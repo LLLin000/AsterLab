@@ -378,6 +378,27 @@ async fn create_record(
             if record(&tx, rid)?.map(|x| x.0) != Some("run".into()) {
                 return Err(ApiError::bad("实验运行不存在"));
             }
+            let assay_id = match data.get("assay_id") {
+                Some(Value::String(assay_id)) if !assay_id.trim().is_empty() => Some(assay_id),
+                Some(Value::Null) | None => None,
+                Some(_) => return Err(ApiError::bad("assay_id 必须是字符串或 null")),
+            };
+            let timepoint = match data.get("timepoint") {
+                Some(Value::String(value)) if !value.trim().is_empty() => Some(value),
+                Some(Value::Null) | None => None,
+                Some(_) => return Err(ApiError::bad("timepoint 必须是字符串或 null")),
+            };
+            if let Some(assay_id) = assay_id {
+                cli::validate_run_assay_reference(
+                    &tx,
+                    rid,
+                    assay_id,
+                    timepoint.map(String::as_str),
+                )
+                .map_err(ApiError::from_cli)?;
+            } else if timepoint.is_some() {
+                return Err(ApiError::bad("填写板图 timepoint 时必须同时关联 assay_id"));
+            }
             let rows = data["rows"].as_i64().unwrap_or(0);
             let cols = data["columns"].as_i64().unwrap_or(0);
             if !(1..=32).contains(&rows) || !(1..=48).contains(&cols) {
@@ -472,6 +493,12 @@ async fn create_record(
             };
             insert(&tx, "note", project.as_deref(), Some(rid), 1, &data)?
         }
+        "execution_event" => {
+            let run_id = parent
+                .as_deref()
+                .ok_or_else(|| ApiError::bad("执行事件需要关联实验运行"))?;
+            cli::create_execution_event_tx(&tx, run_id, &data).map_err(ApiError::from_cli)?
+        }
         "formula" => {
             let pid = parent
                 .as_deref()
@@ -526,9 +553,9 @@ async fn update_record(
     let mut db = lock(&s)?;
     let (kind, project, parent, revision, old) =
         record(&db, &input.id)?.ok_or_else(|| ApiError::missing("找不到要更新的记录"))?;
-    if kind == "design" && input.expected_revision.is_none() {
+    if matches!(kind.as_str(), "design" | "run") && input.expected_revision.is_none() {
         return Err(ApiError::bad(
-            "修订实验设计必须提供 expected_revision；请先读取当前版本",
+            "修订实验设计或运行必须提供 expected_revision；请先读取当前版本",
         ));
     }
     if let Some(expected) = input.expected_revision {
@@ -577,8 +604,13 @@ async fn update_record(
             json!({"id":input.id,"kind":"design","project_id":project,"parent_id":parent,"revision":next,"data":data,"new_version":version}),
         ));
     }
-    if kind == "run" && input.data.get("status").and_then(Value::as_str) == Some("in_progress") {
-        cli::ensure_run_protocol_ready(&db, &input.id).map_err(ApiError::from_cli)?;
+    if kind == "run" {
+        let expected = input.expected_revision.ok_or_else(|| {
+            ApiError::bad("修订实验运行必须提供 expected_revision；请先读取当前版本")
+        })?;
+        let updated =
+            cli::patch_run(&db, &input.id, expected, &input.data).map_err(ApiError::from_cli)?;
+        return Ok(Json(updated));
     }
     if kind == "protocol" {
         return Err(ApiError::bad(
@@ -587,6 +619,11 @@ async fn update_record(
     }
     if kind == "protocol_version" {
         return Err(ApiError::bad("协议版本不可覆盖，请创建新版本"));
+    }
+    if kind == "execution_event" {
+        return Err(ApiError::bad(
+            "执行事件为追加记录，不可覆盖；请追加更正事件并说明依据",
+        ));
     }
     let next = revision + 1;
     let changed = db.execute(

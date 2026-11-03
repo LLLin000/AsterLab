@@ -134,6 +134,8 @@ struct AssayPlan {
     #[serde(default)]
     timepoints: Vec<String>,
     #[serde(default)]
+    timepoint_timing: Vec<TimepointTiming>,
+    #[serde(default)]
     group_names: Vec<String>,
     #[serde(default)]
     group_ids: Vec<String>,
@@ -151,6 +153,18 @@ struct AssayPlan {
     controls: Vec<String>,
     #[serde(default)]
     control_group_ids: Vec<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TimepointTiming {
+    timepoint: String,
+    #[serde(default)]
+    offset_value: Option<f64>,
+    unit: String,
+    #[serde(default)]
+    window_before: Option<f64>,
+    #[serde(default)]
+    window_after: Option<f64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -351,6 +365,26 @@ struct RunCreate {
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RunRevise {
+    id: String,
+    expected_revision: i64,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    scheduled_date: Option<Option<String>>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunPatch {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    scheduled_date: Option<Option<String>>,
+    #[serde(default)]
+    status: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TaskCreate {
     project_id: String,
     #[serde(default)]
@@ -430,6 +464,15 @@ struct StepBinding {
     #[serde(default)]
     unit: Option<String>,
 }
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum StepVisualization {
+    Transfer,
+    Incubation,
+    PlateLayout,
+    SampleSplit,
+    Measurement,
+}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum ProtocolStep {
@@ -439,6 +482,8 @@ enum ProtocolStep {
         instruction: String,
         #[serde(default)]
         parameter_refs: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        visualization: Option<StepVisualization>,
     },
     BlockUse {
         use_id: String,
@@ -786,6 +831,7 @@ fn expand_block(
                 title,
                 instruction,
                 parameter_refs,
+                visualization,
             } => {
                 if acc.steps.len() >= 500 {
                     return Err(CliError::input("组合展开超过 500 个操作步骤；请拆分预览"));
@@ -804,7 +850,12 @@ fn expand_block(
                         }
                     }
                 }
-                acc.steps.push(json!({"path":step_path,"use_id":use_id,"title":title,"instruction":instruction,"parameters":parameters,"unresolved_parameter_refs":unresolved_refs,"source_block_version_id":version_id}));
+                let mut rendered = json!({"path":step_path,"use_id":use_id,"title":title,"instruction":instruction,"parameters":parameters,"unresolved_parameter_refs":unresolved_refs,"source_block_version_id":version_id});
+                if let Some(visualization) = visualization {
+                    rendered["visualization"] = serde_json::to_value(visualization)
+                        .map_err(|e| CliError::internal(e.to_string()))?;
+                }
+                acc.steps.push(rendered);
             }
             ProtocolStep::BlockUse {
                 use_id,
@@ -1123,6 +1174,347 @@ pub(crate) fn create_run_in_transaction(
     insert(tx, "run", Some(&project), Some(design_id), 1, &data)
 }
 
+pub(crate) fn patch_run(
+    db: &Connection,
+    run_id: &str,
+    expected_revision: i64,
+    changes: &Value,
+) -> Result<Value, CliError> {
+    let patch: RunPatch = serde_json::from_value(changes.clone())
+        .map_err(|e| CliError::input(format!("运行修订字段无效：{e}")))?;
+    if patch.title.is_none() && patch.scheduled_date.is_none() && patch.status.is_none() {
+        return Err(CliError::input(
+            "至少提供 title、scheduled_date 或 status 中的一项",
+        ));
+    }
+    let (kind, _, _, revision, raw) =
+        kind_id(db, run_id)?.ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    if kind != "run" {
+        return Err(CliError::input("id 必须指向实验运行"));
+    }
+    if revision != expected_revision {
+        return Err(CliError::conflict(format!(
+            "运行版本已从 v{expected_revision} 更新为 v{revision}；请先重新读取。"
+        )));
+    }
+    let mut data: Value = serde_json::from_str(&raw)
+        .map_err(|e| CliError::internal(format!("运行快照无法读取：{e}")))?;
+    if let Some(title) = patch.title {
+        check_text(&title, "运行名称", 160)?;
+        data["title"] = json!(title.trim());
+    }
+    if let Some(scheduled_date) = patch.scheduled_date {
+        if let Some(date) = scheduled_date.as_deref() {
+            validate_date(date, "计划开始日期")?;
+        }
+        data["scheduled_date"] = json!(scheduled_date);
+    }
+    if let Some(status) = patch.status {
+        if ![
+            "planned",
+            "in_progress",
+            "completed",
+            "blocked",
+            "cancelled",
+        ]
+        .contains(&status.as_str())
+        {
+            return Err(CliError::input(
+                "运行状态必须是 planned、in_progress、completed、blocked 或 cancelled",
+            ));
+        }
+        if status == "in_progress" {
+            ensure_run_protocol_ready(db, run_id)?;
+        }
+        data["status"] = json!(status);
+    }
+    update_data(db, run_id, expected_revision, "run", &data)
+}
+
+pub(crate) fn create_execution_event_tx(
+    tx: &Transaction<'_>,
+    run_id: &str,
+    input: &Value,
+) -> Result<Value, CliError> {
+    let mut payload = input.clone();
+    payload["run_id"] = json!(run_id);
+    let event: ExecutionEventCreate = serde_json::from_value(payload)
+        .map_err(|e| CliError::input(format!("执行事件字段无效：{e}")))?;
+    let (kind, project, _, _, raw) =
+        kind_id(tx, run_id)?.ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    if kind != "run" {
+        return Err(CliError::input("parent_id 必须指向实验运行"));
+    }
+    if ![
+        "operation",
+        "material_use",
+        "measurement",
+        "deviation",
+        "observation",
+    ]
+    .contains(&event.event_type.as_str())
+    {
+        return Err(CliError::input(
+            "event_type 必须是 operation、material_use、measurement、deviation 或 observation",
+        ));
+    }
+    check_text(&event.content, "事件内容", 5000)?;
+    if let Some(at) = &event.occurred_at {
+        if DateTime::parse_from_rfc3339(at).is_err() {
+            return Err(CliError::input(
+                "occurred_at 必须是带时区的 RFC 3339 时间；不确定时留空",
+            ));
+        }
+    }
+    if event
+        .stage
+        .as_ref()
+        .is_some_and(|v| v.chars().count() > 160)
+    {
+        return Err(CliError::input("操作阶段不能超过 160 个字符"));
+    }
+    for (value, label) in [
+        (event.protocol_version_id.as_deref(), "Protocol 版本 ID"),
+        (event.assay_id.as_deref(), "检测 ID"),
+        (event.planned_output_id.as_deref(), "计划产物 ID"),
+    ] {
+        if let Some(value) = value {
+            check_text(value, label, 120)?;
+        }
+    }
+    if event.sample_ids.len() > 100 {
+        return Err(CliError::input("样本编号最多 100 个"));
+    }
+    for sample_id in &event.sample_ids {
+        check_text(sample_id, "样本编号", 120)?;
+    }
+    if event.materials.len() > 100 || event.measurements.len() > 100 {
+        return Err(CliError::input("单个事件的材料使用或测量最多 100 项"));
+    }
+    let run_data: Value =
+        serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+    if let Some(step_path) = &event.protocol_step_path {
+        check_text(step_path, "Protocol 步骤路径", 500)?;
+        if event.assay_id.is_some() && event.planned_output_id.is_some() {
+            return Err(CliError::input(
+                "步骤事件只能关联一个检测或一个共享计划产物",
+            ));
+        }
+        let protocol_version_id = event
+            .protocol_version_id
+            .as_deref()
+            .ok_or_else(|| CliError::input("关联 Protocol 步骤时必须提供 protocol_version_id"))?;
+        let in_protocols = run_data
+            .get("protocol_manifest")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|manifest| {
+                manifest["protocol_version_id"].as_str() == Some(protocol_version_id)
+                    && event.planned_output_id.is_none()
+                    && manifest["assay_id"].as_str() == event.assay_id.as_deref()
+                    && manifest["steps"].as_array().is_some_and(|steps| {
+                        steps
+                            .iter()
+                            .any(|step| step["path"].as_str() == Some(step_path.as_str()))
+                    })
+            });
+        let in_materials = run_data
+            .get("material_manifest")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|manifest| {
+                manifest["planned_output_id"].as_str() == event.planned_output_id.as_deref()
+                    && event.assay_id.is_none()
+                    && manifest["producer_protocol"]["protocol_version_id"].as_str()
+                        == Some(protocol_version_id)
+                    && manifest["producer_protocol"]["steps"]
+                        .as_array()
+                        .is_some_and(|steps| {
+                            steps
+                                .iter()
+                                .any(|step| step["path"].as_str() == Some(step_path.as_str()))
+                        })
+            });
+        if !in_protocols && !in_materials {
+            return Err(CliError::input(
+                "Protocol 步骤引用必须同时匹配本次运行冻结的 Protocol 版本、检测或计划产物及步骤路径",
+            ));
+        }
+    } else if event.protocol_version_id.is_some()
+        || event.assay_id.is_some()
+        || event.planned_output_id.is_some()
+    {
+        return Err(CliError::input(
+            "未关联 protocol_step_path 时不能提供 Protocol 步骤引用字段",
+        ));
+    }
+    let planned_output_ids: std::collections::HashSet<&str> = run_data
+        .get("material_manifest")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("planned_output_id").and_then(Value::as_str))
+        .collect();
+    for material in &event.materials {
+        check_text(&material.material, "材料名称", 160)?;
+        if let Some(output_id) = &material.planned_output_id {
+            if !planned_output_ids.contains(output_id.as_str()) {
+                return Err(CliError::input(format!(
+                    "planned_output_id 不属于本次运行的材料清单：{output_id}"
+                )));
+            }
+        }
+        if material
+            .amount
+            .is_some_and(|amount| !amount.is_finite() || amount < 0.0)
+        {
+            return Err(CliError::input("材料用量必须是有限的非负数"));
+        }
+        if material.amount.is_some()
+            != material
+                .unit
+                .as_ref()
+                .is_some_and(|unit| !unit.trim().is_empty())
+        {
+            return Err(CliError::input("填写材料用量时必须同时填写单位"));
+        }
+        if material
+            .unit
+            .as_ref()
+            .is_some_and(|unit| unit.chars().count() > 40)
+        {
+            return Err(CliError::input("材料单位不能超过 40 个字符"));
+        }
+    }
+    for measurement in &event.measurements {
+        check_text(&measurement.endpoint, "测量终点", 300)?;
+        if !measurement.value.is_finite() {
+            return Err(CliError::input("测量值必须是有限数值"));
+        }
+        if let Some(sample_id) = &measurement.sample_id {
+            check_text(sample_id, "测量样本编号", 120)?;
+        }
+        if measurement
+            .unit
+            .as_ref()
+            .is_some_and(|unit| unit.chars().count() > 40)
+        {
+            return Err(CliError::input("测量单位不能超过 40 个字符"));
+        }
+    }
+    match event.event_type.as_str() {
+        "material_use" if event.materials.is_empty() => {
+            return Err(CliError::input("材料使用事件至少需要一项材料"));
+        }
+        "measurement" if event.measurements.is_empty() => {
+            return Err(CliError::input("测量事件至少需要一项数值读数"));
+        }
+        "deviation"
+            if event
+                .deviation
+                .as_deref()
+                .is_none_or(|v| v.trim().is_empty()) =>
+        {
+            return Err(CliError::input("偏差事件必须说明实际偏差内容"));
+        }
+        _ => {}
+    }
+    if event.event_type != "measurement" && !event.measurements.is_empty() {
+        return Err(CliError::input("数值读数请使用 measurement 事件类型"));
+    }
+    if event.event_type != "material_use" && !event.materials.is_empty() {
+        return Err(CliError::input("材料使用请使用 material_use 事件类型"));
+    }
+    if let Some(deviation) = &event.deviation {
+        if deviation.chars().count() > 5000 {
+            return Err(CliError::input("偏差说明不能超过 5000 个字符"));
+        }
+    }
+    let data = json!({
+        "event_type":event.event_type,
+        "content":event.content,
+        "occurred_at":event.occurred_at,
+        "stage":event.stage,
+        "protocol_step_path":event.protocol_step_path,
+        "protocol_version_id":event.protocol_version_id,
+        "assay_id":event.assay_id,
+        "planned_output_id":event.planned_output_id,
+        "sample_ids":event.sample_ids,
+        "materials":event.materials.iter().map(|m|json!({"material":m.material,"planned_output_id":m.planned_output_id,"amount":m.amount,"unit":m.unit})).collect::<Vec<_>>(),
+        "measurements":event.measurements.iter().map(|m|json!({"endpoint":m.endpoint,"value":m.value,"unit":m.unit,"sample_id":m.sample_id})).collect::<Vec<_>>(),
+        "deviation":event.deviation
+    });
+    insert(
+        tx,
+        "execution_event",
+        project.as_deref(),
+        Some(run_id),
+        1,
+        &data,
+    )
+}
+
+pub(crate) fn validate_run_assay_reference(
+    db: &Connection,
+    run_id: &str,
+    assay_id: &str,
+    timepoint: Option<&str>,
+) -> Result<(), CliError> {
+    let (kind, _, _, _, raw) =
+        kind_id(db, run_id)?.ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    if kind != "run" {
+        return Err(CliError::input("run_id 必须指向实验运行"));
+    }
+    let run: Value = serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+    let design_version_id = run["design_version_id"]
+        .as_str()
+        .ok_or_else(|| CliError::internal("运行缺少冻结设计版本"))?;
+    let version = get(db, design_version_id)?;
+    let snapshot = &version["data"]["snapshot"];
+    let assays = snapshot["assays"]
+        .as_array()
+        .ok_or_else(|| CliError::internal("冻结设计版本缺少检测列表"))?;
+    let assay = assays
+        .iter()
+        .find(|assay| assay["id"].as_str() == Some(assay_id))
+        .ok_or_else(|| CliError::input("assay_id 必须属于该 Run 冻结设计中的检测"))?;
+    if assay_requires_timepoint(snapshot, assay)
+        && assay["timepoints"]
+            .as_array()
+            .is_some_and(|points| !points.is_empty())
+        && timepoint.is_none()
+    {
+        return Err(CliError::input(
+            "该检测每个时间点使用新样本；实际板图必须标记对应 timepoint",
+        ));
+    }
+    if let Some(timepoint) = timepoint {
+        if !assay["timepoints"]
+            .as_array()
+            .is_some_and(|points| points.iter().any(|point| point.as_str() == Some(timepoint)))
+        {
+            return Err(CliError::input(
+                "板图 timepoint 必须属于该检测在 Run 冻结设计中的时间点",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn assay_requires_timepoint(snapshot: &Value, assay: &Value) -> bool {
+    assay["sample_use_policy"] == "new_per_timepoint"
+        || snapshot["sample_allocations"]
+            .as_array()
+            .is_some_and(|allocations| {
+                allocations.iter().any(|allocation| {
+                    allocation["assay_id"] == assay["id"]
+                        && allocation["relation"] == "new_per_timepoint"
+                })
+            })
+}
+
 pub(crate) fn preview_protocol_block(
     db: &Connection,
     version_id: &str,
@@ -1270,6 +1662,10 @@ struct PlateCreate {
     format: String,
     rows: u32,
     columns: u32,
+    #[serde(default)]
+    assay_id: Option<String>,
+    #[serde(default)]
+    timepoint: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1298,6 +1694,54 @@ struct NoteCreate {
     result: String,
     #[serde(default)]
     deviation: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EventMaterialUse {
+    material: String,
+    #[serde(default)]
+    planned_output_id: Option<String>,
+    #[serde(default)]
+    amount: Option<f64>,
+    #[serde(default)]
+    unit: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EventMeasurement {
+    endpoint: String,
+    value: f64,
+    #[serde(default)]
+    unit: Option<String>,
+    #[serde(default)]
+    sample_id: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutionEventCreate {
+    run_id: String,
+    event_type: String,
+    content: String,
+    #[serde(default)]
+    occurred_at: Option<String>,
+    #[serde(default)]
+    stage: Option<String>,
+    #[serde(default)]
+    protocol_step_path: Option<String>,
+    #[serde(default)]
+    protocol_version_id: Option<String>,
+    #[serde(default)]
+    assay_id: Option<String>,
+    #[serde(default)]
+    planned_output_id: Option<String>,
+    #[serde(default)]
+    sample_ids: Vec<String>,
+    #[serde(default)]
+    materials: Vec<EventMaterialUse>,
+    #[serde(default)]
+    measurements: Vec<EventMeasurement>,
+    #[serde(default)]
+    deviation: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1580,6 +2024,53 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
         }
         for t in &assay.timepoints {
             check_text(t, "检测时间点", 100)?;
+        }
+        if assay.timepoint_timing.len() > 100 {
+            return Err(CliError::input("单项检测的相对时间最多 100 项"));
+        }
+        if !assay.timepoint_timing.is_empty() {
+            if assay.timepoint_timing.len() != assay.timepoints.len()
+                || assay
+                    .timepoint_timing
+                    .iter()
+                    .zip(&assay.timepoints)
+                    .any(|(timing, label)| timing.timepoint != *label)
+            {
+                return Err(CliError::input(
+                    "相对时间必须与测量时间点逐项对应且顺序一致",
+                ));
+            }
+            if assay
+                .time_anchor_event
+                .as_deref()
+                .is_none_or(|anchor| anchor.trim().is_empty())
+            {
+                return Err(CliError::input(
+                    "填写相对时间前必须明确时间起算事件；未知时先不填写相对时间",
+                ));
+            }
+            for timing in &assay.timepoint_timing {
+                if !["min", "h", "day"].contains(&timing.unit.as_str()) {
+                    return Err(CliError::input("相对时间单位只能是 min、h 或 day"));
+                }
+                if timing.offset_value.is_some_and(|v| !v.is_finite())
+                    || timing
+                        .window_before
+                        .is_some_and(|v| !v.is_finite() || v < 0.0)
+                    || timing
+                        .window_after
+                        .is_some_and(|v| !v.is_finite() || v < 0.0)
+                {
+                    return Err(CliError::input(
+                        "相对时间偏移必须为有限数值；允许时间窗不能小于 0",
+                    ));
+                }
+                if timing.offset_value.is_none()
+                    && (timing.window_before.is_some() || timing.window_after.is_some())
+                {
+                    return Err(CliError::input("填写允许时间窗时必须同时填写相对时间偏移"));
+                }
+            }
         }
         let mut selected_group_ids = std::collections::HashSet::new();
         for group_id in &assay.group_ids {
@@ -2335,6 +2826,17 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 json!({"record":set_status(&db,i,"run",&["planned","in_progress","completed","blocked","cancelled"])?}),
             )
         }
+        "run.revise" => {
+            let i: RunRevise = parse_input(path)?;
+            let mut changes = serde_json::Map::new();
+            if let Some(title) = i.title {
+                changes.insert("title".into(), json!(title));
+            }
+            if let Some(scheduled_date) = i.scheduled_date {
+                changes.insert("scheduled_date".into(), json!(scheduled_date));
+            }
+            Ok(json!({"record":patch_run(&db,&i.id,i.expected_revision,&Value::Object(changes))?}))
+        }
         "run.create" => {
             let i: RunCreate = parse_input(path)?;
             let tx = db
@@ -2580,6 +3082,17 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             if kind != "run" {
                 return Err(CliError::input("run_id 必须指向实验运行"));
             }
+            if let Some(assay_id) = i.assay_id.as_deref().filter(|id| !id.is_empty()) {
+                validate_run_assay_reference(&db, &i.run_id, assay_id, i.timepoint.as_deref())?;
+            } else if i
+                .timepoint
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                return Err(CliError::input(
+                    "填写板图 timepoint 时必须同时关联 assay_id",
+                ));
+            }
             check_text(&i.name, "板名", 100)?;
             if !(1..=32).contains(&i.rows) || !(1..=48).contains(&i.columns) {
                 return Err(CliError::input("板型行列范围无效：行 1–32、列 1–48"));
@@ -2612,7 +3125,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 project.as_deref(),
                 Some(&i.run_id),
                 1,
-                &json!({"name":i.name.trim(),"format":i.format,"rows":i.rows,"columns":i.columns}),
+                &json!({"name":i.name.trim(),"format":i.format,"rows":i.rows,"columns":i.columns,"assay_id":i.assay_id.filter(|id| !id.is_empty()),"timepoint":i.timepoint.filter(|point| !point.trim().is_empty())}),
             )?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(json!({"record":r}))
@@ -2692,6 +3205,17 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 1,
                 &json!({"content":i.content,"event_time":i.event_time,"observation":i.observation,"result":i.result,"deviation":i.deviation}),
             )?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(json!({"record":r}))
+        }
+        "execution_event.create" => {
+            let i: ExecutionEventCreate = parse_input(path)?;
+            let payload =
+                serde_json::to_value(&i).map_err(|e| CliError::internal(e.to_string()))?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let r = create_execution_event_tx(&tx, &i.run_id, &payload)?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(json!({"record":r}))
         }
@@ -2801,6 +3325,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                     "plate",
                     "well",
                     "note",
+                    "execution_event",
                     "formula",
                     "library_table",
                 ]
@@ -2936,16 +3461,19 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["title","summary"],"properties":{"title":{"type":"string"},"summary":{"type":"string"}}})
         }
         "protocol_block_version" => {
-            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
+            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
         }
         "plate" => {
-            json!({"type":"object","additionalProperties":false,"required":["name","format","rows","columns"],"properties":{"name":{"type":"string"},"format":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48}}})
+            json!({"type":"object","additionalProperties":false,"required":["name","format","rows","columns"],"properties":{"name":{"type":"string"},"format":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48},"assay_id":{"type":["string","null"]},"timepoint":{"type":["string","null"]}}})
         }
         "well" => {
             json!({"type":"object","additionalProperties":false,"required":["well_id","group_label","sample_id","note"],"properties":{"well_id":{"type":"string"},"group_label":{"type":"string"},"sample_id":{"type":"string"},"note":{"type":"string"}}})
         }
         "note" => {
             json!({"type":"object","additionalProperties":false,"required":["content","event_time","observation","result","deviation"],"properties":{"content":{"type":"string"},"event_time":{"type":["string","null"],"format":"date-time"},"event_time_local":{"type":["string","null"]},"event_timezone":{"type":["string","null"]},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
+        }
+        "execution_event" => {
+            json!({"type":"object","additionalProperties":false,"required":["event_type","content","occurred_at","stage","sample_ids","materials","measurements","deviation"],"properties":{"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"]},"protocol_step_path":{"type":["string","null"]},"protocol_version_id":{"type":["string","null"]},"assay_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]},"sample_ids":{"type":"array","items":{"type":"string"}},"materials":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["material","planned_output_id","amount","unit"],"properties":{"material":{"type":"string"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"]},"unit":{"type":["string","null"]}}}},"measurements":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["endpoint","value","unit","sample_id"],"properties":{"endpoint":{"type":"string"},"value":{"type":"number"},"unit":{"type":["string","null"]},"sample_id":{"type":["string","null"]}}}},"deviation":{"type":["string","null"]}}})
         }
         "formula" => {
             json!({"type":"object","additionalProperties":false,"required":["title","expression","variables","notes"],"properties":{"title":{"type":"string"},"expression":{"type":"string"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -2975,6 +3503,7 @@ fn any_record_schema() -> Value {
         "plate",
         "well",
         "note",
+        "execution_event",
         "formula",
         "library_table",
     ];
@@ -2996,6 +3525,7 @@ fn result_schema(tool: &str) -> Value {
         "run.list" => arr("run"),
         "run.create" => one("run"),
         "run.set_status" => one("run"),
+        "run.revise" => one("run"),
         "task.create" => one("task"),
         "task.set_status" => one("task"),
         "protocol.list" => arr("protocol"),
@@ -3010,7 +3540,7 @@ fn result_schema(tool: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["version"],"properties":{"version":record_schema("protocol_block_version")}})
         }
         "protocol.block.preview" => {
-            json!({"type":"object","additionalProperties":false,"required":["block_version_id","block_id","title","version","ready","steps","resolved_parameters","unresolved_parameters","block_version_ids"],"properties":{"block_version_id":{"type":"string"},"block_id":{"type":"string"},"title":{"type":"string"},"version":{"type":"integer"},"ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","use_id","title","instruction","parameters","unresolved_parameter_refs","source_block_version_id"],"properties":{"path":{"type":"string"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","label","value","unit","provenance"],"properties":{"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameter_refs":{"type":"array","items":{"type":"string"}},"source_block_version_id":{"type":"string"}}}},"resolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","value","unit","provenance"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"block_version_ids":{"type":"array","items":{"type":"string"}}}})
+            json!({"type":"object","additionalProperties":false,"required":["block_version_id","block_id","title","version","ready","steps","resolved_parameters","unresolved_parameters","block_version_ids"],"properties":{"block_version_id":{"type":"string"},"block_id":{"type":"string"},"title":{"type":"string"},"version":{"type":"integer"},"ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","use_id","title","instruction","parameters","unresolved_parameter_refs","source_block_version_id"],"properties":{"path":{"type":"string"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","label","value","unit","provenance"],"properties":{"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameter_refs":{"type":"array","items":{"type":"string"}},"source_block_version_id":{"type":"string"},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]}}}},"resolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","value","unit","provenance"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"block_version_ids":{"type":"array","items":{"type":"string"}}}})
         }
         "protocol.create" => {
             json!({"type":"object","additionalProperties":false,"required":["protocol","version"],"properties":{"protocol":record_schema("protocol"),"version":record_schema("protocol_version")}})
@@ -3021,6 +3551,7 @@ fn result_schema(tool: &str) -> Value {
         "plate.create" => one("plate"),
         "well.set" => one("well"),
         "note.create" => one("note"),
+        "execution_event.create" => one("execution_event"),
         "formula.create" => one("formula"),
         "formula.revise" => one("formula"),
         "table.create" => one("library_table"),
@@ -3097,6 +3628,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         "run.set_status" => {
             json!({"type":"object","additionalProperties":false,"required":["id","expected_revision","status"],"properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":1},"status":{"type":"string","enum":["planned","in_progress","completed","blocked","cancelled"]}}})
         }
+        "run.revise" => {
+            json!({"type":"object","additionalProperties":false,"required":["id","expected_revision"],"anyOf":[{"required":["title"]},{"required":["scheduled_date"]}],"properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":1},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"}}})
+        }
         "run.create" => {
             json!({"type":"object","additionalProperties":false,"required":["design_id","title"],"properties":{"design_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]}}})
         }
@@ -3113,13 +3647,16 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["protocol_id","expected_version"],"anyOf":[{"required":["body"]},{"required":["root_block_version_id"]},{"required":["root_bindings"]}],"properties":{"protocol_id":{"type":"string"},"expected_version":{"type":"integer","minimum":1},"body":{"type":"string"},"root_block_version_id":{"type":["string","null"]},"root_bindings":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["slot","value"],"properties":{"slot":{"type":"string"},"value":{"type":["string","number","integer","boolean"]},"unit":{"type":"string","maxLength":40}}}}}})
         }
         "plate.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","name","format","rows","columns"],"properties":{"run_id":{"type":"string"},"name":{"type":"string","minLength":1,"maxLength":100,"pattern":"\\S"},"format":{"type":"string","enum":["6","12","24","48","96","384","custom"]},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","name","format","rows","columns"],"properties":{"run_id":{"type":"string"},"assay_id":{"type":"string","description":"可选；必须是 Run 冻结设计中的检测 ID"},"timepoint":{"type":"string","description":"可选；标注该实际板图所用的检测时间点，需与冻结设计一致"},"name":{"type":"string","minLength":1,"maxLength":100,"pattern":"\\S"},"format":{"type":"string","enum":["6","12","24","48","96","384","custom"]},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48}}})
         }
         "well.set" => {
             json!({"type":"object","additionalProperties":false,"required":["plate_id","well_id"],"properties":{"plate_id":{"type":"string"},"well_id":{"type":"string","pattern":"^[A-Za-z]{1,2}[0-9]{1,2}$"},"expected_revision":{"type":"integer","minimum":1,"description":"仅覆盖已存在孔位时必需；创建新孔位时省略"},"group_label":{"type":"string"},"sample_id":{"type":"string"},"note":{"type":"string"}}})
         }
         "note.create" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
+        }
+        "execution_event.create" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "formula.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","expression"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"expression":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -3134,7 +3671,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["id","expected_revision","name","columns","rows"],"properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":1},"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"columns":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":40},"rows":{"type":"array","maxItems":5000,"items":{"type":"array","items":{"type":"string"}}}}})
         }
         "record.list" => {
-            json!({"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["project","design","design_version","run","task","protocol","protocol_version","protocol_block","protocol_block_version","plate","well","note","formula","library_table"]},"project_id":{"type":"string"}}})
+            json!({"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["project","design","design_version","run","task","protocol","protocol_version","protocol_block","protocol_block_version","plate","well","note","execution_event","formula","library_table"]},"project_id":{"type":"string"}}})
         }
         "record.get" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
@@ -3173,7 +3710,7 @@ fn design_schema() -> Value {
             "primary_endpoint":{"type":"string","maxLength":1000},"endpoint_method":{"type":"string","maxLength":1000},"endpoint_unit":{"type":"string","maxLength":100},
             "sample_size_rationale":{"type":"string","maxLength":5000},"randomization":{"type":"string","maxLength":2000},"blinding":{"type":"string","maxLength":2000},
             "inclusion_criteria":{"type":"string","maxLength":5000},"exclusion_criteria":{"type":"string","maxLength":5000},"analysis_plan":{"type":"string","maxLength":5000},"controls":{"type":"string","maxLength":2000},
-            "assays":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["id","title"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"endpoint":{"type":"string","maxLength":1000},"method":{"type":"string","maxLength":1000},"unit":{"type":"string","maxLength":100},"timepoints":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":100}},"group_names":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":120}},"group_ids":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":80}},"time_anchor_event":{"type":["string","null"],"maxLength":120},"sample_use_policy":{"type":["string","null"],"enum":["new_per_timepoint","same_sample_repeated","split_from_assay","sequential_after_assay","unknown",null]},"container_type":{"type":["string","null"],"maxLength":80},"container_format":{"type":["string","null"],"maxLength":80},"protocol_version_id":{"type":["string","null"]},"controls":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":300}},"control_group_ids":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":80}}}}},
+            "assays":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["id","title"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"endpoint":{"type":"string","maxLength":1000},"method":{"type":"string","maxLength":1000},"unit":{"type":"string","maxLength":100},"timepoints":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":100}},"timepoint_timing":{"type":"array","maxItems":100,"items":timepoint_timing_input_schema()},"group_names":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":120}},"group_ids":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":80}},"time_anchor_event":{"type":["string","null"],"maxLength":120},"sample_use_policy":{"type":["string","null"],"enum":["new_per_timepoint","same_sample_repeated","split_from_assay","sequential_after_assay","unknown",null]},"container_type":{"type":["string","null"],"maxLength":80},"container_format":{"type":["string","null"],"maxLength":80},"protocol_version_id":{"type":["string","null"]},"controls":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":300}},"control_group_ids":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":80}}}}},
             "sample_allocations":{"type":"array","maxItems":10000,"items":{"type":"object","additionalProperties":false,"required":["assay_id","group_name","relation"],"properties":{"assay_id":{"type":"string"},"group_name":{"type":"string"},"group_id":{"type":["string","null"]},"relation":{"type":"string","enum":["new_per_timepoint","same_sample_repeated","split_from_assay","sequential_after_assay","unknown"]},"source_assay_id":{"type":["string","null"]},"physical_slots_per_group":{"type":["integer","null"],"minimum":1},"evidence_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]}}}},
             "planned_outputs":{"type":"array","maxItems":1000,"items":{"type":"object","additionalProperties":false,"required":["id","title","protocol_version_id"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":80},"root_bindings":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["slot","value"],"properties":{"slot":{"type":"string","minLength":1,"maxLength":100},"value":{"type":["string","number","integer","boolean"]},"unit":{"type":["string","null"],"maxLength":40}}}},"evidence_id":{"type":["string","null"]}}}},
             "source_evidence":{"type":"array","maxItems":2000,"items":{"type":"object","additionalProperties":false,"required":["id","source_document","claim","state"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"source_document":{"type":"string","minLength":1,"maxLength":500},"source_date":{"type":["string","null"],"maxLength":40},"source_locator":{"type":["string","null"],"maxLength":500},"claim":{"type":"string","minLength":1,"maxLength":2000},"state":{"type":"string","enum":["source_record","proposal","user_confirmed","calculated","agent_suggestion"]}}}},
@@ -3217,7 +3754,8 @@ fn protocol_step_input_schema() -> Value {
             "kind":{"const":"text"},"use_id":{"type":"string","minLength":1,"maxLength":80},
             "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
             "instruction":{"type":"string","minLength":1,"maxLength":4000,"pattern":"\\S"},
-            "parameter_refs":{"type":"array","maxItems":100,"items":{"type":"string"}}
+            "parameter_refs":{"type":"array","maxItems":100,"items":{"type":"string"}},
+            "visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]}
         }},
         {"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id"],"properties":{
             "kind":{"const":"block_use"},"use_id":{"type":"string","minLength":1,"maxLength":80},
@@ -3229,6 +3767,20 @@ fn root_parameter_values_input_schema() -> Value {
     json!({"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["slot","value"],"properties":{
         "slot":{"type":"string"},"value":{"type":["string","number","integer","boolean"]},"unit":{"type":"string","maxLength":40}
     }}})
+}
+fn timepoint_timing_input_schema() -> Value {
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["timepoint","unit"],
+        "properties":{
+            "timepoint":{"type":"string","minLength":1,"maxLength":100,"pattern":"\\S"},
+            "offset_value":{"type":["number","null"]},
+            "unit":{"type":"string","enum":["min","h","day"]},
+            "window_before":{"type":["number","null"],"minimum":0},
+            "window_after":{"type":["number","null"],"minimum":0}
+        }
+    })
 }
 fn tool_specs() -> Vec<Value> {
     let names = [
@@ -3242,6 +3794,7 @@ fn tool_specs() -> Vec<Value> {
         "run.list",
         "run.create",
         "run.set_status",
+        "run.revise",
         "task.create",
         "task.set_status",
         "protocol.list",
@@ -3255,6 +3808,7 @@ fn tool_specs() -> Vec<Value> {
         "plate.create",
         "well.set",
         "note.create",
+        "execution_event.create",
         "formula.create",
         "formula.revise",
         "table.create",
@@ -3304,6 +3858,7 @@ fn tool_description(tool: &str) -> &'static str {
         "run.list" => "按项目查询实验运行。",
         "run.create" => "从设计当前版本创建运行并固定设计/Protocol 版本引用。",
         "run.set_status" => "更新运行状态；必须提供读取时的 expected_revision。Protocol 必填参数未确认时拒绝开始运行。",
+        "run.revise" => "按 expected_revision 修订运行名称或计划日期；设计版本、Protocol 清单、材料清单和重复关系不可改写。",
         "task.create" => "按项目、日期和可选运行创建日历任务。",
         "task.set_status" => "更新任务状态；必须提供读取时的 expected_revision。",
         "protocol.list" => "按项目查询 Protocol。",
@@ -3317,6 +3872,7 @@ fn tool_description(tool: &str) -> &'static str {
         "plate.create" => "为实验运行创建指定行列数的空布局。",
         "well.set" => "创建或覆盖一个板孔映射。",
         "note.create" => "向运行追加一条实际记录；事件时间必须显式提供或留空。",
+        "execution_event.create" => "向运行追加结构化实际事件；事件时间不确定时留空，材料/测量必须填写明确单位或样本标识。",
         "formula.create" => "保存公式表达式及变量单位说明，不执行公式代码。",
         "formula.revise" => "按 expected_revision 修订公式字段。",
         "table.create" => "创建列名固定、每行长度与列数一致的资料表。",
@@ -3357,6 +3913,7 @@ fn tool_effects(tool: &str) -> &'static str {
         "run.set_status" | "task.set_status" => {
             "按 expected_revision 更新一个状态并递增 revision。"
         }
+        "run.revise" => "按 expected_revision 只修订运行名称或计划日期；不可修改已冻结的科学设计和 Protocol/材料清单。",
         "task.create" => "创建一条日历任务。",
         "protocol.create" => "创建 Protocol 记录并创建不可变的 v1 正文版本。",
         "protocol.revise" => "为 Protocol 追加一个不可变的新版本；不覆盖旧正文。",
@@ -3365,6 +3922,7 @@ fn tool_effects(tool: &str) -> &'static str {
         "plate.create" => "为指定运行创建一个空铺板布局。",
         "well.set" => "新建孔位映射，或按 expected_revision 覆盖一个已有孔位。",
         "note.create" => "为运行追加一条实验记录；不修改既有记录。",
+        "execution_event.create" => "为运行追加一条不可覆盖的结构化操作、材料使用、测量、偏差或观察事件。",
         "formula.create" => "创建一条公式记录。",
         "formula.revise" => "按 expected_revision 更新一条公式记录并递增 revision。",
         "table.create" => "创建一张资料表。",

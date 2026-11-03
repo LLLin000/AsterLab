@@ -36,14 +36,15 @@ stdout 每次只输出一行 JSON。成功结构为：
 |---|---|---:|
 | `project.list` / `project.create` / `project.revise` | 查询、创建或按版本修订项目 | create/revise |
 | `design.list` / `design.get` / `design.create` / `design.revise` | 查询、创建、修订实验设计 | create/revise |
-| `run.list` / `run.create` / `run.set_status` | 查询、从当前设计版本创建运行或更新运行状态 | create/update |
+| `run.list` / `run.create` / `run.set_status` / `run.revise` | 查询、创建运行、更新状态或只修订名称/计划日期 | create/update |
 | `task.create` / `task.set_status` | 创建日历任务或更新状态 | create/update |
 | `protocol.list` / `protocol.create` / `protocol.revise` | 查询 Protocol、创建 v1、追加新版本 | create/revise |
 | `protocol.block.list` / `protocol.block.get` | 查询项目步骤块库和不可变版本 | 否 |
 | `protocol.block.create` / `protocol.block.revise` | 创建步骤块或基于预期版本追加新版本 | create/revise |
 | `protocol.block.preview` | 只读递归展开、解析参数来源并列出未填写槽位 | 否 |
 | `plate.create` / `well.set` | 创建铺板布局、设置孔位标签 | create/update |
-| `note.create` | 给实验运行追加实际操作、观察、结果或偏差 | create |
+| `note.create` | 给实验运行追加自由文本记录 | create |
+| `execution_event.create` | 追加结构化操作、材料使用、数值测量、偏差或观察事件 | create |
 | `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
 | `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
 | `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
@@ -60,6 +61,7 @@ Protocol 可以继续保存旧式 body 文本，也可以引用一个确切的 r
 
 - text：包含 use_id、title、instruction 和 parameter_refs，是普通可读操作。只有列入 parameter_refs 的槽位才作为该步骤的显式输入。
 - block_use：包含 use_id、block_version_id 和 bindings，在此位置组合一个确切的子块版本。binding 必须且只能提供 value 或 source_slot；类型和单位必须一致，不做隐式换算。每个必填子块槽位都要明确映射或给出值。
+- text 可选 `visualization`：`transfer`、`incubation`、`plate_layout`、`sample_split`、`measurement`。它只决定操作台采用哪种图解布局，不新增实验事实；示意中的样本、孔位和参数都从 Run 冻结清单及实际记录读取。没有合适图解时省略，继续显示文字步骤。
 
 参数槽位包括 key、label、value_type（text、number、integer、boolean）、可选 unit 和 required。步骤块版本不可变；组合块固定引用子块的确切版本。只改本次条件或浓度时，保持步骤块原样，创建新的 Protocol 版本并更新 root_bindings，不复制步骤块。
 
@@ -73,6 +75,8 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 运行可以先按草案状态创建，以便排期和核对；若其 Protocol manifest 中仍有必填参数未确认，run.set_status 切换到 in_progress 会被拒绝。先追加带完整参数的新 Protocol 版本，再按该版本建立新的 Run。未解决的可选槽位不会自动阻断。
 
+`run.revise` 必须提供 `id` 和当前 `expected_revision`，只接受 `title`、`scheduled_date`；日期可传 `null` 清除。状态仍通过 `run.set_status` 修订。设计版本、Protocol 清单、材料清单、轮次和来源关系属于创建时冻结快照，修订接口拒绝这些字段。HTTP API 与 CLI 共用同一补丁校验；网页不得整体替换 Run JSON。
+
 ## 设计数据语义
 
 `design.create` 接收 `project_id` 和 `design` 对象。关键字段含义：
@@ -80,13 +84,15 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - `experimental_unit`：一个独立观测对应的实验单位定义，例如一只动物、一个培养孔或一个患者；需要由研究者提供。
 - `group_specs[]`：每组一个对象：`name`、可选枚举 `role`、具体 `condition`、`independent_n`、`technical_repeats`。`independent_n` 是每组独立实验单位数；技术重复单独填写。系统不把孔、切片或重复测量自动视为独立 n。
 - `timepoints[]`：按实验方案填写的采样或测量时间点。空数组表示尚未提供，不表示“无时间维度”。
+- `timepoint_timing[]`（可选）：将 `timepoint` 与 `offset_value`、`unit`（`min` / `h` / `day`）及可选提前/延后窗口绑定。设置偏移或窗口时必须同时提供 `time_anchor_event`；时间点顺序与标签必须和 `timepoints[]` 一致。它是计划时间，不等于实际发生时间。
 - `primary_endpoint`、`endpoint_method`、`endpoint_unit`：主要测量对象、已确定的方法和适用单位；不适用的单位留空。
 - `sample_size_rationale`、`randomization`、`blinding`、纳排标准和 `analysis_plan` 只记录研究者已给出的依据，不由 Agent 臆造。
 - `plate.create.format` 只能是 `6`、`12`、`24`、`48`、`96`、`384` 或 `custom`。标准板型的 `rows` / `columns` 必须与板型对应；非标准行列使用 `custom`。
+- `plate.create.assay_id` 可将实际板图绑定到 Run 冻结设计中的检测；`timepoint` 需属于该检测冻结的时间点。只要检测级 `sample_use_policy` 或该检测任一 `sample_allocations[].relation` 为 `new_per_timepoint` 且已列出时间点，必须提供 `timepoint`；同一样本跨时间重复测量时，板图可不绑定单一时间点，因此在各时间点操作视图中仍指向同一块板。若检测级策略与组别分配关系不同，界面标为待核；没有实际映射时只显示计划数量，不生成假坐标。
 
 多检测设计可在同一 `design` 中使用以下固定字段；未提供数组可省略，表示尚未录入：
 
-- `assays[]`：每项检测有稳定 `id`、`title`、`endpoint`、`method`、`unit`、自己的 `timepoints[]`、`group_ids[]`、`group_names[]`（兼容显示字段）、`control_group_ids[]`、`time_anchor_event`、`sample_use_policy`、`container_type` / `container_format`、`protocol_version_id` 和 `controls[]`。关联通过稳定组 ID，不靠显示名称；每项检测自己的时间、适用组、对照和 Protocol 不从其他检测继承。`sample_use_policy` 只能是 `new_per_timepoint`、`same_sample_repeated`、`split_from_assay`、`sequential_after_assay`、`unknown` 或 `null`。当前 `controls[]` 是带来源的补充描述文本，不参与孔位/材料数量计算。
+- `assays[]`：每项检测有稳定 `id`、`title`、`endpoint`、`method`、`unit`、自己的 `timepoints[]`、可选 `timepoint_timing[]`、`group_ids[]`、`group_names[]`（兼容显示字段）、`control_group_ids[]`、`time_anchor_event`、`sample_use_policy`、`container_type` / `container_format`、`protocol_version_id` 和 `controls[]`。关联通过稳定组 ID，不靠显示名称；每项检测自己的时间、适用组、对照和 Protocol 不从其他检测继承。`sample_use_policy` 只能是 `new_per_timepoint`、`same_sample_repeated`、`split_from_assay`、`sequential_after_assay`、`unknown` 或 `null`。当前 `controls[]` 是带来源的补充描述文本，不参与孔位/材料数量计算。
 - `sample_allocations[]`：内部“处理组 → 检测/计划产物”的分配关系，字段为 `assay_id`、`group_name`、`group_id`、`relation`、可选 `source_assay_id`、`physical_slots_per_group`、`evidence_id`、`planned_output_id`。它表达计划分配/逻辑槽位，不生成真实样本或孔位 ID；组关联用稳定 ID，分样和顺序复用须指向来源检测。多个分配引用同一个 `planned_output_id` 才表示计划共用一次制备；物理槽位不得当作独立 n。
 - `planned_outputs[]`：每项计划产物有稳定 `id`、`title`、制备 `protocol_version_id`、`root_bindings[]` 参数绑定和可选 `evidence_id`。相同产物 ID 是多项检测计划共用同一份制备的明确表达；相同 Protocol 版本本身不表示共用。
 - `source_evidence[]`：`id`、`source_document`、可选 `source_date` / `source_locator`、原始 `claim` 和 `state`。locator 用章节、表格行、行号等定位原文；不要求置信度分数。state 只能是 `source_record`、`proposal`、`user_confirmed`、`calculated`、`agent_suggestion`。原始证据保留，系统推导或 Agent 建议不能改写成实验事实。
@@ -127,5 +133,6 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - 只从用户提供的文件、当前项目记录或用户明确确认的来源提取事实。数值、单位、时间、剂量、样本数、处理条件不得猜填。
 - 每次生成方案，明确区分“已提供”“从已保存记录读取”“计算所得”“待确认”；不使用“适量”“按常规”“视情况”等无法执行的值。
 - 创建运行时固定引用当前 `design_revision`，并生成 `protocol_manifest[]` 固定该版本各检测所引用的 Protocol 精确版本。`run_index` 按设计递增；再次执行可传 `repeat_of_run_id` 与 `repeat_relationship`（`independent`、`same_source`、`paired`、`unknown`），不能仅凭轮次数断言独立性。Protocol 修订创建新版本，不覆盖历史版本。
+- `note.create` 是追加式自由文本记录。`execution_event.create` 适合需要筛选、计算或追溯的实际事件：输入 `run_id`、`event_type`、`content`，可附 `occurred_at`（带时区 RFC 3339；不确定时留空）、`stage`、`sample_ids[]`；`material_use` 事件可写 `materials[]`，`measurement` 事件必须含数值 `measurements[]`，`deviation` 事件必须说明 `deviation`。材料用量和单位成对填写；`planned_output_id` 必须属于该 Run 的冻结 `material_manifest`。若事件关联 Protocol 步骤，还要同时提供 `protocol_step_path` 与 `protocol_version_id`，并按上下文提供 `assay_id`（检测步骤）或 `planned_output_id`（共享制备步骤）；三者必须精确匹配本次 Run 冻结的清单，避免跨检测同名步骤串联。事件创建后不可覆盖；更正须再追加事件并写明依据。
 - 写入工具只返回记录 ID、所属关系、版本、数据和创建/更新时间；不声称实际实验已经执行。
 - 该 CLI 是本机原型，尚无多用户认证、审计签名、细粒度附件权限或撤销系统。不要把本地访问控制误称为云端安全边界。
