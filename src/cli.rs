@@ -105,6 +105,16 @@ enum RunRelationship {
     Paired,
     Unknown,
 }
+impl RunRelationship {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Independent => "independent",
+            Self::SameSource => "same_source",
+            Self::Paired => "paired",
+            Self::Unknown => "unknown",
+        }
+    }
+}
 impl Default for RunRelationship {
     fn default() -> Self {
         Self::Unknown
@@ -508,16 +518,25 @@ struct ComposeAccumulator {
     block_version_ids: Vec<String>,
     unresolved_keys: HashSet<String>,
 }
-fn block_version_data(db: &Connection, version_id: &str) -> Result<(Value, ProtocolBlockVersionData), CliError> {
+fn block_version_data(
+    db: &Connection,
+    version_id: &str,
+) -> Result<(Value, ProtocolBlockVersionData), CliError> {
     let record = get(db, version_id)?;
     if record["kind"] != "protocol_block_version" {
-        return Err(CliError::input("block_version_id 必须指向 protocol_block_version"));
+        return Err(CliError::input(
+            "block_version_id 必须指向 protocol_block_version",
+        ));
     }
     let data = serde_json::from_value::<ProtocolBlockVersionData>(record["data"].clone())
         .map_err(|e| CliError::internal(format!("步骤块版本数据无效：{e}")))?;
     Ok((record, data))
 }
-fn validate_parameter_value(slot: &ParameterSlot, value: &Value, unit: Option<&str>) -> Result<(), CliError> {
+fn validate_parameter_value(
+    slot: &ParameterSlot,
+    value: &Value,
+    unit: Option<&str>,
+) -> Result<(), CliError> {
     let valid = match slot.value_type {
         ParameterValueType::Text => value.as_str().is_some(),
         ParameterValueType::Number => value.as_f64().is_some_and(f64::is_finite),
@@ -545,7 +564,9 @@ fn validate_parameter_value(slot: &ParameterSlot, value: &Value, unit: Option<&s
     }
     Ok(())
 }
-fn validate_parameter_slots(slots: &[ParameterSlot]) -> Result<HashMap<String, ParameterSlot>, CliError> {
+fn validate_parameter_slots(
+    slots: &[ParameterSlot],
+) -> Result<HashMap<String, ParameterSlot>, CliError> {
     if slots.len() > 100 {
         return Err(CliError::input("单个步骤块最多定义 100 个参数槽位"));
     }
@@ -553,14 +574,24 @@ fn validate_parameter_slots(slots: &[ParameterSlot]) -> Result<HashMap<String, P
     for slot in slots {
         let mut chars = slot.key.chars();
         let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
-        if !first_ok || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') || slot.key.len() > 80 {
-            return Err(CliError::input(format!("参数 key 无效：{}（使用字母开头的字母、数字和下划线）", slot.key)));
+        if !first_ok || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') || slot.key.len() > 80
+        {
+            return Err(CliError::input(format!(
+                "参数 key 无效：{}（使用字母开头的字母、数字和下划线）",
+                slot.key
+            )));
         }
         check_text(&slot.label, "参数显示名", 120)?;
         if let Some(unit) = &slot.unit {
             check_text(unit, "参数单位", 40)?;
-            if !matches!(slot.value_type, ParameterValueType::Number | ParameterValueType::Integer) {
-                return Err(CliError::input(format!("非数值参数 {} 不能声明单位", slot.key)));
+            if !matches!(
+                slot.value_type,
+                ParameterValueType::Number | ParameterValueType::Integer
+            ) {
+                return Err(CliError::input(format!(
+                    "非数值参数 {} 不能声明单位",
+                    slot.key
+                )));
             }
         }
         if by_key.insert(slot.key.clone(), slot.clone()).is_some() {
@@ -585,14 +616,26 @@ fn validate_block_content(
             ProtocolStep::Text { use_id, .. } | ProtocolStep::BlockUse { use_id, .. } => use_id,
         };
         check_text(use_id, "步骤/使用 ID", 80)?;
-        if !use_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-            return Err(CliError::input(format!("步骤/使用 ID 只能包含字母、数字、下划线或连字符：{use_id}")));
+        if !use_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(CliError::input(format!(
+                "步骤/使用 ID 只能包含字母、数字、下划线或连字符：{use_id}"
+            )));
         }
         if !use_ids.insert(use_id.as_str()) {
-            return Err(CliError::input(format!("同一块内的步骤/使用 ID 重复：{use_id}")));
+            return Err(CliError::input(format!(
+                "同一块内的步骤/使用 ID 重复：{use_id}"
+            )));
         }
         match step {
-            ProtocolStep::Text { title, instruction, parameter_refs, .. } => {
+            ProtocolStep::Text {
+                title,
+                instruction,
+                parameter_refs,
+                ..
+            } => {
                 check_text(title, "步骤标题", 200)?;
                 check_text(instruction, "步骤说明", 4000)?;
                 if parameter_refs.len() > 100 {
@@ -601,14 +644,22 @@ fn validate_block_content(
                 let mut refs = HashSet::new();
                 for key in parameter_refs {
                     if !parent_slots.contains_key(key) {
-                        return Err(CliError::input(format!("步骤 {use_id} 引用了未定义的参数槽位：{key}")));
+                        return Err(CliError::input(format!(
+                            "步骤 {use_id} 引用了未定义的参数槽位：{key}"
+                        )));
                     }
                     if !refs.insert(key.as_str()) {
-                        return Err(CliError::input(format!("步骤 {use_id} 重复引用参数：{key}")));
+                        return Err(CliError::input(format!(
+                            "步骤 {use_id} 重复引用参数：{key}"
+                        )));
                     }
                 }
             }
-            ProtocolStep::BlockUse { block_version_id, bindings, .. } => {
+            ProtocolStep::BlockUse {
+                block_version_id,
+                bindings,
+                ..
+            } => {
                 let (child_record, child) = block_version_data(db, block_version_id)?;
                 if child_record["project_id"].as_str() != Some(project_id) {
                     return Err(CliError::input("被引用的步骤块版本必须属于同一项目"));
@@ -616,43 +667,79 @@ fn validate_block_content(
                 let child_slots = validate_parameter_slots(&child.parameter_slots)?;
                 let mut mapped = HashSet::new();
                 for binding in bindings {
-                    let child_slot = child_slots.get(&binding.slot).ok_or_else(|| CliError::input(format!("子块不存在参数槽位：{}", binding.slot)))?;
+                    let child_slot = child_slots.get(&binding.slot).ok_or_else(|| {
+                        CliError::input(format!("子块不存在参数槽位：{}", binding.slot))
+                    })?;
                     if !mapped.insert(binding.slot.as_str()) {
-                        return Err(CliError::input(format!("子块参数 {} 被重复绑定", binding.slot)));
+                        return Err(CliError::input(format!(
+                            "子块参数 {} 被重复绑定",
+                            binding.slot
+                        )));
                     }
                     match (&binding.value, &binding.source_slot) {
-                        (Some(value), None) => validate_parameter_value(child_slot, value, binding.unit.as_deref())?,
+                        (Some(value), None) => {
+                            validate_parameter_value(child_slot, value, binding.unit.as_deref())?
+                        }
                         (None, Some(source_key)) => {
                             if binding.unit.is_some() {
-                                return Err(CliError::input("source_slot 绑定不能另填 unit；单位来自父参数槽位"));
+                                return Err(CliError::input(
+                                    "source_slot 绑定不能另填 unit；单位来自父参数槽位",
+                                ));
                             }
-                            let parent_slot = parent_slots.get(source_key).ok_or_else(|| CliError::input(format!("父步骤块不存在参数槽位：{source_key}")))?;
-                            if parent_slot.value_type != child_slot.value_type || parent_slot.unit != child_slot.unit {
+                            let parent_slot = parent_slots.get(source_key).ok_or_else(|| {
+                                CliError::input(format!("父步骤块不存在参数槽位：{source_key}"))
+                            })?;
+                            if parent_slot.value_type != child_slot.value_type
+                                || parent_slot.unit != child_slot.unit
+                            {
                                 return Err(CliError::input(format!("父槽位 {source_key} 与子槽位 {} 的类型或单位不一致；不会自动换算", binding.slot)));
                             }
                         }
-                        _ => return Err(CliError::input(format!("参数 {} 必须且只能设置 value 或 source_slot 之一", binding.slot))),
+                        _ => {
+                            return Err(CliError::input(format!(
+                                "参数 {} 必须且只能设置 value 或 source_slot 之一",
+                                binding.slot
+                            )))
+                        }
                     }
                 }
-                if let Some(missing) = child.parameter_slots.iter().find(|s| s.required && !mapped.contains(s.key.as_str())) {
-                    return Err(CliError::input(format!("子块必填参数 {} 尚未绑定；请映射到父槽位或明确给值", missing.key)));
+                if let Some(missing) = child
+                    .parameter_slots
+                    .iter()
+                    .find(|s| s.required && !mapped.contains(s.key.as_str()))
+                {
+                    return Err(CliError::input(format!(
+                        "子块必填参数 {} 尚未绑定；请映射到父槽位或明确给值",
+                        missing.key
+                    )));
                 }
             }
         }
     }
     Ok(())
 }
-fn validate_root_bindings(slots: &[ParameterSlot], bindings: &[RootParameterValue]) -> Result<HashMap<String, ResolvedParameter>, CliError> {
+fn validate_root_bindings(
+    slots: &[ParameterSlot],
+    bindings: &[RootParameterValue],
+) -> Result<HashMap<String, ResolvedParameter>, CliError> {
     let slots = validate_parameter_slots(slots)?;
     let mut values = HashMap::new();
     for binding in bindings {
-        let slot = slots.get(&binding.slot).ok_or_else(|| CliError::input(format!("步骤块不存在根参数槽位：{}", binding.slot)))?;
+        let slot = slots
+            .get(&binding.slot)
+            .ok_or_else(|| CliError::input(format!("步骤块不存在根参数槽位：{}", binding.slot)))?;
         validate_parameter_value(slot, &binding.value, binding.unit.as_deref())?;
-        if values.insert(binding.slot.clone(), ResolvedParameter {
-            value: binding.value.clone(),
-            unit: binding.unit.clone(),
-            provenance: vec![json!({"kind":"preview_input","slot":binding.slot})],
-        }).is_some() {
+        if values
+            .insert(
+                binding.slot.clone(),
+                ResolvedParameter {
+                    value: binding.value.clone(),
+                    unit: binding.unit.clone(),
+                    provenance: vec![json!({"kind":"preview_input","slot":binding.slot})],
+                },
+            )
+            .is_some()
+        {
             return Err(CliError::input(format!("根参数重复绑定：{}", binding.slot)));
         }
     }
@@ -694,7 +781,12 @@ fn expand_block(
     }
     for step in &data.steps {
         match step {
-            ProtocolStep::Text { use_id, title, instruction, parameter_refs } => {
+            ProtocolStep::Text {
+                use_id,
+                title,
+                instruction,
+                parameter_refs,
+            } => {
                 if acc.steps.len() >= 500 {
                     return Err(CliError::input("组合展开超过 500 个操作步骤；请拆分预览"));
                 }
@@ -714,12 +806,18 @@ fn expand_block(
                 }
                 acc.steps.push(json!({"path":step_path,"use_id":use_id,"title":title,"instruction":instruction,"parameters":parameters,"unresolved_parameter_refs":unresolved_refs,"source_block_version_id":version_id}));
             }
-            ProtocolStep::BlockUse { use_id, block_version_id, bindings } => {
+            ProtocolStep::BlockUse {
+                use_id,
+                block_version_id,
+                bindings,
+            } => {
                 let (_, child) = block_version_data(db, block_version_id)?;
                 let child_slots = validate_parameter_slots(&child.parameter_slots)?;
                 let mut child_values = HashMap::new();
                 for binding in bindings {
-                    let slot = child_slots.get(&binding.slot).ok_or_else(|| CliError::internal("已保存的子块绑定引用不存在槽位"))?;
+                    let slot = child_slots
+                        .get(&binding.slot)
+                        .ok_or_else(|| CliError::internal("已保存的子块绑定引用不存在槽位"))?;
                     if let Some(value) = &binding.value {
                         child_values.insert(binding.slot.clone(), ResolvedParameter {
                             value: value.clone(),
@@ -730,33 +828,67 @@ fn expand_block(
                         if let Some(parent_value) = values.get(source_key) {
                             let mut provenance = parent_value.provenance.clone();
                             provenance.push(json!({"kind":"parent_slot_binding","block_version_id":version_id,"use_id":use_id,"parent_slot":source_key}));
-                            child_values.insert(binding.slot.clone(), ResolvedParameter {
-                                value: parent_value.value.clone(),
-                                unit: slot.unit.clone(),
-                                provenance,
-                            });
+                            child_values.insert(
+                                binding.slot.clone(),
+                                ResolvedParameter {
+                                    value: parent_value.value.clone(),
+                                    unit: slot.unit.clone(),
+                                    provenance,
+                                },
+                            );
                         }
                     }
                 }
-                expand_block(db, block_version_id, child_values, &format!("{path}/{use_id}"), depth + 1, active, acc)?;
+                expand_block(
+                    db,
+                    block_version_id,
+                    child_values,
+                    &format!("{path}/{use_id}"),
+                    depth + 1,
+                    active,
+                    acc,
+                )?;
             }
         }
     }
     active.remove(version_id);
     Ok(())
 }
-fn block_preview(db: &Connection, version_id: &str, bindings: &[RootParameterValue]) -> Result<Value, CliError> {
+fn block_preview(
+    db: &Connection,
+    version_id: &str,
+    bindings: &[RootParameterValue],
+) -> Result<Value, CliError> {
     let (_, data) = block_version_data(db, version_id)?;
     let block = get(db, &data.block_id)?;
     let values = validate_root_bindings(&data.parameter_slots, bindings)?;
     let mut acc = ComposeAccumulator::default();
-    expand_block(db, version_id, values, "root", 1, &mut HashSet::new(), &mut acc)?;
-    let ready = !acc.unresolved_parameters.iter().any(|p| p["required"] == true);
-    Ok(json!({"block_version_id":version_id,"block_id":data.block_id,"title":block["data"]["title"],"version":data.version,"ready":ready,"steps":acc.steps,"resolved_parameters":acc.resolved_parameters,"unresolved_parameters":acc.unresolved_parameters,"block_version_ids":acc.block_version_ids}))
+    expand_block(
+        db,
+        version_id,
+        values,
+        "root",
+        1,
+        &mut HashSet::new(),
+        &mut acc,
+    )?;
+    let ready = !acc
+        .unresolved_parameters
+        .iter()
+        .any(|p| p["required"] == true);
+    Ok(
+        json!({"block_version_id":version_id,"block_id":data.block_id,"title":block["data"]["title"],"version":data.version,"ready":ready,"steps":acc.steps,"resolved_parameters":acc.resolved_parameters,"unresolved_parameters":acc.unresolved_parameters,"block_version_ids":acc.block_version_ids}),
+    )
 }
-pub fn protocol_block_manifest(db: &Connection, root_version_id: Option<&str>, bindings: &Value) -> Result<Value, String> {
+pub fn protocol_block_manifest(
+    db: &Connection,
+    root_version_id: Option<&str>,
+    bindings: &Value,
+) -> Result<Value, String> {
     let Some(version_id) = root_version_id else {
-        return Ok(json!({"root_block_version_id":null,"block_version_ids":[],"root_bindings":[],"protocol_ready":true,"steps":[],"resolved_parameters":[],"unresolved_parameters":[]}));
+        return Ok(
+            json!({"root_block_version_id":null,"block_version_ids":[],"root_bindings":[],"protocol_ready":true,"steps":[],"resolved_parameters":[],"unresolved_parameters":[]}),
+        );
     };
     let typed: Vec<RootParameterValue> = serde_json::from_value(bindings.clone())
         .map_err(|e| format!("Protocol root_bindings 格式无效：{e}"))?;
@@ -778,7 +910,14 @@ pub(crate) fn protocol_manifest_entry(
     assay_id: Value,
     assay_title: Value,
 ) -> Result<Value, CliError> {
-    protocol_manifest_entry_with_bindings(db, version_id, expected_project, assay_id, assay_title, None)
+    protocol_manifest_entry_with_bindings(
+        db,
+        version_id,
+        expected_project,
+        assay_id,
+        assay_title,
+        None,
+    )
 }
 fn protocol_manifest_entry_with_bindings(
     db: &Connection,
@@ -796,29 +935,32 @@ fn protocol_manifest_entry_with_bindings(
     if project.as_deref() != Some(expected_project) {
         return Err(CliError::input("Protocol 版本必须属于同一项目"));
     }
-    let protocol_id = protocol_id.ok_or_else(|| CliError::internal("Protocol 版本缺少所属 Protocol"))?;
-    let (protocol_kind, _, _, _, protocol_raw) = kind_id(db, &protocol_id)?
-        .ok_or_else(|| CliError::missing("Protocol 不存在"))?;
+    let protocol_id =
+        protocol_id.ok_or_else(|| CliError::internal("Protocol 版本缺少所属 Protocol"))?;
+    let (protocol_kind, _, _, _, protocol_raw) =
+        kind_id(db, &protocol_id)?.ok_or_else(|| CliError::missing("Protocol 不存在"))?;
     if protocol_kind != "protocol" {
         return Err(CliError::internal("Protocol 版本的所属记录类型无效"));
     }
-    let protocol_data: Value = serde_json::from_str(&protocol_raw)
-        .map_err(|e| CliError::internal(e.to_string()))?;
-    let version_data: Value = serde_json::from_str(&version_raw)
-        .map_err(|e| CliError::internal(e.to_string()))?;
+    let protocol_data: Value =
+        serde_json::from_str(&protocol_raw).map_err(|e| CliError::internal(e.to_string()))?;
+    let version_data: Value =
+        serde_json::from_str(&version_raw).map_err(|e| CliError::internal(e.to_string()))?;
     let empty_bindings = json!([]);
     let override_bindings = root_bindings_override
         .map(serde_json::to_value)
         .transpose()
         .map_err(|e| CliError::internal(e.to_string()))?;
-    let root_bindings = override_bindings.as_ref()
+    let root_bindings = override_bindings
+        .as_ref()
         .or_else(|| version_data.get("root_bindings"))
         .unwrap_or(&empty_bindings);
     let block_manifest = protocol_block_manifest(
         db,
         version_data["root_block_version_id"].as_str(),
         root_bindings,
-    ).map_err(CliError::input)?;
+    )
+    .map_err(CliError::input)?;
     Ok(json!({
         "assay_id":assay_id,
         "assay_title":assay_title,
@@ -835,59 +977,285 @@ fn protocol_manifest_entry_with_bindings(
         "unresolved_parameters":block_manifest["unresolved_parameters"]
     }))
 }
-pub(crate) fn preview_protocol_block(db: &Connection, version_id: &str, bindings: &Value) -> Result<Value, CliError> {
+pub(crate) fn build_run_manifests(
+    db: &Connection,
+    design_data: &Value,
+    project_id: &str,
+    global_protocol_version_id: Option<&str>,
+) -> Result<(Vec<Value>, Vec<Value>), CliError> {
+    let design: DesignFields = serde_json::from_value(design_data.clone())
+        .map_err(|e| CliError::internal(format!("当前设计数据无效：{e}")))?;
+    let mut protocol_manifest = Vec::new();
+    for assay in &design.assays {
+        if let Some(version_id) = assay
+            .protocol_version_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+        {
+            protocol_manifest.push(protocol_manifest_entry(
+                db,
+                version_id,
+                project_id,
+                json!(assay.id),
+                json!(assay.title),
+            )?);
+        }
+    }
+    if let Some(version_id) = global_protocol_version_id.filter(|id| !id.is_empty()) {
+        protocol_manifest.push(protocol_manifest_entry(
+            db,
+            version_id,
+            project_id,
+            Value::Null,
+            json!("未分配到检测的全局 Protocol"),
+        )?);
+    }
+
+    let mut material_manifest = Vec::new();
+    for output in &design.planned_outputs {
+        let producer_protocol = protocol_manifest_entry_with_bindings(
+            db,
+            &output.protocol_version_id,
+            project_id,
+            Value::Null,
+            json!(format!("材料制备：{}", output.title)),
+            Some(&output.root_bindings),
+        )?;
+        let consumers: Vec<Value> = design
+            .sample_allocations
+            .iter()
+            .filter(|allocation| {
+                allocation.planned_output_id.as_deref() == Some(output.id.as_str())
+            })
+            .map(|allocation| {
+                let assay = design
+                    .assays
+                    .iter()
+                    .find(|assay| assay.id == allocation.assay_id);
+                json!({
+                    "assay_id":allocation.assay_id,
+                    "assay_title":assay.map(|value| value.title.as_str()).unwrap_or("未知检测"),
+                    "group_id":allocation.group_id,
+                    "group_name":allocation.group_name
+                })
+            })
+            .collect();
+        material_manifest.push(json!({
+            "planned_output_id":output.id,
+            "title":output.title,
+            "evidence_id":output.evidence_id,
+            "producer_protocol":producer_protocol,
+            "consumers":consumers
+        }));
+    }
+    Ok((protocol_manifest, material_manifest))
+}
+
+pub(crate) fn create_run_in_transaction(
+    tx: &Transaction<'_>,
+    design_id: &str,
+    title: &str,
+    scheduled_date: Option<&str>,
+    global_protocol_version_id: Option<&str>,
+    repeat_of_run_id: Option<&str>,
+    repeat_relationship: &str,
+) -> Result<Value, CliError> {
+    check_text(title, "运行名称", 160)?;
+    if let Some(date) = scheduled_date.filter(|date| !date.trim().is_empty()) {
+        validate_date(date, "计划开始日期")?;
+    }
+    if !["independent", "same_source", "paired", "unknown"].contains(&repeat_relationship) {
+        return Err(CliError::input(
+            "repeat_relationship 只能是 independent、same_source、paired 或 unknown",
+        ));
+    }
+    let (kind, project, _, revision, design_raw) =
+        kind_id(tx, design_id)?.ok_or_else(|| CliError::missing("实验设计不存在"))?;
+    if kind != "design" {
+        return Err(CliError::input("design_id 必须指向实验设计"));
+    }
+    let project = project.ok_or_else(|| CliError::internal("实验设计缺少项目归属"))?;
+    let version: String = tx
+        .query_row(
+            "SELECT id FROM records WHERE kind='design_version' AND parent_id=?1 AND revision=?2",
+            params![design_id, revision],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| CliError::internal(e.to_string()))?
+        .ok_or_else(|| CliError::internal("当前设计版本快照缺失"))?;
+    let design_data: Value =
+        serde_json::from_str(&design_raw).map_err(|e| CliError::internal(e.to_string()))?;
+    let (protocol_manifest, material_manifest) =
+        build_run_manifests(tx, &design_data, &project, global_protocol_version_id)?;
+    if let Some(previous_id) = repeat_of_run_id.filter(|id| !id.is_empty()) {
+        let (previous_kind, previous_project, previous_design, _, _) = kind_id(tx, previous_id)?
+            .ok_or_else(|| CliError::missing("被重复执行的 Run 不存在"))?;
+        if previous_kind != "run"
+            || previous_design.as_deref() != Some(design_id)
+            || previous_project.as_deref() != Some(project.as_str())
+        {
+            return Err(CliError::input(
+                "repeat_of_run_id 必须指向同项目、同一设计下的既有 Run",
+            ));
+        }
+    }
+    let run_index: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) + 1 FROM records WHERE kind='run' AND parent_id=?1",
+            [design_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let data = json!({
+        "title":title.trim(),
+        "scheduled_date":scheduled_date.filter(|date| !date.trim().is_empty()),
+        "protocol_version_id":global_protocol_version_id.filter(|id| !id.is_empty()),
+        "protocol_manifest":protocol_manifest,
+        "material_manifest":material_manifest,
+        "design_version_id":version,
+        "design_revision":revision,
+        "run_index":run_index,
+        "repeat_of_run_id":repeat_of_run_id.filter(|id| !id.is_empty()),
+        "repeat_relationship":repeat_relationship,
+        "status":"planned"
+    });
+    insert(tx, "run", Some(&project), Some(design_id), 1, &data)
+}
+
+pub(crate) fn preview_protocol_block(
+    db: &Connection,
+    version_id: &str,
+    bindings: &Value,
+) -> Result<Value, CliError> {
     let typed: Vec<RootParameterValue> = serde_json::from_value(bindings.clone())
         .map_err(|e| CliError::input(format!("步骤块 bindings 格式无效：{e}")))?;
     block_preview(db, version_id, &typed)
 }
-pub(crate) fn create_protocol_block_records(tx: &Transaction<'_>, project_id: &str, data: &Value) -> Result<Value, CliError> {
+pub(crate) fn create_protocol_block_records(
+    tx: &Transaction<'_>,
+    project_id: &str,
+    data: &Value,
+) -> Result<Value, CliError> {
     let mut input = data.clone();
     input["project_id"] = json!(project_id);
     let i: ProtocolBlockCreate = serde_json::from_value(input)
         .map_err(|e| CliError::input(format!("步骤块数据结构无效：{e}")))?;
     ensure_project(tx, &i.project_id)?;
     check_text(&i.title, "步骤块名称", 160)?;
-    if i.summary.chars().count() > 1000 { return Err(CliError::input("步骤块摘要不能超过 1000 个字符")); }
+    if i.summary.chars().count() > 1000 {
+        return Err(CliError::input("步骤块摘要不能超过 1000 个字符"));
+    }
     validate_block_content(tx, &i.project_id, &i.parameter_slots, &i.steps)?;
-    let block = insert(tx, "protocol_block", Some(&i.project_id), Some(&i.project_id), 1, &json!({"title":i.title.trim(),"summary":i.summary}))?;
-    let version_data = ProtocolBlockVersionData { block_id:block["id"].as_str().unwrap_or_default().to_owned(), version:1, summary:i.summary, parameter_slots:i.parameter_slots, steps:i.steps };
-    let serialized = serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
-    let version = insert(tx, "protocol_block_version", Some(&i.project_id), block["id"].as_str(), 1, &serialized)?;
+    let block = insert(
+        tx,
+        "protocol_block",
+        Some(&i.project_id),
+        Some(&i.project_id),
+        1,
+        &json!({"title":i.title.trim(),"summary":i.summary}),
+    )?;
+    let version_data = ProtocolBlockVersionData {
+        block_id: block["id"].as_str().unwrap_or_default().to_owned(),
+        version: 1,
+        summary: i.summary,
+        parameter_slots: i.parameter_slots,
+        steps: i.steps,
+    };
+    let serialized =
+        serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
+    let version = insert(
+        tx,
+        "protocol_block_version",
+        Some(&i.project_id),
+        block["id"].as_str(),
+        1,
+        &serialized,
+    )?;
     Ok(json!({"block":block,"version":version}))
 }
-pub(crate) fn revise_protocol_block_records(tx: &Transaction<'_>, block_id: &str, data: &Value) -> Result<Value, CliError> {
+pub(crate) fn revise_protocol_block_records(
+    tx: &Transaction<'_>,
+    block_id: &str,
+    data: &Value,
+) -> Result<Value, CliError> {
     let mut input = data.clone();
     input["block_id"] = json!(block_id);
     let i: ProtocolBlockRevise = serde_json::from_value(input)
         .map_err(|e| CliError::input(format!("步骤块修订数据结构无效：{e}")))?;
-    let (kind, project, _, _, _) = kind_id(tx, &i.block_id)?
-        .ok_or_else(|| CliError::missing("步骤块不存在"))?;
-    if kind != "protocol_block" { return Err(CliError::input("block_id 必须指向 protocol_block")); }
+    let (kind, project, _, _, _) =
+        kind_id(tx, &i.block_id)?.ok_or_else(|| CliError::missing("步骤块不存在"))?;
+    if kind != "protocol_block" {
+        return Err(CliError::input("block_id 必须指向 protocol_block"));
+    }
     let project_id = project.ok_or_else(|| CliError::internal("步骤块缺少项目归属"))?;
     let latest: i64 = tx.query_row("SELECT COALESCE(MAX(revision),0) FROM records WHERE kind='protocol_block_version' AND parent_id=?1", [&i.block_id], |r| r.get(0)).map_err(|e| CliError::internal(e.to_string()))?;
-    if latest != i.expected_version { return Err(CliError::conflict(format!("步骤块已从 v{} 更新为 v{}；请先重新读取。", i.expected_version, latest))); }
+    if latest != i.expected_version {
+        return Err(CliError::conflict(format!(
+            "步骤块已从 v{} 更新为 v{}；请先重新读取。",
+            i.expected_version, latest
+        )));
+    }
     let latest_id: String = tx.query_row("SELECT id FROM records WHERE kind='protocol_block_version' AND parent_id=?1 AND revision=?2", params![i.block_id, latest], |r| r.get(0)).map_err(|e| CliError::internal(e.to_string()))?;
     let (_, current_data) = block_version_data(tx, &latest_id)?;
     let summary = i.summary.unwrap_or(current_data.summary);
-    if summary.chars().count() > 1000 { return Err(CliError::input("步骤块摘要不能超过 1000 个字符")); }
+    if summary.chars().count() > 1000 {
+        return Err(CliError::input("步骤块摘要不能超过 1000 个字符"));
+    }
     validate_block_content(tx, &project_id, &i.parameter_slots, &i.steps)?;
-    let version_data = ProtocolBlockVersionData { block_id:i.block_id.clone(), version:latest + 1, summary, parameter_slots:i.parameter_slots, steps:i.steps };
-    let serialized = serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
-    let version = insert(tx, "protocol_block_version", Some(&project_id), Some(&i.block_id), latest + 1, &serialized)?;
+    let version_data = ProtocolBlockVersionData {
+        block_id: i.block_id.clone(),
+        version: latest + 1,
+        summary,
+        parameter_slots: i.parameter_slots,
+        steps: i.steps,
+    };
+    let serialized =
+        serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
+    let version = insert(
+        tx,
+        "protocol_block_version",
+        Some(&project_id),
+        Some(&i.block_id),
+        latest + 1,
+        &serialized,
+    )?;
     Ok(json!({"version":version}))
 }
 pub(crate) fn ensure_run_protocol_ready(db: &Connection, run_id: &str) -> Result<(), CliError> {
-    let (kind, _, _, _, raw) = kind_id(db, run_id)?
-        .ok_or_else(|| CliError::missing("实验运行不存在"))?;
-    if kind != "run" { return Err(CliError::input("id 必须指向实验运行")); }
+    let (kind, _, _, _, raw) =
+        kind_id(db, run_id)?.ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    if kind != "run" {
+        return Err(CliError::input("id 必须指向实验运行"));
+    }
     let data: Value = serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
-    let unresolved: Vec<String> = data.get("protocol_manifest").and_then(Value::as_array).into_iter().flatten()
-        .chain(data.get("material_manifest").and_then(Value::as_array).into_iter().flatten()
-            .filter_map(|entry| entry.get("producer_protocol")))
+    let unresolved: Vec<String> = data
+        .get("protocol_manifest")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            data.get("material_manifest")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.get("producer_protocol")),
+        )
         .filter(|entry| entry.get("protocol_ready").and_then(Value::as_bool) == Some(false))
-        .flat_map(|entry| entry.get("unresolved_parameters").and_then(Value::as_array).into_iter().flatten())
+        .flat_map(|entry| {
+            entry
+                .get("unresolved_parameters")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
         .filter(|parameter| parameter.get("required").and_then(Value::as_bool) == Some(true))
-        .filter_map(|parameter| parameter.get("path").and_then(Value::as_str).map(str::to_owned))
+        .filter_map(|parameter| {
+            parameter
+                .get("path")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
         .collect();
     if !unresolved.is_empty() {
         return Err(CliError::input(format!("运行尚不能开始：Protocol 有必填参数待确认（{}）。请保存新的 Protocol 版本并重新创建运行。", unresolved.join("、"))));
@@ -1071,17 +1439,29 @@ fn validate_groups(groups: &[GroupSpec]) -> Result<(), CliError> {
 
 fn normalize_design(d: &mut DesignFields, previous: Option<&DesignFields>) {
     if d.group_specs.is_empty() && !d.groups.trim().is_empty() {
-        d.group_specs = d.groups.lines().filter(|name| !name.trim().is_empty()).map(|name| GroupSpec {
-            id: String::new(), name: name.trim().to_owned(), role: None, condition: None,
-            independent_n: None, technical_repeats: None,
-        }).collect();
+        d.group_specs = d
+            .groups
+            .lines()
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| GroupSpec {
+                id: String::new(),
+                name: name.trim().to_owned(),
+                role: None,
+                condition: None,
+                independent_n: None,
+                technical_repeats: None,
+            })
+            .collect();
     }
 
     let mut used_ids = std::collections::HashSet::new();
     for group in &mut d.group_specs {
         if group.id.trim().is_empty() {
-            let matches: Vec<&GroupSpec> = previous.into_iter().flat_map(|old| old.group_specs.iter())
-                .filter(|old| old.name == group.name && !old.id.trim().is_empty()).collect();
+            let matches: Vec<&GroupSpec> = previous
+                .into_iter()
+                .flat_map(|old| old.group_specs.iter())
+                .filter(|old| old.name == group.name && !old.id.trim().is_empty())
+                .collect();
             if matches.len() == 1 && !used_ids.contains(matches[0].id.as_str()) {
                 group.id = matches[0].id.clone();
             } else {
@@ -1091,28 +1471,62 @@ fn normalize_design(d: &mut DesignFields, previous: Option<&DesignFields>) {
         used_ids.insert(group.id.clone());
     }
 
-    let groups_by_id: std::collections::HashMap<String, String> = d.group_specs.iter()
-        .map(|group| (group.id.clone(), group.name.clone())).collect();
-    let groups_by_name: std::collections::HashMap<String, String> = d.group_specs.iter()
-        .map(|group| (group.name.clone(), group.id.clone())).collect();
+    let groups_by_id: std::collections::HashMap<String, String> = d
+        .group_specs
+        .iter()
+        .map(|group| (group.id.clone(), group.name.clone()))
+        .collect();
+    let groups_by_name: std::collections::HashMap<String, String> = d
+        .group_specs
+        .iter()
+        .map(|group| (group.name.clone(), group.id.clone()))
+        .collect();
     for assay in &mut d.assays {
         if assay.group_ids.is_empty() {
-            if let Some(ids) = assay.group_names.iter().map(|name| groups_by_name.get(name).cloned()).collect::<Option<Vec<_>>>() {
+            if let Some(ids) = assay
+                .group_names
+                .iter()
+                .map(|name| groups_by_name.get(name).cloned())
+                .collect::<Option<Vec<_>>>()
+            {
                 assay.group_ids = ids;
             }
         }
         if !assay.group_ids.is_empty() {
-            assay.group_names = assay.group_ids.iter().filter_map(|id| groups_by_id.get(id).cloned()).collect();
+            assay.group_names = assay
+                .group_ids
+                .iter()
+                .filter_map(|id| groups_by_id.get(id).cloned())
+                .collect();
         }
     }
     for allocation in &mut d.sample_allocations {
         if allocation.group_id.is_none() {
             allocation.group_id = groups_by_name.get(&allocation.group_name).cloned();
         }
-        if let Some(name) = allocation.group_id.as_ref().and_then(|id| groups_by_id.get(id)) {
+        if let Some(name) = allocation
+            .group_id
+            .as_ref()
+            .and_then(|id| groups_by_id.get(id))
+        {
             allocation.group_name = name.clone();
         }
     }
+}
+
+pub(crate) fn normalize_validate_design_data(
+    data: Value,
+    previous: Option<&Value>,
+) -> Result<Value, CliError> {
+    let mut design: DesignFields = serde_json::from_value(data)
+        .map_err(|e| CliError::input(format!("设计数据结构无效：{e}")))?;
+    let previous_design = previous
+        .map(|value| serde_json::from_value::<DesignFields>(value.clone()))
+        .transpose()
+        .map_err(|e| CliError::internal(format!("现有设计数据无效：{e}")))?;
+    normalize_design(&mut design, previous_design.as_ref());
+    validate_design(&design)?;
+    serde_json::to_value(design).map_err(|e| CliError::internal(e.to_string()))
 }
 
 fn validate_design(d: &DesignFields) -> Result<(), CliError> {
@@ -1154,8 +1568,10 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
         ));
     }
     let mut assay_ids = std::collections::HashSet::new();
-    let group_ids: std::collections::HashSet<&str> = d.group_specs.iter().map(|g| g.id.as_str()).collect();
-    let group_names: std::collections::HashSet<&str> = d.group_specs.iter().map(|g| g.name.as_str()).collect();
+    let group_ids: std::collections::HashSet<&str> =
+        d.group_specs.iter().map(|g| g.id.as_str()).collect();
+    let group_names: std::collections::HashSet<&str> =
+        d.group_specs.iter().map(|g| g.name.as_str()).collect();
     for assay in &d.assays {
         check_text(&assay.id, "检测 ID", 80)?;
         check_text(&assay.title, "检测名称", 160)?;
@@ -1168,7 +1584,9 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
         let mut selected_group_ids = std::collections::HashSet::new();
         for group_id in &assay.group_ids {
             check_text(group_id, "检测适用组别 ID", 80)?;
-            if !group_ids.contains(group_id.as_str()) || !selected_group_ids.insert(group_id.as_str()) {
+            if !group_ids.contains(group_id.as_str())
+                || !selected_group_ids.insert(group_id.as_str())
+            {
                 return Err(CliError::input("检测适用组别必须引用已定义的唯一组别 ID"));
             }
         }
@@ -1217,7 +1635,11 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
                 allocation.group_name
             )));
         }
-        if allocation.group_id.as_deref().is_none_or(|id| !group_ids.contains(id)) {
+        if allocation
+            .group_id
+            .as_deref()
+            .is_none_or(|id| !group_ids.contains(id))
+        {
             return Err(CliError::input("样本分配必须引用已定义的组别 ID"));
         }
         if allocation
@@ -1250,7 +1672,11 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
         {
             return Err(CliError::input("样本分配引用的来源证据不存在"));
         }
-        if allocation.planned_output_id.as_ref().is_some_and(|id| !d.planned_outputs.iter().any(|output| &output.id == id)) {
+        if allocation
+            .planned_output_id
+            .as_ref()
+            .is_some_and(|id| !d.planned_outputs.iter().any(|output| &output.id == id))
+        {
             return Err(CliError::input("样本分配引用了不存在的计划产物"));
         }
     }
@@ -1269,10 +1695,17 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
         for binding in &output.root_bindings {
             check_text(&binding.slot, "产物参数槽位", 100)?;
             if !slots.insert(binding.slot.as_str()) {
-                return Err(CliError::input(format!("计划产物参数重复：{}", binding.slot)));
+                return Err(CliError::input(format!(
+                    "计划产物参数重复：{}",
+                    binding.slot
+                )));
             }
         }
-        if output.evidence_id.as_ref().is_some_and(|id| !evidence_ids.contains(id.as_str())) {
+        if output
+            .evidence_id
+            .as_ref()
+            .is_some_and(|id| !evidence_ids.contains(id.as_str()))
+        {
             return Err(CliError::input("计划产物引用的来源证据不存在"));
         }
     }
@@ -1289,9 +1722,7 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
             }
         }
         if conflict.affects_container_estimate && conflict.affected_assay_ids.is_empty() {
-            return Err(CliError::input(
-                "影响容器位估算的冲突必须关联至少一项检测",
-            ));
+            return Err(CliError::input("影响容器位估算的冲突必须关联至少一项检测"));
         }
         if conflict.evidence_ids.len() < 2
             || conflict
@@ -1532,10 +1963,10 @@ fn create_design_tx(
     project_id: &str,
     design: &DesignFields,
 ) -> Result<Value, CliError> {
-    let mut normalized = design.clone();
-    normalize_design(&mut normalized, None);
-    validate_design(&normalized)?;
-    let raw = serde_json::to_value(&normalized).map_err(|e| CliError::internal(e.to_string()))?;
+    let raw = normalize_validate_design_data(
+        serde_json::to_value(design).map_err(|e| CliError::internal(e.to_string()))?,
+        None,
+    )?;
     let record = insert(tx, "design", Some(project_id), Some(project_id), 1, &raw)?;
     let version = insert(
         tx,
@@ -1906,110 +2337,20 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         }
         "run.create" => {
             let i: RunCreate = parse_input(path)?;
-            let (kind, project, _, revision, design_raw) =
-                kind_id(&db, &i.design_id)?.ok_or_else(|| CliError::missing("实验设计不存在"))?;
-            if kind != "design" {
-                return Err(CliError::input("design_id 必须指向实验设计"));
-            }
-            check_text(&i.title, "运行名称", 160)?;
-            if let Some(date) = &i.scheduled_date {
-                validate_date(date, "计划开始日期")?
-            }
-            let version:String=db.query_row("SELECT id FROM records WHERE kind='design_version' AND parent_id=?1 AND revision=?2",params![i.design_id,revision],|r|r.get(0)).optional().map_err(|e|CliError::internal(e.to_string()))?.ok_or_else(||CliError::internal("当前设计版本快照缺失"))?;
-            let design_data: Value =
-                serde_json::from_str(&design_raw).map_err(|e| CliError::internal(e.to_string()))?;
-            let design_fields: DesignFields = serde_json::from_value(design_data.clone())
-                .map_err(|e| CliError::internal(format!("当前设计数据无效：{e}")))?;
-            let mut protocol_manifest = Vec::new();
-            if let Some(assays) = design_data.get("assays").and_then(Value::as_array) {
-                for assay in assays {
-                    let Some(protocol_version_id) = assay
-                        .get("protocol_version_id")
-                        .and_then(Value::as_str)
-                        .filter(|id| !id.is_empty())
-                    else {
-                        continue;
-                    };
-                    protocol_manifest.push(protocol_manifest_entry(
-                        &db,
-                        protocol_version_id,
-                        project.as_deref().unwrap_or_default(),
-                        assay.get("id").and_then(Value::as_str).map(|v| json!(v)).unwrap_or(Value::Null),
-                        assay.get("title").and_then(Value::as_str).map(|v| json!(v)).unwrap_or_else(|| json!("未命名检测")),
-                    )?);
-                }
-            }
-            if let Some(pv) = &i.protocol_version_id {
-                protocol_manifest.push(protocol_manifest_entry(
-                    &db,
-                    pv,
-                    project.as_deref().unwrap_or_default(),
-                    Value::Null,
-                    json!("未分配到检测的全局 Protocol"),
-                )?);
-            }
-            let mut material_manifest = Vec::new();
-            for output in &design_fields.planned_outputs {
-                let producer_protocol = protocol_manifest_entry_with_bindings(
-                    &db,
-                    &output.protocol_version_id,
-                    project.as_deref().unwrap_or_default(),
-                    Value::Null,
-                    json!(format!("材料制备：{}", output.title)),
-                    Some(&output.root_bindings),
-                )?;
-                let consumers: Vec<Value> = design_fields.sample_allocations.iter()
-                    .filter(|allocation| allocation.planned_output_id.as_deref() == Some(output.id.as_str()))
-                    .map(|allocation| {
-                        let assay = design_fields.assays.iter().find(|assay| assay.id == allocation.assay_id);
-                        json!({
-                            "assay_id":allocation.assay_id,
-                            "assay_title":assay.map(|value| value.title.as_str()).unwrap_or("未知检测"),
-                            "group_id":allocation.group_id,
-                            "group_name":allocation.group_name
-                        })
-                    }).collect();
-                material_manifest.push(json!({
-                    "planned_output_id":output.id,
-                    "title":output.title,
-                    "evidence_id":output.evidence_id,
-                    "producer_protocol":producer_protocol,
-                    "consumers":consumers
-                }));
-            }
-            if let Some(previous_id) = &i.repeat_of_run_id {
-                let (previous_kind, previous_project, previous_design, _, _) =
-                    kind_id(&db, previous_id)?
-                        .ok_or_else(|| CliError::missing("被重复执行的 Run 不存在"))?;
-                if previous_kind != "run"
-                    || previous_design.as_deref() != Some(i.design_id.as_str())
-                    || previous_project.as_deref() != project.as_deref()
-                {
-                    return Err(CliError::input(
-                        "repeat_of_run_id 必须指向同项目、同一设计下的既有 Run",
-                    ));
-                }
-            }
             let tx = db
                 .unchecked_transaction()
                 .map_err(|e| CliError::internal(e.to_string()))?;
-            let run_index: i64 = tx
-                .query_row(
-                    "SELECT COUNT(*) + 1 FROM records WHERE kind='run' AND parent_id=?1",
-                    [&i.design_id],
-                    |r| r.get(0),
-                )
-                .map_err(|e| CliError::internal(e.to_string()))?;
-            let r = insert(
+            let record = create_run_in_transaction(
                 &tx,
-                "run",
-                project.as_deref(),
-                Some(&i.design_id),
-                1,
-                &json!({"title":i.title.trim(),"scheduled_date":i.scheduled_date,"protocol_version_id":i.protocol_version_id,"protocol_manifest":protocol_manifest,"material_manifest":material_manifest,"design_version_id":version,"design_revision":revision,"run_index":run_index,"repeat_of_run_id":i.repeat_of_run_id,"repeat_relationship":i.repeat_relationship,"status":"planned"}),
+                &i.design_id,
+                &i.title,
+                i.scheduled_date.as_deref(),
+                i.protocol_version_id.as_deref(),
+                i.repeat_of_run_id.as_deref(),
+                i.repeat_relationship.as_str(),
             )?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
-            Ok(json!({"record":r}))
+            Ok(json!({"record":record}))
         }
         "task.create" => {
             let i: TaskCreate = parse_input(path)?;
@@ -2066,25 +2407,40 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             if block["kind"] != "protocol_block" {
                 return Err(CliError::input("id 必须指向 protocol_block"));
             }
-            let versions: Vec<Value> = list(&db, Some("protocol_block_version"), block["project_id"].as_str())?
-                .into_iter()
-                .filter(|v| v["parent_id"] == i.id)
-                .collect();
-            let latest = versions.iter().max_by_key(|v| v["revision"].as_i64().unwrap_or(0)).cloned()
+            let versions: Vec<Value> = list(
+                &db,
+                Some("protocol_block_version"),
+                block["project_id"].as_str(),
+            )?
+            .into_iter()
+            .filter(|v| v["parent_id"] == i.id)
+            .collect();
+            let latest = versions
+                .iter()
+                .max_by_key(|v| v["revision"].as_i64().unwrap_or(0))
+                .cloned()
                 .ok_or_else(|| CliError::internal("步骤块缺少 v1 版本"))?;
             Ok(json!({"block":block,"latest_version":latest,"versions":versions}))
         }
         "protocol.block.create" => {
             let i: ProtocolBlockCreate = parse_input(path)?;
-            let tx = db.unchecked_transaction().map_err(|e| CliError::internal(e.to_string()))?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
             let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
-            let result = create_protocol_block_records(&tx, payload["project_id"].as_str().unwrap_or_default(), &payload)?;
+            let result = create_protocol_block_records(
+                &tx,
+                payload["project_id"].as_str().unwrap_or_default(),
+                &payload,
+            )?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(result)
         }
         "protocol.block.revise" => {
             let i: ProtocolBlockRevise = parse_input(path)?;
-            let tx = db.unchecked_transaction().map_err(|e| CliError::internal(e.to_string()))?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
             let block_id = i.block_id.clone();
             let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
             let result = revise_protocol_block_records(&tx, &block_id, &payload)?;
@@ -2102,7 +2458,9 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 ensure_project(&db, p)?
             }
             if i.body.is_none() && i.root_block_version_id.is_none() {
-                return Err(CliError::input("Protocol 必须提供正文或 root_block_version_id"));
+                return Err(CliError::input(
+                    "Protocol 必须提供正文或 root_block_version_id",
+                ));
             }
             if let Some(block_version_id) = &i.root_block_version_id {
                 let (block_record, block_data) = block_version_data(&db, block_version_id)?;
@@ -2111,7 +2469,9 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 }
                 validate_root_bindings(&block_data.parameter_slots, &i.root_bindings)?;
             } else if !i.root_bindings.is_empty() {
-                return Err(CliError::input("未指定 root_block_version_id 时不能提供 root_bindings"));
+                return Err(CliError::input(
+                    "未指定 root_block_version_id 时不能提供 root_bindings",
+                ));
             }
             let tx = db
                 .unchecked_transaction()
@@ -2150,33 +2510,54 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let (_, project, _, _, _) = kind_id(&db, &i.protocol_id)?
                 .ok_or_else(|| CliError::missing("Protocol 不存在"))?;
             if i.body.is_none() && i.root_block_version_id.is_none() && i.root_bindings.is_none() {
-                return Err(CliError::input("至少提供 body、root_block_version_id 或 root_bindings 之一"));
+                return Err(CliError::input(
+                    "至少提供 body、root_block_version_id 或 root_bindings 之一",
+                ));
             }
             let previous_raw: String = db.query_row("SELECT data_json FROM records WHERE kind='protocol_version' AND parent_id=?1 AND revision=?2", params![i.protocol_id, latest], |r| r.get(0)).map_err(|e| CliError::internal(e.to_string()))?;
-            let previous: Value = serde_json::from_str(&previous_raw).map_err(|e| CliError::internal(e.to_string()))?;
-            let body = i.body.unwrap_or_else(|| previous["body"].as_str().unwrap_or_default().to_owned());
+            let previous: Value = serde_json::from_str(&previous_raw)
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let body = i
+                .body
+                .unwrap_or_else(|| previous["body"].as_str().unwrap_or_default().to_owned());
             let root_id = match i.root_block_version_id {
-                None => previous.get("root_block_version_id").and_then(Value::as_str).map(str::to_owned),
+                None => previous
+                    .get("root_block_version_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
                 Some(Value::Null) => None,
                 Some(Value::String(id)) => Some(id),
-                Some(_) => return Err(CliError::input("root_block_version_id 必须是字符串或 null")),
+                Some(_) => {
+                    return Err(CliError::input("root_block_version_id 必须是字符串或 null"))
+                }
             };
-            let previous_bindings = previous.get("root_bindings").and_then(Value::as_array).cloned().unwrap_or_default();
-            let root_bindings = match (&root_id, i.root_bindings) {
-                (Some(_), Some(values)) => serde_json::to_value(values).map_err(|e| CliError::internal(e.to_string()))?,
-                (Some(_), None) => json!(previous_bindings),
-                (None, Some(values)) => serde_json::to_value(values).map_err(|e| CliError::internal(e.to_string()))?,
-                (None, None) => json!([]),
-            };
+            let previous_bindings = previous
+                .get("root_bindings")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let root_bindings =
+                match (&root_id, i.root_bindings) {
+                    (Some(_), Some(values)) => serde_json::to_value(values)
+                        .map_err(|e| CliError::internal(e.to_string()))?,
+                    (Some(_), None) => json!(previous_bindings),
+                    (None, Some(values)) => serde_json::to_value(values)
+                        .map_err(|e| CliError::internal(e.to_string()))?,
+                    (None, None) => json!([]),
+                };
             if let Some(block_version_id) = &root_id {
                 let (block_record, block_data) = block_version_data(&db, block_version_id)?;
                 if project.as_deref() != block_record["project_id"].as_str() {
                     return Err(CliError::input("Protocol 与根步骤块必须属于同一项目"));
                 }
-                let typed_bindings: Vec<RootParameterValue> = serde_json::from_value(root_bindings.clone()).map_err(|e| CliError::input(format!("root_bindings 格式无效：{e}")))?;
+                let typed_bindings: Vec<RootParameterValue> =
+                    serde_json::from_value(root_bindings.clone())
+                        .map_err(|e| CliError::input(format!("root_bindings 格式无效：{e}")))?;
                 validate_root_bindings(&block_data.parameter_slots, &typed_bindings)?;
             } else if root_bindings.as_array().is_some_and(|v| !v.is_empty()) {
-                return Err(CliError::input("清除 root_block_version_id 时必须清空 root_bindings"));
+                return Err(CliError::input(
+                    "清除 root_block_version_id 时必须清空 root_bindings",
+                ));
             }
             let tx = db
                 .unchecked_transaction()
@@ -2953,9 +3334,16 @@ fn tool_description(tool: &str) -> &'static str {
 }
 fn tool_effects(tool: &str) -> &'static str {
     match tool {
-        "project.list" | "design.list" | "design.get" | "run.list" | "protocol.list"
-        | "protocol.block.list" | "protocol.block.get" | "protocol.block.preview"
-        | "record.list" | "record.get" => "只读；不修改数据库。",
+        "project.list"
+        | "design.list"
+        | "design.get"
+        | "run.list"
+        | "protocol.list"
+        | "protocol.block.list"
+        | "protocol.block.get"
+        | "protocol.block.preview"
+        | "record.list"
+        | "record.get" => "只读；不修改数据库。",
         "import.study.preview" => "只校验导入内容并返回警告；不写入数据库。",
         "calculator.dilution"
         | "calculator.solution"
