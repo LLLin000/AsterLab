@@ -1,0 +1,664 @@
+#![recursion_limit = "256"]
+
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{Html, IntoResponse, Response},
+    routing::{get, post},
+    Json, Router,
+};
+use chrono::Utc;
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::{
+    env, fs,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+use uuid::Uuid;
+
+mod cli;
+const INDEX_HTML: &str = include_str!("../web/index.html");
+#[derive(Clone)]
+struct AppState {
+    db: Arc<Mutex<Connection>>,
+}
+#[derive(Debug)]
+struct ApiError {
+    status: StatusCode,
+    message: String,
+}
+impl ApiError {
+    fn bad(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: message.into(),
+        }
+    }
+    fn missing(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
+    }
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: message.into(),
+        }
+    }
+    fn from_cli(error: cli::CliError) -> Self {
+        let status = match error.code {
+            "NOT_FOUND" => StatusCode::NOT_FOUND,
+            "REVISION_CONFLICT" => StatusCode::CONFLICT,
+            "INTERNAL" => StatusCode::INTERNAL_SERVER_ERROR,
+            _ => StatusCode::BAD_REQUEST,
+        };
+        Self { status, message: error.message }
+    }
+}
+impl From<rusqlite::Error> for ApiError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::internal(format!("数据库操作失败：{e}"))
+    }
+}
+impl From<serde_json::Error> for ApiError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::bad(format!("数据格式无效：{e}"))
+    }
+}
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.status, Json(json!({"error":self.message}))).into_response()
+    }
+}
+type ApiResult<T> = Result<Json<T>, ApiError>;
+fn now() -> String {
+    Utc::now().to_rfc3339()
+}
+fn id() -> String {
+    Uuid::new_v4().to_string()
+}
+fn lock(s: &AppState) -> Result<std::sync::MutexGuard<'_, Connection>, ApiError> {
+    s.db.lock()
+        .map_err(|_| ApiError::internal("数据库锁不可用"))
+}
+fn text<'a>(v: &'a Value, key: &str) -> &'a str {
+    v.get(key).and_then(Value::as_str).unwrap_or("").trim()
+}
+fn required(v: &Value, key: &str, label: &str, max: usize) -> Result<String, ApiError> {
+    let s = text(v, key);
+    if s.is_empty() {
+        return Err(ApiError::bad(format!("{label}不能为空")));
+    }
+    if s.chars().count() > max {
+        return Err(ApiError::bad(format!("{label}不能超过 {max} 个字符")));
+    }
+    Ok(s.to_owned())
+}
+fn record(
+    db: &Connection,
+    record_id: &str,
+) -> Result<Option<(String, Option<String>, Option<String>, i64, String)>, ApiError> {
+    Ok(db
+        .query_row(
+            "SELECT kind,project_id,parent_id,revision,data_json FROM records WHERE id=?1",
+            [record_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()?)
+}
+fn insert(
+    tx: &Transaction<'_>,
+    kind: &str,
+    project: Option<&str>,
+    parent: Option<&str>,
+    revision: i64,
+    data: &Value,
+) -> Result<Value, ApiError> {
+    let record_id = id();
+    let stamp = now();
+    tx.execute("INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
+       params![record_id,kind,project,parent,revision,serde_json::to_string(data)?,stamp])?;
+    Ok(
+        json!({"id":record_id,"kind":kind,"project_id":project,"parent_id":parent,"revision":revision,"data":data,"created_at":stamp,"updated_at":stamp}),
+    )
+}
+fn protocol_manifest(
+    db: &Connection,
+    design: &Value,
+    project_id: &str,
+    global_protocol_version_id: Option<&str>,
+) -> Result<Vec<Value>, ApiError> {
+    let mut manifest = Vec::new();
+    if let Some(assays) = design.get("assays").and_then(Value::as_array) {
+        for assay in assays {
+            let Some(version_id) = assay
+                .get("protocol_version_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+            else {
+                continue;
+            };
+            manifest.push(cli::protocol_manifest_entry(
+                db,
+                version_id,
+                project_id,
+                assay.get("id").cloned().unwrap_or(Value::Null),
+                assay.get("title").cloned().unwrap_or(Value::Null),
+            ).map_err(ApiError::from_cli)?);
+        }
+    }
+    if let Some(version_id) = global_protocol_version_id.filter(|id| !id.is_empty()) {
+        manifest.push(cli::protocol_manifest_entry(
+            db,
+            version_id,
+            project_id,
+            Value::Null,
+            json!("未分配到检测的全局 Protocol"),
+        ).map_err(ApiError::from_cli)?);
+    }
+    Ok(manifest)
+}
+fn list(db: &Connection) -> Result<Vec<Value>, ApiError> {
+    let mut s=db.prepare("SELECT id,kind,project_id,parent_id,revision,data_json,created_at,updated_at FROM records ORDER BY created_at DESC,rowid DESC")?;
+    let rows=s.query_map([],|r| {
+        let raw:String=r.get(5)?;
+        let data:Value=serde_json::from_str(&raw).unwrap_or(Value::Null);
+        Ok(json!({"id":r.get::<_,String>(0)?,"kind":r.get::<_,String>(1)?,"project_id":r.get::<_,Option<String>>(2)?,"parent_id":r.get::<_,Option<String>>(3)?,"revision":r.get::<_,i64>(4)?,"data":data,"created_at":r.get::<_,String>(6)?,"updated_at":r.get::<_,String>(7)?}))
+    })?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+async fn index() -> Html<&'static str> {
+    Html(INDEX_HTML)
+}
+async fn health() -> Json<Value> {
+    Json(json!({"ok":true,"app":"Lab Workbench","storage":"SQLite","agent":"typed-cli-v1"}))
+}
+async fn get_state(State(s): State<AppState>) -> ApiResult<Value> {
+    let rows = {
+        let db = lock(&s)?;
+        list(&db)?
+    };
+    Ok(Json(json!({"records":rows})))
+}
+#[derive(Deserialize)]
+struct BlockPreviewInput {
+    block_version_id: String,
+    #[serde(default = "empty_array")]
+    bindings: Value,
+}
+fn empty_array() -> Value { json!([]) }
+async fn preview_block(State(s): State<AppState>, Json(input): Json<BlockPreviewInput>) -> ApiResult<Value> {
+    let db = lock(&s)?;
+    let result = cli::preview_protocol_block(&db, &input.block_version_id, &input.bindings)
+        .map_err(ApiError::from_cli)?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct CreateInput {
+    kind: String,
+    project_id: Option<String>,
+    parent_id: Option<String>,
+    #[serde(default)]
+    data: Value,
+}
+async fn create_record(
+    State(s): State<AppState>,
+    Json(input): Json<CreateInput>,
+) -> ApiResult<Value> {
+    let mut db = lock(&s)?;
+    let tx = db.transaction()?;
+    let kind = input.kind.as_str();
+    let mut project = input.project_id.clone();
+    let parent = input.parent_id.clone();
+    let mut data = input.data;
+    let result = match kind {
+        "project" => {
+            required(&data, "name", "项目名称", 120)?;
+            data["description"] = json!(text(&data, "description"));
+            insert(&tx, "project", None, None, 1, &data)?
+        }
+        "design" => {
+            let pid = parent
+                .as_deref()
+                .ok_or_else(|| ApiError::bad("实验设计需要归属项目"))?;
+            if record(&tx, pid)?.map(|x| x.0) != Some("project".into()) {
+                return Err(ApiError::bad("项目不存在"));
+            }
+            required(&data, "title", "设计标题", 160)?;
+            project = Some(pid.to_owned());
+            let design = insert(&tx, "design", project.as_deref(), Some(pid), 1, &data)?;
+            let snapshot = json!({"design_id":design["id"],"design_revision":1,"snapshot":data});
+            insert(
+                &tx,
+                "design_version",
+                project.as_deref(),
+                design["id"].as_str(),
+                1,
+                &snapshot,
+            )?;
+            design
+        }
+        "run" => {
+            let did = parent
+                .as_deref()
+                .ok_or_else(|| ApiError::bad("实验运行需要关联实验设计"))?;
+            let (design_project, revision, design_raw) = match record(&tx, did)? {
+                Some((k, p, _, r, raw)) if k == "design" => (p.unwrap_or_default(), r, raw),
+                _ => return Err(ApiError::bad("实验设计不存在")),
+            };
+            let design_version_id:String=tx.query_row("SELECT id FROM records WHERE kind='design_version' AND parent_id=?1 AND revision=?2",params![did,revision],|r|r.get(0))?;
+            let design_data: Value = serde_json::from_str(&design_raw)?;
+            let global_protocol = data.get("protocol_version_id").and_then(Value::as_str);
+            data["protocol_manifest"] = json!(protocol_manifest(
+                &tx,
+                &design_data,
+                &design_project,
+                global_protocol,
+            )?);
+            data["design_version_id"] = json!(design_version_id);
+            data["design_revision"] = json!(revision);
+            if let Some(previous_id) = data
+                .get("repeat_of_run_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+            {
+                let (previous_kind, previous_project, previous_design, _, _) =
+                    record(&tx, previous_id)?
+                        .ok_or_else(|| ApiError::bad("被重复执行的 Run 不存在"))?;
+                if previous_kind != "run"
+                    || previous_project.as_deref() != Some(design_project.as_str())
+                    || previous_design.as_deref() != Some(did)
+                {
+                    return Err(ApiError::bad(
+                        "repeat_of_run_id 必须指向同项目、同一设计下的既有 Run",
+                    ));
+                }
+            }
+            let repeat_relationship = data
+                .get("repeat_relationship")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            if !["independent", "same_source", "paired", "unknown"].contains(&repeat_relationship) {
+                return Err(ApiError::bad(
+                    "repeat_relationship 只能是 independent、same_source、paired 或 unknown",
+                ));
+            }
+            let run_index: i64 = tx.query_row(
+                "SELECT COUNT(*) + 1 FROM records WHERE kind='run' AND parent_id=?1",
+                [did],
+                |r| r.get(0),
+            )?;
+            data["run_index"] = json!(run_index);
+            if data
+                .get("repeat_relationship")
+                .and_then(Value::as_str)
+                .is_none()
+            {
+                data["repeat_relationship"] = json!("unknown");
+            }
+            required(&data, "title", "运行名称", 160)?;
+            project = Some(design_project);
+            insert(&tx, "run", project.as_deref(), Some(did), 1, &data)?
+        }
+        "task" => {
+            if let Some(pid) = parent.as_deref() {
+                if record(&tx, pid)?.map(|x| x.0) != Some("run".into()) {
+                    return Err(ApiError::bad("关联的实验运行不存在"));
+                }
+            }
+            required(&data, "title", "任务名称", 160)?;
+            required(&data, "scheduled_date", "计划日期", 32)?;
+            data["status"] = json!(data
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("planned"));
+            insert(&tx, "task", project.as_deref(), parent.as_deref(), 1, &data)?
+        }
+        "protocol" => {
+            if let Some(pid) = parent.as_deref() {
+                if record(&tx, pid)?.map(|x| x.0) != Some("project".into()) {
+                    return Err(ApiError::bad("归属项目不存在"));
+                }
+                if project.as_deref().is_some_and(|incoming| incoming != pid) {
+                    return Err(ApiError::bad("Protocol parent_id 与 project_id 必须一致"));
+                }
+                project = Some(pid.to_owned());
+            }
+            required(&data, "title", "协议名称", 160)?;
+            let body = text(&data, "body").to_owned();
+            let root_id = data.get("root_block_version_id").and_then(Value::as_str);
+            let bindings = data.get("root_bindings").cloned().unwrap_or_else(empty_array);
+            if let Some(block_version_id) = root_id {
+                let (_, block_project, _, _, _) = record(&tx, block_version_id)?
+                    .ok_or_else(|| ApiError::bad("根步骤块版本不存在"))?;
+                if block_project.as_deref() != project.as_deref() {
+                    return Err(ApiError::bad("Protocol 与根步骤块必须属于同一项目"));
+                }
+                cli::protocol_block_manifest(&tx, Some(block_version_id), &bindings).map_err(ApiError::bad)?;
+            } else if !bindings.as_array().is_some_and(Vec::is_empty) {
+                return Err(ApiError::bad("未指定 root_block_version_id 时不能提供 root_bindings"));
+            }
+            let protocol = insert(
+                &tx,
+                "protocol",
+                project.as_deref(),
+                parent.as_deref(),
+                1,
+                &json!({"title":text(&data,"title")}),
+            )?;
+            let version = insert(
+                &tx,
+                "protocol_version",
+                project.as_deref(),
+                protocol["id"].as_str(),
+                1,
+                &json!({"protocol_id":protocol["id"],"version":1,"body":body,"root_block_version_id":root_id,"root_bindings":bindings}),
+            )?;
+            json!({"protocol":protocol,"version":version})
+        }
+        "protocol_version" => {
+            let pid = parent
+                .as_deref()
+                .ok_or_else(|| ApiError::bad("协议版本需要关联协议"))?;
+            let (_, protocol_project, _, _, _) = record(&tx, pid)?
+                .filter(|r| r.0 == "protocol")
+                .ok_or_else(|| ApiError::bad("协议不存在"))?;
+            if project.as_deref().is_some_and(|incoming| Some(incoming) != protocol_project.as_deref()) {
+                return Err(ApiError::bad("协议版本必须属于 Protocol 所属项目"));
+            }
+            project = protocol_project;
+            let latest:i64=tx.query_row("SELECT COALESCE(MAX(revision),0) FROM records WHERE kind='protocol_version' AND parent_id=?1",[pid],|r|r.get(0))?;
+            let previous_raw: String = tx.query_row("SELECT data_json FROM records WHERE kind='protocol_version' AND parent_id=?1 AND revision=?2", params![pid, latest], |r| r.get(0))?;
+            let previous: Value = serde_json::from_str(&previous_raw)?;
+            let root_id = match data.get("root_block_version_id") {
+                None => previous.get("root_block_version_id").and_then(Value::as_str).map(str::to_owned),
+                Some(Value::Null) => None,
+                Some(Value::String(value)) => Some(value.clone()),
+                Some(_) => return Err(ApiError::bad("root_block_version_id 必须是字符串或 null")),
+            };
+            let bindings = if data.get("root_block_version_id").is_some_and(Value::is_null) {
+                data.get("root_bindings").cloned().unwrap_or_else(empty_array)
+            } else {
+                data.get("root_bindings").cloned().or_else(|| previous.get("root_bindings").cloned()).unwrap_or_else(empty_array)
+            };
+            if let Some(block_version_id) = root_id.as_deref() {
+                let (_, block_project, _, _, _) = record(&tx, block_version_id)?
+                    .ok_or_else(|| ApiError::bad("根步骤块版本不存在"))?;
+                if block_project.as_deref() != project.as_deref() {
+                    return Err(ApiError::bad("Protocol 与根步骤块必须属于同一项目"));
+                }
+                cli::protocol_block_manifest(&tx, Some(block_version_id), &bindings).map_err(ApiError::bad)?;
+            } else if !bindings.as_array().is_some_and(Vec::is_empty) {
+                return Err(ApiError::bad("清除 root_block_version_id 时必须清空 root_bindings"));
+            }
+            data = json!({"protocol_id":pid,"version":latest+1,"body":data.get("body").and_then(Value::as_str).unwrap_or_else(|| previous["body"].as_str().unwrap_or_default()),"root_block_version_id":root_id,"root_bindings":bindings});
+            insert(
+                &tx,
+                "protocol_version",
+                project.as_deref(),
+                Some(pid),
+                latest + 1,
+                &data,
+            )?
+        }
+        "plate" => {
+            let rid = parent
+                .as_deref()
+                .ok_or_else(|| ApiError::bad("板布局需要关联实验运行"))?;
+            if record(&tx, rid)?.map(|x| x.0) != Some("run".into()) {
+                return Err(ApiError::bad("实验运行不存在"));
+            }
+            let rows = data["rows"].as_i64().unwrap_or(0);
+            let cols = data["columns"].as_i64().unwrap_or(0);
+            if !(1..=32).contains(&rows) || !(1..=48).contains(&cols) {
+                return Err(ApiError::bad("板型行列范围无效"));
+            }
+            required(&data, "name", "板名", 100)?;
+            insert(&tx, "plate", project.as_deref(), Some(rid), 1, &data)?
+        }
+        "protocol_block" => {
+            let pid = project.as_deref().or(parent.as_deref()).ok_or_else(|| ApiError::bad("步骤块需要归属项目"))?.to_owned();
+            if parent.as_deref().is_some_and(|parent_id| parent_id != pid) {
+                return Err(ApiError::bad("步骤块 parent_id 与 project_id 必须一致"));
+            }
+            if record(&tx, &pid)?.map(|x| x.0) != Some("project".into()) {
+                return Err(ApiError::bad("归属项目不存在"));
+            }
+            cli::create_protocol_block_records(&tx, &pid, &data).map_err(ApiError::from_cli)?
+        }
+        "protocol_block_version" => {
+            let block_id = parent.as_deref().ok_or_else(|| ApiError::bad("步骤块版本需要关联步骤块"))?;
+            let (_, block_project, _, _, _) = record(&tx, block_id)?
+                .filter(|r| r.0 == "protocol_block")
+                .ok_or_else(|| ApiError::bad("步骤块不存在"))?;
+            if project.as_deref().is_some_and(|incoming| Some(incoming) != block_project.as_deref()) {
+                return Err(ApiError::bad("步骤块版本必须属于步骤块所属项目"));
+            }
+            cli::revise_protocol_block_records(&tx, block_id, &data).map_err(ApiError::from_cli)?["version"].clone()
+        }
+        "well" => {
+            let plate_id = parent
+                .as_deref()
+                .ok_or_else(|| ApiError::bad("孔位需要关联板布局"))?;
+            let (_, _, _, _, plate_raw) = record(&tx, plate_id)?
+                .filter(|x| x.0 == "plate")
+                .ok_or_else(|| ApiError::bad("板布局不存在"))?;
+            let plate: Value = serde_json::from_str(&plate_raw)?;
+            let well = required(&data, "well_id", "孔位", 12)?;
+            let letters = well
+                .chars()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect::<String>();
+            let number = well
+                .chars()
+                .skip_while(|c| c.is_ascii_alphabetic())
+                .collect::<String>()
+                .parse::<i64>()
+                .unwrap_or(0);
+            let row = letters.chars().fold(0i64, |n, c| {
+                n * 26 + (c.to_ascii_uppercase() as i64 - 'A' as i64 + 1)
+            });
+            if row < 1
+                || row > plate["rows"].as_i64().unwrap_or(0)
+                || number < 1
+                || number > plate["columns"].as_i64().unwrap_or(0)
+            {
+                return Err(ApiError::bad("孔位超出板型范围"));
+            }
+            let existing:Option<String>=tx.query_row("SELECT id FROM records WHERE kind='well' AND parent_id=?1 AND json_extract(data_json,'$.well_id')=?2",[plate_id,&well],|r|r.get(0)).optional()?;
+            if let Some(existing) = existing {
+                tx.execute(
+                    "UPDATE records SET data_json=?2,updated_at=?3 WHERE id=?1",
+                    params![existing, serde_json::to_string(&data)?, now()],
+                )?;
+                json!({"id":existing,"kind":"well","project_id":project,"parent_id":plate_id,"data":data})
+            } else {
+                insert(&tx, "well", project.as_deref(), Some(plate_id), 1, &data)?
+            }
+        }
+        "note" => {
+            let rid = parent
+                .as_deref()
+                .ok_or_else(|| ApiError::bad("实验记录需要关联实验运行"))?;
+            if record(&tx, rid)?.map(|x| x.0) != Some("run".into()) {
+                return Err(ApiError::bad("实验运行不存在"));
+            }
+            required(&data, "content", "记录内容", 10000)?;
+            data["event_time"] = if text(&data, "event_time").is_empty() {
+                Value::Null
+            } else {
+                json!(text(&data, "event_time"))
+            };
+            insert(&tx, "note", project.as_deref(), Some(rid), 1, &data)?
+        }
+        "formula" => {
+            let pid = parent
+                .as_deref()
+                .ok_or_else(|| ApiError::bad("公式需要归属项目"))?;
+            if record(&tx, pid)?.map(|x| x.0) != Some("project".into()) {
+                return Err(ApiError::bad("归属项目不存在"));
+            }
+            required(&data, "title", "公式名称", 160)?;
+            required(&data, "expression", "公式表达式", 2000)?;
+            project = Some(pid.to_owned());
+            insert(&tx, "formula", project.as_deref(), Some(pid), 1, &data)?
+        }
+        "library_table" => {
+            if let Some(pid) = parent.as_deref() {
+                if record(&tx, pid)?.map(|x| x.0) != Some("project".into()) {
+                    return Err(ApiError::bad("归属项目不存在"));
+                }
+                project = Some(pid.to_owned());
+            }
+            required(&data, "name", "资料表名称", 120)?;
+            if data["columns"].as_array().map_or(0, Vec::len) > 40
+                || data["rows"].as_array().map_or(0, Vec::len) > 5000
+            {
+                return Err(ApiError::bad("资料表行列超出上限"));
+            }
+            insert(
+                &tx,
+                "library_table",
+                project.as_deref(),
+                parent.as_deref(),
+                1,
+                &data,
+            )?
+        }
+        _ => return Err(ApiError::bad("未知的数据类型")),
+    };
+    tx.commit()?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct UpdateInput {
+    id: String,
+    #[serde(default)]
+    expected_revision: Option<i64>,
+    data: Value,
+}
+async fn update_record(
+    State(s): State<AppState>,
+    Json(input): Json<UpdateInput>,
+) -> ApiResult<Value> {
+    let mut db = lock(&s)?;
+    let (kind, project, parent, revision, old) =
+        record(&db, &input.id)?.ok_or_else(|| ApiError::missing("找不到要更新的记录"))?;
+    if let Some(expected) = input.expected_revision {
+        if expected != revision {
+            return Err(ApiError {
+                status: StatusCode::CONFLICT,
+                message: format!(
+                    "记录版本已从 v{expected} 更新为 v{revision}；请先重新读取后再保存"
+                ),
+            });
+        }
+    }
+    if kind == "design" {
+        let next = revision + 1;
+        let tx = db.transaction()?;
+        let changed = tx.execute(
+            "UPDATE records SET revision=?2,data_json=?3,updated_at=?4 WHERE id=?1 AND revision=?5",
+            params![
+                input.id,
+                next,
+                serde_json::to_string(&input.data)?,
+                now(),
+                revision
+            ],
+        )?;
+        if changed != 1 {
+            return Err(ApiError {
+                status: StatusCode::CONFLICT,
+                message: "记录已被其他操作更新；请刷新后重试".into(),
+            });
+        }
+        let snapshot = json!({"design_id":input.id,"design_revision":next,"snapshot":input.data});
+        let version = insert(
+            &tx,
+            "design_version",
+            project.as_deref(),
+            Some(&input.id),
+            next,
+            &snapshot,
+        )?;
+        tx.commit()?;
+        return Ok(Json(
+            json!({"id":input.id,"kind":"design","project_id":project,"parent_id":parent,"revision":next,"data":input.data,"new_version":version}),
+        ));
+    }
+    if kind == "run" && input.data.get("status").and_then(Value::as_str) == Some("in_progress") {
+        cli::ensure_run_protocol_ready(&db, &input.id).map_err(ApiError::from_cli)?;
+    }
+    if kind == "protocol" {
+        return Err(ApiError::bad(
+            "协议正文必须通过新建 protocol_version 保存，避免覆盖历史版本",
+        ));
+    }
+    if kind == "protocol_version" {
+        return Err(ApiError::bad("协议版本不可覆盖，请创建新版本"));
+    }
+    let next = revision + 1;
+    let changed = db.execute(
+        "UPDATE records SET revision=?2,data_json=?3,updated_at=?4 WHERE id=?1 AND revision=?5",
+        params![
+            input.id,
+            next,
+            serde_json::to_string(&input.data)?,
+            now(),
+            revision
+        ],
+    )?;
+    if changed != 1 {
+        return Err(ApiError {
+            status: StatusCode::CONFLICT,
+            message: "记录已被其他操作更新；请刷新后重试".into(),
+        });
+    }
+    Ok(Json(
+        json!({"id":input.id,"kind":kind,"project_id":project,"parent_id":parent,"revision":next,"data":input.data,"previous_data":serde_json::from_str::<Value>(&old)?}),
+    ))
+}
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let folder = env::var_os("LABWORKBENCH_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data"));
+    let args: Vec<String> = env::args().skip(1).collect();
+    if !args.is_empty() {
+        std::process::exit(cli::run(&args, &folder));
+    }
+    fs::create_dir_all(&folder)?;
+    let db_path = folder.join("labworkbench.sqlite");
+    let db = Connection::open(&db_path)?;
+    db.pragma_update(None, "foreign_keys", "ON")?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);")?;
+    let state = AppState {
+        db: Arc::new(Mutex::new(db)),
+    };
+    let port = env::var("LABWORKBENCH_PORT")
+        .ok()
+        .and_then(|x| x.parse::<u16>().ok())
+        .unwrap_or(8832);
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let app = Router::new()
+        .route("/", get(index))
+        .route("/api/health", get(health))
+        .route("/api/state", get(get_state))
+        .route("/api/protocol-blocks/preview", post(preview_block))
+        .route("/api/records", post(create_record))
+        .route("/api/records/update", post(update_record))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    println!("Lab Workbench：http://{addr}");
+    println!("本地 SQLite：{}", db_path.display());
+    println!("仅监听本机回环地址。Ctrl+C 可停止。");
+    axum::serve(listener, app).await?;
+    Ok(())
+}

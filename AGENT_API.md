@@ -1,0 +1,131 @@
+# Agent CLI 契约（v1）
+
+Agent 通过 `.\target\release\labworkbench.exe` 的命名子命令操作实验工作台。界面和 CLI 共用本机 SQLite；Agent 不使用通用 `kind + data` 写入接口，也没有独立“Agent 草稿”页面。
+
+产品概念和规范用词见 [CONTEXT.md](CONTEXT.md)。本文描述当前可运行 CLI 的真实输入输出契约；术语文件中的目标模型尚不表示这些运行时能力已实现。
+
+## 通用调用规则
+
+```powershell
+.\target\release\labworkbench.exe tools --json
+.\target\release\labworkbench.exe schema design.create
+.\target\release\labworkbench.exe design.create --input .\design.json
+```
+
+每个业务命令只接受一个 `--input <json-file|->` 参数：`-` 表示从 stdin 读取。JSON 最大 2 MiB，UTF-8；每个命令使用单独的封闭 schema，未知字段、错误类型和超范围值会被拒绝。嵌套对象也封闭校验，不允许 Agent 顺手塞入未定义字段。schema 查询返回该命令完整的 JSON Schema，包括输入字段、必需项、枚举和成功/失败输出形状。工具清单中也内嵌相同 schema。
+
+`tools --json` 中每项都提供 `description`、`side_effects`、`writes_data`、`input_schema` 和 `output_schema`。`side_effects` 说明会创建、修订、追加版本，或明确说明只读/只计算；Agent 应在调用前按输入 schema 组装参数，并按输出 schema 读取结果，不能从自然语言文案猜结果。
+
+stdout 每次只输出一行 JSON。成功结构为：
+
+```json
+{"ok":true,"tool":"design.create","result":{"design":{},"version":{}}}
+```
+
+失败结构为：
+
+```json
+{"ok":false,"tool":"design.revise","error":{"code":"REVISION_CONFLICT","message":"设计版本已更新；请先重新读取。"}}
+```
+
+退出码固定为 `0` 成功、`2` 输入/用法错误、`3` 目标不存在、`4` 版本冲突、`5` 内部错误。不要从 stderr 文案推断业务结果；以 JSON 的 `ok` 与 `error.code` 为准。
+
+## 命令目录
+
+| 命令 | 用途 | 写入 |
+|---|---|---:|
+| `project.list` / `project.create` / `project.revise` | 查询、创建或按版本修订项目 | create/revise |
+| `design.list` / `design.get` / `design.create` / `design.revise` | 查询、创建、修订实验设计 | create/revise |
+| `run.list` / `run.create` / `run.set_status` | 查询、从当前设计版本创建运行或更新运行状态 | create/update |
+| `task.create` / `task.set_status` | 创建日历任务或更新状态 | create/update |
+| `protocol.list` / `protocol.create` / `protocol.revise` | 查询 Protocol、创建 v1、追加新版本 | create/revise |
+| `protocol.block.list` / `protocol.block.get` | 查询项目步骤块库和不可变版本 | 否 |
+| `protocol.block.create` / `protocol.block.revise` | 创建步骤块或基于预期版本追加新版本 | create/revise |
+| `protocol.block.preview` | 只读递归展开、解析参数来源并列出未填写槽位 | 否 |
+| `plate.create` / `well.set` | 创建铺板布局、设置孔位标签 | create/update |
+| `note.create` | 给实验运行追加实际操作、观察、结果或偏差 | create |
+| `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
+| `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
+| `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
+| `calculator.*`（4 个） | 稀释、溶液质量、系列稀释、反应体积 | 否 |
+| `import.study.preview` / `import.study.apply` | 预检并导入项目、设计和 Protocol | apply only |
+
+所有工具的字段细节以 `labworkbench schema <命令>` 为准。Agent 不得自行扩展字段或把别的记录类型塞进现有工具。删除与覆盖不是 CLI 能力。
+
+设计读取与版本写入有固定结果形状：`design.get`、`design.create` 返回 `{ "design": <当前设计记录>, "version": <对应 design_version 记录> }`；`design.revise` 返回 `{ "record": <修订后的设计记录>, "version": <新建的 design_version 记录> }`。`protocol.create` 返回 Protocol 记录和 v1 正文版本，`protocol.revise` 只返回新建的正文版本记录。所有成功响应使用 `ok=true` 和工具名；失败响应使用 `ok=false`、稳定错误码和可读 `message`。每项输出字段以工具自己的 `output_schema` 为准。
+
+## Protocol 步骤块契约
+
+Protocol 可以继续保存旧式 body 文本，也可以引用一个确切的 root_block_version_id。步骤块是唯一的可复用操作对象。protocol.block.create 的 steps 接受两种项：
+
+- text：包含 use_id、title、instruction 和 parameter_refs，是普通可读操作。只有列入 parameter_refs 的槽位才作为该步骤的显式输入。
+- block_use：包含 use_id、block_version_id 和 bindings，在此位置组合一个确切的子块版本。binding 必须且只能提供 value 或 source_slot；类型和单位必须一致，不做隐式换算。每个必填子块槽位都要明确映射或给出值。
+
+参数槽位包括 key、label、value_type（text、number、integer、boolean）、可选 unit 和 required。步骤块版本不可变；组合块固定引用子块的确切版本。只改本次条件或浓度时，保持步骤块原样，创建新的 Protocol 版本并更新 root_bindings，不复制步骤块。
+
+推荐调用顺序：先用 protocol.block.list / protocol.block.get 读取候选定义；用 protocol.block.preview 检查展开顺序、参数来源与 unresolved_parameters；确认结构确实改变后才用 protocol.block.revise，并携带 expected_version。草案允许有未绑定槽位，preview.ready=false 表示当前方案仍有必填参数待确认，不代表数据库拒绝保存。
+
+run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`，并保存根步骤块、全部子块版本依赖、展开步骤、已解析参数与未解决参数。另按每个 `PlannedOutput` 生成一条 `material_manifest`：固定制备 Protocol 与参数，并列出引用该产物的检测/组别。多个消费者仍只列一条计划制备；各检测自己的使用 Protocol 仍分别保留。步骤块引用只是内容复用，不代表实际操作或材料复用；同一块在两个位置出现，仍是两个 BlockUse。Run 清单描述冻结的计划，不证明材料已经制备或实际共用。
+
+为旧数据保留的全局 protocol_version_id 也会进入同一清单，assay_id 为 null，避免全局 Protocol 的根步骤块和参数在 Run 快照中遗漏；新设计优先在各 Assay 上分别指定 Protocol 版本。
+
+当前 CLI 支持多步骤和递归组合；网页编辑器可创建基础文字步骤块、填写参数并预览/绑定根步骤块。复杂多步骤或嵌套组合请使用封闭的 CLI 工具契约，网页展示仍可读取并预览这些组合。
+
+运行可以先按草案状态创建，以便排期和核对；若其 Protocol manifest 中仍有必填参数未确认，run.set_status 切换到 in_progress 会被拒绝。先追加带完整参数的新 Protocol 版本，再按该版本建立新的 Run。未解决的可选槽位不会自动阻断。
+
+## 设计数据语义
+
+`design.create` 接收 `project_id` 和 `design` 对象。关键字段含义：
+
+- `experimental_unit`：一个独立观测对应的实验单位定义，例如一只动物、一个培养孔或一个患者；需要由研究者提供。
+- `group_specs[]`：每组一个对象：`name`、可选枚举 `role`、具体 `condition`、`independent_n`、`technical_repeats`。`independent_n` 是每组独立实验单位数；技术重复单独填写。系统不把孔、切片或重复测量自动视为独立 n。
+- `timepoints[]`：按实验方案填写的采样或测量时间点。空数组表示尚未提供，不表示“无时间维度”。
+- `primary_endpoint`、`endpoint_method`、`endpoint_unit`：主要测量对象、已确定的方法和适用单位；不适用的单位留空。
+- `sample_size_rationale`、`randomization`、`blinding`、纳排标准和 `analysis_plan` 只记录研究者已给出的依据，不由 Agent 臆造。
+- `plate.create.format` 只能是 `6`、`12`、`24`、`48`、`96`、`384` 或 `custom`。标准板型的 `rows` / `columns` 必须与板型对应；非标准行列使用 `custom`。
+
+多检测设计可在同一 `design` 中使用以下固定字段；未提供数组可省略，表示尚未录入：
+
+- `assays[]`：每项检测有稳定 `id`、`title`、`endpoint`、`method`、`unit`、自己的 `timepoints[]`、`group_ids[]`、`group_names[]`（兼容显示字段）、`control_group_ids[]`、`time_anchor_event`、`sample_use_policy`、`container_type` / `container_format`、`protocol_version_id` 和 `controls[]`。关联通过稳定组 ID，不靠显示名称；每项检测自己的时间、适用组、对照和 Protocol 不从其他检测继承。`sample_use_policy` 只能是 `new_per_timepoint`、`same_sample_repeated`、`split_from_assay`、`sequential_after_assay`、`unknown` 或 `null`。当前 `controls[]` 是带来源的补充描述文本，不参与孔位/材料数量计算。
+- `sample_allocations[]`：内部“处理组 → 检测/计划产物”的分配关系，字段为 `assay_id`、`group_name`、`group_id`、`relation`、可选 `source_assay_id`、`physical_slots_per_group`、`evidence_id`、`planned_output_id`。它表达计划分配/逻辑槽位，不生成真实样本或孔位 ID；组关联用稳定 ID，分样和顺序复用须指向来源检测。多个分配引用同一个 `planned_output_id` 才表示计划共用一次制备；物理槽位不得当作独立 n。
+- `planned_outputs[]`：每项计划产物有稳定 `id`、`title`、制备 `protocol_version_id`、`root_bindings[]` 参数绑定和可选 `evidence_id`。相同产物 ID 是多项检测计划共用同一份制备的明确表达；相同 Protocol 版本本身不表示共用。
+- `source_evidence[]`：`id`、`source_document`、可选 `source_date` / `source_locator`、原始 `claim` 和 `state`。locator 用章节、表格行、行号等定位原文；不要求置信度分数。state 只能是 `source_record`、`proposal`、`user_confirmed`、`calculated`、`agent_suggestion`。原始证据保留，系统推导或 Agent 建议不能改写成实验事实。
+- `evidence_conflicts[]`：`id`、`topic`、至少两个 `evidence_ids[]`、`status`（`unresolved` / `resolved`）和可选 `resolution`。`affected_assay_ids[]` 可关联受影响的检测，必须引用本设计中已定义且不重复的检测 ID；当 `affects_container_estimate=true` 时至少关联一项检测。此标记只让界面将对应检测的孔/容器数显示为“暂定”，不自动判定来源冲突。已确认解释必须写明依据；未确认时保持 `unresolved`，不覆盖原始记录。
+- `planned_run_count` 是计划执行轮次数；`planned_run_relationship` 只能是 `independent`、`same_source`、`paired`、`unknown`。轮次数不会被合并成独立 n。
+
+创建示例：
+
+```json
+{
+  "project_id": "<project-id>",
+  "design": {
+    "title": "示例：处理条件比较",
+    "objective": "比较预先指定处理条件下的主要终点",
+    "experimental_unit": "一个独立培养孔",
+    "group_specs": [
+      {"name":"对照组","role":"control","condition":"对照条件待研究者确认"},
+      {"name":"处理组","role":"treatment","condition":"处理剂量和时长待研究者确认"}
+    ],
+    "timepoints": [],
+    "primary_endpoint": "待研究者指定",
+    "endpoint_method": "",
+    "endpoint_unit": ""
+  }
+}
+```
+
+示例中的未确认值只是说明如何表达缺失信息；不能当作一个可执行的已完成方案。未知的独立 n、处理条件、时间点、终点或检测方法必须保留为空并在输出中列为待确认。`design.revise` 必须提供 `id`、读取到的 `expected_revision` 和 `changes`。只修改 `changes` 中出现的字段；空字符串或空数组可用于清空字段。版本不匹配时返回 `REVISION_CONFLICT`，必须重新读取后再提修订。
+
+## 导入边界
+
+导入只支持当前 schema 中明确列出的 `project`、`designs[]`、`protocols[]`。Agent 可以先读取外部文件并抽取为这个结构，但不能把原始文件内容、任意 JSON 或未知记录类型直接写入数据库。其他实体通过各自的 `*.create` 工具创建，按工具的输入 schema 校验。
+
+先调用 `import.study.preview`。它**不写入数据库**，返回对象数量与缺失关键字段警告。检查映射、记录归属和待确认项后，只有确定需要落库时才调用 `import.study.apply`；apply 在一个事务中创建项目及其设计版本、Protocol v1，失败时整体回滚。当前不支持导入原始实验结果、附件、任意表结构或通用数据库备份。
+
+## 安全与科学边界
+
+- 只从用户提供的文件、当前项目记录或用户明确确认的来源提取事实。数值、单位、时间、剂量、样本数、处理条件不得猜填。
+- 每次生成方案，明确区分“已提供”“从已保存记录读取”“计算所得”“待确认”；不使用“适量”“按常规”“视情况”等无法执行的值。
+- 创建运行时固定引用当前 `design_revision`，并生成 `protocol_manifest[]` 固定该版本各检测所引用的 Protocol 精确版本。`run_index` 按设计递增；再次执行可传 `repeat_of_run_id` 与 `repeat_relationship`（`independent`、`same_source`、`paired`、`unknown`），不能仅凭轮次数断言独立性。Protocol 修订创建新版本，不覆盖历史版本。
+- 写入工具只返回记录 ID、所属关系、版本、数据和创建/更新时间；不声称实际实验已经执行。
+- 该 CLI 是本机原型，尚无多用户认证、审计签名、细粒度附件权限或撤销系统。不要把本地访问控制误称为云端安全边界。
