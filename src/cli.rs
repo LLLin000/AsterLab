@@ -75,11 +75,42 @@ struct GroupSpec {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum SampleRelation {
+enum LegacySampleRelation {
     NewPerTimepoint,
     SameSampleRepeated,
     SplitFromAssay,
     SequentialAfterAssay,
+    Unknown,
+}
+impl Default for LegacySampleRelation {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+fn is_unknown_legacy_relation(relation: &LegacySampleRelation) -> bool {
+    matches!(relation, LegacySampleRelation::Unknown)
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TimepointRelation {
+    SameExperimentalUnitRepeated,
+    SamePhysicalSampleRepeated,
+    IndependentSamplePerTimepoint,
+    Unknown,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum PhysicalSlotsScope {
+    PerTimepoint,
+    WholeAssayUniquePositions,
+    Unknown,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SourceRelation {
+    SplitFromAssay,
+    SequentialAfterAssay,
+    NotApplicable,
     Unknown,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,8 +172,10 @@ struct AssayPlan {
     group_ids: Vec<String>,
     #[serde(default)]
     time_anchor_event: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sample_use_policy: Option<LegacySampleRelation>,
     #[serde(default)]
-    sample_use_policy: Option<SampleRelation>,
+    timepoint_relation: Option<TimepointRelation>,
     #[serde(default)]
     container_type: Option<String>,
     #[serde(default)]
@@ -173,11 +206,19 @@ struct SampleAllocation {
     group_name: String,
     #[serde(default)]
     group_id: Option<String>,
-    relation: SampleRelation,
+    // Legacy input only. normalize_design migrates this before omitting it from output.
+    #[serde(default, skip_serializing_if = "is_unknown_legacy_relation")]
+    relation: LegacySampleRelation,
+    #[serde(default)]
+    timepoint_relation: Option<TimepointRelation>,
+    #[serde(default)]
+    source_relation: Option<SourceRelation>,
     #[serde(default)]
     source_assay_id: Option<String>,
     #[serde(default)]
     physical_slots_per_group: Option<u32>,
+    #[serde(default)]
+    physical_slots_scope: Option<PhysicalSlotsScope>,
     #[serde(default)]
     evidence_id: Option<String>,
     #[serde(default)]
@@ -1273,6 +1314,33 @@ pub(crate) fn create_execution_event_tx(
     {
         return Err(CliError::input("操作阶段不能超过 160 个字符"));
     }
+    if event
+        .timepoint
+        .as_ref()
+        .is_some_and(|v| v.trim().is_empty() || v.chars().count() > 100)
+    {
+        return Err(CliError::input("timepoint 不能为空且不能超过 100 个字符"));
+    }
+    if event.step_status.as_deref().is_some_and(|status| {
+        !["in_progress", "completed", "blocked", "skipped"].contains(&status)
+    }) {
+        return Err(CliError::input(
+            "step_status 必须是 in_progress、completed、blocked 或 skipped",
+        ));
+    }
+    if event.step_status.is_some() && event.protocol_step_path.is_none() {
+        return Err(CliError::input("步骤状态只能关联 Protocol 步骤"));
+    }
+    if let Some(timepoint) = event.timepoint.as_deref() {
+        let assay_id = event
+            .assay_id
+            .as_deref()
+            .ok_or_else(|| CliError::input("检测步骤的 timepoint 必须同时提供 assay_id"))?;
+        if event.protocol_step_path.is_none() {
+            return Err(CliError::input("步骤 timepoint 必须关联 Protocol 步骤"));
+        }
+        validate_run_assay_reference(tx, run_id, assay_id, Some(timepoint))?;
+    }
     for (value, label) in [
         (event.protocol_version_id.as_deref(), "Protocol 版本 ID"),
         (event.assay_id.as_deref(), "检测 ID"),
@@ -1437,6 +1505,8 @@ pub(crate) fn create_execution_event_tx(
         "content":event.content,
         "occurred_at":event.occurred_at,
         "stage":event.stage,
+        "timepoint":event.timepoint,
+        "step_status":event.step_status,
         "protocol_step_path":event.protocol_step_path,
         "protocol_version_id":event.protocol_version_id,
         "assay_id":event.assay_id,
@@ -1504,13 +1574,15 @@ pub(crate) fn validate_run_assay_reference(
 }
 
 fn assay_requires_timepoint(snapshot: &Value, assay: &Value) -> bool {
-    assay["sample_use_policy"] == "new_per_timepoint"
+    assay["timepoint_relation"] == "independent_sample_per_timepoint"
+        || assay["sample_use_policy"] == "new_per_timepoint"
         || snapshot["sample_allocations"]
             .as_array()
             .is_some_and(|allocations| {
                 allocations.iter().any(|allocation| {
                     allocation["assay_id"] == assay["id"]
-                        && allocation["relation"] == "new_per_timepoint"
+                        && (allocation["timepoint_relation"] == "independent_sample_per_timepoint"
+                            || allocation["relation"] == "new_per_timepoint")
                 })
             })
 }
@@ -1727,6 +1799,10 @@ struct ExecutionEventCreate {
     #[serde(default)]
     stage: Option<String>,
     #[serde(default)]
+    timepoint: Option<String>,
+    #[serde(default)]
+    step_status: Option<String>,
+    #[serde(default)]
     protocol_step_path: Option<String>,
     #[serde(default)]
     protocol_version_id: Option<String>,
@@ -1881,6 +1957,28 @@ fn validate_groups(groups: &[GroupSpec]) -> Result<(), CliError> {
     Ok(())
 }
 
+fn legacy_timepoint_relation(relation: &LegacySampleRelation) -> Option<TimepointRelation> {
+    match relation {
+        LegacySampleRelation::NewPerTimepoint => {
+            Some(TimepointRelation::IndependentSamplePerTimepoint)
+        }
+        // The old label did not distinguish an experimental unit from a physical sample.
+        // Preserve that uncertainty instead of silently choosing one interpretation.
+        LegacySampleRelation::SameSampleRepeated => Some(TimepointRelation::Unknown),
+        LegacySampleRelation::Unknown
+        | LegacySampleRelation::SplitFromAssay
+        | LegacySampleRelation::SequentialAfterAssay => None,
+    }
+}
+
+fn legacy_source_relation(relation: &LegacySampleRelation) -> SourceRelation {
+    match relation {
+        LegacySampleRelation::SplitFromAssay => SourceRelation::SplitFromAssay,
+        LegacySampleRelation::SequentialAfterAssay => SourceRelation::SequentialAfterAssay,
+        _ => SourceRelation::Unknown,
+    }
+}
+
 fn normalize_design(d: &mut DesignFields, previous: Option<&DesignFields>) {
     if d.group_specs.is_empty() && !d.groups.trim().is_empty() {
         d.group_specs = d
@@ -1926,6 +2024,14 @@ fn normalize_design(d: &mut DesignFields, previous: Option<&DesignFields>) {
         .map(|group| (group.name.clone(), group.id.clone()))
         .collect();
     for assay in &mut d.assays {
+        if assay.timepoint_relation.is_none() {
+            assay.timepoint_relation = Some(assay
+                .sample_use_policy
+                .as_ref()
+                .and_then(legacy_timepoint_relation)
+                .unwrap_or(TimepointRelation::Unknown));
+        }
+        assay.sample_use_policy = None;
         if assay.group_ids.is_empty() {
             if let Some(ids) = assay
                 .group_names
@@ -1944,9 +2050,34 @@ fn normalize_design(d: &mut DesignFields, previous: Option<&DesignFields>) {
                 .collect();
         }
     }
+    let assay_timepoint_relations: std::collections::HashMap<String, TimepointRelation> = d
+        .assays
+        .iter()
+        .filter_map(|assay| {
+            assay
+                .timepoint_relation
+                .as_ref()
+                .map(|relation| (assay.id.clone(), relation.clone()))
+        })
+        .collect();
     for allocation in &mut d.sample_allocations {
+        if allocation.timepoint_relation.is_none() {
+            allocation.timepoint_relation = Some(
+                legacy_timepoint_relation(&allocation.relation)
+                    .or_else(|| assay_timepoint_relations.get(&allocation.assay_id).cloned())
+                    .unwrap_or(TimepointRelation::Unknown),
+            );
+        }
+        if allocation.source_relation.is_none() {
+            allocation.source_relation = Some(legacy_source_relation(&allocation.relation));
+        }
         if allocation.group_id.is_none() {
             allocation.group_id = groups_by_name.get(&allocation.group_name).cloned();
+        }
+        if allocation.physical_slots_per_group.is_some()
+            && allocation.physical_slots_scope.is_none()
+        {
+            allocation.physical_slots_scope = Some(PhysicalSlotsScope::Unknown);
         }
         if let Some(name) = allocation
             .group_id
@@ -1955,6 +2086,7 @@ fn normalize_design(d: &mut DesignFields, previous: Option<&DesignFields>) {
         {
             allocation.group_name = name.clone();
         }
+        allocation.relation = LegacySampleRelation::Unknown;
     }
 }
 
@@ -2138,12 +2270,12 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
             .is_some_and(|n| n == 0 || n > 100000)
         {
             return Err(CliError::input(
-                "每组物理样本/容器位数量必须为 1–100000；未知时留空",
+                "每组容器位数量必须为 1–100000；未知时留空",
             ));
         }
         let needs_source = matches!(
-            &allocation.relation,
-            SampleRelation::SplitFromAssay | SampleRelation::SequentialAfterAssay
+            allocation.source_relation.as_ref(),
+            Some(SourceRelation::SplitFromAssay | SourceRelation::SequentialAfterAssay)
         );
         if needs_source && allocation.source_assay_id.is_none() {
             return Err(CliError::input("分样或顺序复用关系必须指定来源检测"));
@@ -3473,7 +3605,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["content","event_time","observation","result","deviation"],"properties":{"content":{"type":"string"},"event_time":{"type":["string","null"],"format":"date-time"},"event_time_local":{"type":["string","null"]},"event_timezone":{"type":["string","null"]},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event" => {
-            json!({"type":"object","additionalProperties":false,"required":["event_type","content","occurred_at","stage","sample_ids","materials","measurements","deviation"],"properties":{"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"]},"protocol_step_path":{"type":["string","null"]},"protocol_version_id":{"type":["string","null"]},"assay_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]},"sample_ids":{"type":"array","items":{"type":"string"}},"materials":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["material","planned_output_id","amount","unit"],"properties":{"material":{"type":"string"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"]},"unit":{"type":["string","null"]}}}},"measurements":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["endpoint","value","unit","sample_id"],"properties":{"endpoint":{"type":"string"},"value":{"type":"number"},"unit":{"type":["string","null"]},"sample_id":{"type":["string","null"]}}}},"deviation":{"type":["string","null"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["event_type","content","occurred_at","stage","timepoint","step_status","sample_ids","materials","measurements","deviation"],"properties":{"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"]},"timepoint":{"type":["string","null"],"maxLength":100},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null]},"protocol_step_path":{"type":["string","null"]},"protocol_version_id":{"type":["string","null"]},"assay_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]},"sample_ids":{"type":"array","items":{"type":"string"}},"materials":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["material","planned_output_id","amount","unit"],"properties":{"material":{"type":"string"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"]},"unit":{"type":["string","null"]}}}},"measurements":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["endpoint","value","unit","sample_id"],"properties":{"endpoint":{"type":"string"},"value":{"type":"number"},"unit":{"type":["string","null"]},"sample_id":{"type":["string","null"]}}}},"deviation":{"type":["string","null"]}}})
         }
         "formula" => {
             json!({"type":"object","additionalProperties":false,"required":["title","expression","variables","notes"],"properties":{"title":{"type":"string"},"expression":{"type":"string"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -3656,7 +3788,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "formula.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","expression"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"expression":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -3710,8 +3842,8 @@ fn design_schema() -> Value {
             "primary_endpoint":{"type":"string","maxLength":1000},"endpoint_method":{"type":"string","maxLength":1000},"endpoint_unit":{"type":"string","maxLength":100},
             "sample_size_rationale":{"type":"string","maxLength":5000},"randomization":{"type":"string","maxLength":2000},"blinding":{"type":"string","maxLength":2000},
             "inclusion_criteria":{"type":"string","maxLength":5000},"exclusion_criteria":{"type":"string","maxLength":5000},"analysis_plan":{"type":"string","maxLength":5000},"controls":{"type":"string","maxLength":2000},
-            "assays":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["id","title"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"endpoint":{"type":"string","maxLength":1000},"method":{"type":"string","maxLength":1000},"unit":{"type":"string","maxLength":100},"timepoints":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":100}},"timepoint_timing":{"type":"array","maxItems":100,"items":timepoint_timing_input_schema()},"group_names":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":120}},"group_ids":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":80}},"time_anchor_event":{"type":["string","null"],"maxLength":120},"sample_use_policy":{"type":["string","null"],"enum":["new_per_timepoint","same_sample_repeated","split_from_assay","sequential_after_assay","unknown",null]},"container_type":{"type":["string","null"],"maxLength":80},"container_format":{"type":["string","null"],"maxLength":80},"protocol_version_id":{"type":["string","null"]},"controls":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":300}},"control_group_ids":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":80}}}}},
-            "sample_allocations":{"type":"array","maxItems":10000,"items":{"type":"object","additionalProperties":false,"required":["assay_id","group_name","relation"],"properties":{"assay_id":{"type":"string"},"group_name":{"type":"string"},"group_id":{"type":["string","null"]},"relation":{"type":"string","enum":["new_per_timepoint","same_sample_repeated","split_from_assay","sequential_after_assay","unknown"]},"source_assay_id":{"type":["string","null"]},"physical_slots_per_group":{"type":["integer","null"],"minimum":1},"evidence_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]}}}},
+            "assays":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["id","title"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"endpoint":{"type":"string","maxLength":1000},"method":{"type":"string","maxLength":1000},"unit":{"type":"string","maxLength":100},"timepoints":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":100}},"timepoint_timing":{"type":"array","maxItems":100,"items":timepoint_timing_input_schema()},"group_names":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":120}},"group_ids":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":80}},"time_anchor_event":{"type":["string","null"],"maxLength":120},"sample_use_policy":{"description":"Legacy input only; normalized output uses timepoint_relation.","type":["string","null"],"enum":["new_per_timepoint","same_sample_repeated","split_from_assay","sequential_after_assay","unknown",null]},"timepoint_relation":{"type":["string","null"],"enum":["same_experimental_unit_repeated","same_physical_sample_repeated","independent_sample_per_timepoint","unknown",null]},"container_type":{"type":["string","null"],"maxLength":80},"container_format":{"type":["string","null"],"maxLength":80},"protocol_version_id":{"type":["string","null"]},"controls":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":300}},"control_group_ids":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":80}}}}},
+            "sample_allocations":{"type":"array","maxItems":10000,"items":{"type":"object","additionalProperties":false,"required":["assay_id","group_name"],"properties":{"assay_id":{"type":"string"},"group_name":{"type":"string"},"group_id":{"type":["string","null"]},"relation":{"description":"Legacy input only; normalized output uses timepoint_relation and source_relation.","type":"string","enum":["new_per_timepoint","same_sample_repeated","split_from_assay","sequential_after_assay","unknown"]},"source_relation":{"type":["string","null"],"enum":["split_from_assay","sequential_after_assay","not_applicable","unknown",null]},"timepoint_relation":{"type":["string","null"],"enum":["same_experimental_unit_repeated","same_physical_sample_repeated","independent_sample_per_timepoint","unknown",null]},"source_assay_id":{"type":["string","null"]},"physical_slots_per_group":{"type":["integer","null"],"minimum":1},"physical_slots_scope":{"type":["string","null"],"enum":["per_timepoint","whole_assay_unique_positions","unknown",null]},"evidence_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]}}}},
             "planned_outputs":{"type":"array","maxItems":1000,"items":{"type":"object","additionalProperties":false,"required":["id","title","protocol_version_id"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":80},"root_bindings":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["slot","value"],"properties":{"slot":{"type":"string","minLength":1,"maxLength":100},"value":{"type":["string","number","integer","boolean"]},"unit":{"type":["string","null"],"maxLength":40}}}},"evidence_id":{"type":["string","null"]}}}},
             "source_evidence":{"type":"array","maxItems":2000,"items":{"type":"object","additionalProperties":false,"required":["id","source_document","claim","state"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"source_document":{"type":"string","minLength":1,"maxLength":500},"source_date":{"type":["string","null"],"maxLength":40},"source_locator":{"type":["string","null"],"maxLength":500},"claim":{"type":"string","minLength":1,"maxLength":2000},"state":{"type":"string","enum":["source_record","proposal","user_confirmed","calculated","agent_suggestion"]}}}},
             "evidence_conflicts":{"type":"array","maxItems":1000,"items":{"type":"object","additionalProperties":false,"required":["id","topic","evidence_ids","status"],"properties":{"id":{"type":"string","minLength":1,"maxLength":80},"topic":{"type":"string","minLength":1,"maxLength":500},"evidence_ids":{"type":"array","minItems":2,"items":{"type":"string"}},"status":{"type":"string","enum":["unresolved","resolved"]},"affected_assay_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":80}},"affects_container_estimate":{"type":"boolean"},"resolution":{"type":["string","null"],"maxLength":2000}}}},
