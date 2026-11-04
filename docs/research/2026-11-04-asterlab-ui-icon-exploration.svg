@@ -1,0 +1,238 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 730" width="940" height="730" style="color: var(--fg, currentColor); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;">
+  <style>
+    :root, svg {
+      color: var(--fg, currentColor);
+    }
+    .icon {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .title { font-size: 19px; font-weight: 700; fill: currentColor; }
+    .subtitle { font-size: 12px; fill: currentColor; opacity: 0.68; }
+    .col-head { font-size: 12.5px; font-weight: 700; fill: currentColor; opacity: 0.88; }
+    .col-sub { font-size: 10px; font-weight: 400; opacity: 0.55; }
+    .row-label { font-size: 14px; font-weight: 600; fill: currentColor; dominant-baseline: central; }
+    .glyph-16 { font-size: 16px; fill: currentColor; text-anchor: middle; dominant-baseline: central; font-family: 'Segoe UI Symbol', 'Apple Symbols', sans-serif; }
+    .glyph-box { stroke: currentColor; stroke-opacity: 0.12; fill: none; }
+    .scale-label { font-size: 10px; fill: currentColor; opacity: 0.45; text-anchor: middle; }
+    .row-desc { font-size: 12.5px; fill: currentColor; opacity: 0.76; dominant-baseline: central; }
+    .row-sub { font-size: 10.5px; fill: currentColor; opacity: 0.48; dominant-baseline: central; }
+    .divider { stroke: currentColor; stroke-opacity: 0.12; stroke-width: 1; }
+    .grid-box { stroke: currentColor; stroke-opacity: 0.14; stroke-dasharray: 2 2; fill: none; }
+    .tag { font-size: 10.5px; font-weight: 500; fill: currentColor; opacity: 0.65; }
+    .chip { font-size: 10px; fill: currentColor; opacity: 0.7; font-weight: 600; }
+  </style>
+
+  <!-- Header Section -->
+  <text x="36" y="34" class="title">AsterLab 导航图标探索：现有字符与原创线性 SVG 候选对比</text>
+  <text x="36" y="54" class="subtitle">研究样品 · 侧栏基准 (16px 桌面 / 14px 移动端) 为主视认视图 · 附 24px 原稿放大细节 · 单色 currentColor</text>
+  <text x="904" y="54" class="tag" text-anchor="end">原创线性图标 · 2026-11-04</text>
+
+  <!-- Table Header Bar -->
+  <line x1="36" y1="72" x2="904" y2="72" class="divider" stroke-opacity="0.2" />
+  <text x="44" y="92" class="col-head">功能模块</text>
+  <text x="170" y="87" class="col-head" text-anchor="middle">现有字符</text>
+  <text x="170" y="101" class="col-sub" text-anchor="middle">16px 基准</text>
+
+  <text x="260" y="87" class="col-head" text-anchor="middle">SVG 候选</text>
+  <text x="260" y="101" class="col-sub" text-anchor="middle">16px 主视认视图</text>
+
+  <text x="355" y="87" class="col-head" text-anchor="middle">24px 原稿细节</text>
+  <text x="355" y="101" class="col-sub" text-anchor="middle">2px 描边网格</text>
+
+  <text x="440" y="92" class="col-head">设计考量与几何特征</text>
+  <line x1="36" y1="108" x2="904" y2="108" class="divider" stroke-opacity="0.2" />
+
+  <!-- Row 1: 工作台 (⌂) -->
+  <g transform="translate(0, 114)">
+    <text x="44" y="27" class="row-label">工作台</text>
+    <text x="44" y="44" class="row-sub">U+2302 · 主站台</text>
+    <!-- 16px Glyph in 16x16 frame -->
+    <rect x="162" y="19" width="16" height="16" class="glyph-box" />
+    <text x="170" y="27" class="glyph-16">⌂</text>
+    <!-- 16px SVG Primary -->
+    <rect x="252" y="19" width="16" height="16" class="glyph-box" />
+    <g class="icon" transform="translate(252, 19) scale(0.6667)">
+      <path d="M3 10.5L12 3l9 7.5" />
+      <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
+      <path d="M9.5 21v-5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v5" />
+    </g>
+    <!-- 24px Enlarged -->
+    <rect x="343" y="15" width="24" height="24" class="grid-box" />
+    <g class="icon" transform="translate(343, 15)">
+      <path d="M3 10.5L12 3l9 7.5" />
+      <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
+      <path d="M9.5 21v-5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v5" />
+    </g>
+    <text x="440" y="26" class="row-desc">主站台轮廓：斜坡顶盖 + 稳固侧壁 + 底部拱形操作通道。</text>
+    <text x="440" y="44" class="row-sub">继承 ⌂ 的主屋轮廓并精简内部，避免小尺寸下台面线条堆叠。</text>
+    <line x1="36" y1="64" x2="904" y2="64" class="divider" />
+  </g>
+
+  <!-- Row 2: 项目 (▣) -->
+  <g transform="translate(0, 178)">
+    <text x="44" y="27" class="row-label">项目</text>
+    <text x="44" y="44" class="row-sub">U+25A3 · 资产夹</text>
+    <rect x="162" y="19" width="16" height="16" class="glyph-box" />
+    <text x="170" y="27" class="glyph-16">▣</text>
+    <rect x="252" y="19" width="16" height="16" class="glyph-box" />
+    <g class="icon" transform="translate(252, 19) scale(0.6667)">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      <rect x="8.5" y="11" width="7" height="5" rx="1" />
+    </g>
+    <rect x="343" y="15" width="24" height="24" class="grid-box" />
+    <g class="icon" transform="translate(343, 15)">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      <rect x="8.5" y="11" width="7" height="5" rx="1" />
+    </g>
+    <text x="440" y="26" class="row-desc">档案夹容器：结构化文件袋顶标 + 呼应 ▣ 的中心资产矩形。</text>
+    <text x="440" y="44" class="row-sub">保留项目包含多类资产的“容器”概念，内外虚实对比清晰。</text>
+    <line x1="36" y1="64" x2="904" y2="64" class="divider" />
+  </g>
+
+  <!-- Row 3: 实验设计 (◇) -->
+  <g transform="translate(0, 242)">
+    <text x="44" y="27" class="row-label">实验设计</text>
+    <text x="44" y="44" class="row-sub">U+25C7 · 决策网</text>
+    <rect x="162" y="19" width="16" height="16" class="glyph-box" />
+    <text x="170" y="27" class="glyph-16">◇</text>
+    <rect x="252" y="19" width="16" height="16" class="glyph-box" />
+    <g class="icon" transform="translate(252, 19) scale(0.6667)">
+      <path d="M12 2.5L21.5 12L12 21.5L2.5 12Z" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M12 2.5v7M12 14.5v7M2.5 12h7M14.5 12h7" />
+    </g>
+    <rect x="343" y="15" width="24" height="24" class="grid-box" />
+    <g class="icon" transform="translate(343, 15)">
+      <path d="M12 2.5L21.5 12L12 21.5L2.5 12Z" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M12 2.5v7M12 14.5v7M2.5 12h7M14.5 12h7" />
+    </g>
+    <text x="440" y="26" class="row-desc">决策分支网：保留 ◇ 菱形基底，内嵌中心决策节点与四向链路。</text>
+    <text x="440" y="44" class="row-sub">具象化分组、检测、时间点与终点的设计流向，几何对称感强。</text>
+    <line x1="36" y1="64" x2="904" y2="64" class="divider" />
+  </g>
+
+  <!-- Row 4: 日历与任务 (▦) -->
+  <g transform="translate(0, 306)">
+    <text x="44" y="27" class="row-label">日历与任务</text>
+    <text x="44" y="44" class="row-sub">U+25A6 · 排期表</text>
+    <rect x="162" y="19" width="16" height="16" class="glyph-box" />
+    <text x="170" y="27" class="glyph-16">▦</text>
+    <rect x="252" y="19" width="16" height="16" class="glyph-box" />
+    <g class="icon" transform="translate(252, 19) scale(0.6667)">
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M8 2v4M16 2v4M3 9h18" />
+      <path d="M9 9v12M15 9v12M3 15h18" />
+    </g>
+    <rect x="343" y="15" width="24" height="24" class="grid-box" />
+    <g class="icon" transform="translate(343, 15)">
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M8 2v4M16 2v4M3 9h18" />
+      <path d="M9 9v12M15 9v12M3 15h18" />
+    </g>
+    <text x="440" y="26" class="row-desc">排期时间表：双挂耳 + 顶部表头 + 3×2 正交排期单元格。</text>
+    <text x="440" y="44" class="row-sub">以网格表达日期/任务排期；不限定周数或时间周期。</text>
+    <line x1="36" y1="64" x2="904" y2="64" class="divider" />
+  </g>
+
+  <!-- Row 5: 实验运行 (▶) -->
+  <g transform="translate(0, 370)">
+    <text x="44" y="27" class="row-label">实验运行</text>
+    <text x="44" y="44" class="row-sub">U+25B6 · 执行态</text>
+    <rect x="162" y="19" width="16" height="16" class="glyph-box" />
+    <text x="170" y="27" class="glyph-16">▶</text>
+    <rect x="252" y="19" width="16" height="16" class="glyph-box" />
+    <g class="icon" transform="translate(252, 19) scale(0.6667)">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M10 8.8c0-.6.7-1 1.2-.7l5.5 3.2c.5.3.5 1.1 0 1.4l-5.5 3.2c-.5.3-1.2-.1-1.2-.7V8.8z" />
+    </g>
+    <rect x="343" y="15" width="24" height="24" class="grid-box" />
+    <g class="icon" transform="translate(343, 15)">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M10 8.8c0-.6.7-1 1.2-.7l5.5 3.2c.5.3.5 1.1 0 1.4l-5.5 3.2c-.5.3-1.2-.1-1.2-.7V8.8z" />
+    </g>
+    <text x="440" y="26" class="row-desc">执行态轮廓：外环状态轨道 + 严格质心居中的圆角执行三角。</text>
+    <text x="440" y="44" class="row-sub">圆环增加视觉边界；实际点击命中区仍由按钮组件尺寸决定。</text>
+    <line x1="36" y1="64" x2="904" y2="64" class="divider" />
+  </g>
+
+  <!-- Row 6: 铺板布局 (▤) -->
+  <g transform="translate(0, 434)">
+    <text x="44" y="27" class="row-label">铺板布局</text>
+    <text x="44" y="44" class="row-sub">U+25A4 · 微孔板</text>
+    <rect x="162" y="19" width="16" height="16" class="glyph-box" />
+    <text x="170" y="27" class="glyph-16">▤</text>
+    <rect x="252" y="19" width="16" height="16" class="glyph-box" />
+    <g class="icon" transform="translate(252, 19) scale(0.6667)">
+      <path d="M6.5 4H19a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5L6.5 4z" />
+      <circle cx="8.5" cy="9" r="1.8" />
+      <circle cx="15.5" cy="9" r="1.8" />
+      <circle cx="8.5" cy="15" r="1.8" />
+      <circle cx="15.5" cy="15" r="1.8" />
+    </g>
+    <rect x="343" y="15" width="24" height="24" class="grid-box" />
+    <g class="icon" transform="translate(343, 15)">
+      <path d="M6.5 4H19a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5L6.5 4z" />
+      <circle cx="8.5" cy="9" r="1.8" />
+      <circle cx="15.5" cy="9" r="1.8" />
+      <circle cx="8.5" cy="15" r="1.8" />
+      <circle cx="15.5" cy="15" r="1.8" />
+    </g>
+    <text x="440" y="26" class="row-desc">微孔板图标示意：角部方向标记 + 4 孔阵列；不表示特定板型。</text>
+    <text x="440" y="44" class="row-sub">以容器轮廓区别于现有横纹字符；实际板规格与孔位仍以铺板图为准。</text>
+    <line x1="36" y1="64" x2="904" y2="64" class="divider" />
+  </g>
+
+  <!-- Row 7: Protocol (≡) -->
+  <g transform="translate(0, 498)">
+    <text x="44" y="27" class="row-label">Protocol</text>
+    <text x="44" y="44" class="row-sub">U+2261 · 规程页</text>
+    <rect x="162" y="19" width="16" height="16" class="glyph-box" />
+    <text x="170" y="27" class="glyph-16">≡</text>
+    <rect x="252" y="19" width="16" height="16" class="glyph-box" />
+    <g class="icon" transform="translate(252, 19) scale(0.6667)">
+      <path d="M5 4a2 2 0 0 1 2-2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4z" />
+      <path d="M14 2v5h5" />
+      <path d="M9 11h6M9 14.5h6M9 18h4" />
+    </g>
+    <rect x="343" y="15" width="24" height="24" class="grid-box" />
+    <g class="icon" transform="translate(343, 15)">
+      <path d="M5 4a2 2 0 0 1 2-2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4z" />
+      <path d="M14 2v5h5" />
+      <path d="M9 11h6M9 14.5h6M9 18h4" />
+    </g>
+    <text x="440" y="26" class="row-desc">方案规程页：右上折角标准协议文书 + 承继 ≡ 的三级规程步骤线。</text>
+    <text x="440" y="44" class="row-sub">既保留 ≡ 的三横线记忆，又赋予其实验室操作方案的文书载体特征。</text>
+    <line x1="36" y1="64" x2="904" y2="64" class="divider" />
+  </g>
+
+  <!-- Row 8: 实验记录 (✎) -->
+  <g transform="translate(0, 562)">
+    <text x="44" y="27" class="row-label">实验记录</text>
+    <text x="44" y="44" class="row-sub">U+270E · 数据志</text>
+    <rect x="162" y="19" width="16" height="16" class="glyph-box" />
+    <text x="170" y="27" class="glyph-16">✎</text>
+    <rect x="252" y="19" width="16" height="16" class="glyph-box" />
+    <g class="icon" transform="translate(252, 19) scale(0.6667)">
+      <path d="M4 20h16" />
+      <path d="M14.5 3.5l3.5 3.5L8 17H4.5v-3.5L14.5 3.5z" />
+      <path d="M12.5 5.5l3.5 3.5" />
+    </g>
+    <rect x="343" y="15" width="24" height="24" class="grid-box" />
+    <g class="icon" transform="translate(343, 15)">
+      <path d="M4 20h16" />
+      <path d="M14.5 3.5l3.5 3.5L8 17H4.5v-3.5L14.5 3.5z" />
+      <path d="M12.5 5.5l3.5 3.5" />
+    </g>
+    <text x="440" y="26" class="row-desc">数据记录线：底线录入基准 + 倾斜精密笔尖，表达观测与追加记录。</text>
+    <text x="440" y="44" class="row-sub">将纯文本笔形 ✎ 结合录入基线，清楚区别于静态 Protocol 规程文书。</text>
+    <line x1="36" y1="64" x2="904" y2="64" class="divider" />
+  </g>
+
+  <!-- Footer / Boundaries -->
+  <text x="36" y="694" class="subtitle">设计边界说明：本图表仅作为静态视觉候选比对样品，主比对列严格以当前侧栏 16px 为准，不代表任何图标已被批准或采纳，亦不构成实验方案建议。</text>
+</svg>
