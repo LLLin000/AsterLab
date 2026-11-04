@@ -1,0 +1,464 @@
+// AsterLab 原生工作空间：稀疏导航、实验结构画布、上下文检查器、可展开培养板。
+// 只读展示；所有选择与展开仅是界面状态，不产生执行事件。
+import { ScrollView, AboutSlint } from "std-widgets.slint";
+import { Theme } from "Theme.slint";
+import { SectionLabel, QuietButton, Chip, NavRow, PlateTab, InspectorRow } from "Components.slint";
+import { ExperimentCanvas, GroupNodeData, AssayNodeData, LinkSegment } from "ExperimentCanvas.slint";
+import { PlateView, WellCell, AxisLabel } from "PlateView.slint";
+
+export struct ProjectEntry {
+    id: string,
+    name: string,
+    detail: string
+}
+
+export struct DesignEntry {
+    id: string,
+    title: string,
+    detail: string
+}
+
+export struct PlateEntry {
+    id: string,
+    name: string,
+    format: string,
+    timepoint: string,
+    mapped_count: int
+}
+
+export struct InspectorItem {
+    kind: string,
+    label: string,
+    value: string,
+    missing: bool
+}
+
+export component AboutWindow inherits Window {
+    title: "关于 AsterLab";
+    width: 420px;
+    height: 340px;
+    background: Theme.surface;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+        Text {
+            text: "AsterLab";
+            color: Theme.ink;
+            font-size: Theme.font-title;
+            font-weight: 600;
+        }
+        Text {
+            text: "轻量原生科研工作台 · 界面验证原型";
+            color: Theme.ink-2;
+            font-size: Theme.font-body;
+            wrap: word-wrap;
+        }
+        AboutSlint { }
+        Text {
+            text: "以只读方式加载外部隔离数据库，不写入任何实验数据。";
+            color: Theme.ink-3;
+            font-size: Theme.font-small;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "AsterLab";
+    width: 1280px;
+    height: 840px;
+    background: Theme.bg;
+
+    in-out property <[ProjectEntry]> projects;
+    in-out property <[DesignEntry]> designs;
+    in-out property <[PlateEntry]> plates;
+    in-out property <[WellCell]> wells;
+    in-out property <[GroupNodeData]> group_nodes;
+    in-out property <[AssayNodeData]> assay_nodes;
+    in-out property <[LinkSegment]> link_segments;
+    in-out property <[AxisLabel]> row_labels;
+    in-out property <[AxisLabel]> column_labels;
+    in-out property <[InspectorItem]> inspector_fields;
+
+    in-out property <string> selected_project_id;
+    in-out property <string> selected_design_id;
+    in-out property <string> selected_assay_id;
+    in-out property <string> selected_group_id;
+    in-out property <string> selected_plate_id;
+    in-out property <string> selected_well_id;
+
+    in-out property <string> project_name;
+    in-out property <string> design_title;
+    in-out property <string> design_objective;
+    in-out property <string> experimental_unit;
+    in-out property <string> run_title;
+    in-out property <string> run_status;
+    in-out property <string> data_counts;
+    in-out property <string> inspector_kind;
+    in-out property <string> inspector_title;
+    in-out property <string> inspector_subtitle;
+
+    in-out property <string> plate_name;
+    in-out property <string> plate_meta;
+
+    in-out property <int> group_count;
+    in-out property <int> assay_count;
+    in-out property <int> plate_rows;
+    in-out property <int> plate_columns;
+    in-out property <int> plate_mapped_count;
+    in-out property <bool> has_plate;
+
+    in-out property <length> canvas_width;
+    in-out property <length> canvas_height;
+    in-out property <length> assay_column_x;
+
+    callback project_selected(string);
+    callback design_selected(string);
+    callback assay_selected(string);
+    callback group_selected(string);
+    callback plate_selected(string);
+    callback well_selected(string);
+    callback about_requested();
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // 顶部上下文栏。
+        header := Rectangle {
+            height: 56px;
+            background: Theme.surface;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: "AsterLab";
+                    color: Theme.ink;
+                    font-size: 16px;
+                    font-weight: 600;
+                    letter-spacing: 0.2px;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "轻量原生科研工作台";
+                    color: Theme.ink-3;
+                    font-size: Theme.font-caption;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 1px;
+                    height: 20px;
+                    background: Theme.line;
+                }
+                Text {
+                    text: project_name == "" ? "未选择项目" : project_name;
+                    color: Theme.ink-2;
+                    font-size: Theme.font-small;
+                    vertical-alignment: center;
+                }
+                if (design_title != "") : Text {
+                    text: "›";
+                    color: Theme.ink-3;
+                    font-size: Theme.font-small;
+                    vertical-alignment: center;
+                }
+                if (design_title != "") : Text {
+                    text: design_title;
+                    color: Theme.ink;
+                    font-size: Theme.font-small;
+                    vertical-alignment: center;
+                    wrap: no-wrap;
+                    overflow: elide;
+                    max-lines: 1;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Chip {
+                    text: "只读预览";
+                    tone: "neutral";
+                }
+                Text {
+                    text: data_counts;
+                    color: Theme.ink-3;
+                    font-size: Theme.font-caption;
+                    vertical-alignment: center;
+                }
+                QuietButton {
+                    label: "关于";
+                    compact: true;
+                    clicked => { root.about_requested(); }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.line; }
+
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            spacing: 0px;
+
+            // 左：项目 / 实验设计两级导航。
+            nav := Rectangle {
+                width: 216px;
+                background: Theme.sidebar;
+                VerticalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 16px;
+                    padding-bottom: 14px;
+                    spacing: 4px;
+
+                    SectionLabel { text: "项目"; }
+                    for p in projects : NavRow {
+                        title: p.name == "" ? "未命名项目" : p.name;
+                        detail: p.detail;
+                        selected: p.id == selected_project_id;
+                        clicked => { root.project_selected(p.id); }
+                    }
+
+                    Rectangle { height: 14px; background: transparent; }
+
+                    SectionLabel { text: "实验设计"; }
+                    for d in designs : NavRow {
+                        title: d.title == "" ? "未命名设计" : d.title;
+                        detail: d.detail;
+                        selected: d.id == selected_design_id;
+                        clicked => { root.design_selected(d.id); }
+                    }
+
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                    Rectangle { height: 1px; background: Theme.line; }
+                    Rectangle {
+                        height: 30px;
+                        background: transparent;
+                        Text {
+                            text: "只读 · 不写入数据库";
+                            color: Theme.ink-3;
+                            font-size: Theme.font-caption;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: Theme.line; }
+
+            // 中：设计摘要 + 实验结构画布 + 培养板。
+            ScrollView {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+
+                content := VerticalLayout {
+                    vertical-stretch: 0;
+                    padding-left: 32px;
+                    padding-right: 32px;
+                    padding-top: 24px;
+                    padding-bottom: 32px;
+                    spacing: 24px;
+
+                    if (design_title == "") : Rectangle {
+                        height: 120px;
+                        background: Theme.surface;
+                        border-radius: Theme.radius-lg;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: "当前项目没有实验设计";
+                                color: Theme.ink-3;
+                                font-size: Theme.font-body;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+
+                    if (design_title != "") : VerticalLayout {
+                        vertical-stretch: 0;
+                        height: self.preferred-height;
+                        alignment: start;
+                        spacing: 8px;
+                        Text {
+                            text: design_title;
+                            color: Theme.ink;
+                            font-size: Theme.font-display;
+                            font-weight: 600;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: "研究目的：" + (design_objective == "" ? "未记录" : design_objective);
+                            color: Theme.ink-2;
+                            font-size: Theme.font-secondary;
+                            wrap: word-wrap;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Chip { text: "\{group_count} 组"; horizontal-stretch: 0; }
+                            Chip { text: "\{assay_count} 项检测"; horizontal-stretch: 0; }
+                            Chip {
+                                text: "执行 · " + (run_status == "" ? "待确认" : run_status);
+                                horizontal-stretch: 0;
+                            }
+                        }
+                        Text {
+                            text: "实验单元：" + (experimental_unit == "" ? "待确认" : experimental_unit);
+                            color: Theme.ink-3;
+                            font-size: Theme.font-secondary;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if (design_title != "") : VerticalLayout {
+                        vertical-stretch: 0;
+                        height: self.preferred-height;
+                        spacing: 8px;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            SectionLabel {
+                                text: "实验结构";
+                                width: 76px;
+                                horizontal-stretch: 0;
+                            }
+                            Text {
+                                text: "选择组别或检测查看记录；连线仅表示该检测明确列出的组别。";
+                                color: Theme.ink-3;
+                                font-size: Theme.font-small;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                wrap: word-wrap;
+                                max-lines: 1;
+                                overflow: elide;
+                            }
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            ExperimentCanvas {
+                                width: root.canvas_width;
+                                height: root.canvas_height + 34px;
+                                content_w: root.canvas_width;
+                                content_h: root.canvas_height;
+                                assay_x: root.assay_column_x;
+                                group_nodes: root.group_nodes;
+                                assay_nodes: root.assay_nodes;
+                                link_segments: root.link_segments;
+                                group_clicked(id) => { root.group_selected(id); }
+                                assay_clicked(id) => { root.assay_selected(id); }
+                            }
+                        }
+                    }
+
+                    if (design_title != "") : VerticalLayout {
+                        vertical-stretch: 0;
+                        height: self.preferred-height;
+                        spacing: 12px;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            SectionLabel {
+                                text: "培养板";
+                                width: 76px;
+                                horizontal-stretch: 0;
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                for pl in plates : PlateTab {
+                                    name: pl.name == "" ? "未命名培养板" : pl.name;
+                                    detail: "\{pl.mapped_count} 孔";
+                                    selected: pl.id == selected_plate_id;
+                                    clicked => { root.plate_selected(pl.id); }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        if (has_plate) : PlateView {
+                            width: 520px;
+                            horizontal-stretch: 0;
+                            plate_name: root.plate_name;
+                            plate_meta: root.plate_meta;
+                            plate_rows: root.plate_rows;
+                            plate_columns: root.plate_columns;
+                            mapped_count: root.plate_mapped_count;
+                            wells: root.wells;
+                            selected_well_id: root.selected_well_id;
+                            row_labels: root.row_labels;
+                            column_labels: root.column_labels;
+                            well_selected(id) => { root.well_selected(id); }
+                        }
+
+                        if (!has_plate) : Rectangle {
+                            height: 72px;
+                            background: Theme.surface;
+                            border-radius: Theme.radius-md;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            Text {
+                                text: "当前设计没有培养板记录";
+                                color: Theme.ink-3;
+                                font-size: Theme.font-small;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: Theme.line; }
+
+            // 右：随选择变化的上下文检查器。
+            inspector := Rectangle {
+                width: 304px;
+                background: Theme.surface;
+                VerticalLayout {
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    padding-top: 20px;
+                    padding-bottom: 14px;
+                    spacing: 10px;
+
+                    SectionLabel { text: inspector_kind; }
+                    Text {
+                        text: inspector_title;
+                        color: Theme.ink;
+                        font-size: Theme.font-title;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
+                    if (inspector_subtitle != "") : Text {
+                        text: inspector_subtitle;
+                        color: Theme.ink-3;
+                        font-size: Theme.font-small;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: 1px; background: Theme.line; }
+
+                    if (inspector_fields.length == 0) : Text {
+                        text: "在画布中选择组别、检测或孔位。";
+                        color: Theme.ink-3;
+                        font-size: Theme.font-small;
+                        wrap: word-wrap;
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 12px;
+                            for item in inspector_fields : InspectorRow {
+                                kind: item.kind;
+                                label: item.label;
+                                value: item.value;
+                                missing: item.missing;
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: Theme.line; }
+                    Text {
+                        text: "只读 · 仅显示数据库已记录内容";
+                        color: Theme.ink-3;
+                        font-size: Theme.font-caption;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}

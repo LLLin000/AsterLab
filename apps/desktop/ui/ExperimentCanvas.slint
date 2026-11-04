@@ -1,0 +1,236 @@
+// 实验结构画布：组别与检测是两类节点；连线只绘制当前检测在记录中明确列出的组别。
+// 节点坐标由 Rust 计算，Slint 只负责表现，避免两套布局推理。
+import { Theme } from "Theme.slint";
+
+export struct GroupNodeData {
+    id: string,
+    node_name: string,
+    node_role: string,
+    linked: bool,
+    selected: bool,
+    x: length,
+    y: length,
+    w: length,
+    h: length
+}
+
+export struct AssayNodeData {
+    id: string,
+    node_title: string,
+    node_method: string,
+    node_timepoints: string,
+    has_timepoints: bool,
+    node_group_summary: string,
+    has_groups: bool,
+    selected: bool,
+    x: length,
+    y: length,
+    w: length,
+    h: length
+}
+
+export struct LinkSegment {
+    x: length,
+    y: length,
+    w: length,
+    h: length
+}
+
+component GroupNode inherits Rectangle {
+    in property <string> node_name;
+    in property <string> node_role;
+    in property <bool> linked;
+    in property <bool> selected;
+    callback clicked();
+
+    background: selected
+        ? Theme.accent-tint
+        : (touch.has-hover ? Theme.surface-alt : Theme.surface);
+    border-width: 1px;
+    border-color: selected ? Theme.accent : Theme.line;
+    border-radius: Theme.radius-md;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.node_name;
+                color: Theme.ink;
+                font-size: Theme.font-subhead;
+                font-weight: 600;
+                wrap: word-wrap;
+                max-lines: 1;
+                overflow: elide;
+            }
+            Text {
+                text: root.node_role;
+                color: Theme.ink-3;
+                font-size: Theme.font-small;
+                wrap: word-wrap;
+                max-lines: 1;
+                overflow: elide;
+            }
+        }
+        if (root.linked) : Rectangle {
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: Theme.accent;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    accessible-role: button;
+    accessible-label: "处理组 " + root.node_name;
+    accessible-action-default => { root.clicked(); }
+}
+
+component AssayNode inherits Rectangle {
+    in property <string> node_title;
+    in property <string> node_method;
+    in property <string> node_timepoints;
+    in property <bool> has_timepoints;
+    in property <string> node_group_summary;
+    in property <bool> has_groups;
+    in property <bool> selected;
+    callback clicked();
+
+    background: selected
+        ? Theme.accent-tint
+        : (touch.has-hover ? Theme.surface-alt : Theme.surface);
+    border-width: 1px;
+    border-color: selected ? Theme.accent : Theme.line;
+    border-radius: Theme.radius-md;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.node_title;
+                color: Theme.ink;
+                font-size: Theme.font-subhead;
+                font-weight: 600;
+                horizontal-stretch: 1;
+                wrap: word-wrap;
+                max-lines: 1;
+                overflow: elide;
+            }
+            Text {
+                text: root.node_group_summary;
+                color: root.has_groups ? Theme.ink-3 : Theme.warn-ink;
+                font-size: Theme.font-small;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: root.node_method;
+            color: Theme.ink-2;
+            font-size: Theme.font-secondary;
+            wrap: word-wrap;
+            max-lines: 1;
+            overflow: elide;
+        }
+        Text {
+            text: root.node_timepoints;
+            color: root.has_timepoints ? Theme.accent : Theme.ink-3;
+            font-size: Theme.font-small;
+            wrap: word-wrap;
+            max-lines: 1;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    accessible-role: button;
+    accessible-label: "检测项目 " + root.node_title;
+    accessible-action-default => { root.clicked(); }
+}
+
+export component ExperimentCanvas inherits Rectangle {
+    in property <[GroupNodeData]> group_nodes;
+    in property <[AssayNodeData]> assay_nodes;
+    in property <[LinkSegment]> link_segments;
+    in property <length> content_w;
+    in property <length> content_h;
+    in property <length> assay_x;
+
+    callback group_clicked(string);
+    callback assay_clicked(string);
+
+    width: content_w;
+    height: content_h + 34px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: assay_x - 12px;
+        height: 22px;
+        text: "处理组";
+        color: Theme.ink-3;
+        font-size: Theme.font-caption;
+        font-weight: 600;
+        letter-spacing: 0.7px;
+        vertical-alignment: center;
+    }
+    Text {
+        x: assay_x;
+        y: 0px;
+        width: content_w - assay_x;
+        height: 22px;
+        text: "检测项目";
+        color: Theme.ink-3;
+        font-size: Theme.font-caption;
+        font-weight: 600;
+        letter-spacing: 0.7px;
+        vertical-alignment: center;
+    }
+
+    for s in link_segments : Rectangle {
+        x: s.x;
+        y: 34px + s.y;
+        width: s.w;
+        height: s.h;
+        background: Theme.accent-line;
+    }
+
+    for g in group_nodes : GroupNode {
+        x: g.x;
+        y: 34px + g.y;
+        width: g.w;
+        height: g.h;
+        node_name: g.node_name;
+        node_role: g.node_role;
+        linked: g.linked;
+        selected: g.selected;
+        clicked => { root.group_clicked(g.id); }
+    }
+
+    for a in assay_nodes : AssayNode {
+        x: a.x;
+        y: 34px + a.y;
+        width: a.w;
+        height: a.h;
+        node_title: a.node_title;
+        node_method: a.node_method;
+        node_timepoints: a.node_timepoints;
+        has_timepoints: a.has_timepoints;
+        node_group_summary: a.node_group_summary;
+        has_groups: a.has_groups;
+        selected: a.selected;
+        clicked => { root.assay_clicked(a.id); }
+    }
+}

@@ -1,0 +1,214 @@
+// 培养板场景：缩略图与俯视图共用同一份孔位数据；空白孔只表示“未记录映射”。
+// 展开只改变界面尺寸，不产生任何执行事件。
+import { Theme } from "Theme.slint";
+import { QuietButton } from "Components.slint";
+
+export struct WellCell {
+    well_id: string,
+    row: int,
+    column: int,
+    group_label: string,
+    sample_id: string,
+    note: string,
+    mapped: bool
+}
+
+export struct AxisLabel {
+    index: int,
+    text: string
+}
+
+export component PlateView inherits Rectangle {
+    in property <string> plate_name;
+    in property <string> plate_meta;
+    in property <int> plate_rows;
+    in property <int> plate_columns;
+    in property <int> mapped_count;
+    in property <[WellCell]> wells;
+    in property <string> selected_well_id;
+    in property <[AxisLabel]> row_labels;
+    in property <[AxisLabel]> column_labels;
+
+    callback well_selected(string);
+
+    // 纯界面态：展开 / 收起。
+    property <bool> expanded: false;
+    property <length> pitch: expanded ? 34px : 14px;
+    property <length> cell: expanded ? 26px : 10px;
+    property <length> label_gap: expanded ? 22px : 0px;
+    property <length> top_gap: expanded ? 18px : 0px;
+    property <length> board_pad: expanded ? 12px : 8px;
+
+    background: Theme.surface;
+    border-radius: Theme.radius-md;
+    border-width: 1px;
+    border-color: Theme.line;
+    height: expanded ? 444px : 244px;
+    animate height {
+        duration: 320ms;
+        easing: ease-in-out;
+    }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 3px;
+                Text {
+                    text: plate_name == "" ? "未命名培养板" : plate_name;
+                    color: Theme.ink;
+                    font-size: Theme.font-subhead;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                    max-lines: 1;
+                    overflow: elide;
+                }
+                Text {
+                    text: plate_meta;
+                    color: Theme.ink-3;
+                    font-size: Theme.font-secondary;
+                    wrap: word-wrap;
+                    max-lines: 1;
+                    overflow: elide;
+                }
+            }
+            Text {
+                text: "已映射 \{mapped_count} 孔";
+                color: Theme.ink-3;
+                font-size: Theme.font-small;
+                vertical-alignment: center;
+            }
+            QuietButton {
+                label: expanded ? "收起" : "展开俯视";
+                compact: true;
+                clicked => { expanded = !expanded; }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: center;
+            vertical-stretch: 1;
+            board_area := Rectangle {
+                width: label_gap + plate_columns * pitch + board_pad * 2;
+                height: top_gap + plate_rows * pitch + board_pad * 2;
+                background: transparent;
+                animate width, height {
+                    duration: 320ms;
+                    easing: ease-in-out;
+                }
+
+                for l in column_labels : Text {
+                    visible: expanded;
+                    x: label_gap + board_pad + l.index * pitch + cell / 2 - 10px;
+                    y: 0px;
+                    width: 20px;
+                    height: top_gap;
+                    text: l.text;
+                    color: Theme.ink-3;
+                    font-size: 10px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                for l in row_labels : Text {
+                    visible: expanded;
+                    x: 0px;
+                    y: top_gap + board_pad + l.index * pitch + cell / 2 - 8px;
+                    width: label_gap - 4px;
+                    height: 16px;
+                    text: l.text;
+                    color: Theme.ink-3;
+                    font-size: 10px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                board := Rectangle {
+                    x: label_gap;
+                    y: top_gap;
+                    width: plate_columns * pitch + board_pad * 2;
+                    height: plate_rows * pitch + board_pad * 2;
+                    background: Theme.plate-body;
+                    border-radius: Theme.radius-lg;
+                    border-width: 1px;
+                    border-color: Theme.plate-line;
+                    animate width, height {
+                        duration: 320ms;
+                        easing: ease-in-out;
+                    }
+
+                    for w in wells : well_focus := FocusScope {
+                        x: board_pad + w.column * pitch;
+                        y: board_pad + w.row * pitch;
+                        width: cell;
+                        height: cell;
+                        accessible-role: button;
+                        accessible-label: "孔位 " + w.well_id
+                            + (w.mapped ? "，已记录映射" : "，未记录映射");
+                        accessible-action-default => { root.well_selected(w.well_id); }
+                        key-pressed(e) => {
+                            if (e.text == "\n" || e.text == " ") {
+                                root.well_selected(w.well_id);
+                                accept
+                            } else {
+                                reject
+                            }
+                        }
+                        animate x, y, width, height {
+                            duration: 320ms;
+                            easing: ease-in-out;
+                        }
+
+                        Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            border-radius: expanded ? 5px : 2px;
+                            background: w.mapped ? Theme.well-mapped : Theme.well-empty;
+                            border-width: w.well_id == selected_well_id ? 2px : 1px;
+                            border-color: w.well_id == selected_well_id
+                                ? Theme.accent
+                                : (w.mapped ? Theme.well-mapped-line : Theme.well-empty-line);
+                            animate background, border-color, border-radius {
+                                duration: 320ms;
+                                easing: ease-in-out;
+                            }
+
+                            if (w.well_id == selected_well_id) : Rectangle {
+                                x: -3px;
+                                y: -3px;
+                                width: parent.width + 6px;
+                                height: parent.height + 6px;
+                                border-radius: expanded ? 8px : 5px;
+                                border-width: 1px;
+                                border-color: Theme.accent-line;
+                                background: transparent;
+                            }
+
+                            TouchArea {
+                                width: 100%;
+                                height: 100%;
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    well_focus.focus();
+                                    root.well_selected(w.well_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: expanded
+                ? "俯视图：行列为实际坐标；深色孔为已记录映射，选择孔位查看属性。"
+                : "缩略图：深色为已记录映射；展开后读取行列坐标。";
+            color: Theme.ink-3;
+            font-size: Theme.font-caption;
+            wrap: word-wrap;
+        }
+    }
+}

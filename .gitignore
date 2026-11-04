@@ -1,4 +1,5 @@
 /target
+/apps/desktop/target
 /data/
 /cargo-check.log
 /LabWorkbench*.exe
