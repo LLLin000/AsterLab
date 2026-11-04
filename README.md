@@ -4,6 +4,8 @@
 
 产品术语与目标对象边界见 [CONTEXT.md](CONTEXT.md)；该文件记录目标设计语义，当前 CLI 的已实现能力仍以 [AGENT_API.md](AGENT_API.md) 为准。
 
+系统分层、Slint 前端职责、Core 读模型和仪器步骤模块的架构见 [docs/architecture.md](docs/architecture.md)。
+
 ## 启动
 
 Windows 可双击 `start-labworkbench.bat`，或在 PowerShell 中运行：

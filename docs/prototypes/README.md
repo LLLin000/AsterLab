@@ -12,6 +12,7 @@
 [`2026-11-05-step-editor-implementation-plan.md`](./2026-11-05-step-editor-implementation-plan.md)。
 实验地图与 Agent 验收契约见
 [`2026-11-05-experiment-map-and-agent-contract.md`](./2026-11-05-experiment-map-and-agent-contract.md)。
+系统分层与 Slint/Core 架构见 [`../architecture.md`](../architecture.md)。
 
 ## 运行
 
