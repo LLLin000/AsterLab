@@ -6,6 +6,12 @@
 
 设计口径见仓库根目录 [`DESIGN.md`](../../DESIGN.md)；P1 需求边界见
 [`asterlab-native-ui-acceptance.md`](./asterlab-native-ui-acceptance.md)。
+仪器/操作如何作为步骤模块插入 Protocol，见
+[`instrument-step-modules.md`](./instrument-step-modules.md)。
+步骤编辑器的前后端实现方案见
+[`2026-11-05-step-editor-implementation-plan.md`](./2026-11-05-step-editor-implementation-plan.md)。
+实验地图与 Agent 验收契约见
+[`2026-11-05-experiment-map-and-agent-contract.md`](./2026-11-05-experiment-map-and-agent-contract.md)。
 
 ## 运行
 
@@ -38,21 +44,30 @@ apps/desktop/target/release/labworkbench-desktop.exe \
 
 ## 本轮实现
 
-- 左侧项目 / 实验设计 / 实验运行三级导航；顶部上下文栏包含 Run；中央实验结构画布；右侧上下文检查器。
+- 工作区分为 **设计 / 准备 / 执行** 三种模式；三种模式共用同一份只读数据与外壳。
+- 左侧项目 / 实验设计 / 实验运行三级导航；顶部上下文栏包含 Run；中央为模式工作区；右侧为上下文检查器。
 - 显式 Run 选择；孔板列表只包含当前 Run 且与当前检测关联的板。切换检测不会继续显示无关板。
+- 设计模式：扁平组别表（独立 n、技术重复）、检测表（终点/方法/时间/关系/Protocol 状态）、
+  样本分配摘要、证据/冲突、只读数据完整性检查；关系图默认折叠。
+- 准备 / 执行模式读取 Run 的 `design_version.snapshot`，显示冻结版本与当前设计版本的差异；
+  没有 `protocol_manifest`、`material_manifest` 或 `execution_event` 时明确说明，不生成步骤。
 - 默认优先选择有孔板的检测（L929 下为 CCK-8）；无孔板时显示“该检测暂无培养板记录”。
-- 画布节点：处理组、检测项目。只有当前检测在记录中明确列出的组别才绘制连线；
-  `划痕成像` 没有组别记录时显示“组别未明确”，不画推断连线。
 - 检查器随选择切换：检测参数、组别与计划孔位、来源/证据、执行；组别；培养板；孔位。
 - 培养板：缩略 14px 节距 → 俯视 34px 节距，320ms 过渡；行 A–H、列 1–12 来自真实板尺寸；
   已映射孔为中性数据色，选中孔才有紫色描边/外环。
 - 未记录/待确认/未记录映射保持低对比文本，不填默认值。
 
+视觉系统已按 Linear、Vercel Geist、Apple HIG、GitHub Primer、Obsidian、Notion 的公开设计规则重写：
+扁平列表 + 发丝线，单一强调色，模式分段控件，正文大于灰色标签；见 `DESIGN.md`。
+
 ## 验证证据
 
 截图（`docs/prototypes/assets/`）：
 
-- `native-workspace.png`：默认状态，CCK-8 被选中，Run 与孔板上下文一致。
+- `experiment-map.png`：只读实验地图，显示组别、检测、时间/样本关系与待确认项。
+- `native-workspace.png`：设计模式，扁平组别/检测表与折叠关系图。
+- `native-prepare.png`：准备模式，冻结版本、计划产物、计划容器位。
+- `native-execute.png`：执行模式，Protocol/材料/事件缺失说明与实际培养板。
 - `native-livedead-noplate.png`：切换到活死染色，显示“该检测暂无培养板记录”，不再残留 CCK-8 板。
 - `native-plate-expanded.png`：96 孔俯视，行列坐标；A1 已映射。
 - `native-well.png`：选中 A1，检查器显示 E1 / SYN-CCK8-A1 / 备注。
@@ -63,6 +78,8 @@ apps/desktop/target/release/labworkbench-desktop.exe \
 交互通过 Windows UI Automation `InvokePattern` 实际执行，并断言：
 
 - 默认检查器为 CCK-8，且存在 `CCK-8 演示板 A`；
+- 设计模式出现 `设计摘要`、`组别`、`检测`；准备/执行模式出现 `执行批次`/`本次执行` 与冻结状态；
+- 执行模式明确显示 `该执行批次没有冻结的 protocol_manifest；不能生成操作步骤。`；
 - 选择 `检测项目 活死染色` 后出现 `活/死细胞荧光图像`、`该检测暂无培养板记录`，且不存在 CCK-8 板页签；
 - 切回 `检测项目 CCK-8` 后孔板页签恢复；选择 Run 不丢失当前检测/孔板；
 - 展开后出现 `收起`、轴标签 `A`…`H` / `1`…`12`；
@@ -132,5 +149,5 @@ node tests/smoke.cjs
 sha256sum data/labworkbench.sqlite
 ```
 
-本轮结果：5 个 Rust 测试通过；Web/CLI smoke 通过（37 个 CLI 工具、移动端 390px 无横向溢出）；
+本轮结果：5 个 Rust 测试通过；Web/CLI smoke 通过（38 个 CLI 工具、只读实验地图、移动端 390px 无横向溢出）；
 默认数据库 SHA-256 保持 `6d9af98c05d6f7ee128a0ef13a2add26ceda9b66832a77fa5575ba800e4dfb3d`。

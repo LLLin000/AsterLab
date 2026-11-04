@@ -10,9 +10,10 @@
 4. [视觉语言与图标方案研究](2026-11-04-asterlab-visual-language-research.md) — 现有界面核对、图标集、视觉图层、风险和后续验收；内含 [Gemini SVG 图标样张](2026-11-04-asterlab-ui-icon-exploration.svg)。
 5. [全界面 UI/UX 走查](2026-11-05-asterlab-ui-ux-audit.md) — 操作者视角的导航收敛、逐屏布局/文案、单位与移动端问题；区分源码事实、浏览器观察和建议。
 6. [组别 × 检测覆盖语义研究](2026-11-04-asterlab-assay-coverage-research.md) — 核实现状、未知/明确不做/不适用契约缺口、保守文案与四态候选。
-7. [实验设计契约与步骤块](2026-11-03-cellplanner-contract-modules.md) — Protocol/步骤块复用、参数、Agent 写 Protocol 的契约。
-8. [实验设计模型](2026-11-02-cellplanner-experiment-design-model.md) — 科学设计模型、n、Assay、对照、样本及 CLI 契约边界。
-9. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
+7. [协议知识、步骤模型与相关项目](2026-11-05-protocol-knowledge-and-related-projects.md) — 常见实验的步骤/目的/对照/失败模式、协议软件与标准参照、产品边界。
+8. [实验设计契约与步骤块](2026-11-03-cellplanner-contract-modules.md) — Protocol/步骤块复用、参数、Agent 写 Protocol 的契约。
+9. [实验设计模型](2026-11-02-cellplanner-experiment-design-model.md) — 科学设计模型、n、Assay、对照、样本及 CLI 契约边界。
+10. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
 
 ## 证据标签
 

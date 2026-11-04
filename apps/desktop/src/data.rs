@@ -13,7 +13,9 @@ use std::path::Path;
 pub struct ReadModel {
     pub projects: Vec<Project>,
     pub designs: Vec<Design>,
+    pub design_versions: Vec<DesignVersion>,
     pub runs: Vec<Run>,
+    pub events: Vec<ExecutionEvent>,
     pub plates: Vec<Plate>,
 }
 
@@ -27,13 +29,36 @@ pub struct Project {
 pub struct Design {
     pub id: String,
     pub project_id: String,
+    pub revision: i64,
     pub title: String,
     pub objective: Option<String>,
+    pub hypothesis: Option<String>,
     pub experimental_unit: Option<String>,
+    pub independent_variables: Option<String>,
+    pub primary_endpoint: Option<String>,
+    pub endpoint_method: Option<String>,
+    pub endpoint_unit: Option<String>,
+    pub planned_run_count: Option<u32>,
+    pub planned_run_relationship: Option<String>,
+    pub analysis_plan: Option<String>,
+    pub randomization: Option<String>,
+    pub blinding: Option<String>,
+    pub inclusion_criteria: Option<String>,
+    pub exclusion_criteria: Option<String>,
+    pub sample_size_rationale: Option<String>,
     pub groups: Vec<Group>,
     pub assays: Vec<Assay>,
+    pub planned_outputs: Vec<PlannedOutput>,
     pub sources: Vec<Source>,
     pub conflicts: Vec<Conflict>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DesignVersion {
+    pub id: String,
+    pub design_id: String,
+    pub revision: i64,
+    pub snapshot: Design,
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +67,8 @@ pub struct Group {
     pub name: String,
     pub role: String,
     pub condition: Option<String>,
+    pub independent_n: Option<u32>,
+    pub technical_repeats: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -52,14 +79,26 @@ pub struct Assay {
     pub method: Option<String>,
     pub unit: Option<String>,
     pub timepoints: Vec<String>,
+    pub timepoint_timing: Vec<TimepointTiming>,
     pub group_ids: Vec<String>,
     pub group_names: Vec<String>,
+    pub control_group_ids: Vec<String>,
     pub timepoint_relation: Option<String>,
     pub time_anchor_event: Option<String>,
     pub container_format: Option<String>,
     pub controls: Vec<String>,
     pub allocations: Vec<Allocation>,
+    pub protocol_version_id: Option<String>,
     pub evidence_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TimepointTiming {
+    pub timepoint: String,
+    pub offset_value: Option<f64>,
+    pub unit: Option<String>,
+    pub window_before: Option<f64>,
+    pub window_after: Option<f64>,
 }
 
 /// One stored `sample_allocations` entry: an explicit group ↔ assay plan.
@@ -69,6 +108,19 @@ pub struct Allocation {
     pub group_name: String,
     pub slots_per_group: Option<u32>,
     pub slots_scope: Option<String>,
+    pub timepoint_relation: Option<String>,
+    pub source_relation: Option<String>,
+    pub source_assay_id: Option<String>,
+    pub planned_output_id: Option<String>,
+    pub evidence_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlannedOutput {
+    pub id: String,
+    pub title: String,
+    pub protocol_version_id: Option<String>,
+    pub evidence_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -76,14 +128,19 @@ pub struct Source {
     pub id: String,
     pub source_document: Option<String>,
     pub source_locator: Option<String>,
+    pub source_date: Option<String>,
     pub claim: Option<String>,
+    pub state: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Conflict {
     pub topic: String,
     pub status: Option<String>,
+    pub resolution: Option<String>,
     pub evidence_ids: Vec<String>,
+    pub affected_assay_ids: Vec<String>,
+    pub affects_container_estimate: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -91,8 +148,39 @@ pub struct Run {
     pub id: String,
     pub project_id: String,
     pub design_id: String,
+    pub design_version_id: Option<String>,
+    pub design_revision: Option<i64>,
+    pub run_index: Option<u32>,
+    pub scheduled_date: Option<String>,
     pub title: String,
     pub status: Option<String>,
+    pub repeat_of_run_id: Option<String>,
+    pub repeat_relationship: Option<String>,
+    pub protocol_version_id: Option<String>,
+    pub protocol_manifest: Vec<ManifestItem>,
+    pub material_manifest: Vec<ManifestItem>,
+}
+
+/// Manifests are stored as open JSON in the current backend. Display only what
+/// is present; do not infer step order or material identity.
+#[derive(Clone, Debug)]
+pub struct ManifestItem {
+    pub title: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExecutionEvent {
+    pub id: String,
+    pub run_id: String,
+    pub event_type: Option<String>,
+    pub content: Option<String>,
+    pub occurred_at: Option<String>,
+    pub stage: Option<String>,
+    pub timepoint: Option<String>,
+    pub step_status: Option<String>,
+    pub protocol_step_path: Option<String>,
+    pub assay_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -148,7 +236,83 @@ fn as_u32(value: &Value) -> Option<u32> {
     value.as_u64().and_then(|n| u32::try_from(n).ok())
 }
 
-fn parse_design(id: String, project_id: Option<String>, data: &Value) -> Design {
+fn as_f64(value: &Value) -> Option<f64> {
+    value.as_f64().or_else(|| value.as_i64().map(|n| n as f64))
+}
+
+fn parse_timepoint_timing(value: &Value) -> Vec<TimepointTiming> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let timepoint = item["timepoint"].as_str()?.to_owned();
+                    Some(TimepointTiming {
+                        timepoint,
+                        offset_value: as_f64(&item["offset_value"]),
+                        unit: opt(&item["unit"]),
+                        window_before: as_f64(&item["window_before"]),
+                        window_after: as_f64(&item["window_after"]),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_planned_outputs(value: &Value) -> Vec<PlannedOutput> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let id = item["id"].as_str()?;
+                    Some(PlannedOutput {
+                        id: id.to_owned(),
+                        title: item["title"].as_str().unwrap_or_default().to_owned(),
+                        protocol_version_id: opt(&item["protocol_version_id"]),
+                        evidence_id: opt(&item["evidence_id"]),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Manifests are open JSON in the current backend; display present fields and
+/// keep the raw entry as a fallback instead of inventing a step structure.
+fn parse_manifest(value: &Value) -> Vec<ManifestItem> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let title = item["title"]
+                        .as_str()
+                        .or_else(|| item["name"].as_str())
+                        .or_else(|| item["step_path"].as_str())
+                        .or_else(|| item["id"].as_str())
+                        .unwrap_or("未命名条目")
+                        .to_owned();
+                    let detail = item["detail"]
+                        .as_str()
+                        .or_else(|| item["description"].as_str())
+                        .or_else(|| item["status"].as_str())
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| {
+                            serde_json::to_string(item).unwrap_or_else(|_| String::new())
+                        });
+                    ManifestItem { title, detail }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_design(id: String, project_id: Option<String>, revision: i64, data: &Value) -> Design {
     let groups = data["group_specs"]
         .as_array()
         .map(|specs| {
@@ -160,6 +324,8 @@ fn parse_design(id: String, project_id: Option<String>, data: &Value) -> Design 
                         name: name.to_owned(),
                         role: opt(&spec["role"]).unwrap_or_default(),
                         condition: opt(&spec["condition"]),
+                        independent_n: as_u32(&spec["independent_n"]),
+                        technical_repeats: as_u32(&spec["technical_repeats"]),
                     })
                 })
                 .collect()
@@ -199,6 +365,11 @@ fn parse_design(id: String, project_id: Option<String>, data: &Value) -> Design 
                             group_name: opt(&allocation["group_name"]).unwrap_or_default(),
                             slots_per_group: as_u32(&allocation["physical_slots_per_group"]),
                             slots_scope: opt(&allocation["physical_slots_scope"]),
+                            timepoint_relation: opt(&allocation["timepoint_relation"]),
+                            source_relation: opt(&allocation["source_relation"]),
+                            source_assay_id: opt(&allocation["source_assay_id"]),
+                            planned_output_id: opt(&allocation["planned_output_id"]),
+                            evidence_id: opt(&allocation["evidence_id"]),
                         })
                         .collect();
                     Some(Assay {
@@ -208,14 +379,17 @@ fn parse_design(id: String, project_id: Option<String>, data: &Value) -> Design 
                         method: opt(&assay["method"]),
                         unit: opt(&assay["unit"]),
                         timepoints: str_list(&assay["timepoints"]),
+                        timepoint_timing: parse_timepoint_timing(&assay["timepoint_timing"]),
                         group_ids: str_list(&assay["group_ids"]),
                         group_names: str_list(&assay["group_names"]),
+                        control_group_ids: str_list(&assay["control_group_ids"]),
                         timepoint_relation: opt(&assay["timepoint_relation"]),
                         time_anchor_event: opt(&assay["time_anchor_event"]),
                         container_format: opt(&assay["container_format"])
                             .or_else(|| opt(&assay["container_type"])),
                         controls: str_list(&assay["controls"]),
                         allocations: assay_allocations,
+                        protocol_version_id: opt(&assay["protocol_version_id"]),
                         evidence_id: opt(&assay["evidence_id"])
                             .or_else(|| allocation_field(assay_id, "evidence_id").and_then(opt)),
                     })
@@ -234,7 +408,9 @@ fn parse_design(id: String, project_id: Option<String>, data: &Value) -> Design 
                         id: id.to_owned(),
                         source_document: opt(&evidence["source_document"]),
                         source_locator: opt(&evidence["source_locator"]),
+                        source_date: opt(&evidence["source_date"]),
                         claim: opt(&evidence["claim"]),
+                        state: opt(&evidence["state"]),
                     })
                 })
                 .collect()
@@ -250,7 +426,12 @@ fn parse_design(id: String, project_id: Option<String>, data: &Value) -> Design 
                     Some(Conflict {
                         topic: conflict["topic"].as_str().unwrap_or_default().to_owned(),
                         status: opt(&conflict["status"]),
+                        resolution: opt(&conflict["resolution"]),
                         evidence_ids: str_list(&conflict["evidence_ids"]),
+                        affected_assay_ids: str_list(&conflict["affected_assay_ids"]),
+                        affects_container_estimate: conflict["affects_container_estimate"]
+                            .as_bool()
+                            .unwrap_or(false),
                     })
                 })
                 .collect()
@@ -260,11 +441,26 @@ fn parse_design(id: String, project_id: Option<String>, data: &Value) -> Design 
     Design {
         id,
         project_id: project_id.unwrap_or_default(),
+        revision,
         title: data["title"].as_str().unwrap_or_default().to_owned(),
         objective: opt(&data["objective"]),
+        hypothesis: opt(&data["hypothesis"]),
         experimental_unit: opt(&data["experimental_unit"]),
+        independent_variables: opt(&data["independent_variables"]),
+        primary_endpoint: opt(&data["primary_endpoint"]),
+        endpoint_method: opt(&data["endpoint_method"]),
+        endpoint_unit: opt(&data["endpoint_unit"]),
+        planned_run_count: as_u32(&data["planned_run_count"]),
+        planned_run_relationship: opt(&data["planned_run_relationship"]),
+        analysis_plan: opt(&data["analysis_plan"]),
+        randomization: opt(&data["randomization"]),
+        blinding: opt(&data["blinding"]),
+        inclusion_criteria: opt(&data["inclusion_criteria"]),
+        exclusion_criteria: opt(&data["exclusion_criteria"]),
+        sample_size_rationale: opt(&data["sample_size_rationale"]),
         groups,
         assays,
+        planned_outputs: parse_planned_outputs(&data["planned_outputs"]),
         sources,
         conflicts,
     }
@@ -275,11 +471,11 @@ pub fn load_read_model(db_path: &Path) -> Result<ReadModel, String> {
         .map_err(|e| format!("打不开数据库（只读）：{}：{e}", db_path.display()))?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, kind, project_id, parent_id, data_json \
+            "SELECT id, kind, project_id, parent_id, revision, data_json \
              FROM records ORDER BY id",
         )
         .map_err(|e| format!("查询 records 失败：{e}"))?;
-    let rows: Vec<(String, String, Option<String>, Option<String>, String)> = stmt
+    let rows: Vec<(String, String, Option<String>, Option<String>, i64, String)> = stmt
         .query_map([], |row| {
             Ok((
                 row.get(0)?,
@@ -287,6 +483,7 @@ pub fn load_read_model(db_path: &Path) -> Result<ReadModel, String> {
                 row.get(2)?,
                 row.get(3)?,
                 row.get(4)?,
+                row.get(5)?,
             ))
         })
         .map_err(|e| format!("查询 records 失败：{e}"))?
@@ -296,26 +493,65 @@ pub fn load_read_model(db_path: &Path) -> Result<ReadModel, String> {
     let mut model = ReadModel {
         projects: Vec::new(),
         designs: Vec::new(),
+        design_versions: Vec::new(),
         runs: Vec::new(),
+        events: Vec::new(),
         plates: Vec::new(),
     };
     let mut plate_index: HashMap<String, usize> = HashMap::new();
     let mut pending_wells: Vec<(Option<String>, Well)> = Vec::new();
 
-    for (id, kind, project_id, parent_id, raw) in rows {
+    for (id, kind, project_id, parent_id, revision, raw) in rows {
         let data: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
         match kind.as_str() {
             "project" => model.projects.push(Project {
                 id: id.clone(),
                 name: data["name"].as_str().unwrap_or_default().to_owned(),
             }),
-            "design" => model.designs.push(parse_design(id, project_id, &data)),
+            "design" => model
+                .designs
+                .push(parse_design(id, project_id, revision, &data)),
+            "design_version" => {
+                let design_id = opt(&data["design_id"])
+                    .or(parent_id.clone())
+                    .unwrap_or_default();
+                let version_revision = data["design_revision"].as_i64().unwrap_or(revision);
+                let snapshot =
+                    parse_design(design_id.clone(), None, version_revision, &data["snapshot"]);
+                model.design_versions.push(DesignVersion {
+                    id: id.clone(),
+                    design_id,
+                    revision: version_revision,
+                    snapshot,
+                });
+            }
             "run" => model.runs.push(Run {
                 id: id.clone(),
                 project_id: project_id.unwrap_or_default(),
                 design_id: parent_id.unwrap_or_default(),
+                design_version_id: opt(&data["design_version_id"]),
+                design_revision: data["design_revision"].as_i64(),
+                run_index: as_u32(&data["run_index"]),
+                scheduled_date: opt(&data["scheduled_date"]),
                 title: data["title"].as_str().unwrap_or_default().to_owned(),
                 status: opt(&data["status"]),
+                repeat_of_run_id: opt(&data["repeat_of_run_id"]),
+                repeat_relationship: opt(&data["repeat_relationship"]),
+                protocol_version_id: opt(&data["protocol_version_id"]),
+                protocol_manifest: parse_manifest(&data["protocol_manifest"]),
+                material_manifest: parse_manifest(&data["material_manifest"]),
+            }),
+            "execution_event" => model.events.push(ExecutionEvent {
+                id: id.clone(),
+                run_id: parent_id.unwrap_or_default(),
+                event_type: opt(&data["event_type"]),
+                content: opt(&data["content"]),
+                occurred_at: opt(&data["occurred_at"]),
+                stage: opt(&data["stage"]),
+                timepoint: opt(&data["timepoint"]),
+                step_status: opt(&data["step_status"]),
+                protocol_step_path: opt(&data["protocol_step_path"]),
+                assay_id: opt(&data["assay_id"]),
             }),
             "plate" => {
                 plate_index.insert(id.clone(), model.plates.len());

@@ -7,10 +7,30 @@ mod data;
 use data::ReadModel;
 use slint::{ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
 slint::include_modules!();
+
+#[derive(Default, Clone)]
+struct Draft {
+    comparison: Option<String>,
+    experimental_unit: Option<String>,
+    relations: HashMap<String, String>,
+    group_n: HashMap<String, Option<u32>>,
+    group_technical: HashMap<String, Option<u32>>,
+}
+
+impl Draft {
+    fn touched(&self) -> bool {
+        self.comparison.is_some()
+            || self.experimental_unit.is_some()
+            || !self.relations.is_empty()
+            || !self.group_n.is_empty()
+            || !self.group_technical.is_empty()
+    }
+}
 
 #[derive(Default, Clone)]
 struct Selection {
@@ -21,6 +41,8 @@ struct Selection {
     group_id: String,
     plate_id: String,
     well_id: String,
+    mode: String,
+    draft: Draft,
 }
 
 const GROUP_W: f32 = 232.0;
@@ -342,6 +364,9 @@ fn clear_design(app: &AppWindow, sel: &mut Selection) {
     sel.group_id.clear();
     sel.plate_id.clear();
     sel.well_id.clear();
+    sel.mode = "design".to_owned();
+    sel.draft = Draft::default();
+    app.set_mode(SharedString::from("design"));
     app.set_selected_design_id(SharedString::from(""));
     app.set_selected_run_id(SharedString::from(""));
     app.set_selected_assay_id(SharedString::from(""));
@@ -364,12 +389,27 @@ fn clear_design(app: &AppWindow, sel: &mut Selection) {
     clear_inspector(app);
 }
 
-/// 画布坐标与连线由 Rust 计算：节点位置确定，Slint 不重复推理布局。
-fn refresh_canvas(app: &AppWindow, model: &ReadModel, sel: &Selection) {
-    let design = model
+/// Design mode reads the current Design record. Prepare/Execute read the
+/// snapshot frozen by the selected Run; if it is missing, no design is shown.
+fn active_design<'a>(model: &'a ReadModel, sel: &Selection) -> Option<&'a data::Design> {
+    if sel.mode == "prepare" || sel.mode == "execute" {
+        let run = model.runs.iter().find(|run| run.id == sel.run_id)?;
+        let version_id = run.design_version_id.as_ref()?;
+        return model
+            .design_versions
+            .iter()
+            .find(|version| &version.id == version_id)
+            .map(|version| &version.snapshot);
+    }
+    model
         .designs
         .iter()
-        .find(|design| design.id == sel.design_id);
+        .find(|design| design.id == sel.design_id)
+}
+
+/// 画布坐标与连线由 Rust 计算：节点位置确定，Slint 不重复推理布局。
+fn refresh_canvas(app: &AppWindow, model: &ReadModel, sel: &Selection) {
+    let design = active_design(model, sel);
     let Some(design) = design else {
         app.set_group_nodes(model_rc(Vec::<GroupNodeData>::new()));
         app.set_assay_nodes(model_rc(Vec::<AssayNodeData>::new()));
@@ -487,11 +527,7 @@ fn refresh_canvas(app: &AppWindow, model: &ReadModel, sel: &Selection) {
 }
 
 fn set_inspector_assay(app: &AppWindow, model: &ReadModel, sel: &Selection) {
-    let Some(design) = model
-        .designs
-        .iter()
-        .find(|design| design.id == sel.design_id)
-    else {
+    let Some(design) = active_design(model, sel) else {
         clear_inspector(app);
         return;
     };
@@ -581,7 +617,13 @@ fn set_inspector_assay(app: &AppWindow, model: &ReadModel, sel: &Selection) {
     let run = model
         .runs
         .iter()
-        .find(|run| run.project_id == design.project_id && run.design_id == design.id);
+        .find(|run| run.id == sel.run_id)
+        .or_else(|| {
+            model
+                .runs
+                .iter()
+                .find(|run| run.project_id == design.project_id && run.design_id == design.id)
+        });
     match run {
         Some(run) => {
             items.push(field("运行", Some(run.title.clone())));
@@ -601,11 +643,7 @@ fn set_inspector_assay(app: &AppWindow, model: &ReadModel, sel: &Selection) {
 }
 
 fn set_inspector_group(app: &AppWindow, model: &ReadModel, sel: &Selection) {
-    let Some(design) = model
-        .designs
-        .iter()
-        .find(|design| design.id == sel.design_id)
-    else {
+    let Some(design) = active_design(model, sel) else {
         clear_inspector(app);
         return;
     };
@@ -739,6 +777,782 @@ fn set_inspector_well(app: &AppWindow, model: &ReadModel, sel: &Selection) {
     app.set_inspector_fields(model_rc(items));
 }
 
+fn evidence_state_text(value: &Option<String>) -> String {
+    match value.as_deref() {
+        Some("source_record") => "原始记录".to_owned(),
+        Some("proposal") => "建议".to_owned(),
+        Some("user_confirmed") => "用户确认".to_owned(),
+        Some("calculated") => "程序推导".to_owned(),
+        Some("agent_suggestion") => "Agent 建议".to_owned(),
+        Some(value) if !value.trim().is_empty() => format!("待确认（原值：{value}）"),
+        _ => "来源状态未记录".to_owned(),
+    }
+}
+
+fn source_relation_text(value: &Option<String>) -> String {
+    match value.as_deref() {
+        Some("not_applicable") => "无跨检测来源".to_owned(),
+        Some("split_from_assay") => "从其他检测分样".to_owned(),
+        Some("sequential_after_assay") => "在其他检测之后顺序使用".to_owned(),
+        Some(value) if !value.trim().is_empty() => format!("待确认（原值：{value}）"),
+        _ => "来源待确认".to_owned(),
+    }
+}
+
+fn assay_title_in(design: &data::Design, id: &str) -> String {
+    design
+        .assays
+        .iter()
+        .find(|assay| assay.id == id)
+        .map(|assay| assay.title.clone())
+        .unwrap_or_else(|| id.to_owned())
+}
+
+fn comparison_text(value: &str) -> String {
+    match value {
+        "treatment_vs_control" => "处理组 vs 对照".to_owned(),
+        "main_effect" => "因素主效应".to_owned(),
+        "interaction" => "交互作用".to_owned(),
+        "unknown" => "待确认".to_owned(),
+        _ => value.to_owned(),
+    }
+}
+
+fn unit_text(value: &str) -> String {
+    match value {
+        "independent_culture" => "独立培养单位".to_owned(),
+        "technical_well" => "技术孔".to_owned(),
+        "animal" => "动物 / 个体".to_owned(),
+        "unknown" => "待确认".to_owned(),
+        _ => value.to_owned(),
+    }
+}
+
+fn unit_missing(value: &Option<String>) -> bool {
+    value.as_ref().is_none_or(|text| {
+        let text = text.trim();
+        text.is_empty() || text == "未记录" || text.starts_with("待确认")
+    })
+}
+
+fn set_question(app: &AppWindow, design: &data::Design, sel: &Selection) {
+    let clear = |app: &AppWindow| {
+        app.set_question_kind(SharedString::from(""));
+        app.set_question_title(SharedString::from(""));
+        app.set_question_detail(SharedString::from(""));
+        app.set_question_options(model_rc(Vec::<QuestionOption>::new()));
+    };
+
+    if sel.draft.comparison.is_none() {
+        app.set_question_kind(SharedString::from("comparison"));
+        app.set_question_title(SharedString::from("主要比较是什么？"));
+        app.set_question_detail(SharedString::from(
+            "组别存在不等于比较目标明确。先选当前最想回答的比较，界面只更新本地草案。",
+        ));
+        app.set_question_options(model_rc(vec![
+            QuestionOption {
+                label: SharedString::from("处理 vs 对照"),
+                value: SharedString::from("treatment_vs_control"),
+            },
+            QuestionOption {
+                label: SharedString::from("因素主效应"),
+                value: SharedString::from("main_effect"),
+            },
+            QuestionOption {
+                label: SharedString::from("交互作用"),
+                value: SharedString::from("interaction"),
+            },
+            QuestionOption {
+                label: SharedString::from("暂不确定"),
+                value: SharedString::from("unknown"),
+            },
+        ]));
+        return;
+    }
+
+    if unit_missing(&design.experimental_unit) && sel.draft.experimental_unit.is_none() {
+        app.set_question_kind(SharedString::from("unit"));
+        app.set_question_title(SharedString::from("每组 n 对应什么单位？"));
+        app.set_question_detail(SharedString::from(
+            "独立实验单位不能按孔数或技术重复代替；先确认这句话里的“一个样本”指什么。",
+        ));
+        app.set_question_options(model_rc(vec![
+            QuestionOption {
+                label: SharedString::from("独立培养"),
+                value: SharedString::from("independent_culture"),
+            },
+            QuestionOption {
+                label: SharedString::from("技术孔"),
+                value: SharedString::from("technical_well"),
+            },
+            QuestionOption {
+                label: SharedString::from("动物 / 个体"),
+                value: SharedString::from("animal"),
+            },
+            QuestionOption {
+                label: SharedString::from("暂不确定"),
+                value: SharedString::from("unknown"),
+            },
+        ]));
+        return;
+    }
+
+    if let Some(assay) = design.assays.iter().find(|assay| {
+        let relation = assay.timepoint_relation.as_deref();
+        (relation.is_none() || relation == Some("unknown"))
+            && !sel.draft.relations.contains_key(&assay.id)
+    }) {
+        let prefix = format!("{}|", assay.id);
+        app.set_question_kind(SharedString::from("relation"));
+        app.set_question_title(SharedString::from(format!(
+            "{} 的各时间点如何取样？",
+            assay.title
+        )));
+        app.set_question_detail(SharedString::from(
+            "这决定样本需求、板数和重复关系；无法判断时保留“待确认”。",
+        ));
+        app.set_question_options(model_rc(vec![
+            QuestionOption {
+                label: SharedString::from("同一单位"),
+                value: SharedString::from(format!(
+                    "{prefix}same_experimental_unit_repeated"
+                )),
+            },
+            QuestionOption {
+                label: SharedString::from("同一样本"),
+                value: SharedString::from(format!("{prefix}same_physical_sample_repeated")),
+            },
+            QuestionOption {
+                label: SharedString::from("独立取样"),
+                value: SharedString::from(format!(
+                    "{prefix}independent_sample_per_timepoint"
+                )),
+            },
+            QuestionOption {
+                label: SharedString::from("暂不确定"),
+                value: SharedString::from(format!("{prefix}unknown")),
+            },
+        ]));
+        return;
+    }
+
+    clear(app);
+}
+
+fn answer_question(
+    app: &AppWindow,
+    model: &ReadModel,
+    sel: &mut Selection,
+    kind: &str,
+    value: &str,
+) {
+    match kind {
+        "comparison" => sel.draft.comparison = Some(value.to_owned()),
+        "unit" => sel.draft.experimental_unit = Some(value.to_owned()),
+        "relation" => {
+            if let Some((assay_id, relation)) = value.split_once('|') {
+                sel.draft
+                    .relations
+                    .insert(assay_id.to_owned(), relation.to_owned());
+            }
+        }
+        _ => return,
+    }
+    set_workspace_details(app, model, sel);
+}
+
+fn update_group_metric(
+    app: &AppWindow,
+    model: &ReadModel,
+    sel: &mut Selection,
+    group_id: &str,
+    metric: &str,
+    value: &str,
+) {
+    let parsed = value.trim().parse::<u32>().ok();
+    match metric {
+        "n" => {
+            sel.draft.group_n.insert(group_id.to_owned(), parsed);
+        }
+        "technical" => {
+            sel.draft
+                .group_technical
+                .insert(group_id.to_owned(), parsed);
+        }
+        _ => return,
+    }
+    set_workspace_details(app, model, sel);
+}
+
+fn set_workspace_details(app: &AppWindow, model: &ReadModel, sel: &Selection) {
+    let active = active_design(model, sel);
+    let current = model
+        .designs
+        .iter()
+        .find(|design| design.id == sel.design_id);
+    let run = model.runs.iter().find(|run| run.id == sel.run_id);
+
+    let design_revision_text = if sel.mode == "prepare" || sel.mode == "execute" {
+        match run
+            .and_then(|run| run.design_version_id.as_ref())
+            .and_then(|id| {
+                model
+                    .design_versions
+                    .iter()
+                    .find(|version| &version.id == id)
+            }) {
+            Some(version) => format!("冻结 r{}", version.revision),
+            None => "冻结版本未记录".to_owned(),
+        }
+    } else {
+        match current {
+            Some(design) => format!("设计 r{}", design.revision),
+            None => "设计版本未记录".to_owned(),
+        }
+    };
+
+    let frozen_note = match run {
+        None => "未选择执行批次".to_owned(),
+        Some(run) => match run.design_version_id.as_ref() {
+            None => "该批次未引用设计版本".to_owned(),
+            Some(version_id) => match model
+                .design_versions
+                .iter()
+                .find(|version| &version.id == version_id)
+            {
+                None => "冻结设计快照不可读取".to_owned(),
+                Some(version) => match current {
+                    Some(current) if current.revision != version.revision => format!(
+                        "当前设计 r{}；本批次冻结 r{}",
+                        current.revision, version.revision
+                    ),
+                    _ => format!("冻结版本 r{} 与当前设计一致", version.revision),
+                },
+            },
+        },
+    };
+
+    let run_meta = match run {
+        Some(run) => format!(
+            "{} · {} · {} · 第 {} 轮",
+            run.title,
+            run_status_text(&run.status),
+            run.scheduled_date.as_deref().unwrap_or("计划日期未记录"),
+            run.run_index
+                .map_or_else(|| "—".to_owned(), |n| n.to_string())
+        ),
+        None => "未选择执行批次".to_owned(),
+    };
+
+    let Some(design) = active else {
+        app.set_group_details(model_rc(Vec::<GroupDetail>::new()));
+        app.set_assay_details(model_rc(Vec::<AssayDetail>::new()));
+        app.set_allocation_details(model_rc(Vec::<AllocationDetail>::new()));
+        app.set_evidence_details(model_rc(Vec::<EvidenceDetail>::new()));
+        app.set_conflict_details(model_rc(Vec::<ConflictDetail>::new()));
+        app.set_check_details(model_rc(vec![CheckDetail {
+            level: SharedString::from("warn"),
+            title: SharedString::from("当前模式没有可读取的设计"),
+            detail: SharedString::from(frozen_note.as_str()),
+        }]));
+        app.set_planned_output_details(model_rc(Vec::<PlannedOutputDetail>::new()));
+        app.set_protocol_manifest(model_rc(Vec::<ManifestDetail>::new()));
+        app.set_material_manifest(model_rc(Vec::<ManifestDetail>::new()));
+        app.set_execution_events(model_rc(Vec::<ManifestDetail>::new()));
+        app.set_design_hypothesis(SharedString::from("未记录"));
+        app.set_design_variables(SharedString::from("未记录"));
+        app.set_design_primary_endpoint(SharedString::from("未记录"));
+        app.set_design_run_plan(SharedString::from("未记录"));
+        app.set_design_revision_text(SharedString::from(design_revision_text));
+        app.set_frozen_note(SharedString::from(frozen_note));
+        app.set_run_meta(SharedString::from(run_meta));
+        app.set_design_comparison(SharedString::from("未记录"));
+        app.set_draft_note(SharedString::from(""));
+        app.set_question_kind(SharedString::from(""));
+        app.set_question_title(SharedString::from(""));
+        app.set_question_detail(SharedString::from(""));
+        app.set_question_options(model_rc(Vec::<QuestionOption>::new()));
+        return;
+    };
+
+    let comparison = sel
+        .draft
+        .comparison
+        .as_deref()
+        .map(comparison_text)
+        .unwrap_or_else(|| "未记录".to_owned());
+    let experimental_unit = sel
+        .draft
+        .experimental_unit
+        .as_deref()
+        .map(unit_text)
+        .unwrap_or_else(|| opt_text(&design.experimental_unit).to_string());
+    app.set_design_comparison(SharedString::from(comparison));
+    app.set_experimental_unit(SharedString::from(experimental_unit));
+    app.set_draft_note(SharedString::from(if sel.draft.touched() {
+        "本地草案 · 未写入数据库"
+    } else {
+        ""
+    }));
+
+    let group_n_text = |group: &data::Group| -> String {
+        match sel.draft.group_n.get(&group.id) {
+            Some(Some(n)) => n.to_string(),
+            Some(None) => "待确认".to_owned(),
+            None => group
+                .independent_n
+                .map_or_else(|| "待确认".to_owned(), |n| n.to_string()),
+        }
+    };
+    let group_technical_text = |group: &data::Group| -> String {
+        match sel.draft.group_technical.get(&group.id) {
+            Some(Some(n)) => n.to_string(),
+            Some(None) => "待确认".to_owned(),
+            None => group
+                .technical_repeats
+                .map_or_else(|| "待确认".to_owned(), |n| n.to_string()),
+        }
+    };
+
+    let groups = design
+        .groups
+        .iter()
+        .map(|group| GroupDetail {
+            id: SharedString::from(group.id.as_str()),
+            name: SharedString::from(group.name.as_str()),
+            role: group_role_text(&group.role),
+            condition: group
+                .condition
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "条件未记录".to_owned())
+                .into(),
+            n_text: SharedString::from(group_n_text(group)),
+            technical_text: SharedString::from(group_technical_text(group)),
+        })
+        .collect::<Vec<_>>();
+
+    let assays = design
+        .assays
+        .iter()
+        .map(|assay| {
+            let groups = assay_groups(design, assay);
+            let timing = if assay.timepoint_timing.is_empty() {
+                "未记录".to_owned()
+            } else {
+                assay
+                    .timepoint_timing
+                    .iter()
+                    .map(|timing| {
+                        let offset = match timing.offset_value {
+                            Some(value) => {
+                                format!("{value} {}", timing.unit.as_deref().unwrap_or(""))
+                            }
+                            None => "偏移未记录".to_owned(),
+                        };
+                        let window = match (timing.window_before, timing.window_after) {
+                            (Some(before), Some(after)) => format!("（−{before} / +{after}）"),
+                            _ => String::new(),
+                        };
+                        format!("{}：{offset}{window}", timing.timepoint)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("；")
+            };
+            let slots = if assay.allocations.is_empty() {
+                "未记录".to_owned()
+            } else {
+                assay
+                    .allocations
+                    .iter()
+                    .map(|allocation| {
+                        let name = if allocation.group_name.trim().is_empty() {
+                            "未命名组别"
+                        } else {
+                            allocation.group_name.as_str()
+                        };
+                        match allocation.slots_per_group {
+                            Some(slots) => format!(
+                                "{name}：每组 {slots} 孔（{}）",
+                                scope_text(&allocation.slots_scope)
+                            ),
+                            None => format!("{name}：孔位未记录"),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("；")
+            };
+            let relation = sel
+                .draft
+                .relations
+                .get(&assay.id)
+                .cloned()
+                .or_else(|| assay.timepoint_relation.clone());
+            AssayDetail {
+                id: SharedString::from(assay.id.as_str()),
+                title: SharedString::from(assay.title.as_str()),
+                endpoint: opt_text(&assay.endpoint),
+                method: opt_text(&assay.method),
+                timepoints: match join_nonempty(&assay.timepoints, " · ") {
+                    Some(value) => SharedString::from(value),
+                    None => SharedString::from("未记录"),
+                },
+                timing: SharedString::from(timing),
+                relation: relation_text(&relation),
+                container: opt_text(&assay.container_format),
+                protocol: if assay.protocol_version_id.is_some() {
+                    SharedString::from("已引用 Protocol")
+                } else {
+                    SharedString::from("未引用 Protocol")
+                },
+                coverage: if groups.is_empty() {
+                    SharedString::from("组别未列出")
+                } else {
+                    SharedString::from(format!("{} 组覆盖", groups.len()))
+                },
+                slots: SharedString::from(slots),
+                controls: match join_nonempty(&assay.controls, "；") {
+                    Some(value) => SharedString::from(value),
+                    None => SharedString::from("未记录"),
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let allocations = design
+        .assays
+        .iter()
+        .flat_map(|assay| {
+            assay.allocations.iter().map(move |allocation| {
+                let output = allocation
+                    .planned_output_id
+                    .as_ref()
+                    .and_then(|id| {
+                        design
+                            .planned_outputs
+                            .iter()
+                            .find(|output| &output.id == id)
+                    })
+                    .map(|output| output.title.clone())
+                    .unwrap_or_else(|| "无计划产物".to_owned());
+                let source = match (&allocation.source_relation, &allocation.source_assay_id) {
+                    (Some(_), Some(id)) => format!(
+                        "{} · {}",
+                        source_relation_text(&allocation.source_relation),
+                        assay_title_in(design, id)
+                    ),
+                    _ => source_relation_text(&allocation.source_relation),
+                };
+                AllocationDetail {
+                    assay: SharedString::from(assay.title.as_str()),
+                    group: SharedString::from(if allocation.group_name.trim().is_empty() {
+                        "未命名组别"
+                    } else {
+                        allocation.group_name.as_str()
+                    }),
+                    slots: SharedString::from(match allocation.slots_per_group {
+                        Some(slots) => format!("{slots} 孔"),
+                        None => "未记录".to_owned(),
+                    }),
+                    scope: SharedString::from(scope_text(&allocation.slots_scope)),
+                    source: SharedString::from(source),
+                    output: SharedString::from(output),
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let evidence = design
+        .sources
+        .iter()
+        .map(|source| EvidenceDetail {
+            document: opt_text(&source.source_document),
+            locator: opt_text(&source.source_locator),
+            claim: opt_text(&source.claim),
+            state: SharedString::from(evidence_state_text(&source.state)),
+        })
+        .collect::<Vec<_>>();
+
+    let conflicts = design
+        .conflicts
+        .iter()
+        .map(|conflict| ConflictDetail {
+            topic: SharedString::from(conflict.topic.as_str()),
+            status: conflict_status_text(&conflict.status),
+            evidence: SharedString::from(if conflict.evidence_ids.is_empty() {
+                "证据未记录".to_owned()
+            } else {
+                conflict.evidence_ids.join("、")
+            }),
+            affected: SharedString::from(if conflict.affected_assay_ids.is_empty() {
+                String::new()
+            } else {
+                conflict
+                    .affected_assay_ids
+                    .iter()
+                    .map(|id| assay_title_in(design, id))
+                    .collect::<Vec<_>>()
+                    .join("、")
+            }),
+        })
+        .collect::<Vec<_>>();
+
+    let mut checks = Vec::new();
+    if sel.draft.comparison.is_none() {
+        checks.push(CheckDetail {
+            level: SharedString::from("warn"),
+            title: SharedString::from("主要比较未记录"),
+            detail: SharedString::from("组别存在不等于比较目标明确；先定义主要比较。"),
+        });
+    } else if sel.draft.comparison.as_deref() == Some("unknown") {
+        checks.push(CheckDetail {
+            level: SharedString::from("info"),
+            title: SharedString::from("主要比较待确认"),
+            detail: SharedString::from("本地草案已标记为暂不确定。"),
+        });
+    }
+    if unit_missing(&design.experimental_unit) && sel.draft.experimental_unit.is_none() {
+        checks.push(CheckDetail {
+            level: SharedString::from("warn"),
+            title: SharedString::from("实验单位待确认"),
+            detail: SharedString::from("独立 n 的单位未确认；不能用孔数或技术重复代替。"),
+        });
+    }
+    let groups_without_n: Vec<&str> = design
+        .groups
+        .iter()
+        .filter(|group| {
+            group.independent_n.is_none()
+                && !matches!(sel.draft.group_n.get(&group.id), Some(Some(_)))
+        })
+        .map(|group| group.name.as_str())
+        .collect();
+    if !groups_without_n.is_empty() {
+        checks.push(CheckDetail {
+            level: SharedString::from("warn"),
+            title: SharedString::from("独立 n 待确认"),
+            detail: SharedString::from(format!(
+                "{} 的 independent_n 为空；不能用孔数或技术重复代替 n。",
+                groups_without_n.join("、")
+            )),
+        });
+    }
+    let groups_without_technical: Vec<&str> = design
+        .groups
+        .iter()
+        .filter(|group| {
+            group.technical_repeats.is_none()
+                && !matches!(sel.draft.group_technical.get(&group.id), Some(Some(_)))
+        })
+        .map(|group| group.name.as_str())
+        .collect();
+    if !groups_without_technical.is_empty() {
+        checks.push(CheckDetail {
+            level: SharedString::from("info"),
+            title: SharedString::from("技术重复待确认"),
+            detail: SharedString::from(groups_without_technical.join("、")),
+        });
+    }
+    for assay in &design.assays {
+        if assay.protocol_version_id.is_none() {
+            checks.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from("检测未引用 Protocol"),
+                detail: SharedString::from(format!(
+                    "{} 的 protocol_version_id 为空，不能生成执行步骤。",
+                    assay.title
+                )),
+            });
+        }
+        if assay.group_ids.is_empty() && assay.group_names.is_empty() {
+            checks.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from("检测未列出适用组别"),
+                detail: SharedString::from(format!(
+                    "{} 没有 group_ids/group_names 记录；不推断覆盖关系。",
+                    assay.title
+                )),
+            });
+        }
+        if !present(&assay.timepoint_relation)
+            && !sel.draft.relations.contains_key(&assay.id)
+        {
+            checks.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from("时间点关系待确认"),
+                detail: SharedString::from(format!("{} 未记录时间点关系。", assay.title)),
+            });
+        }
+    }
+    for conflict in &design.conflicts {
+        if !matches!(conflict.status.as_deref(), Some("resolved")) {
+            checks.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from("存在未解决证据冲突"),
+                detail: SharedString::from(conflict.topic.as_str()),
+            });
+        }
+    }
+    if design.planned_outputs.is_empty() {
+        checks.push(CheckDetail {
+            level: SharedString::from("info"),
+            title: SharedString::from("没有计划产物"),
+            detail: SharedString::from("planned_outputs 为空；不能推断检测共享同一份材料。"),
+        });
+    }
+    if let Some(run) = run {
+        if run.design_version_id.is_none() {
+            checks.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from("执行批次未引用设计版本"),
+                detail: SharedString::from("不能按冻结设计展示准备或执行。"),
+            });
+        }
+        if run.protocol_manifest.is_empty() {
+            checks.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from("执行批次没有 Protocol 清单"),
+                detail: SharedString::from("protocol_manifest 为空；不能生成步骤顺序或完成状态。"),
+            });
+        }
+        if run.material_manifest.is_empty() {
+            checks.push(CheckDetail {
+                level: SharedString::from("info"),
+                title: SharedString::from("执行批次没有材料清单"),
+                detail: SharedString::from("material_manifest 为空；准备模式不能确认实际材料。"),
+            });
+        }
+    } else {
+        checks.push(CheckDetail {
+            level: SharedString::from("warn"),
+            title: SharedString::from("未选择执行批次"),
+            detail: SharedString::from("准备与执行模式需要先选择 Run。"),
+        });
+    }
+
+    let planned_outputs = design
+        .planned_outputs
+        .iter()
+        .map(|output| PlannedOutputDetail {
+            title: SharedString::from(output.title.as_str()),
+            protocol: if output.protocol_version_id.is_some() {
+                SharedString::from("Protocol 已引用")
+            } else {
+                SharedString::from("Protocol 未引用")
+            },
+            evidence: opt_text(&output.evidence_id),
+        })
+        .collect::<Vec<_>>();
+
+    let protocol_manifest = run
+        .map(|run| {
+            run.protocol_manifest
+                .iter()
+                .map(|item| ManifestDetail {
+                    title: SharedString::from(item.title.as_str()),
+                    detail: SharedString::from(item.detail.as_str()),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let material_manifest = run
+        .map(|run| {
+            run.material_manifest
+                .iter()
+                .map(|item| ManifestDetail {
+                    title: SharedString::from(item.title.as_str()),
+                    detail: SharedString::from(item.detail.as_str()),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let events = model
+        .events
+        .iter()
+        .filter(|event| event.run_id == sel.run_id)
+        .map(|event| {
+            let title = format!(
+                "{} · {} · {}",
+                event
+                    .event_type
+                    .as_deref()
+                    .map(event_type_text)
+                    .unwrap_or_else(|| "事件类型未记录".to_owned()),
+                event.stage.as_deref().unwrap_or("阶段未记录"),
+                event.timepoint.as_deref().unwrap_or("时间点未记录")
+            );
+            let detail = format!(
+                "{}{}{}",
+                event.content.as_deref().unwrap_or("内容未记录"),
+                event
+                    .occurred_at
+                    .as_deref()
+                    .map(|value| format!(" · {value}"))
+                    .unwrap_or_default(),
+                event
+                    .step_status
+                    .as_deref()
+                    .map(|value| format!(" · {value}"))
+                    .unwrap_or_default()
+            );
+            ManifestDetail {
+                title: SharedString::from(title),
+                detail: SharedString::from(detail),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    app.set_group_details(model_rc(groups));
+    app.set_assay_details(model_rc(assays));
+    app.set_allocation_details(model_rc(allocations));
+    app.set_evidence_details(model_rc(evidence));
+    app.set_conflict_details(model_rc(conflicts));
+    app.set_check_details(model_rc(checks));
+    app.set_planned_output_details(model_rc(planned_outputs));
+    app.set_protocol_manifest(model_rc(protocol_manifest));
+    app.set_material_manifest(model_rc(material_manifest));
+    app.set_execution_events(model_rc(events));
+    app.set_design_hypothesis(opt_text(&design.hypothesis));
+    app.set_design_variables(opt_text(&design.independent_variables));
+    app.set_design_primary_endpoint(opt_text(&design.primary_endpoint));
+    app.set_design_run_plan(SharedString::from(match design.planned_run_count {
+        Some(count) => format!(
+            "{count} 轮 · {}",
+            design
+                .planned_run_relationship
+                .as_deref()
+                .map(run_relation_text)
+                .unwrap_or_else(|| "关系待确认".to_owned())
+        ),
+        None => "未记录".to_owned(),
+    }));
+    app.set_design_revision_text(SharedString::from(design_revision_text));
+    app.set_frozen_note(SharedString::from(frozen_note));
+    app.set_run_meta(SharedString::from(run_meta));
+    set_question(app, design, sel);
+}
+
+fn event_type_text(value: &str) -> String {
+    match value {
+        "operation" => "操作".to_owned(),
+        "material_use" => "材料使用".to_owned(),
+        "measurement" => "测量".to_owned(),
+        "deviation" => "偏差".to_owned(),
+        "observation" => "观察".to_owned(),
+        _ => value.to_owned(),
+    }
+}
+
+fn run_relation_text(value: &str) -> String {
+    match value {
+        "independent" => "独立来源".to_owned(),
+        "same_source" => "同一来源".to_owned(),
+        "paired" => "配对/区组".to_owned(),
+        "unknown" => "关系待确认".to_owned(),
+        _ => value.to_owned(),
+    }
+}
+
 fn design_runs<'a>(model: &'a ReadModel, design_id: &str) -> Vec<&'a data::Run> {
     model
         .runs
@@ -789,6 +1603,36 @@ fn first_plate_for_context<'a>(plates: &[&'a data::Plate]) -> Option<&'a data::P
         .or_else(|| plates.first().copied())
 }
 
+fn select_mode(app: &AppWindow, model: &ReadModel, sel: &mut Selection, mode: &str) {
+    if !matches!(mode, "design" | "prepare" | "execute") {
+        return;
+    }
+    sel.mode = mode.to_owned();
+    app.set_mode(SharedString::from(mode));
+
+    if let Some(design) = active_design(model, sel) {
+        if !design.assays.iter().any(|assay| assay.id == sel.assay_id) {
+            clear_assay(app, sel);
+        }
+    } else {
+        clear_assay(app, sel);
+    }
+
+    refresh_canvas(app, model, sel);
+    let plates = refresh_plates(app, model, sel);
+    match first_plate_for_context(&plates).map(|plate| plate.id.clone()) {
+        Some(id) => select_plate(app, model, sel, &id),
+        None => clear_plate(app, sel),
+    }
+    set_workspace_details(app, model, sel);
+
+    if !sel.assay_id.is_empty() {
+        set_inspector_assay(app, model, sel);
+    } else if sel.plate_id.is_empty() {
+        clear_inspector(app);
+    }
+}
+
 fn select_run(app: &AppWindow, model: &ReadModel, sel: &mut Selection, run_id: &str) {
     let Some(run) = model.runs.iter().find(|run| run.id == run_id) else {
         return;
@@ -801,11 +1645,13 @@ fn select_run(app: &AppWindow, model: &ReadModel, sel: &mut Selection, run_id: &
     app.set_run_title(SharedString::from(run.title.as_str()));
     app.set_run_status(run_status_text(&run.status));
 
+    refresh_canvas(app, model, sel);
     let plates = refresh_plates(app, model, sel);
     match first_plate_for_context(&plates).map(|plate| plate.id.clone()) {
         Some(id) => select_plate(app, model, sel, &id),
         None => clear_plate(app, sel),
     }
+    set_workspace_details(app, model, sel);
 
     if !sel.assay_id.is_empty() {
         set_inspector_assay(app, model, sel);
@@ -815,10 +1661,7 @@ fn select_run(app: &AppWindow, model: &ReadModel, sel: &mut Selection, run_id: &
 }
 
 fn select_assay(app: &AppWindow, model: &ReadModel, sel: &mut Selection, assay_id: &str) {
-    let exists = model
-        .designs
-        .iter()
-        .find(|design| design.id == sel.design_id)
+    let exists = active_design(model, sel)
         .is_some_and(|design| design.assays.iter().any(|assay| assay.id == assay_id));
     if !exists {
         clear_assay(app, sel);
@@ -839,10 +1682,7 @@ fn select_assay(app: &AppWindow, model: &ReadModel, sel: &mut Selection, assay_i
 }
 
 fn select_group(app: &AppWindow, model: &ReadModel, sel: &mut Selection, group_id: &str) {
-    let exists = model
-        .designs
-        .iter()
-        .find(|design| design.id == sel.design_id)
+    let exists = active_design(model, sel)
         .is_some_and(|design| design.groups.iter().any(|group| group.id == group_id));
     if !exists {
         return;
@@ -953,6 +1793,9 @@ fn select_design(app: &AppWindow, model: &ReadModel, sel: &mut Selection, design
     sel.group_id.clear();
     sel.plate_id.clear();
     sel.well_id.clear();
+    sel.mode = "design".to_owned();
+    sel.draft = Draft::default();
+    app.set_mode(SharedString::from("design"));
     app.set_selected_design_id(SharedString::from(design.id.as_str()));
     app.set_selected_run_id(SharedString::from(""));
     app.set_selected_assay_id(SharedString::from(""));
@@ -1016,6 +1859,7 @@ fn select_design(app: &AppWindow, model: &ReadModel, sel: &mut Selection, design
             }
         }
     }
+    set_workspace_details(app, model, sel);
 }
 
 fn select_project(app: &AppWindow, model: &ReadModel, sel: &mut Selection, project_id: &str) {
@@ -1033,6 +1877,9 @@ fn select_project(app: &AppWindow, model: &ReadModel, sel: &mut Selection, proje
     sel.group_id.clear();
     sel.plate_id.clear();
     sel.well_id.clear();
+    sel.mode = "design".to_owned();
+    sel.draft = Draft::default();
+    app.set_mode(SharedString::from("design"));
     app.set_selected_project_id(SharedString::from(project.id.as_str()));
     app.set_selected_design_id(SharedString::from(""));
     app.set_selected_run_id(SharedString::from(""));
@@ -1182,6 +2029,49 @@ fn main() {
         let weak = app.as_weak();
         let model = Rc::clone(&model);
         let sel = Rc::clone(&sel);
+        app.on_mode_selected(move |mode| {
+            if let Some(app) = weak.upgrade() {
+                select_mode(&app, &model, &mut sel.borrow_mut(), mode.as_str());
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let model = Rc::clone(&model);
+        let sel = Rc::clone(&sel);
+        app.on_question_answered(move |kind, value| {
+            if let Some(app) = weak.upgrade() {
+                answer_question(
+                    &app,
+                    &model,
+                    &mut sel.borrow_mut(),
+                    kind.as_str(),
+                    value.as_str(),
+                );
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let model = Rc::clone(&model);
+        let sel = Rc::clone(&sel);
+        app.on_group_metric_changed(move |id, metric, value| {
+            if let Some(app) = weak.upgrade() {
+                update_group_metric(
+                    &app,
+                    &model,
+                    &mut sel.borrow_mut(),
+                    id.as_str(),
+                    metric.as_str(),
+                    value.as_str(),
+                );
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let model = Rc::clone(&model);
+        let sel = Rc::clone(&sel);
         app.on_assay_selected(move |id| {
             if let Some(app) = weak.upgrade() {
                 select_assay(&app, &model, &mut sel.borrow_mut(), id.as_str());
@@ -1252,24 +2142,43 @@ mod tests {
         data::Design {
             id: "d1".into(),
             project_id: "p1".into(),
+            revision: 1,
             title: "设计".into(),
             objective: None,
+            hypothesis: None,
             experimental_unit: None,
+            independent_variables: None,
+            primary_endpoint: None,
+            endpoint_method: None,
+            endpoint_unit: None,
+            planned_run_count: None,
+            planned_run_relationship: None,
+            analysis_plan: None,
+            randomization: None,
+            blinding: None,
+            inclusion_criteria: None,
+            exclusion_criteria: None,
+            sample_size_rationale: None,
             groups: vec![
                 data::Group {
                     id: "g1".into(),
                     name: "对照".into(),
                     role: "control".into(),
                     condition: None,
+                    independent_n: None,
+                    technical_repeats: None,
                 },
                 data::Group {
                     id: "g2".into(),
                     name: "处理".into(),
                     role: "treatment".into(),
                     condition: None,
+                    independent_n: None,
+                    technical_repeats: None,
                 },
             ],
             assays: Vec::new(),
+            planned_outputs: Vec::new(),
             sources: Vec::new(),
             conflicts: Vec::new(),
         }
@@ -1283,13 +2192,16 @@ mod tests {
             method: None,
             unit: None,
             timepoints: Vec::new(),
+            timepoint_timing: Vec::new(),
             group_ids: group_ids.into_iter().map(str::to_owned).collect(),
             group_names: group_names.into_iter().map(str::to_owned).collect(),
+            control_group_ids: Vec::new(),
             timepoint_relation: None,
             time_anchor_event: None,
             container_format: None,
             controls: Vec::new(),
             allocations: Vec::new(),
+            protocol_version_id: None,
             evidence_id: None,
         }
     }

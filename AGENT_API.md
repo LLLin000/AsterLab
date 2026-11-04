@@ -35,7 +35,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | 命令 | 用途 | 写入 |
 |---|---|---:|
 | `project.list` / `project.create` / `project.revise` | 查询、创建或按版本修订项目 | create/revise |
-| `design.list` / `design.get` / `design.create` / `design.revise` | 查询、创建、修订实验设计 | create/revise |
+| `design.list` / `design.get` / `design.map` / `design.create` / `design.revise` | 查询、只读实验地图、创建或修订实验设计 | create/revise |
 | `run.list` / `run.create` / `run.set_status` / `run.revise` | 查询、创建运行、更新状态或只修订名称/计划日期 | create/update |
 | `task.create` / `task.set_status` | 创建日历任务或更新状态 | create/update |
 | `protocol.list` / `protocol.create` / `protocol.revise` | 查询 Protocol、创建 v1、追加新版本 | create/revise |
@@ -54,6 +54,8 @@ stdout 每次只输出一行 JSON。成功结构为：
 所有工具的字段细节以 `labworkbench schema <命令>` 为准。Agent 不得自行扩展字段或把别的记录类型塞进现有工具。删除与覆盖不是 CLI 能力。
 
 设计读取与版本写入有固定结果形状：`design.get`、`design.create` 返回 `{ "design": <当前设计记录>, "version": <对应 design_version 记录> }`；`design.revise` 返回 `{ "record": <修订后的设计记录>, "version": <新建的 design_version 记录> }`。`protocol.create` 返回 Protocol 记录和 v1 正文版本，`protocol.revise` 只返回新建的正文版本记录。所有成功响应使用 `ok=true` 和工具名；失败响应使用 `ok=false`、稳定错误码和可读 `message`。每项输出字段以工具自己的 `output_schema` 为准。
+
+`design.map` 是只读实验地图投影：输入 `{ "id": "<design-id>" }`，输出 `design_id`、`revision`、`title`、`objective`、`experimental_unit`、`groups[]`、`assays[]`、`sample_links[]`、`planned_outputs[]`、`conflicts[]` 和 `unresolved[]`。它只复制已有设计字段，并由显式缺失/未解决冲突生成 `unresolved`（如独立 n、时间点、Protocol、时间点关系缺失）；不补造组别、对照、n、剂量、时间点或孔位，也不写数据库。HTTP 对应 `GET /api/designs/{id}/map`。
 
 ## Protocol 步骤块契约
 

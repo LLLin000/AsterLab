@@ -67,6 +67,7 @@ async function post(base,path,body,expected=200){
   toolCatalog=new Map(tools.tools.map(x=>[x.name,x]));
   const toolNames=tools.tools.map(x=>x.name);
   assert(toolNames.includes("design.create")&&toolNames.includes("import.study.preview")&&toolNames.includes("calculator.dilution"));
+  assert(toolNames.includes("design.map"),"design.map must be available to the Agent");
   assert(tools.tools.every(x=>typeof x.writes_data==="boolean"&&typeof x.side_effects==="string"&&x.input_schema.type==="object"&&Array.isArray(x.output_schema.oneOf)),"every tool must define input, output, and side effects");
   assert(!toolNames.includes("record.create"),"there must be no arbitrary record.create tool");
   const designSchema=JSON.parse(spawnSync(bin,["schema","design.create"],{cwd:root,env:envBase,encoding:"utf8"}).stdout);
@@ -100,6 +101,18 @@ async function post(base,path,body,expected=200){
   assert.equal(revisionResult.version.data.design_revision,3);
   const currentDesign=cli("design.get",{id:cliDesign.id}).result;
   assert.equal(currentDesign.design.revision,3);assert.equal(currentDesign.version.data.design_revision,3);
+  const cliMap=cli("design.map",{id:cliDesign.id}).result;
+  assert.equal(cliMap.groups.length,2);assert.equal(cliMap.assays.length,0);
+  assert.equal(cliMap.experimental_unit,"one independent culture well");
+  const incompleteMapDesign=cli("design.create",{project_id:cliProject.id,design:{title:"Incomplete map design",group_specs:[{name:"Unnumbered group"}],assays:[{id:"map-assay",title:"Map assay"}]}}).result.design;
+  const incompleteMap=cli("design.map",{id:incompleteMapDesign.id}).result;
+  const mapKeys=incompleteMap.unresolved.map(x=>x.key);
+  assert(mapKeys.includes("experimental_unit"));
+  assert(mapKeys.includes("groups[0].independent_n"));
+  assert(mapKeys.includes("assays.map-assay.timepoints"));
+  assert(mapKeys.includes("assays.map-assay.protocol_version_id"));
+  assert(mapKeys.includes("assays.map-assay.timepoint_relation"));
+  assert.equal(incompleteMap.groups[0].independent_n,null,"map must not invent an n");
   assert.equal(cli("record.get",{id:cliDesign.id}).result.record.id,cliDesign.id);
   const conflict=cli("design.revise",{id:cliDesign.id,expected_revision:1,changes:{objective:"stale write"}},4);
   assert.equal(conflict.error.code,"REVISION_CONFLICT");
@@ -243,6 +256,9 @@ assert.equal(apiEvent.kind,"execution_event");assert.equal(apiEvent.data.materia
 await post(base,"/api/records/update",{id:apiEvent.id,expected_revision:1,data:{...apiEvent.data,content:"overwrite"}},400);
   const assaySummaryApi=await post(base,"/api/records",{kind:"design",project_id:project.id,parent_id:project.id,data:{title:"Assay summary semantics",objective:"Synthetic UI check",group_specs:[{name:"Vehicle control",role:"control",condition:"vehicle"}],assays:[{id:"summary-assay",title:"Synthetic viability assay",endpoint:"signal",method:"resazurin",unit:"AU",timepoints:["24 h"],group_names:["Vehicle control"],sample_use_policy:"same_sample_repeated",timepoint_relation:"same_physical_sample_repeated",container_type:"plate",container_format:"24-well",controls:["Vehicle control"]}],sample_allocations:[{assay_id:"summary-assay",group_name:"Vehicle control",relation:"same_sample_repeated",timepoint_relation:"same_physical_sample_repeated",physical_slots_per_group:2}],source_evidence:[{id:"summary-a",source_document:"synthetic.md",source_locator:"paragraph 1",claim:"Two physical wells in the text.",state:"source_record"},{id:"summary-b",source_document:"synthetic.md",source_locator:"diagram",claim:"Three positions in the drawing.",state:"source_record"}],evidence_conflicts:[{id:"summary-count",topic:"Synthetic count mismatch",evidence_ids:["summary-a","summary-b"],status:"unresolved",affected_assay_ids:["summary-assay"],affects_container_estimate:true}]}});
   assert.equal(assaySummaryApi.data.evidence_conflicts[0].affects_container_estimate,true);assert.equal(assaySummaryApi.data.sample_allocations[0].physical_slots_scope,"unknown","HTTP must not infer count scope from a repeated-sample relation");
+  const assayMapApi=await (await fetch(base+"/api/designs/"+assaySummaryApi.id+"/map")).json();
+  assert.equal(assayMapApi.groups.length,1);assert.equal(assayMapApi.assays.length,1);
+  assert(assayMapApi.unresolved.some(x=>x.key==="assays.summary-assay.protocol_version_id"),"HTTP map must surface a missing Protocol");
   assert(assaySummaryApi.data.group_specs[0].id,"HTTP design creation should assign stable group IDs");
   assert.deepEqual(assaySummaryApi.data.assays[0].group_ids,[assaySummaryApi.data.group_specs[0].id],"HTTP design creation should resolve group-name references");
   const invalidApiDesign={...assaySummaryApi.data,title:"Rejected invalid API design",assays:assaySummaryApi.data.assays.map(a=>({...a,group_ids:["missing-group"],group_names:[]}))};
@@ -424,6 +440,11 @@ assert.deepEqual(apiRunAfterReject.data.material_manifest,runApi.data.material_m
      await page.locator('#design-form button[type="submit"]').click();await page.locator("#modal-root .modal").waitFor({state:"detached"});
      const roundTrip=await page.evaluate(()=>fetch("/api/state").then(r=>r.json()));l929=roundTrip.records.find(x=>x.kind==="design"&&x.data.title==="L929 材料浸提液多检测");
      assert.equal(l929.revision,2);assert.equal(l929.data.evidence_conflicts[0].status,"unresolved");assert(l929.data.sample_allocations.every(x=>x.evidence_id==="l929-0921"));
+     await page.locator('.item').filter({hasText:"L929 材料浸提液多检测"}).locator('[data-action="design-map"]').click();
+     await page.locator("#modal-root .modal").waitFor();
+     const mapText=await page.locator("#modal-root .modal").innerText();
+     assert(mapText.includes("实验地图")&&mapText.includes("检测安排")&&mapText.includes("CCK-8")&&mapText.includes("待确认"),mapText.slice(0,800));
+     await page.locator('#modal-root .modal-head [data-action="close-modal"]').click();await page.locator("#modal-root .modal").waitFor({state:"detached"});
      await page.locator('[data-action="load-case"][data-case="sa"]').click();
      await page.locator('#design-form [data-stage-panel="0"] [data-action="design-next"]').click();
      await page.locator('#design-form [data-stage-panel="1"] [data-action="design-next"]').click();

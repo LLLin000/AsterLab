@@ -1,8 +1,8 @@
-// AsterLab 原生工作空间：稀疏导航、实验结构画布、上下文检查器、可展开培养板。
-// 只读展示；所有选择与展开仅是界面状态，不产生执行事件。
-import { ScrollView, AboutSlint } from "std-widgets.slint";
+// AsterLab 原生工作空间：设计 / 准备 / 执行三种模式共用同一份只读数据。
+// 设计模式看计划，准备模式看物料与容器，执行模式看冻结版本与实际记录。
+import { ScrollView, AboutSlint, LineEdit } from "std-widgets.slint";
 import { Theme } from "Theme.slint";
-import { SectionLabel, QuietButton, Chip, NavRow, PlateTab, InspectorRow } from "Components.slint";
+import { SectionLabel, QuietButton, NavRow, PlateTab, InspectorRow, ModeTab, KeyValueRow, CheckRow } from "Components.slint";
 import { ExperimentCanvas, GroupNodeData, AssayNodeData, LinkSegment } from "ExperimentCanvas.slint";
 import { PlateView, WellCell, AxisLabel } from "PlateView.slint";
 
@@ -37,6 +37,143 @@ export struct InspectorItem {
     label: string,
     value: string,
     missing: bool
+}
+
+export struct QuestionOption {
+    label: string,
+    value: string
+}
+
+export struct GroupDetail {
+    id: string,
+    name: string,
+    role: string,
+    condition: string,
+    n_text: string,
+    technical_text: string
+}
+
+export struct AssayDetail {
+    id: string,
+    title: string,
+    endpoint: string,
+    method: string,
+    timepoints: string,
+    timing: string,
+    relation: string,
+    container: string,
+    protocol: string,
+    coverage: string,
+    slots: string,
+    controls: string
+}
+
+export struct AllocationDetail {
+    assay: string,
+    group: string,
+    slots: string,
+    scope: string,
+    source: string,
+    output: string
+}
+
+export struct EvidenceDetail {
+    document: string,
+    locator: string,
+    claim: string,
+    state: string
+}
+
+export struct ConflictDetail {
+    topic: string,
+    status: string,
+    evidence: string,
+    affected: string
+}
+
+export struct CheckDetail {
+    level: string,
+    title: string,
+    detail: string
+}
+
+export struct PlannedOutputDetail {
+    title: string,
+    protocol: string,
+    evidence: string
+}
+
+export struct ManifestDetail {
+    title: string,
+    detail: string
+}
+
+component PlateWorkspace inherits VerticalLayout {
+    in property <[PlateEntry]> plates;
+    in property <string> selected_plate_id;
+    in property <bool> has_plate;
+    in property <string> plate_name;
+    in property <string> plate_meta;
+    in property <int> plate_rows;
+    in property <int> plate_columns;
+    in property <int> plate_mapped_count;
+    in property <[WellCell]> wells;
+    in property <string> selected_well_id;
+    in property <[AxisLabel]> row_labels;
+    in property <[AxisLabel]> column_labels;
+
+    callback plate_selected(string);
+    callback well_selected(string);
+
+    spacing: 12px;
+    HorizontalLayout {
+        spacing: 12px;
+        SectionLabel {
+            text: "实际培养板";
+            width: 88px;
+            horizontal-stretch: 0;
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            for pl in plates : PlateTab {
+                name: pl.name == "" ? "未命名培养板" : pl.name;
+                detail: "\{pl.mapped_count} 孔";
+                selected: pl.id == selected_plate_id;
+                clicked => { root.plate_selected(pl.id); }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+
+    if (has_plate) : PlateView {
+        width: 520px;
+        horizontal-stretch: 0;
+        plate_name: root.plate_name;
+        plate_meta: root.plate_meta;
+        plate_rows: root.plate_rows;
+        plate_columns: root.plate_columns;
+        mapped_count: root.plate_mapped_count;
+        wells: root.wells;
+        selected_well_id: root.selected_well_id;
+        row_labels: root.row_labels;
+        column_labels: root.column_labels;
+        well_selected(id) => { root.well_selected(id); }
+    }
+
+    if (!has_plate) : Rectangle {
+        height: 72px;
+        background: Theme.surface;
+        border-radius: Theme.radius-md;
+        border-width: 1px;
+        border-color: Theme.line;
+        Text {
+            text: "当前执行批次没有该检测的实际培养板记录";
+            color: Theme.ink-3;
+            font-size: Theme.font-small;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
 }
 
 export component AboutWindow inherits Window {
@@ -86,6 +223,35 @@ export component AppWindow inherits Window {
     in-out property <[AxisLabel]> row_labels;
     in-out property <[AxisLabel]> column_labels;
     in-out property <[InspectorItem]> inspector_fields;
+    in-out property <[GroupDetail]> group_details;
+    in-out property <[AssayDetail]> assay_details;
+    in-out property <[AllocationDetail]> allocation_details;
+    in-out property <[EvidenceDetail]> evidence_details;
+    in-out property <[ConflictDetail]> conflict_details;
+    in-out property <[CheckDetail]> check_details;
+    in-out property <[PlannedOutputDetail]> planned_output_details;
+    in-out property <[ManifestDetail]> protocol_manifest;
+    in-out property <[ManifestDetail]> material_manifest;
+    in-out property <[ManifestDetail]> execution_events;
+    in-out property <[QuestionOption]> question_options;
+    in-out property <string> question_kind;
+    in-out property <string> question_title;
+    in-out property <string> question_detail;
+    in-out property <string> design_comparison;
+    in-out property <string> draft_note;
+
+    in-out property <string> mode: "design";
+    in-out property <bool> show_graph: false;
+    in-out property <bool> show_design_basis: false;
+    in-out property <bool> show_evidence: false;
+    in-out property <bool> show_all_checks: false;
+    in-out property <string> design_hypothesis;
+    in-out property <string> design_variables;
+    in-out property <string> design_primary_endpoint;
+    in-out property <string> design_run_plan;
+    in-out property <string> design_revision_text;
+    in-out property <string> frozen_note;
+    in-out property <string> run_meta;
 
     in-out property <string> selected_project_id;
     in-out property <string> selected_design_id;
@@ -123,6 +289,9 @@ export component AppWindow inherits Window {
     callback project_selected(string);
     callback design_selected(string);
     callback run_selected(string);
+    callback mode_selected(string);
+    callback question_answered(string, string);
+    callback group_metric_changed(string, string, string);
     callback assay_selected(string);
     callback group_selected(string);
     callback plate_selected(string);
@@ -198,9 +367,11 @@ export component AppWindow inherits Window {
                     max-lines: 1;
                 }
                 Rectangle { horizontal-stretch: 1; }
-                Chip {
+                Text {
                     text: "只读预览";
-                    tone: "neutral";
+                    color: Theme.ink-3;
+                    font-size: Theme.font-caption;
+                    vertical-alignment: center;
                 }
                 Text {
                     text: data_counts;
@@ -222,7 +393,7 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             spacing: 0px;
 
-            // 左：项目 / 实验设计两级导航。
+            // 左：项目 / 实验设计 / 执行批次。
             nav := Rectangle {
                 width: 216px;
                 background: Theme.sidebar;
@@ -284,12 +455,12 @@ export component AppWindow inherits Window {
             }
             Rectangle { width: 1px; background: Theme.line; }
 
-            // 中：设计摘要 + 实验结构画布 + 培养板。
+            // 中：设计 / 准备 / 执行。
             ScrollView {
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
 
-                content := VerticalLayout {
+                VerticalLayout {
                     vertical-stretch: 0;
                     padding-left: 32px;
                     padding-right: 32px;
@@ -332,115 +503,648 @@ export component AppWindow inherits Window {
                             font-size: Theme.font-secondary;
                             wrap: word-wrap;
                         }
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Chip { text: "\{group_count} 组"; horizontal-stretch: 0; }
-                            Chip { text: "\{assay_count} 项检测"; horizontal-stretch: 0; }
-                            Chip {
-                                text: "执行 · " + (run_status == "" ? "待确认" : run_status);
-                                horizontal-stretch: 0;
-                            }
+                        Text {
+                            text: "\{group_count} 组 · \{assay_count} 项检测 · " + design_revision_text
+                                + " · 执行 · " + (run_status == "" ? "待确认" : run_status);
+                            color: Theme.ink-3;
+                            font-size: Theme.font-small;
+                            wrap: word-wrap;
                         }
                         Text {
-                            text: "实验单元：" + (experimental_unit == "" ? "待确认" : experimental_unit);
+                            text: "实验单位：" + (experimental_unit == "" ? "待确认" : experimental_unit);
                             color: Theme.ink-3;
                             font-size: Theme.font-secondary;
                             wrap: word-wrap;
                         }
                     }
 
-                    if (design_title != "") : VerticalLayout {
+                    if (design_title != "") : HorizontalLayout {
                         vertical-stretch: 0;
                         height: self.preferred-height;
-                        spacing: 8px;
-                        HorizontalLayout {
-                            spacing: 12px;
-                            SectionLabel {
-                                text: "实验结构";
-                                width: 76px;
-                                horizontal-stretch: 0;
-                            }
-                            Text {
-                                text: "选择组别或检测查看记录；连线仅表示该检测明确列出的组别。";
-                                color: Theme.ink-3;
-                                font-size: Theme.font-small;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                                wrap: word-wrap;
-                                max-lines: 1;
-                                overflow: elide;
+                        spacing: 12px;
+                        Rectangle {
+                            background: Theme.surface-inset;
+                            border-radius: Theme.radius-md;
+                            HorizontalLayout {
+                                padding: 3px;
+                                spacing: 2px;
+                                ModeTab {
+                                    label: "设计";
+                                    selected: mode == "design";
+                                    clicked => { root.mode_selected("design"); }
+                                }
+                                ModeTab {
+                                    label: "准备";
+                                    selected: mode == "prepare";
+                                    clicked => { root.mode_selected("prepare"); }
+                                }
+                                ModeTab {
+                                    label: "执行";
+                                    selected: mode == "execute";
+                                    clicked => { root.mode_selected("execute"); }
+                                }
                             }
                         }
-                        HorizontalLayout {
-                            alignment: center;
-                            ExperimentCanvas {
-                                width: root.canvas_width;
-                                height: root.canvas_height + 34px;
-                                content_w: root.canvas_width;
-                                content_h: root.canvas_height;
-                                assay_x: root.assay_column_x;
-                                group_nodes: root.group_nodes;
-                                assay_nodes: root.assay_nodes;
-                                link_segments: root.link_segments;
-                                group_clicked(id) => { root.group_selected(id); }
-                                assay_clicked(id) => { root.assay_selected(id); }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text {
+                            text: mode == "design"
+                                ? "当前设计版本"
+                                : (mode == "prepare" ? "执行批次的冻结设计" : "本次实际执行");
+                            color: Theme.ink-3;
+                            font-size: Theme.font-caption;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    if (design_title != "" && mode == "design" && question_title != "") : Rectangle {
+                        background: Theme.surface;
+                        border-radius: Theme.radius-md;
+                        border-width: 1px;
+                        border-color: Theme.accent-line;
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 8px;
+                            SectionLabel { text: "下一项决定"; }
+                            Text {
+                                text: question_title;
+                                color: Theme.ink;
+                                font-size: Theme.font-subhead;
+                                font-weight: 600;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: question_detail;
+                                color: Theme.ink-2;
+                                font-size: Theme.font-secondary;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                for o in question_options : QuietButton {
+                                    label: o.label;
+                                    horizontal-stretch: 0;
+                                    clicked => { root.question_answered(question_kind, o.value); }
+                                }
+                            }
+                            Text {
+                                text: draft_note == "" ? "选择只更新本地草案，不写入数据库。" : draft_note;
+                                color: Theme.ink-3;
+                                font-size: Theme.font-caption;
+                                wrap: word-wrap;
                             }
                         }
                     }
 
-                    if (design_title != "") : VerticalLayout {
+                    // ---------- 设计模式 ----------
+                    if (design_title != "" && mode == "design") : VerticalLayout {
                         vertical-stretch: 0;
                         height: self.preferred-height;
-                        spacing: 12px;
-                        HorizontalLayout {
-                            spacing: 12px;
-                            SectionLabel {
-                                text: "培养板";
-                                width: 76px;
-                                horizontal-stretch: 0;
-                            }
+                        spacing: 24px;
+
+                        VerticalLayout {
+                            spacing: 8px;
                             HorizontalLayout {
-                                spacing: 6px;
-                                for pl in plates : PlateTab {
-                                    name: pl.name == "" ? "未命名培养板" : pl.name;
-                                    detail: "\{pl.mapped_count} 孔";
-                                    selected: pl.id == selected_plate_id;
-                                    clicked => { root.plate_selected(pl.id); }
+                                spacing: 12px;
+                                SectionLabel { text: "设计依据"; width: 88px; horizontal-stretch: 0; }
+                                Text {
+                                    text: "假设、自变量与主要指标默认收起；当前设计版本见顶部。";
+                                    color: Theme.ink-3;
+                                    font-size: Theme.font-small;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                QuietButton {
+                                    label: show_design_basis ? "收起" : "展开";
+                                    compact: true;
+                                    clicked => { show_design_basis = !show_design_basis; }
                                 }
                             }
-                            Rectangle { horizontal-stretch: 1; }
+                            if (show_design_basis) : HorizontalLayout {
+                                spacing: 32px;
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 6px;
+                                    KeyValueRow {
+                                        label: "主要比较";
+                                        value: design_comparison;
+                                        missing: design_comparison == "未记录" || design_comparison == "待确认";
+                                    }
+                                    KeyValueRow {
+                                        label: "假设";
+                                        value: design_hypothesis;
+                                        missing: design_hypothesis == "未记录";
+                                    }
+                                    KeyValueRow {
+                                        label: "自变量";
+                                        value: design_variables;
+                                        missing: design_variables == "未记录";
+                                    }
+                                    KeyValueRow {
+                                        label: "主要指标";
+                                        value: design_primary_endpoint;
+                                        missing: design_primary_endpoint == "未记录";
+                                    }
+                                }
+                                Rectangle { width: 1px; background: Theme.line; }
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 6px;
+                                    KeyValueRow {
+                                        label: "计划轮次";
+                                        value: design_run_plan;
+                                        missing: design_run_plan == "未记录";
+                                    }
+                                    KeyValueRow {
+                                        label: "实验单位";
+                                        value: experimental_unit;
+                                        missing: experimental_unit == "未记录" || experimental_unit == "待确认";
+                                    }
+                                }
+                            }
                         }
 
-                        if (has_plate) : PlateView {
-                            width: 520px;
-                            horizontal-stretch: 0;
+                        VerticalLayout {
+                            spacing: 8px;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SectionLabel { text: "组别"; width: 88px; horizontal-stretch: 0; }
+                                Text {
+                                    text: "独立 n 与技术重复分开显示；未记录时不推算。";
+                                    color: Theme.ink-3;
+                                    font-size: Theme.font-small;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                            for g in group_details : Rectangle {
+                                background: g.id == selected_group_id ? Theme.accent-tint : transparent;
+                                HorizontalLayout {
+                                    padding: 10px;
+                                    spacing: 10px;
+                                    Text {
+                                        text: g.name;
+                                        width: 104px;
+                                        color: Theme.ink;
+                                        font-size: Theme.font-body;
+                                        font-weight: 600;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: g.role;
+                                        width: 42px;
+                                        color: Theme.ink-3;
+                                        font-size: Theme.font-small;
+                                        wrap: word-wrap;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        width: 96px;
+                                        Text {
+                                            text: "n";
+                                            color: Theme.ink-3;
+                                            font-size: Theme.font-caption;
+                                            vertical-alignment: center;
+                                        }
+                                        LineEdit {
+                                            text: g.n_text;
+                                            width: 56px;
+                                            height: 24px;
+                                            font-size: Theme.font-small;
+                                            accepted(text) => { root.group_metric_changed(g.id, "n", text); }
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        width: 108px;
+                                        Text {
+                                            text: "技术";
+                                            color: Theme.ink-3;
+                                            font-size: Theme.font-caption;
+                                            vertical-alignment: center;
+                                        }
+                                        LineEdit {
+                                            text: g.technical_text;
+                                            width: 56px;
+                                            height: 24px;
+                                            font-size: Theme.font-small;
+                                            accepted(text) => { root.group_metric_changed(g.id, "technical", text); }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.group_selected(g.id); }
+                                }
+                                accessible-role: button;
+                                accessible-label: "组别 " + g.name;
+                                accessible-action-default => { root.group_selected(g.id); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SectionLabel { text: "实验结构"; width: 88px; horizontal-stretch: 0; }
+                                Text {
+                                    text: "组别与检测的明确关系；默认折叠，避免占据设计主画布。";
+                                    color: Theme.ink-3;
+                                    font-size: Theme.font-small;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                QuietButton {
+                                    label: show_graph ? "收起关系图" : "显示关系图";
+                                    compact: true;
+                                    clicked => { show_graph = !show_graph; }
+                                }
+                            }
+                            if (show_graph) : HorizontalLayout {
+                                alignment: center;
+                                ExperimentCanvas {
+                                    width: root.canvas_width;
+                                    height: root.canvas_height + 34px;
+                                    content_w: root.canvas_width;
+                                    content_h: root.canvas_height;
+                                    assay_x: root.assay_column_x;
+                                    group_nodes: root.group_nodes;
+                                    assay_nodes: root.assay_nodes;
+                                    link_segments: root.link_segments;
+                                    group_clicked(id) => { root.group_selected(id); }
+                                    assay_clicked(id) => { root.assay_selected(id); }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "检测"; }
+                            for a in assay_details : Rectangle {
+                                background: a.id == selected_assay_id ? Theme.accent-tint : transparent;
+                                VerticalLayout {
+                                    padding-top: 12px;
+                                    padding-bottom: 12px;
+                                    spacing: 3px;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Text {
+                                            text: a.title;
+                                            color: Theme.ink;
+                                            font-size: Theme.font-subhead;
+                                            font-weight: 600;
+                                            horizontal-stretch: 1;
+                                            wrap: word-wrap;
+                                        }
+                                        Text {
+                                            text: a.coverage;
+                                            color: Theme.ink-3;
+                                            font-size: Theme.font-small;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: a.protocol;
+                                            color: a.protocol == "未引用 Protocol" ? Theme.warn-ink : Theme.ink-2;
+                                            font-size: Theme.font-small;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Text {
+                                        text: a.endpoint + " · " + a.timepoints + " · " + a.relation;
+                                        color: Theme.ink-2;
+                                        font-size: Theme.font-secondary;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.assay_selected(a.id); }
+                                }
+                                accessible-role: button;
+                                accessible-label: "检测 " + a.title;
+                                accessible-action-default => { root.assay_selected(a.id); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "样本分配"; }
+                            Text {
+                                text: "每条记录对应一项检测的一个组；不汇总成跨组/跨时间唯一孔位总数。";
+                                color: Theme.ink-3;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                            for al in allocation_details : Text {
+                                text: al.assay + " · " + al.group + " · " + al.slots + " · "
+                                    + al.scope + " · " + al.source + " · " + al.output;
+                                color: Theme.ink-2;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "证据与冲突"; }
+                            for e in evidence_details : Rectangle {
+                                background: transparent;
+                                VerticalLayout {
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    spacing: 2px;
+                                    Text {
+                                        text: e.claim;
+                                        color: Theme.ink;
+                                        font-size: Theme.font-small;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: (e.document == "未记录" ? "来源未记录" : e.document)
+                                            + (e.locator == "未记录" ? "" : " · " + e.locator)
+                                            + " · " + e.state;
+                                        color: Theme.ink-3;
+                                        font-size: Theme.font-caption;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                            }
+                            for c in conflict_details : Rectangle {
+                                background: transparent;
+                                VerticalLayout {
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    spacing: 2px;
+                                    Text {
+                                        text: c.topic;
+                                        color: Theme.warn-ink;
+                                        font-size: Theme.font-small;
+                                        font-weight: 500;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: c.status + (c.evidence == "" ? "" : " · " + c.evidence)
+                                            + (c.affected == "" ? "" : " · 影响 " + c.affected);
+                                        color: Theme.ink-3;
+                                        font-size: Theme.font-caption;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "只读检查（数据完整性）"; }
+                            for c in check_details : CheckRow {
+                                level: c.level;
+                                title: c.title;
+                                detail: c.detail;
+                            }
+                        }
+                    }
+
+                    // ---------- 准备模式 ----------
+                    if (design_title != "" && mode == "prepare") : VerticalLayout {
+                        vertical-stretch: 0;
+                        height: self.preferred-height;
+                        spacing: 24px;
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "执行批次"; }
+                            KeyValueRow { label: "批次"; value: run_meta; missing: run_meta == "未记录"; }
+                            KeyValueRow { label: "设计版本"; value: design_revision_text; }
+                            KeyValueRow { label: "冻结状态"; value: frozen_note; missing: false; }
+                            Rectangle { height: 1px; background: Theme.line; }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "计划产物"; }
+                            if (planned_output_details.length == 0) : Text {
+                                text: "当前设计没有 planned_outputs 记录；不能推断共享材料。";
+                                color: Theme.ink-3;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                            for p in planned_output_details : Rectangle {
+                                background: transparent;
+                                VerticalLayout {
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    spacing: 2px;
+                                    Text { text: p.title; color: Theme.ink; font-size: Theme.font-body; wrap: word-wrap; }
+                                    Text { text: p.protocol + " · " + p.evidence; color: Theme.ink-3; font-size: Theme.font-small; wrap: word-wrap; }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "计划容器位"; }
+                            Text {
+                                text: "以下为每条 sample_allocations 记录；不汇总成跨组/跨时间唯一孔位总数。";
+                                color: Theme.ink-3;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                            for al in allocation_details : Rectangle {
+                                background: transparent;
+                                VerticalLayout {
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    spacing: 2px;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Text { text: al.assay; color: Theme.ink; font-size: Theme.font-body; horizontal-stretch: 1; }
+                                        Text { text: al.slots; color: Theme.ink-2; font-size: Theme.font-small; }
+                                    }
+                                    Text {
+                                        text: al.group + " · " + al.scope + " · " + al.source + " · " + al.output;
+                                        color: Theme.ink-3;
+                                        font-size: Theme.font-small;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                            }
+                        }
+
+                        PlateWorkspace {
+                            plates: root.plates;
+                            selected_plate_id: root.selected_plate_id;
+                            has_plate: root.has_plate;
                             plate_name: root.plate_name;
                             plate_meta: root.plate_meta;
                             plate_rows: root.plate_rows;
                             plate_columns: root.plate_columns;
-                            mapped_count: root.plate_mapped_count;
+                            plate_mapped_count: root.plate_mapped_count;
                             wells: root.wells;
                             selected_well_id: root.selected_well_id;
                             row_labels: root.row_labels;
                             column_labels: root.column_labels;
+                            plate_selected(id) => { root.plate_selected(id); }
                             well_selected(id) => { root.well_selected(id); }
                         }
 
-                        if (!has_plate) : Rectangle {
-                            height: 72px;
-                            background: Theme.surface;
-                            border-radius: Theme.radius-md;
-                            border-width: 1px;
-                            border-color: Theme.line;
-                            Text {
-                                text: selected_assay_id != ""
-                                    ? "该检测暂无培养板记录"
-                                    : "当前设计没有培养板记录";
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "准备检查"; }
+                            for c in check_details : CheckRow {
+                                level: c.level;
+                                title: c.title;
+                                detail: c.detail;
+                            }
+                        }
+                    }
+
+                    // ---------- 执行模式 ----------
+                    if (design_title != "" && mode == "execute") : VerticalLayout {
+                        vertical-stretch: 0;
+                        height: self.preferred-height;
+                        spacing: 24px;
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "本次执行"; }
+                            KeyValueRow { label: "批次"; value: run_meta; missing: run_meta == "未记录"; }
+                            KeyValueRow { label: "设计版本"; value: design_revision_text; }
+                            KeyValueRow { label: "冻结状态"; value: frozen_note; }
+                            Rectangle { height: 1px; background: Theme.line; }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "Protocol 清单"; }
+                            if (protocol_manifest.length == 0) : Text {
+                                text: "该执行批次没有冻结的 protocol_manifest；不能生成操作步骤。";
+                                color: Theme.warn-ink;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                            for m in protocol_manifest : Rectangle {
+                                background: transparent;
+                                VerticalLayout {
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    spacing: 2px;
+                                    Text { text: m.title; color: Theme.ink; font-size: Theme.font-body; wrap: word-wrap; }
+                                    Text { text: m.detail; color: Theme.ink-3; font-size: Theme.font-small; wrap: word-wrap; }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "材料清单"; }
+                            if (material_manifest.length == 0) : Text {
+                                text: "该执行批次没有 material_manifest 记录。";
                                 color: Theme.ink-3;
                                 font-size: Theme.font-small;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                                wrap: word-wrap;
                             }
+                            for m in material_manifest : Rectangle {
+                                background: transparent;
+                                VerticalLayout {
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    spacing: 2px;
+                                    Text { text: m.title; color: Theme.ink; font-size: Theme.font-body; wrap: word-wrap; }
+                                    Text { text: m.detail; color: Theme.ink-3; font-size: Theme.font-small; wrap: word-wrap; }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "执行事件"; }
+                            if (execution_events.length == 0) : Text {
+                                text: "当前数据库没有 execution_event 记录；步骤完成状态不会由界面推断。";
+                                color: Theme.ink-3;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                            for e in execution_events : Rectangle {
+                                background: transparent;
+                                VerticalLayout {
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+                                    spacing: 2px;
+                                    Text { text: e.title; color: Theme.ink; font-size: Theme.font-body; wrap: word-wrap; }
+                                    Text { text: e.detail; color: Theme.ink-3; font-size: Theme.font-small; wrap: word-wrap; }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.line;
+                                }
+                            }
+                        }
+
+                        PlateWorkspace {
+                            plates: root.plates;
+                            selected_plate_id: root.selected_plate_id;
+                            has_plate: root.has_plate;
+                            plate_name: root.plate_name;
+                            plate_meta: root.plate_meta;
+                            plate_rows: root.plate_rows;
+                            plate_columns: root.plate_columns;
+                            plate_mapped_count: root.plate_mapped_count;
+                            wells: root.wells;
+                            selected_well_id: root.selected_well_id;
+                            row_labels: root.row_labels;
+                            column_labels: root.column_labels;
+                            plate_selected(id) => { root.plate_selected(id); }
+                            well_selected(id) => { root.well_selected(id); }
                         }
                     }
                 }

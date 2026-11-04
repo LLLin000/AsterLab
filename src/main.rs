@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -167,6 +167,12 @@ async fn preview_block(
     let db = lock(&s)?;
     let result = cli::preview_protocol_block(&db, &input.block_version_id, &input.bindings)
         .map_err(ApiError::from_cli)?;
+    Ok(Json(result))
+}
+
+async fn get_design_map(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    let db = lock(&s)?;
+    let result = cli::design_map(&db, &id).map_err(ApiError::from_cli)?;
     Ok(Json(result))
 }
 
@@ -672,6 +678,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/", get(index))
         .route("/api/health", get(health))
         .route("/api/state", get(get_state))
+        .route("/api/designs/{id}/map", get(get_design_map))
         .route("/api/protocol-blocks/preview", post(preview_block))
         .route("/api/records", post(create_record))
         .route("/api/records/update", post(update_record))

@@ -4,6 +4,16 @@
 
 `DESIGN.md` 继续规定“界面怎么画”；本文件规定“用户如何完成实验”。两者分开评审。
 
+## 实施进度（2026-11-05）
+
+- P0 上下文：已完成。显式 Run；孔板按 Run + Assay 过滤；切换检测不残留无关板。
+- P1 读取模型：部分完成。桌面端已读取 `design_version.snapshot`、`sample_allocations`、
+  `planned_outputs`、`protocol_manifest`、`material_manifest`、`execution_event`、组别 n 与技术重复。
+  当前 fixture 的 Protocol/材料清单为空，因此执行步骤仍无法生成；UI 明确显示缺失，不伪造步骤。
+- P2 工作区：已完成初版。设计 / 准备 / 执行三种模式共用同一外壳；设计模式显示设计摘要、
+  扁平组别/检测表、样本分配、证据/冲突和数据完整性检查；准备/执行读取冻结快照。
+- P3 操作可视化、P4 实际记录闭环、P5 性能复测：未实现。
+
 ## 1. P1 的真实定位
 
 P1 验证了这些技术能力：
@@ -25,6 +35,10 @@ P1 没有验证产品主线。它把 **Design Overview** 当成了整个应用�
 | Record | 只读孔位属性 | 实际事件、偏差、完成状态 |
 
 因此 P1 可以作为“设计总览”，不能作为“实验操作台”。
+
+> 工具/仪器的正确形态不是独立“工具中心”，而是 Protocol 步骤中的可插拔模块：在步骤列表的
+> “+”处按上下文插入，不弹出“是否使用某仪器”的全局询问。模块目录、参数契约与插入规则见
+> [`instrument-step-modules.md`](./instrument-step-modules.md)。
 
 ## 2. 目标对象模型
 
@@ -197,3 +211,19 @@ P1 实测（单机，提交记录）：
 - 软件渲染：63ms；私有内存 6.9MB；空闲 0%。
 
 正式默认后端不应因“有 GPU”自动选 FemtoVG。P5 必须先定位空闲重绘来源，再按空闲 CPU、内存和复杂场景帧率共同决定。
+
+## 11. 仪器与操作模块（待实现）
+
+完整契约与目录见 [`instrument-step-modules.md`](./instrument-step-modules.md)。
+后端 schema、前端编辑器与分阶段实现见
+[`2026-11-05-step-editor-implementation-plan.md`](./2026-11-05-step-editor-implementation-plan.md)。
+下一轮优先切片（只读实验地图 + 执行台）见
+[`2026-11-05-experiment-map-and-agent-contract.md`](./2026-11-05-experiment-map-and-agent-contract.md)。
+
+P3/P4 的前置条件：
+
+- 步骤列表支持在任意位置插入/删除仪器模块；插入不改动组别、n、检测和样本分配。
+- 插入菜单按当前步骤上下文过滤；不显示“是否使用某仪器”的全局弹窗。
+- 每个模块带参数、单位、约束、未知状态和 Run 记录字段；型号未知时不套用具体规格。
+- 仪器模块的原始观测与派生结果分开；读板/成像/流式等不自动生成科学结论。
+- 同一模块两次使用是两个独立 `BlockUse`；修改一处参数不影响另一处。

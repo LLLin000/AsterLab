@@ -4,14 +4,14 @@ import { Theme } from "Theme.slint";
 /// 分区小标题：11px / 600 / 低对比。
 export component SectionLabel inherits Rectangle {
     in property <string> text;
-    height: 26px;
+    height: 24px;
     background: transparent;
     Text {
         text: root.text;
-        color: Theme.ink-2;
-        font-size: Theme.font-small;
-        font-weight: 600;
-        letter-spacing: 0.4px;
+        color: Theme.ink-3;
+        font-size: Theme.font-caption;
+        font-weight: 500;
+        letter-spacing: 0.3px;
         vertical-alignment: center;
         wrap: no-wrap;
         overflow: elide;
@@ -27,6 +27,7 @@ export component QuietButton inherits Rectangle {
     callback clicked();
 
     height: compact ? 26px : 28px;
+    width: label.preferred-width + (primary ? 24px : 20px);
     border-radius: Theme.radius-sm;
     background: primary
         ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
@@ -37,7 +38,7 @@ export component QuietButton inherits Rectangle {
     HorizontalLayout {
         padding-left: primary ? 12px : 10px;
         padding-right: primary ? 12px : 10px;
-        Text {
+        label := Text {
             text: root.label;
             color: primary ? white : Theme.ink-2;
             font-size: root.compact ? Theme.font-caption : Theme.font-small;
@@ -179,6 +180,96 @@ export component PlateTab inherits Rectangle {
     accessible-action-default => { root.clicked(); }
 }
 
+/// 工作模式页签：设计 / 准备 / 执行。
+export component ModeTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 28px;
+    border-radius: Theme.radius-sm;
+    background: selected ? Theme.surface : (touch.has-hover ? Theme.hover : transparent);
+    border-width: selected ? 1px : 0px;
+    border-color: Theme.line;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        Text {
+            text: root.label;
+            color: selected ? Theme.ink : Theme.ink-2;
+            font-size: Theme.font-small;
+            font-weight: selected ? 600 : 500;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+}
+
+/// 标签 + 值的一行，用于设计摘要与卡片。
+export component KeyValueRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> missing: false;
+
+    spacing: 12px;
+    Text {
+        text: root.label;
+        width: 104px;
+        color: Theme.ink-3;
+        font-size: Theme.font-caption;
+        vertical-alignment: top;
+        wrap: word-wrap;
+    }
+    Text {
+        text: root.value;
+        color: root.missing ? Theme.ink-3 : Theme.ink;
+        font-size: Theme.font-body;
+        horizontal-stretch: 1;
+        wrap: word-wrap;
+    }
+}
+
+/// 只读检查项；文字承担级别，颜色只辅助。
+export component CheckRow inherits HorizontalLayout {
+    in property <string> level;
+    in property <string> title;
+    in property <string> detail;
+
+    spacing: 8px;
+    Rectangle {
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        y: 6px;
+        background: level == "warn" ? Theme.warn-ink : Theme.ink-3;
+    }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text {
+            text: root.title;
+            color: Theme.ink;
+            font-size: Theme.font-small;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.detail;
+            color: Theme.ink-3;
+            font-size: Theme.font-small;
+            wrap: word-wrap;
+        }
+    }
+}
+
 /// 检查器行：section 是分区标题，field 是“标签 + 值”。
 /// 继承 VerticalLayout，让多行值自然撑高，避免固定高度导致重叠。
 export component InspectorRow inherits VerticalLayout {
@@ -191,11 +282,11 @@ export component InspectorRow inherits VerticalLayout {
 
     if (kind == "section") : Text {
         text: root.label;
-        height: 26px;
-        color: Theme.ink-2;
-        font-size: Theme.font-small;
-        font-weight: 600;
-        letter-spacing: 0.4px;
+        height: 24px;
+        color: Theme.ink-3;
+        font-size: Theme.font-caption;
+        font-weight: 500;
+        letter-spacing: 0.3px;
         vertical-alignment: bottom;
     }
 

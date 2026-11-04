@@ -1,202 +1,382 @@
-# AsterLab Design System
-
-本文件是界面的唯一设计口径。实现与评审都以此为准；新增组件前先在这里找到规则，找不到就先补规则，而不是临时决定。
-
-参考基线：
-- Vercel Geist：低装饰、单强调色、1px 描边、4px 间距体系、以留白和排版建立层级；正文 14/13，次要 12，标题 16–24。
-- Apple HIG：macOS 默认正文 13pt、最小 10pt；层级靠字号、字重与颜色，而不是阴影；少字体、少字重；交互目标要足够大。
-- 本项目额外约束：科学数据必须可追溯；未记录、待确认、已记录映射是三种不同状态，不能互相替代。
-
+---
+version: alpha
+name: AsterLab
+description: "A quiet, task-first native research workspace. Warm neutral canvas, one violet accent reserved for selection and primary action, hairline structure instead of card stacks, and a typography ladder where black body text always outranks gray labels."
+colors:
+  accent: "#5b45c9"
+  accent-hover: "#4b37ae"
+  accent-soft: "#efebfb"
+  accent-tint: "#faf8ff"
+  accent-line: "#cfc4f0"
+  ink: "#1c1b18"
+  ink-muted: "#5f5a52"
+  ink-subtle: "#8f897f"
+  canvas: "#f7f6f3"
+  sidebar: "#f1efea"
+  surface: "#ffffff"
+  surface-subtle: "#faf9f7"
+  surface-inset: "#f4f2ee"
+  hairline: "#e7e3db"
+  hairline-strong: "#d6d0c5"
+  hover: "#efece6"
+  warn: "#7a6233"
+  warn-soft: "#f6eedd"
+  plate-body: "#fbfaf7"
+  plate-line: "#e3ded4"
+  well-empty: "#f7f5f1"
+  well-empty-line: "#ded9cf"
+  well-mapped: "#d7d0c2"
+  well-mapped-line: "#a49a88"
+typography:
+  display:
+    fontFamily: system-ui
+    fontSize: 26px
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: -0.2px
+  title:
+    fontFamily: system-ui
+    fontSize: 20px
+    fontWeight: 600
+    lineHeight: 1.3
+    letterSpacing: -0.1px
+  headline:
+    fontFamily: system-ui
+    fontSize: 15px
+    fontWeight: 600
+    lineHeight: 1.35
+    letterSpacing: 0
+  body:
+    fontFamily: system-ui
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: 0
+  body-strong:
+    fontFamily: system-ui
+    fontSize: 14px
+    fontWeight: 500
+    lineHeight: 1.5
+    letterSpacing: 0
+  secondary:
+    fontFamily: system-ui
+    fontSize: 13px
+    fontWeight: 400
+    lineHeight: 1.45
+    letterSpacing: 0
+  meta:
+    fontFamily: system-ui
+    fontSize: 12px
+    fontWeight: 400
+    lineHeight: 1.4
+    letterSpacing: 0
+  caption:
+    fontFamily: system-ui
+    fontSize: 11px
+    fontWeight: 500
+    lineHeight: 1.3
+    letterSpacing: 0.3px
+spacing:
+  xxs: 4px
+  xs: 8px
+  sm: 12px
+  md: 16px
+  lg: 24px
+  xl: 32px
+  xxl: 48px
+rounded:
+  xs: 4px
+  sm: 6px
+  md: 10px
+  lg: 12px
+  pill: 999px
+components:
+  page-shell:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+  sidebar:
+    backgroundColor: "{colors.sidebar}"
+    textColor: "{colors.ink-muted}"
+    width: 216px
+  nav-row:
+    backgroundColor: transparent
+    textColor: "{colors.ink}"
+    typography: "{typography.secondary}"
+    rounded: "{rounded.sm}"
+    height: 36px
+    padding: "0 {spacing.sm}"
+  nav-row-selected:
+    backgroundColor: "{colors.accent-soft}"
+    textColor: "{colors.accent}"
+    typography: "{typography.secondary}"
+  mode-tabs:
+    backgroundColor: "{colors.surface-inset}"
+    rounded: "{rounded.md}"
+    padding: 3px
+    height: 34px
+  mode-tab:
+    backgroundColor: transparent
+    textColor: "{colors.ink-muted}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.sm}"
+    height: 28px
+    padding: "0 {spacing.sm}"
+  mode-tab-selected:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.meta}"
+    borderColor: "{colors.hairline}"
+  button-primary:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.surface}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.sm}"
+    height: 28px
+    padding: "0 {spacing.sm}"
+  button-secondary:
+    backgroundColor: transparent
+    textColor: "{colors.ink-muted}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.sm}"
+    height: 28px
+    padding: "0 {spacing.sm}"
+  section-label:
+    textColor: "{colors.ink-subtle}"
+    typography: "{typography.caption}"
+  group-row:
+    backgroundColor: transparent
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    borderColor: "{colors.hairline}"
+    height: 44px
+    padding: "{spacing.xs} 0"
+  group-row-selected:
+    backgroundColor: "{colors.accent-soft}"
+    textColor: "{colors.ink}"
+  assay-row:
+    backgroundColor: transparent
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    borderColor: "{colors.hairline}"
+    padding: "{spacing.sm} 0"
+  assay-row-selected:
+    backgroundColor: "{colors.accent-tint}"
+  inspector:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    width: 304px
+    borderColor: "{colors.hairline}"
+  field-label:
+    textColor: "{colors.ink-subtle}"
+    typography: "{typography.caption}"
+  field-value:
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+  plate-card:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    borderColor: "{colors.hairline}"
+    rounded: "{rounded.md}"
+    padding: "{spacing.md}"
+  check-row:
+    textColor: "{colors.ink}"
+    typography: "{typography.meta}"
+    borderColor: "{colors.hairline}"
 ---
 
-## 1. 五条硬规则
+## Overview
 
-1. **一个强调色。** 紫色只表示“当前选择”和“主操作”。数据状态、已映射孔、警告不得使用紫色。
-2. **表面优先于阴影。** 页面内元素只用 `surface` / `surface-alt` / 1px `line` 建立层级；投影只允许出现在浮层（关于窗口、菜单、弹出层）。
-3. **4px 网格。** 所有间距、内边距、组件高度都是 4 的倍数；例外只有 1px 描边和字体行高。
-4. **字号不超过六级，字重只用 400/500/600。** 禁止 700 及更粗、禁止斜体强调、禁止两套以上字体。
-5. **未知就是未知。** `未记录`、`待确认`、`未记录映射` 必须显示为低对比文本；不得用默认值、示例值或推断值填充。
+AsterLab is a **quiet, task-first native research workspace** for planning, preparing, and running cell experiments. It should feel like a well-made tool: calm, precise, and dense with real data—not a dashboard, not a form, not a marketing page.
 
----
+The design follows three rules learned from Linear, Vercel Geist, Apple HIG, and GitHub Primer:
 
-## 2. 颜色令牌
+1. **Don’t compete for attention you haven’t earned.** Navigation, metadata, and supporting controls recede; the current work object stays in focus. (Linear’s 2026 refresh)
+2. **Structure should be felt, not seen.** Use alignment, spacing, and hairline separators before boxes, borders, and shadows. (Linear; Apple layout)
+3. **Black body text outranks gray labels.** Hierarchy comes from size, weight, and color—not from making every label bold or every card heavy. (Vercel Geist; Apple typography)
+4. **Rhythm follows adjacency, not uniform padding.** List rows sit close together; sections get larger breathing room. (Notion’s page spacing refresh)
+5. **Tokens are semantic, not raw colors.** Surface, border, text, and interaction roles stay stable across themes. (Obsidian CSS variables; GitHub Primer tokens)
 
-只允许在 `Theme.slint` 定义颜色，其他 `.slint` 文件不得出现十六进制颜色（`transparent` 与 `white` 仅用于按钮反白）。
+The product is read-only in the current spike, but the visual system is designed for edit and execution states. A control that cannot write yet must not pretend to be a completed workflow.
 
-| 令牌 | 值 | 用途 |
+The surface is a warm neutral canvas (`{colors.canvas}`), with pure white only where content is the object of attention (inspector, plate card, selected mode segment). There is **one accent** (`{colors.accent}`) and it means selection or primary action—never decoration, never “data exists.”
+
+## Colors
+
+The palette is a warm neutral ladder plus one violet accent. It deliberately avoids green as a data color: “mapped” is a neutral recorded state, not a success verdict.
+
+- **Canvas** `{colors.canvas}` — page background.
+- **Sidebar** `{colors.sidebar}` — one step quieter than the canvas.
+- **Surface** `{colors.surface}` — inspector, plate card, selected segment.
+- **Surface subtle / inset** `{colors.surface-subtle}` / `{colors.surface-inset}` — selected-mode track, nested metadata, quiet fills.
+- **Hairline** `{colors.hairline}` — 1px separators and card outlines. Use it sparingly; prefer spacing first.
+- **Ink / ink-muted / ink-subtle** `{colors.ink}` / `{colors.ink-muted}` / `{colors.ink-subtle}` — primary, secondary, and metadata text.
+- **Accent / soft / tint / line** `{colors.accent}` / `{colors.accent-soft}` / `{colors.accent-tint}` / `{colors.accent-line}` — current selection and primary action only.
+- **Warn / warn-soft** `{colors.warn}` / `{colors.warn-soft}` — unresolved conflicts and missing critical conditions. Do not use it for ordinary unknowns.
+- **Well states** — `{colors.well-empty}` for unmapped, `{colors.well-mapped}` for recorded mapping. Selection adds `{colors.accent}`; the mapped state is never violet.
+
+Rules:
+- Never use accent for “mapped”, “complete”, or “valid.”
+- Unknown, undecided, and not-applicable are text states first; color is secondary.
+- A single screen may use at most one accented action and one accented selection.
+- Avoid pure black and pure gray-blue; keep the warm-neutral cast consistent.
+
+## Typography
+
+The type ladder is seven levels. Black body text is always larger than gray labels in the same block.
+
+| Token | Size/weight | Color | Use |
+|---|---|---|---|
+| `{typography.display}` | 26/600 | ink | page title |
+| `{typography.title}` | 20/600 | ink | inspector title, run title |
+| `{typography.headline}` | 15/600 | ink | group / assay / plate names |
+| `{typography.body}` | 14/400 | ink | field values, reading text |
+| `{typography.secondary}` | 13/400 | ink-muted | objectives, methods, metadata lines |
+| `{typography.meta}` | 12/400 | ink-muted | mode tabs, counts, hints |
+| `{typography.caption}` | 11/500 | ink-subtle | section labels, field labels, axis labels |
+
+Rules:
+- Section labels are **11/500 ink-subtle**, not 12/600. They organize; they do not compete with body values.
+- Use 600 only for display, title, headline, and selected navigation.
+- Body values wrap fully. Only list titles and metadata may elide.
+- Do not set gray text larger than black body text in the same information block.
+- Chinese text uses the system UI font; no custom display face in this spike.
+
+## Layout
+
+The shell has four regions:
+
+| Region | Size | Responsibility |
 |---|---|---|
-| `bg` | `#f6f5f2` | 中央工作区背景 |
-| `sidebar` | `#efeee9` | 左侧导航背景 |
-| `surface` | `#ffffff` | 卡片、检查器、顶栏、培养板卡 |
-| `surface-alt` | `#faf9f6` | 悬停底色、次级表面 |
-| `hover` | `#f1efe9` | 列表/按钮悬停填充 |
-| `line` | `#e6e3dc` | 默认 1px 分隔线与卡片描边 |
-| `line-strong` | `#d5d0c6` | 输入框、次级按钮描边 |
-| `ink` | `#1d1b18` | 主文本 |
-| `ink-2` | `#5c574f` | 次级文本、正文说明 |
-| `ink-3` | `#8f897f` | 标签、元信息、缺失值 |
-| `accent` | `#5b45c9` | 仅选择态与主操作 |
-| `accent-hover` | `#4b37ae` | 主操作悬停 |
-| `accent-soft` | `#eeeafc` | 选择态背景、导航选中 |
-| `accent-tint` | `#faf9ff` | 画布选中节点背景 |
-| `accent-line` | `#cec3f0` | 关系连线、选择外环 |
-| `neutral-soft` | `#f2f0ea` | 中性胶囊 |
-| `warn-soft` / `warn-ink` | `#f6eedd` / `#77602f` | 仅“未解决分歧/待核对” |
-| `plate-body` | `#fbfaf7` | 培养板板体 |
-| `plate-line` | `#e3ded4` | 板体描边 |
-| `well-empty` / `well-empty-line` | `#f7f5f1` / `#ded9cf` | 未记录映射的孔 |
-| `well-mapped` / `well-mapped-line` | `#d9d4c8` / `#a9a294` | 已记录映射的孔（中性数据色） |
+| Top bar | 56px | project → design → run context, read-only state, about |
+| Sidebar | 216px | project, design, run navigation; recedes visually |
+| Center | fluid | design / prepare / execute workspace |
+| Inspector | 304px | context for the selected object; fields, not a second workspace |
 
-语义约束：
-- 已映射孔 = 中性深一档的填充；选中孔 = 紫色描边 + 紫色外环。二者不能同色。
-- `warn` 只用于“待核对的分歧”，不用于普通缺失值；普通缺失值用 `ink-3`。
-- 关系连线只用 `accent-line`，且只在数据明确列出关联时绘制。
+Center content:
+- 32px side padding, 24px top/bottom.
+- 24px between major sections; 8–12px within a section.
+- Max readable measure around 760px; keep the design canvas centered rather than stretching text edge to edge.
+- No card around every section. A section is a label, content, and whitespace. Use a 1px hairline only when two rows need separation.
+- Adjacent list rows use 8–10px vertical padding and compact line height; major sections use 24–32px. Do not give a list row the same padding as a paragraph block (Notion adjacency).
+- Semantic roles first: background, surface, border, text, accent, warning. Raw palette values never appear outside the theme file (Obsidian/Primer).
+- Selected rows use a soft accent background and, at most, a 1px accent outline. Do not change row height or add heavy borders.
 
----
+Density:
+- Nav rows: 36px.
+- Group rows: 44px.
+- Assay rows: content height, 12px vertical padding.
+- Inspector: 20/18 padding, 10px field spacing, 24px between sections.
+- Plate card: 16px padding; plate board centered; no shadow.
 
-## 3. 排版
+## Elevation & Depth
 
-系统字体（不嵌入字体）。中文回退交由系统处理。
+This is a flat, surface-based system.
 
-| 角色 | 字号 | 字重 | 颜色 | 用途 |
-|---|---|---|---|---|
-| Display | 26px | 600 | `ink` | 设计标题 |
-| Title | 20px | 600 | `ink` | 检查器主标题、关于窗口标题 |
-| Subhead | 15px | 600 | `ink` | 检测/组别节点标题、卡片标题 |
-| Body | 14px | 400 | `ink` | 字段值、主要阅读文本 |
-| Secondary | 13px | 400 | `ink-2` | 研究目的、方法、培养板元信息 |
-| Meta | 12px | 400/500 | `ink-3` | 胶囊、导航标题、提示行 |
-| Caption | 11px | 400/600 | `ink-3` | 字段标签、轴标签、脚注 |
+- **In-flow content:** no shadows. Use surface contrast and hairline borders.
+- **Selected/floating:** a hairline border plus a very soft accent tint; no blur or gradient.
+- **Only floating layers** (about window, future menus/popovers) may use a shadow; keep it soft and neutral.
+- Never use shadow to imply hover or selection.
 
-对比规则：
-- 同一信息块内，黑色正文必须不小于灰色文字；禁止灰字比黑字大。
-- 分区标题是“结构标签”：12px/600/`ink-2`；必须小于 14px 的黑色字段值，大于 11px 的字段标签。
-- 导航标题用 13px/500；选中时 13px/600 + `accent`，不靠放大字号表示选中。
-- 检测节点标题 15px/600，方法 13px，时间点与组数 12px；组别节点标题 15px/600，角色 12px。
+## Shapes
 
-规则：
-- 行高由系统自然行高决定；多行值保持 `wrap: word-wrap`，不得为了对齐而截断事实。
-- 单行列表项允许 `max-lines: 1` + `overflow: elide`；检查器字段值必须完整换行。
-- 分区标题通过 12px + 600 + `letter-spacing: 0.4px` 建立层级，不使用全大写英文单词。
-- 最小正文 11px；10px 仅用于培养板轴标签与脚注，不得承载关键事实。
+- Controls and list rows: 6px radius.
+- Panels, plate card, selected mode track: 10–12px.
+- Wells: 2px in thumbnail, 5px in top view.
+- Pills are reserved for short status labels; do not turn every metadata item into a pill.
+- Avoid fully rounded cards; they read as marketing UI, not a research tool.
 
----
+## Components
 
-## 4. 间距、尺寸、圆角
+### Navigation row
+Height 36px; 13/500 title; 11/400 detail; selected = `{colors.accent-soft}` background + 2×18px accent indicator, text accent. No border. The sidebar should sit a few notches quieter than the canvas (Linear).
 
-| 令牌 | 值 | 用途 |
-|---|---|---|
-| `space-1` | 4px | 图标与文字、标签与值 |
-| `space-2` | 8px | 控件内部、节点内行距 |
-| `space-3` | 12px | 卡片内边距、按钮间距 |
-| `space-4` | 16px | 分区内边距、卡片头部 |
-| `space-5` | 24px | 内容分段 |
-| `space-6` | 32px | 页面左右留白、大分段 |
+### Mode tabs
+A single inset track (`{colors.surface-inset}`, radius 10, 3px padding) with three 28px segments. Selected segment = white surface + 1px hairline; unselected = transparent + ink-muted. No per-tab borders. This is one control, not three buttons.
 
-- 圆角：控件 6px；卡片/节点 10px；培养板板体 12px；孔位 2px（缩略）/5px（俯视）。
-- 描边：所有卡片、节点、按钮统一 1px。选中态用 1px `accent`，不得改成 2px 造成布局跳动；外环用绝对定位，不参与布局。
-- 控件高度：导航行 36px；按钮 28px（紧凑 26px）；胶囊 24px；页签 32px；检测节点 96px；组别节点 64px。
-- 布局：顶栏 56px；左导航 224px；右检查器 320px；中央内容最大 760px、左右 32px；主要分段间距 32px。
-- 指针目标：桌面最小 24×24px；培养板俯视孔 26×26px；缩略孔仅作预览，不承担精确点选（展开后选择）。
+### Buttons
+- Primary: accent fill, white text, 28px, 6px radius. At most one per view.
+- Secondary/quiet: transparent, ink-muted text, hairline only when needed. Hover = `{colors.hover}`.
+- No drop shadows on buttons. Icon-only buttons require an accessible label.
 
----
+### Section label
+11/500, ink-subtle, letter-spacing 0.3px, 24px line box. Never 600 or accent.
 
-## 5. 状态
+### Group row
+Flat row with a bottom hairline, not a card. Name 15/600; role and condition 13/400; `n` and technical repeats 12/400. Selected row uses `{colors.accent-tint}`; do not add a border. The number `n` is independent experimental units—never derived from wells.
 
-| 状态 | 规则 |
-|---|---|
-| Default | 透明或 `surface`；1px `line` |
-| Hover | 填充 `hover`；不改变描边、不位移、不缩放 |
-| Selected | 背景 `accent-soft`/`accent-tint`；1px `accent` 描边；导航另有 2×18px 左侧指示条 |
-| Focus | 2px `accent-line` 外环（绝对定位，不改变尺寸） |
-| Disabled | 40% 不透明度；不响应指针 |
-| Unknown | 文本 `ink-3`；不使用警告色；不显示空占位符 |
+### Assay row
+Flat row, not a card. Title 15/600; endpoint 13/400; timepoints/relation 12/400; protocol state 12/500. Selected row uses `{colors.accent-tint}`. Full parameters live in the inspector. Do not repeat six label/value rows inside every assay.
 
-禁止：用颜色表示“成功/失败”之外的模糊含义；用绿色表示已映射；用粗描边表示选中；用阴影表示悬停。
+### Inspector
+A white contextual panel with grouped fields. Section heading 11/500 ink-subtle; field label 11/400 ink-subtle; value 14/400 ink; missing value 14/400 ink-subtle. Separators only between groups. No nested cards. The inspector answers “what is this object?”—not “run a form.”
 
----
+### Plate
+White card with a subtle hairline; the plate body is inset, not another card. Axis labels 10–11px. Mapped wells are neutral; selected wells use accent stroke and a 1px accent-line halo. Do not put explanatory text inside every empty well.
 
-## 6. 组件规范
+### Check row
+A 6px dot (warn or neutral) plus a 12/600 title and 12/400 detail. Text carries the level; color is reinforcement only. Checks are data-completeness notes in this spike, not a scientific validation verdict.
 
-### 顶栏
-- 高 56px，`surface`，底部 1px `line`。
-- 左：`AsterLab` 17px/600 + 11px 副标题；竖分隔线；项目名 12px `ink-2`；`›`；设计名 12px `ink`，单行省略。
-- 右：只读胶囊（中性）、数据计数 11px `ink-3`、紧凑按钮“关于”。
+## Data Semantics
 
-### 左侧导航（224px）
-- 分组标题 12px/600 `ink-2`，不加大写英文。
-- 行高 36px；标题 13px/500，副行 11px `ink-3`；选中行 13px/600 `accent`。
-- 不使用带边框的巨型列表盒；列表直接落在 `sidebar` 上。
-- 底部固定一行 10/11px `ink-3`：“只读 · 不写入数据库”。
+Design language must not flatten scientific meaning:
 
-### 实验结构画布
-- 两列：处理组（左，232px）、检测项目（右，296px），列间距 96px；列标题 11px/600。
-- 节点坐标由 Rust 计算，Slint 不重复布局推理。
-- 组别节点：名称 15px/600，角色 12px `ink-3`；被当前检测列出时右侧显示 6px `accent` 圆点。
-- 检测节点：标题 15px/600；方法 12px `ink-2`；时间点 11px（有值用 `accent`，缺失用 `ink-3`）；组数 11px `ink-3`，无组别用 `warn-ink`。
-- 节点内最多三行；说明性句子放检查器，不放进节点。
-- 连线：仅当前检测明确列出的组别；1px `accent-line`；正交路由；不得绘制推断关系。
+- Design mode shows the current DesignVersion; prepare/execute show the frozen snapshot referenced by the Run.
+- A Run is not a label; it freezes design and Protocol versions. If the snapshot or Protocol manifest is missing, say so and do not invent steps.
+- Independent n, technical repeats, sample count, container slots, and Run count are separate values.
+- Assay timepoints and relations are per assay; never render one global time line.
+- Plan ≠ fact: planned outputs, planned slots, and planned layout are not actual materials, wells, or observations.
+- Unknown ≠ no / zero / not applicable. “未记录”, “待确认”, and “未记录映射” remain visible.
+- The relationship graph is optional and secondary. It only draws links explicitly listed by the current assay. No link means “not listed”, not “explicitly excluded.”
 
-### 右侧检查器（320px）
-- 内边距 20/18；分区标题 12px/600 `ink-2`；字段标签 11px `ink-3`，值 14px `ink`，值缺失为 `ink-3`。
-- 字段行一律“标签在上、值在下”，间距 2px；字段之间 12px。
-- 分区之间 12px + 分区标题 26px 高。
-- 主标题 20px/600；副标题 12px `ink-3`。
-- 不显示重复提示；没有选择时只保留一句“在画布中选择组别、检测或孔位”。
+## Do's and Don'ts
 
-### 培养板
-- 卡片 `surface`，1px `line`，圆角 10px；头部：名称 15px/600、元信息 11px `ink-3`、已映射计数 11px、展开按钮。
-- 缩略：14px 节距、10px 孔、2px 圆角；俯视：34px 节距、26px 孔、5px 圆角；展开 320ms。
-- 轴标签仅俯视显示，10px `ink-3`；行 A–H，列 1–12，来自真实板尺寸。
-- 已映射孔：`well-mapped` 填充 + `well-mapped-line` 描边；未映射孔：`well-empty` + `well-empty-line`；选中孔：2px `accent` + 1px `accent-line` 外环。
-- 不在每个空孔里写“未记录映射”；说明只放一次在卡片脚注。
+**Do**
+- Use whitespace and alignment before borders.
+- Keep one accent per view.
+- Make the current work object the largest, darkest element.
+- Use flat rows with hairlines for repeated data.
+- Put full details in the inspector; keep the canvas scannable.
+- Show empty states as sentences that explain what is missing.
+- Respect `prefers-reduced-motion` when the platform exposes it.
 
----
+**Don't**
+- Don’t wrap every row in a card.
+- Don’t use accent for mapped wells, success, or “valid.”
+- Don’t set gray labels at 12/600 while black values are 13/400.
+- Don’t use six chips where one meta line would do.
+- Don’t use shadows for hierarchy in flowing content.
+- Don’t fabricate progress, steps, parameters, or completion from names or counts.
+- Don’t present a read-only view as an execution workflow.
 
-## 7. 动效
+## Accessibility & Motion
 
-| 场景 | 时长 | 曲线 |
-|---|---|---|
-| 悬停/按下 | 120ms | ease-out |
-| 选择/面板内容切换 | 200ms | ease-out |
-| 培养板展开/收起 | 320ms | ease-in-out |
+- Text contrast: body and labels ≥ 4.5:1; large titles ≥ 3:1.
+- Controls: 28px minimum desktop target; plate wells 26px in top view.
+- Focus: 2px accent-line ring, never color alone.
+- State: selection uses background + text/outline, not only color.
+- Motion: 120ms hover, 200ms selection, 320ms plate expand; ease-out/in-out. No continuous animation when idle.
+- Reduced motion: switch to final state; do not animate data meaning.
 
-- 只动画尺寸、位置、颜色、圆角；不透明度仅用于淡入淡出。
-- 禁止持续动画、粒子、呼吸灯、无限旋转。
-- 动效不得改变数据；动画结束不写入任何事件。
-- 减少动态效果开启时直接显示终态（Slint 暂无统一 API，接入平台设置前必须保留该设计位）。
+## Review Checklist
 
----
+- [ ] One accent per view; mapped wells are neutral.
+- [ ] No card stack for repeated rows; hairlines + spacing carry structure.
+- [ ] Body 14 black > section 11 gray > field label 11 gray.
+- [ ] Mode tabs read as one segmented control.
+- [ ] Inspector fields are grouped, not a database dump.
+- [ ] Design / prepare / execute each have a different central object.
+- [ ] Frozen Run snapshot is visible; missing Protocol/manifest is stated, not filled.
+- [ ] Unknown and not-applicable states are text, not guessed values.
+- [ ] 96-well expansion and selection work; no idle animation.
+- [ ] The screen is understandable without reading the implementation notes.
 
-## 8. 文案与数据
+## References
 
-- 标签用名词短语：“终点”“方法”“时间点关系”，不写“这里是……”。
-- 缺失统一为“未记录”；未解决统一为“待确认”；孔位状态为“已记录映射 / 未记录映射”。
-- 不在同一视图重复同一条说明；一个分区最多一句提示。
-- 数字与单位之间留空格（`1 d`、`6 孔`、`8 × 12`）；尺寸用 `×`。
-- 不在 UI 中推断样本、组别、孔位或结论；只展示数据库已有字段。
-
----
-
-## 9. Slint 落地规则
-
-- 令牌只在 `Theme.slint`；组件只在 `Components.slint`；场景组件独立文件（`ExperimentCanvas.slint`、`PlateView.slint`）。
-- 主界面不使用 `std-widgets` 的默认 `Button`；`ScrollView` 可用。自绘控件必须设置 `accessible-role`、`accessible-label`、`accessible-action-default`。
-- 组件不得写死颜色；不得在页面文件里写布局魔法数字（除本文件规定的尺寸）。
-- 视觉状态只来自 Rust 传来的只读模型 + 界面局部状态（展开/悬停）。
-- 新增视觉元素前先回答：它是否表达数据关系？是否已有组件承担？是否能在检查器中表达？三者都否，则不添加。
-
----
-
-## 10. 评审清单（不通过即返工）
-
-- [ ] 没有默认 Windows 按钮样式。
-- [ ] 紫色只出现在选择/主操作；已映射孔是中性色。
-- [ ] 页面内没有投影；层级靠表面与 1px 描边。
-- [ ] 所有间距是 4px 倍数；卡片内边距 12/16。
-- [ ] 正文不小于 11px；检查器字段完整换行，事实未被省略。
-- [ ] 画布只画数据明确支持的关系；节点内没有说明性长句。
-- [ ] 未记录/待确认/未记录映射三者视觉可区分，且都未被填充为默认值。
-- [ ] 96 孔板缩略 → 展开 → 选孔路径可用；展开后行列坐标正确。
-- [ ] 空闲时无持续动画；展开/选择只改界面状态。
-- [ ] 截图中的层级与留白符合本文件，而不是“能编译就算完成”。
+- Linear, “A calmer interface for a product in motion” (2026-03-12): navigation recedes, fewer separators, compact tabs, warmer gray.
+- Vercel Geist: Materials (6/12px radii; floating-only shadows), Typography (12/13/14/16 scale), Button variants.
+- Apple Human Interface Guidelines: Layout (hierarchy, alignment, grouping, progressive disclosure), Typography (macOS 13pt body, 10pt minimum).
+- GitHub Primer: semantic color roles, spacing, typography tokens.
+- Obsidian developer docs: 4px spacing grid; radius 4/8/12/16px; UI type 12/13/15/20px; line-height 1.3/1.5; semantic surface/border variables.
+- Notion, “Updating the design of Notion pages” (2026-03-18): standardized spacing, adjacency-based compact lists, paragraph breathing room.
+- Slint examples (gallery, fancy_demo): small composable `.slint` components, `TouchArea` roots, focus scopes, accessibility roles, state-based hover/selection.
+- Google Labs `design.md` format: YAML token front matter + prose rationale, canonical section order.

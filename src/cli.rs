@@ -1321,9 +1321,11 @@ pub(crate) fn create_execution_event_tx(
     {
         return Err(CliError::input("timepoint 不能为空且不能超过 100 个字符"));
     }
-    if event.step_status.as_deref().is_some_and(|status| {
-        !["in_progress", "completed", "blocked", "skipped"].contains(&status)
-    }) {
+    if event
+        .step_status
+        .as_deref()
+        .is_some_and(|status| !["in_progress", "completed", "blocked", "skipped"].contains(&status))
+    {
         return Err(CliError::input(
             "step_status 必须是 in_progress、completed、blocked 或 skipped",
         ));
@@ -2025,11 +2027,13 @@ fn normalize_design(d: &mut DesignFields, previous: Option<&DesignFields>) {
         .collect();
     for assay in &mut d.assays {
         if assay.timepoint_relation.is_none() {
-            assay.timepoint_relation = Some(assay
-                .sample_use_policy
-                .as_ref()
-                .and_then(legacy_timepoint_relation)
-                .unwrap_or(TimepointRelation::Unknown));
+            assay.timepoint_relation = Some(
+                assay
+                    .sample_use_policy
+                    .as_ref()
+                    .and_then(legacy_timepoint_relation)
+                    .unwrap_or(TimepointRelation::Unknown),
+            );
         }
         assay.sample_use_policy = None;
         if assay.group_ids.is_empty() {
@@ -2103,6 +2107,181 @@ pub(crate) fn normalize_validate_design_data(
     normalize_design(&mut design, previous_design.as_ref());
     validate_design(&design)?;
     serde_json::to_value(design).map_err(|e| CliError::internal(e.to_string()))
+}
+
+pub(crate) fn design_map(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+    let record = get(db, design_id)?;
+    if record["kind"] != "design" {
+        return Err(CliError::input("指定记录不是实验设计"));
+    }
+    let revision = record["revision"]
+        .as_i64()
+        .ok_or_else(|| CliError::internal("设计版本号无效"))?;
+    let design: DesignFields = serde_json::from_value(record["data"].clone())
+        .map_err(|e| CliError::internal(format!("设计数据无效：{e}")))?;
+
+    let mut unresolved: Vec<Value> = Vec::new();
+    if design.experimental_unit.trim().is_empty() {
+        unresolved.push(json!({
+            "key":"experimental_unit",
+            "question":"独立实验单位和生物学重复数是什么？",
+            "affects":["组别 n","时间点比较","统计","Run 计划"],
+            "source":"missing"
+        }));
+    }
+
+    let mut groups = Vec::new();
+    for (index, group) in design.group_specs.iter().enumerate() {
+        if group.independent_n.is_none() {
+            unresolved.push(json!({
+                "key":format!("groups[{}].independent_n", index),
+                "question":format!("组别「{}」的独立实验单位数是多少？", group.name),
+                "affects":["该组 n","统计","Run 计划"],
+                "source":"missing"
+            }));
+        }
+        groups.push(json!({
+            "id":group.id,
+            "name":group.name,
+            "role":group.role,
+            "condition":group.condition,
+            "independent_n":group.independent_n,
+            "technical_repeats":group.technical_repeats
+        }));
+    }
+
+    let mut assays = Vec::new();
+    for assay in &design.assays {
+        if assay.timepoints.is_empty() {
+            unresolved.push(json!({
+                "key":format!("assays.{}.timepoints", assay.id),
+                "question":format!("检测「{}」在哪些时间点进行？", assay.title),
+                "affects":["检测安排","样本关系","执行日程"],
+                "source":"missing"
+            }));
+        }
+        if assay
+            .protocol_version_id
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            unresolved.push(json!({
+                "key":format!("assays.{}.protocol_version_id", assay.id),
+                "question":format!("检测「{}」使用哪个已确认的 Protocol 版本？", assay.title),
+                "affects":["操作步骤","Run 冻结","执行记录"],
+                "source":"missing"
+            }));
+        }
+        if assay.timepoint_relation.is_none()
+            || matches!(assay.timepoint_relation, Some(TimepointRelation::Unknown))
+        {
+            unresolved.push(json!({
+                "key":format!("assays.{}.timepoint_relation", assay.id),
+                "question":format!("检测「{}」各时间点是否使用同一对象或独立样本？", assay.title),
+                "affects":["样本流向","板图","独立 n","统计"],
+                "source":"missing"
+            }));
+        }
+        if assay.endpoint.trim().is_empty() && assay.method.trim().is_empty() {
+            unresolved.push(json!({
+                "key":format!("assays.{}.endpoint", assay.id),
+                "question":format!("检测「{}」测量什么、用什么方法？", assay.title),
+                "affects":["检测安排","Protocol 选择"],
+                "source":"missing"
+            }));
+        }
+        assays.push(json!({
+            "id":assay.id,
+            "title":assay.title,
+            "endpoint":assay.endpoint,
+            "method":assay.method,
+            "unit":assay.unit,
+            "group_ids":assay.group_ids,
+            "group_names":assay.group_names,
+            "timepoints":assay.timepoints,
+            "timepoint_timing":assay.timepoint_timing,
+            "time_anchor_event":assay.time_anchor_event,
+            "timepoint_relation":assay.timepoint_relation,
+            "protocol_version_id":assay.protocol_version_id,
+            "controls":assay.controls,
+            "container_type":assay.container_type,
+            "container_format":assay.container_format
+        }));
+    }
+
+    let sample_links: Vec<Value> = design
+        .sample_allocations
+        .iter()
+        .map(|link| {
+            json!({
+                "assay_id":link.assay_id,
+                "group_id":link.group_id,
+                "group_name":link.group_name,
+                "timepoint_relation":link.timepoint_relation,
+                "source_relation":link.source_relation,
+                "source_assay_id":link.source_assay_id,
+                "physical_slots_per_group":link.physical_slots_per_group,
+                "physical_slots_scope":link.physical_slots_scope,
+                "planned_output_id":link.planned_output_id,
+                "evidence_id":link.evidence_id
+            })
+        })
+        .collect();
+
+    let planned_outputs: Vec<Value> = design
+        .planned_outputs
+        .iter()
+        .map(|output| {
+            json!({
+                "id":output.id,
+                "title":output.title,
+                "protocol_version_id":output.protocol_version_id,
+                "root_binding_count":output.root_bindings.len(),
+                "evidence_id":output.evidence_id
+            })
+        })
+        .collect();
+
+    let conflicts: Vec<Value> = design
+        .evidence_conflicts
+        .iter()
+        .filter(|conflict| matches!(conflict.status, ConflictStatus::Unresolved))
+        .map(|conflict| {
+            unresolved.push(json!({
+                "key":format!("conflicts.{}", conflict.id),
+                "question":conflict.topic,
+                "affects":conflict.affected_assay_ids,
+                "source":"evidence_conflict"
+            }));
+            json!({
+                "id":conflict.id,
+                "topic":conflict.topic,
+                "affected_assay_ids":conflict.affected_assay_ids,
+                "affects_container_estimate":conflict.affects_container_estimate
+            })
+        })
+        .collect();
+
+    unresolved.sort_by(|left, right| {
+        left["key"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["key"].as_str().unwrap_or_default())
+    });
+
+    Ok(json!({
+        "design_id":design_id,
+        "revision":revision,
+        "title":design.title,
+        "objective":design.objective,
+        "experimental_unit":if design.experimental_unit.trim().is_empty() { Value::Null } else { json!(design.experimental_unit) },
+        "groups":groups,
+        "assays":assays,
+        "sample_links":sample_links,
+        "planned_outputs":planned_outputs,
+        "conflicts":conflicts,
+        "unresolved":unresolved
+    }))
 }
 
 fn validate_design(d: &DesignFields) -> Result<(), CliError> {
@@ -2269,9 +2448,7 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
             .physical_slots_per_group
             .is_some_and(|n| n == 0 || n > 100000)
         {
-            return Err(CliError::input(
-                "每组容器位数量必须为 1–100000；未知时留空",
-            ));
+            return Err(CliError::input("每组容器位数量必须为 1–100000；未知时留空"));
         }
         let needs_source = matches!(
             allocation.source_relation.as_ref(),
@@ -2881,6 +3058,10 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 .map_err(|e| CliError::internal(e.to_string()))?
                 .ok_or_else(|| CliError::internal("当前设计版本快照缺失"))?;
             Ok(json!({"design":r,"version":get(&db,&version_id)?}))
+        }
+        "design.map" => {
+            let i: IdInput = parse_input(path)?;
+            Ok(design_map(&db, &i.id)?)
         }
         "design.create" => {
             let i: DesignCreate = parse_input(path)?;
@@ -3653,6 +3834,9 @@ fn result_schema(tool: &str) -> Value {
         "design.get" | "design.create" => {
             json!({"type":"object","additionalProperties":false,"required":["design","version"],"properties":{"design":record_schema("design"),"version":record_schema("design_version")}})
         }
+        "design.map" => {
+            json!({"type":"object","additionalProperties":false,"required":["design_id","revision","title","objective","experimental_unit","groups","assays","sample_links","planned_outputs","conflicts","unresolved"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"title":{"type":"string"},"objective":{"type":"string"},"experimental_unit":{"type":["string","null"]},"groups":{"type":"array","items":{"type":"object","additionalProperties":true}},"assays":{"type":"array","items":{"type":"object","additionalProperties":true}},"sample_links":{"type":"array","items":{"type":"object","additionalProperties":true}},"planned_outputs":{"type":"array","items":{"type":"object","additionalProperties":true}},"conflicts":{"type":"array","items":{"type":"object","additionalProperties":true}},"unresolved":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
+        }
         "design.revise" => record_and_version("design"),
         "run.list" => arr("run"),
         "run.create" => one("run"),
@@ -3731,6 +3915,9 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":"string"}}})
         }
         "design.get" => {
+            json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
+        }
+        "design.map" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
         }
         "design.create" => {
@@ -3921,6 +4108,7 @@ fn tool_specs() -> Vec<Value> {
         "project.revise",
         "design.list",
         "design.get",
+        "design.map",
         "design.create",
         "design.revise",
         "run.list",
@@ -3983,6 +4171,7 @@ fn tool_description(tool: &str) -> &'static str {
         "project.revise" => "按 expected_revision 修订项目名称或说明。",
         "design.list" => "按项目查询实验设计。",
         "design.get" => "读取实验设计及其当前版本。",
+        "design.map" => "只读生成实验地图：组别、检测、时间点、样本关系、Protocol 关联和待确认项；不写数据库。",
         "design.create" => "创建实验设计并自动保存 v1 快照。",
         "design.revise" => {
             "只修改 changes 中提供的字段，保留其他值并新增版本；必须提供 expected_revision。"
@@ -4025,6 +4214,7 @@ fn tool_effects(tool: &str) -> &'static str {
         "project.list"
         | "design.list"
         | "design.get"
+        | "design.map"
         | "run.list"
         | "protocol.list"
         | "protocol.block.list"
