@@ -1,8 +1,10 @@
 # AsterLab 原生界面 Spike（P1）
 
-状态：可运行、只读的验证原型。不是正式迁移，也不替代现有 Web/CLI。
+状态：可运行、只读的 **Slint 技术 Spike**。不是正式迁移，也不替代现有 Web/CLI；
+不作为面向实验人员的最终 UX 验收。下一轮任务流程规格见
+[`p2-operator-workflow-spec.md`](./p2-operator-workflow-spec.md)。
 
-设计口径见仓库根目录 [`DESIGN.md`](../../DESIGN.md)；需求与验收边界见
+设计口径见仓库根目录 [`DESIGN.md`](../../DESIGN.md)；P1 需求边界见
 [`asterlab-native-ui-acceptance.md`](./asterlab-native-ui-acceptance.md)。
 
 ## 运行
@@ -36,7 +38,9 @@ apps/desktop/target/release/labworkbench-desktop.exe \
 
 ## 本轮实现
 
-- 左侧项目/实验设计导航；顶部上下文栏；中央实验结构画布；右侧上下文检查器。
+- 左侧项目 / 实验设计 / 实验运行三级导航；顶部上下文栏包含 Run；中央实验结构画布；右侧上下文检查器。
+- 显式 Run 选择；孔板列表只包含当前 Run 且与当前检测关联的板。切换检测不会继续显示无关板。
+- 默认优先选择有孔板的检测（L929 下为 CCK-8）；无孔板时显示“该检测暂无培养板记录”。
 - 画布节点：处理组、检测项目。只有当前检测在记录中明确列出的组别才绘制连线；
   `划痕成像` 没有组别记录时显示“组别未明确”，不画推断连线。
 - 检查器随选择切换：检测参数、组别与计划孔位、来源/证据、执行；组别；培养板；孔位。
@@ -48,17 +52,19 @@ apps/desktop/target/release/labworkbench-desktop.exe \
 
 截图（`docs/prototypes/assets/`）：
 
-- `native-workspace.png`：默认状态，活死染色被选中，三条明确组别连线。
-- `native-cck8.png`：切换到 CCK-8，四组连线与检查器同步。
+- `native-workspace.png`：默认状态，CCK-8 被选中，Run 与孔板上下文一致。
+- `native-livedead-noplate.png`：切换到活死染色，显示“该检测暂无培养板记录”，不再残留 CCK-8 板。
 - `native-plate-expanded.png`：96 孔俯视，行列坐标；A1 已映射。
 - `native-well.png`：选中 A1，检查器显示 E1 / SYN-CCK8-A1 / 备注。
 - `native-software.png`：软件渲染，中文与布局一致。
-- `native-interaction.mp4`：9 秒交互录屏（选择 CCK-8 → 展开 → 滚动 → 选择 A1）。
+- `native-interaction.mp4`：交互录屏（选择检测 → 展开 → 滚动 → 选择 A1）。
 - `web-baseline.png`：同一隔离数据库的 Web 基线。
 
 交互通过 Windows UI Automation `InvokePattern` 实际执行，并断言：
 
-- 选择 `检测项目 CCK-8` 后检查器出现 `OD450 / 相对细胞活力` 与 `同一份物理样本重复测量`；
+- 默认检查器为 CCK-8，且存在 `CCK-8 演示板 A`；
+- 选择 `检测项目 活死染色` 后出现 `活/死细胞荧光图像`、`该检测暂无培养板记录`，且不存在 CCK-8 板页签；
+- 切回 `检测项目 CCK-8` 后孔板页签恢复；选择 Run 不丢失当前检测/孔板；
 - 展开后出现 `收起`、轴标签 `A`…`H` / `1`…`12`；
 - 选择 `孔位 A1，已记录映射` 后检查器出现 `孔位 A1`、`已记录映射`、`E1`、`SYN-CCK8-A1`。
 
@@ -126,5 +132,5 @@ node tests/smoke.cjs
 sha256sum data/labworkbench.sqlite
 ```
 
-本轮结果：4 个 Rust 测试通过；Web/CLI smoke 通过（37 个 CLI 工具、移动端 390px 无横向溢出）；
+本轮结果：5 个 Rust 测试通过；Web/CLI smoke 通过（37 个 CLI 工具、移动端 390px 无横向溢出）；
 默认数据库 SHA-256 保持 `6d9af98c05d6f7ee128a0ef13a2add26ceda9b66832a77fa5575ba800e4dfb3d`。

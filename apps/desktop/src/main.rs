@@ -12,10 +12,11 @@ use std::rc::Rc;
 
 slint::include_modules!();
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Selection {
     project_id: String,
     design_id: String,
+    run_id: String,
     assay_id: String,
     group_id: String,
     plate_id: String,
@@ -336,17 +337,20 @@ fn clear_plate(app: &AppWindow, sel: &mut Selection) {
 
 fn clear_design(app: &AppWindow, sel: &mut Selection) {
     sel.design_id.clear();
+    sel.run_id.clear();
     sel.assay_id.clear();
     sel.group_id.clear();
     sel.plate_id.clear();
     sel.well_id.clear();
     app.set_selected_design_id(SharedString::from(""));
+    app.set_selected_run_id(SharedString::from(""));
     app.set_selected_assay_id(SharedString::from(""));
     app.set_selected_group_id(SharedString::from(""));
+    app.set_runs(model_rc(Vec::<RunEntry>::new()));
     app.set_design_title(SharedString::from(""));
     app.set_design_objective(missing());
     app.set_experimental_unit(unconfirmed());
-    app.set_run_title(missing());
+    app.set_run_title(SharedString::from(""));
     app.set_run_status(unconfirmed());
     app.set_group_count(0);
     app.set_assay_count(0);
@@ -735,6 +739,81 @@ fn set_inspector_well(app: &AppWindow, model: &ReadModel, sel: &Selection) {
     app.set_inspector_fields(model_rc(items));
 }
 
+fn design_runs<'a>(model: &'a ReadModel, design_id: &str) -> Vec<&'a data::Run> {
+    model
+        .runs
+        .iter()
+        .filter(|run| run.design_id == design_id)
+        .collect()
+}
+
+/// A plate is in context only when it belongs to the selected run and, if an
+/// assay is selected, to that assay. This prevents showing a CCK-8 plate while
+/// the inspector says live/dead.
+fn plate_matches_context(plate: &data::Plate, sel: &Selection) -> bool {
+    !sel.run_id.is_empty()
+        && plate.run_id == sel.run_id
+        && (sel.assay_id.is_empty() || plate.assay_id.as_deref() == Some(sel.assay_id.as_str()))
+}
+
+fn refresh_plates<'a>(
+    app: &AppWindow,
+    model: &'a ReadModel,
+    sel: &Selection,
+) -> Vec<&'a data::Plate> {
+    let plates: Vec<&data::Plate> = model
+        .plates
+        .iter()
+        .filter(|plate| plate_matches_context(plate, sel))
+        .collect();
+    app.set_plates(model_rc(
+        plates
+            .iter()
+            .map(|plate| PlateEntry {
+                id: SharedString::from(plate.id.as_str()),
+                name: SharedString::from(plate.name.as_str()),
+                format: SharedString::from(plate.format.as_str()),
+                timepoint: opt_text(&plate.timepoint),
+                mapped_count: mapped_well_count(plate),
+            })
+            .collect(),
+    ));
+    plates
+}
+
+fn first_plate_for_context<'a>(plates: &[&'a data::Plate]) -> Option<&'a data::Plate> {
+    plates
+        .iter()
+        .copied()
+        .find(|plate| plate.wells.iter().any(well_mapped))
+        .or_else(|| plates.first().copied())
+}
+
+fn select_run(app: &AppWindow, model: &ReadModel, sel: &mut Selection, run_id: &str) {
+    let Some(run) = model.runs.iter().find(|run| run.id == run_id) else {
+        return;
+    };
+    if sel.design_id.is_empty() || run.design_id != sel.design_id {
+        return;
+    }
+    sel.run_id = run.id.clone();
+    app.set_selected_run_id(SharedString::from(run.id.as_str()));
+    app.set_run_title(SharedString::from(run.title.as_str()));
+    app.set_run_status(run_status_text(&run.status));
+
+    let plates = refresh_plates(app, model, sel);
+    match first_plate_for_context(&plates).map(|plate| plate.id.clone()) {
+        Some(id) => select_plate(app, model, sel, &id),
+        None => clear_plate(app, sel),
+    }
+
+    if !sel.assay_id.is_empty() {
+        set_inspector_assay(app, model, sel);
+    } else if sel.plate_id.is_empty() {
+        clear_inspector(app);
+    }
+}
+
 fn select_assay(app: &AppWindow, model: &ReadModel, sel: &mut Selection, assay_id: &str) {
     let exists = model
         .designs
@@ -749,6 +828,13 @@ fn select_assay(app: &AppWindow, model: &ReadModel, sel: &mut Selection, assay_i
     sel.assay_id = assay_id.to_owned();
     app.set_selected_assay_id(SharedString::from(assay_id));
     refresh_canvas(app, model, sel);
+
+    let plates = refresh_plates(app, model, sel);
+    match first_plate_for_context(&plates).map(|plate| plate.id.clone()) {
+        Some(id) => select_plate(app, model, sel, &id),
+        None => clear_plate(app, sel),
+    }
+
     set_inspector_assay(app, model, sel);
 }
 
@@ -768,7 +854,11 @@ fn select_group(app: &AppWindow, model: &ReadModel, sel: &mut Selection, group_i
 }
 
 fn select_well(app: &AppWindow, model: &ReadModel, sel: &mut Selection, well_id: &str) {
-    if !model.plates.iter().any(|plate| plate.id == sel.plate_id) {
+    if !model
+        .plates
+        .iter()
+        .any(|plate| plate.id == sel.plate_id && plate_matches_context(plate, sel))
+    {
         return;
     }
     sel.well_id = well_id.to_owned();
@@ -777,9 +867,11 @@ fn select_well(app: &AppWindow, model: &ReadModel, sel: &mut Selection, well_id:
 }
 
 fn select_plate(app: &AppWindow, model: &ReadModel, sel: &mut Selection, plate_id: &str) {
-    let plate = model.plates.iter().find(|plate| plate.id == plate_id);
+    let plate = model
+        .plates
+        .iter()
+        .find(|plate| plate.id == plate_id && plate_matches_context(plate, sel));
     let Some(plate) = plate else {
-        clear_plate(app, sel);
         return;
     };
     sel.plate_id = plate.id.clone();
@@ -856,72 +948,72 @@ fn select_design(app: &AppWindow, model: &ReadModel, sel: &mut Selection, design
         return;
     };
     sel.design_id = design.id.clone();
+    sel.run_id.clear();
     sel.assay_id.clear();
     sel.group_id.clear();
     sel.plate_id.clear();
     sel.well_id.clear();
     app.set_selected_design_id(SharedString::from(design.id.as_str()));
+    app.set_selected_run_id(SharedString::from(""));
     app.set_selected_assay_id(SharedString::from(""));
     app.set_selected_group_id(SharedString::from(""));
     app.set_design_title(SharedString::from(design.title.as_str()));
     app.set_design_objective(opt_text(&design.objective));
     app.set_experimental_unit(opt_text(&design.experimental_unit));
 
-    let run = model
-        .runs
-        .iter()
-        .find(|run| run.project_id == design.project_id && run.design_id == design.id);
-    match run {
-        Some(run) => {
-            app.set_run_title(SharedString::from(run.title.as_str()));
-            app.set_run_status(run_status_text(&run.status));
-        }
-        None => {
-            app.set_run_title(missing());
-            app.set_run_status(unconfirmed());
-        }
-    }
-
-    let plates: Vec<&data::Plate> = match run {
-        Some(run) => model
-            .plates
-            .iter()
-            .filter(|plate| plate.run_id == run.id)
-            .collect(),
-        None => Vec::new(),
-    };
-    app.set_plates(model_rc(
-        plates
-            .iter()
-            .map(|plate| PlateEntry {
-                id: SharedString::from(plate.id.as_str()),
-                name: SharedString::from(plate.name.as_str()),
-                format: SharedString::from(plate.format.as_str()),
-                timepoint: opt_text(&plate.timepoint),
-                mapped_count: mapped_well_count(plate),
+    let runs = design_runs(model, &design.id);
+    app.set_runs(model_rc(
+        runs.iter()
+            .map(|run| RunEntry {
+                id: SharedString::from(run.id.as_str()),
+                title: SharedString::from(run.title.as_str()),
+                detail: SharedString::from(format!(
+                    "{} · {} 块板",
+                    run_status_text(&run.status),
+                    model
+                        .plates
+                        .iter()
+                        .filter(|plate| plate.run_id == run.id)
+                        .count()
+                )),
             })
             .collect(),
     ));
 
-    refresh_canvas(app, model, sel);
-
-    let first_plate = plates
-        .iter()
-        .copied()
-        .find(|plate| plate.wells.iter().any(well_mapped))
-        .or_else(|| plates.first().copied())
-        .map(|plate| plate.id.clone());
-    match first_plate {
-        Some(id) => select_plate(app, model, sel, &id),
-        None => clear_plate(app, sel),
+    match runs.first().map(|run| run.id.clone()) {
+        Some(id) => select_run(app, model, sel, &id),
+        None => {
+            app.set_run_title(SharedString::from(""));
+            app.set_run_status(unconfirmed());
+            refresh_canvas(app, model, sel);
+        }
     }
 
-    let first_assay = design.assays.first().map(|assay| assay.id.clone());
-    match first_assay {
+    // Prefer an assay that has a plate in this run; otherwise the first assay.
+    let default_assay = design
+        .assays
+        .iter()
+        .find(|assay| {
+            model.plates.iter().any(|plate| {
+                plate.run_id == sel.run_id && plate.assay_id.as_deref() == Some(assay.id.as_str())
+            })
+        })
+        .or_else(|| design.assays.first())
+        .map(|assay| assay.id.clone());
+
+    match default_assay {
         Some(id) => select_assay(app, model, sel, &id),
         None => {
             clear_assay(app, sel);
             refresh_canvas(app, model, sel);
+            let plates = refresh_plates(app, model, sel);
+            match first_plate_for_context(&plates).map(|plate| plate.id.clone()) {
+                Some(id) => select_plate(app, model, sel, &id),
+                None => {
+                    clear_plate(app, sel);
+                    clear_inspector(app);
+                }
+            }
         }
     }
 }
@@ -936,14 +1028,17 @@ fn select_project(app: &AppWindow, model: &ReadModel, sel: &mut Selection, proje
     };
     sel.project_id = project.id.clone();
     sel.design_id.clear();
+    sel.run_id.clear();
     sel.assay_id.clear();
     sel.group_id.clear();
     sel.plate_id.clear();
     sel.well_id.clear();
     app.set_selected_project_id(SharedString::from(project.id.as_str()));
     app.set_selected_design_id(SharedString::from(""));
+    app.set_selected_run_id(SharedString::from(""));
     app.set_selected_assay_id(SharedString::from(""));
     app.set_selected_group_id(SharedString::from(""));
+    app.set_runs(model_rc(Vec::<RunEntry>::new()));
     app.set_project_name(SharedString::from(project.name.as_str()));
     app.set_designs(model_rc(
         model
@@ -954,14 +1049,13 @@ fn select_project(app: &AppWindow, model: &ReadModel, sel: &mut Selection, proje
                 id: SharedString::from(design.id.as_str()),
                 title: SharedString::from(design.title.as_str()),
                 detail: SharedString::from(format!(
-                    "{} 项检测 · {}",
+                    "{} 项检测 · {} 次运行",
                     design.assays.len(),
                     model
                         .runs
                         .iter()
-                        .find(|run| run.design_id == design.id)
-                        .map(|run| run_status_text(&run.status).to_string())
-                        .unwrap_or_else(|| "待确认".to_owned())
+                        .filter(|run| run.design_id == design.id)
+                        .count()
                 )),
             })
             .collect(),
@@ -1071,6 +1165,16 @@ fn main() {
         app.on_design_selected(move |id| {
             if let Some(app) = weak.upgrade() {
                 select_design(&app, &model, &mut sel.borrow_mut(), id.as_str());
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let model = Rc::clone(&model);
+        let sel = Rc::clone(&sel);
+        app.on_run_selected(move |id| {
+            if let Some(app) = weak.upgrade() {
+                select_run(&app, &model, &mut sel.borrow_mut(), id.as_str());
             }
         });
     }
@@ -1222,5 +1326,47 @@ mod tests {
 
         let unlinked = sample_assay(vec![], vec![]);
         assert!(assay_groups(&design, &unlinked).is_empty());
+    }
+
+    #[test]
+    fn plates_only_match_selected_run_and_assay() {
+        let plate = data::Plate {
+            id: "p1".into(),
+            run_id: "r1".into(),
+            name: "板".into(),
+            format: "96".into(),
+            rows: 8,
+            columns: 12,
+            assay_id: Some("a1".into()),
+            timepoint: None,
+            wells: Vec::new(),
+        };
+        let selected = super::Selection {
+            run_id: "r1".into(),
+            assay_id: "a1".into(),
+            ..Default::default()
+        };
+        assert!(super::plate_matches_context(&plate, &selected));
+
+        let other_assay = super::Selection {
+            assay_id: "a2".into(),
+            ..selected.clone()
+        };
+        assert!(!super::plate_matches_context(&plate, &other_assay));
+
+        let other_run = super::Selection {
+            run_id: "r2".into(),
+            ..selected.clone()
+        };
+        assert!(!super::plate_matches_context(&plate, &other_run));
+
+        let no_assay = super::Selection {
+            assay_id: String::new(),
+            ..selected
+        };
+        assert!(super::plate_matches_context(&plate, &no_assay));
+
+        let no_run = super::Selection::default();
+        assert!(!super::plate_matches_context(&plate, &no_run));
     }
 }
