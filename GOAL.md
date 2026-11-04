@@ -22,5 +22,7 @@
 - Design cards open a read-only experiment map with groups, assays, timepoints, sample links, Protocol status and unresolved items.
 - Run workbench has a return-to-map entry and still reads the frozen Protocol steps.
 - Smoke tests cover CLI map, HTTP map, UI map, and 390px layout: 38 CLI tools exercised.
-- Visual evidence: `docs/prototypes/assets/experiment-map.png`.
+- Visual evidence: `docs/prototypes/assets/experiment-map.png` and `docs/prototypes/assets/slint-experiment-map.png`.
 - `cargo build --release`, root Rust tests, desktop Rust tests and `node tests/smoke.cjs` pass.
+
+- Slint deliverable: `AsterLab-Slint.exe` + `AsterLab-Slint.bat` (launches the L929 fixture in software renderer).

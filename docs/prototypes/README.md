@@ -64,7 +64,8 @@ apps/desktop/target/release/labworkbench-desktop.exe \
 
 截图（`docs/prototypes/assets/`）：
 
-- `experiment-map.png`：只读实验地图，显示组别、检测、时间/样本关系与待确认项。
+- `experiment-map.png`：Web 只读实验地图，显示组别、检测、时间/样本关系与待确认项。
+- `slint-experiment-map.png`：Slint 原生工作台的“实验地图”首屏，包含独立 n、Protocol、时间点与样本关系统计及待确认项。
 - `native-workspace.png`：设计模式，扁平组别/检测表与折叠关系图。
 - `native-prepare.png`：准备模式，冻结版本、计划产物、计划容器位。
 - `native-execute.png`：执行模式，Protocol/材料/事件缺失说明与实际培养板。

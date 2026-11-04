@@ -379,6 +379,11 @@ fn clear_design(app: &AppWindow, sel: &mut Selection) {
     app.set_run_status(unconfirmed());
     app.set_group_count(0);
     app.set_assay_count(0);
+    app.set_map_n_text(SharedString::from("独立 n 待确认"));
+    app.set_map_protocol_text(SharedString::from("Protocol 未关联"));
+    app.set_map_time_text(SharedString::from("时间点待确认"));
+    app.set_map_sample_text(SharedString::from("样本关系待确认"));
+    app.set_map_attention(model_rc(Vec::<CheckDetail>::new()));
     app.set_group_nodes(model_rc(Vec::<GroupNodeData>::new()));
     app.set_assay_nodes(model_rc(Vec::<AssayNodeData>::new()));
     app.set_link_segments(model_rc(Vec::<LinkSegment>::new()));
@@ -835,6 +840,96 @@ fn unit_missing(value: &Option<String>) -> bool {
     })
 }
 
+fn map_summary(design: &data::Design) -> (String, String, String, String) {
+    let n_missing = unit_missing(&design.experimental_unit)
+        || design.groups.iter().any(|group| group.independent_n.is_none());
+    let protocol_missing = design
+        .assays
+        .iter()
+        .any(|assay| assay.protocol_version_id.is_none());
+    let time_missing = design.assays.iter().any(|assay| assay.timepoints.is_empty());
+    let sample_missing = design.assays.iter().any(|assay| {
+        !present(&assay.timepoint_relation)
+            || matches!(assay.timepoint_relation.as_deref(), Some("unknown"))
+    });
+    (
+        if n_missing { "独立 n 待确认" } else { "独立 n 已记录" }.to_owned(),
+        if protocol_missing { "Protocol 未关联" } else { "Protocol 已关联" }.to_owned(),
+        if time_missing { "时间点待确认" } else { "时间点已记录" }.to_owned(),
+        if sample_missing { "样本关系待确认" } else { "样本关系已记录" }.to_owned(),
+    )
+}
+
+fn map_attention(design: &data::Design) -> Vec<CheckDetail> {
+    let mut items = Vec::new();
+    if unit_missing(&design.experimental_unit) {
+        items.push(CheckDetail {
+            level: SharedString::from("warn"),
+            title: SharedString::from("实验单位待确认"),
+            detail: SharedString::from("独立 n 的单位未确认；不能用孔数或技术重复代替。"),
+        });
+    }
+    let groups_without_n: Vec<&str> = design
+        .groups
+        .iter()
+        .filter(|group| group.independent_n.is_none())
+        .map(|group| group.name.as_str())
+        .collect();
+    if !groups_without_n.is_empty() {
+        items.push(CheckDetail {
+            level: SharedString::from("warn"),
+            title: SharedString::from("独立 n 待确认"),
+            detail: SharedString::from(format!(
+                "{} 的 independent_n 为空；不能用孔数或技术重复代替 n。",
+                groups_without_n.join("、")
+            )),
+        });
+    }
+    for assay in &design.assays {
+        if assay.protocol_version_id.is_none() {
+            items.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from(format!("{} 未关联 Protocol", assay.title)),
+                detail: SharedString::from("缺少 protocol_version_id，不能生成执行步骤。"),
+            });
+        }
+        if assay.timepoints.is_empty() {
+            items.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from(format!("{} 缺少时间点", assay.title)),
+                detail: SharedString::from("检测安排、样本关系和日程无法确定。"),
+            });
+        }
+        if !present(&assay.timepoint_relation)
+            || matches!(assay.timepoint_relation.as_deref(), Some("unknown"))
+        {
+            items.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from(format!("{} 时间点关系待确认", assay.title)),
+                detail: SharedString::from("无法区分同一对象复测、独立取样或分样。"),
+            });
+        }
+        if assay.group_ids.is_empty() && assay.group_names.is_empty() {
+            items.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from(format!("{} 未列出适用组别", assay.title)),
+                detail: SharedString::from("不推断检测覆盖哪些组。"),
+            });
+        }
+    }
+    for conflict in &design.conflicts {
+        if !matches!(conflict.status.as_deref(), Some("resolved")) {
+            items.push(CheckDetail {
+                level: SharedString::from("warn"),
+                title: SharedString::from("存在未解决证据冲突"),
+                detail: SharedString::from(conflict.topic.as_str()),
+            });
+        }
+    }
+    items.truncate(6);
+    items
+}
+
 fn set_question(app: &AppWindow, design: &data::Design, sel: &Selection) {
     let clear = |app: &AppWindow| {
         app.set_question_kind(SharedString::from(""));
@@ -1050,6 +1145,11 @@ fn set_workspace_details(app: &AppWindow, model: &ReadModel, sel: &Selection) {
         app.set_allocation_details(model_rc(Vec::<AllocationDetail>::new()));
         app.set_evidence_details(model_rc(Vec::<EvidenceDetail>::new()));
         app.set_conflict_details(model_rc(Vec::<ConflictDetail>::new()));
+        app.set_map_n_text(SharedString::from("独立 n 待确认"));
+        app.set_map_protocol_text(SharedString::from("Protocol 未关联"));
+        app.set_map_time_text(SharedString::from("时间点待确认"));
+        app.set_map_sample_text(SharedString::from("样本关系待确认"));
+        app.set_map_attention(model_rc(Vec::<CheckDetail>::new()));
         app.set_check_details(model_rc(vec![CheckDetail {
             level: SharedString::from("warn"),
             title: SharedString::from("当前模式没有可读取的设计"),
@@ -1507,6 +1607,12 @@ fn set_workspace_details(app: &AppWindow, model: &ReadModel, sel: &Selection) {
     app.set_allocation_details(model_rc(allocations));
     app.set_evidence_details(model_rc(evidence));
     app.set_conflict_details(model_rc(conflicts));
+    let (map_n, map_protocol, map_time, map_sample) = map_summary(design);
+    app.set_map_n_text(SharedString::from(map_n));
+    app.set_map_protocol_text(SharedString::from(map_protocol));
+    app.set_map_time_text(SharedString::from(map_time));
+    app.set_map_sample_text(SharedString::from(map_sample));
+    app.set_map_attention(model_rc(map_attention(design)));
     app.set_check_details(model_rc(checks));
     app.set_planned_output_details(model_rc(planned_outputs));
     app.set_protocol_manifest(model_rc(protocol_manifest));

@@ -229,6 +229,11 @@ export component AppWindow inherits Window {
     in-out property <[EvidenceDetail]> evidence_details;
     in-out property <[ConflictDetail]> conflict_details;
     in-out property <[CheckDetail]> check_details;
+    in-out property <[CheckDetail]> map_attention;
+    in-out property <string> map_n_text;
+    in-out property <string> map_protocol_text;
+    in-out property <string> map_time_text;
+    in-out property <string> map_sample_text;
     in-out property <[PlannedOutputDetail]> planned_output_details;
     in-out property <[ManifestDetail]> protocol_manifest;
     in-out property <[ManifestDetail]> material_manifest;
@@ -553,6 +558,58 @@ export component AppWindow inherits Window {
                             color: Theme.ink-3;
                             font-size: Theme.font-caption;
                             vertical-alignment: center;
+                        }
+                    }
+
+                    if (design_title != "" && mode == "design") : Rectangle {
+                        background: Theme.surface;
+                        border-radius: Theme.radius-md;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 8px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                SectionLabel { text: "实验地图"; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text {
+                                    text: "只读结构 · 编辑仍回到设计字段";
+                                    color: Theme.ink-3;
+                                    font-size: Theme.font-caption;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Text {
+                                text: map_n_text + "  ·  " + map_protocol_text + "  ·  " + map_time_text + "  ·  " + map_sample_text;
+                                color: Theme.ink-2;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                            if (map_attention.length == 0) : Text {
+                                text: "当前记录没有自动推导出的待确认项；仍需研究者核对。";
+                                color: Theme.ink-3;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                            for c in map_attention : HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "待确认";
+                                    width: 52px;
+                                    color: Theme.warn-ink;
+                                    font-size: Theme.font-caption;
+                                    font-weight: 600;
+                                    vertical-alignment: top;
+                                }
+                                Text {
+                                    text: c.title + " — " + c.detail;
+                                    color: Theme.ink-2;
+                                    font-size: Theme.font-small;
+                                    wrap: word-wrap;
+                                    horizontal-stretch: 1;
+                                }
+                            }
                         }
                     }
 
