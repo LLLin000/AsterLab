@@ -116,24 +116,27 @@ pub struct ReviewRecord {
 
 ## 4. 当前 JSON 草稿
 
-两个操作、两个 profile:
+五个操作、两个 profile:
 
 | Artifact | Path | 状态 |
 |---|---|---|
-| `op.liquid_transfer` v1 | `catalog/operations/liquid-transfer.v1.json` | structural valid; `research_draft` |
-| `op.absorbance_measurement` v1 | `catalog/operations/absorbance-measurement.v1.json` | structural valid; `research_draft` |
+| `op.liquid_transfer` v1 | `catalog/operations/liquid-transfer.v1.json` | structural valid; conditional transfer modes |
+| `op.sample_aliquot` v1 | `catalog/operations/sample-aliquot.v1.json` | structural valid; parent/child |
+| `op.incubation` v1 | `catalog/operations/incubation.v1.json` | structural valid; time anchor/state change |
+| `op.washing` v1 | `catalog/operations/washing.v1.json` | structural valid; state change/waste |
+| `op.absorbance_measurement` v1 | `catalog/operations/absorbance-measurement.v1.json` | structural valid; generic readout |
 | Research plus 100–1000 µL single-channel | `catalog/instruments/liquid-handler.eppendorf-research-plus.single-channel.100-1000.v1.json` | structural valid; no review record |
 | Multiskan SkyHigh | `catalog/instruments/plate-reader.multiskan-skyhigh.v1.json` | structural valid; no review record; one capability has conditions |
 
 这些 JSON 只经过结构校验,没有通过第二人来源复核。集成测试证明:
 
-- 两个操作通过 `OperationModule::validate_contract()`;
+- 五个操作通过 `OperationModule::validate_contract()`;
 - 两个 profile 通过 `InstrumentProfile::validate()`;
 - 两个 profile 都不能与草稿操作产生 `Compatible`(只能 `Unknown`)。
 
 ## 5. 测试
 
-匹配模块 23 个测试;新增集成测试 3 个。覆盖:
+匹配模块 23 个测试;操作模块 26 个测试;新增集成测试 3 个。覆盖:
 
 - 缺失/无效/版本不匹配 profile;
 - 审核记录缺失 → 不能 Compatible;
@@ -144,7 +147,7 @@ pub struct ReviewRecord {
 - 单位不同 → Unknown;
 - 范围不重叠 → Incompatible;
 - profile 结构校验拒绝重复 capability、非法范围、空单位;
-- 两条草稿操作/两条草稿 profile 的结构校验。
+- 五条草稿操作/两条草稿 profile 的结构校验。
 
 ## 6. 明确不做
 

@@ -7,7 +7,7 @@
     "applicability": {
       "assay_families": ["cck8", "elisa"],
       "sample_kinds": ["plate"],
-      "container_kinds": ["96-well", "384-well"],
+      "container_kinds": ["plate"],
       "variants": ["endpoint"],
       "exclusions": ["kinetic", "fluorescence", "luminescence"]
     }
@@ -67,10 +67,9 @@
       "required_at": "protocol_freeze",
       "value_source": "design_variable",
       "constraints": [
-        { "kind": "min", "value": 200.0 },
-        { "kind": "max", "value": 1000.0 }
+        { "kind": "positive" }
       ],
-      "description": "Selected for the assay chemistry; this module supplies no default wavelength.",
+      "description": "A positive wavelength selected for the assay chemistry; the instrument profile supplies the supported range, not this generic operation.",
       "evidence": [
         {
           "evidence_id": "thermo.multiskan-skyhigh.spec",
@@ -89,10 +88,8 @@
       "required": true,
       "required_at": "protocol_freeze",
       "value_source": "design_variable",
-      "constraints": [
-        { "kind": "one_of", "values": ["96", "384"] }
-      ],
-      "description": "Must match the physical plate and the instrument profile.",
+      "constraints": [],
+      "description": "Physical plate format; the method and instrument profile decide supported values.",
       "evidence": [
         {
           "evidence_id": "thermo.multiskan-skyhigh.spec",
@@ -100,26 +97,6 @@
           "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
           "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
           "locator": "Specification table: plates",
-          "retrieved_at": "2026-11-05"
-        }
-      ]
-    },
-    {
-      "key": "blank_wells",
-      "label": "Blank well identifiers",
-      "value_type": "text",
-      "required": false,
-      "required_at": "run_freeze",
-      "value_source": "design_variable",
-      "constraints": [],
-      "description": "Record same-plate blank wells; subtraction is a downstream operation.",
-      "evidence": [
-        {
-          "evidence_id": "dojindo.cck8",
-          "kind": "vendor_manual",
-          "citation": "Dojindo Cell Counting Kit-8 protocol",
-          "url": "https://www.dojindo.com/products/pdf/Protocol/Cell_Counting_Kit-8.pdf",
-          "locator": "Assay procedure: blank and background correction",
           "retrieved_at": "2026-11-05"
         }
       ]
@@ -134,14 +111,8 @@
         "class": "plate_reader",
         "required": true,
         "capabilities": [
-          {
-            "key": "wavelength",
-            "constraint": { "kind": "range", "min": 200.0, "max": 1000.0, "unit": "nm" }
-          },
-          {
-            "key": "plate_format",
-            "constraint": { "kind": "one_of", "values": ["96", "384"] }
-          }
+          { "key": "wavelength", "constraint": { "kind": "exists" } },
+          { "key": "plate_format", "constraint": { "kind": "exists" } }
         ]
       }
     ],
@@ -176,19 +147,11 @@
     ]
   },
   "knowledge": {
-    "controls": [
-      {
-        "control_id": "blank_wells",
-        "label": "Same-plate blank wells",
-        "kind": "blank",
-        "purpose": "Record reagent and medium background on the same plate; do not auto-subtract.",
-        "required": true
-      }
-    ],
+    "controls": [],
     "decision_points": [
       {
         "question": "Are the raw values within the reader's linear range?",
-        "evidence": "Blank wells, known dilution, and the profile linearity limit.",
+        "evidence": "Known dilution and the instrument profile's documented linear range.",
         "continue_if": "Values are within the documented linear range.",
         "stop_if": "Values are saturated or below the detection limit; dilute or repeat upstream."
       }

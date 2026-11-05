@@ -266,14 +266,26 @@ pub struct SampleTransition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_port_id: Option<String>,
     pub effect: SampleEffect,
+    /// Optional condition under which this transition applies. The consumer
+    /// must bind the condition before treating the transition as actual.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applies_when: Option<TransitionCondition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TransitionCondition {
+    pub parameter_key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SampleEffect {
     Preserved,
+    Moved,
     Aliquoted,
     Consumed,
     Terminal,
@@ -283,7 +295,7 @@ pub enum SampleEffect {
 
 impl SampleEffect {
     pub fn requires_output(self) -> bool {
-        matches!(self, Self::Aliquoted | Self::StateChanged)
+        matches!(self, Self::Moved | Self::Aliquoted | Self::StateChanged)
     }
 }
 
@@ -436,6 +448,7 @@ pub enum ParameterConstraint {
     OneOf { values: Vec<String> },
     MaxLength { value: usize },
     NonEmpty,
+    Positive,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -904,8 +917,46 @@ fn validate_transitions(
             issues.push(issue(
                 "transition_output_required",
                 format!("{path}.effect"),
-                "aliquoted and state_changed effects require an output port",
+                "moved, aliquoted and state_changed effects require an output port",
             ));
+        }
+        if let Some(condition) = &transition.applies_when {
+            if condition.value.trim().is_empty() {
+                issues.push(issue(
+                    "transition_condition_value",
+                    format!("{path}.applies_when.value"),
+                    "transition condition value must not be empty",
+                ));
+            }
+            let Some(parameter) = module
+                .parameters
+                .iter()
+                .find(|parameter| parameter.key == condition.parameter_key)
+            else {
+                issues.push(issue(
+                    "transition_condition_parameter",
+                    format!("{path}.applies_when.parameter_key"),
+                    "transition condition must reference a module parameter",
+                ));
+                // The transition still counts as a reference for port checks.
+                if transition.effect == SampleEffect::Unknown {
+                    has_unknown = true;
+                }
+                continue;
+            };
+            if let Some(ParameterConstraint::OneOf { values }) = parameter
+                .constraints
+                .iter()
+                .find(|constraint| matches!(constraint, ParameterConstraint::OneOf { .. }))
+            {
+                if !values.iter().any(|value| value == &condition.value) {
+                    issues.push(issue(
+                        "transition_condition_allowed",
+                        format!("{path}.applies_when.value"),
+                        "transition condition value is not allowed by the parameter",
+                    ));
+                }
+            }
         }
         if transition.effect == SampleEffect::Unknown {
             has_unknown = true;
@@ -1112,6 +1163,15 @@ fn validate_parameter(parameter: &OperationParameter, path: &str, issues: &mut V
                     ));
                 }
             }
+            ParameterConstraint::Positive => {
+                if !parameter.value_type.is_numeric() {
+                    issues.push(issue(
+                        "positive_constraint",
+                        &constraint_path,
+                        "positive applies to numeric parameters",
+                    ));
+                }
+            }
         }
     }
     if min_values
@@ -1242,6 +1302,15 @@ fn validate_binding_value(
                         "binding_non_empty",
                         "value",
                         "binding text must not be empty",
+                    ));
+                }
+            }
+            ParameterConstraint::Positive => {
+                if numeric_value(parameter.value_type, value).is_none_or(|actual| actual <= 0.0) {
+                    issues.push(issue(
+                        "binding_positive",
+                        "value",
+                        "binding value must be positive",
                     ));
                 }
             }
@@ -1421,6 +1490,7 @@ mod tests {
                     input_port_id: "source".into(),
                     output_port_id: Some("transferred".into()),
                     effect: SampleEffect::Aliquoted,
+                    applies_when: None,
                     note: None,
                 }],
             },
@@ -1556,6 +1626,7 @@ mod tests {
             input_port_id: "source".into(),
             output_port_id: Some("transferred".into()),
             effect: SampleEffect::Consumed,
+            applies_when: None,
             note: None,
         });
         let errors = value.validate_contract().unwrap_err();
@@ -1622,6 +1693,40 @@ mod tests {
         assert!(errors
             .iter()
             .any(|issue| issue.code == "duplicate_parameter"));
+    }
+
+    #[test]
+    fn transition_condition_must_reference_a_module_parameter() {
+        let mut value = module();
+        value.semantics.sample_transitions[0].applies_when = Some(TransitionCondition {
+            parameter_key: "missing".into(),
+            value: "partial".into(),
+        });
+        let errors = value.validate_contract().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|issue| issue.code == "transition_condition_parameter"));
+    }
+
+    #[test]
+    fn positive_constraint_rejects_zero_binding() {
+        let mut parameter = module().parameters.remove(0);
+        parameter.constraints = vec![ParameterConstraint::Positive];
+        let mut value = binding();
+        value.value = json!(0.0);
+        let errors = value.validate_against(&parameter).unwrap_err();
+        assert!(errors.iter().any(|issue| issue.code == "binding_positive"));
+    }
+
+    #[test]
+    fn moved_effect_requires_an_output_port() {
+        let mut value = module();
+        value.semantics.sample_transitions[0].effect = SampleEffect::Moved;
+        value.semantics.sample_transitions[0].output_port_id = None;
+        let errors = value.validate_contract().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|issue| issue.code == "transition_output_required"));
     }
 
     #[test]

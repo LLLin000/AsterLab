@@ -1,10 +1,10 @@
 # Catalog Drafts
 
-本目录只放结构校验通过的 K2.1 草稿,不进入 CLI/Protocol/Run/Slint 运行时。
+本目录只放结构校验通过的 K2.1/K2.2 草稿,不进入 CLI/Protocol/Run/Slint 运行时。
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
-| `operations/` | `op.liquid_transfer`、`op.absorbance_measurement` | `research_draft`;无 review record |
+| `operations/` | `liquid_transfer`、`sample_aliquot`、`incubation`、`washing`、`absorbance_measurement` | `research_draft`;无 review record |
 | `instruments/` | Research plus 100–1000 µL 单道、Multiskan SkyHigh | `research_draft`;无 review record |
 
 规则:

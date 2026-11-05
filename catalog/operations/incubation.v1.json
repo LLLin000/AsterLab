@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "catalog": { "module_id": "op.incubation", "version": 1 },
+    "title": "Hold a culture under controlled incubation conditions",
+    "action_type": "incubation",
+    "applicability": {
+      "assay_families": ["cell_culture"],
+      "sample_kinds": ["culture"],
+      "container_kinds": ["flask", "dish", "plate"],
+      "variants": ["co2_incubator"],
+      "exclusions": ["environmental_chamber_without_co2"]
+    }
+  },
+  "semantics": {
+    "purpose": "Hold a prepared culture at controlled temperature and atmosphere for a defined duration anchored to an explicit event.",
+    "preconditions": [
+      "The vessel is labelled, vented as required, and has a recorded seeding or treatment time.",
+      "The incubator is at setpoint and has a free, qualified slot.",
+      "The requested duration and time anchor are defined."
+    ],
+    "inputs": [
+      {
+        "port_id": "culture_in",
+        "role": "source_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "one",
+        "description": "Culture to be held."
+      },
+      {
+        "port_id": "vessel",
+        "role": "destination_container",
+        "object_type": "container",
+        "required": true,
+        "cardinality": "one",
+        "description": "Vented culture vessel."
+      }
+    ],
+    "outputs": [
+      {
+        "port_id": "culture_out",
+        "role": "destination_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "one",
+        "description": "Culture after the hold; identity is preserved, state may change."
+      }
+    ],
+    "sample_transitions": [
+      {
+        "transition_id": "culture_held",
+        "input_port_id": "culture_in",
+        "output_port_id": "culture_out",
+        "effect": "state_changed",
+        "note": "Incubation changes the culture state (growth/attachment); it does not assert a measured outcome."
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "key": "duration",
+      "label": "Hold duration",
+      "value_type": "number",
+      "unit": "h",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [{ "kind": "positive" }],
+      "description": "Protocol- or SOP-specific; no default duration is supplied.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.subculturing",
+          "kind": "peer_reviewed",
+          "citation": "Thermo Fisher Subculturing Adherent Cells",
+          "url": "https://www.thermofisher.com/us/en/home/references/gibco-cell-culture-basics/cell-culture-protocols/subculturing-adherent-cells.html",
+          "locator": "Incubation and subculture timing",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "value_type": "number",
+      "unit": "C",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [{ "kind": "positive" }],
+      "description": "Line- and protocol-specific; no universal 37 C default in this module.",
+      "evidence": [
+        {
+          "evidence_id": "atcc.culture-guide",
+          "kind": "peer_reviewed",
+          "citation": "ATCC Animal Cell Culture Guide",
+          "url": "https://www.atcc.org/resources/culture-guides/animal-cell-culture-guide",
+          "locator": "Incubation optimum",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "co2",
+      "label": "CO2 concentration",
+      "value_type": "number",
+      "unit": "%",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [{ "kind": "positive" }],
+      "description": "Depends on medium buffering and protocol; no universal default.",
+      "evidence": [
+        {
+          "evidence_id": "atcc.culture-guide",
+          "kind": "peer_reviewed",
+          "citation": "ATCC Animal Cell Culture Guide",
+          "url": "https://www.atcc.org/resources/culture-guides/animal-cell-culture-guide",
+          "locator": "Incubation optimum",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "time_anchor",
+      "label": "Time anchor",
+      "value_type": "text",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [{ "kind": "non_empty" }],
+      "description": "Event relative to which the hold starts, e.g. seeding or treatment; not inferred from the Assay.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.subculturing",
+          "kind": "peer_reviewed",
+          "citation": "Thermo Fisher Subculturing Adherent Cells",
+          "url": "https://www.thermofisher.com/us/en/home/references/gibco-cell-culture-basics/cell-culture-protocols/subculturing-adherent-cells.html",
+          "locator": "Incubation and subculture timing",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    }
+  ],
+  "execution": {
+    "default_time_scope": "once",
+    "allowed_time_scopes": ["once", "per_timepoint"],
+    "instrument_requirements": [
+      {
+        "requirement_id": "incubator",
+        "class": "incubator",
+        "required": true,
+        "capabilities": [
+          { "key": "temperature_range", "constraint": { "kind": "exists" } },
+          { "key": "co2_range", "constraint": { "kind": "exists" } }
+        ]
+      }
+    ],
+    "completion_checks": [
+      {
+        "check_id": "setpoint_stable",
+        "kind": "operational",
+        "description": "Incubator setpoints are stable before loading.",
+        "blocking": true
+      },
+      {
+        "check_id": "duration_and_anchor_recorded",
+        "kind": "operational",
+        "description": "Load time, unload time and time anchor are recorded.",
+        "blocking": true
+      }
+    ],
+    "record_fields": [
+      { "key": "load_time", "label": "Load time", "value_type": "text", "required": true },
+      { "key": "unload_time", "label": "Unload time", "value_type": "text", "required": true },
+      { "key": "actual_temperature", "label": "Actual temperature", "value_type": "number", "unit": "C", "required": false },
+      { "key": "actual_co2", "label": "Actual CO2", "value_type": "number", "unit": "%", "required": false }
+    ]
+  },
+  "knowledge": {
+    "controls": [],
+    "decision_points": [
+      {
+        "question": "Is the time anchor explicit?",
+        "evidence": "Seeding/treatment record.",
+        "continue_if": "The anchor event and start time are recorded.",
+        "stop_if": "The anchor is unknown; keep the duration unresolved."
+      }
+    ],
+    "failure_modes": [
+      {
+        "mode": "Contamination",
+        "symptom": "Turbidity, color change or unexpected growth.",
+        "impact": "Culture invalid; downstream assay invalid.",
+        "action": "Discard, decontaminate, and record the affected vessel."
+      },
+      {
+        "mode": "Evaporation or dry-out",
+        "symptom": "Reduced volume or edge effects.",
+        "impact": "Changed concentration/osmolality.",
+        "action": "Check vessel venting and humidity; record the deviation."
+      }
+    ],
+    "readout": null,
+    "evidence": [
+      {
+        "evidence_id": "thermo.subculturing",
+        "kind": "peer_reviewed",
+        "citation": "Thermo Fisher Subculturing Adherent Cells",
+        "url": "https://www.thermofisher.com/us/en/home/references/gibco-cell-culture-basics/cell-culture-protocols/subculturing-adherent-cells.html",
+        "locator": "Incubation and subculture timing",
+        "retrieved_at": "2026-11-05"
+      }
+    ],
+    "review_status": "research_draft"
+  }
+}

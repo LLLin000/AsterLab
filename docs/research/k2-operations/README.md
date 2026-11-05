@@ -14,7 +14,7 @@
 | 洗涤与取样 | [washing-and-sampling.md](washing-and-sampling.md) | Thermo 贴壁培养洗涤、Arbor Assays 洗板说明、Stanford 上清取样;其余仅检索摘要 | 洗涤 = 同一身份保留、液体替换;取样 = 父样本保留 + 新子样本 ID;不能共用一个默认 |
 | 吸光度与荧光读出 | [absorbance-and-fluorescence-readout.md](absorbance-and-fluorescence-readout.md) | Multiskan SkyHigh 规格;Leica DMi8 规格/FAQ/手册;Dojindo CCK-8;Thermo TMB/LIVE-DEAD/IF 协议 | 原始读数不是活力/浓度/计数;读板与成像只是终端数据操作;推导另立步骤 |
 
-逐字段证据矩阵见 [field-evidence-matrix.md](field-evidence-matrix.md)。两份 K2.1 JSON 草稿在 `catalog/operations/` 与 `catalog/instruments/`;它们通过结构校验,但不能产生 `Compatible`。AI 预审记录见 [k2.1-review.md](k2.1-review.md);它不是第二人科学审核。
+逐字段证据矩阵见 [field-evidence-matrix.md](field-evidence-matrix.md)。两份 K2.1 JSON 草稿在 `catalog/operations/` 与 `catalog/instruments/`;它们通过结构校验,但不能产生 `Compatible`。AI 预审记录见 [k2.1-review.md](k2.1-review.md);它不是第二人科学审核。K2.2 五操作横向矩阵见 [k2.2-cross-operation-matrix.md](k2.2-cross-operation-matrix.md)。当前 catalog 另有 `sample-aliquot`、`incubation`、`washing` 三份 JSON 草稿,全部仍为 research_draft。
 
 ## 已核对的边界
 

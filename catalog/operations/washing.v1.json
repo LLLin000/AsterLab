@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "catalog": { "module_id": "op.washing", "version": 1 },
+    "title": "Wash a vessel while preserving sample identity",
+    "action_type": "washing",
+    "applicability": {
+      "assay_families": ["cell_culture", "elisa"],
+      "sample_kinds": ["attached_cells", "plate_bound_sample"],
+      "container_kinds": ["plate", "flask", "dish"],
+      "variants": ["manual_aspiration", "plate_washer"],
+      "exclusions": ["sample_discard"]
+    }
+  },
+  "semantics": {
+    "purpose": "Exchange the liquid around a retained sample to remove unbound material while preserving sample identity; this is not a universal no-loss operation.",
+    "preconditions": [
+      "The sample is attached or otherwise retained in the vessel.",
+      "Wash buffer formulation and volume are defined by the protocol.",
+      "Waste path and anti-drying steps are available."
+    ],
+    "inputs": [
+      {
+        "port_id": "sample_in",
+        "role": "source_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "one",
+        "description": "Retained sample in its vessel."
+      },
+      {
+        "port_id": "vessel",
+        "role": "destination_container",
+        "object_type": "container",
+        "required": true,
+        "cardinality": "one",
+        "description": "Vessel holding the sample."
+      },
+      {
+        "port_id": "wash_buffer",
+        "role": "reagent",
+        "object_type": "reagent",
+        "required": true,
+        "cardinality": "one",
+        "description": "Protocol-defined wash buffer."
+      }
+    ],
+    "outputs": [
+      {
+        "port_id": "sample_out",
+        "role": "destination_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "one",
+        "description": "Retained sample after liquid exchange; identity preserved, state may change."
+      },
+      {
+        "port_id": "waste",
+        "role": "destination_container",
+        "object_type": "container",
+        "required": false,
+        "cardinality": "one",
+        "description": "Waste liquid, not a tracked sample."
+      }
+    ],
+    "sample_transitions": [
+      {
+        "transition_id": "sample_washed",
+        "input_port_id": "sample_in",
+        "output_port_id": "sample_out",
+        "effect": "state_changed",
+        "note": "Sample identity is preserved; the liquid environment changes. If the sample detaches or is lost, this effect is invalid."
+      },
+      {
+        "transition_id": "buffer_to_waste",
+        "input_port_id": "wash_buffer",
+        "output_port_id": "waste",
+        "effect": "consumed",
+        "note": "Wash buffer leaves the vessel as waste; it is not a tracked sample."
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "key": "wash_volume",
+      "label": "Wash volume per vessel",
+      "value_type": "number",
+      "unit": "mL",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [{ "kind": "positive" }],
+      "description": "Protocol-specific; no universal volume is supplied.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.adherent",
+          "kind": "peer_reviewed",
+          "citation": "Thermo Fisher Subculturing Adherent Cells",
+          "url": "https://www.thermofisher.com/us/en/home/references/gibco-cell-culture-basics/cell-culture-protocols/subculturing-adherent-cells.html",
+          "locator": "Wash step",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "cycles",
+      "label": "Wash cycles",
+      "value_type": "integer",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [{ "kind": "positive" }],
+      "description": "Kit/protocol-specific; extra cycles may reduce sensitivity or detach sample.",
+      "evidence": [
+        {
+          "evidence_id": "arbor.plate-wash",
+          "kind": "vendor_manual",
+          "citation": "Arbor Assays Plate Washing Instructions v.231213",
+          "url": "https://www.arborassays.com/wp-content/uploads/2023/12/Plate-Washing-Instruction_231213.pdf",
+          "locator": "Full two-page document",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "prevent_drying",
+      "label": "Prevent drying",
+      "value_type": "boolean",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "protocol_fixed",
+      "constraints": [],
+      "description": "Must remain true; proceed directly to the next step.",
+      "evidence": [
+        {
+          "evidence_id": "arbor.plate-wash",
+          "kind": "vendor_manual",
+          "citation": "Arbor Assays Plate Washing Instructions v.231213",
+          "url": "https://www.arborassays.com/wp-content/uploads/2023/12/Plate-Washing-Instruction_231213.pdf",
+          "locator": "Proceed directly to next assay step",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    }
+  ],
+  "execution": {
+    "default_time_scope": "once",
+    "allowed_time_scopes": ["once", "per_timepoint"],
+    "instrument_requirements": [],
+    "completion_checks": [
+      {
+        "check_id": "sample_retained",
+        "kind": "operational",
+        "description": "Sample remains attached/retained after the wash.",
+        "blocking": true
+      },
+      {
+        "check_id": "no_drying",
+        "kind": "operational",
+        "description": "Vessel proceeds directly to the next step without drying.",
+        "blocking": true
+      }
+    ],
+    "record_fields": [
+      { "key": "wash_volume", "label": "Wash volume", "value_type": "number", "unit": "mL", "required": true },
+      { "key": "cycles", "label": "Wash cycles", "value_type": "integer", "required": true },
+      { "key": "residual_volume", "label": "Residual volume", "value_type": "number", "unit": "uL", "required": false }
+    ]
+  },
+  "knowledge": {
+    "controls": [],
+    "decision_points": [
+      {
+        "question": "Is the sample still retained after washing?",
+        "evidence": "Visual check and protocol acceptance criteria.",
+        "continue_if": "Sample remains attached/retained.",
+        "stop_if": "Sample detached or was aspirated; record loss and do not treat the wash as sample-preserving."
+      }
+    ],
+    "failure_modes": [
+      {
+        "mode": "Sample loss",
+        "symptom": "Cells or bound material detached into waste.",
+        "impact": "Sample identity is not preserved; downstream result invalid.",
+        "action": "Record sample loss; repeat with gentler washing if the protocol allows."
+      },
+      {
+        "mode": "Insufficient washing",
+        "symptom": "High background or residual unbound material.",
+        "impact": "Reduced sensitivity/increased variability.",
+        "action": "Follow the kit/protocol cycle count; do not arbitrarily add cycles."
+      },
+      {
+        "mode": "Drying",
+        "symptom": "Wells dry before the next step.",
+        "impact": "Irreversible assay damage.",
+        "action": "Proceed directly; repeat if drying occurred."
+      }
+    ],
+    "readout": null,
+    "evidence": [
+      {
+        "evidence_id": "thermo.adherent",
+        "kind": "peer_reviewed",
+        "citation": "Thermo Fisher Subculturing Adherent Cells",
+        "url": "https://www.thermofisher.com/us/en/home/references/gibco-cell-culture-basics/cell-culture-protocols/subculturing-adherent-cells.html",
+        "locator": "Wash step",
+        "retrieved_at": "2026-11-05"
+      },
+      {
+        "evidence_id": "arbor.plate-wash",
+        "kind": "vendor_manual",
+        "citation": "Arbor Assays Plate Washing Instructions v.231213",
+        "url": "https://www.arborassays.com/wp-content/uploads/2023/12/Plate-Washing-Instruction_231213.pdf",
+        "locator": "Full two-page document",
+        "retrieved_at": "2026-11-05"
+      }
+    ],
+    "review_status": "research_draft"
+  }
+}

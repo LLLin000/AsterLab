@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "catalog": { "module_id": "op.sample_aliquot", "version": 1 },
+    "title": "Create an aliquot from a parent sample",
+    "action_type": "sampling",
+    "applicability": {
+      "assay_families": ["general"],
+      "sample_kinds": ["liquid", "supernatant"],
+      "container_kinds": ["tube", "plate"],
+      "variants": ["manual_pipette"],
+      "exclusions": ["whole-sample_discard"]
+    }
+  },
+  "semantics": {
+    "purpose": "Remove a defined portion from a parent sample into a new labelled child container while preserving the parent identity and lineage.",
+    "preconditions": [
+      "The parent sample is homogeneous enough for the intended aliquot; mixing is explicit if required.",
+      "The parent contains enough volume for the aliquot and the destination is labelled.",
+      "The aliquot volume and destination are defined before sampling."
+    ],
+    "inputs": [
+      {
+        "port_id": "parent",
+        "role": "source_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "one",
+        "description": "Parent sample."
+      },
+      {
+        "port_id": "destination",
+        "role": "destination_container",
+        "object_type": "container",
+        "required": true,
+        "cardinality": "many",
+        "description": "One or more labelled child containers."
+      },
+      {
+        "port_id": "tip",
+        "role": "consumable",
+        "object_type": "consumable",
+        "required": true,
+        "cardinality": "one",
+        "description": "Single-use disposable tip."
+      }
+    ],
+    "outputs": [
+      {
+        "port_id": "parent_remaining",
+        "role": "source_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "one",
+        "description": "The parent sample after removal; identity is preserved and volume is reduced."
+      },
+      {
+        "port_id": "aliquot",
+        "role": "destination_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "many",
+        "description": "New child sample(s) with lineage to the parent."
+      }
+    ],
+    "sample_transitions": [
+      {
+        "transition_id": "parent_remaining",
+        "input_port_id": "parent",
+        "output_port_id": "parent_remaining",
+        "effect": "preserved",
+        "note": "Parent identity is preserved; remaining volume is reduced. Quantity change is not fully typed in v1."
+      },
+      {
+        "transition_id": "parent_to_aliquot",
+        "input_port_id": "parent",
+        "output_port_id": "aliquot",
+        "effect": "aliquoted",
+        "note": "Each child aliquot gets a new sample ID and a parent link."
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "key": "aliquot_volume",
+      "label": "Aliquot volume",
+      "value_type": "number",
+      "unit": "uL",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [{ "kind": "positive" }],
+      "description": "Exact volume is protocol- or SOP-specific; no default is supplied.",
+      "evidence": [
+        {
+          "evidence_id": "stanford.supernatant",
+          "kind": "peer_reviewed",
+          "citation": "Stanford HIMC cell culture supernatant preparation and normalization",
+          "url": "https://iti.stanford.edu/content/dam/sm/iti/documents/himc/Cell%20culture%20supernatant%20preparation%20and%20normalization%203-5-24.pdf",
+          "locator": "Full one-page protocol",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "aliquot_count",
+      "label": "Number of aliquots",
+      "value_type": "integer",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [{ "kind": "positive" }],
+      "description": "One or more child containers; each gets its own ID and label.",
+      "evidence": [
+        {
+          "evidence_id": "stanford.supernatant",
+          "kind": "peer_reviewed",
+          "citation": "Stanford HIMC cell culture supernatant preparation and normalization",
+          "url": "https://iti.stanford.edu/content/dam/sm/iti/documents/himc/Cell%20culture%20supernatant%20preparation%20and%20normalization%203-5-24.pdf",
+          "locator": "Full one-page protocol",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    }
+  ],
+  "execution": {
+    "default_time_scope": "once",
+    "allowed_time_scopes": ["once", "per_timepoint", "per_assay"],
+    "instrument_requirements": [
+      {
+        "requirement_id": "pipette",
+        "class": "pipette",
+        "required": true,
+        "capabilities": [{ "key": "volume_range", "constraint": { "kind": "exists" } }]
+      }
+    ],
+    "completion_checks": [
+      {
+        "check_id": "parent_link",
+        "kind": "operational",
+        "description": "Every child aliquot records the parent sample ID.",
+        "blocking": true
+      },
+      {
+        "check_id": "volume_recorded",
+        "kind": "operational",
+        "description": "Parent remaining volume and aliquot volumes are recorded.",
+        "blocking": true
+      }
+    ],
+    "record_fields": [
+      { "key": "parent_sample_id", "label": "Parent sample ID", "value_type": "text", "required": true },
+      { "key": "aliquot_sample_id", "label": "Aliquot sample ID", "value_type": "text", "required": true },
+      { "key": "aliquot_volume", "label": "Aliquot volume", "value_type": "number", "unit": "uL", "required": true }
+    ]
+  },
+  "knowledge": {
+    "controls": [],
+    "decision_points": [
+      {
+        "question": "Is the parent volume sufficient for all requested aliquots?",
+        "evidence": "Parent volume and aliquot plan.",
+        "continue_if": "Parent has enough volume for the sum of aliquots.",
+        "stop_if": "Insufficient volume; do not create a partial or unrecorded aliquot."
+      }
+    ],
+    "failure_modes": [
+      {
+        "mode": "Lineage loss",
+        "symptom": "Child aliquot lacks a parent link or label.",
+        "impact": "Sample provenance cannot be reconstructed.",
+        "action": "Stop and label the aliquot with its parent before further use."
+      },
+      {
+        "mode": "Volume mismatch",
+        "symptom": "Aliquot volume differs from the recorded value.",
+        "impact": "Normalization or downstream concentration error.",
+        "action": "Record actual volume; repeat if the protocol requires an exact volume."
+      }
+    ],
+    "readout": null,
+    "evidence": [
+      {
+        "evidence_id": "stanford.supernatant",
+        "kind": "peer_reviewed",
+        "citation": "Stanford HIMC cell culture supernatant preparation and normalization",
+        "url": "https://iti.stanford.edu/content/dam/sm/iti/documents/himc/Cell%20culture%20supernatant%20preparation%20and%20normalization%203-5-24.pdf",
+        "locator": "Full one-page protocol",
+        "retrieved_at": "2026-11-05"
+      }
+    ],
+    "review_status": "research_draft"
+  }
+}

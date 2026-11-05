@@ -131,13 +131,14 @@ pub struct SampleTransition {
 `SampleEffect`:
 
 ```text
-preserved | aliquoted | consumed | terminal | state_changed | unknown
+preserved | moved | aliquoted | consumed | terminal | state_changed | unknown
 ```
 
 规则:
 
 - `transition_id` 唯一;输入必须引用 input port,输出必须引用 output port。
-- `aliquoted` / `state_changed` 必须有输出;`consumed` / `terminal` 可以没有输出。
+- `moved` / `aliquoted` / `state_changed` 必须有输出;`consumed` / `terminal` 可以没有输出。
+- transition 可带 `applies_when { parameter_key, value }` 条件;当前只做结构校验,不执行模式选择。
 - `unknown` 不能和已知 effect 混用。
 - 液体转移、接种、取样必须至少有一个材料输出;空输出的液体转移被拒绝。
 - 样本/试剂/材料输入必须被至少一个 transition 引用;样本/材料输出也必须被引用。
@@ -199,13 +200,13 @@ pub struct ParameterBinding {
 约束:
 
 ```text
-min | max | one_of | max_length | non_empty
+min | max | one_of | max_length | non_empty | positive
 ```
 
 - `min <= max`;多个 min/max 交叉检查。
 - `one_of` 不得为空;值必须能按参数类型解析。
 - `max_length` 只用于 text;整数范围用 min/max。
-- `non_empty` 只用于 text。
+- `non_empty` 只用于 text;`positive` 只用于 number/integer 且绑定值必须 >0。
 
 ### 3.4 Execution
 
@@ -272,6 +273,7 @@ pub struct ModuleKnowledge {
 - `StepMeta` 只能存模块契约未覆盖的步骤级补充;若冲突,以模块契约为准。
 - 修改模块科学知识 = 新模块版本 + 重新审核;不能直接改已审核版本。
 - `time_scope` 只在编译后的 Protocol 步骤保留一份有效值;模块只给默认/允许集合。
+- `applies_when` 条件转移是结构表达;执行器必须选择具体分支,不能把全部条件转移当成同时发生。
 
 ## 5. 与现有模型的映射
 
@@ -333,7 +335,7 @@ pub struct ModuleKnowledge {
 | `binding_source_reference` | protocol_fixed/lab_sop 绑定必须有具体来源 |
 | `unknown_with_value` | unknown 不能携带伪造值 |
 | `transition_input` / `transition_output` | transition 必须引用存在的端口 |
-| `transition_output_required` | aliquoted/state_changed 必须有输出 |
+| `transition_output_required` | moved/aliquoted/state_changed 必须有输出 |
 | `material_output_required` | 液体转移/接种/取样必须有材料输出 |
 | `unreferenced_input` / `unreferenced_output` | 样本/试剂/材料端口必须被 transition 引用 |
 | `sample_effect_ambiguous` | unknown 不能和已知 effect 混用 |
@@ -346,7 +348,7 @@ pub struct ModuleKnowledge {
 
 ## 9. Rust 测试
 
-代码位置:`crates/asterlab-core/src/operation_module.rs`。当前 23 个测试,覆盖:
+代码位置:`crates/asterlab-core/src/operation_module.rs`。当前 26 个测试,覆盖:
 
 - 最小契约、精确版本引用;
 - 同目录模块跨项目绑定不同 block version;
@@ -387,7 +389,7 @@ cargo test -p asterlab-core operation_module
 - [x] 端口级样本转移与反例。
 - [x] 参数结构校验与绑定来源证明。
 - [x] 审核边界说明。
-- [x] 23 个 Rust 测试。
+- [x] 26 个 Rust 测试。
 - [ ] K1.1 审查通过。
 - [ ] 确定 sidecar 字段与 StepMeta 边界。
 - [ ] 才进入 K2 实现。

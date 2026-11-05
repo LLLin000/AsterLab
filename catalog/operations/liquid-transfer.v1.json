@@ -16,7 +16,8 @@
     "purpose": "Move a stated volume from a source liquid to a destination container with a piston-stroke pipette and disposable tip.",
     "preconditions": [
       "A clean compatible tip is attached and the requested volume is within the fitted pipette range.",
-      "The source contains at least the requested volume and the destination has headroom."
+      "The source contains at least the requested volume and the destination has headroom.",
+      "The transfer mode is confirmed before execution."
     ],
     "inputs": [
       {
@@ -46,6 +47,14 @@
     ],
     "outputs": [
       {
+        "port_id": "source_remaining",
+        "role": "source_sample",
+        "object_type": "sample",
+        "required": false,
+        "cardinality": "one",
+        "description": "Remaining source after a partial transfer; identity is preserved but volume is reduced."
+      },
+      {
         "port_id": "transferred",
         "role": "destination_sample",
         "object_type": "sample",
@@ -56,15 +65,62 @@
     ],
     "sample_transitions": [
       {
-        "transition_id": "source_to_transferred",
+        "transition_id": "partial_source_remaining",
+        "input_port_id": "source",
+        "output_port_id": "source_remaining",
+        "effect": "preserved",
+        "applies_when": { "parameter_key": "transfer_mode", "value": "partial" },
+        "note": "Only the remaining source is represented here; the transferred portion is a separate transition."
+      },
+      {
+        "transition_id": "partial_transferred",
         "input_port_id": "source",
         "output_port_id": "transferred",
         "effect": "aliquoted",
+        "applies_when": { "parameter_key": "transfer_mode", "value": "partial" },
         "note": "Source loses the transferred volume; destination gains a new sample portion. No concentration change is implied."
+      },
+      {
+        "transition_id": "full_transferred",
+        "input_port_id": "source",
+        "output_port_id": "transferred",
+        "effect": "moved",
+        "applies_when": { "parameter_key": "transfer_mode", "value": "full" },
+        "note": "The sample identity moves to the destination container; no separate source remainder is asserted."
+      },
+      {
+        "transition_id": "addition_to_existing",
+        "input_port_id": "source",
+        "output_port_id": "transferred",
+        "effect": "state_changed",
+        "applies_when": { "parameter_key": "transfer_mode", "value": "add_to_existing" },
+        "note": "Source liquid is added to existing destination content; the destination state changes."
       }
     ]
   },
   "parameters": [
+    {
+      "key": "transfer_mode",
+      "label": "Transfer relationship",
+      "value_type": "text",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [
+        { "kind": "one_of", "values": ["partial", "add_to_existing", "full"] }
+      ],
+      "description": "Selects which conditional sample transition applies; this is not a default.",
+      "evidence": [
+        {
+          "evidence_id": "opentrons.liquid-control",
+          "kind": "vendor_manual",
+          "citation": "Opentrons Python API: Liquid Control",
+          "url": "https://docs.opentrons.com/python-api/building-block-commands/liquids/",
+          "locator": "Aspirate, Dispense, Blow out, Mix, Air gap",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
     {
       "key": "volume",
       "label": "Transfer volume",
@@ -74,10 +130,9 @@
       "required_at": "run_freeze",
       "value_source": "design_variable",
       "constraints": [
-        { "kind": "min", "value": 0.1 },
-        { "kind": "max", "value": 10000.0 }
+        { "kind": "positive" }
       ],
-      "description": "Must be within the fitted pipette model range; this is not a default volume.",
+      "description": "Positive volume; actual limits come from the selected pipette profile, tip and liquid, not from this generic operation.",
       "evidence": [
         {
           "evidence_id": "opentrons.liquid-control",
@@ -92,17 +147,14 @@
   ],
   "execution": {
     "default_time_scope": "once",
-    "allowed_time_scopes": ["once"],
+    "allowed_time_scopes": ["once", "per_timepoint", "per_assay"],
     "instrument_requirements": [
       {
         "requirement_id": "pipette",
         "class": "pipette",
         "required": true,
         "capabilities": [
-          {
-            "key": "volume_range",
-            "constraint": { "kind": "exists" }
-          }
+          { "key": "volume_range", "constraint": { "kind": "exists" } }
         ]
       }
     ],
@@ -121,6 +173,12 @@
       }
     ],
     "record_fields": [
+      {
+        "key": "transfer_mode",
+        "label": "Transfer relationship",
+        "value_type": "text",
+        "required": true
+      },
       {
         "key": "delivered_volume",
         "label": "Delivered volume",
@@ -144,6 +202,12 @@
         "evidence": "Instrument profile volume range and tip specification.",
         "continue_if": "The requested volume is within both ranges.",
         "stop_if": "The volume is outside the fitted range or the tip is incompatible."
+      },
+      {
+        "question": "Which transfer relationship applies: partial, add-to-existing or full?",
+        "evidence": "Protocol binding and source/destination content.",
+        "continue_if": "The relationship is explicit and conditional transitions are selected.",
+        "stop_if": "The relationship is still unknown; keep the transition Unresolved."
       }
     ],
     "failure_modes": [
