@@ -38,6 +38,19 @@ B01–B22:
 | 测序/质谱/组学 | 数据/组学 | 本轮范围外 |
 | 动物/临床 | — | 本轮范围外 |
 
+## 2.1 Promotion Review v2 结果
+
+| 候选 | 决定 |
+|---|---|
+| ThermalProgram | Promote domain-shared |
+| FlowAcquisition | Promote domain-shared |
+| LuminescencePlateRead | Promote domain-shared |
+| Electrophoresis separation | Deferred |
+| SterileFiltration | Deferred |
+| Autoclave (solution) | Method-local deferred |
+
+仍没有 JSON/Runtime;这些都是研究结论。
+
 ## 3. 下一步:不再扩宽度
 
 优先做 **Catalog Promotion Review v2**:

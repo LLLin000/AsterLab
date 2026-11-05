@@ -40,7 +40,8 @@
 |---|---|
 | Catalog Draft | liquid_transfer、sample_aliquot、incubation、washing、absorbance_measurement(5 份 JSON) |
 | Global Research Shared, no JSON | 离心、原始荧光采集、细胞浓度计数、划线/涂布、菌落计数 |
-| Domain-Shared Candidates | ThermalProgram、FlowAcquisition、LuminescencePlateRead;SterileFiltration/Autoclave deferred;Electrophoresis deferred |
+| Domain-Shared Promoted (research) | ThermalProgram、FlowAcquisition、LuminescencePlateRead |
+| Domain-Shared Deferred | Electrophoresis、SterileFiltration;Autoclave method-local |
 | Method-local / template | 固定/通透/封闭/染色、ELISA/WB 变体、qPCR 热循环具体程序、3D 球体形成 |
 | Gap | 3D 其他模型、transfection、microbial growth/transformation、molecular cloning |
 

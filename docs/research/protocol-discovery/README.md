@@ -70,6 +70,10 @@
 | B21 | [batch-21-reporter-ros-mitochondria-calcium.md](batch-21-reporter-ros-mitochondria-calcium.md) | 报告基因/ROS/线粒体/钙 | 已完成;零新公共模块 |
 | B22 | [batch-22-cell-line-qc.md](batch-22-cell-line-qc.md) | 细胞系 QC | 已完成;零新公共模块 |
 
+## Catalog Promotion Review v2
+
+见 [promotion-review/](promotion-review/):ThermalProgram、FlowAcquisition、LuminescencePlateRead 晋升为 domain-shared;Electrophoresis、SterileFiltration deferred;Autoclave 仍 method-local。不是 JSON/Runtime。
+
 ## Post-B22 结论
 
 见 [post-b22-review.md](post-b22-review.md):常规湿实验覆盖已完成;下一步转 Catalog Promotion Review v2,不再扩宽度。
