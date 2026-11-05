@@ -7,8 +7,7 @@
   成像仅记录湿端原始采集;分析 (设门/活死判读/定量算法) 不在此文件定义,归 method/ToolAction。
 - 原则: 稀疏边界记录。引用通用操作,不为每种模型发明 protocol;
   凡边界不稳定、一再随细胞系/基质/仪器变化的内容,记为 Custom Step 或缺口,不硬建成原子操作。
-- 证据说明: 本任务仅见到检索摘要/二手描述,未拉取全文 PDF;以下所有外部数值与行为
-  均标 `search-summary-only`,不得用于 Compatible 判定。凡未核实者一律 UNKNOWN。
+- 证据说明: 本任务多数来源仅见检索摘要/二手描述;但新增的 [Bio-protocol 4298 拆解](organoid-bio-protocol-4298.md) 已直接读取完整 PDF,覆盖小鼠肠道类器官 Matrigel dome 的体外培养。其余来源仍标 `search-summary-only`,不得用于 Compatible 判定。
 
 ## 0. Reuse Map (先查复用)
 

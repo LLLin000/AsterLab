@@ -28,7 +28,7 @@
 | 生物膜 CV/CFU | [biofilm-cv-cfu.md](k2-operations/biofilm-cv-cfu.md) | S1–S3 直接读;S4/S5 摘要 | **不应作为单独 JSON** | 是 assay model + 两个 method template;见 [粒度判断](k2-operations/granularity-and-biofilm.md) |
 | 划痕/伤口愈合 | [wound-healing-and-migration.md](k2-operations/wound-healing-and-migration.md) | P1–P4 直接读;部分 blocked | 无 | 同视野 ID、增殖混杂、时间锚点;方法模板 |
 | 活力/细胞毒性 | [viability-and-cytotoxicity-methods.md](k2-operations/viability-and-cytotoxicity-methods.md) | S1–S3/S6–S9 直接读;S4/S5 摘要 | 无 | CCK-8/LDH/LIVE-DEAD 方法绑定;通用读数已有 |
-| 3D/类器官 | [three-d-and-organoid-operations.md](k2-operations/three-d-and-organoid-operations.md) | S1–S10 摘要/未读 | 无 | 基质/球体/换液;无稳定原子操作;需实验室 protocol |
+| 3D/类器官 | [three-d-and-organoid-operations.md](k2-operations/three-d-and-organoid-operations.md) + [Bio-protocol 4298](k2-operations/organoid-bio-protocol-4298.md) | 边界记录 S1–S10 摘要;Bio-protocol 4298 完整 PDF 直接读 | 无 | 体外 Matrigel dome 已有方法参数;球体/其他模型仍需 protocol |
 
 ## 2. 仪器记录
 
