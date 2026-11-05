@@ -16,6 +16,7 @@ pub const SEMANTIC_CHANGESET_SCHEMA_VERSION: u32 = 1;
 pub enum ChangeTargetKind {
     Design,
     Protocol,
+    BlockVersion,
     Run,
 }
 
@@ -233,6 +234,10 @@ fn validate_target(
                     "step-scoped Protocol edits require Protocol version, scope and step path",
                 ));
             }
+        }
+        ChangeTargetKind::BlockVersion => {
+            // The block version itself is the exact target; step path is in the
+            // field path and does not need a Protocol location.
         }
         ChangeTargetKind::Run => {
             issues.push(issue(

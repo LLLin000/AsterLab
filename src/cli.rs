@@ -7,6 +7,8 @@ use asterlab_core::protocol_preview::{
     OperationStep, ProtocolPreview, ResolvedParameter, UnresolvedParameter,
 };
 use asterlab_core::semantic_catalog::{compile_operation_module, CompilePolicy};
+use asterlab_core::semantic_changeset::ChangeSet;
+use asterlab_core::semantic_query::{assess_block_patch, inspect_block, search_modules};
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -502,6 +504,22 @@ struct CatalogOperationImport {
     summary: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SemanticInspectInput {
+    block_version_id: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SemanticSearchInput {
+    #[serde(default)]
+    query: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SemanticPatchInput {
+    changeset: ChangeSet,
+}
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CatalogReviewCreate {
@@ -3314,6 +3332,71 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(result)
         }
+        "semantic.inspect" => {
+            let i: SemanticInspectInput = parse_input(path)?;
+            let (_, data) = block_version_data(&db, &i.block_version_id)?;
+            serde_json::to_value(inspect_block(&i.block_version_id, &data))
+                .map_err(|e| CliError::internal(e.to_string()))
+        }
+        "semantic.search" => {
+            let i: SemanticSearchInput = parse_input(path)?;
+            let mut modules = Vec::new();
+            for version in list(&db, Some("protocol_block_version"), None)? {
+                if let Some(module) = version["data"]
+                    .get("module_contract")
+                    .cloned()
+                    .and_then(|value| serde_json::from_value(value).ok())
+                {
+                    let module: OperationModule = module;
+                    modules.push(module);
+                }
+            }
+            Ok(json!({"modules": search_modules(&modules, &i.query)}))
+        }
+        "semantic.validate" => {
+            let i: SemanticPatchInput = parse_input(path)?;
+            match i.changeset.validate() {
+                Ok(()) => Ok(json!({"valid": true, "issues": []})),
+                Err(issues) => Ok(json!({"valid": false, "issues": issues})),
+            }
+        }
+        "semantic.propose_patch" => {
+            let i: SemanticPatchInput = parse_input(path)?;
+            i.changeset.validate().map_err(semantic_error)?;
+            Ok(json!({"summary": i.changeset.summary(), "requires_confirmation": true}))
+        }
+        "semantic.assess_patch" => {
+            let i: SemanticPatchInput = parse_input(path)?;
+            let target_id = &i.changeset.target.object_id;
+            let (_, data) = block_version_data(&db, target_id)?;
+            let mut assessment =
+                assess_block_patch(target_id, &data, &i.changeset).map_err(semantic_error)?;
+            let mut refs = assessment.invalidated_refs.clone();
+            for version in list(&db, Some("protocol_version"), None)? {
+                if version["data"]["root_block_version_id"].as_str() == Some(target_id.as_str()) {
+                    refs.push(format!(
+                        "protocol_version:{}",
+                        version["id"].as_str().unwrap_or_default()
+                    ));
+                }
+            }
+            for run in list(&db, Some("run"), None)? {
+                if run["data"]["protocol_manifest"]
+                    .as_array()
+                    .is_some_and(|entries| {
+                        entries.iter().any(|entry| {
+                            entry["block_version_ids"]
+                                .as_array()
+                                .is_some_and(|ids| ids.iter().any(|id| id == target_id))
+                        })
+                    })
+                {
+                    refs.push(format!("run:{}", run["id"].as_str().unwrap_or_default()));
+                }
+            }
+            assessment.invalidated_refs = refs;
+            serde_json::to_value(assessment).map_err(|e| CliError::internal(e.to_string()))
+        }
         "catalog.review.record" => {
             let i: CatalogReviewCreate = parse_input(path)?;
             let tx = db
@@ -4040,6 +4123,15 @@ fn input_schema(tool: &str) -> Option<Value> {
         "protocol.block.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","steps"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"summary":{"type":"string","maxLength":1000},"parameter_slots":{"type":"array","maxItems":100,"items":parameter_slot_input_schema()},"steps":{"type":"array","minItems":1,"maxItems":100,"items":protocol_step_input_schema()}}})
         }
+        "semantic.inspect" => {
+            json!({"type":"object","additionalProperties":false,"required":["block_version_id"],"properties":{"block_version_id":{"type":"string"}}})
+        }
+        "semantic.search" => {
+            json!({"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"}}})
+        }
+        "semantic.validate" | "semantic.propose_patch" | "semantic.assess_patch" => {
+            json!({"type":"object","additionalProperties":false,"required":["changeset"],"properties":{"changeset":{"type":"object"}}})
+        }
         "catalog.review.record" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","review"],"properties":{"project_id":{"type":"string"},"review":{"type":"object"}}})
         }
@@ -4230,6 +4322,11 @@ fn tool_specs() -> Vec<Value> {
         "protocol.block.list",
         "protocol.block.get",
         "protocol.block.create",
+        "semantic.inspect",
+        "semantic.search",
+        "semantic.validate",
+        "semantic.propose_patch",
+        "semantic.assess_patch",
         "catalog.review.record",
         "catalog.operation.import",
         "protocol.block.revise",
@@ -4266,6 +4363,11 @@ fn tool_writes(tool: &str) -> bool {
             | "protocol.block.list"
             | "protocol.block.get"
             | "protocol.block.preview"
+            | "semantic.inspect"
+            | "semantic.search"
+            | "semantic.validate"
+            | "semantic.propose_patch"
+            | "semantic.assess_patch"
             | "record.list"
             | "record.get"
             | "import.study.preview"
@@ -4297,6 +4399,11 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.block.list" => "按项目列出可复用步骤块。",
         "protocol.block.get" => "读取步骤块及其全部不可变版本。",
         "protocol.block.create" => "创建可作为完整 Protocol 或子步骤复用的版本化步骤块；只记录明确提供的操作和参数槽位。",
+        "semantic.inspect" => "读取一个步骤块版本的步骤、绑定与 module_contract；不写入。",
+        "semantic.search" => "按标题/目的/适用范围搜索已有审核 Catalog 模块；不写入。",
+        "semantic.validate" => "校验 ChangeSet 结构、路径和受保护字段；不写入。",
+        "semantic.propose_patch" => "返回精确目标与 expected version 的变更摘要；不写入。",
+        "semantic.assess_patch" => "在只读上下文中模拟一个绑定变更，返回旧值、新值和受影响引用；不写入。",
         "catalog.review.record" => "保存一条审核记录；正式导入必须通过 review_id 引用它。",
         "catalog.operation.import" => "在受控事务中导入审核过的 OperationModule，分配本地 Block/Version ID，并保存 module_contract 与 ReviewRecord。",
         "protocol.block.revise" => "按 expected_version 创建步骤块新版本；旧版本和引用不变。",
@@ -4354,6 +4461,11 @@ fn tool_effects(tool: &str) -> &'static str {
         "protocol.create" => "创建 Protocol 记录并创建不可变的 v1 正文版本。",
         "protocol.revise" => "为 Protocol 追加一个不可变的新版本；不覆盖旧正文。",
         "protocol.block.create" => "创建步骤块元数据和不可变 v1；步骤块只引用确切的其他版本。",
+        "semantic.inspect"
+        | "semantic.search"
+        | "semantic.validate"
+        | "semantic.propose_patch"
+        | "semantic.assess_patch" => "只读；不修改数据库或冻结 Run。",
         "catalog.review.record" => "保存一条审核证明；不创建 Block 或 Protocol。",
         "catalog.operation.import" => "创建一个本地导入的步骤块及其不可变版本；保留 Catalog 精确版本、module_contract 和审核记录。",
         "protocol.block.revise" => "为步骤块追加不可变版本；不会改写已保存的组合或运行。",

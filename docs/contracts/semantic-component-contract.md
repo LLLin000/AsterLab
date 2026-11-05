@@ -408,16 +408,36 @@ S2-B3 · Persistence & Frozen Run:
 - [x] `catalog.operation.import` 在单一事务中创建本地 Block/Version,使用 DB 分配的真实 Version ID。
 - [x] 保存 `module_contract`、`module_origin`、`catalog_review`;旧 Block JSON 无这些字段仍可读。
 - [x] `ReviewRecord` 绑定精确 Catalog 版本、复核者/时间/证据定位和规范化内容 SHA-256。
-- [x] 普通 `protocol.block.revise` 保留 module contract,标为 `derived`,并清除原审核记录。
+- [x] 普通 `protocol.block.revise` 保留 module contract,标为 `derived` 且 `module_contract_authority=source_only`,并清除原审核记录。
 - [x] ProtocolPreview / Run manifest 冻结 `module_contracts` 与 review;RunWorkspace 继续只消费原有 steps/tasks/occurrences。
 - [x] `tests/catalog_import.rs` 端到端覆盖审核记录、导入、预览、Protocol、Design、Run 创建与冻结语义。
 - [x] 旧 `protocol.block.create` / `revise` / 读取路径保持兼容。
 
+S2-B3.1 · Integrity Regression:
+
+- [x] `Imported` 的 module contract 是当前定义;`Derived` 的 module contract 只作来源,权威内容是新本地步骤。
+- [x] 多步骤 CCK-8(两次 transfer + incubation + absorbance + method-local text)。
+- [x] CCK-8 / Live-Dead 同 Protocol 下 scope 隔离;同一 Design 创建两个 Run。
+- [x] Catalog 升版后旧 Run workspace 保持深比较一致。
+- [x] 修订 imported block 后,旧 Run 不变,新版本标为 derived/source_only。
+- [x] 未冻结的 Typed Sample/Data/Resource Binding 仍未完整进入 Run manifest;这是已知阻断项。
+
+S3-A · Semantic Query & Patch Proposal:
+
+- [x] `semantic.inspect`:读取步骤、BlockUse、绑定、参数槽与 module_contract。
+- [x] `semantic.search`:按标题/目的/适用范围搜索已导入 Catalog 模块。
+- [x] `semantic.validate`:校验 ChangeSet 结构、路径、受保护字段和版本字段。
+- [x] `semantic.propose_patch`:返回精确目标、expected version 与字段路径摘要。
+- [x] `semantic.assess_patch`:只读模拟 `steps.<use_id>.bindings.<slot>` 修改,返回旧值/新值、失效引用和确认要求。
+- [x] 不执行 apply;不写数据库;不修改冻结 Run。
+- [x] CLI 集成测试覆盖 inspect/validate/propose/assess 与真实 Run。
+
 未开始 / 残余:
 
 - 审核记录仍有“谁能写审核记录”的权限缺口;当前只证明来源字段与内容摘要,尚未接入账号/权限系统。
-- S2-B4(可选):同一模块在不同 Assay 下创建多个真实 Run,并验证 Catalog 新版本不会改写旧 Run。
-- S3:Agent 正式语义命令与事务写入适配。
+- S3-A 的失效引用仍是当前 Protocol/Run 的粗粒度引用;没有逐绑定影响图。
+- S3-B:正式 patch 事务提交与冲突处理未开始。
+- Typed Sample/Data/Resource Binding 尚未完整进入 Run 冻结快照。
 
 ## 9. 来源
 

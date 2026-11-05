@@ -10,3 +10,4 @@ pub mod semantic_tool;
 pub mod semantic_changeset;
 pub mod semantic_catalog;
 pub mod protocol_block;
+pub mod semantic_query;

@@ -366,6 +366,41 @@ fn cck8_multistep_live_dead_and_frozen_run_regression() {
         }),
     );
     let method_version_id = method["result"]["version"]["id"].as_str().unwrap();
+    let inspection = cli.run(
+        "semantic.inspect",
+        &json!({"block_version_id": method_version_id}),
+    );
+    assert_eq!(inspection["result"]["steps"].as_array().unwrap().len(), 5);
+    let patch = json!({
+        "changeset_id": "cs-treat-volume",
+        "target": {"kind": "block_version", "object_id": method_version_id},
+        "expected_version": 1,
+        "changes": [{
+            "path": "steps.treat.bindings.volume",
+            "operation": "set",
+            "value": 100.0
+        }]
+    });
+    assert_eq!(
+        cli.run("semantic.validate", &json!({"changeset": patch}))["result"]["valid"],
+        true
+    );
+    let proposed = cli.run("semantic.propose_patch", &json!({"changeset": patch}));
+    assert_eq!(
+        proposed["result"]["summary"]["field_paths"][0],
+        "steps.treat.bindings.volume"
+    );
+    let assessment = cli.run("semantic.assess_patch", &json!({"changeset": patch}));
+    assert_eq!(assessment["result"]["changes"][0]["old_value"], 50.0);
+    assert_eq!(assessment["result"]["changes"][0]["new_value"], 100.0);
+    assert!(assessment["result"]["invalidated_refs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reference| reference
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("block_version:")));
     let preview = cli.run(
         "protocol.block.preview",
         &json!({"block_version_id": method_version_id}),
@@ -389,6 +424,15 @@ fn cck8_multistep_live_dead_and_frozen_run_regression() {
         }),
     );
     let protocol_version_id = protocol["result"]["version"]["id"].as_str().unwrap();
+    let assessment = cli.run("semantic.assess_patch", &json!({"changeset": patch}));
+    assert!(assessment["result"]["invalidated_refs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reference| reference
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("protocol_version:")));
     let design = cli.run(
         "design.create",
         &json!({
