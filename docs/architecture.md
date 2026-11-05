@@ -19,6 +19,12 @@ flowchart TB
   F --> G
 ```
 
+## 0.1 当前阶段：P0 契约冻结
+
+本文件给出模块方向；具体类型、身份和兼容规则以 [`contracts/core-v1.md`](contracts/core-v1.md) 为准，实施顺序以 [`implementation-plan.md`](implementation-plan.md) 为准。
+
+P0 结束前不拆 Slint、不实现 `StepMeta`、不移动 `src/cli.rs`。当前 Slint 的原生界面和 `design.map` 是可运行原型，不是已完成 Core 的证据。
+
 ## 1. 系统边界
 
 | 层 | 负责 | 不负责 |
@@ -182,31 +188,12 @@ flowchart TB
 
 ### 5.2 Protocol Step Module
 
-```json
-{
-  "kind": "text",
-  "use_id": "read_od450",
-  "title": "读取 OD450",
-  "instruction": "按已确认的读板设置测量。",
-  "parameter_refs": ["wavelength"],
-  "visualization": "measurement",
-  "meta": {
-    "purpose": "获得可比较的吸光度信号。",
-    "instrument": {
-      "class": "plate_reader",
-      "profile_id": "multiskan_skyhigh",
-      "required": true
-    },
-    "controls": ["无细胞空白"],
-    "decision_points": ["读数是否在线性范围？"],
-    "failure_modes": ["气泡", "蒸发", "饱和"],
-    "readout": "OD450 不是活细胞数。",
-    "sample_constraints": ["repeatable_measurement"]
-  }
-}
-```
+步骤的正式读模型是 `OperationStep`，字段/身份见 [`contracts/core-v1.md`](contracts/core-v1.md)。P0 只冻结以下边界：
 
-`meta` 是可选语义补充，不是 Design 的核心模型。没有 `meta` 的旧步骤仍可执行、仍可显示 title/instruction/parameters。
+- `Step` 是块内可读操作；`OperationStep` 是展开后的有序读模型；`StepOccurrence` 是 Run 中的实际执行实例。
+- `meta`（purpose/instrument/controls/decision/failure/readout）是**可选**语义补充；正式 Schema 尚未冻结，P4 前不实现。
+- 没有 `meta` 的旧步骤仍可预览、冻结和执行；不得自动补 purpose/control/readout。
+- 不得用 `ManifestItem {title, detail}` 代替结构化步骤。
 
 ### 5.3 Instrument Module
 
@@ -277,11 +264,13 @@ Slint 不直接执行 SQL，不整体替换记录 JSON；写入必须走字段�
 
 ## 9. 实施顺序
 
-1. **稳定架构**：抽出 Core 读模型；Slint 只消费 `design.map`/Run view model。
-2. **Slint 地图**：地图作为设计默认视图；组别/检测/时间/样本/待确认。
-3. **Slint Run**：冻结步骤列表、步骤详情、记录入口；仪器步骤显示 class/profile。
-4. **StepMeta**：可选语义字段与校验；步骤编辑器中按需展开。
-5. **Protocol 组合器**：插入、排序、绑定；仪器模块从上下文菜单进入。
-6. **写入闭环**：Slint → Command Service → Core → SQLite → reload。
+以 [`implementation-plan.md`](implementation-plan.md) 为唯一计划：
 
-每一步都以同一个 L929 合成案例验收；未跑通前不扩展动物/临床专属页面。
+1. P0：冻结 Core 契约、身份、兼容规则。
+2. P1：抽共享 Core，迁移 `design.map`，建立 `run.workspace`。
+3. P2：通过 Core 命令构建可执行 Run Fixture（结构化步骤/参数/时间点/板图/事件）。
+4. P3：拆 Slint，做地图、步骤、执行台。
+5. P4：可选 `StepMeta`、Protocol 编辑/组合器、上下文仪器模块。
+6. P5：写入闭环与性能验收。
+
+P0/P1 不拆 Slint，不实现 StepMeta；每一步都以同一 L929 冻结案例验收。

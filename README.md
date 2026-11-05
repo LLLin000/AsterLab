@@ -5,6 +5,7 @@
 产品术语与目标对象边界见 [CONTEXT.md](CONTEXT.md)；该文件记录目标设计语义，当前 CLI 的已实现能力仍以 [AGENT_API.md](AGENT_API.md) 为准。
 
 系统分层、Slint 前端职责、Core 读模型和仪器步骤模块的架构见 [docs/architecture.md](docs/architecture.md)。
+文档权威与阅读顺序见 [docs/README.md](docs/README.md)；当前实施阶段见 [docs/implementation-plan.md](docs/implementation-plan.md)；P0 Core 契约见 [docs/contracts/core-v1.md](docs/contracts/core-v1.md)。
 
 ## 启动
 
