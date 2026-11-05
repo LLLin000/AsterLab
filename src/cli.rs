@@ -570,6 +570,8 @@ struct ViewDataPreview {
     view_id: String,
     instance_id: String,
     #[serde(default)]
+    calculator_instance_id: Option<String>,
+    #[serde(default)]
     volume_per_well: Option<f64>,
     #[serde(default)]
     extra_ratio: Option<f64>,
@@ -2253,20 +2255,14 @@ pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Valu
     Ok(json!({"document":document}))
 }
 
-fn find_planned_container(value: &Value, instance_id: &str) -> Option<(String, String)> {
+fn find_component<'a>(value: &'a Value, instance_id: &str) -> Option<&'a Value> {
     if value.get("instance_id").and_then(Value::as_str) == Some(instance_id) {
-        let model = value.get("model_ref")?;
-        if model.get("kind").and_then(Value::as_str) == Some("planned_container") {
-            return Some((
-                model.get("design_version_id")?.as_str()?.to_owned(),
-                model.get("container_id")?.as_str()?.to_owned(),
-            ));
-        }
+        return Some(value);
     }
     if let Some(slots) = value.get("slots").and_then(Value::as_object) {
         for children in slots.values().filter_map(Value::as_array) {
             for child in children {
-                if let Some(found) = find_planned_container(child, instance_id) {
+                if let Some(found) = find_component(child, instance_id) {
                     return Some(found);
                 }
             }
@@ -2279,11 +2275,23 @@ fn find_planned_container(value: &Value, instance_id: &str) -> Option<(String, S
     {
         for node in nodes {
             if let Some(component) = node.get("component") {
-                if let Some(found) = find_planned_container(component, instance_id) {
+                if let Some(found) = find_component(component, instance_id) {
                     return Some(found);
                 }
             }
         }
+    }
+    None
+}
+
+fn find_planned_container(value: &Value, instance_id: &str) -> Option<(String, String)> {
+    let component = find_component(value, instance_id)?;
+    let model = component.get("model_ref")?;
+    if model.get("kind").and_then(Value::as_str) == Some("planned_container") {
+        return Some((
+            model.get("design_version_id")?.as_str()?.to_owned(),
+            model.get("container_id")?.as_str()?.to_owned(),
+        ));
     }
     None
 }
@@ -2314,8 +2322,46 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
     let registry = load_labware_registry(db)?;
     let plate = project_well_plate(&plan, &registry, &container_id)
         .map_err(|issues| CliError::input(issues.join("；")))?;
-    let mut calculation = calculate_reagent(&plate, i.volume_per_well, i.extra_ratio);
-    if let (Some(volume), Some(ratio)) = (i.volume_per_well, i.extra_ratio) {
+    let mut volume_per_well = i.volume_per_well;
+    if let Some(calculator_id) = &i.calculator_instance_id {
+        let calculator = find_component(&document["root"], calculator_id)
+            .ok_or_else(|| CliError::input("calculator_instance_id 不存在"))?;
+        if calculator["definition"]["id"].as_str() != Some("tool.calculator") {
+            return Err(CliError::input(
+                "calculator_instance_id 必须指向 tool.calculator",
+            ));
+        }
+        if calculator["props"]["tool_ref"].as_str() != Some("tool.reagent_total@1") {
+            return Err(CliError::input(
+                "calculator tool_ref 必须是 tool.reagent_total@1",
+            ));
+        }
+        let binding = document["bindings"]
+            .as_array()
+            .and_then(|bindings| {
+                bindings.iter().find(|binding| {
+                    binding["target"]["instance_id"].as_str() == Some(calculator_id.as_str())
+                        && binding["target"]["port_id"].as_str() == Some("values")
+                })
+            })
+            .ok_or_else(|| CliError::input("calculator 缺少 values 的 DataBinding"))?;
+        let source_id = binding["source"]["instance_id"]
+            .as_str()
+            .ok_or_else(|| CliError::input("calculator binding source 必须是 ComponentPort"))?;
+        let source = find_component(&document["root"], source_id)
+            .ok_or_else(|| CliError::input("calculator binding source 组件不存在"))?;
+        volume_per_well = source["props"]["rows"]
+            .as_array()
+            .and_then(|rows| rows.first())
+            .and_then(|row| row.as_array())
+            .and_then(|row| row.first())
+            .and_then(Value::as_f64);
+        if volume_per_well.is_none() {
+            return Err(CliError::input("calculator binding 的表格单元格不是数值"));
+        }
+    }
+    let mut calculation = calculate_reagent(&plate, volume_per_well, i.extra_ratio);
+    if let (Some(volume), Some(ratio)) = (volume_per_well, i.extra_ratio) {
         let invocation = run_reagent_tool(&plate, volume, ratio).map_err(|issues| {
             CliError::input(
                 issues
@@ -5086,7 +5132,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["project_id","protocol_version_id","scope"],"properties":{"project_id":{"type":"string"},"protocol_version_id":{"type":"string"},"scope":{"type":"object"},"document_id":{"type":"string"}}})
         }
         "view.data_preview" => {
-            json!({"type":"object","additionalProperties":false,"required":["view_id","instance_id"],"properties":{"view_id":{"type":"string"},"instance_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["view_id","instance_id"],"properties":{"view_id":{"type":"string"},"instance_id":{"type":"string"},"calculator_instance_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
         }
         "view.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","document"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160},"document":{"type":"object"}}})

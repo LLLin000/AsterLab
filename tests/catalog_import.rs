@@ -768,6 +768,30 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         .as_array_mut()
         .unwrap()
         .push(json!({
+            "instance_id": "volume_table",
+            "definition": {"id":"content.table","version":1},
+            "props": {"mode":"authored","rows":[[10.0]]},
+            "slots": {}
+        }));
+    document["root"]["workflow"]["nodes"][0]["component"]["slots"]["detail"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "instance_id": "reagent_calculator",
+            "definition": {"id":"tool.calculator","version":1},
+            "props": {"tool_ref":"tool.reagent_total@1"},
+            "slots": {}
+        }));
+    document["bindings"].as_array_mut().unwrap().push(json!({
+        "binding_id":"table-to-calculator",
+        "source":{"kind":"component_port","instance_id":"volume_table","port_id":"values"},
+        "target":{"instance_id":"reagent_calculator","port_id":"values"},
+        "value_type":"data"
+    }));
+    document["root"]["workflow"]["nodes"][0]["component"]["slots"]["detail"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
             "instance_id": "solution_tool",
             "definition": {"id":"lab.solution_calculator","version":1},
             "props": {},
@@ -823,7 +847,12 @@ fn view_document_persists_and_revises_against_real_core_refs() {
     let view_id = created["result"]["view"]["id"].as_str().unwrap();
     let data_preview = cli.run(
         "view.data_preview",
-        &json!({"view_id": view_id, "instance_id": "planned_plate", "volume_per_well": 10.0, "extra_ratio": 0.1}),
+        &json!({
+            "view_id": view_id,
+            "instance_id": "planned_plate",
+            "calculator_instance_id": "reagent_calculator",
+            "extra_ratio": 0.1
+        }),
     );
     assert_eq!(data_preview["result"]["calculation"]["total_volume"], 11.0);
     assert_eq!(data_preview["result"]["table"]["rows"][0][3], 11.0);
