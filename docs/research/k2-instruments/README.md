@@ -13,6 +13,8 @@
 | CO₂ 培养箱 | Thermo Heracell VIOS 160i | [co2-incubator-heracell-vios-160i.md](co2-incubator-heracell-vios-160i.md) | 产品页规格表、手册 Ch.3/6/11/12、温度/CO₂/O₂/湿度/HEPA/Steri-Run | 校准/服务间隔、恢复时间认证值、部分配置件号 |
 | 吸光度读板机 | Thermo Multiskan SkyHigh | [plate-reader-multiskan-skyhigh.md](plate-reader-multiskan-skyhigh.md) | 官方规格表 PDF + 产品页规格表;波长、板型、模式、温控、线性、速度 | 振荡参数、温控均匀性、动力学时序、软件版本 |
 | 荧光显微镜 | Leica DMi8 | [microscope-leica-dmi8.md](microscope-leica-dmi8.md) | 官方规格页、FAQ、产品手册;平台/对比方法/端口/检测器/载物台选项 | 物镜目录、滤光片波段、相机规格、载物台行程、培养附件参数 |
+| 离心/计数/洗板 | 5424 R / Countess 3 / BioTek 405 TS | [centrifuge-cell-counter-washer.md](centrifuge-cell-counter-washer.md) | 三份记录;数值均标 search-summary-only | 转子/适配器、量程、manifold/残留需逐页复核 |
+| qPCR/流式/分光/混匀 | QS5 / FACSCanto II / NanoDrop One / ThermoMixer C | [qpcr-flow-spectro-thermomixer.md](qpcr-flow-spectro-thermomixer.md) | 四份记录;平台 vs 配置分开 | 通道/滤光片/体积/软件/加热块需逐页复核 |
 
 ## 统一结论
 

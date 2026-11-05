@@ -13,6 +13,11 @@
 | 接种与孵育 | [inoculation-and-incubation.md](inoculation-and-incubation.md) | Thermo Gibco 贴壁/悬浮培养、Corning 培养基体积、ATCC 培养指南;CO₂ 培养箱手册 | `OP-INOC` 与 `OP-INCUB` 是两个权威,通过“已接种容器 + 记录”交接;任何密度/体积必须来自细胞系说明书/SOP |
 | 洗涤与取样 | [washing-and-sampling.md](washing-and-sampling.md) | Thermo 贴壁培养洗涤、Arbor Assays 洗板说明、Stanford 上清取样;其余仅检索摘要 | 洗涤 = 同一身份保留、液体替换;取样 = 父样本保留 + 新子样本 ID;不能共用一个默认 |
 | 吸光度与荧光读出 | [absorbance-and-fluorescence-readout.md](absorbance-and-fluorescence-readout.md) | Multiskan SkyHigh 规格;Leica DMi8 规格/FAQ/手册;Dojindo CCK-8;Thermo TMB/LIVE-DEAD/IF 协议 | 原始读数不是活力/浓度/计数;读板与成像只是终端数据操作;推导另立步骤 |
+| 细胞培养/分离 | [cell-culture-and-separation.md](cell-culture-and-separation.md) | Thermo/ATCC 直接读;Corning 摘要 | 传代、计数、离心、冻存分成四个记录 |
+| ELISA / Western blot | [elisa-and-western-blot.md](elisa-and-western-blot.md) | E1–E3/W1–W2 直接读;部分摘要 | 方法变体分开;原始读数不直接变浓度/量 |
+| qPCR / 核酸 QC | [qpcr-and-nucleic-acid-qc.md](qpcr-and-nucleic-acid-qc.md) | MIQE 直接读;部分摘要 | 提取、RT、qPCR 分开;不写通用循环程序 |
+| 流式 / 免疫荧光 | [flow-cytometry-and-immunofluorescence.md](flow-cytometry-and-immunofluorescence.md) | T1–T5 直接读;部分摘要 | 分析与分选分开;平台能力不等于实际配置 |
+| 生物膜 CV/CFU | [biofilm-cv-cfu.md](biofilm-cv-cfu.md) | S1–S3 直接读;S4/S5 摘要 | CV 生物量与 CFU 活菌不可互换 |
 
 逐字段证据矩阵见 [field-evidence-matrix.md](field-evidence-matrix.md)。两份 K2.1 JSON 草稿在 `catalog/operations/` 与 `catalog/instruments/`;它们通过结构校验,但不能产生 `Compatible`。AI 预审记录见 [k2.1-review.md](k2.1-review.md);它不是第二人科学审核。K2.2 五操作横向矩阵见 [k2.2-cross-operation-matrix.md](k2.2-cross-operation-matrix.md)。当前 catalog 另有 `sample-aliquot`、`incubation`、`washing` 三份 JSON 草稿,全部仍为 research_draft。
 
