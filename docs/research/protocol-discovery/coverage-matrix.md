@@ -1,7 +1,8 @@
 # Protocol Discovery — 公共操作覆盖矩阵
 
 - 日期:2026-11-05
-- 状态:基于 B01–B03 与既有记录的研究归纳;所有来源仍为 `research_draft`,没有 `SourceChecked`
+- 状态:基于 B01–B06 与既有记录的研究归纳;所有来源仍为 `research_draft`,没有 `SourceChecked`
+- 阅读状态:Research Shared(研究有复用)、Catalog Draft(已有 JSON)、SourceChecked(已复核)必须分开;当前没有 SourceChecked
 - 用途:看“哪些操作真的跨方法复用”,不是看“研究了多少篇”
 
 ## 1. 已研究批次
@@ -15,6 +16,15 @@
 | B05 | 蛋白检测 | Thermo/Bio-Rad 直接读 | ELISA/WB 是方法模板;发光读数为缺口;无新公共模块 |
 | B06 | 流式/IF | Thermo 多份 protocol 直接读 | 染色/固定/通透/设门均 method-local/template;原始采集复用;无新公共模块 |
 | 既有 | 生物膜、3D 类器官、ELISA/WB、qPCR、流式/IF、划痕/Transwell | 见 k2-operations | 方法模板为主;Bio-protocol 4298 补足 3D dome |
+
+## 2.1 状态分层
+
+| 状态 | 操作 |
+|---|---|
+| Catalog Draft | liquid_transfer、sample_aliquot、incubation、washing、absorbance_measurement(5 份 JSON) |
+| Research Shared, no JSON | 离心、原始荧光采集、细胞浓度计数、划线/涂布、菌落计数 |
+| Method-local / template | PCR 热循环、电泳、流式采集、固定/通透/封闭/染色、ELISA/WB 变体 |
+| Gap | 发光原始采集、RT-qPCR discovery、3D 其他模型 |
 
 ## 2. 公共操作复用
 
@@ -43,7 +53,7 @@
 
 ## 3. 判定结果
 
-- B01–B03 没有发现需要新增的公共 OperationModule。
+- B01–B06 没有发现需要新增的公共 OperationModule。
 - 公共操作集合目前趋于稳定:transfer、aliquot、incubation、washing、centrifugation、absorbance、raw image、cell count、streak、spread、colony count。
 - 大量“看起来像操作”的步骤实际是:
   - composite:传代、连续稀释、冻存/复苏、条件培养基;

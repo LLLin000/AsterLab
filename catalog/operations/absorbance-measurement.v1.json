@@ -1,15 +1,34 @@
 {
   "schema_version": 1,
   "identity": {
-    "catalog": { "module_id": "op.absorbance_measurement", "version": 1 },
+    "catalog": {
+      "module_id": "op.absorbance_measurement",
+      "version": 1
+    },
     "title": "Absorbance measurement of a prepared plate",
     "action_type": "absorbance_measurement",
     "applicability": {
-      "assay_families": ["cck8", "elisa"],
-      "sample_kinds": ["plate"],
-      "container_kinds": ["plate"],
-      "variants": ["endpoint"],
-      "exclusions": ["kinetic", "fluorescence", "luminescence"]
+      "assay_families": [
+        "cck8",
+        "ldh",
+        "elisa",
+        "biofilm_cv"
+      ],
+      "sample_kinds": [
+        "plate"
+      ],
+      "container_kinds": [
+        "plate"
+      ],
+      "variants": [
+        "endpoint",
+        "spectral_scan"
+      ],
+      "exclusions": [
+        "kinetic",
+        "fluorescence",
+        "luminescence"
+      ]
     }
   },
   "semantics": {
@@ -67,7 +86,9 @@
       "required_at": "protocol_freeze",
       "value_source": "design_variable",
       "constraints": [
-        { "kind": "positive" }
+        {
+          "kind": "positive"
+        }
       ],
       "description": "A positive wavelength selected for the assay chemistry; the instrument profile supplies the supported range, not this generic operation.",
       "evidence": [
@@ -100,19 +121,60 @@
           "retrieved_at": "2026-11-05"
         }
       ]
+    },
+    {
+      "key": "read_mode",
+      "label": "Read mode",
+      "value_type": "text",
+      "required": true,
+      "required_at": "protocol_freeze",
+      "value_source": "design_variable",
+      "constraints": [
+        {
+          "kind": "one_of",
+          "values": [
+            "endpoint",
+            "spectral_scan"
+          ]
+        }
+      ],
+      "description": "Endpoint or spectral scan; kinetic/continuous acquisition is not expressible in v1 and stays a documented gap.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: reading modes",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
     }
   ],
   "execution": {
     "default_time_scope": "once",
-    "allowed_time_scopes": ["once"],
+    "allowed_time_scopes": [
+      "once",
+      "per_timepoint"
+    ],
     "instrument_requirements": [
       {
         "requirement_id": "plate_reader",
         "class": "plate_reader",
         "required": true,
         "capabilities": [
-          { "key": "wavelength", "constraint": { "kind": "exists" } },
-          { "key": "plate_format", "constraint": { "kind": "exists" } }
+          {
+            "key": "wavelength",
+            "constraint": {
+              "kind": "exists"
+            }
+          },
+          {
+            "key": "plate_format",
+            "constraint": {
+              "kind": "exists"
+            }
+          }
         ]
       }
     ],

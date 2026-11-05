@@ -2,22 +2,22 @@
   "schema_version": 1,
   "identity": {
     "catalog": { "module_id": "op.washing", "version": 1 },
-    "title": "Wash a vessel while preserving sample identity",
+    "title": "Liquid exchange / washing",
     "action_type": "washing",
     "applicability": {
-      "assay_families": ["cell_culture", "elisa"],
-      "sample_kinds": ["attached_cells", "plate_bound_sample"],
-      "container_kinds": ["plate", "flask", "dish"],
-      "variants": ["manual_aspiration", "plate_washer"],
-      "exclusions": ["sample_discard"]
+      "assay_families": ["cell_culture", "elisa", "immunofluorescence", "biofilm", "3d_culture"],
+      "sample_kinds": ["attached_cells", "plate_bound_sample", "biofilm", "spheroid"],
+      "container_kinds": ["plate", "flask", "dish", "tube"],
+      "variants": ["preserving", "lossy_possible"],
+      "exclusions": []
     }
   },
   "semantics": {
-    "purpose": "Exchange the liquid around a retained sample to remove unbound material while preserving sample identity; this is not a universal no-loss operation.",
+    "purpose": "Exchange the liquid around a sample to remove unbound material. Sample identity may be preserved or may be lost depending on the method; this is not a universal no-loss operation.",
     "preconditions": [
-      "The sample is attached or otherwise retained in the vessel.",
-      "Wash buffer formulation and volume are defined by the protocol.",
-      "Waste path and anti-drying steps are available."
+      "The sample/vessel is compatible with the wash buffer and removal method.",
+      "Wash buffer formulation, volume and cycles are defined by the protocol.",
+      "Waste path is available; whether drying is allowed is method-specific."
     ],
     "inputs": [
       {
@@ -26,7 +26,7 @@
         "object_type": "sample",
         "required": true,
         "cardinality": "one",
-        "description": "Retained sample in its vessel."
+        "description": "Sample in its vessel."
       },
       {
         "port_id": "vessel",
@@ -52,7 +52,7 @@
         "object_type": "sample",
         "required": true,
         "cardinality": "one",
-        "description": "Retained sample after liquid exchange; identity preserved, state may change."
+        "description": "Sample after liquid exchange; identity may be preserved or partially lost."
       },
       {
         "port_id": "waste",
@@ -69,7 +69,7 @@
         "input_port_id": "sample_in",
         "output_port_id": "sample_out",
         "effect": "state_changed",
-        "note": "Sample identity is preserved; the liquid environment changes. If the sample detaches or is lost, this effect is invalid."
+        "note": "Liquid environment changes. If loss_policy is lossy_possible, sample loss is possible and its magnitude is UNKNOWN unless measured."
       },
       {
         "transition_id": "buffer_to_waste",
@@ -123,21 +123,23 @@
       ]
     },
     {
-      "key": "prevent_drying",
-      "label": "Prevent drying",
-      "value_type": "boolean",
+      "key": "loss_policy",
+      "label": "Sample retention / possible loss",
+      "value_type": "text",
       "required": true,
       "required_at": "run_freeze",
-      "value_source": "protocol_fixed",
-      "constraints": [],
-      "description": "Must remain true; proceed directly to the next step.",
+      "value_source": "design_variable",
+      "constraints": [
+        { "kind": "one_of", "values": ["preserving", "lossy_possible"] }
+      ],
+      "description": "Declare whether the method treats the sample as retained or allows unknown loss. Do not default to preserving.",
       "evidence": [
         {
           "evidence_id": "arbor.plate-wash",
           "kind": "vendor_manual",
           "citation": "Arbor Assays Plate Washing Instructions v.231213",
           "url": "https://www.arborassays.com/wp-content/uploads/2023/12/Plate-Washing-Instruction_231213.pdf",
-          "locator": "Proceed directly to next assay step",
+          "locator": "Full two-page document",
           "retrieved_at": "2026-11-05"
         }
       ]
@@ -149,21 +151,23 @@
     "instrument_requirements": [],
     "completion_checks": [
       {
-        "check_id": "sample_retained",
+        "check_id": "cycles_completed",
         "kind": "operational",
-        "description": "Sample remains attached/retained after the wash.",
+        "description": "The planned number of wash cycles was completed.",
         "blocking": true
       },
       {
-        "check_id": "no_drying",
+        "check_id": "loss_policy_recorded",
         "kind": "operational",
-        "description": "Vessel proceeds directly to the next step without drying.",
+        "description": "The method's retention/loss policy is recorded; if lossy, observed loss is recorded or marked UNKNOWN.",
         "blocking": true
       }
     ],
     "record_fields": [
       { "key": "wash_volume", "label": "Wash volume", "value_type": "number", "unit": "mL", "required": true },
       { "key": "cycles", "label": "Wash cycles", "value_type": "integer", "required": true },
+      { "key": "loss_policy", "label": "Loss policy", "value_type": "text", "required": true },
+      { "key": "observed_loss", "label": "Observed sample loss", "value_type": "text", "required": false },
       { "key": "residual_volume", "label": "Residual volume", "value_type": "number", "unit": "uL", "required": false }
     ]
   },
@@ -171,17 +175,17 @@
     "controls": [],
     "decision_points": [
       {
-        "question": "Is the sample still retained after washing?",
-        "evidence": "Visual check and protocol acceptance criteria.",
-        "continue_if": "Sample remains attached/retained.",
-        "stop_if": "Sample detached or was aspirated; record loss and do not treat the wash as sample-preserving."
+        "question": "Does the method treat the sample as retained or allow loss?",
+        "evidence": "Method template / acceptance criteria / visual check.",
+        "continue_if": "The loss policy is explicit.",
+        "stop_if": "The policy is unknown; keep the wash unresolved or use Custom Step."
       }
     ],
     "failure_modes": [
       {
         "mode": "Sample loss",
         "symptom": "Cells or bound material detached into waste.",
-        "impact": "Sample identity is not preserved; downstream result invalid.",
+        "impact": "Sample identity or quantity is not preserved.",
         "action": "Record sample loss; repeat with gentler washing if the protocol allows."
       },
       {
@@ -191,10 +195,10 @@
         "action": "Follow the kit/protocol cycle count; do not arbitrarily add cycles."
       },
       {
-        "mode": "Drying",
+        "mode": "Drying (method-specific)",
         "symptom": "Wells dry before the next step.",
-        "impact": "Irreversible assay damage.",
-        "action": "Proceed directly; repeat if drying occurred."
+        "impact": "May be irreversible for some assays; other methods intentionally dry.",
+        "action": "Follow the method's drying instruction; record if unintended."
       }
     ],
     "readout": null,

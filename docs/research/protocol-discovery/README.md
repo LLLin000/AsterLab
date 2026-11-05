@@ -53,6 +53,10 @@
 | B05 | [batch-05-protein-assays.md](batch-05-protein-assays.md) | ELISA / Western blot | 已完成;research_draft |
 | B06 | [batch-06-flow-and-if.md](batch-06-flow-and-if.md) | 流式 / 免疫荧光 | 已完成;research_draft |
 
+## 一致性审查
+
+见 [catalog-consistency-audit.md](catalog-consistency-audit.md):Research Shared / Catalog Draft / SourceChecked 分开;五份 JSON 的 incubation、washing、absorbance 已按研究范围修订。
+
 ## 来源边界
 
 - 原始 Protocol 是步骤/参数事实依据;

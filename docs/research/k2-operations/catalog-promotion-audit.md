@@ -98,7 +98,7 @@ Incubation is a controlled hold guaranteeing only elapsed time and conditions; s
 
 ## 5. First public Catalog set (small)
 
-Promote these 10 definitions to the public Catalog (as `research_draft` records first; second-person `ReviewRecord` required before JSON/runtime). Each item lists two document-level Reuse Map examples. Example entries map experiment steps to the public object; they are **document-level** and imply no source verification.
+Promote these 11 definitions to the public Catalog (as `research_draft` records first; second-person `ReviewRecord` required before JSON/runtime). Each item lists two document-level Reuse Map examples. Example entries map experiment steps to the public object; they are **document-level** and imply no source verification.
 
 | # | Public operation | Reuse Map example A | Reuse Map example B |
 |---|---|---|---|

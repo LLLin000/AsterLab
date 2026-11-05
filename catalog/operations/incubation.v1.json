@@ -2,31 +2,31 @@
   "schema_version": 1,
   "identity": {
     "catalog": { "module_id": "op.incubation", "version": 1 },
-    "title": "Hold a culture under controlled incubation conditions",
+    "title": "Controlled hold / incubation",
     "action_type": "incubation",
     "applicability": {
-      "assay_families": ["cell_culture"],
-      "sample_kinds": ["culture"],
-      "container_kinds": ["flask", "dish", "plate"],
-      "variants": ["co2_incubator"],
-      "exclusions": ["environmental_chamber_without_co2"]
+      "assay_families": ["cell_culture", "microbiology", "staining", "assay_development", "molecular"],
+      "sample_kinds": ["culture", "stained_sample", "reaction_mixture"],
+      "container_kinds": ["flask", "dish", "plate", "tube"],
+      "variants": ["room_temperature_hold", "incubator_hold"],
+      "exclusions": []
     }
   },
   "semantics": {
-    "purpose": "Hold a prepared culture at controlled temperature and atmosphere for a defined duration anchored to an explicit event.",
+    "purpose": "Hold a prepared sample under defined conditions for a defined duration anchored to an explicit event; do not infer growth, attachment or reaction completion from elapsed time.",
     "preconditions": [
-      "The vessel is labelled, vented as required, and has a recorded seeding or treatment time.",
-      "The incubator is at setpoint and has a free, qualified slot.",
+      "The sample/vessel is labelled and compatible with the intended hold conditions.",
+      "The required temperature/atmosphere (if any) is defined by the method.",
       "The requested duration and time anchor are defined."
     ],
     "inputs": [
       {
-        "port_id": "culture_in",
+        "port_id": "sample_in",
         "role": "source_sample",
         "object_type": "sample",
         "required": true,
         "cardinality": "one",
-        "description": "Culture to be held."
+        "description": "Sample or culture to be held."
       },
       {
         "port_id": "vessel",
@@ -34,26 +34,26 @@
         "object_type": "container",
         "required": true,
         "cardinality": "one",
-        "description": "Vented culture vessel."
+        "description": "Compatible vessel."
       }
     ],
     "outputs": [
       {
-        "port_id": "culture_out",
+        "port_id": "sample_out",
         "role": "destination_sample",
         "object_type": "sample",
         "required": true,
         "cardinality": "one",
-        "description": "Culture after the hold; identity is preserved, state may change."
+        "description": "Sample after the hold; identity is preserved, state may change."
       }
     ],
     "sample_transitions": [
       {
-        "transition_id": "culture_held",
-        "input_port_id": "culture_in",
-        "output_port_id": "culture_out",
+        "transition_id": "sample_held",
+        "input_port_id": "sample_in",
+        "output_port_id": "sample_out",
         "effect": "state_changed",
-        "note": "Incubation changes the culture state (growth/attachment); it does not assert a measured outcome."
+        "note": "Hold changes the sample state or keeps it under defined conditions; it does not assert a measured biological outcome."
       }
     ]
   },
@@ -70,25 +70,25 @@
       "description": "Protocol- or SOP-specific; no default duration is supplied.",
       "evidence": [
         {
-          "evidence_id": "thermo.subculturing",
+          "evidence_id": "atcc.culture-guide",
           "kind": "peer_reviewed",
-          "citation": "Thermo Fisher Subculturing Adherent Cells",
-          "url": "https://www.thermofisher.com/us/en/home/references/gibco-cell-culture-basics/cell-culture-protocols/subculturing-adherent-cells.html",
-          "locator": "Incubation and subculture timing",
+          "citation": "ATCC Animal Cell Culture Guide",
+          "url": "https://www.atcc.org/resources/culture-guides/animal-cell-culture-guide",
+          "locator": "Incubation optimum",
           "retrieved_at": "2026-11-05"
         }
       ]
     },
     {
       "key": "temperature",
-      "label": "Temperature",
+      "label": "Hold temperature",
       "value_type": "number",
       "unit": "C",
-      "required": true,
+      "required": false,
       "required_at": "run_freeze",
       "value_source": "design_variable",
       "constraints": [{ "kind": "positive" }],
-      "description": "Line- and protocol-specific; no universal 37 C default in this module.",
+      "description": "Optional only if the method specifies room temperature or another non-numeric condition; otherwise record it.",
       "evidence": [
         {
           "evidence_id": "atcc.culture-guide",
@@ -102,21 +102,21 @@
     },
     {
       "key": "co2",
-      "label": "CO2 concentration",
+      "label": "CO2 concentration (if required)",
       "value_type": "number",
       "unit": "%",
-      "required": true,
+      "required": false,
       "required_at": "run_freeze",
       "value_source": "design_variable",
       "constraints": [{ "kind": "positive" }],
-      "description": "Depends on medium buffering and protocol; no universal default.",
+      "description": "Only for methods that require CO2; not a property of all incubation. The CO2-incubator capability is a method/instrument binding, not a generic requirement.",
       "evidence": [
         {
-          "evidence_id": "atcc.culture-guide",
+          "evidence_id": "thermo.subculturing",
           "kind": "peer_reviewed",
-          "citation": "ATCC Animal Cell Culture Guide",
-          "url": "https://www.atcc.org/resources/culture-guides/animal-cell-culture-guide",
-          "locator": "Incubation optimum",
+          "citation": "Thermo Fisher Subculturing Adherent Cells",
+          "url": "https://www.thermofisher.com/us/en/home/references/gibco-cell-culture-basics/cell-culture-protocols/subculturing-adherent-cells.html",
+          "locator": "Incubation and subculture timing",
           "retrieved_at": "2026-11-05"
         }
       ]
@@ -129,7 +129,7 @@
       "required_at": "run_freeze",
       "value_source": "design_variable",
       "constraints": [{ "kind": "non_empty" }],
-      "description": "Event relative to which the hold starts, e.g. seeding or treatment; not inferred from the Assay.",
+      "description": "Event relative to which the hold starts, e.g. seeding, treatment, staining or reaction start; not inferred from the Assay.",
       "evidence": [
         {
           "evidence_id": "thermo.subculturing",
@@ -144,35 +144,25 @@
   ],
   "execution": {
     "default_time_scope": "once",
-    "allowed_time_scopes": ["once", "per_timepoint"],
-    "instrument_requirements": [
-      {
-        "requirement_id": "incubator",
-        "class": "incubator",
-        "required": true,
-        "capabilities": [
-          { "key": "temperature_range", "constraint": { "kind": "exists" } },
-          { "key": "co2_range", "constraint": { "kind": "exists" } }
-        ]
-      }
-    ],
+    "allowed_time_scopes": ["once", "per_timepoint", "per_assay"],
+    "instrument_requirements": [],
     "completion_checks": [
-      {
-        "check_id": "setpoint_stable",
-        "kind": "operational",
-        "description": "Incubator setpoints are stable before loading.",
-        "blocking": true
-      },
       {
         "check_id": "duration_and_anchor_recorded",
         "kind": "operational",
-        "description": "Load time, unload time and time anchor are recorded.",
+        "description": "Start/end times and the time anchor are recorded.",
         "blocking": true
+      },
+      {
+        "check_id": "conditions_recorded",
+        "kind": "operational",
+        "description": "Actual temperature/atmosphere are recorded when the method specifies them.",
+        "blocking": false
       }
     ],
     "record_fields": [
-      { "key": "load_time", "label": "Load time", "value_type": "text", "required": true },
-      { "key": "unload_time", "label": "Unload time", "value_type": "text", "required": true },
+      { "key": "start_time", "label": "Start time", "value_type": "text", "required": true },
+      { "key": "end_time", "label": "End time", "value_type": "text", "required": true },
       { "key": "actual_temperature", "label": "Actual temperature", "value_type": "number", "unit": "C", "required": false },
       { "key": "actual_co2", "label": "Actual CO2", "value_type": "number", "unit": "%", "required": false }
     ]
@@ -182,7 +172,7 @@
     "decision_points": [
       {
         "question": "Is the time anchor explicit?",
-        "evidence": "Seeding/treatment record.",
+        "evidence": "Seeding/treatment/staining/reaction record.",
         "continue_if": "The anchor event and start time are recorded.",
         "stop_if": "The anchor is unknown; keep the duration unresolved."
       }
@@ -191,14 +181,20 @@
       {
         "mode": "Contamination",
         "symptom": "Turbidity, color change or unexpected growth.",
-        "impact": "Culture invalid; downstream assay invalid.",
+        "impact": "Sample invalid; downstream assay invalid.",
         "action": "Discard, decontaminate, and record the affected vessel."
       },
       {
         "mode": "Evaporation or dry-out",
         "symptom": "Reduced volume or edge effects.",
         "impact": "Changed concentration/osmolality.",
-        "action": "Check vessel venting and humidity; record the deviation."
+        "action": "Check vessel venting and humidity where required; record the deviation."
+      },
+      {
+        "mode": "Temperature/atmosphere drift",
+        "symptom": "Recorded condition differs from the method requirement.",
+        "impact": "Invalid hold condition.",
+        "action": "Record deviation and repeat if the method requires a controlled hold."
       }
     ],
     "readout": null,
