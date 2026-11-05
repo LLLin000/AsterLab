@@ -13,7 +13,7 @@
 | 接种与孵育 | [inoculation-and-incubation.md](inoculation-and-incubation.md) | Thermo Gibco 贴壁/悬浮培养、Corning 培养基体积、ATCC 培养指南;CO₂ 培养箱手册 | `OP-INOC` 与 `OP-INCUB` 是两个权威,通过“已接种容器 + 记录”交接;任何密度/体积必须来自细胞系说明书/SOP |
 | 洗涤与取样 | [washing-and-sampling.md](washing-and-sampling.md) | Thermo 贴壁培养洗涤、Arbor Assays 洗板说明、Stanford 上清取样;其余仅检索摘要 | 洗涤 = 同一身份保留、液体替换;取样 = 父样本保留 + 新子样本 ID;不能共用一个默认 |
 | 吸光度与荧光读出 | [absorbance-and-fluorescence-readout.md](absorbance-and-fluorescence-readout.md) | Multiskan SkyHigh 规格;Leica DMi8 规格/FAQ/手册;Dojindo CCK-8;Thermo TMB/LIVE-DEAD/IF 协议 | 原始读数不是活力/浓度/计数;读板与成像只是终端数据操作;推导另立步骤 |
-| 细胞培养/分离 | [cell-culture-and-separation.md](cell-culture-and-separation.md) | Thermo/ATCC 直接读;Corning 摘要 | 传代、计数、离心、冻存分成四个记录 |
+| 细胞培养/分离 | [cell-culture-and-separation.md](cell-culture-and-separation.md);[Morimoto 基础细胞培养](morimoto-basic-cell-culture.md) | Thermo/ATCC 直接读;Morimoto M1–M4 直接读;Corning 摘要 | 传代、计数、台盼蓝、冻存/复苏;公开 lab protocol 交叉核对 |
 | ELISA / Western blot | [elisa-and-western-blot.md](elisa-and-western-blot.md) | E1–E3/W1–W2 直接读;部分摘要 | 方法变体分开;原始读数不直接变浓度/量 |
 | qPCR / 核酸 QC | [qpcr-and-nucleic-acid-qc.md](qpcr-and-nucleic-acid-qc.md) | MIQE 直接读;部分摘要 | 提取、RT、qPCR 分开;不写通用循环程序 |
 | 流式 / 免疫荧光 | [flow-cytometry-and-immunofluorescence.md](flow-cytometry-and-immunofluorescence.md) | T1–T5 直接读;部分摘要 | 分析与分选分开;平台能力不等于实际配置 |

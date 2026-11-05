@@ -16,7 +16,7 @@
 | 洗涤 | [washing-and-sampling.md](k2-operations/washing-and-sampling.md) | S1–S3 直接读 | `washing.v1.json` | 样本损失 effect、残留量 |
 | 吸光度测量 | [absorbance-and-fluorescence-readout.md](k2-operations/absorbance-and-fluorescence-readout.md) | 仪器规格直接读;Assay 部分摘要 | `absorbance-measurement.v1.json` | Assay 空白/曲线的层级、线性范围 |
 | 荧光成像 | [absorbance-and-fluorescence-readout.md](k2-operations/absorbance-and-fluorescence-readout.md) | 仪器规格直接读 | 未单独 JSON | 通道/物镜/配置;活/固定样本差异 |
-| 细胞传代/解离 | [cell-culture-and-separation.md](k2-operations/cell-culture-and-separation.md) | S1/S2/S5/S6 直接读;Corning 摘要 | 未单独 JSON | 传代是 composite block;计数/离心可拆成原子操作;细胞系差异/解离终点 |
+| 细胞传代/解离 | [cell-culture-and-separation.md](k2-operations/cell-culture-and-separation.md);[Morimoto 基础细胞培养](k2-operations/morimoto-basic-cell-culture.md) | S1/S2/S5/S6 直接读;Morimoto M1–M4 直接读;Corning 摘要 | 未单独 JSON | 传代是 composite block;计数/离心可拆成原子操作;细胞系差异/解离终点 |
 | 细胞计数/活力 | 同上 | 直接读 | 未单独 JSON | 计数方法/范围/聚集 |
 | 离心 | 同上 | 直接读 | 未单独 JSON | 转子/RCF/适配器 |
 | 冻存/存储 | 同上 | 直接读 | 未单独 JSON | 降温速率、冻存液、 thaw |
