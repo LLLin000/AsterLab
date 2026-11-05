@@ -6,6 +6,7 @@
 - 不在范围（out-of-scope，一律非操作）: ΔCq / ΔΔCq / 归一化方法 / 效率校正计算 / 统计检验 / 生物学解释。Cq 只记录到“原始 Cq + 判定方法 + 软件版本”，不做任何派生。
 - 规则: 现有仓库记录只用于 Reuse Map 身份对照，不作步骤/数值证据；每条数值/行为证据只引本文件 §1 的原始厂商手册；不提出任何新公共模块；不写 PortSpec/Transition 全文；不做代码/UI/DB 变更。
 - 禁止声明: 本文件不含任何通用循环程序、通用 reference gene、通用阈值、通用效率值；出现的所有温度/时间/浓度均为所引手册的 assay-kit 绑定值，不得跨 assay 复制。
+- 术语: `raw_fluorescence` = 逐循环荧光信号 + 仪器采集元数据;`instrument_reported_derived` = 仪器软件算出的 Cq/Ct。后者不能称为“原始 Cq”,必须附 baseline/threshold 方法与软件版本。
 
 ## 1. 来源索引
 
@@ -98,7 +99,7 @@ R1 `op.liquid_transfer`；R2 `op.sample_aliquot`（conditional，谱系注记）
 | 板短离集液/去泡 | 传代/计数/流式离心 + 本批板集液 | shared conditional（`op.centrifugation` 参数化，集液注记；非沉淀分离） | S3 步骤 2/4；RCF/转子 UNKNOWN（`configuration_dependent`） |
 | 热循环程序（UDG/激活/40×/熔解） | 仅 PCR 家族 | 方法模板内程序（不复用 `op.incubation`） | B04 P-PCR 规则延续；合并即 G2 失败 |
 | SYBR 熔解特异性证据 | 仅 SYBR 家族 | method-local | G1 不过；染料化学依赖，不并入通用读数 |
-| 实时荧光原始采集（扩增曲线/Ct） | 仅 qPCR 家族 | 方法模板内读数（不并入 `FLUO_IMAGE`） | 见 §7 G-5；Cq 判定软件版本依赖 |
+| 实时荧光原始采集（逐循环 raw fluorescence + 采集元数据） | 仅 qPCR 家族 | 方法模板内读数（不并入 `FLUO_IMAGE`） | Cq/Ct 是 `instrument_reported_derived`,非 raw;见 §7 G-5 |
 | 引物设计/浓度优化/基线阈值调试/定量换算 | —（设计/计算/判断） | ToolAction 或 out-of-scope | S3 App.D/ troubleshooting；不建操作 |
 
 ---
@@ -169,7 +170,7 @@ R1 `op.liquid_transfer`；R2 `op.sample_aliquot`（conditional，谱系注记）
 | # | 缺口 | 类别 | 说明 |
 |---|---|---|---|
 | G-1 | 对照矩阵不可省 | 方法绑定缺口 | 两步：NTC（SYBR 必须，S3 E 级语境）+ 模板质控门槛；一步：IPC/NAC/NTC/标准系列/≥3 重复/no-RT 热杀分支（S4）。任一缺失即对应声明不可信 |
-| G-2 | 派生归属 | ToolAction / out-of-scope，非操作 | ΔCq/ΔΔCq、效率（斜率来源）、标准曲线拟合、归一化描述、统计方法、Ct 离群处置——全部下游；本批只到原始 Ct + 判定方法 + 软件版本 |
+| G-2 | 派生归属 | ToolAction / out-of-scope，非操作 | ΔCq/ΔΔCq、效率（斜率来源）、标准曲线拟合、归一化描述、统计方法、Ct 离群处置——全部下游；本批保留 raw fluorescence;Cq/Ct 标记为 `instrument_reported_derived`,附方法与软件版本 |
 | G-3 | 方法边界 | 模型边界 | 等温 RT 保持可复用 `op.incubation`；但 40× 变温循环 / 同孔 RT 相 / UDG / 激活 / 熔解整体≠孵育：合并即 G2 失败（端口/effect/完成检查不兼容），一律方法模板内程序 |
 | G-4 | 试剂/设计依赖值 | `method_dependent` | 引物 300–800 nM（SYBR）vs 400–900 nM + 探针 100–250 nM（TaqPath）为各手册绑定值，不通用；扩增子 50–150 bp、跨内含子、探针优先为设计前置；per-lot 寡核苷酸单未读 |
 | G-5 | 读数边界 | 模型边界 | 实时荧光原始采集（曲线/Ct/熔解）不并入 `FLUO_IMAGE`（静态图像）或 `ABS_READ`（终点 OD）：动力学/通道/基线阈值 effect 不同；发光类比（audit G-1）同样禁并入 |

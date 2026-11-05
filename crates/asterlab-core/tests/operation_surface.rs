@@ -95,7 +95,7 @@ fn incubation_has_an_explicit_time_anchor_and_state_change() {
         .semantics
         .sample_transitions
         .iter()
-        .any(|transition| transition.effect == SampleEffect::StateChanged));
+        .any(|transition| transition.effect == SampleEffect::Unknown));
     assert_eq!(operation.execution.default_time_scope, StepTimeScope::Once);
 }
 
@@ -112,15 +112,34 @@ fn washing_separates_waste_from_sample_state_change() {
                 && transition.output_port_id.as_deref() == Some("waste")
                 && transition.effect == SampleEffect::Consumed
         }));
-    assert!(operation
+    let preserving = operation
         .semantics
         .sample_transitions
         .iter()
-        .any(|transition| {
-            transition.input_port_id == "sample_in"
-                && transition.output_port_id.as_deref() == Some("sample_out")
-                && transition.effect == SampleEffect::StateChanged
-        }));
+        .find(|transition| transition.transition_id == "sample_washed_preserving")
+        .expect("preserving transition");
+    assert_eq!(preserving.effect, SampleEffect::Preserved);
+    assert_eq!(
+        preserving
+            .applies_when
+            .as_ref()
+            .map(|condition| condition.value.as_str()),
+        Some("preserving")
+    );
+    let lossy = operation
+        .semantics
+        .sample_transitions
+        .iter()
+        .find(|transition| transition.transition_id == "sample_washed_lossy")
+        .expect("lossy transition");
+    assert_eq!(lossy.effect, SampleEffect::StateChanged);
+    assert_eq!(
+        lossy
+            .applies_when
+            .as_ref()
+            .map(|condition| condition.value.as_str()),
+        Some("lossy_possible")
+    );
     assert!(operation.execution.instrument_requirements.is_empty());
 }
 

@@ -53,7 +53,7 @@
 | B05 | [batch-05-protein-assays.md](batch-05-protein-assays.md) | ELISA / Western blot | 已完成;research_draft |
 | B06 | [batch-06-flow-and-if.md](batch-06-flow-and-if.md) | 流式 / 免疫荧光 | 已完成;research_draft |
 | B07 | [batch-07-rt-qpcr.md](batch-07-rt-qpcr.md) | 两步/一步 RT-qPCR 湿实验 | 已完成;research_draft |
-| C01 | [candidate-recheck.md](candidate-recheck.md) | 热循环/电泳/流式采集/发光采集复审 | 已完成;零新公共模块 |
+| C01 | [candidate-recheck.md](candidate-recheck.md) | 热循环/电泳/流式采集/发光采集复审 | 已完成;3 个 domain-shared candidate + 电泳 deferred |
 
 ## 剩余实验地图
 

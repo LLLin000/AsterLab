@@ -9,7 +9,7 @@
 
 | # | Gate | Pass means |
 |---|---|---|
-| G1 | Real reuse | Documented at document level in ≥2 independent method families (e.g., cell culture vs microbial vs molecular vs imaging), not 2 variants of the same method. |
+| G1 | Real reuse | Documented at document level in ≥2 independent methods, either within one technical domain (e.g. different flow assays) or across domains. Method-name variants do not count; a domain-shared operation is valid. |
 | G2 | Semantic stability | Same purpose, ports, sample effect, and completion-check type across those families. Parameters may vary; effect must not. |
 | G3 | Abstraction benefit | One public definition + parameter binding replaces repeated per-method redefinition. |
 | G4 | Acceptable branch cost | Variants (if any) differ in parameter values only, or in at most one explicitly declared variant with its own loss/terminality note. Divergent effects hidden behind flags = fail. |
@@ -18,7 +18,7 @@ A candidate failing any gate is classified as `method_local_step` (keep the atom
 
 ## 2. Decision table
 
-Shared = `shared_operation` (promote to public Catalog, §5). Streak is promoted as a narrow exception; it remains separate from spread. All other classes stay private to their method/composite/template/tooling.
+Shared = `shared_operation` (promote to public Catalog, §5). Streak is promoted as a narrow exception; it remains separate from spread. Domain-shared candidates are listed separately and may enter Catalog with a domain scope, without becoming global operations.
 
 | # | Candidate | Class | G1 | G2 | G3 | G4 | Decision |
 |---|---|---|---|---|---|---|---|
@@ -54,7 +54,7 @@ Shared = `shared_operation` (promote to public Catalog, §5). Streak is promoted
 | 30 | 3D matrix dome / embedding | `composite_block` + Custom Step | ✗ | ✗ (dome/embed/sandwich; matrix-dependent) | ✗ | ✗ | **Downgrade — §3.3.** |
 | 31 | ULA spheroid formation | `composite_block` | ✗ (1 model class) | ✓ | ✗ | ✓ | **Downgrade — §3.4.** |
 | 32 | 3D partial media exchange | `shared_operation` variant of #4 (lossy) | ✓ | ✓ | ✓ | ✓ | Covered by #5; do not create a "3D wash" op. |
-| 33 | Luminescence read (e.g., ATP-glow) | `method_local_step` (gap) | ✗ (1 family documented) | — | — | — | Gap, §7. Do not shoehorn into #8. |
+| 33 | Luminescence plate read (ATP/reporter) | `domain_shared` candidate | ✓ (ATP and reporter assays; same plate-read physics) | ~ (same readout shape; different assay meaning) | ✓ | ✓ (plate read vs imaging split) | Domain-shared candidate, §5.1; not a global op; imaging separate. |
 | 34 | Gap-closure metrics, migrated-cell counts, dose–response fits, ΔCq/ΔΔCq, dilution/CFU calculations, plate-capacity checks | `tool_action` | — | — | — | — | Deterministic derivations; never operations. |
 
 ## 3. Rejected / downgraded list (explicit)
@@ -116,6 +116,17 @@ Promote these 11 definitions to the public Catalog (as `research_draft` records 
 
 Explicitly **not** in the first set: colony count (promotable, held out per §7 G-2). Streak is included as a narrow, separate operation; it is not merged with spread.
 
+## 5.1 Domain-shared candidates (new classification)
+
+These are not global operations, but are not method-local either. They can enter Catalog with a domain scope after their own review:
+
+| Candidate | Domain | Why shared | Boundary |
+|---|---|---|---|
+| ThermalProgram | PCR/qPCR/RT-PCR | programmatic temperature stages/cycles reused across PCR methods | fluorescence acquisition is separate; not isothermal incubation |
+| Electrophoresis separation | agarose/SDS-PAGE | field-driven separation intent | deferred: compare prepared system → field → separation only |
+| Flow acquisition | flow cytometry | raw event/FCS acquisition shared by surface/intracellular/viability/cycle methods | sorting and gating/compensation separate |
+| Luminescence plate read | plate luminometry | ATP/reporter assays share integrated RLU readout | imaging is separate; do not merge with absorbance |
+
 ## 6. Exceptions and conditions
 
 ### 6.1 Sample aliquot — conditional promotion
@@ -135,7 +146,7 @@ Incubation completes on elapsed/deviation evidence only; attachment, growth, gel
 
 | ID | Gap | Status |
 |---|---|---|
-| G-1 | Luminescence (ATP-glow) raw read | Missing atomic readout; do not reuse absorbance op. Needs its own record before any promotion. |
+| G-1 | Luminescence (ATP-glow) raw read | Domain-shared candidate; do not reuse absorbance op; plate read and imaging separate. Needs its own record before promotion. |
 | G-2 | Colony-count cross-family evidence | Promotable in principle; held out of the first set until a second family beyond enumeration is documented. |
 | G-3 | Dissociation chemistry | Method-local; no stable cross-method boundary (enzyme, sonication, scraping differ). |
 | G-4 | Lineage / quantity conservation, conditional execution, typed `loss` effect, time-anchored II | Contract gaps (scenario §"cannot express"); remain notes/Custom Steps, not new fields. |

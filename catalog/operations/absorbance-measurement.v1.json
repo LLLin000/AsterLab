@@ -149,6 +149,81 @@
           "retrieved_at": "2026-11-05"
         }
       ]
+    },
+    {
+      "key": "scan_start_nm",
+      "label": "Spectral scan start",
+      "value_type": "number",
+      "unit": "nm",
+      "required": false,
+      "required_at": "protocol_freeze",
+      "value_source": "design_variable",
+      "constraints": [
+        {
+          "kind": "positive"
+        }
+      ],
+      "description": "Required when read_mode is spectral_scan; endpoint reads do not use it.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: spectral scanning",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "scan_end_nm",
+      "label": "Spectral scan end",
+      "value_type": "number",
+      "unit": "nm",
+      "required": false,
+      "required_at": "protocol_freeze",
+      "value_source": "design_variable",
+      "constraints": [
+        {
+          "kind": "positive"
+        }
+      ],
+      "description": "Required when read_mode is spectral_scan; endpoint reads do not use it.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: spectral scanning",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "scan_step_nm",
+      "label": "Spectral scan step",
+      "value_type": "number",
+      "unit": "nm",
+      "required": false,
+      "required_at": "protocol_freeze",
+      "value_source": "design_variable",
+      "constraints": [
+        {
+          "kind": "positive"
+        }
+      ],
+      "description": "Required when read_mode is spectral_scan; endpoint reads do not use it.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: spectral scanning",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
     }
   ],
   "execution": {

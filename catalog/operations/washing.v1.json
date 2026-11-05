@@ -1,14 +1,36 @@
 {
   "schema_version": 1,
   "identity": {
-    "catalog": { "module_id": "op.washing", "version": 1 },
+    "catalog": {
+      "module_id": "op.washing",
+      "version": 1
+    },
     "title": "Liquid exchange / washing",
     "action_type": "washing",
     "applicability": {
-      "assay_families": ["cell_culture", "elisa", "immunofluorescence", "biofilm", "3d_culture"],
-      "sample_kinds": ["attached_cells", "plate_bound_sample", "biofilm", "spheroid"],
-      "container_kinds": ["plate", "flask", "dish", "tube"],
-      "variants": ["preserving", "lossy_possible"],
+      "assay_families": [
+        "cell_culture",
+        "elisa",
+        "immunofluorescence",
+        "biofilm",
+        "3d_culture"
+      ],
+      "sample_kinds": [
+        "attached_cells",
+        "plate_bound_sample",
+        "biofilm",
+        "spheroid"
+      ],
+      "container_kinds": [
+        "plate",
+        "flask",
+        "dish",
+        "tube"
+      ],
+      "variants": [
+        "preserving",
+        "lossy_possible"
+      ],
       "exclusions": []
     }
   },
@@ -65,11 +87,26 @@
     ],
     "sample_transitions": [
       {
-        "transition_id": "sample_washed",
+        "transition_id": "sample_washed_preserving",
+        "input_port_id": "sample_in",
+        "output_port_id": "sample_out",
+        "effect": "preserved",
+        "applies_when": {
+          "parameter_key": "loss_policy",
+          "value": "preserving"
+        },
+        "note": "Method declares the sample retained; identity and approximate quantity are preserved."
+      },
+      {
+        "transition_id": "sample_washed_lossy",
         "input_port_id": "sample_in",
         "output_port_id": "sample_out",
         "effect": "state_changed",
-        "note": "Liquid environment changes. If loss_policy is lossy_possible, sample loss is possible and its magnitude is UNKNOWN unless measured."
+        "applies_when": {
+          "parameter_key": "loss_policy",
+          "value": "lossy_possible"
+        },
+        "note": "Method allows sample loss/detachment; loss magnitude is UNKNOWN unless measured."
       },
       {
         "transition_id": "buffer_to_waste",
@@ -89,7 +126,11 @@
       "required": true,
       "required_at": "run_freeze",
       "value_source": "design_variable",
-      "constraints": [{ "kind": "positive" }],
+      "constraints": [
+        {
+          "kind": "positive"
+        }
+      ],
       "description": "Protocol-specific; no universal volume is supplied.",
       "evidence": [
         {
@@ -109,7 +150,11 @@
       "required": true,
       "required_at": "run_freeze",
       "value_source": "design_variable",
-      "constraints": [{ "kind": "positive" }],
+      "constraints": [
+        {
+          "kind": "positive"
+        }
+      ],
       "description": "Kit/protocol-specific; extra cycles may reduce sensitivity or detach sample.",
       "evidence": [
         {
@@ -130,7 +175,13 @@
       "required_at": "run_freeze",
       "value_source": "design_variable",
       "constraints": [
-        { "kind": "one_of", "values": ["preserving", "lossy_possible"] }
+        {
+          "kind": "one_of",
+          "values": [
+            "preserving",
+            "lossy_possible"
+          ]
+        }
       ],
       "description": "Declare whether the method treats the sample as retained or allows unknown loss. Do not default to preserving.",
       "evidence": [
@@ -147,7 +198,10 @@
   ],
   "execution": {
     "default_time_scope": "once",
-    "allowed_time_scopes": ["once", "per_timepoint"],
+    "allowed_time_scopes": [
+      "once",
+      "per_timepoint"
+    ],
     "instrument_requirements": [],
     "completion_checks": [
       {
@@ -164,11 +218,38 @@
       }
     ],
     "record_fields": [
-      { "key": "wash_volume", "label": "Wash volume", "value_type": "number", "unit": "mL", "required": true },
-      { "key": "cycles", "label": "Wash cycles", "value_type": "integer", "required": true },
-      { "key": "loss_policy", "label": "Loss policy", "value_type": "text", "required": true },
-      { "key": "observed_loss", "label": "Observed sample loss", "value_type": "text", "required": false },
-      { "key": "residual_volume", "label": "Residual volume", "value_type": "number", "unit": "uL", "required": false }
+      {
+        "key": "wash_volume",
+        "label": "Wash volume",
+        "value_type": "number",
+        "unit": "mL",
+        "required": true
+      },
+      {
+        "key": "cycles",
+        "label": "Wash cycles",
+        "value_type": "integer",
+        "required": true
+      },
+      {
+        "key": "loss_policy",
+        "label": "Loss policy",
+        "value_type": "text",
+        "required": true
+      },
+      {
+        "key": "observed_loss",
+        "label": "Observed sample loss",
+        "value_type": "text",
+        "required": false
+      },
+      {
+        "key": "residual_volume",
+        "label": "Residual volume",
+        "value_type": "number",
+        "unit": "uL",
+        "required": false
+      }
     ]
   },
   "knowledge": {

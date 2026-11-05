@@ -1,14 +1,35 @@
 {
   "schema_version": 1,
   "identity": {
-    "catalog": { "module_id": "op.incubation", "version": 1 },
+    "catalog": {
+      "module_id": "op.incubation",
+      "version": 1
+    },
     "title": "Controlled hold / incubation",
     "action_type": "incubation",
     "applicability": {
-      "assay_families": ["cell_culture", "microbiology", "staining", "assay_development", "molecular"],
-      "sample_kinds": ["culture", "stained_sample", "reaction_mixture"],
-      "container_kinds": ["flask", "dish", "plate", "tube"],
-      "variants": ["room_temperature_hold", "incubator_hold"],
+      "assay_families": [
+        "cell_culture",
+        "microbiology",
+        "staining",
+        "assay_development",
+        "molecular"
+      ],
+      "sample_kinds": [
+        "culture",
+        "stained_sample",
+        "reaction_mixture"
+      ],
+      "container_kinds": [
+        "flask",
+        "dish",
+        "plate",
+        "tube"
+      ],
+      "variants": [
+        "room_temperature_hold",
+        "incubator_hold"
+      ],
       "exclusions": []
     }
   },
@@ -52,8 +73,8 @@
         "transition_id": "sample_held",
         "input_port_id": "sample_in",
         "output_port_id": "sample_out",
-        "effect": "state_changed",
-        "note": "Hold changes the sample state or keeps it under defined conditions; it does not assert a measured biological outcome."
+        "effect": "unknown",
+        "note": "The hold may change the sample state, but this operation does not assert growth, attachment or reaction completion; use a method-specific state if known."
       }
     ]
   },
@@ -66,7 +87,11 @@
       "required": true,
       "required_at": "run_freeze",
       "value_source": "design_variable",
-      "constraints": [{ "kind": "positive" }],
+      "constraints": [
+        {
+          "kind": "positive"
+        }
+      ],
       "description": "Protocol- or SOP-specific; no default duration is supplied.",
       "evidence": [
         {
@@ -87,7 +112,7 @@
       "required": false,
       "required_at": "run_freeze",
       "value_source": "design_variable",
-      "constraints": [{ "kind": "positive" }],
+      "constraints": [],
       "description": "Optional only if the method specifies room temperature or another non-numeric condition; otherwise record it.",
       "evidence": [
         {
@@ -108,7 +133,11 @@
       "required": false,
       "required_at": "run_freeze",
       "value_source": "design_variable",
-      "constraints": [{ "kind": "positive" }],
+      "constraints": [
+        {
+          "kind": "positive"
+        }
+      ],
       "description": "Only for methods that require CO2; not a property of all incubation. The CO2-incubator capability is a method/instrument binding, not a generic requirement.",
       "evidence": [
         {
@@ -128,7 +157,11 @@
       "required": true,
       "required_at": "run_freeze",
       "value_source": "design_variable",
-      "constraints": [{ "kind": "non_empty" }],
+      "constraints": [
+        {
+          "kind": "non_empty"
+        }
+      ],
       "description": "Event relative to which the hold starts, e.g. seeding, treatment, staining or reaction start; not inferred from the Assay.",
       "evidence": [
         {
@@ -144,7 +177,11 @@
   ],
   "execution": {
     "default_time_scope": "once",
-    "allowed_time_scopes": ["once", "per_timepoint", "per_assay"],
+    "allowed_time_scopes": [
+      "once",
+      "per_timepoint",
+      "per_assay"
+    ],
     "instrument_requirements": [],
     "completion_checks": [
       {
@@ -161,10 +198,32 @@
       }
     ],
     "record_fields": [
-      { "key": "start_time", "label": "Start time", "value_type": "text", "required": true },
-      { "key": "end_time", "label": "End time", "value_type": "text", "required": true },
-      { "key": "actual_temperature", "label": "Actual temperature", "value_type": "number", "unit": "C", "required": false },
-      { "key": "actual_co2", "label": "Actual CO2", "value_type": "number", "unit": "%", "required": false }
+      {
+        "key": "start_time",
+        "label": "Start time",
+        "value_type": "text",
+        "required": true
+      },
+      {
+        "key": "end_time",
+        "label": "End time",
+        "value_type": "text",
+        "required": true
+      },
+      {
+        "key": "actual_temperature",
+        "label": "Actual temperature",
+        "value_type": "number",
+        "unit": "C",
+        "required": false
+      },
+      {
+        "key": "actual_co2",
+        "label": "Actual CO2",
+        "value_type": "number",
+        "unit": "%",
+        "required": false
+      }
     ]
   },
   "knowledge": {

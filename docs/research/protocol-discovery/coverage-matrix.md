@@ -16,7 +16,7 @@
 | B05 | 蛋白检测 | Thermo/Bio-Rad 直接读 | ELISA/WB 是方法模板;发光读数为缺口;无新公共模块 |
 | B06 | 流式/IF | Thermo 多份 protocol 直接读 | 染色/固定/通透/设门均 method-local/template;原始采集复用;无新公共模块 |
 | B07 | RT-qPCR | Thermo/Bio-Rad/ABI 手册直接读 | RT/qPCR 配制、热循环、原始荧光采集均 method-local/template;无新公共模块 |
-| C01 | 候选复审 | NEB/Phusion/Bio-Rad/琼脂糖/SDS-PAGE/流式/发光手册 | 热循环、电泳、流式采集、发光采集均未通过 G1/G2;保持 method-local/gap |
+| C01 | 候选复审 | NEB/Phusion/Bio-Rad/琼脂糖/SDS-PAGE/流式/发光手册 | PCR 热循环、流式采集、发光板读为 domain-shared candidates;电泳 deferred;不是永久 method-local |
 | 既有 | 生物膜、3D 类器官、ELISA/WB、qPCR、流式/IF、划痕/Transwell | 见 k2-operations | 方法模板为主;Bio-protocol 4298 补足 3D dome |
 
 ## 2.1 状态分层
@@ -24,9 +24,10 @@
 | 状态 | 操作 |
 |---|---|
 | Catalog Draft | liquid_transfer、sample_aliquot、incubation、washing、absorbance_measurement(5 份 JSON) |
-| Research Shared, no JSON | 离心、原始荧光采集、细胞浓度计数、划线/涂布、菌落计数 |
-| Method-local / template | PCR 热循环、电泳、流式采集、固定/通透/封闭/染色、ELISA/WB 变体 |
-| Gap | 发光原始采集、RT-qPCR discovery、3D 其他模型 |
+| Global Research Shared, no JSON | 离心、原始荧光采集、细胞浓度计数、划线/涂布、菌落计数 |
+| Domain-Shared Candidates | ThermalProgram、FlowAcquisition、LuminescencePlateRead;Electrophoresis deferred |
+| Method-local / template | 固定/通透/封闭/染色、ELISA/WB 变体、qPCR 热循环具体程序、3D 球体形成 |
+| Gap | 3D 其他模型、transfection、microbial growth/transformation、molecular cloning |
 
 ## 2. 公共操作复用
 
@@ -55,7 +56,7 @@
 
 ## 3. 判定结果
 
-- B01–B07 没有发现需要新增的公共 OperationModule;C01 复审四个候选也全部保留 method-local/gap。
+- B01–B07 没有新增 **global** 公共 OperationModule;C01 把 PCR 热循环、流式采集、发光板读列为 domain-shared candidates,电泳 deferred。
 - 公共操作集合目前趋于稳定:transfer、aliquot、incubation、washing、centrifugation、absorbance、raw image、cell count、streak、spread、colony count。
 - 大量“看起来像操作”的步骤实际是:
   - composite:传代、连续稀释、冻存/复苏、条件培养基;
@@ -86,5 +87,5 @@
 ## 6. 指标
 
 - Protocol 覆盖广度:目前 7 个 discovery 批次 + 既有方法记录;基础细胞、微生物、细胞检测、分子、RT-qPCR、蛋白、流式/IF 已覆盖。
-- Operation 复用成熟度:transfer/incubation/washing/centrifugation/absorbance/raw image 已跨 ≥5 家族;streak/spread/colony count 跨微生物与 CFU;C01 复审的热循环/电泳/流式采集/发光采集均未晋升;luminescence raw read 仍是缺口。
+- Operation 复用成熟度:transfer/incubation/washing/centrifugation/absorbance/raw image 已跨 ≥5 家族;streak/spread/colony count 跨微生物与 CFU;domain-shared candidates 已单列,未进入 JSON。
 - 不以步骤数/模块数衡量。

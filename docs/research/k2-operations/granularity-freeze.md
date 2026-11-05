@@ -20,7 +20,8 @@
 
 | 层 | 表达 |
 |---|---|
-| Atomic Operation | `OperationModule` |
+| Global Operation | `OperationModule`(跨多个湿实验领域) |
+| Domain-Shared Operation | `OperationModule` + 技术领域适用范围(同一领域多个方法复用) |
 | Composite Block | 递归 `BlockUse` |
 | Method Template | `ProtocolVersion` + 组合块 |
 | Assay Model / Design | Design/Assay |
@@ -94,7 +95,7 @@ Custom Step 保留:
 
 | 维度 | 标准 |
 |---|---|
-| 复用广度 | ≥2 个独立方法家族有真实使用;同一方法变体不算 |
+| 复用广度 | ≥2 个独立方法有真实使用;可在同一技术领域内,不必跨实验大类;同一方法变体不算 |
 | 语义稳定 | 核心输入/输出/作用跨方法不变 |
 | 抽象收益 | 减少重复定义/校验/记录 |
 | 差异成本 | 不需要大量专用分支 |
