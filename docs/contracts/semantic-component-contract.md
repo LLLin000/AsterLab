@@ -112,28 +112,29 @@ ComponentDefinition {
 
 **不要求这些对象共享同一 Rust struct。** S0 只要求它们能被同一个语义查询投影。
 
-### 2.2 ComponentInstance
+### 2.2 三种实例机制,不共享一个结构
+
+`BlockUse` 只是 Operation/Composition 的实例。ToolAction 和 Resource 不强制变成 Protocol 步骤。
+
+| 能力 | 实例机制 | 身份/定位 | 不做什么 |
+|---|---|---|---|
+| Operation / Composition | `BlockUse` + 参数绑定 | `QualifiedStepRef { protocol_version_id, scope, step_path }` | 不把计算器、材料或仪器塞进 `steps` |
+| ToolAction | `ToolInvocation` | invocation id + 算法版本 + 输入/输出引用 | 不自动生成 ProtocolStep |
+| Resource | `ResourceBinding` | step/port + 精确 `profile_id/version` + capability 匹配 | 不把资源能力伪装成步骤 inputs/outputs |
+
+统一的是**查找、引用、校验接口**,不是实例结构。
+
+实例身份不能只靠 `use_id`。同一个 `BlockUse` 在 CCK-8 与 ELISA 中各出现一次,或在同一 Protocol 内重复使用,都必须带上下文:
 
 ```text
-ComponentInstance {
-  definition_ref,
-  instance_id/use_id,
-  path,
-  bindings[],
-  condition?,
-  owner: Protocol | Run
+QualifiedStepRef {
+  protocol_version_id,
+  scope: assay | planned_output | unscoped,
+  step_path
 }
 ```
 
-映射:
-
-- `BlockUse.use_id` = instance id;
-- `BlockUse.block_version_id` = definition ref(精确版本);
-- `BlockUse.bindings` = 当前参数绑定;
-- `ProtocolVersion` / `protocol_manifest` = 实例所在上下文;
-- Run 的冻结 manifest = 实例的冻结快照。
-
-不新建表;不复制操作正文。
+涉及 Run 时再带 `run_id` / `occurrence_id`,复用 `RunWorkspace` 的 steps/tasks/occurrences 分层。不新建全局 ComponentInstance ID。
 
 ### 2.3 Composition
 
@@ -151,46 +152,62 @@ Composition {
 
 **权威顺序**仍是 `ProtocolBlockVersion.steps` 的数组顺序;`contains` 是结构视图,`precedes` 默认由数组顺序派生。只有当真实 Protocol 需要跨分支依赖时才提出显式 `precedes` 扩展;不为每个组合存一张边表。
 
+必须分开校验:
+
+- 步骤顺序相邻 ≠ 数据依赖;输出进入下一步必须有明确端口或样本绑定。
+- `BlockUse` 递归包含环必须拒绝。
+- 纯计算的数据绑定依赖环必须拒绝;实验上的重复操作本身不等于数据环。
+- 条件未解决时保持 unknown,不能默认解释为 `false`,也不能当作已执行/已跳过。
+
 ### 2.4 Typed Binding
 
-当前 `ParameterBinding` 只有 `parameter_key/value/unit/source/source_reference/confirmed`。S0 建议扩展为:
+当前 `ParameterBinding` 只有 `parameter_key/value/unit/source/source_reference/confirmed`。S1-A 在其上增加独立语义类型,不修改旧结构:
 
 ```text
 Binding {
   binding_id,
-  owner_scope: design | protocol | run,
-  target: { kind: parameter|port|sample|data|resource, key/path },
-  source: { kind: literal|design_ref|protocol_ref|run_ref|tool_output, ref, path },
-  value_type, unit,
-  identity: { sample_id? lineage? },
-  provenance[],
-  state: resolved | unresolved | not_applicable,
-  frozen: bool
+  owner: definition | protocol_plan | run_plan | run_execution | run_snapshot,
+  target: parameter | sample | data | resource,
+  source: literal | design_ref | protocol_ref | run_ref | tool_output
+        | planned_sample | actual_sample | raw_data | derived_data | resource,
+  unit,
+  resolution: resolved | unresolved | not_applicable,
+  provenance[]
 }
 ```
 
 规则:
 
-- 单位精确匹配;不做隐式换算(除非未来有显式 ToolAction)。
-- 样本身份/谱系是引用,不是字符串复制。
-- 计划值、实际值、原始读数、派生结果分开。
+- 定义绑定、计划绑定、执行事实、冻结快照分开;不再用单个 `frozen: bool` 当业务真相。
+- 快照不可变、计划就绪、执行就绪是三个判断;`required_at` 的阶段语义保留。
+- 单位精确匹配;不做隐式换算。
+- Binding 只引用样本/数据权威对象,不复制样本谱系或执行结果。
+- `PlannedSampleRef`(Design 计划)、`SampleRef`(实际物理样本)、`RawDataRef`、`DerivedDataRef` 分开;计划样本不能满足实际样本。
 - 未解决用 `unresolved`,不能写 0/null 冒充。
-- Run 只能冻结已确认绑定;修订产生新 Run/新版本。
+- 未来 Run 结果不能在 Protocol/Run 计划阶段引用。
+- 已审核模块定义只能通过新版本修改;`bind` 不能改 `module_contract`。
+
+S1-A 只实现纯类型、兼容适配和校验,不写库、不改 CLI。
 
 ## 3. 现有 Core 对象映射
 
 | 语义对象 | 现有对象 | 映射方式 | 缺口 |
 |---|---|---|---|
 | Operation definition | `OperationModule` | catalog id + version | 未进入 ProtocolBlock |
-| Block definition | `ProtocolBlockVersion` | block_id/version/parameter_slots/steps | 缺 inputs/outputs/condition |
-| Block instance | `BlockUse` | use_id + exact block_version_id + bindings | 无 typed sample/data refs |
+| Block definition | `ProtocolBlockVersion` | block_id/version/parameter_slots/steps | 缺 typed ports/condition |
+| Block instance | `BlockUse` | qualified step ref + exact block_version_id + bindings | 无 typed sample/data refs |
+| Tool instance | `ToolInvocation` | 文档/类型待补 | 未实现执行 |
+| Resource instance | `ResourceBinding` | profile_id/version + capability | 材料/容器未统一 |
 | Composition | `ProtocolVersion` + nested `BlockUse` | recursive steps | 无 explicit dependency/condition |
-| Parameter binding | `ParameterBinding` | value/source/confirmed | 无 owner/port/sample/data refs |
-| Tool action | 文档中的 `ToolActionSpec` | 待 Core 类型 | 无实现 |
-| Resource | `InstrumentProfile` | profile_id/version/capabilities | 材料/容器未统一 |
-| Run freeze | `RunWorkspace` / `protocol_manifest` | frozen design/protocol/steps | 绑定冻结语义待补 |
-| Sample ref | `TargetRef::Sample` / `SampleLink` | 引用 | 与 Design sample allocation 未打通 |
-| Data ref | 目前只有 `ResolvedParameter`/measurement | 需扩展 | 无统一 DataRef |
+| Parameter binding | `ParameterBinding` | value/source/confirmed | 通过语义适配器升级,旧结构不改 |
+| Typed binding | `semantic_component::TypedBinding` | S1-A 纯 Core 类型 | 未持久化 |
+| Tool action | 文档中的 `ToolActionSpec` | 待 Core 类型 | 只有 pure 方向 |
+| Resource | `InstrumentProfile` | profile_id/version/capabilities | 缺 operation→resource 绑定 |
+| Run stage | `RunWorkspace` / `protocol_manifest` | protocol_ready / resolved / unresolved | binding snapshot 待补 |
+| Sample ref | `TargetRef::Sample` / `SampleLink` | 引用 | Design allocation 未完全打通 |
+| Data ref | `ResolvedParameter`/measurement | 需扩展 | 未统一 |
+
+S1-A 映射代码:[`semantic_component.rs`](../../crates/asterlab-core/src/semantic_component.rs)。
 
 ## 4. 语义命令(Agent 只操作语义,不写 JSON/SQL/UI)
 
@@ -250,13 +267,13 @@ The operation definition is the same; the **bindings** and **method template** d
 | # | 缺口 | 影响 | 最小扩展 |
 |---|---|---|---|
 | G1 | `BlockUse` 没有 typed inputs/outputs/condition | 组合只能靠顺序和文本 | 增加可选 `ports`/`condition` 语义字段,不建图引擎 |
-| G2 | `ParameterBinding` 没有 owner/target/source ref | 参数、样本、数据无法统一连接 | 扩展 Binding 语义类型;先只读投影 |
+| G2 | `ParameterBinding` 没有 owner/target/source ref | 参数、样本、数据无法统一连接 | S1-A 已加独立 `TypedBinding`;旧结构未迁移 |
 | G3 | 无 `ToolActionSpec` Rust 类型 | 计算不能作为语义节点 | 先定义类型与 pure 校验 |
 | G4 | `InstrumentProfile` 已有,但无 operation→resource 绑定 | 仪器能力无法在组合中解析 | 增加 `resource_ref` 绑定,不新建 profile 表 |
-| G5 | 无 sample/data ref 统一类型 | 样本谱系/原始/派生数据断裂 | 引入 `SampleRef`/`DataRef`,复用 `TargetRef` |
+| G5 | 无 sample/data ref 统一类型 | 样本谱系/原始/派生数据断裂 | S1-A 已加 PlannedSample/Sample/RawData/DerivedData 引用 |
 | G6 | 无 composition cycle/dependency validation | 递归组合可能循环 | `validate` 增加 DAG/深度检查 |
 | G7 | Run 冻结只覆盖 manifest,未覆盖 semantic bindings | 冻结后绑定漂移 | Run freeze 增加 binding snapshot(后续) |
-| G8 | 无 `propose_patch` 事务契约 | Agent 修改不可审阅 | 先定义 change-set schema,不实现 UI |
+| G8 | 无 `propose_patch` 事务契约 | Agent 修改不可审阅 | S1-C 定义 change-set schema,不实现 UI |
 
 ## 7. 非目标
 
@@ -267,17 +284,32 @@ The operation definition is the same; the **bindings** and **method template** d
 - 不修改 Slint/CLI/数据库。
 - 不把 Design/Protocol/Run 合并成一个对象。
 
-## 8. S0 验收
+## 8. 验收状态
+
+S0:
 
 - [x] 五个语义能力与现有对象逐项映射。
-- [x] 明确 Definition/Instance/Composition/Binding 不新建持久化。
+- [x] Definition/Instance/Composition/Binding 不新建持久化。
 - [x] Typed Binding 的归属、单位、身份、来源、冻结规则。
 - [x] Composition 的 contains/precedes/consumes/produces/binds/conditional 区分。
 - [x] 语义命令与定义/实例修改的边界。
 - [x] 两个合成示例。
-- [x] 语义缺口与最小扩展。
-- [ ] 架构/科学审查通过。
-- [ ] 才进入 S1 Rust 实现。
+- [x] 架构审查通过;五处语义边界已修订。
+
+S1-A:
+
+- [x] `QualifiedStepRef` 带 Protocol 版本、scope、step path。
+- [x] `BindingOwner` 区分 definition/protocol_plan/run_plan/run_execution/run_snapshot。
+- [x] `PlannedSampleRef` / `SampleRef` / `RawDataRef` / `DerivedDataRef` / `ResourceRef`。
+- [x] `TypedBinding` 类型、单位、阶段、resolution、provenance。
+- [x] 旧 `ParameterBinding` 只读适配;未知保持 unresolved。
+- [x] 11 个 Core 单元测试覆盖跨 Protocol 隔离、重复 use、类型/单位、计划/实际样本、未来 Run 数据、定义修改、旧数据兼容。
+- [x] 未改 CLI/Slint/数据库/正式 JSON。
+
+未开始:
+
+- S1-B:composition/ports/scope/dependency-cycle 校验。
+- S1-C:pure ToolAction、patch change-set、事务边界。
 
 ## 9. 来源
 
