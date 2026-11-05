@@ -47,6 +47,13 @@
 | 恒温混匀仪 ThermoMixer C | 同上 | 摘要;手册 403 | 无 | 温度/转速/加热块 |
 | 自动液体处理 | [automated-liquid-handling.md](k2-instruments/automated-liquid-handling.md) | 平台手册/部分摘要 | 无 | 配置/labware/tip/deck/校准 |
 
+## 2.1 公共 Catalog 决策
+
+- [Catalog Promotion Audit](k2-operations/catalog-promotion-audit.md) 把候选分为 shared/method-local/composite/method/tool。
+- 第一版公共操作：转移、分样、孵育、洗涤（preserving + lossy）、离心、吸光度读取、荧光原始采集、涂布接种、细胞浓度计数、划线接种（窄例外）。
+- 方法内部步骤：CAND-GAP-CREATE、CAND-APICAL-CLEAR、3D dome、ULA 球体、固定/通透/封闭、通用染色、解离等。
+- 不因原子性自动建公共模块。
+
 ## 3. 覆盖判断
 
 - **操作覆盖**:主要细胞培养、分离、免疫、分子、成像、流式、生物膜、划痕、活力/毒性、3D/类器官；动物/临床与图像分析/统计按本轮范围排除。

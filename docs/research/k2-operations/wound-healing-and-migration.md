@@ -23,7 +23,7 @@
 | Records | `MT-SCRATCH-WOUND` (mechanical scratch gap closure) · `MT-INSERT-GAP` (culture-insert defined gap) · `MT-TRANSWELL-MIGRATION` (two-chamber pore migration; adherent + non-adherent paths) |
 | Scope | Wet-lab only: adherent seeding → gap creation / gradient assembly → incubation → rinse / apical clear → fix/stain → raw image acquisition |
 | Out of scope | ECM/Matrigel invasion procedure; 3D / spheroid / organoid migration; microfluidic chemotaxis; single-cell tracking metrics; any image-analysis algorithm, statistics, or pipeline; any clinical/epidemiologic/bioinformatic content; any drug-efficacy claim |
-| Granularity | **Not a single atomic operation.** These are method templates composed of atomic operations plus two new-candidate steps (see §1.1 and §3). |
+| Granularity | **Not a single atomic operation.** These are method templates composed of atomic operations plus two **method-local steps** (see §1.1 and §3). |
 
 ### 1.1 Granularity decision
 
@@ -32,11 +32,13 @@
 | `MT-SCRATCH-WOUND` | method template | seed + starve + mechanical wound + wash + proliferation block + incubation + raw imaging |
 | `MT-INSERT-GAP` | method template | seed around barrier + attachment hold + barrier removal + raw imaging |
 | `MT-TRANSWELL-MIGRATION` | method template | culture + upper seed + gradient assembly + timed incubation + apical clear + fix/stain + raw imaging |
-| `CAND-GAP-CREATE` (scratch / insert-removal variants) | new atomic candidate (provisional) | no existing operation expresses monolayer disruption or barrier-defined gap reveal (see §3) |
-| `CAND-APICAL-CLEAR` (swab wipe of non-migrated cells) | new atomic candidate (provisional) | selective mechanical removal preserving the opposite membrane face; washing cannot express it (see §3) |
+| `CAND-GAP-CREATE` (scratch / insert-removal variants) | **method-local step**; not promoted to Catalog | mechanism differs between scratch and insert removal; no cross-method reuse evidence sufficient for a shared operation |
+| `CAND-APICAL-CLEAR` (swab wipe of non-migrated cells) | **method-local step**; not promoted to Catalog | Transwell-specific selective removal; washing cannot express it, but it is not shared across method families |
 
-Provisional research IDs. They MUST NOT be converted to `OperationModule`
-JSON until a second person reviews them.
+These are method-internal steps. They remain `ProtocolStep::Text`-style
+records in the method template and MUST NOT be converted to global
+`OperationModule` JSON. Promotion requires >1 independent method family,
+semantic stability and a second-person review.
 
 Core rule (read first): **gap closure is migration + proliferation unless
 proliferation is blocked and controlled.** A closure number without a
@@ -87,9 +89,9 @@ them as evidence; every binding below cites P1–P4.
 | Gap / membrane raw imaging (phase, brightfield, fluorescence) | `FLUO_IMAGE` (raw image acquisition) | Variant needed (modality parameter: phase/brightfield vs fluorescence; acquisition contract otherwise identical) |
 | Pre-seed viability / count gate | cell-culture R2 `cell-counting-viability` | Direct reuse |
 | Sampling / aliquoting for seeding suspension | `op.sample_aliquot` | Direct reuse where a parent-to-child split is recorded |
-| Scratch wound creation (tip-driven monolayer disruption + debris) | none — liquid transfer / wash / inoculation cannot express mechanical cell removal with wound edges | **New atomic candidate** `CAND-GAP-CREATE` scratch variant (§4) |
-| Insert removal gap reveal (barrier lift, no cell killing) | none — effect differs from scratch (no kill, no debris); cannot share one default | **New atomic candidate** `CAND-GAP-CREATE` insert-removal variant (§5) |
-| Apical wipe of non-migrated cells (cotton swab) | none — washing exchanges liquid around a retained sample; wiping selectively removes one face's cells | **New atomic candidate** `CAND-APICAL-CLEAR` (§6) |
+| Scratch wound creation (tip-driven monolayer disruption + debris) | none — liquid transfer / wash / inoculation cannot express mechanical cell removal with wound edges | **Method-local step** `CAND-GAP-CREATE` scratch variant (§4) |
+| Insert removal gap reveal (barrier lift, no cell killing) | none — effect differs from scratch (no kill, no debris); cannot share one default | **Method-local step** `CAND-GAP-CREATE` insert-removal variant (§5) |
+| Apical wipe of non-migrated cells (cotton swab) | none — washing exchanges liquid around a retained sample; wiping selectively removes one face's cells | **Method-local step** `CAND-APICAL-CLEAR` (§6) |
 | Gap-closure metrics / migrated-cell counts from images | none in wet-lab scope — deterministic downstream derivation | **Out of scope here** (no analysis algorithm defined; record stops at raw images, §8) |
 
 No JSON is emitted. Candidates stay provisional until a second person reviews them.
