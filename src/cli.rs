@@ -1,5 +1,6 @@
 use asterlab_core::operation_module::{
-    ModuleBinding, ModuleOrigin, OperationModule, ParameterValueType, ProtocolBlockVersionRef,
+    ModuleBinding, ModuleOrigin, OperationModule, ParameterBinding, ParameterValueType,
+    ProtocolBlockVersionRef, ValueSource,
 };
 use asterlab_core::protocol_block::ReviewRecord;
 use asterlab_core::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep};
@@ -514,6 +515,8 @@ struct SemanticInspectInput {
 struct SemanticSearchInput {
     #[serde(default)]
     query: String,
+    #[serde(default)]
+    project_id: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1733,6 +1736,106 @@ pub(crate) fn revise_protocol_block_records(
     )?;
     Ok(json!({"version":version}))
 }
+fn apply_binding_changes(
+    tx: &Connection,
+    data: &ProtocolBlockVersionData,
+    changeset: &ChangeSet,
+) -> Result<(ProtocolBlockVersionData, Vec<Value>), CliError> {
+    let mut next = data.clone();
+    let mut diff = Vec::new();
+    for change in &changeset.changes {
+        let parts = change.path.split('.').collect::<Vec<_>>();
+        if parts.len() != 4 || parts[0] != "steps" || parts[2] != "bindings" {
+            return Err(CliError::input(format!(
+                "仅支持 steps.<use_id>.bindings.<slot> 路径，收到 {}",
+                change.path
+            )));
+        }
+        let use_id = parts[1];
+        let slot_key = parts[3];
+        let matches = next
+            .steps
+            .iter()
+            .enumerate()
+            .filter(|(_, step)| matches!(step, ProtocolStep::BlockUse { use_id: id, .. } if id == use_id))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return Err(CliError::input(format!(
+                "use_id {} 必须唯一存在，实际匹配 {} 处",
+                use_id,
+                matches.len()
+            )));
+        }
+        let index = matches[0];
+        let ProtocolStep::BlockUse {
+            block_version_id,
+            bindings,
+            ..
+        } = &mut next.steps[index]
+        else {
+            unreachable!();
+        };
+        let (_, child) = block_version_data(tx, block_version_id)?;
+        let child_slots = validate_parameter_slots(&child.parameter_slots)?;
+        let child_slot = child_slots
+            .get(slot_key)
+            .ok_or_else(|| CliError::input(format!("子块不存在参数槽位：{slot_key}")))?;
+        let binding = bindings
+            .iter_mut()
+            .find(|binding| binding.slot == slot_key)
+            .ok_or_else(|| CliError::input(format!("BlockUse 不存在绑定：{slot_key}")))?;
+        let old_value = binding.value.clone();
+        match change.operation {
+            asterlab_core::semantic_changeset::FieldOperation::Set => {
+                let value = change
+                    .value
+                    .clone()
+                    .ok_or_else(|| CliError::input("Set 必须提供 value"))?;
+                validate_parameter_value(child_slot, &value, child_slot.unit.as_deref())?;
+                if let Some(module) = &child.module_contract {
+                    if let Some(parameter) = module.parameters.iter().find(|p| p.key == slot_key) {
+                        let typed = ParameterBinding {
+                            parameter_key: slot_key.to_string(),
+                            value: value.clone(),
+                            unit: child_slot.unit.clone(),
+                            source: ValueSource::ProtocolFixed,
+                            source_reference: Some("semantic.apply_binding_patch".into()),
+                            confirmed: true,
+                        };
+                        typed.validate_against(parameter).map_err(|issues| {
+                            CliError::input(
+                                issues
+                                    .into_iter()
+                                    .map(|issue| format!("{}: {}", issue.code, issue.message))
+                                    .collect::<Vec<_>>()
+                                    .join("; "),
+                            )
+                        })?;
+                    }
+                }
+                binding.value = Some(value.clone());
+                binding.source_slot = None;
+                binding.unit = child_slot.unit.clone();
+                diff.push(json!({"path":change.path,"old_value":old_value,"new_value":value}));
+            }
+            asterlab_core::semantic_changeset::FieldOperation::Unset => {
+                if child_slot.required {
+                    return Err(CliError::input(format!(
+                        "必填参数 {} 不能删除；先改为非必填或保留值",
+                        slot_key
+                    )));
+                }
+                binding.value = None;
+                binding.source_slot = None;
+                binding.unit = None;
+                diff.push(json!({"path":change.path,"old_value":old_value,"new_value":null}));
+            }
+        }
+    }
+    Ok((next, diff))
+}
+
 pub(crate) fn create_catalog_review_records(
     tx: &Transaction<'_>,
     project_id: &str,
@@ -2950,6 +3053,16 @@ fn print_help() {
     println!("Lab Workbench typed CLI\n\n  labworkbench tools --json\n  labworkbench schema <tool>\n  labworkbench <tool> --input <json-file|->\n\nAll tool inputs use a strict per-command schema; unknown fields are rejected. All output is one JSON envelope on stdout. Data directory follows LABWORKBENCH_DATA_DIR (default: ./data).");
 }
 
+fn require_trusted_writer(tool: &str) -> Result<(), CliError> {
+    if std::env::var("LABWORKBENCH_TRUSTED_WRITER").ok().as_deref() == Some("1") {
+        Ok(())
+    } else {
+        Err(CliError::input(format!(
+            "{tool} 只允许受信任的本地写入端调用；请设置 LABWORKBENCH_TRUSTED_WRITER=1"
+        )))
+    }
+}
+
 fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> {
     if tool == "import.study.preview" {
         let i: StudyImport = parse_input(path)?;
@@ -3332,6 +3445,70 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(result)
         }
+        "semantic.apply_binding_patch" => {
+            require_trusted_writer(tool)?;
+            let i: SemanticPatchInput = parse_input(path)?;
+            if i.changeset.target.kind
+                != asterlab_core::semantic_changeset::ChangeTargetKind::BlockVersion
+            {
+                return Err(CliError::input(
+                    "semantic.apply_binding_patch 只接受 block_version 目标",
+                ));
+            }
+            let target_id = i.changeset.target.object_id.clone();
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let (record, data) = block_version_data(&tx, &target_id)?;
+            if record["revision"].as_i64() != Some(data.version) {
+                return Err(CliError::conflict("BlockVersion 版本记录不一致"));
+            }
+            let block_id = data.block_id.clone();
+            let latest: i64 = tx.query_row(
+                "SELECT COALESCE(MAX(revision),0) FROM records WHERE kind='protocol_block_version' AND parent_id=?1",
+                [&block_id],
+                |row| row.get(0),
+            ).map_err(|e| CliError::internal(e.to_string()))?;
+            if latest != record["revision"].as_i64().unwrap_or(0) {
+                return Err(CliError::conflict(format!(
+                    "目标不是最新 BlockVersion（最新 v{}）；请重新读取后再提交",
+                    latest
+                )));
+            }
+            if data.version != i.changeset.expected_version {
+                return Err(CliError::conflict(format!(
+                    "expected_version={} 与当前 BlockVersion v{} 不一致",
+                    i.changeset.expected_version, data.version
+                )));
+            }
+            let project = record["project_id"].as_str().unwrap_or_default();
+            let (_, _, parent_project, _, _) =
+                kind_id(&tx, &block_id)?.ok_or_else(|| CliError::missing("Block 不存在"))?;
+            if parent_project.as_deref() != Some(project) {
+                return Err(CliError::input("BlockVersion 与 Block 不属于同一项目"));
+            }
+            let (mut next, diff) = apply_binding_changes(&tx, &data, &i.changeset)?;
+            validate_block_content(&tx, project, &next.parameter_slots, &next.steps)?;
+            next.version = latest + 1;
+            next.module_origin = next.module_contract.as_ref().map(|_| ModuleOrigin::Derived);
+            next.module_contract_authority = next
+                .module_contract
+                .as_ref()
+                .map(|_| asterlab_core::protocol_block::ModuleContractAuthority::SourceOnly);
+            next.catalog_review = None;
+            let serialized =
+                serde_json::to_value(&next).map_err(|e| CliError::internal(e.to_string()))?;
+            let version = insert(
+                &tx,
+                "protocol_block_version",
+                Some(project),
+                Some(&block_id),
+                next.version,
+                &serialized,
+            )?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(json!({"version":version,"changes":diff,"requires_protocol_rebind":true}))
+        }
         "semantic.inspect" => {
             let i: SemanticInspectInput = parse_input(path)?;
             let (_, data) = block_version_data(&db, &i.block_version_id)?;
@@ -3341,7 +3518,12 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         "semantic.search" => {
             let i: SemanticSearchInput = parse_input(path)?;
             let mut modules = Vec::new();
-            for version in list(&db, Some("protocol_block_version"), None)? {
+            for version in list(&db, Some("protocol_block_version"), i.project_id.as_deref())? {
+                if version["data"]["module_origin"].as_str() != Some("imported")
+                    || version["data"]["module_contract_authority"].as_str() != Some("current")
+                {
+                    continue;
+                }
                 if let Some(module) = version["data"]
                     .get("module_contract")
                     .cloned()
@@ -3371,7 +3553,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let (_, data) = block_version_data(&db, target_id)?;
             let mut assessment =
                 assess_block_patch(target_id, &data, &i.changeset).map_err(semantic_error)?;
-            let mut refs = assessment.invalidated_refs.clone();
+            let mut refs = assessment.referencing_refs.clone();
             for version in list(&db, Some("protocol_version"), None)? {
                 if version["data"]["root_block_version_id"].as_str() == Some(target_id.as_str()) {
                     refs.push(format!(
@@ -3394,10 +3576,13 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                     refs.push(format!("run:{}", run["id"].as_str().unwrap_or_default()));
                 }
             }
-            assessment.invalidated_refs = refs;
+            assessment.referencing_refs = refs.clone();
+            assessment.would_require_rebind = refs;
+            assessment.invalidated_refs = vec![];
             serde_json::to_value(assessment).map_err(|e| CliError::internal(e.to_string()))
         }
         "catalog.review.record" => {
+            require_trusted_writer(tool)?;
             let i: CatalogReviewCreate = parse_input(path)?;
             let tx = db
                 .unchecked_transaction()
@@ -3412,6 +3597,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             Ok(result)
         }
         "catalog.operation.import" => {
+            require_trusted_writer(tool)?;
             let i: CatalogOperationImport = parse_input(path)?;
             let tx = db
                 .unchecked_transaction()
@@ -4127,9 +4313,12 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["block_version_id"],"properties":{"block_version_id":{"type":"string"}}})
         }
         "semantic.search" => {
-            json!({"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"}}})
+            json!({"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"},"project_id":{"type":"string"}}})
         }
-        "semantic.validate" | "semantic.propose_patch" | "semantic.assess_patch" => {
+        "semantic.validate"
+        | "semantic.propose_patch"
+        | "semantic.assess_patch"
+        | "semantic.apply_binding_patch" => {
             json!({"type":"object","additionalProperties":false,"required":["changeset"],"properties":{"changeset":{"type":"object"}}})
         }
         "catalog.review.record" => {
@@ -4324,6 +4513,7 @@ fn tool_specs() -> Vec<Value> {
         "protocol.block.create",
         "semantic.inspect",
         "semantic.search",
+        "semantic.apply_binding_patch",
         "semantic.validate",
         "semantic.propose_patch",
         "semantic.assess_patch",
@@ -4400,10 +4590,11 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.block.get" => "读取步骤块及其全部不可变版本。",
         "protocol.block.create" => "创建可作为完整 Protocol 或子步骤复用的版本化步骤块；只记录明确提供的操作和参数槽位。",
         "semantic.inspect" => "读取一个步骤块版本的步骤、绑定与 module_contract；不写入。",
-        "semantic.search" => "按标题/目的/适用范围搜索已有审核 Catalog 模块；不写入。",
+        "semantic.search" => "按标题/目的/适用范围搜索当前项目已导入且来源为 current 的 Catalog 模块；不写入。",
         "semantic.validate" => "校验 ChangeSet 结构、路径和受保护字段；不写入。",
         "semantic.propose_patch" => "返回精确目标与 expected version 的变更摘要；不写入。",
         "semantic.assess_patch" => "在只读上下文中模拟一个绑定变更，返回旧值、新值和受影响引用；不写入。",
+        "semantic.apply_binding_patch" => "受信任地提交一个 BlockUse 绑定变更，生成新的不可变 BlockVersion；不改 Protocol/Run。",
         "catalog.review.record" => "保存一条审核记录；正式导入必须通过 review_id 引用它。",
         "catalog.operation.import" => "在受控事务中导入审核过的 OperationModule，分配本地 Block/Version ID，并保存 module_contract 与 ReviewRecord。",
         "protocol.block.revise" => "按 expected_version 创建步骤块新版本；旧版本和引用不变。",

@@ -30,6 +30,21 @@ impl Cli {
         Self { root }
     }
 
+    fn run_error(&self, tool: &str, input: &Value) -> Value {
+        let path = self.root.join(format!("{tool}-error.json"));
+        fs::write(&path, serde_json::to_vec(input).unwrap()).unwrap();
+        let output = Command::new(bin())
+            .arg(tool)
+            .args(["--input", path.to_str().unwrap()])
+            .env("LABWORKBENCH_DATA_DIR", self.root.join("data"))
+            .env("LABWORKBENCH_TRUSTED_WRITER", "1")
+            .env("LABWORKBENCH_TRUSTED_WRITER", "1")
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{tool} unexpectedly succeeded");
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
+
     fn run(&self, tool: &str, input: &Value) -> Value {
         let path = self.root.join(format!("{tool}.json"));
         fs::write(&path, serde_json::to_vec(input).unwrap()).unwrap();
@@ -37,6 +52,8 @@ impl Cli {
             .arg(tool)
             .args(["--input", path.to_str().unwrap()])
             .env("LABWORKBENCH_DATA_DIR", self.root.join("data"))
+            .env("LABWORKBENCH_TRUSTED_WRITER", "1")
+            .env("LABWORKBENCH_TRUSTED_WRITER", "1")
             .output()
             .unwrap();
         assert!(
@@ -211,6 +228,11 @@ fn catalog_import_preview_and_run_freeze_contract() {
     );
     assert_eq!(version["data"]["catalog_review"]["reviewer"], "reviewer-1");
     assert_eq!(version["data"]["module_origin"], "imported");
+    let search = cli.run(
+        "semantic.search",
+        &json!({"project_id": project, "query": "Liquid"}),
+    );
+    assert!(!search["result"]["modules"].as_array().unwrap().is_empty());
 
     let preview = cli.run(
         "protocol.block.preview",
@@ -393,7 +415,7 @@ fn cck8_multistep_live_dead_and_frozen_run_regression() {
     let assessment = cli.run("semantic.assess_patch", &json!({"changeset": patch}));
     assert_eq!(assessment["result"]["changes"][0]["old_value"], 50.0);
     assert_eq!(assessment["result"]["changes"][0]["new_value"], 100.0);
-    assert!(assessment["result"]["invalidated_refs"]
+    assert!(assessment["result"]["referencing_refs"]
         .as_array()
         .unwrap()
         .iter()
@@ -425,7 +447,7 @@ fn cck8_multistep_live_dead_and_frozen_run_regression() {
     );
     let protocol_version_id = protocol["result"]["version"]["id"].as_str().unwrap();
     let assessment = cli.run("semantic.assess_patch", &json!({"changeset": patch}));
-    assert!(assessment["result"]["invalidated_refs"]
+    assert!(assessment["result"]["would_require_rebind"]
         .as_array()
         .unwrap()
         .iter()
@@ -485,6 +507,51 @@ fn cck8_multistep_live_dead_and_frozen_run_regression() {
         .collect::<std::collections::HashSet<_>>();
     assert!(scopes.contains("cck8"));
     assert!(scopes.contains("live_dead"));
+
+    let workspace_before_patch = cli.run(
+        "run.workspace",
+        &json!({"id": run_one["result"]["record"]["id"]}),
+    );
+    let applied = cli.run("semantic.apply_binding_patch", &json!({"changeset": patch}));
+    assert_eq!(applied["result"]["version"]["data"]["version"], 2);
+    assert_eq!(applied["result"]["changes"][0]["old_value"], 50.0);
+    assert_eq!(applied["result"]["changes"][0]["new_value"], 100.0);
+    let stale_patch = json!({
+        "changeset_id": "cs-stale",
+        "target": {"kind": "block_version", "object_id": method_version_id},
+        "expected_version": 1,
+        "changes": [{
+            "path": "steps.treat.bindings.volume",
+            "operation": "set",
+            "value": 25.0
+        }]
+    });
+    let stale = cli.run_error(
+        "semantic.apply_binding_patch",
+        &json!({"changeset": stale_patch}),
+    );
+    assert_eq!(stale["error"]["code"], "REVISION_CONFLICT");
+    let new_method_version_id = applied["result"]["version"]["id"].as_str().unwrap();
+    let bad_patch = json!({
+        "changeset_id": "cs-bad-type",
+        "target": {"kind": "block_version", "object_id": new_method_version_id},
+        "expected_version": 2,
+        "changes": [{
+            "path": "steps.treat.bindings.volume",
+            "operation": "set",
+            "value": "not-a-number"
+        }]
+    });
+    let error = cli.run_error(
+        "semantic.apply_binding_patch",
+        &json!({"changeset": bad_patch}),
+    );
+    assert_eq!(error["error"]["code"], "INVALID_INPUT");
+    let workspace_after_patch = cli.run(
+        "run.workspace",
+        &json!({"id": run_one["result"]["record"]["id"]}),
+    );
+    assert_eq!(workspace_before_patch, workspace_after_patch);
 
     let frozen_one = run_one["result"]["record"]["data"].clone();
     assert_eq!(

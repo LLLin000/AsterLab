@@ -89,6 +89,9 @@ pub struct PatchAssessment {
     pub summary: ChangeSummary,
     pub current_version: i64,
     pub changes: Vec<FieldValueChange>,
+    pub ready: bool,
+    pub referencing_refs: Vec<String>,
+    pub would_require_rebind: Vec<String>,
     pub invalidated_refs: Vec<String>,
     pub requires_confirmation: bool,
 }
@@ -141,7 +144,10 @@ pub fn assess_block_patch(
         summary: changeset.summary(),
         current_version: data.version,
         changes,
-        invalidated_refs: vec![format!("block_version:{block_version_id}")],
+        ready: true,
+        referencing_refs: vec![format!("block_version:{block_version_id}")],
+        would_require_rebind: vec![],
+        invalidated_refs: vec![],
         requires_confirmation: true,
     })
 }

@@ -432,11 +432,25 @@ S3-A · Semantic Query & Patch Proposal:
 - [x] 不执行 apply;不写数据库;不修改冻结 Run。
 - [x] CLI 集成测试覆盖 inspect/validate/propose/assess 与真实 Run。
 
+S3-B1 · Controlled Binding Patch:
+
+- [x] `semantic.apply_binding_patch` 只接受 `block_version` 目标和 `steps.<use_id>.bindings.<slot>`。
+- [x] 事务内重读最新版本、检查项目/Block/Version/expected_version;非最新版本返回冲突。
+- [x] 使用子 Block 的权威参数槽位、类型、单位、required 和 module 约束验证新值。
+- [x] 在内存副本应用 Set/Unset 后重新执行完整 Block 内容验证。
+- [x] 生成新的不可变 BlockVersion;旧版本、ProtocolVersion、Run 不变。
+- [x] 新版本对 imported 来源标记 `derived/source_only`,清除 catalog_review;不修改 Catalog 本体。
+- [x] `assess_patch` 区分 `referencing_refs` / `would_require_rebind` / `invalidated_refs`;不再把旧 Run 误报为失效。
+- [x] 类型错误、非法路径、版本竞争、失败事务均被拒绝。
+- [x] `catalog.review.record`、`catalog.operation.import`、`semantic.apply_binding_patch` 只允许设置 `LABWORKBENCH_TRUSTED_WRITER=1` 的受信任本地写入端调用。
+- [ ] 必填参数 Unset 当前被拒绝;尚未支持“保存未就绪版本”的独立策略。
+- [ ] S3-B2 显式 Protocol Rebind 未开始。
+
 未开始 / 残余:
 
 - 审核记录仍有“谁能写审核记录”的权限缺口;当前只证明来源字段与内容摘要,尚未接入账号/权限系统。
-- S3-A 的失效引用仍是当前 Protocol/Run 的粗粒度引用;没有逐绑定影响图。
-- S3-B:正式 patch 事务提交与冲突处理未开始。
+- `semantic.validate` 只是结构校验;上下文/科学约束由 assess/apply 负责。
+- `semantic.search` 已限定项目、imported/current;能力兼容仍是文本匹配,不是类型化查询。
 - Typed Sample/Data/Resource Binding 尚未完整进入 Run 冻结快照。
 
 ## 9. 来源

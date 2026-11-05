@@ -216,7 +216,8 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | S2-B2 | Composition Integration:BlockUse / Typed Binding / Composition Validation / CCK-8 与 scope 隔离 | 结构接入完成 |
 | S2-B3 | Persistence & Frozen Run:受控 Catalog Import、ReviewRecord 摘要、正式 ID、Run manifest 语义快照 | 已完成;端到端 integration test(审核权限仍是残余缺口) |
 | S3-A | Semantic Query & Patch Proposal:inspect/search/validate/propose/assess，只读 | 已完成;CLI integration test |
-| S3-B | Controlled Patch Application:Core Command 事务提交、冲突处理、版本生成 | 未开始 |
+| S3-B1 | Controlled Binding Patch:BlockUse Set/Unset、事务校验、新 BlockVersion、受信任写入开关 | 已完成;集成测试与冲突测试 |
+| S3-B2 | Explicit Protocol Rebind:选择新 BlockVersion 更新指定 ProtocolVersion | 未开始 |
 | S4 | 组合验收:CCK-8、活死、RT-qPCR | 未开始 |
 
 约束:
