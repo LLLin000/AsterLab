@@ -257,6 +257,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "asterlab-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2371,6 +2379,7 @@ dependencies = [
 name = "labworkbench-desktop"
 version = "0.1.0"
 dependencies = [
+ "asterlab-core",
  "rusqlite",
  "serde_json",
  "slint",

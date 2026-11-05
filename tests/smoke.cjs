@@ -259,6 +259,8 @@ await post(base,"/api/records/update",{id:apiEvent.id,expected_revision:1,data:{
   const assayMapApi=await (await fetch(base+"/api/designs/"+assaySummaryApi.id+"/map")).json();
   assert.equal(assayMapApi.groups.length,1);assert.equal(assayMapApi.assays.length,1);
   assert(assayMapApi.unresolved.some(x=>x.key==="assays.summary-assay.protocol_version_id"),"HTTP map must surface a missing Protocol");
+  const cliAssayMap=cli("design.map",{id:assaySummaryApi.id}).result;
+  assert.deepEqual(cliAssayMap,assayMapApi,"CLI and HTTP must share the same DesignMap projection");
   assert(assaySummaryApi.data.group_specs[0].id,"HTTP design creation should assign stable group IDs");
   assert.deepEqual(assaySummaryApi.data.assays[0].group_ids,[assaySummaryApi.data.group_specs[0].id],"HTTP design creation should resolve group-name references");
   const invalidApiDesign={...assaySummaryApi.data,title:"Rejected invalid API design",assays:assaySummaryApi.data.assays.map(a=>({...a,group_ids:["missing-group"],group_names:[]}))};

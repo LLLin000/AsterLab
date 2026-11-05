@@ -840,94 +840,77 @@ fn unit_missing(value: &Option<String>) -> bool {
     })
 }
 
-fn map_summary(design: &data::Design) -> (String, String, String, String) {
-    let n_missing = unit_missing(&design.experimental_unit)
-        || design.groups.iter().any(|group| group.independent_n.is_none());
-    let protocol_missing = design
+fn design_projection(design: &data::Design) -> Option<asterlab_core::design_map::CurrentDesignMap> {
+    asterlab_core::design_map::build_current(&design.id, design.revision, &design.raw_data).ok()
+}
+
+fn map_summary(
+    map: &asterlab_core::design_map::CurrentDesignMap,
+) -> (String, String, String, String) {
+    let content = &map.content;
+    let n_missing = content.experimental_unit.is_none()
+        || content
+            .groups
+            .iter()
+            .any(|group| group.independent_n.is_none());
+    let protocol_missing = content
         .assays
         .iter()
         .any(|assay| assay.protocol_version_id.is_none());
-    let time_missing = design.assays.iter().any(|assay| assay.timepoints.is_empty());
-    let sample_missing = design.assays.iter().any(|assay| {
-        !present(&assay.timepoint_relation)
+    let time_missing = content
+        .assays
+        .iter()
+        .any(|assay| assay.timepoints.is_empty());
+    let sample_missing = content.assays.iter().any(|assay| {
+        assay.timepoint_relation.is_none()
             || matches!(assay.timepoint_relation.as_deref(), Some("unknown"))
     });
     (
-        if n_missing { "独立 n 待确认" } else { "独立 n 已记录" }.to_owned(),
-        if protocol_missing { "Protocol 未关联" } else { "Protocol 已关联" }.to_owned(),
-        if time_missing { "时间点待确认" } else { "时间点已记录" }.to_owned(),
-        if sample_missing { "样本关系待确认" } else { "样本关系已记录" }.to_owned(),
+        if n_missing {
+            "独立 n 待确认"
+        } else {
+            "独立 n 已记录"
+        }
+        .to_owned(),
+        if protocol_missing {
+            "Protocol 未关联"
+        } else {
+            "Protocol 已关联"
+        }
+        .to_owned(),
+        if time_missing {
+            "时间点待确认"
+        } else {
+            "时间点已记录"
+        }
+        .to_owned(),
+        if sample_missing {
+            "样本关系待确认"
+        } else {
+            "样本关系已记录"
+        }
+        .to_owned(),
     )
 }
 
-fn map_attention(design: &data::Design) -> Vec<CheckDetail> {
-    let mut items = Vec::new();
-    if unit_missing(&design.experimental_unit) {
-        items.push(CheckDetail {
-            level: SharedString::from("warn"),
-            title: SharedString::from("实验单位待确认"),
-            detail: SharedString::from("独立 n 的单位未确认；不能用孔数或技术重复代替。"),
-        });
-    }
-    let groups_without_n: Vec<&str> = design
-        .groups
+fn map_attention(map: &asterlab_core::design_map::CurrentDesignMap) -> Vec<CheckDetail> {
+    map.content
+        .unresolved
         .iter()
-        .filter(|group| group.independent_n.is_none())
-        .map(|group| group.name.as_str())
-        .collect();
-    if !groups_without_n.is_empty() {
-        items.push(CheckDetail {
+        .take(6)
+        .map(|issue| CheckDetail {
             level: SharedString::from("warn"),
-            title: SharedString::from("独立 n 待确认"),
+            title: SharedString::from(issue.question.as_str()),
             detail: SharedString::from(format!(
-                "{} 的 independent_n 为空；不能用孔数或技术重复代替 n。",
-                groups_without_n.join("、")
+                "影响：{}",
+                if issue.affects.is_empty() {
+                    "尚未说明".to_owned()
+                } else {
+                    issue.affects.join("、")
+                }
             )),
-        });
-    }
-    for assay in &design.assays {
-        if assay.protocol_version_id.is_none() {
-            items.push(CheckDetail {
-                level: SharedString::from("warn"),
-                title: SharedString::from(format!("{} 未关联 Protocol", assay.title)),
-                detail: SharedString::from("缺少 protocol_version_id，不能生成执行步骤。"),
-            });
-        }
-        if assay.timepoints.is_empty() {
-            items.push(CheckDetail {
-                level: SharedString::from("warn"),
-                title: SharedString::from(format!("{} 缺少时间点", assay.title)),
-                detail: SharedString::from("检测安排、样本关系和日程无法确定。"),
-            });
-        }
-        if !present(&assay.timepoint_relation)
-            || matches!(assay.timepoint_relation.as_deref(), Some("unknown"))
-        {
-            items.push(CheckDetail {
-                level: SharedString::from("warn"),
-                title: SharedString::from(format!("{} 时间点关系待确认", assay.title)),
-                detail: SharedString::from("无法区分同一对象复测、独立取样或分样。"),
-            });
-        }
-        if assay.group_ids.is_empty() && assay.group_names.is_empty() {
-            items.push(CheckDetail {
-                level: SharedString::from("warn"),
-                title: SharedString::from(format!("{} 未列出适用组别", assay.title)),
-                detail: SharedString::from("不推断检测覆盖哪些组。"),
-            });
-        }
-    }
-    for conflict in &design.conflicts {
-        if !matches!(conflict.status.as_deref(), Some("resolved")) {
-            items.push(CheckDetail {
-                level: SharedString::from("warn"),
-                title: SharedString::from("存在未解决证据冲突"),
-                detail: SharedString::from(conflict.topic.as_str()),
-            });
-        }
-    }
-    items.truncate(6);
-    items
+        })
+        .collect()
 }
 
 fn set_question(app: &AppWindow, design: &data::Design, sel: &Selection) {
@@ -1009,9 +992,7 @@ fn set_question(app: &AppWindow, design: &data::Design, sel: &Selection) {
         app.set_question_options(model_rc(vec![
             QuestionOption {
                 label: SharedString::from("同一单位"),
-                value: SharedString::from(format!(
-                    "{prefix}same_experimental_unit_repeated"
-                )),
+                value: SharedString::from(format!("{prefix}same_experimental_unit_repeated")),
             },
             QuestionOption {
                 label: SharedString::from("同一样本"),
@@ -1019,9 +1000,7 @@ fn set_question(app: &AppWindow, design: &data::Design, sel: &Selection) {
             },
             QuestionOption {
                 label: SharedString::from("独立取样"),
-                value: SharedString::from(format!(
-                    "{prefix}independent_sample_per_timepoint"
-                )),
+                value: SharedString::from(format!("{prefix}independent_sample_per_timepoint")),
             },
             QuestionOption {
                 label: SharedString::from("暂不确定"),
@@ -1474,9 +1453,7 @@ fn set_workspace_details(app: &AppWindow, model: &ReadModel, sel: &Selection) {
                 )),
             });
         }
-        if !present(&assay.timepoint_relation)
-            && !sel.draft.relations.contains_key(&assay.id)
-        {
+        if !present(&assay.timepoint_relation) && !sel.draft.relations.contains_key(&assay.id) {
             checks.push(CheckDetail {
                 level: SharedString::from("warn"),
                 title: SharedString::from("时间点关系待确认"),
@@ -1607,12 +1584,20 @@ fn set_workspace_details(app: &AppWindow, model: &ReadModel, sel: &Selection) {
     app.set_allocation_details(model_rc(allocations));
     app.set_evidence_details(model_rc(evidence));
     app.set_conflict_details(model_rc(conflicts));
-    let (map_n, map_protocol, map_time, map_sample) = map_summary(design);
-    app.set_map_n_text(SharedString::from(map_n));
-    app.set_map_protocol_text(SharedString::from(map_protocol));
-    app.set_map_time_text(SharedString::from(map_time));
-    app.set_map_sample_text(SharedString::from(map_sample));
-    app.set_map_attention(model_rc(map_attention(design)));
+    if let Some(map) = design_projection(design) {
+        let (map_n, map_protocol, map_time, map_sample) = map_summary(&map);
+        app.set_map_n_text(SharedString::from(map_n));
+        app.set_map_protocol_text(SharedString::from(map_protocol));
+        app.set_map_time_text(SharedString::from(map_time));
+        app.set_map_sample_text(SharedString::from(map_sample));
+        app.set_map_attention(model_rc(map_attention(&map)));
+    } else {
+        app.set_map_n_text(SharedString::from("设计投影不可用"));
+        app.set_map_protocol_text(SharedString::from("设计投影不可用"));
+        app.set_map_time_text(SharedString::from("设计投影不可用"));
+        app.set_map_sample_text(SharedString::from("设计投影不可用"));
+        app.set_map_attention(model_rc(Vec::<CheckDetail>::new()));
+    }
     app.set_check_details(model_rc(checks));
     app.set_planned_output_details(model_rc(planned_outputs));
     app.set_protocol_manifest(model_rc(protocol_manifest));
@@ -2287,6 +2272,7 @@ mod tests {
             planned_outputs: Vec::new(),
             sources: Vec::new(),
             conflicts: Vec::new(),
+            raw_data: serde_json::json!({"title":"设计"}),
         }
     }
 

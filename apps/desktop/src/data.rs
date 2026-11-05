@@ -51,6 +51,7 @@ pub struct Design {
     pub planned_outputs: Vec<PlannedOutput>,
     pub sources: Vec<Source>,
     pub conflicts: Vec<Conflict>,
+    pub raw_data: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -463,6 +464,7 @@ fn parse_design(id: String, project_id: Option<String>, revision: i64, data: &Va
         planned_outputs: parse_planned_outputs(&data["planned_outputs"]),
         sources,
         conflicts,
+        raw_data: data.clone(),
     }
 }
 

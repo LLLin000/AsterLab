@@ -6,6 +6,7 @@
 
 系统分层、Slint 前端职责、Core 读模型和仪器步骤模块的架构见 [docs/architecture.md](docs/architecture.md)。
 文档权威与阅读顺序见 [docs/README.md](docs/README.md)；当前实施阶段见 [docs/implementation-plan.md](docs/implementation-plan.md)；P0 Core 契约见 [docs/contracts/core-v1.md](docs/contracts/core-v1.md)。
+当前共享设计投影位于 `crates/asterlab-core`；P1-A 已由 CLI/HTTP 与 Slint 地图摘要共用。
 
 ## 启动
 

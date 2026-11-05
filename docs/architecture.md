@@ -147,13 +147,19 @@ flowchart TB
 
 ### 4.3 共享 Core 的债务
 
-当前根 crate 是二进制，桌面端有自己的 `data.rs` 读适配器。目标架构应抽出 `asterlab-core` 库：
+P1-A 已新增 `crates/asterlab-core`，先共享 `design_map::CurrentDesignMap`：
 
-- 领域类型、验证、读模型、命令入口共享；
-- CLI/HTTP 和 Slint 都依赖它；
-- UI 不复制“组别覆盖/时间关系/样本数”的推导。
+- CLI/HTTP 调用同一 `build_current` 投影，保持扁平 JSON 兼容。
+- Slint 的实验地图摘要/待确认改用 Core 投影；设计详情仍使用现有 `data.rs` 解析。
+- 尚未共享 ProtocolPreview/RunWorkspace；桌面端仍保留 `data.rs` 读适配器。
 
-在抽取前，桌面端的读模型必须与 Core 的 `design.map` 形状保持一致，避免两套语义。
+后续 P1-B/P1-C：
+
+- 共享 Protocol 展开为 `OperationStep`；
+- 共享 `RunWorkspace`（steps/tasks/occurrences/frozen_design）；
+- 最终让 CLI/HTTP/Slint 只依赖 Core 读模型，UI 不复制“组别覆盖/时间关系/样本数”的推导。
+
+当前 CLI/HTTP 与 Slint 地图摘要已使用同一 `CurrentDesignMap`；Protocol/Run 仍待迁移。
 
 ## 5. 数据契约
 

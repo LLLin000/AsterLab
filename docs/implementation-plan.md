@@ -58,7 +58,14 @@ Core 方向正确，但还不能直接拆 Slint。
 
 ### P1 · 抽共享 Core
 
-优先迁移已有测试基础的 `design.map`，再建立 `run.workspace`。
+P1-A 已完成：
+
+- 新增 `crates/asterlab-core`，`design_map::build_current` 纯投影。
+- CLI/HTTP 调用共享 Core，保持 `design.map` 扁平 JSON。
+- Slint 地图摘要/待确认改用 Core 投影，不再自行判断 n/Protocol/时间关系。
+- 核心测试 + CLI/HTTP 一致性 smoke 通过。
+
+P1-B（下一步）迁移 Protocol 展开为结构化 `OperationStep`；P1-C 再建 `RunWorkspace`。
 
 - Core 查询：`ExperimentQueries::design_map` / `protocol_preview` / `run_workspace`。
 - CLI/HTTP 变成 Adapter；不复制校验。
