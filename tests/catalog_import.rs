@@ -646,8 +646,14 @@ fn view_document_persists_and_revises_against_real_core_refs() {
                 "group_specs": [{"name":"Control","role":"control","condition":"vehicle","independent_n":3,"technical_repeats":1}],
                 "assays": [{"id":"cck8","title":"CCK-8","endpoint":"OD450","method":"CCK-8","unit":"absorbance","group_ids":[],"timepoints":[],"protocol_version_id":protocol_version_id}],
                 "container_plan": {
-                    "containers": [{"id":"plate-1","profile_ref":{"id":"labware.cell_culture_96","version":1},"label":"Plate 1"}],
-                    "assignments": [{"container_id":"plate-1","position_id":"A1","targets":[{"target":{"kind":"sample","id":"s1"},"role":"primary","relationship":"contains","counts_as_independent_unit":true}]}],
+                    "containers": [
+                        {"id":"plate-1","profile_ref":{"id":"labware.cell_culture_96","version":1},"label":"Plate 1"},
+                        {"id":"plate-2","profile_ref":{"id":"labware.cell_culture_96","version":1},"label":"Plate 2"}
+                    ],
+                    "assignments": [
+                        {"container_id":"plate-1","position_id":"A1","targets":[{"target":{"kind":"sample","id":"s1"},"role":"primary","relationship":"contains","counts_as_independent_unit":true}]},
+                        {"container_id":"plate-2","position_id":"B1","targets":[{"target":{"kind":"sample","id":"s2"},"role":"primary","relationship":"contains","counts_as_independent_unit":true}]}
+                    ],
                     "placements": []
                 }
             }
@@ -768,6 +774,16 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         .as_array_mut()
         .unwrap()
         .push(json!({
+            "instance_id": "planned_plate_2",
+            "definition": {"id":"lab.well_plate","version":1},
+            "model_ref": {"kind":"planned_container","design_version_id":design_version_id,"container_id":"plate-2"},
+            "props": {},
+            "slots": {}
+        }));
+    document["root"]["workflow"]["nodes"][0]["component"]["slots"]["detail"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
             "instance_id": "volume_table",
             "definition": {"id":"content.table","version":1},
             "props": {"mode":"authored","rows":[[10.0]]},
@@ -856,6 +872,20 @@ fn view_document_persists_and_revises_against_real_core_refs() {
     );
     assert_eq!(data_preview["result"]["calculation"]["total_volume"], 11.0);
     assert_eq!(data_preview["result"]["table"]["rows"][0][3], 11.0);
+    let second = cli.run(
+        "view.data_preview",
+        &json!({
+            "view_id": view_id,
+            "instance_id": "planned_plate_2",
+            "calculator_instance_id": "reagent_calculator",
+            "extra_ratio": 0.1
+        }),
+    );
+    assert_eq!(second["result"]["plate"]["container_id"], "plate-2");
+    assert_eq!(
+        second["result"]["plate"]["positions"][0]["position_id"],
+        "B1"
+    );
     let missing = cli.run(
         "view.data_preview",
         &json!({"view_id": view_id, "instance_id": "planned_plate"}),
