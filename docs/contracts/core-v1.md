@@ -239,7 +239,14 @@ pub struct ToolActionSpec {
     pub output_schema: Value,
     pub side_effects: ToolSideEffects,
     pub implementation_source: String,
+    pub trust: ToolTrust,
     pub requires_confirmation: bool,
+}
+
+pub enum ToolTrust {
+    Trusted,
+    Unregistered,
+    Revoked,
 }
 
 pub enum ToolSideEffects {
