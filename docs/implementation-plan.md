@@ -72,7 +72,15 @@ P1-B 已完成：
 - 步骤数组顺序即执行顺序；`step_path` 保留来源路径。
 - smoke 覆盖递归组合、参数、路径和未解决槽位。
 
-P1-C（下一步）建 `RunWorkspace`：冻结 DesignVersion/Manifest，分开 steps/tasks/occurrences，并接 Slint 执行台。
+P1-C 已完成（只读查询）：
+
+- `crates/asterlab-core/src/run_workspace.rs` 定义 `RunWorkspace`、`RunScope`、`RunStep`、`PlannedTask`、`StepOccurrence`、`TargetSelection`。
+- `run.workspace` CLI + `GET /api/runs/{id}/workspace`。
+- 读取 Run 冻结的 `DesignVersion` 和 `protocol_manifest`，不读当前 Design。
+- `steps/tasks` 分开；`tasks` 不在缺少目标时生成笛卡尔积；旧事件不伪造 occurrence。
+- 测试覆盖 tasks、legacy events、CLI/HTTP 查询。
+
+下一步 P2：通过正式 Core 命令构建 L929 可执行 Run Fixture（多步骤、两个检测/时间点、实际板图、一条实际事件），再接 Slint 执行台。
 
 - Core 查询：`ExperimentQueries::design_map` / `protocol_preview` / `run_workspace`。
 - CLI/HTTP 变成 Adapter；不复制校验。

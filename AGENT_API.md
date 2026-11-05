@@ -36,7 +36,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 |---|---|---:|
 | `project.list` / `project.create` / `project.revise` | 查询、创建或按版本修订项目 | create/revise |
 | `design.list` / `design.get` / `design.map` / `design.create` / `design.revise` | 查询、只读实验地图、创建或修订实验设计 | create/revise |
-| `run.list` / `run.create` / `run.set_status` / `run.revise` | 查询、创建运行、更新状态或只修订名称/计划日期 | create/update |
+| `run.list` / `run.workspace` / `run.create` / `run.set_status` / `run.revise` | 查询、只读冻结工作区、创建运行、更新状态或只修订名称/计划日期 | create/update |
 | `task.create` / `task.set_status` | 创建日历任务或更新状态 | create/update |
 | `protocol.list` / `protocol.create` / `protocol.revise` | 查询 Protocol、创建 v1、追加新版本 | create/revise |
 | `protocol.block.list` / `protocol.block.get` | 查询项目步骤块库和不可变版本 | 否 |
@@ -76,6 +76,8 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 当前 CLI 支持多步骤和递归组合；网页编辑器可创建基础文字步骤块、填写参数并预览/绑定根步骤块。复杂多步骤或嵌套组合请使用封闭的 CLI 工具契约，网页展示仍可读取并预览这些组合。
 
 运行可以先按草案状态创建，以便排期和核对；若其 Protocol manifest 中仍有必填参数未确认，run.set_status 切换到 in_progress 会被拒绝。先追加带完整参数的新 Protocol 版本，再按该版本建立新的 Run。未解决的可选槽位不会自动阻断。
+
+`run.workspace` 只读读取 Run 冻结的 `design_version_id` 和 `protocol_manifest`，返回 `frozen_design`、`scopes`、`steps`、`tasks`、`occurrences`、`materials`、`plates`、`events`；不存在冻结快照时返回错误，不回退当前 Design。旧事件没有 `occurrence_id` 时保留为历史，不自动生成执行实例。
 
 `run.revise` 必须提供 `id` 和当前 `expected_revision`，只接受 `title`、`scheduled_date`；日期可传 `null` 清除。状态仍通过 `run.set_status` 修订。设计版本、Protocol 清单、材料清单、轮次和来源关系属于创建时冻结快照，修订接口拒绝这些字段。HTTP API 与 CLI 共用同一补丁校验；网页不得整体替换 Run JSON。
 

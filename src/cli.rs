@@ -2153,6 +2153,61 @@ pub(crate) fn normalize_validate_design_data(
     serde_json::to_value(design).map_err(|e| CliError::internal(e.to_string()))
 }
 
+pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliError> {
+    let run = get(db, run_id)?;
+    if run["kind"] != "run" {
+        return Err(CliError::input("指定记录不是实验运行"));
+    }
+    let design_id = run["parent_id"]
+        .as_str()
+        .ok_or_else(|| CliError::internal("执行批次缺少所属设计"))?;
+    let version_id = run["data"]["design_version_id"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| CliError::input("执行批次没有冻结设计版本；不能建立 RunWorkspace"))?;
+    let version = get(db, version_id)?;
+    if version["kind"] != "design_version" {
+        return Err(CliError::internal("冻结设计版本记录类型无效"));
+    }
+    let revision = version["data"]["design_revision"]
+        .as_i64()
+        .ok_or_else(|| CliError::internal("冻结设计版本号无效"))?;
+    let snapshot = &version["data"]["snapshot"];
+    let project = run["project_id"].as_str();
+
+    let mut events = Vec::new();
+    for record in list(db, Some("execution_event"), project)? {
+        if record["parent_id"].as_str() != Some(run_id) {
+            continue;
+        }
+        let mut data = record["data"].clone();
+        data["id"] = record["id"].clone();
+        events.push(data);
+    }
+    let mut plates = Vec::new();
+    for record in list(db, Some("plate"), project)? {
+        if record["parent_id"].as_str() != Some(run_id) {
+            continue;
+        }
+        let mut data = record["data"].clone();
+        data["id"] = record["id"].clone();
+        plates.push(data);
+    }
+
+    let workspace = asterlab_core::run_workspace::build(
+        run_id,
+        design_id,
+        version_id,
+        revision,
+        snapshot,
+        &run["data"],
+        &plates,
+        &events,
+    )
+    .map_err(|error| CliError::internal(error.to_string()))?;
+    serde_json::to_value(workspace).map_err(|error| CliError::internal(error.to_string()))
+}
+
 pub(crate) fn design_map(db: &Connection, design_id: &str) -> Result<Value, CliError> {
     let record = get(db, design_id)?;
     if record["kind"] != "design" {
@@ -3032,6 +3087,10 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             }
             Ok(json!({"record":patch_run(&db,&i.id,i.expected_revision,&Value::Object(changes))?}))
         }
+        "run.workspace" => {
+            let i: IdInput = parse_input(path)?;
+            Ok(run_workspace(&db, &i.id)?)
+        }
         "run.create" => {
             let i: RunCreate = parse_input(path)?;
             let tx = db
@@ -3724,6 +3783,9 @@ fn result_schema(tool: &str) -> Value {
         "run.create" => one("run"),
         "run.set_status" => one("run"),
         "run.revise" => one("run"),
+        "run.workspace" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id","design_id","design_version_id","design_revision","frozen_design","protocol_version_id","status","scopes","steps","tasks","occurrences","materials","plates","events"],"properties":{"run_id":{"type":"string"},"design_id":{"type":"string"},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"frozen_design":{"type":"object","additionalProperties":true},"protocol_version_id":{"type":["string","null"]},"status":{"type":"string"},"scopes":{"type":"array","items":{"type":"object","additionalProperties":true}},"steps":{"type":"array","items":{"type":"object","additionalProperties":true}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},"occurrences":{"type":"array","items":{"type":"object","additionalProperties":true}},"materials":{"type":"array","items":{"type":"object","additionalProperties":true}},"plates":{"type":"array","items":{"type":"object","additionalProperties":true}},"events":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
+        }
         "task.create" => one("task"),
         "task.set_status" => one("task"),
         "protocol.list" => arr("protocol"),
@@ -3810,6 +3872,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "run.list" | "protocol.list" => {
             json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":"string"}}})
+        }
+        "run.workspace" => {
+            json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
         }
         "protocol.block.list" => {
             json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":"string"}}})
@@ -3997,6 +4062,7 @@ fn tool_specs() -> Vec<Value> {
         "run.create",
         "run.set_status",
         "run.revise",
+        "run.workspace",
         "task.create",
         "task.set_status",
         "protocol.list",
@@ -4098,6 +4164,7 @@ fn tool_effects(tool: &str) -> &'static str {
         | "design.get"
         | "design.map"
         | "run.list"
+        | "run.workspace"
         | "protocol.list"
         | "protocol.block.list"
         | "protocol.block.get"

@@ -158,6 +158,13 @@ async function post(base,path,body,expected=200){
   assert.equal(structuredManifest.root_block_version_id,cck8Block.version.id);assert(structuredManifest.block_version_ids.includes(gelmaExtract.version.id));
   assert.equal(structuredManifest.protocol_ready,true);assert.equal(structuredManifest.resolved_parameters[0].value,0.7);assert.equal(structuredManifest.steps[0].parameters[0].value,0.7);
   const structuredStepEvent=cli("execution_event.create",{run_id:structuredRun.id,event_type:"operation",content:"Synthetic structured step event",protocol_step_path:structuredManifest.steps[0].path,protocol_version_id:structuredManifest.protocol_version_id,assay_id:"gelma-cck8",timepoint:"24 h",step_status:"completed"}).result.record;
+  const structuredWorkspace=cli("run.workspace",{id:structuredRun.id}).result;
+  assert.equal(structuredWorkspace.run_id,structuredRun.id);
+  assert.equal(structuredWorkspace.design_version_id,structuredRun.data.design_version_id);
+  assert(structuredWorkspace.steps.length>0);
+  assert(structuredWorkspace.tasks.length>0);
+  assert.equal(structuredWorkspace.occurrences.length,0,"old events must not invent occurrences");
+  assert.equal(structuredWorkspace.events.at(-1).occurrence_id,null);
   assert.equal(structuredStepEvent.data.protocol_step_path,structuredManifest.steps[0].path);assert.equal(structuredStepEvent.data.protocol_version_id,structuredManifest.protocol_version_id);assert.equal(structuredStepEvent.data.assay_id,"gelma-cck8");assert.equal(structuredStepEvent.data.timepoint,"24 h");assert.equal(structuredStepEvent.data.step_status,"completed");
   assert.equal(cli("execution_event.create",{run_id:structuredRun.id,event_type:"operation",content:"Wrong frozen Protocol version",protocol_step_path:structuredManifest.steps[0].path,protocol_version_id:structuredProtocol.version.id,assay_id:"gelma-cck8"},2).error.code,"INVALID_INPUT");assert.equal(cli("execution_event.create",{run_id:structuredRun.id,event_type:"operation",content:"Wrong planned timepoint",protocol_step_path:structuredManifest.steps[0].path,protocol_version_id:structuredManifest.protocol_version_id,assay_id:"gelma-cck8",timepoint:"3 d"},2).error.code,"INVALID_INPUT");assert.equal(cli("execution_event.create",{run_id:structuredRun.id,event_type:"operation",content:"Status without a step",step_status:"completed"},2).error.code,"INVALID_INPUT");
   const incompleteProtocol=cli("protocol.create",{project_id:cliProject.id,title:"Draft with unresolved required parameter",root_block_version_id:gelmaExtract.version.id}).result;
@@ -278,6 +285,9 @@ await post(base,"/api/records/update",{id:apiEvent.id,expected_revision:1,data:{
   const structuredDesignApi=await post(base,"/api/records",{kind:"design",project_id:project.id,parent_id:project.id,data:{title:"Structured API design",assays:[{id:"api-assay",title:"Synthetic assay",protocol_version_id:structuredProtocolApi.version.id}]}});
   const structuredRunApi=await post(base,"/api/records",{kind:"run",project_id:project.id,parent_id:structuredDesignApi.id,data:{title:"Structured API run"}});
   assert.equal(structuredRunApi.data.protocol_manifest[0].steps[0].parameters[0].value,0.5);
+  const structuredWorkspaceApi=await (await fetch(base+"/api/runs/"+structuredRunApi.id+"/workspace")).json();
+  assert.equal(structuredWorkspaceApi.steps[0].step.parameters[0].value,0.5);
+  assert.equal(structuredWorkspaceApi.frozen_design.design_version_id,structuredRunApi.data.design_version_id);
   const draftProtocolApi=await post(base,"/api/records",{kind:"protocol",project_id:project.id,parent_id:project.id,data:{title:"Incomplete API Protocol",root_block_version_id:uiStepBlock.version.id}});
   const draftDesignApi=await post(base,"/api/records",{kind:"design",project_id:project.id,parent_id:project.id,data:{title:"Incomplete API design",assays:[{id:"incomplete-api-assay",title:"Incomplete API assay",protocol_version_id:draftProtocolApi.version.id}]}});
   const draftRunApi=await post(base,"/api/records",{kind:"run",project_id:project.id,parent_id:draftDesignApi.id,data:{title:"Incomplete API run",status:"planned"}});
