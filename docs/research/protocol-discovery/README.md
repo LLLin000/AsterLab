@@ -57,6 +57,9 @@
 | B08 | [batch-08-solutions-and-sterilization.md](batch-08-solutions-and-sterilization.md) | 溶液/缓冲液/培养基/无菌处理 | 已完成;零新公共模块 |
 | B09 | [batch-09-transfection-and-stable-lines.md](batch-09-transfection-and-stable-lines.md) | 转染/稳定株 | 已完成;零新公共模块 |
 | B10 | [batch-10-microbial-growth-transformation-susceptibility.md](batch-10-microbial-growth-transformation-susceptibility.md) | 微生物生长/转化/药敏 | 已完成;零新公共模块 |
+| B11 | [batch-11-3d-spheroid-models.md](batch-11-3d-spheroid-models.md) | 3D 球体/悬滴/ALI | 已完成;零新公共模块 |
+| B12 | [batch-12-live-imaging-and-cell-death-cycle.md](batch-12-live-imaging-and-cell-death-cycle.md) | 活细胞成像/死亡/周期 | 已完成;零新公共模块 |
+| B13 | [batch-13-protein-purification-and-ip.md](batch-13-protein-purification-and-ip.md) | 蛋白纯化/IP | 已完成;零新公共模块 |
 
 ## 剩余实验地图
 
