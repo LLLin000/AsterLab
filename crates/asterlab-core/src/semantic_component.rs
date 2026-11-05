@@ -11,7 +11,7 @@ use serde_json::Value;
 
 pub const SEMANTIC_COMPONENT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProtocolScope {
     Assay { assay_id: String },
@@ -25,6 +25,12 @@ pub struct QualifiedStepRef {
     pub protocol_version_id: String,
     pub scope: ProtocolScope,
     pub step_path: String,
+}
+
+impl ProtocolScope {
+    pub fn key(&self) -> String {
+        scope_key(self)
+    }
 }
 
 impl QualifiedStepRef {

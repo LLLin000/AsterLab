@@ -159,12 +159,16 @@ Composition {
 - 纯计算的数据绑定依赖环必须拒绝;实验上的重复操作本身不等于数据环。
 - 条件未解决时保持 unknown,不能默认解释为 `false`,也不能当作已执行/已跳过。
 
-S1-B 实现位于 [`semantic_composition.rs`](../../crates/asterlab-core/src/semantic_composition.rs):
+S1-B/B.1 实现位于 [`semantic_composition.rs`](../../crates/asterlab-core/src/semantic_composition.rs):
 
 - `CompositionNode` 保留 `step_path`/scope/ports/children/condition;
-- `PortConnection` 明确 from/to、对象类型、单位、样本身份和跨 scope 授权;
-- 递归包含按祖先 block version 检查;同一模块可在不同父节点复用;
-- 只对 `Data` 端口做依赖环检查,实验性 Sample 连接不误判为数据环;
+- 步骤身份统一为 **Protocol + scope + step_path**,不再用裸路径判重;
+- `PortConnection` 明确 from/to、对象类型、单位、样本身份、跨 scope 授权和显式迭代;
+- Sample 连接必须向前;回边没有显式 `IterationRef` 会被拒绝。`Data` 依赖环仍拒绝;
+- 跨 scope 授权是 `AuthorizationRef`,结构校验只检查形状,真实授权由只读 `CompositionContext` 验证;无法证明时是 `Unknown`;
+- 端口兼容性分 `Compatible / Incompatible / Unknown`;缺少单位或样本身份不会当作兼容;
+- `CompositionContext.authoritative_port` 对照权威 PortSpec;缺失或冲突都会被报告;
+- `composition_from_block_uses` 提供只读适配入口,保留 scope-qualified 路径;
 - 未知条件保持 `Unknown`,不自动变成 `False`/skipped。
 
 ### 2.4 Typed Binding
@@ -339,11 +343,20 @@ S1-B:
 - [x] 跨 Assay/scope 连接必须有显式授权。
 - [x] 未知条件保持 Unknown。
 - [x] CCK-8 / ELISA / CFU 复用同一 `op.liquid_transfer` 时有独立路径、样本绑定和参数绑定。
-- [x] 9 个组合模块测试;仍为纯 Core 类型,未改 CLI/Slint/数据库。
+- [x] 14 个组合模块测试;仍为纯 Core 类型,未改 CLI/Slint/数据库。
+
+S1-B.1:
+
+- [x] Sample 回边/循环必须显式 `IterationRef`;D1/D3 顺序反接被拒绝。
+- [x] 同一 `root/seed` 在不同 Assay scope 不误判重复。
+- [x] 跨 scope 授权由 Context 验证;缺失/Unknown/Denied 不放行。
+- [x] 端口兼容性三态;权威 PortSpec 缺失或冲突被报告。
+- [x] `BlockUseSource` 只读适配,保留 scope-qualified 路径。
 
 未开始:
 
-- S1-C:pure ToolAction、patch change-set、事务边界。
+- S1-C1:pure ToolAction。
+- S1-C2:Agent ChangeSet。
 
 ## 9. 来源
 
