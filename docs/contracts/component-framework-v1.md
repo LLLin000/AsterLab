@@ -235,7 +235,15 @@ C3-1 计划容器:
   - 嵌套 Workflow 进入/面包屑导航。
 - UI 目前只读/展示 + Note 编辑,不修改科学参数。
 
-## 11. 下一步
+## 11. C3-3A 最小数据闭环
+
+- `component_data` 已提供 WellPlate → Calculator → Table 的只读投影。
+- `view.data_preview` 从 View 中的 PlannedContainer 读取 DesignVersion 孔位，按明确输入的每孔体积计算；缺少体积返回 unresolved，不填默认值。
+- `scientific_facts` 已提供 typed quantity/range、工作体积范围与铺板密度两条确定性规则。
+- 规则输出 `valid / warning / blocked / unresolved`，带 rule id、来源和 affected components。
+- 当前规则只覆盖少量事实；不构成完整科学知识引擎。
+
+## 12. 下一步
 
 C2-B Persistence & Scientific Core Bridge:
 

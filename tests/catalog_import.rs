@@ -644,7 +644,12 @@ fn view_document_persists_and_revises_against_real_core_refs() {
                 "objective": "test",
                 "experimental_unit": "well",
                 "group_specs": [{"name":"Control","role":"control","condition":"vehicle","independent_n":3,"technical_repeats":1}],
-                "assays": [{"id":"cck8","title":"CCK-8","endpoint":"OD450","method":"CCK-8","unit":"absorbance","group_ids":[],"timepoints":[]}]
+                "assays": [{"id":"cck8","title":"CCK-8","endpoint":"OD450","method":"CCK-8","unit":"absorbance","group_ids":[],"timepoints":[]}],
+                "container_plan": {
+                    "containers": [{"id":"plate-1","profile_ref":{"id":"labware.cell_culture_96","version":1},"label":"Plate 1"}],
+                    "assignments": [{"container_id":"plate-1","position_id":"A1","targets":[{"target":{"kind":"sample","id":"s1"},"role":"primary","relationship":"contains","counts_as_independent_unit":true}]}],
+                    "placements": []
+                }
             }
         }),
     );
@@ -735,6 +740,16 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         .as_array_mut()
         .unwrap()
         .push(json!({
+            "instance_id": "planned_plate",
+            "definition": {"id":"lab.well_plate","version":1},
+            "model_ref": {"kind":"planned_container","design_version_id":design_version_id,"container_id":"plate-1"},
+            "props": {},
+            "slots": {}
+        }));
+    document["root"]["workflow"]["nodes"][0]["component"]["slots"]["detail"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
             "instance_id": "solution_tool",
             "definition": {"id":"lab.solution_calculator","version":1},
             "props": {},
@@ -779,6 +794,14 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         &json!({"project_id": project, "title": "View", "document": document}),
     );
     let view_id = created["result"]["view"]["id"].as_str().unwrap();
+    let data_preview = cli.run(
+        "view.data_preview",
+        &json!({"view_id": view_id, "volume_per_well": 10.0, "extra_ratio": 0.1}),
+    );
+    assert_eq!(data_preview["result"]["calculation"]["total_volume"], 11.0);
+    assert_eq!(data_preview["result"]["table"]["rows"][0][3], 11.0);
+    let missing = cli.run("view.data_preview", &json!({"view_id": view_id}));
+    assert_eq!(missing["result"]["calculation"]["state"], "unresolved");
     let fetched = cli.run("view.get", &json!({"id": view_id}));
     assert_eq!(fetched["result"]["latest_version"]["data"]["revision"], 1);
 

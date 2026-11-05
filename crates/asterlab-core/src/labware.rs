@@ -53,10 +53,28 @@ pub struct EvidenceRef {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct Quantity {
+    pub value: f64,
+    pub unit: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct QuantityRange {
+    pub min: Quantity,
+    pub max: Quantity,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProfileField {
     pub state: ProfileFieldState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<Quantity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<QuantityRange>,
     #[serde(default)]
     pub evidence: Vec<EvidenceRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,6 +86,40 @@ impl ProfileField {
         Self {
             state: ProfileFieldState::Known,
             value: Some(value),
+            quantity: None,
+            range: None,
+            evidence: vec![],
+            note: None,
+        }
+    }
+
+    pub fn known_quantity(value: f64, unit: impl Into<String>) -> Self {
+        Self {
+            state: ProfileFieldState::Known,
+            value: None,
+            quantity: Some(Quantity {
+                value,
+                unit: unit.into(),
+            }),
+            range: None,
+            evidence: vec![],
+            note: None,
+        }
+    }
+
+    pub fn known_range(min: f64, max: f64, unit: impl Into<String>) -> Self {
+        let unit = unit.into();
+        Self {
+            state: ProfileFieldState::Known,
+            value: None,
+            quantity: None,
+            range: Some(QuantityRange {
+                min: Quantity {
+                    value: min,
+                    unit: unit.clone(),
+                },
+                max: Quantity { value: max, unit },
+            }),
             evidence: vec![],
             note: None,
         }
@@ -77,6 +129,8 @@ impl ProfileField {
         Self {
             state: ProfileFieldState::Unknown,
             value: None,
+            quantity: None,
+            range: None,
             evidence: vec![],
             note: None,
         }
@@ -86,6 +140,8 @@ impl ProfileField {
         Self {
             state: ProfileFieldState::NotApplicable,
             value: None,
+            quantity: None,
+            range: None,
             evidence: vec![],
             note: None,
         }
@@ -451,7 +507,9 @@ impl ContainerPlan {
 fn validate_profile_fields(profile: &LabwareProfile) -> Result<(), String> {
     for (key, field) in &profile.fields {
         match field.state {
-            ProfileFieldState::Known if field.value.is_none() => {
+            ProfileFieldState::Known
+                if field.value.is_none() && field.quantity.is_none() && field.range.is_none() =>
+            {
                 return Err(format!("profile field {key} is known but has no value"));
             }
             ProfileFieldState::Unknown | ProfileFieldState::NotApplicable
@@ -616,13 +674,25 @@ mod tests {
     fn culture_area_is_unknown_not_not_applicable_for_culture_plate() {
         let registry = default_labware_registry();
         let culture = registry
-            .get(&ProfileRef { id: "labware.cell_culture_96".into(), version: 1 })
+            .get(&ProfileRef {
+                id: "labware.cell_culture_96".into(),
+                version: 1,
+            })
             .unwrap();
-        assert_eq!(culture.fields["culture_area"].state, ProfileFieldState::Unknown);
+        assert_eq!(
+            culture.fields["culture_area"].state,
+            ProfileFieldState::Unknown
+        );
         let pcr = registry
-            .get(&ProfileRef { id: "labware.pcr_96".into(), version: 1 })
+            .get(&ProfileRef {
+                id: "labware.pcr_96".into(),
+                version: 1,
+            })
             .unwrap();
-        assert_eq!(pcr.fields["culture_area"].state, ProfileFieldState::NotApplicable);
+        assert_eq!(
+            pcr.fields["culture_area"].state,
+            ProfileFieldState::NotApplicable
+        );
     }
 
     #[test]
@@ -634,12 +704,17 @@ mod tests {
             ProfileField {
                 state: ProfileFieldState::Known,
                 value: None,
+                quantity: None,
+                range: None,
                 evidence: vec![],
                 note: None,
             },
         );
         let profile = LabwareProfile {
-            profile: ProfileRef { id: "bad".into(), version: 1 },
+            profile: ProfileRef {
+                id: "bad".into(),
+                version: 1,
+            },
             family: LabwareFamily::CellCulturePlate,
             title: "bad".into(),
             fields,

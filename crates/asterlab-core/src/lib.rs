@@ -13,3 +13,5 @@ pub mod protocol_block;
 pub mod semantic_query;
 pub mod component_framework;
 pub mod labware;
+pub mod component_data;
+pub mod scientific_facts;

@@ -30,6 +30,7 @@
 24. [Catalog 晋升审计](k2-operations/catalog-promotion-audit.md) — 原子性不等于公共模块；复用广度/语义稳定/抽象收益/差异成本四道门槛，以及第一版公共操作清单。
 25. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
 26. [组件体系与 LabwareProfile 设计评审](2026-11-05-component-profile-and-labware-design-review.md) — C3 架构基线：通用表格/计算器、LabwareProfile、计划容器/孔位/包含关系、修订顺序；评审稿。
+27. [Scientific Fact-Aware Components 研究记录](2026-11-06-scientific-fact-aware-components.md) — 类型化科学属性、规则评估、Corning/PCR 参考核对、组件联动与最小闭环；研究稿。
 
 ## 证据标签
 

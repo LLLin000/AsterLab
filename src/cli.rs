@@ -1,3 +1,4 @@
+use asterlab_core::component_data::{calculate_reagent, project_well_plate, reagent_table};
 use asterlab_core::component_framework::{
     default_registry, ComponentBindingContext, ComponentDefinition, ComponentDefinitionRef,
     ComponentInstance, ComponentRegistry, ContextValidationMode, ModelPathResolution, ModelRef,
@@ -558,6 +559,15 @@ struct ViewProject {
     protocol_version_id: String,
     #[serde(default)]
     document_id: Option<String>,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ViewDataPreview {
+    view_id: String,
+    #[serde(default)]
+    volume_per_well: Option<f64>,
+    #[serde(default)]
+    extra_ratio: Option<f64>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2193,6 +2203,73 @@ pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Valu
         )
         .map_err(semantic_error)?;
     Ok(json!({"document":document}))
+}
+
+fn find_planned_container(value: &Value) -> Option<(String, String)> {
+    if let Some(model) = value.get("model_ref") {
+        if model.get("kind").and_then(Value::as_str) == Some("planned_container") {
+            return Some((
+                model.get("design_version_id")?.as_str()?.to_owned(),
+                model.get("container_id")?.as_str()?.to_owned(),
+            ));
+        }
+    }
+    if let Some(slots) = value.get("slots").and_then(Value::as_object) {
+        for children in slots.values().filter_map(Value::as_array) {
+            for child in children {
+                if let Some(found) = find_planned_container(child) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    if let Some(nodes) = value
+        .get("workflow")
+        .and_then(|workflow| workflow.get("nodes"))
+        .and_then(Value::as_array)
+    {
+        for node in nodes {
+            if let Some(component) = node.get("component") {
+                if let Some(found) = find_planned_container(component) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, CliError> {
+    let i: ViewDataPreview = serde_json::from_value(data.clone())
+        .map_err(|e| CliError::input(format!("View 数据预览参数无效：{e}")))?;
+    let view = get_view(db, &i.view_id)?;
+    let document = &view["latest_version"]["data"];
+    let Some((design_version_id, container_id)) = find_planned_container(&document["root"]) else {
+        return Err(CliError::input(
+            "ViewDocument 中没有引用 PlannedContainer 的 WellPlate 组件",
+        ));
+    };
+    let design = get(db, &design_version_id)?;
+    if design["kind"] != "design_version" {
+        return Err(CliError::input("PlannedContainer 引用的不是 DesignVersion"));
+    }
+    let plan_value = &design["data"]["snapshot"]["container_plan"];
+    let plan: ContainerPlan = serde_json::from_value(if plan_value.is_null() {
+        json!({})
+    } else {
+        plan_value.clone()
+    })
+    .map_err(|e| CliError::internal(format!("DesignVersion container_plan 无效：{e}")))?;
+    let registry = load_labware_registry(db)?;
+    let plate = project_well_plate(&plan, &registry, &container_id)
+        .map_err(|issues| CliError::input(issues.join("；")))?;
+    let calculation = calculate_reagent(&plate, i.volume_per_well, i.extra_ratio);
+    let table = reagent_table(&calculation);
+    Ok(json!({
+        "plate": plate,
+        "calculation": calculation,
+        "table": table
+    }))
 }
 
 pub(crate) fn create_view_records(
@@ -4046,6 +4123,11 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(result)
         }
+        "view.data_preview" => {
+            let i: ViewDataPreview = parse_input(path)?;
+            let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
+            view_data_preview(&db, &payload)
+        }
         "view.project" => {
             let i: ViewProject = parse_input(path)?;
             let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
@@ -4916,6 +4998,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         "view.project" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","protocol_version_id"],"properties":{"project_id":{"type":"string"},"protocol_version_id":{"type":"string"},"document_id":{"type":"string"}}})
         }
+        "view.data_preview" => {
+            json!({"type":"object","additionalProperties":false,"required":["view_id"],"properties":{"view_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
+        }
         "view.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","document"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160},"document":{"type":"object"}}})
         }
@@ -5131,6 +5216,7 @@ fn tool_specs() -> Vec<Value> {
         "labware.define",
         "component.define",
         "view.project",
+        "view.data_preview",
         "view.create",
         "view.get",
         "view.revise",
@@ -5215,6 +5301,7 @@ fn tool_description(tool: &str) -> &'static str {
         "labware.define" => "注册一个不可变 LabwareProfile 版本;Design 容器计划从持久化注册表解析。",
         "component.define" => "注册一个不可变的 ComponentDefinition 版本;View 创建/修订从持久化注册表加载。",
         "view.project" => "从真实 ProtocolPreview 生成只读 ViewDocument 初始投影;不写入。",
+        "view.data_preview" => "从 ViewDocument 的 PlannedContainer 读取孔位，执行通用试剂总量计算并生成表格；不写入。",
         "view.create" => "在受控事务中保存新的统一组件 ViewDocument。",
         "view.get" => "读取 ViewDocument 元数据及全部不可变版本。",
         "view.revise" => "按 expected_revision 应用 ViewChangeSet，生成新的 ViewDocument 版本。",
