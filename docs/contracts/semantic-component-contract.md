@@ -453,7 +453,11 @@ S3-B1 · Controlled Binding Patch:
 - `semantic.search` 已限定项目、imported/current;能力兼容仍是文本匹配,不是类型化查询。
 - Typed Sample/Data/Resource Binding 尚未完整进入 Run 冻结快照。
 
-## 9. 来源
+## 9. 组件框架
+
+展示/内容/工具/流程的统一组件层见 [Unified Component Framework v1](component-framework-v1.md)。它引用现有科学 Core,不创建第二套 Design/Protocol/Run 或 Component 数据库。
+
+## 10. 来源
 
 - [Core Contract v1](core-v1.md)
 - [OperationModule v1.1](operation-module-v1.md)
