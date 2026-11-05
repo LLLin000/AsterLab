@@ -650,7 +650,35 @@ fn view_document_persists_and_revises_against_real_core_refs() {
     );
     let design_version_id = design["result"]["version"]["id"].as_str().unwrap();
 
-    let document = json!({
+    let projected = cli.run(
+        "view.project",
+        &json!({"project_id": project, "protocol_version_id": protocol_version_id}),
+    );
+    assert_eq!(
+        projected["result"]["document"]["root"]["workflow"]["nodes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let custom = json!({
+        "definition": {
+            "id": "lab.solution_calculator",
+            "version": 1,
+            "family": "tool",
+            "title": "Solution calculator",
+            "props_schema": {"type":"object"},
+            "capabilities": ["calculate"],
+            "inputs": [],
+            "outputs": [],
+            "slots": [],
+            "agent_operations": ["update"]
+        }
+    });
+    cli.run("component.define", &custom);
+
+    let mut document = json!({
         "schema_version": 2,
         "document_id": "view-doc-1",
         "revision": 1,
@@ -672,7 +700,7 @@ fn view_document_persists_and_revises_against_real_core_refs() {
                             "step": {
                                 "protocol_version_id": protocol_version_id,
                                 "scope": {"kind":"assay","assay_id":"cck8"},
-                                "step_path": "root/step"
+                                "step_path": "root/execute"
                             }
                         },
                         "props": {},
@@ -703,6 +731,49 @@ fn view_document_persists_and_revises_against_real_core_refs() {
             "value_type": "data"
         }]
     });
+    document["root"]["workflow"]["nodes"][0]["component"]["slots"]["detail"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "instance_id": "solution_tool",
+            "definition": {"id":"lab.solution_calculator","version":1},
+            "props": {},
+            "slots": {}
+        }));
+    let other_project = cli.run("project.create", &json!({"name":"other"}))["result"]["record"]
+        ["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let other_design = cli.run(
+        "design.create",
+        &json!({
+            "project_id": other_project,
+            "design": {
+                "title": "Other design", "objective": "x", "experimental_unit": "well",
+                "group_specs": [{"name":"Control","role":"control","condition":"vehicle","independent_n":1,"technical_repeats":1}],
+                "assays": []
+            }
+        }),
+    );
+    let mut cross_project = document.clone();
+    cross_project["bindings"][0]["source"]["model"]["id"] =
+        other_design["result"]["version"]["id"].clone();
+    let error = cli.run_error(
+        "view.create",
+        &json!({"project_id": project, "title": "Cross project view", "document": cross_project}),
+    );
+    assert_eq!(error["error"]["code"], "INVALID_INPUT");
+
+    let mut bad_step = document.clone();
+    bad_step["root"]["workflow"]["nodes"][0]["component"]["model_ref"]["step"]["step_path"] =
+        json!("root/does-not-exist");
+    let error = cli.run_error(
+        "view.create",
+        &json!({"project_id": project, "title": "Bad step view", "document": bad_step}),
+    );
+    assert_eq!(error["error"]["code"], "INVALID_INPUT");
+
     let created = cli.run(
         "view.create",
         &json!({"project_id": project, "title": "View", "document": document}),

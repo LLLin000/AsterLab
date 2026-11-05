@@ -1,6 +1,7 @@
 use asterlab_core::component_framework::{
-    default_registry, ComponentBindingContext, ModelPathResolution, ModelRef, ViewChangeSet,
-    ViewDocument,
+    default_registry, ComponentBindingContext, ComponentDefinition, ComponentDefinitionRef,
+    ComponentInstance, ComponentRegistry, ContextValidationMode, ModelPathResolution, ModelRef,
+    ViewChangeSet, ViewDocument, WorkflowEdge, WorkflowGraph, WorkflowNode,
 };
 use asterlab_core::operation_module::{
     ModuleBinding, ModuleOrigin, OperationModule, ParameterBinding, ParameterValueType,
@@ -533,6 +534,19 @@ struct ViewCreate {
     project_id: String,
     title: String,
     document: ViewDocument,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ComponentDefine {
+    definition: ComponentDefinition,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ViewProject {
+    project_id: String,
+    protocol_version_id: String,
+    #[serde(default)]
+    document_id: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1860,11 +1874,43 @@ fn apply_binding_changes(
 
 struct DbComponentContext<'a> {
     db: &'a Connection,
+    project_id: &'a str,
 }
 
 impl<'a> DbComponentContext<'a> {
-    fn new(db: &'a Connection) -> Self {
-        Self { db }
+    fn new(db: &'a Connection, project_id: &'a str) -> Self {
+        Self { db, project_id }
+    }
+
+    fn owned_record(&self, id: &str, kind: &str) -> Option<Value> {
+        let record = get(self.db, id).ok()?;
+        if record["kind"] != kind || record["project_id"].as_str() != Some(self.project_id) {
+            return None;
+        }
+        Some(record)
+    }
+
+    fn resolve_path(&self, value: &Value, path: &str) -> ModelPathResolution {
+        let mut current = value.clone();
+        for segment in path.split('.').filter(|segment| !segment.is_empty()) {
+            let Some(next) = current.get(segment) else {
+                return ModelPathResolution::Missing;
+            };
+            current = next.clone();
+        }
+        if current.is_null() {
+            return ModelPathResolution::Unknown;
+        }
+        let value_type = match current {
+            Value::String(_) => asterlab_core::component_framework::ComponentValueType::Text,
+            Value::Number(_) => asterlab_core::component_framework::ComponentValueType::Number,
+            Value::Bool(_) => asterlab_core::component_framework::ComponentValueType::Boolean,
+            Value::Array(_) | Value::Object(_) => {
+                asterlab_core::component_framework::ComponentValueType::Data
+            }
+            Value::Null => return ModelPathResolution::Unknown,
+        };
+        ModelPathResolution::Resolved(value_type)
     }
 }
 
@@ -1877,37 +1923,15 @@ impl ComponentBindingContext for DbComponentContext<'_> {
             ModelRef::Run { id } => (id, "run"),
             ModelRef::OperationUse { .. } => return ModelPathResolution::Unknown,
         };
-        let Ok(record) = get(self.db, id) else {
+        let Some(record) = self.owned_record(id, kind) else {
             return ModelPathResolution::Missing;
         };
-        if record["kind"] != kind {
-            return ModelPathResolution::Missing;
-        }
-        if kind != "design_version" {
-            return ModelPathResolution::Resolved(
-                asterlab_core::component_framework::ComponentValueType::Data,
-            );
-        }
-        let mut value = record["data"]["snapshot"].clone();
-        for segment in path.split('.').filter(|segment| !segment.is_empty()) {
-            let Some(next) = value.get(segment) else {
-                return ModelPathResolution::Missing;
-            };
-            value = next.clone();
-        }
-        if value.is_null() {
-            return ModelPathResolution::Unknown;
-        }
-        let value_type = match value {
-            Value::String(_) => asterlab_core::component_framework::ComponentValueType::Text,
-            Value::Number(_) => asterlab_core::component_framework::ComponentValueType::Number,
-            Value::Bool(_) => asterlab_core::component_framework::ComponentValueType::Boolean,
-            Value::Array(_) | Value::Object(_) => {
-                asterlab_core::component_framework::ComponentValueType::Data
-            }
-            Value::Null => return ModelPathResolution::Unknown,
+        let data = if kind == "design_version" {
+            &record["data"]["snapshot"]
+        } else {
+            &record["data"]
         };
-        ModelPathResolution::Resolved(value_type)
+        self.resolve_path(data, path)
     }
 
     fn operation_use_exists(
@@ -1915,11 +1939,173 @@ impl ComponentBindingContext for DbComponentContext<'_> {
         block_version_id: &str,
         step: &asterlab_core::semantic_component::QualifiedStepRef,
     ) -> bool {
-        let block = get(self.db, block_version_id);
-        let protocol = get(self.db, &step.protocol_version_id);
-        matches!(block, Ok(record) if record["kind"] == "protocol_block_version")
-            && matches!(protocol, Ok(record) if record["kind"] == "protocol_version")
+        let Some(block) = self.owned_record(block_version_id, "protocol_block_version") else {
+            return false;
+        };
+        let Some(protocol) = self.owned_record(&step.protocol_version_id, "protocol_version")
+        else {
+            return false;
+        };
+        let Some(root_block_version_id) = protocol["data"]["root_block_version_id"].as_str() else {
+            return false;
+        };
+        let bindings = serde_json::from_value::<Vec<RootParameterValue>>(
+            protocol["data"]["root_bindings"].clone(),
+        )
+        .unwrap_or_default();
+        let Ok(preview) = block_preview(self.db, root_block_version_id, &bindings) else {
+            return false;
+        };
+        let _ = block;
+        preview["steps"].as_array().is_some_and(|steps| {
+            steps.iter().any(|candidate| {
+                candidate["path"].as_str() == Some(step.step_path.as_str())
+                    && candidate["source_block_version_id"].as_str() == Some(block_version_id)
+            })
+        })
     }
+}
+
+fn load_component_registry(db: &Connection) -> Result<ComponentRegistry, CliError> {
+    let mut registry = default_registry();
+    for record in list(db, Some("component_definition"), None)? {
+        let definition: ComponentDefinition = serde_json::from_value(record["data"].clone())
+            .map_err(|e| CliError::internal(format!("ComponentDefinition 数据无效：{e}")))?;
+        registry
+            .register(definition)
+            .map_err(|error| CliError::input(error))?;
+    }
+    Ok(registry)
+}
+
+pub(crate) fn create_component_definition(
+    tx: &Transaction<'_>,
+    data: &Value,
+) -> Result<Value, CliError> {
+    let i: ComponentDefine = serde_json::from_value(data.clone())
+        .map_err(|e| CliError::input(format!("ComponentDefinition 数据结构无效：{e}")))?;
+    let mut registry = default_registry();
+    registry
+        .register(i.definition.clone())
+        .map_err(CliError::input)?;
+    let record = insert(
+        tx,
+        "component_definition",
+        None,
+        None,
+        1,
+        &serde_json::to_value(i.definition).map_err(|e| CliError::internal(e.to_string()))?,
+    )?;
+    Ok(json!({"record":record}))
+}
+
+pub(crate) fn get_view(db: &Connection, id: &str) -> Result<Value, CliError> {
+    let record = get(db, id)?;
+    if record["kind"] != "view" {
+        return Err(CliError::input("id 必须指向 view"));
+    }
+    let versions: Vec<Value> = list(db, Some("view_document"), record["project_id"].as_str())?
+        .into_iter()
+        .filter(|version| version["parent_id"] == id)
+        .collect();
+    let latest = versions
+        .iter()
+        .max_by_key(|version| version["revision"].as_i64().unwrap_or(0))
+        .cloned()
+        .ok_or_else(|| CliError::internal("View 缺少文档版本"))?;
+    Ok(json!({"view":record,"latest_version":latest,"versions":versions}))
+}
+
+pub(crate) fn revise_view_tx(
+    tx: &Transaction<'_>,
+    view_id: &str,
+    changeset: &Value,
+) -> Result<Value, CliError> {
+    let payload = json!({"view_id":view_id,"changeset":changeset});
+    revise_view_records(tx, view_id, &payload)
+}
+
+pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Value, CliError> {
+    let i: ViewProject = serde_json::from_value(data.clone())
+        .map_err(|e| CliError::input(format!("View 投影参数无效：{e}")))?;
+    let protocol = get(db, &i.protocol_version_id)?;
+    if protocol["kind"] != "protocol_version"
+        || protocol["project_id"].as_str() != Some(i.project_id.as_str())
+    {
+        return Err(CliError::input("ProtocolVersion 必须属于当前项目"));
+    }
+    let root = protocol["data"]["root_block_version_id"]
+        .as_str()
+        .ok_or_else(|| CliError::input("Protocol 没有根 BlockVersion"))?;
+    let bindings: Vec<RootParameterValue> =
+        serde_json::from_value(protocol["data"]["root_bindings"].clone()).unwrap_or_default();
+    let preview = block_preview(db, root, &bindings)?;
+    let steps = preview["steps"].as_array().cloned().unwrap_or_default();
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut previous: Option<String> = None;
+    for (index, step) in steps.iter().enumerate() {
+        let node_id = format!("step-{}", index + 1);
+        let Some(path) = step["path"].as_str() else {
+            continue;
+        };
+        let Some(block_version_id) = step["source_block_version_id"].as_str() else {
+            continue;
+        };
+        let component = ComponentInstance {
+            instance_id: node_id.clone(),
+            definition: ComponentDefinitionRef::new("operation", 1),
+            model_ref: Some(ModelRef::OperationUse {
+                block_version_id: block_version_id.into(),
+                step: asterlab_core::semantic_component::QualifiedStepRef {
+                    protocol_version_id: i.protocol_version_id.clone(),
+                    scope: asterlab_core::semantic_component::ProtocolScope::Unscoped,
+                    step_path: path.into(),
+                },
+            }),
+            props: json!({}),
+            slots: Default::default(),
+            workflow: None,
+            visual: None,
+        };
+        nodes.push(WorkflowNode {
+            node_id: node_id.clone(),
+            component: Box::new(component),
+        });
+        if let Some(previous) = previous.replace(node_id.clone()) {
+            edges.push(WorkflowEdge {
+                from: previous,
+                to: node_id,
+            });
+        }
+    }
+    let document = ViewDocument {
+        schema_version: asterlab_core::component_framework::COMPONENT_FRAMEWORK_SCHEMA_VERSION,
+        document_id: i
+            .document_id
+            .unwrap_or_else(|| format!("view-{}", i.protocol_version_id)),
+        revision: 1,
+        root: ComponentInstance {
+            instance_id: "experiment_main".into(),
+            definition: ComponentDefinitionRef::new("workflow", 1),
+            model_ref: Some(ModelRef::ProtocolVersion {
+                id: i.protocol_version_id.clone(),
+            }),
+            props: json!({}),
+            slots: Default::default(),
+            workflow: Some(WorkflowGraph { nodes, edges }),
+            visual: None,
+        },
+        bindings: vec![],
+    };
+    document
+        .validate_with_context_mode(
+            &load_component_registry(db)?,
+            &DbComponentContext::new(db, &i.project_id),
+            ContextValidationMode::AllowUnresolved,
+        )
+        .map_err(semantic_error)?;
+    Ok(json!({"document":document}))
 }
 
 pub(crate) fn create_view_records(
@@ -1936,9 +2122,13 @@ pub(crate) fn create_view_records(
     if i.document.revision != 1 {
         return Err(CliError::input("新建 ViewDocument revision 必须为 1"));
     }
-    let registry = default_registry();
+    let registry = load_component_registry(tx)?;
     i.document
-        .validate_with_context(&registry, &DbComponentContext::new(tx))
+        .validate_with_context_mode(
+            &registry,
+            &DbComponentContext::new(tx, &i.project_id),
+            ContextValidationMode::AllowUnresolved,
+        )
         .map_err(semantic_error)?;
     let view = insert(
         tx,
@@ -1990,12 +2180,17 @@ pub(crate) fn revise_view_records(
         )
         .map_err(|e| CliError::internal(e.to_string()))?;
     let (_, document) = record_document(tx, &latest_id)?;
+    let registry = load_component_registry(tx)?;
     let result = document
-        .apply_changeset(&i.changeset, &default_registry())
+        .apply_changeset(&i.changeset, &registry)
         .map_err(semantic_error_with_conflict)?;
     result
         .document
-        .validate_with_context(&default_registry(), &DbComponentContext::new(tx))
+        .validate_with_context_mode(
+            &registry,
+            &DbComponentContext::new(tx, &project_id),
+            ContextValidationMode::AllowUnresolved,
+        )
         .map_err(semantic_error)?;
     let version = insert(
         tx,
@@ -3708,6 +3903,22 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(json!({"version":version,"changes":diff,"requires_protocol_rebind":true}))
         }
+        "component.define" => {
+            require_trusted_writer(tool)?;
+            let i: ComponentDefine = parse_input(path)?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
+            let result = create_component_definition(&tx, &payload)?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(result)
+        }
+        "view.project" => {
+            let i: ViewProject = parse_input(path)?;
+            let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
+            project_view_records(&db, &payload)
+        }
         "view.create" => {
             let i: ViewCreate = parse_input(path)?;
             let tx = db
@@ -3724,21 +3935,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         }
         "view.get" => {
             let i: ViewGet = parse_input(path)?;
-            let record = get(&db, &i.id)?;
-            if record["kind"] != "view" {
-                return Err(CliError::input("id 必须指向 view"));
-            }
-            let versions: Vec<Value> =
-                list(&db, Some("view_document"), record["project_id"].as_str())?
-                    .into_iter()
-                    .filter(|version| version["parent_id"] == i.id)
-                    .collect();
-            let latest = versions
-                .iter()
-                .max_by_key(|version| version["revision"].as_i64().unwrap_or(0))
-                .cloned()
-                .ok_or_else(|| CliError::internal("View 缺少文档版本"))?;
-            Ok(json!({"view":record,"latest_version":latest,"versions":versions}))
+            get_view(&db, &i.id)
         }
         "view.revise" => {
             let i: ViewRevise = parse_input(path)?;
@@ -4388,6 +4585,9 @@ fn record_data_schema(kind: &str) -> Value {
         "catalog_review" => {
             json!({"type":"object","additionalProperties":false,"required":["review_id","subject","status","reviewer","reviewed_at","evidence_id","evidence_locator","content_digest"],"properties":{"review_id":{"type":"string"},"subject":{"type":"object","additionalProperties":false,"required":["module_id","version"],"properties":{"module_id":{"type":"string"},"version":{"type":"integer","minimum":1}}},"status":{"type":"string","enum":["research_draft","source_checked","expert_reviewed","lab_validated"]},"reviewer":{"type":"string"},"reviewed_at":{"type":"string"},"evidence_id":{"type":"string"},"evidence_locator":{"type":"string"},"content_digest":{"type":"string"}}})
         }
+        "component_definition" => {
+            json!({"type":"object","additionalProperties":true})
+        }
         "view" => {
             json!({"type":"object","additionalProperties":false,"required":["title"],"properties":{"title":{"type":"string"}}})
         }
@@ -4434,6 +4634,7 @@ fn any_record_schema() -> Value {
         "protocol_version",
         "protocol_block",
         "protocol_block_version",
+        "component_definition",
         "view",
         "view_document",
         "catalog_review",
@@ -4568,6 +4769,12 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "protocol.block.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","steps"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"summary":{"type":"string","maxLength":1000},"parameter_slots":{"type":"array","maxItems":100,"items":parameter_slot_input_schema()},"steps":{"type":"array","minItems":1,"maxItems":100,"items":protocol_step_input_schema()}}})
+        }
+        "component.define" => {
+            json!({"type":"object","additionalProperties":false,"required":["definition"],"properties":{"definition":{"type":"object"}}})
+        }
+        "view.project" => {
+            json!({"type":"object","additionalProperties":false,"required":["project_id","protocol_version_id"],"properties":{"project_id":{"type":"string"},"protocol_version_id":{"type":"string"},"document_id":{"type":"string"}}})
         }
         "view.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","document"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160},"document":{"type":"object"}}})
@@ -4780,6 +4987,8 @@ fn tool_specs() -> Vec<Value> {
         "protocol.block.list",
         "protocol.block.get",
         "protocol.block.create",
+        "component.define",
+        "view.project",
         "view.create",
         "view.get",
         "view.revise",
@@ -4861,6 +5070,8 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.block.list" => "按项目列出可复用步骤块。",
         "protocol.block.get" => "读取步骤块及其全部不可变版本。",
         "protocol.block.create" => "创建可作为完整 Protocol 或子步骤复用的版本化步骤块；只记录明确提供的操作和参数槽位。",
+        "component.define" => "注册一个不可变的 ComponentDefinition 版本;View 创建/修订从持久化注册表加载。",
+        "view.project" => "从真实 ProtocolPreview 生成只读 ViewDocument 初始投影;不写入。",
         "view.create" => "在受控事务中保存新的统一组件 ViewDocument。",
         "view.get" => "读取 ViewDocument 元数据及全部不可变版本。",
         "view.revise" => "按 expected_revision 应用 ViewChangeSet，生成新的 ViewDocument 版本。",

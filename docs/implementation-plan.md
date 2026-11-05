@@ -222,7 +222,8 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | C1.1 | Framework Hardening:Family + Definition、OperationUse、Contextual Binding、revision | 已完成 |
 | C2-A | Semantic Patch Engine:批量 Patch、Move/Connect/Bind/Remove、原子校验 | 已完成;Core 测试 |
 | C2-B1 | ViewDocument Persistence:view.create/get/revise、不可变版本、expected_revision | 已完成;CLI integration test |
-| C2-B2 | Scientific Resolver:DesignVersion/Protocol/BlockVersion/Run 只读解析 | 最小实现;OperationUse step path 精确校验待补 |
+| C2-B2 | Scientific Resolver:DesignVersion/Protocol/BlockVersion/Run 只读解析 | 已完成项目范围、OperationUse 展开校验、字段路径解析 |
+| C2-B2.1 | Registry/Persistence/Projection:component.define、view.project、自定义组件、最小 View UI | 已完成;UI 未在浏览器环境复跑 |
 | S3-B2 | Explicit Protocol Rebind:选择新 BlockVersion 更新指定 ProtocolVersion | 未开始 |
 | S4 | 组合验收:CCK-8、活死、RT-qPCR | 未开始 |
 

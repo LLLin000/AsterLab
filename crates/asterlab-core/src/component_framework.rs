@@ -52,6 +52,15 @@ pub struct ComponentDefinitionRef {
     pub version: u32,
 }
 
+impl ComponentDefinitionRef {
+    pub fn new(id: impl Into<String>, version: u32) -> Self {
+        Self {
+            id: id.into(),
+            version,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentPort {
@@ -280,6 +289,12 @@ pub enum ModelPathResolution {
     Resolved(ComponentValueType),
     Missing,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextValidationMode {
+    Strict,
+    AllowUnresolved,
 }
 
 pub trait ComponentBindingContext {
@@ -652,6 +667,15 @@ impl ViewDocument {
         registry: &ComponentRegistry,
         context: &dyn ComponentBindingContext,
     ) -> Result<(), Vec<SemanticIssue>> {
+        self.validate_with_context_mode(registry, context, ContextValidationMode::Strict)
+    }
+
+    pub fn validate_with_context_mode(
+        &self,
+        registry: &ComponentRegistry,
+        context: &dyn ComponentBindingContext,
+        mode: ContextValidationMode,
+    ) -> Result<(), Vec<SemanticIssue>> {
         let mut issues = self.validate(registry).err().unwrap_or_default();
         let mut visited = HashSet::new();
         validate_operation_refs(&self.root, context, &mut visited, &mut issues);
@@ -670,11 +694,15 @@ impl ViewDocument {
                         &binding.binding_id,
                         "model path does not exist in the supplied context",
                     )),
-                    ModelPathResolution::Unknown => issues.push(issue(
-                        "model_unknown",
-                        &binding.binding_id,
-                        "model path cannot be resolved",
-                    )),
+                    ModelPathResolution::Unknown => {
+                        if mode == ContextValidationMode::Strict {
+                            issues.push(issue(
+                                "model_unknown",
+                                &binding.binding_id,
+                                "model path cannot be resolved",
+                            ));
+                        }
+                    }
                 }
             }
         }

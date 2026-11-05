@@ -188,7 +188,22 @@ view.revise  按 expected_revision 应用 ViewChangeSet
 - 不让 Agent 直接编辑任意 JSON 路径。
 - 本阶段不声称 ViewDocument 与 Scientific Core 的跨层修改已经原子提交。
 
-## 9. 下一步
+## 9. C2-B2.1 与首个视图切片
+
+- `DbComponentContext` 携带项目范围,所有 ModelRef 检查记录类型、项目归属和精确版本。
+- OperationUse 通过真实 ProtocolPreview 展开步骤校验 `step_path + source_block_version_id`,不再只检查两个记录存在。
+- ModelPath 对 Design/Protocol/Block/Run 都执行字段路径解析;不存在为 Missing,未知为 Unknown。
+- `ContextValidationMode::AllowUnresolved` 允许草稿保存 Unknown,但 Missing/类型冲突仍拒绝。
+- `component.define` 持久化自定义 Definition;View 创建/修订从注册表加载。
+- `view.project` 从 ProtocolPreview 生成只读初始 ViewDocument。
+- `web/view.html` 提供最小交互切片:
+  - Workflow 节点与箭头;
+  - 选中节点查看 detail;
+  - Note 文本编辑通过 `ViewChangeSet` 保存;
+  - 嵌套 Workflow 进入/面包屑导航。
+- UI 目前只读/展示 + Note 编辑,不修改科学参数。
+
+## 10. 下一步
 
 C2-B Persistence & Scientific Core Bridge:
 

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>实验组件视图</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f6f8;--panel:#fff;--muted:#6f7886;--line:#dfe3e8;--accent:#5266d8;--soft:#eef0ff}
+@media(prefers-color-scheme:dark){:root{--bg:#111318;--panel:#1b1f27;--muted:#a4adbb;--line:#313846;--accent:#a8b6ff;--soft:#252a3d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:inherit;font:14px/1.5 Inter,"Segoe UI","Microsoft YaHei",sans-serif}
+.shell{min-height:100vh;display:grid;grid-template-columns:280px minmax(0,1fr)}aside{background:var(--panel);border-right:1px solid var(--line);padding:18px}main{padding:24px;min-width:0}
+h1{font-size:18px;margin:0 0 14px}h2{font-size:14px;margin:0 0 10px;color:var(--muted)}
+input,button,textarea{font:inherit;color:inherit}input,textarea{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px}button{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 10px;cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:transparent}
+.row{display:flex;gap:8px}.muted{color:var(--muted);font-size:12px}.nodes{display:flex;gap:16px;overflow:auto;padding:10px 0 20px}.node{min-width:170px;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:12px;cursor:pointer}.node.active{border-color:var(--accent);box-shadow:0 0 0 2px var(--soft)}.node strong{display:block;overflow-wrap:anywhere}.arrow{align-self:center;color:var(--muted)}
+.detail{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:16px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:12px}.card{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--bg)}.card h3{margin:0 0 6px;font-size:13px}.tag{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:1px 7px;font-size:11px;color:var(--muted)}
+.crumbs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}.crumb{background:var(--soft);border:0;border-radius:99px;padding:3px 9px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="shell">
+<aside>
+  <h1>实验组件视图</h1>
+  <div class="muted">输入 View ID 打开已保存的组件文档。</div>
+  <div class="row" style="margin:10px 0 18px"><input id="viewId" placeholder="View ID"><button class="primary" id="load">打开</button></div>
+  <div class="muted">流程仅展示视图组织；科学执行顺序仍由 Protocol 管理。</div>
+  <div id="status" class="muted" style="margin-top:18px"></div>
+</aside>
+<main>
+  <div class="crumbs" id="crumbs"></div>
+  <h2>Workflow</h2>
+  <div class="nodes" id="nodes"></div>
+  <div class="detail" id="detail"><div class="muted">选择一个步骤查看详情。</div></div>
+</main>
+</div>
+<script>
+let viewId="", data=null, node=null, stack=[];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const defName=c=>c?.definition?.id||"component";
+const nodeTitle=c=>c?.props?.label||defName(c);
+const scopeLabel=c=>c?.model_ref?.step?.scope?.assay_id?`assay: ${c.model_ref.step.scope.assay_id}`:"";
+function workflowOf(c){return c?.workflow?.nodes||[]}
+function slotsOf(c){return c?.slots||{}}
+function renderCrumbs(){ $("crumbs").innerHTML=stack.map((c,i)=>`<button class="crumb" data-i="${i}">${esc(nodeTitle(c))}</button>`).join("<span>›</span>"); $("crumbs").querySelectorAll("button").forEach(b=>b.onclick=()=>{stack=stack.slice(0,Number(b.dataset.i)+1);node=stack[stack.length-1];render()}) }
+function renderNodes(){ const nodes=node?workflowOf(node):[]; $("nodes").innerHTML=nodes.map((n,i)=>`<div class="node ${n.component.instance_id===node?.instance_id?"active":""}" data-i="${i}"><strong>${esc(nodeTitle(n.component))}</strong><div class="muted">${esc(defName(n.component))}</div><div class="tag">${esc(scopeLabel(n.component)||"step")}</div></div>`).join('<div class="arrow">→</div>'); $("nodes").querySelectorAll('.node').forEach(el=>el.onclick=()=>{node=nodes[Number(el.dataset.i)].component;stack.push(node);render()}) }
+function renderDetail(){
+  if(!node){$("detail").innerHTML='<div class="muted">选择一个步骤查看详情。</div>';return}
+  const slots=slotsOf(node); const cards=[];
+  for(const [slot,children] of Object.entries(slots)) for(const child of children){
+    if(child.definition.id==="content.note"){
+      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><textarea id="note-${esc(child.instance_id)}">${esc(child.props?.text||"")}</textarea><div class="row" style="margin-top:8px"><button data-save="${esc(child.instance_id)}">保存说明</button></div></div>`);
+    } else if(child.definition.id==="workflow"){
+      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><div class="muted">嵌套子流程 · ${workflowOf(child).length} 个步骤</div><button data-enter="${esc(child.instance_id)}" style="margin-top:8px">进入子流程</button></div>`);
+    } else {
+      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><div class="tag">${esc(slot)}</div><div class="muted">${esc(child.definition.id)}</div></div>`);
+    }
+  }
+  $("detail").innerHTML=`<h2>Step Detail · ${esc(nodeTitle(node))}</h2><div class="muted">${esc(defName(node))} · ${esc(node.instance_id)}</div><div class="cards">${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div>`;
+  $("detail").querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>{const id=b.dataset.enter;const child=Object.values(slotsOf(node)).flat().find(c=>c.instance_id===id);if(child){node=child;stack.push(child);render()}});
+  $("detail").querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>saveNote(b.dataset.save));
+}
+function render(){renderCrumbs();renderNodes();renderDetail()}
+async function load(){viewId=$("viewId").value.trim();if(!viewId)return;$("status").textContent="加载中…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}`);const j=await r.json();if(!r.ok){$("status").textContent=j.error||"加载失败";return}data=j;node=data.latest_version?.data?.root;stack=node?[node]:[];render();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`}
+async function saveNote(instanceId){
+  if(!data||!node)return;
+  const doc=data.latest_version.data; const text=$("note-"+CSS.escape(instanceId))?.value??"";
+  const changeset={changeset_id:`ui-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations:[{kind:"update_props",instance_id:instanceId,property:"text",value:text}],provenance:["view-ui"]};
+  $("status").textContent="保存中…";
+  const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
+  const j=await r.json();
+  if(!r.ok){$("status").textContent=j.error||"保存失败";return}
+  $("status").textContent="已保存"; await load();
+}
+$("load").onclick=load;
+</script>
+</body>
+</html>

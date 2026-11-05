@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 mod cli;
 const INDEX_HTML: &str = include_str!("../web/index.html");
+const VIEW_HTML: &str = include_str!("../web/view.html");
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
@@ -140,6 +141,31 @@ fn list(db: &Connection) -> Result<Vec<Value>, ApiError> {
 }
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+async fn view_page() -> Html<&'static str> {
+    Html(VIEW_HTML)
+}
+async fn get_view(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    let db = lock(&s)?;
+    let result = cli::get_view(&db, &id).map_err(ApiError::from_cli)?;
+    Ok(Json(result))
+}
+#[derive(Deserialize)]
+struct ViewReviseInput {
+    changeset: Value,
+}
+async fn revise_view(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<ViewReviseInput>,
+) -> ApiResult<Value> {
+    let mut db = lock(&s)?;
+    let tx = db
+        .transaction()
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let result = cli::revise_view_tx(&tx, &id, &input.changeset).map_err(ApiError::from_cli)?;
+    tx.commit().map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(result))
 }
 async fn health() -> Json<Value> {
     Json(json!({"ok":true,"app":"Lab Workbench","storage":"SQLite","agent":"typed-cli-v1"}))
@@ -682,6 +708,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let app = Router::new()
         .route("/", get(index))
+        .route("/view", get(view_page))
+        .route("/api/views/{id}", get(get_view))
+        .route("/api/views/{id}/revise", post(revise_view))
         .route("/api/health", get(health))
         .route("/api/state", get(get_state))
         .route("/api/designs/{id}/map", get(get_design_map))
