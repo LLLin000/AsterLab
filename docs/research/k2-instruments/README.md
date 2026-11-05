@@ -15,6 +15,7 @@
 | 荧光显微镜 | Leica DMi8 | [microscope-leica-dmi8.md](microscope-leica-dmi8.md) | 官方规格页、FAQ、产品手册;平台/对比方法/端口/检测器/载物台选项 | 物镜目录、滤光片波段、相机规格、载物台行程、培养附件参数 |
 | 离心/计数/洗板 | 5424 R / Countess 3 / BioTek 405 TS | [centrifuge-cell-counter-washer.md](centrifuge-cell-counter-washer.md) | 三份记录;数值均标 search-summary-only | 转子/适配器、量程、manifold/残留需逐页复核 |
 | qPCR/流式/分光/混匀 | QS5 / FACSCanto II / NanoDrop One / ThermoMixer C | [qpcr-flow-spectro-thermomixer.md](qpcr-flow-spectro-thermomixer.md) | 四份记录;平台 vs 配置分开 | 通道/滤光片/体积/软件/加热块需逐页复核 |
+| 自动液体处理 | Opentrons Flex/OT-2、Hamilton STAR | [automated-liquid-handling.md](automated-liquid-handling.md) | 平台/配置分开;部分来源摘要 | labware/吸头/deck/校准需逐项确认 |
 
 ## 统一结论
 

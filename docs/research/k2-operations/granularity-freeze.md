@@ -84,6 +84,10 @@ Custom Step 保留:
 
 结论:同一套四层结构可以描述五类场景;不能表达的部分集中到数量守恒、谱系生成、条件执行、状态类型、损失、跨字段校验、方法对照、时间锚点。
 
+## 5.1 具体实验的复用优先流程
+
+新增实验记录必须附 Reuse Map:先列已有的 Atomic Operation/Composite/Method,再列“参数化复用/变体/新操作/Custom Step/ToolAction”。只有不能由已有操作+参数表达时,才新建原子操作。详见 [record-standard §1.5](../record-standard.md#15-具体实验的拆分流程必须先查复用)。
+
 ## 6. 冻结规则
 
 1. 新候选先过四问;失败进 Composite/Method/Assay/Custom,不硬塞 Atomic。

@@ -163,6 +163,7 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | K2.2 | 五操作横向契约验证（转移、分样、孵育、洗涤、吸光度） | 五份结构草案 + 6 个 surface 测试 + [横向矩阵](research/k2-operations/k2.2-cross-operation-matrix.md)；仍未进入 K3 |
 | K2.3 | 操作/仪器覆盖与记录规范 | [记录规范](research/record-standard.md) + [覆盖账本](research/coverage-ledger.md)；新增细胞、免疫、分子、流式、生物膜与仪器记录，全部 research_draft |
 | K2.4 | 粒度冻结 | [粒度冻结](research/k2-operations/granularity-freeze.md)、[候选审查](research/k2-operations/granularity-candidates.md)、[五场景](research/k2-operations/granularity-scenarios.md)；确认 biofilm 是 assay model/method template，不直接生成 OperationModule |
+| K2.5 | 扩展范围冻结 | 仅体外/细胞/微生物/分子湿实验；临床、动物在体、统计/生物信息/图像分析暂不纳入 |
 | K3 | Catalog Compiler：把审核过的目录编译成 `ProtocolBlockVersion` / `ProtocolVersion` | 未开始 |
 | K4 | L929 CCK-8 / LIVE-DEAD 端到端测试；不补值、不串变体 | 未开始 |
 | K5 | 接入 Slint 方法选择、步骤插入、参数编辑、预览 | 未开始；K1–K4 通过后才允许 |

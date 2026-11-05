@@ -17,12 +17,13 @@
 11. [协议知识、步骤模型与相关项目](2026-11-05-protocol-knowledge-and-related-projects.md) — 常见实验的步骤/目的/对照/失败模式、协议软件与标准参照、产品边界。
 12. [实验设计契约与步骤块](2026-11-03-cellplanner-contract-modules.md) — Protocol/步骤块复用、参数、Agent 写 Protocol 的契约。
 13. [实验设计模型](2026-11-02-cellplanner-experiment-design-model.md) — 科学设计模型、n、Assay、对照、样本及 CLI 契约边界。
-14. [操作与仪器记录规范](record-standard.md) — OperationRecord / InstrumentRecord 的必填结构、证据等级、UNKNOWN 分类、JSON 转换与审核清单；后续所有覆盖记录按此执行。
-15. [覆盖账本](coverage-ledger.md) — 操作/仪器覆盖、来源强度、JSON 覆盖与下一批优先级；文件数量不等于可验收。
-16. [粒度冻结](k2-operations/granularity-freeze.md) — 最小可审计科学操作的四条判定、四层结构、Custom Step 与争议裁决。
-17. [粒度与生物膜](k2-operations/granularity-and-biofilm.md) — 生物膜不是单一 OperationModule;CV/CFU 是方法模板。
-18. [粒度候选](k2-operations/granularity-candidates.md) / [独立复审](k2-operations/granularity-candidate-review.md) / [五场景](k2-operations/granularity-scenarios.md) — 约 18–20 个候选的四维审查与五类实验组合验证。
-19. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
+14. [操作与仪器记录规范](record-standard.md) — OperationRecord / InstrumentRecord 的必填结构、实验来源优先级、证据等级、UNKNOWN 分类、JSON 转换与审核清单;本轮仅限体外/细胞/微生物/分子湿实验。
+15. [Protocol 来源清单](protocol-sources.md) — protocols.io、Bio-protocol、Nature Protocols、JoVE、Current Protocols、CSH、ASM 等仓库的用途与访问注意。
+16. [覆盖账本](coverage-ledger.md) — 操作/仪器覆盖、来源强度、JSON 覆盖与下一批优先级；文件数量不等于可验收。
+17. [粒度冻结](k2-operations/granularity-freeze.md) — 最小可审计科学操作的四条判定、四层结构、Custom Step 与争议裁决。
+18. [粒度与生物膜](k2-operations/granularity-and-biofilm.md) — 生物膜不是单一 OperationModule;CV/CFU 是方法模板。
+19. [粒度候选](k2-operations/granularity-candidates.md) / [独立复审](k2-operations/granularity-candidate-review.md) / [五场景](k2-operations/granularity-scenarios.md) — 约 18–20 个候选的四维审查与五类实验组合验证。
+20. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
 
 ## 证据标签
 

@@ -4,6 +4,7 @@
 - 状态:研究覆盖账本;所有条目仍为 `research_draft`,没有 `SourceChecked`。
 - 规范:[record-standard.md](record-standard.md)
 - 用途:知道“哪些对象有记录、来源强度如何、是否已有 JSON、下一步缺什么”,避免把文件数量当成覆盖完成。
+- 本轮边界:体外/细胞/微生物/分子湿实验;临床、动物在体、统计/生物信息/图像分析不在本轮。原始读数可记录,分析/结论不进入操作模块。
 
 ## 1. 操作记录
 
@@ -25,7 +26,9 @@
 | 流式 | [flow-cytometry-and-immunofluorescence.md](k2-operations/flow-cytometry-and-immunofluorescence.md) | T1–T5 直接读;B1/F1 摘要 | 未单独 JSON | panel/补偿/FMO/分选 |
 | 免疫荧光(固定) | 同上 | T1–T5 直接读 | 未单独 JSON | 抗体/通道/曝光/配置 |
 | 生物膜 CV/CFU | [biofilm-cv-cfu.md](k2-operations/biofilm-cv-cfu.md) | S1–S3 直接读;S4/S5 摘要 | **不应作为单独 JSON** | 是 assay model + 两个 method template;见 [粒度判断](k2-operations/granularity-and-biofilm.md) |
-| 划痕/伤口愈合 | 现有协议研究 | 未单独成册 | 无 | 同视野 ID、增殖混杂、时间锚点 |
+| 划痕/伤口愈合 | [wound-healing-and-migration.md](k2-operations/wound-healing-and-migration.md) | P1–P4 直接读;部分 blocked | 无 | 同视野 ID、增殖混杂、时间锚点;方法模板 |
+| 活力/细胞毒性 | [viability-and-cytotoxicity-methods.md](k2-operations/viability-and-cytotoxicity-methods.md) | S1–S3/S6–S9 直接读;S4/S5 摘要 | 无 | CCK-8/LDH/LIVE-DEAD 方法绑定;通用读数已有 |
+| 3D/类器官 | [three-d-and-organoid-operations.md](k2-operations/three-d-and-organoid-operations.md) | S1–S10 摘要/未读 | 无 | 基质/球体/换液;无稳定原子操作;需实验室 protocol |
 
 ## 2. 仪器记录
 
@@ -42,21 +45,29 @@
 | 流式 FACSCanto II | 同上 | T1–T5 直接读;部分摘要 | 无 | 激光/滤光片/panel/分选 |
 | 分光光度计 NanoDrop One | 同上 | 摘要 | 无 | 微量/检测限/blank |
 | 恒温混匀仪 ThermoMixer C | 同上 | 摘要;手册 403 | 无 | 温度/转速/加热块 |
+| 自动液体处理 | [automated-liquid-handling.md](k2-instruments/automated-liquid-handling.md) | 平台手册/部分摘要 | 无 | 配置/labware/tip/deck/校准 |
 
 ## 3. 覆盖判断
 
-- **操作覆盖**:主要细胞培养、分离、免疫、分子、成像、流式、生物膜；仍未单独成册:划痕/伤口愈合、动物/临床、3D/类器官。
-- **仪器覆盖**:移液、培养、读板、显微、离心、计数、洗板、qPCR、流式、分光、混匀；仍未覆盖:自动化液体处理、成像分析软件、质谱/测序。
+- **操作覆盖**:主要细胞培养、分离、免疫、分子、成像、流式、生物膜、划痕、活力/毒性、3D/类器官；动物/临床与图像分析/统计按本轮范围排除。
+- **仪器覆盖**:移液、培养、读板、显微、离心、计数、洗板、qPCR、流式、分光、混匀、自动液体处理；仍未覆盖:成像分析软件、质谱/测序。
 - **JSON 覆盖**:只有 5 个操作 + 2 个仪器 profile;其余仍是研究记录。
 - **证据强度**:多数仪器 5424R/Countess/405TS 是 search-summary-only;不能因为“有文件”就认为可核验。
 - **审核**:没有 `ReviewRecord`;没有第二人逐字段复核;没有 `SourceChecked`。
+
+## 3.1 不在本轮范围
+
+- 临床研究/受试者/流行病学。
+- 动物在体实验(需单独立项,不能套用孔板操作)。
+- 图像分割、统计检验、生物信息流程、结果解释。
+- 这些可以引用原始读数,但不是 OperationModule。
 
 ## 4. 下一批优先级
 
 1. 将 5424R/Countess/405TS 的来源从摘要升级为手册逐页。
 2. 为荧光成像、细胞传代、计数、离心建立独立 JSON 草稿(仍 research_draft)。
 3. 把 ELISA/WB/qPCR 的通用操作与 Assay 绑定分开,避免方法记录变成新运行时。
-4. 划痕/伤口愈合与动物/临床单独立项,不硬套孔板模型。
+4. 划痕/伤口愈合已建方法模板;动物/临床与图像分析/统计按本轮范围排除,不硬套孔板模型。
 5. 所有升级前先做第二人复核;AI 预审不算。
 
 ## 5. 账本维护规则

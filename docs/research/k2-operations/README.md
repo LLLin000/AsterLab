@@ -18,6 +18,9 @@
 | qPCR / 核酸 QC | [qpcr-and-nucleic-acid-qc.md](qpcr-and-nucleic-acid-qc.md) | MIQE 直接读;部分摘要 | 提取、RT、qPCR 分开;不写通用循环程序 |
 | 流式 / 免疫荧光 | [flow-cytometry-and-immunofluorescence.md](flow-cytometry-and-immunofluorescence.md) | T1–T5 直接读;部分摘要 | 分析与分选分开;平台能力不等于实际配置 |
 | 生物膜 CV/CFU | [biofilm-cv-cfu.md](biofilm-cv-cfu.md) | S1–S3 直接读;S4/S5 摘要 | CV 生物量与 CFU 活菌不可互换 |
+| 划痕/Transwell | [wound-healing-and-migration.md](wound-healing-and-migration.md) | P1–P4 直接读 | 方法模板;原始图像为终点,分析不在范围 |
+| 活力/细胞毒性 | [viability-and-cytotoxicity-methods.md](viability-and-cytotoxicity-methods.md) | S1–S3/S6–S9 直接读;S4/S5 摘要 | CCK-8/LDH/LIVE-DEAD 方法绑定,不重定义通用操作 |
+| 3D/类器官 | [three-d-and-organoid-operations.md](three-d-and-organoid-operations.md) | S1–S10 摘要/未读 | 基质/球体/换液;不硬套 2D 孔板;需实验室 protocol |
 
 逐字段证据矩阵见 [field-evidence-matrix.md](field-evidence-matrix.md)。两份 K2.1 JSON 草稿在 `catalog/operations/` 与 `catalog/instruments/`;它们通过结构校验,但不能产生 `Compatible`。AI 预审记录见 [k2.1-review.md](k2.1-review.md);它不是第二人科学审核。K2.2 五操作横向矩阵见 [k2.2-cross-operation-matrix.md](k2.2-cross-operation-matrix.md)。当前 catalog 另有 `sample-aliquot`、`incubation`、`washing` 三份 JSON 草稿,全部仍为 research_draft。
 
