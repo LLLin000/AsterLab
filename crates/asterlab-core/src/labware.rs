@@ -557,14 +557,19 @@ fn position_is_valid(profile: &LabwareProfile, position: &str) -> bool {
     let Some(row_char) = chars.next() else {
         return false;
     };
-    if !row_char.is_ascii_alphabetic() {
+    // Canonical form only: uppercase row + canonical decimal column.
+    // a1 / A01 must be normalized by the caller or rejected.
+    if !row_char.is_ascii_uppercase() {
         return false;
     }
-    let row = row_char.to_ascii_uppercase() as u64;
+    let row = row_char as u64;
     if !(b'A' as u64..b'A' as u64 + rows).contains(&row) {
         return false;
     }
     let suffix = chars.as_str();
+    if suffix.is_empty() || suffix.starts_with('0') {
+        return false;
+    }
     suffix
         .parse::<u64>()
         .ok()

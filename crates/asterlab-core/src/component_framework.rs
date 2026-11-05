@@ -838,7 +838,7 @@ impl ViewDocument {
     ) -> Result<(), Vec<SemanticIssue>> {
         let mut issues = self.validate(registry).err().unwrap_or_default();
         let mut visited = HashSet::new();
-        validate_operation_refs(&self.root, context, &mut visited, &mut issues);
+        validate_operation_refs(&self.root, context, mode, &mut visited, &mut issues);
         for binding in &self.bindings {
             if let BindingSource::Model(path) = &binding.source {
                 match context.resolve_model_path(&path.model, &path.path) {
@@ -1169,6 +1169,7 @@ fn validate_model_ref(model: &ModelRef, path: &str, issues: &mut Vec<SemanticIss
 fn validate_operation_refs(
     instance: &ComponentInstance,
     context: &dyn ComponentBindingContext,
+    mode: ContextValidationMode,
     visited: &mut HashSet<String>,
     issues: &mut Vec<SemanticIssue>,
 ) {
@@ -1188,14 +1189,37 @@ fn validate_operation_refs(
             ));
         }
     }
+    if let Some(ModelRef::PlannedContainer {
+        design_version_id,
+        container_id,
+    }) = &instance.model_ref
+    {
+        match context.resolve_model_path(&instance.model_ref.clone().unwrap(), "") {
+            ModelPathResolution::Missing => issues.push(issue(
+                "planned_container_missing",
+                &instance.instance_id,
+                "planned container does not resolve in the supplied context",
+            )),
+            ModelPathResolution::Unknown if mode == ContextValidationMode::Strict => {
+                issues.push(issue(
+                    "planned_container_unknown",
+                    &instance.instance_id,
+                    "planned container cannot be resolved",
+                ))
+            }
+            _ => {
+                let _ = (design_version_id, container_id);
+            }
+        }
+    }
     for children in instance.slots.values() {
         for child in children {
-            validate_operation_refs(child, context, visited, issues);
+            validate_operation_refs(child, context, mode, visited, issues);
         }
     }
     if let Some(workflow) = &instance.workflow {
         for node in &workflow.nodes {
-            validate_operation_refs(&node.component, context, visited, issues);
+            validate_operation_refs(&node.component, context, mode, visited, issues);
         }
     }
 }

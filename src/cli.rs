@@ -2050,7 +2050,7 @@ pub(crate) fn create_labware_profile(
 ) -> Result<Value, CliError> {
     let i: LabwareDefine = serde_json::from_value(data.clone())
         .map_err(|e| CliError::input(format!("LabwareProfile 数据结构无效：{e}")))?;
-    let mut registry = default_labware_registry();
+    let mut registry = load_labware_registry(tx)?;
     registry
         .register(i.profile.clone())
         .map_err(CliError::input)?;

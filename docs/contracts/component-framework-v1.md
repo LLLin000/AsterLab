@@ -203,9 +203,11 @@ C3-1 计划容器:
 - `PlannedContainer`、`PositionAssignment`、`AssignedTarget`、`ContainerPlacement`。
 - `ContainerPlan` 校验包含环、重复 child、重复位置、重复分配、多个 primary target、非法/Unicode 孔位。
 - `ContainerPlacement` 区分 compatible / incompatible / unknown;unknown 可以保存草案,不能宣称已通过物理兼容。
+- 孔位采用规范形式 `A1`;`a1` / `A01` 拒绝,不参与去重。
+- 组件实例的 `ModelRef::PlannedContainer` 会接受上下文存在性检查。
 - DesignVersion 增加 `container_plan`,并可通过 `design.revise` 替换生成新版本。
 - Run 创建时把该计划冻结进 run data。
-- `labware.define` 持久化版本化 Profile;Design 校验从持久化 Registry 加载。
+- `labware.define` 在事务内加载完整 Registry,拒绝同 ID+Version 不同内容;Design 校验从持久化 Registry 加载。
 - `ModelRef::PlannedContainer { design_version_id, container_id }` 可精确引用同一计划容器。
 - Run 数据同时冻结 `container_plan` 和 `labware_profiles` 完整 Profile 内容,避免 Registry 后续变化导致历史解释漂移。
 - 默认 Profile 为 `research_draft`,物理字段未核实;不提供推测体积/表面/兼容性。
@@ -213,6 +215,7 @@ C3-1 计划容器:
 剩余:
 
 - `OperationUse.scope` 仍未与真实 Assay scope 精确比较。
+- C3-3 的 Table/Calculator/WellPlate 数据闭环尚未实现。
 - Profile 尚无明确的 built_in/imported/local 来源字段;目前由 review_status 与记录归属间接表达。
 - `Generic Table → Calculator` 真实数据联动未实现。
 - Generic Table / Calculator / WellPlate 完整数据适配未实现。
