@@ -774,6 +774,16 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         .as_array_mut()
         .unwrap()
         .push(json!({
+            "instance_id": "planned_plate_copy",
+            "definition": {"id":"lab.well_plate","version":1},
+            "model_ref": {"kind":"planned_container","design_version_id":design_version_id,"container_id":"plate-1"},
+            "props": {},
+            "slots": {}
+        }));
+    document["root"]["workflow"]["nodes"][0]["component"]["slots"]["detail"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
             "instance_id": "planned_plate_2",
             "definition": {"id":"lab.well_plate","version":1},
             "model_ref": {"kind":"planned_container","design_version_id":design_version_id,"container_id":"plate-2"},
@@ -881,6 +891,17 @@ fn view_document_persists_and_revises_against_real_core_refs() {
             "extra_ratio": 0.1
         }),
     );
+    let copy = cli.run(
+        "view.data_preview",
+        &json!({
+            "view_id": view_id,
+            "instance_id": "planned_plate_copy",
+            "calculator_instance_id": "reagent_calculator",
+            "extra_ratio": 0.1
+        }),
+    );
+    assert_eq!(copy["result"]["plate"]["container_id"], "plate-1");
+    assert_eq!(copy["result"]["plate"]["positions"][0]["position_id"], "A1");
     assert_eq!(second["result"]["plate"]["container_id"], "plate-2");
     assert_eq!(
         second["result"]["plate"]["positions"][0]["position_id"],
