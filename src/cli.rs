@@ -1,4 +1,6 @@
-use asterlab_core::component_data::{calculate_reagent, project_well_plate, reagent_table};
+use asterlab_core::component_data::{
+    calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
+};
 use asterlab_core::component_framework::{
     default_registry, ComponentBindingContext, ComponentDefinition, ComponentDefinitionRef,
     ComponentInstance, ComponentRegistry, ContextValidationMode, ModelPathResolution, ModelRef,
@@ -18,6 +20,7 @@ use asterlab_core::protocol_preview::{
 };
 use asterlab_core::semantic_catalog::{compile_operation_module, CompilePolicy};
 use asterlab_core::semantic_changeset::ChangeSet;
+use asterlab_core::semantic_component::ProtocolScope;
 use asterlab_core::semantic_query::{assess_block_patch, inspect_block, search_modules};
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -557,6 +560,7 @@ struct ComponentDefine {
 struct ViewProject {
     project_id: String,
     protocol_version_id: String,
+    scope: ProtocolScope,
     #[serde(default)]
     document_id: Option<String>,
 }
@@ -564,6 +568,7 @@ struct ViewProject {
 #[serde(deny_unknown_fields)]
 struct ViewDataPreview {
     view_id: String,
+    instance_id: String,
     #[serde(default)]
     volume_per_well: Option<f64>,
     #[serde(default)]
@@ -1937,6 +1942,46 @@ impl<'a> DbComponentContext<'a> {
         Self { db, project_id }
     }
 
+    fn scope_exists(&self, protocol_version_id: &str, scope: &ProtocolScope) -> bool {
+        match scope {
+            ProtocolScope::Unscoped => true,
+            ProtocolScope::Assay { assay_id } => {
+                list(self.db, Some("design_version"), Some(self.project_id))
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .any(|version| {
+                        version["data"]["snapshot"]["assays"]
+                            .as_array()
+                            .is_some_and(|assays| {
+                                assays.iter().any(|assay| {
+                                    assay["id"].as_str() == Some(assay_id.as_str())
+                                        && assay["protocol_version_id"].as_str()
+                                            == Some(protocol_version_id)
+                                })
+                            })
+                    })
+            }
+            ProtocolScope::PlannedOutput { planned_output_id } => {
+                list(self.db, Some("design_version"), Some(self.project_id))
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .any(|version| {
+                        version["data"]["snapshot"]["planned_outputs"]
+                            .as_array()
+                            .is_some_and(|outputs| {
+                                outputs.iter().any(|output| {
+                                    output["id"].as_str() == Some(planned_output_id.as_str())
+                                        && output["protocol_version_id"].as_str()
+                                            == Some(protocol_version_id)
+                                })
+                            })
+                    })
+            }
+        }
+    }
+
     fn owned_record(&self, id: &str, kind: &str) -> Option<Value> {
         let record = get(self.db, id).ok()?;
         if record["kind"] != kind || record["project_id"].as_str() != Some(self.project_id) {
@@ -2015,6 +2060,9 @@ impl ComponentBindingContext for DbComponentContext<'_> {
         block_version_id: &str,
         step: &asterlab_core::semantic_component::QualifiedStepRef,
     ) -> bool {
+        if !self.scope_exists(&step.protocol_version_id, &step.scope) {
+            return false;
+        }
         let Some(block) = self.owned_record(block_version_id, "protocol_block_version") else {
             return false;
         };
@@ -2156,7 +2204,7 @@ pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Valu
                 block_version_id: block_version_id.into(),
                 step: asterlab_core::semantic_component::QualifiedStepRef {
                     protocol_version_id: i.protocol_version_id.clone(),
-                    scope: asterlab_core::semantic_component::ProtocolScope::Unscoped,
+                    scope: i.scope.clone(),
                     step_path: path.into(),
                 },
             }),
@@ -2205,8 +2253,9 @@ pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Valu
     Ok(json!({"document":document}))
 }
 
-fn find_planned_container(value: &Value) -> Option<(String, String)> {
-    if let Some(model) = value.get("model_ref") {
+fn find_planned_container(value: &Value, instance_id: &str) -> Option<(String, String)> {
+    if value.get("instance_id").and_then(Value::as_str) == Some(instance_id) {
+        let model = value.get("model_ref")?;
         if model.get("kind").and_then(Value::as_str) == Some("planned_container") {
             return Some((
                 model.get("design_version_id")?.as_str()?.to_owned(),
@@ -2217,7 +2266,7 @@ fn find_planned_container(value: &Value) -> Option<(String, String)> {
     if let Some(slots) = value.get("slots").and_then(Value::as_object) {
         for children in slots.values().filter_map(Value::as_array) {
             for child in children {
-                if let Some(found) = find_planned_container(child) {
+                if let Some(found) = find_planned_container(child, instance_id) {
                     return Some(found);
                 }
             }
@@ -2230,7 +2279,7 @@ fn find_planned_container(value: &Value) -> Option<(String, String)> {
     {
         for node in nodes {
             if let Some(component) = node.get("component") {
-                if let Some(found) = find_planned_container(component) {
+                if let Some(found) = find_planned_container(component, instance_id) {
                     return Some(found);
                 }
             }
@@ -2244,7 +2293,9 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
         .map_err(|e| CliError::input(format!("View 数据预览参数无效：{e}")))?;
     let view = get_view(db, &i.view_id)?;
     let document = &view["latest_version"]["data"];
-    let Some((design_version_id, container_id)) = find_planned_container(&document["root"]) else {
+    let Some((design_version_id, container_id)) =
+        find_planned_container(&document["root"], &i.instance_id)
+    else {
         return Err(CliError::input(
             "ViewDocument 中没有引用 PlannedContainer 的 WellPlate 组件",
         ));
@@ -2263,7 +2314,23 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
     let registry = load_labware_registry(db)?;
     let plate = project_well_plate(&plan, &registry, &container_id)
         .map_err(|issues| CliError::input(issues.join("；")))?;
-    let calculation = calculate_reagent(&plate, i.volume_per_well, i.extra_ratio);
+    let mut calculation = calculate_reagent(&plate, i.volume_per_well, i.extra_ratio);
+    if let (Some(volume), Some(ratio)) = (i.volume_per_well, i.extra_ratio) {
+        let invocation = run_reagent_tool(&plate, volume, ratio).map_err(|issues| {
+            CliError::input(
+                issues
+                    .into_iter()
+                    .map(|issue| format!("{}: {}", issue.code, issue.message))
+                    .collect::<Vec<_>>()
+                    .join("；"),
+            )
+        })?;
+        calculation.total_volume = invocation.outputs["total_volume"].as_f64();
+        calculation.tool_action = Some(format!(
+            "{}@{}",
+            invocation.action_id, invocation.action_version
+        ));
+    }
     let table = reagent_table(&calculation);
     Ok(json!({
         "plate": plate,
@@ -4112,6 +4179,23 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(result)
         }
+        "component.list" => {
+            let _: EmptyInput = parse_input(path)?;
+            let registry = load_component_registry(&db)?;
+            let definitions = registry
+                .definitions()
+                .map(|definition| {
+                    json!({
+                        "id": definition.id,
+                        "version": definition.version,
+                        "family": definition.family,
+                        "title": definition.title,
+                        "implemented": registry.is_implemented(&definition.id, definition.version)
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({"definitions":definitions}))
+        }
         "component.define" => {
             require_trusted_writer(tool)?;
             let i: ComponentDefine = parse_input(path)?;
@@ -4989,6 +5073,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         "protocol.block.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","steps"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"summary":{"type":"string","maxLength":1000},"parameter_slots":{"type":"array","maxItems":100,"items":parameter_slot_input_schema()},"steps":{"type":"array","minItems":1,"maxItems":100,"items":protocol_step_input_schema()}}})
         }
+        "component.list" => {
+            json!({"type":"object","additionalProperties":false,"properties":{}})
+        }
         "labware.define" => {
             json!({"type":"object","additionalProperties":false,"required":["profile"],"properties":{"profile":{"type":"object"}}})
         }
@@ -4996,10 +5083,10 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["definition"],"properties":{"definition":{"type":"object"}}})
         }
         "view.project" => {
-            json!({"type":"object","additionalProperties":false,"required":["project_id","protocol_version_id"],"properties":{"project_id":{"type":"string"},"protocol_version_id":{"type":"string"},"document_id":{"type":"string"}}})
+            json!({"type":"object","additionalProperties":false,"required":["project_id","protocol_version_id","scope"],"properties":{"project_id":{"type":"string"},"protocol_version_id":{"type":"string"},"scope":{"type":"object"},"document_id":{"type":"string"}}})
         }
         "view.data_preview" => {
-            json!({"type":"object","additionalProperties":false,"required":["view_id"],"properties":{"view_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["view_id","instance_id"],"properties":{"view_id":{"type":"string"},"instance_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
         }
         "view.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","document"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160},"document":{"type":"object"}}})
@@ -5214,6 +5301,7 @@ fn tool_specs() -> Vec<Value> {
         "protocol.block.get",
         "protocol.block.create",
         "labware.define",
+        "component.list",
         "component.define",
         "view.project",
         "view.data_preview",
@@ -5262,6 +5350,7 @@ fn tool_writes(tool: &str) -> bool {
             | "protocol.block.list"
             | "protocol.block.get"
             | "protocol.block.preview"
+            | "component.list"
             | "semantic.inspect"
             | "semantic.search"
             | "semantic.validate"
@@ -5298,6 +5387,7 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.block.list" => "按项目列出可复用步骤块。",
         "protocol.block.get" => "读取步骤块及其全部不可变版本。",
         "protocol.block.create" => "创建可作为完整 Protocol 或子步骤复用的版本化步骤块；只记录明确提供的操作和参数槽位。",
+        "component.list" => "列出组件定义及是否已实现;未实现定义只能作为 catalog-only 查看。",
         "labware.define" => "注册一个不可变 LabwareProfile 版本;Design 容器计划从持久化注册表解析。",
         "component.define" => "注册一个不可变的 ComponentDefinition 版本;View 创建/修订从持久化注册表加载。",
         "view.project" => "从真实 ProtocolPreview 生成只读 ViewDocument 初始投影;不写入。",

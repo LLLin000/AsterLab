@@ -4,6 +4,9 @@
 //! derived data; they never write back into DesignVersion or Run.
 
 use crate::labware::{ContainerPlan, LabwareRegistry, PositionAssignment};
+use crate::semantic_tool::{
+    run_pure, PureTool, ToolActionSpec, ToolError, ToolInvocation, ToolSideEffects, ToolTrust,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -26,6 +29,8 @@ pub struct ReagentCalculation {
     pub total_volume: Option<f64>,
     pub unresolved: Vec<String>,
     pub provenance: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -85,6 +90,7 @@ pub fn calculate_reagent(
             total_volume: None,
             unresolved,
             provenance: vec![format!("container:{}", plate.container_id)],
+            tool_action: None,
         };
     };
     if !volume.is_finite() || volume < 0.0 {
@@ -97,9 +103,22 @@ pub fn calculate_reagent(
             total_volume: None,
             unresolved,
             provenance: vec![format!("container:{}", plate.container_id)],
+            tool_action: None,
         };
     }
-    let ratio = extra_ratio.unwrap_or(0.0);
+    let Some(ratio) = extra_ratio else {
+        unresolved.push("extra_ratio".into());
+        return ReagentCalculation {
+            state: "unresolved".into(),
+            assigned_positions,
+            volume_per_position: Some(volume),
+            extra_ratio: None,
+            total_volume: None,
+            unresolved,
+            provenance: vec![format!("container:{}", plate.container_id)],
+            tool_action: None,
+        };
+    };
     if !ratio.is_finite() || ratio < 0.0 {
         unresolved.push("invalid_extra_ratio".into());
         return ReagentCalculation {
@@ -110,6 +129,7 @@ pub fn calculate_reagent(
             total_volume: None,
             unresolved,
             provenance: vec![format!("container:{}", plate.container_id)],
+            tool_action: None,
         };
     }
     let total = assigned_positions as f64 * volume * (1.0 + ratio);
@@ -124,7 +144,77 @@ pub fn calculate_reagent(
             format!("container:{}", plate.container_id),
             "formula:positions*volume*(1+extra_ratio)".into(),
         ],
+        tool_action: Some("tool.reagent_total@1".into()),
     }
+}
+
+pub const REAGENT_TOOL_ID: &str = "tool.reagent_total";
+pub const REAGENT_TOOL_VERSION: &str = "1";
+
+pub fn reagent_tool_spec() -> ToolActionSpec {
+    ToolActionSpec {
+        action_id: REAGENT_TOOL_ID.into(),
+        version: REAGENT_TOOL_VERSION.into(),
+        input_schema: json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["assigned_positions","volume_per_position","extra_ratio"],
+            "properties":{
+                "assigned_positions":{"type":"integer","minimum":1},
+                "volume_per_position":{"type":"number","minimum":0},
+                "extra_ratio":{"type":"number","minimum":0}
+            }
+        }),
+        output_schema: json!({
+            "type":"object",
+            "required":["total_volume"],
+            "properties":{"total_volume":{"type":"number"}}
+        }),
+        side_effects: ToolSideEffects::Pure,
+        implementation_source: "core:component_data:reagent_total".into(),
+        trust: ToolTrust::Trusted,
+        requires_confirmation: false,
+    }
+}
+
+struct ReagentTool {
+    spec: ToolActionSpec,
+}
+
+impl PureTool for ReagentTool {
+    fn spec(&self) -> &ToolActionSpec {
+        &self.spec
+    }
+
+    fn execute(&self, inputs: &Value) -> Result<Value, ToolError> {
+        let positions = inputs["assigned_positions"]
+            .as_u64()
+            .ok_or_else(|| ToolError::new("positions", "assigned_positions is required"))?;
+        let volume = inputs["volume_per_position"]
+            .as_f64()
+            .ok_or_else(|| ToolError::new("volume", "volume_per_position is required"))?;
+        let ratio = inputs["extra_ratio"]
+            .as_f64()
+            .ok_or_else(|| ToolError::new("ratio", "extra_ratio is required"))?;
+        Ok(json!({"total_volume": positions as f64 * volume * (1.0 + ratio)}))
+    }
+}
+
+pub fn run_reagent_tool(
+    plate: &WellPlateProjection,
+    volume_per_position: f64,
+    extra_ratio: f64,
+) -> Result<ToolInvocation, Vec<ToolError>> {
+    let inputs = json!({
+        "assigned_positions": plate.positions.len() as u64,
+        "volume_per_position": volume_per_position,
+        "extra_ratio": extra_ratio
+    });
+    run_pure(
+        &ReagentTool { spec: reagent_tool_spec() },
+        "reagent-total",
+        inputs,
+    )
 }
 
 pub fn reagent_table(calc: &ReagentCalculation) -> TableProjection {

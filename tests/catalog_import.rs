@@ -644,7 +644,7 @@ fn view_document_persists_and_revises_against_real_core_refs() {
                 "objective": "test",
                 "experimental_unit": "well",
                 "group_specs": [{"name":"Control","role":"control","condition":"vehicle","independent_n":3,"technical_repeats":1}],
-                "assays": [{"id":"cck8","title":"CCK-8","endpoint":"OD450","method":"CCK-8","unit":"absorbance","group_ids":[],"timepoints":[]}],
+                "assays": [{"id":"cck8","title":"CCK-8","endpoint":"OD450","method":"CCK-8","unit":"absorbance","group_ids":[],"timepoints":[],"protocol_version_id":protocol_version_id}],
                 "container_plan": {
                     "containers": [{"id":"plate-1","profile_ref":{"id":"labware.cell_culture_96","version":1},"label":"Plate 1"}],
                     "assignments": [{"container_id":"plate-1","position_id":"A1","targets":[{"target":{"kind":"sample","id":"s1"},"role":"primary","relationship":"contains","counts_as_independent_unit":true}]}],
@@ -654,10 +654,28 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         }),
     );
     let design_version_id = design["result"]["version"]["id"].as_str().unwrap();
+    let component_list = cli.run("component.list", &json!({}));
+    let implemented = component_list["result"]["definitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|definition| definition["implemented"] == true)
+        .count();
+    assert_eq!(implemented, 6);
+    assert!(component_list["result"]["definitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|definition| definition["id"] == "content.markdown"
+            && definition["implemented"] == false));
 
     let projected = cli.run(
         "view.project",
-        &json!({"project_id": project, "protocol_version_id": protocol_version_id}),
+        &json!({
+            "project_id": project,
+            "protocol_version_id": protocol_version_id,
+            "scope": {"kind":"assay","assay_id":"cck8"}
+        }),
     );
     assert_eq!(
         projected["result"]["document"]["root"]["workflow"]["nodes"]
@@ -780,6 +798,15 @@ fn view_document_persists_and_revises_against_real_core_refs() {
     );
     assert_eq!(error["error"]["code"], "INVALID_INPUT");
 
+    let mut bad_scope = document.clone();
+    bad_scope["root"]["workflow"]["nodes"][0]["component"]["model_ref"]["step"]["scope"]
+        ["assay_id"] = json!("missing-assay");
+    let error = cli.run_error(
+        "view.create",
+        &json!({"project_id": project, "title": "Bad scope view", "document": bad_scope}),
+    );
+    assert_eq!(error["error"]["code"], "INVALID_INPUT");
+
     let mut bad_step = document.clone();
     bad_step["root"]["workflow"]["nodes"][0]["component"]["model_ref"]["step"]["step_path"] =
         json!("root/does-not-exist");
@@ -796,11 +823,14 @@ fn view_document_persists_and_revises_against_real_core_refs() {
     let view_id = created["result"]["view"]["id"].as_str().unwrap();
     let data_preview = cli.run(
         "view.data_preview",
-        &json!({"view_id": view_id, "volume_per_well": 10.0, "extra_ratio": 0.1}),
+        &json!({"view_id": view_id, "instance_id": "planned_plate", "volume_per_well": 10.0, "extra_ratio": 0.1}),
     );
     assert_eq!(data_preview["result"]["calculation"]["total_volume"], 11.0);
     assert_eq!(data_preview["result"]["table"]["rows"][0][3], 11.0);
-    let missing = cli.run("view.data_preview", &json!({"view_id": view_id}));
+    let missing = cli.run(
+        "view.data_preview",
+        &json!({"view_id": view_id, "instance_id": "planned_plate"}),
+    );
     assert_eq!(missing["result"]["calculation"]["state"], "unresolved");
     let fetched = cli.run("view.get", &json!({"id": view_id}));
     assert_eq!(fetched["result"]["latest_version"]["data"]["revision"], 1);

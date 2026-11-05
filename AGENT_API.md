@@ -142,3 +142,22 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - Protocol 步骤事件可附 `timepoint` 和 `step_status`。`timepoint` 仅用于明确属于某个检测时间点的步骤，并必须匹配 Run 冻结设计；共享制备步骤不应机械绑定某项检测的时间点。`step_status` 只能是 `in_progress`、`completed`、`blocked`、`skipped`，且必须同时关联冻结 Protocol 步骤；普通操作、观察、测量或偏差事件本身不代表步骤完成。未带时间点的旧事件不会被自动分配给 D1/D3。
 - 写入工具只返回记录 ID、所属关系、版本、数据和创建/更新时间；不声称实际实验已经执行。
 - 该 CLI 是本机原型，尚无多用户认证、审计签名、细粒度附件权限或撤销系统。不要把本地访问控制误称为云端安全边界。
+
+## 组件/计划容器只读接口（C3）
+
+| 命令 | 用途 | 写入 |
+|---|---|---:|
+| `component.list` | 列出 Definition 与 `implemented` 状态；未实现项只能作为 catalog-only | 否 |
+| `component.define` | 注册不可变 ComponentDefinition（受信写入端） | create |
+| `labware.define` | 注册不可变 LabwareProfile（受信写入端） | create |
+| `view.project` | 从 ProtocolPreview 生成初始 ViewDocument；必须显式 `scope` | 否 |
+| `view.create` / `view.get` / `view.revise` | 保存/读取/修订 ViewDocument；修订走 ViewChangeSet | create/revise |
+| `view.data_preview` | 按显式 WellPlate `instance_id` 读取 PlannedContainer，执行已登记 Pure ToolAction 并返回 Table | 否 |
+| `semantic.inspect` / `semantic.search` / `semantic.validate` / `semantic.propose_patch` / `semantic.assess_patch` | 只读语义查询与 Patch 评估 | 否 |
+| `semantic.apply_binding_patch` | 受信写入端创建新的不可变 BlockVersion；不自动改 Protocol/Run | create |
+
+`view.project` 的 `scope` 必须是 `{"kind":"assay","assay_id":"..."}`、`{"kind":"planned_output","planned_output_id":"..."}` 或 `{"kind":"unscoped"}`。无 Assay 关联的只读预览应显式 unscoped；不能自动把未知作用域当作某个 Assay。
+
+`view.data_preview` 仍是最小只读投影：输入必须提供 `view_id` 和 WellPlate `instance_id`；`volume_per_well`/`extra_ratio` 是显式输入。缺少输入返回 `unresolved`，不补默认值。它不写 Design/Protocol/Run。
+
+`component.list` 的 `implemented=true` 表示当前有可用数据适配/测试；`catalog-only` 不代表可被 Agent 创建。12 个注册项中当前只有 workflow/operation/layout.section/content.table/tool.calculator/lab.well_plate 标为 implemented。

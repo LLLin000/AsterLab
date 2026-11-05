@@ -238,10 +238,12 @@ C3-1 计划容器:
 ## 11. C3-3A 最小数据闭环
 
 - `component_data` 已提供 WellPlate → Calculator → Table 的只读投影。
-- `view.data_preview` 从 View 中的 PlannedContainer 读取 DesignVersion 孔位，按明确输入的每孔体积计算；缺少体积返回 unresolved，不填默认值。
+- `view.data_preview` 需要显式 View 的 WellPlate `instance_id`，读取该实例的 PlannedContainer；不再寻找“第一块板”。
+- `run_reagent_tool` 使用真实的 `ToolActionSpec`/`run_pure`（`tool.reagent_total@1`），记录 action/version；缺体积/额外比例返回 unresolved。
 - `scientific_facts` 已提供 typed quantity/range、工作体积范围与铺板密度两条确定性规则。
 - 规则输出 `valid / warning / blocked / unresolved`，带 rule id、来源和 affected components。
-- 当前规则只覆盖少量事实；不构成完整科学知识引擎。
+- `component.list` 区分 `implemented` 与 catalog-only；当前 12 个定义中 6 个 implemented。
+- 当前规则只覆盖少量事实；不构成完整科学知识引擎；`view.data_preview` 的 input 仍不是完整 DataBinding 图。
 
 ## 12. 下一步
 

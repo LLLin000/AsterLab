@@ -309,6 +309,7 @@ pub trait ComponentBindingContext {
 #[derive(Debug, Clone, Default)]
 pub struct ComponentRegistry {
     definitions: HashMap<(String, u32), ComponentDefinition>,
+    implemented: HashSet<(String, u32)>,
 }
 
 impl ComponentRegistry {
@@ -363,6 +364,18 @@ impl ComponentRegistry {
     pub fn get(&self, reference: &ComponentDefinitionRef) -> Option<&ComponentDefinition> {
         self.definitions
             .get(&(reference.id.clone(), reference.version))
+    }
+
+    pub fn definitions(&self) -> impl Iterator<Item = &ComponentDefinition> {
+        self.definitions.values()
+    }
+
+    pub fn mark_implemented(&mut self, id: &str, version: u32) {
+        self.implemented.insert((id.into(), version));
+    }
+
+    pub fn is_implemented(&self, id: &str, version: u32) -> bool {
+        self.implemented.contains(&(id.into(), version))
     }
 }
 
@@ -680,6 +693,16 @@ pub fn default_registry() -> ComponentRegistry {
             agent_operations: vec!["update".into()],
         },
     );
+    for id in [
+        "workflow",
+        "operation",
+        "layout.section",
+        "content.table",
+        "tool.calculator",
+        "lab.well_plate",
+    ] {
+        registry.mark_implemented(id, 1);
+    }
     registry
 }
 
