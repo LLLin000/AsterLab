@@ -21,6 +21,8 @@
 
 逐字段证据矩阵见 [field-evidence-matrix.md](field-evidence-matrix.md)。两份 K2.1 JSON 草稿在 `catalog/operations/` 与 `catalog/instruments/`;它们通过结构校验,但不能产生 `Compatible`。AI 预审记录见 [k2.1-review.md](k2.1-review.md);它不是第二人科学审核。K2.2 五操作横向矩阵见 [k2.2-cross-operation-matrix.md](k2.2-cross-operation-matrix.md)。当前 catalog 另有 `sample-aliquot`、`incubation`、`washing` 三份 JSON 草稿,全部仍为 research_draft。
 
+粒度冻结见 [granularity-freeze.md](granularity-freeze.md);候选审查见 [granularity-candidates.md](granularity-candidates.md)、[独立复审](granularity-candidate-review.md);五场景组合见 [granularity-scenarios.md](granularity-scenarios.md)。
+
 ## 已核对的边界
 
 1. **操作 ≠ 仪器**:移液操作不应直接绑定某型号移液器;读板操作不应默认某型号读板机。仪器能力由 K2 profile 匹配。

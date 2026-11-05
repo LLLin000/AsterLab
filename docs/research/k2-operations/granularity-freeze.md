@@ -54,8 +54,8 @@ Custom Step 保留:
 | 1 | 液体转移 | Atomic | 否,不拆吸/排液 | `transfer_mode` 条件 |
 | 2 | 取样/分样 | Atomic | 否 | 父子谱系;数量守恒待模型扩展 |
 | 3 | 孵育/保持 | Atomic | 否 | 确认 elapsed/偏差,不推断生长 |
-| 4 | 基础洗涤 | Atomic | 否 | 样本保留语义需显式 |
-| 5 | lossy 洗涤 | Atomic variant | 否 | 生物膜/易脱落样本;损失量 UNKNOWN |
+| 4 | 基础洗涤 | Atomic + parameter slots | 否 | 试剂/体积/次数/浸泡/搅拌是参数;样本保留语义需显式 |
+| 5 | lossy 洗涤 | Atomic variant | 否 | 生物膜/易脱落样本;损失量 UNKNOWN;不能塞进普通洗涤参数 |
 | 6 | 离心 | Atomic | 否,不拆加速/减速 | 转子/RCF 绑定 |
 | 7 | 离心后取上清 | Atomic(转移) | 与离心分开 | 新意图/new material transfer |
 | 8 | 吸光度读取 | Atomic | 否 | raw OD only |
@@ -91,7 +91,8 @@ Custom Step 保留:
 3. 不把所有实验强行拆成已有模块;允许条件分支、人工判断、Unknown。
 4. 前端可以显示 Composite 任务;内部引用多个 Atomic,不要求用户看技术组件。
 5. 方法模板只记录与通用操作的差异和绑定,不重复通用操作研究。
-6. 任何模块/方法升级前需第二人来源复核;AI 预审不算。
+6. 同一原子操作内的可变量优先参数化,不要按试剂/次数/吹打方式复制模块;只有样本 effect/意图改变时才建 variant 或新操作。
+7. 任何模块/方法升级前需第二人来源复核;AI 预审不算。
 
 ## 7. 未决
 
