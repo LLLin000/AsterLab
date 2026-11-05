@@ -1,22 +1,24 @@
-# Instrument Matching v1(K2 匹配引擎草案)
+# Instrument Matching v1(K2/K2.1 匹配引擎)
 
 - 日期:2026-11-05
-- 阶段:K2;纯 Core 匹配引擎 + 合成测试夹具。
-- **没有真实 InstrumentProfile 被标为 SourceChecked。** 当前测试只用合成 profile,不能当仪器规格。
+- 阶段:K2.1;纯 Core 匹配引擎 + 两个结构校验 JSON 草稿 + 合成测试。
+- **没有真实 InstrumentProfile 被标为 SourceChecked。** 所有真实记录保持 `research_draft`,不能产生 `Compatible`。
 - 关联:[OperationModule v1.1](operation-module-v1.md)、[K0 审计](../research/2026-11-05-k0-knowledge-coverage-audit.md)。
 - 代码:[`crates/asterlab-core/src/instrument_matching.rs`](../../crates/asterlab-core/src/instrument_matching.rs)
+- JSON 草稿:`catalog/operations/`、`catalog/instruments/`
+- 来源矩阵:[field-evidence-matrix](../research/k2-operations/field-evidence-matrix.md)
 
 ## 0. 目标
 
 判断“这个操作要求”与“这个仪器能力档案”之间是:
 
-- `Compatible`:已有、已核验的证据满足全部已知要求。
-- `Unknown`:资料不足、型号未知、单位不能换算或某项能力未记录。
+- `Compatible`:已有、经审核记录覆盖的证据满足全部已知要求。
+- `Unknown`:资料不足、型号/配置未知、单位不能换算、能力未记录、条件未验证。
 - `Incompatible`:存在明确的、有来源的冲突。
 
 不返回裸布尔值;每个判定必须带 `MatchReason`。`Compatible` 也有原因。
 
-## 1. 当前实现
+## 1. 类型
 
 ```rust
 pub struct InstrumentProfile {
@@ -26,10 +28,11 @@ pub struct InstrumentProfile {
     pub class: String,
     pub model: Option<String>,
     pub capabilities: Vec<InstrumentCapability>,
-    pub container_kinds: Vec<String>,
-    pub source: ProfileSource, // built_in | lab_imported
+    pub container_support: ContainerSupport,
+    pub source: ProfileSource,
     pub evidence: Vec<EvidenceRef>,
     pub review_status: ReviewStatus,
+    pub review_record: Option<ReviewRecord>,
 }
 
 pub struct InstrumentCapability {
@@ -40,140 +43,123 @@ pub struct InstrumentCapability {
     pub evidence: Vec<EvidenceRef>,
 }
 
-pub enum CapabilityValue {
-    Exists,
-    Unsupported,
-    Number { value: f64 },
-    Range { min: f64, max: f64 },
-    Text { value: String },
-    Set { values: Vec<String> },
+pub enum ContainerSupport {
+    Unspecified,
+    Partial { listed: Vec<String> },
+    Complete { listed: Vec<String> },
+    ExplicitlyUnsupported { kinds: Vec<String> },
+}
+
+pub struct ReviewRecord {
+    pub review_id: String,
+    pub reviewer: String,
+    pub reviewed_at: String,
+    pub subject: ProfileRef,
+    pub scope: Vec<String>,
+    pub evidence_ids: Vec<String>,
+    pub outcome: ReviewOutcome, // approved | changes_requested | rejected
 }
 ```
 
-`InstrumentProfile::validate()` 做结构校验:
+`InstrumentProfile::validate()` 检查结构、ID、数值范围、单位、容器支持列表、证据和审核记录;它不证明厂商规格正确。
 
-- schema/version/ID/class;
-- capability key 唯一;
-- 数值与范围有限、`min <= max`;
-- 数字/范围才允许单位;
-- set 非空、text 非空;
-- 非 `research_draft` 至少有 evidence。
+## 2. 审核门:声明不等于证明
 
-它**不**证明厂商规格正确;真实 profile 仍需 K2 的来源审核。
+`review_status` 只是模板声明。真正允许 `Compatible` 的判定必须满足 `InstrumentProfile::is_review_verified()`:
 
-## 2. 匹配接口
+- `review_status >= source_checked`;
+- 至少一条 profile evidence;
+- 存在 `ReviewRecord`,且:
+  - `outcome = approved`;
+  - `subject.profile_id + version` 与 profile 完全一致;
+  - `reviewer`, `reviewed_at`, `scope`, `evidence_ids` 非空;
+  - 引用的 evidence id 存在于 profile。
 
-```rust
-pub fn match_requirement(
-    requirement: &InstrumentRequirement,
-    profile: Option<&InstrumentProfile>,
-    requested: Option<&ProfileRef>,
-    container: Option<&ContainerRequirement>,
-) -> MatchResult;
-```
+没有 `ReviewRecord` 的 `source_checked` profile 在 `validate()` 阶段即报 `review_record_required`;即使绕过结构校验,匹配仍返回 `Unknown` `profile_not_review_verified`。
 
-```rust
-pub struct MatchResult {
-    pub status: MatchStatus, // compatible | unknown | incompatible
-    pub reasons: Vec<MatchReason>,
-}
+`ResearchDraft` 永远不能产生 `Compatible`;即使 capability 看起来满足,总体最多 `Unknown`。
 
-pub struct MatchReason {
-    pub code: String,
-    pub path: String,
-    pub message: String,
-    pub source: MatchSource, // requirement | profile | profile_absent | unit_unknown | evidence | container
-}
-```
-
-## 3. 判定顺序
+## 3. 匹配顺序
 
 1. **profile 缺失** → `Unknown` `profile_missing`。
 2. **profile 结构无效** → `Unknown` `profile_invalid`。
 3. **精确引用**
-   - requirement 带 `profile_id + profile_version` 时,必须与 profile 相同;版本不同 → `Unknown` `profile_version_mismatch`。
-   - `profile_id` 没有版本 → `Unknown` `profile_version_missing`。
-   - 调用方另给 `requested` 时也做精确匹配。
-4. **类别**
+   - requirement 带 `profile_id + profile_version` 时必须匹配;不同 → `Unknown` `profile_version_mismatch`。
+   - 只有 version 没有 id → `Unknown` `profile_version_missing`。
+4. **审核门**
+   - `is_review_verified()` 为 false → 总体最多 `Unknown`,reason `profile_not_review_verified`。
+5. **类别**
    - class 不同:
-     - profile 已 source-checked → `Incompatible` `class_mismatch`;
-     - profile 未 source-checked → 仍最多 `Unknown` `class_mismatch_unverified`。
-   - 当前没有 class 别名映射;字符串不同即不同,不猜别名。
-5. **审核门**
-   - profile 低于 `source_checked` 或没有 evidence → 总体最多 `Unknown` `profile_not_source_checked`。
-   - 单个 capability 没有 evidence → `Unknown` `capability_evidence_missing`,不能判 `Compatible`。
-   - 不能因为能力值“看起来满足”就判 `Compatible`。
+     - 已审核 profile → `Incompatible` `class_mismatch`;
+     - 未审核 profile → `Unknown` `class_mismatch_unverified`。
+   - 当前没有 class 别名映射;字符串不同即不同。
 6. **容器**
-   - profile 没记录容器 → `Unknown` `container_unknown`。
-   - `container_kinds` 视为封闭列表;非空但未列出请求容器 → `Incompatible` `container_mismatch`。
+   - `Unspecified` → `Unknown` `container_unspecified`;
+   - `Partial` 未列出 → `Unknown` `container_not_listed`(不能把部分列表当完整列表);
+   - `Complete` 未列出 → `Incompatible` `container_mismatch`;
+   - `ExplicitlyUnsupported` 命中 → `Incompatible` `container_explicitly_unsupported`。
 7. **能力**
-   - profile 没有该 capability → `Unknown` `capability_missing`。
-   - profile 明确 `Unsupported` → `Incompatible` `capability_unsupported`。
-   - 数值/范围按单位完全一致比较;单位不同 → `Unknown` `unit_conversion_unknown`,不判不兼容。
-   - 范围包含/相交规则:
-     - `Min`:profile 最大可达值 ≥ 要求下限;
-     - `Max`:profile 最小可达值 ≤ 要求上限;
-     - `Range`:profile 范围包含要求范围;或 profile 数值落在要求范围内。
-   - `OneOf`:profile set/text 与请求值有交集;否则明确不匹配。
+   - profile 无该 capability → `Unknown` `capability_missing`;
+   - capability 没有 evidence → `Unknown` `capability_evidence_missing`;
+   - `conditions` 非空 → `Unknown` `capability_conditions_unverified`;第一版不假装知道条件已满足;
+   - 明确 `Unsupported` → `Incompatible` `capability_unsupported`;
+   - 数值/范围按单位完全一致比较;单位不同 → `Unknown` `unit_conversion_unknown`;
+   - `Min`:profile 最大可达值 ≥ 要求下限;
+   - `Max`:profile 最小可达值 ≤ 要求上限;
+   - `Range`:profile 范围包含要求范围,或 profile 数值落在要求范围内;
+   - `OneOf`:profile set/text 与请求值有交集。
 8. **汇总**
-   - 任一 `Incompatible` → 总体 `Incompatible`。
-   - 否则任一 `Unknown` → 总体 `Unknown`。
-   - 全部有原因且通过 → `Compatible`。
+   - 未审核 → `Unknown`(即使有冲突也不升级);
+   - 否则任一 `Incompatible` → `Incompatible`;
+   - 否则任一 `Unknown` → `Unknown`;
+   - 全部通过且原因非空 → `Compatible`。
 
-## 4. 当前不做的
+## 4. 当前 JSON 草稿
 
-- 不做单位换算;`µL`/`mL` 无换算依据时返回 `Unknown`。
-- 不做 class 别名映射;未知类别不猜。
-- 不生成 Run 实际设置;匹配通过不代表校准、耗材或当前状态已确认。
-- 不把 `Compatible` 写成科学结论。
-- 不创建真实 profile;真实型号资料必须逐页核对。
+两个操作、两个 profile:
 
-## 5. 首批真实 profile 范围
-
-只研究四类,每类先选一个明确型号:
-
-| 类别 | 候选型号 | 必要记录 |
+| Artifact | Path | 状态 |
 |---|---|---|
-| 手动移液器 | Eppendorf Research plus | 量程、通道、吸头、液体类型、来源页码 |
-| CO₂ 培养箱 | Thermo Heracell VIOS 160i | 温度、CO₂、湿度、容器/透气盖、来源页码 |
-| 吸光度读板机 | Thermo Multiskan SkyHigh | 波长、板型、模式、温度、线性范围、来源页码 |
-| 荧光显微镜 | Leica DMi8 | 物镜、滤光片/通道、工作距离、曝光/相机、来源页码 |
+| `op.liquid_transfer` v1 | `catalog/operations/liquid-transfer.v1.json` | structural valid; `research_draft` |
+| `op.absorbance_measurement` v1 | `catalog/operations/absorbance-measurement.v1.json` | structural valid; `research_draft` |
+| Research plus 100–1000 µL single-channel | `catalog/instruments/liquid-handler.eppendorf-research-plus.single-channel.100-1000.v1.json` | structural valid; no review record |
+| Multiskan SkyHigh | `catalog/instruments/plate-reader.multiskan-skyhigh.v1.json` | structural valid; no review record; one capability has conditions |
 
-真实 profile 必须同时记录:
+这些 JSON 只经过结构校验,没有通过第二人来源复核。集成测试证明:
 
-- 厂商、型号、配置/版本;
-- 每个能力值的单位和适用范围;
-- 手册/规格表 URL、页码/章节、检索日期;
-- 明确未知项;
-- `review_status: research_draft`,直到逐页核对完成。
+- 两个操作通过 `OperationModule::validate_contract()`;
+- 两个 profile 通过 `InstrumentProfile::validate()`;
+- 两个 profile 都不能与草稿操作产生 `Compatible`(只能 `Unknown`)。
 
-## 6. K2 验收
+## 5. 测试
 
-- 同一要求 + 同一 profile 在不同项目得到同一结果。
-- 缺少 profile → `Unknown`,不是 `Compatible`。
-- 明确冲突 → `Incompatible`,带原因。
-- 单位未知 → `Unknown`,不误判不兼容。
-- 档案未记录能力 → `Unknown`,不判不支持。
-- `research_draft` 档案不能产生 `Compatible`。
-- 每条结果都有 `MatchReason`;没有裸布尔值。
-- profile 结构校验拒绝重复 capability、非法范围、无证据的 `source_checked`。
-- 不修改 CLI/Protocol/Run/Slint;先做纯 Core 类型与测试。
+匹配模块 23 个测试;新增集成测试 3 个。覆盖:
 
-当前 19 个合成测试覆盖以上状态;它们只证明匹配逻辑,不证明任何真实仪器。
+- 缺失/无效/版本不匹配 profile;
+- 审核记录缺失 → 不能 Compatible;
+- `ResearchDraft` 即使能力满足也最多 Unknown;
+- class 冲突优先于版本冲突;
+- capability 缺证据、conditions 非空 → Unknown;
+- 容器 `Partial`/`Complete`/`ExplicitlyUnsupported`/`Unspecified` 四态;
+- 单位不同 → Unknown;
+- 范围不重叠 → Incompatible;
+- profile 结构校验拒绝重复 capability、非法范围、空单位;
+- 两条草稿操作/两条草稿 profile 的结构校验。
+
+## 6. 明确不做
+
+- 不做单位换算;首版无换算依据就 Unknown。
+- 不做 class 别名映射。
+- 不做条件规则引擎;有 conditions 即 Unknown。
+- 不生成 Run 实际设置;匹配通过不代表校准、耗材或当前状态已确认。
+- 不批量创建 profile;只做两个代表性 JSON 草稿。
+- 不进入 K3;不改 Slint/CLI/正式数据库。
 
 ## 7. 未决项
 
-1. 四类真实 profile 的来源核对;下一轮按 K0 审核计划逐页做。
-2. class 别名/映射的来源与审核;不能凭 Agent 记忆。
-3. 容器/耗材是否独立 `LabwareProfile`;首版只用 `container_kinds` 字符串。
-4. 单位换算表是否进入 K2;首版只做“未知”。
-5. `InstrumentProfile` 与 `ProtocolBlockVersion.module_contract` 的存储位置;K3 决定。
-6. 审核记录(审核者、时间、内容摘要)的存储;K3。
-
-## 8. 明确不做
-
-- 不批量创建十几个 profile。
-- 不根据几个数值范围写“万能比较器”。
-- 不实现通用仪器控制。
-- 不把匹配结果写进 Run 实际设置。
-- 不修改 Slint。
+1. 两份 JSON 草稿的第二人逐字段来源复核。
+2. 条件类型化(安装组件、滤光片、光源、相机)与可验证满足记录。
+3. 单位换算表;首版只做“未知”。
+4. `ReviewRecord` 的持久化与审批流程;K3 前完成。
+5. 容器/耗材是否独立 `LabwareProfile`。
+6. 其他操作/仪器的来源审计。

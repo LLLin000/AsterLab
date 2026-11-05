@@ -14,6 +14,8 @@
 | 洗涤与取样 | [washing-and-sampling.md](washing-and-sampling.md) | Thermo 贴壁培养洗涤、Arbor Assays 洗板说明、Stanford 上清取样;其余仅检索摘要 | 洗涤 = 同一身份保留、液体替换;取样 = 父样本保留 + 新子样本 ID;不能共用一个默认 |
 | 吸光度与荧光读出 | [absorbance-and-fluorescence-readout.md](absorbance-and-fluorescence-readout.md) | Multiskan SkyHigh 规格;Leica DMi8 规格/FAQ/手册;Dojindo CCK-8;Thermo TMB/LIVE-DEAD/IF 协议 | 原始读数不是活力/浓度/计数;读板与成像只是终端数据操作;推导另立步骤 |
 
+逐字段证据矩阵见 [field-evidence-matrix.md](field-evidence-matrix.md)。两份 K2.1 JSON 草稿在 `catalog/operations/` 与 `catalog/instruments/`;它们通过结构校验,但不能产生 `Compatible`。
+
 ## 已核对的边界
 
 1. **操作 ≠ 仪器**:移液操作不应直接绑定某型号移液器;读板操作不应默认某型号读板机。仪器能力由 K2 profile 匹配。

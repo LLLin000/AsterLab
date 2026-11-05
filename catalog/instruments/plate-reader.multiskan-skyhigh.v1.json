@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "profile_id": "plate_reader.thermo_multiskan_skyhigh",
+  "version": 1,
+  "class": "plate_reader",
+  "model": "Thermo Scientific Multiskan SkyHigh",
+  "capabilities": [
+    {
+      "key": "wavelength",
+      "value": { "kind": "range", "min": 200.0, "max": 1000.0 },
+      "unit": "nm",
+      "conditions": [],
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: wavelength range",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "plate_format",
+      "value": { "kind": "set", "values": ["6", "12", "24", "48", "96", "384"] },
+      "conditions": [],
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: plates",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "readout_range",
+      "value": { "kind": "number", "value": 4.0 },
+      "unit": "Abs",
+      "conditions": [],
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: readout range",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "linearity_450",
+      "value": { "kind": "range", "min": 0.0, "max": 2.5 },
+      "unit": "Abs",
+      "conditions": ["valid only for 96-well flat-bottom plates and quartz semimicro cuvettes"],
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: linearity at 450 nm, footnote",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    }
+  ],
+  "container_support": {
+    "kind": "partial",
+    "listed": ["6-well", "12-well", "24-well", "48-well", "96-well", "384-well"]
+  },
+  "source": "built_in",
+  "evidence": [
+    {
+      "evidence_id": "thermo.multiskan-skyhigh.spec",
+      "kind": "vendor_manual",
+      "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+      "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+      "locator": "Full one-page specification table",
+      "retrieved_at": "2026-11-05"
+    }
+  ],
+  "review_status": "research_draft"
+}

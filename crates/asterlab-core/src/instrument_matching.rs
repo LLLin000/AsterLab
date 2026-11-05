@@ -24,11 +24,50 @@ pub struct InstrumentProfile {
     #[serde(default)]
     pub capabilities: Vec<InstrumentCapability>,
     #[serde(default)]
-    pub container_kinds: Vec<String>,
+    pub container_support: ContainerSupport,
     pub source: ProfileSource,
     #[serde(default)]
     pub evidence: Vec<EvidenceRef>,
     pub review_status: ReviewStatus,
+    /// Formal review proof. A declared status without this record cannot
+    /// produce a Compatible match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_record: Option<ReviewRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ContainerSupport {
+    Unspecified,
+    Partial { listed: Vec<String> },
+    Complete { listed: Vec<String> },
+    ExplicitlyUnsupported { kinds: Vec<String> },
+}
+
+impl Default for ContainerSupport {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewRecord {
+    pub review_id: String,
+    pub reviewer: String,
+    pub reviewed_at: String,
+    pub subject: ProfileRef,
+    pub scope: Vec<String>,
+    pub evidence_ids: Vec<String>,
+    pub outcome: ReviewOutcome,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewOutcome {
+    Approved,
+    ChangesRequested,
+    Rejected,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,6 +150,23 @@ pub enum MatchSource {
 }
 
 impl InstrumentProfile {
+    /// A declared status plus evidence is not enough; an approved record must
+    /// name this exact profile/version and its reviewed evidence.
+    pub fn is_review_verified(&self) -> bool {
+        if !self.review_status.at_least(ReviewStatus::SourceChecked) || self.evidence.is_empty() {
+            return false;
+        }
+        self.review_record.as_ref().is_some_and(|record| {
+            record.outcome == ReviewOutcome::Approved
+                && record.subject.profile_id == self.profile_id
+                && record.subject.version == self.version
+                && !record.reviewer.trim().is_empty()
+                && !record.reviewed_at.trim().is_empty()
+                && !record.scope.is_empty()
+                && !record.evidence_ids.is_empty()
+        })
+    }
+
     pub fn validate(&self) -> Result<(), Vec<ContractIssue>> {
         let mut issues = Vec::new();
         if self.schema_version != INSTRUMENT_PROFILE_SCHEMA_VERSION {
@@ -174,23 +230,7 @@ impl InstrumentProfile {
             }
         }
 
-        let mut container_kinds = HashSet::new();
-        for (index, kind) in self.container_kinds.iter().enumerate() {
-            if kind.trim().is_empty() {
-                issues.push(issue(
-                    "container_kind",
-                    format!("container_kinds[{index}]"),
-                    "container kind must not be empty",
-                ));
-            }
-            if !container_kinds.insert(kind.as_str()) {
-                issues.push(issue(
-                    "duplicate_container_kind",
-                    format!("container_kinds[{index}]"),
-                    "container kinds must be unique",
-                ));
-            }
-        }
+        validate_container_support(&self.container_support, &mut issues);
 
         if self.review_status != ReviewStatus::ResearchDraft && self.evidence.is_empty() {
             issues.push(issue(
@@ -198,6 +238,71 @@ impl InstrumentProfile {
                 "evidence",
                 "source_checked or higher requires at least one evidence reference",
             ));
+        }
+        if self.review_status != ReviewStatus::ResearchDraft && self.review_record.is_none() {
+            issues.push(issue(
+                "review_record_required",
+                "review_record",
+                "source_checked or higher requires an approved review record",
+            ));
+        }
+        if let Some(record) = &self.review_record {
+            if record.reviewer.trim().is_empty()
+                || record.reviewed_at.trim().is_empty()
+                || record.review_id.trim().is_empty()
+            {
+                issues.push(issue(
+                    "review_record_identity",
+                    "review_record",
+                    "review id, reviewer and reviewed_at must not be empty",
+                ));
+            }
+            if record.subject.profile_id != self.profile_id
+                || record.subject.version != self.version
+            {
+                issues.push(issue(
+                    "review_record_subject",
+                    "review_record.subject",
+                    "review record must refer to this exact profile/version",
+                ));
+            }
+            if record.scope.is_empty() {
+                issues.push(issue(
+                    "review_scope",
+                    "review_record.scope",
+                    "review scope must not be empty",
+                ));
+            }
+            if record.evidence_ids.is_empty() {
+                issues.push(issue(
+                    "review_evidence",
+                    "review_record.evidence_ids",
+                    "review must cite at least one evidence id",
+                ));
+            }
+            let known_evidence = self
+                .evidence
+                .iter()
+                .map(|evidence| evidence.evidence_id.as_str())
+                .collect::<HashSet<_>>();
+            for evidence_id in &record.evidence_ids {
+                if !known_evidence.contains(evidence_id.as_str()) {
+                    issues.push(issue(
+                        "review_evidence_unknown",
+                        "review_record.evidence_ids",
+                        "review cites evidence not present on the profile",
+                    ));
+                }
+            }
+            if self.review_status != ReviewStatus::ResearchDraft
+                && record.outcome != ReviewOutcome::Approved
+            {
+                issues.push(issue(
+                    "review_not_approved",
+                    "review_record.outcome",
+                    "source_checked or higher requires an approved outcome",
+                ));
+            }
         }
         for (index, evidence) in self.evidence.iter().enumerate() {
             if evidence.citation.trim().is_empty() {
@@ -251,14 +356,13 @@ pub fn match_requirement(
         };
     }
 
-    let source_checked =
-        profile.review_status.at_least(ReviewStatus::SourceChecked) && !profile.evidence.is_empty();
+    let source_checked = profile.is_review_verified();
     if !source_checked {
         unknown = true;
         reasons.push(reason(
-            "profile_not_source_checked",
-            "review_status",
-            "profile is not source-checked; capability claims are not confirmed",
+            "profile_not_review_verified",
+            "review_record",
+            "profile lacks an approved review record for its declared status",
             MatchSource::Evidence,
         ));
     }
@@ -342,26 +446,71 @@ pub fn match_requirement(
     }
 
     if let Some(container) = container {
-        if profile.container_kinds.is_empty() {
-            unknown = true;
-            reasons.push(reason(
-                "container_unknown",
-                "container_kinds",
-                "profile does not record supported container kinds",
-                MatchSource::Container,
-            ));
-        } else if !profile
-            .container_kinds
-            .iter()
-            .any(|kind| kind == &container.kind)
-        {
-            incompatible = true;
-            reasons.push(reason(
-                "container_mismatch",
-                "container_kinds",
-                "profile explicitly does not list the requested container kind",
-                MatchSource::Container,
-            ));
+        match &profile.container_support {
+            ContainerSupport::Unspecified => {
+                unknown = true;
+                reasons.push(reason(
+                    "container_unspecified",
+                    "container_support",
+                    "profile does not state container support",
+                    MatchSource::Container,
+                ));
+            }
+            ContainerSupport::Partial { listed } => {
+                if listed.iter().any(|kind| kind == &container.kind) {
+                    reasons.push(reason(
+                        "container_listed",
+                        "container_support",
+                        "requested container is listed by the profile",
+                        MatchSource::Container,
+                    ));
+                } else {
+                    unknown = true;
+                    reasons.push(reason(
+                        "container_not_listed",
+                        "container_support",
+                        "profile lists only part of its container support; absence is not incompatibility",
+                        MatchSource::Container,
+                    ));
+                }
+            }
+            ContainerSupport::Complete { listed } => {
+                if listed.iter().any(|kind| kind == &container.kind) {
+                    reasons.push(reason(
+                        "container_listed",
+                        "container_support",
+                        "requested container is listed by the profile",
+                        MatchSource::Container,
+                    ));
+                } else {
+                    incompatible = true;
+                    reasons.push(reason(
+                        "container_mismatch",
+                        "container_support",
+                        "profile declares a complete support list without this container",
+                        MatchSource::Container,
+                    ));
+                }
+            }
+            ContainerSupport::ExplicitlyUnsupported { kinds } => {
+                if kinds.iter().any(|kind| kind == &container.kind) {
+                    incompatible = true;
+                    reasons.push(reason(
+                        "container_explicitly_unsupported",
+                        "container_support",
+                        "profile explicitly marks this container unsupported",
+                        MatchSource::Container,
+                    ));
+                } else {
+                    unknown = true;
+                    reasons.push(reason(
+                        "container_not_listed",
+                        "container_support",
+                        "profile only lists explicitly unsupported containers",
+                        MatchSource::Container,
+                    ));
+                }
+            }
         }
     }
 
@@ -388,6 +537,16 @@ pub fn match_requirement(
                 &path,
                 "matched capability lacks located evidence",
                 MatchSource::Evidence,
+            ));
+            continue;
+        }
+        if !profile_capability.conditions.is_empty() {
+            unknown = true;
+            reasons.push(reason(
+                "capability_conditions_unverified",
+                &path,
+                "capability depends on configuration conditions that have no verified satisfaction record",
+                MatchSource::Profile,
             ));
             continue;
         }
@@ -588,6 +747,41 @@ fn units_match(requirement: Option<&str>, profile: Option<&str>) -> bool {
     requirement == profile
 }
 
+fn validate_container_support(support: &ContainerSupport, issues: &mut Vec<ContractIssue>) {
+    let (label, kinds) = match support {
+        ContainerSupport::Unspecified => return,
+        ContainerSupport::Partial { listed } => ("container_support.partial", listed),
+        ContainerSupport::Complete { listed } => ("container_support.complete", listed),
+        ContainerSupport::ExplicitlyUnsupported { kinds } => {
+            ("container_support.explicitly_unsupported", kinds)
+        }
+    };
+    if kinds.is_empty() {
+        issues.push(issue(
+            "container_support_empty",
+            label,
+            "container support list must not be empty",
+        ));
+    }
+    let mut seen = HashSet::new();
+    for kind in kinds {
+        if kind.trim().is_empty() {
+            issues.push(issue(
+                "container_kind",
+                label,
+                "container kind must not be empty",
+            ));
+        }
+        if !seen.insert(kind.as_str()) {
+            issues.push(issue(
+                "duplicate_container_kind",
+                label,
+                "container kinds must be unique",
+            ));
+        }
+    }
+}
+
 fn validate_capability_value(value: &CapabilityValue, path: &str, issues: &mut Vec<ContractIssue>) {
     match value {
         CapabilityValue::Number { value } => {
@@ -712,6 +906,21 @@ mod tests {
         }
     }
 
+    fn review_record() -> ReviewRecord {
+        ReviewRecord {
+            review_id: "review-1".into(),
+            reviewer: "reviewer".into(),
+            reviewed_at: "2026-11-05".into(),
+            subject: ProfileRef {
+                profile_id: "plate_reader.example".into(),
+                version: 1,
+            },
+            scope: vec!["capabilities".into()],
+            evidence_ids: vec!["spec".into()],
+            outcome: ReviewOutcome::Approved,
+        }
+    }
+
     fn profile() -> InstrumentProfile {
         InstrumentProfile {
             schema_version: INSTRUMENT_PROFILE_SCHEMA_VERSION,
@@ -740,10 +949,13 @@ mod tests {
                     evidence: vec![evidence()],
                 },
             ],
-            container_kinds: vec!["96-well".into()],
+            container_support: ContainerSupport::Partial {
+                listed: vec!["96-well".into()],
+            },
             source: ProfileSource::BuiltIn,
             evidence: vec![evidence()],
             review_status: ReviewStatus::SourceChecked,
+            review_record: Some(review_record()),
         }
     }
 
@@ -915,7 +1127,7 @@ mod tests {
         assert!(result
             .reasons
             .iter()
-            .any(|reason| reason.code == "profile_not_source_checked"));
+            .any(|reason| reason.code == "profile_not_review_verified"));
     }
 
     #[test]
@@ -927,7 +1139,7 @@ mod tests {
         assert!(result
             .reasons
             .iter()
-            .any(|reason| reason.code == "profile_not_source_checked"));
+            .any(|reason| reason.code == "profile_not_review_verified"));
     }
 
     #[test]
@@ -940,28 +1152,90 @@ mod tests {
     }
 
     #[test]
-    fn unknown_container_is_unknown_and_conflict_is_incompatible() {
+    fn container_support_semantics_are_explicit() {
+        let request = ContainerRequirement {
+            kind: "96-well".into(),
+        };
+        let mut partial = profile();
+        partial.container_support = ContainerSupport::Partial {
+            listed: vec!["24-well".into()],
+        };
+        assert_eq!(
+            match_requirement(&requirement(), Some(&partial), None, Some(&request)).status,
+            MatchStatus::Unknown
+        );
+        let mut complete = profile();
+        complete.container_support = ContainerSupport::Complete {
+            listed: vec!["24-well".into()],
+        };
+        assert_eq!(
+            match_requirement(&requirement(), Some(&complete), None, Some(&request)).status,
+            MatchStatus::Incompatible
+        );
+        let mut unsupported = profile();
+        unsupported.container_support = ContainerSupport::ExplicitlyUnsupported {
+            kinds: vec!["96-well".into()],
+        };
+        assert_eq!(
+            match_requirement(&requirement(), Some(&unsupported), None, Some(&request)).status,
+            MatchStatus::Incompatible
+        );
+        let mut unspecified = profile();
+        unspecified.container_support = ContainerSupport::Unspecified;
+        assert_eq!(
+            match_requirement(&requirement(), Some(&unspecified), None, Some(&request)).status,
+            MatchStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn capability_conditions_without_verification_are_unknown() {
         let mut profile = profile();
-        profile.container_kinds.clear();
-        let unknown = match_requirement(
-            &requirement(),
-            Some(&profile),
-            None,
-            Some(&ContainerRequirement {
-                kind: "96-well".into(),
-            }),
-        );
-        assert_eq!(unknown.status, MatchStatus::Unknown);
-        profile.container_kinds = vec!["24-well".into()];
-        let conflict = match_requirement(
-            &requirement(),
-            Some(&profile),
-            None,
-            Some(&ContainerRequirement {
-                kind: "96-well".into(),
-            }),
-        );
-        assert_eq!(conflict.status, MatchStatus::Incompatible);
+        profile.capabilities[0].conditions = vec!["requires installed filter cube".into()];
+        let result = match_requirement(&requirement(), Some(&profile), None, None);
+        assert_eq!(result.status, MatchStatus::Unknown);
+        assert!(result
+            .reasons
+            .iter()
+            .any(|reason| reason.code == "capability_conditions_unverified"));
+    }
+
+    #[test]
+    fn missing_review_record_is_unknown() {
+        let mut profile = profile();
+        profile.review_record = None;
+        let result = match_requirement(&requirement(), Some(&profile), None, None);
+        assert_eq!(result.status, MatchStatus::Unknown);
+        assert!(result
+            .reasons
+            .iter()
+            .any(|reason| reason.code == "profile_invalid"));
+    }
+
+    #[test]
+    fn review_record_requires_matching_subject_and_known_evidence() {
+        let mut first = profile();
+        first.review_record.as_mut().unwrap().subject.version = 2;
+        let errors = first.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|issue| issue.code == "review_record_subject"));
+
+        let mut second = profile();
+        second.review_record.as_mut().unwrap().evidence_ids = vec!["missing".into()];
+        let errors = second.validate().unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|issue| issue.code == "review_evidence_unknown"));
+    }
+
+    #[test]
+    fn approved_review_record_is_required_for_verified_status() {
+        let profile = profile();
+        assert!(profile.is_review_verified());
+        let mut draft = profile.clone();
+        draft.review_status = ReviewStatus::ResearchDraft;
+        assert!(!draft.is_review_verified());
     }
 
     #[test]

@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "catalog": { "module_id": "op.liquid_transfer", "version": 1 },
+    "title": "Liquid transfer with a manual pipette",
+    "action_type": "liquid_transfer",
+    "applicability": {
+      "assay_families": ["general"],
+      "sample_kinds": ["liquid"],
+      "container_kinds": ["tube", "plate", "flask"],
+      "variants": ["manual_pipette"],
+      "exclusions": ["automated_liquid_handler"]
+    }
+  },
+  "semantics": {
+    "purpose": "Move a stated volume from a source liquid to a destination container with a piston-stroke pipette and disposable tip.",
+    "preconditions": [
+      "A clean compatible tip is attached and the requested volume is within the fitted pipette range.",
+      "The source contains at least the requested volume and the destination has headroom."
+    ],
+    "inputs": [
+      {
+        "port_id": "source",
+        "role": "source_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "one",
+        "description": "Liquid-bearing source sample."
+      },
+      {
+        "port_id": "destination",
+        "role": "destination_container",
+        "object_type": "container",
+        "required": true,
+        "cardinality": "one",
+        "description": "Prepared destination container."
+      },
+      {
+        "port_id": "tip",
+        "role": "consumable",
+        "object_type": "consumable",
+        "required": true,
+        "cardinality": "one",
+        "description": "Single-use disposable tip."
+      }
+    ],
+    "outputs": [
+      {
+        "port_id": "transferred",
+        "role": "destination_sample",
+        "object_type": "sample",
+        "required": true,
+        "cardinality": "one",
+        "description": "Material delivered to the destination."
+      }
+    ],
+    "sample_transitions": [
+      {
+        "transition_id": "source_to_transferred",
+        "input_port_id": "source",
+        "output_port_id": "transferred",
+        "effect": "aliquoted",
+        "note": "Source loses the transferred volume; destination gains a new sample portion. No concentration change is implied."
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "key": "volume",
+      "label": "Transfer volume",
+      "value_type": "number",
+      "unit": "uL",
+      "required": true,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [
+        { "kind": "min", "value": 0.1 },
+        { "kind": "max", "value": 10000.0 }
+      ],
+      "description": "Must be within the fitted pipette model range; this is not a default volume.",
+      "evidence": [
+        {
+          "evidence_id": "opentrons.liquid-control",
+          "kind": "vendor_manual",
+          "citation": "Opentrons Python API: Liquid Control",
+          "url": "https://docs.opentrons.com/python-api/building-block-commands/liquids/",
+          "locator": "Aspirate, Dispense, Blow out, Mix, Air gap",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    }
+  ],
+  "execution": {
+    "default_time_scope": "once",
+    "allowed_time_scopes": ["once"],
+    "instrument_requirements": [
+      {
+        "requirement_id": "pipette",
+        "class": "pipette",
+        "required": true,
+        "capabilities": [
+          {
+            "key": "volume_range",
+            "constraint": { "kind": "exists" }
+          }
+        ]
+      }
+    ],
+    "completion_checks": [
+      {
+        "check_id": "tip_attached",
+        "kind": "operational",
+        "description": "A clean tip is attached before aspiration.",
+        "blocking": true
+      },
+      {
+        "check_id": "volume_delivered",
+        "kind": "operational",
+        "description": "The recorded delivered volume matches the requested volume within the pipette tolerance.",
+        "blocking": false
+      }
+    ],
+    "record_fields": [
+      {
+        "key": "delivered_volume",
+        "label": "Delivered volume",
+        "value_type": "number",
+        "unit": "uL",
+        "required": true
+      },
+      {
+        "key": "tip_id",
+        "label": "Tip identifier or lot",
+        "value_type": "text",
+        "required": false
+      }
+    ]
+  },
+  "knowledge": {
+    "controls": [],
+    "decision_points": [
+      {
+        "question": "Is the requested volume within the fitted pipette and tip range?",
+        "evidence": "Instrument profile volume range and tip specification.",
+        "continue_if": "The requested volume is within both ranges.",
+        "stop_if": "The volume is outside the fitted range or the tip is incompatible."
+      }
+    ],
+    "failure_modes": [
+      {
+        "mode": "Aerosol or cross-contamination",
+        "symptom": "Unexpected contamination in subsequent transfers.",
+        "impact": "Invalid downstream culture or assay.",
+        "action": "Replace the tip and repeat the affected transfer; record the deviation."
+      },
+      {
+        "mode": "Volume error",
+        "symptom": "Delivered volume differs from the requested volume beyond tolerance.",
+        "impact": "Wrong concentration or dose.",
+        "action": "Check tip fit, liquid class, pre-wetting and pipette calibration; repeat with a verified pipette."
+      }
+    ],
+    "readout": null,
+    "evidence": [
+      {
+        "evidence_id": "opentrons.liquid-control",
+        "kind": "vendor_manual",
+        "citation": "Opentrons Python API: Liquid Control",
+        "url": "https://docs.opentrons.com/python-api/building-block-commands/liquids/",
+        "locator": "Aspirate, Dispense, Blow out, Mix, Air gap",
+        "retrieved_at": "2026-11-05"
+      },
+      {
+        "evidence_id": "atcc.subculturing-monolayers",
+        "kind": "peer_reviewed",
+        "citation": "ATCC Guide to Subculturing Cell Line Monolayers",
+        "url": "https://www.atcc.org/resources/technical-documents/guide-to-subculturing-cell-line-monolayers",
+        "locator": "Steps for harvesting a cell monolayer",
+        "retrieved_at": "2026-11-05"
+      }
+    ],
+    "review_status": "research_draft"
+  }
+}

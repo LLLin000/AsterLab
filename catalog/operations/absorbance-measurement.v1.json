@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "catalog": { "module_id": "op.absorbance_measurement", "version": 1 },
+    "title": "Absorbance measurement of a prepared plate",
+    "action_type": "absorbance_measurement",
+    "applicability": {
+      "assay_families": ["cck8", "elisa"],
+      "sample_kinds": ["plate"],
+      "container_kinds": ["96-well", "384-well"],
+      "variants": ["endpoint"],
+      "exclusions": ["kinetic", "fluorescence", "luminescence"]
+    }
+  },
+  "semantics": {
+    "purpose": "Record raw absorbance values for a prepared plate without converting them into viability, concentration or cell number.",
+    "preconditions": [
+      "The plate is prepared for the selected colorimetric readout.",
+      "Blank wells are present on the same plate when the assay requires background correction.",
+      "The plate format and lid height are compatible with the reader."
+    ],
+    "inputs": [
+      {
+        "port_id": "plate_in",
+        "role": "source_sample",
+        "object_type": "container",
+        "required": true,
+        "cardinality": "one",
+        "description": "Prepared microplate."
+      }
+    ],
+    "outputs": [
+      {
+        "port_id": "plate_out",
+        "role": "destination_sample",
+        "object_type": "container",
+        "required": true,
+        "cardinality": "one",
+        "description": "The same physical plate after optical measurement."
+      },
+      {
+        "port_id": "raw_measurement",
+        "role": "raw_measurement",
+        "object_type": "measurement",
+        "required": true,
+        "cardinality": "one",
+        "description": "Raw absorbance matrix with wavelength and instrument metadata."
+      }
+    ],
+    "sample_transitions": [
+      {
+        "transition_id": "plate_preserved",
+        "input_port_id": "plate_in",
+        "output_port_id": "plate_out",
+        "effect": "preserved",
+        "note": "Measurement is optical and non-consumptive; the plate is not returned to a pre-reagent state."
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "key": "wavelength",
+      "label": "Measurement wavelength",
+      "value_type": "number",
+      "unit": "nm",
+      "required": true,
+      "required_at": "protocol_freeze",
+      "value_source": "design_variable",
+      "constraints": [
+        { "kind": "min", "value": 200.0 },
+        { "kind": "max", "value": 1000.0 }
+      ],
+      "description": "Selected for the assay chemistry; this module supplies no default wavelength.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: wavelength range",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "plate_format",
+      "label": "Plate format",
+      "value_type": "text",
+      "required": true,
+      "required_at": "protocol_freeze",
+      "value_source": "design_variable",
+      "constraints": [
+        { "kind": "one_of", "values": ["96", "384"] }
+      ],
+      "description": "Must match the physical plate and the instrument profile.",
+      "evidence": [
+        {
+          "evidence_id": "thermo.multiskan-skyhigh.spec",
+          "kind": "vendor_manual",
+          "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+          "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+          "locator": "Specification table: plates",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "blank_wells",
+      "label": "Blank well identifiers",
+      "value_type": "text",
+      "required": false,
+      "required_at": "run_freeze",
+      "value_source": "design_variable",
+      "constraints": [],
+      "description": "Record same-plate blank wells; subtraction is a downstream operation.",
+      "evidence": [
+        {
+          "evidence_id": "dojindo.cck8",
+          "kind": "vendor_manual",
+          "citation": "Dojindo Cell Counting Kit-8 protocol",
+          "url": "https://www.dojindo.com/products/pdf/Protocol/Cell_Counting_Kit-8.pdf",
+          "locator": "Assay procedure: blank and background correction",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    }
+  ],
+  "execution": {
+    "default_time_scope": "once",
+    "allowed_time_scopes": ["once"],
+    "instrument_requirements": [
+      {
+        "requirement_id": "plate_reader",
+        "class": "plate_reader",
+        "required": true,
+        "capabilities": [
+          {
+            "key": "wavelength",
+            "constraint": { "kind": "range", "min": 200.0, "max": 1000.0, "unit": "nm" }
+          },
+          {
+            "key": "plate_format",
+            "constraint": { "kind": "one_of", "values": ["96", "384"] }
+          }
+        ]
+      }
+    ],
+    "completion_checks": [
+      {
+        "check_id": "plate_seated",
+        "kind": "operational",
+        "description": "Plate is seated within the instrument plate-height limit.",
+        "blocking": true
+      },
+      {
+        "check_id": "raw_values_present",
+        "kind": "deterministic",
+        "description": "Every addressed well has a raw value and the wavelength is recorded.",
+        "blocking": true
+      }
+    ],
+    "record_fields": [
+      {
+        "key": "wavelength",
+        "label": "Wavelength",
+        "value_type": "number",
+        "unit": "nm",
+        "required": true
+      },
+      {
+        "key": "instrument_id",
+        "label": "Instrument identifier",
+        "value_type": "text",
+        "required": true
+      }
+    ]
+  },
+  "knowledge": {
+    "controls": [
+      {
+        "control_id": "blank_wells",
+        "label": "Same-plate blank wells",
+        "kind": "blank",
+        "purpose": "Record reagent and medium background on the same plate; do not auto-subtract.",
+        "required": true
+      }
+    ],
+    "decision_points": [
+      {
+        "question": "Are the raw values within the reader's linear range?",
+        "evidence": "Blank wells, known dilution, and the profile linearity limit.",
+        "continue_if": "Values are within the documented linear range.",
+        "stop_if": "Values are saturated or below the detection limit; dilute or repeat upstream."
+      }
+    ],
+    "failure_modes": [
+      {
+        "mode": "Bubbles",
+        "symptom": "Outlier absorbance in otherwise replicated wells.",
+        "impact": "Biased raw reading.",
+        "action": "Re-seat or de-bubble the plate; record the affected wells."
+      },
+      {
+        "mode": "Outside linear range",
+        "symptom": "Saturated or non-linear response.",
+        "impact": "Invalid quantitative interpretation.",
+        "action": "Dilute or repeat the upstream assay; do not clip the value."
+      }
+    ],
+    "readout": {
+      "raw": "Absorbance at the selected wavelength.",
+      "derived": "Blank-corrected or standard-curve result, computed downstream.",
+      "not_implied": "Viability, cell number, concentration or biological effect."
+    },
+    "evidence": [
+      {
+        "evidence_id": "thermo.multiskan-skyhigh.spec",
+        "kind": "vendor_manual",
+        "citation": "Thermo Scientific Multiskan SkyHigh specification sheet COL33729 0720",
+        "url": "https://documents.thermofisher.com/TFS-Assets/BID/Flyers/multiskan-sky-microplate-spectrophotometer-specifications.pdf",
+        "locator": "Specification table",
+        "retrieved_at": "2026-11-05"
+      }
+    ],
+    "review_status": "research_draft"
+  }
+}

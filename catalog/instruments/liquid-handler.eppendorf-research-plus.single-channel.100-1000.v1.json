@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "profile_id": "pipette.eppendorf_research_plus.single_channel.100_1000",
+  "version": 1,
+  "class": "pipette",
+  "model": "Eppendorf Research plus, single-channel, 100-1000 uL",
+  "capabilities": [
+    {
+      "key": "volume_range",
+      "value": { "kind": "range", "min": 100.0, "max": 1000.0 },
+      "unit": "uL",
+      "conditions": [],
+      "evidence": [
+        {
+          "evidence_id": "eppendorf.research-plus.manual",
+          "kind": "vendor_manual",
+          "citation": "Eppendorf Research plus operating manual, doc 3120 900.012-06/042013",
+          "url": "https://pipette.com/mm5/pdfs/manuals-brochures/Operating-manual-Research-plus.pdf",
+          "locator": "Section 6.1, 100-1000 uL single-channel row",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "channels",
+      "value": { "kind": "number", "value": 1.0 },
+      "conditions": [],
+      "evidence": [
+        {
+          "evidence_id": "eppendorf.research-plus.manual",
+          "kind": "vendor_manual",
+          "citation": "Eppendorf Research plus operating manual, doc 3120 900.012-06/042013",
+          "url": "https://pipette.com/mm5/pdfs/manuals-brochures/Operating-manual-Research-plus.pdf",
+          "locator": "Section 6.1 single-channel configuration",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    },
+    {
+      "key": "tip_family",
+      "value": { "kind": "text", "value": "epT.I.P.S. 50-1000 uL" },
+      "conditions": [],
+      "evidence": [
+        {
+          "evidence_id": "eppendorf.research-plus.manual",
+          "kind": "vendor_manual",
+          "citation": "Eppendorf Research plus operating manual, doc 3120 900.012-06/042013",
+          "url": "https://pipette.com/mm5/pdfs/manuals-brochures/Operating-manual-Research-plus.pdf",
+          "locator": "Section 6.1, test tip column",
+          "retrieved_at": "2026-11-05"
+        }
+      ]
+    }
+  ],
+  "container_support": { "kind": "unspecified" },
+  "source": "built_in",
+  "evidence": [
+    {
+      "evidence_id": "eppendorf.research-plus.manual",
+      "kind": "vendor_manual",
+      "citation": "Eppendorf Research plus operating manual, doc 3120 900.012-06/042013",
+      "url": "https://pipette.com/mm5/pdfs/manuals-brochures/Operating-manual-Research-plus.pdf",
+      "locator": "Sections 1-8, technical data pp. 29-31",
+      "retrieved_at": "2026-11-05"
+    }
+  ],
+  "review_status": "research_draft"
+}

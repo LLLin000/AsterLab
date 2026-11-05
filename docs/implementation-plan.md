@@ -158,7 +158,8 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 |---|---|---|
 | K0 | 实验、步骤、仪器覆盖矩阵；证据缺口、文档冲突、审核计划 | 已完成初稿：[K0 审计](research/2026-11-05-k0-knowledge-coverage-audit.md) |
 | K1 | `OperationModule` Contract、与 ProtocolBlock 的映射、参数/能力契约、最小 Rust 测试 | K1.1 加固草案：[OperationModule v1.1](contracts/operation-module-v1.md)；待审查 |
-| K2 | 版本化 InstrumentProfile 与兼容性规则 | 纯 Core 匹配引擎 + 19 个合成测试：[Instrument Matching v1](contracts/instrument-matching-v1.md)；四份仪器档案 + 四份操作记录仍为 [research_draft](research/k2-instruments/README.md) / [k2-operations](research/k2-operations/README.md) |
+| K2 | 版本化 InstrumentProfile 与兼容性规则 | 纯 Core 匹配引擎 + 23 个合成测试 + 3 个 JSON 集成测试：[Instrument Matching v1](contracts/instrument-matching-v1.md)；四份仪器档案 + 四份操作记录仍为 [research_draft](research/k2-instruments/README.md) / [k2-operations](research/k2-operations/README.md) |
+| K2.1 | Source-to-Contract：条件匹配、容器覆盖语义、审核证明、两个 JSON 草稿 | 进行中：[field evidence matrix](research/k2-operations/field-evidence-matrix.md)、[catalog](../catalog/README.md)；待第二人复核 |
 | K3 | Catalog Compiler：把审核过的目录编译成 `ProtocolBlockVersion` / `ProtocolVersion` | 未开始 |
 | K4 | L929 CCK-8 / LIVE-DEAD 端到端测试；不补值、不串变体 | 未开始 |
 | K5 | 接入 Slint 方法选择、步骤插入、参数编辑、预览 | 未开始；K1–K4 通过后才允许 |
@@ -169,7 +170,7 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 - 参数来源、确认阶段、单位约束、样本影响、时间作用域、审核状态可校验。
 - 仪器只声明能力要求，不把型号规格写成实际设置。
 - 旧块、旧 Run、旧 CLI/HTTP 不被破坏。
-- K2 匹配引擎已有合成测试;没有真实 profile 被标为 SourceChecked。
+- K2 匹配引擎已有合成测试;两个 JSON 草稿通过结构校验,但没有真实 profile 被标为 SourceChecked。
 
 ### P5 · Protocol 编辑（K4 后）
 
