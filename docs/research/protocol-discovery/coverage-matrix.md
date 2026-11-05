@@ -1,7 +1,7 @@
 # Protocol Discovery — 公共操作覆盖矩阵
 
 - 日期:2026-11-05
-- 状态:基于 B01–B07 与既有记录的研究归纳;所有来源仍为 `research_draft`,没有 `SourceChecked`
+- 状态:基于 B01–B08 与既有记录的研究归纳;所有来源仍为 `research_draft`,没有 `SourceChecked`
 - 阅读状态:Research Shared(研究有复用)、Catalog Draft(已有 JSON)、SourceChecked(已复核)必须分开;当前没有 SourceChecked
 - 用途:看“哪些操作真的跨方法复用”,不是看“研究了多少篇”
 
@@ -17,6 +17,7 @@
 | B06 | 流式/IF | Thermo 多份 protocol 直接读 | 染色/固定/通透/设门均 method-local/template;原始采集复用;无新公共模块 |
 | B07 | RT-qPCR | Thermo/Bio-Rad/ABI 手册直接读 | RT/qPCR 配制、热循环、原始荧光采集均 method-local/template;无新公共模块 |
 | C01 | 候选复审 | NEB/Phusion/Bio-Rad/琼脂糖/SDS-PAGE/流式/发光手册 | PCR 热循环、流式采集、发光板读为 domain-shared candidates;电泳 deferred;不是永久 method-local |
+| B08 | 基础配液/无菌 | Thermo/Morimoto/MP Bio/protocols.io 直接读 | 称量 ToolAction;溶解/pH/过滤/灭菌 method-local;过滤/灭菌 deferred domain-shared;无新模块 |
 | 既有 | 生物膜、3D 类器官、ELISA/WB、qPCR、流式/IF、划痕/Transwell | 见 k2-operations | 方法模板为主;Bio-protocol 4298 补足 3D dome |
 
 ## 2.1 状态分层
@@ -25,7 +26,7 @@
 |---|---|
 | Catalog Draft | liquid_transfer、sample_aliquot、incubation、washing、absorbance_measurement(5 份 JSON) |
 | Global Research Shared, no JSON | 离心、原始荧光采集、细胞浓度计数、划线/涂布、菌落计数 |
-| Domain-Shared Candidates | ThermalProgram、FlowAcquisition、LuminescencePlateRead;Electrophoresis deferred |
+| Domain-Shared Candidates | ThermalProgram、FlowAcquisition、LuminescencePlateRead;SterileFiltration/Autoclave deferred;Electrophoresis deferred |
 | Method-local / template | 固定/通透/封闭/染色、ELISA/WB 变体、qPCR 热循环具体程序、3D 球体形成 |
 | Gap | 3D 其他模型、transfection、microbial growth/transformation、molecular cloning |
 
@@ -56,7 +57,7 @@
 
 ## 3. 判定结果
 
-- B01–B07 没有新增 **global** 公共 OperationModule;C01 把 PCR 热循环、流式采集、发光板读列为 domain-shared candidates,电泳 deferred。
+- B01–B08 没有新增 **global** 公共 OperationModule;C01 把 PCR 热循环、流式采集、发光板读列为 domain-shared candidates,电泳 deferred;B08 把过滤/灭菌列为 deferred domain-shared。
 - 公共操作集合目前趋于稳定:transfer、aliquot、incubation、washing、centrifugation、absorbance、raw image、cell count、streak、spread、colony count。
 - 大量“看起来像操作”的步骤实际是:
   - composite:传代、连续稀释、冻存/复苏、条件培养基;
@@ -86,6 +87,6 @@
 
 ## 6. 指标
 
-- Protocol 覆盖广度:目前 7 个 discovery 批次 + 既有方法记录;基础细胞、微生物、细胞检测、分子、RT-qPCR、蛋白、流式/IF 已覆盖。
+- Protocol 覆盖广度:目前 8 个 discovery 批次 + 既有方法记录;基础细胞、微生物、细胞检测、分子、RT-qPCR、蛋白、流式/IF、基础配液已覆盖。
 - Operation 复用成熟度:transfer/incubation/washing/centrifugation/absorbance/raw image 已跨 ≥5 家族;streak/spread/colony count 跨微生物与 CFU;domain-shared candidates 已单列,未进入 JSON。
 - 不以步骤数/模块数衡量。
