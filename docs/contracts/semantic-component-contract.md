@@ -370,19 +370,40 @@ S1-C2 · Agent ChangeSet:
 - [x] `ChangePreview` 静态摘要;失效引用与确认要求由 Core `ChangeContext` 提供。
 - [x] 未接正式事务、CLI 或 UI。
 
-S2-A · Minimal Catalog Compiler:
+S2-B1/B2 映射:
+
+```text
+OperationModule
+  → CompiledBlock
+  → ProtocolBlockVersionData(+ optional module_contract sidecar)
+  → ProtocolStep::BlockUse
+  → BlockUseSource → Composition Validation
+```
+
+- `CompiledBlock::to_block_version_data()` 生成正式 `ProtocolBlockVersionData`;旧块没有 sidecar 仍可反序列化。
+- `CompiledBlock::to_block_use_step()` 生成正式 `ProtocolStep::BlockUse`;`to_block_use_source()` 接入递归组合。
+- 正式编译必须提供与精确 CatalogRef 匹配的 `ReviewRecord`;`review_status` 本身不构成审核证明。
+- 参数槽位全字段比较(类型、单位、required、label),不只比较 key 集合。
+- 生成的 Text 步骤只是结构占位;`purpose` 不声明为已审核 SOP。
+
+S2-A/B · Catalog Compiler and Formal Mapping:
 
 - [x] `OperationModule` → `CompiledBlock` 纯 Core 映射。
-- [x] 保留精确 Catalog ID/version、local binding、`module_contract` sidecar。
-- [x] 参数映射为 `CompiledParameterSlot`;端口、仪器要求、样本转换显式保留并做一致性校验。
-- [x] 默认拒绝 `research_draft`;仅隔离测试 policy 可编译。
-- [x] 同一模块可编译到不同 local block,参数槽位独立。
-- [x] liquid_transfer / incubation / absorbance_measurement 合成 fixture 通过。
-- [x] 未创建第二套 Protocol/Run,未改 CLI/Slint/数据库。
+- [x] 精确 Catalog ID/version、local binding、`module_contract` sidecar。
+- [x] 参数映射为正式 `ParameterSlot`;类型、单位、required、required_at/constraints 保留。
+- [x] 端口、仪器要求、样本转换显式保留;`validate_consistency` 逐项比较。
+- [x] `CompiledBlock` → 正式 `ProtocolBlockVersionData`;旧块无 sidecar 仍可读。
+- [x] 正式编译要求精确版本 `ReviewRecord`;`research_draft` 仅隔离测试 policy。
+- [x] 生成正式 `ProtocolStep::BlockUse`;`BlockUseSource` 接入递归 Composition Validation。
+- [x] liquid_transfer / incubation / absorbance_measurement 三份不同 fixture 通过。
+- [x] CCK-8 多步骤复用 liquid_transfer;CCK-8 与 live/dead 同路径 scope 隔离。
+- [x] CLI 使用正式 block 类型,不新增第二套 Protocol/Run。
+- [x] CLI 已使用正式 `ParameterSlot` / `ProtocolStep` / `ProtocolBlockVersionData`;不新增第二套持久化。
+- [x] 未改 Slint/数据库/正式 Run。
 
 未开始:
 
-- S2-B:把编译结果接入真实递归 BlockUse、Typed Binding 与 Composition Validation。
+- S2-B 深水区:用真实 ProtocolPreview/RunWorkspace 做完整合成 Run 冻结验证(目前只验证结构/读取,没有创建 Run)。
 - S3:Agent 正式语义命令与事务写入适配。
 
 ## 9. 来源

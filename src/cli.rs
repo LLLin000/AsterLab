@@ -1,5 +1,7 @@
+use asterlab_core::operation_module::ParameterValueType;
+use asterlab_core::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep};
 use asterlab_core::protocol_preview::{
-    OperationStep, ProtocolPreview, ResolvedParameter, StepTimeScope, UnresolvedParameter,
+    OperationStep, ProtocolPreview, ResolvedParameter, UnresolvedParameter,
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -475,69 +477,6 @@ struct ProtocolRevise {
     #[serde(default)]
     root_bindings: Option<Vec<RootParameterValue>>,
 }
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum ParameterValueType {
-    Text,
-    Number,
-    Integer,
-    Boolean,
-}
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ParameterSlot {
-    key: String,
-    label: String,
-    value_type: ParameterValueType,
-    #[serde(default)]
-    unit: Option<String>,
-    #[serde(default = "required_parameter")]
-    required: bool,
-}
-fn required_parameter() -> bool {
-    true
-}
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct StepBinding {
-    slot: String,
-    #[serde(default)]
-    value: Option<Value>,
-    #[serde(default)]
-    source_slot: Option<String>,
-    #[serde(default)]
-    unit: Option<String>,
-}
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum StepVisualization {
-    Transfer,
-    Incubation,
-    PlateLayout,
-    SampleSplit,
-    Measurement,
-}
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum ProtocolStep {
-    Text {
-        use_id: String,
-        title: String,
-        instruction: String,
-        #[serde(default)]
-        parameter_refs: Vec<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        visualization: Option<StepVisualization>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        time_scope: Option<StepTimeScope>,
-    },
-    BlockUse {
-        use_id: String,
-        block_version_id: String,
-        #[serde(default)]
-        bindings: Vec<StepBinding>,
-    },
-}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ProtocolBlockCreate {
@@ -585,15 +524,6 @@ struct ProtocolBlockPreview {
     block_version_id: String,
     #[serde(default)]
     bindings: Vec<RootParameterValue>,
-}
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ProtocolBlockVersionData {
-    block_id: String,
-    version: i64,
-    summary: String,
-    parameter_slots: Vec<ParameterSlot>,
-    steps: Vec<ProtocolStep>,
 }
 #[derive(Debug, Clone)]
 struct BoundValue {
@@ -1675,6 +1605,7 @@ pub(crate) fn create_protocol_block_records(
         summary: i.summary,
         parameter_slots: i.parameter_slots,
         steps: i.steps,
+        module_contract: None,
     };
     let serialized =
         serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
@@ -1723,6 +1654,7 @@ pub(crate) fn revise_protocol_block_records(
         summary,
         parameter_slots: i.parameter_slots,
         steps: i.steps,
+        module_contract: None,
     };
     let serialized =
         serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;

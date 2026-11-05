@@ -211,8 +211,9 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | S1-B.1 | Composition Hardening:样本回边、scope 身份、授权 Context、三态端口、BlockUse 适配 | 已完成;14 个模块测试 |
 | S1-C1 | Pure ToolAction:spec、Schema/trust 校验、单次执行、provenance | 已完成;9 个模块测试 |
 | S1-C2 | Agent ChangeSet:精确目标、expected version、字段变更、Core 评估 | 已完成;9 个模块测试 |
-| S2-A | Minimal Catalog Compiler:OperationModule → CompiledBlock;保留来源、参数、端口、仪器、样本转换 | 已完成;6 个模块测试 |
-| S2-B | Composition Integration:编译结果接入递归 BlockUse / Typed Binding / Composition Validation | 下一阶段 |
+| S2-A | Minimal Catalog Compiler:OperationModule → CompiledBlock;保留来源、参数、端口、仪器、样本转换 | 已完成 |
+| S2-B1 | Formal Block Mapping:CompiledBlock → ProtocolBlockVersionData;sidecar、ReviewRecord、字段级一致性 | 已完成 |
+| S2-B2 | Composition Integration:BlockUse / Typed Binding / Composition Validation / CCK-8 与 scope 隔离 | 已完成;11 个 Catalog 测试 |
 | S3 | Agent Semantic Patch:inspect/search/compose/bind/validate/propose_patch/apply_patch | 未开始 |
 | S4 | 组合验收:CCK-8、活死、RT-qPCR | 未开始 |
 

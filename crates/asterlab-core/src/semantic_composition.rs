@@ -23,6 +23,7 @@ pub enum PortDirection {
 pub enum PortKind {
     Sample,
     Data,
+    Material,
     Parameter,
     Resource,
 }
