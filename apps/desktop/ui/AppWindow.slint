@@ -97,6 +97,26 @@ export struct CheckDetail {
     detail: string
 }
 
+export struct RunScopeDetail {
+    kind: string,
+    id: string,
+    title: string,
+    protocol: string,
+    readiness: string
+}
+
+export struct RunStepDetail {
+    path: string,
+    scope: string,
+    order_text: string,
+    title: string,
+    instruction: string,
+    parameters: string,
+    tasks: string,
+    events: string,
+    time_scope: string
+}
+
 export struct PlannedOutputDetail {
     title: string,
     protocol: string,
@@ -229,6 +249,14 @@ export component AppWindow inherits Window {
     in-out property <[EvidenceDetail]> evidence_details;
     in-out property <[ConflictDetail]> conflict_details;
     in-out property <[CheckDetail]> check_details;
+    in-out property <[RunScopeDetail]> run_scopes;
+    in-out property <[RunStepDetail]> run_steps;
+    in-out property <string> selected_run_step_path;
+    in-out property <string> run_step_title;
+    in-out property <string> run_step_detail;
+    in-out property <string> run_step_parameters;
+    in-out property <string> run_step_tasks;
+    in-out property <string> run_step_events;
     in-out property <[CheckDetail]> map_attention;
     in-out property <string> map_n_text;
     in-out property <string> map_protocol_text;
@@ -299,6 +327,7 @@ export component AppWindow inherits Window {
     callback group_metric_changed(string, string, string);
     callback assay_selected(string);
     callback group_selected(string);
+    callback run_step_selected(string);
     callback plate_selected(string);
     callback well_selected(string);
     callback about_requested();
@@ -1108,28 +1137,77 @@ export component AppWindow inherits Window {
 
                         VerticalLayout {
                             spacing: 8px;
-                            SectionLabel { text: "Protocol 清单"; }
-                            if (protocol_manifest.length == 0) : Text {
-                                text: "该执行批次没有冻结的 protocol_manifest；不能生成操作步骤。";
+                            SectionLabel { text: "冻结操作方案"; }
+                            if (run_scopes.length == 0) : Text {
+                                text: "该执行批次没有可读取的冻结 Protocol 作用域。";
                                 color: Theme.warn-ink;
                                 font-size: Theme.font-small;
                                 wrap: word-wrap;
                             }
-                            for m in protocol_manifest : Rectangle {
-                                background: transparent;
+                            for scope in run_scopes : Rectangle {
+                                background: Theme.surface;
+                                border-radius: Theme.radius-sm;
+                                border-width: 1px;
+                                border-color: Theme.line;
+                                HorizontalLayout {
+                                    padding: 9px;
+                                    spacing: 8px;
+                                    Text { text: scope.title; color: Theme.ink; font-size: Theme.font-small; font-weight: 600; horizontal-stretch: 1; wrap: word-wrap; }
+                                    Text { text: scope.protocol; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
+                                    Text { text: scope.readiness; color: Theme.ink-2; font-size: Theme.font-caption; vertical-alignment: center; }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "冻结步骤"; }
+                            if (run_steps.length == 0) : Text {
+                                text: "没有可解析的冻结步骤；不会显示空步骤占位。";
+                                color: Theme.warn-ink;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                            for step in run_steps : Rectangle {
+                                background: step.path == selected_run_step_path ? Theme.accent-tint : transparent;
                                 VerticalLayout {
                                     padding-top: 10px;
                                     padding-bottom: 10px;
-                                    spacing: 2px;
-                                    Text { text: m.title; color: Theme.ink; font-size: Theme.font-body; wrap: word-wrap; }
-                                    Text { text: m.detail; color: Theme.ink-3; font-size: Theme.font-small; wrap: word-wrap; }
+                                    spacing: 3px;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Text { text: step.order_text; width: 26px; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
+                                        Text { text: step.title; color: Theme.ink; font-size: Theme.font-body; font-weight: 600; horizontal-stretch: 1; wrap: word-wrap; }
+                                        Text { text: step.scope; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
+                                    }
+                                    Text { text: step.instruction; color: Theme.ink-2; font-size: Theme.font-small; wrap: word-wrap; }
+                                    Text { text: step.time_scope + " · " + step.parameters + " · " + step.tasks + " · " + step.events; color: Theme.ink-3; font-size: Theme.font-caption; wrap: word-wrap; }
                                 }
-                                Rectangle {
-                                    y: parent.height - 1px;
-                                    width: 100%;
-                                    height: 1px;
-                                    background: Theme.line;
+                                Rectangle { y: parent.height - 1px; width: 100%; height: 1px; background: Theme.line; }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.run_step_selected(step.path); }
                                 }
+                                accessible-role: button;
+                                accessible-label: "冻结步骤 " + step.title;
+                                accessible-action-default => { root.run_step_selected(step.path); }
+                            }
+                        }
+
+                        if (selected_run_step_path != "") : Rectangle {
+                            background: Theme.surface;
+                            border-radius: Theme.radius-md;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 7px;
+                                SectionLabel { text: "当前步骤"; }
+                                Text { text: run_step_title; color: Theme.ink; font-size: Theme.font-subhead; font-weight: 600; wrap: word-wrap; }
+                                Text { text: run_step_detail; color: Theme.ink-2; font-size: Theme.font-secondary; wrap: word-wrap; }
+                                KeyValueRow { label: "参数"; value: run_step_parameters; missing: run_step_parameters == "未记录"; }
+                                KeyValueRow { label: "任务"; value: run_step_tasks; missing: run_step_tasks == "未记录"; }
+                                KeyValueRow { label: "事件"; value: run_step_events; missing: run_step_events == "未记录"; }
                             }
                         }
 

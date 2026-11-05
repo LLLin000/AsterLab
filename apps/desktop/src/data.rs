@@ -5,7 +5,7 @@
 //! explicit `well` rows populate `Plate.wells`; empty positions stay absent.
 
 use rusqlite::{Connection, OpenFlags};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -60,6 +60,7 @@ pub struct DesignVersion {
     pub design_id: String,
     pub revision: i64,
     pub snapshot: Design,
+    pub raw_snapshot: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -160,6 +161,7 @@ pub struct Run {
     pub protocol_version_id: Option<String>,
     pub protocol_manifest: Vec<ManifestItem>,
     pub material_manifest: Vec<ManifestItem>,
+    pub raw_data: Value,
 }
 
 /// Manifests are stored as open JSON in the current backend. Display only what
@@ -182,6 +184,7 @@ pub struct ExecutionEvent {
     pub step_status: Option<String>,
     pub protocol_step_path: Option<String>,
     pub assay_id: Option<String>,
+    pub planned_output_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -468,6 +471,74 @@ fn parse_design(id: String, project_id: Option<String>, revision: i64, data: &Va
     }
 }
 
+impl ReadModel {
+    /// Project the frozen Run workspace from the already loaded read model.
+    pub fn run_workspace(
+        &self,
+        run_id: &str,
+    ) -> Option<asterlab_core::run_workspace::RunWorkspace> {
+        let run = self.runs.iter().find(|run| run.id == run_id)?;
+        let version_id = run.design_version_id.as_deref()?;
+        let version = self
+            .design_versions
+            .iter()
+            .find(|version| version.id == version_id)?;
+        let plates = self
+            .plates
+            .iter()
+            .filter(|plate| plate.run_id == run_id)
+            .map(|plate| {
+                json!({
+                    "id": plate.id,
+                    "name": plate.name,
+                    "format": plate.format,
+                    "rows": plate.rows,
+                    "columns": plate.columns,
+                    "assay_id": plate.assay_id,
+                    "timepoint": plate.timepoint,
+                    "wells": plate.wells.iter().map(|well| json!({
+                        "well_id": well.coordinate,
+                        "group_label": well.group_label,
+                        "sample_id": well.sample_id,
+                        "note": well.note
+                    })).collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        let events = self
+            .events
+            .iter()
+            .filter(|event| event.run_id == run_id)
+            .map(|event| {
+                json!({
+                    "id": event.id,
+                    "event_type": event.event_type,
+                    "content": event.content,
+                    "occurred_at": event.occurred_at,
+                    "stage": event.stage,
+                    "timepoint": event.timepoint,
+                    "step_status": event.step_status,
+                    "protocol_step_path": event.protocol_step_path,
+                    "protocol_version_id": null,
+                    "assay_id": event.assay_id,
+                    "planned_output_id": event.planned_output_id
+                })
+            })
+            .collect::<Vec<_>>();
+        asterlab_core::run_workspace::build(
+            &run.id,
+            &run.design_id,
+            version_id,
+            version.revision,
+            &version.raw_snapshot,
+            &run.raw_data,
+            &plates,
+            &events,
+        )
+        .ok()
+    }
+}
+
 pub fn load_read_model(db_path: &Path) -> Result<ReadModel, String> {
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| format!("打不开数据库（只读）：{}：{e}", db_path.display()))?;
@@ -525,6 +596,7 @@ pub fn load_read_model(db_path: &Path) -> Result<ReadModel, String> {
                     design_id,
                     revision: version_revision,
                     snapshot,
+                    raw_snapshot: data["snapshot"].clone(),
                 });
             }
             "run" => model.runs.push(Run {
@@ -542,6 +614,7 @@ pub fn load_read_model(db_path: &Path) -> Result<ReadModel, String> {
                 protocol_version_id: opt(&data["protocol_version_id"]),
                 protocol_manifest: parse_manifest(&data["protocol_manifest"]),
                 material_manifest: parse_manifest(&data["material_manifest"]),
+                raw_data: data.clone(),
             }),
             "execution_event" => model.events.push(ExecutionEvent {
                 id: id.clone(),
@@ -554,6 +627,7 @@ pub fn load_read_model(db_path: &Path) -> Result<ReadModel, String> {
                 step_status: opt(&data["step_status"]),
                 protocol_step_path: opt(&data["protocol_step_path"]),
                 assay_id: opt(&data["assay_id"]),
+                planned_output_id: opt(&data["planned_output_id"]),
             }),
             "plate" => {
                 plate_index.insert(id.clone(), model.plates.len());

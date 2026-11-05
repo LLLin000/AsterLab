@@ -110,9 +110,17 @@ P1-C 加固同时完成：
 - `RunScope` 保留 `protocol_ready`、已解析/未解析参数。
 - `RunPlateView` 包含显式保存的实际孔位，不做计划→实际推断。
 
-### P3 · 拆 Slint
+### P3 · Slint 消费 RunWorkspace（进行中）
 
-此阶段才拆 `AppWindow.slint`：
+P3-A 已完成：
+
+- Slint 执行模式读取共享 `RunWorkspace`，显示冻结作用域、步骤、参数、任务、事件和实际孔位。
+- 步骤列表可点击；当前步骤显示说明、参数、任务和事件。
+- 执行模式的设计标题/研究目的改为冻结 DesignVersion，不显示当前 Design 覆盖。
+- 同一 `root/seed` 步骤在 CCK-8 与活死染色中按 scope 隔离，任务/事件不串用。
+- 截图：`docs/prototypes/assets/slint-run-workspace.png`。
+
+P3-B（仍未做）才拆 `AppWindow.slint`：
 
 - `AppShell`
 - `ExperimentMapView`

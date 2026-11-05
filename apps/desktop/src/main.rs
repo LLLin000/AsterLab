@@ -41,6 +41,7 @@ struct Selection {
     group_id: String,
     plate_id: String,
     well_id: String,
+    run_step_path: String,
     mode: String,
     draft: Draft,
 }
@@ -364,6 +365,7 @@ fn clear_design(app: &AppWindow, sel: &mut Selection) {
     sel.group_id.clear();
     sel.plate_id.clear();
     sel.well_id.clear();
+    sel.run_step_path.clear();
     sel.mode = "design".to_owned();
     sel.draft = Draft::default();
     app.set_mode(SharedString::from("design"));
@@ -384,6 +386,14 @@ fn clear_design(app: &AppWindow, sel: &mut Selection) {
     app.set_map_time_text(SharedString::from("时间点待确认"));
     app.set_map_sample_text(SharedString::from("样本关系待确认"));
     app.set_map_attention(model_rc(Vec::<CheckDetail>::new()));
+    app.set_run_scopes(model_rc(Vec::<RunScopeDetail>::new()));
+    app.set_run_steps(model_rc(Vec::<RunStepDetail>::new()));
+    app.set_selected_run_step_path(SharedString::from(""));
+    app.set_run_step_title(SharedString::from(""));
+    app.set_run_step_detail(SharedString::from(""));
+    app.set_run_step_parameters(SharedString::from(""));
+    app.set_run_step_tasks(SharedString::from(""));
+    app.set_run_step_events(SharedString::from(""));
     app.set_group_nodes(model_rc(Vec::<GroupNodeData>::new()));
     app.set_assay_nodes(model_rc(Vec::<AssayNodeData>::new()));
     app.set_link_segments(model_rc(Vec::<LinkSegment>::new()));
@@ -913,6 +923,221 @@ fn map_attention(map: &asterlab_core::design_map::CurrentDesignMap) -> Vec<Check
         .collect()
 }
 
+fn run_scope_label(scope: &asterlab_core::run_workspace::StepScope) -> String {
+    match scope {
+        asterlab_core::run_workspace::StepScope::Assay { assay_id } => {
+            format!("检测 · {assay_id}")
+        }
+        asterlab_core::run_workspace::StepScope::PlannedOutput { planned_output_id } => {
+            format!("材料 · {planned_output_id}")
+        }
+        asterlab_core::run_workspace::StepScope::Unscoped => "全局".to_owned(),
+    }
+}
+
+fn run_time_scope_text(value: Option<asterlab_core::protocol_preview::StepTimeScope>) -> String {
+    match value {
+        Some(asterlab_core::protocol_preview::StepTimeScope::Once) => "仅一次",
+        Some(asterlab_core::protocol_preview::StepTimeScope::PerTimepoint) => "按检测时间点",
+        Some(asterlab_core::protocol_preview::StepTimeScope::PerAssay) => "按检测",
+        Some(asterlab_core::protocol_preview::StepTimeScope::Unresolved) | None => "时间范围待确认",
+    }
+    .to_owned()
+}
+
+fn value_label(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn run_step_parameters(step: &asterlab_core::protocol_preview::OperationStep) -> String {
+    if step.parameters.is_empty() && step.unresolved_parameter_refs.is_empty() {
+        return "未记录参数".to_owned();
+    }
+    let mut parts = step
+        .parameters
+        .iter()
+        .map(|param| {
+            let mut value = format!("{} = {}", param.label, value_label(&param.value));
+            if let Some(unit) = &param.unit {
+                value.push(' ');
+                value.push_str(unit);
+            }
+            value
+        })
+        .collect::<Vec<_>>();
+    if !step.unresolved_parameter_refs.is_empty() {
+        parts.push(format!(
+            "待填：{}",
+            step.unresolved_parameter_refs.join("、")
+        ));
+    }
+    parts.join(" · ")
+}
+
+fn run_step_tasks(
+    workspace: &asterlab_core::run_workspace::RunWorkspace,
+    step: &asterlab_core::protocol_preview::OperationStep,
+    scope: &asterlab_core::run_workspace::StepScope,
+) -> String {
+    let tasks = workspace
+        .tasks
+        .iter()
+        .filter(|task| task.step_path == step.path && &task.scope == scope)
+        .collect::<Vec<_>>();
+    if tasks.is_empty() {
+        return "没有明确计划任务".to_owned();
+    }
+    let mut timepoints = tasks
+        .iter()
+        .filter_map(|task| task.timepoint.clone())
+        .collect::<Vec<_>>();
+    timepoints.sort();
+    timepoints.dedup();
+    if timepoints.is_empty() {
+        format!("{} 项任务 · 时间/目标待确认", tasks.len())
+    } else {
+        format!("{} 项任务 · {}", tasks.len(), timepoints.join(" / "))
+    }
+}
+
+fn run_step_events(
+    workspace: &asterlab_core::run_workspace::RunWorkspace,
+    step: &asterlab_core::protocol_preview::OperationStep,
+    scope: &asterlab_core::run_workspace::StepScope,
+) -> String {
+    let events = workspace
+        .events
+        .iter()
+        .filter(|event| {
+            if event.protocol_step_path.as_deref() != Some(step.path.as_str()) {
+                return false;
+            }
+            match scope {
+                asterlab_core::run_workspace::StepScope::Assay { assay_id } => {
+                    event.assay_id.as_deref() == Some(assay_id.as_str())
+                        && event.planned_output_id.is_none()
+                }
+                asterlab_core::run_workspace::StepScope::PlannedOutput { planned_output_id } => {
+                    event.planned_output_id.as_deref() == Some(planned_output_id.as_str())
+                }
+                asterlab_core::run_workspace::StepScope::Unscoped => {
+                    event.assay_id.is_none() && event.planned_output_id.is_none()
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    if events.is_empty() {
+        return "尚无执行事件".to_owned();
+    }
+    let legacy = events.iter().any(|event| event.occurrence_id.is_none());
+    format!(
+        "{} 条事件{}",
+        events.len(),
+        if legacy {
+            " · legacy 未绑定实例"
+        } else {
+            ""
+        }
+    )
+}
+
+fn set_run_workspace(app: &AppWindow, model: &ReadModel, sel: &mut Selection) {
+    let Some(workspace) = model.run_workspace(&sel.run_id) else {
+        app.set_run_scopes(model_rc(Vec::new()));
+        app.set_run_steps(model_rc(Vec::new()));
+        app.set_selected_run_step_path(SharedString::from(""));
+        app.set_run_step_title(SharedString::from("未选择冻结步骤"));
+        app.set_run_step_detail(SharedString::from("没有可读取的冻结 RunWorkspace。"));
+        app.set_run_step_parameters(SharedString::from("未记录"));
+        app.set_run_step_tasks(SharedString::from("未记录"));
+        app.set_run_step_events(SharedString::from("未记录"));
+        return;
+    };
+
+    let scopes = workspace
+        .scopes
+        .iter()
+        .map(|scope| RunScopeDetail {
+            kind: SharedString::from(scope.kind.as_str()),
+            id: SharedString::from(scope.id.as_str()),
+            title: SharedString::from(scope.title.as_str()),
+            protocol: SharedString::from(match (&scope.protocol_title, scope.protocol_version) {
+                (Some(title), Some(version)) => format!("{title} v{version}"),
+                (Some(title), None) => title.clone(),
+                (None, Some(version)) => format!("Protocol v{version}"),
+                (None, None) => "Protocol 版本未记录".to_owned(),
+            }),
+            readiness: SharedString::from(if scope.protocol_ready {
+                format!(
+                    "参数就绪 · {}/{}",
+                    scope.resolved_parameters.len(),
+                    scope.unresolved_parameters.len()
+                )
+            } else {
+                format!("参数待确认 · {} 项", scope.unresolved_parameters.len())
+            }),
+        })
+        .collect::<Vec<_>>();
+
+    let steps = workspace
+        .steps
+        .iter()
+        .map(|item| RunStepDetail {
+            path: SharedString::from(item.step.path.as_str()),
+            scope: SharedString::from(run_scope_label(&item.scope)),
+            order_text: SharedString::from(format!("{:02}", item.order)),
+            title: SharedString::from(item.step.title.as_str()),
+            instruction: SharedString::from(item.step.instruction.as_str()),
+            parameters: SharedString::from(run_step_parameters(&item.step)),
+            tasks: SharedString::from(run_step_tasks(&workspace, &item.step, &item.scope)),
+            events: SharedString::from(run_step_events(&workspace, &item.step, &item.scope)),
+            time_scope: SharedString::from(run_time_scope_text(item.step.time_scope)),
+        })
+        .collect::<Vec<_>>();
+
+    let selected_path = workspace
+        .steps
+        .iter()
+        .find(|item| item.step.path == sel.run_step_path)
+        .map(|item| item.step.path.clone())
+        .or_else(|| workspace.steps.first().map(|item| item.step.path.clone()))
+        .unwrap_or_default();
+    sel.run_step_path = selected_path.clone();
+    app.set_selected_run_step_path(SharedString::from(selected_path.as_str()));
+
+    if let Some(step) = workspace
+        .steps
+        .iter()
+        .find(|item| item.step.path == selected_path)
+    {
+        app.set_run_step_title(SharedString::from(step.step.title.as_str()));
+        app.set_run_step_detail(SharedString::from(step.step.instruction.as_str()));
+        app.set_run_step_parameters(SharedString::from(run_step_parameters(&step.step)));
+        app.set_run_step_tasks(SharedString::from(run_step_tasks(
+            &workspace,
+            &step.step,
+            &step.scope,
+        )));
+        app.set_run_step_events(SharedString::from(run_step_events(
+            &workspace,
+            &step.step,
+            &step.scope,
+        )));
+    } else {
+        app.set_run_step_title(SharedString::from("未选择冻结步骤"));
+        app.set_run_step_detail(SharedString::from("没有可读取的冻结步骤。"));
+        app.set_run_step_parameters(SharedString::from("未记录"));
+        app.set_run_step_tasks(SharedString::from("未记录"));
+        app.set_run_step_events(SharedString::from("未记录"));
+    }
+
+    app.set_run_scopes(model_rc(scopes));
+    app.set_run_steps(model_rc(steps));
+}
+
 fn set_question(app: &AppWindow, design: &data::Design, sel: &Selection) {
     let clear = |app: &AppWindow| {
         app.set_question_kind(SharedString::from(""));
@@ -1153,6 +1378,10 @@ fn set_workspace_details(app: &AppWindow, model: &ReadModel, sel: &Selection) {
         app.set_question_options(model_rc(Vec::<QuestionOption>::new()));
         return;
     };
+
+    app.set_design_title(SharedString::from(design.title.as_str()));
+    app.set_design_objective(opt_text(&design.objective));
+    app.set_experimental_unit(opt_text(&design.experimental_unit));
 
     let comparison = sel
         .draft
@@ -1716,6 +1945,7 @@ fn select_mode(app: &AppWindow, model: &ReadModel, sel: &mut Selection, mode: &s
         None => clear_plate(app, sel),
     }
     set_workspace_details(app, model, sel);
+    set_run_workspace(app, model, sel);
 
     if !sel.assay_id.is_empty() {
         set_inspector_assay(app, model, sel);
@@ -1732,6 +1962,7 @@ fn select_run(app: &AppWindow, model: &ReadModel, sel: &mut Selection, run_id: &
         return;
     }
     sel.run_id = run.id.clone();
+    sel.run_step_path.clear();
     app.set_selected_run_id(SharedString::from(run.id.as_str()));
     app.set_run_title(SharedString::from(run.title.as_str()));
     app.set_run_status(run_status_text(&run.status));
@@ -1743,6 +1974,7 @@ fn select_run(app: &AppWindow, model: &ReadModel, sel: &mut Selection, run_id: &
         None => clear_plate(app, sel),
     }
     set_workspace_details(app, model, sel);
+    set_run_workspace(app, model, sel);
 
     if !sel.assay_id.is_empty() {
         set_inspector_assay(app, model, sel);
@@ -2113,6 +2345,18 @@ fn main() {
         app.on_run_selected(move |id| {
             if let Some(app) = weak.upgrade() {
                 select_run(&app, &model, &mut sel.borrow_mut(), id.as_str());
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let model = Rc::clone(&model);
+        let sel = Rc::clone(&sel);
+        app.on_run_step_selected(move |path| {
+            if let Some(app) = weak.upgrade() {
+                let mut selection = sel.borrow_mut();
+                selection.run_step_path = path.to_string();
+                set_run_workspace(&app, &model, &mut selection);
             }
         });
     }
