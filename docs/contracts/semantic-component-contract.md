@@ -159,6 +159,14 @@ Composition {
 - 纯计算的数据绑定依赖环必须拒绝;实验上的重复操作本身不等于数据环。
 - 条件未解决时保持 unknown,不能默认解释为 `false`,也不能当作已执行/已跳过。
 
+S1-B 实现位于 [`semantic_composition.rs`](../../crates/asterlab-core/src/semantic_composition.rs):
+
+- `CompositionNode` 保留 `step_path`/scope/ports/children/condition;
+- `PortConnection` 明确 from/to、对象类型、单位、样本身份和跨 scope 授权;
+- 递归包含按祖先 block version 检查;同一模块可在不同父节点复用;
+- 只对 `Data` 端口做依赖环检查,实验性 Sample 连接不误判为数据环;
+- 未知条件保持 `Unknown`,不自动变成 `False`/skipped。
+
 ### 2.4 Typed Binding
 
 当前 `ParameterBinding` 只有 `parameter_key/value/unit/source/source_reference/confirmed`。S1-A 在其上增加独立语义类型,不修改旧结构:
@@ -323,9 +331,18 @@ S1-A.1:
 - [x] profile id/version 成对;空 parameter key/port/source path 会被拒绝。
 - [x] 反例覆盖跨 Protocol、缺失引用、未确认 Legacy、当前 Run RawData、伪造类型、资源缺版本、空键/端口/路径;合法历史数据可通过。
 
+S1-B:
+
+- [x] 递归包含环、重复路径、重复端口、空 block/path/port。
+- [x] 端口方向、对象类型、单位、样本身份、单输入连接和自连接。
+- [x] 纯 Data 依赖环;Sample 连接不误判。
+- [x] 跨 Assay/scope 连接必须有显式授权。
+- [x] 未知条件保持 Unknown。
+- [x] CCK-8 / ELISA / CFU 复用同一 `op.liquid_transfer` 时有独立路径、样本绑定和参数绑定。
+- [x] 9 个组合模块测试;仍为纯 Core 类型,未改 CLI/Slint/数据库。
+
 未开始:
 
-- S1-B:composition/ports/scope/dependency-cycle 校验。
 - S1-C:pure ToolAction、patch change-set、事务边界。
 
 ## 9. 来源
