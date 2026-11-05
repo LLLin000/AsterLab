@@ -131,6 +131,18 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 
 执行台实现 `StepList → StepDetail → Target/Plate → Record`；不再只是 Manifest 字符串列表。
 
+### P3-C · Native Design Editing（命令切片已完成）
+
+- 新增 `crates/asterlab-core/src/design_commands.rs`：
+  - `DesignDraft` / `DesignGroupDraft` / `DesignAssayDraft`
+  - `CreateDesign` / `ReviseDesign` / `DesignSaved`
+  - `DesignCommands` trait
+  - `validate_draft`：结构、稳定 ID、组别引用、时间点重复；缺 n/来源/剂量仍是合法草案
+- 4 个 core tests 覆盖空草案、重复组 ID、未知组引用、重复时间点。
+- 尚未接 SQLite Repository、Slint editor 或保存/修订 UI。
+
+下一步：实现共享 `DesignCommands` 的 SQLite Adapter 和 `DesignEditorPresenter`，再接入四步原生编辑器；不先画完整表单。
+
 **验收：** 研究者从地图进入冻结 Run，找到当前步骤、参数、目标和记录入口；模式主次不同。
 
 ### P4 · Protocol 编辑

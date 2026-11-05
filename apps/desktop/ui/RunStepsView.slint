@@ -10,6 +10,7 @@ export struct RunScopeDetail {
 }
 
 export struct RunStepDetail {
+    view_id: string,
     path: string,
     scope: string,
     order_text: string,
@@ -68,7 +69,7 @@ export component RunStepsView inherits VerticalLayout {
             wrap: word-wrap;
         }
         for step in steps : Rectangle {
-            background: step.path == selected_path ? Theme.accent-tint : transparent;
+            background: step.view_id == selected_path ? Theme.accent-tint : transparent;
             VerticalLayout {
                 padding-top: 10px;
                 padding-bottom: 10px;
@@ -85,11 +86,11 @@ export component RunStepsView inherits VerticalLayout {
             Rectangle { y: parent.height - 1px; width: 100%; height: 1px; background: Theme.line; }
             TouchArea {
                 mouse-cursor: pointer;
-                clicked => { root.step_selected(step.path); }
+                clicked => { root.step_selected(step.view_id); }
             }
             accessible-role: button;
             accessible-label: "冻结步骤 " + step.title;
-            accessible-action-default => { root.step_selected(step.path); }
+            accessible-action-default => { root.step_selected(step.view_id); }
         }
     }
 

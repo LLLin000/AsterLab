@@ -1085,6 +1085,7 @@ fn set_run_workspace(app: &AppWindow, model: &ReadModel, sel: &mut Selection) {
         .steps
         .iter()
         .map(|item| RunStepDetail {
+            view_id: SharedString::from(item.view_id.as_str()),
             path: SharedString::from(item.step.path.as_str()),
             scope: SharedString::from(run_scope_label(&item.scope)),
             order_text: SharedString::from(format!("{:02}", item.order)),
@@ -1100,9 +1101,9 @@ fn set_run_workspace(app: &AppWindow, model: &ReadModel, sel: &mut Selection) {
     let selected_path = workspace
         .steps
         .iter()
-        .find(|item| item.step.path == sel.run_step_path)
-        .map(|item| item.step.path.clone())
-        .or_else(|| workspace.steps.first().map(|item| item.step.path.clone()))
+        .find(|item| item.view_id == sel.run_step_path)
+        .map(|item| item.view_id.clone())
+        .or_else(|| workspace.steps.first().map(|item| item.view_id.clone()))
         .unwrap_or_default();
     sel.run_step_path = selected_path.clone();
     app.set_selected_run_step_path(SharedString::from(selected_path.as_str()));
@@ -1110,7 +1111,7 @@ fn set_run_workspace(app: &AppWindow, model: &ReadModel, sel: &mut Selection) {
     if let Some(step) = workspace
         .steps
         .iter()
-        .find(|item| item.step.path == selected_path)
+        .find(|item| item.view_id == selected_path)
     {
         app.set_run_step_title(SharedString::from(step.step.title.as_str()));
         app.set_run_step_detail(SharedString::from(step.step.instruction.as_str()));

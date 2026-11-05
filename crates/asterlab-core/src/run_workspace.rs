@@ -42,6 +42,7 @@ pub struct RunScope {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RunStep {
+    pub view_id: String,
     pub scope: StepScope,
     pub order: u32,
     pub step: OperationStep,
@@ -231,7 +232,13 @@ fn append_manifest(
         })?;
         *order += 1;
         step_paths.push(step.path.clone());
+        let view_id = serde_json::to_string(&serde_json::json!({
+            "scope": &scope,
+            "path": &step.path
+        }))
+        .unwrap_or_else(|_| format!("{}:{}", scope_label, step.path));
         steps.push(RunStep {
+            view_id,
             scope: scope.clone(),
             order: *order,
             step,
@@ -500,6 +507,24 @@ mod tests {
         assert!(workspace.tasks.iter().all(|task| task.target == TargetSelection::Unresolved));
         assert!(workspace.tasks.iter().any(|task| task.timepoint.as_deref() == Some("D1")));
         assert!(workspace.occurrences.is_empty());
+    }
+
+    #[test]
+    fn same_step_path_in_different_scopes_has_distinct_view_ids() {
+        let mut run = run();
+        run["protocol_manifest"] = json!([
+            {"assay_id":"cck8","assay_title":"CCK-8","protocol_version_id":"pv1","steps":[{
+                "path":"root/seed","use_id":"seed","title":"Seed","instruction":"seed",
+                "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b1"
+            }]},
+            {"assay_id":"live","assay_title":"Live/Dead","protocol_version_id":"pv2","steps":[{
+                "path":"root/seed","use_id":"seed","title":"Seed","instruction":"seed",
+                "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b2"
+            }]}
+        ]);
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[]).unwrap();
+        assert_eq!(workspace.steps.len(), 2);
+        assert_ne!(workspace.steps[0].view_id, workspace.steps[1].view_id);
     }
 
     #[test]
