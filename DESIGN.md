@@ -243,14 +243,16 @@ Rules:
 
 ## Layout
 
-The shell has four regions:
+The shell has four persistent regions. Experiment design is **a state of the center workspace**, not a fifth panel or a full-screen overlay. See [frontend architecture](docs/research/2026-11-05-design-workspace-architecture.md) for the state machine, step flow, and vocabulary model.
 
 | Region | Size | Responsibility |
 |---|---|---|
-| Top bar | 56px | project → design → run context, read-only state, about |
-| Sidebar | 216px | project, design, run navigation; recedes visually |
-| Center | fluid | design / prepare / execute workspace |
-| Inspector | 304px | context for the selected object; fields, not a second workspace |
+| Top bar | 56px | project → design → run context, design/prepare/execute modes, draft state, save/cancel |
+| Sidebar | 216px | project, design, run navigation; stays visible while editing; recedes visually |
+| Center | fluid | browse state (map / structure / evidence) or draft state (4 steps: question, groups, assays, review) |
+| Inspector | 304px | selected-object context in browse; live summary and unresolved items in draft |
+
+Browsing and editing share the same shell. Entering a draft changes the center and the right panel, not the navigation or the current design context. The browse center uses three views—map, structure, evidence—rather than one long scroll. The draft center uses a four-step rail; the draft object is one, and switching steps must not lose input.
 
 Center content:
 - 32px side padding, 24px top/bottom.

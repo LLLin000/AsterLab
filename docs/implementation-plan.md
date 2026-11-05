@@ -150,9 +150,30 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 
 **验收：** 研究者从地图进入冻结 Run，找到当前步骤、参数、目标和记录入口；模式主次不同。
 
-### P4 · Protocol 编辑
+### P4-Knowledge Foundation（K0–K5）
 
-在步骤展示链路稳定后，再引入：
+在学习“如何把实验知识变成可验证模块”期间，暂缓四步设计 UI、全屏设计器和批量导入模板。
+
+| 阶段 | 工作 | 状态 |
+|---|---|---|
+| K0 | 实验、步骤、仪器覆盖矩阵；证据缺口、文档冲突、审核计划 | 已完成初稿：[K0 审计](research/2026-11-05-k0-knowledge-coverage-audit.md) |
+| K1 | `OperationModule` Contract、与 ProtocolBlock 的映射、参数/能力契约、最小 Rust 测试 | 已提交草案：[OperationModule v1](contracts/operation-module-v1.md)；待审查 |
+| K2 | 版本化 InstrumentProfile 与兼容性规则 | 未开始；K1 审查通过后才允许 |
+| K3 | Catalog Compiler：把审核过的目录编译成 `ProtocolBlockVersion` / `ProtocolVersion` | 未开始 |
+| K4 | L929 CCK-8 / LIVE-DEAD 端到端测试；不补值、不串变体 | 未开始 |
+| K5 | 接入 Slint 方法选择、步骤插入、参数编辑、预览 | 未开始；K1–K4 通过后才允许 |
+
+**K1 审查门槛：**
+
+- `OperationModule` 与 `ProtocolBlockVersion` 不是两套运行时。
+- 参数来源、确认阶段、单位约束、样本影响、时间作用域、审核状态可校验。
+- 仪器只声明能力要求，不把型号规格写成实际设置。
+- 旧块、旧 Run、旧 CLI/HTTP 不被破坏。
+- K2–K5 未开始。
+
+### P5 · Protocol 编辑（K4 后）
+
+在步骤展示链路稳定、K1–K4 通过后，再引入：
 
 - 可选 `StepMeta`（唯一 Schema）；
 - 多步骤编辑器；
@@ -161,7 +182,7 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 
 **验收：** 创建/预览/修订/冻结多步骤 Protocol；旧版本、旧 Run、参数绑定不变。
 
-### P5 · 写入闭环与性能
+### P6 · 写入闭环与性能
 
 - Slint → Application Commands → Core → SQLite → reload。
 - 记录实际事件、偏差、更正；不覆盖历史。
@@ -208,13 +229,14 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 
 ## 6. 下一步
 
-只做 P0 剩余审查：
+P0/P1/P2/P3 的历史完成项保留；当前只做 K0/K1 审查,不继续 UI。
 
-P0 契约已冻结。下一步只做 P1-A：
+K1 审查通过前禁止:
 
-- 在现有根 crate 增加共享 `DesignMapContent` / `CurrentDesignMap` 投影；
-- CLI/HTTP 改为调用共享实现，保持现有扁平 JSON 兼容；
-- 增加 C1/C2/C11 测试；
-- 不拆 Slint、不实现 StepMeta、不迁移 RunWorkspace。
+- 修改 Slint UI 或新增全屏设计器；
+- 批量导入未审核模板；
+- 自动生成完整实验条件；
+- 实现通用仪器控制框架；
+- 扩大数据库结构。
 
-P1-A/P1-B 已通过；下一步只做 P1-C（RunWorkspace）。
+审查通过后,下一步只做 K2（InstrumentProfile 与兼容性规则），不同时做 UI。
