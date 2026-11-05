@@ -12,3 +12,4 @@ pub mod semantic_catalog;
 pub mod protocol_block;
 pub mod semantic_query;
 pub mod component_framework;
+pub mod labware;

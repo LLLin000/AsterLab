@@ -188,7 +188,24 @@ view.revise  按 expected_revision 应用 ViewChangeSet
 - 不让 Agent 直接编辑任意 JSON 路径。
 - 本阶段不声称 ViewDocument 与 Scientific Core 的跨层修改已经原子提交。
 
-## 9. C2-B2.1 与首个视图切片
+## 9. C3-0 / C3-1（当前）
+
+C3-0 目录:
+
+- 12 个 Definition 已注册:`layout.section`、`content.markdown`、`content.table`、`lab.container_view`、`lab.rack_layout`、`tool.calculator`、`data.reference`、`visual.chart`、`media.figure`,以及原有 workflow/operation/well_plate。
+- 旧 `layout.table`、`content.note`、`tool.dilution` 保留只读兼容。
+- `content.table` 支持 authored/bound 的 props 结构;`tool.calculator` 通过 `tool_ref` 选择算法。
+- 这只是目录/契约,不代表 12 个组件都有完整渲染器。
+
+C3-1 计划容器:
+
+- `LabwareProfile` + `ProfileField` 的 known/unknown/not_applicable/conflicted 状态。
+- `PlannedContainer`、`PositionAssignment`、`AssignedTarget`、`ContainerPlacement`。
+- DesignVersion 增加 `container_plan`;Run 创建时把该计划冻结进 run data。
+- 计划孔位只在 DesignVersion;View 只引用,不拥有。
+- 默认 Profile 为 `research_draft`,物理字段未核实;不提供推测体积/表面/兼容性。
+
+## 10. C2-B2.1 与首个视图切片
 
 - `DbComponentContext` 携带项目范围,所有 ModelRef 检查记录类型、项目归属和精确版本。
 - OperationUse 通过真实 ProtocolPreview 展开步骤校验 `step_path + source_block_version_id`,不再只检查两个记录存在。
@@ -203,7 +220,7 @@ view.revise  按 expected_revision 应用 ViewChangeSet
   - 嵌套 Workflow 进入/面包屑导航。
 - UI 目前只读/展示 + Note 编辑,不修改科学参数。
 
-## 10. 下一步
+## 11. 下一步
 
 C2-B Persistence & Scientific Core Bridge:
 

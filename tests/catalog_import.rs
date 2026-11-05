@@ -840,3 +840,56 @@ fn view_document_persists_and_revises_against_real_core_refs() {
     );
     assert_eq!(stale["error"]["code"], "REVISION_CONFLICT");
 }
+
+#[test]
+fn design_container_plan_freezes_into_run() {
+    let cli = Cli::new("containers");
+    let project = cli.run("project.create", &json!({"name":"containers"}))["result"]["record"]
+        ["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let design = cli.run(
+        "design.create",
+        &json!({
+            "project_id": project,
+            "design": {
+                "title": "Container design",
+                "objective": "test",
+                "experimental_unit": "well",
+                "group_specs": [],
+                "assays": [],
+                "container_plan": {
+                    "containers": [{
+                        "id": "plate-1",
+                        "profile_ref": {"id":"labware.cell_culture_96","version":1},
+                        "label": "Plate 1"
+                    }],
+                    "assignments": [{
+                        "container_id":"plate-1",
+                        "position_id":"A1",
+                        "targets":[{
+                            "target":{"kind":"sample","id":"s1"},
+                            "role":"primary",
+                            "relationship":"contains",
+                            "counts_as_independent_unit":true
+                        }]
+                    }],
+                    "placements": []
+                }
+            }
+        }),
+    );
+    let run = cli.run(
+        "run.create",
+        &json!({"design_id": design["result"]["design"]["id"], "title": "container run"}),
+    );
+    assert_eq!(
+        run["result"]["record"]["data"]["container_plan"]["containers"][0]["profile_ref"]["id"],
+        "labware.cell_culture_96"
+    );
+    assert_eq!(
+        run["result"]["record"]["data"]["container_plan"]["assignments"][0]["position_id"],
+        "A1"
+    );
+}

@@ -520,6 +520,162 @@ pub fn default_registry() -> ComponentRegistry {
             agent_operations: vec!["update".into()],
         },
     );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "layout.section".into(),
+            version: 1,
+            family: ComponentFamily::Layout,
+            title: "Section".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"title":{"type":"string"},"collapsed":{"type":"boolean"}}}),
+            capabilities: vec!["compose".into()],
+            inputs: vec![],
+            outputs: vec![],
+            slots: vec![SlotDefinition {
+                id: "children".into(),
+                accepts: vec![
+                    ComponentFamily::Layout,
+                    ComponentFamily::Content,
+                    ComponentFamily::Tool,
+                    ComponentFamily::Workflow,
+                    ComponentFamily::Operation,
+                ],
+                accepts_definitions: vec![],
+                cardinality: SlotCardinality::Many,
+                required: false,
+            }],
+            presentation: Some("layout.section".into()),
+            agent_operations: vec!["update".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "content.markdown".into(),
+            version: 1,
+            family: ComponentFamily::Content,
+            title: "Markdown".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"markdown":{"type":"string"}}}),
+            capabilities: vec!["content".into()],
+            inputs: vec![],
+            outputs: vec![],
+            slots: vec![],
+            presentation: Some("content.markdown".into()),
+            agent_operations: vec!["update".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "content.table".into(),
+            version: 1,
+            family: ComponentFamily::Content,
+            title: "Table".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","enum":["authored","bound"]},"markdown":{"type":"string"},"columns":{"type":"array"},"rows":{"type":"array"}}}),
+            capabilities: vec!["content".into(), "bind".into()],
+            inputs: vec![ComponentPort { id: "data".into(), value_type: ComponentValueType::Data, required: false }],
+            outputs: vec![ComponentPort { id: "values".into(), value_type: ComponentValueType::Data, required: false }],
+            slots: vec![],
+            presentation: Some("content.table".into()),
+            agent_operations: vec!["update".into(), "bind".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "lab.container_view".into(),
+            version: 1,
+            family: ComponentFamily::Layout,
+            title: "Container".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"label":{"type":"string"}}}),
+            capabilities: vec!["layout".into()],
+            inputs: vec![],
+            outputs: vec![],
+            slots: vec![],
+            presentation: Some("lab.container_view".into()),
+            agent_operations: vec!["update".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "lab.rack_layout".into(),
+            version: 1,
+            family: ComponentFamily::Layout,
+            title: "Rack".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"rows":{"type":"integer"},"columns":{"type":"integer"}}}),
+            capabilities: vec!["layout".into()],
+            inputs: vec![],
+            outputs: vec![],
+            slots: vec![],
+            presentation: Some("lab.rack_layout".into()),
+            agent_operations: vec!["update".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "tool.calculator".into(),
+            version: 1,
+            family: ComponentFamily::Tool,
+            title: "Calculator".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"tool_ref":{"type":"string"},"preset":{"type":"object"}}}),
+            capabilities: vec!["calculate".into()],
+            inputs: vec![ComponentPort { id: "values".into(), value_type: ComponentValueType::Data, required: false }],
+            outputs: vec![ComponentPort { id: "result".into(), value_type: ComponentValueType::Data, required: false }],
+            slots: vec![],
+            presentation: Some("tool.calculator".into()),
+            agent_operations: vec!["bind".into(), "update".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "data.reference".into(),
+            version: 1,
+            family: ComponentFamily::Data,
+            title: "Data reference".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"}}}),
+            capabilities: vec!["reference".into()],
+            inputs: vec![],
+            outputs: vec![ComponentPort { id: "value".into(), value_type: ComponentValueType::Data, required: false }],
+            slots: vec![],
+            presentation: Some("data.reference".into()),
+            agent_operations: vec!["update".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "visual.chart".into(),
+            version: 1,
+            family: ComponentFamily::Visualization,
+            title: "Chart".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"}}}),
+            capabilities: vec!["visualize".into()],
+            inputs: vec![ComponentPort { id: "data".into(), value_type: ComponentValueType::Data, required: false }],
+            outputs: vec![],
+            slots: vec![],
+            presentation: Some("visual.chart".into()),
+            agent_operations: vec!["update".into(), "bind".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "media.figure".into(),
+            version: 1,
+            family: ComponentFamily::Visualization,
+            title: "Figure".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"src":{"type":"string"},"alt":{"type":"string"}}}),
+            capabilities: vec!["visualize".into()],
+            inputs: vec![],
+            outputs: vec![],
+            slots: vec![],
+            presentation: Some("media.figure".into()),
+            agent_operations: vec!["update".into()],
+        },
+    );
     registry
 }
 
@@ -1623,6 +1779,30 @@ mod tests {
                     value_type: ComponentValueType::Data,
                 },
             ],
+        }
+    }
+
+    #[test]
+    fn catalog_definitions_are_registered_without_core_enum_changes() {
+        let registry = default_registry();
+        for id in [
+            "workflow",
+            "operation",
+            "layout.section",
+            "content.markdown",
+            "content.table",
+            "lab.well_plate",
+            "lab.container_view",
+            "lab.rack_layout",
+            "tool.calculator",
+            "data.reference",
+            "visual.chart",
+            "media.figure",
+        ] {
+            assert!(
+                registry.get(&ComponentDefinitionRef { id: id.into(), version: 1 }).is_some(),
+                "missing definition {id}"
+            );
         }
     }
 
