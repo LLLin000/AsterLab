@@ -398,6 +398,7 @@ S2-A/B · Catalog Compiler and Formal Mapping:
 - [x] liquid_transfer / incubation / absorbance_measurement 三份不同 fixture 通过。
 - [x] CCK-8 多步骤复用 liquid_transfer;CCK-8 与 live/dead 同路径 scope 隔离。
 - [x] CLI 使用正式 block 类型,不新增第二套 Protocol/Run。
+- [ ] 用真实 ProtocolPreview / RunWorkspace 创建并冻结一个合成 Run;目前只验证正式结构、BlockUse 适配和组合校验。
 - [x] CLI 已使用正式 `ParameterSlot` / `ProtocolStep` / `ProtocolBlockVersionData`;不新增第二套持久化。
 - [x] 未改 Slint/数据库/正式 Run。
 

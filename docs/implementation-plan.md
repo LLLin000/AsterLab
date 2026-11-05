@@ -213,7 +213,7 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | S1-C2 | Agent ChangeSet:精确目标、expected version、字段变更、Core 评估 | 已完成;9 个模块测试 |
 | S2-A | Minimal Catalog Compiler:OperationModule → CompiledBlock;保留来源、参数、端口、仪器、样本转换 | 已完成 |
 | S2-B1 | Formal Block Mapping:CompiledBlock → ProtocolBlockVersionData;sidecar、ReviewRecord、字段级一致性 | 已完成 |
-| S2-B2 | Composition Integration:BlockUse / Typed Binding / Composition Validation / CCK-8 与 scope 隔离 | 已完成;11 个 Catalog 测试 |
+| S2-B2 | Composition Integration:BlockUse / Typed Binding / Composition Validation / CCK-8 与 scope 隔离 | 结构接入完成;真实 ProtocolPreview/Run 冻结仍待验证 |
 | S3 | Agent Semantic Patch:inspect/search/compose/bind/validate/propose_patch/apply_patch | 未开始 |
 | S4 | 组合验收:CCK-8、活死、RT-qPCR | 未开始 |
 
