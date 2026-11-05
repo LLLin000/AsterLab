@@ -65,7 +65,14 @@ P1-A 已完成：
 - Slint 地图摘要/待确认改用 Core 投影，不再自行判断 n/Protocol/时间关系。
 - 核心测试 + CLI/HTTP 一致性 smoke 通过。
 
-P1-B（下一步）迁移 Protocol 展开为结构化 `OperationStep`；P1-C 再建 `RunWorkspace`。
+P1-B 已完成：
+
+- `crates/asterlab-core/src/protocol_preview.rs` 定义 `ProtocolPreview`、`OperationStep`、`ResolvedParameter`、`UnresolvedParameter`。
+- CLI 递归展开直接构造 typed `OperationStep`；`protocol.block.preview` 仍序列化为原扁平 JSON。
+- 步骤数组顺序即执行顺序；`step_path` 保留来源路径。
+- smoke 覆盖递归组合、参数、路径和未解决槽位。
+
+P1-C（下一步）建 `RunWorkspace`：冻结 DesignVersion/Manifest，分开 steps/tasks/occurrences，并接 Slint 执行台。
 
 - Core 查询：`ExperimentQueries::design_map` / `protocol_preview` / `run_workspace`。
 - CLI/HTTP 变成 Adapter；不复制校验。
@@ -169,4 +176,4 @@ P0 契约已冻结。下一步只做 P1-A：
 - 增加 C1/C2/C11 测试；
 - 不拆 Slint、不实现 StepMeta、不迁移 RunWorkspace。
 
-P1-A 通过后再做 P1-B（Protocol 展开）和 P1-C（RunWorkspace）。
+P1-A/P1-B 已通过；下一步只做 P1-C（RunWorkspace）。

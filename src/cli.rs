@@ -1,3 +1,6 @@
+use asterlab_core::protocol_preview::{
+    OperationStep, ProtocolPreview, ResolvedParameter, UnresolvedParameter,
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -591,16 +594,16 @@ struct ProtocolBlockVersionData {
     steps: Vec<ProtocolStep>,
 }
 #[derive(Debug, Clone)]
-struct ResolvedParameter {
+struct BoundValue {
     value: Value,
     unit: Option<String>,
     provenance: Vec<Value>,
 }
 #[derive(Default)]
 struct ComposeAccumulator {
-    steps: Vec<Value>,
-    resolved_parameters: Vec<Value>,
-    unresolved_parameters: Vec<Value>,
+    steps: Vec<OperationStep>,
+    resolved_parameters: Vec<ResolvedParameter>,
+    unresolved_parameters: Vec<UnresolvedParameter>,
     block_version_ids: Vec<String>,
     unresolved_keys: HashSet<String>,
 }
@@ -807,7 +810,7 @@ fn validate_block_content(
 fn validate_root_bindings(
     slots: &[ParameterSlot],
     bindings: &[RootParameterValue],
-) -> Result<HashMap<String, ResolvedParameter>, CliError> {
+) -> Result<HashMap<String, BoundValue>, CliError> {
     let slots = validate_parameter_slots(slots)?;
     let mut values = HashMap::new();
     for binding in bindings {
@@ -818,7 +821,7 @@ fn validate_root_bindings(
         if values
             .insert(
                 binding.slot.clone(),
-                ResolvedParameter {
+                BoundValue {
                     value: binding.value.clone(),
                     unit: binding.unit.clone(),
                     provenance: vec![json!({"kind":"preview_input","slot":binding.slot})],
@@ -834,13 +837,19 @@ fn validate_root_bindings(
 fn add_unresolved(acc: &mut ComposeAccumulator, path: &str, slot: &ParameterSlot) {
     let key = format!("{path}/{}", slot.key);
     if acc.unresolved_keys.insert(key.clone()) {
-        acc.unresolved_parameters.push(json!({"path":key,"slot":slot.key,"label":slot.label,"unit":slot.unit,"required":slot.required}));
+        acc.unresolved_parameters.push(UnresolvedParameter {
+            path: key,
+            slot: slot.key.clone(),
+            label: slot.label.clone(),
+            unit: slot.unit.clone(),
+            required: slot.required,
+        });
     }
 }
 fn expand_block(
     db: &Connection,
     version_id: &str,
-    values: HashMap<String, ResolvedParameter>,
+    values: HashMap<String, BoundValue>,
     path: &str,
     depth: usize,
     active: &mut HashSet<String>,
@@ -860,7 +869,14 @@ fn expand_block(
     for slot in &data.parameter_slots {
         let slot_path = format!("{path}/{}", slot.key);
         if let Some(resolved) = values.get(&slot.key) {
-            acc.resolved_parameters.push(json!({"path":slot_path,"slot":slot.key,"label":slot.label,"value":resolved.value,"unit":resolved.unit,"provenance":resolved.provenance}));
+            acc.resolved_parameters.push(ResolvedParameter {
+                path: Some(slot_path),
+                slot: slot.key.clone(),
+                label: slot.label.clone(),
+                value: resolved.value.clone(),
+                unit: resolved.unit.clone(),
+                provenance: resolved.provenance.clone(),
+            });
         } else {
             add_unresolved(acc, path, slot);
         }
@@ -883,7 +899,14 @@ fn expand_block(
                 for key in parameter_refs {
                     if let Some(value) = values.get(key) {
                         let slot = &slots[key];
-                        parameters.push(json!({"slot":key,"label":slot.label,"value":value.value,"unit":value.unit,"provenance":value.provenance}));
+                        parameters.push(ResolvedParameter {
+                            path: None,
+                            slot: key.clone(),
+                            label: slot.label.clone(),
+                            value: value.value.clone(),
+                            unit: value.unit.clone(),
+                            provenance: value.provenance.clone(),
+                        });
                     } else {
                         unresolved_refs.push(key.clone());
                         if let Some(slot) = slots.get(key) {
@@ -891,12 +914,24 @@ fn expand_block(
                         }
                     }
                 }
-                let mut rendered = json!({"path":step_path,"use_id":use_id,"title":title,"instruction":instruction,"parameters":parameters,"unresolved_parameter_refs":unresolved_refs,"source_block_version_id":version_id});
-                if let Some(visualization) = visualization {
-                    rendered["visualization"] = serde_json::to_value(visualization)
-                        .map_err(|e| CliError::internal(e.to_string()))?;
-                }
-                acc.steps.push(rendered);
+                let visualization = visualization
+                    .as_ref()
+                    .map(|value| {
+                        serde_json::to_value(value)
+                            .map(|value| value.as_str().unwrap_or_default().to_owned())
+                            .map_err(|e| CliError::internal(e.to_string()))
+                    })
+                    .transpose()?;
+                acc.steps.push(OperationStep {
+                    path: step_path,
+                    use_id: use_id.clone(),
+                    title: title.clone(),
+                    instruction: instruction.clone(),
+                    parameters,
+                    unresolved_parameter_refs: unresolved_refs,
+                    source_block_version_id: version_id.to_owned(),
+                    visualization,
+                });
             }
             ProtocolStep::BlockUse {
                 use_id,
@@ -911,7 +946,7 @@ fn expand_block(
                         .get(&binding.slot)
                         .ok_or_else(|| CliError::internal("已保存的子块绑定引用不存在槽位"))?;
                     if let Some(value) = &binding.value {
-                        child_values.insert(binding.slot.clone(), ResolvedParameter {
+                        child_values.insert(binding.slot.clone(), BoundValue {
                             value: value.clone(),
                             unit: binding.unit.clone(),
                             provenance: vec![json!({"kind":"literal_binding","block_version_id":version_id,"use_id":use_id})],
@@ -922,7 +957,7 @@ fn expand_block(
                             provenance.push(json!({"kind":"parent_slot_binding","block_version_id":version_id,"use_id":use_id,"parent_slot":source_key}));
                             child_values.insert(
                                 binding.slot.clone(),
-                                ResolvedParameter {
+                                BoundValue {
                                     value: parent_value.value.clone(),
                                     unit: slot.unit.clone(),
                                     provenance,
@@ -964,13 +999,22 @@ fn block_preview(
         &mut HashSet::new(),
         &mut acc,
     )?;
-    let ready = !acc
-        .unresolved_parameters
-        .iter()
-        .any(|p| p["required"] == true);
-    Ok(
-        json!({"block_version_id":version_id,"block_id":data.block_id,"title":block["data"]["title"],"version":data.version,"ready":ready,"steps":acc.steps,"resolved_parameters":acc.resolved_parameters,"unresolved_parameters":acc.unresolved_parameters,"block_version_ids":acc.block_version_ids}),
-    )
+    let ready = !acc.unresolved_parameters.iter().any(|p| p.required);
+    let preview = ProtocolPreview {
+        block_version_id: version_id.to_owned(),
+        block_id: data.block_id.clone(),
+        title: block["data"]["title"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        version: data.version,
+        ready,
+        steps: acc.steps,
+        resolved_parameters: acc.resolved_parameters,
+        unresolved_parameters: acc.unresolved_parameters,
+        block_version_ids: acc.block_version_ids,
+    };
+    serde_json::to_value(preview).map_err(|e| CliError::internal(e.to_string()))
 }
 pub fn protocol_block_manifest(
     db: &Connection,

@@ -155,8 +155,8 @@ P1-A 已新增 `crates/asterlab-core`，先共享 `design_map::CurrentDesignMap`
 
 后续 P1-B/P1-C：
 
-- 共享 Protocol 展开为 `OperationStep`；
-- 共享 `RunWorkspace`（steps/tasks/occurrences/frozen_design）；
+- P1-B 已共享 Protocol 展开为 `OperationStep`；
+- 下一步共享 `RunWorkspace`（steps/tasks/occurrences/frozen_design）；
 - 最终让 CLI/HTTP/Slint 只依赖 Core 读模型，UI 不复制“组别覆盖/时间关系/样本数”的推导。
 
 当前 CLI/HTTP 与 Slint 地图摘要已使用同一 `CurrentDesignMap`；Protocol/Run 仍待迁移。
