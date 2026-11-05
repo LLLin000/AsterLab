@@ -186,6 +186,8 @@ flowchart TB
 
 规则：只复制已有字段；缺失项显式列出；不补造 n、对照、剂量、时间点、孔位。
 
+当前设计和冻结设计共享 `DesignMapContent`；`CurrentDesignMap` 读当前 revision，`FrozenDesignView` 读 Run 指向的 DesignVersion。Run 缺少冻结快照时明确报错，不回退当前设计。
+
 ### 5.2 Protocol Step Module
 
 步骤的正式读模型是 `OperationStep`，字段/身份见 [`contracts/core-v1.md`](contracts/core-v1.md)。P0 只冻结以下边界：
@@ -194,6 +196,7 @@ flowchart TB
 - `meta`（purpose/instrument/controls/decision/failure/readout）是**可选**语义补充；正式 Schema 尚未冻结，P4 前不实现。
 - 没有 `meta` 的旧步骤仍可预览、冻结和执行；不得自动补 purpose/control/readout。
 - 不得用 `ManifestItem {title, detail}` 代替结构化步骤。
+- `RunWorkspace` 分开返回 `steps`（定义）、`tasks`（计划）和 `occurrences`（实际）；不得从步骤列表推断执行实例，也不生成时间点 × 样本 × 孔位的笛卡尔积。
 
 ### 5.3 Instrument Module
 

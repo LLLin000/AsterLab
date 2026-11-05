@@ -31,18 +31,20 @@ Core 方向正确，但还不能直接拆 Slint。
 
 ## 2. 阶段
 
-### P0 · Core Contract Freeze（当前）
+### P0 · Core Contract Freeze（已完成）
 
 **只做契约，不做 UI。**
 
 交付：
 
 - [x] `CONTEXT.md` 语义补充：Design/DesignVersion、Protocol/ProtocolVersion、StepOccurrence、ToolAction、InstrumentProfile、读模型、检查级别。
-- [x] [Core Contract v1](contracts/core-v1.md)：`DesignMap`、`ProtocolPreview`、`RunWorkspace`、`OperationStep`、`StepOccurrenceKey`。
+- [x] [Core Contract v1](contracts/core-v1.md)：`CurrentDesignMap`、`FrozenDesignView`、`ProtocolPreview`、`RunWorkspace`、`OperationStep`、`PlannedTask`、`StepOccurrence`、`TargetRef`。
 - [x] 模块依赖方向与旧数据兼容规则。
-- [x] 测试矩阵（C1–C10）。
-- [ ] 审查并冻结 `StepOccurrenceKey.target` / `occurrence_id` 的具体落库方式。
-- [ ] 审查 `RunWorkspace.frozen_design` 是否复用 `DesignMap` 类型。
+- [x] 测试矩阵（C1–C12）。
+- [x] `TargetRef` / `TargetSelection` 类型化；`Unresolved` / `NotApplicable` 分开。
+- [x] `ExecutionEvent.occurrence_id` + 独立 `idempotency_key` 方向。
+- [x] `CurrentDesignMap` 与 `FrozenDesignView` 分开，共享 `DesignMapContent`。
+- [x] `OperationStep` / `PlannedTask` / `StepOccurrence` 分离；RunWorkspace 返回 steps/tasks/occurrences。
 
 **禁止：**
 
@@ -52,7 +54,7 @@ Core 方向正确，但还不能直接拆 Slint。
 - 不修改正式 SQLite 数据。
 - 不把 `ManifestItem {title, detail}` 当 Run 步骤模型。
 
-**验收：** 接口、依赖方向、身份、兼容规则和测试用例明确；审查后才能 P1。
+**验收：** 接口、依赖方向、身份、兼容规则和测试用例明确；P0 契约已冻结，进入 P1-A。
 
 ### P1 · 抽共享 Core
 
@@ -153,9 +155,11 @@ Core 方向正确，但还不能直接拆 Slint。
 
 只做 P0 剩余审查：
 
-- 决定 `StepOccurrenceKey` 的 target/occurrence 落库方式；
-- 决定 `RunWorkspace.frozen_design` 的类型复用；
-- 给 `ToolAction` / `InstrumentProfile` 定版本与所有者；
-- 完成 P1 迁移清单和对应测试命名。
+P0 契约已冻结。下一步只做 P1-A：
 
-P0 审查通过后，才开始 P1 的 `design.map` 共享查询迁移。
+- 在现有根 crate 增加共享 `DesignMapContent` / `CurrentDesignMap` 投影；
+- CLI/HTTP 改为调用共享实现，保持现有扁平 JSON 兼容；
+- 增加 C1/C2/C11 测试；
+- 不拆 Slint、不实现 StepMeta、不迁移 RunWorkspace。
+
+P1-A 通过后再做 P1-B（Protocol 展开）和 P1-C（RunWorkspace）。

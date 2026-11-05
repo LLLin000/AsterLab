@@ -102,30 +102,81 @@ Protocol 操作方案（在检测中作为顶层方法展示）
 
 | 读模型 | 输入 | 回答什么 | 明确不回答 |
 |---|---|---|---|
-| `DesignMap` | 当前 `Design` revision | 研究问题、组别、检测、时间、样本关系、待确认项 | 不读 Run 实际值；不生成孔位；不替研究者补 n/对照/剂量 |
+| `CurrentDesignMap` | 当前 `Design` revision，复用 `DesignMapContent` | 研究问题、组别、检测、时间、样本关系、待确认项 | 不读 Run 实际值；不生成孔位；不替研究者补 n/对照/剂量 |
 | `ProtocolPreview` | 一个 `ProtocolVersion` 或根 `ProtocolBlockVersion` | 步骤顺序、参数解析、未解决槽位、块版本来源 | 不表示执行过；不把当前绑定写成 Run 事实 |
-| `RunWorkspace` | 一个 `Run` 及其冻结 `DesignVersion`/Protocol manifest | 冻结设计、结构化步骤、参数、作用域、板图、事件和偏差 | 不读当前 Design 覆盖冻结内容；不把事件摘要压成标题/详情字符串 |
+| `RunWorkspace` | 一个 `Run` 及其冻结 `DesignVersion`/Protocol manifest | 冻结设计、步骤定义、计划任务、已有执行实例、参数、作用域、板图、事件和偏差 | 不读当前 Design 覆盖冻结内容；不把事件摘要压成标题/详情字符串；不从步骤列表推断已执行实例 |
+| `FrozenDesignView` | Run 指向的 `DesignVersion` | 冻结时的科学关系快照 | 不读取当前 Design；找不到快照必须报错，不回退 |
+| `PlannedTask` | Run + 冻结 manifest + 明确分配/时间点/目标 | 本次计划要做的任务（可尚未执行） | 不是执行实例；缺目标/时间关系时用 `Unresolved`，不生成虚假完整任务 |
+| `StepOccurrence` | 已有执行事件及其上下文 | 真实开始后的稳定执行实例 | 不是步骤定义、BlockUse 或计划任务 |
 
-`RunWorkspace` 至少保留：Run 与冻结 `design_version_id`、Protocol 版本、manifest 作用域、`OperationStep` 有序列表、每个步骤的原始 `step_path`、已解析/未解析参数、相关样本/容器/孔位、可关联事件。不得在 Core 中提前压成 `Vec<{title, detail}>`。
+`RunWorkspace` 至少分别返回：
 
-### 步骤执行实例 `StepOccurrence`
+- `steps`：冻结 Protocol 展开后的 `OperationStep` 定义（path、order、参数、来源版本）。
+- `tasks`：`PlannedTask` 只读投影；由明确的时间点/目标/分配关系产生，缺少映射时不自动生成时间点 × 样本 × 孔位笛卡尔积。
+- `occurrences`：已有 `StepOccurrence`，只来自实际事件；未执行的步骤没有 occurrence。
 
-`OperationStep` 是“计划中定义的步骤”；`StepOccurrence` 是“这次 Run 中对某个目标的一次执行”。至少需要区分：
+不得在 Core 中提前压成 `Vec<{title, detail}>`，也不得把 `OperationStep`、`PlannedTask`、`StepOccurrence` 合并成一个结构。
+
+### 目标与步骤执行实例
+
+`OperationStep` 是冻结 Protocol 中的“步骤定义”，不是执行。执行侧要分三层：
 
 ```text
-StepOccurrenceKey
-├─ run_id
-├─ protocol_version_id
-├─ scope: assay_id | planned_output_id
-├─ step_path
-├─ timepoint?        （若该检测/步骤按时间点执行）
-├─ target?           （样本、容器、孔位、动物或受试者标识）
-└─ occurrence_id     （显式实例 ID，用于事件关联）
+OperationStep       定义：path / order / parameters / source block
+PlannedTask         计划：step_path / scope / timepoint? / TargetSelection
+StepOccurrence      实际：occurrence_id / context / events / status
 ```
 
-不能只用 `step_path + timepoint` 断言唯一：同一时间点可能对不同孔、不同样本或不同容器重复执行。也不能用步骤定义、Protocol 版本或 `BlockUse` 本身代表执行已发生。
+`TargetRef` 是类型化引用，不是自由字符串：
 
-`ExecutionEvent` 通过显式 `occurrence_id`（或等价的完整键）关联实例；当前只有 `protocol_step_path` + `protocol_version_id` + `assay_id` + `timepoint` 的实现是过渡状态，P0 必须决定是否补充目标/实例 ID。事件不能靠“最近一个同名步骤”自动归属。
+```rust
+pub enum TargetRef {
+    Sample { sample_id: String },
+    Container { container_id: String },
+    Well { plate_id: String, coordinate: String },
+    Animal { animal_id: String },
+    Subject { subject_id: String }, // 研究系统内部假名化 ID
+}
+
+pub enum TargetSelection {
+    One(TargetRef),
+    Many(Vec<TargetRef>),
+    NotApplicable,
+    Unresolved,
+}
+```
+
+规则：
+
+- 孔位必须同时有 `plate_id` 和坐标；单独 `A1` 不唯一。
+- 样本、容器、孔位是不同对象，不能互相替代。
+- `Unresolved`（尚未确定）与 `NotApplicable`（该方法/步骤确实不针对物理目标）必须分开；不能用一个 `None` 表达。
+- 多孔操作可以引用明确的孔位集合；没有实际映射时不能把“本组 6 孔”转成坐标。
+
+`StepOccurrenceContext`：
+
+```rust
+pub struct StepOccurrenceContext {
+    pub run_id: String,
+    pub protocol_version_id: String,
+    pub scope: StepScope,
+    pub step_path: String,
+    pub timepoint: Option<String>,
+    pub target: TargetSelection,
+}
+
+pub struct StepOccurrence {
+    pub id: String,              // occurrence_id
+    pub context: StepOccurrenceContext,
+}
+```
+
+`ExecutionEvent` 增加显式 `occurrence_id: Option<String>`；首次记录时创建实例并持久化上下文，后续事件引用同一 ID。相同步骤再次执行可以是另一个 occurrence。
+
+- 不能按“最近一次同名步骤”自动归属。
+- 旧事件没有 `occurrence_id` 时显示历史记录，但标为“未精确绑定执行实例”；不自动补 ID。
+- 写入请求另设 `idempotency_key`，用于防网络重试重复追加；不能与 `occurrence_id` 混用。
+- 当前只有 path/version/assay/timepoint 的校验链仍是过渡实现；新增关联必须复用现有 `create_execution_event_tx` 校验，不另写一套。
 
 ## 工具、仪器与步骤的边界
 
@@ -138,7 +189,9 @@ StepOccurrenceKey
 
 - 步骤可以调用 `ToolAction`（例如“配制工作液”步骤打开稀释计算），但计算器本身不成为 Protocol 步骤。
 - 仪器作为步骤的 `instrument` 语义/能力引用出现；不建立全局“工具中心”作为实验入口。
-- `ToolAction` 必须有输入/输出 schema、版本和副作用说明；计算或预览不写数据库，外部操作必须显式确认。
+- `ToolAction` 必须有 `action_id + version`、输入/输出 schema、实现来源和副作用级别：`pure`（计算/预览）、`database_write`（经 Core Command）、`external_effect`（文件/仪器/服务）。纯计算不产生执行事件；外部动作需授权、确认和回执。
+- `InstrumentProfile` 使用 `profile_id + version` 的不可变注册；首版随应用发布只读档案，之后允许实验室导入并保留来源。型号选择不等于校准/当前设置已确认。
+- 两者不合并为一个注册表；P0 只冻结权责和接口，P1 不开发完整注册系统。
 - 仪器型号未知时只保留 class，不自动填转速、波长、通道、体积或时间。
 
 ## 步骤语义补充 `StepMeta`
