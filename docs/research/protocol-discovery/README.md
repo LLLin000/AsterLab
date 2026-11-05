@@ -55,6 +55,10 @@
 | B07 | [batch-07-rt-qpcr.md](batch-07-rt-qpcr.md) | 两步/一步 RT-qPCR 湿实验 | 已完成;research_draft |
 | C01 | [candidate-recheck.md](candidate-recheck.md) | 热循环/电泳/流式采集/发光采集复审 | 已完成;零新公共模块 |
 
+## 剩余实验地图
+
+见 [gap-map.md](gap-map.md):P0(3D 其他模型、转染、微生物转化/生长、分子克隆)、P1(蛋白纯化/IP、活细胞成像、死亡/周期、原代细胞、药敏)、P2(报告基因、复杂 3D、测序/质谱)。公共能力缺口单列:luminescence raw read、fluorescence plate read、FACS raw acquisition。
+
 ## 一致性审查
 
 见 [catalog-consistency-audit.md](catalog-consistency-audit.md):Research Shared / Catalog Draft / SourceChecked 分开;五份 JSON 的 incubation、washing、absorbance 已按研究范围修订。
