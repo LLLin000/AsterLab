@@ -202,7 +202,58 @@ Protocol/Operation(需要科学变更时走正式 Core 命令)
 - [ANSI/SLAS 2-2004 height](https://www.slas.org/SLAS/assets/File/public/standards/ANSI_SLAS_2-2004_HeightDimensions.pdf)
 - 现有代码事实以仓库当前提交为准;本文件不把用户表格当作已独立复核的厂商事实。
 
-## 9. 评审问题
+## 9. 规格/组件数量风险与控制
+
+“规格太多”本身不是主要问题;真正的问题是**每个 Definition 都要求独立实现、独立渲染、独立规则和独立维护**。当前 12 个 Definition 已注册,但其中多数只有 Schema,没有数据适配/渲染;如果直接暴露给 Agent,会把“可发现”误当成“可用”。
+
+| 风险 | 表现 | 控制 |
+|---|---|---|
+| Definition 膨胀 | 每个实验用途新增组件 | 固定 family;新用途优先新增 Profile/内容,不新增组件 |
+| 渲染器膨胀 | 12 个组件 12 套 UI | 先按 family 做通用 renderer;只实现 P0 组件 |
+| Profile 维护 | 每个型号大量字段、来源过期 | 一个通用 Profile schema;字段可选、可 unknown;只维护 3 个初始 Profile |
+| 规则膨胀 | 每个实验/型号一条规则 | 规则按科学属性(面积/体积/兼容性),不按实验名 |
+| Agent 选择困难 | 可选组件太多 | 只暴露 `implemented`/enabled 的定义;其余标 catalog-only |
+| 版本矩阵 | Definition × Profile × View × Protocol × Run | 精确引用 + 不可变版本;不复制 Profile 到每个实例 |
+
+建议的 C3 活跃集合:
+
+```text
+P0 implemented:
+  workflow
+  operation
+  layout.section
+  content.table
+  tool.calculator
+  lab.well_plate
+
+P1 catalog-only (not exposed as usable yet):
+  content.markdown
+  lab.container_view
+  lab.rack_layout
+  data.reference
+  visual.chart
+  media.figure
+
+Profiles initially:
+  cell culture 96 (one specific product)
+  PCR 96 (one specific product)
+  6-well culture (candidate; verify before use)
+
+Rules initially:
+  growth area -> cells per well
+  working volume range
+  PCR plate/instrument compatibility (after source check)
+```
+
+原则:
+
+- Definition 是数据,不是 12 个工程模块。
+- Profile 是稀疏事实,不是厂家百科;未知字段保持 unknown。
+- 只有 `implemented` 的 Definition 才能进入 Agent 的可创建集合。
+- 先做 3 个组件 + 2 条规则 + 2 个具体 Profile,再扩展。
+- 不按实验名称(CCK-8 表、PCR 表)新增组件类型。
+
+## 10. 评审问题
 
 1. 首个具体 Profile 选择哪个品牌/型号?必须有可核对的官方表格。
 2. `growth_area_per_well` 是否只对贴壁培养板适用?悬浮/圆底孔应保持 not_applicable 或 unknown。
