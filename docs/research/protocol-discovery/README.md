@@ -49,6 +49,9 @@
 | B01 | [batch-01-morimoto-cell-culture.md](batch-01-morimoto-cell-culture.md) | Morimoto 基础细胞培养 | 已完成;research_draft |
 | B02 | [batch-02-microbiology-basics.md](batch-02-microbiology-basics.md) | 划线/涂布/液体培养/连续稀释/菌落计数 | 已完成;research_draft |
 | B03 | [batch-03-cell-assays.md](batch-03-cell-assays.md) | CCK-8 / LDH / LIVE-DEAD / scratch / Transwell | 已完成;research_draft |
+| B04 | [batch-04-molecular-basics.md](batch-04-molecular-basics.md) | DNA/RNA 提取、PCR、电泳 | 已完成;research_draft |
+| B05 | [batch-05-protein-assays.md](batch-05-protein-assays.md) | ELISA / Western blot | 已完成;research_draft |
+| B06 | [batch-06-flow-and-if.md](batch-06-flow-and-if.md) | 流式 / 免疫荧光 | 已完成;research_draft |
 
 ## 来源边界
 

@@ -165,7 +165,7 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | K2.4 | 粒度冻结 | [粒度冻结](research/k2-operations/granularity-freeze.md)、[候选审查](research/k2-operations/granularity-candidates.md)、[五场景](research/k2-operations/granularity-scenarios.md)；确认 biofilm 是 assay model/method template，不直接生成 OperationModule |
 | K2.5 | 扩展范围冻结 | 仅体外/细胞/微生物/分子湿实验；临床、动物在体、统计/生物信息/图像分析暂不纳入 |
 | K2.6 | Catalog Promotion Audit | [晋升审计](research/k2-operations/catalog-promotion-audit.md)：原子性不等于公共模块；第一版公共操作小而可复用，专用步骤留 method-local |
-| K2.7 | Protocol-driven Operation Discovery | [B01–B03](research/protocol-discovery/README.md) 已完成,公共操作 [覆盖矩阵](research/protocol-discovery/coverage-matrix.md);无新增公共模块 |
+| K2.7 | Protocol-driven Operation Discovery | [B01–B06](research/protocol-discovery/README.md) 已完成,公共操作 [覆盖矩阵](research/protocol-discovery/coverage-matrix.md);无新增公共模块 |
 | K3 | Catalog Compiler：把审核过的目录编译成 `ProtocolBlockVersion` / `ProtocolVersion` | 未开始 |
 | K4 | L929 CCK-8 / LIVE-DEAD 端到端测试；不补值、不串变体 | 未开始 |
 | K5 | 接入 Slint 方法选择、步骤插入、参数编辑、预览 | 未开始；K1–K4 通过后才允许 |
