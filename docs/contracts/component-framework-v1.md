@@ -239,6 +239,7 @@ C3-1 计划容器:
 
 - `component_data` 已提供 WellPlate → Calculator → Table 的只读投影。
 - `view.data_preview` 需要显式 View 的 WellPlate `instance_id`，读取该实例的 PlannedContainer；不再寻找“第一块板”。
+- Calculator 输入可通过显式 `calculator_instance_id` 的 `values` DataBinding 解析；要求 `tool.calculator` 与 `tool_ref` 精确版本。
 - `run_reagent_tool` 使用真实的 `ToolActionSpec`/`run_pure`（`tool.reagent_total@1`），记录 action/version；缺体积/额外比例返回 unresolved。
 - `scientific_facts` 已提供 typed quantity/range、工作体积范围与铺板密度两条确定性规则。
 - 规则输出 `valid / warning / blocked / unresolved`，带 rule id、来源和 affected components。
