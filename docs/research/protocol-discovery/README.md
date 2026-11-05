@@ -60,6 +60,19 @@
 | B11 | [batch-11-3d-spheroid-models.md](batch-11-3d-spheroid-models.md) | 3D 球体/悬滴/ALI | 已完成;零新公共模块 |
 | B12 | [batch-12-live-imaging-and-cell-death-cycle.md](batch-12-live-imaging-and-cell-death-cycle.md) | 活细胞成像/死亡/周期 | 已完成;零新公共模块 |
 | B13 | [batch-13-protein-purification-and-ip.md](batch-13-protein-purification-and-ip.md) | 蛋白纯化/IP | 已完成;零新公共模块 |
+| B14 | [batch-14-molecular-cloning.md](batch-14-molecular-cloning.md) | 分子克隆链 | 已完成;零新公共模块 |
+| B15 | [batch-15-primary-cells-and-dissociation.md](batch-15-primary-cells-and-dissociation.md) | 原代细胞/组织解离 | 已完成;零新公共模块 |
+| B16 | [batch-16-crispr-and-viral-transduction.md](batch-16-crispr-and-viral-transduction.md) | CRISPR/病毒转导 | 已完成;零新公共模块 |
+| B17 | [batch-17-cell-material-interaction.md](batch-17-cell-material-interaction.md) | 细胞–材料相互作用 | 已完成;零新公共模块 |
+| B18 | [batch-18-histology-and-ihc.md](batch-18-histology-and-ihc.md) | 组织学/IHC | 已完成;零新公共模块 |
+| B19 | [batch-19-organoid-differentiation.md](batch-19-organoid-differentiation.md) | 类器官分化 | 已完成;零新公共模块 |
+| B20 | [batch-20-extracellular-vesicles-and-subcellular-fractionation.md](batch-20-extracellular-vesicles-and-subcellular-fractionation.md) | EV/亚细胞组分 | 已完成;零新公共模块 |
+| B21 | [batch-21-reporter-ros-mitochondria-calcium.md](batch-21-reporter-ros-mitochondria-calcium.md) | 报告基因/ROS/线粒体/钙 | 已完成;零新公共模块 |
+| B22 | [batch-22-cell-line-qc.md](batch-22-cell-line-qc.md) | 细胞系 QC | 已完成;零新公共模块 |
+
+## Post-B22 结论
+
+见 [post-b22-review.md](post-b22-review.md):常规湿实验覆盖已完成;下一步转 Catalog Promotion Review v2,不再扩宽度。
 
 ## 剩余实验地图
 
