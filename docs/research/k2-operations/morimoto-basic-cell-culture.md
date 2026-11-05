@@ -5,6 +5,8 @@
 - 来源类型:大学实验室公开 protocol(Northwestern University, Morimoto Lab);不是同行评议期刊
 - 范围:基础哺乳动物细胞培养:传代、血球计数、台盼蓝活力、冻存/复苏
 - 粒度:Composite Block / Method Template / 一个读数原子;不新增公共 Atomic Operation
+- 完整性审计:见 [protocol-discovery/batch-01-morimoto-cell-culture.md](../protocol-discovery/batch-01-morimoto-cell-culture.md)
+- 审计修正:血球计数原文的两套边界规则自相矛盾,不能当成唯一规则;台盼蓝 0.8 mM 与 Thermo 0.4% 是不同来源条件,不合并;活力公式原文未给;thaw 尚无独立模块。
 
 ## 1. 来源
 

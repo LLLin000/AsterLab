@@ -180,6 +180,15 @@ Atomic Operation 固定的是**科学语义与边界**,不是所有数值:
 
 **第一版 Catalog 应小而有真实复用证据,不是覆盖所有已知操作。**
 
+## 1.7 Protocol Discovery 轻量记录
+
+持续研究 Protocol 时,不需要每篇都写完整 OperationRecord。每篇先交两张表:
+
+1. **步骤拆解表**:原文步骤 → 操作语义/现有模块/候选 → 输入/输出 → 参数归属 → 来源定位。
+2. **公共操作复用表**:候选 → 出现过的独立方法家族 → 处理决定 → 证据/缺口。
+
+只有当一个候选要通过公共 Catalog 晋升时,才展开完整 PortSpec/SampleTransition/参数证据。详见 [protocol-discovery](protocol-discovery/README.md)。
+
 ## 2. OperationRecord 必填结构
 
 | 区块 | 必填内容 |
