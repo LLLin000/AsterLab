@@ -29,6 +29,7 @@
 23. [粒度候选](k2-operations/granularity-candidates.md) / [独立复审](k2-operations/granularity-candidate-review.md) / [五场景](k2-operations/granularity-scenarios.md) — 约 18–20 个候选的四维审查与五类实验组合验证。
 24. [Catalog 晋升审计](k2-operations/catalog-promotion-audit.md) — 原子性不等于公共模块；复用广度/语义稳定/抽象收益/差异成本四道门槛，以及第一版公共操作清单。
 25. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
+26. [组件体系与 LabwareProfile 设计评审](2026-11-05-component-profile-and-labware-design-review.md) — C3 架构基线：通用表格/计算器、LabwareProfile、计划容器/孔位/包含关系、修订顺序；评审稿。
 
 ## 证据标签
 
