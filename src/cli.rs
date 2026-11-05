@@ -1,8 +1,12 @@
-use asterlab_core::operation_module::ParameterValueType;
+use asterlab_core::operation_module::{
+    ModuleBinding, ModuleOrigin, OperationModule, ParameterValueType, ProtocolBlockVersionRef,
+};
+use asterlab_core::protocol_block::ReviewRecord;
 use asterlab_core::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep};
 use asterlab_core::protocol_preview::{
     OperationStep, ProtocolPreview, ResolvedParameter, UnresolvedParameter,
 };
+use asterlab_core::semantic_catalog::{compile_operation_module, CompilePolicy};
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -490,6 +494,22 @@ struct ProtocolBlockCreate {
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct CatalogOperationImport {
+    project_id: String,
+    module: OperationModule,
+    review_id: String,
+    #[serde(default)]
+    summary: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogReviewCreate {
+    project_id: String,
+    review: ReviewRecord,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct ProtocolBlockRevise {
     block_id: String,
     expected_version: i64,
@@ -537,6 +557,7 @@ struct ComposeAccumulator {
     resolved_parameters: Vec<ResolvedParameter>,
     unresolved_parameters: Vec<UnresolvedParameter>,
     block_version_ids: Vec<String>,
+    module_contracts: Vec<Value>,
     unresolved_keys: HashSet<String>,
 }
 fn block_version_data(
@@ -797,6 +818,18 @@ fn expand_block(
     if !acc.block_version_ids.iter().any(|id| id == version_id) {
         acc.block_version_ids.push(version_id.to_owned());
     }
+    if data.module_contract.is_some()
+        && !acc
+            .module_contracts
+            .iter()
+            .any(|entry| entry.get("block_version_id").and_then(Value::as_str) == Some(version_id))
+    {
+        acc.module_contracts.push(json!({
+            "block_version_id":version_id,
+            "module_contract":data.module_contract,
+            "catalog_review":data.catalog_review
+        }));
+    }
     let slots = validate_parameter_slots(&data.parameter_slots)?;
     for slot in &data.parameter_slots {
         let slot_path = format!("{path}/{}", slot.key);
@@ -947,6 +980,7 @@ fn block_preview(
         resolved_parameters: acc.resolved_parameters,
         unresolved_parameters: acc.unresolved_parameters,
         block_version_ids: acc.block_version_ids,
+        module_contracts: acc.module_contracts,
     };
     serde_json::to_value(preview).map_err(|e| CliError::internal(e.to_string()))
 }
@@ -957,7 +991,7 @@ pub fn protocol_block_manifest(
 ) -> Result<Value, String> {
     let Some(version_id) = root_version_id else {
         return Ok(
-            json!({"root_block_version_id":null,"block_version_ids":[],"root_bindings":[],"protocol_ready":true,"steps":[],"resolved_parameters":[],"unresolved_parameters":[]}),
+            json!({"root_block_version_id":null,"block_version_ids":[],"root_bindings":[],"protocol_ready":true,"steps":[],"resolved_parameters":[],"unresolved_parameters":[],"module_contracts":[]}),
         );
     };
     let typed: Vec<RootParameterValue> = serde_json::from_value(bindings.clone())
@@ -966,6 +1000,7 @@ pub fn protocol_block_manifest(
     Ok(json!({
         "root_block_version_id":version_id,
         "block_version_ids":preview["block_version_ids"],
+        "module_contracts":preview["module_contracts"],
         "root_bindings":typed,
         "protocol_ready":preview["ready"],
         "steps":preview["steps"],
@@ -1040,6 +1075,7 @@ fn protocol_manifest_entry_with_bindings(
         "protocol_version":version_data["version"].as_u64().unwrap_or(revision as u64),
         "root_block_version_id":block_manifest["root_block_version_id"],
         "block_version_ids":block_manifest["block_version_ids"],
+        "module_contracts":block_manifest["module_contracts"],
         "root_bindings":block_manifest["root_bindings"],
         "protocol_ready":block_manifest["protocol_ready"],
         "steps":block_manifest["steps"],
@@ -1606,6 +1642,8 @@ pub(crate) fn create_protocol_block_records(
         parameter_slots: i.parameter_slots,
         steps: i.steps,
         module_contract: None,
+        module_origin: None,
+        catalog_review: None,
     };
     let serialized =
         serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
@@ -1648,13 +1686,17 @@ pub(crate) fn revise_protocol_block_records(
         return Err(CliError::input("步骤块摘要不能超过 1000 个字符"));
     }
     validate_block_content(tx, &project_id, &i.parameter_slots, &i.steps)?;
+    let module_contract = current_data.module_contract.clone();
+    let module_origin = module_contract.as_ref().map(|_| ModuleOrigin::Derived);
     let version_data = ProtocolBlockVersionData {
         block_id: i.block_id.clone(),
         version: latest + 1,
         summary,
         parameter_slots: i.parameter_slots,
         steps: i.steps,
-        module_contract: None,
+        module_contract,
+        module_origin,
+        catalog_review: None,
     };
     let serialized =
         serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
@@ -1668,6 +1710,114 @@ pub(crate) fn revise_protocol_block_records(
     )?;
     Ok(json!({"version":version}))
 }
+pub(crate) fn create_catalog_review_records(
+    tx: &Transaction<'_>,
+    project_id: &str,
+    data: &Value,
+) -> Result<Value, CliError> {
+    let mut input = data.clone();
+    input["project_id"] = json!(project_id);
+    let i: CatalogReviewCreate = serde_json::from_value(input)
+        .map_err(|e| CliError::input(format!("审核记录数据结构无效：{e}")))?;
+    ensure_project(tx, &i.project_id)?;
+    if i.review.review_id.trim().is_empty()
+        || i.review.reviewer.trim().is_empty()
+        || i.review.evidence_id.trim().is_empty()
+        || i.review.evidence_locator.trim().is_empty()
+        || i.review.content_digest.trim().is_empty()
+    {
+        return Err(CliError::input("审核记录缺少必填来源字段"));
+    }
+    let record = insert(
+        tx,
+        "catalog_review",
+        Some(&i.project_id),
+        Some(&i.project_id),
+        1,
+        &serde_json::to_value(&i.review).map_err(|e| CliError::internal(e.to_string()))?,
+    )?;
+    Ok(json!({"record":record}))
+}
+
+pub(crate) fn import_catalog_operation_records(
+    tx: &Transaction<'_>,
+    project_id: &str,
+    data: &Value,
+) -> Result<Value, CliError> {
+    let mut input = data.clone();
+    input["project_id"] = json!(project_id);
+    let i: CatalogOperationImport = serde_json::from_value(input)
+        .map_err(|e| CliError::input(format!("Catalog 导入数据结构无效：{e}")))?;
+    ensure_project(tx, &i.project_id)?;
+    let review_record = get(tx, &i.review_id).map_err(|_| CliError::input("审核记录不存在"))?;
+    if review_record["kind"] != "catalog_review" {
+        return Err(CliError::input("review_id 必须指向 catalog_review"));
+    }
+    if review_record["project_id"].as_str() != Some(i.project_id.as_str()) {
+        return Err(CliError::input("审核记录必须属于同一项目"));
+    }
+    let review: ReviewRecord = serde_json::from_value(review_record["data"].clone())
+        .map_err(|e| CliError::input(format!("审核记录数据无效：{e}")))?;
+    let summary = i
+        .summary
+        .unwrap_or_else(|| i.module.semantics.purpose.clone());
+    if summary.chars().count() > 1000 {
+        return Err(CliError::input("步骤块摘要不能超过 1000 个字符"));
+    }
+    let block = insert(
+        tx,
+        "protocol_block",
+        Some(&i.project_id),
+        Some(&i.project_id),
+        1,
+        &json!({"title":i.module.identity.title.trim(),"summary":summary}),
+    )?;
+    let block_id = block["id"].as_str().unwrap_or_default().to_owned();
+    let binding = ModuleBinding {
+        catalog: Some(i.module.identity.catalog.clone()),
+        block_version: ProtocolBlockVersionRef {
+            block_id: block_id.clone(),
+            // The DB assigns the real version record id on insert below. The
+            // compiler only needs a stable local placeholder; it is never
+            // persisted as a BlockUse reference.
+            version_id: format!("pending-{block_id}"),
+        },
+        origin: ModuleOrigin::Imported,
+        based_on: None,
+    };
+    let compiled =
+        compile_operation_module(&i.module, binding, CompilePolicy::default(), Some(&review))
+            .map_err(semantic_error)?;
+    let mut version_data = compiled.to_block_version_data(1).map_err(semantic_error)?;
+    version_data.catalog_review = Some(review);
+    validate_block_content(
+        tx,
+        &i.project_id,
+        &version_data.parameter_slots,
+        &version_data.steps,
+    )?;
+    let serialized =
+        serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
+    let version = insert(
+        tx,
+        "protocol_block_version",
+        Some(&i.project_id),
+        Some(&block_id),
+        1,
+        &serialized,
+    )?;
+    Ok(json!({"block":block,"version":version}))
+}
+
+fn semantic_error(issues: Vec<asterlab_core::semantic_component::SemanticIssue>) -> CliError {
+    let message = issues
+        .into_iter()
+        .map(|issue| format!("{}: {}", issue.code, issue.message))
+        .collect::<Vec<_>>()
+        .join("; ");
+    CliError::input(message)
+}
+
 pub(crate) fn ensure_run_protocol_ready(db: &Connection, run_id: &str) -> Result<(), CliError> {
     let (kind, _, _, _, raw) =
         kind_id(db, run_id)?.ok_or_else(|| CliError::missing("实验运行不存在"))?;
@@ -3159,6 +3309,34 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(result)
         }
+        "catalog.review.record" => {
+            let i: CatalogReviewCreate = parse_input(path)?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
+            let result = create_catalog_review_records(
+                &tx,
+                payload["project_id"].as_str().unwrap_or_default(),
+                &payload,
+            )?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(result)
+        }
+        "catalog.operation.import" => {
+            let i: CatalogOperationImport = parse_input(path)?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
+            let result = import_catalog_operation_records(
+                &tx,
+                payload["project_id"].as_str().unwrap_or_default(),
+                &payload,
+            )?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(result)
+        }
         "protocol.block.revise" => {
             let i: ProtocolBlockRevise = parse_input(path)?;
             let tx = db
@@ -3681,8 +3859,11 @@ fn record_data_schema(kind: &str) -> Value {
         "protocol_block" => {
             json!({"type":"object","additionalProperties":false,"required":["title","summary"],"properties":{"title":{"type":"string"},"summary":{"type":"string"}}})
         }
+        "catalog_review" => {
+            json!({"type":"object","additionalProperties":false,"required":["review_id","subject","status","reviewer","reviewed_at","evidence_id","evidence_locator","content_digest"],"properties":{"review_id":{"type":"string"},"subject":{"type":"object","additionalProperties":false,"required":["module_id","version"],"properties":{"module_id":{"type":"string"},"version":{"type":"integer","minimum":1}}},"status":{"type":"string","enum":["research_draft","source_checked","expert_reviewed","lab_validated"]},"reviewer":{"type":"string"},"reviewed_at":{"type":"string"},"evidence_id":{"type":"string"},"evidence_locator":{"type":"string"},"content_digest":{"type":"string"}}})
+        }
         "protocol_block_version" => {
-            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
+            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"module_contract":{"type":["object","null"]},"module_origin":{"type":["string","null"],"enum":["imported","derived","local_custom",null]},"catalog_review":{"type":["object","null"]},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
         }
         "plate" => {
             json!({"type":"object","additionalProperties":false,"required":["name","format","rows","columns"],"properties":{"name":{"type":"string"},"format":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48},"assay_id":{"type":["string","null"]},"timepoint":{"type":["string","null"]}}})
@@ -3721,6 +3902,7 @@ fn any_record_schema() -> Value {
         "protocol_version",
         "protocol_block",
         "protocol_block_version",
+        "catalog_review",
         "plate",
         "well",
         "note",
@@ -3760,14 +3942,15 @@ fn result_schema(tool: &str) -> Value {
         "protocol.block.get" => {
             json!({"type":"object","additionalProperties":false,"required":["block","latest_version","versions"],"properties":{"block":record_schema("protocol_block"),"latest_version":record_schema("protocol_block_version"),"versions":{"type":"array","items":record_schema("protocol_block_version")}}})
         }
-        "protocol.block.create" => {
+        "catalog.review.record" => one("catalog_review"),
+        "protocol.block.create" | "catalog.operation.import" => {
             json!({"type":"object","additionalProperties":false,"required":["block","version"],"properties":{"block":record_schema("protocol_block"),"version":record_schema("protocol_block_version")}})
         }
         "protocol.block.revise" => {
             json!({"type":"object","additionalProperties":false,"required":["version"],"properties":{"version":record_schema("protocol_block_version")}})
         }
         "protocol.block.preview" => {
-            json!({"type":"object","additionalProperties":false,"required":["block_version_id","block_id","title","version","ready","steps","resolved_parameters","unresolved_parameters","block_version_ids"],"properties":{"block_version_id":{"type":"string"},"block_id":{"type":"string"},"title":{"type":"string"},"version":{"type":"integer"},"ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","use_id","title","instruction","parameters","unresolved_parameter_refs","source_block_version_id"],"properties":{"path":{"type":"string"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","label","value","unit","provenance"],"properties":{"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameter_refs":{"type":"array","items":{"type":"string"}},"source_block_version_id":{"type":"string"},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]}}}},"resolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","value","unit","provenance"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"block_version_ids":{"type":"array","items":{"type":"string"}}}})
+            json!({"type":"object","additionalProperties":false,"required":["block_version_id","block_id","title","version","ready","steps","resolved_parameters","unresolved_parameters","block_version_ids"],"properties":{"module_contracts":{"type":"array","items":{"type":"object","additionalProperties":true}},"block_version_id":{"type":"string"},"block_id":{"type":"string"},"title":{"type":"string"},"version":{"type":"integer"},"ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","use_id","title","instruction","parameters","unresolved_parameter_refs","source_block_version_id"],"properties":{"path":{"type":"string"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","label","value","unit","provenance"],"properties":{"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameter_refs":{"type":"array","items":{"type":"string"}},"source_block_version_id":{"type":"string"},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]}}}},"resolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","value","unit","provenance"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"block_version_ids":{"type":"array","items":{"type":"string"}}}})
         }
         "protocol.create" => {
             json!({"type":"object","additionalProperties":false,"required":["protocol","version"],"properties":{"protocol":record_schema("protocol"),"version":record_schema("protocol_version")}})
@@ -3851,6 +4034,12 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "protocol.block.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","steps"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"summary":{"type":"string","maxLength":1000},"parameter_slots":{"type":"array","maxItems":100,"items":parameter_slot_input_schema()},"steps":{"type":"array","minItems":1,"maxItems":100,"items":protocol_step_input_schema()}}})
+        }
+        "catalog.review.record" => {
+            json!({"type":"object","additionalProperties":false,"required":["project_id","review"],"properties":{"project_id":{"type":"string"},"review":{"type":"object"}}})
+        }
+        "catalog.operation.import" => {
+            json!({"type":"object","additionalProperties":false,"required":["project_id","module","review_id"],"properties":{"project_id":{"type":"string"},"summary":{"type":"string","maxLength":1000},"module":{"type":"object"},"review_id":{"type":"string"}}})
         }
         "protocol.block.revise" => {
             json!({"type":"object","additionalProperties":false,"required":["block_id","expected_version","steps"],"properties":{"block_id":{"type":"string"},"expected_version":{"type":"integer","minimum":1},"summary":{"type":"string","maxLength":1000},"parameter_slots":{"type":"array","maxItems":100,"items":parameter_slot_input_schema()},"steps":{"type":"array","minItems":1,"maxItems":100,"items":protocol_step_input_schema()}}})
@@ -4036,6 +4225,8 @@ fn tool_specs() -> Vec<Value> {
         "protocol.block.list",
         "protocol.block.get",
         "protocol.block.create",
+        "catalog.review.record",
+        "catalog.operation.import",
         "protocol.block.revise",
         "protocol.block.preview",
         "protocol.create",
@@ -4101,6 +4292,8 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.block.list" => "按项目列出可复用步骤块。",
         "protocol.block.get" => "读取步骤块及其全部不可变版本。",
         "protocol.block.create" => "创建可作为完整 Protocol 或子步骤复用的版本化步骤块；只记录明确提供的操作和参数槽位。",
+        "catalog.review.record" => "保存一条审核记录；正式导入必须通过 review_id 引用它。",
+        "catalog.operation.import" => "在受控事务中导入审核过的 OperationModule，分配本地 Block/Version ID，并保存 module_contract 与 ReviewRecord。",
         "protocol.block.revise" => "按 expected_version 创建步骤块新版本；旧版本和引用不变。",
         "protocol.block.preview" => "只读展开组合步骤，返回操作顺序、参数来源和未填写槽位；不写入。",
         "protocol.create" => "创建 Protocol；可引用一个确切根步骤块版本及本版参数绑定，也兼容自由文本正文。",
@@ -4156,6 +4349,8 @@ fn tool_effects(tool: &str) -> &'static str {
         "protocol.create" => "创建 Protocol 记录并创建不可变的 v1 正文版本。",
         "protocol.revise" => "为 Protocol 追加一个不可变的新版本；不覆盖旧正文。",
         "protocol.block.create" => "创建步骤块元数据和不可变 v1；步骤块只引用确切的其他版本。",
+        "catalog.review.record" => "保存一条审核证明；不创建 Block 或 Protocol。",
+        "catalog.operation.import" => "创建一个本地导入的步骤块及其不可变版本；保留 Catalog 精确版本、module_contract 和审核记录。",
         "protocol.block.revise" => "为步骤块追加不可变版本；不会改写已保存的组合或运行。",
         "plate.create" => "为指定运行创建一个空铺板布局。",
         "well.set" => "新建孔位映射，或按 expected_revision 覆盖一个已有孔位。",

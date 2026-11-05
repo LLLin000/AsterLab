@@ -18,6 +18,8 @@ pub struct ProtocolPreview {
     pub resolved_parameters: Vec<ResolvedParameter>,
     pub unresolved_parameters: Vec<UnresolvedParameter>,
     pub block_version_ids: Vec<String>,
+    #[serde(default)]
+    pub module_contracts: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

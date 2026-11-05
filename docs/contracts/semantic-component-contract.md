@@ -400,11 +400,23 @@ S2-A/B · Catalog Compiler and Formal Mapping:
 - [x] CLI 使用正式 block 类型,不新增第二套 Protocol/Run。
 - [ ] 用真实 ProtocolPreview / RunWorkspace 创建并冻结一个合成 Run;目前只验证正式结构、BlockUse 适配和组合校验。
 - [x] CLI 已使用正式 `ParameterSlot` / `ProtocolStep` / `ProtocolBlockVersionData`;不新增第二套持久化。
-- [x] 未改 Slint/数据库/正式 Run。
+- [x] 未改 Slint/正式 Run 执行模型。
 
-未开始:
+S2-B3 · Persistence & Frozen Run:
 
-- S2-B 深水区:用真实 ProtocolPreview/RunWorkspace 做完整合成 Run 冻结验证(目前只验证结构/读取,没有创建 Run)。
+- [x] `catalog.review.record` 先保存审核记录;`catalog.operation.import` 只接受 `review_id` 并从数据库读取。
+- [x] `catalog.operation.import` 在单一事务中创建本地 Block/Version,使用 DB 分配的真实 Version ID。
+- [x] 保存 `module_contract`、`module_origin`、`catalog_review`;旧 Block JSON 无这些字段仍可读。
+- [x] `ReviewRecord` 绑定精确 Catalog 版本、复核者/时间/证据定位和规范化内容 SHA-256。
+- [x] 普通 `protocol.block.revise` 保留 module contract,标为 `derived`,并清除原审核记录。
+- [x] ProtocolPreview / Run manifest 冻结 `module_contracts` 与 review;RunWorkspace 继续只消费原有 steps/tasks/occurrences。
+- [x] `tests/catalog_import.rs` 端到端覆盖审核记录、导入、预览、Protocol、Design、Run 创建与冻结语义。
+- [x] 旧 `protocol.block.create` / `revise` / 读取路径保持兼容。
+
+未开始 / 残余:
+
+- 审核记录仍有“谁能写审核记录”的权限缺口;当前只证明来源字段与内容摘要,尚未接入账号/权限系统。
+- S2-B4(可选):同一模块在不同 Assay 下创建多个真实 Run,并验证 Catalog 新版本不会改写旧 Run。
 - S3:Agent 正式语义命令与事务写入适配。
 
 ## 9. 来源

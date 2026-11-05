@@ -66,13 +66,13 @@ pub struct ModuleBinding {
 impl ModuleBinding {
     pub fn validate(&self) -> Result<(), Vec<ContractIssue>> {
         let mut issues = Vec::new();
-        validate_stable_id(
+        validate_local_id(
             &self.block_version.block_id,
             "block_version.block_id",
             "block_id",
             &mut issues,
         );
-        validate_stable_id(
+        validate_local_id(
             &self.block_version.version_id,
             "block_version.version_id",
             "version_id",
@@ -1360,6 +1360,23 @@ fn numeric_value(value_type: ParameterValueType, value: &Value) -> Option<f64> {
             .map(|value| value as f64)
             .or_else(|| value.as_u64().map(|value| value as f64)),
         _ => None,
+    }
+}
+
+/// Project-local IDs may be UUIDs (starting with a digit) or stable local
+/// handles. They are still distinct from catalog module IDs.
+fn validate_local_id(value: &str, path: &str, name: &str, issues: &mut Vec<ContractIssue>) {
+    let ok = !value.is_empty()
+        && value.len() <= 120
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-');
+    if !ok {
+        issues.push(issue(
+            "local_id",
+            path,
+            format!("{name} must be a non-empty local ID (letters, digits, '.', '_' or '-')"),
+        ));
     }
 }
 

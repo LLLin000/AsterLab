@@ -10,7 +10,7 @@ use crate::operation_module::{
     CatalogModuleRef, ContractIssue, InstrumentRequirement, ModuleBinding, ModuleOrigin,
     OperationModule, PortSpec, ReviewStatus, SampleTransition,
 };
-use crate::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep};
+use crate::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep, ReviewRecord};
 use crate::protocol_preview::StepTimeScope;
 use crate::semantic_component::{ProtocolScope, SampleExpectation, SemanticIssue};
 use crate::semantic_composition::{
@@ -20,50 +20,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub const SEMANTIC_CATALOG_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct ReviewRecord {
-    pub review_id: String,
-    pub subject: CatalogModuleRef,
-    pub status: ReviewStatus,
-    pub evidence_id: String,
-}
-
-impl ReviewRecord {
-    pub fn validate_for(&self, module: &OperationModule) -> Vec<SemanticIssue> {
-        let mut issues = Vec::new();
-        if self.review_id.trim().is_empty() {
-            issues.push(issue(
-                "empty_review_id",
-                "review_id",
-                "review id must not be empty",
-            ));
-        }
-        if self.evidence_id.trim().is_empty() {
-            issues.push(issue(
-                "review_evidence",
-                "evidence_id",
-                "review record must name its evidence",
-            ));
-        }
-        if !self.subject.matches_exact(&module.identity.catalog) {
-            issues.push(issue(
-                "review_subject_mismatch",
-                "subject",
-                "review record must bind the exact catalog module version",
-            ));
-        }
-        if self.status.rank() < ReviewStatus::SourceChecked.rank() {
-            issues.push(issue(
-                "review_status",
-                "status",
-                "review status is below source-checked",
-            ));
-        }
-        issues
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -277,6 +233,8 @@ impl CompiledBlock {
                 .collect(),
             steps,
             module_contract: Some(self.module_contract.clone()),
+            module_origin: Some(self.binding.origin),
+            catalog_review: None,
         })
     }
 
@@ -376,7 +334,18 @@ pub fn compile_operation_module(
     }
     if !policy.allow_research_draft {
         match review {
-            Some(review) => issues.extend(review.validate_for(module)),
+            Some(review) => issues.extend(
+                review
+                    .validate_for(module)
+                    .into_iter()
+                    .map(|issue| {
+                        crate::semantic_component::SemanticIssue {
+                            code: issue.code,
+                            path: "review".into(),
+                            message: issue.message,
+                        }
+                    }),
+            ),
             None => issues.push(issue(
                 "review_record_required",
                 "review",
@@ -474,6 +443,7 @@ mod tests {
         ModuleKnowledge, ModuleSemantics, OperationParameter, ParameterValueType, PortObjectType,
         PortRole, ReviewStatus, SampleEffect, SampleTransition, ValueSource,
     };
+    use crate::protocol_block::module_content_digest;
     use crate::protocol_preview::StepTimeScope;
     use crate::semantic_composition::composition_from_block_uses;
 
@@ -602,7 +572,11 @@ mod tests {
             review_id: "review-1".into(),
             subject: module.identity.catalog.clone(),
             status: ReviewStatus::SourceChecked,
+            reviewer: "reviewer-1".into(),
+            reviewed_at: "2026-11-05T00:00:00Z".into(),
             evidence_id: "module-source-1".into(),
+            evidence_locator: "fixture:1".into(),
+            content_digest: module_content_digest(module),
         }
     }
 
@@ -728,6 +702,19 @@ mod tests {
             .any(|issue| issue.code == "review_record_required"));
 
         let mut wrong = review_for(&module);
+        wrong.content_digest = "not-the-digest".into();
+        let errors = compile_operation_module(
+            &module,
+            binding("block-1", "block-v1"),
+            CompilePolicy::default(),
+            Some(&wrong),
+        )
+        .unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|issue| issue.code == "review_content_digest"));
+
+        let mut wrong = review_for(&module);
         wrong.subject.version = 2;
         let errors = compile_operation_module(
             &module,
@@ -755,6 +742,7 @@ mod tests {
         assert_eq!(data.block_id, "block-1");
         assert_eq!(data.version, 1);
         assert_eq!(data.module_contract.as_ref(), Some(&module));
+        assert_eq!(data.module_origin, Some(ModuleOrigin::Imported));
         let serialized = serde_json::to_value(&data).unwrap();
         assert!(serialized.get("module_contract").is_some());
         let round_trip: ProtocolBlockVersionData =
