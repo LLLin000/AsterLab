@@ -211,7 +211,9 @@ pub fn run_reagent_tool(
         "extra_ratio": extra_ratio
     });
     run_pure(
-        &ReagentTool { spec: reagent_tool_spec() },
+        &ReagentTool {
+            spec: reagent_tool_spec(),
+        },
         "reagent-total",
         inputs,
     )

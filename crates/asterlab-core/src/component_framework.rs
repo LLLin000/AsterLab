@@ -336,7 +336,10 @@ impl ComponentRegistry {
         let mut port_ids = HashSet::new();
         for port in definition.inputs.iter().chain(definition.outputs.iter()) {
             if port.id.trim().is_empty() {
-                return Err(format!("component {}@{} has an empty port id", definition.id, definition.version));
+                return Err(format!(
+                    "component {}@{} has an empty port id",
+                    definition.id, definition.version
+                ));
             }
             if !port_ids.insert(port.id.as_str()) {
                 return Err(format!(
@@ -348,7 +351,10 @@ impl ComponentRegistry {
         let mut slot_ids = HashSet::new();
         for slot in &definition.slots {
             if slot.id.trim().is_empty() {
-                return Err(format!("component {}@{} has an empty slot id", definition.id, definition.version));
+                return Err(format!(
+                    "component {}@{} has an empty slot id",
+                    definition.id, definition.version
+                ));
             }
             if !slot_ids.insert(slot.id.as_str()) {
                 return Err(format!(
@@ -590,8 +596,16 @@ pub fn default_registry() -> ComponentRegistry {
             title: "Table".into(),
             props_schema: json!({"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","enum":["authored","bound"]},"markdown":{"type":"string"},"columns":{"type":"array"},"rows":{"type":"array"}}}),
             capabilities: vec!["content".into(), "bind".into()],
-            inputs: vec![ComponentPort { id: "data".into(), value_type: ComponentValueType::Data, required: false }],
-            outputs: vec![ComponentPort { id: "values".into(), value_type: ComponentValueType::Data, required: false }],
+            inputs: vec![ComponentPort {
+                id: "data".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
+            outputs: vec![ComponentPort {
+                id: "values".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
             slots: vec![],
             presentation: Some("content.table".into()),
             agent_operations: vec!["update".into(), "bind".into()],
@@ -638,8 +652,16 @@ pub fn default_registry() -> ComponentRegistry {
             title: "Calculator".into(),
             props_schema: json!({"type":"object","additionalProperties":false,"properties":{"tool_ref":{"type":"string"},"preset":{"type":"object"}}}),
             capabilities: vec!["calculate".into()],
-            inputs: vec![ComponentPort { id: "values".into(), value_type: ComponentValueType::Data, required: false }],
-            outputs: vec![ComponentPort { id: "result".into(), value_type: ComponentValueType::Data, required: false }],
+            inputs: vec![ComponentPort {
+                id: "values".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
+            outputs: vec![ComponentPort {
+                id: "result".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
             slots: vec![],
             presentation: Some("tool.calculator".into()),
             agent_operations: vec!["bind".into(), "update".into()],
@@ -655,7 +677,11 @@ pub fn default_registry() -> ComponentRegistry {
             props_schema: json!({"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"}}}),
             capabilities: vec!["reference".into()],
             inputs: vec![],
-            outputs: vec![ComponentPort { id: "value".into(), value_type: ComponentValueType::Data, required: false }],
+            outputs: vec![ComponentPort {
+                id: "value".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
             slots: vec![],
             presentation: Some("data.reference".into()),
             agent_operations: vec!["update".into()],
@@ -670,7 +696,11 @@ pub fn default_registry() -> ComponentRegistry {
             title: "Chart".into(),
             props_schema: json!({"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string"}}}),
             capabilities: vec!["visualize".into()],
-            inputs: vec![ComponentPort { id: "data".into(), value_type: ComponentValueType::Data, required: false }],
+            inputs: vec![ComponentPort {
+                id: "data".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
             outputs: vec![],
             slots: vec![],
             presentation: Some("visual.chart".into()),
@@ -920,7 +950,11 @@ impl ViewDocument {
             ));
         }
         if changeset.operations.is_empty() {
-            issues.push(issue("empty_changeset", "operations", "changeset has no operations"));
+            issues.push(issue(
+                "empty_changeset",
+                "operations",
+                "changeset has no operations",
+            ));
         }
         if !issues.is_empty() {
             return Err(issues);
@@ -1477,7 +1511,11 @@ fn apply_patch(
                 .iter_mut()
                 .find(|existing| existing.binding_id == binding.binding_id)
             else {
-                return Err(vec![issue("missing_binding", &binding.binding_id, "binding does not exist")]);
+                return Err(vec![issue(
+                    "missing_binding",
+                    &binding.binding_id,
+                    "binding does not exist",
+                )]);
             };
             *existing = binding.clone();
             affected_bindings.push(binding.binding_id.clone());
@@ -1863,7 +1901,12 @@ mod tests {
             "media.figure",
         ] {
             assert!(
-                registry.get(&ComponentDefinitionRef { id: id.into(), version: 1 }).is_some(),
+                registry
+                    .get(&ComponentDefinitionRef {
+                        id: id.into(),
+                        version: 1
+                    })
+                    .is_some(),
                 "missing definition {id}"
             );
         }
@@ -2054,7 +2097,9 @@ mod tests {
             }],
             provenance: vec![],
         };
-        assert!(document.apply_changeset(&missing_binding, &registry).is_err());
+        assert!(document
+            .apply_changeset(&missing_binding, &registry)
+            .is_err());
 
         let scientific_prop = ViewChangeSet {
             changeset_id: "scientific-prop".into(),
@@ -2067,7 +2112,9 @@ mod tests {
             }],
             provenance: vec![],
         };
-        assert!(document.apply_changeset(&scientific_prop, &registry).is_err());
+        assert!(document
+            .apply_changeset(&scientific_prop, &registry)
+            .is_err());
 
         let index = ViewChangeSet {
             changeset_id: "index".into(),
