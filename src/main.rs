@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -148,6 +148,32 @@ async fn view_page() -> Html<&'static str> {
 async fn get_view(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
     let db = lock(&s)?;
     let result = cli::get_view(&db, &id).map_err(ApiError::from_cli)?;
+    Ok(Json(result))
+}
+#[derive(Deserialize)]
+struct ViewDataQuery {
+    instance_id: String,
+    #[serde(default)]
+    calculator_instance_id: Option<String>,
+    #[serde(default)]
+    extra_ratio: Option<f64>,
+}
+async fn get_view_data(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<ViewDataQuery>,
+) -> ApiResult<Value> {
+    let db = lock(&s)?;
+    let result = cli::view_data_preview(
+        &db,
+        &json!({
+            "view_id": id,
+            "instance_id": query.instance_id,
+            "calculator_instance_id": query.calculator_instance_id,
+            "extra_ratio": query.extra_ratio
+        }),
+    )
+    .map_err(ApiError::from_cli)?;
     Ok(Json(result))
 }
 #[derive(Deserialize)]
@@ -710,6 +736,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/", get(index))
         .route("/view", get(view_page))
         .route("/api/views/{id}", get(get_view))
+        .route("/api/views/{id}/data", get(get_view_data))
         .route("/api/views/{id}/revise", post(revise_view))
         .route("/api/health", get(health))
         .route("/api/state", get(get_state))

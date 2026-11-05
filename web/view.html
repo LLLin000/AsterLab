@@ -51,6 +51,8 @@ function renderDetail(){
       cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><textarea id="note-${esc(child.instance_id)}">${esc(child.props?.text||"")}</textarea><div class="row" style="margin-top:8px"><button data-save="${esc(child.instance_id)}">保存说明</button></div></div>`);
     } else if(child.definition.id==="workflow"){
       cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><div class="muted">嵌套子流程 · ${workflowOf(child).length} 个步骤</div><button data-enter="${esc(child.instance_id)}" style="margin-top:8px">进入子流程</button></div>`);
+    } else if(child.definition.id==="lab.well_plate"){
+      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><div class="tag">${esc(slot)}</div><div class="muted">${esc(child.definition.id)}</div><button data-preview="${esc(child.instance_id)}" style="margin-top:8px">数据预览</button></div>`);
     } else {
       cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><div class="tag">${esc(slot)}</div><div class="muted">${esc(child.definition.id)}</div></div>`);
     }
@@ -58,6 +60,7 @@ function renderDetail(){
   $("detail").innerHTML=`<h2>Step Detail · ${esc(nodeTitle(node))}</h2><div class="muted">${esc(defName(node))} · ${esc(node.instance_id)}</div><div class="cards">${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div>`;
   $("detail").querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>{const id=b.dataset.enter;const child=Object.values(slotsOf(node)).flat().find(c=>c.instance_id===id);if(child){node=child;stack.push(child);render()}});
   $("detail").querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>saveNote(b.dataset.save));
+  $("detail").querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>loadData(b.dataset.preview));
 }
 function render(){renderCrumbs();renderNodes();renderDetail()}
 async function load(){viewId=$("viewId").value.trim();if(!viewId)return;$("status").textContent="加载中…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}`);const j=await r.json();if(!r.ok){$("status").textContent=j.error||"加载失败";return}data=j;node=data.latest_version?.data?.root;stack=node?[node]:[];render();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`}
@@ -70,6 +73,20 @@ async function saveNote(instanceId){
   const j=await r.json();
   if(!r.ok){$("status").textContent=j.error||"保存失败";return}
   $("status").textContent="已保存"; await load();
+}
+async function loadData(instanceId){
+  if(!data)return;
+  const all=[]; const walk=c=>{all.push(c);Object.values(c.slots||{}).flat().forEach(walk);(c.workflow?.nodes||[]).forEach(n=>walk(n.component));}; walk(data.latest_version.data.root);
+  const calc=all.find(c=>c.definition?.id==="tool.calculator");
+  const params=new URLSearchParams({instance_id:instanceId});
+  if(calc)params.set("calculator_instance_id",calc.instance_id);
+  params.set("extra_ratio","0.1");
+  $("status").textContent="加载数据…";
+  const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?${params}`); const j=await r.json();
+  if(!r.ok){$("status").textContent=j.error||"数据加载失败";return}
+  const table=j.result.table;
+  $("detail").insertAdjacentHTML("beforeend",`<div class="card" style="margin-top:12px"><h3>数据预览</h3><table><thead><tr>${table.columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table><div class="muted">${esc(table.unresolved.join(", ")||"resolved")}</div></div>`);
+  $("status").textContent="数据已加载";
 }
 $("load").onclick=load;
 </script>

@@ -158,6 +158,8 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 `view.project` 的 `scope` 必须是 `{"kind":"assay","assay_id":"..."}`、`{"kind":"planned_output","planned_output_id":"..."}` 或 `{"kind":"unscoped"}`。无 Assay 关联的只读预览应显式 unscoped；不能自动把未知作用域当作某个 Assay。
 
+HTTP: `GET /api/views/{id}/data?instance_id=...&calculator_instance_id=...&extra_ratio=...` 对应同一只读投影。
+
 `view.data_preview` 仍是最小只读投影：输入必须提供 `view_id` 和 WellPlate `instance_id`。可提供 `calculator_instance_id`，此时必须指向 `tool.calculator` 且 `props.tool_ref` 为 `tool.reagent_total@1`，并通过指向其 `values` 端口的 DataBinding 读取输入；也可用显式 `volume_per_well` 作为回退。`extra_ratio` 必填。缺少输入返回 `unresolved`，不补默认值。它不写 Design/Protocol/Run。
 
 `component.list` 的 `implemented=true` 表示当前有可用数据适配/测试；`catalog-only` 不代表可被 Agent 创建。12 个注册项中当前只有 workflow/operation/layout.section/content.table/tool.calculator/lab.well_plate 标为 implemented。
