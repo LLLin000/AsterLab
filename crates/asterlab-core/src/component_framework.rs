@@ -315,6 +315,9 @@ impl ComponentRegistry {
         }
         let mut port_ids = HashSet::new();
         for port in definition.inputs.iter().chain(definition.outputs.iter()) {
+            if port.id.trim().is_empty() {
+                return Err(format!("component {}@{} has an empty port id", definition.id, definition.version));
+            }
             if !port_ids.insert(port.id.as_str()) {
                 return Err(format!(
                     "component {}@{} has duplicate port id {}",
@@ -324,6 +327,9 @@ impl ComponentRegistry {
         }
         let mut slot_ids = HashSet::new();
         for slot in &definition.slots {
+            if slot.id.trim().is_empty() {
+                return Err(format!("component {}@{} has an empty slot id", definition.id, definition.version));
+            }
             if !slot_ids.insert(slot.id.as_str()) {
                 return Err(format!(
                     "component {}@{} has duplicate slot id {}",
@@ -356,7 +362,7 @@ pub fn default_registry() -> ComponentRegistry {
             version: 1,
             family: ComponentFamily::Workflow,
             title: "Workflow".into(),
-            props_schema: json!({"type":"object"}),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"label":{"type":"string"},"collapsed":{"type":"boolean"},"style":{"type":"string"}}}),
             capabilities: vec!["compose".into(), "navigate".into()],
             inputs: vec![],
             outputs: vec![],
@@ -384,7 +390,7 @@ pub fn default_registry() -> ComponentRegistry {
             version: 1,
             family: ComponentFamily::Operation,
             title: "Operation".into(),
-            props_schema: json!({"type":"object"}),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"label":{"type":"string"},"collapsed":{"type":"boolean"},"style":{"type":"string"}}}),
             capabilities: vec!["bind".into()],
             inputs: vec![],
             outputs: vec![],
@@ -701,6 +707,9 @@ impl ViewDocument {
                 "expected_revision",
                 "expected revision does not match the current document",
             ));
+        }
+        if changeset.operations.is_empty() {
+            issues.push(issue("empty_changeset", "operations", "changeset has no operations"));
         }
         if !issues.is_empty() {
             return Err(issues);
@@ -1082,7 +1091,16 @@ fn apply_patch(
                     )]
                 })?;
             let children = parent.slots.entry(target_slot_id.clone()).or_default();
-            let index = target_index.unwrap_or(children.len()).min(children.len());
+            if let Some(index) = target_index {
+                if *index > children.len() {
+                    return Err(vec![issue(
+                        "move_index",
+                        instance_id,
+                        "target index is outside the slot",
+                    )]);
+                }
+            }
+            let index = target_index.unwrap_or(children.len());
             children.insert(index, moved);
             changed.push(instance_id.clone());
             *requires_confirmation = true;
@@ -1127,18 +1145,19 @@ fn apply_patch(
                     )]
                 })?);
             remove_instance(&mut document.root, instance_id);
-            let before = document.bindings.len();
             document.bindings.retain(|binding| {
                 let target_removed = removed.contains(&binding.target.instance_id);
                 let source_removed = matches!(
                     &binding.source,
                     BindingSource::ComponentPort(source) if removed.contains(&source.instance_id)
                 );
-                !target_removed && !source_removed
+                if target_removed || source_removed {
+                    affected_bindings.push(binding.binding_id.clone());
+                    false
+                } else {
+                    true
+                }
             });
-            if document.bindings.len() != before {
-                affected_bindings.push(instance_id.clone());
-            }
             changed.extend(removed);
             *requires_confirmation = true;
         }
@@ -1161,6 +1180,13 @@ fn apply_patch(
                     "instance is not a workflow",
                 )]
             })?;
+            if workflow.edges.contains(edge) {
+                return Err(vec![issue(
+                    "duplicate_edge",
+                    workflow_instance_id,
+                    "workflow edge already exists",
+                )]);
+            }
             workflow.edges.push(edge.clone());
             *requires_confirmation = true;
         }
@@ -1183,7 +1209,15 @@ fn apply_patch(
                     "instance is not a workflow",
                 )]
             })?;
+            let before = workflow.edges.len();
             workflow.edges.retain(|candidate| candidate != edge);
+            if workflow.edges.len() == before {
+                return Err(vec![issue(
+                    "missing_edge",
+                    workflow_instance_id,
+                    "workflow edge does not exist",
+                )]);
+            }
             *requires_confirmation = true;
         }
         ViewPatch::AddBinding { binding } => {
@@ -1191,21 +1225,28 @@ fn apply_patch(
             affected_bindings.push(binding.binding_id.clone());
         }
         ViewPatch::ReplaceBinding { binding } => {
-            if let Some(existing) = document
+            let Some(existing) = document
                 .bindings
                 .iter_mut()
                 .find(|existing| existing.binding_id == binding.binding_id)
-            {
-                *existing = binding.clone();
-            } else {
-                document.bindings.push(binding.clone());
-            }
+            else {
+                return Err(vec![issue("missing_binding", &binding.binding_id, "binding does not exist")]);
+            };
+            *existing = binding.clone();
             affected_bindings.push(binding.binding_id.clone());
         }
         ViewPatch::RemoveBinding { binding_id } => {
+            let before = document.bindings.len();
             document
                 .bindings
                 .retain(|binding| binding.binding_id != *binding_id);
+            if document.bindings.len() == before {
+                return Err(vec![issue(
+                    "missing_binding",
+                    binding_id,
+                    "binding does not exist",
+                )]);
+            }
             affected_bindings.push(binding_id.clone());
         }
     }
@@ -1718,6 +1759,58 @@ mod tests {
         let mut document = fixture();
         document.root.definition.version = 99;
         assert!(document.validate(&registry).is_err());
+    }
+
+    #[test]
+    fn strict_patch_targets_and_props_boundaries_are_enforced() {
+        let registry = default_registry();
+        let document = fixture();
+        let empty = ViewChangeSet {
+            changeset_id: "empty".into(),
+            document_id: document.document_id.clone(),
+            expected_revision: 1,
+            operations: vec![],
+            provenance: vec![],
+        };
+        assert!(document.apply_changeset(&empty, &registry).is_err());
+
+        let missing_binding = ViewChangeSet {
+            changeset_id: "missing-binding".into(),
+            document_id: document.document_id.clone(),
+            expected_revision: 1,
+            operations: vec![ViewPatch::RemoveBinding {
+                binding_id: "does-not-exist".into(),
+            }],
+            provenance: vec![],
+        };
+        assert!(document.apply_changeset(&missing_binding, &registry).is_err());
+
+        let scientific_prop = ViewChangeSet {
+            changeset_id: "scientific-prop".into(),
+            document_id: document.document_id.clone(),
+            expected_revision: 1,
+            operations: vec![ViewPatch::UpdateProps {
+                instance_id: "step_drug".into(),
+                property: "temperature".into(),
+                value: json!(37),
+            }],
+            provenance: vec![],
+        };
+        assert!(document.apply_changeset(&scientific_prop, &registry).is_err());
+
+        let index = ViewChangeSet {
+            changeset_id: "index".into(),
+            document_id: document.document_id.clone(),
+            expected_revision: 1,
+            operations: vec![ViewPatch::MoveSlotChild {
+                instance_id: "protocol_note".into(),
+                target_parent_instance_id: "drug_subflow".into(),
+                target_slot_id: "detail".into(),
+                target_index: Some(99),
+            }],
+            provenance: vec![],
+        };
+        assert!(document.apply_changeset(&index, &registry).is_err());
     }
 
     #[test]

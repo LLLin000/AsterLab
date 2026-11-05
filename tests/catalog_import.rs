@@ -605,3 +605,167 @@ fn cck8_multistep_live_dead_and_frozen_run_regression() {
     );
     assert_eq!(old_manifest, workspace_after);
 }
+
+#[test]
+fn view_document_persists_and_revises_against_real_core_refs() {
+    let cli = Cli::new("view");
+    let project = cli.run("project.create", &json!({"name": "view e2e"}))["result"]["record"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let imported = import_module(
+        &cli,
+        &project,
+        &module_for(
+            "op.liquid_transfer",
+            "liquid_transfer",
+            "Transfer",
+            "volume",
+            "uL",
+        ),
+    );
+    let block_version_id = imported["result"]["version"]["id"].as_str().unwrap();
+    let protocol = cli.run(
+        "protocol.create",
+        &json!({
+            "project_id": project,
+            "title": "View protocol",
+            "root_block_version_id": block_version_id,
+            "root_bindings": [{"slot":"volume","value":100,"unit":"uL"}]
+        }),
+    );
+    let protocol_version_id = protocol["result"]["version"]["id"].as_str().unwrap();
+    let design = cli.run(
+        "design.create",
+        &json!({
+            "project_id": project,
+            "design": {
+                "title": "View design",
+                "objective": "test",
+                "experimental_unit": "well",
+                "group_specs": [{"name":"Control","role":"control","condition":"vehicle","independent_n":3,"technical_repeats":1}],
+                "assays": [{"id":"cck8","title":"CCK-8","endpoint":"OD450","method":"CCK-8","unit":"absorbance","group_ids":[],"timepoints":[]}]
+            }
+        }),
+    );
+    let design_version_id = design["result"]["version"]["id"].as_str().unwrap();
+
+    let document = json!({
+        "schema_version": 2,
+        "document_id": "view-doc-1",
+        "revision": 1,
+        "root": {
+            "instance_id": "view_root",
+            "definition": {"id":"workflow","version":1},
+            "model_ref": {"kind":"protocol_version","id":protocol_version_id},
+            "props": {},
+            "slots": {},
+            "workflow": {
+                "nodes": [{
+                    "node_id": "step",
+                    "component": {
+                        "instance_id": "step",
+                        "definition": {"id":"operation","version":1},
+                        "model_ref": {
+                            "kind":"operation_use",
+                            "block_version_id": block_version_id,
+                            "step": {
+                                "protocol_version_id": protocol_version_id,
+                                "scope": {"kind":"assay","assay_id":"cck8"},
+                                "step_path": "root/step"
+                            }
+                        },
+                        "props": {},
+                        "slots": {"detail": [
+                            {
+                                "instance_id": "concentration_table",
+                                "definition": {"id":"layout.table","version":1},
+                                "props": {"rows": []},
+                                "slots": {}
+                            },
+                            {
+                                "instance_id": "note",
+                                "definition": {"id":"content.note","version":1},
+                                "props": {"text": "old"},
+                                "slots": {}
+                            }
+                        ]},
+                        "workflow": null
+                    }
+                }],
+                "edges": []
+            }
+        },
+        "bindings": [{
+            "binding_id": "design-to-table",
+            "source": {"kind":"model","model":{"kind":"design_version","id":design_version_id},"path":"assays"},
+            "target": {"instance_id":"concentration_table","port_id":"data"},
+            "value_type": "data"
+        }]
+    });
+    let created = cli.run(
+        "view.create",
+        &json!({"project_id": project, "title": "View", "document": document}),
+    );
+    let view_id = created["result"]["view"]["id"].as_str().unwrap();
+    let fetched = cli.run("view.get", &json!({"id": view_id}));
+    assert_eq!(fetched["result"]["latest_version"]["data"]["revision"], 1);
+
+    let revised = cli.run(
+        "view.revise",
+        &json!({
+            "view_id": view_id,
+            "changeset": {
+                "changeset_id": "view-cs-1",
+                "document_id": "view-doc-1",
+                "expected_revision": 1,
+                "operations": [{
+                    "kind": "update_props",
+                    "instance_id": "note",
+                    "property": "text",
+                    "value": "new"
+                }],
+                "provenance": ["test"]
+            }
+        }),
+    );
+    assert_eq!(revised["result"]["version"]["data"]["revision"], 2);
+    let fetched = cli.run("view.get", &json!({"id": view_id}));
+    assert_eq!(fetched["result"]["versions"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        fetched["result"]["latest_version"]["data"]["root"]["workflow"]["nodes"][0]["component"]
+            ["slots"]["detail"][1]["props"]["text"],
+        "new"
+    );
+    let old = fetched["result"]["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|version| version["data"]["revision"] == 1)
+        .unwrap();
+    assert_eq!(
+        old["data"]["root"]["workflow"]["nodes"][0]["component"]["slots"]["detail"][1]["props"]
+            ["text"],
+        "old"
+    );
+
+    let stale = cli.run_error(
+        "view.revise",
+        &json!({
+            "view_id": view_id,
+            "changeset": {
+                "changeset_id": "view-cs-stale",
+                "document_id": "view-doc-1",
+                "expected_revision": 1,
+                "operations": [{
+                    "kind": "update_props",
+                    "instance_id": "note",
+                    "property": "text",
+                    "value": "stale"
+                }],
+                "provenance": ["test"]
+            }
+        }),
+    );
+    assert_eq!(stale["error"]["code"], "REVISION_CONFLICT");
+}

@@ -157,7 +157,30 @@ root:
 - 自定义组件 `lab.solution_calculator` 通过注册扩展;
 - Structural / Contextual 绑定校验分离。
 
-## 7. 非目标
+## 7. C2-B1/B2 持久化与 Resolver
+
+已增加正式命令:
+
+```text
+view.create  创建 view + view_document v1
+view.get     读取 view 与全部不可变版本
+view.revise  按 expected_revision 应用 ViewChangeSet
+```
+
+- 复用现有 `records` 表,不新增组件表。
+- 每次成功修订生成新的 `view_document` 版本,旧版本不改。
+- 修订事务内检查 `ViewChangeSet.expected_revision`。
+- `view.create` / `view.revise` 都执行结构校验和真实 Contextual Validation。
+
+最小 Resolver `DbComponentContext`:
+
+- 校验 DesignVersion / ProtocolVersion / BlockVersion / Run 记录类型。
+- ModelPath 遍历 DesignVersion snapshot 字段;缺失为 Missing,无法确定为 Unknown。
+- OperationUse 至少验证 BlockVersion 与 ProtocolVersion 存在。
+- 尚未验证 OperationUse 的 step path 是否与 BlockUse 精确一致;这是 C2-B2 的剩余缺口。
+- 未接入 Frozen Run 的完整历史语义快照解析。
+
+## 8. 非目标
 
 - 不实现 Slint/SVG/前端画布。
 - 不建立 Component 数据库、Workflow Runtime 或第二套 Protocol。
@@ -165,7 +188,7 @@ root:
 - 不让 Agent 直接编辑任意 JSON 路径。
 - 本阶段不声称 ViewDocument 与 Scientific Core 的跨层修改已经原子提交。
 
-## 8. 下一步
+## 9. 下一步
 
 C2-B Persistence & Scientific Core Bridge:
 
