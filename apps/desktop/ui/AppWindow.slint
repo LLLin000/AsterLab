@@ -5,6 +5,8 @@ import { Theme } from "Theme.slint";
 import { SectionLabel, QuietButton, NavRow, PlateTab, InspectorRow, ModeTab, KeyValueRow, CheckRow } from "Components.slint";
 import { ExperimentCanvas, GroupNodeData, AssayNodeData, LinkSegment } from "ExperimentCanvas.slint";
 import { PlateView, WellCell, AxisLabel } from "PlateView.slint";
+import { ExperimentMapView, MapIssue } from "ExperimentMapView.slint";
+import { RunStepsView, RunScopeDetail, RunStepDetail } from "RunStepsView.slint";
 
 export struct ProjectEntry {
     id: string,
@@ -97,25 +99,6 @@ export struct CheckDetail {
     detail: string
 }
 
-export struct RunScopeDetail {
-    kind: string,
-    id: string,
-    title: string,
-    protocol: string,
-    readiness: string
-}
-
-export struct RunStepDetail {
-    path: string,
-    scope: string,
-    order_text: string,
-    title: string,
-    instruction: string,
-    parameters: string,
-    tasks: string,
-    events: string,
-    time_scope: string
-}
 
 export struct PlannedOutputDetail {
     title: string,
@@ -257,7 +240,7 @@ export component AppWindow inherits Window {
     in-out property <string> run_step_parameters;
     in-out property <string> run_step_tasks;
     in-out property <string> run_step_events;
-    in-out property <[CheckDetail]> map_attention;
+    in-out property <[MapIssue]> map_attention;
     in-out property <string> map_n_text;
     in-out property <string> map_protocol_text;
     in-out property <string> map_time_text;
@@ -590,56 +573,12 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    if (design_title != "" && mode == "design") : Rectangle {
-                        background: Theme.surface;
-                        border-radius: Theme.radius-md;
-                        border-width: 1px;
-                        border-color: Theme.line;
-                        VerticalLayout {
-                            padding: 14px;
-                            spacing: 8px;
-                            HorizontalLayout {
-                                spacing: 8px;
-                                SectionLabel { text: "实验地图"; }
-                                Rectangle { horizontal-stretch: 1; }
-                                Text {
-                                    text: "只读结构 · 编辑仍回到设计字段";
-                                    color: Theme.ink-3;
-                                    font-size: Theme.font-caption;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            Text {
-                                text: map_n_text + "  ·  " + map_protocol_text + "  ·  " + map_time_text + "  ·  " + map_sample_text;
-                                color: Theme.ink-2;
-                                font-size: Theme.font-small;
-                                wrap: word-wrap;
-                            }
-                            if (map_attention.length == 0) : Text {
-                                text: "当前记录没有自动推导出的待确认项；仍需研究者核对。";
-                                color: Theme.ink-3;
-                                font-size: Theme.font-small;
-                                wrap: word-wrap;
-                            }
-                            for c in map_attention : HorizontalLayout {
-                                spacing: 8px;
-                                Text {
-                                    text: "待确认";
-                                    width: 52px;
-                                    color: Theme.warn-ink;
-                                    font-size: Theme.font-caption;
-                                    font-weight: 600;
-                                    vertical-alignment: top;
-                                }
-                                Text {
-                                    text: c.title + " — " + c.detail;
-                                    color: Theme.ink-2;
-                                    font-size: Theme.font-small;
-                                    wrap: word-wrap;
-                                    horizontal-stretch: 1;
-                                }
-                            }
-                        }
+                    if (design_title != "" && mode == "design") : ExperimentMapView {
+                        map_n_text: root.map_n_text;
+                        map_protocol_text: root.map_protocol_text;
+                        map_time_text: root.map_time_text;
+                        map_sample_text: root.map_sample_text;
+                        issues: root.map_attention;
                     }
 
                     if (design_title != "" && mode == "design" && question_title != "") : Rectangle {
@@ -1135,80 +1074,16 @@ export component AppWindow inherits Window {
                             Rectangle { height: 1px; background: Theme.line; }
                         }
 
-                        VerticalLayout {
-                            spacing: 8px;
-                            SectionLabel { text: "冻结操作方案"; }
-                            if (run_scopes.length == 0) : Text {
-                                text: "该执行批次没有可读取的冻结 Protocol 作用域。";
-                                color: Theme.warn-ink;
-                                font-size: Theme.font-small;
-                                wrap: word-wrap;
-                            }
-                            for scope in run_scopes : Rectangle {
-                                background: Theme.surface;
-                                border-radius: Theme.radius-sm;
-                                border-width: 1px;
-                                border-color: Theme.line;
-                                HorizontalLayout {
-                                    padding: 9px;
-                                    spacing: 8px;
-                                    Text { text: scope.title; color: Theme.ink; font-size: Theme.font-small; font-weight: 600; horizontal-stretch: 1; wrap: word-wrap; }
-                                    Text { text: scope.protocol; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
-                                    Text { text: scope.readiness; color: Theme.ink-2; font-size: Theme.font-caption; vertical-alignment: center; }
-                                }
-                            }
-                        }
-
-                        VerticalLayout {
-                            spacing: 8px;
-                            SectionLabel { text: "冻结步骤"; }
-                            if (run_steps.length == 0) : Text {
-                                text: "没有可解析的冻结步骤；不会显示空步骤占位。";
-                                color: Theme.warn-ink;
-                                font-size: Theme.font-small;
-                                wrap: word-wrap;
-                            }
-                            for step in run_steps : Rectangle {
-                                background: step.path == selected_run_step_path ? Theme.accent-tint : transparent;
-                                VerticalLayout {
-                                    padding-top: 10px;
-                                    padding-bottom: 10px;
-                                    spacing: 3px;
-                                    HorizontalLayout {
-                                        spacing: 8px;
-                                        Text { text: step.order_text; width: 26px; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
-                                        Text { text: step.title; color: Theme.ink; font-size: Theme.font-body; font-weight: 600; horizontal-stretch: 1; wrap: word-wrap; }
-                                        Text { text: step.scope; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
-                                    }
-                                    Text { text: step.instruction; color: Theme.ink-2; font-size: Theme.font-small; wrap: word-wrap; }
-                                    Text { text: step.time_scope + " · " + step.parameters + " · " + step.tasks + " · " + step.events; color: Theme.ink-3; font-size: Theme.font-caption; wrap: word-wrap; }
-                                }
-                                Rectangle { y: parent.height - 1px; width: 100%; height: 1px; background: Theme.line; }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.run_step_selected(step.path); }
-                                }
-                                accessible-role: button;
-                                accessible-label: "冻结步骤 " + step.title;
-                                accessible-action-default => { root.run_step_selected(step.path); }
-                            }
-                        }
-
-                        if (selected_run_step_path != "") : Rectangle {
-                            background: Theme.surface;
-                            border-radius: Theme.radius-md;
-                            border-width: 1px;
-                            border-color: Theme.line;
-                            VerticalLayout {
-                                padding: 14px;
-                                spacing: 7px;
-                                SectionLabel { text: "当前步骤"; }
-                                Text { text: run_step_title; color: Theme.ink; font-size: Theme.font-subhead; font-weight: 600; wrap: word-wrap; }
-                                Text { text: run_step_detail; color: Theme.ink-2; font-size: Theme.font-secondary; wrap: word-wrap; }
-                                KeyValueRow { label: "参数"; value: run_step_parameters; missing: run_step_parameters == "未记录"; }
-                                KeyValueRow { label: "任务"; value: run_step_tasks; missing: run_step_tasks == "未记录"; }
-                                KeyValueRow { label: "事件"; value: run_step_events; missing: run_step_events == "未记录"; }
-                            }
+                        RunStepsView {
+                            scopes: root.run_scopes;
+                            steps: root.run_steps;
+                            selected_path: root.selected_run_step_path;
+                            step_title: root.run_step_title;
+                            step_detail: root.run_step_detail;
+                            step_parameters: root.run_step_parameters;
+                            step_tasks: root.run_step_tasks;
+                            step_events: root.run_step_events;
+                            step_selected(path) => { root.run_step_selected(path); }
                         }
 
                         VerticalLayout {

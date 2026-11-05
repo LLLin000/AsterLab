@@ -1,0 +1,112 @@
+import { Theme } from "Theme.slint";
+import { SectionLabel, KeyValueRow } from "Components.slint";
+
+export struct RunScopeDetail {
+    kind: string,
+    id: string,
+    title: string,
+    protocol: string,
+    readiness: string
+}
+
+export struct RunStepDetail {
+    path: string,
+    scope: string,
+    order_text: string,
+    title: string,
+    instruction: string,
+    parameters: string,
+    tasks: string,
+    events: string,
+    time_scope: string
+}
+
+export component RunStepsView inherits VerticalLayout {
+    in property <[RunScopeDetail]> scopes;
+    in property <[RunStepDetail]> steps;
+    in property <string> selected_path;
+    in property <string> step_title;
+    in property <string> step_detail;
+    in property <string> step_parameters;
+    in property <string> step_tasks;
+    in property <string> step_events;
+    callback step_selected(string);
+
+    spacing: 24px;
+
+    VerticalLayout {
+        spacing: 8px;
+        SectionLabel { text: "冻结操作方案"; }
+        if (scopes.length == 0) : Text {
+            text: "该执行批次没有可读取的冻结 Protocol 作用域。";
+            color: Theme.warn-ink;
+            font-size: Theme.font-small;
+            wrap: word-wrap;
+        }
+        for scope in scopes : Rectangle {
+            background: Theme.surface;
+            border-radius: Theme.radius-sm;
+            border-width: 1px;
+            border-color: Theme.line;
+            HorizontalLayout {
+                padding: 9px;
+                spacing: 8px;
+                Text { text: scope.title; color: Theme.ink; font-size: Theme.font-small; font-weight: 600; horizontal-stretch: 1; wrap: word-wrap; }
+                Text { text: scope.protocol; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
+                Text { text: scope.readiness; color: Theme.ink-2; font-size: Theme.font-caption; vertical-alignment: center; }
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        SectionLabel { text: "冻结步骤"; }
+        if (steps.length == 0) : Text {
+            text: "没有可解析的冻结步骤；不会显示空步骤占位。";
+            color: Theme.warn-ink;
+            font-size: Theme.font-small;
+            wrap: word-wrap;
+        }
+        for step in steps : Rectangle {
+            background: step.path == selected_path ? Theme.accent-tint : transparent;
+            VerticalLayout {
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 3px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: step.order_text; width: 26px; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
+                    Text { text: step.title; color: Theme.ink; font-size: Theme.font-body; font-weight: 600; horizontal-stretch: 1; wrap: word-wrap; }
+                    Text { text: step.scope; color: Theme.ink-3; font-size: Theme.font-caption; vertical-alignment: center; }
+                }
+                Text { text: step.instruction; color: Theme.ink-2; font-size: Theme.font-small; wrap: word-wrap; }
+                Text { text: step.time_scope + " · " + step.parameters + " · " + step.tasks + " · " + step.events; color: Theme.ink-3; font-size: Theme.font-caption; wrap: word-wrap; }
+            }
+            Rectangle { y: parent.height - 1px; width: 100%; height: 1px; background: Theme.line; }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.step_selected(step.path); }
+            }
+            accessible-role: button;
+            accessible-label: "冻结步骤 " + step.title;
+            accessible-action-default => { root.step_selected(step.path); }
+        }
+    }
+
+    if (selected_path != "") : Rectangle {
+        background: Theme.surface;
+        border-radius: Theme.radius-md;
+        border-width: 1px;
+        border-color: Theme.line;
+        VerticalLayout {
+            padding: 14px;
+            spacing: 7px;
+            SectionLabel { text: "当前步骤"; }
+            Text { text: step_title; color: Theme.ink; font-size: Theme.font-subhead; font-weight: 600; wrap: word-wrap; }
+            Text { text: step_detail; color: Theme.ink-2; font-size: Theme.font-secondary; wrap: word-wrap; }
+            KeyValueRow { label: "参数"; value: step_parameters; missing: step_parameters == "未记录"; }
+            KeyValueRow { label: "任务"; value: step_tasks; missing: step_tasks == "未记录"; }
+            KeyValueRow { label: "事件"; value: step_events; missing: step_events == "未记录"; }
+        }
+    }
+}

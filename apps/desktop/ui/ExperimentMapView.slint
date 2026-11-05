@@ -1,0 +1,66 @@
+import { Theme } from "Theme.slint";
+import { SectionLabel } from "Components.slint";
+
+export struct MapIssue {
+    title: string,
+    detail: string
+}
+
+export component ExperimentMapView inherits Rectangle {
+    in property <string> map_n_text;
+    in property <string> map_protocol_text;
+    in property <string> map_time_text;
+    in property <string> map_sample_text;
+    in property <[MapIssue]> issues;
+
+    background: Theme.surface;
+    border-radius: Theme.radius-md;
+    border-width: 1px;
+    border-color: Theme.line;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            SectionLabel { text: "实验地图"; }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: "只读结构 · 编辑仍回到设计字段";
+                color: Theme.ink-3;
+                font-size: Theme.font-caption;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: map_n_text + "  ·  " + map_protocol_text + "  ·  " + map_time_text + "  ·  " + map_sample_text;
+            color: Theme.ink-2;
+            font-size: Theme.font-small;
+            wrap: word-wrap;
+        }
+        if (issues.length == 0) : Text {
+            text: "当前记录没有自动推导出的待确认项；仍需研究者核对。";
+            color: Theme.ink-3;
+            font-size: Theme.font-small;
+            wrap: word-wrap;
+        }
+        for issue in issues : HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: "待确认";
+                width: 52px;
+                color: Theme.warn-ink;
+                font-size: Theme.font-caption;
+                font-weight: 600;
+                vertical-alignment: top;
+            }
+            Text {
+                text: issue.title + " — " + issue.detail;
+                color: Theme.ink-2;
+                font-size: Theme.font-small;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+}

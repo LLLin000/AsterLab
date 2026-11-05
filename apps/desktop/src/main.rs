@@ -385,7 +385,7 @@ fn clear_design(app: &AppWindow, sel: &mut Selection) {
     app.set_map_protocol_text(SharedString::from("Protocol 未关联"));
     app.set_map_time_text(SharedString::from("时间点待确认"));
     app.set_map_sample_text(SharedString::from("样本关系待确认"));
-    app.set_map_attention(model_rc(Vec::<CheckDetail>::new()));
+    app.set_map_attention(model_rc(Vec::<MapIssue>::new()));
     app.set_run_scopes(model_rc(Vec::<RunScopeDetail>::new()));
     app.set_run_steps(model_rc(Vec::<RunStepDetail>::new()));
     app.set_selected_run_step_path(SharedString::from(""));
@@ -903,13 +903,12 @@ fn map_summary(
     )
 }
 
-fn map_attention(map: &asterlab_core::design_map::CurrentDesignMap) -> Vec<CheckDetail> {
+fn map_attention(map: &asterlab_core::design_map::CurrentDesignMap) -> Vec<MapIssue> {
     map.content
         .unresolved
         .iter()
         .take(6)
-        .map(|issue| CheckDetail {
-            level: SharedString::from("warn"),
+        .map(|issue| MapIssue {
             title: SharedString::from(issue.question.as_str()),
             detail: SharedString::from(format!(
                 "影响：{}",
@@ -1353,7 +1352,7 @@ fn set_workspace_details(app: &AppWindow, model: &ReadModel, sel: &Selection) {
         app.set_map_protocol_text(SharedString::from("Protocol 未关联"));
         app.set_map_time_text(SharedString::from("时间点待确认"));
         app.set_map_sample_text(SharedString::from("样本关系待确认"));
-        app.set_map_attention(model_rc(Vec::<CheckDetail>::new()));
+        app.set_map_attention(model_rc(Vec::<MapIssue>::new()));
         app.set_check_details(model_rc(vec![CheckDetail {
             level: SharedString::from("warn"),
             title: SharedString::from("当前模式没有可读取的设计"),
@@ -1825,7 +1824,7 @@ fn set_workspace_details(app: &AppWindow, model: &ReadModel, sel: &Selection) {
         app.set_map_protocol_text(SharedString::from("设计投影不可用"));
         app.set_map_time_text(SharedString::from("设计投影不可用"));
         app.set_map_sample_text(SharedString::from("设计投影不可用"));
-        app.set_map_attention(model_rc(Vec::<CheckDetail>::new()));
+        app.set_map_attention(model_rc(Vec::<MapIssue>::new()));
     }
     app.set_check_details(model_rc(checks));
     app.set_planned_output_details(model_rc(planned_outputs));

@@ -120,14 +120,14 @@ P3-A 已完成：
 - 同一 `root/seed` 步骤在 CCK-8 与活死染色中按 scope 隔离，任务/事件不串用。
 - 截图：`docs/prototypes/assets/slint-run-workspace.png`。
 
-P3-B（仍未做）才拆 `AppWindow.slint`：
+P3-B（进行中）才拆 `AppWindow.slint`：
 
-- `AppShell`
-- `ExperimentMapView`
-- `DesignDetailView`
-- `ProtocolStepsView`
-- `RunWorkspaceView`
-- `components/`
+- [x] `ExperimentMapView.slint`
+- [x] `RunStepsView.slint`
+- [ ] `AppShell`
+- [ ] `DesignDetailView`
+- [ ] `ProtocolStepsView`
+- [ ] `components/`
 
 执行台实现 `StepList → StepDetail → Target/Plate → Record`；不再只是 Manifest 字符串列表。
 
