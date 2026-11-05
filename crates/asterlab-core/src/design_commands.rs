@@ -102,6 +102,102 @@ pub trait DesignCommands {
 
 /// Validate only structural/scientific-reference constraints. Missing n,
 /// sample relations, doses or timepoints remain valid draft unknowns.
+impl DesignDraft {
+    /// Map the editor draft to the current CLI/HTTP design payload.
+    /// Unknown fields are intentionally not invented.
+    pub fn to_design_json(&self) -> serde_json::Value {
+        let group_names = self
+            .groups
+            .iter()
+            .map(|group| (group.id.as_str(), group.name.as_str()))
+            .collect::<std::collections::HashMap<_, _>>();
+        serde_json::json!({
+            "title": self.title,
+            "objective": self.objective,
+            "experimental_unit": self.experimental_unit,
+            "group_specs": self.groups.iter().map(|group| serde_json::json!({
+                "id": group.id,
+                "name": group.name,
+                "role": group.role,
+                "condition": group.condition,
+                "independent_n": group.independent_n,
+                "technical_repeats": group.technical_repeats
+            })).collect::<Vec<_>>(),
+            "assays": self.assays.iter().map(|assay| serde_json::json!({
+                "id": assay.id,
+                "title": assay.title,
+                "endpoint": assay.endpoint,
+                "method": assay.method,
+                "unit": assay.unit,
+                "group_ids": assay.group_ids,
+                "group_names": assay.group_ids.iter().filter_map(|id| group_names.get(id.as_str()).copied()).collect::<Vec<_>>(),
+                "timepoints": assay.timepoints,
+                "timepoint_relation": assay.timepoint_relation,
+                "protocol_version_id": assay.protocol_version_id,
+                "container_type": assay.container_type,
+                "container_format": assay.container_format
+            })).collect::<Vec<_>>()
+        })
+    }
+
+    pub fn from_design_json(data: &serde_json::Value) -> Self {
+        let groups = data["group_specs"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|group| DesignGroupDraft {
+                        id: group["id"].as_str().unwrap_or_default().to_owned(),
+                        name: group["name"].as_str().unwrap_or_default().to_owned(),
+                        role: group["role"].as_str().map(str::to_owned),
+                        condition: group["condition"].as_str().map(str::to_owned),
+                        independent_n: group["independent_n"]
+                            .as_u64()
+                            .and_then(|value| u32::try_from(value).ok()),
+                        technical_repeats: group["technical_repeats"]
+                            .as_u64()
+                            .and_then(|value| u32::try_from(value).ok()),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let assays = data["assays"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|assay| DesignAssayDraft {
+                        id: assay["id"].as_str().unwrap_or_default().to_owned(),
+                        title: assay["title"].as_str().unwrap_or_default().to_owned(),
+                        endpoint: assay["endpoint"].as_str().unwrap_or_default().to_owned(),
+                        method: assay["method"].as_str().unwrap_or_default().to_owned(),
+                        unit: assay["unit"].as_str().unwrap_or_default().to_owned(),
+                        group_ids: assay["group_ids"]
+                            .as_array()
+                            .map(|ids| ids.iter().filter_map(|id| id.as_str().map(str::to_owned)).collect())
+                            .unwrap_or_default(),
+                        timepoints: assay["timepoints"]
+                            .as_array()
+                            .map(|points| points.iter().filter_map(|point| point.as_str().map(str::to_owned)).collect())
+                            .unwrap_or_default(),
+                        timepoint_relation: assay["timepoint_relation"].as_str().map(str::to_owned),
+                        protocol_version_id: assay["protocol_version_id"].as_str().map(str::to_owned),
+                        container_type: assay["container_type"].as_str().map(str::to_owned),
+                        container_format: assay["container_format"].as_str().map(str::to_owned),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            title: data["title"].as_str().unwrap_or_default().to_owned(),
+            objective: data["objective"].as_str().unwrap_or_default().to_owned(),
+            experimental_unit: data["experimental_unit"].as_str().map(str::to_owned),
+            groups,
+            assays,
+        }
+    }
+}
+
 pub fn validate_draft(draft: &DesignDraft) -> Result<(), DesignCommandError> {
     if draft.title.trim().is_empty() {
         return Err(DesignCommandError::invalid("title", "设计名称不能为空"));
@@ -199,6 +295,25 @@ mod tests {
     #[test]
     fn empty_groups_and_assays_are_valid_draft_unknowns() {
         assert!(validate_draft(&blank()).is_ok());
+    }
+
+    #[test]
+    fn draft_round_trips_through_design_json() {
+        let mut draft = blank();
+        draft.groups = vec![DesignGroupDraft {
+            id: "g1".into(), name: "Control".into(), role: Some("control".into()),
+            condition: None, independent_n: None, technical_repeats: Some(2),
+        }];
+        draft.assays = vec![DesignAssayDraft {
+            id: "a1".into(), title: "CCK-8".into(), endpoint: "OD450".into(),
+            method: "CCK-8".into(), unit: "absorbance".into(),
+            group_ids: vec!["g1".into()], timepoints: vec!["D1".into()],
+            timepoint_relation: None, protocol_version_id: None,
+            container_type: None, container_format: None,
+        }];
+        let json = draft.to_design_json();
+        assert_eq!(json["assays"][0]["group_names"][0], "Control");
+        assert_eq!(DesignDraft::from_design_json(&json), draft);
     }
 
     #[test]

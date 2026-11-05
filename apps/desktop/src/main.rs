@@ -3,6 +3,7 @@
 //! 只读打开调用方显式传入的数据库并做内存内展示；不创建目录/结构、不写入。
 
 mod data;
+mod design_editor;
 
 use data::ReadModel;
 use slint::{ModelRc, SharedString, VecModel};

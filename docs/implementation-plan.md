@@ -139,9 +139,14 @@ P3-B（进行中）才拆 `AppWindow.slint`：
   - `DesignCommands` trait
   - `validate_draft`：结构、稳定 ID、组别引用、时间点重复；缺 n/来源/剂量仍是合法草案
 - 4 个 core tests 覆盖空草案、重复组 ID、未知组引用、重复时间点。
-- 尚未接 SQLite Repository、Slint editor 或保存/修订 UI。
+- 已新增 `apps/desktop/src/design_editor.rs`：
+  - `EditorState`（NewDraft/EditingDraft/Dirty/Validating/Conflict/Saved/Failed）
+  - `DesignEditorPresenter`
+  - `DesignWriter` + `CliDesignWriter`（通过正式 CLI 命令写入，不直接写 SQL）
+  - presenter 测试：create → revise、无效草案不调用 writer
+- 尚未接 Slint 四步编辑器或保存后的 ReadModel 重载。
 
-下一步：实现共享 `DesignCommands` 的 SQLite Adapter 和 `DesignEditorPresenter`，再接入四步原生编辑器；不先画完整表单。
+下一步：实现 Slint DesignEditor（研究问题/组别/检测/时间点），接 `CliDesignWriter`，保存后重建 ReadModel。
 
 **验收：** 研究者从地图进入冻结 Run，找到当前步骤、参数、目标和记录入口；模式主次不同。
 

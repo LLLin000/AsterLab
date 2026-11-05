@@ -157,7 +157,7 @@ P1-A 已新增 `crates/asterlab-core`，先共享 `design_map::CurrentDesignMap`
 
 - P1-B 已共享 Protocol 展开为 `OperationStep`；
 - P1-C 已共享 `RunWorkspace`（steps/tasks/occurrences/frozen_design）；
-- P3-C 已建立 `DesignDraft` / `DesignCommands` 共享命令契约；SQLite Adapter 与 Slint editor 尚未接入。
+- P3-C 已建立 `DesignDraft` / `DesignCommands` 共享命令契约和桌面 `DesignEditorPresenter`/`CliDesignWriter`；Slint editor 与保存后重载尚未接入。
 - 最终让 CLI/HTTP/Slint 只依赖 Core 读模型，UI 不复制“组别覆盖/时间关系/样本数”的推导。
 
 当前 CLI/HTTP 与 Slint 地图摘要已使用同一 `CurrentDesignMap`；Protocol/Run 仍待迁移。
