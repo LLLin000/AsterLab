@@ -17,6 +17,19 @@
 | Records | `OP-BIOFILM-STATIC-CULTURE` (biofilm growth) · `OP-BIOFILM-WASH` (planktonic removal) · `OP-CV-BIOMASS` (crystal-violet stain + solubilize + OD read) · `OP-BIOFILM-DISPERSAL` (harvest + disaggregate to suspension) · `OP-CFU-DILUTION-PLATE` (serial dilution + plating + colony count → CFU) |
 | Scope | Static microtiter-dish biofilm formation and two non-interchangeable readouts (CV total biomass vs CFU viable count) |
 | Out of scope | Flow-cell / chemostat mature-biofilm systems; colony-based biofilm system; air-liquid-interface microscopy assay; metabolic / fluorescent viability stains; MBEC / Calgary device; antimicrobial susceptibility interpretation |
+| Granularity | NOT a single atomic operation. See [granularity-and-biofilm.md](granularity-and-biofilm.md): these are assay model / method templates / composite blocks, not `OperationModule`s. |
+
+### 1.1 Granularity decision (provisional)
+
+| Record ID | Type | Why it is not an atomic operation |
+|---|---|---|
+| `OP-BIOFILM-STATIC-CULTURE` | composite block / method phase | inoculation + incubation + optional medium exchange; attached and planktonic fractions coexist |
+| `OP-BIOFILM-WASH` | lossy washing variant | discards planktonic fraction and may detach weakly adherent biofilm; not a generic sample-preserving wash |
+| `OP-CV-BIOMASS` | method template | wash + stain + wash + solubilize + absorbance; CV measures total adherent material, not viable cells |
+| `OP-BIOFILM-DISPERSAL` | composite/device-dependent step | scraping/sonication/vortex combinations; needs kill-control and detachment check |
+| `OP-CFU-DILUTION-PLATE` | method template | disperse + dilute + plate + incubate + count + CFU calculation |
+
+These record IDs are provisional research IDs. They MUST NOT be converted directly to `OperationModule` JSON. Atomic sub-operations (inoculation, incubation, lossy wash, stain, solubilize, absorbance read, colony count) belong in separate records/modules.
 
 Core rule (read first): **CV and CFU are not interchangeable.** CV absorbance
 reports total surface-associated dye-binding material (cells + matrix +

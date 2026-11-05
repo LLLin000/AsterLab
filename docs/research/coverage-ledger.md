@@ -15,7 +15,7 @@
 | 洗涤 | [washing-and-sampling.md](k2-operations/washing-and-sampling.md) | S1–S3 直接读 | `washing.v1.json` | 样本损失 effect、残留量 |
 | 吸光度测量 | [absorbance-and-fluorescence-readout.md](k2-operations/absorbance-and-fluorescence-readout.md) | 仪器规格直接读;Assay 部分摘要 | `absorbance-measurement.v1.json` | Assay 空白/曲线的层级、线性范围 |
 | 荧光成像 | [absorbance-and-fluorescence-readout.md](k2-operations/absorbance-and-fluorescence-readout.md) | 仪器规格直接读 | 未单独 JSON | 通道/物镜/配置;活/固定样本差异 |
-| 细胞传代/解离 | [cell-culture-and-separation.md](k2-operations/cell-culture-and-separation.md) | S1/S2/S5/S6 直接读;Corning 摘要 | 未单独 JSON | 细胞系差异、解离终点、离心条件 |
+| 细胞传代/解离 | [cell-culture-and-separation.md](k2-operations/cell-culture-and-separation.md) | S1/S2/S5/S6 直接读;Corning 摘要 | 未单独 JSON | 传代是 composite block;计数/离心可拆成原子操作;细胞系差异/解离终点 |
 | 细胞计数/活力 | 同上 | 直接读 | 未单独 JSON | 计数方法/范围/聚集 |
 | 离心 | 同上 | 直接读 | 未单独 JSON | 转子/RCF/适配器 |
 | 冻存/存储 | 同上 | 直接读 | 未单独 JSON | 降温速率、冻存液、 thaw |
@@ -24,7 +24,7 @@
 | qPCR / 核酸 QC | [qpcr-and-nucleic-acid-qc.md](k2-operations/qpcr-and-nucleic-acid-qc.md) | MIQE 直接读;部分摘要 | 未单独 JSON | 引物/效率/参考基因/阈值 |
 | 流式 | [flow-cytometry-and-immunofluorescence.md](k2-operations/flow-cytometry-and-immunofluorescence.md) | T1–T5 直接读;B1/F1 摘要 | 未单独 JSON | panel/补偿/FMO/分选 |
 | 免疫荧光(固定) | 同上 | T1–T5 直接读 | 未单独 JSON | 抗体/通道/曝光/配置 |
-| 生物膜 CV/CFU | [biofilm-cv-cfu.md](k2-operations/biofilm-cv-cfu.md) | S1–S3 直接读;S4/S5 摘要 | 未单独 JSON | 菌种/培养基/分散效率/计数范围 |
+| 生物膜 CV/CFU | [biofilm-cv-cfu.md](k2-operations/biofilm-cv-cfu.md) | S1–S3 直接读;S4/S5 摘要 | **不应作为单独 JSON** | 是 assay model + 两个 method template;见 [粒度判断](k2-operations/granularity-and-biofilm.md) |
 | 划痕/伤口愈合 | 现有协议研究 | 未单独成册 | 无 | 同视野 ID、增殖混杂、时间锚点 |
 
 ## 2. 仪器记录

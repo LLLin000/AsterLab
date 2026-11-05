@@ -19,7 +19,8 @@
 13. [实验设计模型](2026-11-02-cellplanner-experiment-design-model.md) — 科学设计模型、n、Assay、对照、样本及 CLI 契约边界。
 14. [操作与仪器记录规范](record-standard.md) — OperationRecord / InstrumentRecord 的必填结构、证据等级、UNKNOWN 分类、JSON 转换与审核清单；后续所有覆盖记录按此执行。
 15. [覆盖账本](coverage-ledger.md) — 操作/仪器覆盖、来源强度、JSON 覆盖与下一批优先级；文件数量不等于可验收。
-16. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
+16. [粒度与生物膜](k2-operations/granularity-and-biofilm.md) — 原子操作、复合块、方法模板的拆分规则;生物膜不是单一 OperationModule。
+17. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
 
 ## 证据标签
 
