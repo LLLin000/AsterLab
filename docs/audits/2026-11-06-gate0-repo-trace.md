@@ -20,6 +20,8 @@
 ```text
 cargo test -p asterlab-core  155 passed
 cargo test                   3 core integration + 6 operation + 5 catalog integration
+cargo clippy -p asterlab-core --all-targets  passed
+cargo fmt --all -- --check  only pre-existing design_commands.rs diff
 ```
 
 ## 未闭合 / 阻断
