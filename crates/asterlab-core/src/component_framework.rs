@@ -125,6 +125,10 @@ pub enum ModelRef {
         block_version_id: String,
         step: QualifiedStepRef,
     },
+    PlannedContainer {
+        design_version_id: String,
+        container_id: String,
+    },
     Run {
         id: String,
     },
@@ -1144,6 +1148,18 @@ fn validate_model_ref(model: &ModelRef, path: &str, issues: &mut Vec<SemanticIss
                     "empty_step_ref",
                     path,
                     "operation use requires Protocol version and step path",
+                ));
+            }
+        }
+        ModelRef::PlannedContainer {
+            design_version_id,
+            container_id,
+        } => {
+            if design_version_id.trim().is_empty() || container_id.trim().is_empty() {
+                issues.push(issue(
+                    "empty_container_ref",
+                    path,
+                    "planned container reference requires design version and container id",
                 ));
             }
         }

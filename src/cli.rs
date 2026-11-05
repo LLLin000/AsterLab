@@ -3,7 +3,9 @@ use asterlab_core::component_framework::{
     ComponentInstance, ComponentRegistry, ContextValidationMode, ModelPathResolution, ModelRef,
     ViewChangeSet, ViewDocument, WorkflowEdge, WorkflowGraph, WorkflowNode,
 };
-use asterlab_core::labware::{default_labware_registry, ContainerPlan};
+use asterlab_core::labware::{
+    default_labware_registry, ContainerPlan, LabwareProfile, LabwareRegistry,
+};
 use asterlab_core::operation_module::{
     ModuleBinding, ModuleOrigin, OperationModule, ParameterBinding, ParameterValueType,
     ProtocolBlockVersionRef, ValueSource,
@@ -364,6 +366,7 @@ struct DesignChanges {
     assays: Option<Vec<AssayPlan>>,
     sample_allocations: Option<Vec<SampleAllocation>>,
     planned_outputs: Option<Vec<PlannedOutput>>,
+    container_plan: Option<ContainerPlan>,
     source_evidence: Option<Vec<SourceEvidence>>,
     evidence_conflicts: Option<Vec<EvidenceConflict>>,
     planned_run_count: Option<u32>,
@@ -537,6 +540,11 @@ struct ViewCreate {
     project_id: String,
     title: String,
     document: ViewDocument,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct LabwareDefine {
+    profile: LabwareProfile,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1920,12 +1928,33 @@ impl<'a> DbComponentContext<'a> {
 
 impl ComponentBindingContext for DbComponentContext<'_> {
     fn resolve_model_path(&self, model: &ModelRef, path: &str) -> ModelPathResolution {
+        if let ModelRef::PlannedContainer {
+            design_version_id,
+            container_id,
+        } = model
+        {
+            let Some(record) = self.owned_record(design_version_id, "design_version") else {
+                return ModelPathResolution::Missing;
+            };
+            let Some(container) = record["data"]["snapshot"]["container_plan"]["containers"]
+                .as_array()
+                .and_then(|containers| {
+                    containers
+                        .iter()
+                        .find(|container| container["id"].as_str() == Some(container_id.as_str()))
+                })
+            else {
+                return ModelPathResolution::Missing;
+            };
+            return self.resolve_path(container, path);
+        }
         let (id, kind) = match model {
             ModelRef::DesignVersion { id } => (id, "design_version"),
             ModelRef::ProtocolVersion { id } => (id, "protocol_version"),
             ModelRef::BlockVersion { id } => (id, "protocol_block_version"),
             ModelRef::Run { id } => (id, "run"),
             ModelRef::OperationUse { .. } => return ModelPathResolution::Unknown,
+            ModelRef::PlannedContainer { .. } => return ModelPathResolution::Unknown,
         };
         let Some(record) = self.owned_record(id, kind) else {
             return ModelPathResolution::Missing;
@@ -1980,6 +2009,27 @@ fn load_component_registry(db: &Connection) -> Result<ComponentRegistry, CliErro
             .map_err(|error| CliError::input(error))?;
     }
     Ok(registry)
+}
+
+pub(crate) fn create_labware_profile(
+    tx: &Transaction<'_>,
+    data: &Value,
+) -> Result<Value, CliError> {
+    let i: LabwareDefine = serde_json::from_value(data.clone())
+        .map_err(|e| CliError::input(format!("LabwareProfile 数据结构无效：{e}")))?;
+    let mut registry = default_labware_registry();
+    registry
+        .register(i.profile.clone())
+        .map_err(CliError::input)?;
+    let record = insert(
+        tx,
+        "labware_profile",
+        None,
+        None,
+        1,
+        &serde_json::to_value(i.profile).map_err(|e| CliError::internal(e.to_string()))?,
+    )?;
+    Ok(json!({"record":record}))
 }
 
 pub(crate) fn create_component_definition(
@@ -2748,9 +2798,29 @@ fn normalize_design(d: &mut DesignFields, previous: Option<&DesignFields>) {
     }
 }
 
+fn load_labware_registry(db: &Connection) -> Result<LabwareRegistry, CliError> {
+    let mut registry = default_labware_registry();
+    for record in list(db, Some("labware_profile"), None)? {
+        let profile: LabwareProfile = serde_json::from_value(record["data"].clone())
+            .map_err(|e| CliError::internal(format!("LabwareProfile 数据无效：{e}")))?;
+        registry
+            .register(profile)
+            .map_err(|error| CliError::input(error))?;
+    }
+    Ok(registry)
+}
+
 pub(crate) fn normalize_validate_design_data(
     data: Value,
     previous: Option<&Value>,
+) -> Result<Value, CliError> {
+    normalize_validate_design_data_with_registry(data, previous, &default_labware_registry())
+}
+
+fn normalize_validate_design_data_with_registry(
+    data: Value,
+    previous: Option<&Value>,
+    registry: &LabwareRegistry,
 ) -> Result<Value, CliError> {
     let mut design: DesignFields = serde_json::from_value(data)
         .map_err(|e| CliError::input(format!("设计数据结构无效：{e}")))?;
@@ -2759,7 +2829,7 @@ pub(crate) fn normalize_validate_design_data(
         .transpose()
         .map_err(|e| CliError::internal(format!("现有设计数据无效：{e}")))?;
     normalize_design(&mut design, previous_design.as_ref());
-    validate_design(&design)?;
+    validate_design_with_registry(&design, registry)?;
     serde_json::to_value(design).map_err(|e| CliError::internal(e.to_string()))
 }
 
@@ -2863,6 +2933,13 @@ pub(crate) fn design_map(db: &Connection, design_id: &str) -> Result<Value, CliE
 }
 
 fn validate_design(d: &DesignFields) -> Result<(), CliError> {
+    validate_design_with_registry(d, &default_labware_registry())
+}
+
+fn validate_design_with_registry(
+    d: &DesignFields,
+    registry: &LabwareRegistry,
+) -> Result<(), CliError> {
     check_text(&d.title, "设计名称", 160)?;
     for (value, label, max) in [
         (&d.objective, "研究问题", 5000),
@@ -2884,7 +2961,7 @@ fn validate_design(d: &DesignFields) -> Result<(), CliError> {
     }
     validate_groups(&d.group_specs)?;
     d.container_plan
-        .validate(&default_labware_registry())
+        .validate(registry)
         .map_err(|issues| CliError::input(format!("容器计划无效：{}", issues.join("；"))))?;
     if d.group_specs.len() > 100 {
         return Err(CliError::input("组别数量最多 100 个"));
@@ -3343,10 +3420,12 @@ fn create_design_tx(
     tx: &Transaction<'_>,
     project_id: &str,
     design: &DesignFields,
+    registry: &LabwareRegistry,
 ) -> Result<Value, CliError> {
-    let raw = normalize_validate_design_data(
+    let raw = normalize_validate_design_data_with_registry(
         serde_json::to_value(design).map_err(|e| CliError::internal(e.to_string()))?,
         None,
+        registry,
     )?;
     let record = insert(tx, "design", Some(project_id), Some(project_id), 1, &raw)?;
     let version = insert(
@@ -3385,6 +3464,7 @@ fn merge_design(base: &mut Value, c: &DesignChanges) {
     put!(assays);
     put!(sample_allocations);
     put!(planned_outputs);
+    put!(container_plan);
     put!(source_evidence);
     put!(evidence_conflicts);
     put!(planned_run_count);
@@ -3660,7 +3740,8 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let tx = db
                 .unchecked_transaction()
                 .map_err(|e| CliError::internal(e.to_string()))?;
-            let r = create_design_tx(&tx, &i.project_id, &i.design)?;
+            let registry = load_labware_registry(&db)?;
+            let r = create_design_tx(&tx, &i.project_id, &i.design, &registry)?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(r)
         }
@@ -3693,7 +3774,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let mut d: DesignFields = serde_json::from_value(value)
                 .map_err(|e| CliError::input(format!("修改后设计无效：{e}")))?;
             normalize_design(&mut d, Some(&previous));
-            validate_design(&d)?;
+            validate_design_with_registry(&d, &load_labware_registry(&db)?)?;
             let next = revision + 1;
             let tx = db
                 .unchecked_transaction()
@@ -3909,6 +3990,17 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             )?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(json!({"version":version,"changes":diff,"requires_protocol_rebind":true}))
+        }
+        "labware.define" => {
+            require_trusted_writer(tool)?;
+            let i: LabwareDefine = parse_input(path)?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let payload = serde_json::to_value(i).map_err(|e| CliError::internal(e.to_string()))?;
+            let result = create_labware_profile(&tx, &payload)?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(result)
         }
         "component.define" => {
             require_trusted_writer(tool)?;
@@ -4495,6 +4587,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                     &tx,
                     p["id"].as_str().unwrap_or_default(),
                     d,
+                    &default_labware_registry(),
                 )?)
             }
             let mut protocols = Vec::new();
@@ -4592,6 +4685,9 @@ fn record_data_schema(kind: &str) -> Value {
         "catalog_review" => {
             json!({"type":"object","additionalProperties":false,"required":["review_id","subject","status","reviewer","reviewed_at","evidence_id","evidence_locator","content_digest"],"properties":{"review_id":{"type":"string"},"subject":{"type":"object","additionalProperties":false,"required":["module_id","version"],"properties":{"module_id":{"type":"string"},"version":{"type":"integer","minimum":1}}},"status":{"type":"string","enum":["research_draft","source_checked","expert_reviewed","lab_validated"]},"reviewer":{"type":"string"},"reviewed_at":{"type":"string"},"evidence_id":{"type":"string"},"evidence_locator":{"type":"string"},"content_digest":{"type":"string"}}})
         }
+        "labware_profile" => {
+            json!({"type":"object","additionalProperties":true})
+        }
         "component_definition" => {
             json!({"type":"object","additionalProperties":true})
         }
@@ -4641,6 +4737,7 @@ fn any_record_schema() -> Value {
         "protocol_version",
         "protocol_block",
         "protocol_block_version",
+        "labware_profile",
         "component_definition",
         "view",
         "view_document",
@@ -4776,6 +4873,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "protocol.block.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","steps"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"summary":{"type":"string","maxLength":1000},"parameter_slots":{"type":"array","maxItems":100,"items":parameter_slot_input_schema()},"steps":{"type":"array","minItems":1,"maxItems":100,"items":protocol_step_input_schema()}}})
+        }
+        "labware.define" => {
+            json!({"type":"object","additionalProperties":false,"required":["profile"],"properties":{"profile":{"type":"object"}}})
         }
         "component.define" => {
             json!({"type":"object","additionalProperties":false,"required":["definition"],"properties":{"definition":{"type":"object"}}})
@@ -4995,6 +5095,7 @@ fn tool_specs() -> Vec<Value> {
         "protocol.block.list",
         "protocol.block.get",
         "protocol.block.create",
+        "labware.define",
         "component.define",
         "view.project",
         "view.create",
@@ -5078,6 +5179,7 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.block.list" => "按项目列出可复用步骤块。",
         "protocol.block.get" => "读取步骤块及其全部不可变版本。",
         "protocol.block.create" => "创建可作为完整 Protocol 或子步骤复用的版本化步骤块；只记录明确提供的操作和参数槽位。",
+        "labware.define" => "注册一个不可变 LabwareProfile 版本;Design 容器计划从持久化注册表解析。",
         "component.define" => "注册一个不可变的 ComponentDefinition 版本;View 创建/修订从持久化注册表加载。",
         "view.project" => "从真实 ProtocolPreview 生成只读 ViewDocument 初始投影;不写入。",
         "view.create" => "在受控事务中保存新的统一组件 ViewDocument。",

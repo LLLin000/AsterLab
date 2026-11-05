@@ -29,6 +29,14 @@ pub enum LabwareFamily {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum LabwareCompatibility {
+    Compatible,
+    Incompatible,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum ProfileFieldState {
     Known,
     Unknown,
@@ -120,6 +128,7 @@ impl LabwareRegistry {
         {
             return Err("labware profile is missing required identity".into());
         }
+        validate_profile_fields(&profile)?;
         self.profiles.insert(key, profile);
         Ok(())
     }
@@ -155,7 +164,7 @@ pub fn default_labware_registry() -> LabwareRegistry {
             fields.insert("working_volume_range".into(), ProfileField::unknown());
             fields.insert("surface_treatment".into(), ProfileField::unknown());
             fields.insert("bottom_shape".into(), ProfileField::unknown());
-            fields.insert("culture_area".into(), ProfileField::not_applicable());
+            fields.insert("culture_area".into(), ProfileField::unknown());
             fields.insert("sterility".into(), ProfileField::unknown());
             fields.insert("optical_properties".into(), ProfileField::unknown());
             fields.insert("compatible_instruments".into(), ProfileField::unknown());
@@ -172,15 +181,16 @@ pub fn default_labware_registry() -> LabwareRegistry {
             12,
         ))
         .unwrap();
-    registry
-        .register(base(
-            "labware.pcr_96",
-            LabwareFamily::PcrPlate,
-            "96-well PCR plate",
-            8,
-            12,
-        ))
-        .unwrap();
+    let mut pcr = base(
+        "labware.pcr_96",
+        LabwareFamily::PcrPlate,
+        "96-well PCR plate",
+        8,
+        12,
+    );
+    pcr.fields
+        .insert("culture_area".into(), ProfileField::not_applicable());
+    registry.register(pcr).unwrap();
     registry
         .register(base(
             "labware.cell_culture_6",
@@ -301,7 +311,15 @@ impl ContainerPlan {
             }
         }
 
+        let mut assignment_positions = HashSet::new();
         for assignment in &self.assignments {
+            let key = format!("{}::{}", assignment.container_id, assignment.position_id);
+            if !assignment_positions.insert(key) {
+                issues.push(format!(
+                    "duplicate assignment for {}:{}",
+                    assignment.container_id, assignment.position_id
+                ));
+            }
             let Some(profile) = profiles.get(assignment.container_id.as_str()) else {
                 issues.push(format!(
                     "assignment references unknown container {}",
@@ -322,6 +340,17 @@ impl ContainerPlan {
                 ));
             }
             let mut target_keys = HashSet::new();
+            let primaries = assignment
+                .targets
+                .iter()
+                .filter(|target| target.role.eq_ignore_ascii_case("primary"))
+                .count();
+            if primaries > 1 {
+                issues.push(format!(
+                    "assignment {}:{} has multiple primary targets",
+                    assignment.container_id, assignment.position_id
+                ));
+            }
             for target in &assignment.targets {
                 if target.role.trim().is_empty() || target.relationship.trim().is_empty() {
                     issues.push(format!(
@@ -339,6 +368,9 @@ impl ContainerPlan {
             }
         }
 
+        let mut placement_children = HashSet::new();
+        let mut placement_positions = HashSet::new();
+        let mut placement_pairs = HashSet::new();
         for placement in &self.placements {
             let Some(parent) = profiles.get(placement.parent_container_id.as_str()) else {
                 issues.push(format!(
@@ -356,6 +388,29 @@ impl ContainerPlan {
             if placement.parent_container_id == placement.child_container_id {
                 issues.push("container cannot be placed inside itself".into());
             }
+            if !placement_children.insert(placement.child_container_id.as_str()) {
+                issues.push(format!(
+                    "child container {} is placed in more than one parent",
+                    placement.child_container_id
+                ));
+            }
+            let position_key = format!(
+                "{}::{}",
+                placement.parent_container_id, placement.position_id
+            );
+            if !placement_positions.insert(position_key) {
+                issues.push(format!(
+                    "position {} already has a placed child",
+                    placement.position_id
+                ));
+            }
+            let pair = format!(
+                "{}::{}::{}",
+                placement.parent_container_id, placement.position_id, placement.child_container_id
+            );
+            if !placement_pairs.insert(pair) {
+                issues.push("duplicate container placement".into());
+            }
             if !position_is_valid(parent, &placement.position_id) {
                 issues.push(format!(
                     "placement position {} is not valid for container {}",
@@ -365,6 +420,24 @@ impl ContainerPlan {
             if placement.relationship.trim().is_empty() {
                 issues.push("placement relationship must not be empty".into());
             }
+            if let Some(child) = profiles.get(placement.child_container_id.as_str()) {
+                if placement_compatibility(parent, child) == LabwareCompatibility::Incompatible {
+                    issues.push(format!(
+                        "container {} is incompatible with parent {}",
+                        placement.child_container_id, placement.parent_container_id
+                    ));
+                }
+            }
+        }
+        let mut placement_edges: HashMap<String, Vec<String>> = HashMap::new();
+        for placement in &self.placements {
+            placement_edges
+                .entry(placement.parent_container_id.clone())
+                .or_default()
+                .push(placement.child_container_id.clone());
+        }
+        if has_placement_cycle(&placement_edges) {
+            issues.push("container placement graph contains a cycle".into());
         }
 
         if issues.is_empty() {
@@ -373,6 +446,97 @@ impl ContainerPlan {
             Err(issues)
         }
     }
+}
+
+fn validate_profile_fields(profile: &LabwareProfile) -> Result<(), String> {
+    for (key, field) in &profile.fields {
+        match field.state {
+            ProfileFieldState::Known if field.value.is_none() => {
+                return Err(format!("profile field {key} is known but has no value"));
+            }
+            ProfileFieldState::Unknown | ProfileFieldState::NotApplicable
+                if field.value.is_some() =>
+            {
+                return Err(format!(
+                    "profile field {key} carries a value but is not known"
+                ));
+            }
+            ProfileFieldState::Conflicted if field.value.is_some() => {
+                return Err(format!(
+                    "profile field {key} is conflicted but carries one value"
+                ));
+            }
+            ProfileFieldState::Conflicted if field.evidence.is_empty() => {
+                return Err(format!(
+                    "profile field {key} is conflicted without evidence"
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+pub fn placement_compatibility(
+    parent: &LabwareProfile,
+    child: &LabwareProfile,
+) -> LabwareCompatibility {
+    let accepted = parent
+        .fields
+        .get("accepts_child_families")
+        .and_then(|field| field.value.as_ref())
+        .and_then(Value::as_array);
+    let parents = child
+        .fields
+        .get("parent_families")
+        .and_then(|field| field.value.as_ref())
+        .and_then(Value::as_array);
+    let (Some(accepted), Some(parents)) = (accepted, parents) else {
+        return LabwareCompatibility::Unknown;
+    };
+    let parent_ok = parents.iter().any(|family| {
+        serde_json::to_value(parent.family)
+            .ok()
+            .as_ref()
+            .is_some_and(|value| value == family)
+    });
+    let child_ok = accepted.iter().any(|family| {
+        serde_json::to_value(child.family)
+            .ok()
+            .as_ref()
+            .is_some_and(|value| value == family)
+    });
+    if parent_ok && child_ok {
+        LabwareCompatibility::Compatible
+    } else {
+        LabwareCompatibility::Incompatible
+    }
+}
+
+fn has_placement_cycle(edges: &HashMap<String, Vec<String>>) -> bool {
+    fn visit(
+        node: &str,
+        edges: &HashMap<String, Vec<String>>,
+        state: &mut HashMap<String, u8>,
+    ) -> bool {
+        match state.get(node).copied() {
+            Some(1) => return true,
+            Some(2) => return false,
+            _ => {}
+        }
+        state.insert(node.to_owned(), 1);
+        if let Some(next) = edges.get(node) {
+            for child in next {
+                if visit(child, edges, state) {
+                    return true;
+                }
+            }
+        }
+        state.insert(node.to_owned(), 2);
+        false
+    }
+    let mut state = HashMap::new();
+    edges.keys().any(|node| visit(node, edges, &mut state))
 }
 
 fn position_is_valid(profile: &LabwareProfile, position: &str) -> bool {
@@ -389,16 +553,22 @@ fn position_is_valid(profile: &LabwareProfile, position: &str) -> bool {
     let (Some(rows), Some(columns)) = (rows, columns) else {
         return false;
     };
-    let bytes = position.as_bytes();
-    if bytes.is_empty() {
+    let mut chars = position.chars();
+    let Some(row_char) = chars.next() else {
+        return false;
+    };
+    if !row_char.is_ascii_alphabetic() {
         return false;
     }
-    let row = (bytes[0] as char).to_ascii_uppercase() as u64;
+    let row = row_char.to_ascii_uppercase() as u64;
     if !(b'A' as u64..b'A' as u64 + rows).contains(&row) {
         return false;
     }
-    let column = position[1..].parse::<u64>().ok();
-    column.is_some_and(|column| (1..=columns).contains(&column))
+    let suffix = chars.as_str();
+    suffix
+        .parse::<u64>()
+        .ok()
+        .is_some_and(|column| (1..=columns).contains(&column))
 }
 
 #[cfg(test)]
@@ -435,6 +605,85 @@ mod tests {
             ProfileFieldState::Unknown
         );
         assert!(profile.fields["surface_treatment"].value.is_none());
+    }
+
+    #[test]
+    fn culture_area_is_unknown_not_not_applicable_for_culture_plate() {
+        let registry = default_labware_registry();
+        let culture = registry
+            .get(&ProfileRef { id: "labware.cell_culture_96".into(), version: 1 })
+            .unwrap();
+        assert_eq!(culture.fields["culture_area"].state, ProfileFieldState::Unknown);
+        let pcr = registry
+            .get(&ProfileRef { id: "labware.pcr_96".into(), version: 1 })
+            .unwrap();
+        assert_eq!(pcr.fields["culture_area"].state, ProfileFieldState::NotApplicable);
+    }
+
+    #[test]
+    fn profile_registry_rejects_inconsistent_field_states() {
+        let mut registry = LabwareRegistry::default();
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            "rows".into(),
+            ProfileField {
+                state: ProfileFieldState::Known,
+                value: None,
+                evidence: vec![],
+                note: None,
+            },
+        );
+        let profile = LabwareProfile {
+            profile: ProfileRef { id: "bad".into(), version: 1 },
+            family: LabwareFamily::CellCulturePlate,
+            title: "bad".into(),
+            fields,
+            review_status: "research_draft".into(),
+        };
+        assert!(registry.register(profile).is_err());
+    }
+
+    #[test]
+    fn placement_cycles_duplicate_assignments_and_unicode_positions_are_rejected() {
+        let registry = default_labware_registry();
+        let mut plan = ContainerPlan {
+            containers: vec![
+                container("plate-1", "labware.cell_culture_96"),
+                container("insert-1", "labware.transwell_insert_6"),
+            ],
+            assignments: vec![PositionAssignment {
+                container_id: "plate-1".into(),
+                position_id: "A１".into(),
+                targets: vec![AssignedTarget {
+                    target: PlanTargetRef::Sample { id: "s1".into() },
+                    role: "primary".into(),
+                    relationship: "contains".into(),
+                    counts_as_independent_unit: true,
+                    source: None,
+                }],
+            }],
+            placements: vec![
+                ContainerPlacement {
+                    parent_container_id: "plate-1".into(),
+                    position_id: "A1".into(),
+                    child_container_id: "insert-1".into(),
+                    relationship: "inserted_into".into(),
+                    source: None,
+                },
+                ContainerPlacement {
+                    parent_container_id: "insert-1".into(),
+                    position_id: "A1".into(),
+                    child_container_id: "plate-1".into(),
+                    relationship: "inserted_into".into(),
+                    source: None,
+                },
+            ],
+        };
+        assert!(plan.validate(&registry).is_err());
+
+        plan.placements.clear();
+        plan.assignments.push(plan.assignments[0].clone());
+        assert!(plan.validate(&registry).is_err());
     }
 
     #[test]

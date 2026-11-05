@@ -880,9 +880,38 @@ fn design_container_plan_freezes_into_run() {
             }
         }),
     );
+    let design_id = design["result"]["design"]["id"].as_str().unwrap();
+    let revised = cli.run(
+        "design.revise",
+        &json!({
+            "id": design_id,
+            "expected_revision": 1,
+            "changes": {
+                "container_plan": {
+                    "containers": [{
+                        "id": "plate-1",
+                        "profile_ref": {"id":"labware.cell_culture_96","version":1},
+                        "label": "Plate 1"
+                    }],
+                    "assignments": [{
+                        "container_id":"plate-1",
+                        "position_id":"A2",
+                        "targets":[{
+                            "target":{"kind":"sample","id":"s1"},
+                            "role":"primary",
+                            "relationship":"contains",
+                            "counts_as_independent_unit":true
+                        }]
+                    }],
+                    "placements": []
+                }
+            }
+        }),
+    );
+    assert_eq!(revised["result"]["record"]["revision"], 2);
     let run = cli.run(
         "run.create",
-        &json!({"design_id": design["result"]["design"]["id"], "title": "container run"}),
+        &json!({"design_id": design_id, "title": "container run"}),
     );
     assert_eq!(
         run["result"]["record"]["data"]["container_plan"]["containers"][0]["profile_ref"]["id"],
@@ -890,6 +919,53 @@ fn design_container_plan_freezes_into_run() {
     );
     assert_eq!(
         run["result"]["record"]["data"]["container_plan"]["assignments"][0]["position_id"],
-        "A1"
+        "A2"
+    );
+}
+
+#[test]
+fn custom_labware_profile_is_loaded_for_design_validation() {
+    let cli = Cli::new("labware");
+    let project = cli.run("project.create", &json!({"name":"labware"}))["result"]["record"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    cli.run(
+        "labware.define",
+        &json!({"profile": {
+            "profile": {"id":"labware.local_96","version":1},
+            "family": "cell_culture_plate",
+            "title": "Local 96 plate",
+            "fields": {
+                "rows": {"state":"known","value":8},
+                "columns": {"state":"known","value":12},
+                "coordinate_system": {"state":"known","value":"A1 row-major"},
+                "culture_area": {"state":"unknown"}
+            },
+            "review_status": "research_draft"
+        }}),
+    );
+    let design = cli.run(
+        "design.create",
+        &json!({
+            "project_id": project,
+            "design": {
+                "title": "Local profile design", "objective": "x", "experimental_unit": "well",
+                "group_specs": [], "assays": [],
+                "container_plan": {
+                    "containers": [{
+                        "id":"plate-local",
+                        "profile_ref":{"id":"labware.local_96","version":1},
+                        "label":"Local plate"
+                    }],
+                    "assignments": [], "placements": []
+                }
+            }
+        }),
+    );
+    assert_eq!(
+        design["result"]["version"]["data"]["snapshot"]["container_plan"]["containers"][0]
+            ["profile_ref"]["id"],
+        "labware.local_96"
     );
 }

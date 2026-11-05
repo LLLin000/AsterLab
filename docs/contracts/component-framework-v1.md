@@ -199,11 +199,21 @@ C3-0 目录:
 
 C3-1 计划容器:
 
-- `LabwareProfile` + `ProfileField` 的 known/unknown/not_applicable/conflicted 状态。
+- `LabwareProfile` + `ProfileField` 的 known/unknown/not_applicable/conflicted 状态;注册时校验 state/value/evidence。
 - `PlannedContainer`、`PositionAssignment`、`AssignedTarget`、`ContainerPlacement`。
-- DesignVersion 增加 `container_plan`;Run 创建时把该计划冻结进 run data。
-- 计划孔位只在 DesignVersion;View 只引用,不拥有。
+- `ContainerPlan` 校验包含环、重复 child、重复位置、重复分配、多个 primary target、非法/Unicode 孔位。
+- `ContainerPlacement` 区分 compatible / incompatible / unknown;unknown 可以保存草案,不能宣称已通过物理兼容。
+- DesignVersion 增加 `container_plan`,并可通过 `design.revise` 替换生成新版本。
+- Run 创建时把该计划冻结进 run data。
+- `labware.define` 持久化版本化 Profile;Design 校验从持久化 Registry 加载。
+- `ModelRef::PlannedContainer { design_version_id, container_id }` 可精确引用同一计划容器。
 - 默认 Profile 为 `research_draft`,物理字段未核实;不提供推测体积/表面/兼容性。
+
+剩余:
+
+- Run 只保存 ProfileRef,尚未保存 Profile 内容摘要/完整解释快照。
+- `OperationUse.scope` 仍未与真实 Assay scope 精确比较。
+- Generic Table / Calculator / WellPlate 完整数据适配未实现。
 
 ## 10. C2-B2.1 与首个视图切片
 
