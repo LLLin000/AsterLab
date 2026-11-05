@@ -11,11 +11,12 @@
 5. [全界面 UI/UX 走查](2026-11-05-asterlab-ui-ux-audit.md) — 操作者视角的导航收敛、逐屏布局/文案、单位与移动端问题；区分源码事实、浏览器观察和建议。
 6. [前端架构:设计工作区与共用词表](2026-11-05-design-workspace-architecture.md) — 四区域壳、浏览/草稿状态、四步流程、受控词表、外部产品参考与已知数据缺口。
 7. [K0 知识覆盖审计](2026-11-05-k0-knowledge-coverage-audit.md) — 实验/步骤/仪器覆盖矩阵、代码事实、文档冲突与证据审核计划；当前没有 Source Checked 以上条目。
-8. [组别 × 检测覆盖语义研究](2026-11-04-asterlab-assay-coverage-research.md) — 核实现状、未知/明确不做/不适用契约缺口、保守文案与四态候选。
-9. [协议知识、步骤模型与相关项目](2026-11-05-protocol-knowledge-and-related-projects.md) — 常见实验的步骤/目的/对照/失败模式、协议软件与标准参照、产品边界。
-10. [实验设计契约与步骤块](2026-11-03-cellplanner-contract-modules.md) — Protocol/步骤块复用、参数、Agent 写 Protocol 的契约。
-11. [实验设计模型](2026-11-02-cellplanner-experiment-design-model.md) — 科学设计模型、n、Assay、对照、样本及 CLI 契约边界。
-12. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
+8. [K2 仪器来源审计](k2-instruments/README.md) — 移液器、CO₂ 培养箱、吸光度读板机、荧光显微镜四份逐项来源记录；全部仍为 research_draft。
+9. [组别 × 检测覆盖语义研究](2026-11-04-asterlab-assay-coverage-research.md) — 核实现状、未知/明确不做/不适用契约缺口、保守文案与四态候选。
+10. [协议知识、步骤模型与相关项目](2026-11-05-protocol-knowledge-and-related-projects.md) — 常见实验的步骤/目的/对照/失败模式、协议软件与标准参照、产品边界。
+11. [实验设计契约与步骤块](2026-11-03-cellplanner-contract-modules.md) — Protocol/步骤块复用、参数、Agent 写 Protocol 的契约。
+12. [实验设计模型](2026-11-02-cellplanner-experiment-design-model.md) — 科学设计模型、n、Assay、对照、样本及 CLI 契约边界。
+13. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
 
 ## 证据标签
 
