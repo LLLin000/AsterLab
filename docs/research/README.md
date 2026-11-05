@@ -17,17 +17,18 @@
 11. [协议知识、步骤模型与相关项目](2026-11-05-protocol-knowledge-and-related-projects.md) — 常见实验的步骤/目的/对照/失败模式、协议软件与标准参照、产品边界。
 12. [实验设计契约与步骤块](2026-11-03-cellplanner-contract-modules.md) — Protocol/步骤块复用、参数、Agent 写 Protocol 的契约。
 13. [实验设计模型](2026-11-02-cellplanner-experiment-design-model.md) — 科学设计模型、n、Assay、对照、样本及 CLI 契约边界。
-14. [操作与仪器记录规范](record-standard.md) — OperationRecord / InstrumentRecord 的必填结构、实验来源优先级、证据等级、UNKNOWN 分类、JSON 转换与审核清单;本轮仅限体外/细胞/微生物/分子湿实验。
-15. [Protocol 来源清单](protocol-sources.md) — protocols.io、Bio-protocol、Nature Protocols、JoVE、Current Protocols、CSH、ASM 等仓库的用途与访问注意。
-16. [覆盖账本](coverage-ledger.md) — 操作/仪器覆盖、来源强度、JSON 覆盖与下一批优先级；文件数量不等于可验收。
-17. [粒度冻结](k2-operations/granularity-freeze.md) — 最小可审计科学操作的四条判定、四层结构、Custom Step 与争议裁决。
-18. [Bio-protocol 4298 类器官拆解](k2-operations/organoid-bio-protocol-4298.md) — 直接读取完整 Bio-protocol;只覆盖体外 Matrigel dome,不把方法参数写成通用默认。
-19. [Morimoto 基础细胞培养](k2-operations/morimoto-basic-cell-culture.md) — 传代、血球计数、台盼蓝、冻存/复苏;大学 lab protocol 直接读取。
-20. [Protocol-driven Operation Discovery](protocol-discovery/README.md) — 每篇 Protocol 两张表(步骤拆解/公共操作复用)、来源索引、覆盖矩阵与缺口;B01–B22 已完成,覆盖矩阵见 [coverage-matrix](protocol-discovery/coverage-matrix.md),一致性审查见 [catalog-consistency-audit](protocol-discovery/catalog-consistency-audit.md),候选复审见 [candidate-recheck](protocol-discovery/candidate-recheck.md),剩余实验地图见 [gap-map](protocol-discovery/gap-map.md);Post-B22 结论见 [post-b22-review](protocol-discovery/post-b22-review.md);Catalog Promotion Review v2 见 [promotion-review](protocol-discovery/promotion-review/README.md)。
-18. [粒度与生物膜](k2-operations/granularity-and-biofilm.md) — 生物膜不是单一 OperationModule;CV/CFU 是方法模板。
-19. [粒度候选](k2-operations/granularity-candidates.md) / [独立复审](k2-operations/granularity-candidate-review.md) / [五场景](k2-operations/granularity-scenarios.md) — 约 18–20 个候选的四维审查与五类实验组合验证。
-20. [Catalog 晋升审计](k2-operations/catalog-promotion-audit.md) — 原子性不等于公共模块;复用广度/语义稳定/抽象收益/差异成本四道门槛,以及第一版公共操作清单。
-22. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
+14. [Semantic Component Contract v1(S0)](../contracts/semantic-component-contract.md) — 统一语义接口、Typed Binding、递归组合与现有 Core 映射；不新建组件运行时。
+15. [操作与仪器记录规范](record-standard.md) — OperationRecord / InstrumentRecord 的必填结构、实验来源优先级、证据等级、UNKNOWN 分类、JSON 转换与审核清单；本轮仅限体外/细胞/微生物/分子湿实验。
+16. [Protocol 来源清单](protocol-sources.md) — protocols.io、Bio-protocol、Nature Protocols、JoVE、Current Protocols、CSH、ASM 等仓库的用途与访问注意。
+17. [覆盖账本](coverage-ledger.md) — 操作/仪器覆盖、来源强度、JSON 覆盖与下一批优先级；文件数量不等于可验收。
+18. [粒度冻结](k2-operations/granularity-freeze.md) — 最小可审计科学操作的四条判定、四层结构、Custom Step 与争议裁决。
+19. [Bio-protocol 4298 类器官拆解](k2-operations/organoid-bio-protocol-4298.md) — 直接读取完整 Bio-protocol；只覆盖体外 Matrigel dome，不把方法参数写成通用默认。
+20. [Morimoto 基础细胞培养](k2-operations/morimoto-basic-cell-culture.md) — 传代、血球计数、台盼蓝、冻存/复苏；大学 lab protocol 直接读取。
+21. [Protocol-driven Operation Discovery](protocol-discovery/README.md) — 每篇 Protocol 两张表、来源索引、覆盖矩阵与缺口；B01–B22 已完成，覆盖矩阵见 [coverage-matrix](protocol-discovery/coverage-matrix.md)，一致性审查见 [catalog-consistency-audit](protocol-discovery/catalog-consistency-audit.md)，候选复审见 [candidate-recheck](protocol-discovery/candidate-recheck.md)，剩余实验地图见 [gap-map](protocol-discovery/gap-map.md)，Post-B22 见 [post-b22-review](protocol-discovery/post-b22-review.md)，Promotion Review v2 见 [promotion-review](protocol-discovery/promotion-review/README.md)。
+22. [粒度与生物膜](k2-operations/granularity-and-biofilm.md) — 生物膜不是单一 OperationModule；CV/CFU 是方法模板。
+23. [粒度候选](k2-operations/granularity-candidates.md) / [独立复审](k2-operations/granularity-candidate-review.md) / [五场景](k2-operations/granularity-scenarios.md) — 约 18–20 个候选的四维审查与五类实验组合验证。
+24. [Catalog 晋升审计](k2-operations/catalog-promotion-audit.md) — 原子性不等于公共模块；复用广度/语义稳定/抽象收益/差异成本四道门槛，以及第一版公共操作清单。
+25. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
 
 ## 证据标签
 

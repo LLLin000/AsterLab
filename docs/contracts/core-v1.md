@@ -340,6 +340,10 @@ P0 只冻结“可选、非核心、不得阻塞”的边界；正式 Schema 在
 - 测试矩阵 C1–C12 明确。
 - 未完成项明确列出；不把候选方案写成已实现。
 
+## 7.1 后续语义组件契约
+
+S0 统一语义接口见 [Semantic Component Contract v1](semantic-component-contract.md):Operation/Composition/ToolAction/Resource/Typed Binding 映射现有对象,不新建第二套运行时。
+
 ## 8. 未决项（不阻塞 P0 契约冻结）
 
 1. `TargetRef` 的实体表在 P1/P2 何时落地；P0 只要求类型和引用约束。
