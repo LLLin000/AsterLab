@@ -18,7 +18,7 @@
 ## 当前测试
 
 ```text
-cargo test -p asterlab-core  154 passed
+cargo test -p asterlab-core  155 passed
 cargo test                   3 core integration + 6 operation + 5 catalog integration
 ```
 

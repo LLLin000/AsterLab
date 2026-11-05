@@ -280,6 +280,17 @@ mod tests {
     }
 
     #[test]
+    fn registered_reagent_tool_returns_versioned_provenance() {
+        let registry = default_labware_registry();
+        let plate = project_well_plate(&plan(), &registry, "plate-1").unwrap();
+        let invocation = run_reagent_tool(&plate, 10.0, 0.1).unwrap();
+        assert_eq!(invocation.action_id, REAGENT_TOOL_ID);
+        assert_eq!(invocation.action_version, REAGENT_TOOL_VERSION);
+        assert_eq!(invocation.outputs["total_volume"], 11.0);
+        assert_eq!(invocation.provenance[0].kind, "tool_action");
+    }
+
+    #[test]
     fn explicit_volume_and_extra_ratio_calculate() {
         let registry = default_labware_registry();
         let plate = project_well_plate(&plan(), &registry, "plate-1").unwrap();
