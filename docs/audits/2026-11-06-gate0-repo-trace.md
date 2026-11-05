@@ -26,6 +26,6 @@ cargo test                   3 core integration + 6 operation + 5 catalog integr
 
 - Gate 3 的输入仍由 CLI 显式 `volume_per_well` 提供,尚未通过组件 `DataBinding` 图和精确 `tool.calculator` 实例解析。
 - `view.data_preview` 只支持一个绑定到 `PlannedContainer` 的 WellPlate 实例;尚未验证多板/多实例选择。
-- Gate 4 API/HTML 数据预览入口已加入;浏览器视觉走查未完成(本地服务曾 PermissionDenied)。
+- Gate 4 API/HTML 数据预览入口已加入;已用本地浏览器打开 seeded View,选中 operation 后点击数据预览,显示 1 孔 × 10 µL × 1.1 = 11;截图 `target/view-ui-data-preview-fixed.png`。
 - `OperationUse.scope` 已按 Design Assay/PlannedOutput 与 Protocol 的关联验证;仍需要更多多 Assay 回归。
 - Profile 兼容性/来源仍是 research_draft;不能声称专家审核。
