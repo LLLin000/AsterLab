@@ -2,20 +2,21 @@
 
 - 日期:2026-11-05
 - 状态:研究判断;不新增运行时,不把任何记录升级为 `SourceChecked`
-- 依据:[record-standard](../record-standard.md)、[biofilm-cv-cfu.md](biofilm-cv-cfu.md)、O'Toole 2011、Merritt 2005、ASM serial dilution
+- 依据:[record-standard](../record-standard.md)、[粒度冻结](granularity-freeze.md)、[biofilm-cv-cfu.md](biofilm-cv-cfu.md)、O'Toole 2011、Merritt 2005、ASM serial dilution
 - 结论:生物膜不能作为一个单独的 `OperationModule`;它是一个 Assay/方法族。只有其中的原子动作(接种、孵育、洗涤、吸光度读取等)可复用。
 
 ## 1. 判定一个对象能否单独当操作
 
-采用 [record-standard §1.1](../record-standard.md#11-粒度判定先决定它是不是一个操作) 的五条:
+采用 [record-standard §1.1](../record-standard.md#11-粒度判定最小可审计科学操作) 的四条:
 
-1. 一个主要动作。
-2. 一个主要对象变化。
-3. 一个完成状态。
-4. 跨方法可复用。
-5. 边界可封闭。
+1. **独立目的**:是否有明确、独立的实验意图?
+2. **稳定边界**:输入、输出及样本变化是否能说明白?
+3. **独立确认**:是否能判断完成、失败或需要复核?
+4. **有意义的复用**:换一个方法后,基本含义是否保持不变?
 
-`biofilm` 同时违反 1、2、3、4:它包含培养、洗涤、染色、溶解、读数,或分散、稀释、铺板、培养、计数;不同菌种/培养基/终点含义不同;完成条件不止一个。因此它是 `assay_model` / `method_template`,不是 `atomic_operation`。
+停止拆分规则:如果继续拆只会得到设备动作、操作姿势或没有独立科学意义的子动作,就停止。
+
+`biofilm` 四项都不稳:没有单一科学目的(形成?总生物量?活菌?),输入/输出随 CV/CFU 变化,完成条件不止一个,换终点后含义改变。因此它是 `assay_model` / `method_template`,不是 `atomic_operation`。
 
 ## 2. 生物膜的拆分
 
