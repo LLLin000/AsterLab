@@ -172,6 +172,7 @@ Binding {
         | planned_sample | actual_sample | raw_data | derived_data | resource,
   unit,
   resolution: resolved | unresolved | not_applicable,
+  confirmed: bool,
   provenance[]
 }
 ```
@@ -179,6 +180,7 @@ Binding {
 规则:
 
 - 定义绑定、计划绑定、执行事实、冻结快照分开;不再用单个 `frozen: bool` 当业务真相。
+- `resolution` 表示值是否已解析;`confirmed` 表示该值是否已按阶段要求确认。不能因为适配或解析成功就自动变成 PlanReady。
 - 快照不可变、计划就绪、执行就绪是三个判断;`required_at` 的阶段语义保留。
 - 单位精确匹配;不做隐式换算。
 - Binding 只引用样本/数据权威对象,不复制样本谱系或执行结果。
@@ -188,6 +190,11 @@ Binding {
 - 已审核模块定义只能通过新版本修改;`bind` 不能改 `module_contract`。
 
 S1-A 只实现纯类型、兼容适配和校验,不写库、不改 CLI。
+
+校验分两层:
+
+- **Structural** `validate()`:字段、owner/target 的 Protocol 一致性、计划/执行来源边界、资源 id/version 成对、非空键/端口/路径。
+- **Contextual** `validate_with_context()`:通过只读 `BindingContext` 核对权威参数 Schema、引用存在性、版本、生命周期和作用域。`Resolved` 标签本身不被信任。
 
 ## 3. 现有 Core 对象映射
 
@@ -303,8 +310,18 @@ S1-A:
 - [x] `PlannedSampleRef` / `SampleRef` / `RawDataRef` / `DerivedDataRef` / `ResourceRef`。
 - [x] `TypedBinding` 类型、单位、阶段、resolution、provenance。
 - [x] 旧 `ParameterBinding` 只读适配;未知保持 unresolved。
-- [x] 11 个 Core 单元测试覆盖跨 Protocol 隔离、重复 use、类型/单位、计划/实际样本、未来 Run 数据、定义修改、旧数据兼容。
+- [x] 24 个 Core 单元测试覆盖跨 Protocol 隔离、重复 use、类型/单位、计划/实际样本、未来 Run 数据、定义修改、旧数据兼容。
 - [x] 未改 CLI/Slint/数据库/正式 JSON。
+
+S1-A.1:
+
+- [x] Owner 的 Protocol/Run 版本与目标步骤交叉校验。
+- [x] `resolution` 与 `confirmed` 分离;未确认 Legacy 值不会成为 PlanReady。
+- [x] Structural/Contextual 分层;上下文可拒绝缺失、未产生、版本不符和越界引用。
+- [x] 计划阶段禁止本次执行的事实;历史样本/数据必须用显式 Historical 引用。
+- [x] 权威 `ParameterSpec` 对照;伪造 `expected_type`/unit 会被拒绝。
+- [x] profile id/version 成对;空 parameter key/port/source path 会被拒绝。
+- [x] 反例覆盖跨 Protocol、缺失引用、未确认 Legacy、当前 Run RawData、伪造类型、资源缺版本、空键/端口/路径;合法历史数据可通过。
 
 未开始:
 

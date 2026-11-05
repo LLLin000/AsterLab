@@ -205,7 +205,8 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | 阶段 | 重点 | 状态 |
 |---|---|---|
 | S0 | Semantic Component Contract:身份/能力/端口/参数/引用/版本映射现有对象 | 已审查;修订版:[semantic-component-contract](contracts/semantic-component-contract.md) |
-| S1-A | Typed Reference & Binding:版本化引用、作用域、参数/样本/数据/资源绑定、兼容适配 | 已完成纯 Core 类型 + 11 个测试 |
+| S1-A | Typed Reference & Binding:版本化引用、作用域、参数/样本/数据/资源绑定、兼容适配 | 已完成纯 Core 类型 |
+| S1-A.1 | Binding Validation Hardening:owner/target 一致性、confirmed、上下文解析、权威 Schema、生命周期 | 已完成;24 个模块测试 |
 | S1-B | Composition Validation:递归 BlockUse、作用域、端口、引用合法性与依赖环 | 未开始 |
 | S1-C | ToolAction & ChangeSet:pure ToolAction、patch 契约、预期版本与事务边界 | 未开始 |
 | S2 | Catalog Compiler:审核过的操作定义编译到现有 ProtocolBlockVersion | 未开始 |
