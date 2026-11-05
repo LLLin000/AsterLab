@@ -10,7 +10,9 @@ use crate::operation_module::{
     CatalogModuleRef, ContractIssue, InstrumentRequirement, ModuleBinding, ModuleOrigin,
     OperationModule, PortSpec, ReviewStatus, SampleTransition,
 };
-use crate::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep, ReviewRecord};
+use crate::protocol_block::{
+    ModuleContractAuthority, ParameterSlot, ProtocolBlockVersionData, ProtocolStep, ReviewRecord,
+};
 use crate::protocol_preview::StepTimeScope;
 use crate::semantic_component::{ProtocolScope, SampleExpectation, SemanticIssue};
 use crate::semantic_composition::{
@@ -234,6 +236,7 @@ impl CompiledBlock {
             steps,
             module_contract: Some(self.module_contract.clone()),
             module_origin: Some(self.binding.origin),
+            module_contract_authority: Some(ModuleContractAuthority::Current),
             catalog_review: None,
         })
     }
@@ -743,6 +746,10 @@ mod tests {
         assert_eq!(data.version, 1);
         assert_eq!(data.module_contract.as_ref(), Some(&module));
         assert_eq!(data.module_origin, Some(ModuleOrigin::Imported));
+        assert_eq!(
+            data.module_contract_authority,
+            Some(ModuleContractAuthority::Current)
+        );
         let serialized = serde_json::to_value(&data).unwrap();
         assert!(serialized.get("module_contract").is_some());
         let round_trip: ProtocolBlockVersionData =

@@ -172,6 +172,15 @@ fn canonicalize(value: Value) -> Value {
     }
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModuleContractAuthority {
+    /// The sidecar is the current, reviewed definition of this block.
+    Current,
+    /// The sidecar is only provenance for a locally derived block.
+    SourceOnly,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolBlockVersionData {
@@ -186,6 +195,9 @@ pub struct ProtocolBlockVersionData {
     /// Explicit local relation to the catalog module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_origin: Option<ModuleOrigin>,
+    /// Distinguishes a current reviewed contract from a source-only reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_contract_authority: Option<ModuleContractAuthority>,
     /// Additive review proof for imported catalog modules.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_review: Option<ReviewRecord>,

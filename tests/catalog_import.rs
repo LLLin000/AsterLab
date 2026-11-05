@@ -132,6 +132,44 @@ fn module_json() -> Value {
     })
 }
 
+fn module_for(module_id: &str, action: &str, title: &str, parameter: &str, unit: &str) -> Value {
+    let mut module = module_json();
+    module["identity"]["catalog"]["module_id"] = json!(module_id);
+    module["identity"]["action_type"] = json!(action);
+    module["identity"]["title"] = json!(title);
+    module["semantics"]["purpose"] = json!(format!("{title} fixture"));
+    module["parameters"][0]["key"] = json!(parameter);
+    module["parameters"][0]["label"] = json!(parameter);
+    module["parameters"][0]["unit"] = json!(unit);
+    module
+}
+
+fn import_module(cli: &Cli, project: &str, module_json: &Value) -> Value {
+    let module: OperationModule = serde_json::from_value(module_json.clone()).unwrap();
+    let review = json!({
+        "review_id": format!("review-{}-{}", module.identity.catalog.module_id, module.identity.catalog.version),
+        "subject": module.identity.catalog,
+        "status": "source_checked",
+        "reviewer": "reviewer-1",
+        "reviewed_at": "2026-11-05T00:00:00Z",
+        "evidence_id": "k1",
+        "evidence_locator": "p1",
+        "content_digest": module_content_digest(&module)
+    });
+    let record = cli.run(
+        "catalog.review.record",
+        &json!({"project_id": project, "review": review}),
+    );
+    let review_id = record["result"]["record"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    cli.run(
+        "catalog.operation.import",
+        &json!({"project_id": project, "module": module_json, "review_id": review_id}),
+    )
+}
+
 #[test]
 fn catalog_import_preview_and_run_freeze_contract() {
     let cli = Cli::new("e2e");
@@ -264,4 +302,195 @@ fn catalog_import_preview_and_run_freeze_contract() {
         &json!({"id": run["result"]["record"]["id"]}),
     );
     assert_eq!(workspace["result"]["steps"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn cck8_multistep_live_dead_and_frozen_run_regression() {
+    let cli = Cli::new("multistep");
+    let project = cli.run("project.create", &json!({"name": "CCK-8 multistep"}))["result"]
+        ["record"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let liquid = import_module(
+        &cli,
+        &project,
+        &module_for(
+            "op.liquid_transfer",
+            "liquid_transfer",
+            "Transfer",
+            "volume",
+            "uL",
+        ),
+    );
+    let incubation = import_module(
+        &cli,
+        &project,
+        &module_for(
+            "op.incubation",
+            "incubation",
+            "Incubation",
+            "duration",
+            "min",
+        ),
+    );
+    let absorbance = import_module(
+        &cli,
+        &project,
+        &module_for(
+            "op.absorbance_measurement",
+            "absorbance_measurement",
+            "Absorbance",
+            "wavelength",
+            "nm",
+        ),
+    );
+    let liquid_id = liquid["result"]["version"]["id"].as_str().unwrap();
+    let liquid_block_id = liquid["result"]["block"]["id"].as_str().unwrap();
+    let incubation_id = incubation["result"]["version"]["id"].as_str().unwrap();
+    let absorbance_id = absorbance["result"]["version"]["id"].as_str().unwrap();
+
+    let method = cli.run(
+        "protocol.block.create",
+        &json!({
+            "project_id": project,
+            "title": "CCK-8 method",
+            "steps": [
+                {"kind":"block_use","use_id":"seed","block_version_id":liquid_id,"bindings":[{"slot":"volume","value":100,"unit":"uL"}]},
+                {"kind":"block_use","use_id":"treat","block_version_id":liquid_id,"bindings":[{"slot":"volume","value":50,"unit":"uL"}]},
+                {"kind":"block_use","use_id":"incubate","block_version_id":incubation_id,"bindings":[{"slot":"duration","value":24,"unit":"min"}]},
+                {"kind":"block_use","use_id":"read","block_version_id":absorbance_id,"bindings":[{"slot":"wavelength","value":450,"unit":"nm"}]},
+                {"kind":"text","use_id":"note","title":"Method note","instruction":"Method-local instruction."}
+            ]
+        }),
+    );
+    let method_version_id = method["result"]["version"]["id"].as_str().unwrap();
+    let preview = cli.run(
+        "protocol.block.preview",
+        &json!({"block_version_id": method_version_id}),
+    );
+    assert_eq!(preview["result"]["steps"].as_array().unwrap().len(), 5);
+    assert!(preview["result"]["ready"].as_bool().unwrap());
+    assert_eq!(
+        preview["result"]["module_contracts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let protocol = cli.run(
+        "protocol.create",
+        &json!({
+            "project_id": project,
+            "title": "CCK-8 and Live/Dead protocol",
+            "root_block_version_id": method_version_id
+        }),
+    );
+    let protocol_version_id = protocol["result"]["version"]["id"].as_str().unwrap();
+    let design = cli.run(
+        "design.create",
+        &json!({
+            "project_id": project,
+            "design": {
+                "title": "CCK-8 and live/dead design",
+                "objective": "compare",
+                "experimental_unit": "well",
+                "group_specs": [{
+                    "name": "Control", "role": "control", "condition": "vehicle",
+                    "independent_n": 3, "technical_repeats": 1
+                }],
+                "assays": [
+                    {"id":"cck8","title":"CCK-8","endpoint":"OD450","method":"CCK-8","unit":"absorbance","group_ids":[],"timepoints":[],"protocol_version_id":protocol_version_id},
+                    {"id":"live_dead","title":"Live/Dead","endpoint":"fluorescence","method":"Live/Dead","unit":"RFU","group_ids":[],"timepoints":[],"protocol_version_id":protocol_version_id}
+                ]
+            }
+        }),
+    );
+    let design_id = design["result"]["design"]["id"].as_str().unwrap();
+    let run_one = cli.run(
+        "run.create",
+        &json!({"design_id": design_id, "title": "run 1"}),
+    );
+    let run_two = cli.run(
+        "run.create",
+        &json!({"design_id": design_id, "title": "run 2"}),
+    );
+    let workspace_one = cli.run(
+        "run.workspace",
+        &json!({"id": run_one["result"]["record"]["id"]}),
+    );
+    let workspace_two = cli.run(
+        "run.workspace",
+        &json!({"id": run_two["result"]["record"]["id"]}),
+    );
+    assert_eq!(
+        workspace_one["result"]["steps"].as_array().unwrap().len(),
+        10
+    );
+    assert_eq!(
+        workspace_two["result"]["steps"].as_array().unwrap().len(),
+        10
+    );
+    let scopes = workspace_one["result"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|step| step["scope"]["assay_id"].as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert!(scopes.contains("cck8"));
+    assert!(scopes.contains("live_dead"));
+
+    let frozen_one = run_one["result"]["record"]["data"].clone();
+    assert_eq!(
+        frozen_one["protocol_manifest"][0]["module_contracts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let revised = cli.run(
+        "protocol.block.revise",
+        &json!({
+            "block_id": liquid_block_id,
+            "expected_version": 1,
+            "steps": [{"kind":"text","use_id":"revised","title":"Derived method","instruction":"Changed locally."}]
+        }),
+    );
+    assert_eq!(
+        revised["result"]["version"]["data"]["module_origin"],
+        "derived"
+    );
+    assert_eq!(
+        revised["result"]["version"]["data"]["module_contract_authority"],
+        "source_only"
+    );
+    let workspace_after = cli.run(
+        "run.workspace",
+        &json!({"id": run_one["result"]["record"]["id"]}),
+    );
+    assert_eq!(workspace_one, workspace_after);
+
+    let upgraded = import_module(&cli, &project, &{
+        let mut value = module_for(
+            "op.liquid_transfer",
+            "liquid_transfer",
+            "Transfer",
+            "volume",
+            "uL",
+        );
+        value["identity"]["catalog"]["version"] = json!(2);
+        value
+    });
+    assert_eq!(
+        upgraded["result"]["version"]["data"]["module_contract"]["identity"]["catalog"]["version"],
+        2
+    );
+    let old_manifest = cli.run(
+        "run.workspace",
+        &json!({"id": run_one["result"]["record"]["id"]}),
+    );
+    assert_eq!(old_manifest, workspace_after);
 }
