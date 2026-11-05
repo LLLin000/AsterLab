@@ -6,3 +6,5 @@ pub mod operation_module;
 pub mod instrument_matching;
 pub mod semantic_component;
 pub mod semantic_composition;
+pub mod semantic_tool;
+pub mod semantic_changeset;

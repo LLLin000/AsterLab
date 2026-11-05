@@ -56,7 +56,7 @@ ToolAction 不是 Operation:
 - 副作用级别(pure / database_write / external_effect);
 - 测试用例。
 
-当前 Core 没有 `ToolActionSpec`;S0 先冻结语义,不在本轮实现执行器。
+S1-C1 已在 `semantic_tool.rs` 定义 `ToolActionSpec` / `PureTool` / `run_pure`;只执行 Pure 能力,DatabaseWrite 与 ExternalEffect 由后续正式命令/授权处理。
 
 ### 1.4 Resource
 
@@ -287,7 +287,7 @@ The operation definition is the same; the **bindings** and **method template** d
 |---|---|---|---|
 | G1 | `BlockUse` 没有 typed inputs/outputs/condition | 组合只能靠顺序和文本 | 增加可选 `ports`/`condition` 语义字段,不建图引擎 |
 | G2 | `ParameterBinding` 没有 owner/target/source ref | 参数、样本、数据无法统一连接 | S1-A 已加独立 `TypedBinding`;旧结构未迁移 |
-| G3 | 无 `ToolActionSpec` Rust 类型 | 计算不能作为语义节点 | 先定义类型与 pure 校验 |
+| G3 | 无 `ToolActionSpec` Rust 类型 | 计算不能作为语义节点 | S1-C1 已加类型、pure 校验与确定性 runner |
 | G4 | `InstrumentProfile` 已有,但无 operation→resource 绑定 | 仪器能力无法在组合中解析 | 增加 `resource_ref` 绑定,不新建 profile 表 |
 | G5 | 无 sample/data ref 统一类型 | 样本谱系/原始/派生数据断裂 | S1-A 已加 PlannedSample/Sample/RawData/DerivedData 引用 |
 | G6 | 无 composition cycle/dependency validation | 递归组合可能循环 | `validate` 增加 DAG/深度检查 |
@@ -353,10 +353,26 @@ S1-B.1:
 - [x] 端口兼容性三态;权威 PortSpec 缺失或冲突被报告。
 - [x] `BlockUseSource` 只读适配,保留 scope-qualified 路径。
 
+S1-C1 · Pure ToolAction:
+
+- [x] `ToolActionSpec` 的 action/version/schema/source/side effects。
+- [x] 非 Pure 能力被 runner 拒绝;DatabaseWrite / ExternalEffect 不混入计算。
+- [x] 同一输入执行两次以拒绝非确定性输出。
+- [x] `ToolInvocation` 保留 action/version、输入输出和 provenance。
+- [x] 不创建 ProtocolStep,不写数据库。
+
+S1-C2 · Agent ChangeSet:
+
+- [x] `ChangeTarget` 明确对象、版本和可选 scope/step path。
+- [x] `FieldChange` 只支持 Set/Unset;重复路径、缺值、多余值、空路径被拒绝。
+- [x] `validate_against(current_version)` 显式报告版本冲突。
+- [x] `ChangePreview` 只生成字段路径、失效引用和确认要求;不执行写入。
+- [x] 未接正式事务、CLI 或 UI。
+
 未开始:
 
-- S1-C1:pure ToolAction。
-- S1-C2:Agent ChangeSet。
+- S2/P3:把 ToolAction / ChangeSet 接入正式语义命令与写入适配。
+- Catalog Compiler 全量实现。
 
 ## 9. 来源
 

@@ -209,7 +209,8 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | S1-A.1 | Binding Validation Hardening:owner/target 一致性、confirmed、上下文解析、权威 Schema、生命周期 | 已完成;24 个模块测试 |
 | S1-B | Composition Validation:递归 BlockUse、作用域、端口、引用合法性与依赖环 | 已完成 |
 | S1-B.1 | Composition Hardening:样本回边、scope 身份、授权 Context、三态端口、BlockUse 适配 | 已完成;14 个模块测试 |
-| S1-C | ToolAction & ChangeSet:pure ToolAction、patch 契约、预期版本与事务边界 | 下一阶段 |
+| S1-C1 | Pure ToolAction:spec、pure 校验、确定性执行、provenance | 已完成;5 个模块测试 |
+| S1-C2 | Agent ChangeSet:精确目标、expected version、字段变更、预览 | 已完成;6 个模块测试 |
 | S2 | Catalog Compiler:审核过的操作定义编译到现有 ProtocolBlockVersion | 未开始 |
 | S3 | Agent Semantic Patch:inspect/search/compose/bind/validate/propose_patch/apply_patch | 未开始 |
 | S4 | 组合验收:CCK-8、活死、RT-qPCR | 未开始 |
