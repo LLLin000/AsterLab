@@ -207,12 +207,14 @@ C3-1 计划容器:
 - Run 创建时把该计划冻结进 run data。
 - `labware.define` 持久化版本化 Profile;Design 校验从持久化 Registry 加载。
 - `ModelRef::PlannedContainer { design_version_id, container_id }` 可精确引用同一计划容器。
+- Run 数据同时冻结 `container_plan` 和 `labware_profiles` 完整 Profile 内容,避免 Registry 后续变化导致历史解释漂移。
 - 默认 Profile 为 `research_draft`,物理字段未核实;不提供推测体积/表面/兼容性。
 
 剩余:
 
-- Run 只保存 ProfileRef,尚未保存 Profile 内容摘要/完整解释快照。
 - `OperationUse.scope` 仍未与真实 Assay scope 精确比较。
+- Profile 尚无明确的 built_in/imported/local 来源字段;目前由 review_status 与记录归属间接表达。
+- `Generic Table → Calculator` 真实数据联动未实现。
 - Generic Table / Calculator / WellPlate 完整数据适配未实现。
 
 ## 10. C2-B2.1 与首个视图切片

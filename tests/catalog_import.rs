@@ -921,6 +921,10 @@ fn design_container_plan_freezes_into_run() {
         run["result"]["record"]["data"]["container_plan"]["assignments"][0]["position_id"],
         "A2"
     );
+    assert_eq!(
+        run["result"]["record"]["data"]["labware_profiles"][0]["profile"]["id"],
+        "labware.cell_culture_96"
+    );
 }
 
 #[test]

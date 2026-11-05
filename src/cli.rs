@@ -1225,6 +1225,37 @@ pub(crate) fn build_run_manifests(
     Ok((protocol_manifest, material_manifest))
 }
 
+fn labware_profile_snapshot(db: &Connection, design_data: &Value) -> Result<Vec<Value>, CliError> {
+    let plan: ContainerPlan = serde_json::from_value(
+        design_data
+            .get("container_plan")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    )
+    .map_err(|e| CliError::internal(format!("设计 container_plan 无效：{e}")))?;
+    let registry = load_labware_registry(db)?;
+    let mut seen = std::collections::HashSet::new();
+    let mut profiles = Vec::new();
+    for container in &plan.containers {
+        let key = format!(
+            "{}@{}",
+            container.profile_ref.id, container.profile_ref.version
+        );
+        if !seen.insert(key) {
+            continue;
+        }
+        let profile = registry.get(&container.profile_ref).ok_or_else(|| {
+            CliError::input(format!(
+                "容器 {} 引用了未注册的 LabwareProfile {}@{}",
+                container.id, container.profile_ref.id, container.profile_ref.version
+            ))
+        })?;
+        profiles
+            .push(serde_json::to_value(profile).map_err(|e| CliError::internal(e.to_string()))?);
+    }
+    Ok(profiles)
+}
+
 pub(crate) fn create_run_in_transaction(
     tx: &Transaction<'_>,
     design_id: &str,
@@ -1262,6 +1293,7 @@ pub(crate) fn create_run_in_transaction(
         serde_json::from_str(&design_raw).map_err(|e| CliError::internal(e.to_string()))?;
     let (protocol_manifest, material_manifest) =
         build_run_manifests(tx, &design_data, &project, global_protocol_version_id)?;
+    let labware_profiles = labware_profile_snapshot(tx, &design_data)?;
     if let Some(previous_id) = repeat_of_run_id.filter(|id| !id.is_empty()) {
         let (previous_kind, previous_project, previous_design, _, _) = kind_id(tx, previous_id)?
             .ok_or_else(|| CliError::missing("被重复执行的 Run 不存在"))?;
@@ -1288,6 +1320,7 @@ pub(crate) fn create_run_in_transaction(
         "protocol_manifest":protocol_manifest,
         "material_manifest":material_manifest,
         "container_plan":design_data["container_plan"].clone(),
+        "labware_profiles":labware_profiles,
         "design_version_id":version,
         "design_revision":revision,
         "run_index":run_index,
@@ -4668,7 +4701,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["design_id","design_revision","snapshot"],"properties":{"design_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"snapshot":design_payload_schema()}})
         }
         "run" => {
-            json!({"type":"object","additionalProperties":false,"required":["title","scheduled_date","protocol_version_id","design_version_id","design_revision","status"],"properties":{"title":{"type":"string"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"status":{"type":"string","enum":["planned","in_progress","completed","blocked","cancelled"]},"run_index":{"type":"integer","minimum":1},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]},"container_plan":{"type":"object","additionalProperties":true},"material_manifest":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["planned_output_id","title","evidence_id","producer_protocol","consumers"],"properties":{"planned_output_id":{"type":"string"},"title":{"type":"string"},"evidence_id":{"type":["string","null"]},"producer_protocol":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","protocol_version_id","protocol_id","protocol_title","protocol_version","root_block_version_id","block_version_ids","root_bindings","protocol_ready","steps","resolved_parameters","unresolved_parameters"],"properties":{"assay_id":{"type":["string","null"]},"assay_title":{"type":"string"},"protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},"protocol_title":{"type":"string"},"protocol_version":{"type":"integer","minimum":1},"root_block_version_id":{"type":["string","null"]},"block_version_ids":{"type":"array","items":{"type":"string"}},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","unit"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"protocol_ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object"}},"resolved_parameters":{"type":"array","items":{"type":"object"}},"unresolved_parameters":{"type":"array","items":{"type":"object"}}}},"consumers":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","group_id","group_name"],"properties":{"assay_id":{"type":"string"},"assay_title":{"type":"string"},"group_id":{"type":["string","null"]},"group_name":{"type":"string"}}}}}}},"protocol_manifest":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","protocol_version_id","protocol_id","protocol_title","protocol_version"],"properties":{"assay_id":{"type":["string","null"]},"assay_title":{"type":"string"},"protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},"protocol_title":{"type":"string"},"protocol_version":{"type":"integer","minimum":1},"root_block_version_id":{"type":["string","null"]},"block_version_ids":{"type":"array","items":{"type":"string"}},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","unit"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"protocol_ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object"}},"resolved_parameters":{"type":"array","items":{"type":"object"}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}}}}}}})
+            json!({"type":"object","additionalProperties":false,"required":["title","scheduled_date","protocol_version_id","design_version_id","design_revision","status"],"properties":{"title":{"type":"string"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"status":{"type":"string","enum":["planned","in_progress","completed","blocked","cancelled"]},"run_index":{"type":"integer","minimum":1},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]},"container_plan":{"type":"object","additionalProperties":true},"labware_profiles":{"type":"array","items":{"type":"object","additionalProperties":true}},"material_manifest":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["planned_output_id","title","evidence_id","producer_protocol","consumers"],"properties":{"planned_output_id":{"type":"string"},"title":{"type":"string"},"evidence_id":{"type":["string","null"]},"producer_protocol":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","protocol_version_id","protocol_id","protocol_title","protocol_version","root_block_version_id","block_version_ids","root_bindings","protocol_ready","steps","resolved_parameters","unresolved_parameters"],"properties":{"assay_id":{"type":["string","null"]},"assay_title":{"type":"string"},"protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},"protocol_title":{"type":"string"},"protocol_version":{"type":"integer","minimum":1},"root_block_version_id":{"type":["string","null"]},"block_version_ids":{"type":"array","items":{"type":"string"}},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","unit"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"protocol_ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object"}},"resolved_parameters":{"type":"array","items":{"type":"object"}},"unresolved_parameters":{"type":"array","items":{"type":"object"}}}},"consumers":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","group_id","group_name"],"properties":{"assay_id":{"type":"string"},"assay_title":{"type":"string"},"group_id":{"type":["string","null"]},"group_name":{"type":"string"}}}}}}},"protocol_manifest":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","protocol_version_id","protocol_id","protocol_title","protocol_version"],"properties":{"assay_id":{"type":["string","null"]},"assay_title":{"type":"string"},"protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},"protocol_title":{"type":"string"},"protocol_version":{"type":"integer","minimum":1},"root_block_version_id":{"type":["string","null"]},"block_version_ids":{"type":"array","items":{"type":"string"}},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","unit"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"protocol_ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object"}},"resolved_parameters":{"type":"array","items":{"type":"object"}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}}}}}}})
         }
         "task" => {
             json!({"type":"object","additionalProperties":false,"required":["title","scheduled_date","status","notes"],"properties":{"title":{"type":"string"},"scheduled_date":{"type":"string","format":"date"},"status":{"type":"string","enum":["planned","in_progress","done","blocked"]},"notes":{"type":"string"}}})
