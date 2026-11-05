@@ -148,6 +148,7 @@ apps/desktop/target/release/labworkbench-desktop.exe \
 ```bash
 cargo test --manifest-path apps/desktop/Cargo.toml
 node tests/smoke.cjs
+node tests/p2-fixture.cjs
 sha256sum data/labworkbench.sqlite
 ```
 

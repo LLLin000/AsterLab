@@ -44,7 +44,7 @@ Windows 可双击 `start-labworkbench.bat`，或在 PowerShell 中运行：
 - `GET /api/designs/{id}/map`：只读实验地图，返回组别、检测、时间/样本关系、Protocol 关联和待确认项。
 - `GET /api/runs/{id}/workspace`：只读冻结 RunWorkspace，返回冻结设计、步骤/任务/实例、材料、板图和事件。
 - `POST /api/records` / `POST /api/records/update`：供当前本地网页界面使用的服务端适配层；Agent 的正式工具契约以强类型 CLI 为准。
-Agent 命令、输入输出 schema、错误码和科学字段语义见 [AGENT_API.md](AGENT_API.md)。本地回归检查见 `tests/smoke.cjs`；它会自行启动隔离实例，使用合成数据和临时数据库，不连接或改写当前打开的实例。
+Agent 命令、输入输出 schema、错误码和科学字段语义见 [AGENT_API.md](AGENT_API.md)。本地回归检查见 `tests/smoke.cjs` 和 `tests/p2-fixture.cjs`；它会自行启动隔离实例，使用合成数据和临时数据库，不连接或改写当前打开的实例。
 
 ## 当前限制
 

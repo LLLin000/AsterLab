@@ -64,6 +64,7 @@ Protocol 可以继续保存旧式 body 文本，也可以引用一个确切的 r
 - text：包含 use_id、title、instruction 和 parameter_refs，是普通可读操作。只有列入 parameter_refs 的槽位才作为该步骤的显式输入。
 - block_use：包含 use_id、block_version_id 和 bindings，在此位置组合一个确切的子块版本。binding 必须且只能提供 value 或 source_slot；类型和单位必须一致，不做隐式换算。每个必填子块槽位都要明确映射或给出值。
 - text 可选 `visualization`：`transfer`、`incubation`、`plate_layout`、`sample_split`、`measurement`。它只决定操作台采用哪种图解布局，不新增实验事实；示意中的样本、孔位和参数都从 Run 冻结清单及实际记录读取。没有合适图解时省略，继续显示文字步骤。
+- text 可选 `time_scope`：`once`、`per_timepoint`、`per_assay`、`unresolved`。它表达步骤的执行时间作用域，不从标题/类型推断；仅 `per_timepoint` 才会在 RunWorkspace 中按 Assay 时间点展开任务。缺失或 `unresolved` 时保留无确定时间点的任务，不批量复制到所有检测时间点。
 
 参数槽位包括 key、label、value_type（text、number、integer、boolean）、可选 unit 和 required。步骤块版本不可变；组合块固定引用子块的确切版本。只改本次条件或浓度时，保持步骤块原样，创建新的 Protocol 版本并更新 root_bindings，不复制步骤块。
 

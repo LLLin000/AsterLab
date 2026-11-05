@@ -89,9 +89,9 @@ P1-C 已完成（只读查询）：
 
 **验收：** Slint、CLI、HTTP 对同一 design/run 得到同一语义；旧契约不退化；桌面端不再二次计算 n/覆盖/时间关系。
 
-### P2 · 可执行 Run Fixture
+### P2 · 可执行 Run Fixture（已完成）
 
-当前 L929 fixture 的 `protocol_manifest` 为空，执行模式只能显示空清单。必须通过正式 Core 命令构建：
+`tests/p2-fixture.cjs` 通过正式 CLI 命令构建 synthetic L929 Run，验证：
 
 - 至少 3 个步骤；
 - 参数绑定；
@@ -100,7 +100,15 @@ P1-C 已完成（只读查询）：
 - 一条实际执行事件；
 - 不涉及正式数据库。
 
-**验收：** 不启动 Slint，只用 Core 查询就能回答 D1/D3 的任务、参数、目标和记录，且不能串到另一检测。
+**结果：** 6 个步骤、CCK-8 5 个任务、活死 5 个任务、1 个实际孔位、1 条 legacy 事件；修改当前设计后冻结 objective 不变；CCK-8/活死不串用。`node tests/p2-fixture.cjs` 通过。
+
+P1-C 加固同时完成：
+
+- 步骤反序列化失败返回错误，不再静默丢弃。
+- `time_scope` 显式控制任务展开；缺少时不复制到全部 Assay 时间点。
+- 冻结 DesignVersion 校验归属项目/设计，错误引用被拒绝。
+- `RunScope` 保留 `protocol_ready`、已解析/未解析参数。
+- `RunPlateView` 包含显式保存的实际孔位，不做计划→实际推断。
 
 ### P3 · 拆 Slint
 

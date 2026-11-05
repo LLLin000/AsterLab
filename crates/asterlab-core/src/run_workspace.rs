@@ -4,7 +4,7 @@
 //! instances. This module never reads the current Design.
 
 use crate::design_map::FrozenDesignView;
-use crate::protocol_preview::OperationStep;
+use crate::protocol_preview::{OperationStep, ResolvedParameter, StepTimeScope, UnresolvedParameter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -32,6 +32,9 @@ pub struct RunScope {
     pub id: String,
     pub title: String,
     pub protocol_version_id: Option<String>,
+    pub protocol_ready: bool,
+    pub resolved_parameters: Vec<ResolvedParameter>,
+    pub unresolved_parameters: Vec<UnresolvedParameter>,
     pub step_paths: Vec<String>,
 }
 
@@ -107,8 +110,19 @@ pub struct RunPlateView {
     pub plate_id: String,
     pub name: String,
     pub format: String,
+    pub rows: u32,
+    pub columns: u32,
     pub assay_id: Option<String>,
     pub timepoint: Option<String>,
+    pub wells: Vec<RunWellView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RunWellView {
+    pub coordinate: String,
+    pub group_label: Option<String>,
+    pub sample_id: Option<String>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -173,17 +187,82 @@ fn scope_id(scope: &StepScope) -> String {
     }
 }
 
-fn parse_steps(entry: &Value) -> Vec<OperationStep> {
-    entry["steps"]
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|step| serde_json::from_value(step.clone()).ok())
-                .collect()
+fn parse_manifest_parameters<T: serde::de::DeserializeOwned>(
+    entry: &Value,
+    field: &str,
+    scope: &str,
+) -> Result<Vec<T>, RunWorkspaceError> {
+    let Some(items) = entry[field].as_array() else {
+        return Ok(Vec::new());
+    };
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            serde_json::from_value(value.clone()).map_err(|error| {
+                RunWorkspaceError(format!(
+                    "RunProtocol scope {} {}[{}] 无效：{}",
+                    scope, field, index, error
+                ))
+            })
         })
-        .unwrap_or_default()
+        .collect()
 }
+
+fn append_manifest(
+    entry: &Value,
+    scope: StepScope,
+    title: &str,
+    scopes: &mut Vec<RunScope>,
+    steps: &mut Vec<RunStep>,
+    order: &mut u32,
+) -> Result<(), RunWorkspaceError> {
+    let scope_label = scope_id(&scope);
+    let raw_steps = entry["steps"].as_array().cloned().unwrap_or_default();
+    let mut step_paths = Vec::new();
+    for (index, raw) in raw_steps.iter().enumerate() {
+        let step: OperationStep = serde_json::from_value(raw.clone()).map_err(|error| {
+            RunWorkspaceError(format!(
+                "RunProtocol scope {} step[{}] 无法解析：{}",
+                scope_label, index, error
+            ))
+        })?;
+        *order += 1;
+        step_paths.push(step.path.clone());
+        steps.push(RunStep {
+            scope: scope.clone(),
+            order: *order,
+            step,
+        });
+    }
+    let protocol_ready = entry["protocol_ready"].as_bool().unwrap_or(false);
+    let resolved_parameters = parse_manifest_parameters::<ResolvedParameter>(
+        entry,
+        "resolved_parameters",
+        &scope_label,
+    )?;
+    let unresolved_parameters = parse_manifest_parameters::<UnresolvedParameter>(
+        entry,
+        "unresolved_parameters",
+        &scope_label,
+    )?;
+    scopes.push(RunScope {
+        kind: match scope {
+            StepScope::Assay { .. } => "assay".to_owned(),
+            StepScope::PlannedOutput { .. } => "planned_output".to_owned(),
+            StepScope::Unscoped => "global".to_owned(),
+        },
+        id: scope_label,
+        title: title.to_owned(),
+        protocol_version_id: opt_text(&entry["protocol_version_id"]),
+        protocol_ready,
+        resolved_parameters,
+        unresolved_parameters,
+        step_paths,
+    });
+    Ok(())
+}
+
 
 fn assay_timepoints(design: &crate::design_map::DesignMapContent, assay_id: &str) -> Vec<String> {
     design
@@ -221,42 +300,13 @@ pub fn build(
     let mut tasks: Vec<PlannedTask> = Vec::new();
     let mut order = 0u32;
 
-    let mut add_manifest = |entry: &Value, scope: StepScope, title: &str| {
-        let protocol_version_id = opt_text(&entry["protocol_version_id"]);
-        let step_paths = parse_steps(entry)
-            .into_iter()
-            .map(|step| {
-                order += 1;
-                let path = step.path.clone();
-                let scope_for_step = scope.clone();
-                steps.push(RunStep {
-                    scope: scope_for_step,
-                    order,
-                    step,
-                });
-                path
-            })
-            .collect::<Vec<_>>();
-        scopes.push(RunScope {
-            kind: match scope {
-                StepScope::Assay { .. } => "assay".to_owned(),
-                StepScope::PlannedOutput { .. } => "planned_output".to_owned(),
-                StepScope::Unscoped => "global".to_owned(),
-            },
-            id: scope_id(&scope),
-            title: title.to_owned(),
-            protocol_version_id,
-            step_paths,
-        });
-    };
-
     if let Some(entries) = run_data["protocol_manifest"].as_array() {
         for entry in entries {
             let scope = scope_for_manifest(entry);
             let title = opt_text(&entry["assay_title"])
                 .or_else(|| opt_text(&entry["protocol_title"]))
                 .unwrap_or_else(|| "Protocol".to_owned());
-            add_manifest(entry, scope, &title);
+            append_manifest(entry, scope, &title, &mut scopes, &mut steps, &mut order)?;
         }
     }
     if let Some(entries) = run_data["material_manifest"].as_array() {
@@ -267,21 +317,29 @@ pub fn build(
                         .unwrap_or_default(),
                 };
                 let title = opt_text(&entry["title"]).unwrap_or_else(|| "共享材料".to_owned());
-                add_manifest(producer, scope, &title);
+                append_manifest(producer, scope, &title, &mut scopes, &mut steps, &mut order)?;
             }
         }
     }
 
-    // Planned tasks are only derived from explicit step/timepoint pairs.
-    // Targets stay Unresolved; no plate/well/sample Cartesian product.
+    // Tasks are only expanded per timepoint for explicit per-timepoint steps.
+    // Missing step-level time scope stays a single task with no claimed timepoint.
     for step in &steps {
-        let timepoints = match &step.scope {
-            StepScope::Assay { assay_id } => assay_timepoints(&frozen.content, assay_id),
+        let timepoints = match (&step.scope, step.step.time_scope) {
+            (StepScope::Assay { assay_id }, Some(StepTimeScope::PerTimepoint)) => {
+                assay_timepoints(&frozen.content, assay_id)
+            }
             _ => Vec::new(),
         };
         if timepoints.is_empty() {
+            let key = serde_json::to_string(&serde_json::json!({
+                "scope": &step.scope,
+                "path": &step.step.path,
+                "timepoint": null
+            }))
+            .unwrap_or_else(|_| format!("{}:{}", scope_id(&step.scope), step.step.path));
             tasks.push(PlannedTask {
-                task_key: format!("{}:{}", scope_id(&step.scope), step.step.path),
+                task_key: key,
                 step_path: step.step.path.clone(),
                 scope: step.scope.clone(),
                 timepoint: None,
@@ -289,13 +347,16 @@ pub fn build(
             });
         } else {
             for timepoint in timepoints {
+                let key = serde_json::to_string(&serde_json::json!({
+                    "scope": &step.scope,
+                    "path": &step.step.path,
+                    "timepoint": &timepoint
+                }))
+                .unwrap_or_else(|_| {
+                    format!("{}:{}:{}", scope_id(&step.scope), step.step.path, timepoint)
+                });
                 tasks.push(PlannedTask {
-                    task_key: format!(
-                        "{}:{}:{}",
-                        scope_id(&step.scope),
-                        step.step.path,
-                        timepoint
-                    ),
+                    task_key: key,
                     step_path: step.step.path.clone(),
                     scope: step.scope.clone(),
                     timepoint: Some(timepoint),
@@ -336,8 +397,24 @@ pub fn build(
             plate_id: text(&plate["id"]),
             name: text(&plate["name"]),
             format: text(&plate["format"]),
+            rows: plate["rows"].as_u64().unwrap_or(0) as u32,
+            columns: plate["columns"].as_u64().unwrap_or(0) as u32,
             assay_id: opt_text(&plate["assay_id"]),
             timepoint: opt_text(&plate["timepoint"]),
+            wells: plate["wells"]
+                .as_array()
+                .map(|wells| {
+                    wells
+                        .iter()
+                        .map(|well| RunWellView {
+                            coordinate: text(&well["well_id"]),
+                            group_label: opt_text(&well["group_label"]),
+                            sample_id: opt_text(&well["sample_id"]),
+                            note: opt_text(&well["note"]),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
         .collect();
 
@@ -402,9 +479,9 @@ mod tests {
                 "assay_id":"cck8","assay_title":"CCK-8","protocol_version_id":"pv1",
                 "steps":[
                     {"path":"root/a","use_id":"a","title":"Add","instruction":"add",
-                     "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b1"},
+                     "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b1","time_scope":"per_timepoint"},
                     {"path":"root/b","use_id":"b","title":"Read","instruction":"read",
-                     "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b1"}
+                     "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b1","time_scope":"per_timepoint"}
                 ]
             }],
             "material_manifest":[]
@@ -419,6 +496,41 @@ mod tests {
         assert!(workspace.tasks.iter().all(|task| task.target == TargetSelection::Unresolved));
         assert!(workspace.tasks.iter().any(|task| task.timepoint.as_deref() == Some("D1")));
         assert!(workspace.occurrences.is_empty());
+    }
+
+    #[test]
+    fn missing_step_time_scope_does_not_expand_timepoints() {
+        let mut run = run();
+        run["protocol_manifest"][0]["steps"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("time_scope");
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[]).unwrap();
+        assert_eq!(workspace.tasks.len(), 3);
+        assert!(workspace
+            .tasks
+            .iter()
+            .filter(|task| task.step_path == "root/a")
+            .all(|task| task.timepoint.is_none()));
+        assert_eq!(
+            workspace
+                .tasks
+                .iter()
+                .filter(|task| task.step_path == "root/b")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn invalid_step_is_an_error_not_a_silent_drop() {
+        let mut run = run();
+        run["protocol_manifest"][0]["steps"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        let error = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[]).unwrap_err();
+        assert!(error.to_string().contains("step[0]"), "{error}");
     }
 
     #[test]

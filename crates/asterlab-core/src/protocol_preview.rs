@@ -20,6 +20,15 @@ pub struct ProtocolPreview {
     pub block_version_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepTimeScope {
+    Once,
+    PerTimepoint,
+    PerAssay,
+    Unresolved,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OperationStep {
     pub path: String,
@@ -31,6 +40,8 @@ pub struct OperationStep {
     pub source_block_version_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visualization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_scope: Option<StepTimeScope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -92,6 +103,7 @@ mod tests {
             unresolved_parameter_refs: vec![],
             source_block_version_id: "v".into(),
             visualization: None,
+            time_scope: None,
         };
         assert!(!serde_json::to_value(step)
             .unwrap()

@@ -1,5 +1,5 @@
 use asterlab_core::protocol_preview::{
-    OperationStep, ProtocolPreview, ResolvedParameter, UnresolvedParameter,
+    OperationStep, ProtocolPreview, ResolvedParameter, StepTimeScope, UnresolvedParameter,
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -528,6 +528,8 @@ enum ProtocolStep {
         parameter_refs: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         visualization: Option<StepVisualization>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time_scope: Option<StepTimeScope>,
     },
     BlockUse {
         use_id: String,
@@ -889,6 +891,7 @@ fn expand_block(
                 instruction,
                 parameter_refs,
                 visualization,
+                time_scope,
             } => {
                 if acc.steps.len() >= 500 {
                     return Err(CliError::input("组合展开超过 500 个操作步骤；请拆分预览"));
@@ -931,6 +934,7 @@ fn expand_block(
                     unresolved_parameter_refs: unresolved_refs,
                     source_block_version_id: version_id.to_owned(),
                     visualization,
+                    time_scope: *time_scope,
                 });
             }
             ProtocolStep::BlockUse {
@@ -2169,6 +2173,12 @@ pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliE
     if version["kind"] != "design_version" {
         return Err(CliError::internal("冻结设计版本记录类型无效"));
     }
+    if version["parent_id"].as_str() != Some(design_id) {
+        return Err(CliError::input("冻结设计版本不属于本执行批次的设计"));
+    }
+    if version["project_id"].as_str() != run["project_id"].as_str() {
+        return Err(CliError::input("冻结设计版本与执行批次不属于同一项目"));
+    }
     let revision = version["data"]["design_revision"]
         .as_i64()
         .ok_or_else(|| CliError::internal("冻结设计版本号无效"))?;
@@ -2192,6 +2202,31 @@ pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliE
         let mut data = record["data"].clone();
         data["id"] = record["id"].clone();
         plates.push(data);
+    }
+    let plate_ids: HashSet<String> = plates
+        .iter()
+        .filter_map(|plate| plate["id"].as_str().map(str::to_owned))
+        .collect();
+    let mut wells_by_plate: HashMap<String, Vec<Value>> = HashMap::new();
+    for record in list(db, Some("well"), project)? {
+        let Some(plate_id) = record["parent_id"].as_str() else {
+            continue;
+        };
+        if !plate_ids.contains(plate_id) {
+            continue;
+        }
+        let mut data = record["data"].clone();
+        if data["well_id"].as_str().is_none() {
+            data["well_id"] = record["id"].clone();
+        }
+        wells_by_plate
+            .entry(plate_id.to_owned())
+            .or_default()
+            .push(data);
+    }
+    for plate in &mut plates {
+        let plate_id = plate["id"].as_str().unwrap_or_default().to_owned();
+        plate["wells"] = json!(wells_by_plate.remove(&plate_id).unwrap_or_default());
     }
 
     let workspace = asterlab_core::run_workspace::build(
@@ -3715,7 +3750,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["title","summary"],"properties":{"title":{"type":"string"},"summary":{"type":"string"}}})
         }
         "protocol_block_version" => {
-            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
+            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
         }
         "plate" => {
             json!({"type":"object","additionalProperties":false,"required":["name","format","rows","columns"],"properties":{"name":{"type":"string"},"format":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48},"assay_id":{"type":["string","null"]},"timepoint":{"type":["string","null"]}}})
@@ -3800,7 +3835,7 @@ fn result_schema(tool: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["version"],"properties":{"version":record_schema("protocol_block_version")}})
         }
         "protocol.block.preview" => {
-            json!({"type":"object","additionalProperties":false,"required":["block_version_id","block_id","title","version","ready","steps","resolved_parameters","unresolved_parameters","block_version_ids"],"properties":{"block_version_id":{"type":"string"},"block_id":{"type":"string"},"title":{"type":"string"},"version":{"type":"integer"},"ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","use_id","title","instruction","parameters","unresolved_parameter_refs","source_block_version_id"],"properties":{"path":{"type":"string"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","label","value","unit","provenance"],"properties":{"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameter_refs":{"type":"array","items":{"type":"string"}},"source_block_version_id":{"type":"string"},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]}}}},"resolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","value","unit","provenance"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"block_version_ids":{"type":"array","items":{"type":"string"}}}})
+            json!({"type":"object","additionalProperties":false,"required":["block_version_id","block_id","title","version","ready","steps","resolved_parameters","unresolved_parameters","block_version_ids"],"properties":{"block_version_id":{"type":"string"},"block_id":{"type":"string"},"title":{"type":"string"},"version":{"type":"integer"},"ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","use_id","title","instruction","parameters","unresolved_parameter_refs","source_block_version_id"],"properties":{"path":{"type":"string"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","label","value","unit","provenance"],"properties":{"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameter_refs":{"type":"array","items":{"type":"string"}},"source_block_version_id":{"type":"string"},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]}}}},"resolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","value","unit","provenance"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"block_version_ids":{"type":"array","items":{"type":"string"}}}})
         }
         "protocol.create" => {
             json!({"type":"object","additionalProperties":false,"required":["protocol","version"],"properties":{"protocol":record_schema("protocol"),"version":record_schema("protocol_version")}})
@@ -4021,7 +4056,7 @@ fn protocol_step_input_schema() -> Value {
             "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
             "instruction":{"type":"string","minLength":1,"maxLength":4000,"pattern":"\\S"},
             "parameter_refs":{"type":"array","maxItems":100,"items":{"type":"string"}},
-            "visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]}
+            "visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]}
         }},
         {"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id"],"properties":{
             "kind":{"const":"block_use"},"use_id":{"type":"string","minLength":1,"maxLength":80},

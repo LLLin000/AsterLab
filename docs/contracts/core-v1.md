@@ -106,6 +106,8 @@ pub struct ProtocolPreview {
 
 - `ready` 不再暗示科学有效或可执行；新代码使用 `parameters_ready`。
 - `OperationStep` 的 `meta` 可选；缺失不补默认 purpose/control/readout。
+- `OperationStep.time_scope` 显式表达 `once/per_timepoint/per_assay/unresolved`；只有 `per_timepoint` 才按 Assay 时间点展开任务，缺失不等同于每个时间点。
+- 步骤数组顺序即执行顺序；`path` 是展开路径，不由标题生成。
 - 预览不是执行；不产生 `StepOccurrence`。
 
 ### 2.3 `RunWorkspace`
