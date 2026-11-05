@@ -3549,8 +3549,18 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         }
         "semantic.assess_patch" => {
             let i: SemanticPatchInput = parse_input(path)?;
+            if i.changeset.target.kind
+                != asterlab_core::semantic_changeset::ChangeTargetKind::BlockVersion
+            {
+                return Err(CliError::input(
+                    "semantic.assess_patch 只接受 block_version 目标",
+                ));
+            }
             let target_id = &i.changeset.target.object_id;
-            let (_, data) = block_version_data(&db, target_id)?;
+            let (record, data) = block_version_data(&db, target_id)?;
+            let (next, _) = apply_binding_changes(&db, &data, &i.changeset)?;
+            let project = record["project_id"].as_str().unwrap_or_default();
+            validate_block_content(&db, project, &next.parameter_slots, &next.steps)?;
             let mut assessment =
                 assess_block_patch(target_id, &data, &i.changeset).map_err(semantic_error)?;
             let mut refs = assessment.referencing_refs.clone();
