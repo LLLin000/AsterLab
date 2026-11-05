@@ -886,6 +886,57 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         second["result"]["plate"]["positions"][0]["position_id"],
         "B1"
     );
+    let revised_design = cli.run(
+        "design.revise",
+        &json!({
+            "id": design["result"]["design"]["id"],
+            "expected_revision": 1,
+            "changes": {
+                "container_plan": {
+                    "containers": [
+                        {"id":"plate-1","profile_ref":{"id":"labware.cell_culture_96","version":1},"label":"Plate 1"},
+                        {"id":"plate-2","profile_ref":{"id":"labware.cell_culture_96","version":1},"label":"Plate 2"}
+                    ],
+                    "assignments": [
+                        {"container_id":"plate-1","position_id":"A2","targets":[{"target":{"kind":"sample","id":"s1"},"role":"primary","relationship":"contains","counts_as_independent_unit":true}]},
+                        {"container_id":"plate-2","position_id":"B1","targets":[{"target":{"kind":"sample","id":"s2"},"role":"primary","relationship":"contains","counts_as_independent_unit":true}]}
+                    ],
+                    "placements": []
+                }
+            }
+        }),
+    );
+    let new_design_version = revised_design["result"]["version"]["id"].as_str().unwrap();
+    let mut document_v2 = serde_json::from_str::<serde_json::Value>(
+        &serde_json::to_string(&document)
+            .unwrap()
+            .replace(design_version_id, new_design_version),
+    )
+    .unwrap();
+    document_v2["document_id"] = json!("view-doc-2");
+    document_v2["revision"] = json!(1);
+    let view_v2 = cli.run(
+        "view.create",
+        &json!({"project_id": project, "title": "View v2", "document": document_v2}),
+    );
+    let view_v2_id = view_v2["result"]["view"]["id"].as_str().unwrap();
+    let v2_preview = cli.run(
+        "view.data_preview",
+        &json!({"view_id": view_v2_id, "instance_id": "planned_plate", "calculator_instance_id": "reagent_calculator", "extra_ratio": 0.1}),
+    );
+    assert_eq!(
+        v2_preview["result"]["plate"]["positions"][0]["position_id"],
+        "A2"
+    );
+    let old_preview_again = cli.run(
+        "view.data_preview",
+        &json!({"view_id": view_id, "instance_id": "planned_plate", "calculator_instance_id": "reagent_calculator", "extra_ratio": 0.1}),
+    );
+    assert_eq!(
+        old_preview_again["result"]["plate"]["positions"][0]["position_id"],
+        "A1"
+    );
+
     let missing = cli.run(
         "view.data_preview",
         &json!({"view_id": view_id, "instance_id": "planned_plate"}),
