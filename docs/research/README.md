@@ -23,7 +23,7 @@
 17. [粒度冻结](k2-operations/granularity-freeze.md) — 最小可审计科学操作的四条判定、四层结构、Custom Step 与争议裁决。
 18. [Bio-protocol 4298 类器官拆解](k2-operations/organoid-bio-protocol-4298.md) — 直接读取完整 Bio-protocol;只覆盖体外 Matrigel dome,不把方法参数写成通用默认。
 19. [Morimoto 基础细胞培养](k2-operations/morimoto-basic-cell-culture.md) — 传代、血球计数、台盼蓝、冻存/复苏;大学 lab protocol 直接读取。
-20. [Protocol-driven Operation Discovery](protocol-discovery/README.md) — 每篇 Protocol 两张表(步骤拆解/公共操作复用)、来源索引、覆盖矩阵与缺口;B01–B08 已完成,覆盖矩阵见 [coverage-matrix](protocol-discovery/coverage-matrix.md),一致性审查见 [catalog-consistency-audit](protocol-discovery/catalog-consistency-audit.md),候选复审见 [candidate-recheck](protocol-discovery/candidate-recheck.md),剩余实验地图见 [gap-map](protocol-discovery/gap-map.md)。
+20. [Protocol-driven Operation Discovery](protocol-discovery/README.md) — 每篇 Protocol 两张表(步骤拆解/公共操作复用)、来源索引、覆盖矩阵与缺口;B01–B10 已完成,覆盖矩阵见 [coverage-matrix](protocol-discovery/coverage-matrix.md),一致性审查见 [catalog-consistency-audit](protocol-discovery/catalog-consistency-audit.md),候选复审见 [candidate-recheck](protocol-discovery/candidate-recheck.md),剩余实验地图见 [gap-map](protocol-discovery/gap-map.md)。
 18. [粒度与生物膜](k2-operations/granularity-and-biofilm.md) — 生物膜不是单一 OperationModule;CV/CFU 是方法模板。
 19. [粒度候选](k2-operations/granularity-candidates.md) / [独立复审](k2-operations/granularity-candidate-review.md) / [五场景](k2-operations/granularity-scenarios.md) — 约 18–20 个候选的四维审查与五类实验组合验证。
 20. [Catalog 晋升审计](k2-operations/catalog-promotion-audit.md) — 原子性不等于公共模块;复用广度/语义稳定/抽象收益/差异成本四道门槛,以及第一版公共操作清单。

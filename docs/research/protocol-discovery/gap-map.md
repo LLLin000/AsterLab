@@ -28,8 +28,8 @@
 |---|---|---|---|
 | 基础配液与无菌处理 | 溶液/缓冲液/培养基配制、称量、溶解、混合、过滤、灭菌、分装 | 高频基础工作;可能形成跨实验共享能力 | composite + method-local(称量/灭菌/过滤);液体转移/孵育复用 |
 | 3D 其他模型 | ULA 球体、悬滴、Spheroid sheet、air-liquid interface | 目前只有 Matrigel dome;2D 假设不能直接复用 | method template + composite;dome/球体形成 method-local;换液 lossy |
-| 转染与稳定株 | 脂质体/PEI/电转、筛选、单克隆 | 基础细胞操作,当前未覆盖;影响后续 reporter/knockdown | composite + method-local(转染试剂/筛选条件);液体转移/孵育/洗涤复用 |
-| 微生物液体生长与转化 | 生长曲线/OD600、感受态、热激转化、抗性筛选 | B02 只有平板/液体接种,没有转化与生长曲线 | composite + method-local(感受态/热激);OD600 raw read 复用 absorbance |
+| 转染与稳定株 | 脂质体/PEI/电转、筛选、单克隆 | 已由 B09 覆盖 | composite + method-local;无新模块 |
+| 微生物液体生长与转化 | 生长曲线/OD600、感受态、热激转化、抗性筛选 | 已由 B10 覆盖 | composite + method-local;OD600 raw read 复用 absorbance |
 | 分子克隆基础 | 质粒提取、限制酶切、连接、转化、凝胶回收 | B04 只有提取/PCR/电泳,没有克隆链 | composite + method-local;离心/转移/孵育复用;无新原子 |
 
 ### P1 — 第二批
@@ -69,8 +69,9 @@
 | 批次 | 内容 | 目的 |
 |---|---|---|
 | B08 | 基础配液/缓冲液/培养基/无菌处理 | 已完成;称量 ToolAction、溶解/pH/过滤/灭菌 method-local;过滤/灭菌 deferred |
-| B09 | 3D 球体/悬滴/Spheroid sheet | 检验 2D→3D 假设;不建专用原子 |
-| B10 | 转染/稳定株 + 微生物生长/药敏 | 检验转染复合流程、OD600、MIC 的复用 |
+| B09 | 转染/稳定株 | 已完成;脂质/PEI/电转分开;无新模块 |
+| B10 | 微生物生长/转化/药敏 | 已完成;OD600/MIC 判读为 readout/ToolAction;无新模块 |
+| B11 | 3D 球体/悬滴/Spheroid sheet | 检验 2D→3D 假设;不建专用原子 |
 | B11 | 分子克隆链 | 检验提取/PCR/电泳之后的多步组合 |
 | B12 | 蛋白纯化/IP | 检验制备链与检测链的边界 |
 | B13 | 活细胞成像/细胞死亡/周期 | 检验 raw acquisition 与染色/分析分离 |

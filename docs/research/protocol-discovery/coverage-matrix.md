@@ -1,7 +1,7 @@
 # Protocol Discovery — 公共操作覆盖矩阵
 
 - 日期:2026-11-05
-- 状态:基于 B01–B08 与既有记录的研究归纳;所有来源仍为 `research_draft`,没有 `SourceChecked`
+- 状态:基于 B01–B10 与既有记录的研究归纳;所有来源仍为 `research_draft`,没有 `SourceChecked`
 - 阅读状态:Research Shared(研究有复用)、Catalog Draft(已有 JSON)、SourceChecked(已复核)必须分开;当前没有 SourceChecked
 - 用途:看“哪些操作真的跨方法复用”,不是看“研究了多少篇”
 
@@ -18,6 +18,8 @@
 | B07 | RT-qPCR | Thermo/Bio-Rad/ABI 手册直接读 | RT/qPCR 配制、热循环、原始荧光采集均 method-local/template;无新公共模块 |
 | C01 | 候选复审 | NEB/Phusion/Bio-Rad/琼脂糖/SDS-PAGE/流式/发光手册 | PCR 热循环、流式采集、发光板读为 domain-shared candidates;电泳 deferred;不是永久 method-local |
 | B08 | 基础配液/无菌 | Thermo/Morimoto/MP Bio/protocols.io 直接读 | 称量 ToolAction;溶解/pH/过滤/灭菌 method-local;过滤/灭菌 deferred domain-shared;无新模块 |
+| B09 | 转染/稳定株 | Thermo/Addgene/Bio-Rad 直接读 | 脂质/PEI/电转分开;复合物形成复用 transfer+incubation;筛选/单克隆为门控;无新模块 |
+| B10 | 微生物生长/转化/药敏 | 教学/Curr Protoc/Addgene/CLSI SOP 直接读 | OD600 raw read;热激/药敏判读 method-local/ToolAction;无新模块 |
 | 既有 | 生物膜、3D 类器官、ELISA/WB、qPCR、流式/IF、划痕/Transwell | 见 k2-operations | 方法模板为主;Bio-protocol 4298 补足 3D dome |
 
 ## 2.1 状态分层
@@ -57,7 +59,7 @@
 
 ## 3. 判定结果
 
-- B01–B08 没有新增 **global** 公共 OperationModule;C01 把 PCR 热循环、流式采集、发光板读列为 domain-shared candidates,电泳 deferred;B08 把过滤/灭菌列为 deferred domain-shared。
+- B01–B10 没有新增 **global** 公共 OperationModule;C01 把 PCR 热循环、流式采集、发光板读列为 domain-shared candidates,电泳 deferred;B08 把过滤/灭菌列为 deferred domain-shared。
 - 公共操作集合目前趋于稳定:transfer、aliquot、incubation、washing、centrifugation、absorbance、raw image、cell count、streak、spread、colony count。
 - 大量“看起来像操作”的步骤实际是:
   - composite:传代、连续稀释、冻存/复苏、条件培养基;
@@ -71,6 +73,8 @@
 | 缺口 | 说明 |
 |---|---|
 | 分子基础 | B04 覆盖提取/PCR/电泳;B07 已按两表审计 RT-qPCR;热循环/原始荧光仍为方法内 |
+| 转染/稳定株 | B09 已覆盖脂质/PEI/电转/筛选/单克隆;均为 method-local/composite |
+| 微生物生长/药敏 | B10 已覆盖 OD600、转化、MIC/MBC、纸片法;判读为 ToolAction |
 | 蛋白检测 | B05 已按 discovery 表审计 ELISA/WB;发光原始读数仍缺公共模块 |
 | 流式/IF | B06 已按 discovery 表格审计;湿实验步骤已记录,分析/设门 excluded;配置仍需来源复核 |
 | 动物/临床 | 按本轮范围排除 |
@@ -87,6 +91,6 @@
 
 ## 6. 指标
 
-- Protocol 覆盖广度:目前 8 个 discovery 批次 + 既有方法记录;基础细胞、微生物、细胞检测、分子、RT-qPCR、蛋白、流式/IF、基础配液已覆盖。
+- Protocol 覆盖广度:目前 10 个 discovery 批次 + 既有方法记录;基础细胞、微生物、细胞检测、分子、RT-qPCR、蛋白、流式/IF、基础配液、转染、微生物药敏已覆盖。
 - Operation 复用成熟度:transfer/incubation/washing/centrifugation/absorbance/raw image 已跨 ≥5 家族;streak/spread/colony count 跨微生物与 CFU;domain-shared candidates 已单列,未进入 JSON。
 - 不以步骤数/模块数衡量。

@@ -55,6 +55,8 @@
 | B07 | [batch-07-rt-qpcr.md](batch-07-rt-qpcr.md) | 两步/一步 RT-qPCR 湿实验 | 已完成;research_draft |
 | C01 | [candidate-recheck.md](candidate-recheck.md) | 热循环/电泳/流式采集/发光采集复审 | 已完成;3 个 domain-shared candidate + 电泳 deferred |
 | B08 | [batch-08-solutions-and-sterilization.md](batch-08-solutions-and-sterilization.md) | 溶液/缓冲液/培养基/无菌处理 | 已完成;零新公共模块 |
+| B09 | [batch-09-transfection-and-stable-lines.md](batch-09-transfection-and-stable-lines.md) | 转染/稳定株 | 已完成;零新公共模块 |
+| B10 | [batch-10-microbial-growth-transformation-susceptibility.md](batch-10-microbial-growth-transformation-susceptibility.md) | 微生物生长/转化/药敏 | 已完成;零新公共模块 |
 
 ## 剩余实验地图
 
