@@ -218,7 +218,9 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 | S3-A | Semantic Query & Patch Proposal:inspect/search/validate/propose/assess，只读 | 已完成;CLI integration test |
 | S3-B1 | Controlled Binding Patch:BlockUse Set/Unset、事务校验、新 BlockVersion、受信任写入开关 | 已完成;集成测试与冲突测试 |
 | C0 | Unified Component Contract:六类组件、Definition/Instance/Slot/ViewDocument/Binding DSL | 已完成:[component-framework-v1](contracts/component-framework-v1.md) |
-| C1 | Headless Component Framework:注册表、递归校验、workflow/layout、序列化、语义 Patch | 已完成;Core 测试 |
+| C1 | Headless Component Framework:注册表、递归校验、workflow/layout、序列化、语义 Patch | 已完成 |
+| C1.1 | Framework Hardening:Family + Definition、OperationUse、Contextual Binding、revision | 已完成 |
+| C2-A | Semantic Patch Engine:批量 Patch、Move/Connect/Bind/Remove、原子校验 | 已完成;Core 测试 |
 | S3-B2 | Explicit Protocol Rebind:选择新 BlockVersion 更新指定 ProtocolVersion | 未开始 |
 | S4 | 组合验收:CCK-8、活死、RT-qPCR | 未开始 |
 

@@ -1,7 +1,7 @@
 # Unified Component Framework v1(C0/C1)
 
 - 日期:2026-11-05
-- 状态:C0 契约 + C1 Headless Framework 已实现;不是 UI 规格。
+- 状态:C0 + C1.1 + C2-A 已实现;不是 UI 规格。
 - 代码:[`component_framework.rs`](../../crates/asterlab-core/src/component_framework.rs)
 - 边界:不创建第二套 Design/Protocol/Run,不创建 Component 数据库,不替代科学 Core。
 
@@ -23,7 +23,7 @@ Scientific Core
 | 组件 | 实例机制 | 说明 |
 |---|---|---|
 | `workflow` | graph + `detail` slot | 流程图节点/边;详情是布局树 |
-| `operation` | `operation` instance + BlockUse ref | 引用真实 BlockVersion,不复制操作定义 |
+| `operation` | `operation` instance + OperationUse | 同时引用 BlockVersion 定义和 QualifiedStepRef 使用位置 |
 | `layout.table` | instance + props | 表格内容;可绑定 Design 数据 |
 | `lab.well_plate` | instance + props | 孔板布局;引用真实设计/样本绑定 |
 | `tool.dilution` | instance + inputs/outputs | 纯计算工具;不创建 ProtocolStep |
@@ -35,16 +35,24 @@ Scientific Core
 
 ```text
 ComponentDefinition {
-  id, version, kind, title,
+  id, version, family, title,
   props_schema, capabilities,
   inputs[], outputs[], slots[],
   presentation?, agent_operations[]
 }
 
+ComponentFamily =
+  workflow | operation | layout | tool | content | data | visualization
+
+// id 是具体组件身份,例如 lab.well_plate,不是核心枚举。
+// slot.accepts 接受 family;slot.accepts_definitions 可选精确 id 白名单。
+
 ComponentInstance {
   instance_id,
   definition: { id, version },
-  model_ref?: DesignVersion | ProtocolVersion | BlockVersion | Run,
+  model_ref?: DesignVersion | ProtocolVersion | BlockVersion
+             | OperationUse { block_version_id, step: QualifiedStepRef }
+             | Run,
   props,
   slots: { slot_id: [ComponentInstance] },
   workflow?: { nodes[], edges[] },
@@ -54,8 +62,14 @@ ComponentInstance {
 ViewDocument {
   schema_version,
   document_id,
+  revision,
   root: ComponentInstance,
   bindings[]
+}
+
+ViewChangeSet {
+  changeset_id, document_id, expected_revision,
+  operations: ViewPatch[], provenance[]
 }
 
 DataBinding {
@@ -66,8 +80,14 @@ DataBinding {
 }
 
 ViewPatch =
-  UpdateProps | AddSlotChild | RemoveInstance | Connect | AddBinding
+  UpdateProps | AddSlotChild | MoveSlotChild | AddWorkflowNode
+  | RemoveInstance | Connect | Disconnect
+  | AddBinding | ReplaceBinding | RemoveBinding
 ```
+
+`WorkflowGraph` 的 node/edge 只是视图组织:它可以表达“图上怎么连”,不能改变 Protocol 执行顺序。科学顺序、条件、样本流必须通过正式 Protocol/Composition 命令修改。
+
+`OperationUse` 把 BlockVersion 定义身份与 `QualifiedStepRef` 使用位置分开;View 的 `instance_id` 不是科学步骤身份。
 
 ## 4. DSL 示例
 
@@ -103,41 +123,55 @@ root:
 
 ## 5. 校验
 
-- Definition 必须精确 id + version 命中注册表。
+- Definition 必须精确 id + version 命中注册表;同版本不可被不同内容覆盖。
+- `ComponentFamily` 固定;新组件通过注册具体 `id` 扩展,不需要修改核心枚举。
 - `instance_id` 在整份文档内唯一;递归 slot 与 workflow node 共享命名空间。
 - `props` 必须满足 Definition 的 schema 子集。
 - slot 必须声明;`one` 最多一个;required slot 非空;child kind 必须在 accepts 中。
 - workflow node id 唯一;edge 必须指向节点;禁止自连和环。
 - binding target 必须是声明 input;source 必须是声明 output 或 model path;类型必须一致;一个 input 只接受一个 binding。
+- ComponentPort 之间的数据依赖环必须拒绝。
+- Structural Validation 只证明端口/类型/路径形状;`validate_with_context` 才解析 ModelPath 与 OperationUse。
+- 未解析/未知 ModelPath 保持 unresolved,不生成假数据。
 - view 层不验证科学参数;参数合法性仍由 S1/S3 的 Block/Operation 校验负责。
 
-## 6. C1 Fixture
+## 6. C1.1 / C2-A Fixture
 
 测试文档包含:
 
-- workflow 根节点;
-- operation 节点;
+- workflow 根节点,引用 ProtocolVersion;
+- Operation 节点,引用同一 BlockVersion 的 `OperationUse` 与独立 QualifiedStepRef;
 - 表格、96 孔板、稀释计算器、说明卡片;
-- 嵌套 workflow;
+- Operation 的 detail 中嵌套 Workflow;
+- 子 Workflow 中两个 Operation 复用同一 BlockVersion、使用不同 step path;
 - Design 数据到表格、表格到计算器的 typed binding。
 
 测试覆盖:
 
 - 保存/JSON round-trip/重开;
 - 递归 slot 与嵌套 workflow;
-- 重复 instance、错误 slot kind、缺失定义版本;
-- workflow 环;
-- `UpdateProps` 与 `AddSlotChild` 的语义 Patch;
-- 所有修改后重新完整校验。
+- 重复 instance、错误 slot family、缺失定义版本;
+- workflow 环与 binding 环;
+- `UpdateProps`、`AddSlotChild`、`MoveSlotChild`、`RemoveInstance`、`Connect/Disconnect`、`Add/Replace/RemoveBinding`;
+- 批量 changeset 的 expected_revision、原子失败、删除清理绑定;
+- 自定义组件 `lab.solution_calculator` 通过注册扩展;
+- Structural / Contextual 绑定校验分离。
 
 ## 7. 非目标
 
 - 不实现 Slint/SVG/前端画布。
-- 不实现 C2 的全套 add/move/remove/connect 编辑器。
 - 不建立 Component 数据库、Workflow Runtime 或第二套 Protocol。
 - 不把 `purpose` 当 SOP,不从 UI 反向修改科学定义。
 - 不让 Agent 直接编辑任意 JSON 路径。
+- 本阶段不声称 ViewDocument 与 Scientific Core 的跨层修改已经原子提交。
 
 ## 8. 下一步
 
-C2 Semantic Editing API:在 `ViewPatch` 上增加 move/connect/bind 的精确语义、expected version、影响评估与事务提交;C3 再接入孔板/计算器真实数据;C4 才做 presentation adapter 与 UI。
+C2-B Persistence & Scientific Core Bridge:
+
+- ViewDocument 正式保存/修订适配;
+- 把涉及科学参数的修改路由到正式领域 Command;
+- 跨 ViewDocument 与 Scientific Core 的统一变更评估与提交边界;
+- 接入真实 Design/Protocol/Run Context 的 ModelPath/OperationUse 解析。
+
+C3 再接入孔板、计算器真实数据;C4 才做 presentation adapter 与 UI。

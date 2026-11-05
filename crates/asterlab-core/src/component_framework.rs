@@ -1,26 +1,28 @@
-//! C0/C1 headless unified component framework.
+//! C0/C1.1 headless unified component framework.
 //!
-//! This is a presentation/composition layer over the existing scientific core.
-//! It does not create a second Design/Protocol/Run model or a second database.
-//! The document is a versioned, serializable view tree plus a workflow graph.
+//! The view document is a presentation/composition layer over the scientific
+//! core. It stores component organization, presentation props and typed model
+//! references; it is not a second Protocol/Run and does not own execution order,
+//! sample identity or scientific parameter truth.
 
-use crate::semantic_component::SemanticIssue;
+use crate::semantic_component::{QualifiedStepRef, SemanticIssue};
 use crate::semantic_tool::validate_schema_value;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub const COMPONENT_FRAMEWORK_SCHEMA_VERSION: u32 = 1;
+pub const COMPONENT_FRAMEWORK_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-pub enum ComponentKind {
+pub enum ComponentFamily {
     Workflow,
     Operation,
-    LayoutTable,
-    WellPlate,
-    ToolDilution,
-    ContentNote,
+    Layout,
+    Tool,
+    Content,
+    Data,
+    Visualization,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,7 +65,12 @@ pub struct ComponentPort {
 #[serde(deny_unknown_fields)]
 pub struct SlotDefinition {
     pub id: String,
-    pub accepts: Vec<ComponentKind>,
+    #[serde(default)]
+    pub accepts: Vec<ComponentFamily>,
+    /// Optional exact-definition allow-list. Empty means any definition in an
+    /// accepted family.
+    #[serde(default)]
+    pub accepts_definitions: Vec<String>,
     pub cardinality: SlotCardinality,
     #[serde(default)]
     pub required: bool,
@@ -74,7 +81,7 @@ pub struct SlotDefinition {
 pub struct ComponentDefinition {
     pub id: String,
     pub version: u32,
-    pub kind: ComponentKind,
+    pub family: ComponentFamily,
     pub title: String,
     pub props_schema: Value,
     #[serde(default)]
@@ -91,29 +98,27 @@ pub struct ComponentDefinition {
     pub agent_operations: Vec<String>,
 }
 
-impl ComponentDefinitionRef {
-    pub fn new(id: impl Into<String>, version: u32) -> Self {
-        Self {
-            id: id.into(),
-            version,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelKind {
-    DesignVersion,
-    ProtocolVersion,
-    BlockVersion,
-    Run,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ModelRef {
-    pub kind: ModelKind,
-    pub id: String,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelRef {
+    DesignVersion {
+        id: String,
+    },
+    ProtocolVersion {
+        id: String,
+    },
+    BlockVersion {
+        id: String,
+    },
+    /// The definition is a BlockVersion; the use location is a real Protocol
+    /// step. `instance_id` in the view is not the scientific identity.
+    OperationUse {
+        block_version_id: String,
+        step: QualifiedStepRef,
+    },
+    Run {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -199,6 +204,7 @@ pub struct DataBinding {
 pub struct ViewDocument {
     pub schema_version: u32,
     pub document_id: String,
+    pub revision: u64,
     pub root: ComponentInstance,
     #[serde(default)]
     pub bindings: Vec<DataBinding>,
@@ -217,6 +223,16 @@ pub enum ViewPatch {
         slot_id: String,
         child: ComponentInstance,
     },
+    MoveSlotChild {
+        instance_id: String,
+        target_parent_instance_id: String,
+        target_slot_id: String,
+        target_index: Option<usize>,
+    },
+    AddWorkflowNode {
+        workflow_instance_id: String,
+        node: WorkflowNode,
+    },
     RemoveInstance {
         instance_id: String,
     },
@@ -224,9 +240,51 @@ pub enum ViewPatch {
         workflow_instance_id: String,
         edge: WorkflowEdge,
     },
+    Disconnect {
+        workflow_instance_id: String,
+        edge: WorkflowEdge,
+    },
     AddBinding {
         binding: DataBinding,
     },
+    ReplaceBinding {
+        binding: DataBinding,
+    },
+    RemoveBinding {
+        binding_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ViewChangeSet {
+    pub changeset_id: String,
+    pub document_id: String,
+    pub expected_revision: u64,
+    pub operations: Vec<ViewPatch>,
+    #[serde(default)]
+    pub provenance: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ViewChangeResult {
+    pub document: ViewDocument,
+    pub changed_instances: Vec<String>,
+    pub affected_bindings: Vec<String>,
+    pub requires_confirmation: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelPathResolution {
+    Resolved(ComponentValueType),
+    Missing,
+    Unknown,
+}
+
+pub trait ComponentBindingContext {
+    fn resolve_model_path(&self, model: &ModelRef, path: &str) -> ModelPathResolution;
+    fn operation_use_exists(&self, block_version_id: &str, step: &QualifiedStepRef) -> bool;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -235,163 +293,218 @@ pub struct ComponentRegistry {
 }
 
 impl ComponentRegistry {
-    pub fn register(&mut self, definition: ComponentDefinition) {
-        self.definitions
-            .insert((definition.id.clone(), definition.version), definition);
+    /// Definitions are immutable by exact ID + version. Re-registering an equal
+    /// definition is idempotent; a conflicting definition is rejected.
+    pub fn register(&mut self, definition: ComponentDefinition) -> Result<(), String> {
+        let key = (definition.id.clone(), definition.version);
+        if let Some(existing) = self.definitions.get(&key) {
+            if existing == &definition {
+                return Ok(());
+            }
+            return Err(format!(
+                "definition {}@{} is already registered with different content",
+                definition.id, definition.version
+            ));
+        }
+        if definition.id.trim().is_empty()
+            || definition.version == 0
+            || definition.title.trim().is_empty()
+            || !definition.props_schema.is_object()
+        {
+            return Err("component definition is missing required fields".into());
+        }
+        let mut port_ids = HashSet::new();
+        for port in definition.inputs.iter().chain(definition.outputs.iter()) {
+            if !port_ids.insert(port.id.as_str()) {
+                return Err(format!(
+                    "component {}@{} has duplicate port id {}",
+                    definition.id, definition.version, port.id
+                ));
+            }
+        }
+        let mut slot_ids = HashSet::new();
+        for slot in &definition.slots {
+            if !slot_ids.insert(slot.id.as_str()) {
+                return Err(format!(
+                    "component {}@{} has duplicate slot id {}",
+                    definition.id, definition.version, slot.id
+                ));
+            }
+        }
+        self.definitions.insert(key, definition);
+        Ok(())
     }
 
     pub fn get(&self, reference: &ComponentDefinitionRef) -> Option<&ComponentDefinition> {
         self.definitions
             .get(&(reference.id.clone(), reference.version))
     }
+}
 
-    pub fn definitions(&self) -> impl Iterator<Item = &ComponentDefinition> {
-        self.definitions.values()
-    }
+fn reg(registry: &mut ComponentRegistry, definition: ComponentDefinition) {
+    registry
+        .register(definition)
+        .expect("valid built-in definition");
 }
 
 pub fn default_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::default();
-    registry.register(ComponentDefinition {
-        id: "workflow".into(),
-        version: 1,
-        kind: ComponentKind::Workflow,
-        title: "Workflow".into(),
-        props_schema: json_object(),
-        capabilities: vec!["compose".into(), "navigate".into()],
-        inputs: vec![],
-        outputs: vec![],
-        slots: vec![SlotDefinition {
-            id: "detail".into(),
-            accepts: vec![
-                ComponentKind::LayoutTable,
-                ComponentKind::WellPlate,
-                ComponentKind::ToolDilution,
-                ComponentKind::ContentNote,
-                ComponentKind::Workflow,
-                ComponentKind::Operation,
-            ],
-            cardinality: SlotCardinality::Many,
-            required: false,
-        }],
-        presentation: Some("workflow.graph".into()),
-        agent_operations: vec!["update".into(), "add_node".into(), "connect".into()],
-    });
-    registry.register(ComponentDefinition {
-        id: "operation".into(),
-        version: 1,
-        kind: ComponentKind::Operation,
-        title: "Operation".into(),
-        props_schema: json_object(),
-        capabilities: vec!["bind".into()],
-        inputs: vec![],
-        outputs: vec![],
-        slots: vec![SlotDefinition {
-            id: "detail".into(),
-            accepts: vec![
-                ComponentKind::LayoutTable,
-                ComponentKind::WellPlate,
-                ComponentKind::ToolDilution,
-                ComponentKind::ContentNote,
-                ComponentKind::Workflow,
-            ],
-            cardinality: SlotCardinality::Many,
-            required: false,
-        }],
-        presentation: Some("operation.node".into()),
-        agent_operations: vec!["update".into()],
-    });
-    registry.register(ComponentDefinition {
-        id: "layout.table".into(),
-        version: 1,
-        kind: ComponentKind::LayoutTable,
-        title: "Table".into(),
-        props_schema: json!({"type":"object","additionalProperties":false,"properties":{"rows":{"type":"array"}}}),
-        capabilities: vec!["bind".into()],
-        inputs: vec![ComponentPort {
-            id: "data".into(),
-            value_type: ComponentValueType::Data,
-            required: false,
-        }],
-        outputs: vec![ComponentPort {
-            id: "values".into(),
-            value_type: ComponentValueType::Data,
-            required: false,
-        }],
-        slots: vec![],
-        presentation: Some("table".into()),
-        agent_operations: vec!["update".into(), "bind".into()],
-    });
-    registry.register(ComponentDefinition {
-        id: "lab.well_plate".into(),
-        version: 1,
-        kind: ComponentKind::WellPlate,
-        title: "Well plate".into(),
-        props_schema: json!({"type":"object","additionalProperties":false,"properties":{"format":{"type":"string"}}}),
-        capabilities: vec!["bind".into(), "layout".into()],
-        inputs: vec![
-            ComponentPort {
-                id: "groups".into(),
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "workflow".into(),
+            version: 1,
+            family: ComponentFamily::Workflow,
+            title: "Workflow".into(),
+            props_schema: json!({"type":"object"}),
+            capabilities: vec!["compose".into(), "navigate".into()],
+            inputs: vec![],
+            outputs: vec![],
+            slots: vec![SlotDefinition {
+                id: "detail".into(),
+                accepts: vec![
+                    ComponentFamily::Layout,
+                    ComponentFamily::Tool,
+                    ComponentFamily::Content,
+                    ComponentFamily::Workflow,
+                    ComponentFamily::Operation,
+                ],
+                accepts_definitions: vec![],
+                cardinality: SlotCardinality::Many,
+                required: false,
+            }],
+            presentation: Some("workflow.graph".into()),
+            agent_operations: vec!["update".into(), "add_node".into(), "connect".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "operation".into(),
+            version: 1,
+            family: ComponentFamily::Operation,
+            title: "Operation".into(),
+            props_schema: json!({"type":"object"}),
+            capabilities: vec!["bind".into()],
+            inputs: vec![],
+            outputs: vec![],
+            slots: vec![SlotDefinition {
+                id: "detail".into(),
+                accepts: vec![
+                    ComponentFamily::Layout,
+                    ComponentFamily::Tool,
+                    ComponentFamily::Content,
+                    ComponentFamily::Workflow,
+                ],
+                accepts_definitions: vec![],
+                cardinality: SlotCardinality::Many,
+                required: false,
+            }],
+            presentation: Some("operation.node".into()),
+            agent_operations: vec!["update".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "layout.table".into(),
+            version: 1,
+            family: ComponentFamily::Layout,
+            title: "Table".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"rows":{"type":"array"}}}),
+            capabilities: vec!["bind".into()],
+            inputs: vec![ComponentPort {
+                id: "data".into(),
                 value_type: ComponentValueType::Data,
                 required: false,
-            },
-            ComponentPort {
-                id: "volumes".into(),
+            }],
+            outputs: vec![ComponentPort {
+                id: "values".into(),
                 value_type: ComponentValueType::Data,
                 required: false,
-            },
-        ],
-        outputs: vec![ComponentPort {
-            id: "plate_plan".into(),
-            value_type: ComponentValueType::Data,
-            required: false,
-        }],
-        slots: vec![],
-        presentation: Some("well_plate".into()),
-        agent_operations: vec!["update".into(), "bind".into()],
-    });
-    registry.register(ComponentDefinition {
-        id: "tool.dilution".into(),
-        version: 1,
-        kind: ComponentKind::ToolDilution,
-        title: "Dilution calculator".into(),
-        props_schema: json_object(),
-        capabilities: vec!["calculate".into()],
-        inputs: vec![ComponentPort {
-            id: "targets".into(),
-            value_type: ComponentValueType::Data,
-            required: false,
-        }],
-        outputs: vec![ComponentPort {
-            id: "plan".into(),
-            value_type: ComponentValueType::Data,
-            required: false,
-        }],
-        slots: vec![],
-        presentation: Some("tool.dilution".into()),
-        agent_operations: vec!["bind".into()],
-    });
-    registry.register(ComponentDefinition {
-        id: "content.note".into(),
-        version: 1,
-        kind: ComponentKind::ContentNote,
-        title: "Note".into(),
-        props_schema: json!({"type":"object","properties":{"text":{"type":"string"}}}),
-        capabilities: vec!["content".into()],
-        inputs: vec![],
-        outputs: vec![],
-        slots: vec![],
-        presentation: Some("content.note".into()),
-        agent_operations: vec!["update".into()],
-    });
+            }],
+            slots: vec![],
+            presentation: Some("table".into()),
+            agent_operations: vec!["update".into(), "bind".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "lab.well_plate".into(),
+            version: 1,
+            family: ComponentFamily::Layout,
+            title: "Well plate".into(),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"format":{"type":"string"}}}),
+            capabilities: vec!["bind".into(), "layout".into()],
+            inputs: vec![
+                ComponentPort {
+                    id: "groups".into(),
+                    value_type: ComponentValueType::Data,
+                    required: false,
+                },
+                ComponentPort {
+                    id: "volumes".into(),
+                    value_type: ComponentValueType::Data,
+                    required: false,
+                },
+            ],
+            outputs: vec![ComponentPort {
+                id: "plate_plan".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
+            slots: vec![],
+            presentation: Some("well_plate".into()),
+            agent_operations: vec!["update".into(), "bind".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "tool.dilution".into(),
+            version: 1,
+            family: ComponentFamily::Tool,
+            title: "Dilution calculator".into(),
+            props_schema: json!({"type":"object"}),
+            capabilities: vec!["calculate".into()],
+            inputs: vec![ComponentPort {
+                id: "targets".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
+            outputs: vec![ComponentPort {
+                id: "plan".into(),
+                value_type: ComponentValueType::Data,
+                required: false,
+            }],
+            slots: vec![],
+            presentation: Some("tool.dilution".into()),
+            agent_operations: vec!["bind".into()],
+        },
+    );
+    reg(
+        &mut registry,
+        ComponentDefinition {
+            id: "content.note".into(),
+            version: 1,
+            family: ComponentFamily::Content,
+            title: "Note".into(),
+            props_schema: json!({"type":"object","properties":{"text":{"type":"string"}}}),
+            capabilities: vec!["content".into()],
+            inputs: vec![],
+            outputs: vec![],
+            slots: vec![],
+            presentation: Some("content.note".into()),
+            agent_operations: vec!["update".into()],
+        },
+    );
     registry
 }
 
-fn json_object() -> Value {
-    json!({"type":"object"})
-}
-
 impl ViewDocument {
+    /// Structural validation only. ModelPath existence and OperationUse
+    /// existence require a ComponentBindingContext.
     pub fn validate(&self, registry: &ComponentRegistry) -> Result<(), Vec<SemanticIssue>> {
         let mut issues = Vec::new();
         if self.schema_version != COMPONENT_FRAMEWORK_SCHEMA_VERSION {
@@ -408,12 +521,16 @@ impl ViewDocument {
                 "document id must not be empty",
             ));
         }
+        if self.revision == 0 {
+            issues.push(issue("revision", "revision", "view revision must be >= 1"));
+        }
         let mut ids = HashSet::new();
-        let mut port_owner: HashMap<String, ComponentDefinitionRef> = HashMap::new();
-        validate_instance(&self.root, registry, &mut ids, &mut port_owner, &mut issues);
+        let mut owners = HashMap::new();
+        validate_instance(&self.root, registry, &mut ids, &mut owners, &mut issues);
 
         let mut binding_ids = HashSet::new();
         let mut targets = HashSet::new();
+        let mut dependency_edges: HashMap<String, Vec<String>> = HashMap::new();
         for binding in &self.bindings {
             if !binding_ids.insert(binding.binding_id.as_str()) {
                 issues.push(issue(
@@ -437,15 +554,15 @@ impl ViewDocument {
                     "an input port accepts only one binding",
                 ));
             }
-            let target_definition = port_owner.get(&binding.target.instance_id);
-            let target_port = target_definition.and_then(|reference| {
-                registry.get(reference).and_then(|definition| {
+            let target_port = owners
+                .get(&binding.target.instance_id)
+                .and_then(|reference| registry.get(reference))
+                .and_then(|definition| {
                     definition
                         .inputs
                         .iter()
                         .find(|port| port.id == binding.target.port_id)
-                })
-            });
+                });
             let Some(target_port) = target_port else {
                 issues.push(issue(
                     "missing_target_port",
@@ -463,13 +580,14 @@ impl ViewDocument {
             }
             match &binding.source {
                 BindingSource::Model(path) => {
-                    if path.model.id.trim().is_empty() || path.path.trim().is_empty() {
+                    if path.path.trim().is_empty() {
                         issues.push(issue(
                             "empty_model_path",
                             &binding.binding_id,
-                            "model reference and path must not be empty",
+                            "model path must not be empty",
                         ));
                     }
+                    validate_model_ref(&path.model, &binding.binding_id, &mut issues);
                 }
                 BindingSource::ComponentPort(source) => {
                     if !ids.contains(&source.instance_id) {
@@ -480,15 +598,15 @@ impl ViewDocument {
                         ));
                         continue;
                     }
-                    let source_definition = port_owner.get(&source.instance_id);
-                    let source_port = source_definition.and_then(|reference| {
-                        registry.get(reference).and_then(|definition| {
+                    let source_port = owners
+                        .get(&source.instance_id)
+                        .and_then(|reference| registry.get(reference))
+                        .and_then(|definition| {
                             definition
                                 .outputs
                                 .iter()
                                 .find(|port| port.id == source.port_id)
-                        })
-                    });
+                        });
                     let Some(source_port) = source_port else {
                         issues.push(issue(
                             "missing_source_port",
@@ -504,22 +622,112 @@ impl ViewDocument {
                             "binding value type does not match source port",
                         ));
                     }
+                    dependency_edges
+                        .entry(source.instance_id.clone())
+                        .or_default()
+                        .push(binding.target.instance_id.clone());
+                }
+            }
+        }
+        if has_cycle(&dependency_edges) {
+            issues.push(issue(
+                "binding_cycle",
+                "bindings",
+                "component data bindings must not form a cycle",
+            ));
+        }
+        finish(issues)
+    }
+
+    /// Structural plus contextual validation. Missing or unprovable model paths
+    /// remain unresolved; they are never treated as valid data.
+    pub fn validate_with_context(
+        &self,
+        registry: &ComponentRegistry,
+        context: &dyn ComponentBindingContext,
+    ) -> Result<(), Vec<SemanticIssue>> {
+        let mut issues = self.validate(registry).err().unwrap_or_default();
+        let mut visited = HashSet::new();
+        validate_operation_refs(&self.root, context, &mut visited, &mut issues);
+        for binding in &self.bindings {
+            if let BindingSource::Model(path) = &binding.source {
+                match context.resolve_model_path(&path.model, &path.path) {
+                    ModelPathResolution::Resolved(value_type)
+                        if value_type == binding.value_type => {}
+                    ModelPathResolution::Resolved(_) => issues.push(issue(
+                        "model_type",
+                        &binding.binding_id,
+                        "resolved model path type does not match binding type",
+                    )),
+                    ModelPathResolution::Missing => issues.push(issue(
+                        "model_missing",
+                        &binding.binding_id,
+                        "model path does not exist in the supplied context",
+                    )),
+                    ModelPathResolution::Unknown => issues.push(issue(
+                        "model_unknown",
+                        &binding.binding_id,
+                        "model path cannot be resolved",
+                    )),
                 }
             }
         }
         finish(issues)
     }
 
-    pub fn apply(
+    pub fn apply_changeset(
         &self,
-        patch: &ViewPatch,
+        changeset: &ViewChangeSet,
         registry: &ComponentRegistry,
-    ) -> Result<ViewDocument, Vec<SemanticIssue>> {
+    ) -> Result<ViewChangeResult, Vec<SemanticIssue>> {
+        let mut issues = Vec::new();
+        if changeset.changeset_id.trim().is_empty() {
+            issues.push(issue(
+                "empty_changeset",
+                "changeset_id",
+                "changeset id must not be empty",
+            ));
+        }
+        if changeset.document_id != self.document_id {
+            issues.push(issue(
+                "document_mismatch",
+                "document_id",
+                "changeset targets a different document",
+            ));
+        }
+        if changeset.expected_revision != self.revision {
+            issues.push(issue(
+                "revision_conflict",
+                "expected_revision",
+                "expected revision does not match the current document",
+            ));
+        }
+        if !issues.is_empty() {
+            return Err(issues);
+        }
         self.validate(registry)?;
+
         let mut next = self.clone();
-        apply_patch(&mut next, patch)?;
+        let mut changed = Vec::new();
+        let mut affected_bindings = Vec::new();
+        let mut requires_confirmation = false;
+        for patch in &changeset.operations {
+            apply_patch(
+                &mut next,
+                patch,
+                &mut changed,
+                &mut affected_bindings,
+                &mut requires_confirmation,
+            )?;
+        }
+        next.revision += 1;
         next.validate(registry)?;
-        Ok(next)
+        Ok(ViewChangeResult {
+            document: next,
+            changed_instances: changed,
+            affected_bindings,
+            requires_confirmation,
+        })
     }
 }
 
@@ -527,7 +735,7 @@ fn validate_instance(
     instance: &ComponentInstance,
     registry: &ComponentRegistry,
     ids: &mut HashSet<String>,
-    port_owner: &mut HashMap<String, ComponentDefinitionRef>,
+    owners: &mut HashMap<String, ComponentDefinitionRef>,
     issues: &mut Vec<SemanticIssue>,
 ) {
     if instance.instance_id.trim().is_empty() {
@@ -544,9 +752,8 @@ fn validate_instance(
             "instance ids must be unique across the document",
         ));
     }
-    port_owner.insert(instance.instance_id.clone(), instance.definition.clone());
-    let definition = registry.get(&instance.definition);
-    let Some(definition) = definition else {
+    owners.insert(instance.instance_id.clone(), instance.definition.clone());
+    let Some(definition) = registry.get(&instance.definition) else {
         issues.push(issue(
             "missing_definition",
             &instance.instance_id,
@@ -554,14 +761,13 @@ fn validate_instance(
         ));
         return;
     };
-    if !instance.props.is_object() && !instance.props.is_null() {
+    if !instance.props.is_object() {
         issues.push(issue(
             "props_type",
             &instance.instance_id,
             "component props must be an object",
         ));
-    }
-    if instance.props.is_object() {
+    } else {
         for error in validate_schema_value(
             &definition.props_schema,
             &instance.props,
@@ -574,9 +780,27 @@ fn validate_instance(
             ));
         }
     }
+    if let Some(model_ref) = &instance.model_ref {
+        validate_model_ref(model_ref, &instance.instance_id, issues);
+        if definition.family == ComponentFamily::Operation
+            && !matches!(model_ref, ModelRef::OperationUse { .. })
+        {
+            issues.push(issue(
+                "operation_ref",
+                &instance.instance_id,
+                "Operation components require an OperationUse reference",
+            ));
+        }
+    } else if definition.family == ComponentFamily::Operation {
+        issues.push(issue(
+            "operation_ref",
+            &instance.instance_id,
+            "Operation components require a block version and step reference",
+        ));
+    }
 
-    match definition.kind {
-        ComponentKind::Workflow => {
+    match definition.family {
+        ComponentFamily::Workflow => {
             if instance.workflow.is_none() {
                 issues.push(issue(
                     "workflow_body",
@@ -601,7 +825,7 @@ fn validate_instance(
             issues.push(issue(
                 "unknown_slot",
                 format!("{}.slots.{slot_id}", instance.instance_id),
-                "slot is not declared by the component definition",
+                "slot is not declared",
             ));
             continue;
         };
@@ -621,15 +845,27 @@ fn validate_instance(
         }
         for child in children {
             if let Some(child_definition) = registry.get(&child.definition) {
-                if !slot.accepts.contains(&child_definition.kind) {
+                if !slot.accepts.is_empty() && !slot.accepts.contains(&child_definition.family) {
                     issues.push(issue(
-                        "slot_kind",
+                        "slot_family",
                         format!("{}.slots.{slot_id}", instance.instance_id),
-                        "child component kind is not accepted by this slot",
+                        "child family is not accepted by this slot",
+                    ));
+                }
+                if !slot.accepts_definitions.is_empty()
+                    && !slot
+                        .accepts_definitions
+                        .iter()
+                        .any(|id| id == &child_definition.id)
+                {
+                    issues.push(issue(
+                        "slot_definition",
+                        format!("{}.slots.{slot_id}", instance.instance_id),
+                        "child definition is not in the slot allow-list",
                     ));
                 }
             }
-            validate_instance(child, registry, ids, port_owner, issues);
+            validate_instance(child, registry, ids, owners, issues);
         }
     }
     for slot in &definition.slots {
@@ -652,7 +888,7 @@ fn validate_instance(
                     "workflow node ids must be unique",
                 ));
             }
-            validate_instance(&node.component, registry, ids, port_owner, issues);
+            validate_instance(&node.component, registry, ids, owners, issues);
         }
         let mut edges = HashMap::<String, Vec<String>>::new();
         for edge in &workflow.edges {
@@ -685,7 +921,83 @@ fn validate_instance(
     }
 }
 
-fn apply_patch(document: &mut ViewDocument, patch: &ViewPatch) -> Result<(), Vec<SemanticIssue>> {
+fn validate_model_ref(model: &ModelRef, path: &str, issues: &mut Vec<SemanticIssue>) {
+    match model {
+        ModelRef::DesignVersion { id }
+        | ModelRef::ProtocolVersion { id }
+        | ModelRef::BlockVersion { id }
+        | ModelRef::Run { id } => {
+            if id.trim().is_empty() {
+                issues.push(issue(
+                    "empty_model_ref",
+                    path,
+                    "model reference id must not be empty",
+                ));
+            }
+        }
+        ModelRef::OperationUse {
+            block_version_id,
+            step,
+        } => {
+            if block_version_id.trim().is_empty() {
+                issues.push(issue(
+                    "empty_block_ref",
+                    path,
+                    "block version id must not be empty",
+                ));
+            }
+            if step.protocol_version_id.trim().is_empty() || step.step_path.trim().is_empty() {
+                issues.push(issue(
+                    "empty_step_ref",
+                    path,
+                    "operation use requires Protocol version and step path",
+                ));
+            }
+        }
+    }
+}
+
+fn validate_operation_refs(
+    instance: &ComponentInstance,
+    context: &dyn ComponentBindingContext,
+    visited: &mut HashSet<String>,
+    issues: &mut Vec<SemanticIssue>,
+) {
+    if !visited.insert(instance.instance_id.clone()) {
+        return;
+    }
+    if let Some(ModelRef::OperationUse {
+        block_version_id,
+        step,
+    }) = &instance.model_ref
+    {
+        if !context.operation_use_exists(block_version_id, step) {
+            issues.push(issue(
+                "operation_use_missing",
+                &instance.instance_id,
+                "operation use does not resolve in the supplied context",
+            ));
+        }
+    }
+    for children in instance.slots.values() {
+        for child in children {
+            validate_operation_refs(child, context, visited, issues);
+        }
+    }
+    if let Some(workflow) = &instance.workflow {
+        for node in &workflow.nodes {
+            validate_operation_refs(&node.component, context, visited, issues);
+        }
+    }
+}
+
+fn apply_patch(
+    document: &mut ViewDocument,
+    patch: &ViewPatch,
+    changed: &mut Vec<String>,
+    affected_bindings: &mut Vec<String>,
+    requires_confirmation: &mut bool,
+) -> Result<(), Vec<SemanticIssue>> {
     match patch {
         ViewPatch::UpdateProps {
             instance_id,
@@ -704,7 +1016,7 @@ fn apply_patch(document: &mut ViewDocument, patch: &ViewPatch) -> Result<(), Vec
                 .as_object_mut()
                 .ok_or_else(|| vec![issue("props_type", instance_id, "props must be an object")])?;
             object.insert(property.clone(), value.clone());
-            Ok(())
+            changed.push(instance_id.clone());
         }
         ViewPatch::AddSlotChild {
             parent_instance_id,
@@ -724,7 +1036,79 @@ fn apply_patch(document: &mut ViewDocument, patch: &ViewPatch) -> Result<(), Vec
                 .entry(slot_id.clone())
                 .or_default()
                 .push(child.clone());
-            Ok(())
+            changed.push(child.instance_id.clone());
+        }
+        ViewPatch::MoveSlotChild {
+            instance_id,
+            target_parent_instance_id,
+            target_slot_id,
+            target_index,
+        } => {
+            if document.root.instance_id == *instance_id {
+                return Err(vec![issue(
+                    "move_root",
+                    instance_id,
+                    "root instance cannot be moved",
+                )]);
+            }
+            let descendants =
+                collect_ids(find_instance(&document.root, instance_id).ok_or_else(|| {
+                    vec![issue(
+                        "missing_instance",
+                        instance_id,
+                        "instance does not exist",
+                    )]
+                })?);
+            if descendants.contains(target_parent_instance_id) {
+                return Err(vec![issue(
+                    "move_into_descendant",
+                    instance_id,
+                    "cannot move an instance into its own descendant",
+                )]);
+            }
+            let moved = detach_slot_child(&mut document.root, instance_id).ok_or_else(|| {
+                vec![issue(
+                    "move_workflow_node",
+                    instance_id,
+                    "only slot children can be moved",
+                )]
+            })?;
+            let parent = find_instance_mut(&mut document.root, target_parent_instance_id)
+                .ok_or_else(|| {
+                    vec![issue(
+                        "missing_instance",
+                        target_parent_instance_id,
+                        "target parent does not exist",
+                    )]
+                })?;
+            let children = parent.slots.entry(target_slot_id.clone()).or_default();
+            let index = target_index.unwrap_or(children.len()).min(children.len());
+            children.insert(index, moved);
+            changed.push(instance_id.clone());
+            *requires_confirmation = true;
+        }
+        ViewPatch::AddWorkflowNode {
+            workflow_instance_id,
+            node,
+        } => {
+            let instance =
+                find_instance_mut(&mut document.root, workflow_instance_id).ok_or_else(|| {
+                    vec![issue(
+                        "missing_instance",
+                        workflow_instance_id,
+                        "workflow instance does not exist",
+                    )]
+                })?;
+            let workflow = instance.workflow.as_mut().ok_or_else(|| {
+                vec![issue(
+                    "workflow_body",
+                    workflow_instance_id,
+                    "instance is not a workflow",
+                )]
+            })?;
+            workflow.nodes.push(node.clone());
+            changed.push(node.component.instance_id.clone());
+            *requires_confirmation = true;
         }
         ViewPatch::RemoveInstance { instance_id } => {
             if document.root.instance_id == *instance_id {
@@ -734,11 +1118,29 @@ fn apply_patch(document: &mut ViewDocument, patch: &ViewPatch) -> Result<(), Vec
                     "root instance cannot be removed",
                 )]);
             }
+            let removed =
+                collect_ids(find_instance(&document.root, instance_id).ok_or_else(|| {
+                    vec![issue(
+                        "missing_instance",
+                        instance_id,
+                        "instance does not exist",
+                    )]
+                })?);
             remove_instance(&mut document.root, instance_id);
-            document
-                .bindings
-                .retain(|binding| binding.target.instance_id != *instance_id);
-            Ok(())
+            let before = document.bindings.len();
+            document.bindings.retain(|binding| {
+                let target_removed = removed.contains(&binding.target.instance_id);
+                let source_removed = matches!(
+                    &binding.source,
+                    BindingSource::ComponentPort(source) if removed.contains(&source.instance_id)
+                );
+                !target_removed && !source_removed
+            });
+            if document.bindings.len() != before {
+                affected_bindings.push(instance_id.clone());
+            }
+            changed.extend(removed);
+            *requires_confirmation = true;
         }
         ViewPatch::Connect {
             workflow_instance_id,
@@ -760,13 +1162,78 @@ fn apply_patch(document: &mut ViewDocument, patch: &ViewPatch) -> Result<(), Vec
                 )]
             })?;
             workflow.edges.push(edge.clone());
-            Ok(())
+            *requires_confirmation = true;
+        }
+        ViewPatch::Disconnect {
+            workflow_instance_id,
+            edge,
+        } => {
+            let instance =
+                find_instance_mut(&mut document.root, workflow_instance_id).ok_or_else(|| {
+                    vec![issue(
+                        "missing_instance",
+                        workflow_instance_id,
+                        "workflow instance does not exist",
+                    )]
+                })?;
+            let workflow = instance.workflow.as_mut().ok_or_else(|| {
+                vec![issue(
+                    "workflow_body",
+                    workflow_instance_id,
+                    "instance is not a workflow",
+                )]
+            })?;
+            workflow.edges.retain(|candidate| candidate != edge);
+            *requires_confirmation = true;
         }
         ViewPatch::AddBinding { binding } => {
             document.bindings.push(binding.clone());
-            Ok(())
+            affected_bindings.push(binding.binding_id.clone());
+        }
+        ViewPatch::ReplaceBinding { binding } => {
+            if let Some(existing) = document
+                .bindings
+                .iter_mut()
+                .find(|existing| existing.binding_id == binding.binding_id)
+            {
+                *existing = binding.clone();
+            } else {
+                document.bindings.push(binding.clone());
+            }
+            affected_bindings.push(binding.binding_id.clone());
+        }
+        ViewPatch::RemoveBinding { binding_id } => {
+            document
+                .bindings
+                .retain(|binding| binding.binding_id != *binding_id);
+            affected_bindings.push(binding_id.clone());
         }
     }
+    Ok(())
+}
+
+fn find_instance<'a>(
+    instance: &'a ComponentInstance,
+    instance_id: &str,
+) -> Option<&'a ComponentInstance> {
+    if instance.instance_id == instance_id {
+        return Some(instance);
+    }
+    for children in instance.slots.values() {
+        for child in children {
+            if let Some(found) = find_instance(child, instance_id) {
+                return Some(found);
+            }
+        }
+    }
+    if let Some(workflow) = &instance.workflow {
+        for node in &workflow.nodes {
+            if let Some(found) = find_instance(&node.component, instance_id) {
+                return Some(found);
+            }
+        }
+    }
+    None
 }
 
 fn find_instance_mut<'a>(
@@ -786,6 +1253,53 @@ fn find_instance_mut<'a>(
     if let Some(workflow) = &mut instance.workflow {
         for node in &mut workflow.nodes {
             if let Some(found) = find_instance_mut(&mut node.component, instance_id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn collect_ids(instance: &ComponentInstance) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    collect_ids_inner(instance, &mut ids);
+    ids
+}
+
+fn collect_ids_inner(instance: &ComponentInstance, ids: &mut HashSet<String>) {
+    ids.insert(instance.instance_id.clone());
+    for children in instance.slots.values() {
+        for child in children {
+            collect_ids_inner(child, ids);
+        }
+    }
+    if let Some(workflow) = &instance.workflow {
+        for node in &workflow.nodes {
+            collect_ids_inner(&node.component, ids);
+        }
+    }
+}
+
+fn detach_slot_child(
+    instance: &mut ComponentInstance,
+    instance_id: &str,
+) -> Option<ComponentInstance> {
+    for children in instance.slots.values_mut() {
+        if let Some(index) = children
+            .iter()
+            .position(|child| child.instance_id == instance_id)
+        {
+            return Some(children.remove(index));
+        }
+        for child in children {
+            if let Some(found) = detach_slot_child(child, instance_id) {
+                return Some(found);
+            }
+        }
+    }
+    if let Some(workflow) = &mut instance.workflow {
+        for node in &mut workflow.nodes {
+            if let Some(found) = detach_slot_child(&mut node.component, instance_id) {
                 return Some(found);
             }
         }
@@ -814,7 +1328,11 @@ fn remove_instance(instance: &mut ComponentInstance, instance_id: &str) -> bool 
             .iter()
             .position(|node| node.component.instance_id == instance_id)
         {
+            let node_id = workflow.nodes[index].node_id.clone();
             workflow.nodes.remove(index);
+            workflow
+                .edges
+                .retain(|edge| edge.from != node_id && edge.to != node_id);
             return true;
         }
         for node in &mut workflow.nodes {
@@ -872,104 +1390,147 @@ fn finish(issues: Vec<SemanticIssue>) -> Result<(), Vec<SemanticIssue>> {
     }
 }
 
-use serde_json::json;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::semantic_component::ProtocolScope;
 
-    fn instance(
-        id: &str,
-        definition: &str,
-        props: Value,
-        slots: BTreeMap<String, Vec<ComponentInstance>>,
-        workflow: Option<WorkflowGraph>,
-    ) -> ComponentInstance {
+    fn instance(id: &str, definition: &str) -> ComponentInstance {
         ComponentInstance {
             instance_id: id.into(),
-            definition: ComponentDefinitionRef::new(definition, 1),
+            definition: ComponentDefinitionRef {
+                id: definition.into(),
+                version: 1,
+            },
             model_ref: None,
-            props,
-            slots,
-            workflow,
+            props: json!({}),
+            slots: BTreeMap::new(),
+            workflow: None,
             visual: None,
         }
     }
 
-    fn empty_slots() -> BTreeMap<String, Vec<ComponentInstance>> {
-        BTreeMap::new()
+    fn operation(id: &str, block: &str, protocol: &str, step: &str) -> ComponentInstance {
+        let mut value = instance(id, "operation");
+        value.model_ref = Some(ModelRef::OperationUse {
+            block_version_id: block.into(),
+            step: QualifiedStepRef {
+                protocol_version_id: protocol.into(),
+                scope: ProtocolScope::Assay {
+                    assay_id: "cck8".into(),
+                },
+                step_path: step.into(),
+            },
+        });
+        value
     }
 
     fn fixture() -> ViewDocument {
-        let detail = BTreeMap::from([(
+        let table = instance("concentration_table", "layout.table");
+        let plate = instance("plate_layout", "lab.well_plate");
+        let dilution = instance("dilution_tool", "tool.dilution");
+        let note = instance("protocol_note", "content.note");
+        let mut detail = BTreeMap::new();
+        detail.insert(
             "detail".into(),
             vec![
-                instance(
-                    "concentration_table",
-                    "layout.table",
-                    json!({"rows": []}),
-                    empty_slots(),
-                    None,
-                ),
-                instance(
-                    "plate_layout",
-                    "lab.well_plate",
-                    json!({"format": "96"}),
-                    empty_slots(),
-                    None,
-                ),
-                instance(
-                    "dilution_tool",
-                    "tool.dilution",
-                    json!({}),
-                    empty_slots(),
-                    None,
-                ),
-                instance(
-                    "protocol_note",
-                    "content.note",
-                    json!({"text": "note"}),
-                    empty_slots(),
-                    None,
-                ),
-            ],
-        )]);
-        let operation = instance("step_drug", "operation", json!({}), detail, None);
-        let root = instance(
-            "experiment_main",
-            "workflow",
-            json!({}),
-            BTreeMap::from([(
-                "detail".into(),
-                vec![instance(
-                    "drug_subflow",
-                    "workflow",
-                    json!({}),
-                    empty_slots(),
-                    Some(WorkflowGraph {
-                        nodes: vec![],
-                        edges: vec![],
+                table,
+                plate,
+                dilution,
+                note,
+                ComponentInstance {
+                    instance_id: "drug_subflow".into(),
+                    definition: ComponentDefinitionRef {
+                        id: "workflow".into(),
+                        version: 1,
+                    },
+                    model_ref: Some(ModelRef::ProtocolVersion {
+                        id: "drug-prep-v1".into(),
                     }),
-                )],
-            )]),
-            Some(WorkflowGraph {
+                    props: json!({}),
+                    slots: BTreeMap::new(),
+                    workflow: Some(WorkflowGraph {
+                        nodes: vec![
+                            WorkflowNode {
+                                node_id: "prepare".into(),
+                                component: Box::new(operation(
+                                    "prepare",
+                                    "drug-treatment-v1",
+                                    "drug-prep-v1",
+                                    "root/prepare",
+                                )),
+                            },
+                            WorkflowNode {
+                                node_id: "treat".into(),
+                                component: Box::new(operation(
+                                    "treat",
+                                    "drug-treatment-v1",
+                                    "drug-prep-v1",
+                                    "root/treat",
+                                )),
+                            },
+                            WorkflowNode {
+                                node_id: "incubate".into(),
+                                component: Box::new(operation(
+                                    "incubate",
+                                    "drug-treatment-v1",
+                                    "drug-prep-v1",
+                                    "root/incubate",
+                                )),
+                            },
+                        ],
+                        edges: vec![
+                            WorkflowEdge {
+                                from: "prepare".into(),
+                                to: "treat".into(),
+                            },
+                            WorkflowEdge {
+                                from: "treat".into(),
+                                to: "incubate".into(),
+                            },
+                        ],
+                    }),
+                    visual: None,
+                },
+            ],
+        );
+        let mut step = operation(
+            "step_drug",
+            "drug-treatment-v1",
+            "protocol-v1",
+            "root/step_drug",
+        );
+        step.slots = detail;
+        let root = ComponentInstance {
+            instance_id: "experiment_main".into(),
+            definition: ComponentDefinitionRef {
+                id: "workflow".into(),
+                version: 1,
+            },
+            model_ref: Some(ModelRef::ProtocolVersion {
+                id: "protocol-v1".into(),
+            }),
+            props: json!({}),
+            slots: BTreeMap::new(),
+            workflow: Some(WorkflowGraph {
                 nodes: vec![WorkflowNode {
                     node_id: "drug".into(),
-                    component: Box::new(operation),
+                    component: Box::new(step),
                 }],
                 edges: vec![],
             }),
-        );
+            visual: None,
+        };
         ViewDocument {
             schema_version: COMPONENT_FRAMEWORK_SCHEMA_VERSION,
             document_id: "view-1".into(),
+            revision: 1,
             root,
             bindings: vec![
                 DataBinding {
                     binding_id: "bind-table".into(),
                     source: BindingSource::Model(ModelPath {
-                        model: ModelRef {
-                            kind: ModelKind::DesignVersion,
+                        model: ModelRef::DesignVersion {
                             id: "design-v1".into(),
                         },
                         path: "concentrations".into(),
@@ -997,106 +1558,192 @@ mod tests {
     }
 
     #[test]
-    fn fixture_validates_and_round_trips() {
+    fn fixture_round_trips_and_resolves_operation_uses() {
         let registry = default_registry();
         let document = fixture();
         document.validate(&registry).unwrap();
-        let encoded = serde_json::to_string(&document).unwrap();
-        let decoded: ViewDocument = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(decoded, document);
+        let decoded: ViewDocument =
+            serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
         decoded.validate(&registry).unwrap();
+
+        let operations = find_instance(&decoded.root, "prepare");
+        let treat = find_instance(&decoded.root, "treat");
+        assert!(operations.is_some() && treat.is_some());
     }
 
     #[test]
-    fn patch_updates_props_and_adds_content_note() {
+    fn custom_component_extends_registry_without_core_enum_change() {
+        let registry = default_registry();
+        let mut registry = registry;
+        registry
+            .register(ComponentDefinition {
+                id: "lab.solution_calculator".into(),
+                version: 1,
+                family: ComponentFamily::Tool,
+                title: "Solution calculator".into(),
+                props_schema: json!({"type":"object"}),
+                capabilities: vec!["calculate".into()],
+                inputs: vec![],
+                outputs: vec![],
+                slots: vec![],
+                presentation: None,
+                agent_operations: vec!["update".into()],
+            })
+            .unwrap();
+        let document = fixture();
+        document
+            .apply_changeset(
+                &ViewChangeSet {
+                    changeset_id: "add-tool".into(),
+                    document_id: document.document_id.clone(),
+                    expected_revision: 1,
+                    operations: vec![ViewPatch::AddSlotChild {
+                        parent_instance_id: "step_drug".into(),
+                        slot_id: "detail".into(),
+                        child: instance("solution_tool", "lab.solution_calculator"),
+                    }],
+                    provenance: vec!["test".into()],
+                },
+                &registry,
+            )
+            .unwrap();
+        document.validate(&registry).unwrap();
+    }
+
+    #[test]
+    fn changeset_is_atomic_and_checks_revision() {
         let registry = default_registry();
         let document = fixture();
-        let patched = document
-            .apply(
-                &ViewPatch::UpdateProps {
+        let conflict = ViewChangeSet {
+            changeset_id: "bad-rev".into(),
+            document_id: document.document_id.clone(),
+            expected_revision: 2,
+            operations: vec![ViewPatch::UpdateProps {
+                instance_id: "protocol_note".into(),
+                property: "text".into(),
+                value: json!("x"),
+            }],
+            provenance: vec![],
+        };
+        assert!(document.apply_changeset(&conflict, &registry).is_err());
+
+        let invalid = ViewChangeSet {
+            changeset_id: "atomic".into(),
+            document_id: document.document_id.clone(),
+            expected_revision: 1,
+            operations: vec![
+                ViewPatch::UpdateProps {
                     instance_id: "protocol_note".into(),
                     property: "text".into(),
-                    value: json!("updated"),
+                    value: json!("changed"),
                 },
-                &registry,
-            )
-            .unwrap();
-        let mut patched_root = patched.root.clone();
-        let note = find_instance_mut(&mut patched_root, "protocol_note").unwrap();
-        assert_eq!(note.props["text"], "updated");
-
-        let added = document
-            .apply(
-                &ViewPatch::AddSlotChild {
-                    parent_instance_id: "step_drug".into(),
-                    slot_id: "detail".into(),
-                    child: instance(
-                        "new_note",
-                        "content.note",
-                        json!({"text": "new"}),
-                        empty_slots(),
-                        None,
-                    ),
+                ViewPatch::MoveSlotChild {
+                    instance_id: "missing".into(),
+                    target_parent_instance_id: "step_drug".into(),
+                    target_slot_id: "detail".into(),
+                    target_index: None,
                 },
-                &registry,
-            )
-            .unwrap();
-        added.validate(&registry).unwrap();
-        let mut added_root = added.root.clone();
-        assert!(find_instance_mut(&mut added_root, "new_note").is_some());
+            ],
+            provenance: vec![],
+        };
+        assert!(document.apply_changeset(&invalid, &registry).is_err());
+        assert_eq!(document.revision, 1);
     }
 
     #[test]
-    fn duplicate_instance_and_workflow_cycle_are_rejected() {
+    fn move_connect_and_binding_cycles_are_checked() {
         let registry = default_registry();
-        let mut document = fixture();
-        document.bindings.push(DataBinding {
-            binding_id: "bad".into(),
-            source: BindingSource::Model(ModelPath {
-                model: ModelRef {
-                    kind: ModelKind::DesignVersion,
-                    id: "d".into(),
+        let document = fixture();
+        let result = document
+            .apply_changeset(
+                &ViewChangeSet {
+                    changeset_id: "move".into(),
+                    document_id: document.document_id.clone(),
+                    expected_revision: 1,
+                    operations: vec![ViewPatch::MoveSlotChild {
+                        instance_id: "protocol_note".into(),
+                        target_parent_instance_id: "drug_subflow".into(),
+                        target_slot_id: "detail".into(),
+                        target_index: None,
+                    }],
+                    provenance: vec![],
                 },
-                path: "x".into(),
+                &registry,
+            )
+            .unwrap();
+        assert_eq!(result.document.revision, 2);
+        assert!(result.requires_confirmation);
+
+        let mut cycle = fixture();
+        cycle.bindings.push(DataBinding {
+            binding_id: "cycle".into(),
+            source: BindingSource::ComponentPort(ComponentPortRef {
+                instance_id: "dilution_tool".into(),
+                port_id: "plan".into(),
             }),
             target: ComponentPortRef {
-                instance_id: "missing".into(),
+                instance_id: "concentration_table".into(),
                 port_id: "data".into(),
             },
             value_type: ComponentValueType::Data,
         });
-        assert!(document.validate(&registry).is_err());
-
-        let mut cyclic = fixture();
-        if let Some(workflow) = &mut cyclic.root.workflow {
-            workflow.edges = vec![WorkflowEdge {
-                from: "drug".into(),
-                to: "drug".into(),
-            }];
-        }
-        assert!(cyclic.validate(&registry).is_err());
+        assert!(cycle.validate(&registry).is_err());
     }
 
     #[test]
-    fn slot_and_exact_definition_are_enforced() {
+    fn remove_cleans_bindings_and_definition_versions_are_exact() {
         let registry = default_registry();
+        let document = fixture();
+        let result = document
+            .apply_changeset(
+                &ViewChangeSet {
+                    changeset_id: "remove".into(),
+                    document_id: document.document_id.clone(),
+                    expected_revision: 1,
+                    operations: vec![ViewPatch::RemoveInstance {
+                        instance_id: "concentration_table".into(),
+                    }],
+                    provenance: vec![],
+                },
+                &registry,
+            )
+            .unwrap();
+        assert!(!result
+            .document
+            .bindings
+            .iter()
+            .any(|binding| binding.binding_id == "bind-table"));
+        assert!(find_instance(&result.document.root, "concentration_table").is_none());
+
         let mut document = fixture();
-        document.root.workflow.as_mut().unwrap().nodes[0]
-            .component
-            .slots
-            .insert(
-                "detail".into(),
-                vec![instance(
-                    "wrong_kind",
-                    "operation",
-                    json!({}),
-                    empty_slots(),
-                    None,
-                )],
-            );
-        assert!(document.validate(&registry).is_err());
-        document.root.slots.clear();
         document.root.definition.version = 99;
         assert!(document.validate(&registry).is_err());
+    }
+
+    #[test]
+    fn contextual_binding_is_separate_from_structural_validation() {
+        struct Context;
+        impl ComponentBindingContext for Context {
+            fn resolve_model_path(&self, _model: &ModelRef, _path: &str) -> ModelPathResolution {
+                ModelPathResolution::Resolved(ComponentValueType::Data)
+            }
+            fn operation_use_exists(&self, _block: &str, _step: &QualifiedStepRef) -> bool {
+                true
+            }
+        }
+        let registry = default_registry();
+        let document = fixture();
+        document.validate_with_context(&registry, &Context).unwrap();
+
+        struct Missing;
+        impl ComponentBindingContext for Missing {
+            fn resolve_model_path(&self, _model: &ModelRef, _path: &str) -> ModelPathResolution {
+                ModelPathResolution::Missing
+            }
+            fn operation_use_exists(&self, _block: &str, _step: &QualifiedStepRef) -> bool {
+                false
+            }
+        }
+        assert!(document.validate_with_context(&registry, &Missing).is_err());
     }
 }
