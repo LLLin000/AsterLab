@@ -240,6 +240,30 @@ struct ViewDataQuery {
     #[serde(default)]
     extra_ratio: Option<f64>,
 }
+async fn get_view_selection(
+    State(s): State<AppState>,
+    Path((id, instance_id)): Path<(String, String)>,
+) -> ApiResult<Value> {
+    let db = lock(&s)?;
+    let result = cli::view_selection_context(&db, &id, &instance_id).map_err(ApiError::from_cli)?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct ProposalInput {
+    changeset: asterlab_core::component_framework::ViewChangeSet,
+}
+
+async fn propose_view(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<ProposalInput>,
+) -> ApiResult<Value> {
+    let db = lock(&s)?;
+    let result = cli::view_proposal(&db, &id, &input.changeset).map_err(ApiError::from_cli)?;
+    Ok(Json(result))
+}
+
 async fn get_view_step_detail(
     State(s): State<AppState>,
     Path((id, instance_id)): Path<(String, String)>,
@@ -850,6 +874,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/views/{id}/steps/{instance_id}",
             get(get_view_step_detail),
         )
+        .route(
+            "/api/views/{id}/selection/{instance_id}",
+            get(get_view_selection),
+        )
+        .route("/api/views/{id}/propose", post(propose_view))
         .route("/api/views/{id}/revise", post(revise_view))
         .route("/api/health", get(health))
         .route("/api/state", get(get_state))

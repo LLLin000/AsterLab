@@ -2304,6 +2304,124 @@ pub(crate) fn view_step_detail(
     }))
 }
 
+pub(crate) fn view_selection_context(
+    db: &Connection,
+    view_id: &str,
+    instance_id: &str,
+) -> Result<Value, CliError> {
+    let (kind, project, _, _, _) =
+        kind_id(db, view_id)?.ok_or_else(|| CliError::missing("View 不存在"))?;
+    if kind != "view" {
+        return Err(CliError::input("view_id 必须指向 view"));
+    }
+    let _project_id = project.ok_or_else(|| CliError::internal("View 缺少项目归属"))?;
+    let latest: i64 = db
+        .query_row(
+            "SELECT COALESCE(MAX(revision),0) FROM records WHERE kind='view_document' AND parent_id=?1",
+            [view_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let latest_id: String = db
+        .query_row(
+            "SELECT id FROM records WHERE kind='view_document' AND parent_id=?1 AND revision=?2",
+            params![view_id, latest],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let (_, document) = record_document(db, &latest_id)?;
+    let root = serde_json::to_value(&document.root)
+        .map_err(|e| CliError::internal(format!("ViewDocument root 无效：{e}")))?;
+    let component = find_component(&root, instance_id)
+        .ok_or_else(|| CliError::missing("View 中不存在该组件"))?;
+    let renderer_key = format!(
+        "{}@{}",
+        component["definition"]["id"].as_str().unwrap_or("unknown"),
+        component["definition"]["version"].as_u64().unwrap_or(0)
+    );
+    let step_detail = if component["model_ref"]["kind"].as_str() == Some("operation_use") {
+        view_step_detail(db, view_id, instance_id).ok()
+    } else {
+        None
+    };
+    Ok(json!({
+        "view_id": view_id,
+        "document_id": document.document_id,
+        "revision": document.revision,
+        "instance_id": instance_id,
+        "renderer_key": renderer_key,
+        "component": component,
+        "step_detail": step_detail
+    }))
+}
+
+pub(crate) fn view_proposal(
+    db: &Connection,
+    view_id: &str,
+    changeset: &ViewChangeSet,
+) -> Result<Value, CliError> {
+    let (kind, project, _, _, _) =
+        kind_id(db, view_id)?.ok_or_else(|| CliError::missing("View 不存在"))?;
+    if kind != "view" {
+        return Err(CliError::input("view_id 必须指向 view"));
+    }
+    let project_id = project.ok_or_else(|| CliError::internal("View 缺少项目归属"))?;
+    let latest: i64 = db
+        .query_row(
+            "SELECT COALESCE(MAX(revision),0) FROM records WHERE kind='view_document' AND parent_id=?1",
+            [view_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let latest_id: String = db
+        .query_row(
+            "SELECT id FROM records WHERE kind='view_document' AND parent_id=?1 AND revision=?2",
+            params![view_id, latest],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let (_, document) = record_document(db, &latest_id)?;
+    let registry = load_component_registry(db)?;
+    let result = document
+        .apply_changeset(changeset, &registry)
+        .map_err(semantic_error_with_conflict)?;
+    let design_version_id = view_design_version(&result.document)?;
+    result
+        .document
+        .validate_with_context_mode(
+            &registry,
+            &DbComponentContext::with_design(db, &project_id, design_version_id.as_deref()),
+            ContextValidationMode::AllowUnresolved,
+        )
+        .map_err(semantic_error)?;
+    let before = serde_json::to_value(&document.root)
+        .map_err(|e| CliError::internal(format!("ViewDocument root 无效：{e}")))?;
+    let after = serde_json::to_value(&result.document.root)
+        .map_err(|e| CliError::internal(format!("ViewDocument root 无效：{e}")))?;
+    let changes = result
+        .changed_instances
+        .iter()
+        .map(|instance| {
+            json!({
+                "instance_id": instance,
+                "before": find_component(&before, instance).cloned().unwrap_or(Value::Null),
+                "after": find_component(&after, instance).cloned().unwrap_or(Value::Null)
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "valid": true,
+        "view_id": view_id,
+        "document_id": document.document_id,
+        "expected_revision": changeset.expected_revision,
+        "new_revision": result.document.revision,
+        "changed_instances": result.changed_instances,
+        "affected_bindings": result.affected_bindings,
+        "requires_confirmation": result.requires_confirmation,
+        "changes": changes
+    }))
+}
+
 pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Value, CliError> {
     let i: ViewProject = serde_json::from_value(data.clone())
         .map_err(|e| CliError::input(format!("View 投影参数无效：{e}")))?;

@@ -22,9 +22,10 @@
       }catch(e){positions={}}
     }
     const placed=[];
+    // Reserve all manual positions before placing any automatic node.
+    nodes.forEach(n=>{const id=n.node_id;if(manual[id]){out[id]={...manual[id]};placed.push(out[id])}});
     nodes.forEach((n,i)=>{
-      const id=n.node_id;
-      if(manual[id]){out[id]={...manual[id]};placed.push(out[id]);return}
+      const id=n.node_id;if(manual[id])return;
       let p=positions[id]||{x:80+i*190,y:150};
       let guard=0;
       while(placed.some(q=>overlaps(p,q))&&guard++<100)p={x:p.x,y:p.y+140};

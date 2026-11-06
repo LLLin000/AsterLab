@@ -196,8 +196,9 @@ function noteCard(child,actions){
 function saveTable(instanceId){
   const draft=drafts.get(instanceId);if(!draft)return;const savedToken=draft.token||0;
   const child=findById(data.latest_version.data.root,instanceId);
-  const ops=[{kind:"update_props",instance_id:instanceId,property:"rows",value:draft.rows}];
-  if(child?.definition?.id==="content.table")ops.unshift({kind:"update_props",instance_id:instanceId,property:"columns",value:draft.columns});
+  const rows=JSON.parse(JSON.stringify(draft.rows)),columns=[...draft.columns];
+  const ops=[{kind:"update_props",instance_id:instanceId,property:"rows",value:rows}];
+  if(child?.definition?.id==="content.table")ops.unshift({kind:"update_props",instance_id:instanceId,property:"columns",value:columns});
   mutate(ops,"保存表格").then(()=>{const next=drafts.get(instanceId);if(!next||(next.token||0)===savedToken){drafts.delete(instanceId);renderDetail()}}).catch(()=>{});
 }
 function tableAddColumn(instanceId){
@@ -325,8 +326,9 @@ function commitViewChangeSet(operations,label){
     const doc=data.latest_version.data;
     const changeset={changeset_id:`ui-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["view-ui"]};
     $("status").textContent=`${label}…`;
-    const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
+    const r=await fetch(`/api/views/${encodeURIComponent(targetViewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
     const j=await r.json();
+    if(viewId!==targetViewId||data?.latest_version?.data?.document_id!==targetDocumentId){$("status").textContent=`${label}已写入原文档，当前 View 未刷新`;return}
     if(!r.ok){const message=j.error||`${label}失败`;await load(true,true);$("status").textContent=message;throw new Error(message)}
     await load(true,true);$("status").textContent=`${label}已保存`;
   };

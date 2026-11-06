@@ -18,7 +18,7 @@ assert.notDeepEqual(pos.b1, pos.b2, 'branches occupy separate slots');
 for (const a of Object.values(pos)) for (const b of Object.values(pos)) if (a !== b) assert.ok(!overlap(a,b), 'no overlap');
 
 const fixed = {
-  nodes: [node('a'), node('b1', {x: 700, y: 40}), node('b2'), node('merge')],
+  nodes: [node('a'), node('b2'), node('merge'), node('b1', {x: 700, y: 40})],
   edges: [edge('a','b1'),edge('a','b2'),edge('b1','merge'),edge('b2','merge')],
 };
 const fixedPos = layout(fixed.nodes, fixed.edges, dagre);
