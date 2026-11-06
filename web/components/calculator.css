@@ -1,0 +1,24 @@
+.cmp-calculator {
+  height: 100%;
+  min-height: 0;
+  gap: var(--al-gap);
+  padding: var(--al-card-pad);
+  background: var(--al-surface);
+  color: var(--al-ink);
+  font: 13px/18px var(--al-font);
+}
+.cmp-calculator__header { display: flex; justify-content: space-between; gap: var(--al-gap); }
+.cmp-calculator h3 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; }
+.cmp-calculator__meta { color: var(--al-muted); font-size: 12px; line-height: 16px; }
+.cmp-calculator__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--al-gap); }
+.cmp-calculator__fields label, .cmp-calculator__plate { display: grid; gap: 4px; color: var(--al-muted); font-size: 12px; }
+.cmp-calculator input, .cmp-calculator select { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--al-control); padding: 6px 9px; border: 1px solid var(--al-line); border-radius: var(--al-radius-sm); background: var(--al-surface); color: var(--al-ink); font: 13px/18px var(--al-font); }
+.cmp-calculator input:focus, .cmp-calculator select:focus { outline: 2px solid var(--al-accent); outline-offset: 1px; }
+.cmp-calculator__status { padding: 8px 10px; border: 1px solid var(--al-line); border-radius: var(--al-radius-sm); background: var(--al-surface-2); color: var(--al-warning); }
+.cmp-calculator__plate { margin-top: auto; }
+@media (max-width: 420px) { .cmp-calculator__fields { grid-template-columns: 1fr; } }
+.cmp-calculator__actions { display: flex; justify-content: flex-end; }
+.cmp-calculator__run { min-height: var(--al-control); padding: 0 14px; border: 1px solid transparent; border-radius: var(--al-radius-sm); background: var(--al-accent); color: #fff; font: 600 13px/1 var(--al-font); cursor: pointer; }
+.cmp-calculator__result { min-height: 38px; padding: 8px 10px; border-top: 1px solid var(--al-line); color: var(--al-muted); font-size: 12px; line-height: 17px; }
+.cmp-calculator__result strong { color: var(--al-ink); font-size: 14px; }
+.cmp-calculator__result small { display: block; margin-top: 2px; color: var(--al-muted); }

@@ -1,0 +1,63 @@
+.cmp-flow {
+  color: var(--al-ink);
+  font-family: var(--al-font);
+}
+
+.cmp-flow__icon {
+  pointer-events: none;
+}
+
+.cmp-flow__label {
+  fill: var(--al-ink);
+  font: 600 13px/18px var(--al-font);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.cmp-flow__kind {
+  fill: var(--al-muted);
+  font: 400 10px/14px var(--al-font);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+#canvas:has(.cmp-flow) .grid-dot {
+  fill: var(--al-line-strong);
+  opacity: .7;
+}
+
+#canvas:has(.cmp-flow) .edge {
+  stroke: var(--al-line-strong);
+  stroke-width: 1.5;
+}
+
+#canvas:has(.cmp-flow) .wnode:has(.cmp-flow) .node-bg {
+  fill: var(--al-surface);
+  stroke: var(--al-line);
+  stroke-width: 1;
+}
+
+#canvas:has(.cmp-flow) .wnode:has(.cmp-flow):hover .node-bg {
+  stroke: var(--al-line-strong);
+}
+
+#canvas:has(.cmp-flow) .wnode:has(.cmp-flow).selected .node-bg,
+#canvas:has(.cmp-flow) .wnode:has(.cmp-flow).connect-target .node-bg {
+  fill: var(--al-accent-soft);
+  stroke: var(--al-accent);
+  stroke-width: 2;
+}
+
+#canvas:has(.cmp-flow) .wnode:has(.cmp-flow) .port {
+  fill: var(--al-surface);
+  stroke: var(--al-line-strong);
+}
+
+#canvas:has(.cmp-flow) .wnode:has(.cmp-flow).selected .port {
+  fill: var(--al-accent-soft);
+  stroke: var(--al-accent);
+}
+
+#canvas:has(.cmp-flow) .edge.temp-edge {
+  stroke: var(--al-accent);
+}

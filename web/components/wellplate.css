@@ -1,0 +1,49 @@
+.cmp-wellplate {
+  --wp-cell: 30px;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--al-card-pad);
+  border: 1px solid var(--al-line);
+  border-radius: var(--al-radius);
+  background: var(--al-surface);
+  color: var(--al-ink);
+  font: 13px/18px var(--al-font);
+}
+.cmp-wellplate * { box-sizing: border-box; }
+.cmp-wellplate .wp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex: 0 0 auto; }
+.cmp-wellplate h3 { margin: 0; color: var(--al-ink); font-size: 15px; line-height: 20px; font-weight: 600; }
+.cmp-wellplate .wp-subtitle { margin-top: 3px; color: var(--al-muted); font-size: 12px; line-height: 16px; }
+.cmp-wellplate .wp-badge { flex: 0 0 auto; padding: 2px 8px; border: 1px solid var(--al-line); border-radius: 99px; background: var(--al-surface-2); color: var(--al-muted); font-size: 11px; }
+.cmp-wellplate .wp-content { min-height: 0; flex: 1 1 auto; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.cmp-wellplate .wp-state { min-height: 76px; padding: 12px; display: flex; flex-direction: column; justify-content: center; gap: 3px; border: 1px dashed var(--al-line-strong); border-radius: var(--al-radius-sm); color: var(--al-muted); }
+.cmp-wellplate .wp-state strong { color: var(--al-warning); font-weight: 600; }
+.cmp-wellplate .wp-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; color: var(--al-muted); font-size: 12px; line-height: 16px; }
+.cmp-wellplate .wp-toolbar { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.cmp-wellplate button { min-height: 32px; padding: 4px 10px; border: 1px solid var(--al-line); border-radius: var(--al-radius-sm); background: var(--al-surface); color: var(--al-ink); font: inherit; cursor: pointer; }
+.cmp-wellplate button:hover { border-color: var(--al-line-strong); background: var(--al-surface-2); }
+.cmp-wellplate button:focus-visible { outline: 2px solid var(--al-accent); outline-offset: 2px; }
+.cmp-wellplate .wp-toolbar > span { margin-left: auto; color: var(--al-muted); font-size: 12px; }
+.cmp-wellplate .wp-grid-scroll { flex: 1 1 0; min-height: 120px; max-width: 100%; overflow: auto; padding: 2px; }
+.cmp-wellplate .wp-grid { width: max-content; display: grid; grid-template-columns: 24px repeat(var(--wp-columns), var(--wp-cell)); gap: 4px; align-items: center; }
+.cmp-wellplate .wp-axis, .cmp-wellplate .wp-corner { width: 24px; height: var(--wp-cell); display: grid; place-items: center; color: var(--al-muted); font-size: 11px; }
+.cmp-wellplate .wp-well { width: var(--wp-cell); height: var(--wp-cell); min-height: var(--wp-cell); padding: 0; border-color: var(--al-line); border-radius: 50%; background: var(--al-surface-2); color: var(--al-muted); font-size: 10px; line-height: 1; }
+.cmp-wellplate .wp-well.is-assigned { border-color: var(--al-line-strong); background: var(--al-accent-soft); color: var(--al-ink); }
+.cmp-wellplate .wp-well.is-selected { border-color: var(--al-accent); background: var(--al-accent); color: var(--al-surface); }
+.cmp-wellplate .wp-well.is-empty { background: var(--al-surface); }
+.cmp-wellplate .wp-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding-top: 8px; border-top: 1px solid var(--al-line); color: var(--al-muted); font-size: 12px; }
+.cmp-wellplate .wp-legend > b, .cmp-wellplate .wp-selection > b { color: var(--al-ink); font-weight: 600; }
+.cmp-wellplate .wp-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.cmp-wellplate .wp-legend-item i { width: 8px; height: 8px; border: 1px solid var(--al-accent); border-radius: 50%; background: var(--al-accent-soft); }
+.cmp-wellplate .wp-legend-item small { color: var(--al-muted); font-size: 11px; }
+.cmp-wellplate .wp-selection { display: flex; flex-direction: column; gap: 5px; padding-top: 8px; border-top: 1px solid var(--al-line); }
+.cmp-wellplate .wp-selection-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.cmp-wellplate .wp-selected-item { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px 7px; border: 1px solid var(--al-line); border-radius: var(--al-radius-sm); background: var(--al-surface-2); font-size: 12px; }
+.cmp-wellplate .wp-selected-item b { color: var(--al-accent); }
+.cmp-wellplate .wp-selected-item span, .cmp-wellplate .wp-empty-selection { color: var(--al-muted); }
+.cmp-wellplate .wp-empty-selection { font-size: 12px; }

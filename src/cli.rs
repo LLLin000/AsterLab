@@ -593,6 +593,25 @@ struct ViewRevise {
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct ViewProposalCreate {
+    view_id: String,
+    changeset: ViewChangeSet,
+    #[serde(default)]
+    source: String,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ViewProposalAction {
+    view_id: String,
+    proposal_id: String,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ViewProposalList {
+    view_id: String,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CatalogReviewCreate {
     project_id: String,
     review: ReviewRecord,
@@ -2302,6 +2321,136 @@ pub(crate) fn view_step_detail(
         "resolved_parameters": preview["resolved_parameters"],
         "unresolved_parameters": preview["unresolved_parameters"]
     }))
+}
+
+pub(crate) fn create_view_proposal_tx(
+    tx: &Transaction<'_>,
+    view_id: &str,
+    changeset: &Value,
+    source: &str,
+) -> Result<Value, CliError> {
+    let (kind, project, _, _, _) =
+        kind_id(tx, view_id)?.ok_or_else(|| CliError::missing("View 不存在"))?;
+    if kind != "view" {
+        return Err(CliError::input("view_id 必须指向 view"));
+    }
+    let project_id = project.ok_or_else(|| CliError::internal("View 缺少项目归属"))?;
+    let typed: ViewChangeSet = serde_json::from_value(changeset.clone())
+        .map_err(|e| CliError::input(format!("提案 changeset 无效：{e}")))?;
+    let preview = view_proposal(tx, view_id, &typed)?;
+    let proposal_id = make_id();
+    let data = json!({
+        "proposal_id": proposal_id,
+        "view_id": view_id,
+        "document_id": preview["document_id"],
+        "expected_revision": preview["expected_revision"],
+        "changeset": changeset,
+        "preview": preview,
+        "source": source.trim(),
+        "status": "pending",
+        "accepted_revision": Value::Null
+    });
+    insert(
+        tx,
+        "view_proposal",
+        Some(&project_id),
+        Some(view_id),
+        1,
+        &data,
+    )
+}
+
+pub(crate) fn list_view_proposals(db: &Connection, view_id: &str) -> Result<Value, CliError> {
+    let (kind, project, _, _, _) =
+        kind_id(db, view_id)?.ok_or_else(|| CliError::missing("View 不存在"))?;
+    if kind != "view" {
+        return Err(CliError::input("view_id 必须指向 view"));
+    }
+    let project_id = project.ok_or_else(|| CliError::internal("View 缺少项目归属"))?;
+    let records = list(db, Some("view_proposal"), Some(&project_id))?;
+    let mut latest: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+    for record in records.into_iter().filter(|r| r["parent_id"] == view_id) {
+        let proposal_id = record["data"]["proposal_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let replace = latest
+            .get(&proposal_id)
+            .map(|old| record["revision"].as_i64() > old["revision"].as_i64())
+            .unwrap_or(true);
+        if replace {
+            latest.insert(proposal_id, record);
+        }
+    }
+    Ok(json!({"records": latest.into_values().collect::<Vec<_>>()}))
+}
+
+fn latest_view_proposal(
+    tx: &Transaction<'_>,
+    view_id: &str,
+    proposal_id: &str,
+) -> Result<Value, CliError> {
+    let (_, project, _, _, _) =
+        kind_id(tx, view_id)?.ok_or_else(|| CliError::missing("View 不存在"))?;
+    let project_id = project.ok_or_else(|| CliError::internal("View 缺少项目归属"))?;
+    let records = list(tx, Some("view_proposal"), Some(&project_id))?;
+    records
+        .into_iter()
+        .filter(|record| {
+            record["parent_id"] == view_id
+                && record["data"]["proposal_id"].as_str() == Some(proposal_id)
+        })
+        .max_by_key(|record| record["revision"].as_i64().unwrap_or(0))
+        .ok_or_else(|| CliError::missing("提案不存在"))
+}
+
+pub(crate) fn accept_view_proposal_tx(
+    tx: &Transaction<'_>,
+    view_id: &str,
+    proposal_id: &str,
+) -> Result<Value, CliError> {
+    let proposal = latest_view_proposal(tx, view_id, proposal_id)?;
+    if proposal["data"]["status"].as_str() != Some("pending") {
+        return Err(CliError::conflict("提案不是待审阅状态"));
+    }
+    let changeset = proposal["data"]["changeset"].clone();
+    let version = revise_view_records(tx, view_id, &json!({"changeset": changeset}))?;
+    let mut data = proposal["data"].clone();
+    data["status"] = json!("accepted");
+    data["accepted_revision"] = version["version"]["revision"].clone();
+    let existing_revision = proposal["revision"].as_i64().unwrap_or(1);
+    let status_record = insert(
+        tx,
+        "view_proposal",
+        proposal["project_id"].as_str(),
+        Some(view_id),
+        existing_revision + 1,
+        &data,
+    )?;
+    Ok(json!({"proposal": status_record, "version": version["version"]}))
+}
+
+pub(crate) fn reject_view_proposal_tx(
+    tx: &Transaction<'_>,
+    view_id: &str,
+    proposal_id: &str,
+) -> Result<Value, CliError> {
+    let proposal = latest_view_proposal(tx, view_id, proposal_id)?;
+    if proposal["data"]["status"].as_str() != Some("pending") {
+        return Err(CliError::conflict("提案不是待审阅状态"));
+    }
+    let mut data = proposal["data"].clone();
+    data["status"] = json!("rejected");
+    let revision = proposal["revision"].as_i64().unwrap_or(1) + 1;
+    let record = insert(
+        tx,
+        "view_proposal",
+        proposal["project_id"].as_str(),
+        Some(view_id),
+        revision,
+        &data,
+    )?;
+    Ok(json!({"proposal": record}))
 }
 
 pub(crate) fn view_selection_context(
@@ -4753,6 +4902,39 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let i: ViewGet = parse_input(path)?;
             get_view(&db, &i.id)
         }
+        "view.proposal.create" => {
+            let i: ViewProposalCreate = parse_input(path)?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let changeset = serde_json::to_value(&i.changeset)
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let result = create_view_proposal_tx(&tx, &i.view_id, &changeset, &i.source)?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(result)
+        }
+        "view.proposal.list" => {
+            let i: ViewProposalList = parse_input(path)?;
+            list_view_proposals(&db, &i.view_id)
+        }
+        "view.proposal.accept" => {
+            let i: ViewProposalAction = parse_input(path)?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let result = accept_view_proposal_tx(&tx, &i.view_id, &i.proposal_id)?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(result)
+        }
+        "view.proposal.reject" => {
+            let i: ViewProposalAction = parse_input(path)?;
+            let tx = db
+                .unchecked_transaction()
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let result = reject_view_proposal_tx(&tx, &i.view_id, &i.proposal_id)?;
+            tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+            Ok(result)
+        }
         "view.revise" => {
             let i: ViewRevise = parse_input(path)?;
             let tx = db
@@ -5615,6 +5797,15 @@ fn input_schema(tool: &str) -> Option<Value> {
         "view.revise" => {
             json!({"type":"object","additionalProperties":false,"required":["view_id","changeset"],"properties":{"view_id":{"type":"string"},"changeset":{"type":"object"}}})
         }
+        "view.proposal.create" => {
+            json!({"type":"object","additionalProperties":false,"required":["view_id","changeset"],"properties":{"view_id":{"type":"string"},"changeset":{"type":"object"},"source":{"type":"string","maxLength":120}}})
+        }
+        "view.proposal.list" => {
+            json!({"type":"object","additionalProperties":false,"required":["view_id"],"properties":{"view_id":{"type":"string"}}})
+        }
+        "view.proposal.accept" | "view.proposal.reject" => {
+            json!({"type":"object","additionalProperties":false,"required":["view_id","proposal_id"],"properties":{"view_id":{"type":"string"},"proposal_id":{"type":"string"}}})
+        }
         "semantic.inspect" => {
             json!({"type":"object","additionalProperties":false,"required":["block_version_id"],"properties":{"block_version_id":{"type":"string"}}})
         }
@@ -5978,6 +6169,10 @@ fn tool_effects(tool: &str) -> &'static str {
         "protocol.block.create" => "创建步骤块元数据和不可变 v1；步骤块只引用确切的其他版本。",
         "view.create" | "view.revise" => "保存新的 ViewDocument 版本；不改 Protocol/Run。",
         "view.get" => "只读；不修改数据库。",
+        "view.proposal.create" => "为外部 Agent 保存一条待审阅的 View 变更提案；不写 ViewDocument。",
+        "view.proposal.list" => "读取当前 View 的提案收件箱；只读。",
+        "view.proposal.accept" => "接受待审阅提案并提交其冻结的 ViewChangeSet；可能产生 revision conflict。",
+        "view.proposal.reject" => "拒绝待审阅提案；不改 ViewDocument。",
         "semantic.inspect"
         | "semantic.search"
         | "semantic.validate"

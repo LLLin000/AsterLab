@@ -2,7 +2,7 @@
   if(typeof module==="object"&&module.exports)module.exports=factory();
   else root.AsterLayout=factory();
 })(typeof self!=="undefined"?self:this,function(){
-  const W=76,H=120,GAP=16;
+  const W=96,H=136,GAP=16;
   function overlaps(a,b){return a.x < b.x+W+GAP && a.x+W+GAP > b.x && a.y < b.y+H+GAP && a.y+H+GAP > b.y}
   function layout(nodes,edges,dagreApi){
     const out={};

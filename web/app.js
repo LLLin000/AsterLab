@@ -6,9 +6,12 @@ let paramCache=new Map(), plateCache=new Map(), plateSelections=new Map();
 let calcStates=new Map();
 let selectedChildId=null;
 let proposal=null;
+let inboxProposals=[];
+let mountedModules=[];
 let dataRequestSeq=0;
 let drafts=new Map();
 const $=id=>document.getElementById(id);
+window.AsterUI=window.AsterUI||{registry:{},register(key,renderer){this.registry[key]=renderer}};
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const defName=c=>c?.definition?.id||"component";
 const nodeTitle=c=>c?.props?.label||c?.props?.title||defName(c);
@@ -16,15 +19,7 @@ const scopeLabel=c=>c?.model_ref?.step?.scope?.assay_id?`assay: ${c.model_ref.st
 const workflowOf=c=>c?.workflow?.nodes||[];
 const slotsOf=c=>c?.slots||{};
 const findById=(root,id)=>{let hit=null;const walk=c=>{if(c.instance_id===id)hit=c;Object.values(c.slots||{}).flat().forEach(walk);(c.workflow?.nodes||[]).forEach(n=>walk(n.component))};walk(root);return hit};
-let masonry=null;
-function layoutCards(){
-  const container=document.querySelector(".cards");if(!container)return;
-  if(!window.Masonry){container.classList.add("no-masonry");return}
-  if(masonry&&masonry.element!==container){masonry.destroy();masonry=null}
-  if(!masonry)masonry=new Masonry(container,{itemSelector:".card",columnWidth:".grid-sizer",gutter:8,percentPosition:true,transitionDuration:0});
-  else{masonry.reloadItems();masonry.layout()}
-}
-
+function layoutCards(){}
 function iconFor(c){
   const visual=c?.visual||{};
   const explicit=(visual.symbol||visual.template||"").toLowerCase();
@@ -32,7 +27,7 @@ function iconFor(c){
   let key=allowed.includes(explicit)?explicit:"flask";
   const def=defName(c);
   if(!allowed.includes(explicit)&&def==="lab.well_plate")key="plate";
-  return `<image class="bioicon" href="/icons/${key}.svg" x="8" y="7" width="60" height="60" preserveAspectRatio="xMidYMid meet"/>`;
+  const path=(window.AsterIcons&&window.AsterIcons[key])||window.AsterIcons?.flask||"";return `<g class="bioicon" transform="translate(36 24) scale(2)" fill="none" stroke="#202938" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${path}</g>`;
 }
 function renderCrumbs(){
   $("crumbs").innerHTML=stack.map((c,i)=>`<button class="crumb" data-i="${i}">${esc(nodeTitle(c))}</button>`).join('<span class="crumb-sep">›</span>');
@@ -51,18 +46,18 @@ function graph(){
   });
   return {nodes,edges};
 }
-function nodeBox(c){return {x:c._vx??80,y:c._vy??175,w:76,h:76}}
+function nodeBox(c){return {x:c._vx??80,y:c._vy??175,w:96,h:96}}
 function compactMarkup(c){
-  return `<g class="glyph">${iconFor(c)}</g><text class="label" x="38" y="101">${esc(nodeTitle(c))}</text><text class="kind" x="38" y="116">${esc((c.visual?.symbol||c.visual?.template||"").trim()||defName(c))}</text>`;
+  return `<g class="glyph">${iconFor(c)}</g><text class="label" x="48" y="118">${esc(nodeTitle(c))}</text><text class="kind" x="48" y="132">${esc((c.visual?.symbol||c.visual?.template||"").trim()||defName(c))}</text>`;
 }
 function renderCanvas(){
   const svg=$("canvas"); const {nodes,edges}=graph();
   const byId={}; nodes.forEach(n=>{byId[n.node_id]=n.component;byId[n.component.instance_id]=n.component});
-  const edgeMarkup=edges.map(e=>{const a=byId[e.from],b=byId[e.to];if(!a||!b)return "";const A=nodeBox(a),B=nodeBox(b);const x1=A.x+76,y1=A.y+38,x2=B.x,y2=B.y+38;const mid=x1+(x2-x1)/2;return `<path class="edge" d="M${x1} ${y1} C${mid} ${y1},${mid} ${y2},${x2-5} ${y2}"/>`}).join("");
-  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="76" height="76" rx="18"/><circle class="port-hit" data-port="in" data-node="${esc(n.node_id)}" cx="0" cy="38" r="8" fill="transparent"/><circle class="port" cx="0" cy="38" r="3" pointer-events="none"/><circle class="port-hit" data-port="out" data-node="${esc(n.node_id)}" cx="76" cy="38" r="8" fill="transparent"/><circle class="port" cx="76" cy="38" r="3" pointer-events="none"/>${rendererFor(c).compact(c)}</g>`}).join("");
+  const edgeMarkup=edges.map(e=>{const a=byId[e.from],b=byId[e.to];if(!a||!b)return "";const A=nodeBox(a),B=nodeBox(b);const x1=A.x+96,y1=A.y+48,x2=B.x,y2=B.y+48;const mid=x1+(x2-x1)/2;return `<path class="edge" d="M${x1} ${y1} C${mid} ${y1},${mid} ${y2},${x2-5} ${y2}"/>`}).join("");
+  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="96" height="96" rx="18"/><circle class="port-hit" data-port="in" data-node="${esc(n.node_id)}" cx="0" cy="48" r="8" fill="transparent"/><circle class="port" cx="0" cy="48" r="3" pointer-events="none"/><circle class="port-hit" data-port="out" data-node="${esc(n.node_id)}" cx="96" cy="48" r="8" fill="transparent"/><circle class="port" cx="96" cy="48" r="3" pointer-events="none"/>${rendererFor(c).compact(c)}</g>`}).join("");
   const empty=nodes.length?"":`<text class="empty" x="550" y="260">此 View 还没有工作流节点。</text>`;
-  const dots=Array.from({length:16},(_,r)=>Array.from({length:24},(_,c)=>`<circle class="grid-dot" cx="${40+c*44}" cy="${40+r*34}" r="1"/>`).join("")).join("");
-  svg.innerHTML=`<defs><pattern id="dots" width="44" height="34" patternUnits="userSpaceOnUse">${dots}</pattern><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b9c0ca"/></marker></defs><rect width="1100" height="560" fill="url(#dots)"/><g id="viewport" transform="translate(${view.x} ${view.y}) scale(${view.k})">${edgeMarkup}${nodeMarkup}${empty}</g>`;
+  const dots=`<circle class="grid-dot" cx="1" cy="1" r="1"/>`;
+  svg.innerHTML=`<defs><pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">${dots}</pattern><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b9c0ca"/></marker></defs><rect width="1100" height="360" fill="url(#dots)"/><g id="viewport" transform="translate(${view.x} ${view.y}) scale(${view.k})">${edgeMarkup}${nodeMarkup}${empty}</g>`;
   svg.querySelectorAll(".port-hit[data-port=out]").forEach(el=>el.addEventListener("pointerdown",ev=>startConnect(ev,el.dataset.node)));
   svg.querySelectorAll(".wnode").forEach(el=>{
     el.addEventListener("pointerdown",ev=>startNodeDrag(ev,byId[el.dataset.node]));
@@ -120,7 +115,7 @@ function plateMarkup(plate,instanceId){
     const target=hit?.targets?.[0]?.target?.id||"";
     html+=`<button class="well ${hit?"assigned":""} ${on?"selected":""}" data-well="${id}" data-plate="${esc(instanceId)}" ${hit?"":"disabled"} title="${id}${hit?" · "+esc(target):" · 未分配"}">${id}</button>`
   }
-  return `<div class="plate" style="grid-template-columns:repeat(${colCount},17px)">${html}</div><div class="muted">已选 ${selected.size} / 计划 ${assigned.size} 孔（选择不修改 DesignVersion）</div><div class="selection-detail">${fmtSelection(plate,instanceId)}</div>`;
+  return `<div class="plate" style="grid-template-columns:repeat(${colCount},30px)">${html}</div><div class="muted">已选 ${selected.size} / 计划 ${assigned.size} 孔（选择不修改 DesignVersion）</div><div class="selection-detail">${fmtSelection(plate,instanceId)}</div>`;
 }
 function bindPlateBox(box,plate,instanceId){
   box.querySelectorAll(".well").forEach(btn=>btn.onclick=()=>toggleWell(instanceId,btn.dataset.well,plate,box.id));
@@ -250,19 +245,43 @@ const componentRenderers={
 };
 function rendererFor(component){
   const key=`${component.definition?.id||"unknown"}@${component.definition?.version??"?"}`;
+  const module=window.AsterUI?.registry?.[key];
+  if(module)return {compact:module.renderCompact||compactMarkup,detail:module.renderDetail,mount:module.mount};
   return componentRenderers[key]||componentRenderers.unsupported;
 }
 function proposalNoOp(preview){
   const changes=preview?.operation_changes||[];
   return changes.length>0&&changes.every(op=>JSON.stringify(op.before)===JSON.stringify(op.after));
 }
+function renderProposalInbox(){
+  const box=$("inbox-panel");if(!box)return;
+  const pending=inboxProposals.filter(p=>p.data?.status==="pending");
+  const toggle=$("inbox-toggle");if(toggle)toggle.textContent=`待审 ${pending.length}`;
+  if(pending.length===0)box.hidden=true;
+  box.innerHTML=`<div class="inbox-head"><b>Proposal Inbox</b><span class="muted">${pending.length} 条待审阅</span><button data-inbox-refresh>刷新</button></div>`+
+    (pending.map(p=>`<div class="inbox-row"><div><b>${esc(p.data?.source||"external")}</b><span class="muted"> · revision ${esc(p.data?.expected_revision??"?")} · ${esc((p.data?.changeset?.operations||[]).map(x=>x.kind).join(", "))}</span></div><button data-inbox-open="${esc(p.id)}">审阅</button></div>`).join("")||`<div class="muted">没有外部 Agent 提案。</div>`);
+  box.querySelector("[data-inbox-refresh]")?.addEventListener("click",loadInbox);
+  box.querySelectorAll("[data-inbox-open]").forEach(btn=>btn.addEventListener("click",()=>openInboxProposal(btn.dataset.inboxOpen)));
+}
+async function loadInbox(){
+  if(!data)return;
+  try{
+    const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/proposals`);if(!r.ok)return;
+    const j=await r.json();inboxProposals=j.records||[];renderProposalInbox();
+  }catch(e){}
+}
+function openInboxProposal(recordId){
+  const record=inboxProposals.find(p=>p.id===recordId);if(!record)return;
+  proposal={kind:"inbox",proposalId:record.data.proposal_id,source:record.data.source,viewId,documentId:record.data.document_id,expectedRevision:record.data.expected_revision,changeset:record.data.changeset,preview:record.data.preview,stale:record.data.status!=="pending",noOp:proposalNoOp(record.data.preview)};
+  selectedChildId=null;renderProposalPanel();
+}
 function proposalPanelMarkup(){
   const child=selectedChildId?findById(data?.latest_version?.data?.root,selectedChildId):selected;
   if(!child)return `<div class="proposal-empty">选择一个步骤或卡片后，可生成受控提案。</div>`;
-  const agentPrompt=`<div class="agent-prompt"><input id="agent-instruction" placeholder="用自然语言描述修改，例如：把表格移到最上面"><button class="primary" data-agent-run>生成提案</button></div>`;
+
   const kind=child.definition.id;const isNote=kind==="content.note"||kind==="content.markdown";const isTable=kind==="content.table"||kind==="layout.table";
   const actions=[`<button data-proposal="move-top">移动到最上面</button>`,isNote?`<button data-proposal="append-note">追加说明</button>`:``,isTable||kind==="workflow"?`<button data-proposal="add-note">添加 Markdown 卡片</button>`:``,`<button data-proposal="delete">删除此卡片</button>`].join("");
-  if(!proposal)return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">提案只读预览；接受前不会写入。</div>${agentPrompt}<div class="row">${actions}</div>`;
+  if(!proposal)return `<div class="proposal-title">Proposal Review · <b>${esc(nodeTitle(child))}</b></div><div class="muted">外部 Agent 提案或本地测试提案；接受前不会写入。</div><div class="row">${actions}</div>`;
   const stale=proposal.stale||proposal.noOp;
   const changes=(proposal.preview?.operation_changes||[]).map(op=>{
     if(op.kind==="move_slot_child")return `<div class="diff-row"><b>位置</b><span>${esc(JSON.stringify(op.before))} → ${esc(JSON.stringify(op.after))}</span></div>`;
@@ -273,28 +292,17 @@ function proposalPanelMarkup(){
   return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">目标：ViewDocument · revision ${esc(proposal.expectedRevision)} · ${proposal.noOp?"无实际变化":stale?"已过期":"预览校验通过"} · ${proposal.preview?.diff_scope==="net"?"最终净变化":"差异"} · 仅预览，未写入</div><div class="diff-list">${changes||"<div class=muted>无结构化差异</div>"}</div><div class="row"><button class="primary" data-proposal-accept ${stale?"disabled":""}>接受变更</button><button data-proposal-reject>拒绝</button></div>`;
 }
 function renderProposalPanel(){
-  const box=$("proposal-panel");if(!box)return;box.innerHTML=proposalPanelMarkup();
+  const box=$("proposal-panel");if(!box)return;box.hidden=!selectedChildId&&!proposal;box.innerHTML=proposalPanelMarkup();
   box.querySelectorAll("[data-proposal]").forEach(b=>b.onclick=()=>createProposal(b.dataset.proposal));
   box.querySelector("[data-agent-run]")?.addEventListener("click",runAgentProposal);
   box.querySelector("[data-proposal-accept]")?.addEventListener("click",acceptProposal);
-  box.querySelector("[data-proposal-reject]")?.addEventListener("click",()=>{proposal=null;renderProposalPanel()});
+  box.querySelector("[data-proposal-reject]")?.addEventListener("click",rejectProposal);
 }
 function focusChild(id){
   if(selectedChildId!==id)proposal=null;
   selectedChildId=id;
   document.querySelectorAll(".card[data-instance]").forEach(c=>c.classList.toggle("selected",c.dataset.instance===id));
   renderProposalPanel();
-}
-async function runAgentProposal(){
-  if(!data)return;const child=selectedChildId?findById(data.latest_version.data.root,selectedChildId):selected;const instruction=$("agent-instruction")?.value.trim();if(!child||!instruction){$("status").textContent="请选择组件并输入指令";return}
-  const requestViewId=viewId,requestDocumentId=data.latest_version.data.document_id,requestRevision=data.latest_version.data.revision,requestChild=selectedChildId;
-  $("status").textContent="Agent 生成提案…";
-  try{
-    const r=await fetch(`/api/views/${encodeURIComponent(requestViewId)}/agent-propose`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instance_id:child.instance_id,instruction})});
-    const j=await r.json();if(!r.ok)throw new Error(j.error||"Agent 提案失败");
-    if(viewId!==requestViewId||data?.latest_version?.data?.document_id!==requestDocumentId||data?.latest_version?.data?.revision!==requestRevision||selectedChildId!==requestChild){$("status").textContent="选择或版本已变化，旧提案已丢弃";return}
-    proposal={viewId:requestViewId,documentId:requestDocumentId,expectedRevision:j.changeset.expected_revision,changeset:j.changeset,preview:j.proposal,stale:false,noOp:proposalNoOp(j.proposal)};renderProposalPanel();$("status").textContent=proposal.noOp?"Agent 提案无实际变化":"Agent 提案已校验，等待审阅";
-  }catch(e){$("status").textContent=e.message;proposal=null;renderProposalPanel()}
 }
 async function createProposal(kind){
   if(!data||!selected)return;const child=selectedChildId?findById(data.latest_version.data.root,selectedChildId):null;if(!child)return;
@@ -317,15 +325,40 @@ async function createProposal(kind){
     const r=await fetch(`/api/views/${encodeURIComponent(requestViewId)}/propose`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
     const j=await r.json();if(!r.ok)throw new Error(j.error||"提案校验失败");
     if(viewId!==requestViewId||data?.latest_version?.data?.document_id!==requestDocumentId||selectedChildId!==requestChild||data?.latest_version?.data?.revision!==requestRevision){$("status").textContent="选择或版本已变化，旧提案已丢弃";return}
-    proposal={viewId:requestViewId,documentId:requestDocumentId,expectedRevision:requestRevision,changeset,preview:j,stale:false,noOp:proposalNoOp(j)};renderProposalPanel();$("status").textContent=proposal.noOp?"提案无实际变化，不能接受":"提案预览已生成，尚未写入";
+    proposal={kind:"local",viewId:requestViewId,documentId:requestDocumentId,expectedRevision:requestRevision,changeset,preview:j,stale:false,noOp:proposalNoOp(j)};renderProposalPanel();$("status").textContent=proposal.noOp?"提案无实际变化，不能接受":"提案预览已生成，尚未写入";
   }catch(e){$("status").textContent=e.message;proposal=null;renderProposalPanel()}
+}
+async function rejectProposal(){
+  if(!proposal)return;
+  if(proposal.kind==="inbox"){
+    const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/proposals/${encodeURIComponent(proposal.proposalId)}/reject`,{method:"POST"});
+    const j=await r.json();if(!r.ok){$("status").textContent=j.error||"拒绝失败";return}
+    proposal=null;await loadInbox();renderProposalPanel();$("status").textContent="提案已拒绝";return
+  }
+  proposal=null;renderProposalPanel();
 }
 async function acceptProposal(){
   if(!proposal||proposal.noOp)return;
+  if(proposal.kind==="inbox"){
+    const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/proposals/${encodeURIComponent(proposal.proposalId)}/accept`,{method:"POST"});
+    const j=await r.json();if(!r.ok){proposal.stale=true;renderProposalPanel();$("status").textContent=j.error||"接受失败";await loadInbox();return}
+    proposal=null;await load();await loadInbox();$("status").textContent="外部提案已接受";return
+  }
   const doc=data?.latest_version?.data;
   if(!doc||viewId!==proposal.viewId||doc.document_id!==proposal.documentId||doc.revision!==proposal.expectedRevision){proposal.stale=true;renderProposalPanel();$("status").textContent="提案已过期，请重新生成并预览";return}
   try{await commitFrozenChangeSet(proposal,"接受提案");proposal=null;selectedChildId=null;renderDetail();$("status").textContent="提案已接受并保存"}
   catch(e){$("status").textContent=e.message||"提案提交失败"}
+}
+function moduleContext(child,slot,plates,actions){
+  return {esc,title:nodeTitle,definition:defName,slot,plates,root:data?.latest_version?.data?.root,find:(id)=>findById(data.latest_version.data.root,id),actions,
+    commit:commitViewChangeSet,
+    loadPlate:async(id)=>{const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?instance_id=${encodeURIComponent(id)}`);const j=await r.json();return j.result?.plate||j.plate},
+    onPlateSelection:(id,ids)=>{plateSelections.set(id,new Set(ids));calcStates.forEach((state,cid)=>{if(state.plateId===id)state.positions=[...ids].sort().join(",")});syncCalcPositions(id)},
+    selectedPositions:(id)=>[...(plateSelections.get(id)||[])].sort(),
+    calculate:async({calculatorId,plateId,positions,volume,unit,extra})=>{const params=new URLSearchParams({instance_id:plateId,calculator_instance_id:calculatorId,position_ids:positions.join(","),volume_per_well:volume,volume_unit:unit,extra_ratio:extra});const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?${params}`);const j=await r.json();if(!r.ok)throw new Error(j.error||"计算失败");return j.result??j},
+    preview:async(operations)=>{const doc=data.latest_version.data;const changeset={changeset_id:`ui-preview-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["view-ui"]};const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/propose`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});return r.json()},
+    drafts:{get:(id)=>drafts.get(id),set:(id,v)=>drafts.set(id,v),clear:(id)=>drafts.delete(id),markDirty:(id)=>markDirtyCard(id,true)}
+  };
 }
 function renderDetail(){
   const c=selected;
@@ -335,15 +368,28 @@ function renderDetail(){
   const plates=allChildren.filter(x=>x.definition.id==="lab.well_plate");
   for(const [slot,children] of Object.entries(slots)) for(const child of children){
     const actions=cardActions(child);
+    const key=`${child.definition?.id||"unknown"}@${child.definition?.version??"?"}`;
+    const module=child.workflow?.nodes?.length?null:window.AsterUI?.registry?.[key];
     const renderer=child.workflow?.nodes?.length?componentRenderers["workflow@1"]:rendererFor(child);
-    cards.push(renderer.detail(child,actions,{slot,plates}));
+    const ctx=moduleContext(child,slot,plates,actions);
+    if(renderer===componentRenderers.unsupported)continue;
+    if(module)cards.push(module.renderDetail(child,ctx));else cards.push(renderer.detail(child,actions,{slot,plates}));
   }
   const ref=c.model_ref||{};
   const refLine=ref.kind==="operation_use"?`Protocol step · ${esc(ref.step?.step_path||"")}`:ref.kind?esc(ref.kind):"未绑定科学对象";
   const plateChoices=plates.map(p=>`<option value="${esc(p.instance_id)}">${esc(nodeTitle(p))} · ${esc(p.model_ref?.container_id||"")}</option>`).join("");
   const library=[["layout.section","区块"],["content.table","表格"],["tool.calculator","计算器"],["content.note","说明"],["workflow","子流程"]].map(([kind,label])=>`<button data-add="${kind}">+ ${label}</button>`).join("")+(plates.length?`<select id="add-plate" aria-label="要引用的孔板">${plateChoices}</select><button data-add="lab.well_plate">+ 孔板</button>`:"");
-  $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted">${esc(defName(c))} · ${esc(c.instance_id)}</div></div><button id="collapse" aria-label="收起">⌃</button></div><div class="detail-grid"><div><h3>操作参数</h3><div id="params-${esc(c.instance_id)}" class="muted">读取 ProtocolPreview…</div><div class="param"><b>科学引用</b><span>${refLine}</span></div></div><div><h3>相关组件</h3><div class="cards"><div class="grid-sizer"></div>${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div><div class="library"><h3>添加组件</h3>${library}</div></div></div><div id="proposal-panel" class="proposal"></div><div id="preview" class="preview"></div>`;
-  $("detail").querySelectorAll('.card[data-instance]').forEach(card=>card.addEventListener("click",e=>{if(e.target.closest("button,input,textarea,select,a"))return;focusChild(card.dataset.instance)}));
+  $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted detail-meta"><span id="params-${esc(c.instance_id)}">读取 ProtocolPreview…</span><span>${refLine}</span></div></div><div class="detail-actions"><button id="inbox-toggle" class="quiet" type="button">待审 0</button><button id="library-toggle" class="quiet" type="button">+ 组件</button><button id="collapse" aria-label="收起">⌃</button></div></div><div class="cards">${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div><div class="library" id="library-panel" hidden><h3>添加组件</h3>${library}</div><div id="inbox-panel" class="inbox" hidden></div><div id="proposal-panel" class="proposal" hidden></div><div id="preview" class="preview"></div>`;
+  mountedModules.forEach(fn=>{try{fn()}catch(e){}});mountedModules=[];
+  $("detail").querySelectorAll('.card[data-instance]').forEach(card=>{
+    const child=findById(data.latest_version.data.root,card.dataset.instance);const key=child?`${child.definition?.id}@${child.definition?.version}`:"";const module=key?window.AsterUI?.registry?.[key]:null;
+    if(module?.mount){const cleanup=module.mount(card,child,moduleContext(child,'',plates,[]));if(typeof cleanup==="function")mountedModules.push(cleanup)}
+    if(!card.querySelector('.card-actions'))card.insertAdjacentHTML('beforeend',cardActions(child));
+    card.addEventListener("click",e=>{if(e.target.closest("button,input,textarea,select,a"))return;focusChild(card.dataset.instance)});
+  });
+  $("library-toggle").onclick=()=>{const panel=$("library-panel");panel.hidden=!panel.hidden};
+  $("inbox-toggle").onclick=()=>{const panel=$("inbox-panel");panel.hidden=!panel.hidden;renderProposalInbox()};
+  renderProposalInbox();
   renderProposalPanel();
   $("detail").querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>{const child=findById(data.latest_version.data.root,b.dataset.enter);if(child)enterComponent(child)});
   $("detail").querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>saveNote(b.dataset.save));
@@ -444,7 +490,7 @@ async function load(preserveHistory=false,preserveUi=false){
     calcStates.clear();drafts.clear();
   }
   if(!preserveHistory){history=[];future=[]}
-  render();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`
+  render();loadInbox();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`
 }
 async function saveNote(instanceId){
   if(!data)return;const draft=drafts.get(instanceId);const savedToken=draft?.token||0;const text=draft?.text??$("note-"+CSS.escape(instanceId))?.value??"";
@@ -480,7 +526,7 @@ let connectDrag=null;
 function startConnect(ev,fromId){
   if(mode==="hand")return;ev.stopPropagation();ev.preventDefault();
   const source=(node?.workflow?.nodes||[]).find(n=>n.node_id===fromId)?.component;if(!source)return;
-  const A=nodeBox(source),p0={x:A.x+76,y:A.y+38};
+  const A=nodeBox(source),p0={x:A.x+96,y:A.y+48};
   const temp=document.createElementNS("http://www.w3.org/2000/svg","path");temp.setAttribute("class","edge temp-edge");temp.setAttribute("d",`M${p0.x} ${p0.y} L${p0.x} ${p0.y}`);document.querySelector("#viewport")?.appendChild(temp);
   connectDrag={fromId,temp};
   const hit=e=>[...document.querySelectorAll(".wnode")].find(el=>{const b=el.getBoundingClientRect();return e.clientX>=b.left&&e.clientX<=b.right&&e.clientY>=b.top&&e.clientY<=b.bottom})?.dataset.node||"";
@@ -509,7 +555,7 @@ $("redo").onclick=()=>{const entry=future.pop();if(!entry)return;const c=applyPo
   persistVisual(entry.instance_id,entry.after).catch(()=>{future.push(entry);history=history.filter(x=>x!==entry);updateHistoryButtons()})};
 $("selectTool").onclick=()=>{mode="select";$("selectTool").classList.add("active");$("handTool").classList.remove("active");$("canvas").classList.remove("hand")};
 $("handTool").onclick=()=>{mode="hand";$("handTool").classList.add("active");$("selectTool").classList.remove("active");$("canvas").classList.add("hand")};
-$("fit").onclick=()=>{const {nodes}=graph();if(!nodes.length)return;const xs=nodes.map(n=>nodeBox(n.component));const minX=Math.min(...xs.map(b=>b.x)),maxX=Math.max(...xs.map(b=>b.x+76)),minY=Math.min(...xs.map(b=>b.y)),maxY=Math.max(...xs.map(b=>b.y+120));const k=Math.min(1.2,Math.max(.35,Math.min(1000/(maxX-minX+80),480/(maxY-minY+80))));view={k,x:80-minX*k,y:140-minY*k};renderCanvas()};
+$("fit").onclick=()=>{const {nodes}=graph();if(!nodes.length)return;const xs=nodes.map(n=>nodeBox(n.component));const minX=Math.min(...xs.map(b=>b.x)),maxX=Math.max(...xs.map(b=>b.x+96)),minY=Math.min(...xs.map(b=>b.y)),maxY=Math.max(...xs.map(b=>b.y+136));const k=Math.min(1.2,Math.max(.35,Math.min(1000/(maxX-minX+80),480/(maxY-minY+80))));view={k,x:80-minX*k,y:140-minY*k};renderCanvas()};
 function zoomAt(f){const k=Math.min(2,Math.max(.25,view.k*f));const svg=$("canvas"),r=svg.getBoundingClientRect();const center=screenToCanvas(r.left+r.width/2,r.top+r.height/2);view.x=view.x+center.x*(view.k-k);view.y=view.y+center.y*(view.k-k);view.k=k;renderCanvas()}
 $("zoomIn").onclick=()=>zoomAt(1.2);$("zoomOut").onclick=()=>zoomAt(1/1.2);
 $("canvas").addEventListener("wheel",e=>{e.preventDefault();const p=screenToCanvas(e.clientX,e.clientY);const f=e.deltaY<0?1.1:1/1.1;const k=Math.min(2,Math.max(.25,view.k*f));view.x=view.x+p.x*(view.k-k);view.y=view.y+p.y*(view.k-k);view.k=k;renderCanvas()},{passive:false});
@@ -519,7 +565,7 @@ window.addEventListener("pointerup",()=>{pan=null;$("canvas").classList.remove("
 
 const canvasPanel=$("canvasPanel"), splitHandle=$("splitter");
 function setCanvasHeight(h){
-  const max=Math.max(240,window.innerHeight-260);const value=Math.max(220,Math.min(max,h));
+  const max=Math.max(340,window.innerHeight-260);const value=Math.max(340,Math.min(max,h));
   canvasPanel.style.flexBasis=`${value}px`;canvasPanel.style.height=`${value}px`;localStorage.setItem("asterlab.canvasHeight",String(value));
 }
 {

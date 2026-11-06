@@ -1,0 +1,20 @@
+:root {
+  --al-bg: #f7f8fa;
+  --al-surface: #ffffff;
+  --al-surface-2: #fbfcfe;
+  --al-ink: #202938;
+  --al-muted: #667085;
+  --al-line: #e4e7ec;
+  --al-line-strong: #cfd6e2;
+  --al-accent: #2563eb;
+  --al-accent-soft: #eff4ff;
+  --al-success: #16803c;
+  --al-warning: #b54708;
+  --al-error: #c43232;
+  --al-radius: 10px;
+  --al-radius-sm: 6px;
+  --al-gap: 12px;
+  --al-card-pad: 16px;
+  --al-control: 34px;
+  --al-font: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
