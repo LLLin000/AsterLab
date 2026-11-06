@@ -28,6 +28,9 @@ const ICON_INCUBATOR: &str = include_str!("../web/icons/incubator.svg");
 const ICON_READER: &str = include_str!("../web/icons/reader.svg");
 const ICON_FLASK: &str = include_str!("../web/icons/flask.svg");
 const MASONRY_JS: &str = include_str!("../web/vendor/masonry.pkgd.min.js");
+const APP_JS: &str = include_str!("../web/app.js");
+const MARKED_JS: &str = include_str!("../web/vendor/marked.min.js");
+const PURIFY_JS: &str = include_str!("../web/vendor/purify.min.js");
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
@@ -150,6 +153,30 @@ async fn index() -> Html<&'static str> {
 }
 async fn view_page() -> Html<&'static str> {
     Html(VIEW_HTML)
+}
+
+async fn marked_js() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+        MARKED_JS,
+    )
+        .into_response()
+}
+
+async fn purify_js() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+        PURIFY_JS,
+    )
+        .into_response()
+}
+
+async fn app_js() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+        APP_JS,
+    )
+        .into_response()
 }
 
 async fn masonry_js() -> Response {
@@ -794,6 +821,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/view", get(view_page))
         .route("/icons/{name}", get(icon))
         .route("/vendor/masonry.js", get(masonry_js))
+        .route("/app.js", get(app_js))
+        .route("/vendor/marked.js", get(marked_js))
+        .route("/vendor/purify.js", get(purify_js))
         .route("/api/views/{id}", get(get_view))
         .route("/api/views/{id}/data", get(get_view_data))
         .route(
