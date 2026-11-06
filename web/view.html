@@ -7,43 +7,56 @@
 <style>
 :root{color-scheme:light;--bg:#f4f5f8;--panel:#fff;--ink:#1d2026;--muted:#7a8290;--line:#e2e5ea;--accent:#5b6cff;--soft:#eef0ff;--canvas:#fbfbfd;--ok:#2f8f62}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,"Segoe UI","Microsoft YaHei",sans-serif}
-.shell{min-height:100vh;display:grid;grid-template-columns:250px minmax(0,1fr)}aside{background:var(--panel);border-right:1px solid var(--line);padding:18px;display:flex;flex-direction:column;gap:14px}main{padding:22px;min-width:0;display:flex;flex-direction:column;gap:14px}
+.shell{height:100vh;display:grid;grid-template-columns:64px minmax(0,1fr);overflow:hidden}.rail{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:14px}.brand{width:32px;height:32px;border-radius:10px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:12px;letter-spacing:-.03em}.rail-nav{display:flex;flex-direction:column;gap:8px}.rail-item{width:44px;height:44px;padding:6px;border:0;background:transparent;border-radius:12px;display:grid;place-items:center;gap:2px;color:var(--muted)}.rail-item img{width:20px;height:20px;object-fit:contain}.rail-item span{font-size:9px}.rail-item:hover{background:var(--bg)}.rail-item.active{background:var(--soft);color:var(--accent)}main{padding:14px 18px 16px;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;overflow:hidden}.topbar{display:flex;align-items:center;gap:14px;flex:0 0 auto}.topbar-title{min-width:180px}.view-open{display:flex;gap:6px;margin-left:auto;max-width:420px;flex:1}.topbar #status{margin-left:6px;min-width:110px;text-align:right}
 h1{font-size:17px;margin:0}h2{font-size:14px;margin:0;color:var(--muted)}h3{font-size:13px;margin:0 0 8px}
 input,button,textarea{font:inherit;color:inherit}input,textarea{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px}button{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:7px 10px;cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:transparent}button:disabled{opacity:.4;cursor:default}
 .row{display:flex;gap:7px}.muted{color:var(--muted);font-size:12px}.stack{display:flex;flex-direction:column;gap:7px}
-.workspace{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 30px rgba(20,28,48,.06);overflow:hidden;display:flex;flex-direction:column;min-height:650px}
-.workspace-head{padding:20px 22px 8px;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.workspace-title{font-size:20px;font-weight:700;letter-spacing:-.01em}.workspace-sub{color:var(--muted);font-size:12px;margin-top:3px}
+.workspace{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 30px rgba(20,28,48,.06);overflow:hidden;display:flex;flex-direction:column;flex:0 0 360px;min-height:220px}
+.workspace-head{padding:12px 16px 4px;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.workspace-title{font-size:19px;font-weight:700;letter-spacing:-.01em}.workspace-sub{color:var(--muted);font-size:12px;margin-top:3px}.panel-kicker{font-size:11px;font-weight:650;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
 .toolbar{display:flex;justify-content:center;gap:4px;padding:2px 0 10px}.toolbar button{width:38px;height:34px;display:grid;place-items:center;border-radius:9px;background:transparent;border-color:transparent}.toolbar button:hover{background:var(--bg)}.toolbar button.active{background:var(--soft);color:var(--accent)}
-.canvas-wrap{position:relative;flex:1;min-height:390px;margin:0 14px;border:1px solid var(--line);border-radius:14px;background:var(--canvas);overflow:hidden}
-#canvas{display:block;width:100%;height:100%;min-height:390px;touch-action:none;cursor:grab}#canvas.hand{cursor:grab}#canvas.grabbing{cursor:grabbing}
+.canvas-wrap{position:relative;flex:1;min-height:0;margin:0 12px 12px;border:1px solid var(--line);border-radius:14px;background:var(--canvas);overflow:hidden}
+#canvas{display:block;width:100%;height:100%;min-height:0;touch-action:none;cursor:grab}
+.splitter{height:12px;flex:0 0 12px;cursor:row-resize;display:grid;place-items:center;outline:none}.splitter span{width:52px;height:4px;border-radius:99px;background:var(--line)}.splitter:hover span,.splitter:focus span{background:var(--accent)}#canvas.hand{cursor:grab}#canvas.grabbing{cursor:grabbing}
 .grid-dot{fill:#dfe3ea}.wnode{cursor:pointer}.wnode .node-bg{fill:#fff;stroke:#e1e4ea;stroke-width:1;filter:drop-shadow(0 2px 4px rgba(20,28,48,.06))}.wnode:hover .node-bg{stroke:#b9c0ca}.wnode.selected .node-bg{stroke:var(--accent);stroke-width:2}.wnode .glyph{fill:none;stroke:#222831;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.wnode .label{font-size:13px;font-weight:600;fill:var(--ink);text-anchor:middle}.wnode .kind{font-size:10px;fill:var(--muted);text-anchor:middle}
 .edge{fill:none;stroke:#b9c0ca;stroke-width:1.4;marker-end:url(#arrow)}.empty{fill:var(--muted);font-size:13px;text-anchor:middle}
 .zoom{position:absolute;right:14px;bottom:10px;font-size:11px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:3px 9px}
 .crumbs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.crumb{background:var(--soft);border:0;border-radius:99px;padding:3px 9px;font-size:12px}.crumb-sep{color:var(--muted);font-size:11px}
-.detail{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 30px rgba(20,28,48,.05);padding:18px 20px}.detail-head{display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:14px}.detail-title{font-size:18px;font-weight:700}.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:26px}.param{display:flex;flex-direction:column;gap:2px;margin:8px 0}.param b{font-weight:550}.param span{color:var(--muted);font-size:12px}
+.detail{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 30px rgba(20,28,48,.05);padding:14px 16px;flex:1 1 0;min-height:0;overflow:auto}.detail-head{display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:14px}.detail-title{font-size:18px;font-weight:700}.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:26px}.param{display:flex;flex-direction:column;gap:2px;margin:8px 0}.param b{font-weight:550}.param span{color:var(--muted);font-size:12px}
 .cards{position:relative;display:block;min-height:10px}.grid-sizer{width:calc(33.333% - 6px)}.card{width:calc(33.333% - 6px);margin-bottom:8px;box-sizing:border-box}.plate-card{width:calc(66.666% - 6px)}@media(max-width:1100px){.grid-sizer,.card{width:calc(50% - 5px)}.plate-card{width:100%}}@media(max-width:700px){.grid-sizer,.card,.plate-card{width:100%}}.plate{display:grid;gap:3px;margin:8px 0}.well{width:17px;height:17px;padding:0;border-radius:4px;border:1px solid var(--line);background:#f7f8fb;font-size:7px;color:var(--muted)}.well.assigned{background:#eef0ff;border-color:#c7cdfd;color:var(--ink)}.well.selected{background:var(--accent);border-color:var(--accent);color:#fff}.well:disabled{opacity:.25;cursor:default}.card{border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}.card h3{font-size:12px;margin:0 0 3px}.card .tag{font-size:10px;color:var(--muted)}.card button{margin-top:7px;padding:4px 8px;font-size:11px}
 textarea{min-height:54px;resize:vertical}
-table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:6px 4px}th{color:var(--muted);font-weight:500}
+table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:6px 4px}th{color:var(--muted);font-weight:500}.editable-table input{border:0;background:transparent;padding:3px 4px;border-radius:4px}.editable-table input:focus{background:var(--soft);outline:1px solid var(--accent)}.table-actions{margin-top:6px}.empty-card{font-size:12px;color:var(--muted);padding:10px 0}.md-preview{font-size:13px;line-height:1.65}.md-preview h1{font-size:17px}.md-preview h2{font-size:15px}.md-preview h3{font-size:13px}.md-preview code{background:var(--bg);padding:1px 4px;border-radius:4px}
 #status{min-height:18px}.preview{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}.card-actions{display:inline-flex;gap:2px;float:right}.card-actions button{width:24px;height:24px;padding:0;border:0;background:transparent;color:var(--muted)}.library{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}.library h3{width:100%;margin:0 0 2px}.library button{font-size:12px;padding:4px 8px}.selection-detail{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.7}
-@media(max-width:900px){.shell{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--line)}main{padding:14px}.detail-grid{grid-template-columns:1fr}.workspace{min-height:560px}}
+@media(max-width:900px){.shell{grid-template-columns:56px minmax(0,1fr)}main{padding:10px}.topbar{flex-wrap:wrap}.view-open{max-width:none;order:3;flex-basis:100%;margin-left:0}.topbar #status{order:4;flex-basis:100%;text-align:left}.detail-grid{grid-template-columns:1fr}.workspace{flex-basis:300px;min-height:220px}}@media(max-width:600px){.rail-item span{display:none}.workspace{flex-basis:260px}}
 </style>
 </head>
 <body>
 <div class="shell">
-<aside>
-  <h1>实验组件视图</h1>
-  <div class="muted">打开已保存的 ViewDocument。</div>
-  <div class="row"><input id="viewId" placeholder="View ID"><button class="primary" id="openView">打开</button></div>
-  <div class="muted">画布只表达 View 的视觉组织；科学执行顺序仍由 Protocol 决定。计算输入在步骤详情中。</div>
-  <div id="status" class="muted"></div>
+<aside class="rail">
+  <div class="brand" title="AsterLab">AL</div>
+  <nav class="rail-nav" aria-label="主导航">
+    <button class="rail-item active" title="实验设计" aria-label="实验设计"><img src="/icons/plate.svg" alt=""><span>设计</span></button>
+    <button class="rail-item" title="实验运行" aria-label="实验运行"><img src="/icons/incubator.svg" alt=""><span>运行</span></button>
+    <button class="rail-item" title="资料与工具" aria-label="资料与工具"><img src="/icons/flask.svg" alt=""><span>资料</span></button>
+  </nav>
 </aside>
 <main>
+  <header class="topbar">
+    <div class="topbar-title">
+      <div class="workspace-title" id="workspaceTitle">AsterLab / CCK-8 Assay</div>
+      <div class="workspace-sub" id="workspaceSub">Protocol · View</div>
+    </div>
+    <div class="view-open">
+      <input id="viewId" placeholder="View ID" aria-label="View ID">
+      <button class="primary" id="openView">打开</button>
+    </div>
+    <div id="status" class="muted" role="status"></div>
+  </header>
   <div class="crumbs" id="crumbs"></div>
-  <section class="workspace">
+  <section class="workspace" id="canvasPanel">
     <div class="workspace-head">
       <div>
-        <div class="workspace-title" id="workspaceTitle">AsterLab / CCK-8 Assay</div>
-        <div class="workspace-sub" id="workspaceSub">Protocol · View</div>
+        <div class="panel-kicker">实验设计流程</div>
+        <div class="muted">受限流程：连线来自 View；科学顺序仍由 Protocol 决定。</div>
       </div>
       <div class="row">
         <button id="undo" title="撤销布局" disabled>↶</button>
@@ -62,6 +75,7 @@ table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}th,td{te
       <div class="zoom" id="zoomLabel">100%</div>
     </div>
   </section>
+  <div class="splitter" id="splitter" role="separator" aria-label="调整画布与详情高度" aria-orientation="horizontal" tabindex="0"><span></span></div>
   <section class="detail" id="detail"><div class="muted">选择一个步骤查看详情。</div></section>
 </main>
 </div>
@@ -111,11 +125,14 @@ function graph(){
   return {nodes,edges};
 }
 function nodeBox(c){return {x:c._vx??80,y:c._vy??175,w:76,h:76}}
+function compactMarkup(c){
+  return `<g class="glyph">${iconFor(c)}</g><text class="label" x="38" y="101">${esc(nodeTitle(c))}</text><text class="kind" x="38" y="116">${esc((c.visual?.symbol||c.visual?.template||"").trim()||defName(c))}</text>`;
+}
 function renderCanvas(){
   const svg=$("canvas"); const {nodes,edges}=graph();
   const byId={}; nodes.forEach(n=>{byId[n.node_id]=n.component;byId[n.component.instance_id]=n.component});
   const edgeMarkup=edges.map(e=>{const a=byId[e.from],b=byId[e.to];if(!a||!b)return "";const A=nodeBox(a),B=nodeBox(b);const x1=A.x+76,y1=A.y+38,x2=B.x,y2=B.y+38;const mid=x1+(x2-x1)/2;return `<path class="edge" d="M${x1} ${y1} C${mid} ${y1},${mid} ${y2},${x2-5} ${y2}"/>`}).join("");
-  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="76" height="76" rx="18"/><g class="glyph">${iconFor(c)}</g><text class="label" x="38" y="101">${esc(nodeTitle(c))}</text><text class="kind" x="38" y="116">${esc(hint||defName(c))}</text></g>`}).join("");
+  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="76" height="76" rx="18"/>${compactMarkup(c)}</g>`}).join("");
   const empty=nodes.length?"":`<text class="empty" x="550" y="260">此 View 还没有工作流节点。</text>`;
   const dots=Array.from({length:16},(_,r)=>Array.from({length:24},(_,c)=>`<circle class="grid-dot" cx="${40+c*44}" cy="${40+r*34}" r="1"/>`).join("")).join("");
   svg.innerHTML=`<defs><pattern id="dots" width="44" height="34" patternUnits="userSpaceOnUse">${dots}</pattern><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b9c0ca"/></marker></defs><rect width="1100" height="560" fill="url(#dots)"/><g id="viewport" transform="translate(${view.x} ${view.y}) scale(${view.k})">${edgeMarkup}${nodeMarkup}${empty}</g>`;
@@ -205,6 +222,61 @@ function selectAllWells(instanceId,all){
   plateSelections.set(instanceId,set);calcState.positions=[...set].sort().join(",");syncCalcPositions();
   const box=$(`plate-body-${instanceId}`);if(box){box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId);layoutCards()}
 }
+function renderMarkdown(text){
+  const safe=esc(text||"");
+  return safe.split(/\n{2,}/).map(block=>{
+    const lines=block.split("\n").map(line=>{
+      let out=esc(line);
+      out=out.replace(/^###\s+(.+)$/,"<h3>$1</h3>").replace(/^##\s+(.+)$/,"<h2>$1</h2>").replace(/^#\s+(.+)$/,"<h1>$1</h1>");
+      out=out.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/`([^`]+)`/g,"<code>$1</code>");
+      return out;
+    }).join("<br>");
+    return `<p>${lines}</p>`;
+  }).join("");
+}
+function tableColumns(child){
+  const cols=Array.isArray(child.props?.columns)?child.props.columns:[];
+  if(cols.length)return cols;
+  const rows=Array.isArray(child.props?.rows)?child.props.rows:[];
+  const width=rows.reduce((n,row)=>Math.max(n,Array.isArray(row)?row.length:0),0);
+  return Array.from({length:Math.max(1,width)},(_,i)=>`列 ${i+1}`);
+}
+function tableCard(child,actions){
+  const cols=tableColumns(child);const rows=Array.isArray(child.props?.rows)?child.props.rows:[];
+  const head=cols.map((col,i)=>`<th><input data-colhead="${i}" value="${esc(col)}" aria-label="列名"></th>`).join("");
+  const body=rows.map((row,r)=>`<tr data-row="${r}">${cols.map((_,c)=>`<td><input data-cell="${r}-${c}" value="${esc(row[c]??"")}" aria-label="第 ${r+1} 行第 ${c+1} 列"></td>`).join("")}</tr>`).join("");
+  const grid=cols.length?`<table class="editable-table" data-table="${esc(child.instance_id)}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`:`<div class="empty-card">尚无列。添加列后再填写数据。</div>`;
+  return `<div class="card table-card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${esc(child.definition.id)} · 实验分组与数据</div>${grid}<div class="row table-actions"><button data-table-add-col="${esc(child.instance_id)}">+ 列</button><button data-table-add-row="${esc(child.instance_id)}">+ 行</button><button class="primary" data-table-save="${esc(child.instance_id)}">保存表格</button></div></div>`;
+}
+function noteCard(child,actions){
+  const id=child.instance_id;const text=child.props?.text||"";const isMd=child.definition.id==="content.markdown";
+  return `<div class="card note-card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${isMd?"Markdown":"说明"} · 实验说明与记录</div><textarea id="note-${esc(id)}" placeholder="写下实验说明、假设或注意事项">${esc(text)}</textarea><div class="md-preview" id="md-preview-${esc(id)}" hidden></div><div class="row"><button data-md-toggle="${esc(id)}">预览</button><button data-save="${esc(id)}">保存</button></div></div>`;
+}
+function saveTable(instanceId){
+  const table=document.querySelector(`[data-table="${CSS.escape(instanceId)}"]`);if(!table)return;
+  const cols=[...table.querySelectorAll("[data-colhead]")].map(el=>el.value);
+  const rows=[...table.querySelectorAll("tr[data-row]")].map(tr=>[...tr.querySelectorAll("[data-cell]")].map(el=>el.value));
+  const child=findById(data.latest_version.data.root,instanceId);
+  const ops=[{kind:"update_props",instance_id:instanceId,property:"rows",value:rows}];
+  if(child?.definition?.id==="content.table")ops.unshift({kind:"update_props",instance_id:instanceId,property:"columns",value:cols});
+  mutate(ops,"保存表格");
+}
+function tableAddColumn(instanceId){
+  const table=document.querySelector(`[data-table="${CSS.escape(instanceId)}"]`);if(!table)return;
+  const head=table.querySelector("thead tr");if(!head)return;
+  const index=head.children.length;const th=document.createElement("th");th.innerHTML=`<input data-colhead="${index}" value="列 ${index+1}" aria-label="列名">`;head.appendChild(th);
+  table.querySelectorAll("tbody tr[data-row]").forEach((tr,r)=>{const td=document.createElement("td");td.innerHTML=`<input data-cell="${r}-${index}" value="" aria-label="第 ${r+1} 行第 ${index+1} 列">`;tr.appendChild(td)});
+}
+function tableAddRow(instanceId){
+  const table=document.querySelector(`[data-table="${CSS.escape(instanceId)}"]`);if(!table)return;
+  const cols=table.querySelectorAll("[data-colhead]").length;const tbody=table.querySelector("tbody");if(!tbody)return;
+  const r=tbody.querySelectorAll("tr[data-row]").length;const tr=document.createElement("tr");tr.dataset.row=r;
+  for(let c=0;c<cols;c++){const td=document.createElement("td");td.innerHTML=`<input data-cell="${r}-${c}" value="" aria-label="第 ${r+1} 行第 ${c+1} 列">`;tr.appendChild(td)}tbody.appendChild(tr);
+}
+function toggleMarkdown(instanceId){
+  const textarea=$(`note-${CSS.escape(instanceId)}`);const preview=$(`md-preview-${CSS.escape(instanceId)}`);if(!textarea||!preview)return;
+  const showing=!preview.hidden; preview.hidden=showing; textarea.hidden=!showing; preview.innerHTML=showing?"":renderMarkdown(textarea.value);
+}
 function cardActions(child){
   return `<div class="card-actions"><button data-move-up="${esc(child.instance_id)}" title="上移">↑</button><button data-move-down="${esc(child.instance_id)}" title="下移">↓</button><button data-remove="${esc(child.instance_id)}" title="删除">×</button></div>`;
 }
@@ -214,8 +286,10 @@ function renderDetail(){
   const slots=slotsOf(c); const cards=[];
   for(const [slot,children] of Object.entries(slots)) for(const child of children){
     const actions=cardActions(child);
-    if(child.definition.id==="content.note"){
-      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${esc(defName(child))}</div><textarea id="note-${esc(child.instance_id)}">${esc(child.props?.text||"")}</textarea><div class="row" style="margin-top:6px"><button data-save="${esc(child.instance_id)}">保存说明</button></div></div>`);
+    if(child.definition.id==="content.table"||child.definition.id==="layout.table"){
+      cards.push(tableCard(child,actions));
+    } else if(child.definition.id==="content.note"||child.definition.id==="content.markdown"){
+      cards.push(noteCard(child,actions));
     } else if(child.definition.id==="workflow"||child.workflow?.nodes?.length){
       cards.push(`<div class="card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">嵌套流程 · ${workflowOf(child).length} 步</div><button data-enter="${esc(child.instance_id)}">进入</button></div>`);
     } else if(child.definition.id==="lab.well_plate"){
@@ -232,6 +306,10 @@ function renderDetail(){
   $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted">${esc(defName(c))} · ${esc(c.instance_id)}</div></div><button id="collapse" aria-label="收起">⌃</button></div><div class="detail-grid"><div><h3>操作参数</h3><div id="params-${esc(c.instance_id)}" class="muted">读取 ProtocolPreview…</div><div class="param"><b>科学引用</b><span>${refLine}</span></div></div><div><h3>相关组件</h3><div class="cards"><div class="grid-sizer"></div>${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div><div class="library"><h3>添加组件</h3>${library}</div></div></div><div id="preview" class="preview"></div>`;
   $("detail").querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>{const child=findById(data.latest_version.data.root,b.dataset.enter);if(child)enterComponent(child)});
   $("detail").querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>saveNote(b.dataset.save));
+  $("detail").querySelectorAll('[data-table-save]').forEach(b=>b.onclick=()=>saveTable(b.dataset.tableSave));
+  $("detail").querySelectorAll('[data-table-add-col]').forEach(b=>b.onclick=()=>tableAddColumn(b.dataset.tableAddCol));
+  $("detail").querySelectorAll('[data-table-add-row]').forEach(b=>b.onclick=()=>tableAddRow(b.dataset.tableAddRow));
+  $("detail").querySelectorAll('[data-md-toggle]').forEach(b=>b.onclick=()=>toggleMarkdown(b.dataset.mdToggle));
   $("detail").querySelectorAll('[data-plate-preview]').forEach(b=>b.onclick=()=>{const set=[...plateSelections.get(b.dataset.platePreview)||[]].sort();if(!set.length){$("status").textContent="请先选择至少一个孔位";return}calcState.positions=set.join(",");syncCalcPositions();loadData(b.dataset.platePreview,set.join(","))});
   $("detail").querySelectorAll('[data-plate-all]').forEach(b=>b.onclick=()=>selectAllWells(b.dataset.plateAll,true));
   $("detail").querySelectorAll('[data-plate-clear]').forEach(b=>b.onclick=()=>selectAllWells(b.dataset.plateClear,false));
@@ -356,6 +434,32 @@ $("canvas").addEventListener("wheel",e=>{e.preventDefault();const p=screenToCanv
 $("canvas").addEventListener("pointerdown",e=>{if(e.target.closest(".wnode"))return;pan={sx:e.clientX,sy:e.clientY,vx:view.x,vy:view.y,k:view.k};$("canvas").classList.add("grabbing")});
 window.addEventListener("pointermove",e=>{if(!pan)return;const a=screenToSvg(pan.sx,pan.sy),b=screenToSvg(e.clientX,e.clientY);view.x=pan.vx+(b.x-a.x)/pan.k;view.y=pan.vy+(b.y-a.y)/pan.k;renderCanvas()});
 window.addEventListener("pointerup",()=>{pan=null;$("canvas").classList.remove("grabbing")});
+
+const canvasPanel=$("canvasPanel"), splitHandle=$("splitter");
+function setCanvasHeight(h){
+  const max=Math.max(240,window.innerHeight-260);const value=Math.max(220,Math.min(max,h));
+  canvasPanel.style.flexBasis=`${value}px`;canvasPanel.style.height=`${value}px`;localStorage.setItem("asterlab.canvasHeight",String(value));
+}
+{
+  const saved=Number(localStorage.getItem("asterlab.canvasHeight"));
+  if(saved)setCanvasHeight(saved);
+}
+let splitDrag=null;
+splitHandle.addEventListener("pointerdown",e=>{
+  splitDrag={y:e.clientY,h:canvasPanel.getBoundingClientRect().height};
+  splitHandle.setPointerCapture(e.pointerId);document.body.style.cursor="row-resize";
+});
+splitHandle.addEventListener("pointermove",e=>{
+  if(!splitDrag)return;setCanvasHeight(splitDrag.h+(e.clientY-splitDrag.y));renderCanvas();
+});
+splitHandle.addEventListener("pointerup",e=>{
+  splitDrag=null;document.body.style.cursor="";splitHandle.releasePointerCapture?.(e.pointerId);layoutCards();
+});
+splitHandle.addEventListener("keydown",e=>{
+  if(e.key!=="ArrowUp"&&e.key!=="ArrowDown")return;e.preventDefault();
+  setCanvasHeight(canvasPanel.getBoundingClientRect().height+(e.key==="ArrowDown"?20:-20));renderCanvas();
+});
+window.addEventListener("resize",()=>{const h=canvasPanel.getBoundingClientRect().height;setCanvasHeight(h);renderCanvas();layoutCards()});
 $("openView").onclick=load;
 </script>
 </body>

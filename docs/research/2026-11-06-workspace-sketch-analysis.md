@@ -96,6 +96,8 @@ ComponentInstance
 ```
 
 - 顶部节点是 `WorkflowNode { node_id, component }`，下方卡片是某个组件 `slots.detail` 里的 `ComponentInstance`；两者类型相同、校验相同、ViewPatch 相同。
+- **不是同一个实例**：一个 Operation 节点与它内部的 Table/Calculator 是父子实例。共用的是类型、Definition、Renderer 契约和 ViewPatch，不是 instance 身份。
+- `WorkflowGraph.edges` 只是视觉关系，不自动表示样本 pooling/batching/合并；真实样本流转仍来自 Design/Protocol/Run 的既有引用。
 - “节点视图”和“详情视图”只是同一个组件的两种 presentation：operation 的节点视图是图标+步骤名，详情视图是参数+子组件；table 的节点视图可以是缩略表，详情视图是可编辑表格。
 - 不为节点和卡片各造一套 schema。差异放在 renderer 的 `view_mode`（compact/detail）和组件的 `props`，不放在科学对象上。
 - 多组样品进入同一节点：用 `WorkflowGraph.edges` 的多个入边表达；如果只是视觉分组，用 `VisualSpec.lane`/`group` 或 `props.group_label`，不把 lane 写进 Protocol。样本身份仍来自 Design/Run 的既有引用，不从位置推断。
@@ -204,7 +206,7 @@ WorkflowEdge {
 
 草图的四块卡片适合 **Masonry + 拖拽**，不是固定竖排：
 
-- 纯自适应拼图：Masonry（当前已接入）。
+- 纯自适应拼图：Masonry（`7c05d4f` 已接入；更早版本使用 CSS Grid，当前代码以 `web/vendor/masonry.pkgd.min.js` 为准）。
 - 需要拖动/排序/过滤：Muuri（MIT），支持 masonry-like 布局、拖拽和动画。
 - 需要 12 栏、可缩放、布局 JSON：Gridstack.js。
 
