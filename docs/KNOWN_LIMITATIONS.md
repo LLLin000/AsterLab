@@ -9,5 +9,5 @@
 - The Beta is single-user and has no collaboration, cloud sync, automated scheduled backup,
   instrument control, file attachments, or full electronic-signature workflow.
 - The Slint application is retained as a research prototype and is not the Beta frontend.
-- `tests/cli-coverage.cjs` still reports 13 catalogued CLI tools without a real positive/negative test (view.data_preview, semantic/catalog/labware/component tools). The functional smoke does not fail early on this gap.
+- CLI catalog coverage is checked by static call/reference scanning across Node and Rust tests; it confirms every tool is invoked by a test but is not a coverage percentage or proof that every branch is exercised.
 - Synthetic demo records are explicitly synthetic; they must not be presented as real data.
