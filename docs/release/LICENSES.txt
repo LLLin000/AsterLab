@@ -1,0 +1,3 @@
+AsterLab Beta includes Rust crates and the Tabler/Dagre/marked/DOMPurify browser assets.
+Their licenses are distributed with the source dependencies. This Beta package is a local
+research workbench; review third-party license obligations before public redistribution.

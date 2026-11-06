@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -51,6 +51,8 @@ const COMPONENT_TOKENS: &str = include_str!("../web/components/tokens.css");
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
+    data_dir: PathBuf,
+    db_path: PathBuf,
 }
 #[derive(Debug)]
 struct ApiError {
@@ -434,7 +436,7 @@ async fn revise_view(
     Ok(Json(result))
 }
 async fn health() -> Json<Value> {
-    Json(json!({"ok":true,"app":"Lab Workbench","storage":"SQLite","agent":"typed-cli-v1"}))
+    Json(json!({"ok":true,"app":"AsterLab","storage":"SQLite","agent":"typed-cli-v1"}))
 }
 async fn get_state(State(s): State<AppState>) -> ApiResult<Value> {
     let rows = {
@@ -484,6 +486,7 @@ struct CreateInput {
 }
 async fn create_record(
     State(s): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<CreateInput>,
 ) -> ApiResult<Value> {
     let mut db = lock(&s)?;
@@ -520,6 +523,16 @@ async fn create_record(
             design
         }
         "run" => {
+            if headers
+                .get("x-asterlab-human-confirmed")
+                .and_then(|value| value.to_str().ok())
+                != Some("1")
+            {
+                return Err(ApiError {
+                    status: StatusCode::FORBIDDEN,
+                    message: "创建实验运行需要人类确认；请从 AsterLab 运行创建入口提交".into(),
+                });
+            }
             let did = parent
                 .as_deref()
                 .ok_or_else(|| ApiError::bad("实验运行需要关联实验设计"))?;
@@ -950,6 +963,78 @@ async fn update_record(
         json!({"id":input.id,"kind":kind,"project_id":project,"parent_id":parent,"revision":next,"data":input.data,"previous_data":serde_json::from_str::<Value>(&old)?}),
     ))
 }
+#[derive(Debug, Deserialize)]
+struct RestoreInput {
+    path: String,
+}
+fn require_human_confirmation(headers: &HeaderMap) -> Result<(), ApiError> {
+    if headers
+        .get("x-asterlab-human-confirmed")
+        .and_then(|value| value.to_str().ok())
+        == Some("1")
+    {
+        Ok(())
+    } else {
+        Err(ApiError {
+            status: StatusCode::FORBIDDEN,
+            message: "此操作需要从 AsterLab 本地界面确认".into(),
+        })
+    }
+}
+async fn create_backup(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Value> {
+    require_human_confirmation(&headers)?;
+    let db = lock(&s)?;
+    let dir = s.data_dir.join("backups");
+    fs::create_dir_all(&dir).map_err(|e| ApiError::internal(format!("无法创建备份目录：{e}")))?;
+    let stamp = Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let path = dir.join(format!("labworkbench-{stamp}.sqlite"));
+    db.execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])
+        .map_err(|e| ApiError::internal(format!("备份失败：{e}")))?;
+    Ok(Json(json!({"path":path,"created_at":now()})))
+}
+async fn restore_backup(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<RestoreInput>,
+) -> ApiResult<Value> {
+    require_human_confirmation(&headers)?;
+    let source = fs::canonicalize(&input.path)
+        .map_err(|e| ApiError::bad(format!("备份文件不可读：{e}")))?;
+    let check = Connection::open(&source).map_err(|e| ApiError::bad(format!("备份无法打开：{e}")))?;
+    let integrity: String = check
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(|e| ApiError::bad(format!("备份完整性检查失败：{e}")))?;
+    if integrity != "ok" {
+        return Err(ApiError::bad(format!("备份完整性检查未通过：{integrity}")));
+    }
+    drop(check);
+    let mut guard = lock(&s)?;
+    let placeholder = Connection::open_in_memory().map_err(|e| ApiError::internal(e.to_string()))?;
+    let old = std::mem::replace(&mut *guard, placeholder);
+    drop(old);
+    let temp = s.db_path.with_extension("sqlite.restore");
+    let restore = (|| -> Result<(), std::io::Error> {
+        fs::copy(&source, &temp)?;
+        for suffix in ["-wal", "-shm"] {
+            let side = s.db_path.with_extension(format!("sqlite{suffix}"));
+            let _ = fs::remove_file(side);
+        }
+        fs::rename(&temp, &s.db_path)?;
+        Ok(())
+    })();
+    if let Err(error) = restore {
+        let _ = fs::remove_file(&temp);
+        *guard = Connection::open(&s.db_path).map_err(|e| ApiError::internal(format!("恢复失败且无法重新打开数据库：{e}")))?;
+        return Err(ApiError::internal(format!("恢复失败：{error}")));
+    }
+    let restored = Connection::open(&s.db_path).map_err(|e| ApiError::internal(format!("恢复后无法打开数据库：{e}")))?;
+    restored.pragma_update(None, "foreign_keys", "ON")?;
+    *guard = restored;
+    Ok(Json(json!({"restored_from":source,"restored_at":now()})))
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let folder = env::var_os("LABWORKBENCH_DATA_DIR")
@@ -966,6 +1051,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);")?;
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
+        data_dir: folder.clone(),
+        db_path: db_path.clone(),
     };
     let port = env::var("LABWORKBENCH_PORT")
         .ok()
@@ -1015,10 +1102,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/runs/{id}/workspace", get(get_run_workspace))
         .route("/api/protocol-blocks/preview", post(preview_block))
         .route("/api/records", post(create_record))
+        .route("/api/backup", post(create_backup))
+        .route("/api/restore", post(restore_backup))
         .route("/api/records/update", post(update_record))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    println!("Lab Workbench：http://{addr}");
+    println!("AsterLab：http://{addr}");
     println!("本地 SQLite：{}", db_path.display());
     println!("仅监听本机回环地址。Ctrl+C 可停止。");
     axum::serve(listener, app).await?;

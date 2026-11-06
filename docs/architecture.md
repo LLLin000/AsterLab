@@ -1,7 +1,7 @@
 # AsterLab 架构设计
 
 - 日期：2026-11-05
-- 状态：目标架构；Slint 是交付前端，Web 是过渡原型。
+- 状态：Beta 架构；Web 是正式交付前端，Slint 是保留的研究原型。决策见 ADR 0001。
 - 关联：[实验地图契约](prototypes/2026-11-05-experiment-map-and-agent-contract.md)、[协议知识](research/2026-11-05-protocol-knowledge-and-related-projects.md)、[仪器步骤模块](prototypes/instrument-step-modules.md)、[K0 审计](research/2026-11-05-k0-knowledge-coverage-audit.md)、[OperationModule v1](contracts/operation-module-v1.md)、[Semantic Component S0](contracts/semantic-component-contract.md)。
 
 ## 0. 一句话
@@ -35,7 +35,7 @@ P0 结束前不拆 Slint、不实现 `StepMeta`、不移动 `src/cli.rs`。当�
 | SQLite | 记录、版本、Run 快照、执行事件 | 业务规则 |
 | Agent | 读取地图/Protocol、提出字段级 patch、调用确定性工具 | 绕过 Core 直接写记录 |
 
-**交付面是 Slint exe。** 当前 Web `index.html` 保留为快速验证和 Agent/浏览器对照，不是最终产品外壳。
+**Beta 交付面是 Web + Rust 本地服务。** Slint `apps/desktop` 保留为研究分支；不同时维护两套正式前端。
 
 ## 2. 三层对象
 

@@ -4735,7 +4735,7 @@ fn fail(tool: &str, e: CliError) -> i32 {
     e.exit
 }
 fn print_help() {
-    println!("Lab Workbench typed CLI\n\n  labworkbench tools --json\n  labworkbench schema <tool>\n  labworkbench <tool> --input <json-file|->\n\nAll tool inputs use a strict per-command schema; unknown fields are rejected. All output is one JSON envelope on stdout. Data directory follows LABWORKBENCH_DATA_DIR (default: ./data).");
+    println!("AsterLab typed CLI\n\n  labworkbench tools --json\n  labworkbench schema <tool>\n  labworkbench <tool> --input <json-file|->\n\nAll tool inputs use a strict per-command schema; unknown fields are rejected. All output is one JSON envelope on stdout. Data directory follows LABWORKBENCH_DATA_DIR (default: ./data).");
 }
 
 fn require_trusted_writer(tool: &str) -> Result<(), CliError> {

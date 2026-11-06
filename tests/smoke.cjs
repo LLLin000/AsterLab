@@ -56,8 +56,10 @@ async function waitForHealth(base){
   }
   throw new Error("isolated server failed to start: "+serverOutput);
 }
-async function post(base,path,body,expected=200){
-  const r=await fetch(base+path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+async function post(base,path,body,expected=200,humanConfirmed=true){
+  const headers={"content-type":"application/json"};
+  if(body.kind==="run"&&humanConfirmed)headers["x-asterlab-human-confirmed"]="1";
+  const r=await fetch(base+path,{method:"POST",headers,body:JSON.stringify(body)});
   const payload=await r.json();assert.equal(r.status,expected,JSON.stringify(payload));return payload;
 }
 (async()=>{
@@ -250,6 +252,7 @@ assert.equal(cli("record.list",{kind:"execution_event",project_id:cliProject.id}
   serverProcess.stdout.on("data",b=>serverOutput+=b.toString());serverProcess.stderr.on("data",b=>serverOutput+=b.toString());
   const health=await waitForHealth(base);assert.equal(health.agent,"typed-cli-v1");
   const project=await post(base,"/api/records",{kind:"project",data:{name:"Smoke UI project",description:"temporary"}});
+  await post(base,"/api/records",{kind:"run",parent_id:sharedDesign.id,data:{title:"Unauthorized API run"}},403,false);
   const sharedRunApi=await post(base,"/api/records",{kind:"run",parent_id:sharedDesign.id,data:{title:"Shared material API run",status:"completed"}});
   assert.deepEqual(sharedRunApi.data.protocol_manifest,sharedRun.data.protocol_manifest,"HTTP and CLI Runs should freeze the same assay Protocol manifest");
   assert.deepEqual(sharedRunApi.data.material_manifest,sharedRun.data.material_manifest,"HTTP and CLI Runs should freeze the same shared-material manifest");

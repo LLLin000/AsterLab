@@ -1,24 +1,20 @@
-# Lab Workbench（实验工作台）
+# AsterLab（实验工作台）
 
-一个运行在本机的 Rust + SQLite 实验规划与记录工作台。它借鉴 Cell Planner 的项目、任务日历、记录、资料库和计算器工作流，同时加入有版本的实验设计、Protocol、实验运行和铺板布局。它是可用的产品原型，不是 Cell Planner 的品牌、专有素材或内部实现克隆。
+一个运行在本机的 Rust + SQLite 实验规划与记录工作台。它借鉴 Cell Planner 的项目、任务日历、记录、资料库和计算器工作流，同时加入有版本的实验设计、Protocol、实验运行和铺板布局。它是 AsterLab 0.1.0 Beta 的本地工作台；Web UI 是本轮正式交付前端，Slint 仅保留为研究原型。
 
 产品术语与目标对象边界见 [CONTEXT.md](CONTEXT.md)；该文件记录目标设计语义，当前 CLI 的已实现能力仍以 [AGENT_API.md](AGENT_API.md) 为准。
 
-系统分层、Slint 前端职责、Core 读模型和仪器步骤模块的架构见 [docs/architecture.md](docs/architecture.md)。
+交付决策见 [ADR 0001](docs/adr/0001-web-first-beta.md)；系统分层、Core 读模型和仪器步骤模块见 [docs/architecture.md](docs/architecture.md)。
 文档权威与阅读顺序见 [docs/README.md](docs/README.md)；当前实施阶段见 [docs/implementation-plan.md](docs/implementation-plan.md)；P0 Core 契约见 [docs/contracts/core-v1.md](docs/contracts/core-v1.md)。
 当前共享设计投影位于 `crates/asterlab-core`；P1-A 已由 CLI/HTTP 与 Slint 地图摘要共用。
 
 ## 启动
 
-Windows 可双击 `start-labworkbench.bat`，或在 PowerShell 中运行：
+发布包中双击 `START_HERE.bat` 即可启动，不需要 Rust 或 Node。开发态可运行 `./run-local.ps1`，它会先编译再启动。
 
-```powershell
-./run-local.ps1
-```
+服务默认打开 http://127.0.0.1:8832。首次启动在本机数据目录创建 SQLite；按 Ctrl+C 或关闭控制台停止。可通过 `LABWORKBENCH_DATA_DIR` 更改数据目录、通过 `LABWORKBENCH_PORT` 更改端口。
 
-然后打开 http://127.0.0.1:8832。启动脚本会先用 Rust stable 与 Cargo 编译当前源码，再运行 target/release/labworkbench.exe，确保打开的是最新界面与逻辑。首次启动会在本目录创建 data/labworkbench.sqlite。按 Ctrl+C 停止；再次启动会继续使用同一份本地数据库。
-
-可通过 `LABWORKBENCH_DATA_DIR` 更改数据库目录、通过 `LABWORKBENCH_PORT` 更改端口。应用只绑定 `127.0.0.1`，当前不提供账号、网络同步、多用户协作或备份恢复。
+应用只绑定 `127.0.0.1`；当前是单用户本地软件。Run 创建从 UI 通过人工确认入口完成；CLI 的 `run.create` 仅允许受信任写入端。数据库备份/恢复在 UI 顶部入口提供。
 
 ## 当前工作流
 
@@ -48,10 +44,10 @@ Agent 命令、输入输出 schema、错误码和科学字段语义见 [AGENT_AP
 
 ## 当前限制
 
-- CLI 是 Agent 的本地操作面；项目仍不内置模型或自然语言解析。Agent 的实际调用由外部运行环境决定。
-- 没有文件附件、样本库存/试剂批次、权限、协作、云同步、自动备份或迁移界面。
+- CLI 是 Agent 的本地操作面；项目不内置模型。Agent 不应获得创建 Run 的受信任写权限；Run 由人类在 UI 确认后创建。
+- 没有文件附件、样本库存/试剂批次、账号权限、协作、云同步或定时备份；提供手动 SQLite 备份/恢复。
 - 记录表采用带类型的关联对象与 JSON 字段，尚未提供可视化自定义字段类型系统。
-- 运行方式面向本机原型；还没有做安全审计、打包安装、多用户并发或生产环境验收。
+- Beta 面向本机单用户；已提供 Windows 发布包，但还没有安全审计、多用户并发或云端验收。
 - 铺板布局是本项目新增的功能域；当前安装版 Cell Planner 的检查没有找到独立 plate-map 页面，不能据此说这是原版现成功能。
 
 ## 研究来源
