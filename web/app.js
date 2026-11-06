@@ -256,7 +256,7 @@ function proposalPanelMarkup(){
   const child=selectedChildId?findById(data?.latest_version?.data?.root,selectedChildId):null;
   if(!child)return `<div class="proposal-empty">选择一张卡片后，可生成受控提案。</div>`;
   const isTable=child.definition.id==="content.table"||child.definition.id==="layout.table";
-  const actions=[isTable?`<button data-proposal="move-top">移动到最上面</button>`:`<button data-proposal="append-note">追加说明</button>`,`<button data-proposal="add-note">添加 Markdown 卡片</button>`].join("");
+  const actions=[isTable?`<button data-proposal="move-top">移动到最上面</button>`:`<button data-proposal="append-note">追加说明</button>`,`<button data-proposal="add-note">添加 Markdown 卡片</button>`,`<button data-proposal="delete">删除此卡片</button>`].join("");
   if(!proposal)return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">提案只读预览；接受前不会写入。</div><div class="row">${actions}</div>`;
   const stale=proposal.stale;
   const changes=(proposal.preview?.operation_changes||[]).map(op=>{
@@ -289,6 +289,8 @@ async function createProposal(kind){
   }else if(kind==="append-note"){
     const text=(child.props?.text||"")+(child.props?.text?"\n\n":"")+"（提案补充）";
     operations.push({kind:"update_props",instance_id:child.instance_id,property:"text",value:text});
+  }else if(kind==="delete"){
+    operations.push({kind:"remove_instance",instance_id:child.instance_id});
   }
   if(!operations.length)return;
   const changeset={changeset_id:`agent-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["agent-proposal"]};
