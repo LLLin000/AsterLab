@@ -250,6 +250,121 @@ async fn get_view_selection(
 }
 
 #[derive(Deserialize)]
+struct AgentProposalInput {
+    instance_id: String,
+    instruction: String,
+}
+
+const AGENT_ALLOWED: [&str; 4] = [
+    "update_props",
+    "add_slot_child",
+    "move_slot_child",
+    "set_visual",
+];
+
+fn extract_json_object(text: &str) -> Option<Value> {
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    serde_json::from_str(&text[start..=end]).ok()
+}
+
+async fn agent_propose(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<AgentProposalInput>,
+) -> ApiResult<Value> {
+    if input.instruction.trim().is_empty() || input.instruction.chars().count() > 2000 {
+        return Err(ApiError::bad("instruction 必须为 1–2000 字"));
+    }
+    let context = {
+        let db = lock(&s)?;
+        cli::view_selection_context(&db, &id, &input.instance_id).map_err(ApiError::from_cli)?
+    };
+    let base_url = std::env::var("LABWORKBENCH_LLM_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| ApiError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "LLM 未配置：设置 LABWORKBENCH_LLM_URL / API_KEY / MODEL".into(),
+        })?;
+    let api_key = std::env::var("LABWORKBENCH_LLM_API_KEY").unwrap_or_default();
+    let model = std::env::var("LABWORKBENCH_LLM_MODEL").unwrap_or_else(|_| "gpt-4o-mini".into());
+    let system = format!(
+        "You are an experiment-design assistant. Return JSON only: {{\"operations\": [...]}}.
+         Allowed operation kinds: update_props, add_slot_child, move_slot_child, set_visual.
+         Do not emit remove_instance, connect, disconnect, bindings, or scientific parameters.
+         Only reference the selected component or its parent operation. Preserve IDs and do not invent values.
+         Selection context: {}
+Allowed context rules: View operations only; Protocol/Run semantics are out of scope.",
+        serde_json::to_string(&context).unwrap_or_else(|_| "{}".into())
+    );
+    let body = json!({
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {"role":"system","content":system},
+            {"role":"user","content":input.instruction}
+        ]
+    });
+    let mut request = reqwest::Client::new().post(&base_url).json(&body);
+    if !api_key.is_empty() {
+        request = request.bearer_auth(api_key);
+    }
+    let response = request.send().await.map_err(|error| ApiError {
+        status: StatusCode::BAD_GATEWAY,
+        message: format!("LLM 请求失败：{error}"),
+    })?;
+    if !response.status().is_success() {
+        return Err(ApiError {
+            status: StatusCode::BAD_GATEWAY,
+            message: format!("LLM 返回 HTTP {}", response.status()),
+        });
+    }
+    let payload: Value = response.json().await.map_err(|error| ApiError {
+        status: StatusCode::BAD_GATEWAY,
+        message: format!("LLM 响应不是 JSON：{error}"),
+    })?;
+    let content = payload["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| ApiError::bad("LLM 响应缺少 choices[0].message.content"))?;
+    let parsed =
+        extract_json_object(content).ok_or_else(|| ApiError::bad("LLM 没有返回 JSON 对象"))?;
+    let operations = parsed["operations"]
+        .as_array()
+        .cloned()
+        .ok_or_else(|| ApiError::bad("LLM 响应缺少 operations 数组"))?;
+    if operations.is_empty() || operations.len() > 20 {
+        return Err(ApiError::bad("LLM operations 数量必须为 1–20"));
+    }
+    for operation in &operations {
+        let kind = operation["kind"].as_str().unwrap_or_default();
+        if !AGENT_ALLOWED.contains(&kind) {
+            return Err(ApiError::bad(format!("LLM 尝试使用不允许的操作：{kind}")));
+        }
+    }
+    let changeset =
+        serde_json::from_value::<asterlab_core::component_framework::ViewChangeSet>(json!({
+            "changeset_id": format!("agent-{}", Uuid::new_v4()),
+            "document_id": context["document_id"],
+            "expected_revision": context["revision"],
+            "operations": operations,
+            "provenance": ["agent-llm"]
+        }))
+        .map_err(|error| ApiError::bad(format!("LLM 变更集结构无效：{error}")))?;
+    let proposal = {
+        let db = lock(&s)?;
+        cli::view_proposal(&db, &id, &changeset).map_err(ApiError::from_cli)?
+    };
+    Ok(Json(json!({
+        "source": "llm",
+        "model": model,
+        "selection": context,
+        "changeset": changeset,
+        "proposal": proposal
+    })))
+}
+
+#[derive(Deserialize)]
 struct ProposalInput {
     changeset: asterlab_core::component_framework::ViewChangeSet,
 }
@@ -879,6 +994,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(get_view_selection),
         )
         .route("/api/views/{id}/propose", post(propose_view))
+        .route("/api/views/{id}/agent-propose", post(agent_propose))
         .route("/api/views/{id}/revise", post(revise_view))
         .route("/api/health", get(health))
         .route("/api/state", get(get_state))

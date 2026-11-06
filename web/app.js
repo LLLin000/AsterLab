@@ -257,11 +257,12 @@ function proposalNoOp(preview){
   return changes.length>0&&changes.every(op=>JSON.stringify(op.before)===JSON.stringify(op.after));
 }
 function proposalPanelMarkup(){
-  const child=selectedChildId?findById(data?.latest_version?.data?.root,selectedChildId):null;
-  if(!child)return `<div class="proposal-empty">选择一张卡片后，可生成受控提案。</div>`;
+  const child=selectedChildId?findById(data?.latest_version?.data?.root,selectedChildId):selected;
+  if(!child)return `<div class="proposal-empty">选择一个步骤或卡片后，可生成受控提案。</div>`;
+  const agentPrompt=`<div class="agent-prompt"><input id="agent-instruction" placeholder="用自然语言描述修改，例如：把表格移到最上面"><button class="primary" data-agent-run>生成提案</button></div>`;
   const kind=child.definition.id;const isNote=kind==="content.note"||kind==="content.markdown";const isTable=kind==="content.table"||kind==="layout.table";
   const actions=[`<button data-proposal="move-top">移动到最上面</button>`,isNote?`<button data-proposal="append-note">追加说明</button>`:``,isTable||kind==="workflow"?`<button data-proposal="add-note">添加 Markdown 卡片</button>`:``,`<button data-proposal="delete">删除此卡片</button>`].join("");
-  if(!proposal)return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">提案只读预览；接受前不会写入。</div><div class="row">${actions}</div>`;
+  if(!proposal)return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">提案只读预览；接受前不会写入。</div>${agentPrompt}<div class="row">${actions}</div>`;
   const stale=proposal.stale||proposal.noOp;
   const changes=(proposal.preview?.operation_changes||[]).map(op=>{
     if(op.kind==="move_slot_child")return `<div class="diff-row"><b>位置</b><span>${esc(JSON.stringify(op.before))} → ${esc(JSON.stringify(op.after))}</span></div>`;
@@ -274,6 +275,7 @@ function proposalPanelMarkup(){
 function renderProposalPanel(){
   const box=$("proposal-panel");if(!box)return;box.innerHTML=proposalPanelMarkup();
   box.querySelectorAll("[data-proposal]").forEach(b=>b.onclick=()=>createProposal(b.dataset.proposal));
+  box.querySelector("[data-agent-run]")?.addEventListener("click",runAgentProposal);
   box.querySelector("[data-proposal-accept]")?.addEventListener("click",acceptProposal);
   box.querySelector("[data-proposal-reject]")?.addEventListener("click",()=>{proposal=null;renderProposalPanel()});
 }
@@ -282,6 +284,17 @@ function focusChild(id){
   selectedChildId=id;
   document.querySelectorAll(".card[data-instance]").forEach(c=>c.classList.toggle("selected",c.dataset.instance===id));
   renderProposalPanel();
+}
+async function runAgentProposal(){
+  if(!data)return;const child=selectedChildId?findById(data.latest_version.data.root,selectedChildId):selected;const instruction=$("agent-instruction")?.value.trim();if(!child||!instruction){$("status").textContent="请选择组件并输入指令";return}
+  const requestViewId=viewId,requestDocumentId=data.latest_version.data.document_id,requestRevision=data.latest_version.data.revision,requestChild=selectedChildId;
+  $("status").textContent="Agent 生成提案…";
+  try{
+    const r=await fetch(`/api/views/${encodeURIComponent(requestViewId)}/agent-propose`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instance_id:child.instance_id,instruction})});
+    const j=await r.json();if(!r.ok)throw new Error(j.error||"Agent 提案失败");
+    if(viewId!==requestViewId||data?.latest_version?.data?.document_id!==requestDocumentId||data?.latest_version?.data?.revision!==requestRevision||selectedChildId!==requestChild){$("status").textContent="选择或版本已变化，旧提案已丢弃";return}
+    proposal={viewId:requestViewId,documentId:requestDocumentId,expectedRevision:j.changeset.expected_revision,changeset:j.changeset,preview:j.proposal,stale:false,noOp:proposalNoOp(j.proposal)};renderProposalPanel();$("status").textContent=proposal.noOp?"Agent 提案无实际变化":"Agent 提案已校验，等待审阅";
+  }catch(e){$("status").textContent=e.message;proposal=null;renderProposalPanel()}
 }
 async function createProposal(kind){
   if(!data||!selected)return;const child=selectedChildId?findById(data.latest_version.data.root,selectedChildId):null;if(!child)return;

@@ -97,6 +97,34 @@ Selection Context
   → Revision conflict check
 ```
 
+## 真实 LLM 接入
+
+设置环境变量后，Proposal 面板的“生成提案”会调用 OpenAI-compatible Chat Completions：
+
+```text
+LABWORKBENCH_LLM_URL=https://your-gateway/v1/chat/completions
+LABWORKBENCH_LLM_API_KEY=...
+LABWORKBENCH_LLM_MODEL=gpt-4o-mini
+```
+
+接口：
+
+```text
+POST /api/views/{view_id}/agent-propose
+{ "instance_id": "...", "instruction": "把表格移到最上面" }
+```
+
+模型只能返回：
+
+```text
+update_props
+add_slot_child
+move_slot_child
+set_visual
+```
+
+服务端会拒绝 `remove_instance`、`connect`、`disconnect` 和 Binding 操作；生成结果仍走 `/propose` 校验，不直接写库。未配置 LLM 时返回 503，不影响确定性提案按钮。
+
 ## 边界
 
 - 当前 UI 的提案按钮是确定性操作，不是 LLM 生成。
