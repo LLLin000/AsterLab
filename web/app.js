@@ -4,6 +4,8 @@ let view={x:0,y:0,k:1}, pan=null, dragNode=null, nodeMoved=false;
 let history=[], future=[], saveChain=Promise.resolve();
 let paramCache=new Map(), plateCache=new Map(), plateSelections=new Map();
 let calcStates=new Map();
+let selectedChildId=null;
+let proposal=null;
 let dataRequestSeq=0;
 let drafts=new Map();
 const $=id=>document.getElementById(id);
@@ -71,7 +73,7 @@ function renderCanvas(){
   updateHistoryButtons();
 }
 function updateHistoryButtons(){$("undo").disabled=history.length===0;$("redo").disabled=future.length===0}
-function selectComponent(c){selected=c;renderCanvas();renderDetail()}
+function selectComponent(c){if(selected?.instance_id!==c.instance_id){selectedChildId=null;proposal=null}selected=c;renderCanvas();renderDetail()}
 function enterComponent(c){node=c;stack.push(c);selected=workflowOf(c)[0]?.component||c;render()}
 function fmtValue(value){if(value===null||value===undefined)return "待确认";if(typeof value==="object")return JSON.stringify(value);return String(value)}
 async function loadParams(c,boxId){
@@ -250,6 +252,60 @@ function rendererFor(component){
   const key=`${component.definition?.id||"unknown"}@${component.definition?.version??"?"}`;
   return componentRenderers[key]||componentRenderers.unsupported;
 }
+function proposalPanelMarkup(){
+  const child=selectedChildId?findById(data?.latest_version?.data?.root,selectedChildId):null;
+  if(!child)return `<div class="proposal-empty">选择一张卡片后，可生成受控提案。</div>`;
+  const isTable=child.definition.id==="content.table"||child.definition.id==="layout.table";
+  const actions=[isTable?`<button data-proposal="move-top">移动到最上面</button>`:`<button data-proposal="append-note">追加说明</button>`,`<button data-proposal="add-note">添加 Markdown 卡片</button>`].join("");
+  if(!proposal)return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">提案只读预览；接受前不会写入。</div><div class="row">${actions}</div>`;
+  const stale=proposal.stale;
+  const changes=(proposal.preview?.operation_changes||[]).map(op=>{
+    if(op.kind==="move_slot_child")return `<div class="diff-row"><b>位置</b><span>${esc(JSON.stringify(op.before))} → ${esc(JSON.stringify(op.after))}</span></div>`;
+    if(op.kind==="add_slot_child")return `<div class="diff-row"><b>新增</b><span>${esc(op.after?.definition?.id||"组件")} · ${esc(op.slot_id||"")}</span></div>`;
+    if(op.kind==="update_props")return `<div class="diff-row"><b>字段</b><span>${esc(op.property)}: ${esc(JSON.stringify(op.before))} → ${esc(JSON.stringify(op.after))}</span></div>`;
+    return `<div class="diff-row"><b>${esc(op.kind)}</b><span>${esc(JSON.stringify(op.edge||op.binding_id||op.instance_id||""))}</span></div>`;
+  }).join("");
+  return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">目标：ViewDocument · revision ${esc(proposal.expectedRevision)} · ${stale?"已过期":"预览校验通过"} · 仅预览，未写入</div><div class="diff-list">${changes||"<div class=muted>无结构化差异</div>"}</div><div class="row"><button class="primary" data-proposal-accept ${stale?"disabled":""}>接受变更</button><button data-proposal-reject>拒绝</button></div>`;
+}
+function renderProposalPanel(){
+  const box=$("proposal-panel");if(!box)return;box.innerHTML=proposalPanelMarkup();
+  box.querySelectorAll("[data-proposal]").forEach(b=>b.onclick=()=>createProposal(b.dataset.proposal));
+  box.querySelector("[data-proposal-accept]")?.addEventListener("click",acceptProposal);
+  box.querySelector("[data-proposal-reject]")?.addEventListener("click",()=>{proposal=null;renderProposalPanel()});
+}
+function focusChild(id){
+  if(selectedChildId!==id)proposal=null;
+  selectedChildId=id;
+  document.querySelectorAll(".card[data-instance]").forEach(c=>c.classList.toggle("selected",c.dataset.instance===id));
+  renderProposalPanel();
+}
+async function createProposal(kind){
+  if(!data||!selected)return;const child=selectedChildId?findById(data.latest_version.data.root,selectedChildId):null;if(!child)return;
+  const doc=data.latest_version.data;const operations=[];
+  if(kind==="move-top"){
+    operations.push({kind:"move_slot_child",instance_id:child.instance_id,target_parent_instance_id:selected.instance_id,target_slot_id:"detail",target_index:0});
+  }else if(kind==="add-note"){
+    operations.push({kind:"add_slot_child",parent_instance_id:selected.instance_id,slot_id:"detail",child:{instance_id:crypto.randomUUID(),definition:{id:"content.note",version:1},props:{text:"实验注意事项\n"},slots:{}}});
+  }else if(kind==="append-note"){
+    const text=(child.props?.text||"")+(child.props?.text?"\n\n":"")+"（提案补充）";
+    operations.push({kind:"update_props",instance_id:child.instance_id,property:"text",value:text});
+  }
+  if(!operations.length)return;
+  const changeset={changeset_id:`agent-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["agent-proposal"]};
+  $("status").textContent="生成提案预览…";
+  try{
+    const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/propose`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
+    const j=await r.json();if(!r.ok)throw new Error(j.error||"提案校验失败");
+    proposal={viewId,documentId:doc.document_id,expectedRevision:doc.revision,changeset,preview:j,stale:false};renderProposalPanel();$("status").textContent="提案预览已生成，尚未写入";
+  }catch(e){$("status").textContent=e.message;proposal=null;renderProposalPanel()}
+}
+async function acceptProposal(){
+  if(!proposal)return;
+  const doc=data?.latest_version?.data;
+  if(!doc||viewId!==proposal.viewId||doc.document_id!==proposal.documentId||doc.revision!==proposal.expectedRevision){proposal.stale=true;renderProposalPanel();$("status").textContent="提案已过期，请重新生成并预览";return}
+  try{await commitViewChangeSet(proposal.changeset.operations,"接受提案");proposal=null;selectedChildId=null;renderDetail();$("status").textContent="提案已接受并保存"}
+  catch(e){$("status").textContent=e.message||"提案提交失败"}
+}
 function renderDetail(){
   const c=selected;
   if(!c){$("detail").innerHTML='<div class="muted">选择一个步骤查看详情。</div>';return}
@@ -265,7 +321,9 @@ function renderDetail(){
   const refLine=ref.kind==="operation_use"?`Protocol step · ${esc(ref.step?.step_path||"")}`:ref.kind?esc(ref.kind):"未绑定科学对象";
   const plateChoices=plates.map(p=>`<option value="${esc(p.instance_id)}">${esc(nodeTitle(p))} · ${esc(p.model_ref?.container_id||"")}</option>`).join("");
   const library=[["layout.section","区块"],["content.table","表格"],["tool.calculator","计算器"],["content.note","说明"],["workflow","子流程"]].map(([kind,label])=>`<button data-add="${kind}">+ ${label}</button>`).join("")+(plates.length?`<select id="add-plate" aria-label="要引用的孔板">${plateChoices}</select><button data-add="lab.well_plate">+ 孔板</button>`:"");
-  $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted">${esc(defName(c))} · ${esc(c.instance_id)}</div></div><button id="collapse" aria-label="收起">⌃</button></div><div class="detail-grid"><div><h3>操作参数</h3><div id="params-${esc(c.instance_id)}" class="muted">读取 ProtocolPreview…</div><div class="param"><b>科学引用</b><span>${refLine}</span></div></div><div><h3>相关组件</h3><div class="cards"><div class="grid-sizer"></div>${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div><div class="library"><h3>添加组件</h3>${library}</div></div></div><div id="preview" class="preview"></div>`;
+  $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted">${esc(defName(c))} · ${esc(c.instance_id)}</div></div><button id="collapse" aria-label="收起">⌃</button></div><div class="detail-grid"><div><h3>操作参数</h3><div id="params-${esc(c.instance_id)}" class="muted">读取 ProtocolPreview…</div><div class="param"><b>科学引用</b><span>${refLine}</span></div></div><div><h3>相关组件</h3><div class="cards"><div class="grid-sizer"></div>${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div><div class="library"><h3>添加组件</h3>${library}</div></div></div><div id="proposal-panel" class="proposal"></div><div id="preview" class="preview"></div>`;
+  $("detail").querySelectorAll('.card[data-instance]').forEach(card=>card.addEventListener("click",e=>{if(e.target.closest("button,input,textarea,select,a"))return;focusChild(card.dataset.instance)}));
+  renderProposalPanel();
   $("detail").querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>{const child=findById(data.latest_version.data.root,b.dataset.enter);if(child)enterComponent(child)});
   $("detail").querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>saveNote(b.dataset.save));
   $("detail").querySelectorAll('[data-table-save]').forEach(b=>b.onclick=()=>saveTable(b.dataset.tableSave));
@@ -328,8 +386,8 @@ function commitViewChangeSet(operations,label){
     $("status").textContent=`${label}…`;
     const r=await fetch(`/api/views/${encodeURIComponent(targetViewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
     const j=await r.json();
+    if(!r.ok){const message=j.error||`${label}失败`;if(viewId===targetViewId&&data?.latest_version?.data?.document_id===targetDocumentId)await load(true,true);$("status").textContent=message;throw new Error(message)}
     if(viewId!==targetViewId||data?.latest_version?.data?.document_id!==targetDocumentId){$("status").textContent=`${label}已写入原文档，当前 View 未刷新`;return}
-    if(!r.ok){const message=j.error||`${label}失败`;await load(true,true);$("status").textContent=message;throw new Error(message)}
     await load(true,true);$("status").textContent=`${label}已保存`;
   };
   const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run

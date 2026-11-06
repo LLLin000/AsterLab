@@ -2339,11 +2339,19 @@ pub(crate) fn view_selection_context(
         component["definition"]["id"].as_str().unwrap_or("unknown"),
         component["definition"]["version"].as_u64().unwrap_or(0)
     );
-    let step_detail = if component["model_ref"]["kind"].as_str() == Some("operation_use") {
-        view_step_detail(db, view_id, instance_id).ok()
-    } else {
-        None
-    };
+    let (step_status, step_detail, step_error) =
+        if component["model_ref"]["kind"].as_str() == Some("operation_use") {
+            match view_step_detail(db, view_id, instance_id) {
+                Ok(detail) => ("resolved", Some(detail), Value::Null),
+                Err(error) => (
+                    "error",
+                    None,
+                    json!({"code": error.code, "message": error.message}),
+                ),
+            }
+        } else {
+            ("not_applicable", None, Value::Null)
+        };
     Ok(json!({
         "view_id": view_id,
         "document_id": document.document_id,
@@ -2351,8 +2359,135 @@ pub(crate) fn view_selection_context(
         "instance_id": instance_id,
         "renderer_key": renderer_key,
         "component": component,
-        "step_detail": step_detail
+        "step_detail": {
+            "status": step_status,
+            "detail": step_detail,
+            "error": step_error
+        }
     }))
+}
+
+fn find_slot_position(value: &Value, instance_id: &str) -> Option<(String, String, usize)> {
+    if let Some(slots) = value.get("slots").and_then(Value::as_object) {
+        for (slot, children) in slots {
+            if let Some(children) = children.as_array() {
+                for (index, child) in children.iter().enumerate() {
+                    if child["instance_id"].as_str() == Some(instance_id) {
+                        return Some((
+                            value["instance_id"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                            slot.clone(),
+                            index,
+                        ));
+                    }
+                    if let Some(found) = find_slot_position(child, instance_id) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(nodes) = value
+        .get("workflow")
+        .and_then(|workflow| workflow.get("nodes"))
+        .and_then(Value::as_array)
+    {
+        for node in nodes {
+            if let Some(component) = node.get("component") {
+                if let Some(found) = find_slot_position(component, instance_id) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn operation_changes(
+    changeset: &ViewChangeSet,
+    before: &Value,
+    after: &Value,
+    before_bindings: &[Value],
+    after_bindings: &[Value],
+) -> Vec<Value> {
+    let operations = serde_json::to_value(&changeset.operations).unwrap_or_else(|_| json!([]));
+    operations
+        .as_array()
+        .map(|operations| {
+            operations
+                .iter()
+                .map(|operation| {
+                    let kind = operation["kind"].as_str().unwrap_or("unknown");
+                    let instance_id = operation["instance_id"].as_str().unwrap_or("");
+                    match kind {
+                        "update_props" => json!({
+                            "kind": kind,
+                            "instance_id": instance_id,
+                            "property": operation["property"],
+                            "before": find_component(before, instance_id)
+                                .and_then(|c| c["props"].get(operation["property"].as_str()?))
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                            "after": find_component(after, instance_id)
+                                .and_then(|c| c["props"].get(operation["property"].as_str()?))
+                                .cloned()
+                                .unwrap_or(Value::Null)
+                        }),
+                        "add_slot_child" => json!({
+                            "kind": kind,
+                            "instance_id": operation["child"]["instance_id"],
+                            "parent_instance_id": operation["parent_instance_id"],
+                            "slot_id": operation["slot_id"],
+                            "position": find_slot_position(after, operation["child"]["instance_id"].as_str().unwrap_or("")),
+                            "before": Value::Null,
+                            "after": find_component(after, operation["child"]["instance_id"].as_str().unwrap_or(""))
+                        }),
+                        "remove_instance" => json!({
+                            "kind": kind,
+                            "instance_id": instance_id,
+                            "before": find_component(before, instance_id),
+                            "after": Value::Null
+                        }),
+                        "move_slot_child" => json!({
+                            "kind": kind,
+                            "instance_id": instance_id,
+                            "before": find_slot_position(before, instance_id),
+                            "after": find_slot_position(after, instance_id)
+                        }),
+                        "set_visual" => json!({
+                            "kind": kind,
+                            "instance_id": instance_id,
+                            "before": find_component(before, instance_id).map(|c| c["visual"].clone()),
+                            "after": find_component(after, instance_id).map(|c| c["visual"].clone())
+                        }),
+                        "connect" | "disconnect" => json!({
+                            "kind": kind,
+                            "workflow_instance_id": operation["workflow_instance_id"],
+                            "edge": operation["edge"]
+                        }),
+                        "add_binding" | "replace_binding" => {
+                            let binding_id = operation["binding"]["binding_id"].as_str().unwrap_or("");
+                            json!({
+                                "kind": kind,
+                                "binding_id": binding_id,
+                                "before": before_bindings.iter().find(|b| b["binding_id"].as_str() == Some(binding_id)),
+                                "after": after_bindings.iter().find(|b| b["binding_id"].as_str() == Some(binding_id))
+                            })
+                        }
+                        "remove_binding" => json!({
+                            "kind": kind,
+                            "binding_id": operation["binding_id"],
+                            "before": before_bindings.iter().find(|b| b["binding_id"] == operation["binding_id"]),
+                            "after": Value::Null
+                        }),
+                        _ => json!({"kind": kind, "operation": operation}),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn view_proposal(
@@ -2398,6 +2533,24 @@ pub(crate) fn view_proposal(
         .map_err(|e| CliError::internal(format!("ViewDocument root 无效：{e}")))?;
     let after = serde_json::to_value(&result.document.root)
         .map_err(|e| CliError::internal(format!("ViewDocument root 无效：{e}")))?;
+    let before_bindings = document
+        .bindings
+        .iter()
+        .filter_map(|binding| serde_json::to_value(binding).ok())
+        .collect::<Vec<_>>();
+    let after_bindings = result
+        .document
+        .bindings
+        .iter()
+        .filter_map(|binding| serde_json::to_value(binding).ok())
+        .collect::<Vec<_>>();
+    let operation_changes = operation_changes(
+        changeset,
+        &before,
+        &after,
+        &before_bindings,
+        &after_bindings,
+    );
     let changes = result
         .changed_instances
         .iter()
@@ -2418,6 +2571,7 @@ pub(crate) fn view_proposal(
         "changed_instances": result.changed_instances,
         "affected_bindings": result.affected_bindings,
         "requires_confirmation": result.requires_confirmation,
+        "operation_changes": operation_changes,
         "changes": changes
     }))
 }
