@@ -148,6 +148,7 @@ pub struct ExecutionEventView {
     pub checks: Vec<Value>,
     pub controls: Vec<Value>,
     pub lineage: Vec<Value>,
+    pub actual_parameters: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -459,6 +460,7 @@ pub fn build(
             checks: event["checks"].as_array().cloned().unwrap_or_default(),
             controls: event["controls"].as_array().cloned().unwrap_or_default(),
             lineage: event["lineage"].as_array().cloned().unwrap_or_default(),
+            actual_parameters: event["actual_parameters"].as_array().cloned().unwrap_or_default(),
         })
         .collect();
 

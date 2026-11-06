@@ -58,6 +58,8 @@ function setup(name, assayId, assayTitle, steps) {
     title: `${name} view`,
     document: projected,
   }).result;
+  assert.equal(projected.root.workflow.nodes.length, 1);
+  assert.equal(projected.root.workflow.nodes[0].component.props.label, steps[0].title);
   return {project, block, protocol, design, run, view, projected};
 }
 
@@ -82,8 +84,12 @@ function event(run, protocol, assayId, payload) {
   const checked = event(ctx.run, ctx.protocol, "cck8", {
     event_type: "operation", content: "Plate checked",
     checks: [{check_id: "plate_ready", status: "passed", checked_by: "operator-1"}],
+    actual_parameters: [{key: "incubation_time", value: 3, unit: "h", source: "protocol"}],
+    controls: [{role: "blank", status: "passed", experimental_unit: "well B1"}],
   });
   assert.equal(checked.data.checks[0].status, "passed");
+  assert.equal(checked.data.actual_parameters[0].key, "incubation_time");
+  assert.equal(checked.data.controls[0].experimental_unit, "well B1");
   const raw = event(ctx.run, ctx.protocol, "cck8", {
     event_type: "measurement", content: "Raw OD",
     readouts: [{endpoint: "OD450", value: 0.735, unit: "AU", sample_id: "A1", result_kind: "raw"}],
