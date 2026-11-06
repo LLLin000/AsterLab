@@ -877,17 +877,21 @@ fn view_document_persists_and_revises_against_real_core_refs() {
             "view_id": view_id,
             "instance_id": "planned_plate",
             "calculator_instance_id": "reagent_calculator",
+            "volume_per_well": 10.0,
+            "volume_unit": "uL",
             "extra_ratio": 0.1
         }),
     );
     assert_eq!(data_preview["result"]["calculation"]["total_volume"], 11.0);
-    assert_eq!(data_preview["result"]["table"]["rows"][0][3], 11.0);
+    assert_eq!(data_preview["result"]["table"]["rows"][0][4], 11.0);
     let second = cli.run(
         "view.data_preview",
         &json!({
             "view_id": view_id,
             "instance_id": "planned_plate_2",
             "calculator_instance_id": "reagent_calculator",
+            "volume_per_well": 10.0,
+            "volume_unit": "uL",
             "extra_ratio": 0.1
         }),
     );
@@ -897,6 +901,8 @@ fn view_document_persists_and_revises_against_real_core_refs() {
             "view_id": view_id,
             "instance_id": "planned_plate_copy",
             "calculator_instance_id": "reagent_calculator",
+            "volume_per_well": 10.0,
+            "volume_unit": "uL",
             "extra_ratio": 0.1
         }),
     );
@@ -943,7 +949,7 @@ fn view_document_persists_and_revises_against_real_core_refs() {
     let view_v2_id = view_v2["result"]["view"]["id"].as_str().unwrap();
     let v2_preview = cli.run(
         "view.data_preview",
-        &json!({"view_id": view_v2_id, "instance_id": "planned_plate", "calculator_instance_id": "reagent_calculator", "extra_ratio": 0.1}),
+        &json!({"view_id": view_v2_id, "instance_id": "planned_plate", "calculator_instance_id": "reagent_calculator", "volume_per_well": 10.0, "volume_unit": "uL", "extra_ratio": 0.1}),
     );
     assert_eq!(
         v2_preview["result"]["plate"]["positions"][0]["position_id"],

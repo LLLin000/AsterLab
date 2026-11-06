@@ -23,6 +23,9 @@ input,button,textarea{font:inherit;color:inherit}input,textarea{width:100%;backg
   <h1>实验组件视图</h1>
   <div class="muted">输入 View ID 打开已保存的组件文档。</div>
   <div class="row" style="margin:10px 0 18px"><input id="viewId" placeholder="View ID"><button class="primary" id="load">打开</button></div>
+  <div class="muted">数据预览输入（缺省则保持 Unresolved）</div>
+  <div class="row" style="margin:8px 0"><input id="volume" placeholder="每孔体积"><input id="unit" placeholder="单位，如 uL"></div>
+  <div class="row" style="margin:0 0 18px"><input id="extraRatio" placeholder="额外比例，如 0.1"></div>
   <div class="muted">流程仅展示视图组织；科学执行顺序仍由 Protocol 管理。</div>
   <div id="status" class="muted" style="margin-top:18px"></div>
 </aside>
@@ -81,7 +84,10 @@ async function loadData(instanceId){
   const calc=all.find(c=>c.definition?.id==="tool.calculator");
   const params=new URLSearchParams({instance_id:instanceId});
   if(calc)params.set("calculator_instance_id",calc.instance_id);
-  params.set("extra_ratio","0.1");
+  const volume=$("volume").value.trim(); const unit=$("unit").value.trim(); const extra=$("extraRatio").value.trim();
+  if(volume)params.set("volume_per_well",volume);
+  if(unit)params.set("volume_unit",unit);
+  if(extra)params.set("extra_ratio",extra);
   $("status").textContent="加载数据…";
   const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?${params}`); const j=await r.json();
   if(!r.ok){$("status").textContent=j.error||"数据加载失败";return}

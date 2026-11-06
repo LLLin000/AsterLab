@@ -156,6 +156,10 @@ struct ViewDataQuery {
     #[serde(default)]
     calculator_instance_id: Option<String>,
     #[serde(default)]
+    volume_per_well: Option<f64>,
+    #[serde(default)]
+    volume_unit: Option<String>,
+    #[serde(default)]
     extra_ratio: Option<f64>,
 }
 async fn get_view_data(
@@ -170,6 +174,8 @@ async fn get_view_data(
             "view_id": id,
             "instance_id": query.instance_id,
             "calculator_instance_id": query.calculator_instance_id,
+            "volume_per_well": query.volume_per_well,
+            "volume_unit": query.volume_unit,
             "extra_ratio": query.extra_ratio
         }),
     )

@@ -574,6 +574,8 @@ struct ViewDataPreview {
     #[serde(default)]
     volume_per_well: Option<f64>,
     #[serde(default)]
+    volume_unit: Option<String>,
+    #[serde(default)]
     extra_ratio: Option<f64>,
 }
 #[derive(Debug, Deserialize)]
@@ -2322,7 +2324,6 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
     let registry = load_labware_registry(db)?;
     let plate = project_well_plate(&plan, &registry, &container_id)
         .map_err(|issues| CliError::input(issues.join("；")))?;
-    let mut volume_per_well = i.volume_per_well;
     if let Some(calculator_id) = &i.calculator_instance_id {
         let calculator = find_component(&document["root"], calculator_id)
             .ok_or_else(|| CliError::input("calculator_instance_id 不存在"))?;
@@ -2336,31 +2337,12 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
                 "calculator tool_ref 必须是 tool.reagent_total@1",
             ));
         }
-        let binding = document["bindings"]
-            .as_array()
-            .and_then(|bindings| {
-                bindings.iter().find(|binding| {
-                    binding["target"]["instance_id"].as_str() == Some(calculator_id.as_str())
-                        && binding["target"]["port_id"].as_str() == Some("values")
-                })
-            })
-            .ok_or_else(|| CliError::input("calculator 缺少 values 的 DataBinding"))?;
-        let source_id = binding["source"]["instance_id"]
-            .as_str()
-            .ok_or_else(|| CliError::input("calculator binding source 必须是 ComponentPort"))?;
-        let source = find_component(&document["root"], source_id)
-            .ok_or_else(|| CliError::input("calculator binding source 组件不存在"))?;
-        volume_per_well = source["props"]["rows"]
-            .as_array()
-            .and_then(|rows| rows.first())
-            .and_then(|row| row.as_array())
-            .and_then(|row| row.first())
-            .and_then(Value::as_f64);
-        if volume_per_well.is_none() {
-            return Err(CliError::input("calculator binding 的表格单元格不是数值"));
-        }
     }
+    let volume_per_well = i.volume_per_well;
     let mut calculation = calculate_reagent(&plate, volume_per_well, i.extra_ratio);
+    if let Some(unit) = &i.volume_unit {
+        calculation.unit = Some(unit.clone());
+    }
     if let (Some(volume), Some(ratio)) = (volume_per_well, i.extra_ratio) {
         let invocation = run_reagent_tool(&plate, volume, ratio).map_err(|issues| {
             CliError::input(
@@ -5132,7 +5114,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["project_id","protocol_version_id","scope"],"properties":{"project_id":{"type":"string"},"protocol_version_id":{"type":"string"},"scope":{"type":"object"},"document_id":{"type":"string"}}})
         }
         "view.data_preview" => {
-            json!({"type":"object","additionalProperties":false,"required":["view_id","instance_id"],"properties":{"view_id":{"type":"string"},"instance_id":{"type":"string"},"calculator_instance_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["view_id","instance_id"],"properties":{"view_id":{"type":"string"},"instance_id":{"type":"string"},"calculator_instance_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"volume_unit":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
         }
         "view.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","document"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160},"document":{"type":"object"}}})

@@ -26,7 +26,7 @@ cargo fmt --all -- --check  only pre-existing design_commands.rs diff
 
 ## 未闭合 / 阻断
 
-- Gate 3 已支持 `calculator_instance_id` + DataBinding 解析计算器输入;显式 volume 仍作为回退。
+- Gate 3 使用显式 `volume_per_well` + `volume_unit` + `extra_ratio`；`calculator_instance_id` 仅校验 tool_ref。通用 Table 行列映射尚未实现。
 - 已用 Design v1→v2 验证新 View 重算 A1→A2,旧 View 仍为 A1。
 - `view.data_preview` 只支持一个绑定到 `PlannedContainer` 的 WellPlate 实例;尚未验证多板/多实例选择。
 - Gate 4 API/HTML 数据预览入口已加入;已用本地浏览器打开 seeded View,选中 operation 后点击数据预览,显示 1 孔 × 10 µL × 1.1 = 11;截图 `target/view-ui-data-preview-fixed.png`。

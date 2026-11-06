@@ -30,6 +30,10 @@ pub struct ReagentCalculation {
     pub unresolved: Vec<String>,
     pub provenance: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub input_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_action: Option<String>,
 }
 
@@ -90,6 +94,8 @@ pub fn calculate_reagent(
             total_volume: None,
             unresolved,
             provenance: vec![format!("container:{}", plate.container_id)],
+            unit: None,
+            input_refs: vec![],
             tool_action: None,
         };
     };
@@ -103,6 +109,8 @@ pub fn calculate_reagent(
             total_volume: None,
             unresolved,
             provenance: vec![format!("container:{}", plate.container_id)],
+            unit: None,
+            input_refs: vec![],
             tool_action: None,
         };
     }
@@ -116,6 +124,8 @@ pub fn calculate_reagent(
             total_volume: None,
             unresolved,
             provenance: vec![format!("container:{}", plate.container_id)],
+            unit: None,
+            input_refs: vec![],
             tool_action: None,
         };
     };
@@ -129,6 +139,8 @@ pub fn calculate_reagent(
             total_volume: None,
             unresolved,
             provenance: vec![format!("container:{}", plate.container_id)],
+            unit: None,
+            input_refs: vec![],
             tool_action: None,
         };
     }
@@ -144,6 +156,8 @@ pub fn calculate_reagent(
             format!("container:{}", plate.container_id),
             "formula:positions*volume*(1+extra_ratio)".into(),
         ],
+        unit: None,
+        input_refs: vec![],
         tool_action: Some("tool.reagent_total@1".into()),
     }
 }
@@ -224,6 +238,7 @@ pub fn reagent_table(calc: &ReagentCalculation) -> TableProjection {
         json!(calc.assigned_positions),
         calc.volume_per_position
             .map_or(Value::Null, |value| json!(value)),
+        calc.unit.clone().map_or(Value::Null, Value::String),
         calc.extra_ratio.map_or(Value::Null, |value| json!(value)),
         calc.total_volume.map_or(Value::Null, |value| json!(value)),
     ];
@@ -231,6 +246,7 @@ pub fn reagent_table(calc: &ReagentCalculation) -> TableProjection {
         columns: vec![
             "assigned_positions".into(),
             "volume_per_position".into(),
+            "unit".into(),
             "extra_ratio".into(),
             "total_volume".into(),
         ],
@@ -299,7 +315,7 @@ mod tests {
         let calc = calculate_reagent(&plate, Some(10.0), Some(0.1));
         assert_eq!(calc.total_volume, Some(11.0));
         let table = reagent_table(&calc);
-        assert_eq!(table.columns.len(), 4);
-        assert_eq!(table.rows[0][3], 11.0);
+        assert_eq!(table.columns.len(), 5);
+        assert_eq!(table.rows[0][4], 11.0);
     }
 }
