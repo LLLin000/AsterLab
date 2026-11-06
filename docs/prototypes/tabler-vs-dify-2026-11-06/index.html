@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AsterLab · CCK-8 实验设计</title>
+<style>
+:root{--bg:#0b0c0e;--surface:#111316;--surface2:#17191d;--line:#262a30;--line2:#343943;--ink:#f2f4f7;--muted:#8b929d;--accent:#7c8cff;--accent-soft:#20243a;--success:#4ade80;--warning:#f2b84b}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.55 Inter,"Segoe UI","Microsoft YaHei",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}
+.app{height:100%;display:grid;grid-template-columns:56px minmax(0,1fr)}
+.rail{border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:8px;background:#0d0f12}
+.brand{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#6878ff,#8d6bff);display:grid;place-items:center;font-size:11px;font-weight:800;letter-spacing:-.05em;margin-bottom:10px}
+.rail button{width:38px;height:38px;border:0;border-radius:8px;background:transparent;color:var(--muted);display:grid;place-items:center}.rail button:hover{background:var(--surface2);color:var(--ink)}.rail button.active{background:var(--accent-soft);color:var(--accent)}
+.rail .spacer{flex:1}.rail .avatar{width:26px;height:26px;border-radius:50%;background:#2b3040;color:#c8cdfa;display:grid;place-items:center;font-size:10px}
+.main{min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
+.topbar{height:56px;flex:0 0 56px;display:flex;align-items:center;gap:14px;padding:0 24px;border-bottom:1px solid var(--line)}
+.crumb{font-size:12px;color:var(--muted)}.crumb b{color:var(--ink);font-weight:550}.draft{margin-left:2px;font-size:10px;color:var(--warning);border:1px solid #4b3b1f;background:#241d10;border-radius:5px;padding:2px 6px}
+.top-actions{margin-left:auto;display:flex;align-items:center;gap:8px}.status{font-size:11px;color:var(--muted)}.status i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);margin-right:5px;vertical-align:1px}
+.btn{height:32px;border:1px solid var(--line2);border-radius:7px;background:var(--surface);color:var(--ink);padding:0 11px}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}.btn.ghost:hover{background:var(--surface2);color:var(--ink)}
+.workspace{flex:0 0 280px;min-height:220px;margin:16px 24px 0;border:1px solid var(--line);border-radius:12px;background:var(--surface);position:relative;overflow:hidden}
+.canvas-head{display:flex;align-items:flex-start;justify-content:space-between;padding:16px 18px 0;position:relative;z-index:2}.canvas-title{font-size:12px;color:var(--muted)}.canvas-title b{display:block;font-size:14px;color:var(--ink);font-weight:600;margin-bottom:1px}.canvas-note{font-size:11px;color:#6f7783}
+.canvas{position:absolute;inset:0;background-image:radial-gradient(#30343d 1px,transparent 1px);background-size:16px 16px;background-position:0 0}
+.node{position:absolute;width:96px;padding:12px 8px;border:1px solid var(--line2);border-radius:12px;background:#14171c;text-align:center;box-shadow:0 8px 24px #0003}.node.selected{border-color:var(--accent);background:#181c2a;box-shadow:0 0 0 1px var(--accent),0 12px 30px #0005}.node .ico{width:36px;height:36px;margin:0 auto 8px;display:grid;place-items:center;color:#dfe4ff}.node .ico svg{width:30px;height:30px}.node .name{font-size:12px;font-weight:550}.node .kind{font-size:10px;color:var(--muted);margin-top:2px}
+.node.a{left:290px;top:110px}.node.b{left:520px;top:110px}.node.c{left:750px;top:110px}
+.edge{position:absolute;height:1px;top:156px;background:#454b57}.edge.e1{left:388px;width:128px}.edge.e2{left:618px;width:128px}.edge:after{content:"";position:absolute;right:-1px;top:-3px;border-left:6px solid #454b57;border-top:4px solid transparent;border-bottom:4px solid transparent}
+.tools{position:absolute;left:16px;bottom:14px;display:flex;gap:2px;background:#0f1216;border:1px solid var(--line);border-radius:8px;padding:3px}.tools button{width:30px;height:28px;border:0;background:transparent;color:var(--muted);border-radius:5px}.tools button:hover{background:var(--surface2);color:var(--ink)}.zoom{position:absolute;right:16px;bottom:16px;font-size:10px;color:var(--muted)}
+.detail{flex:1 1 0;min-height:0;margin:10px 24px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.detail-head{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:16px 18px 12px;border-bottom:1px solid var(--line)}.detail-head h1{font-size:19px;line-height:1.2;margin:0;font-weight:650;letter-spacing:-.02em}.detail-head .meta{font-size:11px;color:var(--muted);margin-top:4px}.detail-actions{margin-left:auto;display:flex;align-items:center;gap:5px}.pill{font-size:10px;color:var(--muted);border:1px solid var(--line2);border-radius:99px;padding:3px 7px}.pill.warn{color:var(--warning);border-color:#4b3b1f;background:#241d10}
+.detail-scroll{flex:1 1 0;overflow:auto;padding:16px 18px 18px}
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;align-items:start}
+.card{border:1px solid var(--line);border-radius:10px;background:var(--surface2);min-width:0}.plate{grid-column:span 8}.calc{grid-column:span 4}.tablecard{grid-column:span 12}
+.card-head{display:flex;align-items:flex-start;gap:8px;padding:13px 14px 0}.card-head h2{font-size:14px;margin:0;font-weight:600}.card-head .sub{font-size:10px;color:var(--muted);margin-top:2px}.card-head .right{margin-left:auto;font-size:10px;color:var(--muted)}
+.card-body{padding:12px 14px 14px}
+.plate-meta{display:flex;gap:12px;color:var(--muted);font-size:10px;margin-bottom:8px}.wellgrid{display:grid;grid-template-columns:18px repeat(12,18px);gap:4px;align-items:center;justify-content:start}.axis{font-size:9px;color:#69717d;text-align:center}.well{width:18px;height:18px;border-radius:50%;border:1px solid #343a45;background:#20242b}.well.on{background:var(--accent);border-color:var(--accent)}.well.control{background:#243027;border-color:#33503e}.legend{display:flex;gap:12px;color:var(--muted);font-size:10px;margin-top:9px}.dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px;background:var(--accent)}.dot.muted{background:#3a414c}
+.calc-formula{font:11px/1.6 "SFMono-Regular",Consolas,monospace;color:#b7c0ff;background:#171b2a;border:1px solid #2b3353;border-radius:6px;padding:8px 10px;margin-bottom:10px}.field{display:grid;gap:3px;margin-bottom:8px}.field label{font-size:10px;color:var(--muted)}.input{height:30px;border:1px solid var(--line2);border-radius:6px;background:#101216;padding:0 8px;display:flex;align-items:center;justify-content:space-between;font-size:12px}.input small{color:var(--muted);font-size:10px}.result{border-top:1px solid var(--line);margin-top:9px;padding-top:9px;display:flex;justify-content:space-between;align-items:end}.result b{font-size:17px;font-weight:650;color:#e8ebff}.result span{font-size:10px;color:var(--muted)}
+.table{width:100%;border-collapse:collapse;font-size:11px}.table th{font-size:10px;font-weight:500;color:var(--muted);text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}.table td{padding:8px;border-bottom:1px solid #20242a}.table tr:last-child td{border-bottom:0}.table td:first-child,.table th:first-child{padding-left:0}.table .right{text-align:right;font-variant-numeric:tabular-nums}.tag{font-size:10px;color:var(--muted);border:1px solid var(--line2);border-radius:4px;padding:1px 5px}.savehint{font-size:10px;color:var(--warning);margin-left:8px}.addrow{display:inline-flex;height:28px;align-items:center;gap:4px;border:1px solid var(--line2);border-radius:6px;background:transparent;color:var(--muted);padding:0 8px;font-size:11px;margin-top:9px}
+.note{grid-column:span 12;padding:11px 14px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}.note b{color:#c3c8d2;font-weight:500}
+@media(max-width:1100px){.plate{grid-column:span 12}.calc{grid-column:span 12}.node.a{left:170px}.node.b{left:380px}.node.c{left:590px}.edge.e1{left:268px;width:108px}.edge.e2{left:478px;width:108px}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="rail" aria-label="主导航">
+  <div class="brand">AL</div>
+  <button class="active" title="实验设计" aria-label="实验设计"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
+  <button title="Protocol" aria-label="Protocol"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4"/></svg></button>
+  <button title="实验运行" aria-label="实验运行"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></button>
+  <button title="资料与工具" aria-label="资料与工具"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 4h10v16H7zM9 4V2h6v2M10 8h4M10 12h4M10 16h3"/></svg></button>
+  <div class="spacer"></div>
+  <div class="avatar">L</div>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <div class="crumb">CCK-8 <span>/</span> <b>实验设计</b> <span class="draft">Draft v3</span></div>
+    <div class="top-actions"><span class="status"><i></i>已保存</span><button class="btn ghost">分享</button><button class="btn">预览</button><button class="btn primary">运行</button></div>
+  </header>
+  <section class="workspace">
+    <div class="canvas-head"><div class="canvas-title"><b>Workflow</b>受限 DAG · 视觉连接不改变 Protocol 顺序</div><div class="canvas-note">revision 52</div></div>
+    <div class="canvas">
+      <div class="node a"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></div><div class="name">铺板</div><div class="kind">Plating</div></div>
+      <div class="node b selected"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M19 5l-9 9-2 5 5-2 9-9M5 19l2-2"/></svg></div><div class="name">加药</div><div class="kind">Treatment</div></div>
+      <div class="node c"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></div><div class="name">孵育</div><div class="kind">Incubation</div></div>
+      <div class="edge e1"></div><div class="edge e2"></div>
+      <div class="tools"><button>↖</button><button>✋</button><button>⤢</button><button>＋</button><button>−</button></div><div class="zoom">100%</div>
+    </div>
+  </section>
+  <section class="detail">
+    <div class="detail-head">
+      <div><h1>加药处理</h1><div class="meta">参数 · 来源 · 状态 · Treatment</div></div>
+      <div class="detail-actions"><span class="pill warn">待审 1</span><button class="btn ghost">+ 组件</button><button class="btn ghost">⋯</button></div>
+    </div>
+    <div class="detail-scroll">
+      <div class="grid">
+        <section class="card plate">
+          <div class="card-head"><div><h2>孔板布局</h2><div class="sub">PlannedContainer · labware.cell_culture_96</div></div><div class="right">96 wells · 24 planned</div></div>
+          <div class="card-body">
+            <div class="plate-meta"><span>8 × 12</span><span>选择 24 / 96</span><span>目标：加药处理</span></div>
+            <div class="wellgrid"><span></span><span class="axis">1</span><span class="axis">2</span><span class="axis">3</span><span class="axis">4</span><span class="axis">5</span><span class="axis">6</span><span class="axis">7</span><span class="axis">8</span><span class="axis">9</span><span class="axis">10</span><span class="axis">11</span><span class="axis">12</span></div>
+            <div class="wellgrid" style="margin-top:4px"><span class="axis">A</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
+            <div class="wellgrid" style="margin-top:4px"><span class="axis">B</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
+            <div class="wellgrid" style="margin-top:4px"><span class="axis">C</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
+            <div class="wellgrid" style="margin-top:4px"><span class="axis">D</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well control"></i><i class="well control"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
+            <div class="wellgrid" style="margin-top:4px"><span class="axis">E</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
+            <div class="wellgrid" style="margin-top:4px"><span class="axis">F</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
+            <div class="wellgrid" style="margin-top:4px"><span class="axis">G</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
+            <div class="wellgrid" style="margin-top:4px"><span class="axis">H</span><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
+            <div class="legend"><span><i class="dot"></i>加药组 · 24</span><span><i class="dot muted"></i>空白/未分配</span><span>选择不会修改 DesignVersion</span></div>
+          </div>
+        </section>
+        <section class="card calc">
+          <div class="card-head"><div><h2>配液计算</h2><div class="sub">tool.reagent_total@1</div></div><div class="right">rev 52</div></div>
+          <div class="card-body">
+            <div class="calc-formula">C1 × V1 = C2 × V2</div>
+            <div class="field"><label>目标孔位</label><div class="input">A1, B1, C1 <small>24 孔</small></div></div>
+            <div class="field"><label>每孔体积</label><div class="input">10 <small>µL</small></div></div>
+            <div class="field"><label>额外比例</label><div class="input">0.10 <small>10%</small></div></div>
+            <div class="result"><b>275.0 µL</b><span>含 10% 余量 · 已解析</span></div>
+          </div>
+        </section>
+        <section class="card tablecard">
+          <div class="card-head"><div><h2>实验分组表</h2><div class="sub">Group assignment · editable</div></div><div class="right"><span class="tag">未保存</span><span class="savehint">草稿</span></div></div>
+          <div class="card-body">
+            <table class="table"><thead><tr><th>组别</th><th>样本</th><th>处理</th><th class="right">浓度</th><th class="right">孔数</th><th>状态</th></tr></thead><tbody>
+              <tr><td>对照组</td><td>L929</td><td>Vehicle</td><td class="right">0 µM</td><td class="right">3</td><td><span class="tag">已确认</span></td></tr>
+              <tr><td>低剂量</td><td>L929</td><td>Compound A</td><td class="right">5 µM</td><td class="right">3</td><td><span class="tag">已确认</span></td></tr>
+              <tr><td>高剂量</td><td>L929</td><td>Compound A</td><td class="right">20 µM</td><td class="right">3</td><td><span class="tag">待确认</span></td></tr>
+            </tbody></table>
+            <button class="addrow">+ 添加组</button>
+          </div>
+        </section>
+        <div class="note"><b>说明</b> Markdown / 实验注意事项可在这里编辑与预览。</div>
+      </div>
+    </div>
+  </section>
+</div>
+</div>
+</body>
+</html>
