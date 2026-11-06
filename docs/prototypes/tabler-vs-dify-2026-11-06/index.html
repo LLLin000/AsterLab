@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AsterLab · CCK-8 实验设计</title>
 <style>
-:root{--bg:#0b0c0e;--surface:#111316;--surface2:#17191d;--line:#262a30;--line2:#343943;--ink:#f2f4f7;--muted:#8b929d;--accent:#7c8cff;--accent-soft:#20243a;--success:#4ade80;--warning:#f2b84b}
+html[data-theme="light"]{--bg:#f7f8fa;--surface:#fff;--surface2:#fbfcfe;--line:#e4e7ec;--line2:#cfd6e2;--ink:#202938;--muted:#667085;--accent:#2563eb;--accent-soft:#eff4ff;--success:#16803c;--warning:#b54708}:root{--bg:#0b0c0e;--surface:#111316;--surface2:#17191d;--line:#262a30;--line2:#343943;--ink:#f2f4f7;--muted:#8b929d;--accent:#7c8cff;--accent-soft:#20243a;--success:#4ade80;--warning:#f2b84b}
 *{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.55 Inter,"Segoe UI","Microsoft YaHei",sans-serif}
 button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}
 .app{height:100%;display:grid;grid-template-columns:56px minmax(0,1fr)}
@@ -21,18 +21,18 @@ button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}
 .workspace{flex:0 0 280px;min-height:220px;margin:16px 24px 0;border:1px solid var(--line);border-radius:12px;background:var(--surface);position:relative;overflow:hidden}
 .canvas-head{display:flex;align-items:flex-start;justify-content:space-between;padding:16px 18px 0;position:relative;z-index:2}.canvas-title{font-size:12px;color:var(--muted)}.canvas-title b{display:block;font-size:14px;color:var(--ink);font-weight:600;margin-bottom:1px}.canvas-note{font-size:11px;color:#6f7783}
 .canvas{position:absolute;inset:0;background-image:radial-gradient(#30343d 1px,transparent 1px);background-size:16px 16px;background-position:0 0}
-.node{position:absolute;width:96px;padding:12px 8px;border:1px solid var(--line2);border-radius:12px;background:#14171c;text-align:center;box-shadow:0 8px 24px #0003}.node.selected{border-color:var(--accent);background:#181c2a;box-shadow:0 0 0 1px var(--accent),0 12px 30px #0005}.node .ico{width:36px;height:36px;margin:0 auto 8px;display:grid;place-items:center;color:#dfe4ff}.node .ico svg{width:30px;height:30px}.node .name{font-size:12px;font-weight:550}.node .kind{font-size:10px;color:var(--muted);margin-top:2px}
-.node.a{left:290px;top:110px}.node.b{left:520px;top:110px}.node.c{left:750px;top:110px}
-.edge{position:absolute;height:1px;top:156px;background:#454b57}.edge.e1{left:388px;width:128px}.edge.e2{left:618px;width:128px}.edge:after{content:"";position:absolute;right:-1px;top:-3px;border-left:6px solid #454b57;border-top:4px solid transparent;border-bottom:4px solid transparent}
+.node{position:absolute;width:112px;height:104px;border:1px solid transparent;border-radius:16px;background:transparent;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px}.node:hover{background:#ffffff08}.node.selected{background:var(--accent-soft);border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}.node .ico{width:52px;height:52px;display:grid;place-items:center;color:var(--ink)}.node.selected .ico{color:var(--accent)}.node .ico svg{width:48px;height:48px;stroke-width:1.35}.node .name{font-size:14px;font-weight:600;letter-spacing:-.01em}.node .kind{font-size:11px;color:var(--muted);margin-top:-2px}
+.node.a{left:286px;top:100px}.node.b{left:520px;top:100px}.node.c{left:754px;top:100px}
+.edge{position:absolute;height:1px;top:152px;background:#454b57}.edge.e1{left:398px;width:122px}.edge.e2{left:632px;width:122px}.edge:after{content:"";position:absolute;right:-1px;top:-3px;border-left:6px solid #454b57;border-top:4px solid transparent;border-bottom:4px solid transparent}
 .tools{position:absolute;left:16px;bottom:14px;display:flex;gap:2px;background:#0f1216;border:1px solid var(--line);border-radius:8px;padding:3px}.tools button{width:30px;height:28px;border:0;background:transparent;color:var(--muted);border-radius:5px}.tools button:hover{background:var(--surface2);color:var(--ink)}.zoom{position:absolute;right:16px;bottom:16px;font-size:10px;color:var(--muted)}
 .detail{flex:1 1 0;min-height:0;margin:10px 24px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
 .detail-head{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:16px 18px 12px;border-bottom:1px solid var(--line)}.detail-head h1{font-size:19px;line-height:1.2;margin:0;font-weight:650;letter-spacing:-.02em}.detail-head .meta{font-size:11px;color:var(--muted);margin-top:4px}.detail-actions{margin-left:auto;display:flex;align-items:center;gap:5px}.pill{font-size:10px;color:var(--muted);border:1px solid var(--line2);border-radius:99px;padding:3px 7px}.pill.warn{color:var(--warning);border-color:#4b3b1f;background:#241d10}
-.detail-scroll{flex:1 1 0;overflow:auto;padding:16px 18px 18px}
+.detail-scroll{flex:1 1 0;overflow:auto;padding:16px 18px 18px}.workspace.compact{flex-basis:140px;min-height:140px}.workspace.compact .canvas{opacity:.9}.workspace.compact .node{top:18px!important;transform:scale(.62);transform-origin:top center}.workspace.compact .edge{top:58px}.workspace.compact .canvas-head{padding-top:12px}
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;align-items:start}
 .card{border:1px solid var(--line);border-radius:10px;background:var(--surface2);min-width:0}.plate{grid-column:span 8}.calc{grid-column:span 4}.tablecard{grid-column:span 12}
 .card-head{display:flex;align-items:flex-start;gap:8px;padding:13px 14px 0}.card-head h2{font-size:14px;margin:0;font-weight:600}.card-head .sub{font-size:10px;color:var(--muted);margin-top:2px}.card-head .right{margin-left:auto;font-size:10px;color:var(--muted)}
 .card-body{padding:12px 14px 14px}
-.plate-meta{display:flex;gap:12px;color:var(--muted);font-size:10px;margin-bottom:8px}.wellgrid{display:grid;grid-template-columns:18px repeat(12,18px);gap:4px;align-items:center;justify-content:start}.axis{font-size:9px;color:#69717d;text-align:center}.well{width:18px;height:18px;border-radius:50%;border:1px solid #343a45;background:#20242b}.well.on{background:var(--accent);border-color:var(--accent)}.well.control{background:#243027;border-color:#33503e}.legend{display:flex;gap:12px;color:var(--muted);font-size:10px;margin-top:9px}.dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px;background:var(--accent)}.dot.muted{background:#3a414c}
+.plate-meta{display:flex;gap:12px;color:var(--muted);font-size:10px;margin-bottom:8px}.plate-body{display:grid;grid-template-columns:auto minmax(190px,1fr);gap:20px;align-items:start}.wellgrid{display:grid;grid-template-columns:18px repeat(12,22px);gap:5px;align-items:center;justify-content:start}.plate-side{border-left:1px solid var(--line);padding-left:16px;min-height:180px}.side-k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}.side-v{font-size:13px;margin:2px 0 12px}.side-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;border:1px solid var(--line2);border-radius:5px;padding:3px 7px;color:var(--muted)}.axis{font-size:9px;color:#69717d;text-align:center}.well{width:18px;height:18px;border-radius:50%;border:1px solid #343a45;background:#20242b}.well.on{background:var(--accent);border-color:var(--accent)}.well.control{background:#243027;border-color:#33503e}.legend{display:flex;gap:12px;color:var(--muted);font-size:10px;margin-top:9px}.dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px;background:var(--accent)}.dot.muted{background:#3a414c}
 .calc-formula{font:11px/1.6 "SFMono-Regular",Consolas,monospace;color:#b7c0ff;background:#171b2a;border:1px solid #2b3353;border-radius:6px;padding:8px 10px;margin-bottom:10px}.field{display:grid;gap:3px;margin-bottom:8px}.field label{font-size:10px;color:var(--muted)}.input{height:30px;border:1px solid var(--line2);border-radius:6px;background:#101216;padding:0 8px;display:flex;align-items:center;justify-content:space-between;font-size:12px}.input small{color:var(--muted);font-size:10px}.result{border-top:1px solid var(--line);margin-top:9px;padding-top:9px;display:flex;justify-content:space-between;align-items:end}.result b{font-size:17px;font-weight:650;color:#e8ebff}.result span{font-size:10px;color:var(--muted)}
 .table{width:100%;border-collapse:collapse;font-size:11px}.table th{font-size:10px;font-weight:500;color:var(--muted);text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}.table td{padding:8px;border-bottom:1px solid #20242a}.table tr:last-child td{border-bottom:0}.table td:first-child,.table th:first-child{padding-left:0}.table .right{text-align:right;font-variant-numeric:tabular-nums}.tag{font-size:10px;color:var(--muted);border:1px solid var(--line2);border-radius:4px;padding:1px 5px}.savehint{font-size:10px;color:var(--warning);margin-left:8px}.addrow{display:inline-flex;height:28px;align-items:center;gap:4px;border:1px solid var(--line2);border-radius:6px;background:transparent;color:var(--muted);padding:0 8px;font-size:11px;margin-top:9px}
 .note{grid-column:span 12;padding:11px 14px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}.note b{color:#c3c8d2;font-weight:500}
@@ -53,10 +53,10 @@ button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}
 <div class="main">
   <header class="topbar">
     <div class="crumb">CCK-8 <span>/</span> <b>实验设计</b> <span class="draft">Draft v3</span></div>
-    <div class="top-actions"><span class="status"><i></i>已保存</span><button class="btn ghost">分享</button><button class="btn">预览</button><button class="btn primary">运行</button></div>
+    <div class="top-actions"><span class="status"><i></i>已保存</span><button class="btn ghost" id="themeToggle">◐</button><button class="btn ghost">分享</button><button class="btn">预览</button><button class="btn primary">运行</button></div>
   </header>
   <section class="workspace">
-    <div class="canvas-head"><div class="canvas-title"><b>Workflow</b>受限 DAG · 视觉连接不改变 Protocol 顺序</div><div class="canvas-note">revision 52</div></div>
+    <div class="canvas-head"><div class="canvas-title"><b>Workflow</b>受限 DAG · 视觉连接不改变 Protocol 顺序</div><div class="canvas-note">revision 52 <button class="btn ghost" id="collapseWorkflow" style="margin-left:8px;height:24px;font-size:10px">收起流程</button></div></div>
     <div class="canvas">
       <div class="node a"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></div><div class="name">铺板</div><div class="kind">Plating</div></div>
       <div class="node b selected"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M19 5l-9 9-2 5 5-2 9-9M5 19l2-2"/></svg></div><div class="name">加药</div><div class="kind">Treatment</div></div>
@@ -75,6 +75,7 @@ button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}
         <section class="card plate">
           <div class="card-head"><div><h2>孔板布局</h2><div class="sub">PlannedContainer · labware.cell_culture_96</div></div><div class="right">96 wells · 24 planned</div></div>
           <div class="card-body">
+            <div class="plate-body"><div>
             <div class="plate-meta"><span>8 × 12</span><span>选择 24 / 96</span><span>目标：加药处理</span></div>
             <div class="wellgrid"><span></span><span class="axis">1</span><span class="axis">2</span><span class="axis">3</span><span class="axis">4</span><span class="axis">5</span><span class="axis">6</span><span class="axis">7</span><span class="axis">8</span><span class="axis">9</span><span class="axis">10</span><span class="axis">11</span><span class="axis">12</span></div>
             <div class="wellgrid" style="margin-top:4px"><span class="axis">A</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
@@ -86,16 +87,17 @@ button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}
             <div class="wellgrid" style="margin-top:4px"><span class="axis">G</span><i class="well on"></i><i class="well on"></i><i class="well on"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
             <div class="wellgrid" style="margin-top:4px"><span class="axis">H</span><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i><i class="well"></i></div>
             <div class="legend"><span><i class="dot"></i>加药组 · 24</span><span><i class="dot muted"></i>空白/未分配</span><span>选择不会修改 DesignVersion</span></div>
+            </div><aside class="plate-side"><div class="side-k">当前选择</div><div class="side-v">A1–C3 <span class="side-badge">9 孔</span></div><div class="side-k">分组</div><div class="side-v">加药组 · Compound A</div><div class="side-k">处理体积</div><div class="side-v">10 µL / 孔</div><div class="side-k">解析状态</div><div class="side-v" style="color:#f2b84b">目标 24 孔 · 待确认 15</div></aside></div>
           </div>
         </section>
         <section class="card calc">
           <div class="card-head"><div><h2>配液计算</h2><div class="sub">tool.reagent_total@1</div></div><div class="right">rev 52</div></div>
           <div class="card-body">
-            <div class="calc-formula">C1 × V1 = C2 × V2</div>
+            <div class="calc-formula">positions × volume × (1 + extra) = total</div>
             <div class="field"><label>目标孔位</label><div class="input">A1, B1, C1 <small>24 孔</small></div></div>
             <div class="field"><label>每孔体积</label><div class="input">10 <small>µL</small></div></div>
             <div class="field"><label>额外比例</label><div class="input">0.10 <small>10%</small></div></div>
-            <div class="result"><b>275.0 µL</b><span>含 10% 余量 · 已解析</span></div>
+            <div class="result"><b>264.0 µL</b><span>24 × 10 µL × 1.10 · 已解析</span></div>
           </div>
         </section>
         <section class="card tablecard">
@@ -115,5 +117,9 @@ button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}
   </section>
 </div>
 </div>
+<script>
+const ws=document.querySelector('.workspace');const cw=document.getElementById('collapseWorkflow');cw.onclick=()=>{ws.classList.toggle('compact');cw.textContent=ws.classList.contains('compact')?'展开流程':'收起流程'};
+const th=document.getElementById('themeToggle');th.onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'};
+</script>
 </body>
 </html>
