@@ -351,6 +351,9 @@ mod tests {
         culture.containers[0].profile_ref.id = "labware.cell_culture_6".into();
         let plate = project_well_plate(&culture, &registry, "plate-1").unwrap();
         assert_eq!((plate.rows, plate.columns), (2, 3));
+        culture.containers[0].profile_ref.id = "labware.cell_culture_24".into();
+        let plate = project_well_plate(&culture, &registry, "plate-1").unwrap();
+        assert_eq!((plate.rows, plate.columns), (4, 6));
     }
 
     #[test]

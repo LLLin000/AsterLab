@@ -258,6 +258,15 @@ pub fn default_labware_registry() -> LabwareRegistry {
         .unwrap();
     registry
         .register(base(
+            "labware.cell_culture_24",
+            LabwareFamily::CellCulturePlate,
+            "24-well cell culture plate",
+            4,
+            6,
+        ))
+        .unwrap();
+    registry
+        .register(base(
             "labware.transwell_insert_6",
             LabwareFamily::TranswellInsert,
             "Transwell insert for 6-well plate",

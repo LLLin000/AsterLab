@@ -21,10 +21,10 @@ input,button,textarea{font:inherit;color:inherit}input,textarea{width:100%;backg
 .zoom{position:absolute;right:14px;bottom:10px;font-size:11px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:3px 9px}
 .crumbs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.crumb{background:var(--soft);border:0;border-radius:99px;padding:3px 9px;font-size:12px}.crumb-sep{color:var(--muted);font-size:11px}
 .detail{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 30px rgba(20,28,48,.05);padding:18px 20px}.detail-head{display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:14px}.detail-title{font-size:18px;font-weight:700}.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:26px}.param{display:flex;flex-direction:column;gap:2px;margin:8px 0}.param b{font-weight:550}.param span{color:var(--muted);font-size:12px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.plate-card{grid-column:span 2}.plate{display:grid;grid-template-columns:repeat(12,17px);gap:3px;margin:8px 0}.well{width:17px;height:17px;padding:0;border-radius:4px;border:1px solid var(--line);background:#f7f8fb;font-size:7px;color:var(--muted)}.well.assigned{background:#eef0ff;border-color:#c7cdfd;color:var(--ink)}.well.selected{background:var(--accent);border-color:var(--accent);color:#fff}.well:disabled{opacity:.25;cursor:default}.card{border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}.card h3{font-size:12px;margin:0 0 3px}.card .tag{font-size:10px;color:var(--muted)}.card button{margin-top:7px;padding:4px 8px;font-size:11px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.plate-card{grid-column:span 2}.plate{display:grid;gap:3px;margin:8px 0}.well{width:17px;height:17px;padding:0;border-radius:4px;border:1px solid var(--line);background:#f7f8fb;font-size:7px;color:var(--muted)}.well.assigned{background:#eef0ff;border-color:#c7cdfd;color:var(--ink)}.well.selected{background:var(--accent);border-color:var(--accent);color:#fff}.well:disabled{opacity:.25;cursor:default}.card{border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}.card h3{font-size:12px;margin:0 0 3px}.card .tag{font-size:10px;color:var(--muted)}.card button{margin-top:7px;padding:4px 8px;font-size:11px}
 textarea{min-height:54px;resize:vertical}
 table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:6px 4px}th{color:var(--muted);font-weight:500}
-#status{min-height:18px}.preview{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+#status{min-height:18px}.preview{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}.card-actions{display:inline-flex;gap:2px;float:right}.card-actions button{width:24px;height:24px;padding:0;border:0;background:transparent;color:var(--muted)}.library{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}.library h3{width:100%;margin:0 0 2px}.library button{font-size:12px;padding:4px 8px}.selection-detail{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.7}
 @media(max-width:900px){.shell{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--line)}main{padding:14px}.detail-grid{grid-template-columns:1fr}.workspace{min-height:560px}}
 </style>
 </head>
@@ -33,14 +33,8 @@ table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}th,td{te
 <aside>
   <h1>实验组件视图</h1>
   <div class="muted">打开已保存的 ViewDocument。</div>
-  <div class="row"><input id="viewId" placeholder="View ID"><button class="primary" id="load">打开</button></div>
-  <div class="muted" style="margin-top:6px">数据预览输入（缺省则保持 Unresolved）</div>
-  <div class="stack">
-    <input id="positions" placeholder="目标孔位，如 A1,B1">
-    <div class="row"><input id="volume" placeholder="每孔体积"><input id="unit" placeholder="单位，如 uL"></div>
-    <input id="extraRatio" placeholder="额外比例，如 0.1">
-  </div>
-  <div class="muted">画布只表达 View 的视觉组织；科学执行顺序仍由 Protocol 决定。</div>
+  <div class="row"><input id="viewId" placeholder="View ID"><button class="primary" id="openView">打开</button></div>
+  <div class="muted">画布只表达 View 的视觉组织；科学执行顺序仍由 Protocol 决定。计算输入在步骤详情中。</div>
   <div id="status" class="muted"></div>
 </aside>
 <main>
@@ -76,6 +70,7 @@ let viewId="", data=null, node=null, selected=null, stack=[], mode="select";
 let view={x:0,y:0,k:1}, pan=null, dragNode=null, nodeMoved=false;
 let history=[], future=[], saveChain=Promise.resolve();
 let paramCache=new Map(), plateCache=new Map(), plateSelections=new Map();
+let calcState={positions:"",volume:"",unit:"",extra:""};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const defName=c=>c?.definition?.id||"component";
@@ -152,10 +147,17 @@ async function loadParams(c,boxId){
   const pending=unresolved.map(key=>{const item=(result.unresolved_parameters||[]).find(p=>p.slot===key||p.label===key)||{};return `<div class="param"><b>${esc(item.label||key)}</b><span>待确认${item.unit?" · "+esc(item.unit):""}</span></div>`}).join("");
   box.innerHTML=rows+pending||`<div class="muted">该步骤没有已解析参数。</div>`;
 }
+function fmtSelection(plate,instanceId){
+  const assigned=new Map((plate.positions||[]).map(p=>[p.position_id,p]));
+  const selected=plateSelections.get(instanceId)||new Set();
+  const lines=[...selected].sort().map(id=>{const hit=assigned.get(id);const target=hit?.targets?.[0]?.target?.id||"未关联目标";return `${esc(id)} · ${esc(target)}`});
+  return lines.join("<br>")||`<span class="muted">尚未选择孔位。选择不是 DesignVersion 修改。</span>`;
+}
 function plateMarkup(plate,instanceId){
   const assigned=new Map((plate.positions||[]).map(p=>[p.position_id,p]));
   const selected=plateSelections.get(instanceId)||new Set();
-  const rowCount=Math.max(1,Number(plate.rows)||8), colCount=Math.max(1,Number(plate.columns)||12);
+  const rowCount=Number(plate.rows), colCount=Number(plate.columns);
+  if(!rowCount||!colCount)return `<div class="muted">Profile 几何未解析：${esc(plate.profile_id||"unknown")}</div>`;
   const rows=Array.from({length:rowCount},(_,i)=>String.fromCharCode(65+i));
   let html="";
   for(const row of rows)for(let col=1;col<=colCount;col++){
@@ -163,7 +165,13 @@ function plateMarkup(plate,instanceId){
     const target=hit?.targets?.[0]?.target?.id||"";
     html+=`<button class="well ${hit?"assigned":""} ${on?"selected":""}" data-well="${id}" data-plate="${esc(instanceId)}" ${hit?"":"disabled"} title="${id}${hit?" · "+esc(target):" · 未分配"}">${id}</button>`
   }
-  return `<div class="plate">${html}</div><div class="muted">已选 ${selected.size} / 计划 ${assigned.size} 孔</div>`;
+  return `<div class="plate" style="grid-template-columns:repeat(${colCount},17px)">${html}</div><div class="muted">已选 ${selected.size} / 计划 ${assigned.size} 孔（选择不修改 DesignVersion）</div><div class="selection-detail">${fmtSelection(plate,instanceId)}</div>`;
+}
+function bindPlateBox(box,plate,instanceId){
+  box.querySelectorAll(".well").forEach(btn=>btn.onclick=()=>toggleWell(instanceId,btn.dataset.well,plate,box.id));
+}
+function syncCalcPositions(){
+  const setEl=$("calc-positions");if(setEl)setEl.value=calcState.positions;
 }
 async function loadPlate(instanceId,boxId){
   let plate=plateCache.get(instanceId);
@@ -173,42 +181,88 @@ async function loadPlate(instanceId,boxId){
       const j=await r.json(); if(!r.ok)throw new Error(j.error||"孔位读取失败"); plate=(j.result??j).plate; plateCache.set(instanceId,plate);
     }catch(e){const box=$(boxId);if(box)box.innerHTML=`<div class="muted">${esc(e.message)}</div>`;return}
   }
-  if(!plateSelections.has(instanceId))plateSelections.set(instanceId,new Set((plate.positions||[]).map(p=>p.position_id)));
-  const box=$(boxId);if(!box)return;box.innerHTML=plateMarkup(plate,instanceId);
-  box.querySelectorAll(".well").forEach(btn=>btn.onclick=()=>{
-    const set=plateSelections.get(instanceId)||new Set();
-    if(set.has(btn.dataset.well))set.delete(btn.dataset.well);else set.add(btn.dataset.well);
-    plateSelections.set(instanceId,set);box.innerHTML=plateMarkup(plate,instanceId);
-    box.querySelectorAll(".well").forEach(b=>b.onclick=()=>toggleWell(instanceId,b.dataset.well,plate,boxId));
-  });
+  if(!plateSelections.has(instanceId))plateSelections.set(instanceId,new Set());
+  const box=$(boxId);if(!box)return;box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId);
 }
 function toggleWell(instanceId,well,plate,boxId){
   const set=plateSelections.get(instanceId)||new Set();if(set.has(well))set.delete(well);else set.add(well);plateSelections.set(instanceId,set);
-  const box=$(boxId);if(box){box.innerHTML=plateMarkup(plate,instanceId);box.querySelectorAll(".well").forEach(b=>b.onclick=()=>toggleWell(instanceId,b.dataset.well,plate,boxId))}
+  calcState.positions=[...set].sort().join(",");syncCalcPositions();
+  const box=$(boxId);if(box){box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId)}
+}
+function selectAllWells(instanceId,all){
+  const plate=plateCache.get(instanceId);if(!plate)return;
+  const set=all?new Set((plate.positions||[]).map(p=>p.position_id)):new Set();
+  plateSelections.set(instanceId,set);calcState.positions=[...set].sort().join(",");syncCalcPositions();
+  const box=$(`plate-body-${instanceId}`);if(box){box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId)}
+}
+function cardActions(child){
+  return `<div class="card-actions"><button data-move-up="${esc(child.instance_id)}" title="上移">↑</button><button data-move-down="${esc(child.instance_id)}" title="下移">↓</button><button data-remove="${esc(child.instance_id)}" title="删除">×</button></div>`;
 }
 function renderDetail(){
   const c=selected;
   if(!c){$("detail").innerHTML='<div class="muted">选择一个步骤查看详情。</div>';return}
   const slots=slotsOf(c); const cards=[];
   for(const [slot,children] of Object.entries(slots)) for(const child of children){
+    const actions=cardActions(child);
     if(child.definition.id==="content.note"){
-      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><div class="tag">${esc(defName(child))}</div><textarea id="note-${esc(child.instance_id)}">${esc(child.props?.text||"")}</textarea><div class="row" style="margin-top:6px"><button data-save="${esc(child.instance_id)}">保存说明</button></div></div>`);
+      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${esc(defName(child))}</div><textarea id="note-${esc(child.instance_id)}">${esc(child.props?.text||"")}</textarea><div class="row" style="margin-top:6px"><button data-save="${esc(child.instance_id)}">保存说明</button></div></div>`);
     } else if(child.definition.id==="workflow"||child.workflow?.nodes?.length){
-      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><div class="tag">嵌套流程 · ${workflowOf(child).length} 步</div><button data-enter="${esc(child.instance_id)}">进入</button></div>`);
+      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">嵌套流程 · ${workflowOf(child).length} 步</div><button data-enter="${esc(child.instance_id)}">进入</button></div>`);
     } else if(child.definition.id==="lab.well_plate"){
-      cards.push(`<div class="card plate-card"><h3>${esc(nodeTitle(child))}</h3><div class="tag">${esc(slot)} · ${esc(child.model_ref?.container_id||"")}</div><div id="plate-body-${esc(child.instance_id)}"><div class="muted">读取孔位…</div></div><button data-plate-preview="${esc(child.instance_id)}">计算选中孔位</button></div>`);
+      cards.push(`<div class="card plate-card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${esc(slot)} · ${esc(child.model_ref?.container_id||"")} · PlannedContainer</div><div id="plate-body-${esc(child.instance_id)}"><div class="muted">读取孔位…</div></div><div class="row"><button data-plate-all="${esc(child.instance_id)}">选择全部</button><button data-plate-clear="${esc(child.instance_id)}">清空</button><button data-plate-preview="${esc(child.instance_id)}">计算选中孔位</button></div></div>`);
+    } else if(child.definition.id==="tool.calculator"){
+      cards.push(`<div class="card calc-card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${esc(child.props?.tool_ref||defName(child))}</div><div class="stack"><input id="calc-positions" placeholder="目标孔位，如 A1,B1" value="${esc(calcState.positions)}"><div class="row"><input id="calc-volume" placeholder="每孔体积" value="${esc(calcState.volume)}"><input id="calc-unit" placeholder="单位，如 uL" value="${esc(calcState.unit)}"></div><input id="calc-extra" placeholder="额外比例，如 0.1" value="${esc(calcState.extra)}"></div><button data-calc="${esc(child.instance_id)}">计算</button></div>`);
     } else {
-      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))}</h3><div class="tag">${esc(slot)}</div><div class="muted">${esc(child.definition.id)}</div></div>`);
+      cards.push(`<div class="card"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${esc(slot)}</div><div class="muted">${esc(child.definition.id)}</div></div>`);
     }
   }
   const ref=c.model_ref||{};
   const refLine=ref.kind==="operation_use"?`Protocol step · ${esc(ref.step?.step_path||"")}`:ref.kind?esc(ref.kind):"未绑定科学对象";
-  $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted">${esc(defName(c))} · ${esc(c.instance_id)}</div></div><button id="collapse" aria-label="收起">⌃</button></div><div class="detail-grid"><div><h3>操作参数</h3><div id="params-${esc(c.instance_id)}" class="muted">读取 ProtocolPreview…</div><div class="param"><b>科学引用</b><span>${refLine}</span></div></div><div><h3>相关组件</h3><div class="cards">${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div></div></div><div id="preview" class="preview"></div>`;
+  const library=[["layout.section","区块"],["content.table","表格"],["tool.calculator","计算器"],["content.note","说明"],["workflow","子流程"],["lab.well_plate","孔板"]].map(([kind,label])=>`<button data-add="${kind}">+ ${label}</button>`).join("");
+  $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted">${esc(defName(c))} · ${esc(c.instance_id)}</div></div><button id="collapse" aria-label="收起">⌃</button></div><div class="detail-grid"><div><h3>操作参数</h3><div id="params-${esc(c.instance_id)}" class="muted">读取 ProtocolPreview…</div><div class="param"><b>科学引用</b><span>${refLine}</span></div></div><div><h3>相关组件</h3><div class="cards">${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div><div class="library"><h3>添加组件</h3>${library}</div></div></div><div id="preview" class="preview"></div>`;
   $("detail").querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>{const child=findById(data.latest_version.data.root,b.dataset.enter);if(child)enterComponent(child)});
   $("detail").querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>saveNote(b.dataset.save));
-  $("detail").querySelectorAll('[data-plate-preview]').forEach(b=>b.onclick=()=>{const set=[...plateSelections.get(b.dataset.platePreview)||[]].sort();if(!set.length){$("status").textContent="请先选择至少一个孔位";return}loadData(b.dataset.platePreview,set.join(","))});
+  $("detail").querySelectorAll('[data-plate-preview]').forEach(b=>b.onclick=()=>{const set=[...plateSelections.get(b.dataset.platePreview)||[]].sort();if(!set.length){$("status").textContent="请先选择至少一个孔位";return}calcState.positions=set.join(",");syncCalcPositions();loadData(b.dataset.platePreview,set.join(","))});
+  $("detail").querySelectorAll('[data-plate-all]').forEach(b=>b.onclick=()=>selectAllWells(b.dataset.plateAll,true));
+  $("detail").querySelectorAll('[data-plate-clear]').forEach(b=>b.onclick=()=>selectAllWells(b.dataset.plateClear,false));
+  $("detail").querySelectorAll('[data-calc]').forEach(b=>b.onclick=()=>{const firstPlate=Object.values(slots).flat().find(x=>x.definition.id==="lab.well_plate");const positions=calcState.positions||[...(plateSelections.get(firstPlate?.instance_id)||[])].sort().join(",");calcState.positions=positions;syncCalcPositions();loadData(firstPlate?.instance_id,positions)});
+  $("detail").querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>mutate([{kind:"remove_instance",instance_id:b.dataset.remove}],"删除组件"));
+  $("detail").querySelectorAll('[data-move-up]').forEach(b=>b.onclick=()=>moveComponent(b.dataset.moveUp,-1));
+  $("detail").querySelectorAll('[data-move-down]').forEach(b=>b.onclick=()=>moveComponent(b.dataset.moveDown,1));
+  $("detail").querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>addComponent(b.dataset.add));
+  $("detail").querySelectorAll('#calc-positions,#calc-volume,#calc-unit,#calc-extra').forEach(input=>input.oninput=()=>{calcState.positions=$("calc-positions")?.value||"";calcState.volume=$("calc-volume")?.value||"";calcState.unit=$("calc-unit")?.value||"";calcState.extra=$("calc-extra")?.value||""});
   Object.values(slots).flat().filter(child=>child.definition.id==="lab.well_plate").forEach(child=>loadPlate(child.instance_id,`plate-body-${child.instance_id}`));
   loadParams(c,`params-${c.instance_id}`);
+}
+function siblingChildren(id){
+  if(!selected)return null;const list=Object.values(slotsOf(selected)).flat();const index=list.findIndex(x=>x.instance_id===id);return index<0?null:{list,index}
+}
+function moveComponent(id,delta){
+  const info=siblingChildren(id);if(!info)return;const target=info.index+delta;if(target<0||target>=info.list.length)return;
+  mutate([{kind:"move_slot_child",instance_id:id,target_parent_instance_id:selected.instance_id,target_slot_id:"detail",target_index:target}],"移动组件")
+}
+async function addComponent(kind){
+  if(!selected||!data)return;
+  const child={instance_id:crypto.randomUUID(),definition:{id:kind,version:1},props:{},slots:{}};
+  if(kind==="workflow")child.workflow={nodes:[],edges:[]};
+  if(kind==="tool.calculator")child.props={tool_ref:"tool.reagent_total@1"};
+  if(kind==="content.table")child.props={rows:[]};
+  if(kind==="lab.well_plate"){
+    const existing=[];const walk=c=>{if(c.definition?.id==="lab.well_plate")existing.push(c);Object.values(c.slots||{}).flat().forEach(walk);(c.workflow?.nodes||[]).forEach(n=>walk(n.component))};walk(data.latest_version.data.root);
+    if(!existing.length){$("status").textContent="没有可引用的 PlannedContainer";return}
+    child.model_ref=existing[0].model_ref;
+  }
+  await mutate([{kind:"add_slot_child",parent_instance_id:selected.instance_id,slot_id:"detail",child}],`添加 ${kind}`)
+}
+async function mutate(operations,label){
+  if(!data)return;
+  const task=async()=>{
+    const doc=data.latest_version.data;const changeset={changeset_id:`ui-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["view-ui"]};
+    $("status").textContent=`${label}…`;const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});const j=await r.json();
+    if(!r.ok){$("status").textContent=j.error||`${label}失败`;await load(true,true);throw new Error(j.error||label)}
+    await load(true,true);$("status").textContent=`${label}已保存`
+  };
+  const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run
 }
 function render(){renderCrumbs();renderCanvas();renderDetail();$("workspaceTitle").textContent=(data?.latest_version?.data?.root?.props?.title)||"AsterLab / CCK-8 Assay";const d=data?.latest_version?.data;$("workspaceSub").textContent=d?`View revision ${d.revision} · ${esc(d.document_id).slice(0,8)}`:"Protocol · View"}
 async function load(preserveHistory=false,preserveUi=false){
@@ -222,6 +276,7 @@ async function load(preserveHistory=false,preserveUi=false){
   }else{
     node=root;stack=node?[node]:[];selected=workflowOf(node)[0]?.component||node;
     paramCache.clear();plateCache.clear();plateSelections.clear();
+    calcState={positions:"",volume:"",unit:"",extra:""};
   }
   if(!preserveHistory){history=[];future=[]}
   render();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`
@@ -253,12 +308,14 @@ function persistVisual(instanceId,pos){
 async function loadData(instanceId,positionsOverride){
   if(!data)return;const all=[];const walk=c=>{all.push(c);Object.values(c.slots||{}).flat().forEach(walk);(c.workflow?.nodes||[]).forEach(n=>walk(n.component))};walk(data.latest_version.data.root);const calc=all.find(c=>c.definition?.id==="tool.calculator");
   const params=new URLSearchParams({instance_id:instanceId});if(calc)params.set("calculator_instance_id",calc.instance_id);
-  const positions=positionsOverride??$("positions").value.trim();
-  if(positionsOverride)$("positions").value=positions;
+  const positions=positionsOverride??calcState.positions;
+  if(positionsOverride)calcState.positions=positions;
   if(positions)params.set("position_ids",positions);
-  if($("volume").value.trim())params.set("volume_per_well",$("volume").value.trim());if($("unit").value.trim())params.set("volume_unit",$("unit").value.trim());if($("extraRatio").value.trim())params.set("extra_ratio",$("extraRatio").value.trim());
-  $("status").textContent="加载数据…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?${params}`);const j=await r.json();if(!r.ok){$("status").textContent=j.error||"数据加载失败";return}const payload=j.result??j;const table=payload.table;const box=$("preview");if(!box)return;
-  box.innerHTML=`<h3>数据预览</h3><table><thead><tr>${table.columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table><div class="muted">${esc(table.unresolved.join(", ")||"resolved")}</div>`;$("status").textContent="数据已加载"
+  if(calcState.volume)params.set("volume_per_well",calcState.volume);
+  if(calcState.unit)params.set("volume_unit",calcState.unit);
+  if(calcState.extra)params.set("extra_ratio",calcState.extra);
+  $("status").textContent="加载数据…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?${params}`);const j=await r.json();if(!r.ok){$("status").textContent=j.error||"数据加载失败";return}const payload=j.result??j;const table=payload.table;const calcResult=payload.calculation||{};const box=$("preview");if(!box)return;
+  box.innerHTML=`<h3>数据预览</h3><table><thead><tr>${table.columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table><div class="muted">${esc(table.unresolved.join(", ")||"resolved")} · ${esc(calcResult.tool_action||"tool action")} · 使用 ${esc(calcResult.assigned_positions??"未解析")} 孔 · 单位 ${esc(calcResult.unit||"未解析")} · ${esc(calcResult.state||"")}</div>`;$("status").textContent="数据已加载"
 }
 function startNodeDrag(ev,c){
   if(mode==="hand")return;ev.stopPropagation();const B=nodeBox(c);const start=screenToCanvas(ev.clientX,ev.clientY);
@@ -288,7 +345,7 @@ $("canvas").addEventListener("wheel",e=>{e.preventDefault();const p=screenToCanv
 $("canvas").addEventListener("pointerdown",e=>{if(e.target.closest(".wnode"))return;pan={sx:e.clientX,sy:e.clientY,vx:view.x,vy:view.y,k:view.k};$("canvas").classList.add("grabbing")});
 window.addEventListener("pointermove",e=>{if(!pan)return;const a=screenToSvg(pan.sx,pan.sy),b=screenToSvg(e.clientX,e.clientY);view.x=pan.vx+(b.x-a.x)/pan.k;view.y=pan.vy+(b.y-a.y)/pan.k;renderCanvas()});
 window.addEventListener("pointerup",()=>{pan=null;$("canvas").classList.remove("grabbing")});
-$("load").onclick=load;
+$("openView").onclick=load;
 </script>
 </body>
 </html>

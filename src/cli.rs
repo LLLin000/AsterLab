@@ -2271,6 +2271,25 @@ pub(crate) fn view_step_detail(
         })
         .cloned()
         .ok_or_else(|| CliError::missing(format!("ProtocolPreview 中没有步骤 {step_path}")))?;
+    if step["source_block_version_id"].as_str() != Some(block_version_id) {
+        return Err(CliError::input(format!(
+            "步骤 {step_path} 的 BlockVersion 与引用中的 {block_version_id} 不一致"
+        )));
+    }
+    let scope: ProtocolScope = serde_json::from_value(
+        step_ref
+            .get("scope")
+            .cloned()
+            .unwrap_or_else(|| json!({"kind":"unscoped"})),
+    )
+    .map_err(|e| CliError::input(format!("operation_use scope 无效：{e}")))?;
+    let design_version_id = view_design_version(&document)?;
+    let context = DbComponentContext::with_design(db, &project_id, design_version_id.as_deref());
+    if !context.scope_exists(protocol_version_id, &scope) {
+        return Err(CliError::input(format!(
+            "步骤 {step_path} 的科学 Scope 不属于当前 View 的 DesignVersion"
+        )));
+    }
     Ok(json!({
         "view_id": view_id,
         "instance_id": instance_id,
