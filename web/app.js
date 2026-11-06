@@ -40,25 +40,13 @@ function graph(){
   if(!node||!node.workflow)return {nodes:[],edges:[]};
   const nodes=node.workflow.nodes||[];
   const edges=node.workflow.edges||[];
-  if(window.dagre&&nodes.length){
-    try{
-      const g=new dagre.graphlib.Graph();
-      g.setGraph({rankdir:"LR",nodesep:46,ranksep:96,marginx:40,marginy:40});
-      g.setDefaultEdgeLabel(()=>({}));
-      nodes.forEach(n=>g.setNode(n.node_id,{width:76,height:120}));
-      edges.forEach(e=>{if(g.hasNode(e.from)&&g.hasNode(e.to))g.setEdge(e.from,e.to)});
-      dagre.layout(g);
-      nodes.forEach((n,i)=>{
-        const c=n.component;const v=c.visual||{};const p=g.node(n.node_id);
-        if(typeof v.x==="number"&&typeof v.y==="number"){c._vx=v.x;c._vy=v.y}
-        else if(p){c._vx=p.x-38;c._vy=p.y-38}
-        else{c._vx=80+i*190;c._vy=150}
-      });
-      return {nodes,edges};
-    }catch(e){}
-  }
+  const positions=window.AsterLayout?AsterLayout.layout(nodes,edges,window.dagre):{};
   const gap=190,start=550-((nodes.length-1)*gap)/2-38,y=150;
-  nodes.forEach((n,i)=>{const c=n.component;const v=c.visual||{};if(typeof v.x!=="number"){c._vx=start+i*gap;c._vy=y}else{c._vx=v.x;c._vy=v.y}});
+  nodes.forEach((n,i)=>{
+    const c=n.component,p=positions[n.node_id];
+    if(p){c._vx=p.x;c._vy=p.y}
+    else{c._vx=start+i*gap;c._vy=y}
+  });
   return {nodes,edges};
 }
 function nodeBox(c){return {x:c._vx??80,y:c._vy??175,w:76,h:76}}
@@ -69,10 +57,11 @@ function renderCanvas(){
   const svg=$("canvas"); const {nodes,edges}=graph();
   const byId={}; nodes.forEach(n=>{byId[n.node_id]=n.component;byId[n.component.instance_id]=n.component});
   const edgeMarkup=edges.map(e=>{const a=byId[e.from],b=byId[e.to];if(!a||!b)return "";const A=nodeBox(a),B=nodeBox(b);const x1=A.x+76,y1=A.y+38,x2=B.x,y2=B.y+38;const mid=x1+(x2-x1)/2;return `<path class="edge" d="M${x1} ${y1} C${mid} ${y1},${mid} ${y2},${x2-5} ${y2}"/>`}).join("");
-  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="76" height="76" rx="18"/><circle class="port" cx="0" cy="38" r="3"/><circle class="port" cx="76" cy="38" r="3"/>${rendererFor(c).compact(c)}</g>`}).join("");
+  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="76" height="76" rx="18"/><circle class="port-hit" data-port="in" data-node="${esc(n.node_id)}" cx="0" cy="38" r="8" fill="transparent"/><circle class="port" cx="0" cy="38" r="3" pointer-events="none"/><circle class="port-hit" data-port="out" data-node="${esc(n.node_id)}" cx="76" cy="38" r="8" fill="transparent"/><circle class="port" cx="76" cy="38" r="3" pointer-events="none"/>${rendererFor(c).compact(c)}</g>`}).join("");
   const empty=nodes.length?"":`<text class="empty" x="550" y="260">此 View 还没有工作流节点。</text>`;
   const dots=Array.from({length:16},(_,r)=>Array.from({length:24},(_,c)=>`<circle class="grid-dot" cx="${40+c*44}" cy="${40+r*34}" r="1"/>`).join("")).join("");
   svg.innerHTML=`<defs><pattern id="dots" width="44" height="34" patternUnits="userSpaceOnUse">${dots}</pattern><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b9c0ca"/></marker></defs><rect width="1100" height="560" fill="url(#dots)"/><g id="viewport" transform="translate(${view.x} ${view.y}) scale(${view.k})">${edgeMarkup}${nodeMarkup}${empty}</g>`;
+  svg.querySelectorAll(".port-hit[data-port=out]").forEach(el=>el.addEventListener("pointerdown",ev=>startConnect(ev,el.dataset.node)));
   svg.querySelectorAll(".wnode").forEach(el=>{
     el.addEventListener("pointerdown",ev=>startNodeDrag(ev,byId[el.dataset.node]));
     el.addEventListener("click",ev=>{ev.stopPropagation();if(nodeMoved){nodeMoved=false;return}selectComponent(byId[el.dataset.node])});
@@ -146,7 +135,7 @@ function syncCalcPositions(plateId){
 }
 function tableDraft(child){
   const id=child.instance_id;
-  if(!drafts.has(id))drafts.set(id,{columns:tableColumns(child),rows:(Array.isArray(child.props?.rows)?child.props.rows:[]).map(row=>[...row])});
+  if(!drafts.has(id))drafts.set(id,{columns:tableColumns(child),rows:(Array.isArray(child.props?.rows)?child.props.rows:[]).map(row=>[...row]),token:0});
   return drafts.get(id);
 }
 function noteDraft(child){return drafts.get(child.instance_id)?.text??child.props?.text??""}
@@ -205,11 +194,11 @@ function noteCard(child,actions){
   return `<div class="card note-card ${dirty?"is-dirty":""}" data-instance="${esc(id)}"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${isMd?"Markdown":"说明"} · 实验说明与记录${dirty?" · 未保存":""}</div><textarea id="note-${esc(id)}" placeholder="写下实验说明、假设或注意事项">${esc(text)}</textarea><div class="md-preview" id="md-preview-${esc(id)}" hidden></div><div class="row"><button data-md-toggle="${esc(id)}">预览</button><button data-save="${esc(id)}">保存</button></div></div>`;
 }
 function saveTable(instanceId){
-  const draft=drafts.get(instanceId);if(!draft)return;
+  const draft=drafts.get(instanceId);if(!draft)return;const savedToken=draft.token||0;
   const child=findById(data.latest_version.data.root,instanceId);
   const ops=[{kind:"update_props",instance_id:instanceId,property:"rows",value:draft.rows}];
   if(child?.definition?.id==="content.table")ops.unshift({kind:"update_props",instance_id:instanceId,property:"columns",value:draft.columns});
-  mutate(ops,"保存表格").then(()=>{drafts.delete(instanceId);renderDetail()}).catch(()=>{});
+  mutate(ops,"保存表格").then(()=>{const next=drafts.get(instanceId);if(!next||(next.token||0)===savedToken){drafts.delete(instanceId);renderDetail()}}).catch(()=>{});
 }
 function tableAddColumn(instanceId){
   const child=findById(data.latest_version.data.root,instanceId);if(!child)return;
@@ -297,10 +286,10 @@ function renderDetail(){
       card.querySelectorAll("input").forEach(input=>input.addEventListener("input",()=>{state.positions=$(`calc-${CSS.escape(id)}-positions`)?.value||"";state.volume=$(`calc-${CSS.escape(id)}-volume`)?.value||"";state.unit=$(`calc-${CSS.escape(id)}-unit`)?.value||"";state.extra=$(`calc-${CSS.escape(id)}-extra`)?.value||""}));
     }
     if(card.querySelector("[data-table]")){
-      card.querySelectorAll("[data-colhead]").forEach(input=>input.addEventListener("input",()=>{const draft=tableDraft(findById(data.latest_version.data.root,id));draft.columns[Number(input.dataset.colhead)]=input.value;markDirtyCard(id,true)}));
-      card.querySelectorAll("[data-cell]").forEach(input=>input.addEventListener("input",()=>{const [r,c]=input.dataset.cell.split("-").map(Number);const draft=tableDraft(findById(data.latest_version.data.root,id));draft.rows[r][c]=input.value;markDirtyCard(id,true)}));
+      card.querySelectorAll("[data-colhead]").forEach(input=>input.addEventListener("input",()=>{const draft=tableDraft(findById(data.latest_version.data.root,id));draft.columns[Number(input.dataset.colhead)]=input.value;draft.token=(draft.token||0)+1;markDirtyCard(id,true)}));
+      card.querySelectorAll("[data-cell]").forEach(input=>input.addEventListener("input",()=>{const [r,c]=input.dataset.cell.split("-").map(Number);const draft=tableDraft(findById(data.latest_version.data.root,id));draft.rows[r][c]=input.value;draft.token=(draft.token||0)+1;markDirtyCard(id,true)}));
     }
-    const note=card.querySelector("textarea");if(note)note.addEventListener("input",()=>{drafts.set(id,{text:note.value});markDirtyCard(id,true)});
+    const note=card.querySelector("textarea");if(note)note.addEventListener("input",()=>{drafts.set(id,{text:note.value,token:(drafts.get(id)?.token||0)+1});markDirtyCard(id,true)});
   });
   Object.values(slots).flat().filter(child=>child.definition.id==="lab.well_plate").forEach(child=>loadPlate(child.instance_id,`plate-body-${child.instance_id}`));
   loadParams(c,`params-${c.instance_id}`);
@@ -330,13 +319,15 @@ async function addComponent(kind){
 }
 function commitViewChangeSet(operations,label){
   if(!data)return Promise.reject(new Error("View 未加载"));
+  const targetViewId=viewId;const targetDocumentId=data.latest_version.data.document_id;
   const task=async()=>{
+    if(viewId!==targetViewId||data?.latest_version?.data?.document_id!==targetDocumentId){$("status").textContent="View 已切换，已取消旧保存";throw new Error("view_changed")}
     const doc=data.latest_version.data;
     const changeset={changeset_id:`ui-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["view-ui"]};
     $("status").textContent=`${label}…`;
     const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
     const j=await r.json();
-    if(!r.ok){$("status").textContent=j.error||`${label}失败`;await load(true,true);throw new Error(j.error||label)}
+    if(!r.ok){const message=j.error||`${label}失败`;await load(true,true);$("status").textContent=message;throw new Error(message)}
     await load(true,true);$("status").textContent=`${label}已保存`;
   };
   const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run
@@ -360,9 +351,9 @@ async function load(preserveHistory=false,preserveUi=false){
   render();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`
 }
 async function saveNote(instanceId){
-  if(!data)return;const text=drafts.get(instanceId)?.text??$("note-"+CSS.escape(instanceId))?.value??"";
+  if(!data)return;const draft=drafts.get(instanceId);const savedToken=draft?.token||0;const text=draft?.text??$("note-"+CSS.escape(instanceId))?.value??"";
   await commitViewChangeSet([{kind:"update_props",instance_id:instanceId,property:"text",value:text}],"保存说明");
-  drafts.delete(instanceId);renderDetail();
+  const next=drafts.get(instanceId);if(!next||(next.token||0)===savedToken){drafts.delete(instanceId);renderDetail()}
 }
 function screenToSvg(clientX,clientY){
   const svg=$("canvas"),p=svg.createSVGPoint();p.x=clientX;p.y=clientY;const ctm=svg.getScreenCTM();
@@ -388,6 +379,18 @@ async function loadData(instanceId,positionsOverride,calculatorId){
   if(state?.extra)params.set("extra_ratio",state.extra);
   $("status").textContent="加载数据…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?${params}`);const j=await r.json();if(state&&requestSeq!==state.requestSeq)return;if(!state&&requestSeq!==dataRequestSeq)return;if(!r.ok){$("status").textContent=j.error||"数据加载失败";return}const payload=j.result??j;const table=payload.table;const calcResult=payload.calculation||{};const box=state?$(`calc-${CSS.escape(calculatorId)}-result`):$("preview");if(!box)return;
   box.innerHTML=`<h3>数据预览</h3><table><thead><tr>${table.columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table><div class="muted">${esc(table.unresolved.join(", ")||"resolved")} · ${esc(calcResult.tool_action||"tool action")} · 使用 ${esc(calcResult.assigned_positions??"未解析")} 孔 · 单位 ${esc(calcResult.unit||"未解析")} · ${esc(calcResult.state||"")}</div>`;$("status").textContent="数据已加载"
+}
+let connectDrag=null;
+function startConnect(ev,fromId){
+  if(mode==="hand")return;ev.stopPropagation();ev.preventDefault();
+  const source=(node?.workflow?.nodes||[]).find(n=>n.node_id===fromId)?.component;if(!source)return;
+  const A=nodeBox(source),p0={x:A.x+76,y:A.y+38};
+  const temp=document.createElementNS("http://www.w3.org/2000/svg","path");temp.setAttribute("class","edge temp-edge");temp.setAttribute("d",`M${p0.x} ${p0.y} L${p0.x} ${p0.y}`);document.querySelector("#viewport")?.appendChild(temp);
+  connectDrag={fromId,temp};
+  const hit=e=>[...document.querySelectorAll(".wnode")].find(el=>{const b=el.getBoundingClientRect();return e.clientX>=b.left&&e.clientX<=b.right&&e.clientY>=b.top&&e.clientY<=b.bottom})?.dataset.node||"";
+  const move=e=>{if(!connectDrag)return;const p=screenToCanvas(e.clientX,e.clientY);connectDrag.temp.setAttribute("d",`M${p0.x} ${p0.y} C${p0.x+40} ${p0.y},${p.x-40} ${p.y},${p.x} ${p.y}`);document.querySelectorAll(".wnode.connect-target").forEach(x=>x.classList.remove("connect-target"));const target=hit(e);if(target&&target!==fromId)document.querySelector(`.wnode[data-node="${CSS.escape(target)}"]`)?.classList.add("connect-target")};
+  const up=e=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",up);const drag=connectDrag;connectDrag=null;drag?.temp.remove();document.querySelectorAll(".wnode.connect-target").forEach(x=>x.classList.remove("connect-target"));const target=hit(e);if(!target||target===fromId){$("status").textContent="连接取消：需要选择另一个节点";return}commitViewChangeSet([{kind:"connect",workflow_instance_id:node.instance_id,edge:{from:fromId,to:target}}],"连接节点").catch(()=>{})};
+  window.addEventListener("pointermove",move);window.addEventListener("pointerup",up,{once:true});
 }
 function startNodeDrag(ev,c){
   if(mode==="hand")return;ev.stopPropagation();const B=nodeBox(c);const start=screenToCanvas(ev.clientX,ev.clientY);
