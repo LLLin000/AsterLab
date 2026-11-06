@@ -142,6 +142,12 @@ pub struct ExecutionEventView {
     pub assay_id: Option<String>,
     pub planned_output_id: Option<String>,
     pub occurrence_id: Option<String>, // legacy events have None
+    pub operator: Option<String>,
+    pub sample_ids: Vec<String>,
+    pub readouts: Vec<Value>,
+    pub checks: Vec<Value>,
+    pub controls: Vec<Value>,
+    pub lineage: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -444,6 +450,15 @@ pub fn build(
             assay_id: opt_text(&event["assay_id"]),
             planned_output_id: opt_text(&event["planned_output_id"]),
             occurrence_id: opt_text(&event["occurrence_id"]),
+            operator: opt_text(&event["operator"]),
+            sample_ids: event["sample_ids"]
+                .as_array()
+                .map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+                .unwrap_or_default(),
+            readouts: event["readouts"].as_array().cloned().unwrap_or_default(),
+            checks: event["checks"].as_array().cloned().unwrap_or_default(),
+            controls: event["controls"].as_array().cloned().unwrap_or_default(),
+            lineage: event["lineage"].as_array().cloned().unwrap_or_default(),
         })
         .collect();
 

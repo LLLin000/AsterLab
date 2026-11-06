@@ -97,6 +97,12 @@ async function loadParams(c,boxId){
   }).join("");
   const pending=unresolved.map(key=>{const item=(result.unresolved_parameters||[]).find(p=>p.slot===key||p.label===key)||{};return `<div class="param"><b>${esc(item.label||key)}</b><span>待确认${item.unit?" · "+esc(item.unit):""}</span></div>`}).join("");
   box.innerHTML=rows+pending||`<div class="muted">该步骤没有已解析参数。</div>`;
+  const brief=$(`brief-body-${c.instance_id}`);
+  if(brief){
+    const timeLabel={once:"一次",per_timepoint:"每个时间点",per_assay:"每个检测",unresolved:"待确认"}[step.time_scope]||"未指定";
+    const checks=(step.checks||[]).map(item=>`<li class="op-check ${item.blocking?"is-blocking":""}"><span>${esc(item.label||item.check_id)}</span><small>${esc(item.instruction||"设计时检查项")}${item.blocking?" · 阻塞":" · 提示"}</small></li>`).join("");
+    brief.innerHTML=`<div class="op-brief-instruction">${esc(step.instruction||"此步骤没有说明。")}</div><div class="op-brief-meta"><span>时间范围：${esc(timeLabel)}</span><span>来源：${esc(step.source_block_version_id||"未提供")}</span><span>路径：${esc(step.path||"")}</span></div>${checks?`<ul class="op-brief-checks">${checks}</ul>`:'<div class="muted">设计时未定义检查项。</div>'}`;
+  }
   layoutCards();
 }
 function fmtSelection(plate,instanceId){
@@ -362,10 +368,16 @@ function moduleContext(child,slot,plates,actions){
     drafts:{get:(id)=>drafts.get(id),set:(id,v)=>drafts.set(id,v),clear:(id)=>drafts.delete(id),markDirty:(id)=>markDirtyCard(id,true)}
   };
 }
+function operationBriefCard(c){
+  const id=esc(c.instance_id);
+  return `<section class="card op-brief" data-brief-instance="${id}"><header class="op-brief-head"><div><strong>Execution brief</strong><span>只读 · 解析自冻结前 Protocol</span></div></header><div id="brief-body-${id}" class="op-brief-body"><span class="muted">读取 ProtocolPreview…</span></div></section>`;
+}
 function renderDetail(){
   const c=selected;
   if(!c){$("detail").innerHTML='<div class="muted">选择一个步骤查看详情。</div>';return}
+  const ref=c.model_ref||{};
   const slots=slotsOf(c); const cards=[];
+  if(ref.kind==="operation_use")cards.push(operationBriefCard(c));
   const allChildren=Object.values(slots).flat();
   const plates=allChildren.filter(x=>x.definition.id==="lab.well_plate");
   for(const [slot,children] of Object.entries(slots)) for(const child of children){
@@ -377,7 +389,6 @@ function renderDetail(){
     if(renderer===componentRenderers.unsupported)continue;
     if(module)cards.push(module.renderDetail(child,ctx));else cards.push(renderer.detail(child,actions,{slot,plates}));
   }
-  const ref=c.model_ref||{};
   const refLine=ref.kind==="operation_use"?`Protocol step · ${esc(ref.step?.step_path||"")}`:ref.kind?esc(ref.kind):"未绑定科学对象";
   const plateChoices=plates.map(p=>`<option value="${esc(p.instance_id)}">${esc(nodeTitle(p))} · ${esc(p.model_ref?.container_id||"")}</option>`).join("");
   const library=[["layout.section","区块"],["content.table","表格"],["tool.calculator","计算器"],["content.note","说明"],["workflow","子流程"]].map(([kind,label])=>`<button data-add="${kind}">+ ${label}</button>`).join("")+(plates.length?`<select id="add-plate" aria-label="要引用的孔板">${plateChoices}</select><button data-add="lab.well_plate">+ 孔板</button>`:"");

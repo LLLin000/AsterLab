@@ -6,7 +6,7 @@
 use crate::operation_module::{
     CatalogModuleRef, ModuleOrigin, OperationModule, ParameterValueType, ReviewStatus,
 };
-use crate::protocol_preview::StepTimeScope;
+use crate::protocol_preview::{StepCheck, StepTimeScope};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -63,6 +63,8 @@ pub enum ProtocolStep {
         visualization: Option<StepVisualization>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         time_scope: Option<StepTimeScope>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        checks: Vec<StepCheck>,
     },
     BlockUse {
         use_id: String,

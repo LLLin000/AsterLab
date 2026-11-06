@@ -44,6 +44,19 @@ pub struct OperationStep {
     pub visualization: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_scope: Option<StepTimeScope>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<StepCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StepCheck {
+    pub check_id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instruction: Option<String>,
+    #[serde(default)]
+    pub blocking: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -106,6 +119,7 @@ mod tests {
             source_block_version_id: "v".into(),
             visualization: None,
             time_scope: None,
+            checks: vec![],
         };
         assert!(!serde_json::to_value(step)
             .unwrap()
