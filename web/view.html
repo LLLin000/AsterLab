@@ -130,18 +130,18 @@ function fmtValue(value){if(value===null||value===undefined)return "待确认";i
 async function loadParams(c,boxId){
   const ref=c?.model_ref||{};
   if(ref.kind!=="operation_use")return;
-  const key=`${ref.block_version_id}|${ref.step?.protocol_version_id||""}`;
+  const key=`${viewId}|${c.instance_id}`;
   let result=paramCache.get(key);
   if(!result){
     try{
-      const r=await fetch("/api/protocol-blocks/preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({block_version_id:ref.block_version_id,bindings:[]})});
+      const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/steps/${encodeURIComponent(c.instance_id)}`);
       const j=await r.json(); if(!r.ok)throw new Error(j.error||"参数读取失败"); result=j;
     }catch(e){result={error:String(e.message||e)}} paramCache.set(key,result)
   }
   if(selected?.instance_id!==c.instance_id)return;
   const box=$(boxId);if(!box)return;
   if(result.error){box.innerHTML=`<div class="muted">${esc(result.error)}</div>`;return}
-  const step=result.steps?.[0]||{};
+  const step=result.step||{};
   const params=step.parameters||[];
   const unresolved=step.unresolved_parameter_refs||[];
   const rows=params.map(p=>{
@@ -155,9 +155,10 @@ async function loadParams(c,boxId){
 function plateMarkup(plate,instanceId){
   const assigned=new Map((plate.positions||[]).map(p=>[p.position_id,p]));
   const selected=plateSelections.get(instanceId)||new Set();
-  const rows="ABCDEFGH".split("");
+  const rowCount=Math.max(1,Number(plate.rows)||8), colCount=Math.max(1,Number(plate.columns)||12);
+  const rows=Array.from({length:rowCount},(_,i)=>String.fromCharCode(65+i));
   let html="";
-  for(const row of rows)for(let col=1;col<=12;col++){
+  for(const row of rows)for(let col=1;col<=colCount;col++){
     const id=`${row}${col}`; const hit=assigned.get(id); const on=selected.has(id);
     const target=hit?.targets?.[0]?.target?.id||"";
     html+=`<button class="well ${hit?"assigned":""} ${on?"selected":""}" data-well="${id}" data-plate="${esc(instanceId)}" ${hit?"":"disabled"} title="${id}${hit?" · "+esc(target):" · 未分配"}">${id}</button>`
@@ -210,23 +211,32 @@ function renderDetail(){
   loadParams(c,`params-${c.instance_id}`);
 }
 function render(){renderCrumbs();renderCanvas();renderDetail();$("workspaceTitle").textContent=(data?.latest_version?.data?.root?.props?.title)||"AsterLab / CCK-8 Assay";const d=data?.latest_version?.data;$("workspaceSub").textContent=d?`View revision ${d.revision} · ${esc(d.document_id).slice(0,8)}`:"Protocol · View"}
-async function load(preserveHistory=false){
+async function load(preserveHistory=false,preserveUi=false){
   viewId=$("viewId").value.trim();if(!viewId)return;$("status").textContent="加载中…";
+  const previousStack=stack.map(c=>c.instance_id),previousNode=node?.instance_id,previousSelected=selected?.instance_id;
   const r=await fetch(`/api/views/${encodeURIComponent(viewId)}`);const j=await r.json();if(!r.ok){$("status").textContent=j.error||"加载失败";return}
-  data=j;node=data.latest_version?.data?.root;stack=node?[node]:[];selected=workflowOf(node)[0]?.component||node;
+  data=j;const root=data.latest_version?.data?.root;
+  if(preserveUi){
+    stack=previousStack.map(id=>findById(root,id)).filter(Boolean);if(!stack.length)stack=root?[root]:[];
+    node=findById(root,previousNode)||root;selected=findById(root,previousSelected)||workflowOf(node)[0]?.component||node;
+  }else{
+    node=root;stack=node?[node]:[];selected=workflowOf(node)[0]?.component||node;
+    paramCache.clear();plateCache.clear();plateSelections.clear();
+  }
   if(!preserveHistory){history=[];future=[]}
-  paramCache.clear();plateCache.clear();plateSelections.clear();
   render();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`
 }
 async function saveNote(instanceId){
   if(!data)return;const doc=data.latest_version.data;const text=$("note-"+CSS.escape(instanceId))?.value??"";
   const changeset={changeset_id:`ui-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations:[{kind:"update_props",instance_id:instanceId,property:"text",value:text}],provenance:["view-ui"]};
-  $("status").textContent="保存中…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});const j=await r.json();if(!r.ok){$("status").textContent=j.error||"保存失败";return}$("status").textContent="已保存";await load()
+  $("status").textContent="保存中…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});const j=await r.json();if(!r.ok){$("status").textContent=j.error||"保存失败";return}$("status").textContent="已保存";await load(true,true)
+}
+function screenToSvg(clientX,clientY){
+  const svg=$("canvas"),p=svg.createSVGPoint();p.x=clientX;p.y=clientY;const ctm=svg.getScreenCTM();
+  if(!ctm)return {x:view.x,y:view.y};return p.matrixTransform(ctm.inverse())
 }
 function screenToCanvas(clientX,clientY){
-  const svg=$("canvas"),p=svg.createSVGPoint();p.x=clientX;p.y=clientY;const ctm=svg.getScreenCTM();
-  if(!ctm)return {x:view.x,y:view.y};const u=p.matrixTransform(ctm.inverse());
-  return {x:(u.x-view.x)/view.k,y:(u.y-view.y)/view.k}
+  const u=screenToSvg(clientX,clientY);return {x:(u.x-view.x)/view.k,y:(u.y-view.y)/view.k}
 }
 function persistVisual(instanceId,pos){
   const task=async()=>{
@@ -235,8 +245,8 @@ function persistVisual(instanceId,pos){
     $("status").textContent="保存布局…";
     const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
     const j=await r.json();
-    if(!r.ok){$("status").textContent=j.error||"布局保存失败";await load(true);throw new Error(j.error||"布局保存失败")}
-    await load(true);$("status").textContent="布局已保存"
+    if(!r.ok){$("status").textContent=j.error||"布局保存失败";await load(true,true);throw new Error(j.error||"布局保存失败")}
+    await load(true,true);$("status").textContent="布局已保存"
   };
   const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run
 }
@@ -275,8 +285,8 @@ $("fit").onclick=()=>{const {nodes}=graph();if(!nodes.length)return;const xs=nod
 function zoomAt(f){const k=Math.min(2,Math.max(.25,view.k*f));const svg=$("canvas"),r=svg.getBoundingClientRect();const center=screenToCanvas(r.left+r.width/2,r.top+r.height/2);view.x=view.x+center.x*(view.k-k);view.y=view.y+center.y*(view.k-k);view.k=k;renderCanvas()}
 $("zoomIn").onclick=()=>zoomAt(1.2);$("zoomOut").onclick=()=>zoomAt(1/1.2);
 $("canvas").addEventListener("wheel",e=>{e.preventDefault();const p=screenToCanvas(e.clientX,e.clientY);const f=e.deltaY<0?1.1:1/1.1;const k=Math.min(2,Math.max(.25,view.k*f));view.x=view.x+p.x*(view.k-k);view.y=view.y+p.y*(view.k-k);view.k=k;renderCanvas()},{passive:false});
-$("canvas").addEventListener("pointerdown",e=>{if(e.target.closest(".wnode"))return;pan={start:screenToCanvas(e.clientX,e.clientY),vx:view.x,vy:view.y};$("canvas").classList.add("grabbing")});
-window.addEventListener("pointermove",e=>{if(!pan)return;const p=screenToCanvas(e.clientX,e.clientY);view.x=pan.vx+(p.x-pan.start.x);view.y=pan.vy+(p.y-pan.start.y);renderCanvas()});
+$("canvas").addEventListener("pointerdown",e=>{if(e.target.closest(".wnode"))return;pan={sx:e.clientX,sy:e.clientY,vx:view.x,vy:view.y,k:view.k};$("canvas").classList.add("grabbing")});
+window.addEventListener("pointermove",e=>{if(!pan)return;const a=screenToSvg(pan.sx,pan.sy),b=screenToSvg(e.clientX,e.clientY);view.x=pan.vx+(b.x-a.x)/pan.k;view.y=pan.vy+(b.y-a.y)/pan.k;renderCanvas()});
 window.addEventListener("pointerup",()=>{pan=null;$("canvas").classList.remove("grabbing")});
 $("load").onclick=load;
 </script>

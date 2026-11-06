@@ -11,7 +11,8 @@
 - 滚轮缩放、空白拖拽平移、适应屏幕、节点选择、双击进入嵌套 workflow（有 workflow 时）。
 - 节点拖动写入 `VisualSpec.x/y`，通过 `set_visual` ViewPatch 保存；只改 View，不改 Protocol。
 - 撤销/重做使用 `instance_id + before/after` 快照，保存串行化，并在服务器确认后更新历史。
-- Step Detail 读取 `protocol.block.preview` 的真实步骤参数；孔板详情渲染真实计划孔位并可选择。
+- Step Detail 通过 `GET /api/views/{view_id}/steps/{instance_id}` 读取后端精确投影：后端加载真实 ProtocolVersion 的 `root_bindings`，展开 ProtocolPreview，再按 `step_path` 返回当前步骤的参数、单位、来源和未解决项；前端不再自行拼装。
+- 孔板详情使用 `/api/views/{id}/data` 返回的 `rows`/`columns` 按 LabwareProfile 渲染，当前支持 6、96 和 PCR 96 孔；孔位可选择并直接用于计算。
 - 浏览器验收截图见 `target/asterlab-bioicons.png`。
 
 ## 仍未实现

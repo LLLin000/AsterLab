@@ -186,6 +186,15 @@ struct ViewDataQuery {
     #[serde(default)]
     extra_ratio: Option<f64>,
 }
+async fn get_view_step_detail(
+    State(s): State<AppState>,
+    Path((id, instance_id)): Path<(String, String)>,
+) -> ApiResult<Value> {
+    let db = lock(&s)?;
+    let result = cli::view_step_detail(&db, &id, &instance_id).map_err(ApiError::from_cli)?;
+    Ok(Json(result))
+}
+
 async fn get_view_data(
     State(s): State<AppState>,
     Path(id): Path<String>,
@@ -777,6 +786,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/icons/{name}", get(icon))
         .route("/api/views/{id}", get(get_view))
         .route("/api/views/{id}/data", get(get_view_data))
+        .route(
+            "/api/views/{id}/steps/{instance_id}",
+            get(get_view_step_detail),
+        )
         .route("/api/views/{id}/revise", post(revise_view))
         .route("/api/health", get(health))
         .route("/api/state", get(get_state))

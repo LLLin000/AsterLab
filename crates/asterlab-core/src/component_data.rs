@@ -16,6 +16,10 @@ pub struct WellPlateProjection {
     pub container_id: String,
     pub profile_id: String,
     pub profile_version: u32,
+    #[serde(default)]
+    pub rows: u64,
+    #[serde(default)]
+    pub columns: u64,
     pub positions: Vec<PositionAssignment>,
 }
 
@@ -56,15 +60,25 @@ pub fn project_well_plate(
         .iter()
         .find(|container| container.id == container_id)
         .ok_or_else(|| vec![format!("container {container_id} does not exist")])?;
-    if registry.get(&container.profile_ref).is_none() {
+    let Some(profile) = registry.get(&container.profile_ref) else {
         return Err(vec![format!(
             "container {container_id} references unknown profile"
         )]);
-    }
+    };
+    let geometry = |field: &str| {
+        profile
+            .fields
+            .get(field)
+            .and_then(|field| field.value.as_ref())
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
     Ok(WellPlateProjection {
         container_id: container.id.clone(),
         profile_id: container.profile_ref.id.clone(),
         profile_version: container.profile_ref.version,
+        rows: geometry("rows"),
+        columns: geometry("columns"),
         positions: plan
             .assignments
             .iter()
@@ -326,6 +340,17 @@ mod tests {
         assert_eq!(calc.state, "unresolved");
         assert!(calc.total_volume.is_none());
         assert!(calc.unresolved.contains(&"volume_per_position".into()));
+    }
+
+    #[test]
+    fn plate_geometry_comes_from_the_labware_profile() {
+        let registry = default_labware_registry();
+        let mut culture = plan();
+        let plate = project_well_plate(&culture, &registry, "plate-1").unwrap();
+        assert_eq!((plate.rows, plate.columns), (8, 12));
+        culture.containers[0].profile_ref.id = "labware.cell_culture_6".into();
+        let plate = project_well_plate(&culture, &registry, "plate-1").unwrap();
+        assert_eq!((plate.rows, plate.columns), (2, 3));
     }
 
     #[test]

@@ -2199,6 +2199,92 @@ pub(crate) fn revise_view_tx(
     revise_view_records(tx, view_id, &payload)
 }
 
+pub(crate) fn view_step_detail(
+    db: &Connection,
+    view_id: &str,
+    instance_id: &str,
+) -> Result<Value, CliError> {
+    let (kind, project, _, _, _) =
+        kind_id(db, view_id)?.ok_or_else(|| CliError::missing("View 不存在"))?;
+    if kind != "view" {
+        return Err(CliError::input("view_id 必须指向 view"));
+    }
+    let project_id = project.ok_or_else(|| CliError::internal("View 缺少项目归属"))?;
+    let latest: i64 = db
+        .query_row(
+            "SELECT COALESCE(MAX(revision),0) FROM records WHERE kind='view_document' AND parent_id=?1",
+            [view_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let latest_id: String = db
+        .query_row(
+            "SELECT id FROM records WHERE kind='view_document' AND parent_id=?1 AND revision=?2",
+            params![view_id, latest],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let (_, document) = record_document(db, &latest_id)?;
+    let root = serde_json::to_value(&document.root)
+        .map_err(|e| CliError::internal(format!("ViewDocument root 无效：{e}")))?;
+    let component = find_component(&root, instance_id)
+        .ok_or_else(|| CliError::missing("View 中不存在该组件"))?;
+    let reference = component
+        .get("model_ref")
+        .ok_or_else(|| CliError::input("该组件没有科学引用"))?;
+    if reference.get("kind").and_then(Value::as_str) != Some("operation_use") {
+        return Err(CliError::input("step detail 仅支持 operation_use 组件"));
+    }
+    let block_version_id = reference
+        .get("block_version_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CliError::input("operation_use 缺少 block_version_id"))?;
+    let step_ref = reference
+        .get("step")
+        .ok_or_else(|| CliError::input("operation_use 缺少 step"))?;
+    let protocol_version_id = step_ref
+        .get("protocol_version_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CliError::input("operation_use 缺少 protocol_version_id"))?;
+    let step_path = step_ref
+        .get("step_path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CliError::input("operation_use 缺少 step_path"))?;
+    let protocol = get(db, protocol_version_id)?;
+    if protocol["kind"] != "protocol_version"
+        || protocol["project_id"].as_str() != Some(project_id.as_str())
+    {
+        return Err(CliError::input("ProtocolVersion 必须属于当前项目"));
+    }
+    let root_block = protocol["data"]["root_block_version_id"]
+        .as_str()
+        .ok_or_else(|| CliError::input("ProtocolVersion 没有根 BlockVersion"))?;
+    let bindings: Vec<RootParameterValue> =
+        serde_json::from_value(protocol["data"]["root_bindings"].clone()).unwrap_or_default();
+    let preview = block_preview(db, root_block, &bindings)?;
+    let step = preview["steps"]
+        .as_array()
+        .and_then(|steps| {
+            steps
+                .iter()
+                .find(|step| step["path"].as_str() == Some(step_path))
+        })
+        .cloned()
+        .ok_or_else(|| CliError::missing(format!("ProtocolPreview 中没有步骤 {step_path}")))?;
+    Ok(json!({
+        "view_id": view_id,
+        "instance_id": instance_id,
+        "protocol_version_id": protocol_version_id,
+        "block_version_id": block_version_id,
+        "scope": step_ref.get("scope").cloned().unwrap_or(Value::Null),
+        "step_path": step_path,
+        "step": step,
+        "protocol_ready": preview["ready"],
+        "resolved_parameters": preview["resolved_parameters"],
+        "unresolved_parameters": preview["unresolved_parameters"]
+    }))
+}
+
 pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Value, CliError> {
     let i: ViewProject = serde_json::from_value(data.clone())
         .map_err(|e| CliError::input(format!("View 投影参数无效：{e}")))?;
