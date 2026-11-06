@@ -1,13 +1,18 @@
+.card.cmp-table { grid-column: 1 / -1; }
 .cmp-table {
+  grid-column: 1 / -1;
   min-width: 0;
-  min-height: 0;
-  height: 100%;
+  min-height: 220px;
+  max-height: min(460px, 55vh);
+  height: auto;
   padding: var(--al-card-pad);
   gap: var(--al-gap);
   overflow: hidden;
   color: var(--al-ink);
   background: var(--al-surface);
   font: 13px/18px var(--al-font);
+  display: flex;
+  flex-direction: column;
 }
 .cmp-table__header {
   display: flex;
@@ -29,7 +34,9 @@
 }
 .cmp-table__status { white-space: nowrap; }
 .cmp-table--dirty .cmp-table__status { color: var(--al-warning); }
+.cmp-table--error .cmp-table__status { color: var(--al-danger, #dc2626); }
 .cmp-table__scroll {
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
   overflow: auto;
@@ -67,7 +74,8 @@
   border-radius: var(--al-radius-sm);
   background: transparent;
   color: var(--al-ink);
-  font: inherit;
+  font: 13px/18px var(--al-font);
+  font-variant-numeric: tabular-nums;
 }
 .cmp-table input:hover { border-color: var(--al-line); }
 .cmp-table input:focus-visible, .cmp-table button:focus-visible {
@@ -101,7 +109,8 @@
   background: var(--al-accent);
   color: var(--al-surface);
 }
-.cmp-table button:disabled { opacity: .6; cursor: wait; }
+.cmp-table button:disabled { opacity: .6; cursor: not-allowed; }
+.cmp-table .cmp-table__save:disabled { cursor: wait; }
 .cmp-table__sr {
   position: absolute;
   width: 1px;

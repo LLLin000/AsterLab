@@ -10,6 +10,8 @@
 .cmp-calculator__header { display: flex; justify-content: space-between; gap: var(--al-gap); }
 .cmp-calculator h3 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; }
 .cmp-calculator__meta { color: var(--al-muted); font-size: 12px; line-height: 16px; }
+.cmp-calculator__formula { padding: 8px 10px; border-radius: var(--al-radius-sm); background: var(--al-surface-2); color: var(--al-muted); font: 12px/16px var(--al-font); }
+.cmp-calculator__fields small { color: var(--al-muted); font-size: 11px; line-height: 14px; font-weight: 400; }
 .cmp-calculator__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--al-gap); }
 .cmp-calculator__fields label, .cmp-calculator__plate { display: grid; gap: 4px; color: var(--al-muted); font-size: 12px; }
 .cmp-calculator input, .cmp-calculator select { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--al-control); padding: 6px 9px; border: 1px solid var(--al-line); border-radius: var(--al-radius-sm); background: var(--al-surface); color: var(--al-ink); font: 13px/18px var(--al-font); }

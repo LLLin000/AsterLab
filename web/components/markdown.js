@@ -10,7 +10,7 @@
       <header class="cmp-markdown__header"><div><h3>${ctx.esc(ctx.title(instance))}</h3><div class="cmp-markdown__meta">${markdown ? "Markdown" : "说明"}${draft ? " · 未保存" : ""}</div></div></header>
       <textarea data-markdown-editor aria-label="${markdown ? "Markdown 内容" : "实验说明"}" placeholder="写下实验说明、假设或注意事项">${ctx.esc(text)}</textarea>
       <div class="cmp-markdown__preview" data-markdown-preview hidden></div>
-      <div class="cmp-markdown__actions"><button type="button" data-markdown-toggle aria-pressed="false">预览</button><button type="button" data-markdown-save>保存</button><span data-markdown-status role="status"></span></div>
+      <div class="cmp-markdown__actions"><button type="button" data-markdown-toggle aria-pressed="false">预览</button><button type="button" data-markdown-save>保存</button><span data-markdown-status data-state="saved" role="status" aria-live="polite"></span></div>
     </article>`;
   }
 
@@ -28,7 +28,8 @@
       token++;
       ctx.drafts.set(instance.instance_id, { text: editor.value, token });
       ctx.drafts.markDirty(instance.instance_id);
-      status.textContent = "未保存";
+      status.dataset.state = "dirty";
+      status.textContent = "未保存草稿";
       if (showingPreview) preview.innerHTML = renderMarkdown(editor.value, ctx);
     }, { signal });
     toggle.addEventListener("click", () => {
@@ -41,15 +42,18 @@
     }, { signal });
     save.addEventListener("click", async () => {
       const savedToken = token;
-      save.disabled = true;
+      status.dataset.state = "saving";
       status.textContent = "正在保存…";
+      save.disabled = true;
       try {
         await ctx.commit([{ kind: "update_props", instance_id: instance.instance_id, property: "text", value: editor.value }], "保存说明");
         if (savedToken === token) {
           ctx.drafts.clear(instance.instance_id);
+          status.dataset.state = "saved";
           status.textContent = "已保存";
-        } else status.textContent = "有新修改尚未保存";
+        } else { status.dataset.state = "dirty"; status.textContent = "有新修改尚未保存"; }
       } catch (error) {
+        status.dataset.state = "error";
         status.textContent = `保存失败：${error.message || error}`;
       } finally {
         if (!signal.aborted) save.disabled = false;

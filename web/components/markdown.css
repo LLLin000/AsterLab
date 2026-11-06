@@ -22,4 +22,7 @@
 .cmp-markdown__actions button { min-height: var(--al-control); padding: 6px 12px; border: 1px solid var(--al-line); border-radius: var(--al-radius-sm); background: var(--al-surface); color: var(--al-ink); font: 13px/18px var(--al-font); cursor: pointer; }
 .cmp-markdown__actions button:hover { border-color: var(--al-line-strong); }
 .cmp-markdown__actions span { color: var(--al-muted); font-size: 12px; }
+.cmp-markdown__actions [data-state="saved"] { color: var(--al-success); }
+.cmp-markdown__actions [data-state="dirty"], .cmp-markdown__actions [data-state="saving"] { color: var(--al-warning); }
+.cmp-markdown__actions [data-state="error"] { color: var(--al-error); }
 .cmp-markdown__actions button:disabled { opacity: 0.6; cursor: wait; }

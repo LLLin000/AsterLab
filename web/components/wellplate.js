@@ -14,34 +14,38 @@
     }
 
     const positions = new Map((plate.positions || []).map(position => [position.position_id, position]));
-    const groupValues = new Map();
+    const plannedCount = positions.size, total = rows * columns;
+    const controls = new Set([...positions].filter(([, position]) =>
+      (position.targets || []).some(item => item.role?.toLowerCase() === "control")
+    ).map(([id]) => id));
     let cells = `<span class="wp-corner" aria-hidden="true"></span>`;
     for (let column = 1; column <= columns; column++) cells += `<span class="wp-axis" aria-hidden="true">${column}</span>`;
     for (let row = 0; row < rows; row++) {
       const rowName = String.fromCharCode(65 + row);
       cells += `<span class="wp-axis" aria-hidden="true">${rowName}</span>`;
       for (let column = 1; column <= columns; column++) {
-        const id = `${rowName}${column}`, position = positions.get(id), targets = position?.targets || [];
-        const role = targets.map(item => item.role).filter(Boolean).join(", ");
-        const label = targets.map(item => targetLabel(item.target ?? item, esc)).join(", ");
-        const group = role || label;
-        if (group) groupValues.set(group, (groupValues.get(group) || 0) + 1);
-        const chosen = selected.has(id);
-        const details = position ? `${role ? `${esc(role)} · ` : ""}${label || "已分配"}` : "空孔";
-        cells += `<button type="button" class="wp-well${position ? " is-assigned" : " is-empty"}${chosen ? " is-selected" : ""}" data-well="${esc(id)}" aria-pressed="${chosen}" aria-label="${esc(id)}，${details}" title="${esc(id)} · ${details}">${esc(id)}</button>`;
+        const id = `${rowName}${column}`, position = positions.get(id), chosen = selected.has(id);
+        const control = controls.has(id);
+        const state = position ? "计划分配" : "未映射（未确认）";
+        const details = (position?.targets || []).map(item =>
+          `${item.role || "角色未标注"} · ${targetLabel(item.target ?? item, esc)} · ${item.relationship || "关系未标注"}`
+        ).join(" / ");
+        const label = `${id}，${state}${control ? "，对照" : ""}${chosen ? "，已选择" : ""}${details ? `，${details}` : ""}`;
+        cells += `<button type="button" class="wp-well${position ? " is-planned" : " is-unmapped"}${control ? " is-control" : ""}${chosen ? " is-selected" : ""}" data-well="${esc(id)}" aria-pressed="${chosen}" aria-label="${esc(label)}" title="${esc(label)}">${esc(id)}</button>`;
       }
     }
     const details = [...selected].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(id => {
       const position = positions.get(id), targets = position?.targets || [];
-      const labels = targets.map(item => `${item.role ? `${esc(item.role)} · ` : ""}${targetLabel(item.target ?? item, esc)}`);
-      return `<span class="wp-selected-item"><b>${esc(id)}</b><span>${labels.join(" / ") || (position ? "已分配" : "空孔")}</span></span>`;
+      const labels = targets.map(item => `<span><b>${esc(item.role || "角色未标注")}</b> · ${targetLabel(item.target ?? item, esc)} · ${esc(item.relationship || "关系未标注")}</span>`);
+      return `<div class="wp-selected-item"><b>${esc(id)}</b>${labels.join("") || `<span>${position ? "目标未标注" : "未映射（未确认）"}</span>`}</div>`;
     }).join("");
-    const legend = [...groupValues].map(([group, count]) => `<span class="wp-legend-item"><i aria-hidden="true"></i>${esc(group)} <small>${count}</small></span>`).join("");
     return `<div class="wp-meta"><span>${rows} × ${columns} wells</span><span>${esc(plate.profile_id || "未标注板型")}${plate.profile_version ? ` · v${esc(plate.profile_version)}` : ""}</span></div>
-      <div class="wp-toolbar"><button type="button" data-select="all">全选</button><button type="button" data-select="clear">清空</button><span>${selected.size} 个已选</span></div>
-      <div class="wp-grid-scroll"><div class="wp-grid" style="--wp-columns:${columns}" role="group" aria-label="${rows} 行 ${columns} 列孔板">${cells}</div></div>
-      ${legend ? `<div class="wp-legend" aria-label="组别与条件图例"><b>组别 / 条件</b>${legend}</div>` : ""}
-      <div class="wp-selection"><b>已选孔位</b><div class="wp-selection-list">${details || `<span class="wp-empty-selection">尚未选择孔位。点击孔位进行本地选择；选择不会修改实验数据。</span>`}</div></div>`;
+      <div class="wp-toolbar"><button type="button" data-select="all">选择已计划孔位</button><button type="button" data-select="clear">清空</button></div>
+      <div class="wp-body"><div class="wp-grid-scroll"><div class="wp-grid" style="--wp-columns:${columns}" role="group" aria-label="${rows} 行 ${columns} 列孔板">${cells}</div></div>
+      <aside class="wp-side" aria-live="polite"><div class="wp-side-title">当前选择</div><div class="wp-count"><b>${selected.size}</b><span>已选孔位</span></div>
+      <div class="wp-facts"><span>计划分配</span><b>${plannedCount} / ${total}</b><span>对照角色</span><b>${controls.size}</b><span>未确认映射（无计划分配）</span><b>${total - plannedCount}</b></div>
+      <div class="wp-selection"><b>目标 / 角色 / 关系</b><div class="wp-selection-list">${details || `<span class="wp-empty-selection">尚未选择孔位。视觉选择不修改实验数据。</span>`}</div></div></aside></div>
+      <div class="wp-legend" aria-label="孔位状态图例"><span><i class="planned"></i>计划分配</span><span><i class="selected"></i>已选择</span><span><i class="control"></i>对照角色</span><span><i class="unmapped"></i>未确认映射</span></div>`;
   }
 
   window.AsterUI = window.AsterUI || { registry: {}, register(key, renderer) { this.registry[key] = renderer; } };
