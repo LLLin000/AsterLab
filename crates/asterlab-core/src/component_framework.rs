@@ -239,6 +239,8 @@ pub enum ViewPatch {
         instance_id: String,
         x: f64,
         y: f64,
+        #[serde(default)]
+        symbol: Option<String>,
     },
     AddSlotChild {
         parent_instance_id: String,
@@ -1321,6 +1323,7 @@ fn apply_patch(
             instance_id,
             x,
             y,
+            symbol,
         } => {
             if !x.is_finite() || !y.is_finite() {
                 return Err(vec![issue(
@@ -1344,6 +1347,9 @@ fn apply_patch(
             });
             visual.x = Some(*x);
             visual.y = Some(*y);
+            if symbol.is_some() {
+                visual.symbol = symbol.clone();
+            }
             changed.push(instance_id.clone());
         }
         ViewPatch::AddSlotChild {
@@ -2057,6 +2063,7 @@ mod tests {
                         instance_id: "prepare".into(),
                         x: 120.0,
                         y: 240.0,
+                        symbol: Some("pipette".into()),
                     }],
                     provenance: vec![],
                 },
@@ -2066,6 +2073,7 @@ mod tests {
         let prepare = find_instance(&result.document.root, "prepare").unwrap();
         assert_eq!(prepare.visual.as_ref().unwrap().x, Some(120.0));
         assert_eq!(prepare.visual.as_ref().unwrap().y, Some(240.0));
+        assert_eq!(prepare.visual.as_ref().unwrap().symbol.as_deref(), Some("pipette"));
         assert_eq!(result.document.revision, 2);
     }
 

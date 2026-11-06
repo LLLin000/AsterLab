@@ -7,10 +7,12 @@
 ## 已实现
 
 - `web/view.html` 使用 SVG 画布渲染 `ViewDocument` 的 `WorkflowGraph`；节点来自真实组件，边来自真实 `edges`。
-- 节点图标按 `props.label` / definition 显示，支持铺板、加药、孵育、读板等符号。
+- 节点图标来自 Lucide 的 ISC 线性 SVG（grid-3x3、pipette、clock、microscope、flask-conical），由 `VisualSpec.symbol` 或组件 definition 选择；不再手绘或按标题关键词推断。来源与许可见 `2026-11-06-icon-library.md` 和 `web/icons/LICENSE.md`。
 - 滚轮缩放、空白拖拽平移、适应屏幕、节点选择、双击进入嵌套 workflow（有 workflow 时）。
 - 节点拖动写入 `VisualSpec.x/y`，通过 `set_visual` ViewPatch 保存；只改 View，不改 Protocol。
-- 撤销/重做使用本地布局历史并持久化；浏览器验收截图见 `target/canvas-four-steps.png`。
+- 撤销/重做使用 `instance_id + before/after` 快照，保存串行化，并在服务器确认后更新历史。
+- Step Detail 读取 `protocol.block.preview` 的真实步骤参数；孔板详情渲染真实计划孔位并可选择。
+- 浏览器验收截图见 `target/asterlab-bioicons.png`。
 
 ## 仍未实现
 

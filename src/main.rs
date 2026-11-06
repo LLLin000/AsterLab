@@ -22,6 +22,11 @@ use uuid::Uuid;
 mod cli;
 const INDEX_HTML: &str = include_str!("../web/index.html");
 const VIEW_HTML: &str = include_str!("../web/view.html");
+const ICON_PLATE: &str = include_str!("../web/icons/plate.svg");
+const ICON_PIPETTE: &str = include_str!("../web/icons/pipette.svg");
+const ICON_INCUBATOR: &str = include_str!("../web/icons/incubator.svg");
+const ICON_READER: &str = include_str!("../web/icons/reader.svg");
+const ICON_FLASK: &str = include_str!("../web/icons/flask.svg");
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
@@ -144,6 +149,23 @@ async fn index() -> Html<&'static str> {
 }
 async fn view_page() -> Html<&'static str> {
     Html(VIEW_HTML)
+}
+
+async fn icon(Path(name): Path<String>) -> Response {
+    let name = name.trim_end_matches(".svg");
+    let svg = match name {
+        "plate" => ICON_PLATE,
+        "pipette" => ICON_PIPETTE,
+        "incubator" => ICON_INCUBATOR,
+        "reader" => ICON_READER,
+        "flask" => ICON_FLASK,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    (
+        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+        svg.as_bytes().to_vec(),
+    )
+        .into_response()
 }
 async fn get_view(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
     let db = lock(&s)?;
@@ -752,6 +774,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/", get(index))
         .route("/view", get(view_page))
+        .route("/icons/{name}", get(icon))
         .route("/api/views/{id}", get(get_view))
         .route("/api/views/{id}/data", get(get_view_data))
         .route("/api/views/{id}/revise", post(revise_view))
