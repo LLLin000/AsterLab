@@ -12,3 +12,8 @@ Source: https://github.com/cure53/DOMPurify
 
 `dagre.min.js` is dagre 0.8.5, MIT licensed.
 Source: https://github.com/dagrejs/dagre
+
+## Tabler
+
+`tabler.min.css` / `tabler.min.js` are Tabler UI v1.7.3, MIT licensed.
+Source: https://github.com/tabler/tabler

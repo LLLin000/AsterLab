@@ -18,3 +18,18 @@
   --al-control: 34px;
   --al-font: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
 }
+
+[data-bs-theme="dark"] {
+  --al-bg: #101318;
+  --al-surface: #171b22;
+  --al-surface-2: #1c212a;
+  --al-ink: #e7eaf0;
+  --al-muted: #98a2b3;
+  --al-line: #2a303b;
+  --al-line-strong: #3b4450;
+  --al-accent: #6d8cff;
+  --al-accent-soft: #1d2638;
+  --al-success: #49b675;
+  --al-warning: #e0a458;
+  --al-error: #e06c75;
+}

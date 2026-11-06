@@ -11,6 +11,8 @@ let mountedModules=[];
 let dataRequestSeq=0;
 let drafts=new Map();
 const $=id=>document.getElementById(id);
+{const savedTheme=localStorage.getItem("asterlab.theme");if(savedTheme)document.documentElement.dataset.bsTheme=savedTheme;}
+const themeToggle=document.getElementById("themeToggle");if(themeToggle)themeToggle.onclick=()=>{const next=document.documentElement.dataset.bsTheme==="dark"?"light":"dark";document.documentElement.dataset.bsTheme=next;localStorage.setItem("asterlab.theme",next);renderCanvas()};
 window.AsterUI=window.AsterUI||{registry:{},register(key,renderer){this.registry[key]=renderer}};
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const defName=c=>c?.definition?.id||"component";

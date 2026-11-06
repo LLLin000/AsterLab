@@ -33,6 +33,8 @@ const PURIFY_JS: &str = include_str!("../web/vendor/purify.min.js");
 const DAGRE_JS: &str = include_str!("../web/vendor/dagre.min.js");
 const LAYOUT_JS: &str = include_str!("../web/layout.js");
 const ICON_INLINE_JS: &str = include_str!("../web/icons/inline.js");
+const TABLER_CSS: &str = include_str!("../web/vendor/tabler/tabler.min.css");
+const TABLER_JS: &str = include_str!("../web/vendor/tabler/tabler.min.js");
 const COMPONENT_FLOW_JS: &str = include_str!("../web/components/flow.js");
 const COMPONENT_PROPOSAL_JS: &str = include_str!("../web/components/proposal.js");
 const COMPONENT_PROPOSAL_CSS: &str = include_str!("../web/components/proposal.css");
@@ -174,6 +176,18 @@ async fn marked_js() -> Response {
     (
         [(axum::http::header::CONTENT_TYPE, "text/javascript")],
         MARKED_JS,
+    )
+        .into_response()
+}
+
+async fn tabler_css() -> Response {
+    ([(axum::http::header::CONTENT_TYPE, "text/css")], TABLER_CSS).into_response()
+}
+
+async fn tabler_js() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+        TABLER_JS,
     )
         .into_response()
 }
@@ -969,6 +983,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/layout.js", get(layout_js))
         .route("/components/{name}", get(component_asset))
         .route("/icons/inline.js", get(icon_inline_js))
+        .route("/vendor/tabler/tabler.min.css", get(tabler_css))
+        .route("/vendor/tabler/tabler.min.js", get(tabler_js))
         .route("/api/views/{id}", get(get_view))
         .route("/api/views/{id}/data", get(get_view_data))
         .route(
