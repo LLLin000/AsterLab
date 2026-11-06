@@ -50,3 +50,14 @@
 ## 未通过生产验收
 
 此稿仅用于设计评审。未改正式 UI；必须在人工视觉审核后才逐模块还原。
+
+## 评审截图
+
+```text
+assets/before-1440.webp
+assets/after-1440.webp
+assets/after-1920.webp
+assets/comparison-1440.webp
+```
+
+比较页：`comparison.html`。
