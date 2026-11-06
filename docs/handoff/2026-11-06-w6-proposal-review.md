@@ -85,6 +85,7 @@ Content-Type: application/json
 ```bash
 node scripts/agent-proposal-demo.cjs <view-id>
 node scripts/agent-proposal-demo.cjs <view-id> --accept
+node scripts/w6-proposal-tests.cjs <view-id>
 ```
 
 脚本走公开 HTTP API：

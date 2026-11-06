@@ -252,20 +252,24 @@ function rendererFor(component){
   const key=`${component.definition?.id||"unknown"}@${component.definition?.version??"?"}`;
   return componentRenderers[key]||componentRenderers.unsupported;
 }
+function proposalNoOp(preview){
+  const changes=preview?.operation_changes||[];
+  return changes.length>0&&changes.every(op=>JSON.stringify(op.before)===JSON.stringify(op.after));
+}
 function proposalPanelMarkup(){
   const child=selectedChildId?findById(data?.latest_version?.data?.root,selectedChildId):null;
   if(!child)return `<div class="proposal-empty">选择一张卡片后，可生成受控提案。</div>`;
-  const isTable=child.definition.id==="content.table"||child.definition.id==="layout.table";
-  const actions=[isTable?`<button data-proposal="move-top">移动到最上面</button>`:`<button data-proposal="append-note">追加说明</button>`,`<button data-proposal="add-note">添加 Markdown 卡片</button>`,`<button data-proposal="delete">删除此卡片</button>`].join("");
+  const kind=child.definition.id;const isNote=kind==="content.note"||kind==="content.markdown";const isTable=kind==="content.table"||kind==="layout.table";
+  const actions=[`<button data-proposal="move-top">移动到最上面</button>`,isNote?`<button data-proposal="append-note">追加说明</button>`:``,isTable||kind==="workflow"?`<button data-proposal="add-note">添加 Markdown 卡片</button>`:``,`<button data-proposal="delete">删除此卡片</button>`].join("");
   if(!proposal)return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">提案只读预览；接受前不会写入。</div><div class="row">${actions}</div>`;
-  const stale=proposal.stale;
+  const stale=proposal.stale||proposal.noOp;
   const changes=(proposal.preview?.operation_changes||[]).map(op=>{
     if(op.kind==="move_slot_child")return `<div class="diff-row"><b>位置</b><span>${esc(JSON.stringify(op.before))} → ${esc(JSON.stringify(op.after))}</span></div>`;
     if(op.kind==="add_slot_child")return `<div class="diff-row"><b>新增</b><span>${esc(op.after?.definition?.id||"组件")} · ${esc(op.slot_id||"")}</span></div>`;
     if(op.kind==="update_props")return `<div class="diff-row"><b>字段</b><span>${esc(op.property)}: ${esc(JSON.stringify(op.before))} → ${esc(JSON.stringify(op.after))}</span></div>`;
     return `<div class="diff-row"><b>${esc(op.kind)}</b><span>${esc(JSON.stringify(op.edge||op.binding_id||op.instance_id||""))}</span></div>`;
   }).join("");
-  return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">目标：ViewDocument · revision ${esc(proposal.expectedRevision)} · ${stale?"已过期":"预览校验通过"} · 仅预览，未写入</div><div class="diff-list">${changes||"<div class=muted>无结构化差异</div>"}</div><div class="row"><button class="primary" data-proposal-accept ${stale?"disabled":""}>接受变更</button><button data-proposal-reject>拒绝</button></div>`;
+  return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">目标：ViewDocument · revision ${esc(proposal.expectedRevision)} · ${proposal.noOp?"无实际变化":stale?"已过期":"预览校验通过"} · ${proposal.preview?.diff_scope==="net"?"最终净变化":"差异"} · 仅预览，未写入</div><div class="diff-list">${changes||"<div class=muted>无结构化差异</div>"}</div><div class="row"><button class="primary" data-proposal-accept ${stale?"disabled":""}>接受变更</button><button data-proposal-reject>拒绝</button></div>`;
 }
 function renderProposalPanel(){
   const box=$("proposal-panel");if(!box)return;box.innerHTML=proposalPanelMarkup();
@@ -281,6 +285,7 @@ function focusChild(id){
 }
 async function createProposal(kind){
   if(!data||!selected)return;const child=selectedChildId?findById(data.latest_version.data.root,selectedChildId):null;if(!child)return;
+  const requestViewId=viewId,requestDocumentId=data.latest_version.data.document_id,requestChild=selectedChildId,requestRevision=data.latest_version.data.revision;
   const doc=data.latest_version.data;const operations=[];
   if(kind==="move-top"){
     operations.push({kind:"move_slot_child",instance_id:child.instance_id,target_parent_instance_id:selected.instance_id,target_slot_id:"detail",target_index:0});
@@ -296,16 +301,17 @@ async function createProposal(kind){
   const changeset={changeset_id:`agent-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["agent-proposal"]};
   $("status").textContent="生成提案预览…";
   try{
-    const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/propose`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
+    const r=await fetch(`/api/views/${encodeURIComponent(requestViewId)}/propose`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
     const j=await r.json();if(!r.ok)throw new Error(j.error||"提案校验失败");
-    proposal={viewId,documentId:doc.document_id,expectedRevision:doc.revision,changeset,preview:j,stale:false};renderProposalPanel();$("status").textContent="提案预览已生成，尚未写入";
+    if(viewId!==requestViewId||data?.latest_version?.data?.document_id!==requestDocumentId||selectedChildId!==requestChild||data?.latest_version?.data?.revision!==requestRevision){$("status").textContent="选择或版本已变化，旧提案已丢弃";return}
+    proposal={viewId:requestViewId,documentId:requestDocumentId,expectedRevision:requestRevision,changeset,preview:j,stale:false,noOp:proposalNoOp(j)};renderProposalPanel();$("status").textContent=proposal.noOp?"提案无实际变化，不能接受":"提案预览已生成，尚未写入";
   }catch(e){$("status").textContent=e.message;proposal=null;renderProposalPanel()}
 }
 async function acceptProposal(){
-  if(!proposal)return;
+  if(!proposal||proposal.noOp)return;
   const doc=data?.latest_version?.data;
   if(!doc||viewId!==proposal.viewId||doc.document_id!==proposal.documentId||doc.revision!==proposal.expectedRevision){proposal.stale=true;renderProposalPanel();$("status").textContent="提案已过期，请重新生成并预览";return}
-  try{await commitViewChangeSet(proposal.changeset.operations,"接受提案");proposal=null;selectedChildId=null;renderDetail();$("status").textContent="提案已接受并保存"}
+  try{await commitFrozenChangeSet(proposal,"接受提案");proposal=null;selectedChildId=null;renderDetail();$("status").textContent="提案已接受并保存"}
   catch(e){$("status").textContent=e.message||"提案提交失败"}
 }
 function renderDetail(){
@@ -395,6 +401,21 @@ function commitViewChangeSet(operations,label){
   const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run
 }
 function mutate(operations,label){return commitViewChangeSet(operations,label)}
+function commitFrozenChangeSet(proposal,label){
+  if(!data)return Promise.reject(new Error("View 未加载"));
+  const targetViewId=proposal.viewId,targetDocumentId=proposal.documentId;
+  const task=async()=>{
+    if(viewId!==targetViewId||data?.latest_version?.data?.document_id!==targetDocumentId){$("status").textContent="View 已切换，提案提交已取消";throw new Error("view_changed")}
+    $("status").textContent=`${label}…`;
+    const r=await fetch(`/api/views/${encodeURIComponent(targetViewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset:proposal.changeset})});
+    const j=await r.json();
+    if(!r.ok){const message=j.error||`${label}失败`;if(viewId===targetViewId)await load(true,true);$("status").textContent=message;throw new Error(message)}
+    if(viewId!==targetViewId){return}
+    await load(true,true);$("status").textContent=`${label}已保存`;
+  };
+  const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run
+}
+
 function render(){renderCrumbs();renderCanvas();renderDetail();$("workspaceTitle").textContent=(data?.latest_version?.data?.root?.props?.title)||"AsterLab / CCK-8 Assay";const d=data?.latest_version?.data;$("workspaceSub").textContent=d?`View revision ${d.revision} · ${esc(d.document_id).slice(0,8)}`:"Protocol · View"}
 async function load(preserveHistory=false,preserveUi=false){
   viewId=$("viewId").value.trim();if(!viewId)return;$("status").textContent="加载中…";

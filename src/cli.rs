@@ -2352,6 +2352,16 @@ pub(crate) fn view_selection_context(
         } else {
             ("not_applicable", None, Value::Null)
         };
+    let protocol_ready = step_detail
+        .as_ref()
+        .and_then(|detail| detail.get("protocol_ready"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let unresolved_parameters = step_detail
+        .as_ref()
+        .and_then(|detail| detail.get("unresolved_parameters"))
+        .cloned()
+        .unwrap_or(Value::Null);
     Ok(json!({
         "view_id": view_id,
         "document_id": document.document_id,
@@ -2359,6 +2369,8 @@ pub(crate) fn view_selection_context(
         "instance_id": instance_id,
         "renderer_key": renderer_key,
         "component": component,
+        "protocol_ready": protocol_ready,
+        "unresolved_parameters": unresolved_parameters,
         "step_detail": {
             "status": step_status,
             "detail": step_detail,
@@ -2551,6 +2563,12 @@ pub(crate) fn view_proposal(
         &before_bindings,
         &after_bindings,
     );
+    let no_op = !operation_changes.is_empty()
+        && operation_changes.iter().all(|operation| {
+            let before = operation.get("before");
+            let after = operation.get("after");
+            before.is_some() && after.is_some() && before == after
+        });
     let changes = result
         .changed_instances
         .iter()
@@ -2571,6 +2589,8 @@ pub(crate) fn view_proposal(
         "changed_instances": result.changed_instances,
         "affected_bindings": result.affected_bindings,
         "requires_confirmation": result.requires_confirmation,
+        "diff_scope": "net",
+        "no_op": no_op,
         "operation_changes": operation_changes,
         "changes": changes
     }))
