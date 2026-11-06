@@ -7,10 +7,11 @@
         : "flask";
       const title = ctx.esc(ctx.title(instance));
       const kind = ctx.esc(visual.symbol || visual.template || instance.definition?.id || "workflow");
+      const markup = window.AsterIcons?.[icon] || "";
       return `<g class="cmp-flow">
-        <image class="cmp-flow__icon" href="/icons/${icon}.svg" xlink:href="/icons/${icon}.svg" x="40" y="7" width="60" height="60" preserveAspectRatio="xMidYMid meet"/>
-        <text class="cmp-flow__label" x="70" y="101">${title}</text>
-        <text class="cmp-flow__kind" x="70" y="116">${kind}</text>
+        <g class="cmp-flow__icon" transform="translate(32 12) scale(2)">${markup}</g>
+        <text class="cmp-flow__label" x="56" y="105">${title}</text>
+        <text class="cmp-flow__kind" x="56" y="120">${kind}</text>
       </g>`;
     }
   });

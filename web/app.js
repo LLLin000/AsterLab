@@ -11,7 +11,7 @@ let mountedModules=[];
 let dataRequestSeq=0;
 let drafts=new Map();
 const $=id=>document.getElementById(id);
-{const savedTheme=localStorage.getItem("asterlab.theme");if(savedTheme)document.documentElement.dataset.bsTheme=savedTheme;}
+{const savedTheme=localStorage.getItem("asterlab.theme")||"dark";document.documentElement.dataset.bsTheme=savedTheme;}
 const themeToggle=document.getElementById("themeToggle");if(themeToggle)themeToggle.onclick=()=>{const next=document.documentElement.dataset.bsTheme==="dark"?"light":"dark";document.documentElement.dataset.bsTheme=next;localStorage.setItem("asterlab.theme",next);renderCanvas()};
 window.AsterUI=window.AsterUI||{registry:{},register(key,renderer){this.registry[key]=renderer}};
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -48,18 +48,18 @@ function graph(){
   });
   return {nodes,edges};
 }
-function nodeBox(c){return {x:c._vx??80,y:c._vy??175,w:96,h:96}}
+function nodeBox(c){return {x:c._vx??80,y:c._vy??175,w:112,h:136}}
 function compactMarkup(c){
-  return `<g class="glyph">${iconFor(c)}</g><text class="label" x="48" y="118">${esc(nodeTitle(c))}</text><text class="kind" x="48" y="132">${esc((c.visual?.symbol||c.visual?.template||"").trim()||defName(c))}</text>`;
+  return `<g class="glyph">${iconFor(c)}</g><text class="label" x="56" y="105">${esc(nodeTitle(c))}</text><text class="kind" x="56" y="120">${esc((c.visual?.symbol||c.visual?.template||"").trim()||defName(c))}</text>`;
 }
 function renderCanvas(){
   const svg=$("canvas"); const {nodes,edges}=graph();
   const byId={}; nodes.forEach(n=>{byId[n.node_id]=n.component;byId[n.component.instance_id]=n.component});
-  const edgeMarkup=edges.map(e=>{const a=byId[e.from],b=byId[e.to];if(!a||!b)return "";const A=nodeBox(a),B=nodeBox(b);const x1=A.x+96,y1=A.y+48,x2=B.x,y2=B.y+48;const mid=x1+(x2-x1)/2;return `<path class="edge" d="M${x1} ${y1} C${mid} ${y1},${mid} ${y2},${x2-5} ${y2}"/>`}).join("");
-  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="96" height="96" rx="18"/><circle class="port-hit" data-port="in" data-node="${esc(n.node_id)}" cx="0" cy="48" r="8" fill="transparent"/><circle class="port" cx="0" cy="48" r="3" pointer-events="none"/><circle class="port-hit" data-port="out" data-node="${esc(n.node_id)}" cx="96" cy="48" r="8" fill="transparent"/><circle class="port" cx="96" cy="48" r="3" pointer-events="none"/>${rendererFor(c).compact(c)}</g>`}).join("");
+  const edgeMarkup=edges.map(e=>{const a=byId[e.from],b=byId[e.to];if(!a||!b)return "";const A=nodeBox(a),B=nodeBox(b);const x1=A.x+A.w,y1=A.y+A.h/2,x2=B.x,y2=B.y+B.h/2;const mid=x1+(x2-x1)/2;return `<path class="edge" d="M${x1} ${y1} C${mid} ${y1},${mid} ${y2},${x2-5} ${y2}"/>`}).join("");
+  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="${B.w}" height="${B.h}" rx="18"/><circle class="port-hit" data-port="in" data-node="${esc(n.node_id)}" cx="0" cy="${B.h/2}" r="8" fill="transparent"/><circle class="port" cx="0" cy="${B.h/2}" r="3" pointer-events="none"/><circle class="port-hit" data-port="out" data-node="${esc(n.node_id)}" cx="${B.w}" cy="${B.h/2}" r="8" fill="transparent"/><circle class="port" cx="${B.w}" cy="${B.h/2}" r="3" pointer-events="none"/>${rendererFor(c).compact(c,{esc,title:nodeTitle})}</g>`}).join("");
   const empty=nodes.length?"":`<text class="empty" x="550" y="260">此 View 还没有工作流节点。</text>`;
   const dots=`<circle class="grid-dot" cx="1" cy="1" r="1"/>`;
-  svg.innerHTML=`<defs><pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">${dots}</pattern><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b9c0ca"/></marker></defs><rect width="1100" height="360" fill="url(#dots)"/><g id="viewport" transform="translate(${view.x} ${view.y}) scale(${view.k})">${edgeMarkup}${nodeMarkup}${empty}</g>`;
+  svg.innerHTML=`<defs><pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">${dots}</pattern><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--al-line-strong)"/></marker></defs><rect width="1100" height="360" fill="url(#dots)"/><g id="viewport" transform="translate(${view.x} ${view.y}) scale(${view.k})">${edgeMarkup}${nodeMarkup}${empty}</g>`;
   svg.querySelectorAll(".port-hit[data-port=out]").forEach(el=>el.addEventListener("pointerdown",ev=>startConnect(ev,el.dataset.node)));
   svg.querySelectorAll(".wnode").forEach(el=>{
     el.addEventListener("pointerdown",ev=>startNodeDrag(ev,byId[el.dataset.node]));
@@ -528,7 +528,7 @@ let connectDrag=null;
 function startConnect(ev,fromId){
   if(mode==="hand")return;ev.stopPropagation();ev.preventDefault();
   const source=(node?.workflow?.nodes||[]).find(n=>n.node_id===fromId)?.component;if(!source)return;
-  const A=nodeBox(source),p0={x:A.x+96,y:A.y+48};
+  const A=nodeBox(source),p0={x:A.x+A.w,y:A.y+A.h/2};
   const temp=document.createElementNS("http://www.w3.org/2000/svg","path");temp.setAttribute("class","edge temp-edge");temp.setAttribute("d",`M${p0.x} ${p0.y} L${p0.x} ${p0.y}`);document.querySelector("#viewport")?.appendChild(temp);
   connectDrag={fromId,temp};
   const hit=e=>[...document.querySelectorAll(".wnode")].find(el=>{const b=el.getBoundingClientRect();return e.clientX>=b.left&&e.clientX<=b.right&&e.clientY>=b.top&&e.clientY<=b.bottom})?.dataset.node||"";
@@ -557,7 +557,7 @@ $("redo").onclick=()=>{const entry=future.pop();if(!entry)return;const c=applyPo
   persistVisual(entry.instance_id,entry.after).catch(()=>{future.push(entry);history=history.filter(x=>x!==entry);updateHistoryButtons()})};
 $("selectTool").onclick=()=>{mode="select";$("selectTool").classList.add("active");$("handTool").classList.remove("active");$("canvas").classList.remove("hand")};
 $("handTool").onclick=()=>{mode="hand";$("handTool").classList.add("active");$("selectTool").classList.remove("active");$("canvas").classList.add("hand")};
-$("fit").onclick=()=>{const {nodes}=graph();if(!nodes.length)return;const xs=nodes.map(n=>nodeBox(n.component));const minX=Math.min(...xs.map(b=>b.x)),maxX=Math.max(...xs.map(b=>b.x+96)),minY=Math.min(...xs.map(b=>b.y)),maxY=Math.max(...xs.map(b=>b.y+136));const k=Math.min(1.2,Math.max(.35,Math.min(1000/(maxX-minX+80),480/(maxY-minY+80))));view={k,x:80-minX*k,y:140-minY*k};renderCanvas()};
+$("fit").onclick=()=>{const {nodes}=graph();if(!nodes.length)return;const boxes=nodes.map(n=>nodeBox(n.component));const minX=Math.min(...boxes.map(b=>b.x)),maxX=Math.max(...boxes.map(b=>b.x+b.w)),minY=Math.min(...boxes.map(b=>b.y)),maxY=Math.max(...boxes.map(b=>b.y+b.h));const k=Math.min(1.2,Math.max(.35,Math.min(1000/(maxX-minX+80),480/(maxY-minY+80))));view={k,x:80-minX*k,y:140-minY*k};renderCanvas()};
 function zoomAt(f){const k=Math.min(2,Math.max(.25,view.k*f));const svg=$("canvas"),r=svg.getBoundingClientRect();const center=screenToCanvas(r.left+r.width/2,r.top+r.height/2);view.x=view.x+center.x*(view.k-k);view.y=view.y+center.y*(view.k-k);view.k=k;renderCanvas()}
 $("zoomIn").onclick=()=>zoomAt(1.2);$("zoomOut").onclick=()=>zoomAt(1/1.2);
 $("canvas").addEventListener("wheel",e=>{e.preventDefault();const p=screenToCanvas(e.clientX,e.clientY);const f=e.deltaY<0?1.1:1/1.1;const k=Math.min(2,Math.max(.25,view.k*f));view.x=view.x+p.x*(view.k-k);view.y=view.y+p.y*(view.k-k);view.k=k;renderCanvas()},{passive:false});
@@ -565,29 +565,15 @@ $("canvas").addEventListener("pointerdown",e=>{if(e.target.closest(".wnode"))ret
 window.addEventListener("pointermove",e=>{if(!pan)return;const a=screenToSvg(pan.sx,pan.sy),b=screenToSvg(e.clientX,e.clientY);view.x=pan.vx+(b.x-a.x)/pan.k;view.y=pan.vy+(b.y-a.y)/pan.k;renderCanvas()});
 window.addEventListener("pointerup",()=>{pan=null;$("canvas").classList.remove("grabbing")});
 
-const canvasPanel=$("canvasPanel"), splitHandle=$("splitter");
-function setCanvasHeight(h){
-  const max=Math.max(340,window.innerHeight-260);const value=Math.max(340,Math.min(max,h));
-  canvasPanel.style.flexBasis=`${value}px`;canvasPanel.style.height=`${value}px`;localStorage.setItem("asterlab.canvasHeight",String(value));
+const canvasPanel=$("canvasPanel"),collapseButton=$("collapseWorkflow");
+function setWorkflowCollapsed(collapsed){
+  canvasPanel.classList.toggle("compact",collapsed);
+  collapseButton.textContent=collapsed?"展开流程":"收起流程";
+  collapseButton.title=collapsed?"展开流程":"收起流程";
+  collapseButton.setAttribute("aria-expanded",String(!collapsed));
+  localStorage.setItem("asterlab.workflowCollapsed",String(collapsed));
 }
-{
-  const saved=Number(localStorage.getItem("asterlab.canvasHeight"));
-  if(saved)setCanvasHeight(saved);
-}
-let splitDrag=null;
-splitHandle.addEventListener("pointerdown",e=>{
-  splitDrag={y:e.clientY,h:canvasPanel.getBoundingClientRect().height};
-  splitHandle.setPointerCapture(e.pointerId);document.body.style.cursor="row-resize";
-});
-splitHandle.addEventListener("pointermove",e=>{
-  if(!splitDrag)return;setCanvasHeight(splitDrag.h+(e.clientY-splitDrag.y));renderCanvas();
-});
-splitHandle.addEventListener("pointerup",e=>{
-  splitDrag=null;document.body.style.cursor="";splitHandle.releasePointerCapture?.(e.pointerId);layoutCards();
-});
-splitHandle.addEventListener("keydown",e=>{
-  if(e.key!=="ArrowUp"&&e.key!=="ArrowDown")return;e.preventDefault();
-  setCanvasHeight(canvasPanel.getBoundingClientRect().height+(e.key==="ArrowDown"?20:-20));renderCanvas();
-});
-window.addEventListener("resize",()=>{const h=canvasPanel.getBoundingClientRect().height;setCanvasHeight(h);renderCanvas();layoutCards()});
+setWorkflowCollapsed(localStorage.getItem("asterlab.workflowCollapsed")==="true");
+collapseButton.addEventListener("click",()=>setWorkflowCollapsed(!canvasPanel.classList.contains("compact")));
+window.addEventListener("resize",()=>{renderCanvas();layoutCards()});
 $("openView").onclick=load;

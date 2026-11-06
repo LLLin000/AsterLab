@@ -690,6 +690,12 @@ fn view_document_persists_and_revises_against_real_core_refs() {
             .len(),
         1
     );
+    assert_eq!(
+        projected["result"]["document"]["root"]["workflow"]["nodes"][0]["component"]["props"]
+            ["label"],
+        "Transfer",
+        "projection must carry the step title into the canvas node"
+    );
 
     let custom = json!({
         "definition": {
