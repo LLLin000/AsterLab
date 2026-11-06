@@ -31,6 +31,7 @@
 25. [实验设计流程走查](2026-11-02-cellplanner-design-flow-walkthrough.md) — L929、SA 梯度、生物膜、动物/影像等已有案例和 gap。
 26. [组件体系与 LabwareProfile 设计评审](2026-11-05-component-profile-and-labware-design-review.md) — C3 架构基线：通用表格/计算器、LabwareProfile、计划容器/孔位/包含关系、修订顺序；评审稿。
 27. [Scientific Fact-Aware Components 研究记录](2026-11-06-scientific-fact-aware-components.md) — 类型化科学属性、规则评估、Corning/PCR 参考核对、组件联动与最小闭环；研究稿。
+28. [实验设计工作区草图研究](2026-11-06-workspace-sketch-analysis.md) — 导航栏、受限流程图、统一组件语法、多样品入流、卡片工作区、成熟项目与算法参考。
 
 ## 证据标签
 
