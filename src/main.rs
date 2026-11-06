@@ -31,6 +31,7 @@ const MASONRY_JS: &str = include_str!("../web/vendor/masonry.pkgd.min.js");
 const APP_JS: &str = include_str!("../web/app.js");
 const MARKED_JS: &str = include_str!("../web/vendor/marked.min.js");
 const PURIFY_JS: &str = include_str!("../web/vendor/purify.min.js");
+const DAGRE_JS: &str = include_str!("../web/vendor/dagre.min.js");
 #[derive(Clone)]
 struct AppState {
     db: Arc<Mutex<Connection>>,
@@ -159,6 +160,14 @@ async fn marked_js() -> Response {
     (
         [(axum::http::header::CONTENT_TYPE, "text/javascript")],
         MARKED_JS,
+    )
+        .into_response()
+}
+
+async fn dagre_js() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+        DAGRE_JS,
     )
         .into_response()
 }
@@ -824,6 +833,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/app.js", get(app_js))
         .route("/vendor/marked.js", get(marked_js))
         .route("/vendor/purify.js", get(purify_js))
+        .route("/vendor/dagre.js", get(dagre_js))
         .route("/api/views/{id}", get(get_view))
         .route("/api/views/{id}/data", get(get_view_data))
         .route(

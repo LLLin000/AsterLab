@@ -40,7 +40,24 @@ function graph(){
   if(!node||!node.workflow)return {nodes:[],edges:[]};
   const nodes=node.workflow.nodes||[];
   const edges=node.workflow.edges||[];
-  const gap=190, start=550-((nodes.length-1)*gap)/2-38, y=150;
+  if(window.dagre&&nodes.length){
+    try{
+      const g=new dagre.graphlib.Graph();
+      g.setGraph({rankdir:"LR",nodesep:46,ranksep:96,marginx:40,marginy:40});
+      g.setDefaultEdgeLabel(()=>({}));
+      nodes.forEach(n=>g.setNode(n.node_id,{width:76,height:120}));
+      edges.forEach(e=>{if(g.hasNode(e.from)&&g.hasNode(e.to))g.setEdge(e.from,e.to)});
+      dagre.layout(g);
+      nodes.forEach((n,i)=>{
+        const c=n.component;const v=c.visual||{};const p=g.node(n.node_id);
+        if(typeof v.x==="number"&&typeof v.y==="number"){c._vx=v.x;c._vy=v.y}
+        else if(p){c._vx=p.x-38;c._vy=p.y-38}
+        else{c._vx=80+i*190;c._vy=150}
+      });
+      return {nodes,edges};
+    }catch(e){}
+  }
+  const gap=190,start=550-((nodes.length-1)*gap)/2-38,y=150;
   nodes.forEach((n,i)=>{const c=n.component;const v=c.visual||{};if(typeof v.x!=="number"){c._vx=start+i*gap;c._vy=y}else{c._vx=v.x;c._vy=v.y}});
   return {nodes,edges};
 }
@@ -52,7 +69,7 @@ function renderCanvas(){
   const svg=$("canvas"); const {nodes,edges}=graph();
   const byId={}; nodes.forEach(n=>{byId[n.node_id]=n.component;byId[n.component.instance_id]=n.component});
   const edgeMarkup=edges.map(e=>{const a=byId[e.from],b=byId[e.to];if(!a||!b)return "";const A=nodeBox(a),B=nodeBox(b);const x1=A.x+76,y1=A.y+38,x2=B.x,y2=B.y+38;const mid=x1+(x2-x1)/2;return `<path class="edge" d="M${x1} ${y1} C${mid} ${y1},${mid} ${y2},${x2-5} ${y2}"/>`}).join("");
-  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="76" height="76" rx="18"/>${compactMarkup(c)}</g>`}).join("");
+  const nodeMarkup=nodes.map(n=>{const c=n.component,B=nodeBox(c);const active=selected?.instance_id===c.instance_id;const hint=(c.visual?.symbol||c.visual?.template||"").trim();return `<g class="wnode ${active?"selected":""}" data-node="${esc(c.instance_id)}" transform="translate(${B.x} ${B.y})" tabindex="0" role="button" aria-label="${esc(nodeTitle(c))}"><rect class="node-bg" width="76" height="76" rx="18"/><circle class="port" cx="0" cy="38" r="3"/><circle class="port" cx="76" cy="38" r="3"/>${rendererFor(c).compact(c)}</g>`}).join("");
   const empty=nodes.length?"":`<text class="empty" x="550" y="260">此 View 还没有工作流节点。</text>`;
   const dots=Array.from({length:16},(_,r)=>Array.from({length:24},(_,c)=>`<circle class="grid-dot" cx="${40+c*44}" cy="${40+r*34}" r="1"/>`).join("")).join("");
   svg.innerHTML=`<defs><pattern id="dots" width="44" height="34" patternUnits="userSpaceOnUse">${dots}</pattern><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b9c0ca"/></marker></defs><rect width="1100" height="560" fill="url(#dots)"/><g id="viewport" transform="translate(${view.x} ${view.y}) scale(${view.k})">${edgeMarkup}${nodeMarkup}${empty}</g>`;
@@ -214,7 +231,7 @@ function calculatorCard(child,actions,ctx){
   const plates=ctx.plates||[];
   const options=plates.map(p=>`<option value="${esc(p.instance_id)}" ${state.plateId===p.instance_id?"selected":""}>${esc(nodeTitle(p))} · ${esc(p.model_ref?.container_id||"")}</option>`).join("");
   const bind=plates.length?`<select data-calc-plate="${esc(id)}"><option value="">选择孔板…</option>${options}</select>`:`<div class="muted">没有可用孔板；请先添加 PlannedContainer 孔板。</div>`;
-  return `<div class="card calc-card" data-instance="${esc(id)}"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${esc(child.props?.tool_ref||defName(child))}</div><div class="stack">${bind}<input id="calc-${esc(id)}-positions" placeholder="目标孔位，如 A1,B1" value="${esc(state.positions)}"><div class="row"><input id="calc-${esc(id)}-volume" placeholder="每孔体积" value="${esc(state.volume)}"><input id="calc-${esc(id)}-unit" placeholder="单位，如 uL" value="${esc(state.unit)}"></div><input id="calc-${esc(id)}-extra" placeholder="额外比例，如 0.1" value="${esc(state.extra)}"></div><button data-calc="${esc(id)}">计算</button></div>`;
+  return `<div class="card calc-card" data-instance="${esc(id)}"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">${esc(child.props?.tool_ref||defName(child))}</div><div class="stack">${bind}<input id="calc-${esc(id)}-positions" placeholder="目标孔位，如 A1,B1" value="${esc(state.positions)}"><div class="row"><input id="calc-${esc(id)}-volume" placeholder="每孔体积" value="${esc(state.volume)}"><input id="calc-${esc(id)}-unit" placeholder="单位，如 uL" value="${esc(state.unit)}"></div><input id="calc-${esc(id)}-extra" placeholder="额外比例，如 0.1" value="${esc(state.extra)}"></div><button data-calc="${esc(id)}">计算</button><div class="calc-result" id="calc-${esc(id)}-result"></div></div>`;
 }
 function workflowCard(child,actions){
   return `<div class="card" data-instance="${esc(child.instance_id)}"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">嵌套流程 · ${workflowOf(child).length} 步</div><button data-enter="${esc(child.instance_id)}">进入</button></div>`;
@@ -225,16 +242,24 @@ function defaultCard(child,actions,ctx){
 function cardActions(child){
   return `<div class="card-actions"><button data-move-up="${esc(child.instance_id)}" title="上移">↑</button><button data-move-down="${esc(child.instance_id)}" title="下移">↓</button><button data-remove="${esc(child.instance_id)}" title="删除">×</button></div>`;
 }
+function unsupportedCard(child,actions,ctx){
+  return `<div class="card" data-instance="${esc(child.instance_id)}"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">Unsupported</div><div class="muted">没有可用的 Renderer：${esc(defName(child))}@${esc(child.definition?.version??"?")}</div></div>`;
+}
 const componentRenderers={
-  "content.table":{compact:compactMarkup,detail:tableCard},
-  "layout.table":{compact:compactMarkup,detail:tableCard},
-  "content.note":{compact:compactMarkup,detail:noteCard},
-  "content.markdown":{compact:compactMarkup,detail:noteCard},
-  "tool.calculator":{compact:compactMarkup,detail:calculatorCard},
-  "lab.well_plate":{compact:compactMarkup,detail:plateCard},
-  "workflow":{compact:compactMarkup,detail:workflowCard},
-  "default":{compact:compactMarkup,detail:defaultCard}
+  "content.table@1":{compact:compactMarkup,detail:tableCard},
+  "layout.table@1":{compact:compactMarkup,detail:tableCard},
+  "content.note@1":{compact:compactMarkup,detail:noteCard},
+  "content.markdown@1":{compact:compactMarkup,detail:noteCard},
+  "layout.section@1":{compact:compactMarkup,detail:defaultCard},
+  "tool.calculator@1":{compact:compactMarkup,detail:calculatorCard},
+  "lab.well_plate@1":{compact:compactMarkup,detail:plateCard},
+  "workflow@1":{compact:compactMarkup,detail:workflowCard},
+  "unsupported":{compact:compactMarkup,detail:unsupportedCard}
 };
+function rendererFor(component){
+  const key=`${component.definition?.id||"unknown"}@${component.definition?.version??"?"}`;
+  return componentRenderers[key]||componentRenderers.unsupported;
+}
 function renderDetail(){
   const c=selected;
   if(!c){$("detail").innerHTML='<div class="muted">选择一个步骤查看详情。</div>';return}
@@ -243,7 +268,7 @@ function renderDetail(){
   const plates=allChildren.filter(x=>x.definition.id==="lab.well_plate");
   for(const [slot,children] of Object.entries(slots)) for(const child of children){
     const actions=cardActions(child);
-    const renderer=child.workflow?.nodes?.length?componentRenderers.workflow:(componentRenderers[child.definition.id]||componentRenderers.default);
+    const renderer=child.workflow?.nodes?.length?componentRenderers["workflow@1"]:rendererFor(child);
     cards.push(renderer.detail(child,actions,{slot,plates}));
   }
   const ref=c.model_ref||{};
@@ -303,16 +328,20 @@ async function addComponent(kind){
   }
   await mutate([{kind:"add_slot_child",parent_instance_id:selected.instance_id,slot_id:"detail",child}],`添加 ${kind}`)
 }
-async function mutate(operations,label){
-  if(!data)return;
+function commitViewChangeSet(operations,label){
+  if(!data)return Promise.reject(new Error("View 未加载"));
   const task=async()=>{
-    const doc=data.latest_version.data;const changeset={changeset_id:`ui-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["view-ui"]};
-    $("status").textContent=`${label}…`;const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});const j=await r.json();
+    const doc=data.latest_version.data;
+    const changeset={changeset_id:`ui-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations,provenance:["view-ui"]};
+    $("status").textContent=`${label}…`;
+    const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
+    const j=await r.json();
     if(!r.ok){$("status").textContent=j.error||`${label}失败`;await load(true,true);throw new Error(j.error||label)}
-    await load(true,true);$("status").textContent=`${label}已保存`
+    await load(true,true);$("status").textContent=`${label}已保存`;
   };
   const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run
 }
+function mutate(operations,label){return commitViewChangeSet(operations,label)}
 function render(){renderCrumbs();renderCanvas();renderDetail();$("workspaceTitle").textContent=(data?.latest_version?.data?.root?.props?.title)||"AsterLab / CCK-8 Assay";const d=data?.latest_version?.data;$("workspaceSub").textContent=d?`View revision ${d.revision} · ${esc(d.document_id).slice(0,8)}`:"Protocol · View"}
 async function load(preserveHistory=false,preserveUi=false){
   viewId=$("viewId").value.trim();if(!viewId)return;$("status").textContent="加载中…";
@@ -331,9 +360,9 @@ async function load(preserveHistory=false,preserveUi=false){
   render();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`
 }
 async function saveNote(instanceId){
-  if(!data)return;const doc=data.latest_version.data;const text=drafts.get(instanceId)?.text??$("note-"+CSS.escape(instanceId))?.value??"";
-  const changeset={changeset_id:`ui-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations:[{kind:"update_props",instance_id:instanceId,property:"text",value:text}],provenance:["view-ui"]};
-  $("status").textContent="保存中…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});const j=await r.json();if(!r.ok){$("status").textContent=j.error||"保存失败";return}$("status").textContent="已保存";drafts.delete(instanceId);await load(true,true)
+  if(!data)return;const text=drafts.get(instanceId)?.text??$("note-"+CSS.escape(instanceId))?.value??"";
+  await commitViewChangeSet([{kind:"update_props",instance_id:instanceId,property:"text",value:text}],"保存说明");
+  drafts.delete(instanceId);renderDetail();
 }
 function screenToSvg(clientX,clientY){
   const svg=$("canvas"),p=svg.createSVGPoint();p.x=clientX;p.y=clientY;const ctm=svg.getScreenCTM();
@@ -343,20 +372,13 @@ function screenToCanvas(clientX,clientY){
   const u=screenToSvg(clientX,clientY);return {x:(u.x-view.x)/view.k,y:(u.y-view.y)/view.k}
 }
 function persistVisual(instanceId,pos){
-  const task=async()=>{
-    const doc=data?.latest_version?.data;if(!doc)throw new Error("View 未加载");
-    const changeset={changeset_id:`ui-visual-${Date.now()}`,document_id:doc.document_id,expected_revision:doc.revision,operations:[{kind:"set_visual",instance_id:instanceId,x:pos.x,y:pos.y}],provenance:["view-ui","canvas-drag"]};
-    $("status").textContent="保存布局…";
-    const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/revise`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({changeset})});
-    const j=await r.json();
-    if(!r.ok){$("status").textContent=j.error||"布局保存失败";await load(true,true);throw new Error(j.error||"布局保存失败")}
-    await load(true,true);$("status").textContent="布局已保存"
-  };
-  const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run
+  return commitViewChangeSet([{kind:"set_visual",instance_id:instanceId,x:pos.x,y:pos.y}],"保存布局")
 }
 async function loadData(instanceId,positionsOverride,calculatorId){
-  if(!data)return;const requestSeq=++dataRequestSeq;const state=calculatorId?calcStateFor(calculatorId):null;
-  if(state){if(!state.plateId){$("status").textContent="请先为该计算器选择孔板";return}instanceId=state.plateId;positionsOverride=positionsOverride??state.positions}
+  if(!data)return;const state=calculatorId?calcStateFor(calculatorId):null;
+  let requestSeq;
+  if(state){state.requestSeq=(state.requestSeq||0)+1;requestSeq=state.requestSeq;if(!state.plateId){$("status").textContent="请先为该计算器选择孔板";return}instanceId=state.plateId;positionsOverride=positionsOverride??state.positions}
+  else requestSeq=++dataRequestSeq;
   const params=new URLSearchParams({instance_id:instanceId});if(calculatorId)params.set("calculator_instance_id",calculatorId);
   const positions=positionsOverride??state?.positions??"";
   if(state&&positionsOverride)state.positions=positionsOverride;
@@ -364,7 +386,7 @@ async function loadData(instanceId,positionsOverride,calculatorId){
   if(state?.volume)params.set("volume_per_well",state.volume);
   if(state?.unit)params.set("volume_unit",state.unit);
   if(state?.extra)params.set("extra_ratio",state.extra);
-  $("status").textContent="加载数据…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?${params}`);const j=await r.json();if(requestSeq!==dataRequestSeq)return;if(!r.ok){$("status").textContent=j.error||"数据加载失败";return}const payload=j.result??j;const table=payload.table;const calcResult=payload.calculation||{};const box=$("preview");if(!box)return;
+  $("status").textContent="加载数据…";const r=await fetch(`/api/views/${encodeURIComponent(viewId)}/data?${params}`);const j=await r.json();if(state&&requestSeq!==state.requestSeq)return;if(!state&&requestSeq!==dataRequestSeq)return;if(!r.ok){$("status").textContent=j.error||"数据加载失败";return}const payload=j.result??j;const table=payload.table;const calcResult=payload.calculation||{};const box=state?$(`calc-${CSS.escape(calculatorId)}-result`):$("preview");if(!box)return;
   box.innerHTML=`<h3>数据预览</h3><table><thead><tr>${table.columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table><div class="muted">${esc(table.unresolved.join(", ")||"resolved")} · ${esc(calcResult.tool_action||"tool action")} · 使用 ${esc(calcResult.assigned_positions??"未解析")} 孔 · 单位 ${esc(calcResult.unit||"未解析")} · ${esc(calcResult.state||"")}</div>`;$("status").textContent="数据已加载"
 }
 function startNodeDrag(ev,c){
