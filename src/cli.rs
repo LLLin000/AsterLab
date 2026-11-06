@@ -1596,6 +1596,88 @@ pub(crate) fn create_execution_event_tx(
             "未关联 protocol_step_path 时不能提供 Protocol 步骤引用字段",
         ));
     }
+    if !event.checks.is_empty() {
+        let step_path = event
+            .protocol_step_path
+            .as_deref()
+            .ok_or_else(|| CliError::input("检查结果必须关联冻结的 Protocol 步骤"))?;
+        let protocol_version_id = event
+            .protocol_version_id
+            .as_deref()
+            .ok_or_else(|| CliError::input("检查结果必须提供 protocol_version_id"))?;
+        let mut frozen_step: Option<&Value> = None;
+        for manifest in run_data
+            .get("protocol_manifest")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if manifest["protocol_version_id"].as_str() != Some(protocol_version_id)
+                || event.planned_output_id.is_some()
+                || manifest["assay_id"].as_str() != event.assay_id.as_deref()
+            {
+                continue;
+            }
+            frozen_step = manifest["steps"].as_array().and_then(|steps| {
+                steps
+                    .iter()
+                    .find(|step| step["path"].as_str() == Some(step_path))
+            });
+            if frozen_step.is_some() {
+                break;
+            }
+        }
+        if frozen_step.is_none() {
+            for manifest in run_data
+                .get("material_manifest")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if manifest["planned_output_id"].as_str()
+                    != event.planned_output_id.as_deref()
+                    || event.assay_id.is_some()
+                    || manifest["producer_protocol"]["protocol_version_id"].as_str()
+                        != Some(protocol_version_id)
+                {
+                    continue;
+                }
+                frozen_step = manifest["producer_protocol"]["steps"]
+                    .as_array()
+                    .and_then(|steps| {
+                        steps
+                            .iter()
+                            .find(|step| step["path"].as_str() == Some(step_path))
+                    });
+                if frozen_step.is_some() {
+                    break;
+                }
+            }
+        }
+        let frozen_step = frozen_step
+            .ok_or_else(|| CliError::input("检查结果引用的 Protocol 步骤不属于本次冻结清单"))?;
+        let allowed_checks: std::collections::HashSet<&str> = frozen_step["checks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|check| check["check_id"].as_str())
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        for check in &event.checks {
+            if !seen.insert(check.check_id.as_str()) {
+                return Err(CliError::input(format!(
+                    "同一事件不能重复记录检查项：{}",
+                    check.check_id
+                )));
+            }
+            if !allowed_checks.contains(check.check_id.as_str()) {
+                return Err(CliError::input(format!(
+                    "检查项 {} 不属于冻结步骤 {}",
+                    check.check_id, step_path
+                )));
+            }
+        }
+    }
     let planned_output_ids: std::collections::HashSet<&str> = run_data
         .get("material_manifest")
         .and_then(Value::as_array)
@@ -1656,6 +1738,33 @@ pub(crate) fn create_execution_event_tx(
     if let Some(operator) = &event.operator {
         check_text(operator, "记录人", 160)?;
     }
+    let mut known_readouts: HashMap<String, String> = HashMap::new();
+    if event
+        .readouts
+        .iter()
+        .any(|readout| readout.readout_id.is_some() || readout.result_kind == "derived")
+    {
+        let mut stmt = tx
+            .prepare("SELECT data_json FROM records WHERE kind='execution_event' AND parent_id=?1")
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        let rows = stmt
+            .query_map([run_id], |row| row.get::<_, String>(0))
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        for row in rows {
+            let raw = row.map_err(|e| CliError::internal(e.to_string()))?;
+            let value: Value =
+                serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+            for readout in value["readouts"].as_array().into_iter().flatten() {
+                if let (Some(id), Some(kind)) = (
+                    readout["readout_id"].as_str(),
+                    readout["result_kind"].as_str(),
+                ) {
+                    known_readouts.insert(id.to_owned(), kind.to_owned());
+                }
+            }
+        }
+    }
+    let mut current_readout_ids = HashSet::new();
     for readout in &event.readouts {
         check_text(&readout.endpoint, "读数终点", 300)?;
         if !["raw", "derived"].contains(&readout.result_kind.as_str()) {
@@ -1670,10 +1779,23 @@ pub(crate) fn create_execution_event_tx(
         if readout.value.is_some() == has_qualifier {
             return Err(CliError::input("readout 必须且只能填写数值或 qualifier 之一"));
         }
+        if let Some(readout_id) = &readout.readout_id {
+            check_text(readout_id, "读数 ID", 160)?;
+            if !current_readout_ids.insert(readout_id.as_str()) {
+                return Err(CliError::input(format!("同一事件不能重复使用读数 ID：{readout_id}")));
+            }
+            if known_readouts.contains_key(readout_id) {
+                return Err(CliError::input(format!("读数 ID 已属于本次 Run：{readout_id}")));
+            }
+            known_readouts.insert(readout_id.clone(), readout.result_kind.clone());
+        }
         if let Some(qualifier) = &readout.qualifier {
             if !["not_detected", "below_lod", "above_uloq", "invalid", "other"].contains(&qualifier.as_str()) {
                 return Err(CliError::input("readout.qualifier 不受支持"));
             }
+        }
+        if readout.result_kind == "raw" && !readout.derived_from.is_empty() {
+            return Err(CliError::input("原始读数不能填写 derived_from"));
         }
         if readout.result_kind == "derived" {
             if readout.method.as_deref().is_none_or(|value| value.trim().is_empty()) {
@@ -1681,6 +1803,21 @@ pub(crate) fn create_execution_event_tx(
             }
             if readout.derived_from.is_empty() {
                 return Err(CliError::input("派生读数必须列出来源读数或事件"));
+            }
+            for source in &readout.derived_from {
+                match known_readouts.get(source) {
+                    Some(kind) if kind == "raw" => {}
+                    Some(_) => {
+                        return Err(CliError::input(format!(
+                            "派生读数的来源必须是原始读数：{source}"
+                        )))
+                    }
+                    None => {
+                        return Err(CliError::input(format!(
+                            "派生读数的来源不存在或不属于本次 Run：{source}"
+                        )))
+                    }
+                }
             }
         }
         if let Some(method) = &readout.method {
@@ -1741,7 +1878,7 @@ pub(crate) fn create_execution_event_tx(
         if !["passed", "failed", "blocked", "skipped", "not_run"].contains(&control.status.as_str()) {
             return Err(CliError::input("control.status 不受支持"));
         }
-        for value in [&control.control_id, &control.sample_id, &control.experimental_unit, &control.expected, &control.observed, &control.note] {
+        for value in [&control.subtype, &control.control_id, &control.sample_id, &control.experimental_unit, &control.expected, &control.observed, &control.note] {
             if let Some(value) = value {
                 if value.chars().count() > 500 {
                     return Err(CliError::input("对照字段不能超过 500 个字符"));
@@ -1804,9 +1941,9 @@ pub(crate) fn create_execution_event_tx(
         "sample_ids":event.sample_ids,
         "materials":event.materials.iter().map(|m|json!({"material":m.material,"planned_output_id":m.planned_output_id,"amount":m.amount,"unit":m.unit})).collect::<Vec<_>>(),
         "measurements":event.measurements.iter().map(|m|json!({"endpoint":m.endpoint,"value":m.value,"unit":m.unit,"sample_id":m.sample_id})).collect::<Vec<_>>(),
-        "readouts":event.readouts.iter().map(|r|json!({"endpoint":r.endpoint,"value":r.value,"qualifier":r.qualifier,"unit":r.unit,"sample_id":r.sample_id,"result_kind":r.result_kind,"method":r.method,"derived_from":r.derived_from})).collect::<Vec<_>>(),
+        "readouts":event.readouts.iter().map(|r|json!({"readout_id":r.readout_id,"endpoint":r.endpoint,"value":r.value,"qualifier":r.qualifier,"unit":r.unit,"sample_id":r.sample_id,"result_kind":r.result_kind,"method":r.method,"derived_from":r.derived_from})).collect::<Vec<_>>(),
         "checks":event.checks.iter().map(|c|json!({"check_id":c.check_id,"status":c.status,"note":c.note,"checked_by":c.checked_by})).collect::<Vec<_>>(),
-        "controls":event.controls.iter().map(|c|json!({"role":c.role,"status":c.status,"control_id":c.control_id,"sample_id":c.sample_id,"experimental_unit":c.experimental_unit,"expected":c.expected,"observed":c.observed,"note":c.note})).collect::<Vec<_>>(),
+        "controls":event.controls.iter().map(|c|json!({"role":c.role,"subtype":c.subtype,"status":c.status,"control_id":c.control_id,"sample_id":c.sample_id,"experimental_unit":c.experimental_unit,"expected":c.expected,"observed":c.observed,"note":c.note})).collect::<Vec<_>>(),
         "lineage":event.lineage.iter().map(|l|json!({"from_kind":l.from_kind,"from_id":l.from_id,"to_kind":l.to_kind,"to_id":l.to_id,"relation":l.relation,"note":l.note})).collect::<Vec<_>>(),
         "actual_parameters":event.actual_parameters.iter().map(|p|json!({"key":p.key,"value":p.value,"unit":p.unit,"source":p.source})).collect::<Vec<_>>(),
         "operator":event.operator,
@@ -3479,6 +3616,8 @@ struct EventMeasurement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EventReadout {
+    #[serde(default)]
+    readout_id: Option<String>,
     endpoint: String,
     #[serde(default)]
     value: Option<f64>,
@@ -3510,6 +3649,8 @@ struct EventCheck {
 #[serde(deny_unknown_fields)]
 struct EventControl {
     role: String,
+    #[serde(default)]
+    subtype: Option<String>,
     status: String,
     #[serde(default)]
     control_id: Option<String>,
@@ -4890,6 +5031,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             Ok(run_workspace(&db, &i.id)?)
         }
         "run.create" => {
+            require_trusted_writer(tool)?;
             let i: RunCreate = parse_input(path)?;
             let tx = db
                 .unchecked_transaction()
@@ -6080,7 +6222,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "formula.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","expression"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"expression":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -6307,7 +6449,7 @@ fn tool_description(tool: &str) -> &'static str {
             "只修改 changes 中提供的字段，保留其他值并新增版本；必须提供 expected_revision。"
         }
         "run.list" => "按项目查询实验运行。",
-        "run.create" => "从设计当前版本创建运行并固定设计/Protocol 版本引用。",
+        "run.create" => "从设计当前版本创建运行并固定设计/Protocol 版本引用；仅受信任的本地写入端可调用，Agent 不得自行创建 Run。",
         "run.set_status" => "更新运行状态；必须提供读取时的 expected_revision。Protocol 必填参数未确认时拒绝开始运行。",
         "run.revise" => "按 expected_revision 修订运行名称或计划日期；设计版本、Protocol 清单、材料清单和重复关系不可改写。",
         "task.create" => "按项目、日期和可选运行创建日历任务。",

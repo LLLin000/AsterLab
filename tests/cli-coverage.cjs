@@ -1,0 +1,12 @@
+const assert = require("node:assert/strict");
+const {spawnSync} = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+const root = path.resolve(__dirname, "..");
+const bin = process.env.LABWORKBENCH_BIN || path.join(root, "target", "release", "labworkbench.exe");
+const files = fs.readdirSync(__dirname).filter(name => name.endsWith(".cjs") && name !== "cli-coverage.cjs");
+const called = new Set(files.flatMap(name => [...fs.readFileSync(path.join(__dirname, name), "utf8").matchAll(/cli\("([^"]+)"/g)].map(match => match[1])));
+const tools = JSON.parse(spawnSync(bin, ["tools", "--json"], {encoding: "utf8"}).stdout).tools.map(tool => tool.name);
+const missing = tools.filter(tool => !called.has(tool));
+assert.deepEqual(missing, [], "CLI tools missing from smoke coverage: " + missing.join(", "));
+console.log(JSON.stringify({ok: true, covered: called.size, catalog: tools.length}));

@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, "..");
 const bin = process.env.LABWORKBENCH_BIN || path.join(root, "target", "release", "labworkbench.exe");
 const tempRoot = fs.mkdtempSync(path.join(root, "target", "labworkbench-smoke-"));
 const dataDir = path.join(tempRoot, "data");
-const envBase = {...process.env, LABWORKBENCH_DATA_DIR:dataDir};
+const envBase = {...process.env, LABWORKBENCH_DATA_DIR:dataDir, LABWORKBENCH_TRUSTED_WRITER:"1"};
 let serverProcess;
 let browser;
 let serverOutput = "";
@@ -244,8 +244,7 @@ assert.equal(cli("record.list",{kind:"execution_event",project_id:cliProject.id}
   assert.equal(cli("record.list",{}).result.records.length,beforeImport,"preview must not write records");
   assert.equal(cli("import.study.apply",importPayload).result.designs.length,1);
   assert.equal(cli("record.list",{}).result.records.length,beforeImport+5,"apply imports project, design, snapshot, protocol and version");
-  assert.equal(calledTools.size,toolCatalog.size,"every catalogued CLI tool must be exercised by smoke tests");
-
+  // CLI catalog coverage is checked separately in tests/cli-coverage.cjs.
   const port=await freePort();const base="http://127.0.0.1:"+port;
   serverProcess=spawn(bin,[],{cwd:root,env:{...envBase,LABWORKBENCH_PORT:String(port)},windowsHide:true,stdio:["ignore","pipe","pipe"]});
   serverProcess.stdout.on("data",b=>serverOutput+=b.toString());serverProcess.stderr.on("data",b=>serverOutput+=b.toString());
@@ -570,7 +569,7 @@ const afterMaterialEvent=await page.evaluate(()=>fetch("/api/state").then(r=>r.j
 await page.locator('[data-mobile-view="records"]').click();await page.locator('#record-filter-form [name="from_date"]').fill("");await page.locator('#record-filter-form [name="to_date"]').fill("");await page.locator('#record-filter-form [name="query"]').fill("GelMA extract batch 1");await page.locator('#record-filter-form button[type="submit"]').click();const materialRecordText=await page.locator("#content").innerText();assert(materialRecordText.includes("材料使用")&&materialRecordText.includes("计划产物 GelMA extract batch 1"),materialRecordText);
 await page.locator('[data-mobile-view="runs"]').click();const uiRunCard=page.locator(".item").filter({hasText:"Run 01 · UI revised"}),statusBefore=await page.evaluate(()=>fetch("/api/state").then(r=>r.json())),currentRunStatus=statusBefore.records.find(x=>x.id===run.id).data.status,statusCycle=["planned","in_progress","completed","blocked","cancelled"],statusClicks=(statusCycle.indexOf("completed")-statusCycle.indexOf(currentRunStatus)+statusCycle.length)%statusCycle.length;for(let statusStep=0;statusStep<statusClicks;statusStep++){const statusResponse=page.waitForResponse(response=>response.url().includes("/api/records/update"));await uiRunCard.locator('[data-action="run-status"]').click();const statusResult=await statusResponse;if(!statusResult.ok())throw new Error("UI status transition rejected: "+await statusResult.text())}const completedState=await page.evaluate(()=>fetch("/api/state").then(r=>r.json()));assert.equal(completedState.records.find(x=>x.id===run.id).data.status,"completed","a recorded run can be advanced to completed");
   const dimensions=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));assert(dimensions.scroll<=dimensions.width,"mobile page overflows horizontally: "+JSON.stringify(dimensions));assert.deepEqual(pageErrors,[]);await browser.close();
-  console.log(JSON.stringify({ok:true,typedCli:true,strictInput:true,outputSchemaValidation:true,allCliToolsExercised:calledTools.size,importPreviewApply:true,calculators:true,designVersions:2,designVisualization:true,realRecordCaseRoundTrip:["L929","SA","biofilm"],assayProtocolManifest:true,multiRunLineage:true,views:viewNames,mobile:dimensions}));
+  console.log(JSON.stringify({ok:true,typedCli:true,strictInput:true,outputSchemaValidation:true,cliCalls:calledTools.size,importPreviewApply:true,calculators:true,designVersions:2,designVisualization:true,realRecordCaseRoundTrip:["L929","SA","biofilm"],assayProtocolManifest:true,multiRunLineage:true,views:viewNames,mobile:dimensions}));
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{
   if(browser){try{await browser.close()}catch{}}
   if(serverProcess&&serverProcess.exitCode===null){try{serverProcess.kill();await new Promise(resolve=>serverProcess.once("exit",resolve))}catch{}}

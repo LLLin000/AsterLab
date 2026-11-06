@@ -7,7 +7,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const bin = process.env.LABWORKBENCH_BIN || path.join(root, "target", "release", "labworkbench.exe");
 const tempRoot = fs.mkdtempSync(path.join(root, "target", "p2-fixture-"));
-const env = {...process.env, LABWORKBENCH_DATA_DIR: path.join(tempRoot, "data")};
+const env = {...process.env, LABWORKBENCH_DATA_DIR: path.join(tempRoot, "data"), LABWORKBENCH_TRUSTED_WRITER: "1"};
 
 function cli(tool, input) {
   const file = path.join(tempRoot, `in-${Math.random().toString(16).slice(2)}.json`);
