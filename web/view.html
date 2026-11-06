@@ -21,7 +21,7 @@ input,button,textarea{font:inherit;color:inherit}input,textarea{width:100%;backg
 .zoom{position:absolute;right:14px;bottom:10px;font-size:11px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:3px 9px}
 .crumbs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.crumb{background:var(--soft);border:0;border-radius:99px;padding:3px 9px;font-size:12px}.crumb-sep{color:var(--muted);font-size:11px}
 .detail{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 30px rgba(20,28,48,.05);padding:18px 20px}.detail-head{display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:14px}.detail-title{font-size:18px;font-weight:700}.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:26px}.param{display:flex;flex-direction:column;gap:2px;margin:8px 0}.param b{font-weight:550}.param span{color:var(--muted);font-size:12px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.plate-card{grid-column:span 2}.plate{display:grid;gap:3px;margin:8px 0}.well{width:17px;height:17px;padding:0;border-radius:4px;border:1px solid var(--line);background:#f7f8fb;font-size:7px;color:var(--muted)}.well.assigned{background:#eef0ff;border-color:#c7cdfd;color:var(--ink)}.well.selected{background:var(--accent);border-color:var(--accent);color:#fff}.well:disabled{opacity:.25;cursor:default}.card{border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}.card h3{font-size:12px;margin:0 0 3px}.card .tag{font-size:10px;color:var(--muted)}.card button{margin-top:7px;padding:4px 8px;font-size:11px}
+.cards{position:relative;display:block;min-height:10px}.grid-sizer{width:calc(33.333% - 6px)}.card{width:calc(33.333% - 6px);margin-bottom:8px;box-sizing:border-box}.plate-card{width:calc(66.666% - 6px)}@media(max-width:1100px){.grid-sizer,.card{width:calc(50% - 5px)}.plate-card{width:100%}}@media(max-width:700px){.grid-sizer,.card,.plate-card{width:100%}}.plate{display:grid;gap:3px;margin:8px 0}.well{width:17px;height:17px;padding:0;border-radius:4px;border:1px solid var(--line);background:#f7f8fb;font-size:7px;color:var(--muted)}.well.assigned{background:#eef0ff;border-color:#c7cdfd;color:var(--ink)}.well.selected{background:var(--accent);border-color:var(--accent);color:#fff}.well:disabled{opacity:.25;cursor:default}.card{border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}.card h3{font-size:12px;margin:0 0 3px}.card .tag{font-size:10px;color:var(--muted)}.card button{margin-top:7px;padding:4px 8px;font-size:11px}
 textarea{min-height:54px;resize:vertical}
 table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:6px 4px}th{color:var(--muted);font-weight:500}
 #status{min-height:18px}.preview{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}.card-actions{display:inline-flex;gap:2px;float:right}.card-actions button{width:24px;height:24px;padding:0;border:0;background:transparent;color:var(--muted)}.library{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}.library h3{width:100%;margin:0 0 2px}.library button{font-size:12px;padding:4px 8px}.selection-detail{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.7}
@@ -65,6 +65,7 @@ table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}th,td{te
   <section class="detail" id="detail"><div class="muted">选择一个步骤查看详情。</div></section>
 </main>
 </div>
+<script src="/vendor/masonry.js"></script>
 <script>
 let viewId="", data=null, node=null, selected=null, stack=[], mode="select";
 let view={x:0,y:0,k:1}, pan=null, dragNode=null, nodeMoved=false;
@@ -79,6 +80,14 @@ const scopeLabel=c=>c?.model_ref?.step?.scope?.assay_id?`assay: ${c.model_ref.st
 const workflowOf=c=>c?.workflow?.nodes||[];
 const slotsOf=c=>c?.slots||{};
 const findById=(root,id)=>{let hit=null;const walk=c=>{if(c.instance_id===id)hit=c;Object.values(c.slots||{}).flat().forEach(walk);(c.workflow?.nodes||[]).forEach(n=>walk(n.component))};walk(root);return hit};
+let masonry=null;
+function layoutCards(){
+  const container=document.querySelector(".cards");if(!container)return;
+  if(!window.Masonry){container.classList.add("no-masonry");return}
+  if(masonry&&masonry.element!==container){masonry.destroy();masonry=null}
+  if(!masonry)masonry=new Masonry(container,{itemSelector:".card",columnWidth:".grid-sizer",gutter:8,percentPosition:true,transitionDuration:0});
+  else{masonry.reloadItems();masonry.layout()}
+}
 
 function iconFor(c){
   const visual=c?.visual||{};
@@ -146,6 +155,7 @@ async function loadParams(c,boxId){
   }).join("");
   const pending=unresolved.map(key=>{const item=(result.unresolved_parameters||[]).find(p=>p.slot===key||p.label===key)||{};return `<div class="param"><b>${esc(item.label||key)}</b><span>待确认${item.unit?" · "+esc(item.unit):""}</span></div>`}).join("");
   box.innerHTML=rows+pending||`<div class="muted">该步骤没有已解析参数。</div>`;
+  layoutCards();
 }
 function fmtSelection(plate,instanceId){
   const assigned=new Map((plate.positions||[]).map(p=>[p.position_id,p]));
@@ -182,18 +192,18 @@ async function loadPlate(instanceId,boxId){
     }catch(e){const box=$(boxId);if(box)box.innerHTML=`<div class="muted">${esc(e.message)}</div>`;return}
   }
   if(!plateSelections.has(instanceId))plateSelections.set(instanceId,new Set());
-  const box=$(boxId);if(!box)return;box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId);
+  const box=$(boxId);if(!box)return;box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId);layoutCards();
 }
 function toggleWell(instanceId,well,plate,boxId){
   const set=plateSelections.get(instanceId)||new Set();if(set.has(well))set.delete(well);else set.add(well);plateSelections.set(instanceId,set);
   calcState.positions=[...set].sort().join(",");syncCalcPositions();
-  const box=$(boxId);if(box){box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId)}
+  const box=$(boxId);if(box){box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId);layoutCards()}
 }
 function selectAllWells(instanceId,all){
   const plate=plateCache.get(instanceId);if(!plate)return;
   const set=all?new Set((plate.positions||[]).map(p=>p.position_id)):new Set();
   plateSelections.set(instanceId,set);calcState.positions=[...set].sort().join(",");syncCalcPositions();
-  const box=$(`plate-body-${instanceId}`);if(box){box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId)}
+  const box=$(`plate-body-${instanceId}`);if(box){box.innerHTML=plateMarkup(plate,instanceId);bindPlateBox(box,plate,instanceId);layoutCards()}
 }
 function cardActions(child){
   return `<div class="card-actions"><button data-move-up="${esc(child.instance_id)}" title="上移">↑</button><button data-move-down="${esc(child.instance_id)}" title="下移">↓</button><button data-remove="${esc(child.instance_id)}" title="删除">×</button></div>`;
@@ -219,7 +229,7 @@ function renderDetail(){
   const ref=c.model_ref||{};
   const refLine=ref.kind==="operation_use"?`Protocol step · ${esc(ref.step?.step_path||"")}`:ref.kind?esc(ref.kind):"未绑定科学对象";
   const library=[["layout.section","区块"],["content.table","表格"],["tool.calculator","计算器"],["content.note","说明"],["workflow","子流程"],["lab.well_plate","孔板"]].map(([kind,label])=>`<button data-add="${kind}">+ ${label}</button>`).join("");
-  $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted">${esc(defName(c))} · ${esc(c.instance_id)}</div></div><button id="collapse" aria-label="收起">⌃</button></div><div class="detail-grid"><div><h3>操作参数</h3><div id="params-${esc(c.instance_id)}" class="muted">读取 ProtocolPreview…</div><div class="param"><b>科学引用</b><span>${refLine}</span></div></div><div><h3>相关组件</h3><div class="cards">${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div><div class="library"><h3>添加组件</h3>${library}</div></div></div><div id="preview" class="preview"></div>`;
+  $("detail").innerHTML=`<div class="detail-head"><div><div class="detail-title">${esc(nodeTitle(c))} · Step Detail</div><div class="muted">${esc(defName(c))} · ${esc(c.instance_id)}</div></div><button id="collapse" aria-label="收起">⌃</button></div><div class="detail-grid"><div><h3>操作参数</h3><div id="params-${esc(c.instance_id)}" class="muted">读取 ProtocolPreview…</div><div class="param"><b>科学引用</b><span>${refLine}</span></div></div><div><h3>相关组件</h3><div class="cards"><div class="grid-sizer"></div>${cards.join("")||'<div class="muted">此步骤暂无详情组件。</div>'}</div><div class="library"><h3>添加组件</h3>${library}</div></div></div><div id="preview" class="preview"></div>`;
   $("detail").querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>{const child=findById(data.latest_version.data.root,b.dataset.enter);if(child)enterComponent(child)});
   $("detail").querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>saveNote(b.dataset.save));
   $("detail").querySelectorAll('[data-plate-preview]').forEach(b=>b.onclick=()=>{const set=[...plateSelections.get(b.dataset.platePreview)||[]].sort();if(!set.length){$("status").textContent="请先选择至少一个孔位";return}calcState.positions=set.join(",");syncCalcPositions();loadData(b.dataset.platePreview,set.join(","))});
@@ -233,6 +243,7 @@ function renderDetail(){
   $("detail").querySelectorAll('#calc-positions,#calc-volume,#calc-unit,#calc-extra').forEach(input=>input.oninput=()=>{calcState.positions=$("calc-positions")?.value||"";calcState.volume=$("calc-volume")?.value||"";calcState.unit=$("calc-unit")?.value||"";calcState.extra=$("calc-extra")?.value||""});
   Object.values(slots).flat().filter(child=>child.definition.id==="lab.well_plate").forEach(child=>loadPlate(child.instance_id,`plate-body-${child.instance_id}`));
   loadParams(c,`params-${c.instance_id}`);
+  layoutCards();
 }
 function siblingChildren(id){
   if(!selected)return null;const list=Object.values(slotsOf(selected)).flat();const index=list.findIndex(x=>x.instance_id===id);return index<0?null:{list,index}

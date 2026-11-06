@@ -15,6 +15,7 @@
 - 孔板详情使用 `/api/views/{id}/data` 返回的 `rows`/`columns` 按 LabwareProfile 渲染，当前支持 6、24、96 和 PCR 96 孔；孔位初始为空，支持单孔、多选、全选、清空，选中孔位直接用于计算。
 - Step Detail 内置 Calculator 输入（孔位、体积、单位、额外比例）和结果来源；侧栏不再提供隐式计算输入。
 - Step Detail 组件库可添加 `layout.section`、`content.table`、`tool.calculator`、`content.note`、`workflow` 和引用现有 PlannedContainer 的 `lab.well_plate`；通过 ViewChangeSet 添加、删除、上下移动，不修改 Protocol 顺序。
+- Step Detail 卡片使用 Masonry 4.2.2（MIT，本地 vendored）做自适应拼图布局；孔板卡片占两列，窄屏降为单列。来源见 `web/vendor/LICENSE.md`。
 - 浏览器验收截图见 `target/asterlab-bioicons.png`。
 
 ## 仍未实现
