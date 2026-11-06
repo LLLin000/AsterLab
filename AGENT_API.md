@@ -160,6 +160,6 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 HTTP: `GET /api/views/{id}/data?instance_id=...&calculator_instance_id=...&extra_ratio=...` 对应同一只读投影。
 
-`view.data_preview` 仍是最小只读投影：输入必须提供 `view_id` 和 WellPlate `instance_id`。可提供 `calculator_instance_id`，此时必须指向 `tool.calculator` 且 `props.tool_ref` 为 `tool.reagent_total@1`。体积输入必须显式提供 `volume_per_well` + `volume_unit`，`extra_ratio` 也必须显式提供；缺少任何输入返回 `unresolved`，不补默认值。当前尚未实现从任意 Table 行/列映射 Calculator 输入的通用契约；不会把表格第一格当作体积。它不写 Design/Protocol/Run。
+`view.data_preview` 仍是最小只读投影：输入必须提供 `view_id` 和 WellPlate `instance_id`。可提供 `calculator_instance_id`，此时必须指向 `tool.calculator` 且 `props.tool_ref` 为 `tool.reagent_total@1`。体积输入必须显式提供 `volume_per_well` + `volume_unit`，`extra_ratio` 也必须显式提供；`volume_unit` 只接受 `uL`/`µL`/`mL`/`L`（`ul`、`μL` 归一化为 `uL`），非法单位返回输入错误。必须用 `position_ids`（逗号分隔，HTTP）或 `position_ids` 数组（CLI）明确本次操作的目标孔位；缺失时保持 `unresolved`，不自动统计该计划容器的全部已分配孔。缺少体积或额外比例返回 `unresolved`，不补默认值。当前尚未实现从任意 Table 行/列映射 Calculator 输入的通用契约；不会把表格第一格当作体积。它不写 Design/Protocol/Run。
 
 `component.list` 的 `implemented=true` 表示当前有可用数据适配/测试；`catalog-only` 不代表可被 Agent 创建。12 个注册项中当前只有 workflow/operation/layout.section/content.table/tool.calculator/lab.well_plate 标为 implemented。

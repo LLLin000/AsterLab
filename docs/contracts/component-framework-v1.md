@@ -239,7 +239,8 @@ C3-1 计划容器:
 
 - `component_data` 已提供 WellPlate → Calculator → Table 的只读投影。
 - `view.data_preview` 需要显式 View 的 WellPlate `instance_id`，读取该实例的 PlannedContainer；不再寻找“第一块板”。
-- Calculator 输入当前要求显式 `volume_per_well` + `volume_unit` + `extra_ratio`；`calculator_instance_id` 仅校验 `tool.calculator` 与 `tool_ref` 精确版本。
+- Calculator 输入当前要求显式 `volume_per_well` + `volume_unit` + `extra_ratio`；`calculator_instance_id` 仅校验 `tool.calculator` 与 `tool_ref` 精确版本。`position_ids` 必须明确本次操作的目标孔位；缺失时保持 unresolved，不自动统计全部已分配孔。当前没有 Operation TargetSelection 的自动推导。
+- `VisualSpec` 新增可选 `x`/`y` 画布坐标；`set_visual` ViewPatch 只写 View，不修改 Protocol。旧 ViewDocument 无坐标时由前端自动布局。
 - 尚未实现任意 Table 行列到 Calculator 的通用映射；不会把表格第一格当作体积。
 - `run_reagent_tool` 使用真实的 `ToolActionSpec`/`run_pure`（`tool.reagent_total@1`），记录 action/version；缺体积/额外比例返回 unresolved。
 - `scientific_facts` 已提供 typed quantity/range、工作体积范围与铺板密度两条确定性规则。

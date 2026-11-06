@@ -134,13 +134,17 @@ pub enum ModelRef {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VisualSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -230,6 +234,11 @@ pub enum ViewPatch {
         instance_id: String,
         property: String,
         value: Value,
+    },
+    SetVisual {
+        instance_id: String,
+        x: f64,
+        y: f64,
     },
     AddSlotChild {
         parent_instance_id: String,
@@ -1308,6 +1317,35 @@ fn apply_patch(
             object.insert(property.clone(), value.clone());
             changed.push(instance_id.clone());
         }
+        ViewPatch::SetVisual {
+            instance_id,
+            x,
+            y,
+        } => {
+            if !x.is_finite() || !y.is_finite() {
+                return Err(vec![issue(
+                    "invalid_visual_position",
+                    instance_id,
+                    "visual position must be finite",
+                )]);
+            }
+            let instance = find_instance_mut(&mut document.root, instance_id).ok_or_else(|| {
+                vec![issue(
+                    "missing_instance",
+                    instance_id,
+                    "instance does not exist",
+                )]
+            })?;
+            let visual = instance.visual.get_or_insert_with(|| VisualSpec {
+                symbol: None,
+                template: None,
+                x: None,
+                y: None,
+            });
+            visual.x = Some(*x);
+            visual.y = Some(*y);
+            changed.push(instance_id.clone());
+        }
         ViewPatch::AddSlotChild {
             parent_instance_id,
             slot_id,
@@ -2003,6 +2041,32 @@ mod tests {
         };
         assert!(document.apply_changeset(&invalid, &registry).is_err());
         assert_eq!(document.revision, 1);
+    }
+
+    #[test]
+    fn visual_position_is_a_view_only_patch() {
+        let registry = default_registry();
+        let document = fixture();
+        let result = document
+            .apply_changeset(
+                &ViewChangeSet {
+                    changeset_id: "layout".into(),
+                    document_id: document.document_id.clone(),
+                    expected_revision: 1,
+                    operations: vec![ViewPatch::SetVisual {
+                        instance_id: "prepare".into(),
+                        x: 120.0,
+                        y: 240.0,
+                    }],
+                    provenance: vec![],
+                },
+                &registry,
+            )
+            .unwrap();
+        let prepare = find_instance(&result.document.root, "prepare").unwrap();
+        assert_eq!(prepare.visual.as_ref().unwrap().x, Some(120.0));
+        assert_eq!(prepare.visual.as_ref().unwrap().y, Some(240.0));
+        assert_eq!(result.document.revision, 2);
     }
 
     #[test]

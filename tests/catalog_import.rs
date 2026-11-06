@@ -876,6 +876,7 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         &json!({
             "view_id": view_id,
             "instance_id": "planned_plate",
+            "position_ids": ["A1"],
             "calculator_instance_id": "reagent_calculator",
             "volume_per_well": 10.0,
             "volume_unit": "uL",
@@ -889,6 +890,7 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         &json!({
             "view_id": view_id,
             "instance_id": "planned_plate_2",
+            "position_ids": ["B1"],
             "calculator_instance_id": "reagent_calculator",
             "volume_per_well": 10.0,
             "volume_unit": "uL",
@@ -900,6 +902,7 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         &json!({
             "view_id": view_id,
             "instance_id": "planned_plate_copy",
+            "position_ids": ["A1"],
             "calculator_instance_id": "reagent_calculator",
             "volume_per_well": 10.0,
             "volume_unit": "uL",
@@ -949,7 +952,7 @@ fn view_document_persists_and_revises_against_real_core_refs() {
     let view_v2_id = view_v2["result"]["view"]["id"].as_str().unwrap();
     let v2_preview = cli.run(
         "view.data_preview",
-        &json!({"view_id": view_v2_id, "instance_id": "planned_plate", "calculator_instance_id": "reagent_calculator", "volume_per_well": 10.0, "volume_unit": "uL", "extra_ratio": 0.1}),
+        &json!({"view_id": view_v2_id, "instance_id": "planned_plate", "position_ids": ["A2"], "calculator_instance_id": "reagent_calculator", "volume_per_well": 10.0, "volume_unit": "uL", "extra_ratio": 0.1}),
     );
     assert_eq!(
         v2_preview["result"]["plate"]["positions"][0]["position_id"],
@@ -964,9 +967,32 @@ fn view_document_persists_and_revises_against_real_core_refs() {
         "A1"
     );
 
+    let missing_unit = cli.run(
+        "view.data_preview",
+        &json!({"view_id": view_id, "instance_id": "planned_plate", "position_ids": ["A1"], "volume_per_well": 10.0, "extra_ratio": 0.1}),
+    );
+    assert_eq!(missing_unit["result"]["calculation"]["state"], "unresolved");
+    assert!(missing_unit["result"]["calculation"]["unresolved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "volume_unit"));
+    let missing_positions = cli.run(
+        "view.data_preview",
+        &json!({"view_id": view_id, "instance_id": "planned_plate", "volume_per_well": 10.0, "volume_unit": "uL", "extra_ratio": 0.1}),
+    );
+    assert_eq!(
+        missing_positions["result"]["calculation"]["state"],
+        "unresolved"
+    );
+    assert!(missing_positions["result"]["calculation"]["unresolved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "position_ids"));
     let missing = cli.run(
         "view.data_preview",
-        &json!({"view_id": view_id, "instance_id": "planned_plate"}),
+        &json!({"view_id": view_id, "instance_id": "planned_plate", "position_ids": ["A1"]}),
     );
     assert_eq!(missing["result"]["calculation"]["state"], "unresolved");
     let fetched = cli.run("view.get", &json!({"id": view_id}));

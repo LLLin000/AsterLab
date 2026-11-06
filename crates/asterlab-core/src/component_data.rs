@@ -77,6 +77,7 @@ pub fn project_well_plate(
 pub fn calculate_reagent(
     plate: &WellPlateProjection,
     volume_per_position: Option<f64>,
+    volume_unit: Option<&str>,
     extra_ratio: Option<f64>,
 ) -> ReagentCalculation {
     let mut unresolved = Vec::new();
@@ -114,6 +115,21 @@ pub fn calculate_reagent(
             tool_action: None,
         };
     }
+    let Some(unit) = volume_unit.and_then(normalize_volume_unit) else {
+        unresolved.push("volume_unit".into());
+        return ReagentCalculation {
+            state: "unresolved".into(),
+            assigned_positions,
+            volume_per_position: Some(volume),
+            extra_ratio,
+            total_volume: None,
+            unresolved,
+            provenance: vec![format!("container:{}", plate.container_id)],
+            unit: None,
+            input_refs: vec![],
+            tool_action: None,
+        };
+    };
     let Some(ratio) = extra_ratio else {
         unresolved.push("extra_ratio".into());
         return ReagentCalculation {
@@ -156,9 +172,18 @@ pub fn calculate_reagent(
             format!("container:{}", plate.container_id),
             "formula:positions*volume*(1+extra_ratio)".into(),
         ],
-        unit: None,
+        unit: Some(unit.into()),
         input_refs: vec![],
         tool_action: Some("tool.reagent_total@1".into()),
+    }
+}
+
+pub fn normalize_volume_unit(unit: &str) -> Option<&'static str> {
+    match unit.trim() {
+        "uL" | "ul" | "µL" | "μL" => Some("uL"),
+        "mL" | "ml" => Some("mL"),
+        "L" | "l" => Some("L"),
+        _ => None,
     }
 }
 
@@ -172,17 +197,18 @@ pub fn reagent_tool_spec() -> ToolActionSpec {
         input_schema: json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["assigned_positions","volume_per_position","extra_ratio"],
+            "required":["assigned_positions","volume_per_position","volume_unit","extra_ratio"],
             "properties":{
                 "assigned_positions":{"type":"integer","minimum":1},
                 "volume_per_position":{"type":"number","minimum":0},
+                "volume_unit":{"type":"string"},
                 "extra_ratio":{"type":"number","minimum":0}
             }
         }),
         output_schema: json!({
             "type":"object",
             "required":["total_volume"],
-            "properties":{"total_volume":{"type":"number"}}
+            "properties":{"total_volume":{"type":"number"},"unit":{"type":"string"}}
         }),
         side_effects: ToolSideEffects::Pure,
         implementation_source: "core:component_data:reagent_total".into(),
@@ -207,21 +233,26 @@ impl PureTool for ReagentTool {
         let volume = inputs["volume_per_position"]
             .as_f64()
             .ok_or_else(|| ToolError::new("volume", "volume_per_position is required"))?;
+        let unit = inputs["volume_unit"]
+            .as_str()
+            .ok_or_else(|| ToolError::new("unit", "volume_unit is required"))?;
         let ratio = inputs["extra_ratio"]
             .as_f64()
             .ok_or_else(|| ToolError::new("ratio", "extra_ratio is required"))?;
-        Ok(json!({"total_volume": positions as f64 * volume * (1.0 + ratio)}))
+        Ok(json!({"total_volume": positions as f64 * volume * (1.0 + ratio), "unit": unit}))
     }
 }
 
 pub fn run_reagent_tool(
     plate: &WellPlateProjection,
     volume_per_position: f64,
+    volume_unit: &str,
     extra_ratio: f64,
 ) -> Result<ToolInvocation, Vec<ToolError>> {
     let inputs = json!({
         "assigned_positions": plate.positions.len() as u64,
         "volume_per_position": volume_per_position,
+        "volume_unit": normalize_volume_unit(volume_unit).unwrap_or(volume_unit),
         "extra_ratio": extra_ratio
     });
     run_pure(
@@ -291,7 +322,7 @@ mod tests {
     fn missing_volume_is_unresolved_not_zero() {
         let registry = default_labware_registry();
         let plate = project_well_plate(&plan(), &registry, "plate-1").unwrap();
-        let calc = calculate_reagent(&plate, None, None);
+        let calc = calculate_reagent(&plate, None, None, None);
         assert_eq!(calc.state, "unresolved");
         assert!(calc.total_volume.is_none());
         assert!(calc.unresolved.contains(&"volume_per_position".into()));
@@ -301,7 +332,7 @@ mod tests {
     fn registered_reagent_tool_returns_versioned_provenance() {
         let registry = default_labware_registry();
         let plate = project_well_plate(&plan(), &registry, "plate-1").unwrap();
-        let invocation = run_reagent_tool(&plate, 10.0, 0.1).unwrap();
+        let invocation = run_reagent_tool(&plate, 10.0, "uL", 0.1).unwrap();
         assert_eq!(invocation.action_id, REAGENT_TOOL_ID);
         assert_eq!(invocation.action_version, REAGENT_TOOL_VERSION);
         assert_eq!(invocation.outputs["total_volume"], 11.0);
@@ -312,7 +343,7 @@ mod tests {
     fn explicit_volume_and_extra_ratio_calculate() {
         let registry = default_labware_registry();
         let plate = project_well_plate(&plan(), &registry, "plate-1").unwrap();
-        let calc = calculate_reagent(&plate, Some(10.0), Some(0.1));
+        let calc = calculate_reagent(&plate, Some(10.0), Some("uL"), Some(0.1));
         assert_eq!(calc.total_volume, Some(11.0));
         let table = reagent_table(&calc);
         assert_eq!(table.columns.len(), 5);

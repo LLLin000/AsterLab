@@ -154,6 +154,8 @@ async fn get_view(State(s): State<AppState>, Path(id): Path<String>) -> ApiResul
 struct ViewDataQuery {
     instance_id: String,
     #[serde(default)]
+    position_ids: Option<String>,
+    #[serde(default)]
     calculator_instance_id: Option<String>,
     #[serde(default)]
     volume_per_well: Option<f64>,
@@ -168,11 +170,20 @@ async fn get_view_data(
     Query(query): Query<ViewDataQuery>,
 ) -> ApiResult<Value> {
     let db = lock(&s)?;
+    let position_ids = query
+        .position_ids
+        .as_deref()
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
     let result = cli::view_data_preview(
         &db,
         &json!({
             "view_id": id,
             "instance_id": query.instance_id,
+            "position_ids": position_ids,
             "calculator_instance_id": query.calculator_instance_id,
             "volume_per_well": query.volume_per_well,
             "volume_unit": query.volume_unit,

@@ -570,6 +570,8 @@ struct ViewDataPreview {
     view_id: String,
     instance_id: String,
     #[serde(default)]
+    position_ids: Vec<String>,
+    #[serde(default)]
     calculator_instance_id: Option<String>,
     #[serde(default)]
     volume_per_well: Option<f64>,
@@ -1939,49 +1941,72 @@ fn apply_binding_changes(
 struct DbComponentContext<'a> {
     db: &'a Connection,
     project_id: &'a str,
+    design_version_id: Option<&'a str>,
 }
 
 impl<'a> DbComponentContext<'a> {
     fn new(db: &'a Connection, project_id: &'a str) -> Self {
-        Self { db, project_id }
+        Self {
+            db,
+            project_id,
+            design_version_id: None,
+        }
+    }
+
+    fn with_design(
+        db: &'a Connection,
+        project_id: &'a str,
+        design_version_id: Option<&'a str>,
+    ) -> Self {
+        Self {
+            db,
+            project_id,
+            design_version_id,
+        }
+    }
+
+    fn design_versions(&self) -> Vec<Value> {
+        if let Some(id) = self.design_version_id {
+            return self
+                .owned_record(id, "design_version")
+                .into_iter()
+                .collect();
+        }
+        list(self.db, Some("design_version"), Some(self.project_id))
+            .ok()
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     fn scope_exists(&self, protocol_version_id: &str, scope: &ProtocolScope) -> bool {
         match scope {
             ProtocolScope::Unscoped => true,
             ProtocolScope::Assay { assay_id } => {
-                list(self.db, Some("design_version"), Some(self.project_id))
-                    .ok()
-                    .into_iter()
-                    .flatten()
-                    .any(|version| {
-                        version["data"]["snapshot"]["assays"]
-                            .as_array()
-                            .is_some_and(|assays| {
-                                assays.iter().any(|assay| {
-                                    assay["id"].as_str() == Some(assay_id.as_str())
-                                        && assay["protocol_version_id"].as_str()
-                                            == Some(protocol_version_id)
-                                })
+                self.design_versions().into_iter().any(|version| {
+                    version["data"]["snapshot"]["assays"]
+                        .as_array()
+                        .is_some_and(|assays| {
+                            assays.iter().any(|assay| {
+                                assay["id"].as_str() == Some(assay_id.as_str())
+                                    && assay["protocol_version_id"].as_str()
+                                        == Some(protocol_version_id)
                             })
-                    })
+                        })
+                })
             }
             ProtocolScope::PlannedOutput { planned_output_id } => {
-                list(self.db, Some("design_version"), Some(self.project_id))
-                    .ok()
-                    .into_iter()
-                    .flatten()
-                    .any(|version| {
-                        version["data"]["snapshot"]["planned_outputs"]
-                            .as_array()
-                            .is_some_and(|outputs| {
-                                outputs.iter().any(|output| {
-                                    output["id"].as_str() == Some(planned_output_id.as_str())
-                                        && output["protocol_version_id"].as_str()
-                                            == Some(protocol_version_id)
-                                })
+                self.design_versions().into_iter().any(|version| {
+                    version["data"]["snapshot"]["planned_outputs"]
+                        .as_array()
+                        .is_some_and(|outputs| {
+                            outputs.iter().any(|output| {
+                                output["id"].as_str() == Some(planned_output_id.as_str())
+                                    && output["protocol_version_id"].as_str()
+                                        == Some(protocol_version_id)
                             })
-                    })
+                        })
+                })
             }
         }
     }
@@ -2322,8 +2347,31 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
     })
     .map_err(|e| CliError::internal(format!("DesignVersion container_plan 无效：{e}")))?;
     let registry = load_labware_registry(db)?;
-    let plate = project_well_plate(&plan, &registry, &container_id)
+    let mut plate = project_well_plate(&plan, &registry, &container_id)
         .map_err(|issues| CliError::input(issues.join("；")))?;
+    let has_target_positions = !i.position_ids.is_empty();
+    if has_target_positions {
+        let known = plate
+            .positions
+            .iter()
+            .map(|position| position.position_id.clone())
+            .collect::<HashSet<_>>();
+        let missing = i
+            .position_ids
+            .iter()
+            .filter(|position| !known.contains(*position))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(CliError::input(format!(
+                "position_ids 不属于该计划容器：{}",
+                missing.join("、")
+            )));
+        }
+        plate
+            .positions
+            .retain(|position| i.position_ids.iter().any(|id| id == &position.position_id));
+    }
     if let Some(calculator_id) = &i.calculator_instance_id {
         let calculator = find_component(&document["root"], calculator_id)
             .ok_or_else(|| CliError::input("calculator_instance_id 不存在"))?;
@@ -2339,12 +2387,26 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
         }
     }
     let volume_per_well = i.volume_per_well;
-    let mut calculation = calculate_reagent(&plate, volume_per_well, i.extra_ratio);
-    if let Some(unit) = &i.volume_unit {
-        calculation.unit = Some(unit.clone());
+    let volume_unit = i
+        .volume_unit
+        .as_deref()
+        .and_then(asterlab_core::component_data::normalize_volume_unit);
+    if i.volume_unit.is_some() && volume_unit.is_none() {
+        return Err(CliError::input("volume_unit 不是允许的体积单位"));
     }
-    if let (Some(volume), Some(ratio)) = (volume_per_well, i.extra_ratio) {
-        let invocation = run_reagent_tool(&plate, volume, ratio).map_err(|issues| {
+    let mut calculation = calculate_reagent(&plate, volume_per_well, volume_unit, i.extra_ratio);
+    if !has_target_positions {
+        calculation.state = "unresolved".into();
+        calculation.total_volume = None;
+        calculation.unresolved.push("position_ids".into());
+    }
+    if let (true, Some(volume), Some(unit), Some(ratio)) = (
+        has_target_positions,
+        volume_per_well,
+        volume_unit,
+        i.extra_ratio,
+    ) {
+        let invocation = run_reagent_tool(&plate, volume, unit, ratio).map_err(|issues| {
             CliError::input(
                 issues
                     .into_iter()
@@ -2354,6 +2416,7 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
             )
         })?;
         calculation.total_volume = invocation.outputs["total_volume"].as_f64();
+        calculation.unit = invocation.outputs["unit"].as_str().map(str::to_owned);
         calculation.tool_action = Some(format!(
             "{}@{}",
             invocation.action_id, invocation.action_version
@@ -2365,6 +2428,34 @@ pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, 
         "calculation": calculation,
         "table": table
     }))
+}
+
+fn view_design_version(document: &ViewDocument) -> Result<Option<String>, CliError> {
+    let mut found = std::collections::BTreeSet::new();
+    fn walk(component: &ComponentInstance, found: &mut std::collections::BTreeSet<String>) {
+        if let Some(ModelRef::PlannedContainer {
+            design_version_id, ..
+        }) = &component.model_ref
+        {
+            found.insert(design_version_id.clone());
+        }
+        for child in component.slots.values().flatten() {
+            walk(child, found);
+        }
+        if let Some(workflow) = &component.workflow {
+            for node in &workflow.nodes {
+                walk(&node.component, found);
+            }
+        }
+    }
+    walk(&document.root, &mut found);
+    match found.len() {
+        0 => Ok(None),
+        1 => Ok(found.into_iter().next()),
+        _ => Err(CliError::input(
+            "同一个 ViewDocument 的 PlannedContainer 必须来自同一个 DesignVersion",
+        )),
+    }
 }
 
 pub(crate) fn create_view_records(
@@ -2382,10 +2473,11 @@ pub(crate) fn create_view_records(
         return Err(CliError::input("新建 ViewDocument revision 必须为 1"));
     }
     let registry = load_component_registry(tx)?;
+    let design_version_id = view_design_version(&i.document)?;
     i.document
         .validate_with_context_mode(
             &registry,
-            &DbComponentContext::new(tx, &i.project_id),
+            &DbComponentContext::with_design(tx, &i.project_id, design_version_id.as_deref()),
             ContextValidationMode::AllowUnresolved,
         )
         .map_err(semantic_error)?;
@@ -2443,11 +2535,12 @@ pub(crate) fn revise_view_records(
     let result = document
         .apply_changeset(&i.changeset, &registry)
         .map_err(semantic_error_with_conflict)?;
+    let design_version_id = view_design_version(&result.document)?;
     result
         .document
         .validate_with_context_mode(
             &registry,
-            &DbComponentContext::new(tx, &project_id),
+            &DbComponentContext::with_design(tx, &project_id, design_version_id.as_deref()),
             ContextValidationMode::AllowUnresolved,
         )
         .map_err(semantic_error)?;
@@ -5114,7 +5207,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["project_id","protocol_version_id","scope"],"properties":{"project_id":{"type":"string"},"protocol_version_id":{"type":"string"},"scope":{"type":"object"},"document_id":{"type":"string"}}})
         }
         "view.data_preview" => {
-            json!({"type":"object","additionalProperties":false,"required":["view_id","instance_id"],"properties":{"view_id":{"type":"string"},"instance_id":{"type":"string"},"calculator_instance_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"volume_unit":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["view_id","instance_id"],"properties":{"view_id":{"type":"string"},"instance_id":{"type":"string"},"position_ids":{"type":"array","items":{"type":"string"}},"calculator_instance_id":{"type":"string"},"volume_per_well":{"type":["number","null"]},"volume_unit":{"type":"string"},"volume_per_well":{"type":["number","null"]},"extra_ratio":{"type":["number","null"]}}})
         }
         "view.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","document"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160},"document":{"type":"object"}}})
