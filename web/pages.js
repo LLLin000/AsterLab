@@ -19,6 +19,7 @@
   }
   const ctx = {
     get state() { return state; }, records, data, one, title, esc, fmt, loadState,
+    async reloadState() { state = null; stateRequest = null; await loadState(); },
     setPage,
     exportState() {
       const link = document.createElement("a");
@@ -84,8 +85,47 @@
     const pending = (value.evidence_conflicts || []).filter(item => !["resolved", "confirmed"].includes(item.status)).length +
       (value.unresolved_questions || value.pending_questions || []).length +
       assays.filter(assay => assay.timepoint_relation === "unknown" || assay.timepoint_relation === "unresolved").length;
-    box.innerHTML = `<strong>${esc(title(design))}</strong><span>${groups.length} 组</span><span>${esc(fmt(timepoints) || "无时间点")}</span><span>${esc(fmt(assays.map(assay => [assay.title, assay.endpoint].filter(Boolean).join(" / ")).filter(Boolean)) || "无检测/终点")}</span><span>Protocol ${esc(fmt(protocols.map(protocolTitle)) || "未关联")}</span><span>${pending} 项待确认</span>`;
+    box.innerHTML = `<strong>${esc(title(design))}</strong><span>${groups.length} 组</span><span>${esc(fmt(timepoints) || "无时间点")}</span><span>${esc(fmt(assays.map(assay => [assay.title, assay.endpoint].filter(Boolean).join(" / ")).filter(Boolean)) || "无检测/终点")}</span><span>Protocol ${esc(fmt(protocols.map(protocolTitle)) || "未关联")}</span><span>${pending} 项待确认</span><button class="btn" id="editWorkflowDesign" type="button">编辑本次安排</button>`;
     box.hidden = false;
+    box.querySelector("#editWorkflowDesign").onclick = () => openDesignEditor(design);
+  }
+  function openDesignEditor(design) {
+    const existing = $("designInlineEdit"); if (existing) existing.remove();
+    const value = JSON.parse(JSON.stringify(data(design)));
+    const firstAssay = (value.assays || [])[0] || {};
+    const groups = (value.group_specs || []).map((group, index) => `<div class="inline-edit-row"><strong>${esc(group.name || "未命名组")}</strong><label>条件<input data-edit-group="${index}" data-field="condition" value="${esc(group.condition || "")}"></label><label>独立 n<input data-edit-group="${index}" data-field="n" type="number" min="0" step="1" value="${group.independent_n ?? ""}"></label><label>技术重复<input data-edit-group="${index}" data-field="tech" type="number" min="0" step="1" value="${group.technical_repeats ?? ""}"></label></div>`).join("");
+    const panel = document.createElement("section");
+    panel.id = "designInlineEdit";
+    panel.className = "design-inline-edit";
+    panel.innerHTML = `<div class="inline-edit-head"><div><strong>编辑本次安排</strong><small>只修改 Design；引用的 Protocol 版本不变。</small></div><button class="btn" type="button" id="cancelDesignEdit">取消</button></div><div class="inline-edit-grid"><label>研究目的<textarea data-edit-field="objective">${esc(value.objective || "")}</textarea></label><label>研究问题<input data-edit-field="research_question" value="${esc(value.research_question || "")}"></label><label>当前检测终点<input data-edit-assay="endpoint" value="${esc(firstAssay.endpoint || "")}"></label><label>方法<input data-edit-assay="method" value="${esc(firstAssay.method || "")}"></label><label>单位<input data-edit-assay="unit" value="${esc(firstAssay.unit || "")}"></label><label>时间点（逗号分隔）<input data-edit-assay="timepoints" value="${esc((firstAssay.timepoints || []).join(", "))}"></label></div>${groups}<div class="inline-edit-actions"><span id="designEditStatus" class="page-muted"></span><button class="btn primary" type="button" id="saveDesignEdit">保存 DesignVersion</button></div>`;
+    $("workflowSummary").insertAdjacentElement("afterend", panel);
+    panel.querySelector("#cancelDesignEdit").onclick = () => panel.remove();
+    panel.querySelector("#saveDesignEdit").onclick = async () => {
+      const status = panel.querySelector("#designEditStatus"); status.textContent = "保存中…";
+      panel.querySelectorAll("[data-edit-field]").forEach(input => { value[input.dataset.editField] = input.value.trim(); });
+      panel.querySelectorAll("[data-edit-group]").forEach(input => {
+        const group = value.group_specs[Number(input.dataset.editGroup)]; if (!group) return;
+        if (input.dataset.field === "condition") group.condition = input.value.trim();
+        if (input.dataset.field === "n") group.independent_n = input.value === "" ? null : Number(input.value);
+        if (input.dataset.field === "tech") group.technical_repeats = input.value === "" ? null : Number(input.value);
+      });
+      if (value.assays?.[0]) {
+        const assay = value.assays[0];
+        panel.querySelectorAll("[data-edit-assay]").forEach(input => {
+          if (input.dataset.editAssay === "timepoints") assay.timepoints = input.value.split(",").map(item => item.trim()).filter(Boolean);
+          else assay[input.dataset.editAssay] = input.value.trim();
+        });
+      }
+      try {
+        const response = await fetch("/api/records/update", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({id: design.id, expected_revision: design.revision, data: value})});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        await ctx.reloadState();
+        renderWorkflowSummary(ctx.one(design.id));
+        panel.remove();
+        $("status").textContent = "设计已保存，Protocol 版本未修改";
+      } catch (error) { status.textContent = error.message || String(error); }
+    };
   }
   function renderProjects() {
     const projects = records("project");
