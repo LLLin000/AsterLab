@@ -158,11 +158,11 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 @media(max-width:700px){
   .workspace{display:none!important}
   .mobile-steps{display:flex;gap:6px;overflow-x:auto;padding:8px 0 4px;flex:0 0 auto}
-  .mobile-step{display:flex;align-items:center;gap:7px;min-width:128px;padding:7px 9px;border:1px solid var(--al-line);border-radius:9px;background:var(--al-surface);text-align:left}
+  .mobile-step{display:flex;align-items:center;gap:7px;min-width:136px;min-height:44px;padding:7px 9px;border:1px solid var(--al-line);border-radius:9px;background:var(--al-surface);text-align:left}
   .mobile-step.active{border-color:var(--al-accent);background:var(--al-surface-2)}
   .mobile-step-index{font-size:10px;color:var(--al-muted)}
-  .mobile-step strong{display:block;font-size:11px;font-weight:600;color:var(--al-ink);white-space:nowrap}
-  .mobile-step small{display:block;font-size:9px;color:var(--al-muted);white-space:nowrap}
+  .mobile-step strong{display:block;font-size:12px;font-weight:600;color:var(--al-ink);white-space:nowrap}
+  .mobile-step small{display:block;font-size:10px;color:var(--al-muted);white-space:nowrap}
   .page-head{align-items:stretch;flex-direction:column;gap:8px}
   .page-tools{width:100%}
   .page-tools select{width:100%;max-width:none!important}
@@ -177,6 +177,18 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 @media(max-width:700px){.run-form{grid-template-columns:1fr}.run-form label:first-child{grid-column:auto}.status-pill,.devtools{display:none!important}.detail-actions .quiet{display:none!important}}
 .cmp-table--readonly .card-actions{display:none}
 #protocol-select,#version-select{min-width:0;max-width:520px;width:100%;text-overflow:ellipsis}
+
+.run-form .run-confirm,.run-form .run-checks,.run-form .run-note,.run-form .run-more,.run-form .summary-error,.run-form button{grid-column:1/-1}
+.run-confirm{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--al-muted)}
+.run-confirm strong{font-size:13px;color:var(--al-ink)}
+.run-checks{display:flex;flex-direction:column;gap:6px}
+.run-checks>strong{font-size:11px;color:var(--al-muted)}
+.run-form .run-check{display:flex;align-items:center;justify-content:flex-start;gap:12px;flex-direction:row;font-size:12px;color:var(--al-ink)}
+.run-check select{max-width:150px}
+.run-more{font-size:11px;color:var(--al-muted)}
+.run-more summary{cursor:pointer}
+.run-more label{margin-top:6px}
+@media(max-width:700px){.step-chip{font-size:12px;min-height:40px;padding:8px 10px}.step-chip small{font-size:10px}}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">

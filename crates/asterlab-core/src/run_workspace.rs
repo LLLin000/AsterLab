@@ -141,6 +141,7 @@ pub struct ExecutionEventView {
     pub protocol_version_id: Option<String>,
     pub assay_id: Option<String>,
     pub planned_output_id: Option<String>,
+    pub task_key: Option<String>,
     pub occurrence_id: Option<String>, // legacy events have None
     pub operator: Option<String>,
     pub sample_ids: Vec<String>,
@@ -450,6 +451,7 @@ pub fn build(
             protocol_version_id: opt_text(&event["protocol_version_id"]),
             assay_id: opt_text(&event["assay_id"]),
             planned_output_id: opt_text(&event["planned_output_id"]),
+            task_key: opt_text(&event["task_key"]),
             occurrence_id: opt_text(&event["occurrence_id"]),
             operator: opt_text(&event["operator"]),
             sample_ids: event["sample_ids"]

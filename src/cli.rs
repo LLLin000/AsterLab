@@ -1607,6 +1607,9 @@ pub(crate) fn create_execution_event_tx(
             "未关联 protocol_step_path 时不能提供 Protocol 步骤引用字段",
         ));
     }
+    if let Some(task_key) = event.task_key.as_deref() {
+        check_text(task_key, "执行任务键", 1000)?;
+    }
     if !event.checks.is_empty() {
         let step_path = event
             .protocol_step_path
@@ -1938,10 +1941,11 @@ pub(crate) fn create_execution_event_tx(
             return Err(CliError::input("偏差说明不能超过 5000 个字符"));
         }
     }
+    let occurred_at = event.occurred_at.clone().unwrap_or_else(stamp);
     let data = json!({
         "event_type":event.event_type,
         "content":event.content,
-        "occurred_at":event.occurred_at,
+        "occurred_at":occurred_at,
         "stage":event.stage,
         "timepoint":event.timepoint,
         "step_status":event.step_status,
@@ -1949,6 +1953,7 @@ pub(crate) fn create_execution_event_tx(
         "protocol_version_id":event.protocol_version_id,
         "assay_id":event.assay_id,
         "planned_output_id":event.planned_output_id,
+        "task_key":event.task_key,
         "sample_ids":event.sample_ids,
         "materials":event.materials.iter().map(|m|json!({"material":m.material,"planned_output_id":m.planned_output_id,"amount":m.amount,"unit":m.unit})).collect::<Vec<_>>(),
         "measurements":event.measurements.iter().map(|m|json!({"endpoint":m.endpoint,"value":m.value,"unit":m.unit,"sample_id":m.sample_id})).collect::<Vec<_>>(),
@@ -3719,6 +3724,8 @@ struct ExecutionEventCreate {
     assay_id: Option<String>,
     #[serde(default)]
     planned_output_id: Option<String>,
+    #[serde(default)]
+    task_key: Option<String>,
     #[serde(default)]
     sample_ids: Vec<String>,
     #[serde(default)]
