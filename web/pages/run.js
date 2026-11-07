@@ -114,7 +114,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
             ${moduleTable("检查与接受", modules?.checks)}
           </div>
           <div class="run-grid">
-            ${allDone ? '<section class="page-card"><h2>本次运行已完成</h2><p class="page-muted">所有步骤都有已完成记录。可点击上方步骤回看当时的材料、仪器、检查和实际记录。</p></section>' : `<section class="page-card"><h2>记录本步</h2>${step && checkOptions.length ? `<form id="actual-form" class="page-grid"><label>实际内容<textarea name="content" required placeholder="记录实际用量、观察或偏差"></textarea></label><label>步骤状态<select name="step_status"><option value="completed" selected>完成</option><option value="in_progress">进行中</option><option value="blocked">受阻</option></select></label><label>操作人<input name="operator"></label>${checkFields}<button class="btn primary" type="submit">保存并${nextStep ? "进入下一步" : "结束"}</button></form>` : checkFields}</section>`}
+            ${allDone ? '<section class="page-card"><h2>本次运行已完成</h2><p class="page-muted">所有步骤都有已完成记录。可点击上方步骤回看当时的材料、仪器、检查和实际记录。</p></section>' : `<section class="page-card"><h2>记录本步</h2>${step && checkOptions.length ? `<form id="actual-form" class="run-form"><label>实际内容<textarea name="content" required placeholder="记录实际用量、观察或偏差"></textarea></label><label>步骤状态<select name="step_status"><option value="completed" selected>完成</option><option value="in_progress">进行中</option><option value="blocked">受阻</option></select></label><label>操作人<input name="operator"></label>${checkFields}<button class="btn primary" type="submit">保存并${nextStep ? "进入下一步" : "结束"}</button></form>` : checkFields}</section>`}
             <section class="page-card"><h2>本步记录</h2>${eventRows}</section>
           </div>
           ${plates}

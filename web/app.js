@@ -74,7 +74,19 @@ function renderCanvas(){
     el.addEventListener("dblclick",ev=>{ev.stopPropagation();const c=byId[el.dataset.node];if(c?.workflow?.nodes?.length){enterComponent(c)}});
   });
   $("zoomLabel").textContent=`${Math.round(view.k*100)}%`;
+  renderMobileSteps();
   updateHistoryButtons();
+}
+function renderMobileSteps(){
+  const box=document.getElementById("mobileSteps"); if(!box)return;
+  const {nodes}=graph();
+  box.innerHTML=nodes.map((n,i)=>{
+    const c=n.component, kids=Object.values(c.slots||{}).flat();
+    const count=preset=>kids.find(child=>child.definition?.id==="content.table"&&child.props?.preset===preset)?.props?.rows?.length||0;
+    const meta=count("materials")||count("instruments")?`${count("materials")} 材料 · ${count("instruments")} 仪器`:"";
+    return `<button class="mobile-step ${selected?.instance_id===c.instance_id?"active":""}" data-mobile-step="${esc(c.instance_id)}"><span class="mobile-step-index">${i+1}</span><span><strong>${esc(nodeTitle(c))}</strong>${meta?`<small>${esc(meta)}</small>`:""}</span></button>`;
+  }).join("");
+  box.querySelectorAll("[data-mobile-step]").forEach(button=>button.onclick=()=>{const c=nodes.find(n=>n.component.instance_id===button.dataset.mobileStep)?.component;if(c)selectComponent(c)});
 }
 function updateHistoryButtons(){$("undo").disabled=history.length===0;$("redo").disabled=future.length===0}
 function selectComponent(c){if(selected?.instance_id!==c.instance_id){selectedChildId=null;proposal=null}selected=c;renderCanvas();renderDetail()}

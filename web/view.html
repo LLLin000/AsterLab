@@ -134,6 +134,7 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 .run-instruction{font-size:15px;line-height:1.55;margin:0 0 10px;color:var(--al-ink)}
 .run-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--al-muted)}
 .run-modules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.run-modules .page-card{grid-column:auto;min-width:0}
 .run-module{padding:14px}
 .run-module h3{font-size:13px;margin:0 0 8px}
 .run-module-table{width:100%;border-collapse:collapse;font-size:12px}
@@ -148,6 +149,34 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 .cmp-operation__label{font-size:12px;font-weight:600;fill:var(--al-ink)}
 .cmp-operation__kind{font-size:9px;fill:var(--al-muted)}
 .run-next{margin-top:10px;padding-top:10px;border-top:1px solid var(--al-line);font-size:12px;color:var(--al-muted)}
+
+.workflow-summary strong{display:inline-block;margin-right:8px}
+.workflow-summary button{margin-left:6px}
+.cmp-operation__label{text-anchor:middle}
+.cmp-operation__kind{text-anchor:middle}
+.mobile-steps{display:none}
+@media(max-width:700px){
+  .workspace{display:none!important}
+  .mobile-steps{display:flex;gap:6px;overflow-x:auto;padding:8px 0 4px;flex:0 0 auto}
+  .mobile-step{display:flex;align-items:center;gap:7px;min-width:128px;padding:7px 9px;border:1px solid var(--al-line);border-radius:9px;background:var(--al-surface);text-align:left}
+  .mobile-step.active{border-color:var(--al-accent);background:var(--al-surface-2)}
+  .mobile-step-index{font-size:10px;color:var(--al-muted)}
+  .mobile-step strong{display:block;font-size:11px;font-weight:600;color:var(--al-ink);white-space:nowrap}
+  .mobile-step small{display:block;font-size:9px;color:var(--al-muted);white-space:nowrap}
+  .page-head{align-items:stretch;flex-direction:column;gap:8px}
+  .page-tools{width:100%}
+  .page-tools select{width:100%;max-width:none!important}
+}
+
+.run-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px;align-items:end}
+.run-form label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--al-muted);min-width:0}
+.run-form label:first-child{grid-column:1/-1}
+.run-form input,.run-form select,.run-form textarea{width:100%;min-width:0}
+.run-form textarea{min-height:64px;resize:vertical}
+.run-form button{justify-self:start}
+@media(max-width:700px){.run-form{grid-template-columns:1fr}.run-form label:first-child{grid-column:auto}.status-pill,.devtools{display:none!important}.detail-actions .quiet{display:none!important}}
+.cmp-table--readonly .card-actions{display:none}
+#protocol-select,#version-select{min-width:0;max-width:520px;width:100%;text-overflow:ellipsis}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">
@@ -185,6 +214,7 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
   </header>
   <div class="crumbs" id="crumbs"></div>
   <section id="workflowSummary" class="workflow-summary" hidden></section>
+  <section id="mobileSteps" class="mobile-steps" aria-label="实验步骤"></section>
   <section class="workspace" id="canvasPanel">
     <div class="workspace-head">
       <div>
