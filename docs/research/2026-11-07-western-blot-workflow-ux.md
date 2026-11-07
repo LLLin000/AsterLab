@@ -70,11 +70,12 @@ Run 页已改成单步驾驶舱:
 - 完成事件由后端自动写 `occurred_at`;正常操作不需要手填时间。
 - 任务身份使用 `task_key`(协议步骤 + scope + timepoint),不再只用步骤路径。同一路径在多个 Assay 或多个时间点下是不同任务。
 - 已验证:同一步骤按 0 h / 24 h 展开为两个任务;完成 0 h 后 24 h 仍未开始。
+- 已验证:新 Run 的 `execution_resources` 来自创建时 View;首次确认后 Run 状态变为 `in_progress`。
 
 ### 仍未解决
 
-- 执行页的材料/仪器仍从当前项目 View 读取,不是 Run 创建时冻结的副本;View 修改会影响历史 Run 的显示。
-- Run 记录的 `status` 仍可能是 `planned`;页面按任务事件计算完成态,没有静默改写冻结运行。
+- Run 创建时已把匹配 View 的材料/仪器/检查表写入 `execution_resources`;新 Run 使用冻结副本。旧 Run 没有该字段时仍回退当前 View。
+- Run 状态会随执行事件更新为 `in_progress`、`blocked` 或 `completed`;不再长期停在 `planned`。
 - 尚未加入仪器文件导入、图片关联、读数批量粘贴等“记数据”交互。
 - 按钮已按阻塞检查禁用,但还没有把非阻塞检查的“未记录”与“通过”在视觉上进一步区分。
 

@@ -1327,6 +1327,83 @@ fn labware_profile_snapshot(db: &Connection, design_data: &Value) -> Result<Vec<
     Ok(profiles)
 }
 
+
+fn execution_resource_snapshot(
+    db: &Connection,
+    project_id: &str,
+    design_data: &Value,
+) -> Result<Vec<Value>, CliError> {
+    let protocol_ids: HashSet<String> = design_data["assays"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|assay| assay["protocol_version_id"].as_str())
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if protocol_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut resources = Vec::new();
+    let mut seen = HashSet::new();
+    for view in list(db, Some("view"), Some(project_id))? {
+        let Some(view_id) = view["id"].as_str() else { continue };
+        let document = get_view(db, view_id)?["latest_version"]["data"]["root"].clone();
+        let mut stack = vec![document];
+        while let Some(node) = stack.pop() {
+            if node.is_null() {
+                continue;
+            }
+            let component = node.get("component").unwrap_or(&node);
+            if let Some(reference) = component.get("model_ref") {
+                let step = &reference["step"];
+                let protocol_id = step["protocol_version_id"].as_str().unwrap_or_default();
+                let step_path = step["step_path"].as_str().unwrap_or_default();
+                if reference["kind"].as_str() == Some("operation_use")
+                    && protocol_ids.contains(protocol_id)
+                    && !step_path.is_empty()
+                {
+                    let scope = step["scope"].clone();
+                    let key = serde_json::to_string(&json!({"path":step_path,"scope":&scope}))
+                        .unwrap_or_else(|_| format!("{step_path}:{scope}"));
+                    if seen.insert(key) {
+                        let mut tables = serde_json::Map::new();
+                        for child in component["slots"]["detail"].as_array().into_iter().flatten() {
+                            let preset = child["props"]["preset"].as_str().unwrap_or_default();
+                            if ["materials", "instruments", "checks"].contains(&preset) {
+                                tables.insert(
+                                    preset.to_owned(),
+                                    json!({
+                                        "title": child["props"]["title"],
+                                        "columns": child["props"]["columns"],
+                                        "rows": child["props"]["rows"]
+                                    }),
+                                );
+                            }
+                        }
+                        resources.push(json!({
+                            "step_path": step_path,
+                            "scope": scope,
+                            "tables": tables
+                        }));
+                    }
+                }
+            }
+            if let Some(slots) = component["slots"].as_object() {
+                for child in slots.values().filter_map(Value::as_array).flatten() {
+                    stack.push(child.clone());
+                }
+            }
+            if let Some(nodes) = component["workflow"]["nodes"].as_array() {
+                for child in nodes {
+                    stack.push(child.clone());
+                }
+            }
+        }
+    }
+    Ok(resources)
+}
+
 pub(crate) fn create_run_in_transaction(
     tx: &Transaction<'_>,
     design_id: &str,
@@ -1365,6 +1442,7 @@ pub(crate) fn create_run_in_transaction(
     let (protocol_manifest, material_manifest) =
         build_run_manifests(tx, &design_data, &project, global_protocol_version_id)?;
     let labware_profiles = labware_profile_snapshot(tx, &design_data)?;
+    let execution_resources = execution_resource_snapshot(tx, &project, &design_data)?;
     if let Some(previous_id) = repeat_of_run_id.filter(|id| !id.is_empty()) {
         let (previous_kind, previous_project, previous_design, _, _) = kind_id(tx, previous_id)?
             .ok_or_else(|| CliError::missing("被重复执行的 Run 不存在"))?;
@@ -1392,6 +1470,7 @@ pub(crate) fn create_run_in_transaction(
         "material_manifest":material_manifest,
         "container_plan":design_data["container_plan"].clone(),
         "labware_profiles":labware_profiles,
+        "execution_resources":execution_resources,
         "design_version_id":version,
         "design_revision":revision,
         "run_index":run_index,

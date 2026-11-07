@@ -37,8 +37,10 @@ window.AsterPageModules.runs = async function(root, ctx) {
     return document;
   };
 
-  const stepModules = async (step, assayId) => {
+  const stepModules = async (step, assayId, scope) => {
     const run = runs.find(item => item.id === runId);
+    const frozen = (ctx.data(run)?.execution_resources || []).find(item => item.step_path === step.path && sameScope(item.scope, scope));
+    if (frozen) return {materials: frozen.tables?.materials, instruments: frozen.tables?.instruments, checks: frozen.tables?.checks};
     const candidates = ctx.records("view").filter(view => view.project_id === run?.project_id);
     for (const view of candidates) {
       try {
@@ -88,6 +90,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
       const currentTask = tasks[taskIndex];
       const step = steps.find(item => item.step?.path === currentTask?.step_path && sameScope(item.scope, currentTask?.scope))?.step;
       const scope = currentTask?.scope && typeof currentTask.scope === "object" ? currentTask.scope : {};
+      const taskScope = scope;
       const assayId = scope.assay_id;
       const plannedOutputId = scope.planned_output_id;
       const scopeKind = scope.kind || (plannedOutputId ? "planned_output" : "assay");
@@ -111,7 +114,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
       }).join("") : '<span class="page-muted">此 Run 没有冻结任务</span>';
       const parameters = step?.parameters?.length ? step.parameters.map(parameter => `${parameter.label || parameter.slot || "参数"}: ${parameter.value ?? "未解析"}${parameter.unit ? ` ${parameter.unit}` : ""}`).join(" · ") : "无已解析参数";
       const materials = (workspace.materials || []).filter(material => material.planned_output_id === plannedOutputId).map(material => `<div class="page-row"><div><strong>${esc(material.title || "共享材料")}</strong><small>${esc(material.consumer_assay_ids || [])}</small></div></div>`).join("") || '<div class="page-muted">当前范围没有冻结共享材料。</div>';
-      const modules = await stepModules(step || {}, assayId);
+      const modules = await stepModules(step || {}, assayId, taskScope);
       const designAssay = (workspace.frozen_design?.content?.assays || []).find(assay => assay.id === assayId);
       const targetLabel = [designAssay?.group_names?.join(" / "), designAssay?.timepoints?.join(" / ")].filter(Boolean).join(" · ");
       const moduleTable = (title, table) => `<section class="page-card run-module"><h3>${esc(title)}</h3>${table?.rows?.length ? `<table class="run-module-table"><thead><tr>${table.columns.map(column => `<th>${esc(column)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(row => `<tr>${row.map(cell => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : '<div class="page-muted">未绑定</div>'}</section>`;
@@ -143,6 +146,14 @@ window.AsterPageModules.runs = async function(root, ctx) {
         </div>`;
       root.querySelector("#run-select").addEventListener("change", event => { runId = event.target.value; selectedTaskKey = ""; render(); });
       root.querySelectorAll("[data-task]").forEach(button => button.addEventListener("click", () => { selectedTaskKey = button.dataset.task; render(); }));
+      const setRunStatus = async (status) => {
+        if (!run || run.data?.status === status) return;
+        const response = await fetch("/api/records/update", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({id: run.id, expected_revision: run.revision, data: {status}})});
+        if (!response.ok) return;
+        const result = await response.json();
+        if (result.revision) run.revision = result.revision;
+        run.data = {...(run.data || {}), status};
+      };
       const confirmButton = root.querySelector("#actual-form button[type=submit]");
       const syncConfirm = () => {
         if (!confirmButton) return;
@@ -171,6 +182,9 @@ window.AsterPageModules.runs = async function(root, ctx) {
           if (errorBox) errorBox.textContent = body.error || `保存失败（HTTP ${saved.status}）`;
           return;
         }
+        const remainingAfter = tasks.filter(task => task.task_key !== currentTask.task_key && !completed.has(task.task_key));
+        const nextStatus = status === "blocked" ? "blocked" : (remainingAfter.length === 0 ? "completed" : "in_progress");
+        await setRunStatus(nextStatus);
         if (status === "completed" && nextTask) selectedTaskKey = nextTask.task_key;
         await render();
       });
