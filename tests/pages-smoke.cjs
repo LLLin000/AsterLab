@@ -35,6 +35,9 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   await page.locator('#actual-form button[type="submit"]').click();
   await page.waitForTimeout(500);
   assert((await page.locator("body").innerText()).includes("任务 2/2"));
+  await page.locator('#actual-form button[type="submit"]').click();
+  await page.waitForTimeout(500);
+  assert((await page.locator(".run-done").count()) === 1);
   await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("常用工具"));
   assert.deepEqual(errors,[]);
   await browser.close();server.kill();console.log(JSON.stringify({ok:true,rail:4,pages:["protocols","runs","tools"],errors}));
