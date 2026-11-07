@@ -118,7 +118,7 @@
 <main class="main">
 <header class="top">
   <div><h1 id="page-title">工作台</h1><p id="page-subtitle">把实验计划、执行和证据放在同一条可追溯链上。</p></div>
-  <div class="top-actions"><select id="project-select" class="select-project" aria-label="当前项目"></select><button class="btn" id="theme-toggle" data-action="theme" type="button" title="切换明暗主题">主题</button><button class="btn" data-action="backup">备份数据库</button><button class="btn" data-action="restore">恢复备份</button><button class="btn" data-action="export">导出数据</button><span class="status-chip" id="db-status">正在连接本机数据库…</span></div>
+  <div class="top-actions"><select id="project-select" class="select-project" aria-label="当前项目"></select><button class="btn" id="theme-toggle" data-action="theme" type="button" title="切换明暗主题">主题</button><button class="btn" onclick="window.open('/design-preview','_blank')" title="打开已确认的 Dify + Linear 设计预览；这是静态设计稿">设计预览</button><button class="btn" data-action="backup">备份数据库</button><button class="btn" data-action="restore">恢复备份</button><button class="btn" data-action="export">导出数据</button><span class="status-chip" id="db-status">正在连接本机数据库…</span></div>
 </header>
 <div id="content"></div>
 </main>

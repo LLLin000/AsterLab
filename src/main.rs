@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 mod cli;
 const INDEX_HTML: &str = include_str!("../web/index.html");
+const DESIGN_PREVIEW_HTML: &str = include_str!("../docs/prototypes/tabler-vs-dify-2026-11-06/index.html");
 const VIEW_HTML: &str = include_str!("../web/view.html");
 const ICON_PLATE: &str = include_str!("../web/icons/plate.svg");
 const ICON_PIPETTE: &str = include_str!("../web/icons/pipette.svg");
@@ -172,6 +173,9 @@ async fn index() -> Html<&'static str> {
 }
 async fn view_page() -> Html<&'static str> {
     Html(VIEW_HTML)
+}
+async fn design_preview_page() -> Html<&'static str> {
+    Html(DESIGN_PREVIEW_HTML)
 }
 
 async fn marked_js() -> Response {
@@ -1062,6 +1066,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/", get(index))
         .route("/view", get(view_page))
+        .route("/design-preview", get(design_preview_page))
         .route("/icons/{name}", get(icon))
         .route("/app.js", get(app_js))
         .route("/vendor/marked.js", get(marked_js))
