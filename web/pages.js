@@ -42,7 +42,7 @@
     return `<div class="empty-state"><h2>${esc(heading)}</h2><p>${esc(text)}</p></div>`;
   }
   function updateProjectPicker() {
-    const picker = $("projectPicker");
+    const picker = $("projectPicker"), designsPicker = $("designPicker");
     if (!picker) return;
     const projects = records("project");
     picker.innerHTML = projects.length
@@ -54,7 +54,38 @@
     picker.value = selected;
     if (selected) url.searchParams.set("project", selected);
     else url.searchParams.delete("project");
+    if (designsPicker) {
+      const designs = records("design").filter(record => record.project_id === selected);
+      designsPicker.innerHTML = designs.length
+        ? designs.map(design => `<option value="${esc(design.id)}">${esc(title(design))}</option>`).join("")
+        : `<option value="">未选择设计</option>`;
+      const designId = designs.some(design => design.id === url.searchParams.get("design"))
+        ? url.searchParams.get("design") : designs[0]?.id || "";
+      designsPicker.value = designId;
+      designsPicker.disabled = !designId;
+      if (designId) url.searchParams.set("design", designId);
+      else url.searchParams.delete("design");
+      renderWorkflowSummary(designs.find(design => design.id === designId));
+    }
     window.history.replaceState(null, "", url);
+  }
+  function renderWorkflowSummary(design) {
+    const box = $("workflowSummary");
+    if (!box) return;
+    if (!design) { box.hidden = true; box.innerHTML = ""; return; }
+    const value = data(design), groups = Array.isArray(value.group_specs) ? value.group_specs : Array.isArray(value.groups) ? value.groups : typeof value.groups === "string" ? value.groups.split(/\n/).filter(Boolean) : [], assays = value.assays || [];
+    const timepoints = [...new Set(assays.flatMap(assay => assay.timepoints || []))];
+    const protocols = [...new Set(assays.flatMap(assay => [assay.protocol_version_id, ...(assay.protocol_version_ids || [])]).filter(Boolean))];
+    const protocolTitle = id => {
+      const record = one(id);
+      const parent = record?.parent_id ? one(record.parent_id) : record;
+      return parent ? title(parent) : id;
+    };
+    const pending = (value.evidence_conflicts || []).filter(item => !["resolved", "confirmed"].includes(item.status)).length +
+      (value.unresolved_questions || value.pending_questions || []).length +
+      assays.filter(assay => assay.timepoint_relation === "unknown" || assay.timepoint_relation === "unresolved").length;
+    box.innerHTML = `<strong>${esc(title(design))}</strong><span>${groups.length} 组</span><span>${esc(fmt(timepoints) || "无时间点")}</span><span>${esc(fmt(assays.map(assay => [assay.title, assay.endpoint].filter(Boolean).join(" / ")).filter(Boolean)) || "无检测/终点")}</span><span>Protocol ${esc(fmt(protocols.map(protocolTitle)) || "未关联")}</span><span>${pending} 项待确认</span>`;
+    box.hidden = false;
   }
   function renderProjects() {
     const projects = records("project");
@@ -134,6 +165,7 @@
     const isWorkflow = name === "workflow";
     $("canvasPanel").hidden = !isWorkflow;
     $("detail").hidden = !isWorkflow;
+    $("workflowSummary").hidden = !isWorkflow || !$("designPicker").value;
     $("page-view").hidden = isWorkflow;
     const crumbs = $("crumbs"); if (crumbs) crumbs.hidden = !isWorkflow;
     document.querySelectorAll(".rail-item[data-page]").forEach(button => button.classList.toggle("active", button.dataset.page === name));
@@ -141,7 +173,7 @@
     if (name === "workflow") url.searchParams.delete("page"); else url.searchParams.set("page", name);
     window.history.replaceState(null, "", url);
     if (isWorkflow) {
-      if (window.bootLatestView && !$("viewId").value) await window.bootLatestView();
+      if (window.bootLatestView) await window.bootLatestView();
       else if (window.load) await window.load();
       return;
     }
@@ -152,7 +184,22 @@
     const url = new URL(location.href);
     if (event.target.value) url.searchParams.set("project", event.target.value);
     else url.searchParams.delete("project");
+    url.searchParams.delete("design");
     window.history.replaceState(null, "", url);
+    updateProjectPicker();
+    $("viewId").value = "";
+    window.resetView();
+    window.bootLatestView?.();
+  });
+  $("designPicker").addEventListener("change", event => {
+    const url = new URL(location.href);
+    if (event.target.value) url.searchParams.set("design", event.target.value);
+    else url.searchParams.delete("design");
+    window.history.replaceState(null, "", url);
+    renderWorkflowSummary(records("design").find(design => design.id === event.target.value));
+    $("viewId").value = "";
+    window.resetView();
+    window.bootLatestView?.();
   });
   document.querySelectorAll(".rail-item[data-page]").forEach(button => button.addEventListener("click", () => setPage(button.dataset.page)));
   setPage(new URLSearchParams(location.search).get("page") || "workflow");

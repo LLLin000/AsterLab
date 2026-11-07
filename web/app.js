@@ -509,6 +509,12 @@ async function load(preserveHistory=false,preserveUi=false){
   if(!preserveHistory){history=[];future=[]}
   render();loadInbox();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`
 }
+function resetView(){
+  viewId="";data=null;node=null;selected=null;stack=[];history=[];future=[];
+  paramCache.clear();plateCache.clear();plateSelections.clear();calcStates.clear();drafts.clear();proposal=null;inboxProposals=[];
+  render();
+}
+window.resetView=resetView;
 async function saveNote(instanceId){
   if(!data)return;const draft=drafts.get(instanceId);const savedToken=draft?.token||0;const text=draft?.text??$("note-"+CSS.escape(instanceId))?.value??"";
   await commitViewChangeSet([{kind:"update_props",instance_id:instanceId,property:"text",value:text}],"保存说明");

@@ -15,11 +15,11 @@
 | Three-protocol execution acceptance | done | `tests/execution-acceptance.cjs`, 8/5/8 steps |
 | Three-protocol browser E2E | done with seeded Protocol/Design | `tests/e2e-three-protocols.cjs` |
 | Unified page shell | done | 4 primary rail tabs; Projects/Design/Records via Tools; `pages-smoke.cjs` |
-| Design Map page | auxiliary read view | `web/pages/design.js`; primary design remains Workflow |
+| Design page | Workflow only | compact design summary in Workflow; no separate Design Map page |
 | Protocol page | done (read) | selectors, step navigation, instruction-first, collapsed history |
 | Run page | done (read + record form) | `view_id` identity, scope-correct events, in-page record form, execution-only |
-| Browser design/Protocol authoring E2E | partial | Workflow is primary design; Design Map auxiliary; Protocol/Design editing still old workspace |
-| Common resources catalog | done (static) | instruments/tools/materials in Tools and Design Map; not yet typed-bound to steps |
+| Browser design/Protocol authoring E2E | partial | Workflow is primary design; project/design/View linkage and inline edit still in progress |
+| Common resources catalog | done (static) | instruments/tools/materials in Tools; not yet typed-bound to steps |
 | RT-qPCR walkthrough | done | `docs/research/2026-11-07-rt-qpcr-walkthrough.md` |
 | Real screenshots | done | `docs/release/screenshots/*.png` |
 | Windows package | done | `release/AsterLab-0.1.0-beta-win-x64.zip` |
