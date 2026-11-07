@@ -143,10 +143,13 @@ window.AsterPageModules.runs = async function(root, ctx) {
         return `<button class="step-chip ${isCurrent ? "active" : ""} ${isDone ? "done" : ""}" data-task="${esc(task.task_key)}" aria-current="${isCurrent ? "step" : "false"}"><span>${index + 1}. ${esc(taskStep?.title || task.step_path)}${task.timepoint ? ` · ${esc(task.timepoint)}` : ""}</span><small>${isDone ? "已完成" : isCurrent ? "当前" : "未开始"}</small></button>`;
       }).join("") : '<span class="page-muted">此 Run 没有冻结任务</span>';
       const parameters = step?.parameters?.length ? step.parameters.map(parameter => `${parameter.label || parameter.slot || "参数"}: ${parameter.value ?? "未解析"}${parameter.unit ? ` ${parameter.unit}` : ""}`).join(" · ") : "无已解析参数";
+      const timeScopeLabel = value => ({per_timepoint: "每个时间点", once: "一次", per_assay: "每个检测", unresolved: "待确认"})[value] || value || "未指定";
       const materials = (workspace.materials || []).filter(material => material.planned_output_id === plannedOutputId).map(material => `<div class="page-row"><div><strong>${esc(material.title || "共享材料")}</strong><small>${esc(material.consumer_assay_ids || [])}</small></div></div>`).join("") || '<div class="page-muted">当前范围没有冻结共享材料。</div>';
       const modules = await stepModules(step || {}, assayId, taskScope);
       const designAssay = (workspace.frozen_design?.content?.assays || []).find(assay => assay.id === assayId);
-      const targetLabel = [designAssay?.group_names?.join(" / "), designAssay?.timepoints?.join(" / ")].filter(Boolean).join(" · ");
+      const targetGroups = designAssay?.group_names?.join(" / ");
+      const targetTimes = currentTask?.timepoint ? [currentTask.timepoint] : (designAssay?.timepoints || []);
+      const targetLabel = [targetGroups, targetTimes.join(" / ")].filter(Boolean).join(" · ");
       const moduleTable = (title, table) => `<section class="page-card run-module"><h3>${esc(title)}</h3>${table?.rows?.length ? `<table class="run-module-table"><thead><tr>${table.columns.map(column => `<th>${esc(column)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(row => `<tr>${row.map(cell => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : '<div class="page-muted">未绑定</div>'}</section>`;
       const allEvents = (workspace.events || []).slice().reverse();
       const resultRows = allEvents.map(event => {
@@ -162,17 +165,17 @@ window.AsterPageModules.runs = async function(root, ctx) {
       const nextTask = visibleTasks[taskIndex + 1] || tasks[globalTaskIndex + 1];
       const confirmLabel = allDone ? "本次运行已完成" : nextTask ? "确认完成并进入下一步" : "确认完成";
       const form = allDone || timepointDone ? "" : `<form id="actual-form" class="run-form"><div class="run-confirm"><strong>${esc(step?.title || "当前步骤")}</strong><span>${checkOptions.some(check => check.blocking) ? "先完成必需检查，再确认本步。" : "按已选 Protocol 执行后确认即可。"} 确认只记录操作完成，不声称已测量参数或保存结果。</span></div>${checkFields}<label class="run-note">异常 / 偏差 / 实际参数（可选）<textarea name="content" placeholder="正常操作可留空；有偏差、遗漏或实际参数变化时再填写。"></textarea></label><details class="run-more"><summary>更多记录（操作人，可选）</summary><label>操作人<input name="operator" placeholder="可留空"></label></details><div id="run-form-error" class="summary-error" role="alert"></div><button class="btn primary" type="submit">${confirmLabel}</button></form>`;
-      root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))} · ${esc(scopeLabel)} · ${selectedTimepoint ? `${esc(selectedTimepoint)} · ` : ""}任务 ${taskIndex + 1}/${visibleTasks.length} · ${esc(allDone ? "全部任务已完成" : workspace.status || "状态未填写")}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div>
+      root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))} · ${selectedTimepoint ? `${esc(selectedTimepoint)} · ` : ""}任务 ${taskIndex + 1}/${visibleTasks.length} · ${esc(allDone ? "全部任务已完成" : workspace.status || "状态未填写")}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div>
         <div class="run-tabs"><button class="${selectedMode === "session" ? "active" : ""}" data-run-mode="session">执行安排</button><button class="${selectedMode === "results" ? "active" : ""}" data-run-mode="results">结果</button></div>
-        ${timepointValues.length > 1 ? `<div class="page-card run-timepoints"><div class="step-strip">${timepointValues.map(timepoint => `<button class="step-chip ${timepoint === selectedTimepoint ? "active" : ""}" data-timepoint="${esc(timepoint)}">${esc(timepoint)}</button>`).join("")}</div></div>` : ''}
-        <div class="page-card run-step-strip"><div class="step-strip">${chips}</div></div>
+        ${timepointValues.length > 1 ? `<div class="page-card run-timepoints"><div class="step-strip ${timepointValues.length <= 4 ? "wrap" : ""}">${timepointValues.map(timepoint => `<button class="step-chip ${timepoint === selectedTimepoint ? "active" : ""}" data-timepoint="${esc(timepoint)}">${esc(timepoint)}</button>`).join("")}</div></div>` : ''}
+        <div class="page-card run-step-strip"><div class="step-strip ${visibleTasks.length <= 4 ? "wrap" : ""}">${chips}</div></div>
         ${allDone ? '<div class="run-done"><strong>本次运行的全部任务已记录。</strong><span>可点击上方任务回看材料、检查与实际记录。</span></div>' : timepointDone ? '<div class="run-done"><strong>本时间点的任务已完成。</strong><span>切换到其他时间点继续。</span></div>' : ''}
         <div class="run-cockpit" ${selectedMode === "results" ? "hidden" : ""}>
           <section class="page-card run-current">
             <div class="run-kicker">当前任务 · ${taskIndex + 1}/${visibleTasks.length}${selectedTimepoint ? ` · ${esc(selectedTimepoint)}` : ""}</div>
             <h2>${step ? esc(step.title || "当前步骤") : "当前步骤"}</h2>
             <p class="run-instruction">${esc(step?.instruction || "未填写")}</p>
-            <div class="run-meta"><span>参数：${esc(parameters)}</span><span>时间范围：${esc(step?.time_scope || "未指定")}</span>${targetLabel ? `<span>目标样本：${esc(targetLabel)}</span>` : ""}</div>
+            <div class="run-meta"><span>参数：${esc(parameters)}</span><span>时间范围：${esc(timeScopeLabel(step?.time_scope))}</span>${targetLabel ? `<span>目标样本：${esc(targetLabel)}</span>` : ""}</div>
             ${nextTask ? `<div class="run-next">下一步：${esc(steps.find(item => item.step?.path === nextTask.step_path && sameScope(item.scope, nextTask.scope))?.step?.title || nextTask.step_path)}${nextTask.timepoint ? ` · ${esc(nextTask.timepoint)}` : ""}</div>` : ""}
           </section>
           <div class="run-modules">

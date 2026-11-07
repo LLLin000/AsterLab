@@ -212,6 +212,11 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 .run-tabs button.active{color:var(--al-ink);border-color:var(--al-accent);background:var(--al-surface-2)}
 .run-results{padding:0 0 12px}
 .step-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.step-strip.wrap{flex-wrap:wrap;overflow:visible}
+.run-cockpit[hidden],.run-results[hidden]{display:none!important}
+[hidden]{display:none!important}
+@media(max-width:700px){.summary-assay{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px}.summary-assay strong{grid-column:1/-1}.summary-assay span+span:before{content:none}}
+.design-inline-edit-actions{position:sticky;bottom:0;background:var(--al-surface);padding:9px 0;z-index:1}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">

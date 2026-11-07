@@ -31,6 +31,8 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert.equal(await page.locator(".rail-item[data-page]").count(),4);
   await page.locator('.rail-item[data-page="protocols"]').click();await page.waitForTimeout(200);assert((await page.locator("#page-view").innerText()).includes("Pages protocol"));
   await page.locator('.rail-item[data-page="runs"]').click();await page.waitForTimeout(300);assert((await page.locator("#page-view").innerText()).includes("Pages run"));
+  assert.equal(await page.locator("#canvasPanel").isVisible(), false);
+  assert.equal(await page.locator("#detail").isVisible(), false);
   assert((await page.locator(".run-current h2").innerText()).length > 0);
   await page.locator('#actual-form button[type="submit"]').click();
   await page.waitForTimeout(500);
