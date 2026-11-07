@@ -489,7 +489,7 @@ function commitFrozenChangeSet(proposal,label){
   const run=saveChain.then(task,task);saveChain=run.catch(()=>{});return run
 }
 
-function render(){renderCrumbs();renderCanvas();renderDetail();$("workspaceTitle").textContent=(data?.latest_version?.data?.root?.props?.title)||"AsterLab / CCK-8 Assay";const d=data?.latest_version?.data;$("workspaceSub").textContent=d?`View revision ${d.revision} · ${esc(d.document_id).slice(0,8)}`:"Protocol · View"}
+function render(){renderCrumbs();renderCanvas();renderDetail();const title=$("workspaceTitle");if(title)title.textContent=(data?.latest_version?.data?.root?.props?.title)||"AsterLab / CCK-8 Assay";const d=data?.latest_version?.data;const sub=$("workspaceSub");if(sub)sub.textContent=d?`View revision ${d.revision} · ${esc(d.document_id).slice(0,8)}`:"Protocol · View"}
 async function load(preserveHistory=false,preserveUi=false){
   viewId=$("viewId").value.trim();if(!viewId)return;$("status").textContent="加载中…";
   const previousStack=stack.map(c=>c.instance_id),previousNode=node?.instance_id,previousSelected=selected?.instance_id;

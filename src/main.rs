@@ -30,6 +30,7 @@ const ICON_READER: &str = include_str!("../web/icons/reader.svg");
 const ICON_FLASK: &str = include_str!("../web/icons/flask.svg");
 const APP_JS: &str = include_str!("../web/app.js");
 const PAGES_JS: &str = include_str!("../web/pages.js");
+const RESOURCES_JS: &str = include_str!("../web/resources.js");
 const DESIGN_PAGE_JS: &str = include_str!("../web/pages/design.js");
 const PROTOCOL_PAGE_JS: &str = include_str!("../web/pages/protocol.js");
 const RUN_PAGE_JS: &str = include_str!("../web/pages/run.js");
@@ -280,6 +281,13 @@ async fn pages_js() -> Response {
     (
         [(axum::http::header::CONTENT_TYPE, "text/javascript")],
         PAGES_JS,
+    )
+        .into_response()
+}
+async fn resources_js() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+        RESOURCES_JS,
     )
         .into_response()
 }
@@ -1092,6 +1100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/icons/{name}", get(icon))
         .route("/app.js", get(app_js))
         .route("/pages.js", get(pages_js))
+        .route("/resources.js", get(resources_js))
         .route("/vendor/marked.js", get(marked_js))
         .route("/vendor/purify.js", get(purify_js))
         .route("/vendor/dagre.js", get(dagre_js))

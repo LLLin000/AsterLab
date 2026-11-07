@@ -31,8 +31,8 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert.equal(await page.locator(".rail-item[data-page]").count(),4);
   await page.locator('.rail-item[data-page="protocols"]').click();await page.waitForTimeout(200);assert((await page.locator("#page-view").innerText()).includes("Pages protocol"));
   await page.locator('.rail-item[data-page="runs"]').click();await page.waitForTimeout(300);assert((await page.locator("#page-view").innerText()).includes("Pages run"));
-  await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("其他工作区"));
-  await page.getByRole("button",{name:"设计关系"}).click();await page.waitForTimeout(200);const designText=await page.locator("#page-view").innerText();assert(designText.includes("Design Map")&&designText.includes("Does it work?"),designText);
+  await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("常用工具"));
+  await page.getByRole("button",{name:"设计关系"}).click();await page.waitForTimeout(200);const designText=await page.locator("#page-view").innerText();assert(designText.includes("设计关系概览")&&designText.includes("Does it work?"),designText);
   assert.deepEqual(errors,[]);
   await browser.close();server.kill();console.log(JSON.stringify({ok:true,rail:4,pages:["protocols","runs","tools","designs"],errors}));
 })().catch(error=>{console.error(error);process.exitCode=1});

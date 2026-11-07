@@ -15,10 +15,12 @@
 | Three-protocol execution acceptance | done | `tests/execution-acceptance.cjs`, 8/5/8 steps |
 | Three-protocol browser E2E | done with seeded Protocol/Design | `tests/e2e-three-protocols.cjs` |
 | Unified page shell | done | 4 primary rail tabs; Projects/Design/Records via Tools; `pages-smoke.cjs` |
-| Design Map page | done (read) | `web/pages/design.js`, research_question/factors, Design Map + component cards |
-| Protocol page | done (read) | `web/pages/protocol.js`, preview/step/version |
-| Run page | done (read) | `web/pages/run.js`, execution-only, no design metadata |
-| Browser design/Protocol authoring E2E | partial | existing smoke creates designs; protocol authoring still seeded |
+| Design Map page | auxiliary read view | `web/pages/design.js`; primary design remains Workflow |
+| Protocol page | done (read) | selectors, step navigation, instruction-first, collapsed history |
+| Run page | done (read + record form) | `view_id` identity, scope-correct events, in-page record form, execution-only |
+| Browser design/Protocol authoring E2E | partial | Workflow is primary design; Design Map auxiliary; Protocol/Design editing still old workspace |
+| Common resources catalog | done (static) | instruments/tools/materials in Tools and Design Map; not yet typed-bound to steps |
+| RT-qPCR walkthrough | done | `docs/research/2026-11-07-rt-qpcr-walkthrough.md` |
 | Real screenshots | done | `docs/release/screenshots/*.png` |
 | Windows package | done | `release/AsterLab-0.1.0-beta-win-x64.zip` |
 | Isolated package startup | done | no Cargo/Node; health + assets verified |
