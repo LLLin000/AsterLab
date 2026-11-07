@@ -217,6 +217,17 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 [hidden]{display:none!important}
 @media(max-width:700px){.summary-assay{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px}.summary-assay strong{grid-column:1/-1}.summary-assay span+span:before{content:none}}
 .design-inline-edit-actions{position:sticky;bottom:0;background:var(--al-surface);padding:9px 0;z-index:1}
+
+.task-group{display:flex;flex-direction:column;gap:4px}
+.task-group+.task-group{margin-top:8px}
+.task-group-label{font-size:10px;font-weight:700;color:var(--al-muted);letter-spacing:.04em;text-transform:uppercase}
+
+.run-prep{font-size:12px}
+.run-prep summary{cursor:pointer;color:var(--al-ink);font-weight:600}
+.run-prep-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.run-prep-grid strong{display:block;font-size:11px;color:var(--al-muted);margin-bottom:2px}
+.run-prep-grid span{color:var(--al-ink)}
+@media(max-width:700px){.run-prep-grid{grid-template-columns:1fr}}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">
