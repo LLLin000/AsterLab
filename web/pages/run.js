@@ -125,11 +125,15 @@ window.AsterPageModules.runs = async function(root, ctx) {
       root.querySelector("#actual-form")?.addEventListener("submit", async event => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
-        const status = form.get("step_status");
-        const payload = {kind:"execution_event",parent_id:runId,project_id:run.project_id,data:{event_type:"operation",content:form.get("content").trim(),step_status:status,operator:form.get("operator").trim() || null,protocol_step_path:step.path,protocol_version_id:versionId,assay_id:scopeKind === "assay" ? scopeId : null,planned_output_id:scopeKind === "material" ? scopeId : null,checks:[{check_id:form.get("check_id"),status:form.get("check_status"),note:null,checked_by:form.get("operator").trim() || null}]}};
+        const checkId = form.get("check_id");
+        const checkStatus = form.get("check_status");
+        const selectedCheck = checkOptions.find(check => check.check_id === checkId);
+        const blockedByCheck = selectedCheck?.blocking && checkStatus === "failed";
+        const status = blockedByCheck ? "blocked" : form.get("step_status");
+        const payload = {kind:"execution_event",parent_id:runId,project_id:run.project_id,data:{event_type:"operation",content:form.get("content").trim(),step_status:status,operator:form.get("operator").trim() || null,protocol_step_path:step.path,protocol_version_id:versionId,assay_id:scopeKind === "assay" ? scopeId : null,planned_output_id:scopeKind === "material" ? scopeId : null,checks:[{check_id:checkId,status:checkStatus,note:null,checked_by:form.get("operator").trim() || null}]}};
         const saved = await fetch("/api/records", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
         if (!saved.ok) throw new Error(`HTTP ${saved.status}`);
-        if (status === "completed" && nextStep) selectedViewId = nextStep.view_id;
+        if (!blockedByCheck && status === "completed" && nextStep) selectedViewId = nextStep.view_id;
         await render();
       });
     } catch (error) {
