@@ -84,10 +84,14 @@
     const url = new URL(location.href);
     if (name === "workflow") url.searchParams.delete("page"); else url.searchParams.set("page", name);
     window.history.replaceState(null, "", url);
-    if (isWorkflow) { if (window.load) await window.load(); return; }
+    if (isWorkflow) {
+      if (window.bootLatestView && !$("viewId").value) await window.bootLatestView();
+      else if (window.load) await window.load();
+      return;
+    }
     try { await renderPage(name); }
     catch (error) { $("page-view").innerHTML = empty("读取失败", error.message || String(error)); }
   }
   document.querySelectorAll(".rail-item[data-page]").forEach(button => button.addEventListener("click", () => setPage(button.dataset.page)));
-  setPage(new URLSearchParams(location.search).get("page") || "workflow");
+  setPage(new URLSearchParams(location.search).get("page") || "designs");
 })();

@@ -39,7 +39,7 @@ window.AsterPageModules.designs = async function(root, ctx) {
   const conflictRows = conflicts.map(item => `<div class="page-row"><div><strong>${esc(missing(item.topic))}</strong><small>${esc(missing(item.affected_assay_ids))}</small></div></div>`).join("");
   const selector = `<select aria-label="选择设计">${designs.map(record => `<option value="${esc(record.id)}" ${record.id === design.id ? "selected" : ""}>${esc(ctx.title(record))}</option>`).join("")}</select>`;
 
-  root.innerHTML = `<div class="page-head"><div><h1>${esc(ctx.title(design))}</h1><p>实验设计 · ${esc(missing(d.status || design.status))}</p></div><div class="page-tools">${selector}<a class="btn primary" href="/workspace?view=designs">编辑设计</a></div></div>
+  root.innerHTML = `<div class="page-head"><div><h1>${esc(ctx.title(design))}</h1><p>实验设计 · ${esc(missing(d.status || design.status))}</p></div><div class="page-tools">${selector}<a class="btn" href="?page=workflow">打开 Workflow</a><a class="btn primary" href="/workspace?view=designs">编辑设计</a></div></div>
     <section class="page-card"><h2>Design Map</h2><div class="page-map"><div class="page-col"><div class="page-col-title">Groups</div>${groupNodes}</div><div class="map-arrow">→</div><div class="page-col"><div class="page-col-title">Assays</div>${assayNodes}</div><div class="map-arrow">→</div><div class="page-col"><div class="page-col-title">Time / Sample</div>${timeNodes}</div></div></section>
     <div style="height:12px"></div><div class="page-grid">
       <section class="page-card half"><h2>Research</h2>${rows([["研究目标", d.objective], ["研究问题", d.research_question], ["假设", d.hypothesis]])}</section>
