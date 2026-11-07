@@ -580,6 +580,10 @@ async fn create_record(
                 .get("repeat_of_run_id")
                 .and_then(Value::as_str)
                 .filter(|id| !id.is_empty());
+            let view_id = data
+                .get("view_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty());
             let repeat_relationship = data
                 .get("repeat_relationship")
                 .and_then(Value::as_str)
@@ -590,6 +594,7 @@ async fn create_record(
                 &title,
                 scheduled_date,
                 global_protocol,
+                view_id,
                 repeat_of_run_id,
                 repeat_relationship,
             )

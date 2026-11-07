@@ -9,6 +9,8 @@ window.AsterPageModules.runs = async function(root, ctx) {
   let runId = new URLSearchParams(location.search).get("run") || runs[0].id;
   if (!runs.some(run => run.id === runId)) runId = runs[0].id;
   let selectedTaskKey = "";
+  let selectedTimepoint = "";
+  let selectedMode = "session";
   const viewCache = new Map();
 
   const allNodes = (node) => {
@@ -59,9 +61,28 @@ window.AsterPageModules.runs = async function(root, ctx) {
 
   const sameScope = (a, b) => a?.kind === b?.kind && a?.assay_id === b?.assay_id && a?.planned_output_id === b?.planned_output_id;
   const runLabel = item => `${ctx.title(item)} · ${String(item.created_at || "").slice(5, 16).replace("T", " ")}`;
+  const syncRunContext = item => {
+    const projectPicker = document.getElementById("projectPicker");
+    const designPicker = document.getElementById("designPicker");
+    if (!projectPicker || !designPicker || !item) return;
+    if (projectPicker.value === item.project_id) {
+      if (item.parent_id) designPicker.value = item.parent_id;
+      return;
+    }
+    projectPicker.value = item.project_id;
+    const designs = ctx.records("design").filter(design => design.project_id === item.project_id);
+    designPicker.innerHTML = designs.map(design => `<option value="${esc(design.id)}">${esc(ctx.title(design))}</option>`).join("");
+    designPicker.disabled = !designs.length;
+    designPicker.value = item.parent_id || designs[0]?.id || "";
+    const url = new URL(location.href);
+    url.searchParams.set("project", item.project_id);
+    if (designPicker.value) url.searchParams.set("design", designPicker.value);
+    window.history.replaceState(null, "", url);
+  };
 
   async function render() {
     const run = runs.find(item => item.id === runId) || runs[0];
+    syncRunContext(run);
     root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div><div class="empty-state">正在读取冻结工作区…</div>`;
     try {
       const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/workspace`);
@@ -84,10 +105,18 @@ window.AsterPageModules.runs = async function(root, ctx) {
       });
       const taskDone = task => taskEvents(task).some(event => event.step_status === "completed");
       const completed = new Set(tasks.filter(taskDone).map(task => task.task_key));
+      const allTasksDone = Boolean(tasks.length) && tasks.every(task => completed.has(task.task_key));
+      const timepointValues = [...new Set(tasks.map(task => task.timepoint).filter(Boolean))];
       const firstOpen = tasks.find(task => !completed.has(task.task_key));
-      if (!tasks.some(task => task.task_key === selectedTaskKey)) selectedTaskKey = (firstOpen || tasks[tasks.length - 1])?.task_key || "";
-      const taskIndex = Math.max(0, tasks.findIndex(task => task.task_key === selectedTaskKey));
-      const currentTask = tasks[taskIndex];
+      if (!timepointValues.includes(selectedTimepoint)) selectedTimepoint = firstOpen?.timepoint || timepointValues[0] || "";
+      const visibleTasks = timepointValues.length ? tasks.filter(task => task.timepoint === selectedTimepoint) : tasks;
+      if (!visibleTasks.some(task => task.task_key === selectedTaskKey)) {
+        const visibleOpen = visibleTasks.find(task => !completed.has(task.task_key));
+        selectedTaskKey = (visibleOpen || (allTasksDone ? visibleTasks[visibleTasks.length - 1] : visibleTasks[0]))?.task_key || "";
+      }
+      const taskIndex = Math.max(0, visibleTasks.findIndex(task => task.task_key === selectedTaskKey));
+      const currentTask = visibleTasks[taskIndex];
+      const globalTaskIndex = tasks.findIndex(task => task.task_key === currentTask?.task_key);
       const step = steps.find(item => item.step?.path === currentTask?.step_path && sameScope(item.scope, currentTask?.scope))?.step;
       const scope = currentTask?.scope && typeof currentTask.scope === "object" ? currentTask.scope : {};
       const taskScope = scope;
@@ -99,14 +128,15 @@ window.AsterPageModules.runs = async function(root, ctx) {
       const versionId = taskVersion(currentTask || {});
       const scopeLabel = scopeKind === "planned_output" ? `材料 ${scopeId || "未指定"}` : `Assay ${scopeId || "未指定"}`;
       const events = currentTask ? taskEvents(currentTask) : [];
-      const allDone = Boolean(tasks.length) && tasks.every(task => completed.has(task.task_key));
+      const allDone = allTasksDone;
+      const timepointDone = Boolean(visibleTasks.length) && visibleTasks.every(task => completed.has(task.task_key));
       const rowList = (items, renderItem, empty) => items?.length ? items.map(renderItem).join("") : `<div class="page-muted">${empty}</div>`;
       const detailRows = (items, keyLabel) => rowList(items, item => `<div class="page-row"><div><strong>${esc(item.label || item.name || item[keyLabel] || item.endpoint || item.role || "记录")}</strong><small>${esc([item.status, item.value != null && `${item.value}${item.unit ? ` ${item.unit}` : ""}`, item.note, item.method].filter(Boolean).join(" · ") || "未填写")}</small></div></div>`, "暂无记录。");
       const eventRows = rowList(events, event => `<article class="page-row"><div><strong>${esc(event.event_type || event.stage || "执行事件")}</strong><small>${esc([event.occurred_at, event.operator && `操作人：${event.operator}`, event.step_status && `状态：${event.step_status}`, event.timepoint && `时间点：${event.timepoint}`].filter(Boolean).join(" · ") || "时间未填写")}</small>${event.content ? `<small>${esc(event.content)}</small>` : ""}${event.readouts?.length ? `<small><b>读数</b></small>${detailRows(event.readouts, "readout_id")}` : ""}${event.measurements?.length ? `<small><b>测量</b></small>${detailRows(event.measurements, "endpoint")}` : ""}${event.checks?.length ? `<small><b>检查</b></small>${detailRows(event.checks, "check_id")}` : ""}</div></article>`, "当前任务尚无实际事件。");
       const checkOptions = step?.checks || [];
       const checkFields = checkOptions.length ? `<div class="run-checks"><strong>检查项</strong>${checkOptions.map(check => `<label class="run-check"><span>${esc(check.label || check.check_id)}${check.blocking ? " · 必需" : ""}</span><select name="check_${esc(check.check_id)}" data-check="${esc(check.check_id)}"><option value="">未记录</option><option value="passed">通过</option><option value="failed">未通过</option><option value="not_applicable">不适用</option></select></label>`).join("")}</div>` : "";
       const plates = (workspace.plates || []).filter(plate => scopeKind === "planned_output" ? plate.planned_output_id === scopeId : plate.assay_id === scopeId).map(plate => `<section class="page-card"><h2>${esc(plate.name || plate.plate_id || "培养板")}</h2><div class="page-muted">${esc([plate.format, plate.rows && `${plate.rows} 行`, plate.columns && `${plate.columns} 列`, plate.timepoint].filter(Boolean).join(" · "))}</div>${plate.wells?.length ? `<div class="data-table-wrap"><table><thead><tr><th>孔位</th><th>组别</th><th>样本</th><th>备注</th></tr></thead><tbody>${plate.wells.map(well => `<tr><td>${esc(well.coordinate)}</td><td>${esc(well.group_label)}</td><td>${esc(well.sample_id)}</td><td>${esc(well.note)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="page-muted">尚无孔位。</div>'}</section>`).join("");
-      const chips = tasks.length ? tasks.map((task, index) => {
+      const chips = visibleTasks.length ? visibleTasks.map((task, index) => {
         const isDone = completed.has(task.task_key);
         const isCurrent = task.task_key === selectedTaskKey;
         const taskStep = steps.find(item => item.step?.path === task.step_path && sameScope(item.scope, task.scope))?.step;
@@ -118,15 +148,28 @@ window.AsterPageModules.runs = async function(root, ctx) {
       const designAssay = (workspace.frozen_design?.content?.assays || []).find(assay => assay.id === assayId);
       const targetLabel = [designAssay?.group_names?.join(" / "), designAssay?.timepoints?.join(" / ")].filter(Boolean).join(" · ");
       const moduleTable = (title, table) => `<section class="page-card run-module"><h3>${esc(title)}</h3>${table?.rows?.length ? `<table class="run-module-table"><thead><tr>${table.columns.map(column => `<th>${esc(column)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(row => `<tr>${row.map(cell => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : '<div class="page-muted">未绑定</div>'}</section>`;
-      const nextTask = tasks[taskIndex + 1];
+      const allEvents = (workspace.events || []).slice().reverse();
+      const resultRows = allEvents.map(event => {
+        const task = tasks.find(item => item.task_key === event.task_key);
+        const taskStep = steps.find(item => item.step?.path === event.protocol_step_path)?.step;
+        const title = taskStep?.title || event.protocol_step_path || "执行事件";
+        const readouts = (event.readouts || []).length;
+        const measurements = (event.measurements || []).length;
+        const checks = (event.checks || []).length;
+        return `<tr><td>${esc(title)}</td><td>${esc(event.timepoint || task?.timepoint || "—")}</td><td>${esc(event.step_status || event.event_type || "—")}</td><td>${readouts + measurements}</td><td>${checks}</td><td>${esc(event.content || "—")}</td></tr>`;
+      }).join("");
+      const completedWithoutResults = tasks.filter(task => completed.has(task.task_key) && !taskEvents(task).some(event => event.readouts?.length || event.measurements?.length)).length;
+      const nextTask = visibleTasks[taskIndex + 1] || tasks[globalTaskIndex + 1];
       const confirmLabel = allDone ? "本次运行已完成" : nextTask ? "确认完成并进入下一步" : "确认完成";
-      const form = allDone ? "" : `<form id="actual-form" class="run-form"><div class="run-confirm"><strong>${esc(step?.title || "当前步骤")}</strong><span>${checkOptions.some(check => check.blocking) ? "先完成必需检查，再确认本步。" : "按已选 Protocol 执行后确认即可。"}</span></div>${checkFields}<label class="run-note">异常 / 偏差 / 实际参数（可选）<textarea name="content" placeholder="正常操作可留空；有偏差、遗漏或实际参数变化时再填写。"></textarea></label><details class="run-more"><summary>更多记录（操作人，可选）</summary><label>操作人<input name="operator" placeholder="可留空"></label></details><div id="run-form-error" class="summary-error" role="alert"></div><button class="btn primary" type="submit">${confirmLabel}</button></form>`;
-      root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))} · ${esc(scopeLabel)} · 任务 ${taskIndex + 1}/${tasks.length} · ${esc(allDone ? "全部任务已完成" : workspace.status || "状态未填写")}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div>
+      const form = allDone || timepointDone ? "" : `<form id="actual-form" class="run-form"><div class="run-confirm"><strong>${esc(step?.title || "当前步骤")}</strong><span>${checkOptions.some(check => check.blocking) ? "先完成必需检查，再确认本步。" : "按已选 Protocol 执行后确认即可。"} 确认只记录操作完成，不声称已测量参数或保存结果。</span></div>${checkFields}<label class="run-note">异常 / 偏差 / 实际参数（可选）<textarea name="content" placeholder="正常操作可留空；有偏差、遗漏或实际参数变化时再填写。"></textarea></label><details class="run-more"><summary>更多记录（操作人，可选）</summary><label>操作人<input name="operator" placeholder="可留空"></label></details><div id="run-form-error" class="summary-error" role="alert"></div><button class="btn primary" type="submit">${confirmLabel}</button></form>`;
+      root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))} · ${esc(scopeLabel)} · ${selectedTimepoint ? `${esc(selectedTimepoint)} · ` : ""}任务 ${taskIndex + 1}/${visibleTasks.length} · ${esc(allDone ? "全部任务已完成" : workspace.status || "状态未填写")}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div>
+        <div class="run-tabs"><button class="${selectedMode === "session" ? "active" : ""}" data-run-mode="session">执行安排</button><button class="${selectedMode === "results" ? "active" : ""}" data-run-mode="results">结果</button></div>
+        ${timepointValues.length > 1 ? `<div class="page-card run-timepoints"><div class="step-strip">${timepointValues.map(timepoint => `<button class="step-chip ${timepoint === selectedTimepoint ? "active" : ""}" data-timepoint="${esc(timepoint)}">${esc(timepoint)}</button>`).join("")}</div></div>` : ''}
         <div class="page-card run-step-strip"><div class="step-strip">${chips}</div></div>
-        ${allDone ? '<div class="run-done"><strong>本次运行的全部任务已记录。</strong><span>可点击上方任务回看材料、检查与实际记录。</span></div>' : ''}
-        <div class="run-cockpit">
+        ${allDone ? '<div class="run-done"><strong>本次运行的全部任务已记录。</strong><span>可点击上方任务回看材料、检查与实际记录。</span></div>' : timepointDone ? '<div class="run-done"><strong>本时间点的任务已完成。</strong><span>切换到其他时间点继续。</span></div>' : ''}
+        <div class="run-cockpit" ${selectedMode === "results" ? "hidden" : ""}>
           <section class="page-card run-current">
-            <div class="run-kicker">当前任务 · ${taskIndex + 1}/${tasks.length}${currentTask?.timepoint ? ` · ${esc(currentTask.timepoint)}` : ""}</div>
+            <div class="run-kicker">当前任务 · ${taskIndex + 1}/${visibleTasks.length}${selectedTimepoint ? ` · ${esc(selectedTimepoint)}` : ""}</div>
             <h2>${step ? esc(step.title || "当前步骤") : "当前步骤"}</h2>
             <p class="run-instruction">${esc(step?.instruction || "未填写")}</p>
             <div class="run-meta"><span>参数：${esc(parameters)}</span><span>时间范围：${esc(step?.time_scope || "未指定")}</span>${targetLabel ? `<span>目标样本：${esc(targetLabel)}</span>` : ""}</div>
@@ -138,14 +181,22 @@ window.AsterPageModules.runs = async function(root, ctx) {
             ${moduleTable("检查与接受", modules?.checks)}
           </div>
           <div class="run-grid">
-            <section class="page-card"><h2>${allDone ? "本次运行已完成" : "确认 / 记录"}</h2>${allDone ? '<p class="page-muted">所有任务都有已完成记录；本页只回看，不再追加新的完成事件。</p>' : form}</section>
+            <section class="page-card"><h2>${allDone ? "本次运行已完成" : timepointDone ? "本时间点已完成" : "确认 / 记录"}</h2>${allDone ? '<p class="page-muted">所有任务都有已完成记录；本页只回看，不再追加新的完成事件。</p>' : timepointDone ? '<p class="page-muted">本时间点没有未完成的任务，切换上方时间点继续。</p>' : form}</section>
             <section class="page-card"><h2>本任务记录</h2>${eventRows}</section>
           </div>
           ${plates}
           <details class="page-card"><summary>材料与技术信息</summary><h3>当前范围材料</h3>${materials}<h3>技术 ID</h3><div class="page-muted">task_key：${esc(currentTask?.task_key || "未指定")} · Protocol 版本：${esc(versionId || "未指定")} · 路径：${esc(step?.path || "未指定")}</div></details>
-        </div>`;
+        </div>
+        <section class="run-results" ${selectedMode === "session" ? "hidden" : ""}>
+          <div class="page-card"><h2>结果与异常</h2><p class="page-muted">操作完成不等于结果完整。这里显示已记录的事件、读数和检查；${completedWithoutResults} 个已完成任务尚无读数。</p>
+            ${allEvents.length ? `<div class="data-table-wrap"><table><thead><tr><th>任务</th><th>时间点</th><th>状态</th><th>读数/测量</th><th>检查</th><th>记录</th></tr></thead><tbody>${resultRows}</tbody></table></div>` : '<div class="page-muted">还没有执行事件。</div>'}
+          </div>
+          <div class="page-card"><h2>未记录读数的已完成任务</h2><p class="page-muted">这里只表示当前事件里没有读数或测量；是否必须记录由步骤的结果要求决定。</p>${tasks.filter(task => completed.has(task.task_key) && !taskEvents(task).some(event => event.readouts?.length || event.measurements?.length)).length ? tasks.filter(task => completed.has(task.task_key) && !taskEvents(task).some(event => event.readouts?.length || event.measurements?.length)).map(task => `<div class="page-row"><div><strong>${esc(steps.find(item => item.step?.path === task.step_path && sameScope(item.scope, task.scope))?.step?.title || task.step_path)}</strong><small>${esc(task.timepoint || "无时间点")} · 已完成操作但尚无读数/测量</small></div></div>`).join("") : '<div class="page-muted">所有已完成任务都已有读数/测量记录，或没有任务。</div>'}</div>
+        </section>`;
       root.querySelector("#run-select").addEventListener("change", event => { runId = event.target.value; selectedTaskKey = ""; render(); });
       root.querySelectorAll("[data-task]").forEach(button => button.addEventListener("click", () => { selectedTaskKey = button.dataset.task; render(); }));
+      root.querySelectorAll("[data-timepoint]").forEach(button => button.addEventListener("click", () => { selectedTimepoint = button.dataset.timepoint; selectedTaskKey = ""; render(); }));
+      root.querySelectorAll("[data-run-mode]").forEach(button => button.addEventListener("click", () => { selectedMode = button.dataset.runMode; render(); }));
       const setRunStatus = async (status) => {
         if (!run || run.data?.status === status) return;
         const response = await fetch("/api/records/update", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({id: run.id, expected_revision: run.revision, data: {status}})});
@@ -185,7 +236,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
         const remainingAfter = tasks.filter(task => task.task_key !== currentTask.task_key && !completed.has(task.task_key));
         const nextStatus = status === "blocked" ? "blocked" : (remainingAfter.length === 0 ? "completed" : "in_progress");
         await setRunStatus(nextStatus);
-        if (status === "completed" && nextTask) selectedTaskKey = nextTask.task_key;
+        if (status === "completed" && nextTask) { selectedTaskKey = nextTask.task_key; selectedTimepoint = nextTask.timepoint || ""; }
         await render();
       });
     } catch (error) {

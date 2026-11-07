@@ -75,24 +75,29 @@
     if (!box) return;
     if (!design) { box.hidden = true; box.innerHTML = ""; return; }
     const value = data(design), groups = Array.isArray(value.group_specs) ? value.group_specs : Array.isArray(value.groups) ? value.groups : typeof value.groups === "string" ? value.groups.split(/\n/).filter(Boolean) : [], assays = value.assays || [];
-    const timepoints = [...new Set(assays.flatMap(assay => assay.timepoints || []))];
-    const protocols = [...new Set(assays.flatMap(assay => [assay.protocol_version_id, ...(assay.protocol_version_ids || [])]).filter(Boolean))];
     const protocolTitle = id => {
       const record = one(id);
       const parent = record?.parent_id ? one(record.parent_id) : record;
       return parent ? title(parent) : id;
     };
+    const relationLabel = relation => ({
+      same_experimental_unit_repeated: "同一实验单位重复",
+      same_physical_sample_repeated: "同一实体样本重复",
+      independent_sample_per_timepoint: "每时间点独立样本",
+      unknown: "时间关系待确认"
+    })[relation] || "时间关系未填";
     const pending = (value.evidence_conflicts || []).filter(item => !["resolved", "confirmed"].includes(item.status)).length +
       (value.unresolved_questions || value.pending_questions || []).length +
-      assays.filter(assay => assay.timepoint_relation === "unknown" || assay.timepoint_relation === "unresolved").length;
-    box.innerHTML = `<strong>${esc(title(design))}</strong><span>${groups.length} 组</span><span>${esc(fmt(timepoints) || "无时间点")}</span><span>${esc(fmt(assays.map(assay => [assay.title, assay.endpoint].filter(Boolean).join(" / ")).filter(Boolean)) || "无检测/终点")}</span><span>Protocol ${esc(fmt(protocols.map(protocolTitle)) || "未关联")}</span><span>${pending} 项待确认</span><button class="btn" id="editWorkflowDesign" type="button">编辑本次安排</button><button class="btn primary" id="startWorkflowRun" type="button">开始运行</button>`;
+      assays.filter(assay => !assay.timepoint_relation || assay.timepoint_relation === "unknown").length;
+    const assayLines = assays.map(assay => `<div class="summary-assay"><strong>${esc(assay.title || "未命名检测")}</strong><span>${esc((assay.timepoints || []).join(" / ") || "无时间点")}</span><span>${esc(relationLabel(assay.timepoint_relation))}</span><span>${esc([assay.endpoint, assay.method].filter(Boolean).join(" · ") || "终点未填")}</span><span>Protocol ${esc(assay.protocol_version_id ? protocolTitle(assay.protocol_version_id) : "未关联")}</span></div>`).join("");
+    box.innerHTML = `<div class="summary-main"><strong>${esc(title(design))}</strong><span>${groups.length} 组</span><span>${assays.length} 项检测</span><span>${pending} 项待确认</span><button class="btn" id="editWorkflowDesign" type="button">编辑本次安排</button><button class="btn primary" id="startWorkflowRun" type="button">开始运行</button></div><div class="summary-assays">${assayLines || '<span class="page-muted">没有检测安排。</span>'}</div>`;
     box.hidden = false;
     box.querySelector("#editWorkflowDesign").onclick = () => openDesignEditor(design);
     box.querySelector("#startWorkflowRun").onclick = async () => {
       const button = box.querySelector("#startWorkflowRun");
       button.disabled = true; button.textContent = "创建运行…";
       try {
-        const response = await fetch("/api/records", {method: "POST", headers: {"content-type": "application/json", "X-AsterLab-Human-Confirmed": "1"}, body: JSON.stringify({kind: "run", project_id: design.project_id, parent_id: design.id, data: {title: `${title(design)} 执行`}})});
+        const response = await fetch("/api/records", {method: "POST", headers: {"content-type": "application/json", "X-AsterLab-Human-Confirmed": "1"}, body: JSON.stringify({kind: "run", project_id: design.project_id, parent_id: design.id, data: {title: `${title(design)} 执行`, view_id: window.AsterCurrentViewId || null}})});
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
         const runId = result.record?.id || result.id;
@@ -106,12 +111,34 @@
   function openDesignEditor(design) {
     const existing = $("designInlineEdit"); if (existing) existing.remove();
     const value = JSON.parse(JSON.stringify(data(design)));
-    const firstAssay = (value.assays || [])[0] || {};
+    const assays = Array.isArray(value.assays) ? value.assays : [];
+    const relationLabels = [
+      ["same_experimental_unit_repeated", "同一实验单位重复"],
+      ["same_physical_sample_repeated", "同一实体样本重复"],
+      ["independent_sample_per_timepoint", "每个时间点独立样本"],
+      ["unknown", "待确认"]
+    ];
     const groups = (value.group_specs || []).map((group, index) => `<div class="inline-edit-row"><strong>${esc(group.name || "未命名组")}</strong><label>条件<input data-edit-group="${index}" data-field="condition" value="${esc(group.condition || "")}"></label><label>独立 n<input data-edit-group="${index}" data-field="n" type="number" min="0" step="1" value="${group.independent_n ?? ""}"></label><label>技术重复<input data-edit-group="${index}" data-field="tech" type="number" min="0" step="1" value="${group.technical_repeats ?? ""}"></label></div>`).join("");
+    const assayCards = assays.map((assay, index) => `<section class="inline-edit-assay" data-assay-card="${index}">
+      <div class="inline-edit-assay-head"><strong>${esc(assay.title || `检测 ${index + 1}`)}</strong><small>${esc(one(assay.protocol_version_id)?.parent_id ? title(one(one(assay.protocol_version_id)?.parent_id)) : "Protocol 未关联")}</small></div>
+      <div class="inline-edit-assay-grid">
+        <label>名称<input data-assay-index="${index}" data-field="title" value="${esc(assay.title || "")}"></label>
+        <label>终点<input data-assay-index="${index}" data-field="endpoint" value="${esc(assay.endpoint || "")}"></label>
+        <label>方法<input data-assay-index="${index}" data-field="method" value="${esc(assay.method || "")}"></label>
+        <label>单位<input data-assay-index="${index}" data-field="unit" value="${esc(assay.unit || "")}"></label>
+        <label>时间点（逗号分隔）<input data-assay-index="${index}" data-field="timepoints" value="${esc((assay.timepoints || []).join(", "))}"></label>
+        <label>时间点关系<select data-assay-index="${index}" data-field="timepoint_relation">${relationLabels.map(([key, label]) => `<option value="${key}" ${assay.timepoint_relation === key ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <label>对照（逗号分隔）<input data-assay-index="${index}" data-field="controls" value="${esc((assay.controls || []).join(", "))}"></label>
+      </div>
+    </section>`).join("") || '<div class="page-muted">此设计还没有检测。</div>';
     const panel = document.createElement("section");
     panel.id = "designInlineEdit";
     panel.className = "design-inline-edit";
-    panel.innerHTML = `<div class="inline-edit-head"><div><strong>编辑本次安排</strong><small>只修改 Design；引用的 Protocol 版本不变。</small></div><button class="btn" type="button" id="cancelDesignEdit">取消</button></div><div class="inline-edit-grid"><label>研究目的<textarea data-edit-field="objective">${esc(value.objective || "")}</textarea></label><label>研究问题<input data-edit-field="research_question" value="${esc(value.research_question || "")}"></label><label>当前检测终点<input data-edit-assay="endpoint" value="${esc(firstAssay.endpoint || "")}"></label><label>方法<input data-edit-assay="method" value="${esc(firstAssay.method || "")}"></label><label>单位<input data-edit-assay="unit" value="${esc(firstAssay.unit || "")}"></label><label>时间点（逗号分隔）<input data-edit-assay="timepoints" value="${esc((firstAssay.timepoints || []).join(", "))}"></label></div>${groups}<div class="inline-edit-actions"><span id="designEditStatus" class="page-muted"></span><button class="btn primary" type="button" id="saveDesignEdit">保存 DesignVersion</button></div>`;
+    panel.innerHTML = `<div class="inline-edit-head"><div><strong>编辑本次安排</strong><small>修改所有检测、组别和时间关系；只保存 Design，引用的 Protocol 版本不变。</small></div><button class="btn" type="button" id="cancelDesignEdit">取消</button></div>
+      <div class="inline-edit-grid"><label>研究目的<textarea data-edit-field="objective">${esc(value.objective || "")}</textarea></label><label>研究问题<input data-edit-field="research_question" value="${esc(value.research_question || "")}"></label></div>
+      <div class="inline-edit-section-title">检测</div>${assayCards}
+      <div class="inline-edit-section-title">组别</div><div class="inline-edit-groups">${groups || '<div class="page-muted">此设计还没有组别。</div>'}</div>
+      <div class="inline-edit-actions"><span id="designEditStatus" class="page-muted"></span><button class="btn primary" id="saveDesignEdit" type="button">保存设计</button></div>`;
     $("workflowSummary").insertAdjacentElement("afterend", panel);
     panel.querySelector("#cancelDesignEdit").onclick = () => panel.remove();
     panel.querySelector("#saveDesignEdit").onclick = async () => {
@@ -123,13 +150,13 @@
         if (input.dataset.field === "n") group.independent_n = input.value === "" ? null : Number(input.value);
         if (input.dataset.field === "tech") group.technical_repeats = input.value === "" ? null : Number(input.value);
       });
-      if (value.assays?.[0]) {
-        const assay = value.assays[0];
-        panel.querySelectorAll("[data-edit-assay]").forEach(input => {
-          if (input.dataset.editAssay === "timepoints") assay.timepoints = input.value.split(",").map(item => item.trim()).filter(Boolean);
-          else assay[input.dataset.editAssay] = input.value.trim();
-        });
-      }
+      panel.querySelectorAll("[data-assay-index]").forEach(input => {
+        const assay = (value.assays || [])[Number(input.dataset.assayIndex)]; if (!assay) return;
+        const field = input.dataset.field;
+        if (field === "timepoints" || field === "controls") assay[field] = input.value.split(",").map(item => item.trim()).filter(Boolean);
+        else if (field === "timepoint_relation") assay[field] = input.value;
+        else assay[field] = input.value.trim();
+      });
       try {
         const response = await fetch("/api/records/update", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({id: design.id, expected_revision: design.revision, data: value})});
         const result = await response.json();

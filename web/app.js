@@ -523,11 +523,12 @@ async function load(preserveHistory=false,preserveUi=false){
     calcStates.clear();drafts.clear();
   }
   if(!preserveHistory){history=[];future=[]}
+  window.AsterCurrentViewId=viewId;
   render();loadInbox();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`;
   if(!preserveUi && graph().nodes.length>6){setTimeout(()=>document.getElementById("fit")?.click(),0)}
 }
 function resetView(){
-  viewId="";data=null;node=null;selected=null;stack=[];history=[];future=[];
+  viewId="";window.AsterCurrentViewId="";data=null;node=null;selected=null;stack=[];history=[];future=[];
   paramCache.clear();plateCache.clear();plateSelections.clear();calcStates.clear();drafts.clear();proposal=null;inboxProposals=[];
   render();
 }

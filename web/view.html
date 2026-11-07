@@ -188,7 +188,30 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 .run-more{font-size:11px;color:var(--al-muted)}
 .run-more summary{cursor:pointer}
 .run-more label{margin-top:6px}
-@media(max-width:700px){.step-chip{font-size:12px;min-height:40px;padding:8px 10px}.step-chip small{font-size:10px}}
+@media(max-width:700px){.step-chip{font-size:12px;min-height:44px;padding:8px 10px}.step-chip small{font-size:10px}}
+
+.inline-edit-section-title{margin-top:4px;font-size:11px;font-weight:700;color:var(--al-muted);letter-spacing:.04em;text-transform:uppercase}
+.inline-edit-assay{border:1px solid var(--al-line);border-radius:8px;padding:10px}
+.inline-edit-assay-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
+.inline-edit-assay-head strong{font-size:13px}
+.inline-edit-assay-head small{font-size:10px;color:var(--al-muted)}
+.inline-edit-assay-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.inline-edit-assay-grid label{display:grid;gap:4px;font-size:11px;color:var(--al-muted)}
+.inline-edit-assay-grid input,.inline-edit-assay-grid select{width:100%;min-width:0}
+.inline-edit-assay-grid label:nth-child(5),.inline-edit-assay-grid label:nth-child(6){grid-column:span 2}
+@media(max-width:700px){.inline-edit-assay-grid{grid-template-columns:1fr 1fr}.inline-edit-assay-grid label:nth-child(5),.inline-edit-assay-grid label:nth-child(6){grid-column:span 1}}
+
+.summary-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.summary-assays{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+.summary-assay{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--al-muted);border-top:1px solid var(--al-line);padding-top:5px}
+.summary-assay strong{font-size:11px;color:var(--al-ink)}
+.summary-assay span+span:before{content:"·";margin-right:6px;color:var(--al-line-strong)}
+
+.run-tabs{display:flex;gap:4px;margin:10px 0 0}
+.run-tabs button{border:1px solid var(--al-line);background:var(--al-surface);color:var(--al-muted);border-radius:7px;padding:6px 11px;font-size:12px}
+.run-tabs button.active{color:var(--al-ink);border-color:var(--al-accent);background:var(--al-surface-2)}
+.run-results{padding:0 0 12px}
+.step-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">
@@ -289,12 +312,14 @@ async function bootLatestView(){
     const root=result.latest_version?.data?.root, refs=new Set();
     const collect=component=>{if(!component)return;const scan=value=>{if(!value||typeof value!=='object')return;for(const [key,item] of Object.entries(value)){if(key==='protocol_version_id'&&item)refs.add(item);else if(key==='protocol_version_ids'&&Array.isArray(item))item.forEach(id=>id&&refs.add(id));else scan(item)}};scan(component)};
     collect(root);
-    if([...protocolIds].some(id=>refs.has(id))){document.getElementById('viewId').value=viewRecord.id;await window.load();return}
+    if([...protocolIds].some(id=>refs.has(id))){document.getElementById('canvasPanel').hidden=false;document.getElementById('detail').hidden=false;document.getElementById('viewId').value=viewRecord.id;await window.load();return}
   }
   document.getElementById('viewId').value='';
   window.resetView();
-  document.getElementById('status').textContent='当前设计暂无匹配 View';
-  document.getElementById('detail').innerHTML='<div class="empty-state"><h2>当前设计暂无 View</h2><p>为当前设计生成 View；不会打开其他项目的 View。</p></div>';
+  document.getElementById('canvasPanel').hidden=true;
+  document.getElementById('status').textContent='Plan 已保存';
+  document.getElementById('detail').hidden=false;
+  document.getElementById('detail').innerHTML='<div class="empty-state"><h2>Plan</h2><p>此设计还没有可视化流程。上方的检测安排可直接用于开始运行；需要步骤图时再生成 View。</p></div>';
 }
 window.bootLatestView=bootLatestView;
 

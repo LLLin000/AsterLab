@@ -433,6 +433,8 @@ struct RunCreate {
     #[serde(default)]
     protocol_version_id: Option<String>,
     #[serde(default)]
+    view_id: Option<String>,
+    #[serde(default)]
     repeat_of_run_id: Option<String>,
     #[serde(default)]
     repeat_relationship: RunRelationship,
@@ -1332,6 +1334,7 @@ fn execution_resource_snapshot(
     db: &Connection,
     project_id: &str,
     design_data: &Value,
+    view_id: Option<&str>,
 ) -> Result<Vec<Value>, CliError> {
     let protocol_ids: HashSet<String> = design_data["assays"]
         .as_array()
@@ -1346,7 +1349,16 @@ fn execution_resource_snapshot(
     }
     let mut resources = Vec::new();
     let mut seen = HashSet::new();
-    for view in list(db, Some("view"), Some(project_id))? {
+    let views = if let Some(id) = view_id {
+        let view = get(db, id)?;
+        if view["kind"] != "view" || view["project_id"].as_str() != Some(project_id) {
+            return Err(CliError::input("view_id 必须是当前项目的 View"));
+        }
+        vec![view]
+    } else {
+        list(db, Some("view"), Some(project_id))?
+    };
+    for view in views {
         let Some(view_id) = view["id"].as_str() else { continue };
         let document = get_view(db, view_id)?["latest_version"]["data"]["root"].clone();
         let mut stack = vec![document];
@@ -1410,6 +1422,7 @@ pub(crate) fn create_run_in_transaction(
     title: &str,
     scheduled_date: Option<&str>,
     global_protocol_version_id: Option<&str>,
+    view_id: Option<&str>,
     repeat_of_run_id: Option<&str>,
     repeat_relationship: &str,
 ) -> Result<Value, CliError> {
@@ -1442,7 +1455,7 @@ pub(crate) fn create_run_in_transaction(
     let (protocol_manifest, material_manifest) =
         build_run_manifests(tx, &design_data, &project, global_protocol_version_id)?;
     let labware_profiles = labware_profile_snapshot(tx, &design_data)?;
-    let execution_resources = execution_resource_snapshot(tx, &project, &design_data)?;
+    let execution_resources = execution_resource_snapshot(tx, &project, &design_data, view_id)?;
     if let Some(previous_id) = repeat_of_run_id.filter(|id| !id.is_empty()) {
         let (previous_kind, previous_project, previous_design, _, _) = kind_id(tx, previous_id)?
             .ok_or_else(|| CliError::missing("被重复执行的 Run 不存在"))?;
@@ -1471,6 +1484,7 @@ pub(crate) fn create_run_in_transaction(
         "container_plan":design_data["container_plan"].clone(),
         "labware_profiles":labware_profiles,
         "execution_resources":execution_resources,
+        "view_id":view_id.filter(|id| !id.is_empty()),
         "design_version_id":version,
         "design_revision":revision,
         "run_index":run_index,
@@ -5165,6 +5179,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 &i.title,
                 i.scheduled_date.as_deref(),
                 i.protocol_version_id.as_deref(),
+                i.view_id.as_deref(),
                 i.repeat_of_run_id.as_deref(),
                 i.repeat_relationship.as_str(),
             )?;
