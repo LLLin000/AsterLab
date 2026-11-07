@@ -130,7 +130,7 @@
     const name = pageNames.includes(next) ? next : "workflow";
     await loadState();
     updateProjectPicker();
-    const labels = {workflow:"实验设计",projects:"项目",designs:"设计关系",protocols:"Protocol",runs:"实验运行",records:"实验记录",tools:"资料与工具"};
+    const labels = {workflow:"实验设计",projects:"项目",designs:"实验设计",protocols:"Protocol",runs:"实验运行",records:"实验记录",tools:"资料与工具"};
     $("pageCrumb").textContent = labels[name] || "工作区";
     const isWorkflow = name === "workflow";
     $("canvasPanel").hidden = !isWorkflow;
@@ -156,5 +156,5 @@
     window.history.replaceState(null, "", url);
   });
   document.querySelectorAll(".rail-item[data-page]").forEach(button => button.addEventListener("click", () => setPage(button.dataset.page)));
-  setPage(new URLSearchParams(location.search).get("page") || "workflow");
+  setPage(new URLSearchParams(location.search).get("page") || "designs");
 })();

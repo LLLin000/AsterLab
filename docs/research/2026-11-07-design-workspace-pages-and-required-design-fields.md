@@ -250,18 +250,19 @@ Quality      随机化 · 盲法 · 纳排 · 分析计划 · 证据
 
 ## 8. 用户确认的产品修正
 
-实验设计页不是独立的 Design Map 摘要页，**直接就是 Workflow View 工作区**（上半流程、下半组件），
-用于设计整个实验。Design Map 只作为辅助关系视图，从「资料与工具」进入，不占主标签。
+最新用户修正后的结论：实验设计首屏应是一张轻量实验安排页，而不是完整 SOP 或复杂 Sample 网络。
+它显示研究目的、组别/关键条件、时间点、检测、主要流程和待确认；固定方法通过 Protocol 版本引用继承。
+需要完整操作时再打开 Workflow View 或 Protocol 详情。
 
 因此四标签固定为：
 
-1. 实验设计 → Workflow View（默认）
-2. Protocol
+1. 实验设计 → Design Plan（摘要 + 流程，默认）
+2. Protocol → 方法版本与步骤详情
 3. 实验运行（只执行，不显示设计决策）
-4. 资料与工具（项目、设计关系、记录、资料/公式）
+4. 资料与工具（项目、Workflow、记录、资料/公式）
 
-Design Map 的 research_question/factors 等字段仍然是必要补充，但应作为 Workflow 下方组件或辅助视图，
-不能另起一个主页面替代 Workflow。
+Workflow View 保留为设计的完整画布/步骤视图，从实验设计页进入；不占主入口。
+Design Map 的 research_question/factors 等字段仍保留，但不在首屏堆满。
 
 ## 9. 从 Protocol 反推三个角色的 UX
 
