@@ -15,6 +15,12 @@
     const columns = columnsFor(instance);
     const rows = rowsFor(instance);
     const title = escape(ctx?.title ? ctx.title(instance) : instance?.props?.label || instance?.props?.title || definition, ctx);
+    if (["materials", "instruments", "checks"].includes(instance?.props?.preset) || instance?.props?.readOnly) {
+      return `<article class="card cmp-table cmp-table--readonly" data-instance="${id}" data-component="${escape(definition, ctx)}">
+      <header class="cmp-table__header"><div><h3>${title}</h3><div class="cmp-table__meta">${rows.length} 项</div></div></header>
+      <div class="cmp-table__scroll"><table><thead><tr>${columns.map(column => `<th scope="col">${escape(column, ctx)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map((_, index) => `<td>${escape(row[index] ?? "", ctx)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+    </article>`;
+    }
     return `<article class="card cmp-table" data-instance="${id}" data-component="${escape(definition, ctx)}">
       <header class="cmp-table__header"><div><h3>${title}</h3><div class="cmp-table__meta" data-table-meta>${escape(definition, ctx)} · ${rows.length} 行 · ${columns.length} 列</div></div><span class="cmp-table__status" data-table-status role="status" aria-live="polite">已保存</span></header>
       <div class="cmp-table__scroll"><table><thead><tr>${columns.map((column, index) => `<th scope="col"><label class="cmp-table__sr" for="${id}-head-${index}">第 ${index + 1} 列名称</label><input id="${id}-head-${index}" data-colhead="${index}" value="${escape(column, ctx)}" aria-label="第 ${index + 1} 列名称"></th>`).join("")}</tr></thead><tbody>${rows.map((row, rowIndex) => `<tr>${columns.map((_, columnIndex) => `<td><label class="cmp-table__sr" for="${id}-cell-${rowIndex}-${columnIndex}">第 ${rowIndex + 1} 行，第 ${columnIndex + 1} 列</label><input id="${id}-cell-${rowIndex}-${columnIndex}" data-cell="${rowIndex}-${columnIndex}" value="${escape(row[columnIndex] ?? "", ctx)}" aria-label="第 ${rowIndex + 1} 行第 ${columnIndex + 1} 列"></td>`).join("")}</tr>`).join("")}</tbody></table>${rows.length ? "" : '<div class="cmp-table__empty">暂无数据行。选择“添加行”开始录入。</div>'}</div>

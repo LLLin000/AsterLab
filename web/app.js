@@ -49,6 +49,10 @@ function graph(){
     if(p){c._vx=p.x;c._vy=p.y}
     else{c._vx=start+i*gap;c._vy=y}
   });
+  if(nodes.length>7){
+    const perRow=6,rowGap=170,rowY=[80,235];
+    nodes.forEach((n,i)=>{const c=n.component;c._vx=470+(i%perRow)*rowGap-38;c._vy=rowY[Math.floor(i/perRow)]});
+  }
   return {nodes,edges};
 }
 function nodeBox(c){return {x:c._vx??80,y:c._vy??175,w:112,h:136}}
@@ -507,7 +511,8 @@ async function load(preserveHistory=false,preserveUi=false){
     calcStates.clear();drafts.clear();
   }
   if(!preserveHistory){history=[];future=[]}
-  render();loadInbox();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`
+  render();loadInbox();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`;
+  if(!preserveUi && graph().nodes.length>6){setTimeout(()=>document.getElementById("fit")?.click(),0)}
 }
 function resetView(){
   viewId="";data=null;node=null;selected=null;stack=[];history=[];future=[];
@@ -578,7 +583,7 @@ $("redo").onclick=()=>{const entry=future.pop();if(!entry)return;const c=applyPo
   persistVisual(entry.instance_id,entry.after).catch(()=>{future.push(entry);history=history.filter(x=>x!==entry);updateHistoryButtons()})};
 $("selectTool").onclick=()=>{mode="select";$("selectTool").classList.add("active");$("handTool").classList.remove("active");$("canvas").classList.remove("hand")};
 $("handTool").onclick=()=>{mode="hand";$("handTool").classList.add("active");$("selectTool").classList.remove("active");$("canvas").classList.add("hand")};
-$("fit").onclick=()=>{const {nodes}=graph();if(!nodes.length)return;const boxes=nodes.map(n=>nodeBox(n.component));const minX=Math.min(...boxes.map(b=>b.x)),maxX=Math.max(...boxes.map(b=>b.x+b.w)),minY=Math.min(...boxes.map(b=>b.y)),maxY=Math.max(...boxes.map(b=>b.y+b.h));const k=Math.min(1.2,Math.max(.35,Math.min(1000/(maxX-minX+80),480/(maxY-minY+80))));view={k,x:80-minX*k,y:140-minY*k};renderCanvas()};
+$("fit").onclick=()=>{const {nodes}=graph();if(!nodes.length)return;const boxes=nodes.map(n=>nodeBox(n.component));const minX=Math.min(...boxes.map(b=>b.x)),maxX=Math.max(...boxes.map(b=>b.x+b.w)),minY=Math.min(...boxes.map(b=>b.y)),maxY=Math.max(...boxes.map(b=>b.y+b.h));const k=Math.min(1.2,Math.max(.35,Math.min(1000/(maxX-minX+80),300/(maxY-minY+80))));view={k,x:80-minX*k,y:90-minY*k};renderCanvas()};
 function zoomAt(f){const k=Math.min(2,Math.max(.25,view.k*f));const svg=$("canvas"),r=svg.getBoundingClientRect();const center=screenToCanvas(r.left+r.width/2,r.top+r.height/2);view.x=view.x+center.x*(view.k-k);view.y=view.y+center.y*(view.k-k);view.k=k;renderCanvas()}
 $("zoomIn").onclick=()=>zoomAt(1.2);$("zoomOut").onclick=()=>zoomAt(1/1.2);
 $("canvas").addEventListener("wheel",e=>{e.preventDefault();const p=screenToCanvas(e.clientX,e.clientY);const f=e.deltaY<0?1.1:1/1.1;const k=Math.min(2,Math.max(.25,view.k*f));view.x=view.x+p.x*(view.k-k);view.y=view.y+p.y*(view.k-k);view.k=k;renderCanvas()},{passive:false});

@@ -605,7 +605,7 @@ pub fn default_registry() -> ComponentRegistry {
             version: 1,
             family: ComponentFamily::Content,
             title: "Table".into(),
-            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","enum":["authored","bound"]},"markdown":{"type":"string"},"columns":{"type":"array"},"rows":{"type":"array"}}}),
+            props_schema: json!({"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","enum":["authored","bound"]},"markdown":{"type":"string"},"columns":{"type":"array"},"rows":{"type":"array"},"title":{"type":"string"},"preset":{"type":"string"}}}),
             capabilities: vec!["content".into(), "bind".into()],
             inputs: vec![ComponentPort {
                 id: "data".into(),
