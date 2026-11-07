@@ -38,10 +38,10 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
   <div class="brand-row"><div class="brand" title="AsterLab">AL</div><div class="brand-copy"><strong>AsterLab</strong><span>实验工作台</span></div></div>
   <label class="project-picker"><span>项目</span><select aria-label="当前项目"><option>CCK-8 assay</option><option>L929 culture</option><option>Biofilm CV</option></select></label>
   <nav class="rail-nav" aria-label="主导航">
-    <button class="rail-item active" title="实验设计" aria-label="实验设计"><img src="/icons/plate.svg" alt=""><span>实验设计</span></button>
-    <button class="rail-item" title="Protocol" aria-label="Protocol"><img src="/icons/pipette.svg" alt=""><span>Protocol</span></button>
-    <button class="rail-item" title="实验运行" aria-label="实验运行"><img src="/icons/incubator.svg" alt=""><span>实验运行</span></button>
-    <button class="rail-item" title="资料与工具" aria-label="资料与工具"><img src="/icons/flask.svg" alt=""><span>资料与工具</span></button>
+    <button class="rail-item active" title="实验设计" aria-label="实验设计" onclick="location.href='/workspace?view=designs'"><img src="/icons/plate.svg" alt=""><span>实验设计</span></button>
+    <button class="rail-item" title="Protocol" aria-label="Protocol" onclick="location.href='/workspace?view=protocols'"><img src="/icons/pipette.svg" alt=""><span>Protocol</span></button>
+    <button class="rail-item" title="实验运行" aria-label="实验运行" onclick="location.href='/workspace?view=runs'"><img src="/icons/incubator.svg" alt=""><span>实验运行</span></button>
+    <button class="rail-item" title="资料与工具" aria-label="资料与工具" onclick="location.href='/workspace?view=records'"><img src="/icons/flask.svg" alt=""><span>资料与工具</span></button>
   </nav>
   <div class="rail-foot muted">本地工作区<br>SQLite · 127.0.0.1</div>
 </aside>
@@ -98,5 +98,21 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 <script src="/components/flow.js"></script>
 <script src="/components/markdown.js"></script>
 <script src="/components/proposal.js"></script>
+<script>
+async function bootLatestView(){
+  try{
+    const state=await fetch('/api/state').then(r=>r.json());
+    const views=(state.records||[]).filter(r=>r.kind==='view').sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+    if(!views.length){
+      document.getElementById('status').textContent='尚无 View';
+      document.getElementById('detail').innerHTML='<div class="empty-state"><h2>还没有可打开的设计视图</h2><p>先在功能工作台创建设计与 Protocol，再由 Agent 或视图工具生成 ViewDocument。</p><a class="btn primary" href="/workspace?view=designs">打开功能工作台</a></div>';
+      return;
+    }
+    document.getElementById('viewId').value=views[0].id;
+    await load();
+  }catch(error){document.getElementById('status').textContent='读取失败：'+(error.message||error)}
+}
+bootLatestView();
+</script>
 </body>
 </html>

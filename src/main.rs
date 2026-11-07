@@ -1064,7 +1064,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(8832);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let app = Router::new()
-        .route("/", get(index))
+        .route("/", get(view_page))
+        .route("/workspace", get(index))
         .route("/view", get(view_page))
         .route("/design-preview", get(design_preview_page))
         .route("/icons/{name}", get(icon))
