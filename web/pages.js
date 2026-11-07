@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const pageNames = ["workflow", "projects", "designs", "protocols", "runs", "records", "tools"];
+  const pageNames = ["workflow", "projects", "protocols", "runs", "records", "tools"];
   let state;
   let stateRequest;
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;"}[char]));
@@ -93,7 +93,6 @@
       `<div class="page-grid">
         <section class="page-card"><h2>常用工具</h2><div class="page-tools">
           <button class="btn primary" onclick="AsterPageCtx.setPage('workflow')">实验设计</button>
-          <button class="btn" onclick="AsterPageCtx.setPage('designs')">设计关系</button>
           <button class="btn" onclick="AsterPageCtx.setPage('protocols')">Protocol</button>
           <button class="btn" onclick="AsterPageCtx.setPage('runs')">实验运行</button>
           <button class="btn" onclick="AsterPageCtx.setPage('records')">记录实验结果</button>
@@ -120,10 +119,10 @@
     if (name === "projects") return renderProjects();
     if (name === "records") return renderRecords();
     if (name === "tools") return renderTools();
-    if (["designs", "protocols", "runs"].includes(name)) {
+    if (["protocols", "runs"].includes(name)) {
       const module = window.AsterPageModules?.[name];
       if (module) return module($("page-view"), ctx);
-      $("page-view").innerHTML = header(({designs:"实验设计", protocols:"Protocol", runs:"实验运行"})[name], "") + empty("模块未加载", `页面模块 ${name} 尚未加载。`);
+      $("page-view").innerHTML = header(({protocols:"Protocol", runs:"实验运行"})[name], "") + empty("模块未加载", `页面模块 ${name} 尚未加载。`);
     }
   }
   async function setPage(next) {
@@ -156,5 +155,5 @@
     window.history.replaceState(null, "", url);
   });
   document.querySelectorAll(".rail-item[data-page]").forEach(button => button.addEventListener("click", () => setPage(button.dataset.page)));
-  setPage(new URLSearchParams(location.search).get("page") || "designs");
+  setPage(new URLSearchParams(location.search).get("page") || "workflow");
 })();

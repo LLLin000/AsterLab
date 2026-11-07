@@ -31,7 +31,6 @@ const ICON_FLASK: &str = include_str!("../web/icons/flask.svg");
 const APP_JS: &str = include_str!("../web/app.js");
 const PAGES_JS: &str = include_str!("../web/pages.js");
 const RESOURCES_JS: &str = include_str!("../web/resources.js");
-const DESIGN_PAGE_JS: &str = include_str!("../web/pages/design.js");
 const PROTOCOL_PAGE_JS: &str = include_str!("../web/pages/protocol.js");
 const RUN_PAGE_JS: &str = include_str!("../web/pages/run.js");
 const MARKED_JS: &str = include_str!("../web/vendor/marked.min.js");
@@ -237,7 +236,6 @@ async fn component_asset(Path(name): Path<String>) -> Response {
 }
 async fn page_asset(Path(name): Path<String>) -> Response {
     let body = match name.as_str() {
-        "design.js" => DESIGN_PAGE_JS,
         "protocol.js" => PROTOCOL_PAGE_JS,
         "run.js" => RUN_PAGE_JS,
         _ => return StatusCode::NOT_FOUND.into_response(),

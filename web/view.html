@@ -95,6 +95,26 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
   #page-view .page-card{display:block!important}
 }
 .page-view .page-row select{max-width:100%;min-width:0;width:100%}@media(max-width:760px){.page-view .page-row select{width:100%}}
+/* Typography: titles strong, body/readable secondary text larger. */
+.page-head h1{font-size:28px;font-weight:750;color:var(--al-ink)}
+.page-head p{font-size:13px;line-height:1.55;color:var(--al-muted)}
+.page-card h2{font-size:16px;font-weight:700;color:var(--al-ink)}
+.page-card h3{font-size:14px;font-weight:650;color:var(--al-ink)}
+.page-row strong{font-size:14px;font-weight:650;color:var(--al-ink)}
+.page-row small{font-size:13px;line-height:1.55;color:var(--al-muted)}
+.page-muted{font-size:13px;line-height:1.55;color:var(--al-muted)}
+@media(max-width:760px){.page-head h1{font-size:23px}.page-row strong{font-size:13px}.page-row small{font-size:12px}}
+
+.detail-title{font-size:24px;font-weight:750;letter-spacing:-.02em}
+.detail-meta{font-size:12px;line-height:1.5}
+.op-brief-head strong{font-size:15px;font-weight:700}
+.op-brief-head span{font-size:11px}
+.op-brief-instruction{font-size:14px;line-height:1.65}
+.op-brief-meta{font-size:12px;line-height:1.5}
+.op-check{font-size:13px}.op-check small{font-size:11px}
+.wnode .cmp-flow__label,.wnode .label{font-size:14px;font-weight:650}
+.wnode .cmp-flow__kind,.wnode .kind{font-size:11px}
+@media(max-width:760px){.detail-title{font-size:21px}.op-brief-instruction{font-size:13px}}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">
@@ -109,7 +129,7 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 <aside class="rail">
   <div class="brand-row"><div class="brand" title="AsterLab">AL</div><div class="brand-copy"><strong>AsterLab</strong><span>实验工作台</span></div></div>
   <nav class="rail-nav" aria-label="主导航">
-    <button class="rail-item active" data-page="designs" title="实验设计" aria-label="实验设计"><img src="/icons/plate.svg" alt=""><span>实验设计</span></button>
+    <button class="rail-item active" data-page="workflow" title="实验设计" aria-label="实验设计"><img src="/icons/plate.svg" alt=""><span>实验设计</span></button>
     <button class="rail-item" data-page="protocols" title="Protocol" aria-label="Protocol"><img src="/icons/pipette.svg" alt=""><span>Protocol</span></button>
     <button class="rail-item" data-page="runs" title="实验运行" aria-label="实验运行"><img src="/icons/incubator.svg" alt=""><span>实验运行</span></button>
     <button class="rail-item" data-page="tools" title="资料与工具" aria-label="资料与工具"><img src="/icons/flask.svg" alt=""><span>资料与工具</span></button>
@@ -171,7 +191,6 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 <script src="/components/flow.js"></script>
 <script src="/components/markdown.js"></script>
 <script src="/components/proposal.js"></script>
-<script src="/pages/design.js"></script>
 <script src="/pages/protocol.js"></script>
 <script src="/pages/run.js"></script>
 <script src="/resources.js"></script>

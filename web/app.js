@@ -32,7 +32,10 @@ function iconFor(c){
   const path=(window.AsterIcons&&window.AsterIcons[key])||window.AsterIcons?.flask||"";return `<g class="bioicon" transform="translate(36 24) scale(2)" fill="none" stroke="#202938" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${path}</g>`;
 }
 function renderCrumbs(){
-  $("crumbs").innerHTML=stack.map((c,i)=>`<button class="crumb" data-i="${i}">${esc(nodeTitle(c))}</button>`).join('<span class="crumb-sep">›</span>');
+  const crumbs=$("crumbs");if(!crumbs)return;
+  if(stack.length<=1){crumbs.hidden=true;crumbs.innerHTML="";return}
+  crumbs.hidden=false;
+  crumbs.innerHTML=stack.map((c,i)=>`<button class="crumb" data-i="${i}">${esc(nodeTitle(c))}</button>`).join('<span class="crumb-sep">›</span>');
   $("crumbs").querySelectorAll("button").forEach(b=>b.onclick=()=>{stack=stack.slice(0,Number(b.dataset.i)+1);node=stack[stack.length-1];selected=workflowOf(node)[0]?.component||node;render()});
 }
 function graph(){

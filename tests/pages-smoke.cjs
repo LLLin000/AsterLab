@@ -32,7 +32,6 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   await page.locator('.rail-item[data-page="protocols"]').click();await page.waitForTimeout(200);assert((await page.locator("#page-view").innerText()).includes("Pages protocol"));
   await page.locator('.rail-item[data-page="runs"]').click();await page.waitForTimeout(300);assert((await page.locator("#page-view").innerText()).includes("Pages run"));
   await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("常用工具"));
-  await page.getByRole("button",{name:"设计关系"}).click();await page.waitForTimeout(200);const designText=await page.locator("#page-view").innerText();assert(designText.includes("实验安排")&&designText.includes("Does it work?"),designText);
   assert.deepEqual(errors,[]);
-  await browser.close();server.kill();console.log(JSON.stringify({ok:true,rail:4,pages:["protocols","runs","tools","designs"],errors}));
+  await browser.close();server.kill();console.log(JSON.stringify({ok:true,rail:4,pages:["protocols","runs","tools"],errors}));
 })().catch(error=>{console.error(error);process.exitCode=1});
