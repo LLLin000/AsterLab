@@ -93,6 +93,8 @@ window.AsterPageModules.runs = async function(root, ctx) {
       const checks = rowList(checkOptions, check => `<div class="page-row"><div><strong>${esc(check.label || check.check_id)}</strong><small>${esc(check.instruction || "设计时检查项")}${check.blocking ? " · 阻塞" : " · 提示"}</small></div></div>`, "此步骤未定义检查项。");
       const materials = (workspace.materials || []).filter(material => material.planned_output_id === plannedOutputId).map(material => `<div class="page-row"><div><strong>${esc(material.title || "共享材料")}</strong><small>${esc(material.consumer_assay_ids || [])}</small></div></div>`).join("") || '<div class="page-muted">当前范围没有冻结共享材料。</div>';
       const modules = await stepModules(step || {}, versionId, scopeKind === "assay" ? scopeId : null);
+      const designAssay = (workspace.frozen_design?.content?.assays || []).find(assay => assay.id === scopeId);
+      const targetLabel = [designAssay?.group_names?.join(" / "), designAssay?.timepoints?.join(" / ")].filter(Boolean).join(" · ");
       const moduleTable = (title, table) => `<section class="page-card run-module"><h3>${esc(title)}</h3>${table?.rows?.length ? `<table class="run-module-table"><thead><tr>${table.columns.map(column => `<th>${esc(column)}</th>`).join("")}</tr></thead><tbody>${table.rows.map(row => `<tr>${row.map(cell => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : '<div class="page-muted">未绑定</div>'}</section>`;
       const nextStep = steps[stepIndex + 1];
       root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))} · ${esc(scopeLabel)} · 步骤 ${stepIndex + 1}/${steps.length} · ${esc(allDone ? "全部步骤已完成" : workspace.status || "状态未填写")}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(ctx.title(item))}</option>`).join("")}</select></div></div>
@@ -103,7 +105,8 @@ window.AsterPageModules.runs = async function(root, ctx) {
             <div class="run-kicker">当前步骤 · ${stepIndex + 1}/${steps.length}</div>
             <h2>${step ? esc(step.title || "当前步骤") : "当前步骤"}</h2>
             <p class="run-instruction">${esc(step?.instruction || "未填写")}</p>
-            <div class="run-meta"><span>参数：${esc(parameters)}</span><span>时间范围：${esc(step?.time_scope || "未指定")}</span></div>
+            <div class="run-meta"><span>参数：${esc(parameters)}</span><span>时间范围：${esc(step?.time_scope || "未指定")}</span>${targetLabel ? `<span>目标样本：${esc(targetLabel)}</span>` : ""}</div>
+            ${nextStep ? `<div class="run-next">下一步：${esc(nextStep.step?.title || nextStep.step?.path || "下一步")}</div>` : ""}
           </section>
           <div class="run-modules">
             ${moduleTable("材料与试剂", modules?.materials)}
@@ -111,7 +114,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
             ${moduleTable("检查与接受", modules?.checks)}
           </div>
           <div class="run-grid">
-            <section class="page-card"><h2>记录本步</h2>${step && checkOptions.length ? `<form id="actual-form" class="page-grid"><label>实际内容<textarea name="content" required placeholder="记录实际用量、观察或偏差"></textarea></label><label>步骤状态<select name="step_status"><option value="completed" selected>完成</option><option value="in_progress">进行中</option><option value="blocked">受阻</option></select></label><label>操作人<input name="operator"></label>${checkFields}<button class="btn primary" type="submit">保存并${nextStep ? "进入下一步" : "结束"}</button></form>` : checkFields}</section>
+            ${allDone ? '<section class="page-card"><h2>本次运行已完成</h2><p class="page-muted">所有步骤都有已完成记录。可点击上方步骤回看当时的材料、仪器、检查和实际记录。</p></section>' : `<section class="page-card"><h2>记录本步</h2>${step && checkOptions.length ? `<form id="actual-form" class="page-grid"><label>实际内容<textarea name="content" required placeholder="记录实际用量、观察或偏差"></textarea></label><label>步骤状态<select name="step_status"><option value="completed" selected>完成</option><option value="in_progress">进行中</option><option value="blocked">受阻</option></select></label><label>操作人<input name="operator"></label>${checkFields}<button class="btn primary" type="submit">保存并${nextStep ? "进入下一步" : "结束"}</button></form>` : checkFields}</section>`}
             <section class="page-card"><h2>本步记录</h2>${eventRows}</section>
           </div>
           ${plates}
