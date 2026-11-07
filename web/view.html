@@ -23,6 +23,9 @@ main{min-width:0;min-height:0;height:100%;display:flex;flex-direction:column;gap
 .cards>.calc-card{grid-column:span 4}.cards>.table-card,.cards>.note-card{grid-column:span 12}.cards>.card:not(.plate-card):not(.calc-card){grid-column:span 12}.card{overflow:visible}.workspace.compact .wnode{transform:none}.workspace.compact .workspace-head .muted{display:block}.rail-item img{filter:brightness(0) invert(.65);opacity:1}.rail-item.active img{filter:brightness(0) invert(.76) sepia(.24) saturate(3) hue-rotate(195deg)}
 html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-scheme:dark}
 @media(max-width:900px){main{padding:0 12px}.cards{grid-template-columns:repeat(12,minmax(0,1fr))}.cards>.card{grid-column:span 12!important}.workspace{flex-basis:240px;height:240px}.workspace.compact{flex-basis:140px;height:140px}.detail-title{font-size:16px}}
+
+.page-view{flex:1 1 0;min-height:0;overflow:auto;padding:16px 0 24px}.page-view[hidden]{display:none}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:14px}.page-head h1{font-size:22px;margin:0;letter-spacing:-.02em}.page-head p{margin:4px 0 0;color:var(--muted);font-size:12px}.page-tools{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.page-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}.page-card{grid-column:span 12;background:var(--al-surface);border:1px solid var(--al-line);border-radius:10px;padding:14px;min-width:0}.page-card h2{font-size:14px;margin:0 0 10px}.page-card h3{font-size:12px;margin:0 0 8px}.page-card.half{grid-column:span 6}.page-card.third{grid-column:span 4}.page-list{display:grid;gap:7px}.page-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--al-line)}.page-row:first-child{border-top:0;padding-top:0}.page-row strong{font-size:12px}.page-row small{display:block;color:var(--muted);font-size:10px;margin-top:2px}.page-muted{color:var(--muted);font-size:11px}.page-map{display:grid;grid-template-columns:minmax(160px,1fr) 28px minmax(180px,1.2fr) 28px minmax(160px,1fr);gap:8px;align-items:start}.page-col{display:grid;gap:7px}.page-col-title{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}.map-node{border:1px solid var(--al-line);border-radius:9px;background:var(--al-surface-2);padding:9px;min-width:0}.map-node strong{display:block;font-size:12px}.map-node small{display:block;color:var(--muted);font-size:10px;margin-top:2px}.map-arrow{display:grid;place-items:center;color:var(--al-muted);font-size:18px;padding-top:22px}.step-strip{display:flex;gap:8px;overflow:auto;padding:4px 0 12px}.step-chip{flex:none;border:1px solid var(--al-line);background:var(--al-surface);border-radius:9px;padding:8px 10px;color:var(--al-muted);font-size:12px}.step-chip.active{border-color:var(--al-accent);background:var(--al-accent-soft);color:var(--al-ink)}.step-chip small{display:block;font-size:9px;color:var(--al-muted);margin-top:2px}.data-table-wrap{overflow:auto}.page-view table{width:100%;border-collapse:collapse;font-size:11px}.page-view th,.page-view td{text-align:left;border-bottom:1px solid var(--al-line);padding:7px 5px}.page-view th{color:var(--al-muted);font-weight:500}.page-view .empty-state{padding:40px;text-align:center;color:var(--al-muted);border:1px dashed var(--al-line);border-radius:12px}.page-view .empty-state h2{color:var(--al-ink);margin:0 0 6px;font-size:16px}.page-view .btn{height:30px;padding:0 10px;border:1px solid var(--al-line-strong);border-radius:7px;background:var(--al-surface);color:var(--al-ink);font-size:11px;cursor:pointer}.page-view .btn.primary{background:var(--al-accent);border-color:var(--al-accent);color:#fff}.page-view .btn.ghost{background:transparent}
+@media(max-width:850px){.page-card.half,.page-card.third{grid-column:span 12}.page-map{grid-template-columns:1fr}.map-arrow{display:none}}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">
@@ -38,10 +41,10 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
   <div class="brand-row"><div class="brand" title="AsterLab">AL</div><div class="brand-copy"><strong>AsterLab</strong><span>实验工作台</span></div></div>
   <label class="project-picker"><span>项目</span><select aria-label="当前项目"><option>CCK-8 assay</option><option>L929 culture</option><option>Biofilm CV</option></select></label>
   <nav class="rail-nav" aria-label="主导航">
-    <button class="rail-item active" title="实验设计" aria-label="实验设计" onclick="location.href='/workspace?view=designs'"><img src="/icons/plate.svg" alt=""><span>实验设计</span></button>
-    <button class="rail-item" title="Protocol" aria-label="Protocol" onclick="location.href='/workspace?view=protocols'"><img src="/icons/pipette.svg" alt=""><span>Protocol</span></button>
-    <button class="rail-item" title="实验运行" aria-label="实验运行" onclick="location.href='/workspace?view=runs'"><img src="/icons/incubator.svg" alt=""><span>实验运行</span></button>
-    <button class="rail-item" title="资料与工具" aria-label="资料与工具" onclick="location.href='/workspace?view=records'"><img src="/icons/flask.svg" alt=""><span>资料与工具</span></button>
+    <button class="rail-item active" data-page="workflow" title="实验设计" aria-label="实验设计"><img src="/icons/plate.svg" alt=""><span>实验设计</span></button>
+    <button class="rail-item" data-page="protocols" title="Protocol" aria-label="Protocol"><img src="/icons/pipette.svg" alt=""><span>Protocol</span></button>
+    <button class="rail-item" data-page="runs" title="实验运行" aria-label="实验运行"><img src="/icons/incubator.svg" alt=""><span>实验运行</span></button>
+    <button class="rail-item" data-page="tools" title="资料与工具" aria-label="资料与工具"><img src="/icons/flask.svg" alt=""><span>资料与工具</span></button>
   </nav>
   <div class="rail-foot muted">本地工作区<br>SQLite · 127.0.0.1</div>
 </aside>
@@ -83,6 +86,7 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
     </div>
   </section>
   <section class="detail" id="detail"><div class="muted">选择一个步骤查看详情。</div></section>
+  <section id="page-view" class="page-view" hidden></section>
 </main>
 </div>
 <script src="/icons/inline.js"></script>
@@ -98,10 +102,14 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 <script src="/components/flow.js"></script>
 <script src="/components/markdown.js"></script>
 <script src="/components/proposal.js"></script>
+<script src="/pages/design.js"></script>
+<script src="/pages/protocol.js"></script>
+<script src="/pages/run.js"></script>
+<script src="/pages.js"></script>
 <script>
 async function bootLatestView(){
   try{
-    const state=await fetch('/api/state').then(r=>r.json());
+    const state=await window.AsterPageCtx.loadState();
     const views=(state.records||[]).filter(r=>r.kind==='view').sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
     if(!views.length){
       document.getElementById('status').textContent='尚无 View';

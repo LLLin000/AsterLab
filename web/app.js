@@ -238,7 +238,8 @@ function cardActions(child){
   return `<div class="card-actions"><button data-move-up="${esc(child.instance_id)}" title="上移">↑</button><button data-move-down="${esc(child.instance_id)}" title="下移">↓</button><button data-remove="${esc(child.instance_id)}" title="删除">×</button></div>`;
 }
 function unsupportedCard(child,actions,ctx){
-  return `<div class="card" data-instance="${esc(child.instance_id)}"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">Unsupported</div><div class="muted">没有可用的 Renderer：${esc(defName(child))}@${esc(child.definition?.version??"?")}</div></div>`;
+  const definition=`${defName(child)}@${child.definition?.version??"?"}`;
+  return `<div class="card" data-instance="${esc(child.instance_id)}"><h3>${esc(nodeTitle(child))} ${actions}</h3><div class="tag">Unsupported component</div><div class="muted">实例：${esc(child.instance_id)} · 定义：${esc(definition)} · 原因：没有可用的 Renderer。</div></div>`;
 }
 const componentRenderers={
   "content.table@1":{compact:compactMarkup,detail:tableCard},
@@ -386,7 +387,7 @@ function renderDetail(){
     const module=child.workflow?.nodes?.length?null:window.AsterUI?.registry?.[key];
     const renderer=child.workflow?.nodes?.length?componentRenderers["workflow@1"]:rendererFor(child);
     const ctx=moduleContext(child,slot,plates,actions);
-    if(renderer===componentRenderers.unsupported)continue;
+    if(renderer===componentRenderers.unsupported){cards.push(renderer.detail(child,actions,ctx));continue;}
     if(module)cards.push(module.renderDetail(child,ctx));else cards.push(renderer.detail(child,actions,{slot,plates}));
   }
   const refLine=ref.kind==="operation_use"?`Protocol step · ${esc(ref.step?.step_path||"")}`:ref.kind?esc(ref.kind):"未绑定科学对象";

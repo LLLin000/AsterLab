@@ -29,6 +29,10 @@ const ICON_INCUBATOR: &str = include_str!("../web/icons/incubator.svg");
 const ICON_READER: &str = include_str!("../web/icons/reader.svg");
 const ICON_FLASK: &str = include_str!("../web/icons/flask.svg");
 const APP_JS: &str = include_str!("../web/app.js");
+const PAGES_JS: &str = include_str!("../web/pages.js");
+const DESIGN_PAGE_JS: &str = include_str!("../web/pages/design.js");
+const PROTOCOL_PAGE_JS: &str = include_str!("../web/pages/protocol.js");
+const RUN_PAGE_JS: &str = include_str!("../web/pages/run.js");
 const MARKED_JS: &str = include_str!("../web/vendor/marked.min.js");
 const PURIFY_JS: &str = include_str!("../web/vendor/purify.min.js");
 const DAGRE_JS: &str = include_str!("../web/vendor/dagre.min.js");
@@ -230,6 +234,16 @@ async fn component_asset(Path(name): Path<String>) -> Response {
     };
     ([(axum::http::header::CONTENT_TYPE, content_type)], body).into_response()
 }
+async fn page_asset(Path(name): Path<String>) -> Response {
+    let body = match name.as_str() {
+        "design.js" => DESIGN_PAGE_JS,
+        "protocol.js" => PROTOCOL_PAGE_JS,
+        "run.js" => RUN_PAGE_JS,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    ([(axum::http::header::CONTENT_TYPE, "text/javascript")], body).into_response()
+}
+
 
 async fn layout_js() -> Response {
     (
@@ -259,6 +273,13 @@ async fn app_js() -> Response {
     (
         [(axum::http::header::CONTENT_TYPE, "text/javascript")],
         APP_JS,
+    )
+        .into_response()
+}
+async fn pages_js() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+        PAGES_JS,
     )
         .into_response()
 }
@@ -1070,11 +1091,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/design-preview", get(design_preview_page))
         .route("/icons/{name}", get(icon))
         .route("/app.js", get(app_js))
+        .route("/pages.js", get(pages_js))
         .route("/vendor/marked.js", get(marked_js))
         .route("/vendor/purify.js", get(purify_js))
         .route("/vendor/dagre.js", get(dagre_js))
         .route("/layout.js", get(layout_js))
         .route("/components/{name}", get(component_asset))
+        .route("/pages/{name}", get(page_asset))
         .route("/icons/inline.js", get(icon_inline_js))
         .route("/vendor/tabler/tabler.min.css", get(tabler_css))
         .route("/vendor/tabler/tabler.min.js", get(tabler_js))

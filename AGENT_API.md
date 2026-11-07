@@ -97,6 +97,8 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 多检测设计可在同一 `design` 中使用以下固定字段；未提供数组可省略，表示尚未录入：
 
+- `research_question`（可选）：独立的研究问题；`objective` 仍表示目标/目的。旧记录无此字段时回退为空。
+- `factors[]`（可选）：`{name, levels[]}` 的结构化因素与水平；名称非空且唯一，单因素最多 50 个水平。它是设计语义，不从组别文本推断。
 - `assays[]`：每项检测有稳定 `id`、`title`、`endpoint`、`method`、`unit`、自己的 `timepoints[]`、可选 `timepoint_timing[]`、`group_ids[]`、`group_names[]`（兼容显示字段）、`control_group_ids[]`、`time_anchor_event`、`timepoint_relation`、`container_type` / `container_format`、`protocol_version_id` 和 `controls[]`。`timepoint_relation` 只能是 `same_experimental_unit_repeated`、`same_physical_sample_repeated`、`independent_sample_per_timepoint`、`unknown` 或 `null`。每项检测自己的时间、适用组、对照和 Protocol 不从其他检测继承。旧字段 `sample_use_policy` 只为兼容旧输入保留，不写入规范化输出；`new_per_timepoint` 可迁移为独立取样，含糊的 `same_sample_repeated` 会迁移为 `unknown`，不会擅自解释成重复测量同一实体样本。旧字段中的 `split_from_assay` / `sequential_after_assay` 也不再作为时间关系使用。当前 `controls[]` 是带来源的补充描述文本，不参与孔位/材料数量计算。
 - `sample_allocations[]`：内部“组别 → 检测/计划产物”的分配关系。新记录使用 `timepoint_relation` 表达时间点关系，使用 `source_relation` 表达跨检测来源（`not_applicable`、`unknown`、`split_from_assay`、`sequential_after_assay`）；旧字段 `relation` 只兼容旧输入，不作为新记录的时间点关系依据，规范化输出不包含该字段。分样和顺序使用须提供 `source_assay_id`。`physical_slots_per_group` 记录每组的计划物理位置数，不等同实体样本数或独立 n；physical_slots_scope 说明该数按 per_timepoint（每个时间点）、whole_assay_unique_positions（全检测唯一位置）或 unknown（范围待确认）解释。旧记录有位置数但未给范围时规范化为 unknown，数字保留。时间点关系不推断位置范围；设计页只显示按组录入的数量与范围，不汇总成跨组/跨时间布局总数，实际坐标与总布局由铺板工具映射确认。没有明确样本分配依据时，实体样本数不从 n 或时间点推算。多个分配引用同一个 `planned_output_id` 才表示计划共用一次制备。
 - `planned_outputs[]`：每项计划产物有稳定 `id`、`title`、制备 `protocol_version_id`、`root_bindings[]` 参数绑定和可选 `evidence_id`。相同产物 ID 是多项检测计划共用同一份制备的明确表达；相同 Protocol 版本本身不表示共用。

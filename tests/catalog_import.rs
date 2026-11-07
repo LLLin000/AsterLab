@@ -1195,3 +1195,97 @@ fn custom_labware_profile_is_loaded_for_design_validation() {
         "labware.local_96"
     );
 }
+#[test]
+fn design_factors_and_research_question_round_trip_with_legacy_defaults() {
+    let cli = Cli::new("design-factors");
+    let project = cli.run("project.create", &json!({"name":"design factors"}))["result"]["record"]
+        ["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let created = cli.run(
+        "design.create",
+        &json!({
+            "project_id": project,
+            "design": {
+                "title": "Factor design",
+                "objective": "Objective is retained",
+                "research_question": "Does dose affect response?",
+                "factors": [{"name":"Dose","levels":["low","high"]}]
+            }
+        }),
+    );
+    let design_id = created["result"]["design"]["id"].as_str().unwrap();
+    assert_eq!(created["result"]["design"]["data"]["objective"], "Objective is retained");
+    assert_eq!(created["result"]["design"]["data"]["research_question"], "Does dose affect response?");
+    assert_eq!(created["result"]["version"]["data"]["snapshot"]["factors"][0]["levels"][1], "high");
+
+    let fetched = cli.run("design.get", &json!({"id":design_id}));
+    assert_eq!(fetched["result"]["design"]["data"]["factors"][0]["name"], "Dose");
+    let map = cli.run("design.map", &json!({"id":design_id}));
+    assert_eq!(map["result"]["objective"], "Objective is retained");
+    assert_eq!(map["result"]["research_question"], "Does dose affect response?");
+    assert_eq!(map["result"]["factors"][0]["levels"], json!(["low","high"]));
+    let revised = cli.run(
+        "design.revise",
+        &json!({
+            "id":design_id,
+            "expected_revision":1,
+            "changes":{
+                "research_question":"Does duration affect response?",
+                "factors":[{"name":"Duration","levels":["short","long"]}]
+            }
+        }),
+    );
+    assert_eq!(
+        revised["result"]["version"]["data"]["snapshot"]["research_question"],
+        "Does duration affect response?"
+    );
+    assert_eq!(
+        revised["result"]["version"]["data"]["snapshot"]["factors"][0]["name"],
+        "Duration"
+    );
+
+    let legacy = cli.run(
+        "design.create",
+        &json!({"project_id":project,"design":{"title":"Legacy"}}),
+    );
+    assert_eq!(legacy["result"]["design"]["data"]["research_question"], Value::Null);
+    assert_eq!(legacy["result"]["design"]["data"]["factors"], json!([]));
+}
+
+#[test]
+fn design_rejects_empty_or_duplicate_factors() {
+    let cli = Cli::new("invalid-design-factors");
+    let project = cli.run("project.create", &json!({"name":"invalid factors"}))["result"]["record"]
+        ["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let error = cli.run_error(
+        "design.create",
+        &json!({
+            "project_id": project,
+            "design": {
+                "title": "Invalid",
+                "factors": [{"name":"Dose","levels":[]}]
+            }
+        }),
+    );
+    assert_eq!(error["error"]["code"], "INVALID_INPUT");
+
+    let error = cli.run_error(
+        "design.create",
+        &json!({
+            "project_id": project,
+            "design": {
+                "title": "Duplicate",
+                "factors": [
+                    {"name":"Dose","levels":["low"]},
+                    {"name":" dose ","levels":["high"]}
+                ]
+            }
+        }),
+    );
+    assert_eq!(error["error"]["code"], "INVALID_INPUT");
+}

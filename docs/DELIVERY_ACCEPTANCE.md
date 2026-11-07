@@ -5,8 +5,8 @@ A checked item requires executable evidence, not a static prototype.
 | # | Gate | State | Evidence |
 |---|---|---|---|
 | 1 | Unzip and launch without Cargo/Node | PASS | package extracted; health + ASTERLAB assets |
-| 2 | Create a complete design in the UI | PASS | `smoke.cjs` creates a 4-group/3-timepoint design and edits it through the UI |
-| 3 | Edit Protocol and inspect versions/instructions | PASS | `smoke.cjs` creates a block, previews bindings, creates a Protocol and a new version |
+| 2 | Create a complete design in the UI | PARTIAL | read-only Design Map now exists; editing still routes to the old design modal |
+| 3 | Edit Protocol and inspect versions/instructions | PARTIAL | read-only Protocol page exists; editing still routes to old workspace |
 | 4 | Operate Workflow components | PASS | `smoke.cjs` View/component UI |
 | 5 | Human review and trusted Run creation | PASS | UI run form header + CLI trusted-writer + HTTP 403 negative |
 | 6 | Record and reread raw/derived results | PASS | `execution-acceptance.cjs` + UI check/actual parameter |
@@ -30,5 +30,5 @@ node tests/smoke.cjs
 node tests/execution-acceptance.cjs
 node tests/backup-restore.cjs
 node tests/e2e-three-protocols.cjs
-node tests/cli-coverage.cjs   # open gap
+node tests/cli-coverage.cjs
 ```

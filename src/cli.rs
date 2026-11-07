@@ -292,6 +292,10 @@ struct DesignFields {
     #[serde(default)]
     objective: String,
     #[serde(default)]
+    research_question: Option<String>,
+    #[serde(default)]
+    factors: Vec<asterlab_core::design_map::DesignFactor>,
+    #[serde(default)]
     experimental_unit: String,
     #[serde(default)]
     group_specs: Vec<GroupSpec>,
@@ -354,6 +358,8 @@ struct DesignCreate {
 struct DesignChanges {
     title: Option<String>,
     objective: Option<String>,
+    research_question: Option<Option<String>>,
+    factors: Option<Vec<asterlab_core::design_map::DesignFactor>>,
     experimental_unit: Option<String>,
     group_specs: Option<Vec<GroupSpec>>,
     timepoints: Option<Vec<String>>,
@@ -4163,6 +4169,30 @@ fn validate_design_with_registry(
             return Err(CliError::input(format!("{label}不能超过 {max} 个字符")));
         }
     }
+    if let Some(question) = &d.research_question {
+        if question.chars().count() > 5000 {
+            return Err(CliError::input("研究问题不能超过 5000 个字符"));
+        }
+    }
+    if d.factors.len() > 50 {
+        return Err(CliError::input("因素数量最多 50 个"));
+    }
+    let mut factor_names = std::collections::HashSet::new();
+    for factor in &d.factors {
+        check_text(&factor.name, "因素名称", 120)?;
+        if !factor_names.insert(factor.name.trim().to_lowercase()) {
+            return Err(CliError::input(format!("因素名称重复：{}", factor.name)));
+        }
+        if factor.levels.is_empty() {
+            return Err(CliError::input("因素必须至少有一个水平"));
+        }
+        if factor.levels.len() > 50 {
+            return Err(CliError::input("每个因素的水平数量最多 50 个"));
+        }
+        for level in &factor.levels {
+            check_text(level, "因素水平", 500)?;
+        }
+    }
     validate_groups(&d.group_specs)?;
     d.container_plan
         .validate(registry)
@@ -4652,6 +4682,8 @@ fn merge_design(base: &mut Value, c: &DesignChanges) {
     }
     put!(title);
     put!(objective);
+    put!(research_question);
+    put!(factors);
     put!(experimental_unit);
     put!(group_specs);
     put!(timepoints);
@@ -6024,7 +6056,7 @@ fn result_schema(tool: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["design","version"],"properties":{"design":record_schema("design"),"version":record_schema("design_version")}})
         }
         "design.map" => {
-            json!({"type":"object","additionalProperties":false,"required":["design_id","revision","title","objective","experimental_unit","groups","assays","sample_links","planned_outputs","conflicts","unresolved"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"title":{"type":"string"},"objective":{"type":"string"},"experimental_unit":{"type":["string","null"]},"groups":{"type":"array","items":{"type":"object","additionalProperties":true}},"assays":{"type":"array","items":{"type":"object","additionalProperties":true}},"sample_links":{"type":"array","items":{"type":"object","additionalProperties":true}},"planned_outputs":{"type":"array","items":{"type":"object","additionalProperties":true}},"conflicts":{"type":"array","items":{"type":"object","additionalProperties":true}},"unresolved":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
+            json!({"type":"object","additionalProperties":false,"required":["design_id","revision","title","objective","research_question","factors","experimental_unit","groups","assays","sample_links","planned_outputs","conflicts","unresolved"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"title":{"type":"string"},"objective":{"type":"string"},"research_question":{"type":["string","null"]},"factors":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name","levels"],"properties":{"name":{"type":"string"},"levels":{"type":"array","items":{"type":"string"}}}}},"experimental_unit":{"type":["string","null"]},"groups":{"type":"array","items":{"type":"object","additionalProperties":true}},"assays":{"type":"array","items":{"type":"object","additionalProperties":true}},"sample_links":{"type":"array","items":{"type":"object","additionalProperties":true}},"planned_outputs":{"type":"array","items":{"type":"object","additionalProperties":true}},"conflicts":{"type":"array","items":{"type":"object","additionalProperties":true}},"unresolved":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
         }
         "design.revise" => record_and_version("design"),
         "run.list" => arr("run"),
@@ -6266,6 +6298,8 @@ fn design_schema() -> Value {
         "type":"object","additionalProperties":false,"required":["title"],
         "properties":{
         "title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S","description":"简短识别名称。"},
+            "research_question":{"type":["string","null"],"maxLength":5000,"description":"研究者明确提出的研究问题；未知时留空。"},
+            "factors":{"type":"array","maxItems":50,"items":{"type":"object","additionalProperties":false,"required":["name","levels"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"levels":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S"}}}}},
             "objective":{"type":"string","maxLength":5000,"description":"本实验实际要回答的研究问题；未知时留空。"},
             "experimental_unit":{"type":"string","maxLength":500,"description":"独立观测单位的明确定义；必须由研究者确定。"},
             "group_specs":{"type":"array","maxItems":100,"description":"已定义实验组。id 是稳定引用；independent_n 是每组独立实验单位数，不能用技术重复代替。","items":{"type":"object","additionalProperties":false,"required":["name"],"properties":{

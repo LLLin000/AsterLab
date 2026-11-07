@@ -10,6 +10,10 @@ use serde_json::{json, Value};
 pub struct DesignMapContent {
     pub title: String,
     pub objective: String,
+    #[serde(default)]
+    pub research_question: Option<String>,
+    #[serde(default)]
+    pub factors: Vec<DesignFactor>,
     pub experimental_unit: Option<String>,
     pub groups: Vec<DesignGroup>,
     pub assays: Vec<DesignAssay>,
@@ -17,6 +21,12 @@ pub struct DesignMapContent {
     pub planned_outputs: Vec<PlannedOutputSummary>,
     pub conflicts: Vec<ConflictSummary>,
     pub unresolved: Vec<ValidationIssueSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DesignFactor {
+    pub name: String,
+    pub levels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -101,7 +111,6 @@ pub struct ValidationIssueSummary {
     pub affects: Vec<String>,
     pub source: String,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesignMapError(pub String);
 
@@ -359,6 +368,16 @@ pub fn build_current(
         revision,
         content: DesignMapContent {
             title: text(&data["title"]),
+            research_question: opt_text(&data["research_question"]),
+            factors: data["factors"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|factor| DesignFactor {
+                    name: text(&factor["name"]),
+                    levels: string_list(&factor["levels"]),
+                })
+                .collect(),
             objective: text(&data["objective"]),
             experimental_unit,
             groups,
@@ -380,6 +399,8 @@ impl CurrentDesignMap {
             "revision": self.revision,
             "title": c.title,
             "objective": c.objective,
+            "research_question": c.research_question,
+            "factors": c.factors,
             "experimental_unit": c.experimental_unit,
             "groups": c.groups,
             "assays": c.assays,
@@ -436,6 +457,8 @@ mod tests {
     fn missing_values_stay_unresolved() {
         let map = build_current("d1", 1, &sample()).unwrap();
         assert_eq!(map.content.groups.len(), 2);
+        assert_eq!(map.content.research_question, None);
+        assert!(map.content.factors.is_empty());
         assert_eq!(map.content.groups[0].independent_n, None);
         assert!(map.content.unresolved.iter().any(|x| x.key == "experimental_unit"));
         assert!(map.content.unresolved.iter().any(|x| x.key == "groups[0].independent_n"));
