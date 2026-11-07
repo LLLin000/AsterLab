@@ -98,6 +98,42 @@
 .timepoint-timing-row{min-width:0}
 @media(max-width:520px){.timepoint-timing-row{grid-template-columns:minmax(0,1fr) minmax(62px,.8fr)}.timepoint-timing-row strong{grid-column:1/-1}}
 .map-summary{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.map-section{margin:14px 0}.map-section h3{font-size:13px;margin:0 0 7px}.map-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.map-group{border:1px solid var(--line);border-radius:9px;padding:8px;background:var(--panel2);min-width:0}.map-group strong{display:block;font-size:12px}.map-group span,.map-group small{display:block;color:var(--muted);font-size:11px;margin-top:2px}.map-assays{display:grid;gap:7px}.map-assay{border:1px solid var(--line);border-radius:9px;padding:9px;background:var(--panel2)}.map-assay-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.map-assay-head strong{font-size:13px}.map-assay-meta{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}.map-unresolved{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:8px;margin-top:6px;background:var(--panel)}.map-unresolved strong{display:block;font-size:12px}.map-unresolved small{display:block;color:var(--muted);font-size:11px;margin-top:3px}.map-empty{color:var(--muted);font-size:12px}.map-modal .modal{max-width:860px}@media(max-width:650px){.map-groups{grid-template-columns:1fr}.map-assay-head{flex-direction:column}}
+
+/* Design-shell integration: 56px rail and compact top bar from the confirmed prototype. */
+.shell{grid-template-columns:56px minmax(0,1fr)}
+.side{width:56px;min-width:56px;padding:12px 0;gap:8px;align-items:center;background:#0d0f12;border-right-color:#262a30}
+.side .brand{justify-content:center;padding:0;margin:0 0 10px}
+.side .brand>span:last-child{display:none}
+.side .nav-section{width:100%;display:block;margin:0}
+.side .nav{display:flex;flex-direction:column;align-items:center;gap:4px;overflow:visible}
+.side .nav-label,.side .side-foot{display:none!important}
+.side .nav button{width:38px;height:38px;padding:0;border:0;border-radius:8px;display:grid;place-items:center;font-size:0;color:#b3b6c4;background:transparent;box-shadow:none}
+.side .nav button:hover{background:rgba(255,255,255,.07);color:#fff;transform:none}
+.side .nav button.active{background:rgba(170,156,255,.15);color:#c4baff;box-shadow:inset 2px 0 #aa9cff}
+.side .nav .ico{width:auto;font-size:17px;line-height:1;color:inherit}
+.side .brand-mark{width:28px;height:28px}
+.main{padding:0 24px}
+.top{height:56px;flex:0 0 56px;align-items:center;padding:0;border-bottom:1px solid var(--line);margin-bottom:0}
+.top h1{font-size:14px;line-height:1.2;margin:0;font-weight:650;letter-spacing:-.01em}
+.top p{font-size:10px;margin-top:2px}
+.top-actions{gap:8px}
+.top-actions .btn{height:32px;min-height:32px;padding:0 11px;border-radius:7px}
+#content{padding-top:16px}
+@media(max-width:850px){
+ .shell{grid-template-columns:1fr}
+ .side{width:auto;min-width:0;display:block;padding:8px 10px;border-right:0;border-bottom:1px solid var(--line)}
+ .side .brand{justify-content:flex-start;margin:0;padding:0 5px 7px}
+ .side .brand>span:last-child{display:block}
+ .side .brand>span:last-child{font-size:12px}
+ .side .nav-section{display:flex!important;gap:4px}
+ .side .nav{flex-direction:row;flex-wrap:nowrap;overflow:auto;justify-content:flex-start}
+ .side .nav button{width:auto;height:32px;padding:0 8px;font-size:12px}
+ .side .nav .ico{font-size:14px;margin-right:4px}
+ .top{height:auto;flex-basis:auto;padding:10px 0}
+}
+
+[data-theme="light"]{color-scheme:light;--bg:#f5f6f8;--panel:#fff;--panel2:#f0f2f5;--line:#dfe3e8;--text:#202630;--muted:#707987;--accent:#5d53df;--accent-soft:#eeedff;--green:#197b55;--amber:#9a6614;--red:#a33d3d;--shadow:0 12px 34px rgba(24,29,49,.07)}
+[data-theme="dark"]{color-scheme:dark;--bg:#111318;--panel:#191b22;--panel2:#21232c;--line:#30323c;--text:#ececf3;--muted:#a3a4b1;--accent:#aa9cff;--accent-soft:#302c4d;--green:#63c69a;--amber:#f1c36b;--red:#ff9696;--shadow:0 12px 34px rgba(0,0,0,.28)}
 </style></head>
 <body>
 <div class="shell">
@@ -127,7 +163,8 @@
 <script>
 (function(){
 "use strict";
-(function(){var t=localStorage.getItem("asterlab.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t})();
+document.addEventListener("DOMContentLoaded",function(){document.querySelectorAll(".side .nav button").forEach(function(b){if(!b.title)b.title=b.textContent.trim()})});
+(function(){var t=localStorage.getItem("asterlab.theme")||"dark";document.documentElement.dataset.theme=t})();
 var records=[], view="home", activeProject="", calcMode="dilution", weekAnchor=new Date(), recordQuery="", recordRunFilter="", recordFrom="", recordTo="", operationRunId="", operationScopeKey="", operationStepPath="", operationTimepoint="", operationPlateId="";
 var titles={projects:["项目管理","按项目组织设计、运行、Protocol 和资料。"],home:["工作台","把实验计划、执行和证据放在同一条可追溯链上。"],designs:["实验设计","用实验单位、分组、时间点与检测终点画清执行路径。"],calendar:["日历与任务","排期是计划信息；完成状态不自动代表实验结果。"],runs:["实验运行","每次实际执行都固定关联实验设计版本和 Protocol 版本。"],plates:["铺板布局","只建立你选择的板型与孔位映射；不预置组别或处理条件。"],protocols:["Protocol","Protocol 以不可覆盖的版本保存，运行引用具体版本。"],records:["实验记录","保留事件发生时间与系统录入时间，缺失时间不会补造。"],tables:["资料表","按你定义的列组织样本、材料或其他实验资料。"],formulas:["公式库","保存可复用公式与变量单位定义；公式需由研究者维护。"],calculators:["计算器","只计算你输入的量，不替你选择实验条件。"]};
 function el(id){return document.getElementById(id)}
