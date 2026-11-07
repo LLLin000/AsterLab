@@ -1242,13 +1242,18 @@ pub(crate) fn build_run_manifests(
         }
     }
     if let Some(version_id) = global_protocol_version_id.filter(|id| !id.is_empty()) {
-        protocol_manifest.push(protocol_manifest_entry(
-            db,
-            version_id,
-            project_id,
-            Value::Null,
-            json!("未分配到检测的全局 Protocol"),
-        )?);
+        let already_manifested = protocol_manifest.iter().any(|entry| {
+            entry["protocol_version_id"].as_str() == Some(version_id)
+        });
+        if !already_manifested {
+            protocol_manifest.push(protocol_manifest_entry(
+                db,
+                version_id,
+                project_id,
+                Value::Null,
+                json!("未分配到检测的全局 Protocol"),
+            )?);
+        }
     }
 
     let mut material_manifest = Vec::new();

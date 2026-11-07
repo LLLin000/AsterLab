@@ -85,9 +85,23 @@
     const pending = (value.evidence_conflicts || []).filter(item => !["resolved", "confirmed"].includes(item.status)).length +
       (value.unresolved_questions || value.pending_questions || []).length +
       assays.filter(assay => assay.timepoint_relation === "unknown" || assay.timepoint_relation === "unresolved").length;
-    box.innerHTML = `<strong>${esc(title(design))}</strong><span>${groups.length} 组</span><span>${esc(fmt(timepoints) || "无时间点")}</span><span>${esc(fmt(assays.map(assay => [assay.title, assay.endpoint].filter(Boolean).join(" / ")).filter(Boolean)) || "无检测/终点")}</span><span>Protocol ${esc(fmt(protocols.map(protocolTitle)) || "未关联")}</span><span>${pending} 项待确认</span><button class="btn" id="editWorkflowDesign" type="button">编辑本次安排</button>`;
+    box.innerHTML = `<strong>${esc(title(design))}</strong><span>${groups.length} 组</span><span>${esc(fmt(timepoints) || "无时间点")}</span><span>${esc(fmt(assays.map(assay => [assay.title, assay.endpoint].filter(Boolean).join(" / ")).filter(Boolean)) || "无检测/终点")}</span><span>Protocol ${esc(fmt(protocols.map(protocolTitle)) || "未关联")}</span><span>${pending} 项待确认</span><button class="btn" id="editWorkflowDesign" type="button">编辑本次安排</button><button class="btn primary" id="startWorkflowRun" type="button">开始运行</button>`;
     box.hidden = false;
     box.querySelector("#editWorkflowDesign").onclick = () => openDesignEditor(design);
+    box.querySelector("#startWorkflowRun").onclick = async () => {
+      const button = box.querySelector("#startWorkflowRun");
+      button.disabled = true; button.textContent = "创建运行…";
+      try {
+        const response = await fetch("/api/records", {method: "POST", headers: {"content-type": "application/json", "X-AsterLab-Human-Confirmed": "1"}, body: JSON.stringify({kind: "run", project_id: design.project_id, parent_id: design.id, data: {title: `${title(design)} 执行`}})});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        const runId = result.record?.id || result.id;
+        location.href = `/?page=runs&project=${encodeURIComponent(design.project_id)}&run=${encodeURIComponent(runId)}`;
+      } catch (error) {
+        button.disabled = false; button.textContent = "开始运行";
+        box.insertAdjacentHTML("beforeend", `<span class="summary-error">${esc(error.message || error)}</span>`);
+      }
+    };
   }
   function openDesignEditor(design) {
     const existing = $("designInlineEdit"); if (existing) existing.remove();
