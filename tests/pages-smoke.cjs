@@ -75,7 +75,13 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert.equal(await page.locator(".cmp-markdown").count(),1);
   assert((await page.locator(".cmp-table").count()) >= 1);
   assert.equal(await page.locator(".cmp-calculator").count(),1);
-  assert.equal(await page.locator(".cmp-flow").count(),0);
+  assert((await page.locator(".cards").innerText()).includes("嵌套流程"));
+  await page.locator(".cards .cmp-table").first().click();
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator("#proposal-panel").isVisible(),true);
+  await page.mouse.click(600,120);
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator("#proposal-panel").isVisible(),false);
   assert.deepEqual(errors,[]);
   await browser.close();server.kill();console.log(JSON.stringify({ok:true,rail:4,pages:["protocols","runs","tools"],errors}));
 })().catch(error=>{console.error(error);process.exitCode=1});

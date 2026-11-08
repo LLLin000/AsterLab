@@ -49,7 +49,7 @@ Step Detail 从单列全宽改为桌面两列:
 - `tool.calculator`(无孔板时的空状态)
 - 空 `workflow` 子流程
 
-并断言这些组件在点击步骤后渲染,且不产生 JS 错误。空 workflow 曾经因为调用不存在的 `module.renderDetail` 导致详情区整体崩溃;已改为回退到 `workflowCard`。
+并断言这些组件在点击步骤后渲染,且不产生 JS 错误;同时验证点击组件卡片打开 Proposal 后,点击外部会关闭。空 workflow 曾经因为调用不存在的 `module.renderDetail` 导致详情区整体崩溃;已改为回退到 `workflowCard`。
 
 ## 尚未覆盖
 
