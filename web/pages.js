@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const pageNames = ["workflow", "projects", "protocols", "runs", "records", "tools"];
+  const pageNames = ["workflow", "projects", "protocols", "runs", "tools"];
   let state;
   let stateRequest;
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;"}[char]));
@@ -244,81 +244,6 @@
 
   window.AsterRecordSchemas = { forAssay: recordSchemaFor };
 
-  function structuredRecordRows(events) {
-    return events.flatMap(event => {
-      const value = data(event), run = one(event.parent_id);
-      const measurements = (value.measurements || []).map(item => ({...item, kind:"measurement"}));
-      const readouts = (value.readouts || []).map(item => ({...item, kind:"readout"}));
-      return [...measurements, ...readouts].map(item => ({
-        run: run ? title(run) : "未知运行",
-        assay: value.assay_id || "—",
-        timepoint: value.timepoint || "—",
-        sample: item.sample_id || "—",
-        endpoint: item.endpoint || "—",
-        value: item.value ?? item.qualifier ?? "—",
-        unit: item.unit || ""
-      }));
-    });
-  }
-
-  function renderRecords() {
-    const events = records("execution_event"), notes = records("note"), runs = records("run");
-    const params = new URLSearchParams(location.search);
-    const run = runs.find(item => item.id === params.get("record-run")) || runs[0];
-    const design = run?.parent_id ? one(run.parent_id) : null;
-    const assays = design ? (data(design).assays || []) : [];
-    const assay = assays.find(item => item.id === params.get("record-assay")) || assays[0];
-    const schema = recordSchemaFor(assay);
-    const manifest = (data(run).protocol_manifest || []).find(item => item.assay_id === assay?.id);
-    const steps = manifest?.steps || [];
-    const step = steps.find(item => /read|measure|image|Cq|OD|检测|成像|读|记录/i.test(item.title || "")) || steps[steps.length - 1];
-    const timepoints = assay?.timepoints || [];
-    const structured = structuredRecordRows(events).filter(row => !run || row.run === title(run));
-    const columns = schema.columns.map(column => `<th>${esc(column.label)}${column.unit ? `<small>${esc(column.unit)}</small>` : ""}</th>`).join("");
-    const rowMarkup = schema.columns.map(column => `<td><input data-record-field="${esc(column.key)}" type="${esc(column.type || "text")}" step="${esc(column.step || "any")}" placeholder="${esc(column.placeholder || "")}" aria-label="${esc(column.label)}"></td>`).join("");
-    $("page-view").innerHTML = header("实验记录", "按实验设计中的 Assay 记录结构化读数；原始事件仍保留。") +
-      `<div class="page-grid">
-        <section class="page-card"><h2>记录入口</h2>
-          <div class="record-controls">
-            <label>实验运行<select id="record-run">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === run?.id ? "selected" : ""}>${esc(title(item))}</option>`).join("") || '<option value="">尚无运行</option>'}</select></label>
-            <label>检测<select id="record-assay">${assays.map(item => `<option value="${esc(item.id)}" ${item.id === assay?.id ? "selected" : ""}>${esc(item.title)}</option>`).join("") || '<option value="">尚无检测</option>'}</select></label>
-            <label>时间点<select id="record-timepoint"><option value="">不指定</option>${timepoints.map(item => `<option value="${esc(item)}">${esc(item)}</option>`).join("")}</select></label>
-          </div>
-          <div class="record-schema-head"><strong>${esc(schema.title)}</strong><span>${esc(step ? `记录到 ${step.title}` : "未找到可关联步骤")}</span></div>
-          <div class="data-table-wrap"><table class="record-entry-table"><thead><tr>${columns}</tr></thead><tbody id="record-rows"><tr>${rowMarkup}</tr></tbody></table></div>
-          <div class="record-actions"><button class="btn" id="add-record-row" type="button">+ 添加行</button><button class="btn primary" id="save-record" type="button" onclick="window.__saveRecord?.()" ${step ? "" : "disabled"}>保存结构化记录</button><span id="record-status" class="page-muted"></span></div>
-        </section>
-        <section class="page-card"><h2>结构化记录</h2>${structured.length ? `<div class="data-table-wrap"><table><thead><tr><th>运行</th><th>检测</th><th>时间点</th><th>样本 / 孔位</th><th>终点</th><th>数值</th><th>单位</th></tr></thead><tbody>${structured.map(row => `<tr><td>${esc(row.run)}</td><td>${esc(row.assay)}</td><td>${esc(row.timepoint)}</td><td>${esc(row.sample)}</td><td>${esc(row.endpoint)}</td><td>${esc(row.value)}</td><td>${esc(row.unit)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="page-muted">尚无结构化读数。'}</section>
-        <section class="page-card"><details><summary>原始事件（${events.length}）</summary>${events.length ? `<div class="data-table-wrap"><table><thead><tr><th>运行</th><th>类型</th><th>内容</th><th>时间</th></tr></thead><tbody>${events.map(event => `<tr><td>${esc(title(one(event.parent_id)))}</td><td>${esc(data(event).event_type)}</td><td>${esc(data(event).content)}</td><td>${esc(data(event).occurred_at || "")}</td></tr>`).join("")}</tbody></table></div>` : '<div class="page-muted">尚无执行事件。</div>'}</details></section>
-        <section class="page-card"><h2>补充记录</h2>${notes.length ? notes.map(note => `<div class="page-row"><div><strong>${esc(data(note).content)}</strong><small>${esc(note.created_at || "")}</small></div></div>`).join("") : '<div class="page-muted">尚无补充记录。</div>'}</section>
-      </div>`;
-    const updateSelection = (key, value) => {
-      const url = new URL(location.href);
-      url.searchParams.set(key, value);
-      window.history.replaceState(null, "", url);
-      renderRecords();
-    };
-    $("record-run")?.addEventListener("change", event => { const url = new URL(location.href); url.searchParams.set("record-run", event.target.value); url.searchParams.delete("record-assay"); history.replaceState(null, "", url); renderRecords(); });
-    $("record-assay")?.addEventListener("change", event => updateSelection("record-assay", event.target.value));
-    $("add-record-row")?.addEventListener("click", () => {
-      const body = $("record-rows");
-      body.insertAdjacentHTML("beforeend", `<tr>${rowMarkup}</tr>`);
-    });
-    window.__saveRecord = async () => {
-      const status = $("record-status"); try {
-      const rows = [...document.querySelectorAll("#record-rows tr")].map(tr => Object.fromEntries([...tr.querySelectorAll("[data-record-field]")].map(input => [input.dataset.recordField, input.value.trim()])));
-      const measurements = rows.flatMap(row => schema.map(row));
-      if (!measurements.length) { status.textContent = "至少填写一行有效数值。"; return; }
-      if (!run || !assay || !step) { status.textContent = "缺少运行、检测或可关联步骤。"; return; }
-      status.textContent = "保存中…";
-      const payload = {kind:"execution_event",parent_id:run.id,project_id:run.project_id,data:{event_type:"measurement",content:`结构化记录 · ${assay.title}`,protocol_step_path:step.path,protocol_version_id:manifest.protocol_version_id,assay_id:assay.id,timepoint:$("record-timepoint")?.value || null,measurements}};
-      const response = await fetch("/api/records",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
-      if (!response.ok) { const body = await response.json().catch(() => ({})); status.textContent = body.error || `保存失败（${response.status}）`; return; }
-      await ctx.reloadState();
-      renderRecords();
-      } catch (error) { if (status) status.textContent = error.message || String(error); console.error(error); }
-    };
-  }
   function resourceRows(items, kind) {
     return items.length ? items.map(record => {
       const value = data(record);
@@ -406,7 +331,7 @@
           <button class="btn primary" onclick="AsterPageCtx.setPage('workflow')">实验设计</button>
           <button class="btn" onclick="AsterPageCtx.setPage('protocols')">Protocol</button>
           <button class="btn" onclick="AsterPageCtx.setPage('runs')">实验运行</button>
-          <button class="btn" onclick="AsterPageCtx.setPage('records')">记录实验结果</button>
+          <button class="btn" onclick="AsterPageCtx.setPage('runs')">进入实验运行记录</button>
         </div><p class="page-muted">计算器在下方“计算器与布局”中打开，不再跳转旧页面。</p></section>
         ${hasSavedResources ? `<section class="page-card"><h2>已保存资料</h2>
           <h3>资料表</h3><div class="page-list">${resourceRows(tables, "library_table")}</div>
@@ -418,7 +343,7 @@
         <section class="page-card"><h2>计算器与布局</h2><div class="page-list">${(window.AsterResources?.tools || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div>${item.view === "calculators" ? `<button class="btn" data-calculator="${esc(item.mode || "dilution")}">打开</button>` : `<button class="btn" disabled title="旧版工具页已下线，待迁移">暂不可用</button>`}</div>`).join("") || '<div class="page-muted">尚无工具目录。</div>'}</div></section>
         <section class="page-card"><h2>材料与配方 · ${(window.AsterResources?.materials || []).length}</h2><div class="resource-grid material-grid">${(window.AsterResources?.materials || []).map(item => resourceCard(item, "材料")).join("") || '<div class="page-muted">尚无材料目录。</div>'}</div></section>
         <section class="page-card"><h2>数据与项目管理</h2><div class="page-tools">
-          <button class="btn" onclick="AsterPageCtx.setPage('records')">查看实验记录</button>
+          <button class="btn" onclick="AsterPageCtx.setPage('runs')">查看实验记录</button>
           <button class="btn" onclick="AsterPageCtx.setPage('projects')">查看项目</button>
           <button class="btn" onclick="AsterPageCtx.exportState()">导出数据 JSON</button>
           <button class="btn" onclick="AsterPageCtx.backupData().catch(error => { document.getElementById('status').textContent = error.message; })">备份数据库</button>
@@ -429,7 +354,6 @@
   async function renderPage(name) {
     await loadState();
     if (name === "projects") return renderProjects();
-    if (name === "records") return renderRecords();
     if (name === "tools") return renderTools();
     if (["protocols", "runs"].includes(name)) {
       const module = window.AsterPageModules?.[name];
@@ -438,10 +362,10 @@
     }
   }
   async function setPage(next) {
-    const name = pageNames.includes(next) ? next : "workflow";
+    const name = next === "records" ? "runs" : (pageNames.includes(next) ? next : "workflow");
     await loadState();
     updateProjectPicker();
-    const labels = {workflow:"实验设计",projects:"项目",designs:"实验设计",protocols:"Protocol",runs:"实验运行",records:"实验记录",tools:"资料与工具"};
+    const labels = {workflow:"实验设计",projects:"项目",designs:"实验设计",protocols:"Protocol",runs:"实验运行",tools:"资料与工具"};
     $("pageCrumb").textContent = labels[name] || "工作区";
     const isWorkflow = name === "workflow";
     $("canvasPanel").hidden = !isWorkflow;
