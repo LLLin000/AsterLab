@@ -57,7 +57,8 @@ fn view(s: &Spike, cx: &mut Cx<Spike>) -> El {
                         )
                         .child(text(if s.saved { "已保存 · 0.77 AU" } else { "未保存" })
                             .font(type_::LABEL).color(if s.saved { t.text } else { t.text_secondary })),
-                ),
+                )
+                .child(text(format!("孔位值：{}", s.well.text)).font(type_::LABEL).color(t.text_secondary)),
         )
         .child(
             col().key("table-card").w_full().gap(space::S1).px(16.0).py(16.0).radius(radius::LG).fill(t.card).border(1.0, t.card_border)

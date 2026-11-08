@@ -16,9 +16,9 @@
 | 中文短标签/长段落 | 显式 `.wrap()` 后可换行 | 通过（有条件） |
 | CJK 分段错误 | 通过 spike crate 直接启用 Parley `complex-scripts`，`cargo tree` 确认；零 ICU 报错 | 可复现的 feature unification |
 | Headless PNG / 元素树 | `--snap`、`--tree` | 通过 |
-| 脚本点击/输入 | 100 行表格中编辑单元格；Tab 到下一单元 | 通过 |
+| 脚本点击/输入 | 100 行表格中编辑单元格；Tab 到下一单元；粘贴 | 通过 |
 | 真实冻结 Run | workspace JSON → Rune 只读 | 通过；11 任务 / 10 测量 |
-| 100 行可编辑表格 | 100 个 TextEdit，滚动容器；点击/中文输入 | 初测通过；未做粘贴/虚拟化 |
+| 100 行可编辑表格 | 100 个 TextEdit，滚动容器；点击/中文输入/粘贴 | 初测通过；未做虚拟化 |
 | 中文 IME | 未安装中文输入法，未测 | **未证明**；不是失败 |
 | Release 构建 | 12m56s（干净 target）；25.8 MB；正常窗口打开/重启 | 通过 |
 | 真实数据库接入 | 未做 | **未开始** |
@@ -32,7 +32,7 @@
 | Headless PNG | `--snap ... --scale 2 --theme light` | 通过 |
 | Accessibility tree | `--tree ...json` | 通过；中文 label、text-input、button、100 个 cell |
 | 150% scale | `--scale 1.5 --theme dark` | 清晰；长中文可换行 |
-| Scripted input | 点击第 4 行单元格键入 `B2` / `你好`；点击 `cell-0` 后 Tab | `A4` → `A4B2` / `A4你好`；`A2` → `A2X` |
+| Scripted input | 点击第 4 行单元格键入 `B2` / `你好`；`cell-0` Tab；粘贴 `0.99` | `A4` → `A4B2` / `A4你好`；`A2` → `A2X`；`A4` → `A0.994` |
 | 100 行表格 | 100 个 TextEdit，scroll viewport | 528 layout nodes；脚本 126 帧，first 83ms，p50 2.3ms；可编辑 |
 | 中文 IME | — | **未测**：系统没有安装中文输入法 |
 | 真实冻结 Run | 1c0c8989… workspace JSON | 11 任务、10 测量、时间点/状态正确显示 |
