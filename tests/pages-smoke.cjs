@@ -68,7 +68,7 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert(timedText.includes("通用准备"));
   assert(timedText.includes("24 h") && timedText.includes("48 h"));
   assert(timedText.includes("任务 1/2"));
-  await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("常用工具"));
+  await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("快速入口"));
   assert.equal(await page.evaluate(() => typeof window.AsterLabIcons), "object");
   assert((await page.locator(".resource-card").count()) >= 14);
   assert((await page.locator(".resource-card .resource-icon svg").count()) >= 14);
