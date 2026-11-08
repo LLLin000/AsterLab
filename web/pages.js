@@ -258,7 +258,14 @@
     drawForm(mode);
   }
 
+  function resourceCard(item, kind) {
+    const icon = window.AsterLabIcons?.[item.id] || window.AsterLabIcons?.flask || "";
+    const tags = (item.tags || []).map(tag => `<span class="resource-tag">${esc(tag)}</span>`).join("");
+    return `<article class="resource-card"><div class="resource-icon">${icon}</div><div class="resource-copy"><strong>${esc(item.title)}</strong><p>${esc(item.summary)}</p><div class="resource-meta">${tags || `<span class="resource-tag">${kind}</span>`}</div></div></article>`;
+  }
+
   function renderTools() {
+
     const tables = records("library_table"), formulas = records("formula");
     const materials = records("material"), instruments = records("instrument");
     $("page-view").innerHTML = header("资料与工具", "快速进入实验操作，查阅可复用资料并管理项目数据。") +
@@ -275,9 +282,9 @@
           <h3>材料</h3><div class="page-list">${resourceRows(materials, "material")}</div>
           <h3>仪器</h3><div class="page-list">${resourceRows(instruments, "instrument")}</div>
         </section>
-        <section class="page-card"><h2>仪器与设备</h2><div class="page-list">${(window.AsterResources?.instruments || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div><span class="page-muted">通用资源</span></div>`).join("") || '<div class="page-muted">尚无仪器目录。</div>'}</div></section>
-        <section class="page-card"><h2>常用工具</h2><div class="page-list">${(window.AsterResources?.tools || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div>${item.view === "calculators" ? `<button class="btn" data-calculator="${esc(item.mode || "dilution")}">打开</button>` : `<button class="btn" onclick="location.href='/workspace?view=${esc(item.view || "home")}'">打开</button>`}</div>`).join("") || '<div class="page-muted">尚无工具目录。</div>'}</div></section>
-        <section class="page-card"><h2>材料与配方</h2><div class="page-list">${(window.AsterResources?.materials || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div><span class="page-muted">配方待绑定</span></div>`).join("") || '<div class="page-muted">尚无材料目录。</div>'}</div></section>
+        <section class="page-card"><h2>仪器与设备</h2><div class="resource-grid">${(window.AsterResources?.instruments || []).map(item => resourceCard(item, "仪器")).join("") || '<div class="page-muted">尚无仪器目录。</div>'}</div></section>
+        <section class="page-card"><h2>常用工具</h2><div class="page-list">${(window.AsterResources?.tools || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div>${item.view === "calculators" ? `<button class="btn" data-calculator="${esc(item.mode || "dilution")}">打开</button>` : `<button class="btn" disabled title="旧版工具页已下线，待迁移">暂不可用</button>`}</div>`).join("") || '<div class="page-muted">尚无工具目录。</div>'}</div></section>
+        <section class="page-card"><h2>材料与配方</h2><div class="resource-grid material-grid">${(window.AsterResources?.materials || []).map(item => resourceCard(item, "材料")).join("") || '<div class="page-muted">尚无材料目录。</div>'}</div></section>
         <section class="page-card"><h2>数据与项目管理</h2><div class="page-tools">
           <button class="btn" onclick="AsterPageCtx.setPage('records')">查看实验记录</button>
           <button class="btn" onclick="AsterPageCtx.setPage('projects')">查看项目</button>

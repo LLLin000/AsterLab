@@ -20,7 +20,6 @@ use std::{
 use uuid::Uuid;
 
 mod cli;
-const INDEX_HTML: &str = include_str!("../web/index.html");
 const DESIGN_PREVIEW_HTML: &str = include_str!("../docs/prototypes/tabler-vs-dify-2026-11-06/index.html");
 const VIEW_HTML: &str = include_str!("../web/view.html");
 const ICON_PLATE: &str = include_str!("../web/icons/plate.svg");
@@ -171,9 +170,6 @@ fn list(db: &Connection) -> Result<Vec<Value>, ApiError> {
         Ok(json!({"id":r.get::<_,String>(0)?,"kind":r.get::<_,String>(1)?,"project_id":r.get::<_,Option<String>>(2)?,"parent_id":r.get::<_,Option<String>>(3)?,"revision":r.get::<_,i64>(4)?,"data":data,"created_at":r.get::<_,String>(6)?,"updated_at":r.get::<_,String>(7)?}))
     })?;
     Ok(rows.filter_map(Result::ok).collect())
-}
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
 }
 async fn view_page() -> Html<&'static str> {
     Html(VIEW_HTML)
@@ -1103,7 +1099,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let app = Router::new()
         .route("/", get(view_page))
-        .route("/workspace", get(index))
+        .route("/workspace", get(view_page))
         .route("/view", get(view_page))
         .route("/design-preview", get(design_preview_page))
         .route("/icons/{name}", get(icon))

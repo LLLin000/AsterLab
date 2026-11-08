@@ -16,7 +16,7 @@ window.AsterPageModules.protocols = async function(root, ctx) {
     url.searchParams.set("step", String(stepIndex));
     window.history.replaceState(null, "", url);
   };
-  const header = `<div class="page-head"><div><h1>Protocol</h1><p>当前方法、执行动作与关键条件。</p></div><div class="page-tools"><a class="btn" href="/workspace?view=protocols">编辑 Protocol</a></div></div>`;
+  const header = `<div class="page-head"><div><h1>Protocol</h1><p>当前方法、执行动作与关键条件。</p></div><div class="page-tools"><span class="page-muted">编辑功能待迁移</span></div></div>`;
   if (!protocols.length) {
     root.innerHTML = header + `<div class="empty-state"><h2>还没有 Protocol</h2><p>在功能工作台创建 Protocol 与步骤块。</p></div>`;
     return;

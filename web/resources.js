@@ -15,7 +15,6 @@ window.AsterResources = {
     {id:"serial-dilution", title:"系列稀释", summary:"逐级转移与稀释倍数；保留每一步输入。", view:"calculators", mode:"serial"},
     {id:"reaction-volume", title:"反应体系", summary:"目标体积、各组分体积与剩余体积。", view:"calculators", mode:"reaction"},
     {id:"plate-layout", title:"孔板布局", summary:"按实际孔位安排组别、样本与对照。", view:"plates"},
-    {id:"timepoints", title:"时间点排程", summary:"起算事件、偏移、窗口与关系。", view:"designs"}
   ],
   materials: [
     {id:"media", title:"培养基 / 缓冲液", summary:"配方、批号、体积和有效期由 Protocol/执行记录提供。"},
