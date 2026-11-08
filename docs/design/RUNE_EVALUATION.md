@@ -105,12 +105,20 @@ parley = { version = "0.12", default-features = false, features = ["std", "compl
 CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike
 ```
 
-首次 600 秒超时没有产物，但这只是超时，不是编译错误。第二次构建使用独立 C: target，正在运行；完成后记录：
+首次 600 秒超时没有产物，但这只是超时，不是编译错误。第二次在独立 C: target 上完成：
 
-- 实际耗时
-- `aster-spike.exe` 体积
-- 启动时间
-- 是否可脱离终端运行
+```text
+Finished `release` profile [optimized] target(s) in 12m 08s
+aster-spike.exe: 25,764,352 bytes (~24.6 MiB)
+SHA-256: 6D404EAB3954F33919D037F735FF53BCA1BEB98A2FB7E8F3F133C43312C3A7D3
+```
+
+Headless snap 启动（进程 + GPU + 渲染，不是普通窗口启动）：
+
+- cold: 3.48 s
+- warm: 1.42 s
+
+这证明 release 可执行文件可以产出；安装包、签名和普通窗口启动仍未验证。
 
 ## Gate status
 
