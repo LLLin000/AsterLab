@@ -243,6 +243,17 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 .proposal-title{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .proposal-title button{border:0;background:transparent;color:var(--al-muted);font-size:16px;line-height:1;padding:2px 4px;cursor:pointer}
 .proposal-title button:hover{color:var(--al-ink)}
+
+.cmp-table--readonly{min-height:0!important;max-height:none!important}
+.cmp-table--readonly .cmp-table__scroll{overflow:visible}
+.cmp-table--readonly th{font-size:11px;letter-spacing:.03em;font-weight:650;padding:7px 10px}
+.cmp-table--readonly td{padding:8px 10px;font-size:12px;line-height:1.45}
+.cmp-table--readonly td:first-child{font-weight:600;color:var(--al-ink)}
+.cmp-table--readonly tbody tr:hover td{background:var(--al-surface-2)}
+.cmp-table--readonly .cmp-table__header h3{font-size:15px;font-weight:650}
+.op-brief-meta{font-size:11px;gap:8px 14px;border-top:1px solid var(--al-line);padding-top:8px}
+.op-brief-instruction{letter-spacing:0}
+.op-brief .op-check{padding-top:8px;margin-top:2px}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">
