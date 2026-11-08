@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 rune = { path = "../../crates/rune" }
+parley = { version = "0.12", default-features = false, features = ["std", "complex-scripts"] }
 
 [lints]
 workspace = true

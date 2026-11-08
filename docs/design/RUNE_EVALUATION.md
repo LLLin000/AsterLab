@@ -14,12 +14,13 @@
 | Windows 编译/运行 | `cargo test -p hello` 通过 | 通过 |
 | GPU 原生渲染 | headless 渲染 + 150% scale | 通过 |
 | 中文短标签/长段落 | 显式 `.wrap()` 后可换行 | 通过（有条件） |
-| CJK 分段错误 | 启用 Parley `complex-scripts` 后零 ICU 报错 | 已定向修复，需上游/补丁 |
+| CJK 分段错误 | 通过 spike crate 直接启用 Parley `complex-scripts`，`cargo tree` 确认；零 ICU 报错 | 可复现的 feature unification |
 | Headless PNG / 元素树 | `--snap`、`--tree` | 通过 |
-| 脚本点击/输入 | 100 行表格中编辑单元格 | 通过 |
-| 100 行可编辑表格 | 100 个 TextEdit，滚动容器 | 初测通过；未做粘贴/虚拟化 |
-| 中文 IME | 未安装中文输入法，未测 | **未证明** |
-| Release 构建 | 12m08s；25.8 MB | 通过 |
+| 脚本点击/输入 | 100 行表格中编辑单元格；Tab 到下一单元 | 通过 |
+| 真实冻结 Run | workspace JSON → Rune 只读 | 通过；11 任务 / 10 测量 |
+| 100 行可编辑表格 | 100 个 TextEdit，滚动容器；点击/中文输入 | 初测通过；未做粘贴/虚拟化 |
+| 中文 IME | 未安装中文输入法，未测 | **未证明**；不是失败 |
+| Release 构建 | 12m56s（干净 target）；25.8 MB；正常窗口打开/重启 | 通过 |
 | 真实数据库接入 | 未做 | **未开始** |
 
 ## What ran
@@ -32,9 +33,11 @@
 | Accessibility tree | `--tree ...json` | 通过；中文 label、text-input、button、100 个 cell |
 | 150% scale | `--scale 1.5 --theme dark` | 清晰；长中文可换行 |
 | Scripted input | 点击第 4 行单元格并键入 `B2` | 单元格从 `A4` 变为 `A4B2` |
-| 100 行表格 | 100 个 TextEdit，scroll viewport | 528 layout nodes；脚本 126 帧，first 83ms，p50 2.3ms |
+| 100 行表格 | 100 个 TextEdit，scroll viewport | 528 layout nodes；脚本 126 帧，first 83ms，p50 2.3ms；可编辑 |
 | 中文 IME | — | **未测**：系统没有安装中文输入法 |
-| Release 构建 | `CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike` | **通过**：12m08s；25,764,352 bytes |
+| 真实冻结 Run | 1c0c8989… workspace JSON | 11 任务、10 测量、时间点/状态正确显示 |
+| 普通窗口 | release exe 无参数启动两次 | 窗口标题正常、响应、关闭/重启 |
+| Release 构建 | 干净 target（无手工改 Rune） | **通过**：12m56s；25,764,352 bytes |
 
 Spike 源码：[rune-spike/](rune-spike/)（临时 clone：`target/rune-spike/examples/aster-spike/`）。
 
@@ -54,27 +57,34 @@ Spike 源码：[rune-spike/](rune-spike/)（临时 clone：`target/rune-spike/ex
 ICU4X data error: No segmentation model for complex script: Chinese/Japanese
 ```
 
-Rune 的 `parley` 依赖使用：
+Rune 的 `parley` 依赖默认关闭：
 
 ```toml
 parley = { version = "0.12", default-features = false, features = ["std"] }
 ```
 
-Parley 的 `complex-scripts` feature 才会启用 CJK/Thai/Khmer/Lao/Myanmar 的字典分段。Spike 在本地 clone 中改为：
+Parley 的 `complex-scripts` feature 才会启用 CJK/Thai/Khmer/Lao/Myanmar 的字典分段。Spike **不修改 Rune clone**，而是在自己的 crate 直接依赖同一 Parley 版本：
 
 ```toml
 parley = { version = "0.12", default-features = false, features = ["std", "complex-scripts"] }
 ```
 
-修改后：
+`cargo tree -e features -p aster-spike` 已确认最终图包含：
+
+```text
+parley feature "complex-scripts"
+parley feature "std"
+```
+
+结果：
 
 - ICU4X 报错消失；
 - 长中文段落正常换行；
 - 100 行表格、中文标签、`mg/mL`、数字混排正常；
 - 仍需每个长文本元素显式 `.wrap()`；Rune 默认不自动换行。
 
-**判断：不是框架不可用，是依赖 feature 配置问题。**  
-但这是本地补丁，不是已合并的上游默认；迁移前必须固定补丁方式（fork、vendored patch 或等待上游）。
+**判断：不是框架不可用，是依赖 feature 配置问题；通过 Cargo feature unification 可复现，无需手工改 clone。**  
+仍需在 AsterLab 的 `asterlab-ui` crate 中固化这项依赖，避免只存在于 spike。
 
 ## 100-row editable table
 
@@ -105,20 +115,21 @@ parley = { version = "0.12", default-features = false, features = ["std", "compl
 CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike
 ```
 
-首次 600 秒超时没有产物，但这只是超时，不是编译错误。第二次在独立 C: target 上完成：
+首次 600 秒超时没有产物，但这只是超时，不是编译错误。干净 target（Rune clone 未手工改，只通过 spike crate 的 Parley 直接依赖）完成：
 
 ```text
-Finished `release` profile [optimized] target(s) in 12m 08s
+Finished `release` profile [optimized] target(s) in 12m 56s
 aster-spike.exe: 25,764,352 bytes (~24.6 MiB)
-SHA-256: 6D404EAB3954F33919D037F735FF53BCA1BEB98A2FB7E8F3F133C43312C3A7D3
+SHA-256: 37046743B8B90B1980F9ED91E52F8404BE7B30F77472DBD1546C5F5D9E0D7F97
 ```
 
 Headless snap 启动（进程 + GPU + 渲染，不是普通窗口启动）：
 
-- cold: 3.48 s
+- cold: 3.48 s（第一次构建后）
 - warm: 1.42 s
+- clean release 直接运行：无 ICU 分段错误
 
-这证明 release 可执行文件可以产出；安装包、签名和普通窗口启动仍未验证。
+普通窗口：release EXE 无参数启动两次，窗口标题 `AsterLab Rune Spike`、响应正常，关闭后可重启。安装包、签名仍未验证。
 
 ## Gate status
 
@@ -129,9 +140,9 @@ Headless snap 启动（进程 + GPU + 渲染，不是普通窗口启动）：
 | 可编辑表格 | 100 行初测通过 |
 | 100+ 行滚动 | 部分通过（100 行） |
 | 高 DPI | 通过 1.5x |
-| 键盘焦点 | 部分通过（单元格输入；未做完整 Tab 路径） |
+| 键盘焦点 | 部分通过（单元格点击、Tab 到下一单元、输入） |
 | Headless | 通过 |
-| 打包 | 初步通过（release executable） |
+| 打包 | 通过（release executable；安装包/签名后续） |
 | 真实数据 | 未测 |
 
 **Gate 1 尚未完成，不能批准 Run 切片。**  

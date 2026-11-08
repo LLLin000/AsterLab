@@ -4,14 +4,14 @@ This is the exact source used for [RUNE_EVALUATION.md](../RUNE_EVALUATION.md), p
 
 It is a standalone example, not part of the AsterLab crate.
 
-The spike required a local Rune dependency patch for CJK segmentation:
+The spike enables CJK segmentation through Cargo feature unification, without editing the Rune clone:
 
 ```toml
-# crates/rune/Cargo.toml
+# examples/aster-spike/Cargo.toml
 parley = { version = "0.12", default-features = false, features = ["std", "complex-scripts"] }
 ```
 
-Without `complex-scripts`, ICU4X reports `No segmentation model for complex script: Chinese/Japanese`.
+`cargo tree -e features -p aster-spike` must show `parley feature "complex-scripts"`. Without it, ICU4X reports `No segmentation model for complex script: Chinese/Japanese`.
 
 ```bash
 git clone --filter=blob:none --depth 1 --branch dev https://github.com/anomalyco/rune /tmp/rune-spike
@@ -24,4 +24,4 @@ cp <repo>/docs/design/rune-spike/main.rs examples/aster-spike/src/main.rs
 cargo run -p aster-spike -- --snap out.png --scale 2 --theme light --tree tree.json
 ```
 
-The long Chinese paragraph intentionally exercises CJK line breaking. It must be built with the `complex-scripts` patch above; otherwise it overflows and emits the ICU4X error.
+The long Chinese paragraph intentionally exercises CJK line breaking. It must be built with the direct Parley dependency above; otherwise it overflows and emits the ICU4X error.
