@@ -69,6 +69,18 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert(timedText.includes("24 h") && timedText.includes("48 h"));
   assert(timedText.includes("任务 1/2"));
   await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("快速入口"));
+  await page.goto(`${base}/?page=records&record-run=${pagesRun.id}`,{waitUntil:"networkidle"});
+  await page.waitForSelector("#record-rows");
+  assert((await page.locator("#page-view").innerText()).includes("CCK-8 读板记录") || (await page.locator("#page-view").innerText()).includes("结果记录"));
+  await page.locator('#record-rows input[data-record-field="well"]').first().fill("A1");
+  await page.locator('#record-rows input[data-record-field="group"]').first().fill("Control");
+  await page.locator('#record-rows input[data-record-field="od"]').first().fill("0.82");
+  await page.locator("#save-record").click();
+  await page.waitForTimeout(700);
+  assert((await page.locator("#page-view").innerText()).includes("OD450"));
+  assert((await page.locator("#page-view").innerText()).includes("0.82"));
+  await page.goto(`${base}/?page=tools`,{waitUntil:"networkidle"});
+  await page.waitForTimeout(300);
   assert.equal(await page.evaluate(() => typeof window.AsterLabIcons), "object");
   assert((await page.locator(".resource-card").count()) >= 14);
   assert((await page.locator(".resource-card .resource-icon svg").count()) >= 14);

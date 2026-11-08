@@ -180,14 +180,142 @@
         return `<article class="page-card half"><div class="page-row"><div><strong>${esc(title(project))}</strong><small>${esc(data(project).description || "暂无说明")}</small></div><span class="page-muted">${designs.length} 设计 · ${runs.length} 运行</span></div></article>`;
       }).join("")}</div>` : empty("还没有项目", "在功能工作台创建项目，或等待 Agent 生成草案。"));
   }
+  function recordSchemaFor(assay) {
+    const text = `${assay?.title || ""} ${assay?.endpoint || ""} ${assay?.method || ""}`;
+    if (/CCK|OD450|viability|活力/i.test(text)) return {
+      title: "CCK-8 读板记录",
+      columns: [
+        {key:"well", label:"孔位", placeholder:"A1"},
+        {key:"group", label:"组别", placeholder:"Control"},
+        {key:"od", label:"OD450", type:"number", unit:"AU", step:"any"}
+      ],
+      map: row => Number.isFinite(Number(row.od)) && row.od !== "" ? [{endpoint:"OD450", value:Number(row.od), unit:"AU", sample_id:[row.group,row.well].filter(Boolean).join(" · ") || null}] : []
+    };
+    if (/qPCR|Cq|荧光定量/i.test(text)) return {
+      title: "qPCR 读数记录",
+      columns: [
+        {key:"sample", label:"样本", placeholder:"Control-1"},
+        {key:"target", label:"靶标", placeholder:"GAPDH"},
+        {key:"cq", label:"Cq", type:"number", unit:"Cq", step:"any"}
+      ],
+      map: row => Number.isFinite(Number(row.cq)) && row.cq !== "" ? [{endpoint:row.target || "Cq", value:Number(row.cq), unit:"Cq", sample_id:row.sample || null}] : []
+    };
+    if (/LIVE|DEAD|live\/dead|荧光|存活/i.test(text)) return {
+      title: "LIVE/DEAD 图像计数",
+      columns: [
+        {key:"field", label:"样本 / 视野", placeholder:"D1-Control-F1"},
+        {key:"live", label:"活细胞", type:"number", unit:"cells", step:"1"},
+        {key:"dead", label:"死细胞", type:"number", unit:"cells", step:"1"},
+        {key:"image", label:"图像文件", placeholder:"可选"}
+      ],
+      map: row => {
+        const values = [];
+        if (Number.isFinite(Number(row.live)) && row.live !== "") values.push({endpoint:"live cells", value:Number(row.live), unit:"cells/field", sample_id:row.field || null});
+        if (Number.isFinite(Number(row.dead)) && row.dead !== "") values.push({endpoint:"dead cells", value:Number(row.dead), unit:"cells/field", sample_id:row.field || null});
+        return values;
+      }
+    };
+    if (/Western|blot|band|条带/i.test(text)) return {
+      title: "Western blot 条带记录",
+      columns: [
+        {key:"sample", label:"样本", placeholder:"Control-1"},
+        {key:"target", label:"目标条带", placeholder:"p-AKT"},
+        {key:"band", label:"目标强度", type:"number", unit:"AU", step:"any"},
+        {key:"loading", label:"Loading control", type:"number", unit:"AU", step:"any"}
+      ],
+      map: row => {
+        const values = [];
+        if (Number.isFinite(Number(row.band)) && row.band !== "") values.push({endpoint:row.target || "target band", value:Number(row.band), unit:"AU", sample_id:row.sample || null});
+        if (Number.isFinite(Number(row.loading)) && row.loading !== "") values.push({endpoint:"loading control", value:Number(row.loading), unit:"AU", sample_id:row.sample || null});
+        return values;
+      }
+    };
+    return {
+      title: `${assay?.title || "检测"} 结果记录`,
+      columns: [
+        {key:"sample", label:"样本 / 孔位", placeholder:"A1"},
+        {key:"endpoint", label:"终点", placeholder:assay?.endpoint || "读数"},
+        {key:"value", label:"数值", type:"number", step:"any"},
+        {key:"unit", label:"单位", placeholder:assay?.unit || ""}
+      ],
+      map: row => Number.isFinite(Number(row.value)) && row.value !== "" ? [{endpoint:row.endpoint || assay?.endpoint || "measurement", value:Number(row.value), unit:row.unit || assay?.unit || null, sample_id:row.sample || null}] : []
+    };
+  }
+
+  function structuredRecordRows(events) {
+    return events.flatMap(event => {
+      const value = data(event), run = one(event.parent_id);
+      const measurements = (value.measurements || []).map(item => ({...item, kind:"measurement"}));
+      const readouts = (value.readouts || []).map(item => ({...item, kind:"readout"}));
+      return [...measurements, ...readouts].map(item => ({
+        run: run ? title(run) : "未知运行",
+        assay: value.assay_id || "—",
+        timepoint: value.timepoint || "—",
+        sample: item.sample_id || "—",
+        endpoint: item.endpoint || "—",
+        value: item.value ?? item.qualifier ?? "—",
+        unit: item.unit || ""
+      }));
+    });
+  }
+
   function renderRecords() {
-    const events = records("execution_event"), notes = records("note");
-    $("page-view").innerHTML = header("实验记录", "实际事件、原始/派生结果和补充记录。") +
-      `<div class="page-grid"><section class="page-card"><h2>执行事件</h2>${events.length
-        ? `<div class="data-table-wrap"><table><thead><tr><th>运行</th><th>类型</th><th>内容</th><th>时间</th></tr></thead><tbody>${events.map(event => `<tr><td>${esc(title(one(event.parent_id)))}</td><td>${esc(data(event).event_type)}</td><td>${esc(data(event).content)}</td><td>${esc(data(event).occurred_at || "")}</td></tr>`).join("")}</tbody></table></div>`
-        : `<div class="page-muted">尚无执行事件。</div>`}</section><section class="page-card"><h2>补充记录</h2>${notes.length
-        ? notes.map(note => `<div class="page-row"><div><strong>${esc(data(note).content)}</strong><small>${esc(note.created_at || "")}</small></div></div>`).join("")
-        : `<div class="page-muted">尚无补充记录。</div>`}</section></div>`;
+    const events = records("execution_event"), notes = records("note"), runs = records("run");
+    const params = new URLSearchParams(location.search);
+    const run = runs.find(item => item.id === params.get("record-run")) || runs[0];
+    const design = run?.parent_id ? one(run.parent_id) : null;
+    const assays = design ? (data(design).assays || []) : [];
+    const assay = assays.find(item => item.id === params.get("record-assay")) || assays[0];
+    const schema = recordSchemaFor(assay);
+    const manifest = (data(run).protocol_manifest || []).find(item => item.assay_id === assay?.id);
+    const steps = manifest?.steps || [];
+    const step = steps.find(item => /read|measure|image|Cq|OD|检测|成像|读|记录/i.test(item.title || "")) || steps[steps.length - 1];
+    const timepoints = assay?.timepoints || [];
+    const structured = structuredRecordRows(events).filter(row => !run || row.run === title(run));
+    const columns = schema.columns.map(column => `<th>${esc(column.label)}${column.unit ? `<small>${esc(column.unit)}</small>` : ""}</th>`).join("");
+    const rowMarkup = schema.columns.map(column => `<td><input data-record-field="${esc(column.key)}" type="${esc(column.type || "text")}" step="${esc(column.step || "any")}" placeholder="${esc(column.placeholder || "")}" aria-label="${esc(column.label)}"></td>`).join("");
+    $("page-view").innerHTML = header("实验记录", "按实验设计中的 Assay 记录结构化读数；原始事件仍保留。") +
+      `<div class="page-grid">
+        <section class="page-card"><h2>记录入口</h2>
+          <div class="record-controls">
+            <label>实验运行<select id="record-run">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === run?.id ? "selected" : ""}>${esc(title(item))}</option>`).join("") || '<option value="">尚无运行</option>'}</select></label>
+            <label>检测<select id="record-assay">${assays.map(item => `<option value="${esc(item.id)}" ${item.id === assay?.id ? "selected" : ""}>${esc(item.title)}</option>`).join("") || '<option value="">尚无检测</option>'}</select></label>
+            <label>时间点<select id="record-timepoint"><option value="">不指定</option>${timepoints.map(item => `<option value="${esc(item)}">${esc(item)}</option>`).join("")}</select></label>
+          </div>
+          <div class="record-schema-head"><strong>${esc(schema.title)}</strong><span>${esc(step ? `记录到 ${step.title}` : "未找到可关联步骤")}</span></div>
+          <div class="data-table-wrap"><table class="record-entry-table"><thead><tr>${columns}</tr></thead><tbody id="record-rows"><tr>${rowMarkup}</tr></tbody></table></div>
+          <div class="record-actions"><button class="btn" id="add-record-row" type="button">+ 添加行</button><button class="btn primary" id="save-record" type="button" onclick="window.__saveRecord?.()" ${step ? "" : "disabled"}>保存结构化记录</button><span id="record-status" class="page-muted"></span></div>
+        </section>
+        <section class="page-card"><h2>结构化记录</h2>${structured.length ? `<div class="data-table-wrap"><table><thead><tr><th>运行</th><th>检测</th><th>时间点</th><th>样本 / 孔位</th><th>终点</th><th>数值</th><th>单位</th></tr></thead><tbody>${structured.map(row => `<tr><td>${esc(row.run)}</td><td>${esc(row.assay)}</td><td>${esc(row.timepoint)}</td><td>${esc(row.sample)}</td><td>${esc(row.endpoint)}</td><td>${esc(row.value)}</td><td>${esc(row.unit)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="page-muted">尚无结构化读数。'}</section>
+        <section class="page-card"><details><summary>原始事件（${events.length}）</summary>${events.length ? `<div class="data-table-wrap"><table><thead><tr><th>运行</th><th>类型</th><th>内容</th><th>时间</th></tr></thead><tbody>${events.map(event => `<tr><td>${esc(title(one(event.parent_id)))}</td><td>${esc(data(event).event_type)}</td><td>${esc(data(event).content)}</td><td>${esc(data(event).occurred_at || "")}</td></tr>`).join("")}</tbody></table></div>` : '<div class="page-muted">尚无执行事件。</div>'}</details></section>
+        <section class="page-card"><h2>补充记录</h2>${notes.length ? notes.map(note => `<div class="page-row"><div><strong>${esc(data(note).content)}</strong><small>${esc(note.created_at || "")}</small></div></div>`).join("") : '<div class="page-muted">尚无补充记录。</div>'}</section>
+      </div>`;
+    const updateSelection = (key, value) => {
+      const url = new URL(location.href);
+      url.searchParams.set(key, value);
+      window.history.replaceState(null, "", url);
+      renderRecords();
+    };
+    $("record-run")?.addEventListener("change", event => { const url = new URL(location.href); url.searchParams.set("record-run", event.target.value); url.searchParams.delete("record-assay"); history.replaceState(null, "", url); renderRecords(); });
+    $("record-assay")?.addEventListener("change", event => updateSelection("record-assay", event.target.value));
+    $("add-record-row")?.addEventListener("click", () => {
+      const body = $("record-rows");
+      body.insertAdjacentHTML("beforeend", `<tr>${rowMarkup}</tr>`);
+    });
+    window.__saveRecord = async () => {
+      const status = $("record-status"); try {
+      const rows = [...document.querySelectorAll("#record-rows tr")].map(tr => Object.fromEntries([...tr.querySelectorAll("[data-record-field]")].map(input => [input.dataset.recordField, input.value.trim()])));
+      const measurements = rows.flatMap(row => schema.map(row));
+      if (!measurements.length) { status.textContent = "至少填写一行有效数值。"; return; }
+      if (!run || !assay || !step) { status.textContent = "缺少运行、检测或可关联步骤。"; return; }
+      status.textContent = "保存中…";
+      const payload = {kind:"execution_event",parent_id:run.id,project_id:run.project_id,data:{event_type:"measurement",content:`结构化记录 · ${assay.title}`,protocol_step_path:step.path,protocol_version_id:manifest.protocol_version_id,assay_id:assay.id,timepoint:$("record-timepoint")?.value || null,measurements}};
+      const response = await fetch("/api/records",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+      if (!response.ok) { const body = await response.json().catch(() => ({})); status.textContent = body.error || `保存失败（${response.status}）`; return; }
+      await ctx.reloadState();
+      renderRecords();
+      } catch (error) { if (status) status.textContent = error.message || String(error); console.error(error); }
+    };
   }
   function resourceRows(items, kind) {
     return items.length ? items.map(record => {

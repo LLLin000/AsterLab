@@ -3,7 +3,8 @@ window.AsterPageModules.runs = async function(root, ctx) {
   const esc = ctx.esc;
   const runs = ctx.records("run");
   if (!runs.length) {
-    root.innerHTML = '<div class="page-head"><div><h1>实验运行</h1><p>只显示本次执行的步骤和实际记录，不展示设计决策。</p></div></div><div class="empty-state"><h2>还没有实验运行</h2><p>从实验设计创建 Run；本页只承载执行。</p></div>';
+    root.innerHTML = '<div class="page-head"><div><h1>实验运行</h1><p>只显示本次执行的步骤和实际记录，不展示设计决策。</p></div><div class="page-tools"><button class="btn primary" type="button" data-create-run>从当前设计创建执行</button></div></div><div class="empty-state"><h2>还没有实验运行</h2><p>当前设计已有步骤和 Protocol；直接生成执行界面，不需要手工建 Run。</p></div>';
+    root.querySelector("[data-create-run]")?.addEventListener("click", startRunFromDesign);
     return;
   }
   let runId = new URLSearchParams(location.search).get("run") || runs[0].id;
@@ -61,6 +62,16 @@ window.AsterPageModules.runs = async function(root, ctx) {
 
   const sameScope = (a, b) => a?.kind === b?.kind && a?.assay_id === b?.assay_id && a?.planned_output_id === b?.planned_output_id;
   const runLabel = item => `${ctx.title(item)} · ${String(item.created_at || "").slice(5, 16).replace("T", " ")}`;
+  const startRunFromDesign = async () => {
+    const designId = document.getElementById("designPicker")?.value;
+    const design = designId ? ctx.one(designId) : null;
+    if (!design) { document.getElementById("status").textContent = "先选择一个实验设计"; return; }
+    const response = await fetch("/api/records", {method:"POST",headers:{"content-type":"application/json","X-AsterLab-Human-Confirmed":"1"},body:JSON.stringify({kind:"run",project_id:design.project_id,parent_id:design.id,data:{title:`${ctx.title(design)} 执行`,view_id:window.AsterCurrentViewId || null}})});
+    const result = await response.json();
+    if (!response.ok) { document.getElementById("status").textContent = result.error || `创建失败（${response.status}）`; return; }
+    const runId = result.record?.id || result.id;
+    location.href = `/?page=runs&project=${encodeURIComponent(design.project_id)}&run=${encodeURIComponent(runId)}&design=${encodeURIComponent(design.id)}`;
+  };
   const syncRunContext = item => {
     const projectPicker = document.getElementById("projectPicker");
     const designPicker = document.getElementById("designPicker");
@@ -83,7 +94,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
   async function render() {
     const run = runs.find(item => item.id === runId) || runs[0];
     syncRunContext(run);
-    root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div><div class="empty-state">正在读取冻结工作区…</div>`;
+    root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))}</p></div><div class="page-tools"><button class="btn" type="button" data-create-run>新建执行</button><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div><div class="empty-state">正在读取冻结工作区…</div>`;
     try {
       const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/workspace`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -199,7 +210,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
       const nextTask = visibleTasks[taskIndex + 1] || sequence[globalTaskIndex + 1];
       const confirmLabel = allDone ? "本次运行已完成" : nextTask ? "确认完成并进入下一步" : "确认完成";
       const form = allDone || timepointDone ? "" : `<form id="actual-form" class="run-form"><div class="run-confirm"><strong>${esc(step?.title || "当前步骤")}</strong><span>${checkOptions.some(check => check.blocking) ? "先完成必需检查，再确认本步。" : "按已选 Protocol 执行后确认即可。"} 确认只记录操作完成，不声称已测量参数或保存结果。</span></div>${checkFields}<label class="run-note">异常 / 偏差 / 实际参数（可选）<textarea name="content" placeholder="正常操作可留空；有偏差、遗漏或实际参数变化时再填写。"></textarea></label><details class="run-more"><summary>更多记录（操作人，可选）</summary><label>操作人<input name="operator" placeholder="可留空"></label></details><div id="run-form-error" class="summary-error" role="alert"></div><button class="btn primary" type="submit">${confirmLabel}</button></form>`;
-      root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))} · ${selectedTimepoint ? `${esc(selectedTimepoint)} · ` : ""}任务 ${taskIndex + 1}/${visibleTasks.length} · ${esc(allDone ? "全部任务已完成" : workspace.status || "状态未填写")}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div>
+      root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))} · 设计 v${esc(run.data?.design_revision ?? "?")} · Protocol v${esc(scopeMeta?.protocol_version ?? "?")} · ${selectedTimepoint ? `${esc(selectedTimepoint)} · ` : ""}任务 ${taskIndex + 1}/${visibleTasks.length} · ${esc(allDone ? "全部任务已完成" : workspace.status || "状态未填写")}</p></div><div class="page-tools"><button class="btn" type="button" data-create-run>新建执行</button><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div>
         <div class="run-tabs"><button class="${selectedMode === "session" ? "active" : ""}" data-run-mode="session">执行安排</button><button class="${selectedMode === "results" ? "active" : ""}" data-run-mode="results">结果</button></div>
         ${prepMarkup}
         ${timepointValues.length > 1 ? `<div class="page-card run-timepoints"><div class="step-strip ${timepointValues.length <= 4 ? "wrap" : ""}">${timepointValues.map(timepoint => `<button class="step-chip ${timepoint === selectedTimepoint ? "active" : ""}" data-timepoint="${esc(timepoint)}">${esc(timepoint)}</button>`).join("")}</div></div>` : ''}
@@ -233,6 +244,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
           <div class="page-card"><h2>批量录入读数</h2>${resultForm}</div>
         </section>`;
       root.querySelector("#run-select").addEventListener("change", event => { runId = event.target.value; selectedTaskKey = ""; render(); });
+      root.querySelector("[data-create-run]")?.addEventListener("click", startRunFromDesign);
       root.querySelectorAll("[data-task]").forEach(button => button.addEventListener("click", () => { selectedTaskKey = button.dataset.task; render(); }));
       root.querySelectorAll("[data-timepoint]").forEach(button => button.addEventListener("click", () => { selectedTimepoint = button.dataset.timepoint; selectedTaskKey = ""; render(); }));
       root.querySelectorAll("[data-run-mode]").forEach(button => button.addEventListener("click", () => { selectedMode = button.dataset.runMode; render(); }));
