@@ -73,6 +73,9 @@ fn init() -> App {
     let mut a = App { run_id, workspace, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: String::new(), projects, designs, runs };
     a.selected = a.first_open();
     a.reset_rows();
+    if std::env::var("ASTERLAB_DEBUG_FILL").ok().as_deref() == Some("1") {
+        if let Some(row) = a.rows.first_mut() { row.sample = TextEdit::new("Control-1"); row.value = TextEdit::new("0.82"); }
+    }
     a
 }
 impl App {
