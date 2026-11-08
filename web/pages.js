@@ -139,8 +139,11 @@
       <div class="inline-edit-section-title">检测</div>${assayCards}
       <div class="inline-edit-section-title">组别</div><div class="inline-edit-groups">${groups || '<div class="page-muted">此设计还没有组别。</div>'}</div>
       <div class="inline-edit-actions"><span id="designEditStatus" class="page-muted"></span><button class="btn primary" id="saveDesignEdit" type="button">保存设计</button></div>`;
-    $("workflowSummary").insertAdjacentElement("afterend", panel);
-    panel.querySelector("#cancelDesignEdit").onclick = () => panel.remove();
+    const backdrop=document.createElement("div");
+    backdrop.className="design-edit-backdrop";
+    backdrop.setAttribute("aria-hidden","true");
+    document.body.append(backdrop,panel);
+    panel.querySelector("#cancelDesignEdit").onclick = () => {panel.remove();backdrop.remove()};
     panel.querySelector("#saveDesignEdit").onclick = async () => {
       const status = panel.querySelector("#designEditStatus"); status.textContent = "保存中…";
       panel.querySelectorAll("[data-edit-field]").forEach(input => { value[input.dataset.editField] = input.value.trim(); });
@@ -163,7 +166,7 @@
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
         await ctx.reloadState();
         renderWorkflowSummary(ctx.one(design.id));
-        panel.remove();
+        panel.remove();backdrop.remove();
         $("status").textContent = "设计已保存，Protocol 版本未修改";
       } catch (error) { status.textContent = error.message || String(error); }
     };

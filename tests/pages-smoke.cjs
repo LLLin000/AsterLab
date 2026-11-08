@@ -90,6 +90,11 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   await page.goto(`${base}/?project=${project.id}&design=${timedDesign.id}`,{waitUntil:"networkidle"});
   await page.waitForSelector(".wnode",{timeout:5000});
   assert((await page.locator(".wnode").count()) > 0);
+  await page.locator("#editWorkflowDesign").click();
+  await page.waitForSelector("#designInlineEdit");
+  assert.equal(await page.locator(".design-edit-backdrop").count(),1);
+  await page.locator("#cancelDesignEdit").click();
+  assert.equal(await page.locator("#designInlineEdit").count(),0);
   assert.deepEqual(errors,[]);
   await browser.close();server.kill();console.log(JSON.stringify({ok:true,rail:4,pages:["protocols","runs","tools"],errors}));
 })().catch(error=>{console.error(error);process.exitCode=1});
