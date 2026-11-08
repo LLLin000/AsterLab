@@ -3,8 +3,9 @@
 - 状态：**实现完成，待主人验收保存/重启闭环**。
 - 日期：2026-11-08
 - 代码：`native/asterlab-run/`
-- 正式视觉：`rune-gate2-titlebar.png`
+- 正式视觉：`rune-gate2-1200.png`
 - 自定义 titlebar：无 Windows 原生标题栏，40pt 拖动带 + Rune 绘制 caption 按钮
+- 2/3 记录 + 1/3 就绪：1200px 下成立；900px 下就绪卡换行到下方并可滚动
 - 窄窗：`rune-gate2-900.png`
 - 150% / 200%：`rune-gate2-150.png`, `rune-gate2-200.png`
 - 深色：`rune-gate2-dark.png`
@@ -34,6 +35,7 @@
 | 100%/150%/200% | 截图通过 |
 | 窄窗 900 | 通过，卡片单列 |
 | 保存读数 | **通过**：debug 填充 `Control-1/0.82` 后保存，CLI 回读成功；正常 UI 需填写样本 |
+| 保存错误 | 已显示 CLI 的 message/code；样本为空时明确提示 |
 | 关闭重启回看 | 数据已写入；需主人用真实键盘完整走一次 |
 | 安装包/签名 | 未做 |
 

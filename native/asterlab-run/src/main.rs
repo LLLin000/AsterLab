@@ -154,9 +154,9 @@ impl App {
 fn theme(dark: bool) -> tok::Theme {
     let mut t = tok::theme(dark);
     if dark {
-        t.bg = hex("#12110f").unwrap(); t.card = hex("#1b1916").unwrap(); t.card_border = hex("#302c26").unwrap();
-        t.text = hex("#f2eee6").unwrap(); t.text_secondary = hex("#a9a196").unwrap();
-        t.separator = hex("#302c26").unwrap(); t.hover = hex("#26231f").unwrap();
+        t.bg = hex("#100f0d").unwrap(); t.card = hex("#201d18").unwrap(); t.card_border = hex("#3a342b").unwrap();
+        t.text = hex("#f5f1e9").unwrap(); t.text_secondary = hex("#b8afa2").unwrap();
+        t.separator = hex("#332d25").unwrap(); t.hover = hex("#2d2720").unwrap();
     } else {
         t.bg = hex("#f7f6f3").unwrap(); t.card = hex("#ffffff").unwrap(); t.card_border = hex("#e7e3db").unwrap();
         t.text = hex("#1c1b18").unwrap(); t.text_secondary = hex("#6b655b").unwrap();
@@ -184,7 +184,14 @@ static I_TOOLS: RuneIcon = RuneIcon { name: "tools", view: 24.0, body: r#"<path 
 
 fn view(a: &App, cx: &mut Cx<App>) -> El {
     let t = theme(cx.system_dark());
-    let k = Kit::from_palette(PaletteSeed { bg: t.bg, fg: t.text, accent: accent() });
+    let mut k = Kit::from_palette(PaletteSeed { bg: t.bg, fg: t.text, accent: accent() });
+    k.c.bg_icon_button_contrast = accent();
+    k.c.bg_accent = accent();
+    k.c.text_accent = accent();
+    k.c.submit_fg = hex("#ffffff").unwrap();
+    k.c.submit_icon = hex("#ffffff").unwrap();
+    k.c.submit_hover = hex("#4b37ae").unwrap();
+    k.c.contrast_hover = hex("#4b37ae").unwrap();
     let title = a.workspace["frozen_design"]["content"]["title"].as_str().unwrap_or("实验运行");
     let status = status_cn(a.workspace["status"].as_str().unwrap_or(""));
     let selected_tp = a.task().and_then(|x| x["timepoint"].as_str()).unwrap_or("").to_owned();
@@ -296,19 +303,19 @@ fn view(a: &App, cx: &mut Cx<App>) -> El {
         let materials = arr(&a.workspace, "materials").len();
         let plates = arr(&a.workspace, "plates").len();
         let instruments = arr(&a.workspace, "instruments").len();
-        let readiness = |label: &str, value: String| col().w(190.0).gap(2.0)
-            .child(text(label.to_owned()).font(LABEL).color(t.text_secondary))
+        let readiness = |label: &str, value: String| row().w_full().gap(space::S2).items_center()
+            .child(text(label.to_owned()).w(88.0).font(LABEL).color(t.text_secondary))
             .child(text(value).font(BODY).color(t.text).wrap());
         let mut right = Card::new().title("就绪信息", Some(&I_TOOLS));
-        right = right.child(row().w_full().gap(16.0)
-            .child(readiness("材料 / 试剂", if materials == 0 { "未绑定".into() } else { format!("{materials} 项") }))
+        right = right.child(readiness("材料 / 试剂", if materials == 0 { "未绑定".into() } else { format!("{materials} 项") }))
             .child(readiness("仪器 / 程序", if instruments == 0 { "未绑定".into() } else { format!("{instruments} 项") }))
-            .child(readiness("孔板", if plates == 0 { "未绑定".into() } else { format!("{plates} 块") })));
-        content = content.child(left.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
-        content = content.child(right.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
+            .child(readiness("孔板", if plates == 0 { "未绑定".into() } else { format!("{plates} 块") }));
+        content = content.child(row().w_full().gap(16.0).items_start().wrap()
+            .child(left.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0).w(560.0).min_w(0.0))
+            .child(right.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0).w(240.0).min_w(240.0)));
     }
 
-    let main_area = col().grow(1.0).min_w(0.0).min_h(0.0).child(content);
+    let main_area = col().grow(1.0).min_w(0.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(content);
     let insets = cx.chrome_insets();
     let top = row().w_full().h(40.0).px(14.0).pr(14.0 + insets.trailing)
         .items_center().gap(space::S2).fill(t.card).border(1.0, t.card_border)
@@ -316,7 +323,7 @@ fn view(a: &App, cx: &mut Cx<App>) -> El {
         .child(text("AsterLab").font(SECTION).color(t.text))
         .child(text("实验运行").font(LABEL).color(t.text_secondary))
         .child(el().grow(1.0))
-        .child(text(title.to_owned()).font(LABEL).color(t.text_secondary).wrap());
+        .child(text(String::new()).font(LABEL).color(t.text_secondary));
     let body = row().w_full().grow(1.0).min_h(0.0)
         .child(rail)
         .child(side)
