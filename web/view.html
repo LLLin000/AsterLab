@@ -233,6 +233,16 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 .result-preview.is-error{color:var(--al-danger,#dc2626)}
 #detail.plan-empty{flex:0 0 auto;min-height:0;background:transparent;border:0;margin:8px 0 0;padding:0;overflow:visible}
 #detail.plan-empty .empty-state{margin:0;padding:14px;border:1px solid var(--al-line);border-radius:10px;background:var(--al-surface)}
+
+@media(min-width:901px){
+  .cards{display:flex;flex-wrap:wrap;align-content:flex-start}
+  .cards>.card{flex:0 0 calc(50% - 6px);max-width:calc(50% - 6px);width:calc(50% - 6px)}
+  .cards>.op-brief,.cards>.card[data-component="content.note"],.cards>.card[data-component="content.markdown"]{flex-basis:100%;max-width:100%;width:100%}
+}
+
+.proposal-title{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.proposal-title button{border:0;background:transparent;color:var(--al-muted);font-size:16px;line-height:1;padding:2px 4px;cursor:pointer}
+.proposal-title button:hover{color:var(--al-ink)}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">

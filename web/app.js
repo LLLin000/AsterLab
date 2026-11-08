@@ -309,7 +309,7 @@ function proposalPanelMarkup(){
 
   const kind=child.definition.id;const isNote=kind==="content.note"||kind==="content.markdown";const isTable=kind==="content.table"||kind==="layout.table";
   const actions=[`<button data-proposal="move-top">移动到最上面</button>`,isNote?`<button data-proposal="append-note">追加说明</button>`:``,isTable||kind==="workflow"?`<button data-proposal="add-note">添加 Markdown 卡片</button>`:``,`<button data-proposal="delete">删除此卡片</button>`].join("");
-  if(!proposal)return `<div class="proposal-title">Proposal Review · <b>${esc(nodeTitle(child))}</b></div><div class="muted">外部 Agent 提案或本地测试提案；接受前不会写入。</div><div class="row">${actions}</div>`;
+  if(!proposal)return `<div class="proposal-title"><span>Proposal Review · <b>${esc(nodeTitle(child))}</b></span><button data-proposal-close aria-label="关闭">×</button></div><div class="muted">外部 Agent 提案或本地测试提案；接受前不会写入。</div><div class="row">${actions}</div>`;
   const stale=proposal.stale||proposal.noOp;
   const changes=(proposal.preview?.operation_changes||[]).map(op=>{
     if(op.kind==="move_slot_child")return `<div class="diff-row"><b>位置</b><span>${esc(JSON.stringify(op.before))} → ${esc(JSON.stringify(op.after))}</span></div>`;
@@ -317,16 +317,18 @@ function proposalPanelMarkup(){
     if(op.kind==="update_props")return `<div class="diff-row"><b>字段</b><span>${esc(op.property)}: ${esc(JSON.stringify(op.before))} → ${esc(JSON.stringify(op.after))}</span></div>`;
     return `<div class="diff-row"><b>${esc(op.kind)}</b><span>${esc(JSON.stringify(op.edge||op.binding_id||op.instance_id||""))}</span></div>`;
   }).join("");
-  return `<div class="proposal-title">Agent Proposal · <b>${esc(nodeTitle(child))}</b></div><div class="muted">目标：ViewDocument · revision ${esc(proposal.expectedRevision)} · ${proposal.noOp?"无实际变化":stale?"已过期":"预览校验通过"} · ${proposal.preview?.diff_scope==="net"?"最终净变化":"差异"} · 仅预览，未写入</div><div class="diff-list">${changes||"<div class=muted>无结构化差异</div>"}</div><div class="row"><button class="primary" data-proposal-accept ${stale?"disabled":""}>接受变更</button><button data-proposal-reject>拒绝</button></div>`;
+  return `<div class="proposal-title"><span>Agent Proposal · <b>${esc(nodeTitle(child))}</b></span><button data-proposal-close aria-label="关闭">×</button></div><div class="muted">目标：ViewDocument · revision ${esc(proposal.expectedRevision)} · ${proposal.noOp?"无实际变化":stale?"已过期":"预览校验通过"} · ${proposal.preview?.diff_scope==="net"?"最终净变化":"差异"} · 仅预览，未写入</div><div class="diff-list">${changes||"<div class=muted>无结构化差异</div>"}</div><div class="row"><button class="primary" data-proposal-accept ${stale?"disabled":""}>接受变更</button><button data-proposal-reject>拒绝</button></div>`;
 }
 function renderProposalPanel(){
   const box=$("proposal-panel");if(!box)return;box.hidden=!selectedChildId&&!proposal;box.innerHTML=proposalPanelMarkup();
   box.querySelectorAll("[data-proposal]").forEach(b=>b.onclick=()=>createProposal(b.dataset.proposal));
+  box.querySelector("[data-proposal-close]")?.addEventListener("click",()=>{selectedChildId=null;proposal=null;document.querySelectorAll(".card[data-instance]").forEach(c=>c.classList.remove("selected"));renderProposalPanel()});
   box.querySelector("[data-agent-run]")?.addEventListener("click",runAgentProposal);
   box.querySelector("[data-proposal-accept]")?.addEventListener("click",acceptProposal);
   box.querySelector("[data-proposal-reject]")?.addEventListener("click",rejectProposal);
 }
 function focusChild(id){
+  if(selectedChildId===id){selectedChildId=null;proposal=null;document.querySelectorAll(".card[data-instance]").forEach(c=>c.classList.remove("selected"));renderProposalPanel();return}
   if(selectedChildId!==id)proposal=null;
   selectedChildId=id;
   document.querySelectorAll(".card[data-instance]").forEach(c=>c.classList.toggle("selected",c.dataset.instance===id));
@@ -615,4 +617,11 @@ function setWorkflowCollapsed(collapsed){
 setWorkflowCollapsed(localStorage.getItem("asterlab.workflowCollapsed")==="true");
 collapseButton.addEventListener("click",()=>setWorkflowCollapsed(!canvasPanel.classList.contains("compact")));
 window.addEventListener("resize",()=>{renderCanvas();layoutCards()});
+document.addEventListener("click",event=>{
+  if(event.target.closest(".card[data-instance],#proposal-panel,#library-panel,#inbox-panel,#library-toggle,#inbox-toggle"))return;
+  if(selectedChildId||proposal){selectedChildId=null;proposal=null;renderProposalPanel();document.querySelectorAll(".card[data-instance]").forEach(c=>c.classList.remove("selected"))}
+  const library=document.getElementById("library-panel");if(library)library.hidden=true;
+  const inbox=document.getElementById("inbox-panel");if(inbox)inbox.hidden=true;
+});
+document.addEventListener("keydown",event=>{if(event.key!=="Escape")return;if(selectedChildId||proposal){selectedChildId=null;proposal=null;renderProposalPanel();document.querySelectorAll(".card[data-instance]").forEach(c=>c.classList.remove("selected"))}const library=document.getElementById("library-panel");if(library)library.hidden=true;const inbox=document.getElementById("inbox-panel");if(inbox)inbox.hidden=true});
 $("openView").onclick=load;
