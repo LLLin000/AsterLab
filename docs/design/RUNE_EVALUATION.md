@@ -19,7 +19,7 @@
 | 脚本点击/输入 | 100 行表格中编辑单元格 | 通过 |
 | 100 行可编辑表格 | 100 个 TextEdit，滚动容器 | 初测通过；未做粘贴/虚拟化 |
 | 中文 IME | 未安装中文输入法，未测 | **未证明** |
-| Release 构建 | 进行中 | **待定** |
+| Release 构建 | 12m08s；25.8 MB | 通过 |
 | 真实数据库接入 | 未做 | **未开始** |
 
 ## What ran
@@ -34,7 +34,7 @@
 | Scripted input | 点击第 4 行单元格并键入 `B2` | 单元格从 `A4` 变为 `A4B2` |
 | 100 行表格 | 100 个 TextEdit，scroll viewport | 528 layout nodes；脚本 126 帧，first 83ms，p50 2.3ms |
 | 中文 IME | — | **未测**：系统没有安装中文输入法 |
-| Release 构建 | `CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike` | 运行中；结果见下方 |
+| Release 构建 | `CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike` | **通过**：12m08s；25,764,352 bytes |
 
 Spike 源码：[rune-spike/](rune-spike/)（临时 clone：`target/rune-spike/examples/aster-spike/`）。
 
@@ -123,13 +123,13 @@ CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike
 | 高 DPI | 通过 1.5x |
 | 键盘焦点 | 部分通过（单元格输入；未做完整 Tab 路径） |
 | Headless | 通过 |
-| 打包 | 待定 |
+| 打包 | 初步通过（release executable） |
 | 真实数据 | 未测 |
 
 **Gate 1 尚未完成，不能批准 Run 切片。**  
 但已不再是“框架做不了”；更准确的结论是：
 
-> Rune 的基础 UI 能力已得到初步验证；CJK 分段问题有明确修复路径；剩余关键未知项是真实 Windows IME、完整键盘路径、打包和真实数据接入。
+> Rune 的基础 UI 能力已得到初步验证；CJK 分段问题有明确修复路径；剩余关键未知项是真实 Windows IME、完整键盘路径、安装包/签名和真实数据接入。
 
 ## Decision
 
