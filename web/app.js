@@ -406,10 +406,10 @@ function renderDetail(){
     const actions=cardActions(child);
     const key=`${child.definition?.id||"unknown"}@${child.definition?.version??"?"}`;
     const module=child.workflow?.nodes?.length?null:window.AsterUI?.registry?.[key];
-    const renderer=child.workflow?.nodes?.length?componentRenderers["workflow@1"]:rendererFor(child);
+    const renderer=(child.workflow?.nodes?.length||child.definition?.id==="workflow")?componentRenderers["workflow@1"]:rendererFor(child);
     const ctx=moduleContext(child,slot,plates,actions);
     if(renderer===componentRenderers.unsupported){cards.push(renderer.detail(child,actions,ctx));continue;}
-    if(module)cards.push(module.renderDetail(child,ctx));else cards.push(renderer.detail(child,actions,{slot,plates}));
+    if(module?.renderDetail)cards.push(module.renderDetail(child,ctx));else cards.push(renderer.detail(child,actions,{slot,plates}));
   }
   const refLine=ref.kind==="operation_use"?`Protocol step · ${esc(ref.step?.step_path||"")}`:ref.kind?esc(ref.kind):"未绑定科学对象";
   const plateChoices=plates.map(p=>`<option value="${esc(p.instance_id)}">${esc(nodeTitle(p))} · ${esc(p.model_ref?.container_id||"")}</option>`).join("");

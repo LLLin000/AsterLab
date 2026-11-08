@@ -25,6 +25,17 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   const protocol=cli("protocol.create",{project_id:project.id,title:"Pages protocol",root_block_version_id:block.version.id}).result;
   const design=cli("design.create",{project_id:project.id,design:{title:"Pages design",research_question:"Does it work?",factors:[{name:"Treatment",levels:["control","treated"]}],group_specs:[{name:"Control",role:"control",condition:"vehicle",independent_n:3},{name:"Treatment",role:"treatment",condition:"X",independent_n:3}],assays:[{id:"cck8",title:"CCK-8",endpoint:"OD450",method:"CCK-8",unit:"AU",timepoints:["24 h"],group_names:["Control","Treatment"],protocol_version_id:protocol.version.id}]}}).result.design;
   const pagesRun=cli("run.create",{design_id:design.id,title:"Pages run"}).result.record;
+  const projected=cli("view.project",{project_id:project.id,protocol_version_id:protocol.version.id,scope:{kind:"assay",assay_id:"cck8"}}).result.document;
+  const componentsView=cli("view.create",{project_id:project.id,title:"Components view",document:projected}).result;
+  const componentRootId=projected.root.workflow.nodes[0].component.instance_id;
+  const componentDocumentId=componentsView.version?.data?.document_id;
+  const componentOperations=[
+    {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-note",definition:{id:"content.note",version:1},props:{text:"Note *rendered*"},slots:{}}},
+    {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-table",definition:{id:"content.table",version:1},props:{columns:["Item","Value"],rows:[["A","1"]]},slots:{}}},
+    {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-calc",definition:{id:"tool.calculator",version:1},props:{tool_ref:"tool.reagent_total@1"},slots:{}}},
+    {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-flow",definition:{id:"workflow",version:1},props:{},slots:{},workflow:{nodes:[],edges:[]}}}
+  ];
+  cli("view.revise",{view_id:componentsView.view?.id||componentsView.id,changeset:{changeset_id:"components-smoke",document_id:componentDocumentId,expected_revision:1,operations:componentOperations,provenance:["test"]}});
   const timedBlock=cli("protocol.block.create",{project_id:project.id,title:"Timed protocol",steps:[{kind:"text",use_id:"prep",title:"Prep",instruction:"Prepare once"},{kind:"text",use_id:"read",title:"Timed read",instruction:"Read at each timepoint",time_scope:"per_timepoint"}]}).result;
   const timedProtocol=cli("protocol.create",{project_id:project.id,title:"Timed protocol",root_block_version_id:timedBlock.version.id}).result;
   const timedDesign=cli("design.create",{project_id:project.id,design:{title:"Timed design",group_specs:[{name:"Control",role:"control",condition:"vehicle",independent_n:2}],assays:[{id:"read",title:"Read",endpoint:"OD",method:"plate",unit:"AU",timepoints:["24 h","48 h"],group_names:["Control"],protocol_version_id:timedProtocol.version.id}]}}).result.design;
@@ -57,6 +68,14 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert(timedText.includes("24 h") && timedText.includes("48 h"));
   assert(timedText.includes("任务 1/2"));
   await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("常用工具"));
+  await page.goto(`${base}/?project=${project.id}&design=${design.id}`,{waitUntil:"networkidle"});
+  await page.waitForSelector(".wnode");
+  await page.locator(".wnode").first().click();
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator(".cmp-markdown").count(),1);
+  assert((await page.locator(".cmp-table").count()) >= 1);
+  assert.equal(await page.locator(".cmp-calculator").count(),1);
+  assert.equal(await page.locator(".cmp-flow").count(),0);
   assert.deepEqual(errors,[]);
   await browser.close();server.kill();console.log(JSON.stringify({ok:true,rail:4,pages:["protocols","runs","tools"],errors}));
 })().catch(error=>{console.error(error);process.exitCode=1});

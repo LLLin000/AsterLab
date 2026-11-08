@@ -40,6 +40,17 @@ Step Detail 从单列全宽改为桌面两列:
 - 组件小窗不会自动关闭的问题已修;点击同一卡片、空白、× 或 Esc 都关闭。
 - `+ 组件` 面板点外部关闭。
 
+## 自动化覆盖
+
+`tests/pages-smoke.cjs` 现在构造一个 View,包含:
+
+- Markdown/说明
+- 可编辑 `content.table`
+- `tool.calculator`(无孔板时的空状态)
+- 空 `workflow` 子流程
+
+并断言这些组件在点击步骤后渲染,且不产生 JS 错误。空 workflow 曾经因为调用不存在的 `module.renderDetail` 导致详情区整体崩溃;已改为回退到 `workflowCard`。
+
 ## 尚未覆盖
 
 - 当前演示 View 没有 calculator、well plate、workflow 子流程卡片,未做这些组件的真实截图审计。
