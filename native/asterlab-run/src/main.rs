@@ -124,6 +124,10 @@ impl App {
         let Some(step) = self.step() else { self.message = "没有冻结步骤".into(); return; };
         let mut ms = Vec::new();
         for r in &self.rows {
+            if !r.value.text.trim().is_empty() && r.sample.text.trim().is_empty() {
+                self.message = "样本 / 孔位不能为空".into();
+                return;
+            }
             let Ok(v) = r.value.text.trim().parse::<f64>() else { continue };
             if !v.is_finite() { continue; }
             ms.push(json!({"endpoint": self.endpoint(), "value": v, "unit": self.unit(), "sample_id": r.sample.text.trim()}));
