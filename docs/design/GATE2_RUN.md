@@ -22,7 +22,7 @@
 - Run 读写走现有 `labworkbench.exe` CLI，不直接打开 SQLite。
 - Rust 应用层新增 blocking-check 完成校验与完成事件幂等守卫（`src/cli.rs` + `tests/execution-acceptance.cjs`）。
 - 字体：Rune `TextStyle` 20/16/14.5/12.5；families `Inter, Segoe UI, Microsoft YaHei`。
-- Release：`target/rune-spike/target/release/asterlab-run.exe`，26,236,928 bytes；SHA-256 `C37878DE48EA9987615C28E4464A85A096C7B44E4906E777CFB8331EA65825B7`；无参数窗口启动正常。
+- Release：`target/rune-spike/target/release/asterlab-run.exe`，26,275,328 bytes；SHA-256 `01A7F197DD55FE0F2F4399F175E1F324668BD5AB6740DC7799BCD09BA2FD2337`；无参数窗口启动正常。
 
 ## 验收状态
 
