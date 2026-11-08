@@ -44,10 +44,13 @@ fn s(v: &Value, key: &str) -> String { v[key].as_str().unwrap_or("").to_string()
 fn arr<'a>(v: &'a Value, key: &str) -> &'a [Value] { v[key].as_array().map(Vec::as_slice).unwrap_or(&[]) }
 
 struct Row { sample: TextEdit, value: TextEdit }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Page { Design, Protocol, Run, Tools }
 struct App {
     run_id: String, workspace: Value, selected: usize, checks: HashMap<String, String>,
     rows: Vec<Row>, results: bool, message: String,
-    projects: Vec<Value>, designs: Vec<Value>, runs: Vec<Value>,
+    page: Page, sidebar_open: bool,
+    projects: Vec<Value>, designs: Vec<Value>, runs: Vec<Value>, protocols: Vec<Value>, records: Vec<Value>,
 }
 fn init() -> App {
     let env_id = std::env::var("ASTERLAB_RUN_ID").ok();
@@ -64,15 +67,22 @@ fn init() -> App {
     };
     let workspace = match result {
         Ok(w) => w,
-        Err(e) => return App { run_id: String::new(), workspace: Value::Null, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: format!("无法读取 Run（id={env_id:?}）：{e}"), projects: Vec::new(), designs: Vec::new(), runs: Vec::new() },
+        Err(e) => return App { run_id: String::new(), workspace: Value::Null, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: format!("无法读取 Run（id={env_id:?}）：{e}"), page: Page::Run, sidebar_open: true, projects: Vec::new(), designs: Vec::new(), runs: Vec::new(), protocols: Vec::new(), records: Vec::new() },
     };
     let projects = call("project.list", json!({})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default();
     let designs = call("design.list", json!({})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default();
     let runs = call("run.list", json!({})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default();
     let run_id = s(&workspace, "run_id");
-    let mut a = App { run_id, workspace, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: String::new(), projects, designs, runs };
+    let protocols = call("protocol.list", json!({})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default();
+    let mut records = call("record.list", json!({"kind":"formula"})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default();
+    records.extend(call("record.list", json!({"kind":"library_table"})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default());
+    records.extend(call("record.list", json!({"kind":"note"})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default());
+    let mut a = App { run_id, workspace, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: String::new(), page: Page::Run, sidebar_open: true, projects, designs, runs, protocols, records };
     a.selected = a.first_open();
     a.reset_rows();
+    if let Ok(pg) = std::env::var("ASTERLAB_PAGE") {
+        a.page = match pg.as_str() { "design" => Page::Design, "protocol" => Page::Protocol, "tools" => Page::Tools, _ => Page::Run };
+    }
     if std::env::var("ASTERLAB_DEBUG_FILL").ok().as_deref() == Some("1") {
         if let Some(row) = a.rows.first_mut() { row.sample = TextEdit::new("Control-1"); row.value = TextEdit::new("0.82"); }
     }
@@ -180,6 +190,7 @@ fn status_cn(s: &str) -> &'static str {
 static I_DESIGN: RuneIcon = RuneIcon { name: "design", view: 24.0, body: r#"<path d="M4 4h16v16H4z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 9h8M8 13h8" stroke="currentColor" stroke-width="1.5"/>"# };
 static I_PROTOCOL: RuneIcon = RuneIcon { name: "protocol", view: 24.0, body: r#"<path d="M6 4h12v16H6z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9 8h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.5"/>"# };
 static I_RUN: RuneIcon = RuneIcon { name: "run", view: 24.0, body: r#"<path d="M8 5l11 7-11 7z" fill="currentColor"/>"# };
+static I_SIDEBAR: RuneIcon = RuneIcon { name: "sidebar", view: 24.0, body: r#"<path d="M4 5h16v14H4z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9 5v14" stroke="currentColor" stroke-width="1.5"/>"# };
 static I_TOOLS: RuneIcon = RuneIcon { name: "tools", view: 24.0, body: r#"<path d="M4 20l8-8M14 6l4 4-6 6-4-4 6-6z" fill="none" stroke="currentColor" stroke-width="1.5"/>"# };
 
 fn view(a: &App, cx: &mut Cx<App>) -> El {
@@ -206,13 +217,14 @@ fn view(a: &App, cx: &mut Cx<App>) -> El {
     let step_title = a.step().map(|x| s(x, "title")).unwrap_or_else(|| "没有任务".into());
     let instruction = a.step().map(|x| s(x, "instruction")).unwrap_or_default();
 
+    let page = a.page;
     // Rail
     let rail = col().w(56.0).h_full().px(6.0).py(8.0).gap(6.0).fill(t.card).border(1.0, t.card_border)
         .child(text("AL").font(TITLE).color(accent()))
-        .child(IconButton::new(&I_DESIGN).label("实验设计").build(&k))
-        .child(IconButton::new(&I_PROTOCOL).label("Protocol").build(&k))
-        .child(IconButton::new(&I_RUN).label("实验运行").variant(rune_kit::IconButtonVariant::Contrast).build(&k))
-        .child(IconButton::new(&I_TOOLS).label("资料与工具").build(&k));
+        .child(IconButton::new(&I_DESIGN).label("实验设计").variant(if page==Page::Design { rune_kit::IconButtonVariant::Submit } else { rune_kit::IconButtonVariant::Neutral }).build(&k).on_press(|x: &mut App| x.page = Page::Design))
+        .child(IconButton::new(&I_PROTOCOL).label("Protocol").variant(if page==Page::Protocol { rune_kit::IconButtonVariant::Submit } else { rune_kit::IconButtonVariant::Neutral }).build(&k).on_press(|x: &mut App| x.page = Page::Protocol))
+        .child(IconButton::new(&I_RUN).label("实验运行").variant(if page==Page::Run { rune_kit::IconButtonVariant::Submit } else { rune_kit::IconButtonVariant::Neutral }).build(&k).on_press(|x: &mut App| x.page = Page::Run))
+        .child(IconButton::new(&I_TOOLS).label("资料与工具").variant(if page==Page::Tools { rune_kit::IconButtonVariant::Submit } else { rune_kit::IconButtonVariant::Neutral }).build(&k).on_press(|x: &mut App| x.page = Page::Tools));
 
     // Side panel
     let current_design = s(&a.workspace, "design_id");
@@ -239,95 +251,123 @@ fn view(a: &App, cx: &mut Cx<App>) -> El {
     let sidebar_el = sidebar.build(&k);
     side = side.child(sidebar_el.scroll(ScrollSpec { stick_bottom: false }));
 
-    // Main content
     let mut content = col().w_full().grow(1.0).min_w(0.0).gap(12.0).px(16.0).py(16.0);
-    content = content.child(row().w_full().items_center().gap(space::S3)
-        .child(text(title.to_owned()).font(TITLE).color(t.text).wrap())
-        .child(el().grow(1.0))
-        .child(text(status.to_owned()).font(LABEL).color(t.text_secondary)));
-    content = content.child(row().gap(space::S3)
-        .child(SegmentedControl::new(&["执行安排", "结果"], Some(if a.results { 1 } else { 0 }))
-            .label("视图").on_pick(|x: &mut App, i, _| x.results = i == 1).build(&k)));
+    if page == Page::Run {
+        content = content.child(row().w_full().items_center().gap(space::S3)
+            .child(text(title.to_owned()).font(TITLE).color(t.text).wrap())
+            .child(el().grow(1.0))
+            .child(text(status.to_owned()).font(LABEL).color(t.text_secondary)));
+        content = content.child(row().gap(space::S3)
+            .child(SegmentedControl::new(&["执行安排", "结果"], Some(if a.results { 1 } else { 0 }))
+                .label("视图").on_pick(|x: &mut App, i, _| x.results = i == 1).build(&k)));
 
-    let mut strip = row().w_full().gap(space::S2).wrap();
-    for (tp, done, total) in &tps {
-        if tp.is_empty() { continue; }
-        let active = *tp == selected_tp;
-        let tp2 = tp.clone();
-        strip = strip.child(btn(format!("tp-{tp}"), format!("{tp} {done}/{total}"), active, &k,
-            move |x: &mut App| { if let Some(i) = x.tasks().iter().position(|task| task["timepoint"].as_str().unwrap_or("") == tp2) { x.selected = i; x.checks.clear(); x.reset_rows(); } }));
-    }
-    content = content.child(strip);
+        let mut strip = row().w_full().gap(space::S2).wrap();
+        for (tp, done, total) in &tps {
+            if tp.is_empty() { continue; }
+            let active = *tp == selected_tp;
+            let tp2 = tp.clone();
+            strip = strip.child(btn(format!("tp-{tp}"), format!("{tp} {done}/{total}"), active, &k,
+                move |x: &mut App| { if let Some(i) = x.tasks().iter().position(|task| task["timepoint"].as_str().unwrap_or("") == tp2) { x.selected = i; x.checks.clear(); x.reset_rows(); } }));
+        }
+        content = content.child(strip);
 
-    if a.results {
-        let mut r = Card::new().title("结果与测量", Some(&I_RUN));
-        let ms = a.measurements();
-        if ms.is_empty() { r = r.child(text("暂无测量记录").font(BODY).color(t.text_secondary)); }
-        for (sample, value, unit) in ms { r = r.child(row().w_full().gap(space::S2).child(text(sample).w(220.0).font(BODY).color(t.text)).child(text(format!("{value} {unit}")).font(BODY).color(t.text_secondary))); }
-        content = content.child(r.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
-    } else {
-        let mut left = Card::new().title(format!("当前任务 · {step_title}"), Some(&I_RUN)).description(instruction);
-        let checks = a.step().map(|s| arr(s, "checks")).unwrap_or(&[]);
-        if !checks.is_empty() {
-            left = left.child(text("检查").font(LABEL).color(t.text_secondary));
-            for c in checks {
-                let id = s(c, "check_id");
-                let cur = a.checks.get(&id).map(String::as_str).unwrap_or("");
-                let idx = match cur { "passed" => 1, "failed" => 2, "skipped" => 3, _ => 0 };
-                let label = format!("{} {}", s(c, "label"), if c["blocking"].as_bool() == Some(true) { "· 必需" } else { "" });
-                let id2 = id.clone();
-                left = left.child(row().w_full().gap(space::S3).items_center()
-                    .child(text(label).w(220.0).font(BODY).color(t.text))
-                    .child(SegmentedControl::new(&["未记录", "通过", "未通过", "不适用"], Some(idx))
-                        .on_pick(move |x: &mut App, i, _| {
-                            match i { 0 => { x.checks.remove(&id2); }, 1 => { x.checks.insert(id2.clone(), "passed".into()); }, 2 => { x.checks.insert(id2.clone(), "failed".into()); }, _ => { x.checks.insert(id2.clone(), "skipped".into()); } }
-                        }).build(&k).w(300.0)));
+        if a.results {
+            let mut r = Card::new().title("结果与测量", Some(&I_RUN));
+            let ms = a.measurements();
+            if ms.is_empty() { r = r.child(text("暂无测量记录").font(BODY).color(t.text_secondary)); }
+            for (sample, value, unit) in ms { r = r.child(row().w_full().gap(space::S2).child(text(sample).w(220.0).font(BODY).color(t.text)).child(text(format!("{value} {unit}")).font(BODY).color(t.text_secondary))); }
+            content = content.child(r.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
+        } else {
+            let mut left = Card::new().title(format!("当前任务 · {step_title}"), Some(&I_RUN)).description(instruction);
+            let checks = a.step().map(|s| arr(s, "checks")).unwrap_or(&[]);
+            if !checks.is_empty() {
+                left = left.child(text("检查").font(LABEL).color(t.text_secondary));
+                for c in checks {
+                    let id = s(c, "check_id");
+                    let cur = a.checks.get(&id).map(String::as_str).unwrap_or("");
+                    let idx = match cur { "passed" => 1, "failed" => 2, "skipped" => 3, _ => 0 };
+                    let label = format!("{} {}", s(c, "label"), if c["blocking"].as_bool() == Some(true) { "· 必需" } else { "" });
+                    let id2 = id.clone();
+                    left = left.child(row().w_full().gap(space::S3).items_center()
+                        .child(text(label).w(220.0).font(BODY).color(t.text))
+                        .child(SegmentedControl::new(&["未记录", "通过", "未通过", "不适用"], Some(idx))
+                            .on_pick(move |x: &mut App, i, _| {
+                                match i { 0 => { x.checks.remove(&id2); }, 1 => { x.checks.insert(id2.clone(), "passed".into()); }, 2 => { x.checks.insert(id2.clone(), "failed".into()); }, _ => { x.checks.insert(id2.clone(), "skipped".into()); } }
+                            }).build(&k).w(300.0)));
+                }
             }
+            left = left.child(text(format!("记录 {}（{}）", a.endpoint(), a.unit())).font(SECTION).color(t.text));
+            left = left.child(row().w_full().gap(space::S2)
+                .child(text("样本 / 孔位").w(170.0).font(LABEL).color(t.text_secondary))
+                .child(text("数值").w(110.0).font(LABEL).color(t.text_secondary))
+                .child(text("单位").font(LABEL).color(t.text_secondary)));
+            for (i, r) in a.rows.iter().enumerate() {
+                left = left.child(row().w_full().gap(space::S2).items_center()
+                    .child(input(&r.sample, "sample", &k, move |x: &mut App| &mut x.rows[i].sample).w(170.0))
+                    .child(input(&r.value, "value", &k, move |x: &mut App| &mut x.rows[i].value).w(110.0))
+                    .child(text(a.unit()).font(LABEL).color(t.text_secondary)));
+            }
+            left = left.child(row().gap(space::S2)
+                .child(btn("add", "+ 添加行".into(), false, &k, |x: &mut App| x.rows.push(Row { sample: TextEdit::new(""), value: TextEdit::new("") })))
+                .child(btn("save", "保存读数".into(), true, &k, |x: &mut App| x.save_measure()))
+                .child(btn("complete", "完成本步".into(), false, &k, |x: &mut App| x.complete())));
+            if !a.message.is_empty() { left = left.child(text(a.message.clone()).font(LABEL).color(t.text_secondary).wrap()); }
+            let materials = arr(&a.workspace, "materials").len();
+            let plates = arr(&a.workspace, "plates").len();
+            let instruments = arr(&a.workspace, "instruments").len();
+            let readiness = |label: &str, value: String| row().w_full().gap(space::S2).items_center()
+                .child(text(label.to_owned()).w(88.0).font(LABEL).color(t.text_secondary))
+                .child(text(value).font(BODY).color(t.text).wrap());
+            let mut right = Card::new().title("就绪信息", Some(&I_TOOLS));
+            right = right.child(readiness("材料 / 试剂", if materials == 0 { "未绑定".into() } else { format!("{materials} 项") }))
+                .child(readiness("仪器 / 程序", if instruments == 0 { "未绑定".into() } else { format!("{instruments} 项") }))
+                .child(readiness("孔板", if plates == 0 { "未绑定".into() } else { format!("{plates} 块") }));
+            content = content.child(row().w_full().gap(16.0).items_start().wrap()
+                .child(left.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0).w(560.0).min_w(0.0))
+                .child(right.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0).w(240.0).min_w(240.0)));
         }
-        left = left.child(text(format!("记录 {}（{}）", a.endpoint(), a.unit())).font(SECTION).color(t.text));
-        left = left.child(row().w_full().gap(space::S2)
-            .child(text("样本 / 孔位").w(170.0).font(LABEL).color(t.text_secondary))
-            .child(text("数值").w(110.0).font(LABEL).color(t.text_secondary))
-            .child(text("单位").font(LABEL).color(t.text_secondary)));
-        for (i, r) in a.rows.iter().enumerate() {
-            left = left.child(row().w_full().gap(space::S2).items_center()
-                .child(input(&r.sample, "sample", &k, move |x: &mut App| &mut x.rows[i].sample).w(170.0))
-                .child(input(&r.value, "value", &k, move |x: &mut App| &mut x.rows[i].value).w(110.0))
-                .child(text(a.unit()).font(LABEL).color(t.text_secondary)));
+    } else if page == Page::Design {
+        let mut c = Card::new().title("设计", Some(&I_DESIGN));
+        if a.designs.is_empty() { c = c.child(text("暂无设计").font(BODY).color(t.text_secondary)); }
+        for d in &a.designs {
+            let name = d["data"]["title"].as_str().unwrap_or("未命名设计");
+            let n = d["data"]["assays"].as_array().map(|x| x.len()).unwrap_or(0);
+            c = c.child(text(format!("{name} · {n} 个检测")).font(BODY).color(t.text).wrap());
         }
-        left = left.child(row().gap(space::S2)
-            .child(btn("add", "+ 添加行".into(), false, &k, |x: &mut App| x.rows.push(Row { sample: TextEdit::new(""), value: TextEdit::new("") })))
-            .child(btn("save", "保存读数".into(), true, &k, |x: &mut App| x.save_measure()))
-            .child(btn("complete", "完成本步".into(), false, &k, |x: &mut App| x.complete())));
-        if !a.message.is_empty() { left = left.child(text(a.message.clone()).font(LABEL).color(t.text_secondary).wrap()); }
-        let materials = arr(&a.workspace, "materials").len();
-        let plates = arr(&a.workspace, "plates").len();
-        let instruments = arr(&a.workspace, "instruments").len();
-        let readiness = |label: &str, value: String| row().w_full().gap(space::S2).items_center()
-            .child(text(label.to_owned()).w(88.0).font(LABEL).color(t.text_secondary))
-            .child(text(value).font(BODY).color(t.text).wrap());
-        let mut right = Card::new().title("就绪信息", Some(&I_TOOLS));
-        right = right.child(readiness("材料 / 试剂", if materials == 0 { "未绑定".into() } else { format!("{materials} 项") }))
-            .child(readiness("仪器 / 程序", if instruments == 0 { "未绑定".into() } else { format!("{instruments} 项") }))
-            .child(readiness("孔板", if plates == 0 { "未绑定".into() } else { format!("{plates} 块") }));
-        content = content.child(row().w_full().gap(16.0).items_start().wrap()
-            .child(left.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0).w(560.0).min_w(0.0))
-            .child(right.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0).w(240.0).min_w(240.0)));
+        content = content.child(c.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
+    } else if page == Page::Protocol {
+        let mut c = Card::new().title("Protocol", Some(&I_PROTOCOL));
+        if a.protocols.is_empty() { c = c.child(text("暂无 Protocol").font(BODY).color(t.text_secondary)); }
+        for p in &a.protocols {
+            let name = p["data"]["title"].as_str().unwrap_or("未命名 Protocol");
+            let rev = p["revision"].as_i64().unwrap_or(1);
+            c = c.child(text(format!("{name} · v{rev}")).font(BODY).color(t.text).wrap());
+        }
+        content = content.child(c.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
+    } else {
+        let mut c = Card::new().title("记录", Some(&I_TOOLS));
+        if a.records.is_empty() { c = c.child(text("暂无记录").font(BODY).color(t.text_secondary)); }
+        for r in a.records.iter().take(20) {
+            let et = r["data"]["event_type"].as_str().unwrap_or("记录");
+            let content_text = r["data"]["content"].as_str().unwrap_or("");
+            c = c.child(text(format!("{et} · {content_text}")).font(BODY).color(t.text).wrap());
+        }
+        content = content.child(c.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
     }
-
     let main_area = col().grow(1.0).min_w(0.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(content);
     let insets = cx.chrome_insets();
     let top = row().w_full().h(40.0).px(14.0).pr(14.0 + insets.trailing)
         .items_center().gap(space::S2).fill(t.card).border(1.0, t.card_border)
         .window_drag()
         .child(text("AsterLab").font(SECTION).color(t.text))
-        .child(text("实验运行").font(LABEL).color(t.text_secondary))
+        .child(IconButton::new(&I_SIDEBAR).label("侧栏").variant(rune_kit::IconButtonVariant::Ghost).build(&k).on_press(|x: &mut App| x.sidebar_open = !x.sidebar_open))
         .child(el().grow(1.0))
-        .child(text(String::new()).font(LABEL).color(t.text_secondary));
+        .child(text(match page { Page::Design=>"设计", Page::Protocol=>"Protocol", Page::Run=>"实验运行", Page::Tools=>"资料与工具" }).font(LABEL).color(t.text_secondary));
     let body = row().w_full().grow(1.0).min_h(0.0)
-        .child(rail)
-        .child(side)
-        .child(main_area);
+        .child(rail);
+    let mut body = body;
+    if a.sidebar_open { body = body.child(side); }
+    let body = body.child(main_area);
     col().w_full().h_full().fill(t.bg).child(top).child(body)
 }
 
