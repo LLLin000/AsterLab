@@ -32,7 +32,7 @@
 | Headless PNG | `--snap ... --scale 2 --theme light` | 通过 |
 | Accessibility tree | `--tree ...json` | 通过；中文 label、text-input、button、100 个 cell |
 | 150% scale | `--scale 1.5 --theme dark` | 清晰；长中文可换行 |
-| Scripted input | 点击第 4 行单元格并键入 `B2` | 单元格从 `A4` 变为 `A4B2` |
+| Scripted input | 点击第 4 行单元格键入 `B2` / `你好`；点击 `cell-0` 后 Tab | `A4` → `A4B2` / `A4你好`；`A2` → `A2X` |
 | 100 行表格 | 100 个 TextEdit，scroll viewport | 528 layout nodes；脚本 126 帧，first 83ms，p50 2.3ms；可编辑 |
 | 中文 IME | — | **未测**：系统没有安装中文输入法 |
 | 真实冻结 Run | 1c0c8989… workspace JSON | 11 任务、10 测量、时间点/状态正确显示 |
@@ -112,7 +112,7 @@ parley feature "std"
 命令：
 
 ```bash
-CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike
+CARGO_TARGET_DIR=C:/rune-clean-release cargo build --release -p aster-spike
 ```
 
 首次 600 秒超时没有产物，但这只是超时，不是编译错误。干净 target（Rune clone 未手工改，只通过 spike crate 的 Parley 直接依赖）完成：
@@ -136,7 +136,7 @@ Headless snap 启动（进程 + GPU + 渲染，不是普通窗口启动）：
 | Gate 1 项目 | 状态 |
 |---|---|
 | Windows 中文 IME | 未测 |
-| CJK 字体/换行 | 通过，需本地 feature patch + `.wrap()` |
+| CJK 字体/换行 | 通过；直接 Parley `complex-scripts` + `.wrap()` |
 | 可编辑表格 | 100 行初测通过 |
 | 100+ 行滚动 | 部分通过（100 行） |
 | 高 DPI | 通过 1.5x |
