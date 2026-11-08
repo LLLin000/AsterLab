@@ -1,7 +1,7 @@
 # Rune Technical Feasibility Report
 
 - 日期：2026-11-08
-- 结论：**技术可行性尚未验证完毕；既不是失败，也还不能批准迁移。**
+- 结论：**Gate 1 通过（2026-11-08 主人手动 IME 验收）。** 可进入 Gate 2：Run 单屏纵向切片；全应用迁移仍未批准。
 - 固定 revision：`a7f276c3630f85a06a0230295da4d2bd172d8d3b`（`anomalyco/rune` `dev`）
 - 许可：MIT（仓库声明）
 - 状态：Rune 官方仍是 pre-release；pin revision，不追浮动分支。
@@ -19,7 +19,7 @@
 | 脚本点击/输入 | 100 行表格中编辑单元格；Tab 到下一单元；粘贴 | 通过 |
 | 真实冻结 Run | workspace JSON → Rune 只读 | 通过；11 任务 / 10 测量 |
 | 100 行可编辑表格 | 100 个 TextEdit，滚动容器；点击/中文输入/粘贴 | 初测通过；未做虚拟化 |
-| 中文 IME | 未安装中文输入法，未测 | **未证明**；不是失败 |
+| 中文 IME | 微软拼音手动测试：候选、确认、取消、退格、焦点切换 | **通过（主人验收）** |
 | Release 构建 | 12m56s（干净 target）；25.8 MB；正常窗口打开/重启 | 通过 |
 | 真实数据库接入 | 未做 | **未开始** |
 
@@ -34,7 +34,7 @@
 | 150% scale | `--scale 1.5 --theme dark` | 清晰；长中文可换行 |
 | Scripted input | 点击第 4 行单元格键入 `B2` / `你好`；`cell-0` Tab；粘贴 `0.99` | `A4` → `A4B2` / `A4你好`；`A2` → `A2X`；`A4` → `A0.994` |
 | 100 行表格 | 100 个 TextEdit，scroll viewport | 528 layout nodes；脚本 126 帧，first 83ms，p50 2.3ms；可编辑 |
-| 中文 IME | — | **未测**：系统没有安装中文输入法 |
+| 中文 IME | Windows 微软拼音，真实窗口 | **通过**：主人测试候选窗、确认、取消、退格、焦点均正常 |
 | 真实冻结 Run | 1c0c8989… workspace JSON | 11 任务、10 测量、时间点/状态正确显示 |
 | 普通窗口 | release exe 无参数启动两次 | 窗口标题正常、响应、关闭/重启 |
 | Release 构建 | 干净 target（无手工改 Rune） | **通过**：12m56s；25,764,352 bytes |
@@ -93,19 +93,18 @@ parley feature "std"
 - 脚本点击 `cell-3` 并输入 `B2`，值从 `A4` 变为 `A4B2`，证明字段获得焦点、接收键盘输入、回写状态。
 - 126 帧脚本运行：first frame 83ms（含初始化），p50 2.3ms、p95 5.9ms；528 layout nodes。
 - 这是**非虚拟化**的 100 行；只证明 100 行可用，不证明 1,000+ 行。
-- 未验证：滚动到第 100 行后的焦点、粘贴、多选、撤销。
+- 已验证粘贴；未验证滚动到第 100 行后的焦点、多选、撤销。
 
 ## Chinese IME
 
-**未测。** 当前 Windows 没有安装中文输入法，Headless 也不能替代候选词/组合输入。
+2026-11-08 主人用真实 Windows 窗口和微软拼音手动验证：
 
-这不等于失败；它是下一轮必须由真实窗口完成的人工/自动化测试：
+- 候选窗位置正常
+- 组合输入、确认、取消正常
+- 退格、光标、失焦正常
+- 没有丢字或重复字
 
-1. 打开真实 Rune 窗口。
-2. 聚焦 `孔位` 或表格单元。
-3. 切换微软拼音。
-4. 输入 `ni hao`、选择候选词、退格、移动光标、失焦。
-5. 截图/录屏并记录候选窗位置和焦点。
+**结论：通过。** 这是人工验收证据；具体微软拼音版本以测试机为准。
 
 ## Release build
 
@@ -135,34 +134,42 @@ Headless snap 启动（进程 + GPU + 渲染，不是普通窗口启动）：
 
 | Gate 1 项目 | 状态 |
 |---|---|
-| Windows 中文 IME | 未测 |
+| Windows 中文 IME | **通过（主人手动测试）** |
 | CJK 字体/换行 | 通过；直接 Parley `complex-scripts` + `.wrap()` |
 | 可编辑表格 | 100 行初测通过 |
-| 100+ 行滚动 | 部分通过（100 行） |
+| 100+ 行滚动 | 100 行可编辑；滚动到末行未单独验收 |
 | 高 DPI | 通过 1.5x |
 | 键盘焦点 | 部分通过（单元格点击、Tab 到下一单元、输入） |
 | Headless | 通过 |
 | 打包 | 通过（release executable；安装包/签名后续） |
-| 真实数据 | 未测 |
+| 真实数据 | 通过（只读 RunWorkspace JSON） |
 
-**Gate 1 尚未完成，不能批准 Run 切片。**  
-但已不再是“框架做不了”；更准确的结论是：
+**Gate 1 通过。** Run 单屏纵向切片（Gate 2）可以开始；全应用迁移仍未批准。
 
-> Rune 的基础 UI 能力已得到初步验证；CJK 分段问题有明确修复路径；剩余关键未知项是真实 Windows IME、完整键盘路径、安装包/签名和真实数据接入。
+准确的结论是：
+
+> Rune 的基础 UI 能力、CJK、100 行表格、真实冻结 Run 读取和 Windows IME 均已通过验收。
+
+## Gate 2 approved
+
+- 只做 Run 单屏完整纵向切片。
+- 不做全应用迁移。
+- 不提前重构 Core。
+- Web 继续作为默认与回退。
+- Gate 2 验收：读取 -> 显示 -> 检查 -> 完成 -> 录入 -> 重启回看，Web/Rune 事实一致。
 
 ## Decision
 
-- 不立即放弃 Rune。
-- 不启动 AsterLab Run 迁移。
+- Gate 1 通过；批准 Gate 2 的 Run 单屏纵向切片。
+- 全应用迁移仍未批准。
 - Web Beta 继续作为可用默认和回退。
-- 完成本轮剩余验证后再决定是否进入 Run 单屏。
+- 除 Gate 2 验收中出现阻断问题，否则不启动 Slint/WebView2 对照。
 
-## Next bounded checks
+## Next
 
-1. 真实 Windows IME（人工/自动）测试。
-2. 100 行表格的滚动、粘贴、焦点、错误态。
-3. Release 构建耗时、产物大小、启动时间。
-4. Rune 读取冻结 Run fixture；不改数据库。
-5. 若以上通过，再启动 Run 单屏；否则评估 Slint/WebView2。
+1. 用冻结 Run 做 Rune Run 单屏：时间点、任务、状态、检查、记录、结果。
+2. 同一 fixture 与 Web 做事实对照。
+3. 重启回看；确认数据持久化。
+4. 不重构 Core，不迁移其他页面。
 
-No UI migration is approved by this report.
+No full-app migration is approved by this report.
