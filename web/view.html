@@ -274,6 +274,18 @@ h1,h2,h3,.detail-title{text-wrap:balance}
 p,.op-brief-instruction{text-wrap:pretty}
 
 .cmp-table--readonly td,.run-module-table td{font-variant-numeric:tabular-nums}
+
+.calculator-backdrop{position:fixed;inset:0;z-index:40;background:rgb(0 0 0 / 38%)}
+.calculator-drawer{position:fixed;z-index:41;top:56px;right:0;bottom:0;width:min(560px,100vw);overflow:auto;padding:20px;background:var(--al-surface);border-left:1px solid var(--al-line);box-shadow:-24px 0 60px rgb(0 0 0 / 24%)}
+.calc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+.calc-head h2{margin:0 0 3px;font-size:20px}.calc-head small{display:block;color:var(--al-muted);font-size:11px;line-height:1.5}
+.calc-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.calc-grid label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--al-muted)}
+.calc-grid input,.calc-grid select{min-height:34px;padding:6px 8px;border:1px solid var(--al-line);border-radius:6px;background:var(--al-surface);color:var(--al-ink);font:13px var(--al-font)}
+.calc-result{margin-top:14px;padding:10px 12px;border:1px solid var(--al-line);border-radius:8px;background:var(--al-surface-2);font-variant-numeric:tabular-nums;font-size:13px;line-height:1.5}
+.calc-result.is-error{color:var(--al-danger,#dc2626);border-color:var(--al-danger,#dc2626)}
+@media(max-width:760px){.calculator-drawer{top:0;width:100vw;padding:14px}.calc-grid{grid-template-columns:1fr}}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">

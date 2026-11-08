@@ -201,6 +201,63 @@
       return `<details class="page-row"><summary><strong>${esc(title(record))}</strong><small>${esc(summary)}</small></summary><div class="page-resource-detail">${detail}<details><summary>技术 ID</summary><code>${esc(record.id)}</code></details></div></details>`;
     }).join("") : `<div class="page-muted">暂无资料。</div>`;
   }
+  function openCalculator(mode = "dilution") {
+    document.getElementById("calculator-drawer")?.remove();
+    document.getElementById("calculator-backdrop")?.remove();
+    const backdrop = document.createElement("div");
+    backdrop.id = "calculator-backdrop";
+    backdrop.className = "calculator-backdrop";
+    const drawer = document.createElement("section");
+    drawer.id = "calculator-drawer";
+    drawer.className = "calculator-drawer";
+    const modes = [["dilution", "稀释"], ["reagent", "试剂总量"], ["serial", "系列稀释"], ["reaction", "反应体积"]];
+    const fields = {
+      dilution: `<div class="calc-grid"><label>储液浓度 C1<input name="c1" type="number" min="0" step="any" placeholder="0"></label><label>目标浓度 C2<input name="c2" type="number" min="0" step="any" placeholder="0"></label><label>目标体积 V2<input name="v2" type="number" min="0" step="any" placeholder="0"></label><label>浓度单位<select name="c_unit"><option value="1">M</option><option value="0.001" selected>mM</option><option value="0.000001">µM</option></select></label><label>体积单位<select name="v_unit"><option value="0.001" selected>mL</option><option value="0.000001">µL</option></select></label></div>`,
+      reagent: `<div class="calc-grid"><label>孔位数<input name="positions" type="number" min="1" step="1" placeholder="96"></label><label>每孔体积 (µL)<input name="volume" type="number" min="0" step="any" placeholder="100"></label><label>额外比例<input name="extra" type="number" min="0" step="any" placeholder="0.1"></label></div>`,
+      serial: `<div class="calc-grid"><label>初始浓度<input name="initial" type="number" min="0" step="any" placeholder="1"></label><label>转移体积<input name="transfer" type="number" min="0" step="any" placeholder="100"></label><label>稀释液体积<input name="diluent" type="number" min="0" step="any" placeholder="900"></label><label>级数<input name="steps" type="number" min="1" max="100" step="1" placeholder="6"></label></div>`,
+      reaction: `<div class="calc-grid"><label>目标总体积 (µL)<input name="target" type="number" min="0" step="any" placeholder="50"></label><label>已分配体积 (µL)<input name="used" type="number" min="0" step="any" placeholder="30"></label></div>`
+    };
+    drawer.innerHTML = `<div class="calc-head"><div><h2>计算器</h2><small>算术结果不是实验条件建议；请核对单位与适用方案。</small></div><button class="btn" id="calcClose" type="button">×</button></div><div class="calc-tabs">${modes.map(([key,label])=>`<button class="btn ${key===mode?"primary":""}" data-calc-mode="${key}" type="button">${label}</button>`).join("")}</div><div id="calcForm">${fields[mode]}</div><button class="btn primary" id="calcRun" type="button">计算</button><div id="calcResult" class="calc-result" role="status" aria-live="polite">填写输入后计算。</div><p class="page-muted">结果只做算术；单位、纯度、盐型和实验条件由研究者核对。</p>`;
+    document.body.append(backdrop, drawer);
+    const close = () => { drawer.remove(); backdrop.remove(); };
+    drawer.querySelector("#calcClose").onclick = close;
+    backdrop.onclick = close;
+    const drawForm = next => {
+      drawer.querySelectorAll("[data-calc-mode]").forEach(button => button.classList.toggle("primary", button.dataset.calcMode === next));
+      drawer.querySelector("#calcForm").innerHTML = fields[next];
+      drawer.querySelector("#calcResult").textContent = "填写输入后计算。";
+      drawer.querySelector("#calcRun").onclick = () => calculate(next);
+    };
+    const number = name => Number(drawer.querySelector(`[name="${name}"]`)?.value);
+    const calculate = next => {
+      const result = drawer.querySelector("#calcResult");
+      const fail = text => { result.textContent = text; result.classList.add("is-error"); };
+      result.classList.remove("is-error");
+      if (next === "dilution") {
+        const c1 = number("c1"), c2 = number("c2"), v2 = number("v2"), cu = number("c_unit"), vu = number("v_unit");
+        if (![c1,c2,v2,cu,vu].every(value => Number.isFinite(value) && value > 0)) return fail("请填写大于 0 的浓度和体积。");
+        const v1L = (c2 * cu * v2 * vu) / (c1 * cu);
+        result.textContent = `V1 = ${Number((v1L * 1e6).toFixed(4))} µL（${Number((v1L * 1000).toFixed(6))} mL）`;
+      } else if (next === "reagent") {
+        const positions = number("positions"), volume = number("volume"), extra = number("extra");
+        if (![positions,volume,extra].every(value => Number.isFinite(value) && value >= 0) || !Number.isInteger(positions) || !positions) return fail("孔位数必须是正整数，体积和额外比例不能为负。");
+        result.textContent = `总量 = ${Number((positions * volume * (1 + extra)).toFixed(3))} µL`;
+      } else if (next === "serial") {
+        const initial = number("initial"), transfer = number("transfer"), diluent = number("diluent"), steps = number("steps");
+        if (![initial,transfer,diluent,steps].every(value => Number.isFinite(value) && value > 0) || !Number.isInteger(steps) || steps > 100) return fail("浓度、体积和 1–100 的整数级数必须有效。");
+        let current = initial; const values = [];
+        for (let i = 1; i <= steps; i++) { current = current * transfer / (transfer + diluent); values.push(`${i}: ${Number(current.toFixed(6))}`); }
+        result.textContent = values.join(" · ");
+      } else {
+        const target = number("target"), used = number("used");
+        if (![target,used].every(value => Number.isFinite(value) && value >= 0) || used > target) return fail("已分配体积不能超过目标总体积。");
+        result.textContent = `剩余体积 = ${Number((target - used).toFixed(3))} µL`;
+      }
+    };
+    drawer.querySelectorAll("[data-calc-mode]").forEach(button => button.onclick = () => { mode = button.dataset.calcMode; drawForm(mode); });
+    drawForm(mode);
+  }
+
   function renderTools() {
     const tables = records("library_table"), formulas = records("formula");
     const materials = records("material"), instruments = records("instrument");
@@ -219,7 +276,7 @@
           <h3>仪器</h3><div class="page-list">${resourceRows(instruments, "instrument")}</div>
         </section>
         <section class="page-card"><h2>仪器与设备</h2><div class="page-list">${(window.AsterResources?.instruments || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div><span class="page-muted">通用资源</span></div>`).join("") || '<div class="page-muted">尚无仪器目录。</div>'}</div></section>
-        <section class="page-card"><h2>常用工具</h2><div class="page-list">${(window.AsterResources?.tools || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div><button class="btn" onclick="location.href='/workspace?view=${esc(item.view || "calculators")}'">打开</button></div>`).join("") || '<div class="page-muted">尚无工具目录。</div>'}</div></section>
+        <section class="page-card"><h2>常用工具</h2><div class="page-list">${(window.AsterResources?.tools || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div>${item.view === "calculators" ? `<button class="btn" data-calculator="${esc(item.mode || "dilution")}">打开</button>` : `<button class="btn" onclick="location.href='/workspace?view=${esc(item.view || "home")}'">打开</button>`}</div>`).join("") || '<div class="page-muted">尚无工具目录。</div>'}</div></section>
         <section class="page-card"><h2>材料与配方</h2><div class="page-list">${(window.AsterResources?.materials || []).map(item => `<div class="page-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.summary)}</small></div><span class="page-muted">配方待绑定</span></div>`).join("") || '<div class="page-muted">尚无材料目录。</div>'}</div></section>
         <section class="page-card"><h2>数据与项目管理</h2><div class="page-tools">
           <button class="btn" onclick="AsterPageCtx.setPage('records')">查看实验记录</button>
@@ -228,6 +285,7 @@
           <button class="btn" onclick="AsterPageCtx.backupData().catch(error => { document.getElementById('status').textContent = error.message; })">备份数据库</button>
         </div><p class="page-muted">项目切换位于顶部；导出包含当前本机状态。</p></section>
       </div>`;
+    document.querySelectorAll("[data-calculator]").forEach(button => button.onclick = () => openCalculator(button.dataset.calculator));
   }
   async function renderPage(name) {
     await loadState();

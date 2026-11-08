@@ -69,6 +69,15 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert(timedText.includes("24 h") && timedText.includes("48 h"));
   assert(timedText.includes("任务 1/2"));
   await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("常用工具"));
+  await page.locator('[data-calculator="dilution"]').first().click();
+  await page.waitForSelector("#calculator-drawer");
+  await page.locator('#calculator-drawer input[name="c1"]').fill('1');
+  await page.locator('#calculator-drawer input[name="c2"]').fill('0.1');
+  await page.locator('#calculator-drawer input[name="v2"]').fill('1');
+  await page.locator('#calcRun').click();
+  assert((await page.locator('#calcResult').innerText()).includes('µL'));
+  await page.locator('#calcClose').click();
+  assert.equal(await page.locator('#calculator-drawer').count(),0);
   await page.goto(`${base}/?project=${project.id}&design=${design.id}`,{waitUntil:"networkidle"});
   await page.waitForSelector(".wnode");
   await page.locator(".wnode").first().click();
