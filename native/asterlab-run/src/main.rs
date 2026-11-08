@@ -32,7 +32,12 @@ fn call(cmd: &str, input: Value) -> Result<Value, String> {
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
     let raw = String::from_utf8_lossy(&out.stdout);
     let v: Value = serde_json::from_str(raw.trim()).map_err(|_| format!("{cmd}: {raw}"))?;
-    if v["ok"].as_bool() != Some(true) { return Err(v["error"].as_str().unwrap_or("命令失败").into()); }
+    if v["ok"].as_bool() != Some(true) {
+        let e = &v["error"];
+        let msg = e["message"].as_str().or_else(|| e.as_str()).unwrap_or("命令失败");
+        let code = e["code"].as_str().unwrap_or("");
+        return Err(if code.is_empty() { msg.to_owned() } else { format!("{msg} ({code})") });
+    }
     Ok(v["result"].clone())
 }
 fn s(v: &Value, key: &str) -> String { v[key].as_str().unwrap_or("").to_string() }
@@ -218,7 +223,7 @@ fn view(a: &App, cx: &mut Cx<App>) -> El {
                 .on_select(move |x: &mut App, _| x.select_design(&did2))
                 .build(&k).key(format!("design-{did}"))
         }).collect();
-        let section = SidebarSection::new(pname).rows(rows);
+        let section = SidebarSection::new(pname).collapsed(false).rows(rows);
         sidebar = sidebar.section(section);
     }
     let sidebar_el = sidebar.build(&k);
@@ -300,18 +305,25 @@ fn view(a: &App, cx: &mut Cx<App>) -> El {
         content = content.child(right.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
     }
 
-    let main_area = col().grow(1.0).min_w(0.0).h_full().child(content);
-
-    let shell = row().w_full().h_full().fill(t.bg)
+    let main_area = col().grow(1.0).min_w(0.0).min_h(0.0).child(content);
+    let insets = cx.chrome_insets();
+    let top = row().w_full().h(40.0).px(14.0).pr(14.0 + insets.trailing)
+        .items_center().gap(space::S2).fill(t.card).border(1.0, t.card_border)
+        .window_drag()
+        .child(text("AsterLab").font(SECTION).color(t.text))
+        .child(text("实验运行").font(LABEL).color(t.text_secondary))
+        .child(el().grow(1.0))
+        .child(text(title.to_owned()).font(LABEL).color(t.text_secondary).wrap());
+    let body = row().w_full().grow(1.0).min_h(0.0)
         .child(rail)
         .child(side)
         .child(main_area);
-    shell
+    col().w_full().h_full().fill(t.bg).child(top).child(body)
 }
 
 fn main() {
     let mut spec = AppSpec::new("AsterLab Run · Gate 2", (1200.0, 760.0), init, view);
     spec.families = ("Inter, Segoe UI, Microsoft YaHei", "Cascadia Mono, Consolas");
     spec.min_size = Some((900.0, 600.0));
-    rune::run(spec);
+    rune::App::new(spec).titlebar(rune::Titlebar::new(40.0)).run();
 }
