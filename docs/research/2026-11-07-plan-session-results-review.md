@@ -91,7 +91,8 @@
 - 批量粘贴增加预览/校验:空数值、非法数字、超过两列会阻止保存;样本标签明确标记为未匹配。
 - 实测 L929 closure run:D1 完成后刷新进入 D3,D3 完成后刷新进入 D7;通用准备仍可查看。
 - 状态切换实测:D7 任务 completed → blocked → completed;任务投影依次为 blocked → completed,Run 状态同步为 blocked → in_progress。
-- Results 往返实测:粘贴 0.82/0.79,刷新后仍显示 `0.82 AU · Control-1; 0.79 AU · Control-2`。
+- 跨天/重开实测:L929 D1 完成后进程重启,Run 直接定位 D3;D3 完成后重启定位 D7;通用准备仍显示已完成。
+- Results 往返实测:粘贴 0.82/0.79,刷新后仍显示 `0.82 AU · Control-1; 0.79 AU · Control-2`;完全重启 AsterLab 进程后仍显示。
 - 批量粘贴预览会拒绝空数值(`Number("")` 不再变 0)、非法数字和超过两列。
 - `pages-smoke` 增加 measurement 往返断言、混合时间点首屏断言和完成状态断言。
 
