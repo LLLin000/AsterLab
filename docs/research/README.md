@@ -1,6 +1,6 @@
 # Research 文档索引
 
-这些文件记录 AsterLab / Lab Workbench 的产品研究、术语和设计边界。它们含有产品建议、源码观察和桌面走查，**不等同于代码已实现或用户测试已通过**。当前运行能力以 README.md 与 AGENT_API.md 为准；科学对象术语以 CONTEXT.md 为准。
+这些文件记录 AsterLab / Lab Workbench 的产品研究、术语和设计边界。它们含有产品建议、源码观察和桌面走查，**不等同于代码已实现或用户测试已通过**。当前运行能力以 README.md 与 AGENT_API.md 为准；科学对象术语以 CONTEXT.md 为准。 **已冻结的当前设计契约与 Rune 迁移门槛见 [docs/design/README.md](../design/README.md)。**
 
 ## 建议阅读顺序
 

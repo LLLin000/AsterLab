@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: AsterLab
-description: "A quiet, task-first native research workspace. Warm neutral canvas, one violet accent reserved for selection and primary action, hairline structure instead of card stacks, and a typography ladder where black body text always outranks gray labels."
+description: "AsterLab is a process-centered research design and execution workbench. Warm neutral canvas, one violet accent reserved for selection and primary action, hairline structure instead of card stacks, and a typography ladder where black body text always outranks gray labels."
 colors:
   accent: "#5b45c9"
   accent-hover: "#4b37ae"
@@ -184,9 +184,19 @@ components:
     borderColor: "{colors.hairline}"
 ---
 
+## Direction freeze
+
+- Status: **Native UI Direction Freeze / 2026-11-08**
+- Authority: [PRODUCT.md](PRODUCT.md) defines product positioning and the four frozen decisions; this file defines the visual and interaction language. [SURFACES.md](SURFACES.md), [COMPONENTS.md](COMPONENTS.md), [RECORDING.md](RECORDING.md) and [MIGRATION.md](MIGRATION.md) define the execution contracts.
+- Rune is an implementation choice under evaluation, not a visual authority. Do not inherit Rune/OpenCode themes.
+- The four main labels remain: 实验设计, Protocol, 实验运行, 资料与工具. Results belongs inside Run; there is no standalone experiment-records surface.
+- Run-first means Task-first inside the Run surface. It does not make experiment design secondary, and it does not make Run the application home page.
+- A schedule strip is data-driven: timepoints when a Run has them, named phases when a Protocol has them, otherwise linear step progress. Never hardcode D1/D3/D7 or invent a second timeline.
+- One primary action per view. Measurement and step completion are separate events. Unknown conditions remain visible; planned parameters never become actual measurements.
+
 ## Overview
 
-AsterLab is a **quiet, task-first native research workspace** for planning, preparing, and running cell experiments. It should feel like a well-made tool: calm, precise, and dense with real data—not a dashboard, not a form, not a marketing page.
+AsterLab is a **process-centered research design and execution workbench** for planning, preparing, and running cell experiments. It should feel like a well-made tool: calm, precise, and dense with real data—not a dashboard, not a form, not a marketing page.
 
 The design follows three rules learned from Linear, Vercel Geist, Apple HIG, and GitHub Primer:
 
@@ -196,7 +206,7 @@ The design follows three rules learned from Linear, Vercel Geist, Apple HIG, and
 4. **Rhythm follows adjacency, not uniform padding.** List rows sit close together; sections get larger breathing room. (Notion’s page spacing refresh)
 5. **Tokens are semantic, not raw colors.** Surface, border, text, and interaction roles stay stable across themes. (Obsidian CSS variables; GitHub Primer tokens)
 
-The product is read-only in the current spike, but the visual system is designed for edit and execution states. A control that cannot write yet must not pretend to be a completed workflow.
+The current Web Beta is writable; Rune is a future native target under gate evaluation. A control must still never pretend to be a completed workflow when its write path is unavailable.
 
 The surface is a warm neutral canvas (`{colors.canvas}`), with pure white only where content is the object of attention (inspector, plate card, selected mode segment). There is **one accent** (`{colors.accent}`) and it means selection or primary action—never decoration, never “data exists.”
 

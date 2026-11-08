@@ -1,0 +1,732 @@
+{
+  "accessibility": {
+    "bounds": [
+      0.0,
+      0.0,
+      920.0,
+      600.0
+    ],
+    "children": [
+      {
+        "bounds": [
+          24.0,
+          24.0,
+          872.0,
+          16.3
+        ],
+        "name": "实验运行 · Run 单屏 Spike",
+        "role": "label"
+      },
+      {
+        "bounds": [
+          24.0,
+          56.3,
+          872.0,
+          16.3
+        ],
+        "name": "L929 closure run · 当前任务 3/5 · D7 · 中文标签、输入和表格字段",
+        "role": "label"
+      },
+      {
+        "bounds": [
+          24.0,
+          88.5,
+          872.0,
+          16.3
+        ],
+        "name": "这是一段用于验证中文长文本换行、标点、数字 12345 和单位 mg/mL 混排的说明。实验记录必须保持未知与已知的边界，不能根据孔位数量推断独立实验单位，也不能把计划参数写成实际测量值。",
+        "role": "label"
+      },
+      {
+        "bounds": [
+          40.0,
+          136.8,
+          840.0,
+          16.3
+        ],
+        "name": "CCK-8 读板记录",
+        "role": "label"
+      },
+      {
+        "bounds": [
+          40.0,
+          161.0,
+          840.0,
+          15.0
+        ],
+        "name": "按当前 Assay 的结构化字段记录，保存后进入结果。",
+        "role": "label"
+      },
+      {
+        "bounds": [
+          40.0,
+          184.0,
+          30.0,
+          15.0
+        ],
+        "name": "孔位",
+        "role": "label"
+      },
+      {
+        "actions": [
+          "click"
+        ],
+        "bounds": [
+          48.0,
+          210.9,
+          14.0,
+          16.3
+        ],
+        "key": "well",
+        "role": "text-input",
+        "selection": [
+          1,
+          2,
+          1,
+          2
+        ],
+        "states": [
+          "read-only"
+        ],
+        "value": "A1"
+      },
+      {
+        "bounds": [
+          78.0,
+          184.0,
+          61.0,
+          15.0
+        ],
+        "name": "组别",
+        "role": "label"
+      },
+      {
+        "actions": [
+          "click"
+        ],
+        "bounds": [
+          86.0,
+          210.9,
+          45.0,
+          16.3
+        ],
+        "key": "group",
+        "role": "text-input",
+        "selection": [
+          1,
+          7,
+          1,
+          7
+        ],
+        "states": [
+          "read-only"
+        ],
+        "value": "Control"
+      },
+      {
+        "bounds": [
+          147.0,
+          184.0,
+          42.5,
+          15.0
+        ],
+        "name": "OD450",
+        "role": "label"
+      },
+      {
+        "actions": [
+          "click"
+        ],
+        "bounds": [
+          155.0,
+          210.9,
+          26.5,
+          16.3
+        ],
+        "key": "od",
+        "role": "text-input",
+        "selection": [
+          1,
+          4,
+          1,
+          4
+        ],
+        "states": [
+          "read-only"
+        ],
+        "value": "0.77"
+      },
+      {
+        "actions": [
+          "click"
+        ],
+        "bounds": [
+          40.0,
+          243.0,
+          72.0,
+          30.0
+        ],
+        "children": [
+          {
+            "bounds": [
+              52.0,
+              250.5,
+              48.0,
+              15.0
+            ],
+            "name": "保存读数",
+            "role": "label"
+          }
+        ],
+        "key": "save",
+        "name": "保存读数",
+        "role": "button"
+      },
+      {
+        "bounds": [
+          120.0,
+          250.5,
+          36.0,
+          15.0
+        ],
+        "name": "未保存",
+        "role": "label"
+      },
+      {
+        "bounds": [
+          24.0,
+          305.0,
+          872.0,
+          16.3
+        ],
+        "name": "材料与试剂 未绑定 · 仪器与程序 未绑定 · 检查与接受 0/2",
+        "role": "label"
+      }
+    ],
+    "name": "AsterLab Rune Spike",
+    "role": "window"
+  },
+  "anim_t": 0.0,
+  "animating": false,
+  "dark_system": false,
+  "elements": [
+    {
+      "blur": 0.0,
+      "fill": "#f0f1f4ff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0",
+      "rect": [
+        0.0,
+        0.0,
+        920.0,
+        600.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#1a1c1fff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#0",
+      "rect": [
+        24.0,
+        24.0,
+        872.0,
+        16.25
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "实验运行 · Run 单屏 Spike"
+    },
+    {
+      "blur": 0.0,
+      "color": "#606369ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#1",
+      "rect": [
+        24.0,
+        56.25,
+        872.0,
+        16.25
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "L929 closure run · 当前任务 3/5 · D7 · 中文标签、输入和表格字段"
+    },
+    {
+      "blur": 0.0,
+      "color": "#606369ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#2",
+      "rect": [
+        24.0,
+        88.5,
+        872.0,
+        16.25
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "这是一段用于验证中文长文本换行、标点、数字 12345 和单位 mg/mL 混排的说明。实验记录必须保持未知与已知的边界，不能根据孔位数量推断独立实验单位，也不能把计划参数写成实际测量值。"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#ffffffff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3",
+      "rect": [
+        24.0,
+        120.75,
+        872.0,
+        168.25
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#1a1c1fff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#0",
+      "rect": [
+        40.0,
+        136.75,
+        840.0,
+        16.25
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "CCK-8 读板记录"
+    },
+    {
+      "blur": 0.0,
+      "color": "#606369ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#1",
+      "rect": [
+        40.0,
+        161.0,
+        840.0,
+        15.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "按当前 Assay 的结构化字段记录，保存后进入结果。"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2",
+      "rect": [
+        40.0,
+        184.0,
+        840.0,
+        51.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#0",
+      "rect": [
+        40.0,
+        184.0,
+        30.0,
+        51.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#606369ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#0/#0",
+      "rect": [
+        40.0,
+        184.0,
+        30.0,
+        15.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "孔位"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#ffffffff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#0/#1",
+      "rect": [
+        40.0,
+        203.0,
+        30.0,
+        32.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#1a1c1fff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "well",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#0/#1/well",
+      "rect": [
+        48.0,
+        210.88,
+        14.0,
+        16.25
+      ],
+      "role": "textbox",
+      "scale": 1.0,
+      "text": "A1"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#1",
+      "rect": [
+        78.0,
+        184.0,
+        61.0,
+        51.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#606369ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#1/#0",
+      "rect": [
+        78.0,
+        184.0,
+        61.0,
+        15.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "组别"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#ffffffff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#1/#1",
+      "rect": [
+        78.0,
+        203.0,
+        61.0,
+        32.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#1a1c1fff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "group",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#1/#1/group",
+      "rect": [
+        86.0,
+        210.88,
+        45.0,
+        16.25
+      ],
+      "role": "textbox",
+      "scale": 1.0,
+      "text": "Control"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#2",
+      "rect": [
+        147.0,
+        184.0,
+        42.5,
+        51.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#606369ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#2/#0",
+      "rect": [
+        147.0,
+        184.0,
+        42.5,
+        15.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "OD450"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#ffffffff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#2/#1",
+      "rect": [
+        147.0,
+        203.0,
+        42.5,
+        32.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#1a1c1fff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "od",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#2/#2/#1/od",
+      "rect": [
+        155.0,
+        210.88,
+        26.5,
+        16.25
+      ],
+      "role": "textbox",
+      "scale": 1.0,
+      "text": "0.77"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#3",
+      "rect": [
+        40.0,
+        243.0,
+        840.0,
+        30.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#9260daff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "save",
+      "label": "保存读数",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#3/save",
+      "rect": [
+        40.0,
+        243.0,
+        72.0,
+        30.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ffffffff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#3/save/#0",
+      "rect": [
+        52.0,
+        250.5,
+        48.0,
+        15.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "保存读数"
+    },
+    {
+      "blur": 0.0,
+      "color": "#606369ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#3/#3/#1",
+      "rect": [
+        120.0,
+        250.5,
+        36.0,
+        15.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "未保存"
+    },
+    {
+      "blur": 0.0,
+      "color": "#606369ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "#0/#4",
+      "rect": [
+        24.0,
+        305.0,
+        872.0,
+        16.25
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "材料与试剂 未绑定 · 仪器与程序 未绑定 · 检查与接受 0/2"
+    }
+  ],
+  "reduced_motion": false,
+  "scale": 2.0,
+  "t": 0.0,
+  "time_scale": 1.0,
+  "title": "AsterLab Rune Spike",
+  "viewport": [
+    920.0,
+    600.0
+  ],
+  "warnings": []
+}

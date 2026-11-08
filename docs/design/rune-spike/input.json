@@ -1,0 +1,5 @@
+[
+  {"t":0.2,"type":"tap","x":50,"y":220},
+  {"t":0.4,"type":"type","text":"B2"},
+  {"t":0.8,"type":"tap","key":"save"}
+]
