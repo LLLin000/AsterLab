@@ -36,6 +36,7 @@
 30. [视觉审查:设计工作流与执行驾驶舱](2026-11-07-visual-audit.md) — 1440/390 截图审查,图标、移动端流程、执行模块列和表单重叠的修复记录。
 31. [Plan → Session → Results 双场景走查](2026-11-07-plan-session-results-review.md) — L929 多检测跨天与 Western blot 流程,含子代理视觉反馈和剩余限制。
 32. [Step Detail 组件视觉审计](2026-11-08-component-visual-audit.md) — 两列组件布局、只读表格、Execution brief 和弹层关闭行为。
+33. [Kubai UI 技巧借鉴](2026-11-08-kubai-ui-principles.md) — 浮层分层、连续性、材质小配方和动画节奏在 AsterLab 的落地范围。
 
 ## 证据标签
 
