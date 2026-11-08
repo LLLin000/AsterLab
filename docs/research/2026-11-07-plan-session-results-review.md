@@ -83,6 +83,14 @@
 
 验证:L929 Run 首屏显示 5 个任务(2 个通用准备 + 3 个 D1 任务),完成 Seed 后进入 Apply extracts;Run 状态为 `in_progress`;结果页可粘贴两行读数并生成 measurement 事件。
 
+## 2026-11-08 Design → Workflow 自动投影
+
+- 新增 `POST /api/designs/{id}/workflow`:按 Design 中每个 Assay 的 ProtocolVersion 调用现有 `view.project`,合并为一张带检测分支的 ViewDocument;节点保留 `protocol_version_id`、scope、step path 引用。
+- 无匹配 View 时前端自动调用一次;成功后直接加载 Workflow,不再停留在 Plan 空态。已有 View 不改写。
+- 生成的 ViewDocument 使用确定性 `design-{id}-workflow` document_id;重复打开返回已有 View。
+- 验收:L929 设计首次打开自动出现 5 个节点(CCK-8 3 步 + LIVE/DEAD 2 步),检测分支均可点击。
+- 回归:已有 Western blot View 不受影响。
+
 ## 2026-11-08 Results/State 收口
 
 - `ExecutionEventView` 新增 `measurements`;RunWorkspace 往返不再丢失批量读数。

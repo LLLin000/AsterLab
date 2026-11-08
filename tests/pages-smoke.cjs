@@ -33,6 +33,7 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
     {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-note",definition:{id:"content.note",version:1},props:{text:"Note *rendered*"},slots:{}}},
     {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-table",definition:{id:"content.table",version:1},props:{columns:["Item","Value"],rows:[["A","1"]]},slots:{}}},
     {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-calc",definition:{id:"tool.calculator",version:1},props:{tool_ref:"tool.reagent_total@1"},slots:{}}},
+    {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-plate",definition:{id:"lab.well_plate",version:1},props:{},slots:{}}},
     {kind:"add_slot_child",parent_instance_id:componentRootId,slot_id:"detail",child:{instance_id:"test-flow",definition:{id:"workflow",version:1},props:{},slots:{},workflow:{nodes:[],edges:[]}}}
   ];
   cli("view.revise",{view_id:componentsView.view?.id||componentsView.id,changeset:{changeset_id:"components-smoke",document_id:componentDocumentId,expected_revision:1,operations:componentOperations,provenance:["test"]}});
@@ -75,6 +76,10 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert.equal(await page.locator(".cmp-markdown").count(),1);
   assert((await page.locator(".cmp-table").count()) >= 1);
   assert.equal(await page.locator(".cmp-calculator").count(),1);
+  assert.equal(await page.locator(".cmp-wellplate").count(),1);
+  const plateWidth=await page.locator(".cmp-wellplate").evaluate(e=>e.getBoundingClientRect().width);
+  const calcWidth=await page.locator(".cmp-calculator").evaluate(e=>e.getBoundingClientRect().width);
+  assert(plateWidth > calcWidth);
   assert((await page.locator(".cards").innerText()).includes("嵌套流程"));
   await page.locator(".cards .cmp-table").first().click();
   await page.waitForTimeout(150);
@@ -82,6 +87,9 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   await page.mouse.click(600,120);
   await page.waitForTimeout(150);
   assert.equal(await page.locator("#proposal-panel").isVisible(),false);
+  await page.goto(`${base}/?project=${project.id}&design=${timedDesign.id}`,{waitUntil:"networkidle"});
+  await page.waitForSelector(".wnode",{timeout:5000});
+  assert((await page.locator(".wnode").count()) > 0);
   assert.deepEqual(errors,[]);
   await browser.close();server.kill();console.log(JSON.stringify({ok:true,rail:4,pages:["protocols","runs","tools"],errors}));
 })().catch(error=>{console.error(error);process.exitCode=1});

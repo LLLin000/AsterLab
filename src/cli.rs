@@ -3244,6 +3244,98 @@ pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Valu
     Ok(json!({"document":document}))
 }
 
+
+pub(crate) fn ensure_design_workflow(
+    db: &mut Connection,
+    design_id: &str,
+) -> Result<Value, CliError> {
+    let design = get(db, design_id)?;
+    if design["kind"] != "design" {
+        return Err(CliError::input("design_id 必须指向实验设计"));
+    }
+    let project = design["project_id"]
+        .as_str()
+        .ok_or_else(|| CliError::internal("实验设计缺少项目归属"))?
+        .to_owned();
+    for view in list(db, Some("view"), Some(&project))? {
+        let Some(view_id) = view["id"].as_str() else { continue };
+        let Ok(document) = get_view(db, view_id) else { continue };
+        if document["latest_version"]["data"]["document_id"].as_str() == Some(&format!("design-{design_id}-workflow")) {
+            return Ok(json!({"view": view, "latest_version": document["latest_version"]}));
+        }
+    }
+    let assays = design["data"]["assays"].as_array().cloned().unwrap_or_default();
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut schema_version = 1;
+    for (assay_index, assay) in assays.iter().enumerate() {
+        let Some(protocol_version_id) = assay["protocol_version_id"].as_str().filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        let Some(assay_id) = assay["id"].as_str() else { continue };
+        let projected = project_view_records(
+            db,
+            &json!({
+                "project_id": project,
+                "protocol_version_id": protocol_version_id,
+                "scope": {"kind": "assay", "assay_id": assay_id}
+            }),
+        )?;
+        let document = &projected["document"];
+        schema_version = document["schema_version"].as_i64().unwrap_or(1);
+        let node_items = document["root"]["workflow"]["nodes"].as_array().cloned().unwrap_or_default();
+        let edge_items = document["root"]["workflow"]["edges"].as_array().cloned().unwrap_or_default();
+        let prefix = format!("a{}-", assay_index + 1);
+        let id_map: std::collections::HashMap<String, String> = node_items.iter().filter_map(|node| {
+            let old = node["node_id"].as_str()?.to_owned();
+            Some((old.clone(), format!("{prefix}{old}")))
+        }).collect();
+        for node in node_items {
+            let Some(old) = node["node_id"].as_str().map(str::to_owned) else { continue };
+            let Some(new_id) = id_map.get(&old) else { continue };
+            let mut next = node;
+            next["node_id"] = json!(new_id);
+            if let Some(component) = next.get_mut("component") {
+                component["instance_id"] = json!(new_id);
+            }
+            nodes.push(next);
+        }
+        for edge in edge_items {
+            let Some(from) = edge["from"].as_str() else { continue };
+            let Some(to) = edge["to"].as_str() else { continue };
+            let (Some(from), Some(to)) = (id_map.get(from), id_map.get(to)) else { continue };
+            edges.push(json!({"from": from, "to": to}));
+        }
+    }
+    if nodes.is_empty() {
+        return Err(CliError::input("当前设计没有可投影的 Protocol 步骤"));
+    }
+    let title = format!("{} Workflow", design["data"]["title"].as_str().unwrap_or("Experiment"));
+    let document = json!({
+        "schema_version": schema_version,
+        "document_id": format!("design-{design_id}-workflow"),
+        "revision": 1,
+        "root": {
+            "instance_id": "experiment_main",
+            "definition": {"id": "workflow", "version": 1},
+            "model_ref": null,
+            "props": {},
+            "slots": {},
+            "workflow": {"nodes": nodes, "edges": edges},
+            "visual": null
+        },
+        "bindings": []
+    });
+    let tx = db.unchecked_transaction().map_err(|error| CliError::internal(error.to_string()))?;
+    let result = create_view_records(
+        &tx,
+        &project,
+        &json!({"project_id": project, "title": title, "document": document}),
+    )?;
+    tx.commit().map_err(|error| CliError::internal(error.to_string()))?;
+    Ok(result)
+}
+
 fn find_component<'a>(value: &'a Value, instance_id: &str) -> Option<&'a Value> {
     if value.get("instance_id").and_then(Value::as_str) == Some(instance_id) {
         return Some(value);

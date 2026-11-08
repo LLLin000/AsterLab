@@ -237,6 +237,8 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 @media(min-width:901px){
   .cards{display:flex;flex-wrap:wrap;align-content:flex-start}
   .cards>.card{flex:0 0 calc(50% - 6px);max-width:calc(50% - 6px);width:calc(50% - 6px)}
+  .cards>.card[data-component="lab.well_plate"],.cards>.plate-card{flex-basis:calc(66.666% - 4px);max-width:calc(66.666% - 4px);width:calc(66.666% - 4px)}
+  .cards>.card[data-component="tool.calculator"]{flex-basis:calc(33.333% - 8px);max-width:calc(33.333% - 8px);width:calc(33.333% - 8px)}
   .cards>.op-brief,.cards>.card[data-component="content.note"],.cards>.card[data-component="content.markdown"]{flex-basis:100%;max-width:100%;width:100%}
 }
 
@@ -254,6 +256,17 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 .op-brief-meta{font-size:11px;gap:8px 14px;border-top:1px solid var(--al-line);padding-top:8px}
 .op-brief-instruction{letter-spacing:0}
 .op-brief .op-check{padding-top:8px;margin-top:2px}
+
+/* Kubai-inspired component polish: restrained elevation, inner highlight, continuity */
+.card{box-shadow:inset 0 1px 0 rgb(255 255 255 / 4%),0 1px 2px rgb(0 0 0 / 14%);transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease,transform .15s ease}
+html[data-bs-theme="light"] .card{box-shadow:inset 0 1px 0 rgb(255 255 255 / 90%),0 1px 2px rgb(23 32 48 / 7%)}
+.card:hover{border-color:var(--al-line-strong)}
+.card.selected{border-color:var(--al-accent);box-shadow:0 0 0 1px var(--al-accent),0 8px 24px rgb(0 0 0 / 12%)}
+.wnode{transition:opacity .15s ease,transform .15s ease}
+.wnode:hover .cmp-operation__icon{color:var(--al-accent)}
+.library,.inbox,.proposal{animation:aster-pop .14s ease-out;box-shadow:0 16px 40px rgb(0 0 0 / 22%)}
+@keyframes aster-pop{from{opacity:0;transform:translateY(4px) scale(.985)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.card,.wnode,.library,.inbox,.proposal,.step-chip{transition:none;animation:none}}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">
@@ -356,13 +369,29 @@ async function bootLatestView(){
     collect(root);
     if([...protocolIds].some(id=>refs.has(id))){document.getElementById('canvasPanel').hidden=false;document.getElementById('detail').hidden=false;document.getElementById('detail').classList.remove("plan-empty");document.getElementById('viewId').value=viewRecord.id;await window.load();return}
   }
+  document.getElementById('status').textContent='正在生成 Workflow…';
+  try {
+    const generated=await fetch(`/api/designs/${encodeURIComponent(designId)}/workflow`,{method:"POST"});
+    if(generated.ok){
+      const result=await generated.json();
+      const generatedId=result.view?.id||result.view_id;
+      if(generatedId){
+        document.getElementById('viewId').value=generatedId;
+        document.getElementById('canvasPanel').hidden=false;
+        document.getElementById('detail').hidden=false;
+        document.getElementById('detail').classList.remove("plan-empty");
+        await window.load();
+        return;
+      }
+    }
+  } catch (error) {}
   document.getElementById('viewId').value='';
   window.resetView();
   document.getElementById('canvasPanel').hidden=true;
   document.getElementById('status').textContent='Plan 已保存';
   document.getElementById('detail').hidden=false;
   document.getElementById('detail').classList.add("plan-empty");
-  document.getElementById('detail').innerHTML='<div class="empty-state"><h2>Plan</h2><p>此设计还没有可视化流程。上方的检测安排可直接用于开始运行；需要步骤图时再生成 View。</p></div>';
+  document.getElementById('detail').innerHTML='<div class="empty-state"><h2>Plan</h2><p>此设计还没有可投影的 Protocol 步骤。上方的检测安排可直接用于开始运行。</p></div>';
 }
 window.bootLatestView=bootLatestView;
 

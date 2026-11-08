@@ -527,7 +527,7 @@ async function load(preserveHistory=false,preserveUi=false){
   if(!preserveHistory){history=[];future=[]}
   window.AsterCurrentViewId=viewId;
   render();loadInbox();$("status").textContent=`revision ${data.latest_version?.data?.revision??"?"}`;
-  if(!preserveUi && graph().nodes.length>6){setTimeout(()=>document.getElementById("fit")?.click(),0)}
+  if(!preserveUi && graph().nodes.length>4){setTimeout(()=>document.getElementById("fit")?.click(),0)}
 }
 function resetView(){
   viewId="";window.AsterCurrentViewId="";data=null;node=null;selected=null;stack=[];history=[];future=[];

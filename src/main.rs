@@ -501,6 +501,12 @@ async fn get_design_map(State(s): State<AppState>, Path(id): Path<String>) -> Ap
     Ok(Json(result))
 }
 
+async fn ensure_design_workflow(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    let mut db = lock(&s)?;
+    let result = cli::ensure_design_workflow(&mut db, &id).map_err(ApiError::from_cli)?;
+    Ok(Json(result))
+}
+
 async fn get_run_workspace(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
     let db = lock(&s)?;
     let result = cli::run_workspace(&db, &id).map_err(ApiError::from_cli)?;
@@ -1140,6 +1146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/health", get(health))
         .route("/api/state", get(get_state))
         .route("/api/designs/{id}/map", get(get_design_map))
+        .route("/api/designs/{id}/workflow", post(ensure_design_workflow))
         .route("/api/runs/{id}/workspace", get(get_run_workspace))
         .route("/api/protocol-blocks/preview", post(preview_block))
         .route("/api/records", post(create_record))
