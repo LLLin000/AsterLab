@@ -166,6 +166,10 @@ window.AsterPageModules.runs = async function(root, ctx) {
       const materials = (workspace.materials || []).filter(material => material.planned_output_id === plannedOutputId).map(material => `<div class="page-row"><div><strong>${esc(material.title || "共享材料")}</strong><small>${esc(material.consumer_assay_ids || [])}</small></div></div>`).join("") || '<div class="page-muted">当前范围没有冻结共享材料。</div>';
       const modules = await stepModules(step || {}, assayId, taskScope);
       const designAssay = (workspace.frozen_design?.content?.assays || []).find(assay => assay.id === assayId);
+      const stepSchema = window.AsterRecordSchemas?.forAssay(designAssay);
+      const showStepMeasurement = Boolean(stepSchema && step && !allDone && /read|measure|image|Cq|OD|检测|成像|读|记录/i.test(step.title || ""));
+      const stepMeasurementFields = stepSchema ? stepSchema.columns.map(column => `<td><input data-step-measure="${esc(column.key)}" type="${esc(column.type || "text")}" step="${esc(column.step || "any")}" placeholder="${esc(column.placeholder || "")}" aria-label="${esc(column.label)}"></td>`).join("") : "";
+      const stepMeasurementMarkup = showStepMeasurement ? `<section class="page-card run-measure"><h2>记录本步读数 · ${esc(stepSchema.title)}</h2><p class="page-muted">按当前 Assay 的结构化字段记录；保存后进入下方本任务记录。</p><div class="data-table-wrap"><table class="record-entry-table"><thead><tr>${stepSchema.columns.map(column => `<th>${esc(column.label)}${column.unit ? `<small>${esc(column.unit)}</small>` : ""}</th>`).join("")}</tr></thead><tbody id="step-measure-rows"><tr>${stepMeasurementFields}</tr></tbody></table></div><div class="record-actions"><button class="btn" type="button" id="add-step-measure-row">+ 添加行</button><button class="btn primary" type="button" id="save-step-measure">保存读数</button><span id="step-measure-status" class="page-muted"></span></div></section>` : "";
       const targetGroups = designAssay?.group_names?.join(" / ");
       const targetTimes = currentTask?.timepoint ? [currentTask.timepoint] : (designAssay?.timepoints || []);
       const targetLabel = [targetGroups, targetTimes.join(" / ")].filter(Boolean).join(" · ");
@@ -232,6 +236,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
             ${moduleTable("仪器与程序", modules?.instruments)}
             ${moduleTable("检查与接受", modules?.checks)}
           </div>
+          ${stepMeasurementMarkup}
           <div class="run-grid">
             <section class="page-card"><h2>${allDone ? "本次运行已完成" : timepointDone ? "本时间点已完成" : "确认 / 记录"}</h2>${allDone ? '<p class="page-muted">所有任务都有已完成记录；本页只回看，不再追加新的完成事件。</p>' : timepointDone ? '<p class="page-muted">本时间点没有未完成的任务，切换上方时间点继续。</p>' : form}</section>
             <section class="page-card"><h2>本任务记录</h2>${eventRows}</section>
@@ -293,6 +298,19 @@ window.AsterPageModules.runs = async function(root, ctx) {
         resultFormEl.addEventListener("input", updatePreview);
         updatePreview();
       }
+      root.querySelector("#add-step-measure-row")?.addEventListener("click", () => {
+        root.querySelector("#step-measure-rows")?.insertAdjacentHTML("beforeend", `<tr>${stepMeasurementFields}</tr>`);
+      });
+      root.querySelector("#save-step-measure")?.addEventListener("click", async () => {
+        const status = root.querySelector("#step-measure-status");
+        const rows = [...root.querySelectorAll("#step-measure-rows tr")].map(tr => Object.fromEntries([...tr.querySelectorAll("[data-step-measure]")].map(input => [input.dataset.stepMeasure, input.value.trim()])));
+        const measurements = rows.flatMap(row => stepSchema.map(row));
+        if (!measurements.length) { status.textContent = "至少填写一行有效数值。"; return; }
+        status.textContent = "保存中…";
+        const response = await fetch("/api/records", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind:"execution_event",parent_id:runId,project_id:run.project_id,data:{event_type:"measurement",content:`结构化记录 · ${designAssay?.title || "检测"}`,protocol_step_path:step.path,protocol_version_id:versionId,assay_id:assayId,timepoint:currentTask?.timepoint || null,task_key:currentTask?.task_key || null,measurements}})});
+        if (!response.ok) { const body = await response.json().catch(() => ({})); status.textContent = body.error || `保存失败（${response.status}）`; return; }
+        await render();
+      });
       const confirmButton = root.querySelector("#actual-form button[type=submit]");
       const syncConfirm = () => {
         if (!confirmButton) return;

@@ -242,6 +242,8 @@
     };
   }
 
+  window.AsterRecordSchemas = { forAssay: recordSchemaFor };
+
   function structuredRecordRows(events) {
     return events.flatMap(event => {
       const value = data(event), run = one(event.parent_id);

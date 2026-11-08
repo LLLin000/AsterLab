@@ -61,6 +61,12 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   assert((await page.locator(".run-current h2").innerText()).length > 0);
   await page.locator('#actual-form button[type="submit"]').click();
   await page.waitForFunction(() => document.body.innerText.includes("任务 2/2"), null, {timeout: 5000});
+  assert.equal(await page.locator("#step-measure-rows").count(),1);
+  await page.locator('#step-measure-rows input[data-step-measure="well"]').fill("A1");
+  await page.locator('#step-measure-rows input[data-step-measure="group"]').fill("Control");
+  await page.locator('#step-measure-rows input[data-step-measure="od"]').fill("0.77");
+  await page.locator("#save-step-measure").click();
+  await page.waitForTimeout(500);
   await page.locator('#actual-form button[type="submit"]').click();
   await page.waitForSelector(".run-done", {timeout: 5000});
   await page.goto(`${base}/?page=runs&run=${timedRun.id}`,{waitUntil:"networkidle"});
