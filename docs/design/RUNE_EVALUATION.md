@@ -1,10 +1,26 @@
 # Rune Technical Feasibility Report
 
 - 日期：2026-11-08
-- 结论：**Gate 1 未通过（IME、表格、打包尚不可用）**；停止 Rune 扩张，保留 Web Beta。CJK 长文本在显式 `.wrap()` 下可换行，但 ICU4X 仍报告缺分段模型。
+- 结论：**技术可行性尚未验证完毕；既不是失败，也还不能批准迁移。**
 - 固定 revision：`a7f276c3630f85a06a0230295da4d2bd172d8d3b`（`anomalyco/rune` `dev`）
 - 许可：MIT（仓库声明）
 - 状态：Rune 官方仍是 pre-release；pin revision，不追浮动分支。
+- 重要区分：**未测 ≠ 失败**。本报告把已有证据、未测项和失败项分开。
+
+## Current verdict
+
+| 能力 | 证据 | 判定 |
+|---|---|---|
+| Windows 编译/运行 | `cargo test -p hello` 通过 | 通过 |
+| GPU 原生渲染 | headless 渲染 + 150% scale | 通过 |
+| 中文短标签/长段落 | 显式 `.wrap()` 后可换行 | 通过（有条件） |
+| CJK 分段错误 | 启用 Parley `complex-scripts` 后零 ICU 报错 | 已定向修复，需上游/补丁 |
+| Headless PNG / 元素树 | `--snap`、`--tree` | 通过 |
+| 脚本点击/输入 | 100 行表格中编辑单元格 | 通过 |
+| 100 行可编辑表格 | 100 个 TextEdit，滚动容器 | 初测通过；未做粘贴/虚拟化 |
+| 中文 IME | 未安装中文输入法，未测 | **未证明** |
+| Release 构建 | 进行中 | **待定** |
+| 真实数据库接入 | 未做 | **未开始** |
 
 ## What ran
 
@@ -12,92 +28,122 @@
 |---|---|---|
 | Rune 构建 | `cargo test -p hello` in pinned clone | 通过；`hello` 1/1 |
 | Spike 编译 | `cargo check -p aster-spike` | 通过 |
-| Headless PNG | `cargo run -p aster-spike -- --snap ... --scale 2 --theme light` | 通过；生成截图 |
-| Accessibility tree | 同次 `--tree ...json` | 通过；中文 label、text-input、button 出现在树中 |
-| 150% scale | `--scale 1.5 --theme dark` | 窗口/文字清晰；长中文仍溢出 |
-| Scripted input | `--script`，tap 保存按钮 | 保存状态变化；字段键入未确认 |
-| 表格 | 未做 | CJK 风险暴露后停止扩展；未证明可编辑表格 |
-| 中文 IME | 未做 | 无法用 headless 替代真实 Windows IME |
-| 打包 | **未完成** | `cargo build --release` 600s 超时；无 release 产物 |
+| Headless PNG | `--snap ... --scale 2 --theme light` | 通过 |
+| Accessibility tree | `--tree ...json` | 通过；中文 label、text-input、button、100 个 cell |
+| 150% scale | `--scale 1.5 --theme dark` | 清晰；长中文可换行 |
+| Scripted input | 点击第 4 行单元格并键入 `B2` | 单元格从 `A4` 变为 `A4B2` |
+| 100 行表格 | 100 个 TextEdit，scroll viewport | 528 layout nodes；脚本 126 帧，first 83ms，p50 2.3ms |
+| 中文 IME | — | **未测**：系统没有安装中文输入法 |
+| Release 构建 | `CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike` | 运行中；结果见下方 |
 
-Spike 源码：[rune-spike/](rune-spike/)（临时 clone：`target/rune-spike/examples/aster-spike/`）。  
-证据截图：
+Spike 源码：[rune-spike/](rune-spike/)（临时 clone：`target/rune-spike/examples/aster-spike/`）。
 
-- `docs/design/rune-spike-light.png`
-- `docs/design/rune-spike-cjk-wrap.png`
-- `docs/design/rune-spike-150.png`
+证据：
+
+- `docs/design/rune-spike-cjk-fixed.png`
 - `docs/design/rune-spike-input.png`
-- `docs/design/rune-spike-tree.json`
+- `docs/design/rune-spike-150.png`
+- `docs/design/rune-spike-fixed-tree.json`
+- `docs/design/rune-spike-input-tree.json`
 
-## Risk — CJK segmentation
+## CJK finding and fix
 
-`aster-spike` renders Chinese glyphs correctly, but every long Chinese paragraph emits:
+原始现象：
 
 ```text
 ICU4X data error: No segmentation model for complex script: Chinese/Japanese
 ```
 
-Before adding `.wrap()`, the paragraph overflowed the right edge. With explicit `.wrap()` it wraps at character boundaries and stays inside the window at `--scale 2` and `--scale 1.5` (light and dark). The ICU4X errors remain.
+Rune 的 `parley` 依赖使用：
 
-Why it is still a risk:
+```toml
+parley = { version = "0.12", default-features = false, features = ["std"] }
+```
 
-- AsterLab's UI is Chinese-first; descriptions, errors, instructions and parameter notes are long.
-- The error means Rune/ICU4X lacks a CJK segmentation dictionary in this build; wrapping may fall back to character boundaries and produce poor punctuation/word-break behavior.
-- Rune's default text wrap is not automatic; every long text element must opt in. That is a component contract requirement, not a framework guarantee.
-- This spike did not test line-break quality against Chinese typography rules.
+Parley 的 `complex-scripts` feature 才会启用 CJK/Thai/Khmer/Lao/Myanmar 的字典分段。Spike 在本地 clone 中改为：
 
-**Gate result: not passed — CJK is conditionally usable; IME/table/packaging remain unproven.**
+```toml
+parley = { version = "0.12", default-features = false, features = ["std", "complex-scripts"] }
+```
 
-## What passed
+修改后：
 
-- Rune compiles and runs on Windows with wgpu.
-- Chinese glyph fallback works for short labels.
-- Headless PNG and accessibility tree work; elements are inspectable.
-- High-DPI 1.5x render is crisp.
-- Basic text fields, focusable button and tap-save work; scripted tap reached the save action.
-- AccessKit tree exposes roles and Chinese names.
+- ICU4X 报错消失；
+- 长中文段落正常换行；
+- 100 行表格、中文标签、`mg/mL`、数字混排正常；
+- 仍需每个长文本元素显式 `.wrap()`；Rune 默认不自动换行。
 
-## What remains unproven
+**判断：不是框架不可用，是依赖 feature 配置问题。**  
+但这是本地补丁，不是已合并的上游默认；迁移前必须固定补丁方式（fork、vendored patch 或等待上游）。
 
-| Gate item | Status | Why |
-|---|---|---|
-| Windows Chinese IME | **未测** | Headless cannot prove candidate window/composition; requires real window + IME |
-| Table editing | **未测** | Rune/rune-kit has Table, but AsterLab editable table was not proven; stopped after CJK risk |
-| 100+ row scrolling | **未测** | Same |
-| Keyboard focus across table | **未测** | Basic button tap only |
-| Packaging | **未完成** | Release build timed out at 600s; no artifact |
-| Real app data | **未测** | Spike is synthetic; no database access |
-| CJK line breaking | **有条件通过** | 显式 `.wrap()` 后长段落换行；ICU4X 仍报告缺分段模型，断行质量未验证 |
+## 100-row editable table
 
-## Packaging
+- 100 个 `TextEdit` 行放在一个 220pt 的 scroll viewport。
+- 元素树有 `cell-0` 到 `cell-99`。
+- 脚本点击 `cell-3` 并输入 `B2`，值从 `A4` 变为 `A4B2`，证明字段获得焦点、接收键盘输入、回写状态。
+- 126 帧脚本运行：first frame 83ms（含初始化），p50 2.3ms、p95 5.9ms；528 layout nodes。
+- 这是**非虚拟化**的 100 行；只证明 100 行可用，不证明 1,000+ 行。
+- 未验证：滚动到第 100 行后的焦点、粘贴、多选、撤销。
 
-`cargo build --release -p aster-spike` exceeded 600s and produced no executable before the timeout. This is not a pass; it is an inconclusive packaging gate. Build time itself is a risk for a desktop release path.
+## Chinese IME
 
-## Environment
+**未测。** 当前 Windows 没有安装中文输入法，Headless 也不能替代候选词/组合输入。
 
-- OS: Windows 10/11 (win32 x64)
-- Rust toolchain: repository default
-- Rune clone: `target/rune-spike` (ignored, not committed)
-- Render: headless, `--scale 2` / `--scale 1.5`, light/dark
+这不等于失败；它是下一轮必须由真实窗口完成的人工/自动化测试：
+
+1. 打开真实 Rune 窗口。
+2. 聚焦 `孔位` 或表格单元。
+3. 切换微软拼音。
+4. 输入 `ni hao`、选择候选词、退格、移动光标、失焦。
+5. 截图/录屏并记录候选窗位置和焦点。
+
+## Release build
+
+命令：
+
+```bash
+CARGO_TARGET_DIR=C:/rune-release-target cargo build --release -p aster-spike
+```
+
+首次 600 秒超时没有产物，但这只是超时，不是编译错误。第二次构建使用独立 C: target，正在运行；完成后记录：
+
+- 实际耗时
+- `aster-spike.exe` 体积
+- 启动时间
+- 是否可脱离终端运行
+
+## Gate status
+
+| Gate 1 项目 | 状态 |
+|---|---|
+| Windows 中文 IME | 未测 |
+| CJK 字体/换行 | 通过，需本地 feature patch + `.wrap()` |
+| 可编辑表格 | 100 行初测通过 |
+| 100+ 行滚动 | 部分通过（100 行） |
+| 高 DPI | 通过 1.5x |
+| 键盘焦点 | 部分通过（单元格输入；未做完整 Tab 路径） |
+| Headless | 通过 |
+| 打包 | 待定 |
+| 真实数据 | 未测 |
+
+**Gate 1 尚未完成，不能批准 Run 切片。**  
+但已不再是“框架做不了”；更准确的结论是：
+
+> Rune 的基础 UI 能力已得到初步验证；CJK 分段问题有明确修复路径；剩余关键未知项是真实 Windows IME、完整键盘路径、打包和真实数据接入。
 
 ## Decision
 
-Per [MIGRATION.md](../../MIGRATION.md):
+- 不立即放弃 Rune。
+- 不启动 AsterLab Run 迁移。
+- Web Beta 继续作为可用默认和回退。
+- 完成本轮剩余验证后再决定是否进入 Run 单屏。
 
-- **Do not start Run vertical slice.**
-- **Do not migrate other pages.**
-- **Keep Web Beta writable and default.**
-- Open a focused Rune investigation: enable/load ICU4X CJK segmentation and re-run the same long-paragraph fixture.
-- If fixed, repeat Gate 1 including real Windows IME and editable table; otherwise evaluate Slint/WebView2 or retain Web.
+## Next bounded checks
 
-## Next experiment (bounded)
-
-1. Find Rune/Parley feature or data package for CJK segmentation.
-2. Re-run `aster-spike` with the same long Chinese string at 920×600 and 390 wide.
-3. Only if wrapping passes, test:
-   - 100-row editable table;
-   - Chinese IME candidate/composition;
-   - package size and startup;
-   - accessibility tree for table cells.
+1. 真实 Windows IME（人工/自动）测试。
+2. 100 行表格的滚动、粘贴、焦点、错误态。
+3. Release 构建耗时、产物大小、启动时间。
+4. Rune 读取冻结 Run fixture；不改数据库。
+5. 若以上通过，再启动 Run 单屏；否则评估 Slint/WebView2。
 
 No UI migration is approved by this report.
