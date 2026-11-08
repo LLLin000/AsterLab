@@ -49,7 +49,7 @@ enum Page { Design, Protocol, Run, Tools }
 struct App {
     run_id: String, workspace: Value, selected: usize, checks: HashMap<String, String>,
     rows: Vec<Row>, results: bool, message: String,
-    page: Page, sidebar_open: bool,
+    page: Page, sidebar_open: bool, design_step: usize,
     projects: Vec<Value>, designs: Vec<Value>, runs: Vec<Value>, protocols: Vec<Value>, records: Vec<Value>,
 }
 fn init() -> App {
@@ -67,7 +67,7 @@ fn init() -> App {
     };
     let workspace = match result {
         Ok(w) => w,
-        Err(e) => return App { run_id: String::new(), workspace: Value::Null, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: format!("无法读取 Run（id={env_id:?}）：{e}"), page: Page::Run, sidebar_open: true, projects: Vec::new(), designs: Vec::new(), runs: Vec::new(), protocols: Vec::new(), records: Vec::new() },
+        Err(e) => return App { run_id: String::new(), workspace: Value::Null, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: format!("无法读取 Run（id={env_id:?}）：{e}"), page: Page::Run, sidebar_open: true, design_step: 0, projects: Vec::new(), designs: Vec::new(), runs: Vec::new(), protocols: Vec::new(), records: Vec::new() },
     };
     let projects = call("project.list", json!({})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default();
     let designs = call("design.list", json!({})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default();
@@ -77,7 +77,7 @@ fn init() -> App {
     let mut records = call("record.list", json!({"kind":"formula"})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default();
     records.extend(call("record.list", json!({"kind":"library_table"})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default());
     records.extend(call("record.list", json!({"kind":"note"})).ok().and_then(|x| x["records"].as_array().cloned()).unwrap_or_default());
-    let mut a = App { run_id, workspace, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: String::new(), page: Page::Run, sidebar_open: true, projects, designs, runs, protocols, records };
+    let mut a = App { run_id, workspace, selected: 0, checks: HashMap::new(), rows: Vec::new(), results: false, message: String::new(), page: Page::Run, sidebar_open: true, design_step: 0, projects, designs, runs, protocols, records };
     a.selected = a.first_open();
     a.reset_rows();
     if let Ok(pg) = std::env::var("ASTERLAB_PAGE") {
@@ -327,14 +327,56 @@ fn view(a: &App, cx: &mut Cx<App>) -> El {
                 .child(right.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0).w(240.0).min_w(240.0)));
         }
     } else if page == Page::Design {
-        let mut c = Card::new().title("设计", Some(&I_DESIGN));
-        if a.designs.is_empty() { c = c.child(text("暂无设计").font(BODY).color(t.text_secondary)); }
-        for d in &a.designs {
-            let name = d["data"]["title"].as_str().unwrap_or("未命名设计");
-            let n = d["data"]["assays"].as_array().map(|x| x.len()).unwrap_or(0);
-            c = c.child(text(format!("{name} · {n} 个检测")).font(BODY).color(t.text).wrap());
+        let design = &a.workspace["frozen_design"]["content"];
+        let dname = design["title"].as_str().unwrap_or("实验设计");
+        let groups = arr(design, "groups").len();
+        let assays = arr(design, "assays").len();
+        let steps = arr(&a.workspace, "steps");
+        let sel = a.design_step.min(steps.len().saturating_sub(1));
+        content = content.child(row().w_full().items_center().gap(space::S3)
+            .child(text(dname.to_owned()).font(TITLE).color(t.text).wrap())
+            .child(el().grow(1.0))
+            .child(text(format!("{groups} 组 · {assays} 项检测")).font(LABEL).color(t.text_secondary)));
+        let mut summary = Card::new().title("实验设计", Some(&I_DESIGN));
+        summary = summary.child(text(format!("组别 {groups} · 检测 {assays} · 冻结 Protocol 步骤 {}", steps.len())).font(BODY).color(t.text));
+        let mut group_col = col().gap(2.0).w(300.0).child(text("组别").font(LABEL).color(t.text_secondary));
+        for g in arr(design, "groups") {
+            group_col = group_col.child(text(format!("{} · n={}", g["name"].as_str().unwrap_or("组"), g["independent_n"].as_i64().unwrap_or(0))).font(BODY).color(t.text).wrap());
         }
-        content = content.child(c.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
+        let mut assay_col = col().gap(2.0).w(420.0).child(text("检测").font(LABEL).color(t.text_secondary));
+        for a in arr(design, "assays") {
+            let tps = a["timepoints"].as_array().map(|x| x.iter().filter_map(|y| y.as_str()).collect::<Vec<_>>().join(" / ")).unwrap_or_default();
+            assay_col = assay_col.child(text(format!("{} · {} · {}", a["title"].as_str().unwrap_or("检测"), a["endpoint"].as_str().unwrap_or(""), tps)).font(BODY).color(t.text).wrap());
+        }
+        summary = summary.child(row().w_full().gap(16.0).items_start().child(group_col).child(assay_col));
+        content = content.child(summary.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
+        let mut flow = Card::new().title("实验步骤", Some(&I_PROTOCOL));
+        let mut flow_row = row().w_full().gap(space::S2).wrap();
+        for (i, st) in steps.iter().enumerate() {
+            let step = &st["step"];
+            let title = step["title"].as_str().unwrap_or("步骤");
+            let active = i == sel;
+            let idx = i;
+            flow_row = flow_row.child(Button::new(title)
+                .variant(if active { ButtonVariant::Submit } else { ButtonVariant::Neutral })
+                .on_press(move |x: &mut App| x.design_step = idx)
+                .build(&k));
+        }
+        flow = flow.child(flow_row);
+        content = content.child(flow.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
+        if let Some(st) = steps.get(sel) {
+            let step = &st["step"];
+            let title = step["title"].as_str().unwrap_or("步骤");
+            let instruction = step["instruction"].as_str().unwrap_or("");
+            let path = step["path"].as_str().unwrap_or("");
+            let mut detail = Card::new().title(format!("步骤详情 · {title}"), Some(&I_RUN));
+            detail = detail.child(text(instruction).w_full().wrap().font(BODY).color(t.text));
+            detail = detail.child(text(format!("Protocol step · {path}")).font(LABEL).color(t.text_secondary));
+            for c in arr(step, "checks") {
+                detail = detail.child(text(format!("检查 · {} ({})", c["label"].as_str().unwrap_or("检查"), if c["blocking"].as_bool()==Some(true){"必需"}else{"可选"})).font(LABEL).color(t.text_secondary));
+            }
+            content = content.child(detail.build(&k).fill(t.card).border(1.0, t.card_border).radius(12.0));
+        }
     } else if page == Page::Protocol {
         let mut c = Card::new().title("Protocol", Some(&I_PROTOCOL));
         if a.protocols.is_empty() { c = c.child(text("暂无 Protocol").font(BODY).color(t.text_secondary)); }

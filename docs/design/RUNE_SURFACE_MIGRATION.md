@@ -4,10 +4,10 @@ Status: **four surfaces visible; Run is the only writable surface.**
 
 | Surface | Current Rune state | Not yet |
 |---|---|---|
-| 实验设计 | read-only design list (title, assay count) | four-step editor, matrix, inspector |
+| 实验设计 | design summary, group/assay summary, step sequence, step detail | four-step editor, matrix editing |
 | Protocol | read-only protocol list (title, revision) | block tree, parameters, version editing |
 | 实验运行 | writable Run slice (task/check/measurement/results) | full parity, restart verification |
-| 资料与工具 | read-only record list (formula/table/note) | resources, calculators, instruments |
+| 资料与工具 | read-only formula/table/note list | resources, calculators, instruments |
 
 Shell:
 
