@@ -77,6 +77,7 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   await page.locator('.rail-item[data-page="tools"]').click();assert((await page.locator("#page-view").innerText()).includes("快速入口"));
   await page.goto(`${base}/?page=runs&run=${pagesRun.id}`,{waitUntil:"networkidle"});
   await page.locator('[data-run-mode="results"]').click();
+  await page.waitForFunction(() => document.querySelector("#page-view")?.innerText.includes("0.77"), null, {timeout: 5000});
   assert((await page.locator("#page-view").innerText()).includes("0.77"));
   await page.goto(`${base}/?page=records`,{waitUntil:"networkidle"});
   assert.equal(await page.locator("#record-rows").count(),0);
