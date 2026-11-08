@@ -286,6 +286,19 @@ p,.op-brief-instruction{text-wrap:pretty}
 .calc-result{margin-top:14px;padding:10px 12px;border:1px solid var(--al-line);border-radius:8px;background:var(--al-surface-2);font-variant-numeric:tabular-nums;font-size:13px;line-height:1.5}
 .calc-result.is-error{color:var(--al-danger,#dc2626);border-color:var(--al-danger,#dc2626)}
 @media(max-width:760px){.calculator-drawer{top:0;width:100vw;padding:14px}.calc-grid{grid-template-columns:1fr}}
+
+.resource-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;width:100%}
+.resource-card{display:flex;align-items:flex-start;gap:12px;min-width:0;padding:12px;border:1px solid var(--al-line);border-radius:10px;background:var(--al-surface-2);box-shadow:inset 0 1px 0 rgb(255 255 255 / 4%);transition:border-color .15s ease,background-color .15s ease}
+.resource-card:hover{border-color:var(--al-line-strong);background:var(--al-surface)}
+.resource-icon{flex:0 0 42px;width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--al-line);border-radius:9px;background:var(--al-surface);color:var(--al-accent)}
+.resource-icon svg{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.resource-copy{min-width:0;display:flex;flex-direction:column;gap:4px}
+.resource-copy strong{font-size:13px;color:var(--al-ink)}
+.resource-copy p{margin:0;font-size:11px;line-height:1.45;color:var(--al-muted)}
+.resource-meta{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.resource-tag{font-size:10px;padding:2px 5px;border-radius:4px;background:var(--al-surface);color:var(--al-muted);border:1px solid var(--al-line)}
+@media(max-width:1000px){.resource-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.resource-grid{grid-template-columns:1fr}}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">

@@ -30,6 +30,7 @@ const ICON_FLASK: &str = include_str!("../web/icons/flask.svg");
 const APP_JS: &str = include_str!("../web/app.js");
 const PAGES_JS: &str = include_str!("../web/pages.js");
 const RESOURCES_JS: &str = include_str!("../web/resources.js");
+const LAB_ICONS_JS: &str = include_str!("../web/lab-icons.js");
 const PROTOCOL_PAGE_JS: &str = include_str!("../web/pages/protocol.js");
 const RUN_PAGE_JS: &str = include_str!("../web/pages/run.js");
 const MARKED_JS: &str = include_str!("../web/vendor/marked.min.js");
@@ -282,6 +283,13 @@ async fn resources_js() -> Response {
     (
         [(axum::http::header::CONTENT_TYPE, "text/javascript")],
         RESOURCES_JS,
+    )
+        .into_response()
+}
+async fn lab_icons_js() -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+        LAB_ICONS_JS,
     )
         .into_response()
 }
@@ -1106,6 +1114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/app.js", get(app_js))
         .route("/pages.js", get(pages_js))
         .route("/resources.js", get(resources_js))
+        .route("/lab-icons.js", get(lab_icons_js))
         .route("/vendor/marked.js", get(marked_js))
         .route("/vendor/purify.js", get(purify_js))
         .route("/vendor/dagre.js", get(dagre_js))
