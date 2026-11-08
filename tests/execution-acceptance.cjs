@@ -122,7 +122,33 @@ function event(run, protocol, assayId, payload, stepPath = "root/step") {
     run_id: ctx.run.id, event_type: "operation", content: "Unlinked check",
     checks: [{check_id: "plate_ready", status: "passed"}],
   }, 2);
-  assert.match(unlinkedCheck.error.message, /必须关联冻结的 Protocol 步骤/);
+  const missingBlockingCompletion = cli("execution_event.create", {
+    run_id: ctx.run.id, event_type: "operation", content: "Complete without blocking check",
+    protocol_step_path: "root/seed", protocol_version_id: ctx.protocol.version.id, assay_id: "cck8",
+    step_status: "completed",
+  }, 2);
+  assert.match(missingBlockingCompletion.error.message, /缺少 blocking 检查项/);
+  const failedBlockingCompletion = cli("execution_event.create", {
+    run_id: ctx.run.id, event_type: "operation", content: "Complete with failed blocking check",
+    protocol_step_path: "root/seed", protocol_version_id: ctx.protocol.version.id, assay_id: "cck8",
+    step_status: "completed",
+    checks: [{check_id: "plate_ready", status: "failed"}],
+  }, 2);
+  assert.match(failedBlockingCompletion.error.message, /必须为 passed/);
+  const completed = event(ctx.run, ctx.protocol, "cck8", {
+    event_type: "operation", content: "Seed plate completed",
+    protocol_step_path: "root/seed", protocol_version_id: ctx.protocol.version.id, assay_id: "cck8",
+    step_status: "completed",
+    checks: [{check_id: "plate_ready", status: "passed", checked_by: "operator-1"}],
+  }, "root/seed");
+  assert.equal(completed.data.step_status, "completed");
+  const duplicateCompletion = event(ctx.run, ctx.protocol, "cck8", {
+    event_type: "operation", content: "Seed plate completed again",
+    protocol_step_path: "root/seed", protocol_version_id: ctx.protocol.version.id, assay_id: "cck8",
+    step_status: "completed",
+    checks: [{check_id: "plate_ready", status: "passed", checked_by: "operator-1"}],
+  }, "root/seed");
+  assert.equal(duplicateCompletion.id, completed.id);
   const raw = event(ctx.run, ctx.protocol, "cck8", {
     event_type: "measurement", content: "Raw OD",
     readouts: [{readout_id: "OD450:A1", endpoint: "OD450", value: 0.735, unit: "AU", sample_id: "A1", result_kind: "raw"}],

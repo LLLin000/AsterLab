@@ -2034,6 +2034,106 @@ pub(crate) fn create_execution_event_tx(
             return Err(CliError::input("偏差说明不能超过 5000 个字符"));
         }
     }
+    if event.step_status.as_deref() == Some("completed") {
+        if let Some(frozen_step) = frozen_step_for_event(&run_data, &event) {
+            let blocking_checks: Vec<&str> = frozen_step
+                .get("checks")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|check| {
+                    check
+                        .get("blocking")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|check| check.get("check_id").and_then(Value::as_str))
+                .collect();
+            if !blocking_checks.is_empty() {
+                let mut provided: std::collections::HashMap<&str, &str> =
+                    std::collections::HashMap::new();
+                for check in &event.checks {
+                    provided.insert(check.check_id.as_str(), check.status.as_str());
+                }
+                for check_id in blocking_checks {
+                    match provided.get(check_id) {
+                        Some(&"passed") => {}
+                        Some(_) => {
+                            return Err(CliError::input(format!(
+                                "完成步骤前，blocking 检查项 {check_id} 必须为 passed"
+                            )))
+                        }
+                        None => {
+                            return Err(CliError::input(format!(
+                                "完成步骤前，缺少 blocking 检查项 {check_id}"
+                            )))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if event.step_status.as_deref() == Some("completed") {
+        let mut stmt = tx
+            .prepare(
+                "SELECT id,project_id,parent_id,revision,data_json,created_at,updated_at \
+                 FROM records WHERE kind='execution_event' AND parent_id=?1",
+            )
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        let rows = stmt
+            .query_map([run_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        for row in rows {
+            let (id, project, parent, revision, raw, created, updated) =
+                row.map_err(|e| CliError::internal(e.to_string()))?;
+            let data: Value = serde_json::from_str(&raw)
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            if data.get("step_status").and_then(Value::as_str) != Some("completed") {
+                continue;
+            }
+            if data.get("protocol_step_path").and_then(Value::as_str)
+                != event.protocol_step_path.as_deref()
+            {
+                continue;
+            }
+            if data.get("timepoint").and_then(Value::as_str) != event.timepoint.as_deref() {
+                continue;
+            }
+            if data.get("assay_id").and_then(Value::as_str) != event.assay_id.as_deref() {
+                continue;
+            }
+            if data.get("planned_output_id").and_then(Value::as_str)
+                != event.planned_output_id.as_deref()
+            {
+                continue;
+            }
+            if let Some(task_key) = &event.task_key {
+                if data.get("task_key").and_then(Value::as_str) != Some(task_key.as_str()) {
+                    continue;
+                }
+            }
+            return Ok(json!({
+                "id": id,
+                "kind": "execution_event",
+                "project_id": project,
+                "parent_id": parent,
+                "revision": revision,
+                "data": data,
+                "created_at": created,
+                "updated_at": updated
+            }));
+        }
+    }
     let occurred_at = event.occurred_at.clone().unwrap_or_else(stamp);
     let data = json!({
         "event_type":event.event_type,
@@ -2069,7 +2169,64 @@ pub(crate) fn create_execution_event_tx(
     refresh_run_status_in_transaction(tx, run_id)?;
     Ok(event_record)
 }
-
+fn frozen_step_for_event(run_data: &Value, event: &ExecutionEventCreate) -> Option<Value> {
+    let step_path = event.protocol_step_path.as_deref()?;
+    let protocol_version_id = event.protocol_version_id.as_deref()?;
+    if event.planned_output_id.is_none() {
+        for manifest in run_data
+            .get("protocol_manifest")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if manifest.get("protocol_version_id").and_then(Value::as_str) != Some(protocol_version_id) {
+                continue;
+            }
+            if manifest.get("assay_id").and_then(Value::as_str) != event.assay_id.as_deref() {
+                continue;
+            }
+            if let Some(step) = manifest
+                .get("steps")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|step| step.get("path").and_then(Value::as_str) == Some(step_path))
+            {
+                return Some(step.clone());
+            }
+        }
+    } else {
+        for manifest in run_data
+            .get("material_manifest")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if manifest.get("planned_output_id").and_then(Value::as_str) != event.planned_output_id.as_deref() {
+                continue;
+            }
+            if manifest
+                .get("producer_protocol")
+                .and_then(|p| p.get("protocol_version_id"))
+                .and_then(Value::as_str)
+                != Some(protocol_version_id)
+            {
+                continue;
+            }
+            if let Some(step) = manifest
+                .get("producer_protocol")
+                .and_then(|p| p.get("steps"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|step| step.get("path").and_then(Value::as_str) == Some(step_path))
+            {
+                return Some(step.clone());
+            }
+        }
+    }
+    None
+}
 fn refresh_run_status_in_transaction(tx: &Transaction<'_>, run_id: &str) -> Result<(), CliError> {
     let workspace = run_workspace(tx, run_id)?;
     let tasks = workspace["tasks"].as_array().cloned().unwrap_or_default();
