@@ -1,8 +1,9 @@
 #![recursion_limit = "256"]
 
 use axum::{
-    extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    extract::{Path, Query, Request, State},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -172,6 +173,15 @@ fn list(db: &Connection) -> Result<Vec<Value>, ApiError> {
     })?;
     Ok(rows.filter_map(Result::ok).collect())
 }
+async fn no_store(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, max-age=0"),
+    );
+    response
+}
+
 async fn view_page() -> Html<&'static str> {
     Html(VIEW_HTML)
 }
@@ -1158,6 +1168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/backup", post(create_backup))
         .route("/api/restore", post(restore_backup))
         .route("/api/records/update", post(update_record))
+        .layer(middleware::from_fn(no_store))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!("AsterLab：http://{addr}");
