@@ -231,6 +231,8 @@ html[data-bs-theme="light"]{color-scheme:light}html[data-bs-theme="dark"]{color-
 
 .result-preview{grid-column:1/-1;font-size:11px;color:var(--al-muted);padding:6px 0}
 .result-preview.is-error{color:var(--al-danger,#dc2626)}
+#detail.plan-empty{flex:0 0 auto;min-height:0;background:transparent;border:0;margin:8px 0 0;padding:0;overflow:visible}
+#detail.plan-empty .empty-state{margin:0;padding:14px;border:1px solid var(--al-line);border-radius:10px;background:var(--al-surface)}
 </style>
 <link rel="stylesheet" href="/components/tokens.css">
 <link rel="stylesheet" href="/components/wellplate.css">
@@ -331,13 +333,14 @@ async function bootLatestView(){
     const root=result.latest_version?.data?.root, refs=new Set();
     const collect=component=>{if(!component)return;const scan=value=>{if(!value||typeof value!=='object')return;for(const [key,item] of Object.entries(value)){if(key==='protocol_version_id'&&item)refs.add(item);else if(key==='protocol_version_ids'&&Array.isArray(item))item.forEach(id=>id&&refs.add(id));else scan(item)}};scan(component)};
     collect(root);
-    if([...protocolIds].some(id=>refs.has(id))){document.getElementById('canvasPanel').hidden=false;document.getElementById('detail').hidden=false;document.getElementById('viewId').value=viewRecord.id;await window.load();return}
+    if([...protocolIds].some(id=>refs.has(id))){document.getElementById('canvasPanel').hidden=false;document.getElementById('detail').hidden=false;document.getElementById('detail').classList.remove("plan-empty");document.getElementById('viewId').value=viewRecord.id;await window.load();return}
   }
   document.getElementById('viewId').value='';
   window.resetView();
   document.getElementById('canvasPanel').hidden=true;
   document.getElementById('status').textContent='Plan 已保存';
   document.getElementById('detail').hidden=false;
+  document.getElementById('detail').classList.add("plan-empty");
   document.getElementById('detail').innerHTML='<div class="empty-state"><h2>Plan</h2><p>此设计还没有可视化流程。上方的检测安排可直接用于开始运行；需要步骤图时再生成 View。</p></div>';
 }
 window.bootLatestView=bootLatestView;
