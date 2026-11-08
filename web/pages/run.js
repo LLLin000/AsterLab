@@ -103,13 +103,14 @@ window.AsterPageModules.runs = async function(root, ctx) {
           : task.scope?.kind === "planned_output" ? event.planned_output_id === task.scope.planned_output_id : !event.assay_id && !event.planned_output_id;
         return event.protocol_step_path === task.step_path && scopeMatch && (event.timepoint || null) === (task.timepoint || null);
       });
-      const taskDone = task => taskEvents(task).some(event => event.step_status === "completed");
+      const taskDone = task => task.status === "completed";
       const completed = new Set(tasks.filter(taskDone).map(task => task.task_key));
       const allTasksDone = Boolean(tasks.length) && tasks.every(task => completed.has(task.task_key));
       const timepointValues = [...new Set(tasks.map(task => task.timepoint).filter(Boolean))];
-      const firstOpen = tasks.find(task => !completed.has(task.task_key));
-      if (!timepointValues.includes(selectedTimepoint)) selectedTimepoint = firstOpen?.timepoint || timepointValues[0] || "";
       const generalTasks = tasks.filter(task => !task.timepoint);
+      const sequence = [...generalTasks, ...timepointValues.flatMap(timepoint => tasks.filter(task => task.timepoint === timepoint))];
+      const firstOpen = sequence.find(task => !completed.has(task.task_key));
+      if (!timepointValues.includes(selectedTimepoint)) selectedTimepoint = firstOpen?.timepoint || timepointValues[0] || "";
       const dayTasks = timepointValues.length ? tasks.filter(task => task.timepoint === selectedTimepoint) : [];
       const visibleTasks = [...generalTasks, ...dayTasks];
       if (!visibleTasks.some(task => task.task_key === selectedTaskKey)) {
@@ -118,7 +119,7 @@ window.AsterPageModules.runs = async function(root, ctx) {
       }
       const taskIndex = Math.max(0, visibleTasks.findIndex(task => task.task_key === selectedTaskKey));
       const currentTask = visibleTasks[taskIndex];
-      const globalTaskIndex = tasks.findIndex(task => task.task_key === currentTask?.task_key);
+      const globalTaskIndex = sequence.findIndex(task => task.task_key === currentTask?.task_key);
       const step = steps.find(item => item.step?.path === currentTask?.step_path && sameScope(item.scope, currentTask?.scope))?.step;
       const scope = currentTask?.scope && typeof currentTask.scope === "object" ? currentTask.scope : {};
       const taskScope = scope;
@@ -171,16 +172,31 @@ window.AsterPageModules.runs = async function(root, ctx) {
         const readouts = (event.readouts || []).length;
         const measurements = (event.measurements || []).length;
         const checks = (event.checks || []).length;
-        return `<tr><td>${esc(title)}</td><td>${esc(event.timepoint || task?.timepoint || "—")}</td><td>${esc(event.step_status || event.event_type || "—")}</td><td>${readouts + measurements}</td><td>${checks}</td><td>${esc(event.content || "—")}</td></tr>`;
+        const values = [...(event.measurements || []).map(item => `${item.value ?? item.qualifier ?? ""}${item.unit ? ` ${item.unit}` : ""}${item.sample_id ? ` · ${item.sample_id}` : ""}`), ...(event.readouts || []).map(item => `${item.value ?? item.qualifier ?? ""}${item.unit ? ` ${item.unit}` : ""}${item.sample_id ? ` · ${item.sample_id}` : ""}`)].filter(Boolean).join("; ");
+        return `<tr><td>${esc(title)}</td><td>${esc(event.timepoint || task?.timepoint || "—")}</td><td>${esc(event.step_status || event.event_type || "—")}</td><td>${readouts + measurements}${values ? `<small><br>${esc(values)}</small>` : ""}</td><td>${checks}</td><td>${esc(event.content || "—")}</td></tr>`;
       }).join("");
       const completedWithoutResults = tasks.filter(task => completed.has(task.task_key) && !taskEvents(task).some(event => event.readouts?.length || event.measurements?.length)).length;
       const resultTaskOptions = tasks.map((task, index) => {
         const taskStep = steps.find(item => item.step?.path === task.step_path && sameScope(item.scope, task.scope))?.step;
         return `<option value="${esc(task.task_key)}" ${task.task_key === selectedTaskKey ? "selected" : ""}>${index + 1}. ${esc(taskStep?.title || task.step_path)}${task.timepoint ? ` · ${esc(task.timepoint)}` : ""}</option>`;
       }).join("");
+      const parseResultRows = raw => {
+        const rows = [], errors = [], labels = [];
+        raw.split(/\n/).forEach((line, index) => {
+          if (!line.trim()) return;
+          const parts = line.split(/[,\t]/).map(part => part.trim());
+          if (parts.length > 2) { errors.push(`第 ${index + 1} 行：最多两列（值, 样本标签）`); return; }
+          if (!parts[0]) { errors.push(`第 ${index + 1} 行：数值为空`); return; }
+          const value = Number(parts[0]);
+          if (!Number.isFinite(value)) { errors.push(`第 ${index + 1} 行：不是有效数字「${parts[0]}」`); return; }
+          if (parts[1]) labels.push(parts[1]);
+          rows.push({value, sample_id: parts[1] || null});
+        });
+        return {rows, errors, labels};
+      };
       const resultForm = `<form id="result-paste" class="run-form"><div class="run-confirm"><strong>批量录入读数</strong><span>每行一个值，可写“值, 样本编号”；单位和终点适用于整次粘贴。原始事件会保留。</span></div><label>任务<select name="task_key" required>${resultTaskOptions}</select></label><label>终点<input name="endpoint" required placeholder="例如 OD450 / Cq"></label><label>单位<input name="unit" placeholder="例如 AU"></label><label class="run-note">读数行（每行：值 或 值, 样本编号）<textarea name="rows" required placeholder="0.82, Control-1
-0.79, Control-2"></textarea></label><div id="result-form-error" class="summary-error" role="alert"></div><button class="btn primary" type="submit">保存读数</button></form>`;
-      const nextTask = visibleTasks[taskIndex + 1] || tasks[globalTaskIndex + 1];
+0.79, Control-2"></textarea></label><div id="result-preview" class="result-preview"></div><div id="result-form-error" class="summary-error" role="alert"></div><button class="btn primary" type="submit">保存读数</button></form>`;
+      const nextTask = visibleTasks[taskIndex + 1] || sequence[globalTaskIndex + 1];
       const confirmLabel = allDone ? "本次运行已完成" : nextTask ? "确认完成并进入下一步" : "确认完成";
       const form = allDone || timepointDone ? "" : `<form id="actual-form" class="run-form"><div class="run-confirm"><strong>${esc(step?.title || "当前步骤")}</strong><span>${checkOptions.some(check => check.blocking) ? "先完成必需检查，再确认本步。" : "按已选 Protocol 执行后确认即可。"} 确认只记录操作完成，不声称已测量参数或保存结果。</span></div>${checkFields}<label class="run-note">异常 / 偏差 / 实际参数（可选）<textarea name="content" placeholder="正常操作可留空；有偏差、遗漏或实际参数变化时再填写。"></textarea></label><details class="run-more"><summary>更多记录（操作人，可选）</summary><label>操作人<input name="operator" placeholder="可留空"></label></details><div id="run-form-error" class="summary-error" role="alert"></div><button class="btn primary" type="submit">${confirmLabel}</button></form>`;
       root.innerHTML = `<div class="page-head"><div><h1>实验运行</h1><p>${esc(ctx.title(run))} · ${selectedTimepoint ? `${esc(selectedTimepoint)} · ` : ""}任务 ${taskIndex + 1}/${visibleTasks.length} · ${esc(allDone ? "全部任务已完成" : workspace.status || "状态未填写")}</p></div><div class="page-tools"><select id="run-select" aria-label="选择实验运行">${runs.map(item => `<option value="${esc(item.id)}" ${item.id === runId ? "selected" : ""}>${esc(runLabel(item))}</option>`).join("")}</select></div></div>
@@ -229,16 +245,10 @@ window.AsterPageModules.runs = async function(root, ctx) {
         if (!task || !taskStep) { if (errorBox) errorBox.textContent = "选择的任务无效"; return; }
         const endpoint = form.get("endpoint").trim();
         const unit = form.get("unit").trim() || null;
-        const measurements = [];
-        for (const raw of form.get("rows").split(/\n/)) {
-          const line = raw.trim();
-          if (!line) continue;
-          const parts = line.split(/[,\t]/).map(part => part.trim());
-          const value = Number(parts[0]);
-          if (!Number.isFinite(value)) { if (errorBox) errorBox.textContent = `无法解析读数：${line}`; return; }
-          measurements.push({endpoint, value, unit, sample_id: parts[1] || null});
-        }
-        if (!measurements.length) { if (errorBox) errorBox.textContent = "至少录入一行读数"; return; }
+        const parsed = parseResultRows(form.get("rows"));
+        if (parsed.errors.length) { if (errorBox) errorBox.textContent = parsed.errors.join("；"); return; }
+        if (!parsed.rows.length) { if (errorBox) errorBox.textContent = "至少录入一行读数"; return; }
+        const measurements = parsed.rows.map(row => ({endpoint, value: row.value, unit, sample_id: row.sample_id}));
         const scope = task.scope || {};
         const payload = {kind:"execution_event",parent_id:runId,project_id:run.project_id,data:{event_type:"measurement",content:"批量粘贴读数",protocol_step_path:taskStep.path,protocol_version_id:taskVersion(task),assay_id:scope.kind === "assay" ? scope.assay_id : null,planned_output_id:scope.kind === "planned_output" ? scope.planned_output_id : null,task_key:task.task_key,timepoint:task.timepoint || null,measurements}};
         const response = await fetch("/api/records", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
@@ -249,6 +259,25 @@ window.AsterPageModules.runs = async function(root, ctx) {
         }
         await render();
       });
+      const resultFormEl = root.querySelector("#result-paste");
+      if (resultFormEl) {
+        const preview = resultFormEl.querySelector("#result-preview");
+        const save = resultFormEl.querySelector("button[type=submit]");
+        const updatePreview = () => {
+          const endpoint = resultFormEl.querySelector('[name="endpoint"]').value.trim();
+          const unit = resultFormEl.querySelector('[name="unit"]').value.trim();
+          const parsed = parseResultRows(resultFormEl.querySelector('[name="rows"]').value);
+          const problems = [...parsed.errors];
+          if (!endpoint) problems.push("终点不能为空");
+          save.disabled = problems.length > 0 || parsed.rows.length === 0;
+          preview.textContent = problems.length
+            ? problems.join("；")
+            : `${parsed.rows.length} 行 · 终点 ${endpoint}${unit ? ` · 单位 ${unit}` : ""}${parsed.labels.length ? " · 样本标签仅保留原始文本，未匹配本次 Run 样本" : ""}`;
+          preview.classList.toggle("is-error", problems.length > 0);
+        };
+        resultFormEl.addEventListener("input", updatePreview);
+        updatePreview();
+      }
       const confirmButton = root.querySelector("#actual-form button[type=submit]");
       const syncConfirm = () => {
         if (!confirmButton) return;

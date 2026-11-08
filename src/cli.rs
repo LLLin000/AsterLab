@@ -2070,46 +2070,14 @@ pub(crate) fn create_execution_event_tx(
     Ok(event_record)
 }
 
-fn event_matches_task(task: &Value, event: &Value) -> bool {
-    if let Some(key) = event["task_key"].as_str() {
-        return task["task_key"].as_str() == Some(key);
-    }
-    if event["protocol_step_path"].as_str() != task["step_path"].as_str() {
-        return false;
-    }
-    if event["timepoint"].as_str().unwrap_or("") != task["timepoint"].as_str().unwrap_or("") {
-        return false;
-    }
-    let scope = &task["scope"];
-    match scope["kind"].as_str() {
-        Some("assay") => event["assay_id"].as_str() == scope["assay_id"].as_str(),
-        Some("planned_output") => event["planned_output_id"].as_str() == scope["planned_output_id"].as_str(),
-        _ => event["assay_id"].is_null() && event["planned_output_id"].is_null(),
-    }
-}
-
 fn refresh_run_status_in_transaction(tx: &Transaction<'_>, run_id: &str) -> Result<(), CliError> {
     let workspace = run_workspace(tx, run_id)?;
     let tasks = workspace["tasks"].as_array().cloned().unwrap_or_default();
     if tasks.is_empty() {
         return Ok(());
     }
-    let events = workspace["events"].as_array().cloned().unwrap_or_default();
-    let mut latest = HashMap::new();
-    for event in &events {
-        for task in &tasks {
-            let key = task["task_key"].as_str().unwrap_or_default();
-            if !latest.contains_key(key) && event_matches_task(task, event) {
-                if let Some(status) = event["step_status"].as_str().filter(|status| !status.is_empty()) {
-                    latest.insert(key.to_owned(), status.to_owned());
-                }
-            }
-        }
-    }
-    let blocked = latest.values().any(|status| status == "blocked");
-    let all_done = tasks.iter().all(|task| {
-        latest.get(task["task_key"].as_str().unwrap_or_default()).is_some_and(|status| status == "completed")
-    });
+    let blocked = tasks.iter().any(|task| task["status"].as_str() == Some("blocked"));
+    let all_done = tasks.iter().all(|task| task["status"].as_str() == Some("completed"));
     let target = if blocked && !all_done {
         "blocked"
     } else if all_done {

@@ -30,6 +30,14 @@ async function start(port){const p=spawn(bin,[],{cwd:root,env:{...env,LABWORKBEN
   const timedDesign=cli("design.create",{project_id:project.id,design:{title:"Timed design",group_specs:[{name:"Control",role:"control",condition:"vehicle",independent_n:2}],assays:[{id:"read",title:"Read",endpoint:"OD",method:"plate",unit:"AU",timepoints:["24 h","48 h"],group_names:["Control"],protocol_version_id:timedProtocol.version.id}]}}).result.design;
   const timedRun=cli("run.create",{design_id:timedDesign.id,title:"Timed run"}).result.record;
   const port=await freePort(),base=`http://127.0.0.1:${port}`;const server=await start(port);
+  const timedWorkspace=await (await fetch(`${base}/api/runs/${timedRun.id}/workspace`)).json();
+  const readTask=timedWorkspace.tasks.find(task => task.step_path === "root/read" && task.timepoint === "24 h");
+  const measurementResponse=await fetch(`${base}/api/records`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({kind:"execution_event",parent_id:timedRun.id,project_id:project.id,data:{event_type:"measurement",content:"roundtrip",protocol_step_path:"root/read",protocol_version_id:timedProtocol.version.id,assay_id:"read",task_key:readTask.task_key,timepoint:"24 h",measurements:[{endpoint:"OD",value:0.82,unit:"AU",sample_id:"Control-1"}]}})});
+  assert.equal(measurementResponse.status,200,await measurementResponse.text());
+  const roundtrip=await (await fetch(`${base}/api/runs/${timedRun.id}/workspace`)).json();
+  const roundtripEvent=roundtrip.events.find(event => event.content === "roundtrip");
+  assert.equal(roundtripEvent.measurements[0].value,0.82);
+  assert.equal(roundtripEvent.measurements[0].unit,"AU");
   const browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on("pageerror",e=>errors.push(e.message));
   await page.goto(`${base}/?page=workflow`,{waitUntil:"networkidle"});
   assert.equal(await page.locator(".rail-item[data-page]").count(),4);

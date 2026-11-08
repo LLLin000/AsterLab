@@ -55,6 +55,12 @@ pub struct PlannedTask {
     pub scope: StepScope,
     pub timepoint: Option<String>,
     pub target: TargetSelection,
+    #[serde(default = "default_task_status")]
+    pub status: String,
+}
+
+fn default_task_status() -> String {
+    "not_started".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -146,6 +152,7 @@ pub struct ExecutionEventView {
     pub operator: Option<String>,
     pub sample_ids: Vec<String>,
     pub readouts: Vec<Value>,
+    pub measurements: Vec<Value>,
     pub checks: Vec<Value>,
     pub controls: Vec<Value>,
     pub lineage: Vec<Value>,
@@ -363,6 +370,7 @@ pub fn build(
                 scope: step.scope.clone(),
                 timepoint: None,
                 target: TargetSelection::Unresolved,
+                status: default_task_status(),
             });
         } else {
             for timepoint in timepoints {
@@ -380,6 +388,7 @@ pub fn build(
                     scope: step.scope.clone(),
                     timepoint: Some(timepoint),
                     target: TargetSelection::Unresolved,
+                    status: default_task_status(),
                 });
             }
         }
@@ -459,6 +468,7 @@ pub fn build(
                 .map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect())
                 .unwrap_or_default(),
             readouts: event["readouts"].as_array().cloned().unwrap_or_default(),
+            measurements: event["measurements"].as_array().cloned().unwrap_or_default(),
             checks: event["checks"].as_array().cloned().unwrap_or_default(),
             controls: event["controls"].as_array().cloned().unwrap_or_default(),
             lineage: event["lineage"].as_array().cloned().unwrap_or_default(),
@@ -469,7 +479,7 @@ pub fn build(
     // Old events do not have occurrence_id. Do not synthesize an instance.
     let occurrences = Vec::new();
 
-    Ok(RunWorkspace {
+    let mut workspace = RunWorkspace {
         run_id: run_id.to_owned(),
         design_id: design_id.to_owned(),
         design_version_id: design_version_id.to_owned(),
@@ -484,7 +494,31 @@ pub fn build(
         materials,
         plates,
         events,
-    })
+    };
+    for task in &mut workspace.tasks {
+        task.status = workspace.events.iter()
+            .find(|event| event_matches_task(task, event) && event.step_status.is_some())
+            .and_then(|event| event.step_status.clone())
+            .unwrap_or_else(|| "not_started".to_owned());
+    }
+    Ok(workspace)
+}
+
+fn event_matches_task(task: &PlannedTask, event: &ExecutionEventView) -> bool {
+    if let Some(key) = event.task_key.as_deref() {
+        return task.task_key == key;
+    }
+    if event.protocol_step_path.as_deref() != Some(task.step_path.as_str()) {
+        return false;
+    }
+    if event.timepoint.as_deref().unwrap_or("") != task.timepoint.as_deref().unwrap_or("") {
+        return false;
+    }
+    match &task.scope {
+        StepScope::Assay { assay_id } => event.assay_id.as_deref() == Some(assay_id.as_str()),
+        StepScope::PlannedOutput { planned_output_id } => event.planned_output_id.as_deref() == Some(planned_output_id.as_str()),
+        StepScope::Unscoped => event.assay_id.is_none() && event.planned_output_id.is_none(),
+    }
 }
 
 #[cfg(test)]
