@@ -8,6 +8,7 @@
 2. [设计基线与术语表](2026-11-03-cellplanner-design-baseline-and-glossary.md) — 当前产品方向与关键对象定义。
 3. [UI/UX 设计画布评审](2026-11-03-cellplanner-uiux-canvas-review.md) — 四步流程、关系图、工具中心、真实案例、消融评估候选。
 4. [视觉语言与图标方案研究](2026-11-04-asterlab-visual-language-research.md) — 现有界面核对、图标集、视觉图层、风险和后续验收；内含 [Gemini SVG 图标样张](2026-11-04-asterlab-ui-icon-exploration.svg)。
+4b. [结构化实验记录 v1.1：ResultGrid 与批量读数](2026-11-09-structured-experimental-recording.md) — 孔板/表格统一输入、Excel 粘贴、Rust 批量事务契约；产品候选，未实现。
 5. [全界面 UI/UX 走查](2026-11-05-asterlab-ui-ux-audit.md) — 操作者视角的导航收敛、逐屏布局/文案、单位与移动端问题；区分源码事实、浏览器观察和建议。
 6. [前端架构:设计工作区与共用词表](2026-11-05-design-workspace-architecture.md) — 四区域壳、浏览/草稿状态、四步流程、受控词表、外部产品参考与已知数据缺口。
 7. [K0 知识覆盖审计](2026-11-05-k0-knowledge-coverage-audit.md) — 实验/步骤/仪器覆盖矩阵、代码事实、文档冲突与证据审核计划；当前没有 Source Checked 以上条目。
