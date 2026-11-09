@@ -12,3 +12,5 @@
 /prototypes/mygo-run/.mygo/
 /prototypes/mygo-run/modules/runs/rust/target/
 /prototypes/mygo-run/*.exe
+
+/crates/asterlab-app/target/
