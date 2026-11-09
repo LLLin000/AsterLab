@@ -38,6 +38,8 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+    nsExec::ExecToLog 'taskkill /IM mygo-run.exe /F'
+    Sleep 500
     Delete "$INSTDIR\mygo-run.exe"
     Delete "$INSTDIR\Runs.dll"
     Delete "$INSTDIR\BUILD_INFO.txt"
