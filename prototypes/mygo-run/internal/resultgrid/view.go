@@ -51,7 +51,7 @@ func View(c *ui.Context, g *Grid, opts Options) {
 						for col := range g.Schema.ColumnLabels {
 							cc := col
 							cell, _ := g.CellAt(rr, cc)
-							e := ui.TextInput(c, g.input(rr, cc)).Width(width).Padding(4).Placeholder("—").OnSubmit(func() {
+							commit := func() {
 								raw := *g.input(rr, cc)
 								v, err := strconv.ParseFloat(raw, 64)
 								if raw == "" {
@@ -67,7 +67,13 @@ func View(c *ui.Context, g *Grid, opts Options) {
 									g.Error = ""
 									_ = g.SetCell(cell)
 								}
-							})
+							}
+							e := ui.TextInput(c, g.input(rr, cc)).Width(width).Padding(4).Placeholder("—").OnSubmit(commit)
+							// A click on Save must persist the text currently in
+							// the input, not only values confirmed with Enter.
+							if e.Changed() {
+								commit()
+							}
 							e.OnClick(func() { g.SetSelection(Selection{rr, cc, rr, cc}) })
 							if rr >= min(g.Selection.StartRow, g.Selection.EndRow) && rr <= max(g.Selection.StartRow, g.Selection.EndRow) && cc >= min(g.Selection.StartColumn, g.Selection.EndColumn) && cc <= max(g.Selection.StartColumn, g.Selection.EndColumn) {
 								e.Background(c.Theme().Accent)
