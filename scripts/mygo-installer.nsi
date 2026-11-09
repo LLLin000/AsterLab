@@ -5,6 +5,8 @@ Name "AsterLab MyGo (Unsigned Beta)"
 OutFile "..\release\AsterLab-MyGo-0.1.0-beta-unsigned-win-x64-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\AsterLab MyGo"
 RequestExecutionLevel user
+SilentInstall silent
+SilentUnInstall silent
 
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME

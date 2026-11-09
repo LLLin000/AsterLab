@@ -22,6 +22,13 @@ func View(c *ui.Context, g *Grid, opts Options) {
 			if g.Error != "" {
 				ui.Text(c, g.Error).TextColor(c.Theme().Danger)
 			}
+			ui.Spacer(c)
+			if ui.Button(c, "粘贴").Clicked() {
+				if _, err := g.PasteTSV(c.ReadClipboard()); err != nil {
+					g.Error = err.Error()
+					g.State = StateError
+				}
+			}
 		})
 		if g.Preview != nil {
 			ui.Row(c).Gap(8).Children(func() {
