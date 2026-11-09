@@ -83,11 +83,22 @@ func TestWorkflowUIButtons(t *testing.T) {
 	e := NewEditor()
 	tt := ui.NewTester(func(c *ui.Context) { e.View(c) }, 800, 600)
 	tt.Frame()
-	if err := tt.Click("Add Flask"); err != nil {
+	if err := tt.Click("＋ 材料"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if len(e.Doc.Nodes) != 1 {
 		t.Fatalf("ui add failed: nodes=%d", len(e.Doc.Nodes))
+	}
+}
+func TestDragUsesSingleUndoEntry(t *testing.T) {
+	e := NewEditor()
+	id := e.AddNode(KindFlask, "F1", Position{X: 10, Y: 10})
+	e.dragNode(id, Position{X: 20, Y: 20}, true)
+	e.dragNode(id, Position{X: 30, Y: 30}, true)
+	e.dragNode(id, Position{X: 40, Y: 40}, false)
+	if len(e.UndoStack) != 2 { t.Fatalf("undo entries=%d, want add + one drag", len(e.UndoStack)) }
+	if !e.Undo() || e.Doc.Nodes[0].Pos != (Position{X: 10, Y: 10}) {
+		t.Fatal("undo did not revert the whole drag")
 	}
 }

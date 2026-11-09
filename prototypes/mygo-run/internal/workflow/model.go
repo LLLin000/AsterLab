@@ -138,6 +138,8 @@ type Editor struct {
 	Zoom          float32
 	ConnectMode   bool
 	ConnectFrom   string
+	MovingNode    string
+	MoveStart     WorkflowDocument
 	OnSelect      func(nodeID string)
 	OnEnterNested func(nodeID string)
 	OnChange      func()
@@ -225,6 +227,33 @@ func (e *Editor) MoveNode(id string, pos Position) bool {
 		e.OnChange()
 	}
 	return true
+}
+func (e *Editor) dragNode(id string, pos Position, dragging bool) {
+	if dragging {
+		if e.MovingNode != id {
+			e.MovingNode, e.MoveStart = id, e.Doc.clone()
+		}
+		e.Doc.MoveNode(id, pos)
+		return
+	}
+	if e.MovingNode == id {
+		e.Doc.MoveNode(id, pos)
+		start, current := e.MoveStart.findNode(id), e.Doc.findNode(id)
+		changed := start >= 0 && current >= 0 && e.MoveStart.Nodes[start].Pos != e.Doc.Nodes[current].Pos
+		if changed {
+			e.UndoStack = append(e.UndoStack, e.MoveStart)
+			if len(e.UndoStack) > 100 {
+				e.UndoStack = e.UndoStack[1:]
+			}
+			e.RedoStack = nil
+			if e.OnChange != nil {
+				e.OnChange()
+			}
+		}
+		e.MovingNode, e.MoveStart = "", WorkflowDocument{}
+		return
+	}
+	e.MoveNode(id, pos)
 }
 
 func (e *Editor) SelectNode(id string) {

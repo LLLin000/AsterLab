@@ -3,6 +3,7 @@ package designer
 import (
 	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
+	"asterlab-mygo-prototype/internal/components"
 	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/modules/runs"
 	"context"
@@ -60,6 +61,7 @@ type Designer struct {
 	ControlGroupDraft, CalibratorGroupDraft, SamplesDraft, GenesDraft, ReferenceGenesDraft string
 	SampleIDDraft, GroupIDDraft, WellTimepointDraft, WellAssignmentsDraft                  string
 	SelectedWells                                                                          []string
+	HoveredWell                                                                            string
 	SelectedNode                                                                           string
 	ComponentRefsDraft                                                                     string
 
@@ -77,7 +79,10 @@ type Designer struct {
 	Left  func(*ui.Context)
 	Right func(*ui.Context)
 
-	opSeq uint64
+	InspectorTab       int
+	InspectorCollapsed bool
+	InspectorHeight    float32
+	opSeq              uint64
 }
 
 func New(designID, title string, revision uint64, svc runs.DesignService) *Designer {
@@ -401,126 +406,206 @@ func (d *Designer) setComponentRefs(nodeID, value string) {
 	}
 }
 
-// View renders the designer: left/right hooks, top workflow editor, bottom inspector.
+// View renders the workflow and its structured inspector in one shared light/dark layout.
 func View(c *ui.Context, d *Designer) {
 	t := c.Theme()
+	width, height := c.Size()
+	narrow := width > 0 && width <= 1000
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		ui.Row(c).Grow(1).Children(func() {
-			if d.Left != nil {
-				ui.Column(c).Width(220).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() {
-					d.Left(c)
-				})
+			if d.Left != nil && !narrow {
+				ui.Column(c).Width(188).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() { d.Left(c) })
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
-				// top workflow editor
-				ui.Box(c).Height(280).Fill().Children(func() {
+				inspectorHeight := float32(320)
+				if narrow {
+					inspectorHeight = 280
+				}
+				if d.InspectorHeight == 0 {
+					d.InspectorHeight = inspectorHeight
+				}
+				inspectorHeight = d.InspectorHeight
+				canvasHeight := height - 36 - inspectorHeight
+				if canvasHeight < 180 {
+					canvasHeight = 180
+					inspectorHeight = height - 216
+				}
+				if narrow && canvasHeight > 260 {
+					canvasHeight = 260
+				}
+				if d.InspectorCollapsed {
+					canvasHeight = height - 36
+					inspectorHeight = 0
+				}
+				ui.Box(c).Height(canvasHeight).Fill().Children(func() {
 					if d.Editor != nil {
 						d.Editor.View(c)
 					}
 				})
-				ui.Divider(c)
-				// bottom inspector
-				ui.Box(c).Height(340).Fill().Padding(8).Children(func() {
-					inspector(c, d, t)
-				})
+				if !d.InspectorCollapsed {
+					ui.Divider(c)
+					ui.Box(c).Height(inspectorHeight).Fill().Padding(8).Children(func() { inspector(c, d, t, narrow) })
+				}
 			})
-			if d.Right != nil {
-				ui.Column(c).Width(260).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() {
-					d.Right(c)
-				})
+			if d.Right != nil && !narrow {
+				ui.Column(c).Width(220).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() { d.Right(c) })
 			}
 		})
-		// status bar
-		ui.Row(c).Height(32).Padding(0, 12).Gap(8).Children(func() {
-			if ui.Button(c, "保存").Clicked() {
-				d.Save(context.Background())
+		ui.Row(c).Height(36).Padding(0, 12).Gap(8).AlignItems(ui.Center).Background(t.Surface).Children(func() {
+			if d.Dirty {
+				ui.Text(c, "● 草稿未保存").FontSize(12).TextColor(t.Warning)
+			} else if d.SaveState == SaveSaved {
+				ui.Text(c, fmt.Sprintf("✓ 已保存 · rev %d", d.Revision)).FontSize(12).TextColor(t.Success)
+			} else {
+				ui.Text(c, fmt.Sprintf("就绪 · rev %d", d.Revision)).FontSize(12).TextColor(t.TextMuted)
 			}
-			if ui.Button(c, "创建运行").Clicked() {
-				d.CreateRun(context.Background())
-			}
+			ui.Spacer(c)
 			if d.Loading {
 				ui.Text(c, "加载中…").FontSize(12).TextColor(t.TextMuted)
-			} else if d.Error != "" {
+			}
+			if d.Error != "" {
 				ui.Text(c, d.Error).FontSize(12).TextColor(t.Danger)
-			} else if d.Empty {
-				ui.Text(c, "空设计").FontSize(12).TextColor(t.TextMuted)
-			} else if d.Dirty {
-				ui.Text(c, "Draft").FontSize(12).TextColor(t.TextMuted)
-			} else {
-				ui.Text(c, string(d.SaveState)).FontSize(12).TextColor(t.TextMuted)
+			}
+			if ui.Button(c, "保存设计").Clicked() {
+				d.Save(context.Background())
+			}
+			if ui.Button(c, "▶ 创建运行").Clicked() {
+				d.CreateRun(context.Background())
+			}
+			if ui.Button(c, map[bool]string{true: "展开检查器", false: "收起检查器"}[d.InspectorCollapsed]).Clicked() {
+				d.InspectorCollapsed = !d.InspectorCollapsed
 			}
 		})
 	})
 }
 
-func inspector(c *ui.Context, d *Designer, t *ui.Theme) {
-	ui.Column(c).Gap(6).Padding(8).Children(func() {
-		ui.Text(c, "步骤检查器").Bold()
-		if d.SelectedNode == "" {
-			ui.Text(c, "未选中节点").FontSize(12).TextColor(t.TextMuted)
-			return
+func inspector(c *ui.Context, d *Designer, t *ui.Theme, compact bool) {
+	labels := []string{"步骤属性", "96 孔映射", "检测参数"}
+	ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+		components.SectionTitle(c, "检查器")
+		ui.Spacer(c)
+		if ui.Button(c, "−").Clicked() && d.InspectorHeight > 200 {
+			d.InspectorHeight -= 24
 		}
-		title := d.nodeTitle(d.SelectedNode)
-		if ui.TextInput(c, &title).Placeholder("步骤名称").Changed() {
-			d.setNodeTitle(d.SelectedNode, title)
-		}
-		if ui.TextInput(c, &d.ComponentRefsDraft).Placeholder("组件 ID").Changed() {
-			d.setComponentRefs(d.SelectedNode, d.ComponentRefsDraft)
-		}
-		if ui.TextInput(c, &d.AssayIDDraft).Placeholder("cck8 / qpcr").Changed() {
-			d.saveAssayDraft()
-		}
-		if d.AssayIDDraft != "" {
-			changed := false
-			fields := []*string{&d.TimepointsDraft, &d.PlateInstanceDraft, &d.ReplicatesDraft, &d.ControlGroupDraft, &d.CalibratorGroupDraft, &d.SamplesDraft, &d.GenesDraft, &d.ReferenceGenesDraft}
-			labels := []string{"时间点", "孔板组件 ID", "技术重复数", "对照组", "校准组", "样本 ID:组别", "基因（参考基因加 *）", "参考基因"}
-			for i := range fields {
-				if ui.TextInput(c, fields[i]).Placeholder(labels[i]).Changed() {
-					changed = true
-				}
-			}
-			if changed {
-				d.saveAssayDraft()
-			}
-			ui.Text(c, "96 孔板映射 · 选择孔位后分配").FontSize(12)
-			for row := range 8 {
-				ui.Row(c).Gap(2).Children(func() {
-					for col := range 12 {
-						well := fmt.Sprintf("%c%d", 'A'+row, col+1)
-						label := well
-						if d.wellAssigned(well) {
-							label = "●" + well
-						}
-						if containsString(d.SelectedWells, well) {
-							label = "✓" + well
-						}
-						if ui.Button(c, label).Clicked() {
-							d.toggleWell(well)
-						}
-					}
-				})
-			}
-			ui.TextInput(c, &d.SampleIDDraft).Placeholder("样本 ID")
-			ui.TextInput(c, &d.GroupIDDraft).Placeholder("组别")
-			ui.TextInput(c, &d.WellTimepointDraft).Placeholder("时间点")
-			if ui.Button(c, "分配孔位").Clicked() {
-				if err := d.AssignSelectedWells(); err != nil {
-					d.Error = err.Error()
-				} else {
-					d.Error = ""
-				}
-			}
-			if d.WellAssignmentsDraft != "" {
-				ui.Text(c, "已保存映射: "+d.WellAssignmentsDraft).FontSize(11).TextColor(t.TextMuted)
-			}
-		}
-		if ui.Button(c, "添加备注组件").Clicked() {
-			d.addNoteComponent(d.SelectedNode)
-		}
-		for i := range d.SelectedInstances() {
-			d.editInstance(c, d.SelectedNode, i, t)
+		if ui.Button(c, "+").Clicked() && d.InspectorHeight < 480 {
+			d.InspectorHeight += 24
 		}
 	})
+	components.Tabs(c, labels, &d.InspectorTab)
+	ui.Scroll(c).Fill().Children(func() {
+		ui.Column(c).Gap(8).Padding(8).Children(func() {
+			if d.SelectedNode == "" {
+				components.SectionTitle(c, "步骤检查器")
+				components.Body(c, "选择画布中的节点以查看或编辑其属性。")
+				return
+			}
+			switch d.InspectorTab {
+			case 1:
+				plateInspector(c, d, t)
+			case 2:
+				assayInspector(c, d, t)
+			default:
+				stepInspector(c, d)
+			}
+		})
+	})
+}
+
+func stepInspector(c *ui.Context, d *Designer) {
+	components.SectionTitle(c, "步骤属性")
+	title := d.nodeTitle(d.SelectedNode)
+	if components.Field(c, "步骤名称", &title, "为该步骤命名") {
+		d.setNodeTitle(d.SelectedNode, title)
+	}
+	if components.Field(c, "关联组件", &d.ComponentRefsDraft, "组件定义 ID") {
+		d.setComponentRefs(d.SelectedNode, d.ComponentRefsDraft)
+	}
+	if components.Field(c, "检测 ID", &d.AssayIDDraft, "例如 cck8") {
+		d.saveAssayDraft()
+	}
+	if ui.Button(c, "添加备注组件").Clicked() {
+		d.addNoteComponent(d.SelectedNode)
+	}
+	for i := range d.SelectedInstances() {
+		d.editInstance(c, d.SelectedNode, i, c.Theme())
+	}
+}
+
+func plateInspector(c *ui.Context, d *Designer, t *ui.Theme) {
+	components.SectionTitle(c, "96 孔板映射")
+	d.HoveredWell = ""
+	components.Meta(c, "选择孔位，再填写样本与组别并应用。")
+	ui.Row(c).Gap(3).Children(func() {
+		ui.Text(c, "").Width(20)
+		for col := range 12 {
+			ui.Text(c, strconv.Itoa(col+1)).Width(22).FontSize(10).TextColor(t.TextMuted)
+		}
+	})
+	for row := range 8 {
+		ui.Row(c).Gap(3).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, string(rune('A'+row))).Width(20).FontSize(10).TextColor(t.TextMuted)
+			for col := range 12 {
+				well := fmt.Sprintf("%c%d", 'A'+row, col+1)
+				selected, assigned := containsString(d.SelectedWells, well), d.wellAssigned(well)
+				group := d.wellGroup(well)
+				wellElement := ui.Box(c).Size(22, 22).Draw(func(p *ui.Painter, r ui.Rect) {
+					fill := t.Surface
+					if assigned {
+						fill = wellGroupTint(group, t.Dark)
+					}
+					p.Fill(ui.Rect{X: r.X + 2, Y: r.Y + 2, W: 18, H: 18}, fill, 9)
+					border := t.Border
+					if selected {
+						border = t.Accent
+					}
+					p.Stroke(ui.Rect{X: r.X + 2, Y: r.Y + 2, W: 18, H: 18}, border, 9, 2)
+				}).OnClick(func() { d.toggleWell(well) }).Key(well)
+				if wellElement.Hovered() {
+					d.HoveredWell = well
+				}
+			}
+		})
+	}
+	components.Meta(c, fmt.Sprintf("已选 %d 孔", len(d.SelectedWells)))
+	if d.HoveredWell != "" {
+		message := d.HoveredWell + " · 未分配"
+		for _, assignment := range d.Assays[d.AssayIDDraft].Wells {
+			if strings.EqualFold(assignment.WellID, d.HoveredWell) {
+				message = fmt.Sprintf("%s · 样本 %s · 组别 %s · 重复 %d", d.HoveredWell, assignment.SampleID, assignment.GroupID, assignment.Replicate)
+				break
+			}
+		}
+		components.Meta(c, message)
+	}
+	components.Field(c, "样本 ID", &d.SampleIDDraft, "例如 Control-01")
+	components.Field(c, "组别", &d.GroupIDDraft, "例如 对照组")
+	components.Field(c, "时间点", &d.WellTimepointDraft, "例如 24 h")
+	if ui.Button(c, "应用到已选孔").Clicked() {
+		if err := d.AssignSelectedWells(); err != nil {
+			d.Error = err.Error()
+		} else {
+			d.Error = ""
+		}
+	}
+	if d.WellAssignmentsDraft != "" {
+		components.Meta(c, "已保存映射: "+d.WellAssignmentsDraft)
+	}
+}
+
+func assayInspector(c *ui.Context, d *Designer, t *ui.Theme) {
+	components.SectionTitle(c, "检测合约与参数")
+	if d.AssayIDDraft == "" {
+		components.Body(c, "先在步骤属性中关联一个检测方案。")
+		return
+	}
+	fields := []*string{&d.TimepointsDraft, &d.PlateInstanceDraft, &d.ReplicatesDraft, &d.ControlGroupDraft, &d.CalibratorGroupDraft}
+	labels := []string{"时间点（h）", "孔板组件 ID", "技术重复数（个）", "对照组", "校准组"}
+	for i := range fields {
+		if components.Field(c, labels[i], fields[i], "") {
+			d.saveAssayDraft()
+		}
+	}
+	components.Meta(c, "参数按当前设计修订保存；保存失败时草稿会保留。")
 }
 
 func (d *Designer) wellAssigned(id string) bool {
@@ -530,6 +615,26 @@ func (d *Designer) wellAssigned(id string) bool {
 		}
 	}
 	return false
+}
+func (d *Designer) wellGroup(id string) string {
+	for _, well := range d.Assays[d.AssayIDDraft].Wells {
+		if strings.EqualFold(well.WellID, id) {
+			return well.GroupID
+		}
+	}
+	return ""
+}
+
+func wellGroupTint(group string, dark bool) ui.Color {
+	palette := [...]string{"#DCEBFA", "#E5E1FA", "#DDF1E8", "#F8E8D4"}
+	if dark {
+		palette = [...]string{"#23354D", "#352E4F", "#233E35", "#493725"}
+	}
+	var index uint32
+	for _, r := range group {
+		index += uint32(r)
+	}
+	return ui.Hex(palette[index%uint32(len(palette))])
 }
 
 func containsString(values []string, value string) bool {

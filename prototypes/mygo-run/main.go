@@ -18,6 +18,7 @@ import (
 	"asterlab-mygo-prototype/internal/runui"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/state"
+	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/modules/runs"
@@ -269,6 +270,7 @@ func (a *app) loadRun() {
 func isFinite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 func (a *app) view(c *ui.Context) {
+	c.SetTheme(theme.DarkTheme())
 	shell.View(c, a.shell)
 }
 

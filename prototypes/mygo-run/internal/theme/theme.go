@@ -22,12 +22,12 @@ type Tokens struct {
 
 func LightTokens() Tokens {
 	t := Tokens{
-		Canvas: ui.Hex("#F6F4EF"), Surface: ui.Hex("#FBFAF7"), Elevated: ui.Hex("#FFFFFF"),
-		Border: ui.Hex("#DDD7CC"), BorderStrong: ui.Hex("#C8C0B2"),
-		Text: ui.Hex("#201E1A"), TextMuted: ui.Hex("#6F6A60"),
-		Accent: ui.Hex("#1F6F5F"), AccentHover: ui.Hex("#195C4F"), AccentText: ui.Hex("#FFFFFF"),
-		Success: ui.Hex("#2F7D4A"), Warning: ui.Hex("#A9651D"), Danger: ui.Hex("#A13B36"),
-		RailBackground: ui.Hex("#FBFAF7"), SidebarBackground: ui.Hex("#FBFAF7"),
+		Canvas: ui.Hex("#F8F9FA"), Surface: ui.Hex("#FFFFFF"), Elevated: ui.Hex("#F4F5F7"),
+		Border: ui.Hex("#E5E7EB"), BorderStrong: ui.Hex("#CBD5E1"),
+		Text: ui.Hex("#0F172A"), TextMuted: ui.Hex("#475569"),
+		Accent: ui.Hex("#2563EB"), AccentHover: ui.Hex("#1D4ED8"), AccentText: ui.Hex("#FFFFFF"),
+		Success: ui.Hex("#10B981"), Warning: ui.Hex("#F59E0B"), Danger: ui.Hex("#EF4444"),
+		RailBackground: ui.Hex("#FFFFFF"), SidebarBackground: ui.Hex("#FFFFFF"),
 		Spacing4: 4, Spacing8: 8, Spacing12: 12, Spacing16: 16, Spacing24: 24, Spacing32: 32, Spacing48: 48,
 		TextPage: 20, TextSection: 15, TextBody: 13, TextMeta: 11, TextData: 12,
 		ButtonHeight: 32, InputHeight: 32, RowHeight: 32,
@@ -38,11 +38,11 @@ func LightTokens() Tokens {
 
 func DarkTokens() Tokens {
 	t := LightTokens()
-	t.Canvas, t.Surface, t.Elevated = ui.Hex("#171614"), ui.Hex("#201E1A"), ui.Hex("#28251F")
-	t.Border, t.BorderStrong = ui.Hex("#39352D"), ui.Hex("#514B40")
-	t.Text, t.TextMuted = ui.Hex("#F0EDE6"), ui.Hex("#A8A196")
-	t.Accent, t.AccentHover, t.AccentText = ui.Hex("#4FA38D"), ui.Hex("#60B39D"), ui.Hex("#10201C")
-	t.Success, t.Warning, t.Danger = ui.Hex("#55A76D"), ui.Hex("#D5964D"), ui.Hex("#D26B62")
+	t.Canvas, t.Surface, t.Elevated = ui.Hex("#0B0C0E"), ui.Hex("#111317"), ui.Hex("#16191F")
+	t.Border, t.BorderStrong = ui.Hex("#232832"), ui.Hex("#393F49")
+	t.Text, t.TextMuted = ui.Hex("#F0F2F5"), ui.Hex("#9DA3AF")
+	t.Accent, t.AccentHover, t.AccentText = ui.Hex("#4B88FF"), ui.Hex("#6098FF"), ui.Hex("#FFFFFF")
+	t.Success, t.Warning, t.Danger = ui.Hex("#34D399"), ui.Hex("#F59E0B"), ui.Hex("#F87171")
 	t.RailBackground, t.SidebarBackground = t.Surface, t.Surface
 	return aliases(t)
 }
