@@ -8,6 +8,11 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $repoRoot 'prototypes\mygo-run\dist\mygo-run.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "missing $exe; run scripts/mygo-build.ps1 first" }
 
+if (-not $env:LABWORKBENCH_DATA_DIR) {
+    $src = 'D:\L\AI\Cindy\CellPlanner-ProductStudy\cellplanner-replica\target\asterlab-ui-runtime3'
+    if (Test-Path -LiteralPath $src) { $env:LABWORKBENCH_DATA_DIR = $src }
+}
+if (-not $env:ASTERLAB_RUN_ID) { $env:ASTERLAB_RUN_ID = '1c0c8989-0513-483a-851b-bdc7d6c67483' }
 $proc = Start-Process -FilePath $exe -PassThru
 $start = Get-Date
 Start-Sleep -Milliseconds 500

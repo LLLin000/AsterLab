@@ -6,280 +6,345 @@ import (
 	"log"
 	"math"
 	"os"
-	"strconv"
+	"sync/atomic"
 
+	"asterlab-mygo-prototype/internal/blocks"
+	"asterlab-mygo-prototype/internal/designer"
+	"asterlab-mygo-prototype/internal/runui"
+	"asterlab-mygo-prototype/internal/shell"
+	"asterlab-mygo-prototype/internal/state"
+	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/modules/runs"
+
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
 type sample struct{ id, value string }
+
 type app struct {
-	page      *string
-	step      *string
-	samples   []sample
-	checked   bool
-	plateWell *int
-	tp        string
-	svc       runs.RunService
+	page    *string
+	step    *string
+	samples []sample
+
+	runSvc    runs.RunService
+	designSvc runs.DesignService
 	snap      runs.RunSnapshot
 	err       string
+
+	shell    *shell.Shell
+	ws       *runui.Workspace
+	designer *designer.Designer
+	guard    state.StaleGuard
+
+	designSnap *runs.DesignSnapshot
+
+	wf     *workflow.Editor
+	blocks []blocks.Instance
+
+	opCounter atomic.Uint64
+
+	selectedTask string
 }
 
-func (a *app) apply(snap runs.RunSnapshot) {
-	if snap.Revision < a.snap.Revision {
+func (a *app) nextOp() string {
+	n := a.opCounter.Add(1)
+	return fmt.Sprintf("op-%d", n)
+}
+
+func toRunView(s runs.RunSnapshot) runui.RunView {
+	v := runui.RunView{
+		Title:        s.Title,
+		Status:       s.Status,
+		Revision:     s.Revision,
+		Measurements: make([]runui.Measurement, 0, len(s.Measurements)),
+		Events:       make([]runui.Event, 0, len(s.Events)),
+	}
+	for _, t := range s.Tasks {
+		v.Tasks = append(v.Tasks, runui.Task{Key: t.Key, Title: t.Title, Timepoint: t.Timepoint, Status: t.Status})
+	}
+	for _, m := range s.Measurements {
+		v.Measurements = append(v.Measurements, runui.Measurement{SampleID: m.SampleID, Endpoint: m.Endpoint, Value: m.Value, Unit: m.Unit})
+	}
+	for _, e := range s.Events {
+		v.Events = append(v.Events, runui.Event{Kind: e.EventType, Message: e.Content})
+	}
+	return v
+}
+
+func (a *app) applySnap(snap runs.RunSnapshot) {
+	if !a.guard.Accept(snap.Revision) {
 		a.err = "忽略过期快照"
 		return
 	}
-	a.snap = snap
-}
-
-func (a *app) save() {
-	if a.svc == nil {
-		a.err = "Rust RunService 不可用"
-		return
-	}
-	ms := make([]runs.Measurement, 0, len(a.samples))
-	for _, r := range a.samples {
-		v, err := strconv.ParseFloat(r.value, 64)
-		if err != nil || !isFinite(v) {
-			continue
-		}
-		if r.id == "" {
-			a.err = "样本 / 孔位不能为空"
-			return
-		}
-		ms = append(ms, runs.Measurement{SampleID: r.id, Endpoint: "OD450", Value: v, Unit: "AU"})
-	}
-	if len(ms) == 0 {
-		a.err = "至少填写一条有效数值"
-		return
-	}
-	snap, err := a.svc.SaveReadout(context.Background(), runs.ReadoutInput{RunID: a.snap.RunID, Measurements: ms})
+	newSnap, err := state.ApplySnapshot(a.snap, snap)
 	if err != nil {
 		a.err = err.Error()
 		return
 	}
-	a.snap = snap
-	a.err = "已保存"
+	if err := state.ConflictIfDifferent(a.snap, snap); err != nil {
+		a.err = err.Error()
+	}
+	a.snap = newSnap
+	if a.ws != nil {
+		a.ws.View = toRunView(a.snap)
+		if len(a.snap.Tasks) == 0 && len(a.snap.Measurements) == 0 {
+			a.ws.State = runui.StateEmpty
+		} else {
+			a.ws.State = runui.StateReady
+		}
+	}
+}
+
+func (a *app) loadDesign(id string) {
+	if a.designSvc == nil {
+		return
+	}
+	a.designer = designer.New(id, "", 0, a.designSvc)
+	a.designer.Load(context.Background(), id)
+	snap, err := a.designSvc.LoadDesign(context.Background(), id)
+	if err != nil {
+		a.err = state.MapError(err).Error()
+		return
+	}
+	a.designSnap = &snap
+}
+
+func (a *app) loadDesigns() {
+	if a.designSvc == nil {
+		return
+	}
+	ds, err := a.designSvc.ListDesigns(context.Background())
+	if err != nil {
+		a.err = state.MapError(err).Error()
+		return
+	}
+	a.shell.Designs = make([]shell.DesignItem, 0, len(ds))
+	for _, d := range ds {
+		a.shell.Designs = append(a.shell.Designs, shell.DesignItem{ID: d.DesignID, Title: d.Title, Meta: fmt.Sprintf("rev %d", d.Revision)})
+	}
+	if a.shell.Selected == "" && len(ds) > 0 {
+		a.shell.Selected = ds[0].DesignID
+		a.loadDesign(ds[0].DesignID)
+	}
+}
+
+func (a *app) loadRun() {
+	if a.runSvc == nil {
+		if a.ws != nil {
+			a.ws.State = runui.StateBlocked
+			a.ws.Error = "Rust RunService 不可用"
+		}
+		return
+	}
+	runID := os.Getenv("ASTERLAB_RUN_ID")
+	if runID == "" {
+		runID = "1c0c8989-0513-483a-851b-bdc7d6c67483"
+	}
+	snap, err := a.runSvc.LoadRun(context.Background(), runID)
+	if err != nil {
+		if a.ws != nil {
+			a.ws.State = runui.StateBlocked
+			a.ws.Error = state.MapError(err).Error()
+		}
+		a.err = state.MapError(err).Error()
+		return
+	}
+	a.applySnap(snap)
+	if a.ws != nil && a.ws.State == runui.StateLoading {
+		if len(a.snap.Tasks) == 0 && len(a.snap.Measurements) == 0 {
+			a.ws.State = runui.StateEmpty
+		} else {
+			a.ws.State = runui.StateReady
+		}
+	}
 }
 
 func isFinite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 func (a *app) view(c *ui.Context) {
-	t := c.Theme()
-	bar := c.TitleBar()
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		// Custom title bar: no Windows chrome.
-		ui.Row(c).Height(max(bar.Height, 40)).Padding(0, bar.Right+12, 0, bar.Left+14).
-			DragWindow().Children(func() {
-			ui.Text(c, "AsterLab").Bold()
-			ui.Text(c, "/").TextColor(t.TextMuted)
-			ui.Text(c, "实验运行").TextColor(t.TextMuted)
-			ui.Spacer(c)
-			ui.Text(c, a.snap.Title+" · 第 2 次运行").TextColor(t.TextMuted)
-		})
-		ui.Divider(c)
-		ui.Row(c).Grow(1).Children(func() {
-			a.sidebar(c)
-			a.workspace(c)
-		})
+	shell.View(c, a.shell)
+}
+
+func designPage(c *ui.Context, a *app) {
+	ui.Column(c).Fill().Padding(16).Gap(10).Children(func() {
+		ui.Text(c, "实验设计").FontSize(20).Bold()
+		if a.designer != nil {
+			designer.View(c, a.designer)
+			return
+		}
+		ui.Text(c, "DesignService 不可用").TextColor(ui.Hex("#b00020"))
 	})
 }
 
-func (a *app) sidebar(c *ui.Context) {
+func protocolPage(c *ui.Context, a *app) {
 	t := c.Theme()
-	ui.Column(c).Width(240).FillHeight().Padding(10).Gap(8).Background(ui.Hex("#f1efea")).Children(func() {
-		ui.Text(c, "项目 / 实验设计").FontSize(12).TextColor(t.TextMuted)
-		ui.Sidebar(c, a.step, func() {
-			ui.SidebarSection(c, "L929 GelMA/ZnO biocompatibility", nil, func() {
-				ui.SidebarItem(c, "design-l929", nil, "GelMA/ZnO L929 生物相容性")
-				ui.SidebarItem(c, "design-timed", nil, "Timed design")
-				ui.SidebarItem(c, "design-wb", nil, "p-AKT Western blot")
+	ui.Column(c).Fill().Padding(16).Gap(10).Children(func() {
+		ui.Text(c, "Protocol（只读）").FontSize(20).Bold()
+		if len(a.snap.Tasks) == 0 {
+			ui.Text(c, "无 Protocol 任务").TextColor(t.TextMuted)
+			return
+		}
+		for _, task := range a.snap.Tasks {
+			ui.Text(c, fmt.Sprintf("%s · %s · %s", task.Timepoint, task.Title, task.Status))
+		}
+	})
+}
+
+func toolsPage(c *ui.Context, a *app) {
+	t := c.Theme()
+	ui.Column(c).Fill().Padding(16).Gap(10).Children(func() {
+		ui.Text(c, "资料与工具（只读）").FontSize(20).Bold()
+		for _, inst := range a.blocks {
+			ui.Column(c).Padding(8).Radius(6).Border(1, t.Border).Children(func() {
+				blocks.View(c, inst)
 			})
-			ui.SidebarSection(c, "Second project", nil, func() {
-				ui.SidebarItem(c, "design-elisa", nil, "ELISA design")
-				ui.SidebarItem(c, "design-cck", nil, "CCK-8 设计工作区")
-			})
-		}).Grow(1)
-		ui.Text(c, "2 次执行 · 0 项待确认").FontSize(12).TextColor(t.TextMuted)
-	})
-}
-
-func (a *app) workspace(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Grow(1).FillHeight().Padding(18).Gap(14).Children(func() {
-		ui.Row(c).Children(func() {
-			ui.Text(c, a.snap.Title).FontSize(22).Bold()
-			ui.Spacer(c)
-			ui.Text(c, a.snap.Status+" · D3").TextColor(t.TextMuted)
-		})
-		a.schedule(c)
-		ui.Grid(c).Grow(1).ColumnTracks(ui.Fr(2), ui.Fixed(280)).Gap(16).Children(func() {
-			a.record(c)
-			a.ready(c)
-		})
-	})
-}
-
-func (a *app) schedule(c *ui.Context) {
-	t := c.Theme()
-	type tp struct {
-		name        string
-		done, total int
-	}
-	var list []tp
-	for _, task := range a.snap.Tasks {
-		name := task.Timepoint
-		if name == "" {
-			name = "准备"
-		}
-		i := -1
-		for j := range list {
-			if list[j].name == name {
-				i = j
-				break
-			}
-		}
-		if i < 0 {
-			list = append(list, tp{name: name})
-			i = len(list) - 1
-		}
-		list[i].total++
-		if task.Status == "completed" {
-			list[i].done++
-		}
-	}
-	ui.Row(c).Gap(8).Children(func() {
-		for _, item := range list {
-			item := item
-			bg := t.Surface
-			if item.name == a.tp {
-				bg = ui.Hex("#5b45c9")
-			}
-			if ui.Button(c, fmt.Sprintf("%s  %d/%d", item.name, item.done, item.total)).Radius(7).Padding(8, 12).Background(bg).Clicked() {
-				a.tp = item.name
-			}
-		}
-	})
-}
-
-func (a *app) record(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Gap(12).Padding(16).Radius(10).Background(t.Surface).Border(1, t.Border).Children(func() {
-		ui.Text(c, "当前任务 · CCK-8 读数").FontSize(17).Bold()
-		ui.Text(c, "具体操作条件继承已选 Protocol").TextColor(t.TextMuted)
-		ui.Row(c).Gap(10).Children(func() {
-			if ui.Checkbox(c, &a.checked, "确认空白孔设置").Changed() {
-			}
-			ui.Text(c, "必需").FontSize(11).TextColor(t.TextMuted)
-		})
-		ui.Divider(c)
-		ui.Text(c, "记录 OD450（AU）").FontSize(15).Bold()
-		ui.Grid(c).Columns(2).Gap(8).Children(func() {
-			ui.Text(c, "样本 / 孔位").FontSize(11).TextColor(t.TextMuted)
-			ui.Text(c, "测量值").FontSize(11).TextColor(t.TextMuted)
-			for i := range a.samples {
-				i := i
-				ui.TextInput(c, &a.samples[i].id)
-				ui.TextInput(c, &a.samples[i].value)
-			}
-		})
-		ui.Row(c).Gap(8).Children(func() {
-			if ui.PrimaryButton(c, "保存读数").Clicked() {
-			}
-			if ui.Button(c, "完成本步").Clicked() {
-			}
-		})
-	})
-}
-
-func (a *app) ready(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Gap(10).Padding(16).Radius(10).Background(t.Surface).Border(1, t.Border).Children(func() {
-		ui.Text(c, "就绪信息").FontSize(15).Bold()
-		ui.Text(c, "材料 / 试剂").FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, "尚未绑定")
-		ui.Text(c, a.err)
-		ui.Text(c, "仪器 / 程序").FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, "尚未绑定")
-		ui.Text(c, "孔板").FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, "尚未绑定")
-		ui.Divider(c)
-		ui.Text(c, "流程预览 · 示意").FontSize(15).Bold()
-		a.flow(c)
-		ui.Text(c, "96 孔板 · 示意").FontSize(15).Bold()
-		a.plate(c)
-	})
-}
-
-func (a *app) flow(c *ui.Context) {
-	t := c.Theme()
-	ui.Box(c).Height(145).Draw(func(p *ui.Painter, r ui.Rect) {
-		nodes := []struct {
-			x, y  float32
-			label string
-		}{
-			{0.12, 0.35, "Seed"}, {0.38, 0.35, "Treat"}, {0.64, 0.35, "Read"}, {0.64, 0.75, "Stain"}, {0.88, 0.75, "Image"},
-		}
-		for i := 0; i < 4; i++ {
-			x1 := r.X + r.W*nodes[i].x
-			y1 := r.Y + r.H*nodes[i].y
-			x2 := r.X + r.W*nodes[i+1].x
-			y2 := r.Y + r.H*nodes[i+1].y
-			p.Line(x1+12, y1, x2-12, y2, 1, t.Border)
-		}
-		for i, n := range nodes {
-			x := r.X + r.W*n.x
-			y := r.Y + r.H*n.y
-			fill := t.Surface
-			if i == 2 {
-				fill = ui.Hex("#5b45c9")
-			}
-			p.Fill(ui.Rect{X: x - 32, Y: y - 16, W: 64, H: 32}, fill, 8)
-			p.Stroke(ui.Rect{X: x - 32, Y: y - 16, W: 64, H: 32}, t.Border, 8, 1)
-			p.Text(x-22, y-5, n.label, 11, t.Text)
-		}
-	})
-}
-
-func (a *app) plate(c *ui.Context) {
-	t := c.Theme()
-	ui.Grid(c).Columns(12).Gap(2).Children(func() {
-		for i := 0; i < 96; i++ {
-			fill := t.Background
-			if i == 13 || i == 14 || i == 25 {
-				fill = ui.Hex("#d7d0c2")
-			}
-			ui.Box(c).Height(10).Radius(2).Background(fill).Border(1, t.Border)
 		}
 	})
 }
 
 func main() {
 	page, step := "run", "design-l929"
-	svc, err := runs.NewRunService()
-	if err != nil {
-		log.Fatal(err)
+	_ = step
+
+	runSvc, _ := runs.NewRunService()
+	designSvc, _ := runs.NewDesignService()
+
+	a := &app{
+		page:      &page,
+		step:      &step,
+		runSvc:    runSvc,
+		designSvc: designSvc,
+		snap:      runs.RunSnapshot{Title: "加载中", Status: "loading"},
 	}
-	runID := os.Getenv("ASTERLAB_RUN_ID")
-	if runID == "" {
-		runID = "1c0c8989-0513-483a-851b-bdc7d6c67483"
+	a.shell = &shell.Shell{
+		Project:     "L929",
+		Page:        shell.Run,
+		SidebarOpen: true,
+		OnSelect:    func(id string) { a.shell.Selected = id; a.loadDesign(id) },
+		OnPage:      func(p shell.Page) { a.shell.Page = p },
+		Content:     func(c *ui.Context) { contentPage(c, a) },
 	}
-	a := &app{page: &page, step: &step, tp: "D3", samples: []sample{{"Control-1", ""}, {"E1-1", ""}}, svc: svc, snap: runs.RunSnapshot{Title: "L929 生物相容性", Status: "加载中"}}
+
+	// workflow editor with a small sample graph (示意).
+	a.wf = workflow.NewEditor()
+	a.wf.Doc.AddNode(workflow.KindFlask, "Seed", workflow.Position{X: 40, Y: 40})
+	a.wf.Doc.AddNode(workflow.KindPipette, "Treat", workflow.Position{X: 160, Y: 40})
+	a.wf.Doc.AddNode(workflow.KindPlate, "Read", workflow.Position{X: 280, Y: 40})
+
+	// blocks samples.
+	noteDef := blocks.Definition{ID: "note-1", Version: 1, Type: blocks.TypeNote, Props: blocks.NoteProps{Title: "Note", Text: "示意"}}
+	if inst, err := blocks.NewInstance("note-inst", noteDef); err == nil {
+		a.blocks = append(a.blocks, inst)
+	}
+	plateDef := blocks.Definition{ID: "plate-1", Version: 1, Type: blocks.TypePlate96, Props: blocks.Plate96Props{Rows: 8, Cols: 12, Selected: []int{13, 14}}}
+	if inst, err := blocks.NewInstance("plate-inst", plateDef); err == nil {
+		a.blocks = append(a.blocks, inst)
+	}
+
+	// runui workspace.
+	cb := runui.Callbacks{
+		SaveReadout: func(ms []runui.Measurement) {
+			if a.ws == nil {
+				return
+			}
+			rMs := make([]runs.Measurement, 0, len(ms))
+			for _, m := range ms {
+				rMs = append(rMs, runs.Measurement{SampleID: m.SampleID, Endpoint: m.Endpoint, Value: m.Value, Unit: m.Unit})
+			}
+			taskKey := a.ws.Selected
+			timepoint := ""
+			for _, t := range a.ws.View.Tasks {
+				if t.Key == taskKey {
+					timepoint = t.Timepoint
+				}
+			}
+			if taskKey == "" && len(a.ws.View.Tasks) > 0 {
+				taskKey = a.ws.View.Tasks[0].Key
+				timepoint = a.ws.View.Tasks[0].Timepoint
+			}
+			opID := a.nextOp()
+			snap, err := a.runSvc.SaveReadout(context.Background(), runs.ReadoutInput{
+				RunID:        a.snap.RunID,
+				TaskKey:      taskKey,
+				Timepoint:    timepoint,
+				Measurements: rMs,
+				OperationID:  opID,
+			})
+			if err != nil {
+				a.ws.State = runui.StateBlocked
+				a.ws.Error = state.MapError(err).Error()
+				a.ws.Draft.Error = state.MapError(err).Error()
+				a.err = state.MapError(err).Error()
+				return
+			}
+			a.applySnap(snap)
+			if a.ws != nil {
+				a.ws.State = runui.StateSaved
+			}
+		},
+		CompleteTask: func(taskKey string) {
+			if a.ws == nil {
+				return
+			}
+			if taskKey == "" {
+				taskKey = a.ws.Selected
+			}
+			opID := a.nextOp()
+			snap, err := a.runSvc.CompleteTask(context.Background(), runs.CompleteTaskInput{
+				RunID:       a.snap.RunID,
+				TaskKey:     taskKey,
+				OperationID: opID,
+			})
+			if err != nil {
+				a.ws.State = runui.StateBlocked
+				a.ws.Error = state.MapError(err).Error()
+				a.err = state.MapError(err).Error()
+				return
+			}
+			a.applySnap(snap)
+			if a.ws != nil {
+				a.ws.State = runui.StateReady
+			}
+		},
+		SelectTask: func(taskKey string) { a.selectedTask = taskKey },
+	}
+	a.ws = runui.NewWorkspace(toRunView(a.snap), cb)
+	a.ws.State = runui.StateLoading
+	a.ws.Width = 1200
+
 	mygo.App.WhenReady(func() {
 		go func() {
-			if snap, err := svc.LoadRun(context.Background(), runID); err == nil {
-				a.apply(snap)
-			}
+			a.loadDesigns()
+			a.loadRun()
 		}()
 		mygo.NewWindow(mygo.WindowOptions{
-			Title: "AsterLab MyGo Prototype", Width: 1200, Height: 760,
+			Title:         "AsterLab MyGo Prototype",
+			Width:         1200,
+			Height:        760,
 			TitleBarStyle: mygo.TitleBarHidden,
 			Content:       ui.View(a.view),
 		})
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func contentPage(c *ui.Context, a *app) {
+	switch a.shell.Page {
+	case shell.Design:
+		designPage(c, a)
+	case shell.Protocol:
+		protocolPage(c, a)
+	case shell.Run:
+		if a.ws != nil {
+			a.ws.Width = 1200
+			runui.View(c, a.ws)
+		} else {
+			ui.Text(c, "加载中…")
+		}
+	case shell.Tools:
+		toolsPage(c, a)
 	}
 }

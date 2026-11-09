@@ -14,6 +14,19 @@ const (
 	Tools
 )
 
+func (p Page) ShortLabel() string {
+	switch p {
+	case Design:
+		return "设计"
+	case Protocol:
+		return "方案"
+	case Run:
+		return "运行"
+	default:
+		return "工具"
+	}
+}
+
 func (p Page) Label() string {
 	switch p {
 	case Design:
@@ -66,12 +79,18 @@ func View(c *ui.Context, s *Shell) {
 		})
 		ui.Divider(c)
 		ui.Row(c).Grow(1).Children(func() {
-			ui.Column(c).Width(52).FillHeight().Padding(6).Gap(4).Background(t.Background).Children(func() {
+			ui.Column(c).Width(64).FillHeight().Padding(6).Gap(4).Background(t.Background).Children(func() {
 				ui.Text(c, "AL").FontSize(18).Bold()
 				for _, p := range []Page{Design, Protocol, Run, Tools} {
 					p := p
-					label := p.Label()
-					if ui.Button(c, label).Radius(7).Clicked() {
+					b := ui.ButtonBase(c).Width(46).Height(38).Radius(8)
+					if p == s.Page {
+						b = b.Background(t.Accent)
+					}
+					b.Children(func() {
+						ui.Text(c, p.ShortLabel()).FontSize(12)
+					})
+					if b.Clicked() {
 						s.Page = p
 						if s.OnPage != nil {
 							s.OnPage(p)

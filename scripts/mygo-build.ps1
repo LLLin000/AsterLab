@@ -6,7 +6,8 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $protoDir = Join-Path $repoRoot 'prototypes\mygo-run'
 $distDir = Join-Path $protoDir 'dist'
-$mygo = if ($env:MYGO_BIN) { $env:MYGO_BIN } else { 'mygo' }
+$mygoPin = 'v0.8.4-0.20261108220316-c4197b7fe562'
+$mygo = 'go'
 
 if (-not (Test-Path -LiteralPath $protoDir)) { throw "prototype dir missing: $protoDir" }
 
@@ -17,7 +18,7 @@ New-Item -ItemType Directory -Path $distDir | Out-Null
 Push-Location $protoDir
 try {
     # 1. Native module
-    & $mygo native check .\modules\runs
+    & $mygo run github.com/egoist/mygo/cmd/mygo@$mygoPin native check .\modules\runs
     if ($LASTEXITCODE -ne 0) { throw "mygo native check failed (exit $LASTEXITCODE)" }
     $dll = Join-Path $protoDir '.mygo\native\windows-amd64\Runs.dll'
     if (-not (Test-Path -LiteralPath $dll)) { throw "Runs.dll not produced: $dll" }
