@@ -3,8 +3,8 @@
 
 Name "AsterLab MyGo (Unsigned Beta)"
 OutFile "..\release\AsterLab-MyGo-0.1.0-beta-unsigned-win-x64-setup.exe"
-InstallDir "$PROGRAMFILES64\AsterLab MyGo"
-RequestExecutionLevel admin
+InstallDir "$LOCALAPPDATA\Programs\AsterLab MyGo"
+RequestExecutionLevel user
 
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
@@ -16,6 +16,7 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
+    SetShellVarContext current
     SetOutPath "$INSTDIR"
     File "..\prototypes\mygo-run\dist\mygo-run.exe"
     File "..\prototypes\mygo-run\dist\Runs.dll"
@@ -29,15 +30,16 @@ Section "Install"
 
     WriteUninstaller "$INSTDIR\uninstall.exe"
 
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayName" "AsterLab MyGo (Unsigned Beta)"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "InstallLocation" "$INSTDIR"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayVersion" "0.1.0-beta-unsigned"
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "NoModify" 1
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "NoRepair" 1
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayName" "AsterLab MyGo (Unsigned Beta)"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "InstallLocation" "$INSTDIR"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayVersion" "0.1.0-beta-unsigned"
+    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "NoModify" 1
+    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "NoRepair" 1
 SectionEnd
 
 Section "Uninstall"
+    SetShellVarContext current
     nsExec::ExecToLog 'taskkill /IM mygo-run.exe /F'
     Sleep 500
     Delete "$INSTDIR\mygo-run.exe"
@@ -49,5 +51,5 @@ Section "Uninstall"
     Delete "$SMPROGRAMS\AsterLab MyGo\AsterLab MyGo.lnk"
     RMDir "$SMPROGRAMS\AsterLab MyGo"
     Delete "$DESKTOP\AsterLab MyGo.lnk"
-    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo"
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo"
 SectionEnd
