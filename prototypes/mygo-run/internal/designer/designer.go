@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -25,12 +26,14 @@ const (
 	SaveError  SaveState = "error"
 )
 
-// designDoc is the serialized design payload stored in DesignSnapshot.Data/Changes.
-type designDoc struct {
-	DesignID  string                       `json:"designId"`
-	Title     string                       `json:"title"`
+type designExtension struct {
 	Workflow  workflow.WorkflowDocument    `json:"workflow"`
 	Instances map[string][]blocks.Instance `json:"instances,omitempty"`
+}
+
+type designDoc struct {
+	Title string          `json:"title,omitempty"`
+	MyGo  designExtension `json:"mygo"`
 }
 
 type Callbacks struct {
@@ -48,7 +51,8 @@ type Designer struct {
 	Editor    *workflow.Editor
 	Instances map[string][]blocks.Instance
 
-	SelectedNode string
+	SelectedNode       string
+	ComponentRefsDraft string
 
 	Dirty     bool
 	SaveState SaveState
@@ -64,8 +68,7 @@ type Designer struct {
 	Left  func(*ui.Context)
 	Right func(*ui.Context)
 
-	savedDoc designDoc
-	opSeq    uint64
+	opSeq uint64
 }
 
 func New(designID, title string, revision uint64, svc runs.DesignService) *Designer {
@@ -78,7 +81,11 @@ func New(designID, title string, revision uint64, svc runs.DesignService) *Desig
 		SaveState: SaveIdle,
 		Service:   svc,
 	}
-	d.savedDoc = designDoc{DesignID: designID, Title: title, Workflow: d.Editor.Doc, Instances: d.Instances}
+	d.Editor.OnSelect = func(id string) {
+		d.SelectedNode = id
+		d.ComponentRefsDraft = strings.Join(d.componentRefs(id), ", ")
+	}
+	d.Editor.OnChange = d.Touch
 	return d
 }
 
@@ -152,9 +159,9 @@ func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 	var doc designDoc
 	if snap.Data != "" {
 		if err := json.Unmarshal([]byte(snap.Data), &doc); err == nil {
-			d.Editor.Doc = doc.Workflow
-			if doc.Instances != nil {
-				d.Instances = doc.Instances
+			d.Editor.Doc = doc.MyGo.Workflow
+			if doc.MyGo.Instances != nil {
+				d.Instances = doc.MyGo.Instances
 			}
 			if doc.Title != "" {
 				d.Title = doc.Title
@@ -164,7 +171,6 @@ func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 	d.Dirty = false
 	d.SaveState = SaveIdle
 	d.Error = ""
-	d.savedDoc = designDoc{DesignID: d.DesignID, Title: d.Title, Workflow: d.Editor.Doc, Instances: d.Instances}
 }
 
 // Touch marks the design dirty.
@@ -178,10 +184,8 @@ func (d *Designer) Save(ctx context.Context) {
 	d.SaveState = SaveSaving
 	d.Error = ""
 	changes, err := json.Marshal(designDoc{
-		DesignID:  d.DesignID,
-		Title:     d.Title,
-		Workflow:  d.Editor.Doc,
-		Instances: d.Instances,
+		Title: d.Title,
+		MyGo:  designExtension{Workflow: d.Editor.Doc, Instances: d.Instances},
 	})
 	if err != nil {
 		d.SaveState = SaveError
@@ -208,7 +212,6 @@ func (d *Designer) Save(ctx context.Context) {
 	}
 	d.Dirty = false
 	d.SaveState = SaveSaved
-	d.savedDoc = designDoc{DesignID: d.DesignID, Title: d.Title, Workflow: d.Editor.Doc, Instances: d.Instances}
 }
 
 // CreateRun creates a Run from the current design.
@@ -233,6 +236,34 @@ func (d *Designer) SelectedInstances() []blocks.Instance {
 		return nil
 	}
 	return d.Instances[d.SelectedNode]
+}
+
+func (d *Designer) componentRefs(nodeID string) []string {
+	for i := range d.Editor.Doc.Nodes {
+		if d.Editor.Doc.Nodes[i].ID == nodeID {
+			return d.Editor.Doc.Nodes[i].ComponentRefs
+		}
+	}
+	return nil
+}
+
+func (d *Designer) setComponentRefs(nodeID, value string) {
+	var refs []string
+	for _, ref := range strings.Split(value, ",") {
+		if ref = strings.TrimSpace(ref); ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+	for i := range d.Editor.Doc.Nodes {
+		node := &d.Editor.Doc.Nodes[i]
+		if node.ID == nodeID {
+			if strings.Join(node.ComponentRefs, "\x00") != strings.Join(refs, "\x00") {
+				node.ComponentRefs = refs
+				d.Touch()
+			}
+			return
+		}
+	}
 }
 
 // View renders the designer: left/right hooks, top workflow editor, bottom inspector.
@@ -294,6 +325,10 @@ func inspector(c *ui.Context, d *Designer, t *ui.Theme) {
 			return
 		}
 		ui.Text(c, "节点: "+d.SelectedNode).FontSize(12)
+		ui.Text(c, "组件绑定 ID（逗号分隔）").FontSize(12)
+		if ui.TextInput(c, &d.ComponentRefsDraft).Placeholder("component-id").Changed() {
+			d.setComponentRefs(d.SelectedNode, d.ComponentRefsDraft)
+		}
 		insts := d.SelectedInstances()
 		if len(insts) == 0 {
 			ui.Text(c, "无组件预览").FontSize(12).TextColor(t.TextMuted)

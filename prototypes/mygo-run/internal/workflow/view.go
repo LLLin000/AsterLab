@@ -77,6 +77,7 @@ func (e *Editor) View(c *ui.Context) {
 		// node overlays
 		for i := range e.Doc.Nodes {
 			n := &e.Doc.Nodes[i]
+			oldPos := n.Pos
 			off := ui.Point{X: n.Pos.X + e.PanX, Y: n.Pos.Y + e.PanY}
 			// scale not applied to point (int); approximate
 			sel := n.ID == e.SelectedNode
@@ -108,6 +109,9 @@ func (e *Editor) View(c *ui.Context) {
 			}).Draggable(&off, ui.DraggableOptions{}).Key(n.ID)
 			// sync position back
 			n.Pos = Position{X: float32(off.X) - e.PanX, Y: float32(off.Y) - e.PanY}
+			if n.Pos != oldPos && e.OnChange != nil {
+				e.OnChange()
+			}
 		}
 	})
 }

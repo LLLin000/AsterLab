@@ -1094,18 +1094,14 @@ async fn restore_backup(
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let folder = env::var_os("LABWORKBENCH_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("data"));
+    let folder = cli::data_dir().map_err(|e| e.message)?;
     let args: Vec<String> = env::args().skip(1).collect();
     if !args.is_empty() {
         std::process::exit(cli::run(&args, &folder));
     }
     fs::create_dir_all(&folder)?;
-    let db_path = folder.join("labworkbench.sqlite");
-    let db = Connection::open(&db_path)?;
-    db.pragma_update(None, "foreign_keys", "ON")?;
-    db.execute_batch("CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);")?;
+    let db_path = cli::db_path(&folder);
+    let db = cli::open_db(&folder).map_err(|e| e.message)?;
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
         data_dir: folder.clone(),

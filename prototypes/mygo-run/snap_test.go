@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"image/png"
 	"os"
 	"strconv"
 	"testing"
 
+	"asterlab-mygo-prototype/internal/designer"
 	"asterlab-mygo-prototype/internal/runui"
 	"asterlab-mygo-prototype/internal/shell"
+	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/modules/runs"
 
 	"github.com/egoist/mygo/ui"
@@ -33,5 +36,63 @@ func TestSnap(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.Close()
+	}
+}
+
+func TestDesignerRealCopiedDBSaveReopenCreateRun(t *testing.T) {
+	copyFixtureDB(t)
+	ctx := context.Background()
+	dsvc, err := runs.NewDesignService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dsvc.Close()
+	designs, err := dsvc.ListDesigns(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(designs) == 0 {
+		t.Skip("no designs in fixture")
+	}
+	id := designs[0].DesignID
+	a := &app{designSvc: dsvc, shell: &shell.Shell{}}
+	a.loadDesign(id)
+	d := a.designer
+	d.Editor.AddNode(workflow.KindFlask, "EditedNode", workflow.Position{X: 10, Y: 10})
+	if !d.Dirty || d.SaveState != designer.SaveDraft {
+		t.Fatalf("editor change state = dirty:%v save:%s", d.Dirty, d.SaveState)
+	}
+	d.Save(ctx)
+	if d.SaveState != designer.SaveSaved {
+		t.Fatalf("save state = %s (%s)", d.SaveState, d.Error)
+	}
+	savedRev := d.Revision
+	// reopen with a fresh service (GUI-like second connection)
+	dsvc2, err := runs.NewDesignService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dsvc2.Close()
+	a2 := &app{designSvc: dsvc2, shell: &shell.Shell{}}
+	a2.loadDesign(id)
+	d2 := a2.designer
+	found := false
+	for _, n := range d2.Editor.Doc.Nodes {
+		if n.Title == "EditedNode" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("edited node not found after reopen")
+	}
+	d2.CreateRun(ctx)
+	if d2.Error != "" {
+		t.Fatalf("create run error: %s", d2.Error)
+	}
+	if a2.snap.RunID == "" {
+		t.Fatal("create run did not return snapshot")
+	}
+	if a2.snap.DesignRevision != savedRev {
+		t.Fatalf("create run design revision = %d, want %d", a2.snap.DesignRevision, savedRev)
 	}
 }

@@ -30,7 +30,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     io::{self, Read},
-    path::Path,
+    path::{Path, PathBuf},
 };
 use uuid::Uuid;
 
@@ -1451,8 +1451,11 @@ pub(crate) fn create_run_in_transaction(
         .optional()
         .map_err(|e| CliError::internal(e.to_string()))?
         .ok_or_else(|| CliError::internal("当前设计版本快照缺失"))?;
-    let design_data: Value =
+    let mut design_data: Value =
         serde_json::from_str(&design_raw).map_err(|e| CliError::internal(e.to_string()))?;
+    if let Some(object) = design_data.as_object_mut() {
+        object.remove("mygo");
+    }
     let (protocol_manifest, material_manifest) =
         build_run_manifests(tx, &design_data, &project, global_protocol_version_id)?;
     let labware_profiles = labware_profile_snapshot(tx, &design_data)?;
@@ -4844,16 +4847,76 @@ fn validate_date(value: &str, label: &str) -> Result<(), CliError> {
     }
     Ok(())
 }
+pub fn data_dir() -> Result<PathBuf, CliError> {
+    let path = if let Ok(v) = std::env::var("LABWORKBENCH_DATA_DIR") {
+        if v.trim().is_empty() {
+            return Err(CliError::internal("LABWORKBENCH_DATA_DIR is empty"));
+        }
+        PathBuf::from(v.trim())
+    } else if let Ok(base) = std::env::var("LOCALAPPDATA") {
+        PathBuf::from(base).join("AsterLab").join("data")
+    } else if cfg!(not(windows)) {
+        PathBuf::from(std::env::var("HOME").map_err(|e| CliError::internal(e.to_string()))?)
+            .join(".local/share/AsterLab/data")
+    } else {
+        return Err(CliError::internal("LOCALAPPDATA is unavailable"));
+    };
+    if !path.is_absolute() {
+        return Err(CliError::internal("data directory must be an absolute path"));
+    }
+    ensure_data_dirs(&path).map_err(|e| CliError::internal(e.to_string()))?;
+    log_data_dir_once(&path);
+    Ok(path)
+}
+
+fn ensure_data_dirs(data_dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(data_dir)?;
+    if let Some(parent) = data_dir.parent() {
+        fs::create_dir_all(parent.join("logs"))?;
+        fs::create_dir_all(parent.join("cache"))?;
+        fs::create_dir_all(parent.join("backups"))?;
+    }
+    Ok(())
+}
+
+fn log_data_dir_once(data_dir: &Path) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static LOGGED: AtomicBool = AtomicBool::new(false);
+    if !LOGGED.swap(true, Ordering::Relaxed) {
+        eprintln!("asterlab data dir: {}", data_dir.display());
+    }
+}
+
+pub fn db_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("labworkbench.sqlite")
+}
+
+
 pub(crate) fn open_db(path: &Path) -> Result<Connection, CliError> {
-    fs::create_dir_all(path).map_err(|e| CliError::internal(e.to_string()))?;
-    let db = Connection::open(path.join("labworkbench.sqlite"))
+    let data_dir = if path.extension().map(|e| e == "sqlite").unwrap_or(false) {
+        path.parent().unwrap_or(path).to_path_buf()
+    } else {
+        path.to_path_buf()
+    };
+    ensure_data_dirs(&data_dir).map_err(|e| CliError::internal(e.to_string()))?;
+    let db_file = data_dir.join("labworkbench.sqlite");
+    let db = Connection::open(&db_file).map_err(|e| CliError::internal(e.to_string()))?;
+    db.busy_timeout(std::time::Duration::from_secs(10))
         .map_err(|e| CliError::internal(e.to_string()))?;
+    // WAL is a persistent database property. A concurrent opener may hold the
+    // exclusive lock needed to change it; keep the existing journal mode rather
+    // than failing the whole connection. Writes remain transactional.
+    if let Err(error) = db.pragma_update(None, "journal_mode", "WAL") {
+        eprintln!(
+            "asterlab: WAL not enabled for {} ({error}); continuing with existing journal mode",
+            db_file.display()
+        );
+    }
     db.pragma_update(None, "foreign_keys", "ON")
-        .map_err(|e| CliError::internal(e.to_string()))?;
-    db.busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|e| CliError::internal(e.to_string()))?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);")
       .map_err(|e| CliError::internal(e.to_string()))?;
+    log_data_dir_once(&data_dir);
     Ok(db)
 }
 fn kind_id(
@@ -5081,19 +5144,40 @@ pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, Cli
     Ok(json!({"design": r, "version": get(db, &version_id)?}))
 }
 
+fn take_mygo_extension(value: &mut Value) -> Option<Value> {
+    value.as_object_mut()?.remove("mygo")
+}
+
 pub(crate) fn create_design_record(
     db: &Connection,
     project_id: &str,
     design: &Value,
 ) -> Result<Value, CliError> {
     ensure_project(db, project_id)?;
-    let design_fields: DesignFields = serde_json::from_value(design.clone())
+    let mut input = design.clone();
+    let mygo = take_mygo_extension(&mut input);
+    let design_fields: DesignFields = serde_json::from_value(input)
         .map_err(|e| CliError::input(format!("设计字段无效：{e}")))?;
     let tx = db
         .unchecked_transaction()
         .map_err(|e| CliError::internal(e.to_string()))?;
     let registry = load_labware_registry(db)?;
-    let r = create_design_tx(&tx, project_id, &design_fields, &registry)?;
+    let mut r = create_design_tx(&tx, project_id, &design_fields, &registry)?;
+    if let Some(mygo) = mygo {
+        let id = r["design"]["id"].as_str().unwrap_or_default();
+        let mut stored = r["design"]["data"].clone();
+        stored["mygo"] = mygo;
+        let raw = serde_json::to_string(&stored).map_err(|e| CliError::internal(e.to_string()))?;
+        tx.execute("UPDATE records SET data_json=?2 WHERE id=?1", params![id, raw])
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        let version_id = r["version"]["id"].as_str().unwrap_or_default();
+        let mut version = r["version"]["data"].clone();
+        version["snapshot"] = stored.clone();
+        let version_raw = serde_json::to_string(&version).map_err(|e| CliError::internal(e.to_string()))?;
+        tx.execute("UPDATE records SET data_json=?2 WHERE id=?1", params![version_id, version_raw])
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        r["design"]["data"] = stored;
+    }
     tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
     Ok(r)
 }
@@ -5115,11 +5199,16 @@ pub(crate) fn revise_design_record(
             expected_revision, revision
         )));
     }
-    let previous: DesignFields = serde_json::from_str(&raw)
-        .map_err(|e| CliError::internal(format!("现有设计无法读取：{e}")))?;
     let mut value: Value =
         serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
-    let changeset: DesignChanges = serde_json::from_value(changes.clone())
+    let mut mygo = take_mygo_extension(&mut value);
+    let previous: DesignFields = serde_json::from_value(value.clone())
+        .map_err(|e| CliError::internal(format!("现有设计无法读取：{e}")))?;
+    let mut change_value = changes.clone();
+    if let Some(extension) = take_mygo_extension(&mut change_value) {
+        mygo = Some(extension);
+    }
+    let changeset: DesignChanges = serde_json::from_value(change_value)
         .map_err(|e| CliError::input(format!("changes 无效：{e}")))?;
     merge_design(&mut value, &changeset);
     let mut d: DesignFields = serde_json::from_value(value)
@@ -5130,7 +5219,11 @@ pub(crate) fn revise_design_record(
     let tx = db
         .unchecked_transaction()
         .map_err(|e| CliError::internal(e.to_string()))?;
-    let newdata = serde_json::to_string(&d).map_err(|e| CliError::internal(e.to_string()))?;
+    let mut stored = serde_json::to_value(&d).map_err(|e| CliError::internal(e.to_string()))?;
+    if let Some(mygo) = mygo {
+        stored["mygo"] = mygo;
+    }
+    let newdata = serde_json::to_string(&stored).map_err(|e| CliError::internal(e.to_string()))?;
     tx.execute(
         "UPDATE records SET revision=?2,data_json=?3,updated_at=?4 WHERE id=?1",
         params![id, next, newdata, stamp()],
@@ -5142,7 +5235,7 @@ pub(crate) fn revise_design_record(
         project.as_deref(),
         Some(id),
         next,
-        &json!({"design_id": id, "design_revision": next, "snapshot": d}),
+        &json!({"design_id": id, "design_revision": next, "snapshot": stored}),
     )?;
     tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
     let r = get(db, id)?;

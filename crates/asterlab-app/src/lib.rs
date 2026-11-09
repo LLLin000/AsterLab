@@ -199,4 +199,31 @@ mod tests {
 
         let _ = fs::remove_dir_all(&d);
     }
+    #[test]
+    fn readout_persists_across_reopen() {
+        let d = std::env::temp_dir().join(format!("asterlab-reopen-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::env::set_var("LABWORKBENCH_DATA_DIR", &d);
+        let resolved = cli_impl::data_dir().unwrap();
+        assert_eq!(resolved, d);
+        let rid = {
+            let mut core = AppCore::open(&resolved).unwrap();
+            assert_eq!(core.db.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0)).unwrap(), "wal");
+            let proj = cli_impl::create_project(&core.db, "p").unwrap();
+            let pid = proj["id"].as_str().unwrap();
+            let design = core.save_design(serde_json::json!({"project_id": pid, "design": {"title": "d", "mygo": {"workflow": {"id":"wf"}, "instances": {}}}})).unwrap();
+            let did = design["design"]["id"].as_str().unwrap();
+            assert_eq!(core.load_design(did).unwrap()["design"]["data"]["mygo"]["workflow"]["id"], "wf");
+            let run = core.create_run(did, None, None).unwrap();
+            let rid = run["id"].as_str().unwrap().to_owned();
+            let input = serde_json::json!({"run_id": rid, "operation_id": "op1", "measurements": [{"endpoint":"e","value":1.0}]});
+            core.save_readout(input).unwrap();
+            rid
+        };
+        let core2 = AppCore::open(&cli_impl::data_dir().unwrap()).unwrap();
+        let v = core2.load_run(&rid).unwrap();
+        assert!(v["revision"].as_i64().unwrap() > 0);
+        let _ = std::fs::remove_dir_all(&d);
+        std::env::remove_var("LABWORKBENCH_DATA_DIR");
+    }
 }

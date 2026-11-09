@@ -157,6 +157,7 @@ type Editor struct {
 	ConnectFrom   string
 	OnSelect      func(nodeID string)
 	OnEnterNested func(nodeID string)
+	OnChange      func()
 }
 
 func NewEditor() *Editor {
@@ -179,6 +180,9 @@ func (e *Editor) AddNode(kind NodeKind, title string, pos Position) string {
 	if e.OnSelect != nil {
 		e.OnSelect(id)
 	}
+	if e.OnChange != nil {
+		e.OnChange()
+	}
 	return id
 }
 
@@ -195,6 +199,9 @@ func (e *Editor) DeleteSelected() bool {
 		ok = e.Doc.DeleteEdge(e.SelectedEdge)
 		e.SelectedEdge = ""
 	}
+	if ok && e.OnChange != nil {
+		e.OnChange()
+	}
 	return ok
 }
 
@@ -208,17 +215,27 @@ func (e *Editor) DuplicateSelected() string {
 	if e.OnSelect != nil {
 		e.OnSelect(id)
 	}
+	if id != "" && e.OnChange != nil {
+		e.OnChange()
+	}
 	return id
 }
-
 func (e *Editor) Connect(from, to string) string {
 	e.pushUndo()
-	return e.Doc.AddEdge(from, to)
+	id := e.Doc.AddEdge(from, to)
+	if id != "" && e.OnChange != nil {
+		e.OnChange()
+	}
+	return id
 }
 
 func (e *Editor) MoveNode(id string, pos Position) bool {
 	e.pushUndo()
-	return e.Doc.MoveNode(id, pos)
+	ok := e.Doc.MoveNode(id, pos)
+	if ok && e.OnChange != nil {
+		e.OnChange()
+	}
+	return ok
 }
 
 func (e *Editor) SelectNode(id string) {
@@ -245,6 +262,9 @@ func (e *Editor) Undo() bool {
 	last := e.UndoStack[len(e.UndoStack)-1]
 	e.UndoStack = e.UndoStack[:len(e.UndoStack)-1]
 	e.Doc = last
+	if e.OnChange != nil {
+		e.OnChange()
+	}
 	return true
 }
 
@@ -256,6 +276,9 @@ func (e *Editor) Redo() bool {
 	last := e.RedoStack[len(e.RedoStack)-1]
 	e.RedoStack = e.RedoStack[:len(e.RedoStack)-1]
 	e.Doc = last
+	if e.OnChange != nil {
+		e.OnChange()
+	}
 	return true
 }
 

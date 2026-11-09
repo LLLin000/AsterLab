@@ -10,17 +10,13 @@ mod cli_impl;
 use asterlab_app::AppCore;
 
 pub fn make_run_service() -> Result<Arc<dyn RunService>, Error> {
-    let dir = std::env::var("LABWORKBENCH_DATA_DIR")
-        .map(PathBuf::from)
-        .map_err(|_| Error::Go("INTERNAL: LABWORKBENCH_DATA_DIR is required".into()))?;
+    let dir = cli_impl::data_dir().map_err(map_cli)?;
     let core = AppCore::open(&dir).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
     Ok(Arc::new(CoreRunService { core: Mutex::new(Some(core)) }))
 }
 
 pub fn make_design_service() -> Result<Arc<dyn DesignService>, Error> {
-    let dir = std::env::var("LABWORKBENCH_DATA_DIR")
-        .map(PathBuf::from)
-        .map_err(|_| Error::Go("INTERNAL: LABWORKBENCH_DATA_DIR is required".into()))?;
+    let dir = cli_impl::data_dir().map_err(map_cli)?;
     let db = cli_impl::open_db(&dir).map_err(|e| map_cli(e))?;
     Ok(Arc::new(CoreDesignService { db: Mutex::new(Some(db)) }))
 }
