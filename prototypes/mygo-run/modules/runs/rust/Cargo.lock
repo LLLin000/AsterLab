@@ -331,8 +331,12 @@ name = "runs"
 version = "0.1.0"
 dependencies = [
  "asterlab-app",
+ "asterlab-core",
+ "chrono",
+ "rusqlite",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

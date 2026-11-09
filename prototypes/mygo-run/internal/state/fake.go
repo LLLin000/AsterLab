@@ -1,0 +1,74 @@
+package state
+
+import (
+	"context"
+
+	"asterlab-mygo-prototype/modules/runs"
+)
+
+// FakeRunService is an in-memory RunService for UI tests.
+type FakeRunService struct {
+	Snapshot runs.RunSnapshot
+	Err      error
+}
+
+func (f *FakeRunService) LoadRun(ctx context.Context, runID string) (runs.RunSnapshot, error) {
+	if f.Err != nil {
+		return runs.RunSnapshot{}, MapError(f.Err)
+	}
+	s := f.Snapshot
+	if s.RunID == "" {
+		s.RunID = runID
+	}
+	return s, nil
+}
+func (f *FakeRunService) SaveReadout(ctx context.Context, input runs.ReadoutInput) (runs.RunSnapshot, error) {
+	if f.Err != nil {
+		return runs.RunSnapshot{}, MapError(f.Err)
+	}
+	return f.Snapshot, nil
+}
+func (f *FakeRunService) CompleteTask(ctx context.Context, input runs.CompleteTaskInput) (runs.RunSnapshot, error) {
+	if f.Err != nil {
+		return runs.RunSnapshot{}, MapError(f.Err)
+	}
+	return f.Snapshot, nil
+}
+func (f *FakeRunService) Close() error { return nil }
+
+// FakeDesignService is an in-memory DesignService for UI tests.
+type FakeDesignService struct {
+	Designs  []runs.DesignSummary
+	Snapshot runs.DesignSnapshot
+	Run      runs.RunSnapshot
+	Err      error
+}
+func (f *FakeDesignService) ListDesigns(ctx context.Context) ([]runs.DesignSummary, error) {
+	if f.Err != nil {
+		return nil, MapError(f.Err)
+	}
+	return f.Designs, nil
+}
+func (f *FakeDesignService) LoadDesign(ctx context.Context, designID string) (runs.DesignSnapshot, error) {
+	if f.Err != nil {
+		return runs.DesignSnapshot{}, MapError(f.Err)
+	}
+	s := f.Snapshot
+	if s.DesignID == "" {
+		s.DesignID = designID
+	}
+	return s, nil
+}
+func (f *FakeDesignService) SaveDesign(ctx context.Context, input runs.DesignSaveInput) (runs.DesignSnapshot, error) {
+	if f.Err != nil {
+		return runs.DesignSnapshot{}, MapError(f.Err)
+	}
+	return f.Snapshot, nil
+}
+func (f *FakeDesignService) CreateRun(ctx context.Context, designID string, operationID string) (runs.RunSnapshot, error) {
+	if f.Err != nil {
+		return runs.RunSnapshot{}, MapError(f.Err)
+	}
+	return f.Run, nil
+}
+func (f *FakeDesignService) Close() error { return nil }

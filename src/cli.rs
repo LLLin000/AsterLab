@@ -2156,7 +2156,9 @@ pub(crate) fn create_execution_event_tx(
         "lineage":event.lineage.iter().map(|l|json!({"from_kind":l.from_kind,"from_id":l.from_id,"to_kind":l.to_kind,"to_id":l.to_id,"relation":l.relation,"note":l.note})).collect::<Vec<_>>(),
         "actual_parameters":event.actual_parameters.iter().map(|p|json!({"key":p.key,"value":p.value,"unit":p.unit,"source":p.source})).collect::<Vec<_>>(),
         "operator":event.operator,
-        "deviation":event.deviation
+        "deviation":event.deviation,
+        "operation_id":event.operation_id,
+        "operation_payload":event.operation_payload
     });
     let event_record = insert(
         tx,
@@ -4120,6 +4122,10 @@ struct ExecutionEventCreate {
     operator: Option<String>,
     #[serde(default)]
     deviation: Option<String>,
+    #[serde(default)]
+    operation_id: Option<String>,
+    #[serde(default)]
+    operation_payload: Option<Value>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -5036,6 +5042,138 @@ fn volume_factor(unit: &str) -> Result<f64, CliError> {
         _ => Err(CliError::input("体积单位只能是 L、mL、µL")),
     }
 }
+
+pub(crate) fn create_project(db: &Connection, name: &str) -> Result<Value, CliError> {
+    let tx = db.unchecked_transaction().map_err(|e| CliError::internal(e.to_string()))?;
+    let r = insert(&tx, "project", None, None, 1, &json!({"name": name, "description": ""}))?;
+    tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+    Ok(r)
+}
+
+pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
+    Ok(json!({"records": list(db, Some("design"), project_id)?}))
+}
+
+pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+    let r = get(db, design_id)?;
+    if r["kind"] != "design" {
+        return Err(CliError::input("指定记录不是实验设计"));
+    }
+    let revision = r["revision"]
+        .as_i64()
+        .ok_or_else(|| CliError::internal("设计版本号无效"))?;
+    let version_id: String = db
+        .query_row(
+            "SELECT id FROM records WHERE kind='design_version' AND parent_id=?1 AND revision=?2",
+            params![design_id, revision],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| CliError::internal(e.to_string()))?
+        .ok_or_else(|| CliError::internal("当前设计版本快照缺失"))?;
+    Ok(json!({"design": r, "version": get(db, &version_id)?}))
+}
+
+pub(crate) fn create_design_record(
+    db: &Connection,
+    project_id: &str,
+    design: &Value,
+) -> Result<Value, CliError> {
+    ensure_project(db, project_id)?;
+    let design_fields: DesignFields = serde_json::from_value(design.clone())
+        .map_err(|e| CliError::input(format!("设计字段无效：{e}")))?;
+    let tx = db
+        .unchecked_transaction()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let registry = load_labware_registry(db)?;
+    let r = create_design_tx(&tx, project_id, &design_fields, &registry)?;
+    tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+    Ok(r)
+}
+
+pub(crate) fn revise_design_record(
+    db: &Connection,
+    id: &str,
+    expected_revision: i64,
+    changes: &Value,
+) -> Result<Value, CliError> {
+    let (kind, project, _parent, revision, raw) = kind_id(db, id)?
+        .ok_or_else(|| CliError::missing(format!("设计不存在：{id}")))?;
+    if kind != "design" {
+        return Err(CliError::input("指定记录不是实验设计"));
+    }
+    if revision != expected_revision {
+        return Err(CliError::conflict(format!(
+            "设计版本已从 v{} 更新为 v{}；先重新读取后再提交。",
+            expected_revision, revision
+        )));
+    }
+    let previous: DesignFields = serde_json::from_str(&raw)
+        .map_err(|e| CliError::internal(format!("现有设计无法读取：{e}")))?;
+    let mut value: Value =
+        serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+    let changeset: DesignChanges = serde_json::from_value(changes.clone())
+        .map_err(|e| CliError::input(format!("changes 无效：{e}")))?;
+    merge_design(&mut value, &changeset);
+    let mut d: DesignFields = serde_json::from_value(value)
+        .map_err(|e| CliError::input(format!("修改后设计无效：{e}")))?;
+    normalize_design(&mut d, Some(&previous));
+    validate_design_with_registry(&d, &load_labware_registry(db)?)?;
+    let next = revision + 1;
+    let tx = db
+        .unchecked_transaction()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let newdata = serde_json::to_string(&d).map_err(|e| CliError::internal(e.to_string()))?;
+    tx.execute(
+        "UPDATE records SET revision=?2,data_json=?3,updated_at=?4 WHERE id=?1",
+        params![id, next, newdata, stamp()],
+    )
+    .map_err(|e| CliError::internal(e.to_string()))?;
+    let snapshot = insert(
+        &tx,
+        "design_version",
+        project.as_deref(),
+        Some(id),
+        next,
+        &json!({"design_id": id, "design_revision": next, "snapshot": d}),
+    )?;
+    tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+    let r = get(db, id)?;
+    Ok(json!({"design": r, "version": snapshot}))
+}
+
+pub(crate) fn create_run_for_design(
+    db: &Connection,
+    design_id: &str,
+    title: Option<&str>,
+) -> Result<Value, CliError> {
+    let design = get(db, design_id)?;
+    if design["kind"] != "design" {
+        return Err(CliError::input("design_id 必须指向实验设计"));
+    }
+    let default_title = design["data"]["title"]
+        .as_str()
+        .unwrap_or("Run")
+        .to_string()
+        + " run";
+    let title = title.unwrap_or(&default_title);
+    let tx = db
+        .unchecked_transaction()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let record = create_run_in_transaction(
+        &tx,
+        design_id,
+        title,
+        None,
+        None,
+        None,
+        None,
+        "independent",
+    )?;
+    tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+    Ok(record)
+}
+
 fn create_design_tx(
     tx: &Transaction<'_>,
     project_id: &str,
