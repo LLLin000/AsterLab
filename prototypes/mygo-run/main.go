@@ -61,7 +61,7 @@ func toRunView(s runs.RunSnapshot) runui.RunView {
 		Events:       make([]runui.Event, 0, len(s.Events)),
 	}
 	for _, t := range s.Tasks {
-		v.Tasks = append(v.Tasks, runui.Task{Key: t.Key, Title: t.Title, Timepoint: t.Timepoint, Status: t.Status})
+		v.Tasks = append(v.Tasks, runui.Task{Key: t.Key, Title: t.Title, Timepoint: t.Timepoint, Status: t.Status, AssayID: t.AssayID})
 	}
 	for _, m := range s.Measurements {
 		v.Measurements = append(v.Measurements, runui.Measurement{SampleID: m.SampleID, Endpoint: m.Endpoint, Value: m.Value, Unit: m.Unit})
@@ -87,7 +87,10 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 	}
 	a.snap = newSnap
 	if a.ws != nil {
-		a.ws.View = toRunView(a.snap)
+		view := toRunView(a.snap)
+		a.ws.View = view
+		// A loaded/saved snapshot is authoritative for the rows shown.
+		a.ws.Draft = runui.NewDraft(view)
 		if len(a.snap.Tasks) == 0 && len(a.snap.Measurements) == 0 {
 			a.ws.State = runui.StateEmpty
 		} else {
@@ -101,6 +104,10 @@ func (a *app) loadDesign(id string) {
 		return
 	}
 	a.designer = designer.New(id, "", 0, a.designSvc)
+	a.designer.OnCreateRun = func(snap runs.RunSnapshot) {
+		a.applySnap(snap)
+		a.shell.Page = shell.Run
+	}
 	a.designer.Load(context.Background(), id)
 	snap, err := a.designSvc.LoadDesign(context.Background(), id)
 	if err != nil {
@@ -226,22 +233,6 @@ func main() {
 		Content:     func(c *ui.Context) { contentPage(c, a) },
 	}
 
-	// workflow editor with a small sample graph (示意).
-	a.wf = workflow.NewEditor()
-	a.wf.Doc.AddNode(workflow.KindFlask, "Seed", workflow.Position{X: 40, Y: 40})
-	a.wf.Doc.AddNode(workflow.KindPipette, "Treat", workflow.Position{X: 160, Y: 40})
-	a.wf.Doc.AddNode(workflow.KindPlate, "Read", workflow.Position{X: 280, Y: 40})
-
-	// blocks samples.
-	noteDef := blocks.Definition{ID: "note-1", Version: 1, Type: blocks.TypeNote, Props: blocks.NoteProps{Title: "Note", Text: "示意"}}
-	if inst, err := blocks.NewInstance("note-inst", noteDef); err == nil {
-		a.blocks = append(a.blocks, inst)
-	}
-	plateDef := blocks.Definition{ID: "plate-1", Version: 1, Type: blocks.TypePlate96, Props: blocks.Plate96Props{Rows: 8, Cols: 12, Selected: []int{13, 14}}}
-	if inst, err := blocks.NewInstance("plate-inst", plateDef); err == nil {
-		a.blocks = append(a.blocks, inst)
-	}
-
 	// runui workspace.
 	cb := runui.Callbacks{
 		SaveReadout: func(ms []runui.Measurement) {
@@ -253,23 +244,26 @@ func main() {
 				rMs = append(rMs, runs.Measurement{SampleID: m.SampleID, Endpoint: m.Endpoint, Value: m.Value, Unit: m.Unit})
 			}
 			taskKey := a.ws.Selected
-			timepoint := ""
-			for _, t := range a.ws.View.Tasks {
+			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
+			for _, t := range a.snap.Tasks {
 				if t.Key == taskKey {
-					timepoint = t.Timepoint
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
 				}
 			}
-			if taskKey == "" && len(a.ws.View.Tasks) > 0 {
-				taskKey = a.ws.View.Tasks[0].Key
-				timepoint = a.ws.View.Tasks[0].Timepoint
+			if taskKey == "" && len(a.snap.Tasks) > 0 {
+				t := a.snap.Tasks[0]
+				taskKey, timepoint, assayID, stepPath, protocolVersion = t.Key, t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
 			}
 			opID := a.nextOp()
 			snap, err := a.runSvc.SaveReadout(context.Background(), runs.ReadoutInput{
-				RunID:        a.snap.RunID,
-				TaskKey:      taskKey,
-				Timepoint:    timepoint,
-				Measurements: rMs,
-				OperationID:  opID,
+				RunID:             a.snap.RunID,
+				TaskKey:           taskKey,
+				Timepoint:         timepoint,
+				AssayID:           assayID,
+				ProtocolStepPath:  stepPath,
+				ProtocolVersionID: protocolVersion,
+				Measurements:      rMs,
+				OperationID:       opID,
 			})
 			if err != nil {
 				a.ws.State = runui.StateBlocked
@@ -291,10 +285,20 @@ func main() {
 				taskKey = a.ws.Selected
 			}
 			opID := a.nextOp()
+			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
+			for _, t := range a.snap.Tasks {
+				if t.Key == taskKey {
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+				}
+			}
 			snap, err := a.runSvc.CompleteTask(context.Background(), runs.CompleteTaskInput{
-				RunID:       a.snap.RunID,
-				TaskKey:     taskKey,
-				OperationID: opID,
+				RunID:             a.snap.RunID,
+				TaskKey:           taskKey,
+				OperationID:       opID,
+				AssayID:           assayID,
+				Timepoint:         timepoint,
+				ProtocolStepPath:  stepPath,
+				ProtocolVersionID: protocolVersion,
 			})
 			if err != nil {
 				a.ws.State = runui.StateBlocked

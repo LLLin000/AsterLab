@@ -46,11 +46,12 @@ type RunSnapshot struct {
 }
 
 type RunTask struct {
-	Key       string `json:"key"`
-	Title     string `json:"title"`
-	Timepoint string `json:"timepoint"`
-	Status    string `json:"status"`
-	AssayID   string `json:"assayId"`
+	Key               string `json:"key"`
+	Title             string `json:"title"`
+	Timepoint         string `json:"timepoint"`
+	Status            string `json:"status"`
+	AssayID           string `json:"assayId"`
+	ProtocolVersionID string `json:"protocolVersionId"`
 }
 
 type Measurement struct {
@@ -70,18 +71,24 @@ type RunEvent struct {
 }
 
 type ReadoutInput struct {
-	RunID        string        `json:"runId"`
-	TaskKey      string        `json:"taskKey"`
-	Timepoint    string        `json:"timepoint"`
-	Measurements []Measurement `json:"measurements"`
-	OperationID  string        `json:"operationId"`
-	AssayID      string        `json:"assayId"`
+	RunID             string        `json:"runId"`
+	TaskKey           string        `json:"taskKey"`
+	Timepoint         string        `json:"timepoint"`
+	Measurements      []Measurement `json:"measurements"`
+	OperationID       string        `json:"operationId"`
+	AssayID           string        `json:"assayId"`
+	ProtocolStepPath  string        `json:"protocolStepPath"`
+	ProtocolVersionID string        `json:"protocolVersionId"`
 }
 
 type CompleteTaskInput struct {
-	RunID       string `json:"runId"`
-	TaskKey     string `json:"taskKey"`
-	OperationID string `json:"operationId"`
+	RunID             string `json:"runId"`
+	TaskKey           string `json:"taskKey"`
+	OperationID       string `json:"operationId"`
+	AssayID           string `json:"assayId"`
+	Timepoint         string `json:"timepoint"`
+	ProtocolStepPath  string `json:"protocolStepPath"`
+	ProtocolVersionID string `json:"protocolVersionId"`
 }
 
 type DesignSummary struct {

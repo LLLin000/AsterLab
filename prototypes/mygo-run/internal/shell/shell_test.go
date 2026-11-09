@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 
+	"asterlab-mygo-prototype/internal/runui"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -30,4 +32,111 @@ func TestShellRenders(t *testing.T) {
 		defer f.Close()
 		return png.Encode(f, tt.Image())
 	}()
+}
+
+func TestShellShortcuts(t *testing.T) {
+	s := &Shell{
+		Project:     "L929",
+		Page:        Run,
+		SidebarOpen: true,
+	}
+	tt := ui.NewTester(func(c *ui.Context) { View(c, s) }, 1200, 760)
+	tt.Frame()
+
+	// Test Cmd+B toggles sidebar
+	tt.Key(ui.Cmd, ui.KeyB)
+	tt.Frame()
+	if s.SidebarOpen {
+		t.Fatal("expected sidebar closed after Cmd+B")
+	}
+
+	tt.Key(ui.Cmd, ui.KeyB)
+	tt.Frame()
+	if !s.SidebarOpen {
+		t.Fatal("expected sidebar open after second Cmd+B")
+	}
+
+	// Test Cmd+1 switches to Design page
+	tt.Key(ui.Cmd, ui.Key1)
+	tt.Frame()
+	if s.Page != Design {
+		t.Fatalf("expected page Design, got %v", s.Page)
+	}
+
+	// Test Cmd+3 switches to Run page
+	tt.Key(ui.Cmd, ui.Key3)
+	tt.Frame()
+	if s.Page != Run {
+		t.Fatalf("expected page Run, got %v", s.Page)
+	}
+}
+
+func TestShellThemes(t *testing.T) {
+	s := &Shell{Project: "L929", Page: Run, SidebarOpen: true}
+	// Light theme
+	ttLight := ui.NewTesterWith(func(c *ui.Context) { View(c, s) }, 1200, 760, ui.TesterOptions{Dark: false})
+	ttLight.Frame()
+	if ttLight.Image() == nil {
+		t.Fatal("light image nil")
+	}
+
+	// Dark theme
+	ttDark := ui.NewTesterWith(func(c *ui.Context) { View(c, s) }, 1200, 760, ui.TesterOptions{Dark: true})
+	ttDark.Frame()
+	if ttDark.Image() == nil {
+	}
+}
+
+func TestShellUserDimensions1186x753(t *testing.T) {
+	v := runui.RunView{
+		Title:    "GelMA/ZnO L929 biocompatibility",
+		Status:   "in_progress",
+		Revision: 16,
+		Tasks: []runui.Task{
+			{Key: "t1", Title: "root/seed", Timepoint: "准备", Status: "completed"},
+			{Key: "t2", Title: "root/treat", Timepoint: "准备", Status: "completed"},
+			{Key: "t3", Title: "root/read", Timepoint: "D1", Status: "completed"},
+			{Key: "t4", Title: "root/read", Timepoint: "D3", Status: "not_started"},
+			{Key: "t5", Title: "root/read", Timepoint: "D7", Status: "not_started"},
+			{Key: "t6", Title: "root/image", Timepoint: "D7", Status: "not_started"},
+		},
+		Checks: []runui.Check{
+			{Key: "m", Title: "材料", Binding: "GelMA · 水凝胶基质 (就绪)"},
+		},
+		Measurements: []runui.Measurement{
+			{SampleID: "Control-1", Endpoint: "OD450", Value: 0.82, Unit: "AU"},
+			{SampleID: "ZnO-0.5", Endpoint: "OD450", Value: 0.79, Unit: "AU"},
+		},
+	}
+	ws := runui.NewWorkspace(v, runui.Callbacks{})
+	ws.Selected = "t4"
+
+	s := &Shell{
+		Project:     "L929",
+		Page:        Run,
+		SidebarOpen: true,
+		Designs: []DesignItem{
+			{ID: "d1", Title: "GelMA/ZnO L929 biocompatibility"},
+			{ID: "d2", Title: "Timed design"},
+			{ID: "d3", Title: "p-AKT Western blot"},
+			{ID: "d4", Title: "ELISA design"},
+			{ID: "d5", Title: "RT-qPCR 基因表达比较"},
+			{ID: "d6", Title: "CCK-8 设计工作区"},
+		},
+		Selected: "d1",
+		Content: func(c *ui.Context) {
+			runui.View(c, ws)
+		},
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) { View(c, s) }, 1186, 753)
+	tt.Frame()
+	f, err := os.Create("evidence-shell-1186x753.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, tt.Image()); err != nil {
+		t.Fatal(err)
+	}
 }

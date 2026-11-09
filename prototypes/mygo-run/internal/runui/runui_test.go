@@ -83,3 +83,131 @@ func TestScreenshot(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTaskAssayID(t *testing.T) {
+	v := RunView{
+		Title: "Assay Test",
+		Tasks: []Task{
+			{Key: "t1", Title: "Task 1", Timepoint: "D1", Status: "not_started", AssayID: "assay-99"},
+			{Key: "t2", Title: "Task 2", Timepoint: "D2", Status: "not_started", AssayID: "assay-100"},
+		},
+	}
+	w := NewWorkspace(v, Callbacks{})
+	ct := w.currentTask()
+	if ct == nil {
+		t.Fatal("expected currentTask non-nil")
+	}
+	if ct.AssayID != "assay-99" {
+		t.Fatalf("expected AssayID assay-99, got %q", ct.AssayID)
+	}
+
+	w.Selected = "t2"
+	ct2 := w.currentTask()
+	if ct2 == nil || ct2.AssayID != "assay-100" {
+		t.Fatalf("expected AssayID assay-100 after selection, got %+v", ct2)
+	}
+}
+
+func TestRunShortcuts(t *testing.T) {
+	v := sampleView()
+	saved := false
+	w := NewWorkspace(v, Callbacks{
+		SaveReadout: func(ms []Measurement) { saved = true },
+	})
+	w.Draft.Rows = []DraftRow{{SampleID: "Sample-1", Value: "0.55"}}
+	tt := ui.NewTester(func(c *ui.Context) { View(c, w) }, 1200, 760)
+	tt.Frame()
+
+	// Cmd+N adds a draft row
+	initialRows := len(w.Draft.Rows)
+	tt.Key(ui.Cmd, ui.KeyN)
+	tt.Frame()
+	if len(w.Draft.Rows) != initialRows+1 {
+		t.Fatalf("expected %d rows after Cmd+N, got %d", initialRows+1, len(w.Draft.Rows))
+	}
+
+	// Cmd+S triggers save
+	tt.Key(ui.Cmd, ui.KeyS)
+	tt.Frame()
+	if !saved {
+		t.Fatal("expected save invoked via Cmd+S")
+	}
+}
+
+func TestScalingAndThemesEvidence(t *testing.T) {
+	saveImg := func(name string, img *ui.Tester) {
+		f, err := os.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := png.Encode(f, img.Image()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	v := sampleView()
+	// 1. Light and Dark themes at 1200x760
+	for _, dark := range []bool{false, true} {
+		w := NewWorkspace(v, Callbacks{})
+		tt := ui.NewTesterWith(func(c *ui.Context) { View(c, w) }, 1200, 760, ui.TesterOptions{Dark: dark})
+		tt.Frame()
+		mode := "light"
+		if dark {
+			mode = "dark"
+		}
+		saveImg("evidence-runui-1200x760-"+mode+".png", tt)
+	}
+
+	// 2. Light and Dark themes at 900x600 (compact stacked)
+	for _, dark := range []bool{false, true} {
+		w := NewWorkspace(v, Callbacks{})
+		w.Width = 900
+		tt := ui.NewTesterWith(func(c *ui.Context) { View(c, w) }, 900, 600, ui.TesterOptions{Dark: dark})
+		tt.Frame()
+		mode := "light"
+		if dark {
+			mode = "dark"
+		}
+		saveImg("evidence-runui-900x600-"+mode+".png", tt)
+	}
+	// 2.5 User dimensions: 1186x753
+	{
+		w := NewWorkspace(v, Callbacks{})
+		tt := ui.NewTester(func(c *ui.Context) { View(c, w) }, 1186, 753)
+		tt.Frame()
+		saveImg("evidence-runui-1186x753.png", tt)
+	}
+
+	// 3. Scaling at 150% and 200%
+	for _, sc := range []float32{1.5, 2.0} {
+		w := NewWorkspace(v, Callbacks{})
+		tt := ui.NewTester(func(c *ui.Context) { View(c, w) }, 1200, 760)
+		tt.SetScale(sc)
+		tt.Frame()
+		scaleName := "150"
+		if sc == 2.0 {
+			scaleName = "200"
+		}
+		saveImg("evidence-runui-1200x760-scale"+scaleName+".png", tt)
+	}
+
+	// 4. Error State with preserved draft
+	{
+		w := NewWorkspace(v, Callbacks{})
+		w.Draft.Rows = []DraftRow{{SampleID: "Invalid-Row", Value: "not-a-number"}}
+		w.save()
+		tt := ui.NewTester(func(c *ui.Context) { View(c, w) }, 1200, 760)
+		tt.Frame()
+		saveImg("evidence-runui-error.png", tt)
+	}
+
+	// 5. Saved State
+	{
+		w := NewWorkspace(v, Callbacks{})
+		w.State = StateSaved
+		tt := ui.NewTester(func(c *ui.Context) { View(c, w) }, 1200, 760)
+		tt.Frame()
+		saveImg("evidence-runui-saved.png", tt)
+	}
+}

@@ -18,34 +18,35 @@ import (
 type SaveState string
 
 const (
-	SaveIdle    SaveState = "idle"
-	SaveSaving  SaveState = "saving"
-	SaveSaved   SaveState = "saved"
-	SaveError   SaveState = "error"
+	SaveIdle   SaveState = "idle"
+	SaveDraft  SaveState = "draft"
+	SaveSaving SaveState = "saving"
+	SaveSaved  SaveState = "saved"
+	SaveError  SaveState = "error"
 )
 
 // designDoc is the serialized design payload stored in DesignSnapshot.Data/Changes.
 type designDoc struct {
-	DesignID   string                       `json:"designId"`
-	Title      string                       `json:"title"`
-	Workflow   workflow.WorkflowDocument    `json:"workflow"`
-	Instances  map[string][]blocks.Instance `json:"instances,omitempty"`
+	DesignID  string                       `json:"designId"`
+	Title     string                       `json:"title"`
+	Workflow  workflow.WorkflowDocument    `json:"workflow"`
+	Instances map[string][]blocks.Instance `json:"instances,omitempty"`
 }
 
-// Callbacks allows callers to override service access; Service takes precedence when set.
 type Callbacks struct {
 	LoadDesign func(ctx context.Context, designID string) (runs.DesignSnapshot, error)
 	SaveDesign func(ctx context.Context, input runs.DesignSaveInput) (runs.DesignSnapshot, error)
+	CreateRun  func(ctx context.Context, designID string, operationID string) (runs.RunSnapshot, error)
 }
 
 // Designer composes workflow + blocks into one design view state.
 type Designer struct {
-	DesignID  string
-	Title     string
-	Revision  uint64
+	DesignID string
+	Title    string
+	Revision uint64
 
-	Editor     *workflow.Editor
-	Instances  map[string][]blocks.Instance
+	Editor    *workflow.Editor
+	Instances map[string][]blocks.Instance
 
 	SelectedNode string
 
@@ -58,6 +59,8 @@ type Designer struct {
 	Service   runs.DesignService
 	Callbacks Callbacks
 
+	OnCreateRun func(runs.RunSnapshot)
+
 	Left  func(*ui.Context)
 	Right func(*ui.Context)
 
@@ -67,13 +70,13 @@ type Designer struct {
 
 func New(designID, title string, revision uint64, svc runs.DesignService) *Designer {
 	d := &Designer{
-		DesignID:    designID,
-		Title:       title,
-		Revision:    revision,
-		Editor:      workflow.NewEditor(),
-		Instances:   map[string][]blocks.Instance{},
-		SaveState:   SaveIdle,
-		Service:     svc,
+		DesignID:  designID,
+		Title:     title,
+		Revision:  revision,
+		Editor:    workflow.NewEditor(),
+		Instances: map[string][]blocks.Instance{},
+		SaveState: SaveIdle,
+		Service:   svc,
 	}
 	d.savedDoc = designDoc{DesignID: designID, Title: title, Workflow: d.Editor.Doc, Instances: d.Instances}
 	return d
@@ -106,6 +109,17 @@ func (d *Designer) saveDesign(ctx context.Context, input runs.DesignSaveInput) (
 		return runs.DesignSnapshot{}, fmt.Errorf("design service unavailable")
 	}
 	return svc.SaveDesign(ctx, input)
+}
+
+func (d *Designer) createRun(ctx context.Context, designID string, opID string) (runs.RunSnapshot, error) {
+	if d.Callbacks.CreateRun != nil {
+		return d.Callbacks.CreateRun(ctx, designID, opID)
+	}
+	svc := d.loadService()
+	if svc == nil {
+		return runs.RunSnapshot{}, fmt.Errorf("design service unavailable")
+	}
+	return svc.CreateRun(ctx, designID, opID)
 }
 
 // Load fetches a design from Core and applies it; preserves draft on error.
@@ -156,7 +170,7 @@ func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 // Touch marks the design dirty.
 func (d *Designer) Touch() {
 	d.Dirty = true
-	d.SaveState = SaveIdle
+	d.SaveState = SaveDraft
 }
 
 // Save performs an explicit save with expected revision and operation ID.
@@ -178,7 +192,7 @@ func (d *Designer) Save(ctx context.Context) {
 	opID := fmt.Sprintf("design-save-%s-%d-%d", d.DesignID, time.Now().UnixNano(), d.opSeq)
 	snap, err := d.saveDesign(ctx, runs.DesignSaveInput{
 		DesignID:         d.DesignID,
-		ExpectedRevision:  d.Revision,
+		ExpectedRevision: d.Revision,
 		Changes:          string(changes),
 		OperationID:      opID,
 	})
@@ -197,6 +211,22 @@ func (d *Designer) Save(ctx context.Context) {
 	d.savedDoc = designDoc{DesignID: d.DesignID, Title: d.Title, Workflow: d.Editor.Doc, Instances: d.Instances}
 }
 
+// CreateRun creates a Run from the current design.
+func (d *Designer) CreateRun(ctx context.Context) {
+	d.Error = ""
+	atomic.AddUint64(&d.opSeq, 1)
+	opID := fmt.Sprintf("design-create-run-%s-%d-%d", d.DesignID, time.Now().UnixNano(), d.opSeq)
+	snap, err := d.createRun(ctx, d.DesignID, opID)
+	if err != nil {
+		d.SaveState = SaveError
+		d.Error = err.Error()
+		return
+	}
+	if d.OnCreateRun != nil {
+		d.OnCreateRun(snap)
+	}
+}
+
 // SelectedInstances returns block instances for the selected node.
 func (d *Designer) SelectedInstances() []blocks.Instance {
 	if d.SelectedNode == "" {
@@ -211,8 +241,7 @@ func View(c *ui.Context, d *Designer) {
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		ui.Row(c).Grow(1).Children(func() {
 			if d.Left != nil {
-				ui.Column(c).Width(220).FillHeight().Padding(8).Gap(6).Background(ui.Hex("#f1efea")).Children(func() {
-					d.Left(c)
+				ui.Column(c).Width(220).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() {
 				})
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
@@ -229,21 +258,27 @@ func View(c *ui.Context, d *Designer) {
 				})
 			})
 			if d.Right != nil {
-				ui.Column(c).Width(260).FillHeight().Padding(8).Gap(6).Background(ui.Hex("#f1efea")).Children(func() {
+				ui.Column(c).Width(260).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() {
 					d.Right(c)
 				})
 			}
 		})
 		// status bar
-		ui.Row(c).Height(24).Padding(0, 12).Children(func() {
+		ui.Row(c).Height(32).Padding(0, 12).Gap(8).Children(func() {
+			if ui.Button(c, "保存").Clicked() {
+				d.Save(context.Background())
+			}
+			if ui.Button(c, "创建运行").Clicked() {
+				d.CreateRun(context.Background())
+			}
 			if d.Loading {
 				ui.Text(c, "加载中…").FontSize(12).TextColor(t.TextMuted)
 			} else if d.Error != "" {
-				ui.Text(c, d.Error).FontSize(12).TextColor(ui.Hex("#b00020"))
+				ui.Text(c, d.Error).FontSize(12).TextColor(t.Danger)
 			} else if d.Empty {
 				ui.Text(c, "空设计").FontSize(12).TextColor(t.TextMuted)
 			} else if d.Dirty {
-				ui.Text(c, "未保存").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "Draft").FontSize(12).TextColor(t.TextMuted)
 			} else {
 				ui.Text(c, string(d.SaveState)).FontSize(12).TextColor(t.TextMuted)
 			}

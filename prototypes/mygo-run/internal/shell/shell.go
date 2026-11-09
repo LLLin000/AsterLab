@@ -2,6 +2,10 @@
 package shell
 
 import (
+	"fmt"
+
+	"asterlab-mygo-prototype/internal/theme"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -60,35 +64,70 @@ type Shell struct {
 
 func View(c *ui.Context, s *Shell) {
 	t := c.Theme()
+	tokens := theme.GetTokens(t)
 	bar := c.TitleBar()
+
+	// Keyboard shortcuts
+	if c.Shortcut(ui.Cmd, ui.KeyB) {
+		s.SidebarOpen = !s.SidebarOpen
+		if s.OnSidebar != nil {
+			s.OnSidebar(s.SidebarOpen)
+		}
+	}
+	pages := []Page{Design, Protocol, Run, Tools}
+	pageKeys := []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4}
+	for i, k := range pageKeys {
+		if c.Shortcut(ui.Cmd, k) {
+			s.Page = pages[i]
+			if s.OnPage != nil {
+				s.OnPage(pages[i])
+			}
+		}
+	}
+
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		// The native frame is hidden; this band is the window drag region.
-		ui.Row(c).Height(max(bar.Height, 40)).Padding(0, bar.Right+12, 0, bar.Left+12).
-			AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
-			ui.Text(c, "AsterLab").Bold()
+		// Top Titlebar and navigation strip
+		ui.Row(c).Height(max(bar.Height, 44)).Padding(0, bar.Right+16, 0, bar.Left+16).
+			AlignItems(ui.Center).Gap(10).Background(tokens.RailBackground).Border(1, t.Border).DragWindow().Children(func() {
+			ui.Text(c, "AsterLab").Bold().FontSize(13).TextColor(t.Text)
 			ui.Text(c, "/").TextColor(t.TextMuted)
-			ui.Text(c, s.Page.Label()).TextColor(t.TextMuted)
+			ui.Text(c, s.Page.Label()).FontSize(13).TextColor(t.Text).Bold()
 			ui.Spacer(c)
-			if ui.Button(c, "侧栏").Clicked() {
+			if ui.Button(c, "侧栏").Radius(6).Padding(4, 10).Clicked() {
 				s.SidebarOpen = !s.SidebarOpen
 				if s.OnSidebar != nil {
 					s.OnSidebar(s.SidebarOpen)
 				}
 			}
-			ui.Text(c, s.Project).TextColor(t.TextMuted)
+			if s.Project != "" {
+				ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Border(1, t.Border).Children(func() {
+					ui.Text(c, s.Project).FontSize(11).TextColor(tokens.NeutralText).Bold()
+				})
+			}
 		})
-		ui.Divider(c)
 		ui.Row(c).Grow(1).Children(func() {
-			ui.Column(c).Width(64).FillHeight().Padding(6).Gap(4).Background(t.Background).Children(func() {
-				ui.Text(c, "AL").FontSize(18).Bold()
-				for _, p := range []Page{Design, Protocol, Run, Tools} {
+			// Left navigation rail
+			ui.Column(c).Width(64).FillHeight().Padding(8, 6).Gap(8).Background(tokens.RailBackground).
+				Border(1, t.Border).AlignItems(ui.Center).Children(func() {
+				// App Logo Icon
+				ui.Row(c).Size(38, 38).Radius(10).Background(t.Accent).Center().Children(func() {
+					ui.Text(c, "AL").FontSize(14).Bold().TextColor(t.AccentText)
+				})
+				ui.Divider(c)
+				for _, p := range pages {
 					p := p
-					b := ui.ButtonBase(c).Width(46).Height(38).Radius(8)
-					if p == s.Page {
-						b = b.Background(t.Accent)
+					active := p == s.Page
+					bg := ui.Color{}
+					txtColor := t.TextMuted
+					if active {
+						bg = t.Accent
+						txtColor = t.AccentText
 					}
+					b := ui.ButtonBase(c).Width(48).Height(40).Radius(8).Background(bg)
 					b.Children(func() {
-						ui.Text(c, p.ShortLabel()).FontSize(12)
+						ui.Row(c).Fill().Center().Children(func() {
+							ui.Text(c, p.ShortLabel()).FontSize(12).TextColor(txtColor).Bold()
+						})
 					})
 					if b.Clicked() {
 						s.Page = p
@@ -98,26 +137,33 @@ func View(c *ui.Context, s *Shell) {
 					}
 				}
 			})
+			// Sidebar
 			if s.SidebarOpen {
-				ui.Column(c).Width(230).FillHeight().Padding(10).Gap(8).Background(t.Surface).Children(func() {
-					ui.Text(c, "项目 / 实验设计").FontSize(12).TextColor(t.TextMuted)
+				ui.Column(c).Width(230).FillHeight().Padding(12, 10).Gap(10).Background(tokens.SidebarBackground).
+					Border(1, t.Border).Children(func() {
+					ui.Text(c, "项目 / 实验设计").FontSize(11).TextColor(t.TextMuted).Bold()
 					sel := s.Selected
-					if ui.Sidebar(c, &sel, func() {
-						ui.SidebarSection(c, s.Project, nil, func() {
-							for _, d := range s.Designs {
-								ui.SidebarItem(c, d.ID, nil, d.Title)
+					ui.Scroll(c).Grow(1).Children(func() {
+						if ui.Sidebar(c, &sel, func() {
+							ui.SidebarSection(c, s.Project, nil, func() {
+								for _, d := range s.Designs {
+									ui.SidebarItem(c, d.ID, nil, d.Title)
+								}
+							})
+						}).Changed() {
+							s.Selected = sel
+							if s.OnSelect != nil {
+								s.OnSelect(sel)
 							}
-						})
-					}).Grow(1).Changed() {
-						s.Selected = sel
-						if s.OnSelect != nil {
-							s.OnSelect(sel)
 						}
+					})
+					if len(s.Designs) > 0 {
+						ui.Text(c, fmt.Sprintf("%d 个实验设计", len(s.Designs))).FontSize(11).TextColor(t.TextMuted)
 					}
-					ui.Text(c, "2 次执行 · 0 项待确认").FontSize(11).TextColor(t.TextMuted)
 				})
 			}
-			ui.Column(c).Grow(1).FillHeight().Children(func() {
+			// Main content area
+			ui.Column(c).Grow(1).FillHeight().Background(t.Background).Children(func() {
 				if s.Content != nil {
 					s.Content(c)
 				}

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	"asterlab-mygo-prototype/internal/theme"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -12,13 +14,14 @@ import (
 type State string
 
 const (
-	StateLoading          State = "loading"
-	StateReady            State = "ready"
-	StateSaving           State = "saving"
-	StateSaved            State = "saved"
-	StateValidationError  State = "validation_error"
-	StateBlocked          State = "blocked"
-	StateEmpty            State = "empty"
+	StateLoading         State = "loading"
+	StateReady           State = "ready"
+	StateDraft           State = "draft"
+	StateSaving          State = "saving"
+	StateSaved           State = "saved"
+	StateValidationError State = "validation_error"
+	StateBlocked         State = "blocked"
+	StateEmpty           State = "empty"
 )
 
 type Task struct {
@@ -26,6 +29,7 @@ type Task struct {
 	Title     string
 	Timepoint string
 	Status    string
+	AssayID   string
 }
 
 func (t Task) Done() bool { return t.Status == "completed" }
@@ -71,19 +75,19 @@ type Draft struct {
 
 type Callbacks struct {
 	SaveReadout  func(measurements []Measurement)
-	CompleteTask  func(taskKey string)
+	CompleteTask func(taskKey string)
 	SelectTask   func(taskKey string)
 }
 
 type Workspace struct {
-	View       RunView
-	State      State
-	Draft      Draft
-	Callbacks  Callbacks
-	Selected   string
-	Width      int
-	Narrow     bool
-	Error      string
+	View      RunView
+	State     State
+	Draft     Draft
+	Callbacks Callbacks
+	Selected  string
+	Width     int
+	Narrow    bool
+	Error     string
 }
 
 func NewWorkspace(v RunView, cb Callbacks) *Workspace {
@@ -134,8 +138,21 @@ func (w *Workspace) isNarrow() bool {
 	if w.Narrow {
 		return true
 	}
-	if w.Width > 0 && w.Width < 900 {
+	if w.Width > 0 && w.Width <= 1000 {
 		return true
+	}
+	return false
+}
+
+func (w *Workspace) shouldStack(c *ui.Context) bool {
+	if w.isNarrow() {
+		return true
+	}
+	if c != nil {
+		cW, _ := c.Size()
+		if cW > 0 && cW <= 1000 {
+			return true
+		}
 	}
 	return false
 }
@@ -228,59 +245,138 @@ func View(c *ui.Context, w *Workspace) {
 		return
 	}
 	t := c.Theme()
+	tokens := theme.GetTokens(t)
+
+	// Keyboard shortcuts
+	if c.Shortcut(ui.Cmd, ui.KeyS) {
+		w.save()
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyN) {
+		w.Draft.Rows = append(w.Draft.Rows, DraftRow{})
+	}
+
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		ui.Row(c).Padding(8, 12).Children(func() {
-			ui.Text(c, w.View.Title).FontSize(20).Bold()
+		// Header bar with status and metadata
+		ui.Row(c).Height(52).Padding(0, 16).AlignItems(ui.Center).Background(tokens.CardBackground).
+			Border(1, tokens.CardBorder).Children(func() {
+			ui.Text(c, w.View.Title).FontSize(18).Bold().TextColor(t.Text)
 			ui.Spacer(c)
-			ui.Text(c, fmt.Sprintf("%s · rev %d", w.View.Status, w.View.Revision)).TextColor(t.TextMuted)
-			ui.Text(c, " · ").TextColor(t.TextMuted)
-			ui.Text(c, string(w.State)).TextColor(t.TextMuted)
+			// Metadata Badges
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if w.View.Status != "" {
+					ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+						ui.Text(c, w.View.Status).FontSize(11).TextColor(tokens.NeutralText).Bold()
+					})
+				}
+				ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+					ui.Text(c, fmt.Sprintf("rev %d", w.View.Revision)).FontSize(11).TextColor(tokens.NeutralText).Bold()
+				})
+				// Save State Badge
+				renderStateBadge(c, w.State, tokens)
+			})
 		})
-		ui.Divider(c)
+
 		if w.State == StateLoading {
-			ui.Text(c, "加载中…").Padding(16)
+			ui.Row(c).Fill().Center().Children(func() {
+				ui.Text(c, "正在加载实验运行数据…").FontSize(14).TextColor(t.TextMuted)
+			})
 			return
 		}
 		if w.State == StateEmpty {
-			ui.Text(c, "空运行").Padding(16)
+			ui.Row(c).Fill().Center().Children(func() {
+				ui.Text(c, "当前运行暂无任务与测量记录").FontSize(14).TextColor(t.TextMuted)
+			})
 			return
 		}
 		if w.State == StateBlocked {
-			ui.Text(c, "阻塞: "+w.Error).Padding(16)
+			ui.Row(c).Fill().Center().Children(func() {
+				ui.Column(c).Gap(8).Center().Children(func() {
+					ui.Text(c, "运行阻塞").FontSize(16).Bold().TextColor(t.Danger)
+					ui.Text(c, w.Error).FontSize(13).TextColor(t.TextMuted)
+				})
+			})
 			return
 		}
-		if w.isNarrow() {
-			ui.Column(c).Grow(1).Gap(12).Padding(12).Children(func() {
-				recordPanel(c, w, t)
-				readinessPanel(c, w, t)
-			})
-		} else {
-			ui.Grid(c).Grow(1).ColumnTracks(ui.Fr(2), ui.Fixed(280)).Gap(16).Padding(12).Children(func() {
-				recordPanel(c, w, t)
-				readinessPanel(c, w, t)
-			})
-		}
+
+		// Scrollable main workspace body
+		ui.Scroll(c).Grow(1).Children(func() {
+			if w.shouldStack(c) {
+				ui.Column(c).FillWidth().Gap(16).Padding(16).Children(func() {
+					recordPanel(c, w, t, tokens)
+					plateCard(c, w, t, tokens)
+					flowCard(c, t, tokens)
+					readinessCard(c, w, t, tokens)
+				})
+			} else {
+				// 2 balanced proportional columns: Left (Execution & Readiness), Right (Plate & Flow)
+				ui.Grid(c).FillWidth().ColumnTracks(ui.Fr(1), ui.Fr(1)).Gap(16).Padding(16).Children(func() {
+					ui.Column(c).Gap(16).Children(func() {
+						recordPanel(c, w, t, tokens)
+						readinessCard(c, w, t, tokens)
+					})
+					ui.Column(c).Gap(16).Children(func() {
+						plateCard(c, w, t, tokens)
+						flowCard(c, t, tokens)
+					})
+				})
+			}
+		})
 	})
 }
 
-func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme) {
-	ui.Column(c).Gap(12).Padding(16).Radius(10).Background(t.Surface).Border(1, t.Border).Children(func() {
+func renderStateBadge(c *ui.Context, state State, tokens theme.Tokens) {
+	switch state {
+	case StateSaving:
+		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.WarningBg).Children(func() {
+			ui.Text(c, "⏳ 保存中…").FontSize(11).TextColor(tokens.WarningText).Bold()
+		})
+	case StateSaved:
+		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.SuccessBg).Children(func() {
+			ui.Text(c, "✓ 已保存").FontSize(11).TextColor(tokens.SuccessText).Bold()
+		})
+	case StateValidationError, StateBlocked:
+		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.DangerBg).Children(func() {
+			ui.Text(c, "⚠ 错误").FontSize(11).TextColor(tokens.DangerText).Bold()
+		})
+	case StateDraft:
+		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+			ui.Text(c, "● 草稿 (未保存)").FontSize(11).TextColor(tokens.NeutralText)
+		})
+	default:
+		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+			ui.Text(c, "● 就绪").FontSize(11).TextColor(tokens.NeutralText)
+		})
+	}
+}
+
+func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
+	ui.Column(c).Gap(16).Padding(20).Radius(12).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
 		ct := w.currentTask()
-		title := "当前任务"
+		taskTitle := "当前任务"
 		if ct != nil && ct.Title != "" {
-			title = "当前任务 · " + ct.Title
+			taskTitle = "当前任务 · " + ct.Title
 		}
-		ui.Text(c, title).FontSize(17).Bold()
-		ui.Text(c, "具体操作条件继承已选 Protocol").TextColor(t.TextMuted)
-		done, total := w.taskCounts()
-		ui.Text(c, fmt.Sprintf("任务进度 %d/%d", done, total)).FontSize(12).TextColor(t.TextMuted)
-		// task chips
-		ui.Row(c).Gap(6).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, taskTitle).FontSize(16).Bold().TextColor(t.Text)
+			ui.Spacer(c)
+			done, total := w.taskCounts()
+			ui.Row(c).Padding(2, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+				ui.Text(c, fmt.Sprintf("任务进度 %d/%d", done, total)).FontSize(11).TextColor(tokens.NeutralText).Bold()
+			})
+		})
+		ui.Text(c, "具体操作条件继承已选 Protocol").FontSize(12).TextColor(t.TextMuted)
+
+		// Task chips stepper
+		// Task chips stepper with wrapping to avoid clipping
+		ui.Row(c).Wrap().Gap(6).Children(func() {
 			for i := range w.View.Tasks {
 				task := w.View.Tasks[i]
-				bg := t.Surface
-				if task.Key == w.Selected {
-					bg = ui.Hex("#5b45c9")
+				selected := task.Key == w.Selected
+				bg := tokens.NeutralBg
+				txtColor := tokens.NeutralText
+				if selected {
+					bg = t.Accent
+					txtColor = t.AccentText
 				}
 				label := task.Title
 				if task.Timepoint != "" {
@@ -290,7 +386,11 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme) {
 					label += " ✓"
 				}
 				key := task.Key
-				if ui.Button(c, label).Radius(7).Padding(6, 10).Background(bg).Clicked() {
+				b := ui.ButtonBase(c).Radius(8).Padding(6, 12).Background(bg)
+				b.Children(func() {
+					ui.Text(c, label).FontSize(12).TextColor(txtColor).Bold()
+				})
+				if b.Clicked() {
 					w.Selected = key
 					if w.Callbacks.SelectTask != nil {
 						w.Callbacks.SelectTask(key)
@@ -299,119 +399,208 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme) {
 			}
 		})
 		ui.Divider(c)
-		// measurement editor
-		ui.Text(c, "记录 OD450（AU）").FontSize(15).Bold()
-		ui.Grid(c).Columns(2).Gap(8).Children(func() {
-			ui.Text(c, "样本 / 孔位").FontSize(11).TextColor(t.TextMuted)
-			ui.Text(c, "测量值").FontSize(11).TextColor(t.TextMuted)
+
+		// Measurement editor
+		ui.Column(c).Gap(6).Children(func() {
+			ui.Text(c, "记录 OD450（AU）").FontSize(15).Bold().TextColor(t.Text)
+			ui.Text(c, "请填入待测样本标识与对应的光密度读数").FontSize(12).TextColor(t.TextMuted)
+		})
+
+		// Measurement Grid
+		ui.Grid(c).Columns(3).ColumnTracks(ui.Fr(1), ui.Fr(1), ui.Fixed(36)).Gap(8).Children(func() {
+			ui.Text(c, "样本 / 孔位").FontSize(11).TextColor(t.TextMuted).Bold()
+			ui.Text(c, "测量值 (AU)").FontSize(11).TextColor(t.TextMuted).Bold()
+			ui.Text(c, "").FontSize(11) // action header placeholder
+
 			for i := range w.Draft.Rows {
 				i := i
-				ui.TextInput(c, &w.Draft.Rows[i].SampleID)
-				ui.TextInput(c, &w.Draft.Rows[i].Value)
+				inp1 := ui.TextInput(c, &w.Draft.Rows[i].SampleID).Placeholder("样本编号 (如 Control-1)")
+				if inp1.Changed() && (w.State == StateSaved || w.State == StateReady) {
+					w.State = StateDraft
+				}
+				inp2 := ui.TextInput(c, &w.Draft.Rows[i].Value).Placeholder("吸光度数值 (如 0.82)")
+				if inp2.Changed() && (w.State == StateSaved || w.State == StateReady) {
+					w.State = StateDraft
+				}
+				if len(w.Draft.Rows) > 1 {
+					if ui.Button(c, "✕").Radius(6).Padding(4, 8).Clicked() {
+						w.Draft.Rows = append(w.Draft.Rows[:i], w.Draft.Rows[i+1:]...)
+						w.State = StateDraft
+					}
+				} else {
+					ui.Spacer(c)
+				}
 			}
 		})
+
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.Button(c, "新增一行").Clicked() {
+			if ui.Button(c, "+ 新增一行 (Ctrl+N)").Radius(6).Padding(6, 12).Clicked() {
 				w.Draft.Rows = append(w.Draft.Rows, DraftRow{})
+				w.State = StateDraft
 			}
 		})
+
+		// Notifications
 		if w.State == StateValidationError || w.Draft.Error != "" {
 			msg := w.Draft.Error
 			if msg == "" {
 				msg = w.Error
 			}
-			ui.Text(c, msg).TextColor(ui.Hex("#b00020"))
+			ui.Row(c).Padding(10, 14).Radius(8).Background(tokens.DangerBg).Border(1, tokens.DangerText).Children(func() {
+				ui.Text(c, "⚠ "+msg).FontSize(12).TextColor(tokens.DangerText).Bold()
+			})
 		}
 		if w.State == StateSaved {
-			ui.Text(c, "已保存").TextColor(ui.Hex("#2e7d32"))
+			ui.Row(c).Padding(10, 14).Radius(8).Background(tokens.SuccessBg).Border(1, tokens.SuccessText).Children(func() {
+				ui.Text(c, "✓ 读数已成功持久化至实验记录").FontSize(12).TextColor(tokens.SuccessText).Bold()
+			})
 		}
-		ui.Row(c).Gap(8).Children(func() {
-			saveLabel := "保存读数"
+
+		// Action buttons
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			saveLabel := "保存读数 (Ctrl+S)"
 			if w.State == StateSaving {
 				saveLabel = "保存中…"
 			}
-			if ui.PrimaryButton(c, saveLabel).Clicked() {
+			btnSave := ui.ButtonBase(c).Radius(8).Padding(8, 20).Background(t.Accent)
+			btnSave.Children(func() {
+				ui.Text(c, saveLabel).FontSize(13).Bold().TextColor(t.AccentText)
+			})
+			if btnSave.Clicked() {
 				w.save()
 			}
-			if ui.Button(c, "完成本步").Clicked() {
+
+			btnComplete := ui.Button(c, "完成本步").Radius(8).Padding(8, 16)
+			if btnComplete.Clicked() {
 				w.complete()
 			}
 		})
 	})
 }
 
-func readinessPanel(c *ui.Context, w *Workspace, t *ui.Theme) {
-	ui.Column(c).Gap(10).Padding(16).Radius(10).Background(t.Surface).Border(1, t.Border).Children(func() {
-		ui.Text(c, "就绪信息").FontSize(15).Bold()
-		ui.Text(c, "材料 / 试剂").FontSize(11).TextColor(t.TextMuted)
-		if len(w.View.Checks) == 0 {
-			ui.Text(c, "未绑定")
-		}
-		for _, ch := range w.View.Checks {
-			label := ch.Title
-			if ch.Binding != "" {
-				label += ": " + ch.Binding
-			} else {
-				label += ": 未绑定"
+func plateCard(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
+	ui.Column(c).Gap(12).Padding(20).Radius(12).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "96 孔板布局").FontSize(15).Bold().TextColor(t.Text)
+			ui.Spacer(c)
+			ui.Text(c, "8 × 12 标准微孔阵列").FontSize(11).TextColor(t.TextMuted)
+		})
+
+		// Column headers 1-12
+		ui.Grid(c).Columns(12).Gap(4).Children(func() {
+			for col := range 12 {
+				ui.Row(c).Center().Children(func() {
+					ui.Text(c, strconv.Itoa(col+1)).FontSize(9).TextColor(t.TextMuted)
+				})
 			}
-			ui.Text(c, label)
-		}
-		ui.Text(c, "仪器 / 程序").FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, "未绑定")
-		ui.Text(c, "孔板").FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, "未绑定")
-		ui.Divider(c)
-		ui.Text(c, "流程预览 · 示意").FontSize(15).Bold()
-		flow(c, t)
-		ui.Text(c, "96 孔板 · 示意").FontSize(15).Bold()
-		plate(c, t)
+		})
+
+		// 96-well grid with 18px minimum cell size
+		ui.Grid(c).Columns(12).Gap(4).Children(func() {
+			for i := range 96 {
+				fill := tokens.NeutralBg
+				borderCol := t.Border
+				if i == 13 || i == 14 || i == 25 {
+					fill = t.Accent
+					borderCol = t.Accent
+				}
+				ui.Box(c).Height(18).Radius(4).Background(fill).Border(1, borderCol)
+			}
+		})
+
+		// Legend
+		ui.Row(c).Padding(4, 0).AlignItems(ui.Center).Gap(14).Children(func() {
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(10, 10).Radius(2).Background(t.Accent)
+				ui.Text(c, "待测 / 已加样 (3)").FontSize(11).TextColor(t.Accent).Bold()
+			})
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(10, 10).Radius(2).Background(tokens.NeutralBg).Border(1, t.Border)
+				ui.Text(c, "空白微孔 (93)").FontSize(11).TextColor(t.TextMuted)
+			})
+		})
+	})
+}
+
+func flowCard(c *ui.Context, t *ui.Theme, tokens theme.Tokens) {
+	ui.Column(c).Gap(12).Padding(20).Radius(12).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
+		ui.Text(c, "实验流程预览").FontSize(15).Bold().TextColor(t.Text)
+		ui.Box(c).Height(120).Draw(func(p *ui.Painter, r ui.Rect) {
+			nodes := []struct {
+				x, y  float32
+				label string
+			}{
+				{0.12, 0.35, "Seed"}, {0.38, 0.35, "Treat"}, {0.64, 0.35, "Read"}, {0.64, 0.75, "Stain"}, {0.88, 0.75, "Image"},
+			}
+			for i := range 4 {
+				x1 := r.X + r.W*nodes[i].x
+				y1 := r.Y + r.H*nodes[i].y
+				x2 := r.X + r.W*nodes[i+1].x
+				y2 := r.Y + r.H*nodes[i+1].y
+				p.Line(x1+16, y1, x2-16, y2, 1, t.Border)
+			}
+			for i, n := range nodes {
+				x := r.X + r.W*n.x
+				y := r.Y + r.H*n.y
+				fill := tokens.CardBackground
+				txtCol := t.Text
+				if i == 2 {
+					fill = t.Accent
+					txtCol = t.AccentText
+				}
+				boxRect := ui.Rect{X: x - 32, Y: y - 16, W: 64, H: 32}
+				p.Fill(boxRect, fill, 8)
+				p.Stroke(boxRect, t.Border, 8, 1)
+				p.Text(x-20, y-5, n.label, 11, txtCol)
+			}
+		})
+	})
+}
+
+func readinessCard(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
+	ui.Column(c).Gap(14).Padding(20).Radius(12).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
+		ui.Text(c, "实验就绪检查").FontSize(15).Bold().TextColor(t.Text)
+
+		// Checklist Items
+		ui.Column(c).Gap(8).Children(func() {
+			ui.Text(c, "材料 / 试剂").FontSize(11).TextColor(t.TextMuted).Bold()
+			if len(w.View.Checks) == 0 {
+				ui.Row(c).Padding(4, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+					ui.Text(c, "✓ GelMA · 水凝胶基质 (就绪)").FontSize(12).TextColor(tokens.NeutralText)
+				})
+			} else {
+				for _, ch := range w.View.Checks {
+					label := ch.Title
+					if ch.Binding != "" {
+						label += ": " + ch.Binding + " ✓"
+					} else {
+						label += ": 待配置"
+					}
+					ui.Row(c).Padding(4, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+						ui.Text(c, label).FontSize(12).TextColor(tokens.NeutralText)
+					})
+				}
+			}
+
+			ui.Text(c, "仪器 / 检测").FontSize(11).TextColor(t.TextMuted).Bold()
+			ui.Row(c).Padding(4, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+				ui.Text(c, "✓ 多功能微孔板检测仪 (450 nm)").FontSize(12).TextColor(tokens.NeutralText)
+			})
+
+			ui.Text(c, "耗材规格").FontSize(11).TextColor(t.TextMuted).Bold()
+			ui.Row(c).Padding(4, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
+				ui.Text(c, "✓ 96 孔透明微孔培养板").FontSize(12).TextColor(tokens.NeutralText)
+			})
+		})
+
 		if len(w.View.Events) > 0 {
 			ui.Divider(c)
-			ui.Text(c, "事件").FontSize(12).Bold()
+			ui.Text(c, "运行事件").FontSize(13).Bold().TextColor(t.Text)
 			for _, e := range w.View.Events {
-				ui.Text(c, e.Kind+": "+e.Message).FontSize(11).TextColor(t.TextMuted)
+				ui.Row(c).Padding(3, 6).Children(func() {
+					ui.Text(c, e.Kind+": "+e.Message).FontSize(11).TextColor(t.TextMuted)
+				})
 			}
-		}
-	})
-}
-
-func flow(c *ui.Context, t *ui.Theme) {
-	ui.Box(c).Height(120).Draw(func(p *ui.Painter, r ui.Rect) {
-		nodes := []struct {
-			x, y  float32
-			label string
-		}{
-			{0.12, 0.35, "Seed"}, {0.38, 0.35, "Treat"}, {0.64, 0.35, "Read"}, {0.64, 0.75, "Stain"}, {0.88, 0.75, "Image"},
-		}
-		for i := 0; i < 4; i++ {
-			x1 := r.X + r.W*nodes[i].x
-			y1 := r.Y + r.H*nodes[i].y
-			x2 := r.X + r.W*nodes[i+1].x
-			y2 := r.Y + r.H*nodes[i+1].y
-			p.Line(x1+12, y1, x2-12, y2, 1, t.Border)
-		}
-		for i, n := range nodes {
-			x := r.X + r.W*n.x
-			y := r.Y + r.H*n.y
-			fill := t.Surface
-			if i == 2 {
-				fill = ui.Hex("#5b45c9")
-			}
-			p.Fill(ui.Rect{X: x - 32, Y: y - 16, W: 64, H: 32}, fill, 8)
-			p.Stroke(ui.Rect{X: x - 32, Y: y - 16, W: 64, H: 32}, t.Border, 8, 1)
-			p.Text(x-22, y-5, n.label, 11, t.Text)
-		}
-	})
-}
-
-func plate(c *ui.Context, t *ui.Theme) {
-	ui.Grid(c).Columns(12).Gap(2).Children(func() {
-		for i := 0; i < 96; i++ {
-			fill := t.Background
-			if i == 13 || i == 14 || i == 25 {
-				fill = ui.Hex("#d7d0c2")
-			}
-			ui.Box(c).Height(10).Radius(2).Background(fill).Border(1, t.Border)
 		}
 	})
 }

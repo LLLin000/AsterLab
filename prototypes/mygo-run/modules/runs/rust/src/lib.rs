@@ -51,6 +51,8 @@ impl RunService for CoreRunService {
         if !input.task_key.is_empty() { event["task_key"] = serde_json::json!(input.task_key); }
         if !input.timepoint.is_empty() { event["timepoint"] = serde_json::json!(input.timepoint); }
         if !input.assay_id.is_empty() { event["assay_id"] = serde_json::json!(input.assay_id); }
+        if !input.protocol_step_path.is_empty() { event["protocol_step_path"] = serde_json::json!(input.protocol_step_path); }
+        if !input.protocol_version_id.is_empty() { event["protocol_version_id"] = serde_json::json!(input.protocol_version_id); }
         if !input.operation_id.is_empty() { event["operation_id"] = serde_json::json!(input.operation_id); }
         let v = core.save_readout(event).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         Ok(snapshot(v))
@@ -65,7 +67,11 @@ impl RunService for CoreRunService {
             "content": "完成任务",
             "task_key": input.task_key,
             "step_status": "completed",
-            "operation_id": input.operation_id
+            "operation_id": input.operation_id,
+            "assay_id": input.assay_id,
+            "timepoint": input.timepoint,
+            "protocol_step_path": input.protocol_step_path,
+            "protocol_version_id": input.protocol_version_id
         });
         let v = core.save_readout(event).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         Ok(snapshot(v))
@@ -177,13 +183,30 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
         events: vec![],
     };
     for t in v["tasks"].as_array().into_iter().flatten() {
-        let assay_id = t.get("scope").and_then(|sc| sc.get("Assay")).and_then(|a| a.get("assay_id")).and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let assay_id = t
+            .get("scope")
+            .and_then(|sc| {
+                sc.get("assay_id")
+                    .or_else(|| sc.get("Assay").and_then(|a| a.get("assay_id")))
+            })
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let protocol_version_id = v["scopes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|sc| sc["kind"].as_str() == Some("assay") && sc["id"].as_str() == Some(assay_id.as_str()))
+            .and_then(|sc| sc["protocol_version_id"].as_str())
+            .unwrap_or("")
+            .to_string();
         s.tasks.push(RunTask {
             key: t["task_key"].as_str().unwrap_or("").into(),
             title: t["step_path"].as_str().unwrap_or("").into(),
-            timepoint: t["timepoint"].as_str().unwrap_or("准备").into(),
+            timepoint: t["timepoint"].as_str().unwrap_or("").into(),
             status: t["status"].as_str().unwrap_or("").into(),
             assay_id,
+            protocol_version_id,
         });
     }
     for e in v["events"].as_array().into_iter().flatten() {
