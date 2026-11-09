@@ -8,6 +8,7 @@ import (
 
 	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
+	"asterlab-mygo-prototype/internal/components"
 	"asterlab-mygo-prototype/internal/theme"
 	"github.com/egoist/mygo/ui"
 )
@@ -182,7 +183,7 @@ func View(c *ui.Context, w *Workspace) {
 	tok := theme.GetTokens(t)
 	ui.Column(c).Fill().Padding(16).Gap(12).Children(func() {
 		ui.Row(c).Gap(8).Children(func() {
-			ui.Text(c, "Tools & Components").Bold().FontSize(20)
+			components.PageTitle(c, "Tools & Components")
 		})
 		ui.Row(c).Grow(1).Gap(12).Children(func() {
 			ui.Column(c).Width(190).FillHeight().Padding(8).Gap(4).Background(tok.SidebarBackground).Children(func() {

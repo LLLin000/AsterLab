@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"asterlab-mygo-prototype/internal/blocks"
+	"asterlab-mygo-prototype/internal/components"
 	"asterlab-mygo-prototype/internal/workflow"
 
 	"github.com/egoist/mygo/ui"
@@ -19,13 +20,13 @@ func View(c *ui.Context, s *State) {
 	ids := s.StepIDs()
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		ui.Row(c).Height(34).Padding(0, 12).Gap(8).Children(func() {
-			ui.Text(c, "Protocol").FontSize(20).Bold()
+			components.PageTitle(c, "Protocol")
 			ui.Text(c, fmt.Sprintf("Design %s · revision %d", display(s.DesignID, "unlinked"), s.Revision)).FontSize(12).TextColor(t.TextMuted)
 		})
 		ui.Divider(c)
 		ui.Row(c).Grow(1).Children(func() {
 			ui.Column(c).Width(224).FillHeight().Padding(12).Gap(4).Background(t.Surface).Children(func() {
-				ui.Text(c, "STEPS").FontSize(11).Bold().TextColor(t.TextMuted)
+				components.Meta(c, "STEPS")
 				if len(ids) == 0 {
 					ui.Text(c, "No workflow steps in this design.").FontSize(13).TextColor(t.TextMuted)
 				}
@@ -51,7 +52,7 @@ func View(c *ui.Context, s *State) {
 					return
 				}
 				instances := s.Instances[node.ID]
-				ui.Text(c, display(node.Title, "Untitled step")).FontSize(20).Bold()
+				components.PageTitle(c, display(node.Title, "Untitled step"))
 				ui.Text(c, fmt.Sprintf("%s · step %s", display(string(node.Kind), "step"), node.ID)).FontSize(12).TextColor(t.TextMuted)
 				section(c, "Purpose")
 				hasPurpose := false

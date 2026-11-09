@@ -14,7 +14,9 @@ type Tokens struct {
 	RailBackground, SidebarBackground                                                            ui.Color
 	CardBackground, CardBorder                                                                   ui.Color
 	SuccessBg, SuccessText, WarningBg, WarningText, DangerBg, DangerText, NeutralBg, NeutralText ui.Color
-	Spacing4, Spacing8, Spacing12, Spacing16, Spacing24, Spacing32                               int
+	Spacing4, Spacing8, Spacing12, Spacing16, Spacing24, Spacing32, Spacing48                    int
+	TextPage, TextSection, TextBody, TextMeta, TextData                                          int
+	ButtonHeight, InputHeight, RowHeight                                                         int
 	ControlRadius, PanelRadius, DialogRadius                                                     int
 }
 
@@ -26,8 +28,10 @@ func LightTokens() Tokens {
 		Accent: ui.Hex("#1F6F5F"), AccentHover: ui.Hex("#195C4F"), AccentText: ui.Hex("#FFFFFF"),
 		Success: ui.Hex("#2F7D4A"), Warning: ui.Hex("#A9651D"), Danger: ui.Hex("#A13B36"),
 		RailBackground: ui.Hex("#FBFAF7"), SidebarBackground: ui.Hex("#FBFAF7"),
-		Spacing4: 4, Spacing8: 8, Spacing12: 12, Spacing16: 16, Spacing24: 24, Spacing32: 32,
-		ControlRadius: 4, PanelRadius: 8, DialogRadius: 12,
+		Spacing4: 4, Spacing8: 8, Spacing12: 12, Spacing16: 16, Spacing24: 24, Spacing32: 32, Spacing48: 48,
+		TextPage: 20, TextSection: 15, TextBody: 13, TextMeta: 11, TextData: 12,
+		ButtonHeight: 32, InputHeight: 32, RowHeight: 32,
+		ControlRadius: 6, PanelRadius: 8, DialogRadius: 12,
 	}
 	return aliases(t)
 }
