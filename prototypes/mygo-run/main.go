@@ -275,12 +275,11 @@ func (a *app) view(c *ui.Context) {
 }
 
 func designPage(c *ui.Context, a *app) {
+	if a.designer != nil {
+		designer.View(c, a.designer)
+		return
+	}
 	ui.Column(c).Fill().Padding(16).Gap(10).Children(func() {
-		ui.Text(c, "实验设计").FontSize(20).Bold()
-		if a.designer != nil {
-			designer.View(c, a.designer)
-			return
-		}
 		ui.Text(c, "DesignService 不可用").TextColor(ui.Hex("#b00020"))
 	})
 }

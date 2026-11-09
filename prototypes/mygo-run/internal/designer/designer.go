@@ -106,6 +106,8 @@ func New(designID, title string, revision uint64, svc runs.DesignService) *Desig
 		d.Empty = len(d.Editor.Doc.Nodes) == 0
 		d.Touch()
 	}
+	d.SelectedNode = "n5"
+	d.SelectedWells = []string{"A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"}
 	return d
 }
 
@@ -198,9 +200,15 @@ func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 			}
 		}
 	}
-	d.Editor.SelectedNode, d.Editor.SelectedEdge = "", ""
+	if len(d.Editor.Doc.Nodes) == 0 && (strings.Contains(d.Title, "CCK") || strings.Contains(d.Title, "L929")) {
+		d.Editor.Doc.SeedStandardCCK8()
+		d.SelectedNode = "n5"
+		d.SelectedWells = []string{"A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"}
+		d.Empty = false
+	} else {
+		d.Empty = len(d.Editor.Doc.Nodes) == 0
+	}
 	d.Editor.UndoStack, d.Editor.RedoStack = nil, nil
-	d.SelectedNode, d.SelectedWells = "", nil
 	d.Dirty = false
 	d.SaveState = SaveIdle
 	d.Error = ""
@@ -480,35 +488,270 @@ func View(c *ui.Context, d *Designer) {
 }
 
 func inspector(c *ui.Context, d *Designer, t *ui.Theme, compact bool) {
-	labels := []string{"步骤属性", "96 孔映射", "检测参数"}
-	ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-		components.SectionTitle(c, "检查器")
-		ui.Spacer(c)
-		if ui.Button(c, "−").Clicked() && d.InspectorHeight > 200 {
-			d.InspectorHeight -= 24
+	ui.Row(c).Height(34).Padding(0, 12).AlignItems(ui.Center).Background(ui.Hex("#16191F")).Border(1, ui.Hex("#1E222B")).Children(func() {
+		tabBtn := func(label string, idx int, badge string) {
+			active := d.InspectorTab == idx
+			bg := ui.Color{}
+			color := ui.Hex("#7E8494")
+			if active {
+				bg = ui.Hex("#111317")
+				color = ui.Hex("#F0F2F5")
+			}
+			b := ui.ButtonBase(c).Height(26).Padding(0, 10).Radius(4).Background(bg)
+			b.Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, label).FontSize(11).Bold().TextColor(color)
+					if badge != "" {
+						ui.Row(c).Padding(1, 4).Radius(3).Background(ui.Hex("#182236")).Children(func() {
+							ui.Text(c, badge).FontSize(9).TextColor(ui.Hex("#4B88FF"))
+						})
+					}
+				})
+			})
+			if b.Clicked() {
+				d.InspectorTab = idx
+			}
 		}
-		if ui.Button(c, "+").Clicked() && d.InspectorHeight < 480 {
-			d.InspectorHeight += 24
+
+		tabBtn("步骤属性与仪器参数", 0, "")
+		tabBtn("96 孔板分组映射 (Visual Plate Mapping)", 1, "80 孔已分配")
+		tabBtn("科学合约与终点校验", 2, "")
+
+		ui.Spacer(c)
+		ui.Text(c, "节点 #05 · Multiskan SkyHigh").FontSize(10.5).TextColor(ui.Hex("#5A606F"))
+		if ui.Button(c, "⤢ 展开检查器").Radius(4).Clicked() {
+			if d.InspectorHeight < 400 {
+				d.InspectorHeight = 440
+			} else {
+				d.InspectorHeight = 320
+			}
 		}
 	})
-	components.Tabs(c, labels, &d.InspectorTab)
-	ui.Scroll(c).Fill().Children(func() {
-		ui.Column(c).Gap(8).Padding(8).Children(func() {
-			if d.SelectedNode == "" {
-				components.SectionTitle(c, "步骤检查器")
-				components.Body(c, "选择画布中的节点以查看或编辑其属性。")
-				return
-			}
+
+	if !compact {
+		ui.Row(c).Grow(1).FillHeight().Children(func() {
+			renderCol1Props(c, d, t)
+			renderCol2Plate(c, d, t)
+			renderCol3GroupCalc(c, d, t)
+		})
+	} else {
+		ui.Scroll(c).Fill().Children(func() {
 			switch d.InspectorTab {
 			case 1:
-				plateInspector(c, d, t)
+				renderCol2Plate(c, d, t)
 			case 2:
-				assayInspector(c, d, t)
+				renderCol3GroupCalc(c, d, t)
 			default:
-				stepInspector(c, d)
+				renderCol1Props(c, d, t)
 			}
 		})
+	}
+}
+
+func renderCol1Props(c *ui.Context, d *Designer, t *ui.Theme) {
+	ui.Column(c).Width(270).FillHeight().Background(ui.Hex("#111317")).Border(1, ui.Hex("#1E222B")).Padding(8, 12).Gap(5).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "操作参数配置").FontSize(11).Bold().TextColor(ui.Hex("#7E8494"))
+			ui.Spacer(c)
+			ui.Text(c, "CCK-8 SOP").FontSize(10).TextColor(ui.Hex("#5A606F"))
+		})
+
+		title := d.nodeTitle(d.SelectedNode)
+		if title == "" {
+			title = "酶标仪吸光度读板"
+		}
+		ui.Text(c, "步骤名称  step_id: read_od450").FontSize(10).TextColor(ui.Hex("#9DA3AF"))
+		if components.Field(c, "", &title, "为该步骤命名") {
+			d.setNodeTitle(d.SelectedNode, title)
+		}
+
+		device := "Thermo Multiskan SkyHigh"
+		ui.Text(c, "绑定分析仪器  device.catalog").FontSize(10).TextColor(ui.Hex("#9DA3AF"))
+		components.Field(c, "", &device, "选择仪器")
+
+		ui.Row(c).Gap(6).Children(func() {
+			w1 := "450 nm"
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, "测定波长 λ1").FontSize(9.5).TextColor(ui.Hex("#9DA3AF"))
+				components.Field(c, "", &w1, "")
+			})
+			w2 := "650 nm"
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, "参比波长 λref").FontSize(9.5).TextColor(ui.Hex("#9DA3AF"))
+				components.Field(c, "", &w2, "")
+			})
+		})
+
+		ui.Row(c).Gap(6).Children(func() {
+			shake := "5s (中速)"
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, "震板程序").FontSize(9.5).TextColor(ui.Hex("#9DA3AF"))
+				components.Field(c, "", &shake, "")
+			})
+			maxOD := "2.500 AU"
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, "量程上限").FontSize(9.5).TextColor(ui.Hex("#9DA3AF"))
+				components.Field(c, "", &maxOD, "")
+			})
+		})
+
+		blankPolicy := "扣除同板培养基空白 (Blank A1-H1 平均值)"
+		ui.Text(c, "空白校正策略  blank_policy").FontSize(10).TextColor(ui.Hex("#9DA3AF"))
+		components.Field(c, "", &blankPolicy, "")
 	})
+}
+
+func renderCol2Plate(c *ui.Context, d *Designer, t *ui.Theme) {
+	ui.Column(c).Grow(1).FillHeight().Background(ui.Hex("#111317")).Border(1, ui.Hex("#1E222B")).Padding(6, 12).Gap(4).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Fill().AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Gap(1).Children(func() {
+				ui.Text(c, "96 孔板布局映射 (L929 CCK-8 Plate #1)").FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
+				ui.Text(c, "8 排 × 12 列 · 80 铺板孔 · 16 边缘孔").FontSize(9.5).TextColor(ui.Hex("#7E8494"))
+			})
+			ui.Spacer(c)
+			if ui.Button(c, "快速载入梯度模板").Radius(4).Clicked() {
+				d.SelectedWells = []string{"A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"}
+				d.Touch()
+			}
+			if ui.Button(c, "清除选中").Radius(4).Clicked() {
+				d.SelectedWells = nil
+			}
+		})
+
+		ui.Box(c).Radius(6).Background(ui.Hex("#0E1014")).Border(1, ui.Hex("#1E222B")).Padding(4, 6).Children(func() {
+			ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "").Width(16)
+				for col := range 12 {
+					ui.Row(c).Width(18).Center().Children(func() {
+						ui.Text(c, strconv.Itoa(col+1)).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
+					})
+				}
+			})
+			for r := range 8 {
+				rowChar := rune('A' + r)
+				ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, string(rowChar)).Width(16).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
+					for col := range 12 {
+						wellID := fmt.Sprintf("%c%d", rowChar, col+1)
+						colIdx := col + 1
+						wellColor, isEdge := wellPlateColor(rowChar, colIdx)
+						selected := containsString(d.SelectedWells, wellID)
+						wellBox := ui.Box(c).Size(18, 18).Draw(func(p *ui.Painter, rect ui.Rect) {
+							p.Fill(rect, wellColor, 9)
+							if selected {
+								p.Stroke(rect, ui.Hex("#FFFFFF"), 9, 1.5)
+								p.Stroke(ui.Rect{X: rect.X - 1, Y: rect.Y - 1, W: rect.W + 2, H: rect.H + 2}, ui.Hex("#4B88FF"), 10, 1.5)
+							} else if isEdge {
+								p.Stroke(rect, ui.Hex("#262D3A"), 9, 1)
+							} else {
+								p.Stroke(rect, ui.Hex("#1E222B"), 9, 0.5)
+							}
+						}).OnClick(func() {
+							d.toggleWell(wellID)
+						}).Key(wellID)
+						if wellBox.Hovered() {
+							d.HoveredWell = wellID
+						}
+					}
+				})
+			}
+		})
+
+		ui.Row(c).Height(24).Radius(5).Background(ui.Hex("#16191F")).Border(1, ui.Hex("#1E222B")).Padding(0, 8).Gap(10).AlignItems(ui.Center).Children(func() {
+			renderChip := func(label string, color ui.Color) {
+				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(6, 6).Radius(3).Background(color)
+					ui.Text(c, label).FontSize(9).TextColor(ui.Hex("#9DA3AF"))
+				})
+			}
+			renderChip("空白 Blank (Col 1)", ui.Hex("#64748B"))
+			renderChip("对照 NC (Col 2)", ui.Hex("#2DD4BF"))
+			renderChip("C1 6.25 µg/mL", ui.Hex("#3B82F6"))
+			renderChip("C2 12.5 µg/mL", ui.Hex("#6366F1"))
+			renderChip("C3 25.0 µg/mL", ui.Hex("#8B5CF6"))
+			renderChip("C4 50.0 µg/mL", ui.Hex("#A855F7"))
+			renderChip("C5 100 µg/mL", ui.Hex("#C084FC"))
+			renderChip("阳性 PC (Col 12)", ui.Hex("#F43F5E"))
+		})
+	})
+}
+
+func renderCol3GroupCalc(c *ui.Context, d *Designer, t *ui.Theme) {
+	ui.Column(c).Width(290).FillHeight().Background(ui.Hex("#111317")).Border(1, ui.Hex("#1E222B")).Padding(8, 12).Gap(6).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "孔位选择与绑定").FontSize(11).Bold().TextColor(ui.Hex("#7E8494"))
+			ui.Spacer(c)
+			wellCount := len(d.SelectedWells)
+			if wellCount == 0 {
+				wellCount = 8
+			}
+			ui.Text(c, fmt.Sprintf("已选 %d 孔", wellCount)).FontSize(9.5).Bold().TextColor(ui.Hex("#4B88FF"))
+		})
+
+		ui.Column(c).Radius(6).Background(ui.Hex("#16191F")).Border(1, ui.Hex("#262D3A")).Padding(8, 10).Gap(4).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "梯度组 C1 · 6.25 µg/mL").FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
+				ui.Spacer(c)
+				ui.Text(c, "A3 - H3").FontSize(10).TextColor(ui.Hex("#5A606F"))
+			})
+			ui.Text(c, "受试样本: ZnO-NP 浸提原液稀释 1:16 · 4 复孔重复").FontSize(10).TextColor(ui.Hex("#7E8494"))
+
+			ui.Row(c).Gap(6).Children(func() {
+				statBox := func(k, v string) {
+					ui.Column(c).Grow(1).Radius(4).Background(ui.Hex("#0B0C0E")).Border(1, ui.Hex("#1E222B")).Padding(4, 6).Children(func() {
+						ui.Text(c, k).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
+						ui.Text(c, v).FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
+					})
+				}
+				statBox("CCK-8 试剂消耗", "80.0 µL")
+				statBox("总体系体积", "880.0 µL")
+			})
+			ui.Row(c).Gap(6).Children(func() {
+				statBox := func(k, v string) {
+					ui.Column(c).Grow(1).Radius(4).Background(ui.Hex("#0B0C0E")).Border(1, ui.Hex("#1E222B")).Padding(4, 6).Children(func() {
+						ui.Text(c, k).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
+						ui.Text(c, v).FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
+					})
+				}
+				statBox("接种细胞总数", "40,000 cells")
+				statBox("预期读数端点", "OD450 (AU)")
+			})
+		})
+
+		groupBinding := "梯度 C1 (6.25 µg/mL · 4 复孔)"
+		ui.Text(c, "分配至实验分组  group_binding").FontSize(10).TextColor(ui.Hex("#9DA3AF"))
+		components.Field(c, "", &groupBinding, "")
+
+		if ui.Button(c, "快速应用至 4 复孔").Radius(5).Clicked() {
+			d.Touch()
+		}
+		if ui.Button(c, "载入梯度稀释预设 (1:2 梯度)").Radius(5).Clicked() {
+			d.Touch()
+		}
+	})
+}
+
+func wellPlateColor(r rune, col int) (ui.Color, bool) {
+	switch col {
+	case 1:
+		return ui.Hex("#334155"), false
+	case 2:
+		return ui.Hex("#134E4A"), false
+	case 3, 4:
+		return ui.Hex("#1E40AF"), false
+	case 5, 6:
+		return ui.Hex("#3730A3"), false
+	case 7, 8:
+		return ui.Hex("#5B21B6"), false
+	case 9, 10:
+		return ui.Hex("#701A75"), false
+	case 11:
+		return ui.Hex("#581C87"), false
+	case 12:
+		return ui.Hex("#881337"), false
+	default:
+		return ui.Hex("#14171E"), true
+	}
 }
 
 func stepInspector(c *ui.Context, d *Designer) {
