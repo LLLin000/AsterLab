@@ -16,7 +16,7 @@ go test -run TestSnap
 
 The snapshot is written to `docs/design/mygo-prototype.png`.
 
-It uses MyGo Native UI only: no HTML, JS, WebView, or Rust bridge. It shows:
+It uses MyGo Native UI and the generated Rust Native Module. The module calls the shared `asterlab-app` library, which includes the existing CLI command implementation over SQLite. It shows:
 
 - custom 40 DIP title bar (no Windows native title)
 - project/design sidebar
@@ -26,4 +26,4 @@ It uses MyGo Native UI only: no HTML, JS, WebView, or Rust bridge. It shows:
 - SVG/path flow preview
 - 96-well plate drawn as a 12-column grid
 
-The data is synthetic. MyGo's Rust bridge was not tested.
+The schedule/flow/plate are synthetic; `LoadRun`/`SaveReadout` use the real SQLite Run. See `NATIVE_MODULE.md`.

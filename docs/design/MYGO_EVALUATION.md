@@ -20,7 +20,7 @@
 | Flow path drawing | pass; 5 nodes and connectors |
 | 96-well grid | pass; 12×8 |
 | Windows real-window launch | not conclusively measured (automation hung) |
-| Rust CLI bridge | not tested; prototype uses synthetic data |
+| Rust Native Module | generated `RunService`; `asterlab-app`; SQLite read/write tested |
 | Windows installer/signing | not tested |
 
 Binary built during the test: ~16 MB (Go native UI, no WebView).
@@ -46,8 +46,8 @@ the same visual scope.
 - MyGo is new (v0.8.3); long-term API stability is unproven.
 - Rust integration is an experimental bridge, so adopting it would introduce
   a Go/Rust boundary around the existing Core.
-- The prototype is synthetic; no real RunWorkspace, save, transaction, or
-  restart test.
+- The UI schedule/flow/plate remain synthetic; `LoadRun`/`SaveReadout`
+  use a copy of a real SQLite Run and pass the CLI cross-entry check.
 - Real-window startup/memory measurement was not completed.
 - Custom flowchart editing (drag, snapping, undo, layout) is still app work;
   MyGo only supplies drawing and hit testing.
@@ -58,7 +58,7 @@ MyGo is a credible **visual benchmark**, not a production replacement yet.
 Use it to compare composition and component feel against Rune. Do not migrate
 AsterLab until a second spike proves:
 
-1. real Rust Core/CLI integration;
+1. real Rust Core/CLI integration; **now passing a shared-DB test**
 2. text input/save/restart with the same Run;
 3. Windows startup, memory, and packaging;
 4. Agent editability on a second screen.

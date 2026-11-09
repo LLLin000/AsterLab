@@ -11,6 +11,8 @@ type RunService interface {
 	LoadRun(ctx context.Context, runID string) (RunSnapshot, error)
 	// SaveReadout records measurements and returns the persisted snapshot.
 	SaveReadout(ctx context.Context, input ReadoutInput) (RunSnapshot, error)
+	// Close releases the database connection.
+	Close() error
 }
 
 type RunSnapshot struct {

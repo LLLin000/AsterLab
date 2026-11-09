@@ -1,49 +1,63 @@
-# Rust Native Module spike
+# MyGo Rust Native Module — shared Core integration
 
 - MyGo pseudo-version: `v0.8.4-0.20261108220316-c4197b7fe562`
-- Note: `v0.8.3` has no `mygo native` command; the native-module CLI and
-  generated Rust bindings are on this newer revision.
+- `v0.8.3` has no `mygo native` command; use the pinned pseudo-version.
 - Module: `modules/runs`
-- Generator: `go run github.com/egoist/mygo/cmd/mygo@v0.8.4-0.20261108220316-c4197b7fe562 native new -lang rust runs`
-- Check: `mygo native check modules/runs` → built `Runs.dll`
-- Persistence test: `go test ./...`
+- Shared Rust library: `crates/asterlab-app`
+- Core: existing `src/cli.rs` command implementation, included once by both CLI and desktop
 
-## Interface
+## Architecture
 
-```go
-type RunService interface {
-    LoadRun(ctx context.Context, runID string) (RunSnapshot, error)
-    SaveReadout(ctx context.Context, input ReadoutInput) (RunSnapshot, error)
-}
+```text
+Go MyGo UI
+  └─ generated runs.RunService (Go)
+       └─ generated Rust RunService trait
+            └─ modules/runs/rust (cdylib)
+                 └─ asterlab-app::AppCore
+                      └─ existing CLI command implementation
+                           └─ SQLite / transactions / validation
 ```
 
-Generated Rust: `trait RunService`, `RunSnapshot`, `RunTask`,
-`Measurement`, `ReadoutInput`; factory `make_run_service`.
+`asterlab-app` includes `src/cli.rs` as its implementation module and exposes:
 
-Implementation: `modules/runs/rust/src/lib.rs`. It is a **file-backed
-adapter** that writes a temp JSON and renames it atomically. It proves the
-Go↔Rust typed call, error return, context parameter and state across calls.
+```rust
+AppCore::open(data_dir)
+AppCore::load_run(run_id)
+AppCore::save_readout(event)
+```
 
-The original AsterLab SQLite/Core is **not connected yet**; a Rust module
-can depend on the core crate once the Run command layer is extracted into a
-library. This spike deliberately does not bypass domain validation.
+`save_readout` runs `create_execution_event_tx` inside one SQLite transaction,
+then returns the authoritative `RunWorkspace`; errors roll back.
 
-## Test result
+## Verified
 
-`go test ./...` passes:
+- `mygo native check modules/runs` → `Runs.dll` built
+- `go test ./...` → Go loads the Rust DLL, calls `LoadRun` and
+  `SaveReadout` against a **copy of a real AsterLab SQLite database**
+- saved `Control-1 / OD450 / 0.82` is read back in the next `LoadRun`
+- generated Go/Rust types, context parameter, error return and Close work
 
-- construct `RunService` from Go
-- `LoadRun` returns the seeded snapshot
-- `SaveReadout` appends a measurement
-- a second `LoadRun` sees the persisted value
+Test command:
 
-The window prototype uses the generated service for title/status and keeps
-its schedule/flow/plate synthetic.
+```sh
+cd prototypes/mygo-run
+go test ./...
+```
 
-## Next
+Runtime:
 
-1. Extract `RunWorkspace` + save/complete commands from `src/cli.rs` into a
-   library crate.
-2. Add it as a path dependency of the Rust module.
-3. Replace the file-backed adapter with SQLite transactions.
-4. Test Windows packaging: DLL beside the app, restart, and the same Run.
+```powershell
+$env:LABWORKBENCH_DATA_DIR="<repo>/target/asterlab-ui-runtime3"
+$env:ASTERLAB_RUN_ID="1c0c8989-0513-483a-851b-bdc7d6c67483"
+go run .
+```
+
+## Still open
+
+- UI schedule/flow/plate are still synthetic; only title/status and save use
+  the real Core.
+- CompleteTask is intentionally not added.
+- Revision/out-of-order response guard is not implemented yet.
+- Two-save concurrency is serialized by the module mutex; no UI request
+  ordering test.
+- Windows installer and independent DLL loading after install are not tested.

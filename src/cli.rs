@@ -4833,7 +4833,7 @@ fn validate_date(value: &str, label: &str) -> Result<(), CliError> {
     }
     Ok(())
 }
-fn open_db(path: &Path) -> Result<Connection, CliError> {
+pub(crate) fn open_db(path: &Path) -> Result<Connection, CliError> {
     fs::create_dir_all(path).map_err(|e| CliError::internal(e.to_string()))?;
     let db = Connection::open(path.join("labworkbench.sqlite"))
         .map_err(|e| CliError::internal(e.to_string()))?;
