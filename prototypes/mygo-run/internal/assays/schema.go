@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"asterlab-mygo-prototype/internal/blocks"
@@ -23,14 +24,23 @@ const (
 
 // Design is the assay-specific parameter set persisted under mygo.assays.
 type Design struct {
-	PlateInstanceID     string   `json:"plateInstanceId,omitempty"`
-	Timepoints          []string `json:"timepoints,omitempty"`
-	TechnicalReplicates int      `json:"technicalReplicates,omitempty"`
-	ControlGroup        string   `json:"controlGroup,omitempty"`
-	CalibratorGroup     string   `json:"calibratorGroup,omitempty"`
-	ReferenceGenes      []string `json:"referenceGenes,omitempty"`
-	Samples             []Sample `json:"samples,omitempty"`
-	Genes               []Gene   `json:"genes,omitempty"`
+	PlateInstanceID     string           `json:"plateInstanceId,omitempty"`
+	Timepoints          []string         `json:"timepoints,omitempty"`
+	TechnicalReplicates int              `json:"technicalReplicates,omitempty"`
+	ControlGroup        string           `json:"controlGroup,omitempty"`
+	CalibratorGroup     string           `json:"calibratorGroup,omitempty"`
+	ReferenceGenes      []string         `json:"referenceGenes,omitempty"`
+	Samples             []Sample         `json:"samples,omitempty"`
+	Genes               []Gene           `json:"genes,omitempty"`
+	Wells               []WellAssignment `json:"wells,omitempty"`
+}
+
+type WellAssignment struct {
+	WellID    string `json:"wellId"`
+	SampleID  string `json:"sampleId"`
+	GroupID   string `json:"groupId"`
+	Replicate int    `json:"replicate"`
+	Timepoint string `json:"timepoint"`
 }
 
 type Sample struct {
@@ -150,6 +160,31 @@ func cck8Schema(doc designDocument, spec assaySpec, params Design, assayID, time
 	cells := make([]resultgrid.Cell, 96)
 	for i := range cells {
 		cells[i] = resultgrid.Cell{Row: i / 12, Column: i % 12, Field: OD450, Status: Missing}
+	}
+	if len(params.Wells) > 0 {
+		seen := map[string]bool{}
+		for _, well := range params.Wells {
+			if well.Timepoint != timepoint {
+				continue
+			}
+			id := strings.ToUpper(strings.TrimSpace(well.WellID))
+			col, err := strconv.Atoi(id[1:])
+			if err != nil || len(id) < 2 || id[0] < 'A' || id[0] > 'H' || col < 1 || col > 12 {
+				return resultgrid.Schema{}, nil, fmt.Errorf("invalid well %q", well.WellID)
+			}
+			if strings.TrimSpace(well.SampleID) == "" || strings.TrimSpace(well.GroupID) == "" || well.Replicate < 1 {
+				return resultgrid.Schema{}, nil, fmt.Errorf("well %s has no sample/group/replicate", id)
+			}
+			key := id + "@" + timepoint
+			if seen[key] {
+				return resultgrid.Schema{}, nil, fmt.Errorf("well %s assigned twice", id)
+			}
+			seen[key] = true
+			idx := (int(id[0]-'A'))*12 + col - 1
+			cells[idx].SampleID, cells[idx].Group, cells[idx].Replicate = well.SampleID, well.GroupID, well.Replicate
+		}
+		delete(metadata, "unresolved")
+		return schema, cells, nil
 	}
 	if !contains(params.Timepoints, timepoint) || params.PlateInstanceID == "" {
 		return schema, cells, nil
@@ -279,4 +314,27 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func ValidateWellAssignments(wells []WellAssignment) error {
+	seenWells := map[string]bool{}
+	for _, well := range wells {
+		id := strings.ToUpper(strings.TrimSpace(well.WellID))
+		if len(id) < 2 || id[0] < 'A' || id[0] > 'H' {
+			return fmt.Errorf("invalid well %q", well.WellID)
+		}
+		col, err := strconv.Atoi(id[1:])
+		if err != nil || col < 1 || col > 12 || strconv.Itoa(col) != id[1:] {
+			return fmt.Errorf("invalid well %q", well.WellID)
+		}
+		if strings.TrimSpace(well.SampleID) == "" || strings.TrimSpace(well.GroupID) == "" || strings.TrimSpace(well.Timepoint) == "" || well.Replicate < 1 {
+			return fmt.Errorf("well %s requires sample, group, timepoint, replicate", id)
+		}
+		key := id + "\x00" + well.Timepoint
+		if seenWells[key] {
+			return fmt.Errorf("well %s assigned twice at %s", id, well.Timepoint)
+		}
+		seenWells[key] = true
+	}
+	return nil
 }

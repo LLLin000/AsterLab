@@ -170,7 +170,22 @@ func (a *app) loadDesign(id string) {
 	}
 	a.designer = designer.New(id, "", 0, a.designSvc)
 	a.designer.OnCreateRun = func(snap runs.RunSnapshot) {
-		a.applySnap(snap)
+		// The new run replaces the previous run's revision/task state.
+		a.snap = snap
+		a.guard = state.StaleGuard{}
+		if a.ws != nil {
+			view := toRunView(snap)
+			a.ws.View = view
+			a.ws.Draft = runui.NewDraft(view)
+			a.ws.Selected = ""
+			a.ws.Grid = nil
+			if len(snap.Tasks) == 0 && len(snap.Measurements) == 0 {
+				a.ws.State = runui.StateEmpty
+			} else {
+				a.ws.State = runui.StateReady
+			}
+		}
+		a.prepareGrid()
 		a.shell.Page = shell.Run
 	}
 	a.designer.Load(context.Background(), id)

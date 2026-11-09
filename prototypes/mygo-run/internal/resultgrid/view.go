@@ -68,7 +68,14 @@ func View(c *ui.Context, g *Grid, opts Options) {
 									_ = g.SetCell(cell)
 								}
 							}
-							e := ui.TextInput(c, g.input(rr, cc)).Width(width).Padding(4).Placeholder("—").OnSubmit(commit)
+							e := ui.TextInput(c, g.input(rr, cc)).Width(width).Padding(4).Placeholder("—").OnSubmit(commit).OnPaste(func(text string) bool {
+								if _, err := g.PasteTSV(text); err != nil {
+									g.Error = err.Error()
+									g.State = StateError
+									return false
+								}
+								return true
+							})
 							// A click on Save must persist the text currently in
 							// the input, not only values confirmed with Enter.
 							if e.Changed() {

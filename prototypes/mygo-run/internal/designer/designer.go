@@ -58,6 +58,7 @@ type Designer struct {
 
 	AssayIDDraft, TimepointsDraft, PlateInstanceDraft, ReplicatesDraft                     string
 	ControlGroupDraft, CalibratorGroupDraft, SamplesDraft, GenesDraft, ReferenceGenesDraft string
+	WellsDraft, SampleIDDraft, GroupIDDraft, WellTimepointDraft, WellAssignmentsDraft      string
 	SelectedNode                                                                           string
 	ComponentRefsDraft                                                                     string
 
@@ -213,6 +214,44 @@ func (d *Designer) loadAssayDraft(nodeID string) {
 	}
 	d.SamplesDraft, d.GenesDraft = strings.Join(samples, ", "), strings.Join(genes, ", ")
 	d.ReferenceGenesDraft = strings.Join(p.ReferenceGenes, ", ")
+	assignments := make([]string, 0, len(p.Wells))
+	for _, well := range p.Wells {
+		assignments = append(assignments, fmt.Sprintf("%s=%s/%s#%d@%s", well.WellID, well.SampleID, well.GroupID, well.Replicate, well.Timepoint))
+	}
+	d.WellAssignmentsDraft = strings.Join(assignments, ", ")
+	d.WellsDraft, d.SampleIDDraft, d.GroupIDDraft, d.WellTimepointDraft = "", "", "", ""
+}
+
+// AssignSelectedWells expands the comma-separated well selection into explicit
+// Well -> Sample -> Group -> Replicate -> Timepoint assignments.
+func (d *Designer) AssignSelectedWells() error {
+	if d.AssayIDDraft == "" || d.SelectedNode == "" {
+		return fmt.Errorf("select an assay step first")
+	}
+	p := d.Assays[d.AssayIDDraft]
+	wells := splitCSV(d.WellsDraft)
+	sampleID, groupID, timepoint := strings.TrimSpace(d.SampleIDDraft), strings.TrimSpace(d.GroupIDDraft), strings.TrimSpace(d.WellTimepointDraft)
+	if len(wells) == 0 || sampleID == "" || groupID == "" || timepoint == "" {
+		return fmt.Errorf("wells, sample, group and timepoint are required")
+	}
+	assignments := append([]assays.WellAssignment(nil), p.Wells...)
+	for i, wellID := range wells {
+		wellID = strings.ToUpper(strings.TrimSpace(wellID))
+		for j := range assignments {
+			if strings.EqualFold(assignments[j].WellID, wellID) && assignments[j].Timepoint == timepoint {
+				return fmt.Errorf("well %s already assigned at %s", wellID, timepoint)
+			}
+		}
+		assignments = append(assignments, assays.WellAssignment{WellID: wellID, SampleID: sampleID, GroupID: groupID, Replicate: i + 1, Timepoint: timepoint})
+	}
+	if err := assays.ValidateWellAssignments(assignments); err != nil {
+		return err
+	}
+	p.Wells = assignments
+	d.Assays[d.AssayIDDraft] = p
+	d.loadAssayDraft(d.SelectedNode)
+	d.Touch()
+	return nil
 }
 
 func (d *Designer) saveAssayDraft() {
@@ -441,6 +480,29 @@ func inspector(c *ui.Context, d *Designer, t *ui.Theme) {
 			}
 			if ui.TextInput(c, &d.ReferenceGenesDraft).Placeholder("参考基因，逗号分隔").Changed() {
 				changed = true
+			}
+			if d.AssayIDDraft == assays.CCK8 {
+				ui.Text(c, "孔位分配：Well → Sample → Group → Replicate → Timepoint").FontSize(11).TextColor(t.TextMuted)
+				if ui.TextInput(c, &d.WellsDraft).Placeholder("A1, A2, A3").Changed() {
+					changed = true
+				}
+				if ui.TextInput(c, &d.SampleIDDraft).Placeholder("SampleID，例如 Control-1").Changed() {
+					changed = true
+				}
+				if ui.TextInput(c, &d.GroupIDDraft).Placeholder("GroupID，例如 Control").Changed() {
+					changed = true
+				}
+				if ui.TextInput(c, &d.WellTimepointDraft).Placeholder("Timepoint，例如 D3").Changed() {
+					changed = true
+				}
+				if ui.Button(c, "分配所选孔位并生成技术重复").Clicked() {
+					if err := d.AssignSelectedWells(); err != nil {
+						d.Error = err.Error()
+					}
+				}
+				if d.WellAssignmentsDraft != "" {
+					ui.Text(c, "已分配: "+d.WellAssignmentsDraft).FontSize(11).TextColor(t.TextMuted)
+				}
 			}
 		}
 		if changed {
