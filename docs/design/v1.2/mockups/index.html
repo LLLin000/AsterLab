@@ -12,10 +12,10 @@
   --font-mono: "SF Mono", Consolas, "Cascadia Code", Menlo, monospace;
 
   /* Harness Theme */
-  --harness-bg: #1A1C20;
+  --harness-bg: #141619;
   --harness-text: #E0E2E8;
-  --harness-panel: #262930;
-  --harness-border: #3D424D;
+  --harness-panel: #202328;
+  --harness-border: #353942;
   --harness-accent: #38A189;
 }
 
@@ -99,7 +99,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 .harness-title {
@@ -126,7 +126,7 @@ body {
 }
 .harness-group {
   display: flex;
-  background: #191B1F;
+  background: #141619;
   border: 1px solid var(--harness-border);
   border-radius: 6px;
   padding: 2px;
@@ -149,10 +149,28 @@ body {
   font-weight: 700;
 }
 
+/* Prototype Disclaimer Banner */
+.prototype-disclaimer {
+  width: 100%;
+  max-width: 1360px;
+  background: #23272E;
+  border: 1px solid #3E4451;
+  border-left: 4px solid var(--harness-accent);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 11px;
+  color: #ABB2BF;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.prototype-disclaimer strong { color: #E5C07B; }
+
 /* Desktop Viewport Window */
 .viewport-frame {
   position: relative;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   overflow: hidden;
   transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1), height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -419,6 +437,57 @@ body {
 .sidebar-item:hover { background: var(--surface); }
 .sidebar-item.active { background: var(--elevated); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 
+/* Scientific Workflow DAG Nodes with Hero Icons */
+.dag-node {
+  position: relative;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.dag-node:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.dag-node.selected {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 2px rgba(31,111,95,0.2), 0 4px 12px rgba(0,0,0,0.06);
+}
+.node-hero-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.dag-node.selected .node-hero-icon {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.node-hero-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
+.node-port {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+}
+.node-port.in { left: -5px; }
+.node-port.out { right: -5px; }
+.dag-node.selected .node-port { border-color: var(--accent); background: var(--accent-text); }
+
 /* 96-Well Microplate Component */
 .plate-grid-container {
   background: var(--surface);
@@ -528,10 +597,6 @@ body {
   z-index: 2;
 }
 .result-table tr:hover td { background: var(--canvas); }
-.result-table td.cell-selected {
-  background: var(--accent) !important;
-  color: var(--accent-text);
-}
 .result-table input {
   width: 100%;
   background: transparent;
@@ -549,16 +614,6 @@ body {
   flex-direction: column;
   overflow: hidden;
 }
-.page-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.page-title-block h1 { font-size: 18px; font-weight: 700; color: var(--text); }
-.page-title-block p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
 /* 50/50 Dual Work Surface */
 .dual-surface {
@@ -577,18 +632,46 @@ body {
 }
 .surface-pane:first-child { border-right: 1px solid var(--border); }
 
-/* Review Mode Banner */
-.review-banner {
-  background: var(--warning-bg);
-  border: 1px solid var(--warning);
-  color: var(--warning);
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
+/* Responsive 900x600 Tab Switcher */
+.compact-tabs-bar {
+  display: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px;
+  gap: 8px;
+}
+.res-900x600 .compact-tabs-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+}
+.res-900x600 .dual-surface {
+  grid-template-columns: 1fr;
+}
+.res-900x600 .ctx-sidebar {
+  display: none;
+}
+.res-900x600 .inspector-grid-3 {
+  grid-template-columns: 1fr !important;
+}
+
+/* Modal Dialog */
+.modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+}
+.modal-card {
+  width: 440px;
+  background: var(--elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 16px 36px rgba(0,0,0,0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 </style>
 </head>
@@ -622,6 +705,15 @@ body {
   </div>
 </header>
 
+<!-- Prototype Disclaimer Banner -->
+<div class="prototype-disclaimer">
+  <div>
+    <strong>[交互与视觉原型 (Visual & Interaction Prototype)]</strong>
+    <span>本原型用于视觉还原与人机交互走查；业务逻辑契约与数据模型以 <code>docs/design/v1.2/</code> 规范为准。</span>
+  </div>
+  <span style="font-family:var(--font-mono); font-size:10px;">v1.2.1 FROZEN</span>
+</div>
+
 <!-- Native Window Viewport Frame -->
 <main id="viewportFrame" class="viewport-frame res-1200x760">
 
@@ -636,9 +728,9 @@ body {
       <span class="win-crumb-brand">AsterLab</span>
       <span class="win-crumb-sep">/</span>
       <select class="project-select" aria-label="活跃研究项目">
-        <option>PRJ-2026-088 · L929 生物相容性及毒性评价</option>
-        <option>PRJ-2026-092 · MCF-7 药物耐药性筛选</option>
-        <option>PRJ-2026-104 · 3D 肿瘤类器官活死染色</option>
+        <option>[示例] PRJ-2026-088 · L929 生物相容性评估</option>
+        <option>[示例] PRJ-2026-092 · MCF-7 药物耐药性筛选</option>
+        <option>[示例] PRJ-2026-104 · 3D 肿瘤类器官染色</option>
       </select>
       <span class="win-crumb-sep">/</span>
       <span id="titlebarCrumbPage" class="win-crumb-active">项目工作区</span>
@@ -646,9 +738,9 @@ body {
     <div class="win-actions">
       <div class="status-indicator">
         <div class="status-indicator-dot"></div>
-        <span>本地 Core 已就绪</span>
+        <span>Core 已就绪</span>
       </div>
-      <button class="btn btn-outline" style="padding:4px 8px; font-size:11px;">帮助与快捷键</button>
+      <button class="btn btn-outline" style="padding:4px 8px; font-size:11px;">快捷键</button>
     </div>
   </div>
 
@@ -702,6 +794,8 @@ const pageNames = {
 };
 
 let currentPage = "project";
+let currentRes = "1200x760";
+let runState = "draft"; // "draft", "saving", "saved"
 
 function renderPage(page) {
   currentPage = page;
@@ -725,28 +819,28 @@ function renderProjectPage() {
     <!-- Project Tree Sidebar -->
     <aside class="ctx-sidebar">
       <div class="sidebar-head">
-        <span>研究项目</span>
+        <span>研究项目目录</span>
         <button class="btn btn-ghost" style="padding:2px 6px;">+</button>
       </div>
       <div class="sidebar-list">
         <button class="sidebar-item active">
           <span>●</span>
           <div style="flex:1;min-width:0;">
-            <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">L929 生物相容性评估</div>
-            <div style="font-size:10px;color:var(--text-muted);">3 设计 · 2 运行</div>
+            <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">[示例] L929 生物相容性评估</div>
+            <div style="font-size:10px;color:var(--text-muted);">3 设计 · 2 运行 · 进行中</div>
           </div>
         </button>
         <button class="sidebar-item">
           <span>○</span>
           <div style="flex:1;min-width:0;">
-            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">MCF-7 药物耐药性筛选</div>
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">[示例] MCF-7 耐药性筛选</div>
             <div style="font-size:10px;color:var(--text-muted);">1 设计 · 0 运行</div>
           </div>
         </button>
         <button class="sidebar-item">
           <span>○</span>
           <div style="flex:1;min-width:0;">
-            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">3D 肿瘤类器官活死染色</div>
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">[示例] 3D 类器官活死染色</div>
             <div style="font-size:10px;color:var(--text-muted);">2 设计 · 4 运行</div>
           </div>
         </button>
@@ -762,15 +856,14 @@ function renderProjectPage() {
       <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:flex; justify-content:space-between; align-items:flex-start;">
         <div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <h1 style="font-size:20px; font-weight:700;">L929 生物相容性及细胞毒性评价 (ISO 10993-5)</h1>
+            <h1 style="font-size:18px; font-weight:700;">[示例] L929 生物相容性及细胞毒性评价 (ISO 10993-5)</h1>
             <span class="badge badge-success">进行中</span>
           </div>
-          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
-            项目编号: PRJ-2026-088 · 负责人: 实验组 A · 方案目标: 评估受试提取液对小鼠成纤维细胞增殖活性影响
+          <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+            编号: PRJ-2026-088 · 负责人: 实验组 A · 方案目标: 评估受试提取液对成纤维细胞增殖活性影响
           </p>
         </div>
         <div style="display:flex; gap:8px;">
-          <button class="btn btn-outline">编辑项目信息</button>
           <button class="btn btn-primary" onclick="renderPage('designer')">+ 新建实验设计</button>
         </div>
       </div>
@@ -780,8 +873,8 @@ function renderProjectPage() {
         <div style="display:flex; align-items:center; gap:10px;">
           <div style="width:32px; height:32px; border-radius:6px; background:var(--accent); color:var(--accent-text); display:grid; place-items:center; font-weight:bold;">▶</div>
           <div>
-            <strong style="font-size:13px;">继续当前实验运行: Run-20261109-01 (Day 3 CCK-8 读板)</strong>
-            <div style="font-size:11px; color:var(--text-muted);">已完成 2/5 步骤 · 待测孔位 96 孔 · 预期测定 OD450</div>
+            <strong style="font-size:13px;">继续当前实验运行: [示例] Run-20261109-01 (Day 3 CCK-8 读板)</strong>
+            <div style="font-size:11px; color:var(--text-muted);">已完成 2/5 步骤 · 待测孔位 96 孔 · 测定终点 OD450</div>
           </div>
         </div>
         <button class="btn btn-primary" onclick="renderPage('run')">进入当前运行记录</button>
@@ -798,20 +891,13 @@ function renderProjectPage() {
           <div style="display:flex; flex-direction:column; gap:8px;">
             <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
               <div>
-                <strong style="font-size:13px;">CCK-8 比色法测定设计</strong>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">rev 4 · 终点: OD450 · 6 个浓度梯度 · 3 次技术重复</div>
+                <strong style="font-size:13px;">[示例] CCK-8 比色法测定设计</strong>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">rev 4 · 终点: OD450 · 6 梯度 · 3 次重复</div>
               </div>
               <div style="display:flex; gap:6px;">
                 <button class="btn btn-outline" onclick="renderPage('designer')">进入设计</button>
-                <button class="btn btn-primary" onclick="renderPage('run')">开始运行</button>
+                <button class="btn btn-primary" onclick="renderPage('run')">创建运行</button>
               </div>
-            </div>
-            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <strong style="font-size:13px;">LIVE/DEAD 荧光双染成像方案</strong>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">rev 1 · 终点: 活死细胞计数 · 4 视野/孔 · 共焦成像</div>
-              </div>
-              <button class="btn btn-outline" onclick="renderPage('designer')">进入设计</button>
             </div>
           </div>
         </div>
@@ -826,22 +912,12 @@ function renderProjectPage() {
             <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
               <div>
                 <div style="display:flex; align-items:center; gap:6px;">
-                  <strong style="font-size:13px;">Run-20261109-01</strong>
+                  <strong style="font-size:13px;">[示例] Run-20261109-01</strong>
                   <span class="badge badge-warning">进行中</span>
                 </div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">步骤 3/5 · CCK-8 测定 · 2026-11-09 10:30 更新</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">步骤 3/5 · CCK-8 读板 · 2026-11-09 更新</div>
               </div>
               <button class="btn btn-primary" onclick="renderPage('run')">继续执行</button>
-            </div>
-            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <strong style="font-size:13px;">Run-20261107-02</strong>
-                  <span class="badge badge-success">已归档</span>
-                </div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">步骤 5/5 · 完整数据 96 孔 · 2026-11-07 完成</div>
-              </div>
-              <button class="btn btn-outline" onclick="renderPage('run')">查阅记录</button>
             </div>
           </div>
         </div>
@@ -854,101 +930,135 @@ function renderProjectPage() {
 /* PAGE 2: EXPERIMENT DESIGNER                                               */
 /* ========================================================================= */
 function renderDesignerPage() {
+  const isCompact = (currentRes === "900x600");
+
   stage.innerHTML = `
     <div class="page-container">
-      <!-- Upper Canvas (58% Height) -->
-      <div style="flex:0 0 58%; min-height:0; display:flex; flex-direction:column; border-bottom:1px solid var(--border); position:relative; background:var(--canvas);">
+      <!-- Upper Canvas (56% Height) -->
+      <div style="flex:0 0 56%; min-height:0; display:flex; flex-direction:column; border-bottom:1px solid var(--border); position:relative; background:var(--canvas);">
         <!-- Canvas Toolbar -->
         <div style="height:38px; background:var(--surface); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 14px;">
           <div style="display:flex; align-items:center; gap:8px;">
-            <strong style="font-size:13px;">工作流设计画布 (DAG)</strong>
+            <strong style="font-size:12px;">工作流设计画布 (DAG)</strong>
             <span class="badge badge-neutral">rev 4</span>
           </div>
           <div style="display:flex; gap:6px;">
-            <button class="btn btn-outline" style="padding:4px 8px;">⤢ 居中对齐</button>
-            <button class="btn btn-outline" style="padding:4px 8px;">+ 添加材料节点</button>
-            <button class="btn btn-outline" style="padding:4px 8px;">+ 添加操作步骤</button>
-            <button class="btn btn-outline" style="padding:4px 8px;">+ 添加仪器节点</button>
+            <button class="btn btn-outline" style="padding:4px 8px;">+ 材料节点</button>
+            <button class="btn btn-outline" style="padding:4px 8px;">+ 操作节点</button>
+            <button class="btn btn-outline" style="padding:4px 8px;">+ 仪器节点</button>
+            <button class="btn btn-outline" style="padding:4px 8px;">⤢ 居中</button>
           </div>
         </div>
 
-        <!-- Visual Canvas Nodes & Edges -->
-        <div style="flex:1; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; gap:36px; padding:20px;">
-          <!-- Node 1: Material -->
-          <div style="width:160px; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
-            <div style="font-size:10px; color:var(--text-muted); font-weight:700;">材料 / 细胞悬液</div>
-            <strong style="font-size:13px; display:block; margin:2px 0;">L929 细胞</strong>
-            <div style="font-size:11px; color:var(--text-muted);">1.0 × 10⁴ 孔 · P4 代</div>
-          </div>
-          <span style="color:var(--text-muted); font-size:18px;">➔</span>
-
-          <!-- Node 2: Operation -->
-          <div style="width:160px; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
-            <div style="font-size:10px; color:var(--text-muted); font-weight:700;">操作步骤</div>
-            <strong style="font-size:13px; display:block; margin:2px 0;">微孔板接种</strong>
-            <div style="font-size:11px; color:var(--text-muted);">96 孔板 · 100 µL/孔</div>
-          </div>
-          <span style="color:var(--text-muted); font-size:18px;">➔</span>
-
-          <!-- Node 3: Operation -->
-          <div style="width:160px; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
-            <div style="font-size:10px; color:var(--text-muted); font-weight:700;">操作步骤</div>
-            <strong style="font-size:13px; display:block; margin:2px 0;">药物浓度处理</strong>
-            <div style="font-size:11px; color:var(--text-muted);">6 梯度 · 孵育 24h</div>
-          </div>
-          <span style="color:var(--text-muted); font-size:18px;">➔</span>
-
-          <!-- Node 4: Selected Operation -->
-          <div style="width:180px; background:var(--card-bg); border:2px solid var(--accent); border-radius:8px; padding:10px; box-shadow:0 4px 12px rgba(31,111,95,0.15);">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:10px; color:var(--accent); font-weight:700;">当前选中步骤</span>
-              <span class="badge badge-success" style="padding:1px 5px; font-size:9px;">CCK-8</span>
+        <!-- Visual Canvas Nodes with Hero SVG Paths -->
+        <div style="flex:1; position:relative; overflow-x:auto; overflow-y:hidden; display:flex; align-items:center; justify-content:center; gap:28px; padding:16px;">
+          
+          <!-- Node 1: Material (Flask / Cryovial Hero Icon) -->
+          <div class="dag-node">
+            <div class="node-port out"></div>
+            <div class="node-hero-icon" title="材料节点">
+              <svg viewBox="0 0 24 24"><path d="M9 3h6v2h-1v5l4 9H6l4-9V5H9z"/></svg>
             </div>
-            <strong style="font-size:13px; display:block; margin:2px 0;">酶标仪读板测定</strong>
-            <div style="font-size:11px; color:var(--text-muted);">OD450 · 37°C 震板 5s</div>
+            <div>
+              <div style="font-size:10px; color:var(--text-muted); font-weight:700;">材料 / 细胞悬液</div>
+              <strong style="font-size:12px;">L929 细胞</strong>
+              <div style="font-size:10px; color:var(--text-muted);">1.0×10⁴/孔 · P4 代</div>
+            </div>
+          </div>
+
+          <span style="color:var(--text-muted); font-size:16px;">➔</span>
+
+          <!-- Node 2: Operation (Pipette / Dispenser Hero Icon) -->
+          <div class="dag-node">
+            <div class="node-port in"></div>
+            <div class="node-port out"></div>
+            <div class="node-hero-icon" title="操作步骤节点">
+              <svg viewBox="0 0 24 24"><path d="M19 3l2 2-9 9-2-2 9-9z"/><path d="M6 16l-3 5 5-3z"/></svg>
+            </div>
+            <div>
+              <div style="font-size:10px; color:var(--text-muted); font-weight:700;">操作步骤</div>
+              <strong style="font-size:12px;">微孔板接种铺板</strong>
+              <div style="font-size:10px; color:var(--text-muted);">96 孔板 · 100 µL/孔</div>
+            </div>
+          </div>
+
+          <span style="color:var(--text-muted); font-size:16px;">➔</span>
+
+          <!-- Node 3: Operation (Incubator / Treatment Hero Icon) -->
+          <div class="dag-node">
+            <div class="node-port in"></div>
+            <div class="node-port out"></div>
+            <div class="node-hero-icon" title="操作步骤节点">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+            </div>
+            <div>
+              <div style="font-size:10px; color:var(--text-muted); font-weight:700;">操作步骤</div>
+              <strong style="font-size:12px;">梯度浓度给药</strong>
+              <div style="font-size:10px; color:var(--text-muted);">6 梯度 · 孵育 24h</div>
+            </div>
+          </div>
+
+          <span style="color:var(--text-muted); font-size:16px;">➔</span>
+
+          <!-- Node 4: Selected Instrument (Microplate Reader Hero Icon) -->
+          <div class="dag-node selected">
+            <div class="node-port in"></div>
+            <div class="node-port out"></div>
+            <div class="node-hero-icon" title="仪器测定节点 (已选中)">
+              <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="16" cy="12" r="2"/></svg>
+            </div>
+            <div>
+              <div style="font-size:10px; color:var(--accent); font-weight:700;">分析仪器 · 已选中</div>
+              <strong style="font-size:12px;">酶标仪吸光度读板</strong>
+              <div style="font-size:10px; color:var(--text-muted);">OD450 · 震板 5s</div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Lower Inspector (42% Height) -->
-      <div style="flex:1 1 0; min-height:0; display:grid; grid-template-columns:260px 1fr 300px; background:var(--surface);">
-        <!-- Inspector Zone A: Step Parameters -->
-        <div style="padding:14px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:10px; overflow-y:auto;">
+      <!-- 900x600 Segmented Tab Switcher (Visible only in compact mode) -->
+      <div class="compact-tabs-bar" id="designerTabs">
+        <button class="btn btn-outline" style="flex:1;" onclick="switchDesignerTab(0)">步骤属性</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="switchDesignerTab(1)">96 孔板分组映射 (当前)</button>
+        <button class="btn btn-outline" style="flex:1;" onclick="switchDesignerTab(2)">检测合约与参数</button>
+      </div>
+
+      <!-- Lower Inspector (44% Height) -->
+      <div class="inspector-grid-3" style="flex:1 1 0; min-height:0; display:grid; grid-template-columns:250px 1fr 280px; background:var(--surface);">
+        <!-- Zone A: Step Parameters -->
+        <div id="inspPaneA" style="padding:14px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:10px; overflow-y:auto;">
           <strong style="font-size:13px;">步骤属性检查器</strong>
           <div>
             <label style="font-size:11px; color:var(--text-muted); font-weight:600;">步骤名称</label>
-            <input class="project-select" style="width:100%; margin-top:3px;" value="酶标仪读板测定">
+            <input class="project-select" style="width:100%; margin-top:3px;" value="酶标仪吸光度读板">
           </div>
           <div>
-            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">检测组件类型</label>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">绑定组件</label>
             <input class="project-select" style="width:100%; margin-top:3px;" value="lab.well_plate_96">
           </div>
           <div>
-            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">仪器程序 (Protocol Step)</label>
-            <input class="project-select" style="width:100%; margin-top:3px;" value="Thermo Multiskan SkyHigh / OD450">
+            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">关联仪器程序</label>
+            <input class="project-select" style="width:100%; margin-top:3px;" value="Thermo Multiskan / OD450">
           </div>
         </div>
 
-        <!-- Inspector Zone B: 96-Well Plate Layout -->
-        <div style="padding:14px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:8px; overflow-y:auto;">
+        <!-- Zone B: Visual 96-Well Plate Layout -->
+        <div id="inspPaneB" style="padding:14px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:8px; overflow-y:auto;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <strong style="font-size:13px;">96 孔板分组映射 (Visual Plate Mapping)</strong>
             <span style="font-size:11px; color:var(--text-muted);">已选 18 孔 · 分配至对照组</span>
           </div>
-          <!-- 96 Well Plate Grid Matrix -->
-          <div class="plate-grid-container" id="designerPlate">
-            <!-- Rendered by JS below -->
-          </div>
+          <div class="plate-grid-container" id="designerPlate"></div>
           <div style="display:flex; gap:8px; align-items:center;">
             <span style="font-size:11px; font-weight:600;">快速分配已选孔:</span>
-            <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;">空白对照 (Blank)</button>
-            <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;">阴性对照 (Control)</button>
+            <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;">空白组 (Blank)</button>
+            <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;">对照组 (Control)</button>
             <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;">给药组 (Treatment)</button>
           </div>
         </div>
 
-        <!-- Inspector Zone C: Assay Contract -->
-        <div style="padding:14px; display:flex; flex-direction:column; gap:10px; overflow-y:auto;">
+        <!-- Zone C: Assay Contract -->
+        <div id="inspPaneC" style="padding:14px; display:flex; flex-direction:column; gap:10px; overflow-y:auto;">
           <strong style="font-size:13px;">检测合约配置</strong>
           <div>
             <label style="font-size:11px; color:var(--text-muted); font-weight:600;">终点指标 (Endpoint)</label>
@@ -972,24 +1082,32 @@ function renderDesignerPage() {
   renderPlateMatrix("designerPlate");
 }
 
+function switchDesignerTab(idx) {
+  const pA = document.getElementById("inspPaneA");
+  const pB = document.getElementById("inspPaneB");
+  const pC = document.getElementById("inspPaneC");
+  if (!pA || !pB || !pC) return;
+  pA.style.display = (idx === 0) ? "flex" : "none";
+  pB.style.display = (idx === 1) ? "flex" : "none";
+  pC.style.display = (idx === 2) ? "flex" : "none";
+}
+
 /* ========================================================================= */
 /* PAGE 3: PROTOCOL SOP                                                      */
 /* ========================================================================= */
 function renderProtocolPage() {
   stage.innerHTML = `
     <aside class="ctx-sidebar">
-      <div class="sidebar-head">
-        <span>执行步骤清单</span>
-      </div>
+      <div class="sidebar-head"><span>执行步骤清单 (SOP)</span></div>
       <div class="sidebar-list">
-        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">01</span> 试剂与耗材准备</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">01</span> 试剂耗材准备</button>
         <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">02</span> L929 细胞消化计数</button>
         <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">03</span> 细胞悬液梯度稀释</button>
         <button class="sidebar-item active"><span style="font-size:10px;color:var(--accent);">04</span> 96 孔板接种铺板</button>
         <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">05</span> 培养箱 24h 孵育</button>
-        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">06</span> 受试物给药处理</button>
-        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">07</span> CCK-8 试剂加入孵育</button>
-        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">08</span> 酶标仪 450nm 测定</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">06</span> 受试物梯度给药</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">07</span> CCK-8 试剂孵育</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">08</span> 酶标仪读板测定</button>
       </div>
     </aside>
 
@@ -998,11 +1116,11 @@ function renderProtocolPage() {
       <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:flex; justify-content:space-between; align-items:flex-start;">
         <div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <h1 style="font-size:20px; font-weight:700;">L929 细胞微孔板接种与培养标准操作规程 (SOP-CCK8-01)</h1>
+            <h1 style="font-size:18px; font-weight:700;">[示例] L929 细胞微孔板接种操作规程 (SOP-CCK8-01)</h1>
             <span class="badge badge-success">版本 v1.2</span>
           </div>
-          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
-            来源设计: L929 CCK-8 细胞毒性评价 · 固化日期: 2026-11-09 · 状态: 正式生效
+          <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+            来源设计: L929 CCK-8 毒性评价 · 固化日期: 2026-11-09 · 状态: 正式生效
           </p>
         </div>
         <div style="display:flex; gap:8px;">
@@ -1011,20 +1129,20 @@ function renderProtocolPage() {
         </div>
       </div>
 
-      <!-- Professional Read-only Guidance Banner -->
+      <!-- Professional Guidance Banner -->
       <div style="background:var(--canvas); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:4px; padding:8px 12px; font-size:12px; color:var(--text);">
         ℹ 本方案由实验设计 v1.2 固化生成。如需调整接种密度或孵育参数，请在“实验设计”中修改并发布新版本。
       </div>
 
-      <!-- Current Step Content -->
+      <!-- Current Step Detail -->
       <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:18px; display:flex; flex-direction:column; gap:14px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <strong style="font-size:16px;">步骤 04: 96 孔微孔板接种铺板 (Step Execution)</strong>
+          <strong style="font-size:15px;">步骤 04: 96 孔微孔板接种铺板 (Step Execution)</strong>
           <span style="font-size:12px; color:var(--text-muted);">预估耗时: 15 分钟</span>
         </div>
 
         <div>
-          <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">操作规程指令</div>
+          <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">操作规程指令 [示例用例]</div>
           <p style="font-size:13px; line-height:1.6;">
             1. 取预热好的 96 孔细胞培养板，标记实验组别及日期；<br>
             2. 使用 Eppendorf 8 道移液器，轻柔吹吸混匀细胞悬液；<br>
@@ -1036,29 +1154,33 @@ function renderProtocolPage() {
 
         <!-- Parameters Table -->
         <div>
-          <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">关键工艺参数</div>
+          <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">关键工艺参数表 [示例数据]</div>
           <table class="result-table" style="width:100%;">
             <thead>
-              <tr><th>参数项</th><th>设定标准值</th><th>允许容差</th><th>监控方式</th></tr>
+              <tr><th>参数项</th><th>标准设定值</th><th>允许容差</th><th>监控方式</th></tr>
             </thead>
             <tbody>
               <tr><td>接种体积</td><td>100 µL / 孔</td><td>± 2 µL</td><td>移液器标准档位</td></tr>
-              <tr><td>细胞活率</td><td>≥ 95%</td><td>≥ 90% 下限</td><td>台盼蓝自动计数</td></tr>
-              <tr><td>培养条件</td><td>37.0 °C / 5.0% CO₂</td><td>± 0.5 °C</td><td>培养箱在线监控</td></tr>
+              <tr><td>细胞活率</td><td>≥ 95%</td><td>≥ 90% 下限</td><td>台盼蓝自动计数仪</td></tr>
+              <tr><td>培养环境</td><td>37.0 °C / 5.0% CO₂</td><td>± 0.5 °C</td><td>培养箱在线监控</td></tr>
             </tbody>
           </table>
         </div>
 
-        <!-- Checks -->
+        <!-- Layered Quality Checks -->
         <div>
           <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">质控与接受标准 (Quality Checks)</div>
           <div style="display:flex; flex-direction:column; gap:6px;">
             <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--surface); border:1px solid var(--border); border-radius:4px; font-size:12px;">
-              <span>[✓] 镜检确认细胞悬液完全单个化，无明显团块</span>
-              <span class="badge badge-danger">阻断项 (Blocking)</span>
+              <span>[✓] 设计前置校验: 96 孔位全部完成组别绑定与阴阳性对照设置</span>
+              <span class="badge badge-neutral">设计前置校验</span>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--surface); border:1px solid var(--border); border-radius:4px; font-size:12px;">
-              <span>[✓] 接种后镜检确认各孔液体无气泡</span>
+              <span>[✓] 现场执行质控: 接种前镜检确认细胞单个化，无肉眼可见团块</span>
+              <span class="badge badge-danger">阻断检查项</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--surface); border:1px solid var(--border); border-radius:4px; font-size:12px;">
+              <span>[✓] 现场执行质控: 接种后确认微孔底部无明显气泡</span>
               <span class="badge badge-neutral">提示项</span>
             </div>
           </div>
@@ -1069,7 +1191,7 @@ function renderProtocolPage() {
 }
 
 /* ========================================================================= */
-/* PAGE 4: RUN & MEASUREMENT LOGGING                                         */
+/* PAGE 4: RUN & HONEST TRANSACTIONAL SAVE                                   */
 /* ========================================================================= */
 function renderRunPage() {
   stage.innerHTML = `
@@ -1082,14 +1204,20 @@ function renderRunPage() {
         <div class="step-chip">○ D3 显微镜检</div>
         <div class="step-chip">○ D4 终点分析</div>
         <div style="margin-left:auto; font-size:11px; color:var(--text-muted); font-weight:600;">
-          执行进度: 3 / 5 步骤
+          进度: 3 / 5 步骤
         </div>
+      </div>
+
+      <!-- Compact 900x600 Tabs Switcher -->
+      <div class="compact-tabs-bar">
+        <button class="btn btn-outline" style="flex:1;" onclick="switchRunTab(0)">操作指引与质控 (3/5)</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="switchRunTab(1)">读数录入表格 (96/96) (当前)</button>
       </div>
 
       <!-- 50/50 Dual Work Surface -->
       <div class="dual-surface">
         <!-- Left Pane: Guidance & Checks -->
-        <div class="surface-pane">
+        <div class="surface-pane" id="runPaneGuidance">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div>
               <strong style="font-size:15px;">当前执行任务: CCK-8 吸光度测定</strong>
@@ -1100,7 +1228,7 @@ function renderRunPage() {
 
           <!-- Readiness Checklist -->
           <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; flex-direction:column; gap:8px;">
-            <strong style="font-size:12px;">执行前确认清单</strong>
+            <strong style="font-size:12px;">现场执行前确认清单</strong>
             <label style="font-size:12px; display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 酶标仪已预热至 37 °C 并完成系统自检</label>
             <label style="font-size:12px; display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 培养板避光孵育满 2 小时整</label>
             <label style="font-size:12px; display:flex; align-items:center; gap:6px;"><input type="checkbox"> 板底擦拭清洁，无冷凝水与划痕</label>
@@ -1113,19 +1241,19 @@ function renderRunPage() {
           </div>
 
           <div style="margin-top:auto;">
-            <button class="btn btn-primary" style="width:100%; padding:10px;" onclick="alert('本步已标记完成并记录归档。')">✔ 确认本步操作完成并进入下一步</button>
+            <button class="btn btn-primary" style="width:100%; padding:10px;">✔ 确认本步操作完成并归档</button>
           </div>
         </div>
 
         <!-- Right Pane: Structured 96-Well Data Entry -->
-        <div class="surface-pane">
+        <div class="surface-pane" id="runPaneData">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div>
               <strong style="font-size:15px;">测定读数录入工作台 (OD450)</strong>
-              <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">已录入 96/96 孔 · 批量保存修订号 rev 5</div>
+              <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" id="saveStatusMeta">已录入 96/96 孔 · 草稿状态 (待提交)</div>
             </div>
             <div style="display:flex; gap:6px;">
-              <button class="btn btn-outline" onclick="mockPasteTSV()">📋 粘贴板读仪 TSV</button>
+              <button class="btn btn-outline" onclick="openPasteModal()">📋 粘贴板读仪 TSV</button>
               <button class="btn btn-outline">📥 模板下载</button>
             </div>
           </div>
@@ -1142,25 +1270,94 @@ function renderRunPage() {
                   <th style="width:60px;">状态</th>
                 </tr>
               </thead>
-              <tbody id="runTableBody">
-                <!-- Populated by JS -->
-              </tbody>
+              <tbody id="runTableBody"></tbody>
             </table>
           </div>
 
-          <!-- Action & Save Strip -->
+          <!-- Honest Transactional Save Strip -->
           <div style="display:flex; justify-content:space-between; align-items:center; padding-top:6px;">
-            <span class="badge badge-success">✓ 批量数据已保存至 Core (rev 5)</span>
+            <span class="badge badge-warning" id="runSaveBadge">● 草稿 (96 项修改未保存)</span>
             <div style="display:flex; gap:8px;">
-              <button class="btn btn-outline">撤销本次修改</button>
-              <button class="btn btn-primary" onclick="alert('已成功触发批量保存 SaveBatch，修订号已更新。')">💾 批量保存读数</button>
+              <button class="btn btn-outline" onclick="revertDraft()">撤销修改</button>
+              <button class="btn btn-primary" id="btnBatchSave" onclick="triggerBatchSave()">💾 批量保存读数</button>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Paste Preview Modal (Hidden by default) -->
+    <div id="pasteModal" class="modal-overlay" style="display:none;">
+      <div class="modal-card">
+        <strong style="font-size:15px;">板读仪 TSV 矩阵粘贴预览 (Paste Preview)</strong>
+        <p style="font-size:12px; color:var(--text-muted); line-height:1.5;">
+          已识别 8 × 12 阵列，将写入 96 个微孔单元格。<br>
+          覆盖现有已录入数据: <strong>0 项</strong>。
+        </p>
+        <div style="background:var(--canvas); border:1px solid var(--border); border-radius:4px; padding:8px; font-family:var(--font-mono); font-size:11px;">
+          A01: 1.245 · A02: 1.258 · A03: 1.239 · B01: 1.012 ... [96 孔]
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+          <button class="btn btn-outline" onclick="closePasteModal()">取消</button>
+          <button class="btn btn-primary" onclick="confirmPasteTSV()">确认应用粘贴</button>
+        </div>
+      </div>
+    </div>
   `;
   renderRunTableRows();
+}
+
+function switchRunTab(idx) {
+  const pG = document.getElementById("runPaneGuidance");
+  const pD = document.getElementById("runPaneData");
+  if (!pG || !pD) return;
+  pG.style.display = (idx === 0) ? "flex" : "none";
+  pD.style.display = (idx === 1) ? "flex" : "none";
+}
+
+function openPasteModal() { document.getElementById("pasteModal").style.display = "grid"; }
+function closePasteModal() { document.getElementById("pasteModal").style.display = "none"; }
+
+function confirmPasteTSV() {
+  closePasteModal();
+  runState = "draft";
+  const badge = document.getElementById("runSaveBadge");
+  const meta = document.getElementById("saveStatusMeta");
+  if (badge) {
+    badge.className = "badge badge-warning";
+    badge.textContent = "● 草稿 (96 项修改未保存)";
+  }
+  if (meta) meta.textContent = "已导入 96 孔数据 · 草稿状态 (待批量提交)";
+}
+
+function triggerBatchSave() {
+  const btn = document.getElementById("btnBatchSave");
+  const badge = document.getElementById("runSaveBadge");
+  const meta = document.getElementById("saveStatusMeta");
+  if (!btn || !badge) return;
+
+  btn.disabled = true;
+  btn.textContent = "⏳ 正在向 Core 提交批量保存…";
+  badge.className = "badge badge-warning";
+  badge.textContent = "⏳ 提交中...";
+
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = "💾 批量保存读数";
+    badge.className = "badge badge-success";
+    badge.textContent = "✓ 已保存 (rev 5 · Core 已确认)";
+    if (meta) meta.textContent = "全部 96 孔数据已固化至 Core · 修订号 rev 5";
+  }, 700);
+}
+
+function revertDraft() {
+  const badge = document.getElementById("runSaveBadge");
+  const meta = document.getElementById("saveStatusMeta");
+  if (badge) {
+    badge.className = "badge badge-neutral";
+    badge.textContent = "● 就绪 (rev 4)";
+  }
+  if (meta) meta.textContent = "已恢复至 Core 固化快照 rev 4";
 }
 
 function renderRunTableRows() {
@@ -1178,7 +1375,6 @@ function renderRunTableRows() {
     ["C03", "Dose-50-03", "50 µM", "0.661", "原始"],
     ["D01", "Dose-100-01", "100 µM", "0.321", "原始"],
     ["D02", "Dose-100-02", "100 µM", "0.315", "原始"],
-    ["D03", "Dose-100-03", "100 µM", "0.310", "原始"],
     ["H12", "Blank-03", "空白组", "0.045", "原始"]
   ];
   tbody.innerHTML = sampleData.map(row => `
@@ -1186,25 +1382,19 @@ function renderRunTableRows() {
       <td style="font-weight:700; font-family:var(--font-mono);">${row[0]}</td>
       <td>${row[1]}</td>
       <td><span class="badge badge-neutral">${row[2]}</span></td>
-      <td><input value="${row[3]}" style="font-weight:700; color:var(--text);"></td>
+      <td><input value="${row[3]}" style="font-weight:700; color:var(--text);" oninput="confirmPasteTSV()"></td>
       <td><span class="badge badge-success">${row[4]}</span></td>
     </tr>
   `).join("");
 }
 
-function mockPasteTSV() {
-  alert("已识别剪贴板 8×12 矩阵，成功写入 96 个微孔读数。覆盖已填数据: 0 项。");
-}
-
 /* ========================================================================= */
-/* PAGE 5: TOOLS & COMPONENTS                                                */
+/* PAGE 5: TOOLS & COMPONENTS (MATH PURITY)                                  */
 /* ========================================================================= */
 function renderToolsPage() {
   stage.innerHTML = `
     <aside class="ctx-sidebar">
-      <div class="sidebar-head">
-        <span>实验工具箱</span>
-      </div>
+      <div class="sidebar-head"><span>实验工具箱</span></div>
       <div class="sidebar-list">
         <button class="sidebar-item active">
           <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
@@ -1219,9 +1409,7 @@ function renderToolsPage() {
           <span>参数表格生成器</span>
         </button>
       </div>
-      <div class="sidebar-head" style="margin-top:12px;">
-        <span>模块与规范</span>
-      </div>
+      <div class="sidebar-head" style="margin-top:12px;"><span>模块与规范</span></div>
       <div class="sidebar-list">
         <button class="sidebar-item">标准实验模块库</button>
         <button class="sidebar-item">结构化 JSON 导入</button>
@@ -1231,13 +1419,12 @@ function renderToolsPage() {
     <div class="page-container" style="padding:20px; gap:16px; overflow-y:auto;">
       <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:flex; justify-content:space-between; align-items:center;">
         <div>
-          <h1 style="font-size:20px; font-weight:700;">溶液稀释与移液配比计算器 (Dilution Calculator)</h1>
+          <h1 style="font-size:18px; font-weight:700;">溶液稀释与移液配比计算器 (Dilution Calculator)</h1>
           <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
-            基于质量守恒公式 C1·V1 = C2·V2 实时推导移液配方，支持一键注入实验设计方案。
+            基于质量守恒公式 C1·V1 = C2·V2 实时推导物理液体配比，支持一键注入实验设计方案。
           </p>
         </div>
         <div style="display:flex; gap:8px;">
-          <button class="btn btn-outline">重置输入</button>
           <button class="btn btn-primary" onclick="alert('已将配方参数生成为设计组件并插入当前方案。')">💾 插入至实验设计</button>
         </div>
       </div>
@@ -1249,24 +1436,33 @@ function renderToolsPage() {
         <button class="btn btn-ghost" style="padding:4px 12px;">多孔反应体系分配</button>
       </div>
 
-      <!-- Input Grid -->
+      <!-- Input Grid (Sample Case Label) -->
       <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
         <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:14px;">
-          <label style="font-size:11px; font-weight:700; color:var(--text-muted);">储液浓度 (C1)</label>
+          <div style="display:flex; justify-content:space-between;">
+            <label style="font-size:11px; font-weight:700; color:var(--text-muted);">储液浓度 (C1)</label>
+            <span style="font-size:10px; color:var(--text-muted);">[示例用例]</span>
+          </div>
           <div style="display:flex; gap:6px; margin-top:4px;">
             <input class="project-select" style="flex:1;" value="100">
             <select class="project-select"><option>mM</option><option>M</option><option>µM</option></select>
           </div>
         </div>
         <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:14px;">
-          <label style="font-size:11px; font-weight:700; color:var(--text-muted);">目标浓度 (C2)</label>
+          <div style="display:flex; justify-content:space-between;">
+            <label style="font-size:11px; font-weight:700; color:var(--text-muted);">目标浓度 (C2)</label>
+            <span style="font-size:10px; color:var(--text-muted);">[示例用例]</span>
+          </div>
           <div style="display:flex; gap:6px; margin-top:4px;">
             <input class="project-select" style="flex:1;" value="10">
             <select class="project-select"><option>µM</option><option>mM</option><option>nM</option></select>
           </div>
         </div>
         <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:14px;">
-          <label style="font-size:11px; font-weight:700; color:var(--text-muted);">目标体积 (V2)</label>
+          <div style="display:flex; justify-content:space-between;">
+            <label style="font-size:11px; font-weight:700; color:var(--text-muted);">目标体积 (V2)</label>
+            <span style="font-size:10px; color:var(--text-muted);">[示例用例]</span>
+          </div>
           <div style="display:flex; gap:6px; margin-top:4px;">
             <input class="project-select" style="flex:1;" value="50">
             <select class="project-select"><option>mL</option><option>µL</option><option>L</option></select>
@@ -1274,18 +1470,18 @@ function renderToolsPage() {
         </div>
       </div>
 
-      <!-- Live Scientific Output Card -->
+      <!-- Live Scientific Output Card (Math Only) -->
       <div style="background:var(--elevated); border:2px solid var(--accent); border-radius:8px; padding:18px; display:flex; flex-direction:column; gap:10px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <strong style="font-size:14px; color:var(--accent);">移液配方计算结果 (Actionable Recipe)</strong>
-          <span class="badge badge-success">稀释倍数: 10,000 ×</span>
+          <strong style="font-size:14px; color:var(--accent);">纯数学液体配比推导结果 (Mathematical Derivation)</strong>
+          <span class="badge badge-success">稀释倍数 (D): 10,000 ×</span>
         </div>
-        <div style="font-size:15px; font-weight:700; color:var(--text); line-height:1.6;">
-          所需母液体积 (V1): <span style="color:var(--accent);">5.0000 µL</span><br>
-          所需稀释液体积 (V_diluent): <span style="color:var(--accent);">49.9950 mL</span>
+        <div style="font-size:14px; font-weight:700; color:var(--text); line-height:1.7; font-family:var(--font-mono);">
+          所需母液体积 (V1 = C2·V2 / C1): <span style="color:var(--accent);">5.0000 µL</span><br>
+          所需稀释液体积 (V_diluent = V2 - V1): <span style="color:var(--accent);">49.9950 mL</span>
         </div>
-        <div style="background:var(--canvas); border:1px solid var(--border); border-radius:4px; padding:10px; font-size:12px; color:var(--text-muted);">
-          移液指引: 使用 P10 量程微量移液器吸取 5.0 µL 储液，注入 49.995 mL 基础培养液中，涡旋混匀 10 秒后室温避光保存备用。
+        <div style="background:var(--canvas); border:1px solid var(--border); border-radius:4px; padding:10px; font-size:11px; color:var(--text-muted); line-height:1.5;">
+          <strong>科学边界声明:</strong> 计算结果仅提供质量/浓度物理守恒推导；稀释液选择、移液器具校准及保存条件请依具体实验 SOP 执行。
         </div>
       </div>
     </div>
@@ -1326,7 +1522,9 @@ document.querySelectorAll(".harness-btn[data-res]").forEach(b => {
   b.addEventListener("click", () => {
     document.querySelectorAll(".harness-btn[data-res]").forEach(btn => btn.classList.remove("active"));
     b.classList.add("active");
-    frame.className = `viewport-frame res-${b.dataset.res}`;
+    currentRes = b.dataset.res;
+    frame.className = `viewport-frame res-${currentRes}`;
+    renderPage(currentPage);
   });
 });
 

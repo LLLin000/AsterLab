@@ -16,15 +16,15 @@
 <circle cx="52" cy="24" r="5.5" fill="#27C93F"/>
 <text x="76" y="28" font-family="var(--sans)" font-size="13" font-weight="700" fill="#201E1A">AsterLab</text>
 <text x="142" y="28" font-family="var(--sans)" font-size="13" fill="#C8C0B2">/</text>
-<rect x="156" y="12" width="280" height="24" rx="4" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
-<text x="166" y="28" font-family="var(--sans)" font-size="11" fill="#201E1A">PRJ-2026-088 · L929 生物相容性评估 ▾</text>
-<text x="446" y="28" font-family="var(--sans)" font-size="13" fill="#C8C0B2">/</text>
-<text x="460" y="28" font-family="var(--sans)" font-size="13" font-weight="600" fill="#201E1A">资料与工具</text>
-<rect x="1000" y="12" width="105" height="24" rx="4" fill="#F6F4EF" stroke="#DDD7CC" stroke-width="1"/>
-<circle cx="1010" cy="24" r="3" fill="#2F7D4A"/>
-<text x="1020" y="28" font-family="var(--sans)" font-size="11" fill="#6F6A60">Core 已就绪</text>
-<rect x="1115" y="12" width="70" height="24" rx="4" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
-<text x="1125" y="28" font-family="var(--sans)" font-size="11" fill="#201E1A">快捷键</text>
+<rect x="156" y="12" width="260" height="24" rx="4" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
+<text x="166" y="28" font-family="var(--sans)" font-size="11" fill="#201E1A">[示例] PRJ-088 · L929 生物相容性 ▾</text>
+<text x="426" y="28" font-family="var(--sans)" font-size="13" fill="#C8C0B2">/</text>
+<text x="440" y="28" font-family="var(--sans)" font-size="13" font-weight="600" fill="#201E1A">资料与工具</text>
+<rect x="1030" y="12" width="95" height="24" rx="4" fill="#F6F4EF" stroke="#DDD7CC" stroke-width="1"/>
+<circle cx="1040" cy="24" r="3" fill="#2F7D4A"/>
+<text x="1050" y="28" font-family="var(--sans)" font-size="11" fill="#6F6A60">Core 就绪</text>
+<rect x="1135" y="12" width="55" height="24" rx="4" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
+<text x="1145" y="28" font-family="var(--sans)" font-size="11" fill="#201E1A">快捷键</text>
 <rect x="0" y="48" width="56" height="712" fill="#101318"/>
 <line x1="56" y1="48" x2="56" y2="760" stroke="#DDD7CC" stroke-width="1"/>
 <rect x="10" y="60" width="36" height="36" rx="8" fill="#1F6F5F"/>
@@ -40,47 +40,47 @@
 <rect x="56" y="48" width="200" height="712" fill="#FBFAF7"/>
 <line x1="256" y1="48" x2="256" y2="760" stroke="#DDD7CC" stroke-width="1"/>
 <text x="70" y="74" font-family="var(--sans)" font-size="11" font-weight="700" fill="#6F6A60">实验工具箱</text>
-<rect x="64" y="88" width="184" height="32" rx="5" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
-<text x="76" y="108" font-family="var(--sans)" font-size="11" font-weight="700" fill="#1F6F5F">溶液稀释计算器</text>
-<text x="76" y="144" font-family="var(--sans)" font-size="11" fill="#201E1A">96 孔板布局器</text>
-<text x="76" y="180" font-family="var(--sans)" font-size="11" fill="#201E1A">参数表格生成器</text>
-<text x="70" y="212" font-family="var(--sans)" font-size="11" font-weight="700" fill="#6F6A60">模块与规范</text>
-<text x="76" y="246" font-family="var(--sans)" font-size="11" fill="#201E1A">标准实验模块库</text>
-<text x="76" y="278" font-family="var(--sans)" font-size="11" fill="#201E1A">结构化 JSON 导入</text>
-<rect x="276" y="68" width="904" height="76" rx="8" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
-<text x="292" y="94" font-family="var(--sans)" font-size="16" font-weight="700" fill="#201E1A">溶液稀释与移液配比计算器 (Dilution Calculator)</text>
-<text x="292" y="118" font-family="var(--sans)" font-size="11" fill="#6F6A60">基于质量守恒公式 C1·V1 = C2·V2 实时推导移液配方，支持一键注入实验设计方案。</text>
-<rect x="1040" y="90" width="124" height="32" rx="4" fill="#1F6F5F"/>
-<text x="1102" y="111" font-family="var(--sans)" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">💾 插入至实验设计</text>
-<rect x="276" y="156" width="360" height="32" rx="6" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
-<rect x="280" y="160" width="140" height="24" rx="4" fill="#1F6F5F"/>
-<text x="350" y="176" font-family="var(--sans)" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">单次稀释 (C1·V1=C2·V2)</text>
-<text x="476" y="176" font-family="var(--sans)" font-size="11" fill="#6F6A60" text-anchor="middle">梯度倍比稀释</text>
-<text x="576" y="176" font-family="var(--sans)" font-size="11" fill="#6F6A60" text-anchor="middle">多孔反应体系</text>
-<rect x="276.0" y="200" width="293.3333333333333" height="76" rx="6" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
-<text x="290.0" y="222" font-family="var(--sans)" font-size="11" font-weight="700" fill="#6F6A60">储液浓度 (C1)</text>
-<rect x="290.0" y="232" width="219.33333333333331" height="28" rx="4" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
-<text x="300.0" y="251" font-family="var(--mono)" font-size="13" font-weight="700" fill="#201E1A">100</text>
-<rect x="517.3333333333333" y="232" width="38" height="28" rx="4" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
-<text x="536.3333333333333" y="251" font-family="var(--sans)" font-size="11" font-weight="600" fill="#201E1A" text-anchor="middle">mM</text>
-<rect x="581.3333333333333" y="200" width="293.3333333333333" height="76" rx="6" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
-<text x="595.3333333333333" y="222" font-family="var(--sans)" font-size="11" font-weight="700" fill="#6F6A60">目标浓度 (C2)</text>
-<rect x="595.3333333333333" y="232" width="219.33333333333331" height="28" rx="4" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
-<text x="605.3333333333333" y="251" font-family="var(--mono)" font-size="13" font-weight="700" fill="#201E1A">10</text>
-<rect x="822.6666666666665" y="232" width="38" height="28" rx="4" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
-<text x="841.6666666666665" y="251" font-family="var(--sans)" font-size="11" font-weight="600" fill="#201E1A" text-anchor="middle">µM</text>
-<rect x="886.6666666666666" y="200" width="293.3333333333333" height="76" rx="6" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
-<text x="900.6666666666666" y="222" font-family="var(--sans)" font-size="11" font-weight="700" fill="#6F6A60">目标体积 (V2)</text>
-<rect x="900.6666666666666" y="232" width="219.33333333333331" height="28" rx="4" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
-<text x="910.6666666666666" y="251" font-family="var(--mono)" font-size="13" font-weight="700" fill="#201E1A">50</text>
-<rect x="1128.0" y="232" width="38" height="28" rx="4" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
-<text x="1147.0" y="251" font-family="var(--sans)" font-size="11" font-weight="600" fill="#201E1A" text-anchor="middle">mL</text>
-<rect x="276" y="290" width="904" height="130" rx="8" fill="#FFFFFF" stroke="#1F6F5F" stroke-width="2"/>
-<text x="294" y="318" font-family="var(--sans)" font-size="14" font-weight="700" fill="#1F6F5F">移液配方计算结果 (Actionable Scientific Recipe)</text>
-<rect x="1050" y="304" width="112" height="22" rx="4" fill="#EAF5EE"/>
-<text x="1106" y="319" font-family="var(--sans)" font-size="10" font-weight="700" fill="#2F7D4A" text-anchor="middle">稀释倍数: 10,000 ×</text>
-<text x="294" y="350" font-family="var(--sans)" font-size="13" font-weight="700" fill="#201E1A">所需母液体积 (V1): <tspan fill="#1F6F5F">5.0000 µL</tspan>  (P10 移液器精准量取)</text>
-<text x="294" y="372" font-family="var(--sans)" font-size="13" font-weight="700" fill="#201E1A">所需稀释液体积 (V_diluent): <tspan fill="#1F6F5F">49.9950 mL</tspan></text>
-<rect x="294" y="384" width="868" height="24" rx="4" fill="#F6F4EF"/>
-<text x="302" y="400" font-family="var(--sans)" font-size="11" fill="#6F6A60">操作指引: 取 5.0 µL 母液加入 49.995 mL 基础培养液中，涡旋混匀 10 秒后室温避光保存备用。</text>
+<rect x="64" y="86" width="184" height="32" rx="5" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
+<text x="76" y="106" font-family="var(--sans)" font-size="11" font-weight="700" fill="#1F6F5F">溶液稀释计算器</text>
+<text x="76" y="142" font-family="var(--sans)" font-size="11" fill="#201E1A">96 孔板布局器</text>
+<text x="76" y="174" font-family="var(--sans)" font-size="11" fill="#201E1A">参数表格生成器</text>
+<rect x="276" y="64" width="904" height="76" rx="8" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
+<text x="292" y="90" font-family="var(--sans)" font-size="15" font-weight="700" fill="#201E1A">溶液稀释与移液配比计算器 (Dilution Calculator)</text>
+<text x="292" y="114" font-family="var(--sans)" font-size="11" fill="#6F6A60">基于质量守恒公式 C1·V1 = C2·V2 实时推导物理液体配比，支持一键注入实验设计方案。</text>
+<rect x="1040" y="86" width="124" height="32" rx="4" fill="#1F6F5F"/>
+<text x="1102" y="107" font-family="var(--sans)" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">💾 插入至实验设计</text>
+<rect x="276" y="150" width="340" height="30" rx="6" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
+<rect x="279" y="153" width="130" height="24" rx="4" fill="#1F6F5F"/>
+<text x="344" y="169" font-family="var(--sans)" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">单次稀释 (C1·V1=C2·V2)</text>
+<text x="466" y="169" font-family="var(--sans)" font-size="11" fill="#6F6A60" text-anchor="middle">梯度倍比稀释</text>
+<text x="556" y="169" font-family="var(--sans)" font-size="11" fill="#6F6A60" text-anchor="middle">多孔体系</text>
+<rect x="276.0" y="190" width="293.3333333333333" height="76" rx="6" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
+<text x="288.0" y="212" font-family="var(--sans)" font-size="11" font-weight="700" fill="#6F6A60">储液浓度 (C1)</text>
+<text x="513.3333333333333" y="212" font-family="var(--sans)" font-size="9" fill="#6F6A60">[示例用例]</text>
+<rect x="288.0" y="222" width="219.33333333333331" height="28" rx="4" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
+<text x="298.0" y="241" font-family="var(--mono)" font-size="13" font-weight="700" fill="#201E1A">100</text>
+<rect x="517.3333333333333" y="222" width="38" height="28" rx="4" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
+<text x="536.3333333333333" y="241" font-family="var(--sans)" font-size="11" font-weight="600" fill="#201E1A" text-anchor="middle">mM</text>
+<rect x="581.3333333333333" y="190" width="293.3333333333333" height="76" rx="6" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
+<text x="593.3333333333333" y="212" font-family="var(--sans)" font-size="11" font-weight="700" fill="#6F6A60">目标浓度 (C2)</text>
+<text x="818.6666666666665" y="212" font-family="var(--sans)" font-size="9" fill="#6F6A60">[示例用例]</text>
+<rect x="593.3333333333333" y="222" width="219.33333333333331" height="28" rx="4" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
+<text x="603.3333333333333" y="241" font-family="var(--mono)" font-size="13" font-weight="700" fill="#201E1A">10</text>
+<rect x="822.6666666666665" y="222" width="38" height="28" rx="4" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
+<text x="841.6666666666665" y="241" font-family="var(--sans)" font-size="11" font-weight="600" fill="#201E1A" text-anchor="middle">µM</text>
+<rect x="886.6666666666666" y="190" width="293.3333333333333" height="76" rx="6" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
+<text x="898.6666666666666" y="212" font-family="var(--sans)" font-size="11" font-weight="700" fill="#6F6A60">目标体积 (V2)</text>
+<text x="1124.0" y="212" font-family="var(--sans)" font-size="9" fill="#6F6A60">[示例用例]</text>
+<rect x="898.6666666666666" y="222" width="219.33333333333331" height="28" rx="4" fill="#FBFAF7" stroke="#DDD7CC" stroke-width="1"/>
+<text x="908.6666666666666" y="241" font-family="var(--mono)" font-size="13" font-weight="700" fill="#201E1A">50</text>
+<rect x="1128.0" y="222" width="38" height="28" rx="4" fill="#FFFFFF" stroke="#DDD7CC" stroke-width="1"/>
+<text x="1147.0" y="241" font-family="var(--sans)" font-size="11" font-weight="600" fill="#201E1A" text-anchor="middle">mL</text>
+<rect x="276" y="278" width="904" height="126" rx="8" fill="#FFFFFF" stroke="#1F6F5F" stroke-width="2"/>
+<text x="294" y="304" font-family="var(--sans)" font-size="13" font-weight="700" fill="#1F6F5F">纯数学物理配比推导结果 (Mathematical Derivation)</text>
+<rect x="1060" y="290" width="102" height="22" rx="4" fill="#EAF5EE"/>
+<text x="1111" y="305" font-family="var(--sans)" font-size="10" font-weight="700" fill="#2F7D4A" text-anchor="middle">稀释倍数: 10,000 ×</text>
+<text x="294" y="336" font-family="var(--mono)" font-size="13" font-weight="700" fill="#201E1A">所需母液体积 (V1 = C2·V2 / C1): <tspan fill="#1F6F5F">5.0000 µL</tspan></text>
+<text x="294" y="358" font-family="var(--mono)" font-size="13" font-weight="700" fill="#201E1A">所需稀释液体积 (V_diluent = V2 - V1): <tspan fill="#1F6F5F">49.9950 mL</tspan></text>
+<rect x="294" y="370" width="868" height="24" rx="4" fill="#F6F4EF"/>
+<text x="302" y="386" font-family="var(--sans)" font-size="10" fill="#6F6A60">科学边界声明: 计算仅提供物理量守恒推导；稀释液选择、移液器具校准及保存条件请遵循具体实验 SOP。</text>
 </svg>

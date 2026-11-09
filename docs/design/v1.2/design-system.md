@@ -1,6 +1,6 @@
 # AsterLab v1.2 — Native Desktop Design System Specification
 
-- **Version**: 1.2.0 (Frozen Design System Specification)
+- **Version**: 1.2.1 (Revised per Conditional Review)
 - **Target Platform**: MyGo Native Desktop (`github.com/egoist/mygo`, Windows 10/11, macOS 12+, Linux/GTK)
 - **Target Resolutions**: 1200×760 DIP (Standard Workstation), 900×600 DIP (Minimum Compact Laptop)
 - **Design Philosophy**: Quiet Precision (克制精密), Native Craft (原生工法), Scientific Clarity (科学明晰), Workflow First (流程驱动)
@@ -84,139 +84,133 @@ All numerical displays (tables, well coordinates, plate matrices, dilution conce
 
 ---
 
-## 3. Spacing, Elevation & Metrics
+## 3. Scientific Workflow Nodes Specification
 
-### 3.1 Spacing Grid (Multiples of 4)
-- `Spacing 4`: 4px (micro gap between well buttons, badge inner padding).
-- `Spacing 8`: 8px (standard gap between related controls, input vertical padding).
-- `Spacing 12`: 12px (form row gap, compact card padding, toolbar button gap).
-- `Spacing 16`: 16px (standard panel padding, section gap, table horizontal cell inset).
-- `Spacing 24`: 24px (major work surface padding, column gutter).
-- `Spacing 32`: 32px (page layout margin, large modal separation).
-
-### 3.2 Corner Radii
-- `Radius 4`: Interactive controls (`Button`, `TextInput`, `Select`, `Badge`, `Chip`).
-- `Radius 8`: Containers (`Panel`, `Card`, `Sidebar`, `Workflow Node`, `Drawer`).
-- `Radius 12`: Top-level overlays (`Modal Dialog`, `Popover`, `Floating Toolbar`).
-
-### 3.3 Elevation & Shadows
-AsterLab avoids heavy, blurry drop shadows that create visual mud in desktop CAD/scientific tools.
-- **Flat Surface**: Default for all panels. Defined solely by `1px solid Border`.
-- **Raised Card**: `border: 1px solid Border; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04)`.
-- **Floating Overlay / Dialog**: `border: 1px solid BorderStrong; box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.12), 0 2px 6px -1px rgba(0, 0, 0, 0.06)`.
-
----
-
-## 4. Shell & Window Architecture
+Designer nodes represent biological materials, wet-lab procedures, and analytical devices. They are **topological tokens**, not form containers. Detailed attribute and well mapping belongs exclusively in the lower Inspector.
 
 ```
-+---------------------------------------------------------------------------------------+
-| Window Titlebar (48px) - DragWindow, Breadcrumb, Project Switcher, Global State, Help |
-+----+-------------------+--------------------------------------------------------------+
-| R  | Context Sidebar   | Main Work Surface                                            |
-| a  | (220px, Collapsed |                                                              |
-| i  | at 900x600)       | [Page-specific Canvas, 50/50 Split, or Multi-pane Grid]      |
-| l  |                   |                                                              |
-| 56 |                   |                                                              |
-| px |                   |                                                              |
-+----+-------------------+--------------------------------------------------------------+
-| Bottom Status Bar (28px) - Connection, Revision, Stale Guard, Unsaved Indicator       |
-+----+-------------------+--------------------------------------------------------------+
+       [Input Port]                                          [Output Port]
+           (o)----------------+---------------------------+-----(o)
+                              |  [Hero SVG Icon 32x32]    |
+                              |       <flask / vial>      |
+                              |                           |
+                              |  Node Title (12px bold)   |
+                              |  [Compact Param Pill]     |
+                              +---------------------------+
 ```
 
-### 4.1 Global Titlebar (48px)
-- **Window Dragging**: Supports native drag (`ui.Row().DragWindow()`).
-- **Brand / Breadcrumbs**: Clean, non-distracting path: `AsterLab` / `[项目选择器]` / `[当前页面名称]`.
-- **Global Actions**: Status indicator (`● 就绪` / `⏳ 同步中`), Theme Switcher (Light / Dark), Keyboard Shortcut cheatsheet button.
+### 3.1 Three Visual Node Types
 
-### 4.2 Primary Navigation Rail (56px)
-- Dark background (`#101318` in Light, `#0E1014` in Dark) anchors the left boundary across all themes.
-- **Brand Mark**: Top 36×36px square with 8px radius, featuring spruce teal monogram `AL`.
-- **Nav Items** (Top to Bottom):
-  1. `项目` (Project/Workspace) — Icon: `folder`
-  2. `设计` (Experiment Designer) — Icon: `git-branch` / `workflow`
-  3. `方案` (Protocol) — Icon: `file-text`
-  4. `运行` (Run) — Icon: `play-circle`
-  5. `工具` (Tools & Components) — Icon: `grid` / `tool`
-- **Active State**: Left 3px spruce indicator bar, background `#222832`, active icon tinted `AccentText`.
-- **Keyboard Shortcuts**: `Cmd/Ctrl + 1..5` immediately switches pages.
+1. **Material Node (生物与化学材料节点)**:
+   - **Primary Visual**: Hero scientific SVG illustration (`<path>` conical flask / cryogenic vial / reagent bottle / suspension tube).
+   - **Visual Anchor**: Icon in upper 36×36px badge. Tinted in subtle neutral slate.
+   - **Data**: Entity name (`L929 细胞悬液`, `受试化合物 A`), batch/passage (`P4`), concentration pill (`1.0×10⁴/孔`).
+   - **Ports**: Output port on right edge (no input port).
 
-### 4.3 Context Sidebar (220px)
-- Default open at 1200×760; automatically collapses into drawer or icon toggle at 900×600.
-- Keyboard toggle: `Cmd/Ctrl + B`.
-- Holds context-sensitive navigation: project tree, step list, assay list, tool catalog.
+2. **Operation Node (湿实验操作步骤节点)**:
+   - **Primary Visual**: Hero scientific SVG illustration (`<path>` pipette / 8-channel microplate dispenser / incubator / plate washer).
+   - **Visual Anchor**: Icon in upper 36×36px badge. Tinted in spruce teal.
+   - **Data**: Operation verb (`微孔板接种`, `梯度给药`, `CCK-8 孵育`), condition pill (`100 µL/孔`, `37 °C 24h`).
+   - **Ports**: Input port on left edge, Output port on right edge.
+
+3. **Instrument / Device Node (分析仪器与读板节点)**:
+   - **Primary Visual**: Hero scientific SVG illustration (`<path>` microplate reader / spectrophotometer optical beam / confocal laser / cytometer detector).
+   - **Visual Anchor**: Icon in upper 36×36px badge. Tinted in high-contrast analytical spruce.
+   - **Data**: Device name (`Multiskan 酶标仪`, `Bio-Rad CFX96`), detection mode pill (`OD450 吸光度`, `FAM/HEX 荧光`).
+   - **Ports**: Input port on left edge, terminal status output port on right edge.
+
+### 3.2 Four Interactive Node States
+
+1. **Default (Resting)**: `1px solid Border`, `CardBackground`, ports visible as 6px circles with 1.5px stroke.
+2. **Selected**: `2px solid Accent`, soft 4px spruce elevation glow (`box-shadow: 0 0 0 2px rgba(31,111,95,0.2)`), active port rings, drives immediate selection in the Inspector.
+3. **Dragging**: `ZIndex(10)`, scaled by 1.02 (`ui.Pose{Scale: 1.02}`), subtle elevation shadow (`0 8px 16px rgba(0,0,0,0.12)`).
+4. **Connecting (Port Target)**: Port circle pulses with Accent halo; invalid target ports dim to opacity 0.3.
 
 ---
 
-## 5. Control States & Interactive Feedback
+## 4. Run Save Semantics & State Machine
 
-Every control in AsterLab must implement the complete 8-state model. Unhandled states are prohibited.
+AsterLab enforces honest, transactional save semantics. **The interface MUST NEVER display "已保存" or "已自动同步" before Core confirms persistence.**
 
 ```
-[Resting] ---> (Hover) ---> [Hovered]
-   |                           |
-   +--------> (Press) <--------+
-                 |
-                 v
-             [Pressed]
-                 |
-                 v
-             [Focused] (via Keyboard Tab: 2px Accent Ring)
+[ 就绪 Ready (rev X) ]
+         |
+         | (Cell Edit / TSV Paste)
+         v
+[ 粘贴预览 Paste Preview ] ---> (Confirm) ---> [ 草稿 Draft (N 项未保存修改) ]
+                                                      |
+                                                      | (Click "批量保存读数")
+                                                      v
+                                        [ 提交中 Saving (Inputs Locked) ]
+                                                      |
+                       +------------------------------+------------------------------+
+                       |                                                             |
+                       v (Core Confirmed)                                            v (Conflict / Reject)
+      [ 已保存 Saved (rev X+1) ]                                        [ 冲突/错误 Conflict (Error Banner) ]
 ```
 
-1. **Resting (Default)**: Clean, subtle 1px border, high contrast readable text.
-2. **Hover**: Surface tint transitions in 120ms (`SurfaceHover` / `AccentHover`), cursor changes to `pointer` or `text`.
-3. **Pressed**: Scale down by 0.99 or darken background by 8% (`AccentPressed`).
-4. **Focused (Keyboard)**: Native focus ring drawn via `c.Theme().Focus`: 2px wide, 1px offset, color `Accent`. Never shown on mouse click (`:focus-visible` semantics).
-5. **Disabled**: Opacity 0.42, cursor `not-allowed`. Screen-readers retain access with explanatory reason (`AccessDisabled`).
-6. **Loading / Saving**: Spinner replacement or text change with `⏳` indicator, inputs locked against duplicate submission.
-7. **Error / Invalid**: 1.5px `Danger` border, red-tinted background, explicit inline error tooltip.
-8. **Empty**: Structured empty state illustration with single actionable button, never a blank gray void.
+### 4.1 State Definitions
+1. **就绪 (Ready, rev X)**: Rest state. Result cells match frozen Core state; revision matches active snapshot.
+2. **粘贴预览 (Paste Preview Modal)**: Triggered by `Cmd/Ctrl + V` or clicking "粘贴板读仪 TSV". Displays dimensions (`8 × 12 矩阵`), cell count (`96 孔`), and overwrite count (`覆盖已填数据: N 项`). Must be explicitly confirmed or dismissed by operator.
+3. **草稿 (Draft, N 项未保存修改)**: Data in UI differs from Core snapshot. Status chip displays `● 草稿 (N 项未保存)` in Amber (`Warning`). Batch Save button is active.
+4. **提交中 (Saving Batch...)**: Operator clicked "批量保存读数". Table inputs are temporarily disabled to prevent race conditions; button displays `⏳ 正在向 Core 提交批量保存…`.
+5. **已保存 (Saved, rev X+1)**: Core returns atomic confirmation. UI updates snapshot revision, flashes green success badge for 3 seconds (`✓ 已保存 rev X+1 · Core 已确认`), and unlocks cells.
+6. **冲突 / 错误 (Conflict / Error)**: Core returns `StaleRevision` or validation failure. UI retains operator draft inputs, surfaces an explicit warning banner, and offers "重新拉取并比对 (Rebase)" without discarding entered data.
 
 ---
 
-## 6. Motion, Transitions & Reduced Motion
+## 5. Separation of Scientific Examples from Product Defaults
 
-Motion in AsterLab serves exactly one purpose: **spatial continuity**. It communicates where an item came from and where it went. Decorative spring bounces, playful wiggle, or slow fades are strictly banned.
+AsterLab is an extensible scientific workbench. Product defaults, calculation math, and quality checks must remain cleanly decoupled from specific biological testcases.
 
-### 6.1 Transition Specifications
-- **Panel Collapse / Expand**: `160ms cubic-bezier(0.16, 1, 0.3, 1)` (ease-out snappy).
-- **Selection / Tab Indicator**: `120ms ease-out`.
-- **Modal / Popover Enter**: `140ms ease-out`, scale from `0.97` to `1.0`, opacity `0 -> 1`.
-- **Data Table Batch Update**: Cells flash subtle `Accent` tint for 250ms then settle into resting state.
+### 5.1 Sample Data Annotation Rule
+Whenever biological examples are used in documentation, mockups, or seed fixtures (e.g., `L929`, `CCK-8`, `DMEM + 10% FBS`, `100 mM 储液`), they **MUST** be explicitly labeled with `[示例数据 / 演示用例]`. The application must never behave as if L929 or CCK-8 is hardcoded into the data model.
 
-### 6.2 Reduced Motion Mode
-- When OS setting `prefers-reduced-motion` is active or `t.ReduceMotion == true`:
-  - `Duration` and `ExitDuration` are set to `-1` (instantaneous switch).
-  - No translation animations; simple instant visibility toggle.
-  - Zero camera pan/zoom animations on the experiment canvas.
+### 5.2 Scientific Calculator Purity (Math Only)
+Calculators in `Tools` perform physical-chemical mathematical derivations only:
+$$V_1 = \frac{C_2 \cdot V_2}{C_1}, \quad V_{\text{diluent}} = V_2 - V_1, \quad D = \frac{V_2}{V_1}$$
+- **Prohibited**: Generating speculative procedural recipes (e.g., "涡旋振荡 10 秒", "室温避光保存", "使用 P10 移液器量取").
+- **Required**: Generating exact physical quantities with unit conversions and explicit scientific boundary disclaimers:
+  `"计算结果仅提供质量/浓度守恒推导；稀释液选择、移液器具校准及保存条件请依具体实验 SOP 执行。"`
 
----
-
-## 7. Multi-DPI & Compact Desktop Discipline
-
-The interface must scale seamlessly across high-DPI displays (125%, 150%, 200%) and compact screens (900×600 DIP).
-
-### 7.1 Pixel Grid Alignment (Snap to DIP)
-- All structural borders use exact 1 DIP metrics.
-- Subpixel border anti-aliasing is avoided by aligning container boundaries to integer DIP positions.
-- Microplate circles: Drawn with centered SVG vector paths, ensuring crisp rendering at both 100% and 150% Windows scaling.
-
-### 7.2 The 900×600 Compact Desktop Contract
-When window size drops to 900×600:
-1. Primary Rail remains 56px fixed width.
-2. Context Sidebar collapses to 0px, accessible via a floating/header toggle button.
-3. 50/50 Dual Work Surfaces (such as Run) convert into top-tabbed single panels: `[ 操作指引 ] | [ 读数记录 (当前) ]`.
-4. Table rows drop from 32px to 28px height; padding tightens from 16px to 10px.
-5. All interactive buttons maintain a minimum 30×30px touch/click target.
+### 5.3 Quality Check Taxonomy
+1. **设计前置校验 (Design Pre-conditions)**: Evaluated at design-time in Designer (e.g., all 96 wells mapped, controls present, non-zero replicates).
+2. **现场执行质控 (Execution Bench Checks)**: Evaluated by operator at wet bench in Run (e.g., pre-run temperature verified, blank well absorbance < 0.08 AU, cell suspension verified clump-free).
 
 ---
 
-## 8. Chinese Scientific Copy & Punctuation Standards
+## 6. Two-Tier Desktop Responsive Discipline (1200×760 vs 900×600)
+
+```
++------------------------------------------------------------------------------------------------+
+| 1200×760 Standard: Full Dual-Surfaces & Multi-Zone Panels                                      |
+| [Rail 56px] [Sidebar 220px] [Main Dual Work Surface / 3-Zone Inspector]                       |
++------------------------------------------------------------------------------------------------+
+| 900×600 Compact: Strict Responsive Flow (Zero Horizontal Clipping)                            |
+| [Rail 56px] [Header Dropdown (Sidebar 0px)]                                                    |
+| Designer:  Canvas (auto-fit pan/scroll) + Inspector (3-Tab Switcher: 属性 | 孔板 | 合约)        |
+| Run:       Single-Column Tabbed Surface ([ 操作指引 (3/5) ] | [ 读数表格 (96/96) ])             |
++------------------------------------------------------------------------------------------------+
+```
+
+### 6.1 Designer Responsive Contract at 900×600
+- Canvas height adjusts to 240px; graph nodes automatically pan and fit into viewport with visible horizontal scroll indicators if required. No node is clipped off-screen.
+- Lower Inspector converts from 3 horizontal columns into a top 3-tab segmented switcher:
+  `[ 步骤属性 ] | [ 96孔板分组映射 (当前) ] | [ 检测合约与参数 ]`
+- Each tab occupies the full available width, providing generous room for the 8×12 microplate grid without horizontal squishing.
+
+### 6.2 Run Responsive Contract at 900×600
+- The 50/50 dual pane converts into a single-pane tabbed view:
+  `[ 操作指引与质控 (3/5) ] | [ 测定读数录入 (96/96) ]`
+- A persistent, sticky bottom action bar keeps the "批量保存读数 (SaveBatch)" trigger immediately accessible regardless of active tab.
+
+---
+
+## 7. Chinese Scientific Copy & Punctuation Standards
 
 Technical software in life sciences frequently suffers from either machine-translated jargon or developer confessions. AsterLab enforces strict editorial rules:
 
-### 8.1 Terminology Harmonization Table
+### 7.1 Terminology Harmonization Table
 
 | Prohibited Jargon / Demo Copy | Approved AsterLab Copy | Rationale |
 | :--- | :--- | :--- |
@@ -231,7 +225,7 @@ Technical software in life sciences frequently suffers from either machine-trans
 | `Same experimental unit repeated` | `同一实验单位重复` | Accurate statistical biology concept. |
 | `Independent sample per timepoint` | `每时间点独立样本` | Clear distinction from continuous sampling. |
 
-### 8.2 Punctuation & Spacing
+### 7.2 Punctuation & Spacing
 1. **CJK + Western Spacing**: When Latin letters/numbers meet Chinese characters, include 1 half-width space (e.g., `CCK-8 读板记录`, `OD450 读数`, `共 96 孔`).
 2. **Units & Punctuation**: Full-width punctuation (`，` `。` `：` `（）`) in descriptive prose. Half-width punctuation in mathematical/unit expressions (`37 °C`, `5% CO₂`, `10 µM`, `A1:H12`).
 3. **No Developer Debug Strings**: Never display raw exception traces or internal enum names in the UI. All backend errors pass through `state.MapError()` to yield clear, actionable Chinese messages.

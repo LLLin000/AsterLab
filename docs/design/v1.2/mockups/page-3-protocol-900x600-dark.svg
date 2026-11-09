@@ -16,15 +16,15 @@
 <circle cx="52" cy="24" r="5.5" fill="#27C93F"/>
 <text x="76" y="28" font-family="var(--sans)" font-size="13" font-weight="700" fill="#F0EDE6">AsterLab</text>
 <text x="142" y="28" font-family="var(--sans)" font-size="13" fill="#514B40">/</text>
-<rect x="156" y="12" width="280" height="24" rx="4" fill="#28251F" stroke="#39352D" stroke-width="1"/>
-<text x="166" y="28" font-family="var(--sans)" font-size="11" fill="#F0EDE6">PRJ-2026-088 · L929 生物相容性评估 ▾</text>
-<text x="446" y="28" font-family="var(--sans)" font-size="13" fill="#514B40">/</text>
-<text x="460" y="28" font-family="var(--sans)" font-size="13" font-weight="600" fill="#F0EDE6">实验方案</text>
-<rect x="700" y="12" width="105" height="24" rx="4" fill="#171614" stroke="#39352D" stroke-width="1"/>
-<circle cx="710" cy="24" r="3" fill="#55A76D"/>
-<text x="720" y="28" font-family="var(--sans)" font-size="11" fill="#A8A196">Core 已就绪</text>
-<rect x="815" y="12" width="70" height="24" rx="4" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
-<text x="825" y="28" font-family="var(--sans)" font-size="11" fill="#F0EDE6">快捷键</text>
+<rect x="156" y="12" width="180" height="24" rx="4" fill="#28251F" stroke="#39352D" stroke-width="1"/>
+<text x="166" y="28" font-family="var(--sans)" font-size="11" fill="#F0EDE6">[示例] PRJ-088 · L929 生物相容性 ▾</text>
+<text x="346" y="28" font-family="var(--sans)" font-size="13" fill="#514B40">/</text>
+<text x="360" y="28" font-family="var(--sans)" font-size="13" font-weight="600" fill="#F0EDE6">实验方案</text>
+<rect x="730" y="12" width="95" height="24" rx="4" fill="#171614" stroke="#39352D" stroke-width="1"/>
+<circle cx="740" cy="24" r="3" fill="#55A76D"/>
+<text x="750" y="28" font-family="var(--sans)" font-size="11" fill="#A8A196">Core 就绪</text>
+<rect x="835" y="12" width="55" height="24" rx="4" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
+<text x="845" y="28" font-family="var(--sans)" font-size="11" fill="#F0EDE6">快捷键</text>
 <rect x="0" y="48" width="56" height="552" fill="#0E1014"/>
 <line x1="56" y1="48" x2="56" y2="600" stroke="#39352D" stroke-width="1"/>
 <rect x="10" y="60" width="36" height="36" rx="8" fill="#4FA38D"/>
@@ -37,40 +37,30 @@
 <text x="28" y="241" font-family="var(--sans)" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">方案</text>
 <text x="28" y="291" font-family="var(--sans)" font-size="11" font-weight="500" fill="#8C93A0" text-anchor="middle">运行</text>
 <text x="28" y="341" font-family="var(--sans)" font-size="11" font-weight="500" fill="#8C93A0" text-anchor="middle">工具</text>
-<rect x="76" y="68" width="804" height="76" rx="8" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
-<text x="92" y="94" font-family="var(--sans)" font-size="16" font-weight="700" fill="#F0EDE6">L929 细胞微孔板接种与培养操作规程 (SOP-CCK8-01)</text>
-<rect x="800" y="80" width="64" height="20" rx="4" fill="#1A3623"/>
-<text x="832" y="94" font-family="var(--sans)" font-size="10" font-weight="600" fill="#55A76D" text-anchor="middle">版本 v1.2</text>
-<text x="92" y="118" font-family="var(--sans)" font-size="11" fill="#A8A196">来源设计: L929 CCK-8 细胞毒性评价 · 固化日期: 2026-11-09 · 状态: 正式生效</text>
-<rect x="76" y="156" width="804" height="32" rx="4" fill="#171614" stroke="#39352D" stroke-width="1"/>
-<rect x="76" y="156" width="4" height="32" rx="2" fill="#4FA38D"/>
-<text x="90" y="176" font-family="var(--sans)" font-size="11" fill="#F0EDE6">ℹ 本方案由实验设计 v1.2 固化生成。如需调整接种密度或孵育参数，请在“实验设计”中修改并发布新版本。</text>
-<rect x="76" y="200" width="804" height="380" rx="8" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
-<text x="92" y="226" font-family="var(--sans)" font-size="14" font-weight="700" fill="#F0EDE6">步骤 04: 96 孔微孔板接种铺板 (Step Execution)</text>
-<text x="760" y="226" font-family="var(--sans)" font-size="11" fill="#A8A196">预计耗时: 15 分钟</text>
-<text x="92" y="250" font-family="var(--sans)" font-size="11" fill="#F0EDE6">1. 取预热好的 96 孔细胞培养板，标记实验组别及日期；</text>
-<text x="92" y="270" font-family="var(--sans)" font-size="11" fill="#F0EDE6">2. 使用 Eppendorf 8 道移液器，轻柔吹吸混匀细胞悬液；</text>
-<text x="92" y="290" font-family="var(--sans)" font-size="11" fill="#F0EDE6">3. 沿微孔侧壁每孔缓慢加入 100 µL 细胞悬液（接种密度为 10,000 cells/孔）；</text>
-<text x="92" y="310" font-family="var(--sans)" font-size="11" fill="#F0EDE6">4. 接种完成后盖上板盖，十字交叉晃动混匀，严禁剧烈摇晃以防边缘效应；</text>
-<text x="92" y="330" font-family="var(--sans)" font-size="11" fill="#F0EDE6">5. 室温静置 15 分钟使细胞贴壁平铺，移入 37 °C、5% CO₂ 细胞培养箱孵育 24 小时。</text>
-<text x="92" y="360" font-family="var(--sans)" font-size="12" font-weight="700" fill="#A8A196">关键工艺参数表</text>
-<rect x="92" y="368" width="772" height="76" rx="4" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
-<line x1="92" y1="392" x2="864" y2="392" stroke="#39352D" stroke-width="1"/>
-<text x="102" y="384" font-family="var(--sans)" font-size="10" font-weight="700" fill="#A8A196">参数项</text>
-<text x="236" y="384" font-family="var(--sans)" font-size="10" font-weight="700" fill="#A8A196">标准设定值</text>
-<text x="376" y="384" font-family="var(--sans)" font-size="10" font-weight="700" fill="#A8A196">允许容差</text>
-<text x="516" y="384" font-family="var(--sans)" font-size="10" font-weight="700" fill="#A8A196">监控方式</text>
-<text x="102" y="410" font-family="var(--sans)" font-size="11" fill="#F0EDE6">接种体积</text>
-<text x="236" y="410" font-family="var(--sans)" font-size="11" font-weight="600" fill="#F0EDE6">100 µL / 孔</text>
-<text x="376" y="410" font-family="var(--sans)" font-size="11" fill="#A8A196">± 2 µL</text>
-<text x="516" y="410" font-family="var(--sans)" font-size="11" fill="#A8A196">移液器校准档位</text>
-<text x="102" y="432" font-family="var(--sans)" font-size="11" fill="#F0EDE6">细胞活率</text>
-<text x="236" y="432" font-family="var(--sans)" font-size="11" font-weight="600" fill="#F0EDE6">≥ 95%</text>
-<text x="376" y="432" font-family="var(--sans)" font-size="11" fill="#A8A196">≥ 90% 下限</text>
-<text x="516" y="432" font-family="var(--sans)" font-size="11" fill="#A8A196">台盼蓝计数仪自动检测</text>
-<text x="92" y="460" font-family="var(--sans)" font-size="12" font-weight="700" fill="#A8A196">质量与接受标准 (Quality Checks)</text>
-<rect x="92" y="468" width="772" height="30" rx="4" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
-<text x="102" y="487" font-family="var(--sans)" font-size="11" fill="#F0EDE6">[✓] 接种前镜检确认细胞悬液单个化，无明显肉眼可见团块</text>
-<rect x="774" y="474" width="80" height="18" rx="3" fill="#3D1B1A"/>
-<text x="814" y="487" font-family="var(--sans)" font-size="9" font-weight="700" fill="#D26B62" text-anchor="middle">阻断检查项</text>
+<rect x="56" y="48" width="844" height="36" fill="#201E1A"/>
+<line x1="56" y1="84" x2="900" y2="84" stroke="#39352D" stroke-width="1"/>
+<text x="72" y="71" font-family="var(--sans)" font-size="11" font-weight="700" fill="#4FA38D">04 接种铺板 (当前步骤) ▾</text>
+<rect x="72" y="96" width="812" height="76" rx="8" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
+<text x="88" y="122" font-family="var(--sans)" font-size="15" font-weight="700" fill="#F0EDE6">[示例] L929 细胞微孔板接种操作规程 (SOP-CCK8-01)</text>
+<rect x="804" y="108" width="64" height="20" rx="4" fill="#1A3623"/>
+<text x="836" y="122" font-family="var(--sans)" font-size="10" font-weight="600" fill="#55A76D" text-anchor="middle">版本 v1.2</text>
+<text x="88" y="146" font-family="var(--sans)" font-size="11" fill="#A8A196">来源设计: L929 CCK-8 细胞毒性评价 · 固化日期: 2026-11-09 · 状态: 正式生效</text>
+<rect x="72" y="182" width="812" height="30" rx="4" fill="#171614" stroke="#39352D" stroke-width="1"/>
+<rect x="72" y="182" width="4" height="30" rx="2" fill="#4FA38D"/>
+<text x="86" y="201" font-family="var(--sans)" font-size="11" fill="#F0EDE6">ℹ 本方案由实验设计 v1.2 固化生成。如需调整接种密度或孵育参数，请在“实验设计”中修改并发布新版本。</text>
+<rect x="72" y="224" width="812" height="356" rx="8" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
+<text x="88" y="250" font-family="var(--sans)" font-size="13" font-weight="700" fill="#F0EDE6">步骤 04: 96 孔微孔板接种铺板 (Step Execution)</text>
+<text x="88" y="274" font-family="var(--sans)" font-size="11" fill="#F0EDE6">1. 取预热好的 96 孔细胞培养板，标记实验组别及日期；</text>
+<text x="88" y="292" font-family="var(--sans)" font-size="11" fill="#F0EDE6">2. 使用 Eppendorf 8 道移液器，轻柔吹吸混匀细胞悬液；</text>
+<text x="88" y="310" font-family="var(--sans)" font-size="11" fill="#F0EDE6">3. 沿微孔侧壁每孔缓慢加入 100 µL 细胞悬液（接种密度为 10,000 cells/孔）；</text>
+<text x="88" y="328" font-family="var(--sans)" font-size="11" fill="#F0EDE6">4. 接种完成后盖上板盖，十字交叉晃动混匀，严禁剧烈摇晃以防边缘效应。</text>
+<text x="88" y="356" font-family="var(--sans)" font-size="12" font-weight="700" fill="#A8A196">质控与接受标准 (Quality Checks)</text>
+<rect x="88" y="364" width="780" height="28" rx="4" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
+<text x="98" y="382" font-family="var(--sans)" font-size="11" fill="#F0EDE6">[✓] 设计前置校验: 96 孔板已完整绑定细胞浓度与梯度对照组</text>
+<rect x="768" y="369" width="74" height="18" rx="3" fill="#171614" stroke="#39352D" stroke-width="1"/>
+<text x="805" y="381" font-family="var(--sans)" font-size="9" fill="#A8A196" text-anchor="middle">设计前置校验</text>
+<rect x="88" y="398" width="780" height="28" rx="4" fill="#201E1A" stroke="#39352D" stroke-width="1"/>
+<text x="98" y="416" font-family="var(--sans)" font-size="11" fill="#F0EDE6">[✓] 现场执行质控: 接种前镜检确认无细胞团块 (台盼蓝活率 ≥95%)</text>
+<rect x="768" y="403" width="74" height="18" rx="3" fill="#3D1B1A"/>
+<text x="805" y="415" font-family="var(--sans)" font-size="9" font-weight="700" fill="#D26B62" text-anchor="middle">阻断检查项</text>
 </svg>

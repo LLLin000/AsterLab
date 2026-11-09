@@ -1,5 +1,6 @@
 # AsterLab v1.2 — Native Implementation Contract & UI-Kit Specification
 
+- **Version**: 1.2.1 (Revised per Conditional Review)
 - **Target Framework**: MyGo Native Desktop (`github.com/egoist/mygo/ui`)
 - **Core Principle**: Component-Driven Native Architecture. **Strictly NO temporary per-page button piles or raw text dumps.**
 - **Scope**: Every recurring visual element across all 5 pages is mapped directly to a reusable UI-Kit primitive implemented on MyGo bases.
@@ -17,11 +18,12 @@
 | `StatusBadge` | `ui.Row().Radius(4).Padding(2, 8)` | Compact chip for `Success`, `Warning`, `Danger`, `Neutral`, `Raw`, `Derived`. | All |
 | `StepperChip` | `ui.ButtonBase`, `ui.Row` | Stepper chip displaying index, task title, completion `✓`, active focus. | Protocol, Run |
 | `Plate96Widget` | `ui.Box().Draw()`, `ui.HitTest` or Matrix | 8×12 SVG microplate with row A-H, col 1-12, group tints, box-select. | Designer, Tools, Run |
-| `WorkflowCanvas` | `ui.Box().Draw()`, `Painter.Transform`, `Draggable` | Directed graph nodes, bezier edges, pan/zoom coordinate mapping. | Designer |
+| `WorkflowNode` | `ui.Box().Draw()`, `ui.Draggable`, `Painter` | Scientific SVG hero icon, 3 visual types, ports, 4 interaction states. | Designer |
 | `ResultGrid` | `resultgrid.Grid`, `ui.ScrollBoth()`, `ui.Painter` | 96-well tabular entry, cell selection, arrow keys, TSV clipboard. | Run |
+| `InspectorTabs` | `ui.SegmentedBase`, `ui.Row` | 3-tab full-width switcher for 900×600 compact desktop in Designer. | Designer (900×600) |
 | `SectionCard` | `ui.Column().Radius(8).Border(1)` | Structural card with title, action slot, content padding 16px. | Project, Protocol, Tools |
 | `FormField` | `ui.Column().Gap(4)`, `ui.TextInputBase` | Field label, text/number input, unit addon, inline error text. | Designer, Tools |
-| `ConfirmDialog` | `ui.DialogBase`, `ui.Box().Background(Backdrop)` | Modal overlay, Escape to dismiss, title, body, destructive/action buttons. | Run (Paste overwrite), Project |
+| `PastePreviewDialog` | `ui.DialogBase`, `ui.Box().Background(Backdrop)` | Non-destructive paste modal showing row/col count and overwrite warning. | Run |
 | `EmptyState` | `ui.Column().Center().Padding(32)` | Clean illustration icon, title, description, single primary action. | All |
 | `ReviewBanner` | `ui.Row().Padding(8, 12).Radius(6)` | Sticky alert banner distinguishing Read-Only Review Mode from Active Run. | Run |
 
@@ -46,46 +48,49 @@ func Button(c *ui.Context, label string, variant ButtonVariant) *ui.Element
 - **States**: Resting, Hover (`SurfaceHover` or `AccentHover`), Pressed (scale 0.99), Focused (2px Accent ring), Disabled (opacity 0.42).
 - **Height**: 32px standard desktop (30px on 900×600 compact).
 
-### 2.2 `StatusBadge` Contract
-```go
-type BadgeKind string
-const (
-    BadgeSuccess BadgeKind = "success" // Green: ✓ 已完成, 已就绪
-    BadgeWarning BadgeKind = "warning" // Amber: ● 草稿未保存, 待确认
-    BadgeDanger  BadgeKind = "danger"  // Red: ⚠ 阻塞错误, 格式错误
-    BadgeNeutral BadgeKind = "neutral" // Gray: ○ 未开始, 历史归档
-    BadgeRaw     BadgeKind = "raw"     // Dark: 原始读数
-    BadgeDerived BadgeKind = "derived" // Teal: 计算派生
-)
-
-func StatusBadge(c *ui.Context, text string, kind BadgeKind)
-```
-- **Metrics**: Height 20px, horizontal padding 8px, font 11px bold, radius 4px.
-
-### 2.3 `StepperChip` Contract
-Used on Protocol and Run to display execution chronology without clumsy pagination.
+### 2.2 `WorkflowNode` Contract (Scientific SVG DAG Nodes)
+Nodes in Designer represent biological entities and procedures. They are topological graph tokens; all granular editing happens in the lower Inspector.
 
 ```go
-type StepperState string
+type NodeKind int
 const (
-    StepCompleted StepperState = "completed" // Accent or Success checkmark
-    StepActive    StepperState = "active"    // Solid Accent, white text
-    StepUpcoming  StepperState = "upcoming"  // Outline, muted text
-    StepReview    StepperState = "review"    // Eye icon, subtle blue tint
+    NodeMaterial NodeKind = iota   // Material: Cryovial / Flask illustration
+    NodeOperation                  // Operation: Pipette / Well Plate dispenser illustration
+    NodeInstrument                 // Instrument: Microplate reader / Spectrophotometer illustration
 )
 
-type StepperChipProps struct {
-    Index     int
-    Title     string
-    Timepoint string
-    State     StepperState
-    OnClick   func()
+type NodeState int
+const (
+    NodeStateDefault NodeState = iota // 1px Border, resting elevation
+    NodeStateSelected                 // 2px Accent border, soft glow, active ports
+    NodeStateDragging                 // Lifted (Scale 1.02, elevation shadow)
+    NodeStateConnecting               // Port target pulse
+)
+
+type WorkflowNodeProps struct {
+    ID          string
+    Kind        NodeKind
+    Title       string
+    ParamBadge  string   // Concise pill (e.g. "100 µL", "OD450")
+    State       NodeState
+    X, Y        float32
+    Width       float32  // Standard: 145px (120px compact)
+    Height      float32  // Standard: 64px
+    HasInput    bool     // False for Material
+    HasOutput   bool     // Always true
 }
 
-func StepperChip(c *ui.Context, props StepperChipProps)
+func WorkflowNodeWidget(p *ui.Painter, props WorkflowNodeProps)
 ```
+- **Rendering & Hero Icon**:
+  - The node features a **Hero SVG Illustration** drawn via `Painter.StrokePath` / `Painter.FillPath`:
+    - Material: Flask/vial path (`M9 3h6v2h-1v5l4 9H6l4-9V5H9z`).
+    - Operation: Pipette liquid transfer path (`M19 3l2 2-9 9-2-2 9-9z M6 16l-3 5 5-3z`).
+    - Instrument: Microplate optical chamber path (`M4 6h16v12H4z M9 10h6v4H9z`).
+  - Icon is the primary visual anchor (upper 36×36 area); title (12px bold) and parameter badge (10px muted) are secondary.
+  - Left input port (if `HasInput`) and right output port rendered as 6px circles with 1.5px stroke.
 
-### 2.4 `Plate96Widget` Contract (Custom 96-Well Plate)
+### 2.3 `Plate96Widget` Contract (8×12 Microplate Matrix)
 Replaces the 96 raw button pile with an authentic, scientifically accurate microplate.
 
 ```go
@@ -109,53 +114,60 @@ type Plate96Props struct {
 func Plate96Widget(c *ui.Context, props Plate96Props)
 ```
 - **Rendering**:
-  - Container aspect ratio 12 : 8.
-  - Column headers `1 .. 12`, Row headers `A .. H`.
-  - Well circles drawn with crisp 1px strokes.
-  - Assigned wells filled with group semantic tints (`WellControl`, `WellAssigned`, `WellBlank`).
-  - Selected wells filled with `Accent` (`#1F6F5F`) and white tick mark.
-  - Supports rectangular mouse-drag selection (`ui.Draggable` / `HitTest`).
+  - 8 rows (`A–H`) and 12 columns (`1–12`) with coordinates.
+  - Assigned wells tinted by semantic group:
+    - Control: `WellControl` (`#D9E8F5` Light / `#192E42` Dark).
+    - Treatment: `WellAssigned` (`#E1EFEA` Light / `#1B362F` Dark).
+    - Blank: `WellBlank` (`#EBEAE5` Light / `#2A2824` Dark).
+    - Selected: `Accent` (`#1F6F5F` Light / `#4FA38D` Dark) with tick mark.
+  - Rectangular box-drag selection handled smoothly via `ui.Draggable` and `HitTest`.
 
-### 2.5 `WorkflowCanvas` Contract
-Upper zone of Experiment Designer. Renders a clean DAG of operations.
-
-```go
-type WorkflowNodeProps struct {
-    ID        string
-    Kind      string // "material", "operation", "device"
-    Title     string
-    Subtitle  string
-    Selected  bool
-    X, Y      float32
-}
-
-func DrawWorkflowGraph(p *ui.Painter, nodes []WorkflowNodeProps, edges []WorkflowEdge, pan ui.Point, zoom float32)
-```
-- **Nodes**: Rounded rect 160×64px, 1px border, category icon, title in 13px bold, parameter subtitle in 11px muted.
-- **Edges**: Directed Bezier curves with smooth cubic control points and solid arrowheads.
-
-### 2.6 `ResultGrid` Contract
-High-density wet-lab measurement table.
+### 2.4 `ResultGrid` & Save Lifecycle Contract
+High-density wet-lab measurement table with honest transactional save semantics.
 
 ```go
+type SavePhase int
+const (
+    SavePhaseReady SavePhase = iota // Rest state, rev X confirmed
+    SavePhaseDraft                  // N uncommitted edits in UI, status = Warning
+    SavePhaseSubmitting             // Inputs locked, spinner active
+    SavePhaseSaved                  // Confirmed rev X+1 by Core
+    SavePhaseConflict               // Rebase / conflict banner
+)
+
 type ResultGridOptions struct {
     FullWidth bool
     ReadOnly  bool
+    Phase     SavePhase
+    Revision  uint64
+    DirtyCount int
 }
 
 func RenderResultGrid(c *ui.Context, g *resultgrid.Grid, opts ResultGridOptions)
 ```
-- **Row Height**: 28–32px.
-- **Columns**: Well, Sample ID, Group Tag, Replicate, Measured Value, Inline Status Tag.
-- **Clipboard**: `Cmd/Ctrl + C` copies tab-separated values (TSV); `Cmd/Ctrl + V` opens Paste Preview Modal.
-- **Numbers**: Strict `tabular-nums` alignment.
+- **Inviolable Rule**: Grid NEVER reports `✓ 已保存` or `已同步` while `DirtyCount > 0`.
+- **Paste TSV Action**: Opens `PastePreviewDialog` showing matrix dimensions and overwrite count before committing to draft cells.
+- **Batch Save Commit**: Locks inputs and dispatches atomic `SaveBatch` request with `expected_revision`.
 
-### 2.7 `ReviewBanner` Contract
+### 2.5 `InspectorTabs` Contract (900×600 Compact Desktop)
+```go
+type InspectorTab int
+const (
+    InspectorTabAttributes InspectorTab = iota // 步骤属性
+    InspectorTabPlate                          // 96 孔板分组映射 (当前)
+    InspectorTabContract                       // 检测合约与参数
+)
+
+func InspectorTabs(c *ui.Context, active *InspectorTab, onSelect func(InspectorTab))
+```
+- At 900×600, converts the 3 horizontal columns into a full-width segmented tab view so that the 96-well plate and form inputs never suffer horizontal squishing.
+
+### 2.6 `ReviewBanner` Contract
 ```go
 func ReviewBanner(c *ui.Context, taskTitle string, onUnlock func())
 ```
 - Displayed when viewing completed runs or historical steps.
-- Color: Subtle neutral/amber banner (`#FDF3E7` Light / `#2A2216` Dark).
+- Color: Warning amber banner (`#FDF3E7` Light / `#2A2216` Dark).
 - Copy: `👁 正在回看已完成步骤: [taskTitle] · 当前数据已锁定为只读。`
 - Action: "解锁并重新测定" (with explicit confirmation dialog).
 
@@ -169,14 +181,14 @@ When engineering implements v1.2, every module replaces legacy raw code with the
    - Replace raw vertical button stacks in `projectView()` with `SectionCard`, `Button(ButtonPrimary)`, and `StatusBadge`.
    - Embed `PrimaryRail` with proper SVG icons and tooltips.
 2. `internal/designer`:
-   - Replace comma-separated text inputs with structured `FormField` components.
+   - Replace rounded text-only boxes with `WorkflowNode` featuring hero SVG `<path>` illustrations and ports.
+   - Implement `InspectorTabs` for 900×600 compact desktop.
    - Replace the 96 raw button matrix with `Plate96Widget`.
-   - Localize all status messages (`idle` -> `● 就绪`).
 3. `internal/protocol`:
    - Replace developer apologies with the professional `ReviewBanner` and `SectionCard`.
    - Implement `StepperChip` sequence.
 4. `internal/runui` & `internal/resultgrid`:
-   - Maintain 50/50 split; embed `ReviewBanner` for completed tasks.
-   - Localize paste dialog and batch save actions.
+   - Enforce honest save lifecycle (paste preview -> draft -> submitting -> saved rev X).
+   - Implement single-column tabbed mode for 900×600 compact desktop.
 5. `internal/tools`:
-   - Connect dilution calculator outputs directly to `Designer` via structured callback payloads.
+   - Dilution calculator performs pure math derivations without speculative protocol guessing.
