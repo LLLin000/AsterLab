@@ -6,3 +6,5 @@
 /release/
 
 /native/asterlab-run/target
+
+/prototypes/mygo-run/*.exe
