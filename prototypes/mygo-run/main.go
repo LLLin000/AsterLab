@@ -224,15 +224,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	snap, err := svc.LoadRun(context.Background(), "run-1")
-	if err != nil {
-		log.Fatal(err)
+	runID := os.Getenv("ASTERLAB_RUN_ID")
+	if runID == "" {
+		runID = "1c0c8989-0513-483a-851b-bdc7d6c67483"
 	}
-	a := &app{page: &page, step: &step, samples: []sample{{"Control-1", ""}, {"E1-1", ""}}, svc: svc, snap: snap}
-	if os.Getenv("ASTERLAB_MYGO_RUNS") == "" {
-		_ = os.Setenv("ASTERLAB_MYGO_RUNS", "runs.json")
-	}
+	a := &app{page: &page, step: &step, samples: []sample{{"Control-1", ""}, {"E1-1", ""}}, svc: svc, snap: runs.RunSnapshot{Title: "L929 生物相容性", Status: "加载中"}}
 	mygo.App.WhenReady(func() {
+		go func() {
+			if snap, err := svc.LoadRun(context.Background(), runID); err == nil {
+				a.snap = snap
+			}
+		}()
 		mygo.NewWindow(mygo.WindowOptions{
 			Title: "AsterLab MyGo Prototype", Width: 1200, Height: 760,
 			TitleBarStyle: mygo.TitleBarHidden,
