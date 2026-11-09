@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -81,20 +82,24 @@ type Designer struct {
 
 	InspectorTab       int
 	InspectorCollapsed bool
+	CanvasHeight       float32
 	InspectorHeight    float32
+	CmdPaletteOpen     bool
+	CmdQuery           string
 	opSeq              uint64
 }
 
 func New(designID, title string, revision uint64, svc runs.DesignService) *Designer {
 	d := &Designer{
-		DesignID:   designID,
-		Title:      title,
-		Revision:   revision,
-		Editor:     workflow.NewEditor(),
-		Instances:  map[string][]blocks.Instance{},
-		Assays:     map[string]assays.Design{},
-		StepAssays: map[string]string{},
-		Service:    svc,
+		DesignID:     designID,
+		Title:        title,
+		Revision:     revision,
+		Editor:       workflow.NewEditor(),
+		Instances:    map[string][]blocks.Instance{},
+		Assays:       map[string]assays.Design{},
+		StepAssays:   map[string]string{},
+		Service:      svc,
+		CanvasHeight: 380,
 	}
 	d.Editor.OnSelect = func(id string) {
 		d.SelectedNode = id
@@ -104,10 +109,16 @@ func New(designID, title string, revision uint64, svc runs.DesignService) *Desig
 	}
 	d.Editor.OnChange = func() {
 		d.Empty = len(d.Editor.Doc.Nodes) == 0
+		if d.SelectedNode == "" && len(d.Editor.Doc.Nodes) > 0 {
+			d.SelectedNode = d.Editor.Doc.Nodes[len(d.Editor.Doc.Nodes)-1].ID
+			d.StepAssays[d.SelectedNode] = "cck8"
+			d.loadAssayDraft(d.SelectedNode)
+		}
 		d.Touch()
 	}
-	d.SelectedNode = "n5"
-	d.SelectedWells = []string{"A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"}
+	d.Editor.OnCommandPalette = func() {
+		d.CmdPaletteOpen = !d.CmdPaletteOpen
+	}
 	return d
 }
 
@@ -200,14 +211,16 @@ func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 			}
 		}
 	}
-	if len(d.Editor.Doc.Nodes) == 0 && (strings.Contains(d.Title, "CCK") || strings.Contains(d.Title, "L929")) {
-		d.Editor.Doc.SeedStandardCCK8()
-		d.SelectedNode = "n5"
-		d.SelectedWells = []string{"A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"}
-		d.Empty = false
+	d.Empty = len(d.Editor.Doc.Nodes) == 0
+	if len(d.Editor.Doc.Nodes) > 0 {
+		d.SelectedNode = d.Editor.Doc.Nodes[0].ID
+		d.Editor.SelectedNode = d.SelectedNode
+		d.loadAssayDraft(d.SelectedNode)
 	} else {
-		d.Empty = len(d.Editor.Doc.Nodes) == 0
+		d.SelectedNode = ""
+		d.Editor.SelectedNode = ""
 	}
+	d.SelectedWells = nil
 	d.Editor.UndoStack, d.Editor.RedoStack = nil, nil
 	d.Dirty = false
 	d.SaveState = SaveIdle
@@ -417,74 +430,86 @@ func (d *Designer) setComponentRefs(nodeID, value string) {
 // View renders the workflow and its structured inspector in one shared light/dark layout.
 func View(c *ui.Context, d *Designer) {
 	t := c.Theme()
-	width, height := c.Size()
+	width, _ := c.Size()
 	narrow := width > 0 && width <= 1000
+
+	c.OnShortcut(ui.Cmd, ui.KeyK, func() {
+		d.CmdPaletteOpen = !d.CmdPaletteOpen
+	})
+	c.OnShortcut(ui.Cmd, ui.KeyS, func() {
+		d.Save(context.Background())
+	})
+
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		ui.Row(c).Grow(1).Children(func() {
 			if d.Left != nil && !narrow {
 				ui.Column(c).Width(188).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() { d.Left(c) })
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
-				inspectorHeight := float32(320)
-				if narrow {
-					inspectorHeight = 280
-				}
-				if d.InspectorHeight == 0 {
-					d.InspectorHeight = inspectorHeight
-				}
-				inspectorHeight = d.InspectorHeight
-				canvasHeight := height - 36 - inspectorHeight
-				if canvasHeight < 180 {
-					canvasHeight = 180
-					inspectorHeight = height - 216
-				}
-				if narrow && canvasHeight > 260 {
-					canvasHeight = 260
+				if d.CanvasHeight <= 0 {
+					d.CanvasHeight = 380
 				}
 				if d.InspectorCollapsed {
-					canvasHeight = height - 36
-					inspectorHeight = 0
-				}
-				ui.Box(c).Height(canvasHeight).Fill().Children(func() {
-					if d.Editor != nil {
-						d.Editor.View(c)
-					}
-				})
-				if !d.InspectorCollapsed {
-					ui.Divider(c)
-					ui.Box(c).Height(inspectorHeight).Fill().Padding(8).Children(func() { inspector(c, d, t, narrow) })
+					ui.Box(c).Grow(1).Fill().Children(func() {
+						if d.Editor != nil {
+							d.Editor.View(c)
+						}
+					})
+				} else {
+					ui.SplitVertical(c, &d.CanvasHeight, func() {
+						if d.Editor != nil {
+							d.Editor.View(c)
+						}
+					}, func() {
+						inspector(c, d, t, narrow)
+					}).SplitReset(380).Fill()
 				}
 			})
 			if d.Right != nil && !narrow {
 				ui.Column(c).Width(220).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() { d.Right(c) })
 			}
 		})
-		ui.Row(c).Height(36).Padding(0, 12).Gap(8).AlignItems(ui.Center).Background(t.Surface).Children(func() {
+		ui.Row(c).Height(34).Padding(0, 14).Gap(10).AlignItems(ui.Center).Background(ui.Hex("#111317")).Border(1, ui.Hex("#1E222B")).Children(func() {
 			if d.Dirty {
-				ui.Text(c, "● 草稿未保存").FontSize(12).TextColor(t.Warning)
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(6, 6).Radius(3).Background(ui.Hex("#F59E0B"))
+					ui.Text(c, fmt.Sprintf("● 草稿未保存 (rev %d)", d.Revision)).FontSize(11.5).TextColor(ui.Hex("#F59E0B"))
+				})
+			} else if d.SaveState == SaveSaving {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(6, 6).Radius(3).Background(ui.Hex("#60A5FA"))
+					ui.Text(c, "⟳ 正在同步写入 SQLite…").FontSize(11.5).TextColor(ui.Hex("#60A5FA"))
+				})
 			} else if d.SaveState == SaveSaved {
-				ui.Text(c, fmt.Sprintf("✓ 已保存 · rev %d", d.Revision)).FontSize(12).TextColor(t.Success)
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(6, 6).Radius(3).Background(ui.Hex("#34D399"))
+					ui.Text(c, fmt.Sprintf("✓ 已保存 · rev %d · SQLite", d.Revision)).FontSize(11.5).TextColor(ui.Hex("#34D399"))
+				})
 			} else {
-				ui.Text(c, fmt.Sprintf("就绪 · rev %d", d.Revision)).FontSize(12).TextColor(t.TextMuted)
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(6, 6).Radius(3).Background(ui.Hex("#5A606F"))
+					ui.Text(c, fmt.Sprintf("就绪 · rev %d · SQLite", d.Revision)).FontSize(11.5).TextColor(ui.Hex("#9DA3AF"))
+				})
 			}
 			ui.Spacer(c)
 			if d.Loading {
-				ui.Text(c, "加载中…").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "加载中…").FontSize(11.5).TextColor(t.TextMuted)
 			}
 			if d.Error != "" {
-				ui.Text(c, d.Error).FontSize(12).TextColor(t.Danger)
+				ui.Text(c, d.Error).FontSize(11.5).TextColor(t.Danger)
 			}
-			if ui.Button(c, "保存设计").Clicked() {
+			if ui.Button(c, "保存设计 (Cmd+S)").Radius(5).Clicked() {
 				d.Save(context.Background())
 			}
-			if ui.Button(c, "▶ 创建运行").Clicked() {
+			if ui.Button(c, "▶ 创建运行").Radius(5).Clicked() {
 				d.CreateRun(context.Background())
 			}
-			if ui.Button(c, map[bool]string{true: "展开检查器", false: "收起检查器"}[d.InspectorCollapsed]).Clicked() {
+			if ui.Button(c, map[bool]string{true: "展开检查器", false: "收起检查器"}[d.InspectorCollapsed]).Radius(5).Clicked() {
 				d.InspectorCollapsed = !d.InspectorCollapsed
 			}
 		})
 	})
+	renderCommandPalette(c, d)
 }
 
 func inspector(c *ui.Context, d *Designer, t *ui.Theme, compact bool) {
@@ -513,19 +538,17 @@ func inspector(c *ui.Context, d *Designer, t *ui.Theme, compact bool) {
 			}
 		}
 
+		plateBadge := fmt.Sprintf("%d 孔已分配", len(d.Assays[d.AssayIDDraft].Wells))
 		tabBtn("步骤属性与仪器参数", 0, "")
-		tabBtn("96 孔板分组映射 (Visual Plate Mapping)", 1, "80 孔已分配")
+		tabBtn("96 孔板分组映射 (Visual Plate Mapping)", 1, plateBadge)
 		tabBtn("科学合约与终点校验", 2, "")
 
 		ui.Spacer(c)
-		ui.Text(c, "节点 #05 · Multiskan SkyHigh").FontSize(10.5).TextColor(ui.Hex("#5A606F"))
-		if ui.Button(c, "⤢ 展开检查器").Radius(4).Clicked() {
-			if d.InspectorHeight < 400 {
-				d.InspectorHeight = 440
-			} else {
-				d.InspectorHeight = 320
-			}
+		nodeLabel := "未选择节点"
+		if d.SelectedNode != "" {
+			nodeLabel = fmt.Sprintf("节点 %s · %s", d.SelectedNode, d.nodeTitle(d.SelectedNode))
 		}
+		ui.Text(c, nodeLabel).FontSize(10.5).TextColor(ui.Hex("#5A606F"))
 	})
 
 	if !compact {
@@ -602,19 +625,27 @@ func renderCol1Props(c *ui.Context, d *Designer, t *ui.Theme) {
 }
 
 func renderCol2Plate(c *ui.Context, d *Designer, t *ui.Theme) {
+	assignedCount := len(d.Assays[d.AssayIDDraft].Wells)
 	ui.Column(c).Grow(1).FillHeight().Background(ui.Hex("#111317")).Border(1, ui.Hex("#1E222B")).Padding(6, 12).Gap(4).AlignItems(ui.Center).Children(func() {
 		ui.Row(c).Fill().AlignItems(ui.Center).Children(func() {
 			ui.Column(c).Gap(1).Children(func() {
-				ui.Text(c, "96 孔板布局映射 (L929 CCK-8 Plate #1)").FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
-				ui.Text(c, "8 排 × 12 列 · 80 铺板孔 · 16 边缘孔").FontSize(9.5).TextColor(ui.Hex("#7E8494"))
+				ui.Text(c, "96 孔板布局映射").FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
+				ui.Text(c, fmt.Sprintf("8 排 × 12 列 · %d 孔已分配真实样本", assignedCount)).FontSize(9.5).TextColor(ui.Hex("#7E8494"))
 			})
 			ui.Spacer(c)
-			if ui.Button(c, "快速载入梯度模板").Radius(4).Clicked() {
-				d.SelectedWells = []string{"A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"}
-				d.Touch()
+			if ui.Button(c, "载入 80 孔标准梯度模板").Radius(4).Clicked() {
+				d.LoadStandardPlateTemplate()
 			}
-			if ui.Button(c, "清除选中").Radius(4).Clicked() {
+			if ui.Button(c, "清除已选").Radius(4).Clicked() {
 				d.SelectedWells = nil
+			}
+			if assignedCount > 0 && ui.Button(c, "清空孔板").Radius(4).Clicked() {
+				p := d.Assays[d.AssayIDDraft]
+				p.Wells = nil
+				d.Assays[d.AssayIDDraft] = p
+				d.SelectedWells = nil
+				d.loadAssayDraft(d.SelectedNode)
+				d.Touch()
 			}
 		})
 
@@ -633,22 +664,29 @@ func renderCol2Plate(c *ui.Context, d *Designer, t *ui.Theme) {
 					ui.Text(c, string(rowChar)).Width(16).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
 					for col := range 12 {
 						wellID := fmt.Sprintf("%c%d", rowChar, col+1)
-						colIdx := col + 1
-						wellColor, isEdge := wellPlateColor(rowChar, colIdx)
+						assigned := d.wellAssigned(wellID)
+						group := d.wellGroup(wellID)
 						selected := containsString(d.SelectedWells, wellID)
+
+						wellColor := ui.Hex("#14171E")
+						if assigned {
+							wellColor = getScientificGroupColor(group)
+						}
+
 						wellBox := ui.Box(c).Size(18, 18).Draw(func(p *ui.Painter, rect ui.Rect) {
 							p.Fill(rect, wellColor, 9)
 							if selected {
 								p.Stroke(rect, ui.Hex("#FFFFFF"), 9, 1.5)
 								p.Stroke(ui.Rect{X: rect.X - 1, Y: rect.Y - 1, W: rect.W + 2, H: rect.H + 2}, ui.Hex("#4B88FF"), 10, 1.5)
-							} else if isEdge {
-								p.Stroke(rect, ui.Hex("#262D3A"), 9, 1)
+							} else if assigned {
+								p.Stroke(rect, ui.Hex("#2A313D"), 9, 1)
 							} else {
 								p.Stroke(rect, ui.Hex("#1E222B"), 9, 0.5)
 							}
 						}).OnClick(func() {
 							d.toggleWell(wellID)
 						}).Key(wellID)
+
 						if wellBox.Hovered() {
 							d.HoveredWell = wellID
 						}
@@ -664,94 +702,240 @@ func renderCol2Plate(c *ui.Context, d *Designer, t *ui.Theme) {
 					ui.Text(c, label).FontSize(9).TextColor(ui.Hex("#9DA3AF"))
 				})
 			}
-			renderChip("空白 Blank (Col 1)", ui.Hex("#64748B"))
-			renderChip("对照 NC (Col 2)", ui.Hex("#2DD4BF"))
-			renderChip("C1 6.25 µg/mL", ui.Hex("#3B82F6"))
-			renderChip("C2 12.5 µg/mL", ui.Hex("#6366F1"))
-			renderChip("C3 25.0 µg/mL", ui.Hex("#8B5CF6"))
-			renderChip("C4 50.0 µg/mL", ui.Hex("#A855F7"))
-			renderChip("C5 100 µg/mL", ui.Hex("#C084FC"))
-			renderChip("阳性 PC (Col 12)", ui.Hex("#F43F5E"))
+			groupsMap := make(map[string]int)
+			for _, w := range d.Assays[d.AssayIDDraft].Wells {
+				groupsMap[w.GroupID]++
+			}
+			if len(groupsMap) == 0 {
+				ui.Text(c, "未分配孔位（点击孔板孔位并在右侧分配）").FontSize(9).TextColor(ui.Hex("#5A606F"))
+			} else {
+				var sortedGroups []string
+				for g := range groupsMap {
+					sortedGroups = append(sortedGroups, g)
+				}
+				sort.Strings(sortedGroups)
+				for _, g := range sortedGroups {
+					renderChip(fmt.Sprintf("%s (%d孔)", g, groupsMap[g]), getScientificGroupColor(g))
+				}
+			}
 		})
 	})
 }
 
 func renderCol3GroupCalc(c *ui.Context, d *Designer, t *ui.Theme) {
+	wellCount := len(d.SelectedWells)
+
 	ui.Column(c).Width(290).FillHeight().Background(ui.Hex("#111317")).Border(1, ui.Hex("#1E222B")).Padding(8, 12).Gap(6).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "孔位选择与绑定").FontSize(11).Bold().TextColor(ui.Hex("#7E8494"))
 			ui.Spacer(c)
-			wellCount := len(d.SelectedWells)
 			if wellCount == 0 {
-				wellCount = 8
+				ui.Text(c, "未选择孔位").FontSize(9.5).TextColor(ui.Hex("#5A606F"))
+			} else {
+				ui.Text(c, fmt.Sprintf("已选 %d 孔", wellCount)).FontSize(9.5).Bold().TextColor(ui.Hex("#4B88FF"))
 			}
-			ui.Text(c, fmt.Sprintf("已选 %d 孔", wellCount)).FontSize(9.5).Bold().TextColor(ui.Hex("#4B88FF"))
 		})
 
-		ui.Column(c).Radius(6).Background(ui.Hex("#16191F")).Border(1, ui.Hex("#262D3A")).Padding(8, 10).Gap(4).Children(func() {
-			ui.Row(c).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "梯度组 C1 · 6.25 µg/mL").FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
-				ui.Spacer(c)
-				ui.Text(c, "A3 - H3").FontSize(10).TextColor(ui.Hex("#5A606F"))
+		if wellCount == 0 {
+			ui.Column(c).Radius(6).Background(ui.Hex("#16191F")).Border(1, ui.Hex("#262D3A")).Padding(12).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "未选中孔位").FontSize(12).Bold().TextColor(ui.Hex("#7E8494"))
+				ui.Text(c, "在左侧孔板点击单个或多个孔位，或点击上方载入模板").FontSize(10.5).TextColor(ui.Hex("#5A606F"))
 			})
-			ui.Text(c, "受试样本: ZnO-NP 浸提原液稀释 1:16 · 4 复孔重复").FontSize(10).TextColor(ui.Hex("#7E8494"))
+		} else {
+			coordsStr := strings.Join(d.SelectedWells, ", ")
+			if len(coordsStr) > 28 {
+				coordsStr = fmt.Sprintf("%s 等 %d 孔", d.SelectedWells[0], wellCount)
+			}
+			ui.Column(c).Radius(6).Background(ui.Hex("#16191F")).Border(1, ui.Hex("#262D3A")).Padding(8, 10).Gap(4).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Children(func() {
+					grp := d.GroupIDDraft
+					if grp == "" {
+						grp = "待分配组"
+					}
+					ui.Text(c, grp).FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
+					ui.Spacer(c)
+					ui.Text(c, coordsStr).FontSize(10).TextColor(ui.Hex("#5A606F"))
+				})
+				ui.Text(c, "基于真实孔数的试剂与实验单位用量计算：").FontSize(9.5).TextColor(ui.Hex("#7E8494"))
 
-			ui.Row(c).Gap(6).Children(func() {
-				statBox := func(k, v string) {
-					ui.Column(c).Grow(1).Radius(4).Background(ui.Hex("#0B0C0E")).Border(1, ui.Hex("#1E222B")).Padding(4, 6).Children(func() {
-						ui.Text(c, k).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
-						ui.Text(c, v).FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
-					})
+				reagentVol := float64(wellCount) * 10.0
+				totalVol := float64(wellCount) * 110.0
+				cells := wellCount * 5000
+
+				ui.Row(c).Gap(6).Children(func() {
+					statBox := func(k, v string) {
+						ui.Column(c).Grow(1).Radius(4).Background(ui.Hex("#0B0C0E")).Border(1, ui.Hex("#1E222B")).Padding(4, 6).Children(func() {
+							ui.Text(c, k).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
+							ui.Text(c, v).FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
+						})
+					}
+					statBox("试剂消耗量", fmt.Sprintf("%.1f µL", reagentVol))
+					statBox("总培养体系", fmt.Sprintf("%.1f µL", totalVol))
+				})
+				ui.Row(c).Gap(6).Children(func() {
+					statBox := func(k, v string) {
+						ui.Column(c).Grow(1).Radius(4).Background(ui.Hex("#0B0C0E")).Border(1, ui.Hex("#1E222B")).Padding(4, 6).Children(func() {
+							ui.Text(c, k).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
+							ui.Text(c, v).FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
+						})
+					}
+					statBox("接种细胞总数", fmt.Sprintf("%d cells", cells))
+					statBox("预期端点", "OD450")
+				})
+			})
+
+			if d.GroupIDDraft == "" {
+				d.GroupIDDraft = "C1"
+			}
+			if d.SampleIDDraft == "" {
+				d.SampleIDDraft = "Sample-01"
+			}
+			if d.WellTimepointDraft == "" {
+				d.WellTimepointDraft = "24 h"
+			}
+
+			ui.Text(c, "实验组别 (group_id)").FontSize(10).TextColor(ui.Hex("#9DA3AF"))
+			components.Field(c, "", &d.GroupIDDraft, "例如 C1 / 对照组")
+
+			ui.Text(c, "样本标识 (sample_id)").FontSize(10).TextColor(ui.Hex("#9DA3AF"))
+			components.Field(c, "", &d.SampleIDDraft, "例如 Sample-01")
+
+			if ui.PrimaryButton(c, fmt.Sprintf("应用绑定到已选 %d 孔", wellCount)).Radius(5).Clicked() {
+				if err := d.AssignSelectedWells(); err != nil {
+					d.Error = err.Error()
+				} else {
+					d.Error = ""
 				}
-				statBox("CCK-8 试剂消耗", "80.0 µL")
-				statBox("总体系体积", "880.0 µL")
-			})
-			ui.Row(c).Gap(6).Children(func() {
-				statBox := func(k, v string) {
-					ui.Column(c).Grow(1).Radius(4).Background(ui.Hex("#0B0C0E")).Border(1, ui.Hex("#1E222B")).Padding(4, 6).Children(func() {
-						ui.Text(c, k).FontSize(8.5).TextColor(ui.Hex("#5A606F"))
-						ui.Text(c, v).FontSize(11.5).Bold().TextColor(ui.Hex("#F0F2F5"))
-					})
-				}
-				statBox("接种细胞总数", "40,000 cells")
-				statBox("预期读数端点", "OD450 (AU)")
-			})
-		})
-
-		groupBinding := "梯度 C1 (6.25 µg/mL · 4 复孔)"
-		ui.Text(c, "分配至实验分组  group_binding").FontSize(10).TextColor(ui.Hex("#9DA3AF"))
-		components.Field(c, "", &groupBinding, "")
-
-		if ui.Button(c, "快速应用至 4 复孔").Radius(5).Clicked() {
-			d.Touch()
-		}
-		if ui.Button(c, "载入梯度稀释预设 (1:2 梯度)").Radius(5).Clicked() {
-			d.Touch()
+			}
 		}
 	})
 }
 
-func wellPlateColor(r rune, col int) (ui.Color, bool) {
-	switch col {
-	case 1:
-		return ui.Hex("#334155"), false
-	case 2:
-		return ui.Hex("#134E4A"), false
-	case 3, 4:
-		return ui.Hex("#1E40AF"), false
-	case 5, 6:
-		return ui.Hex("#3730A3"), false
-	case 7, 8:
-		return ui.Hex("#5B21B6"), false
-	case 9, 10:
-		return ui.Hex("#701A75"), false
-	case 11:
-		return ui.Hex("#581C87"), false
-	case 12:
-		return ui.Hex("#881337"), false
-	default:
-		return ui.Hex("#14171E"), true
+func (d *Designer) LoadStandardPlateTemplate() {
+	if d.AssayIDDraft == "" {
+		d.AssayIDDraft = "cck8"
 	}
+	if d.SelectedNode != "" {
+		d.StepAssays[d.SelectedNode] = d.AssayIDDraft
+	}
+	p := d.Assays[d.AssayIDDraft]
+	var assignments []assays.WellAssignment
+	for r := range 8 {
+		rowChar := rune('A' + r)
+		assignments = append(assignments, assays.WellAssignment{WellID: fmt.Sprintf("%c1", rowChar), SampleID: "Blank", GroupID: "Blank", Replicate: r + 1, Timepoint: "24 h"})
+		assignments = append(assignments, assays.WellAssignment{WellID: fmt.Sprintf("%c2", rowChar), SampleID: "NC", GroupID: "NC", Replicate: r + 1, Timepoint: "24 h"})
+		for col := 3; col <= 4; col++ {
+			assignments = append(assignments, assays.WellAssignment{WellID: fmt.Sprintf("%c%d", rowChar, col), SampleID: "Sample-C1", GroupID: "C1", Replicate: (col-3)*8 + r + 1, Timepoint: "24 h"})
+		}
+		for col := 5; col <= 6; col++ {
+			assignments = append(assignments, assays.WellAssignment{WellID: fmt.Sprintf("%c%d", rowChar, col), SampleID: "Sample-C2", GroupID: "C2", Replicate: (col-5)*8 + r + 1, Timepoint: "24 h"})
+		}
+		for col := 7; col <= 8; col++ {
+			assignments = append(assignments, assays.WellAssignment{WellID: fmt.Sprintf("%c%d", rowChar, col), SampleID: "Sample-C3", GroupID: "C3", Replicate: (col-7)*8 + r + 1, Timepoint: "24 h"})
+		}
+		for col := 9; col <= 10; col++ {
+			assignments = append(assignments, assays.WellAssignment{WellID: fmt.Sprintf("%c%d", rowChar, col), SampleID: "Sample-C4", GroupID: "C4", Replicate: (col-9)*8 + r + 1, Timepoint: "24 h"})
+		}
+		assignments = append(assignments, assays.WellAssignment{WellID: fmt.Sprintf("%c11", rowChar), SampleID: "Sample-C5", GroupID: "C5", Replicate: r + 1, Timepoint: "24 h"})
+		assignments = append(assignments, assays.WellAssignment{WellID: fmt.Sprintf("%c12", rowChar), SampleID: "PC", GroupID: "PC", Replicate: r + 1, Timepoint: "24 h"})
+	}
+	p.Wells = assignments
+	d.Assays[d.AssayIDDraft] = p
+	d.SelectedWells = []string{"A3", "B3", "C3", "D3", "E3", "F3", "G3", "H3"}
+	d.loadAssayDraft(d.SelectedNode)
+	d.Touch()
+}
+
+func getScientificGroupColor(group string) ui.Color {
+	g := strings.ToLower(strings.TrimSpace(group))
+	switch {
+	case strings.Contains(g, "blank") || strings.Contains(g, "空白"):
+		return ui.Hex("#334155")
+	case strings.Contains(g, "nc") || strings.Contains(g, "对照") || strings.Contains(g, "control"):
+		return ui.Hex("#134E4A")
+	case strings.Contains(g, "pc") || strings.Contains(g, "阳性") || strings.Contains(g, "positive"):
+		return ui.Hex("#881337")
+	case strings.EqualFold(g, "c1"):
+		return ui.Hex("#1E40AF")
+	case strings.EqualFold(g, "c2"):
+		return ui.Hex("#3730A3")
+	case strings.EqualFold(g, "c3"):
+		return ui.Hex("#5B21B6")
+	case strings.EqualFold(g, "c4"):
+		return ui.Hex("#701A75")
+	case strings.EqualFold(g, "c5"):
+		return ui.Hex("#581C87")
+	default:
+		return wellGroupTint(group, true)
+	}
+}
+
+func renderCommandPalette(c *ui.Context, d *Designer) {
+	if !d.CmdPaletteOpen {
+		return
+	}
+	ui.Modal(c, &d.CmdPaletteOpen, func() {
+		ui.Column(c).Width(520).Radius(10).Background(ui.Hex("#16191F")).Border(1, ui.Hex("#2A313D")).Padding(14).Gap(10).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+				ui.Row(c).Padding(2, 6).Radius(4).Background(ui.Hex("#182236")).Children(func() {
+					ui.Text(c, "⌘K").FontSize(11).Bold().TextColor(ui.Hex("#4B88FF"))
+				})
+				ui.TextInput(c, &d.CmdQuery).AutoFocus().Placeholder("搜索操作、步骤或模板… (Esc 关闭)").Grow(1)
+			})
+			ui.Divider(c)
+			ui.Scroll(c).MaxHeight(260).Children(func() {
+				cmdItem := func(title, desc string, act func()) {
+					if d.CmdQuery != "" && !strings.Contains(strings.ToLower(title), strings.ToLower(d.CmdQuery)) && !strings.Contains(strings.ToLower(desc), strings.ToLower(d.CmdQuery)) {
+						return
+					}
+					row := ui.Row(c.Key(title)).Padding(8, 10).Radius(6).AlignItems(ui.Center).Children(func() {
+						ui.Column(c).Grow(1).Gap(2).Children(func() {
+							ui.Text(c, title).FontSize(12).Bold().TextColor(ui.Hex("#F0F2F5"))
+							ui.Text(c, desc).FontSize(10).TextColor(ui.Hex("#7E8494"))
+						})
+					})
+					if row.Clicked() {
+						act()
+						d.CmdPaletteOpen = false
+						d.CmdQuery = ""
+					}
+				}
+
+				cmdItem("载入标准 CCK-8 流程模板", "初始化 5 节点科学实验设计流程（细胞悬液准备到吸光度读板）", func() {
+					d.Editor.Doc.SeedStandardCCK8()
+					d.SelectedNode = "n5"
+					d.Editor.SelectNode("n5")
+					d.StepAssays["n5"] = "cck8"
+					d.loadAssayDraft("n5")
+					d.Touch()
+				})
+				cmdItem("载入 80 孔标准梯度模板", "为当前设计分配 Blank / NC / C1~C5 / PC 80 孔布局", func() {
+					d.LoadStandardPlateTemplate()
+				})
+				cmdItem("添加材料节点 (细胞悬液)", "在画布中追加一个细胞/原材料步骤节点", func() {
+					d.Editor.AddNode(workflow.KindFlask, "细胞悬液", workflow.Position{X: 60 + float32(len(d.Editor.Doc.Nodes)*220), Y: 70})
+				})
+				cmdItem("添加操作步骤 (加样 / 孵育)", "在画布中追加一个加样或反应处理操作步骤", func() {
+					d.Editor.AddNode(workflow.KindPipette, "加样操作", workflow.Position{X: 60 + float32(len(d.Editor.Doc.Nodes)*220), Y: 70})
+				})
+				cmdItem("添加分析仪器 (酶标仪读板)", "在画布中追加一个读板或检测采集节点", func() {
+					d.Editor.AddNode(workflow.KindPlate, "酶标仪读板", workflow.Position{X: 60 + float32(len(d.Editor.Doc.Nodes)*220), Y: 70})
+				})
+				cmdItem("水平对齐所有节点", "将所有工作流节点按 220px 间距排列在 Y=70 轴线", func() {
+					for i := range d.Editor.Doc.Nodes {
+						d.Editor.Doc.Nodes[i].Pos = workflow.Position{X: 60 + float32(i*220), Y: 70}
+					}
+					d.Editor.PanX, d.Editor.PanY, d.Editor.Zoom = 0, 0, 1
+				})
+				cmdItem("保存当前设计 (Cmd+S)", "执行确定性保存，将工作流结构与孔位映射写入 SQLite", func() {
+					d.Save(context.Background())
+				})
+				cmdItem("创建实验运行 (Run)", "冻结当前实验设计版本并创建可追溯执行批次", func() {
+					d.CreateRun(context.Background())
+				})
+			})
+		})
+	})
 }
 
 func stepInspector(c *ui.Context, d *Designer) {

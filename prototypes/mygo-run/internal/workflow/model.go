@@ -151,6 +151,7 @@ type Editor struct {
 	OnSelect      func(nodeID string)
 	OnEnterNested func(nodeID string)
 	OnChange      func()
+	OnCommandPalette func()
 }
 
 func NewEditor() *Editor {
