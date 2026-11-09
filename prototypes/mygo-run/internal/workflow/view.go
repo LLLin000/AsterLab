@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -24,7 +25,6 @@ func iconPath(k NodeKind) *ui.Path {
 func (e *Editor) View(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		// toolbar
 		ui.Row(c).Padding(8).Gap(6).Children(func() {
 			if ui.Button(c, "Add Flask").Clicked() {
 				e.AddNode(KindFlask, "Flask", Position{X: 80 + float32(len(e.Doc.Nodes)*20), Y: 80})
@@ -53,64 +53,70 @@ func (e *Editor) View(c *ui.Context) {
 					e.ConnectFrom = ""
 				}
 			}
+			if ui.Button(c, "−").Clicked() && e.Zoom > .5 {
+				e.Zoom -= .1
+			}
+			if ui.Button(c, "+").Clicked() && e.Zoom < 2 {
+				e.Zoom += .1
+			}
+			if ui.Button(c, "Pan ←").Clicked() {
+				e.PanX += 32
+			}
+			if ui.Button(c, "Pan →").Clicked() {
+				e.PanX -= 32
+			}
+			if ui.Button(c, "Pan ↑").Clicked() {
+				e.PanY += 32
+			}
+			if ui.Button(c, "Pan ↓").Clicked() {
+				e.PanY -= 32
+			}
+			ui.Text(c, fmt.Sprintf("%.0f%%", e.zoomOr1()*100)).FontSize(11).TextColor(t.TextMuted)
 		})
 		ui.Divider(c)
-		// canvas
 		ui.Box(c).Grow(1).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
-			// grid-ish background
 			p.Fill(r, t.Surface, 0)
-			// edges
-			for _, ed := range e.Doc.Edges {
-				fn := e.Doc.findNodePtr(ed.From)
-				tn := e.Doc.findNodePtr(ed.To)
-				if fn == nil || tn == nil {
+			for _, edge := range e.Doc.Edges {
+				from, to := e.Doc.findNodePtr(edge.From), e.Doc.findNodePtr(edge.To)
+				if from == nil || to == nil {
 					continue
 				}
-				x0 := r.X + (fn.Pos.X+e.PanX)*e.zoomOr1()
-				y0 := r.Y + (fn.Pos.Y+e.PanY)*e.zoomOr1()
-				x1 := r.X + (tn.Pos.X+e.PanX)*e.zoomOr1()
-				y1 := r.Y + (tn.Pos.Y+e.PanY)*e.zoomOr1()
-				p.Line(x0+36, y0+36, x1+36, y1+36, 2, t.Border)
+				z := e.zoomOr1()
+				x0, y0 := r.X+(from.Pos.X+e.PanX)*z, r.Y+(from.Pos.Y+e.PanY)*z
+				x1, y1 := r.X+(to.Pos.X+e.PanX)*z, r.Y+(to.Pos.Y+e.PanY)*z
+				p.Line(x0+36*z, y0+36*z, x1+36*z, y1+36*z, 2, t.Border)
 			}
-			// nodes drawn via overlay boxes below; but draw selection ring here
 		})
-		// node overlays
 		for i := range e.Doc.Nodes {
 			n := &e.Doc.Nodes[i]
-			oldPos := n.Pos
-			off := ui.Point{X: n.Pos.X + e.PanX, Y: n.Pos.Y + e.PanY}
-			// scale not applied to point (int); approximate
-			sel := n.ID == e.SelectedNode
-			ui.Box(c).Absolute().Left(off.X).Top(off.Y).Size(72, 72).Draw(func(p *ui.Painter, r ui.Rect) {
-				col := t.Surface
-				if sel {
-					col = ui.Hex("#5b45c9")
+			z := e.zoomOr1()
+			off := ui.Point{X: (n.Pos.X + e.PanX) * z, Y: (n.Pos.Y + e.PanY) * z}
+			selected := n.ID == e.SelectedNode
+			ui.Box(c).Absolute().Left(off.X).Top(off.Y).Size(72*z, 72*z).Draw(func(p *ui.Painter, r ui.Rect) {
+				fill := t.Surface
+				if selected {
+					fill = t.Accent
 				}
-				p.Fill(r, col, 8)
+				p.Fill(r, fill, 8)
 				p.Stroke(r, t.Border, 8, 1)
-				ip := iconPath(n.Kind)
-				// center icon
-				ir := ui.Rect{X: r.X + 12, Y: r.Y + 8, W: 48, H: 48}
-				p.FillPath(ip, t.Text)
-				_ = ir
-				p.Text(r.X+4, r.Y+58, n.Title, 10, t.Text)
+				p.FillPath(iconPath(n.Kind), t.Text)
+				p.Text(r.X+4, r.Y+58*z, n.Title, 10*z, t.Text)
 			}).OnClick(func() {
-				if e.ConnectMode {
-					if e.ConnectFrom == "" {
-						e.ConnectFrom = n.ID
-					} else if e.ConnectFrom != n.ID {
-						e.Connect(e.ConnectFrom, n.ID)
-						e.ConnectFrom = ""
-						e.ConnectMode = false
-					}
-				} else {
+				if !e.ConnectMode {
 					e.SelectNode(n.ID)
+					return
+				}
+				if e.ConnectFrom == "" {
+					e.ConnectFrom = n.ID
+				} else if e.ConnectFrom != n.ID {
+					e.Connect(e.ConnectFrom, n.ID)
+					e.ConnectFrom = ""
+					e.ConnectMode = false
 				}
 			}).Draggable(&off, ui.DraggableOptions{}).Key(n.ID)
-			// sync position back
-			n.Pos = Position{X: float32(off.X) - e.PanX, Y: float32(off.Y) - e.PanY}
-			if n.Pos != oldPos && e.OnChange != nil {
-				e.OnChange()
+			pos := Position{X: off.X/z - e.PanX, Y: off.Y/z - e.PanY}
+			if pos != n.Pos {
+				e.MoveNode(n.ID, pos)
 			}
 		}
 	})
@@ -124,10 +130,9 @@ func (d *WorkflowDocument) findNodePtr(id string) *Node {
 	}
 	return nil
 }
-
 func (e *Editor) zoomOr1() float32 {
-	if e.Zoom == 0 {
-		return 1
+	if e.Zoom != 0 {
+		return e.Zoom
 	}
-	return e.Zoom
+	return 1
 }

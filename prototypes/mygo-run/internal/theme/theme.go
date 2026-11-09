@@ -4,59 +4,54 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// Tokens defines AsterLab unified theme configuration.
+// Tokens defines the shared AsterLab design system.
 type Tokens struct {
-	RailBackground    ui.Color
-	SidebarBackground ui.Color
-	CardBackground    ui.Color
-	CardBorder        ui.Color
-	SuccessBg         ui.Color
-	SuccessText       ui.Color
-	WarningBg         ui.Color
-	WarningText       ui.Color
-	DangerBg          ui.Color
-	DangerText        ui.Color
-	NeutralBg         ui.Color
-	NeutralText       ui.Color
+	Canvas, Surface, Elevated                                                                    ui.Color
+	Border, BorderStrong                                                                         ui.Color
+	Text, TextMuted                                                                              ui.Color
+	Accent, AccentHover, AccentText                                                              ui.Color
+	Success, Warning, Danger                                                                     ui.Color
+	RailBackground, SidebarBackground                                                            ui.Color
+	CardBackground, CardBorder                                                                   ui.Color
+	SuccessBg, SuccessText, WarningBg, WarningText, DangerBg, DangerText, NeutralBg, NeutralText ui.Color
+	Spacing4, Spacing8, Spacing12, Spacing16, Spacing24, Spacing32                               int
+	ControlRadius, PanelRadius, DialogRadius                                                     int
 }
 
-// LightTokens returns semantic colors for light theme.
 func LightTokens() Tokens {
-	return Tokens{
-		RailBackground:    ui.Hex("#f1f5f9"),
-		SidebarBackground: ui.Hex("#f8fafc"),
-		CardBackground:    ui.Hex("#ffffff"),
-		CardBorder:        ui.Hex("#e2e8f0"),
-		SuccessBg:         ui.Hex("#ecfdf5"),
-		SuccessText:       ui.Hex("#059669"),
-		WarningBg:         ui.Hex("#fffbeb"),
-		WarningText:       ui.Hex("#d97706"),
-		DangerBg:          ui.Hex("#fff1f2"),
-		DangerText:        ui.Hex("#e11d48"),
-		NeutralBg:         ui.Hex("#f1f5f9"),
-		NeutralText:       ui.Hex("#475569"),
+	t := Tokens{
+		Canvas: ui.Hex("#F6F4EF"), Surface: ui.Hex("#FBFAF7"), Elevated: ui.Hex("#FFFFFF"),
+		Border: ui.Hex("#DDD7CC"), BorderStrong: ui.Hex("#C8C0B2"),
+		Text: ui.Hex("#201E1A"), TextMuted: ui.Hex("#6F6A60"),
+		Accent: ui.Hex("#1F6F5F"), AccentHover: ui.Hex("#195C4F"), AccentText: ui.Hex("#FFFFFF"),
+		Success: ui.Hex("#2F7D4A"), Warning: ui.Hex("#A9651D"), Danger: ui.Hex("#A13B36"),
+		RailBackground: ui.Hex("#FBFAF7"), SidebarBackground: ui.Hex("#FBFAF7"),
+		Spacing4: 4, Spacing8: 8, Spacing12: 12, Spacing16: 16, Spacing24: 24, Spacing32: 32,
+		ControlRadius: 4, PanelRadius: 8, DialogRadius: 12,
 	}
+	return aliases(t)
 }
 
-// DarkTokens returns semantic colors for dark theme.
 func DarkTokens() Tokens {
-	return Tokens{
-		RailBackground:    ui.Hex("#090d16"),
-		SidebarBackground: ui.Hex("#0e1526"),
-		CardBackground:    ui.Hex("#131b2e"),
-		CardBorder:        ui.Hex("#1e293b"),
-		SuccessBg:         ui.Hex("#064e3b"),
-		SuccessText:       ui.Hex("#34d399"),
-		WarningBg:         ui.Hex("#78350f"),
-		WarningText:       ui.Hex("#fbbf24"),
-		DangerBg:          ui.Hex("#881337"),
-		DangerText:        ui.Hex("#fda4af"),
-		NeutralBg:         ui.Hex("#1e293b"),
-		NeutralText:       ui.Hex("#94a3b8"),
-	}
+	t := LightTokens()
+	t.Canvas, t.Surface, t.Elevated = ui.Hex("#171614"), ui.Hex("#201E1A"), ui.Hex("#28251F")
+	t.Border, t.BorderStrong = ui.Hex("#39352D"), ui.Hex("#514B40")
+	t.Text, t.TextMuted = ui.Hex("#F0EDE6"), ui.Hex("#A8A196")
+	t.Accent, t.AccentHover, t.AccentText = ui.Hex("#4FA38D"), ui.Hex("#60B39D"), ui.Hex("#10201C")
+	t.Success, t.Warning, t.Danger = ui.Hex("#55A76D"), ui.Hex("#D5964D"), ui.Hex("#D26B62")
+	t.RailBackground, t.SidebarBackground = t.Surface, t.Surface
+	return aliases(t)
 }
 
-// GetTokens returns the semantic tokens matching the given theme.
+func aliases(t Tokens) Tokens {
+	t.CardBackground, t.CardBorder = t.Elevated, t.Border
+	t.SuccessBg, t.SuccessText = t.Surface, t.Success
+	t.WarningBg, t.WarningText = t.Surface, t.Warning
+	t.DangerBg, t.DangerText = t.Surface, t.Danger
+	t.NeutralBg, t.NeutralText = t.Surface, t.TextMuted
+	return t
+}
+
 func GetTokens(t *ui.Theme) Tokens {
 	if t != nil && t.Dark {
 		return DarkTokens()
@@ -64,58 +59,21 @@ func GetTokens(t *ui.Theme) Tokens {
 	return LightTokens()
 }
 
-// LightTheme returns a calibrated AsterLab light theme.
 func LightTheme() *ui.Theme {
-	t := ui.LightTheme()
-	t.Dark = false
-	t.Background = ui.Hex("#f8fafc")
-	t.Surface = ui.Hex("#ffffff")
-	t.SurfaceHover = ui.Hex("#f1f5f9")
-	t.SurfacePressed = ui.Hex("#e2e8f0")
-	t.Border = ui.Hex("#e2e8f0")
-	t.Text = ui.Hex("#0f172a")
-	t.TextMuted = ui.Hex("#64748b")
-	t.Accent = ui.Hex("#4f46e5")
-	t.AccentHover = ui.Hex("#4338ca")
-	t.AccentPressed = ui.Hex("#3730a3")
-	t.AccentText = ui.Hex("#ffffff")
-	t.InactiveAccent = ui.Hex("#94a3b8")
-	t.Danger = ui.Hex("#e11d48")
-	t.Warning = ui.Hex("#d97706")
-	t.Success = ui.Hex("#059669")
-	t.Selection = ui.Hex("#c7d2fe")
-	t.Focus = ui.Hex("#6366f1")
-	t.FocusRingWidth = 2
-	t.FocusRingOffset = 1
-	t.Radius = 8
-	t.Spacing = 4
-	return t
+	return apply(ui.LightTheme(), LightTokens(), false)
 }
 
-// DarkTheme returns a calibrated AsterLab dark theme.
 func DarkTheme() *ui.Theme {
-	t := ui.DarkTheme()
-	t.Dark = true
-	t.Background = ui.Hex("#0b0f19")
-	t.Surface = ui.Hex("#131b2e")
-	t.SurfaceHover = ui.Hex("#1e293b")
-	t.SurfacePressed = ui.Hex("#334155")
-	t.Border = ui.Hex("#1e293b")
-	t.Text = ui.Hex("#f8fafc")
-	t.TextMuted = ui.Hex("#94a3b8")
-	t.Accent = ui.Hex("#6366f1")
-	t.AccentHover = ui.Hex("#818cf8")
-	t.AccentPressed = ui.Hex("#4f46e5")
-	t.AccentText = ui.Hex("#ffffff")
-	t.InactiveAccent = ui.Hex("#475569")
-	t.Danger = ui.Hex("#f43f5e")
-	t.Warning = ui.Hex("#f59e0b")
-	t.Success = ui.Hex("#10b981")
-	t.Selection = ui.Hex("#312e81")
-	t.Focus = ui.Hex("#818cf8")
-	t.FocusRingWidth = 2
-	t.FocusRingOffset = 1
-	t.Radius = 8
-	t.Spacing = 4
+	return apply(ui.DarkTheme(), DarkTokens(), true)
+}
+
+func apply(t *ui.Theme, c Tokens, dark bool) *ui.Theme {
+	t.Dark = dark
+	t.Background, t.Surface, t.SurfaceHover, t.SurfacePressed = c.Canvas, c.Surface, c.Elevated, c.Border
+	t.Border, t.Text, t.TextMuted = c.Border, c.Text, c.TextMuted
+	t.Accent, t.AccentHover, t.AccentPressed, t.AccentText = c.Accent, c.AccentHover, c.Accent, c.AccentText
+	t.Danger, t.Warning, t.Success, t.Focus = c.Danger, c.Warning, c.Success, c.Accent
+	t.FocusRingWidth, t.FocusRingOffset = 2, 1
+	t.Radius, t.Spacing = float32(c.PanelRadius), 4
 	return t
 }

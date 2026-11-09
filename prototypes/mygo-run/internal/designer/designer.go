@@ -58,7 +58,8 @@ type Designer struct {
 
 	AssayIDDraft, TimepointsDraft, PlateInstanceDraft, ReplicatesDraft                     string
 	ControlGroupDraft, CalibratorGroupDraft, SamplesDraft, GenesDraft, ReferenceGenesDraft string
-	WellsDraft, SampleIDDraft, GroupIDDraft, WellTimepointDraft, WellAssignmentsDraft      string
+	SampleIDDraft, GroupIDDraft, WellTimepointDraft, WellAssignmentsDraft                  string
+	SelectedWells                                                                          []string
 	SelectedNode                                                                           string
 	ComponentRefsDraft                                                                     string
 
@@ -92,10 +93,14 @@ func New(designID, title string, revision uint64, svc runs.DesignService) *Desig
 	}
 	d.Editor.OnSelect = func(id string) {
 		d.SelectedNode = id
+		d.SelectedWells = nil
 		d.ComponentRefsDraft = strings.Join(d.componentRefs(id), ", ")
 		d.loadAssayDraft(id)
 	}
-	d.Editor.OnChange = d.Touch
+	d.Editor.OnChange = func() {
+		d.Empty = len(d.Editor.Doc.Nodes) == 0
+		d.Touch()
+	}
 	return d
 }
 
@@ -161,6 +166,7 @@ func (d *Designer) Load(ctx context.Context, designID string) {
 func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 	d.Assays = map[string]assays.Design{}
 	d.StepAssays = map[string]string{}
+	d.Instances = map[string][]blocks.Instance{}
 	d.Revision = snap.Revision
 	if snap.Title != "" {
 		d.Title = snap.Title
@@ -169,6 +175,7 @@ func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 		d.DesignID = snap.DesignID
 	}
 	var doc designDoc
+	d.Editor.Doc = workflow.WorkflowDocument{}
 	if snap.Data != "" {
 		if err := json.Unmarshal([]byte(snap.Data), &doc); err == nil {
 			d.Editor.Doc = doc.MyGo.Workflow
@@ -186,9 +193,9 @@ func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 			}
 		}
 	}
-	if d.SelectedNode != "" {
-		d.loadAssayDraft(d.SelectedNode)
-	}
+	d.Editor.SelectedNode, d.Editor.SelectedEdge = "", ""
+	d.Editor.UndoStack, d.Editor.RedoStack = nil, nil
+	d.SelectedNode, d.SelectedWells = "", nil
 	d.Dirty = false
 	d.SaveState = SaveIdle
 	d.Error = ""
@@ -219,26 +226,25 @@ func (d *Designer) loadAssayDraft(nodeID string) {
 		assignments = append(assignments, fmt.Sprintf("%s=%s/%s#%d@%s", well.WellID, well.SampleID, well.GroupID, well.Replicate, well.Timepoint))
 	}
 	d.WellAssignmentsDraft = strings.Join(assignments, ", ")
-	d.WellsDraft, d.SampleIDDraft, d.GroupIDDraft, d.WellTimepointDraft = "", "", "", ""
+	d.SampleIDDraft, d.GroupIDDraft, d.WellTimepointDraft = "", "", ""
 }
 
-// AssignSelectedWells expands the comma-separated well selection into explicit
-// Well -> Sample -> Group -> Replicate -> Timepoint assignments.
+// AssignSelectedWells commits visually selected 96-well plate positions.
 func (d *Designer) AssignSelectedWells() error {
 	if d.AssayIDDraft == "" || d.SelectedNode == "" {
 		return fmt.Errorf("select an assay step first")
 	}
 	p := d.Assays[d.AssayIDDraft]
-	wells := splitCSV(d.WellsDraft)
+	wells := append([]string(nil), d.SelectedWells...)
 	sampleID, groupID, timepoint := strings.TrimSpace(d.SampleIDDraft), strings.TrimSpace(d.GroupIDDraft), strings.TrimSpace(d.WellTimepointDraft)
 	if len(wells) == 0 || sampleID == "" || groupID == "" || timepoint == "" {
-		return fmt.Errorf("wells, sample, group and timepoint are required")
+		return fmt.Errorf("select wells and provide sample, group and timepoint")
 	}
 	assignments := append([]assays.WellAssignment(nil), p.Wells...)
 	for i, wellID := range wells {
 		wellID = strings.ToUpper(strings.TrimSpace(wellID))
-		for j := range assignments {
-			if strings.EqualFold(assignments[j].WellID, wellID) && assignments[j].Timepoint == timepoint {
+		for _, existing := range assignments {
+			if strings.EqualFold(existing.WellID, wellID) && existing.Timepoint == timepoint {
 				return fmt.Errorf("well %s already assigned at %s", wellID, timepoint)
 			}
 		}
@@ -249,6 +255,7 @@ func (d *Designer) AssignSelectedWells() error {
 	}
 	p.Wells = assignments
 	d.Assays[d.AssayIDDraft] = p
+	d.SelectedWells = nil
 	d.loadAssayDraft(d.SelectedNode)
 	d.Touch()
 	return nil
@@ -336,9 +343,15 @@ func (d *Designer) Save(ctx context.Context) {
 	d.SaveState = SaveSaved
 }
 
-// CreateRun creates a Run from the current design.
+// CreateRun creates a Run from the saved current design.
 func (d *Designer) CreateRun(ctx context.Context) {
 	d.Error = ""
+	if d.Dirty {
+		d.Save(ctx)
+		if d.Dirty || d.SaveState == SaveError {
+			return
+		}
+	}
 	atomic.AddUint64(&d.opSeq, 1)
 	opID := fmt.Sprintf("design-create-run-%s-%d-%d", d.DesignID, time.Now().UnixNano(), d.opSeq)
 	snap, err := d.createRun(ctx, d.DesignID, opID)
@@ -406,7 +419,7 @@ func View(c *ui.Context, d *Designer) {
 				})
 				ui.Divider(c)
 				// bottom inspector
-				ui.Box(c).Height(220).Fill().Padding(8).Children(func() {
+				ui.Box(c).Height(340).Fill().Padding(8).Children(func() {
 					inspector(c, d, t)
 				})
 			})
@@ -440,84 +453,169 @@ func View(c *ui.Context, d *Designer) {
 }
 
 func inspector(c *ui.Context, d *Designer, t *ui.Theme) {
-	ui.Column(c).Gap(6).Children(func() {
+	ui.Column(c).Gap(6).Padding(8).Children(func() {
 		ui.Text(c, "步骤检查器").Bold()
 		if d.SelectedNode == "" {
 			ui.Text(c, "未选中节点").FontSize(12).TextColor(t.TextMuted)
 			return
 		}
-		ui.Text(c, "节点: "+d.SelectedNode).FontSize(12)
-		ui.Text(c, "组件绑定 ID（逗号分隔）").FontSize(12)
-		if ui.TextInput(c, &d.ComponentRefsDraft).Placeholder("component-id").Changed() {
+		title := d.nodeTitle(d.SelectedNode)
+		if ui.TextInput(c, &title).Placeholder("步骤名称").Changed() {
+			d.setNodeTitle(d.SelectedNode, title)
+		}
+		if ui.TextInput(c, &d.ComponentRefsDraft).Placeholder("组件 ID").Changed() {
 			d.setComponentRefs(d.SelectedNode, d.ComponentRefsDraft)
 		}
-		ui.Text(c, "检测参数（当前步骤）").Bold()
-		changed := false
-		if ui.TextInput(c, &d.AssayIDDraft).Placeholder("cck8 或 qpcr").Changed() {
-			changed = true
-		}
-		if d.AssayIDDraft != "" {
-			if ui.TextInput(c, &d.TimepointsDraft).Placeholder("时间点，逗号分隔").Changed() {
-				changed = true
-			}
-			if ui.TextInput(c, &d.PlateInstanceDraft).Placeholder("CCK-8 plate instance ID").Changed() {
-				changed = true
-			}
-			if ui.TextInput(c, &d.ReplicatesDraft).Placeholder("技术重复数").Changed() {
-				changed = true
-			}
-			if ui.TextInput(c, &d.ControlGroupDraft).Placeholder("对照组").Changed() {
-				changed = true
-			}
-			if ui.TextInput(c, &d.CalibratorGroupDraft).Placeholder("qPCR 校准组").Changed() {
-				changed = true
-			}
-			if ui.TextInput(c, &d.SamplesDraft).Placeholder("样本ID:组别, ...").Changed() {
-				changed = true
-			}
-			if ui.TextInput(c, &d.GenesDraft).Placeholder("基因, 参考基因加 *").Changed() {
-				changed = true
-			}
-			if ui.TextInput(c, &d.ReferenceGenesDraft).Placeholder("参考基因，逗号分隔").Changed() {
-				changed = true
-			}
-			if d.AssayIDDraft == assays.CCK8 {
-				ui.Text(c, "孔位分配：Well → Sample → Group → Replicate → Timepoint").FontSize(11).TextColor(t.TextMuted)
-				if ui.TextInput(c, &d.WellsDraft).Placeholder("A1, A2, A3").Changed() {
-					changed = true
-				}
-				if ui.TextInput(c, &d.SampleIDDraft).Placeholder("SampleID，例如 Control-1").Changed() {
-					changed = true
-				}
-				if ui.TextInput(c, &d.GroupIDDraft).Placeholder("GroupID，例如 Control").Changed() {
-					changed = true
-				}
-				if ui.TextInput(c, &d.WellTimepointDraft).Placeholder("Timepoint，例如 D3").Changed() {
-					changed = true
-				}
-				if ui.Button(c, "分配所选孔位并生成技术重复").Clicked() {
-					if err := d.AssignSelectedWells(); err != nil {
-						d.Error = err.Error()
-					}
-				}
-				if d.WellAssignmentsDraft != "" {
-					ui.Text(c, "已分配: "+d.WellAssignmentsDraft).FontSize(11).TextColor(t.TextMuted)
-				}
-			}
-		}
-		if changed {
+		if ui.TextInput(c, &d.AssayIDDraft).Placeholder("cck8 / qpcr").Changed() {
 			d.saveAssayDraft()
 		}
-		insts := d.SelectedInstances()
-		if len(insts) == 0 {
-			ui.Text(c, "无组件预览").FontSize(12).TextColor(t.TextMuted)
-		} else {
-			for i := range insts {
-				inst := insts[i]
-				ui.Box(c).Padding(6).Children(func() {
-					blocks.View(c, inst)
+		if d.AssayIDDraft != "" {
+			changed := false
+			fields := []*string{&d.TimepointsDraft, &d.PlateInstanceDraft, &d.ReplicatesDraft, &d.ControlGroupDraft, &d.CalibratorGroupDraft, &d.SamplesDraft, &d.GenesDraft, &d.ReferenceGenesDraft}
+			labels := []string{"时间点", "孔板组件 ID", "技术重复数", "对照组", "校准组", "样本 ID:组别", "基因（参考基因加 *）", "参考基因"}
+			for i := range fields {
+				if ui.TextInput(c, fields[i]).Placeholder(labels[i]).Changed() {
+					changed = true
+				}
+			}
+			if changed {
+				d.saveAssayDraft()
+			}
+			ui.Text(c, "96 孔板映射 · 选择孔位后分配").FontSize(12)
+			for row := range 8 {
+				ui.Row(c).Gap(2).Children(func() {
+					for col := range 12 {
+						well := fmt.Sprintf("%c%d", 'A'+row, col+1)
+						label := well
+						if d.wellAssigned(well) {
+							label = "●" + well
+						}
+						if containsString(d.SelectedWells, well) {
+							label = "✓" + well
+						}
+						if ui.Button(c, label).Clicked() {
+							d.toggleWell(well)
+						}
+					}
 				})
 			}
+			ui.TextInput(c, &d.SampleIDDraft).Placeholder("样本 ID")
+			ui.TextInput(c, &d.GroupIDDraft).Placeholder("组别")
+			ui.TextInput(c, &d.WellTimepointDraft).Placeholder("时间点")
+			if ui.Button(c, "分配孔位").Clicked() {
+				if err := d.AssignSelectedWells(); err != nil {
+					d.Error = err.Error()
+				} else {
+					d.Error = ""
+				}
+			}
+			if d.WellAssignmentsDraft != "" {
+				ui.Text(c, "已保存映射: "+d.WellAssignmentsDraft).FontSize(11).TextColor(t.TextMuted)
+			}
+		}
+		if ui.Button(c, "添加备注组件").Clicked() {
+			d.addNoteComponent(d.SelectedNode)
+		}
+		for i := range d.SelectedInstances() {
+			d.editInstance(c, d.SelectedNode, i, t)
 		}
 	})
+}
+
+func (d *Designer) wellAssigned(id string) bool {
+	for _, well := range d.Assays[d.AssayIDDraft].Wells {
+		if strings.EqualFold(well.WellID, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Designer) toggleWell(well string) {
+	for i, selected := range d.SelectedWells {
+		if selected == well {
+			d.SelectedWells = append(d.SelectedWells[:i], d.SelectedWells[i+1:]...)
+			return
+		}
+	}
+	d.SelectedWells = append(d.SelectedWells, well)
+}
+
+func (d *Designer) nodeTitle(id string) string {
+	for i := range d.Editor.Doc.Nodes {
+		if d.Editor.Doc.Nodes[i].ID == id {
+			return d.Editor.Doc.Nodes[i].Title
+		}
+	}
+	return ""
+}
+
+func (d *Designer) setNodeTitle(id, title string) {
+	for i := range d.Editor.Doc.Nodes {
+		if d.Editor.Doc.Nodes[i].ID == id && d.Editor.Doc.Nodes[i].Title != title {
+			d.Editor.Doc.Nodes[i].Title = title
+			d.Touch()
+			return
+		}
+	}
+}
+
+func (d *Designer) addNoteComponent(nodeID string) {
+	inst, err := blocks.NewInstance(fmt.Sprintf("note-%d", len(d.Instances[nodeID])+1), blocks.Definition{ID: "designer-note", Version: 1, Type: blocks.TypeNote, Props: blocks.NoteProps{Title: "Note"}})
+	if err != nil {
+		d.Error = err.Error()
+		return
+	}
+	d.Instances[nodeID] = append(d.Instances[nodeID], inst)
+	refs := d.componentRefs(nodeID)
+	if !containsString(refs, inst.DefinitionID) {
+		refs = append(refs, inst.DefinitionID)
+	}
+	for i := range d.Editor.Doc.Nodes {
+		if d.Editor.Doc.Nodes[i].ID == nodeID {
+			d.Editor.Doc.Nodes[i].ComponentRefs = refs
+			break
+		}
+	}
+	d.ComponentRefsDraft = strings.Join(refs, ", ")
+	d.Touch()
+}
+
+func (d *Designer) editInstance(c *ui.Context, nodeID string, index int, t *ui.Theme) {
+	instances := d.Instances[nodeID]
+	if index >= len(instances) {
+		return
+	}
+	inst := instances[index]
+	if inst.Type != blocks.TypeNote {
+		blocks.View(c, inst)
+		return
+	}
+	var props blocks.NoteProps
+	if inst.DecodeProps(&props) != nil {
+		return
+	}
+	ui.Text(c, "备注组件 · "+inst.ID).FontSize(11).TextColor(t.TextMuted)
+	changed := ui.TextInput(c, &props.Title).Placeholder("备注标题").Changed()
+	if ui.TextInput(c, &props.Text).Placeholder("备注内容").Changed() {
+		changed = true
+	}
+	if changed {
+		raw, err := json.Marshal(props)
+		if err == nil {
+			inst.RawProps = raw
+			instances[index] = inst
+			d.Instances[nodeID] = instances
+			d.Touch()
+		}
+	}
 }

@@ -205,8 +205,7 @@ func (w *Workspace) parseDraft() ([]Measurement, string) {
 			return nil, "测量值格式错误: " + valStr
 		}
 		hasValid = true
-		ep := "OD450"
-		unit := "AU"
+		ep, unit := "", ""
 		if len(w.View.Measurements) > 0 {
 			ep = w.View.Measurements[0].Endpoint
 			unit = w.View.Measurements[0].Unit
@@ -327,7 +326,7 @@ func View(c *ui.Context, w *Workspace) {
 				ui.Column(c).FillWidth().Gap(16).Padding(16).Children(func() {
 					recordPanel(c, w, t, tokens)
 					plateCard(c, w, t, tokens)
-					flowCard(c, t, tokens)
+					taskPanel(c, w, t, tokens)
 					readinessCard(c, w, t, tokens)
 				})
 			} else {
@@ -339,7 +338,7 @@ func View(c *ui.Context, w *Workspace) {
 					})
 					ui.Column(c).Gap(16).Children(func() {
 						plateCard(c, w, t, tokens)
-						flowCard(c, t, tokens)
+						taskPanel(c, w, t, tokens)
 					})
 				})
 			}
@@ -452,13 +451,21 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 				}
 			}
 		} else {
+			label := "原始测量记录"
+			if len(w.View.Measurements) > 0 {
+				m := w.View.Measurements[0]
+				label = m.Endpoint
+				if m.Unit != "" {
+					label += " (" + m.Unit + ")"
+				}
+			}
 			ui.Column(c).Gap(6).Children(func() {
-				ui.Text(c, "记录 OD450（AU）").FontSize(15).Bold().TextColor(t.Text)
-				ui.Text(c, "请填入待测样本标识与对应的光密度读数").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, label).FontSize(15).Bold().TextColor(t.Text)
+				ui.Text(c, "仅记录原始读数；派生结果由 assay 结果表独立呈现").FontSize(12).TextColor(t.TextMuted)
 			})
 			ui.Grid(c).Columns(3).ColumnTracks(ui.Fr(1), ui.Fr(1), ui.Fixed(36)).Gap(8).Children(func() {
 				ui.Text(c, "样本 / 孔位").FontSize(11).TextColor(t.TextMuted).Bold()
-				ui.Text(c, "测量值 (AU)").FontSize(11).TextColor(t.TextMuted).Bold()
+				ui.Text(c, "原始测量值").FontSize(11).TextColor(t.TextMuted).Bold()
 				ui.Text(c, "").FontSize(11)
 				for i := range w.Draft.Rows {
 					i := i
@@ -466,7 +473,7 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 					if inp1.Changed() {
 						w.State = StateDraft
 					}
-					inp2 := ui.TextInput(c, &w.Draft.Rows[i].Value).Placeholder("吸光度数值 (如 0.82)")
+					inp2 := ui.TextInput(c, &w.Draft.Rows[i].Value).Placeholder("原始测量值")
 					if inp2.Changed() {
 						w.State = StateDraft
 					}
@@ -497,7 +504,7 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 		}
 		if w.State == StateSaved {
 			ui.Row(c).Padding(10, 14).Radius(8).Background(tokens.SuccessBg).Border(1, tokens.SuccessText).Children(func() {
-				ui.Text(c, "✓ 读数已成功持久化至实验记录").FontSize(12).TextColor(tokens.SuccessText).Bold()
+				ui.Text(c, "✓ 记录已成功持久化至实验记录").FontSize(12).TextColor(tokens.SuccessText).Bold()
 			})
 		}
 
@@ -563,38 +570,30 @@ func plateGrid(c *ui.Context, grid *resultgrid.Grid) {
 	})
 }
 
-func flowCard(c *ui.Context, t *ui.Theme, tokens theme.Tokens) {
-	ui.Column(c).Gap(12).Padding(20).Radius(12).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
-		ui.Text(c, "实验流程预览").FontSize(15).Bold().TextColor(t.Text)
-		ui.Box(c).Height(120).Draw(func(p *ui.Painter, r ui.Rect) {
-			nodes := []struct {
-				x, y  float32
-				label string
-			}{
-				{0.12, 0.35, "Seed"}, {0.38, 0.35, "Treat"}, {0.64, 0.35, "Read"}, {0.64, 0.75, "Stain"}, {0.88, 0.75, "Image"},
-			}
-			for i := range 4 {
-				x1 := r.X + r.W*nodes[i].x
-				y1 := r.Y + r.H*nodes[i].y
-				x2 := r.X + r.W*nodes[i+1].x
-				y2 := r.Y + r.H*nodes[i+1].y
-				p.Line(x1+16, y1, x2-16, y2, 1, t.Border)
-			}
-			for i, n := range nodes {
-				x := r.X + r.W*n.x
-				y := r.Y + r.H*n.y
-				fill := tokens.CardBackground
-				txtCol := t.Text
-				if i == 2 {
-					fill = t.Accent
-					txtCol = t.AccentText
-				}
-				boxRect := ui.Rect{X: x - 32, Y: y - 16, W: 64, H: 32}
-				p.Fill(boxRect, fill, 8)
-				p.Stroke(boxRect, t.Border, 8, 1)
-				p.Text(x-20, y-5, n.label, 11, txtCol)
-			}
-		})
+func taskPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
+	ui.Column(c).Gap(8).Padding(16).Radius(8).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
+		ct := w.currentTask()
+		ui.Text(c, "任务与结果").FontSize(15).Bold().TextColor(t.Text)
+		if ct == nil {
+			ui.Text(c, "当前运行没有任务").FontSize(13).TextColor(t.TextMuted)
+			return
+		}
+		title := ct.Title
+		if ct.Timepoint != "" {
+			title = ct.Timepoint + " · " + title
+		}
+		ui.Text(c, title).FontSize(13).Bold().TextColor(t.Text)
+		ui.Text(c, "任务 "+ct.Key+" · "+ct.Status).FontSize(11).TextColor(t.TextMuted)
+		if ct.AssayID != "" {
+			ui.Text(c, "Assay "+ct.AssayID).FontSize(11).TextColor(t.TextMuted)
+		}
+		if w.Grid != nil {
+			ui.Text(c, fmt.Sprintf("结果表 %s · %d × %d", w.Grid.Schema.ID, w.Grid.Rows(), w.Grid.Columns())).FontSize(11).TextColor(t.TextMuted)
+		} else if len(w.View.Measurements) > 0 {
+			ui.Text(c, fmt.Sprintf("已记录 %d 条原始测量", len(w.View.Measurements))).FontSize(11).TextColor(t.TextMuted)
+		} else {
+			ui.Text(c, "尚无结果记录").FontSize(11).TextColor(t.TextMuted)
+		}
 	})
 }
 
@@ -604,34 +603,26 @@ func readinessCard(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens
 
 		// Checklist Items
 		ui.Column(c).Gap(8).Children(func() {
-			ui.Text(c, "材料 / 试剂").FontSize(11).TextColor(t.TextMuted).Bold()
+			ui.Text(c, "检查项").FontSize(11).TextColor(t.TextMuted).Bold()
 			if len(w.View.Checks) == 0 {
-				ui.Row(c).Padding(4, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-					ui.Text(c, "✓ GelMA · 水凝胶基质 (就绪)").FontSize(12).TextColor(tokens.NeutralText)
-				})
+				ui.Text(c, "尚无检查项").FontSize(12).TextColor(t.TextMuted)
 			} else {
 				for _, ch := range w.View.Checks {
-					label := ch.Title
-					if ch.Binding != "" {
-						label += ": " + ch.Binding + " ✓"
-					} else {
-						label += ": 待配置"
+					label := ch.Title + ": "
+					switch ch.Status {
+					case "ready", "completed", "passed":
+						label += "就绪"
+					case "blocked", "failed", "invalid":
+						label += "未通过"
+					default:
+						label += "待检查"
 					}
-					ui.Row(c).Padding(4, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-						ui.Text(c, label).FontSize(12).TextColor(tokens.NeutralText)
-					})
+					if ch.Binding != "" {
+						label += " · " + ch.Binding
+					}
+					ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
 				}
 			}
-
-			ui.Text(c, "仪器 / 检测").FontSize(11).TextColor(t.TextMuted).Bold()
-			ui.Row(c).Padding(4, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-				ui.Text(c, "✓ 多功能微孔板检测仪 (450 nm)").FontSize(12).TextColor(tokens.NeutralText)
-			})
-
-			ui.Text(c, "耗材规格").FontSize(11).TextColor(t.TextMuted).Bold()
-			ui.Row(c).Padding(4, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-				ui.Text(c, "✓ 96 孔透明微孔培养板").FontSize(12).TextColor(tokens.NeutralText)
-			})
 		})
 
 		if len(w.View.Events) > 0 {

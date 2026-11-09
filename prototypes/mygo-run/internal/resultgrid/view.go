@@ -12,13 +12,16 @@ func View(c *ui.Context, g *Grid, opts Options) {
 	if g == nil {
 		return
 	}
-	width := float32(96)
+	width := float32(112)
 	if opts.FullWidth {
 		width = 0
 	}
-	ui.Column(c).Fill().Padding(8).Gap(4).Children(func() {
+	ui.Column(c).Fill().Padding(8).Gap(6).Children(func() {
 		ui.Row(c).Gap(8).Children(func() {
 			ui.Text(c, fmt.Sprintf("%s · %s", g.Schema.ID, g.State)).Bold()
+			if g.Schema.AssayID != "" {
+				ui.Text(c, g.Schema.AssayID).TextColor(c.Theme().TextMuted)
+			}
 			if g.Error != "" {
 				ui.Text(c, g.Error).TextColor(c.Theme().Danger)
 			}
@@ -44,17 +47,17 @@ func View(c *ui.Context, g *Grid, opts Options) {
 			})
 		}
 		ui.ScrollBoth(c).Fill().Children(func() {
-			ui.Column(c).Gap(2).Children(func() {
+			ui.Column(c).Gap(4).Children(func() {
 				ui.Row(c).Gap(2).Children(func() {
 					ui.Text(c, "").Width(38)
 					for _, label := range g.Schema.ColumnLabels {
-						ui.Text(c, label).Width(width).Padding(4).Background(c.Theme().Surface).Bold()
+						ui.Text(c, label).Width(width).Padding(6).Background(c.Theme().Surface).Bold()
 					}
 				})
 				for r, label := range g.Schema.RowLabels {
 					rr := r
 					ui.Row(c).Gap(2).Children(func() {
-						ui.Text(c, label).Width(38).Padding(4).Bold()
+						ui.Text(c, label).Width(38).Padding(6).Bold()
 						for col := range g.Schema.ColumnLabels {
 							cc := col
 							cell, _ := g.CellAt(rr, cc)
@@ -75,7 +78,7 @@ func View(c *ui.Context, g *Grid, opts Options) {
 									_ = g.SetCell(cell)
 								}
 							}
-							e := ui.TextInput(c, g.input(rr, cc)).Width(width).Padding(4).Placeholder("—").OnSubmit(commit).OnPaste(func(text string) bool {
+							e := ui.TextInput(c, g.input(rr, cc)).Width(width).Padding(6).Placeholder("—").OnSubmit(commit).OnPaste(func(text string) bool {
 								if _, err := g.PasteTSV(text); err != nil {
 									g.Error = err.Error()
 									g.State = StateError
@@ -83,15 +86,28 @@ func View(c *ui.Context, g *Grid, opts Options) {
 								}
 								return true
 							})
-							// A click on Save must persist the text currently in
-							// the input, not only values confirmed with Enter.
 							if e.Changed() {
 								commit()
 							}
 							e.OnClick(func() { g.SetSelection(Selection{rr, cc, rr, cc}) })
-							if rr >= min(g.Selection.StartRow, g.Selection.EndRow) && rr <= max(g.Selection.StartRow, g.Selection.EndRow) && cc >= min(g.Selection.StartColumn, g.Selection.EndColumn) && cc <= max(g.Selection.StartColumn, g.Selection.EndColumn) {
+							selected := rr >= min(g.Selection.StartRow, g.Selection.EndRow) && rr <= max(g.Selection.StartRow, g.Selection.EndRow) && cc >= min(g.Selection.StartColumn, g.Selection.EndColumn) && cc <= max(g.Selection.StartColumn, g.Selection.EndColumn)
+							if selected {
 								e.Background(c.Theme().Accent)
 							}
+							status := cell.Status
+							switch status {
+							case "raw":
+								status = "原始"
+							case "derived":
+								status = "派生"
+							case "missing", "":
+								status = "缺失"
+							case "invalid":
+								status = "无效"
+							case "undetected":
+								status = "未检出"
+							}
+							ui.Text(c, status).Width(width).FontSize(9).TextColor(c.Theme().TextMuted)
 						}
 					})
 				}

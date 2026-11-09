@@ -13,10 +13,12 @@ import (
 	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/designer"
+	"asterlab-mygo-prototype/internal/protocol"
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/runui"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/state"
+	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/modules/runs"
 
@@ -49,6 +51,7 @@ type app struct {
 	opCounter atomic.Uint64
 
 	selectedTask string
+	tools        *tools.Workspace
 }
 
 func (a *app) nextOp() string {
@@ -281,33 +284,24 @@ func designPage(c *ui.Context, a *app) {
 }
 
 func protocolPage(c *ui.Context, a *app) {
-	t := c.Theme()
-	ui.Column(c).Fill().Padding(16).Gap(10).Children(func() {
-		ui.Text(c, "Protocol（只读）").FontSize(20).Bold()
-		if len(a.snap.Tasks) == 0 {
-			ui.Text(c, "无 Protocol 任务").TextColor(t.TextMuted)
-			return
-		}
-		for _, task := range a.snap.Tasks {
-			ui.Text(c, fmt.Sprintf("%s · %s · %s", task.Timepoint, task.Title, task.Status))
-		}
-	})
+	state := &protocol.State{DesignID: a.shell.Selected, Revision: a.snap.DesignRevision}
+	if a.designer != nil {
+		state.Document = a.designer.Editor.Doc
+		state.Instances = a.designer.Instances
+		state.Revision = a.designer.Revision
+	}
+	protocol.View(c, state)
 }
 
 func toolsPage(c *ui.Context, a *app) {
-	t := c.Theme()
-	ui.Column(c).Fill().Padding(16).Gap(10).Children(func() {
-		ui.Text(c, "资料与工具（只读）").FontSize(20).Bold()
-		for _, inst := range a.blocks {
-			ui.Column(c).Padding(8).Radius(6).Border(1, t.Border).Children(func() {
-				blocks.View(c, inst)
-			})
-		}
-	})
+	if a.tools == nil {
+		a.tools = tools.New(tools.Callbacks{})
+	}
+	tools.View(c, a.tools)
 }
 
 func main() {
-	page, step := "run", "design-l929"
+	page, step := "project", "design-l929"
 	_ = step
 
 	runSvc, _ := runs.NewRunService()
@@ -322,7 +316,7 @@ func main() {
 	}
 	a.shell = &shell.Shell{
 		Project:     "L929",
-		Page:        shell.Run,
+		Page:        shell.Project,
 		SidebarOpen: true,
 		OnSelect:    func(id string) { a.shell.Selected = id; a.loadDesign(id) },
 		OnPage:      func(p shell.Page) { a.shell.Page = p },
@@ -479,6 +473,7 @@ func main() {
 			}
 		},
 	}
+	a.tools = tools.New(tools.Callbacks{})
 	a.ws = runui.NewWorkspace(toRunView(a.snap), cb)
 	a.ws.State = runui.StateLoading
 	a.ws.Width = 1200

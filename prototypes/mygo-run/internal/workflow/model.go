@@ -1,8 +1,6 @@
 package workflow
 
-import (
-	"fmt"
-)
+import "fmt"
 
 type NodeKind string
 
@@ -12,9 +10,7 @@ const (
 	KindPipette NodeKind = "pipette"
 )
 
-type Position struct {
-	X, Y float32
-}
+type Position struct{ X, Y float32 }
 
 type Node struct {
 	ID    string
@@ -25,11 +21,7 @@ type Node struct {
 	ComponentRefs []string
 }
 
-type Edge struct {
-	ID   string
-	From string
-	To   string
-}
+type Edge struct{ ID, From, To string }
 
 // BusinessOrder is protocol/business order, independent of layout positions.
 type WorkflowDocument struct {
@@ -40,15 +32,8 @@ type WorkflowDocument struct {
 	EdgeSeq       uint64
 }
 
-func (d *WorkflowDocument) nextNodeID() string {
-	d.NodeSeq++
-	return fmt.Sprintf("n%d", d.NodeSeq)
-}
-
-func (d *WorkflowDocument) nextEdgeID() string {
-	d.EdgeSeq++
-	return fmt.Sprintf("e%d", d.EdgeSeq)
-}
+func (d *WorkflowDocument) nextNodeID() string { d.NodeSeq++; return fmt.Sprintf("n%d", d.NodeSeq) }
+func (d *WorkflowDocument) nextEdgeID() string { d.EdgeSeq++; return fmt.Sprintf("e%d", d.EdgeSeq) }
 
 func (d WorkflowDocument) clone() WorkflowDocument {
 	out := d
@@ -83,22 +68,20 @@ func (d *WorkflowDocument) DeleteNode(id string) bool {
 		return false
 	}
 	d.Nodes = append(d.Nodes[:i], d.Nodes[i+1:]...)
-	// edges
 	filtered := d.Edges[:0]
-	for _, e := range d.Edges {
-		if e.From != id && e.To != id {
-			filtered = append(filtered, e)
+	for _, edge := range d.Edges {
+		if edge.From != id && edge.To != id {
+			filtered = append(filtered, edge)
 		}
 	}
 	d.Edges = filtered
-	// business order
-	bo := d.BusinessOrder[:0]
-	for _, x := range d.BusinessOrder {
-		if x != id {
-			bo = append(bo, x)
+	order := d.BusinessOrder[:0]
+	for _, nodeID := range d.BusinessOrder {
+		if nodeID != id {
+			order = append(order, nodeID)
 		}
 	}
-	d.BusinessOrder = bo
+	d.BusinessOrder = order
 	return true
 }
 
@@ -111,7 +94,7 @@ func (d *WorkflowDocument) DuplicateNode(id string) string {
 	n.ID = d.nextNodeID()
 	n.Pos.X += 24
 	n.Pos.Y += 24
-	n.Title = n.Title + " copy"
+	n.Title += " copy"
 	d.Nodes = append(d.Nodes, n)
 	d.BusinessOrder = append(d.BusinessOrder, n.ID)
 	return n.ID
@@ -160,9 +143,7 @@ type Editor struct {
 	OnChange      func()
 }
 
-func NewEditor() *Editor {
-	return &Editor{Zoom: 1}
-}
+func NewEditor() *Editor { return &Editor{Zoom: 1} }
 
 func (e *Editor) pushUndo() {
 	e.UndoStack = append(e.UndoStack, e.Doc.clone())
@@ -220,7 +201,11 @@ func (e *Editor) DuplicateSelected() string {
 	}
 	return id
 }
+
 func (e *Editor) Connect(from, to string) string {
+	if e.Doc.findNode(from) < 0 || e.Doc.findNode(to) < 0 || from == to {
+		return ""
+	}
 	e.pushUndo()
 	id := e.Doc.AddEdge(from, to)
 	if id != "" && e.OnChange != nil {
@@ -249,7 +234,6 @@ func (e *Editor) SelectNode(id string) {
 		e.OnSelect(id)
 	}
 }
-
 func (e *Editor) ClearSelection() {
 	e.SelectedNode = ""
 	e.SelectedEdge = ""

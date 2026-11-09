@@ -147,3 +147,89 @@ func TestScreenshot(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type persistedDesignService struct {
+	runs.DesignService
+	snapshot runs.DesignSnapshot
+	created  bool
+}
+
+func (s *persistedDesignService) ListDesigns(context.Context) ([]runs.DesignSummary, error) {
+	return nil, nil
+}
+
+func (s *persistedDesignService) LoadDesign(_ context.Context, _ string) (runs.DesignSnapshot, error) {
+	return s.snapshot, nil
+}
+
+func (s *persistedDesignService) SaveDesign(_ context.Context, input runs.DesignSaveInput) (runs.DesignSnapshot, error) {
+	s.snapshot = runs.DesignSnapshot{
+		DesignID: input.DesignID, Revision: input.ExpectedRevision + 1,
+		Title: "Saved design", Data: input.Changes,
+	}
+	return s.snapshot, nil
+}
+
+func (s *persistedDesignService) CreateRun(_ context.Context, designID, _ string) (runs.RunSnapshot, error) {
+	s.created = true
+	return runs.RunSnapshot{DesignID: designID, RunID: "run-created"}, nil
+}
+
+func (s *persistedDesignService) Close() error { return nil }
+
+func TestDesignerUIMapSaveReopenAndCreateRun(t *testing.T) {
+	svc := &persistedDesignService{snapshot: runs.DesignSnapshot{DesignID: "design-1", Revision: 2, Title: "Test"}}
+	d := New("design-1", "Test", 2, svc)
+	tt := ui.NewTester(func(c *ui.Context) { View(c, d) }, 1200, 760)
+	tt.Frame()
+	d.Editor.AddNode(workflow.KindFlask, "Flask", workflow.Position{X: 80, Y: 80})
+	d.SelectedNode = d.Editor.SelectedNode
+	if d.SelectedNode == "" {
+		t.Fatal("workflow editor did not create/select a step")
+	}
+	d.setNodeTitle(d.SelectedNode, "Incubate cells")
+	d.AssayIDDraft = assays.CCK8
+	d.StepAssays[d.SelectedNode] = assays.CCK8
+	d.Assays[assays.CCK8] = assays.Design{Timepoints: []string{"24 h"}}
+	d.SampleIDDraft, d.GroupIDDraft, d.WellTimepointDraft = "sample-1", "control", "24 h"
+	p := d.Assays[assays.CCK8]
+	p.Wells = []assays.WellAssignment{{WellID: "A1", SampleID: "sample-1", GroupID: "control", Replicate: 1, Timepoint: "24 h"}}
+	d.Assays[assays.CCK8] = p
+	d.Save(context.Background())
+	if d.SaveState != SaveSaved {
+		t.Fatalf("save state = %s (%s)", d.SaveState, d.Error)
+	}
+
+	reopened := New("design-1", "Test", 0, svc)
+	reopened.Load(context.Background(), "design-1")
+	if got := reopened.nodeTitle(reopened.Editor.Doc.Nodes[0].ID); got != "Incubate cells" {
+		t.Fatalf("reopened step title = %q", got)
+	}
+	if got := reopened.Assays[assays.CCK8].Wells; len(got) != 1 || got[0].WellID != "A1" {
+		t.Fatalf("reopened mapping = %+v", got)
+	}
+	tt = ui.NewTester(func(c *ui.Context) { View(c, reopened) }, 1200, 760)
+	tt.Frame()
+	f, err := os.Create("designer-mapping-roundtrip.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, tt.Image()); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened.setNodeTitle(reopened.Editor.Doc.Nodes[0].ID, "Updated step")
+	var created runs.RunSnapshot
+	reopened.OnCreateRun = func(s runs.RunSnapshot) { created = s }
+	reopened.CreateRun(context.Background())
+	if !svc.created || created.RunID != "run-created" {
+		t.Fatalf("Core CreateRun not reached: created=%v run=%+v", svc.created, created)
+	}
+	if reopened.Dirty || reopened.SaveState != SaveSaved {
+		t.Fatalf("CreateRun did not save current draft: state=%s dirty=%v", reopened.SaveState, reopened.Dirty)
+	}
+}

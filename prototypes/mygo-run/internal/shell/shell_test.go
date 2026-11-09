@@ -140,3 +140,40 @@ func TestShellUserDimensions1186x753(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProjectWorkspaceDataAndActions(t *testing.T) {
+	project, created, imported, continued := "", false, false, false
+	s := &Shell{
+		Page: Project, Projects: []string{"Study A"},
+		Designs: []DesignItem{{ID: "design-1", Title: "Design A", Meta: "Edited today"}},
+		RecentRuns: []RecentRun{{ID: "run-1", Title: "Run A", Meta: "Saved"}},
+		OnProject: func(v string) { project = v },
+		OnCreate: func() { created = true }, OnImport: func() { imported = true },
+		OnContinue: func() { continued = true },
+	}
+	tt := ui.NewTester(func(c *ui.Context) { View(c, s) }, 900, 600)
+	tt.Frame()
+	for _, text := range []string{"项目工作区", "Study A", "Design A", "Run A", "暂无项目"} {
+		if tt.HasText(text) == (text == "暂无项目") { t.Fatalf("unexpected workspace text %q: %v", text, tt.Texts()) }
+	}
+	for _, label := range []string{"Study A", "新建设计", "导入", "继续上次工作"} {
+		if err := tt.Click(label); err != nil { t.Fatal(err) }
+		tt.Frame()
+	}
+	if project != "Study A" || !created || !imported || !continued { t.Fatal("workspace action callback not invoked") }
+}
+
+func TestShellResponsiveThemeScreenshots(t *testing.T) {
+	for _, size := range []struct{ w, h int; label string }{{1186, 753, "1186x753"}, {900, 600, "900x600"}} {
+		for _, dark := range []bool{false, true} {
+			name := "light"
+			if dark { name = "dark" }
+			tt := ui.NewTesterWith(func(c *ui.Context) { View(c, &Shell{Page: Project}) }, size.w, size.h, ui.TesterOptions{Dark: dark})
+			tt.Frame()
+			f, err := os.Create("evidence-shell-" + size.label + "-" + name + ".png")
+			if err != nil { t.Fatal(err) }
+			if err := png.Encode(f, tt.Image()); err != nil { f.Close(); t.Fatal(err) }
+			if err := f.Close(); err != nil { t.Fatal(err) }
+		}
+	}
+}
