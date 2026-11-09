@@ -230,12 +230,16 @@ func (e *Editor) Connect(from, to string) string {
 }
 
 func (e *Editor) MoveNode(id string, pos Position) bool {
+	i := e.Doc.findNode(id)
+	if i < 0 || e.Doc.Nodes[i].Pos == pos {
+		return false
+	}
 	e.pushUndo()
-	ok := e.Doc.MoveNode(id, pos)
-	if ok && e.OnChange != nil {
+	e.Doc.Nodes[i].Pos = pos
+	if e.OnChange != nil {
 		e.OnChange()
 	}
-	return ok
+	return true
 }
 
 func (e *Editor) SelectNode(id string) {
