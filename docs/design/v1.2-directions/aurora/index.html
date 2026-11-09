@@ -1,0 +1,1538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1200, height=760, initial-scale=1.0">
+  <title>AsterLab — CCK-8 Designer [Aurora / Raycast × Cursor]</title>
+  <style>
+    :root {
+      --bg-base: #080B10;
+      --bg-panel: #0D1117;
+      --bg-surface: #161B22;
+      --bg-surface-hover: #1F242C;
+      --bg-surface-active: #242B35;
+      --bg-overlay: rgba(13, 17, 23, 0.85);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-medium: rgba(255, 255, 255, 0.15);
+      --border-glow: rgba(34, 211, 238, 0.45);
+      --cyan-accent: #22D3EE;
+      --cyan-bright: #67E8F9;
+      --teal-accent: #06B6D4;
+      --teal-deep: #0D9488;
+      --teal-dim: rgba(34, 211, 238, 0.12);
+      --text-primary: #F0F6FC;
+      --text-secondary: #8B949E;
+      --text-muted: #484F58;
+      --badge-dirty: #F59E0B;
+      --badge-saved: #10B981;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Inter", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", Consolas, Menlo, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background-color: #030508;
+      font-family: var(--font-sans);
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Strict 1200x760 Workbench Container */
+    #app-container {
+      width: 1200px;
+      height: 760px;
+      background-color: var(--bg-base);
+      border-radius: 8px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 1. Titlebar (40px) */
+    .titlebar {
+      height: 40px;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      z-index: 20;
+    }
+
+    .titlebar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .traffic-lights {
+      display: flex;
+      gap: 7px;
+    }
+    .traffic-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+    .traffic-close { background: #FF5F56; }
+    .traffic-min { background: #FFBD2E; }
+    .traffic-max { background: #27C93F; }
+
+    .brand-mark {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--cyan-accent);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-left: 4px;
+    }
+    .brand-mark svg {
+      width: 14px;
+      height: 14px;
+      fill: var(--cyan-accent);
+    }
+
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      border-left: 1px solid var(--border-subtle);
+      padding-left: 12px;
+    }
+    .breadcrumb-proj {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+    .breadcrumb-sep {
+      color: var(--text-muted);
+    }
+    .breadcrumb-item {
+      color: var(--cyan-bright);
+      font-weight: 600;
+    }
+    .rev-badge {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      background: rgba(34, 211, 238, 0.1);
+      border: 1px solid rgba(34, 211, 238, 0.3);
+      color: var(--cyan-accent);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    .titlebar-center {
+      display: flex;
+      align-items: center;
+    }
+
+    .cmd-trigger {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .cmd-trigger:hover {
+      border-color: var(--border-glow);
+      color: var(--text-primary);
+      background: var(--bg-surface-hover);
+    }
+    .kbd-pill {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--text-secondary);
+    }
+
+    .titlebar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--badge-dirty);
+      box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+      transition: all 0.3s ease;
+    }
+    .status-dot.saved {
+      background: var(--badge-saved);
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+    }
+
+    .save-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--teal-dim);
+      border: 1px solid var(--cyan-accent);
+      color: var(--cyan-accent);
+      padding: 4px 10px;
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .save-btn:hover {
+      background: rgba(34, 211, 238, 0.22);
+      box-shadow: 0 0 8px rgba(34, 211, 238, 0.3);
+    }
+
+    /* 2. Main Workbench Body (696px = 760 - 40 - 24) */
+    .workbench-body {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 200px 1fr 290px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 2.1 Left Sidebar (Assay Structure Tree) */
+    .sidebar {
+      background: var(--bg-panel);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .sidebar-section-header {
+      padding: 10px 12px 6px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .node-nav-list {
+      list-style: none;
+      padding: 0 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .node-nav-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 5px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .node-nav-item:hover {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+    }
+    .node-nav-item.active {
+      background: rgba(34, 211, 238, 0.08);
+      border-color: rgba(34, 211, 238, 0.3);
+      color: var(--cyan-accent);
+      font-weight: 600;
+    }
+
+    .node-idx {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      width: 14px;
+    }
+    .node-nav-item.active .node-idx {
+      color: var(--cyan-accent);
+    }
+
+    .node-icon-mini {
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .node-icon-mini svg {
+      width: 14px;
+      height: 14px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.6;
+    }
+
+    .sidebar-divider {
+      height: 1px;
+      background: var(--border-subtle);
+      margin: 12px 8px;
+    }
+
+    .resource-card {
+      margin: 0 8px 6px;
+      padding: 8px 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      font-size: 11px;
+    }
+    .resource-title {
+      color: var(--text-primary);
+      font-weight: 600;
+      margin-bottom: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .resource-tag {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 1px 4px;
+      border-radius: 3px;
+      color: var(--text-secondary);
+    }
+    .resource-desc {
+      color: var(--text-secondary);
+      font-size: 10px;
+      line-height: 1.4;
+    }
+
+    /* 2.2 Central Workspace: Split Canvas & Microplate */
+    .center-workspace {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg-base);
+    }
+
+    /* Upper Canvas Zone (340px) */
+    .canvas-zone {
+      height: 340px;
+      border-bottom: 1px solid var(--border-subtle);
+      position: relative;
+      background-image: 
+        radial-gradient(rgba(34, 211, 238, 0.08) 1px, transparent 1px),
+        radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 24px 24px, 12px 12px;
+      background-position: 0 0, 12px 12px;
+      overflow: hidden;
+    }
+
+    .canvas-hud {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .hud-left, .hud-right {
+      display: flex;
+      gap: 6px;
+      pointer-events: auto;
+    }
+
+    .hud-btn {
+      background: rgba(13, 17, 23, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .hud-btn:hover {
+      border-color: var(--cyan-accent);
+      color: var(--text-primary);
+      background: rgba(22, 27, 34, 0.95);
+    }
+    .hud-btn.active {
+      color: var(--cyan-accent);
+      border-color: rgba(34, 211, 238, 0.4);
+      background: rgba(34, 211, 238, 0.1);
+    }
+
+    /* SVG Canvas Overlay for Nodes & Edges */
+    .workflow-svg {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    /* Lower Zone: 96-Well Microplate Matrix (356px) */
+    .plate-zone {
+      flex: 1;
+      background: var(--bg-panel);
+      padding: 10px 14px 6px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .plate-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .plate-title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .plate-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--text-primary);
+    }
+    .plate-subtitle {
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+    }
+
+    .plate-legend {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .legend-chip {
+      width: 9px;
+      height: 9px;
+      border-radius: 2px;
+    }
+
+    .chip-blank { background: #161B22; border: 1px solid #30363D; }
+    .chip-ctrl { background: #0E3A42; border: 1px solid #0891B2; }
+    .chip-dox1 { background: #083344; border: 1px solid #06B6D4; }
+    .chip-dox2 { background: #0C4A6E; border: 1px solid #0EA5E9; }
+    .chip-dox3 { background: #075985; border: 1px solid #38BDF8; }
+    .chip-dox4 { background: #0369A1; border: 1px solid #22D3EE; }
+    .chip-dox5 { background: #0284C7; border: 1px solid #67E8F9; }
+    .chip-dox6 { background: #0369A1; border: 1px solid #A5F3FC; }
+
+    /* Microplate Matrix Grid */
+    .plate-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #090C10;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 6px 12px;
+      position: relative;
+    }
+
+    .plate-matrix {
+      display: grid;
+      grid-template-columns: 24px repeat(12, 1fr);
+      grid-template-rows: 18px repeat(8, 1fr);
+      gap: 4px;
+      width: 100%;
+      max-width: 660px;
+      height: 100%;
+      max-height: 270px;
+    }
+
+    .matrix-header-col {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .matrix-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .well {
+      border-radius: 50%;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      aspect-ratio: 1 / 1;
+    }
+    .well:hover {
+      transform: scale(1.28);
+      z-index: 15;
+      border-color: #FFFFFF !important;
+      box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+    }
+    .well.selected {
+      border-color: #FFFFFF !important;
+      box-shadow: 0 0 0 2px var(--cyan-accent);
+      transform: scale(1.15);
+    }
+
+    /* Well Tooltip (Raycast Floater) */
+    .well-tooltip {
+      position: absolute;
+      bottom: 12px;
+      right: 16px;
+      background: var(--bg-overlay);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(34, 211, 238, 0.3);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      pointer-events: none;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    }
+    .wt-coord {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--cyan-accent);
+    }
+    .wt-group {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+    .wt-detail {
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      font-size: 10px;
+    }
+
+    /* 2.3 Right Inspector Panel */
+    .inspector {
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .inspector-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-surface);
+    }
+    .inspector-tab {
+      flex: 1;
+      padding: 8px 0;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .inspector-tab:hover {
+      color: var(--text-primary);
+    }
+    .inspector-tab.active {
+      color: var(--cyan-accent);
+      border-bottom-color: var(--cyan-accent);
+      background: rgba(34, 211, 238, 0.04);
+    }
+
+    .inspector-content {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .param-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .param-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .param-unit {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .param-input {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 5px;
+      padding: 6px 9px;
+      font-size: 12px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .param-input:focus {
+      border-color: var(--cyan-accent);
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.2);
+    }
+    .param-input.mono {
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .param-select {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 5px;
+      padding: 6px 9px;
+      font-size: 12px;
+      color: var(--text-primary);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .contract-check-card {
+      background: rgba(13, 148, 136, 0.08);
+      border: 1px solid rgba(13, 148, 136, 0.25);
+      border-radius: 6px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .contract-check-header {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--cyan-accent);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .check-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .check-icon {
+      color: #10B981;
+      font-size: 12px;
+    }
+
+    /* 3. Status Bar (24px) */
+    .statusbar {
+      height: 24px;
+      background: #06090D;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      z-index: 20;
+    }
+    .sb-left, .sb-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .sb-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .sb-cyan {
+      color: var(--cyan-accent);
+    }
+
+    /* 4. Floating Command Palette (Raycast Modal) */
+    .cmd-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(4, 7, 12, 0.65);
+      backdrop-filter: blur(14px);
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 80px;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+    .cmd-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .cmd-modal {
+      width: 580px;
+      background: rgba(13, 17, 23, 0.94);
+      border: 1px solid rgba(34, 211, 238, 0.35);
+      border-radius: 10px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.9), 0 0 24px rgba(34, 211, 238, 0.15);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: translateY(-8px);
+      transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .cmd-overlay.open .cmd-modal {
+      transform: translateY(0);
+    }
+
+    .cmd-input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .cmd-input-wrap svg {
+      width: 16px;
+      height: 16px;
+      stroke: var(--cyan-accent);
+      fill: none;
+    }
+    .cmd-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-size: 14px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+    }
+    .cmd-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .cmd-results {
+      max-height: 320px;
+      overflow-y: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .cmd-group-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      padding: 6px 8px 2px;
+    }
+    .cmd-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all 0.1s ease;
+    }
+    .cmd-item:hover, .cmd-item.selected {
+      background: rgba(34, 211, 238, 0.12);
+      color: var(--cyan-bright);
+    }
+    .cmd-item-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .cmd-item-desc {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .cmd-shortcut {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--text-secondary);
+    }
+
+    .cmd-footer {
+      padding: 8px 14px;
+      background: #090C10;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .cmd-shortcuts-hints {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* Pulse Glow Animation for Selected Node / Active Bezier */
+    @keyframes pulseCyan {
+      0%, 100% { filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.7)); }
+      50% { filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.95)); }
+    }
+    .edge-active {
+      stroke: var(--cyan-accent);
+      stroke-width: 2.5;
+      animation: pulseCyan 3s infinite ease-in-out;
+    }
+    .edge-flow {
+      stroke-dasharray: 6 6;
+      animation: flowDash 1.2s linear infinite;
+    }
+    @keyframes flowDash {
+      from { stroke-dashoffset: 24; }
+      to { stroke-dashoffset: 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="app-container">
+    <!-- 1. Titlebar (40px) -->
+    <header class="titlebar">
+      <div class="titlebar-left">
+        <div class="traffic-lights">
+          <div class="traffic-dot traffic-close"></div>
+          <div class="traffic-dot traffic-min"></div>
+          <div class="traffic-dot traffic-max"></div>
+        </div>
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
+          AsterLab
+        </div>
+        <div class="breadcrumb">
+          <span class="breadcrumb-proj">PRJ-088: L929 生物毒性评价</span>
+          <span class="breadcrumb-sep">/</span>
+          <span class="breadcrumb-item">CCK-8 细胞活力检测设计</span>
+          <span class="rev-badge">rev 4</span>
+        </div>
+      </div>
+
+      <div class="titlebar-center">
+        <div class="cmd-trigger" id="cmd-trigger-btn" onclick="toggleCommandPalette(true)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span>搜索操作、节点、试剂或执行命令...</span>
+          <span class="kbd-pill">⌘K</span>
+        </div>
+      </div>
+
+      <div class="titlebar-right">
+        <div class="status-indicator">
+          <div class="status-dot" id="save-status-dot"></div>
+          <span id="save-status-text">未保存修改 (3项变更)</span>
+        </div>
+        <button class="save-btn" id="save-btn" onclick="triggerSave()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          <span>保存设计</span>
+          <span class="kbd-pill" style="color: inherit; border-color: currentColor;">⌘S</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. Main Workbench Body -->
+    <main class="workbench-body">
+      <!-- 2.1 Left Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-section-header">
+          <span>实验流程结构 (5)</span>
+          <span style="font-family: var(--font-mono); color: var(--cyan-accent);">100%</span>
+        </div>
+        <ul class="node-nav-list" id="node-nav-list">
+          <li class="node-nav-item" onclick="selectNode(1)">
+            <span class="node-idx">01</span>
+            <span class="node-icon-mini">
+              <svg viewBox="0 0 24 24"><path d="M10 2v7.31L4.1 19.46A2 2 0 0 0 5.8 22h12.4a2 2 0 0 0 1.7-2.54L14 9.31V2"/></svg>
+            </span>
+            <span>细胞悬液制备</span>
+          </li>
+          <li class="node-nav-item" onclick="selectNode(2)">
+            <span class="node-idx">02</span>
+            <span class="node-icon-mini">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </span>
+            <span>96孔板接种</span>
+          </li>
+          <li class="node-nav-item active" onclick="selectNode(3)">
+            <span class="node-idx">03</span>
+            <span class="node-icon-mini">
+              <svg viewBox="0 0 24 24"><path d="m19 5-7 7-7-7"/><path d="m19 12-7 7-7-7"/></svg>
+            </span>
+            <span>梯度给药 (Dox)</span>
+          </li>
+          <li class="node-nav-item" onclick="selectNode(4)">
+            <span class="node-idx">04</span>
+            <span class="node-icon-mini">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+            <span>CCK-8 孵育</span>
+          </li>
+          <li class="node-nav-item" onclick="selectNode(5)">
+            <span class="node-idx">05</span>
+            <span class="node-icon-mini">
+              <svg viewBox="0 0 24 24"><path d="M2 12h20"/><path d="M12 2v20"/></svg>
+            </span>
+            <span>酶标仪读板测定</span>
+          </li>
+        </ul>
+
+        <div class="sidebar-divider"></div>
+
+        <div class="sidebar-section-header">
+          <span>关键耗材与试剂</span>
+        </div>
+        <div class="resource-card">
+          <div class="resource-title">
+            <span>Dojindo CCK-8</span>
+            <span class="resource-tag">CK04</span>
+          </div>
+          <div class="resource-desc">WST-8 比色试剂盒 · 避光 4℃ 存储 · 批号 20261018</div>
+        </div>
+        <div class="resource-card">
+          <div class="resource-title">
+            <span>Corning 96孔黑框板</span>
+            <span class="resource-tag">TC-Treated</span>
+          </div>
+          <div class="resource-desc">透明平底 · 防交叉污染设计 · #3599</div>
+        </div>
+        <div class="resource-card">
+          <div class="resource-title">
+            <span>L929 小鼠成纤维细胞</span>
+            <span class="resource-tag">P12</span>
+          </div>
+          <div class="resource-desc">活力 96.8% · 密度 1.0×10⁴ 孔 · DMEM 培养</div>
+        </div>
+      </aside>
+
+      <!-- 2.2 Center Canvas & Microplate -->
+      <section class="center-workspace">
+        <!-- Canvas Zone (340px) -->
+        <div class="canvas-zone">
+          <div class="canvas-hud">
+            <div class="hud-left">
+              <button class="hud-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg> 适应画布</button>
+              <button class="hud-btn active">100%</button>
+              <button class="hud-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 添加步骤</button>
+            </div>
+            <div class="hud-right">
+              <button class="hud-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> 撤销</button>
+              <button class="hud-btn" style="color: var(--cyan-accent); border-color: rgba(34, 211, 238, 0.4);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> 运行模拟</button>
+            </div>
+          </div>
+
+          <!-- Flowchart SVG Canvas -->
+          <svg class="workflow-svg" viewBox="0 0 710 340">
+            <defs>
+              <!-- Glowing Filter for Luminous Edge -->
+              <filter id="cyanGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <!-- Arrowhead Marker -->
+              <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 8 5 L 0 9 z" fill="#22D3EE" />
+              </marker>
+              <marker id="arrowMuted" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1 L 8 5 L 0 9 z" fill="#484F58" />
+              </marker>
+            </defs>
+
+            <!-- Bezier Edges between nodes -->
+            <!-- 1 -> 2 -->
+            <path d="M 125 155 C 145 155, 145 155, 165 155" stroke="#22D3EE" stroke-width="2" fill="none" marker-end="url(#arrow)" />
+            <!-- 2 -> 3 (Active selected connection) -->
+            <path class="edge-active edge-flow" d="M 285 155 C 305 155, 305 155, 325 155" stroke="#22D3EE" stroke-width="2.5" fill="none" marker-end="url(#arrow)" filter="url(#cyanGlow)" />
+            <!-- 3 -> 4 (Active selected connection out) -->
+            <path class="edge-active edge-flow" d="M 445 155 C 465 155, 465 155, 485 155" stroke="#22D3EE" stroke-width="2.5" fill="none" marker-end="url(#arrow)" filter="url(#cyanGlow)" />
+            <!-- 4 -> 5 -->
+            <path d="M 605 155 C 625 155, 625 155, 645 155" stroke="#22D3EE" stroke-width="2" fill="none" marker-end="url(#arrow)" />
+
+            <!-- NODE 01: 细胞悬液 -->
+            <g transform="translate(15, 105)" onclick="selectNode(1)" style="cursor: pointer;">
+              <rect width="110" height="100" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+              <rect x="8" y="8" width="24" height="24" rx="4" fill="rgba(255,255,255,0.05)"/>
+              <path d="M16 13 v5 l4 4 h-12 l4 -4 v-5" stroke="#8B949E" stroke-width="1.5" fill="none"/>
+              <text x="38" y="24" font-family="var(--font-sans)" font-size="11" font-weight="600" fill="#F0F6FC">01 细胞悬液</text>
+              <text x="12" y="52" font-family="var(--font-mono)" font-size="10" fill="#8B949E">L929 悬液</text>
+              <rect x="10" y="68" width="90" height="20" rx="3" fill="#0D1117"/>
+              <text x="16" y="82" font-family="var(--font-mono)" font-size="9" fill="#22D3EE">1.0×10⁴/孔</text>
+              <!-- Port Out -->
+              <circle cx="110" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5"/>
+            </g>
+
+            <!-- NODE 02: 96孔板接种 -->
+            <g transform="translate(165, 105)" onclick="selectNode(2)" style="cursor: pointer;">
+              <rect width="120" height="100" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+              <circle cx="0" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5"/>
+              <rect x="8" y="8" width="24" height="24" rx="4" fill="rgba(255,255,255,0.05)"/>
+              <rect x="13" y="14" width="14" height="12" rx="1" stroke="#8B949E" stroke-width="1.4" fill="none"/>
+              <text x="38" y="24" font-family="var(--font-sans)" font-size="11" font-weight="600" fill="#F0F6FC">02 微孔接种</text>
+              <text x="12" y="52" font-family="var(--font-mono)" font-size="10" fill="#8B949E">100 µL / 孔</text>
+              <rect x="10" y="68" width="100" height="20" rx="3" fill="#0D1117"/>
+              <text x="16" y="82" font-family="var(--font-mono)" font-size="9" fill="#22D3EE">37℃, 24h 贴壁</text>
+              <circle cx="120" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5"/>
+            </g>
+
+            <!-- NODE 03: 梯度给药 (ACTIVE SELECTED) -->
+            <g transform="translate(325, 95)" onclick="selectNode(3)" style="cursor: pointer;">
+              <!-- Outer Luminous Glow Box -->
+              <rect width="120" height="120" rx="8" fill="#121824" stroke="#22D3EE" stroke-width="2" filter="url(#cyanGlow)"/>
+              <circle cx="0" cy="60" r="5" fill="#22D3EE" stroke="#FFFFFF" stroke-width="1.5"/>
+              <rect x="8" y="8" width="26" height="26" rx="5" fill="rgba(34, 211, 238, 0.15)"/>
+              <!-- Syringe / Gradient Icon -->
+              <path d="M14 26 l12 -12 M22 10 l4 4 M12 28 l-2 -2" stroke="#22D3EE" stroke-width="1.8" fill="none"/>
+              <text x="40" y="24" font-family="var(--font-sans)" font-size="11" font-weight="700" fill="#FFFFFF">03 梯度给药</text>
+              <rect x="40" y="30" width="46" height="14" rx="3" fill="rgba(34, 211, 238, 0.2)"/>
+              <text x="44" y="41" font-family="var(--font-mono)" font-size="8.5" font-weight="700" fill="#22D3EE">● 焦点步骤</text>
+              <text x="12" y="64" font-family="var(--font-sans)" font-size="10" fill="#8B949E">阿霉素 (Dox)</text>
+              <text x="12" y="78" font-family="var(--font-mono)" font-size="9.5" fill="#67E8F9">6 浓度梯度 (n=6)</text>
+              <rect x="8" y="88" width="104" height="22" rx="3" fill="#080C14" stroke="rgba(34, 211, 238, 0.3)" stroke-width="1"/>
+              <text x="14" y="103" font-family="var(--font-mono)" font-size="9" fill="#22D3EE">0.1 ~ 50 µM (10 µL)</text>
+              <circle cx="120" cy="60" r="5" fill="#22D3EE" stroke="#FFFFFF" stroke-width="1.5"/>
+            </g>
+
+            <!-- NODE 04: CCK-8 孵育 -->
+            <g transform="translate(485, 105)" onclick="selectNode(4)" style="cursor: pointer;">
+              <rect width="120" height="100" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+              <circle cx="0" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5"/>
+              <rect x="8" y="8" width="24" height="24" rx="4" fill="rgba(255,255,255,0.05)"/>
+              <circle cx="20" cy="20" r="6" stroke="#8B949E" stroke-width="1.4" fill="none"/>
+              <text x="38" y="24" font-family="var(--font-sans)" font-size="11" font-weight="600" fill="#F0F6FC">04 CCK-8 孵育</text>
+              <text x="12" y="52" font-family="var(--font-mono)" font-size="10" fill="#8B949E">10 µL/孔 · 避光</text>
+              <rect x="10" y="68" width="100" height="20" rx="3" fill="#0D1117"/>
+              <text x="16" y="82" font-family="var(--font-mono)" font-size="9" fill="#22D3EE">37℃ 孵育 2.0 h</text>
+              <circle cx="120" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5"/>
+            </g>
+
+            <!-- NODE 05: 酶标仪读板 -->
+            <g transform="translate(645, 105)" onclick="selectNode(5)" style="cursor: pointer;">
+              <rect width="120" height="100" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+              <circle cx="0" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5"/>
+              <rect x="8" y="8" width="24" height="24" rx="4" fill="rgba(255,255,255,0.05)"/>
+              <path d="M14 16 h12 v8 h-12 z" stroke="#8B949E" stroke-width="1.4" fill="none"/>
+              <text x="38" y="24" font-family="var(--font-sans)" font-size="11" font-weight="600" fill="#F0F6FC">05 酶标读板</text>
+              <text x="12" y="52" font-family="var(--font-mono)" font-size="10" fill="#8B949E">OD450 比色</text>
+              <rect x="10" y="68" width="100" height="20" rx="3" fill="#0D1117"/>
+              <text x="16" y="82" font-family="var(--font-mono)" font-size="9" fill="#22D3EE">5s 震板 · 终点法</text>
+            </g>
+          </svg>
+        </div>
+
+        <!-- Lower Zone: 96-Well Plate Matrix (356px) -->
+        <div class="plate-zone">
+          <div class="plate-header">
+            <div class="plate-title-group">
+              <span class="plate-title">96 孔微孔板布局映射 (Corning #3599)</span>
+              <span class="plate-subtitle">当前分配: 60 / 96 孔 · 边缘蒸发保护开启</span>
+            </div>
+            <div class="plate-legend">
+              <div class="legend-item"><div class="legend-chip chip-blank"></div><span>空白/PBS</span></div>
+              <div class="legend-item"><div class="legend-chip chip-ctrl"></div><span>Control</span></div>
+              <div class="legend-item"><div class="legend-chip chip-dox1"></div><span>0.1 µM</span></div>
+              <div class="legend-item"><div class="legend-chip chip-dox2"></div><span>0.5 µM</span></div>
+              <div class="legend-item"><div class="legend-chip chip-dox3"></div><span>1.0 µM</span></div>
+              <div class="legend-item"><div class="legend-chip chip-dox4"></div><span>5.0 µM</span></div>
+              <div class="legend-item"><div class="legend-chip chip-dox5"></div><span>10 µM</span></div>
+              <div class="legend-item"><div class="legend-chip chip-dox6"></div><span>50 µM</span></div>
+            </div>
+          </div>
+
+          <div class="plate-container">
+            <div class="plate-matrix" id="plate-grid">
+              <!-- Dynamically populated 8x12 via JS -->
+            </div>
+
+            <!-- Floating Well Tooltip -->
+            <div class="well-tooltip" id="well-tooltip">
+              <span class="wt-coord" id="wt-coord">D05</span>
+              <span class="wt-group" id="wt-group">Dox 0.5 µM (给药组)</span>
+              <span class="wt-detail" id="wt-detail">100 µL 培养基 + 10 µL 药液 · Rep 4/6</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2.3 Right Inspector Panel -->
+      <aside class="inspector">
+        <div class="inspector-tabs">
+          <div class="inspector-tab active" onclick="switchTab(this, 'tab-params')">参数配置</div>
+          <div class="inspector-tab" onclick="switchTab(this, 'tab-quality')">质控合约</div>
+          <div class="inspector-tab" onclick="switchTab(this, 'tab-export')">自动化代码</div>
+        </div>
+
+        <div class="inspector-content" id="tab-params">
+          <div class="param-group">
+            <label class="param-label">步骤名称</label>
+            <input type="text" class="param-input" value="梯度给药 (Doxorubicin)" />
+          </div>
+
+          <div class="param-group">
+            <label class="param-label">
+              <span>给药化合物</span>
+              <span class="param-unit">CAS: 25316-40-9</span>
+            </label>
+            <input type="text" class="param-input mono" value="阿霉素盐酸盐 (Doxorubicin HCl)" />
+          </div>
+
+          <div class="param-group">
+            <label class="param-label">
+              <span>溶剂与母液体系</span>
+              <span class="param-unit">DMSO &lt; 0.1%</span>
+            </label>
+            <select class="param-select">
+              <option selected>10 mM DMSO 母液 → DMEM 培养基梯度稀释</option>
+              <option>无菌 PBS 1× 溶解直接加药</option>
+            </select>
+          </div>
+
+          <div class="param-group">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div>
+                <label class="param-label">单孔加药体积</label>
+                <input type="text" class="param-input mono" value="10.0 µL" />
+              </div>
+              <div>
+                <label class="param-label">预估操作耗时</label>
+                <input type="text" class="param-input mono" value="12 min" />
+              </div>
+            </div>
+          </div>
+
+          <div class="param-group">
+            <label class="param-label">
+              <span>给药后孵育时间</span>
+              <span class="param-unit">37℃, 5% CO₂</span>
+            </label>
+            <input type="text" class="param-input mono" value="24.0 h (标准耐药动力学)" />
+          </div>
+
+          <div class="param-group">
+            <label class="param-label">移液策略与工作台分配</label>
+            <select class="param-select">
+              <option selected>8通道排枪多孔同步点样 (OT-2 Pipetting)</option>
+              <option>手动单通道精密移液 (防交叉残留)</option>
+            </select>
+          </div>
+
+          <div class="contract-check-card">
+            <div class="contract-check-header">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>CCK-8 自动化验证合约 (Pass)</span>
+            </div>
+            <div class="check-item"><span class="check-icon">✓</span><span>边缘保护: A1-H1, A12-H12 已注 PBS</span></div>
+            <div class="check-item"><span class="check-icon">✓</span><span>技术重复数: 6 复孔平衡随机 (满足 n≥3)</span></div>
+            <div class="check-item"><span class="check-icon">✓</span><span>终浓度 DMSO 0.05% &lt; 0.1% 细胞耐受阈值</span></div>
+          </div>
+        </div>
+
+        <div class="inspector-content" id="tab-quality" style="display: none;">
+          <div class="contract-check-card" style="background: rgba(34, 211, 238, 0.06); border-color: rgba(34, 211, 238, 0.3);">
+            <div class="contract-check-header">ISO 10993-5 生物相容性合规</div>
+            <p style="font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
+              本实验设计满足医疗器械体外细胞毒性评定规范。阴性对照 (Control) 细胞存活率需 &gt; 90%，高浓度梯度需跨越 IC50 剂量。
+            </p>
+          </div>
+        </div>
+
+        <div class="inspector-content" id="tab-export" style="display: none;">
+          <textarea class="param-input mono" style="height: 220px; font-size: 10px; line-height: 1.4;" readonly>
+# Opentrons OT-2 Protocol (Auto-generated by AsterLab Aurora)
+from opentrons import protocol_api
+
+metadata = {
+    'protocolName': 'L929 CCK-8 Doxorubicin Gradient',
+    'author': 'AsterLab Core v1.2',
+    'apiLevel': '2.13'
+}
+
+def run(protocol: protocol_api.ProtocolContext):
+    plate = protocol.load_labware('corning_96_wellplate_360ul_flat', 1)
+    tiprack = protocol.load_labware('opentrons_96_tiprack_20ul', 2)
+    p20 = protocol.load_instrument('p20_multi_gen2', 'left', tip_racks=[tiprack])
+    
+    # Dispense 10 uL Dox gradient to rows B-G, cols 3-10
+    # ...
+          </textarea>
+        </div>
+      </aside>
+    </main>
+
+    <!-- 3. Status Bar (24px) -->
+    <footer class="statusbar">
+      <div class="sb-left">
+        <div class="sb-item">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
+          <span>git: feature/cck8-l929</span>
+        </div>
+        <div class="sb-item">
+          <span class="sb-cyan">●</span>
+          <span>板位占用: 60/96 孔 (62.5%)</span>
+        </div>
+        <div class="sb-item">
+          <span>当前步骤: 03. 梯度给药 (Doxorubicin)</span>
+        </div>
+      </div>
+
+      <div class="sb-right">
+        <div class="sb-item"><span>UTF-8</span></div>
+        <div class="sb-item"><span>Assay Contract: Pass</span></div>
+        <div class="sb-item"><span class="sb-cyan">Core FFI: 1.8ms</span></div>
+        <div class="sb-item" style="color: var(--cyan-accent); font-weight: 600;">⚡ Aurora Theme</div>
+      </div>
+    </footer>
+
+    <!-- 4. Floating Command Palette (Raycast Modal) -->
+    <div class="cmd-overlay" id="cmd-overlay" onclick="handleOverlayClick(event)">
+      <div class="cmd-modal">
+        <div class="cmd-input-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" class="cmd-input" id="cmd-search-input" placeholder="键入命令、添加试剂、或搜索孔板算法..." autofocus oninput="filterCommands(this.value)">
+          <span class="kbd-pill">ESC</span>
+        </div>
+        <div class="cmd-results" id="cmd-results-list">
+          <div class="cmd-group-label">孔板布局算法与优化</div>
+          <div class="cmd-item selected" onclick="executeCommand('fill-buffer')">
+            <div class="cmd-item-left">
+              <span>▦ 一键填充边缘蒸发缓冲孔 (PBS 200 µL)</span>
+              <span class="cmd-item-desc">保护 36 孔边缘免受培养箱对流挥发</span>
+            </div>
+            <span class="cmd-shortcut">↵ Enter</span>
+          </div>
+          <div class="cmd-item" onclick="executeCommand('randomize')">
+            <div class="cmd-item-left">
+              <span>⇄ 应用平衡随机化孔板分布 (6×6 棋盘)</span>
+              <span class="cmd-item-desc">消除加药时间差导致的系统误差</span>
+            </div>
+            <span class="cmd-shortcut">⌘R</span>
+          </div>
+
+          <div class="cmd-group-label">流程与节点操作</div>
+          <div class="cmd-item" onclick="executeCommand('add-gradient')">
+            <div class="cmd-item-left">
+              <span>＋ 插入等比稀释梯度计算器 (Dilution Calculator)</span>
+              <span class="cmd-item-desc">自动计算 DMSO 母液与完全培养基配比</span>
+            </div>
+            <span class="cmd-shortcut">⌘G</span>
+          </div>
+          <div class="cmd-item" onclick="executeCommand('validate')">
+            <div class="cmd-item-left">
+              <span>⚡ 执行完整实验合约预检 (Pre-flight Validate)</span>
+              <span class="cmd-item-desc">验证体积、耗材适配性与技术重复数</span>
+            </div>
+            <span class="cmd-shortcut">⌘V</span>
+          </div>
+
+          <div class="cmd-group-label">自动化与导出</div>
+          <div class="cmd-item" onclick="executeCommand('export-ot2')">
+            <div class="cmd-item-left">
+              <span>▷ 生成 Opentrons OT-2 移液工作站脚本</span>
+              <span class="cmd-item-desc">导出标准 Python protocol</span>
+            </div>
+            <span class="cmd-shortcut">⌘E</span>
+          </div>
+        </div>
+        <div class="cmd-footer">
+          <div class="cmd-shortcuts-hints">
+            <span>↑↓ 导航</span>
+            <span>↵ 执行</span>
+            <span>ESC 关闭</span>
+          </div>
+          <span>AsterLab Raycast Engine · 24ms</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 1. 96-Well Plate Matrix Generator
+    const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    const cols = 12;
+    const plateGrid = document.getElementById('plate-grid');
+    const wtCoord = document.getElementById('wt-coord');
+    const wtGroup = document.getElementById('wt-group');
+    const wtDetail = document.getElementById('wt-detail');
+
+    // Group definitions
+    function getWellInfo(r, c) {
+      const coord = `${r}${c < 10 ? '0' + c : c}`;
+      // Outer border: Blank / Buffer
+      if (c === 1 || c === 12 || r === 'A' || r === 'H') {
+        return {
+          bg: '#161B22',
+          border: '#30363D',
+          group: 'Blank / PBS 蒸发保护',
+          detail: '200 µL 灭菌 PBS · 无细胞'
+        };
+      }
+      // Control (Col 2)
+      if (c === 2) {
+        return {
+          bg: '#0E3A42',
+          border: '#0891B2',
+          group: 'Control (0 µM Vehicle)',
+          detail: '100 µL 细胞 + 10 µL 0.1% DMSO · 阴性对照'
+        };
+      }
+      // Dox Gradients (Cols 3 to 8)
+      const gradients = [
+        { conc: '0.1 µM', bg: '#083344', border: '#06B6D4' },
+        { conc: '0.5 µM', bg: '#0C4A6E', border: '#0EA5E9' },
+        { conc: '1.0 µM', bg: '#075985', border: '#38BDF8' },
+        { conc: '5.0 µM', bg: '#0369A1', border: '#22D3EE' },
+        { conc: '10 µM',  bg: '#0284C7', border: '#67E8F9' },
+        { conc: '50 µM',  bg: '#0369A1', border: '#A5F3FC' }
+      ];
+      if (c >= 3 && c <= 8) {
+        const tier = gradients[c - 3];
+        const rep = (r.charCodeAt(0) - 65); // 0-5
+        return {
+          bg: tier.bg,
+          border: tier.border,
+          group: `Dox ${tier.conc} (给药组)`,
+          detail: `100 µL 细胞 + 10 µL 药液 · Rep ${rep}/6`
+        };
+      }
+      // Empty wells for remaining
+      return {
+        bg: '#0D1117',
+        border: 'rgba(255,255,255,0.06)',
+        group: '备用孔 (Unassigned)',
+        detail: '未分配液体 · 空置'
+      };
+    }
+
+    // Render Matrix Headers and Wells
+    function initPlate() {
+      // Top Left blank corner
+      const corner = document.createElement('div');
+      plateGrid.appendChild(corner);
+
+      // Col numbers 1..12
+      for (let c = 1; c <= 12; c++) {
+        const colHeader = document.createElement('div');
+        colHeader.className = 'matrix-header-col';
+        colHeader.innerText = c;
+        plateGrid.appendChild(colHeader);
+      }
+
+      // Rows A..H with row header then 12 wells
+      rows.forEach(r => {
+        const rowHeader = document.createElement('div');
+        rowHeader.className = 'matrix-header-row';
+        rowHeader.innerText = r;
+        plateGrid.appendChild(rowHeader);
+
+        for (let c = 1; c <= 12; c++) {
+          const well = document.createElement('div');
+          well.className = 'well';
+          const info = getWellInfo(r, c);
+          well.style.backgroundColor = info.bg;
+          well.style.borderColor = info.border;
+          const coord = `${r}${c < 10 ? '0' + c : c}`;
+          well.dataset.coord = coord;
+
+          // Event listeners
+          well.onmouseenter = () => {
+            wtCoord.innerText = coord;
+            wtGroup.innerText = info.group;
+            wtDetail.innerText = info.detail;
+          };
+
+          well.onclick = () => {
+            well.classList.toggle('selected');
+          };
+
+          plateGrid.appendChild(well);
+        }
+      });
+    }
+    initPlate();
+
+    // 2. Command Palette Toggle
+    const cmdOverlay = document.getElementById('cmd-overlay');
+    const cmdSearchInput = document.getElementById('cmd-search-input');
+
+    function toggleCommandPalette(open) {
+      if (open) {
+        cmdOverlay.classList.add('open');
+        setTimeout(() => cmdSearchInput.focus(), 50);
+      } else {
+        cmdOverlay.classList.remove('open');
+      }
+    }
+
+    function handleOverlayClick(e) {
+      if (e.target === cmdOverlay) {
+        toggleCommandPalette(false);
+      }
+    }
+
+    // Keyboard Shortcuts: ⌘K / Ctrl+K and Esc
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        toggleCommandPalette(!cmdOverlay.classList.contains('open'));
+      } else if (e.key === 'Escape' && cmdOverlay.classList.contains('open')) {
+        toggleCommandPalette(false);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        triggerSave();
+      }
+    });
+
+    // Filter commands
+    function filterCommands(query) {
+      const items = document.querySelectorAll('.cmd-item');
+      items.forEach(item => {
+        const text = item.innerText.toLowerCase();
+        if (text.includes(query.toLowerCase())) {
+          item.style.display = 'flex';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    }
+
+    function executeCommand(action) {
+      toggleCommandPalette(false);
+      const dot = document.getElementById('save-status-dot');
+      const text = document.getElementById('save-status-text');
+      dot.className = 'status-dot';
+      text.innerText = '命令已执行: 正在同步孔板合约...';
+      setTimeout(() => {
+        text.innerText = '未保存修改 (已应用新配置)';
+      }, 1000);
+    }
+
+    // 3. Save State Simulation
+    let isSaving = false;
+    function triggerSave() {
+      if (isSaving) return;
+      isSaving = true;
+      const dot = document.getElementById('save-status-dot');
+      const text = document.getElementById('save-status-text');
+      const btn = document.getElementById('save-btn');
+
+      dot.style.background = '#38BDF8';
+      dot.style.boxShadow = '0 0 8px rgba(56, 189, 248, 0.8)';
+      text.innerText = '正在保存 revision 5 (Core FFI)...';
+      btn.style.opacity = '0.6';
+
+      setTimeout(() => {
+        dot.className = 'status-dot saved';
+        dot.style.background = '';
+        dot.style.boxShadow = '';
+        text.innerText = '已保存 (rev 5 · 22:35:12)';
+        btn.style.opacity = '1';
+        isSaving = false;
+      }, 700);
+    }
+
+    // 4. Node Selection
+    function selectNode(idx) {
+      const items = document.querySelectorAll('.node-nav-item');
+      items.forEach((item, i) => {
+        if (i + 1 === idx) {
+          item.classList.add('active');
+        } else {
+          item.classList.remove('active');
+        }
+      });
+    }
+
+    // 5. Inspector Tabs
+    function switchTab(el, tabId) {
+      document.querySelectorAll('.inspector-tab').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      document.querySelectorAll('.inspector-content').forEach(c => c.style.display = 'none');
+      document.getElementById(tabId).style.display = 'flex';
+    }
+  </script>
+</body>
+</html>

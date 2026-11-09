@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1200, height=760, initial-scale=1.0, user-scalable=no">
+  <title>AsterLab v1.2 — Porcelain Direction (Things 3 × Linear)</title>
+  <style>
+    /* --- CSS RESET & BASE TOKENS --- */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    :root {
+      /* Surface & Paper Palette (Porcelain) */
+      --canvas: #F8F9FA;
+      --surface: #FFFFFF;
+      --surface-subtle: #F4F5F7;
+      --surface-hover: #F1F3F5;
+      --surface-active: #E9ECEF;
+      
+      /* Precision Hairlines (No heavy borders) */
+      --hairline: #E5E7EB;
+      --hairline-subtle: #F1F3F5;
+      --hairline-focus: #2563EB;
+      
+      /* Ink & Typography */
+      --ink-primary: #0F172A;
+      --ink-secondary: #475569;
+      --ink-tertiary: #94A3B8;
+      --ink-on-accent: #FFFFFF;
+      
+      /* Single Precision Accent (Cobalt / Things Blue) */
+      --accent: #2563EB;
+      --accent-hover: #1D4ED8;
+      --accent-pressed: #1E40AF;
+      --accent-tint: #EFF6FF;
+      --accent-ring: rgba(37, 99, 235, 0.18);
+      
+      /* Scientific Status Tokens */
+      --status-success: #10B981;
+      --status-success-bg: #ECFDF5;
+      --status-warning: #F59E0B;
+      --status-warning-bg: #FFFBEB;
+      --status-error: #EF4444;
+      --status-error-bg: #FEF2F2;
+
+      /* Typography Stacks */
+      --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", Consolas, "Cascadia Code", monospace;
+
+      /* Radii */
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 10px;
+      --radius-pill: 9999px;
+
+    html, body {
+      width: 1200px;
+      height: 760px;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: var(--canvas);
+      font-family: var(--font-sans);
+      color: var(--ink-primary);
+      user-select: none;
+    }
+
+    /* Fixed 1200×760 App Window Frame */
+    .app-viewport {
+      width: 1200px;
+      height: 760px;
+      background-color: var(--canvas);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* --- TOPBAR / COMMAND BAR (44px) --- */
+    .topbar {
+      height: 44px;
+      background-color: var(--surface);
+      border-bottom: 1px solid var(--hairline);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .window-controls {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-right: 4px;
+    }
+    .win-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #CBD5E1;
+      transition: background 0.15s;
+    }
+    .app-viewport:hover .win-dot.red { background: #FF5F56; }
+    .app-viewport:hover .win-dot.yellow { background: #FFBD2E; }
+    .app-viewport:hover .win-dot.green { background: #27C93F; }
+
+    .brand-mark {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 600;
+      font-size: 13px;
+      letter-spacing: -0.01em;
+      color: var(--ink-primary);
+    }
+    .brand-icon {
+      width: 18px;
+      height: 18px;
+      color: var(--accent);
+    }
+
+    .crumb-divider {
+      color: var(--hairline);
+      font-size: 14px;
+    }
+
+    .project-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--ink-secondary);
+      background: var(--surface-subtle);
+      padding: 3px 9px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--hairline-subtle);
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .project-badge:hover {
+      background: var(--surface-hover);
+      color: var(--ink-primary);
+    }
+
+    .topbar-center {
+      display: flex;
+      align-items: center;
+    }
+
+    .view-segments {
+      display: flex;
+      background: var(--surface-subtle);
+      padding: 2.5px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--hairline);
+      gap: 2px;
+    }
+    .view-segment-btn {
+      padding: 4px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      border: none;
+      background: transparent;
+      color: var(--ink-secondary);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .view-segment-btn.active {
+      background: var(--surface);
+      color: var(--ink-primary);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      font-weight: 600;
+    }
+    .view-segment-btn:hover:not(.active) {
+      color: var(--ink-primary);
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Save Status Pill (Interactive Toggle) */
+    .save-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      color: var(--ink-secondary);
+      font-family: var(--font-mono);
+      background: var(--surface-subtle);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--hairline-subtle);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .save-indicator:hover {
+      background: var(--surface-hover);
+      border-color: var(--hairline);
+    }
+    .save-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--status-success);
+      box-shadow: 0 0 0 2px var(--status-success-bg);
+      transition: all 0.2s;
+    }
+    .save-indicator.dirty .save-dot {
+      background: var(--status-warning);
+      box-shadow: 0 0 0 2px var(--status-warning-bg);
+    }
+    .save-indicator.saving .save-dot {
+      background: var(--accent);
+      animation: pulse 1s infinite alternate;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+
+    .btn-precision {
+      height: 28px;
+      padding: 0 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--hairline);
+      background: var(--surface);
+      color: var(--ink-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .btn-precision:hover {
+      background: var(--surface-hover);
+      border-color: var(--hairline);
+    }
+    .btn-primary-cobalt {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--ink-on-accent);
+      font-weight: 500;
+      box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+    }
+    .btn-primary-cobalt:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+    .btn-primary-cobalt:active {
+      background: var(--accent-pressed);
+    }
+    .kbd-shortcut {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      opacity: 0.75;
+      padding: 1px 4px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+    }
+
+    /* --- MAIN APP WORKSPACE (Split View: 220px Left | 660px Center | 320px Right) --- */
+    .app-workspace {
+      flex: 1;
+      height: calc(760px - 44px - 28px);
+      display: flex;
+      overflow: hidden;
+      background: var(--canvas);
+    }
+
+    /* --- 1. LEFT WORKFLOW OUTLINE RAIL (220px) --- */
+    .workflow-rail {
+      width: 220px;
+      background: var(--surface);
+      border-right: 1px solid var(--hairline);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .rail-header {
+      padding: 12px 14px 8px 14px;
+      border-bottom: 1px solid var(--hairline-subtle);
+    }
+    .rail-label {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+      color: var(--ink-tertiary);
+      margin-bottom: 3px;
+    }
+    .rail-assay-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cell-type-chip {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 1px 6px;
+      background: var(--accent-tint);
+      color: var(--accent);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+    }
+
+    .rail-node-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .rail-node-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.12s;
+      position: relative;
+    }
+    .rail-node-item:hover {
+      background: var(--surface-subtle);
+    }
+    .rail-node-item.active {
+      background: var(--accent-tint);
+    }
+    .rail-node-item.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 6px;
+      bottom: 6px;
+      width: 3px;
+      background: var(--accent);
+      border-radius: 0 2px 2px 0;
+    }
+    .step-idx {
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--ink-tertiary);
+      width: 16px;
+    }
+    .rail-node-item.active .step-idx {
+      color: var(--accent);
+    }
+    .rail-node-text {
+      flex: 1;
+      min-width: 0;
+    }
+    .rail-node-name {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--ink-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rail-node-item.active .rail-node-name {
+      font-weight: 600;
+      color: var(--accent-hover);
+    }
+    .rail-node-sub {
+      font-size: 11px;
+      color: var(--ink-tertiary);
+      font-family: var(--font-mono);
+    }
+    .rail-status-icon {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+    }
+
+    .rail-footer {
+      padding: 10px 14px;
+      border-top: 1px solid var(--hairline-subtle);
+      background: var(--surface);
+      font-size: 11.5px;
+    }
+    .rail-summary-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--ink-secondary);
+      margin-bottom: 4px;
+    }
+    .rail-summary-val {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--ink-primary);
+    }
+
+    /* --- 2. CENTER CANVAS: WORKFLOW DAG & 96-WELL PLATE (660px) --- */
+    .center-canvas {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--canvas);
+      padding: 10px 14px;
+      gap: 10px;
+    }
+
+    /* Upper Stage: Horizontal Workflow DAG (140px) */
+    .workflow-dag-card {
+      height: 140px;
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--hairline);
+      box-shadow: var(--shadow-porcelain);
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .dag-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .section-eyebrow {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--ink-tertiary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dag-flow-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+      padding: 0 4px;
+    }
+    
+    /* Connecting Line between DAG nodes */
+    .dag-track-line {
+      position: absolute;
+      top: 50%;
+      left: 36px;
+      right: 36px;
+      height: 2px;
+      background: #E2E8F0;
+      z-index: 1;
+      transform: translateY(-50%);
+    }
+    .dag-track-progress {
+      position: absolute;
+      top: 50%;
+      left: 36px;
+      width: 50%;
+      height: 2px;
+      background: var(--accent);
+      z-index: 2;
+      transform: translateY(-50%);
+    }
+
+    .dag-node {
+      width: 102px;
+      background: var(--surface);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius-md);
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      z-index: 3;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+      transition: all 0.15s ease-out;
+      position: relative;
+    }
+    .dag-node:hover {
+      transform: translateY(-1.5px);
+      box-shadow: var(--shadow-float);
+      border-color: #CBD5E1;
+    }
+    .dag-node.active {
+      border: 1.5px solid var(--accent);
+      box-shadow: var(--shadow-active-node);
+      background: var(--surface);
+      transform: translateY(-2px);
+    }
+    .dag-node-badge {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .dag-node-num {
+      font-size: 9.5px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--ink-tertiary);
+    }
+    .dag-node.active .dag-node-num {
+      color: var(--accent);
+    }
+    .dag-node-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #CBD5E1;
+    }
+    .dag-node.completed .dag-node-dot {
+      background: var(--status-success);
+    }
+    .dag-node.active .dag-node-dot {
+      background: var(--accent);
+    }
+    .dag-node-title {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      margin-top: 1px;
+      line-height: 1.25;
+    }
+    .dag-node.active .dag-node-title {
+      color: var(--accent-hover);
+    }
+    .dag-node-spec {
+      font-size: 10px;
+      color: var(--ink-secondary);
+      font-family: var(--font-mono);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Lower Stage: 96-Well Plate Layout & Interactive Matrix (530px area) */
+    .plate-workspace-card {
+      flex: 1;
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--hairline);
+      box-shadow: var(--shadow-porcelain);
+      padding: 10px 14px 12px 14px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .plate-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .plate-title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .plate-model-tag {
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      color: var(--ink-secondary);
+      background: var(--surface-subtle);
+      border: 1px solid var(--hairline);
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
+    }
+
+    .plate-legend-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--ink-secondary);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .legend-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    /* 96-Well Microplate Grid (8 Rows A-H, 12 Cols 1-12) */
+    .plate-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: var(--surface-subtle);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--hairline-subtle);
+      padding: 8px 12px;
+      position: relative;
+    }
+
+    .plate-grid-wrap {
+      display: grid;
+      grid-template-columns: 20px repeat(12, 1fr);
+      grid-template-rows: 18px repeat(8, 1fr);
+      gap: 4px;
+      width: 100%;
+      max-width: 610px;
+      height: 100%;
+      max-height: 340px;
+    }
+
+    /* Headers (Cols 1-12, Rows A-H) */
+    .plate-col-header, .plate-row-header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--ink-tertiary);
+    }
+
+    /* Wells Cells */
+    .plate-well {
+      aspect-ratio: 1;
+      border-radius: 50%;
+      border: 1px solid #CBD5E1;
+      background: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.12s;
+      position: relative;
+    }
+    .plate-well:hover {
+      transform: scale(1.15);
+      z-index: 10;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      border-color: var(--ink-primary);
+    }
+    .plate-well.selected {
+      box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+      transform: scale(1.18);
+      z-index: 11;
+    }
+
+    /* Specific Well Functional Types */
+    /* 1. PBS Edge Moat */
+    .well-moat {
+      background: #F1F5F9;
+      border-color: #E2E8F0;
+      color: #94A3B8;
+      background-image: radial-gradient(#CBD5E1 0.75px, transparent 0.75px);
+      background-size: 4px 4px;
+    }
+    /* 2. Negative Control (Medium Blank) */
+    .well-nc {
+      background: #E0E7FF;
+      border-color: #A5B4FC;
+      color: #4338CA;
+    }
+    /* 3. Solvent Control (0.1% DMSO Vehicle) */
+    .well-vehicle {
+      background: #EDE9FE;
+      border-color: #C4B5FD;
+      color: #6D28D9;
+    }
+    /* 4. Drug Gradient Concentrations (6 tiers) */
+    .well-dose-0 {
+      background: #EFF6FF;
+      border-color: #BFDBFE;
+      color: #1E40AF;
+    }
+    .well-dose-1 {
+      background: #DBEAFE;
+      border-color: #93C5FD;
+      color: #1D4ED8;
+    }
+    .well-dose-2 {
+      background: #BFDBFE;
+      border-color: #60A5FA;
+      color: #1E3A8A;
+    }
+    .well-dose-3 {
+      background: #93C5FD;
+      border-color: #3B82F6;
+      color: #1E3A8A;
+    }
+    .well-dose-4 {
+      background: #60A5FA;
+      border-color: #2563EB;
+      color: #FFFFFF;
+    }
+    .well-dose-5 {
+      background: #2563EB;
+      border-color: #1D4ED8;
+      color: #FFFFFF;
+    }
+    /* 5. Positive Control (DDP / Cisplatin 50 µg/mL) */
+    .well-pc {
+      background: #FEE2E2;
+      border-color: #FCA5A5;
+      color: #B91C1C;
+    }
+    /* 6. Spare Blank */
+    .well-blank {
+      background: #FAFAFA;
+      border-color: #E5E7EB;
+      color: #D1D5DB;
+    }
+
+    /* Floating Well Hover / Inspector Tooltip */
+    .well-hover-hud {
+      position: absolute;
+      bottom: 8px;
+      left: 14px;
+      right: 14px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius-md);
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: var(--shadow-porcelain);
+      font-size: 11.5px;
+      color: var(--ink-secondary);
+    }
+    .hud-title {
+      font-weight: 600;
+      color: var(--ink-primary);
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hud-badge {
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .hud-metrics {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-family: var(--font-mono);
+    }
+
+    /* --- 3. RIGHT PRECISION INSPECTOR (320px) --- */
+    .inspector-panel {
+      width: 320px;
+      background: var(--surface);
+      border-left: 1px solid var(--hairline);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .inspector-header {
+      padding: 12px 16px 10px 16px;
+      border-bottom: 1px solid var(--hairline-subtle);
+    }
+    .inspector-tag {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-tint);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      display: inline-block;
+      margin-bottom: 4px;
+    }
+    .inspector-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--ink-primary);
+      margin-bottom: 2px;
+    }
+    .inspector-desc {
+      font-size: 11.5px;
+      color: var(--ink-secondary);
+      line-height: 1.35;
+    }
+
+    .inspector-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--hairline);
+      padding: 0 16px;
+      background: var(--surface);
+    }
+    .inspector-tab-btn {
+      padding: 8px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink-secondary);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .inspector-tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      font-weight: 600;
+    }
+
+    .inspector-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .property-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--ink-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Precision Property Row (Linear / Things Style, NOT stacked inputs) */
+    .prop-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 30px;
+      padding: 2px 0;
+    }
+    .prop-label {
+      font-size: 12px;
+      color: var(--ink-secondary);
+      font-weight: 500;
+      flex-shrink: 0;
+      width: 90px;
+    }
+    .prop-value-wrap {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    
+    /* Precision Inline Value Control */
+    .val-input-group {
+      display: inline-flex;
+      align-items: center;
+      background: var(--surface-subtle);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius-sm);
+      padding: 2px 6px;
+      transition: all 0.12s;
+    }
+    .val-input-group:focus-within {
+      border-color: var(--accent);
+      background: var(--surface);
+      box-shadow: 0 0 0 2px var(--accent-ring);
+    }
+    .val-number {
+      border: none;
+      background: transparent;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      width: 52px;
+      text-align: right;
+      outline: none;
+    }
+    .val-unit {
+      font-size: 11px;
+      color: var(--ink-tertiary);
+      font-family: var(--font-mono);
+      margin-left: 3px;
+    }
+
+    /* Stepper + - */
+    .stepper-btn {
+      width: 18px;
+      height: 18px;
+      border: 1px solid var(--hairline);
+      background: var(--surface);
+      border-radius: 3px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--ink-secondary);
+      transition: all 0.1s;
+    }
+    .stepper-btn:hover {
+      background: var(--surface-hover);
+      color: var(--ink-primary);
+    }
+
+    /* Gradient Doses Table Mini */
+    .dose-matrix-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+      margin-top: 4px;
+    }
+    .dose-matrix-table th {
+      text-align: left;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--ink-tertiary);
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--hairline);
+    }
+    .dose-matrix-table td {
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--hairline-subtle);
+      color: var(--ink-secondary);
+    }
+    .dose-matrix-table tr:hover td {
+      background: var(--surface-subtle);
+      color: var(--ink-primary);
+    }
+    .dose-tag {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--ink-primary);
+    }
+    .well-span {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-tertiary);
+    }
+
+    /* Verification Checklist Card */
+    .qc-box {
+      background: var(--surface-subtle);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius-md);
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 11.5px;
+    }
+    .qc-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ink-secondary);
+    }
+    .qc-check-icon {
+      color: var(--status-success);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .inspector-footer {
+      padding: 10px 16px;
+      border-top: 1px solid var(--hairline-subtle);
+      background: var(--surface);
+      display: flex;
+      gap: 8px;
+    }
+
+    /* --- FOOTER / STATUS TELEMETRY BAR (28px) --- */
+    .statusbar {
+      height: 28px;
+      background: var(--surface);
+      border-top: 1px solid var(--hairline);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      font-size: 11px;
+      color: var(--ink-secondary);
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    .status-left, .status-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .telemetry-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--font-mono);
+    }
+    .telemetry-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--status-success);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- FIXED 1200x760 DIP WORKSPACE VIEWPORT -->
+  <div class="app-viewport" id="appViewport">
+    
+    <!-- 1. TOPBAR & COMMAND BAR (44px) -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="window-controls">
+          <div class="win-dot red"></div>
+          <div class="win-dot yellow"></div>
+          <div class="win-dot green"></div>
+        </div>
+        <div class="brand-mark">
+          <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+          <span>AsterLab</span>
+        </div>
+        <span class="crumb-divider">/</span>
+        <div class="project-badge" title="切换工作区工程">
+          <span>Oncology-InVitro</span>
+          <span style="color: var(--ink-tertiary)">/</span>
+          <strong style="color: var(--ink-primary)">L929-CCK8-Tox-2026</strong>
+          <span style="font-size: 10px; color: var(--ink-tertiary);">▾</span>
+        </div>
+      </div>
+
+      <div class="topbar-center">
+        <div class="view-segments">
+          <button class="view-segment-btn active" id="btnViewDesign">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+            流程设计 (Designer)
+          </button>
+          <button class="view-segment-btn" id="btnViewPlate">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M12 3v18M3 12h18"></path>
+            </svg>
+            孔板排布 (Plate)
+          </button>
+          <button class="view-segment-btn" id="btnViewProtocol">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+            标准规程 (Protocol)
+          </button>
+          <button class="view-segment-btn" id="btnViewRun">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            执行批次 (Run)
+          </button>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <!-- Interactive Save Indicator -->
+        <div class="save-indicator" id="saveIndicator" title="点击手动同步状态 (快捷键: ⌘S)">
+          <div class="save-dot"></div>
+          <span id="saveText">已同步 14:32:08</span>
+        </div>
+
+        <button class="btn-precision btn-primary-cobalt" id="btnExecute">
+          <span>生成执行批次</span>
+          <span class="kbd-shortcut">⌘↵</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. MAIN WORKSPACE (Split Rail / Center Canvas / Right Inspector) -->
+    <main class="app-workspace">
+      
+      <!-- LEFT RAIL: WORKFLOW OUTLINE (220px) -->
+      <aside class="workflow-rail">
+        <div class="rail-header">
+          <div class="rail-label">Assay Workflow Outline</div>
+          <div class="rail-assay-title">
+            <span>CCK-8 比色检测</span>
+            <span class="cell-type-chip">L929</span>
+          </div>
+        </div>
+
+        <div class="rail-node-list" id="railNodeList">
+          <!-- Node 1 -->
+          <div class="rail-node-item completed" data-node="1">
+            <span class="step-idx">01</span>
+            <div class="rail-node-text">
+              <div class="rail-node-name">细胞悬液制备</div>
+              <div class="rail-node-sub">5.0×10⁴ /mL · 消化计数</div>
+            </div>
+            <svg class="rail-status-icon" viewBox="0 0 20 20" fill="#10B981">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+            </svg>
+          </div>
+
+          <!-- Node 2 -->
+          <div class="rail-node-item completed" data-node="2">
+            <span class="step-idx">02</span>
+            <div class="rail-node-text">
+              <div class="rail-node-name">96孔板接种</div>
+              <div class="rail-node-sub">100 µL/孔 · 24h 贴壁</div>
+            </div>
+            <svg class="rail-status-icon" viewBox="0 0 20 20" fill="#10B981">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+            </svg>
+          </div>
+
+          <!-- Node 3 (ACTIVE) -->
+          <div class="rail-node-item active" data-node="3">
+            <span class="step-idx">03</span>
+            <div class="rail-node-text">
+              <div class="rail-node-name">梯度给药 (DOX)</div>
+              <div class="rail-node-sub">6梯度 × 3复孔 · 24h</div>
+            </div>
+            <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent);"></div>
+          </div>
+
+          <!-- Node 4 -->
+          <div class="rail-node-item" data-node="4">
+            <span class="step-idx">04</span>
+            <div class="rail-node-text">
+              <div class="rail-node-name">CCK-8 避光孵育</div>
+              <div class="rail-node-sub">10 µL/孔 · 37°C 2h</div>
+            </div>
+            <div style="width: 5px; height: 5px; border-radius: 50%; background: #CBD5E1;"></div>
+          </div>
+
+          <!-- Node 5 -->
+          <div class="rail-node-item" data-node="5">
+            <span class="step-idx">05</span>
+            <div class="rail-node-text">
+              <div class="rail-node-name">酶标仪双波长读板</div>
+              <div class="rail-node-sub">OD450 / OD650 · 5s震板</div>
+            </div>
+            <div style="width: 5px; height: 5px; border-radius: 50%; background: #CBD5E1;"></div>
+          </div>
+        </div>
+
+        <div class="rail-footer">
+          <div class="rail-summary-row">
+            <span>总孔位占用:</span>
+            <span class="rail-summary-val">42 / 96 孔</span>
+          </div>
+          <div class="rail-summary-row">
+            <span>试验化合物:</span>
+            <span class="rail-summary-val">Doxorubicin</span>
+          </div>
+          <div class="rail-summary-row">
+            <span>溶剂体系:</span>
+            <span class="rail-summary-val">0.1% DMSO</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- CENTER CANVAS (660px) -->
+      <section class="center-canvas">
+        
+        <!-- UPPER STAGE: HORIZONTAL WORKFLOW DAG (140px) -->
+        <div class="workflow-dag-card">
+          <div class="dag-card-header">
+            <div class="section-eyebrow">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+              </svg>
+              <span>实验工序流水线 (Workflow DAG)</span>
+            </div>
+            <span style="font-size: 11px; font-family: var(--font-mono); color: var(--ink-tertiary);">5 Nodes · Linear Pipeline</span>
+          </div>
+
+          <div class="dag-flow-container">
+            <div class="dag-track-line"></div>
+            <div class="dag-track-progress" id="dagProgress"></div>
+
+            <!-- DAG Node 1 -->
+            <div class="dag-node completed" data-node="1" title="01 细胞悬液制备">
+              <div class="dag-node-badge">
+                <span class="dag-node-num">01</span>
+                <span class="dag-node-dot"></span>
+              </div>
+              <div class="dag-node-title">细胞悬液</div>
+              <div class="dag-node-spec">5×10⁴/mL</div>
+            </div>
+
+            <!-- DAG Node 2 -->
+            <div class="dag-node completed" data-node="2" title="02 96孔板接种">
+              <div class="dag-node-badge">
+                <span class="dag-node-num">02</span>
+                <span class="dag-node-dot"></span>
+              </div>
+              <div class="dag-node-title">96孔接种</div>
+              <div class="dag-node-spec">100 µL/well</div>
+            </div>
+
+            <!-- DAG Node 3 (Selected) -->
+            <div class="dag-node active" data-node="3" title="03 梯度给药 (当前聚焦)">
+              <div class="dag-node-badge">
+                <span class="dag-node-num">03 · Active</span>
+                <span class="dag-node-dot"></span>
+              </div>
+              <div class="dag-node-title">梯度给药</div>
+              <div class="dag-node-spec">6 梯度 · 3复孔</div>
+            </div>
+
+            <!-- DAG Node 4 -->
+            <div class="dag-node" data-node="4" title="04 CCK-8 避光孵育">
+              <div class="dag-node-badge">
+                <span class="dag-node-num">04</span>
+                <span class="dag-node-dot"></span>
+              </div>
+              <div class="dag-node-title">CCK-8 孵育</div>
+              <div class="dag-node-spec">10 µL · 2h</div>
+            </div>
+
+            <!-- DAG Node 5 -->
+            <div class="dag-node" data-node="5" title="05 酶标仪读板">
+              <div class="dag-node-badge">
+                <span class="dag-node-num">05</span>
+                <span class="dag-node-dot"></span>
+              </div>
+              <div class="dag-node-title">酶标仪读板</div>
+              <div class="dag-node-spec">450 / 650 nm</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LOWER STAGE: 96-WELL PLATE WORKSPACE -->
+        <div class="plate-workspace-card">
+          <div class="plate-card-header">
+            <div class="plate-title-group">
+              <div class="section-eyebrow">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="3" y1="9" x2="21" y2="9"></line>
+                  <line x1="9" y1="21" x2="9" y2="9"></line>
+                </svg>
+                <span>96-孔微孔板映射图</span>
+              </div>
+              <span class="plate-model-tag">Corning 3599 Flat Clear</span>
+            </div>
+
+            <div class="plate-legend-bar">
+              <div class="legend-item"><span class="legend-swatch" style="background:#F1F5F9; border-color:#CBD5E1;"></span> PBS封边 (36)</div>
+              <div class="legend-item"><span class="legend-swatch" style="background:#E0E7FF; border-color:#A5B4FC;"></span> 阴性对照 (3)</div>
+              <div class="legend-item"><span class="legend-swatch" style="background:#EDE9FE; border-color:#C4B5FD;"></span> 溶剂对照 (3)</div>
+              <div class="legend-item"><span class="legend-swatch" style="background:#93C5FD; border-color:#3B82F6;"></span> 梯度给药 (18)</div>
+              <div class="legend-item"><span class="legend-swatch" style="background:#FEE2E2; border-color:#FCA5A5;"></span> 阳性对照 (3)</div>
+            </div>
+          </div>
+
+          <!-- 96-Well Interactive Matrix Grid -->
+          <div class="plate-container">
+            <div class="plate-grid-wrap" id="plateGridWrap">
+              <!-- Headers and wells generated via JS -->
+            </div>
+
+            <!-- Floating Micro-HUD for Hovered/Selected Well -->
+            <div class="well-hover-hud" id="wellHud">
+              <div class="hud-title">
+                <span id="hudWellId">孔位 C5 (Well C5)</span>
+                <span class="hud-badge" id="hudGroupBadge" style="background: #DBEAFE; color: #1D4ED8;">给药组 Dose-3</span>
+              </div>
+              <div class="hud-metrics">
+                <div>化合物: <strong id="hudDrug">阿霉素 (DOX)</strong></div>
+                <div>目标浓度: <strong id="hudConc">20.0 µg/mL</strong></div>
+                <div>加样体积: <strong id="hudVol">100 µL</strong></div>
+                <div>复孔批次: <strong id="hudRep">3/3 (B5, C5, D5)</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- RIGHT INSPECTOR PANEL (320px) -->
+      <aside class="inspector-panel">
+        <div class="inspector-header">
+          <div class="inspector-tag" id="inspectorStepTag">STEP 03 · EXPOSURE</div>
+          <div class="inspector-title" id="inspectorStepTitle">梯度给药 (Gradient Dosing)</div>
+          <div class="inspector-desc" id="inspectorStepDesc">设置试验组化合物浓度梯度、溶剂对照与复孔几何排布。</div>
+        </div>
+
+        <div class="inspector-tabs">
+          <button class="inspector-tab-btn active" id="tabParam">参数配置</button>
+          <button class="inspector-tab-btn" id="tabPlate">孔位映射</button>
+          <button class="inspector-tab-btn" id="tabQc">合规质控</button>
+        </div>
+
+        <div class="inspector-body" id="inspectorBody">
+          
+          <!-- Section 1: Chemical & Compound Specs -->
+          <div class="property-section">
+            <div class="section-title">
+              <span>化合物与溶剂 (Substance)</span>
+            </div>
+            
+            <div class="prop-row">
+              <span class="prop-label">试验化合物</span>
+              <div class="prop-value-wrap">
+                <div class="val-input-group" style="width: 175px;">
+                  <span style="font-size: 12px; font-weight: 600; color: var(--ink-primary);">盐酸阿霉素 (DOX)</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="prop-row">
+              <span class="prop-label">溶剂对照体系</span>
+              <div class="prop-value-wrap">
+                <div class="val-input-group" style="width: 175px;">
+                  <span style="font-size: 11.5px; font-family: var(--font-mono); color: var(--ink-secondary);">0.1% DMSO complete DMEM</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="prop-row">
+              <span class="prop-label">给药暴露时长</span>
+              <div class="prop-value-wrap">
+                <button class="stepper-btn" onclick="adjustTime(-6)">−</button>
+                <div class="val-input-group">
+                  <input type="text" class="val-number" id="inputDuration" value="24.0">
+                  <span class="val-unit">h</span>
+                </div>
+                <button class="stepper-btn" onclick="adjustTime(6)">+</button>
+              </div>
+            </div>
+
+            <div class="prop-row">
+              <span class="prop-label">每孔加入体积</span>
+              <div class="prop-value-wrap">
+                <div class="val-input-group">
+                  <input type="text" class="val-number" value="100">
+                  <span class="val-unit">µL</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Gradient Matrix Sheet -->
+          <div class="property-section">
+            <div class="section-title">
+              <span>梯度浓度与孔位 (Dose Matrix)</span>
+              <span style="font-size: 10px; font-family: var(--font-mono); color: var(--accent);">6 Tiers · Triplicates</span>
+            </div>
+
+            <table class="dose-matrix-table">
+              <thead>
+                <tr>
+                  <th>梯度组</th>
+                  <th>目标浓度</th>
+                  <th>孔位分布</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="legend-swatch" style="display:inline-block; vertical-align:middle; background:#EFF6FF; border-color:#BFDBFE;"></span> C0 (0 µg/mL)</td>
+                  <td class="dose-tag">0.0 µg/mL</td>
+                  <td class="well-span">B3, C3, D3</td>
+                </tr>
+                <tr>
+                  <td><span class="legend-swatch" style="display:inline-block; vertical-align:middle; background:#DBEAFE; border-color:#93C5FD;"></span> C1 (10 µg/mL)</td>
+                  <td class="dose-tag">10.0 µg/mL</td>
+                  <td class="well-span">B4, C4, D4</td>
+                </tr>
+                <tr style="background: var(--accent-tint);">
+                  <td><span class="legend-swatch" style="display:inline-block; vertical-align:middle; background:#BFDBFE; border-color:#60A5FA;"></span> <strong>C2 (20 µg/mL)</strong></td>
+                  <td class="dose-tag" style="color: var(--accent);">20.0 µg/mL</td>
+                  <td class="well-span" style="color: var(--accent); font-weight: 600;">B5, C5, D5</td>
+                </tr>
+                <tr>
+                  <td><span class="legend-swatch" style="display:inline-block; vertical-align:middle; background:#93C5FD; border-color:#3B82F6;"></span> C3 (50 µg/mL)</td>
+                  <td class="dose-tag">50.0 µg/mL</td>
+                  <td class="well-span">B6, C6, D6</td>
+                </tr>
+                <tr>
+                  <td><span class="legend-swatch" style="display:inline-block; vertical-align:middle; background:#60A5FA; border-color:#2563EB;"></span> C4 (100 µg/mL)</td>
+                  <td class="dose-tag">100.0 µg/mL</td>
+                  <td class="well-span">B7, C7, D7</td>
+                </tr>
+                <tr>
+                  <td><span class="legend-swatch" style="display:inline-block; vertical-align:middle; background:#2563EB; border-color:#1D4ED8;"></span> C5 (200 µg/mL)</td>
+                  <td class="dose-tag">200.0 µg/mL</td>
+                  <td class="well-span">B8, C8, D8</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Section 3: Quiet Validation & Quality Checklist -->
+          <div class="property-section">
+            <div class="section-title">
+              <span>实验设计约束校验 (Validation)</span>
+            </div>
+
+            <div class="qc-box">
+              <div class="qc-item">
+                <span class="qc-check-icon">✓</span>
+                <span>边缘效应隔离: 36 外周孔已填充 200 µL PBS</span>
+              </div>
+              <div class="qc-item">
+                <span class="qc-check-icon">✓</span>
+                <span>复孔几何排布: 满足 n=3 独立平行复孔校验</span>
+              </div>
+              <div class="qc-item">
+                <span class="qc-check-icon">✓</span>
+                <span>终浓度 DMSO ≤ 0.1%，排除溶剂细胞毒性假阳性</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="inspector-footer">
+          <button class="btn-precision" style="flex:1;" onclick="triggerSave()">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            暂存参数 (⌘S)
+          </button>
+          <button class="btn-precision btn-primary-cobalt" style="flex:1;" onclick="nextStep()">
+            <span>下一步</span>
+            <span class="kbd-shortcut">Tab</span>
+          </button>
+        </div>
+      </aside>
+
+    </main>
+
+    <!-- 3. FOOTER TELEMETRY & STATUS BAR (28px) -->
+    <footer class="statusbar">
+      <div class="status-left">
+        <div class="telemetry-item">
+          <div class="telemetry-dot"></div>
+          <span>Core Engine: v1.2-native (Go-Engine 0.18ms)</span>
+        </div>
+        <div class="telemetry-item">
+          <span>Plate: 96-Well Flat (ANSI/SLAS 1-2004)</span>
+        </div>
+        <div class="telemetry-item">
+          <span>Active Layer: 药物暴露设计</span>
+        </div>
+      </div>
+
+      <div class="status-right">
+        <div class="telemetry-item">
+          <span>Selected: <strong style="color:var(--ink-primary)" id="footerSelection">Well C5 (DOX 20 µg/mL)</strong></span>
+        </div>
+        <div class="telemetry-item">
+          <span>Memory: 14.8 MB · Zero Webview</span>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- INTERACTIVITY SCRIPT -->
+  <script>
+    // State Model
+    const state = {
+      currentNode: 3,
+      selectedWell: 'C5',
+      isSaving: false,
+      saveTimestamp: '14:32:08',
+      nodes: {
+        1: {
+          tag: 'STEP 01 · CELL SUSPENSION',
+          title: '细胞悬液制备 (Cell Suspension)',
+          desc: 'L929 小鼠成纤维细胞贴壁消化、细胞离心重悬与活率计数。',
+          props: [
+            { label: '细胞株系', val: 'L929 (ATCC CCL-1)' },
+            { label: '细胞密度', val: '5.0 × 10⁴ cells/mL' },
+            { label: '台盼蓝活率', val: '97.4% (>95% 达标)' },
+            { label: '培养基', val: 'DMEM + 10% FBS + 1% P/S' }
+          ]
+        },
+        2: {
+          tag: 'STEP 02 · SEEDING',
+          title: '96孔板接种 (96-Well Seeding)',
+          desc: '标准平底96孔板接种，封边防蒸发与 37°C 24h 贴壁培养。',
+          props: [
+            { label: '每孔接种量', val: '100 µL / 孔 (5000 cells/孔)' },
+            { label: '封边液', val: '无菌 PBS 200 µL / 孔' },
+            { label: '贴壁孵育', val: '24.0 h @ 37°C 5% CO₂' }
+          ]
+        },
+        3: {
+          tag: 'STEP 03 · EXPOSURE',
+          title: '梯度给药 (Gradient Dosing)',
+          desc: '设置试验组化合物浓度梯度、溶剂对照与复孔几何排布。',
+          props: [
+            { label: '试验化合物', val: '盐酸阿霉素 (DOX)' },
+            { label: '溶剂对照体系', val: '0.1% DMSO in DMEM' },
+            { label: '暴露时长', val: '24.0 h' },
+            { label: '给药体积', val: '100 µL / 孔' }
+          ]
+        },
+        4: {
+          tag: 'STEP 04 · INCUBATION',
+          title: 'CCK-8 避光孵育 (CCK-8 Reaction)',
+          desc: '加入 WST-8 试剂，活细胞脱氢酶催化生成高水溶性黄色橙色甲瓒。',
+          props: [
+            { label: 'CCK-8试剂', val: '10 µL / 孔 (原液直接加入)' },
+            { label: '操作规程', val: '全程避光，沿孔壁轻柔加入' },
+            { label: '孵育条件', val: '2.0 h @ 37°C 避光恒温' }
+          ]
+        },
+        5: {
+          tag: 'STEP 05 · DETECTION',
+          title: '酶标仪双波长读板 (Microplate Readout)',
+          desc: '多功能微孔板读板机测定吸光度，扣除参比波长与空白本底。',
+          props: [
+            { label: '测定主波长', val: 'OD 450 nm (甲瓒吸收峰)' },
+            { label: '参比校准波长', val: 'OD 650 nm (消除浊度干扰)' },
+            { label: '振板参数', val: '线性振板 5 s (中速)' },
+            { label: '计算模型', val: '细胞活力% = (OD供试 - OD空白)/(OD对照 - OD空白)' }
+          ]
+        }
+      }
+    };
+
+    // Plate Definitions
+    const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    const cols = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    function getWellData(r, c) {
+      const wellId = `${r}${c}`;
+      // Edge moat
+      if (r === 'A' || r === 'H' || c === 1 || c === 12) {
+        return { type: 'well-moat', group: 'PBS 封边隔离', conc: '—', drug: '无 (PBS)', rep: '—', badgeBg: '#F1F5F9', badgeColor: '#64748B' };
+      }
+      // Col 2: Controls
+      if (c === 2) {
+        if (['B', 'C', 'D'].includes(r)) {
+          return { type: 'well-nc', group: '阴性对照 (NC)', conc: '0 µg/mL', drug: '完整培养基', rep: `3/3 (${r}2)`, badgeBg: '#E0E7FF', badgeColor: '#4338CA' };
+        }
+        if (['E', 'F', 'G'].includes(r)) {
+          return { type: 'well-vehicle', group: '溶剂对照 (Vehicle)', conc: '0.1% DMSO', drug: 'DMSO溶剂对照', rep: `3/3 (${r}2)`, badgeBg: '#EDE9FE', badgeColor: '#6D28D9' };
+        }
+      }
+      // Col 3-8: Doses
+      if (['B', 'C', 'D'].includes(r)) {
+        if (c === 3) return { type: 'well-dose-0', group: '给药组 Dose-0', conc: '0.0 µg/mL', drug: '阿霉素 (DOX)', rep: 'B3, C3, D3', badgeBg: '#EFF6FF', badgeColor: '#1E40AF' };
+        if (c === 4) return { type: 'well-dose-1', group: '给药组 Dose-1', conc: '10.0 µg/mL', drug: '阿霉素 (DOX)', rep: 'B4, C4, D4', badgeBg: '#DBEAFE', badgeColor: '#1D4ED8' };
+        if (c === 5) return { type: 'well-dose-2', group: '给药组 Dose-2', conc: '20.0 µg/mL', drug: '阿霉素 (DOX)', rep: 'B5, C5, D5', badgeBg: '#BFDBFE', badgeColor: '#1E3A8A' };
+        if (c === 6) return { type: 'well-dose-3', group: '给药组 Dose-3', conc: '50.0 µg/mL', drug: '阿霉素 (DOX)', rep: 'B6, C6, D6', badgeBg: '#93C5FD', badgeColor: '#1E3A8A' };
+        if (c === 7) return { type: 'well-dose-4', group: '给药组 Dose-4', conc: '100.0 µg/mL', drug: '阿霉素 (DOX)', rep: 'B7, C7, D7', badgeBg: '#60A5FA', badgeColor: '#FFFFFF' };
+        if (c === 8) return { type: 'well-dose-5', group: '给药组 Dose-5', conc: '200.0 µg/mL', drug: '阿霉素 (DOX)', rep: 'B8, C8, D8', badgeBg: '#2563EB', badgeColor: '#FFFFFF' };
+      }
+      // Col 9: Positive control
+      if (c === 9 && ['B', 'C', 'D'].includes(r)) {
+        return { type: 'well-pc', group: '阳性对照 (PC)', conc: '50.0 µg/mL', drug: '顺铂 (Cisplatin)', rep: 'B9, C9, D9', badgeBg: '#FEE2E2', badgeColor: '#B91C1C' };
+      }
+      // Blank
+      return { type: 'well-blank', group: '未用备用孔 (Spare)', conc: '—', drug: '无', rep: '—', badgeBg: '#F3F4F6', badgeColor: '#9CA3AF' };
+    }
+
+    // Render 96-Well Matrix
+    function initPlateGrid() {
+      const wrap = document.getElementById('plateGridWrap');
+      wrap.innerHTML = '';
+
+      // Top Left Corner empty
+      const corner = document.createElement('div');
+      wrap.appendChild(corner);
+
+      // Col Headers 1-12
+      cols.forEach(c => {
+        const ch = document.createElement('div');
+        ch.className = 'plate-col-header';
+        ch.textContent = c;
+        wrap.appendChild(ch);
+      });
+
+      // Rows A-H with wells
+      rows.forEach(r => {
+        // Row label
+        const rh = document.createElement('div');
+        rh.className = 'plate-row-header';
+        rh.textContent = r;
+        wrap.appendChild(rh);
+
+        // 12 wells per row
+        cols.forEach(c => {
+          const wellId = `${r}${c}`;
+          const wData = getWellData(r, c);
+          const well = document.createElement('div');
+          well.className = `plate-well ${wData.type}`;
+          well.id = `well_${wellId}`;
+          well.dataset.well = wellId;
+          
+          if (wellId === state.selectedWell) {
+            well.classList.add('selected');
+          }
+
+          well.addEventListener('mouseenter', () => updateHud(wellId, wData));
+          well.addEventListener('click', () => selectWell(wellId, wData));
+
+          wrap.appendChild(well);
+        });
+      });
+    }
+
+    function updateHud(wellId, wData) {
+      document.getElementById('hudWellId').textContent = `孔位 ${wellId} (Well ${wellId})`;
+      const badge = document.getElementById('hudGroupBadge');
+      badge.textContent = wData.group;
+      badge.style.background = wData.badgeBg;
+      badge.style.color = wData.badgeColor;
+
+      document.getElementById('hudDrug').textContent = wData.drug;
+      document.getElementById('hudConc').textContent = wData.conc;
+      document.getElementById('hudVol').textContent = wData.type === 'well-moat' ? '200 µL' : '100 µL';
+      document.getElementById('hudRep').textContent = wData.rep;
+    }
+
+    function selectWell(wellId, wData) {
+      state.selectedWell = wellId;
+      document.querySelectorAll('.plate-well').forEach(el => el.classList.remove('selected'));
+      const target = document.getElementById(`well_${wellId}`);
+      if (target) target.classList.add('selected');
+      updateHud(wellId, wData);
+      document.getElementById('footerSelection').textContent = `Well ${wellId} (${wData.group} · ${wData.conc})`;
+    }
+
+    // Switch Selected Node
+    function selectNode(nodeIdx) {
+      state.currentNode = nodeIdx;
+      // Update Rail
+      document.querySelectorAll('.rail-node-item').forEach(el => {
+        el.classList.toggle('active', parseInt(el.dataset.node) === nodeIdx);
+      });
+      // Update DAG
+      document.querySelectorAll('.dag-node').forEach(el => {
+        el.classList.toggle('active', parseInt(el.dataset.node) === nodeIdx);
+      });
+      // Update DAG Progress Bar
+      const progressPercent = ((nodeIdx - 1) / 4) * 100;
+      document.getElementById('dagProgress').style.width = `calc(${progressPercent}% - 36px)`;
+
+      // Update Inspector Header
+      const nInfo = state.nodes[nodeIdx];
+      if (nInfo) {
+        document.getElementById('inspectorStepTag').textContent = nInfo.tag;
+        document.getElementById('inspectorStepTitle').textContent = nInfo.title;
+        document.getElementById('inspectorStepDesc').textContent = nInfo.desc;
+      }
+    }
+
+    // Interactive Save Logic
+    function triggerSave() {
+      if (state.isSaving) return;
+      state.isSaving = true;
+      const ind = document.getElementById('saveIndicator');
+      const text = document.getElementById('saveText');
+      ind.classList.remove('dirty');
+      ind.classList.add('saving');
+      text.textContent = '正在同步至本地核心...';
+
+      setTimeout(() => {
+        state.isSaving = false;
+        ind.classList.remove('saving');
+        const now = new Date();
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+        state.saveTimestamp = timeStr;
+        text.textContent = `已同步 ${timeStr}`;
+      }, 420);
+    }
+
+    function adjustTime(delta) {
+      const input = document.getElementById('inputDuration');
+      let val = parseFloat(input.value) || 24;
+      val = Math.max(6, val + delta);
+      input.value = val.toFixed(1);
+      triggerSave();
+    }
+
+    function nextStep() {
+      let next = state.currentNode + 1;
+      if (next > 5) next = 1;
+      selectNode(next);
+    }
+
+    // Attach Event Handlers
+    document.addEventListener('DOMContentLoaded', () => {
+      initPlateGrid();
+      
+      // Select well C5 by default
+      const defaultWellData = getWellData('C', 5);
+      updateHud('C5', defaultWellData);
+
+      // Node clicks
+      document.querySelectorAll('.rail-node-item, .dag-node').forEach(el => {
+        el.addEventListener('click', (e) => {
+          const n = parseInt(el.dataset.node);
+          if (n) selectNode(n);
+        });
+      });
+
+      // Save indicator click
+      document.getElementById('saveIndicator').addEventListener('click', triggerSave);
+
+      // Keyboard shortcuts: Cmd/Ctrl+S for save
+      window.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+          e.preventDefault();
+          triggerSave();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,559 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760">
+  <defs>
+    <style>
+      :root {
+        --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Inter", sans-serif;
+        --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", Consolas, Menlo, monospace;
+      }
+      text { user-select: none; }
+      .mono { font-family: var(--font-mono); }
+      .sans { font-family: var(--font-sans); }
+    </style>
+    <!-- Cyan Luminous Edge Bloom Filter -->
+    <filter id="auroraGlow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="4" result="blur1" />
+      <feGaussianBlur stdDeviation="8" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="softGlow" x="-15%" y="-15%" width="130%" height="130%">
+      <feGaussianBlur stdDeviation="2.5" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <!-- Arrowhead Markers -->
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#22D3EE" />
+    </marker>
+    <marker id="arrowMuted" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#8B949E" />
+    </marker>
+
+    <!-- Canvas Dot Grid Pattern -->
+    <pattern id="dotGrid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="rgba(34, 211, 238, 0.12)" />
+      <circle cx="14" cy="14" r="0.8" fill="rgba(255, 255, 255, 0.04)" />
+    </pattern>
+  </defs>
+
+  <!-- Window Container Frame -->
+  <rect width="1200" height="760" fill="#080B10" rx="8" />
+  <rect width="1200" height="760" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1" rx="8" />
+
+  <!-- 1. TITLEBAR (Height 40px) -->
+  <rect x="0" y="0" width="1200" height="40" fill="#0D1117" />
+  <line x1="0" y1="40" x2="1200" y2="40" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <!-- Traffic Lights -->
+  <circle cx="20" cy="20" r="5.5" fill="#FF5F56" />
+  <circle cx="36" cy="20" r="5.5" fill="#FFBD2E" />
+  <circle cx="52" cy="20" r="5.5" fill="#27C93F" />
+
+  <!-- Brand Mark -->
+  <polygon points="76,14 84,18 84,26 76,30 68,26 68,18" fill="#22D3EE" />
+  <text x="92" y="24" class="sans" font-size="12" font-weight="700" fill="#22D3EE" letter-spacing="0.04em">AsterLab</text>
+
+  <!-- Breadcrumbs -->
+  <line x1="160" y1="14" x2="160" y2="26" stroke="rgba(255,255,255,0.12)" stroke-width="1" />
+  <text x="174" y="24" class="sans" font-size="12" fill="#8B949E">PRJ-088: L929 生物毒性评价</text>
+  <text x="345" y="24" class="sans" font-size="12" fill="#484F58">/</text>
+  <text x="358" y="24" class="sans" font-size="12" font-weight="600" fill="#67E8F9">CCK-8 细胞活力检测设计</text>
+  <rect x="525" y="13" width="44" height="16" rx="4" fill="rgba(34,211,238,0.1)" stroke="rgba(34,211,238,0.3)" stroke-width="1" />
+  <text x="532" y="25" class="mono" font-size="10" fill="#22D3EE">rev 4</text>
+
+  <!-- Titlebar Center: Raycast Command Palette Trigger -->
+  <rect x="590" y="8" width="280" height="24" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+  <circle cx="604" cy="20" r="4.5" stroke="#8B949E" stroke-width="1.2" fill="none" />
+  <line x1="607" y1="23" x2="612" y2="27" stroke="#8B949E" stroke-width="1.2" />
+  <text x="618" y="24" class="sans" font-size="11" fill="#8B949E">搜索操作、节点、试剂或执行命令...</text>
+  <rect x="836" y="11" width="26" height="18" rx="3" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.12)" stroke-width="1" />
+  <text x="840" y="24" class="mono" font-size="10" fill="#8B949E">⌘K</text>
+
+  <!-- Titlebar Right: Save Status & Actions -->
+  <circle cx="900" cy="20" r="3.5" fill="#F59E0B" filter="url(#softGlow)" />
+  <text x="912" y="24" class="sans" font-size="11" fill="#8B949E">未保存修改 (3项变更)</text>
+  <rect x="1065" y="8" width="120" height="24" rx="5" fill="rgba(34,211,238,0.12)" stroke="#22D3EE" stroke-width="1" />
+  <text x="1080" y="24" class="sans" font-size="11" font-weight="600" fill="#22D3EE">保存设计</text>
+  <rect x="1148" y="11" width="28" height="18" rx="3" fill="rgba(34,211,238,0.15)" stroke="rgba(34,211,238,0.4)" stroke-width="1" />
+  <text x="1153" y="24" class="mono" font-size="10" font-weight="600" fill="#22D3EE">⌘S</text>
+
+
+  <!-- 2. WORKBENCH BODY (y: 40 to 736) -->
+
+  <!-- 2.1 LEFT SIDEBAR: Structure Tree (x: 0..200, y: 40..736) -->
+  <rect x="0" y="40" width="200" height="696" fill="#0D1117" />
+  <line x1="200" y1="40" x2="200" y2="736" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <text x="14" y="60" class="sans" font-size="10" font-weight="700" fill="#484F58" letter-spacing="0.08em">实验流程结构 (5)</text>
+  <text x="168" y="60" class="mono" font-size="10" fill="#22D3EE">100%</text>
+
+  <!-- Step 01 -->
+  <rect x="8" y="70" width="184" height="28" rx="5" fill="transparent" />
+  <text x="16" y="88" class="mono" font-size="10" fill="#484F58">01</text>
+  <text x="36" y="88" class="sans" font-size="11.5" fill="#8B949E">细胞悬液制备</text>
+
+  <!-- Step 02 -->
+  <rect x="8" y="102" width="184" height="28" rx="5" fill="transparent" />
+  <text x="16" y="120" class="mono" font-size="10" fill="#484F58">02</text>
+  <text x="36" y="120" class="sans" font-size="11.5" fill="#8B949E">96孔板接种</text>
+
+  <!-- Step 03: ACTIVE FOCUS -->
+  <rect x="8" y="134" width="184" height="28" rx="5" fill="rgba(34,211,238,0.08)" stroke="rgba(34,211,238,0.3)" stroke-width="1" />
+  <text x="16" y="152" class="mono" font-size="10" font-weight="700" fill="#22D3EE">03</text>
+  <text x="36" y="152" class="sans" font-size="11.5" font-weight="600" fill="#22D3EE">梯度给药 (Dox)</text>
+  <circle cx="180" cy="148" r="3" fill="#22D3EE" filter="url(#softGlow)" />
+
+  <!-- Step 04 -->
+  <rect x="8" y="166" width="184" height="28" rx="5" fill="transparent" />
+  <text x="16" y="184" class="mono" font-size="10" fill="#484F58">04</text>
+  <text x="36" y="184" class="sans" font-size="11.5" fill="#8B949E">CCK-8 孵育</text>
+
+  <!-- Step 05 -->
+  <rect x="8" y="198" width="184" height="28" rx="5" fill="transparent" />
+  <text x="16" y="216" class="mono" font-size="10" fill="#484F58">05</text>
+  <text x="36" y="216" class="sans" font-size="11.5" fill="#8B949E">酶标仪读板测定</text>
+
+  <!-- Divider -->
+  <line x1="12" y1="240" x2="188" y2="240" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <!-- Consumables Header -->
+  <text x="14" y="262" class="sans" font-size="10" font-weight="700" fill="#484F58" letter-spacing="0.08em">关键耗材与试剂</text>
+
+  <!-- Resource Card 1 -->
+  <rect x="10" y="274" width="180" height="52" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+  <text x="18" y="292" class="sans" font-size="11" font-weight="600" fill="#F0F6FC">Dojindo CCK-8</text>
+  <rect x="144" y="280" width="38" height="15" rx="3" fill="rgba(255,255,255,0.06)" />
+  <text x="148" y="291" class="mono" font-size="9" fill="#8B949E">CK04</text>
+  <text x="18" y="312" class="sans" font-size="10" fill="#8B949E">WST-8 试剂 · 避光 4℃ 存储</text>
+
+  <!-- Resource Card 2 -->
+  <rect x="10" y="334" width="180" height="52" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+  <text x="18" y="352" class="sans" font-size="11" font-weight="600" fill="#F0F6FC">Corning 96孔黑框板</text>
+  <rect x="136" y="340" width="46" height="15" rx="3" fill="rgba(255,255,255,0.06)" />
+  <text x="140" y="351" class="mono" font-size="9" fill="#8B949E">TC-3599</text>
+  <text x="18" y="372" class="sans" font-size="10" fill="#8B949E">透明平底 · 防交叉污染</text>
+
+  <!-- Resource Card 3 -->
+  <rect x="10" y="394" width="180" height="52" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+  <text x="18" y="412" class="sans" font-size="11" font-weight="600" fill="#F0F6FC">L929 小鼠成纤维细胞</text>
+  <rect x="156" y="400" width="26" height="15" rx="3" fill="rgba(255,255,255,0.06)" />
+  <text x="160" y="411" class="mono" font-size="9" fill="#8B949E">P12</text>
+  <text x="18" y="432" class="sans" font-size="10" fill="#8B949E">活力 96.8% · 密度 1.0×10⁴/孔</text>
+
+
+  <!-- 2.2 CENTER AREA (x: 200..910, y: 40..736) -->
+
+  <!-- UPPER CANVAS ZONE (y: 40..380, height 340px) -->
+  <rect x="200" y="40" width="710" height="340" fill="#080B10" />
+  <rect x="200" y="40" width="710" height="340" fill="url(#dotGrid)" />
+  <line x1="200" y1="380" x2="910" y2="380" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <!-- Canvas Floating HUD -->
+  <rect x="214" y="50" width="76" height="24" rx="6" fill="rgba(13,17,23,0.85)" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+  <text x="226" y="66" class="sans" font-size="11" fill="#8B949E">⤢ 适应画布</text>
+  <rect x="296" y="50" width="46" height="24" rx="6" fill="rgba(34,211,238,0.1)" stroke="rgba(34,211,238,0.4)" stroke-width="1" />
+  <text x="306" y="66" class="mono" font-size="11" font-weight="600" fill="#22D3EE">100%</text>
+  <rect x="348" y="50" width="76" height="24" rx="6" fill="rgba(13,17,23,0.85)" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+  <text x="360" y="66" class="sans" font-size="11" fill="#8B949E">＋ 添加步骤</text>
+
+  <rect x="746" y="50" width="60" height="24" rx="6" fill="rgba(13,17,23,0.85)" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+  <text x="758" y="66" class="sans" font-size="11" fill="#8B949E">↶ 撤销</text>
+  <rect x="812" y="50" width="84" height="24" rx="6" fill="rgba(13,17,23,0.85)" stroke="rgba(34,211,238,0.4)" stroke-width="1" />
+  <text x="824" y="66" class="sans" font-size="11" font-weight="600" fill="#22D3EE">▷ 运行模拟</text>
+
+  <!-- Flowchart Connections -->
+  <!-- 1 -> 2 -->
+  <path d="M 330 195 C 348 195, 348 195, 365 195" stroke="#22D3EE" stroke-width="2" fill="none" marker-end="url(#arrowCyan)" />
+  <!-- 2 -> 3 (LUMINOUS CYAN BLOOM) -->
+  <path d="M 485 195 C 502 195, 502 195, 520 195" stroke="#22D3EE" stroke-width="3" fill="none" marker-end="url(#arrowCyan)" filter="url(#auroraGlow)" />
+  <path d="M 485 195 C 502 195, 502 195, 520 195" stroke="#FFFFFF" stroke-width="1.2" stroke-dasharray="4 4" fill="none" />
+  <!-- 3 -> 4 (LUMINOUS CYAN BLOOM) -->
+  <path d="M 645 195 C 662 195, 662 195, 680 195" stroke="#22D3EE" stroke-width="3" fill="none" marker-end="url(#arrowCyan)" filter="url(#auroraGlow)" />
+  <path d="M 645 195 C 662 195, 662 195, 680 195" stroke="#FFFFFF" stroke-width="1.2" stroke-dasharray="4 4" fill="none" />
+  <!-- 4 -> 5 -->
+  <path d="M 795 195 C 812 195, 812 195, 825 195" stroke="#22D3EE" stroke-width="2" fill="none" marker-end="url(#arrowCyan)" />
+
+  <!-- NODE 01: 细胞悬液 (x: 215, y: 145) -->
+  <g transform="translate(215, 145)">
+    <rect width="115" height="100" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+    <rect x="8" y="8" width="22" height="22" rx="4" fill="rgba(255,255,255,0.06)" />
+    <!-- Flask icon -->
+    <path d="M15 13 v5 l4 4 h-10 l4 -4 v-5" stroke="#8B949E" stroke-width="1.3" fill="none" />
+    <text x="36" y="24" class="sans" font-size="11" font-weight="600" fill="#F0F6FC">01 细胞悬液</text>
+    <text x="12" y="52" class="mono" font-size="10" fill="#8B949E">L929 悬浮液</text>
+    <rect x="10" y="68" width="95" height="20" rx="3" fill="#0D1117" />
+    <text x="16" y="82" class="mono" font-size="9.5" fill="#22D3EE">1.0×10⁴ / 孔</text>
+    <circle cx="115" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5" />
+  </g>
+
+  <!-- NODE 02: 96孔板接种 (x: 365, y: 145) -->
+  <g transform="translate(365, 145)">
+    <rect width="120" height="100" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+    <circle cx="0" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5" />
+    <rect x="8" y="8" width="22" height="22" rx="4" fill="rgba(255,255,255,0.06)" />
+    <!-- Pipette/Plate icon -->
+    <rect x="13" y="14" width="12" height="10" rx="1" stroke="#8B949E" stroke-width="1.3" fill="none" />
+    <text x="36" y="24" class="sans" font-size="11" font-weight="600" fill="#F0F6FC">02 微孔接种</text>
+    <text x="12" y="52" class="mono" font-size="10" fill="#8B949E">100 µL / 孔</text>
+    <rect x="10" y="68" width="100" height="20" rx="3" fill="#0D1117" />
+    <text x="14" y="82" class="mono" font-size="9.5" fill="#22D3EE">37℃, 24h 贴壁</text>
+    <circle cx="120" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5" />
+  </g>
+
+  <!-- NODE 03: 梯度给药 (ACTIVE FOCUS) (x: 520, y: 135) -->
+  <g transform="translate(520, 135)">
+    <!-- High-luminous outer glow box -->
+    <rect width="125" height="120" rx="8" fill="#121824" stroke="#22D3EE" stroke-width="2" filter="url(#auroraGlow)" />
+    <circle cx="0" cy="60" r="5" fill="#22D3EE" stroke="#FFFFFF" stroke-width="1.5" />
+    <rect x="8" y="8" width="26" height="26" rx="5" fill="rgba(34,211,238,0.18)" />
+    <!-- Gradient Syringe Icon -->
+    <path d="M14 26 l12 -12 M22 10 l4 4 M12 28 l-2 -2" stroke="#22D3EE" stroke-width="1.8" fill="none" />
+    <text x="40" y="24" class="sans" font-size="11" font-weight="700" fill="#FFFFFF">03 梯度给药</text>
+    <rect x="40" y="30" width="48" height="14" rx="3" fill="rgba(34,211,238,0.2)" />
+    <text x="44" y="41" class="mono" font-size="8.5" font-weight="700" fill="#22D3EE">● 焦点步骤</text>
+    <text x="12" y="64" class="sans" font-size="10" fill="#8B949E">阿霉素 (Dox)</text>
+    <text x="12" y="78" class="mono" font-size="9.5" fill="#67E8F9">6 浓度梯度 (n=6)</text>
+    <rect x="8" y="88" width="109" height="22" rx="3" fill="#080C14" stroke="rgba(34,211,238,0.3)" stroke-width="1" />
+    <text x="12" y="103" class="mono" font-size="9" fill="#22D3EE">0.1 ~ 50 µM (10 µL)</text>
+    <circle cx="125" cy="60" r="5" fill="#22D3EE" stroke="#FFFFFF" stroke-width="1.5" />
+  </g>
+
+  <!-- NODE 04: CCK-8 孵育 (x: 680, y: 145) -->
+  <g transform="translate(680, 145)">
+    <rect width="115" height="100" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+    <circle cx="0" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5" />
+    <rect x="8" y="8" width="22" height="22" rx="4" fill="rgba(255,255,255,0.06)" />
+    <circle cx="19" cy="19" r="6" stroke="#8B949E" stroke-width="1.3" fill="none" />
+    <text x="36" y="24" class="sans" font-size="11" font-weight="600" fill="#F0F6FC">04 CCK-8 孵育</text>
+    <text x="12" y="52" class="mono" font-size="10" fill="#8B949E">10 µL/孔 · 避光</text>
+    <rect x="10" y="68" width="95" height="20" rx="3" fill="#0D1117" />
+    <text x="14" y="82" class="mono" font-size="9.5" fill="#22D3EE">37℃ 孵育 2.0 h</text>
+    <circle cx="115" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5" />
+  </g>
+
+  <!-- NODE 05: 酶标仪读板 (x: 825, y: 145) -->
+  <g transform="translate(825, 145)">
+    <rect width="80" height="100" rx="6" fill="#161B22" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+    <circle cx="0" cy="50" r="4" fill="#0D1117" stroke="#22D3EE" stroke-width="1.5" />
+    <text x="10" y="24" class="sans" font-size="11" font-weight="600" fill="#F0F6FC">05 读板</text>
+    <text x="10" y="52" class="mono" font-size="10" fill="#8B949E">OD450</text>
+    <rect x="8" y="68" width="64" height="20" rx="3" fill="#0D1117" />
+    <text x="12" y="82" class="mono" font-size="9" fill="#22D3EE">5s 震板</text>
+  </g>
+
+
+  <!-- LOWER ZONE: 96-WELL PLATE MATRIX (y: 380..736, height 356px) -->
+  <rect x="200" y="380" width="710" height="356" fill="#0D1117" />
+
+  <!-- Plate Title & Subtitle -->
+  <text x="216" y="402" class="sans" font-size="12" font-weight="700" fill="#F0F6FC">96 孔微孔板布局映射 (Corning #3599)</text>
+  <text x="440" y="402" class="mono" font-size="11" fill="#8B949E">当前分配: 60 / 96 孔 · 边缘蒸发保护开启</text>
+
+  <!-- Plate Legend -->
+  <g transform="translate(216, 412)">
+    <rect x="0" y="0" width="8" height="8" rx="2" fill="#161B22" stroke="#30363D" />
+    <text x="12" y="7" class="sans" font-size="9.5" fill="#8B949E">空白/PBS</text>
+
+    <rect x="75" y="0" width="8" height="8" rx="2" fill="#0E3A42" stroke="#0891B2" />
+    <text x="87" y="7" class="sans" font-size="9.5" fill="#8B949E">Control</text>
+
+    <rect x="145" y="0" width="8" height="8" rx="2" fill="#083344" stroke="#06B6D4" />
+    <text x="157" y="7" class="sans" font-size="9.5" fill="#8B949E">0.1 µM</text>
+
+    <rect x="205" y="0" width="8" height="8" rx="2" fill="#0C4A6E" stroke="#0EA5E9" />
+    <text x="217" y="7" class="sans" font-size="9.5" fill="#8B949E">0.5 µM</text>
+
+    <rect x="265" y="0" width="8" height="8" rx="2" fill="#075985" stroke="#38BDF8" />
+    <text x="277" y="7" class="sans" font-size="9.5" fill="#8B949E">1.0 µM</text>
+
+    <rect x="325" y="0" width="8" height="8" rx="2" fill="#0369A1" stroke="#22D3EE" />
+    <text x="337" y="7" class="sans" font-size="9.5" fill="#8B949E">5.0 µM</text>
+
+    <rect x="385" y="0" width="8" height="8" rx="2" fill="#0284C7" stroke="#67E8F9" />
+    <text x="397" y="7" class="sans" font-size="9.5" fill="#8B949E">10 µM</text>
+
+    <rect x="440" y="0" width="8" height="8" rx="2" fill="#0369A1" stroke="#A5F3FC" />
+    <text x="452" y="7" class="sans" font-size="9.5" fill="#8B949E">50 µM</text>
+  </g>
+
+  <!-- 96-Well Plate Base Frame (x: 216, y: 430, width 678, height 280) -->
+  <rect x="216" y="430" width="678" height="280" rx="8" fill="#090C10" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <!-- Column Headers 1..12 -->
+  <!-- Col width: 48px, offset x = 265 -->
+  <g class="mono" font-size="9.5" font-weight="600" fill="#484F58" text-anchor="middle">
+    <text x="280" y="448">1</text>
+    <text x="330" y="448">2</text>
+    <text x="380" y="448">3</text>
+    <text x="430" y="448">4</text>
+    <text x="480" y="448">5</text>
+    <text x="530" y="448">6</text>
+    <text x="580" y="448">7</text>
+    <text x="630" y="448">8</text>
+    <text x="680" y="448">9</text>
+    <text x="730" y="448">10</text>
+    <text x="780" y="448">11</text>
+    <text x="830" y="448">12</text>
+  </g>
+
+  <!-- Row Headers A..H -->
+  <g class="mono" font-size="9.5" font-weight="600" fill="#484F58" text-anchor="middle">
+    <text x="245" y="475">A</text>
+    <text x="245" y="505">B</text>
+    <text x="245" y="535">C</text>
+    <text x="245" y="565">D</text>
+    <text x="245" y="595">E</text>
+    <text x="245" y="625">F</text>
+    <text x="245" y="655">G</text>
+    <text x="245" y="685">H</text>
+  </g>
+
+  <!-- 8x12 Wells Grid Matrix Rendering -->
+  <!-- Row A (All Blank / PBS Buffer) -->
+  <g>
+    <circle cx="280" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="330" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="380" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="430" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="480" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="530" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="580" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="630" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="680" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="730" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="780" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="830" cy="472" r="10.5" fill="#161B22" stroke="#30363D" />
+  </g>
+
+  <!-- Rows B to G (Active Replicates: Col 1 Blank, Col 2 Ctrl, Cols 3-8 Dox 0.1..50, Cols 9-11 Spare, Col 12 Blank) -->
+  <!-- Row B (y: 502) -->
+  <g>
+    <circle cx="280" cy="502" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="330" cy="502" r="10.5" fill="#0E3A42" stroke="#0891B2" />
+    <circle cx="380" cy="502" r="10.5" fill="#083344" stroke="#06B6D4" />
+    <circle cx="430" cy="502" r="10.5" fill="#0C4A6E" stroke="#0EA5E9" />
+    <circle cx="480" cy="502" r="10.5" fill="#075985" stroke="#38BDF8" />
+    <circle cx="530" cy="502" r="10.5" fill="#0369A1" stroke="#22D3EE" />
+    <circle cx="580" cy="502" r="10.5" fill="#0284C7" stroke="#67E8F9" />
+    <circle cx="630" cy="502" r="10.5" fill="#0369A1" stroke="#A5F3FC" />
+    <circle cx="680" cy="502" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="730" cy="502" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="780" cy="502" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="830" cy="502" r="10.5" fill="#161B22" stroke="#30363D" />
+  </g>
+
+  <!-- Row C (y: 532) -->
+  <g>
+    <circle cx="280" cy="532" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="330" cy="532" r="10.5" fill="#0E3A42" stroke="#0891B2" />
+    <circle cx="380" cy="532" r="10.5" fill="#083344" stroke="#06B6D4" />
+    <circle cx="430" cy="532" r="10.5" fill="#0C4A6E" stroke="#0EA5E9" />
+    <circle cx="480" cy="532" r="10.5" fill="#075985" stroke="#38BDF8" />
+    <circle cx="530" cy="532" r="10.5" fill="#0369A1" stroke="#22D3EE" />
+    <circle cx="580" cy="532" r="10.5" fill="#0284C7" stroke="#67E8F9" />
+    <circle cx="630" cy="532" r="10.5" fill="#0369A1" stroke="#A5F3FC" />
+    <circle cx="680" cy="532" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="730" cy="532" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="780" cy="532" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="830" cy="532" r="10.5" fill="#161B22" stroke="#30363D" />
+  </g>
+
+  <!-- Row D (y: 562) - WELL D05 IS ACTIVE / HIGHLIGHTED -->
+  <g>
+    <circle cx="280" cy="562" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="330" cy="562" r="10.5" fill="#0E3A42" stroke="#0891B2" />
+    <circle cx="380" cy="562" r="10.5" fill="#083344" stroke="#06B6D4" />
+    <circle cx="430" cy="562" r="10.5" fill="#0C4A6E" stroke="#0EA5E9" />
+    <!-- Active D05 Well -->
+    <circle cx="480" cy="562" r="13" fill="#075985" stroke="#FFFFFF" stroke-width="2" filter="url(#auroraGlow)" />
+    <circle cx="480" cy="562" r="5" fill="#22D3EE" />
+    <circle cx="530" cy="562" r="10.5" fill="#0369A1" stroke="#22D3EE" />
+    <circle cx="580" cy="562" r="10.5" fill="#0284C7" stroke="#67E8F9" />
+    <circle cx="630" cy="562" r="10.5" fill="#0369A1" stroke="#A5F3FC" />
+    <circle cx="680" cy="562" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="730" cy="562" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="780" cy="562" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="830" cy="562" r="10.5" fill="#161B22" stroke="#30363D" />
+  </g>
+
+  <!-- Row E (y: 592) -->
+  <g>
+    <circle cx="280" cy="592" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="330" cy="592" r="10.5" fill="#0E3A42" stroke="#0891B2" />
+    <circle cx="380" cy="592" r="10.5" fill="#083344" stroke="#06B6D4" />
+    <circle cx="430" cy="592" r="10.5" fill="#0C4A6E" stroke="#0EA5E9" />
+    <circle cx="480" cy="592" r="10.5" fill="#075985" stroke="#38BDF8" />
+    <circle cx="530" cy="592" r="10.5" fill="#0369A1" stroke="#22D3EE" />
+    <circle cx="580" cy="592" r="10.5" fill="#0284C7" stroke="#67E8F9" />
+    <circle cx="630" cy="592" r="10.5" fill="#0369A1" stroke="#A5F3FC" />
+    <circle cx="680" cy="592" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="730" cy="592" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="780" cy="592" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="830" cy="592" r="10.5" fill="#161B22" stroke="#30363D" />
+  </g>
+
+  <!-- Row F (y: 622) -->
+  <g>
+    <circle cx="280" cy="622" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="330" cy="622" r="10.5" fill="#0E3A42" stroke="#0891B2" />
+    <circle cx="380" cy="622" r="10.5" fill="#083344" stroke="#06B6D4" />
+    <circle cx="430" cy="622" r="10.5" fill="#0C4A6E" stroke="#0EA5E9" />
+    <circle cx="480" cy="622" r="10.5" fill="#075985" stroke="#38BDF8" />
+    <circle cx="530" cy="622" r="10.5" fill="#0369A1" stroke="#22D3EE" />
+    <circle cx="580" cy="622" r="10.5" fill="#0284C7" stroke="#67E8F9" />
+    <circle cx="630" cy="622" r="10.5" fill="#0369A1" stroke="#A5F3FC" />
+    <circle cx="680" cy="622" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="730" cy="622" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="780" cy="622" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="830" cy="622" r="10.5" fill="#161B22" stroke="#30363D" />
+  </g>
+
+  <!-- Row G (y: 652) -->
+  <g>
+    <circle cx="280" cy="652" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="330" cy="652" r="10.5" fill="#0E3A42" stroke="#0891B2" />
+    <circle cx="380" cy="652" r="10.5" fill="#083344" stroke="#06B6D4" />
+    <circle cx="430" cy="652" r="10.5" fill="#0C4A6E" stroke="#0EA5E9" />
+    <circle cx="480" cy="652" r="10.5" fill="#075985" stroke="#38BDF8" />
+    <circle cx="530" cy="652" r="10.5" fill="#0369A1" stroke="#22D3EE" />
+    <circle cx="580" cy="652" r="10.5" fill="#0284C7" stroke="#67E8F9" />
+    <circle cx="630" cy="652" r="10.5" fill="#0369A1" stroke="#A5F3FC" />
+    <circle cx="680" cy="652" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="730" cy="652" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="780" cy="652" r="10.5" fill="#0D1117" stroke="rgba(255,255,255,0.06)" />
+    <circle cx="830" cy="652" r="10.5" fill="#161B22" stroke="#30363D" />
+  </g>
+
+  <!-- Row H (All Blank / PBS Buffer) (y: 682) -->
+  <g>
+    <circle cx="280" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="330" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="380" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="430" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="480" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="530" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="580" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="630" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="680" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="730" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="780" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+    <circle cx="830" cy="682" r="10.5" fill="#161B22" stroke="#30363D" />
+  </g>
+
+  <!-- Floating Raycast Tooltip for Well D05 (x: 550, y: 640) -->
+  <g transform="translate(530, 645)">
+    <rect width="340" height="42" rx="6" fill="#0D1117" stroke="rgba(34,211,238,0.4)" stroke-width="1" filter="url(#softGlow)" />
+    <text x="14" y="24" class="mono" font-size="12" font-weight="700" fill="#22D3EE">D05</text>
+    <text x="48" y="24" class="sans" font-size="11.5" font-weight="600" fill="#FFFFFF">Dox 0.5 µM (给药组)</text>
+    <text x="175" y="24" class="mono" font-size="10" fill="#8B949E">100 µL 培养基 + 10 µL 药液 · Rep 4/6</text>
+  </g>
+
+
+  <!-- 2.3 RIGHT INSPECTOR PANEL (x: 910..1200, width 290px, y: 40..736) -->
+  <rect x="910" y="40" width="290" height="696" fill="#0D1117" />
+  <line x1="910" y1="40" x2="910" y2="736" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <!-- Inspector Tabs -->
+  <rect x="910" y="40" width="290" height="34" fill="#161B22" />
+  <line x1="910" y1="74" x2="1200" y2="74" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <text x="942" y="62" class="sans" font-size="11" font-weight="600" fill="#22D3EE">参数配置</text>
+  <line x1="930" y1="73" x2="996" y2="73" stroke="#22D3EE" stroke-width="2" />
+
+  <text x="1030" y="62" class="sans" font-size="11" fill="#8B949E">质控合约</text>
+  <text x="1115" y="62" class="sans" font-size="11" fill="#8B949E">自动化代码</text>
+
+  <!-- Inspector Form Fields -->
+  <!-- Field 1: Step Name -->
+  <g transform="translate(924, 88)">
+    <text x="0" y="10" class="sans" font-size="11" fill="#8B949E">步骤名称</text>
+    <rect x="0" y="16" width="262" height="28" rx="5" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+    <text x="10" y="34" class="sans" font-size="11.5" fill="#F0F6FC">梯度给药 (Doxorubicin)</text>
+  </g>
+
+  <!-- Field 2: Compound -->
+  <g transform="translate(924, 142)">
+    <text x="0" y="10" class="sans" font-size="11" fill="#8B949E">给药化合物</text>
+    <text x="160" y="10" class="mono" font-size="10" fill="#484F58">CAS: 25316-40-9</text>
+    <rect x="0" y="16" width="262" height="28" rx="5" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+    <text x="10" y="34" class="sans" font-size="11" fill="#F0F6FC">阿霉素盐酸盐 (Doxorubicin HCl)</text>
+  </g>
+
+  <!-- Field 3: Solvent system -->
+  <g transform="translate(924, 196)">
+    <text x="0" y="10" class="sans" font-size="11" fill="#8B949E">溶剂与母液体系</text>
+    <text x="180" y="10" class="mono" font-size="10" fill="#484F58">DMSO &lt; 0.1%</text>
+    <rect x="0" y="16" width="262" height="28" rx="5" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+    <text x="10" y="34" class="sans" font-size="11" fill="#F0F6FC">10 mM DMSO 母液 → DMEM 培养基稀释</text>
+  </g>
+
+  <!-- Field 4: Volume & Time split -->
+  <g transform="translate(924, 250)">
+    <!-- Sub 1: Dispense Volume -->
+    <text x="0" y="10" class="sans" font-size="11" fill="#8B949E">单孔加药体积</text>
+    <rect x="0" y="16" width="126" height="28" rx="5" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+    <text x="10" y="34" class="mono" font-size="11" fill="#22D3EE">10.0 µL</text>
+
+    <!-- Sub 2: Estimated Duration -->
+    <text x="136" y="10" class="sans" font-size="11" fill="#8B949E">预估操作耗时</text>
+    <rect x="136" y="16" width="126" height="28" rx="5" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+    <text x="146" y="34" class="mono" font-size="11" fill="#F0F6FC">12 min</text>
+  </g>
+
+  <!-- Field 5: Post-dosing Incubation -->
+  <g transform="translate(924, 304)">
+    <text x="0" y="10" class="sans" font-size="11" fill="#8B949E">给药后孵育时间</text>
+    <text x="160" y="10" class="mono" font-size="10" fill="#484F58">37℃, 5% CO₂</text>
+    <rect x="0" y="16" width="262" height="28" rx="5" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+    <text x="10" y="34" class="mono" font-size="11" fill="#F0F6FC">24.0 h (标准耐药动力学)</text>
+  </g>
+
+  <!-- Field 6: Pipetting mode -->
+  <g transform="translate(924, 358)">
+    <text x="0" y="10" class="sans" font-size="11" fill="#8B949E">移液策略与工作台分配</text>
+    <rect x="0" y="16" width="262" height="28" rx="5" fill="#161B22" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+    <text x="10" y="34" class="sans" font-size="11" fill="#F0F6FC">8通道排枪多孔同步点样 (OT-2 Pipetting)</text>
+  </g>
+
+  <!-- Contract Check Card -->
+  <g transform="translate(924, 415)">
+    <rect width="262" height="110" rx="6" fill="rgba(13,148,136,0.08)" stroke="rgba(13,148,136,0.25)" stroke-width="1" />
+    <text x="12" y="22" class="sans" font-size="11" font-weight="700" fill="#22D3EE">CCK-8 自动化验证合约 (Pass)</text>
+    <text x="12" y="46" class="sans" font-size="11" fill="#10B981">✓</text>
+    <text x="26" y="46" class="sans" font-size="11" fill="#8B949E">边缘保护: A1-H1, A12-H12 已注 PBS</text>
+
+    <text x="12" y="70" class="sans" font-size="11" fill="#10B981">✓</text>
+    <text x="26" y="70" class="sans" font-size="11" fill="#8B949E">技术重复数: 6 复孔平衡随机 (n≥3)</text>
+
+    <text x="12" y="94" class="sans" font-size="11" fill="#10B981">✓</text>
+    <text x="26" y="94" class="sans" font-size="11" fill="#8B949E">终浓度 DMSO 0.05% &lt; 0.1% 细胞耐受阈值</text>
+  </g>
+
+  <!-- Bottom Action Buttons in Inspector -->
+  <g transform="translate(924, 665)">
+    <rect width="126" height="32" rx="5" fill="rgba(34,211,238,0.12)" stroke="#22D3EE" stroke-width="1" />
+    <text x="24" y="21" class="sans" font-size="11.5" font-weight="600" fill="#22D3EE">保存设计 (⌘S)</text>
+
+    <rect x="136" y="0" width="126" height="32" rx="5" fill="#1F242C" stroke="rgba(255,255,255,0.12)" stroke-width="1" />
+    <text x="156" y="21" class="sans" font-size="11.5" font-weight="600" fill="#F0F6FC">创建实验运行 ▷</text>
+  </g>
+
+
+  <!-- 3. STATUS BAR (y: 736..760, height 24px) -->
+  <rect x="0" y="736" width="1200" height="24" fill="#06090D" />
+  <line x1="0" y1="736" x2="1200" y2="736" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <text x="14" y="752" class="mono" font-size="10.5" fill="#8B949E">git: feature/cck8-l929</text>
+  <circle cx="160" cy="748" r="3" fill="#22D3EE" />
+  <text x="170" y="752" class="mono" font-size="10.5" fill="#8B949E">板位占用: 60/96 孔 (62.5%)</text>
+  <text x="340" y="752" class="sans" font-size="10.5" fill="#8B949E">当前步骤: 03. 梯度给药 (Doxorubicin)</text>
+
+  <text x="940" y="752" class="mono" font-size="10.5" fill="#484F58">UTF-8</text>
+  <text x="1000" y="752" class="sans" font-size="10.5" fill="#8B949E">Assay Contract: Pass</text>
+  <text x="1115" y="752" class="mono" font-size="10.5" font-weight="600" fill="#22D3EE">⚡ Aurora Theme</text>
+</svg>
