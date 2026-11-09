@@ -617,6 +617,7 @@ async fn create_record(
                 view_id,
                 repeat_of_run_id,
                 repeat_relationship,
+                None,
             )
             .map_err(ApiError::from_cli)?
         }

@@ -48,20 +48,36 @@ impl AppCore {
         None
     }
 
+    fn find_operation_event_tx(tx: &rusqlite::Transaction<'_>, run_id: &str, op_id: &str) -> Option<Value> {
+        let mut stmt = tx.prepare(
+            "SELECT data_json FROM records WHERE kind='execution_event' AND parent_id=?1",
+        ).ok()?;
+        let rows = stmt.query_map([run_id], |row| row.get::<_, String>(0)).ok()?;
+        for row in rows.flatten() {
+            if let Ok(v) = serde_json::from_str::<Value>(&row) {
+                if v.get("operation_id").and_then(Value::as_str) == Some(op_id) {
+                    return Some(v);
+                }
+            }
+        }
+        None
+    }
+
     pub fn save_readout(&mut self, input: Value) -> Result<Value, String> {
         let run_id = input.get("run_id").and_then(Value::as_str).map(str::to_owned)
             .ok_or_else(|| "run_id is required".to_owned())?;
         let op_id = input.get("operation_id").and_then(Value::as_str).map(str::to_owned);
+        let tx = self.db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         if let Some(op) = &op_id {
-            if let Some(existing) = self.find_operation_event(&run_id, op) {
+            if let Some(existing) = Self::find_operation_event_tx(&tx, &run_id, op) {
                 let existing_payload = existing.get("operation_payload").cloned().unwrap_or(Value::Null);
                 if existing_payload == input {
+                    tx.commit().map_err(|e| e.to_string())?;
                     return self.load_run(&run_id);
                 }
                 return Err("operation id conflict: same operation_id with different payload".to_owned());
             }
         }
-        let tx = self.db.transaction().map_err(|e| e.to_string())?;
         let mut event = input.clone();
         if event.get("event_type").is_none() {
             event["event_type"] = json!("measurement");
@@ -82,16 +98,17 @@ impl AppCore {
         let run_id = input.get("run_id").and_then(Value::as_str).map(str::to_owned)
             .ok_or_else(|| "run_id is required".to_owned())?;
         let op_id = input.get("operation_id").and_then(Value::as_str).map(str::to_owned);
+        let tx = self.db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         if let Some(op) = &op_id {
-            if let Some(existing) = self.find_operation_event(&run_id, op) {
+            if let Some(existing) = Self::find_operation_event_tx(&tx, &run_id, op) {
                 let existing_payload = existing.get("operation_payload").cloned().unwrap_or(Value::Null);
                 if existing_payload == input {
+                    tx.commit().map_err(|e| e.to_string())?;
                     return self.load_run(&run_id);
                 }
                 return Err("operation id conflict: same operation_id with different payload".to_owned());
             }
         }
-        let tx = self.db.transaction().map_err(|e| e.to_string())?;
         let mut event = input.clone();
         if event.get("event_type").is_none() {
             event["event_type"] = json!("operation");
@@ -136,8 +153,8 @@ impl AppCore {
         cli_impl::revise_design_record(&self.db, id, expected, &changes).map_err(|e| e.message)
     }
 
-    pub fn create_run(&mut self, design_id: &str, title: Option<&str>) -> Result<Value, String> {
-        cli_impl::create_run_for_design(&self.db, design_id, title).map_err(|e| e.message)
+    pub fn create_run(&mut self, design_id: &str, title: Option<&str>, operation_id: Option<&str>) -> Result<Value, String> {
+        cli_impl::create_run_for_design(&mut self.db, design_id, title, operation_id).map_err(|e| e.message)
     }
 }
 
@@ -156,7 +173,7 @@ mod tests {
         let pid = proj["id"].as_str().unwrap();
         let design = core.save_design(serde_json::json!({"project_id": pid, "design": {"title": "d"}})).unwrap();
         let did = design["design"]["id"].as_str().unwrap();
-        let run = core.create_run(did, None).unwrap();
+        let run = core.create_run(did, None, None).unwrap();
         let rid = run["id"].as_str().unwrap();
         let rev0 = core.load_run(rid).unwrap()["revision"].as_i64().unwrap();
 

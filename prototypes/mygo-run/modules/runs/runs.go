@@ -50,6 +50,7 @@ type RunTask struct {
 	Title     string `json:"title"`
 	Timepoint string `json:"timepoint"`
 	Status    string `json:"status"`
+	AssayID   string `json:"assayId"`
 }
 
 type Measurement struct {
@@ -74,6 +75,7 @@ type ReadoutInput struct {
 	Timepoint    string        `json:"timepoint"`
 	Measurements []Measurement `json:"measurements"`
 	OperationID  string        `json:"operationId"`
+	AssayID      string        `json:"assayId"`
 }
 
 type CompleteTaskInput struct {

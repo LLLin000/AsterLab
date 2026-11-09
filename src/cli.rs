@@ -1425,6 +1425,7 @@ pub(crate) fn create_run_in_transaction(
     view_id: Option<&str>,
     repeat_of_run_id: Option<&str>,
     repeat_relationship: &str,
+    operation_id: Option<&str>,
 ) -> Result<Value, CliError> {
     check_text(title, "运行名称", 160)?;
     if let Some(date) = scheduled_date.filter(|date| !date.trim().is_empty()) {
@@ -1475,7 +1476,7 @@ pub(crate) fn create_run_in_transaction(
             |row| row.get(0),
         )
         .map_err(|e| CliError::internal(e.to_string()))?;
-    let data = json!({
+    let mut data = json!({
         "title":title.trim(),
         "scheduled_date":scheduled_date.filter(|date| !date.trim().is_empty()),
         "protocol_version_id":global_protocol_version_id.filter(|id| !id.is_empty()),
@@ -1492,6 +1493,10 @@ pub(crate) fn create_run_in_transaction(
         "repeat_relationship":repeat_relationship,
         "status":"planned"
     });
+    if let Some(op) = operation_id.filter(|s| !s.trim().is_empty()) {
+        data["operation_id"] = json!(op);
+        data["operation_payload"] = json!({"design_id": design_id, "title": title});
+    }
     insert(tx, "run", Some(&project), Some(design_id), 1, &data)
 }
 
@@ -4845,6 +4850,8 @@ pub(crate) fn open_db(path: &Path) -> Result<Connection, CliError> {
         .map_err(|e| CliError::internal(e.to_string()))?;
     db.pragma_update(None, "foreign_keys", "ON")
         .map_err(|e| CliError::internal(e.to_string()))?;
+    db.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| CliError::internal(e.to_string()))?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);")
       .map_err(|e| CliError::internal(e.to_string()))?;
     Ok(db)
@@ -5143,9 +5150,10 @@ pub(crate) fn revise_design_record(
 }
 
 pub(crate) fn create_run_for_design(
-    db: &Connection,
+    db: &mut Connection,
     design_id: &str,
     title: Option<&str>,
+    operation_id: Option<&str>,
 ) -> Result<Value, CliError> {
     let design = get(db, design_id)?;
     if design["kind"] != "design" {
@@ -5156,19 +5164,52 @@ pub(crate) fn create_run_for_design(
         .unwrap_or("Run")
         .to_string()
         + " run";
-    let title = title.unwrap_or(&default_title);
+    let title_str = title.unwrap_or(&default_title);
+    let op = operation_id.filter(|s| !s.trim().is_empty()).map(str::to_owned);
+
     let tx = db
-        .unchecked_transaction()
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| CliError::internal(e.to_string()))?;
+
+    if let Some(op_id) = &op {
+        let found: Option<(String, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT id, data_json FROM records WHERE kind='run' AND json_extract(data_json, '$.operation_id')=?1")
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let rows = stmt
+                .query_map([op_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| CliError::internal(e.to_string()))?;
+            let mut out = None;
+            for row in rows {
+                let (id, raw) = row.map_err(|e| CliError::internal(e.to_string()))?;
+                out = Some((id, raw));
+                break;
+            }
+            out
+        };
+        if let Some((existing_id, raw)) = found {
+            let existing_data: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+            let existing_payload = existing_data.get("operation_payload").cloned().unwrap_or(Value::Null);
+            let request_payload = json!({"design_id": design_id, "title": title_str});
+            if existing_payload == request_payload {
+                tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+                return get(db, &existing_id);
+            }
+            tx.rollback().ok();
+            return Err(CliError::conflict("operation id conflict: same operation_id with different payload"));
+        }
+    }
+
     let record = create_run_in_transaction(
         &tx,
         design_id,
-        title,
+        title_str,
         None,
         None,
         None,
         None,
         "independent",
+        op.as_deref(),
     )?;
     tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
     Ok(record)
@@ -5601,6 +5642,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 i.view_id.as_deref(),
                 i.repeat_of_run_id.as_deref(),
                 i.repeat_relationship.as_str(),
+                None,
             )?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(json!({"record":record}))

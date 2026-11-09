@@ -50,6 +50,7 @@ impl RunService for CoreRunService {
         });
         if !input.task_key.is_empty() { event["task_key"] = serde_json::json!(input.task_key); }
         if !input.timepoint.is_empty() { event["timepoint"] = serde_json::json!(input.timepoint); }
+        if !input.assay_id.is_empty() { event["assay_id"] = serde_json::json!(input.assay_id); }
         if !input.operation_id.is_empty() { event["operation_id"] = serde_json::json!(input.operation_id); }
         let v = core.save_readout(event).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         Ok(snapshot(v))
@@ -137,16 +138,12 @@ impl DesignService for CoreDesignService {
     fn create_run(&self, _ctx: &Context, design_id: String, operation_id: String) -> Result<RunSnapshot, Error> {
         let mut guard = self.db.lock().map_err(|_| Error::Go("INTERNAL: db lock poisoned".into()))?;
         let db = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
-        let tx = db.transaction().map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
-        let record = cli_impl::create_run_in_transaction(&tx, &design_id, "", None, None, None, None, "independent")
-            .map_err(map_cli)?;
-        tx.commit().map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        let op = if operation_id.trim().is_empty() { None } else { Some(operation_id.as_str()) };
+        let record = cli_impl::create_run_for_design(db, &design_id, None, op).map_err(map_cli)?;
         let run_id = record["id"].as_str().unwrap_or("").to_string();
-        // load via AppCore? Need run snapshot. Use cli_impl::run_workspace
         let v = cli_impl::run_workspace(db, &run_id).map_err(map_cli)?;
         let mut s = snapshot(v);
         s.run_id = run_id;
-        let _ = operation_id;
         Ok(s)
     }
 
@@ -180,11 +177,13 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
         events: vec![],
     };
     for t in v["tasks"].as_array().into_iter().flatten() {
+        let assay_id = t.get("scope").and_then(|sc| sc.get("Assay")).and_then(|a| a.get("assay_id")).and_then(|x| x.as_str()).unwrap_or("").to_string();
         s.tasks.push(RunTask {
             key: t["task_key"].as_str().unwrap_or("").into(),
             title: t["step_path"].as_str().unwrap_or("").into(),
             timepoint: t["timepoint"].as_str().unwrap_or("准备").into(),
             status: t["status"].as_str().unwrap_or("").into(),
+            assay_id,
         });
     }
     for e in v["events"].as_array().into_iter().flatten() {
