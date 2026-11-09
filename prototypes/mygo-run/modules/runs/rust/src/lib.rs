@@ -38,13 +38,16 @@ impl RunService for CoreRunService {
             "row":c.row,"column":c.column,"sample_id":c.sample_id,"group":c.group,
             "replicate":c.replicate,"field":c.field,"value":c.value,"status":c.status
         })).collect();
-        let request = serde_json::json!({
+        let mut request = serde_json::json!({
             "run_id":input.run_id,"operation_id":input.operation_id,"task_key":input.task_key,
-            "assay_id":input.assay_id,"timepoint":input.timepoint,
-            "protocol_step_path":input.protocol_step_path,"protocol_version_id":input.protocol_version_id,
             "schema_id":input.schema_id,"schema_version":input.schema_version,
-            "plate_id":input.plate_id,"expected_revision":input.expected_revision,"cells":cells
+            "expected_revision":input.expected_revision,"cells":cells
         });
+        if !input.assay_id.is_empty() { request["assay_id"] = serde_json::json!(input.assay_id); }
+        if !input.timepoint.is_empty() { request["timepoint"] = serde_json::json!(input.timepoint); }
+        if !input.protocol_step_path.is_empty() { request["protocol_step_path"] = serde_json::json!(input.protocol_step_path); }
+        if !input.protocol_version_id.is_empty() { request["protocol_version_id"] = serde_json::json!(input.protocol_version_id); }
+        if !input.plate_id.is_empty() { request["plate_id"] = serde_json::json!(input.plate_id); }
         let result = core.save_readouts_batch(request).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         Ok(BatchReadoutResult {
             run_id: result["run_id"].as_str().unwrap_or_default().to_owned(),
