@@ -99,7 +99,7 @@ func (e *Editor) View(c *ui.Context) {
 				}
 				p.Fill(r, fill, 8)
 				p.Stroke(r, t.Border, 8, 1)
-				p.FillPath(iconPath(n.Kind), t.Text)
+				p.Text(r.X+4, r.Y+22*z, string(n.Kind), 10*z, t.Text)
 				p.Text(r.X+4, r.Y+58*z, n.Title, 10*z, t.Text)
 			}).OnClick(func() {
 				if !e.ConnectMode {

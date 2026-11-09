@@ -408,11 +408,12 @@ func View(c *ui.Context, d *Designer) {
 		ui.Row(c).Grow(1).Children(func() {
 			if d.Left != nil {
 				ui.Column(c).Width(220).FillHeight().Padding(8).Gap(6).Background(t.Surface).Children(func() {
+					d.Left(c)
 				})
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				// top workflow editor
-				ui.Box(c).Grow(1).Fill().Children(func() {
+				ui.Box(c).Height(280).Fill().Children(func() {
 					if d.Editor != nil {
 						d.Editor.View(c)
 					}
