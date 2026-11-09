@@ -196,6 +196,7 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
         run_id: v["run_id"].as_str().unwrap_or("").into(),
         design_id,
         design_revision,
+        design_data: serde_json::to_string(&v["frozen_design"]["content"]).unwrap_or_default(),
         revision: v["revision"].as_u64().unwrap_or(0),
         title: v["frozen_design"]["content"]["title"].as_str().unwrap_or("").into(),
         status: v["status"].as_str().unwrap_or("").into(),

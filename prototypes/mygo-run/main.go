@@ -132,7 +132,11 @@ func (a *app) prepareGrid() {
 		a.ws.Grid = nil
 		return
 	}
-	schema, cells, err := assays.BuildSchema([]byte(a.designSnap.Data), task.AssayID, task.Timepoint)
+	designData := a.designSnap.Data
+	if a.snap.DesignData != "" {
+		designData = a.snap.DesignData
+	}
+	schema, cells, err := assays.BuildSchema([]byte(designData), task.AssayID, task.Timepoint)
 	if err != nil {
 		a.ws.Grid = nil
 		a.ws.Error = state.MapError(err).Error()
