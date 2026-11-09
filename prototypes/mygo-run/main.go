@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
+	"math"
+	"os"
+	"strconv"
 
+	"asterlab-mygo-prototype/modules/runs"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -14,7 +19,42 @@ type app struct {
 	samples   []sample
 	checked   bool
 	plateWell *int
+	svc       runs.RunService
+	snap      runs.RunSnapshot
+	err       string
 }
+
+func (a *app) save() {
+	if a.svc == nil {
+		a.err = "Rust RunService 不可用"
+		return
+	}
+	ms := make([]runs.Measurement, 0, len(a.samples))
+	for _, r := range a.samples {
+		v, err := strconv.ParseFloat(r.value, 64)
+		if err != nil || !isFinite(v) {
+			continue
+		}
+		if r.id == "" {
+			a.err = "样本 / 孔位不能为空"
+			return
+		}
+		ms = append(ms, runs.Measurement{SampleID: r.id, Endpoint: "OD450", Value: v, Unit: "AU"})
+	}
+	if len(ms) == 0 {
+		a.err = "至少填写一条有效数值"
+		return
+	}
+	snap, err := a.svc.SaveReadout(context.Background(), runs.ReadoutInput{RunID: a.snap.RunID, Measurements: ms})
+	if err != nil {
+		a.err = err.Error()
+		return
+	}
+	a.snap = snap
+	a.err = "已保存"
+}
+
+func isFinite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 func (a *app) view(c *ui.Context) {
 	t := c.Theme()
@@ -27,7 +67,7 @@ func (a *app) view(c *ui.Context) {
 			ui.Text(c, "/").TextColor(t.TextMuted)
 			ui.Text(c, "实验运行").TextColor(t.TextMuted)
 			ui.Spacer(c)
-			ui.Text(c, "L929 生物相容性 · 第 2 次运行").TextColor(t.TextMuted)
+			ui.Text(c, a.snap.Title+" · 第 2 次运行").TextColor(t.TextMuted)
 		})
 		ui.Divider(c)
 		ui.Row(c).Grow(1).Children(func() {
@@ -60,9 +100,9 @@ func (a *app) workspace(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).FillHeight().Padding(18).Gap(14).Children(func() {
 		ui.Row(c).Children(func() {
-			ui.Text(c, "L929 生物相容性").FontSize(22).Bold()
+			ui.Text(c, a.snap.Title).FontSize(22).Bold()
 			ui.Spacer(c)
-			ui.Text(c, "进行中 · D3").TextColor(t.TextMuted)
+			ui.Text(c, a.snap.Status+" · D3").TextColor(t.TextMuted)
 		})
 		a.schedule(c)
 		ui.Grid(c).Grow(1).ColumnTracks(ui.Fr(2), ui.Fixed(280)).Gap(16).Children(func() {
@@ -122,6 +162,7 @@ func (a *app) ready(c *ui.Context) {
 		ui.Text(c, "就绪信息").FontSize(15).Bold()
 		ui.Text(c, "材料 / 试剂").FontSize(11).TextColor(t.TextMuted)
 		ui.Text(c, "尚未绑定")
+		ui.Text(c, a.err)
 		ui.Text(c, "仪器 / 程序").FontSize(11).TextColor(t.TextMuted)
 		ui.Text(c, "尚未绑定")
 		ui.Text(c, "孔板").FontSize(11).TextColor(t.TextMuted)
@@ -179,7 +220,18 @@ func (a *app) plate(c *ui.Context) {
 
 func main() {
 	page, step := "run", "design-l929"
-	a := &app{page: &page, step: &step, samples: []sample{{"Control-1", ""}, {"E1-1", ""}}}
+	svc, err := runs.NewRunService()
+	if err != nil {
+		log.Fatal(err)
+	}
+	snap, err := svc.LoadRun(context.Background(), "run-1")
+	if err != nil {
+		log.Fatal(err)
+	}
+	a := &app{page: &page, step: &step, samples: []sample{{"Control-1", ""}, {"E1-1", ""}}, svc: svc, snap: snap}
+	if os.Getenv("ASTERLAB_MYGO_RUNS") == "" {
+		_ = os.Setenv("ASTERLAB_MYGO_RUNS", "runs.json")
+	}
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{
 			Title: "AsterLab MyGo Prototype", Width: 1200, Height: 760,

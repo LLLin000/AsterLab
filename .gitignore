@@ -8,3 +8,7 @@
 /native/asterlab-run/target
 
 /prototypes/mygo-run/*.exe
+
+/prototypes/mygo-run/.mygo/
+/prototypes/mygo-run/modules/runs/rust/target/
+/prototypes/mygo-run/*.exe
