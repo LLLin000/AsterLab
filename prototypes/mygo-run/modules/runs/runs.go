@@ -17,6 +17,7 @@ type RunService interface {
 
 type RunSnapshot struct {
 	RunID        string        `json:"runId"`
+	Revision     uint64        `json:"revision"`
 	Title        string        `json:"title"`
 	Status       string        `json:"status"`
 	Tasks        []RunTask     `json:"tasks"`

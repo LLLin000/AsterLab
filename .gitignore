@@ -14,3 +14,5 @@
 /prototypes/mygo-run/*.exe
 
 /crates/asterlab-app/target/
+
+/prototypes/mygo-run/dist/

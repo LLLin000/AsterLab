@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math"
 	"os"
@@ -19,9 +20,18 @@ type app struct {
 	samples   []sample
 	checked   bool
 	plateWell *int
+	tp        string
 	svc       runs.RunService
 	snap      runs.RunSnapshot
 	err       string
+}
+
+func (a *app) apply(snap runs.RunSnapshot) {
+	if snap.Revision < a.snap.Revision {
+		a.err = "忽略过期快照"
+		return
+	}
+	a.snap = snap
 }
 
 func (a *app) save() {
@@ -114,14 +124,42 @@ func (a *app) workspace(c *ui.Context) {
 
 func (a *app) schedule(c *ui.Context) {
 	t := c.Theme()
+	type tp struct {
+		name        string
+		done, total int
+	}
+	var list []tp
+	for _, task := range a.snap.Tasks {
+		name := task.Timepoint
+		if name == "" {
+			name = "准备"
+		}
+		i := -1
+		for j := range list {
+			if list[j].name == name {
+				i = j
+				break
+			}
+		}
+		if i < 0 {
+			list = append(list, tp{name: name})
+			i = len(list) - 1
+		}
+		list[i].total++
+		if task.Status == "completed" {
+			list[i].done++
+		}
+	}
 	ui.Row(c).Gap(8).Children(func() {
-		for _, d := range []string{"D1", "D3", "D7"} {
-			d := d
+		for _, item := range list {
+			item := item
 			bg := t.Surface
-			if d == "D3" {
+			if item.name == a.tp {
 				bg = ui.Hex("#5b45c9")
 			}
-			ui.Button(c, d+"  2/3").Radius(7).Padding(8, 12).Background(bg)
+			if ui.Button(c, fmt.Sprintf("%s  %d/%d", item.name, item.done, item.total)).Radius(7).Padding(8, 12).Background(bg).Clicked() {
+				a.tp = item.name
+			}
 		}
 	})
 }
@@ -168,9 +206,9 @@ func (a *app) ready(c *ui.Context) {
 		ui.Text(c, "孔板").FontSize(11).TextColor(t.TextMuted)
 		ui.Text(c, "尚未绑定")
 		ui.Divider(c)
-		ui.Text(c, "流程预览").FontSize(15).Bold()
+		ui.Text(c, "流程预览 · 示意").FontSize(15).Bold()
 		a.flow(c)
-		ui.Text(c, "96 孔板").FontSize(15).Bold()
+		ui.Text(c, "96 孔板 · 示意").FontSize(15).Bold()
 		a.plate(c)
 	})
 }
@@ -228,11 +266,11 @@ func main() {
 	if runID == "" {
 		runID = "1c0c8989-0513-483a-851b-bdc7d6c67483"
 	}
-	a := &app{page: &page, step: &step, samples: []sample{{"Control-1", ""}, {"E1-1", ""}}, svc: svc, snap: runs.RunSnapshot{Title: "L929 生物相容性", Status: "加载中"}}
+	a := &app{page: &page, step: &step, tp: "D3", samples: []sample{{"Control-1", ""}, {"E1-1", ""}}, svc: svc, snap: runs.RunSnapshot{Title: "L929 生物相容性", Status: "加载中"}}
 	mygo.App.WhenReady(func() {
 		go func() {
 			if snap, err := svc.LoadRun(context.Background(), runID); err == nil {
-				a.snap = snap
+				a.apply(snap)
 			}
 		}()
 		mygo.NewWindow(mygo.WindowOptions{

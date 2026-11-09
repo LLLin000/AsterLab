@@ -24,7 +24,17 @@ impl AppCore {
     }
 
     pub fn load_run(&self, run_id: &str) -> Result<Value, String> {
-        cli_impl::run_workspace(&self.db, run_id).map_err(|e| e.message)
+        let mut v = cli_impl::run_workspace(&self.db, run_id).map_err(|e| e.message)?;
+        v["revision"] = json!(self.revision(run_id)?);
+        Ok(v)
+    }
+
+    fn revision(&self, run_id: &str) -> Result<i64, String> {
+        self.db.query_row(
+            "SELECT COUNT(*) FROM records WHERE kind='execution_event' AND parent_id=?1",
+            rusqlite::params![run_id],
+            |row| row.get(0),
+        ).map_err(|e| e.to_string())
     }
 
     /// Append a measurement event and return the authoritative snapshot.

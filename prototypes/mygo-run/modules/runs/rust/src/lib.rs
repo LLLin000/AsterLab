@@ -49,6 +49,7 @@ impl RunService for CoreRunService {
 fn snapshot(v: serde_json::Value) -> RunSnapshot {
     let mut s = RunSnapshot {
         run_id: v["run_id"].as_str().unwrap_or("").into(),
+        revision: v["revision"].as_u64().unwrap_or(0),
         title: v["frozen_design"]["content"]["title"].as_str().unwrap_or("").into(),
         status: v["status"].as_str().unwrap_or("").into(),
         tasks: vec![],

@@ -34,12 +34,33 @@ func TestRustModuleReadsAndWritesSQLite(t *testing.T) {
 	if snap.RunID == "" || len(snap.Tasks) == 0 {
 		t.Fatalf("empty snapshot: %+v", snap)
 	}
+	before := snap.Revision
 	_, err = svc.SaveReadout(ctx, runs.ReadoutInput{
 		RunID:        "1c0c8989-0513-483a-851b-bdc7d6c67483",
 		Measurements: []runs.Measurement{{SampleID: "Control-1", Endpoint: "OD450", Value: 0.82, Unit: "AU"}},
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	afterSave, err := svc.LoadRun(ctx, "1c0c8989-0513-483a-851b-bdc7d6c67483")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterSave.Revision <= before {
+		t.Fatalf("revision did not advance: %d -> %d", before, afterSave.Revision)
+	}
+	// A rejected write must leave the revision unchanged.
+	badRev := afterSave.Revision
+	_, err = svc.SaveReadout(ctx, runs.ReadoutInput{RunID: "1c0c8989-0513-483a-851b-bdc7d6c67483", Measurements: []runs.Measurement{{Endpoint: "OD450", Value: 1, Unit: "AU"}}})
+	if err == nil {
+		t.Fatal("expected missing sample to fail")
+	}
+	afterFail, err := svc.LoadRun(ctx, "1c0c8989-0513-483a-851b-bdc7d6c67483")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterFail.Revision != badRev {
+		t.Fatalf("rejected write changed revision: %d -> %d", badRev, afterFail.Revision)
 	}
 	again, err := svc.LoadRun(ctx, "1c0c8989-0513-483a-851b-bdc7d6c67483")
 	if err != nil {
@@ -53,6 +74,25 @@ func TestRustModuleReadsAndWritesSQLite(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("saved measurement not in snapshot: %+v", again.Measurements)
+	}
+	// A fresh service instance sees the same SQLite snapshot.
+	svc2, err := runs.NewRunService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc2.Close()
+	reopened, err := svc2.LoadRun(ctx, "1c0c8989-0513-483a-851b-bdc7d6c67483")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, m := range reopened.Measurements {
+		if m.SampleID == "Control-1" && m.Value == 0.82 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("reopened snapshot missing value")
 	}
 
 	// The CLI reads the same copied SQLite file through the same command layer.
