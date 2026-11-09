@@ -14,11 +14,11 @@ Section "Install"
     File "..\prototypes\mygo-run\dist\mygo-run.exe"
     File "..\prototypes\mygo-run\dist\Runs.dll"
     File "..\prototypes\mygo-run\dist\BUILD_INFO.txt"
-    File "..\scripts\AsterLab-MyGo.bat"
+    Delete "$INSTDIR\AsterLab-MyGo.bat"
 
     CreateDirectory "$SMPROGRAMS\AsterLab MyGo"
-    CreateShortcut "$SMPROGRAMS\AsterLab MyGo\AsterLab MyGo.lnk" "$INSTDIR\mygo-run.exe"
-    CreateShortcut "$DESKTOP\AsterLab MyGo.lnk" "$INSTDIR\mygo-run.exe"
+    CreateShortcut "$SMPROGRAMS\AsterLab MyGo\AsterLab MyGo.lnk" "$INSTDIR\mygo-run.exe" "" "$INSTDIR\mygo-run.exe" 0
+    CreateShortcut "$DESKTOP\AsterLab MyGo.lnk" "$INSTDIR\mygo-run.exe" "" "$INSTDIR\mygo-run.exe" 0
 
     WriteUninstaller "$INSTDIR\uninstall.exe"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayName" "AsterLab MyGo (Unsigned Beta)"
@@ -31,8 +31,6 @@ SectionEnd
 
 Section "Uninstall"
     SetShellVarContext current
-    nsExec::ExecToLog 'taskkill /IM mygo-run.exe /F'
-    Sleep 500
     Delete "$INSTDIR\mygo-run.exe"
     Delete "$INSTDIR\Runs.dll"
     Delete "$INSTDIR\BUILD_INFO.txt"
