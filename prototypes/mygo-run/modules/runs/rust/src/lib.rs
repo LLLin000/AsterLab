@@ -50,6 +50,7 @@ impl RunService for CoreRunService {
         });
         if !input.task_key.is_empty() { event["task_key"] = serde_json::json!(input.task_key); }
         if !input.timepoint.is_empty() { event["timepoint"] = serde_json::json!(input.timepoint); }
+        if !input.operation_id.is_empty() { event["operation_id"] = serde_json::json!(input.operation_id); }
         let v = core.save_readout(event).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         Ok(snapshot(v))
     }
@@ -62,7 +63,8 @@ impl RunService for CoreRunService {
             "event_type": "operation",
             "content": "完成任务",
             "task_key": input.task_key,
-            "step_status": "completed"
+            "step_status": "completed",
+            "operation_id": input.operation_id
         });
         let v = core.save_readout(event).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         Ok(snapshot(v))
