@@ -315,7 +315,7 @@ func main() {
 		snap:      runs.RunSnapshot{Title: "加载中", Status: "loading"},
 	}
 	a.shell = &shell.Shell{
-		Project:     "L929",
+		Project:     "",
 		Page:        shell.Project,
 		SidebarOpen: true,
 		OnSelect:    func(id string) { a.shell.Selected = id; a.loadDesign(id) },

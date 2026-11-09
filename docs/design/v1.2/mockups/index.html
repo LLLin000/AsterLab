@@ -1,0 +1,1345 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AsterLab v1.2 — Native Desktop High-Fidelity Mockups</title>
+<style>
+/* CSS Reset & Token Variables */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "SF Mono", Consolas, "Cascadia Code", Menlo, monospace;
+
+  /* Harness Theme */
+  --harness-bg: #1A1C20;
+  --harness-text: #E0E2E8;
+  --harness-panel: #262930;
+  --harness-border: #3D424D;
+  --harness-accent: #38A189;
+}
+
+/* Light Theme Tokens */
+.theme-light {
+  --canvas: #F6F4EF;
+  --surface: #FBFAF7;
+  --elevated: #FFFFFF;
+  --border: #DDD7CC;
+  --border-strong: #C8C0B2;
+  --text: #201E1A;
+  --text-muted: #6F6A60;
+  --accent: #1F6F5F;
+  --accent-hover: #195C4F;
+  --accent-pressed: #144A3F;
+  --accent-text: #FFFFFF;
+  --success: #2F7D4A;
+  --success-bg: #EAF5EE;
+  --warning: #A9651D;
+  --warning-bg: #FDF3E7;
+  --danger: #A13B36;
+  --danger-bg: #FCEBEA;
+  --rail-bg: #101318;
+  --sidebar-bg: #FBFAF7;
+  --card-bg: #FFFFFF;
+  --well-empty: #EFECE6;
+  --well-assigned: #E1EFEA;
+  --well-control: #D9E8F5;
+  --well-blank: #EBEAE5;
+}
+
+/* Dark Theme Tokens */
+.theme-dark {
+  --canvas: #171614;
+  --surface: #201E1A;
+  --elevated: #28251F;
+  --border: #39352D;
+  --border-strong: #514B40;
+  --text: #F0EDE6;
+  --text-muted: #A8A196;
+  --accent: #4FA38D;
+  --accent-hover: #60B39D;
+  --accent-pressed: #3D8270;
+  --accent-text: #10201C;
+  --success: #55A76D;
+  --success-bg: #1A3623;
+  --warning: #D5964D;
+  --warning-bg: #382A1A;
+  --danger: #D26B62;
+  --danger-bg: #3D1B1A;
+  --rail-bg: #0E1014;
+  --sidebar-bg: #1E1C18;
+  --card-bg: #201E1A;
+  --well-empty: #25231F;
+  --well-assigned: #1B362F;
+  --well-control: #192E42;
+  --well-blank: #2A2824;
+}
+
+body {
+  background: var(--harness-bg);
+  color: var(--harness-text);
+  font: 13px/1.5 var(--font-sans);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  overflow-x: hidden;
+}
+
+/* Top Harness Bar */
+.harness-bar {
+  width: 100%;
+  max-width: 1360px;
+  background: var(--harness-panel);
+  border: 1px solid var(--harness-border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+.harness-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFF;
+}
+.harness-badge {
+  background: var(--harness-accent);
+  color: #10201C;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.harness-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.harness-group {
+  display: flex;
+  background: #191B1F;
+  border: 1px solid var(--harness-border);
+  border-radius: 6px;
+  padding: 2px;
+}
+.harness-btn {
+  background: transparent;
+  color: #A0A4AE;
+  border: 0;
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.harness-btn:hover { color: #FFF; background: #2B2F38; }
+.harness-btn.active {
+  background: var(--harness-accent);
+  color: #10201C;
+  font-weight: 700;
+}
+
+/* Desktop Viewport Window */
+.viewport-frame {
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1), height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  background: var(--canvas);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+}
+.res-1200x760 { width: 1200px; height: 760px; min-width: 1200px; min-height: 760px; }
+.res-900x600 { width: 900px; height: 600px; min-width: 900px; min-height: 600px; }
+
+/* Native Window Chrome (48px) */
+.win-titlebar {
+  height: 48px;
+  flex: 0 0 48px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  user-select: none;
+}
+.win-controls {
+  display: flex;
+  gap: 8px;
+  margin-right: 8px;
+}
+.win-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.15);
+}
+.dot-close { background: #FF5F56; }
+.dot-min { background: #FFBD2E; }
+.dot-max { background: #27C93F; }
+
+.win-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.win-crumb-brand { font-weight: 700; color: var(--text); }
+.win-crumb-sep { color: var(--border-strong); }
+.win-crumb-active { font-weight: 600; color: var(--text); }
+
+.project-select {
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.project-select:focus { border-color: var(--accent); }
+
+.win-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+.status-indicator-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+/* Primary Rail (56px) */
+.app-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.primary-rail {
+  width: 56px;
+  flex: 0 0 56px;
+  background: var(--rail-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 8px;
+  user-select: none;
+  z-index: 10;
+}
+.rail-brand {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.rail-divider {
+  width: 32px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 0;
+}
+.rail-item {
+  width: 44px;
+  height: 40px;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  color: #8C93A0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.12s;
+}
+.rail-item svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.rail-item span { font-size: 10px; font-weight: 600; }
+.rail-item:hover { color: #FFF; background: rgba(255, 255, 255, 0.08); }
+.rail-item.active {
+  color: #FFF;
+  background: rgba(255, 255, 255, 0.14);
+}
+.rail-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+/* Main Viewport Content */
+.main-stage {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  background: var(--canvas);
+  overflow: hidden;
+}
+
+/* UI-Kit Base Elements */
+.btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.12s;
+  outline: none;
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-outline {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-outline:hover { background: var(--elevated); border-color: var(--border-strong); }
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+}
+.btn-ghost:hover { background: var(--surface); color: var(--text); }
+.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.badge-success { background: var(--success-bg); color: var(--success); }
+.badge-warning { background: var(--warning-bg); color: var(--warning); }
+.badge-danger { background: var(--danger-bg); color: var(--danger); }
+.badge-neutral { background: var(--canvas); border: 1px solid var(--border); color: var(--text-muted); }
+
+/* Context Sidebar */
+.ctx-sidebar {
+  width: 220px;
+  flex: 0 0 220px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  user-select: none;
+}
+.sidebar-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.sidebar-list {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  gap: 2px;
+}
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+}
+.sidebar-item:hover { background: var(--surface); }
+.sidebar-item.active { background: var(--elevated); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+
+/* 96-Well Microplate Component */
+.plate-grid-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: none;
+}
+.plate-header-row {
+  display: grid;
+  grid-template-columns: 24px repeat(12, 1fr);
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-align: center;
+}
+.plate-data-row {
+  display: grid;
+  grid-template-columns: 24px repeat(12, 1fr);
+  gap: 4px;
+  align-items: center;
+}
+.plate-row-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-align: center;
+}
+.plate-well {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--well-empty);
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.plate-well:hover { border-color: var(--accent); transform: scale(1.08); }
+.plate-well.assigned { background: var(--well-assigned); border-color: var(--accent); color: var(--text); }
+.plate-well.control { background: var(--well-control); border-color: #7AA7D0; }
+.plate-well.blank { background: var(--well-blank); border-color: var(--border-strong); }
+.plate-well.selected { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+
+/* Stepper Chips */
+.stepper-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.step-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--canvas);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.step-chip.completed { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+.step-chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.step-chip:hover:not(.active) { background: var(--elevated); color: var(--text); }
+
+/* High Density Result Grid */
+.result-table-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+}
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.result-table th, .result-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  text-align: left;
+}
+.result-table th {
+  background: var(--surface);
+  font-weight: 600;
+  color: var(--text-muted);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.result-table tr:hover td { background: var(--canvas); }
+.result-table td.cell-selected {
+  background: var(--accent) !important;
+  color: var(--accent-text);
+}
+.result-table input {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  outline: none;
+}
+
+/* Page Specific Styles */
+.page-container {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.page-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.page-title-block h1 { font-size: 18px; font-weight: 700; color: var(--text); }
+.page-title-block p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+/* 50/50 Dual Work Surface */
+.dual-surface {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+}
+.surface-pane {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 18px;
+  gap: 14px;
+}
+.surface-pane:first-child { border-right: 1px solid var(--border); }
+
+/* Review Mode Banner */
+.review-banner {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+</style>
+</head>
+<body class="theme-light">
+
+<!-- Master Harness Navigation Bar -->
+<header class="harness-bar">
+  <div class="harness-title">
+    <span>AsterLab v1.2</span>
+    <span class="harness-badge">Native UI Kit</span>
+  </div>
+  <div class="harness-controls">
+    <!-- Page Switcher -->
+    <div class="harness-group">
+      <button class="harness-btn active" data-page="project">1. 项目工作区</button>
+      <button class="harness-btn" data-page="designer">2. 实验设计器</button>
+      <button class="harness-btn" data-page="protocol">3. 实验方案</button>
+      <button class="harness-btn" data-page="run">4. 实验运行</button>
+      <button class="harness-btn" data-page="tools">5. 资料与工具</button>
+    </div>
+    <!-- Resolution Switcher -->
+    <div class="harness-group">
+      <button class="harness-btn active" data-res="1200x760">1200 × 760</button>
+      <button class="harness-btn" data-res="900x600">900 × 600</button>
+    </div>
+    <!-- Theme Switcher -->
+    <div class="harness-group">
+      <button class="harness-btn active" data-theme="light">浅色 (Light)</button>
+      <button class="harness-btn" data-theme="dark">深色 (Dark)</button>
+    </div>
+  </div>
+</header>
+
+<!-- Native Window Viewport Frame -->
+<main id="viewportFrame" class="viewport-frame res-1200x760">
+
+  <!-- Native 48px Window Titlebar -->
+  <div class="win-titlebar">
+    <div class="win-controls">
+      <div class="win-dot dot-close"></div>
+      <div class="win-dot dot-min"></div>
+      <div class="win-dot dot-max"></div>
+    </div>
+    <div class="win-breadcrumbs">
+      <span class="win-crumb-brand">AsterLab</span>
+      <span class="win-crumb-sep">/</span>
+      <select class="project-select" aria-label="活跃研究项目">
+        <option>PRJ-2026-088 · L929 生物相容性及毒性评价</option>
+        <option>PRJ-2026-092 · MCF-7 药物耐药性筛选</option>
+        <option>PRJ-2026-104 · 3D 肿瘤类器官活死染色</option>
+      </select>
+      <span class="win-crumb-sep">/</span>
+      <span id="titlebarCrumbPage" class="win-crumb-active">项目工作区</span>
+    </div>
+    <div class="win-actions">
+      <div class="status-indicator">
+        <div class="status-indicator-dot"></div>
+        <span>本地 Core 已就绪</span>
+      </div>
+      <button class="btn btn-outline" style="padding:4px 8px; font-size:11px;">帮助与快捷键</button>
+    </div>
+  </div>
+
+  <!-- Primary Application Body -->
+  <div class="app-body">
+    <!-- Primary Navigation Rail (56px) -->
+    <nav class="primary-rail" aria-label="全局导航">
+      <div class="rail-brand">AL</div>
+      <div class="rail-divider"></div>
+      <button class="rail-item active" data-nav="project" title="项目工作区 (Cmd+1)">
+        <svg viewBox="0 0 24 24"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        <span>项目</span>
+      </button>
+      <button class="rail-item" data-nav="designer" title="实验设计器 (Cmd+2)">
+        <svg viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7M6 9v12"/></svg>
+        <span>设计</span>
+      </button>
+      <button class="rail-item" data-nav="protocol" title="实验方案 (Cmd+3)">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+        <span>方案</span>
+      </button>
+      <button class="rail-item" data-nav="run" title="实验运行 (Cmd+4)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+        <span>运行</span>
+      </button>
+      <button class="rail-item" data-nav="tools" title="资料与工具 (Cmd+5)">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>工具</span>
+      </button>
+    </nav>
+
+    <!-- Main Dynamic Content Stage -->
+    <div id="mainStage" class="main-stage">
+      <!-- Injected by JavaScript dynamically for each page -->
+    </div>
+  </div>
+</main>
+
+<script>
+// Mockup Switcher Engine
+const stage = document.getElementById("mainStage");
+const crumbPage = document.getElementById("titlebarCrumbPage");
+const frame = document.getElementById("viewportFrame");
+
+const pageNames = {
+  project: "项目工作区",
+  designer: "实验设计器",
+  protocol: "实验方案",
+  run: "实验运行",
+  tools: "资料与工具"
+};
+
+let currentPage = "project";
+
+function renderPage(page) {
+  currentPage = page;
+  crumbPage.textContent = pageNames[page];
+
+  document.querySelectorAll(".harness-btn[data-page]").forEach(b => b.classList.toggle("active", b.dataset.page === page));
+  document.querySelectorAll(".rail-item").forEach(b => b.classList.toggle("active", b.dataset.nav === page));
+
+  if (page === "project") renderProjectPage();
+  else if (page === "designer") renderDesignerPage();
+  else if (page === "protocol") renderProtocolPage();
+  else if (page === "run") renderRunPage();
+  else if (page === "tools") renderToolsPage();
+}
+
+/* ========================================================================= */
+/* PAGE 1: PROJECT WORKSPACE                                                 */
+/* ========================================================================= */
+function renderProjectPage() {
+  stage.innerHTML = `
+    <!-- Project Tree Sidebar -->
+    <aside class="ctx-sidebar">
+      <div class="sidebar-head">
+        <span>研究项目</span>
+        <button class="btn btn-ghost" style="padding:2px 6px;">+</button>
+      </div>
+      <div class="sidebar-list">
+        <button class="sidebar-item active">
+          <span>●</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">L929 生物相容性评估</div>
+            <div style="font-size:10px;color:var(--text-muted);">3 设计 · 2 运行</div>
+          </div>
+        </button>
+        <button class="sidebar-item">
+          <span>○</span>
+          <div style="flex:1;min-width:0;">
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">MCF-7 药物耐药性筛选</div>
+            <div style="font-size:10px;color:var(--text-muted);">1 设计 · 0 运行</div>
+          </div>
+        </button>
+        <button class="sidebar-item">
+          <span>○</span>
+          <div style="flex:1;min-width:0;">
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">3D 肿瘤类器官活死染色</div>
+            <div style="font-size:10px;color:var(--text-muted);">2 设计 · 4 运行</div>
+          </div>
+        </button>
+      </div>
+      <div class="sidebar-head" style="margin-top:auto;">
+        <span>历史归档 (12)</span>
+      </div>
+    </aside>
+
+    <!-- Main Project Workspace Surface -->
+    <div class="page-container" style="padding:20px; gap:16px; overflow-y:auto;">
+      <!-- Project Summary Banner -->
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <h1 style="font-size:20px; font-weight:700;">L929 生物相容性及细胞毒性评价 (ISO 10993-5)</h1>
+            <span class="badge badge-success">进行中</span>
+          </div>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            项目编号: PRJ-2026-088 · 负责人: 实验组 A · 方案目标: 评估受试提取液对小鼠成纤维细胞增殖活性影响
+          </p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-outline">编辑项目信息</button>
+          <button class="btn btn-primary" onclick="renderPage('designer')">+ 新建实验设计</button>
+        </div>
+      </div>
+
+      <!-- Quick Action Strip -->
+      <div style="background:var(--elevated); border:1px solid var(--border-strong); border-radius:8px; padding:12px 16px; display:flex; align-items:center; justify-content:space-between;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:32px; height:32px; border-radius:6px; background:var(--accent); color:var(--accent-text); display:grid; place-items:center; font-weight:bold;">▶</div>
+          <div>
+            <strong style="font-size:13px;">继续当前实验运行: Run-20261109-01 (Day 3 CCK-8 读板)</strong>
+            <div style="font-size:11px; color:var(--text-muted);">已完成 2/5 步骤 · 待测孔位 96 孔 · 预期测定 OD450</div>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="renderPage('run')">进入当前运行记录</button>
+      </div>
+
+      <!-- Two-Column Scientific Overview -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; flex:1 1 0;">
+        <!-- Left: Designs -->
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="font-size:14px;">实验设计方案 (Designs)</strong>
+            <span class="badge badge-neutral">共 3 方案</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <strong style="font-size:13px;">CCK-8 比色法测定设计</strong>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">rev 4 · 终点: OD450 · 6 个浓度梯度 · 3 次技术重复</div>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-outline" onclick="renderPage('designer')">进入设计</button>
+                <button class="btn btn-primary" onclick="renderPage('run')">开始运行</button>
+              </div>
+            </div>
+            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <strong style="font-size:13px;">LIVE/DEAD 荧光双染成像方案</strong>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">rev 1 · 终点: 活死细胞计数 · 4 视野/孔 · 共焦成像</div>
+              </div>
+              <button class="btn btn-outline" onclick="renderPage('designer')">进入设计</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Recent Runs -->
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="font-size:14px;">最近实验运行记录 (Runs)</strong>
+            <span class="badge badge-neutral">共 2 运行</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <strong style="font-size:13px;">Run-20261109-01</strong>
+                  <span class="badge badge-warning">进行中</span>
+                </div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">步骤 3/5 · CCK-8 测定 · 2026-11-09 10:30 更新</div>
+              </div>
+              <button class="btn btn-primary" onclick="renderPage('run')">继续执行</button>
+            </div>
+            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <strong style="font-size:13px;">Run-20261107-02</strong>
+                  <span class="badge badge-success">已归档</span>
+                </div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">步骤 5/5 · 完整数据 96 孔 · 2026-11-07 完成</div>
+              </div>
+              <button class="btn btn-outline" onclick="renderPage('run')">查阅记录</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ========================================================================= */
+/* PAGE 2: EXPERIMENT DESIGNER                                               */
+/* ========================================================================= */
+function renderDesignerPage() {
+  stage.innerHTML = `
+    <div class="page-container">
+      <!-- Upper Canvas (58% Height) -->
+      <div style="flex:0 0 58%; min-height:0; display:flex; flex-direction:column; border-bottom:1px solid var(--border); position:relative; background:var(--canvas);">
+        <!-- Canvas Toolbar -->
+        <div style="height:38px; background:var(--surface); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 14px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <strong style="font-size:13px;">工作流设计画布 (DAG)</strong>
+            <span class="badge badge-neutral">rev 4</span>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-outline" style="padding:4px 8px;">⤢ 居中对齐</button>
+            <button class="btn btn-outline" style="padding:4px 8px;">+ 添加材料节点</button>
+            <button class="btn btn-outline" style="padding:4px 8px;">+ 添加操作步骤</button>
+            <button class="btn btn-outline" style="padding:4px 8px;">+ 添加仪器节点</button>
+          </div>
+        </div>
+
+        <!-- Visual Canvas Nodes & Edges -->
+        <div style="flex:1; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; gap:36px; padding:20px;">
+          <!-- Node 1: Material -->
+          <div style="width:160px; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+            <div style="font-size:10px; color:var(--text-muted); font-weight:700;">材料 / 细胞悬液</div>
+            <strong style="font-size:13px; display:block; margin:2px 0;">L929 细胞</strong>
+            <div style="font-size:11px; color:var(--text-muted);">1.0 × 10⁴ 孔 · P4 代</div>
+          </div>
+          <span style="color:var(--text-muted); font-size:18px;">➔</span>
+
+          <!-- Node 2: Operation -->
+          <div style="width:160px; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+            <div style="font-size:10px; color:var(--text-muted); font-weight:700;">操作步骤</div>
+            <strong style="font-size:13px; display:block; margin:2px 0;">微孔板接种</strong>
+            <div style="font-size:11px; color:var(--text-muted);">96 孔板 · 100 µL/孔</div>
+          </div>
+          <span style="color:var(--text-muted); font-size:18px;">➔</span>
+
+          <!-- Node 3: Operation -->
+          <div style="width:160px; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+            <div style="font-size:10px; color:var(--text-muted); font-weight:700;">操作步骤</div>
+            <strong style="font-size:13px; display:block; margin:2px 0;">药物浓度处理</strong>
+            <div style="font-size:11px; color:var(--text-muted);">6 梯度 · 孵育 24h</div>
+          </div>
+          <span style="color:var(--text-muted); font-size:18px;">➔</span>
+
+          <!-- Node 4: Selected Operation -->
+          <div style="width:180px; background:var(--card-bg); border:2px solid var(--accent); border-radius:8px; padding:10px; box-shadow:0 4px 12px rgba(31,111,95,0.15);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:10px; color:var(--accent); font-weight:700;">当前选中步骤</span>
+              <span class="badge badge-success" style="padding:1px 5px; font-size:9px;">CCK-8</span>
+            </div>
+            <strong style="font-size:13px; display:block; margin:2px 0;">酶标仪读板测定</strong>
+            <div style="font-size:11px; color:var(--text-muted);">OD450 · 37°C 震板 5s</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lower Inspector (42% Height) -->
+      <div style="flex:1 1 0; min-height:0; display:grid; grid-template-columns:260px 1fr 300px; background:var(--surface);">
+        <!-- Inspector Zone A: Step Parameters -->
+        <div style="padding:14px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:10px; overflow-y:auto;">
+          <strong style="font-size:13px;">步骤属性检查器</strong>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">步骤名称</label>
+            <input class="project-select" style="width:100%; margin-top:3px;" value="酶标仪读板测定">
+          </div>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">检测组件类型</label>
+            <input class="project-select" style="width:100%; margin-top:3px;" value="lab.well_plate_96">
+          </div>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">仪器程序 (Protocol Step)</label>
+            <input class="project-select" style="width:100%; margin-top:3px;" value="Thermo Multiskan SkyHigh / OD450">
+          </div>
+        </div>
+
+        <!-- Inspector Zone B: 96-Well Plate Layout -->
+        <div style="padding:14px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:8px; overflow-y:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="font-size:13px;">96 孔板分组映射 (Visual Plate Mapping)</strong>
+            <span style="font-size:11px; color:var(--text-muted);">已选 18 孔 · 分配至对照组</span>
+          </div>
+          <!-- 96 Well Plate Grid Matrix -->
+          <div class="plate-grid-container" id="designerPlate">
+            <!-- Rendered by JS below -->
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <span style="font-size:11px; font-weight:600;">快速分配已选孔:</span>
+            <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;">空白对照 (Blank)</button>
+            <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;">阴性对照 (Control)</button>
+            <button class="btn btn-outline" style="padding:3px 8px; font-size:11px;">给药组 (Treatment)</button>
+          </div>
+        </div>
+
+        <!-- Inspector Zone C: Assay Contract -->
+        <div style="padding:14px; display:flex; flex-direction:column; gap:10px; overflow-y:auto;">
+          <strong style="font-size:13px;">检测合约配置</strong>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">终点指标 (Endpoint)</label>
+            <input class="project-select" style="width:100%; margin-top:3px;" value="OD450 (吸光度 AU)">
+          </div>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:600;">时间关系</label>
+            <div style="display:flex; flex-direction:column; gap:4px; margin-top:4px; font-size:12px;">
+              <label><input type="radio" name="tr" checked> 同一实验单位重复测定</label>
+              <label><input type="radio" name="tr"> 每个时间点独立破坏样本</label>
+            </div>
+          </div>
+          <div style="margin-top:auto; display:flex; flex-direction:column; gap:6px;">
+            <button class="btn btn-outline" style="width:100%;">保存设计草稿</button>
+            <button class="btn btn-primary" style="width:100%;" onclick="renderPage('run')">从设计生成执行 Run</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  renderPlateMatrix("designerPlate");
+}
+
+/* ========================================================================= */
+/* PAGE 3: PROTOCOL SOP                                                      */
+/* ========================================================================= */
+function renderProtocolPage() {
+  stage.innerHTML = `
+    <aside class="ctx-sidebar">
+      <div class="sidebar-head">
+        <span>执行步骤清单</span>
+      </div>
+      <div class="sidebar-list">
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">01</span> 试剂与耗材准备</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">02</span> L929 细胞消化计数</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">03</span> 细胞悬液梯度稀释</button>
+        <button class="sidebar-item active"><span style="font-size:10px;color:var(--accent);">04</span> 96 孔板接种铺板</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">05</span> 培养箱 24h 孵育</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">06</span> 受试物给药处理</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">07</span> CCK-8 试剂加入孵育</button>
+        <button class="sidebar-item"><span style="font-size:10px;color:var(--text-muted);">08</span> 酶标仪 450nm 测定</button>
+      </div>
+    </aside>
+
+    <div class="page-container" style="padding:20px; gap:16px; overflow-y:auto;">
+      <!-- Protocol Header -->
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <h1 style="font-size:20px; font-weight:700;">L929 细胞微孔板接种与培养标准操作规程 (SOP-CCK8-01)</h1>
+            <span class="badge badge-success">版本 v1.2</span>
+          </div>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            来源设计: L929 CCK-8 细胞毒性评价 · 固化日期: 2026-11-09 · 状态: 正式生效
+          </p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-outline">🖨 打印 SOP</button>
+          <button class="btn btn-outline">📋 复制说明</button>
+        </div>
+      </div>
+
+      <!-- Professional Read-only Guidance Banner -->
+      <div style="background:var(--canvas); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:4px; padding:8px 12px; font-size:12px; color:var(--text);">
+        ℹ 本方案由实验设计 v1.2 固化生成。如需调整接种密度或孵育参数，请在“实验设计”中修改并发布新版本。
+      </div>
+
+      <!-- Current Step Content -->
+      <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:18px; display:flex; flex-direction:column; gap:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong style="font-size:16px;">步骤 04: 96 孔微孔板接种铺板 (Step Execution)</strong>
+          <span style="font-size:12px; color:var(--text-muted);">预估耗时: 15 分钟</span>
+        </div>
+
+        <div>
+          <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">操作规程指令</div>
+          <p style="font-size:13px; line-height:1.6;">
+            1. 取预热好的 96 孔细胞培养板，标记实验组别及日期；<br>
+            2. 使用 Eppendorf 8 道移液器，轻柔吹吸混匀细胞悬液；<br>
+            3. 沿微孔侧壁每孔缓慢加入 100 µL 细胞悬液（接种密度为 10,000 cells/孔）；<br>
+            4. 接种完成后盖上板盖，十字交叉晃动混匀，严禁旋转剧烈摇晃以防边缘效应；<br>
+            5. 室温静置 15 分钟使细胞贴壁平铺，移入 37 °C、5% CO₂ 细胞培养箱孵育 24 小时。
+          </p>
+        </div>
+
+        <!-- Parameters Table -->
+        <div>
+          <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">关键工艺参数</div>
+          <table class="result-table" style="width:100%;">
+            <thead>
+              <tr><th>参数项</th><th>设定标准值</th><th>允许容差</th><th>监控方式</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>接种体积</td><td>100 µL / 孔</td><td>± 2 µL</td><td>移液器标准档位</td></tr>
+              <tr><td>细胞活率</td><td>≥ 95%</td><td>≥ 90% 下限</td><td>台盼蓝自动计数</td></tr>
+              <tr><td>培养条件</td><td>37.0 °C / 5.0% CO₂</td><td>± 0.5 °C</td><td>培养箱在线监控</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Checks -->
+        <div>
+          <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">质控与接受标准 (Quality Checks)</div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--surface); border:1px solid var(--border); border-radius:4px; font-size:12px;">
+              <span>[✓] 镜检确认细胞悬液完全单个化，无明显团块</span>
+              <span class="badge badge-danger">阻断项 (Blocking)</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--surface); border:1px solid var(--border); border-radius:4px; font-size:12px;">
+              <span>[✓] 接种后镜检确认各孔液体无气泡</span>
+              <span class="badge badge-neutral">提示项</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ========================================================================= */
+/* PAGE 4: RUN & MEASUREMENT LOGGING                                         */
+/* ========================================================================= */
+function renderRunPage() {
+  stage.innerHTML = `
+    <div class="page-container">
+      <!-- Stepper Strip -->
+      <div class="stepper-strip">
+        <div class="step-chip completed">✓ D1 细胞接种</div>
+        <div class="step-chip completed">✓ D2 梯度给药</div>
+        <div class="step-chip active">● D3 CCK-8 读板 (当前执行)</div>
+        <div class="step-chip">○ D3 显微镜检</div>
+        <div class="step-chip">○ D4 终点分析</div>
+        <div style="margin-left:auto; font-size:11px; color:var(--text-muted); font-weight:600;">
+          执行进度: 3 / 5 步骤
+        </div>
+      </div>
+
+      <!-- 50/50 Dual Work Surface -->
+      <div class="dual-surface">
+        <!-- Left Pane: Guidance & Checks -->
+        <div class="surface-pane">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <strong style="font-size:15px;">当前执行任务: CCK-8 吸光度测定</strong>
+              <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">时间点: Day 3 · 关联 Assay: CCK-8 比色法</div>
+            </div>
+            <span class="badge badge-warning">执行中</span>
+          </div>
+
+          <!-- Readiness Checklist -->
+          <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; flex-direction:column; gap:8px;">
+            <strong style="font-size:12px;">执行前确认清单</strong>
+            <label style="font-size:12px; display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 酶标仪已预热至 37 °C 并完成系统自检</label>
+            <label style="font-size:12px; display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 培养板避光孵育满 2 小时整</label>
+            <label style="font-size:12px; display:flex; align-items:center; gap:6px;"><input type="checkbox"> 板底擦拭清洁，无冷凝水与划痕</label>
+          </div>
+
+          <!-- Deviation Logger -->
+          <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; flex-direction:column; gap:6px;">
+            <strong style="font-size:12px;">本步偏差与实验记录</strong>
+            <textarea class="project-select" style="height:60px; resize:none;" placeholder="如发生测定时间延迟、气泡或溢出，请在此记录..."></textarea>
+          </div>
+
+          <div style="margin-top:auto;">
+            <button class="btn btn-primary" style="width:100%; padding:10px;" onclick="alert('本步已标记完成并记录归档。')">✔ 确认本步操作完成并进入下一步</button>
+          </div>
+        </div>
+
+        <!-- Right Pane: Structured 96-Well Data Entry -->
+        <div class="surface-pane">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <strong style="font-size:15px;">测定读数录入工作台 (OD450)</strong>
+              <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">已录入 96/96 孔 · 批量保存修订号 rev 5</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-outline" onclick="mockPasteTSV()">📋 粘贴板读仪 TSV</button>
+              <button class="btn btn-outline">📥 模板下载</button>
+            </div>
+          </div>
+
+          <!-- Result Grid Table -->
+          <div class="result-table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr>
+                  <th style="width:50px;">孔位</th>
+                  <th style="width:100px;">样本 ID</th>
+                  <th style="width:90px;">分组</th>
+                  <th style="width:80px;">OD450</th>
+                  <th style="width:60px;">状态</th>
+                </tr>
+              </thead>
+              <tbody id="runTableBody">
+                <!-- Populated by JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Action & Save Strip -->
+          <div style="display:flex; justify-content:space-between; align-items:center; padding-top:6px;">
+            <span class="badge badge-success">✓ 批量数据已保存至 Core (rev 5)</span>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-outline">撤销本次修改</button>
+              <button class="btn btn-primary" onclick="alert('已成功触发批量保存 SaveBatch，修订号已更新。')">💾 批量保存读数</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  renderRunTableRows();
+}
+
+function renderRunTableRows() {
+  const tbody = document.getElementById("runTableBody");
+  if (!tbody) return;
+  const sampleData = [
+    ["A01", "Control-01", "对照组", "1.245", "原始"],
+    ["A02", "Control-02", "对照组", "1.258", "原始"],
+    ["A03", "Control-03", "对照组", "1.239", "原始"],
+    ["B01", "Dose-10-01", "10 µM", "1.012", "原始"],
+    ["B02", "Dose-10-02", "10 µM", "1.008", "原始"],
+    ["B03", "Dose-10-03", "10 µM", "0.995", "原始"],
+    ["C01", "Dose-50-01", "50 µM", "0.654", "原始"],
+    ["C02", "Dose-50-02", "50 µM", "0.648", "原始"],
+    ["C03", "Dose-50-03", "50 µM", "0.661", "原始"],
+    ["D01", "Dose-100-01", "100 µM", "0.321", "原始"],
+    ["D02", "Dose-100-02", "100 µM", "0.315", "原始"],
+    ["D03", "Dose-100-03", "100 µM", "0.310", "原始"],
+    ["H12", "Blank-03", "空白组", "0.045", "原始"]
+  ];
+  tbody.innerHTML = sampleData.map(row => `
+    <tr>
+      <td style="font-weight:700; font-family:var(--font-mono);">${row[0]}</td>
+      <td>${row[1]}</td>
+      <td><span class="badge badge-neutral">${row[2]}</span></td>
+      <td><input value="${row[3]}" style="font-weight:700; color:var(--text);"></td>
+      <td><span class="badge badge-success">${row[4]}</span></td>
+    </tr>
+  `).join("");
+}
+
+function mockPasteTSV() {
+  alert("已识别剪贴板 8×12 矩阵，成功写入 96 个微孔读数。覆盖已填数据: 0 项。");
+}
+
+/* ========================================================================= */
+/* PAGE 5: TOOLS & COMPONENTS                                                */
+/* ========================================================================= */
+function renderToolsPage() {
+  stage.innerHTML = `
+    <aside class="ctx-sidebar">
+      <div class="sidebar-head">
+        <span>实验工具箱</span>
+      </div>
+      <div class="sidebar-list">
+        <button class="sidebar-item active">
+          <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <span>溶液稀释计算器</span>
+        </button>
+        <button class="sidebar-item">
+          <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span>96 孔板布局器</span>
+        </button>
+        <button class="sidebar-item">
+          <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
+          <span>参数表格生成器</span>
+        </button>
+      </div>
+      <div class="sidebar-head" style="margin-top:12px;">
+        <span>模块与规范</span>
+      </div>
+      <div class="sidebar-list">
+        <button class="sidebar-item">标准实验模块库</button>
+        <button class="sidebar-item">结构化 JSON 导入</button>
+      </div>
+    </aside>
+
+    <div class="page-container" style="padding:20px; gap:16px; overflow-y:auto;">
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <h1 style="font-size:20px; font-weight:700;">溶液稀释与移液配比计算器 (Dilution Calculator)</h1>
+          <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+            基于质量守恒公式 C1·V1 = C2·V2 实时推导移液配方，支持一键注入实验设计方案。
+          </p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-outline">重置输入</button>
+          <button class="btn btn-primary" onclick="alert('已将配方参数生成为设计组件并插入当前方案。')">💾 插入至实验设计</button>
+        </div>
+      </div>
+
+      <!-- Calculation Mode Selector -->
+      <div style="display:flex; gap:8px; background:var(--surface); border:1px solid var(--border); padding:6px; border-radius:6px; width:fit-content;">
+        <button class="btn btn-primary" style="padding:4px 12px;">单次稀释 (C1·V1=C2·V2)</button>
+        <button class="btn btn-ghost" style="padding:4px 12px;">梯度倍比稀释</button>
+        <button class="btn btn-ghost" style="padding:4px 12px;">多孔反应体系分配</button>
+      </div>
+
+      <!-- Input Grid -->
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
+        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:14px;">
+          <label style="font-size:11px; font-weight:700; color:var(--text-muted);">储液浓度 (C1)</label>
+          <div style="display:flex; gap:6px; margin-top:4px;">
+            <input class="project-select" style="flex:1;" value="100">
+            <select class="project-select"><option>mM</option><option>M</option><option>µM</option></select>
+          </div>
+        </div>
+        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:14px;">
+          <label style="font-size:11px; font-weight:700; color:var(--text-muted);">目标浓度 (C2)</label>
+          <div style="display:flex; gap:6px; margin-top:4px;">
+            <input class="project-select" style="flex:1;" value="10">
+            <select class="project-select"><option>µM</option><option>mM</option><option>nM</option></select>
+          </div>
+        </div>
+        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:14px;">
+          <label style="font-size:11px; font-weight:700; color:var(--text-muted);">目标体积 (V2)</label>
+          <div style="display:flex; gap:6px; margin-top:4px;">
+            <input class="project-select" style="flex:1;" value="50">
+            <select class="project-select"><option>mL</option><option>µL</option><option>L</option></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Scientific Output Card -->
+      <div style="background:var(--elevated); border:2px solid var(--accent); border-radius:8px; padding:18px; display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong style="font-size:14px; color:var(--accent);">移液配方计算结果 (Actionable Recipe)</strong>
+          <span class="badge badge-success">稀释倍数: 10,000 ×</span>
+        </div>
+        <div style="font-size:15px; font-weight:700; color:var(--text); line-height:1.6;">
+          所需母液体积 (V1): <span style="color:var(--accent);">5.0000 µL</span><br>
+          所需稀释液体积 (V_diluent): <span style="color:var(--accent);">49.9950 mL</span>
+        </div>
+        <div style="background:var(--canvas); border:1px solid var(--border); border-radius:4px; padding:10px; font-size:12px; color:var(--text-muted);">
+          移液指引: 使用 P10 量程微量移液器吸取 5.0 µL 储液，注入 49.995 mL 基础培养液中，涡旋混匀 10 秒后室温避光保存备用。
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderPlateMatrix(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  let html = `<div class="plate-header-row"><div></div>`;
+  for (let c = 1; c <= 12; c++) html += `<div>${c}</div>`;
+  html += `</div>`;
+
+  const rows = ['A','B','C','D','E','F','G','H'];
+  for (let r = 0; r < 8; r++) {
+    html += `<div class="plate-data-row"><div class="plate-row-label">${rows[r]}</div>`;
+    for (let c = 1; c <= 12; c++) {
+      let cls = "plate-well";
+      if (c === 1 || c === 12) cls += " blank";
+      else if (c === 2 || c === 3) cls += " control";
+      else if (c >= 4 && c <= 9) cls += " assigned";
+      html += `<div class="${cls}" title="${rows[r]}${c}"></div>`;
+    }
+    html += `</div>`;
+  }
+  container.innerHTML = html;
+}
+
+// Harness Event Listeners
+document.querySelectorAll(".harness-btn[data-page]").forEach(b => {
+  b.addEventListener("click", () => renderPage(b.dataset.page));
+});
+document.querySelectorAll(".rail-item[data-nav]").forEach(b => {
+  b.addEventListener("click", () => renderPage(b.dataset.nav));
+});
+
+document.querySelectorAll(".harness-btn[data-res]").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".harness-btn[data-res]").forEach(btn => btn.classList.remove("active"));
+    b.classList.add("active");
+    frame.className = `viewport-frame res-${b.dataset.res}`;
+  });
+});
+
+document.querySelectorAll(".harness-btn[data-theme]").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".harness-btn[data-theme]").forEach(btn => btn.classList.remove("active"));
+    b.classList.add("active");
+    document.body.className = `theme-${b.dataset.theme}`;
+  });
+});
+
+// Initial Render
+renderPage("project");
+</script>
+</body>
+</html>
