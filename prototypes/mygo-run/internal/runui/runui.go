@@ -280,6 +280,11 @@ func View(c *ui.Context, w *Workspace) {
 		ui.Row(c).Height(52).Padding(0, 16).AlignItems(ui.Center).Background(tokens.CardBackground).
 			Border(1, tokens.CardBorder).Children(func() {
 			ui.Text(c, w.View.Title).FontSize(18).Bold().TextColor(t.Text)
+			if w.Grid != nil {
+				if ui.Button(c, "保存").Clicked() {
+					w.save()
+				}
+			}
 			ui.Spacer(c)
 			// Metadata Badges
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
