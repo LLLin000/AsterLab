@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
@@ -52,7 +53,7 @@ type app struct {
 
 func (a *app) nextOp() string {
 	n := a.opCounter.Add(1)
-	return fmt.Sprintf("op-%d", n)
+	return fmt.Sprintf("op-%d-%d", time.Now().UnixNano(), n)
 }
 
 func toRunView(s runs.RunSnapshot) runui.RunView {
@@ -147,7 +148,22 @@ func (a *app) prepareGrid() {
 	// measurements remain a fallback for pre-v1.1 runs.
 	for _, event := range a.snap.Events {
 		for _, c := range event.ResultCells {
-			cell := resultgrid.Cell{Row: c.Row, Column: c.Column, SampleID: c.SampleID, Group: c.Group, Replicate: c.Replicate, Field: c.Field, Value: c.Value, Status: c.Status}
+			cell, ok := grid.CellAt(c.Row, c.Column)
+			if !ok {
+				continue
+			}
+			// Keep the frozen design's sample/group identity when old batches
+			// predate explicit well mapping; only the measured value is replayed.
+			if c.SampleID != "" {
+				cell.SampleID = c.SampleID
+			}
+			if c.Group != "" {
+				cell.Group = c.Group
+			}
+			if c.Replicate != 0 {
+				cell.Replicate = c.Replicate
+			}
+			cell.Field, cell.Value, cell.Status = c.Field, c.Value, c.Status
 			_ = grid.SetCell(cell)
 		}
 	}
@@ -411,6 +427,9 @@ func main() {
 				a.ws.Grid.State = resultgrid.StateError
 				a.err = message
 				return
+			}
+			if batchResult.Revision > a.snap.Revision {
+				a.snap.Revision = batchResult.Revision
 			}
 			savedGrid := a.ws.Grid
 			savedGrid.State = resultgrid.StateSaved

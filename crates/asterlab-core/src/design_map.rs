@@ -42,6 +42,8 @@ pub struct FrozenDesignView {
     pub design_version_id: String,
     pub design_revision: i64,
     pub content: DesignMapContent,
+    #[serde(default)]
+    pub mygo: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -425,6 +427,7 @@ impl FrozenDesignView {
             design_version_id: design_version_id.to_owned(),
             design_revision,
             content: current.content,
+            mygo: data.get("mygo").cloned(),
         })
     }
 }

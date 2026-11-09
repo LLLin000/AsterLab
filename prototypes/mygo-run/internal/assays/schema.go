@@ -104,6 +104,9 @@ func BuildSchema(designJSON []byte, assayID, timepoint string) (resultgrid.Schem
 	if len(params.Timepoints) == 0 {
 		params.Timepoints = spec.Timepoints
 	}
+	if timepoint == "" && len(params.Timepoints) > 0 {
+		timepoint = params.Timepoints[0]
+	}
 	groups := make(map[string]groupSpec, len(doc.GroupSpecs))
 	for _, group := range doc.GroupSpecs {
 		groups[group.ID] = group

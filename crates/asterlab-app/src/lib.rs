@@ -105,6 +105,7 @@ impl AppCore {
         }
         if cells.is_empty() || cells.len() > 100 { return Err("batch must contain 1..=100 cells".into()); }
         let tx = self.db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        eprintln!("run.save_batch layer=core transaction=start run_id={} operation_id={} schema_id={} cell_count={}", run_id, operation_id, schema, cells.len());
         if let Some(existing) = Self::find_operation_event_tx(&tx, &run_id, &operation_id) {
             if existing.get("operation_payload") == Some(&input) {
                 let event_id = existing["id"].as_str().unwrap_or_default().to_owned();
@@ -133,7 +134,7 @@ impl AppCore {
                 return Err(format!("cell {index}: invalid status/value"));
             }
             if status == "raw" {
-                measurements.push(json!({"endpoint":field,"value":value.unwrap(),"unit":"","sample_id":cell["sample_id"],"row":row,"column":column,"group":cell["group"],"replicate":cell["replicate"],"status":status,"field":field}));
+                measurements.push(json!({"endpoint":field,"value":value.unwrap(),"unit":"","sample_id":cell["sample_id"].as_str().filter(|id|!id.trim().is_empty()).map(Value::from).unwrap_or(Value::Null),"row":row,"column":column,"group":cell["group"],"replicate":cell["replicate"],"status":status,"field":field}));
             }
         }
         let batch_id = format!("batch-{operation_id}");
@@ -142,6 +143,7 @@ impl AppCore {
         let event_id: String = tx.query_row("SELECT id FROM records WHERE kind='execution_event' AND parent_id=?1 ORDER BY rowid DESC LIMIT 1", [&run_id], |r|r.get(0)).map_err(|e|e.to_string())?;
         let revision = revision + 1;
         tx.commit().map_err(|e|e.to_string())?;
+        eprintln!("run.save_batch layer=core transaction=commit run_id={} operation_id={} batch_id={} event_id={} cell_count={}", run_id, operation_id, batch_id, event_id, cells.len());
         Ok(json!({"run_id":run_id,"revision":revision,"batch_id":batch_id,"event_id":event_id,"accepted":cells.len(),"rejected":[]}))
     }
 
@@ -227,7 +229,7 @@ mod tests {
 
     fn batch(run_id: &str, op: &str, expected_revision: u64) -> Value {
         let cells: Vec<Value> = (0..8).flat_map(|r| (0..12).map(move |c| json!({
-            "row":r,"column":c,"sample_id":Value::Null,"group":"control","replicate":1,
+            "row":r,"column":c,"sample_id":"","group":"control","replicate":1,
             "field":"od450","value":(r*12+c) as f64,"status":"raw"
         }))).collect();
         json!({"run_id":run_id,"operation_id":op,"schema_id":"cck8.plate96.od450.v1",

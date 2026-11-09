@@ -193,13 +193,18 @@ fn map_cli(e: cli_impl::CliError) -> Error {
 }
 
 fn snapshot(v: serde_json::Value) -> RunSnapshot {
+    let mut design_content = v["frozen_design"]["content"].clone();
+    if let Some(mygo) = v["frozen_design"].get("mygo") {
+        if !mygo.is_null() { design_content["mygo"] = mygo.clone(); }
+    }
+    let design_data = serde_json::to_string(&design_content).unwrap_or_default();
     let design_id = v["design_id"].as_str().unwrap_or("").into();
     let design_revision = v["design_revision"].as_u64().or_else(|| v["revision"].as_u64()).unwrap_or(0);
     let mut s = RunSnapshot {
         run_id: v["run_id"].as_str().unwrap_or("").into(),
         design_id,
         design_revision,
-        design_data: serde_json::to_string(&v["frozen_design"]["content"]).unwrap_or_default(),
+        design_data,
         revision: v["revision"].as_u64().unwrap_or(0),
         title: v["frozen_design"]["content"]["title"].as_str().unwrap_or("").into(),
         status: v["status"].as_str().unwrap_or("").into(),

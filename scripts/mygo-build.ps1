@@ -26,7 +26,7 @@ try {
 
     # 2. Go app
     $env:CGO_ENABLED = '0'
-    go build -trimpath -o (Join-Path $distDir 'mygo-run.exe') .
+    go build -tags=e2e -trimpath -o (Join-Path $distDir 'mygo-run.exe') .
     if ($LASTEXITCODE -ne 0) { throw "go build failed (exit $LASTEXITCODE)" }
 
     # Evidence
