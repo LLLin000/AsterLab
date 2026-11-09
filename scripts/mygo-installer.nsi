@@ -17,8 +17,8 @@ Section "Install"
     File "..\scripts\AsterLab-MyGo.bat"
 
     CreateDirectory "$SMPROGRAMS\AsterLab MyGo"
-    CreateShortcut "$SMPROGRAMS\AsterLab MyGo\AsterLab MyGo.lnk" "$INSTDIR\AsterLab-MyGo.bat" "" "$INSTDIR\mygo-run.exe" 0
-    CreateShortcut "$DESKTOP\AsterLab MyGo.lnk" "$INSTDIR\AsterLab-MyGo.bat" "" "$INSTDIR\mygo-run.exe" 0
+    CreateShortcut "$SMPROGRAMS\AsterLab MyGo\AsterLab MyGo.lnk" "$INSTDIR\mygo-run.exe"
+    CreateShortcut "$DESKTOP\AsterLab MyGo.lnk" "$INSTDIR\mygo-run.exe"
 
     WriteUninstaller "$INSTDIR\uninstall.exe"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayName" "AsterLab MyGo (Unsigned Beta)"
