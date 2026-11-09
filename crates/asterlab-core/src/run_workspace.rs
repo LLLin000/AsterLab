@@ -157,8 +157,12 @@ pub struct ExecutionEventView {
     pub controls: Vec<Value>,
     pub lineage: Vec<Value>,
     pub actual_parameters: Vec<Value>,
-}
+    pub batch_id: Option<String>,
+    pub schema_id: Option<String>,
+    pub schema_version: Option<u32>,
+    pub result_cells: Vec<Value>,
 
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunWorkspaceError(pub String);
 
@@ -473,6 +477,10 @@ pub fn build(
             controls: event["controls"].as_array().cloned().unwrap_or_default(),
             lineage: event["lineage"].as_array().cloned().unwrap_or_default(),
             actual_parameters: event["actual_parameters"].as_array().cloned().unwrap_or_default(),
+            batch_id: opt_text(&event["batch_id"]),
+            schema_id: opt_text(&event["schema_id"]),
+            schema_version: event["schema_version"].as_u64().map(|v| v as u32),
+            result_cells: event["result_cells"].as_array().cloned().unwrap_or_default(),
         })
         .collect();
 

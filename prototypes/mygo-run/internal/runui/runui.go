@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/theme"
 
 	"github.com/egoist/mygo/ui"
@@ -20,6 +21,7 @@ const (
 	StateSaving          State = "saving"
 	StateSaved           State = "saved"
 	StateValidationError State = "validation_error"
+	StateError           State = "error"
 	StateBlocked         State = "blocked"
 	StateEmpty           State = "empty"
 )
@@ -75,6 +77,7 @@ type Draft struct {
 
 type Callbacks struct {
 	SaveReadout  func(measurements []Measurement)
+	SaveBatch    func(schema resultgrid.Schema, cells []resultgrid.Cell)
 	CompleteTask func(taskKey string)
 	SelectTask   func(taskKey string)
 }
@@ -83,6 +86,9 @@ type Workspace struct {
 	View      RunView
 	State     State
 	Draft     Draft
+	Grid      *resultgrid.Grid
+	PlateView bool
+	FullWidth bool
 	Callbacks Callbacks
 	Selected  string
 	Width     int
@@ -214,6 +220,20 @@ func (w *Workspace) parseDraft() ([]Measurement, string) {
 }
 
 func (w *Workspace) save() {
+	if w.Grid != nil && w.Callbacks.SaveBatch != nil {
+		if w.Grid.Preview != nil {
+			w.Error = "请先确认或取消粘贴预览"
+			w.Grid.Error = w.Error
+			w.Grid.State = resultgrid.StateError
+			return
+		}
+		w.State = StateSaving
+		w.Grid.State = resultgrid.StateSaving
+		w.Grid.Error = ""
+		w.Error = ""
+		w.Callbacks.SaveBatch(w.Grid.Schema, append([]resultgrid.Cell(nil), w.Grid.Cells...))
+		return
+	}
 	ms, err := w.parseDraft()
 	if err != "" {
 		w.State = StateValidationError
@@ -251,7 +271,7 @@ func View(c *ui.Context, w *Workspace) {
 	if c.Shortcut(ui.Cmd, ui.KeyS) {
 		w.save()
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyN) {
+	if c.Shortcut(ui.Cmd, ui.KeyN) && w.Grid == nil {
 		w.Draft.Rows = append(w.Draft.Rows, DraftRow{})
 	}
 
@@ -300,7 +320,7 @@ func View(c *ui.Context, w *Workspace) {
 
 		// Scrollable main workspace body
 		ui.Scroll(c).Grow(1).Children(func() {
-			if w.shouldStack(c) {
+			if w.FullWidth || w.shouldStack(c) {
 				ui.Column(c).FillWidth().Gap(16).Padding(16).Children(func() {
 					recordPanel(c, w, t, tokens)
 					plateCard(c, w, t, tokens)
@@ -334,7 +354,7 @@ func renderStateBadge(c *ui.Context, state State, tokens theme.Tokens) {
 		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.SuccessBg).Children(func() {
 			ui.Text(c, "✓ 已保存").FontSize(11).TextColor(tokens.SuccessText).Bold()
 		})
-	case StateValidationError, StateBlocked:
+	case StateValidationError, StateError, StateBlocked:
 		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.DangerBg).Children(func() {
 			ui.Text(c, "⚠ 错误").FontSize(11).TextColor(tokens.DangerText).Bold()
 		})
@@ -382,6 +402,9 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 				if task.Timepoint != "" {
 					label = task.Timepoint + " " + label
 				}
+				if task.AssayID != "" {
+					label += " · " + task.AssayID
+				}
 				if task.Done() {
 					label += " ✓"
 				}
@@ -400,48 +423,67 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 		})
 		ui.Divider(c)
 
-		// Measurement editor
-		ui.Column(c).Gap(6).Children(func() {
-			ui.Text(c, "记录 OD450（AU）").FontSize(15).Bold().TextColor(t.Text)
-			ui.Text(c, "请填入待测样本标识与对应的光密度读数").FontSize(12).TextColor(t.TextMuted)
-		})
-
-		// Measurement Grid
-		ui.Grid(c).Columns(3).ColumnTracks(ui.Fr(1), ui.Fr(1), ui.Fixed(36)).Gap(8).Children(func() {
-			ui.Text(c, "样本 / 孔位").FontSize(11).TextColor(t.TextMuted).Bold()
-			ui.Text(c, "测量值 (AU)").FontSize(11).TextColor(t.TextMuted).Bold()
-			ui.Text(c, "").FontSize(11) // action header placeholder
-
-			for i := range w.Draft.Rows {
-				i := i
-				inp1 := ui.TextInput(c, &w.Draft.Rows[i].SampleID).Placeholder("样本编号 (如 Control-1)")
-				if inp1.Changed() && (w.State == StateSaved || w.State == StateReady) {
-					w.State = StateDraft
+		if w.Grid != nil {
+			ui.Row(c).Gap(8).Children(func() {
+				if ui.Button(c, "Plate").Clicked() {
+					w.PlateView = true
 				}
-				inp2 := ui.TextInput(c, &w.Draft.Rows[i].Value).Placeholder("吸光度数值 (如 0.82)")
-				if inp2.Changed() && (w.State == StateSaved || w.State == StateReady) {
-					w.State = StateDraft
+				if ui.Button(c, "Table").Clicked() {
+					w.PlateView = false
 				}
-				if len(w.Draft.Rows) > 1 {
-					if ui.Button(c, "✕").Radius(6).Padding(4, 8).Clicked() {
-						w.Draft.Rows = append(w.Draft.Rows[:i], w.Draft.Rows[i+1:]...)
-						w.State = StateDraft
-					}
-				} else {
-					ui.Spacer(c)
+				if ui.Button(c, "全宽编辑").Clicked() {
+					w.PlateView = false
+					w.FullWidth = !w.FullWidth
+				}
+			})
+			if w.PlateView {
+				plateGrid(c, w.Grid)
+			} else {
+				resultgrid.View(c, w.Grid, resultgrid.Options{FullWidth: w.FullWidth})
+				switch w.Grid.State {
+				case resultgrid.StateDraft:
+					w.State = StateDraft
+				case resultgrid.StateError:
+					w.State = StateError
+					w.Error = w.Grid.Error
 				}
 			}
-		})
-
-		ui.Row(c).Gap(8).Children(func() {
-			if ui.Button(c, "+ 新增一行 (Ctrl+N)").Radius(6).Padding(6, 12).Clicked() {
+		} else {
+			ui.Column(c).Gap(6).Children(func() {
+				ui.Text(c, "记录 OD450（AU）").FontSize(15).Bold().TextColor(t.Text)
+				ui.Text(c, "请填入待测样本标识与对应的光密度读数").FontSize(12).TextColor(t.TextMuted)
+			})
+			ui.Grid(c).Columns(3).ColumnTracks(ui.Fr(1), ui.Fr(1), ui.Fixed(36)).Gap(8).Children(func() {
+				ui.Text(c, "样本 / 孔位").FontSize(11).TextColor(t.TextMuted).Bold()
+				ui.Text(c, "测量值 (AU)").FontSize(11).TextColor(t.TextMuted).Bold()
+				ui.Text(c, "").FontSize(11)
+				for i := range w.Draft.Rows {
+					i := i
+					inp1 := ui.TextInput(c, &w.Draft.Rows[i].SampleID).Placeholder("样本编号 (如 Control-1)")
+					if inp1.Changed() {
+						w.State = StateDraft
+					}
+					inp2 := ui.TextInput(c, &w.Draft.Rows[i].Value).Placeholder("吸光度数值 (如 0.82)")
+					if inp2.Changed() {
+						w.State = StateDraft
+					}
+					if len(w.Draft.Rows) > 1 {
+						if ui.Button(c, "✕").Clicked() {
+							w.Draft.Rows = append(w.Draft.Rows[:i], w.Draft.Rows[i+1:]...)
+							w.State = StateDraft
+						}
+					} else {
+						ui.Spacer(c)
+					}
+				}
+			})
+			if ui.Button(c, "+ 新增一行 (Ctrl+N)").Clicked() {
 				w.Draft.Rows = append(w.Draft.Rows, DraftRow{})
 				w.State = StateDraft
 			}
-		})
-
+		}
 		// Notifications
-		if w.State == StateValidationError || w.Draft.Error != "" {
+		if w.State == StateValidationError || w.State == StateError || w.Draft.Error != "" {
 			msg := w.Draft.Error
 			if msg == "" {
 				msg = w.Error
@@ -480,44 +522,43 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 
 func plateCard(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
 	ui.Column(c).Gap(12).Padding(20).Radius(12).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "96 孔板布局").FontSize(15).Bold().TextColor(t.Text)
-			ui.Spacer(c)
-			ui.Text(c, "8 × 12 标准微孔阵列").FontSize(11).TextColor(t.TextMuted)
-		})
+		ui.Text(c, "空间板视图 · 只读").FontSize(15).Bold().TextColor(t.Text)
+		if w.Grid == nil {
+			ui.Text(c, "当前任务尚无 assay schema").FontSize(12).TextColor(t.TextMuted)
+			return
+		}
+		plateGrid(c, w.Grid)
+	})
+}
 
-		// Column headers 1-12
-		ui.Grid(c).Columns(12).Gap(4).Children(func() {
-			for col := range 12 {
-				ui.Row(c).Center().Children(func() {
-					ui.Text(c, strconv.Itoa(col+1)).FontSize(9).TextColor(t.TextMuted)
-				})
+func plateGrid(c *ui.Context, grid *resultgrid.Grid) {
+	if grid == nil || grid.Rows() == 0 || grid.Columns() == 0 {
+		return
+	}
+	ui.Column(c).Gap(3).Children(func() {
+		ui.Grid(c).Columns(grid.Columns() + 1).Gap(3).Children(func() {
+			ui.Text(c, "")
+			for _, label := range grid.Schema.ColumnLabels {
+				ui.Text(c, label).FontSize(9).Bold()
 			}
-		})
-
-		// 96-well grid with 18px minimum cell size
-		ui.Grid(c).Columns(12).Gap(4).Children(func() {
-			for i := range 96 {
-				fill := tokens.NeutralBg
-				borderCol := t.Border
-				if i == 13 || i == 14 || i == 25 {
-					fill = t.Accent
-					borderCol = t.Accent
+			for row, label := range grid.Schema.RowLabels {
+				ui.Text(c, label).FontSize(9).Bold()
+				for col := range grid.Columns() {
+					cell, _ := grid.CellAt(row, col)
+					value := "—"
+					if cell.Value != nil {
+						value = strconv.FormatFloat(*cell.Value, 'g', -1, 64)
+					}
+					cellLabel := value
+					if cell.SampleID != "" {
+						cellLabel = cell.SampleID + " · " + value
+					}
+					rr, cc := row, col
+					if ui.Button(c, cellLabel).Clicked() {
+						grid.SetSelection(resultgrid.Selection{StartRow: rr, StartColumn: cc, EndRow: rr, EndColumn: cc})
+					}
 				}
-				ui.Box(c).Height(18).Radius(4).Background(fill).Border(1, borderCol)
 			}
-		})
-
-		// Legend
-		ui.Row(c).Padding(4, 0).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(10, 10).Radius(2).Background(t.Accent)
-				ui.Text(c, "待测 / 已加样 (3)").FontSize(11).TextColor(t.Accent).Bold()
-			})
-			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(10, 10).Radius(2).Background(tokens.NeutralBg).Border(1, t.Border)
-				ui.Text(c, "空白微孔 (93)").FontSize(11).TextColor(t.TextMuted)
-			})
 		})
 	})
 }

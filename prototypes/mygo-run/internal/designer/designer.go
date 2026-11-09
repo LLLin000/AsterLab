@@ -1,16 +1,17 @@
 package designer
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"strings"
-	"sync/atomic"
-	"time"
-
+	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/modules/runs"
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -27,8 +28,10 @@ const (
 )
 
 type designExtension struct {
-	Workflow  workflow.WorkflowDocument    `json:"workflow"`
-	Instances map[string][]blocks.Instance `json:"instances,omitempty"`
+	Workflow   workflow.WorkflowDocument    `json:"workflow"`
+	Instances  map[string][]blocks.Instance `json:"instances,omitempty"`
+	Assays     map[string]assays.Design     `json:"assays,omitempty"`
+	StepAssays map[string]string            `json:"stepAssays,omitempty"`
 }
 
 type designDoc struct {
@@ -48,11 +51,15 @@ type Designer struct {
 	Title    string
 	Revision uint64
 
-	Editor    *workflow.Editor
-	Instances map[string][]blocks.Instance
+	Editor     *workflow.Editor
+	Instances  map[string][]blocks.Instance
+	Assays     map[string]assays.Design
+	StepAssays map[string]string
 
-	SelectedNode       string
-	ComponentRefsDraft string
+	AssayIDDraft, TimepointsDraft, PlateInstanceDraft, ReplicatesDraft                     string
+	ControlGroupDraft, CalibratorGroupDraft, SamplesDraft, GenesDraft, ReferenceGenesDraft string
+	SelectedNode                                                                           string
+	ComponentRefsDraft                                                                     string
 
 	Dirty     bool
 	SaveState SaveState
@@ -73,17 +80,19 @@ type Designer struct {
 
 func New(designID, title string, revision uint64, svc runs.DesignService) *Designer {
 	d := &Designer{
-		DesignID:  designID,
-		Title:     title,
-		Revision:  revision,
-		Editor:    workflow.NewEditor(),
-		Instances: map[string][]blocks.Instance{},
-		SaveState: SaveIdle,
-		Service:   svc,
+		DesignID:   designID,
+		Title:      title,
+		Revision:   revision,
+		Editor:     workflow.NewEditor(),
+		Instances:  map[string][]blocks.Instance{},
+		Assays:     map[string]assays.Design{},
+		StepAssays: map[string]string{},
+		Service:    svc,
 	}
 	d.Editor.OnSelect = func(id string) {
 		d.SelectedNode = id
 		d.ComponentRefsDraft = strings.Join(d.componentRefs(id), ", ")
+		d.loadAssayDraft(id)
 	}
 	d.Editor.OnChange = d.Touch
 	return d
@@ -149,6 +158,8 @@ func (d *Designer) Load(ctx context.Context, designID string) {
 }
 
 func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
+	d.Assays = map[string]assays.Design{}
+	d.StepAssays = map[string]string{}
 	d.Revision = snap.Revision
 	if snap.Title != "" {
 		d.Title = snap.Title
@@ -163,14 +174,86 @@ func (d *Designer) applySnapshot(snap runs.DesignSnapshot) {
 			if doc.MyGo.Instances != nil {
 				d.Instances = doc.MyGo.Instances
 			}
+			if doc.MyGo.Assays != nil {
+				d.Assays = doc.MyGo.Assays
+			}
+			if doc.MyGo.StepAssays != nil {
+				d.StepAssays = doc.MyGo.StepAssays
+			}
 			if doc.Title != "" {
 				d.Title = doc.Title
 			}
 		}
 	}
+	if d.SelectedNode != "" {
+		d.loadAssayDraft(d.SelectedNode)
+	}
 	d.Dirty = false
 	d.SaveState = SaveIdle
 	d.Error = ""
+}
+func (d *Designer) loadAssayDraft(nodeID string) {
+	d.AssayIDDraft = d.StepAssays[nodeID]
+	p := d.Assays[d.AssayIDDraft]
+	d.TimepointsDraft = strings.Join(p.Timepoints, ", ")
+	d.PlateInstanceDraft = p.PlateInstanceID
+	d.ReplicatesDraft = fmt.Sprint(p.TechnicalReplicates)
+	d.ControlGroupDraft = p.ControlGroup
+	d.CalibratorGroupDraft = p.CalibratorGroup
+	samples, genes := make([]string, 0, len(p.Samples)), make([]string, 0, len(p.Genes))
+	for _, sample := range p.Samples {
+		samples = append(samples, sample.ID+":"+sample.Group)
+	}
+	for _, gene := range p.Genes {
+		if gene.Reference {
+			genes = append(genes, gene.ID+"*")
+		} else {
+			genes = append(genes, gene.ID)
+		}
+	}
+	d.SamplesDraft, d.GenesDraft = strings.Join(samples, ", "), strings.Join(genes, ", ")
+	d.ReferenceGenesDraft = strings.Join(p.ReferenceGenes, ", ")
+}
+
+func (d *Designer) saveAssayDraft() {
+	if d.AssayIDDraft == "" || d.SelectedNode == "" {
+		return
+	}
+	d.StepAssays[d.SelectedNode] = d.AssayIDDraft
+	p := d.Assays[d.AssayIDDraft]
+	p.Timepoints = splitCSV(d.TimepointsDraft)
+	p.PlateInstanceID = strings.TrimSpace(d.PlateInstanceDraft)
+	p.TechnicalReplicates, _ = strconv.Atoi(strings.TrimSpace(d.ReplicatesDraft))
+	p.ControlGroup, p.CalibratorGroup = strings.TrimSpace(d.ControlGroupDraft), strings.TrimSpace(d.CalibratorGroupDraft)
+	p.ReferenceGenes = splitCSV(d.ReferenceGenesDraft)
+	p.Samples, p.Genes = nil, nil
+	for _, value := range splitCSV(d.SamplesDraft) {
+		parts := strings.SplitN(value, ":", 2)
+		sample := assays.Sample{ID: strings.TrimSpace(parts[0])}
+		if len(parts) == 2 {
+			sample.Group = strings.TrimSpace(parts[1])
+		}
+		p.Samples = append(p.Samples, sample)
+	}
+	for _, value := range splitCSV(d.GenesDraft) {
+		value = strings.TrimSpace(value)
+		gene := assays.Gene{ID: strings.TrimSuffix(value, "*"), Reference: strings.HasSuffix(value, "*")}
+		if gene.ID != "" {
+			p.Genes = append(p.Genes, gene)
+		}
+	}
+	d.Assays[d.AssayIDDraft] = p
+	d.Touch()
+}
+
+func splitCSV(value string) []string {
+	var values []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			values = append(values, item)
+		}
+	}
+	return values
 }
 
 // Touch marks the design dirty.
@@ -185,7 +268,7 @@ func (d *Designer) Save(ctx context.Context) {
 	d.Error = ""
 	changes, err := json.Marshal(designDoc{
 		Title: d.Title,
-		MyGo:  designExtension{Workflow: d.Editor.Doc, Instances: d.Instances},
+		MyGo:  designExtension{Workflow: d.Editor.Doc, Instances: d.Instances, Assays: d.Assays, StepAssays: d.StepAssays},
 	})
 	if err != nil {
 		d.SaveState = SaveError
@@ -329,16 +412,50 @@ func inspector(c *ui.Context, d *Designer, t *ui.Theme) {
 		if ui.TextInput(c, &d.ComponentRefsDraft).Placeholder("component-id").Changed() {
 			d.setComponentRefs(d.SelectedNode, d.ComponentRefsDraft)
 		}
+		ui.Text(c, "检测参数（当前步骤）").Bold()
+		changed := false
+		if ui.TextInput(c, &d.AssayIDDraft).Placeholder("cck8 或 qpcr").Changed() {
+			changed = true
+		}
+		if d.AssayIDDraft != "" {
+			if ui.TextInput(c, &d.TimepointsDraft).Placeholder("时间点，逗号分隔").Changed() {
+				changed = true
+			}
+			if ui.TextInput(c, &d.PlateInstanceDraft).Placeholder("CCK-8 plate instance ID").Changed() {
+				changed = true
+			}
+			if ui.TextInput(c, &d.ReplicatesDraft).Placeholder("技术重复数").Changed() {
+				changed = true
+			}
+			if ui.TextInput(c, &d.ControlGroupDraft).Placeholder("对照组").Changed() {
+				changed = true
+			}
+			if ui.TextInput(c, &d.CalibratorGroupDraft).Placeholder("qPCR 校准组").Changed() {
+				changed = true
+			}
+			if ui.TextInput(c, &d.SamplesDraft).Placeholder("样本ID:组别, ...").Changed() {
+				changed = true
+			}
+			if ui.TextInput(c, &d.GenesDraft).Placeholder("基因, 参考基因加 *").Changed() {
+				changed = true
+			}
+			if ui.TextInput(c, &d.ReferenceGenesDraft).Placeholder("参考基因，逗号分隔").Changed() {
+				changed = true
+			}
+		}
+		if changed {
+			d.saveAssayDraft()
+		}
 		insts := d.SelectedInstances()
 		if len(insts) == 0 {
 			ui.Text(c, "无组件预览").FontSize(12).TextColor(t.TextMuted)
-			return
-		}
-		for i := range insts {
-			inst := insts[i]
-			ui.Box(c).Padding(6).Children(func() {
-				blocks.View(c, inst)
-			})
+		} else {
+			for i := range insts {
+				inst := insts[i]
+				ui.Box(c).Padding(6).Children(func() {
+					blocks.View(c, inst)
+				})
+			}
 		}
 	})
 }

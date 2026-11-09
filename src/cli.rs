@@ -2018,7 +2018,7 @@ pub(crate) fn create_execution_event_tx(
         "material_use" if event.materials.is_empty() => {
             return Err(CliError::input("材料使用事件至少需要一项材料"));
         }
-        "measurement" if event.measurements.is_empty() && event.readouts.is_empty() => {
+        "measurement" if event.measurements.is_empty() && event.readouts.is_empty() && event.result_cells.is_empty() => {
             return Err(CliError::input("测量事件至少需要一项数值读数或结构化读数"));
         }
         "deviation"
@@ -2157,7 +2157,11 @@ pub(crate) fn create_execution_event_tx(
         "task_key":event.task_key,
         "sample_ids":event.sample_ids,
         "materials":event.materials.iter().map(|m|json!({"material":m.material,"planned_output_id":m.planned_output_id,"amount":m.amount,"unit":m.unit})).collect::<Vec<_>>(),
-        "measurements":event.measurements.iter().map(|m|json!({"endpoint":m.endpoint,"value":m.value,"unit":m.unit,"sample_id":m.sample_id})).collect::<Vec<_>>(),
+        "measurements":event.measurements.iter().map(|m|json!({"endpoint":m.endpoint,"value":m.value,"unit":m.unit,"sample_id":m.sample_id,"row":m.row,"column":m.column,"group":m.group,"replicate":m.replicate,"status":m.status,"field":m.field})).collect::<Vec<_>>(),
+        "batch_id":event.batch_id,
+        "schema_id":event.schema_id,
+        "schema_version":event.schema_version,
+        "result_cells":event.result_cells,
         "readouts":event.readouts.iter().map(|r|json!({"readout_id":r.readout_id,"endpoint":r.endpoint,"value":r.value,"qualifier":r.qualifier,"unit":r.unit,"sample_id":r.sample_id,"result_kind":r.result_kind,"method":r.method,"derived_from":r.derived_from})).collect::<Vec<_>>(),
         "checks":event.checks.iter().map(|c|json!({"check_id":c.check_id,"status":c.status,"note":c.note,"checked_by":c.checked_by})).collect::<Vec<_>>(),
         "controls":event.controls.iter().map(|c|json!({"role":c.role,"subtype":c.subtype,"status":c.status,"control_id":c.control_id,"sample_id":c.sample_id,"experimental_unit":c.experimental_unit,"expected":c.expected,"observed":c.observed,"note":c.note})).collect::<Vec<_>>(),
@@ -4012,6 +4016,18 @@ struct EventMeasurement {
     unit: Option<String>,
     #[serde(default)]
     sample_id: Option<String>,
+    #[serde(default)]
+    row: Option<usize>,
+    #[serde(default)]
+    column: Option<usize>,
+    #[serde(default)]
+    group: Option<String>,
+    #[serde(default)]
+    replicate: Option<usize>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    field: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -4116,6 +4132,14 @@ struct ExecutionEventCreate {
     materials: Vec<EventMaterialUse>,
     #[serde(default)]
     measurements: Vec<EventMeasurement>,
+    #[serde(default)]
+    batch_id: Option<String>,
+    #[serde(default)]
+    schema_id: Option<String>,
+    #[serde(default)]
+    schema_version: Option<u32>,
+    #[serde(default)]
+    result_cells: Vec<Value>,
     #[serde(default)]
     readouts: Vec<EventReadout>,
     #[serde(default)]

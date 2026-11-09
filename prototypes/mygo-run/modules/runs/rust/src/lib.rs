@@ -31,6 +31,31 @@ impl RunService for CoreRunService {
         Ok(snapshot(v))
     }
 
+    fn save_readouts_batch(&self, _ctx: &Context, input: BatchReadoutInput) -> Result<BatchReadoutResult, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let cells: Vec<serde_json::Value> = input.cells.iter().map(|c| serde_json::json!({
+            "row":c.row,"column":c.column,"sample_id":c.sample_id,"group":c.group,
+            "replicate":c.replicate,"field":c.field,"value":c.value,"status":c.status
+        })).collect();
+        let request = serde_json::json!({
+            "run_id":input.run_id,"operation_id":input.operation_id,"task_key":input.task_key,
+            "assay_id":input.assay_id,"timepoint":input.timepoint,
+            "protocol_step_path":input.protocol_step_path,"protocol_version_id":input.protocol_version_id,
+            "schema_id":input.schema_id,"schema_version":input.schema_version,
+            "plate_id":input.plate_id,"expected_revision":input.expected_revision,"cells":cells
+        });
+        let result = core.save_readouts_batch(request).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        Ok(BatchReadoutResult {
+            run_id: result["run_id"].as_str().unwrap_or_default().to_owned(),
+            revision: result["revision"].as_u64().unwrap_or_default(),
+            batch_id: result["batch_id"].as_str().unwrap_or_default().to_owned(),
+            event_id: result["event_id"].as_str().unwrap_or_default().to_owned(),
+            accepted: result["accepted"].as_i64().unwrap_or_default(),
+            rejected: vec![],
+        })
+    }
+
     fn save_readout(&self, _ctx: &Context, input: ReadoutInput) -> Result<RunSnapshot, Error> {
         let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
@@ -207,12 +232,25 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
     }
     for e in v["events"].as_array().into_iter().flatten() {
         s.events.push(RunEvent {
-            id: e["id"].as_str().unwrap_or("").into(),
+            id: e["event_id"].as_str().or_else(||e["id"].as_str()).unwrap_or("").into(),
             event_type: e["event_type"].as_str().unwrap_or("").into(),
             content: e["content"].as_str().unwrap_or("").into(),
             task_key: e["task_key"].as_str().unwrap_or("").into(),
             step_status: e["step_status"].as_str().unwrap_or("").into(),
             timepoint: e["timepoint"].as_str().unwrap_or("").into(),
+            batch_id: e["batch_id"].as_str().unwrap_or("").into(),
+            schema_id: e["schema_id"].as_str().unwrap_or("").into(),
+            schema_version: e["schema_version"].as_u64().unwrap_or_default() as i64,
+            result_cells: e["result_cells"].as_array().into_iter().flatten().map(|cell| ResultCell {
+                row: cell["row"].as_u64().unwrap_or_default() as i64,
+                column: cell["column"].as_u64().unwrap_or_default() as i64,
+                sample_id: cell["sample_id"].as_str().unwrap_or("").into(),
+                group: cell["group"].as_str().unwrap_or("").into(),
+                replicate: cell["replicate"].as_u64().unwrap_or_default() as i64,
+                field: cell["field"].as_str().unwrap_or("").into(),
+                value: cell["value"].as_f64(),
+                status: cell["status"].as_str().unwrap_or("").into(),
+            }).collect(),
         });
         for m in e["measurements"].as_array().into_iter().flatten() {
             s.measurements.push(Measurement {

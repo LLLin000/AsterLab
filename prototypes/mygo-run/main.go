@@ -6,10 +6,13 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 	"sync/atomic"
 
+	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/designer"
+	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/runui"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/state"
@@ -89,14 +92,72 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 	if a.ws != nil {
 		view := toRunView(a.snap)
 		a.ws.View = view
-		// A loaded/saved snapshot is authoritative for the rows shown.
 		a.ws.Draft = runui.NewDraft(view)
+		if a.ws.Selected == "" {
+			a.ws.Selected = currentRunTask(a.snap.Tasks).Key
+		}
 		if len(a.snap.Tasks) == 0 && len(a.snap.Measurements) == 0 {
 			a.ws.State = runui.StateEmpty
 		} else {
 			a.ws.State = runui.StateReady
 		}
+		a.prepareGrid()
 	}
+}
+
+func currentRunTask(tasks []runs.RunTask) runs.RunTask {
+	for _, task := range tasks {
+		if task.Status != "completed" {
+			return task
+		}
+	}
+	if len(tasks) > 0 {
+		return tasks[len(tasks)-1]
+	}
+	return runs.RunTask{}
+}
+
+func (a *app) prepareGrid() {
+	if a.ws == nil || a.designSnap == nil {
+		return
+	}
+	var task *runs.RunTask
+	for i := range a.snap.Tasks {
+		if a.snap.Tasks[i].Key == a.ws.Selected {
+			task = &a.snap.Tasks[i]
+			break
+		}
+	}
+	if task == nil || task.AssayID == "" {
+		a.ws.Grid = nil
+		return
+	}
+	schema, cells, err := assays.BuildSchema([]byte(a.designSnap.Data), task.AssayID, task.Timepoint)
+	if err != nil {
+		a.ws.Grid = nil
+		a.ws.Error = state.MapError(err).Error()
+		return
+	}
+	grid := resultgrid.New(schema, cells)
+	// Batch events are authoritative for restored grid cells; legacy
+	// measurements remain a fallback for pre-v1.1 runs.
+	for _, event := range a.snap.Events {
+		for _, c := range event.ResultCells {
+			cell := resultgrid.Cell{Row: c.Row, Column: c.Column, SampleID: c.SampleID, Group: c.Group, Replicate: c.Replicate, Field: c.Field, Value: c.Value, Status: c.Status}
+			_ = grid.SetCell(cell)
+		}
+	}
+	for _, measurement := range a.snap.Measurements {
+		for _, cell := range grid.Cells {
+			if cell.SampleID == measurement.SampleID && strings.EqualFold(cell.Field, measurement.Endpoint) {
+				value := measurement.Value
+				cell.Value, cell.Status = &value, "raw"
+				_ = grid.SetCell(cell)
+				break
+			}
+		}
+	}
+	a.ws.Grid = grid
 }
 
 func (a *app) loadDesign(id string) {
@@ -275,7 +336,68 @@ func main() {
 			a.applySnap(snap)
 			if a.ws != nil {
 				a.ws.State = runui.StateSaved
+				if a.ws.Grid != nil {
+					a.ws.Grid.State = resultgrid.StateSaved
+				}
 			}
+		},
+		SaveBatch: func(schema resultgrid.Schema, cells []resultgrid.Cell) {
+			if a.ws == nil || a.runSvc == nil {
+				return
+			}
+			taskKey := a.ws.Selected
+			task := currentRunTask(a.snap.Tasks)
+			for _, candidate := range a.snap.Tasks {
+				if candidate.Key == taskKey {
+					task = candidate
+					break
+				}
+			}
+			batchCells := make([]runs.ResultCell, 0, len(cells))
+			for _, cell := range cells {
+				batchCells = append(batchCells, runs.ResultCell{
+					Row: cell.Row, Column: cell.Column, SampleID: cell.SampleID,
+					Group: cell.Group, Replicate: cell.Replicate, Field: cell.Field,
+					Value: cell.Value, Status: cell.Status,
+				})
+			}
+			batchResult, err := a.runSvc.SaveReadoutsBatch(context.Background(), runs.BatchReadoutInput{
+				RunID: a.snap.RunID, OperationID: a.nextOp(), TaskKey: task.Key,
+				AssayID: task.AssayID, Timepoint: task.Timepoint,
+				ProtocolStepPath: task.Title, ProtocolVersionID: task.ProtocolVersionID,
+				SchemaID: schema.ID, SchemaVersion: schema.Version, Cells: batchCells,
+				ExpectedRevision: a.snap.Revision,
+			})
+			if err != nil {
+				message := state.MapError(err).Error()
+				a.ws.State = runui.StateError
+				a.ws.Error, a.ws.Grid.Error = message, message
+				a.ws.Grid.State = resultgrid.StateError
+				a.err = message
+				return
+			}
+			if batchResult.Accepted != len(batchCells) {
+				message := fmt.Sprintf("批量保存未接受全部单元格：%d/%d", batchResult.Accepted, len(batchCells))
+				a.ws.State = runui.StateError
+				a.ws.Error, a.ws.Grid.Error = message, message
+				a.ws.Grid.State = resultgrid.StateError
+				a.err = message
+				return
+			}
+			snap, err := a.runSvc.LoadRun(context.Background(), a.snap.RunID)
+			if err != nil {
+				message := state.MapError(err).Error()
+				a.ws.State = runui.StateError
+				a.ws.Error, a.ws.Grid.Error = message, message
+				a.ws.Grid.State = resultgrid.StateError
+				a.err = message
+				return
+			}
+			savedGrid := a.ws.Grid
+			savedGrid.State = resultgrid.StateSaved
+			a.applySnap(snap)
+			a.ws.State = runui.StateSaved
+			a.ws.Grid = savedGrid
 		},
 		CompleteTask: func(taskKey string) {
 			if a.ws == nil {
@@ -311,7 +433,13 @@ func main() {
 				a.ws.State = runui.StateReady
 			}
 		},
-		SelectTask: func(taskKey string) { a.selectedTask = taskKey },
+		SelectTask: func(taskKey string) {
+			a.selectedTask = taskKey
+			if a.ws != nil {
+				a.ws.Selected = taskKey
+				a.prepareGrid()
+			}
+		},
 	}
 	a.ws = runui.NewWorkspace(toRunView(a.snap), cb)
 	a.ws.State = runui.StateLoading

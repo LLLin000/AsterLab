@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/workflow"
@@ -36,17 +37,26 @@ func sampleDesigner(t *testing.T) *Designer {
 
 func TestSaveCallback(t *testing.T) {
 	d := sampleDesigner(t)
-	var got runs.DesignSaveInput
+	d.Assays["cck8"] = assays.Design{Timepoints: []string{"24 h"}, ControlGroup: "Control"}
+	d.StepAssays["n1"] = "cck8"
 	fake := &state.FakeDesignService{
 		Snapshot: runs.DesignSnapshot{DesignID: "design-1", Revision: 5, Title: "Test Design"},
 	}
 	d.Service = nil
+	var got runs.DesignSaveInput
 	d.Callbacks.SaveDesign = func(ctx context.Context, input runs.DesignSaveInput) (runs.DesignSnapshot, error) {
 		got = input
 		return fake.SaveDesign(ctx, input)
 	}
 	d.Dirty = true
 	d.Save(context.Background())
+	var saved designDoc
+	if err := json.Unmarshal([]byte(got.Changes), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.MyGo.Assays["cck8"].ControlGroup != "Control" || saved.MyGo.StepAssays["n1"] != "cck8" {
+		t.Fatalf("assay mapping not persisted in mygo extension: %+v", saved.MyGo)
+	}
 	if got.ExpectedRevision != 3 {
 		t.Fatalf("expected revision = %d", got.ExpectedRevision)
 	}
