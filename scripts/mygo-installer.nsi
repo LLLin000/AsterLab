@@ -1,4 +1,3 @@
-; AsterLab MyGo unsigned test installer
 !include "MUI2.nsh"
 
 Name "AsterLab MyGo (Unsigned Beta)"
@@ -7,15 +6,7 @@ InstallDir "$LOCALAPPDATA\Programs\AsterLab MyGo"
 RequestExecutionLevel user
 SilentInstall silent
 SilentUnInstall silent
-
-!define MUI_ABORTWARNING
-!insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_DIRECTORY
-!insertmacro MUI_PAGE_INSTFILES
-!insertmacro MUI_PAGE_FINISH
-!insertmacro MUI_UNPAGE_CONFIRM
-!insertmacro MUI_UNPAGE_INSTFILES
-!insertmacro MUI_LANGUAGE "English"
+SetCompressor /SOLID lzma
 
 Section "Install"
     SetShellVarContext current
@@ -23,7 +14,6 @@ Section "Install"
     File "..\prototypes\mygo-run\dist\mygo-run.exe"
     File "..\prototypes\mygo-run\dist\Runs.dll"
     File "..\prototypes\mygo-run\dist\BUILD_INFO.txt"
-
     File "..\scripts\AsterLab-MyGo.bat"
 
     CreateDirectory "$SMPROGRAMS\AsterLab MyGo"
@@ -31,7 +21,6 @@ Section "Install"
     CreateShortcut "$DESKTOP\AsterLab MyGo.lnk" "$INSTDIR\AsterLab-MyGo.bat" "" "$INSTDIR\mygo-run.exe" 0
 
     WriteUninstaller "$INSTDIR\uninstall.exe"
-
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayName" "AsterLab MyGo (Unsigned Beta)"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "InstallLocation" "$INSTDIR"

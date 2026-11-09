@@ -281,9 +281,7 @@ func View(c *ui.Context, w *Workspace) {
 			Border(1, tokens.CardBorder).Children(func() {
 			ui.Text(c, w.View.Title).FontSize(18).Bold().TextColor(t.Text)
 			if w.Grid != nil {
-				if ui.Button(c, "保存").Clicked() {
-					w.save()
-				}
+				ui.Button(c, "保存").OnClick(func() { w.save() })
 			}
 			ui.Spacer(c)
 			// Metadata Badges
@@ -509,13 +507,10 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 			if w.State == StateSaving {
 				saveLabel = "保存中…"
 			}
-			btnSave := ui.ButtonBase(c).Radius(8).Padding(8, 20).Background(t.Accent)
+			btnSave := ui.ButtonBase(c).Radius(8).Padding(8, 20).Background(t.Accent).OnClick(func() { w.save() })
 			btnSave.Children(func() {
 				ui.Text(c, saveLabel).FontSize(13).Bold().TextColor(t.AccentText)
 			})
-			if btnSave.Clicked() {
-				w.save()
-			}
 
 			btnComplete := ui.Button(c, "完成本步").Radius(8).Padding(8, 16)
 			if btnComplete.Clicked() {
