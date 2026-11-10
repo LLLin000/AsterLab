@@ -1541,7 +1541,7 @@ fn run_creation_audit(design_data: &Value, revision: i64, version_id: &str) -> R
             pairs.sort();
             for ((assay, timepoint), count) in pairs {
                 warnings.push(format!(
-                    "检测 {assay} 的 {timepoint} 同时被 {count} 个步骤声明；这些任务会保持未关联。"
+                    "检测 {assay} 的 {timepoint} 被 {count} 个步骤共享；任务按 path / Step ID 区分，不按时间点合并。"
                 ));
             }
         }

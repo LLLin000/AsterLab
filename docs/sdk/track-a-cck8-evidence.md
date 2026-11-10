@@ -17,7 +17,7 @@
 - Run: `36d44741-a0b9-4ae8-89cd-85a6b45363db` (`CCK-8 run`)
 - Run task list: `D1 root/seed`, `root/dose` (unresolved timepoint), `D1 root/read`.
 
-The duplicate-D1 warning remains: `root/seed` and `root/read` both declare D1. The UI/Core keep those tasks explicitly unlinked rather than guessing; this is recorded as a remaining design-authoring issue, not hidden.
+`root/seed` and `root/read` both declare D1. They are distinguished by path / Step ID; the remaining warning is advisory and says so, rather than claiming the tasks are unresolved.
 
 ## 2. Real-window operations
 
@@ -64,7 +64,7 @@ The earlier Run `d5163844-1cae-4013-b31e-efe17169d24d` still points to design ve
 
 ## 5. Remaining gaps
 
-- `root/dose` has no resolved timepoint; the duplicate-D1 warning remains visible.
+- `root/dose` has no resolved timepoint; the shared-D1 advisory remains visible (it no longer claims the tasks are unresolved).
 - The Notebook page now has a read-only `时间线` mode over authoritative Run events (event/batch IDs, task, checks/cells counts, batch drilldown); the editable Markdown modes remain.
 - The first batch predates readout IDs; new batches include them, but the old event is intentionally not rewritten.
 - High-DPI/scale-200 and dark-mode real-window captures are not part of this evidence.

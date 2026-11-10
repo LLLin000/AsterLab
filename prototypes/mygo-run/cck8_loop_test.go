@@ -104,7 +104,7 @@ func TestCCK8VerticalSliceLoop(t *testing.T) {
 	}
 	foundWarning := false
 	for _, warning := range audit.Warnings {
-		if strings.Contains(warning, "同时被 2 个步骤声明") {
+		if strings.Contains(warning, "被 2 个步骤共享") {
 			foundWarning = true
 		}
 	}
@@ -468,7 +468,7 @@ func seedPlatePlan(ctx context.Context, svc runs.DesignService, designID, assayI
 		map[string]any{"stepId": "seed-step-a", "assayId": assayID, "timepoint": timepoint},
 		map[string]any{"stepId": "seed-step-b", "assayId": assayID, "timepoint": timepoint},
 	}
-	ackWarning := fmt.Sprintf("检测 %s 的 %s 同时被 2 个步骤声明；这些任务会保持未关联。", assayID, timepoint)
+	ackWarning := fmt.Sprintf("检测 %s 的 %s 被 2 个步骤共享；任务按 path / Step ID 区分，不按时间点合并。", assayID, timepoint)
 	mygo["preflightAck"] = map[string]any{
 		"warnings":       []any{ackWarning},
 		"actorId":        "fixture-operator",

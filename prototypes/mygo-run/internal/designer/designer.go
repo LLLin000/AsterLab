@@ -679,7 +679,7 @@ func (d *Designer) PreflightWarnings() []string {
 			continue
 		}
 		parts := strings.SplitN(key, "\x00", 2)
-		out = append(out, fmt.Sprintf("检测 %s 的 %s 同时被 %d 个步骤声明；这些任务会保持未关联。",
+		out = append(out, fmt.Sprintf("检测 %s 的 %s 被 %d 个步骤共享；任务按 path / Step ID 区分，不按时间点合并。",
 			parts[0], parts[1], len(steps)))
 	}
 	for assayID, params := range d.Assays {

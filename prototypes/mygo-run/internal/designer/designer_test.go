@@ -541,7 +541,7 @@ func TestCreateRunPreflightDetectsDuplicateClaimsAndUndeclaredTimepoints(t *test
 	}
 	warnings := d.PreflightWarnings()
 	joined := strings.Join(warnings, "\n")
-	if !strings.Contains(joined, "同时被 2 个步骤声明") {
+	if !strings.Contains(joined, "被 2 个步骤共享") {
 		t.Fatalf("duplicate claim not reported: %v", warnings)
 	}
 	if !strings.Contains(joined, "未在检测时间点中声明的时间点 48 h") {
