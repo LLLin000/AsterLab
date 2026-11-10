@@ -15,7 +15,7 @@ import (
 
 func TestStepIDsUsesBusinessOrderAndIncludesRemainingNodes(t *testing.T) {
 	s := &State{Document: workflow.WorkflowDocument{
-		Nodes: []workflow.Node{{ID: "step-a"}, {ID: "step-b"}, {ID: "step-c"}},
+		Nodes:         []workflow.Node{{ID: "step-a"}, {ID: "step-b"}, {ID: "step-c"}},
 		BusinessOrder: []string{"step-b", "missing", "step-b", "step-a"},
 	}}
 	if got, want := s.StepIDs(), []string{"step-b", "step-a", "step-c"}; !reflect.DeepEqual(got, want) {

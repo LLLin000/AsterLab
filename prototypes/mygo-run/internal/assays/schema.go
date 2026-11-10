@@ -301,7 +301,7 @@ func groupNames(spec assaySpec, groups map[string]groupSpec) string {
 
 func normalizeAssayID(id string) string {
 	switch strings.ToLower(strings.TrimSpace(id)) {
-	case "cck8", "cck-8":
+	case "cck8", "cck-8", "assay-cck8", "assay-cck-8":
 		return CCK8
 	case "qpcr", "rt-qpcr", "rtqpcr", "rt-q-pcr":
 		return RTqPCR

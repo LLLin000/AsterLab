@@ -44,6 +44,8 @@ pub struct FrozenDesignView {
     pub content: DesignMapContent,
     #[serde(default)]
     pub mygo: Option<Value>,
+    #[serde(default)]
+    pub asterlab: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -428,6 +430,7 @@ impl FrozenDesignView {
             design_revision,
             content: current.content,
             mygo: data.get("mygo").cloned(),
+            asterlab: data.get("asterlab").cloned(),
         })
     }
 }

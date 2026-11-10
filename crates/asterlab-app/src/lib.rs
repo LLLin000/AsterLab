@@ -19,6 +19,10 @@ impl AppCore {
         Ok(AppCore { db })
     }
 
+    pub fn raw_db(&self) -> &Connection {
+        &self.db
+    }
+
     pub fn load_run(&self, run_id: &str) -> Result<Value, String> {
         let mut v = cli_impl::run_workspace(&self.db, run_id).map_err(|e| e.message)?;
         v["revision"] = json!(self.revision(run_id)?);
@@ -121,6 +125,7 @@ impl AppCore {
         }
         let mut seen = std::collections::HashSet::new();
         let mut measurements = Vec::with_capacity(cells.len());
+        let mut readouts = Vec::with_capacity(cells.len());
         for (index, cell) in cells.iter().enumerate() {
             let row = cell["row"].as_u64().ok_or_else(||format!("cell {index}: invalid row"))?;
             let column = cell["column"].as_u64().ok_or_else(||format!("cell {index}: invalid column"))?;
@@ -134,11 +139,14 @@ impl AppCore {
                 return Err(format!("cell {index}: invalid status/value"));
             }
             if status == "raw" {
-                measurements.push(json!({"endpoint":field,"value":value.unwrap(),"unit":"","sample_id":cell["sample_id"].as_str().filter(|id|!id.trim().is_empty()).map(Value::from).unwrap_or(Value::Null),"row":row,"column":column,"group":cell["group"],"replicate":cell["replicate"],"status":status,"field":field}));
+                let sample_id = cell["sample_id"].as_str().filter(|id|!id.trim().is_empty()).map(Value::from).unwrap_or(Value::Null);
+                measurements.push(json!({"endpoint":field,"value":value.unwrap(),"unit":"","sample_id":sample_id,"row":row,"column":column,"group":cell["group"],"replicate":cell["replicate"],"status":status,"field":field}));
+                let readout_id = format!("readout-{operation_id}-{row}-{column}-{field}");
+                readouts.push(json!({"readout_id":readout_id,"endpoint":field,"value":value.unwrap(),"unit":"","sample_id":sample_id,"result_kind":"raw"}));
             }
         }
         let batch_id = format!("batch-{operation_id}");
-        let event = json!({"run_id":run_id,"event_type":"measurement","content":"Structured readout batch","task_key":input["task_key"],"assay_id":input["assay_id"],"timepoint":input["timepoint"],"protocol_step_path":input["protocol_step_path"],"protocol_version_id":input["protocol_version_id"],"measurements":measurements,"result_cells":cells,"operation_id":operation_id,"operation_payload":input,"batch_id":batch_id,"schema_id":schema,"schema_version":1});
+        let event = json!({"run_id":run_id,"event_type":"measurement","content":"Structured readout batch","task_key":input["task_key"],"assay_id":input["assay_id"],"timepoint":input["timepoint"],"protocol_step_path":input["protocol_step_path"],"protocol_version_id":input["protocol_version_id"],"measurements":measurements,"result_cells":cells,"readouts":readouts,"operation_id":operation_id,"operation_payload":input,"batch_id":batch_id,"schema_id":schema,"schema_version":1});
         cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e|e.message)?;
         let event_id: String = tx.query_row("SELECT id FROM records WHERE kind='execution_event' AND parent_id=?1 ORDER BY rowid DESC LIMIT 1", [&run_id], |r|r.get(0)).map_err(|e|e.to_string())?;
         let revision = revision + 1;
@@ -206,6 +214,42 @@ impl AppCore {
         cli_impl::revise_design_record(&self.db, id, expected, &changes).map_err(|e| e.message)
     }
 
+    pub fn apply_asterdoc_command(&mut self, input: Value) -> Result<Value, String> {
+        cli_impl::apply_asterdoc_command(&mut self.db, &input).map_err(|e| e.message)
+    }
+
+    pub fn create_asterdoc_design(&mut self, input: Value) -> Result<Value, String> {
+        cli_impl::create_asterdoc_design(&mut self.db, &input).map_err(|e| e.message)
+    }
+
+    pub fn save_asterdoc(&mut self, input: Value) -> Result<Value, String> {
+        cli_impl::save_asterdoc_version(&mut self.db, &input).map_err(|e| e.message)
+    }
+
+    pub fn load_asterdoc(&self, design_id: &str) -> Result<Value, String> {
+        cli_impl::load_asterdoc(&self.db, design_id).map_err(|e| e.message)
+    }
+
+    pub fn load_asterdoc_at(&self, design_id: &str, revision: u64) -> Result<Value, String> {
+        cli_impl::load_asterdoc_at(&self.db, design_id, revision).map_err(|e| e.message)
+    }
+
+    pub fn assess_asterdoc(&self, input: Value) -> Result<Value, String> {
+        cli_impl::assess_asterdoc(&self.db, &input).map_err(|e| e.message)
+    }
+
+    pub fn create_run_from_asterdoc(&mut self, design_id: &str, revision: u64, operation_id: Option<&str>, title: Option<&str>, acknowledged: &[String]) -> Result<Value, String> {
+        cli_impl::create_run_from_asterdoc(&mut self.db, design_id, revision, operation_id, title, acknowledged)
+            .map_err(|e| e.message)
+    }
+
+    pub fn compile_asterdoc(&self, design_id: &str, revision: u64) -> Result<Value, String> {
+        let doc = cli_impl::load_asterdoc_at(&self.db, design_id, revision).map_err(|e| e.message)?;
+        let source = doc["source"].as_str().unwrap_or("");
+        let design = cli_impl::compile_asterdoc_to_design(source).map_err(|e| e.message)?;
+        Ok(json!({"design": design, "document": doc}))
+    }
+
     pub fn create_run(&mut self, design_id: &str, title: Option<&str>, operation_id: Option<&str>) -> Result<Value, String> {
         cli_impl::create_run_for_design(&mut self.db, design_id, title, operation_id).map_err(|e| e.message)
     }
@@ -245,7 +289,11 @@ mod tests {
         let revision = result["revision"].as_u64().unwrap();
         let event_id = result["event_id"].as_str().unwrap().to_owned();
         assert_eq!(core.save_readouts_batch(input.clone()).unwrap()["event_id"], event_id);
-        assert_eq!(core.load_run(&run_id).unwrap()["revision"], revision);
+        let first = core.load_run(&run_id).unwrap();
+        assert_eq!(first["revision"], revision);
+        let first_event = first["events"].as_array().unwrap().iter().find(|e| e["event_id"] == event_id).unwrap();
+        assert_eq!(first_event["readouts"].as_array().unwrap().len(), 96);
+        assert!(first_event["readouts"][0]["readout_id"].as_str().is_some_and(|id| !id.is_empty()));
         let mut changed = input.clone();
         changed["cells"][0]["value"] = json!(999.0);
         assert!(core.save_readouts_batch(changed).unwrap_err().contains("conflict"));

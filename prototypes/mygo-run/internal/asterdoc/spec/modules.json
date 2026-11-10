@@ -1,0 +1,1132 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "kind": "plate96",
+      "schema": 1,
+      "title": "96 孔板",
+      "description": "8×12 孔板的组别布局；写入文档的 groups 字段，实际读数仍由 Run 事务记录。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true,
+          "description": "固定为 plate96"
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "文档内稳定 ID"
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true,
+          "description": "模块版本，当前为 1"
+        },
+        {
+          "name": "assay",
+          "type": "string",
+          "description": "关联的检测 ID，例如 cck8"
+        },
+        {
+          "name": "groups",
+          "type": "well-map",
+          "required": true,
+          "description": "组名到孔位列表（A1–H12，不重复）"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "wells",
+          "type": "well-map",
+          "description": "孔位到组名的反查表",
+          "origin": "view"
+        },
+        {
+          "name": "assigned",
+          "type": "int",
+          "description": "已分配孔位数",
+          "origin": "view"
+        }
+      ],
+      "actions": [
+        {
+          "id": "assign_wells",
+          "title": "将选中孔位归入组别",
+          "permission": "document.edit",
+          "writes": [
+            "groups"
+          ]
+        },
+        {
+          "id": "clear_wells",
+          "title": "清除所选孔位",
+          "permission": "document.edit",
+          "writes": [
+            "groups"
+          ]
+        }
+      ],
+      "rules": [
+        "plate-wells"
+      ],
+      "sdk": "1.0.0",
+      "category": "labware",
+      "capabilities": [
+        "well-plate",
+        "well-assignment",
+        "plate-geometry"
+      ],
+      "permissions": [
+        "document.edit"
+      ],
+      "renderers": {
+        "design": "plate96.editor",
+        "document": "plate96.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+    {
+      "kind": "plate",
+      "schema": 1,
+      "title": "孔板",
+      "description": "参数化孔板布局；format 选择 6/12/24/48/96/384 孔几何，groups 保存组别与孔位。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true,
+          "description": "固定为 plate"
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "文档内稳定 ID"
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true,
+          "description": "模块版本，当前为 1"
+        },
+        {
+          "name": "format",
+          "type": "int",
+          "required": true,
+          "description": "孔数：6/12/24/48/96/384"
+        },
+        {
+          "name": "assay",
+          "type": "reference",
+          "description": "关联检测 ID",
+          "target": "assay"
+        },
+        {
+          "name": "timepoint",
+          "type": "timepoint",
+          "description": "该布局所属时间点"
+        },
+        {
+          "name": "groups",
+          "type": "well-map",
+          "required": true,
+          "description": "组名到孔位列表"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "rows",
+          "type": "int",
+          "description": "由 format 决定的行数",
+          "origin": "view"
+        },
+        {
+          "name": "columns",
+          "type": "int",
+          "description": "由 format 决定的列数",
+          "origin": "view"
+        },
+        {
+          "name": "wells",
+          "type": "well-map",
+          "description": "孔位到组名",
+          "origin": "view"
+        }
+      ],
+      "actions": [
+        {
+          "id": "assign_wells",
+          "title": "将选中孔位归入组别",
+          "permission": "document.edit",
+          "writes": [
+            "groups"
+          ]
+        },
+        {
+          "id": "clear_wells",
+          "title": "清除所选孔位",
+          "permission": "document.edit",
+          "writes": [
+            "groups"
+          ]
+        }
+      ],
+      "rules": [
+        "plate-geometry-wells"
+      ],
+      "sdk": "1.0.0",
+      "category": "labware",
+      "capabilities": [
+        "well-plate",
+        "well-assignment",
+        "plate-geometry"
+      ],
+      "permissions": [
+        "document.edit"
+      ],
+      "renderers": {
+        "design": "plate.editor",
+        "document": "plate.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+    {
+      "kind": "reference",
+      "schema": 1,
+      "title": "引用",
+      "description": "引用已有对象（孔板、读数批次或事件），不复制其数据。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true,
+          "description": "固定为 reference"
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "文档内稳定 ID"
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true,
+          "description": "模块版本，当前为 1"
+        },
+        {
+          "name": "ref",
+          "type": "string",
+          "required": true,
+          "description": "目标对象 ID，可带类型前缀"
+        },
+        {
+          "name": "view",
+          "type": "string",
+          "description": "目标视图，例如 plate-readout"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "target",
+          "type": "string",
+          "description": "解析后的目标 ID；未解析时为空",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "reference-ref"
+      ],
+      "sdk": "1.0.0",
+      "category": "document",
+      "capabilities": [
+        "typed-reference"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "reference.editor",
+        "document": "reference.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+    {
+      "kind": "experiment",
+      "schema": 1,
+      "title": "实验",
+      "description": "实验级科研语义与计划字段。模块只保存计划，实际执行由 Run 记录。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "objective",
+          "type": "string"
+        },
+        {
+          "name": "research_question",
+          "type": "string"
+        },
+        {
+          "name": "hypothesis",
+          "type": "string"
+        },
+        {
+          "name": "experimental_unit",
+          "type": "string"
+        },
+        {
+          "name": "factors",
+          "type": "object-list"
+        },
+        {
+          "name": "timepoints",
+          "type": "string[]"
+        },
+        {
+          "name": "primary_endpoint",
+          "type": "string"
+        },
+        {
+          "name": "endpoint_method",
+          "type": "string"
+        },
+        {
+          "name": "endpoint_unit",
+          "type": "string"
+        },
+        {
+          "name": "controls",
+          "type": "string"
+        },
+        {
+          "name": "analysis_plan",
+          "type": "string"
+        },
+        {
+          "name": "sample_size_rationale",
+          "type": "string"
+        },
+        {
+          "name": "randomization",
+          "type": "string"
+        },
+        {
+          "name": "blinding",
+          "type": "string"
+        },
+        {
+          "name": "inclusion_criteria",
+          "type": "string"
+        },
+        {
+          "name": "exclusion_criteria",
+          "type": "string"
+        },
+        {
+          "name": "planned_run_count",
+          "type": "int"
+        },
+        {
+          "name": "planned_run_relationship",
+          "type": "string"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "design_fields",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [],
+      "sdk": "1.0.0",
+      "category": "workflow",
+      "capabilities": [
+        "experiment-plan"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "experiment.editor",
+        "document": "experiment.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+    {
+      "kind": "group",
+      "schema": 1,
+      "title": "分组",
+      "description": "稳定分组身份与科学属性；颜色等显示配置不属于身份。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "role",
+          "type": "string"
+        },
+        {
+          "name": "condition",
+          "type": "string"
+        },
+        {
+          "name": "independent_n",
+          "type": "int"
+        },
+        {
+          "name": "technical_repeats",
+          "type": "int"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "group_spec",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "group-fields"
+      ],
+      "sdk": "1.0.0",
+      "category": "workflow",
+      "capabilities": [
+        "group-definition"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "group.editor",
+        "document": "group.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+    {
+      "kind": "assay",
+      "schema": 1,
+      "title": "检测",
+      "description": "检测定义、protocol 版本与时间点；执行读数仍由 Run 记录。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "endpoint",
+          "type": "string"
+        },
+        {
+          "name": "method",
+          "type": "string"
+        },
+        {
+          "name": "unit",
+          "type": "string"
+        },
+        {
+          "name": "group_refs",
+          "type": "list",
+          "item_type": "reference",
+          "target": "group"
+        },
+        {
+          "name": "timepoints",
+          "type": "string[]"
+        },
+        {
+          "name": "protocol_version_id",
+          "type": "string"
+        },
+        {
+          "name": "controls",
+          "type": "string[]"
+        },
+        {
+          "name": "timepoint_relation",
+          "type": "string"
+        },
+        {
+          "name": "technical_replicates",
+          "type": "int"
+        },
+        {
+          "name": "control_group_ref",
+          "type": "reference",
+          "target": "group"
+        },
+        {
+          "name": "calibrator_group_ref",
+          "type": "reference",
+          "target": "group"
+        },
+        {
+          "name": "reference_genes",
+          "type": "string[]"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "assay_plan",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "assay-fields"
+      ],
+      "sdk": "1.0.0",
+      "category": "measurement",
+      "capabilities": [
+        "assay-plan",
+        "measurement-endpoint"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "assay.editor",
+        "document": "assay.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+    {
+      "kind": "step",
+      "schema": 1,
+      "title": "步骤",
+      "description": "一个可执行步骤；通过 path 绑定 protocol 步骤，不靠标题推断。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "assay",
+          "type": "reference",
+          "target": "assay"
+        },
+        {
+          "name": "timepoints",
+          "type": "string[]"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "order",
+          "type": "int"
+        },
+        {
+          "name": "checks",
+          "type": "object-list"
+        },
+        {
+          "name": "tasks",
+          "type": "object-list",
+          "description": "步骤计划中的任务/检查项"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "step_task",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "step-fields"
+      ],
+      "sdk": "1.0.0",
+      "category": "workflow",
+      "capabilities": [
+        "step-definition",
+        "workflow-edge"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "step.editor",
+        "document": "step.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+    {
+      "kind": "workflow",
+      "schema": 1,
+      "title": "流程",
+      "description": "步骤依赖与业务顺序；画布坐标不属于科学事实。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "steps",
+          "type": "list",
+          "required": true,
+          "item_type": "reference",
+          "target": "step"
+        },
+        {
+          "name": "edges",
+          "type": "object-list"
+        },
+        {
+          "name": "business_order",
+          "type": "string[]"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "workflow_graph",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "workflow-fields"
+      ],
+      "sdk": "1.0.0",
+      "category": "workflow",
+      "capabilities": [
+        "workflow-graph"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "workflow.editor",
+        "document": "workflow.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+    {
+      "kind": "dilution",
+      "schema": 1,
+      "title": "稀释计算",
+      "description": "由母液浓度、目标浓度和终体积计算母液体积与稀释液体积；输出是派生值，不写 Run 事实。",
+      "sdk": "1.0.0",
+      "category": "measurement",
+      "capabilities": [
+        "quantity",
+        "deterministic-calculation",
+        "derived-output"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "dilution.editor",
+        "document": "dilution.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      },
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "stock",
+          "type": "quantity",
+          "required": true,
+          "dimension": "mass_concentration",
+          "description": "母液浓度，例如 20 mg/mL"
+        },
+        {
+          "name": "target",
+          "type": "quantity",
+          "required": true,
+          "dimension": "mass_concentration",
+          "description": "目标浓度，例如 2 mg/mL"
+        },
+        {
+          "name": "final_volume",
+          "type": "quantity",
+          "required": true,
+          "dimension": "volume",
+          "description": "终体积，例如 5 mL"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "stock_volume",
+          "type": "quantity",
+          "dimension": "volume",
+          "origin": "derived",
+          "calculator": "dilution.v1",
+          "description": "所需母液体积"
+        },
+        {
+          "name": "diluent_volume",
+          "type": "quantity",
+          "dimension": "volume",
+          "origin": "derived",
+          "calculator": "dilution.v1",
+          "description": "补足到终体积的稀释液体积"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "dilution-fields"
+      ]
+    },
+    {
+      "kind": "instrument_profile",
+      "schema": 1,
+      "title": "仪器能力档案",
+      "description": "仪器/型号的能力与限制声明；不是某台设备、校准状态或执行记录，也不连接硬件。",
+      "sdk": "1.0.0",
+      "category": "resource",
+      "capabilities": [
+        "instrument-profile",
+        "capability-declaration"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "instrument-profile.editor",
+        "document": "instrument-profile.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      },
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "class",
+          "type": "string",
+          "required": true,
+          "description": "能力类别，例如 plate_reader、centrifuge、uv_curing"
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "型号或档案名称；未知时留空"
+        },
+        {
+          "name": "capabilities",
+          "type": "list",
+          "item_type": "object",
+          "required": true,
+          "description": "能力项；每项至少包含 name"
+        },
+        {
+          "name": "constraints",
+          "type": "list",
+          "item_type": "object",
+          "description": "限制项，例如板型、体积或波长范围"
+        },
+        {
+          "name": "source",
+          "type": "enum",
+          "values": [
+            "built_in",
+            "lab_imported",
+            "unknown"
+          ],
+          "required": true
+        },
+        {
+          "name": "evidence",
+          "type": "list",
+          "item_type": "artifact",
+          "description": "能力来源文件；只引用，不复制文件内容"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "profile_view",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "instrument-profile-fields"
+      ]
+    },
+    {
+      "kind": "step",
+      "schema": 2,
+      "title": "步骤 v2（模块绑定）",
+      "description": "步骤的模块引用：uses 以稳定 ID 绑定仪器、材料、计算器等；不改变 step@1 语义。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "assay",
+          "type": "reference",
+          "target": "assay"
+        },
+        {
+          "name": "timepoints",
+          "type": "string[]"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "order",
+          "type": "int"
+        },
+        {
+          "name": "checks",
+          "type": "object-list"
+        },
+        {
+          "name": "tasks",
+          "type": "object-list",
+          "description": "步骤计划中的任务/检查项"
+        },
+        {
+          "name": "uses",
+          "type": "list",
+          "item_type": "object",
+          "description": "模块绑定；每项 {ref, role}"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "step_task",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "step-fields",
+        "step-uses"
+      ],
+      "sdk": "1.0.0",
+      "category": "workflow",
+      "capabilities": [
+        "step-definition",
+        "workflow-edge"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "step.editor",
+        "document": "step.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    }
+  ],
+  "foundationVersion": 1,
+  "sdkVersion": "1.0.0"
+}

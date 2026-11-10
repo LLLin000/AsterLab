@@ -270,7 +270,24 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 7. 技术测试通过不等于产品交互通过；阅读器不能验收为操作台。
 8. Agent 提出局部修改，Core 实施/验证，Slint 让用户确认；Agent 不绕过 Core 写库。
 
-## 6. 下一步
+## 6. SDK Foundation v1（进行中）
+
+当前并行阶段：把 AsterML 的扩展层从“每加一种工具就改解析器/Core/UI”整理为统一 SDK 契约。目标与边界见 [`sdk/README.md`](sdk/README.md)，不替代本计划的 Core 阶段。
+
+已落地：
+
+- Foundation v1 envelope、port 类型、命名 UCUM 子集、类型化 reference、时间与 artifact 形状；
+- 单一 `spec/modules.json` 扩展 SDK/category/permissions/renderers/lifecycle/provenance；
+- `dilution@1` 与 `instrument_profile@1` 作为计算类和资源类参考模块；
+- Go/Rust 共用 manifest，并增加 parity 样本。
+
+下一步只能在以下边界内推进：
+
+- 先补结构化 diagnostics、manifest/CLI tooling 与迁移规则，再扩大模块数量；
+- 不实现动态第三方插件、真实设备控制、完整 ISA/AnIML 导入导出；
+- 不为新模块开放第二条 Core 写事务；实际事实仍只走记录存储。
+
+## 7. 下一步
 
 P0/P1/P2/P3 的历史完成项保留；当前只做 K0/K1 审查,不继续 UI。
 

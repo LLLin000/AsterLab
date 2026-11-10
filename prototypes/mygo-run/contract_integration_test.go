@@ -47,9 +47,9 @@ func TestContractSameSQLiteCopy(t *testing.T) {
 	}
 	for _, sid := range []string{"Control-1", "E1-1"} {
 		_, err = svc.SaveReadout(ctx, runs.ReadoutInput{
-			RunID: contractRunID,
+			RunID:        contractRunID,
 			Measurements: []runs.Measurement{{SampleID: sid, Endpoint: "OD450", Value: 0.82, Unit: "AU"}},
-			OperationID: "op-" + sid,
+			OperationID:  "op-" + sid,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -100,7 +100,7 @@ func TestContractOperationIDIdempotency(t *testing.T) {
 	defer svc.Close()
 	input := runs.ReadoutInput{RunID: contractRunID,
 		Measurements: []runs.Measurement{{SampleID: "Control-1", Endpoint: "OD450", Value: 0.82, Unit: "AU"}},
-		OperationID: "op-idem"}
+		OperationID:  "op-idem"}
 	r1, err := svc.SaveReadout(ctx, input)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func TestContractOperationIDIdempotency(t *testing.T) {
 	}
 	bad := runs.ReadoutInput{RunID: contractRunID,
 		Measurements: []runs.Measurement{{SampleID: "Control-1", Endpoint: "OD450", Value: 0.41, Unit: "AU"}},
-		OperationID: "op-idem"}
+		OperationID:  "op-idem"}
 	if _, err := svc.SaveReadout(ctx, bad); err == nil {
 		t.Fatal("expected conflict for different payload")
 	}

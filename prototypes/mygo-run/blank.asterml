@@ -1,0 +1,9 @@
+# 新实验
+
+```asterlab
+kind: experiment
+id: exp-new
+schema: 1
+title: 新实验
+experimental_unit: 一个独立实验单位
+```

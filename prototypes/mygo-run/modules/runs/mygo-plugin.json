@@ -1,0 +1,14 @@
+{
+  "libraries": [
+    {
+      "name": "Runs",
+      "files": {
+        "windows-amd64": {
+          "name": "Runs.dll",
+          "sha256": "21e5ceb2319b6a3d254c895b12c13fe713464ce8cb597c67dcbf33db717118ff",
+          "sourceHash": "6b03cd8f628c0f9c4cb1b36338483716968cc4028b82617b3dd0edca2b3cb76f"
+        }
+      }
+    }
+  ]
+}

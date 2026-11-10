@@ -140,6 +140,7 @@ pub struct ExecutionEventView {
     pub event_type: Option<String>,
     pub content: Option<String>,
     pub occurred_at: Option<String>,
+    pub recorded_at: Option<String>,
     pub stage: Option<String>,
     pub timepoint: Option<String>,
     pub step_status: Option<String>,
@@ -303,6 +304,22 @@ fn assay_timepoints(design: &crate::design_map::DesignMapContent, assay_id: &str
         .unwrap_or_default()
 }
 
+fn explicit_step_timepoints(design_snapshot: &Value) -> std::collections::HashMap<String, Vec<String>> {
+    let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for task in design_snapshot["mygo"]["stepTasks"].as_array().into_iter().flatten() {
+        let path = task["path"].as_str().unwrap_or("").trim();
+        let timepoint = task["timepoint"].as_str().unwrap_or("").trim();
+        if path.is_empty() || timepoint.is_empty() {
+            continue;
+        }
+        let entry = out.entry(path.to_owned()).or_default();
+        if !entry.iter().any(|existing| existing == timepoint) {
+            entry.push(timepoint.to_owned());
+        }
+    }
+    out
+}
+
 /// Build a frozen Run workspace from stored JSON.
 ///
 /// `design_snapshot` must be the payload of the Run's exact DesignVersion,
@@ -352,6 +369,10 @@ pub fn build(
         }
     }
 
+    // Explicit design stepTasks are the author's path-level time binding. They
+    // resolve a step whose Protocol block did not repeat a time_scope, without
+    // guessing from a title or expanding every assay timepoint.
+    let explicit_timepoints = explicit_step_timepoints(design_snapshot);
     // Tasks are only expanded per timepoint for explicit per-timepoint steps.
     // Missing step-level time scope stays a single task with no claimed timepoint.
     for step in &steps {
@@ -359,6 +380,10 @@ pub fn build(
             (StepScope::Assay { assay_id }, Some(StepTimeScope::PerTimepoint)) => {
                 assay_timepoints(&frozen.content, assay_id)
             }
+            (StepScope::Assay { .. }, None) => explicit_timepoints
+                .get(&step.step.path)
+                .cloned()
+                .unwrap_or_default(),
             _ => Vec::new(),
         };
         if timepoints.is_empty() {
@@ -457,6 +482,7 @@ pub fn build(
             event_type: opt_text(&event["event_type"]),
             content: opt_text(&event["content"]),
             occurred_at: opt_text(&event["occurred_at"]),
+            recorded_at: opt_text(&event["recorded_at"]),
             stage: opt_text(&event["stage"]),
             timepoint: opt_text(&event["timepoint"]),
             step_status: opt_text(&event["step_status"]),
@@ -610,6 +636,34 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn frozen_design_carries_sdk_modules() {
+        let mut design = design();
+        design["asterlab"] = json!({"foundationVersion":1,"sdkVersion":"1.0.0",
+            "modules":[{"kind":"dilution","id":"d1","schema":1}]});
+        let workspace = build("r1", "d1", "dv1", 1, &design, &run(), &[], &[]).unwrap();
+        assert_eq!(workspace.frozen_design.asterlab.as_ref().unwrap()["modules"][0]["kind"], "dilution");
+    }
+
+    #[test]
+    fn explicit_design_step_tasks_bind_timepoints_without_protocol_scope() {
+        let mut design = design();
+        design["mygo"] = json!({
+            "stepTasks": [
+                {"stepId":"s1","path":"root/a","timepoint":"D1","assayId":"cck8"}
+            ]
+        });
+        let mut run = run();
+        run["protocol_manifest"][0]["steps"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("time_scope");
+        let workspace = build("r1", "d1", "dv1", 1, &design, &run, &[], &[]).unwrap();
+        let root_a: Vec<_> = workspace.tasks.iter().filter(|task| task.step_path == "root/a").collect();
+        assert_eq!(root_a.len(), 1);
+        assert_eq!(root_a[0].timepoint.as_deref(), Some("D1"));
     }
 
     #[test]

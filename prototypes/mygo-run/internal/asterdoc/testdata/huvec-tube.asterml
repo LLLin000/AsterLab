@@ -1,0 +1,129 @@
+# HUVEC 成管实验
+
+```asterlab
+kind: experiment
+id: exp-huvec
+schema: 1
+title: HUVEC 成管实验
+objective: 比较 3%、5%、7% GelMA 水凝胶对 HUVEC 成管的影响
+research_question: 不同 GelMA 浓度是否改变 HUVEC 成管能力？
+experimental_unit: 一个 12 孔板孔
+factors:
+  - name: GelMA 浓度
+    levels: ["3%", "5%", "7%"]
+timepoints: [6 h, 12 h, 24 h]
+```
+
+```asterlab
+kind: group
+id: group-3pct
+schema: 1
+name: 3% GelMA
+role: treatment
+condition: 3% GelMA
+```
+
+```asterlab
+kind: group
+id: group-5pct
+schema: 1
+name: 5% GelMA
+role: treatment
+condition: 5% GelMA
+```
+
+```asterlab
+kind: group
+id: group-7pct
+schema: 1
+name: 7% GelMA
+role: treatment
+condition: 7% GelMA
+```
+
+```asterlab
+kind: assay
+id: assay-tube
+schema: 1
+title: HUVEC 成管
+endpoint: tube length
+method: 光镜成像
+unit: µm
+group_refs: [group-3pct, group-5pct, group-7pct]
+timepoints: [6 h, 12 h, 24 h]
+```
+
+```asterlab
+kind: step
+id: step-gel
+schema: 1
+title: GelMA 消毒与脱泡
+assay: assay-tube
+timepoints: []
+path: ""
+tasks:
+  - id: task-gel
+    title: 80℃ 5min / 冰上 10min，重复三次；2000rpm 脱泡
+    kind: procedure
+checks:
+  - checkId: bubbles
+    title: 确认无明显气泡
+    blocking: true
+```
+
+```asterlab
+kind: step
+id: step-cast
+schema: 1
+title: 铺胶与 UV 固化
+assay: assay-tube
+timepoints: []
+path: ""
+tasks:
+  - id: task-cast
+    title: 12 孔板每孔铺 0.5ml 水凝胶，UV 固化 120s
+    kind: procedure
+checks:
+  - checkId: uv
+    title: 确认 UV 120s
+    blocking: true
+```
+
+```asterlab
+kind: step
+id: step-seed
+schema: 1
+title: 接种 HUVEC
+assay: assay-tube
+timepoints: [6 h, 12 h, 24 h]
+path: ""
+tasks:
+  - id: task-seed
+    title: 每孔 0.5ml 细胞悬液，1×10^5/孔，提前加入 VEGF
+    kind: procedure
+```
+
+```asterlab
+kind: workflow
+id: wf-huvec
+schema: 1
+steps: [step-gel, step-cast, step-seed]
+edges:
+  - from: step-gel
+    to: step-cast
+  - from: step-cast
+    to: step-seed
+```
+
+```asterlab
+kind: plate
+id: plate-huvec
+schema: 1
+format: 12
+assay: assay-tube
+timepoint: 6 h
+groups:
+  group-3pct: [A1, A2, A3, A4]
+  group-5pct: [B1, B2, B3, B4]
+  group-7pct: [C1, C2, C3, C4]
+```

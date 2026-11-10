@@ -1,0 +1,63 @@
+# 新实验
+
+```asterlab
+kind: experiment
+id: exp-new
+schema: 1
+title: 新实验
+experimental_unit: 一个独立实验单位
+```
+
+```asterlab
+kind: group
+id: g-control
+schema: 1
+name: Control
+role: control
+```
+
+```asterlab
+kind: group
+id: g-treatment
+schema: 1
+name: Treatment
+role: treatment
+```
+
+```asterlab
+kind: assay
+id: assay-main
+schema: 1
+title: 检测
+group_refs: [g-control, g-treatment]
+timepoints: []
+```
+
+```asterlab
+kind: step
+id: step-1
+schema: 1
+title: 步骤 1
+assay: assay-main
+timepoints: []
+path: ""
+```
+
+```asterlab
+kind: workflow
+id: wf-1
+schema: 1
+steps: [step-1]
+edges: []
+```
+
+```asterlab
+kind: plate
+id: plate-1
+schema: 1
+format: 96
+assay: assay-main
+groups:
+  g-control: []
+  g-treatment: []
+```

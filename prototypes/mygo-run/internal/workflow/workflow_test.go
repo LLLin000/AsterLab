@@ -79,16 +79,28 @@ func TestWorkflowHeadlessPNG(t *testing.T) {
 	}
 }
 
-func TestWorkflowUIButtons(t *testing.T) {
+func TestWorkflowCanvasEmptyState(t *testing.T) {
 	e := NewEditor()
 	tt := ui.NewTester(func(c *ui.Context) { e.View(c) }, 800, 600)
 	tt.Frame()
-	if err := tt.Click("＋ 材料"); err != nil {
-		t.Fatal(err)
+	if !tt.HasText("空白工作流") {
+		t.Fatalf("missing empty state: %q", tt.Texts())
 	}
+}
+
+func TestWorkflowCanvasShowsStepCards(t *testing.T) {
+	e := NewEditor()
+	e.AddNode(KindFlask, "GelMA 水凝胶", Position{X: 40, Y: 40})
+	e.AddNode(KindPipette, "铺板 96 孔", Position{X: 300, Y: 40})
+	tt := ui.NewTester(func(c *ui.Context) { e.View(c) }, 800, 600)
 	tt.Frame()
-	if len(e.Doc.Nodes) != 1 {
-		t.Fatalf("ui add failed: nodes=%d", len(e.Doc.Nodes))
+	for _, title := range []string{"GelMA 水凝胶", "铺板 96 孔", "未填写参数"} {
+		if !tt.HasText(title) {
+			t.Fatalf("missing %q in %q", title, tt.Texts())
+		}
+	}
+	if tt.HasText("空白工作流") {
+		t.Fatal("empty state shown with steps")
 	}
 }
 func TestDragUsesSingleUndoEntry(t *testing.T) {
@@ -97,7 +109,9 @@ func TestDragUsesSingleUndoEntry(t *testing.T) {
 	e.dragNode(id, Position{X: 20, Y: 20}, true)
 	e.dragNode(id, Position{X: 30, Y: 30}, true)
 	e.dragNode(id, Position{X: 40, Y: 40}, false)
-	if len(e.UndoStack) != 2 { t.Fatalf("undo entries=%d, want add + one drag", len(e.UndoStack)) }
+	if len(e.UndoStack) != 2 {
+		t.Fatalf("undo entries=%d, want add + one drag", len(e.UndoStack))
+	}
 	if !e.Undo() || e.Doc.Nodes[0].Pos != (Position{X: 10, Y: 10}) {
 		t.Fatal("undo did not revert the whole drag")
 	}

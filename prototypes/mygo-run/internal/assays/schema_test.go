@@ -88,3 +88,13 @@ func TestBuildSchemaQPCRMapping(t *testing.T) {
 		t.Fatalf("wrong replicate mapping: %+v", cells[3])
 	}
 }
+
+func TestBuildSchemaAcceptsAsterDocAssayIDs(t *testing.T) {
+	schema, cells, err := BuildSchema(fixture(t, "cck8-design.json"), "assay-cck8", "24 h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.AssayID != "assay-cck8" || len(cells) != 96 {
+		t.Fatalf("AsterDoc assay id was not accepted: %+v cells=%d", schema, len(cells))
+	}
+}

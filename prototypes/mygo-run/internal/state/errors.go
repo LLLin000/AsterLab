@@ -39,5 +39,5 @@ type typedError struct {
 	msg  string
 }
 
-func (e *typedError) Error() string { return e.msg }
+func (e *typedError) Error() string        { return e.msg }
 func (e *typedError) Is(target error) bool { return e.base == target }

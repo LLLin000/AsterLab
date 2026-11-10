@@ -9,12 +9,12 @@ import (
 // State references the Designer's existing document and block instances; it does
 // not introduce a second protocol model or claim persistence of protocol edits.
 type State struct {
-	Document        workflow.WorkflowDocument
-	Instances       map[string][]blocks.Instance
-	DesignID        string
-	Revision        uint64
-	SelectedStepID  string
-	OnSelectStep    func(string)
+	Document       workflow.WorkflowDocument
+	Instances      map[string][]blocks.Instance
+	DesignID       string
+	Revision       uint64
+	SelectedStepID string
+	OnSelectStep   func(string)
 }
 
 // StepIDs returns valid workflow node IDs in business order, then includes any

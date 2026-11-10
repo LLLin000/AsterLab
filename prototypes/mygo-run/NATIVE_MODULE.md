@@ -52,6 +52,19 @@ $env:ASTERLAB_RUN_ID="1c0c8989-0513-483a-851b-bdc7d6c67483"
 go run .
 ```
 
+## Regenerating after a contract change
+
+Run both, in order, whenever `modules/runs/runs.go` gains or changes a field:
+
+```sh
+go run github.com/egoist/mygo/cmd/mygo native check modules/runs
+go run github.com/egoist/mygo/cmd/mygo native build -target windows-amd64 modules/runs
+```
+
+`check` regenerates the Go/Rust glue and builds the dev library; `build` refreshes the packaged `Runs.dll`
+(`.mygo/native/windows-amd64`). A `go build` alone keeps the stale DLL, and the GUI then fails with
+"a value from the implementation ends early".
+
 ## Still open
 
 - UI schedule/flow/plate are still synthetic; only title/status and save use

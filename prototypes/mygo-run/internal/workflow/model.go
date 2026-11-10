@@ -1,6 +1,10 @@
 package workflow
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/oneo-me/onevra/source/components/gesture"
+)
 
 type NodeKind string
 
@@ -11,6 +15,13 @@ const (
 )
 
 type Position struct{ X, Y float32 }
+
+// NodeWidth/NodeHeight mirror workflownode's unscaled card size for hit
+// testing and marquee selection. The canvas scales them at render time.
+const (
+	NodeWidth  float32 = 224
+	NodeHeight float32 = 128
+)
 
 type NodeParam struct {
 	Key string `json:"key"`
@@ -137,104 +148,41 @@ func (d *WorkflowDocument) DeleteEdge(id string) bool {
 }
 
 type Editor struct {
-	Doc           WorkflowDocument
-	SelectedNode  string
-	SelectedEdge  string
-	UndoStack     []WorkflowDocument
-	RedoStack     []WorkflowDocument
-	PanX, PanY    float32
-	Zoom          float32
-	ConnectMode   bool
-	ConnectFrom   string
-	MovingNode    string
-	MoveStart     WorkflowDocument
-	OnSelect      func(nodeID string)
-	OnEnterNested func(nodeID string)
-	OnChange      func()
+	Doc              WorkflowDocument
+	SelectedNode     string
+	SelectedNodes    map[string]bool
+	SelectedEdge     string
+	HoveredNode      string
+	UndoStack        []WorkflowDocument
+	RedoStack        []WorkflowDocument
+	PanX, PanY       float32
+	Zoom             float32
+	ConnectMode      bool
+	ConnectFrom      string
+	MovingNode       string
+	MoveStart        WorkflowDocument
+	MoveOrigins      map[string]Position
+	MarqueeBase      map[string]bool
+	MarqueeActive    bool
+	MarqueeStartX    float32
+	MarqueeStartY    float32
+	MarqueeCurrentX  float32
+	MarqueeCurrentY  float32
+	MarqueeAdditive  bool
+	BeforeDelete     func(nodeID string) bool
+	OnSelect         func(nodeID string)
+	OnEnterNested    func(nodeID string)
+	OnChange         func()
 	OnCommandPalette func()
+	// ExternalWrites tells View not to bind delete/undo shortcuts that would
+	// mutate this local graph without the document command layer.
+	ExternalWrites bool
+	// Navigation turns wheel/pinch/two-finger scroll into canvas pan and zoom.
+	Navigation gesture.Navigation
 }
 
 func NewEditor() *Editor {
 	return &Editor{Zoom: 1}
-}
-
-func (d *WorkflowDocument) SeedStandardCCK8() {
-	d.Nodes = []Node{
-		{
-			ID:    "n1",
-			Kind:  KindFlask,
-			Title: "细胞悬液准备",
-			Order: "01",
-			Tag:   "[材料 · 样本]",
-			Pos:   Position{X: 60, Y: 70},
-			Params: []NodeParam{
-				{Key: "细胞系", Val: "L929 (成纤维)"},
-				{Key: "密度", Val: "1.0×10⁵/mL"},
-				{Key: "代数 / 活力", Val: "P4 · 97.4%"},
-			},
-		},
-		{
-			ID:    "n2",
-			Kind:  KindPipette,
-			Title: "96 孔板接种铺板",
-			Order: "02",
-			Tag:   "[操作步骤]",
-			Pos:   Position{X: 280, Y: 70},
-			Params: []NodeParam{
-				{Key: "接种体积", Val: "100 µL/孔"},
-				{Key: "目标密度", Val: "5,000 cells/孔"},
-				{Key: "贴壁培养", Val: "37°C, 24h"},
-			},
-		},
-		{
-			ID:    "n3",
-			Kind:  KindPipette,
-			Title: "梯度药物暴露处理",
-			Order: "03",
-			Tag:   "[操作步骤]",
-			Pos:   Position{X: 500, Y: 70},
-			Params: []NodeParam{
-				{Key: "药物受试物", Val: "ZnO-NP 浸提液"},
-				{Key: "浓度跨度", Val: "0~100 µg/mL"},
-				{Key: "梯度/复孔", Val: "6 组 · 4 复孔"},
-			},
-		},
-		{
-			ID:    "n4",
-			Kind:  KindFlask,
-			Title: "CCK-8 试剂孵育",
-			Order: "04",
-			Tag:   "[反应孵育]",
-			Pos:   Position{X: 720, Y: 70},
-			Params: []NodeParam{
-				{Key: "加液量", Val: "10 µL/孔 (10%)"},
-				{Key: "孵育条件", Val: "37°C 避光"},
-				{Key: "显色时长", Val: "2.5 h"},
-			},
-		},
-		{
-			ID:    "n5",
-			Kind:  KindPlate,
-			Title: "酶标仪吸光度读板",
-			Order: "05",
-			Tag:   "[分析仪器 · 当前选中]",
-			Pos:   Position{X: 940, Y: 70},
-			Params: []NodeParam{
-				{Key: "测定波长", Val: "OD450 nm"},
-				{Key: "参比波长", Val: "650 nm (校正)"},
-				{Key: "预处理", Val: "中速震板 5s"},
-			},
-		},
-	}
-	d.Edges = []Edge{
-		{ID: "e1", From: "n1", To: "n2"},
-		{ID: "e2", From: "n2", To: "n3"},
-		{ID: "e3", From: "n3", To: "n4"},
-		{ID: "e4", From: "n4", To: "n5"},
-	}
-	d.BusinessOrder = []string{"n1", "n2", "n3", "n4", "n5"}
-	d.NodeSeq = 5
-	d.EdgeSeq = 4
 }
 
 func (e *Editor) pushUndo() {
@@ -260,14 +208,22 @@ func (e *Editor) AddNode(kind NodeKind, title string, pos Position) string {
 }
 
 func (e *Editor) DeleteSelected() bool {
-	if e.SelectedNode == "" && e.SelectedEdge == "" {
+	ids := e.SelectedIDs()
+	if len(ids) == 0 && e.SelectedEdge == "" {
 		return false
+	}
+	for _, id := range ids {
+		if e.BeforeDelete != nil && !e.BeforeDelete(id) {
+			return false
+		}
 	}
 	e.pushUndo()
 	ok := false
-	if e.SelectedNode != "" {
-		ok = e.Doc.DeleteNode(e.SelectedNode)
-		e.SelectedNode = ""
+	if len(ids) > 0 {
+		for _, id := range ids {
+			ok = e.Doc.DeleteNode(id) || ok
+		}
+		e.ClearSelection()
 	} else {
 		ok = e.Doc.DeleteEdge(e.SelectedEdge)
 		e.SelectedEdge = ""
@@ -321,15 +277,31 @@ func (e *Editor) MoveNode(id string, pos Position) bool {
 func (e *Editor) dragNode(id string, pos Position, dragging bool) {
 	if dragging {
 		if e.MovingNode != id {
+			if !e.selectedSet()[id] {
+				e.SelectNode(id)
+			}
 			e.MovingNode, e.MoveStart = id, e.Doc.clone()
+			e.MoveOrigins = map[string]Position{}
+			for _, selected := range e.SelectedIDs() {
+				if i := e.Doc.findNode(selected); i >= 0 {
+					e.MoveOrigins[selected] = e.Doc.Nodes[i].Pos
+				}
+			}
 		}
-		e.Doc.MoveNode(id, pos)
+		origin := e.MoveOrigins[id]
+		dx, dy := pos.X-origin.X, pos.Y-origin.Y
+		for nodeID, start := range e.MoveOrigins {
+			e.Doc.MoveNode(nodeID, Position{X: start.X + dx, Y: start.Y + dy})
+		}
 		return
 	}
 	if e.MovingNode == id {
-		e.Doc.MoveNode(id, pos)
-		start, current := e.MoveStart.findNode(id), e.Doc.findNode(id)
-		changed := start >= 0 && current >= 0 && e.MoveStart.Nodes[start].Pos != e.Doc.Nodes[current].Pos
+		changed := false
+		for nodeID, start := range e.MoveOrigins {
+			if i := e.Doc.findNode(nodeID); i >= 0 && e.Doc.Nodes[i].Pos != start {
+				changed = true
+			}
+		}
 		if changed {
 			e.UndoStack = append(e.UndoStack, e.MoveStart)
 			if len(e.UndoStack) > 100 {
@@ -341,6 +313,7 @@ func (e *Editor) dragNode(id string, pos Position, dragging bool) {
 			}
 		}
 		e.MovingNode, e.MoveStart = "", WorkflowDocument{}
+		e.MoveOrigins = nil
 		return
 	}
 	e.MoveNode(id, pos)
@@ -348,13 +321,109 @@ func (e *Editor) dragNode(id string, pos Position, dragging bool) {
 
 func (e *Editor) SelectNode(id string) {
 	e.SelectedNode = id
+	e.SelectedNodes = nil
+	if id != "" {
+		e.SelectedNodes = map[string]bool{id: true}
+	}
 	e.SelectedEdge = ""
 	if e.OnSelect != nil {
 		e.OnSelect(id)
 	}
 }
+
+// ToggleNode adds or removes one node from a multi-selection. The last
+// toggled node stays the primary selection for the inspector.
+func (e *Editor) ToggleNode(id string) {
+	if e.SelectedNodes == nil {
+		e.SelectedNodes = map[string]bool{}
+		if e.SelectedNode != "" {
+			e.SelectedNodes[e.SelectedNode] = true
+		}
+	}
+	if e.SelectedNodes[id] {
+		delete(e.SelectedNodes, id)
+		if e.SelectedNode == id {
+			e.SelectedNode = ""
+			for _, node := range e.Doc.Nodes {
+				if e.SelectedNodes[node.ID] {
+					e.SelectedNode = node.ID
+					break
+				}
+			}
+		}
+	} else {
+		e.SelectedNodes[id] = true
+		e.SelectedNode = id
+	}
+	e.SelectedEdge = ""
+	if e.OnSelect != nil {
+		e.OnSelect(e.SelectedNode)
+	}
+}
+
+func (e *Editor) selectedSet() map[string]bool {
+	if len(e.SelectedNodes) == 0 {
+		out := map[string]bool{}
+		if e.SelectedNode != "" {
+			out[e.SelectedNode] = true
+		}
+		return out
+	}
+	return e.SelectedNodes
+}
+
+// SelectedIDs returns selected node IDs in document order.
+func (e *Editor) SelectedIDs() []string {
+	selected := e.selectedSet()
+	out := make([]string, 0, len(selected))
+	for _, node := range e.Doc.Nodes {
+		if selected[node.ID] {
+			out = append(out, node.ID)
+		}
+	}
+	return out
+}
+
+// SelectInBounds replaces or extends the selection with nodes whose card
+// bounds intersect x/y/w/h in document coordinates.
+func (e *Editor) SelectInBounds(x, y, w, h float32, additive bool) {
+	if w < 0 {
+		x += w
+		w = -w
+	}
+	if h < 0 {
+		y += h
+		h = -h
+	}
+	next := map[string]bool{}
+	if additive {
+		for id := range e.selectedSet() {
+			next[id] = true
+		}
+	}
+	for _, node := range e.Doc.Nodes {
+		if node.Pos.X < x+w && node.Pos.X+NodeWidth > x &&
+			node.Pos.Y < y+h && node.Pos.Y+NodeHeight > y {
+			next[node.ID] = true
+		}
+	}
+	e.SelectedNodes = next
+	e.SelectedNode = ""
+	for _, node := range e.Doc.Nodes {
+		if next[node.ID] {
+			e.SelectedNode = node.ID
+			break
+		}
+	}
+	e.SelectedEdge = ""
+	if e.OnSelect != nil {
+		e.OnSelect(e.SelectedNode)
+	}
+}
+
 func (e *Editor) ClearSelection() {
 	e.SelectedNode = ""
+	e.SelectedNodes = nil
 	e.SelectedEdge = ""
 	if e.OnSelect != nil {
 		e.OnSelect("")

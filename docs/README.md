@@ -11,6 +11,7 @@
 | [`architecture.md`](architecture.md) | 模块依赖、前后端职责、迁移方向 |
 | [`implementation-plan.md`](implementation-plan.md) | 唯一当前实施阶段、完成/未完成、验收 |
 | [`contracts/core-v1.md`](contracts/core-v1.md) | P0 Core 查询/命令/身份/兼容契约 |
+| [`sdk/README.md`](sdk/README.md) | AsterML Foundation v1、统一模块契约、SDK 开发指南与已知缺口 |
 | [`../DESIGN.md`](../DESIGN.md) | 视觉与交互规范；不反向定义领域对象 |
 
 ## 研究分组

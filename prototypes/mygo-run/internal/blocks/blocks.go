@@ -14,13 +14,13 @@ import (
 type BlockType string
 
 const (
-	TypeNote              BlockType = "note"
-	TypeParameterTable    BlockType = "parameter_table"
-	TypeMeasurementTable  BlockType = "measurement_table"
-	TypePlate96           BlockType = "plate_96"
+	TypeNote               BlockType = "note"
+	TypeParameterTable     BlockType = "parameter_table"
+	TypeMeasurementTable   BlockType = "measurement_table"
+	TypePlate96            BlockType = "plate_96"
 	TypeDilutionCalculator BlockType = "dilution_calculator"
-	TypeChecklist         BlockType = "checklist"
-	TypeNestedWorkflow    BlockType = "nested_workflow"
+	TypeChecklist          BlockType = "checklist"
+	TypeNestedWorkflow     BlockType = "nested_workflow"
 )
 
 // AllTypes lists every supported block type.
@@ -55,7 +55,7 @@ type MeasurementRow struct {
 }
 
 type MeasurementTableProps struct {
-	Columns []string        `json:"columns"`
+	Columns []string         `json:"columns"`
 	Rows    []MeasurementRow `json:"rows"`
 }
 
@@ -69,9 +69,9 @@ type Plate96Props struct {
 }
 
 type DilutionInput struct {
-	StockConc  float64 `json:"stockConc"`
-	FinalConc  float64 `json:"finalConc"`
-	FinalVol   float64 `json:"finalVol"`
+	StockConc float64 `json:"stockConc"`
+	FinalConc float64 `json:"finalConc"`
+	FinalVol  float64 `json:"finalVol"`
 }
 
 type DilutionResult struct {
@@ -126,11 +126,11 @@ func (d Definition) Validate() error {
 // --- Instance (step-level frozen copy) ---
 
 type Instance struct {
-	ID                 string    `json:"id"`
-	DefinitionID       string    `json:"definitionId"`
-	DefinitionVersion  uint64    `json:"definitionVersion"`
-	Type               BlockType `json:"type"`
-	RawProps           json.RawMessage `json:"props"`
+	ID                string          `json:"id"`
+	DefinitionID      string          `json:"definitionId"`
+	DefinitionVersion uint64          `json:"definitionVersion"`
+	Type              BlockType       `json:"type"`
+	RawProps          json.RawMessage `json:"props"`
 }
 
 func NewInstance(id string, def Definition) (Instance, error) {

@@ -1,7 +1,12 @@
+// Package theme is AsterLab's visual system: warm neutral surfaces, one violet
+// accent for selection and primary action, hairline structure instead of card
+// stacks. Palettes start from Onevra's warm theme and replace its colors, so
+// Onevra components, MyGo widgets and AsterLab's own painters share one look.
 package theme
 
 import (
 	"github.com/egoist/mygo/ui"
+	onevra "github.com/oneo-me/onevra/source/theme"
 )
 
 // Tokens defines the shared AsterLab design system.
@@ -22,28 +27,28 @@ type Tokens struct {
 
 func LightTokens() Tokens {
 	t := Tokens{
-		Canvas: ui.Hex("#F8F9FA"), Surface: ui.Hex("#FFFFFF"), Elevated: ui.Hex("#F4F5F7"),
-		Border: ui.Hex("#E5E7EB"), BorderStrong: ui.Hex("#CBD5E1"),
-		Text: ui.Hex("#0F172A"), TextMuted: ui.Hex("#475569"),
-		Accent: ui.Hex("#2563EB"), AccentHover: ui.Hex("#1D4ED8"), AccentText: ui.Hex("#FFFFFF"),
-		Success: ui.Hex("#10B981"), Warning: ui.Hex("#F59E0B"), Danger: ui.Hex("#EF4444"),
-		RailBackground: ui.Hex("#FFFFFF"), SidebarBackground: ui.Hex("#FFFFFF"),
+		Canvas: ui.Hex("#f7f6f3"), Surface: ui.Hex("#ffffff"), Elevated: ui.Hex("#faf9f7"),
+		Border: ui.Hex("#e7e3db"), BorderStrong: ui.Hex("#d6d0c5"),
+		Text: ui.Hex("#1c1b18"), TextMuted: ui.Hex("#5f5a52"),
+		Accent: ui.Hex("#5b45c9"), AccentHover: ui.Hex("#4b37ae"), AccentText: ui.Hex("#ffffff"),
+		Success: ui.Hex("#2f7a4f"), Warning: ui.Hex("#7a6233"), Danger: ui.Hex("#a3373a"),
+		RailBackground: ui.Hex("#f1efea"), SidebarBackground: ui.Hex("#f1efea"),
 		Spacing4: 4, Spacing8: 8, Spacing12: 12, Spacing16: 16, Spacing24: 24, Spacing32: 32, Spacing48: 48,
-		TextPage: 20, TextSection: 15, TextBody: 13, TextMeta: 11, TextData: 12,
-		ButtonHeight: 32, InputHeight: 32, RowHeight: 32,
-		ControlRadius: 6, PanelRadius: 8, DialogRadius: 12,
+		TextPage: 22, TextSection: 15, TextBody: 13, TextMeta: 12, TextData: 12,
+		ButtonHeight: 30, InputHeight: 30, RowHeight: 32,
+		ControlRadius: 6, PanelRadius: 10, DialogRadius: 12,
 	}
 	return aliases(t)
 }
 
 func DarkTokens() Tokens {
 	t := LightTokens()
-	t.Canvas, t.Surface, t.Elevated = ui.Hex("#0B0C0E"), ui.Hex("#111317"), ui.Hex("#16191F")
-	t.Border, t.BorderStrong = ui.Hex("#232832"), ui.Hex("#393F49")
-	t.Text, t.TextMuted = ui.Hex("#F0F2F5"), ui.Hex("#9DA3AF")
-	t.Accent, t.AccentHover, t.AccentText = ui.Hex("#4B88FF"), ui.Hex("#6098FF"), ui.Hex("#FFFFFF")
-	t.Success, t.Warning, t.Danger = ui.Hex("#34D399"), ui.Hex("#F59E0B"), ui.Hex("#F87171")
-	t.RailBackground, t.SidebarBackground = t.Surface, t.Surface
+	t.Canvas, t.Surface, t.Elevated = ui.Hex("#171614"), ui.Hex("#1e1d1a"), ui.Hex("#242320")
+	t.Border, t.BorderStrong = ui.Hex("#37352f"), ui.Hex("#4a473f")
+	t.Text, t.TextMuted = ui.Hex("#f2efe9"), ui.Hex("#a9a49a")
+	t.Accent, t.AccentHover, t.AccentText = ui.Hex("#a996ff"), ui.Hex("#bcabff"), ui.Hex("#1b1533")
+	t.Success, t.Warning, t.Danger = ui.Hex("#84c9a4"), ui.Hex("#d9b878"), ui.Hex("#e79a9c")
+	t.RailBackground, t.SidebarBackground = t.Canvas, t.Canvas
 	return aliases(t)
 }
 
@@ -56,6 +61,7 @@ func aliases(t Tokens) Tokens {
 	return t
 }
 
+// GetTokens returns the painter tokens matching the frame's appearance.
 func GetTokens(t *ui.Theme) Tokens {
 	if t != nil && t.Dark {
 		return DarkTokens()
@@ -63,21 +69,60 @@ func GetTokens(t *ui.Theme) Tokens {
 	return LightTokens()
 }
 
-func LightTheme() *ui.Theme {
-	return apply(ui.LightTheme(), LightTokens(), false)
+// LightPalette is the AsterLab light theme.
+func LightPalette() *ui.Theme { return apply(false) }
+
+// DarkPalette is the AsterLab dark theme.
+func DarkPalette() *ui.Theme { return apply(true) }
+
+// Palette returns the AsterLab palette for the given appearance.
+func Palette(dark bool) *ui.Theme {
+	if dark {
+		return DarkPalette()
+	}
+	return LightPalette()
 }
 
-func DarkTheme() *ui.Theme {
-	return apply(ui.DarkTheme(), DarkTokens(), true)
+// Window is the theme function Onevra's shells and Apply take: it follows the
+// desktop's appearance, text scale and higher-contrast preference.
+func Window(c *ui.Context) *ui.Theme {
+	t := Palette(c.Theme().Dark)
+	p := c.Preferences()
+	if p.HighContrast {
+		t.Border = t.Border.Mix(t.Text, 0.45)
+		t.TextMuted = t.TextMuted.Mix(t.Text, 0.4)
+		t.Scrollbar = t.Scrollbar.Alpha(1.6)
+	}
+	if s := p.TextScale; s > 0 && s != 1 {
+		t.FontSize *= s
+	}
+	return t
 }
 
-func apply(t *ui.Theme, c Tokens, dark bool) *ui.Theme {
-	t.Dark = dark
+// Apply installs the AsterLab palette for the current frame. Call it at the
+// start of a root content builder that is not inside an Onevra shell.
+func Apply(c *ui.Context) { c.SetTheme(Window(c)) }
+
+// LightTheme and DarkTheme install a fixed appearance, for isolated studios.
+func LightTheme() *ui.Theme { return LightPalette() }
+
+func DarkTheme() *ui.Theme { return DarkPalette() }
+
+func apply(dark bool) *ui.Theme {
+	t := onevra.Palette(dark)
+	c := LightTokens()
+	if dark {
+		c = DarkTokens()
+	}
 	t.Background, t.Surface, t.SurfaceHover, t.SurfacePressed = c.Canvas, c.Surface, c.Elevated, c.Border
 	t.Border, t.Text, t.TextMuted = c.Border, c.Text, c.TextMuted
-	t.Accent, t.AccentHover, t.AccentPressed, t.AccentText = c.Accent, c.AccentHover, c.Accent, c.AccentText
-	t.Danger, t.Warning, t.Success, t.Focus = c.Danger, c.Warning, c.Success, c.Accent
+	t.Accent, t.AccentHover, t.AccentPressed, t.AccentText = c.Accent, c.AccentHover, c.AccentHover, c.AccentText
+	t.Danger, t.Warning, t.Success = c.Danger, c.Warning, c.Success
+	t.Selection = c.Accent.Alpha(.18)
+	t.Focus = c.Accent.Alpha(.55)
+	t.Scrollbar = c.Text.Alpha(.28)
 	t.FocusRingWidth, t.FocusRingOffset = 2, 1
-	t.Radius, t.Spacing = float32(c.PanelRadius), 4
+	t.Radius = 8
+	t.Spacing = 4
 	return t
 }

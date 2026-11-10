@@ -1,9 +1,18 @@
-// Package shell is the AsterLab natively drawn desktop frame.
+// Package shell is the AsterLab natively drawn desktop frame: an Onevra
+// sidebar window whose navigation, page header and pages are AsterLab's.
 package shell
 
 import (
-	"asterlab-mygo-prototype/internal/theme"
+	"fmt"
+	"strings"
+
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
+	"github.com/oneo-me/onevra/source/shells/sidebar"
+
+	"asterlab-mygo-prototype/internal/theme"
 )
 
 type Page int
@@ -11,44 +20,74 @@ type Page int
 const (
 	Project Page = iota
 	Design
-	Protocol
 	Run
+	Notebook
 	Tools
 )
 
 func (p Page) ShortLabel() string {
 	switch p {
-	case Project:
-		return "项目"
 	case Design:
 		return "设计"
-	case Protocol:
-		return "方案"
 	case Run:
 		return "运行"
-	default:
+	case Notebook:
+		return "笔记"
+	case Tools:
 		return "工具"
 	}
+	return "项目"
+}
+
+// PageName is the persisted session name of the current page.
+func (s *Shell) PageName() string {
+	switch s.Page {
+	case Design:
+		return "design"
+	case Run:
+		return "run"
+	case Notebook:
+		return "notebook"
+	case Tools:
+		return "tools"
+	}
+	return "project"
 }
 
 func (p Page) Label() string {
 	switch p {
-	case Project:
-		return "项目工作区"
 	case Design:
 		return "实验设计"
-	case Protocol:
-		return "实验方案"
 	case Run:
 		return "实验运行"
-	default:
+	case Notebook:
+		return "Notebook"
+	case Tools:
 		return "资料与工具"
 	}
+	return "项目工作区"
+}
+
+// icon is the page's navigation icon.
+func (p Page) icon() *ui.SVG {
+	switch p {
+	case Design:
+		return lucide.FlaskConical()
+	case Run:
+		return lucide.Play()
+	case Notebook:
+		return lucide.NotebookPen()
+	case Tools:
+		return lucide.Boxes()
+	}
+	return lucide.FolderKanban()
 }
 
 type DesignItem struct{ ID, Title, Meta string }
 type RecentRun struct{ ID, Title, Meta string }
 
+// Shell owns AsterLab's window-level state: the page, the selected project and
+// design, and the window Onevra draws.
 type Shell struct {
 	Project     string
 	Projects    []string
@@ -56,7 +95,6 @@ type Shell struct {
 	RecentRuns  []RecentRun
 	Selected    string
 	Page        Page
-	SidebarOpen bool
 	Loading     bool
 	Error       string
 	OnSelect    func(string)
@@ -64,190 +102,471 @@ type Shell struct {
 	OnRunSelect func(string)
 	OnPage      func(Page)
 	OnSidebar   func(bool)
-	OnContinue  func()
-	OnCreate    func()
-	OnImport    func()
-	Content     func(*ui.Context)
+
+	Query      string
+	OnContinue func()
+	OnCreate   func()
+	OnImport   func()
+	Content    func(*ui.Context)
+
+	window *sidebar.Shell
 }
 
-func View(c *ui.Context, s *Shell) {
+var pages = []Page{Project, Design, Run, Notebook, Tools}
+
+// NewWindow creates the AsterLab window. The Onevra shell owns the title bar,
+// the floating header and the resizable navigation column.
+func (s *Shell) NewWindow() *sidebar.Shell {
+	s.window = sidebar.NewShell(sidebar.ShellOptions{
+		Title:        "AsterLab",
+		Width:        1360,
+		Height:       880,
+		MinWidth:     900,
+		MinHeight:    600,
+		StateKey:     "asterlab-desk",
+		Theme:        theme.Window,
+		LeftWidth:    232,
+		Left:         s.navigation,
+		Content:      s.page,
+		ContentTitle: s.breadcrumb,
+		LeftHeader:   s.navigationHeader,
+		LeftToolbar:  s.navigationFooter,
+	})
+	return s.window
+}
+
+// Invalidate asks the window for a frame after state changed off the UI thread.
+func (s *Shell) Invalidate() {
+	if s.window != nil {
+		s.window.Window().Invalidate()
+	}
+}
+
+func (s *Shell) breadcrumb(c *ui.Context) {
 	t := c.Theme()
-	tok := theme.GetTokens(t)
-	width, _ := c.Size()
-	if c.Shortcut(ui.Cmd, ui.KeyB) {
-		s.SidebarOpen = !s.SidebarOpen
-		if s.OnSidebar != nil {
-			s.OnSidebar(s.SidebarOpen)
+	components.Text(c, "AsterLab").FontWeight(600).SingleLine()
+	components.Text(c, "/").TextColor(t.TextMuted)
+	components.Text(c, s.location()).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+	ui.Spacer(c)
+	if s.Loading {
+		components.Text(c, "加载中…").TextColor(t.TextMuted).FontSize(t.Rem(.85))
+	}
+	if s.Error != "" {
+		components.Text(c, s.Error).TextColor(t.Danger).FontSize(t.Rem(.85)).SingleLine().Ellipsis("…").MaxWidth(420)
+	}
+}
+
+// location names the project, or the design being edited, after AsterLab.
+func (s *Shell) location() string {
+	if s.Page == Design && s.Selected != "" {
+		for _, d := range s.Designs {
+			if d.ID == s.Selected {
+				return d.Title
+			}
 		}
 	}
-	pages := []Page{Project, Design, Protocol, Run, Tools}
-	for i, key := range []ui.Key{ui.Key0, ui.Key1, ui.Key2, ui.Key3, ui.Key4} {
-		if c.Shortcut(ui.Cmd, key) {
-			s.Page = pages[i]
-			if s.OnPage != nil {
-				s.OnPage(pages[i])
-			}
-		}
+	if s.Project != "" {
+		return s.Project
 	}
-	ui.Column(c).Fill().Background(tok.Canvas).Children(func() {
-		projectName := s.Project
-		if projectName == "" {
-			projectName = "L929 细胞毒性评价"
-		}
-		ui.Row(c).Height(40).Padding(0, 14).AlignItems(ui.Center).Gap(8).Background(tok.Surface).Border(1, tok.Border).DragWindow().Children(func() {
-			ui.Text(c, "AsterLab").Bold().FontSize(13).TextColor(tok.Text)
-			ui.Text(c, "›").TextColor(tok.TextMuted)
-			ui.Text(c, projectName).FontSize(12).TextColor(tok.Text)
-			ui.Text(c, "›").TextColor(tok.TextMuted)
-			ui.Row(c).Padding(1, 6).Radius(3).Background(ui.Hex("#182236")).Border(1, ui.Hex("#25457D")).Children(func() {
-				ui.Text(c, "v1.2 · rev 4").FontSize(10).Bold().TextColor(ui.Hex("#4B88FF"))
-			})
-			ui.Text(c, "›").TextColor(tok.TextMuted)
-			ui.Text(c, s.Page.Label()).FontSize(12).TextColor(tok.Text).Bold()
-			ui.Spacer(c)
-			ui.Row(c).Padding(3, 8).Radius(12).Background(ui.Hex("#111317")).Border(1, ui.Hex("#1E222B")).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(6, 6).Radius(3).Background(ui.Hex("#34D399"))
-				ui.Text(c, "已同步 (rev 4 · SQLite)").FontSize(10.5).TextColor(ui.Hex("#9DA3AF"))
-			})
-			ui.Spacer(c)
-			if s.Loading {
-				ui.Text(c, "加载中…").FontSize(12).TextColor(tok.TextMuted)
-			}
-			if s.Error != "" {
-				ui.Text(c, s.Error).FontSize(12).TextColor(tok.Danger)
-			}
-			if ui.Button(c, "侧栏").Radius(float32(tok.ControlRadius)).Padding(3, 8).Clicked() {
-				s.SidebarOpen = !s.SidebarOpen
-				if s.OnSidebar != nil {
-					s.OnSidebar(s.SidebarOpen)
-				}
-			}
-		})
-		ui.Row(c).Grow(1).Children(func() {
-			ui.Column(c).Width(48).FillHeight().Padding(8, 2).Gap(6).Background(tok.RailBackground).Border(1, tok.Border).AlignItems(ui.Center).Children(func() {
-				ui.Row(c).Size(32, 32).Radius(6).Background(tok.Accent).Center().Children(func() { ui.Text(c, "AL").FontSize(13).Bold().TextColor(tok.AccentText) })
-				ui.Divider(c)
-				for _, p := range pages {
-					p := p
-					active := p == s.Page
-					bg := ui.Color{}
-					color := tok.TextMuted
-					if active {
-						bg = ui.Hex("#182236")
-						color = ui.Hex("#4B88FF")
-					}
-					b := ui.ButtonBase(c).Width(40).Height(34).Radius(6).Background(bg)
-					b.Children(func() {
-						ui.Row(c).Fill().AlignItems(ui.Center).Children(func() {
-							if active {
-								ui.Box(c).Width(3).Height(18).Radius(1.5).Background(ui.Hex("#4B88FF"))
-							} else {
-								ui.Box(c).Width(3)
-							}
-							ui.Row(c).Grow(1).Center().Children(func() {
-								ui.Text(c, p.ShortLabel()).FontSize(11).TextColor(color).Bold()
-							})
-						})
-					})
-					if b.Clicked() {
-						s.Page = p
-						if s.OnPage != nil {
-							s.OnPage(p)
+	return "未选择项目"
+}
+
+func (s *Shell) navigationHeader(c *ui.Context) {
+	ui.Spacer(c)
+	if s.OnCreate == nil {
+		return
+	}
+	if components.IconButton(c, lucide.SquarePen(), "新建设计", components.IconButtonCompact).Clicked() {
+		s.OnCreate()
+	}
+}
+
+func (s *Shell) navigation(c *ui.Context) {
+	inset := sidebar.HeaderHeight(c)
+	ui.Column(c).Fill().Children(func() {
+		ui.Scroll(c).Grow(1).Padding(inset, 0, 0, 0).Children(func() {
+			components.Sidebar(c).Children(func() {
+				components.SidebarSection(c, "工作区", func() {
+					for _, p := range pages {
+						p := p
+						if components.SidebarItem(c, p.Label(), p.icon(), s.Page == p).Clicked() {
+							s.setPage(p)
 						}
 					}
-				}
+				})
+				components.SidebarSectionWithActions(c, "最近设计", nil, func() {
+					if len(s.Designs) == 0 {
+						components.Text(c, "尚无已保存的设计").TextColor(c.Theme().TextMuted).
+							FontSize(c.Theme().Rem(.85)).Padding(c.Theme().Space(1), c.Theme().Space(2))
+						return
+					}
+					for _, d := range s.Designs {
+						d := d
+						item := components.SidebarItemWithSlots(c, d.Title, s.Selected == d.ID,
+							func(c *ui.Context, size float32) {
+								components.Icon(c, lucide.FileText()).Size(size, size).TextColor(c.Theme().Accent)
+							},
+							func(c *ui.Context, _ float32) {
+								components.Text(c, d.Meta).TextColor(c.Theme().TextMuted).FontSize(c.Theme().Rem(.78)).Shrink(0)
+							})
+						if item.Clicked() {
+							s.Selected = d.ID
+							s.Page = Design
+							if s.OnSelect != nil {
+								s.OnSelect(d.ID)
+							}
+							s.setPage(Design)
+						}
+					}
+				})
 			})
-			if s.SidebarOpen && s.Page != Project && s.Page != Design && width > 900 {
-				ui.Column(c).Width(220).FillHeight().Padding(12, 10).Gap(10).Background(tok.SidebarBackground).Border(1, tok.Border).Children(func() {
-					ui.Text(c, "最近设计").FontSize(11).TextColor(tok.TextMuted).Bold()
-					ui.Scroll(c).Grow(1).Children(func() {
-						for _, d := range s.Designs {
-							d := d
-							if ui.Button(c, d.Title).Clicked() {
-								s.Selected = d.ID
-								if s.OnSelect != nil {
-									s.OnSelect(d.ID)
-								}
+		})
+	})
+}
+
+func (s *Shell) navigationFooter(c *ui.Context) {
+	t := c.Theme()
+	components.Text(c, "AsterLab · 原生设计工作台").TextColor(t.TextMuted).FontSize(t.Rem(.78)).
+		SingleLine().Ellipsis("…")
+}
+
+func (s *Shell) setPage(p Page) {
+	changed := s.Page != p
+	s.Page = p
+	if s.OnPage != nil {
+		s.OnPage(p)
+	}
+	if changed && s.window != nil {
+		s.window.Window().Invalidate()
+	}
+}
+
+func (s *Shell) page(c *ui.Context) {
+	t := c.Theme()
+	inset := sidebar.HeaderHeight(c)
+	if c.Shortcut(ui.Cmd, ui.KeyB) {
+		if s.window != nil {
+			s.window.SetLeftExpanded(!s.window.LeftExpanded())
+		}
+	}
+	for i, key := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5} {
+		if c.Shortcut(ui.Cmd, key) {
+			s.setPage(pages[i])
+		}
+	}
+	padding := t.Space(3)
+	ui.Column(c).Fill().Padding(inset, 0, 0, 0).Background(t.Background).Children(func() {
+		ui.Column(c).Grow(1).MinHeight(0).Padding(0, padding, padding, padding).Children(func() {
+			if s.Page == Project {
+				s.projectView(c)
+				return
+			}
+			if s.Content != nil {
+				s.Content(c)
+			}
+		})
+	})
+}
+
+func (s *Shell) projectView(c *ui.Context) {
+	t := c.Theme()
+	width, _ := c.Size()
+	columns := 3
+	if width < 980 {
+		columns = 2
+	}
+	if width < 680 {
+		columns = 1
+	}
+	query := strings.ToLower(strings.TrimSpace(s.Query))
+	designs := make([]DesignItem, 0, len(s.Designs))
+	for _, design := range s.Designs {
+		if query == "" || strings.Contains(strings.ToLower(design.Title), query) {
+			designs = append(designs, design)
+		}
+	}
+	ui.Scroll(c).Grow(1).Children(func() {
+		ui.Column(c).Padding(t.Space(5), t.Space(4)).Gap(t.Space(5)).MaxWidth(1040).
+			MaxWidthPercent(100).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.End).Gap(t.Space(3)).Children(func() {
+				ui.Column(c).Gap(t.Space(.75)).Children(func() {
+					components.Text(c, "项目工作区").FontSize(t.Rem(1.7)).FontWeight(600)
+					components.Text(c, "继续一个设计，或从已有案例开始；所有文档共用同一份 AsterDoc。").
+						TextColor(t.TextMuted).FontSize(t.Rem(.92))
+				})
+				ui.Spacer(c)
+				ui.TextInput(c, &s.Query).Placeholder("搜索设计…").Width(t.Space(32))
+			})
+
+			ui.Row(c).Wrap().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+				if s.OnCreate != nil && components.Button(c, "新建设计", components.ButtonPrimary).Clicked() {
+					s.OnCreate()
+				}
+				if s.OnImport != nil && components.Button(c, "导入设计", components.ButtonSecondary).Clicked() {
+					s.OnImport()
+				}
+				if s.OnContinue != nil && components.Button(c, "继续上次工作", components.ButtonGhost).Clicked() {
+					s.OnContinue()
+				}
+				ui.Spacer(c)
+				count := fmt.Sprintf("%d 个设计 · %d 个运行", len(s.Designs), len(s.RecentRuns))
+				if len(s.Projects) > 0 {
+					count = fmt.Sprintf("%d 个项目 · %s", len(s.Projects), count)
+				}
+				components.Text(c, count).TextColor(t.TextMuted).FontSize(t.Rem(.78))
+			})
+
+			if len(s.Designs) == 0 {
+				s.homeEmpty(c)
+			} else {
+				inProgress := []RecentRun{}
+				for _, run := range s.RecentRuns {
+					if run.Meta != "completed" {
+						inProgress = append(inProgress, run)
+					}
+				}
+				if len(inProgress) > 2 {
+					inProgress = inProgress[:2]
+				}
+				designLimit := 6 - len(inProgress)
+				if designLimit < 1 {
+					designLimit = 1
+				}
+				if len(designs) > designLimit {
+					designs = designs[:designLimit]
+				}
+				ui.Column(c).Gap(t.Space(1.5)).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Children(func() {
+						components.Text(c, "继续工作").FontSize(t.Rem(1.05)).FontWeight(600)
+						ui.Spacer(c)
+						components.Text(c, fmt.Sprintf("%d 个工作项", len(designs)+len(inProgress))).
+							TextColor(t.TextMuted).FontSize(t.Rem(.78))
+					})
+					if len(designs) == 0 && len(inProgress) == 0 {
+						components.Text(c, "没有匹配的设计。").
+							TextColor(t.TextMuted).FontSize(t.Rem(.9))
+						return
+					}
+					ui.Grid(c).Columns(columns).Gap(t.Space(1)).Children(func() {
+						for _, run := range inProgress {
+							s.runCard(c, run)
+						}
+						for _, design := range designs {
+							s.designCard(c, design)
+						}
+					})
+				})
+				s.homeTemplates(c)
+				s.homeRuns(c)
+			}
+
+			if len(s.Projects) > 0 {
+				ui.Column(c).Gap(t.Space(1)).Children(func() {
+					components.Text(c, "项目").FontSize(t.Rem(1.05)).FontWeight(600)
+					ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
+						for _, project := range s.Projects {
+							project := project
+							b := components.Button(c, project, components.ButtonGhost)
+							if project == s.Project {
+								b = components.Button(c, project, components.ButtonSecondary)
+							}
+							if b.Clicked() && s.OnProject != nil {
+								s.OnProject(project)
 							}
 						}
 					})
 				})
 			}
-			ui.Column(c).Grow(1).FillHeight().Background(tok.Canvas).Children(func() {
-				if s.Page == Project {
-					projectView(c, s, tok)
-				} else if s.Content != nil {
-					s.Content(c)
-				}
-			})
+			if s.Loading {
+				components.Text(c, "正在加载工作区…").TextColor(t.TextMuted)
+			}
+			if s.Error != "" {
+				components.Text(c, s.Error).TextColor(t.Danger)
+			}
 		})
 	})
 }
 
-func projectView(c *ui.Context, s *Shell, tok theme.Tokens) {
-	ui.Scroll(c).Grow(1).Children(func() {
-		ui.Column(c).Padding(24).Gap(16).Children(func() {
-			ui.Text(c, "项目工作区").FontSize(20).Bold().TextColor(tok.Text)
-			if s.Project != "" {
-				ui.Text(c, s.Project).FontSize(15).TextColor(tok.Text)
-			} else {
-				ui.Text(c, "选择或创建项目").FontSize(13).TextColor(tok.TextMuted)
-			}
-			ui.Row(c).Gap(8).Children(func() {
-				if s.OnContinue != nil && ui.Button(c, "继续上次工作").Clicked() {
-					s.OnContinue()
-				}
-				if s.OnCreate != nil && ui.Button(c, "新建设计").Clicked() {
-					s.OnCreate()
-				}
-				if s.OnImport != nil && ui.Button(c, "导入").Clicked() {
-					s.OnImport()
-				}
+func (s *Shell) homeEmpty(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Padding(t.Space(5)).Radius(t.Space(2)).
+		Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
+		components.Icon(c, lucide.FlaskConical()).Size(t.Space(6), t.Space(6)).TextColor(t.Accent)
+		components.Text(c, "还没有实验设计").FontSize(t.Rem(1.15)).FontWeight(600)
+		components.Text(c, "新建一个设计，或导入已有记录开始。").
+			TextColor(t.TextMuted).FontSize(t.Rem(.9))
+		if s.OnCreate != nil && components.Button(c, "新建设计", components.ButtonPrimary).Clicked() {
+			s.OnCreate()
+		}
+	})
+}
+
+func (s *Shell) designCard(c *ui.Context, design DesignItem) {
+	t := c.Theme()
+	card := ui.ButtonBase(c).FillWidth().Padding(t.Space(2), t.Space(2)).Radius(t.Space(1.5)).
+		Background(t.Surface).Border(1, t.Border).Label(design.Title)
+	card.Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Box(c).Size(t.Space(4.5), t.Space(4.5)).Radius(t.Space(1)).
+				Background(t.Accent.Alpha(.10)).Center().Children(func() {
+				components.Icon(c, lucide.FileText()).Size(t.Space(2.2), t.Space(2.2)).
+					TextColor(t.Accent)
 			})
-			ui.Text(c, "项目").FontSize(15).Bold().TextColor(tok.Text)
-			if len(s.Projects) == 0 {
-				ui.Text(c, "暂无项目").FontSize(13).TextColor(tok.TextMuted)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+				components.Text(c, design.Title).FontSize(t.Rem(.9)).FontWeight(600).
+					SingleLine().Ellipsis("…")
+				components.Text(c, design.Meta).TextColor(t.TextMuted).FontSize(t.Rem(.75))
+			})
+			components.Icon(c, lucide.ArrowUpRight()).Size(t.Space(2), t.Space(2)).
+				TextColor(t.TextMuted)
+		})
+	})
+	if card.Clicked() {
+		s.Selected = design.ID
+		s.Page = Design
+		if s.OnSelect != nil {
+			s.OnSelect(design.ID)
+		}
+		s.setPage(Design)
+	}
+}
+
+func statusLabel(status string) string {
+	switch status {
+	case "in_progress":
+		return "执行中"
+	case "planned":
+		return "计划中"
+	case "completed":
+		return "已完成"
+	case "blocked":
+		return "阻塞"
+	case "cancelled":
+		return "已取消"
+	}
+	return status
+}
+
+func (s *Shell) runCard(c *ui.Context, run RecentRun) {
+	t := c.Theme()
+	card := ui.ButtonBase(c).FillWidth().Padding(t.Space(2), t.Space(2)).Radius(t.Space(1.5)).
+		Background(t.Surface).Border(1, t.Border).Label(run.Title)
+	card.Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Box(c).Size(t.Space(4.5), t.Space(4.5)).Radius(t.Space(1)).
+				Background(t.Warning.Alpha(.12)).Center().Children(func() {
+				components.Icon(c, lucide.Play()).Size(t.Space(2.2), t.Space(2.2)).
+					TextColor(t.Warning)
+			})
+			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+				components.Text(c, run.Title).FontSize(t.Rem(.9)).FontWeight(600).
+					SingleLine().Ellipsis("…")
+				components.Text(c, "Run · "+statusLabel(run.Meta)).TextColor(t.TextMuted).FontSize(t.Rem(.75))
+			})
+			components.Icon(c, lucide.ArrowUpRight()).Size(t.Space(2), t.Space(2)).
+				TextColor(t.TextMuted)
+		})
+	})
+	if card.Clicked() && s.OnRunSelect != nil {
+		s.OnRunSelect(run.ID)
+	}
+}
+
+func (s *Shell) homeTemplates(c *ui.Context) {
+	t := c.Theme()
+	type match struct {
+		title  string
+		design DesignItem
+	}
+	matches := []match{}
+	for _, template := range []struct{ title, match string }{
+		{"CCK-8 细胞活力", "CCK-8"},
+		{"L929 生物相容性", "L929"},
+		{"RT-qPCR 表达比较", "RT-qPCR"},
+	} {
+		for _, design := range s.Designs {
+			if strings.Contains(design.Title, template.match) {
+				matches = append(matches, match{title: template.title, design: design})
+				break
 			}
-			for _, p := range s.Projects {
-				p := p
-				if ui.Button(c, p).Clicked() && s.OnProject != nil {
-					s.Project = p
-					s.OnProject(p)
-				}
-			}
-			ui.Text(c, "最近设计").FontSize(15).Bold().TextColor(tok.Text)
-			if len(s.Designs) == 0 {
-				ui.Text(c, "暂无设计").FontSize(13).TextColor(tok.TextMuted)
-			}
-			for _, d := range s.Designs {
-				d := d
-				if ui.Button(c, d.Title+"  "+d.Meta).Clicked() {
-					s.Selected = d.ID
-					s.Page = Design
+		}
+	}
+	if len(matches) == 0 {
+		return
+	}
+	ui.Column(c).Gap(t.Space(1.5)).Children(func() {
+		components.Text(c, "浏览实验设计").FontSize(t.Rem(1.05)).FontWeight(600)
+		ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
+			for _, item := range matches {
+				item := item
+				b := ui.ButtonBase(c).Padding(t.Space(1.5), t.Space(2)).Radius(t.Space(1.5)).
+					Background(t.Background).Border(1, t.Border).Label(item.design.Title)
+				b.Children(func() {
+					ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+						components.Icon(c, lucide.FlaskConical()).Size(t.Space(2.2), t.Space(2.2)).
+							TextColor(t.Accent)
+						ui.Column(c).Gap(0).Children(func() {
+							components.Text(c, item.title).FontSize(t.Rem(.85))
+							components.Text(c, item.design.Meta).TextColor(t.TextMuted).
+								FontSize(t.Rem(.7))
+						})
+					})
+				})
+				if b.Clicked() {
+					s.Selected = item.design.ID
 					if s.OnSelect != nil {
-						s.OnSelect(d.ID)
+						s.OnSelect(item.design.ID)
 					}
-					if s.OnPage != nil {
-						s.OnPage(Design)
-					}
+					s.setPage(Design)
 				}
-			}
-			ui.Text(c, "最近运行").FontSize(15).Bold().TextColor(tok.Text)
-			if len(s.RecentRuns) == 0 {
-				ui.Text(c, "暂无运行").FontSize(13).TextColor(tok.TextMuted)
-			}
-			for _, r := range s.RecentRuns {
-				r := r
-				if ui.Button(c, r.Title+"  "+r.Meta).Clicked() && s.OnRunSelect != nil {
-					s.OnRunSelect(r.ID)
-				}
-			}
-			if s.Loading {
-				ui.Text(c, "正在加载项目…").TextColor(tok.TextMuted)
-			}
-			if s.Error != "" {
-				ui.Text(c, s.Error).TextColor(tok.Danger)
 			}
 		})
 	})
+}
+
+func (s *Shell) homeRuns(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).Gap(t.Space(1.5)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			components.Text(c, "最近的运行").FontSize(t.Rem(1.05)).FontWeight(600)
+			ui.Spacer(c)
+			components.Text(c, fmt.Sprintf("%d 个", len(s.RecentRuns))).
+				TextColor(t.TextMuted).FontSize(t.Rem(.78))
+		})
+		if len(s.RecentRuns) == 0 {
+			components.Text(c, "尚无运行。设计保存后可以创建冻结运行。").
+				TextColor(t.TextMuted).FontSize(t.Rem(.88))
+			return
+		}
+		shown := s.RecentRuns
+		if len(shown) > 5 {
+			shown = shown[:5]
+		}
+		for _, run := range shown {
+			run := run
+			b := ui.ButtonBase(c).FillWidth().Padding(t.Space(1.5), t.Space(2)).Radius(t.Space(1.5)).
+				Background(t.Surface).Border(1, t.Border).Label(run.Title)
+			b.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+					components.Icon(c, lucide.Play()).Size(t.Space(2.2), t.Space(2.2)).
+						TextColor(t.TextMuted)
+					components.Text(c, run.Title).FontSize(t.Rem(.88)).SingleLine().Ellipsis("…")
+					ui.Spacer(c)
+					components.Text(c, statusLabel(run.Meta)).TextColor(t.TextMuted).FontSize(t.Rem(.75))
+					components.Icon(c, lucide.ArrowUpRight()).Size(t.Space(1.8), t.Space(1.8)).
+						TextColor(t.TextMuted)
+				})
+			})
+			if b.Clicked() && s.OnRunSelect != nil {
+				s.OnRunSelect(run.ID)
+			}
+		}
+	})
+}
+
+// Quit closes the application when the AsterLab window closes.
+func (s *Shell) Quit() {
+	if s.window != nil {
+		s.window.Window().OnClosed(func() { mygo.App.Quit() })
+	}
 }
