@@ -11,6 +11,7 @@ Status: Foundation v1 contract work in progress. This directory defines the deve
 | [Track A: CCK-8 real-window evidence](track-a-cck8-evidence.md) | Real Run, batch readouts, task completion, Review and frozen isolation. |
 | [Track B: SDK extensibility evidence](track-b-extensibility-evidence.md) | Dilution/instrument_profile generic editing and frozen Run viewing. |
 | [Typed Step Module Binding v1](step-binding-v1.md) | `step@2.uses`, compiler projection and task-scoped Run filtering. |
+| [Release evidence](evidence/) | Real-window 900×600 light/dark and Run captures. |
 | [Foundation JSON Schema](../../prototypes/mygo-run/internal/asterdoc/spec/foundation-v1.schema.json) | Machine-checkable envelope, port, action, manifest and template shapes. |
 | [Single module manifest](../../prototypes/mygo-run/internal/asterdoc/spec/modules.json) | The authoritative module registry read by Go and Rust. |
 | [Foundation unit registry](../../prototypes/mygo-run/internal/asterdoc/spec/units.json) | The named UCUM subset used for validation and explicit conversion. |

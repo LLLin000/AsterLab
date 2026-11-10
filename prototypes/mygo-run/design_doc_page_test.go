@@ -86,3 +86,27 @@ func TestPreflightDialogShowsCoreIssues(t *testing.T) {
 		t.Fatalf("preflight dialog missing: %q", tt.Texts())
 	}
 }
+
+func TestStepInspectorEditsModuleBindings(t *testing.T) {
+	source := "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: SDK\n```\n```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: instrument_profile\nid: uv-1\nschema: 1\nclass: uv_curing\ncapabilities:\n  - name: 365 nm\nsource: built_in\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV cure\nassay: assay-1\npath: root/uv\n```\n"
+	a := &app{designDoc: &runs.AsterDocSnapshot{DesignID: "design-1", Revision: 1, Source: source}, designTab: 0}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		asterDesignPage(c, a)
+	}, 1200, 760)
+	tt.Frame()
+	if err := tt.Click("UV cure"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("步骤资源") || !tt.HasText("+ dilution-01") || !tt.HasText("+ uv-1") {
+		t.Fatalf("binding editor missing: %q", tt.Texts())
+	}
+	if err := tt.Click("+ dilution-01"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.canvasUses) != 1 || a.canvasUses[0].Ref != "dilution-01" || a.canvasUses[0].Role != "calculator" {
+		t.Fatalf("binding draft = %+v", a.canvasUses)
+	}
+}

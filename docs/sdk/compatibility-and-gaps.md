@@ -48,7 +48,7 @@
 - `step@1` still cannot express HUVEC material amounts, UV duration, temperature and concentrations as structured fields; a future version/composable module is required.
 - `instrument_profile` has no instance/calibration/reservation model and no Device Adapter. It cannot control hardware.
 - SDK modules now bind through `step@2.uses` and are filtered per Run task. `step@1` remains unchanged; role values are not yet a closed enum.
-- Notebook now has a read-only timeline mode; high-DPI/dark real-window evidence remains open.
+- Notebook has a read-only timeline mode. Real dark-theme 900×600 evidence at 150% scale is captured; 100%/200% and additional dark pages remain open.
 - No ISA/AnIML/PROV serialization or import.
 - No template instantiation or template command.
 - No migration runner for old AsterDoc module versions.

@@ -236,6 +236,10 @@ func validateStepUses(modules []Module) error {
 	for _, module := range modules {
 		all[module.ID] = true
 	}
+	byID := map[string]Module{}
+	for _, module := range modules {
+		byID[module.ID] = module
+	}
 	for _, module := range modules {
 		if module.Kind != "step" {
 			continue
@@ -244,12 +248,48 @@ func validateStepUses(modules []Module) error {
 		for _, raw := range uses {
 			item, _ := raw.(map[string]any)
 			ref, _ := item["ref"].(string)
-			if strings.TrimSpace(ref) != "" && !all[ref] {
+			role, _ := item["role"].(string)
+			ref, role = strings.TrimSpace(ref), strings.TrimSpace(role)
+			if ref == "" {
+				continue
+			}
+			target, ok := byID[ref]
+			if !ok {
 				return fmt.Errorf("step %q uses missing module %q", module.ID, ref)
+			}
+			spec, ok := specByKey[specKey(target.Kind, target.Schema)]
+			if !ok {
+				return fmt.Errorf("step %q uses unregistered module %q", module.ID, ref)
+			}
+			if !roleAllowedForModule(role, spec.Descriptor) {
+				return fmt.Errorf("step %q use %q has role %q incompatible with %s", module.ID, ref, role, target.Kind)
 			}
 		}
 	}
 	return nil
+}
+
+func roleAllowedForModule(role string, module Descriptor) bool {
+	required, builtin := roleCapabilities[role]
+	if !builtin {
+		// Namespaced extension roles are explicit capabilities on the target
+		// module, e.g. role "acme:imaging" requires capability "acme:imaging".
+		if !strings.Contains(role, ":") {
+			return false
+		}
+		required = []string{role}
+	}
+	if len(required) == 0 {
+		return true
+	}
+	for _, capability := range required {
+		for _, declared := range module.Capabilities {
+			if declared == capability {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func parseModule(body string, start, end int) (Module, error) {

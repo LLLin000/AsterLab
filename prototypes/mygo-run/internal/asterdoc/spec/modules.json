@@ -1128,5 +1128,23 @@
     }
   ],
   "foundationVersion": 1,
-  "sdkVersion": "1.0.0"
+  "sdkVersion": "1.0.0",
+  "roleCapabilities": {
+    "instrument": [
+      "instrument-profile"
+    ],
+    "calculator": [
+      "deterministic-calculation"
+    ],
+    "labware": [
+      "well-plate"
+    ],
+    "material": [
+      "material"
+    ],
+    "sample": [
+      "sample"
+    ],
+    "other": []
+  }
 }

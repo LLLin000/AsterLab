@@ -22,7 +22,7 @@ uses:
     role: calculator
 ```
 
-`uses[].ref` is a stable module ID in the same AsterDoc. `uses[].role` is an explicit role, currently one of the string values accepted by the editor (for example `instrument`, `material`, `calculator`, `labware`, `sample`, `other`). Duplicate refs and missing refs are rejected.
+`uses[].ref` is a stable module ID in the same AsterDoc. `uses[].role` is checked against the target module's declared capabilities through the shared registry. Built-in roles are `instrument`, `calculator`, `labware`, `material`, `sample` and `other`; a namespaced role such as `acme:imaging` is accepted only when the target module declares that exact capability. Duplicate refs, missing refs and role/capability mismatches are rejected with the Step and Ref in the message.
 
 `step@1` remains readable and keeps its old meaning. A document must opt into `step@2` to declare bindings; there is no implicit upgrade.
 
@@ -57,7 +57,7 @@ Timepoint is not task identity. Multiple tasks may legitimately share D1; the St
 
 ## 4. Current limitations
 
-- Role values are validated as non-empty strings, not yet as a closed role enum in the shared manifest.
-- `step@2` is not exposed by a dedicated editor form for `uses`; the generic editor currently treats list fields as read-only. Binding is authored through AsterDoc/Agent or a semantic command.
+- Built-in role-to-capability mappings live in the shared manifest; adding a new built-in role is a deliberate registry change. Namespaced extension roles are supported by capability declaration.
+- The AsterDoc Step Inspector exposes `步骤资源`: existing bindings show their role and a remove action; SDK modules in the document can be added with an inferred role and the role can be changed before saving. Saving uses the existing `update_module` semantic command and creates a new Revision.
 - `step@2` does not yet carry a separate Task Template ID; task identity currently uses the frozen step path + scope + timepoint. A future Task Template/Instance layer can extend this without changing `step@1`.
 - Actual instrument instances, calibration and device state remain outside `instrument_profile`.

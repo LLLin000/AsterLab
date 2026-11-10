@@ -19,10 +19,11 @@ var foundationSchemaJSON []byte
 func FoundationSchema() []byte { return append([]byte(nil), foundationSchemaJSON...) }
 
 type specFile struct {
-	SchemaVersion     int               `json:"schemaVersion"`
-	FoundationVersion int               `json:"foundationVersion"`
-	SDKVersion        string            `json:"sdkVersion"`
-	Modules           []json.RawMessage `json:"modules"`
+	SchemaVersion     int                 `json:"schemaVersion"`
+	FoundationVersion int                 `json:"foundationVersion"`
+	SDKVersion        string              `json:"sdkVersion"`
+	RoleCapabilities  map[string][]string `json:"roleCapabilities"`
+	Modules           []json.RawMessage   `json:"modules"`
 }
 
 type specModule struct {
@@ -35,6 +36,7 @@ var (
 	specErr           error
 	specFoundationVer int
 	specSDKVersion    string
+	roleCapabilities  map[string][]string
 )
 
 func init() { specErr = loadSpec() }
@@ -51,6 +53,7 @@ func loadSpec() error {
 		return fmt.Errorf("asterdoc module spec: sdkVersion is required")
 	}
 	specFoundationVer, specSDKVersion = file.FoundationVersion, file.SDKVersion
+	roleCapabilities = file.RoleCapabilities
 	if unitBySymbol == nil {
 		if err := loadUnits(); err != nil {
 			return err

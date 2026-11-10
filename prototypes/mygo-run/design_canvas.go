@@ -182,6 +182,10 @@ type canvasCheckDraft struct {
 	ID, Title string
 	Blocking  bool
 }
+
+type canvasUseDraft struct {
+	Ref, Role string
+}
 type canvasEdgeInfo struct{ id, from, to string }
 
 func canvasSteps(doc *asterdoc.Document) []canvasStepInfo {
@@ -352,6 +356,16 @@ func (a *app) canvasInspector(c *ui.Context, doc *asterdoc.Document) {
 				})
 			}
 		}
+		a.canvasUses = nil
+		if uses, ok := selected.Data["uses"].([]any); ok {
+			for _, raw := range uses {
+				use, _ := raw.(map[string]any)
+				a.canvasUses = append(a.canvasUses, canvasUseDraft{
+					Ref: moduleString(use, "ref"), Role: moduleString(use, "role"),
+				})
+			}
+		}
+		a.canvasUsePick = ""
 		a.canvasChecks = nil
 		if checks, ok := selected.Data["checks"].([]any); ok {
 			for _, raw := range checks {
@@ -388,12 +402,21 @@ func (a *app) canvasInspector(c *ui.Context, doc *asterdoc.Document) {
 						"checkId": check.ID, "title": check.Title, "blocking": check.Blocking,
 					})
 				}
+				uses := make([]any, 0, len(a.canvasUses))
+				for _, use := range a.canvasUses {
+					uses = append(uses, map[string]any{"ref": use.Ref, "role": use.Role})
+				}
+				schema := selected.Schema
+				if len(uses) > 0 {
+					schema = 2
+				}
 				_ = a.applyDesignRaw(map[string]any{
 					"type": "update_module", "moduleId": a.designSelected,
 					"properties": map[string]any{
-						"title": a.canvasTitle, "assay": a.canvasAssay,
+						"schema": schema,
+						"title":  a.canvasTitle, "assay": a.canvasAssay,
 						"path": a.canvasPath, "timepoints": timepoints,
-						"tasks": tasks, "checks": checks,
+						"tasks": tasks, "checks": checks, "uses": uses,
 					},
 				})
 				a.canvasSelLoaded = ""
@@ -459,6 +482,51 @@ func (a *app) canvasInspector(c *ui.Context, doc *asterdoc.Document) {
 		})
 		field("Protocol path", &a.canvasPath)
 		field("时间点", &a.canvasTimepoints)
+		ui.Divider(c)
+		ui.Text(c, "步骤资源").FontSize(t.Rem(.75)).Bold().TextColor(t.Text)
+		roles := []string{"instrument", "calculator", "labware", "material", "sample", "other"}
+		for i := range a.canvasUses {
+			i := i
+			use := &a.canvasUses[i]
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(.5)).Children(func() {
+				ui.Text(c, use.Ref).FontSize(t.Rem(.72)).TextColor(t.Text).Width(180)
+				ui.Select(c, &use.Role, roles).FillWidth()
+				if components.IconButton(c, lucide.X(), "移除绑定", components.IconButtonCompact).Clicked() {
+					a.canvasUses = append(a.canvasUses[:i], a.canvasUses[i+1:]...)
+				}
+			})
+		}
+		ui.Row(c).FillWidth().Wrap().Gap(t.Space(.5)).Children(func() {
+			for _, module := range doc.Modules {
+				switch module.Kind {
+				case "step", "experiment", "group", "assay", "workflow", "plate", "plate96", "reference":
+					continue
+				}
+				module := module
+				btn := ui.ButtonBase(c).Padding(3, 8).Radius(t.Space(1)).
+					Background(t.Background).Border(1, t.Border)
+				btn.Children(func() {
+					ui.Text(c, "+ "+module.ID).FontSize(t.Rem(.7)).TextColor(t.Text)
+				})
+				if btn.Clicked() {
+					role := "other"
+					if module.Kind == "instrument_profile" {
+						role = "instrument"
+					} else if module.Kind == "dilution" {
+						role = "calculator"
+					}
+					exists := false
+					for _, existing := range a.canvasUses {
+						if existing.Ref == module.ID {
+							exists = true
+						}
+					}
+					if !exists {
+						a.canvasUses = append(a.canvasUses, canvasUseDraft{Ref: module.ID, Role: role})
+					}
+				}
+			}
+		})
 		ui.Divider(c)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "执行任务").FontSize(t.Rem(.75)).Bold().TextColor(t.Text)

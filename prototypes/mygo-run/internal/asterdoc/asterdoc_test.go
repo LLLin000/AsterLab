@@ -416,6 +416,13 @@ func TestStep2UsesStableModuleReferences(t *testing.T) {
 	if _, err := Parse(strings.Replace(source, "ref: uv-1", "ref: missing", 1)); err == nil {
 		t.Fatal("missing module use was accepted")
 	}
+	if _, err := Parse(strings.Replace(source, "role: calculator", "role: instrument", 1)); err == nil {
+		t.Fatal("calculator module accepted instrument role")
+	}
+	if _, err := Parse(strings.Replace(source, "role: calculator", "role: acme:imaging", 1)); err == nil {
+		t.Fatal("namespaced role without capability was accepted")
+	}
+
 	if _, err := Parse(strings.Replace(source, "    role: instrument", "    role: instrument\n  - ref: uv-1\n    role: instrument", 1)); err == nil {
 		t.Fatal("duplicate module use was accepted")
 	}

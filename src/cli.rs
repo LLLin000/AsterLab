@@ -2263,15 +2263,30 @@ fn validate_asterdoc_references(modules: &[serde_yaml::Value]) -> Result<(), Cli
             }
         }
     }
+    let by_id: std::collections::HashMap<String, &serde_yaml::Value> =
+        modules.iter().map(|module| (id(module), module)).collect();
     for module in modules {
         if kind(module) != "step" {
             continue;
         }
         for use_item in module.get("uses").and_then(|value| value.as_sequence()).into_iter().flatten() {
             let ref_id = asterdoc_map_get(use_item, "ref").and_then(|value| value.as_str()).unwrap_or("").trim();
-            if !ref_id.is_empty() && !all_ids.contains(ref_id) {
+            let role = asterdoc_map_get(use_item, "role").and_then(|value| value.as_str()).unwrap_or("").trim();
+            if ref_id.is_empty() {
+                continue;
+            }
+            let target = by_id.get(ref_id).ok_or_else(|| CliError::input(format!(
+                "step {} uses missing module {ref_id}",
+                id(module)
+            )))?;
+            let target_kind = kind(target);
+            let target_schema = target.get("schema").and_then(|value| value.as_i64()).unwrap_or(0);
+            let spec = asterdoc_module_spec(&target_kind, target_schema).ok_or_else(|| {
+                CliError::input(format!("step {} uses unregistered module {ref_id}", id(module)))
+            })?;
+            if !role_allowed_for_module(role, spec) {
                 return Err(CliError::input(format!(
-                    "step {} uses missing module {ref_id}",
+                    "step {} use {ref_id} has role {role} incompatible with {target_kind}",
                     id(module)
                 )));
             }
@@ -2684,6 +2699,22 @@ fn plate_geometry(format: i64) -> Option<(i64, i64)> {
         384 => Some((16, 24)),
         _ => None,
     }
+}
+
+fn role_allowed_for_module(role: &str, spec: &Value) -> bool {
+    let required: Vec<&str> = if let Some(values) = asterdoc_spec()["roleCapabilities"][role].as_array() {
+        values.iter().filter_map(|value| value.as_str()).collect()
+    } else if role.contains(':') {
+        vec![role]
+    } else {
+        return false;
+    };
+    if required.is_empty() {
+        return true;
+    }
+    let declared: Vec<&str> = spec["capabilities"].as_array().into_iter().flatten()
+        .filter_map(|value| value.as_str()).collect();
+    required.iter().any(|required| declared.contains(required))
 }
 
 fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> {

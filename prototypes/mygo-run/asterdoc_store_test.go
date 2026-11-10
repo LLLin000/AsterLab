@@ -124,6 +124,7 @@ func TestAsterDocGoRustParity(t *testing.T) {
 		{"missing typed reference", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\ngroup_refs: [missing-group]\n```\n"},
 		{"valid step2 uses", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: calculator\n```\n"},
 		{"invalid step2 missing use", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: missing\n    role: calculator\n```\n"},
+		{"invalid step2 role capability", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: instrument\n```\n"},
 	}
 	revision := uint64(0)
 	for index, sample := range samples {

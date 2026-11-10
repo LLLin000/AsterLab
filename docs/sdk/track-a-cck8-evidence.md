@@ -67,5 +67,5 @@ The earlier Run `d5163844-1cae-4013-b31e-efe17169d24d` still points to design ve
 - `root/dose` has no resolved timepoint; the shared-D1 advisory remains visible (it no longer claims the tasks are unresolved).
 - The Notebook page now has a read-only `时间线` mode over authoritative Run events (event/batch IDs, task, checks/cells counts, batch drilldown); the editable Markdown modes remain.
 - The first batch predates readout IDs; new batches include them, but the old event is intentionally not rewritten.
-- High-DPI/scale-200 and dark-mode real-window captures are not part of this evidence.
+- Real-window captures are stored under `docs/sdk/evidence/`: 900×600 light, 900×600 dark at 150% display scale, and 1080×640 Run. Scale-200 and additional dark pages remain open.
 - The evidence is a disposable fixture copy; it does not claim a user study.

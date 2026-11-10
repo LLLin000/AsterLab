@@ -373,6 +373,7 @@ pub fn build(
     // resolve a step whose Protocol block did not repeat a time_scope, without
     // guessing from a title or expanding every assay timepoint.
     let explicit_timepoints = explicit_step_timepoints(design_snapshot);
+    let mut task_keys = std::collections::HashSet::new();
     // Tasks are only expanded per timepoint for explicit per-timepoint steps.
     // Missing step-level time scope stays a single task with no claimed timepoint.
     for step in &steps {
@@ -393,6 +394,9 @@ pub fn build(
                 "timepoint": null
             }))
             .unwrap_or_else(|_| format!("{}:{}", scope_id(&step.scope), step.step.path));
+            if !task_keys.insert(key.clone()) {
+                return Err(RunWorkspaceError(format!("duplicate task key {key}")));
+            }
             tasks.push(PlannedTask {
                 task_key: key,
                 step_path: step.step.path.clone(),
@@ -411,6 +415,9 @@ pub fn build(
                 .unwrap_or_else(|_| {
                     format!("{}:{}:{}", scope_id(&step.scope), step.step.path, timepoint)
                 });
+                if !task_keys.insert(key.clone()) {
+                    return Err(RunWorkspaceError(format!("duplicate task key {key}")));
+                }
                 tasks.push(PlannedTask {
                     task_key: key,
                     step_path: step.step.path.clone(),
@@ -636,6 +643,13 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn duplicate_task_keys_are_rejected_not_silently_merged() {
+        let mut run = run();
+        run["protocol_manifest"][0]["steps"][1]["path"] = json!("root/a");
+        assert!(build("r1", "d1", "dv1", 1, &design(), &run, &[], &[]).is_err());
     }
 
     #[test]

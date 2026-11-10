@@ -66,7 +66,7 @@ After `step@2` was introduced, `step-seed` was bound to `uv-1` and `dilution-01`
 
 - The binding is implemented through `step@2.uses`; `step@1` is unchanged. Role values are currently validated as non-empty strings rather than a closed enum.
 - A read-only Notebook timeline now exposes the same authoritative events and batch drilldown.
-- The generic editor treats the `uses` list as read-only; binding is authored through AsterDoc/Agent or a semantic command.
+- The Step Inspector now edits `uses` through the existing `update_module` command; the generic editor still treats arbitrary list/object fields as read-only.
 - Task identity currently uses frozen path + scope + timepoint; a separate Task Template/Instance ID remains a future extension.
 - The generic editor intentionally leaves list/object fields (capabilities/constraints/evidence) read-only in this pass.
 - No `sdk new`/`sdk validate`/`sdk test` CLI; tooling remains the Go registry plus shared manifest and tests.

@@ -6,7 +6,11 @@
   "$defs": {
     "moduleEnvelope": {
       "type": "object",
-      "required": ["kind", "id", "schema"],
+      "required": [
+        "kind",
+        "id",
+        "schema"
+      ],
       "properties": {
         "kind": {
           "type": "string",
@@ -27,9 +31,14 @@
     },
     "quantity": {
       "type": "object",
-      "required": ["value", "unit"],
+      "required": [
+        "value",
+        "unit"
+      ],
       "properties": {
-        "value": {"type": "number"},
+        "value": {
+          "type": "number"
+        },
         "unit": {
           "type": "string",
           "minLength": 1,
@@ -45,7 +54,9 @@
     },
     "artifact": {
       "type": "object",
-      "required": ["uri"],
+      "required": [
+        "uri"
+      ],
       "properties": {
         "uri": {
           "type": "string",
@@ -53,9 +64,16 @@
           "pattern": "^(?![Dd][Aa][Tt][Aa]:)",
           "description": "External artifact URI. Inline data URIs are not document data."
         },
-        "media_type": {"type": "string"},
-        "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"},
-        "label": {"type": "string"}
+        "media_type": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        },
+        "label": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -65,11 +83,21 @@
     },
     "timepoint": {
       "oneOf": [
-        {"type": "string", "minLength": 1},
+        {
+          "type": "string",
+          "minLength": 1
+        },
         {
           "type": "object",
-          "required": ["label"],
-          "properties": {"label": {"type": "string", "minLength": 1}},
+          "required": [
+            "label"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
           "additionalProperties": true
         }
       ],
@@ -77,158 +105,425 @@
     },
     "relativeTime": {
       "type": "object",
-      "required": ["anchor", "offset"],
+      "required": [
+        "anchor",
+        "offset"
+      ],
       "properties": {
-        "anchor": {"type": "string", "minLength": 1},
-        "offset": {"$ref": "#/$defs/quantity"}
+        "anchor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "$ref": "#/$defs/quantity"
+        }
       },
       "additionalProperties": false
     },
     "diagnostic": {
       "type": "object",
-      "required": ["code", "path", "message", "severity"],
+      "required": [
+        "code",
+        "path",
+        "message",
+        "severity"
+      ],
       "properties": {
-        "code": {"type": "string", "minLength": 1},
-        "path": {"type": "string", "minLength": 1},
-        "message": {"type": "string", "minLength": 1},
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
         "severity": {
           "type": "string",
-          "enum": ["blocking", "needs_confirmation", "advisory"]
+          "enum": [
+            "blocking",
+            "needs_confirmation",
+            "advisory"
+          ]
         },
-        "affects": {"type": "array", "items": {"type": "string"}},
-        "next_action": {"type": "string"}
+        "affects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "next_action": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "port": {
       "type": "object",
-      "required": ["name", "type"],
+      "required": [
+        "name",
+        "type"
+      ],
       "properties": {
-        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
         "type": {
           "type": "string",
           "enum": [
-            "string", "enum", "boolean", "integer", "decimal",
-            "quantity", "reference", "list", "object", "table",
-            "geometry", "artifact", "duration", "timepoint", "relative_time",
-            "bool", "int", "number", "well-map", "string[]", "object-list"
+            "string",
+            "enum",
+            "boolean",
+            "integer",
+            "decimal",
+            "quantity",
+            "reference",
+            "list",
+            "object",
+            "table",
+            "geometry",
+            "artifact",
+            "duration",
+            "timepoint",
+            "relative_time",
+            "bool",
+            "int",
+            "number",
+            "well-map",
+            "string[]",
+            "object-list"
           ]
         },
-        "required": {"type": "boolean"},
-        "description": {"type": "string"},
-        "target": {"type": "string", "description": "Required for reference; names a module kind or module."},
-        "item_type": {"type": "string"},
-        "dimension": {"type": "string"},
-        "values": {"type": "array", "items": {"type": "string"}},
-        "origin": {"type": "string", "enum": ["planned", "derived", "recorded", "view"]},
-        "calculator": {"type": "string"}
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "description": "Required for reference; names a module kind or module."
+        },
+        "item_type": {
+          "type": "string"
+        },
+        "dimension": {
+          "type": "string"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "planned",
+            "derived",
+            "recorded",
+            "view"
+          ]
+        },
+        "calculator": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "action": {
       "type": "object",
-      "required": ["id", "title", "permission", "writes"],
+      "required": [
+        "id",
+        "title",
+        "permission",
+        "writes"
+      ],
       "properties": {
-        "id": {"type": "string", "minLength": 1},
-        "title": {"type": "string", "minLength": 1},
-        "permission": {"type": "string", "minLength": 1},
-        "writes": {"type": "array", "items": {"type": "string"}}
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "permission": {
+          "type": "string",
+          "minLength": 1
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": false
     },
     "moduleManifest": {
       "type": "object",
-      "required": ["kind", "schema", "title", "modes", "inputs", "outputs", "actions"],
+      "required": [
+        "kind",
+        "schema",
+        "title",
+        "modes",
+        "inputs",
+        "outputs",
+        "actions"
+      ],
       "properties": {
-        "kind": {"$ref": "#/$defs/moduleEnvelope/properties/kind"},
-        "schema": {"$ref": "#/$defs/moduleEnvelope/properties/schema"},
-        "title": {"type": "string", "minLength": 1},
-        "description": {"type": "string"},
-        "sdk": {"type": "string"},
-        "category": {"type": "string", "enum": ["workflow", "resource", "labware", "measurement", "document", "device"]},
-        "capabilities": {"type": "array", "items": {"type": "string"}},
-        "permissions": {"type": "array", "items": {"type": "string"}},
+        "kind": {
+          "$ref": "#/$defs/moduleEnvelope/properties/kind"
+        },
+        "schema": {
+          "$ref": "#/$defs/moduleEnvelope/properties/schema"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "sdk": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "workflow",
+            "resource",
+            "labware",
+            "measurement",
+            "document",
+            "device"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "renderers": {
           "type": "object",
           "properties": {
-            "design": {"type": "string"},
-            "document": {"type": "string"},
-            "static": {"type": "string"}
+            "design": {
+              "type": "string"
+            },
+            "document": {
+              "type": "string"
+            },
+            "static": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
         "lifecycle": {
           "type": "object",
           "properties": {
-            "states": {"type": "array", "items": {"type": "string"}},
-            "freeze": {"type": "string"}
+            "states": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "freeze": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
         "provenance": {
           "type": "object",
           "properties": {
-            "origin": {"type": "string", "enum": ["planned", "derived", "recorded"]},
-            "record_boundary": {"type": "string"}
+            "origin": {
+              "type": "string",
+              "enum": [
+                "planned",
+                "derived",
+                "recorded"
+              ]
+            },
+            "record_boundary": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "modes": {"type": "array", "items": {"type": "string"}},
-        "inputs": {"type": "array", "items": {"$ref": "#/$defs/port"}},
-        "outputs": {"type": "array", "items": {"$ref": "#/$defs/port"}},
-        "actions": {"type": "array", "items": {"$ref": "#/$defs/action"}},
-        "rules": {"type": "array", "items": {"type": "string"}}
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/port"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/port"
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": false
     },
     "manifestFile": {
       "type": "object",
-      "required": ["schemaVersion", "foundationVersion", "sdkVersion", "modules"],
+      "required": [
+        "schemaVersion",
+        "foundationVersion",
+        "sdkVersion",
+        "modules"
+      ],
       "properties": {
-        "schemaVersion": {"type": "integer", "const": 1},
-        "foundationVersion": {"type": "integer", "const": 1},
-        "sdkVersion": {"type": "string", "minLength": 1},
-        "modules": {"type": "array", "items": {"$ref": "#/$defs/moduleManifest"}}
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "foundationVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "sdkVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/moduleManifest"
+          }
+        },
+        "roleCapabilities": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Built-in role to required module capabilities. Namespaced roles require the exact capability on the target module."
+        }
       },
       "additionalProperties": false
     },
     "moduleBody": {
-      "allOf": [{"$ref": "#/$defs/moduleEnvelope"}],
+      "allOf": [
+        {
+          "$ref": "#/$defs/moduleEnvelope"
+        }
+      ],
       "type": "object",
       "additionalProperties": true,
       "description": "The three identity fields are frozen; scientific fields come from the matching module manifest."
     },
     "templateManifest": {
       "type": "object",
-      "required": ["template_id", "version", "dependencies", "parameters", "requirements", "defaults", "instantiate", "provenance"],
+      "required": [
+        "template_id",
+        "version",
+        "dependencies",
+        "parameters",
+        "requirements",
+        "defaults",
+        "instantiate",
+        "provenance"
+      ],
       "properties": {
-        "template_id": {"type": "string", "minLength": 1},
-        "version": {"type": "string", "minLength": 1},
+        "template_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
         "dependencies": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["kind", "schema"],
+            "required": [
+              "kind",
+              "schema"
+            ],
             "properties": {
-              "kind": {"type": "string"},
-              "schema": {"type": "integer", "minimum": 1},
-              "version_range": {"type": "string"}
+              "kind": {
+                "type": "string"
+              },
+              "schema": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "version_range": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
         },
-        "parameters": {"type": "array", "items": {"type": "object"}},
-        "requirements": {"type": "array", "items": {"type": "string"}},
-        "defaults": {"type": "object"},
-        "instantiate": {"type": "object"},
-        "provenance": {"type": "object"}
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "defaults": {
+          "type": "object"
+        },
+        "instantiate": {
+          "type": "object"
+        },
+        "provenance": {
+          "type": "object"
+        }
       },
       "additionalProperties": false
     }
   },
   "oneOf": [
-    {"$ref": "#/$defs/manifestFile"},
-    {"$ref": "#/$defs/moduleBody"},
-    {"$ref": "#/$defs/templateManifest"}
+    {
+      "$ref": "#/$defs/manifestFile"
+    },
+    {
+      "$ref": "#/$defs/moduleBody"
+    },
+    {
+      "$ref": "#/$defs/templateManifest"
+    }
   ]
 }

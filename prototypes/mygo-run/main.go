@@ -85,6 +85,8 @@ type app struct {
 	confirmDeleteStep   string
 	canvasTasks         []canvasTaskDraft
 	canvasChecks        []canvasCheckDraft
+	canvasUses          []canvasUseDraft
+	canvasUsePick       string
 	toolsTab            int
 	noteDraft           string
 	noteRunID           string
@@ -1547,6 +1549,9 @@ func (a *app) saveNotebook() {
 }
 
 func main() {
+	if strings.EqualFold(os.Getenv("ASTERLAB_THEME"), "dark") {
+		mygo.Theme.SetSource(mygo.ThemeDark)
+	}
 	page, step := "project", "design-l929"
 	_ = step
 
