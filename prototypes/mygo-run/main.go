@@ -38,6 +38,12 @@ import (
 
 type sample struct{ id, value string }
 
+type pdfExportResult struct {
+	path     string
+	err      error
+	canceled bool
+}
+
 type app struct {
 	page    *string
 	step    *string
@@ -48,8 +54,11 @@ type app struct {
 	snap                runs.RunSnapshot
 	err                 string
 	batchView           string
-	asterDoc            *runs.AsterDocSnapshot
+	asterDoc            *asterdoc.FrozenAsterDoc
 	asterErr            string
+	pdfExporting        bool
+	pdfExportResults    chan pdfExportResult
+	showFrozenDoc       bool
 	designDoc           *runs.AsterDocSnapshot
 	designView          *asterdoc.View
 	designDocErr        string
@@ -263,9 +272,9 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 // loadFrozenAsterDoc loads the exact document revision frozen on the Run. The
 // latest live document is never substituted for a missing or broken revision.
 func (a *app) loadFrozenAsterDoc() {
+	a.asterDoc = nil
+	a.asterErr = ""
 	if a.snap.AsterDoc == nil {
-		a.asterDoc = nil
-		a.asterErr = ""
 		return
 	}
 	if a.designSvc == nil {
@@ -273,19 +282,200 @@ func (a *app) loadFrozenAsterDoc() {
 		return
 	}
 	ref := a.snap.AsterDoc
-	doc, err := a.designSvc.LoadAsterDocAt(context.Background(), ref.DesignID, ref.Revision)
+	if ref.SourceHash == "" {
+		a.asterErr = "Run 未记录冻结文档源码哈希"
+		return
+	}
+	frozen, err := asterdoc.LoadFrozenAsterDocAt(
+		context.Background(), a.designSvc, ref.DesignID, ref.Revision, ref.SourceHash,
+	)
 	if err != nil {
-		a.asterDoc = nil
 		a.asterErr = state.MapError(err).Error()
 		return
 	}
-	if doc.SourceHash != ref.SourceHash {
-		a.asterDoc = nil
-		a.asterErr = "冻结文档的源码哈希与 Run 记录不一致"
+	a.asterDoc = &frozen
+}
+
+func (a *app) startPDFExport(c *ui.Context) {
+	if a.pdfExporting {
 		return
 	}
-	a.asterDoc = &doc
-	a.asterErr = ""
+	if a.snap.AsterDoc == nil || a.designSvc == nil {
+		c.AddToast(ui.Toast{Title: "无法导出 PDF", Description: "当前 Run 未关联可读取的冻结 AsterDoc。", Type: components.ToastError})
+		return
+	}
+	ref := *a.snap.AsterDoc
+	loader := a.designSvc
+	runID, title := a.snap.RunID, a.snap.Title
+	designData, designID, designRevision := a.snap.DesignData, a.snap.DesignID, a.snap.DesignRevision
+	if ref.SourceHash == "" {
+		c.AddToast(ui.Toast{Title: "无法导出 PDF", Description: "Run 未记录冻结文档源码哈希。", Type: components.ToastError})
+		return
+	}
+	a.pdfExporting = true
+	a.pdfExportResults = make(chan pdfExportResult, 1)
+	c.AddToast(ui.Toast{
+		ID: "asterlab-pdf-export", Title: "正在导出 PDF…", Timeout: -1,
+		Data: components.ToastContent{Leading: func() { components.Spinner(c, components.SpinnerRing) }},
+	})
+	results := a.pdfExportResults
+	go func() {
+		defer func() {
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		}()
+		frozen, err := asterdoc.LoadFrozenAsterDocAt(
+			context.Background(), loader, ref.DesignID, ref.Revision, ref.SourceHash,
+		)
+		if err != nil {
+			results <- pdfExportResult{err: err}
+			return
+		}
+		plan := ""
+		if designData != "" {
+			doc, err := protocol.Build(designData, designID, designRevision)
+			if err != nil {
+				results <- pdfExportResult{err: fmt.Errorf("冻结实验方案无法生成: %w", err)}
+				return
+			}
+			plan = doc.Markdown()
+		}
+		home, _ := os.UserHomeDir()
+		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+			Parent: mygo.FocusedWindow(), Title: "导出 PDF",
+			DefaultPath: filepath.Join(home, pdfFilename(title)), ButtonLabel: "保存",
+			Filters: []mygo.FileFilter{{Name: "PDF", Extensions: []string{"pdf"}}},
+		})
+		if err != nil {
+			results <- pdfExportResult{err: err}
+			return
+		}
+		if path == "" {
+			results <- pdfExportResult{canceled: true}
+			return
+		}
+		if !strings.EqualFold(filepath.Ext(path), ".pdf") {
+			path += ".pdf"
+		}
+		dir := filepath.Dir(path)
+		tmp, err := os.CreateTemp(dir, ".asterlab-export-*.pdf")
+		if err != nil {
+			results <- pdfExportResult{err: err}
+			return
+		}
+		tmpPath := tmp.Name()
+		err = asterdoc.ExportFrozenPDF(tmp, title, frozen, runID, plan)
+		if err == nil {
+			err = tmp.Sync()
+		}
+		if closeErr := tmp.Close(); err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			err = os.Rename(tmpPath, path)
+		}
+		if err != nil {
+			_ = os.Remove(tmpPath)
+			results <- pdfExportResult{err: err}
+			return
+		}
+		results <- pdfExportResult{path: path}
+	}()
+}
+
+func pdfFilename(title string) string {
+	name := strings.Map(func(r rune) rune {
+		if strings.ContainsRune(`<>:"/\\|?*`, r) || r < 32 {
+			return '_'
+		}
+		return r
+	}, strings.TrimSpace(title))
+	if name == "" || name == "." || name == ".." {
+		name = "AsterLab"
+	}
+	return name + ".pdf"
+}
+
+func (a *app) pollPDFExport(c *ui.Context) {
+	if a.pdfExportResults == nil {
+		return
+	}
+	select {
+	case result := <-a.pdfExportResults:
+		a.pdfExportResults = nil
+		a.pdfExporting = false
+		c.CloseToast("asterlab-pdf-export")
+		if result.canceled {
+			return
+		}
+		if result.err != nil {
+			c.AddToast(ui.Toast{Title: "PDF 导出失败", Description: result.err.Error(), Type: components.ToastError})
+			return
+		}
+		c.AddToast(ui.Toast{
+			Title: "PDF 已保存", Description: result.path, Type: components.ToastSuccess,
+			Action: "打开 PDF", OnAction: func() { go mygo.Shell.OpenPath(result.path) },
+		})
+	default:
+	}
+}
+
+func (a *app) documentExportButton(c *ui.Context) {
+	if a.snap.AsterDoc == nil {
+		return
+	}
+	button := components.Button(c, "导出 PDF", components.ButtonSecondary)
+	button.Disabled(a.pdfExporting || a.asterErr != "")
+	if button.Clicked() && !a.pdfExporting && a.asterErr == "" {
+		a.startPDFExport(c)
+	}
+}
+
+func (a *app) documentToolbar(c *ui.Context) {
+	ui.Row(c).FillWidth().Padding(6, 12).AlignItems(ui.Center).Gap(8).Children(func() {
+		if a.snap.AsterDoc != nil {
+			ui.Text(c, fmt.Sprintf("冻结文档 Revision: %d", a.snap.AsterDoc.Revision)).
+				FontSize(11).TextColor(c.Theme().TextMuted)
+		} else if a.snap.DesignRevision > 0 {
+			ui.Text(c, fmt.Sprintf("Document Revision: %d", a.snap.DesignRevision)).
+				FontSize(11).TextColor(c.Theme().TextMuted)
+		} else {
+			ui.Text(c, "尚未关联文档 Revision").FontSize(11).TextColor(c.Theme().TextMuted)
+		}
+		if a.snap.AsterDoc != nil {
+			label := "查看冻结文档"
+			if a.showFrozenDoc {
+				label = "隐藏冻结文档"
+			}
+			if components.Button(c, label, components.ButtonGhost).Clicked() {
+				a.showFrozenDoc = !a.showFrozenDoc
+			}
+		}
+		a.documentExportButton(c)
+	})
+}
+
+func (a *app) renderFrozenAsterDoc(c *ui.Context, mode asterdoc.Mode) {
+	t := c.Theme()
+	if a.asterErr != "" {
+		ui.Text(c, "冻结文档无法读取："+a.asterErr).FontSize(t.Rem(.85)).TextColor(t.Danger)
+		return
+	}
+	if a.asterDoc == nil {
+		ui.Text(c, "正在读取冻结文档…").FontSize(t.Rem(.85)).TextColor(t.TextMuted)
+		return
+	}
+	doc, err := asterdoc.Parse(a.asterDoc.Source)
+	if err != nil {
+		ui.Text(c, "冻结文档语法无法解析："+err.Error()).FontSize(t.Rem(.85)).TextColor(t.Danger)
+		return
+	}
+	view := &asterdoc.View{
+		Doc: doc, Registry: asterdoc.BuiltinRegistry(), Mode: mode,
+		ReadOnly: true, DocumentRevision: fmt.Sprint(a.asterDoc.Revision),
+	}
+	view.Render(c)
 }
 
 //go:embed starter.asterml
@@ -890,33 +1080,29 @@ func designPage(c *ui.Context, a *app) {
 func protocolPage(c *ui.Context, a *app) {
 	// A document-backed Run reads its exact frozen AsterDoc revision.
 	if a.snap.RunID != "" && a.snap.AsterDoc != nil {
-		if a.asterErr != "" {
-			ui.Column(c).Grow(1).Padding(c.Theme().Space(8)).Gap(c.Theme().Space(2)).Children(func() {
-				ui.Text(c, "冻结文档无法读取。").FontSize(16).Bold().TextColor(c.Theme().Danger)
-				ui.Text(c, a.asterErr).FontSize(13).TextColor(c.Theme().TextMuted)
-			})
-			return
-		}
-		if a.asterDoc == nil {
-			ui.Text(c, "正在读取冻结文档…").Padding(c.Theme().Space(8)).TextColor(c.Theme().TextMuted)
-			return
-		}
-		doc, err := asterdoc.Parse(a.asterDoc.Source)
-		if err != nil {
-			ui.Text(c, "冻结文档语法无法解析："+err.Error()).Padding(c.Theme().Space(8)).
-				TextColor(c.Theme().Danger)
-			return
-		}
-		ui.Scroll(c).Fill().Children(func() {
-			ui.Column(c).FillWidth().Padding(c.Theme().Space(6), c.Theme().Space(6)).
+		ui.Column(c).Fill().Children(func() {
+			ui.Row(c).FillWidth().Padding(c.Theme().Space(2), c.Theme().Space(4)).
 				AlignItems(ui.Center).Children(func() {
-				ui.Box(c).FillWidth().MaxWidth(900).MaxWidthPercent(100).
-					Radius(float32(18)).Border(1, c.Theme().Border).Background(c.Theme().Surface).
-					Padding(c.Theme().Space(7), c.Theme().Space(8)).Children(func() {
-					ui.Text(c, fmt.Sprintf("冻结文档 · rev %d", a.asterDoc.Revision)).
-						FontSize(11).Bold().TextColor(c.Theme().TextMuted)
-					view := &asterdoc.View{Doc: doc, Mode: asterdoc.ModeProtocol, ReadOnly: true}
-					view.Render(c)
+				ui.Text(c, fmt.Sprintf("冻结文档 · rev %d", a.snap.AsterDoc.Revision)).
+					FontSize(11).Bold().TextColor(c.Theme().TextMuted)
+				ui.Spacer(c)
+				a.documentExportButton(c)
+			})
+			if a.asterErr != "" {
+				ui.Column(c).Grow(1).Padding(c.Theme().Space(8)).Gap(c.Theme().Space(2)).Children(func() {
+					ui.Text(c, "冻结文档无法读取。").FontSize(16).Bold().TextColor(c.Theme().Danger)
+					ui.Text(c, a.asterErr).FontSize(13).TextColor(c.Theme().TextMuted)
+				})
+				return
+			}
+			ui.Scroll(c).Fill().Children(func() {
+				ui.Column(c).FillWidth().Padding(c.Theme().Space(6), c.Theme().Space(6)).
+					AlignItems(ui.Center).Children(func() {
+					ui.Box(c).FillWidth().MaxWidth(900).MaxWidthPercent(100).
+						Radius(float32(18)).Border(1, c.Theme().Border).Background(c.Theme().Surface).
+						Padding(c.Theme().Space(7), c.Theme().Space(8)).Children(func() {
+						a.renderFrozenAsterDoc(c, asterdoc.ModeProtocol)
+					})
 				})
 			})
 		})
@@ -925,6 +1111,12 @@ func protocolPage(c *ui.Context, a *app) {
 	// A loaded Run must read its frozen design. If that revision is missing or
 	// corrupt the page reports it; showing the live draft would pass a later
 	// edit off as the plan executed on the day.
+	if a.snap.RunID != "" && a.snap.AsterDoc == nil {
+		ui.Row(c).FillWidth().Padding(c.Theme().Space(2), c.Theme().Space(4)).Children(func() {
+			ui.Text(c, fmt.Sprintf("Document Revision: %d", a.snap.DesignRevision)).
+				FontSize(11).TextColor(c.Theme().TextMuted)
+		})
+	}
 	if a.snap.RunID != "" {
 		if a.snap.DesignData == "" {
 			ui.Column(c).Grow(1).Padding(c.Theme().Space(8)).Gap(c.Theme().Space(2)).Children(func() {
@@ -1223,7 +1415,12 @@ func notebookPage(c *ui.Context, a *app) {
 			ui.Text(c, "/").FontSize(11).TextColor(t.Border)
 			ui.Text(c, a.snap.Title).FontSize(11).TextColor(t.TextMuted).
 				SingleLine().Ellipsis("…").MaxWidth(420)
+			if a.snap.AsterDoc == nil && a.snap.DesignRevision > 0 {
+				ui.Text(c, fmt.Sprintf("Document Revision: %d", a.snap.DesignRevision)).
+					FontSize(10).TextColor(t.TextMuted)
+			}
 			ui.Spacer(c)
+			a.documentExportButton(c)
 			ui.Text(c, fmt.Sprintf("%d / 5000", len([]rune(a.noteSource())))).
 				FontSize(10).TextColor(t.TextMuted).FontFeatures("tnum")
 		})
@@ -1372,6 +1569,15 @@ func (a *app) renderNotebookTimeline(c *ui.Context) {
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().Padding(t.Space(3), t.Space(5)).Gap(t.Space(2)).
 			AlignItems(ui.Center).Children(func() {
+			if a.snap.AsterDoc != nil {
+				ui.Box(c).FillWidth().MaxWidth(980).MaxWidthPercent(100).
+					Background(t.Surface).Border(1, t.Border).Radius(t.Space(2)).
+					Padding(t.Space(4), t.Space(5)).Children(func() {
+					ui.Text(c, fmt.Sprintf("冻结 AsterDoc · Revision %d", a.snap.AsterDoc.Revision)).
+						FontSize(t.Rem(1)).Bold().TextColor(t.Text)
+					a.renderFrozenAsterDoc(c, asterdoc.ModeNotebook)
+				})
+			}
 			ui.Box(c).FillWidth().MaxWidth(980).MaxWidthPercent(100).
 				Background(t.Surface).Border(1, t.Border).Radius(t.Space(2)).
 				Padding(t.Space(4), t.Space(5)).Children(func() {
@@ -1844,18 +2050,30 @@ func main() {
 }
 
 func contentPage(c *ui.Context, a *app) {
+	a.pollPDFExport(c)
 	switch a.shell.Page {
 	case shell.Design:
 		designPage(c, a)
 	case shell.Run:
-		if a.batchView != "" {
-			batchPage(c, a)
-		} else if a.ws != nil {
-			a.ws.Width = 1200
-			runui.View(c, a.ws)
-		} else {
-			ui.Text(c, "加载中…")
-		}
+		ui.Column(c).Fill().Children(func() {
+			a.documentToolbar(c)
+			if a.showFrozenDoc && a.snap.AsterDoc != nil {
+				ui.Scroll(c).Height(260).Children(func() {
+					ui.Box(c).FillWidth().Background(c.Theme().Surface).
+						Padding(c.Theme().Space(3), c.Theme().Space(4)).Children(func() {
+						a.renderFrozenAsterDoc(c, asterdoc.ModeRun)
+					})
+				})
+			}
+			if a.batchView != "" {
+				batchPage(c, a)
+			} else if a.ws != nil {
+				a.ws.Width = 1200
+				runui.View(c, a.ws)
+			} else {
+				ui.Text(c, "加载中…")
+			}
+		})
 	case shell.Notebook:
 		notebookPage(c, a)
 	case shell.Tools:

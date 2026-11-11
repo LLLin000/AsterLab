@@ -3,75 +3,163 @@ package asterdoc
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"time"
+
+	"github.com/jung-kurt/gofpdf"
 )
 
-// ExportPDF writes a minimal, deterministic PDF from a document revision and
-// rendered module previews. It uses only the standard library.
+var chineseFontCandidates = []string{
+	"C:/Windows/Fonts/simhei.ttf",
+	"C:/Windows/Fonts/simsunb.ttf",
+	"C:/Windows/Fonts/NotoSansSC-VF.ttf",
+}
+
+// ExportPDF writes a deterministic, multi-page PDF from a frozen document's
+// rendered Markdown and module previews.
 func ExportPDF(w io.Writer, title, revision, sourceHash string, previews []string) error {
-	var body strings.Builder
-	body.WriteString("%PDF-1.4\n")
-	objects := []string{}
-	add := func(s string) int {
-		objects = append(objects, s)
-		return len(objects)
+	return ExportPDFWithRun(w, title, revision, sourceHash, "", previews)
+}
+
+// ExportPDFWithRun includes the linked Run identifier in the traceability stamp.
+// gofpdf is used instead of the former text-only writer because it supports
+// paginated wrapping and embedded UTF-8 TrueType fonts for Chinese output.
+func ExportPDFWithRun(w io.Writer, title, revision, sourceHash, runID string, previews []string) error {
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetCreationDate(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	pdf.SetModificationDate(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	pdf.SetMargins(16, 16, 16)
+	pdf.SetAutoPageBreak(true, 16)
+	font := "Helvetica"
+	needsCJK := containsCJK(title, revision, sourceHash, runID, previews)
+	if needsCJK {
+		for _, path := range chineseFontCandidates {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			pdf.AddUTF8FontFromBytes("AsterCJK", "", data)
+			if err := pdf.Error(); err != nil {
+				return fmt.Errorf("load CJK font %q: %w", path, err)
+			}
+			font = "AsterCJK"
+			break
+		}
+		if font == "Helvetica" {
+			return fmt.Errorf("cannot export Chinese text: no CJK TrueType font found")
+		}
 	}
-	// 1: catalog
-	cat := add("<< /Type /Catalog /Pages 2 0 R >>")
-	// 2: pages (placeholder, filled later)
-	pagesIdx := add("PAGES")
-	// 3: font
-	fontIdx := add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-	// content stream
-	var content strings.Builder
-	content.WriteString("BT\n/F1 11 Tf\n50 780 Td\n")
-	writeLine := func(line string) {
-		line = pdfEscape(line)
-		content.WriteString(fmt.Sprintf("(%s) Tj\n0 -14 Td\n", line))
+	pdf.SetTitle(title, true)
+	traceability := "Document Revision: " + revision + "; Source Hash: " + sourceHash
+	if runID != "" {
+		traceability += "; Linked Run: " + runID
 	}
-	writeLine(sanitize(title))
-	writeLine(fmt.Sprintf("Revision: %s", revision))
-	writeLine(fmt.Sprintf("Source hash: %s", sourceHash))
-	writeLine("")
+	pdf.SetSubject(traceability, false)
+	pdf.SetFooterFunc(func() {
+		pdf.SetY(-12)
+		pdf.SetFont("Helvetica", "", 8)
+		pdf.CellFormat(0, 8, fmt.Sprintf("Page %d", pdf.PageNo()), "", 0, "C", false, 0, "")
+	})
+	pdf.AddPage()
+	pdf.SetFont(font, "", 18)
+	pdf.MultiCell(0, 9, title, "", "", false)
+	pdf.SetFont(font, "", 9)
+	pdf.MultiCell(0, 5, "Document Revision: "+revision, "", "", false)
+	pdf.MultiCell(0, 5, "Source Hash: "+sourceHash, "", "", false)
+	if runID != "" {
+		pdf.MultiCell(0, 5, "Linked Run: "+runID, "", "", false)
+	}
+	pdf.Ln(5)
 	for _, preview := range previews {
 		for _, line := range strings.Split(preview, "\n") {
-			writeLine(line)
+			renderPDFLine(pdf, font, line)
 		}
-		writeLine("")
+		pdf.Ln(4)
 	}
-	content.WriteString("ET\n")
-	stream := content.String()
-	pageContent := fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream)
-	contentIdx := add(pageContent)
-	page := fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>", fontIdx, contentIdx)
-	pageIdx := add(page)
-	// fix pages
-	objects[pagesIdx-1] = fmt.Sprintf("<< /Type /Pages /Kids [%d 0 R] /Count 1 >>", pageIdx)
-	// write objects
-	offsets := make([]int, len(objects)+1)
-	for i, obj := range objects {
-		offsets[i+1] = body.Len()
-		fmt.Fprintf(&body, "%d 0 obj\n%s\nendobj\n", i+1, obj)
-	}
-	xrefPos := body.Len()
-	fmt.Fprintf(&body, "xref\n0 %d\n", len(objects)+1)
-	body.WriteString("0000000000 65535 f \n")
-	for i := 1; i <= len(objects); i++ {
-		fmt.Fprintf(&body, "%010d 00000 n \n", offsets[i])
-	}
-	fmt.Fprintf(&body, "trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, cat, xrefPos)
-	_, err := io.WriteString(w, body.String())
-	return err
+	return pdf.Output(w)
 }
 
-func pdfEscape(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "(", "\\(")
-	s = strings.ReplaceAll(s, ")", "\\)")
-	return s
+// ExportFrozenPDF exports a verified frozen document to PDF. It refuses to
+// export if the source no longer matches the pinned source_hash.
+func ExportFrozenPDF(w io.Writer, title string, frozen FrozenAsterDoc, runID, plan string) error {
+	if !frozen.VerifySourceHash(frozen.Source) {
+		return fmt.Errorf("frozen source hash mismatch: document tampered after freeze")
+	}
+	doc, err := Parse(frozen.Source)
+	if err != nil {
+		return fmt.Errorf("frozen document parse failed: %w", err)
+	}
+	previews := []string{}
+	if markdown := strings.TrimSpace(markdownOutsideAsterLabFences(frozen.Source)); markdown != "" {
+		previews = append(previews, markdown)
+	}
+	if plan != "" {
+		previews = append(previews, "Experiment Plan\n"+plan)
+	}
+	if modules := StaticDocumentPreview(doc); modules != "" {
+		previews = append(previews, modules)
+	}
+	return ExportPDFWithRun(w, title, fmt.Sprint(frozen.Revision), frozen.SourceHash, runID, previews)
 }
 
-func sanitize(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	return s
+func markdownOutsideAsterLabFences(source string) string {
+	var markdown strings.Builder
+	inAsterLab := false
+	for _, line := range strings.SplitAfter(source, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			if inAsterLab || strings.TrimSpace(strings.TrimPrefix(trimmed, "```")) == "asterlab" {
+				inAsterLab = !inAsterLab
+				continue
+			}
+		}
+		if !inAsterLab {
+			markdown.WriteString(line)
+		}
+	}
+	return markdown.String()
+}
+
+func containsCJK(title, revision, sourceHash, runID string, previews []string) bool {
+	text := strings.Join(append([]string{title, revision, sourceHash, runID}, previews...), "\n")
+	for _, r := range text {
+		if r >= 0x3400 && r <= 0x9FFF {
+			return true
+		}
+	}
+	return false
+}
+
+func renderPDFLine(pdf *gofpdf.Fpdf, font, line string) {
+	line = strings.TrimRight(line, " \t")
+	if strings.TrimSpace(line) == "" {
+		pdf.Ln(3)
+		return
+	}
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "|---") || strings.HasPrefix(trimmed, "| ---") {
+		return
+	}
+	size := 10.0
+	if strings.HasPrefix(trimmed, "#") {
+		level := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+		trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+		size = 16 - float64(level)
+		if size < 11 {
+			size = 11
+		}
+	} else if strings.HasPrefix(trimmed, "|") {
+		cells := strings.Split(strings.Trim(trimmed, "|"), "|")
+		for i := range cells {
+			cells[i] = strings.TrimSpace(cells[i])
+		}
+		trimmed = strings.Join(cells, "   │   ")
+	} else if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+		trimmed = "• " + strings.TrimSpace(trimmed[2:])
+	}
+	trimmed = strings.ReplaceAll(trimmed, "**", "")
+	trimmed = strings.ReplaceAll(trimmed, "`", "")
+	pdf.SetFont(font, "", size)
+	pdf.MultiCell(0, 5, trimmed, "", "", false)
 }

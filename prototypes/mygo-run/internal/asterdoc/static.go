@@ -19,6 +19,28 @@ func StaticPreview(m Module) string {
 		title = spec.Descriptor.Title
 	}
 	lines := []string{fmt.Sprintf("%s (%s@%d) · %s", title, m.Kind, m.Schema, m.ID)}
+	if m.Plate != nil {
+		if m.Plate.Assay != "" {
+			lines = append(lines, "  assay: "+m.Plate.Assay)
+		}
+		if m.Plate.Timepoint != "" {
+			lines = append(lines, "  timepoint: "+m.Plate.Timepoint)
+		}
+		lines = append(lines, fmt.Sprintf("  format: %d", m.Plate.Format))
+		var coordinates []string
+		for row := 'A'; row <= 'H'; row++ {
+			for column := 1; column <= 12; column++ {
+				coordinates = append(coordinates, fmt.Sprintf("%c%d", row, column))
+			}
+		}
+		lines = append(lines, "  coordinates: "+strings.Join(coordinates, ", "))
+		for _, group := range m.Plate.GroupNames() {
+			wells := append([]string(nil), m.Plate.Groups[group]...)
+			sort.Strings(wells)
+			lines = append(lines, fmt.Sprintf("  group %s: %s", group, strings.Join(wells, ", ")))
+		}
+		return strings.Join(lines, "\n")
+	}
 	if ok {
 		for _, input := range spec.Descriptor.Inputs {
 			if input.Name == "kind" || input.Name == "id" || input.Name == "schema" {

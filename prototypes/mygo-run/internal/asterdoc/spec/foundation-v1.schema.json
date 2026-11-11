@@ -493,7 +493,29 @@
         "parameters": {
           "type": "array",
           "items": {
-            "type": "object"
+            "type": "object",
+            "required": [
+              "name",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": {},
+              "constraint": {
+                "type": "string"
+              },
+              "constraints": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "requirements": {

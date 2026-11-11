@@ -51,6 +51,12 @@ record, right-aligned time, folded details); `internal/notebook` only projects s
 Markdown editor/preview whose saves append `stage=notebook` observation events to the Run's audit trail. The Run's 汇总 tab derives per-sample recorded/missing/excluded counts with mean and sample SD, labelled as
 technical replicates — never as an independent biological n.
 
+AsterDoc-backed Runs pin the exact document revision and source hash. Notebook timelines and Protocol use the same read-only
+`asterdoc.View` registry as Design; Run/Review can open that frozen document without substituting a newer draft. Export PDF
+re-reads and verifies the pinned revision, includes the frozen experiment plan and linked Run, and writes only the chosen file.
+The native save picker confirms overwrites; the success toast offers to open the PDF. PDF pagination, Unicode font embedding,
+and deterministic output use gofpdf; Chinese export requires an installed CJK TrueType font.
+
 The canvas and plate draw only planned design data; `LoadRun`/`SaveReadout` use the real SQLite Run. See `NATIVE_MODULE.md`.
 
 With `ASTERLAB_RUN_ID` unset, the Run workspace stays empty instead of loading a fixed run. Switching away from an unsaved design requires an explicit save or discard choice. Empty saved designs start blank; workflow nodes and well assignments are added explicitly.
