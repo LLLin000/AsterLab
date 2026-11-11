@@ -1,0 +1,471 @@
+# PureLink RNA Mini Kit — suspension cells
+
+```asterlab
+kind: experiment
+id: exp-rna
+schema: 1
+title: PureLink RNA extraction
+objective: Validate a 10-step RNA extraction workflow in the existing Run workspace.
+experimental_unit: sample
+primary_endpoint: RNA concentration
+endpoint_method: UV absorbance (A260/A280)
+endpoint_unit: ng/µL
+sample_size_rationale: Four virtual samples for UI validation; this is not biological n.
+planned_run_count: 1
+planned_run_relationship: independent
+```
+
+```asterlab
+kind: group
+id: g-rna
+schema: 1
+name: RNA extraction
+role: control
+condition: PureLink RNA Mini Kit, suspension cells, <=5 x 10^6 cells
+independent_n: 4
+technical_repeats: 1
+```
+
+```asterlab
+kind: assay
+id: assay-rna
+schema: 1
+title: Total RNA isolation
+endpoint: RNA concentration
+method: UV absorbance (A260/A280)
+unit: ng/µL
+group_refs: [g-rna]
+protocol_version_id: a5d8318e-6f1c-4dcd-a930-73a6f38d872a
+```
+
+```asterlab
+kind: material
+id: mat-lysis
+schema: 1
+name: Lysis Buffer with 1% 2-mercaptoethanol
+role: treatment
+condition: PureLink RNA Mini Kit; add 10 µL 2-mercaptoethanol per 1 mL Lysis Buffer
+source: lab_imported
+```
+
+```asterlab
+kind: material
+id: mat-wash1
+schema: 1
+name: Wash Buffer I
+role: treatment
+condition: PureLink RNA Mini Kit
+source: lab_imported
+```
+
+```asterlab
+kind: material
+id: mat-wash2
+schema: 1
+name: Wash Buffer II with ethanol
+role: treatment
+condition: PureLink RNA Mini Kit; ethanol added as directed
+source: lab_imported
+```
+
+```asterlab
+kind: material
+id: mat-ethanol
+schema: 1
+name: 70% ethanol
+role: treatment
+condition: prepared in RNase-free water
+source: lab_imported
+```
+
+```asterlab
+kind: material
+id: mat-water
+schema: 1
+name: RNase-free water
+role: treatment
+condition: elution reagent
+source: lab_imported
+```
+
+```asterlab
+kind: instrument_profile
+id: inst-centrifuge
+schema: 1
+class: centrifuge
+model: microcentrifuge
+capabilities:
+  - name: 2,000 x g
+  - name: 12,000 x g
+  - name: 4 C
+constraints:
+  - name: 1.5-2.0 mL tubes
+source: unknown
+```
+
+```asterlab
+kind: instrument_profile
+id: inst-homogenizer
+schema: 1
+class: homogenizer
+model: Homogenizer cartridge / 18-21G needle / rotor-stator
+capabilities:
+  - name: 12,000 x g 2 min
+  - name: 18-21G needle 5-10 passes
+  - name: rotor-stator 45 s
+source: unknown
+```
+
+```asterlab
+kind: sample
+id: s-rna-01
+schema: 1
+sample_id: RNA-S01
+group_ref: g-rna
+amount: {value: 1, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-rna-02
+schema: 1
+sample_id: RNA-S02
+group_ref: g-rna
+amount: {value: 1, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-rna-03
+schema: 1
+sample_id: RNA-S03
+group_ref: g-rna
+amount: {value: 1, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-rna-04
+schema: 1
+sample_id: RNA-S04
+group_ref: g-rna
+amount: {value: 1, unit: mL}
+```
+
+```asterlab
+kind: container
+id: cartridge-S01
+schema: 1
+format: PureLink Spin Cartridge + Collection Tube
+wells: 1
+```
+
+```asterlab
+kind: container
+id: cartridge-S02
+schema: 1
+format: PureLink Spin Cartridge + Collection Tube
+wells: 1
+```
+
+```asterlab
+kind: container
+id: cartridge-S03
+schema: 1
+format: PureLink Spin Cartridge + Collection Tube
+wells: 1
+```
+
+```asterlab
+kind: container
+id: cartridge-S04
+schema: 1
+format: PureLink Spin Cartridge + Collection Tube
+wells: 1
+```
+
+```asterlab
+kind: container
+id: recovery-S01
+schema: 1
+format: Recovery Tube
+wells: 1
+```
+
+```asterlab
+kind: container
+id: recovery-S02
+schema: 1
+format: Recovery Tube
+wells: 1
+```
+
+```asterlab
+kind: container
+id: recovery-S03
+schema: 1
+format: Recovery Tube
+wells: 1
+```
+
+```asterlab
+kind: container
+id: recovery-S04
+schema: 1
+format: Recovery Tube
+wells: 1
+```
+
+```asterlab
+kind: step
+id: step-01
+schema: 2
+title: 01 收集细胞
+assay: assay-rna
+path: root/01-collect
+order: 1
+uses:
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+  - {ref: inst-centrifuge, role: instrument}
+tasks:
+  - {id: collect, title: "转移细胞至 RNase-free 管", kind: procedure}
+  - {id: pellet, title: "2,000 x g 5 min 4 C，弃培养基", kind: procedure}
+checks:
+  - {checkId: c01-pellet, title: 保留细胞沉淀；弃培养基, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-02
+schema: 2
+title: 02 裂解与匀浆
+assay: assay-rna
+path: root/02-lyse
+order: 2
+uses:
+  - {ref: mat-lysis, role: material}
+  - {ref: inst-homogenizer, role: instrument}
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: lyse, title: "加 Lysis Buffer + 1% 2-ME，涡旋", kind: procedure}
+  - {id: homogenize, title: "选择一种匀浆方式", kind: procedure}
+checks:
+  - {checkId: c02-lysis, title: 细胞沉淀完全分散；匀浆方式已选定, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-03
+schema: 2
+title: 03 加乙醇
+assay: assay-rna
+path: root/03-ethanol
+order: 3
+uses:
+  - {ref: mat-ethanol, role: material}
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: ethanol, title: "加等体积 70% 乙醇", kind: procedure}
+  - {id: mix, title: "涡旋混匀", kind: procedure}
+checks:
+  - {checkId: c03-ethanol, title: 70% 乙醇按 1:1 加入并混匀, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-04
+schema: 2
+title: 04 上柱结合
+assay: assay-rna
+path: root/04-bind
+order: 4
+uses:
+  - {ref: cartridge-S01, role: other}
+  - {ref: cartridge-S02, role: other}
+  - {ref: cartridge-S03, role: other}
+  - {ref: cartridge-S04, role: other}
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: load, title: "转移 <=700 µL 至 Spin Cartridge", kind: procedure}
+  - {id: bind-spin, title: "12,000 x g 15 s，弃流出液，重复至全部过柱", kind: procedure}
+checks:
+  - {checkId: c04-bind, title: 弃流出液；保留吸附柱, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-05
+schema: 2
+title: 05 Wash I
+assay: assay-rna
+path: root/05-wash1
+order: 5
+uses:
+  - {ref: mat-wash1, role: material}
+  - {ref: cartridge-S01, role: other}
+  - {ref: cartridge-S02, role: other}
+  - {ref: cartridge-S03, role: other}
+  - {ref: cartridge-S04, role: other}
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: wash1, title: "加 700 µL Wash Buffer I", kind: procedure}
+  - {id: wash1-spin, title: "12,000 x g 15 s，弃流出液并换收集管", kind: procedure}
+checks:
+  - {checkId: c05-wash1, title: 弃流出液并更换 Collection Tube, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-06
+schema: 2
+title: 06 Wash II 第一次
+assay: assay-rna
+path: root/06-wash2a
+order: 6
+uses:
+  - {ref: mat-wash2, role: material}
+  - {ref: cartridge-S01, role: other}
+  - {ref: cartridge-S02, role: other}
+  - {ref: cartridge-S03, role: other}
+  - {ref: cartridge-S04, role: other}
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: wash2a, title: "加 500 µL Wash Buffer II", kind: procedure}
+  - {id: wash2a-spin, title: "12,000 x g 15 s，弃流出液", kind: procedure}
+checks:
+  - {checkId: c06-wash2a, title: 第一次 Wash II：弃流出液, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-07
+schema: 2
+title: 07 Wash II 第二次
+assay: assay-rna
+path: root/07-wash2b
+order: 7
+uses:
+  - {ref: mat-wash2, role: material}
+  - {ref: cartridge-S01, role: other}
+  - {ref: cartridge-S02, role: other}
+  - {ref: cartridge-S03, role: other}
+  - {ref: cartridge-S04, role: other}
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: wash2b, title: "重复 500 µL Wash Buffer II", kind: procedure}
+  - {id: wash2b-spin, title: "12,000 x g 15 s，弃流出液", kind: procedure}
+checks:
+  - {checkId: c07-wash2b, title: 第二次 Wash II：弃流出液, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-08
+schema: 2
+title: 08 干柱离心
+assay: assay-rna
+path: root/08-dry
+order: 8
+uses:
+  - {ref: cartridge-S01, role: other}
+  - {ref: cartridge-S02, role: other}
+  - {ref: cartridge-S03, role: other}
+  - {ref: cartridge-S04, role: other}
+  - {ref: recovery-S01, role: other}
+  - {ref: recovery-S02, role: other}
+  - {ref: recovery-S03, role: other}
+  - {ref: recovery-S04, role: other}
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: dry, title: "12,000 x g 1-2 min 干膜", kind: procedure}
+  - {id: recovery, title: "弃 Collection Tube，换 Recovery Tube", kind: procedure}
+checks:
+  - {checkId: c08-dry, title: 膜已干燥；换 Recovery Tube, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-09
+schema: 2
+title: 09 RNA 洗脱
+assay: assay-rna
+path: root/09-elute
+order: 9
+uses:
+  - {ref: mat-water, role: material}
+  - {ref: recovery-S01, role: other}
+  - {ref: recovery-S02, role: other}
+  - {ref: recovery-S03, role: other}
+  - {ref: recovery-S04, role: other}
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: water, title: "加 30-100 µL RNase-free water 至膜中心", kind: procedure}
+  - {id: elute, title: "室温 1 min；>=12,000 x g 2 min", kind: procedure}
+checks:
+  - {checkId: c09-elute, title: 保留洗脱液（RNA 成品）, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-10
+schema: 2
+title: 10 RNA 质检与保存
+assay: assay-rna
+path: root/10-qc
+order: 10
+uses:
+  - {ref: s-rna-01, role: sample}
+  - {ref: s-rna-02, role: sample}
+  - {ref: s-rna-03, role: sample}
+  - {ref: s-rna-04, role: sample}
+tasks:
+  - {id: qc, title: "记录 RNA 浓度与 A260/A280", kind: measurement, readout: rna_qc}
+  - {id: store, title: "记录保存位置", kind: procedure}
+checks:
+  - {checkId: c10-qc, title: RNA 浓度与 A260/A280 已记录, blocking: true}
+```
+
+```asterlab
+kind: workflow
+id: wf-rna
+schema: 1
+steps: [step-01, step-02, step-03, step-04, step-05, step-06, step-07, step-08, step-09, step-10]
+edges:
+  - {from: step-01, to: step-02}
+  - {from: step-02, to: step-03}
+  - {from: step-03, to: step-04}
+  - {from: step-04, to: step-05}
+  - {from: step-05, to: step-06}
+  - {from: step-06, to: step-07}
+  - {from: step-07, to: step-08}
+  - {from: step-08, to: step-09}
+  - {from: step-09, to: step-10}
+business_order: [step-01, step-02, step-03, step-04, step-05, step-06, step-07, step-08, step-09, step-10]
+```

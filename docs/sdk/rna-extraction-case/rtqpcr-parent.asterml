@@ -1,0 +1,172 @@
+# RT-qPCR parent workflow — containment test
+
+```asterlab
+kind: experiment
+id: exp-rtqpcr
+schema: 1
+title: RT-qPCR parent workflow
+objective: Test whether a parent workflow can contain a reusable RNA extraction block.
+experimental_unit: sample
+primary_endpoint: Relative expression
+endpoint_method: RT-qPCR
+endpoint_unit: fold change
+sample_size_rationale: Four virtual samples; UI validation only.
+planned_run_count: 1
+planned_run_relationship: independent
+```
+
+```asterlab
+kind: group
+id: g-rtqpcr
+schema: 1
+name: RT-qPCR
+role: control
+condition: RNA extraction block reused from the PureLink protocol block
+independent_n: 4
+technical_repeats: 1
+```
+
+```asterlab
+kind: assay
+id: assay-rtqpcr
+schema: 1
+title: RT-qPCR
+endpoint: Relative expression
+method: RT-qPCR
+unit: fold change
+group_refs: [g-rtqpcr]
+protocol_version_id: 2066e8ba-17c9-48be-976a-64e4ddde64a6
+```
+
+```asterlab
+kind: reference
+id: ref-rna-block
+schema: 1
+ref: c23df8e1-3f2a-4449-8ac9-a4bb7256a113
+view: protocol_block
+```
+
+```asterlab
+kind: sample
+id: rt-s01
+schema: 1
+sample_id: RNA-S01
+group_ref: g-rtqpcr
+amount: {value: 1, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: rt-s02
+schema: 1
+sample_id: RNA-S02
+group_ref: g-rtqpcr
+amount: {value: 1, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: rt-s03
+schema: 1
+sample_id: RNA-S03
+group_ref: g-rtqpcr
+amount: {value: 1, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: rt-s04
+schema: 1
+sample_id: RNA-S04
+group_ref: g-rtqpcr
+amount: {value: 1, unit: mL}
+```
+
+```asterlab
+kind: step
+id: step-rna-extract
+schema: 2
+title: 01 RNA 提取
+assay: assay-rtqpcr
+path: rtqpcr/rna-extraction
+order: 1
+uses:
+  - {ref: ref-rna-block, role: other}
+  - {ref: rt-s01, role: sample}
+  - {ref: rt-s02, role: sample}
+  - {ref: rt-s03, role: sample}
+  - {ref: rt-s04, role: sample}
+tasks:
+  - {id: extract, title: "复用 PureLink RNA 提取块（10 步）", kind: procedure}
+checks:
+  - {checkId: rna-extract-complete, title: RNA 提取子流程完成, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-rna-qc
+schema: 2
+title: 02 RNA 质控
+assay: assay-rtqpcr
+path: rtqpcr/rna-qc
+order: 2
+uses:
+  - {ref: rt-s01, role: sample}
+  - {ref: rt-s02, role: sample}
+  - {ref: rt-s03, role: sample}
+  - {ref: rt-s04, role: sample}
+tasks:
+  - {id: qc, title: "记录 RNA 浓度与 A260/A280", kind: measurement, readout: rna_qc}
+checks:
+  - {checkId: qc-pass, title: RNA 浓度与 A260/A280 已记录, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-rt
+schema: 2
+title: 03 逆转录
+assay: assay-rtqpcr
+path: rtqpcr/rt
+order: 3
+uses:
+  - {ref: rt-s01, role: sample}
+  - {ref: rt-s02, role: sample}
+  - {ref: rt-s03, role: sample}
+  - {ref: rt-s04, role: sample}
+tasks:
+  - {id: rt, title: "RNA -> cDNA", kind: procedure}
+checks:
+  - {checkId: rt-complete, title: cDNA 合成完成, blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-qpcr
+schema: 2
+title: 04 qPCR 扩增及检测
+assay: assay-rtqpcr
+path: rtqpcr/qpcr
+order: 4
+uses:
+  - {ref: rt-s01, role: sample}
+  - {ref: rt-s02, role: sample}
+  - {ref: rt-s03, role: sample}
+  - {ref: rt-s04, role: sample}
+tasks:
+  - {id: qpcr, title: "配置反应并运行 qPCR", kind: measurement, readout: ct}
+checks:
+  - {checkId: qpcr-complete, title: 扩增曲线与 Ct 已记录, blocking: true}
+```
+
+```asterlab
+kind: workflow
+id: wf-rtqpcr
+schema: 1
+steps: [step-rna-extract, step-rna-qc, step-rt, step-qpcr]
+edges:
+  - {from: step-rna-extract, to: step-rna-qc}
+  - {from: step-rna-qc, to: step-rt}
+  - {from: step-rt, to: step-qpcr}
+business_order: [step-rna-extract, step-rna-qc, step-rt, step-qpcr]
+```
