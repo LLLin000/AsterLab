@@ -82,11 +82,12 @@ type CheckViewModel struct {
 
 // PlannedStep is the frozen plan for a step/task (read-only, from AsterDoc).
 type PlannedStep struct {
-	StepID    string
-	StepTitle string
-	AssayID   string
-	Timepoint string
-	Path      string
+	StepID      string
+	StepTitle   string
+	AssayID     string
+	Timepoint   string
+	Path        string
+	Instruction string
 
 	Parameters []PlannedParameter
 	Checks     []PlannedCheck
@@ -110,18 +111,68 @@ type RunTaskViewModel struct {
 	Checks  []CheckViewModel
 	Modules []ModuleRef
 
+	// Instruction and Parameters come from the frozen Protocol step, not from
+	// raw module fields.
+	Instruction string
+	Parameters  []PlannedParameter
+
+	Events []EventViewModel
+
 	Children []*RunTaskViewModel
+}
+
+// MaterialUseView is one material consumption recorded in an event.
+type MaterialUseView struct {
+	Material string
+	Amount   float64
+	Unit     string
+}
+
+// LineageView is one structured object-transfer edge recorded in an event.
+type LineageView struct {
+	FromKind string
+	FromID   string
+	ToKind   string
+	ToID     string
+	Relation string
+	Note     string
+}
+
+// EventViewModel is the read-only audit entry for a task.
+type EventViewModel struct {
+	ID         string
+	Type       string
+	Content    string
+	OccurredAt string
+	RecordedAt string
+	Operator   string
+	TaskKey    string
+	StepPath   string
+
+	Checks       []CheckAckView
+	Materials    []MaterialUseView
+	Deviation    string
+	Lineage      []LineageView
+	Measurements []MeasurementView
+	Parameters   []PlannedParameter
+	SampleIDs    []string
+	CheckAck     bool
 }
 
 // RunWorkspaceViewModel is the top-level view model for a run execution surface.
 type RunWorkspaceViewModel struct {
-	RunID    string
-	Title    string
-	Revision uint64
-	Status   string
+	RunID            string
+	Title            string
+	Revision         uint64
+	DesignRevision   uint64
+	AsterDocRevision uint64
+	Status           string
 
 	Steps     []*RunTaskViewModel
 	TaskByKey map[string]*RunTaskViewModel
+
+	UnassociatedMeasurements []MeasurementView
+	UnassociatedEvents       []EventViewModel
 
 	Selected *RunTaskViewModel
 }
@@ -288,15 +339,170 @@ func taskPath(key string) string {
 	return parsed.Path
 }
 
+func findTaskForRecord(vm *RunWorkspaceViewModel, taskKey, path string) *RunTaskViewModel {
+	if taskKey != "" {
+		if task := vm.TaskByKey[taskKey]; task != nil {
+			return task
+		}
+	}
+	if path == "" {
+		return nil
+	}
+	var found *RunTaskViewModel
+	for _, task := range vm.TaskByKey {
+		if task.StepPath != path {
+			continue
+		}
+		if found != nil {
+			// The same path names more than one frozen task; without a
+			// task key the record is ambiguous and stays unassociated.
+			return nil
+		}
+		found = task
+	}
+	return found
+}
+
+func parseRunParameters(raw string) []PlannedParameter {
+	if strings.TrimSpace(raw) == "" || strings.TrimSpace(raw) == "[]" {
+		return nil
+	}
+	var items []struct {
+		Key   string `json:"key"`
+		Label string `json:"label"`
+		Name  string `json:"name"`
+		Value any    `json:"value"`
+		Unit  string `json:"unit"`
+	}
+	if json.Unmarshal([]byte(raw), &items) != nil {
+		return nil
+	}
+	out := make([]PlannedParameter, 0, len(items))
+	for _, item := range items {
+		label := item.Label
+		if label == "" {
+			label = item.Name
+		}
+		if label == "" {
+			label = item.Key
+		}
+		value := ""
+		if item.Value != nil {
+			value = fmt.Sprint(item.Value)
+		}
+		out = append(out, PlannedParameter{Key: item.Key, Label: label, Value: value, Unit: item.Unit})
+	}
+	return out
+}
+
+func eventViewModel(e runs.RunEvent) EventViewModel {
+	event := EventViewModel{
+		ID: e.ID, Type: e.EventType, Content: e.Content,
+		OccurredAt: e.OccurredAt, RecordedAt: e.RecordedAt,
+		TaskKey: e.TaskKey, StepPath: e.ProtocolStepPath,
+	}
+	for _, check := range e.Checks {
+		event.Checks = append(event.Checks, CheckAckView{CheckID: check.CheckID, Status: check.Status})
+	}
+	if strings.TrimSpace(e.DataJSON) == "" {
+		return event
+	}
+	var data struct {
+		Operator  string   `json:"operator"`
+		CheckAck  bool     `json:"check_ack"`
+		SampleIDs []string `json:"sample_ids"`
+		Checks    []struct {
+			CheckID string `json:"check_id"`
+			Status  string `json:"status"`
+		} `json:"checks"`
+		Materials []struct {
+			Material string   `json:"material"`
+			Amount   *float64 `json:"amount"`
+			Unit     string   `json:"unit"`
+		} `json:"materials"`
+		Deviation *string `json:"deviation"`
+		Lineage   []struct {
+			FromKind string `json:"from_kind"`
+			FromID   string `json:"from_id"`
+			ToKind   string `json:"to_kind"`
+			ToID     string `json:"to_id"`
+			Relation string `json:"relation"`
+			Note     string `json:"note"`
+		} `json:"lineage"`
+		Measurements []struct {
+			SampleID string   `json:"sample_id"`
+			Endpoint string   `json:"endpoint"`
+			Value    *float64 `json:"value"`
+			Unit     string   `json:"unit"`
+		} `json:"measurements"`
+		ActualParameters []struct {
+			Key   string `json:"key"`
+			Value any    `json:"value"`
+			Unit  string `json:"unit"`
+		} `json:"actual_parameters"`
+	}
+	if json.Unmarshal([]byte(e.DataJSON), &data) != nil {
+		return event
+	}
+	event.Operator = data.Operator
+	event.CheckAck = data.CheckAck
+	event.SampleIDs = data.SampleIDs
+	if len(data.Checks) > 0 {
+		event.Checks = nil
+		for _, check := range data.Checks {
+			event.Checks = append(event.Checks, CheckAckView{CheckID: check.CheckID, Status: check.Status})
+		}
+	}
+	for _, material := range data.Materials {
+		amount := 0.0
+		if material.Amount != nil {
+			amount = *material.Amount
+		}
+		event.Materials = append(event.Materials, MaterialUseView{Material: material.Material, Amount: amount, Unit: material.Unit})
+	}
+	if data.Deviation != nil {
+		event.Deviation = *data.Deviation
+	}
+	for _, edge := range data.Lineage {
+		event.Lineage = append(event.Lineage, LineageView{
+			FromKind: edge.FromKind, FromID: edge.FromID,
+			ToKind: edge.ToKind, ToID: edge.ToID,
+			Relation: edge.Relation, Note: edge.Note,
+		})
+	}
+	for _, measurement := range data.Measurements {
+		value := ""
+		if measurement.Value != nil {
+			value = fmt.Sprintf("%g", *measurement.Value)
+		}
+		event.Measurements = append(event.Measurements, MeasurementView{
+			SampleID: measurement.SampleID, Field: measurement.Endpoint,
+			Value: value, Unit: measurement.Unit, Status: "raw",
+		})
+	}
+	for _, parameter := range data.ActualParameters {
+		value := ""
+		if parameter.Value != nil {
+			value = fmt.Sprint(parameter.Value)
+		}
+		event.Parameters = append(event.Parameters, PlannedParameter{Key: parameter.Key, Label: parameter.Key, Value: value, Unit: parameter.Unit})
+	}
+	return event
+}
+
 // BuildViewModel constructs the run workspace view model from a frozen run
 // snapshot and its frozen AsterDoc.
 func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWorkspaceViewModel {
 	vm := &RunWorkspaceViewModel{
-		RunID:     snap.RunID,
-		Title:     snap.Title,
-		Revision:  snap.Revision,
-		Status:    snap.Status,
-		TaskByKey: map[string]*RunTaskViewModel{},
+		RunID:          snap.RunID,
+		Title:          snap.Title,
+		Revision:       snap.Revision,
+		DesignRevision: snap.DesignRevision,
+		Status:         snap.Status,
+		TaskByKey:      map[string]*RunTaskViewModel{},
+	}
+	if snap.AsterDoc != nil {
+		vm.AsterDocRevision = snap.AsterDoc.Revision
 	}
 
 	docModules := map[string]map[string]any{}
@@ -308,30 +514,36 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 	taskOrder := make([]string, 0, len(snap.Tasks))
 	for _, t := range snap.Tasks {
 		taskOrder = append(taskOrder, t.Key)
-
-		path := taskPath(t.Key)
+		path := t.Path
+		if path == "" {
+			path = taskPath(t.Key)
+		}
+		params := parseRunParameters(t.ParametersJSON)
 		vmTask := &RunTaskViewModel{
-			TaskKey:   t.Key,
-			StepID:    t.DesignStepID,
-			StepPath:  path,
-			StepTitle: t.Title,
-			Timepoint: t.Timepoint,
-			AssayID:   t.AssayID,
-			Status:    buildTaskStatus(t),
+			TaskKey:     t.Key,
+			StepID:      t.DesignStepID,
+			StepPath:    path,
+			StepTitle:   t.Title,
+			Timepoint:   t.Timepoint,
+			AssayID:     t.AssayID,
+			Status:      buildTaskStatus(t),
+			Instruction: t.Instruction,
+			Parameters:  params,
 			Actual: &ActualRecord{
 				Parameters:   map[string]string{},
 				Measurements: []MeasurementView{},
 			},
 		}
-
+		vmTask.Planned = &PlannedStep{
+			StepID:      t.DesignStepID,
+			StepTitle:   t.Title,
+			AssayID:     t.AssayID,
+			Timepoint:   t.Timepoint,
+			Path:        path,
+			Instruction: t.Instruction,
+			Parameters:  params,
+		}
 		if uses, ok := stepUses[t.DesignStepID]; ok {
-			vmTask.Planned = &PlannedStep{
-				StepID:    t.DesignStepID,
-				StepTitle: t.Title,
-				AssayID:   t.AssayID,
-				Timepoint: t.Timepoint,
-				Path:      path,
-			}
 			for _, u := range uses {
 				if modData, ok := docModules[u.ID]; ok {
 					vmTask.Modules = append(vmTask.Modules, ModuleRef{
@@ -341,36 +553,52 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 						Title:  textValue(modData, "title"),
 						Role:   u.Role,
 					})
-					for _, p := range plannedParameters(modData) {
-						vmTask.Planned.Parameters = append(vmTask.Planned.Parameters, p)
-					}
 				}
 			}
 		}
-
 		for _, c := range t.Checks {
+			status := c.Status
+			if status == "" {
+				status = "unknown"
+			}
 			vmTask.Checks = append(vmTask.Checks, CheckViewModel{
 				CheckID:     c.CheckID,
 				Label:       c.Label,
 				Instruction: c.Instruction,
 				Blocking:    c.Blocking,
-				Status:      "pending",
+				Status:      status,
 			})
 		}
-
-		for _, m := range snap.Measurements {
-			if m.SampleID != "" {
-				vmTask.Actual.Measurements = append(vmTask.Actual.Measurements, MeasurementView{
-					SampleID: m.SampleID,
-					Field:    m.Endpoint,
-					Value:    fmt.Sprintf("%g", m.Value),
-					Unit:     m.Unit,
-					Status:   "raw",
-				})
-			}
-		}
-
 		vm.TaskByKey[t.Key] = vmTask
+	}
+
+	// Measurements carry their authoritative task/path association. A record
+	// without either is unassociated; never attach it to every task.
+	for _, m := range snap.Measurements {
+		if m.SampleID == "" {
+			continue
+		}
+		view := MeasurementView{
+			SampleID: m.SampleID,
+			Field:    m.Endpoint,
+			Value:    fmt.Sprintf("%g", m.Value),
+			Unit:     m.Unit,
+			Status:   "raw",
+		}
+		if target := findTaskForRecord(vm, m.TaskKey, m.ProtocolStepPath); target != nil {
+			target.Actual.Measurements = append(target.Actual.Measurements, view)
+		} else {
+			vm.UnassociatedMeasurements = append(vm.UnassociatedMeasurements, view)
+		}
+	}
+
+	for _, e := range snap.Events {
+		event := eventViewModel(e)
+		if target := findTaskForRecord(vm, e.TaskKey, e.ProtocolStepPath); target != nil {
+			target.Events = append(target.Events, event)
+		} else {
+			vm.UnassociatedEvents = append(vm.UnassociatedEvents, event)
+		}
 	}
 
 	stepOrder := make([]string, 0)

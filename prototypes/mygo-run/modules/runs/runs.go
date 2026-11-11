@@ -110,8 +110,11 @@ type CreationAudit struct {
 }
 
 type RunTask struct {
-	Key               string `json:"key"`
-	Title             string `json:"title"`
+	Key   string `json:"key"`
+	Title string `json:"title"`
+	// Path is the frozen protocol step path. It is the stable identity used by
+	// events; Title is the human step title and must never substitute for it.
+	Path              string `json:"path"`
 	Timepoint         string `json:"timepoint"`
 	Status            string `json:"status"`
 	AssayID           string `json:"assayId"`
@@ -120,6 +123,11 @@ type RunTask struct {
 	// Empty means the run predates the link, or the design linked its assay to
 	// more than one step: the task is unresolved, never guessed from its title.
 	DesignStepID string `json:"designStepId"`
+	// Instruction is the frozen protocol step's operator instruction.
+	Instruction string `json:"instruction,omitempty"`
+	// ParametersJSON is the resolved protocol parameter list, serialized as
+	// JSON so the native boundary does not need a second parameter type.
+	ParametersJSON string `json:"parametersJson,omitempty"`
 	// Checks are the frozen protocol step's real checks. Empty means the step
 	// defines none; the UI must not invent one.
 	Checks []TaskCheck `json:"checks,omitempty"`
@@ -131,6 +139,9 @@ type TaskCheck struct {
 	Label       string `json:"label"`
 	Instruction string `json:"instruction,omitempty"`
 	Blocking    bool   `json:"blocking"`
+	// Status comes only from a formal Core CheckAck event. Empty means no
+	// authoritative ack is known; surfaces must not infer one from free text.
+	Status string `json:"status,omitempty"`
 }
 
 // CheckAck is one operator verdict for a TaskCheck.
@@ -144,6 +155,10 @@ type Measurement struct {
 	Endpoint string  `json:"endpoint"`
 	Value    float64 `json:"value"`
 	Unit     string  `json:"unit"`
+	// TaskKey and ProtocolStepPath are the authoritative association copied
+	// from the event. Empty means the historical measurement is unassociated.
+	TaskKey          string `json:"taskKey,omitempty"`
+	ProtocolStepPath string `json:"protocolStepPath,omitempty"`
 }
 
 type RunEvent struct {
@@ -170,6 +185,10 @@ type RunEvent struct {
 	SchemaVersion    int          `json:"schemaVersion"`
 	ResultCells      []ResultCell `json:"resultCells"`
 	Checks           []CheckAck   `json:"checks,omitempty"`
+	// DataJSON carries the projected event fields (materials, deviation,
+	// lineage, measurements, sample_ids, check_ack, ...) without expanding the
+	// generated native type for every optional field.
+	DataJSON string `json:"dataJson,omitempty"`
 }
 
 type ReadoutInput struct {

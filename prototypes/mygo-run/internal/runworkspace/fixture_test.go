@@ -17,17 +17,21 @@ func makeSnapshot() runs.RunSnapshot {
 				Key:          "t-seed",
 				DesignStepID: "step-seed",
 				Title:        "细胞接种",
+				Path:         "root/seed",
 				Timepoint:    "D0",
 				AssayID:      "assay-cck8",
 				Status:       "completed",
 			},
 			{
-				Key:          "t-read",
-				DesignStepID: "step-read",
-				Title:        "CCK-8 检测",
-				Timepoint:    "D1",
-				AssayID:      "assay-cck8",
-				Status:       "not_started",
+				Key:            "t-read",
+				DesignStepID:   "step-read",
+				Title:          "CCK-8 检测",
+				Path:           "root/read",
+				Instruction:    "读取 OD450 并记录。",
+				ParametersJSON: `[{"key":"od450","label":"OD450","value":0.82,"unit":"AU"}]`,
+				Timepoint:      "D1",
+				AssayID:        "assay-cck8",
+				Status:         "not_started",
 				Checks: []runs.TaskCheck{
 					{CheckID: "c-plate", Label: "板与密度已确认", Blocking: true},
 					{CheckID: "c-read", Label: "读数已复核", Blocking: false},
@@ -35,7 +39,7 @@ func makeSnapshot() runs.RunSnapshot {
 			},
 		},
 		Measurements: []runs.Measurement{
-			{SampleID: "Control-1", Endpoint: "OD450", Value: 0.82, Unit: "AU"},
+			{SampleID: "Control-1", Endpoint: "OD450", Value: 0.82, Unit: "AU", TaskKey: "t-read", ProtocolStepPath: "root/read"},
 		},
 	}
 }

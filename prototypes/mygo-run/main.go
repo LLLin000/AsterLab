@@ -782,7 +782,9 @@ func (a *app) saveSession() {
 		AssetRoots:    a.assetRoots,
 		UpdatedAt:     time.Now().Format(time.RFC3339),
 	}
-	if a.snap.RunID != "" && a.shell.Page == shell.Run {
+	if a.snap.RunID != "" {
+		// The selected Run belongs to the workspace, not only to the Run page.
+		// Keeping it lets Design/Notebook/Tools restore with their run context.
 		session.RunID = a.snap.RunID
 	}
 	raw, err := json.Marshal(session)
@@ -815,35 +817,35 @@ func (a *app) restoreSession() {
 	if session.Project != "" {
 		a.shell.Project = session.Project
 	}
+	loadedRun := false
 	if session.RunID != "" {
 		a.selectRun(session.RunID)
-		if a.snap.RunID != "" {
+		loadedRun = a.snap.RunID != ""
+	}
+	if session.Page == "design" && session.DesignID != "" {
+		a.selectDesign(session.DesignID)
+		a.shell.Page = shell.Design
+		a.designTab = session.DesignTab
+		a.saveSession()
+		return
+	}
+	switch session.Page {
+	case "project":
+		a.shell.Page = shell.Project
+	case "tools":
+		a.shell.Page = shell.Tools
+	case "notebook":
+		a.shell.Page = shell.Notebook
+	case "run":
+		if loadedRun {
 			a.shell.Page = shell.Run
-			return
+		}
+	default:
+		if loadedRun {
+			a.shell.Page = shell.Run
 		}
 	}
-	if session.DesignID != "" {
-		for _, design := range a.shell.Designs {
-			if design.ID == session.DesignID {
-				a.selectDesign(session.DesignID)
-				if session.Page == "design" {
-					a.shell.Page = shell.Design
-				}
-				a.designTab = session.DesignTab
-				return
-			}
-		}
-	}
-	if session.Page != "" {
-		switch session.Page {
-		case "project":
-			a.shell.Page = shell.Project
-		case "tools":
-			a.shell.Page = shell.Tools
-		case "notebook":
-			a.shell.Page = shell.Notebook
-		}
-	}
+	a.saveSession()
 }
 
 func (a *app) rememberRun(snap runs.RunSnapshot) {
@@ -874,12 +876,22 @@ func (a *app) selectTaskFromEnv() {
 		return
 	}
 	for _, task := range a.snap.Tasks {
-		if task.Title == path {
+		if task.Path == path || (task.Path == "" && task.Title == path) {
 			a.ws.Selected = task.Key
+			if a.runWS != nil {
+				a.runWS.Selected = task.Key
+			}
 			a.prepareGrid()
 			return
 		}
 	}
+}
+
+func taskStepPath(task runs.RunTask) string {
+	if task.Path != "" {
+		return task.Path
+	}
+	return task.Title
 }
 
 func currentRunTask(tasks []runs.RunTask) runs.RunTask {
@@ -2045,12 +2057,12 @@ func main() {
 			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
 			for _, t := range a.snap.Tasks {
 				if t.Key == taskKey {
-					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, taskStepPath(t), t.ProtocolVersionID
 				}
 			}
 			if taskKey == "" && len(a.snap.Tasks) > 0 {
 				t := a.snap.Tasks[0]
-				taskKey, timepoint, assayID, stepPath, protocolVersion = t.Key, t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+				taskKey, timepoint, assayID, stepPath, protocolVersion = t.Key, t.Timepoint, t.AssayID, taskStepPath(t), t.ProtocolVersionID
 			}
 			opID := a.nextOp()
 			snap, err := a.runSvc.SaveReadout(context.Background(), runs.ReadoutInput{
@@ -2101,7 +2113,7 @@ func main() {
 			batchResult, err := a.runSvc.SaveReadoutsBatch(context.Background(), runs.BatchReadoutInput{
 				RunID: a.snap.RunID, OperationID: a.nextOp(), TaskKey: task.Key,
 				AssayID: task.AssayID, Timepoint: task.Timepoint,
-				ProtocolStepPath: task.Title, ProtocolVersionID: task.ProtocolVersionID,
+				ProtocolStepPath: taskStepPath(task), ProtocolVersionID: task.ProtocolVersionID,
 				SchemaID: schema.ID, SchemaVersion: schema.Version, Cells: batchCells,
 				ExpectedRevision: a.snap.Revision,
 			})
@@ -2146,7 +2158,7 @@ func main() {
 			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
 			for _, t := range a.snap.Tasks {
 				if t.Key == taskKey {
-					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, taskStepPath(t), t.ProtocolVersionID
 				}
 			}
 			acks := make([]runs.CheckAck, 0, len(checks))
@@ -2181,7 +2193,7 @@ func main() {
 			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
 			for _, t := range a.snap.Tasks {
 				if t.Key == taskKey {
-					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, taskStepPath(t), t.ProtocolVersionID
 				}
 			}
 			acks := make([]runs.CheckAck, 0, len(checks))
@@ -2240,7 +2252,7 @@ func main() {
 			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
 			for _, t := range a.snap.Tasks {
 				if t.Key == taskKey {
-					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, taskStepPath(t), t.ProtocolVersionID
 				}
 			}
 			acks := make([]runs.CheckAck, 0, len(checks))
@@ -2271,7 +2283,7 @@ func main() {
 			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
 			for _, t := range a.snap.Tasks {
 				if t.Key == taskKey {
-					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, taskStepPath(t), t.ProtocolVersionID
 				}
 			}
 			acks := make([]runs.CheckAck, 0, len(checks))

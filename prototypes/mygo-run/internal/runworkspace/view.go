@@ -44,6 +44,9 @@ type State struct {
 	// ShowHistory toggles the third layer (operation history) for the selected task.
 	ShowHistory bool
 
+	// railScrollKey remembers which selection was last scrolled into view.
+	railScrollKey string
+
 	Narrow bool
 
 	// RecordingValid reports whether the recording module has unsaved edits.
@@ -218,6 +221,7 @@ func View(c *ui.Context, s *State) {
 				ui.Column(c).FillWidth().Gap(12).Padding(12).Children(func() {
 					flowRail(c, s, t, tokens, true)
 					taskWorkspace(c, s, t, tokens)
+					unassociatedRecords(c, s, t, tokens)
 				})
 			})
 			return
@@ -226,12 +230,15 @@ func View(c *ui.Context, s *State) {
 			ui.Box(c).Width(railWidth(c)).Shrink(0).FillHeight().
 				Background(tokens.RailBackground).
 				Border(1, tokens.Border).Children(func() {
-				flowRail(c, s, t, tokens, false)
+				ui.Scroll(c).FillHeight().Children(func() {
+					flowRail(c, s, t, tokens, false)
+				})
 			})
 			ui.Column(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
 				ui.Scroll(c).Grow(1).Children(func() {
 					ui.Column(c).FillWidth().Padding(16, 20).Children(func() {
 						taskWorkspace(c, s, t, tokens)
+						unassociatedRecords(c, s, t, tokens)
 					})
 				})
 			})
@@ -280,7 +287,8 @@ func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			if vm.Status != "" {
 				statusPill(c, vm.Status, tokens)
 			}
-			ui.Text(c, fmt.Sprintf("冻结方案 rev %d", vm.Revision)).FontSize(11).
+			ui.Text(c, fmt.Sprintf("Run rev %d · Design rev %d · AsterDoc rev %d",
+				vm.Revision, vm.DesignRevision, vm.AsterDocRevision)).FontSize(11).
 				TextColor(t.TextMuted)
 			ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(11).
 				TextColor(t.TextMuted).FontFeatures("tnum")
@@ -328,6 +336,11 @@ func flowConnector(c *ui.Context, t *ui.Theme, tokens theme.Tokens) {
 // stepNode renders one step group and its tasks.
 func stepNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, step *RunTaskViewModel) {
 	selected := s.Selected == step.TaskKey
+	for _, child := range step.Children {
+		if s.Selected == child.TaskKey {
+			selected = true
+		}
+	}
 	ui.Column(c).FillWidth().Children(func() {
 		b := ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(2)).Radius(8).
 			Background(tokens.Surface).Border(1, tokens.Border).
@@ -361,6 +374,10 @@ func stepNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, step *R
 				}
 			}
 		})
+		if selected && s.railScrollKey != step.TaskKey {
+			b.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
+			s.railScrollKey = step.TaskKey
+		}
 		if b.Clicked() {
 			s.Selected = step.TaskKey
 			if s.Callbacks.SelectTask != nil {
@@ -396,6 +413,10 @@ func childItem(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *
 		ui.Text(c, label).FontSize(t.Rem(.78)).TextColor(t.TextMuted).
 			SingleLine().Ellipsis("…")
 	})
+	if selected && s.railScrollKey != task.TaskKey {
+		row.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
+		s.railScrollKey = task.TaskKey
+	}
 	if row.Clicked() {
 		s.Selected = task.TaskKey
 		if s.Callbacks.SelectTask != nil {
@@ -446,15 +467,21 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 		recorded = len(task.Actual.Measurements)
 		files = len(task.Actual.Files)
 	}
-	instruction := "执行本步骤，并在下方实验记录中录入读数。"
+	instruction := strings.TrimSpace(task.Instruction)
 	next := "录入读数并保存"
 	switch {
 	case total > passed:
-		instruction = "先完成执行确认，再记录本步骤读数。"
+		if instruction == "" {
+			instruction = "先完成执行确认，再记录本步骤读数。"
+		}
 		next = fmt.Sprintf("完成 %d 项执行确认", total-passed)
 	case recorded > 0:
-		instruction = "读数已记录；核对后保存读数并完成任务。"
+		if instruction == "" {
+			instruction = "读数已记录；核对后保存读数并完成任务。"
+		}
 		next = "核对读数，保存并完成任务"
+	case instruction == "":
+		instruction = "执行本步骤，并在下方实验记录中录入读数。"
 	}
 
 	ui.Column(c).FillWidth().Padding(16).Radius(float32(tokens.PanelRadius)).
@@ -467,11 +494,11 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 		})
 		ui.Text(c, instruction).FontSize(t.Rem(.82)).TextColor(t.Text)
 
-		if task.Planned != nil && len(task.Planned.Parameters) > 0 {
+		if len(task.Parameters) > 0 {
 			ui.Divider(c)
 			ui.Text(c, "操作参数").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
 			ui.Row(c).Wrap().Gap(t.Space(2)).Children(func() {
-				for _, p := range task.Planned.Parameters {
+				for _, p := range task.Parameters {
 					paramChip(c, p, t, tokens)
 				}
 			})
@@ -589,6 +616,9 @@ func moduleChip(c *ui.Context, m ModuleRef, t *ui.Theme, tokens theme.Tokens) {
 	ui.Row(c).Padding(4, 9).Radius(6).Background(tokens.Elevated).
 		Border(1, tokens.Border).Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, moduleLabel(m.Kind, m.Title)).FontSize(t.Rem(.76)).TextColor(t.Text)
+		if m.ID != "" {
+			ui.Text(c, m.ID).FontSize(t.Rem(.66)).TextColor(t.TextMuted)
+		}
 		if m.Role != "" {
 			ui.Text(c, m.Role).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		}
@@ -636,6 +666,16 @@ func checkList(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *
 		if box.Changed() && s.Callbacks.SaveChecks != nil {
 			s.Callbacks.SaveChecks(task.TaskKey, s.acks(task))
 		}
+		statusText, statusColor := "未知", t.TextMuted
+		switch check.Status {
+		case "passed":
+			statusText, statusColor = "已确认", tokens.SuccessText
+		case "failed":
+			statusText, statusColor = "未通过", tokens.DangerText
+		case "pending":
+			statusText = "未确认"
+		}
+		ui.Text(c, statusText).FontSize(t.Rem(.66)).TextColor(statusColor)
 		if check.Instruction != "" {
 			ui.Text(c, check.Instruction).FontSize(t.Rem(.7)).TextColor(t.TextMuted).
 				Padding(0, 0, 0, t.Space(1))
@@ -673,22 +713,116 @@ func recordingLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 func historyLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
 	open := s.ShowHistory
 	components.Collapsible(c, "操作历史", &open, components.CollapsibleOptions{}, func() {
-		ui.Column(c).Gap(t.Space(1.5)).Children(func() {
-			if len(task.Actual.Deviations) > 0 {
-				for _, d := range task.Actual.Deviations {
-					ui.Row(c).Gap(t.Space(1.5)).Children(func() {
-						ui.Text(c, d.Field).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-						ui.Text(c, fmt.Sprintf("计划 %s → 实际 %s", d.Planned, d.Actual)).
-							FontSize(t.Rem(.75)).TextColor(t.Warning)
+		if len(task.Events) == 0 {
+			ui.Text(c, "尚无执行事件。").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			return
+		}
+		ui.Column(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
+			for _, event := range task.Events {
+				event := event
+				ui.Column(c).FillWidth().Gap(t.Space(.5)).Padding(t.Space(1.5), t.Space(2)).
+					Radius(6).Background(tokens.Elevated).Border(1, tokens.Border).Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, eventTypeLabel(event.Type)).FontSize(t.Rem(.7)).Bold().TextColor(t.Text)
+						if event.CheckAck {
+							ui.Row(c).Padding(1, 5).Radius(4).Background(tokens.SuccessBg).Children(func() {
+								ui.Text(c, "检查确认").FontSize(t.Rem(.62)).TextColor(tokens.SuccessText)
+							})
+						}
+						ui.Spacer(c)
+						when := event.RecordedAt
+						if when == "" {
+							when = event.OccurredAt
+						}
+						ui.Text(c, when).FontSize(t.Rem(.64)).TextColor(t.TextMuted)
 					})
-					if d.Reason != "" {
-						ui.Text(c, d.Reason).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+					ui.Text(c, event.Content).FontSize(t.Rem(.76)).TextColor(t.Text)
+					if event.Deviation != "" {
+						ui.Text(c, "偏差："+event.Deviation).FontSize(t.Rem(.72)).TextColor(tokens.WarningText)
 					}
-				}
+					if len(event.Checks) > 0 {
+						ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
+							for _, check := range event.Checks {
+								ui.Row(c).Padding(1, 5).Radius(4).Background(tokens.NeutralBg).Children(func() {
+									ui.Text(c, fmt.Sprintf("%s · %s", check.CheckID, check.Status)).
+										FontSize(t.Rem(.64)).TextColor(tokens.NeutralText)
+								})
+							}
+						})
+					}
+					if len(event.Materials) > 0 {
+						ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
+							for _, material := range event.Materials {
+								ui.Text(c, fmt.Sprintf("%s %.3g %s", material.Material, material.Amount, material.Unit)).
+									FontSize(t.Rem(.66)).TextColor(t.TextMuted)
+							}
+						})
+					}
+					if len(event.Parameters) > 0 {
+						ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
+							for _, parameter := range event.Parameters {
+								ui.Text(c, strings.TrimSpace(fmt.Sprintf("%s %s %s", parameter.Key, parameter.Value, parameter.Unit))).
+									FontSize(t.Rem(.64)).TextColor(t.TextMuted)
+							}
+						})
+					}
+					if len(event.Lineage) > 0 {
+						for _, edge := range event.Lineage {
+							ui.Text(c, fmt.Sprintf("%s:%s → %s:%s (%s)", edge.FromKind, edge.FromID, edge.ToKind, edge.ToID, edge.Relation)).
+								FontSize(t.Rem(.64)).TextColor(t.TextMuted)
+						}
+					}
+					if len(event.Measurements) > 0 {
+						for _, measurement := range event.Measurements {
+							ui.Text(c, fmt.Sprintf("%s · %s %s %s", fallback(measurement.SampleID, "未分配"),
+								measurement.Field, measurement.Value, measurement.Unit)).
+								FontSize(t.Rem(.66)).TextColor(t.TextMuted)
+						}
+					}
+				})
 			}
-			ui.Text(c, "保存、修改、更正、完成与文件关联事件由 Core 记录，此处只读。").
-				FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 		})
 	})
 	s.ShowHistory = open
+}
+
+func eventTypeLabel(kind string) string {
+	switch kind {
+	case "operation":
+		return "操作"
+	case "material_use":
+		return "材料使用"
+	case "measurement":
+		return "测量"
+	case "deviation":
+		return "偏差"
+	case "observation":
+		return "观察"
+	case "check":
+		return "检查"
+	}
+	return kind
+}
+
+// unassociatedRecords renders run-level records that cannot be tied to a
+// frozen task. They are never guessed into a task.
+func unassociatedRecords(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
+	if s.VM == nil || (len(s.VM.UnassociatedMeasurements) == 0 && len(s.VM.UnassociatedEvents) == 0) {
+		return
+	}
+	ui.Column(c).FillWidth().Padding(t.Space(2)).Radius(float32(tokens.PanelRadius)).
+		Background(tokens.WarningBg).Border(1, tokens.WarningText).Gap(t.Space(1.5)).Children(func() {
+		ui.Text(c, "未关联记录").FontSize(t.Rem(.85)).Bold().TextColor(tokens.WarningText)
+		ui.Text(c, "这些记录缺少可确认的 task key 或 protocol step path，未归入任何步骤。").
+			FontSize(t.Rem(.7)).TextColor(tokens.WarningText)
+		for _, measurement := range s.VM.UnassociatedMeasurements {
+			ui.Text(c, fmt.Sprintf("%s · %s %s %s", fallback(measurement.SampleID, "未分配"),
+				measurement.Field, measurement.Value, measurement.Unit)).
+				FontSize(t.Rem(.72)).TextColor(t.Text)
+		}
+		for _, event := range s.VM.UnassociatedEvents {
+			ui.Text(c, fmt.Sprintf("%s · %s", eventTypeLabel(event.Type), event.Content)).
+				FontSize(t.Rem(.72)).TextColor(t.Text)
+		}
+	})
 }

@@ -4114,6 +4114,7 @@ pub(crate) fn create_execution_event_tx(
         "result_cells":event.result_cells,
         "readouts":event.readouts.iter().map(|r|json!({"readout_id":r.readout_id,"endpoint":r.endpoint,"value":r.value,"qualifier":r.qualifier,"unit":r.unit,"sample_id":r.sample_id,"result_kind":r.result_kind,"method":r.method,"derived_from":r.derived_from})).collect::<Vec<_>>(),
         "checks":event.checks.iter().map(|c|json!({"check_id":c.check_id,"status":c.status,"note":c.note,"checked_by":c.checked_by})).collect::<Vec<_>>(),
+        "check_ack":event.check_ack,
         "controls":event.controls.iter().map(|c|json!({"role":c.role,"subtype":c.subtype,"status":c.status,"control_id":c.control_id,"sample_id":c.sample_id,"experimental_unit":c.experimental_unit,"expected":c.expected,"observed":c.observed,"note":c.note})).collect::<Vec<_>>(),
         "lineage":event.lineage.iter().map(|l|json!({"from_kind":l.from_kind,"from_id":l.from_id,"to_kind":l.to_kind,"to_id":l.to_id,"relation":l.relation,"note":l.note})).collect::<Vec<_>>(),
         "actual_parameters":event.actual_parameters.iter().map(|p|json!({"key":p.key,"value":p.value,"unit":p.unit,"source":p.source})).collect::<Vec<_>>(),
@@ -6137,6 +6138,10 @@ struct ExecutionEventCreate {
     operation_id: Option<String>,
     #[serde(default)]
     operation_payload: Option<Value>,
+    // Internal marker for the native SaveTaskChecks/CompleteTask path. The
+    // public execution_event.create schema deliberately does not expose it.
+    #[serde(default)]
+    check_ack: bool,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

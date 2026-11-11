@@ -1,5 +1,9 @@
 # RNA 提取 / RT-qPCR 多层级 Workflow 适配性测试
 
+> **Post-fix update (Track A):** The Run correctness issues below were fixed after this
+> pre-fix adaptivity test. The matrix records the original state; see
+> `docs/sdk/run-correctness-track-a.md` for the fixed behavior and evidence.
+
 - 日期：2026-11-11
 - 基线：`feature/v2-run-workspace` @ `d649ed1`
 - 范围：仅使用现有 SDK、CLI、AsterDoc、ProtocolBlock、Design、Run；未修改任何生产代码，未修改 Run UI v1 布局。

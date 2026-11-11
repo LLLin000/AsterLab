@@ -131,6 +131,7 @@ impl RunService for CoreRunService {
             "content": "核对执行检查项",
             "task_key": input.task_key,
             "operation_id": input.operation_id,
+            "check_ack": true,
             "checks": checks
         });
         if !input.assay_id.is_empty() { event["assay_id"] = serde_json::json!(input.assay_id); }
@@ -155,6 +156,7 @@ impl RunService for CoreRunService {
             "task_key": input.task_key,
             "step_status": "completed",
             "operation_id": input.operation_id,
+            "check_ack": true,
             "checks": checks
         });
         if !input.assay_id.is_empty() { event["assay_id"] = serde_json::json!(input.assay_id); }
@@ -546,8 +548,19 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
             label: check["label"].as_str().unwrap_or("").into(),
             instruction: check["instruction"].as_str().unwrap_or("").into(),
             blocking: check["blocking"].as_bool().unwrap_or(false),
+            status: String::new(),
         }).collect();
         checks_by_path.insert(path, checks);
+    }
+    let mut steps_by_path: std::collections::HashMap<String, (String, String, String)> =
+        std::collections::HashMap::new();
+    for step in v["steps"].as_array().into_iter().flatten() {
+        let path = step["step"]["path"].as_str().unwrap_or("").to_owned();
+        if path.is_empty() { continue; }
+        let title = step["step"]["title"].as_str().unwrap_or("").to_owned();
+        let instruction = step["step"]["instruction"].as_str().unwrap_or("").to_owned();
+        let parameters_json = serde_json::to_string(&step["step"]["parameters"]).unwrap_or_else(|_| "[]".into());
+        steps_by_path.insert(path, (title, instruction, parameters_json));
     }
     let mut steps_by_assay: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     if let Some(step_assays) = v["frozen_design"]["mygo"]["stepAssays"].as_object() {
@@ -625,10 +638,14 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
                 .map(|nodes| nodes[0].clone())
                 .unwrap_or_default()
         };
-        let title: String = t["step_path"].as_str().unwrap_or("").into();
-        let mut checks = checks_by_path.get(&title).cloned().unwrap_or_default();
+        let path: String = t["step_path"].as_str().unwrap_or("").into();
+        let (title, instruction, parameters_json) = steps_by_path
+            .get(&path)
+            .cloned()
+            .unwrap_or_else(|| (path.clone(), String::new(), "[]".into()));
+        let mut checks = checks_by_path.get(&path).cloned().unwrap_or_default();
         for entry in v["design_checks"].as_array().into_iter().flatten() {
-            if entry["path"].as_str() != Some(title.as_str()) {
+            if entry["path"].as_str() != Some(path.as_str()) {
                 continue;
             }
             for check in entry["checks"].as_array().into_iter().flatten() {
@@ -643,19 +660,55 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
                     label: check["label"].as_str().unwrap_or("").into(),
                     instruction: "".into(),
                     blocking: check["blocking"].as_bool().unwrap_or(false),
+                    status: String::new(),
                 });
             }
         }
         s.tasks.push(RunTask {
             key: t["task_key"].as_str().unwrap_or("").into(),
             title,
+            path,
             timepoint,
             status: t["status"].as_str().unwrap_or("").into(),
             assay_id,
             protocol_version_id,
             design_step_id,
+            instruction,
+            parameters_json,
             checks,
         });
+    }
+    // Apply only formal CheckAck events. Free-form execution_event checks are
+    // observations, not authoritative acknowledgements.
+    for task in &mut s.tasks {
+        for check in &mut task.checks {
+            let mut best: Option<(String, String)> = None;
+            for e in v["events"].as_array().into_iter().flatten() {
+                if !e["check_ack"].as_bool().unwrap_or(false) {
+                    continue;
+                }
+                let matches = e["task_key"].as_str() == Some(task.key.as_str())
+                    || e["protocol_step_path"].as_str() == Some(task.path.as_str());
+                if !matches {
+                    continue;
+                }
+                let at = e["recorded_at"].as_str()
+                    .or_else(|| e["occurred_at"].as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                for ack in e["checks"].as_array().into_iter().flatten() {
+                    if ack["check_id"].as_str() != Some(check.check_id.as_str()) {
+                        continue;
+                    }
+                    if best.as_ref().map_or(true, |(prev, _)| at.as_str() >= prev.as_str()) {
+                        best = Some((at.clone(), ack["status"].as_str().unwrap_or("").to_owned()));
+                    }
+                }
+            }
+            if let Some((_, status)) = best {
+                check.status = status;
+            }
+        }
     }
     for e in v["events"].as_array().into_iter().flatten() {
         s.events.push(RunEvent {
@@ -687,6 +740,7 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
                 check_id: check["check_id"].as_str().unwrap_or("").into(),
                 status: check["status"].as_str().unwrap_or("").into(),
             }).collect(),
+            data_json: serde_json::to_string(e).unwrap_or_default(),
         });
         for m in e["measurements"].as_array().into_iter().flatten() {
             s.measurements.push(Measurement {
@@ -694,6 +748,8 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
                 endpoint: m["endpoint"].as_str().unwrap_or("").into(),
                 value: m["value"].as_f64().unwrap_or(0.0),
                 unit: m["unit"].as_str().unwrap_or("").into(),
+                task_key: e["task_key"].as_str().unwrap_or("").into(),
+                protocol_step_path: e["protocol_step_path"].as_str().unwrap_or("").into(),
             });
         }
     }

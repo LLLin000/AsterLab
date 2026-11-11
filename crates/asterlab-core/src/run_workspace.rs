@@ -155,6 +155,9 @@ pub struct ExecutionEventView {
     pub readouts: Vec<Value>,
     pub measurements: Vec<Value>,
     pub checks: Vec<Value>,
+    pub materials: Vec<Value>,
+    pub deviation: Option<String>,
+    pub check_ack: bool,
     pub controls: Vec<Value>,
     pub lineage: Vec<Value>,
     pub actual_parameters: Vec<Value>,
@@ -507,6 +510,9 @@ pub fn build(
             readouts: event["readouts"].as_array().cloned().unwrap_or_default(),
             measurements: event["measurements"].as_array().cloned().unwrap_or_default(),
             checks: event["checks"].as_array().cloned().unwrap_or_default(),
+            materials: event["materials"].as_array().cloned().unwrap_or_default(),
+            deviation: opt_text(&event["deviation"]),
+            check_ack: event["check_ack"].as_bool().unwrap_or(false),
             controls: event["controls"].as_array().cloned().unwrap_or_default(),
             lineage: event["lineage"].as_array().cloned().unwrap_or_default(),
             actual_parameters: event["actual_parameters"].as_array().cloned().unwrap_or_default(),
@@ -537,8 +543,20 @@ pub fn build(
         events,
     };
     for task in &mut workspace.tasks {
-        task.status = workspace.events.iter()
-            .find(|event| event_matches_task(task, event) && event.step_status.is_some())
+        let mut latest: Option<&ExecutionEventView> = None;
+        for event in &workspace.events {
+            if !event_matches_task(task, event) || event.step_status.is_none() {
+                continue;
+            }
+            let at = event.recorded_at.as_deref().or(event.occurred_at.as_deref()).unwrap_or("");
+            let prev = latest
+                .map(|e| e.recorded_at.as_deref().or(e.occurred_at.as_deref()).unwrap_or(""))
+                .unwrap_or("");
+            if latest.is_none() || at >= prev {
+                latest = Some(event);
+            }
+        }
+        task.status = latest
             .and_then(|event| event.step_status.clone())
             .unwrap_or_else(|| "not_started".to_owned());
     }
