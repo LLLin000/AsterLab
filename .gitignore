@@ -16,3 +16,23 @@
 /crates/asterlab-app/target/
 
 /prototypes/mygo-run/dist/
+# Large local artifacts kept for research / release use — NOT committed.
+# These folders/files are useful but too large for git. Their absence does
+# NOT mean missing source: the SDK v1 RC baseline lives in committed
+# docs/sdk/ and prototypes/mygo-run/internal/asterdoc/spec/.
+#
+# /release/                        beta installers and zips (QA/release evidence)
+# /AsterLab-Slint.exe              local Slint prototype binary
+# /data/labworkbench.sqlite        user working database (useful research data)
+# /prototypes/mygo-run/target/     final RC app binary + Runs.dll
+#                                  (rebuild from committed source + spec/ for release)
+# /crates/asterlab-core/target/    Rust build cache
+# /crates/asterlab-app/target/     Rust build cache
+# /native/asterlab-run/target/     Rust build cache
+# /prototypes/mygo-run/.mygo/      local prototype state
+# /cargo-check.log                 one-off check log
+# /prototypes/mygo-run/dist2/      leftover build output
+
+/crates/asterlab-core/target/
+/prototypes/mygo-run/target/
+/prototypes/mygo-run/dist2/
