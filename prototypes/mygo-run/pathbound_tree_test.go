@@ -9,6 +9,7 @@ import (
 
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/runworkspace"
+	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -16,7 +17,8 @@ import (
 // fixture. The fixture is copied to a temporary data directory so the test
 // never depends on an untracked local acceptance database and never mutates
 // the committed file.
-func TestPathBoundRunTreeProjection(t *testing.T) {
+func rnaFixtureDataDir(t *testing.T) string {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "rna-case", "labworkbench.sqlite"))
 	if err != nil {
 		t.Fatalf("path-bound fixture missing: %v", err)
@@ -25,6 +27,11 @@ func TestPathBoundRunTreeProjection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "labworkbench.sqlite"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return dir
+}
+
+func TestPathBoundRunTreeProjection(t *testing.T) {
+	dir := rnaFixtureDataDir(t)
 	t.Setenv("LABWORKBENCH_DATA_DIR", dir)
 	ctx := context.Background()
 	runSvc, err := runs.NewRunService()
@@ -59,6 +66,9 @@ func TestPathBoundRunTreeProjection(t *testing.T) {
 	rna := vm.Tree.Roots[0]
 	if rna.Title != "01 RNA 提取" || !rna.Composite || rna.Total != 10 || rna.Completed != 5 || rna.Status != "current" {
 		t.Fatalf("RNA root = %+v", rna)
+	}
+	if rna.Identity != workflowtree.IdentityUse || rna.Children[0].Identity != workflowtree.IdentityOccurrence {
+		t.Fatalf("identity = %q / %q", rna.Identity, rna.Children[0].Identity)
 	}
 	if len(rna.Children) != 10 {
 		t.Fatalf("RNA children = %d, want 10", len(rna.Children))

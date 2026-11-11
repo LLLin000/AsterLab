@@ -21,6 +21,17 @@ const (
 	KindTask Kind = "task"
 )
 
+// Identity separates the three layers of the hierarchy. A definition is an
+// immutable ProtocolBlock version; a use is a design step referencing it; an
+// occurrence is a frozen Run task. Paths locate nodes; identity does not.
+type Identity string
+
+const (
+	IdentityDefinition Identity = "definition"
+	IdentityUse        Identity = "use"
+	IdentityOccurrence Identity = "occurrence"
+)
+
 // TaskRef is one frozen Run task occurrence under a step.
 type TaskRef struct {
 	Key                  string
@@ -34,18 +45,21 @@ type TaskRef struct {
 // Node is one read-only node. A step node may contain child tasks or nested
 // composites; a task node has no children.
 type Node struct {
-	ID            string
-	Title         string
-	Path          string
-	Kind          Kind
-	Composite     bool
-	Order         int
-	DefinitionRef string
-	Status        string
-	Completed     int
-	Total         int
-	Children      []*Node
-	Issues        []string
+	ID             string
+	Title          string
+	Path           string
+	Kind           Kind
+	Composite      bool
+	Order          int
+	Identity       Identity
+	UseID          string
+	BlockVersionID string
+	DefinitionRef  string
+	Status         string
+	Completed      int
+	Total          int
+	Children       []*Node
+	Issues         []string
 }
 
 // Tree is the projection of one frozen design plus one frozen Run.
@@ -56,7 +70,10 @@ type Tree struct {
 	Order []string
 	// Precedes is the explicit dependency graph from workflow.edges. Missing
 	// edges are not synthesized from Order or authored position.
-	Precedes  map[string][]string
+	Precedes map[string][]string
+	// Design is true when the tree was projected from AsterDoc/BlockVersion
+	// definitions without a frozen Run. Execution fields are then empty.
+	Design    bool
 	Issues    []string
 	Orphans   []TaskRef
 	Ambiguous []TaskRef
@@ -164,7 +181,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 	}
 
 	for _, step := range validSteps {
-		node := &Node{ID: step.id, Title: step.title, Path: step.path, Kind: KindStep, Order: step.order}
+		node := &Node{ID: step.id, Title: step.title, Path: step.path, Kind: KindStep, Order: step.order, Identity: IdentityUse, UseID: step.path}
 		var exact, descendants []TaskRef
 		for _, task := range assignments[step.id] {
 			if task.Path == step.path {
@@ -181,6 +198,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 			node.Composite = true
 			node.Children = buildTrie(step.path, descendants)
 			node.DefinitionRef = resolveDefinition(step, referenceRefs)
+			node.BlockVersionID = node.DefinitionRef
 			validateComposite(node, step.path, node.DefinitionRef, descendants)
 		case len(exact) > 0:
 			for _, task := range exact {
@@ -190,6 +208,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 				node.Issues = append(node.Issues, "multiple exact tasks share one step path")
 			}
 			node.DefinitionRef = exact[0].ProtocolVersionID
+			node.BlockVersionID = exact[0].SourceBlockVersionID
 		default:
 			node.Issues = append(node.Issues, "no frozen task matches this step path")
 		}
@@ -303,7 +322,7 @@ func convertTrie(node *trieNode) []*Node {
 		}
 		childNode := &Node{
 			ID: child.path, Title: child.segment, Path: child.path,
-			Kind: KindStep, Composite: true,
+			Kind: KindStep, Composite: true, Identity: IdentityUse, UseID: child.path,
 		}
 		childNode.Children = convertTrie(child)
 		if len(child.tasks) > 0 && len(child.children) > 0 {
@@ -322,6 +341,7 @@ func taskNode(task TaskRef) *Node {
 	}
 	return &Node{
 		ID: task.Key, Title: title, Path: task.Path, Kind: KindTask,
+		Identity: IdentityOccurrence, BlockVersionID: task.SourceBlockVersionID,
 		Status: task.Status, DefinitionRef: task.ProtocolVersionID,
 		Completed: completedCount(task.Status), Total: 1,
 	}

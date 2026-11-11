@@ -44,6 +44,9 @@ type DesignService interface {
 	ListProjects(ctx context.Context) ([]ProjectSummary, error)
 	// ListProtocols returns the protocol versions available for assay binding.
 	ListProtocols(ctx context.Context) ([]ProtocolSummary, error)
+	// PreviewProtocolBlock expands one immutable ProtocolBlock version for
+	// read-only Design hierarchy browsing. It never writes or creates a Run.
+	PreviewProtocolBlock(ctx context.Context, blockVersionID string) (ProtocolBlockPreview, error)
 	// LoadDesign returns the current authoritative design snapshot.
 	LoadDesign(ctx context.Context, designID string) (DesignSnapshot, error)
 	// SaveDesign revises a design and returns the persisted snapshot.
@@ -285,6 +288,24 @@ type ProtocolSummary struct {
 	ProtocolID        string `json:"protocolId"`
 	Title             string `json:"title"`
 	Version           int    `json:"version"`
+}
+
+// ProtocolBlockStep is one expanded definition step inside a ProtocolBlock
+// version. Path is relative to the block root (for example "01-collect").
+type ProtocolBlockStep struct {
+	UseID                string `json:"useId"`
+	Path                 string `json:"path"`
+	Title                string `json:"title"`
+	Instruction          string `json:"instruction"`
+	SourceBlockVersionID string `json:"sourceBlockVersionId"`
+}
+
+// ProtocolBlockPreview is a read-only expansion of one immutable block
+// version. It is not a Run and carries no execution status.
+type ProtocolBlockPreview struct {
+	BlockVersionID string              `json:"blockVersionId"`
+	Ready          bool                `json:"ready"`
+	Steps          []ProtocolBlockStep `json:"steps"`
 }
 
 type RunSummary struct {

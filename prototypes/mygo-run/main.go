@@ -29,6 +29,7 @@ import (
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/workflow"
+	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
 
 	mygo "github.com/egoist/mygo"
@@ -51,67 +52,76 @@ type app struct {
 	step    *string
 	samples []sample
 
-	runSvc              runs.RunService
-	designSvc           runs.DesignService
-	snap                runs.RunSnapshot
-	err                 string
-	batchView           string
-	asterDoc            *asterdoc.FrozenAsterDoc
-	asterErr            string
-	pdfExporting        bool
-	pdfExportResults    chan pdfExportResult
-	showFrozenDoc       bool
-	designDoc           *runs.AsterDocSnapshot
-	designView          *asterdoc.View
-	assetRoots          map[string]string
-	runAssets           []runs.Asset
-	runViewKinds        map[string]runworkspace.ViewKind
-	designDocErr        string
-	projects            []runs.ProjectSummary
-	protocols           []runs.ProtocolSummary
-	readiness           *runs.AsterDocAssessment
-	preflightOpen       bool
-	preflightRisk       bool
-	newDesignOpen       bool
-	addModuleOpen       bool
-	importOpen          bool
-	importPath          string
-	importTitle         string
-	importErr           string
-	designHistory       []runs.AsterDocSnapshot
-	designFuture        []runs.AsterDocSnapshot
-	asterDraftUndo      [][]byte
-	asterDraftRedo      [][]byte
-	asterDraftLast      []byte
-	asterDraftSuspend   bool
-	asterDraftSelection string
-	designTab           int
-	designCanvas        *workflow.Editor
-	designCanvasSource  string
-	designLayouts       map[string]map[string]workflow.Position
-	designSelected      string
-	canvasTitle         string
-	canvasAssay         string
-	canvasPath          string
-	canvasTimepoints    string
-	canvasSelLoaded     string
-	canvasSyncing       bool
-	confirmDeleteStep   string
-	canvasTasks         []canvasTaskDraft
-	canvasChecks        []canvasCheckDraft
-	canvasUses          []canvasUseDraft
-	canvasUsePick       string
-	toolsTab            int
-	noteDraft           string
-	noteRunID           string
-	noteDirty           bool
-	noteState           string
-	noteErr             string
-	createRunErr        string
-	noteMode            int
-	noteEditMode        int
-	noteDoc             *richtext.Document
-	noteAster           *asterdoc.View
+	runSvc                runs.RunService
+	designSvc             runs.DesignService
+	snap                  runs.RunSnapshot
+	err                   string
+	batchView             string
+	asterDoc              *asterdoc.FrozenAsterDoc
+	asterErr              string
+	pdfExporting          bool
+	pdfExportResults      chan pdfExportResult
+	showFrozenDoc         bool
+	designDoc             *runs.AsterDocSnapshot
+	designView            *asterdoc.View
+	assetRoots            map[string]string
+	runAssets             []runs.Asset
+	runViewKinds          map[string]runworkspace.ViewKind
+	designDocErr          string
+	projects              []runs.ProjectSummary
+	protocols             []runs.ProtocolSummary
+	readiness             *runs.AsterDocAssessment
+	preflightOpen         bool
+	preflightRisk         bool
+	newDesignOpen         bool
+	addModuleOpen         bool
+	importOpen            bool
+	importPath            string
+	importTitle           string
+	importErr             string
+	designHistory         []runs.AsterDocSnapshot
+	designFuture          []runs.AsterDocSnapshot
+	asterDraftUndo        [][]byte
+	asterDraftRedo        [][]byte
+	asterDraftLast        []byte
+	asterDraftSuspend     bool
+	asterDraftSelection   string
+	designTab             int
+	designCanvas          *workflow.Editor
+	designCanvasSource    string
+	designLayouts         map[string]map[string]workflow.Position
+	designHierarchy       *workflowtree.Tree
+	designHierarchySource string
+	designHierarchyErr    string
+	blockPreviewCache     map[string]workflowtree.BlockDefinition
+	designPreviewExpanded bool
+	designSubflow         *workflow.Editor
+	designSubflowParent   string
+	designSubflowTitle    string
+	designSubflowSelected string
+	designSelected        string
+	canvasTitle           string
+	canvasAssay           string
+	canvasPath            string
+	canvasTimepoints      string
+	canvasSelLoaded       string
+	canvasSyncing         bool
+	confirmDeleteStep     string
+	canvasTasks           []canvasTaskDraft
+	canvasChecks          []canvasCheckDraft
+	canvasUses            []canvasUseDraft
+	canvasUsePick         string
+	toolsTab              int
+	noteDraft             string
+	noteRunID             string
+	noteDirty             bool
+	noteState             string
+	noteErr               string
+	createRunErr          string
+	noteMode              int
+	noteEditMode          int
+	noteDoc               *richtext.Document
+	noteAster             *asterdoc.View
 
 	shell               *shell.Shell
 	ws                  *runui.Workspace
@@ -1082,6 +1092,9 @@ func (a *app) loadDesign(id string) {
 	a.resetAsterDraftHistory()
 	a.designCanvas = nil
 	a.designCanvasSource = ""
+	a.designHierarchy = nil
+	a.designHierarchySource = ""
+	a.designHierarchyErr = ""
 	// Keep per-design layouts loaded from the session; selecting a design uses
 	// its own saved coordinates. (no-op)
 	a.designSelected = ""
@@ -1585,6 +1598,8 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 	a.designView = nil
 	a.designCanvas = nil
 	a.designCanvasSource = ""
+	a.designHierarchy = nil
+	a.designHierarchySource = ""
 	a.refreshReadiness()
 	return true
 }
@@ -1614,6 +1629,8 @@ func (a *app) designUndo() {
 	a.designView = nil
 	a.designCanvas = nil
 	a.designCanvasSource = ""
+	a.designHierarchy = nil
+	a.designHierarchySource = ""
 	a.refreshReadiness()
 }
 
@@ -1642,6 +1659,8 @@ func (a *app) designRedo() {
 	a.designView = nil
 	a.designCanvas = nil
 	a.designCanvasSource = ""
+	a.designHierarchy = nil
+	a.designHierarchySource = ""
 	a.refreshReadiness()
 }
 

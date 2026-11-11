@@ -275,6 +275,32 @@ impl DesignService for CoreDesignService {
         Ok(out)
     }
 
+    fn preview_protocol_block(&self, _ctx: &Context, block_version_id: String) -> Result<ProtocolBlockPreview, Error> {
+        let guard = self.db.lock().map_err(|_| Error::Go("INTERNAL: db lock poisoned".into()))?;
+        let db = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let manifest = cli_impl::protocol_block_manifest(db, Some(&block_version_id), &serde_json::json!([]))
+            .map_err(|e| Error::Go(format!("INVALID: {e}")))?;
+        let mut steps = Vec::new();
+        for step in manifest["steps"].as_array().into_iter().flatten() {
+            let path = step["path"].as_str().unwrap_or("").to_owned();
+            if path.is_empty() {
+                continue;
+            }
+            steps.push(ProtocolBlockStep {
+                use_id: step["use_id"].as_str().unwrap_or("").to_owned(),
+                path,
+                title: step["title"].as_str().unwrap_or("").to_owned(),
+                instruction: step["instruction"].as_str().unwrap_or("").to_owned(),
+                source_block_version_id: step["source_block_version_id"].as_str().unwrap_or("").to_owned(),
+            });
+        }
+        Ok(ProtocolBlockPreview {
+            block_version_id,
+            ready: manifest["protocol_ready"].as_bool().unwrap_or(false),
+            steps,
+        })
+    }
+
     fn list_designs(&self, _ctx: &Context) -> Result<Vec<DesignSummary>, Error> {
         let guard = self.db.lock().map_err(|_| Error::Go("INTERNAL: db lock poisoned".into()))?;
         let db = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;

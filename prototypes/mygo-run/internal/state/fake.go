@@ -62,6 +62,12 @@ func (f *FakeDesignService) ListProtocols(ctx context.Context) ([]runs.ProtocolS
 	}
 	return nil, nil
 }
+func (f *FakeDesignService) PreviewProtocolBlock(ctx context.Context, blockVersionID string) (runs.ProtocolBlockPreview, error) {
+	if f.Err != nil {
+		return runs.ProtocolBlockPreview{}, MapError(f.Err)
+	}
+	return runs.ProtocolBlockPreview{BlockVersionID: blockVersionID}, nil
+}
 func (f *FakeDesignService) ListDesigns(ctx context.Context) ([]runs.DesignSummary, error) {
 	if f.Err != nil {
 		return nil, MapError(f.Err)
