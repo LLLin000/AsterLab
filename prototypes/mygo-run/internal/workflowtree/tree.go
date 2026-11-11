@@ -34,52 +34,53 @@ const (
 
 // TaskRef is one frozen Run task occurrence under a step.
 type TaskRef struct {
-	Key                  string
-	Path                 string
-	Title                string
-	Status               string
-	ProtocolVersionID    string
-	SourceBlockVersionID string
+	Key                  string `json:"key"`
+	Path                 string `json:"path"`
+	Title                string `json:"title"`
+	Status               string `json:"status,omitempty"`
+	ProtocolVersionID    string `json:"protocolVersionId,omitempty"`
+	SourceBlockVersionID string `json:"sourceBlockVersionId,omitempty"`
 }
 
 // Node is one read-only node. A step node may contain child tasks or nested
 // composites; a task node has no children.
 type Node struct {
-	ID                   string
-	Title                string
-	Path                 string
-	Kind                 Kind
-	Composite            bool
-	Order                int
-	Identity             Identity
-	UseID                string
-	BlockVersionID       string
-	DefinitionRef        string
-	Instruction          string
-	Parameters           []BlockParameter
-	UnresolvedParameters []string
-	Status               string
-	Completed            int
-	Total                int
-	Children             []*Node
-	Issues               []string
+	ID                   string           `json:"id"`
+	Title                string           `json:"title"`
+	Path                 string           `json:"path"`
+	Kind                 Kind             `json:"kind"`
+	Composite            bool             `json:"composite,omitempty"`
+	Order                int              `json:"order,omitempty"`
+	Identity             Identity         `json:"identity,omitempty"`
+	UseID                string           `json:"useId,omitempty"`
+	BlockVersionID       string           `json:"blockVersionId,omitempty"`
+	DefinitionRef        string           `json:"definitionRef,omitempty"`
+	Instruction          string           `json:"instruction,omitempty"`
+	Parameters           []BlockParameter `json:"parameters,omitempty"`
+	UnresolvedParameters []string         `json:"unresolvedParameters,omitempty"`
+	Status               string           `json:"status,omitempty"`
+	Completed            int              `json:"completed,omitempty"`
+	Total                int              `json:"total,omitempty"`
+	TaskKey              string           `json:"taskKey,omitempty"`
+	Children             []*Node          `json:"children,omitempty"`
+	Issues               []string         `json:"issues,omitempty"`
 }
 
 // Tree is the projection of one frozen design plus one frozen Run.
 type Tree struct {
-	Roots []*Node
+	Roots []*Node `json:"roots"`
 	// Order is the business display order from workflow.business_order. It is
 	// independent of Precedes and never implies execution dependency.
-	Order []string
+	Order []string `json:"order"`
 	// Precedes is the explicit dependency graph from workflow.edges. Missing
 	// edges are not synthesized from Order or authored position.
-	Precedes map[string][]string
+	Precedes map[string][]string `json:"precedes"`
 	// Design is true when the tree was projected from AsterDoc/BlockVersion
 	// definitions without a frozen Run. Execution fields are then empty.
-	Design    bool
-	Issues    []string
-	Orphans   []TaskRef
-	Ambiguous []TaskRef
+	Design    bool      `json:"design"`
+	Issues    []string  `json:"issues,omitempty"`
+	Orphans   []TaskRef `json:"orphans,omitempty"`
+	Ambiguous []TaskRef `json:"ambiguous,omitempty"`
 }
 
 // Build projects the design steps and frozen tasks. A task has exactly one
@@ -345,7 +346,8 @@ func taskNode(task TaskRef) *Node {
 	return &Node{
 		ID: task.Key, Title: title, Path: task.Path, Kind: KindTask,
 		Identity: IdentityOccurrence, BlockVersionID: task.SourceBlockVersionID,
-		Status: task.Status, DefinitionRef: task.ProtocolVersionID,
+		TaskKey: task.Key,
+		Status:  task.Status, DefinitionRef: task.ProtocolVersionID,
 		Completed: completedCount(task.Status), Total: 1,
 	}
 }

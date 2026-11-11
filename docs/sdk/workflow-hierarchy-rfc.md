@@ -125,3 +125,10 @@ Design Canvas now consumes the same hierarchy without a Run: AsterDoc steps are
 Use nodes, immutable ProtocolBlock versions contribute Definition children,
 and frozen Run tasks are Occurrence overlays. The Canvas can preview and enter
 one level read-only; see `docs/sdk/design-hierarchy-track-e.md`.
+
+## Read-only Agent query
+
+`workflow.inspect_tree` exposes the same hierarchy contract to the Agent CLI,
+with optional Run overlay. The Rust CLI is a transport adapter over the shared
+Go hierarchy engine; it does not reimplement `BuildDesign`. See
+`docs/sdk/workflow-tree-contract-v1.md`.

@@ -32,6 +32,7 @@ use std::{
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
+    process::Command,
 };
 use uuid::Uuid;
 
@@ -410,6 +411,15 @@ struct EmptyInput {}
 #[serde(deny_unknown_fields)]
 struct IdInput {
     id: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InspectTreeInput {
+    design_id: String,
+    #[serde(default)]
+    revision: Option<u64>,
+    #[serde(default)]
+    run_id: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -6551,6 +6561,41 @@ pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliE
     Ok(value)
 }
 
+fn inspect_workflow_tree(input: &InspectTreeInput, data_dir: &Path) -> Result<Value, CliError> {
+    let binary = std::env::var("ASTERLAB_APP_BIN").ok().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| {
+        let local = Path::new("prototypes/mygo-run/target/asterlab-onevra.exe");
+        if local.exists() {
+            local.to_string_lossy().into_owned()
+        } else {
+            "asterlab-onevra.exe".to_owned()
+        }
+    });
+    let mut command = Command::new(&binary);
+    command.arg("--inspect-tree").arg("--design").arg(&input.design_id);
+    if let Some(revision) = input.revision {
+        command.arg("--revision").arg(revision.to_string());
+    }
+    if let Some(run_id) = &input.run_id {
+        command.arg("--run").arg(run_id);
+    }
+    command.env("LABWORKBENCH_DATA_DIR", data_dir);
+    let output = command.output().map_err(|error| {
+        CliError::internal(format!(
+            "无法启动层级投影引擎 {binary}：{error}；可设置 ASTERLAB_APP_BIN 指向 AsterLab 应用"
+        ))
+    })?;
+    if !output.status.success() {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(CliError::internal(if message.is_empty() {
+            format!("层级投影引擎退出码 {:?}", output.status.code())
+        } else {
+            message
+        }));
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| CliError::internal(format!("层级投影输出无效：{error}")))
+}
+
 pub(crate) fn design_map(db: &Connection, design_id: &str) -> Result<Value, CliError> {
     let record = get(db, design_id)?;
     if record["kind"] != "design" {
@@ -7677,6 +7722,10 @@ fn require_trusted_writer(tool: &str) -> Result<(), CliError> {
 }
 
 fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> {
+    if tool == "workflow.inspect_tree" {
+        let input: InspectTreeInput = parse_input(path)?;
+        return inspect_workflow_tree(&input, data_dir);
+    }
     if tool == "import.study.preview" {
         let i: StudyImport = parse_input(path)?;
         validate_import(&i)?;
@@ -9120,6 +9169,7 @@ fn result_schema(tool: &str) -> Value {
         "run.workspace" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","design_id","design_version_id","design_revision","frozen_design","protocol_version_id","status","scopes","steps","tasks","occurrences","materials","plates","events"],"properties":{"run_id":{"type":"string"},"design_id":{"type":"string"},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"frozen_design":{"type":"object","additionalProperties":true},"protocol_version_id":{"type":["string","null"]},"status":{"type":"string"},"scopes":{"type":"array","items":{"type":"object","additionalProperties":true}},"steps":{"type":"array","items":{"type":"object","additionalProperties":true}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},"occurrences":{"type":"array","items":{"type":"object","additionalProperties":true}},"materials":{"type":"array","items":{"type":"object","additionalProperties":true}},"plates":{"type":"array","items":{"type":"object","additionalProperties":true}},"events":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
         }
+        "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["designId","revision","design","roots","order","precedes","issues"],"properties":{"designId":{"type":"string"},"revision":{"type":"integer","minimum":0},"runId":{"type":"string"},"design":{"type":"boolean"},"roots":{"type":"array","items":{"type":"object","additionalProperties":true}},"order":{"type":"array","items":{"type":"string"}},"precedes":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"issues":{"type":"array","items":{"type":"string"}}}}),
         "task.create" => one("task"),
         "task.set_status" => one("task"),
         "protocol.list" => arr("protocol"),
@@ -9295,6 +9345,7 @@ fn input_schema(tool: &str) -> Option<Value> {
         "run.create" => {
             json!({"type":"object","additionalProperties":false,"required":["design_id","title"],"properties":{"design_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]}}})
         }
+        "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"run_id":{"type":"string"}}}),
         "task.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","scheduled_date"],"properties":{"project_id":{"type":"string"},"run_id":{"type":["string","null"]},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":"string","minLength":1,"format":"date"},"status":{"type":"string","enum":["planned","in_progress","done","blocked"]},"notes":{"type":"string"}}})
         }
@@ -9507,6 +9558,7 @@ fn tool_specs() -> Vec<Value> {
         "run.set_status",
         "run.revise",
         "run.workspace",
+        "workflow.inspect_tree",
         "task.create",
         "task.set_status",
         "protocol.list",
@@ -9569,6 +9621,7 @@ fn tool_writes(tool: &str) -> bool {
             | "design.list"
             | "design.get"
             | "run.list"
+            | "workflow.inspect_tree"
             | "protocol.list"
             | "protocol.block.list"
             | "protocol.block.get"
@@ -9608,6 +9661,7 @@ fn tool_description(tool: &str) -> &'static str {
             "只修改 changes 中提供的字段，保留其他值并新增版本；必须提供 expected_revision。"
         }
         "run.list" => "按项目查询实验运行。",
+        "workflow.inspect_tree" => "只读投影 Design（可选 Run）的 Use/Definition/Occurrence 层级树；CLI 调用同一 Go 层级引擎，不复制投影算法。",
         "run.create" => "从设计当前版本创建运行并固定设计/Protocol 版本引用；仅受信任的本地写入端可调用，Agent 不得自行创建 Run。",
         "run.set_status" => "更新运行状态；必须提供读取时的 expected_revision。Protocol 必填参数未确认时拒绝开始运行。",
         "run.revise" => "按 expected_revision 修订运行名称或计划日期；设计版本、Protocol 清单、材料清单和重复关系不可改写。",
@@ -9674,6 +9728,7 @@ fn tool_effects(tool: &str) -> &'static str {
         | "design.map"
         | "run.list"
         | "run.workspace"
+        | "workflow.inspect_tree"
         | "protocol.list"
         | "protocol.block.list"
         | "protocol.block.get"

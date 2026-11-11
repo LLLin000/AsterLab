@@ -2137,6 +2137,13 @@ func (a *app) saveNotebook() {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--inspect-tree" {
+		if err := runInspectTree(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if strings.EqualFold(os.Getenv("ASTERLAB_THEME"), "dark") {
 		mygo.Theme.SetSource(mygo.ThemeDark)
 	}

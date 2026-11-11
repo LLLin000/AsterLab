@@ -12,10 +12,10 @@ import (
 // Path is relative to the block root; SourceBlockVersionID is the exact block
 // version that owns the step.
 type BlockParameter struct {
-	Key   string
-	Label string
-	Value string
-	Unit  string
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Value string `json:"value"`
+	Unit  string `json:"unit,omitempty"`
 }
 
 type BlockStep struct {

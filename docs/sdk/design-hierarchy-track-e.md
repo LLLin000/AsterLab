@@ -1,9 +1,11 @@
 # Track E — Design Canvas hierarchy browsing
 
 - Baseline: `feature/v2-run-workspace` @ `6608ab1`
-- Commits: E0 `d4224f8`, E1 `dfd3ada`, E2/E3 (this commit)
-- Scope: read-only Design hierarchy, one-level Canvas drill-down, no nested
-  editing and no Agent commands.
+- Commits: E0 `d4224f8`, E1 `dfd3ada`, E2/E3 `abb8c75`, F0 `f67c382`,
+  F1 `f560075`
+- Scope: read-only Design hierarchy, one-level Canvas drill-down, F0
+  readability, and the read-only Agent query. No nested editing and no Agent
+  write commands.
 - Existing Run UI v1 right-side layout is unchanged.
 
 ## 1. E0 — contract and regression hardening
@@ -142,3 +144,13 @@ go run github.com/egoist/mygo/cmd/mygo native check modules/runs      PASS
   selected node inside the subflow is not part of the session.
 - The existing root step card tag/kind is unchanged; composite cards override
   the tag with `子流程 · N 步`.
+
+## F1 — Agent hierarchy query
+
+`workflow.inspect_tree` is available as a read-only Agent command. It returns
+the same contract used by the Canvas: `roots[]`, separated `order`/`precedes`,
+Definition/Use/Occurrence identity, instructions, parameters, optional
+TaskKey/status, and issues. The Rust CLI does not reimplement `BuildDesign`; it
+invokes the shared Go hierarchy engine through the app's hidden
+`--inspect-tree` mode. The remaining architecture step is moving that producer
+into Rust Core while preserving `docs/sdk/workflow-tree-contract-v1.md`.
