@@ -742,6 +742,7 @@ type workspaceSession struct {
 	CanvasLayouts map[string]map[string]workflow.Position `json:"canvas_layouts,omitempty"`
 	DesignID      string                                  `json:"design_id"`
 	RunID         string                                  `json:"run_id"`
+	TaskKey       string                                  `json:"task_key,omitempty"`
 	TaskPath      string                                  `json:"task_path,omitempty"`
 	Collapsed     map[string]bool                         `json:"collapsed,omitempty"`
 	Page          string                                  `json:"page"`
@@ -797,6 +798,7 @@ func (a *app) saveSession() {
 		if a.runWS.Selected != "" {
 			for _, task := range a.snap.Tasks {
 				if task.Key == a.runWS.Selected {
+					session.TaskKey = task.Key
 					session.TaskPath = taskStepPath(task)
 					break
 				}
@@ -842,15 +844,10 @@ func (a *app) restoreSession() {
 				a.runWS.Collapsed = session.Collapsed
 				a.runWS.SetTreeCollapsed(session.Collapsed)
 			}
-			if session.TaskPath != "" {
-				for _, task := range a.snap.Tasks {
-					if taskStepPath(task) == session.TaskPath {
-						a.ws.Selected = task.Key
-						a.runWS.Selected = task.Key
-						a.prepareGrid()
-						break
-					}
-				}
+			if key := restoreTaskKey(a.snap.Tasks, session.TaskKey, session.TaskPath); key != "" {
+				a.ws.Selected = key
+				a.runWS.Selected = key
+				a.prepareGrid()
 			}
 		}
 	}
@@ -924,6 +921,33 @@ func taskStepPath(task runs.RunTask) string {
 		return task.Path
 	}
 	return task.Title
+}
+
+// restoreTaskKey prefers the complete TaskKey. A path is only a fallback when
+// exactly one frozen task carries it; duplicate paths across assays or
+// timepoints are ambiguous and must not select an arbitrary occurrence.
+func restoreTaskKey(tasks []runs.RunTask, taskKey, taskPath string) string {
+	if taskKey != "" {
+		for _, task := range tasks {
+			if task.Key == taskKey {
+				return task.Key
+			}
+		}
+	}
+	if taskPath == "" {
+		return ""
+	}
+	key := ""
+	for _, task := range tasks {
+		if taskStepPath(task) != taskPath {
+			continue
+		}
+		if key != "" {
+			return ""
+		}
+		key = task.Key
+	}
+	return key
 }
 
 func currentRunTask(tasks []runs.RunTask) runs.RunTask {

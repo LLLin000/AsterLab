@@ -99,8 +99,39 @@ func TestProjectionBuildsFourParentsAndTenRNAOperations(t *testing.T) {
 	if tree.Roots[3].Status != "blocked" {
 		t.Fatalf("qPCR status = %q", tree.Roots[3].Status)
 	}
+	if got := tree.Order; len(got) != 4 || got[1] != "step-rna-qc" {
+		t.Fatalf("business order = %+v", got)
+	}
 	if got := tree.Precedes["step-rna-extract"]; len(got) != 1 || got[0] != "step-rna-qc" {
 		t.Fatalf("precedes = %+v", tree.Precedes)
+	}
+}
+
+func TestProjectionKeepsDisplayOrderAndDependenciesIndependent(t *testing.T) {
+	source := strings.Replace(parentSourceText(t),
+		"business_order: [step-rna-extract, step-rna-qc, step-rt, step-qpcr]",
+		"business_order: [step-rna-extract, step-qpcr, step-rna-qc, step-rt]", 1)
+	tree, err := Build(parentTasks(), &asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOrder := []string{"step-rna-extract", "step-qpcr", "step-rna-qc", "step-rt"}
+	for i, want := range wantOrder {
+		if tree.Order[i] != want {
+			t.Fatalf("order[%d] = %q, want %q", i, tree.Order[i], want)
+		}
+	}
+	if got := tree.Roots[1].ID; got != "step-qpcr" {
+		t.Fatalf("root display order was not applied: %q", got)
+	}
+	if got := tree.Precedes["step-rna-extract"]; len(got) != 1 || got[0] != "step-rna-qc" {
+		t.Fatalf("dependency was replaced by display order: %+v", tree.Precedes)
+	}
+	if got := tree.Precedes["step-rna-qc"]; len(got) != 1 || got[0] != "step-rt" {
+		t.Fatalf("qPCR edge lost: %+v", tree.Precedes)
+	}
+	if err := tree.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 

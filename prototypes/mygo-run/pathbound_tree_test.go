@@ -12,16 +12,18 @@ import (
 	"asterlab-mygo-prototype/modules/runs"
 )
 
-// TestPathBoundRunTreeProjection reads the real frozen path-bound RT-qPCR Run
-// from the local acceptance database. It skips on a clean checkout where that
-// disposable fixture is absent.
+// TestPathBoundRunTreeProjection reads the committed deterministic RT-qPCR Run
+// fixture. The fixture is copied to a temporary data directory so the test
+// never depends on an untracked local acceptance database and never mutates
+// the committed file.
 func TestPathBoundRunTreeProjection(t *testing.T) {
-	dir, err := filepath.Abs(filepath.Join("..", "..", "target", "rna-case-data"))
+	raw, err := os.ReadFile(filepath.Join("testdata", "rna-case", "labworkbench.sqlite"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("path-bound fixture missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "labworkbench.sqlite")); err != nil {
-		t.Skipf("path-bound acceptance DB unavailable: %v", err)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "labworkbench.sqlite"), raw, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("LABWORKBENCH_DATA_DIR", dir)
 	ctx := context.Background()

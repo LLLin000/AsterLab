@@ -50,7 +50,12 @@ type Node struct {
 
 // Tree is the projection of one frozen design plus one frozen Run.
 type Tree struct {
-	Roots     []*Node
+	Roots []*Node
+	// Order is the business display order from workflow.business_order. It is
+	// independent of Precedes and never implies execution dependency.
+	Order []string
+	// Precedes is the explicit dependency graph from workflow.edges. Missing
+	// edges are not synthesized from Order or authored position.
 	Precedes  map[string][]string
 	Issues    []string
 	Orphans   []TaskRef
@@ -193,18 +198,14 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 		tree.Issues = append(tree.Issues, node.Issues...)
 	}
 
-	// Precedes is separate from containment. Prefer the frozen business order,
-	// then explicit workflow edges, then the authored step order.
-	if order := businessOrder(parsed); len(order) > 0 {
-		addOrderEdges(tree.Precedes, order)
-	} else if edges := workflowEdges(parsed); len(edges) > 0 {
-		for _, edge := range edges {
-			tree.Precedes[edge[0]] = append(tree.Precedes[edge[0]], edge[1])
-		}
-	} else {
-		for i := 0; i+1 < len(tree.Roots); i++ {
-			tree.Precedes[tree.Roots[i].ID] = append(tree.Precedes[tree.Roots[i].ID], tree.Roots[i+1].ID)
-		}
+	// Display order and dependency are independent contracts. business_order
+	// orders the rail/canvas; only workflow.edges declares execution
+	// dependency. Never synthesize edges from display order or authored
+	// position, especially for branched or parallel workflows.
+	tree.Order = businessOrder(parsed)
+	tree.Roots = orderRoots(tree.Roots, tree.Order)
+	for _, edge := range workflowEdges(parsed) {
+		tree.Precedes[edge[0]] = append(tree.Precedes[edge[0]], edge[1])
 	}
 	if cycle := findCycle(tree.Precedes); cycle != "" {
 		tree.Issues = append(tree.Issues, "precedes cycle at "+cycle)
@@ -420,6 +421,30 @@ func taskPath(task runs.RunTask) string {
 	return parsed.Path
 }
 
+func orderRoots(roots []*Node, order []string) []*Node {
+	if len(order) == 0 || len(roots) < 2 {
+		return roots
+	}
+	byID := make(map[string]*Node, len(roots))
+	for _, root := range roots {
+		byID[root.ID] = root
+	}
+	ordered := make([]*Node, 0, len(roots))
+	seen := make(map[string]bool, len(roots))
+	for _, id := range order {
+		if root := byID[id]; root != nil && !seen[id] {
+			ordered = append(ordered, root)
+			seen[id] = true
+		}
+	}
+	for _, root := range roots {
+		if !seen[root.ID] {
+			ordered = append(ordered, root)
+		}
+	}
+	return ordered
+}
+
 func businessOrder(doc *asterdoc.Document) []string {
 	for _, module := range doc.Modules {
 		if module.Kind != "workflow" {
@@ -435,12 +460,6 @@ func businessOrder(doc *asterdoc.Document) []string {
 		return out
 	}
 	return nil
-}
-
-func addOrderEdges(edges map[string][]string, order []string) {
-	for i := 0; i+1 < len(order); i++ {
-		edges[order[i]] = append(edges[order[i]], order[i+1])
-	}
 }
 
 func workflowEdges(doc *asterdoc.Document) [][2]string {
