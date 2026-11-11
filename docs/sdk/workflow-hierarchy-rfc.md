@@ -118,3 +118,10 @@ business order, structured task key, real frozen Run proof) is documented in
 `docs/sdk/workflow-hierarchy-track-d.md`. The Run rail now consumes this
 projection through Onevra's existing collapsible `components.Tree`; single-layer
 runs keep the legacy rail.
+
+## Track E extension
+
+Design Canvas now consumes the same hierarchy without a Run: AsterDoc steps are
+Use nodes, immutable ProtocolBlock versions contribute Definition children,
+and frozen Run tasks are Occurrence overlays. The Canvas can preview and enter
+one level read-only; see `docs/sdk/design-hierarchy-track-e.md`.

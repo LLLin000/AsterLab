@@ -29,14 +29,18 @@ type NodeParam struct {
 }
 
 type Node struct {
-	ID            string      `json:"id"`
-	Kind          NodeKind    `json:"kind"`
-	Title         string      `json:"title"`
-	Pos           Position    `json:"pos"`
-	ComponentRefs []string    `json:"component_refs,omitempty"`
-	Order         string      `json:"order,omitempty"`
-	Tag           string      `json:"tag,omitempty"`
-	Params        []NodeParam `json:"params,omitempty"`
+	ID            string   `json:"id"`
+	Kind          NodeKind `json:"kind"`
+	Title         string   `json:"title"`
+	Pos           Position `json:"pos"`
+	ComponentRefs []string `json:"component_refs,omitempty"`
+	Order         string   `json:"order,omitempty"`
+	Tag           string   `json:"tag,omitempty"`
+	// Composite marks a design step that references a ProtocolBlock
+	// definition. ChildCount is the derived number of definition operations.
+	Composite  bool        `json:"composite,omitempty"`
+	ChildCount int         `json:"child_count,omitempty"`
+	Params     []NodeParam `json:"params,omitempty"`
 }
 
 type Edge struct{ ID, From, To string }
@@ -177,6 +181,9 @@ type Editor struct {
 	// ExternalWrites tells View not to bind delete/undo shortcuts that would
 	// mutate this local graph without the document command layer.
 	ExternalWrites bool
+	// ReadOnly disables layout drags in derived views such as a ProtocolBlock
+	// definition. Selection remains available.
+	ReadOnly bool
 	// Navigation turns wheel/pinch/two-finger scroll into canvas pan and zoom.
 	Navigation gesture.Navigation
 }

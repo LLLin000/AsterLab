@@ -95,7 +95,13 @@ Real run: `ad9b452e-f8ea-404b-9a2a-7124f9403b02`; design
 Events: 01–05 completed, 06 in progress, QC completed, qPCR blocked, RT
 pending.
 
-## 4. Remaining limits
+## 4. Track E extension
+
+Track E keeps this projection as the Run overlay and adds the independent
+Design hierarchy (Definition/Use/Occurrence) plus a one-level read-only Canvas
+drill-down. See `docs/sdk/design-hierarchy-track-e.md`.
+
+## 5. Remaining limits
 
 - Parent `block_use` version/use_id are not exposed in the frozen task model;
   nested block definitions have no direct `DefinitionRef` in the projection.

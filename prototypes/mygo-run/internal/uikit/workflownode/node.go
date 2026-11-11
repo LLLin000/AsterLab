@@ -4,6 +4,8 @@
 package workflownode
 
 import (
+	"fmt"
+
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
@@ -41,6 +43,10 @@ type NodeProps struct {
 	Params    []ParamItem
 	State     NodeState
 	ErrorText string
+	// Composite and ChildCount mark a step that contains a ProtocolBlock
+	// definition. The card remains read-only for that definition.
+	Composite  bool
+	ChildCount int
 }
 
 const (
@@ -142,6 +148,9 @@ func params(c *ui.Context, props NodeProps, scale float32) {
 func tagText(props NodeProps) string {
 	if props.Tag != "" {
 		return props.Tag
+	}
+	if props.Composite {
+		return fmt.Sprintf("子流程 · %d 步", props.ChildCount)
 	}
 	return defaultKindTag(props.Kind)
 }

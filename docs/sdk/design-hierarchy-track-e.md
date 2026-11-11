@@ -1,0 +1,117 @@
+# Track E — Design Canvas hierarchy browsing
+
+- Baseline: `feature/v2-run-workspace` @ `6608ab1`
+- Commits: E0 `d4224f8`, E1 `dfd3ada`, E2/E3 (this commit)
+- Scope: read-only Design hierarchy, one-level Canvas drill-down, no nested
+  editing and no Agent commands.
+- Existing Run UI v1 right-side layout is unchanged.
+
+## 1. E0 — contract and regression hardening
+
+- `workflowtree.Tree` now has two independent contracts:
+  - `Order` — `workflow.business_order`, used for display order;
+  - `Precedes` — explicit `workflow.edges` only.
+  No edge is synthesized from display order or authored position. Branched or
+  parallel workflows keep their real dependency graph.
+- Workspace selection persists the complete `TaskKey` first. `task_path` is a
+  fallback only when exactly one frozen task carries that path; ambiguous paths
+  select nothing.
+- The real RT-qPCR Run projection test now reads a committed fixture at
+  `testdata/rna-case/labworkbench.sqlite`, copies it to a temporary data
+  directory, and fails if the fixture is missing. It no longer depends on the
+  untracked local acceptance database or skips on a clean checkout.
+- Historical Run/CCK-8 tests and the single-layer RNA rail remain compatible.
+
+## 2. E1 — definition/use/occurrence projection
+
+`workflowtree.BuildDesign(doc, provider)` builds the hierarchy without a Run:
+
+- Design steps are **Use** nodes.
+- Referenced immutable ProtocolBlock versions contribute **Definition** child
+  steps. The block steps are never copied into the AsterDoc.
+- Frozen Run tasks remain the only **Occurrence** layer; the existing
+  `workflowtree.Build` overlays them on the same identity model.
+- A step's reference resolves to an exact `block_version_id`. Paths locate
+  nodes; version IDs and reference IDs validate identity.
+- Two uses of the same block version keep separate root `UseID` and child
+  paths. A newly created block version cannot change an old reference.
+- Missing provider, missing block, duplicate definition paths, mixed
+  task/children and cycle cases produce diagnostics instead of guessed
+  children.
+
+Core exposes a read-only `PreviewProtocolBlock(blockVersionID)` on
+`DesignService`, backed by the existing block expansion. It performs no write
+and creates no Run.
+
+Tests:
+
+```text
+TestBuildDesignWithoutRun
+TestBuildDesignRejectsMissingBlockProvider
+TestBuildDesignReusesSameBlockVersionIndependently
+TestBuildDesignKeepsOldVersionReference
+TestProtocolBlockPreviewFixture
+TestDesignHierarchyWithoutRunFixture
+TestCanvasStepsCarryCompositeMarker
+```
+
+## 3. E2 — Canvas expand and enter
+
+- The root Canvas still shows only the four top-level steps.
+- A composite step card is marked `子流程 · N 步`; the existing step editing
+  toolbar and inspector remain unchanged.
+- Selecting the RNA extraction card shows a read-only actions row:
+  - `展开预览` shows the first four real definition operations and the
+    remaining count;
+  - `进入子流程` focuses the complete child definition set.
+- The child view reuses the existing `workflow.Editor` in read-only mode
+  (`ExternalWrites=true`, `ReadOnly=true`) and the existing node cards. It has
+  no add/delete/connect commands, no layout drag, and no second persistent
+  graph.
+- A `components.Breadcrumbs` path returns to the root. The root editor object
+  is kept intact, so its pan, zoom, selection and saved node positions are
+  restored.
+- Workspace session stores `design_focus`, `design_preview`, and
+  `design_subflow`; restart restores the selected root step, preview state and
+  open subflow. These fields never enter AsterDoc.
+- No nested editing command, shared block mutation, or Agent operation exists
+  in this round.
+
+## 4. E3 — evidence
+
+| Evidence | Content |
+|---|---|
+| `evidence/design-hierarchy-root.png` | Design with no Run selected; four root steps; RNA card marked `子流程 · 10 步`; actions row. |
+| `evidence/design-hierarchy-preview.png` | Local preview of four real definition operations plus `+6 个操作`. |
+| `evidence/design-hierarchy-subflow.png` | Read-only RNA subflow with all 10 definition operations. |
+| `evidence/design-hierarchy-subflow-restart.png` | Restart restores the open subflow. |
+| `evidence/design-hierarchy-return.png` | Breadcrumb returns to the root with the RNA selection, preview and layout preserved. |
+| `evidence/rtqpcr-tree-standard-regression.png` | Existing Run Tree remains intact after Track E. |
+
+The screenshots are from the real 2576×1408 maximized app window with the
+RNA/RT-qPCR fixture. The design root screenshot has no selected Run.
+
+## 5. Verification
+
+```text
+go test ./...                                                        PASS
+go test ./internal/workflowtree                                      PASS
+go test -run 'TestDesignHierarchyWithoutRunFixture|TestProtocolBlockPreviewFixture|TestPathBoundRunTreeProjection' .  PASS
+go run github.com/egoist/mygo/cmd/mygo native check modules/runs      PASS
+```
+
+## 6. Remaining limits
+
+- Drill-down is one level. A nested ProtocolBlock inside the current block is
+  shown as a composite card, but there is no second-level `进入` yet.
+- The subflow is read-only; no nested step edit command exists. Agent
+  `inspect_tree`/`expand` and write operations remain future work.
+- Block preview uses empty root bindings. If a block requires root parameters,
+  its definition steps are still shown but readiness may be false; that is a
+  design-readiness concern, not a hierarchy guess.
+- Root Canvas node positions remain the existing per-design layout. The
+  subflow uses an auto grid and does not persist child positions.
+- Only the subflow's parent and the root focus/preview are persisted; a
+  selected node inside the subflow is not part of the session.
+- The existing root step card tag/kind is unchanged; composite cards override
+  the tag with `子流程 · N 步`.

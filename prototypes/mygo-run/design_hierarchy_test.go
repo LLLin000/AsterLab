@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"testing"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
@@ -40,5 +42,44 @@ func TestDesignHierarchyWithoutRunFixture(t *testing.T) {
 	}
 	if rna.Children[0].Identity != workflowtree.IdentityDefinition {
 		t.Fatalf("child identity = %q", rna.Children[0].Identity)
+	}
+}
+
+func TestCanvasStepsCarryCompositeMarker(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/sdk/rna-extraction-case/rtqpcr-parent-path-bound.asterml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := asterdoc.Parse(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := make([]workflowtree.BlockStep, 0, 10)
+	for i := 1; i <= 10; i++ {
+		steps = append(steps, workflowtree.BlockStep{
+			UseID: "op", Path: "root/" + fmt.Sprintf("%02d-op", i),
+			Title: "操作", SourceBlockVersionID: "c23df8e1-3f2a-4449-8ac9-a4bb7256a113",
+		})
+	}
+	provider := workflowtree.BlockProviderFunc(func(string) (workflowtree.BlockDefinition, error) {
+		return workflowtree.BlockDefinition{
+			BlockVersionID: "c23df8e1-3f2a-4449-8ac9-a4bb7256a113",
+			Ready:          true,
+			Steps:          steps,
+		}, nil
+	})
+	tree, err := workflowtree.BuildDesign(&asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: string(raw)}, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rna *canvasStepInfo
+	for _, step := range canvasSteps(doc, tree) {
+		if step.id == "step-rna-extract" {
+			step := step
+			rna = &step
+		}
+	}
+	if rna == nil || !rna.composite || rna.childCount != 10 {
+		t.Fatalf("composite marker = %+v", rna)
 	}
 }

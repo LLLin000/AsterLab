@@ -754,6 +754,9 @@ type workspaceSession struct {
 	RunID         string                                  `json:"run_id"`
 	TaskKey       string                                  `json:"task_key,omitempty"`
 	TaskPath      string                                  `json:"task_path,omitempty"`
+	DesignFocus   string                                  `json:"design_focus,omitempty"`
+	DesignPreview bool                                    `json:"design_preview,omitempty"`
+	DesignSubflow string                                  `json:"design_subflow,omitempty"`
 	Collapsed     map[string]bool                         `json:"collapsed,omitempty"`
 	Page          string                                  `json:"page"`
 	DesignTab     int                                     `json:"design_tab"`
@@ -799,6 +802,13 @@ func (a *app) saveSession() {
 		// The selected Run belongs to the workspace, not only to the Run page.
 		// Keeping it lets Design/Notebook/Tools restore with their run context.
 		session.RunID = a.snap.RunID
+	}
+	if a.designDoc != nil {
+		session.DesignFocus = a.designSelected
+		session.DesignPreview = a.designPreviewExpanded
+		if a.designSubflow != nil {
+			session.DesignSubflow = a.designSubflowParent
+		}
 	}
 	if a.runWS != nil {
 		collapsed := a.runWS.TreeCollapsed()
@@ -865,6 +875,13 @@ func (a *app) restoreSession() {
 		a.selectDesign(session.DesignID)
 		a.shell.Page = shell.Design
 		a.designTab = session.DesignTab
+		if a.designDoc != nil {
+			a.designSelected = session.DesignFocus
+			a.designPreviewExpanded = session.DesignPreview
+			if session.DesignSubflow != "" {
+				a.enterDesignSubflow(session.DesignSubflow)
+			}
+		}
 		a.saveSession()
 		return
 	}
@@ -1095,6 +1112,10 @@ func (a *app) loadDesign(id string) {
 	a.designHierarchy = nil
 	a.designHierarchySource = ""
 	a.designHierarchyErr = ""
+	a.designSubflow = nil
+	a.designSubflowParent = ""
+	a.designSubflowTitle = ""
+	a.designSubflowSelected = ""
 	// Keep per-design layouts loaded from the session; selecting a design uses
 	// its own saved coordinates. (no-op)
 	a.designSelected = ""
@@ -1600,6 +1621,8 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 	a.designCanvasSource = ""
 	a.designHierarchy = nil
 	a.designHierarchySource = ""
+	a.designSubflow = nil
+	a.designSubflowParent = ""
 	a.refreshReadiness()
 	return true
 }
@@ -1631,6 +1654,8 @@ func (a *app) designUndo() {
 	a.designCanvasSource = ""
 	a.designHierarchy = nil
 	a.designHierarchySource = ""
+	a.designSubflow = nil
+	a.designSubflowParent = ""
 	a.refreshReadiness()
 }
 
@@ -1661,6 +1686,8 @@ func (a *app) designRedo() {
 	a.designCanvasSource = ""
 	a.designHierarchy = nil
 	a.designHierarchySource = ""
+	a.designSubflow = nil
+	a.designSubflowParent = ""
 	a.refreshReadiness()
 }
 

@@ -10,7 +10,9 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/workflow"
+	"asterlab-mygo-prototype/internal/workflowtree"
 )
 
 // renderWorkflowCanvas is the doc-backed professional Workflow editor. The
@@ -21,6 +23,10 @@ func (a *app) renderWorkflowCanvas(c *ui.Context) {
 	doc, err := asterdoc.Parse(a.designDoc.Source)
 	if err != nil {
 		ui.Text(c, "AsterDoc 语法错误："+err.Error()).Padding(t.Space(6)).TextColor(t.Danger)
+		return
+	}
+	if a.designSubflow != nil {
+		a.renderDesignSubflow(c, doc)
 		return
 	}
 	a.ensureDesignCanvas(doc)
@@ -72,6 +78,14 @@ func (a *app) renderWorkflowCanvas(c *ui.Context) {
 					SingleLine().Ellipsis("…").MaxWidth(320)
 			}
 		})
+		if a.designHierarchyErr != "" {
+			ui.Row(c).FillWidth().Padding(6, 12).Background(theme.GetTokens(t).WarningBg).
+				Border(1, theme.GetTokens(t).WarningText).Children(func() {
+				ui.Text(c, "层级诊断："+a.designHierarchyErr).FontSize(t.Rem(.72)).
+					TextColor(theme.GetTokens(t).WarningText)
+			})
+		}
+		a.renderDesignCompositeActions(c, doc)
 		ui.Row(c).Grow(1).FillWidth().MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 			ui.Box(c).Grow(1).MinWidth(0).MinHeight(0).Fill().Children(func() {
 				a.designCanvas.View(c)
@@ -144,6 +158,7 @@ func (a *app) ensureDesignCanvas(doc *asterdoc.Document) {
 	ed.OnSelect = func(id string) {
 		a.designSelected = id
 		a.canvasSelLoaded = ""
+		a.saveSession()
 	}
 	ed.BeforeDelete = func(string) bool { return false }
 	ed.OnChange = func() { a.syncCanvasEdges(ed) }
@@ -156,7 +171,8 @@ func (a *app) ensureDesignCanvas(doc *asterdoc.Document) {
 	if positions == nil {
 		positions = map[string]workflow.Position{}
 	}
-	steps := canvasSteps(doc)
+	hierarchy := a.ensureDesignHierarchy()
+	steps := canvasSteps(doc, hierarchy)
 	for index, step := range steps {
 		pos, ok := positions[step.id]
 		if !ok {
@@ -164,6 +180,7 @@ func (a *app) ensureDesignCanvas(doc *asterdoc.Document) {
 		}
 		ed.Doc.Nodes = append(ed.Doc.Nodes, workflow.Node{
 			ID: step.id, Kind: workflow.KindFlask, Title: step.title, Pos: pos,
+			Composite: step.composite, ChildCount: step.childCount,
 		})
 		ed.Doc.BusinessOrder = append(ed.Doc.BusinessOrder, step.id)
 	}
@@ -173,11 +190,24 @@ func (a *app) ensureDesignCanvas(doc *asterdoc.Document) {
 	if old := a.designCanvas; old != nil {
 		ed.PanX, ed.PanY, ed.Zoom = old.PanX, old.PanY, old.Zoom
 	}
+	if a.designSelected != "" {
+		for _, node := range ed.Doc.Nodes {
+			if node.ID == a.designSelected {
+				ed.SelectedNode = node.ID
+				ed.SelectedNodes = map[string]bool{node.ID: true}
+				break
+			}
+		}
+	}
 	a.designCanvas = ed
 	a.designCanvasSource = a.designDoc.Source
 }
 
-type canvasStepInfo struct{ id, title, assay, path, timepoints string }
+type canvasStepInfo struct {
+	id, title, assay, path, timepoints string
+	composite                          bool
+	childCount                         int
+}
 
 type canvasTaskDraft struct {
 	ID, Title, Kind, Readout string
@@ -193,17 +223,22 @@ type canvasUseDraft struct {
 }
 type canvasEdgeInfo struct{ id, from, to string }
 
-func canvasSteps(doc *asterdoc.Document) []canvasStepInfo {
+func canvasSteps(doc *asterdoc.Document, hierarchy *workflowtree.Tree) []canvasStepInfo {
 	out := []canvasStepInfo{}
 	for _, module := range doc.Modules {
 		if module.Kind != "step" {
 			continue
 		}
-		out = append(out, canvasStepInfo{
+		step := canvasStepInfo{
 			id: module.ID, title: moduleString(module.Data, "title"),
 			assay: moduleString(module.Data, "assay"), path: moduleString(module.Data, "path"),
 			timepoints: strings.Join(moduleStrings(module.Data, "timepoints"), ", "),
-		})
+		}
+		if root := designRootNode(hierarchy, module.ID); root != nil {
+			step.composite = root.Composite
+			step.childCount = root.Total
+		}
+		out = append(out, step)
 	}
 	return out
 }
@@ -390,7 +425,7 @@ func (a *app) canvasInspector(c *ui.Context, doc *asterdoc.Document) {
 			}
 		}
 	}
-	ui.Column(c).Width(t.Space(38)).Shrink(0).FillWidth().Padding(t.Space(3)).
+	ui.Column(c).Width(t.Space(90)).Shrink(0).FillHeight().Padding(t.Space(3)).
 		Gap(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "步骤属性").FontSize(t.Rem(.95)).Bold().TextColor(t.Text)
@@ -588,4 +623,143 @@ func (a *app) canvasInspector(c *ui.Context, doc *asterdoc.Document) {
 		ui.Text(c, "拖动只改变布局；连接与属性修改写入 AsterDoc。").
 			FontSize(t.Rem(.68)).TextColor(t.TextMuted)
 	})
+}
+
+// renderDesignCompositeActions is the read-only drill-down affordance for a
+// selected composite step. It never edits the referenced ProtocolBlock.
+func (a *app) renderDesignCompositeActions(c *ui.Context, doc *asterdoc.Document) {
+	t := c.Theme()
+	tree := a.ensureDesignHierarchy()
+	node := designRootNode(tree, a.designSelected)
+	if node == nil || !node.Composite {
+		return
+	}
+	ui.Row(c).FillWidth().Padding(t.Space(1.5), t.Space(3)).Gap(t.Space(1.5)).
+		Background(theme.GetTokens(t).Elevated).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
+		components.Icon(c, lucide.Boxes()).Size(t.Space(4), t.Space(4)).TextColor(t.Accent)
+		ui.Text(c, node.Title).FontSize(t.Rem(.82)).FontWeight(600).TextColor(t.Text)
+		ui.Text(c, fmt.Sprintf("%d 个定义操作", node.Total)).FontSize(t.Rem(.72)).
+			TextColor(t.TextMuted)
+		ui.Spacer(c)
+		label := "展开预览"
+		if a.designPreviewExpanded {
+			label = "收起预览"
+		}
+		if components.Button(c, label, components.ButtonSecondary).Clicked() {
+			a.designPreviewExpanded = !a.designPreviewExpanded
+			a.saveSession()
+		}
+		if components.Button(c, "进入子流程", components.ButtonPrimary).Clicked() {
+			a.enterDesignSubflow(node.ID)
+		}
+	})
+	if !a.designPreviewExpanded {
+		return
+	}
+	ui.Row(c).FillWidth().Padding(t.Space(1), t.Space(3)).Gap(t.Space(1.5)).
+		Background(t.Surface).Border(1, t.Border).Children(func() {
+		limit := len(node.Children)
+		if limit > 4 {
+			limit = 4
+		}
+		for _, child := range node.Children[:limit] {
+			ui.Column(c).Width(190).Padding(t.Space(1), t.Space(1.5)).Gap(2).
+				Background(t.Background).Border(1, t.Border).Radius(t.Space(1)).Children(func() {
+				ui.Text(c, child.Title).FontSize(t.Rem(.74)).FontWeight(600).
+					TextColor(t.Text).SingleLine().Ellipsis("…")
+				ui.Text(c, "定义步骤").FontSize(t.Rem(.64)).TextColor(t.TextMuted)
+			})
+		}
+		if remaining := len(node.Children) - limit; remaining > 0 {
+			ui.Text(c, fmt.Sprintf("+%d 个操作", remaining)).FontSize(t.Rem(.72)).
+				TextColor(t.TextMuted)
+		}
+	})
+}
+
+// enterDesignSubflow builds a read-only canvas from the definition children.
+// The root canvas object is left untouched, preserving its pan/zoom/selection.
+func (a *app) enterDesignSubflow(parentID string) {
+	tree := a.ensureDesignHierarchy()
+	node := designRootNode(tree, parentID)
+	if node == nil || !node.Composite || len(node.Children) == 0 {
+		return
+	}
+	ed := workflow.NewEditor()
+	ed.ExternalWrites = true
+	ed.ReadOnly = true
+	ed.OnSelect = func(id string) { a.designSubflowSelected = id }
+	for index, child := range node.Children {
+		pos := workflow.Position{
+			X: 60 + float32(index%3)*260,
+			Y: 60 + float32(index/3)*150,
+		}
+		ed.Doc.Nodes = append(ed.Doc.Nodes, workflow.Node{
+			ID: child.ID, Kind: workflow.KindPipette, Title: child.Title, Pos: pos,
+			Composite: child.Composite, ChildCount: child.Total,
+		})
+		ed.Doc.BusinessOrder = append(ed.Doc.BusinessOrder, child.ID)
+	}
+	a.designSubflow = ed
+	a.designSubflowParent = parentID
+	a.designSubflowTitle = node.Title
+	a.designSubflowSelected = ""
+	a.saveSession()
+}
+
+func (a *app) leaveDesignSubflow() {
+	a.designSubflow = nil
+	a.designSubflowParent = ""
+	a.designSubflowTitle = ""
+	a.designSubflowSelected = ""
+	a.saveSession()
+}
+
+func designExperimentTitle(doc *asterdoc.Document) string {
+	if doc != nil {
+		for _, module := range doc.Modules {
+			if module.Kind == "experiment" {
+				if title := moduleString(module.Data, "title"); title != "" {
+					return title
+				}
+			}
+		}
+	}
+	return "设计根流程"
+}
+
+func (a *app) renderDesignSubflow(c *ui.Context, doc *asterdoc.Document) {
+	t := c.Theme()
+	if a.designSubflow == nil {
+		return
+	}
+	leave := false
+	ui.Column(c).Grow(1).FillWidth().Children(func() {
+		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(3)).Border(1, t.Border).
+			Background(t.Surface).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+			components.Text(c, "只读").FontSize(t.Rem(.72)).TextColor(t.TextMuted).Shrink(0)
+			chosen := 1
+			breadcrumb := components.Breadcrumbs(c, []string{designExperimentTitle(doc), a.designSubflowTitle}, &chosen)
+			ui.Spacer(c)
+			if components.IconButton(c, lucide.Maximize2(), "适应子流程", components.IconButtonPlain).Clicked() {
+				a.designSubflow.PanX, a.designSubflow.PanY, a.designSubflow.Zoom = 0, 0, 1
+			}
+			if breadcrumb.Changed() && chosen == 0 {
+				leave = true
+			}
+		})
+		if leave {
+			return
+		}
+		ui.Row(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
+			ui.Box(c).Grow(1).MinWidth(0).MinHeight(0).Fill().Children(func() {
+				if a.designSubflow != nil {
+					a.designSubflow.View(c)
+				}
+			})
+		})
+	})
+	if leave {
+		a.leaveDesignSubflow()
+	}
 }

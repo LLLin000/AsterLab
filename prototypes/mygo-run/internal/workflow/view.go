@@ -113,7 +113,11 @@ func canvas(c *ui.Context, e *Editor, t *ui.Theme) {
 			nodeElement := ui.Box(c).Absolute().Left(off.X).Top(off.Y).Size(nodeW, nodeH).
 				Children(func() {
 					workflownode.View(c, props, z, func() { e.activateNode(nodeID, c.Modifiers()) })
-				}).Draggable(&off, ui.DraggableOptions{}).Key(nodeID)
+				})
+			if !e.ReadOnly {
+				nodeElement = nodeElement.Draggable(&off, ui.DraggableOptions{})
+			}
+			nodeElement = nodeElement.Key(nodeID)
 			if nodeElement.Hovered() {
 				hovered = nodeID
 			}
@@ -189,6 +193,7 @@ func adaptWorkflowNode(n Node, order string, state workflownode.NodeState) workf
 	}
 	return workflownode.NodeProps{
 		ID: n.ID, Kind: kind, Order: order, Tag: n.Tag, Title: n.Title,
+		Composite: n.Composite, ChildCount: n.ChildCount,
 		Params: params, State: state,
 	}
 }
