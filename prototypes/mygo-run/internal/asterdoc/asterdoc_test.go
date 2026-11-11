@@ -12,17 +12,20 @@ import (
 	"asterlab-mygo-prototype/internal/theme"
 )
 
-const sample = "# L929\n\n说明文字。\n\n```asterlab\nkind: plate96\nid: plate-cck8-d3\nschema: 1\nassay: cck8\ngroups:\n  control: [A1, A2, A3]\n  material: [B1, B2, B3]\n```\n\n尾注。\n"
+const sample = "# L929\n\n说明文字。\n\n```asterlab\nkind: assay\nid: cck8\nschema: 1\ntitle: CCK-8\n```\n\n```asterlab\nkind: group\nid: control\nschema: 1\nname: Control\nrole: control\n```\n\n```asterlab\nkind: group\nid: material\nschema: 1\nname: Material\nrole: treatment\n```\n\n```asterlab\nkind: plate\nid: plate-cck8-d3\nschema: 1\nformat: 96\nassay: cck8\ngroups:\n  control: [A1, A2, A3]\n  material: [B1, B2, B3]\n```\n\n尾注。\n"
 
 func TestParseRoundTripsProseAndPlate(t *testing.T) {
 	doc, err := Parse(sample)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Modules) != 1 || doc.Modules[0].Plate == nil {
+	if len(doc.Modules) != 4 {
 		t.Fatalf("modules = %+v", doc.Modules)
 	}
-	plate := doc.Modules[0].Plate
+	plate, ok := doc.PlateByID("plate-cck8-d3")
+	if !ok || plate == nil {
+		t.Fatalf("plate missing: %+v", doc.Modules)
+	}
 	if plate.ID != "plate-cck8-d3" || len(plate.Groups["control"]) != 3 {
 		t.Fatalf("plate = %+v", plate)
 	}
@@ -60,9 +63,13 @@ func TestUpdatePlateReplacesOnlyTheFenceBody(t *testing.T) {
 }
 
 func TestRejectsDuplicateWellAndUnknownKind(t *testing.T) {
-	duplicate := "```asterlab\nkind: plate96\nid: p\nschema: 1\ngroups:\n  a: [A1]\n  b: [A1]\n```\n"
+	duplicate := "```asterlab\nkind: plate\nid: p\nschema: 1\nformat: 96\ngroups:\n  a: [A1]\n  b: [A1]\n```\n"
 	if _, err := Parse(duplicate); err == nil {
 		t.Fatal("duplicate well accepted")
+	}
+	legacyPlate := "```asterlab\nkind: plate96\nid: p-legacy\nschema: 1\nformat: 96\ngroups: {}\n```\n"
+	if _, err := Parse(legacyPlate); err == nil {
+		t.Fatal("removed plate96 module kind accepted")
 	}
 	unknown := "```asterlab\nkind: calculator\nid: c\nschema: 1\n```\n"
 	if _, err := Parse(unknown); err == nil {
@@ -121,23 +128,26 @@ func TestViewRendersNativePlateAndAssignRewritesSource(t *testing.T) {
 
 func TestRegistryManifestDescribesInputsOutputsAndPermissions(t *testing.T) {
 	descriptors := BuiltinRegistry().Descriptors()
-	if len(descriptors) < 2 {
-		t.Fatalf("descriptors = %+v", descriptors)
+	if len(descriptors) != 14 {
+		t.Fatalf("expected 14 module kinds after plate consolidation, got %d", len(descriptors))
 	}
 	var plate *Descriptor
 	for i := range descriptors {
-		if descriptors[i].Kind == "plate96" {
+		if descriptors[i].Kind == "plate" {
 			plate = &descriptors[i]
+		}
+		if descriptors[i].Kind == "plate96" {
+			t.Fatal("duplicate plate96 module is still registered")
 		}
 	}
 	if plate == nil {
-		t.Fatal("plate96 descriptor missing")
+		t.Fatal("plate descriptor missing")
 	}
 	inputs := map[string]bool{}
 	for _, in := range plate.Inputs {
 		inputs[in.Name] = true
 	}
-	if !inputs["groups"] || !inputs["id"] {
+	if !inputs["groups"] || !inputs["id"] || !inputs["format"] || !inputs["samples"] || !inputs["replicates"] {
 		t.Fatalf("plate inputs = %+v", plate.Inputs)
 	}
 	if len(plate.Actions) == 0 || plate.Actions[0].Permission != PermDocumentEdit {
@@ -158,7 +168,6 @@ func TestCustomModuleCanBeRegisteredAndParsed(t *testing.T) {
 		Descriptor: Descriptor{Kind: "counter", Schema: 1, Title: "计数器",
 			Inputs: []Port{{Name: "value", Type: "int"}}},
 		Validate: func(data map[string]any) error { return nil },
-		Render:   func(v *View, c *ui.Context, data map[string]any) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -360,7 +369,7 @@ func TestManifestDeclaresFoundationAndReferenceModules(t *testing.T) {
 	if err := json.Unmarshal(manifest, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.FoundationVersion != 1 || decoded.SDKVersion != "1.0.0" || len(decoded.Modules) != 15 {
+	if decoded.FoundationVersion != 1 || decoded.SDKVersion != "1.0.0" || len(decoded.Modules) != 14 {
 		t.Fatalf("manifest header/modules = %+v", decoded)
 	}
 	for _, module := range decoded.Modules {

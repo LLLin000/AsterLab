@@ -9,6 +9,7 @@ Package: `asterlab-mygo-prototype/internal/resultgrid`
 - `Grid.PasteTSV(text string) (*PastePreview, error)` parses TSV (including CSV quote escaping) into a non-mutating preview. `CommitPaste()` applies when no populated cell would be overwritten; `ConfirmPasteOverwrite()` explicitly applies overwrite previews.
 - `Grid.Undo() bool` and `Grid.Redo() bool` undo and redo edits.
 - `Grid.State` is `StateDraft`, `StateSaving`, `StateSaved`, or `StateError`; this component does not save or fake persistence. The host owns state transitions and errors.
+- Alternate renderers may edit `Grid.InputAt(row, column)` and commit parsed values with `Grid.SetCell`.
 - `View(ctx, grid, Options{FullWidth: true})` draws the editable native table; `Options{}` uses constrained column widths.
 
 No Core, database, or assay imports are used by this package.

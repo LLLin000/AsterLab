@@ -45,7 +45,7 @@ func TestGenericEditorRendersDilutionFieldsAndSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	var saved map[string]any
-	v := &View{Doc: doc, Registry: BuiltinRegistry(), Allowed: map[string]bool{PermDocumentEdit: true},
+	v := &View{Doc: doc, Registry: BuiltinRegistry(), Mode: ModeDesign, Allowed: map[string]bool{PermDocumentEdit: true},
 		OnUpdateModule: func(id string, props map[string]any) { saved = props }}
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())

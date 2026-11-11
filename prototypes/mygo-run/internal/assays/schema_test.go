@@ -62,7 +62,7 @@ func TestBuildSchemaCCK8MapsOnlySelectedWells(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cells[0].SampleID != "S1" || cells[0].Group != "Control" || cells[0].Replicate != 1 || cells[1].Replicate != 2 || cells[13].SampleID != "S2" || cells[2].SampleID != "" {
+	if cells[0].SampleID != "S1" || cells[0].Group != "Control" || cells[0].Replicate != 0 || cells[1].Replicate != 0 || cells[13].SampleID != "S2" || cells[2].SampleID != "" {
 		t.Fatalf("unexpected well mapping: %+v %+v %+v", cells[0], cells[1], cells[13])
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -92,6 +93,44 @@ func TestCreateRunFromAsterDocFreezesDocumentAndDesign(t *testing.T) {
 	if seedTask == nil {
 		t.Fatal("read task missing")
 	}
+
+	schema, plan, err := assays.BuildSchema([]byte(run.DesignData), seedTask.AssayID, seedTask.Timepoint)
+	if err != nil {
+		t.Fatalf("build result grid from frozen AsterDoc design: %v", err)
+	}
+	if unresolved := schema.Metadata["unresolved"]; unresolved != "" {
+		t.Fatalf("frozen plate mapping unresolved: %s", unresolved)
+	}
+	cells := make([]runs.ResultCell, len(plan))
+	recorded := 0
+	for i, cell := range plan {
+		cells[i] = runs.ResultCell{
+			Row: cell.Row, Column: cell.Column, SampleID: cell.SampleID,
+			Group: cell.Group, Replicate: cell.Replicate, Field: cell.Field, Status: "missing",
+		}
+		if cell.SampleID == "" {
+			continue
+		}
+		value := 0.82
+		cells[i].Value, cells[i].Status = &value, "raw"
+		recorded++
+	}
+	if recorded != 2 {
+		t.Fatalf("explicit plate identity produced %d recordable wells, want 2", recorded)
+	}
+	batch, err := rsvc.SaveReadoutsBatch(ctx, runs.BatchReadoutInput{
+		RunID: run.RunID, OperationID: "freeze-plate-batch", TaskKey: seedTask.Key,
+		AssayID: seedTask.AssayID, Timepoint: seedTask.Timepoint,
+		ProtocolStepPath: seedTask.Title, ProtocolVersionID: seedTask.ProtocolVersionID,
+		SchemaID: schema.ID, SchemaVersion: schema.Version, Cells: cells,
+		ExpectedRevision: run.Revision,
+	})
+	if err != nil {
+		t.Fatalf("SaveReadoutsBatch from frozen AsterDoc design: %v", err)
+	}
+	if batch.Accepted != len(cells) || batch.BatchID == "" {
+		t.Fatalf("saved result batch = %+v", batch)
+	}
 	if _, err := rsvc.CompleteTask(ctx, runs.CompleteTaskInput{
 		RunID: run.RunID, TaskKey: seedTask.Key, OperationID: "freeze-complete-missing",
 		AssayID: seedTask.AssayID, Timepoint: seedTask.Timepoint,
@@ -140,6 +179,26 @@ func TestCreateRunFromAsterDocFreezesDocumentAndDesign(t *testing.T) {
 	if reopened.AsterDoc == nil || reopened.AsterDoc.Revision != doc.Revision ||
 		reopened.AsterDoc.SourceHash != doc.SourceHash {
 		t.Fatalf("reopened asterdoc = %+v", reopened.AsterDoc)
+	}
+
+	var reopenedBatch *runs.RunEvent
+	for i := range reopened.Events {
+		if reopened.Events[i].BatchID == batch.BatchID {
+			reopenedBatch = &reopened.Events[i]
+			break
+		}
+	}
+	if reopenedBatch == nil || len(reopenedBatch.ResultCells) != len(cells) {
+		t.Fatalf("reopened Run batch = %+v", reopenedBatch)
+	}
+	reopenedReplicates := map[int]bool{}
+	for _, cell := range reopenedBatch.ResultCells {
+		if cell.SampleID == "control-sample-1" && cell.Value != nil {
+			reopenedReplicates[cell.Replicate] = true
+		}
+	}
+	if len(reopenedReplicates) != 2 || !reopenedReplicates[1] || !reopenedReplicates[2] {
+		t.Fatalf("reopened sample/technical replicates = %v", reopenedReplicates)
 	}
 
 	// A second document revision and Run must not rewrite the first Run.

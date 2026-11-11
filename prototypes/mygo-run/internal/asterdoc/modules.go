@@ -25,183 +25,159 @@ func plateFromData(data map[string]any) (Plate, error) {
 	if err := validatePlate(plate); err != nil {
 		return Plate{}, err
 	}
+	plate.Samples = normalizeSamples(plate.Samples)
+	plate.Replicates = normalizeReplicates(plate.Replicates)
 	return plate, nil
 }
 
-func plate96Spec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"plate96.editor", "plate96.viewer"},
-		Descriptor: builtinDescriptor("plate96"),
-		Validate:   specValidator("plate96"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			plate, err := plateFromData(data)
-			if err != nil {
-				v.moduleError(c, err)
-				return
-			}
+func plateSpec() ModuleSpec {
+	renderPlate := func(v *View, c *ui.Context, data map[string]any) {
+		plate, err := plateFromData(data)
+		if err != nil {
+			v.moduleError(c, err)
+			return
+		}
+		if plate.Format == 96 {
 			v.plate(c, &plate)
+			return
+		}
+		v.genericPlate(c, &plate)
+	}
+	return ModuleSpec{
+		Descriptor: builtinDescriptor("plate"),
+		Validate:   specValidator("plate"),
+		Implementations: map[string]RendererFunc{
+			"plate.editor": renderPlate,
+			"plate.viewer": renderPlate,
+			"plate.run":    renderPlate,
 		},
 	}
 }
 
-func plateSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"plate.editor", "plate.viewer"},
-		Descriptor: builtinDescriptor("plate"),
-		Validate:   specValidator("plate"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			plate, err := plateFromData(data)
-			if err != nil {
-				v.moduleError(c, err)
-				return
-			}
-			if plate.Format == 96 {
-				v.plate(c, &plate)
-				return
-			}
-			v.genericPlate(c, &plate)
+func moduleDocumentSpec(descriptor Descriptor, validate func(map[string]any) error, render RendererFunc) ModuleSpec {
+	return ModuleSpec{
+		Descriptor: descriptor,
+		Validate:   validate,
+		Implementations: map[string]RendererFunc{
+			descriptor.Renderers.Document: render,
 		},
 	}
 }
 
 func referenceSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"reference.editor", "reference.viewer"},
-		Descriptor: builtinDescriptor("reference"),
-		Validate:   specValidator("reference"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			t := c.Theme()
-			ref, _ := data["ref"].(string)
-			view, _ := data["view"].(string)
-			ui.Row(c).Padding(10, 12).Radius(t.Radius).Background(t.Background).
-				Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "引用").FontSize(t.Rem(.75)).Bold().TextColor(t.TextMuted)
-				ui.Text(c, ref).FontSize(t.Rem(.85)).TextColor(t.Text)
-				if view != "" {
-					ui.Text(c, "· "+view).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-				}
-			})
-		},
-	}
+	return moduleDocumentSpec(builtinDescriptor("reference"), specValidator("reference"), func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ref, _ := data["ref"].(string)
+		view, _ := data["view"].(string)
+		ui.Row(c).Padding(10, 12).Radius(t.Radius).Background(t.Background).
+			Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "引用").FontSize(t.Rem(.75)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, ref).FontSize(t.Rem(.85)).TextColor(t.Text)
+			if view != "" {
+				ui.Text(c, "· "+view).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			}
+		})
+	})
 }
 
 func experimentSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"experiment.editor", "experiment.viewer"},
-		Descriptor: builtinDescriptor("experiment"),
-		Validate:   specValidator("experiment"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			t := c.Theme()
-			ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).
-				Background(t.Surface).Border(1, t.Border).Children(func() {
-				ui.Text(c, textValue(data, "title")).FontSize(t.Rem(1.2)).Bold().TextColor(t.Text)
-				for _, key := range []string{"objective", "research_question", "experimental_unit"} {
-					if value := textValue(data, key); value != "" {
-						ui.Text(c, value).FontSize(t.Rem(.85)).TextColor(t.TextMuted)
-					}
+	return moduleDocumentSpec(builtinDescriptor("experiment"), specValidator("experiment"), func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).
+			Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Text(c, textValue(data, "title")).FontSize(t.Rem(1.2)).Bold().TextColor(t.Text)
+			for _, key := range []string{"objective", "research_question", "experimental_unit"} {
+				if value := textValue(data, key); value != "" {
+					ui.Text(c, value).FontSize(t.Rem(.85)).TextColor(t.TextMuted)
 				}
-				if points := stringList(data, "timepoints"); len(points) > 0 {
-					ui.Text(c, "时间点 · "+strings.Join(points, " / ")).
-						FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-				}
-			})
-		},
-	}
+			}
+			if points := stringList(data, "timepoints"); len(points) > 0 {
+				ui.Text(c, "时间点 · "+strings.Join(points, " / ")).
+					FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			}
+		})
+	})
 }
 
 func groupSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"group.editor", "group.viewer"},
-		Descriptor: builtinDescriptor("group"),
-		Validate:   specValidator("group"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			t := c.Theme()
-			ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).
-				Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, textValue(data, "name")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
-				if role := textValue(data, "role"); role != "" {
-					ui.Text(c, role).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-				}
-				if condition := textValue(data, "condition"); condition != "" {
-					ui.Text(c, "· "+condition).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-				}
-			})
-		},
-	}
+	return moduleDocumentSpec(builtinDescriptor("group"), specValidator("group"), func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).
+			Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, textValue(data, "name")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
+			if role := textValue(data, "role"); role != "" {
+				ui.Text(c, role).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			}
+			if condition := textValue(data, "condition"); condition != "" {
+				ui.Text(c, "· "+condition).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			}
+		})
+	})
 }
 
 func assaySpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"assay.editor", "assay.viewer"},
-		Descriptor: builtinDescriptor("assay"),
-		Validate:   specValidator("assay"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			t := c.Theme()
-			ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).
-				Background(t.Surface).Border(1, t.Border).Children(func() {
-				ui.Text(c, textValue(data, "title")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
-				line := strings.Join(nonEmpty([]string{
-					textValue(data, "endpoint"), textValue(data, "method"), textValue(data, "unit"),
-				}), " · ")
-				if line != "" {
-					ui.Text(c, line).FontSize(t.Rem(.78)).TextColor(t.TextMuted)
-				}
-				if points := stringList(data, "timepoints"); len(points) > 0 {
-					ui.Text(c, "时间点 · "+strings.Join(points, " / ")).
-						FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-				}
-			})
-		},
-	}
+	return moduleDocumentSpec(builtinDescriptor("assay"), specValidator("assay"), func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).
+			Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Text(c, textValue(data, "title")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+			line := strings.Join(nonEmpty([]string{
+				textValue(data, "endpoint"), textValue(data, "method"), textValue(data, "unit"),
+			}), " · ")
+			if line != "" {
+				ui.Text(c, line).FontSize(t.Rem(.78)).TextColor(t.TextMuted)
+			}
+			if points := stringList(data, "timepoints"); len(points) > 0 {
+				ui.Text(c, "时间点 · "+strings.Join(points, " / ")).
+					FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			}
+		})
+	})
 }
 
-func stepSpec() ModuleSpec {
-	return stepSpecAt(1)
-}
+func stepSpec() ModuleSpec { return stepSpecAt(1) }
 
-func step2Spec() ModuleSpec {
-	return stepSpecAt(2)
-}
+func step2Spec() ModuleSpec { return stepSpecAt(2) }
 
 func stepSpecAt(schema int) ModuleSpec {
-	return ModuleSpec{Renders: []string{"step.editor", "step.viewer"},
-		Descriptor: descriptorFor("step", schema),
-		Validate:   specValidatorFor("step", schema),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			t := c.Theme()
-			ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(2.5)).Radius(t.Space(1)).
-				Background(t.Background).Border(1, t.Border).Gap(t.Space(1.5)).
-				AlignItems(ui.Center).Children(func() {
-				ui.Text(c, textValue(data, "title")).FontSize(t.Rem(.9)).Bold().TextColor(t.Text)
-				if assay := textValue(data, "assay"); assay != "" {
-					ui.Text(c, assay).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-				}
-				if path := textValue(data, "path"); path != "" {
-					ui.Text(c, path).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-				}
-			})
-		},
-	}
+	return ModuleSpec{Descriptor: descriptorFor("step", schema), Validate: specValidatorFor("step", schema)}
+}
+
+func renderStepSummary(v *View, c *ui.Context, data map[string]any) {
+	t := c.Theme()
+	ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(2.5)).Radius(t.Space(1)).
+		Background(t.Background).Border(1, t.Border).Gap(t.Space(1.5)).
+		AlignItems(ui.Center).Children(func() {
+		ui.Text(c, textValue(data, "title")).FontSize(t.Rem(.9)).Bold().TextColor(t.Text)
+		if assay := textValue(data, "assay"); assay != "" {
+			ui.Text(c, assay).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+		}
+		if path := textValue(data, "path"); path != "" {
+			ui.Text(c, path).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+		}
+	})
 }
 
 func workflowSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"workflow.editor", "workflow.viewer"},
-		Descriptor: builtinDescriptor("workflow"),
-		Validate:   specValidator("workflow"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			t := c.Theme()
-			steps := stringList(data, "steps")
-			edges, _ := data["edges"].([]any)
-			ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).
-				Background(t.Surface).Border(1, t.Border).Children(func() {
-				ui.Text(c, "流程").FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
-				ui.Text(c, fmt.Sprintf("%d 个步骤 · %d 条依赖", len(steps), len(edges))).
-					FontSize(t.Rem(.78)).TextColor(t.TextMuted)
-				ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
-					for _, step := range steps {
-						ui.Row(c).Padding(3, 8).Radius(t.Space(1)).Background(t.Background).
-							Border(1, t.Border).Children(func() {
-							ui.Text(c, step).FontSize(t.Rem(.75)).TextColor(t.Text)
-						})
-					}
-				})
+	return moduleDocumentSpec(builtinDescriptor("workflow"), specValidator("workflow"), func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		steps := stringList(data, "steps")
+		edges, _ := data["edges"].([]any)
+		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).
+			Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Text(c, "流程").FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+			ui.Text(c, fmt.Sprintf("%d 个步骤 · %d 条依赖", len(steps), len(edges))).
+				FontSize(t.Rem(.78)).TextColor(t.TextMuted)
+			ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
+				for _, step := range steps {
+					ui.Row(c).Padding(3, 8).Radius(t.Space(1)).Background(t.Background).
+						Border(1, t.Border).Children(func() {
+						ui.Text(c, step).FontSize(t.Rem(.75)).TextColor(t.Text)
+					})
+				}
 			})
-		},
-	}
+		})
+	})
 }
 
 func textValue(data map[string]any, key string) string {
@@ -284,126 +260,113 @@ func dilutionResultFor(data map[string]any) (dilutionResult, error) {
 }
 
 func dilutionSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"dilution.editor", "dilution.viewer"},
-		Descriptor: builtinDescriptor("dilution"),
-		Validate:   specValidator("dilution"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			if v.Can(PermDocumentEdit) && !v.ReadOnly {
-				v.GenericModuleEditor(c, textValue(data, "id"), data)
+	fn := func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		result, err := dilutionResultFor(data)
+		ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).Radius(t.Space(1.5)).
+			Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+				ui.Text(c, "稀释计算").FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+				ui.Spacer(c)
+				ui.Text(c, "派生值 · 不写 Run").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+			})
+			_, stockUnit, _ := quantityParts(data["stock"])
+			_, targetUnit, _ := quantityParts(data["target"])
+			_, finalUnit, _ := quantityParts(data["final_volume"])
+			ui.Text(c, fmt.Sprintf("母液 %s %s · 目标 %s %s · 终体积 %s %s",
+				formatNumber(result.StockConc), stockUnit,
+				formatNumber(result.TargetConc), targetUnit,
+				formatNumber(result.Final), finalUnit)).
+				FontSize(t.Rem(.78)).TextColor(t.TextMuted)
+			if err != nil {
+				v.moduleError(c, err)
 				return
 			}
-			t := c.Theme()
-			result, err := dilutionResultFor(data)
-			ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).Radius(t.Space(1.5)).
-				Background(t.Surface).Border(1, t.Border).Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-					ui.Text(c, "稀释计算").FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
-					ui.Spacer(c)
-					ui.Text(c, "派生值 · 不写 Run").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
-				})
-				_, stockUnit, _ := quantityParts(data["stock"])
-				_, targetUnit, _ := quantityParts(data["target"])
-				_, finalUnit, _ := quantityParts(data["final_volume"])
-				ui.Text(c, fmt.Sprintf("母液 %s %s · 目标 %s %s · 终体积 %s %s",
-					formatNumber(result.StockConc), stockUnit,
-					formatNumber(result.TargetConc), targetUnit,
-					formatNumber(result.Final), finalUnit)).
-					FontSize(t.Rem(.78)).TextColor(t.TextMuted)
-				if err != nil {
-					v.moduleError(c, err)
-					return
-				}
-				ui.Row(c).Gap(t.Space(2)).Children(func() {
-					ui.Text(c, fmt.Sprintf("母液体积 %s %s", formatNumber(result.Stock), result.Unit)).
-						FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
-					ui.Text(c, fmt.Sprintf("稀释液体积 %s %s", formatNumber(result.Diluent), result.Unit)).
-						FontSize(t.Rem(.85)).TextColor(t.TextMuted)
-				})
-				ui.Text(c, "dilution.v1 · 输入未修改；实际配制以 Run 记录为准").
-					FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+			ui.Row(c).Gap(t.Space(2)).Children(func() {
+				ui.Text(c, fmt.Sprintf("母液体积 %s %s", formatNumber(result.Stock), result.Unit)).
+					FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
+				ui.Text(c, fmt.Sprintf("稀释液体积 %s %s", formatNumber(result.Diluent), result.Unit)).
+					FontSize(t.Rem(.85)).TextColor(t.TextMuted)
 			})
-		},
+			ui.Text(c, "dilution.v1 · 输入未修改；实际配制以 Run 记录为准").
+				FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+		})
 	}
+	return moduleDocumentSpec(builtinDescriptor("dilution"), specValidator("dilution"), fn)
 }
 
 func instrumentProfileSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"instrument-profile.editor", "instrument-profile.viewer"},
-		Descriptor: builtinDescriptor("instrument_profile"),
-		Validate:   specValidator("instrument_profile"),
-		Render: func(v *View, c *ui.Context, data map[string]any) {
-			if v.Can(PermDocumentEdit) && !v.ReadOnly {
-				v.GenericModuleEditor(c, textValue(data, "id"), data)
-				return
-			}
-			t := c.Theme()
-			ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).Radius(t.Space(1.5)).
-				Background(t.Surface).Border(1, t.Border).Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-					ui.Text(c, textValue(data, "class")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
-					if model := textValue(data, "model"); model != "" {
-						ui.Text(c, "· "+model).FontSize(t.Rem(.8)).TextColor(t.TextMuted)
-					}
-					ui.Spacer(c)
-					ui.Text(c, "能力档案").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
-				})
-				if capabilities, ok := data["capabilities"].([]any); ok {
-					ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
-						for _, raw := range capabilities {
-							item, _ := raw.(map[string]any)
-							name, _ := item["name"].(string)
-							if name == "" {
-								continue
-							}
-							ui.Row(c).Padding(3, 8).Radius(t.Space(1)).Background(t.Background).
-								Border(1, t.Border).Children(func() {
-								ui.Text(c, name).FontSize(t.Rem(.72)).TextColor(t.Text)
-							})
-						}
-					})
+	return moduleDocumentSpec(builtinDescriptor("instrument_profile"), specValidator("instrument_profile"), func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).Radius(t.Space(1.5)).
+			Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+				ui.Text(c, textValue(data, "class")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+				if model := textValue(data, "model"); model != "" {
+					ui.Text(c, "· "+model).FontSize(t.Rem(.8)).TextColor(t.TextMuted)
 				}
-				ui.Text(c, "声明能力，不代表某台设备、校准状态或执行结果。").
-					FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+				ui.Spacer(c)
+				ui.Text(c, "能力档案").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 			})
-		},
-	}
+			if capabilities, ok := data["capabilities"].([]any); ok {
+				ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
+					for _, raw := range capabilities {
+						item, _ := raw.(map[string]any)
+						name, _ := item["name"].(string)
+						if name == "" {
+							continue
+						}
+						ui.Row(c).Padding(3, 8).Radius(t.Space(1)).Background(t.Background).
+							Border(1, t.Border).Children(func() {
+							ui.Text(c, name).FontSize(t.Rem(.72)).TextColor(t.Text)
+						})
+					}
+				})
+			}
+			ui.Text(c, "声明能力，不代表某台设备、校准状态或执行结果。").
+				FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+		})
+	})
 }
 
-func formatNumber(value float64) string {
-	return strconv.FormatFloat(value, 'f', -1, 64)
-}
+func formatNumber(value float64) string { return strconv.FormatFloat(value, 'f', -1, 64) }
 
 func materialSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"material.editor", "material.viewer"}, Descriptor: builtinDescriptor("material"), Validate: specValidator("material"), Render: func(v *View, c *ui.Context, data map[string]any) {
+	return moduleDocumentSpec(builtinDescriptor("material"), specValidator("material"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
-		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).
+			Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, textValue(data, "name")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
 		})
-	}}
+	})
 }
 
 func sampleSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"sample.editor", "sample.viewer"}, Descriptor: builtinDescriptor("sample"), Validate: specValidator("sample"), Render: func(v *View, c *ui.Context, data map[string]any) {
+	return moduleDocumentSpec(builtinDescriptor("sample"), specValidator("sample"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
-		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).
+			Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, textValue(data, "sample_id")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
 		})
-	}}
+	})
 }
 
 func containerSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"container.editor", "container.viewer"}, Descriptor: builtinDescriptor("container"), Validate: specValidator("container"), Render: func(v *View, c *ui.Context, data map[string]any) {
+	return moduleDocumentSpec(builtinDescriptor("container"), specValidator("container"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
-		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
+		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).
+			Background(t.Surface).Border(1, t.Border).Children(func() {
 			ui.Text(c, textValue(data, "format")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
 		})
-	}}
+	})
 }
 
 func measurementProfileSpec() ModuleSpec {
-	return ModuleSpec{Renders: []string{"measurement_profile.editor", "measurement_profile.viewer"}, Descriptor: builtinDescriptor("measurement_profile"), Validate: specValidator("measurement_profile"), Render: func(v *View, c *ui.Context, data map[string]any) {
+	return moduleDocumentSpec(builtinDescriptor("measurement_profile"), specValidator("measurement_profile"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
-		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
+		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).
+			Background(t.Surface).Border(1, t.Border).Children(func() {
 			ui.Text(c, textValue(data, "endpoint")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
 		})
-	}}
+	})
 }

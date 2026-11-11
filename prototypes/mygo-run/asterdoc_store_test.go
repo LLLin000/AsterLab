@@ -10,7 +10,7 @@ import (
 	"asterlab-mygo-prototype/modules/runs"
 )
 
-const storeDoc = "# CCK-8\n\n```asterlab\nkind: plate96\nid: plate-d3\nschema: 1\nassay: cck8\ngroups:\n  control: [A1, A2]\n  material: [B1]\n```\n"
+const storeDoc = "# CCK-8\n\n```asterlab\nkind: assay\nid: cck8\nschema: 1\ntitle: CCK-8\n```\n\n```asterlab\nkind: group\nid: control\nschema: 1\nname: Control\nrole: control\n```\n\n```asterlab\nkind: group\nid: material\nschema: 1\nname: Material\nrole: treatment\n```\n\n```asterlab\nkind: plate\nid: plate-d3\nschema: 1\nformat: 96\nassay: cck8\ngroups:\n  control: [A1, A2]\n  material: [B1]\n```\n"
 const parityDilutionDoc = "```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n"
 
 const parityInstrumentDoc = "```asterlab\nkind: instrument_profile\nid: instrument-reader\nschema: 1\nclass: plate_reader\nmodel: Synergy H1\ncapabilities:\n  - name: absorbance\n    wavelength: 450 nm\n  - name: fluorescence\nsource: built_in\n```\n"
@@ -105,15 +105,16 @@ func TestAsterDocGoRustParity(t *testing.T) {
 		source string
 	}{
 		{"valid plate", storeDoc},
-		{"valid reference", "```asterlab\nkind: reference\nid: r1\nschema: 1\nref: readout_batch:batch-3\n```\n"},
+		{"valid explicit plate identities", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: Control\n```\n```asterlab\nkind: assay\nid: a1\nschema: 1\ntitle: CCK-8\ngroup_refs: [g1]\ntimepoints: [D1]\n```\n```asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\nassay: a1\ngroups:\n  g1: [A1, A2]\nsamples:\n  A1: S1\n  A2: S1\nreplicates:\n  A1: 1\n  A2: 2\n```\n"},
+		{"invalid duplicate technical replicate", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: Control\n```\n```asterlab\nkind: assay\nid: a1\nschema: 1\ntitle: CCK-8\ngroup_refs: [g1]\ntimepoints: [D1]\n```\n```asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\nassay: a1\ngroups:\n  g1: [A1, A2]\nsamples:\n  A1: S1\n  A2: S1\nreplicates:\n  A1: 1\n  A2: 1\n```\n"},
+		{"invalid replicate without sample", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: Control\n```\n```asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\ngroups:\n  g1: [A1]\nreplicates:\n  A1: 1\n```\n"},
 		{"valid 24 plate", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: A\n```\n```asterlab\nkind: plate\nid: p24\nschema: 1\nformat: 24\ngroups:\n  g1: [A1, B2]\n```\n"},
-		{"invalid 24 plate well", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: A\n```\n```asterlab\nkind: plate\nid: p24bad\nschema: 1\nformat: 24\ngroups:\n  g1: [H1]\n```\n"},
-		{"unsupported format", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: A\n```\n```asterlab\nkind: plate\nid: p7\nschema: 1\nformat: 7\ngroups:\n  g1: [A1]\n```\n"},
 		{"missing group ref", "```asterlab\nkind: plate\nid: p24ref\nschema: 1\nformat: 24\ngroups:\n  ghost: [A1]\n```\n"},
 		{"valid scientific doc", readTestDoc(t)},
-		{"invalid well", "```asterlab\nkind: plate96\nid: p1\nschema: 1\ngroups:\n  a: [Z99]\n```\n"},
-		{"duplicate well", "```asterlab\nkind: plate96\nid: p2\nschema: 1\ngroups:\n  a: [A1]\n  b: [A1]\n```\n"},
-		{"missing groups", "```asterlab\nkind: plate96\nid: p3\nschema: 1\nassay: cck8\n```\n"},
+		{"invalid well", "```asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\ngroups:\n  a: [Z99]\n```\n"},
+		{"duplicate well", "```asterlab\nkind: plate\nid: p2\nschema: 1\nformat: 96\ngroups:\n  a: [A1]\n  b: [A1]\n```\n"},
+		{"missing groups", "```asterlab\nkind: plate\nid: p3\nschema: 1\nformat: 96\n```\n"},
+		{"removed plate96 kind", "```asterlab\nkind: plate96\nid: p-legacy\nschema: 1\nformat: 96\ngroups: {}\n```\n"},
 		{"unknown kind", "```asterlab\nkind: calculator\nid: c1\nschema: 1\n```\n"},
 		{"duplicate id", "```asterlab\nkind: reference\nid: dup\nschema: 1\nref: a\n```\n```asterlab\nkind: reference\nid: dup\nschema: 1\nref: b\n```\n"},
 		{"valid dilution", parityDilutionDoc},

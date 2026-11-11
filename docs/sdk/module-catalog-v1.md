@@ -1,40 +1,61 @@
 # AsterDoc SDK 模块目录 v1
 
-> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，15 个已注册模块）。本文只描述已实现的事实，不描述未实现能力。
+> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，14 个已注册模块）。本文只描述已实现的事实，不描述未实现能力。
 
 ## 1. 已注册模块总表
 
-| kind@schema | category | capabilities | permissions | renderers design/document/static | rules |
+| kind@schema | category | capabilities | permissions | Design / Document / Run / Static | rules |
 |---|---|---|---|---|---|
-| plate96@1 | labware | well-plate, well-assignment, plate-geometry | document.edit | plate96.editor / plate96.viewer / — | plate-wells |
-| plate@1 | labware | well-plate, well-assignment, plate-geometry | document.edit | plate.editor / plate.viewer / — | plate-geometry-wells |
-| reference@1 | document | typed-reference | (none) | reference.editor / reference.viewer / — | reference-ref |
-| experiment@1 | workflow | experiment-plan | (none) | experiment.editor / experiment.viewer / — | (none) |
-| group@1 | workflow | group-definition | (none) | group.editor / group.viewer / — | group-fields |
-| assay@1 | measurement | assay-plan, measurement-endpoint | (none) | assay.editor / assay.viewer / — | assay-fields |
-| step@1 | workflow | step-definition, workflow-edge | (none) | step.editor / step.viewer / — | step-fields |
-| workflow@1 | workflow | workflow-graph | (none) | workflow.editor / workflow.viewer / — | workflow-fields |
-| dilution@1 | measurement | quantity, deterministic-calculation, derived-output | (none) | dilution.editor / dilution.viewer / — | dilution-fields |
-| instrument_profile@1 | resource | instrument-profile, capability-declaration | (none) | instrument-profile.editor / instrument-profile.viewer / — | instrument-profile-fields |
-| step@2 | workflow | step-definition, workflow-edge | (none) | step.editor / step.viewer / — | step-fields, step-uses |
-| material@1 | resource | material, role-declaration | (none) | material.editor / material.viewer / — | material-fields |
-| sample@1 | resource | sample, sample-tracking | (none) | sample.editor / sample.viewer / — | sample-fields |
-| container@1 | labware | container, well-map | (none) | container.editor / container.viewer / — | container-fields |
-| measurement_profile@1 | measurement | measurement-profile, calculator-reference | (none) | measurement_profile.editor / measurement_profile.viewer / — | measurement-profile-fields |
+| plate@1 | labware | well-plate, well-assignment, plate-geometry | document.edit | plate.editor / plate.viewer / plate.run / — | plate-geometry-wells |
+| reference@1 | document | typed-reference | (none) | generic.editor / reference.viewer / generic.run / — | reference-ref |
+| experiment@1 | workflow | experiment-plan | (none) | generic.editor / experiment.viewer / generic.run / — | (none) |
+| group@1 | workflow | group-definition | (none) | generic.editor / group.viewer / generic.run / — | group-fields |
+| assay@1 | measurement | assay-plan, measurement-endpoint | (none) | generic.editor / assay.viewer / generic.run / — | assay-fields |
+| step@1 | workflow | step-definition, workflow-edge | (none) | generic.editor / step.viewer / generic.run / — | step-fields |
+| workflow@1 | workflow | workflow-graph | (none) | — (Workspace canvas) / workflow.viewer / generic.run / — | workflow-fields |
+| dilution@1 | measurement | quantity, deterministic-calculation, derived-output | (none) | generic.editor / dilution.viewer / generic.run / — | dilution-fields |
+| instrument_profile@1 | resource | instrument-profile, capability-declaration | (none) | generic.editor / instrument-profile.viewer / generic.run / — | instrument-profile-fields |
+| step@2 | workflow | step-definition, workflow-edge | (none) | generic.editor / step.viewer / generic.run / — | step-fields, step-uses |
+| material@1 | resource | material, role-declaration | (none) | generic.editor / material.viewer / generic.run / — | material-fields |
+| sample@1 | resource | sample, sample-tracking | (none) | generic.editor / sample.viewer / generic.run / — | sample-fields |
+| container@1 | labware | container, well-map | (none) | generic.editor / container.viewer / generic.run / — | container-fields |
+| measurement_profile@1 | measurement | measurement-profile, calculator-reference | (none) | generic.editor / measurement_profile.viewer / generic.run / — | measurement-profile-fields |
 
-说明：`renderers.static` 在当前 manifest 中未声明（均为 `—`）；静态预览通过 `StaticPreview`/`StaticDocumentPreview`（`prototypes/mygo-run/internal/asterdoc/static.go`）按 registry 路径读取，不依赖该字段。
+说明：`renderers.static` 当前未声明；静态预览走 `StaticPreview`/`StaticDocumentPreview`。
 
-`renderers` 现在是**被执行**的契约：`Register` 校验每个声明的 key 都有实现（`ModuleSpec.Renders`），跨 kind 复用同一 key 被拒绝；宿主按 `Descriptor.RendererKey(mode)` 分派，声明但未实现时渲染显式的能力缺口提示（`View.rendererGap`），不回退猜测。`plate`/`plate96`/`container` 保留专用编辑器；字段型模块通过 `generic-editor` capability 显式选择通用编辑器。
+`renderers` 是实际执行的契约。`Registry.RegisterRenderer` 将回调按 key 注册一次，多个 kind 可以共享；
+`generic.editor` 和只读 `generic.run` 是共享实现。`plate` 使用独立的 `plate.editor`、`plate.viewer`、
+`plate.run`。缺少某个 surface 时显示能力缺口，不回退猜测。`workflow` 的增删/排序/连线属于 Workspace
+画布命令，因此它没有模块级 Design renderer。
+
+## 1.1 模块就绪矩阵（独立维度，如实陈述）
+
+注册 ≠ 可用编辑器 / Run 视图 / 记录闭环。下表按四个独立维度拆开，不把“已注册”混同为“可操作”。
+
+| kind@schema | schema/校验 | Design 编辑器 | Run 视图 | 记录闭环 |
+|---|---|---|---|---|
+| plate@1 | Go+Rust parity；格式 6/12/24/48/96/384 | **96 孔交互式分配/清空**；6/12/24/48/384 为忠实只读矩阵，非完整专用编辑器 | 只读 `plate.run` 摘要 | 仅 CCK-8 结果网格 / Run Core 路径 |
+| reference@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
+| experiment@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
+| group@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
+| assay@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
+| step@1 / step@2 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
+| workflow@1 | Go+Rust | Workspace 画布（非模块级 Design renderer） | 只读摘要 | 无 |
+| dilution@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无（derived，不写 Run 事实） |
+| instrument_profile@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无；无设备控制 |
+| material@1 / sample@1 / container@1 / measurement_profile@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
+
+说明：
+- 通用编辑器（`GenericModuleEditor`）对 `list/object/table/object-list/well-map/geometry` 字段为 read-only；复合字段目前无法在通用编辑器内组装。
+- 模块级 Run 视图均为只读摘要；记录写入只通过 Core 命令（`run.workspace` / `execution_event.create` 等）。
+- 本 pass 仅 CCK-8 结果网格 / Run Core 路径具备读数闭环；仪器控制未实现。
 
 ## 2. 端口（inputs / outputs）明细
 
-### plate96@1
-- inputs: kind string required；id string required；schema int required；assay string；groups well-map required。
-- outputs: wells well-map view；assigned int view。
 
 ### plate@1
-- inputs: kind string required；id string required；schema int required；format int required（6/12/24/48/96/384）；assay reference→assay；timepoint timepoint；groups well-map required。
-- outputs: rows int view；columns int view；wells well-map view。
+- inputs: kind string required；id string required；schema int required；format int required（6/12/24/48/96/384）；assay reference→assay；timepoint timepoint；groups well-map required；samples object（well→显式 sample ID，可选）；replicates object（well→正整数技术重复编号，可选，须有对应 sample ID）。未填写的身份保持未解析，不根据组别或孔位顺序推断。
+- outputs: rows int view；columns int view；wells well-map view；samples object view；replicates object view。clear_wells 同时清除目标孔位的组别、样本和重复映射。
 
 ### reference@1
 - inputs: kind string required；id string required；schema int required；ref string required；view string。
@@ -101,7 +122,7 @@
 | 6 Actions | `modules.json` `actions[]`（含 `permission/writes`） |
 | 7 Permissions | `modules.json` `permissions[]` + `actions[].permission`；Go `Perm*` 常量与 `View.Can` |
 | 8 Bindings | renderer/runtime 集成（下文 §5） |
-| 9 Renderers | `modules.json` `renderers.design/document/static`；Go `Renderers`；渲染代码在 `modules.go` |
+| 9 Renderers | `modules.json` `renderers.design/document/run/static`；Go `Renderers`；回调注册于 `Registry` |
 | 10 Lifecycle | `modules.json` `lifecycle.states/freeze` |
 | 11 Provenance | `modules.json` `provenance.origin/record_boundary`；Go `Provenance` |
 | 12 Diagnostics | 共享 shape（Foundation v1），CLI 错误信封暴露稳定顶层 code |
@@ -111,8 +132,8 @@
 - `record_boundary` 固定为 `run`；document 模块不得写 Run 事实。
 - 量纲/UCUM：`prototypes/mygo-run/internal/asterdoc/spec/units.json` 仅 36 个符号、9 个维度（mass_concentration、mass、amount_concentration、length、time、volume、amount、dimensionless、temperature）；`units.go` 注释明确是"命名 UCUM 子集"，转换显式且不重写原值。
 - 引用：`reference.ref` 是非类型化的 `string`（`reference@1` 的 `ref` 字段为 `string`，仅 `target` 在引用端口声明）；typed reference 通过 `inputs[].type=reference + target` 实现，`ref` 本身不带类型。
-- Go 注册：`BuiltinRegistry()`（`registry.go`）`sync.Once` 注册 15 个 `*Spec()`；`Register` 拒绝重复 kind@schema、缺 Validate/Render。
-- Rust 镜像：`src/cli.rs` 嵌入同一 `modules.json`（`ASTERDOC_MODULE_SPEC`），`asterdoc_spec()` OnceLock 解析并 `validate_asterdoc_spec` 校验；`asterdoc_module_spec(kind, schema)` 查找。
+- Go 注册：`BuiltinRegistry()` 注册 14 个 `kind@schema`；`Register` 验证所声明的 renderer key 有已注册 callback。
+- Rust 镜像：`src/cli.rs` 嵌入同一 `modules.json` 并校验；`asterdoc_module_spec(kind, schema)` 查找。
 
 ## 4. 新增模块：精确文件清单
 
@@ -134,13 +155,19 @@ Rust 侧 `validate_asterdoc_module` 的 rule 匹配是穷举的：已知 rule �
 - Notebook AsterML 模式：`a.noteAster = &asterdoc.View{..., Mode: ModeNotebook, Allowed:{PermDocumentEdit:true}, OnChange:...}`（`main.go` ~1512）。
 - 静态预览/PDF：`StaticPreview(m)` / `StaticDocumentPreview(doc)`（`static.go`）；`pdf.go` ~100 调用 `StaticDocumentPreview(doc)` 作为 PDF 导出的只读数据源。`StaticPreview` 从 `BuiltinRegistry()` 查找 spec，未注册 kind 则退化为按键名打印。
 
+## 5.1 `plate@1` 单一 AsterDoc kind 与迁移
+
+- AsterDoc 侧只有一种孔板模块 kind：`plate@1`，通过 `format`（6/12/24/48/96/384）表达板型。不存在重复的 `plate96` AsterDoc module kind。
+- 旧 `kind: plate96` 源必须显式迁移为 `kind: plate` + `format: 96`；不可变历史修订不被重写，不保留兼容别名。
+- `cck8.plate96.od450.v1` 是 CCK-8 结果 schema ID，`blocks.TypePlate96` 是 legacy block 路径类型；两者是独立契约，不是重复的 AsterDoc module kind，不得重命名或删除。
+
 ## 6. 限制（如实陈述）
 
 - 无动态/第三方加载：模块是 Go 代码（`*Spec()` + `Register`），不是插件 ABI；contract 语言中立，但 v1 不是可插拔扩展。
 - 无设备控制/SiLA：`instrument_profile` 仅能力声明，不连接硬件、不校准、不记录执行结果。
 - 量纲仅命名 UCUM 子集（36 符号/9 维度），非完整 UCUM。
-- 无代码生成：Go 与 Rust 校验器并行维护，漂移仅由 `TestAsterDocGoRustParity` 采样覆盖（`TestAsterDocGoRustParity` 现含 23 个 valid/invalid 样本，覆盖 plate/plate96/reference/dilution/instrument_profile/step@2/material/sample/container/measurement_profile，未逐一覆盖 experiment/group/assay/workflow 每字段）。
-- 无 `sdk new/validate/manifest` CLI：CLI 仅 `validate_asterdoc_source`（`src/cli.rs`）供 AsterML 编译使用。
+- 无代码生成：Go 与 Rust 校验器并行维护；`TestAsterDocGoRustParity` 覆盖 plate、引用、稀释、仪器档案和字段校验样本，但不逐一覆盖每个模块的每个字段。
+- 无 manifest/schema 校验或代码生成 CLI；目前的工具 `sdk.modules`、`sdk.describe` 从嵌入的 manifest 发现/描述模块，`asterdoc.validate` 校验候选 AsterDoc 并尝试编译。Go 与 Rust 校验器仍并行维护。
 - 无模板市场：模板 shape 在 Foundation schema 中定义；实例化已在 `internal/asterdoc/template.go` 实现（`InstantiateTemplate` / `TemplateManifest`），但无模板市场、无远程下载、无模板管理 CLI。
 - 通用编辑器对 `list/object/table/object-list/well-map/geometry` 字段显示为 read-only（`GenericModuleEditor`，`view.go`）；因此复合字段目前无法在通用编辑器内组装，需要专用编辑器或后续的结构化控件。
 - 无模块生命周期（register/activate/dispose）：模块是纯函数，加载即全部注册，失败即暴露 `BuiltinError`。

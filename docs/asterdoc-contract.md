@@ -8,16 +8,14 @@ Design/Protocol/Run/Review surface.
 An AsterDoc is ordinary Markdown. A fenced block whose language is `asterlab` declares one module:
 
 ````markdown
-# D3 · CCK-8
+# D3 · 孔板
 
 ```asterlab
-kind: plate96
+kind: plate
 id: plate-cck8-d3
 schema: 1
-assay: cck8
-groups:
-  control: [A1, A2, A3]
-  material: [B1, B2, B3]
+format: 96
+groups: {}
 ```
 ````
 
@@ -56,8 +54,11 @@ Go contract (`internal/asterdoc/registry.go`):
 type ModuleSpec struct {
     Descriptor
     Validate func(data map[string]any) error
-    Render   func(v *View, c *ui.Context, data map[string]any)
+    Implementations map[string]RendererFunc // only module-specific callbacks
 }
+
+func (r *Registry) RegisterRenderer(key string, fn RendererFunc) error
+
 ```
 
 `View` carries the render context: `Mode`, `RunID`, `DocumentRevision`, and an explicit `Allowed` permission set.
@@ -67,20 +68,26 @@ A `Descriptor` is the agent-facing contract:
 
 ```json
 {
-  "kind": "plate96",
+  "kind": "plate",
   "schema": 1,
-  "title": "96 孔板",
-  "modes": ["design", "protocol", "run", "notebook", "review"],
+  "title": "孔板",
+  "renderers": {
+    "design": "plate.editor",
+    "document": "plate.viewer",
+    "run": "plate.run"
+  },
   "inputs": [
-    {"name": "id", "type": "string", "required": true, "description": "..."},
-    {"name": "groups", "type": "well-map", "required": true, "description": "..."}
+    {"name": "id", "type": "string", "required": true},
+    {"name": "format", "type": "int", "required": true},
+    {"name": "assay", "type": "reference", "target": "assay"},
+    {"name": "groups", "type": "well-map", "required": true}
   ],
   "outputs": [
-    {"name": "wells", "type": "well-map", "description": "..."},
-    {"name": "assigned", "type": "int", "description": "..."}
+    {"name": "wells", "type": "well-map"},
+    {"name": "assigned", "type": "int"}
   ],
   "actions": [
-    {"id": "assign_wells", "title": "...", "permission": "document.edit", "writes": ["groups"]}
+    {"id": "assign_wells", "permission": "document.edit", "writes": ["groups"]}
   ]
 }
 ```
@@ -105,26 +112,34 @@ authorization boundary.
 
 ## 5. Renderers
 
-The module is a Node in the document, and every output is a renderer over the same AST/source:
+The module data contract is shared; each surface selects a registered callback key:
 
-- native interactive renderer (MyGo `markdown.Options.CodeBlock` hook);
-- notebook/reading renderer (same hook, no edits);
-- future PDF/static renderer (same module registry, a `Static` capability instead of `Render`).
+- Design: `renderers.design` selects an editor or design-time view.
+- Protocol/Notebook/Review: `renderers.document` selects a read-only document view.
+- Run: `renderers.run` selects a frozen-plan view; record entry remains a Core command.
+
+`Registry.RegisterRenderer` installs reusable callbacks such as `generic.editor` and
+`generic.run`; specialized modules such as `plate` register `plate.editor`, `plate.viewer`,
+and `plate.run`. The same key can serve multiple kinds. A missing key is shown as a capability
+gap; the host never falls back to another surface. `View.Density` selects `compact`,
+`inspector`, or `full` presentation without changing module data or permissions.
 
 A PDF must pin: document revision, run revision, batch IDs, calculation version and export time. Missing references
 or unsupported schema versions fail the export visibly; they are never skipped.
 
 ## 6. Adding a module
 
-1. Implement `Validate` and `Render` and a `Descriptor` with typed inputs, outputs, modes and actions.
-2. Register it in `BuiltinRegistry()` (or a caller-owned `Registry` for tests/plugins).
+1. Define the manifest contract and validation rules.
+2. Register shared renderer keys once or add module-specific callbacks; declare only implemented surfaces.
 3. Add round-trip, manifest and permission tests.
 4. Do not add a second syntax. Every module is a fenced `asterlab` block with `kind`, `id`, `schema`.
 
-Current shipped modules: `plate96@1`, `plate@1`, `reference@1`, `experiment@1`, `group@1`, `assay@1`, `step@1`,
-`workflow@1`, `dilution@1`, `instrument_profile@1`. The reference renderer is a static label; resolution to a
-batch/plate view is not implemented yet. Dilution outputs are derived (`dilution.v1`) and are never written as Run
-facts. Instrument profiles declare capabilities only; they do not connect to hardware.
+Current shipped modules: `plate@1`, `reference@1`, `experiment@1`, `group@1`, `assay@1`, `step@1`,
+`workflow@1`, `dilution@1`, `instrument_profile@1`, `step@2`, `material@1`, `sample@1`, `container@1`,
+and `measurement_profile@1` (14 module kinds). `plate@1` owns 6/12/24/48/96/384 formats; the duplicate
+`plate96@1` kind is removed. `reference` renders a static label; record-target resolution is not implemented.
+Dilution outputs are derived (`dilution.v1`) and are never written as Run facts. Instrument profiles declare
+capabilities only; they do not connect to hardware.
 
 ## 7. Core document store (Slice A)
 
@@ -136,13 +151,11 @@ Core now owns AsterDoc revisions as first-class records:
 - `SaveAsterDoc` validates the source in Rust before writing, checks `expected_revision`, and commits the revision in
   one immediate transaction. The same `operation_id` with the same source is idempotent; a different source conflicts.
 - `LoadAsterDoc` returns the latest revision and an empty revision 0 when the design has none.
-- Core supports `plate96@1` and `reference@1` today; both sides read `spec/modules.json`. Go keeps an immediate parser
-  for rendering, but Core is the save authority.
+- Core validates the consolidated `plate@1` kind; Go and Rust read `spec/modules.json`, and Core remains the save authority.
 - The design record remains the document root, matching the existing record/foreign-key model rather than adding a
   parallel table hierarchy. Versions are immutable because Core exposes no update/delete path.
 
-Not yet implemented: Design projection, Run freeze, CLI routes, GUI write-through. The Notebook 文档 mode still saves
-through `SaveNotebook`; do not treat it as a Core document revision.
+Notebook 文档 mode still saves through `SaveNotebook`; it is a Run notebook event, not a Design AsterDoc revision.
 
 ## 8. Compiler and Run freeze (Slice B/C, CCK-8)
 
@@ -169,13 +182,9 @@ source hash, and never falls back to the latest document or live Design.
 Tests: `asterdoc_compile_test.go` (projection fields) and `asterdoc_freeze_test.go` (atomic freeze, restart, historical
 isolation, legacy-write refusal).
 
-Not yet implemented: Workflow canvas command integration for nested/write-through designs, full Plate Editor undo and
-colored/annotation layers, Notebook frozen-document view, preflight confirmation dialog for CreateRun, PDF/static
-renderer, evidence/material/container-plan modules, RT-qPCR/CFU acceptance, real-window evidence for the new design
-surface. The workflow canvas now supports wheel/pinch pan-zoom, empty-canvas marquee, Shift/Cmd multi-select, batch move and
-multi-delete; the enlarged plate supports mouse marquee selection. These were exercised in headless tests. A real-window
-CCK-8 walkthrough at 900×600 covered step selection, draft edit/undo/redo, save, same-project Protocol binding, Run
-creation and the Run workspace; the shell minimum is now 900×600.
+Current gaps include full plate annotation layers, Notebook frozen-document rendering, preflight confirmation,
+evidence/material/container-plan modules, and RT-qPCR/CFU acceptance. Workflow node positions are presentation state;
+they remain separate from AsterDoc's semantic step order and dependency edges.
 
 ## 9. Semantic edit commands (Phase 3-A)
 
@@ -216,10 +225,10 @@ Implemented in Notebook as the **文档** mode:
 - Save appends a `stage=notebook` event through `RunService.SaveNotebook`.
 - Registry manifest, explicit permissions, duplicate-ID and duplicate-well validation.
 
-Not implemented yet:
+Current gaps:
 
-- Core document store and document revision; the notebook event is not a Design Revision.
-- Freezing an AsterDoc into a Run and rendering Run/Protocol/Review modes from it.
-- Reference resolution to batches/plates.
-- Static/PDF renderer.
-- Milkdown or web-based editing.
+- Notebook AsterML content is still saved as a `stage=notebook` event, not as a Design AsterDoc revision.
+- `reference.ref` does not resolve to a typed batch/plate view.
+- Full plate annotation layers and a dedicated table-to-plate editor are not implemented.
+- AsterDoc `plate96` source is a breaking cleanup: change `kind: plate96` to `kind: plate`, add `format: 96`,
+  and ensure `assay`/group IDs reference modules. Immutable old revisions are not rewritten.

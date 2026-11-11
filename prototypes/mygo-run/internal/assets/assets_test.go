@@ -47,23 +47,42 @@ func TestNewLinkUsesRelativePath(t *testing.T) {
 	}
 }
 
+func TestAssetIDUsesStableLogicalRootAndRelativePath(t *testing.T) {
+	roots := []string{tempRoot(t), tempRoot(t)}
+	ids := make([]string, len(roots))
+	for i, root := range roots {
+		path := filepath.Join(root, "huvec", "image.tif")
+		writeFile(t, path, "same bytes")
+		asset, err := NewLink("project-data", root, path, Link{RunID: "run-1", TaskKey: "t1"}, "", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = asset.ID
+	}
+	if ids[0] != ids[1] || len(ids[0]) != len("asset-")+32 {
+		t.Fatalf("unstable asset ID: %q vs %q", ids[0], ids[1])
+	}
+}
+
 func TestNewLinkRejectsPathEscapingRoot(t *testing.T) {
 	root := tempRoot(t)
 	outside := filepath.Join(filepath.Dir(root), "outside.txt")
 	writeFile(t, outside, "x")
-	if _, err := NewLink("project-data", root, outside, Link{RunID: "r"}, "", false); err == nil {
+	if _, err := NewLink("project-data", root, outside, Link{RunID: "r", TaskKey: "t1"}, "", false); err == nil {
 		t.Fatal("accepted a path outside the root")
 	}
 }
 
 func TestRootsResolveAndRejectTraversal(t *testing.T) {
 	root := tempRoot(t)
+	file := filepath.Join(root, "huvec", "d1", "image_01.tif")
+	writeFile(t, file, "x")
 	r := Roots{"project-data": root}
 	a := Asset{ID: "a1", RootID: "project-data", RelativePath: "huvec/d1/image_01.tif"}
 	path, err := r.Resolve(a)
 	if err != nil {
 		t.Fatal(err)
-    }
+	}
 	if path != filepath.Join(root, "huvec", "d1", "image_01.tif") {
 		t.Fatalf("path = %q", path)
 	}
@@ -106,7 +125,7 @@ func TestUnavailableKeepsLink(t *testing.T) {
 	root := tempRoot(t)
 	path := filepath.Join(root, "gone.tif")
 	writeFile(t, path, "x")
-	asset, err := NewLink("project-data", root, path, Link{RunID: "r"}, "", false)
+	asset, err := NewLink("project-data", root, path, Link{RunID: "r", TaskKey: "t1"}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

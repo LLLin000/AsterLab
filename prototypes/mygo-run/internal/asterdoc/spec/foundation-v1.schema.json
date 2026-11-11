@@ -325,6 +325,9 @@
             "document": {
               "type": "string"
             },
+            "run": {
+              "type": "string"
+            },
             "static": {
               "type": "string"
             }

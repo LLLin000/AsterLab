@@ -14,10 +14,10 @@ import (
 // Callbacks are the write seams. Every write goes through Core; the UI never
 // mutates a record itself.
 type Callbacks struct {
-	SelectTask  func(taskKey string)
-	SaveChecks  func(taskKey string, checks []CheckAckView)
-	Complete    func(taskKey string, checks []CheckAckView)
-	OpenBatch   func(batchID string)
+	SelectTask func(taskKey string)
+	SaveChecks func(taskKey string, checks []CheckAckView)
+	Complete   func(taskKey string, checks []CheckAckView)
+	OpenBatch  func(batchID string)
 	// Recording renders the recording module for a task. The host supplies it so
 	// the same module serves Design, Run, Notebook and PDF.
 	Recording func(c *ui.Context, task *RunTaskViewModel)
@@ -31,8 +31,8 @@ type CheckAckView struct {
 
 // State holds the mutable UI state of the run workspace.
 type State struct {
-	VM       *RunWorkspaceViewModel
-	Selected string
+	VM        *RunWorkspaceViewModel
+	Selected  string
 	Callbacks Callbacks
 
 	// Checks holds the operator's pending checkbox state per (task, check).
@@ -308,9 +308,20 @@ func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline 
 	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3), t.Space(2)).Children(func() {
 		ui.Text(c, "实验流程").FontSize(11).Bold().TextColor(t.TextMuted).
 			Padding(0, 0, t.Space(2), 0)
-		for _, step := range s.VM.Steps {
+		for i, step := range s.VM.Steps {
 			stepNode(c, s, t, tokens, step)
+			if i < len(s.VM.Steps)-1 {
+				flowConnector(c, t, tokens)
+			}
 		}
+	})
+}
+
+// flowConnector draws the vertical link and arrow between two step nodes.
+func flowConnector(c *ui.Context, t *ui.Theme, tokens theme.Tokens) {
+	ui.Column(c).Width(32).Height(20).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Width(2).Height(6).Background(tokens.BorderStrong)
+		ui.Text(c, "↓").FontSize(t.Rem(1.0)).TextColor(tokens.BorderStrong)
 	})
 }
 
@@ -318,10 +329,11 @@ func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline 
 func stepNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, step *RunTaskViewModel) {
 	selected := s.Selected == step.TaskKey
 	ui.Column(c).FillWidth().Children(func() {
-		b := ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(2)).Radius(6).
+		b := ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(2)).Radius(8).
+			Background(tokens.Surface).Border(1, tokens.Border).
 			AlignItems(ui.Center).Gap(t.Space(2))
 		if selected {
-			b.Background(t.Accent.Alpha(.10))
+			b.Background(t.Accent.Alpha(.10)).Border(1, t.Accent.Alpha(.45))
 		}
 		b.Children(func() {
 			statusDot(c, step.Status, t, tokens)
@@ -423,35 +435,92 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 }
 
 func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	passed, total := 0, len(task.Checks)
+	for _, check := range task.Checks {
+		if check.Status == "passed" {
+			passed++
+		}
+	}
+	recorded, files := 0, 0
+	if task.Actual != nil {
+		recorded = len(task.Actual.Measurements)
+		files = len(task.Actual.Files)
+	}
+	instruction := "执行本步骤，并在下方实验记录中录入读数。"
+	next := "录入读数并保存"
+	switch {
+	case total > passed:
+		instruction = "先完成执行确认，再记录本步骤读数。"
+		next = fmt.Sprintf("完成 %d 项执行确认", total-passed)
+	case recorded > 0:
+		instruction = "读数已记录；核对后保存读数并完成任务。"
+		next = "核对读数，保存并完成任务"
+	}
+
 	ui.Column(c).FillWidth().Padding(16).Radius(float32(tokens.PanelRadius)).
 		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(2)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 			ui.Text(c, task.StepTitle).FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
+			taskStatusPill(c, task.Status, t, tokens)
 			ui.Spacer(c)
-			ui.Text(c, "来自冻结实验方案").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			ui.Text(c, "当前步骤").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		})
-		sub := ""
-		if task.Timepoint != "" {
-			sub = "时间点 " + task.Timepoint
-		}
-		if task.AssayID != "" {
-			if sub != "" {
-				sub += " · "
-			}
-			sub += "检测 " + task.AssayID
-		}
-		if sub != "" {
-			ui.Text(c, sub).FontSize(t.Rem(.78)).TextColor(t.TextMuted)
-		}
+		ui.Text(c, instruction).FontSize(t.Rem(.82)).TextColor(t.Text)
+
 		if task.Planned != nil && len(task.Planned.Parameters) > 0 {
 			ui.Divider(c)
-			ui.Text(c, "计划参数").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "操作参数").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
 			ui.Row(c).Wrap().Gap(t.Space(2)).Children(func() {
 				for _, p := range task.Planned.Parameters {
 					paramChip(c, p, t, tokens)
 				}
 			})
 		}
+
+		// Checks come before recording: the operator confirms the step first.
+		if len(task.Checks) > 0 {
+			ui.Divider(c)
+			checkList(c, s, t, tokens, task)
+		}
+
+		ui.Divider(c)
+		ui.Text(c, "要记录什么").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
+		ui.Row(c).FillWidth().Wrap().Gap(t.Space(2)).Children(func() {
+			statChip(c, fmt.Sprintf("已记录读数 %d", recorded), t, tokens)
+			statChip(c, fmt.Sprintf("执行确认 %d/%d", passed, total), t, tokens)
+			if files > 0 {
+				statChip(c, fmt.Sprintf("关联文件 %d", files), t, tokens)
+			}
+		})
+		if task.Actual != nil && len(task.Actual.Measurements) > 0 {
+			ui.Row(c).Wrap().Gap(t.Space(1.5)).Children(func() {
+				limit := len(task.Actual.Measurements)
+				if limit > 4 {
+					limit = 4
+				}
+				for _, m := range task.Actual.Measurements[:limit] {
+					ui.Row(c).Padding(4, 9).Radius(6).Background(tokens.Elevated).
+						Border(1, tokens.Border).Gap(6).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, fallback(m.SampleID, "未分配")).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+						ui.Text(c, strings.TrimSpace(m.Field+" "+m.Value+" "+m.Unit)).FontSize(t.Rem(.78)).
+							FontWeight(600).TextColor(t.Text)
+					})
+				}
+				if len(task.Actual.Measurements) > limit {
+					ui.Text(c, fmt.Sprintf("+%d", len(task.Actual.Measurements)-limit)).
+						FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+				}
+			})
+		}
+		ui.Text(c, "在下方「实验记录」中录入读数；保存后写入 Run 记录。").
+			FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+
+		ui.Row(c).FillWidth().Padding(6, 10).Radius(6).Background(tokens.Elevated).
+			Border(1, tokens.Border).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+			ui.Text(c, "下一步").FontSize(t.Rem(.7)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, next).FontSize(t.Rem(.76)).TextColor(t.Text)
+		})
+
 		if len(task.Modules) > 0 {
 			ui.Divider(c)
 			ui.Text(c, "步骤资源").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
@@ -461,12 +530,47 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 				}
 			})
 		}
-		// Checks belong to the execution area: operator verdicts are facts.
-		if len(task.Checks) > 0 {
-			ui.Divider(c)
-			checkList(c, s, t, tokens, task)
+
+		ui.Divider(c)
+		frozen := []string{fallback(task.StepPath), fallback(task.AssayID, "未绑定"), fallback(task.Timepoint, "未绑定")}
+		if strings.TrimSpace(task.StepID) != "" {
+			frozen = append(frozen, "步骤 ID "+task.StepID)
 		}
+		ui.Text(c, "冻结信息（只读） · "+strings.Join(frozen, " · ")).
+			FontSize(t.Rem(.68)).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 	})
+}
+
+func statChip(c *ui.Context, label string, t *ui.Theme, tokens theme.Tokens) {
+	ui.Row(c).Padding(2, 7).Radius(5).Background(tokens.Elevated).
+		Border(1, tokens.Border).Children(func() {
+		ui.Text(c, label).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+	})
+}
+
+func taskStatusPill(c *ui.Context, status TaskStatus, t *ui.Theme, tokens theme.Tokens) {
+	label, bg, fg := "未开始", tokens.NeutralBg, tokens.NeutralText
+	switch status {
+	case TaskStatusCurrent:
+		label, bg, fg = "进行中", tokens.WarningBg, tokens.WarningText
+	case TaskStatusCompleted:
+		label, bg, fg = "已完成", tokens.SuccessBg, tokens.SuccessText
+	case TaskStatusBlocked:
+		label, bg, fg = "已阻塞", tokens.DangerBg, tokens.DangerText
+	}
+	ui.Row(c).Padding(2, 7).Radius(5).Background(bg).Children(func() {
+		ui.Text(c, label).FontSize(t.Rem(.68)).Bold().TextColor(fg)
+	})
+}
+
+func fallback(value string, alt ...string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	if len(alt) > 0 {
+		return alt[0]
+	}
+	return "—"
 }
 
 func paramChip(c *ui.Context, p PlannedParameter, t *ui.Theme, tokens theme.Tokens) {
@@ -500,7 +604,7 @@ func moduleLabel(kind, title string) string {
 		return "仪器能力档案"
 	case "dilution":
 		return "稀释计算"
-	case "plate", "plate96":
+	case "plate":
 		return "孔板"
 	case "measurement_profile":
 		return "测量方案"

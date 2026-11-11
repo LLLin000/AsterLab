@@ -81,7 +81,7 @@ func TestNotebookTimelineReadsAuthoritativeEvents(t *testing.T) {
 func ptrFloat(v float64) *float64 { return &v }
 
 func TestNotebookAsterDocModeRendersPlateModule(t *testing.T) {
-	source := "# D3\n\n```asterlab\nkind: plate96\nid: plate-d3\nschema: 1\nassay: cck8\ngroups:\n  control: [A1, A2]\n  material: [B1]\n```\n"
+	source := "# D3\n\n```asterlab\nkind: group\nid: g-control\nschema: 1\nname: Control\nrole: control\n```\n\n```asterlab\nkind: plate\nid: plate-d3\nschema: 1\nformat: 96\ngroups:\n  g-control: [A1]\n```\n"
 	a := &app{snap: runs.RunSnapshot{
 		RunID: "run-1", Title: "CCK-8",
 		Events: []runs.RunEvent{{ID: "note", Stage: "notebook", Content: source, RecordedAt: "2026-11-10T10:00:00Z"}},
@@ -119,7 +119,7 @@ func TestNotebookDocumentModeCanInsertPlateModule(t *testing.T) {
 	}
 	tt.Frame()
 	tt.Frame()
-	if !strings.Contains(a.noteDraft, "kind: plate96") {
+	if !strings.Contains(a.noteDraft, "kind: plate") {
 		t.Fatalf("plate module was not inserted: %q", a.noteDraft)
 	}
 	if !tt.HasText("96 孔板") {

@@ -90,4 +90,10 @@ format: 96
 assay: assay-cck8
 groups:
   g-control: [A1, A2]
+samples:
+  A1: control-sample-1
+  A2: control-sample-1
+replicates:
+  A1: 1
+  A2: 2
 ```

@@ -1,190 +1,161 @@
 package asterdoc
 
 import (
-	"strings"
 	"testing"
 
 	"asterlab-mygo-prototype/internal/theme"
 	"github.com/egoist/mygo/ui"
 )
 
-// The shipped registry must satisfy its own declared contract: every renderer
-// key a module declares is actually implemented, and every registered module
-// resolves for the surfaces the app uses.
-func TestShippedRenderersAreImplemented(t *testing.T) {
+func TestBuiltInRenderersMatchDeclaredSurfaces(t *testing.T) {
 	if err := BuiltinError(); err != nil {
 		t.Fatalf("shipped registry rejected its own modules: %v", err)
 	}
 	registry := BuiltinRegistry()
+	if got := len(registry.Descriptors()); got != 14 {
+		t.Fatalf("registered module count = %d, want 14", got)
+	}
 	for _, spec := range registry.specs {
-		if spec.Renderers == nil {
-			continue
-		}
-		for surface, key := range spec.declaredRenderers() {
-			if key == "" {
-				continue
-			}
-			if !registry.HasRenderer(key) {
-				t.Fatalf("%s@%d declares %s renderer %q but the registry does not implement it",
-					spec.Kind, spec.Schema, surface, key)
+		for surface, rendererKey := range spec.declaredRenderers() {
+			if !registry.HasRenderer(rendererKey) {
+				t.Fatalf("%s@%d declares %s renderer %q without a callback",
+					spec.Kind, spec.Schema, surface, rendererKey)
 			}
 		}
 	}
+	if _, ok := registry.Lookup("plate96", 1); ok {
+		t.Fatal("duplicate plate96 module remains registered")
+	}
 }
 
-// A module that declares a design renderer but has no implementation must be
-// rejected at registration; the host may never draw a guess.
 func TestRegisterRejectsUnimplementedDeclaredRenderer(t *testing.T) {
-	r := NewRegistry()
-	err := r.Register(ModuleSpec{
-		Descriptor: Descriptor{
-			Kind: "ghost", Schema: 1, Title: "Ghost",
-			Renderers: &Renderers{Design: "ghost.editor"},
-		},
+	registry := NewRegistry()
+	err := registry.Register(ModuleSpec{
+		Descriptor: Descriptor{Kind: "ghost", Schema: 1, Title: "Ghost",
+			Renderers: &Renderers{Design: "ghost.editor"}},
 		Validate: func(map[string]any) error { return nil },
-		Renders:  []string{"ghost.viewer"},
 	})
 	if err == nil {
 		t.Fatal("unimplemented renderer accepted")
 	}
-	// Either guard may fire first (no Render, or declared-but-unimplemented);
-	// what matters is that registration is refused and nothing is left behind.
-	if !strings.Contains(err.Error(), "does not implement") &&
-		!strings.Contains(err.Error(), "no Render implementation") {
-		t.Fatalf("rejection reason is not about the implementation gap: %v", err)
+	if registry.HasRenderer("ghost.editor") {
+		t.Fatal("rejected module left a renderer registered")
 	}
-	if r.HasRenderer("ghost.editor") {
-		t.Fatal("rejected module left renderer ownership behind")
+	if _, ok := registry.Lookup("ghost", 1); ok {
+		t.Fatal("rejected module left a module registered")
 	}
 }
 
-// Two different kinds cannot claim the same renderer key, while two schema
-// versions of one kind may share a renderer family (step@1 and step@2).
-func TestRegisterRendererOwnershipRules(t *testing.T) {
-	r := NewRegistry()
-	noop := func(*View, *ui.Context, map[string]any) {}
-	validate := func(map[string]any) error { return nil }
-
-	first := ModuleSpec{
-		Descriptor: Descriptor{Kind: "alpha", Schema: 1, Title: "Alpha",
-			Renderers: &Renderers{Design: "shared.editor", Document: "alpha.viewer"}},
-		Validate: validate, Render: noop,
-		Renders: []string{"shared.editor", "alpha.viewer"},
-	}
-	if err := r.Register(first); err != nil {
-		t.Fatalf("first module rejected: %v", err)
-	}
-
-	// Another kind claiming shared.editor must be refused.
-	if err := r.Register(ModuleSpec{
-		Descriptor: Descriptor{Kind: "beta", Schema: 1, Title: "Beta",
-			Renderers: &Renderers{Design: "shared.editor"}},
-		Validate: validate, Render: noop,
-		Renders: []string{"shared.editor"},
-	}); err == nil {
-		t.Fatal("cross-kind renderer conflict accepted")
-	}
-	if r.HasRenderer("beta.viewer") {
-		t.Fatal("rejected module claimed a renderer")
-	}
-
-	// Same kind, new schema version, same family: allowed.
-	if err := r.Register(ModuleSpec{
-		Descriptor: Descriptor{Kind: "alpha", Schema: 2, Title: "Alpha v2",
-			Renderers: &Renderers{Design: "shared.editor"}},
-		Validate: validate, Render: noop,
-		Renders: []string{"shared.editor"},
-	}); err != nil {
-		t.Fatalf("same-kind schema upgrade rejected: %v", err)
-	}
-	if _, ok := r.Lookup("alpha", 2); !ok {
-		t.Fatal("alpha@2 not registered")
-	}
-}
-
-// A headless module (no interactive renderer) is valid and reports a gap.
-func TestHeadlessModuleIsAllowed(t *testing.T) {
-	r := NewRegistry()
-	if err := r.Register(ModuleSpec{
-		Descriptor: Descriptor{Kind: "headless", Schema: 1, Title: "Headless"},
-		Validate:   func(map[string]any) error { return nil },
-	}); err != nil {
-		t.Fatalf("headless module rejected: %v", err)
-	}
-	spec, ok := r.Lookup("headless", 1)
-	if !ok {
-		t.Fatal("headless module not registered")
-	}
-	if key, declared := spec.Descriptor.RendererKey(ModeDesign); declared {
-		t.Fatalf("headless module declared %q", key)
-	}
-}
-
-func TestRendererKeyPerMode(t *testing.T) {
-	d := Descriptor{Renderers: &Renderers{Design: "x.editor", Document: "x.viewer"}}
-	if k, ok := d.RendererKey(ModeDesign); !ok || k != "x.editor" {
-		t.Fatalf("design key = %q %v", k, ok)
-	}
-	for _, mode := range []Mode{ModeRun, ModeNotebook, ModeReview, ModeProtocol} {
-		if k, ok := d.RendererKey(mode); !ok || k != "x.viewer" {
-			t.Fatalf("%s key = %q %v", mode, k, ok)
-		}
-	}
-	none := Descriptor{}
-	if _, ok := none.RendererKey(ModeDesign); ok {
-		t.Fatal("descriptor without renderers reported a key")
-	}
-}
-
-// The generic editor is opt-in by capability; spatial modules keep their own.
-func TestGenericEditorCapabilityGate(t *testing.T) {
-	registry := BuiltinRegistry()
-	plate, _ := registry.Lookup("plate", 1)
-	if hasCapability(plate.Descriptor, "generic-editor") {
-		t.Fatal("plate must keep its own editor, not the generic one")
-	}
-	dil, _ := registry.Lookup("dilution", 1)
-	if !hasCapability(dil.Descriptor, "generic-editor") {
-		t.Fatal("dilution should opt into the generic editor")
-	}
-}
-
-// Run's parsed-module path must enforce the same surface declaration as the
-// Markdown path. A document-only viewer is a gap in Design and callable in Run.
-func TestRenderModuleHonorsDeclaredSurface(t *testing.T) {
+func TestRendererKeysAreReusableAcrossModuleKindsAndModes(t *testing.T) {
 	registry := NewRegistry()
-	if err := registry.Register(ModuleSpec{
-		Descriptor: Descriptor{
-			Kind: "viewer_only", Schema: 1, Title: "Viewer only",
-			Renderers: &Renderers{Document: "viewer_only.viewer"},
-		},
-		Validate: func(map[string]any) error { return nil },
-		Render: func(_ *View, c *ui.Context, _ map[string]any) {
-			ui.Text(c, "document renderer called")
-		},
-		Renders: []string{"viewer_only.viewer"},
+	shared := func(_ *View, c *ui.Context, _ map[string]any) { ui.Text(c, "shared renderer") }
+	run := func(_ *View, c *ui.Context, _ map[string]any) { ui.Text(c, "run renderer") }
+	if err := registry.RegisterRenderer("generic.editor", shared); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.RegisterRenderer("generic.run", run); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.RegisterRenderer("alpha.document", func(_ *View, c *ui.Context, _ map[string]any) {
+		ui.Text(c, "document renderer")
 	}); err != nil {
 		t.Fatal(err)
 	}
-
-	design := &View{Registry: registry, Mode: ModeDesign}
-	designTest := ui.NewTester(func(c *ui.Context) {
-		c.SetTheme(theme.LightTheme())
-		design.RenderModule(c, "viewer_only", 1, map[string]any{"id": "v1"})
-	}, 800, 500)
-	designTest.Frame()
-	if designTest.HasText("document renderer called") ||
-		!designTest.HasText("viewer_only@1 · 该模块未声明此视图的渲染能力") {
-		t.Fatalf("Design did not report the missing surface: %q", designTest.Texts())
+	validate := func(map[string]any) error { return nil }
+	for _, kind := range []string{"alpha", "beta"} {
+		if err := registry.Register(ModuleSpec{
+			Descriptor: Descriptor{Kind: kind, Schema: 1, Title: kind,
+				Renderers: &Renderers{Design: "generic.editor", Run: "generic.run"}},
+			Validate: validate,
+		}); err != nil {
+			t.Fatalf("%s could not reuse shared keys: %v", kind, err)
+		}
 	}
+	if err := registry.Register(ModuleSpec{
+		Descriptor: Descriptor{Kind: "alpha", Schema: 2, Title: "Alpha v2",
+			Renderers: &Renderers{Document: "alpha.document"}},
+		Validate: validate,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		kind   string
+		schema int
+		mode   Mode
+		want   string
+	}{{"beta", 1, ModeDesign, "shared renderer"}, {"beta", 1, ModeRun, "run renderer"}, {"alpha", 2, ModeProtocol, "document renderer"}} {
+		view := &View{Registry: registry, Mode: test.mode, ReadOnly: test.mode == ModeRun}
+		tt := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(theme.LightTheme())
+			view.RenderModule(c, test.kind, test.schema, map[string]any{"id": "m1"})
+		}, 500, 300)
+		tt.Frame()
+		if !tt.HasText(test.want) {
+			t.Fatalf("%s@%d %s view did not dispatch %q: %q", test.kind, test.schema, test.mode, test.want, tt.Texts())
+		}
+	}
+	if err := registry.RegisterRenderer("generic.run", run); err == nil {
+		t.Fatal("duplicate renderer key was silently replaced")
+	}
+}
 
-	run := &View{Registry: registry, Mode: ModeRun, ReadOnly: true}
-	runTest := ui.NewTester(func(c *ui.Context) {
+func TestMissingRunSurfaceDoesNotFallBackToDocumentRenderer(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.RegisterRenderer("document.only", func(_ *View, c *ui.Context, _ map[string]any) {
+		ui.Text(c, "document only")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(ModuleSpec{
+		Descriptor: Descriptor{Kind: "readme", Schema: 1, Title: "Readme",
+			Renderers: &Renderers{Document: "document.only"}},
+		Validate: func(map[string]any) error { return nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view := &View{Registry: registry, Mode: ModeRun, ReadOnly: true}
+	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
-		run.RenderModule(c, "viewer_only", 1, map[string]any{"id": "v1"})
-	}, 800, 500)
-	runTest.Frame()
-	if !runTest.HasText("document renderer called") {
-		t.Fatalf("Run viewer was not dispatched: %q", runTest.Texts())
+		view.RenderModule(c, "readme", 1, map[string]any{"id": "r1"})
+	}, 500, 300)
+	tt.Frame()
+	if tt.HasText("document only") || !tt.HasText("readme@1 · 该模块未声明此视图的渲染能力") {
+		t.Fatalf("Run silently reused a document renderer: %q", tt.Texts())
+	}
+}
+
+func TestGenericRunSummaryHonorsDensityAndIsReadOnly(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.RegisterRenderer("generic.run", func(v *View, c *ui.Context, data map[string]any) {
+		v.GenericModuleSummary(c, data)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(ModuleSpec{
+		Descriptor: Descriptor{Kind: "planned", Schema: 1, Title: "计划参数",
+			Renderers: &Renderers{Run: "generic.run"},
+			Inputs: []Port{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}},
+		Validate: func(map[string]any) error { return nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data := map[string]any{"kind": "planned", "id": "p1", "schema": 1,
+		"a": "A", "b": "B", "c": "C", "d": "D"}
+	for _, test := range []struct {
+		density Density
+		showD   bool
+	}{{DensityCompact, false}, {DensityFull, true}} {
+		view := &View{Registry: registry, Mode: ModeRun, Density: test.density, ReadOnly: true}
+		tt := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(theme.LightTheme())
+			view.RenderModule(c, "planned", 1, data)
+		}, 500, 400)
+		tt.Frame()
+		if tt.HasText("D") != test.showD {
+			t.Fatalf("density %s displayed field D=%v; texts=%q", test.density, tt.HasText("D"), tt.Texts())
+		}
+		if tt.HasText("保存") {
+			t.Fatalf("Run summary exposed an edit action: %q", tt.Texts())
+		}
 	}
 }

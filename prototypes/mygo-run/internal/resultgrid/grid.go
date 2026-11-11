@@ -54,8 +54,7 @@ type PastePreview struct {
 	Rows, Columns int
 }
 type historyEntry struct {
-	key       string
-	old, next Cell
+	old, next []Cell
 }
 type Grid struct {
 	Schema           Schema
@@ -67,6 +66,10 @@ type Grid struct {
 	ConfirmOverwrite bool
 	undo, redo       []historyEntry
 	inputs           []string
+
+	editRow, editCol int
+	editDraft        string
+	editDirty        bool
 }
 
 func New(s Schema, cells []Cell) *Grid {
@@ -108,35 +111,67 @@ func (g *Grid) CellAt(r, c int) (Cell, bool) {
 	}
 	return g.Cells[g.index(r, c)], true
 }
+
+// InputAt exposes a cell's editable text buffer to alternate renderers. Call
+// SetCell after parsing a changed value to commit it to the grid.
+func (g *Grid) InputAt(r, c int) (*string, bool) {
+	if !g.validCoord(r, c) {
+		return nil, false
+	}
+	return g.input(r, c), true
+}
 func (g *Grid) input(r, c int) *string { return &g.inputs[g.index(r, c)] }
-func (g *Grid) SetCell(cell Cell) error {
+
+func (g *Grid) normalizeCell(cell Cell) (Cell, error) {
 	if !g.validCoord(cell.Row, cell.Column) {
-		return fmt.Errorf("cell coordinate out of range")
+		return Cell{}, fmt.Errorf("cell coordinate out of range")
 	}
 	if cell.Value != nil && (math.IsNaN(*cell.Value) || math.IsInf(*cell.Value, 0)) {
-		return fmt.Errorf("value must be finite")
+		return Cell{}, fmt.Errorf("value must be finite")
 	}
 	if cell.Value == nil {
 		if cell.Status == "" {
 			cell.Status = "missing"
 		}
 		if cell.Status != "missing" {
-			return fmt.Errorf("empty value must have missing status")
+			return Cell{}, fmt.Errorf("empty value must have missing status")
 		}
 	} else if cell.Status == "" || cell.Status == "missing" {
 		cell.Status = "raw"
 	}
-	idx := g.index(cell.Row, cell.Column)
-	old := g.Cells[idx]
-	key := fmt.Sprintf("%d:%d", cell.Row, cell.Column)
-	g.undo = append(g.undo, historyEntry{key, old, cell})
-	g.redo = nil
-	g.Cells[idx] = cell
-	if cell.Value == nil {
-		g.inputs[idx] = ""
-	} else {
-		g.inputs[idx] = strconv.FormatFloat(*cell.Value, 'g', -1, 64)
+	return cell, nil
+}
+
+func (g *Grid) SetCell(cell Cell) error {
+	return g.SetCells([]Cell{cell})
+}
+
+// SetCells applies a batch atomically: every cell is validated first, and the
+// whole batch is one undo step. A paste therefore undoes as one action, not 96.
+func (g *Grid) SetCells(cells []Cell) error {
+	if len(cells) == 0 {
+		return nil
 	}
+	next := make([]Cell, len(cells))
+	old := make([]Cell, len(cells))
+	for i, cell := range cells {
+		normalized, err := g.normalizeCell(cell)
+		if err != nil {
+			return err
+		}
+		next[i] = normalized
+		old[i], _ = g.CellAt(normalized.Row, normalized.Column)
+	}
+	for _, cell := range next {
+		idx := g.index(cell.Row, cell.Column)
+		g.Cells[idx] = cell
+		g.inputs[idx] = ""
+		if cell.Value != nil {
+			g.inputs[idx] = strconv.FormatFloat(*cell.Value, 'g', -1, 64)
+		}
+	}
+	g.undo = append(g.undo, historyEntry{old: old, next: next})
+	g.redo = nil
 	g.State = StateDraft
 	g.Error = ""
 	return nil
@@ -147,11 +182,13 @@ func (g *Grid) Undo() bool {
 	}
 	e := g.undo[len(g.undo)-1]
 	g.undo = g.undo[:len(g.undo)-1]
-	idx := g.index(e.old.Row, e.old.Column)
-	g.Cells[idx] = e.old
-	g.inputs[idx] = ""
-	if e.old.Value != nil {
-		g.inputs[idx] = strconv.FormatFloat(*e.old.Value, 'g', -1, 64)
+	for _, cell := range e.old {
+		idx := g.index(cell.Row, cell.Column)
+		g.Cells[idx] = cell
+		g.inputs[idx] = ""
+		if cell.Value != nil {
+			g.inputs[idx] = strconv.FormatFloat(*cell.Value, 'g', -1, 64)
+		}
 	}
 	g.redo = append(g.redo, e)
 	g.State = StateDraft
@@ -163,11 +200,13 @@ func (g *Grid) Redo() bool {
 	}
 	e := g.redo[len(g.redo)-1]
 	g.redo = g.redo[:len(g.redo)-1]
-	idx := g.index(e.next.Row, e.next.Column)
-	g.Cells[idx] = e.next
-	g.inputs[idx] = ""
-	if e.next.Value != nil {
-		g.inputs[idx] = strconv.FormatFloat(*e.next.Value, 'g', -1, 64)
+	for _, cell := range e.next {
+		idx := g.index(cell.Row, cell.Column)
+		g.Cells[idx] = cell
+		g.inputs[idx] = ""
+		if cell.Value != nil {
+			g.inputs[idx] = strconv.FormatFloat(*cell.Value, 'g', -1, 64)
+		}
 	}
 	g.undo = append(g.undo, e)
 	g.State = StateDraft
@@ -318,10 +357,8 @@ func (g *Grid) CommitPaste() error {
 		return fmt.Errorf("overwrite confirmation required")
 	}
 	p := g.Preview
-	for _, cell := range p.Cells {
-		if err := g.SetCell(cell); err != nil {
-			return err
-		}
+	if err := g.SetCells(p.Cells); err != nil {
+		return err
 	}
 	g.Preview = nil
 	return nil
@@ -332,10 +369,8 @@ func (g *Grid) ConfirmPasteOverwrite() error {
 	}
 	g.ConfirmOverwrite = false
 	p := g.Preview
-	for _, cell := range p.Cells {
-		if err := g.SetCell(cell); err != nil {
-			return err
-		}
+	if err := g.SetCells(p.Cells); err != nil {
+		return err
 	}
 	g.Preview = nil
 	return nil

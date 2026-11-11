@@ -165,28 +165,53 @@ func cck8Schema(doc designDocument, spec assaySpec, params Design, assayID, time
 		cells[i] = resultgrid.Cell{Row: i / 12, Column: i % 12, Field: OD450, Status: Missing}
 	}
 	if len(params.Wells) > 0 {
-		seen := map[string]bool{}
+		seenWells := map[string]bool{}
+		seenReplicates := map[string]string{}
+		foundAtTimepoint, incomplete := false, false
 		for _, well := range params.Wells {
 			if well.Timepoint != timepoint {
 				continue
 			}
+			foundAtTimepoint = true
 			id := strings.ToUpper(strings.TrimSpace(well.WellID))
-			col, err := strconv.Atoi(id[1:])
-			if err != nil || len(id) < 2 || id[0] < 'A' || id[0] > 'H' || col < 1 || col > 12 {
+			if len(id) < 2 || id[0] < 'A' || id[0] > 'H' {
 				return resultgrid.Schema{}, nil, fmt.Errorf("invalid well %q", well.WellID)
 			}
-			if strings.TrimSpace(well.SampleID) == "" || strings.TrimSpace(well.GroupID) == "" || well.Replicate < 1 {
-				return resultgrid.Schema{}, nil, fmt.Errorf("well %s has no sample/group/replicate", id)
+			col, err := strconv.Atoi(id[1:])
+			if err != nil || col < 1 || col > 12 || strconv.Itoa(col) != id[1:] {
+				return resultgrid.Schema{}, nil, fmt.Errorf("invalid well %q", well.WellID)
+			}
+			group, sample := strings.TrimSpace(well.GroupID), strings.TrimSpace(well.SampleID)
+			if group == "" || well.Replicate < 0 || (well.Replicate > 0 && sample == "") {
+				return resultgrid.Schema{}, nil, fmt.Errorf("well %s has invalid group/sample/replicate mapping", id)
 			}
 			key := id + "@" + timepoint
-			if seen[key] {
+			if seenWells[key] {
 				return resultgrid.Schema{}, nil, fmt.Errorf("well %s assigned twice", id)
 			}
-			seen[key] = true
+			seenWells[key] = true
+			if well.Replicate > 0 {
+				replicateKey := sample + "\x00" + strconv.Itoa(well.Replicate)
+				if previous, exists := seenReplicates[replicateKey]; exists {
+					return resultgrid.Schema{}, nil, fmt.Errorf("sample %s replicate %d assigned to both %s and %s", sample, well.Replicate, previous, id)
+				}
+				seenReplicates[replicateKey] = id
+			} else {
+				incomplete = true
+			}
+			if sample == "" {
+				incomplete = true
+			}
 			idx := (int(id[0]-'A'))*12 + col - 1
-			cells[idx].SampleID, cells[idx].Group, cells[idx].Replicate = well.SampleID, well.GroupID, well.Replicate
+			cells[idx].SampleID, cells[idx].Group, cells[idx].Replicate = sample, group, well.Replicate
 		}
-		delete(metadata, "unresolved")
+		if !foundAtTimepoint {
+			metadata["unresolved"] = "plate allocation absent for requested timepoint"
+		} else if incomplete {
+			metadata["unresolved"] = "well sample/replicate mapping is incomplete"
+		} else {
+			delete(metadata, "unresolved")
+		}
 		return schema, cells, nil
 	}
 	if !contains(params.Timepoints, timepoint) || params.PlateInstanceID == "" {
@@ -221,7 +246,7 @@ func cck8Schema(doc designDocument, spec assaySpec, params Design, assayID, time
 	}
 	wells := append([]int(nil), props.Selected...)
 	sort.Ints(wells)
-	seen, repeats := make(map[int]bool, len(wells)), map[string]int{}
+	seen := make(map[int]bool, len(wells))
 	for _, well := range wells {
 		if well < 0 || well >= 96 {
 			return resultgrid.Schema{}, nil, fmt.Errorf("cck8 well index %d out of range", well)
@@ -232,16 +257,11 @@ func cck8Schema(doc designDocument, spec assaySpec, params Design, assayID, time
 		seen[well] = true
 		cell := &cells[well]
 		cell.Group, cell.SampleID = props.Groups[well], props.Labels[well]
-		if cell.SampleID != "" {
-			key := cell.Group + "\x00" + cell.SampleID
-			repeats[key]++
-			cell.Replicate = repeats[key]
-		}
 	}
 	if len(wells) == 0 {
 		metadata["unresolved"] = "plate has no selected wells"
 	} else {
-		delete(metadata, "unresolved")
+		metadata["unresolved"] = "legacy plate has no explicit replicate mapping"
 	}
 	return schema, cells, nil
 }
@@ -321,6 +341,7 @@ func contains(values []string, target string) bool {
 
 func ValidateWellAssignments(wells []WellAssignment) error {
 	seenWells := map[string]bool{}
+	seenReplicates := map[string]string{}
 	for _, well := range wells {
 		id := strings.ToUpper(strings.TrimSpace(well.WellID))
 		if len(id) < 2 || id[0] < 'A' || id[0] > 'H' {
@@ -330,14 +351,22 @@ func ValidateWellAssignments(wells []WellAssignment) error {
 		if err != nil || col < 1 || col > 12 || strconv.Itoa(col) != id[1:] {
 			return fmt.Errorf("invalid well %q", well.WellID)
 		}
-		if strings.TrimSpace(well.SampleID) == "" || strings.TrimSpace(well.GroupID) == "" || strings.TrimSpace(well.Timepoint) == "" || well.Replicate < 1 {
-			return fmt.Errorf("well %s requires sample, group, timepoint, replicate", id)
+		if strings.TrimSpace(well.GroupID) == "" || strings.TrimSpace(well.Timepoint) == "" ||
+			well.Replicate < 0 || (well.Replicate > 0 && strings.TrimSpace(well.SampleID) == "") {
+			return fmt.Errorf("well %s requires a group and timepoint; replicate requires an explicit sample", id)
 		}
 		key := id + "\x00" + well.Timepoint
 		if seenWells[key] {
 			return fmt.Errorf("well %s assigned twice at %s", id, well.Timepoint)
 		}
 		seenWells[key] = true
+		if well.Replicate > 0 {
+			replicateKey := strings.TrimSpace(well.Timepoint) + "\x00" + strings.TrimSpace(well.SampleID) + "\x00" + strconv.Itoa(well.Replicate)
+			if previous, exists := seenReplicates[replicateKey]; exists {
+				return fmt.Errorf("sample %s replicate %d assigned to both %s and %s", well.SampleID, well.Replicate, previous, id)
+			}
+			seenReplicates[replicateKey] = id
+		}
 	}
 	return nil
 }

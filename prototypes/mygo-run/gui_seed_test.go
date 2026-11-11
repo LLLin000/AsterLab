@@ -130,7 +130,7 @@ func TestSeedGUIRun(t *testing.T) {
 	}
 	if _, err := rsvc.SaveNotebook(ctx, runs.NotebookInput{
 		RunID: run.RunID, OperationID: "gui-seed-notebook",
-		Markdown: "# D1 观察\n\n- 细胞贴壁良好，边缘无气泡\n- 空白孔已加入\n\n```asterlab\nkind: plate96\nid: plate-cck8-d1\nschema: 1\nassay: cck8\ngroups:\n  control: [A1, A2, A3]\n  material: [B1, B2, B3]\n```\n\n## 备注\n\n下一次读数前检查培养基颜色。",
+		Markdown: "# D1 观察\n\n- 细胞贴壁良好，边缘无气泡\n- 空白孔已加入\n\n```asterlab\nkind: plate\nid: plate-cck8-d1\nschema: 1\nformat: 96\ngroups: {}\n```\n\n## 备注\n\n下一次读数前检查培养基颜色。",
 	}); err != nil {
 		t.Fatal(err)
 	}

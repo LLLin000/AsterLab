@@ -166,9 +166,63 @@ impl RunService for CoreRunService {
         Ok(snapshot(v))
     }
 
+    fn save_asset_link(&self, _ctx: &Context, input: AssetLinkInput) -> Result<Asset, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let asset_json = serde_json::json!({
+            "asset": {
+                "id": input.asset.id,
+                "rootId": input.asset.root_id,
+                "relativePath": input.asset.relative_path,
+                "mediaType": input.asset.media_type,
+                "size": input.asset.size,
+                "modTime": input.asset.mod_time,
+                "sha256": input.asset.sha256,
+                "availability": input.asset.availability,
+                "link": {
+                    "runId": input.asset.link.run_id,
+                    "taskKey": input.asset.link.task_key,
+                    "sampleId": if input.asset.link.sample_id.is_empty() { serde_json::Value::Null } else { serde_json::json!(input.asset.link.sample_id) }
+                },
+                "linkedAt": input.asset.linked_at,
+                "actorId": input.asset.actor_id
+            }
+        });
+        let result = core.save_asset_link(asset_json).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        Ok(asset_from_value(&result))
+    }
+
+    fn list_asset_links(&self, _ctx: &Context, run_id: String) -> Result<Vec<Asset>, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let v = core.list_asset_links(&run_id).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        let arr = v.as_array().cloned().unwrap_or_default();
+        Ok(arr.iter().map(asset_from_value).collect())
+    }
+
     fn close(&self) -> Result<(), Error> {
         if let Ok(mut g) = self.core.lock() { g.take(); }
         Ok(())
+    }
+}
+
+fn asset_from_value(v: &serde_json::Value) -> Asset {
+    Asset {
+        id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        root_id: v.get("rootId").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        relative_path: v.get("relativePath").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        media_type: v.get("mediaType").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        size: v.get("size").and_then(|x| x.as_i64()).unwrap_or(0),
+        mod_time: v.get("modTime").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        sha256: v.get("sha256").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        availability: v.get("availability").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        link: AssetLink {
+            run_id: v.get("link").and_then(|x| x.get("runId")).and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+            task_key: v.get("link").and_then(|x| x.get("taskKey")).and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+            sample_id: v.get("link").and_then(|x| x.get("sampleId")).and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        },
+        linked_at: v.get("linkedAt").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+        actor_id: v.get("actorId").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
     }
 }
 

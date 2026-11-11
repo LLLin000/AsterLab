@@ -253,6 +253,14 @@ impl AppCore {
     pub fn create_run(&mut self, design_id: &str, title: Option<&str>, operation_id: Option<&str>) -> Result<Value, String> {
         cli_impl::create_run_for_design(&mut self.db, design_id, title, operation_id).map_err(|e| e.message)
     }
+
+    pub fn save_asset_link(&mut self, input: Value) -> Result<Value, String> {
+        cli_impl::save_asset_link(&mut self.db, &input).map_err(|e| e.message)
+    }
+
+    pub fn list_asset_links(&self, run_id: &str) -> Result<Value, String> {
+        cli_impl::list_asset_links(&self.db, run_id).map_err(|e| e.message)
+    }
 }
 
 

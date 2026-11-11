@@ -2,6 +2,7 @@ package runworkspace
 
 import (
 	"fmt"
+	"strconv"
 
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/theme"
@@ -78,40 +79,75 @@ type RecordingView struct {
 	OnOpenAsset  func(asset LinkedAsset)
 	OnRelocate   func(asset LinkedAsset)
 	OnLinkFile   func(asset LinkedAsset)
+	OnKindChange func(kind ViewKind)
 	OnSaveBatch  func(cells []resultgrid.Cell)
 }
 
-// Render draws the selected view plus a compact view switcher.
+// Render draws the selected view plus a compact view switcher and the single
+// Core write action. Save lives in the header so it stays visible while the
+// plate or table is scrolled.
 func (r *RecordingView) Render(c *ui.Context) {
 	if r == nil || r.Task == nil {
 		return
 	}
 	t := c.Theme()
+	tokens := theme.GetTokens(t)
 
 	views := r.availableViews()
-	if len(views) > 1 {
-		ui.Row(c).Gap(t.Space(1)).Children(func() {
-			current := r.Kind
-			for _, v := range views {
-				v := v
-				label := viewLabel(v)
-				b := ui.ButtonBase(c).Padding(3, 10).Radius(5)
-				if v == current {
-					b.Background(t.Accent)
-					b.Children(func() {
-						ui.Text(c, label).FontSize(t.Rem(.76)).Bold().TextColor(t.AccentText)
-					})
-				} else {
-					b.Children(func() {
-						ui.Text(c, label).FontSize(t.Rem(.76)).TextColor(t.TextMuted)
-					})
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+		for _, v := range views {
+			v := v
+			label := viewLabel(v)
+			b := ui.ButtonBase(c).Padding(3, 10).Radius(5)
+			if v == r.Kind {
+				b.Background(t.Accent)
+				b.Children(func() {
+					ui.Text(c, label).FontSize(t.Rem(.76)).Bold().TextColor(t.AccentText)
+				})
+			} else {
+				b.Children(func() {
+					ui.Text(c, label).FontSize(t.Rem(.76)).TextColor(t.TextMuted)
+				})
+			}
+			if b.Clicked() {
+				blocked := false
+				if r.Grid != nil {
+					if err := r.Grid.CommitPendingEdit(); err != nil {
+						r.Grid.Error = err.Error()
+						blocked = true
+					}
 				}
-				if b.Clicked() {
+				if !blocked {
 					r.Kind = v
+					if r.OnKindChange != nil {
+						r.OnKindChange(v)
+					}
 				}
 			}
-		})
-	}
+		}
+		ui.Spacer(c)
+		if r.Grid != nil && r.OnSaveBatch != nil {
+			switch r.Grid.State {
+			case resultgrid.StateSaved:
+				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "已保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.SuccessText)
+				})
+			default:
+				save := components.Button(c, "保存读数", components.ButtonPrimary)
+				save.Disabled(r.Grid.State == resultgrid.StateSaving)
+				if r.Grid.State == resultgrid.StateSaving {
+					ui.Text(c, "保存中…").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+				}
+				if save.Clicked() {
+					if err := r.Grid.CommitPendingEdit(); err != nil {
+						r.Grid.Error = err.Error()
+					} else {
+						r.OnSaveBatch(r.Grid.Cells)
+					}
+				}
+			}
+		}
+	})
 
 	switch r.Kind {
 	case ViewPlate:
@@ -132,7 +168,7 @@ func (r *RecordingView) availableViews() []ViewKind {
 	} else if len(r.Task.Actual.Measurements) > 0 {
 		out = append(out, ViewTable)
 	}
-	if len(r.Assets) > 0 {
+	if len(r.Assets) > 0 || r.OnLinkFile != nil {
 		out = append(out, ViewGallery)
 	}
 	if len(out) == 0 {
@@ -160,31 +196,80 @@ func (r *RecordingView) renderPlate(c *ui.Context) {
 		ui.Text(c, "当前任务没有孔板记录 schema。").FontSize(12).TextColor(c.Theme().TextMuted)
 		return
 	}
-	ui.Text(c, fmt.Sprintf("%s · %d × %d · 冻结设计",
-		r.Grid.Schema.ID, r.Grid.Rows(), r.Grid.Columns())).
-		FontSize(11).TextColor(c.Theme().TextMuted)
-	resultgrid.View(c, r.Grid, resultgrid.Options{FullWidth: true})
+	resultgrid.PlateView(c, r.Grid)
 }
 
-// renderTable draws a rectangular table view (bulk paste supported by grid).
+// renderTable draws a table projection of the same Core-backed grid. It never
+// becomes a second authoritative dataset: identity and values come from Grid.
 func (r *RecordingView) renderTable(c *ui.Context) {
 	t := c.Theme()
-	if len(r.Task.Actual.Measurements) == 0 {
-		ui.Text(c, "尚无已记录的实际读数。").FontSize(12).TextColor(t.TextMuted)
+	if r.Grid == nil {
+		if len(r.Task.Actual.Measurements) == 0 {
+			ui.Text(c, "尚无已记录的实际读数。").FontSize(12).TextColor(t.TextMuted)
+			return
+		}
+		ui.Grid(c).Columns(4).Gap(8).Children(func() {
+			ui.Text(c, "样本").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "字段").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "数值").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "状态").FontSize(11).Bold().TextColor(t.TextMuted)
+			for _, m := range r.Task.Actual.Measurements {
+				ui.Text(c, m.SampleID).FontSize(12).TextColor(t.Text)
+				ui.Text(c, m.Field).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, m.Value+" "+m.Unit).FontSize(12).FontFeatures("tnum")
+				status := m.Status
+				if status == "" {
+					status = "raw"
+				}
+				ui.Text(c, status).FontSize(11).TextColor(t.TextMuted)
+			}
+		})
 		return
 	}
-	ui.Grid(c).Columns(4).Gap(8).Children(func() {
+	g := r.Grid
+	ui.Grid(c).Columns(7).Gap(8).Children(func() {
+		ui.Text(c, "井位").FontSize(11).Bold().TextColor(t.TextMuted)
 		ui.Text(c, "样本").FontSize(11).Bold().TextColor(t.TextMuted)
+		ui.Text(c, "分组").FontSize(11).Bold().TextColor(t.TextMuted)
+		ui.Text(c, "重复").FontSize(11).Bold().TextColor(t.TextMuted)
 		ui.Text(c, "字段").FontSize(11).Bold().TextColor(t.TextMuted)
 		ui.Text(c, "数值").FontSize(11).Bold().TextColor(t.TextMuted)
 		ui.Text(c, "状态").FontSize(11).Bold().TextColor(t.TextMuted)
-		for _, m := range r.Task.Actual.Measurements {
-			ui.Text(c, m.SampleID).FontSize(12).TextColor(t.Text)
-			ui.Text(c, m.Field).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, m.Value+" "+m.Unit).FontSize(12).FontFeatures("tnum")
-			status := m.Status
+		for _, cell := range g.Cells {
+			rr, cc := cell.Row, cell.Column
+			well := ""
+			if rr < len(g.Schema.RowLabels) && cc < len(g.Schema.ColumnLabels) {
+				well = g.Schema.RowLabels[rr] + g.Schema.ColumnLabels[cc]
+			}
+			ui.Text(c, well).FontSize(12).TextColor(t.Text)
+			ui.Text(c, cell.SampleID).FontSize(12).TextColor(t.Text)
+			ui.Text(c, cell.Group).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, fmt.Sprintf("%d", cell.Replicate)).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, cell.Field).FontSize(12).TextColor(t.TextMuted)
+			input, ok := g.InputAt(rr, cc)
+			if !ok {
+				continue
+			}
+			e := ui.TextInput(c, input).Width(90).Padding(4).Placeholder("—")
+			if e.Changed() {
+				v, err := strconv.ParseFloat(*input, 64)
+				if *input == "" {
+					cell.Value = nil
+					cell.Status = "missing"
+					_ = g.SetCell(cell)
+				} else if err != nil {
+					g.Error = "Invalid numeric value"
+					g.State = resultgrid.StateError
+				} else {
+					cell.Value = &v
+					cell.Status = "raw"
+					g.Error = ""
+					_ = g.SetCell(cell)
+				}
+			}
+			status := cell.Status
 			if status == "" {
-				status = "raw"
+				status = "missing"
 			}
 			ui.Text(c, status).FontSize(11).TextColor(t.TextMuted)
 		}
@@ -201,6 +286,9 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 			if len(r.Assets) > 0 {
 				ui.Text(c, fmt.Sprintf("%d 个文件 · 本地引用", len(r.Assets))).
 					FontSize(11).TextColor(t.TextMuted)
+			}
+			if r.OnLinkFile != nil && components.Button(c, "关联本地文件", components.ButtonSecondary).Clicked() {
+				r.OnLinkFile(LinkedAsset{LinkedTo: AssetLink{TaskKey: r.Task.TaskKey}})
 			}
 		})
 		if len(r.Assets) == 0 {

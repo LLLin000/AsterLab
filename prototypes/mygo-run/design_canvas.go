@@ -147,7 +147,12 @@ func (a *app) ensureDesignCanvas(doc *asterdoc.Document) {
 	}
 	ed.BeforeDelete = func(string) bool { return false }
 	ed.OnChange = func() { a.syncCanvasEdges(ed) }
-	positions := a.designNodePos
+	positions := map[string]workflow.Position{}
+	if id := a.currentDesignID(); id != "" {
+		if saved := a.designLayouts[id]; saved != nil {
+			positions = saved
+		}
+	}
 	if positions == nil {
 		positions = map[string]workflow.Position{}
 	}
@@ -309,10 +314,17 @@ func (a *app) syncCanvasEdges(ed *workflow.Editor) {
 		}
 	}
 	// Node moves are layout-only; remember them for the next rebuild.
-	a.designNodePos = map[string]workflow.Position{}
+	layout := map[string]workflow.Position{}
 	for _, node := range ed.Doc.Nodes {
-		a.designNodePos[node.ID] = node.Pos
+		layout[node.ID] = node.Pos
 	}
+	if a.designLayouts == nil {
+		a.designLayouts = map[string]map[string]workflow.Position{}
+	}
+	if id := a.currentDesignID(); id != "" {
+		a.designLayouts[id] = layout
+	}
+	a.saveSession()
 	if len(newEdges) == 0 {
 		return
 	}
@@ -499,7 +511,7 @@ func (a *app) canvasInspector(c *ui.Context, doc *asterdoc.Document) {
 		ui.Row(c).FillWidth().Wrap().Gap(t.Space(.5)).Children(func() {
 			for _, module := range doc.Modules {
 				switch module.Kind {
-				case "step", "experiment", "group", "assay", "workflow", "plate", "plate96", "reference":
+				case "step", "experiment", "group", "assay", "workflow", "plate", "reference":
 					continue
 				}
 				module := module

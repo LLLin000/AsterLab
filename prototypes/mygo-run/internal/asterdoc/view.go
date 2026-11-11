@@ -3,6 +3,7 @@ package asterdoc
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -22,6 +23,7 @@ type View struct {
 	Doc              *Document
 	Registry         *Registry
 	Mode             Mode
+	Density          Density
 	RunID            string
 	DocumentRevision string
 	ReadOnly         bool
@@ -43,20 +45,23 @@ type View struct {
 	// editor state, not document state.
 	ExpandedPlate string
 	// moduleDrafts stores editable text per module/field across frames.
-	moduleDrafts    map[string]map[string]*string
-	moduleDraftBool map[string]map[string]*bool
-	moduleOriginals map[string]map[string]any
-	ExpandedWells   []string
-	PlateZoom       float32
-	marqueeActive   bool
-	marqueeRow      int
-	marqueeCol      int
-	marqueeBase     []string
-	gridDrag        ui.Point
-	gridDragging    bool
-	gridStart       ui.Point
-	gridLast        ui.Point
-	gridBase        []string
+	moduleDrafts        map[string]map[string]*string
+	moduleDraftBool     map[string]map[string]*bool
+	moduleOriginals     map[string]map[string]any
+	ExpandedWells       []string
+	PlateSampleID       string
+	PlateReplicateStart string
+	PlateSampleError    string
+	PlateZoom           float32
+	marqueeActive       bool
+	marqueeRow          int
+	marqueeCol          int
+	marqueeBase         []string
+	gridDrag            ui.Point
+	gridDragging        bool
+	gridStart           ui.Point
+	gridLast            ui.Point
+	gridBase            []string
 }
 
 // Can reports whether the host granted one business command.
@@ -99,35 +104,22 @@ func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind st
 		v.rendererGap(c, kind, schema, "")
 		return
 	}
-	if key, declared := spec.Descriptor.RendererKey(v.Mode); declared {
-		if !registry.HasRenderer(key) {
-			v.rendererGap(c, kind, schema, key)
-			return
-		}
-	} else {
+	key, declared := spec.Descriptor.RendererKey(v.Mode)
+	if !declared {
 		v.rendererGap(c, kind, schema, "")
 		return
 	}
-	if v.Mode == ModeDesign && v.Can(PermDocumentEdit) && !v.ReadOnly &&
-		hasCapability(spec.Descriptor, "generic-editor") {
-		v.genericModuleEditor(c, moduleID, data)
+	if !registry.HasRenderer(key) {
+		v.rendererGap(c, kind, schema, key)
 		return
 	}
-	if spec.Render == nil {
-		v.rendererGap(c, kind, schema, "")
+	// Generic editor is a registered renderer capability; dispatch by key only.
+	fn, _ := registry.Renderer(key)
+	if fn == nil {
+		v.rendererGap(c, kind, schema, key)
 		return
 	}
-	spec.Render(v, c, data)
-}
-
-// hasCapability reports whether a module declares one capability.
-func hasCapability(d Descriptor, capability string) bool {
-	for _, c := range d.Capabilities {
-		if c == capability {
-			return true
-		}
-	}
-	return false
+	fn(v, c, data)
 }
 
 // rendererGap reports a declared-but-unavailable or undeclared renderer as a
@@ -153,6 +145,7 @@ func (v *View) moduleError(c *ui.Context, err error) {
 			TextColor(t.Danger)
 	})
 }
+
 // RenderModule renders one already-parsed module through the same surface
 // checks used for fenced AsterML blocks.
 func (v *View) RenderModule(c *ui.Context, kind string, schema int, data map[string]any) {
@@ -173,8 +166,8 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 		counts[group]++
 		wells[well] = plateui.WellState{Group: group}
 	}
-	// Inline modules are previews only. All editing happens in the enlarged
-	// floating plate, so 6/12/24/96/384 behave identically.
+	// The 96-well editor previews inline; editing happens in the enlarged overlay.
+	// Other formats use genericPlate below and remain read-only.
 	ui.Row(c).FillWidth().Children(func() {
 		ui.Column(c).FillWidth().Gap(t.Space(1.5)).Padding(t.Space(3)).
 			Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
@@ -269,6 +262,42 @@ func (v *View) plateOverlay(c *ui.Context) {
 		} else {
 			_ = v.assign(v.ExpandedWells, "")
 		}
+		v.ExpandedWells = nil
+	}
+
+	assignSample := func() {
+		if len(v.ExpandedWells) == 0 {
+			v.PlateSampleError = "请先选择孔位"
+			return
+		}
+		start := 0
+		rawStart := strings.TrimSpace(v.PlateReplicateStart)
+		if rawStart != "" {
+			n, err := strconv.Atoi(rawStart)
+			if err != nil || n <= 0 {
+				v.PlateSampleError = "技术重复编号必须为正整数"
+				return
+			}
+			start = n
+		}
+		samples, replicates, err := ApplyPlateSamples(geometry, plate.Groups, plate.Samples, plate.Replicates, v.ExpandedWells, v.PlateSampleID, start)
+		if err != nil {
+			v.PlateSampleError = err.Error()
+			return
+		}
+		props := map[string]any{"samples": samples, "replicates": replicates}
+		if v.OnUpdateModule != nil {
+			v.OnUpdateModule(plate.ID, props)
+		} else if v.Doc != nil {
+			if _, err := v.Doc.UpdateModule(plate.ID, props); err != nil {
+				v.PlateSampleError = err.Error()
+				return
+			}
+			if v.OnChange != nil {
+				v.OnChange(v.Doc.Source)
+			}
+		}
+		v.PlateSampleError = ""
 		v.ExpandedWells = nil
 	}
 	ui.Overlay(c, func() {
@@ -471,6 +500,18 @@ func (v *View) plateOverlay(c *ui.Context) {
 					}
 					if canEdit {
 						ui.Box(c).Width(1).Height(18).Background(t.Border)
+						ui.TextInput(c, &v.PlateSampleID).Placeholder("样本 ID")
+						ui.TextInput(c, &v.PlateReplicateStart).Placeholder("起始技术重复 (可选)")
+						applySample := components.IconButton(c, lucide.CheckCheck(), "分配样本", components.IconButtonPlain)
+						applySample.Disabled(len(v.ExpandedWells) == 0)
+						if applySample.Clicked() {
+							assignSample()
+						}
+						if v.PlateSampleError != "" {
+							ui.Text(c, v.PlateSampleError).FontSize(t.Rem(.7)).
+								TextColor(t.Danger)
+						}
+						ui.Box(c).Width(1).Height(18).Background(t.Border)
 						assignBtn := components.IconButton(c, lucide.CheckCheck(), "分配到 "+v.SelectedGroup, components.IconButtonPlain)
 						assignBtn.Disabled(len(v.ExpandedWells) == 0)
 						if assignBtn.Clicked() {
@@ -499,6 +540,109 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// ApplyPlateSamples maps one sample ID onto the selected wells. A positive
+// startReplicate assigns successive replicate numbers in deterministic
+// well order; zero leaves replicate labels absent. Existing mappings for
+// other wells are preserved.
+func ApplyPlateSamples(geometry Geometry, groups map[string][]string, samples map[string]string, replicates map[string]int, wells []string, sampleID string, startReplicate int) (map[string]string, map[string]int, error) {
+	sampleID = strings.TrimSpace(sampleID)
+	if sampleID == "" {
+		return nil, nil, fmt.Errorf("sample ID cannot be blank")
+	}
+	if startReplicate < 0 {
+		return nil, nil, fmt.Errorf("replicate start must be positive")
+	}
+	groupByWell := map[string]string{}
+	for group, assigned := range groups {
+		for _, well := range assigned {
+			groupByWell[strings.ToUpper(strings.TrimSpace(well))] = strings.TrimSpace(group)
+		}
+	}
+	outSamples := make(map[string]string, len(samples)+len(wells))
+	for well, id := range samples {
+		outSamples[strings.ToUpper(strings.TrimSpace(well))] = strings.TrimSpace(id)
+	}
+	outReplicates := make(map[string]int, len(replicates)+len(wells))
+	for well, n := range replicates {
+		outReplicates[strings.ToUpper(strings.TrimSpace(well))] = n
+	}
+	selected := make([]string, 0, len(wells))
+	seen := map[string]bool{}
+	for _, well := range wells {
+		well = strings.ToUpper(strings.TrimSpace(well))
+		if well == "" {
+			return nil, nil, fmt.Errorf("well ID cannot be blank")
+		}
+		if seen[well] {
+			continue
+		}
+		seen[well] = true
+		selected = append(selected, well)
+	}
+	sort.Slice(selected, func(i, j int) bool {
+		return wellLess(geometry, selected[i], selected[j])
+	})
+	if startReplicate > 0 && len(selected) > 0 {
+		maxInt := int(^uint(0) >> 1)
+		if startReplicate > maxInt-(len(selected)-1) {
+			return nil, nil, fmt.Errorf("replicate range overflows integer")
+		}
+	}
+	selectedSet := make(map[string]bool, len(selected))
+	for _, well := range selected {
+		selectedSet[well] = true
+	}
+	replicateOwner := map[string]string{}
+	for well, replicate := range outReplicates {
+		if selectedSet[well] || replicate < 1 || outSamples[well] == "" {
+			continue
+		}
+		replicateOwner[outSamples[well]+"\x00"+strconv.Itoa(replicate)] = well
+	}
+	for i, well := range selected {
+		if !validWell(well, geometry) {
+			return nil, nil, fmt.Errorf("invalid well %q", well)
+		}
+		if _, ok := groupByWell[well]; !ok {
+			return nil, nil, fmt.Errorf("well %s has no group assignment", well)
+		}
+		outSamples[well] = sampleID
+		if startReplicate > 0 {
+			replicate := startReplicate + i
+			key := sampleID + "\x00" + strconv.Itoa(replicate)
+			if previous, exists := replicateOwner[key]; exists {
+				return nil, nil, fmt.Errorf("sample %s replicate %d is already assigned to %s", sampleID, replicate, previous)
+			}
+			replicateOwner[key] = well
+			outReplicates[well] = replicate
+		} else {
+			delete(outReplicates, well)
+		}
+	}
+	return outSamples, outReplicates, nil
+}
+
+func wellLess(geometry Geometry, a, b string) bool {
+	ra, ca := wellRowCol(a)
+	rb, cb := wellRowCol(b)
+	if ra != rb {
+		return ra < rb
+	}
+	return ca < cb
+}
+
+func wellRowCol(well string) (int, int) {
+	if len(well) < 2 {
+		return 0, 0
+	}
+	row := int(well[0] - 'A')
+	col := 0
+	for _, r := range well[1:] {
+		col = col*10 + int(r-'0')
+	}
+	return row, col
 }
 
 func removeString(values []string, target string) []string {
@@ -588,11 +732,19 @@ func (v *View) assign(wells []string, group string) error {
 	if !v.Can(PermDocumentEdit) {
 		return fmt.Errorf("permission %s is not granted", PermDocumentEdit)
 	}
-	if v.Doc == nil || len(v.Doc.Modules) == 0 {
+	if v.Doc == nil {
 		return fmt.Errorf("document has no plate module")
 	}
-	module := v.Doc.Modules[0]
-	if module.Plate == nil {
+	var module *Module
+	for i := range v.Doc.Modules {
+		candidate := &v.Doc.Modules[i]
+		if candidate.Plate == nil || (v.ExpandedPlate != "" && candidate.ID != v.ExpandedPlate) {
+			continue
+		}
+		module = candidate
+		break
+	}
+	if module == nil {
 		return fmt.Errorf("document has no plate module")
 	}
 	groups := map[string][]string{}
@@ -857,6 +1009,90 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 			}
 		}
 	})
+}
+
+// GenericModuleSummary is the shared, read-only renderer for Run surfaces.
+// Hosts can request compact, inspector, or full density without changing data.
+func (v *View) GenericModuleSummary(c *ui.Context, data map[string]any) {
+	kind, _ := data["kind"].(string)
+	schema := 1
+	switch value := data["schema"].(type) {
+	case int:
+		schema = value
+	case int64:
+		schema = int(value)
+	case float64:
+		schema = int(value)
+	}
+	registry := v.Registry
+	if registry == nil {
+		registry = BuiltinRegistry()
+	}
+	spec, ok := registry.Lookup(kind, schema)
+	if !ok {
+		v.moduleError(c, fmt.Errorf("no Run summary for %s@%d", kind, schema))
+		return
+	}
+	density := v.Density
+	if density == "" {
+		density = DensityCompact
+	}
+	fields := make([]Port, 0, len(spec.Inputs))
+	for _, input := range spec.Inputs {
+		if input.Name == "kind" || input.Name == "id" || input.Name == "schema" {
+			continue
+		}
+		if value, exists := data[input.Name]; exists && value != nil {
+			fields = append(fields, input)
+		}
+	}
+	t := c.Theme()
+	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(2)).Radius(t.Space(1)).
+		Background(t.Surface).Border(1, t.Border).Children(func() {
+		ui.Text(c, spec.Title).FontSize(t.Rem(.9)).Bold().TextColor(t.Text)
+		if len(fields) == 0 {
+			ui.Text(c, "暂无可预览的参数").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			return
+		}
+		limit := len(fields)
+		if density == DensityCompact && limit > 3 {
+			limit = 3
+		}
+		for _, input := range fields[:limit] {
+			value := summaryFieldValue(data[input.Name])
+			if value == "" {
+				continue
+			}
+			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, input.Name).FontSize(t.Rem(.72)).TextColor(t.TextMuted).Width(112)
+				ui.Text(c, value).FontSize(t.Rem(.78)).TextColor(t.Text)
+			})
+			if density == DensityFull && input.Description != "" {
+				ui.Text(c, input.Description).FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+			}
+		}
+		if limit < len(fields) {
+			ui.Text(c, fmt.Sprintf("另有 %d 项参数", len(fields)-limit)).
+				FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+		}
+	})
+}
+
+func summaryFieldValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		if quantity, ok := typed["value"]; ok {
+			unit, _ := typed["unit"].(string)
+			return strings.TrimSpace(fmt.Sprint(quantity) + " " + unit)
+		}
+		return "结构化数据"
+	case []any:
+		return fmt.Sprintf("%d 项", len(typed))
+	default:
+		return fmt.Sprint(value)
+	}
 }
 
 func (v *View) GenericEditor(c *ui.Context, moduleID string, data map[string]any) {

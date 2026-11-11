@@ -1,6 +1,7 @@
 package runworkspace
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -38,11 +39,11 @@ type PlannedCheck struct {
 
 // ModuleRef is an SDK module bound to this step/task.
 type ModuleRef struct {
-	Kind    string
-	ID      string
-	Schema  int
-	Title   string
-	Role    string
+	Kind   string
+	ID     string
+	Schema int
+	Title  string
+	Role   string
 }
 
 // MeasurementView is a single actual measurement.
@@ -81,11 +82,11 @@ type CheckViewModel struct {
 
 // PlannedStep is the frozen plan for a step/task (read-only, from AsterDoc).
 type PlannedStep struct {
-	StepID      string
-	StepTitle   string
-	AssayID     string
-	Timepoint   string
-	Path        string
+	StepID    string
+	StepTitle string
+	AssayID   string
+	Timepoint string
+	Path      string
 
 	Parameters []PlannedParameter
 	Checks     []PlannedCheck
@@ -96,6 +97,7 @@ type PlannedStep struct {
 type RunTaskViewModel struct {
 	TaskKey   string
 	StepID    string
+	StepPath  string
 	StepTitle string
 	Timepoint string
 	AssayID   string
@@ -113,12 +115,12 @@ type RunTaskViewModel struct {
 
 // RunWorkspaceViewModel is the top-level view model for a run execution surface.
 type RunWorkspaceViewModel struct {
-	RunID     string
-	Title     string
-	Revision  uint64
-	Status    string
+	RunID    string
+	Title    string
+	Revision uint64
+	Status   string
 
-	Steps    []*RunTaskViewModel
+	Steps     []*RunTaskViewModel
 	TaskByKey map[string]*RunTaskViewModel
 
 	Selected *RunTaskViewModel
@@ -126,10 +128,10 @@ type RunWorkspaceViewModel struct {
 
 // moduleUse is a parsed step@2.uses entry.
 type moduleUse struct {
-	Kind  string
-	ID    string
+	Kind   string
+	ID     string
 	Schema int
-	Role  string
+	Role   string
 }
 
 // parseAsterDocSource parses the frozen AsterDoc source YAML to extract
@@ -168,16 +170,16 @@ func parseAsterDocSource(source string) (map[string]map[string]any, map[string][
 			}
 			if refDoc, ok := docModules[ref]; ok {
 				usesList = append(usesList, moduleUse{
-					Kind:  textValue(refDoc, "kind"),
-					ID:    ref,
+					Kind:   textValue(refDoc, "kind"),
+					ID:     ref,
 					Schema: intVal(refDoc["schema"]),
-					Role:  role,
+					Role:   role,
 				})
 			} else {
 				usesList = append(usesList, moduleUse{
-					Kind:  "",
-					ID:    ref,
-					Role:  role,
+					Kind: "",
+					ID:   ref,
+					Role: role,
 				})
 			}
 		}
@@ -274,6 +276,18 @@ func aggregateStatus(tasks []*RunTaskViewModel) TaskStatus {
 	return TaskStatusPending
 }
 
+// taskPath extracts the protocol step path carried by a frozen task key. The
+// key is a JSON object; legacy keys without a path stay empty.
+func taskPath(key string) string {
+	var parsed struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(key), &parsed) != nil {
+		return ""
+	}
+	return parsed.Path
+}
+
 // BuildViewModel constructs the run workspace view model from a frozen run
 // snapshot and its frozen AsterDoc.
 func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWorkspaceViewModel {
@@ -286,7 +300,7 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 	}
 
 	docModules := map[string]map[string]any{}
-	stepUses     := map[string][]moduleUse{}
+	stepUses := map[string][]moduleUse{}
 	if doc != nil && doc.Source != "" {
 		docModules, stepUses = parseAsterDocSource(doc.Source)
 	}
@@ -295,9 +309,11 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 	for _, t := range snap.Tasks {
 		taskOrder = append(taskOrder, t.Key)
 
+		path := taskPath(t.Key)
 		vmTask := &RunTaskViewModel{
 			TaskKey:   t.Key,
 			StepID:    t.DesignStepID,
+			StepPath:  path,
 			StepTitle: t.Title,
 			Timepoint: t.Timepoint,
 			AssayID:   t.AssayID,
@@ -310,20 +326,20 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 
 		if uses, ok := stepUses[t.DesignStepID]; ok {
 			vmTask.Planned = &PlannedStep{
-				StepID:   t.DesignStepID,
+				StepID:    t.DesignStepID,
 				StepTitle: t.Title,
 				AssayID:   t.AssayID,
 				Timepoint: t.Timepoint,
-				Path:      "",
+				Path:      path,
 			}
 			for _, u := range uses {
 				if modData, ok := docModules[u.ID]; ok {
 					vmTask.Modules = append(vmTask.Modules, ModuleRef{
-						Kind:    u.Kind,
-						ID:      u.ID,
-						Schema:  u.Schema,
-						Title:   textValue(modData, "title"),
-						Role:    u.Role,
+						Kind:   u.Kind,
+						ID:     u.ID,
+						Schema: u.Schema,
+						Title:  textValue(modData, "title"),
+						Role:   u.Role,
 					})
 					for _, p := range plannedParameters(modData) {
 						vmTask.Planned.Parameters = append(vmTask.Planned.Parameters, p)

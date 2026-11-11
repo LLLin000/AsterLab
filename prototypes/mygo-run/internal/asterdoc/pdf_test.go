@@ -90,7 +90,7 @@ func TestExportFrozenPDFUsesVerifiedFrozenContent(t *testing.T) {
 }
 
 func TestMarkdownOutsideAsterLabFences(t *testing.T) {
-	source := "# 标题\n\n正文段落。\n\n```asterlab\nkind: plate96\nid: p1\nschema: 1\ngroups:\n  a: [A1]\n```\n\n尾注。\n"
+	source := "# 标题\n\n正文段落。\n\n```asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\ngroups: {}\n```\n\n尾注。\n"
 	out := markdownOutsideAsterLabFences(source)
 	if !strings.Contains(out, "# 标题") {
 		t.Fatal("heading should be outside fences")
@@ -98,7 +98,7 @@ func TestMarkdownOutsideAsterLabFences(t *testing.T) {
 	if !strings.Contains(out, "尾注。") {
 		t.Fatal("trailing prose should be outside fences")
 	}
-	if strings.Contains(out, "kind: plate96") {
+	if strings.Contains(out, "kind: plate") {
 		t.Fatal("asterlab fence should be excluded")
 	}
 }

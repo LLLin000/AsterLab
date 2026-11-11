@@ -36,7 +36,7 @@ func wellID(row, col int) string {
 	return fmt.Sprintf("%s%d", rowLabels[row], col+1)
 }
 
-func groupColor(group string, dark bool) ui.Color {
+func GroupColor(group string, dark bool) ui.Color {
 	g := strings.ToLower(strings.TrimSpace(group))
 	switch {
 	case g == "":
@@ -144,7 +144,7 @@ func View(c *ui.Context, props Props) {
 					if assigned && well.Ambiguous {
 						fill = t.Warning
 					} else if assigned {
-						fill = groupColor(well.Group, dark)
+						fill = GroupColor(well.Group, dark)
 					}
 					p.Fill(wr, fill, wellSize/2)
 					p.Stroke(wr, t.Border, wellSize/2, 1)
@@ -232,7 +232,7 @@ func View(c *ui.Context, props Props) {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				for _, group := range groups {
 					ui.Row(c).Gap(3).AlignItems(ui.Center).Children(func() {
-						ui.Box(c).Size(7, 7).Radius(4).Background(groupColor(group, dark))
+						ui.Box(c).Size(7, 7).Radius(4).Background(GroupColor(group, dark))
 						ui.Text(c, fmt.Sprintf("%s %d", group, groupCounts[group])).FontSize(th.Rem(.75)).TextColor(t.TextMuted)
 					})
 				}

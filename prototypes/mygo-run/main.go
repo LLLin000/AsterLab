@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"asterlab-mygo-prototype/internal/assays"
+	"asterlab-mygo-prototype/internal/assets"
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/blockui"
@@ -62,6 +63,9 @@ type app struct {
 	showFrozenDoc       bool
 	designDoc           *runs.AsterDocSnapshot
 	designView          *asterdoc.View
+	assetRoots          map[string]string
+	runAssets           []runs.Asset
+	runViewKinds        map[string]runworkspace.ViewKind
 	designDocErr        string
 	projects            []runs.ProjectSummary
 	protocols           []runs.ProtocolSummary
@@ -84,7 +88,7 @@ type app struct {
 	designTab           int
 	designCanvas        *workflow.Editor
 	designCanvasSource  string
-	designNodePos       map[string]workflow.Position
+	designLayouts       map[string]map[string]workflow.Position
 	designSelected      string
 	canvasTitle         string
 	canvasAssay         string
@@ -248,8 +252,12 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 	if err := state.ConflictIfDifferent(a.snap, snap); err != nil {
 		a.err = err.Error()
 	}
+	previousRunID := a.snap.RunID
 	a.snap = newSnap
 	a.loadFrozenAsterDoc()
+	if previousRunID != newSnap.RunID {
+		a.loadRunAssets()
+	}
 	a.refreshRunWorkspace()
 	a.rememberRun(newSnap)
 	if a.ws != nil {
@@ -272,6 +280,176 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 			a.loadNotebook()
 		}
 	}
+}
+
+func assetRootID(designID string) string {
+	return "design-data-" + strings.TrimSpace(designID)
+}
+
+func localAssetFromRun(asset runs.Asset) assets.Asset {
+	return assets.Asset{
+		ID: asset.ID, RootID: asset.RootID, RelativePath: asset.RelativePath,
+		MediaType: assets.MediaType(asset.MediaType), Size: asset.Size,
+		ModTime: asset.ModTime, SHA256: asset.SHA256,
+		Availability: assets.Availability(asset.Availability),
+		Link:         assets.Link{RunID: asset.Link.RunID, TaskKey: asset.Link.TaskKey, SampleID: asset.Link.SampleID},
+		LinkedAt:     asset.LinkedAt, ActorID: asset.ActorID,
+	}
+}
+
+func runAssetFromLocal(asset assets.Asset) runs.Asset {
+	return runs.Asset{
+		ID: asset.ID, RootID: asset.RootID, RelativePath: asset.RelativePath,
+		MediaType: string(asset.MediaType), Size: asset.Size, ModTime: asset.ModTime,
+		SHA256: asset.SHA256, Availability: string(asset.Availability),
+		Link:     runs.AssetLink{RunID: asset.Link.RunID, TaskKey: asset.Link.TaskKey, SampleID: asset.Link.SampleID},
+		LinkedAt: asset.LinkedAt, ActorID: asset.ActorID,
+	}
+}
+
+func localAssetFromView(asset runworkspace.LinkedAsset) assets.Asset {
+	availability := assets.Unavailable
+	if asset.Available {
+		availability = assets.Available
+	}
+	return assets.Asset{
+		ID: asset.AssetID, RootID: asset.RootID, RelativePath: asset.RelativePath,
+		MediaType: assets.MediaType(asset.MediaType), Size: asset.Size,
+		ModTime: asset.ModTime, SHA256: asset.SHA256, Availability: availability,
+		Link: assets.Link{RunID: asset.LinkedTo.RunID, TaskKey: asset.LinkedTo.TaskKey, SampleID: asset.LinkedTo.SampleID},
+	}
+}
+
+func (a *app) loadRunAssets() {
+	if a.snap.RunID == "" || a.runSvc == nil {
+		a.runAssets = nil
+		return
+	}
+	linked, err := a.runSvc.ListAssetLinks(context.Background(), a.snap.RunID)
+	if err != nil {
+		a.err = state.MapError(err).Error()
+		return
+	}
+	a.runAssets = linked
+}
+
+func (a *app) runAssetsForTask(taskKey string) []runworkspace.LinkedAsset {
+	out := []runworkspace.LinkedAsset{}
+	roots := assets.Roots(a.assetRoots)
+	for _, linked := range a.runAssets {
+		if linked.Link.TaskKey != taskKey {
+			continue
+		}
+		local := localAssetFromRun(linked)
+		path, err := roots.Resolve(local)
+		available := false
+		if err == nil {
+			available, _ = assets.Verify(local, path, false)
+		}
+		out = append(out, runworkspace.LinkedAsset{
+			AssetID: linked.ID, RootID: linked.RootID, RelativePath: linked.RelativePath,
+			MediaType: linked.MediaType, Size: linked.Size, ModTime: linked.ModTime,
+			SHA256: linked.SHA256, Available: available,
+			LinkedTo: runworkspace.AssetLink{
+				RunID: linked.Link.RunID, TaskKey: linked.Link.TaskKey, SampleID: linked.Link.SampleID,
+			},
+		})
+	}
+	return out
+}
+
+func (a *app) openRunAsset(asset runworkspace.LinkedAsset) error {
+	local := localAssetFromView(asset)
+	path, err := assets.Roots(a.assetRoots).Resolve(local)
+	if err != nil {
+		return err
+	}
+	if ok, reason := assets.Verify(local, path, true); !ok {
+		return fmt.Errorf("文件校验失败：%s", reason)
+	}
+	go mygo.Shell.OpenPath(path)
+	return nil
+}
+
+func (a *app) relocateRunAsset(asset runworkspace.LinkedAsset) error {
+	local := localAssetFromView(asset)
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent: mygo.FocusedWindow(), Title: "重新定位本地数据根目录",
+		DefaultPath: a.assetRoots[asset.RootID], Directory: true,
+	})
+	if err != nil || len(paths) == 0 {
+		return err
+	}
+	roots := assets.Roots(a.assetRoots)
+	roots[asset.RootID] = paths[0]
+	path, err := roots.Resolve(local)
+	if err != nil {
+		return err
+	}
+	if ok, reason := assets.Verify(local, path, true); !ok {
+		return fmt.Errorf("文件校验失败：%s", reason)
+	}
+	if a.assetRoots == nil {
+		a.assetRoots = map[string]string{}
+	}
+	a.assetRoots[asset.RootID] = paths[0]
+	a.saveSession()
+	return nil
+}
+
+func (a *app) linkRunAsset(taskKey string) error {
+	if a.runSvc == nil || a.snap.RunID == "" || taskKey == "" {
+		return fmt.Errorf("当前没有可关联文件的 Run 任务")
+	}
+	if strings.TrimSpace(a.snap.DesignID) == "" {
+		return fmt.Errorf("当前 Run 没有关联设计")
+	}
+	rootID := assetRootID(a.snap.DesignID)
+	rootDir := a.assetRoots[rootID]
+	info, statErr := os.Stat(rootDir)
+	if rootDir == "" || statErr != nil || !info.IsDir() {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Parent: mygo.FocusedWindow(), Title: "选择实验数据根目录", Directory: true,
+		})
+		if err != nil {
+			return err
+		}
+		if len(paths) == 0 {
+			return nil
+		}
+		rootDir = paths[0]
+		if a.assetRoots == nil {
+			a.assetRoots = map[string]string{}
+		}
+		a.assetRoots[rootID] = rootDir
+		a.saveSession()
+	}
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent: mygo.FocusedWindow(), Title: "关联实验文件", DefaultPath: rootDir,
+	})
+	if err != nil || len(paths) == 0 {
+		return err
+	}
+	linked, err := assets.NewLink(rootID, rootDir, paths[0], assets.Link{
+		RunID: a.snap.RunID, TaskKey: taskKey,
+	}, "local-user", true)
+	if err != nil {
+		return err
+	}
+	saved, err := a.runSvc.SaveAssetLink(context.Background(), runs.AssetLinkInput{Asset: runAssetFromLocal(linked)})
+	if err != nil {
+		return state.MapError(err)
+	}
+	for i, old := range a.runAssets {
+		if old.RootID == saved.RootID && old.RelativePath == saved.RelativePath &&
+			old.Link.RunID == saved.Link.RunID && old.Link.TaskKey == saved.Link.TaskKey &&
+			old.Link.SampleID == saved.Link.SampleID {
+			a.runAssets[i] = saved
+			return nil
+		}
+	}
+	a.runAssets = append(a.runAssets, saved)
+	return nil
 }
 
 // loadFrozenAsterDoc loads the exact document revision frozen on the Run. The
@@ -559,12 +737,14 @@ func (a *app) selectRun(runID string) {
 }
 
 type workspaceSession struct {
-	Project   string `json:"project"`
-	DesignID  string `json:"design_id"`
-	RunID     string `json:"run_id"`
-	Page      string `json:"page"`
-	DesignTab int    `json:"design_tab"`
-	UpdatedAt string `json:"updated_at"`
+	Project       string                                  `json:"project"`
+	AssetRoots    map[string]string                       `json:"asset_roots,omitempty"`
+	CanvasLayouts map[string]map[string]workflow.Position `json:"canvas_layouts,omitempty"`
+	DesignID      string                                  `json:"design_id"`
+	RunID         string                                  `json:"run_id"`
+	Page          string                                  `json:"page"`
+	DesignTab     int                                     `json:"design_tab"`
+	UpdatedAt     string                                  `json:"updated_at"`
 }
 
 func workspaceDataDir() string {
@@ -598,7 +778,9 @@ func (a *app) saveSession() {
 	session := workspaceSession{
 		Project: a.shell.Project, DesignID: a.shell.Selected,
 		Page: a.shell.PageName(), DesignTab: a.designTab,
-		UpdatedAt: time.Now().Format(time.RFC3339),
+		CanvasLayouts: a.designLayouts,
+		AssetRoots:    a.assetRoots,
+		UpdatedAt:     time.Now().Format(time.RFC3339),
 	}
 	if a.snap.RunID != "" && a.shell.Page == shell.Run {
 		session.RunID = a.snap.RunID
@@ -623,6 +805,12 @@ func (a *app) restoreSession() {
 	var session workspaceSession
 	if json.Unmarshal(raw, &session) != nil {
 		return
+	}
+	if session.AssetRoots != nil {
+		a.assetRoots = session.AssetRoots
+	}
+	if session.CanvasLayouts != nil {
+		a.designLayouts = session.CanvasLayouts
 	}
 	if session.Project != "" {
 		a.shell.Project = session.Project
@@ -738,16 +926,18 @@ func (a *app) prepareGrid() {
 	}
 	a.ws.Error = ""
 	grid := resultgrid.New(schema, cells)
-	// Batch events are authoritative for restored grid cells; legacy
-	// measurements remain a fallback for pre-v1.1 runs.
+	// Batch events are scoped to one frozen task. Unscoped legacy batches
+	// cannot be assigned safely when a Run has multiple tasks.
+	hasSavedValues := false
 	for _, event := range a.snap.Events {
+		if event.TaskKey != task.Key {
+			continue
+		}
 		for _, c := range event.ResultCells {
 			cell, ok := grid.CellAt(c.Row, c.Column)
 			if !ok {
 				continue
 			}
-			// Keep the frozen design's sample/group identity when old batches
-			// predate explicit well mapping; only the measured value is replayed.
 			if c.SampleID != "" {
 				cell.SampleID = c.SampleID
 			}
@@ -759,17 +949,26 @@ func (a *app) prepareGrid() {
 			}
 			cell.Field, cell.Value, cell.Status = c.Field, c.Value, c.Status
 			_ = grid.SetCell(cell)
+			hasSavedValues = true
 		}
 	}
-	for _, measurement := range a.snap.Measurements {
-		for _, cell := range grid.Cells {
-			if cell.SampleID == measurement.SampleID && strings.EqualFold(cell.Field, measurement.Endpoint) {
-				value := measurement.Value
-				cell.Value, cell.Status = &value, "raw"
-				_ = grid.SetCell(cell)
-				break
+	// Old measurements do not carry task/timepoint IDs, so only replay them
+	// when the Run has one task and the target is unambiguous.
+	if len(a.snap.Tasks) == 1 {
+		for _, measurement := range a.snap.Measurements {
+			for _, cell := range grid.Cells {
+				if cell.SampleID == measurement.SampleID && strings.EqualFold(cell.Field, measurement.Endpoint) {
+					value := measurement.Value
+					cell.Value, cell.Status = &value, "raw"
+					_ = grid.SetCell(cell)
+					hasSavedValues = true
+					break
+				}
 			}
 		}
+	}
+	if hasSavedValues {
+		grid.State = resultgrid.StateSaved
 	}
 	a.ws.Grid = grid
 }
@@ -782,6 +981,7 @@ func (a *app) loadDesign(id string) {
 	a.designer.OnCreateRun = func(snap runs.RunSnapshot) {
 		// The new run replaces the previous run's revision/task state.
 		a.snap = snap
+		a.loadRunAssets()
 		a.guard = state.StaleGuard{}
 		if a.ws != nil {
 			view := toRunView(snap)
@@ -814,7 +1014,8 @@ func (a *app) loadDesign(id string) {
 	a.resetAsterDraftHistory()
 	a.designCanvas = nil
 	a.designCanvasSource = ""
-	a.designNodePos = nil
+	// Keep per-design layouts loaded from the session; selecting a design uses
+	// its own saved coordinates. (no-op)
 	a.designSelected = ""
 	if doc, docErr := a.designSvc.LoadAsterDoc(context.Background(), id); docErr != nil {
 		a.designDocErr = state.MapError(docErr).Error()
@@ -824,6 +1025,19 @@ func (a *app) loadDesign(id string) {
 	}
 	a.preflightOpen = false
 	a.preflightRisk = false
+}
+
+func (a *app) currentDesignID() string {
+	if a.designDoc != nil && a.designDoc.DesignID != "" {
+		return a.designDoc.DesignID
+	}
+	if a.designer != nil && a.designer.DesignID != "" {
+		return a.designer.DesignID
+	}
+	if a.shell != nil {
+		return a.shell.Selected
+	}
+	return ""
 }
 
 // preload fetches the design list and the Run named by ASTERLAB_RUN_ID before
@@ -1054,6 +1268,7 @@ func (a *app) applyRun(snap *runs.RunSnapshot, err error) {
 			a.ws.State = runui.StateEmpty
 			a.ws.Error = ""
 		}
+		a.runAssets = nil
 		a.runWSVM = runworkspace.BuildViewModel(a.snap, a.asterDoc)
 		if a.runWS != nil {
 			a.runWS.SyncFrom(a.runWSVM)
@@ -1380,6 +1595,7 @@ func (a *app) createRunFromDesignDoc() {
 	}
 	a.createRunErr = ""
 	a.snap = run
+	a.loadRunAssets()
 	a.guard = state.StaleGuard{}
 	if a.ws != nil {
 		view := toRunView(run)
@@ -1665,7 +1881,9 @@ func (a *app) applyNoteModeChange(old int) {
 
 func (a *app) insertPlateModule() {
 	a.noteAster = nil
-	block := fmt.Sprintf("\n```asterlab\nkind: plate96\nid: plate-%d\nschema: 1\nassay: cck8\ngroups:\n  group-a: []\n```\n", time.Now().UnixNano())
+	stamp := time.Now().UnixNano()
+	groupID := fmt.Sprintf("group-%d", stamp)
+	block := fmt.Sprintf("\n```asterlab\nkind: group\nid: %s\nschema: 1\nname: Control\nrole: control\n```\n\n```asterlab\nkind: plate\nid: plate-%d\nschema: 1\nformat: 96\ngroups:\n  %s: [A1]\n```\n", groupID, stamp, groupID)
 	if strings.TrimSpace(a.noteDraft) != "" {
 		a.noteDraft = strings.TrimRight(a.noteDraft, "\n") + "\n" + block
 	} else {
@@ -1787,11 +2005,12 @@ func main() {
 	designSvc, designErr := runs.NewDesignService()
 
 	a := &app{
-		page:      &page,
-		step:      &step,
-		runSvc:    runSvc,
-		designSvc: designSvc,
-		snap:      runs.RunSnapshot{Title: "加载中", Status: "loading"},
+		page:       &page,
+		step:       &step,
+		runSvc:     runSvc,
+		designSvc:  designSvc,
+		snap:       runs.RunSnapshot{Title: "加载中", Status: "loading"},
+		assetRoots: map[string]string{}, runViewKinds: map[string]runworkspace.ViewKind{},
 	}
 	if designErr != nil {
 		a.err = "设计服务：" + designErr.Error()
@@ -2083,13 +2302,44 @@ func main() {
 			if a.ws != nil && a.ws.Selected == task.TaskKey {
 				grid = a.ws.Grid
 			}
+			linkedAssets := a.runAssetsForTask(task.TaskKey)
+			kindKey := a.snap.RunID + "\x00" + task.TaskKey
+			if a.runViewKinds == nil {
+				a.runViewKinds = map[string]runworkspace.ViewKind{}
+			}
+			kind, ok := a.runViewKinds[kindKey]
+			if !ok {
+				kind = runworkspace.SelectKind(task, grid, linkedAssets)
+			}
 			rv := runworkspace.RecordingView{
-				Kind:   runworkspace.SelectKind(task, grid, nil),
-				Grid:   grid,
-				Assets: []runworkspace.LinkedAsset{},
-				Task:   task,
-				OnOpenAsset: func(asset runworkspace.LinkedAsset) {},
-				OnRelocate:  func(asset runworkspace.LinkedAsset) {},
+				Kind: kind, Grid: grid, Assets: linkedAssets, Task: task,
+				OnKindChange: func(kind runworkspace.ViewKind) {
+					a.runViewKinds[kindKey] = kind
+				},
+				OnOpenAsset: func(asset runworkspace.LinkedAsset) {
+					if err := a.openRunAsset(asset); err != nil {
+						c.AddToast(ui.Toast{Title: "无法打开文件", Description: err.Error(), Type: components.ToastError})
+					}
+				},
+				OnRelocate: func(asset runworkspace.LinkedAsset) {
+					if err := a.relocateRunAsset(asset); err != nil {
+						c.AddToast(ui.Toast{Title: "文件重新定位失败", Description: err.Error(), Type: components.ToastError})
+					} else if a.shell != nil {
+						a.shell.Invalidate()
+					}
+				},
+				OnLinkFile: func(_ runworkspace.LinkedAsset) {
+					if err := a.linkRunAsset(task.TaskKey); err != nil {
+						c.AddToast(ui.Toast{Title: "文件关联失败", Description: err.Error(), Type: components.ToastError})
+					} else if a.shell != nil {
+						a.shell.Invalidate()
+					}
+				},
+				OnSaveBatch: func(cells []resultgrid.Cell) {
+					if grid != nil {
+						cb.SaveBatch(grid.Schema, cells)
+					}
+				},
 			}
 			rv.Render(c)
 		},

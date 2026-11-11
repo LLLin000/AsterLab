@@ -1572,8 +1572,16 @@ fn run_creation_audit(design_data: &Value, revision: i64, version_id: &str) -> R
                         errors.push(format!("检测 {assay_id} 的孔位 {well_id} 无效，应为 A1–H12。"));
                         continue;
                     }
-                    if sample.is_empty() || group.is_empty() || replicate < 1 {
-                        errors.push(format!("检测 {assay_id} 的孔位 {well_id} 缺少样本、分组或重复编号。"));
+                    if group.is_empty() {
+                        errors.push(format!("检测 {assay_id} 的孔位 {well_id} 缺少分组。"));
+                    }
+                    if replicate < 0 || (replicate > 0 && sample.is_empty()) {
+                        errors.push(format!("检测 {assay_id} 的孔位 {well_id} 样本/重复编号无效。"));
+                    }
+                    if sample.is_empty() || replicate == 0 {
+                        warnings.push(format!(
+                            "检测 {assay_id} 的孔位 {well_id} 尚未指定完整的样本与技术重复映射。"
+                        ));
                     }
                     let key = format!("{well_id}@{timepoint}");
                     if !seen.insert(key) {
@@ -2025,9 +2033,9 @@ fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<String, CliErro
                 });
                 let sequence = target.as_sequence_mut()
                     .ok_or_else(|| CliError::input("plate group must be a list"))?;
-                for well in wells {
+                for well in &wells {
                     if !sequence.iter().any(|existing| existing.as_str() == Some(well.as_str())) {
-                        sequence.push(serde_yaml::Value::String(well));
+                        sequence.push(serde_yaml::Value::String(well.clone()));
                     }
                 }
                 let mut sorted: Vec<String> = sequence.iter()
@@ -2035,6 +2043,22 @@ fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<String, CliErro
                     .collect();
                 sorted.sort();
                 *sequence = sorted.into_iter().map(serde_yaml::Value::String).collect();
+            } else {
+                for field in ["samples", "replicates"] {
+                    let key = serde_yaml::Value::String(field.to_owned());
+                    if let Some(assignments) = mapping.get_mut(&key).and_then(|value| value.as_mapping_mut()) {
+                        let remove: Vec<serde_yaml::Value> = assignments
+                            .iter()
+                            .filter_map(|(key, _)| {
+                                let assigned = key.as_str()?.trim().to_uppercase();
+                                wells.iter().any(|well| well == &assigned).then(|| key.clone())
+                            })
+                            .collect();
+                        for key in remove {
+                            assignments.remove(&key);
+                        }
+                    }
+                }
             }
         }
         "connect_steps" | "disconnect_steps" => {
@@ -2798,6 +2822,80 @@ fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> 
                         }
                     }
                 }
+                let mut sample_by_well: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
+                if let Some(samples) = get("samples").and_then(|value| value.as_mapping()) {
+                    for (well_key, sample_value) in samples {
+                        let well = well_key.as_str().unwrap_or("").trim().to_uppercase();
+                        let valid = well.len() >= 2
+                            && well.as_bytes()[0].is_ascii_uppercase()
+                            && (well.as_bytes()[0] - b'A') < rows as u8
+                            && well[1..]
+                                .parse::<u32>()
+                                .map(|col| (1..=cols as u32).contains(&col))
+                                .unwrap_or(false);
+                        if !valid {
+                            return Err(CliError::input(format!(
+                                "sample well {well} is outside {rows}x{cols}"
+                            )));
+                        }
+                        if !seen.contains(&well) {
+                            return Err(CliError::input(format!(
+                                "sample well {well} has no group assignment"
+                            )));
+                        }
+                        let sample_id = sample_value.as_str().map(str::trim).unwrap_or("").to_owned();
+                        if sample_id.is_empty() {
+                            return Err(CliError::input(format!(
+                                "sample ID for well {well} cannot be empty"
+                            )));
+                        }
+                        if sample_by_well.contains_key(&well) {
+                            return Err(CliError::input(format!(
+                                "sample assignment for well {well} is duplicated"
+                            )));
+                        }
+                        sample_by_well.insert(well, sample_id);
+                    }
+                }
+                let mut seen_replicates: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
+                if let Some(replicates) = get("replicates").and_then(|value| value.as_mapping()) {
+                    for (well_key, replicate_value) in replicates {
+                        let well = well_key.as_str().unwrap_or("").trim().to_uppercase();
+                        let valid = well.len() >= 2
+                            && well.as_bytes()[0].is_ascii_uppercase()
+                            && (well.as_bytes()[0] - b'A') < rows as u8
+                            && well[1..]
+                                .parse::<u32>()
+                                .map(|col| (1..=cols as u32).contains(&col))
+                                .unwrap_or(false);
+                        if !valid {
+                            return Err(CliError::input(format!(
+                                "replicate well {well} is outside {rows}x{cols}"
+                            )));
+                        }
+                        let sample_id = sample_by_well.get(&well).cloned().unwrap_or_default();
+                        if sample_id.is_empty() {
+                            return Err(CliError::input(format!(
+                                "replicate well {well} has no sample ID"
+                            )));
+                        }
+                        let replicate = replicate_value.as_i64().unwrap_or(0);
+                        if replicate < 1 {
+                            return Err(CliError::input(format!(
+                                "replicate for well {well} must be positive"
+                            )));
+                        }
+                        let key = format!("{sample_id}\u{0}{replicate}");
+                        if let Some(previous) = seen_replicates.get(&key) {
+                            return Err(CliError::input(format!(
+                                "sample {sample_id} replicate {replicate} is assigned to both {previous} and {well}"
+                            )));
+                        }
+                        seen_replicates.insert(key, well);
+                    }
+                }
             }
             "reference-ref" => {
                 if text("ref").is_empty() {
@@ -3103,19 +3201,38 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
             if ytext(plate, "assay") != assay_id {
                 continue;
             }
-            let plate_timepoint = ytext(plate, "timepoint");
-            let groups_map = plate
-                .get("groups")
+            let mut sample_lookup: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+            let mut replicate_lookup: std::collections::HashMap<String, i64> =
+                std::collections::HashMap::new();
+            if let Some(samples) = plate.get("samples").and_then(|v| v.as_mapping()) {
+                for (key, value) in samples {
+                    let well = key.as_str().unwrap_or("").trim().to_uppercase();
+                    let sample = value.as_str().map(str::trim).unwrap_or("").to_owned();
+                    sample_lookup.insert(well, sample);
+                }
+            }
+            if let Some(replicates) = plate.get("replicates").and_then(|v| v.as_mapping()) {
+                for (key, value) in replicates {
+                    let well = key.as_str().unwrap_or("").trim().to_uppercase();
+                    replicate_lookup.insert(well, value.as_i64().unwrap_or(0));
+                }
+            }
+            let groups_map = plate.get("groups")
                 .and_then(|value| value.as_mapping())
                 .cloned()
                 .unwrap_or_default();
+            let plate_timepoint = ytext(plate, "timepoint");
+            let plate_timepoints = if plate_timepoint.is_empty() {
+                assay_timepoints.clone()
+            } else {
+                vec![plate_timepoint]
+            };
             for (group_value, wells_value) in groups_map {
                 let group_id = group_value.as_str().unwrap_or("").to_owned();
-                let group = match group_index.get(&group_id) {
-                    Some(group) => *group,
-                    None => continue,
-                };
-                let group_name = ytext(group, "name");
+                if !group_index.contains_key(&group_id) {
+                    continue;
+                }
                 let mut coordinates: Vec<String> = wells_value
                     .as_sequence()
                     .into_iter()
@@ -3125,18 +3242,16 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
                 coordinates.sort_by_key(|well| {
                     parse_well_coordinate(well).unwrap_or(usize::MAX)
                 });
-                for (index, coordinate) in coordinates.iter().enumerate() {
-                    wells.push(json!({
-                        "wellId": coordinate,
-                        "sampleId": format!("{}-{}", group_name, index + 1),
-                        "groupId": group_id,
-                        "replicate": index + 1,
-                        "timepoint": if plate_timepoint.is_empty() {
-                            assay_timepoints.first().cloned().unwrap_or_default()
-                        } else {
-                            plate_timepoint.clone()
-                        }
-                    }));
+                for coordinate in &coordinates {
+                    for timepoint in &plate_timepoints {
+                        wells.push(json!({
+                            "wellId": coordinate,
+                            "sampleId": sample_lookup.get(coordinate).cloned().unwrap_or_default(),
+                            "groupId": group_id,
+                            "replicate": replicate_lookup.get(coordinate).copied().unwrap_or(0),
+                            "timepoint": timepoint
+                        }));
+                    }
                 }
             }
         }
@@ -3266,7 +3381,7 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
         "assays": assay_plans,
         "mygo": mygo
     });
-    let core_kinds = ["experiment", "group", "assay", "step", "workflow", "plate", "plate96", "reference"];
+    let core_kinds = ["experiment", "group", "assay", "step", "workflow", "plate", "reference"];
     let sdk_modules: Vec<Value> = modules
         .iter()
         .filter(|module| !core_kinds.contains(&ytext(module, "kind").as_str()))
@@ -7249,11 +7364,7 @@ pub(crate) fn assess_asterdoc(db: &Connection, input: &Value) -> Result<Value, C
         match compile_asterdoc_to_design(source) {
             Err(error) => errors.push(error.message),
             Ok(design) => {
-                let mut audit_design = design.clone();
-                if let Some(object) = audit_design.as_object_mut() {
-                    object.remove("mygo");
-                }
-                match run_creation_audit(&audit_design, 0, "") {
+                match run_creation_audit(&design, 0, "") {
                     Err(error) => errors.push(error.message),
                     Ok(audit) => {
                         for warning in audit["warnings"].as_array().into_iter().flatten() {
@@ -7875,6 +7986,123 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 .and_then(Value::as_array).into_iter().flatten()
                 .filter_map(|value| value.as_str().map(str::to_owned)).collect();
             create_run_from_asterdoc(&mut db, design_id, revision, op, title, &acknowledged)
+        }
+        "sdk.modules" => {
+            let _: EmptyInput = parse_input(path)?;
+            let modules = asterdoc_spec()["modules"].as_array().cloned().unwrap_or_default();
+            let summaries: Vec<Value> = modules
+                .iter()
+                .map(|module| {
+                    json!({
+                        "kind": module.get("kind").cloned().unwrap_or(Value::Null),
+                        "schema": module.get("schema").cloned().unwrap_or(Value::Null),
+                        "title": module.get("title").cloned().unwrap_or(Value::Null),
+                        "category": module.get("category").cloned().unwrap_or(Value::Null),
+                        "capabilities": module.get("capabilities").cloned().unwrap_or(Value::Null),
+                        "renderers": module.get("renderers").cloned().unwrap_or(Value::Null),
+                        "actions": module.get("actions").cloned().unwrap_or(Value::Null)
+                    })
+                })
+                .collect();
+            Ok(json!({"modules": summaries}))
+        }
+        "sdk.describe" => {
+            let input: Value = parse_input(path)?;
+            let kind = input
+                .get("kind")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CliError::input("kind is required"))?;
+            let schema = input
+                .get("schema")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| CliError::input("schema is required"))?;
+            let module = asterdoc_module_spec(kind, schema)
+                .ok_or_else(|| CliError::missing(format!("unknown module {kind}@{schema}")))?;
+            Ok(json!({"module": module}))
+        }
+        "asterdoc.inspect" => {
+            let input: Value = parse_input(path)?;
+            let design_id = input
+                .get("design_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CliError::input("design_id is required"))?;
+            let revision = input.get("revision").and_then(Value::as_u64);
+            let doc = if let Some(revision) = revision {
+                load_asterdoc_at(&db, design_id, revision)?
+            } else {
+                load_asterdoc(&db, design_id)?
+            };
+            let module_id = input.get("module_id").and_then(Value::as_str);
+            let source = doc.get("source").and_then(Value::as_str).unwrap_or("");
+            let modules = parse_asterdoc_modules(source)?;
+            let mut inspected = Vec::new();
+            for module in &modules {
+                let kind = module.get("kind").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                let id = module.get("id").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                if let Some(filter) = module_id {
+                    if id != filter {
+                        continue;
+                    }
+                }
+                let schema = module.get("schema").and_then(|v| v.as_i64()).unwrap_or(0);
+                let spec = asterdoc_module_spec(&kind, schema);
+                let manifest = spec.map(|spec_value| {
+                    json!({
+                        "renderers": spec_value.get("renderers").cloned().unwrap_or(Value::Null),
+                        "actions": spec_value.get("actions").cloned().unwrap_or(Value::Null)
+                    })
+                });
+                let data = serde_json::to_value(module).unwrap_or(Value::Null);
+                inspected.push(json!({
+                    "kind": kind,
+                    "id": id,
+                    "schema": schema,
+                    "data": data,
+                    "manifest": manifest.unwrap_or(Value::Null)
+                }));
+            }
+            if let Some(filter) = module_id {
+                if inspected.is_empty() {
+                    return Err(CliError::missing(format!("module {filter} not found")));
+                }
+            }
+            Ok(json!({
+                "design_id": design_id,
+                "revision": doc.get("revision").cloned().unwrap_or(Value::Null),
+                "source_hash": doc.get("source_hash").cloned().unwrap_or(Value::Null),
+                "modules": inspected
+            }))
+        }
+        "asterdoc.assess" => {
+            let input: Value = parse_input(path)?;
+            assess_asterdoc(&db, &input)
+        }
+
+        "asterdoc.validate" => {
+            let input: Value = parse_input(path)?;
+            let source = input
+                .get("source")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CliError::input("source is required"))?;
+            if let Err(error) = validate_asterdoc_source(source) {
+                return Ok(json!({
+                    "valid": false,
+                    "compiled": false,
+                    "error": {"code": error.code, "message": error.message}
+                }));
+            }
+            match compile_asterdoc_to_design(source) {
+                Ok(design) => Ok(json!({
+                    "valid": true,
+                    "compiled": true,
+                    "design": design
+                })),
+                Err(error) => Ok(json!({
+                    "valid": true,
+                    "compiled": false,
+                    "error": {"code": error.code, "message": error.message}
+                })),
+            }
         }
         "run.workspace" => {
             let i: IdInput = parse_input(path)?;
@@ -8865,6 +9093,7 @@ fn any_record_schema() -> Value {
 }
 fn result_schema(tool: &str) -> Value {
     let arr = |kind: &str| json!({"type":"object","additionalProperties":false,"required":["records"],"properties":{"records":{"type":"array","items":record_schema(kind)}}});
+    let asterdoc_version = || json!({"type":"object","additionalProperties":true,"required":["design_id","revision","source","source_hash","schema_version","compiler_version"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source":{"type":"string"},"source_hash":{"type":"string"},"schema_version":{"type":"integer","minimum":1},"compiler_version":{"type":"string"},"design_revision":{"type":"integer","minimum":0},"operation_id":{"type":["string","null"]},"actor_id":{"type":["string","null"]},"created_at":{"type":["string","null"]}}});
     let one = |kind: &str| json!({"type":"object","additionalProperties":false,"required":["record"],"properties":{"record":record_schema(kind)}});
     let record_and_version = |record_kind: &str| json!({"type":"object","additionalProperties":false,"required":["record","version"],"properties":{"record":record_schema(record_kind),"version":record_schema("design_version")}});
     match tool {
@@ -8941,6 +9170,15 @@ fn result_schema(tool: &str) -> Value {
         "calculator.reaction_volume" => {
             json!({"type":"object","additionalProperties":false,"required":["allocated_volume_ul","remaining_volume_ul","unit","assumption"],"properties":{"allocated_volume_ul":{"type":"number","minimum":0},"remaining_volume_ul":{"type":"number","minimum":0},"unit":{"const":"µL"},"assumption":{"type":"string"}}})
         }
+        "sdk.modules" => json!({"type":"object","additionalProperties":false,"required":["modules"],"properties":{"modules":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1},"title":{"type":["string","null"]},"category":{"type":["string","null"]},"capabilities":{"type":["array","null"]},"renderers":{"type":["object","null"]},"actions":{"type":["array","null"]}}}}}}),
+        "sdk.describe" => json!({"type":"object","additionalProperties":false,"required":["module"],"properties":{"module":{"type":"object","additionalProperties":true}}}),
+        "asterdoc.inspect" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","modules"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","id","schema","data","manifest"],"properties":{"kind":{"type":"string"},"id":{"type":"string"},"schema":{"type":"integer","minimum":0},"data":{"type":"object","additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}}}}}),
+        "asterdoc.assess" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","state","errors","warnings"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"state":{"type":"string","enum":["ready","warning","incomplete"]},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}}}}),
+
+        "asterdoc.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"design":{"type":"object","additionalProperties":true},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string"},"message":{"type":"string"}}}}}),
+        "asterdoc.load" | "asterdoc.save" | "asterdoc.command" => asterdoc_version(),
+        "asterdoc.compile" => json!({"type":"object","additionalProperties":false,"required":["design","document"],"properties":{"design":{"type":"object","additionalProperties":true},"document":asterdoc_version()}}),
+        "asterdoc.create_run" => record_schema("run"),
         _ => json!({"type":"object"}),
     }
 }
@@ -9109,6 +9347,51 @@ fn input_schema(tool: &str) -> Option<Value> {
         "calculator.reaction_volume" => {
             json!({"type":"object","additionalProperties":false,"required":["target_volume_ul","components"],"properties":{"target_volume_ul":{"type":"number","exclusiveMinimum":0},"components":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","volume_ul"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"volume_ul":{"type":"number","minimum":0}}}}}})
         }
+        "sdk.modules" => {
+            json!({"type":"object","additionalProperties":false,"properties":{}})
+        }
+        "sdk.describe" => {
+            json!({"type":"object","additionalProperties":false,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1}}})
+        }
+        "asterdoc.inspect" => {
+            json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"module_id":{"type":"string"}}})
+        }
+        "asterdoc.assess" => {
+            json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":1}}})
+        }
+
+        "asterdoc.validate" => {
+            json!({"type":"object","additionalProperties":false,"required":["source"],"properties":{"source":{"type":"string","minLength":1}}})
+        }
+        "asterdoc.load" => {
+            json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string","minLength":1}}})
+        }
+        "asterdoc.save" => {
+            json!({"type":"object","additionalProperties":false,"required":["design_id","source"],"properties":{"design_id":{"type":"string","minLength":1},"source":{"type":"string","maxLength":400000},"expected_revision":{"type":"integer","minimum":0},"operation_id":{"type":"string","minLength":1},"actor_id":{"type":"string","minLength":1}}})
+        }
+        "asterdoc.command" => {
+            json!({"type":"object","additionalProperties":false,"required":["design_id","expected_revision","command"],"properties":{
+                "design_id":{"type":"string","minLength":1},
+                "expected_revision":{"type":"integer","minimum":0},
+                "operation_id":{"type":"string","minLength":1},
+                "actor_id":{"type":"string","minLength":1},
+                "command":{"oneOf":[
+                    {"type":"object","additionalProperties":false,"required":["type","module"],"properties":{"type":{"const":"add_module"},"module":{"type":"object","required":["kind","id","schema"],"properties":{"kind":{"type":"string"},"id":{"type":"string","minLength":1},"schema":{"type":"integer","minimum":1}}}}},
+                    {"type":"object","additionalProperties":false,"required":["type","module"],"properties":{"type":{"const":"add_step"},"workflowId":{"type":"string"},"module":{"type":"object","required":["kind","id","schema"],"properties":{"kind":{"const":"step"},"id":{"type":"string","minLength":1},"schema":{"type":"integer","minimum":1}}}}},
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId"],"properties":{"type":{"enum":["remove_module","remove_step"]},"moduleId":{"type":"string","minLength":1}}},
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId","properties"],"properties":{"type":{"const":"update_module"},"moduleId":{"type":"string","minLength":1},"properties":{"type":"object"}}},
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId","group","wells"],"properties":{"type":{"const":"assign_wells"},"moduleId":{"type":"string","minLength":1},"group":{"type":"string","minLength":1},"wells":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId","wells"],"properties":{"type":{"const":"clear_wells"},"moduleId":{"type":"string","minLength":1},"wells":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId","from","to"],"properties":{"type":{"enum":["connect_steps","disconnect_steps"]},"moduleId":{"type":"string","minLength":1},"from":{"type":"string","minLength":1},"to":{"type":"string","minLength":1}}}
+                ]}
+            }})
+        }
+        "asterdoc.compile" => {
+            json!({"type":"object","additionalProperties":false,"required":["design_id","revision"],"properties":{"design_id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":1}}})
+        }
+        "asterdoc.create_run" => {
+            json!({"type":"object","additionalProperties":false,"required":["design_id","revision"],"properties":{"design_id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":1},"operation_id":{"type":"string","minLength":1},"title":{"type":"string","minLength":1},"acknowledged_warnings":{"type":"array","items":{"type":"string"}}}})
+        }
         _ => return None,
     };
     Some(s)
@@ -9261,6 +9544,16 @@ fn tool_specs() -> Vec<Value> {
         "calculator.solution",
         "calculator.serial_dilution",
         "calculator.reaction_volume",
+        "sdk.modules",
+        "sdk.describe",
+        "asterdoc.inspect",
+        "asterdoc.assess",
+        "asterdoc.validate",
+        "asterdoc.load",
+        "asterdoc.save",
+        "asterdoc.command",
+        "asterdoc.compile",
+        "asterdoc.create_run",
     ];
     names.iter().filter_map(|n|Some(json!({"name":n,"description":tool_description(n),"side_effects":tool_effects(n),"writes_data":tool_writes(n),"command":format!("labworkbench {n} --input <json-file|->"),"input_schema":input_schema(n)?,"output_schema":output_schema(n)}))).collect()
 }
@@ -9288,6 +9581,13 @@ fn tool_writes(tool: &str) -> bool {
             | "calculator.solution"
             | "calculator.serial_dilution"
             | "calculator.reaction_volume"
+            | "sdk.modules"
+            | "sdk.describe"
+            | "asterdoc.inspect"
+            | "asterdoc.assess"
+            | "asterdoc.validate"
+            | "asterdoc.compile"
+            | "asterdoc.load"
     )
 }
 fn tool_description(tool: &str) -> &'static str {
@@ -9348,6 +9648,16 @@ fn tool_description(tool: &str) -> &'static str {
         "calculator.solution" => "按 m=C×V×MW 计算理论质量。",
         "calculator.serial_dilution" => "按相同体积单位计算逐级稀释浓度。",
         "calculator.reaction_volume" => "求反应已分配体积与剩余体积，不判断配方科学适用性。",
+        "sdk.modules" => "从嵌入的 modules.json 返回 AsterDoc 模块摘要（kind/schema/title/category/capabilities/renderers/actions）；只读。",
+        "sdk.describe" => "按 kind+schema 返回完整的 AsterDoc 模块 manifest；只读。",
+        "asterdoc.inspect" => "读取设计的精确/当前 AsterDoc 修订，解析模块并返回 manifest 渲染器/动作契约；只读。",
+        "asterdoc.validate" => "校验候选 AsterDoc 源码并尝试编译；不写入。",
+        "asterdoc.assess" => "对当前或指定 AsterDoc revision 执行只读 readiness 检查，返回 errors 与 warnings。",
+        "asterdoc.load" => "读取设计的最新 AsterDoc 修订；只读。",
+        "asterdoc.save" => "保存新的不可变 AsterDoc 修订；expected_revision 用于并发保护，operation_id 可用于幂等重试。",
+        "asterdoc.command" => "按 expected_revision 将单条语义命令应用到 AsterDoc，并保存新修订；可提供 operation_id 做幂等重试。",
+        "asterdoc.compile" => "将精确 AsterDoc revision 编译为设计；只读。",
+        "asterdoc.create_run" => "从指定 AsterDoc revision 创建并冻结运行。",
         _ => "未定义工具。",
     }
 }
@@ -9408,6 +9718,387 @@ fn tool_effects(tool: &str) -> &'static str {
         "import.study.apply" => {
             "在一个数据库事务中创建项目、设计及其 v1 快照、Protocol 及其 v1 版本；失败时整体回滚。"
         }
+        "sdk.modules" | "sdk.describe" | "asterdoc.inspect" | "asterdoc.assess" | "asterdoc.validate" | "asterdoc.compile" | "asterdoc.load" => "只读；不修改数据库。",
+        "asterdoc.save" => "保存新的不可变 AsterDoc 修订。",
+        "asterdoc.command" => "应用语义命令并保存新的不可变 AsterDoc 修订。",
+        "asterdoc.create_run" => "创建运行并固定 AsterDoc 修订引用。",
         _ => "未定义副作用。",
+    }
+}
+
+pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+    let asset = input
+        .get("asset")
+        .ok_or_else(|| CliError::input("asset is required"))?;
+    let root_id = asset
+        .get("rootId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    if root_id.is_empty() {
+        return Err(CliError::input("rootId is required"));
+    }
+    if root_id.len() > 200 || root_id.chars().any(char::is_control) {
+        return Err(CliError::input("rootId is invalid"));
+    }
+    let relative_path_raw = asset
+        .get("relativePath")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    if relative_path_raw.is_empty() {
+        return Err(CliError::input("relativePath is required"));
+    }
+    let normalized_path = relative_path_raw.replace('\\', "/");
+    let path = std::path::Path::new(&normalized_path);
+    if path.is_absolute() {
+        return Err(CliError::input("relativePath must not be absolute"));
+    }
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => {
+                let part = part.to_str().ok_or_else(|| CliError::input("relativePath is invalid"))?;
+                if part.is_empty() || part.contains('\0') {
+                    return Err(CliError::input("relativePath is invalid"));
+                }
+                parts.push(part.to_owned());
+            }
+            std::path::Component::CurDir => {
+                return Err(CliError::input("relativePath must be normalized"));
+            }
+            std::path::Component::ParentDir => {
+                return Err(CliError::input("relativePath must not escape its root"));
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(CliError::input("relativePath must not be absolute"));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(CliError::input("relativePath is required"));
+    }
+    let relative_path = parts.join("/");
+
+    let link = asset
+        .get("link")
+        .ok_or_else(|| CliError::input("asset link is required"))?;
+    let run_id = link
+        .get("runId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    if run_id.is_empty() {
+        return Err(CliError::input("runId is required"));
+    }
+    let task_key = link
+        .get("taskKey")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    if task_key.is_empty() || task_key.len() > 1000 || task_key.chars().any(char::is_control) {
+        return Err(CliError::input("taskKey is invalid"));
+    }
+    let sample_id = link
+        .get("sampleId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    if sample_id.len() > 200 || sample_id.chars().any(char::is_control) {
+        return Err(CliError::input("sampleId is invalid"));
+    }
+
+    let (kind, project, _, _, _) = kind_id(db, &run_id)?
+        .ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    if kind != "run" {
+        return Err(CliError::input("parent_id must point to a run"));
+    }
+    let workspace = run_workspace(db, &run_id)?;
+    let task_exists = workspace["tasks"]
+        .as_array()
+        .is_some_and(|tasks| tasks.iter().any(|task| task["task_key"].as_str() == Some(&task_key)));
+    if !task_exists {
+        return Err(CliError::input("taskKey does not belong to this Run"));
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(root_id.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(relative_path.as_bytes());
+    let digest = hasher.finalize();
+    let mut id = String::from("asset-");
+    for byte in digest.iter().take(16) {
+        id.push_str(&format!("{:02x}", byte));
+    }
+    let mut link_hasher = Sha256::new();
+    for part in [&root_id, &relative_path, &run_id, &task_key, &sample_id] {
+        link_hasher.update(part.as_bytes());
+        link_hasher.update(b"\0");
+    }
+    let link_digest = link_hasher.finalize();
+    let mut record_id = String::from("asset-link-");
+    for byte in link_digest.iter().take(16) {
+        record_id.push_str(&format!("{:02x}", byte));
+    }
+
+    let media_type = asset
+        .get("mediaType")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_owned();
+    if !matches!(media_type.as_str(), "image" | "table" | "document" | "binary" | "unknown") {
+        return Err(CliError::input("mediaType is invalid"));
+    }
+    let size = asset.get("size").and_then(Value::as_i64).unwrap_or(0);
+    if size < 0 {
+        return Err(CliError::input("size must not be negative"));
+    }
+    let mod_time = asset
+        .get("modTime")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let sha256 = asset
+        .get("sha256")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    if !sha256.is_empty() && (sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit())) {
+        return Err(CliError::input("sha256 must be 64 hexadecimal characters"));
+    }
+    let availability = asset
+        .get("availability")
+        .and_then(Value::as_str)
+        .unwrap_or("available")
+        .to_owned();
+    if !matches!(availability.as_str(), "available" | "unavailable") {
+        return Err(CliError::input("availability is invalid"));
+    }
+    let linked_at = asset
+        .get("linkedAt")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let linked_at = if linked_at.is_empty() { stamp() } else { linked_at };
+    let actor_id = asset
+        .get("actorId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+
+    let data = json!({
+        "id": id,
+        "rootId": root_id,
+        "relativePath": relative_path,
+        "mediaType": media_type,
+        "size": size,
+        "modTime": mod_time,
+        "sha256": sha256,
+        "availability": availability,
+        "link": {
+            "runId": run_id,
+            "taskKey": task_key,
+            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id) }
+        },
+        "linkedAt": linked_at,
+        "actorId": actor_id
+    });
+
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let exists: bool = tx
+        .query_row("SELECT 1 FROM records WHERE id=?1", [&record_id], |_| Ok(()))
+        .optional()
+        .map_err(|e| CliError::internal(e.to_string()))?
+        .is_some();
+    if exists {
+        tx.execute(
+            "UPDATE records SET data_json=?1, updated_at=?2 WHERE id=?3",
+            params![serde_json::to_string(&data).map_err(|e| CliError::internal(e.to_string()))?, stamp(), record_id],
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    } else {
+        tx.execute(
+            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
+            params![record_id, "asset_link", project, run_id, 1i64, serde_json::to_string(&data).map_err(|e| CliError::internal(e.to_string()))?, stamp()],
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    }
+    tx.commit()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    Ok(data)
+}
+
+pub(crate) fn list_asset_links(db: &Connection, run_id: &str) -> Result<Value, CliError> {
+    let (kind, _, _, _, _) = kind_id(db, run_id)?
+        .ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    if kind != "run" {
+        return Err(CliError::input("run_id must point to a run"));
+    }
+    let mut stmt = db
+        .prepare("SELECT data_json FROM records WHERE kind='asset_link' AND parent_id=?1 ORDER BY created_at ASC")
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let rows = stmt
+        .query_map([run_id], |row| row.get::<_, String>(0))
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows.flatten() {
+        if let Ok(v) = serde_json::from_str::<Value>(&row) {
+            out.push(v);
+        }
+    }
+    Ok(Value::Array(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_tools_are_discoverable() {
+        let specs = tool_specs();
+        let names: Vec<&str> = specs.iter().filter_map(|v| v.get("name").and_then(Value::as_str)).collect();
+        for tool in ["sdk.modules", "sdk.describe", "asterdoc.inspect", "asterdoc.assess", "asterdoc.validate", "asterdoc.load", "asterdoc.save", "asterdoc.command", "asterdoc.compile", "asterdoc.create_run"] {
+            assert!(names.contains(&tool), "missing {tool}");
+            assert!(input_schema(tool).is_some(), "missing input schema for {tool}");
+        }
+        let command = input_schema("asterdoc.command").unwrap();
+        assert!(command["required"].as_array().unwrap().contains(&json!("expected_revision")));
+        assert!(command["properties"].get("operation_id").is_some());
+        assert!(command["properties"].get("revision").is_none());
+        let variants = command["properties"]["command"]["oneOf"].as_array().unwrap();
+        let declared_types: Vec<&str> = variants.iter().flat_map(|variant| {
+            let kind = &variant["properties"]["type"];
+            kind["const"].as_str().into_iter().chain(
+                kind["enum"].as_array().into_iter().flatten().filter_map(Value::as_str)
+            )
+        }).collect();
+        for action in ["add_module", "add_step", "update_module", "assign_wells", "clear_wells", "connect_steps", "disconnect_steps", "remove_module", "remove_step"] {
+            assert!(declared_types.contains(&action), "command schema omits {action}");
+        }
+        assert_eq!(result_schema("sdk.modules")["required"][0], "modules");
+        assert_eq!(result_schema("asterdoc.assess")["required"][3], "state");
+        let plate = asterdoc_module_spec("plate", 1).unwrap();
+        assert!(asterdoc_module_spec("plate96", 1).is_none());
+        for field in ["samples", "replicates"] {
+            assert!(plate["inputs"].as_array().unwrap().iter().any(|port| port["name"] == field));
+        }
+    }
+
+    #[test]
+    fn compiler_keeps_sample_identity_explicit_across_timepoints() {
+        let source = "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: CCK-8\n```\n\
+```asterlab\nkind: group\nid: g-control\nschema: 1\nname: Control\nrole: control\n```\n\
+```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\nendpoint: OD450\nunit: AU\ngroup_refs: [g-control]\ntimepoints: [D1, D3]\n```\n\
+```asterlab\nkind: plate\nid: plate-1\nschema: 1\nformat: 96\nassay: assay-cck8\ngroups:\n  g-control: [A1, A2, A3]\nsamples:\n  A1: sample-1\n  A2: sample-1\n  A3: sample-1\nreplicates:\n  A1: 1\n  A2: 2\n  A3: 3\n```\n";
+        let design = compile_asterdoc_to_design(source).unwrap();
+        let wells = design["mygo"]["assays"]["assay-cck8"]["wells"].as_array().unwrap();
+        assert_eq!(wells.len(), 6, "unscoped plate layout should project to every declared assay timepoint");
+        for timepoint in ["D1", "D3"] {
+            let at_timepoint: Vec<_> = wells.iter().filter(|well| well["timepoint"] == timepoint).collect();
+            assert_eq!(at_timepoint.len(), 3);
+            for (index, well) in at_timepoint.iter().enumerate() {
+                assert_eq!(well["sampleId"], "sample-1");
+                assert_eq!(well["replicate"], index as i64 + 1);
+            }
+        }
+
+        let source_without_identity = source.replace(
+            "samples:\n  A1: sample-1\n  A2: sample-1\n  A3: sample-1\nreplicates:\n  A1: 1\n  A2: 2\n  A3: 3\n",
+            "",
+        );
+        let unmapped = compile_asterdoc_to_design(&source_without_identity).unwrap();
+        let first = &unmapped["mygo"]["assays"]["assay-cck8"]["wells"][0];
+        assert_eq!(first["sampleId"], "");
+        assert_eq!(first["replicate"], 0);
+    }
+
+    #[test]
+    fn assess_includes_run_creation_audit_warnings() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+             INSERT INTO records VALUES('project-1','project',NULL,NULL,1,'{}','now','now');
+             INSERT INTO records VALUES('design-1','design','project-1',NULL,1,'{}','now','now');",
+        ).unwrap();
+        let source = r#"```asterlab
+kind: experiment
+id: exp-1
+schema: 1
+title: CCK-8
+```
+```asterlab
+kind: group
+id: g-control
+schema: 1
+name: Control
+role: control
+```
+```asterlab
+kind: assay
+id: assay-cck8
+schema: 1
+title: CCK-8
+endpoint: OD450
+unit: AU
+group_refs: [g-control]
+timepoints: [D1]
+```
+```asterlab
+kind: plate
+id: plate-1
+schema: 1
+format: 96
+assay: assay-cck8
+groups:
+  g-control: [A1]
+```
+"#;
+        save_asterdoc_version(&mut db, &json!({
+            "design_id": "design-1",
+            "source": source,
+            "expected_revision": 0
+        })).unwrap();
+
+        let assessed = assess_asterdoc(&db, &json!({"design_id": "design-1"})).unwrap();
+        let compiled = compile_asterdoc_to_design(source).unwrap();
+        let freeze_audit = run_creation_audit(&compiled, 0, "").unwrap();
+        assert_eq!(assessed["warnings"], freeze_audit["warnings"]);
+        assert!(assessed["warnings"].as_array().unwrap().iter().any(|warning|
+            warning.as_str().unwrap_or("").contains("尚未指定完整的样本与技术重复映射")
+        ));
+    }
+
+
+    #[test]
+    fn clear_wells_removes_sample_and_replicate_mappings() {
+        let source = "```asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\ngroups:\n  g1: [A1, A2]\nsamples:\n  A1: S1\n  A2: S2\nreplicates:\n  A1: 1\n  A2: 1\n```\n";
+        let next = apply_asterdoc_patch(source, &json!({
+            "type": "clear_wells", "moduleId": "p1", "wells": ["A1"]
+        })).unwrap();
+        let mut blocks = asterdoc_blocks(&next).unwrap();
+        let block = blocks.remove(0);
+        let groups = block.value["groups"]["g1"].as_sequence().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].as_str(), Some("A2"));
+        assert!(block.value["samples"].get("A1").is_none());
+        assert!(block.value["replicates"].get("A1").is_none());
+
+
+    }
+    #[test]
+    fn read_only_tools_do_not_write() {
+        for tool in ["sdk.modules", "sdk.describe", "asterdoc.inspect", "asterdoc.assess", "asterdoc.validate", "asterdoc.compile", "asterdoc.load"] {
+            assert!(!tool_writes(tool), "{tool} should be read-only");
+        }
+        for tool in ["asterdoc.save", "asterdoc.command", "asterdoc.create_run"] {
+            assert!(tool_writes(tool), "{tool} should write");
+        }
     }
 }

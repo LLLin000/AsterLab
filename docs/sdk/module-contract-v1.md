@@ -113,18 +113,20 @@ Current permissions: `document.edit`, `run.readout`, `notebook.append`. The rend
 `renderers` is an executed contract, not a comment:
 
 ```json
-{"design": "dilution.editor", "document": "dilution.viewer"}
+{"design": "generic.editor", "document": "dilution.viewer", "run": "generic.run"}
 ```
 
 - A professional editor and a read-only viewer are separate capabilities.
-- `Register` refuses a module that declares a renderer key its `ModuleSpec.Renders`
-  list does not cover (`registry.go`), so the manifest cannot promise a surface
-  the host cannot draw.
-- Two different kinds may not claim the same renderer key; two schema versions
-  of one kind may share a family (`step@1` and `step@2` both use
-  `step.editor`/`step.viewer`).
-- In v1 the host resolves the renderer key for the current mode, verifies the registered module covers it via `ModuleSpec.Renders`, then calls that module's single `Render` function. The key is a surface capability, not a separate Go callback slot; `kind@schema` still selects the module implementation. Design selects `renderers.design`; protocol/run/notebook/review select `renderers.document`.
-- The generic field editor is opt-in through the `generic-editor` capability. `plate` and `plate96` keep their dedicated plate surface; modules that opt in use the generic editor in Design. Field-only modules can opt in.
+- `Register` refuses a declared renderer key without an implementation. Module-specific callbacks live in
+  `ModuleSpec.Implementations`; reusable callbacks are installed once with `Registry.RegisterRenderer`.
+- Different module kinds may share one registered key. Schema versions may share a key when their renderer semantics
+  are identical; `step@1` and `step@2` share `step.viewer`.
+- The host maps Design to `renderers.design`, Run to `renderers.run`, and protocol/notebook/review to
+  `renderers.document`. A missing surface is a visible gap, never a fallback.
+- `generic.editor` is an explicit shared Design renderer; `generic.run` is a shared, read-only Run summary.
+  `plate` keeps specialized `plate.editor`, `plate.viewer`, and `plate.run` callbacks.
+- `workflow` editing belongs to the Workspace canvas and Core semantic commands, not a module-level editor.
+  `View.Density` lets a host request `compact`, `inspector`, or `full` presentation.
 - A static/PDF renderer must be deterministic from document revision, frozen-run
   revision, referenced IDs and calculator version. `renderers.static` is
   currently declared by no shipped module; static output goes through
@@ -196,7 +198,7 @@ The template shape is defined in the Foundation schema, but template instantiati
 
 | Module | SDK category | What it proves |
 | --- | --- | --- |
-| `plate` / `plate96` | Labware | Geometry, group/well validation, document freeze, readout boundary. |
+| `plate` | Labware | Geometry, group/well validation, document freeze, readout boundary. |
 | `dilution` | Measurement | Quantities, units, deterministic calculator, derived output, no record write. |
 | `instrument_profile` | Resource | Capability declaration without hardware control or calibration claims. |
 

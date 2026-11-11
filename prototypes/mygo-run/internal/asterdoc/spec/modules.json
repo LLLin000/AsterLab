@@ -2,115 +2,10 @@
   "schemaVersion": 1,
   "modules": [
     {
-      "kind": "plate96",
-      "schema": 1,
-      "title": "96 孔板",
-      "description": "8×12 孔板的组别布局；写入文档的 groups 字段，实际读数仍由 Run 事务记录。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true,
-          "description": "固定为 plate96"
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true,
-          "description": "文档内稳定 ID"
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true,
-          "description": "模块版本，当前为 1"
-        },
-        {
-          "name": "assay",
-          "type": "string",
-          "description": "关联的检测 ID，例如 cck8"
-        },
-        {
-          "name": "groups",
-          "type": "well-map",
-          "required": true,
-          "description": "组名到孔位列表（A1–H12，不重复）"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "wells",
-          "type": "well-map",
-          "description": "孔位到组名的反查表",
-          "origin": "view"
-        },
-        {
-          "name": "assigned",
-          "type": "int",
-          "description": "已分配孔位数",
-          "origin": "view"
-        }
-      ],
-      "actions": [
-        {
-          "id": "assign_wells",
-          "title": "将选中孔位归入组别",
-          "permission": "document.edit",
-          "writes": [
-            "groups"
-          ]
-        },
-        {
-          "id": "clear_wells",
-          "title": "清除所选孔位",
-          "permission": "document.edit",
-          "writes": [
-            "groups"
-          ]
-        }
-      ],
-      "rules": [
-        "plate-wells"
-      ],
-      "sdk": "1.0.0",
-      "category": "labware",
-      "capabilities": [
-        "well-plate",
-        "well-assignment",
-        "plate-geometry"
-      ],
-      "permissions": [
-        "document.edit"
-      ],
-      "renderers": {
-        "design": "plate96.editor",
-        "document": "plate96.viewer"
-      },
-      "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
-        "freeze": "immutable-revision"
-      },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
-    },
-    {
       "kind": "plate",
       "schema": 1,
       "title": "孔板",
-      "description": "参数化孔板布局；format 选择 6/12/24/48/96/384 孔几何，groups 保存组别与孔位。",
+      "description": "参数化孔板；format 选择孔板几何，groups 分配组别，samples 与 replicates 显式记录孔位身份。",
       "modes": [
         "design",
         "protocol",
@@ -159,6 +54,16 @@
           "type": "well-map",
           "required": true,
           "description": "组名到孔位列表"
+        },
+        {
+          "name": "samples",
+          "type": "object",
+          "description": "孔位到显式 sample ID；不可根据组别或孔位顺序推断独立样本。"
+        },
+        {
+          "name": "replicates",
+          "type": "object",
+          "description": "孔位到正整数技术重复编号；每个重复编号都必须关联显式 sample ID。"
         }
       ],
       "outputs": [
@@ -179,6 +84,18 @@
           "type": "well-map",
           "description": "孔位到组名",
           "origin": "view"
+        },
+        {
+          "name": "samples",
+          "type": "object",
+          "description": "孔位到显式 sample ID",
+          "origin": "view"
+        },
+        {
+          "name": "replicates",
+          "type": "object",
+          "description": "孔位到技术重复编号",
+          "origin": "view"
         }
       ],
       "actions": [
@@ -195,7 +112,9 @@
           "title": "清除所选孔位",
           "permission": "document.edit",
           "writes": [
-            "groups"
+            "groups",
+            "samples",
+            "replicates"
           ]
         }
       ],
@@ -214,7 +133,8 @@
       ],
       "renderers": {
         "design": "plate.editor",
-        "document": "plate.viewer"
+        "document": "plate.viewer",
+        "run": "plate.run"
       },
       "lifecycle": {
         "states": [
@@ -287,13 +207,13 @@
       "sdk": "1.0.0",
       "category": "document",
       "capabilities": [
-        "typed-reference",
-        "generic-editor"
+        "typed-reference"
       ],
       "permissions": [],
       "renderers": {
-        "design": "reference.editor",
-        "document": "reference.viewer"
+        "design": "generic.editor",
+        "document": "reference.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -426,13 +346,13 @@
       "sdk": "1.0.0",
       "category": "workflow",
       "capabilities": [
-        "experiment-plan",
-        "generic-editor"
+        "experiment-plan"
       ],
       "permissions": [],
       "renderers": {
-        "design": "experiment.editor",
-        "document": "experiment.viewer"
+        "design": "generic.editor",
+        "document": "experiment.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -511,13 +431,13 @@
       "sdk": "1.0.0",
       "category": "workflow",
       "capabilities": [
-        "group-definition",
-        "generic-editor"
+        "group-definition"
       ],
       "permissions": [],
       "renderers": {
-        "design": "group.editor",
-        "document": "group.viewer"
+        "design": "generic.editor",
+        "document": "group.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -633,13 +553,13 @@
       "category": "measurement",
       "capabilities": [
         "assay-plan",
-        "measurement-endpoint",
-        "generic-editor"
+        "measurement-endpoint"
       ],
       "permissions": [],
       "renderers": {
-        "design": "assay.editor",
-        "document": "assay.viewer"
+        "design": "generic.editor",
+        "document": "assay.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -729,13 +649,13 @@
       "category": "workflow",
       "capabilities": [
         "step-definition",
-        "workflow-edge",
-        "generic-editor"
+        "workflow-edge"
       ],
       "permissions": [],
       "renderers": {
-        "design": "step.editor",
-        "document": "step.viewer"
+        "design": "generic.editor",
+        "document": "step.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -808,13 +728,12 @@
       "sdk": "1.0.0",
       "category": "workflow",
       "capabilities": [
-        "workflow-graph",
-        "generic-editor"
+        "workflow-graph"
       ],
       "permissions": [],
       "renderers": {
-        "design": "workflow.editor",
-        "document": "workflow.viewer"
+        "document": "workflow.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -839,13 +758,13 @@
       "capabilities": [
         "quantity",
         "deterministic-calculation",
-        "derived-output",
-        "generic-editor"
+        "derived-output"
       ],
       "permissions": [],
       "renderers": {
-        "design": "dilution.editor",
-        "document": "dilution.viewer"
+        "design": "generic.editor",
+        "document": "dilution.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -936,13 +855,13 @@
       "category": "resource",
       "capabilities": [
         "instrument-profile",
-        "capability-declaration",
-        "generic-editor"
+        "capability-declaration"
       ],
       "permissions": [],
       "renderers": {
-        "design": "instrument-profile.editor",
-        "document": "instrument-profile.viewer"
+        "design": "generic.editor",
+        "document": "instrument-profile.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -1114,13 +1033,13 @@
       "category": "workflow",
       "capabilities": [
         "step-definition",
-        "workflow-edge",
-        "generic-editor"
+        "workflow-edge"
       ],
       "permissions": [],
       "renderers": {
-        "design": "step.editor",
-        "document": "step.viewer"
+        "design": "generic.editor",
+        "document": "step.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -1144,13 +1063,13 @@
       "category": "resource",
       "capabilities": [
         "material",
-        "role-declaration",
-        "generic-editor"
+        "role-declaration"
       ],
       "permissions": [],
       "renderers": {
-        "design": "material.editor",
-        "document": "material.viewer"
+        "design": "generic.editor",
+        "document": "material.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -1247,13 +1166,13 @@
       "category": "resource",
       "capabilities": [
         "sample",
-        "sample-tracking",
-        "generic-editor"
+        "sample-tracking"
       ],
       "permissions": [],
       "renderers": {
-        "design": "sample.editor",
-        "document": "sample.viewer"
+        "design": "generic.editor",
+        "document": "sample.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -1339,13 +1258,13 @@
       "category": "labware",
       "capabilities": [
         "container",
-        "well-map",
-        "generic-editor"
+        "well-map"
       ],
       "permissions": [],
       "renderers": {
-        "design": "container.editor",
-        "document": "container.viewer"
+        "design": "generic.editor",
+        "document": "container.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [
@@ -1426,13 +1345,13 @@
       "category": "measurement",
       "capabilities": [
         "measurement-profile",
-        "calculator-reference",
-        "generic-editor"
+        "calculator-reference"
       ],
       "permissions": [],
       "renderers": {
-        "design": "measurement_profile.editor",
-        "document": "measurement_profile.viewer"
+        "design": "generic.editor",
+        "document": "measurement_profile.viewer",
+        "run": "generic.run"
       },
       "lifecycle": {
         "states": [

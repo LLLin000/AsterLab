@@ -8,7 +8,7 @@ This guide is for adding a scientific module to the current AsterLab prototype w
 | --- | --- | --- |
 | `workflow` | Steps, dependencies, experiment-level plan | `experiment`, `group`, `step`, `workflow` |
 | `resource` | Materials, reagents, samples, instrument profiles | `instrument_profile` |
-| `labware` | Plates, containers, spatial layouts | `plate`, `plate96` |
+| `labware` | Plates, containers, spatial layouts | `plate` |
 | `measurement` | Endpoints, measurements, calculations | `assay`, `dilution` |
 | `document` | References, viewers, document-level composition | `reference` |
 | `device` | Future device commands and acquisition | not implemented |
@@ -33,7 +33,7 @@ Minimum shape:
   "category": "measurement",
   "capabilities": ["quantity"],
   "permissions": [],
-  "renderers": {"design": "example.editor", "document": "example.viewer"},
+  "renderers": {"design": "generic.editor", "document": "example.viewer", "run": "generic.run"},
   "lifecycle": {"states": ["draft", "validated", "frozen"], "freeze": "immutable-revision"},
   "provenance": {"origin": "planned", "record_boundary": "run"},
   "modes": ["design", "protocol", "run", "notebook", "review"],
@@ -85,15 +85,19 @@ Rules:
 
 ## 4. Rendering contract
 
-A module may expose:
+A module may expose independently implemented surfaces:
 
 - `design`: an editor or design-time summary;
-- `document`: a read-only viewer used by Notebook/Review;
-- `static`: a deterministic static/PDF renderer (not implemented for the reference modules yet).
+- `document`: a read-only Protocol/Notebook/Review view;
+- `run`: a frozen-plan view; actual records still go through Core commands;
+- `static`: a deterministic static/PDF renderer.
 
-A simple module can use a generic form/summary. Only spatial or computational modules need a specialized editor. Do not duplicate a module's data in a second UI model.
+`renderers.<surface>` names a callback key. The host registers shared callbacks such as `generic.editor` and
+`generic.run` once; specialized modules can register their own keys. Module kind and schema still select the
+data contract, while `View.Density` selects compact, inspector, or full presentation.
 
-The renderer receives the parsed module data and the `View` context. It can ask for `document.edit` through the existing `View.Can` seam; it cannot write records.
+The renderer receives parsed module data and `View` context. It cannot write records; Design edits report semantic
+commands through the host seam and require `document.edit`.
 
 ## 5. Add tests
 
@@ -111,7 +115,9 @@ For a new Core projection, also add a freeze/round-trip test. For a pure viewer 
 
 ### Plate
 
-`plate` and `plate96` are Labware modules. They validate fixed geometry, group names and duplicate wells, and edit groups only through `assign_wells` / `clear_wells` commands. Actual readouts remain Run records.
+`plate` owns all supported formats (6/12/24/48/96/384). It validates geometry, group references and duplicate wells;
+Design assignment uses `assign_wells` / `clear_wells`, while actual readouts remain Run records. Legacy AsterDoc
+`kind: plate96` documents require explicit migration to `kind: plate` plus `format: 96`; there is no alias.
 
 ### Dilution
 

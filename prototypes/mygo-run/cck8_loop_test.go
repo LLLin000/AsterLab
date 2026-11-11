@@ -278,8 +278,14 @@ func TestCCK8VerticalSliceLoop(t *testing.T) {
 
 	grid := resultgrid.New(schema, toGridCells(batchEvent.ResultCells))
 	review := resultgrid.Summarize(grid)
+	if len(review.Rows) != 2 {
+		t.Fatalf("technical replicates were treated as independent samples: got %d sample rows, want 2", len(review.Rows))
+	}
 	bySample := map[string]resultgrid.ReviewRow{}
 	for _, row := range review.Rows {
+		if row.Recorded != 3 {
+			t.Fatalf("sample %s has %d technical reads, want 3", row.SampleID, row.Recorded)
+		}
 		bySample[row.SampleID] = row
 	}
 	checked := 0
@@ -343,14 +349,48 @@ func TestCCK8VerticalSliceLoop(t *testing.T) {
 	if reopened.Revision != after.Revision {
 		t.Fatalf("reopen revision %d != %d", reopened.Revision, after.Revision)
 	}
-	reopenedCells := 0
-	for _, event := range reopened.Events {
+	var reopenedEvent *runs.RunEvent
+	for i := range reopened.Events {
+		event := &reopened.Events[i]
 		if event.BatchID == batch.BatchID {
-			reopenedCells = len(event.ResultCells)
+			reopenedEvent = event
 		}
 	}
-	if reopenedCells != len(cells) {
-		t.Fatalf("reopen batch cells = %d, want %d", reopenedCells, len(cells))
+	if reopenedEvent == nil || len(reopenedEvent.ResultCells) != len(cells) {
+		t.Fatalf("reopen batch cells = %v, want %d", reopenedEvent, len(cells))
+	}
+	byCoord := map[string]runs.ResultCell{}
+	for _, c := range cells {
+		byCoord[fmt.Sprintf("%d:%d", c.Row, c.Column)] = c
+	}
+	for _, got := range reopenedEvent.ResultCells {
+		want, ok := byCoord[fmt.Sprintf("%d:%d", got.Row, got.Column)]
+		if !ok {
+			t.Fatalf("reopen has unexpected cell %+v", got)
+		}
+		if got.SampleID != want.SampleID || got.Group != want.Group || got.Replicate != want.Replicate || got.Field != want.Field || got.Status != want.Status {
+			t.Fatalf("reopen identity mismatch: got %+v want %+v", got, want)
+		}
+		if (got.Value == nil) != (want.Value == nil) || (got.Value != nil && want.Value != nil && math.Abs(*got.Value-*want.Value) > 1e-12) {
+			t.Fatalf("reopen value mismatch: got %+v want %+v", got, want)
+		}
+	}
+	// Technical replicates remain aggregated technical repeats, never independent n.
+	reopenedGrid := resultgrid.New(schema, toGridCells(reopenedEvent.ResultCells))
+	reopenedReview := resultgrid.Summarize(reopenedGrid)
+	if len(reopenedReview.Rows) != len(review.Rows) {
+		t.Fatalf("reopen review rows = %d, want %d", len(reopenedReview.Rows), len(review.Rows))
+	}
+	reopenedRecorded := 0
+	for _, row := range reopenedReview.Rows {
+		reopenedRecorded += row.Recorded
+	}
+	recorded := 0
+	for _, row := range review.Rows {
+		recorded += row.Recorded
+	}
+	if reopenedRecorded != recorded {
+		t.Fatalf("reopen recorded count = %d, want %d", reopenedRecorded, recorded)
 	}
 
 	cli := "D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/release/labworkbench.exe"
@@ -427,12 +467,12 @@ func seedPlatePlan(ctx context.Context, svc runs.DesignService, designID, assayI
 		well, sample, group string
 		rep                 int
 	}{
-		{"A1", control + "-1", control, 1},
-		{"A2", control + "-2", control, 2},
-		{"A3", control + "-3", control, 3},
-		{"A4", treatment + "-1", treatment, 1},
-		{"A5", treatment + "-2", treatment, 2},
-		{"A6", treatment + "-3", treatment, 3},
+		{"A1", control + "-sample-1", control, 1},
+		{"A2", control + "-sample-1", control, 2},
+		{"A3", control + "-sample-1", control, 3},
+		{"A4", treatment + "-sample-1", treatment, 1},
+		{"A5", treatment + "-sample-1", treatment, 2},
+		{"A6", treatment + "-sample-1", treatment, 3},
 	}
 	for _, sample := range samples {
 		groupID := groups[sample.group]

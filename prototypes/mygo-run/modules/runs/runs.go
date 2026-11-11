@@ -22,6 +22,12 @@ type RunService interface {
 	// task. Checks belong to the frozen protocol step; Core rejects any check
 	// that step does not define.
 	SaveTaskChecks(ctx context.Context, input TaskCheckInput) (RunSnapshot, error)
+	// SaveAssetLink persists a validated local asset link for a Run and returns
+	// the durable metadata. Only logical root ID and relative path are stored.
+	SaveAssetLink(ctx context.Context, input AssetLinkInput) (Asset, error)
+	// ListAssetLinks returns all asset links for a Run, including after a
+	// fresh service reload.
+	ListAssetLinks(ctx context.Context, runID string) ([]Asset, error)
 	// CompleteTask marks a task completed and returns the persisted snapshot.
 	CompleteTask(ctx context.Context, input CompleteTaskInput) (RunSnapshot, error)
 	// Close releases the database connection.
@@ -325,7 +331,7 @@ type AsterDocRef struct {
 }
 
 type AsterDocProjection struct {
-	Design   string `json:"design"`
+	Design   string           `json:"design"`
 	Document AsterDocSnapshot `json:"document"`
 }
 
@@ -353,4 +359,33 @@ type DesignSaveInput struct {
 	ExpectedRevision uint64 `json:"expectedRevision"`
 	Changes          string `json:"changes"`
 	OperationID      string `json:"operationId"`
+}
+
+// Asset is the durable asset reference contract. It mirrors
+// internal/assets.Asset so the service can carry the same metadata across
+// the native boundary without embedding file bytes.
+type Asset struct {
+	ID           string    `json:"id"`
+	RootID       string    `json:"rootId"`
+	RelativePath string    `json:"relativePath"`
+	MediaType    string    `json:"mediaType"`
+	Size         int64     `json:"size"`
+	ModTime      string    `json:"modTime"`
+	SHA256       string    `json:"sha256,omitempty"`
+	Availability string    `json:"availability"`
+	Link         AssetLink `json:"link"`
+	LinkedAt     string    `json:"linkedAt"`
+	ActorID      string    `json:"actorId,omitempty"`
+}
+
+// AssetLink names the experiment object an asset belongs to.
+type AssetLink struct {
+	RunID    string `json:"runId"`
+	TaskKey  string `json:"taskKey"`
+	SampleID string `json:"sampleId,omitempty"`
+}
+
+// AssetLinkInput carries one asset reference to persist for a Run.
+type AssetLinkInput struct {
+	Asset Asset `json:"asset"`
 }

@@ -24,15 +24,17 @@ type Module struct {
 	Data   map[string]any
 }
 
-// Plate is the plate96 module payload this prototype understands.
+// Plate is the plate module payload; format selects its geometry.
 type Plate struct {
-	Kind      string              `yaml:"kind" json:"kind"`
-	ID        string              `yaml:"id" json:"id"`
-	Schema    int                 `yaml:"schema" json:"schema"`
-	Format    int                 `yaml:"format,omitempty" json:"format,omitempty"`
-	Assay     string              `yaml:"assay,omitempty" json:"assay,omitempty"`
-	Timepoint string              `yaml:"timepoint,omitempty" json:"timepoint,omitempty"`
-	Groups    map[string][]string `yaml:"groups" json:"groups"`
+	Kind       string              `yaml:"kind" json:"kind"`
+	ID         string              `yaml:"id" json:"id"`
+	Schema     int                 `yaml:"schema" json:"schema"`
+	Format     int                 `yaml:"format,omitempty" json:"format,omitempty"`
+	Assay      string              `yaml:"assay,omitempty" json:"assay,omitempty"`
+	Timepoint  string              `yaml:"timepoint,omitempty" json:"timepoint,omitempty"`
+	Groups     map[string][]string `yaml:"groups" json:"groups"`
+	Samples    map[string]string   `yaml:"samples,omitempty" json:"samples,omitempty"`
+	Replicates map[string]int      `yaml:"replicates,omitempty" json:"replicates,omitempty"`
 }
 
 // Document is a parsed AsterML source. Source is always the canonical text;
@@ -327,7 +329,7 @@ func parseModuleWith(body string, start, end int, registry *Registry) (Module, e
 	}
 	module := Module{Kind: header.Kind, ID: header.ID, Schema: header.Schema,
 		Body: body, Start: start, End: end, Data: data}
-	if header.Kind == "plate96" || header.Kind == "plate" {
+	if header.Kind == "plate" {
 		var plate Plate
 		if err := yaml.Unmarshal([]byte(body), &plate); err != nil {
 			return Module{}, fmt.Errorf("plate %q: %w", header.ID, err)
@@ -349,6 +351,22 @@ func normalizeGroups(groups map[string][]string) map[string][]string {
 			normalized = append(normalized, strings.ToUpper(strings.TrimSpace(well)))
 		}
 		out[strings.TrimSpace(group)] = normalized
+	}
+	return out
+}
+
+func normalizeSamples(samples map[string]string) map[string]string {
+	out := make(map[string]string, len(samples))
+	for well, sample := range samples {
+		out[strings.ToUpper(strings.TrimSpace(well))] = strings.TrimSpace(sample)
+	}
+	return out
+}
+
+func normalizeReplicates(replicates map[string]int) map[string]int {
+	out := make(map[string]int, len(replicates))
+	for well, replicate := range replicates {
+		out[strings.ToUpper(strings.TrimSpace(well))] = replicate
 	}
 	return out
 }
@@ -384,6 +402,43 @@ func validatePlate(plate Plate) error {
 			seen[well] = group
 		}
 	}
+	sampleByWell := map[string]string{}
+	for well, sampleID := range plate.Samples {
+		well = strings.ToUpper(strings.TrimSpace(well))
+		if !validWell(well, geometry) {
+			return fmt.Errorf("sample well %q is outside %dx%d", well, geometry.Rows, geometry.Columns)
+		}
+		if _, ok := seen[well]; !ok {
+			return fmt.Errorf("sample well %s has no group assignment", well)
+		}
+		sampleID = strings.TrimSpace(sampleID)
+		if sampleID == "" {
+			return fmt.Errorf("sample ID for well %s cannot be empty", well)
+		}
+		if _, exists := sampleByWell[well]; exists {
+			return fmt.Errorf("sample assignment for well %s is duplicated", well)
+		}
+		sampleByWell[well] = sampleID
+	}
+	seenReplicates := map[string]string{}
+	for well, replicate := range plate.Replicates {
+		well = strings.ToUpper(strings.TrimSpace(well))
+		if !validWell(well, geometry) {
+			return fmt.Errorf("replicate well %q is outside %dx%d", well, geometry.Rows, geometry.Columns)
+		}
+		sampleID := sampleByWell[well]
+		if sampleID == "" {
+			return fmt.Errorf("replicate well %s has no sample ID", well)
+		}
+		if replicate < 1 {
+			return fmt.Errorf("replicate for well %s must be positive", well)
+		}
+		key := fmt.Sprintf("%s\x00%d", sampleID, replicate)
+		if previous, exists := seenReplicates[key]; exists {
+			return fmt.Errorf("sample %s replicate %d is assigned to both %s and %s", sampleID, replicate, previous, well)
+		}
+		seenReplicates[key] = well
+	}
 	return nil
 }
 
@@ -413,7 +468,7 @@ func (d *Document) UpdatePlate(id string, groups map[string][]string) (string, e
 	}
 	module := d.Modules[index]
 	if module.Plate == nil {
-		return "", fmt.Errorf("module %q is not a plate96", id)
+		return "", fmt.Errorf("module %q is not a plate", id)
 	}
 	previous := module.End
 	plate := *module.Plate

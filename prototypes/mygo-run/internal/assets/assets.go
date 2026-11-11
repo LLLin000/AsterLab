@@ -20,11 +20,11 @@ import (
 type MediaType string
 
 const (
-	MediaImage   MediaType = "image"
-	MediaTable   MediaType = "table"
+	MediaImage    MediaType = "image"
+	MediaTable    MediaType = "table"
 	MediaDocument MediaType = "document"
-	MediaBinary  MediaType = "binary"
-	MediaUnknown MediaType = "unknown"
+	MediaBinary   MediaType = "binary"
+	MediaUnknown  MediaType = "unknown"
 )
 
 // Availability states whether the referenced file can be read right now.
@@ -73,11 +73,23 @@ func (r Roots) Resolve(a Asset) (string, error) {
 	if rel == "" {
 		return "", fmt.Errorf("asset %q has no relative path", a.ID)
 	}
-	clean := filepath.Clean(rel)
-	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("asset %q relative path escapes its root", a.ID)
 	}
-	return filepath.Join(base, clean), nil
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return "", fmt.Errorf("resolve root %q: %w", a.RootID, err)
+	}
+	target, err := filepath.EvalSymlinks(filepath.Join(realBase, clean))
+	if err != nil {
+		return "", fmt.Errorf("resolve asset %q: %w", a.ID, err)
+	}
+	inside, err := filepath.Rel(realBase, target)
+	if err != nil || filepath.IsAbs(inside) || inside == ".." || strings.HasPrefix(inside, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("asset %q resolves outside its root", a.ID)
+	}
+	return target, nil
 }
 
 // Classify maps a file extension to a coarse media type.
@@ -151,20 +163,35 @@ func Verify(a Asset, path string, withHash bool) (bool, string) {
 // The relative path is derived from the root, so the caller passes a directory
 // root and the concrete file; nothing absolute is persisted.
 func NewLink(rootID, rootDir, filePath string, link Link, actorID string, withHash bool) (Asset, error) {
-	rel, err := filepath.Rel(rootDir, filePath)
+	if strings.TrimSpace(rootID) == "" || strings.TrimSpace(link.RunID) == "" || strings.TrimSpace(link.TaskKey) == "" {
+		return Asset{}, fmt.Errorf("root ID, run ID and task key are required")
+	}
+	root, err := filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		return Asset{}, fmt.Errorf("resolve asset root: %w", err)
+	}
+	file, err := filepath.EvalSymlinks(filePath)
+	if err != nil {
+		return Asset{}, fmt.Errorf("resolve asset path: %w", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return Asset{}, fmt.Errorf("asset root %q is not a directory", rootDir)
+	}
+	rel, err := filepath.Rel(root, file)
 	if err != nil {
 		return Asset{}, fmt.Errorf("asset is outside root %q: %w", rootID, err)
 	}
-	if filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") {
+	if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return Asset{}, fmt.Errorf("asset %q escapes root %q", filePath, rootID)
 	}
-	size, modTime, hash, availability := Describe(filePath, withHash)
+	size, modTime, hash, availability := Describe(file, withHash)
 	if availability == Unavailable {
 		return Asset{}, fmt.Errorf("file %q is not readable", filePath)
 	}
 	rel = filepath.ToSlash(rel)
 	return Asset{
-		ID:           fmt.Sprintf("asset-%s-%x", slugify(rel), time.Now().UnixNano()),
+		ID:           stableID(rootID, rel),
 		RootID:       rootID,
 		RelativePath: rel,
 		MediaType:    Classify(rel),
@@ -178,24 +205,8 @@ func NewLink(rootID, rootDir, filePath string, link Link, actorID string, withHa
 	}, nil
 }
 
-func slugify(path string) string {
-	base := filepath.Base(path)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	var b strings.Builder
-	for _, r := range strings.ToLower(name) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		}
-		if r == '-' || r == '_' {
-			// keep separators out of the ID; use hyphen
-			b.WriteByte('-')
-		}
-	}
-	out := strings.Trim(b.String(), "-")
-	if out == "" {
-		out = "file"
-	}
-	return out
+// stableID uses the same 128-bit root/path digest as the Core asset contract.
+func stableID(rootID, rel string) string {
+	h := sha256.Sum256([]byte(rootID + "\x00" + rel))
+	return "asset-" + hex.EncodeToString(h[:16])
 }
