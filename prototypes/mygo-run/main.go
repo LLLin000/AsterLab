@@ -790,7 +790,10 @@ func (a *app) saveSession() {
 		session.RunID = a.snap.RunID
 	}
 	if a.runWS != nil {
-		session.Collapsed = a.runWS.Collapsed
+		collapsed := a.runWS.TreeCollapsed()
+		if len(collapsed) > 0 {
+			session.Collapsed = collapsed
+		}
 		if a.runWS.Selected != "" {
 			for _, task := range a.snap.Tasks {
 				if task.Key == a.runWS.Selected {
@@ -837,6 +840,7 @@ func (a *app) restoreSession() {
 		if loadedRun && a.runWS != nil {
 			if session.Collapsed != nil {
 				a.runWS.Collapsed = session.Collapsed
+				a.runWS.SetTreeCollapsed(session.Collapsed)
 			}
 			if session.TaskPath != "" {
 				for _, task := range a.snap.Tasks {
@@ -2272,6 +2276,9 @@ func main() {
 			if a.runWS != nil {
 				a.runWS.Selected = taskKey
 			}
+			a.saveSession()
+		},
+		ToggleTree: func() {
 			a.saveSession()
 		},
 		SaveChecks: func(taskKey string, checks []runworkspace.CheckAckView) {

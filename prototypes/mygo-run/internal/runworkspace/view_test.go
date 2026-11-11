@@ -115,3 +115,19 @@ func TestSyncFromKeepsSelection(t *testing.T) {
 		t.Fatalf("selection changed after sync: %q -> %q", first, s.Selected)
 	}
 }
+
+func TestTreeExpansionRoundTrip(t *testing.T) {
+	s := NewState(nil, Callbacks{})
+	s.SetTreeCollapsed(map[string]bool{"step-rna-extract": true})
+	if got := s.TreeCollapsed(); !got["step-rna-extract"] {
+		t.Fatalf("collapsed state not returned: %+v", got)
+	}
+	open := s.treeOpen("step-rna-extract")
+	if open == nil || *open {
+		t.Fatalf("collapsed branch pointer = %v", open)
+	}
+	s.SetTreeCollapsed(map[string]bool{"step-rna-extract": false})
+	if !*open {
+		t.Fatal("expanded state not restored")
+	}
+}

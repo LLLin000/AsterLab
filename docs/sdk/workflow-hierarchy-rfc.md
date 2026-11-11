@@ -116,5 +116,5 @@ go test -run TestPathBoundRunTreeProjection .   PASS
 Track D hardening (unique ownership, recursive trie, source-block validation,
 business order, structured task key, real frozen Run proof) is documented in
 `docs/sdk/workflow-hierarchy-track-d.md`. The Run rail now consumes this
-projection when a real composite exists; single-layer runs keep the legacy
-rail.
+projection through Onevra's existing collapsible `components.Tree`; single-layer
+runs keep the legacy rail.

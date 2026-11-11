@@ -2,6 +2,7 @@ package runworkspace
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"asterlab-mygo-prototype/internal/theme"
@@ -16,6 +17,8 @@ import (
 // mutates a record itself.
 type Callbacks struct {
 	SelectTask func(taskKey string)
+	// ToggleTree persists expansion changes after a parent row is clicked.
+	ToggleTree func()
 	SaveChecks func(taskKey string, checks []CheckAckView)
 	Complete   func(taskKey string, checks []CheckAckView)
 	OpenBatch  func(batchID string)
@@ -39,8 +42,15 @@ type State struct {
 	// Checks holds the operator's pending checkbox state per (task, check).
 	Checks map[string]*bool
 
-	// Collapsed tracks whether a step group is collapsed in the left rail.
+	// Collapsed tracks whether a legacy step group is collapsed in the rail.
 	Collapsed map[string]bool
+
+	// Expanded is the stable expansion state for the tree rail. Pointers are
+	// kept across frames because components.TreeItem owns the toggle target.
+	Expanded map[string]*bool
+	// expansionFingerprint detects arrow/keyboard toggles for session saving.
+	expansionFingerprint string
+	expansionInitialized bool
 
 	// ShowHistory toggles the third layer (operation history) for the selected task.
 	ShowHistory bool
@@ -56,11 +66,62 @@ type State struct {
 
 // NewState constructs the runtime state from a view model.
 func NewState(vm *RunWorkspaceViewModel, cb Callbacks) *State {
-	s := &State{VM: vm, Callbacks: cb, Checks: map[string]*bool{}, Collapsed: map[string]bool{}}
+	s := &State{VM: vm, Callbacks: cb, Checks: map[string]*bool{}, Collapsed: map[string]bool{}, Expanded: map[string]*bool{}}
 	if vm != nil && vm.Selected != nil {
 		s.Selected = vm.Selected.TaskKey
 	}
 	return s
+}
+
+// treeOpen returns the stable expansion target for a tree node. Roots and
+// composites default to open so the real four-parent/fourteen-row case is
+// visible immediately; the user can collapse any branch.
+func (s *State) treeOpen(id string) *bool {
+	if open, ok := s.Expanded[id]; ok {
+		return open
+	}
+	open := true
+	s.Expanded[id] = &open
+	return &open
+}
+
+// TreeCollapsed returns the collapsed branch IDs for the session. It includes
+// legacy rail groups so one session field serves both navigation modes.
+func (s *State) TreeCollapsed() map[string]bool {
+	out := map[string]bool{}
+	for id, open := range s.Expanded {
+		if open != nil && !*open {
+			out[id] = true
+		}
+	}
+	for id, collapsed := range s.Collapsed {
+		if collapsed {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// SetTreeCollapsed restores expansion from the session. Unknown IDs are
+// ignored; the default remains open.
+func (s *State) SetTreeCollapsed(collapsed map[string]bool) {
+	for id, value := range collapsed {
+		open := s.treeOpen(id)
+		*open = !value
+	}
+}
+
+// treeExpansionFingerprint changes when any branch toggles, letting the host
+// persist arrow/keyboard expansion without a custom click hook.
+func (s *State) treeExpansionFingerprint() string {
+	ids := make([]string, 0, len(s.Expanded))
+	for id, open := range s.Expanded {
+		if open != nil && !*open {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, "\x00")
 }
 
 // SyncFrom replaces the view model after a Core reload, preserving UI state
@@ -325,9 +386,17 @@ func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline 
 			})
 		}
 		if s.VM.Tree != nil {
-			for _, root := range s.VM.Tree.Roots {
-				treeNode(c, s, t, tokens, root, 0)
+			fingerprint := s.treeExpansionFingerprint()
+			if s.expansionInitialized && fingerprint != s.expansionFingerprint && s.Callbacks.ToggleTree != nil {
+				s.Callbacks.ToggleTree()
 			}
+			s.expansionInitialized = true
+			s.expansionFingerprint = fingerprint
+			components.Tree(c, func() {
+				for _, root := range s.VM.Tree.Roots {
+					treeNode(c, s, t, tokens, root)
+				}
+			})
 			return
 		}
 		for i, step := range s.VM.Steps {
@@ -339,81 +408,53 @@ func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline 
 	})
 }
 
-func treeNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, node *workflowtree.Node, depth int) {
+func treeNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, node *workflowtree.Node) {
 	if node == nil {
 		return
 	}
 	if node.Kind == workflowtree.KindTask {
-		treeTaskRow(c, s, t, tokens, node.Title, node, depth)
+		treeLeafItem(c, s, t, tokens, node.Title, node)
 		return
 	}
 	if !node.Composite && len(node.Children) == 1 && node.Children[0].Kind == workflowtree.KindTask {
-		treeTaskRow(c, s, t, tokens, node.Title, node.Children[0], depth)
+		treeLeafItem(c, s, t, tokens, node.Title, node.Children[0])
 		return
 	}
-	selected := treeContainsSelected(s, node)
-	left := t.Space(2) + float32(depth)*10
-	row := ui.Row(c).FillWidth().Padding(t.Space(2), left).Radius(6).
-		AlignItems(ui.Center).Gap(t.Space(1.5))
-	if selected {
-		row.Background(t.Accent.Alpha(.10))
+	open := s.treeOpen(node.ID)
+	label := node.Title
+	if node.Composite {
+		label = fmt.Sprintf("%s   %d/%d", node.Title, node.Completed, node.Total)
 	}
-	row.Children(func() {
+	item := components.TreeItemWithLeading(c, label, open, s.Selected == node.ID, func(c *ui.Context, size float32) {
 		if node.Composite {
-			icon := lucide.ChevronRight()
-			if !s.Collapsed[node.ID] {
-				icon = lucide.ChevronDown()
-			}
-			components.Icon(c, icon).Size(12, 12)
-		} else {
-			treeStatusDot(c, node.Status, t, tokens)
+			components.Icon(c, lucide.Folder()).Size(size, size).TextColor(treeStatusColor(node.Status, t, tokens))
+			return
 		}
-		ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
-			ui.Text(c, node.Title).FontSize(t.Rem(.82)).FontWeight(600).
-				TextColor(t.Text).SingleLine().Ellipsis("…")
-			if node.Composite {
-				ui.Text(c, fmt.Sprintf("%d/%d 个子操作", node.Completed, node.Total)).
-					FontSize(t.Rem(.66)).TextColor(t.TextMuted)
-			}
-		})
-		if node.Composite {
-			ui.Text(c, fmt.Sprintf("%d/%d", node.Completed, node.Total)).
-				FontSize(t.Rem(.68)).TextColor(t.TextMuted).FontFeatures("tnum")
+		ui.Box(c).Size(7, 7).Radius(3.5).Background(treeStatusColor(node.Status, t, tokens))
+	}, func() {
+		for _, child := range node.Children {
+			treeNode(c, s, t, tokens, child)
 		}
-		treeStatusDot(c, node.Status, t, tokens)
 	})
-	if row.Clicked() {
+	if item.Clicked() {
 		if node.Composite {
-			s.Collapsed[node.ID] = !s.Collapsed[node.ID]
+			*open = !*open
 		} else if len(node.Children) > 0 {
 			selectTreeTask(s, node.Children[0].ID)
 		}
 	}
-	if node.Composite && !s.Collapsed[node.ID] {
-		for _, child := range node.Children {
-			treeNode(c, s, t, tokens, child, depth+1)
-		}
-	}
 }
 
-func treeTaskRow(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, title string, task *workflowtree.Node, depth int) {
+func treeLeafItem(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, title string, task *workflowtree.Node) {
 	selected := s.Selected == task.ID
-	left := t.Space(2) + float32(depth)*10
-	row := ui.ButtonBase(c).FillWidth().Radius(5).
-		Padding(t.Space(1.5), left).Gap(t.Space(1.5)).AlignItems(ui.Center)
-	if selected {
-		row.Background(t.Accent.Alpha(.08))
-	}
-	row.Children(func() {
-		treeStatusDot(c, task.Status, t, tokens)
-		ui.Text(c, title).FontSize(t.Rem(.78)).TextColor(t.Text).
-			SingleLine().Ellipsis("…")
-	})
+	item := components.TreeItemWithLeading(c, title, nil, selected, func(c *ui.Context, size float32) {
+		ui.Box(c).Size(7, 7).Radius(3.5).Background(treeStatusColor(task.Status, t, tokens))
+	}, nil)
 	if selected && s.railScrollKey != task.ID {
-		row.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
+		item.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
 		s.railScrollKey = task.ID
 	}
-	if row.Clicked() {
+	if item.Clicked() {
 		selectTreeTask(s, task.ID)
 	}
 }
@@ -428,34 +469,18 @@ func selectTreeTask(s *State, taskKey string) {
 	}
 }
 
-func treeContainsSelected(s *State, node *workflowtree.Node) bool {
-	if node == nil {
-		return false
-	}
-	if s.Selected == node.ID {
-		return true
-	}
-	for _, child := range node.Children {
-		if treeContainsSelected(s, child) {
-			return true
-		}
-	}
-	return false
-}
-
-func treeStatusDot(c *ui.Context, status string, t *ui.Theme, tokens theme.Tokens) {
-	color := tokens.NeutralText
+func treeStatusColor(status string, t *ui.Theme, tokens theme.Tokens) ui.Color {
 	switch status {
 	case "completed":
-		color = t.Success
+		return t.Success
 	case "current", "in_progress":
-		color = t.Accent
+		return t.Accent
 	case "blocked":
-		color = t.Danger
+		return t.Danger
 	case "unresolved":
-		color = t.Warning
+		return t.Warning
 	}
-	ui.Box(c).Size(7, 7).Radius(3.5).Shrink(0).Background(color)
+	return tokens.NeutralText
 }
 
 // flowConnector draws the vertical link and arrow between two step nodes.

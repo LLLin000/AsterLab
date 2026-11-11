@@ -1,7 +1,8 @@
 # Workflow hierarchy UI proposal — Track C
 
-Status: the Run tree navigation is implemented in Track D. Canvas
-subflow expansion/drill-down and Agent write commands remain design only.
+Status: the Run tree navigation is implemented in Track D using the existing
+Onevra collapsible tree component. Canvas subflow expansion/drill-down and
+Agent write commands remain design only.
 
 ## 1. Design Canvas
 

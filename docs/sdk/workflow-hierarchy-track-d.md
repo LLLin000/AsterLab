@@ -47,18 +47,24 @@ freeze remains authoritative for the parent block_use.
 
 - `RunWorkspaceViewModel.Tree` is set only when the projection is valid and
   `HasComposite()` is true. Otherwise the existing single-layer rail is kept.
-- Tree rail:
-  - 4 top-level steps;
-  - RNA extraction expands/collapses and shows 10 child operations;
-  - parent rows show `Completed/Total` and aggregated status;
+- Tree rail uses Onevra's existing collapsible tree component
+  (`components.Tree` + `TreeItemWithLeading`), not a hand-rolled row tree:
+  - standard disclosure arrow, indentation, focus ring, keyboard
+    Up/Down/Home/End/Left/Right, and scroll-into-view;
+  - parent rows use a folder mark and `Completed/Total` in the label;
+  - child rows use a status dot and the frozen human title;
+  - 4 top-level steps; RNA extraction expands/collapses and shows 10 child
+    operations;
   - leaf parents (RNA QC, RT, qPCR) select their single child operation;
   - child selection uses the existing right-side Run UI v1 detail, checks,
     recording, and history;
-  - selected child auto-scrolls into view;
   - blocked qPCR shows a danger dot; RNA extraction shows `5/10` current.
+- Parent rows only expand/collapse; they are never selected as completable
+  tasks. Child rows select the existing detail surface.
 - If the projection has diagnostics, the rail shows a warning and falls back to
   the legacy navigation; no incorrect ownership is rendered.
-- Session persists `task_path` and the tree `collapsed` map, so restart
+- Session persists `task_path` and the tree `collapsed` map. Arrow, keyboard,
+  double-click and row toggles all update the expansion fingerprint, so restart
   restores the selected child and expansion state.
 - Single-layer RNA extraction still uses the legacy 10-card rail; the tree is
   not shown.
@@ -67,9 +73,11 @@ freeze remains authoritative for the parent block_use.
 
 | Screenshot | Content |
 |---|---|
-| `evidence/rtqpcr-tree.png` | Four top-level steps; RNA extraction expanded with 10 children; `5/10` current; qPCR blocked; selected 01. |
-| `evidence/rtqpcr-tree-wash2a.png` | Wash II first selected; right-side frozen instruction, check, recording and history; tree parent progress. |
-| `evidence/rtqpcr-tree-restart.png` | Restart restores the same tree, selected Wash II first, expansion and parent status. |
+| `evidence/rtqpcr-tree-standard.png` | Four top-level steps; RNA extraction expanded with 10 children; `5/10` current; qPCR blocked; selected 01. |
+| `evidence/rtqpcr-tree-standard-click-wash2a.png` | Wash II first selected by clicking the tree; right-side frozen instruction, check, recording and history. |
+| `evidence/rtqpcr-tree-collapsed.png` | Parent row collapsed; only the four top-level steps remain; no parent completion action. |
+| `evidence/rtqpcr-tree-collapsed-restart.png` | Restart restores the collapsed branch. |
+| `evidence/rtqpcr-tree-standard-restart.png` | Restart restores the selected Wash II first and the expanded tree. |
 | `evidence/run-09-elute-regression.png` | Single-layer RNA extraction still uses the legacy 10-card rail; no tree regression. |
 
 Commands:
@@ -77,6 +85,7 @@ Commands:
 ```text
 go test ./...                                      PASS
 go test ./internal/workflowtree                    PASS
+go test ./internal/runworkspace                    PASS
 go test -run TestPathBoundRunTreeProjection .      PASS
 go run github.com/egoist/mygo/cmd/mygo native check modules/runs   PASS
 ```
@@ -92,5 +101,8 @@ pending.
   nested block definitions have no direct `DefinitionRef` in the projection.
 - The tree is a Run rail navigation change only; Canvas expand/drill-down and
   Agent `inspect_tree`/write commands remain future work.
+- The existing tree component owns keyboard/focus; row click is intentionally
+  expand-only for parents, while double-click and the disclosure arrow also
+  toggle in the component.
 - Sample-level status matrix is still absent.
 - No parent task can be completed independently; parent status is derived.
