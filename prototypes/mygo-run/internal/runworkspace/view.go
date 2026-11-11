@@ -1,0 +1,590 @@
+package runworkspace
+
+import (
+	"fmt"
+	"strings"
+
+	"asterlab-mygo-prototype/internal/theme"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
+)
+
+// Callbacks are the write seams. Every write goes through Core; the UI never
+// mutates a record itself.
+type Callbacks struct {
+	SelectTask  func(taskKey string)
+	SaveChecks  func(taskKey string, checks []CheckAckView)
+	Complete    func(taskKey string, checks []CheckAckView)
+	OpenBatch   func(batchID string)
+	// Recording renders the recording module for a task. The host supplies it so
+	// the same module serves Design, Run, Notebook and PDF.
+	Recording func(c *ui.Context, task *RunTaskViewModel)
+}
+
+// CheckAckView is one operator verdict sent back to Core.
+type CheckAckView struct {
+	CheckID string
+	Status  string
+}
+
+// State holds the mutable UI state of the run workspace.
+type State struct {
+	VM       *RunWorkspaceViewModel
+	Selected string
+	Callbacks Callbacks
+
+	// Checks holds the operator's pending checkbox state per (task, check).
+	Checks map[string]*bool
+
+	// Collapsed tracks whether a step group is collapsed in the left rail.
+	Collapsed map[string]bool
+
+	// ShowHistory toggles the third layer (operation history) for the selected task.
+	ShowHistory bool
+
+	Narrow bool
+
+	// RecordingValid reports whether the recording module has unsaved edits.
+	RecordingDirty bool
+}
+
+// NewState constructs the runtime state from a view model.
+func NewState(vm *RunWorkspaceViewModel, cb Callbacks) *State {
+	s := &State{VM: vm, Callbacks: cb, Checks: map[string]*bool{}, Collapsed: map[string]bool{}}
+	if vm != nil && vm.Selected != nil {
+		s.Selected = vm.Selected.TaskKey
+	}
+	return s
+}
+
+// SyncFrom replaces the view model after a Core reload, preserving UI state
+// (selection, collapsible groups) but never inventing facts.
+func (s *State) SyncFrom(vm *RunWorkspaceViewModel) {
+	if vm == nil {
+		return
+	}
+	s.VM = vm
+	if s.Selected != "" {
+		if _, ok := vm.TaskByKey[s.Selected]; ok {
+			return
+		}
+		// Keep a step-node selection valid too.
+		for _, step := range vm.Steps {
+			if step.TaskKey == s.Selected {
+				return
+			}
+		}
+	}
+	s.Selected = ""
+	if vm.Selected != nil {
+		s.Selected = vm.Selected.TaskKey
+	}
+}
+
+// selectedTask returns the task view model for the current selection, falling
+// back to the first task in the run.
+func (s *State) selectedTask() *RunTaskViewModel {
+	if s.VM == nil {
+		return nil
+	}
+	if s.Selected != "" {
+		if t, ok := s.VM.TaskByKey[s.Selected]; ok {
+			return t
+		}
+		for _, step := range s.VM.Steps {
+			if step.TaskKey == s.Selected {
+				if len(step.Children) > 0 {
+					return step.Children[0]
+				}
+				return step
+			}
+		}
+	}
+	if s.VM.Selected != nil {
+		return s.VM.Selected
+	}
+	return nil
+}
+
+// selectedStep returns the step group that owns the selected task.
+func (s *State) selectedStep() *RunTaskViewModel {
+	if s.VM == nil {
+		return nil
+	}
+	for _, step := range s.VM.Steps {
+		if step.TaskKey == s.Selected {
+			return step
+		}
+		for _, child := range step.Children {
+			if child.TaskKey == s.Selected {
+				return step
+			}
+		}
+	}
+	return nil
+}
+
+// checkOn returns the current checkbox value for a check, honouring the
+// operator's pending edit first, then the stored status.
+func (s *State) checkOn(taskKey, checkID string) *bool {
+	key := taskKey + "\x00" + checkID
+	if v, ok := s.Checks[key]; ok {
+		return v
+	}
+	task := s.taskByKey(taskKey)
+	if task != nil {
+		for _, c := range task.Checks {
+			if c.CheckID == checkID {
+				on := c.Status == "passed"
+				b := on
+				s.Checks[key] = &b
+				return &b
+			}
+		}
+	}
+	off := false
+	s.Checks[key] = &off
+	return &off
+}
+
+func (s *State) taskByKey(key string) *RunTaskViewModel {
+	if s.VM == nil {
+		return nil
+	}
+	return s.VM.TaskByKey[key]
+}
+
+// openBlocking returns the blocking checks that are still unconfirmed for a task.
+func (s *State) openBlocking(t *RunTaskViewModel) []CheckViewModel {
+	var out []CheckViewModel
+	if t == nil {
+		return out
+	}
+	for _, c := range t.Checks {
+		if c.Blocking && !*s.checkOn(t.TaskKey, c.CheckID) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// acks builds the Core payload from current checkbox state.
+func (s *State) acks(t *RunTaskViewModel) []CheckAckView {
+	var out []CheckAckView
+	if t == nil {
+		return out
+	}
+	for _, c := range t.Checks {
+		status := "failed"
+		if *s.checkOn(t.TaskKey, c.CheckID) {
+			status = "passed"
+		}
+		out = append(out, CheckAckView{CheckID: c.CheckID, Status: status})
+	}
+	return out
+}
+
+// View renders the whole run workspace: left flow rail and right task workspace.
+func View(c *ui.Context, s *State) {
+	if s == nil || s.VM == nil {
+		return
+	}
+	t := c.Theme()
+	tokens := theme.GetTokens(t)
+
+	ui.Column(c).Fill().Background(tokens.Canvas).Children(func() {
+		runHeader(c, s, t, tokens)
+		if s.VM.Status == "loading" {
+			ui.Row(c).Fill().Center().Children(func() {
+				ui.Text(c, "正在加载实验运行数据…").FontSize(14).TextColor(t.TextMuted)
+			})
+			return
+		}
+		if len(s.VM.Steps) == 0 {
+			ui.Row(c).Fill().Center().Children(func() {
+				ui.Column(c).Gap(8).Center().Children(func() {
+					ui.Text(c, "此运行没有任务").FontSize(16).Bold().TextColor(t.Text)
+					ui.Text(c, "冻结方案中没有可执行步骤，或步骤未绑定检测。").
+						FontSize(12).TextColor(t.TextMuted)
+				})
+			})
+			return
+		}
+		if s.shouldStack(c) {
+			// Narrow: flow on top, task below.
+			ui.Scroll(c).Grow(1).Children(func() {
+				ui.Column(c).FillWidth().Gap(12).Padding(12).Children(func() {
+					flowRail(c, s, t, tokens, true)
+					taskWorkspace(c, s, t, tokens)
+				})
+			})
+			return
+		}
+		ui.Row(c).Grow(1).MinHeight(0).Children(func() {
+			ui.Box(c).Width(railWidth(c)).Shrink(0).FillHeight().
+				Background(tokens.RailBackground).
+				Border(1, tokens.Border).Children(func() {
+				flowRail(c, s, t, tokens, false)
+			})
+			ui.Column(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
+				ui.Scroll(c).Grow(1).Children(func() {
+					ui.Column(c).FillWidth().Padding(16, 20).Children(func() {
+						taskWorkspace(c, s, t, tokens)
+					})
+				})
+			})
+		})
+	})
+}
+
+func (s *State) shouldStack(c *ui.Context) bool {
+	if s.Narrow {
+		return true
+	}
+	if c != nil {
+		if w, _ := c.Size(); w > 0 && w <= 1000 {
+			return true
+		}
+	}
+	return false
+}
+
+func railWidth(c *ui.Context) float32 {
+	if c != nil {
+		if w, _ := c.Size(); w > 0 && w < 1200 {
+			return 240
+		}
+	}
+	return 272
+}
+
+// runHeader is the compact title bar: run title, status, frozen revision.
+func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
+	vm := s.VM
+	done, total := 0, 0
+	for _, step := range vm.Steps {
+		total++
+		if step.Status == TaskStatusCompleted {
+			done++
+		}
+	}
+	ui.Row(c).FillWidth().Height(52).Padding(0, 16).
+		Background(tokens.Surface).Border(1, tokens.Border).
+		AlignItems(ui.Center).Children(func() {
+		ui.Text(c, vm.Title).FontSize(16).Bold().TextColor(t.Text).
+			SingleLine().Ellipsis("…").Shrink(1).MaxWidth(420)
+		ui.Spacer(c)
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			if vm.Status != "" {
+				statusPill(c, vm.Status, tokens)
+			}
+			ui.Text(c, fmt.Sprintf("冻结方案 rev %d", vm.Revision)).FontSize(11).
+				TextColor(t.TextMuted)
+			ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(11).
+				TextColor(t.TextMuted).FontFeatures("tnum")
+		})
+	})
+}
+
+func statusPill(c *ui.Context, status string, tokens theme.Tokens) {
+	bg, fg := tokens.NeutralBg, tokens.NeutralText
+	switch status {
+	case "completed", "done":
+		bg, fg = tokens.SuccessBg, tokens.SuccessText
+	case "running", "in_progress", "active":
+		bg, fg = tokens.WarningBg, tokens.WarningText
+	case "blocked", "error":
+		bg, fg = tokens.DangerBg, tokens.DangerText
+	}
+	ui.Row(c).Padding(3, 9).Radius(6).Background(bg).Children(func() {
+		ui.Text(c, status).FontSize(11).Bold().TextColor(fg)
+	})
+}
+
+// flowRail is the vertical execution navigation on the left.
+func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline bool) {
+	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3), t.Space(2)).Children(func() {
+		ui.Text(c, "实验流程").FontSize(11).Bold().TextColor(t.TextMuted).
+			Padding(0, 0, t.Space(2), 0)
+		for _, step := range s.VM.Steps {
+			stepNode(c, s, t, tokens, step)
+		}
+	})
+}
+
+// stepNode renders one step group and its tasks.
+func stepNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, step *RunTaskViewModel) {
+	selected := s.Selected == step.TaskKey
+	ui.Column(c).FillWidth().Children(func() {
+		b := ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(2)).Radius(6).
+			AlignItems(ui.Center).Gap(t.Space(2))
+		if selected {
+			b.Background(t.Accent.Alpha(.10))
+		}
+		b.Children(func() {
+			statusDot(c, step.Status, t, tokens)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+				ui.Text(c, step.StepTitle).FontSize(t.Rem(.9)).FontWeight(600).
+					TextColor(t.Text).SingleLine().Ellipsis("…")
+				meta := ""
+				if step.Timepoint != "" {
+					meta = step.Timepoint
+				}
+				if step.AssayID != "" {
+					if meta != "" {
+						meta += " · "
+					}
+					meta += step.AssayID
+				}
+				if meta != "" {
+					ui.Text(c, meta).FontSize(t.Rem(.72)).TextColor(t.TextMuted).
+						SingleLine().Ellipsis("…")
+				}
+			})
+			if len(step.Children) > 1 {
+				if components.IconButton(c, lucide.ChevronDown(), "展开任务", components.IconButtonCompact).Clicked() {
+					s.Collapsed[step.TaskKey] = !s.Collapsed[step.TaskKey]
+				}
+			}
+		})
+		if b.Clicked() {
+			s.Selected = step.TaskKey
+			if s.Callbacks.SelectTask != nil {
+				s.Callbacks.SelectTask(step.TaskKey)
+			}
+		}
+		// Collapsed by default when multiple tasks; the selected task is always
+		// reachable from the right panel anyway.
+		if len(step.Children) > 1 && !s.Collapsed[step.TaskKey] {
+			ui.Column(c).FillWidth().Padding(t.Space(2), 0, 0, t.Space(3)).Gap(t.Space(.5)).
+				Children(func() {
+					for _, child := range step.Children {
+						childItem(c, s, t, tokens, child)
+					}
+				})
+		}
+	})
+}
+
+func childItem(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	selected := s.Selected == task.TaskKey
+	row := ui.ButtonBase(c).FillWidth().Radius(5).
+		Padding(t.Space(1.25), t.Space(1.5)).Gap(t.Space(1.5))
+	if selected {
+		row.Background(t.Accent.Alpha(.08))
+	}
+	row.Children(func() {
+		statusDot(c, task.Status, t, tokens)
+		label := task.Timepoint
+		if label == "" {
+			label = task.TaskKey
+		}
+		ui.Text(c, label).FontSize(t.Rem(.78)).TextColor(t.TextMuted).
+			SingleLine().Ellipsis("…")
+	})
+	if row.Clicked() {
+		s.Selected = task.TaskKey
+		if s.Callbacks.SelectTask != nil {
+			s.Callbacks.SelectTask(task.TaskKey)
+		}
+	}
+}
+
+func statusDot(c *ui.Context, status TaskStatus, t *ui.Theme, tokens theme.Tokens) {
+	color := tokens.NeutralText
+	switch status {
+	case TaskStatusCompleted:
+		color = t.Success
+	case TaskStatusCurrent:
+		color = t.Accent
+	case TaskStatusBlocked:
+		color = t.Danger
+	}
+	ui.Box(c).Size(8, 8).Radius(4).Shrink(0).Background(color)
+}
+
+// taskWorkspace is the right column: three fixed layers.
+func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
+	task := s.selectedTask()
+	if task == nil {
+		ui.Text(c, "选择一个步骤查看操作说明").FontSize(13).TextColor(t.TextMuted)
+		return
+	}
+	ui.Column(c).FillWidth().Gap(16).Children(func() {
+		// Layer 1: operation instructions and planned parameters (read-only).
+		procedureLayer(c, s, t, tokens, task)
+		// Layer 2: recording module (host-supplied).
+		recordingLayer(c, s, t, tokens, task)
+		// Layer 3: operation history, collapsed by default.
+		historyLayer(c, s, t, tokens, task)
+	})
+}
+
+func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	ui.Column(c).FillWidth().Padding(16).Radius(float32(tokens.PanelRadius)).
+		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(2)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+			ui.Text(c, task.StepTitle).FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
+			ui.Spacer(c)
+			ui.Text(c, "来自冻结实验方案").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+		})
+		sub := ""
+		if task.Timepoint != "" {
+			sub = "时间点 " + task.Timepoint
+		}
+		if task.AssayID != "" {
+			if sub != "" {
+				sub += " · "
+			}
+			sub += "检测 " + task.AssayID
+		}
+		if sub != "" {
+			ui.Text(c, sub).FontSize(t.Rem(.78)).TextColor(t.TextMuted)
+		}
+		if task.Planned != nil && len(task.Planned.Parameters) > 0 {
+			ui.Divider(c)
+			ui.Text(c, "计划参数").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
+			ui.Row(c).Wrap().Gap(t.Space(2)).Children(func() {
+				for _, p := range task.Planned.Parameters {
+					paramChip(c, p, t, tokens)
+				}
+			})
+		}
+		if len(task.Modules) > 0 {
+			ui.Divider(c)
+			ui.Text(c, "步骤资源").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
+			ui.Row(c).Wrap().Gap(t.Space(1.5)).Children(func() {
+				for _, m := range task.Modules {
+					moduleChip(c, m, t, tokens)
+				}
+			})
+		}
+		// Checks belong to the execution area: operator verdicts are facts.
+		if len(task.Checks) > 0 {
+			ui.Divider(c)
+			checkList(c, s, t, tokens, task)
+		}
+	})
+}
+
+func paramChip(c *ui.Context, p PlannedParameter, t *ui.Theme, tokens theme.Tokens) {
+	value := p.Value
+	if p.Unit != "" {
+		value += " " + p.Unit
+	}
+	ui.Row(c).Padding(4, 9).Radius(6).Background(tokens.Elevated).
+		Border(1, tokens.Border).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, p.Label).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+		ui.Text(c, value).FontSize(t.Rem(.78)).FontWeight(600).TextColor(t.Text)
+	})
+}
+
+func moduleChip(c *ui.Context, m ModuleRef, t *ui.Theme, tokens theme.Tokens) {
+	ui.Row(c).Padding(4, 9).Radius(6).Background(tokens.Elevated).
+		Border(1, tokens.Border).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, moduleLabel(m.Kind, m.Title)).FontSize(t.Rem(.76)).TextColor(t.Text)
+		if m.Role != "" {
+			ui.Text(c, m.Role).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+		}
+	})
+}
+
+func moduleLabel(kind, title string) string {
+	if title != "" {
+		return title
+	}
+	switch kind {
+	case "instrument_profile":
+		return "仪器能力档案"
+	case "dilution":
+		return "稀释计算"
+	case "plate", "plate96":
+		return "孔板"
+	case "measurement_profile":
+		return "测量方案"
+	case "material":
+		return "材料"
+	case "sample":
+		return "样本"
+	case "container":
+		return "容器"
+	}
+	return kind
+}
+
+func checkList(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	open := s.openBlocking(task)
+	ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+		ui.Text(c, "执行确认").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
+		if len(open) > 0 {
+			ui.Row(c).Padding(2, 7).Radius(5).Background(tokens.DangerBg).Children(func() {
+				ui.Text(c, fmt.Sprintf("%d 项未确认", len(open))).FontSize(t.Rem(.68)).
+					Bold().TextColor(tokens.DangerText)
+			})
+		}
+	})
+	for _, check := range task.Checks {
+		check := check
+		on := s.checkOn(task.TaskKey, check.CheckID)
+		box := components.Checkbox(c, on, labelOr(check.Label, check.CheckID))
+		if box.Changed() && s.Callbacks.SaveChecks != nil {
+			s.Callbacks.SaveChecks(task.TaskKey, s.acks(task))
+		}
+		if check.Instruction != "" {
+			ui.Text(c, check.Instruction).FontSize(t.Rem(.7)).TextColor(t.TextMuted).
+				Padding(0, 0, 0, t.Space(1))
+		}
+	}
+}
+
+func labelOr(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
+}
+
+func recordingLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	ui.Column(c).FillWidth().Padding(16).Radius(float32(tokens.PanelRadius)).
+		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(2)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "实验记录").FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
+			ui.Spacer(c)
+			recorded := len(task.Actual.Measurements)
+			if recorded > 0 {
+				ui.Text(c, fmt.Sprintf("已记录 %d 项", recorded)).FontSize(t.Rem(.72)).
+					TextColor(t.TextMuted)
+			}
+		})
+		if s.Callbacks.Recording != nil {
+			s.Callbacks.Recording(c, task)
+			return
+		}
+		ui.Text(c, "没有可用的记录界面。").FontSize(t.Rem(.78)).TextColor(t.TextMuted)
+	})
+}
+
+func historyLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	open := s.ShowHistory
+	components.Collapsible(c, "操作历史", &open, components.CollapsibleOptions{}, func() {
+		ui.Column(c).Gap(t.Space(1.5)).Children(func() {
+			if len(task.Actual.Deviations) > 0 {
+				for _, d := range task.Actual.Deviations {
+					ui.Row(c).Gap(t.Space(1.5)).Children(func() {
+						ui.Text(c, d.Field).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+						ui.Text(c, fmt.Sprintf("计划 %s → 实际 %s", d.Planned, d.Actual)).
+							FontSize(t.Rem(.75)).TextColor(t.Warning)
+					})
+					if d.Reason != "" {
+						ui.Text(c, d.Reason).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+					}
+				}
+			}
+			ui.Text(c, "保存、修改、更正、完成与文件关联事件由 Core 记录，此处只读。").
+				FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+		})
+	})
+	s.ShowHistory = open
+}
