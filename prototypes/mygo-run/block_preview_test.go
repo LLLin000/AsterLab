@@ -26,7 +26,7 @@ func TestProtocolBlockPreviewFixture(t *testing.T) {
 		t.Fatalf("steps = %d, want 10", len(preview.Steps))
 	}
 	first := preview.Steps[0]
-	if first.Path != "root/01-collect" || first.Title == "" || first.SourceBlockVersionID != preview.BlockVersionID {
+	if first.Path != "root/01-collect" || first.Title == "" || first.Instruction == "" || first.SourceBlockVersionID != preview.BlockVersionID {
 		t.Fatalf("first step = %+v", first)
 	}
 }

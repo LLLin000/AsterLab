@@ -15,6 +15,21 @@ import (
 	"asterlab-mygo-prototype/internal/workflowtree"
 )
 
+// designNarrow reports a compact content width. The root layout is the same
+// previous-frame width the rest of the Canvas uses; the inspector starts closed
+// on narrow windows and remains available from the toolbar.
+func absF32(value float32) float32 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func designNarrow(c *ui.Context) bool {
+	bounds := c.Root().LayoutBounds()
+	return bounds.W > 0 && bounds.W < 1100
+}
+
 // renderWorkflowCanvas is the doc-backed professional Workflow editor. The
 // canvas is built from AsterDoc step/workflow modules; add/delete/connect and
 // inspector updates go through Core commands, never a second writable graph.
@@ -32,6 +47,10 @@ func (a *app) renderWorkflowCanvas(c *ui.Context) {
 	a.ensureDesignCanvas(doc)
 	if a.designCanvas == nil {
 		return
+	}
+	narrow := designNarrow(c)
+	if !a.designInspectorUserToggled && c.Root().LayoutBounds().W > 0 {
+		a.designInspectorOpen = !narrow
 	}
 	ui.Column(c).Grow(1).FillWidth().Children(func() {
 		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(3)).AlignItems(ui.Center).
@@ -62,6 +81,16 @@ func (a *app) renderWorkflowCanvas(c *ui.Context) {
 						a.designCanvas.ConnectFrom = ""
 					}
 				}
+				panel := components.IconButton(c, lucide.PanelRight(), "步骤属性", components.IconButtonPlain)
+				if a.designInspectorOpen {
+					panel.Background(t.Accent.Alpha(.14)).TextColor(t.Accent)
+				}
+				if panel.Clicked() {
+					a.designInspectorOpen = !a.designInspectorOpen
+					a.designInspectorUserToggled = true
+					a.designCanvasFitPending = true
+					a.saveSession()
+				}
 				if components.IconButton(c, lucide.Maximize2(), "适应画布", components.IconButtonPlain).Clicked() {
 					a.designCanvas.PanX, a.designCanvas.PanY, a.designCanvas.Zoom = 0, 0, 1
 				}
@@ -87,10 +116,11 @@ func (a *app) renderWorkflowCanvas(c *ui.Context) {
 		}
 		a.renderDesignCompositeActions(c, doc)
 		ui.Row(c).Grow(1).FillWidth().MinHeight(0).AlignItems(ui.Stretch).Children(func() {
-			ui.Box(c).Grow(1).MinWidth(0).MinHeight(0).Fill().Children(func() {
+			canvasBox := ui.Box(c).Grow(1).MinWidth(0).MinHeight(0).Fill().Children(func() {
 				a.designCanvas.View(c)
 			})
-			if a.designSelected != "" {
+			a.fitDesignCanvas(c, canvasBox)
+			if a.designSelected != "" && a.designInspectorOpen {
 				a.canvasInspector(c, doc)
 			}
 		})
@@ -189,6 +219,8 @@ func (a *app) ensureDesignCanvas(doc *asterdoc.Document) {
 	}
 	if old := a.designCanvas; old != nil {
 		ed.PanX, ed.PanY, ed.Zoom = old.PanX, old.PanY, old.Zoom
+	} else {
+		a.designCanvasFitPending = true
 	}
 	if a.designSelected != "" {
 		for _, node := range ed.Doc.Nodes {
@@ -625,6 +657,64 @@ func (a *app) canvasInspector(c *ui.Context, doc *asterdoc.Document) {
 	})
 }
 
+// fitDesignCanvas centers the saved layout once, using the previous frame's
+// canvas bounds. It never changes saved node positions; it only chooses a
+// readable initial zoom for narrow windows.
+func (a *app) fitDesignCanvas(c *ui.Context, box ui.Element) {
+	if a.designCanvas == nil || len(a.designCanvas.Doc.Nodes) == 0 {
+		return
+	}
+	bounds := box.LayoutBounds()
+	if bounds.W <= 0 || bounds.H <= 0 {
+		c.AnimationFrame()
+		return
+	}
+	resized := a.designCanvasBoundsW > 0 && (absF32(bounds.W-a.designCanvasBoundsW) > 2 || absF32(bounds.H-a.designCanvasBoundsH) > 2)
+	if !a.designCanvasFitPending && !resized {
+		return
+	}
+	a.designCanvasBoundsW = bounds.W
+	a.designCanvasBoundsH = bounds.H
+	minX, minY := a.designCanvas.Doc.Nodes[0].Pos.X, a.designCanvas.Doc.Nodes[0].Pos.Y
+	maxX, maxY := minX, minY
+	for _, node := range a.designCanvas.Doc.Nodes {
+		if node.Pos.X < minX {
+			minX = node.Pos.X
+		}
+		if node.Pos.Y < minY {
+			minY = node.Pos.Y
+		}
+		if node.Pos.X > maxX {
+			maxX = node.Pos.X
+		}
+		if node.Pos.Y > maxY {
+			maxY = node.Pos.Y
+		}
+	}
+	contentW := maxX - minX + workflow.NodeWidth
+	contentH := maxY - minY + workflow.NodeHeight
+	pad := float32(48)
+	fit := float32(1)
+	if contentW+pad > bounds.W {
+		fit = (bounds.W - pad) / contentW
+	}
+	if contentH+pad > bounds.H {
+		if next := (bounds.H - pad) / contentH; next < fit {
+			fit = next
+		}
+	}
+	if fit < 0.35 {
+		fit = 0.35
+	}
+	if fit > 1 {
+		fit = 1
+	}
+	a.designCanvas.Zoom = fit
+	a.designCanvas.PanX = (bounds.W/fit-contentW)/2 - minX
+	a.designCanvas.PanY = (bounds.H/fit-contentH)/2 - minY
+	a.designCanvasFitPending = false
+}
+
 // renderDesignCompositeActions is the read-only drill-down affordance for a
 // selected composite step. It never edits the referenced ProtocolBlock.
 func (a *app) renderDesignCompositeActions(c *ui.Context, doc *asterdoc.Document) {
@@ -656,14 +746,28 @@ func (a *app) renderDesignCompositeActions(c *ui.Context, doc *asterdoc.Document
 	if !a.designPreviewExpanded {
 		return
 	}
+	limit := len(node.Children)
+	if limit > 4 {
+		limit = 4
+	}
+	cardWidth := float32(190)
+	if designNarrow(c) {
+		cardWidth = 140
+	}
+	ui.Row(c).FillWidth().Padding(t.Space(1), t.Space(3)).Gap(t.Space(1)).
+		Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, fmt.Sprintf("预览 %d / %d 个定义操作 · 剩余 %d", limit, len(node.Children), len(node.Children)-limit)).
+			FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+		ui.Text(c, "· 阅读顺序，非执行依赖").FontSize(t.Rem(.66)).TextColor(t.TextMuted)
+	})
 	ui.Row(c).FillWidth().Padding(t.Space(1), t.Space(3)).Gap(t.Space(1.5)).
 		Background(t.Surface).Border(1, t.Border).Children(func() {
-		limit := len(node.Children)
-		if limit > 4 {
-			limit = 4
-		}
-		for _, child := range node.Children[:limit] {
-			ui.Column(c).Width(190).Padding(t.Space(1), t.Space(1.5)).Gap(2).
+		for i, child := range node.Children[:limit] {
+			if i > 0 {
+				components.Icon(c, lucide.ChevronRight()).Size(t.Space(3), t.Space(3)).
+					TextColor(t.TextMuted).Shrink(0)
+			}
+			ui.Column(c).Width(cardWidth).Padding(t.Space(1), t.Space(1.5)).Gap(2).
 				Background(t.Background).Border(1, t.Border).Radius(t.Space(1)).Children(func() {
 				ui.Text(c, child.Title).FontSize(t.Rem(.74)).FontWeight(600).
 					TextColor(t.Text).SingleLine().Ellipsis("…")
@@ -688,22 +792,38 @@ func (a *app) enterDesignSubflow(parentID string) {
 	ed := workflow.NewEditor()
 	ed.ExternalWrites = true
 	ed.ReadOnly = true
+	ed.Zoom = 0.8
 	ed.OnSelect = func(id string) { a.designSubflowSelected = id }
+	previous := ""
 	for index, child := range node.Children {
-		pos := workflow.Position{
-			X: 60 + float32(index%3)*260,
-			Y: 60 + float32(index/3)*150,
+		row := index / 3
+		column := index % 3
+		if row%2 == 1 {
+			column = 2 - column
 		}
+		pos := workflow.Position{
+			X: 60 + float32(column)*250,
+			Y: 60 + float32(row)*150,
+		}
+		params, paramStatus := definitionNodeParams(child)
 		ed.Doc.Nodes = append(ed.Doc.Nodes, workflow.Node{
 			ID: child.ID, Kind: workflow.KindPipette, Title: child.Title, Pos: pos,
 			Composite: child.Composite, ChildCount: child.Total,
+			Instruction: child.Instruction, Params: params, ParamStatus: paramStatus,
 		})
 		ed.Doc.BusinessOrder = append(ed.Doc.BusinessOrder, child.ID)
+		if previous != "" {
+			ed.Sequence = append(ed.Sequence, workflow.Edge{
+				ID: fmt.Sprintf("reading-%d", len(ed.Sequence)+1), From: previous, To: child.ID,
+			})
+		}
+		previous = child.ID
 	}
 	a.designSubflow = ed
 	a.designSubflowParent = parentID
 	a.designSubflowTitle = node.Title
 	a.designSubflowSelected = ""
+	a.designSubflowFitted = false
 	a.saveSession()
 }
 
@@ -712,7 +832,27 @@ func (a *app) leaveDesignSubflow() {
 	a.designSubflowParent = ""
 	a.designSubflowTitle = ""
 	a.designSubflowSelected = ""
+	a.designSubflowFitted = false
 	a.saveSession()
+}
+
+func definitionNodeParams(node *workflowtree.Node) ([]workflow.NodeParam, string) {
+	params := make([]workflow.NodeParam, 0, len(node.Parameters))
+	for _, parameter := range node.Parameters {
+		value := parameter.Value
+		if parameter.Unit != "" {
+			value += " " + parameter.Unit
+		}
+		params = append(params, workflow.NodeParam{Key: parameter.Label, Val: value})
+	}
+	switch {
+	case len(params) > 0:
+		return params, ""
+	case len(node.UnresolvedParameters) > 0:
+		return nil, fmt.Sprintf("%d 个参数未解析", len(node.UnresolvedParameters))
+	default:
+		return nil, "无参数"
+	}
 }
 
 func designExperimentTitle(doc *asterdoc.Document) string {
@@ -737,7 +877,7 @@ func (a *app) renderDesignSubflow(c *ui.Context, doc *asterdoc.Document) {
 	ui.Column(c).Grow(1).FillWidth().Children(func() {
 		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(3)).Border(1, t.Border).
 			Background(t.Surface).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-			components.Text(c, "只读").FontSize(t.Rem(.72)).TextColor(t.TextMuted).Shrink(0)
+			components.Text(c, "只读 · 阅读顺序").FontSize(t.Rem(.72)).TextColor(t.TextMuted).Shrink(0)
 			chosen := 1
 			breadcrumb := components.Breadcrumbs(c, []string{designExperimentTitle(doc), a.designSubflowTitle}, &chosen)
 			ui.Spacer(c)
@@ -751,15 +891,144 @@ func (a *app) renderDesignSubflow(c *ui.Context, doc *asterdoc.Document) {
 		if leave {
 			return
 		}
+		ui.Row(c).FillWidth().Padding(t.Space(1), t.Space(3)).Gap(t.Space(.75)).
+			Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "阅读顺序").FontSize(t.Rem(.68)).TextColor(t.TextMuted).Shrink(0)
+			count := len(a.designSubflow.Doc.Nodes)
+			for i := 1; i <= count; i++ {
+				ui.Text(c, fmt.Sprintf("%02d", i)).FontSize(t.Rem(.68)).
+					TextColor(t.TextMuted).FontFeatures("tnum").Shrink(0)
+				if i < count {
+					components.Icon(c, lucide.ChevronRight()).Size(t.Space(2.5), t.Space(2.5)).
+						TextColor(t.TextMuted).Shrink(0)
+				}
+			}
+		})
 		ui.Row(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
-			ui.Box(c).Grow(1).MinWidth(0).MinHeight(0).Fill().Children(func() {
+			canvasBox := ui.Box(c).Grow(1).MinWidth(0).MinHeight(0).Fill().Children(func() {
 				if a.designSubflow != nil {
 					a.designSubflow.View(c)
 				}
 			})
+			a.fitDesignSubflow(c, canvasBox)
 		})
 	})
+	a.renderDesignDefinitionDetail(c)
 	if leave {
 		a.leaveDesignSubflow()
+	}
+}
+
+func (a *app) fitDesignSubflow(c *ui.Context, box ui.Element) {
+	if a.designSubflow == nil || len(a.designSubflow.Doc.Nodes) == 0 {
+		return
+	}
+	bounds := box.LayoutBounds()
+	if bounds.W <= 0 || bounds.H <= 0 {
+		c.AnimationFrame()
+		return
+	}
+	resized := a.designSubflowBoundsW > 0 && (absF32(bounds.W-a.designSubflowBoundsW) > 2 || absF32(bounds.H-a.designSubflowBoundsH) > 2)
+	if a.designSubflowFitted && !resized {
+		return
+	}
+	a.designSubflowBoundsW = bounds.W
+	a.designSubflowBoundsH = bounds.H
+	minX, minY := a.designSubflow.Doc.Nodes[0].Pos.X, a.designSubflow.Doc.Nodes[0].Pos.Y
+	maxX, maxY := minX, minY
+	for _, node := range a.designSubflow.Doc.Nodes {
+		if node.Pos.X < minX {
+			minX = node.Pos.X
+		}
+		if node.Pos.Y < minY {
+			minY = node.Pos.Y
+		}
+		if node.Pos.X > maxX {
+			maxX = node.Pos.X
+		}
+		if node.Pos.Y > maxY {
+			maxY = node.Pos.Y
+		}
+	}
+	contentW := maxX - minX + workflow.NodeWidth
+	contentH := maxY - minY + workflow.NodeHeight
+	pad := float32(40)
+	fit := float32(1)
+	if contentW+pad > bounds.W {
+		fit = (bounds.W - pad) / contentW
+	}
+	if contentH+pad > bounds.H {
+		if next := (bounds.H - pad) / contentH; next < fit {
+			fit = next
+		}
+	}
+	if fit < 0.5 {
+		fit = 0.5
+	}
+	if fit > 1 {
+		fit = 1
+	}
+	a.designSubflow.Zoom = fit
+	a.designSubflow.PanX = (bounds.W/fit-contentW)/2 - minX
+	a.designSubflow.PanY = (bounds.H/fit-contentH)/2 - minY
+	a.designSubflowFitted = true
+}
+
+// renderDesignDefinitionDetail is a read-only dialog for one definition step.
+// It is opened by selecting a node in the derived subflow canvas.
+func (a *app) renderDesignDefinitionDetail(c *ui.Context) {
+	if a.designSubflowSelected == "" || a.designHierarchy == nil {
+		return
+	}
+	node := designNodeByID(a.designHierarchy, a.designSubflowSelected)
+	if node == nil {
+		a.designSubflowSelected = ""
+		return
+	}
+	t := c.Theme()
+	open := true
+	components.Dialog(c, &open, components.DialogOptions{Label: "步骤详情"}, func(panel ui.Element) {
+		panel.Width(540).Children(func() {
+			ui.Text(c, node.Title).FontSize(t.Rem(1.05)).FontWeight(600).TextColor(t.Text)
+			ui.Text(c, "定义步骤 · 只读").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			ui.Text(c, "来源 ProtocolBlock："+node.BlockVersionID).FontSize(t.Rem(.7)).
+				TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+			ui.Divider(c)
+			ui.Text(c, "操作说明").FontSize(t.Rem(.78)).FontWeight(600).TextColor(t.Text)
+			ui.Scroll(c).Height(220).Children(func() {
+				ui.Text(c, node.Instruction).FontSize(t.Rem(.8)).TextColor(t.Text)
+			})
+			ui.Divider(c)
+			ui.Text(c, "参数").FontSize(t.Rem(.78)).FontWeight(600).TextColor(t.Text)
+			if len(node.Parameters) > 0 {
+				for _, parameter := range node.Parameters {
+					value := parameter.Value
+					if parameter.Unit != "" {
+						value += " " + parameter.Unit
+					}
+					ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+						ui.Text(c, parameter.Label).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+						ui.Spacer(c)
+						ui.Text(c, value).FontSize(t.Rem(.75)).TextColor(t.Text)
+					})
+				}
+			} else if len(node.UnresolvedParameters) > 0 {
+				ui.Text(c, fmt.Sprintf("%d 个参数未解析", len(node.UnresolvedParameters))).
+					FontSize(t.Rem(.78)).TextColor(theme.GetTokens(t).WarningText)
+				for _, parameter := range node.UnresolvedParameters {
+					ui.Text(c, "· "+parameter).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+				}
+			} else {
+				ui.Text(c, "无参数").FontSize(t.Rem(.78)).TextColor(t.TextMuted)
+			}
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				if components.Button(c, "关闭", components.ButtonSecondary).Clicked() {
+					open = false
+				}
+			})
+		})
+	})
+	if !open {
+		a.designSubflowSelected = ""
 	}
 }

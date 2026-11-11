@@ -30,9 +30,17 @@ func (p *protocolBlockProvider) BlockDefinition(versionID string) (workflowtree.
 	}
 	steps := make([]workflowtree.BlockStep, 0, len(preview.Steps))
 	for _, step := range preview.Steps {
+		parameters := make([]workflowtree.BlockParameter, 0, len(step.Parameters))
+		for _, parameter := range step.Parameters {
+			parameters = append(parameters, workflowtree.BlockParameter{
+				Key: parameter.Key, Label: parameter.Label,
+				Value: parameter.Value, Unit: parameter.Unit,
+			})
+		}
 		steps = append(steps, workflowtree.BlockStep{
 			UseID: step.UseID, Path: step.Path, Title: step.Title,
 			Instruction: step.Instruction, SourceBlockVersionID: step.SourceBlockVersionID,
+			Parameters: parameters, UnresolvedParameters: step.UnresolvedParameterRefs,
 		})
 	}
 	definition := workflowtree.BlockDefinition{

@@ -292,12 +292,21 @@ type ProtocolSummary struct {
 
 // ProtocolBlockStep is one expanded definition step inside a ProtocolBlock
 // version. Path is relative to the block root (for example "01-collect").
+type ProtocolBlockParameter struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Value string `json:"value"`
+	Unit  string `json:"unit,omitempty"`
+}
+
 type ProtocolBlockStep struct {
-	UseID                string `json:"useId"`
-	Path                 string `json:"path"`
-	Title                string `json:"title"`
-	Instruction          string `json:"instruction"`
-	SourceBlockVersionID string `json:"sourceBlockVersionId"`
+	UseID                   string                   `json:"useId"`
+	Path                    string                   `json:"path"`
+	Title                   string                   `json:"title"`
+	Instruction             string                   `json:"instruction"`
+	SourceBlockVersionID    string                   `json:"sourceBlockVersionId"`
+	Parameters              []ProtocolBlockParameter `json:"parameters,omitempty"`
+	UnresolvedParameterRefs []string                 `json:"unresolvedParameterRefs,omitempty"`
 }
 
 // ProtocolBlockPreview is a read-only expansion of one immutable block

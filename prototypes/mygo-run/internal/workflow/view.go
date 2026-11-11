@@ -53,6 +53,31 @@ func canvas(c *ui.Context, e *Editor, t *ui.Theme) {
 
 		nodeW := workflownode.CardWidth * z
 		nodeH := workflownode.CardHeight * z
+		// Reading order is a visual aid, not a dependency edge. Draw it
+		// separately so no view can mistake it for workflow.edges.
+		for _, edge := range e.Sequence {
+			from, to := e.Doc.findNodePtr(edge.From), e.Doc.findNodePtr(edge.To)
+			if from == nil || to == nil {
+				continue
+			}
+			x0 := r.X + (from.Pos.X+e.PanX)*z
+			y0 := r.Y + (from.Pos.Y+e.PanY)*z
+			x1 := r.X + (to.Pos.X+e.PanX)*z
+			y1 := r.Y + (to.Pos.Y+e.PanY)*z
+			var path ui.Path
+			if abs32(from.Pos.Y-to.Pos.Y) < 1 {
+				if to.Pos.X > from.Pos.X {
+					path.MoveTo(x0+nodeW, y0+nodeH/2).LineTo(x1, y1+nodeH/2)
+				} else {
+					path.MoveTo(x0, y0+nodeH/2).LineTo(x1+nodeW, y1+nodeH/2)
+				}
+			} else {
+				path.MoveTo(x0+nodeW/2, y0+nodeH).LineTo(x1+nodeW/2, y1)
+			}
+			p.StrokePath(&path, 1.8*z, t.Accent.Alpha(.55))
+			p.Fill(ui.Rect{X: x1 + nodeW/2 - 2.5*z, Y: y1 - 2.5*z, W: 5 * z, H: 5 * z}, t.Accent.Alpha(.55), 2.5*z)
+		}
+
 		for _, edge := range e.Doc.Edges {
 			from, to := e.Doc.findNodePtr(edge.From), e.Doc.findNodePtr(edge.To)
 			if from == nil || to == nil {
@@ -194,6 +219,7 @@ func adaptWorkflowNode(n Node, order string, state workflownode.NodeState) workf
 	return workflownode.NodeProps{
 		ID: n.ID, Kind: kind, Order: order, Tag: n.Tag, Title: n.Title,
 		Composite: n.Composite, ChildCount: n.ChildCount,
+		Instruction: n.Instruction, ParamStatus: n.ParamStatus,
 		Params: params, State: state,
 	}
 }

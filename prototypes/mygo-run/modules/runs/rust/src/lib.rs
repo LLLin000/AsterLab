@@ -228,6 +228,16 @@ fn asset_from_value(v: &serde_json::Value) -> Asset {
     }
 }
 
+fn parameter_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::Bool(flag) => flag.to_string(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
 struct CoreDesignService { db: Mutex<Option<rusqlite::Connection>> }
 
 impl DesignService for CoreDesignService {
@@ -286,12 +296,29 @@ impl DesignService for CoreDesignService {
             if path.is_empty() {
                 continue;
             }
+            let mut parameters = Vec::new();
+            for parameter in step["parameters"].as_array().into_iter().flatten() {
+                parameters.push(ProtocolBlockParameter {
+                    key: parameter["slot"].as_str().unwrap_or("").to_owned(),
+                    label: parameter["label"].as_str().unwrap_or("").to_owned(),
+                    value: parameter_text(&parameter["value"]),
+                    unit: parameter["unit"].as_str().unwrap_or("").to_owned(),
+                });
+            }
+            let unresolved_parameter_refs = step["unresolved_parameter_refs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|value| value.as_str().map(str::to_owned))
+                .collect();
             steps.push(ProtocolBlockStep {
                 use_id: step["use_id"].as_str().unwrap_or("").to_owned(),
                 path,
                 title: step["title"].as_str().unwrap_or("").to_owned(),
                 instruction: step["instruction"].as_str().unwrap_or("").to_owned(),
                 source_block_version_id: step["source_block_version_id"].as_str().unwrap_or("").to_owned(),
+                parameters,
+                unresolved_parameter_refs,
             });
         }
         Ok(ProtocolBlockPreview {

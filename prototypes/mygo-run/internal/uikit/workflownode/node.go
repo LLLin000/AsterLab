@@ -5,6 +5,7 @@ package workflownode
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -45,8 +46,10 @@ type NodeProps struct {
 	ErrorText string
 	// Composite and ChildCount mark a step that contains a ProtocolBlock
 	// definition. The card remains read-only for that definition.
-	Composite  bool
-	ChildCount int
+	Composite   bool
+	ChildCount  int
+	Instruction string
+	ParamStatus string
 }
 
 const (
@@ -95,6 +98,10 @@ func View(c *ui.Context, props NodeProps, scale float32, onClick func()) ui.Elem
 					ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(.5) * scale).Children(func() {
 						components.Text(c, props.Title).FontSize(t.Rem(.95) * scale).
 							FontWeight(500).SingleLine().Ellipsis("…")
+						if props.Instruction != "" {
+							components.Text(c, props.Instruction).FontSize(t.Rem(.68) * scale).
+								TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+						}
 					})
 				})
 				ui.Divider(c)
@@ -128,7 +135,14 @@ func params(c *ui.Context, props NodeProps, scale float32) {
 		return
 	}
 	if len(props.Params) == 0 {
-		components.Text(c, "未填写参数").FontSize(t.Rem(.78) * scale).TextColor(t.TextMuted)
+		label, color := "未填写参数", t.TextMuted
+		if props.ParamStatus != "" {
+			label = props.ParamStatus
+			if strings.Contains(label, "未解析") {
+				color = t.Warning
+			}
+		}
+		components.Text(c, label).FontSize(t.Rem(.78) * scale).TextColor(color)
 		return
 	}
 	for i, param := range props.Params {

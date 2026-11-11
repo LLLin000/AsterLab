@@ -77,6 +77,33 @@ TestCanvasStepsCarryCompositeMarker
 - No nested editing command, shared block mutation, or Agent operation exists
   in this round.
 
+
+## 3b. F0 — readability closure
+
+- Preview is now a visible strip with a heading `预览 N / M 个定义操作 · 剩余 K`
+  and four real operation cards joined by reading-order chevrons.
+- Subflow cards show the frozen `Instruction` excerpt and a real parameter
+  status (`无参数`, resolved values, or `N 个参数未解析`), never the generic
+  `未填写参数`.
+- The subflow uses a 3-column snake layout with a separate `Sequence` reading
+  guide. Sequence lines are drawn from `Editor.Sequence`, not `Doc.Edges`, so
+  they cannot be mistaken for execution dependencies. A compact
+  `01 → … → 10` ribbon states the same reading order.
+- Selecting a subflow operation opens a read-only dialog with the full frozen
+  instruction, resolved parameters or unresolved parameter names, and the exact
+  source ProtocolBlock version.
+- Root and subflow canvases fit their content on first layout and after a
+  window resize. On narrow windows the root inspector starts closed and can be
+  reopened from the toolbar; the canvas keeps all four root steps visible.
+- Screenshots at logical 1360×880 and 900×600:
+  - `design-hierarchy-preview-1360x880.png`
+  - `design-hierarchy-preview-900x600.png`
+  - `design-hierarchy-subflow-1360x880.png`
+  - `design-hierarchy-subflow-900x600.png`
+  - `design-hierarchy-subflow-detail-1360x880.png`
+- The existing root step editing commands remain available; the derived
+  subflow remains `ExternalWrites=true` and `ReadOnly=true`.
+
 ## 4. E3 — evidence
 
 | Evidence | Content |

@@ -23,6 +23,9 @@ func rnaBlock(versionID string) BlockDefinition {
 			Title:                title,
 			Instruction:          title + " instruction",
 			SourceBlockVersionID: versionID,
+			Parameters: []BlockParameter{{
+				Key: "volume", Label: "体积", Value: "500", Unit: "µL",
+			}},
 		})
 	}
 	return BlockDefinition{BlockVersionID: versionID, Ready: true, Steps: steps}
@@ -60,6 +63,9 @@ func TestBuildDesignWithoutRun(t *testing.T) {
 	for _, child := range rna.Children {
 		if child.Identity != IdentityDefinition || child.Status != "" || child.BlockVersionID == "" {
 			t.Fatalf("definition child = %+v", child)
+		}
+		if child.Instruction == "" || len(child.Parameters) != 1 || child.Parameters[0].Label != "体积" {
+			t.Fatalf("definition detail = %+v", child)
 		}
 	}
 	if tree.Roots[1].Composite {

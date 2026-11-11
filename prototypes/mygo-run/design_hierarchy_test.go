@@ -83,3 +83,22 @@ func TestCanvasStepsCarryCompositeMarker(t *testing.T) {
 		t.Fatalf("composite marker = %+v", rna)
 	}
 }
+
+func TestDefinitionNodeParamsStatus(t *testing.T) {
+	params, status := definitionNodeParams(&workflowtree.Node{
+		Parameters: []workflowtree.BlockParameter{{Label: "体积", Value: "500", Unit: "µL"}},
+	})
+	if len(params) != 1 || params[0].Val != "500 µL" || status != "" {
+		t.Fatalf("resolved = %+v %q", params, status)
+	}
+	params, status = definitionNodeParams(&workflowtree.Node{
+		UnresolvedParameters: []string{"volume"},
+	})
+	if len(params) != 0 || status != "1 个参数未解析" {
+		t.Fatalf("unresolved = %+v %q", params, status)
+	}
+	params, status = definitionNodeParams(&workflowtree.Node{})
+	if len(params) != 0 || status != "无参数" {
+		t.Fatalf("empty = %+v %q", params, status)
+	}
+}

@@ -11,12 +11,21 @@ import (
 // BlockStep is one immutable definition step inside a ProtocolBlock version.
 // Path is relative to the block root; SourceBlockVersionID is the exact block
 // version that owns the step.
+type BlockParameter struct {
+	Key   string
+	Label string
+	Value string
+	Unit  string
+}
+
 type BlockStep struct {
 	UseID                string
 	Path                 string
 	Title                string
 	Instruction          string
 	SourceBlockVersionID string
+	Parameters           []BlockParameter
+	UnresolvedParameters []string
 }
 
 // BlockDefinition is the read-only expansion of one ProtocolBlock version.
@@ -238,9 +247,12 @@ func convertDefinitionTrie(node *definitionTrie) ([]*Node, []string) {
 			out = append(out, &Node{
 				ID: child.path, Title: title, Path: child.path, Kind: KindStep,
 				Identity: IdentityDefinition, UseID: child.path,
-				BlockVersionID: step.SourceBlockVersionID,
-				DefinitionRef:  step.SourceBlockVersionID,
-				Status:         "", Total: 1,
+				BlockVersionID:       step.SourceBlockVersionID,
+				DefinitionRef:        step.SourceBlockVersionID,
+				Instruction:          step.Instruction,
+				Parameters:           step.Parameters,
+				UnresolvedParameters: step.UnresolvedParameters,
+				Status:               "", Total: 1,
 			})
 		case child.step == nil && len(child.children) > 0:
 			nested, nestedIssues := convertDefinitionTrie(child)

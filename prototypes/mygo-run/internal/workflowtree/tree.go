@@ -45,21 +45,24 @@ type TaskRef struct {
 // Node is one read-only node. A step node may contain child tasks or nested
 // composites; a task node has no children.
 type Node struct {
-	ID             string
-	Title          string
-	Path           string
-	Kind           Kind
-	Composite      bool
-	Order          int
-	Identity       Identity
-	UseID          string
-	BlockVersionID string
-	DefinitionRef  string
-	Status         string
-	Completed      int
-	Total          int
-	Children       []*Node
-	Issues         []string
+	ID                   string
+	Title                string
+	Path                 string
+	Kind                 Kind
+	Composite            bool
+	Order                int
+	Identity             Identity
+	UseID                string
+	BlockVersionID       string
+	DefinitionRef        string
+	Instruction          string
+	Parameters           []BlockParameter
+	UnresolvedParameters []string
+	Status               string
+	Completed            int
+	Total                int
+	Children             []*Node
+	Issues               []string
 }
 
 // Tree is the projection of one frozen design plus one frozen Run.

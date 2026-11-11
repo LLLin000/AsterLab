@@ -38,9 +38,11 @@ type Node struct {
 	Tag           string   `json:"tag,omitempty"`
 	// Composite marks a design step that references a ProtocolBlock
 	// definition. ChildCount is the derived number of definition operations.
-	Composite  bool        `json:"composite,omitempty"`
-	ChildCount int         `json:"child_count,omitempty"`
-	Params     []NodeParam `json:"params,omitempty"`
+	Composite   bool        `json:"composite,omitempty"`
+	ChildCount  int         `json:"child_count,omitempty"`
+	Instruction string      `json:"instruction,omitempty"`
+	ParamStatus string      `json:"param_status,omitempty"`
+	Params      []NodeParam `json:"params,omitempty"`
 }
 
 type Edge struct{ ID, From, To string }
@@ -152,7 +154,10 @@ func (d *WorkflowDocument) DeleteEdge(id string) bool {
 }
 
 type Editor struct {
-	Doc              WorkflowDocument
+	Doc WorkflowDocument
+	// Sequence is a read-only reading-order guide for derived views. It is
+	// deliberately separate from Doc.Edges, which means explicit dependency.
+	Sequence         []Edge
 	SelectedNode     string
 	SelectedNodes    map[string]bool
 	SelectedEdge     string
