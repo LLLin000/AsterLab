@@ -1,0 +1,164 @@
+# Complex Template for SDK Deep Acceptance
+
+```asterlab
+kind: experiment
+id: exp-template
+schema: 1
+title: Template Experiment
+objective: Template instantiation deep acceptance
+experimental_unit: well
+factors:
+  - name: treatment
+    levels: [control, material]
+```
+
+```asterlab
+kind: group
+id: g-control
+schema: 1
+name: Control
+role: control
+condition: untreated
+```
+
+```asterlab
+kind: group
+id: g-material
+schema: 1
+name: Material
+role: treatment
+condition: 5% GelMA
+```
+
+```asterlab
+kind: material
+id: mat-gelma
+schema: 1
+name: GelMA
+role: treatment
+condition: 5% GelMA
+concentration:
+  value: 5
+  unit: mg/mL
+source: lab_imported
+```
+
+```asterlab
+kind: instrument_profile
+id: uv-reader
+schema: 1
+class: plate_reader
+model: Synergy H1
+capabilities:
+  - name: absorbance
+    wavelength: 450 nm
+source: built_in
+```
+
+```asterlab
+kind: dilution
+id: dil-stock
+schema: 1
+stock:
+  value: 20
+  unit: mg/mL
+target:
+  value: 2
+  unit: mg/mL
+final_volume:
+  value: 5
+  unit: mL
+```
+
+```asterlab
+kind: assay
+id: assay-cck8
+schema: 1
+title: CCK-8
+endpoint: OD450
+unit: AU
+group_refs: [g-control, g-material]
+timepoints: [D1]
+```
+
+```asterlab
+kind: step
+id: step-seed
+schema: 2
+title: Seed cells
+assay: assay-cck8
+path: root/seed
+timepoints: [D1]
+uses:
+  - ref: uv-reader
+    role: instrument
+  - ref: dil-stock
+    role: calculator
+```
+
+```asterlab
+kind: step
+id: step-read
+schema: 2
+title: Read OD450
+assay: assay-cck8
+path: root/read
+timepoints: [D1]
+uses:
+  - ref: uv-reader
+    role: instrument
+```
+
+```asterlab
+kind: workflow
+id: wf-template
+schema: 1
+steps: [step-seed, step-read]
+edges:
+  - from: step-seed
+    to: step-read
+```
+
+```asterlab
+kind: plate
+id: plate-d1
+schema: 1
+format: 96
+assay: assay-cck8
+groups:
+  g-control: [A1, A2, A3]
+  g-material: [B1, B2, B3]
+```
+
+```asterlab
+kind: sample
+id: sample-1
+schema: 1
+sample_id: SAMPLE-001
+group_ref: g-control
+material_refs: [mat-gelma]
+amount:
+  value: 0.5
+  unit: mL
+```
+
+```asterlab
+kind: container
+id: container-96
+schema: 1
+format: 96-well
+wells: 96
+sample_map:
+  A1: sample-1
+```
+
+```asterlab
+kind: measurement_profile
+id: mp-od450
+schema: 1
+endpoint: OD450
+unit: AU
+readout_schema:
+  columns: [well, od450]
+calculator_refs: [dil-stock]
+```

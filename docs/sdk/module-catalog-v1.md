@@ -24,6 +24,8 @@
 
 说明：`renderers.static` 在当前 manifest 中未声明（均为 `—`）；静态预览通过 `StaticPreview`/`StaticDocumentPreview`（`prototypes/mygo-run/internal/asterdoc/static.go`）按 registry 路径读取，不依赖该字段。
 
+`renderers` 现在是**被执行**的契约：`Register` 校验每个声明的 key 都有实现（`ModuleSpec.Renders`），跨 kind 复用同一 key 被拒绝；宿主按 `Descriptor.RendererKey(mode)` 分派，声明但未实现时渲染显式的能力缺口提示（`View.rendererGap`），不回退猜测。`plate`/`plate96`/`container` 保留专用编辑器；字段型模块通过 `generic-editor` capability 显式选择通用编辑器。
+
 ## 2. 端口（inputs / outputs）明细
 
 ### plate96@1
@@ -140,7 +142,8 @@ Rust 侧 `validate_asterdoc_module` 的 rule 匹配是穷举的：已知 rule �
 - 无代码生成：Go 与 Rust 校验器并行维护，漂移仅由 `TestAsterDocGoRustParity` 采样覆盖（`TestAsterDocGoRustParity` 现含 23 个 valid/invalid 样本，覆盖 plate/plate96/reference/dilution/instrument_profile/step@2/material/sample/container/measurement_profile，未逐一覆盖 experiment/group/assay/workflow 每字段）。
 - 无 `sdk new/validate/manifest` CLI：CLI 仅 `validate_asterdoc_source`（`src/cli.rs`）供 AsterML 编译使用。
 - 无模板市场：模板 shape 在 Foundation schema 中定义；实例化已在 `internal/asterdoc/template.go` 实现（`InstantiateTemplate` / `TemplateManifest`），但无模板市场、无远程下载、无模板管理 CLI。
-- 通用编辑器对 `list/object/table/object-list/well-map/geometry` 字段显示为 read-only（`GenericModuleEditor`，`view.go` ~707-725）。
+- 通用编辑器对 `list/object/table/object-list/well-map/geometry` 字段显示为 read-only（`GenericModuleEditor`，`view.go`）；因此复合字段目前无法在通用编辑器内组装，需要专用编辑器或后续的结构化控件。
+- 无模块生命周期（register/activate/dispose）：模块是纯函数，加载即全部注册，失败即暴露 `BuiltinError`。
 - `step@1` 语义不变；`step@2` 仅新增 `uses` 绑定。
 - `reference.ref` 是非类型化字符串，typed reference 通过端口 `type=reference + target` 实现。
 - `renderers.static` 字段未在 manifest 中声明；静态渲染走 `StaticPreview` 路径。

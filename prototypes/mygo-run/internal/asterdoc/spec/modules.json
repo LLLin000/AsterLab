@@ -287,7 +287,8 @@
       "sdk": "1.0.0",
       "category": "document",
       "capabilities": [
-        "typed-reference"
+        "typed-reference",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -425,7 +426,8 @@
       "sdk": "1.0.0",
       "category": "workflow",
       "capabilities": [
-        "experiment-plan"
+        "experiment-plan",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -509,7 +511,8 @@
       "sdk": "1.0.0",
       "category": "workflow",
       "capabilities": [
-        "group-definition"
+        "group-definition",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -630,7 +633,8 @@
       "category": "measurement",
       "capabilities": [
         "assay-plan",
-        "measurement-endpoint"
+        "measurement-endpoint",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -725,7 +729,8 @@
       "category": "workflow",
       "capabilities": [
         "step-definition",
-        "workflow-edge"
+        "workflow-edge",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -803,7 +808,8 @@
       "sdk": "1.0.0",
       "category": "workflow",
       "capabilities": [
-        "workflow-graph"
+        "workflow-graph",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -833,7 +839,8 @@
       "capabilities": [
         "quantity",
         "deterministic-calculation",
-        "derived-output"
+        "derived-output",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -929,7 +936,8 @@
       "category": "resource",
       "capabilities": [
         "instrument-profile",
-        "capability-declaration"
+        "capability-declaration",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -1106,7 +1114,8 @@
       "category": "workflow",
       "capabilities": [
         "step-definition",
-        "workflow-edge"
+        "workflow-edge",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -1135,7 +1144,8 @@
       "category": "resource",
       "capabilities": [
         "material",
-        "role-declaration"
+        "role-declaration",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -1237,7 +1247,8 @@
       "category": "resource",
       "capabilities": [
         "sample",
-        "sample-tracking"
+        "sample-tracking",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -1328,7 +1339,8 @@
       "category": "labware",
       "capabilities": [
         "container",
-        "well-map"
+        "well-map",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {
@@ -1414,7 +1426,8 @@
       "category": "measurement",
       "capabilities": [
         "measurement-profile",
-        "calculator-reference"
+        "calculator-reference",
+        "generic-editor"
       ],
       "permissions": [],
       "renderers": {

@@ -110,17 +110,34 @@ Current permissions: `document.edit`, `run.readout`, `notebook.append`. The rend
 
 ## 5. Renderers and bindings
 
-`renderers` declares capability, not proof of implementation:
+`renderers` is an executed contract, not a comment:
 
 ```json
 {"design": "dilution.editor", "document": "dilution.viewer"}
 ```
 
 - A professional editor and a read-only viewer are separate capabilities.
-- A static/PDF renderer must be deterministic from document revision, frozen-run revision, referenced IDs and calculator version.
-- A missing renderer means the surface is unavailable; the host must show that gap rather than rendering a guess.
-- Notebook uses the same document viewer capability; it does not get a private module implementation.
-- Renderer code may be written in Go for the current desktop prototype. The contract is language-neutral, but a module is not a dynamic plugin in v1.
+- `Register` refuses a module that declares a renderer key its `ModuleSpec.Renders`
+  list does not cover (`registry.go`), so the manifest cannot promise a surface
+  the host cannot draw.
+- Two different kinds may not claim the same renderer key; two schema versions
+  of one kind may share a family (`step@1` and `step@2` both use
+  `step.editor`/`step.viewer`).
+- The host dispatches by declared key and mode (`Descriptor.RendererKey`), not by
+  hardcoded `kind` checks. A missing key or an unimplemented key renders an
+  explicit capability-gap notice (`View.rendererGap`) — never a guess.
+- The generic field editor is opt-in through the `generic-editor` capability.
+  Spatial/computational modules (plate, plate96, container) keep their own
+  design renderer; field-only modules opt in.
+- A static/PDF renderer must be deterministic from document revision, frozen-run
+  revision, referenced IDs and calculator version. `renderers.static` is
+  currently declared by no shipped module; static output goes through
+  `StaticPreview`, which is a separate plain-text path.
+- Notebook uses the same document-viewer capability; it does not get a private
+  module implementation.
+- Renderer code is Go for the current desktop prototype. The contract is
+  language-neutral, but a module is not a dynamic plugin in v1: there is no
+  load/unload lifecycle and no third-party loading.
 
 ## 6. Lifecycle
 

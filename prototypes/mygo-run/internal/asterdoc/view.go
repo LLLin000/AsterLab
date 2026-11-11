@@ -90,14 +90,60 @@ func (v *View) codeBlock(c *ui.Context, block *markdown.CodeBlockView) {
 	}
 	spec, ok := registry.Lookup(module.Kind, module.Schema)
 	if !ok {
-		v.moduleError(c, fmt.Errorf("no renderer for %s@%d", module.Kind, module.Schema))
+		v.rendererGap(c, module.Kind, module.Schema, "")
 		return
 	}
-	if (module.Kind == "dilution" || module.Kind == "instrument_profile") && v.Can(PermDocumentEdit) && !v.ReadOnly {
+	// Dispatch by the module's declared renderer capability, not by kind. A
+	// module that declares an editable design renderer and grants document.edit
+	// is drawn by the generic editor; everything else uses its own renderer.
+	if key, declared := spec.Descriptor.RendererKey(v.Mode); declared {
+		if !registry.HasRenderer(key) {
+			v.rendererGap(c, module.Kind, module.Schema, key)
+			return
+		}
+	} else {
+		v.rendererGap(c, module.Kind, module.Schema, "")
+		return
+	}
+	// Only a module that opts into the generic editor is drawn by it. Spatial
+	// and computational modules (plate, dilution, instrument_profile) declare
+	// their own design renderer and must keep it; the generic editor is a
+	// fallback for field-only modules, selected by an explicit capability.
+	if v.Mode == ModeDesign && v.Can(PermDocumentEdit) && !v.ReadOnly &&
+		hasCapability(spec.Descriptor, "generic-editor") {
 		v.genericModuleEditor(c, module.ID, module.Data)
 		return
 	}
+	if spec.Render == nil {
+		v.rendererGap(c, module.Kind, module.Schema, "")
+		return
+	}
 	spec.Render(v, c, module.Data)
+}
+
+// hasCapability reports whether a module declares one capability.
+func hasCapability(d Descriptor, capability string) bool {
+	for _, c := range d.Capabilities {
+		if c == capability {
+			return true
+		}
+	}
+	return false
+}
+
+// rendererGap reports a declared-but-unavailable or undeclared renderer as a
+// visible capability gap. The host must never draw a guess in its place.
+func (v *View) rendererGap(c *ui.Context, kind string, schema int, key string) {
+	t := c.Theme()
+	reason := "该模块未声明此视图的渲染能力"
+	if key != "" {
+		reason = fmt.Sprintf("渲染能力 %q 未被实现", key)
+	}
+	ui.Row(c).Padding(10, 12).Radius(t.Radius).
+		Background(t.Warning.Alpha(.08)).Border(1, t.Warning).Children(func() {
+		ui.Text(c, fmt.Sprintf("%s@%d · %s", kind, schema, reason)).
+			FontSize(t.Rem(.85)).TextColor(t.Warning)
+	})
 }
 
 func (v *View) moduleError(c *ui.Context, err error) {

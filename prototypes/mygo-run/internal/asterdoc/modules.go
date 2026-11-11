@@ -29,7 +29,7 @@ func plateFromData(data map[string]any) (Plate, error) {
 }
 
 func plate96Spec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"plate96.editor", "plate96.viewer"},
 		Descriptor: builtinDescriptor("plate96"),
 		Validate:   specValidator("plate96"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -44,7 +44,7 @@ func plate96Spec() ModuleSpec {
 }
 
 func plateSpec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"plate.editor", "plate.viewer"},
 		Descriptor: builtinDescriptor("plate"),
 		Validate:   specValidator("plate"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -63,7 +63,7 @@ func plateSpec() ModuleSpec {
 }
 
 func referenceSpec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"reference.editor", "reference.viewer"},
 		Descriptor: builtinDescriptor("reference"),
 		Validate:   specValidator("reference"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -83,7 +83,7 @@ func referenceSpec() ModuleSpec {
 }
 
 func experimentSpec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"experiment.editor", "experiment.viewer"},
 		Descriptor: builtinDescriptor("experiment"),
 		Validate:   specValidator("experiment"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -106,7 +106,7 @@ func experimentSpec() ModuleSpec {
 }
 
 func groupSpec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"group.editor", "group.viewer"},
 		Descriptor: builtinDescriptor("group"),
 		Validate:   specValidator("group"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -126,7 +126,7 @@ func groupSpec() ModuleSpec {
 }
 
 func assaySpec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"assay.editor", "assay.viewer"},
 		Descriptor: builtinDescriptor("assay"),
 		Validate:   specValidator("assay"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -158,7 +158,7 @@ func step2Spec() ModuleSpec {
 }
 
 func stepSpecAt(schema int) ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"step.editor", "step.viewer"},
 		Descriptor: descriptorFor("step", schema),
 		Validate:   specValidatorFor("step", schema),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -179,7 +179,7 @@ func stepSpecAt(schema int) ModuleSpec {
 }
 
 func workflowSpec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"workflow.editor", "workflow.viewer"},
 		Descriptor: builtinDescriptor("workflow"),
 		Validate:   specValidator("workflow"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -284,7 +284,7 @@ func dilutionResultFor(data map[string]any) (dilutionResult, error) {
 }
 
 func dilutionSpec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"dilution.editor", "dilution.viewer"},
 		Descriptor: builtinDescriptor("dilution"),
 		Validate:   specValidator("dilution"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -327,7 +327,7 @@ func dilutionSpec() ModuleSpec {
 }
 
 func instrumentProfileSpec() ModuleSpec {
-	return ModuleSpec{
+	return ModuleSpec{Renders: []string{"instrument-profile.editor", "instrument-profile.viewer"},
 		Descriptor: builtinDescriptor("instrument_profile"),
 		Validate:   specValidator("instrument_profile"),
 		Render: func(v *View, c *ui.Context, data map[string]any) {
@@ -373,7 +373,7 @@ func formatNumber(value float64) string {
 }
 
 func materialSpec() ModuleSpec {
-	return ModuleSpec{Descriptor: builtinDescriptor("material"), Validate: specValidator("material"), Render: func(v *View, c *ui.Context, data map[string]any) {
+	return ModuleSpec{Renders: []string{"material.editor", "material.viewer"}, Descriptor: builtinDescriptor("material"), Validate: specValidator("material"), Render: func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
 		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, textValue(data, "name")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
@@ -382,7 +382,7 @@ func materialSpec() ModuleSpec {
 }
 
 func sampleSpec() ModuleSpec {
-	return ModuleSpec{Descriptor: builtinDescriptor("sample"), Validate: specValidator("sample"), Render: func(v *View, c *ui.Context, data map[string]any) {
+	return ModuleSpec{Renders: []string{"sample.editor", "sample.viewer"}, Descriptor: builtinDescriptor("sample"), Validate: specValidator("sample"), Render: func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
 		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, textValue(data, "sample_id")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
@@ -391,7 +391,7 @@ func sampleSpec() ModuleSpec {
 }
 
 func containerSpec() ModuleSpec {
-	return ModuleSpec{Descriptor: builtinDescriptor("container"), Validate: specValidator("container"), Render: func(v *View, c *ui.Context, data map[string]any) {
+	return ModuleSpec{Renders: []string{"container.editor", "container.viewer"}, Descriptor: builtinDescriptor("container"), Validate: specValidator("container"), Render: func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
 		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
 			ui.Text(c, textValue(data, "format")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
@@ -400,7 +400,7 @@ func containerSpec() ModuleSpec {
 }
 
 func measurementProfileSpec() ModuleSpec {
-	return ModuleSpec{Descriptor: builtinDescriptor("measurement_profile"), Validate: specValidator("measurement_profile"), Render: func(v *View, c *ui.Context, data map[string]any) {
+	return ModuleSpec{Renders: []string{"measurement_profile.editor", "measurement_profile.viewer"}, Descriptor: builtinDescriptor("measurement_profile"), Validate: specValidator("measurement_profile"), Render: func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
 		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
 			ui.Text(c, textValue(data, "endpoint")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
