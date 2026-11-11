@@ -22,6 +22,7 @@ import (
 	"asterlab-mygo-prototype/internal/protocol"
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/runui"
+	"asterlab-mygo-prototype/internal/runworkspace"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
@@ -110,6 +111,9 @@ type app struct {
 
 	shell               *shell.Shell
 	ws                  *runui.Workspace
+	runWS               *runworkspace.State
+	runWSVM             *runworkspace.RunWorkspaceViewModel
+	runWSKey            string
 	designer            *designer.Designer
 	pendingDesignID     string
 	confirmDesignSwitch bool
@@ -246,6 +250,7 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 	}
 	a.snap = newSnap
 	a.loadFrozenAsterDoc()
+	a.refreshRunWorkspace()
 	a.rememberRun(newSnap)
 	if a.ws != nil {
 		view := toRunView(a.snap)
@@ -271,6 +276,19 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 
 // loadFrozenAsterDoc loads the exact document revision frozen on the Run. The
 // latest live document is never substituted for a missing or broken revision.
+func (a *app) refreshRunWorkspace() {
+	vm := runworkspace.BuildViewModel(a.snap, a.asterDoc)
+	key := a.snap.RunID + "|" + fmt.Sprintf("%d", a.snap.Revision)
+	if a.asterDoc != nil {
+		key += "|" + a.asterDoc.SourceHash
+	}
+	a.runWSVM = vm
+	a.runWSKey = key
+	if a.runWS != nil {
+		a.runWS.SyncFrom(vm)
+	}
+}
+
 func (a *app) loadFrozenAsterDoc() {
 	a.asterDoc = nil
 	a.asterErr = ""
@@ -1035,6 +1053,10 @@ func (a *app) applyRun(snap *runs.RunSnapshot, err error) {
 			a.ws.Grid = nil
 			a.ws.State = runui.StateEmpty
 			a.ws.Error = ""
+		}
+		a.runWSVM = runworkspace.BuildViewModel(a.snap, a.asterDoc)
+		if a.runWS != nil {
+			a.runWS.SyncFrom(a.runWSVM)
 		}
 		return
 	}
@@ -1979,8 +2001,103 @@ func main() {
 			a.batchView = batchID
 		},
 	}
+
+	// runworkspace callbacks reuse the same Core seams as legacy runui.
+	rwcb := runworkspace.Callbacks{
+		SelectTask: func(taskKey string) {
+			a.selectedTask = taskKey
+			if a.ws != nil {
+				a.ws.Selected = taskKey
+				a.prepareGrid()
+			}
+			if a.runWS != nil {
+				a.runWS.Selected = taskKey
+			}
+		},
+		SaveChecks: func(taskKey string, checks []runworkspace.CheckAckView) {
+			if a.runWS == nil {
+				return
+			}
+			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
+			for _, t := range a.snap.Tasks {
+				if t.Key == taskKey {
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+				}
+			}
+			acks := make([]runs.CheckAck, 0, len(checks))
+			for _, check := range checks {
+				acks = append(acks, runs.CheckAck{CheckID: check.CheckID, Status: check.Status})
+			}
+			snap, err := a.runSvc.SaveTaskChecks(context.Background(), runs.TaskCheckInput{
+				RunID: a.snap.RunID, TaskKey: taskKey, OperationID: a.nextOp(),
+				AssayID: assayID, Timepoint: timepoint,
+				ProtocolStepPath: stepPath, ProtocolVersionID: protocolVersion,
+				Checks: acks,
+			})
+			if err != nil {
+				log.Printf("save task checks: %v", err)
+				if a.runWS != nil {
+					a.runWS.RecordingDirty = false
+				}
+				a.err = state.MapError(err).Error()
+				return
+			}
+			a.applySnap(snap)
+		},
+		Complete: func(taskKey string, checks []runworkspace.CheckAckView) {
+			if taskKey == "" && a.runWS != nil {
+				taskKey = a.runWS.Selected
+			}
+			opID := a.nextOp()
+			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
+			for _, t := range a.snap.Tasks {
+				if t.Key == taskKey {
+					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, t.Title, t.ProtocolVersionID
+				}
+			}
+			acks := make([]runs.CheckAck, 0, len(checks))
+			for _, check := range checks {
+				acks = append(acks, runs.CheckAck{CheckID: check.CheckID, Status: check.Status})
+			}
+			snap, err := a.runSvc.CompleteTask(context.Background(), runs.CompleteTaskInput{
+				RunID:             a.snap.RunID,
+				TaskKey:           taskKey,
+				OperationID:       opID,
+				AssayID:           assayID,
+				Timepoint:         timepoint,
+				ProtocolStepPath:  stepPath,
+				ProtocolVersionID: protocolVersion,
+				Checks:            acks,
+			})
+			if err != nil {
+				a.err = state.MapError(err).Error()
+				return
+			}
+			a.applySnap(snap)
+		},
+		OpenBatch: func(batchID string) {
+			a.batchView = batchID
+		},
+		Recording: func(c *ui.Context, task *runworkspace.RunTaskViewModel) {
+			grid := (*resultgrid.Grid)(nil)
+			if a.ws != nil && a.ws.Selected == task.TaskKey {
+				grid = a.ws.Grid
+			}
+			rv := runworkspace.RecordingView{
+				Kind:   runworkspace.SelectKind(task, grid, nil),
+				Grid:   grid,
+				Assets: []runworkspace.LinkedAsset{},
+				Task:   task,
+				OnOpenAsset: func(asset runworkspace.LinkedAsset) {},
+				OnRelocate:  func(asset runworkspace.LinkedAsset) {},
+			}
+			rv.Render(c)
+		},
+	}
 	a.tools = tools.New(tools.Callbacks{})
 	a.ws = runui.NewWorkspace(toRunView(a.snap), cb)
+	a.runWSVM = runworkspace.BuildViewModel(a.snap, a.asterDoc)
+	a.runWS = runworkspace.NewState(a.runWSVM, rwcb)
 	// The Run surface renders the frozen design's modules through the same
 	// blockui the Designer uses: Run for open tasks, Review once completed.
 	a.ws.Modules = func(c *ui.Context, task runui.Task) {
@@ -2067,6 +2184,8 @@ func contentPage(c *ui.Context, a *app) {
 			}
 			if a.batchView != "" {
 				batchPage(c, a)
+			} else if a.runWS != nil {
+				runworkspace.View(c, a.runWS)
 			} else if a.ws != nil {
 				a.ws.Width = 1200
 				runui.View(c, a.ws)

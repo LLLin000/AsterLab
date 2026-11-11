@@ -7,6 +7,7 @@ Status: Foundation v1 contract work in progress. This directory defines the deve
 | [Foundation v1](foundation-v1.md) | Frozen AsterML envelope, data types, units, references, time, artifacts and compatibility rules. |
 | [Unified module contract v1](module-contract-v1.md) | The twelve contract dimensions every module declares, and where each lives in the single manifest. |
 | [Module development guide](module-development-guide.md) | How to add a module without adding a second syntax or bypassing Core. |
+| [Module catalog v1](module-catalog-v1.md) | All 15 registered modules, port-by-port, the exact new-module checklist, rule-name parity hazard, and surface wiring. |
 | [Compatibility and gaps](compatibility-and-gaps.md) | Acceptance-gate evidence and the limitations that remain. |
 | [Track A: CCK-8 real-window evidence](track-a-cck8-evidence.md) | Real Run, batch readouts, task completion, Review and frozen isolation. |
 | [Track B: SDK extensibility evidence](track-b-extensibility-evidence.md) | Dilution/instrument_profile generic editing and frozen Run viewing. |
