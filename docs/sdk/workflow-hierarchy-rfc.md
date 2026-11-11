@@ -1,6 +1,6 @@
 # Workflow hierarchy RFC — v1 read-only projection
 
-- Status: proposal + read-only projection implementation
+- Status: read-only projection + Run tree navigation implemented; Canvas/Agent proposal only
 - Baseline: `feature/v2-run-workspace` after Track A
 - Evidence: `internal/workflowtree/tree_test.go`, `docs/sdk/rna-extraction-case/rtqpcr-parent-path-bound.asterml`
 
@@ -110,4 +110,11 @@ steps and `runs.RunTask` paths. `internal/workflowtree/tree_test.go` proves:
 
 ```text
 go test ./internal/workflowtree   PASS
+go test -run TestPathBoundRunTreeProjection .   PASS
 ```
+
+Track D hardening (unique ownership, recursive trie, source-block validation,
+business order, structured task key, real frozen Run proof) is documented in
+`docs/sdk/workflow-hierarchy-track-d.md`. The Run rail now consumes this
+projection when a real composite exists; single-layer runs keep the legacy
+rail.

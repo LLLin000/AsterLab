@@ -742,6 +742,8 @@ type workspaceSession struct {
 	CanvasLayouts map[string]map[string]workflow.Position `json:"canvas_layouts,omitempty"`
 	DesignID      string                                  `json:"design_id"`
 	RunID         string                                  `json:"run_id"`
+	TaskPath      string                                  `json:"task_path,omitempty"`
+	Collapsed     map[string]bool                         `json:"collapsed,omitempty"`
 	Page          string                                  `json:"page"`
 	DesignTab     int                                     `json:"design_tab"`
 	UpdatedAt     string                                  `json:"updated_at"`
@@ -787,6 +789,17 @@ func (a *app) saveSession() {
 		// Keeping it lets Design/Notebook/Tools restore with their run context.
 		session.RunID = a.snap.RunID
 	}
+	if a.runWS != nil {
+		session.Collapsed = a.runWS.Collapsed
+		if a.runWS.Selected != "" {
+			for _, task := range a.snap.Tasks {
+				if task.Key == a.runWS.Selected {
+					session.TaskPath = taskStepPath(task)
+					break
+				}
+			}
+		}
+	}
 	raw, err := json.Marshal(session)
 	if err != nil {
 		return
@@ -821,6 +834,21 @@ func (a *app) restoreSession() {
 	if session.RunID != "" {
 		a.selectRun(session.RunID)
 		loadedRun = a.snap.RunID != ""
+		if loadedRun && a.runWS != nil {
+			if session.Collapsed != nil {
+				a.runWS.Collapsed = session.Collapsed
+			}
+			if session.TaskPath != "" {
+				for _, task := range a.snap.Tasks {
+					if taskStepPath(task) == session.TaskPath {
+						a.ws.Selected = task.Key
+						a.runWS.Selected = task.Key
+						a.prepareGrid()
+						break
+					}
+				}
+			}
+		}
 	}
 	if session.Page == "design" && session.DesignID != "" {
 		a.selectDesign(session.DesignID)
@@ -2244,6 +2272,7 @@ func main() {
 			if a.runWS != nil {
 				a.runWS.Selected = taskKey
 			}
+			a.saveSession()
 		},
 		SaveChecks: func(taskKey string, checks []runworkspace.CheckAckView) {
 			if a.runWS == nil {

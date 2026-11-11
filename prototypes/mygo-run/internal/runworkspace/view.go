@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"asterlab-mygo-prototype/internal/theme"
+	workflowtree "asterlab-mygo-prototype/internal/workflowtree"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -316,6 +317,19 @@ func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline 
 	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3), t.Space(2)).Children(func() {
 		ui.Text(c, "实验流程").FontSize(11).Bold().TextColor(t.TextMuted).
 			Padding(0, 0, t.Space(2), 0)
+		if len(s.VM.TreeIssues) > 0 {
+			ui.Row(c).FillWidth().Padding(6, 8).Radius(6).Background(tokens.WarningBg).
+				Border(1, tokens.WarningText).Children(func() {
+				ui.Text(c, "层级诊断："+strings.Join(s.VM.TreeIssues, "；")).
+					FontSize(t.Rem(.66)).TextColor(tokens.WarningText)
+			})
+		}
+		if s.VM.Tree != nil {
+			for _, root := range s.VM.Tree.Roots {
+				treeNode(c, s, t, tokens, root, 0)
+			}
+			return
+		}
 		for i, step := range s.VM.Steps {
 			stepNode(c, s, t, tokens, step)
 			if i < len(s.VM.Steps)-1 {
@@ -323,6 +337,125 @@ func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline 
 			}
 		}
 	})
+}
+
+func treeNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, node *workflowtree.Node, depth int) {
+	if node == nil {
+		return
+	}
+	if node.Kind == workflowtree.KindTask {
+		treeTaskRow(c, s, t, tokens, node.Title, node, depth)
+		return
+	}
+	if !node.Composite && len(node.Children) == 1 && node.Children[0].Kind == workflowtree.KindTask {
+		treeTaskRow(c, s, t, tokens, node.Title, node.Children[0], depth)
+		return
+	}
+	selected := treeContainsSelected(s, node)
+	left := t.Space(2) + float32(depth)*10
+	row := ui.Row(c).FillWidth().Padding(t.Space(2), left).Radius(6).
+		AlignItems(ui.Center).Gap(t.Space(1.5))
+	if selected {
+		row.Background(t.Accent.Alpha(.10))
+	}
+	row.Children(func() {
+		if node.Composite {
+			icon := lucide.ChevronRight()
+			if !s.Collapsed[node.ID] {
+				icon = lucide.ChevronDown()
+			}
+			components.Icon(c, icon).Size(12, 12)
+		} else {
+			treeStatusDot(c, node.Status, t, tokens)
+		}
+		ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+			ui.Text(c, node.Title).FontSize(t.Rem(.82)).FontWeight(600).
+				TextColor(t.Text).SingleLine().Ellipsis("…")
+			if node.Composite {
+				ui.Text(c, fmt.Sprintf("%d/%d 个子操作", node.Completed, node.Total)).
+					FontSize(t.Rem(.66)).TextColor(t.TextMuted)
+			}
+		})
+		if node.Composite {
+			ui.Text(c, fmt.Sprintf("%d/%d", node.Completed, node.Total)).
+				FontSize(t.Rem(.68)).TextColor(t.TextMuted).FontFeatures("tnum")
+		}
+		treeStatusDot(c, node.Status, t, tokens)
+	})
+	if row.Clicked() {
+		if node.Composite {
+			s.Collapsed[node.ID] = !s.Collapsed[node.ID]
+		} else if len(node.Children) > 0 {
+			selectTreeTask(s, node.Children[0].ID)
+		}
+	}
+	if node.Composite && !s.Collapsed[node.ID] {
+		for _, child := range node.Children {
+			treeNode(c, s, t, tokens, child, depth+1)
+		}
+	}
+}
+
+func treeTaskRow(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, title string, task *workflowtree.Node, depth int) {
+	selected := s.Selected == task.ID
+	left := t.Space(2) + float32(depth)*10
+	row := ui.ButtonBase(c).FillWidth().Radius(5).
+		Padding(t.Space(1.5), left).Gap(t.Space(1.5)).AlignItems(ui.Center)
+	if selected {
+		row.Background(t.Accent.Alpha(.08))
+	}
+	row.Children(func() {
+		treeStatusDot(c, task.Status, t, tokens)
+		ui.Text(c, title).FontSize(t.Rem(.78)).TextColor(t.Text).
+			SingleLine().Ellipsis("…")
+	})
+	if selected && s.railScrollKey != task.ID {
+		row.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
+		s.railScrollKey = task.ID
+	}
+	if row.Clicked() {
+		selectTreeTask(s, task.ID)
+	}
+}
+
+func selectTreeTask(s *State, taskKey string) {
+	if taskKey == "" {
+		return
+	}
+	s.Selected = taskKey
+	if s.Callbacks.SelectTask != nil {
+		s.Callbacks.SelectTask(taskKey)
+	}
+}
+
+func treeContainsSelected(s *State, node *workflowtree.Node) bool {
+	if node == nil {
+		return false
+	}
+	if s.Selected == node.ID {
+		return true
+	}
+	for _, child := range node.Children {
+		if treeContainsSelected(s, child) {
+			return true
+		}
+	}
+	return false
+}
+
+func treeStatusDot(c *ui.Context, status string, t *ui.Theme, tokens theme.Tokens) {
+	color := tokens.NeutralText
+	switch status {
+	case "completed":
+		color = t.Success
+	case "current", "in_progress":
+		color = t.Accent
+	case "blocked":
+		color = t.Danger
+	case "unresolved":
+		color = t.Warning
+	}
+	ui.Box(c).Size(7, 7).Radius(3.5).Shrink(0).Background(color)
 }
 
 // flowConnector draws the vertical link and arrow between two step nodes.

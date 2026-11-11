@@ -1,9 +1,10 @@
 // Package workflowtree builds a read-only containment projection over the
-// frozen AsterDoc step paths and the frozen Run tasks. It does not add a
-// second workflow store or a new execution engine.
+// frozen AsterDoc steps and the frozen Run tasks. It does not add a second
+// workflow store or execution engine.
 package workflowtree
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"asterlab-mygo-prototype/modules/runs"
 )
 
-// Kind distinguishes an AsterDoc step from an executable frozen task.
+// Kind distinguishes a step/composite from an executable frozen task.
 type Kind string
 
 const (
@@ -22,20 +23,22 @@ const (
 
 // TaskRef is one frozen Run task occurrence under a step.
 type TaskRef struct {
-	Key               string
-	Path              string
-	Title             string
-	Status            string
-	ProtocolVersionID string
+	Key                  string
+	Path                 string
+	Title                string
+	Status               string
+	ProtocolVersionID    string
+	SourceBlockVersionID string
 }
 
-// Node is one read-only node in the projection. A step node may contain child
-// task nodes; a task node has no children.
+// Node is one read-only node. A step node may contain child tasks or nested
+// composites; a task node has no children.
 type Node struct {
 	ID            string
 	Title         string
 	Path          string
 	Kind          Kind
+	Composite     bool
 	Order         int
 	DefinitionRef string
 	Status        string
@@ -47,15 +50,17 @@ type Node struct {
 
 // Tree is the projection of one frozen design plus one frozen Run.
 type Tree struct {
-	Roots    []*Node
-	Precedes map[string][]string
-	Issues   []string
-	Orphans  []TaskRef
+	Roots     []*Node
+	Precedes  map[string][]string
+	Issues    []string
+	Orphans   []TaskRef
+	Ambiguous []TaskRef
 }
 
-// Build projects the design steps and frozen tasks. It matches a task to a
-// step by exact path or by the composite prefix step.path + "/". It never
-// matches by title.
+// Build projects the design steps and frozen tasks. A task has exactly one
+// authoritative step: the unique matching step path. If it matches more than
+// one step, it is reported as ambiguous and is not assigned. Titles are never
+// used for matching.
 func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 	if doc == nil || strings.TrimSpace(doc.Source) == "" {
 		return nil, fmt.Errorf("frozen AsterDoc source is required")
@@ -66,14 +71,6 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 	}
 	tree := &Tree{Precedes: map[string][]string{}}
 
-	type stepDef struct {
-		id    string
-		title string
-		path  string
-		order int
-		refs  []string
-	}
-	var steps []stepDef
 	referenceRefs := map[string]string{}
 	for _, module := range parsed.Modules {
 		if module.Kind == "reference" {
@@ -82,6 +79,15 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 			}
 		}
 	}
+
+	type stepDef struct {
+		id    string
+		title string
+		path  string
+		order int
+		refs  []string
+	}
+	var steps []stepDef
 	for _, module := range parsed.Modules {
 		if module.Kind != "step" {
 			continue
@@ -110,6 +116,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 
 	// Duplicate step paths make containment ambiguous.
 	seenPath := map[string]string{}
+	validSteps := make([]stepDef, 0, len(steps))
 	for _, step := range steps {
 		if step.path == "" {
 			tree.Issues = append(tree.Issues, fmt.Sprintf("step %s has no path", step.id))
@@ -120,107 +127,93 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 			continue
 		}
 		seenPath[step.path] = step.id
+		validSteps = append(validSteps, step)
 	}
 
-	// A task belongs to the longest matching step path. If it matches more
-	// than one step, it is ambiguous and is reported, not guessed.
-	assigned := map[int]bool{}
-	for i, step := range steps {
-		if step.path == "" {
-			continue
+	// Assign every task to exactly one step before building any node.
+	assignments := map[string][]TaskRef{}
+	for _, task := range tasks {
+		path := taskPath(task)
+		ref := TaskRef{
+			Key: task.Key, Path: path, Title: task.Title, Status: task.Status,
+			ProtocolVersionID: task.ProtocolVersionID, SourceBlockVersionID: task.SourceBlockVersionID,
 		}
-		node := &Node{ID: step.id, Title: step.title, Path: step.path, Kind: KindStep, Order: step.order}
-		var children []TaskRef
-		for taskIndex, task := range tasks {
-			path := task.Path
-			if path == "" {
-				path = taskPath(task.Key)
+		var matches []stepDef
+		for _, step := range validSteps {
+			if path == step.path || strings.HasPrefix(path, step.path+"/") {
+				matches = append(matches, step)
 			}
-			matches := path == step.path || strings.HasPrefix(path, step.path+"/")
-			if !matches {
-				continue
-			}
-			// Check whether a more specific step also matches this task.
-			for otherIndex, other := range steps {
-				if otherIndex == i || other.path == "" {
-					continue
-				}
-				if strings.HasPrefix(path, other.path+"/") && len(other.path) > len(step.path) {
-					node.Issues = append(node.Issues, fmt.Sprintf("task %s is also under step %s", path, other.id))
-				}
-			}
-			assigned[taskIndex] = true
-			children = append(children, TaskRef{Key: task.Key, Path: path, Title: task.Title, Status: task.Status, ProtocolVersionID: task.ProtocolVersionID})
 		}
-		sort.SliceStable(children, func(i, j int) bool { return children[i].Path < children[j].Path })
-		for _, child := range children {
-			node.Children = append(node.Children, &Node{
-				ID: child.Key, Title: child.Title, Path: child.Path, Kind: KindTask, Status: child.Status,
-				DefinitionRef: child.ProtocolVersionID,
-			})
+		switch len(matches) {
+		case 0:
+			tree.Orphans = append(tree.Orphans, ref)
+		case 1:
+			assignments[matches[0].id] = append(assignments[matches[0].id], ref)
+		default:
+			tree.Ambiguous = append(tree.Ambiguous, ref)
+			tree.Issues = append(tree.Issues, fmt.Sprintf("task path %s matches %d design steps", path, len(matches)))
 		}
-		node.Total = len(children)
-		node.Completed = countCompleted(children)
-		node.Status = aggregate(children)
-		if node.Total == 0 {
-			node.Issues = append(node.Issues, "no frozen task matches this step path")
-			node.Status = "unresolved"
-		}
-		if node.Total > 0 && hasExactAndPrefix(children, step.path) {
-			node.Issues = append(node.Issues, "step mixes an exact task and child tasks")
-		}
-		if isComposite(node, step.path) {
-			for _, ref := range step.refs {
-				if blockRef, ok := referenceRefs[ref]; ok {
-					node.DefinitionRef = blockRef
-					break
-				}
-			}
-			if node.DefinitionRef == "" {
-				node.Issues = append(node.Issues, "composite step has no explicit reference to a child definition")
-			}
-		} else if len(children) == 1 {
-			// A leaf's definition is the frozen parent protocol version; the
-			// occurrence identity remains the frozen task key.
-			node.DefinitionRef = children[0].ProtocolVersionID
-		}
-		tree.Roots = append(tree.Roots, node)
-		tree.Issues = append(tree.Issues, node.Issues...)
-	}
-
-	for taskIndex, task := range tasks {
-		if assigned[taskIndex] {
-			continue
-		}
-		path := task.Path
-		if path == "" {
-			path = taskPath(task.Key)
-		}
-		tree.Orphans = append(tree.Orphans, TaskRef{Key: task.Key, Path: path, Title: task.Title, Status: task.Status, ProtocolVersionID: task.ProtocolVersionID})
 	}
 	if len(tree.Orphans) > 0 {
 		tree.Issues = append(tree.Issues, fmt.Sprintf("%d frozen task(s) have no design step", len(tree.Orphans)))
 	}
 
-	// Precedes comes from the workflow edges when present; otherwise from the
-	// authored step order. Containment is the tree itself.
-	if edges := workflowEdges(parsed); len(edges) > 0 {
+	for _, step := range validSteps {
+		node := &Node{ID: step.id, Title: step.title, Path: step.path, Kind: KindStep, Order: step.order}
+		var exact, descendants []TaskRef
+		for _, task := range assignments[step.id] {
+			if task.Path == step.path {
+				exact = append(exact, task)
+			} else if strings.HasPrefix(task.Path, step.path+"/") {
+				descendants = append(descendants, task)
+			}
+		}
+		if len(exact) > 0 && len(descendants) > 0 {
+			node.Issues = append(node.Issues, "step mixes an exact task and child tasks")
+		}
+		switch {
+		case len(descendants) > 0:
+			node.Composite = true
+			node.Children = buildTrie(step.path, descendants)
+			node.DefinitionRef = resolveDefinition(step, referenceRefs)
+			validateComposite(node, step.path, node.DefinitionRef, descendants)
+		case len(exact) > 0:
+			for _, task := range exact {
+				node.Children = append(node.Children, taskNode(task))
+			}
+			if len(exact) > 1 {
+				node.Issues = append(node.Issues, "multiple exact tasks share one step path")
+			}
+			node.DefinitionRef = exact[0].ProtocolVersionID
+		default:
+			node.Issues = append(node.Issues, "no frozen task matches this step path")
+		}
+		aggregateNode(node)
+		tree.Roots = append(tree.Roots, node)
+		tree.Issues = append(tree.Issues, node.Issues...)
+	}
+
+	// Precedes is separate from containment. Prefer the frozen business order,
+	// then explicit workflow edges, then the authored step order.
+	if order := businessOrder(parsed); len(order) > 0 {
+		addOrderEdges(tree.Precedes, order)
+	} else if edges := workflowEdges(parsed); len(edges) > 0 {
 		for _, edge := range edges {
 			tree.Precedes[edge[0]] = append(tree.Precedes[edge[0]], edge[1])
-		}
-		if cycle := findCycle(tree.Precedes); cycle != "" {
-			tree.Issues = append(tree.Issues, "precedes cycle at "+cycle)
 		}
 	} else {
 		for i := 0; i+1 < len(tree.Roots); i++ {
 			tree.Precedes[tree.Roots[i].ID] = append(tree.Precedes[tree.Roots[i].ID], tree.Roots[i+1].ID)
 		}
 	}
+	if cycle := findCycle(tree.Precedes); cycle != "" {
+		tree.Issues = append(tree.Issues, "precedes cycle at "+cycle)
+	}
 	return tree, nil
 }
 
-// Validate returns an error when the projection contains ambiguity, orphans,
-// unresolved steps, or a precedence cycle.
+// Validate returns an error when the projection has ambiguity, orphans,
+// unresolved steps, a missing definition, or a precedence cycle.
 func (t *Tree) Validate() error {
 	if t == nil {
 		return fmt.Errorf("nil workflow tree")
@@ -231,91 +224,223 @@ func (t *Tree) Validate() error {
 	return nil
 }
 
-func isComposite(node *Node, stepPath string) bool {
-	if len(node.Children) == 0 {
+// HasComposite reports whether the tree has at least one real containment
+// level. A single-layer run (one task per step) keeps the legacy rail.
+func (t *Tree) HasComposite() bool {
+	if t == nil {
 		return false
 	}
-	for _, child := range node.Children {
-		if strings.HasPrefix(child.Path, stepPath+"/") {
+	var walk func(*Node) bool
+	walk = func(node *Node) bool {
+		if node.Composite {
+			return true
+		}
+		for _, child := range node.Children {
+			if walk(child) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, root := range t.Roots {
+		if walk(root) {
 			return true
 		}
 	}
 	return false
 }
 
-func hasExactAndPrefix(children []TaskRef, stepPath string) bool {
-	exact, prefix := false, false
-	for _, child := range children {
-		if child.Path == stepPath {
-			exact = true
-		}
-		if strings.HasPrefix(child.Path, stepPath+"/") {
-			prefix = true
-		}
-	}
-	return exact && prefix
+type trieNode struct {
+	segment  string
+	path     string
+	tasks    []TaskRef
+	children map[string]*trieNode
 }
 
-func countCompleted(tasks []TaskRef) int {
-	count := 0
+func buildTrie(stepPath string, tasks []TaskRef) []*Node {
+	root := &trieNode{children: map[string]*trieNode{}}
 	for _, task := range tasks {
-		if task.Status == "completed" {
-			count++
+		suffix := strings.TrimPrefix(task.Path, stepPath+"/")
+		parts := strings.Split(suffix, "/")
+		current := root
+		for i, part := range parts {
+			if part == "" {
+				continue
+			}
+			if current.children == nil {
+				current.children = map[string]*trieNode{}
+			}
+			next := current.children[part]
+			if next == nil {
+				next = &trieNode{segment: part, path: stepPath + "/" + strings.Join(parts[:i+1], "/"), children: map[string]*trieNode{}}
+				current.children[part] = next
+			}
+			current = next
 		}
+		current.tasks = append(current.tasks, task)
 	}
-	return count
+	return convertTrie(root)
 }
 
-func aggregate(tasks []TaskRef) string {
-	if len(tasks) == 0 {
-		return "unresolved"
+func convertTrie(node *trieNode) []*Node {
+	segments := make([]string, 0, len(node.children))
+	for segment := range node.children {
+		segments = append(segments, segment)
 	}
-	completed, current, blocked := 0, false, false
-	for _, task := range tasks {
-		switch task.Status {
-		case "completed":
-			completed++
-		case "in_progress", "current", "started", "active":
-			current = true
+	sort.Strings(segments)
+	out := make([]*Node, 0, len(segments)+len(node.tasks))
+	for _, task := range node.tasks {
+		out = append(out, taskNode(task))
+	}
+	for _, segment := range segments {
+		child := node.children[segment]
+		if len(child.tasks) > 0 && len(child.children) == 0 {
+			for _, task := range child.tasks {
+				out = append(out, taskNode(task))
+			}
+			continue
+		}
+		childNode := &Node{
+			ID: child.path, Title: child.segment, Path: child.path,
+			Kind: KindStep, Composite: true,
+		}
+		childNode.Children = convertTrie(child)
+		if len(child.tasks) > 0 && len(child.children) > 0 {
+			childNode.Issues = append(childNode.Issues, "nested node mixes a task and child tasks")
+		}
+		aggregateNode(childNode)
+		out = append(out, childNode)
+	}
+	return out
+}
+
+func taskNode(task TaskRef) *Node {
+	title := task.Title
+	if title == "" {
+		title = lastSegment(task.Path)
+	}
+	return &Node{
+		ID: task.Key, Title: title, Path: task.Path, Kind: KindTask,
+		Status: task.Status, DefinitionRef: task.ProtocolVersionID,
+		Completed: completedCount(task.Status), Total: 1,
+	}
+}
+
+func validateComposite(node *Node, stepPath, definitionRef string, descendants []TaskRef) {
+	if definitionRef == "" {
+		node.Issues = append(node.Issues, "composite step has no explicit reference to a child definition")
+	}
+	protocolVersions := map[string]bool{}
+	for _, task := range descendants {
+		if task.ProtocolVersionID != "" {
+			protocolVersions[task.ProtocolVersionID] = true
+		}
+		// Direct child tasks must come from the referenced block version. A
+		// deeper task comes from a nested block, whose parent version is not
+		// exposed by the current frozen task model; do not guess it.
+		if strings.Count(strings.TrimPrefix(task.Path, stepPath+"/"), "/") != 0 {
+			continue
+		}
+		if definitionRef != "" && task.SourceBlockVersionID != "" && task.SourceBlockVersionID != definitionRef {
+			node.Issues = append(node.Issues, fmt.Sprintf(
+				"child task %s source block %s does not match referenced block %s",
+				task.Path, task.SourceBlockVersionID, definitionRef))
+		}
+	}
+	if len(protocolVersions) > 1 {
+		node.Issues = append(node.Issues, "composite children reference multiple Protocol versions")
+	}
+}
+
+func resolveDefinition(step struct {
+	id    string
+	title string
+	path  string
+	order int
+	refs  []string
+}, referenceRefs map[string]string) string {
+	for _, ref := range step.refs {
+		if block, ok := referenceRefs[ref]; ok {
+			return block
+		}
+	}
+	return ""
+}
+
+func aggregateNode(node *Node) {
+	completed, total := 0, 0
+	blocked, current := false, false
+	for _, child := range node.Children {
+		completed += child.Completed
+		total += child.Total
+		switch child.Status {
 		case "blocked":
 			blocked = true
+		case "current", "in_progress", "started", "active":
+			current = true
 		}
 	}
+	node.Completed, node.Total = completed, total
 	switch {
+	case total == 0:
+		node.Status = "unresolved"
 	case blocked:
-		return "blocked"
-	case completed == len(tasks):
-		return "completed"
+		node.Status = "blocked"
+	case completed == total:
+		node.Status = "completed"
 	case current:
-		return "current"
+		node.Status = "current"
+	default:
+		node.Status = "pending"
 	}
-	return "pending"
 }
 
-func intValue(value any) int {
-	switch v := value.(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
+func completedCount(status string) int {
+	if status == "completed" {
+		return 1
 	}
 	return 0
 }
 
-func taskPath(key string) string {
-	const marker = `"path":"`
-	start := strings.Index(key, marker)
-	if start < 0 {
+func lastSegment(path string) string {
+	parts := strings.Split(path, "/")
+	return parts[len(parts)-1]
+}
+
+func taskPath(task runs.RunTask) string {
+	if task.Path != "" {
+		return task.Path
+	}
+	var parsed struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(task.Key), &parsed) != nil {
 		return ""
 	}
-	start += len(marker)
-	end := strings.Index(key[start:], `"`)
-	if end < 0 {
-		return ""
+	return parsed.Path
+}
+
+func businessOrder(doc *asterdoc.Document) []string {
+	for _, module := range doc.Modules {
+		if module.Kind != "workflow" {
+			continue
+		}
+		raw, _ := module.Data["business_order"].([]any)
+		out := make([]string, 0, len(raw))
+		for _, value := range raw {
+			if id, ok := value.(string); ok && id != "" {
+				out = append(out, id)
+			}
+		}
+		return out
 	}
-	return key[start : start+end]
+	return nil
+}
+
+func addOrderEdges(edges map[string][]string, order []string) {
+	for i := 0; i+1 < len(order); i++ {
+		edges[order[i]] = append(edges[order[i]], order[i+1])
+	}
 }
 
 func workflowEdges(doc *asterdoc.Document) [][2]string {
@@ -323,10 +448,10 @@ func workflowEdges(doc *asterdoc.Document) [][2]string {
 		if module.Kind != "workflow" {
 			continue
 		}
-		edges, _ := module.Data["edges"].([]any)
-		out := make([][2]string, 0, len(edges))
-		for _, raw := range edges {
-			edge, _ := raw.(map[string]any)
+		raw, _ := module.Data["edges"].([]any)
+		out := make([][2]string, 0, len(raw))
+		for _, value := range raw {
+			edge, _ := value.(map[string]any)
 			from, _ := edge["from"].(string)
 			to, _ := edge["to"].(string)
 			if from != "" && to != "" {
@@ -363,4 +488,16 @@ func findCycle(edges map[string][]string) string {
 		}
 	}
 	return ""
+}
+
+func intValue(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	}
+	return 0
 }

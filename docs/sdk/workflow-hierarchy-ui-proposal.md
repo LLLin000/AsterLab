@@ -1,7 +1,7 @@
 # Workflow hierarchy UI proposal — Track C
 
-Design only. No nested Canvas, Run tree, or Agent write command is implemented
-in this round.
+Status: the Run tree navigation is implemented in Track D. Canvas
+subflow expansion/drill-down and Agent write commands remain design only.
 
 ## 1. Design Canvas
 

@@ -552,7 +552,7 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
         }).collect();
         checks_by_path.insert(path, checks);
     }
-    let mut steps_by_path: std::collections::HashMap<String, (String, String, String)> =
+    let mut steps_by_path: std::collections::HashMap<String, (String, String, String, String)> =
         std::collections::HashMap::new();
     for step in v["steps"].as_array().into_iter().flatten() {
         let path = step["step"]["path"].as_str().unwrap_or("").to_owned();
@@ -560,7 +560,8 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
         let title = step["step"]["title"].as_str().unwrap_or("").to_owned();
         let instruction = step["step"]["instruction"].as_str().unwrap_or("").to_owned();
         let parameters_json = serde_json::to_string(&step["step"]["parameters"]).unwrap_or_else(|_| "[]".into());
-        steps_by_path.insert(path, (title, instruction, parameters_json));
+        let source_block_version_id = step["step"]["source_block_version_id"].as_str().unwrap_or("").to_owned();
+        steps_by_path.insert(path, (title, instruction, parameters_json, source_block_version_id));
     }
     let mut steps_by_assay: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     if let Some(step_assays) = v["frozen_design"]["mygo"]["stepAssays"].as_object() {
@@ -639,10 +640,10 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
                 .unwrap_or_default()
         };
         let path: String = t["step_path"].as_str().unwrap_or("").into();
-        let (title, instruction, parameters_json) = steps_by_path
+        let (title, instruction, parameters_json, source_block_version_id) = steps_by_path
             .get(&path)
             .cloned()
-            .unwrap_or_else(|| (path.clone(), String::new(), "[]".into()));
+            .unwrap_or_else(|| (path.clone(), String::new(), "[]".into(), String::new()));
         let mut checks = checks_by_path.get(&path).cloned().unwrap_or_default();
         for entry in v["design_checks"].as_array().into_iter().flatten() {
             if entry["path"].as_str() != Some(path.as_str()) {
@@ -675,6 +676,7 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
             design_step_id,
             instruction,
             parameters_json,
+            source_block_version_id,
             checks,
         });
     }

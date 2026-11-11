@@ -44,12 +44,17 @@ func parentTasks() []runs.RunTask {
 		if i == 12 {
 			status = "blocked"
 		}
+		sourceBlock := "c23df8e1-3f2a-4449-8ac9-a4bb7256a113"
+		if i >= 10 {
+			sourceBlock = "b41381b7-cd4c-44ca-9efa-97d43f9d66ea"
+		}
 		out = append(out, runs.RunTask{
-			Key:               `{"path":"` + path + `"}`,
-			Path:              path,
-			Title:             path,
-			Status:            status,
-			ProtocolVersionID: "protocol-rtqpcr-v1",
+			Key:                  `{"path":"` + path + `"}`,
+			Path:                 path,
+			Title:                path,
+			Status:               status,
+			ProtocolVersionID:    "protocol-rtqpcr-v1",
+			SourceBlockVersionID: sourceBlock,
 		})
 	}
 	return out
@@ -129,6 +134,47 @@ func TestProjectionRejectsCompositeWithoutDefinition(t *testing.T) {
 		t.Fatal(err)
 	}
 	if tree.Validate() == nil || !strings.Contains(tree.Validate().Error(), "no explicit reference") {
+		t.Fatalf("Validate() = %v", tree.Validate())
+	}
+}
+
+func TestProjectionBuildsNestedContainment(t *testing.T) {
+	source := strings.Replace(parentSourceText(t), "ref: c23df8e1-3f2a-4449-8ac9-a4bb7256a113", "ref: purify-block", 1)
+	tasks := []runs.RunTask{
+		{Key: `{"path":"root/rna-extraction/purification/01-wash"}`, Path: "root/rna-extraction/purification/01-wash", Title: "01 Wash", Status: "completed", ProtocolVersionID: "pv", SourceBlockVersionID: "purify-block"},
+		{Key: `{"path":"root/rna-extraction/purification/02-elute"}`, Path: "root/rna-extraction/purification/02-elute", Title: "02 Elute", Status: "in_progress", ProtocolVersionID: "pv", SourceBlockVersionID: "purify-block"},
+		{Key: `{"path":"root/rna-qc"}`, Path: "root/rna-qc", Title: "QC", Status: "completed", ProtocolVersionID: "pv"},
+		{Key: `{"path":"root/reverse-transcription"}`, Path: "root/reverse-transcription", Title: "RT", Status: "pending", ProtocolVersionID: "pv"},
+		{Key: `{"path":"root/qpcr"}`, Path: "root/qpcr", Title: "qPCR", Status: "pending", ProtocolVersionID: "pv"},
+	}
+	tree, err := Build(tasks, &asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tree.HasComposite() {
+		t.Fatal("nested tree was not marked composite")
+	}
+	root := tree.Roots[0]
+	if len(root.Children) != 1 || root.Children[0].Title != "purification" {
+		t.Fatalf("root children = %+v", root.Children)
+	}
+	nested := root.Children[0]
+	if len(nested.Children) != 2 || nested.Completed != 1 || nested.Total != 2 || nested.Status != "current" {
+		t.Fatalf("nested node = %+v", nested)
+	}
+	if err := tree.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProjectionRejectsWrongBlockVersion(t *testing.T) {
+	tasks := parentTasks()
+	tasks[0].SourceBlockVersionID = "wrong-block-version"
+	tree, err := Build(tasks, parentDoc(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.Validate() == nil || !strings.Contains(tree.Validate().Error(), "does not match referenced block") {
 		t.Fatalf("Validate() = %v", tree.Validate())
 	}
 }

@@ -128,6 +128,9 @@ type RunTask struct {
 	// ParametersJSON is the resolved protocol parameter list, serialized as
 	// JSON so the native boundary does not need a second parameter type.
 	ParametersJSON string `json:"parametersJson,omitempty"`
+	// SourceBlockVersionID is the exact ProtocolBlock version that produced
+	// this expanded task. Empty for legacy tasks or text-only steps.
+	SourceBlockVersionID string `json:"sourceBlockVersionId,omitempty"`
 	// Checks are the frozen protocol step's real checks. Empty means the step
 	// defines none; the UI must not invent one.
 	Checks []TaskCheck `json:"checks,omitempty"`

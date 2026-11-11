@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -173,6 +174,12 @@ type RunWorkspaceViewModel struct {
 
 	UnassociatedMeasurements []MeasurementView
 	UnassociatedEvents       []EventViewModel
+
+	// Tree is the read-only containment projection used by the Run rail when
+	// a real composite exists. TreeIssues holds diagnostics when the hierarchy
+	// cannot be trusted; the legacy rail is then used.
+	Tree       *workflowtree.Tree
+	TreeIssues []string
 
 	Selected *RunTaskViewModel
 }
@@ -633,6 +640,16 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 			Children:  tasks,
 		}
 		vm.Steps = append(vm.Steps, parent)
+	}
+
+	if doc != nil {
+		if tree, err := workflowtree.Build(snap.Tasks, doc); err != nil {
+			vm.TreeIssues = []string{err.Error()}
+		} else if len(tree.Issues) > 0 {
+			vm.TreeIssues = tree.Issues
+		} else if tree.HasComposite() {
+			vm.Tree = tree
+		}
 	}
 
 	if vm.Selected == nil {
