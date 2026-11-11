@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"asterlab-mygo-prototype/internal/theme"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -145,5 +146,45 @@ func TestGenericEditorCapabilityGate(t *testing.T) {
 	dil, _ := registry.Lookup("dilution", 1)
 	if !hasCapability(dil.Descriptor, "generic-editor") {
 		t.Fatal("dilution should opt into the generic editor")
+	}
+}
+
+// Run's parsed-module path must enforce the same surface declaration as the
+// Markdown path. A document-only viewer is a gap in Design and callable in Run.
+func TestRenderModuleHonorsDeclaredSurface(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(ModuleSpec{
+		Descriptor: Descriptor{
+			Kind: "viewer_only", Schema: 1, Title: "Viewer only",
+			Renderers: &Renderers{Document: "viewer_only.viewer"},
+		},
+		Validate: func(map[string]any) error { return nil },
+		Render: func(_ *View, c *ui.Context, _ map[string]any) {
+			ui.Text(c, "document renderer called")
+		},
+		Renders: []string{"viewer_only.viewer"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	design := &View{Registry: registry, Mode: ModeDesign}
+	designTest := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		design.RenderModule(c, "viewer_only", 1, map[string]any{"id": "v1"})
+	}, 800, 500)
+	designTest.Frame()
+	if designTest.HasText("document renderer called") ||
+		!designTest.HasText("viewer_only@1 · 该模块未声明此视图的渲染能力") {
+		t.Fatalf("Design did not report the missing surface: %q", designTest.Texts())
+	}
+
+	run := &View{Registry: registry, Mode: ModeRun, ReadOnly: true}
+	runTest := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		run.RenderModule(c, "viewer_only", 1, map[string]any{"id": "v1"})
+	}, 800, 500)
+	runTest.Frame()
+	if !runTest.HasText("document renderer called") {
+		t.Fatalf("Run viewer was not dispatched: %q", runTest.Texts())
 	}
 }

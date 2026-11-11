@@ -123,12 +123,8 @@ Current permissions: `document.edit`, `run.readout`, `notebook.append`. The rend
 - Two different kinds may not claim the same renderer key; two schema versions
   of one kind may share a family (`step@1` and `step@2` both use
   `step.editor`/`step.viewer`).
-- The host dispatches by declared key and mode (`Descriptor.RendererKey`), not by
-  hardcoded `kind` checks. A missing key or an unimplemented key renders an
-  explicit capability-gap notice (`View.rendererGap`) — never a guess.
-- The generic field editor is opt-in through the `generic-editor` capability.
-  Spatial/computational modules (plate, plate96, container) keep their own
-  design renderer; field-only modules opt in.
+- In v1 the host resolves the renderer key for the current mode, verifies the registered module covers it via `ModuleSpec.Renders`, then calls that module's single `Render` function. The key is a surface capability, not a separate Go callback slot; `kind@schema` still selects the module implementation. Design selects `renderers.design`; protocol/run/notebook/review select `renderers.document`.
+- The generic field editor is opt-in through the `generic-editor` capability. `plate` and `plate96` keep their dedicated plate surface; modules that opt in use the generic editor in Design. Field-only modules can opt in.
 - A static/PDF renderer must be deterministic from document revision, frozen-run
   revision, referenced IDs and calculator version. `renderers.static` is
   currently declared by no shipped module; static output goes through

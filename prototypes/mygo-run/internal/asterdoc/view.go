@@ -88,37 +88,36 @@ func (v *View) codeBlock(c *ui.Context, block *markdown.CodeBlockView) {
 		v.moduleError(c, err)
 		return
 	}
-	spec, ok := registry.Lookup(module.Kind, module.Schema)
+	v.renderRegisteredModule(c, registry, module.Kind, module.Schema, module.ID, module.Data)
+}
+
+// renderRegisteredModule checks the surface declared for this mode and then
+// renders the module through the registered implementation.
+func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind string, schema int, moduleID string, data map[string]any) {
+	spec, ok := registry.Lookup(kind, schema)
 	if !ok {
-		v.rendererGap(c, module.Kind, module.Schema, "")
+		v.rendererGap(c, kind, schema, "")
 		return
 	}
-	// Dispatch by the module's declared renderer capability, not by kind. A
-	// module that declares an editable design renderer and grants document.edit
-	// is drawn by the generic editor; everything else uses its own renderer.
 	if key, declared := spec.Descriptor.RendererKey(v.Mode); declared {
 		if !registry.HasRenderer(key) {
-			v.rendererGap(c, module.Kind, module.Schema, key)
+			v.rendererGap(c, kind, schema, key)
 			return
 		}
 	} else {
-		v.rendererGap(c, module.Kind, module.Schema, "")
+		v.rendererGap(c, kind, schema, "")
 		return
 	}
-	// Only a module that opts into the generic editor is drawn by it. Spatial
-	// and computational modules (plate, dilution, instrument_profile) declare
-	// their own design renderer and must keep it; the generic editor is a
-	// fallback for field-only modules, selected by an explicit capability.
 	if v.Mode == ModeDesign && v.Can(PermDocumentEdit) && !v.ReadOnly &&
 		hasCapability(spec.Descriptor, "generic-editor") {
-		v.genericModuleEditor(c, module.ID, module.Data)
+		v.genericModuleEditor(c, moduleID, data)
 		return
 	}
 	if spec.Render == nil {
-		v.rendererGap(c, module.Kind, module.Schema, "")
+		v.rendererGap(c, kind, schema, "")
 		return
 	}
-	spec.Render(v, c, module.Data)
+	spec.Render(v, c, data)
 }
 
 // hasCapability reports whether a module declares one capability.
@@ -132,7 +131,7 @@ func hasCapability(d Descriptor, capability string) bool {
 }
 
 // rendererGap reports a declared-but-unavailable or undeclared renderer as a
-// visible capability gap. The host must never draw a guess in its place.
+// visible capability gap. The host must never draw a guess.
 func (v *View) rendererGap(c *ui.Context, kind string, schema int, key string) {
 	t := c.Theme()
 	reason := "该模块未声明此视图的渲染能力"
@@ -153,6 +152,16 @@ func (v *View) moduleError(c *ui.Context, err error) {
 		ui.Text(c, "asterlab 模块无法解析："+err.Error()).FontSize(t.Rem(.85)).
 			TextColor(t.Danger)
 	})
+}
+// RenderModule renders one already-parsed module through the same surface
+// checks used for fenced AsterML blocks.
+func (v *View) RenderModule(c *ui.Context, kind string, schema int, data map[string]any) {
+	registry := v.Registry
+	if registry == nil {
+		registry = BuiltinRegistry()
+	}
+	moduleID, _ := data["id"].(string)
+	v.renderRegisteredModule(c, registry, kind, schema, moduleID, data)
 }
 
 func (v *View) plate(c *ui.Context, p *Plate) {
@@ -876,20 +885,4 @@ func parseInt(s string) int {
 	var n int
 	fmt.Sscan(s, &n)
 	return n
-}
-
-// RenderModule renders one module payload read-only (or with the View's
-// explicit permissions). It is the seam for frozen Run/Notebook viewers that
-// already have parsed module data rather than a full Markdown source.
-func (v *View) RenderModule(c *ui.Context, kind string, schema int, data map[string]any) {
-	registry := v.Registry
-	if registry == nil {
-		registry = BuiltinRegistry()
-	}
-	spec, ok := registry.Lookup(kind, schema)
-	if !ok {
-		v.moduleError(c, fmt.Errorf("no renderer for %s@%d", kind, schema))
-		return
-	}
-	spec.Render(v, c, data)
 }
