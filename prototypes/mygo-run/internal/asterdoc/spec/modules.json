@@ -1125,6 +1125,372 @@
         "origin": "planned",
         "record_boundary": "run"
       }
+    },
+    {
+      "kind": "material",
+      "schema": 1,
+      "title": "材料",
+      "description": "材料/试剂声明。",
+      "sdk": "1.0.0",
+      "category": "resource",
+      "capabilities": [
+        "material",
+        "role-declaration"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "material.editor",
+        "document": "material.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      },
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "材料名称"
+        },
+        {
+          "name": "role",
+          "type": "enum",
+          "values": [
+            "control",
+            "treatment"
+          ],
+          "required": true,
+          "description": "实验角色"
+        },
+        {
+          "name": "condition",
+          "type": "string",
+          "description": "处理条件描述"
+        },
+        {
+          "name": "concentration",
+          "type": "quantity",
+          "dimension": "mass_concentration",
+          "description": "标称浓度"
+        },
+        {
+          "name": "source",
+          "type": "enum",
+          "values": [
+            "built_in",
+            "lab_imported",
+            "unknown"
+          ],
+          "required": true,
+          "description": "材料来源"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "material_view",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "material-fields"
+      ]
+    },
+    {
+      "kind": "sample",
+      "schema": 1,
+      "title": "样本",
+      "description": "样本声明。",
+      "sdk": "1.0.0",
+      "category": "resource",
+      "capabilities": [
+        "sample",
+        "sample-tracking"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "sample.editor",
+        "document": "sample.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      },
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "sample_id",
+          "type": "string",
+          "required": true,
+          "description": "样本编号"
+        },
+        {
+          "name": "group_ref",
+          "type": "reference",
+          "target": "group",
+          "required": true,
+          "description": "所属分组"
+        },
+        {
+          "name": "material_refs",
+          "type": "list",
+          "item_type": "reference",
+          "description": "关联材料",
+          "target": "material"
+        },
+        {
+          "name": "amount",
+          "type": "quantity",
+          "dimension": "volume",
+          "required": true,
+          "description": "样本用量"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sample_view",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "sample-fields"
+      ]
+    },
+    {
+      "kind": "container",
+      "schema": 1,
+      "title": "容器/板型",
+      "description": "实验容器与孔位映射。",
+      "sdk": "1.0.0",
+      "category": "labware",
+      "capabilities": [
+        "container",
+        "well-map"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "container.editor",
+        "document": "container.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      },
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": true,
+          "description": "容器格式"
+        },
+        {
+          "name": "wells",
+          "type": "int",
+          "required": true,
+          "description": "孔数"
+        },
+        {
+          "name": "geometry",
+          "type": "geometry",
+          "description": "几何/布局"
+        },
+        {
+          "name": "sample_map",
+          "type": "well-map",
+          "description": "孔位到样本的映射"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "container_view",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "container-fields"
+      ]
+    },
+    {
+      "kind": "measurement_profile",
+      "schema": 1,
+      "title": "测量方案",
+      "description": "测量端点、单位、读数结构与计算器引用。",
+      "sdk": "1.0.0",
+      "category": "measurement",
+      "capabilities": [
+        "measurement-profile",
+        "calculator-reference"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "measurement_profile.editor",
+        "document": "measurement_profile.viewer"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      },
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "endpoint",
+          "type": "string",
+          "required": true,
+          "description": "测量端点"
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "description": "读数单位"
+        },
+        {
+          "name": "readout_schema",
+          "type": "object",
+          "description": "读数结构"
+        },
+        {
+          "name": "calculator_refs",
+          "type": "list",
+          "item_type": "string",
+          "description": "关联计算器"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "profile_view",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "measurement-profile-fields"
+      ]
     }
   ],
   "foundationVersion": 1,

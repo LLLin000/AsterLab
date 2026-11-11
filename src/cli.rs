@@ -2876,6 +2876,38 @@ fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> 
                     }
                 }
             }
+            "material-fields" => {
+                if text("name").is_empty() {
+                    return Err(CliError::input("material needs a name"));
+                }
+                if text("role").is_empty() {
+                    return Err(CliError::input("material needs a role"));
+                }
+                if text("source").is_empty() {
+                    return Err(CliError::input("material needs a source"));
+                }
+            }
+            "sample-fields" => {
+                if text("sample_id").is_empty() {
+                    return Err(CliError::input("sample needs a sample_id"));
+                }
+            }
+            "container-fields" => {
+                if text("format").is_empty() {
+                    return Err(CliError::input("container needs a format"));
+                }
+                if get("wells").and_then(|v| v.as_i64()).unwrap_or(0) <= 0 {
+                    return Err(CliError::input("container needs positive wells"));
+                }
+            }
+            "measurement-profile-fields" => {
+                if text("endpoint").is_empty() {
+                    return Err(CliError::input("measurement profile needs an endpoint"));
+                }
+                if text("unit").is_empty() {
+                    return Err(CliError::input("measurement profile needs a unit"));
+                }
+            }
             other => {
                 return Err(CliError::internal(format!(
                     "unknown asterlab module rule {other}"

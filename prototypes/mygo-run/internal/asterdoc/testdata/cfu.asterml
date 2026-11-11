@@ -1,0 +1,52 @@
+```asterlab
+kind: group
+id: group-control
+schema: 1
+name: control
+role: control
+condition: untreated
+```
+
+```asterlab
+kind: material
+id: mat-agar
+schema: 1
+name: LB agar
+role: control
+condition: plate count
+concentration:
+  value: 1.5
+  unit: mg/mL
+source: lab_imported
+```
+
+```asterlab
+kind: sample
+id: sample-cfu
+schema: 1
+sample_id: CFU-01
+group_ref: group-control
+material_refs: [mat-agar]
+amount:
+  value: 0.1
+  unit: mL
+```
+
+```asterlab
+kind: container
+id: plate-cfu
+schema: 1
+format: petri
+wells: 1
+```
+
+```asterlab
+kind: measurement_profile
+id: mp-cfu
+schema: 1
+endpoint: colony count
+unit: CFU/mL
+readout_schema:
+  columns: [plate, colonies]
+calculator_refs: []
+```

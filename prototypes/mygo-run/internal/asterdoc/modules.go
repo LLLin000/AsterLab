@@ -371,3 +371,39 @@ func instrumentProfileSpec() ModuleSpec {
 func formatNumber(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
+
+func materialSpec() ModuleSpec {
+	return ModuleSpec{Descriptor: builtinDescriptor("material"), Validate: specValidator("material"), Render: func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, textValue(data, "name")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
+		})
+	}}
+}
+
+func sampleSpec() ModuleSpec {
+	return ModuleSpec{Descriptor: builtinDescriptor("sample"), Validate: specValidator("sample"), Render: func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ui.Row(c).Padding(6, 10).Radius(t.Space(1)).Background(t.Background).Border(1, t.Border).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, textValue(data, "sample_id")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
+		})
+	}}
+}
+
+func containerSpec() ModuleSpec {
+	return ModuleSpec{Descriptor: builtinDescriptor("container"), Validate: specValidator("container"), Render: func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Text(c, textValue(data, "format")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+		})
+	}}
+}
+
+func measurementProfileSpec() ModuleSpec {
+	return ModuleSpec{Descriptor: builtinDescriptor("measurement_profile"), Validate: specValidator("measurement_profile"), Render: func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		ui.Column(c).FillWidth().Gap(4).Padding(t.Space(3)).Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Text(c, textValue(data, "endpoint")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+		})
+	}}
+}

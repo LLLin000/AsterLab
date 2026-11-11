@@ -1,0 +1,54 @@
+```asterlab
+kind: group
+id: group-3pct
+schema: 1
+name: 3% GelMA
+role: treatment
+condition: 3% GelMA
+```
+
+```asterlab
+kind: material
+id: mat-gelma
+schema: 1
+name: GelMA
+role: treatment
+condition: 5% GelMA
+concentration:
+  value: 5
+  unit: mg/mL
+source: lab_imported
+```
+
+```asterlab
+kind: sample
+id: sample-huvec
+schema: 1
+sample_id: HUVEC-001
+group_ref: group-3pct
+material_refs: [mat-gelma]
+amount:
+  value: 0.5
+  unit: mL
+```
+
+```asterlab
+kind: container
+id: plate-huvec-12
+schema: 1
+format: 12-well
+wells: 12
+sample_map:
+  A1: sample-huvec
+```
+
+```asterlab
+kind: measurement_profile
+id: mp-tube
+schema: 1
+endpoint: tube length
+unit: µm
+readout_schema:
+  columns: [well, length]
+calculator_refs: []
+```

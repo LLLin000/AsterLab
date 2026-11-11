@@ -266,6 +266,28 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 						return fmt.Errorf("instrument capability needs a name")
 					}
 				}
+			case "material-fields":
+				if name, _ := data["name"].(string); strings.TrimSpace(name) == "" {
+					return fmt.Errorf("material needs a name")
+				}
+				if role, _ := data["role"].(string); strings.TrimSpace(role) == "" {
+					return fmt.Errorf("material needs a role")
+				}
+			case "sample-fields":
+				if id, _ := data["sample_id"].(string); strings.TrimSpace(id) == "" {
+					return fmt.Errorf("sample needs a sample_id")
+				}
+			case "container-fields":
+				if format, _ := data["format"].(string); strings.TrimSpace(format) == "" {
+					return fmt.Errorf("container needs a format")
+				}
+			case "measurement-profile-fields":
+				if endpoint, _ := data["endpoint"].(string); strings.TrimSpace(endpoint) == "" {
+					return fmt.Errorf("measurement profile needs an endpoint")
+				}
+				if unit, _ := data["unit"].(string); strings.TrimSpace(unit) == "" {
+					return fmt.Errorf("measurement profile needs a unit")
+				}
 			default:
 				return fmt.Errorf("unknown module rule %q", rule)
 			}

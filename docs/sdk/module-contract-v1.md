@@ -188,3 +188,7 @@ The template shape is defined in the Foundation schema, but template instantiati
 | `instrument_profile` | Resource | Capability declaration without hardware control or calibration claims. |
 
 These three deliberately exercise spatial, computational and resource objects. If a future module needs a fourth special-case write path, the SDK contract has failed for that case.
+
+## Static renderer capability
+
+Modules may be rendered through `StaticPreview`/`StaticDocumentPreview` for read-only surfaces and PDF export. The `Renderers.Static` field remains the declared capability; implementations use the same registry path as interactive rendering. Static rendering is read-only and must not expose a write handle.

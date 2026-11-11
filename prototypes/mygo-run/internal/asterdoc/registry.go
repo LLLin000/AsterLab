@@ -195,6 +195,10 @@ func BuiltinRegistry() *Registry {
 		_ = builtin.Register(workflowSpec())
 		_ = builtin.Register(dilutionSpec())
 		_ = builtin.Register(instrumentProfileSpec())
+		_ = builtin.Register(materialSpec())
+		_ = builtin.Register(sampleSpec())
+		_ = builtin.Register(containerSpec())
+		_ = builtin.Register(measurementProfileSpec())
 	})
 	return builtin
 }

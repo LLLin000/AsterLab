@@ -125,6 +125,15 @@ func TestAsterDocGoRustParity(t *testing.T) {
 		{"valid step2 uses", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: calculator\n```\n"},
 		{"invalid step2 missing use", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: missing\n    role: calculator\n```\n"},
 		{"invalid step2 role capability", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: instrument\n```\n"},
+		{"valid material", "```asterlab\nkind: material\nid: mat-1\nschema: 1\nname: GelMA\nrole: treatment\ncondition: 5%\nconcentration: {value: 5, unit: mg/mL}\nsource: lab_imported\n```\n"},
+		{"invalid material role", "```asterlab\nkind: material\nid: mat-2\nschema: 1\nname: GelMA\nrole: \nconcentration: {value: 5, unit: mg/mL}\nsource: lab_imported\n```\n"},
+		{"invalid material concentration", "```asterlab\nkind: material\nid: mat-3\nschema: 1\nname: GelMA\nrole: treatment\nconcentration: {value: 5, unit: mg/ml}\nsource: lab_imported\n```\n"},
+		{"valid sample", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: G\n```\n```asterlab\nkind: sample\nid: s1\nschema: 1\nsample_id: S1\ngroup_ref: g1\namount: {value: 1, unit: mL}\n```\n"},
+		{"invalid sample amount", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: G\n```\n```asterlab\nkind: sample\nid: s2\nschema: 1\nsample_id: S2\ngroup_ref: g1\namount: {value: 1, unit: mg}\n```\n"},
+		{"valid container", "```asterlab\nkind: container\nid: c1\nschema: 1\nformat: 96-well\nwells: 96\n```\n"},
+		{"invalid container format", "```asterlab\nkind: container\nid: c2\nschema: 1\nformat: \nwells: 96\n```\n"},
+		{"valid measurement profile", "```asterlab\nkind: measurement_profile\nid: mp1\nschema: 1\nendpoint: Ct\nunit: Ct\n```\n"},
+		{"invalid measurement profile unit", "```asterlab\nkind: measurement_profile\nid: mp2\nschema: 1\nendpoint: Ct\nunit: \n```\n"},
 	}
 	revision := uint64(0)
 	for index, sample := range samples {

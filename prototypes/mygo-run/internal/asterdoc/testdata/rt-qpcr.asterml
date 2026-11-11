@@ -1,0 +1,52 @@
+```asterlab
+kind: group
+id: group-control
+schema: 1
+name: control
+role: control
+condition: untreated
+```
+
+```asterlab
+kind: material
+id: mat-sybr
+schema: 1
+name: SYBR Green
+role: treatment
+condition: qPCR master mix
+concentration:
+  value: 2
+  unit: mg/mL
+source: built_in
+```
+
+```asterlab
+kind: sample
+id: sample-cdna
+schema: 1
+sample_id: cDNA-01
+group_ref: group-control
+material_refs: [mat-sybr]
+amount:
+  value: 1
+  unit: uL
+```
+
+```asterlab
+kind: container
+id: plate-qpcr-96
+schema: 1
+format: 96-well
+wells: 96
+```
+
+```asterlab
+kind: measurement_profile
+id: mp-ct
+schema: 1
+endpoint: Ct
+unit: Ct
+readout_schema:
+  columns: [well, Ct]
+calculator_refs: [calculator.dilution]
+```

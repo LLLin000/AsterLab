@@ -104,3 +104,14 @@ cargo test --quiet
 cd prototypes/mygo-run
 go run github.com/egoist/mygo/cmd/mygo native check modules/runs
 ```
+
+## Static / PDF (Phase 2)
+
+Added: read-only static module preview (`internal/asterdoc.StaticPreview` / `StaticDocumentPreview`) renders any registered module deterministically from parsed data + revision/hash, with no write path or DB handle. Frozen revision loading is verified by `LoadFrozenAsterDocAt` (source hash checked before render). Minimal stdlib PDF export (`internal/asterdoc.ExportPDF`) is deterministic for identical input.
+
+Limits: PDF layout is basic single-page text; no charts/images; multi-page pagination not implemented; viewer still requires Go UI host for interactive rendering.
+## Phase 4 scientific modules
+
+Added: material, sample, container, measurement_profile (sdk 1.0.0). All are
+document/render-only with record_boundary=run. Remaining gaps: hardware control,
+dynamic loading, step@1 semantics unchanged.
