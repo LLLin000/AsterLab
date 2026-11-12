@@ -282,6 +282,16 @@ def resolve_description(args):
     api_token = args.kandev_token or os.environ.get("KANDEV_API_TOKEN", "")
 
     if args.task_id:
+        if not api_url:
+            raise ScopeError(
+                "--task-id needs a Kandev base URL: pass --kandev-url or set "
+                "KANDEV_API_URL"
+            )
+        if not api_token:
+            raise ScopeError(
+                "--task-id needs a Kandev token: pass --kandev-token or set "
+                "KANDEV_API_TOKEN"
+            )
         return (
             fetch_task_description(args.task_id, api_url, api_token),
             f"Kandev API task {args.task_id}",

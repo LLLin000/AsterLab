@@ -8,6 +8,7 @@ Run by the `scope-check` workflow and locally:
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -148,6 +149,25 @@ class CommandLineTest(unittest.TestCase):
         result = run_script("--diff-file", str(FIXTURES / "in-scope" / "diff.txt"))
         self.assertEqual(result.returncode, 2)
         self.assertIn("no task description source", result.stderr)
+
+    def test_task_id_without_credentials_is_a_config_error(self):
+        env = {key: "" for key in ("KANDEV_API_URL", "KANDEV_API_TOKEN")}
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--task-id",
+                "4fd7bbeb-e7e8-49a8-8323-2766f1d2f645",
+                "--diff-file",
+                str(FIXTURES / "in-scope" / "diff.txt"),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(HERE),
+            env={**os.environ, **env},
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--task-id needs a Kandev base URL", result.stderr)
 
     def test_truncated_diff_file_is_a_config_error(self):
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as handle:

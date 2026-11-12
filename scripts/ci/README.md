@@ -82,20 +82,29 @@ actionlint 固定在 1.7.7，`install-actionlint.sh` 用 SHA256 校验下载包�
 
 ## 设为 PR 必需
 
-仓库设置，不是文件；`main` 上的命令：
+仓库设置，不是文件。REL-04 已对 `main` 执行过，复现命令：
 
 ```bash
-gh api -X PUT repos/LLLin000/AsterLab/branches/main/protection \
-  -F required_status_checks[strict]=false \
-  -f 'required_status_checks[contexts][]=linux-tests' \
-  -f 'required_status_checks[contexts][]=windows-build' \
-  -f 'required_status_checks[contexts][]=scope-check' \
-  -F enforce_admins=false \
-  -F required_pull_request_reviews= \
-  -F restrictions= \
-  -F allow_force_pushes=false \
-  -F allow_deletions=false
+cat > /tmp/protection.json <<'JSON'
+{
+  "required_status_checks": {
+    "strict": false,
+    "contexts": ["linux-tests", "windows-build", "scope-check"]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": false
+}
+JSON
+gh api -X PUT repos/LLLin000/AsterLab/branches/main/protection --input /tmp/protection.json
 ```
+
+`strict: false`：不要求 PR 分支每次先跟上 `main`，避免与多 agent 并行冲突；三个 context 名称必须与 job `name` 完全一致。
+副作用：workflow 文件只在合入 `main` 之后才对其他 PR 可见，早于本 PR 打开的分支必须先更新到含这三个 workflow 的 `main` 才能合并。
 
 ## 非目标
 
