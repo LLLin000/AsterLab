@@ -189,3 +189,4 @@ forbid:
 - [ ] 分类与泳道一致；跨 Core/UI 的工作已拆卡。
 - [ ] 没有 `TBD`、`可选`、`你确认` 这类不可执行表述。
 - [ ] 并行执行时，与同时在跑的卡 `write` 范围没有交集；有交集则串行。
+- [ ] 并行执行使用 Worktree executor（workspace default = `exec-worktree`）；任务 `workspace_path` 必须是独立 worktree，不能是共享 clone。
