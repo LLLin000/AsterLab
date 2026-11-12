@@ -52,6 +52,16 @@ jobs:
           cargo --version
           git rev-parse HEAD
 
+      - name: Native generator hashes (two Windows generations)
+        # REL-05: the same golden file the Linux job uses. This is the Windows
+        # half of "one input, one hash": a CRLF checkout must not change these
+        # hashes, and the pinned MyGo must regenerate the committed files byte
+        # for byte. Contract: scripts/ci/native_generator_hash.py.
+        run: |
+          py -3 scripts/ci/test_native_generator_hash.py
+          py -3 scripts/ci/native_generator_hash.py --check
+          py -3 scripts/ci/native_generator_hash.py --regen 2
+
       - name: Build MyGo app and Runs.dll
         # Runs `mygo native check .\modules\runs`, then `go build -tags=e2e`,
         # then writes dist/BUILD_INFO.txt with the commit and both hashes.

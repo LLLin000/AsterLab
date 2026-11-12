@@ -64,3 +64,20 @@ jobs:
           cargo test --locked --bin labworkbench
           cargo test --locked --manifest-path crates/asterlab-core/Cargo.toml
           cargo test --locked --manifest-path crates/asterlab-app/Cargo.toml
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          # go 1.27.3, the pin in HANDOFF-VPS.md §2 and go.mod.
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+
+      - name: Native generator hashes (two Linux generations)
+        # REL-05: the committed MyGo binding output must hash identically on
+        # Linux and Windows, and the pinned MyGo must regenerate it byte for
+        # byte. Contract and golden file: scripts/ci/native_generator_hash.py,
+        # scripts/ci/native_generator_hashes.json.
+        run: |
+          python3 scripts/ci/test_native_generator_hash.py
+          python3 scripts/ci/native_generator_hash.py --check
+          python3 scripts/ci/native_generator_hash.py --regen 2

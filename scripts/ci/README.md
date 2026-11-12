@@ -4,9 +4,37 @@ REL-04 的 CI 入口。三个必需的 PR 检查：
 
 | 检查 | 工作流 | 内容 |
 |---|---|---|
-| `linux-tests` | `.github/workflows/linux-tests.yml` | L0：`cargo build --locked` 三个 target；L1：`cargo test --locked` 三个 suite（HANDOFF-VPS.md §3） |
-| `windows-build` | `.github/workflows/windows-build.yml` | `scripts/mygo-build.ps1` → `mygo-run.exe` + `Runs.dll`，产出 `BUILD_INFO.txt` 与 `SHA256SUMS.txt` 并上传 artifact；不做 GUI E2E |
+| `linux-tests` | `.github/workflows/linux-tests.yml` | L0：`cargo build --locked` 三个 target；L1：`cargo test --locked` 三个 suite（HANDOFF-VPS.md §3）；REL-05 生成器 hash（两次重生成） |
+| `windows-build` | `.github/workflows/windows-build.yml` | REL-05 生成器 hash（两次重生成）；`scripts/mygo-build.ps1` → `mygo-run.exe` + `Runs.dll`，产出 `BUILD_INFO.txt` 与 `SHA256SUMS.txt` 并上传 artifact；不做 GUI E2E |
 | `scope-check` | `.github/workflows/scope-check.yml` | 解析卡片 `kandev-scope` 块，对 `git diff --name-status <base>...HEAD` 判越界；同时跑 `actionlint` 和解析器自测 |
+
+## 生成器 hash 门（REL-05）
+
+MyGo 生成的两个绑定文件是提交进仓库的：
+
+```text
+prototypes/mygo-run/modules/runs/runs_native.go
+prototypes/mygo-run/modules/runs/rust/src/mygo.rs
+```
+
+`scripts/ci/native_generator_hash.py` 把它们规范化（去掉 BOM、CRLF→LF）后算 hash，与 `scripts/ci/native_generator_hashes.json` 比对，并在同一次运行里用固定的 MyGo 版本重新生成两次。Linux 与 Windows 用同一份 golden，所以两平台 hash 相同是门禁判定结果，不是声明。
+
+```bash
+# 检查器自测（fixture 树，不碰仓库）
+python3 scripts/ci/test_native_generator_hash.py
+
+# 比对 golden + 校验 pin + 扫描时间戳/路径漂移
+python3 scripts/ci/native_generator_hash.py --check
+
+# 用固定 pin 重新生成两次，要求两次输出与提交内容逐字节相同
+python3 scripts/ci/native_generator_hash.py --regen 2
+
+# 改生成器 pin 或接口后，在复审过的提交里重写 golden
+python3 scripts/ci/native_generator_hash.py --update-golden
+```
+
+生成器 pin 必须三处一致：`prototypes/mygo-run/go.mod` 的 require 行、`scripts/mygo-native-linux.sh` 的 `mygo_pin`、`scripts/mygo-build.ps1` 的 `$mygoPin`；不一致即 exit 1。漂移来源和处理方式见脚本头部与 `docs/release/evidence/REL-05/README.md`。
+
 
 ## scope 块
 
