@@ -645,10 +645,16 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 	if doc != nil {
 		if tree, err := workflowtree.Build(snap.Tasks, doc); err != nil {
 			vm.TreeIssues = []string{err.Error()}
-		} else if len(tree.Issues) > 0 {
-			vm.TreeIssues = tree.Issues
-		} else if tree.HasComposite() {
-			vm.Tree = tree
+		} else {
+			// Per-node issues (a design step with no frozen task) must not
+			// hide a real containment level: they are diagnostics, and the
+			// rail falls back to raw task keys without the tree.
+			if len(tree.Issues) > 0 {
+				vm.TreeIssues = tree.Issues
+			}
+			if tree.HasComposite() {
+				vm.Tree = tree
+			}
 		}
 	}
 

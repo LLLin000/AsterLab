@@ -209,3 +209,89 @@ func TestProjectionRejectsWrongBlockVersion(t *testing.T) {
 		t.Fatalf("Validate() = %v", tree.Validate())
 	}
 }
+
+// A frozen task path is the protocol block's own path, which is not the
+// author-chosen design step path. The recorded design step identity is the
+// only join, and the protocol's steps must hang directly under the design
+// step instead of under a stray protocol root level.
+func TestProjectionJoinsByDesignStepIdentity(t *testing.T) {
+	source := strings.Join([]string{
+		"```asterlab",
+		"kind: experiment",
+		"id: exp",
+		"schema: 1",
+		"title: CCK-8",
+		"```",
+		"```asterlab",
+		"kind: assay",
+		"id: assay-cck8",
+		"schema: 1",
+		"title: CCK-8",
+		"endpoint: OD450",
+		"method: absorbance",
+		"unit: AU",
+		"```",
+		"```asterlab",
+		"kind: reference",
+		"id: ref-block",
+		"schema: 1",
+		"ref: block-v1",
+		"view: protocol_block",
+		"```",
+		"```asterlab",
+		"kind: step",
+		"id: step-read",
+		"schema: 2",
+		"title: 02 CCK-8 检测",
+		"assay: assay-cck8",
+		"path: cck8/readout",
+		"order: 1",
+		"uses:",
+		"  - {ref: ref-block, role: other}",
+		"```",
+		"```asterlab",
+		"kind: workflow",
+		"id: wf",
+		"schema: 1",
+		"steps: [step-read]",
+		"business_order: [step-read]",
+		"```",
+	}, "\n")
+	tasks := []runs.RunTask{
+		{Key: `{"path":"root/seed"}`, Path: "root/seed", Title: "接种细胞", Status: "completed",
+			DesignStepID: "step-read", SourceBlockVersionID: "block-v1", AssayID: "assay-cck8"},
+		{Key: `{"path":"root/read"}`, Path: "root/read", Title: "读取 OD450", Status: "not_started",
+			DesignStepID: "step-read", SourceBlockVersionID: "block-v1", AssayID: "assay-cck8"},
+	}
+	tree, err := Build(tasks, &asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tree.Orphans) != 0 || len(tree.Ambiguous) != 0 {
+		t.Fatalf("orphans=%d ambiguous=%d issues=%v", len(tree.Orphans), len(tree.Ambiguous), tree.Issues)
+	}
+	if len(tree.Roots) != 1 {
+		t.Fatalf("roots = %d, want 1", len(tree.Roots))
+	}
+	root := tree.Roots[0]
+	if !root.Composite || len(root.Children) != 2 {
+		t.Fatalf("root = %+v", root)
+	}
+	// The protocol root ("root") is not a containment level of the design.
+	seen := map[string]bool{}
+	for _, child := range root.Children {
+		if child.Kind != KindTask {
+			t.Fatalf("child %+v is not a frozen task", child)
+		}
+		seen[child.Title] = true
+	}
+	if !seen["接种细胞"] || !seen["读取 OD450"] {
+		t.Fatalf("children = %+v", root.Children)
+	}
+	if root.Total != 2 || root.Completed != 1 {
+		t.Fatalf("aggregate = %d/%d, want 1/2", root.Completed, root.Total)
+	}
+	if err := tree.Validate(); err != nil {
+		t.Fatalf("Validate() = %v", err)
+	}
+}

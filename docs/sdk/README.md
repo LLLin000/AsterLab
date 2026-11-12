@@ -1,6 +1,6 @@
 # AsterLab SDK
 
-Status: Foundation v1 contract work in progress. This directory defines the developer-facing contract; it does not claim that every capability described here is already exposed in the GUI.
+Status: Foundation v1 and Module SDK v1 are frozen at RC (`sdk-v1-rc2`, 2026-11-12). The contracts in this directory are the developer-facing surface; the GUI exposes the subset recorded in [compatibility and gaps](compatibility-and-gaps.md).
 
 | Document | Purpose |
 | --- | --- |

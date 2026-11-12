@@ -69,3 +69,48 @@ The earlier Run `d5163844-1cae-4013-b31e-efe17169d24d` still points to design ve
 - The first batch predates readout IDs; new batches include them, but the old event is intentionally not rewritten.
 - Real-window captures are stored under `docs/sdk/evidence/`: 900×600 light, 900×600 dark at 150% display scale, and 1080×640 Run. Scale-200 and additional dark pages remain open.
 - The evidence is a disposable fixture copy; it does not claim a user study.
+
+## 6. SDK v1 RC re-acceptance (2026-11-12)
+
+A second CCK-8 loop was driven end to end on a fresh fixture, after the workflow
+hierarchy join was fixed. This run is the SDK v1 RC acceptance.
+
+- Fixture: project `ef9f32d7-1331-4ac9-a61a-64fff81ab38a`, design
+  `9b19d678-7c10-4247-9481-2312479f63d0` (AsterDoc revision 2), Run
+  `6116cb32-f5a7-45e8-8f8d-4e971aac09ca`.
+- Design: one CCK-8 assay (`assay-cck8`, OD450/AU), two steps
+  (`cck8/seed`, `cck8/readout`); the readout step reuses ProtocolBlock
+  `5aa33924-33c9-44d7-855d-8965cb36c5cd` through Protocol
+  `e8e5fc61-…`/version.
+- Drive: `scripts/gui-e2e-v11.ps1` against the real window through
+  `mygo-automation`, then `run.workspace` through the typed CLI.
+
+Steps exercised and their evidence:
+
+1. Opened the run workspace; the 96-well grid rendered
+   `cck8.plate96.od450.v1 · OD450 (AU)`.
+2. Pasted an 8×12 block with `A1=0.91`, `A2=0.42`; the UI reported
+   `粘贴预览：8 × 12` and then `已记录 96` (mean `0.485`).
+3. Saved the batch; the panel showed `已保存`.
+4. Killed the app and relaunched it; the restored grid reported
+   `已记录 96`, mean `0.499` (the pasted values, not the paste preview).
+5. `run.workspace` cross-read the same cells (`0.91`, `0.42`) from the
+   persisted event.
+6. Real window resized to 900×600 in both themes; the run workspace,
+   hierarchy rail and recording panel render without clipping. Captures:
+   `evidence/cck8-hierarchy-900x600-light-v1rc2.png`,
+   `evidence/cck8-hierarchy-900x600-dark-v1rc2.png`.
+
+Hierarchy join fixed in this pass. A frozen task path is the protocol
+block's own path (`root/seed`), which never equals the author-chosen
+design step path (`cck8/readout`). The compiler now records
+`mygo.stepBlocks` (design step → reused block version), the native Run
+snapshot links each task to its design step through that identity, and
+`workflowtree` joins on `DesignStepID` when paths do not contain. The
+rail now shows the protocol steps under their design step instead of
+reporting every task as orphaned.
+
+Known remaining diagnostic: a design step that reuses no ProtocolBlock
+(`cck8/seed` here) produces no frozen task, so the rail still reports
+`no frozen task matches this step path` for that step. That is accurate,
+not a join failure.

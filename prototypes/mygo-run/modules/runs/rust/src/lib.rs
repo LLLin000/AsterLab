@@ -624,6 +624,27 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
             }
         }
     }
+    // The compiler records which ProtocolBlock version each design step
+    // reuses, and a frozen task records the block version that produced it.
+    // That identity joins the two layers when the author-chosen design step
+    // path and the block-internal protocol path differ, which they normally
+    // do: paths alone can never join them.
+    let mut step_blocks: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    if let Some(blocks) = v["frozen_design"]["mygo"]["stepBlocks"].as_object() {
+        for (step_id, value) in blocks {
+            let list: Vec<String> = value
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|block| block.as_str())
+                .map(str::to_owned)
+                .collect();
+            if !list.is_empty() {
+                step_blocks.insert(step_id.clone(), list);
+            }
+        }
+    }
     for t in v["tasks"].as_array().into_iter().flatten() {
         let assay_id = t
             .get("scope")
@@ -643,8 +664,13 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
             .unwrap_or("")
             .to_string();
         let timepoint = t["timepoint"].as_str().unwrap_or("").to_string();
+        let path: String = t["step_path"].as_str().unwrap_or("").into();
+        let source_block_version_id = steps_by_path
+            .get(&path)
+            .map(|(_, _, _, block)| block.clone())
+            .unwrap_or_default();
         let design_step_id = if explicit_links {
-            let step_path = t["step_path"].as_str().unwrap_or("");
+            let step_path = path.as_str();
             let pair: Vec<&serde_json::Value> = step_tasks
                 .iter()
                 .filter(|link| {
@@ -659,7 +685,7 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
                 .copied()
                 .filter(|link| link["path"].as_str() == Some(step_path))
                 .collect();
-            let chosen: Option<String> = if by_path.len() == 1 {
+            let mut chosen: Option<String> = if by_path.len() == 1 {
                 by_path[0]["stepId"].as_str().map(str::to_owned)
             } else if by_path.is_empty() {
                 let pair_paths = paths_per_pair
@@ -684,6 +710,20 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
             } else {
                 None
             };
+            // Paths never join a block-internal protocol path to the design's
+            // own step path. The producing block version does, as long as
+            // exactly one design step reuses it.
+            if chosen.is_none() && !source_block_version_id.is_empty() {
+                let mut candidates: Vec<&str> = step_blocks
+                    .iter()
+                    .filter(|(_, blocks)| blocks.iter().any(|b| b == &source_block_version_id))
+                    .map(|(id, _)| id.as_str())
+                    .collect();
+                candidates.sort_unstable();
+                if candidates.len() == 1 {
+                    chosen = Some(candidates[0].to_owned());
+                }
+            }
             chosen.unwrap_or_default()
         } else {
             steps_by_assay
@@ -692,11 +732,10 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
                 .map(|nodes| nodes[0].clone())
                 .unwrap_or_default()
         };
-        let path: String = t["step_path"].as_str().unwrap_or("").into();
         let (title, instruction, parameters_json, source_block_version_id) = steps_by_path
             .get(&path)
             .cloned()
-            .unwrap_or_else(|| (path.clone(), String::new(), "[]".into(), String::new()));
+            .unwrap_or_else(|| (path.clone(), String::new(), "[]".into(), source_block_version_id));
         let mut checks = checks_by_path.get(&path).cloned().unwrap_or_default();
         for entry in v["design_checks"].as_array().into_iter().flatten() {
             if entry["path"].as_str() != Some(path.as_str()) {

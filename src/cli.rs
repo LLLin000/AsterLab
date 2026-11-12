@@ -3127,6 +3127,16 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
         .iter()
         .map(|assay| (ytext(assay, "id"), *assay))
         .collect();
+    // Reference modules name the ProtocolBlock version a design step reuses.
+    // The compiled design carries that identity so a frozen task, which stores
+    // the producing block version, can be joined to its design step even
+    // though the design step path and the block's own step paths differ.
+    let reference_index: std::collections::HashMap<String, String> = modules
+        .iter()
+        .filter(|module| ytext(module, "kind") == "reference")
+        .map(|module| (ytext(module, "id"), ytext(module, "ref")))
+        .filter(|(id, target)| !id.is_empty() && !target.is_empty())
+        .collect();
 
     let group_specs: Vec<Value> = groups
         .iter()
@@ -3284,6 +3294,7 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
     let mut step_checks = Vec::new();
     let mut step_details = Vec::new();
     let mut step_uses = serde_json::Map::new();
+    let mut step_blocks = serde_json::Map::new();
     for (index, step) in steps.iter().enumerate() {
         let id = ytext(step, "id");
         let assay = ytext(step, "assay");
@@ -3297,6 +3308,14 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
         step_assays.insert(id.clone(), json!(assay));
         if let Some(uses) = step.get("uses").and_then(|value| value.as_sequence()) {
             if !uses.is_empty() {
+                let blocks: Vec<String> = uses
+                    .iter()
+                    .filter_map(|use_item| use_item.get("ref").and_then(|value| value.as_str()))
+                    .filter_map(|reference| reference_index.get(reference).cloned())
+                    .collect();
+                if !blocks.is_empty() {
+                    step_blocks.insert(id.clone(), serde_json::to_value(blocks).unwrap_or(Value::Null));
+                }
                 step_uses.insert(id.clone(), serde_json::to_value(uses).unwrap_or(Value::Null));
             }
         }
@@ -3361,6 +3380,7 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
         "stepChecks": step_checks,
         "stepDetails": step_details,
         "stepUses": step_uses,
+        "stepBlocks": step_blocks,
         "assays": mygo_assays
     });
 
@@ -10049,6 +10069,22 @@ mod tests {
         for field in ["samples", "replicates"] {
             assert!(plate["inputs"].as_array().unwrap().iter().any(|port| port["name"] == field));
         }
+    }
+
+    #[test]
+    fn compiler_records_the_block_version_each_step_reuses() {
+        let source = "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: CCK-8\n```\n\
+```asterlab\nkind: group\nid: g-1\nschema: 1\nname: Control\nrole: control\n```\n\
+```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\nendpoint: OD450\nunit: AU\ngroup_refs: [g-1]\n```\n\
+```asterlab\nkind: reference\nid: ref-block\nschema: 1\nref: block-v1\nview: protocol_block\n```\n\
+```asterlab\nkind: sample\nid: s-1\nschema: 1\nsample_id: S1\ngroup_ref: g-1\namount: {value: 1, unit: uL}\n```\n\
+```asterlab\nkind: step\nid: step-read\nschema: 2\ntitle: Read\nassay: assay-cck8\npath: cck8/readout\norder: 1\nuses:\n  - {ref: ref-block, role: other}\n  - {ref: s-1, role: sample}\n```\n\
+```asterlab\nkind: step\nid: step-seed\nschema: 2\ntitle: Seed\nassay: assay-cck8\npath: cck8/seed\norder: 2\nuses:\n  - {ref: s-1, role: sample}\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [step-read, step-seed]\n```\n";
+        let design = compile_asterdoc_to_design(source).unwrap();
+        let blocks = &design["mygo"]["stepBlocks"];
+        assert_eq!(blocks["step-read"], json!(["block-v1"]));
+        assert!(blocks.get("step-seed").is_none(), "a sample reference is not a block reference: {blocks}");
     }
 
     #[test]

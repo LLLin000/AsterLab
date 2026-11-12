@@ -176,6 +176,16 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 				matches = append(matches, step)
 			}
 		}
+		// A frozen task path is the protocol's own step path, which is not the
+		// author-chosen design step path. When the run recorded the design step
+		// it executes, that identity joins them; the paths cannot.
+		if len(matches) == 0 && task.DesignStepID != "" {
+			for _, step := range validSteps {
+				if step.id == task.DesignStepID {
+					matches = append(matches, step)
+				}
+			}
+		}
 		switch len(matches) {
 		case 0:
 			tree.Orphans = append(tree.Orphans, ref)
@@ -194,9 +204,14 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 		node := &Node{ID: step.id, Title: step.title, Path: step.path, Kind: KindStep, Order: step.order, Identity: IdentityUse, UseID: step.path}
 		var exact, descendants []TaskRef
 		for _, task := range assignments[step.id] {
-			if task.Path == step.path {
+			switch {
+			case task.Path == step.path:
 				exact = append(exact, task)
-			} else if strings.HasPrefix(task.Path, step.path+"/") {
+			case strings.HasPrefix(task.Path, step.path+"/"):
+				descendants = append(descendants, task)
+			default:
+				// Joined by design-step identity, so the path is the protocol's
+				// own; buildTrie rebases it under this step.
 				descendants = append(descendants, task)
 			}
 		}
@@ -295,9 +310,35 @@ type trieNode struct {
 }
 
 func buildTrie(stepPath string, tasks []TaskRef) []*Node {
+	// Tasks joined by design-step identity carry the protocol's own root, which
+	// is not the design step path. Strip their shared root so the protocol's
+	// steps hang directly under the design step instead of under a stray level.
+	base := ""
+	var foreign [][]string
+	for _, task := range tasks {
+		if !strings.HasPrefix(task.Path, stepPath+"/") {
+			foreign = append(foreign, strings.Split(task.Path, "/"))
+		}
+	}
+	if len(foreign) > 0 {
+		common := foreign[0]
+		for _, parts := range foreign[1:] {
+			n := 0
+			for n < len(common) && n < len(parts)-1 && common[n] == parts[n] {
+				n++
+			}
+			common = common[:n]
+		}
+		if len(common) > 0 {
+			base = strings.Join(common, "/") + "/"
+		}
+	}
 	root := &trieNode{children: map[string]*trieNode{}}
 	for _, task := range tasks {
 		suffix := strings.TrimPrefix(task.Path, stepPath+"/")
+		if suffix == task.Path && base != "" {
+			suffix = strings.TrimPrefix(task.Path, base)
+		}
 		parts := strings.Split(suffix, "/")
 		current := root
 		for i, part := range parts {
