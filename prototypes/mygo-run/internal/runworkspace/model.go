@@ -652,7 +652,7 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 			if len(tree.Issues) > 0 {
 				vm.TreeIssues = tree.Issues
 			}
-			if tree.HasComposite() {
+			if tree.HasComposite() || tree.HasOrganizational() {
 				vm.Tree = tree
 			}
 		}

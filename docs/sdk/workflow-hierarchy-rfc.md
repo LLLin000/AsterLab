@@ -40,44 +40,42 @@ The projection exposes `DefinitionRef`, `Node.ID`/`Path` (Use), and child
 - A composite step does not get a synthetic task of its own. Its status is
   aggregated from the child tasks.
 
-## 4. Binding contract v1 (read-only, path-bound)
+## 4. Binding contract v1 (frozen-version identity)
 
-1. The AsterDoc parent step path MUST equal the protocol step path:
-   - composite: `root/<block_use.use_id>`;
-   - leaf: the exact protocol step path.
-2. A composite step MUST have a `uses` reference whose `ref` equals the exact
-   child `block_version_id`. If more than one `block_use` uses the same child
-   version, the binding is ambiguous and must be rejected.
-3. Child tasks are matched by exact path or `parentPath + "/"`. A task that
-   matches more than one step, or no step, is ambiguous/orphan; it is reported,
-   never guessed into a parent.
-4. Titles are display text only. They are never used for matching or identity.
-5. A parent step that mixes an exact task and child tasks is rejected.
+1. An executable AsterDoc Step references exactly one `reference` module with
+   `view: protocol_block`; its `ref` is the exact ProtocolBlock version ID.
+2. The Step's assay ProtocolVersion must contain that exact block version.
+   Core checks this in `asterdoc.assess` and again before Run creation.
+3. AsterDoc Step paths and ProtocolBlock-internal paths are separate identities.
+   Run tasks link through the explicit Step/assay/timepoint mapping; paths and
+   titles are never guessed as substitutes.
+4. A task whose source block does not match the referenced version is reported,
+   not assigned to that composite.
+5. `step@1` and `step@2` remain executable; absence of a block never implies
+   organizational semantics. `step@3.execution` explicitly declares
+   `executable` or `organizational`; organizational steps produce no Run task.
 
-This contract requires no new schema. A future `step@3` may add an explicit
-`subworkflow_ref { block_version_id, use_id }`; it must not change `step@2` in
-place.
+`step@3` versions execution semantics without changing `step@1`/`step@2`. A
+future nested-subworkflow reference would require a later schema version.
 
 ## 5. Status aggregation
 
 - `completed` only when every child task is `completed`.
 - `blocked` if any child is blocked; `current` if any child is in progress;
   `pending` otherwise.
-- `unresolved` when a step has no matching frozen task.
+- `unresolved` means an executable step has no matching frozen task. An explicit
+  `organizational` step has status `organizational` and total 0.
 - The parent counts are `Completed/Total`; they are derived, not stored.
 
 ## 6. Freeze and validation
 
-- The parent `block_use` pins the exact child version; the Run freezes the
-  compiled design revision and all expanded task paths.
-- Validation rejects:
-  - duplicate step paths;
-  - a composite with no explicit child definition reference;
-  - a composite with no expanded child tasks;
-  - a step with no task;
-  - a task matching multiple steps;
-  - an orphan task;
-  - a `precedes` cycle.
+- A Step reference pins the exact ProtocolBlock version; the Run freezes the
+  compiled Design revision and expanded ProtocolVersion task paths.
+- Core rejects an executable Step unless its exact ProtocolBlock version is
+  present in that assay's frozen ProtocolVersion. Organizational nodes create
+  no task and are not inferred from a missing block.
+- The hierarchy projection reports duplicate step paths, missing/mismatched
+  composite definitions, task ambiguity/orphans, and `precedes` cycles.
 - The projection is read-only. It does not write, migrate, or rewrite a frozen
   Run.
 

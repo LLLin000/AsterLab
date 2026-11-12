@@ -154,7 +154,7 @@ Inline `data:` URIs are rejected. An artifact reference does not copy the file i
 - Old documents remain readable as long as their module kind and schema are still registered.
 - Adding a module does not change existing module semantics.
 - A breaking field change creates a new schema version and a migration rule; it never mutates an already-frozen Run.
-- Existing fields such as `step@1` are not rewritten to express HUVEC material amounts; a future `step@2` or composable parameter module must carry that meaning.
+- Existing fields such as `step@1` are not rewritten to express HUVEC material amounts; a future schema version or composable parameter module must carry that meaning.
 
 There is no automatic migration in Foundation v1. The current compiler ignores modules it does not project; adding a renderable module therefore does not force a Core projection change.
 

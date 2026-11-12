@@ -128,8 +128,8 @@ func TestViewRendersNativePlateAndAssignRewritesSource(t *testing.T) {
 
 func TestRegistryManifestDescribesInputsOutputsAndPermissions(t *testing.T) {
 	descriptors := BuiltinRegistry().Descriptors()
-	if len(descriptors) != 14 {
-		t.Fatalf("expected 14 module kinds after plate consolidation, got %d", len(descriptors))
+	if len(descriptors) != 15 {
+		t.Fatalf("expected 15 module kinds, got %d", len(descriptors))
 	}
 	var plate *Descriptor
 	for i := range descriptors {
@@ -369,7 +369,7 @@ func TestManifestDeclaresFoundationAndReferenceModules(t *testing.T) {
 	if err := json.Unmarshal(manifest, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.FoundationVersion != 1 || decoded.SDKVersion != "1.0.0" || len(decoded.Modules) != 14 {
+	if decoded.FoundationVersion != 1 || decoded.SDKVersion != "1.0.0" || len(decoded.Modules) != 15 {
 		t.Fatalf("manifest header/modules = %+v", decoded)
 	}
 	for _, module := range decoded.Modules {
@@ -437,6 +437,22 @@ func TestStep2UsesStableModuleReferences(t *testing.T) {
 	}
 }
 
+func TestStep3DeclaresExecutionSemantics(t *testing.T) {
+	source := "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: step\nid: step-run\nschema: 3\ntitle: Readout\nexecution: executable\nassay: assay-1\npath: cck8/readout\n```\n```asterlab\nkind: step\nid: step-group\nschema: 3\ntitle: Incubation\nexecution: organizational\n```\n"
+	if _, err := Parse(source); err != nil {
+		t.Fatalf("valid executable and organizational steps rejected: %v", err)
+	}
+	if _, err := Parse(strings.Replace(source, "execution: organizational", "execution: organizational\npath: cck8/incubation", 1)); err == nil {
+		t.Fatal("organizational step accepted an execution path")
+	}
+	if _, err := Parse(strings.Replace(source, "assay: assay-1\n", "", 1)); err == nil {
+		t.Fatal("executable step without an assay was accepted")
+	}
+	if _, err := Parse(strings.Replace(source, "execution: organizational\n", "", 1)); err == nil {
+		t.Fatal("step without an execution mode was accepted")
+	}
+}
+
 func TestBuiltinModuleConformance(t *testing.T) {
 	seen := map[string]bool{}
 	kinds := map[string]bool{}
@@ -466,7 +482,7 @@ func TestBuiltinModuleConformance(t *testing.T) {
 			t.Fatalf("missing reference module %s", kind)
 		}
 	}
-	if !kinds["step"] || !seen[specKey("step", 2)] {
-		t.Fatal("step@2 binding module is not registered")
+	if !kinds["step"] || !seen[specKey("step", 2)] || !seen[specKey("step", 3)] {
+		t.Fatal("step@2 binding and step@3 execution modules are not registered")
 	}
 }

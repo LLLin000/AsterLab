@@ -86,6 +86,38 @@ func TestBuildDesignRejectsMissingBlockProvider(t *testing.T) {
 	}
 }
 
+func TestBuildDesignKeepsOrganizationalStepsExplicit(t *testing.T) {
+	source := strings.Join([]string{
+		"```asterlab", "kind: assay", "id: assay-1", "schema: 1", "title: Assay", "```",
+		"```asterlab", "kind: reference", "id: ref-sample", "schema: 1", "ref: sample-1", "view: sample", "```",
+		"```asterlab", "kind: step", "id: step-run", "schema: 3", "title: Seed",
+		"execution: executable", "assay: assay-1", "path: cck8/seed", "uses:", "- {ref: ref-sample, role: other}", "```",
+		"```asterlab", "kind: step", "id: step-org", "schema: 3", "title: Incubate",
+		"execution: organizational", "```",
+	}, "\n")
+	tree, err := BuildDesign(&asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: source}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tree.Roots) != 2 {
+		t.Fatalf("roots = %d, want 2", len(tree.Roots))
+	}
+	executable, organizational := tree.Roots[0], tree.Roots[1]
+	if executable.ID != "step-run" || executable.Organizational || executable.BlockVersionID != "" || executable.Composite {
+		t.Fatalf("non-ProtocolBlock reference was treated as an executable source: %+v", executable)
+	}
+	if organizational.ID != "step-org" || !organizational.Organizational ||
+		organizational.Path != "step-org" || organizational.Total != 0 || organizational.Status != "organizational" {
+		t.Fatalf("organizational node = %+v", organizational)
+	}
+	if !tree.HasOrganizational() {
+		t.Fatal("tree did not expose its organizational step")
+	}
+}
+
 func TestBuildDesignReusesSameBlockVersionIndependently(t *testing.T) {
 	source := parentSourceText(t)
 	blockStart := strings.Index(source, "kind: step\nid: step-rna-extract")

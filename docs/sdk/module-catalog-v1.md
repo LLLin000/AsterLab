@@ -1,6 +1,6 @@
 # AsterDoc SDK 模块目录 v1
 
-> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，14 个已注册模块）。本文只描述已实现的事实，不描述未实现能力。
+> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，15 个已注册模块）。本文只描述已实现的事实，不描述未实现能力。
 
 ## 1. 已注册模块总表
 
@@ -16,6 +16,7 @@
 | dilution@1 | measurement | quantity, deterministic-calculation, derived-output | (none) | generic.editor / dilution.viewer / generic.run / — | dilution-fields |
 | instrument_profile@1 | resource | instrument-profile, capability-declaration | (none) | generic.editor / instrument-profile.viewer / generic.run / — | instrument-profile-fields |
 | step@2 | workflow | step-definition, workflow-edge | (none) | generic.editor / step.viewer / generic.run / — | step-fields, step-uses |
+| step@3 | workflow | step-definition, workflow-edge | (none) | generic.editor / step.viewer / generic.run / — | step-execution, step-uses |
 | material@1 | resource | material, role-declaration | (none) | generic.editor / material.viewer / generic.run / — | material-fields |
 | sample@1 | resource | sample, sample-tracking | (none) | generic.editor / sample.viewer / generic.run / — | sample-fields |
 | container@1 | labware | container, well-map | (none) | generic.editor / container.viewer / generic.run / — | container-fields |
@@ -39,7 +40,7 @@
 | experiment@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
 | group@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
 | assay@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
-| step@1 / step@2 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
+| step@1 / step@2 / step@3 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
 | workflow@1 | Go+Rust | Workspace 画布（非模块级 Design renderer） | 只读摘要 | 无 |
 | dilution@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无（derived，不写 Run 事实） |
 | instrument_profile@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无；无设备控制 |
@@ -92,6 +93,10 @@
 ### step@2
 - 在 step@1 基础上新增 inputs.uses list(object)（每项 {ref, role}）；rules 增加 step-uses。step@1 语义不变。
 
+### step@3
+- 在 `step@2` 基础上新增必填 `execution` enum{executable,organizational}。可执行步骤需要 assay 和唯一的 `reference.view: protocol_block`；Core 再确认精确 BlockVersion 属于该 assay 的冻结 ProtocolVersion。
+- `organizational` 不得声明 assay、timepoints、path、checks、tasks 或 uses，不生成 Run Task。`step@1`/`step@2` 始终按可执行步骤解释；缺少 Block 不推断为组织节点。
+
 ### material@1
 - inputs: kind/id/schema string|int required；name string required；role enum{control,treatment} required；condition string；concentration quantity (mass_concentration)；source enum{built_in,lab_imported,unknown} required。
 - outputs: material_view object view。
@@ -132,7 +137,7 @@
 - `record_boundary` 固定为 `run`；document 模块不得写 Run 事实。
 - 量纲/UCUM：`prototypes/mygo-run/internal/asterdoc/spec/units.json` 仅 36 个符号、9 个维度（mass_concentration、mass、amount_concentration、length、time、volume、amount、dimensionless、temperature）；`units.go` 注释明确是"命名 UCUM 子集"，转换显式且不重写原值。
 - 引用：`reference.ref` 是非类型化的 `string`（`reference@1` 的 `ref` 字段为 `string`，仅 `target` 在引用端口声明）；typed reference 通过 `inputs[].type=reference + target` 实现，`ref` 本身不带类型。
-- Go 注册：`BuiltinRegistry()` 注册 14 个 `kind@schema`；`Register` 验证所声明的 renderer key 有已注册 callback。
+- Go 注册：`BuiltinRegistry()` 注册 15 个 `kind@schema`；`Register` 验证所声明的 renderer key 有已注册 callback。
 - Rust 镜像：`src/cli.rs` 嵌入同一 `modules.json` 并校验；`asterdoc_module_spec(kind, schema)` 查找。
 
 ## 4. 新增模块：精确文件清单
@@ -171,7 +176,7 @@ Rust 侧 `validate_asterdoc_module` 的 rule 匹配是穷举的：已知 rule �
 - 无模板市场：模板 shape 在 Foundation schema 中定义；实例化已在 `internal/asterdoc/template.go` 实现（`InstantiateTemplate` / `TemplateManifest`），但无模板市场、无远程下载、无模板管理 CLI。
 - 通用编辑器对 `list/object/table/object-list/well-map/geometry` 字段显示为 read-only（`GenericModuleEditor`，`view.go`）；因此复合字段目前无法在通用编辑器内组装，需要专用编辑器或后续的结构化控件。
 - 无模块生命周期（register/activate/dispose）：模块是纯函数，加载即全部注册，失败即暴露 `BuiltinError`。
-- `step@1` 语义不变；`step@2` 仅新增 `uses` 绑定。
+- `step@1`/`step@2` 语义不变；`step@2` 新增 `uses`；`step@3` 显式声明执行/组织语义并要求可执行步骤有精确 ProtocolBlock 来源。
 - `reference.ref` 是非类型化字符串，typed reference 通过端口 `type=reference + target` 实现。
 - `renderers.static` 字段未在 manifest 中声明；静态渲染走 `StaticPreview` 路径。
 - 模块 specific migration 版本化；Foundation v1 不静默迁移旧字段。

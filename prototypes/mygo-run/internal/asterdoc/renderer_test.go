@@ -12,8 +12,8 @@ func TestBuiltInRenderersMatchDeclaredSurfaces(t *testing.T) {
 		t.Fatalf("shipped registry rejected its own modules: %v", err)
 	}
 	registry := BuiltinRegistry()
-	if got := len(registry.Descriptors()); got != 14 {
-		t.Fatalf("registered module count = %d, want 14", got)
+	if got := len(registry.Descriptors()); got != 15 {
+		t.Fatalf("registered module count = %d, want 15", got)
 	}
 	for _, spec := range registry.specs {
 		for surface, rendererKey := range spec.declaredRenderers() {
@@ -134,7 +134,7 @@ func TestGenericRunSummaryHonorsDensityAndIsReadOnly(t *testing.T) {
 	if err := registry.Register(ModuleSpec{
 		Descriptor: Descriptor{Kind: "planned", Schema: 1, Title: "计划参数",
 			Renderers: &Renderers{Run: "generic.run"},
-			Inputs: []Port{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}},
+			Inputs:    []Port{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}},
 		Validate: func(map[string]any) error { return nil },
 	}); err != nil {
 		t.Fatal(err)

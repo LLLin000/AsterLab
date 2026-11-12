@@ -114,3 +114,43 @@ Known remaining diagnostic: a design step that reuses no ProtocolBlock
 (`cck8/seed` here) produces no frozen task, so the rail still reports
 `no frozen task matches this step path` for that step. That is accurate,
 not a join failure.
+
+## 7. RC-3 execution-source acceptance (2026-11-12)
+
+RC-3 changes the contract, so the fixture was rebuilt rather than reused: a
+design step is executable only when it names an exact ProtocolBlock version
+that occurs in its assay's frozen ProtocolVersion.
+
+Fixture (`target/rc3-fixture.py`, disposable data dir):
+
+- ProtocolBlocks: seed (1 step), readout (2 steps, one blocking check), and a
+  root block with two `block_use` children.
+- Protocol version binds the root block; the assay binds that version.
+- AsterDoc: two `step@3` steps, `execution: executable`, each with one
+  `reference.view: protocol_block` use pointing at its exact block version.
+- Design `ddbe9052…` rev 1, Run `d0226c6a…`.
+
+Checks and results:
+
+| Check | Result |
+|---|---|
+| `asterdoc.assess` state | `warning`, `errors: []` |
+| Frozen protocol tasks | 3: `root/seed/seed`, `root/readout/incubate`, `root/readout/read` |
+| Design-step join (`workflow.inspect_tree`) | 2 roots, 0 issues: `接种细胞 → 接种细胞(task)`, `CCK-8 检测 → 孵育 + 读取 OD450` |
+| Exact block identity | seed node `a0b070e9…`, readout node `1c582ed6…`, each task carries the same block id |
+| Real GUI CCK-8 loop | `GUI E2E PASS`: 8×12 paste, save, restart, restored mean `0.499`, CLI cross-read `0.91`/`0.42` |
+
+Negative paths, verified by Rust tests rather than by fixture:
+
+- A `step@3` executable step with no ProtocolBlock reference is rejected by
+  `asterdoc.assess` and by Run creation with `STEP_NOT_MATERIALIZED: <path>`,
+  and the transaction rolls back: design revision, run count and
+  design_version count are unchanged.
+- An `organizational` step cannot declare assay/path/timepoints/checks/tasks/uses.
+- A block version present only in another assay's ProtocolVersion does not
+  satisfy the check.
+- A later ProtocolBlock revision does not rewrite an existing Run's frozen
+  `protocol_manifest`.
+
+Suites at this commit: Go `./...` all packages; Rust core 169, app 12,
+`labworkbench` 8.

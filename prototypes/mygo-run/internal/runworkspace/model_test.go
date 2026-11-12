@@ -331,3 +331,21 @@ func TestBuildViewModelAssociatesMeasurementsAndAuditEvents(t *testing.T) {
 		t.Fatalf("unassociated events = %+v", vm.UnassociatedEvents)
 	}
 }
+
+func TestBuildViewModelShowsOrganizationalNodes(t *testing.T) {
+	source := "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n" +
+		"```asterlab\nkind: step\nid: step-seed\nschema: 3\ntitle: Seed\nexecution: executable\nassay: assay-1\npath: cck8/seed\n```\n" +
+		"```asterlab\nkind: step\nid: step-incubate\nschema: 3\ntitle: Incubate\nexecution: organizational\n```\n"
+	snap := runs.RunSnapshot{
+		RunID: "run-1",
+		Tasks: []runs.RunTask{{
+			Key: "task-seed", Path: "cck8/seed", Title: "Seed", Status: "pending",
+			DesignStepID: "step-seed", AssayID: "assay-1",
+		}},
+	}
+	doc := &asterdoc.FrozenAsterDoc{DesignID: "design-1", Revision: 1, Source: source}
+	vm := BuildViewModel(snap, doc)
+	if vm.Tree == nil || !vm.Tree.HasOrganizational() {
+		t.Fatalf("organizational workflow tree was hidden: %+v", vm.TreeIssues)
+	}
+}

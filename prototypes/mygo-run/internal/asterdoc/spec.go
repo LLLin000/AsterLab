@@ -228,6 +228,34 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 				if assay, _ := data["assay"].(string); assay == "" {
 					return fmt.Errorf("step needs an assay")
 				}
+			case "step-execution":
+				switch textValue(data, "execution") {
+				case "executable":
+					if strings.TrimSpace(textValue(data, "assay")) == "" {
+						return fmt.Errorf("executable step needs an assay")
+					}
+				case "organizational":
+					for _, field := range []string{"assay", "timepoints", "path", "checks", "tasks", "uses"} {
+						value, ok := data[field]
+						if !ok || value == nil {
+							continue
+						}
+						switch value := value.(type) {
+						case string:
+							if strings.TrimSpace(value) != "" {
+								return fmt.Errorf("organizational step cannot declare %s", field)
+							}
+						case []any:
+							if len(value) > 0 {
+								return fmt.Errorf("organizational step cannot declare %s", field)
+							}
+						default:
+							return fmt.Errorf("organizational step cannot declare %s", field)
+						}
+					}
+				default:
+					return fmt.Errorf("step execution must be executable or organizational")
+				}
 			case "workflow-fields":
 				steps, _ := data["steps"].([]any)
 				if len(steps) == 0 {

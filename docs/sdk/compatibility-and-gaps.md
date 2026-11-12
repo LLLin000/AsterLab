@@ -16,12 +16,12 @@
 | 6 | Document and record are not dual-written | Retained | New modules are document/render-only. Dilution outputs are derived and explicitly not written as Run facts. |
 | 7 | One registry for SDK modules | Implemented | `plate`, `dilution`, and `instrument_profile` read `spec/modules.json`; the registry shares generic callbacks by renderer key. |
 | 8 | Notebook can show modules through the same viewer | Implemented through the shared markdown code-block hook | The same renderer path is used for document surfaces; there is no notebook-only module parser. |
-| 9 | New module does not change Core transaction logic | Implemented for these modules | No SQLite/Run transaction changes were made for the new modules. |
-| 10 | New fields/features are versioned, not retrofitted | Contract defined | Old `step@1` is unchanged; new module kinds have schema 1. A future breaking change requires a new schema/migration. |
+| 9 | New module does not change Core transaction logic | Implemented for standalone resource/calculation modules | Those modules remain document/render-only. Step materialization is the separate explicit Core gate; no inline-task execution engine was added. |
+| 10 | New fields/features are versioned, not retrofitted | Implemented | `step@3` adds execution semantics; `step@1`/`step@2` retain their schema meaning, with no silent migration. |
 
 ## 2. Implemented in this pass
 
-- `spec/modules.json` is the single manifest for 14 module kinds and declares their Design/Document/Run renderer keys.
+- `spec/modules.json` is the single manifest for 15 registered `kind@schema` modules and declares their Design/Document/Run renderer keys.
 - `Registry.RegisterRenderer` registers reusable callbacks once (`generic.editor`, `generic.run`); module-specific callbacks such as `plate.editor` remain specialized. Missing surface declarations show a gap, not a fallback.
 - Foundation port types in the shared manifest: quantity, typed reference, enum, decimal/integer/boolean, list, table, geometry, artifact, duration, timepoint, relative time, with legacy aliases.
 - Shared `spec/units.json` named UCUM subset and explicit conversion helper.
@@ -47,9 +47,9 @@
 ### Scientific/domain
 
 - The unit registry is a named subset, not all of UCUM. No compound-unit parser, offset temperature conversion, or molar-mass conversion.
-- `step@1` still cannot express HUVEC material amounts, UV duration, temperature and concentrations as structured fields; a future version/composable module is required.
+- `step@1` still cannot express HUVEC material amounts, UV duration, temperature and concentrations as structured fields; those need a future schema or composable module.
 - `instrument_profile` has no instance/calibration/reservation model and no Device Adapter. It cannot control hardware.
-- SDK modules now bind through `step@2.uses` and are filtered per Run task. `step@1` remains unchanged; role values are not yet a closed enum.
+- SDK modules bind through `step@2`/`step@3` `uses` and are filtered per Run task. `step@1` remains unchanged; role values are not yet a closed enum. `step@3` also distinguishes executable and organizational steps.
 - Notebook has a read-only timeline mode. Real dark-theme 900×600 evidence at 150% scale is captured; 100%/200% and additional dark pages remain open.
 - No ISA/AnIML/PROV serialization or import.
 - Template shape and Go instantiation (`InstantiateTemplate` / `TemplateManifest`) exist; there is no template market, remote download, or template CLI.

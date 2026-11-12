@@ -1,6 +1,6 @@
 # AsterLab SDK
 
-Status: Foundation v1 and Module SDK v1 are frozen at RC (`sdk-v1-rc2`, 2026-11-12). The contracts in this directory are the developer-facing surface; the GUI exposes the subset recorded in [compatibility and gaps](compatibility-and-gaps.md).
+Status: Foundation v1 and Module SDK v1 are frozen at RC (`sdk-v1-rc3`, 2026-11-12). The contracts in this directory are the developer-facing surface; the GUI exposes the subset recorded in [compatibility and gaps](compatibility-and-gaps.md).
 
 | Document | Purpose |
 | --- | --- |
@@ -11,7 +11,7 @@ Status: Foundation v1 and Module SDK v1 are frozen at RC (`sdk-v1-rc2`, 2026-11-
 | [Compatibility and gaps](compatibility-and-gaps.md) | Acceptance-gate evidence and the limitations that remain. |
 | [Track A: CCK-8 real-window evidence](track-a-cck8-evidence.md) | Real Run, batch readouts, task completion, Review and frozen isolation. |
 | [Track B: SDK extensibility evidence](track-b-extensibility-evidence.md) | Dilution/instrument_profile generic editing and frozen Run viewing. |
-| [Typed Step Module Binding v1](step-binding-v1.md) | `step@2.uses`, compiler projection and task-scoped Run filtering. |
+| [Typed Step Module Binding v1](step-binding-v1.md) | `step@2.uses`, `step@3.execution`, exact ProtocolBlock source validation and Run materialization. |
 | [Release evidence](evidence/) | Real-window 900×600 light/dark and Run captures. |
 | [Worktree classification](worktree-classification.md) | The 72 remaining uncommitted entries and release handling rules. |
 | [Foundation JSON Schema](../../prototypes/mygo-run/internal/asterdoc/spec/foundation-v1.schema.json) | Machine-checkable envelope, port, action, manifest and template shapes. |

@@ -63,6 +63,7 @@ type Node struct {
 	Instruction          string           `json:"instruction,omitempty"`
 	Parameters           []BlockParameter `json:"parameters,omitempty"`
 	UnresolvedParameters []string         `json:"unresolvedParameters,omitempty"`
+	Organizational       bool             `json:"organizational,omitempty"`
 	Status               string           `json:"status,omitempty"`
 	Completed            int              `json:"completed,omitempty"`
 	Total                int              `json:"total,omitempty"`
@@ -105,18 +106,21 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 	referenceRefs := map[string]string{}
 	for _, module := range parsed.Modules {
 		if module.Kind == "reference" {
-			if ref, _ := module.Data["ref"].(string); ref != "" {
-				referenceRefs[module.ID] = ref
+			if view, _ := module.Data["view"].(string); view == "protocol_block" {
+				if ref, _ := module.Data["ref"].(string); ref != "" {
+					referenceRefs[module.ID] = ref
+				}
 			}
 		}
 	}
 
 	type stepDef struct {
-		id    string
-		title string
-		path  string
-		order int
-		refs  []string
+		id             string
+		title          string
+		path           string
+		order          int
+		refs           []string
+		organizational bool
 	}
 	var steps []stepDef
 	for _, module := range parsed.Modules {
@@ -126,6 +130,11 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 		title, _ := module.Data["title"].(string)
 		path, _ := module.Data["path"].(string)
 		order := intValue(module.Data["order"])
+		execution, _ := module.Data["execution"].(string)
+		organizational := module.Schema == 3 && execution == "organizational"
+		if organizational && path == "" {
+			path = module.ID
+		}
 		var refs []string
 		if uses, ok := module.Data["uses"].([]any); ok {
 			for _, raw := range uses {
@@ -136,7 +145,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 				}
 			}
 		}
-		steps = append(steps, stepDef{id: module.ID, title: title, path: path, order: order, refs: refs})
+		steps = append(steps, stepDef{id: module.ID, title: title, path: path, order: order, refs: refs, organizational: organizational})
 	}
 	sort.SliceStable(steps, func(i, j int) bool {
 		if steps[i].order != steps[j].order {
@@ -172,6 +181,9 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 		}
 		var matches []stepDef
 		for _, step := range validSteps {
+			if step.organizational {
+				continue
+			}
 			if path == step.path || strings.HasPrefix(path, step.path+"/") {
 				matches = append(matches, step)
 			}
@@ -181,6 +193,9 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 		// it executes, that identity joins them; the paths cannot.
 		if len(matches) == 0 && task.DesignStepID != "" {
 			for _, step := range validSteps {
+				if step.organizational {
+					continue
+				}
 				if step.id == task.DesignStepID {
 					matches = append(matches, step)
 				}
@@ -201,7 +216,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 	}
 
 	for _, step := range validSteps {
-		node := &Node{ID: step.id, Title: step.title, Path: step.path, Kind: KindStep, Order: step.order, Identity: IdentityUse, UseID: step.path}
+		node := &Node{ID: step.id, Title: step.title, Path: step.path, Kind: KindStep, Order: step.order, Identity: IdentityUse, UseID: step.path, Organizational: step.organizational}
 		var exact, descendants []TaskRef
 		for _, task := range assignments[step.id] {
 			switch {
@@ -222,7 +237,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 		case len(descendants) > 0:
 			node.Composite = true
 			node.Children = buildTrie(step.path, descendants)
-			node.DefinitionRef = resolveDefinition(step, referenceRefs)
+			node.DefinitionRef = resolveDefinition(step.refs, referenceRefs)
 			node.BlockVersionID = node.DefinitionRef
 			for _, task := range descendants {
 				if task.ProtocolVersionID != "" {
@@ -242,7 +257,9 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 			node.DefinitionRef = exact[0].SourceBlockVersionID
 			node.BlockVersionID = exact[0].SourceBlockVersionID
 		default:
-			node.Issues = append(node.Issues, "no frozen task matches this step path")
+			if !step.organizational {
+				node.Issues = append(node.Issues, "no frozen task matches this step path")
+			}
 		}
 		aggregateNode(node)
 		tree.Roots = append(tree.Roots, node)
@@ -302,6 +319,20 @@ func (t *Tree) HasComposite() bool {
 	return false
 }
 
+// HasOrganizational reports whether the tree contains a non-executable design
+// step that has no Run task by definition.
+func (t *Tree) HasOrganizational() bool {
+	if t == nil {
+		return false
+	}
+	for _, root := range t.Roots {
+		if root.Organizational {
+			return true
+		}
+	}
+	return false
+}
+
 type trieNode struct {
 	segment  string
 	path     string
@@ -317,14 +348,18 @@ func buildTrie(stepPath string, tasks []TaskRef) []*Node {
 	var foreign [][]string
 	for _, task := range tasks {
 		if !strings.HasPrefix(task.Path, stepPath+"/") {
-			foreign = append(foreign, strings.Split(task.Path, "/"))
+			// Parents only: the last segment is the task itself and must never
+			// become part of the stripped prefix. With one foreign task the
+			// old form kept the whole path and produced a stray root level.
+			parts := strings.Split(task.Path, "/")
+			foreign = append(foreign, parts[:len(parts)-1])
 		}
 	}
 	if len(foreign) > 0 {
 		common := foreign[0]
 		for _, parts := range foreign[1:] {
 			n := 0
-			for n < len(common) && n < len(parts)-1 && common[n] == parts[n] {
+			for n < len(common) && n < len(parts) && common[n] == parts[n] {
 				n++
 			}
 			common = common[:n]
@@ -433,14 +468,8 @@ func validateComposite(node *Node, stepPath, definitionRef string, descendants [
 	}
 }
 
-func resolveDefinition(step struct {
-	id    string
-	title string
-	path  string
-	order int
-	refs  []string
-}, referenceRefs map[string]string) string {
-	for _, ref := range step.refs {
+func resolveDefinition(refs []string, referenceRefs map[string]string) string {
+	for _, ref := range refs {
 		if block, ok := referenceRefs[ref]; ok {
 			return block
 		}
@@ -463,6 +492,8 @@ func aggregateNode(node *Node) {
 	}
 	node.Completed, node.Total = completed, total
 	switch {
+	case node.Organizational:
+		node.Status = "organizational"
 	case total == 0:
 		node.Status = "unresolved"
 	case blocked:

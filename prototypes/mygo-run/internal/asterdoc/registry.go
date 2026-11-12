@@ -284,7 +284,7 @@ func BuiltinRegistry() *Registry {
 		}
 		specs := []ModuleSpec{
 			plateSpec(), referenceSpec(), experimentSpec(), groupSpec(),
-			assaySpec(), stepSpec(), step2Spec(), workflowSpec(),
+			assaySpec(), stepSpec(), step2Spec(), step3Spec(), workflowSpec(),
 			dilutionSpec(), instrumentProfileSpec(), materialSpec(),
 			sampleSpec(), containerSpec(), measurementProfileSpec(),
 		}

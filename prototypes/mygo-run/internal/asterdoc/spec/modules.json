@@ -1055,6 +1055,119 @@
       }
     },
     {
+      "kind": "step",
+      "schema": 3,
+      "title": "步骤 v3（执行语义）",
+      "description": "显式区分可执行步骤与流程组织节点；可执行步骤必须绑定 ProtocolBlock。",
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "execution",
+          "type": "enum",
+          "values": [
+            "executable",
+            "organizational"
+          ],
+          "required": true
+        },
+        {
+          "name": "assay",
+          "type": "reference",
+          "target": "assay"
+        },
+        {
+          "name": "timepoints",
+          "type": "string[]"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "order",
+          "type": "int"
+        },
+        {
+          "name": "checks",
+          "type": "object-list"
+        },
+        {
+          "name": "tasks",
+          "type": "object-list",
+          "description": "步骤计划中的任务/检查项"
+        },
+        {
+          "name": "uses",
+          "type": "list",
+          "item_type": "object",
+          "description": "模块绑定；可执行步骤的 ProtocolBlock 通过 reference.view: protocol_block 指向精确版本"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "step_task",
+          "type": "object",
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "step-execution",
+        "step-uses"
+      ],
+      "sdk": "1.0.0",
+      "category": "workflow",
+      "capabilities": [
+        "step-definition",
+        "workflow-edge"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "generic.editor",
+        "document": "step.viewer",
+        "run": "generic.run"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      }
+    },
+
+    {
       "kind": "material",
       "schema": 1,
       "title": "材料",

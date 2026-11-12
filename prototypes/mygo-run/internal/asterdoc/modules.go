@@ -138,6 +138,7 @@ func assaySpec() ModuleSpec {
 func stepSpec() ModuleSpec { return stepSpecAt(1) }
 
 func step2Spec() ModuleSpec { return stepSpecAt(2) }
+func step3Spec() ModuleSpec { return stepSpecAt(3) }
 
 func stepSpecAt(schema int) ModuleSpec {
 	return ModuleSpec{Descriptor: descriptorFor("step", schema), Validate: specValidatorFor("step", schema)}

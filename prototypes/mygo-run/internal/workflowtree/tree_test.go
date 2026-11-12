@@ -169,6 +169,41 @@ func TestProjectionRejectsCompositeWithoutDefinition(t *testing.T) {
 	}
 }
 
+func TestRunTreeKeepsOrganizationalStepsWithoutTasks(t *testing.T) {
+	source := strings.Join([]string{
+		"```asterlab", "kind: assay", "id: assay-1", "schema: 1", "title: Assay", "```",
+		"```asterlab", "kind: step", "id: step-seed", "schema: 3", "title: Seed",
+		"execution: executable", "assay: assay-1", "path: cck8/seed", "```",
+		"```asterlab", "kind: step", "id: step-incubate", "schema: 3", "title: Incubate",
+		"execution: organizational", "```",
+	}, "\n")
+	tasks := []runs.RunTask{{
+		Key: "task-seed", Path: "cck8/seed", Title: "Seed", Status: "not_started",
+		ProtocolVersionID: "pv-1", DesignStepID: "step-seed", SourceBlockVersionID: "block-seed",
+	}}
+	tree, err := Build(tasks, &asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !tree.HasOrganizational() || tree.HasComposite() {
+		t.Fatalf("tree predicates: organizational=%t composite=%t", tree.HasOrganizational(), tree.HasComposite())
+	}
+	if len(tree.Roots) != 2 {
+		t.Fatalf("roots = %d, want 2", len(tree.Roots))
+	}
+	if !tree.Roots[1].Organizational || tree.Roots[1].Status != "organizational" ||
+		tree.Roots[1].Total != 0 || len(tree.Roots[1].Children) != 0 {
+		t.Fatalf("organizational Run node = %+v", tree.Roots[1])
+	}
+	if tree.Roots[0].ID != "step-seed" || len(tree.Roots[0].Children) != 1 ||
+		tree.Roots[0].Children[0].TaskKey != "task-seed" {
+		t.Fatalf("executable Run node = %+v", tree.Roots[0])
+	}
+}
+
 func TestProjectionBuildsNestedContainment(t *testing.T) {
 	source := strings.Replace(parentSourceText(t), "ref: c23df8e1-3f2a-4449-8ac9-a4bb7256a113", "ref: purify-block", 1)
 	tasks := []runs.RunTask{
@@ -293,5 +328,56 @@ func TestProjectionJoinsByDesignStepIdentity(t *testing.T) {
 	}
 	if err := tree.Validate(); err != nil {
 		t.Fatalf("Validate() = %v", err)
+	}
+}
+
+func TestProjectionLinksSeedAndReadoutByExactBlockVersion(t *testing.T) {
+	source := strings.Join([]string{
+		"```asterlab", "kind: assay", "id: assay-cck8", "schema: 1", "title: CCK-8", "```",
+		"```asterlab", "kind: reference", "id: ref-seed", "schema: 1", "ref: block-seed-v1", "view: protocol_block", "```",
+		"```asterlab", "kind: reference", "id: ref-readout", "schema: 1", "ref: block-readout-v1", "view: protocol_block", "```",
+		"```asterlab", "kind: step", "id: step-seed", "schema: 3", "title: Seed",
+		"execution: executable", "assay: assay-cck8", "path: design/seed", "order: 1",
+		"uses:", "- {ref: ref-seed, role: other}", "```",
+		"```asterlab", "kind: step", "id: step-readout", "schema: 3", "title: Readout",
+		"execution: executable", "assay: assay-cck8", "path: design/readout", "order: 2",
+		"uses:", "- {ref: ref-readout, role: other}", "```",
+	}, "\n")
+	tasks := []runs.RunTask{
+		{Key: "task-seed", Path: "protocol/root/seed", Title: "Seed", Status: "pending",
+			ProtocolVersionID: "pv-1", DesignStepID: "step-seed", SourceBlockVersionID: "block-seed-v1"},
+		{Key: "task-readout", Path: "protocol/root/readout", Title: "Readout", Status: "pending",
+			ProtocolVersionID: "pv-1", DesignStepID: "step-readout", SourceBlockVersionID: "block-readout-v1"},
+	}
+	tree, err := Build(tasks, &asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tree.Roots) != 2 {
+		t.Fatalf("roots = %d, want 2", len(tree.Roots))
+	}
+	for i, want := range []struct{ id, block, task string }{
+		{"step-seed", "block-seed-v1", "task-seed"},
+		{"step-readout", "block-readout-v1", "task-readout"},
+	} {
+		node := tree.Roots[i]
+		var occurrences []*Node
+		var collect func(*Node)
+		collect = func(current *Node) {
+			if current.Identity == IdentityOccurrence {
+				occurrences = append(occurrences, current)
+			}
+			for _, child := range current.Children {
+				collect(child)
+			}
+		}
+		collect(node)
+		if node.ID != want.id || node.BlockVersionID != want.block || len(occurrences) != 1 ||
+			occurrences[0].TaskKey != want.task || occurrences[0].BlockVersionID != want.block {
+			t.Fatalf("step %d = %+v occurrences=%+v, want %s → %s → %s", i, node, occurrences, want.id, want.block, want.task)
+		}
 	}
 }

@@ -1313,6 +1313,123 @@ pub(crate) fn build_run_manifests(
     Ok((protocol_manifest, material_manifest))
 }
 
+fn step_materialization_issues(design: &Value, protocol_manifest: &[Value]) -> Vec<String> {
+    let mygo = &design["mygo"];
+    let tasks = mygo["stepTasks"].as_array().cloned().unwrap_or_default();
+    let mut fallback_execution = serde_json::Map::new();
+    let execution = match mygo.get("stepExecution") {
+        Some(value) => match value.as_object() {
+            Some(execution) => execution,
+            None => return vec!["STEP_EXECUTION_INVALID: stepExecution must be an object".to_owned()],
+        },
+        None => {
+            for task in &tasks {
+                if let Some(step_id) = task["stepId"].as_str() {
+                    fallback_execution.entry(step_id.to_owned()).or_insert(json!("executable"));
+                }
+            }
+            if fallback_execution.is_empty() {
+                return Vec::new();
+            }
+            &fallback_execution
+        }
+    };
+    let mut issues = Vec::new();
+    let mut has_executable = false;
+    for (step_id, mode) in execution {
+        let path = tasks
+            .iter()
+            .find(|task| task["stepId"].as_str() == Some(step_id.as_str()))
+            .and_then(|task| task["path"].as_str())
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or(step_id);
+        let blocks = mygo["stepBlocks"][step_id]
+            .as_array()
+            .map(|blocks| blocks.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let mode = mode.as_str().unwrap_or("");
+        match mode {
+            "organizational" => {
+                if !blocks.is_empty()
+                    || tasks.iter().any(|task| task["stepId"].as_str() == Some(step_id))
+                {
+                    issues.push(format!(
+                        "STEP_EXECUTION_INVALID: organizational step {path} carries executable bindings"
+                    ));
+                }
+            }
+            "executable" => {
+                has_executable = true;
+                if blocks.len() != 1 {
+                    issues.push(format!(
+                        "STEP_NOT_MATERIALIZED: {path} must reference exactly one ProtocolBlock version"
+                    ));
+                    continue;
+                }
+                let assay_id = mygo["stepAssays"][step_id].as_str().or_else(|| {
+                    tasks
+                        .iter()
+                        .find(|task| task["stepId"].as_str() == Some(step_id.as_str()))
+                        .and_then(|task| task["assayId"].as_str())
+                }).unwrap_or("");
+                if assay_id.is_empty() {
+                    issues.push(format!(
+                        "STEP_NOT_MATERIALIZED: {path} has no assay ProtocolVersion scope"
+                    ));
+                    continue;
+                }
+                let Some(protocol) = protocol_manifest
+                    .iter()
+                    .find(|entry| entry["assay_id"].as_str() == Some(assay_id))
+                else {
+                    issues.push(format!(
+                        "STEP_NOT_MATERIALIZED: {path} assay {assay_id} has no frozen ProtocolVersion"
+                    ));
+                    continue;
+                };
+                let block_ids = protocol["block_version_ids"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str);
+                if !block_ids.into_iter().any(|id| id == blocks[0]) {
+                    issues.push(format!(
+                        "STEP_NOT_MATERIALIZED: {path} ProtocolBlock {} is absent from assay {assay_id}'s frozen ProtocolVersion",
+                        blocks[0]
+                    ));
+                }
+            }
+            _ => issues.push(format!(
+                "STEP_EXECUTION_INVALID: step {step_id} has unknown execution mode {mode:?}"
+            )),
+        }
+    }
+    if !has_executable {
+        issues.push("NO_EXECUTABLE_STEP: design has no executable Step".to_owned());
+    }
+    issues
+}
+
+fn asterdoc_step_materialization_issues(
+    db: &Connection,
+    design_id: &str,
+    design: &Value,
+) -> Result<Vec<String>, CliError> {
+    let (kind, project, _, _, _) = kind_id(db, design_id)?
+        .ok_or_else(|| CliError::missing("实验设计不存在"))?;
+    if kind != "design" {
+        return Err(CliError::input("design_id 必须指向实验设计"));
+    }
+    let project = project.ok_or_else(|| CliError::internal("实验设计缺少项目归属"))?;
+    let mut design_fields = design.clone();
+    if let Some(object) = design_fields.as_object_mut() {
+        object.remove("mygo");
+        object.remove("asterlab");
+    }
+    let (protocol_manifest, _) = build_run_manifests(db, &design_fields, &project, None)?;
+    Ok(step_materialization_issues(design, &protocol_manifest))
+}
+
 fn labware_profile_snapshot(db: &Connection, design_data: &Value) -> Result<Vec<Value>, CliError> {
     let plan: ContainerPlan = serde_json::from_value(
         design_data
@@ -1468,20 +1585,26 @@ pub(crate) fn create_run_in_transaction(
         .ok_or_else(|| CliError::internal("当前设计版本快照缺失"))?;
     let mut design_data: Value =
         serde_json::from_str(&design_raw).map_err(|e| CliError::internal(e.to_string()))?;
-    // Audit and revalidate the design the Run will freeze. This runs before
-    // the MyGo extension is removed, in the same transaction that inserts the
-    // Run, so a CLI or Agent entry cannot skip the check a GUI performed.
+    // Revalidate the design before freezing it. Keep the MyGo extension for
+    // the source check, then strip it before strict DesignFields parsing.
     let creation_audit = run_creation_audit(&design_data, revision, &version)?;
     let design_checks = design_data
         .get("mygo")
         .and_then(|mygo| mygo.get("stepChecks"))
         .cloned()
         .unwrap_or_else(|| json!([]));
+    let step_design = json!({
+        "mygo": design_data.get("mygo").cloned().unwrap_or(Value::Null)
+    });
     if let Some(object) = design_data.as_object_mut() {
         object.remove("mygo");
     }
     let (protocol_manifest, material_manifest) =
         build_run_manifests(tx, &design_data, &project, global_protocol_version_id)?;
+    let materialization_issues = step_materialization_issues(&step_design, &protocol_manifest);
+    if !materialization_issues.is_empty() {
+        return Err(CliError::input(materialization_issues.join("; ")));
+    }
     let labware_profiles = labware_profile_snapshot(tx, &design_data)?;
     let execution_resources = execution_resource_snapshot(tx, &project, &design_data, view_id)?;
     if let Some(previous_id) = repeat_of_run_id.filter(|id| !id.is_empty()) {
@@ -2927,6 +3050,33 @@ fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> 
                     return Err(CliError::input("step needs an assay"));
                 }
             }
+            "step-execution" => match text("execution") {
+                "executable" if text("assay").is_empty() => {
+                    return Err(CliError::input("executable step needs an assay"));
+                }
+                "executable" => {}
+                "organizational" => {
+                    for field in ["assay", "timepoints", "path", "checks", "tasks", "uses"] {
+                        let Some(value) = get(field) else { continue };
+                        let present = match value {
+                            serde_yaml::Value::Null => false,
+                            serde_yaml::Value::String(value) => !value.trim().is_empty(),
+                            serde_yaml::Value::Sequence(values) => !values.is_empty(),
+                            _ => true,
+                        };
+                        if present {
+                            return Err(CliError::input(format!(
+                                "organizational step cannot declare {field}"
+                            )));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(CliError::input(
+                        "step execution must be executable or organizational",
+                    ));
+                }
+            },
             "step-uses" => {
                 let mut seen = std::collections::HashSet::new();
                 for use_item in get("uses").and_then(|value| value.as_sequence()).into_iter().flatten() {
@@ -3133,7 +3283,7 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
     // though the design step path and the block's own step paths differ.
     let reference_index: std::collections::HashMap<String, String> = modules
         .iter()
-        .filter(|module| ytext(module, "kind") == "reference")
+        .filter(|module| ytext(module, "kind") == "reference" && ytext(module, "view") == "protocol_block")
         .map(|module| (ytext(module, "id"), ytext(module, "ref")))
         .filter(|(id, target)| !id.is_empty() && !target.is_empty())
         .collect();
@@ -3290,6 +3440,7 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
 
     let mut nodes = Vec::new();
     let mut step_assays = serde_json::Map::new();
+    let mut step_execution = serde_json::Map::new();
     let mut step_tasks = Vec::new();
     let mut step_checks = Vec::new();
     let mut step_details = Vec::new();
@@ -3299,6 +3450,9 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
         let id = ytext(step, "id");
         let assay = ytext(step, "assay");
         let title = ytext(step, "title");
+        let schema = step.get("schema").and_then(|value| value.as_i64()).unwrap_or(0);
+        let execution = if schema >= 3 { ytext(step, "execution") } else { "executable".to_owned() };
+        let is_executable = execution == "executable";
         nodes.push(json!({
             "id": id,
             "kind": "flask",
@@ -3306,6 +3460,7 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
             "pos": {"X": index as f64 * 240.0, "Y": 0.0}
         }));
         step_assays.insert(id.clone(), json!(assay));
+        step_execution.insert(id.clone(), json!(execution));
         if let Some(uses) = step.get("uses").and_then(|value| value.as_sequence()) {
             if !uses.is_empty() {
                 let blocks: Vec<String> = uses
@@ -3348,11 +3503,13 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
                 step_details.push(json!({"stepId": id, "tasks": tasks}));
             }
         }
-        if timepoints.is_empty() {
-            step_tasks.push(json!({"stepId": id, "assayId": assay, "timepoint": "", "path": path}));
-        } else {
-            for timepoint in timepoints {
-                step_tasks.push(json!({"stepId": id, "assayId": assay, "timepoint": timepoint, "path": path}));
+        if is_executable {
+            if timepoints.is_empty() {
+                step_tasks.push(json!({"stepId": id, "assayId": assay, "timepoint": "", "path": path}));
+            } else {
+                for timepoint in timepoints {
+                    step_tasks.push(json!({"stepId": id, "assayId": assay, "timepoint": timepoint, "path": path}));
+                }
             }
         }
     }
@@ -3375,6 +3532,7 @@ fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, Cli
         .collect();
     let mygo = json!({
         "workflow": {"Nodes": nodes, "Edges": edges, "BusinessOrder": business_order},
+        "stepExecution": step_execution,
         "stepAssays": step_assays,
         "stepTasks": step_tasks,
         "stepChecks": step_checks,
@@ -7454,12 +7612,9 @@ pub(crate) fn assess_asterdoc(db: &Connection, input: &Value) -> Result<Value, C
                         errors.push(format!("检测 {id} 没有绑定 protocol 版本，Run 无法生成可执行任务"));
                     }
                 }
-                let mygo = design.get("mygo").cloned().unwrap_or(json!({}));
-                if mygo["workflow"]["Nodes"].as_array().map(|nodes| nodes.is_empty()).unwrap_or(true) {
-                    errors.push("还没有可执行步骤".to_owned());
-                }
-                if mygo["stepTasks"].as_array().map(|tasks| tasks.is_empty()).unwrap_or(true) {
-                    errors.push("步骤还没有绑定 assay / timepoint".to_owned());
+                match asterdoc_step_materialization_issues(db, design_id, &design) {
+                    Ok(issues) => errors.extend(issues),
+                    Err(error) => errors.push(error.message),
                 }
                 let groups = design["group_specs"].as_array().cloned().unwrap_or_default();
                 if groups.is_empty() {
@@ -10077,14 +10232,49 @@ mod tests {
 ```asterlab\nkind: group\nid: g-1\nschema: 1\nname: Control\nrole: control\n```\n\
 ```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\nendpoint: OD450\nunit: AU\ngroup_refs: [g-1]\n```\n\
 ```asterlab\nkind: reference\nid: ref-block\nschema: 1\nref: block-v1\nview: protocol_block\n```\n\
+```asterlab\nkind: reference\nid: ref-seed-block\nschema: 1\nref: block-seed\nview: protocol_block\n```\n\
 ```asterlab\nkind: sample\nid: s-1\nschema: 1\nsample_id: S1\ngroup_ref: g-1\namount: {value: 1, unit: uL}\n```\n\
 ```asterlab\nkind: step\nid: step-read\nschema: 2\ntitle: Read\nassay: assay-cck8\npath: cck8/readout\norder: 1\nuses:\n  - {ref: ref-block, role: other}\n  - {ref: s-1, role: sample}\n```\n\
 ```asterlab\nkind: step\nid: step-seed\nschema: 2\ntitle: Seed\nassay: assay-cck8\npath: cck8/seed\norder: 2\nuses:\n  - {ref: s-1, role: sample}\n```\n\
-```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [step-read, step-seed]\n```\n";
+```asterlab\nkind: step\nid: step-organize\nschema: 3\ntitle: Incubate\nexecution: organizational\norder: 3\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [step-read, step-seed, step-organize]\n```\n";
         let design = compile_asterdoc_to_design(source).unwrap();
         let blocks = &design["mygo"]["stepBlocks"];
         assert_eq!(blocks["step-read"], json!(["block-v1"]));
         assert!(blocks.get("step-seed").is_none(), "a sample reference is not a block reference: {blocks}");
+        assert_eq!(design["mygo"]["stepExecution"]["step-organize"], "organizational");
+        let task_ids: Vec<_> = design["mygo"]["stepTasks"]
+            .as_array().unwrap().iter()
+            .filter_map(|task| task["stepId"].as_str())
+            .collect();
+        assert_eq!(task_ids, ["step-read", "step-seed"]);
+        let manifest = json!([{"assay_id":"assay-cck8","block_version_ids":["block-v1"]}]);
+        let issues = step_materialization_issues(&design, manifest.as_array().unwrap());
+        assert!(issues.iter().any(|issue| issue.contains("STEP_NOT_MATERIALIZED: cck8/seed")));
+        assert!(!issues.iter().any(|issue| issue.contains("step-organize")));
+        let wrong_scope = json!([
+            {"assay_id":"assay-cck8","block_version_ids":["block-v1"]},
+            {"assay_id":"assay-other","block_version_ids":["block-seed"]}
+        ]);
+        let wrong_scope_issues = step_materialization_issues(&design, wrong_scope.as_array().unwrap());
+        assert!(wrong_scope_issues.iter().any(|issue| issue.contains("STEP_NOT_MATERIALIZED: cck8/seed")));
+        let legacy = json!({"mygo":{"stepTasks":[{"stepId":"legacy-seed","path":"cck8/seed","assayId":"assay-cck8"}]}});
+        let legacy_issues = step_materialization_issues(&legacy, &[]);
+        assert!(legacy_issues.iter().any(|issue| issue.contains("STEP_NOT_MATERIALIZED: cck8/seed")));
+
+        let bound_seed = source.replace(
+            "uses:\n  - {ref: s-1, role: sample}\n```\n```asterlab\nkind: step\nid: step-organize",
+            "uses:\n  - {ref: ref-seed-block, role: other}\n  - {ref: s-1, role: sample}\n```\n```asterlab\nkind: step\nid: step-organize",
+        );
+        let bound_design = compile_asterdoc_to_design(&bound_seed).unwrap();
+        assert_eq!(bound_design["mygo"]["stepBlocks"]["step-seed"], json!(["block-seed"]));
+        let complete_manifest = json!([{"assay_id":"assay-cck8","block_version_ids":["block-v1","block-seed"]}]);
+        assert!(step_materialization_issues(&bound_design, complete_manifest.as_array().unwrap()).is_empty());
+        let invalid_org = source.replace(
+            "execution: organizational\n",
+            "execution: organizational\npath: cck8/incubation\n",
+        );
+        assert!(validate_asterdoc_source(&invalid_org).is_err());
     }
 
     #[test]
@@ -10171,6 +10361,162 @@ groups:
         ));
     }
 
+
+    #[test]
+    fn assess_and_run_creation_reject_unmaterialized_steps() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+             INSERT INTO records VALUES('project-1','project',NULL,NULL,1,'{}','now','now');
+             INSERT INTO records VALUES('design-1','design','project-1',NULL,1,'{}','now','now');",
+        ).unwrap();
+        let source = r#"```asterlab
+kind: experiment
+id: exp-1
+schema: 1
+title: CCK-8
+```
+```asterlab
+kind: group
+id: g-1
+schema: 1
+name: Control
+role: control
+```
+```asterlab
+kind: assay
+id: assay-cck8
+schema: 1
+title: CCK-8
+endpoint: OD450
+unit: AU
+group_refs: [g-1]
+```
+```asterlab
+kind: step
+id: step-seed
+schema: 3
+title: Seed
+execution: executable
+assay: assay-cck8
+path: cck8/seed
+```
+"#;
+        save_asterdoc_version(&mut db, &json!({
+            "design_id": "design-1",
+            "source": source,
+            "expected_revision": 0
+        })).unwrap();
+
+        let assessed = assess_asterdoc(&db, &json!({"design_id": "design-1"})).unwrap();
+        assert!(assessed["errors"].as_array().unwrap().iter().any(|error|
+            error.as_str().unwrap_or("").contains("STEP_NOT_MATERIALIZED: cck8/seed")
+        ), "assessment errors = {}", assessed["errors"]);
+
+        let error = create_run_from_asterdoc(&mut db, "design-1", 1, None, None, &[])
+            .unwrap_err();
+        assert!(
+            error.message.contains("STEP_NOT_MATERIALIZED: cck8/seed"),
+            "{}",
+            error.message
+        );
+        let revision: i64 = db.query_row(
+            "SELECT revision FROM records WHERE id='design-1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        let run_count: i64 = db.query_row(
+            "SELECT COUNT(*) FROM records WHERE kind='run'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        let design_version_count: i64 = db.query_row(
+            "SELECT COUNT(*) FROM records WHERE kind='design_version'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!((revision, run_count, design_version_count), (1, 0, 0));
+    }
+
+    #[test]
+    fn step_materialization_preserves_frozen_run_protocol_block_revision() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+             INSERT INTO records VALUES('project-1','project',NULL,NULL,1,'{}','now','now');
+             INSERT INTO records VALUES('protocol-1','protocol','project-1',NULL,1,'{\"title\":\"CCK-8\"}','now','now');
+             INSERT INTO records VALUES('protocol-v1','protocol_version','project-1','protocol-1',1,'{\"protocol_id\":\"protocol-1\",\"version\":1,\"body\":\"\",\"root_block_version_id\":\"block-v1\",\"root_bindings\":[]}','now','now');
+             INSERT INTO records VALUES('block-1','protocol_block','project-1',NULL,1,'{\"title\":\"CCK-8 block\",\"summary\":\"\"}','now','now');",
+        ).unwrap();
+        let source = r#"```asterlab
+kind: experiment
+id: exp-1
+schema: 1
+title: CCK-8
+```
+```asterlab
+kind: group
+id: g-1
+schema: 1
+name: Control
+role: control
+```
+```asterlab
+kind: assay
+id: assay-cck8
+schema: 1
+title: CCK-8
+endpoint: OD450
+unit: AU
+group_refs: [g-1]
+protocol_version_id: protocol-v1
+```
+"#;
+        let mut design = compile_asterdoc_to_design(source).unwrap();
+        let design_object = design.as_object_mut().unwrap();
+        design_object.remove("mygo");
+        design_object.remove("asterlab");
+        let design_json = serde_json::to_string(&design).unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('design-1','design','project-1',NULL,1,?1,'now','now')",
+            rusqlite::params![design_json],
+        ).unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('design-v1','design_version','project-1','design-1',1,'{}','now','now')",
+            [],
+        ).unwrap();
+        let block_v1 = json!({
+            "block_id":"block-1", "version":1, "summary":"",
+            "parameter_slots":[],
+            "steps":[{"kind":"text","use_id":"seed","title":"Seed","instruction":"Seed cells"}]
+        });
+        db.execute(
+            "INSERT INTO records VALUES('block-v1','protocol_block_version','project-1','block-1',1,?1,'now','now')",
+            rusqlite::params![serde_json::to_string(&block_v1).unwrap()],
+        ).unwrap();
+
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        let run = create_run_in_transaction(
+            &tx, "design-1", "Run 1", None, None, None, None, "independent", None,
+        ).unwrap();
+        let run_id = run["id"].as_str().unwrap().to_owned();
+        tx.commit().unwrap();
+        let before = get(&db, &run_id).unwrap()["data"]["protocol_manifest"].clone();
+        assert_eq!(before[0]["protocol_version_id"], "protocol-v1");
+        assert_eq!(before[0]["block_version_ids"], json!(["block-v1"]));
+
+        let block_v2 = json!({
+            "block_id":"block-1", "version":2, "summary":"Revised",
+            "parameter_slots":[],
+            "steps":[{"kind":"text","use_id":"seed","title":"Revised seed","instruction":"Updated"}]
+        });
+        db.execute(
+            "INSERT INTO records VALUES('block-v2','protocol_block_version','project-1','block-1',2,?1,'later','later')",
+            rusqlite::params![serde_json::to_string(&block_v2).unwrap()],
+        ).unwrap();
+        let after = get(&db, &run_id).unwrap()["data"]["protocol_manifest"].clone();
+        assert_eq!(after, before);
+    }
 
     #[test]
     fn clear_wells_removes_sample_and_replicate_mappings() {

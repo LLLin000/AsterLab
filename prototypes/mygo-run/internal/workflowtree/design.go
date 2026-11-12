@@ -68,7 +68,7 @@ func BuildDesign(doc *asterdoc.FrozenAsterDoc, provider BlockProvider) (*Tree, e
 			continue
 		}
 		view, _ := module.Data["view"].(string)
-		if view != "" && view != "protocol_block" {
+		if view != "protocol_block" {
 			continue
 		}
 		if ref, _ := module.Data["ref"].(string); ref != "" {
@@ -80,6 +80,7 @@ func BuildDesign(doc *asterdoc.FrozenAsterDoc, provider BlockProvider) (*Tree, e
 		id, title, path string
 		order           int
 		blockRefs       []string
+		organizational  bool
 	}
 	var steps []designStep
 	for _, module := range parsed.Modules {
@@ -89,17 +90,24 @@ func BuildDesign(doc *asterdoc.FrozenAsterDoc, provider BlockProvider) (*Tree, e
 		title, _ := module.Data["title"].(string)
 		path, _ := module.Data["path"].(string)
 		order := intValue(module.Data["order"])
+		execution, _ := module.Data["execution"].(string)
+		organizational := module.Schema == 3 && execution == "organizational"
+		if organizational && path == "" {
+			path = module.ID
+		}
 		var blockRefs []string
-		if uses, ok := module.Data["uses"].([]any); ok {
-			for _, raw := range uses {
-				use, _ := raw.(map[string]any)
-				ref, _ := use["ref"].(string)
-				if version := referenceBlocks[ref]; version != "" {
-					blockRefs = append(blockRefs, version)
+		if !organizational {
+			if uses, ok := module.Data["uses"].([]any); ok {
+				for _, raw := range uses {
+					use, _ := raw.(map[string]any)
+					ref, _ := use["ref"].(string)
+					if version := referenceBlocks[ref]; version != "" {
+						blockRefs = append(blockRefs, version)
+					}
 				}
 			}
 		}
-		steps = append(steps, designStep{id: module.ID, title: title, path: path, order: order, blockRefs: blockRefs})
+		steps = append(steps, designStep{id: module.ID, title: title, path: path, order: order, blockRefs: blockRefs, organizational: organizational})
 	}
 	sort.SliceStable(steps, func(i, j int) bool {
 		if steps[i].order != steps[j].order {
@@ -123,10 +131,14 @@ func BuildDesign(doc *asterdoc.FrozenAsterDoc, provider BlockProvider) (*Tree, e
 		node := &Node{
 			ID: step.id, Title: step.title, Path: step.path, Kind: KindStep,
 			Order: step.order, Identity: IdentityUse, UseID: step.path,
-			Status: "", Total: 1,
+			Status: "", Total: 1, Organizational: step.organizational,
 		}
 		switch len(step.blockRefs) {
 		case 0:
+			if step.organizational {
+				node.Status = "organizational"
+				node.Total = 0
+			}
 			tree.Roots = append(tree.Roots, node)
 			continue
 		case 1:
