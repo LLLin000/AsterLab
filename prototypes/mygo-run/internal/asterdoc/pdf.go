@@ -14,6 +14,7 @@ var chineseFontCandidates = []string{
 	"C:/Windows/Fonts/simhei.ttf",
 	"C:/Windows/Fonts/simsunb.ttf",
 	"C:/Windows/Fonts/NotoSansSC-VF.ttf",
+	"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
 }
 
 // ExportPDF writes a deterministic, multi-page PDF from a frozen document's
