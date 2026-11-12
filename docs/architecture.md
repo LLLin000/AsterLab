@@ -134,7 +134,7 @@ flowchart TB
 - **Commands**：`design.create/revise`、`protocol.block.create/revise`、`run.create`、`execution_event.create`。
 - **Validation**：结构完整性、操作可行性、科学建议三层；只有前两层可阻断。
 - **Store**：`records(id, kind, parent_id, revision, data_json, created_at, updated_at)`。
-- **Read Models**：`design.map`、Protocol preview/manifest、Run workbench；只读、可重算、不落库。
+- **Read Models**：`design.map`、Protocol preview/manifest、Run workbench、Reading Facts（见 5.4）；只读、可重算、不落库。
 - **Adapters**：CLI（Agent）、HTTP（Web/外部）、Slint 直接调用（未来 shared core）。
 
 ### 4.2 版本与冻结
@@ -143,6 +143,7 @@ flowchart TB
 - Protocol/ProtocolBlock 版本不可变；修改追加新版本。
 - Run 创建时冻结设计版本、Protocol 版本、展开步骤和材料清单。
 - `execution_event` 只追加，不覆盖；偏差链接到具体步骤/样本/结果。
+- 同一孔位/指标再次录入追加新的 `measurement` 事件，事实表修订号递增；不更新旧事件（见 5.4）。
 - 旧记录没有新字段时按默认值读；不自动迁移已冻结内容。
 
 ### 4.3 共享 Core 的债务
@@ -214,6 +215,62 @@ P1-A 已新增 `crates/asterlab-core`，先共享 `design_map::CurrentDesignMap`
 - 步骤的参数、对照、判定、失败模式、读数边界仍属于同一个步骤。
 - 插入入口在 Protocol 步骤列表的“+”菜单；不弹“是否使用该仪器”，不建全局工具中心。
 - 仪器能力档案只描述能力边界，不自动填转速/波长/通道/体积。
+
+### 5.4 Reading Facts（读数/观察事实表）
+
+读数只有一个事实表，由 `crates/asterlab-core::reading_facts` 从 `RunWorkspace`
+的事件派生；它不落库、不是新的记录类型，也不允许 UI 维护第二份读数副本。
+
+事实字段（`ReadingFact`）：
+
+| 字段 | 含义 |
+|---|---|
+| `run_id` | 所属 Run；跨 Run 不合并。 |
+| `step_path` | 冻结 Protocol 中的步骤 path；空值不进入事实表。 |
+| `assay_id` / `timepoint` | 事件声明的检测和时间点；不按名称猜。 |
+| `endpoint` | 测量指标字段（如 `od450`、`cq`）。 |
+| `target` | `well { plate_id, coordinate }` 或 `unit { unit_id }`；孔位坐标只在所属孔板内唯一。 |
+| `value` | 数值；显式缺失为 `null`，不写成 `0`。 |
+| `unit` | 事件记录的原始单位；未知为 `null`，不由 schema 反推。 |
+| `status` | `raw` 或 `missing`。 |
+| `source_event_id` | 产生该事实的执行事件；事实只追加。 |
+| `revision` | 同一 key 的 1 起递增修订号；不是记录 revision。 |
+| `supersedes_event_id` | 被本次记录取代的上一事件；首个修订为 `null`。 |
+| `recorded_at` | 事件 `recorded_at`，缺失时回退 `occurred_at`。 |
+
+唯一 key 是 `step_path + assay_id + timepoint + endpoint + target`。`revision`
+按 `recorded_at`（缺失时 `occurred_at`）归一化后的时间顺序计算，不依赖调用方传入
+的事件数组顺序；同一 key 的旧修订保留在 `history` 中。
+
+统一查询是 `query_readings(workspace, ReadingQuery)`，按 step/assay/timepoint/
+endpoint/plate 过滤，返回：
+
+- `facts`：每个 key 的最新修订；
+- `history`：仅在 `include_history = true` 时包含被覆盖的修订；
+- `overwrites`：旧事件、新事件、前后修订号；
+- `issues`：不能进入事实表的数据问题。
+
+`project_table` 与 `project_plate` 只消费同一个 `ReadingQueryResult`，分别产出
+扁平表格单元格和按行列排序的孔板井位；两者返回完全相同的 cell 集合，禁止各自
+再查事件或推导数值。
+
+写入契约 `plan_reading_batch(batch, workspace)`：批次必须能唯一解析到本次 Run
+的一块孔板，否则事实表无法归属孔位、提交被拒绝；校验通过时一次批次只构造**一个**
+`measurement` 执行事件（`measurements` 存数值、`result_cells` 存含 `missing`
+的完整网格），同时报告该批次会覆盖哪些已有事实。同一 well/step/endpoint 再次
+录入时追加新事件并令 `revision` 递增；旧事件永不修改、删除或回写。查询在事后
+从事件序列重建 `overwrites`，因此覆盖历史可查。
+
+拒绝猜测的边界（`ReadingIssue.code`）：
+
+- `missing_step`、`missing_endpoint`、`missing_target`：不生成匿名 key；
+- `unresolved_plate`、`ambiguous_plate`：Run 内无法唯一确定孔板时不生成孔位事实；
+- `invalid_position`：行列超出孔板、无法转换为坐标，或写入批次位置越界；
+- `wrong_run`、`missing_plate`、`unknown_plate`、`duplicate_position`、`status_value_mismatch`：写入批次在校验层直接拒绝。
+
+兼容规则：批次事件同时带 `result_cells` 与派生 `measurements` 时，先读结构化数组
+并按 key 去重；只有两者都缺失时才读旧 `readouts`。非数值观察保留在事件正文，
+不进入数值事实表。
 
 ## 6. 读/写流程
 
