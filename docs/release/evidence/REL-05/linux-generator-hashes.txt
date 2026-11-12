@@ -1,0 +1,37 @@
+# REL-05 Linux generator hash run
+# 2026-11-12T19:27:33Z
+# go: go version go1.27.3 linux/amd64
+# python: Python 3.12.3
+# kernel: Linux 6.8.0-149-generic
+
+ok   canonical_bytes_normalises_line_endings
+ok   canonical_bytes_keeps_content_differences
+ok   volatile_findings_flags_each_source
+ok   pins_must_agree
+ok   headers_must_agree
+ok   compare_reports_every_difference
+ok   checkout_line_endings_do_not_change_the_hash
+ok   content_changes_fail_the_check
+ok   volatile_generated_content_fails_even_when_golden_matches
+ok   missing_golden_is_an_input_error
+selftest: 10/10 passed
+selftest_exit=0
+
+native-generator-hash: commit=6f4ff4149e3c362b66e1c3dcfcc3bad77ea91587
+native-generator-hash: platform=linux x86_64 python=3.12.3
+native-generator-hash: generator github.com/egoist/mygo v0.8.4-0.20261108220316-c4197b7fe562 (pinned in prototypes/mygo-run/go.mod, scripts/mygo-build.ps1, scripts/mygo-native-linux.sh)
+native-generator-hash: interface hash 006d88f0942bea95 format 2
+native-generator-hash: input sha256 f7f998e9dffef5570e36209f3bc6eb7f8f42ad423f8e4d3f724ce7f54aa4afa3
+native-generator-hash: output sha256 e4669b2540cfe36533f8b1676aec53532a184eba4ba1630b73458e2c75d109f7
+native-generator-hash:   prototypes/mygo-run/modules/runs/runs_native.go sha256 c05bab2afa9aeba527058722ecd3bd6932ee41a01002e219ad149c270fd9ea66 drift none
+native-generator-hash:   prototypes/mygo-run/modules/runs/rust/src/mygo.rs sha256 f87383cdccc56933ba67b995bf3096dd6a2c9dc499a72baae7345e2157c9b69b drift none
+native-generator-hash: OK golden scripts/ci/native_generator_hashes.json
+native-generator-hash: regen 1 output sha256 e4669b2540cfe36533f8b1676aec53532a184eba4ba1630b73458e2c75d109f7 (post-generation build: required by package `runs v0.1.0 (/srv/build/gotmp/native-generator-1-5xqjlv81/modules/runs/rust)`)
+native-generator-hash:   regen 1 prototypes/mygo-run/modules/runs/runs_native.go sha256 c05bab2afa9aeba527058722ecd3bd6932ee41a01002e219ad149c270fd9ea66
+native-generator-hash:   regen 1 prototypes/mygo-run/modules/runs/rust/src/mygo.rs sha256 f87383cdccc56933ba67b995bf3096dd6a2c9dc499a72baae7345e2157c9b69b
+native-generator-hash: regen 2 output sha256 e4669b2540cfe36533f8b1676aec53532a184eba4ba1630b73458e2c75d109f7 (post-generation build: required by package `runs v0.1.0 (/srv/build/gotmp/native-generator-2-xgzhzo7y/modules/runs/rust)`)
+native-generator-hash:   regen 2 prototypes/mygo-run/modules/runs/runs_native.go sha256 c05bab2afa9aeba527058722ecd3bd6932ee41a01002e219ad149c270fd9ea66
+native-generator-hash:   regen 2 prototypes/mygo-run/modules/runs/rust/src/mygo.rs sha256 f87383cdccc56933ba67b995bf3096dd6a2c9dc499a72baae7345e2157c9b69b
+native-generator-hash: OK 2 regeneration(s) identical, generator v0.8.4-0.20261108220316-c4197b7fe562
+native-generator-hash: wrote /tmp/rel05-linux.json
+hashcheck_exit=0

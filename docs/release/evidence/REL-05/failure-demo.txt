@@ -1,0 +1,26 @@
+# REL-05 失败路径演示
+#
+# 在临时副本里跑（不改仓库）：复制 go.mod / go.sum / modules/runs 的 5 个文件 /
+# 两个 pin 脚本 / 检查器本身，先 --update-golden 建立 golden，再制造两类漂移。
+#
+# 1) 生成产物真实改动一个标识符 → golden 不一致
+
+$ python3 scripts/ci/native_generator_hash.py --root <copy> --check
+native-generator-hash: drift output_sha256: golden e4669b2540cfe36533f8b1676aec53532a184eba4ba1630b73458e2c75d109f7 != tree 89f323def3c7e1c0a8f5400fe662cb100a4b7f4710863851d35d37684d1cdb12
+native-generator-hash: drift prototypes/mygo-run/modules/runs/runs_native.go: golden c05bab2afa9aeba527058722ecd3bd6932ee41a01002e219ad149c270fd9ea66 != tree 78fc113a040adbf5f74bda47961083f8f0c4a375b9117b4b274ca9628eb649be
+native-generator-hash: FAILED the committed generator output no longer matches scripts/ci/native_generator_hashes.json
+exit=1
+
+# 2) 生成产物里出现时间戳 → 即使重写 golden 也拒绝
+
+$ python3 scripts/ci/native_generator_hash.py --root <copy> --check
+native-generator-hash: volatile prototypes/mygo-run/modules/runs/runs_native.go: timestamp:iso-date at line 1438: '2026-11-13"'
+native-generator-hash: FAILED generated output carries values that cannot be identical on two platforms; make the generator deterministic instead of hashing around it
+exit=1
+
+# 3) 检查器自身的行为由自测覆盖（CRLF 等价、内容改动、易变内容、pin 冲突、
+#    golden 冲突、缺 golden）：
+
+$ python3 scripts/ci/test_native_generator_hash.py
+selftest: 10/10 passed
+exit=0
