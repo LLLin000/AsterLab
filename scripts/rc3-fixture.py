@@ -1,31 +1,75 @@
 """Build the RC-3 CCK-8 acceptance fixture through the typed CLI.
 
 Every executable design step is bound to an exact ProtocolBlock version, so the
-Run must materialize both steps. Outputs ids to $DATA/../rc3-ids.json.
+Run must materialize both steps. Outputs ids to $DATA/rc3-ids.json.
 
 Usage (from the repository root):
     python scripts/rc3-fixture.py
 Environment overrides:
     ASTERLAB_DATA_DIR   fixture data directory (default target/rc3-data)
     LABWORKBENCH_CLI    labworkbench binary
+
+The fixture only deletes a directory under the system temp directory, the
+repository's target directory, or CARGO_TARGET_DIR. A non-empty directory must
+contain a `.rc3-fixture` marker from a previous fixture run; otherwise the
+script refuses to delete it.
 """
-import json, os, pathlib, shutil, subprocess, sys
+import json, os, pathlib, shutil, subprocess, sys, tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA = pathlib.Path(os.environ.get("ASTERLAB_DATA_DIR", ROOT / "target" / "rc3-data"))
-CLI = os.environ.get(
-    "LABWORKBENCH_CLI",
-    str(pathlib.Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "debug" / "labworkbench"),
+FIXTURE_MARKER = ".rc3-fixture"
+
+
+def prepare_data_dir(raw: str) -> pathlib.Path:
+    path = pathlib.Path(raw).expanduser()
+    if path.is_symlink():
+        sys.exit(f"refusing ASTERLAB_DATA_DIR {path}: symlinks are not allowed")
+    resolved = path.resolve()
+    temp_root = pathlib.Path(tempfile.gettempdir()).resolve()
+    target_root = (ROOT / "target").resolve()
+    cargo_root = None
+    if os.environ.get("CARGO_TARGET_DIR"):
+        cargo_root = pathlib.Path(os.environ["CARGO_TARGET_DIR"]).expanduser().resolve()
+    allowed_roots = [temp_root, target_root] + ([cargo_root] if cargo_root else [])
+    if not any(resolved.is_relative_to(root) for root in allowed_roots):
+        sys.exit(
+            f"refusing ASTERLAB_DATA_DIR {resolved}: use a path under {temp_root}, "
+            f"{target_root}, or CARGO_TARGET_DIR"
+        )
+    forbidden = {pathlib.Path("/"), temp_root, ROOT, ROOT.parent, target_root}
+    if cargo_root:
+        forbidden.add(cargo_root)
+    if resolved in forbidden:
+        sys.exit(f"refusing ASTERLAB_DATA_DIR {resolved}: choose a fixture subdirectory")
+    if resolved.exists():
+        if not resolved.is_dir():
+            sys.exit(f"refusing ASTERLAB_DATA_DIR {resolved}: not a directory")
+        if any(resolved.iterdir()) and not (resolved / FIXTURE_MARKER).is_file():
+            sys.exit(
+                f"refusing to delete non-empty directory {resolved}: it has no "
+                f"{FIXTURE_MARKER} marker"
+            )
+        shutil.rmtree(resolved)
+    resolved.mkdir(parents=True, exist_ok=True)
+    (resolved / FIXTURE_MARKER).write_text("rc3-fixture\n", encoding="utf-8")
+    return resolved
+
+
+DATA = prepare_data_dir(os.environ.get("ASTERLAB_DATA_DIR", str(ROOT / "target" / "rc3-data")))
+CLI = pathlib.Path(
+    os.environ.get(
+        "LABWORKBENCH_CLI",
+        str(pathlib.Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "debug" / "labworkbench"),
+    )
 )
-shutil.rmtree(DATA, ignore_errors=True)
-DATA.mkdir(parents=True, exist_ok=True)
-if not os.path.exists(CLI):
+if not CLI.is_file() and pathlib.Path(str(CLI) + ".exe").is_file():
+    CLI = pathlib.Path(str(CLI) + ".exe")
+if not CLI.is_file():
     sys.exit(
         f"labworkbench not found at {CLI}; build it with "
         "`cargo build --bin labworkbench` or set LABWORKBENCH_CLI"
     )
-if not os.path.exists(CLI) and os.path.exists(CLI + ".exe"):
-    CLI += ".exe"
+CLI = str(CLI)
 
 env = dict(os.environ, LABWORKBENCH_DATA_DIR=str(DATA))
 
@@ -200,6 +244,8 @@ print("protocol tasks:", len(ws["tasks"]))
 for t in ws["tasks"]:
     print("  -", t["step_path"], "| timepoint:", t.get("timepoint"))
 
-json.dump({"data": str(DATA), "project": pid, "design": did, "revision": rev, "run": rid,
-           "protocol": protocol, "seed_block": seed, "read_block": read},
-          open(DATA.parent / "rc3-ids.json", "w"), indent=2)
+ids_path = DATA / "rc3-ids.json"
+with ids_path.open("w", encoding="utf-8") as f:
+    json.dump({"data": str(DATA), "project": pid, "design": did, "revision": rev, "run": rid,
+               "protocol": protocol, "seed_block": seed, "read_block": read}, f, indent=2)
+print("ids:", ids_path)

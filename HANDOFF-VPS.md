@@ -13,9 +13,10 @@ This is a **Windows-first desktop product**. Split the work deliberately.
 | `crates/asterlab-core`, `crates/asterlab-app` tests | **yes** | yes |
 | Module manifest / validators / parity fixture | **yes** | yes |
 | Acceptance fixture via `scripts/rc3-fixture.py` | **yes** | yes |
-| Go non-GUI packages | likely yes — verify `go build ./...` | yes |
+| Go non-GUI packages | **yes**, after `mygo native build -target host` | yes |
 | MyGo/Slint desktop app (`prototypes/mygo-run`) | **not without porting** | yes |
 | `runs.dll` native module (`mygo native check`) | builds a host-native `libRuns.so` for local Go tests; not the shipped `.dll` | yes (MSVC) |
+| `workflow.inspect_tree` | **not available on Linux alone** — it requires `ASTERLAB_APP_BIN` pointing at the Windows app | yes |
 | `mygo-automation` UI automation, `scripts/gui-e2e-v11.ps1`, screenshot scripts | **no** (Win32 + PowerShell) | yes |
 
 Windows-only by construction: `target/vsdev.cmd` (MSVC environment),
@@ -39,7 +40,7 @@ Toolchain measured on the Windows host; match or exceed on the VPS.
 ```bash
 git clone https://github.com/LLLin000/AsterLab.git
 cd AsterLab
-git checkout main          # a1a84d2
+git checkout main          # 5e20027
 ```
 
 Build/test on Linux:
@@ -78,6 +79,7 @@ Environment variables:
 | Variable | Purpose |
 |---|---|
 | `LABWORKBENCH_DATA_DIR` | SQLite data directory (one per fixture/run) |
+| `ASTERLAB_DATA_DIR` | fixture output; must be under temp, `target`, or `CARGO_TARGET_DIR`; non-empty dirs need `.rc3-fixture` |
 | `CARGO_TARGET_DIR` | build output; **set it explicitly on the VPS** |
 | `GOTMPDIR`, `TMP`, `TEMP` | Go/MSVC scratch; keep off the data volume |
 | `ASTERLAB_APP_BIN` | only for `workflow.inspect_tree` (needs the Windows app) |
@@ -85,7 +87,9 @@ Environment variables:
 
 Disk: the repo plus build caches reached ~7 GB. The Windows host ran out of
 space at 452 GB full; do not assume a small VPS volume is enough. Keep
-`CARGO_TARGET_DIR` and `GOTMPDIR` on a volume with headroom.
+`CARGO_TARGET_DIR` and `GOTMPDIR` on a volume with headroom. On a 4-core /
+8 GB VPS, set `CARGO_BUILD_JOBS=2` and `CARGO_INCREMENTAL=0` to avoid
+multiple agents exhausting RAM and disk.
 
 ## 3. Verification ladder (run in this order)
 
@@ -93,14 +97,19 @@ space at 452 GB full; do not assume a small VPS volume is enough. Keep
 2. `cargo test --manifest-path crates/asterlab-core/Cargo.toml` — 160 + 3 + 6.
 3. `cargo test --manifest-path crates/asterlab-app/Cargo.toml` — 14.
 4. `cd prototypes/mygo-run && go run github.com/egoist/mygo/cmd/mygo@v0.8.4-0.20261108220316-c4197b7fe562 native build -target host ./modules/runs && go test ./...` — all packages, using the host-native `libRuns.so`.
-5. Build the CLI, then rebuild the acceptance fixture:
+5. From the repository root, build the CLI, then rebuild the acceptance
+   fixture in a fresh temporary directory:
    ```bash
-   LABWORKBENCH_CLI=$PWD/../../target/debug/labworkbench \
-   ASTERLAB_DATA_DIR=/tmp/rc3-data python scripts/rc3-fixture.py
+   cd "$(git rev-parse --show-toplevel)"
+   RC3_DATA="$(mktemp -d)"
+   LABWORKBENCH_CLI="${CARGO_TARGET_DIR:-target}/debug/labworkbench" \
+   ASTERLAB_DATA_DIR="$RC3_DATA" \
+   python3 scripts/rc3-fixture.py
    ```
    Expect `assess: warning []` and **3** protocol tasks
    (`root/seed/seed`, `root/readout/incubate`, `root/readout/read`).
-6. CLI acceptance on the produced ids (`/tmp/rc3-ids.json`):
+   The fixture writes `$RC3_DATA/rc3-ids.json`.
+6. CLI acceptance on the produced ids (`$RC3_DATA/rc3-ids.json`):
    `run.workspace` shows the tasks; `asterdoc.assess` has no errors.
 7. SDK probe: `sdk.validate` accepts a document using `rna_reagent_usage@1` and
    rejects `target_concentration > stock_concentration`.
@@ -133,6 +142,10 @@ both themes (`docs/product/evidence/`).
   not been re-run after the six-surface change.
 - No plugin ABI, no template market, no device control. The SDK is compiled-in
   modules with a stable contract, and the docs say so.
+- `workflow.inspect_tree` still delegates to the Go desktop app through
+  `ASTERLAB_APP_BIN`. It is not a Linux-native capability, and Linux CLI
+  evidence must not be presented as full Agent CLI parity until the hierarchy
+  projection moves into Rust Core.
 - `cargo fmt` is not clean repo-wide; do not run it wholesale, it buries review
   diffs.
 
