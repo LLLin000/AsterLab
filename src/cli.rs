@@ -1,3 +1,4 @@
+use asterlab_core::assets as asset_refs;
 use asterlab_core::component_data::{
     calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
 };
@@ -9647,6 +9648,8 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                     "execution_event",
                     "formula",
                     "library_table",
+                    "asset_link",
+                    "asset_link_event",
                 ]
                 .contains(&k.as_str())
                 {
@@ -9664,6 +9667,25 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 return Err(CliError::missing("该旧版草稿类型已停用"));
             }
             Ok(json!({"record":r}))
+        }
+        "asset.link" => {
+            let i: AssetLinkCreate = parse_input(path)?;
+            let (record, event) = link_local_asset(&mut db, &i)?;
+            Ok(json!({"record":record,"event":event}))
+        }
+        "asset.unlink" => {
+            let i: AssetUnlinkInput = parse_input(path)?;
+            let (removed, event) =
+                unlink_asset_link(&mut db, &i.id, i.actor_id.as_deref().unwrap_or(""))?;
+            Ok(json!({"removed":removed,"event":event}))
+        }
+        "asset.list" => {
+            let i: AssetListInput = parse_input(path)?;
+            Ok(json!({"records":list_asset_links(&db,&i.run_id)?}))
+        }
+        "asset.events" => {
+            let i: AssetEventsInput = parse_input(path)?;
+            Ok(json!({"records":list_asset_events(&db,&i.run_id,i.action.as_deref())?}))
         }
         "import.study.apply" => {
             let i: StudyImport = parse_input(path)?;
@@ -9756,6 +9778,46 @@ fn split_well(value: &str) -> Result<(String, String), CliError> {
 fn design_payload_schema() -> Value {
     design_schema()
 }
+fn asset_link_payload_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["id","rootId","relativePath","mediaType","size","modTime","sha256","availability","link","linkedAt","actorId"],
+        "properties":{
+            "id":{"type":"string"},
+            "rootId":{"type":"string"},
+            "relativePath":{"type":"string"},
+            "mediaType":{"type":"string","enum":["image","table","document","binary","unknown"]},
+            "size":{"type":"integer","minimum":0},
+            "modTime":{"type":"string"},
+            "sha256":{"type":"string","maxLength":64},
+            "availability":{"type":"string","enum":["available","unavailable"]},
+            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]}}},
+            "linkedAt":{"type":"string"},
+            "actorId":{"type":"string"}
+        }
+    })
+}
+fn asset_link_event_payload_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["id","action","assetId","rootId","relativePath","mediaType","size","modTime","sha256","availability","link","at","actorId"],
+        "properties":{
+            "id":{"type":"string"},
+            "action":{"type":"string","enum":["linked","unlinked"]},
+            "assetId":{"type":"string"},
+            "rootId":{"type":"string"},
+            "relativePath":{"type":"string"},
+            "mediaType":{"type":"string","enum":["image","table","document","binary","unknown"]},
+            "size":{"type":"integer","minimum":0},
+            "modTime":{"type":"string"},
+            "sha256":{"type":"string","maxLength":64},
+            "availability":{"type":"string","enum":["available","unavailable"]},
+            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]}}},
+            "at":{"type":"string"},
+            "actorId":{"type":"string"}
+        }
+    })
+}
 fn record_data_schema(kind: &str) -> Value {
     match kind {
         "project" => {
@@ -9816,6 +9878,8 @@ fn record_data_schema(kind: &str) -> Value {
         "library_table" => {
             json!({"type":"object","additionalProperties":false,"required":["name","columns","rows"],"properties":{"name":{"type":"string"},"columns":{"type":"array","items":{"type":"string"}},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}}}})
         }
+        "asset_link" => asset_link_payload_schema(),
+        "asset_link_event" => asset_link_event_payload_schema(),
         _ => json!({"type":"object","additionalProperties":false}),
     }
 }
@@ -9846,6 +9910,8 @@ fn any_record_schema() -> Value {
         "execution_event",
         "formula",
         "library_table",
+        "asset_link",
+        "asset_link_event",
     ];
     json!({"oneOf":kinds.iter().map(|k|record_schema(k)).collect::<Vec<_>>()})
 }
@@ -9910,6 +9976,18 @@ fn result_schema(tool: &str) -> Value {
         }
         "record.get" => {
             json!({"type":"object","additionalProperties":false,"required":["record"],"properties":{"record":any_record_schema()}})
+        }
+        "asset.link" => {
+            json!({"type":"object","additionalProperties":false,"required":["record","event"],"properties":{"record":record_schema("asset_link"),"event":record_schema("asset_link_event")}})
+        }
+        "asset.unlink" => {
+            json!({"type":"object","additionalProperties":false,"required":["removed","event"],"properties":{"removed":record_schema("asset_link"),"event":record_schema("asset_link_event")}})
+        }
+        "asset.list" => {
+            json!({"type":"object","additionalProperties":false,"required":["records"],"properties":{"records":{"type":"array","items":asset_link_payload_schema()}}})
+        }
+        "asset.events" => {
+            json!({"type":"object","additionalProperties":false,"required":["records"],"properties":{"records":{"type":"array","items":record_schema("asset_link_event")}}})
         }
         "import.study.preview" => {
             json!({"type":"object","additionalProperties":false,"required":["valid","writes","project_count","design_count","protocol_count","warnings"],"properties":{"valid":{"const":true},"writes":{"const":false},"project_count":{"const":1},"design_count":{"type":"integer","minimum":0},"protocol_count":{"type":"integer","minimum":0},"warnings":{"type":"array","items":{"type":"string"}}}})
@@ -10087,10 +10165,22 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["id","expected_revision","name","columns","rows"],"properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":1},"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"columns":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":40},"rows":{"type":"array","maxItems":5000,"items":{"type":"array","items":{"type":"string"}}}}})
         }
         "record.list" => {
-            json!({"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["project","design","design_version","run","task","protocol","protocol_version","protocol_block","protocol_block_version","plate","well","note","execution_event","formula","library_table"]},"project_id":{"type":"string"}}})
+            json!({"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["project","design","design_version","run","task","protocol","protocol_version","protocol_block","protocol_block_version","plate","well","note","execution_event","formula","library_table","asset_link","asset_link_event"]},"project_id":{"type":"string"}}})
         }
         "record.get" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
+        }
+        "asset.link" => {
+            json!({"type":"object","additionalProperties":false,"required":["root_id","root_dir","run_id","task_key"],"anyOf":[{"required":["relative_path"]},{"required":["path"]}],"properties":{"root_id":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S","description":"逻辑根 ID；只保存它和相对路径，不保存绝对路径"},"root_dir":{"type":"string","minLength":1,"description":"本机根目录；仅用于本次读取元数据与计算 sha256，不写入记录"},"relative_path":{"type":"string","minLength":1,"description":"相对 root_dir 的文件路径；不得包含 .. 或绝对路径"},"path":{"type":"string","minLength":1,"description":"本机文件绝对路径；与 root_dir 一起用于推导 relative_path"},"run_id":{"type":"string","minLength":1},"task_key":{"type":"string","minLength":1,"maxLength":1000},"sample_id":{"type":["string","null"],"maxLength":200},"actor_id":{"type":["string","null"],"maxLength":200}}})
+        }
+        "asset.unlink" => {
+            json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1,"description":"asset_link 记录 ID"},"actor_id":{"type":["string","null"],"maxLength":200}}})
+        }
+        "asset.list" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1}}})
+        }
+        "asset.events" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"action":{"type":"string","enum":["linked","unlinked"]}}})
         }
         "import.study.preview" | "import.study.apply" => {
             json!({"type":"object","additionalProperties":false,"required":["project"],"properties":{"project":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"description":{"type":"string"}}},"designs":{"type":"array","maxItems":500,"items":design_schema()},"protocols":{"type":"array","maxItems":500,"items":{"type":"object","additionalProperties":false,"required":["title","body"],"properties":{"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"body":{"type":"string"}}}}}})
@@ -10302,6 +10392,10 @@ fn tool_specs() -> Vec<Value> {
         "table.revise",
         "record.list",
         "record.get",
+        "asset.link",
+        "asset.unlink",
+        "asset.list",
+        "asset.events",
         "import.study.preview",
         "import.study.apply",
         "calculator.dilution",
@@ -10342,6 +10436,8 @@ fn tool_writes(tool: &str) -> bool {
             | "semantic.assess_patch"
             | "record.list"
             | "record.get"
+            | "asset.list"
+            | "asset.events"
             | "import.study.preview"
             | "calculator.dilution"
             | "calculator.solution"
@@ -10410,6 +10506,10 @@ fn tool_description(tool: &str) -> &'static str {
         "table.revise" => "按 expected_revision 替换资料表名称、列和全部行。",
         "record.list" => "按允许的 kind 和项目筛选记录，不返回停用的旧草稿。",
         "record.get" => "按 id 读取一条允许的记录，不返回停用的旧草稿。",
+        "asset.link" => "关联本地文件到 Run 任务：只保存逻辑根、相对路径与实测 size/mtime/类型/sha256，不复制文件；同时追加 linked 事件。",
+        "asset.unlink" => "解除一条 asset_link 并追加 unlinked 事件；只删除引用，不删除原文件。",
+        "asset.list" => "按 Run 查询当前有效的本地文件引用；只读。",
+        "asset.events" => "按 Run 查询 linked/unlinked 事件历史；只读。",
         "import.study.preview" => "校验项目/设计/Protocol 导入结构并报告待补项，不写数据库。",
         "import.study.apply" => "在单一事务中导入项目、设计快照和 Protocol v1。",
         "calculator.dilution" => "按 C1V1=C2V2 换算储液体积并校验单位。",
@@ -10481,6 +10581,9 @@ fn tool_effects(tool: &str) -> &'static str {
         "well.set" => "新建孔位映射，或按 expected_revision 覆盖一个已有孔位。",
         "note.create" => "为运行追加一条实验记录；不修改既有记录。",
         "execution_event.create" => "为运行追加一条不可覆盖的结构化操作、材料使用、测量、偏差或观察事件。",
+        "asset.link" => "读取本地文件元数据并流式计算 sha256；创建或刷新一条 asset_link，并追加 linked 事件；不复制文件。",
+        "asset.unlink" => "删除一条 asset_link 引用并追加 unlinked 事件；不删除原文件。",
+        "asset.list" | "asset.events" => "只读；不修改数据库。",
         "formula.create" => "创建一条公式记录。",
         "formula.revise" => "按 expected_revision 更新一条公式记录并递增 revision。",
         "table.create" => "创建一张资料表。",
@@ -10496,6 +10599,272 @@ fn tool_effects(tool: &str) -> &'static str {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetLinkCreate {
+    root_id: String,
+    root_dir: String,
+    #[serde(default)]
+    relative_path: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    run_id: String,
+    task_key: String,
+    #[serde(default)]
+    sample_id: Option<String>,
+    #[serde(default)]
+    actor_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetUnlinkInput {
+    id: String,
+    #[serde(default)]
+    actor_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetListInput {
+    run_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetEventsInput {
+    run_id: String,
+    #[serde(default)]
+    action: Option<String>,
+}
+
+fn check_asset_root_id(root_id: &str) -> Result<(), CliError> {
+    if root_id.is_empty() {
+        return Err(CliError::input("root_id is required"));
+    }
+    if root_id.len() > 200 || root_id.chars().any(char::is_control) {
+        return Err(CliError::input("root_id is invalid"));
+    }
+    Ok(())
+}
+
+fn check_asset_sample_id(sample_id: &str) -> Result<(), CliError> {
+    if sample_id.len() > 200 || sample_id.chars().any(char::is_control) {
+        return Err(CliError::input("sample_id is invalid"));
+    }
+    Ok(())
+}
+
+/// Validates the Run/task association and returns the Run's project id.
+fn asset_link_scope(db: &Connection, run_id: &str, task_key: &str) -> Result<String, CliError> {
+    let (kind, project, _, _, _) =
+        kind_id(db, run_id)?.ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    if kind != "run" {
+        return Err(CliError::input("run_id must point to a run"));
+    }
+    if task_key.is_empty() || task_key.len() > 1000 || task_key.chars().any(char::is_control) {
+        return Err(CliError::input("task_key is invalid"));
+    }
+    let workspace = run_workspace(db, run_id)?;
+    let task_exists = workspace["tasks"]
+        .as_array()
+        .is_some_and(|tasks| tasks.iter().any(|task| task["task_key"].as_str() == Some(task_key)));
+    if !task_exists {
+        return Err(CliError::input("task_key does not belong to this Run"));
+    }
+    project.ok_or_else(|| CliError::internal("实验运行缺少所属项目"))
+}
+
+fn asset_link_record_id(
+    asset: &asset_refs::AssetRef,
+    run_id: &str,
+    task_key: &str,
+    sample_id: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    for part in [
+        asset.root_id.as_str(),
+        asset.relative_path.as_str(),
+        run_id,
+        task_key,
+        sample_id,
+    ] {
+        hasher.update(part.as_bytes());
+        hasher.update(b"\0");
+    }
+    let digest = hasher.finalize();
+    let mut record_id = String::from("asset-link-");
+    for byte in digest.iter().take(16) {
+        record_id.push_str(&format!("{byte:02x}"));
+    }
+    record_id
+}
+
+fn asset_link_data(
+    asset: &asset_refs::AssetRef,
+    run_id: &str,
+    task_key: &str,
+    sample_id: &str,
+    linked_at: &str,
+    actor_id: &str,
+) -> Value {
+    json!({
+        "id": asset.id,
+        "rootId": asset.root_id,
+        "relativePath": asset.relative_path,
+        "mediaType": asset.media_type,
+        "size": asset.size,
+        "modTime": asset.mod_time,
+        "sha256": asset.sha256,
+        "availability": asset.availability,
+        "link": {
+            "runId": run_id,
+            "taskKey": task_key,
+            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) }
+        },
+        "linkedAt": linked_at,
+        "actorId": actor_id
+    })
+}
+
+fn asset_link_event_data(
+    event_id: &str,
+    action: &str,
+    asset: &asset_refs::AssetRef,
+    run_id: &str,
+    task_key: &str,
+    sample_id: &str,
+    at: &str,
+    actor_id: &str,
+) -> Value {
+    json!({
+        "id": event_id,
+        "action": action,
+        "assetId": asset.id,
+        "rootId": asset.root_id,
+        "relativePath": asset.relative_path,
+        "mediaType": asset.media_type,
+        "size": asset.size,
+        "modTime": asset.mod_time,
+        "sha256": asset.sha256,
+        "availability": asset.availability,
+        "link": {
+            "runId": run_id,
+            "taskKey": task_key,
+            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) }
+        },
+        "at": at,
+        "actorId": actor_id
+    })
+}
+
+/// Writes the durable link and its append-only event in one transaction.
+fn store_asset_link(
+    db: &mut Connection,
+    asset: &asset_refs::AssetRef,
+    project: &str,
+    run_id: &str,
+    task_key: &str,
+    sample_id: &str,
+    linked_at: &str,
+    actor_id: &str,
+) -> Result<(Value, Value), CliError> {
+    let record_id = asset_link_record_id(asset, run_id, task_key, sample_id);
+    let data = asset_link_data(asset, run_id, task_key, sample_id, linked_at, actor_id);
+    let event_id = format!("asset-event-{}", Uuid::new_v4());
+    let event = asset_link_event_data(
+        &event_id, "linked", asset, run_id, task_key, sample_id, linked_at, actor_id,
+    );
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let exists: bool = tx
+        .query_row("SELECT 1 FROM records WHERE id=?1", [&record_id], |_| Ok(()))
+        .optional()
+        .map_err(|e| CliError::internal(e.to_string()))?
+        .is_some();
+    if exists {
+        tx.execute(
+            "UPDATE records SET data_json=?1, updated_at=?2 WHERE id=?3",
+            params![
+                serde_json::to_string(&data).map_err(|e| CliError::internal(e.to_string()))?,
+                stamp(),
+                record_id
+            ],
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    } else {
+        tx.execute(
+            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
+            params![
+                record_id,
+                "asset_link",
+                project,
+                run_id,
+                1i64,
+                serde_json::to_string(&data).map_err(|e| CliError::internal(e.to_string()))?,
+                stamp()
+            ],
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    }
+    tx.execute(
+        "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
+        params![
+            event_id,
+            "asset_link_event",
+            project,
+            run_id,
+            1i64,
+            serde_json::to_string(&event).map_err(|e| CliError::internal(e.to_string()))?,
+            stamp()
+        ],
+    )
+    .map_err(|e| CliError::internal(e.to_string()))?;
+    tx.commit()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    Ok((get(db, &record_id)?, get(db, &event_id)?))
+}
+
+/// `asset.link`: computes the file's observed metadata and SHA-256, then stores
+/// only the logical root, relative path and metadata. The file itself is never
+/// copied; `root_dir` is used for this call only and is not persisted.
+fn link_local_asset(
+    db: &mut Connection,
+    request: &AssetLinkCreate,
+) -> Result<(Value, Value), CliError> {
+    let root_id = request.root_id.trim();
+    check_asset_root_id(root_id)?;
+    let run_id = request.run_id.trim();
+    let task_key = request.task_key.trim();
+    let sample_id = request.sample_id.as_deref().unwrap_or("").trim();
+    check_asset_sample_id(sample_id)?;
+    let actor_id = request.actor_id.as_deref().unwrap_or("").trim();
+    if actor_id.len() > 200 || actor_id.chars().any(char::is_control) {
+        return Err(CliError::input("actor_id is invalid"));
+    }
+    let root_dir = request.root_dir.trim();
+    if root_dir.is_empty() {
+        return Err(CliError::input("root_dir is required"));
+    }
+    // Validate the Run/task before reading a potentially large file.
+    let project = asset_link_scope(db, run_id, task_key)?;
+    let asset = asset_refs::link(
+        root_id,
+        Path::new(root_dir),
+        request.path.as_deref(),
+        request.relative_path.as_deref(),
+    )
+    .map_err(|error| CliError::input(error.to_string()))?;
+    store_asset_link(
+        db, &asset, &project, run_id, task_key, sample_id,
+        &stamp(), actor_id,
+    )
+}
+
+/// Legacy `save_asset_link` input used by the Run UI module: the caller has
+/// already observed the metadata. The stored link and a `linked` event are
+/// written together.
 pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
     let asset = input
         .get("asset")
@@ -10506,51 +10875,14 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         .unwrap_or("")
         .trim()
         .to_owned();
-    if root_id.is_empty() {
-        return Err(CliError::input("rootId is required"));
-    }
-    if root_id.len() > 200 || root_id.chars().any(char::is_control) {
-        return Err(CliError::input("rootId is invalid"));
-    }
-    let relative_path_raw = asset
-        .get("relativePath")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_owned();
-    if relative_path_raw.is_empty() {
-        return Err(CliError::input("relativePath is required"));
-    }
-    let normalized_path = relative_path_raw.replace('\\', "/");
-    let path = std::path::Path::new(&normalized_path);
-    if path.is_absolute() {
-        return Err(CliError::input("relativePath must not be absolute"));
-    }
-    let mut parts = Vec::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::Normal(part) => {
-                let part = part.to_str().ok_or_else(|| CliError::input("relativePath is invalid"))?;
-                if part.is_empty() || part.contains('\0') {
-                    return Err(CliError::input("relativePath is invalid"));
-                }
-                parts.push(part.to_owned());
-            }
-            std::path::Component::CurDir => {
-                return Err(CliError::input("relativePath must be normalized"));
-            }
-            std::path::Component::ParentDir => {
-                return Err(CliError::input("relativePath must not escape its root"));
-            }
-            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
-                return Err(CliError::input("relativePath must not be absolute"));
-            }
-        }
-    }
-    if parts.is_empty() {
-        return Err(CliError::input("relativePath is required"));
-    }
-    let relative_path = parts.join("/");
+    check_asset_root_id(&root_id)?;
+    let relative_path = asset_refs::normalize_relative_path(
+        asset
+            .get("relativePath")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    )
+    .map_err(|error| CliError::input(error.to_string()))?;
 
     let link = asset
         .get("link")
@@ -10570,60 +10902,22 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         .unwrap_or("")
         .trim()
         .to_owned();
-    if task_key.is_empty() || task_key.len() > 1000 || task_key.chars().any(char::is_control) {
-        return Err(CliError::input("taskKey is invalid"));
-    }
     let sample_id = link
         .get("sampleId")
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim()
         .to_owned();
-    if sample_id.len() > 200 || sample_id.chars().any(char::is_control) {
-        return Err(CliError::input("sampleId is invalid"));
-    }
+    check_asset_sample_id(&sample_id)?;
+    let project = asset_link_scope(db, &run_id, &task_key)?;
 
-    let (kind, project, _, _, _) = kind_id(db, &run_id)?
-        .ok_or_else(|| CliError::missing("实验运行不存在"))?;
-    if kind != "run" {
-        return Err(CliError::input("parent_id must point to a run"));
-    }
-    let workspace = run_workspace(db, &run_id)?;
-    let task_exists = workspace["tasks"]
-        .as_array()
-        .is_some_and(|tasks| tasks.iter().any(|task| task["task_key"].as_str() == Some(&task_key)));
-    if !task_exists {
-        return Err(CliError::input("taskKey does not belong to this Run"));
-    }
-
-    let mut hasher = Sha256::new();
-    hasher.update(root_id.as_bytes());
-    hasher.update(b"\0");
-    hasher.update(relative_path.as_bytes());
-    let digest = hasher.finalize();
-    let mut id = String::from("asset-");
-    for byte in digest.iter().take(16) {
-        id.push_str(&format!("{:02x}", byte));
-    }
-    let mut link_hasher = Sha256::new();
-    for part in [&root_id, &relative_path, &run_id, &task_key, &sample_id] {
-        link_hasher.update(part.as_bytes());
-        link_hasher.update(b"\0");
-    }
-    let link_digest = link_hasher.finalize();
-    let mut record_id = String::from("asset-link-");
-    for byte in link_digest.iter().take(16) {
-        record_id.push_str(&format!("{:02x}", byte));
-    }
-
-    let media_type = asset
-        .get("mediaType")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown")
-        .to_owned();
-    if !matches!(media_type.as_str(), "image" | "table" | "document" | "binary" | "unknown") {
-        return Err(CliError::input("mediaType is invalid"));
-    }
+    let media_type: asset_refs::MediaType = serde_json::from_value(json!(
+        asset
+            .get("mediaType")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+    ))
+    .map_err(|_| CliError::input("mediaType is invalid"))?;
     let size = asset.get("size").and_then(Value::as_i64).unwrap_or(0);
     if size < 0 {
         return Err(CliError::input("size must not be negative"));
@@ -10638,17 +10932,18 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    if !sha256.is_empty() && (sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit())) {
+    if !sha256.is_empty()
+        && (sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()))
+    {
         return Err(CliError::input("sha256 must be 64 hexadecimal characters"));
     }
-    let availability = asset
-        .get("availability")
-        .and_then(Value::as_str)
-        .unwrap_or("available")
-        .to_owned();
-    if !matches!(availability.as_str(), "available" | "unavailable") {
-        return Err(CliError::input("availability is invalid"));
-    }
+    let availability: asset_refs::Availability = serde_json::from_value(json!(
+        asset
+            .get("availability")
+            .and_then(Value::as_str)
+            .unwrap_or("available")
+    ))
+    .map_err(|_| CliError::input("availability is invalid"))?;
     let linked_at = asset
         .get("linkedAt")
         .and_then(Value::as_str)
@@ -10661,58 +10956,30 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         .unwrap_or("")
         .to_owned();
 
-    let data = json!({
-        "id": id,
-        "rootId": root_id,
-        "relativePath": relative_path,
-        "mediaType": media_type,
-        "size": size,
-        "modTime": mod_time,
-        "sha256": sha256,
-        "availability": availability,
-        "link": {
-            "runId": run_id,
-            "taskKey": task_key,
-            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id) }
-        },
-        "linkedAt": linked_at,
-        "actorId": actor_id
-    });
-
-    let tx = db
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|e| CliError::internal(e.to_string()))?;
-    let exists: bool = tx
-        .query_row("SELECT 1 FROM records WHERE id=?1", [&record_id], |_| Ok(()))
-        .optional()
-        .map_err(|e| CliError::internal(e.to_string()))?
-        .is_some();
-    if exists {
-        tx.execute(
-            "UPDATE records SET data_json=?1, updated_at=?2 WHERE id=?3",
-            params![serde_json::to_string(&data).map_err(|e| CliError::internal(e.to_string()))?, stamp(), record_id],
-        )
-        .map_err(|e| CliError::internal(e.to_string()))?;
-    } else {
-        tx.execute(
-            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
-            params![record_id, "asset_link", project, run_id, 1i64, serde_json::to_string(&data).map_err(|e| CliError::internal(e.to_string()))?, stamp()],
-        )
-        .map_err(|e| CliError::internal(e.to_string()))?;
-    }
-    tx.commit()
-        .map_err(|e| CliError::internal(e.to_string()))?;
-    Ok(data)
+    let reference = asset_refs::AssetRef {
+        id: asset_refs::stable_id(&root_id, &relative_path),
+        root_id,
+        relative_path,
+        media_type,
+        size: size as u64,
+        mod_time,
+        sha256,
+        availability,
+    };
+    let (record, _) = store_asset_link(
+        db, &reference, &project, &run_id, &task_key, &sample_id, &linked_at, &actor_id,
+    )?;
+    Ok(record["data"].clone())
 }
 
 pub(crate) fn list_asset_links(db: &Connection, run_id: &str) -> Result<Value, CliError> {
-    let (kind, _, _, _, _) = kind_id(db, run_id)?
-        .ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    let (kind, _, _, _, _) =
+        kind_id(db, run_id)?.ok_or_else(|| CliError::missing("实验运行不存在"))?;
     if kind != "run" {
         return Err(CliError::input("run_id must point to a run"));
     }
     let mut stmt = db
-        .prepare("SELECT data_json FROM records WHERE kind='asset_link' AND parent_id=?1 ORDER BY created_at ASC")
+        .prepare("SELECT data_json FROM records WHERE kind='asset_link' AND parent_id=?1 ORDER BY created_at ASC, rowid ASC")
         .map_err(|e| CliError::internal(e.to_string()))?;
     let rows = stmt
         .query_map([run_id], |row| row.get::<_, String>(0))
@@ -10722,6 +10989,117 @@ pub(crate) fn list_asset_links(db: &Connection, run_id: &str) -> Result<Value, C
         if let Ok(v) = serde_json::from_str::<Value>(&row) {
             out.push(v);
         }
+    }
+    Ok(Value::Array(out))
+}
+
+/// Removes only the reference; the referenced file is never touched.
+pub(crate) fn unlink_asset_link(
+    db: &mut Connection,
+    id: &str,
+    actor_id: &str,
+) -> Result<(Value, Value), CliError> {
+    if actor_id.len() > 200 || actor_id.chars().any(char::is_control) {
+        return Err(CliError::input("actor_id is invalid"));
+    }
+    let record = get(db, id)?;
+    if record["kind"] != "asset_link" {
+        return Err(CliError::input("id must point to an asset_link"));
+    }
+    let data = record["data"].clone();
+    let run_id = record["parent_id"]
+        .as_str()
+        .ok_or_else(|| CliError::internal("asset_link 缺少所属 Run"))?;
+    if !has_kind(db, run_id, "run")? {
+        return Err(CliError::internal("asset_link 所属 Run 不存在"));
+    }
+    let project = record["project_id"].as_str().unwrap_or("");
+    let at = stamp();
+    let actor_id = if actor_id.is_empty() {
+        data["actorId"].as_str().unwrap_or("")
+    } else {
+        actor_id
+    };
+    let event_id = format!("asset-event-{}", Uuid::new_v4());
+    let event = json!({
+        "id": event_id,
+        "action": "unlinked",
+        "assetId": data["id"],
+        "rootId": data["rootId"],
+        "relativePath": data["relativePath"],
+        "mediaType": data["mediaType"],
+        "size": data["size"],
+        "modTime": data["modTime"],
+        "sha256": data["sha256"],
+        "availability": data["availability"],
+        "link": data["link"],
+        "at": at,
+        "actorId": actor_id
+    });
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    tx.execute("DELETE FROM records WHERE id=?1", [id])
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    tx.execute(
+        "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
+        params![
+            event_id,
+            "asset_link_event",
+            project,
+            run_id,
+            1i64,
+            serde_json::to_string(&event).map_err(|e| CliError::internal(e.to_string()))?,
+            at
+        ],
+    )
+    .map_err(|e| CliError::internal(e.to_string()))?;
+    tx.commit()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    Ok((record, get(db, &event_id)?))
+}
+
+pub(crate) fn list_asset_events(
+    db: &Connection,
+    run_id: &str,
+    action: Option<&str>,
+) -> Result<Value, CliError> {
+    if let Some(action) = action {
+        if !matches!(action, "linked" | "unlinked") {
+            return Err(CliError::input("action must be linked or unlinked"));
+        }
+    }
+    let (kind, _, _, _, _) =
+        kind_id(db, run_id)?.ok_or_else(|| CliError::missing("实验运行不存在"))?;
+    if kind != "run" {
+        return Err(CliError::input("run_id must point to a run"));
+    }
+    let mut stmt = db
+        .prepare("SELECT id,kind,project_id,parent_id,revision,data_json,created_at,updated_at FROM records WHERE kind='asset_link_event' AND parent_id=?1 ORDER BY created_at ASC, rowid ASC")
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let rows = stmt
+        .query_map([run_id], |row| {
+            let raw: String = row.get(5)?;
+            let data: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "kind": row.get::<_, String>(1)?,
+                "project_id": row.get::<_, Option<String>>(2)?,
+                "parent_id": row.get::<_, Option<String>>(3)?,
+                "revision": row.get::<_, i64>(4)?,
+                "data": data,
+                "created_at": row.get::<_, String>(6)?,
+                "updated_at": row.get::<_, String>(7)?
+            }))
+        })
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let record = row.map_err(|e| CliError::internal(e.to_string()))?;
+        if action.is_some_and(|action| record["data"]["action"] != action) {
+            continue;
+        }
+        out.push(record);
     }
     Ok(Value::Array(out))
 }
@@ -11241,5 +11619,224 @@ protocol_version_id: protocol-v1
             let actual = validate_asterdoc_source(source).is_ok();
             assert_eq!(actual, expected, "sample {} mismatch", sample["name"]);
         }
+    }
+
+    fn seed_asset_run(db: &Connection) -> String {
+        db.execute(
+            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('project-1','project',NULL,NULL,1,?1,'now','now')",
+            [json!({"name":"p","description":""}).to_string()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('design-1','design','project-1',NULL,1,?1,'now','now')",
+            [json!({"title":"d"}).to_string()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('version-1','design_version','project-1','design-1',1,?1,'now','now')",
+            [json!({"design_id":"design-1","design_revision":1,"snapshot":{"title":"d"}}).to_string()],
+        )
+        .unwrap();
+        let step = json!({
+            "path":"s/1","use_id":"u1","title":"T","instruction":"I",
+            "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b1"
+        });
+        db.execute(
+            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('run-1','run','project-1','design-1',1,?1,'now','now')",
+            [json!({
+                "title":"r","design_version_id":"version-1","design_revision":1,
+                "status":"in_progress",
+                "protocol_manifest":[{"assay_id":"assay-1","assay_title":"A","steps":[step]}]
+            })
+            .to_string()],
+        )
+        .unwrap();
+        run_workspace(db, "run-1").unwrap()["tasks"][0]["task_key"]
+            .as_str()
+            .expect("task key")
+            .to_owned()
+    }
+
+    fn dir_size(path: &Path) -> u64 {
+        fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            dir_size(&path)
+                        } else {
+                            fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0)
+                        }
+                    })
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
+
+    fn contains_file_named(path: &Path, name: &str) -> bool {
+        fs::read_dir(path)
+            .map(|entries| {
+                entries.flatten().any(|entry| {
+                    let path = entry.path();
+                    path.file_name().and_then(|value| value.to_str()) == Some(name)
+                        || (path.is_dir() && contains_file_named(&path, name))
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn asset_link_hashes_a_large_file_without_copying_it() {
+        use std::io::Write;
+
+        let data_dir = std::env::temp_dir().join(format!("asterlab-asset-db-{}", Uuid::new_v4()));
+        let root_dir = std::env::temp_dir().join(format!("asterlab-asset-root-{}", Uuid::new_v4()));
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::create_dir_all(root_dir.join("d1")).unwrap();
+        let mut db = open_db(&data_dir).unwrap();
+        let task_key = seed_asset_run(&db);
+
+        let source = root_dir.join("d1").join("large.tif");
+        let chunk = vec![0xABu8; 1024 * 1024];
+        {
+            let mut file = fs::File::create(&source).unwrap();
+            for _ in 0..8 {
+                file.write_all(&chunk).unwrap();
+            }
+        }
+        let mut hasher = Sha256::new();
+        for _ in 0..8 {
+            hasher.update(&chunk);
+        }
+        let expected_hash: String = hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+
+        let before = dir_size(&data_dir);
+        let request = AssetLinkCreate {
+            root_id: "project-data".into(),
+            root_dir: root_dir.display().to_string(),
+            relative_path: Some("d1/large.tif".into()),
+            path: None,
+            run_id: "run-1".into(),
+            task_key: task_key.clone(),
+            sample_id: Some("sample-1".into()),
+            actor_id: Some("tester".into()),
+        };
+        let (record, event) = link_local_asset(&mut db, &request).unwrap();
+        let after = dir_size(&data_dir);
+        assert!(
+            after.saturating_sub(before) < 1024 * 1024,
+            "linking copied the file into the data dir: {before} -> {after}"
+        );
+        assert!(
+            !contains_file_named(&data_dir, "large.tif"),
+            "the source file must not be copied into the data directory"
+        );
+        assert_eq!(fs::metadata(&source).unwrap().len(), 8 * 1024 * 1024);
+
+        let data = &record["data"];
+        assert_eq!(data["size"], 8 * 1024 * 1024);
+        assert_eq!(data["sha256"], expected_hash);
+        assert_eq!(data["mediaType"], "image");
+        assert_eq!(data["relativePath"], "d1/large.tif");
+        assert_eq!(data["rootId"], "project-data");
+        assert_eq!(data["link"]["sampleId"], "sample-1");
+        assert!(
+            !data.to_string().contains(&root_dir.display().to_string()),
+            "absolute root path must not be persisted: {data}"
+        );
+        assert_eq!(event["data"]["action"], "linked");
+        assert_eq!(event["data"]["sha256"], expected_hash);
+
+        let links = list_asset_links(&db, "run-1").unwrap();
+        assert_eq!(links.as_array().unwrap().len(), 1);
+        assert_eq!(links[0]["sha256"], expected_hash);
+        let events = list_asset_events(&db, "run-1", None).unwrap();
+        assert_eq!(events.as_array().unwrap().len(), 1);
+        assert_eq!(events[0]["data"]["action"], "linked");
+        assert_eq!(events[0]["data"]["assetId"], data["id"]);
+
+        // Relinking the same file refreshes the same reference and appends
+        // another event instead of creating a second asset or copying bytes.
+        let (again, _) = link_local_asset(&mut db, &request).unwrap();
+        assert_eq!(again["id"], record["id"]);
+        assert_eq!(again["data"]["id"], data["id"]);
+        assert_eq!(
+            list_asset_events(&db, "run-1", Some("linked"))
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let (removed, unlink_event) =
+            unlink_asset_link(&mut db, record["id"].as_str().unwrap(), "tester").unwrap();
+        assert_eq!(removed["data"]["sha256"], expected_hash);
+        assert_eq!(unlink_event["data"]["action"], "unlinked");
+        assert_eq!(list_asset_links(&db, "run-1").unwrap(), json!([]));
+        let events = list_asset_events(&db, "run-1", None).unwrap();
+        let actions: Vec<&str> = events
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["data"]["action"].as_str().unwrap())
+            .collect();
+        assert_eq!(actions, ["linked", "linked", "unlinked"]);
+        assert_eq!(fs::metadata(&source).unwrap().len(), 8 * 1024 * 1024);
+
+        drop(db);
+        fs::remove_dir_all(&data_dir).unwrap();
+        fs::remove_dir_all(&root_dir).unwrap();
+    }
+
+    #[test]
+    fn asset_link_rejects_paths_outside_the_root_without_writing() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);").unwrap();
+        let task_key = seed_asset_run(&db);
+        let root_dir = std::env::temp_dir().join(format!("asterlab-asset-root-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root_dir).unwrap();
+        let outside = root_dir
+            .parent()
+            .unwrap()
+            .join(format!("asterlab-asset-outside-{}.txt", Uuid::new_v4()));
+        fs::write(&outside, b"secret").unwrap();
+
+        let request = |relative_path: Option<&str>, path: Option<&str>, task: &str| AssetLinkCreate {
+            root_id: "project-data".into(),
+            root_dir: root_dir.display().to_string(),
+            relative_path: relative_path.map(str::to_owned),
+            path: path.map(str::to_owned),
+            run_id: "run-1".into(),
+            task_key: task.to_owned(),
+            sample_id: None,
+            actor_id: None,
+        };
+        let error = link_local_asset(
+            &mut db,
+            &request(None, Some(outside.to_str().unwrap()), &task_key),
+        )
+        .unwrap_err();
+        assert!(error.message.contains("outside its root"), "{error:?}");
+        let error = link_local_asset(&mut db, &request(Some("../secret.txt"), None, &task_key))
+            .unwrap_err();
+        assert!(error.message.contains("escape"), "{error:?}");
+        let error = link_local_asset(
+            &mut db,
+            &request(Some("missing.txt"), None, "not-a-task"),
+        )
+        .unwrap_err();
+        assert!(error.message.contains("does not belong"), "{error:?}");
+        assert_eq!(list_asset_links(&db, "run-1").unwrap(), json!([]));
+        assert_eq!(list_asset_events(&db, "run-1", None).unwrap(), json!([]));
+
+        fs::remove_dir_all(&root_dir).unwrap();
+        fs::remove_file(&outside).unwrap();
     }
 }
