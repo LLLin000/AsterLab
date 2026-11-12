@@ -50,8 +50,8 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 ### 状态语义
 
 - `Inbox` / `Todo`：待人工准入，不会被 agent 自动领取。
-- `Ready`：范围和依赖已确认，等待进入执行。当前没有自动 pull，需人工移到 `Agent`。
-- `Agent`：进入即自动启动 agent；一轮正常结束会自动进入 `Review`。
+- `Ready`：范围和依赖已确认，是 `Agent` 的 feeder。`Agent` 有空位时会把 `Ready` 的卡自动拉入并启动；不要把未准备好或被阻塞的卡移到 `Ready`。
+- `Agent`：进入即自动启动 agent；WIP=2，最多两个 agent 并行。一轮正常结束会自动进入 `Review`。
 - `Review`：人工审查 diff/PR；在这里给 agent 发消息会把任务送回 `Agent` 返工。
 - `Verify`：在目标机器上按卡片验收层级重跑并贴原始输出。
 - `Done`：只由人工确认后进入；agent 不得自行把卡移到 `Done`。
