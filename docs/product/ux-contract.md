@@ -40,6 +40,33 @@ Write boundaries (no exceptions):
 - Plan structure and module values are written only from Design.
 - Protocol and the Run history are read-only.
 
+### 1.1 Protocol: frozen vs preview
+
+Protocol renders two different objects and must never conflate them:
+
+- **已冻结** — a Run exists; the text is the exact frozen AsterDoc revision. Show
+  the Run id and the frozen revision.
+- **预览** — no Run yet; the text is a read-only projection of an explicit
+  Design revision. Show the design revision and the word `预览`, never `冻结`.
+
+A preview must not be exportable as a frozen record, and a frozen document must
+not silently follow later design edits.
+
+### 1.2 Notebook: prose may cite facts, never create them
+
+Notebook writes interpretation. It may reference existing Run events, files,
+measurement ids and sample ids, and those references must resolve to the
+authoritative record. It must not provide any control that creates a
+measurement, completes a step, or attaches an execution file. A note that cites
+a fact is a citation, not a second copy of the fact.
+
+### 1.3 Tools → Run: drafts, not facts
+
+"Send to current Run task" sends a structured draft or suggestion. The Run
+surface shows it as unconfirmed; nothing is written until the operator confirms
+it there, and the write goes through the same Core command as manual entry.
+Tools never writes execution facts directly.
+
 ## 2. Enforceable UX principles
 
 Each principle has a test that fails the change, not a slogan.
