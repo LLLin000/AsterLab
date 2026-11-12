@@ -23,7 +23,7 @@ func TestNotebookPageLoadsLatestMarkdown(t *testing.T) {
 		notebookPage(c, a)
 	}, 1200, 760)
 	tt.Frame()
-	if !tt.HasText("Notebook") || !tt.HasText("实时") || !tt.HasText("编辑") || !tt.HasText("阅读") || !tt.HasText("时间线") {
+	if !tt.HasText("Notebook") || !tt.HasText("实时") || !tt.HasText("编辑") || !tt.HasText("阅读") || !tt.HasText("文档") {
 		t.Fatalf("notebook page is missing its toolbar or modes: %q", tt.Texts())
 	}
 	if a.noteDoc == nil || a.noteDoc.Text().Markdown() != "# 今日观察\n\n- 细胞贴壁良好" {
@@ -47,38 +47,6 @@ func TestNotebookPageLoadsLatestMarkdown(t *testing.T) {
 		t.Fatalf("loaded draft = %q dirty=%v", a.noteDraft, a.noteDirty)
 	}
 }
-
-func TestNotebookTimelineReadsAuthoritativeEvents(t *testing.T) {
-	a := &app{snap: runs.RunSnapshot{
-		RunID: "run-1", Title: "CCK-8",
-		Events: []runs.RunEvent{
-			{ID: "check-1", EventType: "operation", Content: "核对执行检查项", TaskKey: "task-1", RecordedAt: "2026-11-10T10:00:00Z", Checks: []runs.CheckAck{{CheckID: "plate", Status: "passed"}}},
-			{ID: "batch-1", EventType: "measurement", Content: "Structured readout batch", BatchID: "batch-1", TaskKey: "task-1", RecordedAt: "2026-11-10T10:01:00Z", ResultCells: []runs.ResultCell{{Row: 0, Column: 0, SampleID: "Control-1", Value: ptrFloat(0.82)}}},
-		},
-	}}
-	tt := ui.NewTester(func(c *ui.Context) {
-		c.SetTheme(theme.LightTheme())
-		notebookPage(c, a)
-	}, 1200, 760)
-	tt.Frame()
-	if err := tt.Click("时间线"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	for _, want := range []string{"运行时间线 · 只读", "batch-1", "check-1", "打开原始孔板"} {
-		if !tt.HasText(want) {
-			t.Fatalf("timeline missing %q: %q", want, tt.Texts())
-		}
-	}
-	if err := tt.Click("打开原始孔板"); err != nil {
-		t.Fatal(err)
-	}
-	if a.batchView != "batch-1" {
-		t.Fatalf("batch drilldown = %q", a.batchView)
-	}
-}
-
-func ptrFloat(v float64) *float64 { return &v }
 
 func TestNotebookAsterDocModeRendersPlateModule(t *testing.T) {
 	source := "# D3\n\n```asterlab\nkind: group\nid: g-control\nschema: 1\nname: Control\nrole: control\n```\n\n```asterlab\nkind: plate\nid: plate-d3\nschema: 1\nformat: 96\ngroups:\n  g-control: [A1]\n```\n"

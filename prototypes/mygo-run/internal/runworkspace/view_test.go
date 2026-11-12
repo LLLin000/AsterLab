@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/modules/runs"
 )
 
 func buildTestState() *State {
@@ -31,8 +32,8 @@ func TestViewRendersRailAndPanel(t *testing.T) {
 	if !tt.HasText("执行确认") {
 		t.Fatal("checks layer missing")
 	}
-	if !tt.HasText("操作历史") {
-		t.Fatal("history layer missing")
+	if !tt.HasText("历史") {
+		t.Fatal("history tab missing")
 	}
 }
 
@@ -129,5 +130,35 @@ func TestTreeExpansionRoundTrip(t *testing.T) {
 	s.SetTreeCollapsed(map[string]bool{"step-rna-extract": false})
 	if !*open {
 		t.Fatal("expanded state not restored")
+	}
+}
+
+func TestHistoryTabListsStoredEventAndOpensBatch(t *testing.T) {
+	snap := makeSnapshot()
+	snap.Events = []runs.RunEvent{{
+		EventType: "measurement", Content: "OD recorded", OccurredAt: "2024-01-01",
+		TaskKey: "t-read", ProtocolStepPath: "root/read", BatchID: "batch-1",
+	}}
+	vm := BuildViewModel(snap, makeFrozenDoc())
+	opened := ""
+	s := NewState(vm, Callbacks{OpenBatch: func(id string) { opened = id }})
+	s.WorkspaceTab = 1
+	s.Selected = "t-read"
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1200, 760)
+	tt.Frame()
+	if !tt.HasText("OD recorded") {
+		t.Fatalf("stored event missing: %v", tt.Texts())
+	}
+	if !tt.HasText("打开原始孔板") {
+		t.Fatalf("open batch action missing: %v", tt.Texts())
+	}
+	if err := tt.Click("打开原始孔板"); err != nil {
+		t.Fatal(err)
+	}
+	if opened != "batch-1" {
+		t.Fatalf("opened batch = %q, want batch-1", opened)
 	}
 }

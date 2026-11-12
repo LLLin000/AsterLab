@@ -142,6 +142,7 @@ type LineageView struct {
 // EventViewModel is the read-only audit entry for a task.
 type EventViewModel struct {
 	ID         string
+	BatchID    string
 	Type       string
 	Content    string
 	OccurredAt string
@@ -405,6 +406,7 @@ func parseRunParameters(raw string) []PlannedParameter {
 func eventViewModel(e runs.RunEvent) EventViewModel {
 	event := EventViewModel{
 		ID: e.ID, Type: e.EventType, Content: e.Content,
+		BatchID: e.BatchID,
 		OccurredAt: e.OccurredAt, RecordedAt: e.RecordedAt,
 		TaskKey: e.TaskKey, StepPath: e.ProtocolStepPath,
 	}

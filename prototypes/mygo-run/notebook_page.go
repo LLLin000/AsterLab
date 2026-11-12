@@ -12,7 +12,6 @@ import (
 
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/protocol"
-	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
@@ -93,13 +92,38 @@ func notebookPage(c *ui.Context, a *app) {
 						a.insertPlateModule()
 					}
 				}
+				// Citation affordance: prose may reference existing Run events
+				// but never creates them (UX §1.2). Inserts plain text only.
+				cite := components.Button(c, "引用事件", components.ButtonGhost)
+				cite.Disabled(a.noteMode == 2)
+				cite.Menu(func(m *ui.Menu) {
+					shown := 0
+					for i := len(a.snap.Events) - 1; i >= 0 && shown < 8; i-- {
+						ev := a.snap.Events[i]
+						if strings.TrimSpace(ev.ID) == "" {
+							continue
+						}
+						label := ev.Content
+						if strings.TrimSpace(label) == "" {
+							label = ev.ID
+						}
+						if m.Item(label).Chosen() {
+							a.insertEventCitation(ev)
+						}
+						shown++
+					}
+					if shown == 0 {
+						m.Item("无近期事件")
+					}
+				})
+
 				ui.Spacer(c)
 				old := a.noteMode
 				parts := components.TabsWithLeading(c, &a.noteMode, components.TabsSegmented,
 					func(c *ui.Context, i int, size float32) {
-						icon := []*ui.SVG{lucide.Sparkles(), lucide.PenLine(), lucide.BookOpen(), lucide.Blocks(), lucide.ListClock()}[i]
+						icon := []*ui.SVG{lucide.Sparkles(), lucide.PenLine(), lucide.BookOpen(), lucide.Blocks()}[i]
 						components.Icon(c, icon).Size(size, size)
-					}, "实时", "编辑", "阅读", "文档", "时间线")
+					}, "实时", "编辑", "阅读", "文档")
 				if parts.List.Changed() {
 					a.applyNoteModeChange(old)
 				}
@@ -107,8 +131,8 @@ func notebookPage(c *ui.Context, a *app) {
 					ui.Box(c).Size(6, 6).Radius(3).Background(t.Warning)
 				}
 				save := components.IconButton(c, lucide.Save(), "保存笔记", components.IconButtonCompact)
-				save.Disabled(a.noteMode == 2 || a.noteMode == 4)
-				if save.Clicked() && a.noteMode != 2 && a.noteMode != 4 {
+				save.Disabled(a.noteMode == 2)
+				if save.Clicked() && a.noteMode != 2 {
 					a.saveNotebook()
 				}
 			})
@@ -128,8 +152,6 @@ func notebookPage(c *ui.Context, a *app) {
 			})
 		}
 		switch a.noteMode {
-		case 4: // frozen Run timeline, read-only
-			a.renderNotebookTimeline(c)
 		case 3: // AsterML document
 			paper(func() {
 				if a.noteAster == nil || a.noteAster.Doc == nil || a.noteAster.Doc.Source != a.noteDraft {
@@ -188,69 +210,6 @@ func notebookPage(c *ui.Context, a *app) {
 				}
 			})
 		}
-	})
-}
-
-// renderNotebookTimeline is a read-only view over the authoritative Run
-// events. It never copies events into the editable Markdown draft.
-func (a *app) renderNotebookTimeline(c *ui.Context) {
-	t := c.Theme()
-	ui.Scroll(c).Grow(1).Children(func() {
-		ui.Column(c).FillWidth().Padding(t.Space(3), t.Space(5)).Gap(t.Space(2)).
-			AlignItems(ui.Center).Children(func() {
-			if a.snap.AsterDoc != nil {
-				ui.Box(c).FillWidth().MaxWidth(980).MaxWidthPercent(100).
-					Background(t.Surface).Border(1, t.Border).Radius(t.Space(2)).
-					Padding(t.Space(4), t.Space(5)).Children(func() {
-					ui.Text(c, fmt.Sprintf("冻结 AsterDoc · Revision %d", a.snap.AsterDoc.Revision)).
-						FontSize(t.Rem(1)).Bold().TextColor(t.Text)
-					a.renderFrozenAsterDoc(c, asterdoc.ModeNotebook)
-				})
-			}
-			ui.Box(c).FillWidth().MaxWidth(980).MaxWidthPercent(100).
-				Background(t.Surface).Border(1, t.Border).Radius(t.Space(2)).
-				Padding(t.Space(4), t.Space(5)).Children(func() {
-				ui.Text(c, "运行时间线 · 只读").FontSize(t.Rem(1.15)).Bold().TextColor(t.Text)
-				ui.Text(c, "读取 Core Event Store；这里不重新保存事件事实。").
-					FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-				if len(a.snap.Events) == 0 {
-					ui.Text(c, "本次运行还没有事件。").FontSize(t.Rem(.85)).TextColor(t.TextMuted)
-					return
-				}
-				for _, event := range a.snap.Events {
-					event := event
-					ui.Column(c).FillWidth().Gap(t.Space(.5)).Padding(t.Space(2)).
-						Border(1, t.Border).Radius(t.Space(1)).Children(func() {
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-							ui.Text(c, event.EventType).FontSize(t.Rem(.78)).Bold().TextColor(t.Text)
-							ui.Text(c, event.Content).FontSize(t.Rem(.78)).TextColor(t.TextMuted)
-							ui.Spacer(c)
-							if event.BatchID != "" {
-								if components.Button(c, "打开原始孔板", components.ButtonGhost).Clicked() {
-									a.batchView = event.BatchID
-									if a.shell != nil {
-										a.shell.Page = shell.Run
-									}
-								}
-							}
-						})
-						label := func(value string) string {
-							if strings.TrimSpace(value) == "" {
-								return "未记录"
-							}
-							return value
-						}
-						ui.Text(c, fmt.Sprintf("event %s · batch %s · task %s · %s",
-							event.ID, label(event.BatchID), label(event.TaskKey), label(event.StepStatus))).
-							FontSize(t.Rem(.68)).TextColor(t.TextMuted)
-						if len(event.Checks) > 0 || len(event.ResultCells) > 0 {
-							ui.Text(c, fmt.Sprintf("checks %d · cells %d", len(event.Checks), len(event.ResultCells))).
-								FontSize(t.Rem(.68)).TextColor(t.TextMuted)
-						}
-					})
-				}
-			})
-		})
 	})
 }
 
@@ -324,6 +283,25 @@ func (a *app) noteSource() string {
 		return a.noteDoc.Text().Markdown()
 	}
 	return a.noteDraft
+}
+
+func (a *app) insertEventCitation(ev runs.RunEvent) {
+	token := fmt.Sprintf("[event %s]", ev.ID)
+	if strings.TrimSpace(ev.BatchID) != "" {
+		token = fmt.Sprintf("[batch %s]", ev.BatchID)
+	}
+	src := a.noteSource()
+	if strings.TrimSpace(src) != "" {
+		src += " " + token
+	} else {
+		src = token
+	}
+	a.noteDraft = src
+	if a.noteMode == 0 {
+		a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
+	}
+	a.noteDirty = true
+	a.noteState = ""
 }
 
 func (a *app) loadNotebook() {

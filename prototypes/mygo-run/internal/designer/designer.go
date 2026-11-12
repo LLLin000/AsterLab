@@ -123,10 +123,11 @@ type Designer struct {
 
 	OnCreateRun func(runs.RunSnapshot)
 
-	InspectorOpen     bool
-	InspectorDock     Dock
-	CreateRunWarnings []string
-	ConfirmCreateRun  bool
+	InspectorOpen         bool
+	InspectorUserToggled bool
+	InspectorDock         Dock
+	CreateRunWarnings     []string
+	ConfirmCreateRun      bool
 	PreflightAck      *PreflightAck
 	panelDrag         ui.Point
 	panelDragging     bool
@@ -758,6 +759,13 @@ func (d *Designer) setComponentRefs(nodeID, value string) {
 // step never reflows the design.
 func View(c *ui.Context, d *Designer) {
 	t := c.Theme()
+	narrow := false
+	if w, _ := c.Size(); w > 0 && w < 1100 {
+		narrow = true
+	}
+	if narrow && !d.InspectorUserToggled {
+		d.InspectorOpen = false
+	}
 
 	c.OnShortcut(ui.Cmd, ui.KeyK, func() {
 		d.CmdPaletteOpen = !d.CmdPaletteOpen
@@ -767,6 +775,7 @@ func View(c *ui.Context, d *Designer) {
 	})
 	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyI, func() {
 		d.InspectorOpen = !d.InspectorOpen
+		d.InspectorUserToggled = true
 	})
 	c.OnShortcut(ui.Cmd, ui.KeyZ, func() { d.UndoDraft() })
 	c.OnShortcut(ui.Cmd|ui.Shift, ui.KeyZ, func() { d.RedoDraft() })
@@ -774,21 +783,49 @@ func View(c *ui.Context, d *Designer) {
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		toolbar(c, d)
-		ui.Box(c).Fill().Children(func() {
-			if d.Editor != nil {
-				d.Editor.View(c)
+		if narrow {
+			ui.Box(c).Fill().Grow(1).MinHeight(300).Children(func() {
+				if d.Editor != nil {
+					d.Editor.View(c)
+				}
+			})
+			if d.InspectorOpen {
+				ui.Box(c).FillWidth().Height(320).Shrink(0).Children(func() {
+					inspectorColumn(c, d)
+				})
 			}
-		})
+		} else {
+			ui.Row(c).Fill().Grow(1).Children(func() {
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					if d.Editor != nil {
+						d.Editor.View(c)
+					}
+				})
+				if d.InspectorOpen {
+					ui.Box(c).Width(360).Shrink(0).FillHeight().Children(func() {
+						inspectorColumn(c, d)
+					})
+				}
+			})
+		}
 		statusBar(c, d)
 	})
-	if d.InspectorOpen {
-		inspectorPanel(c, d)
+	if narrow && d.InspectorOpen {
+		// bottom sheet: keep overlay for sheet feel but non-occluding of Run button (header above)
 	}
 	renderCommandPalette(c, d)
 	confirmCreateRun(c, d)
 	d.captureDraft()
 }
 
+func inspectorColumn(c *ui.Context, d *Designer) {
+	t := c.Theme()
+	ui.Column(c).Fill().Background(t.Background.Alpha(.97)).Border(1, t.Border).Children(func() {
+		panelHeader(c, d)
+		ui.Divider(c)
+		panelBody(c, d)
+	})
+}
 // inspectorPanel floats above the canvas. It restates Onevra's dialog panel:
 // the same material, doubled radius, hairline edge and soft lift, but
 // non-modal so the canvas keeps working behind it. A handle at its top center
@@ -1132,6 +1169,7 @@ func toolbar(c *ui.Context, d *Designer) {
 			divider()
 			if components.IconButton(c, lucide.PanelRight(), map[bool]string{true: "收起检查器", false: "展开检查器"}[d.InspectorOpen], components.IconButtonPlain).Clicked() {
 				d.InspectorOpen = !d.InspectorOpen
+				d.InspectorUserToggled = true
 			}
 		})
 	})

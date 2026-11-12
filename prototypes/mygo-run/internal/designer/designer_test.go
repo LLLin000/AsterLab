@@ -579,3 +579,33 @@ func TestCreateRunDialogFlow(t *testing.T) {
 		t.Fatalf("返回修改 did not cancel: confirm=%v created=%v", d.ConfirmCreateRun, svc.created)
 	}
 }
+
+func TestInspectorDockedAtWideAndSheetAtNarrow(t *testing.T) {
+	d := New("design-1", "Test Design", 1, &state.FakeDesignService{})
+	d.Editor.AddNode(workflow.KindFlask, "细胞悬液", workflow.Position{X: 80, Y: 80})
+
+	wide := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, d)
+	}, 1200, 820)
+	wide.Frame()
+	if !wide.HasText("步骤属性") {
+		t.Fatalf("inspector not docked at 1200px: %q", wide.Texts())
+	}
+
+	narrow := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, d)
+	}, 900, 600)
+	narrow.Frame()
+	if narrow.HasText("步骤属性") {
+		t.Fatalf("inspector not collapsed at 900px: %q", narrow.Texts())
+	}
+	if err := narrow.Click("展开检查器"); err != nil {
+		t.Fatal(err)
+	}
+	narrow.Frame()
+	if !narrow.HasText("步骤属性") {
+		t.Fatalf("inspector sheet did not open at 900px: %q", narrow.Texts())
+	}
+}

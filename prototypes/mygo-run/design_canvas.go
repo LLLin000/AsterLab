@@ -116,11 +116,17 @@ func (a *app) renderWorkflowCanvas(c *ui.Context) {
 		}
 		a.renderDesignCompositeActions(c, doc)
 		ui.Row(c).Grow(1).FillWidth().MinHeight(0).AlignItems(ui.Stretch).Children(func() {
-			canvasBox := ui.Box(c).Grow(1).MinWidth(0).MinHeight(0).Fill().Children(func() {
+			canvasBox := ui.Box(c).Grow(1).MinWidth(0).MinHeight(300).Fill().Children(func() {
 				a.designCanvas.View(c)
 			})
 			a.fitDesignCanvas(c, canvasBox)
-			if a.designSelected != "" && a.designInspectorOpen {
+			if narrow {
+				if a.designSelected != "" && a.designInspectorOpen {
+					ui.Box(c).FillWidth().Height(300).Shrink(0).Children(func() {
+						a.canvasInspector(c, doc)
+					})
+				}
+			} else if a.designSelected != "" && a.designInspectorOpen {
 				a.canvasInspector(c, doc)
 			}
 		})
@@ -457,7 +463,7 @@ func (a *app) canvasInspector(c *ui.Context, doc *asterdoc.Document) {
 			}
 		}
 	}
-	ui.Column(c).Width(t.Space(90)).Shrink(0).FillHeight().Padding(t.Space(3)).
+	ui.Column(c).Width(t.Space(90)).MinWidth(320).Shrink(0).FillHeight().Padding(t.Space(3)).
 		Gap(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "步骤属性").FontSize(t.Rem(.95)).Bold().TextColor(t.Text)

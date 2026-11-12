@@ -55,6 +55,12 @@ type State struct {
 	// ShowHistory toggles the third layer (operation history) for the selected task.
 	ShowHistory bool
 
+	// ShowProcedure toggles procedure metadata when rendered below the recording
+	// panel (narrow layout); defaults to collapsed.
+	ShowProcedure bool
+	// WorkspaceTab selects the task workspace (0) or the read-only history tab (1).
+	WorkspaceTab int
+
 	// railScrollKey remembers which selection was last scrolled into view.
 	railScrollKey string
 
@@ -596,20 +602,37 @@ func statusDot(c *ui.Context, status TaskStatus, t *ui.Theme, tokens theme.Token
 	ui.Box(c).Size(8, 8).Radius(4).Shrink(0).Background(color)
 }
 
-// taskWorkspace is the right column: three fixed layers.
+// taskWorkspace is the right column: task workspace and read-only history tab.
 func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	task := s.selectedTask()
 	if task == nil {
 		ui.Text(c, "选择一个步骤查看操作说明").FontSize(13).TextColor(t.TextMuted)
 		return
 	}
-	ui.Column(c).FillWidth().Gap(16).Children(func() {
-		// Layer 1: operation instructions and planned parameters (read-only).
-		procedureLayer(c, s, t, tokens, task)
-		// Layer 2: recording module (host-supplied).
-		recordingLayer(c, s, t, tokens, task)
-		// Layer 3: operation history, collapsed by default.
-		historyLayer(c, s, t, tokens, task)
+	ui.Column(c).FillWidth().Gap(12).Children(func() {
+		tab := &s.WorkspaceTab
+		components.Tabs(c, tab, components.TabsHighlight, "任务", "历史")
+		if *tab == 1 {
+			historyTab(c, s, t, tokens, task)
+			return
+		}
+		if s.shouldStack(c) {
+			recordingLayer(c, s, t, tokens, task)
+			open := s.ShowProcedure
+			components.Collapsible(c, "操作说明与元数据", &open, components.CollapsibleOptions{}, func() {
+				procedureLayer(c, s, t, tokens, task)
+			})
+			s.ShowProcedure = open
+		} else {
+			ui.Row(c).FillWidth().Gap(16).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+					procedureLayer(c, s, t, tokens, task)
+				})
+				ui.Column(c).Width(420).Shrink(0).Children(func() {
+					recordingLayer(c, s, t, tokens, task)
+				})
+			})
+		}
 	})
 }
 
@@ -981,6 +1004,43 @@ func unassociatedRecords(c *ui.Context, s *State, t *ui.Theme, tokens theme.Toke
 		for _, event := range s.VM.UnassociatedEvents {
 			ui.Text(c, fmt.Sprintf("%s · %s", eventTypeLabel(event.Type), event.Content)).
 				FontSize(t.Rem(.72)).TextColor(t.Text)
+		}
+	})
+}
+
+// historyTab is the read-only history tab: it lists VM.TaskByKey[selected].Events
+// (same source as the task events) and opens the original plate for events that
+// carry a BatchID.
+func historyTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	if len(task.Events) == 0 {
+		ui.Text(c, "尚无执行事件。").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+		return
+	}
+	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
+		for _, event := range task.Events {
+			event := event
+			ui.Column(c).FillWidth().Gap(t.Space(.5)).Padding(t.Space(1.5), t.Space(2)).
+				Radius(6).Background(tokens.Elevated).Border(1, tokens.Border).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+					ui.Text(c, eventTypeLabel(event.Type)).FontSize(t.Rem(.7)).Bold().TextColor(t.Text)
+					ui.Spacer(c)
+					when := event.RecordedAt
+					if when == "" {
+						when = event.OccurredAt
+					}
+					ui.Text(c, when).FontSize(t.Rem(.64)).TextColor(t.TextMuted)
+				})
+				ui.Text(c, event.Content).FontSize(t.Rem(.76)).TextColor(t.Text)
+				if event.BatchID != "" {
+					ui.Text(c, "Batch "+event.BatchID).FontSize(t.Rem(.64)).TextColor(t.TextMuted)
+					if s.Callbacks.OpenBatch != nil {
+						btn := components.Button(c, "打开原始孔板", components.ButtonGhost)
+						if btn.Clicked() {
+							s.Callbacks.OpenBatch(event.BatchID)
+						}
+					}
+				}
+			})
 		}
 	})
 }

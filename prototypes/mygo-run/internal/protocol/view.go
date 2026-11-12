@@ -44,7 +44,8 @@ func View(c *ui.Context, s *State) {
 				}
 			})
 			ui.Divider(c)
-			ui.Column(c).Grow(1).FillHeight().Padding(20).Gap(12).Children(func() {
+			ui.Scroll(c).Grow(1).Children(func() {
+				ui.Column(c).FillWidth().Padding(20).Gap(12).Children(func() {
 				node := s.selectedNode()
 				if node == nil {
 					ui.Text(c, "Select a step to inspect its protocol details.").FontSize(14).TextColor(t.TextMuted)
@@ -152,6 +153,7 @@ func View(c *ui.Context, s *State) {
 				ui.Text(c, fmt.Sprintf("%s · revision %d · workflow node %s", display(s.DesignID, "No linked design ID"), s.Revision, node.ID)).FontSize(13)
 				ui.Text(c, "Protocol editing and saving are not supported by Core; this view is read-only.").FontSize(12).TextColor(t.TextMuted)
 			})
+		})
 		})
 	})
 }

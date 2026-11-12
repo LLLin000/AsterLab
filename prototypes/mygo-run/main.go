@@ -118,7 +118,6 @@ type app struct {
 	canvasChecks               []canvasCheckDraft
 	canvasUses                 []canvasUseDraft
 	canvasUsePick              string
-	toolsTab                   int
 	noteDraft                  string
 	noteRunID                  string
 	noteDirty                  bool
