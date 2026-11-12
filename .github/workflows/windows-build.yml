@@ -1,0 +1,86 @@
+name: windows-build
+
+# REL-04 Windows build gate: produce the MyGo desktop artifacts (mygo-run.exe +
+# Runs.dll) and their hashes. No GUI E2E, no installers — those need the
+# Windows Gate lane and a real window (HANDOFF-VPS.md §1, §3 step 8).
+#
+# MyGo is the shipped desktop prototype: docs/engineering/cross-platform-builds.md
+# §4 maps "Desktop app" to scripts/mygo-build.ps1. apps/desktop is the retained
+# Rust/Slint research prototype (docs/architecture.md §1) and is not built here.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-build:
+    name: windows-build
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          # go 1.27.3, the pin in HANDOFF-VPS.md §2 and go.mod.
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Record toolchain versions
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED
+          rustc --version
+          cargo --version
+          git rev-parse HEAD
+
+      - name: Build MyGo app and Runs.dll
+        # Runs `mygo native check .\modules\runs`, then `go build -tags=e2e`,
+        # then writes dist/BUILD_INFO.txt with the commit and both hashes.
+        run: ./scripts/mygo-build.ps1
+
+      - name: Verify artifacts and record SHA256
+        run: |
+          $dist = Join-Path $PWD 'prototypes/mygo-run/dist'
+          if (-not (Test-Path -LiteralPath $dist)) { throw "dist directory missing: $dist" }
+          $sums = Join-Path $dist 'SHA256SUMS.txt'
+          Remove-Item -LiteralPath $sums -ErrorAction SilentlyContinue
+          foreach ($file in @('mygo-run.exe', 'Runs.dll')) {
+            $path = Join-Path $dist $file
+            if (-not (Test-Path -LiteralPath $path)) { throw "artifact missing: $path" }
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+            $size = (Get-Item -LiteralPath $path).Length
+            "{0}  {1} bytes  sha256={2}" -f $file, $size, $hash |
+              Tee-Object -FilePath $sums -Append
+          }
+          Get-Content -LiteralPath (Join-Path $dist 'BUILD_INFO.txt')
+          Get-Content -LiteralPath $sums
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-mygo-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            prototypes/mygo-run/dist/mygo-run.exe
+            prototypes/mygo-run/dist/Runs.dll
+            prototypes/mygo-run/dist/BUILD_INFO.txt
+            prototypes/mygo-run/dist/SHA256SUMS.txt
