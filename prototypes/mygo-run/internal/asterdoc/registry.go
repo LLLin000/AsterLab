@@ -287,6 +287,7 @@ func BuiltinRegistry() *Registry {
 			assaySpec(), stepSpec(), step2Spec(), step3Spec(), workflowSpec(),
 			dilutionSpec(), instrumentProfileSpec(), materialSpec(),
 			sampleSpec(), containerSpec(), measurementProfileSpec(),
+			rnaReagentSpec(),
 		}
 		for _, spec := range specs {
 			if err := builtin.Register(spec); err != nil {

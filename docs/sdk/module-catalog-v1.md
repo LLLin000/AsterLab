@@ -21,6 +21,7 @@
 | sample@1 | resource | sample, sample-tracking | (none) | generic.editor / sample.viewer / generic.run / — | sample-fields |
 | container@1 | labware | container, well-map | (none) | generic.editor / container.viewer / generic.run / — | container-fields |
 | measurement_profile@1 | measurement | measurement-profile, calculator-reference | (none) | generic.editor / measurement_profile.viewer / generic.run / — | measurement-profile-fields |
+| rna_reagent_usage@1 | measurement | quantity, deterministic-calculation, derived-output | (none) | generic.editor / rna_reagent_usage.viewer / generic.run / — | rna-reagent-fields |
 
 说明：`renderers.static` 当前未声明；静态预览走 `StaticPreview`/`StaticDocumentPreview`。
 
@@ -112,6 +113,10 @@
 ### measurement_profile@1
 - inputs: kind/id/schema string|int required；endpoint string required；unit string required；readout_schema object；calculator_refs list(string)。
 - outputs: profile_view object view。
+
+### rna_reagent_usage@1
+- inputs: kind/id/schema string|int required；sample_count int required；volume_per_sample quantity (volume) required；stock_concentration quantity (mass_concentration) required；target_concentration quantity (mass_concentration) required；extra_ratio decimal optional。
+- outputs: stock_volume quantity (volume) derived calculator rna.reagent_usage.v1；diluent_volume quantity (volume) derived calculator rna.reagent_usage.v1；total_volume quantity (volume) derived calculator rna.reagent_usage.v1。
 
 ## 3. 模块如何被设计：12 维度与落点
 

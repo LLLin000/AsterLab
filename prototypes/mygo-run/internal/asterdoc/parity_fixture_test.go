@@ -3,6 +3,7 @@ package asterdoc
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -33,5 +34,18 @@ func TestSharedParityFixture(t *testing.T) {
 				t.Fatalf("valid=%v but err=%v", sample.Valid, err)
 			}
 		})
+	}
+}
+
+// The Rust validator rejects a manifest rule it does not implement; Go must do
+// the same at startup, not on a user's document.
+func TestManifestRuleMustBeRegisteredInGo(t *testing.T) {
+	module := specModule{Descriptor: Descriptor{
+		Kind: "probe", Schema: 1, SDK: "1.0.0", Category: "workflow",
+		Rules: []string{"not-a-real-rule"},
+	}}
+	err := validateSpecModule(module, "1.0.0")
+	if err == nil || !strings.Contains(err.Error(), "unregistered rule") {
+		t.Fatalf("validateSpecModule() = %v", err)
 	}
 }

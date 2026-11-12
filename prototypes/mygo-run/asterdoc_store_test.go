@@ -15,6 +15,8 @@ const parityDilutionDoc = "```asterlab\nkind: dilution\nid: dilution-01\nschema:
 
 const parityInstrumentDoc = "```asterlab\nkind: instrument_profile\nid: instrument-reader\nschema: 1\nclass: plate_reader\nmodel: Synergy H1\ncapabilities:\n  - name: absorbance\n    wavelength: 450 nm\n  - name: fluorescence\nsource: built_in\n```\n"
 
+const parityRnaDoc = "```asterlab\nkind: rna_reagent_usage\nid: rna-01\nschema: 1\nsample_count: 10\nvolume_per_sample:\n  value: 20\n  unit: uL\nstock_concentration:\n  value: 10\n  unit: mg/mL\ntarget_concentration:\n  value: 2\n  unit: mg/mL\nextra_ratio: 0.1\n```\n"
+
 func TestAsterDocStoreIsImmutableAndConflictChecked(t *testing.T) {
 	copyFixtureDB(t)
 	ctx := context.Background()
@@ -135,6 +137,9 @@ func TestAsterDocGoRustParity(t *testing.T) {
 		{"invalid container format", "```asterlab\nkind: container\nid: c2\nschema: 1\nformat: \nwells: 96\n```\n"},
 		{"valid measurement profile", "```asterlab\nkind: measurement_profile\nid: mp1\nschema: 1\nendpoint: Ct\nunit: Ct\n```\n"},
 		{"invalid measurement profile unit", "```asterlab\nkind: measurement_profile\nid: mp2\nschema: 1\nendpoint: Ct\nunit: \n```\n"},
+		{"valid rna reagent", parityRnaDoc},
+		{"invalid rna target>stock", strings.Replace(parityRnaDoc, "value: 2\n  unit: mg/mL", "value: 20\n  unit: mg/mL", 1)},
+		{"invalid rna extra_ratio", strings.Replace(parityRnaDoc, "extra_ratio: 0.1", "extra_ratio: -0.1", 1)},
 	}
 	revision := uint64(0)
 	for index, sample := range samples {

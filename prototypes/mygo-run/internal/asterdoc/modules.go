@@ -296,6 +296,108 @@ func dilutionSpec() ModuleSpec {
 	return moduleDocumentSpec(builtinDescriptor("dilution"), specValidator("dilution"), fn)
 }
 
+// rnaReagentResult is a pure derived view. It never writes a Run fact; the
+// authored quantities remain the source of truth.
+type rnaReagentResult struct {
+	StockVolume  float64
+	DiluentVolume float64
+	TotalVolume  float64
+	Unit         string
+}
+
+func rnaReagentResultFor(data map[string]any) (rnaReagentResult, error) {
+	rawCount, ok := data["sample_count"]
+	if !ok {
+		return rnaReagentResult{}, fmt.Errorf("sample_count: missing")
+	}
+	sampleCount, ok := numericValue(rawCount)
+	if !ok {
+		return rnaReagentResult{}, fmt.Errorf("sample_count must be a number")
+	}
+	if sampleCount <= 0 {
+		return rnaReagentResult{}, fmt.Errorf("sample_count must be positive")
+	}
+	volValue, volUnit, err := quantityParts(data["volume_per_sample"])
+	if err != nil {
+		return rnaReagentResult{}, fmt.Errorf("volume_per_sample: %w", err)
+	}
+	stockValue, stockUnit, err := quantityParts(data["stock_concentration"])
+	if err != nil {
+		return rnaReagentResult{}, fmt.Errorf("stock_concentration: %w", err)
+	}
+	targetValue, targetUnit, err := quantityParts(data["target_concentration"])
+	if err != nil {
+		return rnaReagentResult{}, fmt.Errorf("target_concentration: %w", err)
+	}
+	volSpec, volOK := unitFor(volUnit)
+	stockSpec, stockOK := unitFor(stockUnit)
+	targetSpec, targetOK := unitFor(targetUnit)
+	if !volOK || !stockOK || !targetOK {
+		return rnaReagentResult{}, fmt.Errorf("rna reagent uses an unregistered unit")
+	}
+	if volSpec.Dimension != "volume" || stockSpec.Dimension != "mass_concentration" || targetSpec.Dimension != "mass_concentration" {
+		return rnaReagentResult{}, fmt.Errorf("rna reagent needs volume/concentration/concentration")
+	}
+	if volValue <= 0 || stockValue <= 0 || targetValue <= 0 {
+		return rnaReagentResult{}, fmt.Errorf("rna reagent quantities must be positive")
+	}
+	extraRatio := 0.0
+	if raw, ok := data["extra_ratio"]; ok && raw != nil {
+		n, ok := numericValue(raw)
+		if !ok {
+			return rnaReagentResult{}, fmt.Errorf("extra_ratio must be a number")
+		}
+		if n < 0 {
+			return rnaReagentResult{}, fmt.Errorf("extra_ratio must be non-negative")
+		}
+		extraRatio = n
+	}
+	stockBase := stockValue * stockSpec.Factor
+	targetBase := targetValue * targetSpec.Factor
+	if targetBase > stockBase {
+		return rnaReagentResult{}, fmt.Errorf("target concentration cannot exceed stock concentration")
+	}
+	total := sampleCount * volValue * (1 + extraRatio)
+	stockVolume := (targetBase / stockBase) * total
+	diluent := total - stockVolume
+	return rnaReagentResult{
+		StockVolume:   stockVolume,
+		DiluentVolume: diluent,
+		TotalVolume:   total,
+		Unit:          volUnit,
+	}, nil
+}
+
+func rnaReagentSpec() ModuleSpec {
+	fn := func(v *View, c *ui.Context, data map[string]any) {
+		t := c.Theme()
+		result, err := rnaReagentResultFor(data)
+		ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).Radius(t.Space(1.5)).
+			Background(t.Surface).Border(1, t.Border).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+				ui.Text(c, "RNA reagent usage").FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+				ui.Spacer(c)
+				ui.Text(c, "派生值 · 不写 Run").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+			})
+			if err != nil {
+				v.moduleError(c, err)
+				return
+			}
+			ui.Row(c).Gap(t.Space(2)).Children(func() {
+				ui.Text(c, fmt.Sprintf("母液体积 %s %s", formatNumber(result.StockVolume), result.Unit)).
+					FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
+				ui.Text(c, fmt.Sprintf("稀释液体积 %s %s", formatNumber(result.DiluentVolume), result.Unit)).
+					FontSize(t.Rem(.85)).TextColor(t.TextMuted)
+				ui.Text(c, fmt.Sprintf("总体积 %s %s", formatNumber(result.TotalVolume), result.Unit)).
+					FontSize(t.Rem(.85)).TextColor(t.TextMuted)
+			})
+			ui.Text(c, "rna.reagent_usage.v1 · 输入未修改；实际配制以 Run 记录为准").
+				FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+		})
+	}
+	return moduleDocumentSpec(builtinDescriptor("rna_reagent_usage"), specValidator("rna_reagent_usage"), fn)
+}
+
 func instrumentProfileSpec() ModuleSpec {
 	return moduleDocumentSpec(builtinDescriptor("instrument_profile"), specValidator("instrument_profile"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()

@@ -2581,6 +2581,7 @@ const ASTERDOC_RULES: &[&str] = &[
     "sample-fields",
     "container-fields",
     "measurement-profile-fields",
+    "rna-reagent-fields",
 ];
 
 fn validate_asterdoc_spec(spec: &Value) -> Result<(), String> {
@@ -3197,6 +3198,38 @@ fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> 
                 }
                 if text("unit").is_empty() {
                     return Err(CliError::input("measurement profile needs a unit"));
+                }
+            }
+            "rna-reagent-fields" => {
+                let sample_count = get("sample_count")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| CliError::input("rna reagent needs sample_count"))?;
+                if sample_count <= 0 {
+                    return Err(CliError::input("rna reagent sample_count must be positive"));
+                }
+                let (vol_value, vol_unit, vol_dim, _vol_factor) = asterdoc_quantity_parts(get("volume_per_sample").ok_or_else(|| CliError::input("rna reagent needs volume_per_sample"))?)?;
+                let (stock_value, stock_unit, stock_dim, stock_factor) = asterdoc_quantity_parts(get("stock_concentration").ok_or_else(|| CliError::input("rna reagent needs stock_concentration"))?)?;
+                let (target_value, target_unit, target_dim, target_factor) = asterdoc_quantity_parts(get("target_concentration").ok_or_else(|| CliError::input("rna reagent needs target_concentration"))?)?;
+                if vol_dim != "volume" || stock_dim != "mass_concentration" || target_dim != "mass_concentration" {
+                    return Err(CliError::input("rna reagent needs volume/concentration/concentration"));
+                }
+                let _ = (vol_unit, stock_unit, target_unit);
+                if vol_value <= 0.0 || stock_value <= 0.0 || target_value <= 0.0 {
+                    return Err(CliError::input("rna reagent quantities must be positive"));
+                }
+                let extra_ratio = match get("extra_ratio") {
+                    Some(v) => v
+                        .as_f64()
+                        .ok_or_else(|| CliError::input("rna reagent extra_ratio must be a number"))?,
+                    None => 0.0,
+                };
+                if extra_ratio < 0.0 {
+                    return Err(CliError::input("rna reagent extra_ratio must be non-negative"));
+                }
+                let stock_base = stock_value * stock_factor;
+                let target_base = target_value * target_factor;
+                if target_base > stock_base {
+                    return Err(CliError::input("target concentration cannot exceed stock concentration"));
                 }
             }
             other => {

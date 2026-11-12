@@ -847,6 +847,124 @@
       ]
     },
     {
+      "kind": "rna_reagent_usage",
+      "schema": 1,
+      "title": "RNA reagent usage calculator",
+      "description": "由样本数、每样本体积、母液浓度、目标浓度与额外比例计算母液体积、稀释液体积与总体积；输出是派生值，不写 Run 事实。",
+      "sdk": "1.0.0",
+      "category": "measurement",
+      "capabilities": [
+        "quantity",
+        "deterministic-calculation",
+        "derived-output"
+      ],
+      "permissions": [],
+      "renderers": {
+        "design": "generic.editor",
+        "document": "rna_reagent_usage.viewer",
+        "run": "generic.run"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      },
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "sample_count",
+          "type": "int",
+          "required": true,
+          "description": "样本数"
+        },
+        {
+          "name": "volume_per_sample",
+          "type": "quantity",
+          "required": true,
+          "dimension": "volume",
+          "description": "每样本体积"
+        },
+        {
+          "name": "stock_concentration",
+          "type": "quantity",
+          "required": true,
+          "dimension": "mass_concentration",
+          "description": "母液浓度"
+        },
+        {
+          "name": "target_concentration",
+          "type": "quantity",
+          "required": true,
+          "dimension": "mass_concentration",
+          "description": "目标浓度"
+        },
+        {
+          "name": "extra_ratio",
+          "type": "decimal",
+          "required": false,
+          "description": "额外比例"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "stock_volume",
+          "type": "quantity",
+          "dimension": "volume",
+          "origin": "derived",
+          "calculator": "rna.reagent_usage.v1",
+          "description": "所需母液体积"
+        },
+        {
+          "name": "diluent_volume",
+          "type": "quantity",
+          "dimension": "volume",
+          "origin": "derived",
+          "calculator": "rna.reagent_usage.v1",
+          "description": "稀释液体积"
+        },
+        {
+          "name": "total_volume",
+          "type": "quantity",
+          "dimension": "volume",
+          "origin": "derived",
+          "calculator": "rna.reagent_usage.v1",
+          "description": "总体积"
+        }
+      ],
+      "actions": [],
+      "rules": [
+        "rna-reagent-fields"
+      ]
+    },
+    {
       "kind": "instrument_profile",
       "schema": 1,
       "title": "仪器能力档案",

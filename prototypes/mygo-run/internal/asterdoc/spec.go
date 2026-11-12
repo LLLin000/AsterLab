@@ -101,12 +101,29 @@ var foundationCategories = map[string]bool{
 	"measurement": true, "document": true, "device": true,
 }
 
+// knownModuleRules lists every rule specValidatorFor implements. loadSpec
+// rejects a manifest that declares anything else, so a manifest-only addition
+// fails at startup instead of on a user's document (module-catalog-v1.md §4.1).
+var knownModuleRules = map[string]bool{
+	"plate-wells": true, "plate-geometry-wells": true, "reference-ref": true,
+	"group-fields": true, "assay-fields": true, "step-fields": true,
+	"step-execution": true, "step-uses": true, "workflow-fields": true,
+	"dilution-fields": true, "instrument-profile-fields": true,
+	"material-fields": true, "sample-fields": true, "container-fields": true,
+	"measurement-profile-fields": true, "rna-reagent-fields": true,
+}
+
 func validateSpecModule(module specModule, sdkVersion string) error {
 	if strings.TrimSpace(module.Kind) == "" || module.Schema <= 0 {
 		return fmt.Errorf("module needs kind and schema")
 	}
 	if module.SDK != "" && module.SDK != sdkVersion {
 		return fmt.Errorf("%s@%d declares sdk %q, want %q", module.Kind, module.Schema, module.SDK, sdkVersion)
+	}
+	for _, rule := range module.Rules {
+		if !knownModuleRules[rule] {
+			return fmt.Errorf("%s@%d declares unregistered rule %q", module.Kind, module.Schema, rule)
+		}
 	}
 	if module.Category != "" && !foundationCategories[module.Category] {
 		return fmt.Errorf("%s@%d has unknown category %q", module.Kind, module.Schema, module.Category)
@@ -308,6 +325,10 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 			case "container-fields":
 				if format, _ := data["format"].(string); strings.TrimSpace(format) == "" {
 					return fmt.Errorf("container needs a format")
+				}
+			case "rna-reagent-fields":
+				if _, err := rnaReagentResultFor(data); err != nil {
+					return err
 				}
 			case "measurement-profile-fields":
 				if endpoint, _ := data["endpoint"].(string); strings.TrimSpace(endpoint) == "" {
