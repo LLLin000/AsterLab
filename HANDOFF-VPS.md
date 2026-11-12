@@ -1,7 +1,7 @@
 # Handoff — moving AsterLab to a VPS
 
-Date: 2026-11-12. Baseline: `main` = `a1a84d2` (merged from
-`feature/v2-run-workspace`). Frozen tag `sdk-v1-rc3` = `b267d3f`; do not move it.
+Date: 2026-11-12. Baseline: `main` = `5e20027` (`a1a84d2` plus the VPS
+handoff and reproducible fixture). Frozen tag `sdk-v1-rc3` = `b267d3f`; do not move it.
 
 ## 1. What the VPS can and cannot do
 
@@ -15,7 +15,7 @@ This is a **Windows-first desktop product**. Split the work deliberately.
 | Acceptance fixture via `scripts/rc3-fixture.py` | **yes** | yes |
 | Go non-GUI packages | likely yes — verify `go build ./...` | yes |
 | MyGo/Slint desktop app (`prototypes/mygo-run`) | **not without porting** | yes |
-| `runs.dll` native module (`mygo native check`) | builds a host-native `.so`, not the shipped `.dll` | yes (MSVC) |
+| `runs.dll` native module (`mygo native check`) | builds a host-native `libRuns.so` for local Go tests; not the shipped `.dll` | yes (MSVC) |
 | `mygo-automation` UI automation, `scripts/gui-e2e-v11.ps1`, screenshot scripts | **no** (Win32 + PowerShell) | yes |
 
 Windows-only by construction: `target/vsdev.cmd` (MSVC environment),
@@ -32,7 +32,8 @@ Toolchain measured on the Windows host; match or exceed on the VPS.
 - Go 1.27.3
 - rustc 1.99.0 (stable), Cargo
 - Python 3.14 (fixture scripts only)
-- A C toolchain for `rusqlite` bundled SQLite (`cc`, `gcc`) on Linux
+- A C toolchain for `rusqlite` (`cc`, `gcc`, `pkg-config`, `libsqlite3-dev` on Linux)
+- A CJK TrueType font for the PDF test (`fonts-droid-fallback` on Debian/Ubuntu)
 - Git
 
 ```bash
@@ -50,9 +51,16 @@ cargo test --manifest-path crates/asterlab-core/Cargo.toml
 cargo test --manifest-path crates/asterlab-app/Cargo.toml
 cargo build --bin labworkbench
 
-# Go (verify the GUI packages first; if they fail, use the package list below)
-cd prototypes/mygo-run && go test ./...
+# Go: build the host-native Runs library first, then test
+cd prototypes/mygo-run
+go run github.com/egoist/mygo/cmd/mygo@v0.8.4-0.20261108220316-c4197b7fe562 native build -target host ./modules/runs
+go test ./...
 ```
+
+The script `scripts/mygo-native-linux.sh` performs the native build and the
+Go test run. The host build lands in `.mygo/native/linux-amd64/libRuns.so`
+(gitignored); Windows keeps using the published `Runs.dll`. This is the same
+Go contract with different build artifacts per platform.
 
 If the GUI packages do not build on Linux, these are the ones that matter for
 Core work and do build:
@@ -84,7 +92,7 @@ space at 452 GB full; do not assume a small VPS volume is enough. Keep
 1. `cargo test --bin labworkbench` — expect 10 passed.
 2. `cargo test --manifest-path crates/asterlab-core/Cargo.toml` — 160 + 3 + 6.
 3. `cargo test --manifest-path crates/asterlab-app/Cargo.toml` — 14.
-4. `cd prototypes/mygo-run && go test ./...` — all packages.
+4. `cd prototypes/mygo-run && go run github.com/egoist/mygo/cmd/mygo@v0.8.4-0.20261108220316-c4197b7fe562 native build -target host ./modules/runs && go test ./...` — all packages, using the host-native `libRuns.so`.
 5. Build the CLI, then rebuild the acceptance fixture:
    ```bash
    LABWORKBENCH_CLI=$PWD/../../target/debug/labworkbench \
