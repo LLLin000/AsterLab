@@ -52,10 +52,37 @@ jobs:
           cargo --version
           git rev-parse HEAD
 
+      - name: Native generator hashes (two Windows generations)
+        # REL-05: the same golden file the Linux job uses. This is the Windows
+        # half of "one input, one hash": a CRLF checkout must not change these
+        # hashes, and the pinned MyGo must regenerate the committed files byte
+        # for byte. Contract: scripts/ci/native_generator_hash.py.
+        #
+        # pwsh only propagates the exit code of the last command in a step, so
+        # each check stops the step explicitly; a failing selftest must not be
+        # masked by a later pass.
+        run: |
+          py -3 scripts/ci/test_native_generator_hash.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          py -3 scripts/ci/native_generator_hash.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          py -3 scripts/ci/native_generator_hash.py --regen 2
+
       - name: Build MyGo app and Runs.dll
         # Runs `mygo native check .\modules\runs`, then `go build -tags=e2e`,
         # then writes dist/BUILD_INFO.txt with the commit and both hashes.
         run: ./scripts/mygo-build.ps1
+
+      - name: Generated bindings survive the Windows build
+        # `mygo native check` regenerates whenever it cannot recognise an
+        # existing generated file, so a CRLF worktree silently rewrites the
+        # committed bindings with a different interface hash (REL-05). Fail
+        # here instead of shipping two different "generated" outputs.
+        run: |
+          py -3 scripts/ci/native_generator_hash.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dirty = git status --porcelain -- prototypes/mygo-run/modules/runs
+          if ($dirty) { throw "the Windows build rewrote the committed bindings:`n$dirty" }
 
       - name: Verify artifacts and record SHA256
         run: |
