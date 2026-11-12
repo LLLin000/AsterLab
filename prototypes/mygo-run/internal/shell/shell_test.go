@@ -59,14 +59,26 @@ func TestPageShortcuts(t *testing.T) {
 
 	tt.Key(ui.Cmd, ui.Key3)
 	tt.Frame()
-	if s.Page != Run {
-		t.Fatalf("page = %v, want Run", s.Page)
+	if s.Page != Protocol {
+		t.Fatalf("page = %v, want Protocol", s.Page)
 	}
 
 	tt.Key(ui.Cmd, ui.Key4)
 	tt.Frame()
+	if s.Page != Run {
+		t.Fatalf("page = %v, want Run", s.Page)
+	}
+
+	tt.Key(ui.Cmd, ui.Key5)
+	tt.Frame()
 	if s.Page != Notebook {
 		t.Fatalf("page = %v, want Notebook", s.Page)
+	}
+
+	tt.Key(ui.Cmd, ui.Key6)
+	tt.Frame()
+	if s.Page != Tools {
+		t.Fatalf("page = %v, want Tools", s.Page)
 	}
 }
 

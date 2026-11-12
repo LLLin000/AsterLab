@@ -20,6 +20,7 @@ type Page int
 const (
 	Project Page = iota
 	Design
+	Protocol
 	Run
 	Notebook
 	Tools
@@ -29,6 +30,8 @@ func (p Page) ShortLabel() string {
 	switch p {
 	case Design:
 		return "设计"
+	case Protocol:
+		return "方案"
 	case Run:
 		return "运行"
 	case Notebook:
@@ -44,6 +47,8 @@ func (s *Shell) PageName() string {
 	switch s.Page {
 	case Design:
 		return "design"
+	case Protocol:
+		return "protocol"
 	case Run:
 		return "run"
 	case Notebook:
@@ -58,6 +63,8 @@ func (p Page) Label() string {
 	switch p {
 	case Design:
 		return "实验设计"
+	case Protocol:
+		return "实验方案"
 	case Run:
 		return "实验运行"
 	case Notebook:
@@ -73,6 +80,8 @@ func (p Page) icon() *ui.SVG {
 	switch p {
 	case Design:
 		return lucide.FlaskConical()
+	case Protocol:
+		return lucide.BookOpen()
 	case Run:
 		return lucide.Play()
 	case Notebook:
@@ -112,7 +121,7 @@ type Shell struct {
 	window *sidebar.Shell
 }
 
-var pages = []Page{Project, Design, Run, Notebook, Tools}
+var pages = []Page{Project, Design, Protocol, Run, Notebook, Tools}
 
 // NewWindow creates the AsterLab window. The Onevra shell owns the title bar,
 // the floating header and the resizable navigation column.
@@ -249,7 +258,7 @@ func (s *Shell) page(c *ui.Context) {
 			s.window.SetLeftExpanded(!s.window.LeftExpanded())
 		}
 	}
-	for i, key := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5} {
+	for i, key := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6} {
 		if c.Shortcut(ui.Cmd, key) {
 			s.setPage(pages[i])
 		}
@@ -328,13 +337,8 @@ func (s *Shell) projectView(c *ui.Context) {
 				if len(inProgress) > 2 {
 					inProgress = inProgress[:2]
 				}
-				designLimit := 6 - len(inProgress)
-				if designLimit < 1 {
-					designLimit = 1
-				}
-				if len(designs) > designLimit {
-					designs = designs[:designLimit]
-				}
+				// No hard item cap: hiding designs made older work unreachable
+				// from the workspace (UX-IA-1). The grid scrolls instead.
 				ui.Column(c).Gap(t.Space(1.5)).Children(func() {
 					ui.Row(c).AlignItems(ui.Center).Children(func() {
 						components.Text(c, "继续工作").FontSize(t.Rem(1.05)).FontWeight(600)
