@@ -266,11 +266,15 @@ endpoint/plate 过滤，返回：
 - `missing_step`、`missing_endpoint`、`missing_target`：不生成匿名 key；
 - `unresolved_plate`、`ambiguous_plate`：Run 内无法唯一确定孔板时不生成孔位事实；
 - `invalid_position`：行列超出孔板、无法转换为坐标，或写入批次位置越界；
-- `wrong_run`、`missing_plate`、`unknown_plate`、`duplicate_position`、`status_value_mismatch`：写入批次在校验层直接拒绝。
+- `unsupported_cell_status`、`status_value_mismatch`：结构化读数的 `status` 只接受 `raw`/`missing`；
+  未知状态或状态与数值矛盾时跳过该读数并记 issue，不静默改成 raw/missing；写入批次遇到同类
+  矛盾直接拒绝；
+- `wrong_run`、`missing_plate`、`unknown_plate`、`duplicate_position`：写入批次在校验层直接拒绝。
 
 兼容规则：批次事件同时带 `result_cells` 与派生 `measurements` 时，先读结构化数组
-并按 key 去重；只有两者都缺失时才读旧 `readouts`。非数值观察保留在事件正文，
-不进入数值事实表。
+并按 key 去重；只有两者都缺失时才读旧 `readouts`，且只有 `result_kind = "raw"`
+（旧事件缺字段按 raw）的读数进入数值事实表；`derived` 结果保留在事件中，不作为
+原始事实。非数值观察保留在事件正文，不进入数值事实表。
 
 ## 6. 读/写流程
 

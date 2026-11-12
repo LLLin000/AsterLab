@@ -222,9 +222,9 @@ pub struct ReadingBatchPlan {
     pub overwrites: Vec<ReadingOverwrite>,
 }
 
-/// Build the one fact table from a frozen Run. Events are consumed in their
-/// stored order; a later fact for the same key is a new revision and never
-/// rewrites the earlier event.
+/// Build the one fact table from a frozen Run. Events are consumed in
+/// recorded-time order (not caller array order); a later fact for the same key
+/// is a new revision and never rewrites the earlier event.
 pub fn query_readings(workspace: &RunWorkspace, request: &ReadingQuery) -> ReadingQueryResult {
     let mut history: Vec<ReadingFact> = Vec::new();
     let mut latest: HashMap<ReadingKey, usize> = HashMap::new();
@@ -286,13 +286,21 @@ pub fn query_readings(workspace: &RunWorkspace, request: &ReadingQuery) -> Readi
                     ));
                     continue;
                 };
+                let value = cell["value"].as_f64();
+                let status = match status_of(cell, value) {
+                    Ok(status) => status,
+                    Err((code, message)) => {
+                        issues.push(issue(code, &message, event, Some(&step_path)));
+                        continue;
+                    }
+                };
                 raw.push(RawReading {
                     endpoint,
                     position: position_of(cell),
                     unit_id: text_of(cell, "sample_id"),
-                    value: cell["value"].as_f64(),
+                    value,
                     unit: text_of(cell, "unit"),
-                    status: status_of(cell, cell["value"].as_f64()),
+                    status,
                 });
             }
             for measurement in &event.measurements {
@@ -305,13 +313,21 @@ pub fn query_readings(workspace: &RunWorkspace, request: &ReadingQuery) -> Readi
                     ));
                     continue;
                 };
+                let value = measurement["value"].as_f64();
+                let status = match status_of(measurement, value) {
+                    Ok(status) => status,
+                    Err((code, message)) => {
+                        issues.push(issue(code, &message, event, Some(&step_path)));
+                        continue;
+                    }
+                };
                 raw.push(RawReading {
                     endpoint,
                     position: position_of(measurement),
                     unit_id: text_of(measurement, "sample_id"),
-                    value: measurement["value"].as_f64(),
+                    value,
                     unit: text_of(measurement, "unit"),
-                    status: status_of(measurement, measurement["value"].as_f64()),
+                    status,
                 });
             }
         } else {
@@ -319,6 +335,13 @@ pub fn query_readings(workspace: &RunWorkspace, request: &ReadingQuery) -> Readi
                 let Some(endpoint) = endpoint_of(readout) else {
                     continue;
                 };
+                let result_kind = readout["result_kind"].as_str().unwrap_or("raw");
+                if result_kind != "raw" {
+                    // Derived results are computed from raw observations; they
+                    // are not facts of their own and must not enter the raw
+                    // fact table.
+                    continue;
+                }
                 let value = readout["value"].as_f64();
                 if value.is_none() {
                     // A non-numeric observation is not a numeric reading fact;
@@ -771,11 +794,26 @@ fn position_of(item: &Value) -> Option<(u32, u32)> {
     Some((row as u32, column as u32))
 }
 
-fn status_of(item: &Value, value: Option<f64>) -> ReadingStatus {
-    if item["status"].as_str() == Some("missing") || value.is_none() {
-        ReadingStatus::Missing
-    } else {
-        ReadingStatus::Raw
+fn status_of(item: &Value, value: Option<f64>) -> Result<ReadingStatus, (&'static str, String)> {
+    let status = item["status"]
+        .as_str()
+        .map(str::trim)
+        .filter(|status| !status.is_empty());
+    match (status, value) {
+        (None, Some(_)) | (Some("raw"), Some(_)) => Ok(ReadingStatus::Raw),
+        (None, None) | (Some("missing"), None) => Ok(ReadingStatus::Missing),
+        (Some("raw"), None) => Err((
+            "status_value_mismatch",
+            "status=raw 但缺少数值；读数被跳过".to_owned(),
+        )),
+        (Some("missing"), Some(_)) => Err((
+            "status_value_mismatch",
+            "status=missing 但带数值；读数被跳过".to_owned(),
+        )),
+        (Some(other), _) => Err((
+            "unsupported_cell_status",
+            format!("不支持的读数状态 {other}；读数被跳过"),
+        )),
     }
 }
 
@@ -1121,6 +1159,40 @@ mod tests {
             }
         );
         assert!(project_table(&result, plate_of(&workspace)).cells.is_empty());
+    }
+
+    #[test]
+    fn derived_readouts_never_become_raw_facts() {
+        let events = vec![json!({
+            "id":"e1","event_type":"observation","content":"fold change",
+            "recorded_at":"2026-01-01T00:00:00Z","protocol_step_path":"root/read",
+            "assay_id":"cck8","timepoint":"D1",
+            "readouts":[{"endpoint":"fold_change","value":2.0,"result_kind":"derived",
+                "derived_from":["r1"]}]
+        })];
+        let workspace = workspace(&[plate("cck8", "D1")], &events);
+        let result = query_readings(&workspace, &ReadingQuery::default());
+        assert!(result.facts.is_empty());
+        assert!(result.history.is_empty());
+        assert!(result.issues.is_empty(), "{:?}", result.issues);
+    }
+
+    #[test]
+    fn unknown_cell_status_is_reported_not_coerced_to_raw() {
+        let events = vec![json!({
+            "id":"e1","event_type":"measurement","content":"read",
+            "recorded_at":"2026-01-01T00:00:00Z","protocol_step_path":"root/read",
+            "assay_id":"cck8","timepoint":"D1",
+            "result_cells":[{"row":0,"column":0,"field":"od450","value":1.0,
+                "status":"excluded"}]
+        })];
+        let workspace = workspace(&[plate("cck8", "D1")], &events);
+        let result = query_readings(&workspace, &ReadingQuery::default());
+        assert!(result.facts.is_empty());
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| issue.code == "unsupported_cell_status"));
     }
 
     #[test]
