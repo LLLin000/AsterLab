@@ -81,6 +81,7 @@ v0.1.0 Beta 明确不做以下内容；任何一项都不构成发布阻塞，�
 8. 完整 ISA / AnIML / OBI / RO-Crate 导入导出、通用工作流或脚本引擎、自动生成完整实验方案（[`docs/architecture.md`](../architecture.md) §8）。
 9. 跨平台共享数据目录；SQLite 数据属于单机单平台（[`cross-platform-builds.md`](../engineering/cross-platform-builds.md) §9）。
 10. 全仓 `cargo fmt`；会埋掉 review diff（[`HANDOFF-VPS.md`](../../HANDOFF-VPS.md) §5）。
+11. 文件附件、样本库存/试剂批次、可视化自定义字段类型系统与安全审计：Beta 不交付附件存储、库存/批次管理或可视化自定义字段类型系统，也不出具安全审计或渗透测试结论（[`README.md`](../../README.md) 第 48–50 行「当前限制」、[`docs/KNOWN_LIMITATIONS.md`](../KNOWN_LIMITATIONS.md)）。
 
 ## 4. 发布 DoD
 
