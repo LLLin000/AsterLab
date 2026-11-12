@@ -26,7 +26,17 @@ Kandev 承载 AsterLab 的全部**任务级规划**：路线图、里程碑、�
 
 Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方。先在卡片评论中记录冲突，改卡或改文档对齐后再动代码。
 
-## 2. 当前工作流
+## 2. 任务卡写法
+
+所有 Kandev 卡必须遵循 [`docs/engineering/kandev-card-template.md`](docs/engineering/kandev-card-template.md)。标题格式为 `<卡片 ID> (<Category>) <中文标题>`，分类只使用 `(Docs)`、`(Audit)`、`(Contract)`、`(Core)`、`(UI)`、`(Integration)`、`(QA)`、`(Build)`、`(Release)`。
+
+- 一张卡只有一个分类；需要同时改 Core 和 UI 时拆卡，用 `blocked_by` 连接。
+- `范围` 使用机器可读的 `<!-- kandev-scope -->` 块；`REL-04` 的范围检查只解析该块。
+- `验收` 必须是命令 + 期望结果，或截图规格 + 规则 id；禁止 `TBD`、`可选`、`你确认`。
+- 描述只保留结果、范围、实施、验收、证据、非目标和分类工作方法；逐步清单放任务 Plan。
+- 进入 `Ready` 前逐条核对模板第 4 节的 Definition of Ready。
+
+## 3. 当前工作流
 
 | 流程 | 泳道 | 步骤 | 执行者 |
 |---|---|---|---|
@@ -46,7 +56,7 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 - `Verify`：在目标机器上按卡片验收层级重跑并贴原始输出。
 - `Done`：只由人工确认后进入；agent 不得自行把卡移到 `Done`。
 
-## 3. 开工前必须做
+## 4. 开工前必须做
 
 1. 读取对应 Kandev 卡片，确认 `范围`、`验收`、`依赖`、`lane` 和 `milestone`。
 2. 读取 `CONTEXT.md`、`docs/architecture.md`、`docs/product/ux-contract.md`、`docs/product/ownership.md` 和 `HANDOFF-VPS.md` 第 6 节。
@@ -55,7 +65,7 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 5. 不复用其他卡的分支或工作区；一卡一分支，避免并发写同一文件。
 6. 如果收到的步骤提示词里还有未被替换的 `{{...}}` 占位符，先停下并在任务评论中指出；不要按字面量创建分支、文件或路径。
 
-## 4. 完成与交接
+## 5. 完成与交接
 
 - 运行卡片要求的验收命令，把**原始输出**贴到任务评论或 PR 描述，不要只说“通过了”。
 - 提交到 `agent/<卡片ID>-<slug>` 分支，不直接推 `main`；推送后开 PR，并在任务里附 PR 链接。
@@ -63,7 +73,7 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 - 不移动 frozen tag（`sdk-v1-rc3`），不修改 frozen Run，不跑全仓 `cargo fmt`。
 - 任务完成后只移到 `Review`；`Verify` 和 `Done` 由人工或明确指定的验证者推进。
 
-## 5. 快速入口
+## 6. 快速入口
 
 ```bash
 # 服务状态
