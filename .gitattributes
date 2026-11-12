@@ -1,0 +1,18 @@
+# Line endings, per docs/engineering/cross-platform-builds.md §9.
+#
+# MyGo recognises its own generated files by a header that ends in LF
+# (internal/nativegen/parse.go, isGenerated). With core.autocrlf=true the
+# committed bindings arrive with CRLF, MyGo stops recognising them, and
+# `mygo native check` regenerates a different interface hash: bb7eb37b2f2b16dd
+# instead of 006d88f0942bea95. Keep generated sources and their inputs LF on
+# every platform; REL-05 evidence records the reproduction.
+#
+# PowerShell keeps the Windows default (CRLF): do not add *.ps1 here.
+*.go text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf

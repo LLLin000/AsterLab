@@ -58,7 +58,7 @@ def build_tree(root: Path) -> None:
     for rel, text in files.items():
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+        target.write_text(text, encoding="utf-8", newline="\n")
 
 
 def run_cli(root: Path, *args: str) -> int:
@@ -198,7 +198,7 @@ def content_changes_fail_the_check() -> None:
         assert run_cli(root, "--update-golden") == 0, getattr(run_cli, "last", "")
 
         path = root / hashcheck.GENERATED[0]
-        path.write_text(GO_HEADER.replace("var _module = 1", "var _module = 2"), encoding="utf-8")
+        path.write_text(GO_HEADER.replace("var _module = 1", "var _module = 2"), encoding="utf-8", newline="\n")
         code = run_cli(root, "--check")
         assert code == 1, getattr(run_cli, "last", "")
         assert "drift" in getattr(run_cli, "last", ""), getattr(run_cli, "last", "")
@@ -210,7 +210,7 @@ def volatile_generated_content_fails_even_when_golden_matches() -> None:
         root = Path(tmp)
         build_tree(root)
         path = root / hashcheck.GENERATED[1]
-        path.write_text(RUST_HEADER + 'pub const BUILT: &str = "2026-11-13";\n', encoding="utf-8")
+        path.write_text(RUST_HEADER + 'pub const BUILT: &str = "2026-11-13";\n', encoding="utf-8", newline="\n")
         assert run_cli(root, "--update-golden") == 1, getattr(run_cli, "last", "")
         assert "cannot be identical on two platforms" in getattr(run_cli, "last", "")
 

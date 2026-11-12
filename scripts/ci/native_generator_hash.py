@@ -51,6 +51,7 @@ Exit codes: 0 the check passed; 1 drift, a pin mismatch or a golden mismatch;
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -99,8 +100,6 @@ def repo_root() -> Path:
 
 
 def sha256(data: bytes) -> str:
-    import hashlib
-
     return hashlib.sha256(data).hexdigest()
 
 
@@ -273,6 +272,13 @@ def load_golden(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def display_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root))
+    except ValueError:
+        return str(path)
+
+
 def platform_line() -> str:
     return f"platform={platform.system().lower()} {platform.machine()} python={platform.python_version()}"
 
@@ -322,10 +328,10 @@ def write_golden(root: Path, golden_path: Path, report: dict) -> None:
         ),
     }
     golden_path.parent.mkdir(parents=True, exist_ok=True)
-    golden_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    golden_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
 
 
-def temp_path(root: Path, rel: str) -> Path:
+def temp_path(rel: str) -> Path:
     """Map a repository path below PROTOTYPES to its path in a temp copy."""
     prefix = f"{PROTO}/"
     if not rel.startswith(prefix):
@@ -343,7 +349,7 @@ def regen_once(root: Path, pin: str, index: int) -> dict:
         for rel in ("go.mod", "go.sum"):
             shutil.copy2(root / PROTO / rel, tmp / rel)
         for rel in INPUT_FILES + [LANG_MANIFESTS["rust"], f"{MODULE}/rust/src/lib.rs"]:
-            shutil.copy2(root / rel, tmp / temp_path(root, rel))
+            shutil.copy2(root / rel, tmp / temp_path(rel))
         proc = subprocess.run(
             [go, "run", f"{GENERATOR_MODULE}/cmd/mygo@{pin}", "native", "check", "./modules/runs"],
             cwd=tmp,
@@ -353,7 +359,7 @@ def regen_once(root: Path, pin: str, index: int) -> dict:
         )
         files: dict[str, bytes] = {}
         for rel in GENERATED:
-            target = tmp / temp_path(root, rel)
+            target = tmp / temp_path(rel)
             if not target.is_file():
                 raise CheckError(
                     f"regen {index}: the generator wrote no {rel}\n"
@@ -442,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.update_golden:
         write_golden(root, golden_path, report)
-        print(f"{PREFIX} wrote {golden_path.relative_to(root)}")
+        print(f"{PREFIX} wrote {display_path(golden_path, root)}")
         return 0
 
     problems: list[str] = []
@@ -456,11 +462,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{PREFIX} drift {problem}", file=sys.stderr)
         print(
             f"{PREFIX} FAILED the committed generator output no longer matches "
-            f"{golden_path.relative_to(root)}",
+            f"{display_path(golden_path, root)}",
             file=sys.stderr,
         )
     else:
-        print(f"{PREFIX} OK golden {golden_path.relative_to(root)}")
+        print(f"{PREFIX} OK golden {display_path(golden_path, root)}")
 
     if args.regen:
         regen_problems = run_regen(root, args.regen, report)
@@ -482,7 +488,7 @@ def main(argv: list[str] | None = None) -> int:
             "report": report,
             "problems": problems,
         }
-        Path(args.json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        Path(args.json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
         print(f"{PREFIX} wrote {args.json}")
 
     return 1 if problems else 0
