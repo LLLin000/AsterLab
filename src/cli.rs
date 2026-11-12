@@ -2563,6 +2563,26 @@ fn asterdoc_spec() -> &'static Value {
     })
 }
 
+/// Every rule name the Rust validator implements. A manifest may only use
+/// these names; `validate_asterdoc_spec` rejects anything else at startup.
+const ASTERDOC_RULES: &[&str] = &[
+    "plate-wells",
+    "plate-geometry-wells",
+    "reference-ref",
+    "group-fields",
+    "assay-fields",
+    "step-fields",
+    "step-execution",
+    "step-uses",
+    "workflow-fields",
+    "dilution-fields",
+    "instrument-profile-fields",
+    "material-fields",
+    "sample-fields",
+    "container-fields",
+    "measurement-profile-fields",
+];
+
 fn validate_asterdoc_spec(spec: &Value) -> Result<(), String> {
     if spec["foundationVersion"].as_u64() != Some(1) {
         return Err("foundationVersion must be 1".into());
@@ -2601,6 +2621,19 @@ fn validate_asterdoc_spec(spec: &Value) -> Result<(), String> {
             let permission = action["permission"].as_str().unwrap_or("");
             if permission.is_empty() || !permissions.contains(permission) {
                 return Err(format!("{kind}@{schema} action names an undeclared permission"));
+            }
+        }
+        // A rule declared in the manifest must have an implementation here.
+        // Without this check a manifest-only addition surfaces later as an
+        // "unknown rule" internal error on a user's document instead of failing
+        // at startup (module-catalog-v1.md §4.1).
+        for rule in module["rules"].as_array().into_iter().flatten() {
+            let rule = rule.as_str().unwrap_or("");
+            if !ASTERDOC_RULES.contains(&rule) {
+                return Err(format!(
+                    "{kind}@{schema} declares unregistered rule {rule}; \
+                     register it in ASTERDOC_RULES and validate_asterdoc_module"
+                ));
             }
         }
         for port in module["inputs"].as_array().into_iter().flatten()
@@ -8249,6 +8282,64 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 .ok_or_else(|| CliError::missing(format!("unknown module {kind}@{schema}")))?;
             Ok(json!({"module": module}))
         }
+        "sdk.validate" => {
+            let input: Value = parse_input(path)?;
+            let source = if let Some(source) = input.get("source").and_then(Value::as_str) {
+                source.to_owned()
+            } else {
+                let design_id = input
+                    .get("design_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| CliError::input("source or design_id is required"))?;
+                let revision = input.get("revision").and_then(Value::as_u64);
+                let doc = if let Some(revision) = revision {
+                    load_asterdoc_at(&db, design_id, revision)?
+                } else {
+                    load_asterdoc(&db, design_id)?
+                };
+                doc.get("source").and_then(Value::as_str).unwrap_or("").to_owned()
+            };
+            let mut errors: Vec<String> = Vec::new();
+            let mut warnings: Vec<String> = Vec::new();
+            let valid = validate_asterdoc_source(&source).is_ok();
+            if let Err(error) = validate_asterdoc_source(&source) {
+                errors.push(error.message);
+            }
+            let mut compiled = false;
+            let mut design_value = Value::Null;
+            if valid {
+                match compile_asterdoc_to_design(&source) {
+                    Ok(design) => {
+                        compiled = true;
+                        design_value = design;
+                    }
+                    Err(error) => {
+                        compiled = false;
+                        errors.push(error.message);
+                    }
+                }
+            }
+            let modules: Vec<Value> = if valid {
+                parse_asterdoc_modules(&source)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|m| { let mj = serde_json::to_value(m).unwrap_or(Value::Null); json!({"kind": mj.get("kind").cloned().unwrap_or(Value::Null), "schema": mj.get("schema").cloned().unwrap_or(Value::Null)}) })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let mut out = json!({
+                "valid": valid,
+                "compiled": compiled,
+                "errors": errors,
+                "warnings": warnings,
+                "modules": modules
+            });
+            if compiled {
+                out["design"] = design_value;
+            }
+            Ok(out)
+        }
         "asterdoc.inspect" => {
             let input: Value = parse_input(path)?;
             let design_id = input
@@ -9401,7 +9492,7 @@ fn result_schema(tool: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["allocated_volume_ul","remaining_volume_ul","unit","assumption"],"properties":{"allocated_volume_ul":{"type":"number","minimum":0},"remaining_volume_ul":{"type":"number","minimum":0},"unit":{"const":"µL"},"assumption":{"type":"string"}}})
         }
         "sdk.modules" => json!({"type":"object","additionalProperties":false,"required":["modules"],"properties":{"modules":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1},"title":{"type":["string","null"]},"category":{"type":["string","null"]},"capabilities":{"type":["array","null"]},"renderers":{"type":["object","null"]},"actions":{"type":["array","null"]}}}}}}),
-        "sdk.describe" => json!({"type":"object","additionalProperties":false,"required":["module"],"properties":{"module":{"type":"object","additionalProperties":true}}}),
+        "sdk.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled","errors","warnings","modules"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","schema"],"properties":{"kind":{},"schema":{}}}},"design":{"type":"object","additionalProperties":true}}}),
         "asterdoc.inspect" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","modules"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","id","schema","data","manifest"],"properties":{"kind":{"type":"string"},"id":{"type":"string"},"schema":{"type":"integer","minimum":0},"data":{"type":"object","additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}}}}}),
         "asterdoc.assess" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","state","errors","warnings"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"state":{"type":"string","enum":["ready","warning","incomplete"]},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}}}}),
 
@@ -9583,6 +9674,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "sdk.describe" => {
             json!({"type":"object","additionalProperties":false,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1}}})
+        }
+        "sdk.validate" => {
+            json!({"type":"object","additionalProperties":false,"properties":{"source":{"type":"string","minLength":1},"design_id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":0}}})
         }
         "asterdoc.inspect" => {
             json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"module_id":{"type":"string"}}})
@@ -9777,6 +9871,7 @@ fn tool_specs() -> Vec<Value> {
         "calculator.serial_dilution",
         "calculator.reaction_volume",
         "sdk.modules",
+        "sdk.validate",
         "sdk.describe",
         "asterdoc.inspect",
         "asterdoc.assess",
@@ -9816,6 +9911,7 @@ fn tool_writes(tool: &str) -> bool {
             | "calculator.reaction_volume"
             | "sdk.modules"
             | "sdk.describe"
+            | "sdk.validate"
             | "asterdoc.inspect"
             | "asterdoc.assess"
             | "asterdoc.validate"
@@ -9884,6 +9980,7 @@ fn tool_description(tool: &str) -> &'static str {
         "calculator.reaction_volume" => "求反应已分配体积与剩余体积，不判断配方科学适用性。",
         "sdk.modules" => "从嵌入的 modules.json 返回 AsterDoc 模块摘要（kind/schema/title/category/capabilities/renderers/actions）；只读。",
         "sdk.describe" => "按 kind+schema 返回完整的 AsterDoc 模块 manifest；只读。",
+        "sdk.validate" => "校验 AsterDoc 源码或已保存设计并尝试编译；不写入。",
         "asterdoc.inspect" => "读取设计的精确/当前 AsterDoc 修订，解析模块并返回 manifest 渲染器/动作契约；只读。",
         "asterdoc.validate" => "校验候选 AsterDoc 源码并尝试编译；不写入。",
         "asterdoc.assess" => "对当前或指定 AsterDoc revision 执行只读 readiness 检查，返回 errors 与 warnings。",
@@ -9953,7 +10050,7 @@ fn tool_effects(tool: &str) -> &'static str {
         "import.study.apply" => {
             "在一个数据库事务中创建项目、设计及其 v1 快照、Protocol 及其 v1 版本；失败时整体回滚。"
         }
-        "sdk.modules" | "sdk.describe" | "asterdoc.inspect" | "asterdoc.assess" | "asterdoc.validate" | "asterdoc.compile" | "asterdoc.load" => "只读；不修改数据库。",
+        "sdk.modules" | "sdk.describe" | "sdk.validate" | "asterdoc.inspect" | "asterdoc.assess" | "asterdoc.validate" | "asterdoc.compile" | "asterdoc.load" => "只读；不修改数据库。",
         "asterdoc.save" => "保存新的不可变 AsterDoc 修订。",
         "asterdoc.command" => "应用语义命令并保存新的不可变 AsterDoc 修订。",
         "asterdoc.create_run" => "创建运行并固定 AsterDoc 修订引用。",
@@ -10199,7 +10296,7 @@ mod tests {
     fn agent_tools_are_discoverable() {
         let specs = tool_specs();
         let names: Vec<&str> = specs.iter().filter_map(|v| v.get("name").and_then(Value::as_str)).collect();
-        for tool in ["sdk.modules", "sdk.describe", "asterdoc.inspect", "asterdoc.assess", "asterdoc.validate", "asterdoc.load", "asterdoc.save", "asterdoc.command", "asterdoc.compile", "asterdoc.create_run"] {
+        for tool in ["sdk.modules", "sdk.describe", "sdk.validate", "asterdoc.inspect", "asterdoc.assess", "asterdoc.validate", "asterdoc.load", "asterdoc.save", "asterdoc.command", "asterdoc.compile", "asterdoc.create_run"] {
             assert!(names.contains(&tool), "missing {tool}");
             assert!(input_schema(tool).is_some(), "missing input schema for {tool}");
         }
@@ -10535,12 +10632,47 @@ protocol_version_id: protocol-v1
 
     }
     #[test]
+    fn manifest_rule_must_be_registered_in_rust() {
+        let spec = json!({
+            "foundationVersion": 1,
+            "sdkVersion": "1.0.0",
+            "modules": [{
+                "kind": "probe", "schema": 1, "sdk": "1.0.0", "category": "workflow",
+                "inputs": [], "outputs": [], "actions": [], "permissions": [],
+                "rules": ["not-a-real-rule"]
+            }]
+        });
+        let error = validate_asterdoc_spec(&spec).unwrap_err();
+        assert!(error.contains("unregistered rule not-a-real-rule"), "{error}");
+    }
+
+    #[test]
     fn read_only_tools_do_not_write() {
-        for tool in ["sdk.modules", "sdk.describe", "asterdoc.inspect", "asterdoc.assess", "asterdoc.validate", "asterdoc.compile", "asterdoc.load"] {
+        for tool in ["sdk.modules", "sdk.describe", "sdk.validate", "asterdoc.inspect", "asterdoc.assess", "asterdoc.validate", "asterdoc.compile", "asterdoc.load"] {
             assert!(!tool_writes(tool), "{tool} should be read-only");
         }
         for tool in ["asterdoc.save", "asterdoc.command", "asterdoc.create_run"] {
             assert!(tool_writes(tool), "{tool} should write");
+        }
+    }
+    #[test]
+    fn asterdoc_parity_samples() {
+        // This file is compiled into more than one crate (the CLI and the app),
+        // so the fixture is found by walking up from the compiling manifest
+        // instead of assuming the repository root is the working directory.
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .map(|dir| dir.join("tests/asterdoc_parity_samples.json"))
+            .find(|path| path.is_file())
+            .expect("shared parity fixture");
+        let raw = std::fs::read_to_string(&fixture)
+            .unwrap_or_else(|e| panic!("read {}: {e}", fixture.display()));
+        let samples: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        for sample in samples.as_array().expect("array") {
+            let source = sample["source"].as_str().unwrap_or("");
+            let expected = sample["valid"].as_bool().unwrap_or(false);
+            let actual = validate_asterdoc_source(source).is_ok();
+            assert_eq!(actual, expected, "sample {} mismatch", sample["name"]);
         }
     }
 }

@@ -47,6 +47,7 @@ type View struct {
 	// moduleDrafts stores editable text per module/field across frames.
 	moduleDrafts        map[string]map[string]*string
 	moduleDraftBool     map[string]map[string]*bool
+	moduleLists         map[string]map[string][]string
 	moduleOriginals     map[string]map[string]any
 	ExpandedWells       []string
 	PlateSampleID       string
@@ -820,9 +821,26 @@ func (v *View) ensureDraft(moduleID string, data map[string]any) (map[string]*st
 	if changed {
 		draft = map[string]*string{}
 		bools := map[string]*bool{}
+		lists := map[string][]string{}
 		for key, val := range data {
 			if key == "kind" || key == "id" || key == "schema" {
 				continue
+			}
+			if items, ok := val.([]any); ok {
+				values := make([]string, 0, len(items))
+				allStrings := true
+				for _, item := range items {
+					text, isText := item.(string)
+					if !isText {
+						allStrings = false
+						break
+					}
+					values = append(values, text)
+				}
+				if allStrings {
+					lists[key] = values
+					continue
+				}
 			}
 			switch typed := val.(type) {
 			case bool:
@@ -848,6 +866,10 @@ func (v *View) ensureDraft(moduleID string, data map[string]any) (map[string]*st
 		}
 		v.moduleDrafts[moduleID] = draft
 		v.moduleDraftBool[moduleID] = bools
+		if v.moduleLists == nil {
+			v.moduleLists = map[string]map[string][]string{}
+		}
+		v.moduleLists[moduleID] = lists
 		clone := map[string]any{}
 		for k, val := range data {
 			clone[k] = val
@@ -898,9 +920,16 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 			if input.Name == "kind" || input.Name == "id" || input.Name == "schema" {
 				continue
 			}
-			if draft[input.Name] == nil {
-				empty := ""
-				draft[input.Name] = &empty
+			// Composite ports are never edited through the scalar draft. Giving
+			// them an empty string draft made a plain save write "" over the
+			// stored value (a plate's groups, a step's tasks).
+			switch input.Type {
+			case "string[]", "list", "object", "table", "object-list", "well-map", "geometry", "artifact":
+			default:
+				if draft[input.Name] == nil {
+					empty := ""
+					draft[input.Name] = &empty
+				}
 			}
 			if input.Type == "quantity" && draft[input.Name+"__unit"] == nil {
 				empty := ""
@@ -928,6 +957,32 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 				case "quantity":
 					ui.DecimalInput(c, draft[input.Name], "", "", "1").Label(input.Name)
 					ui.TextInput(c, draft[input.Name+"__unit"]).Label(input.Name + " unit")
+				case "string[]":
+					lists := v.moduleLists[moduleID]
+					if lists == nil {
+						lists = map[string][]string{}
+						v.moduleLists[moduleID] = lists
+					}
+					items := lists[input.Name]
+					ui.Column(c).Gap(4).Grow(1).Children(func() {
+						remove := -1
+						for i := range items {
+							i := i
+							ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
+								ui.TextInput(c, &items[i]).Label(input.Name)
+								if components.IconButton(c, lucide.Trash(), "删除 "+input.Name, components.IconButtonCompact).Clicked() {
+									remove = i
+								}
+							})
+						}
+						if remove >= 0 {
+							items = append(items[:remove], items[remove+1:]...)
+						}
+						if components.Button(c, "+ 添加", components.ButtonGhost).Clicked() {
+							items = append(items, "")
+						}
+						lists[input.Name] = items
+					})
 				case "list", "object", "table", "object-list", "well-map", "geometry":
 					ui.Text(c, "read-only").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 				default:
@@ -1005,10 +1060,50 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 						props[key] = *ptr
 					}
 				}
+				if lists := v.moduleLists[moduleID]; lists != nil {
+					for name, items := range lists {
+						if sameStringList(items, orig[name]) {
+							continue
+						}
+						out := make([]any, 0, len(items))
+						for _, item := range items {
+							if strings.TrimSpace(item) == "" {
+								continue
+							}
+							out = append(out, item)
+						}
+						props[name] = out
+					}
+				}
 				v.OnUpdateModule(moduleID, props)
 			}
 		}
 	})
+}
+
+// sameStringList compares an editable string list with the stored value, which
+// arrives as []any from YAML/JSON.
+func sameStringList(items []string, original any) bool {
+	stored, ok := original.([]any)
+	if !ok {
+		return len(items) == 0 && original == nil
+	}
+	trimmed := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
+		trimmed = append(trimmed, item)
+	}
+	if len(trimmed) != len(stored) {
+		return false
+	}
+	for i := range trimmed {
+		if fmt.Sprint(stored[i]) != trimmed[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // GenericModuleSummary is the shared, read-only renderer for Run surfaces.

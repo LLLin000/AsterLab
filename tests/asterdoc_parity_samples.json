@@ -1,0 +1,11 @@
+[
+  {"name":"valid-experiment","valid":true,"source":"```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: Demo\n```\n"},
+  {"name":"valid-group","valid":true,"source":"```asterlab\nkind: group\nid: g-1\nschema: 1\nname: Control\n```\n"},
+  {"name":"valid-dilution","valid":true,"source":"```asterlab\nkind: dilution\nid: d-1\nschema: 1\nstock:\n  value: 10\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 1\n  unit: mL\n```\n"},
+  {"name":"valid-reference","valid":true,"source":"```asterlab\nkind: reference\nid: r-1\nschema: 1\nref: doi:10.1/x\n```\n"},
+  {"name":"invalid-unclosed-fence","valid":false,"source":"```asterlab\nkind: experiment\nid: e\nschema: 1\n"},
+  {"name":"invalid-plate-duplicate-well","valid":false,"source":"```asterlab\nkind: plate\nid: p-1\nschema: 1\nformat: 96\nassay: a-1\ngroups:\n  g: [A1, A1]\n```\n"},
+  {"name":"invalid-dilution-target-exceeds-stock","valid":false,"source":"```asterlab\nkind: dilution\nid: d-2\nschema: 1\nstock:\n  value: 2\n  unit: mg/mL\ntarget:\n  value: 10\n  unit: mg/mL\nfinal_volume:\n  value: 1\n  unit: mL\n```\n"},
+  {"name":"invalid-unknown-module-kind","valid":false,"source":"```asterlab\nkind: nope\nid: x\nschema: 1\n```\n"},
+  {"name":"invalid-missing-required-field","valid":false,"source":"```asterlab\nkind: group\nid: g-2\nschema: 1\n```\n"}
+]
