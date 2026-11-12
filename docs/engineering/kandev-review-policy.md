@@ -51,3 +51,13 @@ Review agent 不在 Review 里改代码、提交、推送或 rebase。
 - `Merged` 进入即标记任务完成。
 - 依赖卡只在 `Merged`（即 `COMPLETED`）后解除阻塞，因此不会出现「前序 Done 但 PR 未合并」的基线错位。
 - 对于非快速分类，人工在 Review 里批准后，仍需合并 PR；合并事件会把任务推进到 `Merged`。
+
+## 6. 例外记录与分支清理
+
+- 2026-11-13 `REL-03` / PR #3：仓库已要求 `linux-tests`、`windows-build`、`scope-check`，但 `main` 还没有 `.github/workflows`（只在未合并的 `REL-04` PR #4 中），常规 merge 会被 base-branch policy 拒绝。该次以 `--admin` 合并，diff 已人工核验为单文档、范围合规。这是一次性 CI bootstrap 例外；后续 Review 禁止 `--admin`。
+- `REL-04` PR #4 是 CI bootstrap PR。它的 checks 在同一 PR 上运行；三个 context 通过后正常合并，不需要 `--admin`。
+- `gh pr merge --delete-branch` 可能因为 `main` 被另一个 worktree 占用而清理失败。此时由人工/维护者执行：
+  1. 确认任务 worktree 干净；
+  2. 从共享 clone 移除 worktree；
+  3. 删除本地分支和远端分支。
+- 不要 force-remove 有未提交改动的 worktree；先保留并报告。
