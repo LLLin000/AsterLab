@@ -32,7 +32,15 @@
 | `RUN-04a` 原卡在 Windows 工作流，分类改为 Core 后泳道不一致 | 已移到 `VPS Dev`，标签改为 `lane:vps` |
 | 所有卡正文重复 lane/milestone/依赖 | 新模板不再重复；结构化字段和 `blocked_by` 是唯一来源 |
 
-## 3. 暂不解决的已知风险
+## 3. Review 与合并门
+
+- `Review` 现在是 AI review agent，复用实现 profile，进入时切换角色；不是独立模型。
+- `(Docs)/(Audit)/(Build)` 在审查门槛通过时可由 Review agent 自动 squash-merge；其余分类只给结论，人工合并。
+- `Review` WIP=2。Review 满 2 个时，feeder 停止把 Inbox 卡提升到 Ready，也停止启动 Ready 卡；这是防止未审查工作堆积的背压。
+- `Verify` 监听 `on_pr_merged`，PR 合并后进入 `Merged`；`Merged` 进入即完成任务。依赖卡只在 `Merged` 后解除阻塞。
+- 评审与合并细则见 [`kandev-review-policy.md`](kandev-review-policy.md)。
+
+## 4. 暂不解决的已知风险
 
 1. **VPS agent 仍以 root 运行。** 当前 Kandev service 与 Local executor 都是 root；`REL-02` 和 `REL-04` 完成前不启用 Night Auto。正式无人值守队列前必须建立受限用户、隔离构建缓存，并验证 agent 不能写工作区外路径。
 2. **Windows Gate 没有 executor。** 25 张 Windows 卡仍是人工/待接入 executor；VPS 不能代替 GUI 验收。

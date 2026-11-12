@@ -13,8 +13,10 @@ Environment:
   KANDEV_VPS_WORKFLOW_ID default VPS Dev workflow
   KANDEV_VPS_INBOX_STEP  default Inbox step
   KANDEV_VPS_READY_STEP  default Ready step
-  KANDEV_VPS_AGENT_STEP  default Agent step
-  KANDEV_AGENT_WIP       default 2
+  KANDEV_VPS_AGENT_STEP    default Agent step
+  KANDEV_VPS_REVIEW_STEP   default Review step
+  KANDEV_AGENT_WIP         default 2
+  KANDEV_REVIEW_WIP        default 2
 """
 
 import argparse
@@ -32,7 +34,9 @@ WORKFLOW = os.environ.get("KANDEV_VPS_WORKFLOW_ID", "d1a08c74-42ab-4e8d-aee3-a67
 INBOX = os.environ.get("KANDEV_VPS_INBOX_STEP", "1141b1f5-2ea7-44bb-b182-d7490b31a8e9")
 READY = os.environ.get("KANDEV_VPS_READY_STEP", "9e7881ac-cda4-480c-8652-d3665f78645e")
 AGENT = os.environ.get("KANDEV_VPS_AGENT_STEP", "47b1aac7-2bb9-4b26-b8e3-412c424b4f46")
+REVIEW = os.environ.get("KANDEV_VPS_REVIEW_STEP", "2b6d9951-e9fd-4578-8bf4-6f3e7aa7ce31")
 WIP = int(os.environ.get("KANDEV_AGENT_WIP", "2"))
+REVIEW_WIP = int(os.environ.get("KANDEV_REVIEW_WIP", "2"))
 ACTIVE_STATES = {"IN_PROGRESS", "SCHEDULING", "WAITING_FOR_INPUT"}
 
 
@@ -122,6 +126,12 @@ def run_once():
     for task in detailed:
         if task.get("workflow_step_id") == READY and not is_eligible(task):
             move(task, INBOX, "Ready blocked -> Inbox")
+
+    # Backpressure: do not feed new work while Review is full.
+    review_tasks = [t for t in detailed if t.get("workflow_step_id") == REVIEW]
+    if len(review_tasks) >= REVIEW_WIP:
+        print(f"review full ({len(review_tasks)}/{REVIEW_WIP}); not feeding")
+        return
 
     # Fill Ready with every eligible Inbox card.
     for task in detailed:

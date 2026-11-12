@@ -75,6 +75,8 @@ forbid:
 <从第 3 节复制的分类 prompt>
 ```
 
+评审、合并权限和 Review WIP 见 [`kandev-review-policy.md`](kandev-review-policy.md)。
+
 硬规则：
 
 - 不在正文重复 `lane`、`milestone`、`priority`、依赖列表；这些用 Kandev 的 label、priority 和 `blocked_by`。
