@@ -40,6 +40,8 @@ type TaskRef struct {
 	Status               string `json:"status,omitempty"`
 	ProtocolVersionID    string `json:"protocolVersionId,omitempty"`
 	SourceBlockVersionID string `json:"sourceBlockVersionId,omitempty"`
+	AssayID              string `json:"assayId,omitempty"`
+	Timepoint            string `json:"timepoint,omitempty"`
 }
 
 // Node is one read-only node. A step node may contain child tasks or nested
@@ -55,6 +57,9 @@ type Node struct {
 	UseID                string           `json:"useId,omitempty"`
 	BlockVersionID       string           `json:"blockVersionId,omitempty"`
 	DefinitionRef        string           `json:"definitionRef,omitempty"`
+	ProtocolVersionID    string           `json:"protocolVersionId,omitempty"`
+	AssayID              string           `json:"assayId,omitempty"`
+	Timepoint            string           `json:"timepoint,omitempty"`
 	Instruction          string           `json:"instruction,omitempty"`
 	Parameters           []BlockParameter `json:"parameters,omitempty"`
 	UnresolvedParameters []string         `json:"unresolvedParameters,omitempty"`
@@ -163,6 +168,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 		ref := TaskRef{
 			Key: task.Key, Path: path, Title: task.Title, Status: task.Status,
 			ProtocolVersionID: task.ProtocolVersionID, SourceBlockVersionID: task.SourceBlockVersionID,
+			AssayID: task.AssayID, Timepoint: task.Timepoint,
 		}
 		var matches []stepDef
 		for _, step := range validSteps {
@@ -203,6 +209,12 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 			node.Children = buildTrie(step.path, descendants)
 			node.DefinitionRef = resolveDefinition(step, referenceRefs)
 			node.BlockVersionID = node.DefinitionRef
+			for _, task := range descendants {
+				if task.ProtocolVersionID != "" {
+					node.ProtocolVersionID = task.ProtocolVersionID
+					break
+				}
+			}
 			validateComposite(node, step.path, node.DefinitionRef, descendants)
 		case len(exact) > 0:
 			for _, task := range exact {
@@ -211,7 +223,8 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 			if len(exact) > 1 {
 				node.Issues = append(node.Issues, "multiple exact tasks share one step path")
 			}
-			node.DefinitionRef = exact[0].ProtocolVersionID
+			node.ProtocolVersionID = exact[0].ProtocolVersionID
+			node.DefinitionRef = exact[0].SourceBlockVersionID
 			node.BlockVersionID = exact[0].SourceBlockVersionID
 		default:
 			node.Issues = append(node.Issues, "no frozen task matches this step path")
@@ -346,8 +359,9 @@ func taskNode(task TaskRef) *Node {
 	return &Node{
 		ID: task.Key, Title: title, Path: task.Path, Kind: KindTask,
 		Identity: IdentityOccurrence, BlockVersionID: task.SourceBlockVersionID,
-		TaskKey: task.Key,
-		Status:  task.Status, DefinitionRef: task.ProtocolVersionID,
+		TaskKey: task.Key, ProtocolVersionID: task.ProtocolVersionID,
+		AssayID: task.AssayID, Timepoint: task.Timepoint,
+		Status: task.Status, DefinitionRef: task.SourceBlockVersionID,
 		Completed: completedCount(task.Status), Total: 1,
 	}
 }

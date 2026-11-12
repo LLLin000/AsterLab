@@ -13,6 +13,15 @@ Canvas and the Agent CLI.
 adds the frozen Run occurrence overlay. The command never writes and never
 creates a Run.
 
+When `run_id` is supplied the frozen Run is the sole authority:
+
+- `design_id` must equal the Run's owning design, else the query is rejected.
+- If `revision` is supplied it must equal the Run's frozen AsterDoc revision,
+  else the query is rejected with a version conflict.
+- Definition instructions and parameters come from the frozen AsterDoc and the
+  ProtocolBlock versions it referenced at freeze time. The latest Design is
+  never read to supplement an old Run.
+
 ## Output
 
 ```json
@@ -41,17 +50,23 @@ derived from the other.
 | `kind` | `step` or `task` |
 | `identity` | `use`, `definition`, or `occurrence` |
 | `useId` | design/block-use location |
-| `blockVersionId`, `definitionRef` | exact ProtocolBlock version |
+| `blockVersionId`, `definitionRef` | exact ProtocolBlock version backing the operation |
+| `protocolVersionId` | Protocol version of the frozen task/design context |
 | `instruction` | frozen operation instruction |
 | `parameters[]` | resolved `{key,label,value,unit}` |
 | `unresolvedParameters[]` | explicit unresolved parameter names |
-| `taskKey`, `status` | present on Run occurrence nodes |
+| `taskKey`, `status`, `assayId`, `timepoint` | present on Run occurrence nodes |
+| `assayId`, `timepoint` | execution scope of a Run occurrence |
 | `composite`, `total`, `completed` | derived containment/progress |
 | `children[]` | recursive child nodes |
 | `issues[]` | local diagnostics |
 
 Unresolved references, ambiguous paths, duplicate definitions and missing
 providers are returned as `issues`; they are never guessed into children.
+
+Definition/Use/Occurrence association is not path-only. Run enrichment matches
+`path + assayId` inside the same frozen revision; two definition nodes at the
+same key produce an `identity is ambiguous` issue and copy no metadata.
 
 ## Producer boundary
 

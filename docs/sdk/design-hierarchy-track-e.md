@@ -2,7 +2,7 @@
 
 - Baseline: `feature/v2-run-workspace` @ `6608ab1`
 - Commits: E0 `d4224f8`, E1 `dfd3ada`, E2/E3 `abb8c75`, F0 `f67c382`,
-  F1 `c3382d4`
+  F1 `c3382d4`, F2 (this commit)
 - Scope: read-only Design hierarchy, one-level Canvas drill-down, F0
   readability, and the read-only Agent query. No nested editing and no Agent
   write commands.

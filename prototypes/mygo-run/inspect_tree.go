@@ -52,72 +52,136 @@ func runInspectTree(args []string) error {
 	}
 	defer runSvc.Close()
 
-	var doc runs.AsterDocSnapshot
-	if *revision > 0 {
-		doc, err = designSvc.LoadAsterDocAt(ctx, *designID, *revision)
-	} else {
-		doc, err = designSvc.LoadAsterDoc(ctx, *designID)
-	}
+	result, err := inspectTreeFor(ctx, designSvc, runSvc, *designID, *revision, *runID)
 	if err != nil {
 		return err
 	}
-	if doc.Source == "" {
-		return fmt.Errorf("design %s has no AsterDoc source", *designID)
+	return encoderOutput(result)
+}
+
+// inspectTreeFor is the testable projection entry point. It returns the
+// contract and never prints.
+func inspectTreeFor(ctx context.Context, designSvc runs.DesignService, runSvc runs.RunService, designID string, revision uint64, runID string) (inspectTreeResult, error) {
+	if runID != "" {
+		result, err := inspectFrozenRun(ctx, designSvc, runSvc, designID, revision, runID)
+		if err != nil {
+			return inspectTreeResult{}, err
+		}
+		return result, nil
+	}
+	return inspectDesign(ctx, designSvc, designID, revision)
+}
+
+// inspectDesign builds the hierarchy from a frozen AsterDoc revision without a Run.
+func inspectDesign(ctx context.Context, designSvc runs.DesignService, designID string, revision uint64) (inspectTreeResult, error) {
+	doc, err := loadAsterDoc(ctx, designSvc, designID, revision)
+	if err != nil {
+		return inspectTreeResult{}, err
 	}
 	provider := &protocolBlockProvider{svc: designSvc, cache: map[string]workflowtree.BlockDefinition{}}
-	designTree, err := workflowtree.BuildDesign(&asterdoc.FrozenAsterDoc{
+	tree, err := workflowtree.BuildDesign(&asterdoc.FrozenAsterDoc{
 		DesignID: doc.DesignID, Revision: doc.Revision, Source: doc.Source,
 	}, provider)
 	if err != nil {
-		return err
+		return inspectTreeResult{}, fmt.Errorf("design %s: %w", designID, err)
 	}
-
-	tree := designTree
-	designMode := true
-	resultRevision := doc.Revision
-	if *runID != "" {
-		snap, loadErr := runSvc.LoadRun(ctx, *runID)
-		if loadErr != nil {
-			return loadErr
-		}
-		if snap.AsterDoc == nil || snap.AsterDoc.SourceHash == "" {
-			return fmt.Errorf("run %s has no frozen AsterDoc reference", *runID)
-		}
-		frozen, loadErr := asterdoc.LoadFrozenAsterDocAt(ctx, designSvc,
-			snap.AsterDoc.DesignID, snap.AsterDoc.Revision, snap.AsterDoc.SourceHash)
-		if loadErr != nil {
-			return loadErr
-		}
-		tree, err = workflowtree.Build(snap.Tasks, &frozen)
-		if err != nil {
-			return err
-		}
-		enrichRunTree(tree, designTree)
-		designMode = false
-		resultRevision = frozen.Revision
-	}
-	issues := append([]string{}, designTree.Issues...)
-	issues = append(issues, tree.Issues...)
-	result := inspectTreeResult{
-		DesignID: doc.DesignID, Revision: resultRevision, RunID: *runID,
-		Design: designMode, Roots: tree.Roots, Order: tree.Order,
-		Precedes: tree.Precedes, Issues: issues,
-	}
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetEscapeHTML(false)
-	return encoder.Encode(result)
+	return inspectTreeResult{
+		DesignID: doc.DesignID,
+		Revision: doc.Revision,
+		Design:   true,
+		Roots:    tree.Roots,
+		Order:    tree.Order,
+		Precedes: tree.Precedes,
+		Issues:   tree.Issues,
+	}, nil
 }
 
-// enrichRunTree copies definition metadata onto the matching Run overlay
-// nodes. Occurrence identity and status stay owned by the Run.
-func enrichRunTree(runTree, designTree *workflowtree.Tree) {
-	byPath := map[string]*workflowtree.Node{}
+// inspectFrozenRun uses the Run's frozen AsterDoc as the sole authority.
+// It never reads the latest Design revision to supplement a frozen Run.
+func inspectFrozenRun(ctx context.Context, designSvc runs.DesignService, runSvc runs.RunService, designID string, requestedRevision uint64, runID string) (inspectTreeResult, error) {
+	snap, err := runSvc.LoadRun(ctx, runID)
+	if err != nil {
+		return inspectTreeResult{}, fmt.Errorf("run %s: %w", runID, err)
+	}
+	if snap.DesignID != designID {
+		return inspectTreeResult{}, fmt.Errorf("run %s belongs to design %s, not %s", runID, snap.DesignID, designID)
+	}
+	if requestedRevision > 0 && snap.AsterDoc != nil && snap.AsterDoc.Revision != requestedRevision {
+		return inspectTreeResult{}, fmt.Errorf("run %s frozen AsterDoc revision %d does not match requested revision %d",
+			runID, snap.AsterDoc.Revision, requestedRevision)
+	}
+	if snap.AsterDoc == nil || snap.AsterDoc.SourceHash == "" {
+		return inspectTreeResult{}, fmt.Errorf("run %s has no frozen AsterDoc reference", runID)
+	}
+	if snap.AsterDoc.DesignID != designID {
+		return inspectTreeResult{}, fmt.Errorf("run %s frozen AsterDoc belongs to design %s, not %s",
+			runID, snap.AsterDoc.DesignID, designID)
+	}
+	frozen, err := asterdoc.LoadFrozenAsterDocAt(ctx, designSvc,
+		snap.AsterDoc.DesignID, snap.AsterDoc.Revision, snap.AsterDoc.SourceHash)
+	if err != nil {
+		return inspectTreeResult{}, fmt.Errorf("run %s frozen document: %w", runID, err)
+	}
+	if frozen.Revision != snap.AsterDoc.Revision {
+		return inspectTreeResult{}, fmt.Errorf("run %s frozen document revision %d does not match reference %d",
+			runID, frozen.Revision, snap.AsterDoc.Revision)
+	}
+	provider := &protocolBlockProvider{svc: designSvc, cache: map[string]workflowtree.BlockDefinition{}}
+	designTree, err := workflowtree.BuildDesign(&frozen, provider)
+	if err != nil {
+		return inspectTreeResult{}, fmt.Errorf("run %s frozen design hierarchy: %w", runID, err)
+	}
+	runTree, err := workflowtree.Build(snap.Tasks, &frozen)
+	if err != nil {
+		return inspectTreeResult{}, fmt.Errorf("run %s workflow tree: %w", runID, err)
+	}
+	enrichRunTree(runTree, designTree, runID)
+	issues := append([]string{}, designTree.Issues...)
+	issues = append(issues, runTree.Issues...)
+	for _, root := range runTree.Roots {
+		issues = append(issues, root.Issues...)
+	}
+	return inspectTreeResult{
+		DesignID: designID,
+		Revision: frozen.Revision,
+		RunID:    runID,
+		Design:   false,
+		Roots:    runTree.Roots,
+		Order:    runTree.Order,
+		Precedes: runTree.Precedes,
+		Issues:   issues,
+	}, nil
+}
+
+func loadAsterDoc(ctx context.Context, designSvc runs.DesignService, designID string, revision uint64) (runs.AsterDocSnapshot, error) {
+	var doc runs.AsterDocSnapshot
+	var err error
+	if revision > 0 {
+		doc, err = designSvc.LoadAsterDocAt(ctx, designID, revision)
+	} else {
+		doc, err = designSvc.LoadAsterDoc(ctx, designID)
+	}
+	if err != nil {
+		return doc, fmt.Errorf("design %s: %w", designID, err)
+	}
+	if doc.Source == "" {
+		return doc, fmt.Errorf("design %s has no AsterDoc source", designID)
+	}
+	return doc, nil
+}
+
+// enrichRunTree copies definition metadata from the frozen design hierarchy
+// onto Run occurrence nodes. Matching is identity-based: path + assay_id.
+// It never guesses from path alone.
+func enrichRunTree(runTree, designTree *workflowtree.Tree, runID string) error {
+	byPath := map[string][]*workflowtree.Node{}
 	var walk func(*workflowtree.Node)
 	walk = func(node *workflowtree.Node) {
 		if node == nil {
 			return
 		}
-		byPath[node.Path] = node
+		key := node.Path + "|" + node.AssayID
+		byPath[key] = append(byPath[key], node)
 		for _, child := range node.Children {
 			walk(child)
 		}
@@ -125,31 +189,53 @@ func enrichRunTree(runTree, designTree *workflowtree.Tree) {
 	for _, root := range designTree.Roots {
 		walk(root)
 	}
-	var apply func(*workflowtree.Node)
-	apply = func(node *workflowtree.Node) {
+	var apply func(*workflowtree.Node) error
+	apply = func(node *workflowtree.Node) error {
 		if node == nil {
-			return
+			return nil
 		}
-		if definition := byPath[node.Path]; definition != nil {
+		key := node.Path + "|" + node.AssayID
+		defs := byPath[key]
+		if len(defs) > 1 {
+			node.Issues = append(node.Issues, fmt.Sprintf(
+				"run %s: path %s assay %s matches %d design nodes; identity is ambiguous",
+				runID, node.Path, node.AssayID, len(defs)))
+		} else if len(defs) == 1 {
+			def := defs[0]
 			if node.Instruction == "" {
-				node.Instruction = definition.Instruction
+				node.Instruction = def.Instruction
 			}
 			if len(node.Parameters) == 0 {
-				node.Parameters = definition.Parameters
-				node.UnresolvedParameters = definition.UnresolvedParameters
+				node.Parameters = def.Parameters
+				node.UnresolvedParameters = def.UnresolvedParameters
 			}
 			if node.UseID == "" {
-				node.UseID = definition.UseID
+				node.UseID = def.UseID
 			}
 			if node.DefinitionRef == "" {
-				node.DefinitionRef = definition.DefinitionRef
+				node.DefinitionRef = def.DefinitionRef
+			}
+			if node.BlockVersionID == "" {
+				node.BlockVersionID = def.BlockVersionID
 			}
 		}
 		for _, child := range node.Children {
-			apply(child)
+			if err := apply(child); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
 	for _, root := range runTree.Roots {
-		apply(root)
+		if err := apply(root); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+func encoderOutput(result inspectTreeResult) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(result)
 }
