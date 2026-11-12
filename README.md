@@ -4,7 +4,7 @@
 
 产品术语与目标对象边界见 [CONTEXT.md](CONTEXT.md)；该文件记录目标设计语义，当前 CLI 的已实现能力仍以 [AGENT_API.md](AGENT_API.md) 为准。
 
-交付决策见 [ADR 0001](docs/adr/0001-web-first-beta.md)；系统分层、Core 读模型和仪器步骤模块见 [docs/architecture.md](docs/architecture.md)。
+交付决策见 [ADR 0001](docs/adr/0001-web-first-beta.md)；系统分层、Core 读模型和仪器步骤模块见 [docs/architecture.md](docs/architecture.md)。Windows/Linux 分工、构建产物与验证门禁见 [docs/engineering/cross-platform-builds.md](docs/engineering/cross-platform-builds.md)。
 文档权威与阅读顺序见 [docs/README.md](docs/README.md)；当前实施阶段见 [docs/implementation-plan.md](docs/implementation-plan.md)；P0 Core 契约见 [docs/contracts/core-v1.md](docs/contracts/core-v1.md)。 设计控制与 Rune 迁移门槛见 [docs/design/README.md](docs/design/README.md)。
 当前共享设计投影位于 `crates/asterlab-core`；P1-A 已由 CLI/HTTP 与 Slint 地图摘要共用。
 

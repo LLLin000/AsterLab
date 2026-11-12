@@ -3,6 +3,9 @@
 Date: 2026-11-12. Baseline: `main` = `5e20027` (`a1a84d2` plus the VPS
 handoff and reproducible fixture). Frozen tag `sdk-v1-rc3` = `b267d3f`; do not move it.
 
+Shared Windows/Linux workflow, artifact ownership, and merge gates:
+[`docs/engineering/cross-platform-builds.md`](docs/engineering/cross-platform-builds.md).
+
 ## 1. What the VPS can and cannot do
 
 This is a **Windows-first desktop product**. Split the work deliberately.
