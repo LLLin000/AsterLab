@@ -70,16 +70,15 @@ same key produce an `identity is ambiguous` issue and copy no metadata.
 
 ## Producer boundary
 
-The projection is currently produced by the shared Go hierarchy engine
-(`prototypes/mygo-run/internal/workflowtree`) through the app's hidden
-`--inspect-tree` contract mode. The Rust CLI `workflow.inspect_tree` is a
-transport adapter: it invokes that engine and returns the JSON; it does not
-reimplement the algorithm.
+The CLI `workflow.inspect_tree` is produced directly by Rust Core
+(`crates/asterlab-core/src/workflow_tree.rs`). The adapter loads the AsterDoc
+revision, ProtocolBlock previews, and frozen Run workspace, then calls the
+Core projection; it does not launch the desktop app and does not need
+`ASTERLAB_APP_BIN`.
 
-The GUI uses the same engine. The Go tests remain the validation oracle. Moving
-the producer into Rust Core while preserving this contract is the remaining
-architecture step; the CLI/Canvas contract must not fork in the meantime.
-
-`ASTERLAB_APP_BIN` can point the CLI at the app binary. Without it, the adapter
-looks for `prototypes/mygo-run/target/asterlab-onevra.exe` relative to the
-working directory, then `asterlab-onevra.exe` on `PATH`.
+The Go hierarchy engine (`prototypes/mygo-run/internal/workflowtree`) remains
+the GUI Canvas/Run-rail producer. Both producers must preserve this contract
+until the GUI migrates. The shared evidence files under
+`docs/sdk/rna-extraction-case/evidence/` are checked by the Rust test
+`workflow_inspect_tree_matches_shared_go_evidence`, so a CLI/Core change cannot
+silently fork the shape while the Go oracle is still authoritative.

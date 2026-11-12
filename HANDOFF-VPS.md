@@ -19,7 +19,7 @@ This is a **Windows-first desktop product**. Split the work deliberately.
 | Go non-GUI packages | **yes**, after `mygo native build -target host` | yes |
 | MyGo/Slint desktop app (`prototypes/mygo-run`) | **not without porting** | yes |
 | `runs.dll` native module (`mygo native check`) | builds a host-native `libRuns.so` for local Go tests; not the shipped `.dll` | yes (MSVC) |
-| `workflow.inspect_tree` | **not available on Linux alone** — it requires `ASTERLAB_APP_BIN` pointing at the Windows app | yes |
+| `workflow.inspect_tree` | **yes** — Rust Core projection, no desktop app | yes |
 | `mygo-automation` UI automation, `scripts/gui-e2e-v11.ps1`, screenshot scripts | **no** (Win32 + PowerShell) | yes |
 
 Windows-only by construction: `target/vsdev.cmd` (MSVC environment),
@@ -85,7 +85,6 @@ Environment variables:
 | `ASTERLAB_DATA_DIR` | fixture output; must be under temp, `target`, or `CARGO_TARGET_DIR`; non-empty dirs need `.rc3-fixture` |
 | `CARGO_TARGET_DIR` | build output; **set it explicitly on the VPS** |
 | `GOTMPDIR`, `TMP`, `TEMP` | Go/MSVC scratch; keep off the data volume |
-| `ASTERLAB_APP_BIN` | only for `workflow.inspect_tree` (needs the Windows app) |
 | `LABWORKBENCH_CLI` | path to `labworkbench` for `scripts/rc3-fixture.py` |
 
 Disk: the repo plus build caches reached ~7 GB. The Windows host ran out of
@@ -145,10 +144,9 @@ both themes (`docs/product/evidence/`).
   not been re-run after the six-surface change.
 - No plugin ABI, no template market, no device control. The SDK is compiled-in
   modules with a stable contract, and the docs say so.
-- `workflow.inspect_tree` still delegates to the Go desktop app through
-  `ASTERLAB_APP_BIN`. It is not a Linux-native capability, and Linux CLI
-  evidence must not be presented as full Agent CLI parity until the hierarchy
-  projection moves into Rust Core.
+- The GUI Canvas/Run rail still uses the Go `internal/workflowtree` engine.
+  The CLI now uses Rust Core and is checked against the shared RNA evidence;
+  keep both producers aligned until the GUI migrates.
 - `cargo fmt` is not clean repo-wide; do not run it wholesale, it buries review
   diffs.
 

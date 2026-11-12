@@ -127,6 +127,7 @@ one level read-only; see `docs/sdk/design-hierarchy-track-e.md`.
 ## Read-only Agent query
 
 `workflow.inspect_tree` exposes the same hierarchy contract to the Agent CLI,
-with optional Run overlay. The Rust CLI is a transport adapter over the shared
-Go hierarchy engine; it does not reimplement `BuildDesign`. See
-`docs/sdk/workflow-tree-contract-v1.md`.
+with optional Run overlay. The CLI now computes it in Rust Core
+(`crates/asterlab-core/src/workflow_tree.rs`); the GUI still uses the Go
+hierarchy engine, and the Rust test compares both against the shared RNA
+evidence. See `docs/sdk/workflow-tree-contract-v1.md`.

@@ -92,8 +92,9 @@ python3 scripts/rc3-fixture.py
 
 The fixture writes IDs to `$RC3_DATA/rc3-ids.json`. A non-empty directory is
 refused unless it contains the `.rc3-fixture` marker from a previous run.
-`workflow.inspect_tree` is **not** a Linux-native capability yet; it still
-requires `ASTERLAB_APP_BIN` pointing at the Windows app.
+`workflow.inspect_tree` is now computed by Rust Core on Linux; it no longer
+requires `ASTERLAB_APP_BIN`. The GUI Canvas/Run rail still uses the Go engine,
+so both producers stay checked against the shared RNA evidence.
 
 Linux Go tests currently write headless PNG evidence into tracked paths. Do not
 commit those changes; discard PNG churn after a run or use a disposable
@@ -168,6 +169,7 @@ have run. A Linux-only green run does not prove the GUI.
   the whole tree as part of a feature PR.
 - Do not run `cargo fmt` wholesale; the tree is not clean and the diff would
   bury review. Format touched code only.
-- `workflow.inspect_tree` is still a Windows-app adapter. Moving the hierarchy
-  projection into Rust Core is the next architecture step; until then, do not
-  present Linux CLI evidence as full Agent CLI parity.
+- `workflow.inspect_tree` now has a Rust Core producer for the CLI. The GUI
+  Canvas/Run rail still uses the Go producer; keep the shared evidence test
+  green and migrate the GUI producer before calling the two implementations a
+  single code path.

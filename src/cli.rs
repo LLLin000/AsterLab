@@ -22,6 +22,9 @@ use asterlab_core::semantic_catalog::{compile_operation_module, CompilePolicy};
 use asterlab_core::semantic_changeset::ChangeSet;
 use asterlab_core::semantic_component::ProtocolScope;
 use asterlab_core::semantic_query::{assess_block_patch, inspect_block, search_modules};
+use asterlab_core::workflow_tree::{
+    BlockDefinition, BlockParameter, BlockStep, DesignStep, Document, RunTask,
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use sha2::{Digest, Sha256};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -32,7 +35,6 @@ use std::{
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
-    process::Command,
 };
 use uuid::Uuid;
 
@@ -6806,38 +6808,428 @@ pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliE
 }
 
 fn inspect_workflow_tree(input: &InspectTreeInput, data_dir: &Path) -> Result<Value, CliError> {
-    let binary = std::env::var("ASTERLAB_APP_BIN").ok().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| {
-        let local = Path::new("prototypes/mygo-run/target/asterlab-onevra.exe");
-        if local.exists() {
-            local.to_string_lossy().into_owned()
-        } else {
-            "asterlab-onevra.exe".to_owned()
+    let db = open_db(data_dir)?;
+    let (design_id, revision, run_id, source, tasks, design) = if let Some(run_id) = &input.run_id {
+        let workspace = run_workspace(&db, run_id)?;
+        let design_id = workspace["design_id"]
+            .as_str()
+            .ok_or_else(|| CliError::internal("Run 缺少设计 ID"))?
+            .to_owned();
+        if design_id != input.design_id {
+            return Err(CliError::input("design_id 必须等于 Run 的所属设计"));
         }
-    });
-    let mut command = Command::new(&binary);
-    command.arg("--inspect-tree").arg("--design").arg(&input.design_id);
-    if let Some(revision) = input.revision {
-        command.arg("--revision").arg(revision.to_string());
-    }
-    if let Some(run_id) = &input.run_id {
-        command.arg("--run").arg(run_id);
-    }
-    command.env("LABWORKBENCH_DATA_DIR", data_dir);
-    let output = command.output().map_err(|error| {
-        CliError::internal(format!(
-            "无法启动层级投影引擎 {binary}：{error}；可设置 ASTERLAB_APP_BIN 指向 AsterLab 应用"
-        ))
-    })?;
-    if !output.status.success() {
-        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(CliError::internal(if message.is_empty() {
-            format!("层级投影引擎退出码 {:?}", output.status.code())
+        let revision = workspace["asterdoc"]["revision"]
+            .as_u64()
+            .filter(|revision| *revision > 0)
+            .or_else(|| workspace["design_revision"].as_u64())
+            .ok_or_else(|| CliError::internal("Run 缺少冻结 AsterDoc 版本号"))?;
+        if let Some(requested) = input.revision {
+            if requested != revision {
+                return Err(CliError::conflict(format!(
+                    "Run 冻结的 AsterDoc revision 为 {revision}，请求为 {requested}"
+                )));
+            }
+        }
+        let document = load_asterdoc_at(&db, &design_id, revision)?;
+        let source = document["source"].as_str().unwrap_or("").to_owned();
+        let tasks = workflow_tasks_from_workspace(&workspace);
+        (
+            design_id,
+            revision,
+            Some(run_id.clone()),
+            source,
+            tasks,
+            false,
+        )
+    } else {
+        let document = if let Some(revision) = input.revision {
+            load_asterdoc_at(&db, &input.design_id, revision)?
         } else {
-            message
-        }));
+            load_asterdoc(&db, &input.design_id)?
+        };
+        let revision = document["revision"].as_u64().unwrap_or(0);
+        let source = document["source"].as_str().unwrap_or("").to_owned();
+        (
+            input.design_id.clone(),
+            revision,
+            None,
+            source,
+            Vec::new(),
+            true,
+        )
+    };
+
+    let document = parse_workflow_document(&source)?;
+    let blocks = load_workflow_blocks(&db, &document)?;
+    let mut value = if design {
+        asterlab_core::workflow_tree::build_design(&document, &blocks)
+    } else {
+        asterlab_core::workflow_tree::build_run(&document, &blocks, &tasks)
+    };
+    value["designId"] = json!(design_id);
+    value["revision"] = json!(revision);
+    if let Some(run_id) = run_id {
+        value["runId"] = json!(run_id);
     }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|error| CliError::internal(format!("层级投影输出无效：{error}")))
+    Ok(value)
+}
+
+fn parse_workflow_document(source: &str) -> Result<Document, CliError> {
+    let mut document = Document::default();
+    let mut workflow_seen = false;
+    for block in asterdoc_blocks(source)? {
+        let value = &block.value;
+        let kind = value.get("kind").and_then(|value| value.as_str()).unwrap_or("");
+        match kind {
+            "reference" => {
+                let view = value.get("view").and_then(|value| value.as_str()).unwrap_or("");
+                if view == "protocol_block" {
+                    let id = value.get("id").and_then(|value| value.as_str()).unwrap_or("");
+                    let reference = value.get("ref").and_then(|value| value.as_str()).unwrap_or("");
+                    if !id.is_empty() && !reference.is_empty() {
+                        document
+                            .reference_blocks
+                            .insert(id.to_owned(), reference.to_owned());
+                    }
+                }
+            }
+            "step" => {
+                let id = value.get("id").and_then(|value| value.as_str()).unwrap_or("");
+                if id.is_empty() {
+                    continue;
+                }
+                let schema = value.get("schema").and_then(|value| value.as_i64()).unwrap_or(0);
+                let execution = value
+                    .get("execution")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                let organizational = schema == 3 && execution == "organizational";
+                let mut path = value
+                    .get("path")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                if organizational && path.is_empty() {
+                    path = id.to_owned();
+                }
+                let mut refs = Vec::new();
+                if let Some(uses) = value.get("uses").and_then(|value| value.as_sequence()) {
+                    for item in uses {
+                        if let Some(reference) =
+                            item.get("ref").and_then(|value| value.as_str())
+                        {
+                            if !reference.is_empty() {
+                                refs.push(reference.to_owned());
+                            }
+                        }
+                    }
+                }
+                document.steps.push(DesignStep {
+                    id: id.to_owned(),
+                    title: value
+                        .get("title")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("")
+                        .to_owned(),
+                    path,
+                    order: value.get("order").and_then(|value| value.as_i64()).unwrap_or(0),
+                    organizational,
+                    refs,
+                });
+            }
+            "workflow" if !workflow_seen => {
+                workflow_seen = true;
+                if let Some(order) = value
+                    .get("business_order")
+                    .and_then(|value| value.as_sequence())
+                {
+                    document.order = order
+                        .iter()
+                        .filter_map(|value| value.as_str().map(str::to_owned))
+                        .collect();
+                }
+                if let Some(edges) = value.get("edges").and_then(|value| value.as_sequence()) {
+                    for edge in edges {
+                        let from = edge.get("from").and_then(|value| value.as_str()).unwrap_or("");
+                        let to = edge.get("to").and_then(|value| value.as_str()).unwrap_or("");
+                        if !from.is_empty() && !to.is_empty() {
+                            document.edges.push((from.to_owned(), to.to_owned()));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(document)
+}
+
+fn load_workflow_blocks(
+    db: &Connection,
+    document: &Document,
+) -> Result<HashMap<String, Result<BlockDefinition, String>>, CliError> {
+    let mut versions = HashSet::new();
+    for step in &document.steps {
+        for reference in &step.refs {
+            if let Some(version) = document.reference_blocks.get(reference) {
+                versions.insert(version.clone());
+            }
+        }
+    }
+    let mut blocks = HashMap::new();
+    for version in versions {
+        let parsed = block_preview(db, &version, &[])
+            .map_err(|error| error.message)
+            .and_then(workflow_block_definition);
+        blocks.insert(version, parsed);
+    }
+    Ok(blocks)
+}
+
+fn workflow_block_definition(value: Value) -> Result<BlockDefinition, String> {
+    let steps = value
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "ProtocolPreview 缺少 steps".to_owned())?;
+    let mut definition = BlockDefinition::default();
+    for step in steps {
+        let parameters = step
+            .get("parameters")
+            .and_then(Value::as_array)
+            .map(|parameters| {
+                parameters
+                    .iter()
+                    .map(|parameter| BlockParameter {
+                        key: parameter
+                            .get("slot")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned(),
+                        label: parameter
+                            .get("label")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned(),
+                        value: parameter.get("value").cloned().unwrap_or(Value::Null),
+                        unit: parameter
+                            .get("unit")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let unresolved_parameters = step
+            .get("unresolved_parameter_refs")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        definition.steps.push(BlockStep {
+            use_id: step
+                .get("use_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            path: step
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            title: step
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            instruction: step
+                .get("instruction")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            source_block_version_id: step
+                .get("source_block_version_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            parameters,
+            unresolved_parameters,
+        });
+    }
+    Ok(definition)
+}
+
+fn workflow_tasks_from_workspace(workspace: &Value) -> Vec<RunTask> {
+    let mut step_details: HashMap<(String, String), (String, String)> = HashMap::new();
+    for step in workspace["steps"].as_array().into_iter().flatten() {
+        let inner = &step["step"];
+        let path = inner["path"].as_str().unwrap_or("").to_owned();
+        let assay_id = step["scope"]["assay_id"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+        let title = inner["title"].as_str().unwrap_or("").to_owned();
+        let source = inner["source_block_version_id"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+        step_details.insert((path, assay_id), (title, source));
+    }
+    let mut protocol_versions: HashMap<String, String> = HashMap::new();
+    for scope in workspace["scopes"].as_array().into_iter().flatten() {
+        let assay_id = scope["id"].as_str().unwrap_or("").to_owned();
+        let version = scope["protocol_version_id"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+        if !assay_id.is_empty() {
+            protocol_versions.insert(assay_id, version);
+        }
+    }
+    let global_protocol = workspace["protocol_version_id"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned();
+    let mygo = &workspace["frozen_design"]["mygo"];
+    let step_tasks = mygo["stepTasks"].as_array().cloned().unwrap_or_default();
+    let explicit_links = mygo
+        .as_object()
+        .is_some_and(|mygo| mygo.contains_key("stepTasks"));
+    let mut step_blocks: HashMap<String, Vec<String>> = HashMap::new();
+    for (step, blocks) in mygo["stepBlocks"]
+        .as_object()
+        .into_iter()
+        .flat_map(|blocks| blocks.iter())
+    {
+        let versions = blocks
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        if !versions.is_empty() {
+            step_blocks.insert(step.clone(), versions);
+        }
+    }
+    let mut steps_by_assay: HashMap<String, Vec<String>> = HashMap::new();
+    for (step, assay) in mygo["stepAssays"]
+        .as_object()
+        .into_iter()
+        .flat_map(|assays| assays.iter())
+    {
+        if let Some(assay) = assay.as_str().filter(|assay| !assay.is_empty()) {
+            steps_by_assay
+                .entry(assay.to_owned())
+                .or_default()
+                .push(step.clone());
+        }
+    }
+    let mut paths_per_pair: HashMap<(String, String), HashSet<String>> = HashMap::new();
+    for task in workspace["tasks"].as_array().into_iter().flatten() {
+        let assay = task["scope"]["assay_id"].as_str().unwrap_or("");
+        if assay.is_empty() {
+            continue;
+        }
+        paths_per_pair
+            .entry((
+                assay.to_owned(),
+                task["timepoint"].as_str().unwrap_or("").to_owned(),
+            ))
+            .or_default()
+            .insert(task["step_path"].as_str().unwrap_or("").to_owned());
+    }
+
+    let mut tasks = Vec::new();
+    for task in workspace["tasks"].as_array().into_iter().flatten() {
+        let path = task["step_path"].as_str().unwrap_or("").to_owned();
+        let assay_id = task["scope"]["assay_id"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+        let timepoint = task["timepoint"].as_str().unwrap_or("").to_owned();
+        let (title, source) = step_details
+            .get(&(path.clone(), assay_id.clone()))
+            .cloned()
+            .unwrap_or_default();
+        let design_step_id = if explicit_links {
+            let pair = step_tasks
+                .iter()
+                .filter(|link| {
+                    link["assayId"].as_str() == Some(assay_id.as_str())
+                        && link["timepoint"].as_str() == Some(timepoint.as_str())
+                })
+                .collect::<Vec<_>>();
+            let by_path = pair
+                .iter()
+                .copied()
+                .filter(|link| link["path"].as_str() == Some(path.as_str()))
+                .collect::<Vec<_>>();
+            let mut chosen = if by_path.len() == 1 {
+                by_path[0]["stepId"].as_str().map(str::to_owned)
+            } else if by_path.is_empty() {
+                let pair_paths = paths_per_pair
+                    .get(&(assay_id.clone(), timepoint.clone()))
+                    .map(HashSet::len)
+                    .unwrap_or(0);
+                let unqualified = pair
+                    .iter()
+                    .copied()
+                    .filter(|link| {
+                        link.get("path")
+                            .and_then(Value::as_str)
+                            .map(str::is_empty)
+                            .unwrap_or(true)
+                    })
+                    .collect::<Vec<_>>();
+                if pair_paths == 1 && unqualified.len() == 1 {
+                    unqualified[0]["stepId"].as_str().map(str::to_owned)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if chosen.is_none() && !source.is_empty() {
+                let mut candidates = step_blocks
+                    .iter()
+                    .filter(|(_, blocks)| blocks.iter().any(|block| block == &source))
+                    .map(|(step, _)| step.clone())
+                    .collect::<Vec<_>>();
+                candidates.sort_unstable();
+                if candidates.len() == 1 {
+                    chosen = candidates.pop();
+                }
+            }
+            chosen.unwrap_or_default()
+        } else {
+            steps_by_assay
+                .get(&assay_id)
+                .filter(|steps| steps.len() == 1)
+                .map(|steps| steps[0].clone())
+                .unwrap_or_default()
+        };
+        tasks.push(RunTask {
+            key: task["task_key"].as_str().unwrap_or("").to_owned(),
+            path,
+            title: task["title"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| title.clone()),
+            status: task["status"].as_str().unwrap_or("").to_owned(),
+            protocol_version_id: protocol_versions
+                .get(&assay_id)
+                .cloned()
+                .unwrap_or_else(|| global_protocol.clone()),
+            source_block_version_id: source,
+            assay_id,
+            timepoint,
+            design_step_id,
+        });
+    }
+    tasks
 }
 
 pub(crate) fn design_map(db: &Connection, design_id: &str) -> Result<Value, CliError> {
@@ -9965,7 +10357,7 @@ fn tool_description(tool: &str) -> &'static str {
             "只修改 changes 中提供的字段，保留其他值并新增版本；必须提供 expected_revision。"
         }
         "run.list" => "按项目查询实验运行。",
-        "workflow.inspect_tree" => "只读投影 Design（可选 Run）的 Use/Definition/Occurrence 层级树；CLI 调用同一 Go 层级引擎，不复制投影算法。",
+        "workflow.inspect_tree" => "只读投影 Design（可选 Run）的 Use/Definition/Occurrence 层级树；由 Rust Core 直接计算，不依赖桌面应用。",
         "run.create" => "从设计当前版本创建运行并固定设计/Protocol 版本引用；仅受信任的本地写入端可调用，Agent 不得自行创建 Run。",
         "run.set_status" => "更新运行状态；必须提供读取时的 expected_revision。Protocol 必填参数未确认时拒绝开始运行。",
         "run.revise" => "按 expected_revision 修订运行名称或计划日期；设计版本、Protocol 清单、材料清单和重复关系不可改写。",
@@ -10688,6 +11080,85 @@ protocol_version_id: protocol-v1
             assert!(tool_writes(tool), "{tool} should write");
         }
     }
+    #[test]
+    fn workflow_inspect_tree_matches_shared_go_evidence() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .find(|dir| {
+                dir.join("prototypes/mygo-run/testdata/rna-case/labworkbench.sqlite")
+                    .is_file()
+            })
+            .expect("repository root with RNA evidence database");
+        let data_dir = std::env::temp_dir().join(format!("asterlab-workflow-{}", Uuid::new_v4()));
+        fs::create_dir_all(&data_dir).expect("temp data dir");
+        fs::copy(
+            root.join("prototypes/mygo-run/testdata/rna-case/labworkbench.sqlite"),
+            data_dir.join("labworkbench.sqlite"),
+        )
+        .expect("copy RNA evidence database");
+        let design_id = "d5525203-56bb-4b52-82c4-0e05f0ed2ff8";
+        let run_id = "ad9b452e-f8ea-404b-9a2a-7124f9403b02";
+
+        let design = inspect_workflow_tree(
+            &InspectTreeInput {
+                design_id: design_id.into(),
+                revision: Some(1),
+                run_id: None,
+            },
+            &data_dir,
+        )
+        .expect("design projection");
+        let design_evidence: Value = serde_json::from_str(
+            &fs::read_to_string(
+                root.join("docs/sdk/rna-extraction-case/evidence/inspect-tree-design.json"),
+            )
+            .expect("design evidence"),
+        )
+        .expect("design evidence json");
+        assert_eq!(design, design_evidence["result"]);
+
+        let run = inspect_workflow_tree(
+            &InspectTreeInput {
+                design_id: design_id.into(),
+                revision: None,
+                run_id: Some(run_id.into()),
+            },
+            &data_dir,
+        )
+        .expect("run projection");
+        let run_evidence: Value = serde_json::from_str(
+            &fs::read_to_string(
+                root.join("docs/sdk/rna-extraction-case/evidence/inspect-tree-run.json"),
+            )
+            .expect("run evidence"),
+        )
+        .expect("run evidence json");
+        assert_eq!(run, run_evidence["result"]);
+
+        let wrong_design = inspect_workflow_tree(
+            &InspectTreeInput {
+                design_id: "00000000-0000-0000-0000-000000000000".into(),
+                revision: None,
+                run_id: Some(run_id.into()),
+            },
+            &data_dir,
+        )
+        .expect_err("Run must reject a different design");
+        assert_eq!(wrong_design.code, "INVALID_INPUT");
+
+        let stale_revision = inspect_workflow_tree(
+            &InspectTreeInput {
+                design_id: design_id.into(),
+                revision: Some(2),
+                run_id: Some(run_id.into()),
+            },
+            &data_dir,
+        )
+        .expect_err("Run must reject a non-frozen revision");
+        assert_eq!(stale_revision.code, "REVISION_CONFLICT");
+        fs::remove_dir_all(&data_dir).expect("remove temp data dir");
+    }
+
     #[test]
     fn asterdoc_parity_samples() {
         // This file is compiled into more than one crate (the CLI and the app),

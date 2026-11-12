@@ -150,7 +150,7 @@ go run github.com/egoist/mygo/cmd/mygo native check modules/runs      PASS
 `workflow.inspect_tree` is available as a read-only Agent command. It returns
 the same contract used by the Canvas: `roots[]`, separated `order`/`precedes`,
 Definition/Use/Occurrence identity, instructions, parameters, optional
-TaskKey/status, and issues. The Rust CLI does not reimplement `BuildDesign`; it
-invokes the shared Go hierarchy engine through the app's hidden
-`--inspect-tree` mode. The remaining architecture step is moving that producer
-into Rust Core while preserving `docs/sdk/workflow-tree-contract-v1.md`.
+TaskKey/status, and issues. The CLI now computes the projection in Rust Core;
+the Canvas still uses the Go engine, and both are checked against the shared
+RNA evidence. Moving the GUI producer into Rust Core remains the architecture
+step while preserving `docs/sdk/workflow-tree-contract-v1.md`.
