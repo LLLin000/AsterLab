@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
 )
@@ -53,9 +53,9 @@ func (p *protocolBlockProvider) BlockDefinition(versionID string) (workflowtree.
 	return definition, nil
 }
 
-// ensureDesignHierarchy builds the definition/use hierarchy from the current
-// AsterDoc and referenced immutable ProtocolBlock versions. It never needs a
-// Run and never copies block steps into the AsterDoc.
+// ensureDesignHierarchy builds the definition/use hierarchy through Core. It
+// never needs a Run and never copies block steps into the AsterDoc. Go keeps
+// the projection only for rendering; Core owns every identity decision.
 func (a *app) ensureDesignHierarchy() *workflowtree.Tree {
 	if a.designDoc == nil {
 		a.designHierarchy = nil
@@ -63,20 +63,29 @@ func (a *app) ensureDesignHierarchy() *workflowtree.Tree {
 		a.designHierarchyErr = ""
 		return nil
 	}
-	if a.designHierarchy != nil && a.designHierarchySource == a.designDoc.Source {
+	key := fmt.Sprintf("%s|%d|%s", a.designDoc.DesignID, a.designDoc.Revision, a.designDoc.Source)
+	if a.designHierarchy != nil && a.designHierarchySource == key {
 		return a.designHierarchy
 	}
-	provider := &protocolBlockProvider{svc: a.designSvc, cache: a.blockPreviewCache}
-	tree, err := workflowtree.BuildDesign(&asterdoc.FrozenAsterDoc{
-		DesignID: a.designDoc.DesignID, Revision: a.designDoc.Revision, Source: a.designDoc.Source,
-	}, provider)
-	a.blockPreviewCache = provider.cache
-	a.designHierarchySource = a.designDoc.Source
-	a.designHierarchy = tree
+	a.designHierarchy = nil
 	a.designHierarchyErr = ""
+	if a.designSvc == nil {
+		a.designHierarchyErr = "设计服务不可用，无法读取层级"
+		return nil
+	}
+	raw, err := a.designSvc.WorkflowTree(context.Background(), a.designDoc.DesignID, a.designDoc.Revision)
+	if err != nil {
+		a.designHierarchyErr = state.MapError(err).Error()
+		return nil
+	}
+	tree, err := workflowtree.ParseJSON(raw)
 	if err != nil {
 		a.designHierarchyErr = err.Error()
-	} else if tree != nil && len(tree.Issues) > 0 {
+		return nil
+	}
+	a.designHierarchySource = key
+	a.designHierarchy = tree
+	if len(tree.Issues) > 0 {
 		a.designHierarchyErr = strings.Join(tree.Issues, "；")
 	}
 	return tree

@@ -38,6 +38,83 @@ func TestInspectTreeContractJSON(t *testing.T) {
 	}
 }
 
+func TestNativeWorkflowTreeDesignAndRunContract(t *testing.T) {
+	dir := rnaFixtureDataDir(t)
+	t.Setenv("LABWORKBENCH_DATA_DIR", dir)
+	ctx := context.Background()
+	designSvc, err := runs.NewDesignService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer designSvc.Close()
+	runSvc, err := runs.NewRunService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runSvc.Close()
+
+	const designID = "d2d393a8-9af4-452c-beba-c3687503ffee"
+	raw, err := designSvc.WorkflowTree(ctx, designID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	designTree, err := workflowtree.ParseJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !designTree.Design || len(designTree.Roots) == 0 {
+		t.Fatalf("design projection = design:%v roots:%d", designTree.Design, len(designTree.Roots))
+	}
+
+	const runID = "357c2f94-d5bf-4002-951e-f84c73e2d0b7"
+	raw, err = runSvc.WorkflowTree(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runTree, err := workflowtree.ParseJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runTree.Design || len(runTree.Roots) != 10 {
+		t.Fatalf("run projection = design:%v roots:%d", runTree.Design, len(runTree.Roots))
+	}
+	oracle, err := inspectTreeFor(ctx, designSvc, runSvc, designID, 0, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(oracle.Roots) != len(runTree.Roots) {
+		t.Fatalf("oracle roots=%d native roots=%d", len(oracle.Roots), len(runTree.Roots))
+	}
+	for i, root := range oracle.Roots {
+		if runTree.Roots[i].ID != root.ID {
+			t.Fatalf("root %d: native %q oracle %q", i, runTree.Roots[i].ID, root.ID)
+		}
+	}
+}
+
+func TestNativeWorkflowTreeHiddenModeRejectsMismatch(t *testing.T) {
+	dir := rnaFixtureDataDir(t)
+	t.Setenv("LABWORKBENCH_DATA_DIR", dir)
+	ctx := context.Background()
+	designSvc, err := runs.NewDesignService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer designSvc.Close()
+	runSvc, err := runs.NewRunService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runSvc.Close()
+	const runID = "357c2f94-d5bf-4002-951e-f84c73e2d0b7"
+	if _, err := nativeWorkflowTreeJSON(ctx, designSvc, runSvc, "00000000-0000-0000-0000-000000000000", 0, runID); err == nil {
+		t.Fatal("mismatched design accepted")
+	}
+	if _, err := nativeWorkflowTreeJSON(ctx, designSvc, runSvc, "d2d393a8-9af4-452c-beba-c3687503ffee", 3, runID); err == nil {
+		t.Fatal("non-frozen revision accepted")
+	}
+}
+
 func TestEnrichRunTreeKeepsOccurrenceIdentity(t *testing.T) {
 	design := &workflowtree.Tree{Roots: []*workflowtree.Node{{
 		Path: "root/rna-extraction", UseID: "root/rna-extraction",

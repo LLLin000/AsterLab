@@ -298,6 +298,7 @@ pub fn build_run(
 
     let mut valid_steps = Vec::new();
     let mut issues = Vec::new();
+    let mut duplicate_paths = HashSet::new();
     let mut seen_paths: HashMap<String, String> = HashMap::new();
     for step in steps {
         if step.path.is_empty() {
@@ -309,6 +310,7 @@ pub fn build_run(
                 "steps {} and {} share path {}",
                 previous, step.id, step.path
             ));
+            duplicate_paths.insert(step.path.clone());
             continue;
         }
         seen_paths.insert(step.path.clone(), step.id.clone());
@@ -334,30 +336,68 @@ pub fn build_run(
             assay_id: task.assay_id.clone(),
             timepoint: task.timepoint.clone(),
         };
-        let mut matches = valid_steps
+        if duplicate_paths
+            .iter()
+            .any(|duplicate| path == *duplicate || path.starts_with(&format!("{duplicate}/")))
+        {
+            issues.push(format!(
+                "task path {path} matches a duplicated design path"
+            ));
+            ambiguous.push(reference);
+            continue;
+        }
+        let path_matches = valid_steps
             .iter()
             .filter(|step| {
                 !step.organizational
                     && (path == step.path || path.starts_with(&format!("{}/", step.path)))
             })
             .collect::<Vec<_>>();
-        if matches.is_empty() && !task.design_step_id.is_empty() {
-            matches = valid_steps
+        let id_matches = if task.design_step_id.is_empty() {
+            Vec::new()
+        } else {
+            valid_steps
                 .iter()
                 .filter(|step| !step.organizational && step.id == task.design_step_id)
-                .collect();
-        }
-        match matches.len() {
+                .collect::<Vec<_>>()
+        };
+        let selected = if !task.design_step_id.is_empty() {
+            if id_matches.len() != 1 {
+                issues.push(format!(
+                    "task path {} names DesignStepID {} but it resolves to {} design steps",
+                    path,
+                    task.design_step_id,
+                    id_matches.len()
+                ));
+                ambiguous.push(reference);
+                continue;
+            }
+            let target = id_matches[0];
+            if !path_matches.is_empty()
+                && (path_matches.len() != 1 || path_matches[0].id != target.id)
+            {
+                issues.push(format!(
+                    "task path {} matches a different design step than DesignStepID {}",
+                    path, task.design_step_id
+                ));
+                ambiguous.push(reference);
+                continue;
+            }
+            vec![target]
+        } else {
+            path_matches
+        };
+        match selected.len() {
             0 => orphans.push(reference),
             1 => assignments
-                .entry(matches[0].id.clone())
+                .entry(selected[0].id.clone())
                 .or_default()
                 .push(reference),
             _ => {
                 issues.push(format!(
                     "task path {} matches {} design steps",
                     path,
-                    matches.len()
+                    selected.len()
                 ));
                 ambiguous.push(reference);
             }
@@ -1029,5 +1069,253 @@ mod tests {
         assert_eq!(value["roots"][0]["completed"], 1);
         assert_eq!(value["roots"][0]["total"], 2);
         assert_eq!(value["orphans"][0]["key"], "task-orphan");
+    }
+
+    #[test]
+    fn run_projection_keeps_multiple_timepoints_as_occurrences() {
+        let document = Document {
+            steps: vec![DesignStep {
+                id: "step-parent".into(),
+                title: "Parent".into(),
+                path: "root/parent".into(),
+                order: 1,
+                organizational: false,
+                refs: vec!["ref-block".into()],
+            }],
+            reference_blocks: HashMap::from([("ref-block".into(), "block-v1".into())]),
+            order: vec![],
+            edges: vec![],
+        };
+        let task = |key: &str, timepoint: &str| RunTask {
+            key: key.into(),
+            path: "root/parent/op".into(),
+            title: "Op".into(),
+            status: "pending".into(),
+            protocol_version_id: "protocol-v1".into(),
+            source_block_version_id: "block-v1".into(),
+            assay_id: "assay-1".into(),
+            timepoint: timepoint.into(),
+            design_step_id: "step-parent".into(),
+        };
+        let tasks = vec![task("task-d1", "D1"), task("task-d3", "D3")];
+        let value = build_run(&document, &HashMap::new(), &tasks);
+        let children = value["roots"][0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(value["roots"][0]["total"], 2);
+        assert_eq!(children[0]["timepoint"], "D1");
+        assert_eq!(children[1]["timepoint"], "D3");
+    }
+
+    #[test]
+    fn design_projection_reports_a_missing_block_provider() {
+        let document = Document {
+            steps: vec![DesignStep {
+                id: "step-parent".into(),
+                title: "Parent".into(),
+                path: "root/parent".into(),
+                order: 1,
+                organizational: false,
+                refs: vec!["ref-block".into()],
+            }],
+            reference_blocks: HashMap::from([("ref-block".into(), "block-v1".into())]),
+            order: vec![],
+            edges: vec![],
+        };
+        let value = build_design(&document, &HashMap::new());
+        assert!(value["roots"][0]["children"].is_null());
+        assert!(
+            value["roots"][0]["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|issue| issue.as_str().unwrap_or("").contains("provider is unavailable"))
+        );
+    }
+
+    #[test]
+    fn design_projection_reports_duplicate_step_paths() {
+        let document = Document {
+            steps: vec![
+                DesignStep {
+                    id: "step-a".into(),
+                    title: "A".into(),
+                    path: "root/shared".into(),
+                    order: 1,
+                    organizational: false,
+                    refs: vec![],
+                },
+                DesignStep {
+                    id: "step-b".into(),
+                    title: "B".into(),
+                    path: "root/shared".into(),
+                    order: 2,
+                    organizational: false,
+                    refs: vec![],
+                },
+            ],
+            reference_blocks: HashMap::new(),
+            order: vec![],
+            edges: vec![],
+        };
+        let value = build_design(&document, &HashMap::new());
+        assert_eq!(value["roots"].as_array().unwrap().len(), 1);
+        assert!(
+            value["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|issue| issue.as_str().unwrap_or("").contains("share path"))
+        );
+    }
+
+    #[test]
+    fn run_projection_does_not_bind_a_duplicated_design_path() {
+        let document = Document {
+            steps: vec![
+                DesignStep {
+                    id: "step-a".into(),
+                    title: "A".into(),
+                    path: "root/shared".into(),
+                    order: 1,
+                    organizational: false,
+                    refs: vec![],
+                },
+                DesignStep {
+                    id: "step-b".into(),
+                    title: "B".into(),
+                    path: "root/shared".into(),
+                    order: 2,
+                    organizational: false,
+                    refs: vec![],
+                },
+            ],
+            reference_blocks: HashMap::new(),
+            order: vec![],
+            edges: vec![],
+        };
+        let tasks = vec![RunTask {
+            key: "task-shared".into(),
+            path: "root/shared/op".into(),
+            title: "Shared".into(),
+            status: "pending".into(),
+            protocol_version_id: "protocol-v1".into(),
+            source_block_version_id: "block-v1".into(),
+            assay_id: "assay-1".into(),
+            timepoint: "D1".into(),
+            design_step_id: "".into(),
+        }];
+        let value = build_run(&document, &HashMap::new(), &tasks);
+        assert_eq!(value["ambiguous"][0]["key"], "task-shared");
+        assert!(value["roots"][0]["children"].is_null());
+    }
+
+    #[test]
+    fn run_projection_rejects_a_conflicting_design_step_identity() {
+        let document = Document {
+            steps: vec![
+                DesignStep {
+                    id: "step-a".into(),
+                    title: "A".into(),
+                    path: "root/a".into(),
+                    order: 1,
+                    organizational: false,
+                    refs: vec![],
+                },
+                DesignStep {
+                    id: "step-b".into(),
+                    title: "B".into(),
+                    path: "root/b".into(),
+                    order: 2,
+                    organizational: false,
+                    refs: vec![],
+                },
+            ],
+            reference_blocks: HashMap::new(),
+            order: vec![],
+            edges: vec![],
+        };
+        let tasks = vec![RunTask {
+            key: "task-conflict".into(),
+            path: "root/a".into(),
+            title: "A".into(),
+            status: "pending".into(),
+            protocol_version_id: "protocol-v1".into(),
+            source_block_version_id: "block-v1".into(),
+            assay_id: "assay-1".into(),
+            timepoint: "D1".into(),
+            design_step_id: "step-b".into(),
+        }];
+        let value = build_run(&document, &HashMap::new(), &tasks);
+        assert_eq!(value["ambiguous"][0]["key"], "task-conflict");
+        assert!(
+            value["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|issue| issue.as_str().unwrap_or("").contains("different design step"))
+        );
+        assert!(value["roots"][0]["children"].is_null());
+        assert!(value["roots"][1]["children"].is_null());
+    }
+
+    #[test]
+    fn design_projection_keeps_repeated_block_uses_independent() {
+        let document = Document {
+            steps: vec![
+                DesignStep {
+                    id: "use-one".into(),
+                    title: "One".into(),
+                    path: "root/one".into(),
+                    order: 1,
+                    organizational: false,
+                    refs: vec!["ref-block".into()],
+                },
+                DesignStep {
+                    id: "use-two".into(),
+                    title: "Two".into(),
+                    path: "root/two".into(),
+                    order: 2,
+                    organizational: false,
+                    refs: vec!["ref-block".into()],
+                },
+            ],
+            reference_blocks: HashMap::from([("ref-block".into(), "block-v1".into())]),
+            order: vec!["use-one".into(), "use-two".into()],
+            edges: vec![],
+        };
+        let blocks = HashMap::from([(
+            "block-v1".into(),
+            Ok(BlockDefinition {
+                steps: vec![block_step("root/op", "Op", "block-v1")],
+            }),
+        )]);
+        let value = build_design(&document, &blocks);
+        assert_eq!(value["roots"][0]["children"][0]["id"], "root/one/op");
+        assert_eq!(value["roots"][1]["children"][0]["id"], "root/two/op");
+        assert_eq!(
+            value["roots"][0]["children"][0]["blockVersionId"],
+            value["roots"][1]["children"][0]["blockVersionId"]
+        );
+    }
+
+    #[test]
+    fn design_projection_reports_a_precedes_cycle() {
+        let document = Document {
+            steps: vec![],
+            reference_blocks: HashMap::new(),
+            order: vec![],
+            edges: vec![
+                ("step-a".into(), "step-b".into()),
+                ("step-b".into(), "step-a".into()),
+            ],
+        };
+        let value = build_design(&document, &HashMap::new());
+        assert!(
+            value["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|issue| issue.as_str().unwrap_or("").starts_with("precedes cycle"))
+        );
     }
 }

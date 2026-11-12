@@ -13,8 +13,8 @@ import (
 )
 
 // inspectTreeResult is the shared read-only hierarchy contract. The GUI and
-// the Agent CLI consume this shape; the Go projection remains the single
-// implementation until the contract is moved into Rust Core.
+// the Agent CLI consume this shape from Core; inspectTreeFor below is retained
+// only as a Go/Rust parity oracle for tests.
 type inspectTreeResult struct {
 	DesignID string               `json:"designId"`
 	Revision uint64               `json:"revision"`
@@ -52,15 +52,41 @@ func runInspectTree(args []string) error {
 	}
 	defer runSvc.Close()
 
-	result, err := inspectTreeFor(ctx, designSvc, runSvc, *designID, *revision, *runID)
+	raw, err := nativeWorkflowTreeJSON(ctx, designSvc, runSvc, *designID, *revision, *runID)
 	if err != nil {
 		return err
 	}
-	return encoderOutput(result)
+	return encoderOutput(json.RawMessage(raw))
 }
 
-// inspectTreeFor is the testable projection entry point. It returns the
-// contract and never prints.
+// nativeWorkflowTreeJSON is the hidden-mode path: Core builds the hierarchy,
+// Go only validates the request envelope and prints the returned contract.
+func nativeWorkflowTreeJSON(ctx context.Context, designSvc runs.DesignService, runSvc runs.RunService, designID string, revision uint64, runID string) (string, error) {
+	if runID == "" {
+		return designSvc.WorkflowTree(ctx, designID, revision)
+	}
+	raw, err := runSvc.WorkflowTree(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	var header struct {
+		DesignID string `json:"designId"`
+		Revision uint64 `json:"revision"`
+	}
+	if err := json.Unmarshal([]byte(raw), &header); err != nil {
+		return "", fmt.Errorf("decode workflow tree: %w", err)
+	}
+	if header.DesignID != "" && header.DesignID != designID {
+		return "", fmt.Errorf("design_id 必须等于 Run 的所属设计")
+	}
+	if revision != 0 && header.Revision != revision {
+		return "", fmt.Errorf("Run 冻结的 AsterDoc revision 为 %d，请求为 %d", header.Revision, revision)
+	}
+	return raw, nil
+}
+
+// inspectTreeFor is the test-only Go/Rust parity oracle. Production paths
+// call nativeWorkflowTreeJSON and never this function.
 func inspectTreeFor(ctx context.Context, designSvc runs.DesignService, runSvc runs.RunService, designID string, revision uint64, runID string) (inspectTreeResult, error) {
 	if runID != "" {
 		result, err := inspectFrozenRun(ctx, designSvc, runSvc, designID, revision, runID)
@@ -234,7 +260,7 @@ func enrichRunTree(runTree, designTree *workflowtree.Tree, runID string) error {
 	return nil
 }
 
-func encoderOutput(result inspectTreeResult) error {
+func encoderOutput(result any) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(result)

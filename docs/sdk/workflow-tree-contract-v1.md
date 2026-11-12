@@ -70,15 +70,26 @@ same key produce an `identity is ambiguous` issue and copy no metadata.
 
 ## Producer boundary
 
-The CLI `workflow.inspect_tree` is produced directly by Rust Core
-(`crates/asterlab-core/src/workflow_tree.rs`). The adapter loads the AsterDoc
-revision, ProtocolBlock previews, and frozen Run workspace, then calls the
-Core projection; it does not launch the desktop app and does not need
-`ASTERLAB_APP_BIN`.
+Rust Core (`crates/asterlab-core/src/workflow_tree.rs`) is the only producer.
+The CLI adapter and the MyGo native bridge share
+`workflow_tree_for_db`, which loads the exact AsterDoc revision, ProtocolBlock
+previews, and frozen Run workspace before calling Core. For a Run, the adapter
+also rejects a stored `asterdoc.source_hash` that does not match the frozen
+hash; it never substitutes the latest revision.
 
-The Go hierarchy engine (`prototypes/mygo-run/internal/workflowtree`) remains
-the GUI Canvas/Run-rail producer. Both producers must preserve this contract
-until the GUI migrates. The shared evidence files under
+The GUI consumes the same JSON through generated
+`DesignService.WorkflowTree(designID, revision)` and
+`RunService.WorkflowTree(runID)`. The hidden `--inspect-tree` mode also calls
+those methods. Go only decodes the contract for rendering.
+
+`prototypes/mygo-run/internal/workflowtree` remains temporarily as a parity
+oracle for tests (`BuildViewModel` without a `Projection` and
+`inspectTreeFor`). Those Go paths are test-only and must be retired once parity
+coverage is complete. The shared evidence files under
 `docs/sdk/rna-extraction-case/evidence/` are checked by the Rust test
-`workflow_inspect_tree_matches_shared_go_evidence`, so a CLI/Core change cannot
-silently fork the shape while the Go oracle is still authoritative.
+`workflow_inspect_tree_matches_shared_go_evidence`.
+
+Identity conflicts are rejected, not resolved by precedence: when a Run task
+records a `DesignStepID`, its path match and ID match must name the same
+non-organizational step; otherwise the task is reported as ambiguous and is
+not assigned.

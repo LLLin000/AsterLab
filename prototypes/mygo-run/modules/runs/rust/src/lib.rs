@@ -202,6 +202,14 @@ impl RunService for CoreRunService {
         Ok(arr.iter().map(asset_from_value).collect())
     }
 
+    fn workflow_tree(&self, _ctx: &Context, run_id: String) -> Result<String, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let value = cli_impl::workflow_tree_for_db(core.raw_db(), None, None, Some(&run_id))
+            .map_err(map_cli)?;
+        Ok(value.to_string())
+    }
+
     fn close(&self) -> Result<(), Error> {
         if let Ok(mut g) = self.core.lock() { g.take(); }
         Ok(())
@@ -483,6 +491,19 @@ impl DesignService for CoreDesignService {
         let mut s = snapshot(v);
         s.run_id = run_id;
         Ok(s)
+    }
+
+    fn workflow_tree(&self, _ctx: &Context, design_id: String, revision: u64) -> Result<String, Error> {
+        let guard = self.db.lock().map_err(|_| Error::Go("INTERNAL: db lock poisoned".into()))?;
+        let db = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let value = cli_impl::workflow_tree_for_db(
+            db,
+            Some(&design_id),
+            (revision > 0).then_some(revision),
+            None,
+        )
+        .map_err(map_cli)?;
+        Ok(value.to_string())
     }
 
     fn close(&self) -> Result<(), Error> {

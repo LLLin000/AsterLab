@@ -406,7 +406,7 @@ func parseRunParameters(raw string) []PlannedParameter {
 func eventViewModel(e runs.RunEvent) EventViewModel {
 	event := EventViewModel{
 		ID: e.ID, Type: e.EventType, Content: e.Content,
-		BatchID: e.BatchID,
+		BatchID:    e.BatchID,
 		OccurredAt: e.OccurredAt, RecordedAt: e.RecordedAt,
 		TaskKey: e.TaskKey, StepPath: e.ProtocolStepPath,
 	}
@@ -499,9 +499,18 @@ func eventViewModel(e runs.RunEvent) EventViewModel {
 	return event
 }
 
+// Projection carries Core's contract projection into the view model.
+// Exactly one Projection is passed by production callers; omitting it keeps
+// the old Go builder available only as a parity oracle for tests.
+type Projection struct {
+	Tree   *workflowtree.Tree
+	Issues []string
+}
+
 // BuildViewModel constructs the run workspace view model from a frozen run
-// snapshot and its frozen AsterDoc.
-func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWorkspaceViewModel {
+// snapshot and its frozen AsterDoc. Production callers pass Core's Projection;
+// the no-projection path is a test-only oracle and must not be used by the GUI.
+func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc, projection ...Projection) *RunWorkspaceViewModel {
 	vm := &RunWorkspaceViewModel{
 		RunID:          snap.RunID,
 		Title:          snap.Title,
@@ -644,7 +653,13 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc) *RunWor
 		vm.Steps = append(vm.Steps, parent)
 	}
 
-	if doc != nil {
+	if len(projection) > 0 {
+		p := projection[0]
+		vm.TreeIssues = append([]string(nil), p.Issues...)
+		if p.Tree != nil && (p.Tree.HasComposite() || p.Tree.HasOrganizational()) {
+			vm.Tree = p.Tree
+		}
+	} else if doc != nil {
 		if tree, err := workflowtree.Build(snap.Tasks, doc); err != nil {
 			vm.TreeIssues = []string{err.Error()}
 		} else {

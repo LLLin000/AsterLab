@@ -144,4 +144,10 @@ func (f *FakeDesignService) CreateRun(ctx context.Context, designID string, oper
 	}
 	return f.Run, nil
 }
+func (f *FakeDesignService) WorkflowTree(ctx context.Context, designID string, revision uint64) (string, error) {
+	if f.Err != nil {
+		return "", MapError(f.Err)
+	}
+	return `{"roots":[],"order":[],"precedes":{},"design":true}`, nil
+}
 func (f *FakeDesignService) Close() error { return nil }

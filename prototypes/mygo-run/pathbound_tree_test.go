@@ -99,3 +99,29 @@ func TestPathBoundRunTreeProjection(t *testing.T) {
 		}
 	}
 }
+
+func TestPathBoundRunWorkspaceUsesNativeCore(t *testing.T) {
+	dir := rnaFixtureDataDir(t)
+	t.Setenv("LABWORKBENCH_DATA_DIR", dir)
+	ctx := context.Background()
+	runSvc, err := runs.NewRunService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runSvc.Close()
+	snap, err := runSvc.LoadRun(ctx, "ad9b452e-f8ea-404b-9a2a-7124f9403b02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{runSvc: runSvc, snap: snap}
+	vm := a.buildRunWorkspaceVM()
+	if vm.Tree == nil {
+		t.Fatalf("native tree missing; issues=%v", vm.TreeIssues)
+	}
+	if len(vm.Tree.Roots) != 4 || !vm.Tree.Roots[0].Composite {
+		t.Fatalf("native roots = %d", len(vm.Tree.Roots))
+	}
+	if vm.Tree.Roots[0].Total != 10 || vm.Tree.Roots[0].Completed != 5 {
+		t.Fatalf("native RNA root = %+v", vm.Tree.Roots[0])
+	}
+}

@@ -30,6 +30,10 @@ type RunService interface {
 	ListAssetLinks(ctx context.Context, runID string) ([]Asset, error)
 	// CompleteTask marks a task completed and returns the persisted snapshot.
 	CompleteTask(ctx context.Context, input CompleteTaskInput) (RunSnapshot, error)
+	// WorkflowTree returns Core's read-only hierarchy projection for the
+	// Run's frozen AsterDoc. The JSON is the single contract shared with the
+	// CLI and must be decoded, never rebuilt in Go.
+	WorkflowTree(ctx context.Context, runID string) (string, error)
 	// Close releases the database connection.
 	Close() error
 }
@@ -76,6 +80,9 @@ type DesignService interface {
 	CreateRunFromAsterDoc(ctx context.Context, input AsterDocRunInput) (RunSnapshot, error)
 	// CreateRun creates a Run from a design.
 	CreateRun(ctx context.Context, designID string, operationID string) (RunSnapshot, error)
+	// WorkflowTree returns Core's read-only hierarchy projection for one
+	// design revision; revision 0 means the latest immutable revision.
+	WorkflowTree(ctx context.Context, designID string, revision uint64) (string, error)
 	// Close releases the database connection.
 	Close() error
 }

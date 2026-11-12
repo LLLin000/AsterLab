@@ -6809,58 +6809,71 @@ pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliE
 
 fn inspect_workflow_tree(input: &InspectTreeInput, data_dir: &Path) -> Result<Value, CliError> {
     let db = open_db(data_dir)?;
-    let (design_id, revision, run_id, source, tasks, design) = if let Some(run_id) = &input.run_id {
-        let workspace = run_workspace(&db, run_id)?;
-        let design_id = workspace["design_id"]
+    workflow_tree_for_db(
+        &db,
+        Some(&input.design_id),
+        input.revision,
+        input.run_id.as_deref(),
+    )
+}
+
+/// workflow_tree_for_db builds the read-only hierarchy projection for a
+/// Design or a frozen Run. Native services call this directly so the GUI and
+/// CLI share one Core-driven implementation.
+pub(crate) fn workflow_tree_for_db(
+    db: &Connection,
+    design_id: Option<&str>,
+    requested_revision: Option<u64>,
+    run_id: Option<&str>,
+) -> Result<Value, CliError> {
+    let (design_id, revision, source, tasks, design) = if let Some(run_id) = run_id {
+        let workspace = run_workspace(db, run_id)?;
+        let frozen_design_id = workspace["design_id"]
             .as_str()
             .ok_or_else(|| CliError::internal("Run 缺少设计 ID"))?
             .to_owned();
-        if design_id != input.design_id {
-            return Err(CliError::input("design_id 必须等于 Run 的所属设计"));
+        if let Some(requested) = design_id {
+            if frozen_design_id != requested {
+                return Err(CliError::input("design_id 必须等于 Run 的所属设计"));
+            }
         }
         let revision = workspace["asterdoc"]["revision"]
             .as_u64()
             .filter(|revision| *revision > 0)
             .or_else(|| workspace["design_revision"].as_u64())
             .ok_or_else(|| CliError::internal("Run 缺少冻结 AsterDoc 版本号"))?;
-        if let Some(requested) = input.revision {
+        if let Some(requested) = requested_revision {
             if requested != revision {
                 return Err(CliError::conflict(format!(
                     "Run 冻结的 AsterDoc revision 为 {revision}，请求为 {requested}"
                 )));
             }
         }
-        let document = load_asterdoc_at(&db, &design_id, revision)?;
+        let document = load_asterdoc_at(db, &frozen_design_id, revision)?;
+        let frozen_hash = workspace["asterdoc"]["source_hash"].as_str().unwrap_or("");
+        let stored_hash = document["source_hash"].as_str().unwrap_or("");
+        if !frozen_hash.is_empty() && !stored_hash.is_empty() && frozen_hash != stored_hash {
+            return Err(CliError::conflict(format!(
+                "Run 冻结的 AsterDoc source_hash 与 revision v{revision} 不一致"
+            )));
+        }
         let source = document["source"].as_str().unwrap_or("").to_owned();
         let tasks = workflow_tasks_from_workspace(&workspace);
-        (
-            design_id,
-            revision,
-            Some(run_id.clone()),
-            source,
-            tasks,
-            false,
-        )
+        (frozen_design_id, revision, source, tasks, false)
     } else {
-        let document = if let Some(revision) = input.revision {
-            load_asterdoc_at(&db, &input.design_id, revision)?
+        let design_id = design_id.ok_or_else(|| CliError::input("design_id 必填"))?;
+        let document = if let Some(revision) = requested_revision {
+            load_asterdoc_at(db, design_id, revision)?
         } else {
-            load_asterdoc(&db, &input.design_id)?
+            load_asterdoc(db, design_id)?
         };
         let revision = document["revision"].as_u64().unwrap_or(0);
         let source = document["source"].as_str().unwrap_or("").to_owned();
-        (
-            input.design_id.clone(),
-            revision,
-            None,
-            source,
-            Vec::new(),
-            true,
-        )
+        (design_id.to_owned(), revision, source, Vec::new(), true)
     };
 
     let document = parse_workflow_document(&source)?;
-    let blocks = load_workflow_blocks(&db, &document)?;
+    let blocks = load_workflow_blocks(db, &document)?;
     let mut value = if design {
         asterlab_core::workflow_tree::build_design(&document, &blocks)
     } else {
@@ -11156,6 +11169,56 @@ protocol_version_id: protocol-v1
         )
         .expect_err("Run must reject a non-frozen revision");
         assert_eq!(stale_revision.code, "REVISION_CONFLICT");
+
+        let db = open_db(&data_dir).expect("open evidence database");
+        let run_record = get(&db, run_id).expect("run record");
+        let mut data = run_record["data"].clone();
+        data["asterdoc"]["source_hash"] = json!("corrupt-source-hash");
+        db.execute(
+            "UPDATE records SET data_json=?2 WHERE id=?1",
+            params![run_id, serde_json::to_string(&data).unwrap()],
+        )
+        .expect("corrupt frozen source hash");
+        drop(db);
+        let corrupt_hash = inspect_workflow_tree(
+            &InspectTreeInput {
+                design_id: design_id.into(),
+                revision: None,
+                run_id: Some(run_id.into()),
+            },
+            &data_dir,
+        )
+        .expect_err("Run must reject a frozen source hash mismatch");
+        assert_eq!(corrupt_hash.code, "REVISION_CONFLICT");
+        assert!(
+            corrupt_hash.message.contains("source_hash"),
+            "{}",
+            corrupt_hash.message
+        );
+
+        let db = open_db(&data_dir).expect("reopen evidence database");
+        let mut old_data = run_record["data"].clone();
+        old_data["design_revision"] = run_record["data"]["asterdoc"]["revision"].clone();
+        if let Some(object) = old_data.as_object_mut() {
+            object.remove("asterdoc");
+        }
+        db.execute(
+            "UPDATE records SET data_json=?2 WHERE id=?1",
+            params![run_id, serde_json::to_string(&old_data).unwrap()],
+        )
+        .expect("remove frozen document metadata");
+        drop(db);
+        let old_run = inspect_workflow_tree(
+            &InspectTreeInput {
+                design_id: design_id.into(),
+                revision: None,
+                run_id: Some(run_id.into()),
+            },
+            &data_dir,
+        )
+        .expect_err("legacy Run without a frozen document must fail explicitly");
+        assert_eq!(old_run.code, "NOT_FOUND");
+        assert!(old_run.message.contains("AsterDoc revision"));
         fs::remove_dir_all(&data_dir).expect("remove temp data dir");
     }
 

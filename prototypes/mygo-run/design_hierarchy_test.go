@@ -45,6 +45,28 @@ func TestDesignHierarchyWithoutRunFixture(t *testing.T) {
 	}
 }
 
+func TestDesignHierarchyUsesNativeCore(t *testing.T) {
+	dir := rnaFixtureDataDir(t)
+	t.Setenv("LABWORKBENCH_DATA_DIR", dir)
+	svc, err := runs.NewDesignService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	doc, err := svc.LoadAsterDoc(context.Background(), "d5525203-56bb-4b52-82c4-0e05f0ed2ff8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{designSvc: svc, designDoc: &doc}
+	tree := a.ensureDesignHierarchy()
+	if tree == nil || a.designHierarchyErr != "" {
+		t.Fatalf("native hierarchy failed: %v", a.designHierarchyErr)
+	}
+	if !tree.Design || len(tree.Roots) != 4 || !tree.Roots[0].Composite {
+		t.Fatalf("native hierarchy = design:%v roots:%d", tree.Design, len(tree.Roots))
+	}
+}
+
 func TestCanvasStepsCarryCompositeMarker(t *testing.T) {
 	raw, err := os.ReadFile("../../docs/sdk/rna-extraction-case/rtqpcr-parent-path-bound.asterml")
 	if err != nil {

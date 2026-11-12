@@ -29,6 +29,18 @@ AppCore::save_readout(event)
 `save_readout` runs `create_execution_event_tx` inside one SQLite transaction,
 then returns the authoritative `RunWorkspace`; errors roll back.
 
+The generated bridge also exposes the read-only workflow hierarchy:
+
+```go
+DesignService.WorkflowTree(ctx, designID, revision) (string, error)
+RunService.WorkflowTree(ctx, runID) (string, error)
+```
+
+Both return the same JSON contract as CLI `workflow.inspect_tree`. Core owns
+step identity, containment, block-version references, source-hash validation,
+and ambiguity diagnostics. The Go GUI decodes the JSON; it must not rebuild a
+tree for production surfaces.
+
 ## Verified
 
 - `mygo native check modules/runs` → `Runs.dll` built

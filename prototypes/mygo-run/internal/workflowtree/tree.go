@@ -89,6 +89,19 @@ type Tree struct {
 	Ambiguous []TaskRef `json:"ambiguous,omitempty"`
 }
 
+// ParseJSON decodes the shared Core projection contract. It is deliberately
+// only a decoder: identity and containment must never be rebuilt in Go.
+func ParseJSON(raw string) (*Tree, error) {
+	var tree Tree
+	if err := json.Unmarshal([]byte(raw), &tree); err != nil {
+		return nil, fmt.Errorf("decode workflow tree: %w", err)
+	}
+	if tree.Precedes == nil {
+		tree.Precedes = map[string][]string{}
+	}
+	return &tree, nil
+}
+
 // Build projects the design steps and frozen tasks. A task has exactly one
 // authoritative step: the unique matching step path. If it matches more than
 // one step, it is reported as ambiguous and is not assigned. Titles are never

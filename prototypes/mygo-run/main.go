@@ -468,10 +468,34 @@ func (a *app) linkRunAsset(taskKey string) error {
 	return nil
 }
 
+// buildRunWorkspaceVM asks Core for the frozen Run hierarchy. Go only decodes
+// the contract and renders it; no containment or task identity is rebuilt here.
+func (a *app) buildRunWorkspaceVM() *runworkspace.RunWorkspaceViewModel {
+	if a.runSvc == nil || a.snap.RunID == "" {
+		return runworkspace.BuildViewModel(a.snap, a.asterDoc, runworkspace.Projection{})
+	}
+	raw, err := a.runSvc.WorkflowTree(context.Background(), a.snap.RunID)
+	if err != nil {
+		return runworkspace.BuildViewModel(a.snap, a.asterDoc, runworkspace.Projection{
+			Issues: []string{state.MapError(err).Error()},
+		})
+	}
+	tree, err := workflowtree.ParseJSON(raw)
+	if err != nil {
+		return runworkspace.BuildViewModel(a.snap, a.asterDoc, runworkspace.Projection{
+			Issues: []string{err.Error()},
+		})
+	}
+	return runworkspace.BuildViewModel(a.snap, a.asterDoc, runworkspace.Projection{
+		Tree:   tree,
+		Issues: tree.Issues,
+	})
+}
+
 // loadFrozenAsterDoc loads the exact document revision frozen on the Run. The
 // latest live document is never substituted for a missing or broken revision.
 func (a *app) refreshRunWorkspace() {
-	vm := runworkspace.BuildViewModel(a.snap, a.asterDoc)
+	vm := a.buildRunWorkspaceVM()
 	key := a.snap.RunID + "|" + fmt.Sprintf("%d", a.snap.Revision)
 	if a.asterDoc != nil {
 		key += "|" + a.asterDoc.SourceHash
@@ -1382,7 +1406,7 @@ func (a *app) applyRun(snap *runs.RunSnapshot, err error) {
 			a.ws.Error = ""
 		}
 		a.runAssets = nil
-		a.runWSVM = runworkspace.BuildViewModel(a.snap, a.asterDoc)
+		a.runWSVM = a.buildRunWorkspaceVM()
 		if a.runWS != nil {
 			a.runWS.SyncFrom(a.runWSVM)
 		}
@@ -1938,7 +1962,7 @@ func main() {
 	}
 	a.tools = tools.New(tools.Callbacks{})
 	a.ws = runui.NewWorkspace(toRunView(a.snap), cb)
-	a.runWSVM = runworkspace.BuildViewModel(a.snap, a.asterDoc)
+	a.runWSVM = a.buildRunWorkspaceVM()
 	a.runWS = runworkspace.NewState(a.runWSVM, rwcb)
 	// The Run surface renders the frozen design's modules through the same
 	// blockui the Designer uses: Run for open tasks, Review once completed.
