@@ -1,0 +1,5 @@
+M	src/cli.rs
+M	docs/contracts/core-v1.md
+M	README.md
+M	crates/asterlab-core/src/lib.rs
+A	docs/release/evidence/REL-X/README.md

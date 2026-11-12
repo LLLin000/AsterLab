@@ -1,0 +1,2 @@
+M	crates/asterlab-core/src/lib.rs
+A	crates/asterlab-core/tests/scope.rs
