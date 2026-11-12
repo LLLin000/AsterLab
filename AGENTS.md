@@ -1,0 +1,76 @@
+# AsterLab Agent 指南
+
+本文件约束所有在本仓库工作的 agent。产品语义和已实现契约仍以 `docs/README.md` 列出的权威文档为准；本文件只补充工作方式与规划边界。
+
+## 1. Kandev 是项目的规划与执行应用
+
+Kandev 承载 AsterLab 的全部**任务级规划**：路线图、里程碑、优先级、依赖、卡片范围、验收条件和执行状态。仓库里不再另建 TODO、roadmap 或 backlog 文档；需要新工作项时，先在 Kandev 建卡，再开始实现。
+
+- 本地地址：`http://127.0.0.1:38429`
+- 工作区：`asterlab`（`b67b6785-db21-46de-bd68-c0c437823798`）
+- 仓库：`LLLin000/AsterLab`，默认分支 `main`
+- API token 只放在环境变量或密钥存储中，禁止写入仓库、任务描述、日志或提交。
+- 卡片 ID（`REL-01`、`AG-03`、`DES-02`、`RUN-04`、`QA-05`、`RC-01` 等）写在标题前缀和描述里，是当前引用标识；改标题时保留它。分支名、PR 标题、提交信息和任务评论都应带上卡片 ID。
+- 任务必须绑定仓库后才能启动。只传 `workspace_id` 创建的任务不会自动继承工作区仓库，API 会返回 `runner_ineligible_reason: "no_repository"`。
+
+### 权威边界
+
+| 事实 | 权威来源 |
+|---|---|
+| 任务范围、优先级、依赖、里程碑、验收、执行状态 | Kandev 卡片 |
+| 领域术语与对象边界 | `CONTEXT.md` |
+| 已实现的 CLI/HTTP 字段、枚举、错误码 | `AGENT_API.md` |
+| 架构与模块职责 | `docs/architecture.md` |
+| 当前实施阶段与未完成项 | `docs/implementation-plan.md` |
+| UI 规则 | `docs/product/ux-contract.md` |
+
+Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方。先在卡片评论中记录冲突，改卡或改文档对齐后再动代码。
+
+## 2. 当前工作流
+
+| 流程 | 泳道 | 步骤 | 执行者 |
+|---|---|---|---|
+| VPS Dev | `lane:vps` | Inbox → Ready → Agent → Review → Verify → Done | 本机 omp agent |
+| Windows Gate | `lane:win` | Todo → Windows Work → Windows Verify → Done | Windows 人工/受控环境 |
+
+- **VPS Dev** 承担 Core、CLI、Rust/Go 非 GUI 包、契约、文档和 Linux 可跑的测试。
+- **Windows Gate** 承担 MyGo/Slint GUI、`runs.dll`、Windows 安装包和 PowerShell E2E。当前该流程没有 agent profile，也没有注册 Windows executor，是人工泳道；不要把它当作自动队列，也不要在 VPS 上假装执行。
+- 卡片的 `lane` 标签和所在流程不一致时，先对齐再执行。
+
+### 状态语义
+
+- `Inbox` / `Todo`：待人工准入，不会被 agent 自动领取。
+- `Ready`：范围和依赖已确认，等待进入执行。当前没有自动 pull，需人工移到 `Agent`。
+- `Agent`：进入即自动启动 agent；一轮正常结束会自动进入 `Review`。
+- `Review`：人工审查 diff/PR；在这里给 agent 发消息会把任务送回 `Agent` 返工。
+- `Verify`：在目标机器上按卡片验收层级重跑并贴原始输出。
+- `Done`：只由人工确认后进入；agent 不得自行把卡移到 `Done`。
+
+## 3. 开工前必须做
+
+1. 读取对应 Kandev 卡片，确认 `范围`、`验收`、`依赖`、`lane` 和 `milestone`。
+2. 读取 `CONTEXT.md`、`docs/architecture.md`、`docs/product/ux-contract.md`、`docs/product/ownership.md` 和 `HANDOFF-VPS.md` 第 6 节。
+3. 检查 `blocked_by`；依赖未完成时不要绕过，也不要提前改该卡范围之外的文件。
+4. 只修改卡片 `范围` 列出的文件。范围不足时先在卡片评论说明并退回，不得擅自扩围。
+5. 不复用其他卡的分支或工作区；一卡一分支，避免并发写同一文件。
+6. 如果收到的步骤提示词里还有未被替换的 `{{...}}` 占位符，先停下并在任务评论中指出；不要按字面量创建分支、文件或路径。
+
+## 4. 完成与交接
+
+- 运行卡片要求的验收命令，把**原始输出**贴到任务评论或 PR 描述，不要只说“通过了”。
+- 提交到 `agent/<卡片ID>-<slug>` 分支，不直接推 `main`；推送后开 PR，并在任务里附 PR 链接。
+- 需要 GUI、Windows 安装包或 Win32 验证的工作，停止当前泳道，在任务里说明并转 `Windows Gate`。
+- 不移动 frozen tag（`sdk-v1-rc3`），不修改 frozen Run，不跑全仓 `cargo fmt`。
+- 任务完成后只移到 `Review`；`Verify` 和 `Done` 由人工或明确指定的验证者推进。
+
+## 5. 快速入口
+
+```bash
+# 服务状态
+systemctl status kandev --no-pager
+
+# 任务 API（token 放在 KANDEV_API_TOKEN）
+curl -s -H "Authorization: Bearer $KANDEV_API_TOKEN" \
+  http://127.0.0.1:38429/api/v1/workspaces/b67b6785-db21-46de-bd68-c0c437823798/tasks \
+  | python3 -m json.tool
+```
