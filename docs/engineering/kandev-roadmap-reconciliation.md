@@ -41,7 +41,9 @@
 
 ## 4. 并行策略
 
-- `VPS Dev` 的 `Agent` 列 WIP=2；`Ready` 是 feeder，进入 `Ready` 即可能被自动拉入 `Agent`。
+- `VPS Dev` 的 `Agent` 列 WIP=2，原生 `pull_from` 已关闭。
+- `scripts/kandev-ready-feeder.py` 负责依赖感知的队列：只把无阻塞的 `lane:vps` 卡从 `Inbox` 提升到 `Ready`，并在 `Agent` 有空位时移入 `Agent`。
+- 原因：实测 Kandev 原生 `pull_from=Ready` 不会跳过 blocked 卡，曾把 `REL-02` 直接启动。`Ready` 的手动拖动已关闭，避免同样问题。
 - 并行只允许在文件范围不重叠的卡之间进行；一张卡一个 worktree。
 - Core 轨道：`REL-03` → `REL-04` → `AG-01` → `AG-02` → `AG-03` → `RUN-03a` → `RUN-04a` → `QA-04` → `QA-05` → `QA-06`。
 - UI 轨道：`RUN-01` → `RUN-02` → `RUN-03b` → `RUN-04b` → `RUN-05` → `RUN-06` → `UX-*`。
