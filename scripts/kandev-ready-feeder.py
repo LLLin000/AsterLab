@@ -139,6 +139,104 @@ def scan_ci_ready(review_tasks):
             move(task, REVIEW, "ci-ready -> Review re-review")
 
 
+def scan_no_pr(review_tasks):
+    """Bounce Review cards with no associated PR back to Agent.
+
+    Agent's on_turn_complete fires even when the turn produced nothing;
+    without a PR there is nothing to review.
+    """
+    for task in review_tasks:
+        labels = lane_labels(task)
+        if "human-hold" in labels:
+            continue
+        pr = task_pr(task["id"])
+        if pr:
+            continue
+        # Grace period: just entered Review, PR may be seconds away.
+        try:
+            import sqlite3
+            from datetime import datetime, timezone
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            last = con.execute(
+                "select max(occurred_at) from task_step_transitions where task_id=? and to_workflow_step_id=?",
+                (task["id"], REVIEW),
+            ).fetchone()[0]
+            con.close()
+        except Exception:  # noqa: BLE001
+            continue
+        if not last:
+            continue
+        try:
+            dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+            idle = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+        except Exception:  # noqa: BLE001
+            continue
+        if idle < 10:
+            continue
+        move(task, AGENT, "no PR in Review -> back to Agent")
+
+
+def scan_deadlock():
+    """Detect blocked_by cycles; notify once per cycle (label on each member)."""
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        edges = con.execute("select task_id,blocker_task_id from task_blockers").fetchall()
+        titles = dict(con.execute("select id,title from tasks where archived_at is null"))
+        con.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"deadlock scan failed: {exc}", file=sys.stderr)
+        return
+    graph = {}
+    for a, b in edges:
+        graph.setdefault(a, []).append(b)
+    cycles = []
+    visited, stack = set(), []
+    def dfs(n):
+        if n in stack:
+            cycles.append(stack[stack.index(n):] + [n])
+            return
+        if n in visited or n not in titles:
+            return
+        visited.add(n)
+        stack.append(n)
+        for m in graph.get(n, []):
+            dfs(m)
+        stack.pop()
+    for n in list(graph):
+        if n in titles:
+            dfs(n)
+    for cyc in cycles:
+        names = [titles.get(t, t[:8])[:30] for t in cyc]
+        try:
+            import sqlite3
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            sent = any(
+                "tg-deadlock-sent" in (con.execute("select labels from tasks where id=?", (t,)).fetchone()[0] or "")
+                for t in cyc if t in titles
+            )
+            con.close()
+        except Exception:  # noqa: BLE001
+            sent = False
+        if sent:
+            continue
+        tg_send(
+            "Kandev 死锁：blocked_by 成环，谁也动不了。\n"
+            + " → ".join(names)
+            + "\n请人工断环（删掉反向的那条）。"
+        )
+        print(f"DEADLOCK: {' -> '.join(names)}", file=sys.stderr)
+        for t in cyc:
+            if t in titles:
+                try:
+                    add_label(t, "tg-deadlock-sent")
+                except Exception:  # noqa: BLE001
+                    pass
+
+
 def scan_stuck(detailed):
     """Self-heal cards with no live session; escalate after STUCK_FIX_LIMIT."""
     import datetime
@@ -632,6 +730,7 @@ def run_once():
     scan_cardfix([t for t in detailed if t.get("workflow_step_id") in (AGENT, REVIEW)])
     scan_retro_ready(detailed)
     scan_ci_ready(review_tasks)
+    scan_no_pr(review_tasks)
 
     # FYI: CI-config cards that got merged.
     scan_ci_merges(detailed)
@@ -639,6 +738,7 @@ def run_once():
     # Stuck self-heal before backpressure: a card with no live session
     # gets bounced to trigger a fresh one; escalates after 3 fixes.
     scan_stuck(detailed)
+    scan_deadlock()
 
     # Backpressure: do not feed new work while Review is full.
     # human-hold cards still occupy Review slots: clear them by hand.

@@ -1,158 +1,84 @@
-# QA-05 SQLite backup/restore and upgrade evidence
+# QA-05 SQLite schema migration fixtures
 
-## Scope and isolation
+`legacy-v0.sqlite` is an immutable SQLite v0 database. Its `records` table has the legacy columns `id`, `kind`, `parent_id`, `revision`, `data_json`, `created_at`, and `updated_at`; it intentionally has no `project_id` column and no secondary indexes. It contains a project, a design, a design version, and a protocol record with fixed payloads and timestamps. `PRAGMA user_version` is 0.
 
-Runtime database tests use isolated copies in a fresh temporary directory; no user data directory was used. `legacy-v0.sql` builds a version-0 SQLite database with the legacy `records` layout used by existing CLI compatibility test setup. `legacy-v0.sqlite` is the reproducible fixture stored in this evidence directory.
+The companion `legacy-v0.sql` rebuilds the same v0 schema and rows; replaying it reports `user_version` 0 and integrity `ok`.
 
-## Test matrix
+## QA test matrix
 
 | Case | Scenario | Result |
 |---|---|---|
-| Normal | Integrity-check, copy to backup, compare every user-table row count, replace a modified source from backup, compare data and hashes | PASS for the closed-file `cp` workflow; one user table (`records`), 2 rows restored |
-| Boundary | Apply current `open_db` table/index SQL to legacy layout; check data and `PRAGMA user_version` | Data preserved, integrity `ok`; `user_version` remains `0`, so no current version/upgrade contract exists |
-| Failure | Inject an error in current schema-initialization SQL and compare source SHA-256 | FAIL: SQLite exits `1`; hash changes and the first index remains; no rollback |
-| Restart | Reopen restored database in a new `sqlite3` process | PASS: integrity `ok`, `user_version` `0`, 2 rows |
-| Concurrency | Restore during active writes / two simultaneous restores | NOT RUN: the documented operation requires writes to finish and forbids concurrent restores; no scoped CLI restore entry exists |
+| Normal | Check integrity, copy a closed database, compare the user-table row count, restore a deleted row from the copy, compare hashes | PASS: `records` has 4 rows before backup and after restore; backup and restored file hashes match |
+| Boundary | Open a v0 fixture through the CLI database opener and check migrated data and schema version | PASS: current migration tests assert integrity `ok`, schema version 1, and exact legacy-row preservation; see [legacy migration output](legacy-migration-output.txt) |
+| Failure | Abort migration after its first schema change and compare database state | PASS: [failure test output](failed-migration-output.txt) records the test pass; test compares hash, schema, row count, and user_version |
+| Restart | Reopen the migrated database and recheck integrity and data | PASS: covered by the legacy migration test |
+| Concurrency | Restore during active writes or run two restores concurrently | NOT RUN: the documented restore is single-user and requires writes to finish; no concurrent restore surface was exercised |
 
-## Findings
 
-- `src/cli.rs::open_db` issues `CREATE TABLE/INDEX IF NOT EXISTS`; it neither sets `PRAGMA user_version` nor contains a column migration. Applying its current schema SQL leaves the legacy fixture at version `0`.
-- Injecting a missing `project_id` column makes the second index creation fail after WAL mode and the first index have been applied. The source hash changes; this DDL sequence is not transactional.
-- `AGENT_API.md` lists no backup/restore CLI tool. `docs/release/BACKUP_RESTORE.md` documents UI backup and restore only; UI was intentionally not exercised.
-- Rust CLI execution was unavailable: neither `cargo` nor `rustc` is installed. Schema initialization/failure checks below replay the exact DDL from `open_db` through `sqlite3`; they do not claim an application-level run. UI service backup/restore remains unverified.
-- This result requires a Core repair card; no application code was changed in QA-05.
+The migration test copies this fixture into a temporary data directory, opens it through the CLI database opener, and checks integrity, current `user_version`, and exact preservation of every legacy field. It closes and reopens the migrated database, then repeats the checks. The checked-in fixture itself remains v0 and is copied afresh on every test run.
 
-## Raw commands and output
+`failure-v0.sql` installs a deterministic `BEFORE UPDATE` abort trigger on a disposable copy of the fixture. The migration adds `project_id` as its first persistent schema change and then backfills project ownership. The trigger aborts that backfill. The failure test compares the database SHA-256, schema, row count, and `user_version` before and after the failed open; the original fixture is not modified.
 
-SQLite version and tool availability:
+Run the focused checks from the repository root:
 
 ```text
-sqlite3 version: 3.45.1 2024-01-30 16:01:20 e876e51a0ed5c5b3126f52e532044363a014bc594cfefa87ffb5b82257ccalt1 (64-bit)
-cargo: not installed
-rustc: not installed
+cargo test --bin labworkbench schema_migration_legacy_v0
+cargo test --bin labworkbench failed_schema_migration_preserves_database
 ```
+The card's literal `cargo test --bin labworkbench schema_migration_legacy_v0 -- --exact` filter matches zero tests because the harness name is `cli::tests::schema_migration_legacy_v0`. The qualified exact command was run twice; both outputs are retained.
 
-Fixture creation and baseline:
+Raw command outputs: [legacy migration](legacy-migration-output.txt), [failed migration](failed-migration-output.txt), [literal exact filter, run 1](exact-filter-run-1.txt), [literal exact filter, run 2](exact-filter-run-2.txt), [qualified exact test, run 1](qualified-exact-run-1.txt), [qualified exact test, run 2](qualified-exact-run-2.txt), [full CLI suite](labworkbench-tests.txt), [Core suite](asterlab-core-tests.txt), and [App suite](asterlab-app-tests.txt).
 
-```sh
-FIXTURE_ROOT=$(mktemp -d)
-sqlite3 "$FIXTURE_ROOT/legacy-v0.sqlite" < docs/release/evidence/QA-05/legacy-v0.sql
-sqlite3 "$FIXTURE_ROOT/legacy-v0.sqlite" 'PRAGMA integrity_check;'
-sqlite3 "$FIXTURE_ROOT/legacy-v0.sqlite" 'PRAGMA user_version;'
-sqlite3 "$FIXTURE_ROOT/legacy-v0.sqlite" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name; SELECT count(*) FROM records;"
-```
+## SQLite copy/restore acceptance
 
-```text
-ok
-0
-records
-2
-```
-
-Closed-file backup, table comparison, restore and restart checks (set `ROOT` to a fresh temporary directory; all output paths below are relative):
+All operations used a fresh temporary directory and closed SQLite processes between file copies. The fixture has one user table, `records`.
 
 ```sh
 ROOT=$(mktemp -d)
-mkdir -p "$ROOT/normal" "$ROOT/upgrade" "$ROOT/failure"
-cp docs/release/evidence/QA-05/legacy-v0.sqlite "$ROOT/normal/labworkbench.sqlite"
-sqlite3 "$ROOT/normal/labworkbench.sqlite" 'PRAGMA integrity_check;'
-sqlite3 "$ROOT/normal/labworkbench.sqlite" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;"
-sqlite3 "$ROOT/normal/labworkbench.sqlite" 'SELECT count(*) FROM records;'
-cp "$ROOT/normal/labworkbench.sqlite" "$ROOT/normal/backup.sqlite"
-sqlite3 "$ROOT/normal/backup.sqlite" 'PRAGMA integrity_check;'
-sqlite3 "$ROOT/normal/backup.sqlite" 'SELECT count(*) FROM records;'
-sqlite3 "$ROOT/normal/labworkbench.sqlite" "DELETE FROM records WHERE id='qa05-design';"
-sqlite3 "$ROOT/normal/labworkbench.sqlite" 'SELECT count(*) FROM records;'
-cp "$ROOT/normal/backup.sqlite" "$ROOT/normal/labworkbench.sqlite"
-sqlite3 "$ROOT/normal/labworkbench.sqlite" 'PRAGMA integrity_check;'
-sqlite3 "$ROOT/normal/labworkbench.sqlite" 'SELECT count(*) FROM records;'
-sqlite3 "$ROOT/normal/labworkbench.sqlite" 'SELECT id,kind,revision,data_json FROM records ORDER BY id;'
-sqlite3 "$ROOT/normal/backup.sqlite" 'SELECT id,kind,revision,data_json FROM records ORDER BY id;'
-sqlite3 "$ROOT/normal/labworkbench.sqlite" 'PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM records;'
-(cd "$ROOT/normal" && sha256sum backup.sqlite labworkbench.sqlite)
+cp docs/release/evidence/QA-05/legacy-v0.sqlite "$ROOT/labworkbench.sqlite"
+cd "$ROOT"
+echo 'SOURCE INTEGRITY'
+sqlite3 labworkbench.sqlite 'PRAGMA integrity_check;'
+echo 'SOURCE USER TABLES AND ROW COUNTS'
+sqlite3 labworkbench.sqlite "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name; SELECT count(*) FROM records;"
+cp labworkbench.sqlite backup.sqlite
+echo 'BACKUP INTEGRITY'
+sqlite3 backup.sqlite 'PRAGMA integrity_check;'
+echo 'BACKUP USER TABLES AND ROW COUNTS'
+sqlite3 backup.sqlite "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name; SELECT count(*) FROM records;"
+sqlite3 labworkbench.sqlite "DELETE FROM records WHERE id='protocol-legacy';"
+echo 'SOURCE ROW COUNT AFTER SIMULATED LOSS'
+sqlite3 labworkbench.sqlite 'SELECT count(*) FROM records;'
+cp backup.sqlite labworkbench.sqlite
+echo 'RESTORED INTEGRITY AND ROW COUNT'
+sqlite3 labworkbench.sqlite 'PRAGMA integrity_check; SELECT count(*) FROM records;'
+echo 'RESTORE FILE COMPARISON'
+if cmp -s labworkbench.sqlite backup.sqlite; then echo 'identical'; else echo 'different'; exit 1; fi
+echo 'BACKUP AND RESTORED SOURCE SHA256'
+sha256sum backup.sqlite labworkbench.sqlite
 ```
 
 ```text
 SOURCE INTEGRITY
 ok
-SOURCE USER TABLES
+SOURCE USER TABLES AND ROW COUNTS
 records
-SOURCE RECORDS ROW COUNT
-2
+4
 BACKUP INTEGRITY
 ok
-BACKUP RECORDS ROW COUNT
-2
-MODIFIED SOURCE ROW COUNT BEFORE RESTORE
-1
-RESTORED SOURCE INTEGRITY
+BACKUP USER TABLES AND ROW COUNTS
+records
+4
+SOURCE ROW COUNT AFTER SIMULATED LOSS
+3
+RESTORED INTEGRITY AND ROW COUNT
 ok
-RESTORED SOURCE RECORDS ROW COUNT
-2
-ROW-BY-ROW SOURCE
-qa05-design|design|1|{"title":"Legacy design","objective":"preserve this record"}
-qa05-project|project|1|{"name":"QA-05 legacy fixture","description":"backup/restore verification"}
-ROW-BY-ROW BACKUP
-qa05-design|design|1|{"title":"Legacy design","objective":"preserve this record"}
-qa05-project|project|1|{"name":"QA-05 legacy fixture","description":"backup/restore verification"}
-REOPENED AFTER RESTORE: INTEGRITY / USER VERSION / RECORD COUNT
-ok
-0
-2
-FIXTURE SHA256
-0e7cd11dfba48e8f7968b4c62ce91553e3ac5efeab8a0482af9fb1899cda8481  docs/release/evidence/QA-05/legacy-v0.sqlite
+4
+RESTORE FILE COMPARISON
+identical
 BACKUP AND RESTORED SOURCE SHA256
-0e7cd11dfba48e8f7968b4c62ce91553e3ac5efeab8a0482af9fb1899cda8481  backup.sqlite
-0e7cd11dfba48e8f7968b4c62ce91553e3ac5efeab8a0482af9fb1899cda8481  labworkbench.sqlite
+9e21bc796ddb02222549d988ccf2d2dc7ae6586b99c416a8dbd8a6579dc8dd12  backup.sqlite
+9e21bc796ddb02222549d988ccf2d2dc7ae6586b99c416a8dbd8a6579dc8dd12  labworkbench.sqlite
 ```
 
-Schema initialization uses the `open_db` DDL from `src/cli.rs` on a separate fixture copy. The exact SQL is recorded in the test command:
-```sh
-
-ROOT=$(mktemp -d)
-mkdir -p "$ROOT/upgrade"
-cp docs/release/evidence/QA-05/legacy-v0.sqlite "$ROOT/upgrade/labworkbench.sqlite"
-sqlite3 "$ROOT/upgrade/labworkbench.sqlite" 'PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);'
-sqlite3 "$ROOT/upgrade/labworkbench.sqlite" 'PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM records;'
-```
-
-```text
-wal
-ok
-0
-2
-```
-
-Failure injection against `failure-v0.sql` replays the same DDL. The `records` layout intentionally lacks `project_id`; the second index fails after the first index is created.
-Failure injection commands (each run creates an isolated database and temporary directory):
-
-```sh
-ROOT=$(mktemp -d)
-mkdir -p "$ROOT/failure"
-sqlite3 "$ROOT/failure/labworkbench.sqlite" < docs/release/evidence/QA-05/failure-v0.sql
-echo 'FAILURE INJECTION BEFORE SHA256'; (cd "$ROOT/failure" && sha256sum labworkbench.sqlite)
-if sqlite3 "$ROOT/failure/labworkbench.sqlite" 'PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);'; then status=0; else status=$?; fi
-echo "FAILURE INJECTION SQLITE EXIT: $status"
-echo 'FAILURE INJECTION AFTER SHA256'; (cd "$ROOT/failure" && sha256sum labworkbench.sqlite)
-echo 'FAILED INITIALIZATION DATABASE INTEGRITY / USER VERSION / RECORD COUNT'; sqlite3 "$ROOT/failure/labworkbench.sqlite" 'PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM records;'
-echo 'FAILED INITIALIZATION INDEXES'; sqlite3 "$ROOT/failure/labworkbench.sqlite" "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%' ORDER BY name;"
-```
-
-
-```text
-FAILURE INJECTION BEFORE SHA256: 276e654ee5ea4af288e4b50e354ccd956547f5cf9d9f2046e3c1b71a4d35b8e0
-Error: in prepare, no such column: project_id
-  TE INDEX IF NOT EXISTS records_project ON records(project_id);
-                                      error here ---^
-wal
-FAILURE INJECTION SQLITE EXIT: 1
-FAILURE INJECTION AFTER SHA256: 168a584b50dbb088969943b0874b27fcc0d8d4fd8d497e9fa7f36e24b943d388
-FAILED INITIALIZATION DATABASE INTEGRITY / USER VERSION / RECORD COUNT
-ok
-0
-1
-FAILED INITIALIZATION INDEXES
-records_kind_parent
-```
-
-`failure-v0.sql` and `legacy-v0.sql` are the reproducible fixture inputs. The captured failure hashes are taken immediately before and after the injected DDL failure; they differ, and `records_kind_parent` persists after the failed second index.
+The database backup/restore above validates closed-file copy semantics, not the UI service implementation. The UI entry is documented in [BACKUP_RESTORE.md](../../BACKUP_RESTORE.md); it was not exercised on VPS.
