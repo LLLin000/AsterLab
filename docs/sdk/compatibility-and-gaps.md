@@ -21,7 +21,7 @@
 
 ## 2. Implemented in this pass
 
-- `spec/modules.json` is the single manifest for 15 registered `kind@schema` modules and declares their Design/Document/Run renderer keys.
+- `spec/modules.json` is the single manifest for 16 registered `kind@schema` modules (14 distinct `kind` values; `step` has schema 1, 2 and 3) and declares their Design/Document/Run renderer keys.
 - `Registry.RegisterRenderer` registers reusable callbacks once (`generic.editor`, `generic.run`); module-specific callbacks such as `plate.editor` remain specialized. Missing surface declarations show a gap, not a fallback.
 - Foundation port types in the shared manifest: quantity, typed reference, enum, decimal/integer/boolean, list, table, geometry, artifact, duration, timepoint, relative time, with legacy aliases.
 - Shared `spec/units.json` named UCUM subset and explicit conversion helper.
@@ -105,7 +105,7 @@ GUI 与 Agent 是同一 Core 的两个独立客户端；不依赖 UI 自动化�
 9. 用 `asterdoc.create_run` 按精确 revision 冻结 Run；研究者确认 `asterdoc.assess` 返回的 warnings 后，将确认的原文传入 `acknowledged_warnings`。
 10. 执行时用 `run.workspace` 查询冻结计划，用 `execution_event.create` 记录结构化事件。CCK-8 孔板/表格读数共用 Run Core 的 readout-batch 写入；当前没有对应的 CLI 批量读数工具。
 
-一条 `asterdoc.command` 是一个原子版本提交；跨多条命令的 `asterdoc.batch` 尚未实现。复杂设计应按依赖顺序逐条提交，每条提交后使用返回的新 revision。
+一条 `asterdoc.command` 是一个原子版本提交；跨多条命令的 `asterdoc.batch` 尚未实现（依据：`src/cli.rs` 的工具分发没有 `asterdoc.batch` 入口，DOC-05 以 `grep -rn 'asterdoc.batch' src/cli.rs` 无输出核对）。复杂设计应按依赖顺序逐条提交，每条提交后使用返回的新 revision。
 
 `asterdoc.validate` 校验候选 source；`asterdoc.assess` 只评估已保存的精确 revision，并返回 Run 冻结所用 Core audit 的同一组 warnings（另加 readiness errors）。两者不可互相替代；研究者确认的 warning 原文可交给 `asterdoc.create_run.acknowledged_warnings`。
 
