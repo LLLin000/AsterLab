@@ -590,7 +590,12 @@ mod tests {
         assert!(normalize_relative_path("./file").is_err());
         assert!(normalize_relative_path("\\\\server\\share\\file").is_err());
         assert!(normalize_relative_path("C:/Windows/win.ini").is_err());
+        // A colon in the first component is a legal Unix file name but a
+        // drive-relative prefix on Windows; both paths stay inside the root.
+        #[cfg(not(windows))]
         assert_eq!(normalize_relative_path("a:b.csv").unwrap(), "a:b.csv");
+        #[cfg(windows)]
+        assert!(normalize_relative_path("a:b.csv").is_err());
         assert_eq!(normalize_relative_path("  ").unwrap(), "  ");
     }
 
