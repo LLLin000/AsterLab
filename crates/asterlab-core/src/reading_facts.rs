@@ -829,7 +829,7 @@ fn coordinate_for(row: u32, column: u32) -> Option<String> {
 /// comparable key. Fractional seconds are padded to nanoseconds and a `Z` zone
 /// becomes `+00:00`, so stored UTC timestamps order correctly. Non-timestamp
 /// text is returned as is.
-fn time_key(value: &str) -> String {
+pub(crate) fn time_key(value: &str) -> String {
     let Some(time_at) = value.find('T') else {
         return value.to_owned();
     };

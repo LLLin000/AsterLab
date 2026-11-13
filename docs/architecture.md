@@ -276,6 +276,59 @@ endpoint/plate 过滤，返回：
 （旧事件缺字段按 raw）的读数进入数值事实表；`derived` 结果保留在事件中，不作为
 原始事实。非数值观察保留在事件正文，不进入数值事实表。
 
+### 5.5 Execution Events 与时间线
+
+执行事件仍只以 `execution_event` 追加记录保存；`crates/asterlab-core::execution_timeline`
+只定义事件词汇、写入计划和 Run/step 时间线，不新增事实表，也不回写旧事件。
+
+写入以 `EventIntent` 表达用户实际发生的事，Core 负责映射到存储字段：
+
+| intent | `event_type` | 必需内容 |
+|---|---|---|
+| `operation` | `operation` | `content`；可选步骤引用 |
+| `material_use` | `material_use` | 至少一项 `materials` |
+| `measurement` | `measurement` | 关联冻结步骤；至少一项数值 `measurements` |
+| `check` | `operation` | 关联冻结步骤；至少一项 `checks` |
+| `completion` | `operation` | 关联冻结步骤；`step_status = completed`，blocking 检查必须为 `passed` |
+| `failure` | `deviation` | 非空 `deviation`；带步骤时 `step_status = blocked` |
+| `observation` | `observation` | `content` |
+
+`plan_event(draft, workspace)` 只校验并返回 `execution_event.create` 的 payload，不写库。
+校验范围：
+
+- `run_id` 必须是当前 Run；`content` 非空且不超过 5000 字符；`occurred_at` 必须是无歧义的
+  RFC 3339 时间，未知时留空；
+- `step_path` 必须同时匹配本次 Run 冻结的步骤、作用域和 `protocol_version_id`；步骤 path
+  在多个作用域重复时必须给出 `assay_id` 或 `planned_output_id`；
+- `timepoint` 必须同时给 `assay_id`，且必须是该步骤的计划时间点；`task_key` 必须匹配
+  步骤、作用域和时间点；
+- 检查项状态只接受 `passed` / `failed` / `blocked` / `skipped`，同一事件不得重复
+  `check_id`；完成事件不得忽略冻结步骤的 blocking 检查；
+- 材料、测量、检查只允许出现在对应 intent，材料 `planned_output_id` 必须属于本次 Run；
+- 未关联步骤时不得携带步骤字段、检查或 `task_key`。
+
+时间线查询 `query_timeline(workspace, TimelineQuery)`（或 `query_step_timeline`）按
+`recorded_at`（缺失时 `occurred_at`）排序，不依赖调用方传入的事件顺序；可按
+`step_path`、`task_key`、`assay_id`、`occurrence_id` 和事件贡献过滤，并返回：
+
+- `events`：每个事件的显式贡献 `contributions`（`operation`、`material_use`、
+  `measurement`、`check`、`completion`、`deviation`、`observation`）和结果
+  `outcome`（`recorded`、`succeeded`、`failed`、`blocked`、`skipped`）；
+- `failures`：`failed` / `blocked` 记录；失败检查、`blocked` 步骤、偏差事件和带
+  `deviation` 的事件都被视为失败，不压成正文文字；
+- `retries`：显式重试链。重试事件用现有 `lineage` 表达，不需要新字段：
+  `{from_kind:"execution_event", from_id:"<被重试事件>", to_kind:"step",
+  to_id:"<步骤 path>", relation:"retry"}`；存储层直接写 `retry_of_event_id` 时也接受。
+  `attempt` 从显式链计算，首个事件为 1；不按“最近一次同名步骤”猜重试；
+- `issues`：`missing_event_type`、`unknown_event_type`、`missing_event_id`、
+  `invalid_check_status`、`check_without_step`、`completion_without_step`、
+  `unknown_retry_target`、`retry_cycle`、`retry_target_not_failed`、
+  `retry_step_mismatch`、`multiple_retry_edges`、`duplicate_event_id`、
+  `invalid_retry_edge`。
+
+写入拒绝与查询 issue 都不静默修正数据：失败的要求整批拒绝，已存储的异常事件保留并在
+`issues` 中说明，不补造事件、不推断执行实例。
+
 ## 6. 读/写流程
 
 ### 6.1 读

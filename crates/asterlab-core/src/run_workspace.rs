@@ -150,6 +150,7 @@ pub struct ExecutionEventView {
     pub planned_output_id: Option<String>,
     pub task_key: Option<String>,
     pub occurrence_id: Option<String>, // legacy events have None
+    pub retry_of_event_id: Option<String>,
     pub operator: Option<String>,
     pub sample_ids: Vec<String>,
     pub readouts: Vec<Value>,
@@ -502,6 +503,7 @@ pub fn build(
             planned_output_id: opt_text(&event["planned_output_id"]),
             task_key: opt_text(&event["task_key"]),
             occurrence_id: opt_text(&event["occurrence_id"]),
+            retry_of_event_id: opt_text(&event["retry_of_event_id"]),
             operator: opt_text(&event["operator"]),
             sample_ids: event["sample_ids"]
                 .as_array()
