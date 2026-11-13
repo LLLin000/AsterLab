@@ -830,6 +830,11 @@ mod tests {
         assert_eq!(second.new_revision, first.new_revision);
         assert_eq!(second.applied, first.applied);
         assert_eq!(second.committed_at, first.committed_at);
+        assert_eq!(second.previous_version_id, first.previous_version_id);
+        assert_eq!(second.proposal_digest, first.proposal_digest);
+        assert_eq!(second.invalidated_refs, first.invalidated_refs);
+        assert_eq!(second.idempotency_key, first.idempotency_key);
+        assert_eq!(second.target, first.target);
         assert_eq!(store.protocols.len(), 2, "replay must not append");
     }
 
