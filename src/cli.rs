@@ -10894,6 +10894,8 @@ fn output_schema(tool: &str) -> Value {
     let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool),"diagnostics":{"type":"array","items":diagnostic_schema()}}});
     let error = if matches!(tool, "agent_edit.validate" | "agent_edit.commit") {
         json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
+    } else if matches!(tool, "readout.submit" | "readout.batch") {
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"issues":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string"},"message":{"type":"string"}}}}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
     } else {
         json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
     };
@@ -13441,6 +13443,13 @@ protocol_version_id: protocol-v1
             result_schema("readout.batch")["required"],
             json!(["record", "idempotency_key", "replayed", "accepted"])
         );
+        for tool in ["readout.submit", "readout.batch"] {
+            assert_eq!(
+                output_schema(tool)["oneOf"][1]["properties"]["error"]["properties"]["issues"]
+                    ["items"]["required"],
+                json!(["code", "message"])
+            );
+        }
     }
 
     #[test]
