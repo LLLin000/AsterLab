@@ -23,6 +23,7 @@ pub mod reading_facts;
 pub mod readout_schema;
 pub mod readout_records;
 pub mod execution_timeline;
+pub mod sample_progress;
 pub mod workflow_tree;
 pub mod agent_edit;
 pub mod agent_edit_commit;

@@ -335,6 +335,51 @@ endpoint/plate 过滤，返回：
 写入拒绝与查询 issue 都不静默修正数据：失败的要求整批拒绝，已存储的异常事件保留并在
 `issues` 中说明，不补造事件、不推断执行实例。
 
+### 5.6 Sample Execution Identity 与 `workflow.progress`
+
+执行事件可以只描述“这一步做了一次”，但真实执行还区分**样本**和**第几次尝试**。
+`crates/asterlab-core::sample_progress` 定义样本级执行身份：
+
+```text
+run_id + step_path + timepoint? + sample_id + attempt
+```
+
+- `timepoint` 是可空的 Run 冻结设计标签；缺失时保持 `null`，共享制备步骤不绑定时间点。
+  `execution_event.create` 的可选 `attempt` 显式声明身份，必须同时提供冻结
+  `protocol_step_path` 和至少一个 `sample_ids`。
+- 同一身份的重复完成不会产生第二条事实：存储层按
+  `step_path + timepoint + sample_ids[] + attempt` 比较，已存在则返回原事件记录。
+- 重试必须追加新 attempt：`attempt` 只能是当前最高 attempt 或 `最高 + 1`，跳跃被拒绝
+  （`INVALID_INPUT`）。attempt 连续性按精确 `(step_path,timepoint,sample_id)` 隔离。
+  旧 attempt 的事件永不修改，仍可在结果中查。
+- 未写 `attempt` 的旧事件保持兼容：读取时若存在显式 retry 链（`retry_of_event_id`
+  或 `lineage.relation = "retry"`）则按链深度推导，否则为 attempt 1。
+
+`workflow.progress` 是只读投影，输入 `{run_id, step_path?, timepoint?, sample_id?, sample_ids?}`，
+按事件实际携带的 `(step_path,timepoint)` 分组返回；缺失时间点作为 `null` 组，不推断归属。
+不筛选时间点时只返回事件实际存在的分组，不构造 Run 全局样本 × 时间点笛卡尔积：
+
+- `steps[]` 显式包含 `step_path` 和可空 `timepoint`；每组的 `samples[]` 含
+  `status`（`not_started` / `in_progress` / `completed` / `failed` / `skipped`）、
+  当前 `attempt`、`attempt_count` 和完整 `attempts[]` 历史；
+- 组内样本集合来自该组事件；只有同时指定 `step_path` 和具体 `timepoint` 时，
+  `sample_ids[]` 才补入该组的 `not_started` 样本，不扩散到其他时间点或共享步骤；
+- 步骤汇总计数和 `last_event_at` 也仅按该 `(step_path,timepoint)` 组计算。
+
+聚合规则是硬性的：
+
+- `complete = true` 当且仅当该步骤所有样本都是 `completed`；某个事件声明
+  `step_status = "completed"` 只代表**该事件的样本**，不代表整步完成。
+- 任一样本当前状态为 `failed` → 步骤 `failed`；全部样本 `skipped` → 步骤 `skipped`；
+  仅部分样本有进展 → 步骤 `in_progress`。重试成功后步骤可回到 `completed`，旧的
+  失败 attempt 仍保留在 `attempts[]`。
+- 事件时间取 `recorded_at`，缺失时回退 `occurred_at`；排序按归一化时间，不依赖
+  调用方事件数组顺序。
+
+`issues` 只报告无法进入矩阵的数据：`missing_step`（事件没有冻结步骤）、
+`unknown_step`（步骤不在本次冻结 Run）、`invalid_attempt`（attempt 为 0）、
+`retry_cycle`（重试链成环）。不确定时保留事件、标出问题，不推断样本状态。
+
 ## 6. 读/写流程
 
 > 历史（2026-11-05）：时序图中的 `Slint` 参与者指当时的桌面原型；现行前端为 MyGo Native，读写方向与命令/版本规则不变。
