@@ -323,7 +323,8 @@ endpoint/plate 过滤，返回：
 - `issues`：`missing_event_type`、`unknown_event_type`、`missing_event_id`、
   `invalid_check_status`、`check_without_step`、`completion_without_step`、
   `unknown_retry_target`、`retry_cycle`、`retry_target_not_failed`、
-  `retry_step_mismatch`、`multiple_retry_edges`、`duplicate_event_id`。
+  `retry_step_mismatch`、`multiple_retry_edges`、`duplicate_event_id`、
+  `invalid_retry_edge`。
 
 写入拒绝与查询 issue 都不静默修正数据：失败的要求整批拒绝，已存储的异常事件保留并在
 `issues` 中说明，不补造事件、不推断执行实例。

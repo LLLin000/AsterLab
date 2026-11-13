@@ -1314,6 +1314,17 @@ fn retry_target(
             ));
             continue;
         }
+        let to_kind = edge["to_kind"].as_str().unwrap_or_default().trim();
+        let to_id = edge["to_id"].as_str().unwrap_or_default().trim();
+        if to_kind != "step" || to_id.is_empty() || step_path != Some(to_id) {
+            issues.push(issue(
+                "invalid_retry_edge",
+                "retry lineage 的 to_kind/to_id 必须指向当前 Protocol 步骤",
+                Some(event_id),
+                step_path,
+            ));
+            continue;
+        }
         edges.push(from_id.to_owned());
     }
     if edges.len() > 1 {
@@ -1951,6 +1962,38 @@ mod tests {
         assert_eq!(retries.events.len(), 1);
         assert_eq!(retries.events[0].event_id, "e3");
         assert_eq!(retries.retries.len(), 1);
+    }
+
+    #[test]
+    fn malformed_retry_lineage_targets_are_reported_not_accepted() {
+        let mut failed = step_event("e1", "2026-01-01T00:00:01Z", "operation");
+        failed["checks"] = check("failed");
+        let mut wrong_kind = step_event("e2", "2026-01-01T00:00:02Z", "operation");
+        wrong_kind["lineage"] = json!([{
+            "from_kind":"execution_event","from_id":"e1",
+            "to_kind":"run","to_id":"r1","relation":"retry"
+        }]);
+        let mut wrong_step = step_event("e3", "2026-01-01T00:00:03Z", "operation");
+        wrong_step["lineage"] = json!([{
+            "from_kind":"execution_event","from_id":"e1",
+            "to_kind":"step","to_id":"root/seed","relation":"retry"
+        }]);
+
+        let result = query_timeline(
+            &workspace(vec![failed, wrong_kind, wrong_step]),
+            &TimelineQuery::default(),
+        );
+        assert!(result.retries.is_empty());
+        assert_eq!(result.events[1].attempt, 1);
+        assert_eq!(result.events[2].attempt, 1);
+        assert_eq!(
+            result
+                .issues
+                .iter()
+                .filter(|issue| issue.code == "invalid_retry_edge")
+                .count(),
+            2
+        );
     }
 
     #[test]
