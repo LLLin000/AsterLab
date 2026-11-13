@@ -1,0 +1,7 @@
+attempt 1 S1 event:      5c05f41c-a3eb-41c1-b94a-7a5575ae736b
+attempt 1 S2 event:      06689d5f-55c9-4179-991b-02bd030e449e (deviation, blocked)
+attempt 2 S2 retry:      d6fbcf47-3d34-4268-93e1-b19c5eaf66d0 (lineage relation=retry)
+duplicate S1 attempt 1:  5c05f41c-a3eb-41c1-b94a-7a5575ae736b
+duplicate === original:  yes
+
+== attempt gap is rejected ==

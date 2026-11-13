@@ -1,0 +1,1028 @@
+warning: unused variable: `assay_index`
+    --> src/../../../src/cli.rs:3387:9
+     |
+3387 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/../../../src/cli.rs:9258:17
+     |
+9258 |             let mut warnings: Vec<String> = Vec::new();
+     |                 ----^^^^^^^^
+     |                 |
+     |                 help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `find_operation_event` is never used
+  --> src/lib.rs:42:8
+   |
+18 | impl AppCore {
+   | ------------ method in this implementation
+...
+42 |     fn find_operation_event(&self, run_id: &str, op_id: &str) -> Option<Value> {
+   |        ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `INPUT_LIMIT` is never used
+  --> src/../../../src/cli.rs:50:7
+   |
+50 | const INPUT_LIMIT: u64 = 2 * 1024 * 1024;
+   |       ^^^^^^^^^^^
+
+warning: fields `code`, `exit`, `path`, `current_version`, `current_version_id`, and `issues` are never read
+  --> src/../../../src/cli.rs:56:16
+   |
+55 | pub(crate) struct CliError {
+   |                   -------- fields in this struct
+56 |     pub(crate) code: &'static str,
+   |                ^^^^
+57 |     pub(crate) message: String,
+58 |     pub(crate) exit: i32,
+   |                ^^^^
+59 |     /// Agent edit v1 optional fields; empty for the older command set.
+60 |     pub(crate) path: Option<String>,
+   |                ^^^^
+61 |     pub(crate) current_version: Option<i64>,
+   |                ^^^^^^^^^^^^^^^
+62 |     pub(crate) current_version_id: Option<String>,
+   |                ^^^^^^^^^^^^^^^^^^
+63 |     pub(crate) issues: Vec<Value>,
+   |                ^^^^^^
+   |
+   = note: `CliError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `as_str` is never used
+   --> src/../../../src/cli.rs:200:8
+    |
+199 | impl RunRelationship {
+    | -------------------- method in this implementation
+200 |     fn as_str(&self) -> &'static str {
+    |        ^^^^^^
+
+warning: struct `DesignCreate` is never constructed
+   --> src/../../../src/cli.rs:392:8
+    |
+392 | struct DesignCreate {
+    |        ^^^^^^^^^^^^
+
+warning: struct `DesignRevise` is never constructed
+   --> src/../../../src/cli.rs:431:8
+    |
+431 | struct DesignRevise {
+    |        ^^^^^^^^^^^^
+
+warning: struct `ProjectFilter` is never constructed
+   --> src/../../../src/cli.rs:438:8
+    |
+438 | struct ProjectFilter {
+    |        ^^^^^^^^^^^^^
+
+warning: struct `EmptyInput` is never constructed
+   --> src/../../../src/cli.rs:443:8
+    |
+443 | struct EmptyInput {}
+    |        ^^^^^^^^^^
+
+warning: struct `IdInput` is never constructed
+   --> src/../../../src/cli.rs:446:8
+    |
+446 | struct IdInput {
+    |        ^^^^^^^
+
+warning: struct `InspectTreeInput` is never constructed
+   --> src/../../../src/cli.rs:451:8
+    |
+451 | struct InspectTreeInput {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: struct `WorkflowProgressInput` is never constructed
+   --> src/../../../src/cli.rs:460:8
+    |
+460 | struct WorkflowProgressInput {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProjectCreate` is never constructed
+   --> src/../../../src/cli.rs:471:8
+    |
+471 | struct ProjectCreate {
+    |        ^^^^^^^^^^^^^
+
+warning: struct `ProjectRevise` is never constructed
+   --> src/../../../src/cli.rs:478:8
+    |
+478 | struct ProjectRevise {
+    |        ^^^^^^^^^^^^^
+
+warning: struct `RunCreate` is never constructed
+   --> src/../../../src/cli.rs:488:8
+    |
+488 | struct RunCreate {
+    |        ^^^^^^^^^
+
+warning: struct `RunRevise` is never constructed
+   --> src/../../../src/cli.rs:504:8
+    |
+504 | struct RunRevise {
+    |        ^^^^^^^^^
+
+warning: struct `RunPatch` is never constructed
+   --> src/../../../src/cli.rs:514:8
+    |
+514 | struct RunPatch {
+    |        ^^^^^^^^
+
+warning: struct `TaskCreate` is never constructed
+   --> src/../../../src/cli.rs:524:8
+    |
+524 | struct TaskCreate {
+    |        ^^^^^^^^^^
+
+warning: struct `StatusUpdate` is never constructed
+   --> src/../../../src/cli.rs:537:8
+    |
+537 | struct StatusUpdate {
+    |        ^^^^^^^^^^^^
+
+warning: function `planned` is never used
+   --> src/../../../src/cli.rs:542:4
+    |
+542 | fn planned() -> String {
+    |    ^^^^^^^
+
+warning: struct `ProtocolCreate` is never constructed
+   --> src/../../../src/cli.rs:547:8
+    |
+547 | struct ProtocolCreate {
+    |        ^^^^^^^^^^^^^^
+
+warning: struct `ProtocolRevise` is never constructed
+   --> src/../../../src/cli.rs:560:8
+    |
+560 | struct ProtocolRevise {
+    |        ^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockCreate` is never constructed
+   --> src/../../../src/cli.rs:572:8
+    |
+572 | struct ProtocolBlockCreate {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CatalogOperationImport` is never constructed
+   --> src/../../../src/cli.rs:583:8
+    |
+583 | struct CatalogOperationImport {
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `SemanticInspectInput` is never constructed
+   --> src/../../../src/cli.rs:593:8
+    |
+593 | struct SemanticInspectInput {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `SemanticSearchInput` is never constructed
+   --> src/../../../src/cli.rs:598:8
+    |
+598 | struct SemanticSearchInput {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `SemanticPatchInput` is never constructed
+   --> src/../../../src/cli.rs:606:8
+    |
+606 | struct SemanticPatchInput {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ViewCreate` is never constructed
+   --> src/../../../src/cli.rs:611:8
+    |
+611 | struct ViewCreate {
+    |        ^^^^^^^^^^
+
+warning: struct `LabwareDefine` is never constructed
+   --> src/../../../src/cli.rs:618:8
+    |
+618 | struct LabwareDefine {
+    |        ^^^^^^^^^^^^^
+
+warning: struct `ComponentDefine` is never constructed
+   --> src/../../../src/cli.rs:623:8
+    |
+623 | struct ComponentDefine {
+    |        ^^^^^^^^^^^^^^^
+
+warning: struct `ViewProject` is never constructed
+   --> src/../../../src/cli.rs:628:8
+    |
+628 | struct ViewProject {
+    |        ^^^^^^^^^^^
+
+warning: struct `ViewDataPreview` is never constructed
+   --> src/../../../src/cli.rs:637:8
+    |
+637 | struct ViewDataPreview {
+    |        ^^^^^^^^^^^^^^^
+
+warning: struct `ViewGet` is never constructed
+   --> src/../../../src/cli.rs:653:8
+    |
+653 | struct ViewGet {
+    |        ^^^^^^^
+
+warning: struct `ViewRevise` is never constructed
+   --> src/../../../src/cli.rs:658:8
+    |
+658 | struct ViewRevise {
+    |        ^^^^^^^^^^
+
+warning: struct `ViewProposalCreate` is never constructed
+   --> src/../../../src/cli.rs:664:8
+    |
+664 | struct ViewProposalCreate {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ViewProposalAction` is never constructed
+   --> src/../../../src/cli.rs:672:8
+    |
+672 | struct ViewProposalAction {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ViewProposalList` is never constructed
+   --> src/../../../src/cli.rs:678:8
+    |
+678 | struct ViewProposalList {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: struct `CatalogReviewCreate` is never constructed
+   --> src/../../../src/cli.rs:683:8
+    |
+683 | struct CatalogReviewCreate {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockRevise` is never constructed
+   --> src/../../../src/cli.rs:689:8
+    |
+689 | struct ProtocolBlockRevise {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockList` is never constructed
+   --> src/../../../src/cli.rs:700:8
+    |
+700 | struct ProtocolBlockList {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockGet` is never constructed
+   --> src/../../../src/cli.rs:706:8
+    |
+706 | struct ProtocolBlockGet {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockPreview` is never constructed
+   --> src/../../../src/cli.rs:719:8
+    |
+719 | struct ProtocolBlockPreview {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `validate_block_content` is never used
+   --> src/../../../src/cli.rs:821:4
+    |
+821 | fn validate_block_content(
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `ywells` is never used
+    --> src/../../../src/cli.rs:3347:4
+     |
+3347 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+     |    ^^^^^^
+
+warning: function `patch_run` is never used
+    --> src/../../../src/cli.rs:3744:15
+     |
+3744 | pub(crate) fn patch_run(
+     |               ^^^^^^^^^
+
+warning: function `preview_protocol_block` is never used
+    --> src/../../../src/cli.rs:4675:15
+     |
+4675 | pub(crate) fn preview_protocol_block(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_protocol_block_records` is never used
+    --> src/../../../src/cli.rs:4684:15
+     |
+4684 | pub(crate) fn create_protocol_block_records(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_protocol_block_records` is never used
+    --> src/../../../src/cli.rs:4730:15
+     |
+4730 | pub(crate) fn revise_protocol_block_records(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `apply_binding_changes` is never used
+    --> src/../../../src/cli.rs:4787:4
+     |
+4787 | fn apply_binding_changes(
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `DbComponentContext` is never constructed
+    --> src/../../../src/cli.rs:4887:8
+     |
+4887 | struct DbComponentContext<'a> {
+     |        ^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `with_design`, `design_versions`, `scope_exists`, `owned_record`, and `resolve_path` are never used
+    --> src/../../../src/cli.rs:4894:8
+     |
+4893 | impl<'a> DbComponentContext<'a> {
+     | ------------------------------- associated items in this implementation
+4894 |     fn new(db: &'a Connection, project_id: &'a str) -> Self {
+     |        ^^^
+...
+4902 |     fn with_design(
+     |        ^^^^^^^^^^^
+...
+4914 |     fn design_versions(&self) -> Vec<Value> {
+     |        ^^^^^^^^^^^^^^^
+...
+4928 |     fn scope_exists(&self, protocol_version_id: &str, scope: &ProtocolScope) -> bool {
+     |        ^^^^^^^^^^^^
+...
+4960 |     fn owned_record(&self, id: &str, kind: &str) -> Option<Value> {
+     |        ^^^^^^^^^^^^
+...
+4968 |     fn resolve_path(&self, value: &Value, path: &str) -> ModelPathResolution {
+     |        ^^^^^^^^^^^^
+
+warning: function `load_component_registry` is never used
+    --> src/../../../src/cli.rs:5068:4
+     |
+5068 | fn load_component_registry(db: &Connection) -> Result<ComponentRegistry, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_labware_profile` is never used
+    --> src/../../../src/cli.rs:5080:15
+     |
+5080 | pub(crate) fn create_labware_profile(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_component_definition` is never used
+    --> src/../../../src/cli.rs:5101:15
+     |
+5101 | pub(crate) fn create_component_definition(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_view_tx` is never used
+    --> src/../../../src/cli.rs:5139:15
+     |
+5139 | pub(crate) fn revise_view_tx(
+     |               ^^^^^^^^^^^^^^
+
+warning: function `view_step_detail` is never used
+    --> src/../../../src/cli.rs:5148:15
+     |
+5148 | pub(crate) fn view_step_detail(
+     |               ^^^^^^^^^^^^^^^^
+
+warning: function `create_view_proposal_tx` is never used
+    --> src/../../../src/cli.rs:5253:15
+     |
+5253 | pub(crate) fn create_view_proposal_tx(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `list_view_proposals` is never used
+    --> src/../../../src/cli.rs:5290:15
+     |
+5290 | pub(crate) fn list_view_proposals(db: &Connection, view_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `latest_view_proposal` is never used
+    --> src/../../../src/cli.rs:5315:4
+     |
+5315 | fn latest_view_proposal(
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `accept_view_proposal_tx` is never used
+    --> src/../../../src/cli.rs:5334:15
+     |
+5334 | pub(crate) fn accept_view_proposal_tx(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `reject_view_proposal_tx` is never used
+    --> src/../../../src/cli.rs:5360:15
+     |
+5360 | pub(crate) fn reject_view_proposal_tx(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `view_selection_context` is never used
+    --> src/../../../src/cli.rs:5383:15
+     |
+5383 | pub(crate) fn view_selection_context(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_slot_position` is never used
+    --> src/../../../src/cli.rs:5458:4
+     |
+5458 | fn find_slot_position(value: &Value, instance_id: &str) -> Option<(String, String, usize)> {
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `operation_changes` is never used
+    --> src/../../../src/cli.rs:5496:4
+     |
+5496 | fn operation_changes(
+     |    ^^^^^^^^^^^^^^^^^
+
+warning: function `view_proposal` is never used
+    --> src/../../../src/cli.rs:5581:15
+     |
+5581 | pub(crate) fn view_proposal(
+     |               ^^^^^^^^^^^^^
+
+warning: function `project_view_records` is never used
+    --> src/../../../src/cli.rs:5675:15
+     |
+5675 | pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `ensure_design_workflow` is never used
+    --> src/../../../src/cli.rs:5759:15
+     |
+5759 | pub(crate) fn ensure_design_workflow(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_component` is never used
+    --> src/../../../src/cli.rs:5850:4
+     |
+5850 | fn find_component<'a>(value: &'a Value, instance_id: &str) -> Option<&'a Value> {
+     |    ^^^^^^^^^^^^^^
+
+warning: function `find_planned_container` is never used
+    --> src/../../../src/cli.rs:5879:4
+     |
+5879 | fn find_planned_container(value: &Value, instance_id: &str) -> Option<(String, String)> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `view_data_preview` is never used
+    --> src/../../../src/cli.rs:5891:15
+     |
+5891 | pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^
+
+warning: function `view_design_version` is never used
+    --> src/../../../src/cli.rs:5998:4
+     |
+5998 | fn view_design_version(document: &ViewDocument) -> Result<Option<String>, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_view_records` is never used
+    --> src/../../../src/cli.rs:6026:15
+     |
+6026 | pub(crate) fn create_view_records(
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_view_records` is never used
+    --> src/../../../src/cli.rs:6069:15
+     |
+6069 | pub(crate) fn revise_view_records(
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `record_document` is never used
+    --> src/../../../src/cli.rs:6125:4
+     |
+6125 | fn record_document(db: &Connection, id: &str) -> Result<(Value, ViewDocument), CliError> {
+     |    ^^^^^^^^^^^^^^^
+
+warning: function `create_catalog_review_records` is never used
+    --> src/../../../src/cli.rs:6135:15
+     |
+6135 | pub(crate) fn create_catalog_review_records(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `import_catalog_operation_records` is never used
+    --> src/../../../src/cli.rs:6164:15
+     |
+6164 | pub(crate) fn import_catalog_operation_records(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `semantic_error_with_conflict` is never used
+    --> src/../../../src/cli.rs:6234:4
+     |
+6234 | fn semantic_error_with_conflict(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `semantic_error` is never used
+    --> src/../../../src/cli.rs:6249:4
+     |
+6249 | fn semantic_error(issues: Vec<asterlab_core::semantic_component::SemanticIssue>) -> CliError {
+     |    ^^^^^^^^^^^^^^
+
+warning: function `ensure_run_protocol_ready` is never used
+    --> src/../../../src/cli.rs:6258:15
+     |
+6258 | pub(crate) fn ensure_run_protocol_ready(db: &Connection, run_id: &str) -> Result<(), CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `PlateCreate` is never constructed
+    --> src/../../../src/cli.rs:6300:8
+     |
+6300 | struct PlateCreate {
+     |        ^^^^^^^^^^^
+
+warning: struct `WellSet` is never constructed
+    --> src/../../../src/cli.rs:6313:8
+     |
+6313 | struct WellSet {
+     |        ^^^^^^^
+
+warning: struct `NoteCreate` is never constructed
+    --> src/../../../src/cli.rs:6327:8
+     |
+6327 | struct NoteCreate {
+     |        ^^^^^^^^^^
+
+warning: struct `FormulaCreate` is never constructed
+    --> src/../../../src/cli.rs:6512:8
+     |
+6512 | struct FormulaCreate {
+     |        ^^^^^^^^^^^^^
+
+warning: struct `FormulaRevise` is never constructed
+    --> src/../../../src/cli.rs:6523:8
+     |
+6523 | struct FormulaRevise {
+     |        ^^^^^^^^^^^^^
+
+warning: struct `TableCreate` is never constructed
+    --> src/../../../src/cli.rs:6537:8
+     |
+6537 | struct TableCreate {
+     |        ^^^^^^^^^^^
+
+warning: struct `TableRevise` is never constructed
+    --> src/../../../src/cli.rs:6545:8
+     |
+6545 | struct TableRevise {
+     |        ^^^^^^^^^^^
+
+warning: struct `DilutionCalc` is never constructed
+    --> src/../../../src/cli.rs:6554:8
+     |
+6554 | struct DilutionCalc {
+     |        ^^^^^^^^^^^^
+
+warning: struct `SolutionCalc` is never constructed
+    --> src/../../../src/cli.rs:6564:8
+     |
+6564 | struct SolutionCalc {
+     |        ^^^^^^^^^^^^
+
+warning: struct `SerialDilutionCalc` is never constructed
+    --> src/../../../src/cli.rs:6572:8
+     |
+6572 | struct SerialDilutionCalc {
+     |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReactionComponent` is never constructed
+    --> src/../../../src/cli.rs:6581:8
+     |
+6581 | struct ReactionComponent {
+     |        ^^^^^^^^^^^^^^^^^
+
+warning: struct `ReactionVolumeCalc` is never constructed
+    --> src/../../../src/cli.rs:6587:8
+     |
+6587 | struct ReactionVolumeCalc {
+     |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `StudyImport` is never constructed
+    --> src/../../../src/cli.rs:6593:8
+     |
+6593 | struct StudyImport {
+     |        ^^^^^^^^^^^
+
+warning: struct `ProtocolBody` is never constructed
+    --> src/../../../src/cli.rs:6602:8
+     |
+6602 | struct ProtocolBody {
+     |        ^^^^^^^^^^^^
+
+warning: function `normalize_validate_design_data` is never used
+    --> src/../../../src/cli.rs:6795:15
+     |
+6795 | pub(crate) fn normalize_validate_design_data(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `inspect_workflow_tree` is never used
+    --> src/../../../src/cli.rs:6918:4
+     |
+6918 | fn inspect_workflow_tree(input: &InspectTreeInput, data_dir: &Path) -> Result<Value, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `workflow_tree_for_db` is never used
+    --> src/../../../src/cli.rs:6931:15
+     |
+6931 | pub(crate) fn workflow_tree_for_db(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_workflow_document` is never used
+    --> src/../../../src/cli.rs:6998:4
+     |
+6998 | fn parse_workflow_document(source: &str) -> Result<Document, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `load_workflow_blocks` is never used
+    --> src/../../../src/cli.rs:7088:4
+     |
+7088 | fn load_workflow_blocks(
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `workflow_block_definition` is never used
+    --> src/../../../src/cli.rs:7110:4
+     |
+7110 | fn workflow_block_definition(value: Value) -> Result<BlockDefinition, String> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `workflow_tasks_from_workspace` is never used
+    --> src/../../../src/cli.rs:7186:4
+     |
+7186 | fn workflow_tasks_from_workspace(workspace: &Value) -> Vec<RunTask> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `design_map` is never used
+    --> src/../../../src/cli.rs:7356:15
+     |
+7356 | pub(crate) fn design_map(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^
+
+warning: function `data_dir` is never used
+    --> src/../../../src/cli.rs:7674:8
+     |
+7674 | pub fn data_dir() -> Result<PathBuf, CliError> {
+     |        ^^^^^^^^
+
+warning: function `db_path` is never used
+    --> src/../../../src/cli.rs:7714:8
+     |
+7714 | pub fn db_path(data_dir: &Path) -> PathBuf {
+     |        ^^^^^^^
+
+warning: function `parse_input` is never used
+    --> src/../../../src/cli.rs:7920:4
+     |
+7920 | fn parse_input<T: DeserializeOwned>(path: &str) -> Result<T, CliError> {
+     |    ^^^^^^^^^^^
+
+warning: function `parse_args` is never used
+    --> src/../../../src/cli.rs:7945:4
+     |
+7945 | fn parse_args(args: &[String]) -> Result<&str, CliError> {
+     |    ^^^^^^^^^^
+
+warning: function `output` is never used
+    --> src/../../../src/cli.rs:7951:4
+     |
+7951 | fn output(tool: &str, result: Value) {
+     |    ^^^^^^
+
+warning: function `update_data` is never used
+    --> src/../../../src/cli.rs:7960:4
+     |
+7960 | fn update_data(
+     |    ^^^^^^^^^^^
+
+warning: function `set_status` is never used
+    --> src/../../../src/cli.rs:7999:4
+     |
+7999 | fn set_status(
+     |    ^^^^^^^^^^
+
+warning: function `concentration_factor` is never used
+    --> src/../../../src/cli.rs:8027:4
+     |
+8027 | fn concentration_factor(unit: &str) -> Result<f64, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `volume_factor` is never used
+    --> src/../../../src/cli.rs:8036:4
+     |
+8036 | fn volume_factor(unit: &str) -> Result<f64, CliError> {
+     |    ^^^^^^^^^^^^^
+
+warning: function `create_project` is never used
+    --> src/../../../src/cli.rs:8045:15
+     |
+8045 | pub(crate) fn create_project(db: &Connection, name: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^
+
+warning: function `run` is never used
+    --> src/../../../src/cli.rs:8514:8
+     |
+8514 | pub fn run(args: &[String], data_dir: &Path) -> i32 {
+     |        ^^^
+
+warning: function `fail` is never used
+    --> src/../../../src/cli.rs:8562:4
+     |
+8562 | fn fail(tool: &str, e: CliError) -> i32 {
+     |    ^^^^
+
+warning: function `print_help` is never used
+    --> src/../../../src/cli.rs:8579:4
+     |
+8579 | fn print_help() {
+     |    ^^^^^^^^^^
+
+warning: function `require_trusted_writer` is never used
+    --> src/../../../src/cli.rs:8583:4
+     |
+8583 | fn require_trusted_writer(tool: &str) -> Result<(), CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CliEditStore` is never constructed
+    --> src/../../../src/cli.rs:8594:8
+     |
+8594 | struct CliEditStore<'a> {
+     |        ^^^^^^^^^^^^
+
+warning: function `edit_protocol_head` is never used
+    --> src/../../../src/cli.rs:8598:4
+     |
+8598 | fn edit_protocol_head(
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `edit_block_version` is never used
+    --> src/../../../src/cli.rs:8641:4
+     |
+8641 | fn edit_block_version(
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: struct `CliCommitStore` is never constructed
+    --> src/../../../src/cli.rs:8683:8
+     |
+8683 | struct CliCommitStore<'a, 'conn> {
+     |        ^^^^^^^^^^^^^^
+
+warning: function `validate_agent_edit` is never used
+    --> src/../../../src/cli.rs:8810:15
+     |
+8810 | pub(crate) fn validate_agent_edit(db: &Connection, input: Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `commit_agent_edit` is never used
+    --> src/../../../src/cli.rs:8824:15
+     |
+8824 | pub(crate) fn commit_agent_edit(db: &mut Connection, input: Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^
+
+warning: function `agent_edit_cli_error` is never used
+    --> src/../../../src/cli.rs:8854:4
+     |
+8854 | fn agent_edit_cli_error(error: AgentEditError) -> CliError {
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `dispatch` is never used
+    --> src/../../../src/cli.rs:8887:4
+     |
+8887 | fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> {
+     |    ^^^^^^^^
+
+warning: struct `RecordList` is never constructed
+     --> src/../../../src/cli.rs:10285:8
+      |
+10285 | struct RecordList {
+      |        ^^^^^^^^^^
+
+warning: function `validate_import` is never used
+     --> src/../../../src/cli.rs:10291:4
+      |
+10291 | fn validate_import(i: &StudyImport) -> Result<(), CliError> {
+      |    ^^^^^^^^^^^^^^^
+
+warning: function `split_well` is never used
+     --> src/../../../src/cli.rs:10306:4
+      |
+10306 | fn split_well(value: &str) -> Result<(String, String), CliError> {
+      |    ^^^^^^^^^^
+
+warning: function `design_payload_schema` is never used
+     --> src/../../../src/cli.rs:10320:4
+      |
+10320 | fn design_payload_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `asset_link_payload_schema` is never used
+     --> src/../../../src/cli.rs:10323:4
+      |
+10323 | fn asset_link_payload_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `asset_link_event_payload_schema` is never used
+     --> src/../../../src/cli.rs:10342:4
+      |
+10342 | fn asset_link_event_payload_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `record_data_schema` is never used
+     --> src/../../../src/cli.rs:10363:4
+      |
+10363 | fn record_data_schema(kind: &str) -> Value {
+      |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `record_schema` is never used
+     --> src/../../../src/cli.rs:10428:4
+      |
+10428 | fn record_schema(kind: &str) -> Value {
+      |    ^^^^^^^^^^^^^
+
+warning: function `any_record_schema` is never used
+     --> src/../../../src/cli.rs:10433:4
+      |
+10433 | fn any_record_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^
+
+warning: function `workflow_progress_output_schema` is never used
+     --> src/../../../src/cli.rs:10460:4
+      |
+10460 | fn workflow_progress_output_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `result_schema` is never used
+     --> src/../../../src/cli.rs:10523:4
+      |
+10523 | fn result_schema(tool: &str) -> Value {
+      |    ^^^^^^^^^^^^^
+
+warning: function `output_schema` is never used
+     --> src/../../../src/cli.rs:10634:4
+      |
+10634 | fn output_schema(tool: &str) -> Value {
+      |    ^^^^^^^^^^^^^
+
+warning: function `input_schema` is never used
+     --> src/../../../src/cli.rs:10643:4
+      |
+10643 | fn input_schema(tool: &str) -> Option<Value> {
+      |    ^^^^^^^^^^^^
+
+warning: function `design_schema` is never used
+     --> src/../../../src/cli.rs:10877:4
+      |
+10877 | fn design_schema() -> Value {
+      |    ^^^^^^^^^^^^^
+
+warning: function `schema` is never used
+     --> src/../../../src/cli.rs:10905:4
+      |
+10905 | fn schema(tool: &str) -> Option<Value> {
+      |    ^^^^^^
+
+warning: function `parameter_slot_input_schema` is never used
+     --> src/../../../src/cli.rs:10908:4
+      |
+10908 | fn parameter_slot_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `step_binding_input_schema` is never used
+     --> src/../../../src/cli.rs:10921:4
+      |
+10921 | fn step_binding_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `protocol_step_input_schema` is never used
+     --> src/../../../src/cli.rs:10933:4
+      |
+10933 | fn protocol_step_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `root_parameter_values_input_schema` is never used
+     --> src/../../../src/cli.rs:10949:4
+      |
+10949 | fn root_parameter_values_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `timepoint_timing_input_schema` is never used
+     --> src/../../../src/cli.rs:10954:4
+      |
+10954 | fn timepoint_timing_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `tool_specs` is never used
+     --> src/../../../src/cli.rs:10968:4
+      |
+10968 | fn tool_specs() -> Vec<Value> {
+      |    ^^^^^^^^^^
+
+warning: function `tool_writes` is never used
+     --> src/../../../src/cli.rs:11047:4
+      |
+11047 | fn tool_writes(tool: &str) -> bool {
+      |    ^^^^^^^^^^^
+
+warning: function `tool_description` is never used
+     --> src/../../../src/cli.rs:11086:4
+      |
+11086 | fn tool_description(tool: &str) -> &'static str {
+      |    ^^^^^^^^^^^^^^^^
+
+warning: function `tool_effects` is never used
+     --> src/../../../src/cli.rs:11166:4
+      |
+11166 | fn tool_effects(tool: &str) -> &'static str {
+      |    ^^^^^^^^^^^^
+
+warning: struct `AssetLinkCreate` is never constructed
+     --> src/../../../src/cli.rs:11240:8
+      |
+11240 | struct AssetLinkCreate {
+      |        ^^^^^^^^^^^^^^^
+
+warning: struct `AssetUnlinkInput` is never constructed
+     --> src/../../../src/cli.rs:11257:8
+      |
+11257 | struct AssetUnlinkInput {
+      |        ^^^^^^^^^^^^^^^^
+
+warning: struct `AssetListInput` is never constructed
+     --> src/../../../src/cli.rs:11265:8
+      |
+11265 | struct AssetListInput {
+      |        ^^^^^^^^^^^^^^
+
+warning: struct `AssetEventsInput` is never constructed
+     --> src/../../../src/cli.rs:11271:8
+      |
+11271 | struct AssetEventsInput {
+      |        ^^^^^^^^^^^^^^^^
+
+warning: function `link_local_asset` is never used
+     --> src/../../../src/cli.rs:11468:4
+      |
+11468 | fn link_local_asset(
+      |    ^^^^^^^^^^^^^^^^
+
+warning: function `unlink_asset_link` is never used
+     --> src/../../../src/cli.rs:11633:15
+      |
+11633 | pub(crate) fn unlink_asset_link(
+      |               ^^^^^^^^^^^^^^^^^
+
+warning: function `list_asset_events` is never used
+     --> src/../../../src/cli.rs:11698:15
+      |
+11698 | pub(crate) fn list_asset_events(
+      |               ^^^^^^^^^^^^^^^^^
+
+warning: fields `exit` and `issues` are never read
+  --> src/../../../src/cli.rs:58:16
+   |
+55 | pub(crate) struct CliError {
+   |                   -------- fields in this struct
+...
+58 |     pub(crate) exit: i32,
+   |                ^^^^
+...
+63 |     pub(crate) issues: Vec<Value>,
+   |                ^^^^^^
+   |
+   = note: `CliError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: `asterlab-app` (lib) generated 155 warnings (run `cargo fix --lib -p asterlab-app` to apply 2 suggestions)
+warning: `asterlab-app` (lib test) generated 112 warnings (111 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-app/64318dc11aff0c44/out/asterlab_app-64318dc11aff0c44)
+
+running 23 tests
+test agent_edit_preview::tests::preview_rejects_the_three_illegal_input_classes ... ok
+test agent_edit_preview::tests::preview_resolves_diffs_from_the_store_and_leaves_it_untouched ... ok
+test cli_impl::tests::assess_and_run_creation_reject_unmaterialized_steps ... ok
+test cli_impl::tests::assess_includes_run_creation_audit_warnings ... ok
+test cli_impl::tests::agent_edit_commit_appends_a_version_and_keeps_the_frozen_run ... ok
+test cli_impl::tests::asset_link_rejects_paths_outside_the_root_without_writing ... ok
+test cli_impl::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
+test cli_impl::tests::asterdoc_parity_samples ... ok
+test cli_impl::tests::compiler_keeps_sample_identity_explicit_across_timepoints ... ok
+test cli_impl::tests::compiler_records_the_block_version_each_step_reuses ... ok
+test cli_impl::tests::failed_schema_migration_preserves_database ... ok
+test cli_impl::tests::manifest_rule_must_be_registered_in_rust ... ok
+test cli_impl::tests::read_only_tools_do_not_write ... ok
+test cli_impl::tests::agent_tools_are_discoverable ... ok
+test cli_impl::tests::step_materialization_preserves_frozen_run_protocol_block_revision ... ok
+test cli_impl::tests::schema_migration_legacy_v0 ... ok
+test cli_impl::tests::concurrent_agent_edit_commits_leave_exactly_one_winner ... ok
+test tests::concurrent_batch_writers_use_authoritative_revision ... ok
+test tests::idempotent_readout_and_rollback ... ok
+test tests::readout_persists_across_reopen ... ok
+test tests::batch_is_atomic_idempotent_and_preserves_missing_cells ... ok
+test cli_impl::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
+test cli_impl::tests::asset_link_hashes_a_large_file_without_copying_it ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.20s
+
+   Doc-tests asterlab_app
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
