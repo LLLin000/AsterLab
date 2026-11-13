@@ -1,0 +1,3 @@
+$ grep -c "^### " docs/contracts/readout-schema-v1.md
+12
+exit=0
