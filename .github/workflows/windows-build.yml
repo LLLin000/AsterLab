@@ -40,9 +40,12 @@ jobs:
           cache-dependency-path: prototypes/mygo-run/go.sum
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
+        # The channel lives only in rust-toolchain.toml (REL-07). `rustup install`
+        # resolves that file and installs exactly that toolchain; a missing or
+        # malformed pin fails here instead of silently using the runner's stable.
+        # x86_64-pc-windows-msvc is this runner's host triple, so the minimal
+        # profile already ships its std; no extra `targets` input is needed.
+        run: rustup install --profile minimal --no-self-update
 
       - name: Record toolchain versions
         run: |

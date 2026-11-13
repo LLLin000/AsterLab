@@ -1,0 +1,10 @@
+# REL-07: the only declaration of the Rust channel. CI does not name a version:
+# both `.github/workflows/linux-tests.yml` and `windows-build.yml` run
+# `rustup install`, which resolves this file, and local `cargo`/`rustc` calls in
+# the repo do the same. Bumping stable means editing `channel` here.
+#
+# 1.100.0 (0ef1bc386 2026-11-09) is the rustc both gates already ran on at
+# 6df1aee, read from their `Record toolchain versions` steps: linux-tests job
+# 43368708135, windows-build job 43368708226.
+[toolchain]
+channel = "1.100.0"
