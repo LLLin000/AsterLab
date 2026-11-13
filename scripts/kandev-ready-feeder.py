@@ -177,6 +177,81 @@ def scan_no_pr(review_tasks):
         move(task, AGENT, "no PR in Review -> back to Agent")
 
 
+def scan_stale_prompt(detailed):
+    """Bounce sessions started before their step's prompt was updated.
+
+    A session reads the step prompt once at start; prompt edits don't
+    propagate to running sessions. Retire stale ones so the relaunch
+    picks up the new prompt.
+    """
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        prompts = dict(con.execute(
+            "select id,updated_at from workflow_steps where workflow_id=?", (WORKFLOW,)
+        ).fetchall())
+        con.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"stale-prompt scan failed: {exc}", file=sys.stderr)
+        return
+    for task in detailed:
+        step = task.get("workflow_step_id")
+        if step not in (AGENT, REVIEW):
+            continue
+        if "human-hold" in lane_labels(task):
+            continue
+        pupd = prompts.get(step)
+        if not pupd:
+            continue
+        try:
+            import sqlite3
+            from datetime import datetime, timezone
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            rows = con.execute(
+                "select id,started_at from task_sessions where task_id=? and state in ('RUNNING','WAITING_FOR_INPUT','SCHEDULING')",
+                (task["id"],),
+            ).fetchall()
+            con.close()
+            pdt = datetime.fromisoformat(pupd.replace("Z", "+00:00"))
+            if pdt.tzinfo is None:
+                pdt = pdt.replace(tzinfo=timezone.utc)
+        except Exception:  # noqa: BLE001
+            continue
+        stale = []
+        for sid, started in rows:
+            try:
+                sdt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                if sdt.tzinfo is None:
+                    sdt = sdt.replace(tzinfo=timezone.utc)
+                if sdt < pdt:
+                    stale.append(sid)
+            except Exception:  # noqa: BLE001
+                continue
+        if not stale:
+            continue
+        try:
+            import sqlite3
+
+            wcon = sqlite3.connect(DB)
+            for sid in stale:
+                wcon.execute(
+                    "update task_sessions set state='FAILED',completed_at=datetime('now') where id=?", (sid,)
+                )
+                wcon.execute(
+                    "update executors_running set status='stopped',local_pid=0,pid=0 where session_id=?", (sid,)
+                )
+            wcon.commit()
+            wcon.close()
+        except Exception as exc:  # noqa: BLE001
+            print(f"stale-prompt retire failed: {exc}", file=sys.stderr)
+            continue
+        if move(task, INBOX, "stale prompt -> Inbox"):
+            time.sleep(1)
+            move(task, step, "stale prompt -> back with new prompt")
+
+
 def scan_deadlock():
     """Detect blocked_by cycles; notify once per cycle (label on each member)."""
     try:
@@ -584,6 +659,46 @@ def scan_cardfix(tasks):
             print(f"cardfix-sent label failed: {exc}", file=sys.stderr)
 
 
+ARCHIVE_AFTER_DAYS = int(os.environ.get("KANDEV_ARCHIVE_AFTER_DAYS", "7"))
+
+
+def scan_archive_merged():
+    """Archive Merged cards older than ARCHIVE_AFTER_DAYS.
+
+    Archiving keeps sessions/messages but lets Kandev reclaim the worktree.
+    """
+    import datetime
+
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            """select t.id,t.title,max(tr.occurred_at) m from tasks t
+                join task_step_transitions tr on tr.task_id=t.id
+               where t.archived_at is null and t.workflow_step_id=?
+                 and tr.to_workflow_step_id=?
+               group by t.id""",
+            (MERGED_STEP, MERGED_STEP),
+        ).fetchall()
+        con.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"archive scan failed: {exc}", file=sys.stderr)
+        return
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for r in rows:
+        try:
+            dt = datetime.datetime.fromisoformat(r["m"].replace("Z", "+00:00"))
+            age = (now - dt).total_seconds() / 86400
+        except Exception:  # noqa: BLE001
+            continue
+        if age < ARCHIVE_AFTER_DAYS:
+            continue
+        status, _ = api("POST", f"/api/v1/tasks/{r['id']}/archive", {})
+        print(f"archive {r['title'][:40]} (merged {age:.0f}d ago): {status}")
+
+
 def scan_ci_merges(detailed):
     """FYI when a card touching .github/** gets merged."""
     for task in detailed:
@@ -739,6 +854,7 @@ def run_once():
     # gets bounced to trigger a fresh one; escalates after 3 fixes.
     scan_stuck(detailed)
     scan_deadlock()
+    scan_stale_prompt(detailed)
 
     # Backpressure: do not feed new work while Review is full.
     # human-hold cards still occupy Review slots: clear them by hand.
