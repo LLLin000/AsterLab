@@ -1,16 +1,18 @@
 # AsterLab 架构设计
 
 - 日期：2026-11-05
-- 状态：Beta 架构；Web 是正式交付前端，Slint 是保留的研究原型。决策见 ADR 0001。
+- 状态：权威（模块依赖、分层与迁移方向）· 生效日期 2026-11-13
+- 交付前端：MyGo Native（`prototypes/mygo-run`）。Web 包与 Slint 原型是历史/研究资产；§3、§6 的 Slint 前端内容保留为历史记录。
+- 文档权威登记：[`release/doc-authority.md`](release/doc-authority.md)；Beta 交付范围：[`release/beta-scope.md`](release/beta-scope.md)。
 - 关联：[实验地图契约](prototypes/2026-11-05-experiment-map-and-agent-contract.md)、[协议知识](research/2026-11-05-protocol-knowledge-and-related-projects.md)、[仪器步骤模块](prototypes/instrument-step-modules.md)、[K0 审计](research/2026-11-05-k0-knowledge-coverage-audit.md)、[OperationModule v1](contracts/operation-module-v1.md)、[Semantic Component S0](contracts/semantic-component-contract.md)。
 
 ## 0. 一句话
 
-AsterLab 是一个**读模型驱动**的实验工作台：设计、Protocol、Run 三层各有稳定对象和读模型；Slint 只负责呈现与交互，Rust 核心负责语义、校验、版本和投影，Agent 使用同一套读模型和命令契约。
+AsterLab 是一个**读模型驱动**的实验工作台：设计、Protocol、Run 三层各有稳定对象和读模型；前端（Beta 为 MyGo Native，历史原型为 Slint）只负责呈现与交互，Rust 核心负责语义、校验、版本和投影，Agent 使用同一套读模型和命令契约。
 
 ```mermaid
 flowchart TB
-  A[Agent / Researcher] --> B[Slint Desktop]
+  A[Agent / Researcher] --> B[MyGo Native Desktop]
   A --> C[CLI / HTTP]
   B --> D[View Model]
   C --> E[Core Commands]
@@ -19,9 +21,11 @@ flowchart TB
   F --> G
 ```
 
-## 0.1 当前阶段：P0 契约冻结
+## 0.1 阶段边界（历史：P0 契约冻结）
 
-本文件给出模块方向；具体类型、身份和兼容规则以 [`contracts/core-v1.md`](contracts/core-v1.md) 为准，实施顺序以 [`implementation-plan.md`](implementation-plan.md) 为准。
+本文件给出模块方向；具体类型、身份和兼容规则以 [`contracts/core-v1.md`](contracts/core-v1.md) 为准，当前交付范围与实施阶段以 [`release/beta-scope.md`](release/beta-scope.md) 与 Kandev 卡片为准；历史路线见 [`implementation-plan.md`](implementation-plan.md)。
+
+> 历史（P0/P1 阶段约束，2026-11-05）：以下限制记录当时的 Slint 原型路线，不是当前交付计划；当前范围见 [`beta-scope.md`](release/beta-scope.md)。
 
 P0 结束前不拆 Slint、不实现 `StepMeta`、不移动 `src/cli.rs`。当前 Slint 的原生界面和 `design.map` 是可运行原型，不是已完成 Core 的证据。
 
@@ -29,13 +33,13 @@ P0 结束前不拆 Slint、不实现 `StepMeta`、不移动 `src/cli.rs`。当�
 
 | 层 | 负责 | 不负责 |
 |---|---|---|
-| Slint Desktop | 导航、地图、设计详情、Protocol 步骤、Run 执行、选择与展开 | SQL 查询、科学推断、自动补值 |
+| MyGo Native Desktop（历史 Slint 原型同职责） | 导航、地图、设计详情、Protocol 步骤、Run 执行、选择与展开 | SQL 查询、科学推断、自动补值 |
 | View Model | 把领域对象投影成当前界面需要的短文本/节点/状态 | 修改数据库、重新定义科学关系 |
 | Core | 领域类型、校验、版本、冻结、读模型、命令 | 绘制界面 |
 | SQLite | 记录、版本、Run 快照、执行事件 | 业务规则 |
 | Agent | 读取地图/Protocol、提出字段级 patch、调用确定性工具 | 绕过 Core 直接写记录 |
 
-**Beta 交付面是 Web + Rust 本地服务。** Slint `apps/desktop` 保留为研究分支；不同时维护两套正式前端。
+**Beta 交付面是 MyGo Native 桌面应用 + Rust 本地 Core。** Web 包是历史交付物，Slint `apps/desktop` 保留为研究分支；不同时维护多套前端（[`beta-scope.md`](release/beta-scope.md) §1、§3）。
 
 ## 2. 三层对象
 
@@ -56,7 +60,9 @@ flowchart LR
 
 设计回答“为什么、比较什么、对什么做、何时测、样本怎么流、还缺什么”；Protocol 回答“具体怎么做”；Run 回答“这一次实际做了什么”。三者共享引用，但默认不混排。
 
-## 3. 前端架构（Slint）
+## 3. 前端架构（历史 Slint 原型）
+
+> 历史（2026-11-05）：本节记录 Slint 原型的组件树与状态划分，保留原文用于追溯，不代表当前交付方向。Beta 前端是 MyGo Native，六个表面见 [`product/ux-contract.md`](product/ux-contract.md) §1。
 
 ### 3.1 组件树
 
@@ -278,6 +284,8 @@ endpoint/plate 过滤，返回：
 
 ## 6. 读/写流程
 
+> 历史（2026-11-05）：时序图中的 `Slint` 参与者指当时的桌面原型；现行前端为 MyGo Native，读写方向与命令/版本规则不变。
+
 ### 6.1 读
 
 ```mermaid
@@ -315,7 +323,7 @@ Slint 不直接执行 SQL，不整体替换记录 JSON；写入必须走字段�
 
 | 决策 | 选择 | 理由 |
 |---|---|---|
-| 交付前端 | Slint exe | 原生桌面、单进程、低资源；Web 仅对照 |
+| 交付前端 | MyGo Native 桌面应用（`prototypes/mygo-run`） | Windows x64 单机；Slint 原型仅作研究资产，Web 包为历史交付物（[`beta-scope.md`](release/beta-scope.md) §1） |
 | 首次视图 | 实验地图 | 先理解科学结构，再进入操作 |
 | 地图读写 | 只读投影 | 避免地图变成第二个编辑器 |
 | StepMeta | 可选语义 | 不阻塞地图/Run；有则展示，无则留空 |
@@ -335,7 +343,9 @@ Slint 不直接执行 SQL，不整体替换记录 JSON；写入必须走字段�
 
 ## 9. 实施顺序
 
-以 [`implementation-plan.md`](implementation-plan.md) 为唯一计划：
+> 历史（2026-11-05）：以下阶段属于 Slint 路线，保留原文；当前交付范围与阶段以 [`release/beta-scope.md`](release/beta-scope.md) 与 Kandev 卡片为准。
+
+以 [`implementation-plan.md`](implementation-plan.md) 为历史路线记录：
 
 1. P0：冻结 Core 契约、身份、兼容规则。
 2. P1：抽共享 Core，迁移 `design.map`，建立 `run.workspace`。

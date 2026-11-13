@@ -1,11 +1,14 @@
 # AsterLab 实施计划
 
 - 日期：2026-11-05
-- 状态：唯一当前实施计划；研究文档中的候选方案不自动进入这里。
+- 状态：历史（2026-11-05 起稿的 P0–P6/S0–S4 Slint 路线）· 生效日期：2026-11-13 起标记为历史
+- 当前交付前端：MyGo Native。当前交付范围与实施阶段以 [`release/beta-scope.md`](release/beta-scope.md) 与 Kandev 卡片为准，文档权威登记见 [`release/doc-authority.md`](release/doc-authority.md)。
 - 基线：`44318b4` 之后的语义/契约修订。
 - 关联：[CONTEXT](../CONTEXT.md)、[架构](architecture.md)、[Core Contract v1](contracts/core-v1.md)。
 
-## 0. 当前结论
+> 迁移说明（2026-11-13）：本文保留 2026-11-05 的原始阶段、完成项与验收，用于追溯历史决策。凡写「Slint 执行台 / Slint 编辑 / 产品前端」的条目均属历史路线，不再是当前计划；Web 包为历史交付物，Slint 为研究资产。现行 Beta 平台与 DoD 见 [`beta-scope.md`](release/beta-scope.md)。
+
+## 0. 历史结论（2026-11-05）
 
 Core 方向正确，但还不能直接拆 Slint。
 
@@ -18,7 +21,7 @@ Core 方向正确，但还不能直接拆 Slint。
 
 否则会把 `main.rs` 和 `AppWindow.slint` 的临时推导搬进新目录，形成“架构完成”的假象。
 
-## 1. 已完成，不重复做
+## 1. 历史已完成项（原型资产，不重复做）
 
 - `design.map` CLI + HTTP 只读投影。
 - Web 只读实验地图与设计卡入口。
@@ -287,7 +290,7 @@ P3-B（进行中）才拆 `AppWindow.slint`：
 - 不实现动态第三方插件、真实设备控制、完整 ISA/AnIML 导入导出；
 - 不为新模块开放第二条 Core 写事务；实际事实仍只走记录存储。
 
-## 7. 下一步
+## 7. 历史下一步（2026-11-05）
 
 P0/P1/P2/P3 的历史完成项保留；当前只做 K0/K1 审查,不继续 UI。
 

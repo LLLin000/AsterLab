@@ -1,14 +1,22 @@
 # AsterLab（实验工作台）
 
-一个运行在本机的 Rust + SQLite 实验规划与记录工作台。它借鉴 Cell Planner 的项目、任务日历、记录、资料库和计算器工作流，同时加入有版本的实验设计、Protocol、实验运行和铺板布局。它是 AsterLab 0.1.0 Beta 的本地工作台；Web UI 是本轮正式交付前端，Slint 仅保留为研究原型。
+- 状态：权威（项目入口导览）· 生效日期 2026-11-13
+- 交付范围：[`docs/release/beta-scope.md`](docs/release/beta-scope.md)；文档权威登记：[`docs/release/doc-authority.md`](docs/release/doc-authority.md)
+
+一个运行在本机的 Rust + SQLite 实验规划与记录工作台。它借鉴 Cell Planner 的项目、任务日历、记录、资料库和计算器工作流，同时加入有版本的实验设计、Protocol、实验运行和铺板布局。它是 AsterLab 0.1.0 Beta 的本地工作台。
+
+- 交付方向：Windows x64 + MyGo Native 桌面应用（`prototypes/mygo-run`）+ 本地 Rust Core。
+- 非交付资产：Web 包是历史交付物，Slint 是研究原型；两者都不在 Beta 交付面内（见 [`beta-scope.md`](docs/release/beta-scope.md) §1）。
 
 产品术语与目标对象边界见 [CONTEXT.md](CONTEXT.md)；该文件记录目标设计语义，当前 CLI 的已实现能力仍以 [AGENT_API.md](AGENT_API.md) 为准。
 
-交付决策见 [ADR 0001](docs/adr/0001-web-first-beta.md)；系统分层、Core 读模型和仪器步骤模块见 [docs/architecture.md](docs/architecture.md)。Windows/Linux 分工、构建产物与验证门禁见 [docs/engineering/cross-platform-builds.md](docs/engineering/cross-platform-builds.md)。
-文档权威与阅读顺序见 [docs/README.md](docs/README.md)；当前实施阶段见 [docs/implementation-plan.md](docs/implementation-plan.md)；P0 Core 契约见 [docs/contracts/core-v1.md](docs/contracts/core-v1.md)。 设计控制与 Rune 迁移门槛见 [docs/design/README.md](docs/design/README.md)。
-当前共享设计投影位于 `crates/asterlab-core`；P1-A 已由 CLI/HTTP 与 Slint 地图摘要共用。
+交付决策见 [ADR 0001](docs/adr/0001-web-first-beta.md)；其前端条款已被 MyGo Native Beta 范围取代，正式替代 ADR 待 DS-12。系统分层、Core 读模型和仪器步骤模块见 [docs/architecture.md](docs/architecture.md)。Windows/Linux 分工、构建产物与验证门禁见 [docs/engineering/cross-platform-builds.md](docs/engineering/cross-platform-builds.md)。
+文档权威与阅读顺序见 [docs/README.md](docs/README.md) 与 [doc-authority](docs/release/doc-authority.md)；历史实施路线（Slint 时代）见 [docs/implementation-plan.md](docs/implementation-plan.md)；当前实施阶段与交付范围以 [`beta-scope.md`](docs/release/beta-scope.md) 与 Kandev 卡片为准；P0 Core 契约见 [docs/contracts/core-v1.md](docs/contracts/core-v1.md)。 设计控制与 Rune 迁移门槛见 [docs/design/README.md](docs/design/README.md)。
+当前共享设计投影位于 `crates/asterlab-core`；P1-A 阶段由 CLI/HTTP 与 Slint 地图摘要共用（Slint 部分为历史原型记录）。
 
 ## 启动
+
+> 迁移说明（2026-11-13）：本节与「当前工作流」描述历史 Web 包的行为。Beta 交付物是 MyGo Native 桌面应用与安装包，启动方式与六个表面见 [`beta-scope.md`](docs/release/beta-scope.md) §1.2 与 [`ux-contract.md`](docs/product/ux-contract.md) §1。原文保留，用于对照历史 Web 包。
 
 发布包中双击 `START_HERE.bat` 即可启动，不需要 Rust 或 Node。开发态可运行 `./run-local.ps1`，它会先编译再启动。
 
@@ -39,7 +47,7 @@
 - `GET /api/state`：读取工作区记录。
 - `GET /api/designs/{id}/map`：只读实验地图，返回组别、检测、时间/样本关系、Protocol 关联和待确认项。
 - `GET /api/runs/{id}/workspace`：只读冻结 RunWorkspace，返回冻结设计、步骤/任务/实例、材料、板图和事件。
-- `POST /api/records` / `POST /api/records/update`：供当前本地网页界面使用的服务端适配层；Agent 的正式工具契约以强类型 CLI 为准。
+- `POST /api/records` / `POST /api/records/update`：供历史 Web 包使用的服务端适配层，不在 Beta 交付面内；Agent 的正式工具契约以强类型 CLI 为准。
 Agent 命令、输入输出 schema、错误码和科学字段语义见 [AGENT_API.md](AGENT_API.md)。本地回归检查见 `tests/smoke.cjs` 和 `tests/p2-fixture.cjs`；它会自行启动隔离实例，使用合成数据和临时数据库，不连接或改写当前打开的实例。
 
 ## 当前限制
