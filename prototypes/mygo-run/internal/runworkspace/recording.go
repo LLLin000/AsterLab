@@ -125,25 +125,23 @@ func (r *RecordingView) Render(c *ui.Context) {
 				}
 			}
 		}
-		ui.Spacer(c)
-		if r.Grid != nil && r.OnSaveBatch != nil {
-			switch r.Grid.State {
-			case resultgrid.StateSaved:
-				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "已保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.SuccessText)
-				})
-			default:
-				save := components.Button(c, "保存读数", components.ButtonPrimary)
-				save.Disabled(r.Grid.State == resultgrid.StateSaving)
-				if r.Grid.State == resultgrid.StateSaving {
-					ui.Text(c, "保存中…").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-				}
-				if save.Clicked() {
-					if err := r.Grid.CommitPendingEdit(); err != nil {
-						r.Grid.Error = err.Error()
-					} else {
-						r.OnSaveBatch(r.Grid.Cells)
-					}
+		if r.Grid != nil && r.Grid.State == resultgrid.StateSaved {
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "已保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.SuccessText)
+			})
+		} else if r.Grid != nil && r.OnSaveBatch != nil {
+			// UX-STATE, UX-P5: make the unsaved state explicit beside Save.
+			ui.Text(c, "未保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.WarningText)
+			save := components.Button(c, "保存读数", components.ButtonPrimary)
+			save.Disabled(r.Grid.State == resultgrid.StateSaving)
+			if r.Grid.State == resultgrid.StateSaving {
+				ui.Text(c, "保存中…").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			}
+			if save.Clicked() {
+				if err := r.Grid.CommitPendingEdit(); err != nil {
+					r.Grid.Error = err.Error()
+				} else {
+					r.OnSaveBatch(r.Grid.Cells)
 				}
 			}
 		}
