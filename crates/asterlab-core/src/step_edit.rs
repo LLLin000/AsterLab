@@ -1867,6 +1867,7 @@ mod tests {
             parameter_refs: Vec::new(),
             visualization: None,
             time_scope: None,
+            operation_spec: None,
             checks: Vec::new(),
         }
     }

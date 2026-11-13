@@ -92,3 +92,19 @@ curl -s -H "Authorization: Bearer $KANDEV_API_TOKEN" \
   http://127.0.0.1:38429/api/v1/workspaces/b67b6785-db21-46de-bd68-c0c437823798/tasks \
   | python3 -m json.tool
 ```
+
+## 7. Engineering Home（只读集成）
+
+`LLLin000/home` 是跨项目规范、项目注册和只读控制入口。当前已接入：
+
+```bash
+set -a
+. /etc/kandev-ready-feeder.env
+set +a
+scripts/kandev-home-status.sh   # 只读；等价于 engctl status --project asterlab
+```
+
+- 详细安装和迁移边界见 [`docs/engineering/engineering-home-integration.md`](docs/engineering/engineering-home-integration.md)。
+- Home 不是任务权威：任务范围、依赖和状态仍以 Kandev 为准；项目技术语义仍以本仓库权威文档为准。
+- 当前 Home 只做读取和对账建议；`reconcile --apply` 尚未实现。不要因为 Home 有策略文件就直接写 Kandev SQLite 或改变合并权限。
+

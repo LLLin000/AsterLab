@@ -1,0 +1,1180 @@
+{
+  "total": 59,
+  "pass": 59,
+  "fail": 0,
+  "difference_count": 3,
+  "differences": [
+    {
+      "name": "valid-readout-schema1",
+      "go": {
+        "name": "valid-readout-schema1",
+        "valid": false,
+        "error": "asterlab module \"readout-1\" uses unsupported readout@1; supported: assay@1, container@1, dilution@1, experiment@1, group@1, instrument_profile@1, material@1, measurement_profile@1, plate@1, reference@1, rna_reagent_usage@1, sample@1, step@1, step@2, step@3, workflow@1"
+      },
+      "rust": {
+        "name": "valid-readout-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09"
+      },
+      "reason": "accept/reject mismatch",
+      "disposition": "known: this task branch predates SDK-02-FIX PR #36; the fix is merged to main, but this task baseline was not rebased"
+    },
+    {
+      "name": "invalid-readout-schema1-missing-schema_id",
+      "go": {
+        "name": "invalid-readout-schema1-missing-schema_id",
+        "valid": false,
+        "error": "asterlab module \"readout-1\" uses unsupported readout@1; supported: assay@1, container@1, dilution@1, experiment@1, group@1, instrument_profile@1, material@1, measurement_profile@1, plate@1, reference@1, rna_reagent_usage@1, sample@1, step@1, step@2, step@3, workflow@1"
+      },
+      "rust": {
+        "name": "invalid-readout-schema1-missing-schema_id",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "readout module needs schema_id",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09"
+      },
+      "reason": "error category mismatch",
+      "disposition": "known: this task branch predates SDK-02-FIX PR #36; the fix is merged to main, but this task baseline was not rebased"
+    },
+    {
+      "name": "invalid-readout-schema1-wrong-type-schema_id",
+      "go": {
+        "name": "invalid-readout-schema1-wrong-type-schema_id",
+        "valid": false,
+        "error": "asterlab module \"readout-1\" uses unsupported readout@1; supported: assay@1, container@1, dilution@1, experiment@1, group@1, instrument_profile@1, material@1, measurement_profile@1, plate@1, reference@1, rna_reagent_usage@1, sample@1, step@1, step@2, step@3, workflow@1"
+      },
+      "rust": {
+        "name": "invalid-readout-schema1-wrong-type-schema_id",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "readout.schema_id must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09"
+      },
+      "reason": "error category mismatch",
+      "disposition": "known: this task branch predates SDK-02-FIX PR #36; the fix is merged to main, but this task baseline was not rebased"
+    }
+  ],
+  "case_results": [
+    {
+      "name": "valid-plate-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-plate-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-plate-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-plate-schema1-missing-format",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-plate-schema1-missing-format",
+        "valid": false,
+        "error": "plate \"plate-1\": missing required field \"format\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-plate-schema1-missing-format",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "plate module needs format",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-plate-schema1-wrong-type-format",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-plate-schema1-wrong-type-format",
+        "valid": false,
+        "error": "plate \"plate-1\": field \"format\" must be an integer",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-plate-schema1-wrong-type-format",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "plate.format must be an integer",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "invalid-plate-schema1-out-of-range-well",
+      "expected": false,
+      "expected_error": "rule_rejection",
+      "go": {
+        "name": "invalid-plate-schema1-out-of-range-well",
+        "valid": false,
+        "error": "plate \"plate-1\": well \"Z99\" is outside 8x12",
+        "error_class": "rule_rejection"
+      },
+      "rust": {
+        "name": "invalid-plate-schema1-out-of-range-well",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "well Z99 is outside 8x12",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "rule_rejection"
+      }
+    },
+    {
+      "name": "valid-reference-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-reference-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-reference-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-reference-schema1-missing-ref",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-reference-schema1-missing-ref",
+        "valid": false,
+        "error": "reference \"reference-1\": missing required field \"ref\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-reference-schema1-missing-ref",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "reference module needs ref",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-reference-schema1-wrong-type-ref",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-reference-schema1-wrong-type-ref",
+        "valid": false,
+        "error": "reference \"reference-1\": field \"ref\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-reference-schema1-wrong-type-ref",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "reference.ref must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "valid-experiment-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-experiment-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-experiment-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-experiment-schema1-missing-title",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-experiment-schema1-missing-title",
+        "valid": false,
+        "error": "experiment \"experiment-1\": missing required field \"title\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-experiment-schema1-missing-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "experiment module needs title",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-experiment-schema1-wrong-type-title",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-experiment-schema1-wrong-type-title",
+        "valid": false,
+        "error": "experiment \"experiment-1\": field \"title\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-experiment-schema1-wrong-type-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "experiment.title must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "valid-group-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-group-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-group-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-group-schema1-missing-name",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-group-schema1-missing-name",
+        "valid": false,
+        "error": "group \"group-1\": missing required field \"name\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-group-schema1-missing-name",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "group module needs name",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-group-schema1-wrong-type-name",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-group-schema1-wrong-type-name",
+        "valid": false,
+        "error": "group \"group-1\": field \"name\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-group-schema1-wrong-type-name",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "group.name must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "valid-assay-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-assay-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-assay-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-assay-schema1-missing-title",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-assay-schema1-missing-title",
+        "valid": false,
+        "error": "assay \"assay-1\": missing required field \"title\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-assay-schema1-missing-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "assay module needs title",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-assay-schema1-wrong-type-title",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-assay-schema1-wrong-type-title",
+        "valid": false,
+        "error": "assay \"assay-1\": field \"title\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-assay-schema1-wrong-type-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "assay.title must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "invalid-assay-schema1-missing-reference",
+      "expected": false,
+      "expected_error": "invalid_reference",
+      "go": {
+        "name": "invalid-assay-schema1-missing-reference",
+        "valid": false,
+        "error": "assay \"assay-1\" field \"group_refs\" references missing group \"missing-group\"",
+        "error_class": "invalid_reference"
+      },
+      "rust": {
+        "name": "invalid-assay-schema1-missing-reference",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "assay assay-1 field group_refs references missing group missing-group",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_reference"
+      }
+    },
+    {
+      "name": "valid-step-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-step-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-step-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-step-schema1-missing-title",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-step-schema1-missing-title",
+        "valid": false,
+        "error": "step \"step-1\": missing required field \"title\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-step-schema1-missing-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step module needs title",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-step-schema1-wrong-type-title",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-step-schema1-wrong-type-title",
+        "valid": false,
+        "error": "step \"step-1\": field \"title\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-step-schema1-wrong-type-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step.title must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "invalid-step-schema1-missing-reference",
+      "expected": false,
+      "expected_error": "invalid_reference",
+      "go": {
+        "name": "invalid-step-schema1-missing-reference",
+        "valid": false,
+        "error": "step \"step-1\" field \"assay\" references missing assay \"missing-assay\"",
+        "error_class": "invalid_reference"
+      },
+      "rust": {
+        "name": "invalid-step-schema1-missing-reference",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step step-1 field assay references missing assay missing-assay",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_reference"
+      }
+    },
+    {
+      "name": "valid-workflow-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-workflow-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-workflow-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-workflow-schema1-missing-steps",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-workflow-schema1-missing-steps",
+        "valid": false,
+        "error": "workflow \"workflow-1\": missing required field \"steps\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-workflow-schema1-missing-steps",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "workflow module needs steps",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-workflow-schema1-wrong-type-steps",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-workflow-schema1-wrong-type-steps",
+        "valid": false,
+        "error": "workflow \"workflow-1\": field \"steps\" must be a list",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-workflow-schema1-wrong-type-steps",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "workflow.steps must be a list",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "valid-dilution-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-dilution-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-dilution-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-dilution-schema1-missing-stock",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-dilution-schema1-missing-stock",
+        "valid": false,
+        "error": "dilution \"dilution-1\": missing required field \"stock\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-dilution-schema1-missing-stock",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "dilution module needs stock",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-dilution-schema1-wrong-type-stock",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-dilution-schema1-wrong-type-stock",
+        "valid": false,
+        "error": "dilution \"dilution-1\": field \"stock\": quantity needs value",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-dilution-schema1-wrong-type-stock",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "dilution.stock quantity value must be a number",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "invalid-dilution-schema1-invalid-unit",
+      "expected": false,
+      "expected_error": "unit_or_quantity",
+      "go": {
+        "name": "invalid-dilution-schema1-invalid-unit",
+        "valid": false,
+        "error": "dilution \"dilution-1\": field \"target\": unit \"mL\" is volume, not mass_concentration",
+        "error_class": "unit_or_quantity"
+      },
+      "rust": {
+        "name": "invalid-dilution-schema1-invalid-unit",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "dilution.target unit mL is volume, not mass_concentration",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "unit_or_quantity"
+      }
+    },
+    {
+      "name": "valid-rna_reagent_usage-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-rna_reagent_usage-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-rna_reagent_usage-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-rna_reagent_usage-schema1-missing-sample_count",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-rna_reagent_usage-schema1-missing-sample_count",
+        "valid": false,
+        "error": "rna_reagent_usage \"rna-reagent-usage-1\": missing required field \"sample_count\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-rna_reagent_usage-schema1-missing-sample_count",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "rna_reagent_usage module needs sample_count",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-rna_reagent_usage-schema1-wrong-type-sample_count",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-rna_reagent_usage-schema1-wrong-type-sample_count",
+        "valid": false,
+        "error": "rna_reagent_usage \"rna-reagent-usage-1\": field \"sample_count\" must be an integer",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-rna_reagent_usage-schema1-wrong-type-sample_count",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "rna_reagent_usage.sample_count must be an integer",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "invalid-rna_reagent_usage-schema1-invalid-unit",
+      "expected": false,
+      "expected_error": "unit_or_quantity",
+      "go": {
+        "name": "invalid-rna_reagent_usage-schema1-invalid-unit",
+        "valid": false,
+        "error": "rna_reagent_usage \"rna-reagent-usage-1\": field \"target_concentration\": unit \"mL\" is volume, not mass_concentration",
+        "error_class": "unit_or_quantity"
+      },
+      "rust": {
+        "name": "invalid-rna_reagent_usage-schema1-invalid-unit",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "rna_reagent_usage.target_concentration unit mL is volume, not mass_concentration",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "unit_or_quantity"
+      }
+    },
+    {
+      "name": "valid-instrument_profile-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-instrument_profile-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-instrument_profile-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-instrument_profile-schema1-missing-class",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-instrument_profile-schema1-missing-class",
+        "valid": false,
+        "error": "instrument_profile \"instrument-profile-1\": missing required field \"class\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-instrument_profile-schema1-missing-class",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "instrument_profile module needs class",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-instrument_profile-schema1-wrong-type-class",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-instrument_profile-schema1-wrong-type-class",
+        "valid": false,
+        "error": "instrument_profile \"instrument-profile-1\": field \"class\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-instrument_profile-schema1-wrong-type-class",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "instrument_profile.class must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "valid-step-schema2",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-step-schema2",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-step-schema2",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-step-schema2-missing-title",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-step-schema2-missing-title",
+        "valid": false,
+        "error": "step \"step-2\": missing required field \"title\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-step-schema2-missing-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step module needs title",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-step-schema2-wrong-type-title",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-step-schema2-wrong-type-title",
+        "valid": false,
+        "error": "step \"step-2\": field \"title\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-step-schema2-wrong-type-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step.title must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "invalid-step-schema2-missing-reference",
+      "expected": false,
+      "expected_error": "invalid_reference",
+      "go": {
+        "name": "invalid-step-schema2-missing-reference",
+        "valid": false,
+        "error": "step \"step-2\" field \"assay\" references missing assay \"missing-assay\"",
+        "error_class": "invalid_reference"
+      },
+      "rust": {
+        "name": "invalid-step-schema2-missing-reference",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step step-2 field assay references missing assay missing-assay",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_reference"
+      }
+    },
+    {
+      "name": "valid-step-schema3",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-step-schema3",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-step-schema3",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-step-schema3-missing-title",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-step-schema3-missing-title",
+        "valid": false,
+        "error": "step \"step-3\": missing required field \"title\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-step-schema3-missing-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step module needs title",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-step-schema3-wrong-type-title",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-step-schema3-wrong-type-title",
+        "valid": false,
+        "error": "step \"step-3\": field \"title\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-step-schema3-wrong-type-title",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step.title must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "invalid-step-schema3-missing-reference",
+      "expected": false,
+      "expected_error": "invalid_reference",
+      "go": {
+        "name": "invalid-step-schema3-missing-reference",
+        "valid": false,
+        "error": "step \"step-3\" field \"assay\" references missing assay \"missing-assay\"",
+        "error_class": "invalid_reference"
+      },
+      "rust": {
+        "name": "invalid-step-schema3-missing-reference",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "step step-3 field assay references missing assay missing-assay",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_reference"
+      }
+    },
+    {
+      "name": "valid-material-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-material-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-material-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-material-schema1-missing-name",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-material-schema1-missing-name",
+        "valid": false,
+        "error": "material \"material-1\": missing required field \"name\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-material-schema1-missing-name",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "material module needs name",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-material-schema1-wrong-type-name",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-material-schema1-wrong-type-name",
+        "valid": false,
+        "error": "material \"material-1\": field \"name\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-material-schema1-wrong-type-name",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "material.name must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "valid-sample-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-sample-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-sample-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-sample-schema1-missing-sample_id",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-sample-schema1-missing-sample_id",
+        "valid": false,
+        "error": "sample \"sample-1\": missing required field \"sample_id\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-sample-schema1-missing-sample_id",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "sample module needs sample_id",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-sample-schema1-wrong-type-sample_id",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-sample-schema1-wrong-type-sample_id",
+        "valid": false,
+        "error": "sample \"sample-1\": field \"sample_id\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-sample-schema1-wrong-type-sample_id",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "sample.sample_id must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "invalid-sample-schema1-missing-reference",
+      "expected": false,
+      "expected_error": "invalid_reference",
+      "go": {
+        "name": "invalid-sample-schema1-missing-reference",
+        "valid": false,
+        "error": "sample \"sample-1\" field \"group_ref\" references missing group \"missing-group\"",
+        "error_class": "invalid_reference"
+      },
+      "rust": {
+        "name": "invalid-sample-schema1-missing-reference",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "sample sample-1 field group_ref references missing group missing-group",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_reference"
+      }
+    },
+    {
+      "name": "valid-container-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-container-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-container-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-container-schema1-missing-format",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-container-schema1-missing-format",
+        "valid": false,
+        "error": "container \"container-1\": missing required field \"format\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-container-schema1-missing-format",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "container module needs format",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-container-schema1-wrong-type-format",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-container-schema1-wrong-type-format",
+        "valid": false,
+        "error": "container \"container-1\": field \"format\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-container-schema1-wrong-type-format",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "container.format must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "valid-measurement_profile-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-measurement_profile-schema1",
+        "valid": true,
+        "error_class": null
+      },
+      "rust": {
+        "name": "valid-measurement_profile-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-measurement_profile-schema1-missing-endpoint",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-measurement_profile-schema1-missing-endpoint",
+        "valid": false,
+        "error": "measurement_profile \"measurement-profile-1\": missing required field \"endpoint\"",
+        "error_class": "missing_field"
+      },
+      "rust": {
+        "name": "invalid-measurement_profile-schema1-missing-endpoint",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "measurement_profile module needs endpoint",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-measurement_profile-schema1-wrong-type-endpoint",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-measurement_profile-schema1-wrong-type-endpoint",
+        "valid": false,
+        "error": "measurement_profile \"measurement-profile-1\": field \"endpoint\" must be a string",
+        "error_class": "invalid_type"
+      },
+      "rust": {
+        "name": "invalid-measurement_profile-schema1-wrong-type-endpoint",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "measurement_profile.endpoint must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    },
+    {
+      "name": "valid-readout-schema1",
+      "expected": true,
+      "expected_error": null,
+      "go": {
+        "name": "valid-readout-schema1",
+        "valid": false,
+        "error": "asterlab module \"readout-1\" uses unsupported readout@1; supported: assay@1, container@1, dilution@1, experiment@1, group@1, instrument_profile@1, material@1, measurement_profile@1, plate@1, reference@1, rna_reagent_usage@1, sample@1, step@1, step@2, step@3, workflow@1",
+        "error_class": "unsupported_kind"
+      },
+      "rust": {
+        "name": "valid-readout-schema1",
+        "valid": true,
+        "error_code": "",
+        "error_message": "",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": null
+      }
+    },
+    {
+      "name": "invalid-readout-schema1-missing-schema_id",
+      "expected": false,
+      "expected_error": "missing_field",
+      "go": {
+        "name": "invalid-readout-schema1-missing-schema_id",
+        "valid": false,
+        "error": "asterlab module \"readout-1\" uses unsupported readout@1; supported: assay@1, container@1, dilution@1, experiment@1, group@1, instrument_profile@1, material@1, measurement_profile@1, plate@1, reference@1, rna_reagent_usage@1, sample@1, step@1, step@2, step@3, workflow@1",
+        "error_class": "unsupported_kind"
+      },
+      "rust": {
+        "name": "invalid-readout-schema1-missing-schema_id",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "readout module needs schema_id",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "missing_field"
+      }
+    },
+    {
+      "name": "invalid-readout-schema1-wrong-type-schema_id",
+      "expected": false,
+      "expected_error": "invalid_type",
+      "go": {
+        "name": "invalid-readout-schema1-wrong-type-schema_id",
+        "valid": false,
+        "error": "asterlab module \"readout-1\" uses unsupported readout@1; supported: assay@1, container@1, dilution@1, experiment@1, group@1, instrument_profile@1, material@1, measurement_profile@1, plate@1, reference@1, rna_reagent_usage@1, sample@1, step@1, step@2, step@3, workflow@1",
+        "error_class": "unsupported_kind"
+      },
+      "rust": {
+        "name": "invalid-readout-schema1-wrong-type-schema_id",
+        "valid": false,
+        "error_code": "INVALID_INPUT",
+        "error_message": "readout.schema_id must be a string",
+        "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09",
+        "error_class": "invalid_type"
+      }
+    }
+  ],
+  "known_differences": [
+    {
+      "go": "parser returns unstructured error text",
+      "rust": "validator returns stable error codes",
+      "disposition": "compare normalized categories; raw Go text and Rust code/message are included per case"
+    },
+    {
+      "kind": "readout@1",
+      "go": "this task branch rejects the kind as unsupported",
+      "rust": "validates the kind",
+      "disposition": "SDK-02-FIX PR #36 is merged to main; task baseline intentionally remains unchanged"
+    }
+  ],
+  "isolated_data_sha256": "59f16ffc15abe43349b48701feb88e4351e80fb0750181414310597f5d9d1e4e"
+}

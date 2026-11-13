@@ -66,17 +66,27 @@ type State struct {
 
 	Narrow bool
 
-	// RecordingValid reports whether the recording module has unsaved edits.
-	RecordingDirty bool
+	// RecordingDirty tracks unsaved recording edits per task (UX-STATE, UX-P5).
+	RecordingDirty map[string]bool
 }
 
 // NewState constructs the runtime state from a view model.
 func NewState(vm *RunWorkspaceViewModel, cb Callbacks) *State {
-	s := &State{VM: vm, Callbacks: cb, Checks: map[string]*bool{}, Collapsed: map[string]bool{}, Expanded: map[string]*bool{}}
+	s := &State{VM: vm, Callbacks: cb, Checks: map[string]*bool{}, Collapsed: map[string]bool{}, Expanded: map[string]*bool{}, RecordingDirty: map[string]bool{}}
 	if vm != nil && vm.Selected != nil {
 		s.Selected = vm.Selected.TaskKey
 	}
 	return s
+}
+
+func (s *State) SetRecordingDirty(taskKey string, dirty bool) {
+	if s == nil || taskKey == "" {
+		return
+	}
+	if s.RecordingDirty == nil {
+		s.RecordingDirty = map[string]bool{}
+	}
+	s.RecordingDirty[taskKey] = dirty
 }
 
 // treeOpen returns the stable expansion target for a tree node. Roots and
@@ -284,12 +294,13 @@ func View(c *ui.Context, s *State) {
 			return
 		}
 		if s.shouldStack(c) {
-			// Narrow: flow on top, task below.
+			// UX-P1, UX-LAYOUT: at narrow widths put the recording action before
+			// navigation and procedure details in the initial viewport.
 			ui.Scroll(c).Grow(1).Children(func() {
 				ui.Column(c).FillWidth().Gap(12).Padding(12).Children(func() {
-					flowRail(c, s, t, tokens, true)
 					taskWorkspace(c, s, t, tokens)
 					unassociatedRecords(c, s, t, tokens)
+					flowRail(c, s, t, tokens, true)
 				})
 			})
 			return
@@ -379,7 +390,7 @@ func statusPill(c *ui.Context, status string, tokens theme.Tokens) {
 	})
 }
 
-// flowRail is the vertical execution navigation on the left.
+// flowRail is the vertical execution navigation on the left (UX-STATE).
 func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline bool) {
 	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3), t.Space(2)).Children(func() {
 		ui.Text(c, "实验流程").FontSize(11).Bold().TextColor(t.TextMuted).
@@ -422,16 +433,27 @@ func treeNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, node *w
 		treeLeafItem(c, s, t, tokens, node.Title, node)
 		return
 	}
-	if !node.Composite && len(node.Children) == 1 && node.Children[0].Kind == workflowtree.KindTask {
+	if !node.Organizational && !node.Composite && len(node.Children) == 1 && node.Children[0].Kind == workflowtree.KindTask {
 		treeLeafItem(c, s, t, tokens, node.Title, node.Children[0])
 		return
 	}
 	open := s.treeOpen(node.ID)
 	label := node.Title
-	if node.Composite {
-		label = fmt.Sprintf("%s   %d/%d", node.Title, node.Completed, node.Total)
+	if node.Composite && !node.Organizational {
+		label = fmt.Sprintf("%s   %d/%d", label, node.Completed, node.Total)
+	}
+	if node.Timepoint != "" {
+		label += " · " + node.Timepoint
+	}
+	if node.Organizational {
+		label += " · 组织节点"
+	} else if status := treeStatusLabel(node.Status); status != "" {
+		label += " · " + status
 	}
 	item := components.TreeItemWithLeading(c, label, open, s.Selected == node.ID, func(c *ui.Context, size float32) {
+		if node.Organizational {
+			return
+		}
 		if node.Composite {
 			components.Icon(c, lucide.Folder()).Size(size, size).TextColor(treeStatusColor(node.Status, t, tokens))
 			return
@@ -453,7 +475,14 @@ func treeNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, node *w
 
 func treeLeafItem(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, title string, task *workflowtree.Node) {
 	selected := s.Selected == task.ID
-	item := components.TreeItemWithLeading(c, title, nil, selected, func(c *ui.Context, size float32) {
+	label := title
+	if task.Timepoint != "" {
+		label += " · " + task.Timepoint
+	}
+	if status := treeStatusLabel(task.Status); status != "" {
+		label += " · " + status
+	}
+	item := components.TreeItemWithLeading(c, label, nil, selected, func(c *ui.Context, size float32) {
 		ui.Box(c).Size(7, 7).Radius(3.5).Background(treeStatusColor(task.Status, t, tokens))
 	}, nil)
 	if selected && s.railScrollKey != task.ID {
@@ -477,9 +506,9 @@ func selectTreeTask(s *State, taskKey string) {
 
 func treeStatusColor(status string, t *ui.Theme, tokens theme.Tokens) ui.Color {
 	switch status {
-	case "completed":
+	case "completed", "done":
 		return t.Success
-	case "current", "in_progress":
+	case "current", "running", "in_progress":
 		return t.Accent
 	case "blocked":
 		return t.Danger
@@ -487,6 +516,21 @@ func treeStatusColor(status string, t *ui.Theme, tokens theme.Tokens) ui.Color {
 		return t.Warning
 	}
 	return tokens.NeutralText
+}
+
+func treeStatusLabel(status string) string {
+	switch status {
+	case "pending", "not_started", "not-started":
+		return "未开始"
+	case "current", "running", "in_progress":
+		return "进行中"
+	case "completed", "done":
+		return "已完成"
+	case "blocked":
+		return "已阻塞"
+	default:
+		return ""
+	}
 }
 
 // flowConnector draws the vertical link and arrow between two step nodes.
@@ -521,11 +565,11 @@ func stepNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, step *R
 				if step.Timepoint != "" {
 					meta = step.Timepoint
 				}
-				if step.AssayID != "" {
+				if status := treeStatusLabel(string(step.Status)); status != "" {
 					if meta != "" {
 						meta += " · "
 					}
-					meta += step.AssayID
+					meta += status
 				}
 				if meta != "" {
 					ui.Text(c, meta).FontSize(t.Rem(.72)).TextColor(t.TextMuted).
@@ -572,7 +616,10 @@ func childItem(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *
 		statusDot(c, task.Status, t, tokens)
 		label := task.Timepoint
 		if label == "" {
-			label = task.TaskKey
+			label = task.StepTitle
+		}
+		if status := treeStatusLabel(string(task.Status)); status != "" {
+			label += " · " + status
 		}
 		ui.Text(c, label).FontSize(t.Rem(.78)).TextColor(t.TextMuted).
 			SingleLine().Ellipsis("…")
