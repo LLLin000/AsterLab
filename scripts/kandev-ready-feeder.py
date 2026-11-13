@@ -332,11 +332,20 @@ def scan_cardfix(tasks):
                 continue
             content = row[0]
         pr = task_pr(task["id"])
+        # Snippet around the keyword hit, not the head: the reason for
+        # human attention is where the keyword is.
+        snippet = content[:300]
+        for k in CARD_FIX_KEYWORDS:
+            i = content.find(k)
+            if i >= 0:
+                s = max(0, content.rfind("\n", 0, i - 100))
+                snippet = content[s : i + 250].strip()
+                break
         text = (
             f"Kandev 修卡请求：{task['title'][:60]}\n"
             f"卡片自矛盾，agent 修不动，已停工等你。\n"
             f"PR #{pr.get('pr_number', '?')} {pr.get('pr_url', '')}\n"
-            f"结论摘要：{content[:300]}"
+            f"原因：{snippet[:400]}"
         )
         markup = {
             "inline_keyboard": [
