@@ -510,13 +510,20 @@ mod tests {
         ParameterSlot, ProtocolBlockVersionData, ProtocolStep, StepBinding,
     };
     use serde_json::json;
+    use sha2::{Digest, Sha256};
+    use std::sync::{Arc, Barrier, Mutex};
+    use std::thread;
 
-    #[derive(Default)]
+    #[derive(Clone, Default)]
     struct MemoryStore {
         protocols: Vec<MemoryProtocol>,
         blocks: Vec<MemoryBlock>,
+        /// One-shot fault injection for the append stage. Like a transaction
+        /// that fails after staging the row, the harness restores its snapshot.
+        fail_next_append: bool,
     }
 
+    #[derive(Clone)]
     struct MemoryProtocol {
         id: String,
         protocol_id: String,
@@ -524,6 +531,7 @@ mod tests {
         data: Value,
     }
 
+    #[derive(Clone)]
     struct MemoryBlock {
         id: String,
         revision: i64,
@@ -533,6 +541,37 @@ mod tests {
     impl MemoryStore {
         fn protocol(&self, version_id: &str) -> Option<&MemoryProtocol> {
             self.protocols.iter().find(|record| record.id == version_id)
+        }
+
+        /// Reload the store from its persisted records only. Proves idempotent
+        /// replay does not depend on process-local state.
+        fn restart(&self) -> MemoryStore {
+            let protocols = self
+                .protocols
+                .iter()
+                .map(|record| MemoryProtocol {
+                    id: record.id.clone(),
+                    protocol_id: record.protocol_id.clone(),
+                    revision: record.revision,
+                    data: serde_json::from_str(&serde_json::to_string(&record.data).unwrap())
+                        .unwrap(),
+                })
+                .collect();
+            let blocks = self
+                .blocks
+                .iter()
+                .map(|record| MemoryBlock {
+                    id: record.id.clone(),
+                    revision: record.revision,
+                    data: serde_json::from_str(&serde_json::to_string(&record.data).unwrap())
+                        .unwrap(),
+                })
+                .collect();
+            MemoryStore {
+                protocols,
+                blocks,
+                fail_next_append: false,
+            }
         }
     }
 
@@ -620,6 +659,9 @@ mod tests {
                 revision,
                 data,
             });
+            if std::mem::take(&mut self.fail_next_append) {
+                return Err("injected append failure".to_owned());
+            }
             Ok((id, revision))
         }
 
@@ -696,6 +738,150 @@ mod tests {
                 revision: 1,
                 data: root,
             }],
+            fail_next_append: false,
+        }
+    }
+
+    /// Canonical record rows `(kind:id, payload)`; the checksum covers the
+    /// logical database, not process memory.
+    fn record_fingerprints(store: &MemoryStore) -> Vec<(String, String)> {
+        let mut rows = Vec::new();
+        for record in &store.protocols {
+            rows.push((
+                format!("protocol_version:{}", record.id),
+                serde_json::to_string(&json!({
+                    "id": record.id,
+                    "parent_id": record.protocol_id,
+                    "revision": record.revision,
+                    "data": record.data,
+                }))
+                .unwrap(),
+            ));
+        }
+        for record in &store.blocks {
+            rows.push((
+                format!("protocol_block_version:{}", record.id),
+                serde_json::to_string(&json!({
+                    "id": record.id,
+                    "revision": record.revision,
+                    "data": record.data,
+                }))
+                .unwrap(),
+            ));
+        }
+        rows.sort();
+        rows
+    }
+
+    fn checksum(rows: &[(String, String)]) -> String {
+        let mut digest = Sha256::new();
+        for (id, payload) in rows {
+            digest.update(id.as_bytes());
+            digest.update(b"\0");
+            digest.update(payload.as_bytes());
+            digest.update(b"\n");
+        }
+        format!(
+            "sha256:{}",
+            digest
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        )
+    }
+
+    fn checksum_for(rows: &[(String, String)], ids: &[String]) -> String {
+        let subset = ids
+            .iter()
+            .map(|id| {
+                rows.iter()
+                    .find(|(row_id, _)| row_id == id)
+                    .unwrap_or_else(|| panic!("历史记录 {id} 消失"))
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+        checksum(&subset)
+    }
+
+    fn assert_history_unchanged(before: &[(String, String)], after: &[(String, String)]) {
+        for (id, payload) in before {
+            let found = after
+                .iter()
+                .find(|(row_id, _)| row_id == id)
+                .unwrap_or_else(|| panic!("历史记录 {id} 消失"));
+            assert_eq!(&found.1, payload, "历史记录 {id} 被改写");
+        }
+    }
+
+    /// Single-writer transaction: the guard is the lock a `BEGIN IMMEDIATE`
+    /// transaction would hold.
+    struct LockedStore<'a> {
+        inner: std::sync::MutexGuard<'a, MemoryStore>,
+    }
+
+    impl EditTargetStore for LockedStore<'_> {
+        fn protocol_head(
+            &self,
+            protocol_id: &str,
+        ) -> Result<Option<StoredProtocolVersion>, String> {
+            self.inner.protocol_head(protocol_id)
+        }
+
+        fn block_version(&self, version_id: &str) -> Result<Option<StoredBlockVersion>, String> {
+            self.inner.block_version(version_id)
+        }
+    }
+
+    impl CommitStore for LockedStore<'_> {
+        fn edit_store(&self) -> &dyn EditTargetStore {
+            self
+        }
+
+        fn protocol_version_data(&self, version_id: &str) -> Result<Option<Value>, String> {
+            self.inner.protocol_version_data(version_id)
+        }
+
+        fn find_commit(&self, idempotency_key: &str) -> Result<Option<CommittedVersion>, String> {
+            self.inner.find_commit(idempotency_key)
+        }
+
+        fn timestamp(&self) -> String {
+            self.inner.timestamp()
+        }
+
+        fn append_protocol_version(
+            &mut self,
+            protocol_id: &str,
+            revision: i64,
+            data: Value,
+        ) -> Result<(String, i64), String> {
+            self.inner.append_protocol_version(protocol_id, revision, data)
+        }
+
+        fn append_block_version(
+            &mut self,
+            block_id: &str,
+            revision: i64,
+            data: Value,
+        ) -> Result<(String, i64), String> {
+            self.inner.append_block_version(block_id, revision, data)
+        }
+    }
+
+    /// Commit inside an implicit transaction: any failure restores the
+    /// pre-commit snapshot, like a rolled-back `BEGIN IMMEDIATE`.
+    fn commit_transactional(
+        store: &mut MemoryStore,
+        request: &ConfirmRequest,
+    ) -> Result<CommitResult, CommitError> {
+        let snapshot = store.clone();
+        match commit(request, store) {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                *store = snapshot;
+                Err(error)
+            }
         }
     }
 
@@ -957,6 +1143,7 @@ mod tests {
                     data: child,
                 },
             ],
+            fail_next_append: false,
         };
         let mut proposal = proposal();
         proposal.target.location.as_mut().unwrap().step_path = "root/lyse/lyse".to_owned();
@@ -965,5 +1152,247 @@ mod tests {
         assert_eq!(code, AgentEditErrorCode::ForbiddenField);
         assert_eq!(path, "target.location.step_path");
         assert_eq!(store.protocols.len(), 1);
+    }
+
+    #[test]
+    fn failed_append_rolls_back_and_retry_appends_once() {
+        let mut store = root_store();
+        let history = record_fingerprints(&store);
+        let history_checksum = checksum(&history);
+        let request = confirm(proposal(), "key-failed-retry");
+
+        store.fail_next_append = true;
+        let error = commit_transactional(&mut store, &request).unwrap_err();
+        assert!(matches!(error, CommitError::Store(_)));
+        assert_eq!(record_fingerprints(&store), history);
+        assert_eq!(checksum(&record_fingerprints(&store)), history_checksum);
+        store.fail_next_append = false;
+
+        let result = commit_transactional(&mut store, &request).unwrap();
+        assert!(!result.replayed);
+        let after_retry = record_fingerprints(&store);
+        assert_eq!(after_retry.len(), history.len() + 1);
+        assert_history_unchanged(&history, &after_retry);
+        let retry_checksum = checksum(&after_retry);
+
+        let replay = commit_transactional(&mut store, &request).unwrap();
+        assert!(replay.replayed);
+        assert_eq!(record_fingerprints(&store), after_retry);
+        assert_eq!(checksum(&record_fingerprints(&store)), retry_checksum);
+        assert_eq!(store.protocols.len(), 2);
+        assert_eq!(
+            store
+                .protocols
+                .iter()
+                .filter(|record| record.data["agent_edit"]["idempotency_key"]
+                    == "key-failed-retry")
+                .count(),
+            1,
+            "a failed retry must not duplicate the committed row"
+        );
+    }
+
+    #[test]
+    fn idempotent_replay_survives_a_store_restart() {
+        let mut store = root_store();
+        let request = confirm(proposal(), "key-restart");
+        let first = commit_transactional(&mut store, &request).unwrap();
+        let before_restart = record_fingerprints(&store);
+        let checksum_before = checksum(&before_restart);
+
+        let mut restarted = store.restart();
+        assert_eq!(record_fingerprints(&restarted), before_restart);
+
+        let replay = commit_transactional(&mut restarted, &request).unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.new_version_id, first.new_version_id);
+        assert_eq!(record_fingerprints(&restarted), before_restart);
+        assert_eq!(checksum(&record_fingerprints(&restarted)), checksum_before);
+    }
+
+    #[test]
+    fn concurrent_distinct_keys_leave_exactly_one_new_version() {
+        let shared = Arc::new(Mutex::new(root_store()));
+        let barrier = Arc::new(Barrier::new(8));
+        let requests = (0..8)
+            .map(|index| {
+                let mut request = confirm(proposal(), &format!("key-concurrent-{index}"));
+                request.proposal.proposal_id = format!("ae-rna-lyse-{index:03}");
+                request.proposal_digest = proposal_digest(&request.proposal);
+                request
+            })
+            .collect::<Vec<_>>();
+        let mut handles = Vec::new();
+        for request in requests {
+            let shared = Arc::clone(&shared);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let guard = shared.lock().unwrap();
+                let mut store = LockedStore { inner: guard };
+                commit(&request, &mut store)
+            }));
+        }
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        for result in &results {
+            match result {
+                Ok(result) => assert_eq!(result.new_revision, 2),
+                Err(CommitError::Rejected(error)) => {
+                    assert_eq!(error.code, AgentEditErrorCode::VersionConflict)
+                }
+                Err(CommitError::Store(message)) => panic!("unexpected store error: {message}"),
+            }
+        }
+        let store = shared.lock().unwrap();
+        assert_eq!(store.protocols.len(), 2, "only the winner appends");
+        assert_eq!(
+            store
+                .protocols
+                .iter()
+                .filter(|record| record.data["agent_edit"].is_object())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn concurrent_same_key_writes_once_and_replays_the_rest() {
+        let shared = Arc::new(Mutex::new(root_store()));
+        let barrier = Arc::new(Barrier::new(8));
+        let request = confirm(proposal(), "key-concurrent-same");
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let shared = Arc::clone(&shared);
+            let barrier = Arc::clone(&barrier);
+            let request = request.clone();
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let guard = shared.lock().unwrap();
+                let mut store = LockedStore { inner: guard };
+                commit(&request, &mut store)
+            }));
+        }
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+        let committed = results
+            .iter()
+            .map(|result| result.as_ref().expect("same-key retries replay"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(committed.len(), 8);
+        assert_eq!(
+            committed.iter().filter(|result| !result.replayed).count(),
+            1
+        );
+        assert_eq!(committed.iter().filter(|result| result.replayed).count(), 7);
+        assert!(committed
+            .iter()
+            .all(|result| result.new_version_id == "protocol-rna-v2"));
+        assert_eq!(shared.lock().unwrap().protocols.len(), 2);
+    }
+
+    #[test]
+    fn replay_and_failed_attempts_do_not_change_history_checksum() {
+        let mut store = root_store();
+        let history = record_fingerprints(&store);
+        let history_ids = history
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        let history_checksum = checksum(&history);
+
+        let request = confirm(proposal(), "key-history");
+        let first = commit_transactional(&mut store, &request).unwrap();
+        let after_first = record_fingerprints(&store);
+        assert_eq!(after_first.len(), history.len() + 1);
+        assert_history_unchanged(&history, &after_first);
+        assert_eq!(checksum_for(&after_first, &history_ids), history_checksum);
+        let committed_checksum = checksum(&after_first);
+
+        let replay = commit_transactional(&mut store, &request).unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.new_version_id, first.new_version_id);
+        let after_replay = record_fingerprints(&store);
+        assert_eq!(after_replay, after_first);
+        assert_eq!(checksum(&after_replay), committed_checksum);
+
+        let mut stale_request = confirm(proposal(), "key-history-stale");
+        stale_request.proposal.proposal_id = "ae-rna-lyse-stale".to_owned();
+        stale_request.proposal_digest = proposal_digest(&stale_request.proposal);
+        let (code, _) = rejected_code(commit_transactional(&mut store, &stale_request).unwrap_err());
+        assert_eq!(code, AgentEditErrorCode::VersionConflict);
+        assert_eq!(record_fingerprints(&store), after_first);
+        assert_eq!(checksum(&record_fingerprints(&store)), committed_checksum);
+
+        let mut next_proposal = proposal();
+        next_proposal.proposal_id = "ae-rna-lyse-002".to_owned();
+        next_proposal.expected_version = 2;
+        next_proposal.base_version_id = first.new_version_id.clone();
+        next_proposal.target.location.as_mut().unwrap().protocol_version_id =
+            first.new_version_id.clone();
+        next_proposal.diffs[0].after =
+            Some(binding("volume_per_sample", json!(300.0), Some("uL")));
+        let next_request = confirm(next_proposal, "key-history-2");
+        let second = commit_transactional(&mut store, &next_request).unwrap();
+        assert_eq!(second.new_revision, 3);
+        let after_second = record_fingerprints(&store);
+        assert_history_unchanged(&after_first, &after_second);
+        assert_eq!(
+            checksum_for(&after_second, &history_ids),
+            history_checksum,
+            "the pre-existing history must stay byte-identical"
+        );
+
+        println!("history_checksum_before={history_checksum}");
+        println!(
+            "history_checksum_after_commit={}",
+            checksum_for(&after_first, &history_ids)
+        );
+        println!("store_checksum_after_commit={committed_checksum}");
+        println!(
+            "history_checksum_after_second_commit={}",
+            checksum_for(&after_second, &history_ids)
+        );
+    }
+
+    #[test]
+    fn replay_of_an_old_key_returns_the_original_after_the_head_advances() {
+        let mut store = root_store();
+        let first_request = confirm(proposal(), "key-first");
+        let first = commit_transactional(&mut store, &first_request).unwrap();
+
+        let mut second_proposal = proposal();
+        second_proposal.proposal_id = "ae-rna-lyse-002".to_owned();
+        second_proposal.expected_version = 2;
+        second_proposal.base_version_id = first.new_version_id.clone();
+        second_proposal.target.location.as_mut().unwrap().protocol_version_id =
+            first.new_version_id.clone();
+        second_proposal.diffs[0].after =
+            Some(binding("volume_per_sample", json!(300.0), Some("uL")));
+        commit_transactional(
+            &mut store,
+            &confirm(second_proposal, "key-second"),
+        )
+        .unwrap();
+
+        let after = record_fingerprints(&store);
+        let checksum_after = checksum(&after);
+        let replay = commit_transactional(&mut store, &first_request).unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.new_version_id, first.new_version_id);
+        assert_eq!(replay.new_revision, first.new_revision);
+        assert_eq!(record_fingerprints(&store), after);
+        assert_eq!(checksum(&record_fingerprints(&store)), checksum_after);
     }
 }
