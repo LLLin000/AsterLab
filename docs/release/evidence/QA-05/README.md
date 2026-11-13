@@ -35,10 +35,11 @@ rustc: not installed
 Fixture creation and baseline:
 
 ```sh
-sqlite3 docs/release/evidence/QA-05/legacy-v0.sqlite < docs/release/evidence/QA-05/legacy-v0.sql
-sqlite3 docs/release/evidence/QA-05/legacy-v0.sqlite 'PRAGMA integrity_check;'
-sqlite3 docs/release/evidence/QA-05/legacy-v0.sqlite 'PRAGMA user_version;'
-sqlite3 docs/release/evidence/QA-05/legacy-v0.sqlite "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name; SELECT count(*) FROM records;"
+FIXTURE_ROOT=$(mktemp -d)
+sqlite3 "$FIXTURE_ROOT/legacy-v0.sqlite" < docs/release/evidence/QA-05/legacy-v0.sql
+sqlite3 "$FIXTURE_ROOT/legacy-v0.sqlite" 'PRAGMA integrity_check;'
+sqlite3 "$FIXTURE_ROOT/legacy-v0.sqlite" 'PRAGMA user_version;'
+sqlite3 "$FIXTURE_ROOT/legacy-v0.sqlite" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name; SELECT count(*) FROM records;"
 ```
 
 ```text
@@ -106,8 +107,11 @@ BACKUP AND RESTORED SOURCE SHA256
 ```
 
 Schema initialization uses the `open_db` DDL from `src/cli.rs` on a separate fixture copy. The exact SQL is recorded in the test command:
-
 ```sh
+
+ROOT=$(mktemp -d)
+mkdir -p "$ROOT/upgrade"
+cp docs/release/evidence/QA-05/legacy-v0.sqlite "$ROOT/upgrade/labworkbench.sqlite"
 sqlite3 "$ROOT/upgrade/labworkbench.sqlite" 'PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);'
 sqlite3 "$ROOT/upgrade/labworkbench.sqlite" 'PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM records;'
 ```
@@ -120,9 +124,11 @@ ok
 ```
 
 Failure injection against `failure-v0.sql` replays the same DDL. The `records` layout intentionally lacks `project_id`; the second index fails after the first index is created.
-Failure injection commands (after setting `ROOT` and creating the temporary folders):
+Failure injection commands (each run creates an isolated database and temporary directory):
 
 ```sh
+ROOT=$(mktemp -d)
+mkdir -p "$ROOT/failure"
 sqlite3 "$ROOT/failure/labworkbench.sqlite" < docs/release/evidence/QA-05/failure-v0.sql
 echo 'FAILURE INJECTION BEFORE SHA256'; (cd "$ROOT/failure" && sha256sum labworkbench.sqlite)
 if sqlite3 "$ROOT/failure/labworkbench.sqlite" 'PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);'; then status=0; else status=$?; fi
