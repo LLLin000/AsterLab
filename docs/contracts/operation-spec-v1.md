@@ -29,15 +29,17 @@
 2. `OperationSpec` 是同一操作的类型化描述：读它不能得到第二个参数来源，也不能绕过 `protocol.block.revise` 的校验。
 3. 冲突时不静默选边：block 保持不变，spec 判为不一致，由 block 校验或后续编译卡产出 `blocking` 级 [`ValidationIssue`](../../CONTEXT.md)。禁止把 spec 的值自动写回 block 或反向覆盖绑定。
 
-### 2.2 两种挂载形态
+### 2.2 挂载形态与字段归属
 
 | 形态 | 说明 | 权威 |
 |---|---|---|
-| 内联 | 单个文本步骤在其所在 block version 数据里带一个可选 spec | 同一 block version |
-| 引用 | 组合块的 `BlockUse` 指向带 spec 的子 block version | 精确子 block version |
+| 内联 | `ProtocolStep::Text.operation_spec: Option<OperationSpec>`；与文本步骤一同保存在其 block version | 同一 block version |
+| 引用 | `BlockUse` 不复制 spec；通过其 `block_version_id` 读取确切子 block version 中各文本步骤的 spec | 精确子 block version |
 
-- spec 随 block version 不可变；同一 spec 被引用两次是两个使用位置，值语义共享、状态不共享。
-- 字段名与编译时机（`operation_spec` sidecar 或 `StepMeta` 子集）由后续卡决定，见 §12。
+- `operation_spec` 使用 serde 默认值；缺省等价于 `None`，序列化时省略 `None`，旧 block 无需迁移且往返不变。
+- spec 随 block version 不可变。组合块校验/展开按 `BlockUse` 引用的精确版本读取，错误路径包含展开步骤位置。
+- Core 在 block revision 校验和 ProtocolBlock 展开校验时调用 `OperationSpec::validate()`；不支持的 schema version 在加载/校验时拒绝。校验只报告闭合的 spec 错误码，不改写步骤、参数、绑定或 checks。
+- 同一 spec 被引用两次是两个使用位置，值语义共享、状态不共享。spec 只描述参数与检查项，不产生第二条执行路径。
 
 ### 2.3 v1 兼容规则
 
@@ -410,7 +412,7 @@ grep -c '^### ' docs/contracts/operation-spec-v1.md
 
 ## 12. 未决项
 
-1. `operation_spec` 在 `ProtocolBlockVersionData` 的字段名与编译时机（内联 vs `StepMeta` 子集）：后续卡决定，本轮不改字段。
+1. 字段与校验时机已确定：spec 是 `ProtocolStep::Text.operation_spec` 可选 sidecar；block version revision 校验及 ProtocolBlock 展开校验调用 `OperationSpec::validate()`，字段路径前缀带步骤位置。`BlockUse` 只引用确切子 block version，不复制 spec。
 2. 单位换算与科学范围：是否引入 block `parameter_slots.constraints` 之外的边界。
 3. 测量类 spec 是否需要 `time_scope`（本契约只写端点与单位，时间点仍由设计决定）。
 4. `checks` 与步骤 checks 的一致性规则（当前只有非空 `check_id` 校验）。

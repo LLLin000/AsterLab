@@ -23,6 +23,7 @@ use crate::agent_edit::{
     ValidationResult, ValidationStatus, AGENT_EDIT_SCHEMA_VERSION,
 };
 use crate::operation_module::{ParameterBinding, ParameterValueType, ValueSource};
+use crate::operation_spec::OperationSpec;
 use crate::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep, StepBinding};
 use crate::semantic_changeset::{ChangeTargetKind, FieldOperation};
 use crate::semantic_component::ProtocolScope;
@@ -165,6 +166,9 @@ fn validate_protocol(
             None
         }
     };
+    if let Some(expansion) = &expansion {
+        issues.extend(expansion.operation_spec_issues.iter().cloned());
+    }
 
     let facts = expansion.as_ref().and_then(|expansion| {
         let matches = expansion
@@ -239,6 +243,7 @@ fn validate_block_version(
     let head_id = (block.version_id.clone(), block.revision);
     let mut issues = Vec::new();
     version_issues(proposal, &block.version_id, block.revision, &mut issues);
+    issues.extend(block_operation_spec_issues(&block.data, "steps"));
 
     // A block version stores slot declarations only, never bound values, so a
     // `params.<slot>` path has no current value to resolve here.
@@ -555,6 +560,7 @@ struct StepFrame {
 struct Expansion {
     steps: Vec<StepFrame>,
     slots_by_block: BTreeMap<String, Vec<ParameterSlot>>,
+    operation_spec_issues: Vec<AgentEditIssue>,
 }
 
 impl Expansion {
@@ -564,6 +570,63 @@ impl Expansion {
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
+}
+fn block_operation_spec_issues(
+    data: &ProtocolBlockVersionData,
+    path_prefix: &str,
+) -> Vec<AgentEditIssue> {
+    data.steps
+        .iter()
+        .enumerate()
+        .filter_map(|(index, step)| match step {
+            ProtocolStep::Text {
+                operation_spec: Some(spec),
+                ..
+            } => Some((index, spec)),
+            ProtocolStep::Text {
+                operation_spec: None,
+                ..
+            }
+            | ProtocolStep::BlockUse { .. } => None,
+        })
+        .flat_map(|(index, spec)| {
+            validate_operation_spec(
+                spec,
+                &format!("{path_prefix}[{index}].operation_spec"),
+            )
+        })
+        .collect()
+}
+
+fn validate_operation_spec(spec: &OperationSpec, path: &str) -> Vec<AgentEditIssue> {
+    if !spec.is_supported_schema_version() {
+        return vec![issue(
+            AgentEditErrorCode::InvalidProposal,
+            format!("{path}.schema_version"),
+            format!(
+                "unsupported OperationSpec schema_version {}",
+                spec.schema_version
+            ),
+            "升级或移除此 OperationSpec 后重新校验",
+        )];
+    }
+    spec.validate()
+        .err()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|spec_issue| {
+            issue(
+                AgentEditErrorCode::InvalidProposal,
+                format!("{path}.{}", spec_issue.path),
+                format!(
+                    "{}: {}",
+                    spec_issue.code.as_str(),
+                    spec_issue.message
+                ),
+                "修正 OperationSpec 字段后重新校验",
+            )
+        })
+        .collect()
 }
 
 fn expand(
@@ -635,11 +698,24 @@ fn walk_inner(
         .or_insert_with(|| block.data.parameter_slots.clone());
     for step in &block.data.steps {
         match step {
-            ProtocolStep::Text { use_id, .. } => expansion.steps.push(StepFrame {
-                path: format!("{path}/{use_id}"),
-                block_version_id: version_id.to_owned(),
-                values: values.clone(),
-            }),
+            ProtocolStep::Text {
+                use_id,
+                operation_spec,
+                ..
+            } => {
+                let step_path = format!("{path}/{use_id}");
+                if let Some(spec) = operation_spec {
+                    expansion.operation_spec_issues.extend(validate_operation_spec(
+                        spec,
+                        &format!("{step_path}.operation_spec"),
+                    ));
+                }
+                expansion.steps.push(StepFrame {
+                    path: step_path,
+                    block_version_id: version_id.to_owned(),
+                    values: values.clone(),
+                });
+            }
             ProtocolStep::BlockUse {
                 use_id,
                 block_version_id,
@@ -933,6 +1009,7 @@ fn canonicalize(value: Value) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+    use crate::operation_spec::OperationSpec;
 
     const STEP: &str = "root/lyse/lyse";
     const SCOPE_ASSAY: &str = "assay-rna-extraction";
@@ -986,6 +1063,7 @@ mod tests {
             parameter_refs: Vec::new(),
             visualization: None,
             time_scope: None,
+            operation_spec: None,
             checks: Vec::new(),
         }
     }
@@ -1176,6 +1254,135 @@ mod tests {
                 },
             ],
         }
+    }
+    fn invalid_transfer_spec() -> OperationSpec {
+        serde_json::from_value(json!({
+            "schema_version": 1,
+            "operation": {
+                "kind": "transfer",
+                "volume": { "value": 10.0, "unit": "min" },
+                "source": { "container_id": "tube-1" },
+                "destination": { "container_id": "plate-1" }
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn protocol_revision_rejects_invalid_spec_on_exact_child_block_version() {
+        let mut store = store();
+        let ProtocolStep::Text { operation_spec, .. } = &mut store.blocks[1].data.steps[0] else {
+            panic!("expected child text step");
+        };
+        *operation_spec = Some(invalid_transfer_spec());
+
+        let result = validate(
+            &proposal(json!([{
+                "path": "params.volume_per_sample",
+                "operation": "set",
+                "after": binding("volume_per_sample", json!(250.0), Some("uL"))
+            }])),
+            &store,
+        )
+        .unwrap();
+        assert_eq!(result.status, ValidationStatus::Blocked);
+        assert_eq!(
+            result.issues[0].path,
+            "root/lyse/lyse.operation_spec.operation.volume"
+        );
+        assert!(result.issues[0].message.contains("unit_mismatch"));
+    }
+
+    #[test]
+    fn block_revision_rejects_invalid_spec_with_step_position() {
+        let mut store = store();
+        let ProtocolStep::Text { operation_spec, .. } = &mut store.blocks[1].data.steps[0] else {
+            panic!("expected child text step");
+        };
+        *operation_spec = Some(invalid_transfer_spec());
+        let proposal: Proposal = serde_json::from_value(json!({
+            "proposal_id": "invalid-spec-block",
+            "target": { "kind": "block_version", "object_id": "block-rna-lyse-v1" },
+            "base_version_id": "block-rna-lyse-v1",
+            "expected_version": 1,
+            "origin": { "source": "agent" },
+            "diffs": [{
+                "path": "params.volume_per_sample",
+                "operation": "set",
+                "after": binding("volume_per_sample", json!(250.0), Some("uL"))
+            }]
+        }))
+        .unwrap();
+
+        let result = validate(&proposal, &store).unwrap();
+        assert_eq!(result.status, ValidationStatus::Blocked);
+        assert_eq!(
+            result.issues[0].path,
+            "steps[0].operation_spec.operation.volume"
+        );
+        assert!(result.issues[0].message.contains("unit_mismatch"));
+    }
+    fn valid_transfer_spec() -> OperationSpec {
+        serde_json::from_value(json!({
+            "schema_version": 1,
+            "operation": {
+                "kind": "transfer",
+                "volume": { "value": 10.0, "unit": "uL" },
+                "source": { "container_id": "tube-1" },
+                "destination": { "container_id": "plate-1" }
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn valid_spec_on_referenced_child_is_accepted_and_legacy_step_stays_absent() {
+        let mut store = store();
+        let ProtocolStep::Text { operation_spec, .. } = &mut store.blocks[1].data.steps[0] else {
+            panic!("expected child text step");
+        };
+        *operation_spec = Some(valid_transfer_spec());
+
+        let result = validate(
+            &proposal(json!([{
+                "path": "params.volume_per_sample",
+                "operation": "set",
+                "after": binding("volume_per_sample", json!(250.0), Some("uL"))
+            }])),
+            &store,
+        )
+        .unwrap();
+        assert!(result.issues.is_empty(), "{:?}", result.issues);
+
+        let legacy = text_step("legacy");
+        let encoded = serde_json::to_value(&legacy).unwrap();
+        assert!(encoded.get("operation_spec").is_none());
+        assert_eq!(
+            serde_json::from_value::<ProtocolStep>(encoded).unwrap(),
+            legacy
+        );
+    }
+    #[test]
+    fn protocol_block_optional_operation_spec_roundtrips() {
+        let legacy = text_step("legacy");
+        let legacy_json = serde_json::to_value(&legacy).unwrap();
+        assert!(legacy_json.get("operation_spec").is_none());
+        assert_eq!(
+            serde_json::from_value::<ProtocolStep>(legacy_json).unwrap(),
+            legacy
+        );
+
+        let mut typed = text_step("typed");
+        let ProtocolStep::Text { operation_spec, .. } = &mut typed else {
+            unreachable!();
+        };
+        *operation_spec = Some(valid_transfer_spec());
+        let encoded = serde_json::to_value(&typed).unwrap();
+        assert!(encoded.get("operation_spec").is_some());
+        assert_eq!(
+            serde_json::from_value::<ProtocolStep>(encoded).unwrap(),
+            typed
+        );
     }
 
     #[test]
