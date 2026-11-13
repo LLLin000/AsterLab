@@ -28,3 +28,4 @@ pub mod workflow_tree;
 pub mod agent_edit;
 pub mod agent_edit_commit;
 pub mod agent_edit_validate;
+pub mod step_edit;
