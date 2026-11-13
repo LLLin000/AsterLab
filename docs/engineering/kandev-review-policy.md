@@ -1,6 +1,6 @@
 # Kandev Review 与合并策略
 
-本文件固定 `VPS Dev` 工作流中 `Review` 步骤的 agent 行为。Review agent 目前复用实现 agent 的 profile（`DeepSeek V4.1 Flash 1017` / `omp-acp` / `opencode-go/deepseek-v4.1-flash`），进入 Review 时切换角色，不是独立模型。
+本文件固定 `VPS Dev` 工作流中 `Review` 步骤的 agent 行为。Review agent 与实现 agent 共用 `GPT-6 Luna 1017` profile（`omp-acp` / `opencode-go/gpt-6-luna`），进入 Review 时切换角色，不是独立模型。Luna 仍经由 OpenCode Go；provider 周配额耗尽时，切换模型名不会解除该 provider 限额。
 
 ## 1. 容量与背压
 
