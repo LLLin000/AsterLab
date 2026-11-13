@@ -1,0 +1,484 @@
+//! Local asset references for a Run.
+//!
+//! An asset link stores a logical root plus a relative path and the file's
+//! observable metadata. It never copies the file and never persists an
+//! absolute path: the workspace owns the root-id -> directory mapping, so a
+//! moved data directory only changes one mapping instead of every link.
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    fmt,
+    fs::{self, File},
+    io::Read,
+    path::{Component, Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+/// Coarse classification used for display and open behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MediaType {
+    Image,
+    Table,
+    Document,
+    Binary,
+    Unknown,
+}
+
+/// Whether the referenced file can be read right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Availability {
+    Available,
+    Unavailable,
+}
+
+/// Durable reference plus the state captured when the link was created.
+///
+/// `size`, `mod_time` and `sha256` are evidence that the file was not silently
+/// swapped. They are observations, not a second copy of the content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetRef {
+    pub id: String,
+    pub root_id: String,
+    pub relative_path: String,
+    pub media_type: MediaType,
+    pub size: u64,
+    pub mod_time: String,
+    pub sha256: String,
+    pub availability: Availability,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetError(pub String);
+
+impl fmt::Display for AssetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for AssetError {}
+
+impl From<std::io::Error> for AssetError {
+    fn from(error: std::io::Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
+fn invalid(message: impl Into<String>) -> AssetError {
+    AssetError(message.into())
+}
+
+/// Maps an extension to a coarse media type. Unknown extensions stay unknown;
+/// a guess must never turn a binary file into a "table".
+pub fn classify(path: &Path) -> MediaType {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "bmp" | "gif" | "webp" => MediaType::Image,
+        "csv" | "tsv" | "xlsx" | "xls" | "txt" => MediaType::Table,
+        "pdf" | "doc" | "docx" | "md" => MediaType::Document,
+        "bin" | "dat" | "zip" | "raw" => MediaType::Binary,
+        _ => MediaType::Unknown,
+    }
+}
+
+/// Normalizes a relative path to forward slashes and rejects anything that
+/// could escape the logical root.
+pub fn normalize_relative_path(value: &str) -> Result<String, AssetError> {
+    if value.is_empty() {
+        return Err(invalid("relative path is required"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(invalid("relative path contains a control character"));
+    }
+    let normalized = value.replace('\\', "/");
+    let path = Path::new(&normalized);
+    if path.is_absolute() {
+        return Err(invalid("relative path must not be absolute"));
+    }
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => {
+                let part = part
+                    .to_str()
+                    .ok_or_else(|| invalid("relative path is not valid UTF-8"))?;
+                if part.is_empty() {
+                    return Err(invalid("relative path is invalid"));
+                }
+                parts.push(part.to_owned());
+            }
+            Component::CurDir => return Err(invalid("relative path must be normalized")),
+            Component::ParentDir => {
+                return Err(invalid("relative path must not escape its root"))
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(invalid("relative path must not be absolute"))
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(invalid("relative path is required"));
+    }
+    Ok(parts.join("/"))
+}
+
+/// Resolves a relative path inside an existing root, following symlinks and
+/// requiring the final target to stay inside that root.
+pub fn resolve(root_dir: &Path, relative_path: &str) -> Result<PathBuf, AssetError> {
+    let relative_path = normalize_relative_path(relative_path)?;
+    let root = fs::canonicalize(root_dir)
+        .map_err(|error| invalid(format!("resolve asset root {}: {error}", root_dir.display())))?;
+    if !fs::metadata(&root)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
+    {
+        return Err(invalid("asset root is not a directory"));
+    }
+    let target = fs::canonicalize(root.join(&relative_path)).map_err(|error| {
+        invalid(format!(
+            "resolve asset {relative_path}: {error}; the file may be unavailable"
+        ))
+    })?;
+    if !target.starts_with(&root) {
+        return Err(invalid("asset resolves outside its root"));
+    }
+    Ok(target)
+}
+
+/// Streams a reader through SHA-256. No buffer proportional to the content
+/// size and no temporary copy is created.
+fn hash_reader<R: Read>(mut reader: R) -> Result<String, AssetError> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+/// Streams a regular file through SHA-256.
+pub fn hash_file(path: &Path) -> Result<String, AssetError> {
+    let metadata = fs::metadata(path)?;
+    if !metadata.is_file() {
+        return Err(invalid("asset path must be a regular file"));
+    }
+    hash_reader(File::open(path)?)
+}
+
+/// Builds a validated reference from a logical root and either an absolute
+/// file path or a path relative to the root.
+///
+/// The file must exist and be readable: a link is created from observed
+/// metadata, never from caller-supplied size or hash fields.
+pub fn link(
+    root_id: &str,
+    root_dir: &Path,
+    path: Option<&str>,
+    relative_path: Option<&str>,
+) -> Result<AssetRef, AssetError> {
+    let root_id = root_id.trim();
+    if root_id.is_empty() {
+        return Err(invalid("root ID is required"));
+    }
+    if root_id.len() > 200 || root_id.chars().any(char::is_control) {
+        return Err(invalid("root ID is invalid"));
+    }
+    let root = fs::canonicalize(root_dir)
+        .map_err(|error| invalid(format!("resolve asset root {}: {error}", root_dir.display())))?;
+    if !fs::metadata(&root)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
+    {
+        return Err(invalid("asset root is not a directory"));
+    }
+
+    let (relative_path, target) = match (path, relative_path) {
+        (Some(path), declared) => {
+            let target = fs::canonicalize(path)
+                .map_err(|error| invalid(format!("resolve asset path {path}: {error}")))?;
+            let derived = target
+                .strip_prefix(&root)
+                .map_err(|_| invalid("asset is outside its root"))?;
+            let derived = normalize_relative_path(
+                derived
+                    .to_str()
+                    .ok_or_else(|| invalid("asset path is not valid UTF-8"))?,
+            )?;
+            if let Some(declared) = declared {
+                if normalize_relative_path(declared)? != derived {
+                    return Err(invalid(
+                        "path and relative_path do not identify the same file",
+                    ));
+                }
+            }
+            (derived, target)
+        }
+        (None, Some(relative_path)) => {
+            let relative_path = normalize_relative_path(relative_path)?;
+            let target = resolve(&root, &relative_path)?;
+            (relative_path, target)
+        }
+        (None, None) => return Err(invalid("path or relative_path is required")),
+    };
+
+    let metadata = fs::metadata(&target)?;
+    if !metadata.is_file() {
+        return Err(invalid("asset path must be a regular file"));
+    }
+    let mut file = File::open(&target)?;
+    // Re-read from the opened handle so size, mtime and hash describe the same
+    // file generation even if the path was replaced between the checks.
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(invalid("asset path must be a regular file"));
+    }
+    let mod_time = metadata
+        .modified()
+        .map(format_rfc3339)
+        .unwrap_or_else(|_| String::new());
+    let sha256 = hash_reader(&mut file)?;
+    Ok(AssetRef {
+        id: stable_id(root_id, &relative_path),
+        root_id: root_id.to_owned(),
+        media_type: classify(Path::new(&relative_path)),
+        relative_path,
+        size: metadata.len(),
+        mod_time,
+        sha256,
+        availability: Availability::Available,
+    })
+}
+
+/// Stable 128-bit identity of a logical root plus relative path.
+pub fn stable_id(root_id: &str, relative_path: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(root_id.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(relative_path.as_bytes());
+    let digest = hasher.finalize();
+    let mut id = String::from("asset-");
+    for byte in digest.iter().take(16) {
+        id.push_str(&format!("{byte:02x}"));
+    }
+    id
+}
+
+fn format_rfc3339(time: SystemTime) -> String {
+    let seconds = match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs() as i64,
+        Err(error) => -(error.duration().as_secs() as i64),
+    };
+    format_unix_seconds(seconds)
+}
+
+fn format_unix_seconds(seconds: i64) -> String {
+    let days = seconds.div_euclid(86_400);
+    let second_of_day = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        second_of_day / 3600,
+        (second_of_day % 3600) / 60,
+        second_of_day % 60
+    )
+}
+
+// Howard Hinnant's civil_from_days; valid for the full i64 day range.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = (day_of_year - (153 * month_prime + 2) / 5 + 1) as u32;
+    let month = if month_prime < 10 {
+        month_prime + 3
+    } else {
+        month_prime - 9
+    } as u32;
+    (if month <= 2 { year + 1 } else { year }, month, day)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempTree(PathBuf);
+
+    impl TempTree {
+        fn new() -> Self {
+            let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "asterlab-assets-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("temp dir");
+            Self(path)
+        }
+    }
+
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn classify_uses_the_extension_without_guessing() {
+        assert_eq!(classify(Path::new("a/b/c.TIF")), MediaType::Image);
+        assert_eq!(classify(Path::new("readout.csv")), MediaType::Table);
+        assert_eq!(classify(Path::new("notes.md")), MediaType::Document);
+        assert_eq!(classify(Path::new("raw.dat")), MediaType::Binary);
+        assert_eq!(classify(Path::new("slots")), MediaType::Unknown);
+        assert_eq!(classify(Path::new("archive.xyz")), MediaType::Unknown);
+    }
+
+    #[test]
+    fn normalize_rejects_escapes_and_unnormalized_paths() {
+        assert_eq!(
+            normalize_relative_path("huvec\\d1\\image.tif").unwrap(),
+            "huvec/d1/image.tif"
+        );
+        assert!(normalize_relative_path("../secret.txt").is_err());
+        assert!(normalize_relative_path("d1/../../secret.txt").is_err());
+        assert!(normalize_relative_path("/abs/file").is_err());
+        assert!(normalize_relative_path("./file").is_err());
+        assert_eq!(normalize_relative_path("  ").unwrap(), "  ");
+    }
+
+    #[test]
+    fn link_preserves_spaces_in_legal_file_names() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.txt"), b"plain").unwrap();
+        fs::write(root.join(" a.txt"), b"spaced-content").unwrap();
+
+        let spaced = link("root", &root, None, Some(" a.txt")).unwrap();
+        let plain = link("root", &root, None, Some("a.txt")).unwrap();
+        assert_eq!(spaced.relative_path, " a.txt");
+        assert_eq!(spaced.size, b"spaced-content".len() as u64);
+        assert_ne!(
+            spaced.sha256, plain.sha256,
+            "the spaced name must not resolve to the unspaced file"
+        );
+    }
+
+    #[test]
+    fn link_records_observed_metadata_and_hash_without_copying() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(root.join("d1")).unwrap();
+        let file = root.join("d1").join("image.tif");
+        fs::write(&file, b"abc").unwrap();
+
+        let asset = link("project-data", &root, None, Some("d1/image.tif")).unwrap();
+        assert_eq!(asset.root_id, "project-data");
+        assert_eq!(asset.relative_path, "d1/image.tif");
+        assert_eq!(asset.media_type, MediaType::Image);
+        assert_eq!(asset.size, 3);
+        assert_eq!(
+            asset.sha256,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(asset.availability, Availability::Available);
+        assert_eq!(asset.id, stable_id("project-data", "d1/image.tif"));
+        assert_eq!(asset.id.len(), "asset-".len() + 32);
+        assert!(asset.mod_time.ends_with('Z'));
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1, "no copy was created");
+        assert_eq!(fs::read(&file).unwrap(), b"abc", "original is untouched");
+    }
+
+    #[test]
+    fn link_derives_the_relative_path_from_an_absolute_file() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(root.join("d1")).unwrap();
+        let file = root.join("d1").join("readout.csv");
+        fs::write(&file, b"a,b\n1,2\n").unwrap();
+
+        let asset = link(
+            "root",
+            &root,
+            Some(file.to_str().unwrap()),
+            Some("d1/readout.csv"),
+        )
+        .unwrap();
+        assert_eq!(asset.relative_path, "d1/readout.csv");
+        assert_eq!(asset.media_type, MediaType::Table);
+
+        let mismatch = link(
+            "root",
+            &root,
+            Some(file.to_str().unwrap()),
+            Some("d1/other.csv"),
+        )
+        .unwrap_err();
+        assert!(mismatch.0.contains("do not identify the same file"));
+    }
+
+    #[test]
+    fn link_rejects_files_outside_the_root() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        let outside = tree.0.join("outside.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&outside, b"secret").unwrap();
+
+        let error = link("root", &root, Some(outside.to_str().unwrap()), None).unwrap_err();
+        assert!(error.0.contains("outside its root"), "{error}");
+
+        let escape = link("root", &root, None, Some("../outside.txt")).unwrap_err();
+        assert!(escape.0.contains("escape"), "{error}");
+    }
+
+    #[test]
+    fn link_reports_a_missing_file_instead_of_inventing_metadata() {
+        let tree = TempTree::new();
+        let error = link("root", &tree.0, None, Some("missing.tif")).unwrap_err();
+        assert!(error.0.contains("unavailable"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_rejects_non_regular_files_without_opening_them() {
+        use std::os::unix::net::UnixListener;
+
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        let socket = root.join("pipe.sock");
+        let _listener = UnixListener::bind(&socket).unwrap();
+
+        let error = link("root", &root, None, Some("pipe.sock")).unwrap_err();
+        assert!(error.0.contains("regular file"), "{error}");
+    }
+
+    #[test]
+    fn rfc3339_formatting_is_utc_and_stable() {
+        assert_eq!(format_unix_seconds(0), "1970-01-01T00:00:00Z");
+        assert_eq!(format_unix_seconds(1_700_000_000), "2023-11-14T22:13:20Z");
+    }
+}
