@@ -209,6 +209,14 @@ pub fn hash_file(path: &Path) -> Result<String, AssetError> {
     hash_reader(File::open(path)?)
 }
 
+/// Compares a stored hash against a freshly computed one.
+///
+/// `hash_reader` emits lowercase hex, but references can be imported from
+/// external JSON whose hash is uppercase; hex case is not evidence of change.
+fn hashes_equal(stored: &str, computed: &str) -> bool {
+    stored.eq_ignore_ascii_case(computed)
+}
+
 /// Builds a validated reference from a logical root and either an absolute
 /// file path or a path relative to the root.
 ///
@@ -343,7 +351,7 @@ pub fn inspect(root_dir: &Path, asset: &AssetRef) -> Result<Availability, AssetE
             Ok(hash) => hash,
             Err(_) => return Ok(Availability::Unavailable),
         };
-        return Ok(if current_hash == asset.sha256 {
+        return Ok(if hashes_equal(&asset.sha256, &current_hash) {
             Availability::Available
         } else {
             Availability::Modified
@@ -393,7 +401,7 @@ pub fn find_candidates(
                 .then_some(AssetMatchMethod::Metadata)
         } else {
             let candidate = link(&asset.root_id, root_dir, None, Some(&relative_path))?;
-            (asset.sha256 == candidate.sha256).then_some(AssetMatchMethod::Sha256)
+            hashes_equal(&asset.sha256, &candidate.sha256).then_some(AssetMatchMethod::Sha256)
         };
         if let Some(matched_by) = matched_by {
             matches.push(AssetCandidate {
@@ -433,7 +441,7 @@ pub fn rebind(
 
 fn match_method(asset: &AssetRef, candidate: &AssetRef) -> Option<AssetMatchMethod> {
     if !asset.sha256.is_empty() {
-        (asset.sha256 == candidate.sha256).then_some(AssetMatchMethod::Sha256)
+        hashes_equal(&asset.sha256, &candidate.sha256).then_some(AssetMatchMethod::Sha256)
     } else if !asset.mod_time.is_empty()
         && asset.size == candidate.size
         && asset.mod_time == candidate.mod_time
@@ -761,6 +769,33 @@ mod tests {
         assert!(matches
             .iter()
             .all(|candidate| candidate.matched_by == AssetMatchMethod::Sha256));
+    }
+
+    #[test]
+    fn uppercase_stored_hash_still_matches_the_file() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("sample.csv"), b"a,b\n1,2\n").unwrap();
+        let linked = link("root", &root, None, Some("sample.csv")).unwrap();
+        let mut serialized = serde_json::to_value(&linked).unwrap();
+        serialized["sha256"] = serde_json::Value::String(
+            serialized["sha256"].as_str().unwrap().to_ascii_uppercase(),
+        );
+        let uppercase: AssetRef = serde_json::from_value(serialized).unwrap();
+        assert_eq!(
+            inspect(&root, &uppercase).unwrap(),
+            Availability::Available,
+            "hex case must not change hash evidence"
+        );
+
+        fs::rename(root.join("sample.csv"), root.join("moved.csv")).unwrap();
+        let matches = find_candidates(&root, &uppercase, &["moved.csv"]).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].matched_by, AssetMatchMethod::Sha256);
+        let rebinding = rebind(&root, &uppercase, &matches[0]).unwrap();
+        assert_eq!(rebinding.matched_by, AssetMatchMethod::Sha256);
+        assert_eq!(rebinding.updated.sha256, linked.sha256);
     }
 
     #[test]
