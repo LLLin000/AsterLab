@@ -45,34 +45,29 @@ test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 ## Isolated SQLite smoke output
 
-The implementation session used an isolated temporary `LABWORKBENCH_DATA_DIR`; it did not use the user database. The original temporary directory name is intentionally omitted. Transcript recorded in the PR:
+The implementation session used an isolated temporary `LABWORKBENCH_DATA_DIR`; it did not use the user database. The previous PR transcript included abbreviated CLI JSON. The recorded output summary is reproduced below without presenting invented JSON as raw output.
 
 ```text
 records=6 checksum=sha256:3df90aab546997273dda04979f50bc51f09e9204f244b2f22c4acf4f4b30151b
 protocol_versions=1
 
-qa04-concurrent-a exit= 0
-{"ok":true,"result":{"new_revision":2,"replayed":false}}
-qa04-concurrent-b exit= 4
-{"error":{"code":"VERSION_CONFLICT","current_version":2}}
+qa04-concurrent-a exit= 0   new_revision=2
+qa04-concurrent-b exit= 4   code=VERSION_CONFLICT current_version=2
 records=7 checksum=sha256:e039518f698d941920f938b603a9021bf3b5e0182776884b0530500b98d396c9
 protocol_versions=2
 
-# replay of the winning key
-{"replayed":true,"new_revision":2,"idempotency_key":"qa04-concurrent-a"}
+replay qa04-concurrent-a: replayed=true new_revision=2
 records=7 checksum=sha256:e039518f698d941920f938b603a9021bf3b5e0182776884b0530500b98d396c9
 protocol_versions=2
 
-# stale expected_version rejection
-{"code":"VERSION_CONFLICT","path":"expected_version"}
+stale fresh key: exit=4 code=VERSION_CONFLICT path=expected_version
 records=7 checksum=sha256:e039518f698d941920f938b603a9021bf3b5e0182776884b0530500b98d396c9
 protocol_versions=2
 
-# existing six-record history subset after revision 2
 history_records=6 history_checksum=sha256:3df90aab546997273dda04979f50bc51f09e9204f244b2f22c4acf4f4b30151b
 ```
 
-The existing six-record subset checksum is unchanged. Concurrent distinct-key submissions produced one successful revision 2 and one `VERSION_CONFLICT`; replay and stale rejection left the seven-row database checksum unchanged.
+The original six-record subset checksum is unchanged. Concurrent distinct-key submissions produced one successful revision 2 and one `VERSION_CONFLICT`; replay and stale rejection left the seven-row database checksum unchanged.
 
 The in-memory history checksum test independently reports:
 
