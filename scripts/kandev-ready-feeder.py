@@ -344,6 +344,115 @@ def scan_deadlock():
                     pass
 
 
+RETRO_LUNA = "e930e6a0-835f-4e84-834e-09dea519280c"
+
+RETRO_PROMPT = """你是 AsterLab 的阶段回顾 agent。本次回顾范围只包括以下任务（不要写范围外的卡）：
+
+{task_list}
+
+数据源（只读，不许改）：
+1. Kandev DB（/var/lib/kandev/data/kandev.db，只读连接）：上述任务的 verdict 历史、返工次数、熔断记录、session 消息
+2. `gh pr view/diff/checks`：每个任务关联 PR 的 diff 摘要与 CI 记录
+3. `git log`：本阶段提交（只看上述任务相关的 PR 合并提交）
+4. 本次范围的时间窗口：{since} 之后进 Merged 的 VPS 卡
+
+报告必须包含（写中文）：
+1. 改动总结：按模块分（Core/CLI/CI/Docs），每模块一句话
+2. 出现的问题：每个一句话 + 影响的卡 + 怎么解决的
+3. 做的调整：流程/配置变更及原因
+4. 可能的问题：从返工模式、CI 失败模式推断的隐患
+5. 项目状况：Milestone 进度、技术债清单（只基于本次范围+已知的 Windows lane 状态，不要编造）
+6. 下一步方向：3-5 个候选，每个一句话 + 理由 + 依赖。不做决定，等人工拍板。
+
+输出：
+1. 写到 docs/release/retrospective-<YYYYMMDD>.md
+2. 提交到分支 agent/RETRO-<YYYYMMDD> 并开 PR（标题带 RETRO-<YYYYMMDD>），PR 描述贴报告全文
+3. 在任务评论写 REVIEW-READY
+不要合并 PR，等人工看完报告再决定。
+"""
+
+
+def scan_retro_trigger():
+    """Create a retrospective card once per lane drain.
+
+    Fires when VPS Inbox+Ready+Agent+Review are all empty AND new cards
+    merged since the watermark. Watermark in kandev_meta; scope is
+    post-watermark merges only, never re-covered.
+    """
+    import datetime
+
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        open_n = con.execute(
+            """select count(*) from tasks where archived_at is null and workflow_id=?
+               and workflow_step_id != ?""",
+            (WORKFLOW, MERGED_STEP),
+        ).fetchone()[0]
+        if open_n > 0:
+            con.close()
+            return
+        wm = con.execute("select value from kandev_meta where key='retro.vps.last_run_at'").fetchone()
+        since = wm[0] if wm else "1970-01-01T00:00:00Z"
+        rows = con.execute(
+            """select t.id,t.title,max(tr.occurred_at) m from task_step_transitions tr
+                join tasks t on t.id=tr.task_id
+               where t.workflow_id=? and tr.to_workflow_step_id=? and tr.occurred_at > ?
+               group by t.id order by m""",
+            (WORKFLOW, MERGED_STEP, since),
+        ).fetchall()
+        con.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"retro scan failed: {exc}", file=sys.stderr)
+        return
+    if not rows:
+        return
+    # Skip RETRO cards themselves (avoid self-trigger loop).
+    rows = [r for r in rows if not r[1].startswith("RETRO-")]
+    if not rows:
+        return
+    task_list = "\n".join(f"- {r[1]} (merged {r[2]})" for r in rows)
+    task_ids = [r[0] for r in rows]
+    stamp = datetime.datetime.now().strftime("%Y%m%d")
+    status, data = api(
+        "POST",
+        "/api/v1/tasks",
+        {
+            "workspace_id": WORKSPACE,
+            "workflow_id": WORKFLOW,
+            "title": f"RETRO-{stamp} (Audit) VPS lane 阶段回顾",
+            "description": RETRO_PROMPT.format(task_list=task_list, since=since),
+            "labels": ["retro", "roadmap", "lane:vps"],
+            "priority": "high",
+            "agent_profile_id": RETRO_LUNA,
+        },
+    )
+    if status not in (200, 201):
+        print(f"retro create failed: {status} {data}", file=sys.stderr)
+        return
+    print(f"retro triggered for {len(rows)} cards: {data.get('id', '?')[:8]}")
+    try:
+        import sqlite3
+
+        wcon = sqlite3.connect(DB)
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        wcon.execute(
+            "insert into kandev_meta(key,value) values('retro.vps.last_run_at',?) "
+            "on conflict(key) do update set value=excluded.value",
+            (now,),
+        )
+        wcon.execute(
+            "insert into kandev_meta(key,value) values('retro.vps.last_task_ids',?) "
+            "on conflict(key) do update set value=excluded.value",
+            (json.dumps(task_ids),),
+        )
+        wcon.commit()
+        wcon.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"retro watermark failed: {exc}", file=sys.stderr)
+
+
 def scan_stuck(detailed):
     """Self-heal cards with no live session; escalate after STUCK_FIX_LIMIT."""
     import datetime
@@ -907,6 +1016,7 @@ def run_once():
     # gets bounced to trigger a fresh one; escalates after 3 fixes.
     scan_stuck(detailed)
     scan_deadlock()
+    scan_retro_trigger()
     scan_stale_prompt(detailed)
 
     # Backpressure: do not feed new work while Review is full.
