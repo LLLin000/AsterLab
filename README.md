@@ -10,13 +10,13 @@
 
 产品术语与目标对象边界见 [CONTEXT.md](CONTEXT.md)；该文件记录目标设计语义，当前 CLI 的已实现能力仍以 [AGENT_API.md](AGENT_API.md) 为准。
 
-交付决策见 [ADR 0001](docs/adr/0001-web-first-beta.md)；其前端条款已被 MyGo Native Beta 范围取代，正式替代 ADR 待 DS-12。系统分层、Core 读模型和仪器步骤模块见 [docs/architecture.md](docs/architecture.md)。Windows/Linux 分工、构建产物与验证门禁见 [docs/engineering/cross-platform-builds.md](docs/engineering/cross-platform-builds.md)。
+交付决策见 [ADR 0001](docs/adr/0001-web-first-beta.md)；其 Web 前端条款与 [`beta-scope.md`](docs/release/beta-scope.md) §1 的 MyGo Native 平台结论冲突，尚未被新 ADR 取代，正式替代 ADR 待 DS-12（冲突登记见 [doc-authority §3](docs/release/doc-authority.md)）。系统分层、Core 读模型和仪器步骤模块见 [docs/architecture.md](docs/architecture.md)。Windows/Linux 分工、构建产物与验证门禁见 [docs/engineering/cross-platform-builds.md](docs/engineering/cross-platform-builds.md)。
 文档权威与阅读顺序见 [docs/README.md](docs/README.md) 与 [doc-authority](docs/release/doc-authority.md)；历史实施路线（Slint 时代）见 [docs/implementation-plan.md](docs/implementation-plan.md)；当前实施阶段与交付范围以 [`beta-scope.md`](docs/release/beta-scope.md) 与 Kandev 卡片为准；P0 Core 契约见 [docs/contracts/core-v1.md](docs/contracts/core-v1.md)。 设计控制与 Rune 迁移门槛见 [docs/design/README.md](docs/design/README.md)。
 当前共享设计投影位于 `crates/asterlab-core`；P1-A 阶段由 CLI/HTTP 与 Slint 地图摘要共用（Slint 部分为历史原型记录）。
 
 ## 启动
 
-> 迁移说明（2026-11-13）：本节与「当前工作流」描述历史 Web 包的行为。Beta 交付物是 MyGo Native 桌面应用与安装包，启动方式与六个表面见 [`beta-scope.md`](docs/release/beta-scope.md) §1.2 与 [`ux-contract.md`](docs/product/ux-contract.md) §1。原文保留，用于对照历史 Web 包。
+> 迁移说明（2026-11-13）：本节与「当前工作流」描述历史 Web 包的行为。Beta 交付物（EXE、`Runs.dll`、NSIS 安装包）见 [`beta-scope.md`](docs/release/beta-scope.md) §1.2，六个表面与写边界见 [`ux-contract.md`](docs/product/ux-contract.md) §1。原文保留，用于对照历史 Web 包。
 
 发布包中双击 `START_HERE.bat` 即可启动，不需要 Rust 或 Node。开发态可运行 `./run-local.ps1`，它会先编译再启动。
 
