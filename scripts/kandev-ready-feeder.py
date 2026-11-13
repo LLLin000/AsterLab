@@ -32,6 +32,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import kandev_model_quota
 
 BASE = os.environ.get("KANDEV_URL", "http://127.0.0.1:38429").rstrip("/")
 TOKEN = os.environ.get("KANDEV_API_TOKEN", "")
@@ -173,6 +174,35 @@ def scan_ci_ready(review_tasks):
             move(task, REVIEW, "ci-ready -> Review re-review")
 
 
+def retire_task_sessions(task_id):
+    """Close nonterminal sessions so a new Agent session starts fresh.
+
+    Reusing a Review session after moving back to Agent replays the review
+    prompt. Retire the old session first; Agent's start policy can then create
+    an implementation session.
+    """
+    import sqlite3
+
+    try:
+        con = sqlite3.connect(DB)
+        for (sid,) in con.execute(
+            "select id from task_sessions where task_id=? and state in ('RUNNING','WAITING_FOR_INPUT','SCHEDULING')",
+            (task_id,),
+        ).fetchall():
+            con.execute(
+                "update task_sessions set state='CANCELLED',completed_at=datetime('now'),updated_at=datetime('now') where id=?",
+                (sid,),
+            )
+            con.execute(
+                "update executors_running set status='stopped',local_pid=0,pid=0 where session_id=?",
+                (sid,),
+            )
+        con.commit()
+        con.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"retire sessions failed for {task_id[:8]}: {exc}", file=sys.stderr)
+
+
 def scan_no_pr(review_tasks):
     """Bounce Review cards with no associated PR back to Agent.
 
@@ -210,6 +240,7 @@ def scan_no_pr(review_tasks):
             continue
         if idle < 10:
             continue
+        retire_task_sessions(task["id"])
         move(task, AGENT, "no PR in Review -> back to Agent")
 
 
@@ -635,6 +666,36 @@ forbid:
 """
 
 
+def bind_retro_and_persist(db_path, task_id, task_ids, now=None):
+    """Bind the created RETRO card and advance its watermark atomically."""
+    import datetime
+    import sqlite3
+    import uuid
+
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with sqlite3.connect(db_path) as con:
+        # No API for repo binding; write task_repositories directly.
+        con.execute(
+            """insert into task_repositories(id,task_id,repository_id,workspace_relative_path,
+               base_branch,checkout_branch,position,metadata,created_at,updated_at)
+               values (?,?,?,?,?,?,?, ?,datetime('now'),datetime('now'))""",
+            (str(uuid.uuid4()), task_id, "a26e8981-6ae8-42ff-845e-1bd312072abd",
+             "", "main", "", 0,
+             '{"base_branch_selection":{"version":1,"branch":"main","source":"explicit"}}'),
+        )
+        con.execute(
+            "insert into kandev_meta(key,value) values('retro.vps.last_run_at',?) "
+            "on conflict(key) do update set value=excluded.value",
+            (now,),
+        )
+        con.execute(
+            "insert into kandev_meta(key,value) values('retro.vps.last_task_ids',?) "
+            "on conflict(key) do update set value=excluded.value",
+            (json.dumps(task_ids),),
+        )
+
+
 def scan_retro_trigger():
     """Create a retrospective card once per lane drain.
 
@@ -695,45 +756,16 @@ def scan_retro_trigger():
     if status not in (200, 201):
         print(f"retro create failed: {status} {data}", file=sys.stderr)
         return
-    print(f"retro triggered for {len(rows)} cards: {data.get('id', '?')[:8]}")
     tid = data.get("id")
-    try:
-        import sqlite3
-        import uuid
-
-        wcon = sqlite3.connect(DB)
-        # No API for repo binding; write task_repositories directly.
-        wcon.execute(
-            """insert into task_repositories(id,task_id,repository_id,workspace_relative_path,
-               base_branch,checkout_branch,position,metadata,created_at,updated_at)
-               values (?,?,?,?,?,?,?,datetime('now'),datetime('now'))""",
-            (str(uuid.uuid4()), tid, "a26e8981-6ae8-42ff-845e-1bd312072abd",
-             "", "main", "", 0,
-             '{"base_branch_selection":{"version":1,"branch":"main","source":"explicit"}}'),
-        )
-        wcon.commit()
-        wcon.close()
-    except Exception as exc:  # noqa: BLE001
-        print(f"retro repo bind failed: {exc}", file=sys.stderr)
+    if not tid:
+        print("retro create succeeded without a task id; watermark not advanced", file=sys.stderr)
         return
-        import sqlite3
-
-        wcon = sqlite3.connect(DB)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        wcon.execute(
-            "insert into kandev_meta(key,value) values('retro.vps.last_run_at',?) "
-            "on conflict(key) do update set value=excluded.value",
-            (now,),
-        )
-        wcon.execute(
-            "insert into kandev_meta(key,value) values('retro.vps.last_task_ids',?) "
-            "on conflict(key) do update set value=excluded.value",
-            (json.dumps(task_ids),),
-        )
-        wcon.commit()
-        wcon.close()
+    try:
+        bind_retro_and_persist(DB, tid, task_ids)
     except Exception as exc:  # noqa: BLE001
-        print(f"retro watermark failed: {exc}", file=sys.stderr)
+        print(f"retro repo bind/watermark failed: {exc}", file=sys.stderr)
+        return
+    print(f"retro triggered for {len(rows)} cards: {tid[:8]}")
 
 
 def scan_stuck(detailed):
@@ -1295,6 +1327,10 @@ def move(task, step_id, reason):
 
 
 def run_once():
+    try:
+        kandev_model_quota.run_once()
+    except Exception as exc:  # noqa: BLE001
+        print(f"model quota scan failed: {exc}", file=sys.stderr)
     tasks = list_tasks()
     vps = [t for t in tasks if is_vps(t) and t.get("workflow_id") == WORKFLOW]
     # Refresh each task: the list projection can lag behind blocked_by edits.

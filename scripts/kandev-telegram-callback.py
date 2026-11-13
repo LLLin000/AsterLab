@@ -38,6 +38,22 @@ REPO_DIR = os.environ.get("KANDEV_REPO_DIR", "/srv/projects/AsterLab")
 REQUIRED_CHECKS = {"linux-tests", "windows-build", "scope-check"}
 
 
+def configured_allowed_user_ids():
+    """Return configured Telegram sender IDs, defaulting to the configured chat."""
+    raw = os.environ.get("TELEGRAM_ALLOWED_USER_IDS")
+    if raw is None:
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID", TG_CHAT)
+        return {str(chat_id)} if chat_id else set()
+    return {user_id.strip() for user_id in raw.split(",") if user_id.strip()}
+
+
+def callback_user_allowed(user_id, allowed_user_ids):
+    return user_id is not None and str(user_id) in allowed_user_ids
+
+
+ALLOWED_USER_IDS = configured_allowed_user_ids()
+
+
 def kapi(method, path, body=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
@@ -263,6 +279,10 @@ def main():
         for upd in data.get("result", []):
             offset = upd["update_id"] + 1
             cq = upd.get("callback_query") or {}
+            sender = (cq.get("from") or {}).get("id")
+            if not callback_user_allowed(sender, ALLOWED_USER_IDS):
+                print(f"ignored callback from unauthorized Telegram user {sender!r}", file=sys.stderr)
+                continue
             chat = (cq.get("message") or {}).get("chat", {}).get("id")
             if str(chat) != str(TG_CHAT):
                 continue
