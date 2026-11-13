@@ -139,6 +139,66 @@ def scan_ci_ready(review_tasks):
             move(task, REVIEW, "ci-ready -> Review re-review")
 
 
+def scan_deadlock():
+    """Detect blocked_by cycles; notify once per cycle (label on each member)."""
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        edges = con.execute("select task_id,blocker_task_id from task_blockers").fetchall()
+        titles = dict(con.execute("select id,title from tasks where archived_at is null"))
+        con.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"deadlock scan failed: {exc}", file=sys.stderr)
+        return
+    graph = {}
+    for a, b in edges:
+        graph.setdefault(a, []).append(b)
+    cycles = []
+    visited, stack = set(), []
+    def dfs(n):
+        if n in stack:
+            cycles.append(stack[stack.index(n):] + [n])
+            return
+        if n in visited or n not in titles:
+            return
+        visited.add(n)
+        stack.append(n)
+        for m in graph.get(n, []):
+            dfs(m)
+        stack.pop()
+    for n in list(graph):
+        if n in titles:
+            dfs(n)
+    for cyc in cycles:
+        names = [titles.get(t, t[:8])[:30] for t in cyc]
+        try:
+            import sqlite3
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            sent = any(
+                "tg-deadlock-sent" in (con.execute("select labels from tasks where id=?", (t,)).fetchone()[0] or "")
+                for t in cyc if t in titles
+            )
+            con.close()
+        except Exception:  # noqa: BLE001
+            sent = False
+        if sent:
+            continue
+        tg_send(
+            "Kandev 死锁：blocked_by 成环，谁也动不了。\n"
+            + " → ".join(names)
+            + "\n请人工断环（删掉反向的那条）。"
+        )
+        print(f"DEADLOCK: {' -> '.join(names)}", file=sys.stderr)
+        for t in cyc:
+            if t in titles:
+                try:
+                    add_label(t, "tg-deadlock-sent")
+                except Exception:  # noqa: BLE001
+                    pass
+
+
 def scan_stuck(detailed):
     """Self-heal cards with no live session; escalate after STUCK_FIX_LIMIT."""
     import datetime
@@ -639,6 +699,7 @@ def run_once():
     # Stuck self-heal before backpressure: a card with no live session
     # gets bounced to trigger a fresh one; escalates after 3 fixes.
     scan_stuck(detailed)
+    scan_deadlock()
 
     # Backpressure: do not feed new work while Review is full.
     # human-hold cards still occupy Review slots: clear them by hand.
