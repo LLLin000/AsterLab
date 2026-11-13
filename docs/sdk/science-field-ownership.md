@@ -117,12 +117,12 @@
 
 | 对象 | 现状 | 处置 | 理由 | 目标卡 |
 |---|---|---|---|---|
-| Group 字段 | `design.group_specs[]` 与 AsterDoc `group@1` 同时声明 `name/role/condition/independent_n/technical_repeats` | 保留 `design` 记录为权威；`group@1` 实例只作草案/渲染，不得被 Run 冻结读取 | 两个写入点会产生冲突的 n/条件；冻结链只读 DesignVersion | DOC-05（文档规则）；后续模块对齐另开卡 |
-| Assay 字段 | `design.assays[]` 与 `assay@1` 同时声明 `endpoint/method/unit/timepoints/group refs/timepoint_relation/protocol_version_id` | 保留 `design.assays[]` 为权威；`assay@1` 实例引用 Design ID，不复制计划值 | Run `protocol_manifest` 只从 DesignVersion 解析；模块副本无法证明是最新计划 | DOC-05；后续模块对齐另开卡 |
-| 孔位/样本映射 | `plate@1` 文档 well-map、`design.sample_allocations.physical_slots_per_group`、`plate`/`well` 记录三处出现位置信息 | 计划数量归 Design；实际坐标归 `plate`/`well`；`plate@1` 文档仅为编辑草案 | 三者语义不同（计划数/计划布局/实际映射），混用会生成假坐标 | DOC-05；UI 卡引用本表 |
-| 读数数组 | 同一事件可带 `result_cells[]`、`measurements[]`、`readouts[]` 三种表示 | 事件仍是唯一权威；存在 `result_cells` 时以其为规范网格，`measurements` 视作查询镜像，`readouts` 仅旧数据兼容 | 避免结果表格与孔板视图各取一份而分叉；契约已规定优先级 | DOC-05（写入规则）；Core 后续可收紧写入 |
-| 派生读数 | `derived` readout 与 `ReadingFact` 都可能被界面当成“结果” | 保留事件中的 `derived` 为权威派生记录；`ReadingFact` 只收 `raw`/`missing` | 派生值缺少输入与公式就不应成为事实；契约明确排除 | DOC-05 |
-| Notebook 存储 | 散文与 Run 事实同存 `execution_event`，仅靠 `stage` 区分 | 保留同表追加；Notebook 投影必须按 `stage=notebook` 过滤，Run 事实查询必须排除该 stage | 分离表会造成第二写入路径；同表则必须用显式判别字段 | DOC-05 + Notebook/Run 边界卡 |
+| Group 字段 | `design_commands.rs:24-35` 与 `modules.json` 的 `group@1` 同时声明 `name/role/condition/independent_n/technical_repeats` | 保留 `design` 记录为权威；`group@1` 实例只作草案/渲染，不得被 Run 冻结读取 | 两个写入点会产生冲突的 n/条件；冻结链只读 DesignVersion | DOC-05（文档规则）；后续模块对齐另开卡 |
+| Assay 字段 | `design_commands.rs:38-59` 与 `modules.json` 的 `assay@1` 同时声明 `endpoint/method/unit/timepoints/group refs/timepoint_relation/protocol_version_id` | 保留 `design.assays[]` 为权威；`assay@1` 实例引用 Design ID，不复制计划值 | Run `protocol_manifest` 只从 DesignVersion 解析；模块副本无法证明是最新计划 | DOC-05；后续模块对齐另开卡 |
+| 孔位/样本映射 | `modules.json` 的 `plate@1` well-map、`design.sample_allocations.physical_slots_per_group`、`plate`/`well` 记录三处出现位置信息；Run 读取见 `run_workspace.rs:118-140` | 计划数量归 Design；实际坐标归 `plate`/`well`；`plate@1` 文档仅为编辑草案 | 三者语义不同（计划数/计划布局/实际映射），混用会生成假坐标 | DOC-05；UI 卡引用本表 |
+| 读数数组 | 同一事件可带 `result_cells[]`、`measurements[]`、`readouts[]` 三种表示（`reading_facts.rs:546-760` 的批处理与兼容读取；`AGENT_API.md` readouts 段） | 事件仍是唯一权威；存在 `result_cells` 时以其为规范网格，`measurements` 视作查询镜像，`readouts` 仅旧数据兼容 | 避免结果表格与孔板视图各取一份而分叉；契约已规定优先级 | DOC-05（写入规则）；Core 后续可收紧写入 |
+| 派生读数 | `derived` readout 与 `ReadingFact` 都可能被界面当成“结果”（`reading_facts.rs:50-69` 只收 `raw`/`missing`；`AGENT_API.md` 要求 `method`+`derived_from[]`） | 保留事件中的 `derived` 为权威派生记录；`ReadingFact` 只收 `raw`/`missing` | 派生值缺少输入与公式就不应成为事实；契约明确排除 | DOC-05 |
+| Notebook 存储 | 散文与 Run 事实同存 `execution_event`，仅靠 `stage` 区分（`lib.rs:107-120`、`notebook_page.go:316`） | 保留同表追加；Notebook 投影必须按 `stage=notebook` 过滤，Run 事实查询必须排除该 stage | 分离表会造成第二写入路径；同表则必须用显式判别字段 | DOC-05 + Notebook/Run 边界卡 |
 | Notebook 写入点 | Notebook 页用 `RunService.SaveNotebook` 写 `execution_event(stage=notebook)`；CLI `note.create` 另写 `kind=note` 记录（`src/cli.rs:9954-9979`），双方互不读取 | 保留 `SaveNotebook` 为 Notebook 散文权威；`note.create` 标注为独立旧记录类型，不得当 Notebook 正文或 Run 事实 | 同名“note”存在两个写点，读者会拿错记录 | DOC-05（AGENT_API 说明）+ CLI 收缩卡 |
 | 全局 Protocol 版本 | `design.protocol_version_id`（旧）与每 Assay `protocol_version_id` 并存 | 新设计以每 Assay 为权威；全局字段仅旧数据兼容，manifest 中 `assay_id=null` | 多检测设计不能共享一个全局版本；契约已声明优先级 | DOC-05 |
 | 参数层级 | `group.condition` 文本、Protocol 绑定、`actual_parameters[]`、模块 `quantity` 四层都可能写浓度/体积 | 按层分工：Design 条件文本、Protocol 计划绑定、事件实际参数、模块草案输入；派生值只进 `derived` 输出 | 同名数值跨层混用会把目标值当实测值 | DOC-05（来源标注规则） |
