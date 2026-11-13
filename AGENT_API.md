@@ -30,6 +30,35 @@ stdout 每次只输出一行 JSON。成功结构为：
 
 退出码固定为 `0` 成功、`2` 输入/用法错误、`3` 目标不存在、`4` 版本冲突、`5` 内部错误。不要从 stderr 文案推断业务结果；以 JSON 的 `ok` 与 `error.code` 为准。
 
+### 结构化诊断（`--diagnostics json`）
+
+任何业务命令都可追加 `--diagnostics json`：
+
+```powershell
+.\target\release\labworkbench.exe design.revise --input .\revise.json --diagnostics json
+```
+
+带该参数时，成功和失败响应都在顶层多一个 `diagnostics` 数组。成功响应通常为 `[]`；只读校验命令（如 `agent_edit.validate`、`semantic.validate`、`asterdoc.validate`）把结论放在 `result.issues`，这些条目也会同时出现在 `diagnostics`，因此 Agent 只读一个数组即可。诊断项是 `asterlab_core::diagnostic::Diagnostic`，字段固定为：
+
+```json
+{
+  "path": "assignments[0].position_id",
+  "code": "assignment_position_invalid",
+  "severity": "blocking",
+  "message": "assignment position A１ is not valid for container plate-1",
+  "affects": [],
+  "next_action": "correct assignments[0].position_id and re-run validation",
+  "source": "derived"
+}
+```
+
+- `severity` 只取 `blocking`、`needs_confirmation`、`advisory`；`blocking` 表示该写入/操作被拒绝。
+- `source` 只取 `user_confirmed`、`imported_record`、`referenced_protocol`、`derived`、`agent_suggestion`、`unknown`，说明这条结论的来源；Core 校验产生的结论是 `derived`。
+- `code` 是稳定机器码，Agent 必须按 `code` 分支，不解析 `message`。
+- `path` 定位字段/对象；`affects` 列出受影响的下游对象；`next_action` 给出下一步动作。
+- 失败时 `error.code` 与 `error.message` 保持不变，`error.issues` 也继续返回；`diagnostics` 是它们的规范化视图。未带 `--diagnostics json` 时响应完全不变。
+- 不带 `--diagnostics` 的旧调用方不受影响；`--diagnostics` 只接受 `json`，其他值返回 `INVALID_INPUT`。
+
 ## 命令目录
 
 | 命令 | 用途 | 写入 |

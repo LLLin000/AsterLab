@@ -1,0 +1,10 @@
+   Compiling asterlab-core v0.1.0 (/var/lib/kandev/tasks/sdk-04-core_2n5f7hd0/LLLin000-AsterLab/crates/asterlab-core)
+    Finished `test` profile [unoptimized] target(s) in 1.63s
+   Doc-tests asterlab_core
+
+running 2 tests
+test crates/asterlab-core/src/operation_spec.rs - operation_spec (line 12) ... ok
+test crates/asterlab-core/src/operation_spec.rs - operation_spec (line 31) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
