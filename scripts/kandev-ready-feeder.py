@@ -213,6 +213,33 @@ def scan_no_pr(review_tasks):
         move(task, AGENT, "no PR in Review -> back to Agent")
 
 
+def session_capacity():
+    """Effective max concurrent sessions (env-locked on this host)."""
+    try:
+        status, data = api("GET", "/api/v1/system/session-capacity/settings")
+        if status == 200:
+            eff = data.get("effective") or {}
+            return int(eff.get("max_sessions") or 0)
+    except Exception:  # noqa: BLE001
+        pass
+    return int(os.environ.get("KANDEV_MAX_CONCURRENT_SESSIONS", "4"))
+
+
+def live_session_ids():
+    """Sessions that occupy a capacity slot (RUNNING/WAITING)."""
+    import sqlite3
+
+    try:
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        rows = con.execute(
+            "select id from task_sessions where state in ('RUNNING','WAITING_FOR_INPUT')"
+        ).fetchall()
+        con.close()
+        return {r[0] for r in rows}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
 def _agent_procs():
     """Live omp ACP processes: pid -> (cwd, start_epoch)."""
     try:
@@ -713,6 +740,9 @@ def scan_stuck(detailed):
     """Self-heal cards with no live session; escalate after STUCK_FIX_LIMIT."""
     import datetime
 
+    cap = session_capacity()
+    if len(live_session_ids()) >= cap:
+        return  # cards waiting for a session slot are not stuck
     for task in detailed:
         step = task.get("workflow_step_id")
         if step not in (AGENT, REVIEW):
@@ -1278,7 +1308,9 @@ def run_once():
     agent_tasks = [t for t in detailed if t.get("workflow_step_id") == AGENT]
     scan_session_reaper(detailed)
     active = [t for t in agent_tasks if t.get("state") in ACTIVE_STATES]
-    slots = max(0, WIP - len(active))
+    cap = session_capacity()
+    used = len(live_session_ids())
+    slots = max(0, min(WIP - len(active), cap - used))
 
     # A blocked card in Ready is a bug: put it back before it can start.
     for task in detailed:
