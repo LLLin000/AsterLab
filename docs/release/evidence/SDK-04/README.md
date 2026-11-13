@@ -4,6 +4,9 @@ Task: `SDK-04 (Core) 统一结构化诊断输出`
 Branch: `feature/sdk-04-core-jun`
 Base commit: `ca69142` (SCI-02 merged)
 
+The captured Cargo logs preserve command/test output; machine-local absolute
+source and target paths are redacted as `[workspace]` and `[target]` to avoid
+publishing host paths.
 ## Acceptance commands (raw output in this directory)
 
 | Command | Expectation | Result | File |

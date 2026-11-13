@@ -1,6 +1,6 @@
-   Compiling asterlab-core v0.1.0 (/var/lib/kandev/tasks/sdk-04-core_2n5f7hd0/LLLin000-AsterLab/crates/asterlab-core)
+   Compiling asterlab-core v0.1.0 ([workspace]/crates/asterlab-core)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 23.97s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-core/7a6e0bb0fcc4d289/out/asterlab_core-7a6e0bb0fcc4d289)
+     Running unittests src/lib.rs ([target]/debug/build/asterlab-core/7a6e0bb0fcc4d289/out/asterlab_core-7a6e0bb0fcc4d289)
 
 running 314 tests
 test agent_edit::tests::error_codes_are_stable_wire_strings ... ok
@@ -320,7 +320,7 @@ test workflow_tree::tests::run_projection_rejects_a_conflicting_design_step_iden
 
 test result: ok. 314 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
 
-     Running tests/catalog_drafts.rs (/srv/build/asterlab-target/debug/build/asterlab-core/b0027bea1b7af6c8/out/catalog_drafts-b0027bea1b7af6c8)
+     Running tests/catalog_drafts.rs ([target]/debug/build/asterlab-core/b0027bea1b7af6c8/out/catalog_drafts-b0027bea1b7af6c8)
 
 running 3 tests
 test instrument_drafts_validate_but_remain_research_drafts ... ok
@@ -329,7 +329,7 @@ test drafts_cannot_produce_compatible_matches ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/operation_surface.rs (/srv/build/asterlab-target/debug/build/asterlab-core/dd305232b879448e/out/operation_surface-dd305232b879448e)
+     Running tests/operation_surface.rs ([target]/debug/build/asterlab-core/dd305232b879448e/out/operation_surface-dd305232b879448e)
 
 running 6 tests
 test incubation_has_an_explicit_time_anchor_and_state_change ... ok

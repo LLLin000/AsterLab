@@ -1,6 +1,6 @@
     Blocking waiting for file lock on build directory
-   Compiling asterlab-core v0.1.0 (/var/lib/kandev/tasks/sdk-04-core_2n5f7hd0/LLLin000-AsterLab/crates/asterlab-core)
-   Compiling labworkbench v0.1.0 (/var/lib/kandev/tasks/sdk-04-core_2n5f7hd0/LLLin000-AsterLab)
+   Compiling asterlab-core v0.1.0 ([workspace]/crates/asterlab-core)
+   Compiling labworkbench v0.1.0 ([workspace])
 warning: unused variable: `assay_index`
     --> src/cli.rs:3377:9
      |
@@ -65,7 +65,7 @@ warning: function `save_asset_link` is never used
 
 warning: `labworkbench` (bin "labworkbench" test) generated 9 warnings (run `cargo fix --bin "labworkbench" -p labworkbench --tests` to apply 2 suggestions)
     Finished `test` profile [unoptimized] target(s) in 13.85s
-     Running unittests src/main.rs (/srv/build/asterlab-target/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
+     Running unittests src/main.rs ([target]/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
 
 running 20 tests
 test cli::tests::assess_includes_run_creation_audit_warnings ... ok

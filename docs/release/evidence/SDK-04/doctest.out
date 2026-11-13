@@ -1,4 +1,4 @@
-   Compiling asterlab-core v0.1.0 (/var/lib/kandev/tasks/sdk-04-core_2n5f7hd0/LLLin000-AsterLab/crates/asterlab-core)
+   Compiling asterlab-core v0.1.0 ([workspace]/crates/asterlab-core)
     Finished `test` profile [unoptimized] target(s) in 1.63s
    Doc-tests asterlab_core
 
