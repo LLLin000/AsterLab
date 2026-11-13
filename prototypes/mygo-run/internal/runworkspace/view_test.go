@@ -1,11 +1,13 @@
 package runworkspace
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -62,13 +64,63 @@ func TestViewNarrowStacks(t *testing.T) {
 		View(c, s)
 	}, 900, 600)
 	tt.Frame()
-	if !tt.HasText("实验流程") {
-		t.Fatal("rail missing in narrow mode")
-	}
-	if !tt.HasText("实验记录") {
-		t.Fatal("recording missing in narrow mode")
+	// UX-P1, UX-LAYOUT: recording controls precede procedure and navigation at 900×600.
+	text := strings.Join(tt.Texts(), "\n")
+	recording := strings.Index(text, "实验记录")
+	procedure := strings.Index(text, "操作说明与元数据")
+	if recording < 0 || procedure < 0 || recording >= procedure {
+		t.Fatalf("recording must precede procedure at 900×600: %v", tt.Texts())
 	}
 }
+
+func TestFlowRailShowsHierarchyProgressTimepointAndCoreStatus(t *testing.T) {
+	s := buildTestState()
+	s.Selected = "task-done"
+	s.VM.Tree = &workflowtree.Tree{Roots: []*workflowtree.Node{
+		{
+			ID: "group", Title: "Workflow group", Kind: workflowtree.KindStep,
+			Composite: true, Completed: 1, Total: 4, Status: "in_progress",
+			Children: []*workflowtree.Node{
+				{ID: "task-new", Title: "New task", Kind: workflowtree.KindTask, Status: "not_started", Timepoint: "D0"},
+				{ID: "task-active", Title: "Active task", Kind: workflowtree.KindTask, Status: "in_progress", Timepoint: "D1"},
+				{ID: "task-done", Title: "Done task", Kind: workflowtree.KindTask, Status: "completed", Timepoint: "D2"},
+				{ID: "task-blocked", Title: "Blocked task", Kind: workflowtree.KindTask, Status: "blocked", Timepoint: "D3"},
+			},
+		},
+		{ID: "org", Title: "Organization", Kind: workflowtree.KindStep, Composite: true, Organizational: true, Completed: 99, Total: 99},
+	}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1200, 760)
+	tt.Frame()
+	text := strings.Join(tt.Texts(), "\n")
+	for _, want := range []string{
+		"Workflow group", "1/4", "D0", "未开始", "进行中", "已完成", "已阻塞",
+		"Organization", "组织节点", "Done task",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("flow rail missing %q: %v", want, tt.Texts())
+		}
+	}
+	if strings.Contains(text, "99/99") {
+		t.Fatalf("organizational node must not show progress counts: %v", tt.Texts())
+	}
+}
+
+func TestRecordingDirtyTracksEachTask(t *testing.T) {
+	s := NewState(nil, Callbacks{})
+	s.SetRecordingDirty("task-a", true)
+	s.SetRecordingDirty("task-b", false)
+	if !s.RecordingDirty["task-a"] || s.RecordingDirty["task-b"] {
+		t.Fatalf("recording dirty states = %+v", s.RecordingDirty)
+	}
+	s.SetRecordingDirty("task-a", false)
+	if s.RecordingDirty["task-a"] {
+		t.Fatalf("saved task remains dirty: %+v", s.RecordingDirty)
+	}
+}
+
 
 func TestCheckTogglesCallback(t *testing.T) {
 	s := buildTestState()

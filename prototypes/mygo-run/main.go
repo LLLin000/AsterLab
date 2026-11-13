@@ -66,6 +66,8 @@ type app struct {
 	assetRoots                 map[string]string
 	runAssets                  []runs.Asset
 	runViewKinds               map[string]runworkspace.ViewKind
+	taskGrids                  map[string]*resultgrid.Grid
+	taskDrafts                 map[string]runui.Draft
 	designDocErr               string
 	projects                   []runs.ProjectSummary
 	protocols                  []runs.ProtocolSummary
@@ -269,6 +271,13 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 		a.err = err.Error()
 	}
 	previousRunID := a.snap.RunID
+	if previousRunID != "" && previousRunID != snap.RunID {
+		a.clearTaskRecording()
+		a.selectedTask = ""
+		if a.ws != nil {
+			a.ws.Selected = ""
+		}
+	}
 	a.snap = newSnap
 	a.loadFrozenAsterDoc()
 	if previousRunID != newSnap.RunID {
@@ -285,6 +294,7 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 		if a.ws.Selected == "" {
 			a.ws.Selected = currentRunTask(a.snap.Tasks).Key
 		}
+		a.selectedTask = a.ws.Selected
 		if len(a.snap.Tasks) == 0 && len(a.snap.Measurements) == 0 {
 			a.ws.State = runui.StateEmpty
 		} else {
@@ -963,11 +973,7 @@ func (a *app) selectTaskFromEnv() {
 	}
 	for _, task := range a.snap.Tasks {
 		if task.Path == path || (task.Path == "" && task.Title == path) {
-			a.ws.Selected = task.Key
-			if a.runWS != nil {
-				a.runWS.Selected = task.Key
-			}
-			a.prepareGrid()
+			a.selectRunTask(task.Key)
 			return
 		}
 	}
@@ -1019,8 +1025,63 @@ func currentRunTask(tasks []runs.RunTask) runs.RunTask {
 	return runs.RunTask{}
 }
 
+func runTaskCacheKey(runID, taskKey string) string { return runID + "\x00" + taskKey }
+
+func (a *app) clearTaskRecording() {
+	a.taskGrids = nil
+	a.taskDrafts = nil
+}
+
+func (a *app) clearTaskRecordingFor(runID, taskKey string) {
+	key := runTaskCacheKey(runID, taskKey)
+	delete(a.taskGrids, key)
+	delete(a.taskDrafts, key)
+}
+
+// selectRunTask keeps the current task's in-memory edits before changing the
+// selection. UX-P5: task navigation must never discard an unsaved draft.
+func (a *app) selectRunTask(taskKey string) {
+	if a.ws == nil {
+		return
+	}
+	if a.selectedTask != "" && a.selectedTask != taskKey {
+		key := runTaskCacheKey(a.snap.RunID, a.selectedTask)
+		if a.taskGrids == nil {
+			a.taskGrids = map[string]*resultgrid.Grid{}
+		}
+		if a.taskDrafts == nil {
+			a.taskDrafts = map[string]runui.Draft{}
+		}
+		if a.ws.Grid != nil {
+			a.taskGrids[key] = a.ws.Grid
+		}
+		a.taskDrafts[key] = a.ws.Draft
+	}
+	a.selectedTask = taskKey
+	a.ws.Selected = taskKey
+	key := runTaskCacheKey(a.snap.RunID, taskKey)
+	if draft, ok := a.taskDrafts[key]; ok {
+		a.ws.Draft = draft
+	} else {
+		a.ws.Draft = runui.NewDraft(a.ws.View)
+	}
+	if grid, ok := a.taskGrids[key]; ok {
+		a.ws.Grid = grid
+	} else {
+		a.prepareGrid()
+	}
+	if a.runWS != nil {
+		a.runWS.Selected = taskKey
+		a.runWS.SetRecordingDirty(taskKey, a.ws.Grid != nil && a.ws.Grid.State != resultgrid.StateSaved)
+	}
+}
+
 func (a *app) prepareGrid() {
 	if a.ws == nil {
+		return
+	}
+	if grid, ok := a.taskGrids[runTaskCacheKey(a.snap.RunID, a.ws.Selected)]; ok {
+		a.ws.Grid = grid
 		return
 	}
 	var task *runs.RunTask
@@ -1050,6 +1111,7 @@ func (a *app) prepareGrid() {
 		return
 	}
 	a.ws.Error = ""
+	key := runTaskCacheKey(a.snap.RunID, task.Key)
 	grid := resultgrid.New(schema, cells)
 	// Batch events are scoped to one frozen task. Unscoped legacy batches
 	// cannot be assigned safely when a Run has multiple tasks.
@@ -1094,6 +1156,9 @@ func (a *app) prepareGrid() {
 	}
 	if hasSavedValues {
 		grid.State = resultgrid.StateSaved
+	}
+	if a.taskGrids != nil {
+		a.taskGrids[key] = grid
 	}
 	a.ws.Grid = grid
 }
@@ -1682,12 +1747,16 @@ func main() {
 				a.err = state.MapError(err).Error()
 				return
 			}
+			a.clearTaskRecordingFor(a.snap.RunID, taskKey)
 			a.applySnap(snap)
 			if a.ws != nil {
 				a.ws.State = runui.StateSaved
 				if a.ws.Grid != nil {
 					a.ws.Grid.State = resultgrid.StateSaved
 				}
+			}
+			if a.runWS != nil {
+				a.runWS.SetRecordingDirty(taskKey, false)
 			}
 		},
 		SaveBatch: func(schema resultgrid.Schema, cells []resultgrid.Cell) {
@@ -1747,9 +1816,13 @@ func main() {
 			}
 			savedGrid := a.ws.Grid
 			savedGrid.State = resultgrid.StateSaved
+			a.clearTaskRecordingFor(a.snap.RunID, task.Key)
 			a.applySnap(snap)
 			a.ws.State = runui.StateSaved
 			a.ws.Grid = savedGrid
+			if a.runWS != nil {
+				a.runWS.SetRecordingDirty(task.Key, false)
+			}
 		},
 		SaveChecks: func(taskKey string, checks []runui.CheckAck) {
 			if a.ws == nil {
@@ -1822,11 +1895,7 @@ func main() {
 			}
 		},
 		SelectTask: func(taskKey string) {
-			a.selectedTask = taskKey
-			if a.ws != nil {
-				a.ws.Selected = taskKey
-				a.prepareGrid()
-			}
+			a.selectRunTask(taskKey)
 		},
 		OpenBatch: func(batchID string) {
 			a.batchView = batchID
@@ -1836,14 +1905,7 @@ func main() {
 	// runworkspace callbacks reuse the same Core seams as legacy runui.
 	rwcb := runworkspace.Callbacks{
 		SelectTask: func(taskKey string) {
-			a.selectedTask = taskKey
-			if a.ws != nil {
-				a.ws.Selected = taskKey
-				a.prepareGrid()
-			}
-			if a.runWS != nil {
-				a.runWS.Selected = taskKey
-			}
+			a.selectRunTask(taskKey)
 			a.saveSession()
 		},
 		ToggleTree: func() {
@@ -1871,9 +1933,6 @@ func main() {
 			})
 			if err != nil {
 				log.Printf("save task checks: %v", err)
-				if a.runWS != nil {
-					a.runWS.RecordingDirty = false
-				}
 				a.err = state.MapError(err).Error()
 				return
 			}
@@ -1914,9 +1973,17 @@ func main() {
 			a.batchView = batchID
 		},
 		Recording: func(c *ui.Context, task *runworkspace.RunTaskViewModel) {
+			key := runTaskCacheKey(a.snap.RunID, task.TaskKey)
 			grid := (*resultgrid.Grid)(nil)
-			if a.ws != nil && a.ws.Selected == task.TaskKey {
-				grid = a.ws.Grid
+			if a.ws != nil {
+				if a.ws.Selected == task.TaskKey {
+					grid = a.ws.Grid
+				} else {
+					grid = a.taskGrids[key]
+				}
+			}
+			if a.runWS != nil {
+				a.runWS.SetRecordingDirty(task.TaskKey, grid != nil && grid.State != resultgrid.StateSaved)
 			}
 			linkedAssets := a.runAssetsForTask(task.TaskKey)
 			kindKey := a.snap.RunID + "\x00" + task.TaskKey
@@ -1962,6 +2029,7 @@ func main() {
 	}
 	a.tools = tools.New(tools.Callbacks{})
 	a.ws = runui.NewWorkspace(toRunView(a.snap), cb)
+	a.selectedTask = a.ws.Selected
 	a.runWSVM = a.buildRunWorkspaceVM()
 	a.runWS = runworkspace.NewState(a.runWSVM, rwcb)
 	// The Run surface renders the frozen design's modules through the same
