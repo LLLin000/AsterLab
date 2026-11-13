@@ -1,5 +1,5 @@
-   Compiling asterlab-core v0.1.0 (/var/lib/kandev/tasks/sdk-05-core-readout_uxf5967w/LLLin000-AsterLab/crates/asterlab-core)
-   Compiling asterlab-app v0.1.0 (/var/lib/kandev/tasks/sdk-05-core-readout_uxf5967w/LLLin000-AsterLab/crates/asterlab-app)
+   Compiling asterlab-core v0.1.0 (<workspace>/crates/asterlab-core)
+   Compiling asterlab-app v0.1.0 (<workspace>/crates/asterlab-app)
 warning: unused variable: `assay_index`
     --> src/../../../src/cli.rs:3380:9
      |
@@ -1002,7 +1002,7 @@ warning: function `list_asset_events` is never used
 warning: `asterlab-app` (lib) generated 157 warnings (110 duplicates)
 warning: `asterlab-app` (lib test) generated 111 warnings (run `cargo fix --lib -p asterlab-app --tests` to apply 2 suggestions)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 30.57s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-app/bfb125850f5e7883/out/asterlab_app-bfb125850f5e7883)
+     Running unittests src/lib.rs (<build>/debug/build/asterlab-app/bfb125850f5e7883/out/asterlab_app-bfb125850f5e7883)
 
 running 27 tests
 test agent_edit_preview::tests::preview_rejects_the_three_illegal_input_classes ... ok

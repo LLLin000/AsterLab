@@ -78,4 +78,4 @@ warning: function `save_asset_link` is never used
 11482 | pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
       |               ^^^^^^^^^^^^^^^
 
-asterlab data dir: /root/.local/share/AsterLab/data
+asterlab data dir: <redacted>

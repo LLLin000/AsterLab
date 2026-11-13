@@ -1,5 +1,5 @@
     Finished `test` profile [unoptimized] target(s) in 0.07s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-core/e4acddd1bf4767f5/out/asterlab_core-e4acddd1bf4767f5)
+     Running unittests src/lib.rs (<build>/debug/build/asterlab-core/e4acddd1bf4767f5/out/asterlab_core-e4acddd1bf4767f5)
 
 running 295 tests
 test agent_edit::tests::error_codes_are_stable_wire_strings ... ok
@@ -300,7 +300,7 @@ test workflow_tree::tests::run_projection_rejects_a_conflicting_design_step_iden
 
 test result: ok. 295 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
 
-     Running tests/catalog_drafts.rs (/srv/build/asterlab-target/debug/build/asterlab-core/f19e871205f766df/out/catalog_drafts-f19e871205f766df)
+     Running tests/catalog_drafts.rs (<build>/debug/build/asterlab-core/f19e871205f766df/out/catalog_drafts-f19e871205f766df)
 
 running 3 tests
 test instrument_drafts_validate_but_remain_research_drafts ... ok
@@ -309,7 +309,7 @@ test drafts_cannot_produce_compatible_matches ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/operation_surface.rs (/srv/build/asterlab-target/debug/build/asterlab-core/a2a226fa5648ab97/out/operation_surface-a2a226fa5648ab97)
+     Running tests/operation_surface.rs (<build>/debug/build/asterlab-core/a2a226fa5648ab97/out/operation_surface-a2a226fa5648ab97)
 
 running 6 tests
 test absorbance_keeps_method_controls_out_of_the_generic_operation ... ok

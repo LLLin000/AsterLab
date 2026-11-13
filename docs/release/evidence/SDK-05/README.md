@@ -5,6 +5,7 @@ Branch: `feature/sdk-05-core-readout-bgy`
 Base: `dd00f20` (SCI-03 merged)
 
 ## Acceptance commands (raw output in this directory)
+The captured output preserves command results; machine-specific absolute workspace, build, and data-directory paths are replaced with `<workspace>`, `<build>`, or `<redacted>`.
 
 | Command | Expectation | Result | File |
 |---|---|---|---|
