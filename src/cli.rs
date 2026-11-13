@@ -10,6 +10,7 @@ use asterlab_core::assets as asset_refs;
 use asterlab_core::component_data::{
     calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
 };
+use asterlab_core::diagnostic::{Diagnostic, DiagnosticSeverity};
 use asterlab_core::component_framework::{
     default_registry, ComponentBindingContext, ComponentDefinition, ComponentDefinitionRef,
     ComponentInstance, ComponentRegistry, ContextValidationMode, ModelPathResolution, ModelRef,
@@ -459,6 +460,19 @@ struct InspectTreeInput {
     revision: Option<u64>,
     #[serde(default)]
     run_id: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowProgressInput {
+    run_id: String,
+    #[serde(default)]
+    step_path: Option<String>,
+    #[serde(default)]
+    timepoint: Option<String>,
+    #[serde(default)]
+    sample_id: Option<String>,
+    #[serde(default)]
+    sample_ids: Vec<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -4372,6 +4386,29 @@ pub(crate) fn create_execution_event_tx(
                     continue;
                 }
             }
+            // A completion belongs to samples and one attempt, not to the whole
+            // step: completing S1 must not suppress the record for S2.
+            let mut stored_samples: Vec<&str> = data["sample_ids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .collect();
+            let mut new_samples: Vec<&str> = event
+                .sample_ids
+                .iter()
+                .map(String::as_str)
+                .map(str::trim)
+                .collect();
+            stored_samples.sort_unstable();
+            new_samples.sort_unstable();
+            if stored_samples != new_samples {
+                continue;
+            }
+            if data.get("attempt").and_then(Value::as_u64) != event.attempt.map(u64::from) {
+                continue;
+            }
             return Ok(json!({
                 "id": id,
                 "kind": "execution_event",
@@ -4383,6 +4420,44 @@ pub(crate) fn create_execution_event_tx(
                 "updated_at": updated
             }));
         }
+    }
+    if let Some(attempt) = event.attempt {
+        let mut stmt = tx
+            .prepare("SELECT id, data_json FROM records WHERE kind='execution_event' AND parent_id=?1")
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        let rows = stmt
+            .query_map([run_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        let mut existing = Vec::new();
+        for row in rows {
+            let (id, raw) = row.map_err(|e| CliError::internal(e.to_string()))?;
+            let mut data: Value =
+                serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+            data["id"] = json!(id);
+            existing.push(asterlab_core::sample_progress::ProgressEvent::from_stored(
+                &data,
+            ));
+        }
+        asterlab_core::sample_progress::plan_event_identity(
+            run_id,
+            event.protocol_step_path.as_deref(),
+            event.timepoint.as_deref(),
+            &event.sample_ids,
+            Some(attempt),
+            &existing,
+        )
+        .map_err(|issues| {
+            CliError::input(format!(
+                "样本执行身份无效：{}",
+                issues
+                    .iter()
+                    .map(|issue| issue.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("；")
+            ))
+        })?;
     }
     let occurred_at = event.occurred_at.clone().unwrap_or_else(stamp);
     let data = json!({
@@ -4399,6 +4474,7 @@ pub(crate) fn create_execution_event_tx(
         "planned_output_id":event.planned_output_id,
         "task_key":event.task_key,
         "sample_ids":event.sample_ids,
+        "attempt":event.attempt,
         "materials":event.materials.iter().map(|m|json!({"material":m.material,"planned_output_id":m.planned_output_id,"amount":m.amount,"unit":m.unit})).collect::<Vec<_>>(),
         "measurements":event.measurements.iter().map(|m|json!({"endpoint":m.endpoint,"value":m.value,"unit":m.unit,"sample_id":m.sample_id,"row":m.row,"column":m.column,"group":m.group,"replicate":m.replicate,"status":m.status,"field":m.field})).collect::<Vec<_>>(),
         "batch_id":event.batch_id,
@@ -6405,6 +6481,10 @@ struct ExecutionEventCreate {
     task_key: Option<String>,
     #[serde(default)]
     sample_ids: Vec<String>,
+    /// Sample-level attempt for one (step, sample) identity. Omitted for
+    /// step-level or legacy events; the read model then derives the attempt.
+    #[serde(default)]
+    attempt: Option<u32>,
     #[serde(default)]
     materials: Vec<EventMaterialUse>,
     #[serde(default)]
@@ -7875,14 +7955,85 @@ fn parse_input<T: DeserializeOwned>(path: &str) -> Result<T, CliError> {
     serde_json::from_str(&raw)
         .map_err(|e| CliError::input(format!("JSON 输入不符合该工具的结构：{e}")))
 }
-fn parse_args(args: &[String]) -> Result<&str, CliError> {
-    if args.len() != 2 || args[0] != "--input" {
-        return Err(CliError::input("命令格式：labworkbench <tool> --input <json-file|->；用 `labworkbench tools --json` 查看工具，用 `labworkbench schema <tool>` 查看字段定义"));
-    }
-    Ok(&args[1])
+#[derive(Debug)]
+struct Invocation<'a> {
+    input: &'a str,
+    /// `--diagnostics json` was requested; envelopes then carry a structured
+    /// `diagnostics` array.
+    diagnostics: bool,
 }
-fn output(tool: &str, result: Value) {
-    println!("{}", json!({"ok":true,"tool":tool,"result":result}));
+
+fn parse_args(args: &[String]) -> Result<Invocation<'_>, CliError> {
+    let mut input: Option<&str> = None;
+    let mut diagnostics = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--input" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(CliError::input("--input 需要 JSON 文件路径或 -"));
+                };
+                if input.replace(value.as_str()).is_some() {
+                    return Err(CliError::input("--input 只能出现一次"));
+                }
+                index += 2;
+            }
+            "--diagnostics" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(CliError::input("--diagnostics 需要参数：json"));
+                };
+                if value != "json" {
+                    return Err(CliError::input(format!(
+                        "--diagnostics 只支持 json，收到：{value}"
+                    )));
+                }
+                diagnostics = true;
+                index += 2;
+            }
+            other => {
+                return Err(CliError::input(format!(
+                    "未知参数：{other}；格式：labworkbench <tool> --input <json-file|-> [--diagnostics json]"
+                )));
+            }
+        }
+    }
+    let Some(input) = input else {
+        return Err(CliError::input("命令格式：labworkbench <tool> --input <json-file|->；用 `labworkbench tools --json` 查看工具，用 `labworkbench schema <tool>` 查看字段定义"));
+    };
+    Ok(Invocation { input, diagnostics })
+}
+fn output(tool: &str, result: Value, diagnostics: bool) {
+    println!("{}", success_envelope(tool, result, diagnostics));
+}
+
+fn success_envelope(tool: &str, result: Value, diagnostics: bool) -> Value {
+    let derived = if diagnostics {
+        result_diagnostics(&result)
+    } else {
+        Vec::new()
+    };
+    let mut envelope = json!({"ok":true,"tool":tool,"result":result});
+    if diagnostics {
+        envelope["diagnostics"] = Value::Array(derived);
+    }
+    envelope
+}
+
+/// Read-only validations (`agent_edit.validate`, `semantic.validate`, …) return
+/// their findings inside a successful result. Surface the same entries as
+/// structured diagnostics so one flag covers both envelopes.
+fn result_diagnostics(result: &Value) -> Vec<Value> {
+    result
+        .get("issues")
+        .and_then(Value::as_array)
+        .map(|issues| {
+            issues
+                .iter()
+                .map(Diagnostic::from_legacy_json)
+                .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 fn ensure_project(db: &Connection, id: &str) -> Result<(), CliError> {
     if !has_kind(db, id, "project")? {
@@ -8462,6 +8613,7 @@ pub fn run(args: &[String], data_dir: &Path) -> i32 {
             return fail(
                 "schema",
                 CliError::input("格式：labworkbench schema <tool>"),
+                false,
             );
         }
         return match schema(&args[1]) {
@@ -8475,39 +8627,87 @@ pub fn run(args: &[String], data_dir: &Path) -> i32 {
             None => fail(
                 &args[1],
                 CliError::missing("未知工具；请运行 `labworkbench tools --json`"),
+                false,
             ),
         };
     }
     let tool = args[0].as_str();
-    let path = match parse_args(&args[1..]) {
+    let requested_diagnostics = args.iter().any(|arg| arg == "--diagnostics");
+    let invocation = match parse_args(&args[1..]) {
         Ok(v) => v,
-        Err(e) => return fail(tool, e),
+        Err(e) => return fail(tool, e, requested_diagnostics),
     };
-    let result = dispatch(tool, path, data_dir);
+    let result = dispatch(tool, invocation.input, data_dir);
     match result {
         Ok(v) => {
-            output(tool, v);
+            output(tool, v, invocation.diagnostics);
             0
         }
-        Err(e) => fail(tool, e),
+        Err(e) => fail(tool, e, invocation.diagnostics),
     }
 }
-fn fail(tool: &str, e: CliError) -> i32 {
+fn fail(tool: &str, e: CliError, diagnostics: bool) -> i32 {
+    let exit = e.exit;
+    println!("{}", error_envelope(tool, &e, diagnostics));
+    exit
+}
+
+fn error_envelope(tool: &str, e: &CliError, diagnostics: bool) -> Value {
     let mut error = json!({"code":e.code,"message":e.message});
-    if let Some(path) = e.path {
+    if let Some(path) = &e.path {
         error["path"] = json!(path);
     }
     if let Some(current_version) = e.current_version {
         error["current_version"] = json!(current_version);
     }
-    if let Some(current_version_id) = e.current_version_id {
+    if let Some(current_version_id) = &e.current_version_id {
         error["current_version_id"] = json!(current_version_id);
     }
     if !e.issues.is_empty() {
-        error["issues"] = Value::Array(e.issues);
+        error["issues"] = Value::Array(e.issues.clone());
     }
-    println!("{}", json!({"ok":false,"tool":tool,"error":error}));
-    e.exit
+    let mut envelope = json!({"ok":false,"tool":tool,"error":error});
+    if diagnostics {
+        envelope["diagnostics"] = Value::Array(cli_diagnostics(e));
+    }
+    envelope
+}
+
+/// Normalize the legacy failure shape into structured diagnostics. Declared
+/// `issues` win; otherwise the error itself becomes one blocking diagnostic.
+fn cli_diagnostics(e: &CliError) -> Vec<Value> {
+    let mut diagnostics: Vec<Diagnostic> = e
+        .issues
+        .iter()
+        .map(Diagnostic::from_legacy_json)
+        .collect();
+    if diagnostics.is_empty() {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticSeverity::Blocking,
+                e.code,
+                e.path.clone().unwrap_or_default(),
+                e.message.clone(),
+            )
+            .with_next_action(next_action_for(e.code)),
+        );
+    }
+    diagnostics
+        .iter()
+        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+        .collect()
+}
+
+fn next_action_for(code: &str) -> &'static str {
+    match code {
+        "REVISION_CONFLICT" | "VERSION_CONFLICT" => "重新读取当前 revision 后重试",
+        "NOT_FOUND" => "确认对象 id 存在后重试",
+        "INVALID_INPUT" | "INVALID_PROPOSAL" | "INVALID_BINDING" | "UNIT_MISMATCH" => {
+            "修正输入字段后重试"
+        }
+        "INTERNAL" => "记录 tool 与输入，报告内部错误",
+        _ => "按 error.diagnostics 修正后重试",
+    }
 }
 fn print_help() {
     println!("AsterLab typed CLI\n\n  labworkbench tools --json\n  labworkbench schema <tool>\n  labworkbench <tool> --input <json-file|->\n\nAll tool inputs use a strict per-command schema; unknown fields are rejected. All output is one JSON envelope on stdout. Data directory follows LABWORKBENCH_DATA_DIR (default: ./data).");
@@ -9508,6 +9708,25 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         "run.workspace" => {
             let i: IdInput = parse_input(path)?;
             Ok(run_workspace(&db, &i.id)?)
+        }
+        "workflow.progress" => {
+            let i: WorkflowProgressInput = parse_input(path)?;
+            if i.run_id.trim().is_empty() {
+                return Err(CliError::input("run_id 不能为空"));
+            }
+            let workspace: asterlab_core::run_workspace::RunWorkspace =
+                serde_json::from_value(run_workspace(&db, &i.run_id)?)
+                    .map_err(|e| CliError::internal(e.to_string()))?;
+            let query = asterlab_core::sample_progress::SampleProgressQuery {
+                step_path: i.step_path,
+                timepoint: i.timepoint,
+                sample_id: i.sample_id,
+                sample_ids: i.sample_ids,
+            };
+            serde_json::to_value(asterlab_core::sample_progress::build_from_workspace(
+                &workspace, &query,
+            ))
+            .map_err(|e| CliError::internal(e.to_string()))
         }
         "run.create" => {
             require_trusted_writer(tool)?;
@@ -10569,6 +10788,70 @@ fn any_record_schema() -> Value {
     ];
     json!({"oneOf":kinds.iter().map(|k|record_schema(k)).collect::<Vec<_>>()})
 }
+fn workflow_progress_output_schema() -> Value {
+    let status = json!({"type":"string","enum":["not_started","in_progress","completed","failed","skipped"]});
+    let attempt = json!({
+        "type":"object","additionalProperties":false,
+        "required":["attempt","status","event_ids","last_event_at","deviation"],
+        "properties":{
+            "attempt":{"type":"integer","minimum":1},
+            "status":status.clone(),
+            "event_ids":{"type":"array","items":{"type":"string"}},
+            "last_event_at":{"type":["string","null"]},
+            "deviation":{"type":"boolean"}
+        }
+    });
+    let sample = json!({
+        "type":"object","additionalProperties":false,
+        "required":["sample_id","status","attempt","attempt_count","last_event_at","attempts"],
+        "properties":{
+            "sample_id":{"type":"string"},
+            "status":status.clone(),
+            "attempt":{"type":["integer","null"],"minimum":1},
+            "attempt_count":{"type":"integer","minimum":0},
+            "last_event_at":{"type":["string","null"]},
+            "attempts":{"type":"array","items":attempt}
+        }
+    });
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["schema_version","run_id","sample_ids","steps","issues"],
+        "properties":{
+            "schema_version":{"type":"integer","minimum":1},
+            "run_id":{"type":"string"},
+            "sample_ids":{"type":"array","items":{"type":"string"}},
+            "steps":{"type":"array","items":{
+                "type":"object","additionalProperties":false,
+                "required":["step_path","timepoint","status","complete","total_samples","completed_samples","failed_samples","skipped_samples","in_progress_samples","not_started_samples","last_event_at","samples"],
+                "properties":{
+                    "step_path":{"type":"string"},
+                    "timepoint":{"type":["string","null"]},
+                    "status":status,
+                    "complete":{"type":"boolean"},
+                    "total_samples":{"type":"integer","minimum":0},
+                    "completed_samples":{"type":"integer","minimum":0},
+                    "failed_samples":{"type":"integer","minimum":0},
+                    "skipped_samples":{"type":"integer","minimum":0},
+                    "in_progress_samples":{"type":"integer","minimum":0},
+                    "not_started_samples":{"type":"integer","minimum":0},
+                    "last_event_at":{"type":["string","null"]},
+                    "samples":{"type":"array","items":sample}
+                }
+            }},
+            "issues":{"type":"array","items":{
+                "type":"object","additionalProperties":false,
+                "required":["code","message","step_path","sample_id","event_id"],
+                "properties":{
+                    "code":{"type":"string"},
+                    "message":{"type":"string"},
+                    "step_path":{"type":["string","null"]},
+                    "sample_id":{"type":["string","null"]},
+                    "event_id":{"type":["string","null"]}
+                }
+            }}
+        }
+    })
+}
 fn result_schema(tool: &str) -> Value {
     let arr = |kind: &str| json!({"type":"object","additionalProperties":false,"required":["records"],"properties":{"records":{"type":"array","items":record_schema(kind)}}});
     let asterdoc_version = || json!({"type":"object","additionalProperties":true,"required":["design_id","revision","source","source_hash","schema_version","compiler_version"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source":{"type":"string"},"source_hash":{"type":"string"},"schema_version":{"type":"integer","minimum":1},"compiler_version":{"type":"string"},"design_revision":{"type":"integer","minimum":0},"operation_id":{"type":["string","null"]},"actor_id":{"type":["string","null"]},"created_at":{"type":["string","null"]}}});
@@ -10594,6 +10877,7 @@ fn result_schema(tool: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["run_id","design_id","design_version_id","design_revision","frozen_design","protocol_version_id","status","scopes","steps","tasks","occurrences","materials","plates","events"],"properties":{"run_id":{"type":"string"},"design_id":{"type":"string"},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"frozen_design":{"type":"object","additionalProperties":true},"protocol_version_id":{"type":["string","null"]},"status":{"type":"string"},"scopes":{"type":"array","items":{"type":"object","additionalProperties":true}},"steps":{"type":"array","items":{"type":"object","additionalProperties":true}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},"occurrences":{"type":"array","items":{"type":"object","additionalProperties":true}},"materials":{"type":"array","items":{"type":"object","additionalProperties":true}},"plates":{"type":"array","items":{"type":"object","additionalProperties":true}},"events":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
         }
         "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["designId","revision","design","roots","order","precedes","issues"],"properties":{"designId":{"type":"string"},"revision":{"type":"integer","minimum":0},"runId":{"type":"string"},"design":{"type":"boolean"},"roots":{"type":"array","items":{"type":"object","additionalProperties":true}},"order":{"type":"array","items":{"type":"string"}},"precedes":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"issues":{"type":"array","items":{"type":"string"}}}}),
+        "workflow.progress" => workflow_progress_output_schema(),
         "task.create" => one("task"),
         "task.set_status" => one("task"),
         "protocol.list" => arr("protocol"),
@@ -10683,12 +10967,16 @@ fn result_schema(tool: &str) -> Value {
         _ => json!({"type":"object"}),
     }
 }
+fn diagnostic_schema() -> Value {
+    json!({"type":"object","additionalProperties":false,"required":["path","code","severity","message","affects","next_action","source"],"properties":{"path":{"type":"string"},"code":{"type":"string"},"severity":{"type":"string","enum":["blocking","needs_confirmation","advisory"]},"message":{"type":"string"},"affects":{"type":"array","items":{"type":"string"}},"next_action":{"type":"string"},"source":{"type":"string","enum":["user_confirmed","imported_record","referenced_protocol","derived","agent_suggestion","unknown"]}}})
+}
+
 fn output_schema(tool: &str) -> Value {
-    let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool)}});
+    let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool),"diagnostics":{"type":"array","items":diagnostic_schema()}}});
     let error = if matches!(tool, "agent_edit.validate" | "agent_edit.commit" | "step.edit") {
-        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}}}})
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
     } else {
-        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}}}})
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
     };
     json!({"oneOf":[success,error]})
 }
@@ -10798,6 +11086,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["design_id","title"],"properties":{"design_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]}}})
         }
         "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"run_id":{"type":"string"}}}),
+        "workflow.progress" => json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"step_path":{"type":"string","minLength":1,"maxLength":500,"description":"只看一个冻结步骤"},"timepoint":{"type":"string","minLength":1,"maxLength":100,"description":"只看该步骤的一个具体冻结时间点；省略时只返回事件实际携带的分组"},"sample_id":{"type":"string","minLength":1,"maxLength":120,"description":"只看一个样本"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120},"description":"仅与 step_path 和具体 timepoint 同时提供时，为该分组补入 not_started 样本"}}}),
         "task.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","scheduled_date"],"properties":{"project_id":{"type":"string"},"run_id":{"type":["string","null"]},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":"string","minLength":1,"format":"date"},"status":{"type":"string","enum":["planned","in_progress","done","blocked"]},"notes":{"type":"string"}}})
         }
@@ -10829,7 +11118,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "formula.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","expression"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"expression":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -11059,6 +11348,7 @@ fn tool_specs() -> Vec<Value> {
         "run.revise",
         "run.workspace",
         "workflow.inspect_tree",
+        "workflow.progress",
         "task.create",
         "task.set_status",
         "protocol.list",
@@ -11130,6 +11420,7 @@ fn tool_writes(tool: &str) -> bool {
             | "design.get"
             | "run.list"
             | "workflow.inspect_tree"
+            | "workflow.progress"
             | "protocol.list"
             | "protocol.block.list"
             | "protocol.block.get"
@@ -11174,6 +11465,7 @@ fn tool_description(tool: &str) -> &'static str {
         }
         "run.list" => "按项目查询实验运行。",
         "workflow.inspect_tree" => "只读投影 Design（可选 Run）的 Use/Definition/Occurrence 层级树；由 Rust Core 直接计算，不依赖桌面应用。",
+        "workflow.progress" => "只读投影一个 Run 每个冻结步骤的样本矩阵：每个样本的当前状态、attempt 历史与最后事件时间；步骤完成只在全部样本完成时成立。",
         "run.create" => "从设计当前版本创建运行并固定设计/Protocol 版本引用；仅受信任的本地写入端可调用，Agent 不得自行创建 Run。",
         "run.set_status" => "更新运行状态；必须提供读取时的 expected_revision。Protocol 必填参数未确认时拒绝开始运行。",
         "run.revise" => "按 expected_revision 修订运行名称或计划日期；设计版本、Protocol 清单、材料清单和重复关系不可改写。",
@@ -11249,6 +11541,7 @@ fn tool_effects(tool: &str) -> &'static str {
         | "run.list"
         | "run.workspace"
         | "workflow.inspect_tree"
+        | "workflow.progress"
         | "protocol.list"
         | "protocol.block.list"
         | "protocol.block.get"
@@ -11820,6 +12113,85 @@ pub(crate) fn list_asset_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostics_flag_is_parsed_with_input_in_any_order() {
+        let args = vec![
+            "--input".to_owned(),
+            "in.json".to_owned(),
+            "--diagnostics".to_owned(),
+            "json".to_owned(),
+        ];
+        let invocation = parse_args(&args).unwrap();
+        assert_eq!(invocation.input, "in.json");
+        assert!(invocation.diagnostics);
+
+        let args = vec![
+            "--diagnostics".to_owned(),
+            "json".to_owned(),
+            "--input".to_owned(),
+            "-".to_owned(),
+        ];
+        assert!(parse_args(&args).unwrap().diagnostics);
+
+        let args = vec!["--input".to_owned(), "in.json".to_owned()];
+        assert!(!parse_args(&args).unwrap().diagnostics);
+
+        let args = vec![
+            "--diagnostics".to_owned(),
+            "yaml".to_owned(),
+            "--input".to_owned(),
+            "-".to_owned(),
+        ];
+        assert_eq!(parse_args(&args).unwrap_err().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn error_envelope_carries_structured_diagnostics() {
+        let mut error = CliError::input("run.create 失败");
+        error.path = Some("manifest".to_owned());
+        error.issues = vec![json!("STEP_NOT_MATERIALIZED: cck8/seed")];
+        let envelope = error_envelope("run.create", &error, true);
+        let diagnostics = envelope["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0]["code"], "STEP_NOT_MATERIALIZED");
+        assert_eq!(diagnostics[0]["path"], "cck8/seed");
+        assert_eq!(diagnostics[0]["severity"], "blocking");
+        assert_eq!(diagnostics[0]["source"], "unknown");
+        assert!(diagnostics[0]["next_action"].is_string());
+
+        let plain = error_envelope("run.create", &error, false);
+        assert!(plain.get("diagnostics").is_none());
+
+        let mut bare = CliError::conflict("设计版本已更新；请先重新读取。");
+        bare.path = Some("revision".to_owned());
+        let envelope = error_envelope("design.revise", &bare, true);
+        assert_eq!(envelope["diagnostics"][0]["code"], "REVISION_CONFLICT");
+        assert_eq!(envelope["diagnostics"][0]["path"], "revision");
+        assert_eq!(envelope["diagnostics"][0]["severity"], "blocking");
+        assert_eq!(envelope["diagnostics"][0]["source"], "derived");
+    }
+
+    #[test]
+    fn success_envelope_derives_diagnostics_from_validation_issues() {
+        let result = json!({
+            "valid": false,
+            "issues": [{
+                "code": "unit_mismatch",
+                "path": "operation.temperature",
+                "message": "unit family differs"
+            }]
+        });
+        let envelope = success_envelope("semantic.validate", result.clone(), true);
+        assert_eq!(envelope["diagnostics"].as_array().unwrap().len(), 1);
+        assert_eq!(envelope["diagnostics"][0]["code"], "unit_mismatch");
+        assert_eq!(envelope["diagnostics"][0]["severity"], "blocking");
+        assert_eq!(envelope["diagnostics"][0]["source"], "derived");
+        assert_eq!(envelope["result"], result);
+
+        let plain = success_envelope("semantic.validate", result, false);
+        assert!(plain.get("diagnostics").is_none());
+    }
 
     #[test]
     fn agent_tools_are_discoverable() {

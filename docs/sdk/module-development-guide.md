@@ -25,7 +25,7 @@ Minimum shape:
 
 ```json
 {
-  "kind": "lab.example",
+  "kind": "lab_example",
   "schema": 1,
   "title": "Example",
   "description": "What it represents and what it does not.",
@@ -51,13 +51,14 @@ Minimum shape:
 
 Checklist:
 
-- [ ] `kind` is stable and lowercase.
+- [ ] `kind` is stable, lowercase, and matches `[a-z][a-z0-9_]*` (it becomes a Go identifier and a directory name).
 - [ ] `schema` is a new version if any old field meaning changes.
 - [ ] Each input has a Foundation type and a description.
 - [ ] Quantities declare `dimension`.
 - [ ] References declare `target`.
 - [ ] Derived outputs declare `origin: "derived"` and a versioned `calculator`.
 - [ ] Actions declare a permission that is present in `permissions`.
+- [ ] Every `rules[]` name is registered in Go `knownModuleRules` and Rust `ASTERDOC_RULES`, with an arm in `validate_asterdoc_module`.
 - [ ] Renderers are only declared when they exist.
 - [ ] No runtime/device claim is made without a Device SDK implementation.
 
@@ -144,9 +145,54 @@ Derived outputs are `stock_volume` and `diluent_volume`, both `dilution.v1`. The
 
 `instrument_profile` is a Resource module. It declares class, model, capabilities, constraints, source and evidence. It is not a specific machine, a calibration record or a device connection. A future Device SDK may bind a profile to an adapter, but that is deliberately out of scope here.
 
-## 7. CLI/tooling status
+## 7. Scaffold and check
 
-The current development commands are:
+Two repository scripts implement the "new module" checklist as commands. Both use only the Python 3
+standard library, read `spec/modules.json` plus the Go/Rust sources, and are not the `asterlab sdk` CLI.
+
+```sh
+python3 scripts/sdk/scaffold.py --kind lab_example --schema 1 --dry-run   # file list only
+python3 scripts/sdk/scaffold.py --kind lab_example --schema 1
+python3 scripts/sdk/check.py                                              # exit 0 = contract holds
+python3 scripts/sdk/check.py --json                                       # modules[] count + per-check results
+```
+
+`scaffold.py` writes six files under `prototypes/mygo-run/internal/asterdoc/_scaffold/<kind>@<schema>/`:
+
+| file | purpose |
+| --- | --- |
+| `manifest.json` | object to append to `spec/modules.json` |
+| `module.go` | `ModuleSpec` constructor and renderer |
+| `registration.go` | the `BuiltinRegistry()` entry |
+| `module.rs` | Rust mirror declaration and rule-registration note |
+| `module_test.go` | minimal valid/rejected contract test |
+| `README.md` | apply checklist and guardrails |
+
+The `_scaffold/` prefix starts with `_`, so the Go tool ignores the directory: a skeleton cannot change a
+build until a maintainer applies it. The generator refuses a duplicate `kind@schema`, a schema gap for an
+existing kind, an unknown category or permission, and a rule name missing from either validator. It does
+not edit `spec/modules.json`, `registry.go` or `src/cli.rs`; applying the skeleton stays a reviewed diff.
+
+`check.py` verifies, and fails with the specific keys or names that drifted:
+
+| check | fails when |
+| --- | --- |
+| `manifest` | identity, title, sdk, category, ports, references, derived calculators, lifecycle or rules violate the contract |
+| `registration` | a `kind@schema` is declared but not registered in `BuiltinRegistry()`, registered twice, or registered without a manifest entry |
+| `schema` | a kind's schemas are not the gap-free sequence 1..N |
+| `permissions` | an action names an undeclared permission, or a declaration has no Go `Perm*` constant |
+| `catalog` | `module-catalog-v1.md` lists another key set or another declared count |
+| `parity` | Go `knownModuleRules` / `foundationPortTypes` / `foundationCategories`, Rust `ASTERDOC_RULES` / `types` / `categories`, or the rule dispatch arms disagree |
+| `scaffold` | a `_scaffold/<kind>@<schema>/` directory is incomplete, disagrees with its fragments, or is already merged |
+
+Tests for the tools build a minimal manifest + Go + Rust tree and assert both the passing and the failing
+paths:
+
+```sh
+python3 scripts/sdk/test_sdk_tools.py
+```
+
+Module tests and the Go/Rust parity sample are still required:
 
 ```sh
 cd prototypes/mygo-run
@@ -154,16 +200,9 @@ go test ./internal/asterdoc
 go test . -run TestAsterDocGoRustParity
 ```
 
-The target SDK commands below are **not implemented** and must not be reported as available:
-
-```text
-asterlab sdk new
-asterlab sdk validate
-asterlab sdk test
-asterlab sdk manifest
-```
-
-The manifest is currently available through the Go registry (`ManifestJSON`) and the shared JSON file. A stable CLI surface is a remaining SDK tooling gap.
+The `asterlab sdk new`, `sdk validate`, `sdk test` and `sdk manifest` commands are **not implemented** and
+must not be reported as available. The manifest remains available through the Go registry (`ManifestJSON`)
+and the shared JSON file; dynamic/third-party module loading does not exist.
 
 ## 8. Anti-patterns
 

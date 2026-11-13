@@ -1,0 +1,19 @@
+$ echo "{}" | labworkbench record.list --input - --diagnostics json
+{"diagnostics":[],"ok":true,"result":{"records":[]},"tool":"record.list"}
+exit=0
+
+$ echo "{\"id\":\"missing-design\"}" | labworkbench design.get --input - --diagnostics json
+{"diagnostics":[{"affects":[],"code":"NOT_FOUND","message":"记录不存在：missing-design","next_action":"确认对象 id 存在后重试","path":"","severity":"blocking","source":"derived"}],"error":{"code":"NOT_FOUND","message":"记录不存在：missing-design"},"ok":false,"tool":"design.get"}
+exit=3
+
+$ echo "{\"id\":\"missing-design\"}" | labworkbench design.get --input -
+{"error":{"code":"NOT_FOUND","message":"记录不存在：missing-design"},"ok":false,"tool":"design.get"}
+exit=3
+
+$ echo "{}" | labworkbench record.list --input - --diagnostics yaml
+{"diagnostics":[{"affects":[],"code":"INVALID_INPUT","message":"--diagnostics 只支持 json，收到：yaml","next_action":"修正输入字段后重试","path":"","severity":"blocking","source":"derived"}],"error":{"code":"INVALID_INPUT","message":"--diagnostics 只支持 json，收到：yaml"},"ok":false,"tool":"record.list"}
+exit=2
+
+$ echo "<empty-diffs proposal>" | labworkbench agent_edit.validate --input - --diagnostics json
+{"diagnostics":[{"affects":[],"code":"INVALID_PROPOSAL","message":"proposal 至少需要一个字段级 diff","next_action":"按 params.<slot_key> 组稿","path":"diffs","severity":"blocking","source":"derived"}],"ok":true,"result":{"current_revision":0,"current_version_id":"","diffs":[],"invalidated_refs":[],"issues":[{"affects":[],"code":"INVALID_PROPOSAL","message":"proposal 至少需要一个字段级 diff","next_action":"按 params.<slot_key> 组稿","path":"diffs","severity":"blocking"}],"proposal_digest":"sha256:e6e2b5dce7e52856e601ef21550d867d173988aa204597703a3d39d727504ecf","proposal_id":"p-1","requires_confirmation":true,"schema_version":1,"status":"blocked","target":{"kind":"block_version","object_id":"b1"}},"tool":"agent_edit.validate"}
+exit=0

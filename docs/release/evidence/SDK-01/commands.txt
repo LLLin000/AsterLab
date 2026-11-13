@@ -1,0 +1,108 @@
+$ python3 --version
+Python 3.12.3
+$ git merge-base origin/main HEAD
+ca69142a3ccaa50b94d01ae591171053d75a7569
+(head commit SHA: see the PR body and the task comment; evidence only pins the base)
+$ git rev-parse --abbrev-ref HEAD
+feature/sdk-01-build-scaffol-d1r
+$ python3 scripts/sdk/check.py
+sdk check: prototypes/mygo-run/internal/asterdoc/spec/modules.json — 16 modules, 14 kinds, sdk 1.0.0
+  ok   manifest      16 modules declared
+  ok   registration  16 Go registrations match the manifest
+  ok   schema        every kind numbers its schemas 1..N without gaps
+  ok   permissions   declared permissions are backed by 3 `Perm*` constants
+  ok   catalog       catalog rows and counts match 16 manifest keys / 14 kinds
+  ok   parity        Go/Rust agree on 16 rules, 21 port types, 6 categories and 16 dispatch arms
+  ok   scaffold      0 scaffold directories consistent
+sdk check: ok
+exit=0
+$ python3 scripts/sdk/scaffold.py --kind probe_tmp --schema 1 --dry-run
+scaffold probe_tmp@1: 6 files under prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/README.md
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/manifest.json
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module.go
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module.rs
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module_test.go
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/registration.go
+dry run: no file written
+exit=0
+$ git status --porcelain prototypes/mygo-run/internal/asterdoc
+(no output above: the dry run created no file)
+$ python3 scripts/sdk/test_sdk_tools.py -v
+test_catalog_count_mismatch_fails (__main__.CheckTest.test_catalog_count_mismatch_fails) ... ok
+test_duplicate_manifest_key_fails (__main__.CheckTest.test_duplicate_manifest_key_fails) ... ok
+test_duplicate_registration_fails (__main__.CheckTest.test_duplicate_registration_fails) ... ok
+test_json_report_carries_module_count (__main__.CheckTest.test_json_report_carries_module_count) ... ok
+test_rust_mirror_drift_fails (__main__.CheckTest.test_rust_mirror_drift_fails) ... ok
+test_schema_gap_fails (__main__.CheckTest.test_schema_gap_fails) ... ok
+test_undeclared_action_permission_fails (__main__.CheckTest.test_undeclared_action_permission_fails) ... ok
+test_unregistered_rule_fails (__main__.CheckTest.test_unregistered_rule_fails) ... ok
+test_valid_fixture_passes (__main__.CheckTest.test_valid_fixture_passes) ... ok
+test_dry_run_lists_files_and_writes_nothing (__main__.ScaffoldTest.test_dry_run_lists_files_and_writes_nothing) ... ok
+test_force_overwrites (__main__.ScaffoldTest.test_force_overwrites) ... ok
+test_generated_skeleton_satisfies_check (__main__.ScaffoldTest.test_generated_skeleton_satisfies_check) ... ok
+test_refuses_duplicate (__main__.ScaffoldTest.test_refuses_duplicate) ... ok
+test_refuses_schema_gap (__main__.ScaffoldTest.test_refuses_schema_gap) ... ok
+test_refuses_unknown_category (__main__.ScaffoldTest.test_refuses_unknown_category) ... ok
+test_refuses_unregistered_rule (__main__.ScaffoldTest.test_refuses_unregistered_rule) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.192s
+
+OK
+exit=0
+$ python3 -c "compare modules.json modules[] with check --json modules"
+modules.json modules[]=16 check --json modules=16 match=True
+$ python3 scripts/sdk/check.py --json
+{
+  "ok": true,
+  "manifest": "prototypes/mygo-run/internal/asterdoc/spec/modules.json",
+  "sdkVersion": "1.0.0",
+  "modules": 16,
+  "kinds": 14,
+  "checks": [
+    {
+      "id": "manifest",
+      "ok": true,
+      "detail": "16 modules declared",
+      "problems": []
+    },
+    {
+      "id": "registration",
+      "ok": true,
+      "detail": "16 Go registrations match the manifest",
+      "problems": []
+    },
+    {
+      "id": "schema",
+      "ok": true,
+      "detail": "every kind numbers its schemas 1..N without gaps",
+      "problems": []
+    },
+    {
+      "id": "permissions",
+      "ok": true,
+      "detail": "declared permissions are backed by 3 `Perm*` constants",
+      "problems": []
+    },
+    {
+      "id": "catalog",
+      "ok": true,
+      "detail": "catalog rows and counts match 16 manifest keys / 14 kinds",
+      "problems": []
+    },
+    {
+      "id": "parity",
+      "ok": true,
+      "detail": "Go/Rust agree on 16 rules, 21 port types, 6 categories and 16 dispatch arms",
+      "problems": []
+    },
+    {
+      "id": "scaffold",
+      "ok": true,
+      "detail": "0 scaffold directories consistent",
+      "problems": []
+    }
+  ]
+}
+exit=0

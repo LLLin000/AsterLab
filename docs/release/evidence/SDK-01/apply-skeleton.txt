@@ -1,0 +1,24 @@
+$ python3 scripts/sdk/scaffold.py --kind probe_tmp --schema 1
+scaffold probe_tmp@1: 6 files under prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1
+created prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/README.md
+created prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/manifest.json
+created prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module.go
+created prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module.rs
+created prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module_test.go
+created prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/registration.go
+$ # apply: append the fragment, copy the Go files, add the registry entry
+$ git status --porcelain prototypes/mygo-run/internal/asterdoc
+ M prototypes/mygo-run/internal/asterdoc/registry.go
+ M prototypes/mygo-run/internal/asterdoc/spec/modules.json
+?? prototypes/mygo-run/internal/asterdoc/_scaffold/
+?? prototypes/mygo-run/internal/asterdoc/probe_tmp.go
+?? prototypes/mygo-run/internal/asterdoc/probe_tmp_test.go
+$ cd prototypes/mygo-run && go test ./internal/asterdoc -run TestProbeTmpSpecContract -count=1 -v
+=== RUN   TestProbeTmpSpecContract
+--- PASS: TestProbeTmpSpecContract (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/asterdoc	0.016s
+exit=0
+$ # revert the temporary application
+$ git status --porcelain prototypes/mygo-run/internal/asterdoc
+(no output above: the temporary application is reverted)

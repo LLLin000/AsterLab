@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::diagnostic::Diagnostic;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileRef {
@@ -349,59 +351,99 @@ impl Default for ContainerPlan {
 }
 
 impl ContainerPlan {
+    /// Legacy string view of [`Self::validate_diagnostics`], kept so existing
+    /// callers and frozen output shapes stay unchanged.
     pub fn validate(&self, registry: &LabwareRegistry) -> Result<(), Vec<String>> {
+        self.validate_diagnostics(registry)
+            .map_err(|issues| issues.into_iter().map(|issue| issue.message).collect())
+    }
+
+    /// Canonical structured validation. Every finding carries a stable code
+    /// and the path of the container, assignment or placement it anchors to.
+    pub fn validate_diagnostics(&self, registry: &LabwareRegistry) -> Result<(), Vec<Diagnostic>> {
         let mut issues = Vec::new();
         let mut container_ids = HashSet::new();
         let mut profiles = HashMap::new();
-        for container in &self.containers {
+        for (index, container) in self.containers.iter().enumerate() {
+            let path = format!("containers[{index}]");
             if container.id.trim().is_empty() {
-                issues.push("container id must not be empty".into());
+                issues.push(Diagnostic::blocking(
+                    "container_id_empty",
+                    format!("{path}.id"),
+                    "container id must not be empty",
+                ));
             }
             if !container_ids.insert(container.id.as_str()) {
-                issues.push(format!("duplicate container id {}", container.id));
+                issues.push(Diagnostic::blocking(
+                    "container_id_duplicate",
+                    format!("{path}.id"),
+                    format!("duplicate container id {}", container.id),
+                ));
             }
             let Some(profile) = registry.get(&container.profile_ref) else {
-                issues.push(format!(
-                    "container {} references unknown profile {}@{}",
-                    container.id, container.profile_ref.id, container.profile_ref.version
+                issues.push(Diagnostic::blocking(
+                    "container_profile_unknown",
+                    format!("{path}.profile_ref"),
+                    format!(
+                        "container {} references unknown profile {}@{}",
+                        container.id, container.profile_ref.id, container.profile_ref.version
+                    ),
                 ));
                 continue;
             };
             profiles.insert(container.id.as_str(), profile);
             if profile.review_status == "conflicted" {
-                issues.push(format!(
-                    "container {} uses a conflicted profile",
-                    container.id
+                issues.push(Diagnostic::blocking(
+                    "container_profile_conflicted",
+                    format!("{path}.review_status"),
+                    format!("container {} uses a conflicted profile", container.id),
                 ));
             }
         }
 
         let mut assignment_positions = HashSet::new();
-        for assignment in &self.assignments {
+        for (index, assignment) in self.assignments.iter().enumerate() {
+            let path = format!("assignments[{index}]");
             let key = format!("{}::{}", assignment.container_id, assignment.position_id);
             if !assignment_positions.insert(key) {
-                issues.push(format!(
-                    "duplicate assignment for {}:{}",
-                    assignment.container_id, assignment.position_id
+                issues.push(Diagnostic::blocking(
+                    "assignment_duplicate",
+                    path.clone(),
+                    format!(
+                        "duplicate assignment for {}:{}",
+                        assignment.container_id, assignment.position_id
+                    ),
                 ));
             }
             let Some(profile) = profiles.get(assignment.container_id.as_str()) else {
-                issues.push(format!(
-                    "assignment references unknown container {}",
-                    assignment.container_id
+                issues.push(Diagnostic::blocking(
+                    "assignment_container_unknown",
+                    format!("{path}.container_id"),
+                    format!(
+                        "assignment references unknown container {}",
+                        assignment.container_id
+                    ),
                 ));
                 continue;
             };
             if !position_is_valid(profile, &assignment.position_id) {
-                issues.push(format!(
-                    "assignment position {} is not valid for container {}",
-                    assignment.position_id, assignment.container_id
+                issues.push(Diagnostic::blocking(
+                    "assignment_position_invalid",
+                    format!("{path}.position_id"),
+                    format!(
+                        "assignment position {} is not valid for container {}",
+                        assignment.position_id, assignment.container_id
+                    ),
                 ));
             }
             if assignment.targets.is_empty() {
-                issues.push(format!(
-                    "assignment {}:{} has no targets",
-                    assignment.container_id, assignment.position_id
+                issues.push(Diagnostic::blocking(
+                    "assignment_targets_missing",
+                    format!("{path}.targets"),
+                    format!(
+                        "assignment {}:{} has no targets",
+                        assignment.container_id, assignment.position_id
+                    ),
                 ));
             }
             let mut target_keys = HashSet::new();
@@ -411,23 +453,36 @@ impl ContainerPlan {
                 .filter(|target| target.role.eq_ignore_ascii_case("primary"))
                 .count();
             if primaries > 1 {
-                issues.push(format!(
-                    "assignment {}:{} has multiple primary targets",
-                    assignment.container_id, assignment.position_id
+                issues.push(Diagnostic::blocking(
+                    "assignment_primary_conflict",
+                    format!("{path}.targets"),
+                    format!(
+                        "assignment {}:{} has multiple primary targets",
+                        assignment.container_id, assignment.position_id
+                    ),
                 ));
             }
-            for target in &assignment.targets {
+            for (target_index, target) in assignment.targets.iter().enumerate() {
+                let target_path = format!("{path}.targets[{target_index}]");
                 if target.role.trim().is_empty() || target.relationship.trim().is_empty() {
-                    issues.push(format!(
-                        "assignment {}:{} target needs role and relationship",
-                        assignment.container_id, assignment.position_id
+                    issues.push(Diagnostic::blocking(
+                        "assignment_target_incomplete",
+                        target_path.clone(),
+                        format!(
+                            "assignment {}:{} target needs role and relationship",
+                            assignment.container_id, assignment.position_id
+                        ),
                     ));
                 }
                 let key = format!("{}:{:?}", target.relationship, target.target);
                 if !target_keys.insert(key) {
-                    issues.push(format!(
-                        "assignment {}:{} repeats a target relationship",
-                        assignment.container_id, assignment.position_id
+                    issues.push(Diagnostic::blocking(
+                        "assignment_target_duplicate",
+                        target_path,
+                        format!(
+                            "assignment {}:{} repeats a target relationship",
+                            assignment.container_id, assignment.position_id
+                        ),
                     ));
                 }
             }
@@ -436,27 +491,44 @@ impl ContainerPlan {
         let mut placement_children = HashSet::new();
         let mut placement_positions = HashSet::new();
         let mut placement_pairs = HashSet::new();
-        for placement in &self.placements {
+        for (index, placement) in self.placements.iter().enumerate() {
+            let path = format!("placements[{index}]");
             let Some(parent) = profiles.get(placement.parent_container_id.as_str()) else {
-                issues.push(format!(
-                    "placement references unknown parent {}",
-                    placement.parent_container_id
+                issues.push(Diagnostic::blocking(
+                    "placement_parent_unknown",
+                    format!("{path}.parent_container_id"),
+                    format!(
+                        "placement references unknown parent {}",
+                        placement.parent_container_id
+                    ),
                 ));
                 continue;
             };
             if !container_ids.contains(placement.child_container_id.as_str()) {
-                issues.push(format!(
-                    "placement references unknown child {}",
-                    placement.child_container_id
+                issues.push(Diagnostic::blocking(
+                    "placement_child_unknown",
+                    format!("{path}.child_container_id"),
+                    format!(
+                        "placement references unknown child {}",
+                        placement.child_container_id
+                    ),
                 ));
             }
             if placement.parent_container_id == placement.child_container_id {
-                issues.push("container cannot be placed inside itself".into());
+                issues.push(Diagnostic::blocking(
+                    "placement_self_reference",
+                    path.clone(),
+                    "container cannot be placed inside itself",
+                ));
             }
             if !placement_children.insert(placement.child_container_id.as_str()) {
-                issues.push(format!(
-                    "child container {} is placed in more than one parent",
-                    placement.child_container_id
+                issues.push(Diagnostic::blocking(
+                    "placement_child_reused",
+                    format!("{path}.child_container_id"),
+                    format!(
+                        "child container {} is placed in more than one parent",
+                        placement.child_container_id
+                    ),
                 ));
             }
             let position_key = format!(
@@ -464,9 +536,13 @@ impl ContainerPlan {
                 placement.parent_container_id, placement.position_id
             );
             if !placement_positions.insert(position_key) {
-                issues.push(format!(
-                    "position {} already has a placed child",
-                    placement.position_id
+                issues.push(Diagnostic::blocking(
+                    "placement_position_occupied",
+                    format!("{path}.position_id"),
+                    format!(
+                        "position {} already has a placed child",
+                        placement.position_id
+                    ),
                 ));
             }
             let pair = format!(
@@ -474,22 +550,38 @@ impl ContainerPlan {
                 placement.parent_container_id, placement.position_id, placement.child_container_id
             );
             if !placement_pairs.insert(pair) {
-                issues.push("duplicate container placement".into());
+                issues.push(Diagnostic::blocking(
+                    "placement_duplicate",
+                    path.clone(),
+                    "duplicate container placement",
+                ));
             }
             if !position_is_valid(parent, &placement.position_id) {
-                issues.push(format!(
-                    "placement position {} is not valid for container {}",
-                    placement.position_id, placement.parent_container_id
+                issues.push(Diagnostic::blocking(
+                    "placement_position_invalid",
+                    format!("{path}.position_id"),
+                    format!(
+                        "placement position {} is not valid for container {}",
+                        placement.position_id, placement.parent_container_id
+                    ),
                 ));
             }
             if placement.relationship.trim().is_empty() {
-                issues.push("placement relationship must not be empty".into());
+                issues.push(Diagnostic::blocking(
+                    "placement_relationship_missing",
+                    format!("{path}.relationship"),
+                    "placement relationship must not be empty",
+                ));
             }
             if let Some(child) = profiles.get(placement.child_container_id.as_str()) {
                 if placement_compatibility(parent, child) == LabwareCompatibility::Incompatible {
-                    issues.push(format!(
-                        "container {} is incompatible with parent {}",
-                        placement.child_container_id, placement.parent_container_id
+                    issues.push(Diagnostic::blocking(
+                        "placement_incompatible",
+                        path.clone(),
+                        format!(
+                            "container {} is incompatible with parent {}",
+                            placement.child_container_id, placement.parent_container_id
+                        ),
                     ));
                 }
             }
@@ -502,7 +594,11 @@ impl ContainerPlan {
                 .push(placement.child_container_id.clone());
         }
         if has_placement_cycle(&placement_edges) {
-            issues.push("container placement graph contains a cycle".into());
+            issues.push(Diagnostic::blocking(
+                "placement_cycle",
+                "placements",
+                "container placement graph contains a cycle",
+            ));
         }
 
         if issues.is_empty() {
@@ -513,35 +609,54 @@ impl ContainerPlan {
     }
 }
 
-fn validate_profile_fields(profile: &LabwareProfile) -> Result<(), String> {
+fn profile_field_diagnostics(profile: &LabwareProfile) -> Vec<Diagnostic> {
+    let mut issues = Vec::new();
     for (key, field) in &profile.fields {
+        let path = format!("fields.{key}");
         match field.state {
             ProfileFieldState::Known
                 if field.value.is_none() && field.quantity.is_none() && field.range.is_none() =>
             {
-                return Err(format!("profile field {key} is known but has no value"));
+                issues.push(Diagnostic::blocking(
+                    "profile_field_value_missing",
+                    path,
+                    format!("profile field {key} is known but has no value"),
+                ));
             }
             ProfileFieldState::Unknown | ProfileFieldState::NotApplicable
                 if field.value.is_some() =>
             {
-                return Err(format!(
-                    "profile field {key} carries a value but is not known"
+                issues.push(Diagnostic::blocking(
+                    "profile_field_state_conflict",
+                    path,
+                    format!("profile field {key} carries a value but is not known"),
                 ));
             }
             ProfileFieldState::Conflicted if field.value.is_some() => {
-                return Err(format!(
-                    "profile field {key} is conflicted but carries one value"
+                issues.push(Diagnostic::blocking(
+                    "profile_field_conflict_single_value",
+                    path,
+                    format!("profile field {key} is conflicted but carries one value"),
                 ));
             }
             ProfileFieldState::Conflicted if field.evidence.is_empty() => {
-                return Err(format!(
-                    "profile field {key} is conflicted without evidence"
+                issues.push(Diagnostic::blocking(
+                    "profile_field_conflict_evidence_missing",
+                    path,
+                    format!("profile field {key} is conflicted without evidence"),
                 ));
             }
             _ => {}
         }
     }
-    Ok(())
+    issues
+}
+
+fn validate_profile_fields(profile: &LabwareProfile) -> Result<(), String> {
+    match profile_field_diagnostics(profile).into_iter().next() {
+        Some(issue) => Err(issue.message),
+        None => Ok(()),
+    }
 }
 
 pub fn placement_compatibility(
@@ -773,6 +888,33 @@ mod tests {
         plan.placements.clear();
         plan.assignments.push(plan.assignments[0].clone());
         assert!(plan.validate(&registry).is_err());
+    }
+
+    #[test]
+    fn container_plan_diagnostics_carry_paths_and_codes() {
+        use crate::diagnostic::{DiagnosticSeverity, DiagnosticSource};
+
+        let registry = default_labware_registry();
+        let plan = ContainerPlan {
+            containers: vec![
+                container("plate-1", "labware.cell_culture_96"),
+                container("plate-1", "labware.cell_culture_96"),
+            ],
+            assignments: vec![],
+            placements: vec![],
+        };
+        let issues = plan.validate_diagnostics(&registry).unwrap_err();
+        let duplicate = issues
+            .iter()
+            .find(|issue| issue.code == "container_id_duplicate")
+            .expect("duplicate container id diagnostic");
+        assert_eq!(duplicate.path, "containers[1].id");
+        assert_eq!(duplicate.severity, DiagnosticSeverity::Blocking);
+        assert_eq!(duplicate.source, DiagnosticSource::Derived);
+        // The legacy string view stays a lossless projection of the messages.
+        let legacy = plan.validate(&registry).unwrap_err();
+        let expected: Vec<String> = issues.into_iter().map(|issue| issue.message).collect();
+        assert_eq!(legacy, expected);
     }
 
     #[test]
