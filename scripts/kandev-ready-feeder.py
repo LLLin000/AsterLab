@@ -26,6 +26,8 @@ Environment:
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -184,6 +186,8 @@ def scan_no_pr(review_tasks):
         pr = task_pr(task["id"])
         if pr:
             continue
+        if merged_pr_by_card(task):
+            continue  # already merged; the sweep will move it
         # Grace period: just entered Review, PR may be seconds away.
         try:
             import sqlite3
@@ -752,6 +756,58 @@ def task_pr(task_id):
         return {}
 
 
+GH_REPO = "LLLin000/AsterLab"
+_merged_pr_cache = {}
+
+
+def merged_pr_by_card(task):
+    """Find a merged PR by card id when Kandev did not link one.
+
+    Linking can miss (for example when the review agent merges before the
+    GitHub watcher associates the PR), leaving a merged card in Review.
+    PR titles start with the card id, so a title search recovers it.
+    """
+    m = re.match(r"^([A-Z]+-\d+[a-z]?)", task.get("title", ""))
+    if not m:
+        return None
+    cid = m.group(1)
+    now = time.time()
+    hit = _merged_pr_cache.get(cid)
+    if hit and now - hit[0] < 300:
+        return hit[1]
+    found = None
+    try:
+        out = subprocess.run(
+            [
+                "gh", "pr", "list", "--repo", GH_REPO, "--state", "merged",
+                "--search", f'"{cid}" in:title',
+                "--json", "number,title,url,mergedAt", "--limit", "10",
+            ],
+            capture_output=True, text=True, timeout=25,
+        )
+        for pr in json.loads(out.stdout or "[]"):
+            if cid not in pr.get("title", ""):
+                continue
+            found = {
+                "pr_number": pr["number"],
+                "pr_url": pr.get("url", ""),
+                "state": "merged",
+            }
+            break
+    except Exception as exc:  # noqa: BLE001
+        print(f"merged PR lookup failed for {cid}: {exc}", file=sys.stderr)
+    _merged_pr_cache[cid] = (now, found)
+    return found
+
+
+def pr_for_task(task):
+    """Linked PR, else a merged PR recovered by card id."""
+    pr = task_pr(task["id"])
+    if pr:
+        return pr
+    return merged_pr_by_card(task)
+
+
 def add_label(task_id, label):
     """Append a label via direct DB write (no write API exists)."""
     import sqlite3
@@ -889,6 +945,8 @@ def scan_cardfix(tasks):
                 continue
             content = row[0]
         pr = task_pr(task["id"])
+        if not pr and merged_pr_by_card(task):
+            continue  # card is merged; the sweep moves it, not a card fix
         # Snippet around the keyword hit, not the head: the reason for
         # human attention is where the keyword is.
         snippet = content[:300]
@@ -1098,7 +1156,7 @@ def run_once():
     for task in detailed:
         if task.get("workflow_step_id") not in (REVIEW, VERIFY_STEP):
             continue
-        pr = task_pr(task["id"])
+        pr = pr_for_task(task)
         if pr and pr.get("state") == "merged":
             move(task, MERGED_STEP, "PR merged -> Merged (sweep)")
 
