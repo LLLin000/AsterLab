@@ -258,7 +258,7 @@ def main():
                 continue
             raw = cq.get("data", "")
             action, _, tid = raw.partition(":")
-            if action not in ("merge", "diff", "reject") or not tid:
+            if action not in ("merge", "diff", "reject", "cardfix") or not tid:
                 continue
             _, task = kapi("GET", f"/api/v1/tasks/{tid}")
             title = (task or {}).get("title", tid[:8])
@@ -268,6 +268,9 @@ def main():
                     res = do_merge(tid, title)
                 elif action == "diff":
                     res = do_diff(tid, title)
+                elif action == "cardfix":
+                    res = (f"🔧 {title[:40]}：卡片问题已记录。\n"
+                           "你改完任务描述后告诉我（回这条消息或发卡号），我来唤醒 review agent 重跑。")
                 else:
                     res = do_reject(tid, title)
             except Exception as exc:  # noqa: BLE001

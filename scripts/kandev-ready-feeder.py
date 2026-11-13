@@ -295,6 +295,46 @@ def scan_approvals(review_tasks):
             print(f"approved-sent label failed: {exc}", file=sys.stderr)
 
 
+CARD_FIX_KEYWORDS = ("修卡", "人工修卡", "需要人工", "二选一", "改任务描述", "改卡")
+
+
+def scan_cardfix(review_tasks):
+    """Push when CHANGES means 'the card itself is wrong', not the code.
+
+    The agent cannot edit task descriptions; these need a human card fix.
+    """
+    for task in review_tasks:
+        labels = lane_labels(task)
+        if "human-hold" in labels or "tg-cardfix-sent" in labels:
+            continue
+        verdict, content = latest_review_verdict(task["id"])
+        if verdict != "CHANGES_REQUESTED":
+            continue
+        if not any(k in content for k in CARD_FIX_KEYWORDS):
+            continue
+        pr = task_pr(task["id"])
+        text = (
+            f"Kandev 修卡请求：{task['title'][:60]}\n"
+            f"代码已过，卡片自矛盾，agent 修不动。\n"
+            f"PR #{pr.get('pr_number', '?')} {pr.get('pr_url', '')}\n"
+            f"结论摘要：{content[:300]}"
+        )
+        markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "🔧 我来修卡", "callback_data": f"cardfix:{task['id']}"},
+                    {"text": "👀 看diff", "callback_data": f"diff:{task['id']}"},
+                ]
+            ]
+        }
+        if tg_send(text, markup):
+            print(f"cardfix sent for {task['title'][:40]}")
+        try:
+            add_label(task["id"], "tg-cardfix-sent")
+        except Exception as exc:  # noqa: BLE001
+            print(f"cardfix-sent label failed: {exc}", file=sys.stderr)
+
+
 def scan_ci_merges(detailed):
     """FYI when a card touching .github/** gets merged."""
     for task in detailed:
@@ -438,6 +478,7 @@ def run_once():
             move(task, MERGED_STEP, "PR merged -> Merged (sweep)")
 
     scan_approvals(review_tasks)
+    scan_cardfix(review_tasks)
 
     # FYI: CI-config cards that got merged.
     scan_ci_merges(detailed)
