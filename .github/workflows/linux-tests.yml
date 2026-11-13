@@ -37,7 +37,10 @@ jobs:
             build-essential pkg-config libssl-dev fonts-droid-fallback
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # The channel lives only in rust-toolchain.toml (REL-07). `rustup install`
+        # resolves that file and installs exactly that toolchain; a missing or
+        # malformed pin fails here instead of silently using the runner's stable.
+        run: rustup install --profile minimal --no-self-update
 
       - name: Cache cargo registry and target directories
         uses: Swatinem/rust-cache@v2
