@@ -2,7 +2,7 @@
 
 ## Scope and isolation
 
-Runtime database tests use isolated copies under `/tmp/asterlab-qa05-f3ed8bcb-94fc-4bf4-b008-ad41f0875b44`; no user data directory was used. `legacy-v0.sql` builds a version-0 SQLite database with the legacy `records` layout used by existing CLI compatibility test setup. `legacy-v0.sqlite` is the reproducible fixture stored in this evidence directory.
+Runtime database tests use isolated copies in a fresh temporary directory; no user data directory was used. `legacy-v0.sql` builds a version-0 SQLite database with the legacy `records` layout used by existing CLI compatibility test setup. `legacy-v0.sqlite` is the reproducible fixture stored in this evidence directory.
 
 ## Test matrix
 
@@ -48,9 +48,11 @@ records
 2
 ```
 
-Closed-file backup, table comparison, restore and restart checks (`ROOT=/tmp/asterlab-qa05-f3ed8bcb-94fc-4bf4-b008-ad41f0875b44`):
+Closed-file backup, table comparison, restore and restart checks (set `ROOT` to a fresh temporary directory; all output paths below are relative):
 
 ```sh
+ROOT=$(mktemp -d)
+mkdir -p "$ROOT/normal" "$ROOT/upgrade" "$ROOT/failure"
 cp docs/release/evidence/QA-05/legacy-v0.sqlite "$ROOT/normal/labworkbench.sqlite"
 sqlite3 "$ROOT/normal/labworkbench.sqlite" 'PRAGMA integrity_check;'
 sqlite3 "$ROOT/normal/labworkbench.sqlite" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;"
@@ -66,7 +68,7 @@ sqlite3 "$ROOT/normal/labworkbench.sqlite" 'SELECT count(*) FROM records;'
 sqlite3 "$ROOT/normal/labworkbench.sqlite" 'SELECT id,kind,revision,data_json FROM records ORDER BY id;'
 sqlite3 "$ROOT/normal/backup.sqlite" 'SELECT id,kind,revision,data_json FROM records ORDER BY id;'
 sqlite3 "$ROOT/normal/labworkbench.sqlite" 'PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM records;'
-sha256sum docs/release/evidence/QA-05/legacy-v0.sqlite "$ROOT/normal/backup.sqlite" "$ROOT/normal/labworkbench.sqlite"
+(cd "$ROOT/normal" && sha256sum backup.sqlite labworkbench.sqlite)
 ```
 
 ```text
@@ -96,10 +98,11 @@ REOPENED AFTER RESTORE: INTEGRITY / USER VERSION / RECORD COUNT
 ok
 0
 2
-FIXTURE AND RESTORE SHA256
+FIXTURE SHA256
 0e7cd11dfba48e8f7968b4c62ce91553e3ac5efeab8a0482af9fb1899cda8481  docs/release/evidence/QA-05/legacy-v0.sqlite
-0e7cd11dfba48e8f7968b4c62ce91553e3ac5efeab8a0482af9fb1899cda8481  /tmp/asterlab-qa05-f3ed8bcb-94fc-4bf4-b008-ad41f0875b44/normal/backup.sqlite
-0e7cd11dfba48e8f7968b4c62ce91553e3ac5efeab8a0482af9fb1899cda8481  /tmp/asterlab-qa05-f3ed8bcb-94fc-4bf4-b008-ad41f0875b44/normal/labworkbench.sqlite
+BACKUP AND RESTORED SOURCE SHA256
+0e7cd11dfba48e8f7968b4c62ce91553e3ac5efeab8a0482af9fb1899cda8481  backup.sqlite
+0e7cd11dfba48e8f7968b4c62ce91553e3ac5efeab8a0482af9fb1899cda8481  labworkbench.sqlite
 ```
 
 Schema initialization uses the `open_db` DDL from `src/cli.rs` on a separate fixture copy. The exact SQL is recorded in the test command:
@@ -117,6 +120,18 @@ ok
 ```
 
 Failure injection against `failure-v0.sql` replays the same DDL. The `records` layout intentionally lacks `project_id`; the second index fails after the first index is created.
+Failure injection commands (after setting `ROOT` and creating the temporary folders):
+
+```sh
+sqlite3 "$ROOT/failure/labworkbench.sqlite" < docs/release/evidence/QA-05/failure-v0.sql
+echo 'FAILURE INJECTION BEFORE SHA256'; (cd "$ROOT/failure" && sha256sum labworkbench.sqlite)
+if sqlite3 "$ROOT/failure/labworkbench.sqlite" 'PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);'; then status=0; else status=$?; fi
+echo "FAILURE INJECTION SQLITE EXIT: $status"
+echo 'FAILURE INJECTION AFTER SHA256'; (cd "$ROOT/failure" && sha256sum labworkbench.sqlite)
+echo 'FAILED INITIALIZATION DATABASE INTEGRITY / USER VERSION / RECORD COUNT'; sqlite3 "$ROOT/failure/labworkbench.sqlite" 'PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM records;'
+echo 'FAILED INITIALIZATION INDEXES'; sqlite3 "$ROOT/failure/labworkbench.sqlite" "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%' ORDER BY name;"
+```
+
 
 ```text
 FAILURE INJECTION BEFORE SHA256: 276e654ee5ea4af288e4b50e354ccd956547f5cf9d9f2046e3c1b71a4d35b8e0
