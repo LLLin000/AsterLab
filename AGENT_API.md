@@ -73,9 +73,11 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `protocol.block.list` / `protocol.block.get` | 查询项目步骤块库和不可变版本 | 否 |
 | `protocol.block.create` / `protocol.block.revise` | 创建步骤块或基于预期版本追加新版本 | create/revise |
 | `protocol.block.preview` | 只读递归展开、解析参数来源并列出未填写槽位 | 否 |
+| `step.edit` | 步骤块级 insert/reorder/reuse/bind 编辑：无 `confirmation` 时只读校验，带 `confirmation` 时追加新版本 | validate 否 / commit 是 |
 | `plate.create` / `well.set` | 创建铺板布局、设置孔位标签 | create/update |
 | `note.create` | 给实验运行追加自由文本记录 | create |
 | `execution_event.create` | 追加结构化操作、材料使用、数值测量、偏差或观察事件 | create |
+| `readout.submit` / `readout.batch` | 幂等提交单条读数，或表格/孔板批量读数（`cells` 或 CSV），一次事务写入一条 measurement 事件 | create |
 | `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
 | `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
 | `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
@@ -117,6 +119,59 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 `run.revise` 必须提供 `id` 和当前 `expected_revision`，只接受 `title`、`scheduled_date`；日期可传 `null` 清除。状态仍通过 `run.set_status` 修订。设计版本、Protocol 清单、材料清单、轮次和来源关系属于创建时冻结快照，修订接口拒绝这些字段。HTTP API 与 CLI 共用同一补丁校验；网页不得整体替换 Run JSON。
 
+## 读数提交（readout.*）
+
+`readout.submit` 与 `readout.batch` 把读数写进现有 `execution_event` 追加记录；不新增记录类型，也不建第二份读数表。两者都只接受本次 Run 冻结清单内的 `step_path` + `protocol_version_id`（检测读数还需 `assay_id`；共享制备读数用 `planned_output_id`），引用校验复用 `execution_event.create` 的同一套逻辑。
+
+- `readout.submit` 输入 `{run_id, step_path, endpoint, protocol_version_id, value | qualifier, unit?, sample_id?, timepoint?, assay_id?, planned_output_id?, operator?, occurred_at?, content?}`。必须有且只有一个 `value` 或 `qualifier`（`not_detected` / `below_lod` / `above_uloq` / `invalid` / `other`）。数值同时写进 `measurements[]` 与 `readouts[]`；带 `qualifier` 的只写 `readouts[]`，不伪造成 0。输出 `{record, idempotency_key, replayed}`。
+- `readout.batch` 输入 `{run_id, step_path, protocol_version_id, plate_id, schema_id, schema_version=1, assay_id?, timepoint?, batch_id?, ...}`，读数用 `cells[]`（`row`/`column` 从 0 开始，可选 `field`、`value`、`unit`、`sample_id`、`group`、`replicate`、`status`）或 `csv` 二选一。CSV 表头 `row,column,field[,value,unit,sample_id,group,replicate,status]`，未知或重复列、缺列、行列越界、同批重复孔位、`status` 与 `value` 矛盾都会拒绝整批。输出 `{record, idempotency_key, replayed, accepted}`。
+- 幂等：`readout.submit` 的键是 `(run_id, step_path, endpoint, sample_id, timepoint)`；`readout.batch` 的键是同一组身份字段按孔位（`plate_id, row, column, field`）展开后的集合——同一批里多个孔位可以共享 endpoint/sample/timepoint，只用卡片元组会互相覆盖。`run_id` 属于键，因此不同 Run 的同名读数互不影响。重复提交返回首次记录并置 `replayed=true`；值属于内容不属于身份，故重放不会覆盖已记录值。
+- 原子性：整批在一个事务内校验并写入一条 `measurement` 事件；任何一行失败都返回 `INVALID_INPUT` 并附 `issues[]`，数据库不产生部分事件。`readout.batch` 必须能唯一确定本次 Run 的一块孔板，否则返回 `unresolved_plate` / `ambiguous_plate` / `unknown_plate`，不猜孔位。
+- 与 `execution_event.create` 的关系：后者仍是多用途底层追加接口（含操作、材料、检查等）；`readout.*` 只覆盖读数，`step_status`、`checks`、`controls` 不通过它写入。
+
+## `step.edit`：步骤块级结构化编辑
+
+`step.edit` 在 agent edit v1 的四段流程（propose → validate → confirm → commit）里承担步骤块结构修改，不引入第二套写入路径。同一个命令有两种阶段：
+
+- 不带 `confirmation`：只读校验，返回 `status`、`edit_digest`、解析后的 `ops` 和计划生成的 `blocks[]`；不写数据库。
+- 带 `confirmation`：单事务重新校验并追加新版本；旧版本、Protocol 版本与已冻结 Run 均不改写。
+
+```json
+{
+  "schema_version": 1,
+  "edit_id": "sde-rna-001",
+  "block_version_id": "<读取时的确切步骤块版本 id>",
+  "expected_version": 3,
+  "origin": {"source": "agent", "rationale": "补一个洗涤子步骤"},
+  "ops": [
+    {"op": "insert", "path": "root/lyse", "position": 1,
+     "step": {"kind": "text", "use_id": "wash", "title": "洗涤", "instruction": "加 200 uL 缓冲液后弃上清"}},
+    {"op": "reorder", "path": "root", "order": ["prep", "lyse"]},
+    {"op": "reuse", "path": "root", "position": 2, "use_id": "read",
+     "block_version_id": "<已存在的步骤块版本 id>",
+     "bindings": [{"slot": "volume_per_sample", "value": 200, "unit": "uL"}]},
+    {"op": "bind", "path": "root/lyse", "bindings": [{"slot": "volume_per_sample", "value": 250, "unit": "uL"}]}
+  ],
+  "confirmation": {
+    "edit_digest": "sha256:<validate 返回的 digest>",
+    "confirmed_by": "researcher:zhang",
+    "idempotency_key": "sde-rna-001-confirm-1",
+    "note": "按试剂盒说明书补洗涤步骤"
+  }
+}
+```
+
+规则：
+
+- `block_version_id` 必须是根步骤块的当前 head；`expected_version` 必须等于它的版本号，否则 `VERSION_CONFLICT`（不是 head 则为 `STALE_REFERENCE`）。被改动的子块也必须仍是各自块的 head，否则同样 `VERSION_CONFLICT`。
+- `path` 使用 Protocol 展开寻址：`root` 表示根块，`root/<use_id>` 表示某处块引用，`root/<use_id>/<use_id>` 可继续加深。不是以 `root` 开头或含空段/`.`/`..` → `FORBIDDEN_FIELD`；格式合法但解析不到步骤 → `STALE_REFERENCE`；嵌套超过 12 层 → `INVALID_PROPOSAL`。
+  `insert` / `reorder` / `reuse` 的 `path` 必须是容器（`root` 或块引用步骤）；指向文字步骤返回 `INVALID_PROPOSAL`，不会退化成修改其父块。`bind` 的 `path` 必须指向块引用步骤，指向文字步骤返回 `INVALID_BINDING`。
+- `insert` 只接受 `step.kind = "text"`（`parameter_refs` 必须引用本块已声明的槽位）；复用已有步骤块用 `reuse`。`reorder.order` 必须是该容器当前 `use_id` 的完整排列。`bind` 按槽位 upsert，绑定规则与 `protocol.block.create` 一致：每个必填子槽位必须有值或映射，单位精确匹配、不做换算。
+- 版本号由 Core 生成：每个被改动的步骤块得到 `previous_version + 1` 的新版本，子块先于父块写入，父块引用自动指向同一事务里新建的子块版本。未改动的块保持原版本（复用）。每个新版本记录带 `based_on_version_id` 和 `step_edit`（`edit_id`、`edit_digest`、`confirmed_by`、`committed_at`、`idempotency_key`）。
+- `edit_digest` 只覆盖 `ops` 与版本前置条件，不覆盖 `confirmation` 本身；同一 `idempotency_key` + 同一 digest 重放返回原结果（`replayed: true`，不写第二个版本），同一 key 配不同 digest 返回 `IDEMPOTENCY_MISMATCH`。
+- 错误码沿用 agent edit v1 的封闭集合（`INVALID_PROPOSAL`、`INVALID_BINDING`、`UNIT_MISMATCH`、`STALE_REFERENCE`、`FORBIDDEN_FIELD`、`VERSION_CONFLICT`、`CONFIRMATION_REQUIRED`、`CONFIRMATION_MISMATCH`、`IDEMPOTENCY_MISMATCH`），没有新增含义。退出码仍为 `0/2/3/4/5`。
+- 语义拒绝是结果而非传输错误：validate 阶段返回 `ok=true` + `status:"blocked"` + `issues[]`（`code`/`severity`/`path`/`message`/`affects`/`next_action`），blocked 结果不带 `blocks[]`，不得据此 commit。
+- 编辑结果只产生步骤块版本。Protocol 版本不可变，若要某个 Protocol 使用新根块，另调 `protocol.revise`（`root_block_version_id` 用返回的 `new_root_block_version_id`）；已冻结 Run 继续引用旧版本。
 ## 设计数据语义
 
 `design.create` 接收 `project_id` 和 `design` 对象。关键字段含义：

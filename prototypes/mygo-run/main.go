@@ -558,6 +558,12 @@ func (a *app) startPDFExport(c *ui.Context) {
 		c.AddToast(ui.Toast{Title: "无法导出 PDF", Description: "Run 未记录冻结文档源码哈希。", Type: components.ToastError})
 		return
 	}
+
+	frozenAt := ""
+	if audit := a.snap.CreationAudit; audit != nil {
+		frozenAt = audit.RecordedAt
+	}
+	runRecords := renderRunRecords(a.runWSVM, a.snap.Revision, frozenAt)
 	a.pdfExporting = true
 	a.pdfExportResults = make(chan pdfExportResult, 1)
 	c.AddToast(ui.Toast{
@@ -611,7 +617,7 @@ func (a *app) startPDFExport(c *ui.Context) {
 			return
 		}
 		tmpPath := tmp.Name()
-		err = asterdoc.ExportFrozenPDF(tmp, title, frozen, runID, plan)
+		err = asterdoc.ExportFrozenPDFWithRunRecords(tmp, title, frozen, runID, plan, runRecords)
 		if err == nil {
 			err = tmp.Sync()
 		}
@@ -628,6 +634,145 @@ func (a *app) startPDFExport(c *ui.Context) {
 		}
 		results <- pdfExportResult{path: path}
 	}()
+}
+
+func renderRunRecords(vm *runworkspace.RunWorkspaceViewModel, revision uint64, frozenAt string) string {
+	var output strings.Builder
+	fmt.Fprintf(&output, "Run Revision: %d\n", revision)
+	if frozenAt == "" {
+		output.WriteString("冻结时间：未记录（旧版 Run）\n")
+	} else {
+		fmt.Fprintf(&output, "冻结时间：%s\n", frozenAt)
+	}
+	output.WriteString("\n## Run 记录\n")
+	if vm != nil {
+		for _, task := range vm.Steps {
+			appendRunTaskRecords(&output, task)
+		}
+		if len(vm.UnassociatedMeasurements) > 0 || len(vm.UnassociatedEvents) > 0 {
+			output.WriteString("\n## 未关联记录\n这些记录缺少可确认的 task key 或 protocol step path，未归入任何步骤。\n")
+			for _, measurement := range vm.UnassociatedMeasurements {
+				sampleID := measurement.SampleID
+				if sampleID == "" {
+					sampleID = "未分配"
+				}
+				fmt.Fprintf(&output, "- %s · %s %s %s\n",
+					sampleID, measurement.Field, measurement.Value, measurement.Unit)
+			}
+			for _, event := range vm.UnassociatedEvents {
+				fmt.Fprintf(&output, "- %s · %s\n", runEventLabel(event.Type), event.Content)
+			}
+		}
+	}
+	return output.String()
+}
+
+func appendRunTaskRecords(output *strings.Builder, task *runworkspace.RunTaskViewModel) {
+	if task == nil {
+		return
+	}
+	if len(task.Children) > 0 {
+		for _, child := range task.Children {
+			appendRunTaskRecords(output, child)
+		}
+		return
+	}
+	fmt.Fprintf(output, "\n### %s", task.StepTitle)
+	if task.Timepoint != "" {
+		fmt.Fprintf(output, " · %s", task.Timepoint)
+	}
+	output.WriteByte('\n')
+	if len(task.Parameters) > 0 {
+		output.WriteString("计划与实际参数\n")
+		for _, parameter := range task.Parameters {
+			planned := parameter.Value
+			if parameter.Unit != "" {
+				planned += " " + parameter.Unit
+			}
+			fmt.Fprintf(output, "- %s: %s", parameter.Label, planned)
+			if task.Actual != nil {
+				if actual, ok := task.Actual.Parameters[parameter.Key]; ok && actual != planned {
+					fmt.Fprintf(output, "；实际 %s", actual)
+				}
+			}
+			output.WriteByte('\n')
+		}
+	}
+	if task.Actual != nil && len(task.Actual.Measurements) > 0 {
+		output.WriteString("实际读数\n")
+		for _, measurement := range task.Actual.Measurements {
+			sampleID := measurement.SampleID
+			if sampleID == "" {
+				sampleID = "未分配"
+			}
+			value := strings.TrimSpace(measurement.Field + " " + measurement.Value + " " + measurement.Unit)
+			fmt.Fprintf(output, "- %s · %s\n", sampleID, value)
+		}
+	}
+	for _, event := range task.Events {
+		when := event.RecordedAt
+		if when == "" {
+			when = event.OccurredAt
+		}
+		if when == "" {
+			fmt.Fprintf(output, "\n#### %s\n%s\n", runEventLabel(event.Type), event.Content)
+		} else {
+			fmt.Fprintf(output, "\n#### %s · %s\n%s\n", runEventLabel(event.Type), when, event.Content)
+		}
+		if event.BatchID != "" {
+			fmt.Fprintf(output, "- Batch %s\n", event.BatchID)
+		}
+		if event.CheckAck {
+			output.WriteString("- 检查确认\n")
+		}
+		if event.Deviation != "" {
+			fmt.Fprintf(output, "- 偏差：%s\n", event.Deviation)
+		}
+		for _, check := range event.Checks {
+			fmt.Fprintf(output, "- %s · %s\n", check.CheckID, check.Status)
+		}
+		for _, material := range event.Materials {
+			fmt.Fprintf(output, "- %s %.3g %s\n", material.Material, material.Amount, material.Unit)
+		}
+		for _, parameter := range event.Parameters {
+			value := parameter.Value
+			if parameter.Unit != "" {
+				value += " " + parameter.Unit
+			}
+			fmt.Fprintf(output, "- %s %s\n", parameter.Key, value)
+		}
+		for _, edge := range event.Lineage {
+			fmt.Fprintf(output, "- %s:%s → %s:%s (%s)\n",
+				edge.FromKind, edge.FromID, edge.ToKind, edge.ToID, edge.Relation)
+		}
+		for _, measurement := range event.Measurements {
+			sampleID := measurement.SampleID
+			if sampleID == "" {
+				sampleID = "未分配"
+			}
+			fmt.Fprintf(output, "- %s · %s %s %s\n",
+				sampleID, measurement.Field, measurement.Value, measurement.Unit)
+		}
+	}
+}
+
+func runEventLabel(kind string) string {
+	switch kind {
+	case "operation":
+		return "操作"
+	case "material_use":
+		return "材料使用"
+	case "measurement":
+		return "测量"
+	case "deviation":
+		return "偏差"
+	case "observation":
+		return "观察"
+	case "check":
+		return "检查"
+	default:
+		return kind
+	}
 }
 
 func pdfFilename(title string) string {
