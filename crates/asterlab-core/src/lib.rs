@@ -13,6 +13,7 @@ pub mod semantic_catalog;
 pub mod protocol_block;
 pub mod semantic_query;
 pub mod component_framework;
+pub mod composite_fields;
 pub mod labware;
 pub mod component_data;
 pub mod scientific_facts;
