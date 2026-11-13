@@ -128,8 +128,8 @@ func TestViewRendersNativePlateAndAssignRewritesSource(t *testing.T) {
 
 func TestRegistryManifestDescribesInputsOutputsAndPermissions(t *testing.T) {
 	descriptors := BuiltinRegistry().Descriptors()
-	if len(descriptors) != 16 {
-		t.Fatalf("expected 16 module kinds, got %d", len(descriptors))
+	if len(descriptors) != 17 {
+		t.Fatalf("expected 17 module kinds, got %d", len(descriptors))
 	}
 	var plate *Descriptor
 	for i := range descriptors {
@@ -369,7 +369,7 @@ func TestManifestDeclaresFoundationAndReferenceModules(t *testing.T) {
 	if err := json.Unmarshal(manifest, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.FoundationVersion != 1 || decoded.SDKVersion != "1.0.0" || len(decoded.Modules) != 16 {
+	if decoded.FoundationVersion != 1 || decoded.SDKVersion != "1.0.0" || len(decoded.Modules) != 17 {
 		t.Fatalf("manifest header/modules = %+v", decoded)
 	}
 	for _, module := range decoded.Modules {
