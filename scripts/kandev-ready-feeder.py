@@ -59,33 +59,45 @@ ACTION_LOG = os.environ.get(
 )
 
 
-def _snapshot_id(task, extra=""):
+def _snapshot_id(task, from_step=None, to_step=None):
+    """Stable decision snapshot; result is deliberately excluded."""
     material = {
         "task_id": task.get("id"),
         "step": task.get("workflow_step_id"),
         "state": task.get("state"),
         "labels": task.get("labels"),
-        "extra": extra,
+        "from_step": from_step or "unknown",
+        "to_step": to_step or "unknown",
     }
     return hashlib.sha256(
         json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
 
+def _action_id(action, snapshot_id):
+    return hashlib.sha256(f"{action}:{snapshot_id}".encode("utf-8")).hexdigest()
+
+
 def log_action(action, task, *, reason="", result="attempted", session_id="",
                head_sha="", from_step=None, to_step=None):
-    """Append a structured legacy-owner action record; never change control flow."""
+    """Append a structured legacy-owner action record; never change control flow.
+
+    The attempted and terminal records for one decision share `action_id` and
+    `snapshot_id`; `result` and `ts` are not part of either identity.
+    """
+    snapshot_id = _snapshot_id(task, from_step, to_step)
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "source": "legacy_feeder",
-        "task_id": task.get("id", ""),
+        "task_id": task.get("id", "unknown") or "unknown",
         "action": action,
+        "action_id": _action_id(action, snapshot_id),
         "reason": reason,
-        "session_id": session_id,
-        "head_sha": head_sha,
-        "snapshot_id": _snapshot_id(task, f"{from_step}:{to_step}:{result}"),
-        "from_step": from_step or "",
-        "to_step": to_step or "",
+        "session_id": session_id or task.get("session_id") or "unknown",
+        "head_sha": head_sha or task.get("head_sha") or "unknown",
+        "snapshot_id": snapshot_id,
+        "from_step": from_step or "unknown",
+        "to_step": to_step or "unknown",
         "result": result,
     }
     try:
