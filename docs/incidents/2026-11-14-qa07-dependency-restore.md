@@ -32,5 +32,8 @@ OPS-01 / PR #38 later reached Merged/COMPLETED. At that point QA-07's
 `blocked` flag became false. The `human-hold` was intentionally retained for a
 separate reason: the QA-07 card's acceptance references a missing
 `tests/fixtures/run_qa07.py` and its scope does not include that path. The
-dependency condition is satisfied; holding is now a card-design decision, not
-a dependency decision.
+dependency condition is satisfied. The card's `tests/fixtures/**` write scope
+does cover the missing runner, so the earlier hold reason was a misread of the
+scope, not a card-design blocker. After the dependency cleared, Home
+`task check` passed and the `human-hold` label was removed; QA-07 was moved to
+Agent to implement `tests/fixtures/run_qa07.py` within the approved scope.
