@@ -350,6 +350,24 @@ RETRO_PROMPT = """你是 AsterLab 的阶段回顾 agent。本次回顾范围只�
 
 {task_list}
 
+## 范围
+<!-- kandev-scope
+write:
+  - docs/release/retrospective-{stamp}.md
+read:
+  - AGENTS.md
+  - docs/engineering/kandev-card-template.md
+forbid:
+  - crates/**
+  - src/**
+  - prototypes/**
+  - docs/contracts/**
+-->
+
+## 验收
+- 命令：`test -f docs/release/retrospective-{stamp}.md && grep -c '^## ' docs/release/retrospective-{stamp}.md` 期望：exit 0 且计数 >= 6（六节齐全）
+- 命令：`gh pr view --json state,mergeable --jq '"\\(.state) \\(.mergeable)"'`（在 PR 分支上） 期望：`OPEN MERGEABLE`
+
 数据源（只读，不许改）：
 1. Kandev DB（/var/lib/kandev/data/kandev.db，只读连接）：上述任务的 verdict 历史、返工次数、熔断记录、session 消息
 2. `gh pr view/diff/checks`：每个任务关联 PR 的 diff 摘要与 CI 记录
@@ -365,8 +383,8 @@ RETRO_PROMPT = """你是 AsterLab 的阶段回顾 agent。本次回顾范围只�
 6. 下一步方向：3-5 个候选，每个一句话 + 理由 + 依赖。不做决定，等人工拍板。
 
 输出：
-1. 写到 docs/release/retrospective-<YYYYMMDD>.md
-2. 提交到分支 agent/RETRO-<YYYYMMDD> 并开 PR（标题带 RETRO-<YYYYMMDD>），PR 描述贴报告全文
+1. 写到 docs/release/retrospective-{stamp}.md
+2. 提交到分支 agent/RETRO-{stamp} 并开 PR（标题带 RETRO-{stamp}），PR 描述贴报告全文，PR 正文末尾附 `<!-- kandev-task: <本任务id> -->` 和上面的 scope 块原文
 3. 在任务评论写 REVIEW-READY
 不要合并 PR，等人工看完报告再决定。
 """
@@ -422,17 +440,37 @@ def scan_retro_trigger():
             "workspace_id": WORKSPACE,
             "workflow_id": WORKFLOW,
             "title": f"RETRO-{stamp} (Audit) VPS lane 阶段回顾",
-            "description": RETRO_PROMPT.format(task_list=task_list, since=since),
+            "description": RETRO_PROMPT.format(task_list=task_list, since=since, stamp=stamp),
             "labels": ["retro", "roadmap", "lane:vps"],
             "priority": "high",
             "agent_profile_id": RETRO_LUNA,
+            "repository_id": "a26e8981-6ae8-42ff-845e-1bd312072abd",
         },
     )
     if status not in (200, 201):
         print(f"retro create failed: {status} {data}", file=sys.stderr)
         return
     print(f"retro triggered for {len(rows)} cards: {data.get('id', '?')[:8]}")
+    tid = data.get("id")
     try:
+        import sqlite3
+        import uuid
+
+        wcon = sqlite3.connect(DB)
+        # No API for repo binding; write task_repositories directly.
+        wcon.execute(
+            """insert into task_repositories(id,task_id,repository_id,workspace_relative_path,
+               base_branch,checkout_branch,position,metadata,created_at,updated_at)
+               values (?,?,?,?,?,?,?,datetime('now'),datetime('now'))""",
+            (str(uuid.uuid4()), tid, "a26e8981-6ae8-42ff-845e-1bd312072abd",
+             "", "main", "", 0,
+             '{"base_branch_selection":{"version":1,"branch":"main","source":"explicit"}}'),
+        )
+        wcon.commit()
+        wcon.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"retro repo bind failed: {exc}", file=sys.stderr)
+        return
         import sqlite3
 
         wcon = sqlite3.connect(DB)
@@ -682,30 +720,22 @@ def notify_approval(task, pr):
 
 
 def scan_retro_ready(detailed):
-    """Push when a RETRO card's report PR is ready for human reading."""
+    """Push when a RETRO card's report PR exists and is open.
+
+    No keyword matching: the PR itself is the signal. The agent writes
+    REVIEW-READY in a task comment, but comments share the message table
+    with prompts that quote the format, so text matching misfires.
+    """
     for task in detailed:
         if not task.get("title", "").startswith("RETRO-"):
             continue
         labels = lane_labels(task)
         if "tg-retro-sent" in labels:
             continue
-        try:
-            import sqlite3
-
-            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-            row = con.execute(
-                """select m.content from task_session_messages m
-                    join task_sessions s on s.id=m.task_session_id
-                   where s.task_id=? and m.content like '%REVIEW-READY%'
-                   order by m.created_at desc limit 1""",
-                (task["id"],),
-            ).fetchone()
-            con.close()
-        except Exception:  # noqa: BLE001
-            continue
-        if not row:
-            continue
         pr = task_pr(task["id"])
+        if not pr or pr.get("state") != "open":
+            continue
+
         text = (
             f"Kandev 阶段回顾已就绪：{task['title'][:50]}\n"
             f"PR #{pr.get('pr_number', '?')} {pr.get('pr_url', '')}\n"
