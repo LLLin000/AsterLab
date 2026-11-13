@@ -2,6 +2,7 @@
 
 - Base: `6ca46c5e60b54000cb6900b7bdde1d4016b7a39d` (`origin/main`)
 - Raw command output: [`commands.txt`](commands.txt)
+- Post-merge verification: [`post-merge.txt`](post-merge.txt)
 - Reproducible table check: [`compare_manifest.py`](compare_manifest.py)
 
 ## What changed
@@ -30,6 +31,13 @@
 - `grep -n '尚未实现'`: one remaining hit, `asterdoc.batch`, now carrying its evidence.
 - `grep -n 'agent_edit' AGENT_API.md` and `grep -rn 'agent_edit' docs/README.md docs/contracts/core-v1.md`
   return no matches, so those registrations are still gaps.
+
+## Post-merge verification
+
+- PR #23 merged at `2026-11-13T10:54:25Z`; squash commit `aec20eab05a7c61ffcb12788da59d430172851be`, head reviewed `868dab4a7a8fdab381bd8915bc42ddc90b7efa67`.
+- Required checks on the reviewed head: `scope-check` pass, `linux-tests` pass 4m35s, `windows-build` pass 5m56s.
+- Acceptance commands re-run in the task worktree at `aec20ea` (== `main`); raw output in [`post-merge.txt`](post-merge.txt). All pass.
+- No document contents changed after review; this section only records the merged state.
 
 ## Out of scope (not edited)
 
