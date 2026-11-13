@@ -522,8 +522,9 @@ fn value_type_name(value_type: ParameterValueType) -> &'static str {
 }
 
 /// The only unit alias v1 accepts: micro-litre spellings of `uL`. Everything
-/// else must match exactly; there is no implicit conversion.
-fn normalize_unit(unit: &str) -> &str {
+/// else must match exactly; there is no implicit conversion. Callers that
+/// persist a value must store the normalized spelling.
+pub(crate) fn normalize_unit(unit: &str) -> &str {
     match unit {
         "µL" | "μL" | "ul" => "uL",
         other => other,
