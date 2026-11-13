@@ -7,7 +7,7 @@ Command: `cd prototypes/mygo-run && go test ./internal/asterdoc`
 Raw output:
 
 ```text
-ok   	asterlab-mygo-prototype/internal/asterdoc	0.622s
+ok   	asterlab-mygo-prototype/internal/asterdoc	0.404s
 ```
 
 Exit code: 0.

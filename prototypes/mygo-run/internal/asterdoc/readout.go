@@ -27,13 +27,31 @@ func validateReadoutFields(data map[string]any) error {
 
 	valueKind, _ := data["value_kind"].(string)
 	unit, hasUnit := data["unit"]
-	if hasUnit && unit != nil {
+	if hasUnit {
 		text, ok := unit.(string)
 		if !ok {
 			return fmt.Errorf("field %q must be a string", "unit")
 		}
 		if strings.TrimSpace(text) != "" && (valueKind == "categorical" || valueKind == "file") {
 			return fmt.Errorf("field %q is not applicable to %s readouts", "unit", valueKind)
+		}
+	}
+
+	if raw, ok := data["null_allowed"]; ok {
+		if _, valid := raw.(bool); !valid {
+			return fmt.Errorf("field %q must be a boolean", "null_allowed")
+		}
+	}
+
+	if raw, ok := data["missing_reasons"]; ok {
+		if _, valid := raw.([]any); !valid {
+			return fmt.Errorf("field %q must be a list", "missing_reasons")
+		}
+	}
+
+	if raw, ok := data["source_kinds"]; ok {
+		if _, valid := raw.([]any); !valid {
+			return fmt.Errorf("field %q must be a list", "source_kinds")
 		}
 	}
 
@@ -70,7 +88,11 @@ func validateReadoutFields(data map[string]any) error {
 	}
 
 	columns, hasColumns := data["table_columns"]
-	hasColumns = hasColumns && columns != nil
+	if hasColumns {
+		if _, valid := columns.([]any); !valid {
+			return fmt.Errorf("field %q must be a list of objects", "table_columns")
+		}
+	}
 	if valueKind == "table" && !hasColumns {
 		return fmt.Errorf("table readout needs table_columns")
 	}
@@ -113,7 +135,11 @@ func validateReadoutFields(data map[string]any) error {
 	}
 
 	plateFormat, hasPlateFormat := data["plate_format"]
-	hasPlateFormat = hasPlateFormat && plateFormat != nil
+	if hasPlateFormat {
+		if _, valid := plateFormat.(string); !valid {
+			return fmt.Errorf("field %q must be an enum string", "plate_format")
+		}
+	}
 	if valueKind == "plate" && !hasPlateFormat {
 		return fmt.Errorf("plate readout needs plate_format")
 	}
