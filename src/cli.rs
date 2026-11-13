@@ -22,6 +22,10 @@ use asterlab_core::operation_module::{
     ModuleBinding, ModuleOrigin, OperationModule, ParameterBinding, ParameterValueType,
     ProtocolBlockVersionRef, ValueSource,
 };
+use asterlab_core::readout_submit::{
+    plan_batch as plan_readout_batch, plan_submit as plan_readout_submit, ReadoutBatchRequest,
+    ReadoutSubmitRequest,
+};
 use asterlab_core::protocol_block::ReviewRecord;
 use asterlab_core::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep, StepBinding};
 use asterlab_core::protocol_preview::{
@@ -4422,6 +4426,110 @@ pub(crate) fn create_execution_event_tx(
     refresh_run_status_in_transaction(tx, run_id)?;
     Ok(event_record)
 }
+
+fn readout_issue_error(
+    action: &str,
+    issues: Vec<asterlab_core::reading_facts::ReadingIssue>,
+) -> CliError {
+    let detail = issues
+        .first()
+        .map(|issue| format!("：{}", issue.message))
+        .unwrap_or_default();
+    let mut error = CliError::input(format!("{action}校验失败{detail}"));
+    error.issues = issues
+        .into_iter()
+        .map(|issue| json!({"code":issue.code,"message":issue.message}))
+        .collect();
+    error
+}
+
+/// Look up an earlier readout submission by its idempotency key. The key is
+/// stored as `operation_id`; the query is scoped to this Run, so the same key
+/// in another Run is a different record.
+fn find_readout_submission(
+    db: &Connection,
+    run_id: &str,
+    operation_id: &str,
+) -> Result<Option<Value>, CliError> {
+    let id: Option<String> = db
+        .query_row(
+            "SELECT id FROM records WHERE kind='execution_event' AND parent_id=?1 \
+             AND json_extract(data_json,'$.operation_id')=?2 ORDER BY created_at LIMIT 1",
+            params![run_id, operation_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    match id {
+        Some(id) => Ok(Some(get(db, &id)?)),
+        None => Ok(None),
+    }
+}
+
+/// `readout.submit`: validate one readout and append exactly one measurement
+/// event. Re-submitting the same identity tuple returns the first record.
+pub(crate) fn submit_readout(
+    db: &mut Connection,
+    input: &ReadoutSubmitRequest,
+) -> Result<Value, CliError> {
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let workspace = run_workspace_typed(&tx, &input.run_id)?;
+    let plan = plan_readout_submit(input, &workspace)
+        .map_err(|issues| readout_issue_error("读数提交", issues))?;
+    if let Some(record) = find_readout_submission(&tx, &input.run_id, &plan.idempotency_key)? {
+        tx.commit()
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        return Ok(json!({
+            "record": record,
+            "idempotency_key": plan.idempotency_key,
+            "replayed": true
+        }));
+    }
+    let record = create_execution_event_tx(&tx, &input.run_id, &plan.event)?;
+    tx.commit()
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    Ok(json!({
+        "record": record,
+        "idempotency_key": plan.idempotency_key,
+        "replayed": false
+    }))
+}
+
+/// `readout.batch`: validate every cell of a table/plate batch and append one
+/// measurement event in a single transaction. Any invalid row aborts the whole
+/// batch; no earlier row is written.
+pub(crate) fn submit_readout_batch(
+    db: &mut Connection,
+    input: &ReadoutBatchRequest,
+) -> Result<Value, CliError> {
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let workspace = run_workspace_typed(&tx, &input.run_id)?;
+    let plan = plan_readout_batch(input, &workspace)
+        .map_err(|issues| readout_issue_error("读数批次", issues))?;
+    if let Some(record) = find_readout_submission(&tx, &input.run_id, &plan.idempotency_key)? {
+        tx.commit()
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        return Ok(json!({
+            "record": record,
+            "idempotency_key": plan.idempotency_key,
+            "replayed": true,
+            "accepted": plan.readout_count
+        }));
+    }
+    let record = create_execution_event_tx(&tx, &input.run_id, &plan.event)?;
+    tx.commit()
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    Ok(json!({
+        "record": record,
+        "idempotency_key": plan.idempotency_key,
+        "replayed": false,
+        "accepted": plan.readout_count
+    }))
+}
 fn merge_design_checks(run_data: &Value, frozen: &mut Value, step_path: &str) {
     let Some(design_checks) = run_data.get("design_checks").and_then(Value::as_array) else {
         return;
@@ -6741,6 +6849,31 @@ fn normalize_validate_design_data_with_registry(
 
 pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliError> {
     let run = get(db, run_id)?;
+    let workspace = run_workspace_typed(db, run_id)?;
+    let mut value =
+        serde_json::to_value(workspace).map_err(|error| CliError::internal(error.to_string()))?;
+    value["creation_audit"] = run["data"]
+        .get("creation_audit")
+        .cloned()
+        .unwrap_or(Value::Null);
+    value["asterdoc"] = run["data"]
+        .get("asterdoc")
+        .cloned()
+        .unwrap_or(Value::Null);
+    value["design_checks"] = run["data"]
+        .get("design_checks")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    Ok(value)
+}
+
+/// Typed counterpart of [`run_workspace`], used by commands that validate
+/// against the frozen Run before writing.
+pub(crate) fn run_workspace_typed(
+    db: &Connection,
+    run_id: &str,
+) -> Result<asterlab_core::run_workspace::RunWorkspace, CliError> {
+    let run = get(db, run_id)?;
     if run["kind"] != "run" {
         return Err(CliError::input("指定记录不是实验运行"));
     }
@@ -6822,21 +6955,7 @@ pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliE
         &events,
     )
     .map_err(|error| CliError::internal(error.to_string()))?;
-    let mut value =
-        serde_json::to_value(workspace).map_err(|error| CliError::internal(error.to_string()))?;
-    value["creation_audit"] = run["data"]
-        .get("creation_audit")
-        .cloned()
-        .unwrap_or(Value::Null);
-    value["asterdoc"] = run["data"]
-        .get("asterdoc")
-        .cloned()
-        .unwrap_or(Value::Null);
-    value["design_checks"] = run["data"]
-        .get("design_checks")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    Ok(value)
+    Ok(workspace)
 }
 
 fn inspect_workflow_tree(input: &InspectTreeInput, data_dir: &Path) -> Result<Value, CliError> {
@@ -9987,6 +10106,14 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(json!({"record":r}))
         }
+        "readout.submit" => {
+            let i: ReadoutSubmitRequest = parse_input(path)?;
+            submit_readout(&mut db, &i)
+        }
+        "readout.batch" => {
+            let i: ReadoutBatchRequest = parse_input(path)?;
+            submit_readout_batch(&mut db, &i)
+        }
         "formula.create" => {
             let i: FormulaCreate = parse_input(path)?;
             ensure_project(&db, &i.project_id)?;
@@ -10421,6 +10548,8 @@ fn result_schema(tool: &str) -> Value {
         "well.set" => one("well"),
         "note.create" => one("note"),
         "execution_event.create" => one("execution_event"),
+        "readout.submit" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}}),
+        "readout.batch" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed","accepted"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"},"accepted":{"type":"integer","minimum":1}}}),
         "formula.create" => one("formula"),
         "formula.revise" => one("formula"),
         "table.create" => one("library_table"),
@@ -10617,6 +10746,12 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "execution_event.create" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+        }
+        "readout.submit" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","endpoint","protocol_version_id"],"oneOf":[{"required":["value"]},{"required":["qualifier"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160}}})
+        }
+        "readout.batch" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","protocol_version_id","plate_id","schema_id"],"oneOf":[{"required":["cells"]},{"required":["csv"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"plate_id":{"type":"string","minLength":1,"maxLength":120,"description":"本次 Run 中唯一的孔板 ID；缺省无法归属孔位"},"schema_id":{"type":"string","minLength":1,"maxLength":120},"schema_version":{"type":"integer","enum":[1]},"assay_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"batch_id":{"type":["string","null"],"maxLength":120},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160},"cells":{"type":"array","maxItems":1000,"items":{"type":"object","additionalProperties":false,"required":["row","column","field"],"properties":{"row":{"type":"integer","minimum":0},"column":{"type":"integer","minimum":0},"field":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":["number","null"]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"group":{"type":["string","null"],"maxLength":120},"replicate":{"type":["integer","null"],"minimum":0},"status":{"type":["string","null"],"enum":["raw","missing",null]}}}},"csv":{"type":"string","maxLength":1000000,"description":"表头 row,column,field[,value,unit,sample_id,group,replicate,status]；行列从 0 开始"}}})
         }
         "formula.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","expression"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"expression":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -10854,6 +10989,8 @@ fn tool_specs() -> Vec<Value> {
         "well.set",
         "note.create",
         "execution_event.create",
+        "readout.submit",
+        "readout.batch",
         "formula.create",
         "formula.revise",
         "table.create",
@@ -10971,6 +11108,8 @@ fn tool_description(tool: &str) -> &'static str {
         "well.set" => "创建或覆盖一个板孔映射。",
         "note.create" => "向运行追加一条实际记录；事件时间必须显式提供或留空。",
         "execution_event.create" => "向运行追加结构化实际事件；事件时间不确定时留空，材料/测量必须填写明确单位或样本标识。",
+        "readout.submit" => "提交一条读数并映射为一个 measurement 事件；同一 (run_id, step_path, endpoint, sample_id, timepoint) 重复提交返回首次记录。",
+        "readout.batch" => "批量提交表格/孔板读数（cells 或 CSV），逐行校验并在单事务中写入一条事件；任一行失败则不写入。",
         "formula.create" => "保存公式表达式及变量单位说明，不执行公式代码。",
         "formula.revise" => "按 expected_revision 修订公式字段。",
         "table.create" => "创建列名固定、每行长度与列数一致的资料表。",
@@ -11054,6 +11193,8 @@ fn tool_effects(tool: &str) -> &'static str {
         "well.set" => "新建孔位映射，或按 expected_revision 覆盖一个已有孔位。",
         "note.create" => "为运行追加一条实验记录；不修改既有记录。",
         "execution_event.create" => "为运行追加一条不可覆盖的结构化操作、材料使用、测量、偏差或观察事件。",
+        "readout.submit" => "为运行追加一条 measurement 执行事件；相同幂等键返回已有记录，不重复写入。",
+        "readout.batch" => "在同一事务中为运行追加一条 measurement 执行事件；任一行校验失败则整体回滚。",
         "asset.link" => "读取本地文件元数据并流式计算 sha256；创建或刷新一条 asset_link，并追加 linked 事件；不复制文件。",
         "asset.unlink" => "删除一条 asset_link 引用并追加 unlinked 事件；不删除原文件。",
         "asset.list" | "asset.events" => "只读；不修改数据库。",
@@ -12779,5 +12920,232 @@ protocol_version_id: protocol-v1
         drop(after);
         assert_eq!(sha256_file(&db_file), before_hash);
         fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    fn seed_readout_runs(db: &Connection) {
+        db.execute_batch(
+            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('project-1','project',NULL,NULL,1,?1,'now','now')",
+            [json!({"name":"p","description":""}).to_string()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('design-1','design','project-1',NULL,1,?1,'now','now')",
+            [json!({"title":"d"}).to_string()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('version-1','design_version','project-1','design-1',1,?1,'now','now')",
+            [json!({
+                "design_id":"design-1","design_revision":1,
+                "snapshot":{
+                    "title":"d","objective":"o","experimental_unit":"well",
+                    "group_specs":[],"sample_allocations":[],"planned_outputs":[],
+                    "assays":[{"id":"assay-1","title":"A","timepoints":["D1"],
+                        "group_ids":[],"timepoint_relation":"same_physical_sample_repeated"}]
+                }
+            })
+            .to_string()],
+        )
+        .unwrap();
+        let step = json!({
+            "path":"run/read","use_id":"u1","title":"Read","instruction":"read",
+            "parameters":[],"unresolved_parameter_refs":[],
+            "source_block_version_id":"b1","time_scope":"per_timepoint"
+        });
+        for run_id in ["run-1", "run-2"] {
+            db.execute(
+                "INSERT INTO records VALUES(?1,'run','project-1','design-1',1,?2,'now','now')",
+                params![
+                    run_id,
+                    json!({
+                        "title":run_id,"design_version_id":"version-1","design_revision":1,
+                        "status":"in_progress",
+                        "protocol_manifest":[{
+                            "assay_id":"assay-1","assay_title":"A","protocol_version_id":"pv1",
+                            "steps":[step.clone()]
+                        }]
+                    })
+                    .to_string()
+                ],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO records VALUES('plate-1','plate','project-1','run-1',1,?1,'now','now')",
+            [json!({"name":"96","format":"96","rows":8,"columns":12,
+                "assay_id":"assay-1","timepoint":"D1"})
+            .to_string()],
+        )
+        .unwrap();
+    }
+
+    fn readout_submit_request(run_id: &str) -> ReadoutSubmitRequest {
+        ReadoutSubmitRequest {
+            run_id: run_id.to_owned(),
+            step_path: "run/read".to_owned(),
+            endpoint: "od450".to_owned(),
+            protocol_version_id: "pv1".to_owned(),
+            assay_id: Some("assay-1".to_owned()),
+            planned_output_id: None,
+            timepoint: Some("D1".to_owned()),
+            sample_id: Some("S-1".to_owned()),
+            value: Some(1.234),
+            qualifier: None,
+            unit: Some("AU".to_owned()),
+            content: None,
+            occurred_at: None,
+            operator: None,
+        }
+    }
+
+    fn readout_batch_request() -> ReadoutBatchRequest {
+        ReadoutBatchRequest {
+            run_id: "run-1".to_owned(),
+            step_path: "run/read".to_owned(),
+            protocol_version_id: "pv1".to_owned(),
+            plate_id: "plate-1".to_owned(),
+            schema_id: "cck8.plate96.od450.v1".to_owned(),
+            schema_version: 1,
+            assay_id: Some("assay-1".to_owned()),
+            timepoint: Some("D1".to_owned()),
+            batch_id: Some("batch-1".to_owned()),
+            content: None,
+            occurred_at: None,
+            operator: None,
+            cells: vec![
+                asterlab_core::reading_facts::ReadingCellInput {
+                    row: 0,
+                    column: 0,
+                    field: "od450".to_owned(),
+                    value: Some(1.0),
+                    unit: Some("AU".to_owned()),
+                    sample_id: Some("S-1".to_owned()),
+                    group: Some("g1".to_owned()),
+                    replicate: Some(1),
+                    status: None,
+                },
+                asterlab_core::reading_facts::ReadingCellInput {
+                    row: 0,
+                    column: 1,
+                    field: "od450".to_owned(),
+                    value: None,
+                    unit: Some("AU".to_owned()),
+                    sample_id: Some("S-2".to_owned()),
+                    group: Some("g2".to_owned()),
+                    replicate: Some(1),
+                    status: None,
+                },
+            ],
+            csv: None,
+        }
+    }
+
+    fn execution_event_count(db: &Connection) -> i64 {
+        db.query_row(
+            "SELECT COUNT(*) FROM records WHERE kind='execution_event'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn readout_tools_are_discoverable_and_write() {
+        let specs = tool_specs();
+        let names: Vec<&str> = specs
+            .iter()
+            .filter_map(|spec| spec["name"].as_str())
+            .collect();
+        for tool in ["readout.submit", "readout.batch"] {
+            assert!(names.contains(&tool), "missing {tool}");
+            assert!(input_schema(tool).is_some(), "missing input schema for {tool}");
+            assert!(tool_writes(tool), "{tool} must be a write tool");
+        }
+        assert_eq!(
+            result_schema("readout.batch")["required"],
+            json!(["record", "idempotency_key", "replayed", "accepted"])
+        );
+    }
+
+    #[test]
+    fn readout_submit_replays_the_first_record_and_isolates_runs() {
+        let mut db = Connection::open_in_memory().unwrap();
+        seed_readout_runs(&db);
+
+        let first = submit_readout(&mut db, &readout_submit_request("run-1")).unwrap();
+        assert_eq!(first["replayed"], false);
+        let first_id = first["record"]["id"].as_str().unwrap().to_owned();
+        assert_eq!(first["record"]["data"]["event_type"], "measurement");
+        assert_eq!(first["record"]["data"]["readouts"][0]["value"], 1.234);
+
+        let replay = submit_readout(&mut db, &readout_submit_request("run-1")).unwrap();
+        assert_eq!(replay["replayed"], true);
+        assert_eq!(replay["record"]["id"], first_id.as_str());
+        assert_eq!(
+            replay["idempotency_key"],
+            first["idempotency_key"]
+        );
+        assert_eq!(execution_event_count(&db), 1);
+
+        let other = submit_readout(&mut db, &readout_submit_request("run-2")).unwrap();
+        assert_eq!(other["replayed"], false);
+        assert_ne!(other["record"]["id"], first_id.as_str());
+        assert_ne!(other["idempotency_key"], first["idempotency_key"]);
+        assert_eq!(execution_event_count(&db), 2);
+        assert_eq!(other["record"]["parent_id"], "run-2");
+    }
+
+    #[test]
+    fn readout_batch_writes_one_event_or_nothing() {
+        let mut db = Connection::open_in_memory().unwrap();
+        seed_readout_runs(&db);
+
+        let mut duplicate = readout_batch_request();
+        duplicate.cells[1].row = 0;
+        duplicate.cells[1].column = 0;
+        let error = submit_readout_batch(&mut db, &duplicate).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert!(error.issues.iter().any(|issue| issue["code"] == "duplicate_position"));
+        assert_eq!(execution_event_count(&db), 0, "a rejected batch writes nothing");
+
+        let mut stale = readout_batch_request();
+        stale.protocol_version_id = "pv-other".to_owned();
+        let error = submit_readout_batch(&mut db, &stale).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert_eq!(execution_event_count(&db), 0, "event creation failure rolls back");
+
+        let accepted = submit_readout_batch(&mut db, &readout_batch_request()).unwrap();
+        assert_eq!(accepted["replayed"], false);
+        assert_eq!(accepted["accepted"], 2);
+        assert_eq!(accepted["record"]["data"]["result_cells"].as_array().unwrap().len(), 2);
+        assert_eq!(execution_event_count(&db), 1);
+
+        let replay = submit_readout_batch(&mut db, &readout_batch_request()).unwrap();
+        assert_eq!(replay["replayed"], true);
+        assert_eq!(replay["record"]["id"], accepted["record"]["id"]);
+        assert_eq!(execution_event_count(&db), 1);
+    }
+
+    #[test]
+    fn readout_batch_accepts_csv_cells() {
+        let mut db = Connection::open_in_memory().unwrap();
+        seed_readout_runs(&db);
+        let mut request = readout_batch_request();
+        request.cells = Vec::new();
+        request.csv = Some(
+            "row,column,field,value,unit,sample_id,group,replicate\n\
+             0,0,od450,1.0,AU,S-1,g1,1\n\
+             0,1,od450,,AU,S-2,g2,1\n"
+                .to_owned(),
+        );
+        let accepted = submit_readout_batch(&mut db, &request).unwrap();
+        assert_eq!(accepted["accepted"], 2);
+        let cells = accepted["record"]["data"]["result_cells"].as_array().unwrap();
+        assert_eq!(cells[1]["status"], "missing");
+        assert_eq!(cells[1]["value"], Value::Null);
     }
 }
