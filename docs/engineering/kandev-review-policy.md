@@ -1,6 +1,6 @@
 # Kandev Review 与合并策略
 
-本文件固定 `VPS Dev` 工作流中 `Review` 步骤的 agent 行为。Review agent 目前复用实现 agent 的 profile（`DeepSeek V4.1 Flash 1017` / `omp-acp` / `opencode-go/deepseek-v4.1-flash`），进入 Review 时切换角色，不是独立模型。
+本文件固定 `VPS Dev` 工作流中 `Review` 步骤的 agent 行为。Review agent 与实现 agent 共用 `GPT-6 Luna 1017` profile（`omp-acp` / `opencode-go/gpt-6-luna`），进入 Review 时切换角色，不是独立模型。Luna 仍经由 OpenCode Go；provider 周配额耗尽时，切换模型名不会解除该 provider 限额。
 
 ## 1. 容量与背压
 
@@ -28,6 +28,7 @@
 Review agent 必须逐条确认：
 
 1. 存在与本任务关联的 PR，`gh pr view` 显示 open 且 mergeable。
+   - 例外：`gh pr list --head <branch> --state all`（或按卡片编号 `gh pr search '"<卡号>" in:title'`）显示本卡已有 merged PR 时，说明合并已完成、只是事件没送到卡片。直接输出 `VERDICT: APPROVED`，第二行写 `ALREADY-MERGED #<n>`，不要新建 PR、不要重复合并。
 2. `git diff --name-status origin/main...HEAD` 只包含 `scope.write` 中的路径；`scope.forbid` 无改动。
 3. 任务描述「验收」中的命令已在 PR 或任务评论中贴出原始输出并全部通过。
 4. 没有密钥、token、绝对路径泄漏；没有移动 frozen tag；没有直接推 `main`。
@@ -36,20 +37,22 @@ Review agent 必须逐条确认：
 
 ## 4. 结论与动作
 
-| 结论 | 动作 |
-|---|---|
-| 门槛通过且符合设计 | `gh pr merge <n> --squash --delete-branch`，然后调用 `step_complete_kandev`；任务进入 `Merged` |
-| 门槛通过但拿不准设计 | 评论 `REVIEW: APPROVED` 列出门槛证据和疑虑；不合并，留在 Review 等人工 |
-| 任一门槛失败 | 评论 `REVIEW: CHANGES REQUESTED` 列出可复现证据，**同一 session 就地返工**：修代码、提交、推送、重跑验收，修完后把门槛 1-7 全部重走一遍；不移卡，不调 move |
+结论消息的第一行必须是且仅是下列之一；系统只读第一行做流转。
 
-Review agent 不调 Kandev move、不把任务移出 Review；返工在同一 session 内完成。熔断口径：同一任务累计 3 次 `REVIEW: CHANGES REQUESTED` 结论后留在 Review 等人工（`human-hold`）。
+| 结论（第一行） | 动作 |
+|---|---|
+| `VERDICT: APPROVED` | 门槛通过且符合设计：`gh pr merge <n> --squash --delete-branch`，然后调用 `step_complete_kandev`。若已有 merged PR，第二行写 `ALREADY-MERGED #<n>`，不重复合并 |
+| `VERDICT: APPROVED`（拿不准设计） | 第二行写疑点，不合并，留在 Review 等人工 |
+| `VERDICT: CHANGES` | 列出可复现证据，**同一 session 就地返工**：修代码、提交、推送、重跑验收，修完后把门槛全部重走；不移卡 |
+| `VERDICT: BLOCKED-NEEDS-HUMAN` | 卡片自相矛盾或权限不足，agent 无法解决；停下等人工，feeder 推送 Telegram |
+
+Review agent 不调 Kandev move、不把任务移出 Review；返工在同一 session 内完成。熔断口径：同一任务累计 3 次 `VERDICT: CHANGES` 后打 `human-hold`，留 Review 等人工。
 
 ## 5. 合并门
 
-- `Verify` 步骤监听 `on_pr_merged`，PR 合并后任务进入 `Merged`。
-- `Merged` 进入即标记任务完成。
+- `Verify` 与 `Review` 都监听 `on_pr_merged`；`Merged` 进入即完成任务。
+- feeder 有兜底扫描：Review/Verify 里的卡，若关联 PR 已 merged，或按卡号能搜到 merged PR（Kandev 未关联时），直接移入 `Merged`。
 - 依赖卡只在 `Merged`（即 `COMPLETED`）后解除阻塞，因此不会出现「前序 Done 但 PR 未合并」的基线错位。
-- 对于非快速分类，人工在 Review 里批准后，仍需合并 PR；合并事件会把任务推进到 `Merged`。
 
 ## 6. 例外记录与分支清理
 

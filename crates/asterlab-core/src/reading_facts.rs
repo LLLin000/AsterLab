@@ -277,6 +277,12 @@ pub fn query_readings(workspace: &RunWorkspace, request: &ReadingQuery) -> Readi
 
         if structured {
             for cell in &event.result_cells {
+                // `kind: "record"` entries hold a complete Readout (table,
+                // categorical, file). They carry no cell identity and must not
+                // become numeric facts; `readout_records` reads them back.
+                if cell["kind"].as_str() == Some(crate::readout_records::READOUT_RECORD_KIND) {
+                    continue;
+                }
                 let Some(endpoint) = endpoint_of(cell) else {
                     issues.push(issue(
                         "missing_endpoint",
@@ -744,7 +750,7 @@ struct RawReading {
     status: ReadingStatus,
 }
 
-fn resolve_plate_for<'a>(
+pub(crate) fn resolve_plate_for<'a>(
     plates: &'a [RunPlateView],
     assay_id: Option<&str>,
     timepoint: Option<&str>,
@@ -817,7 +823,7 @@ fn status_of(item: &Value, value: Option<f64>) -> Result<ReadingStatus, (&'stati
     }
 }
 
-fn coordinate_for(row: u32, column: u32) -> Option<String> {
+pub(crate) fn coordinate_for(row: u32, column: u32) -> Option<String> {
     if row >= 26 {
         return None;
     }
@@ -851,7 +857,7 @@ pub(crate) fn time_key(value: &str) -> String {
     format!("{head}.{fraction}{zone}")
 }
 
-fn parse_coordinate(coordinate: &str) -> Option<(u32, u32)> {
+pub(crate) fn parse_coordinate(coordinate: &str) -> Option<(u32, u32)> {
     let letters: String = coordinate
         .chars()
         .take_while(|value: &char| value.is_ascii_alphabetic())

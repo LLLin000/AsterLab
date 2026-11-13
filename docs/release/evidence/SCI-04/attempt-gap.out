@@ -1,0 +1,2 @@
+{"error":{"code":"INVALID_INPUT","message":"样本执行身份无效：样本 S1 的下一 attempt 只能是 2，收到 4"},"ok":false,"tool":"execution_event.create"}
+exit=2

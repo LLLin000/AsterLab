@@ -151,6 +151,9 @@ pub struct ExecutionEventView {
     pub task_key: Option<String>,
     pub occurrence_id: Option<String>, // legacy events have None
     pub retry_of_event_id: Option<String>,
+    /// Explicit sample-attempt identity carried by the write; legacy events have
+    /// `None` and readers derive the attempt from retry links.
+    pub attempt: Option<u32>,
     pub operator: Option<String>,
     pub sample_ids: Vec<String>,
     pub readouts: Vec<Value>,
@@ -504,6 +507,10 @@ pub fn build(
             task_key: opt_text(&event["task_key"]),
             occurrence_id: opt_text(&event["occurrence_id"]),
             retry_of_event_id: opt_text(&event["retry_of_event_id"]),
+            attempt: event["attempt"]
+                .as_u64()
+                .map(|attempt| attempt as u32)
+                .filter(|attempt| *attempt >= 1),
             operator: opt_text(&event["operator"]),
             sample_ids: event["sample_ids"]
                 .as_array()

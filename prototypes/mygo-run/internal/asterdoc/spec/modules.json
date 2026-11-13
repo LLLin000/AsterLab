@@ -1284,7 +1284,6 @@
         "record_boundary": "run"
       }
     },
-
     {
       "kind": "material",
       "schema": 1,
@@ -1654,6 +1653,149 @@
       "rules": [
         "measurement-profile-fields"
       ]
+    },
+    {
+      "kind": "readout",
+      "schema": 1,
+      "title": "读数结构",
+      "description": "一次 Run 读数的形状声明：numeric/table/plate/categorical/file 五种 value_kind 共用单位、缺失语义、来源与 timepoint/sample 关联。只声明形状；读数本身经 Core 写入 Run 事实，文档不保存记录值。",
+      "sdk": "1.0.0",
+      "category": "measurement",
+      "capabilities": [
+        "readout-schema",
+        "value-kind",
+        "run-record"
+      ],
+      "permissions": [
+        "run.readout"
+      ],
+      "renderers": {
+        "design": "generic.editor",
+        "document": "generic.editor",
+        "run": "generic.run"
+      },
+      "lifecycle": {
+        "states": [
+          "draft",
+          "validated",
+          "frozen"
+        ],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {
+        "origin": "planned",
+        "record_boundary": "run"
+      },
+      "modes": [
+        "design",
+        "protocol",
+        "run",
+        "notebook",
+        "review"
+      ],
+      "inputs": [
+        {
+          "name": "kind",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "int",
+          "required": true
+        },
+        {
+          "name": "schema_id",
+          "type": "string",
+          "required": true,
+          "description": "读数 schema 稳定 ID，例如 cck8_od450、rna_concentration、cfu_count"
+        },
+        {
+          "name": "endpoint",
+          "type": "string",
+          "required": true,
+          "description": "测量指标字段，例如 od450、cfu、a260_a280"
+        },
+        {
+          "name": "value_kind",
+          "type": "enum",
+          "values": [
+            "numeric",
+            "table",
+            "plate",
+            "categorical",
+            "file"
+          ],
+          "required": true
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "description": "记录单位；file/categorical 不携带标量单位"
+        },
+        {
+          "name": "missing_reasons",
+          "type": "list",
+          "item_type": "string",
+          "description": "允许的缺失原因：not_detected、below_lod、above_uloq、invalid、other"
+        },
+        {
+          "name": "null_allowed",
+          "type": "bool",
+          "description": "是否允许“未记录”：既无值也无原因"
+        },
+        {
+          "name": "source_kinds",
+          "type": "list",
+          "item_type": "string",
+          "description": "允许来源 raw、derived；允许 derived 时必须同时允许 raw"
+        },
+        {
+          "name": "table_columns",
+          "type": "object-list",
+          "description": "table 读数的列：{key,label,value_kind,unit}"
+        },
+        {
+          "name": "plate_format",
+          "type": "enum",
+          "values": [
+            "6",
+            "12",
+            "24",
+            "48",
+            "96",
+            "384",
+            "custom"
+          ],
+          "description": "plate 读数的板型"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "readout_shape",
+          "type": "object",
+          "origin": "view"
+        },
+        {
+          "name": "record_form",
+          "type": "enum",
+          "values": [
+            "plate",
+            "single",
+            "table",
+            "categorical",
+            "file"
+          ],
+          "origin": "view"
+        }
+      ],
+      "actions": [],
+      "rules": []
     }
   ],
   "foundationVersion": 1,

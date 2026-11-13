@@ -1,0 +1,30 @@
+    Blocking waiting for file lock on build directory
+   Compiling asterlab-core v0.1.0 ([workspace]/crates/asterlab-core)
+    Finished `test` profile [unoptimized] target(s) in 42.75s
+     Running unittests src/lib.rs ([target]/debug/build/asterlab-core/e4acddd1bf4767f5/out/asterlab_core-e4acddd1bf4767f5)
+
+running 9 tests
+test diagnostic::tests::diagnostic_from_legacy_string_extracts_code_and_path ... ok
+test diagnostic::tests::diagnostic_from_contract_issue_preserves_message ... ok
+test diagnostic::tests::diagnostic_from_legacy_json_keeps_agent_edit_fields ... ok
+test diagnostic::tests::diagnostic_from_spec_issue_marks_derived_source ... ok
+test diagnostic::tests::diagnostic_serializes_every_contract_field ... ok
+test diagnostic::tests::diagnostic_severity_wire_values_match_context ... ok
+test diagnostic::tests::diagnostic_source_wire_values_match_context ... ok
+test labware::tests::container_plan_diagnostics_carry_paths_and_codes ... ok
+test diagnostic::tests::diagnostic_from_legacy_string_without_code_keeps_message ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 305 filtered out; finished in 0.00s
+
+     Running tests/catalog_drafts.rs ([target]/debug/build/asterlab-core/f19e871205f766df/out/catalog_drafts-f19e871205f766df)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/operation_surface.rs ([target]/debug/build/asterlab-core/a2a226fa5648ab97/out/operation_surface-a2a226fa5648ab97)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
