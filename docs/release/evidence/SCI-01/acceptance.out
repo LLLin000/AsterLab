@@ -13,3 +13,6 @@ exit=0
 $ git status --short
  M docs/release/evidence/SCI-01/acceptance.out
  M docs/sdk/science-field-ownership.md
+
+$ git status --short
+ M docs/sdk/science-field-ownership.md
