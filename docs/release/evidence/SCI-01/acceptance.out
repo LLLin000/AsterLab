@@ -1,0 +1,11 @@
+$ test -f docs/sdk/science-field-ownership.md && grep -c "^| " docs/sdk/science-field-ownership.md
+108
+exit=0
+
+$ grep -c "权威" docs/sdk/science-field-ownership.md
+23
+exit=0
+
+$ git status --short
+?? docs/release/evidence/SCI-01/
+?? docs/sdk/science-field-ownership.md
