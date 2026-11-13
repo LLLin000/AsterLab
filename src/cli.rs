@@ -10,6 +10,7 @@ use asterlab_core::assets as asset_refs;
 use asterlab_core::component_data::{
     calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
 };
+use asterlab_core::diagnostic::{Diagnostic, DiagnosticSeverity};
 use asterlab_core::component_framework::{
     default_registry, ComponentBindingContext, ComponentDefinition, ComponentDefinitionRef,
     ComponentInstance, ComponentRegistry, ContextValidationMode, ModelPathResolution, ModelRef,
@@ -7866,14 +7867,85 @@ fn parse_input<T: DeserializeOwned>(path: &str) -> Result<T, CliError> {
     serde_json::from_str(&raw)
         .map_err(|e| CliError::input(format!("JSON 输入不符合该工具的结构：{e}")))
 }
-fn parse_args(args: &[String]) -> Result<&str, CliError> {
-    if args.len() != 2 || args[0] != "--input" {
-        return Err(CliError::input("命令格式：labworkbench <tool> --input <json-file|->；用 `labworkbench tools --json` 查看工具，用 `labworkbench schema <tool>` 查看字段定义"));
-    }
-    Ok(&args[1])
+#[derive(Debug)]
+struct Invocation<'a> {
+    input: &'a str,
+    /// `--diagnostics json` was requested; envelopes then carry a structured
+    /// `diagnostics` array.
+    diagnostics: bool,
 }
-fn output(tool: &str, result: Value) {
-    println!("{}", json!({"ok":true,"tool":tool,"result":result}));
+
+fn parse_args(args: &[String]) -> Result<Invocation<'_>, CliError> {
+    let mut input: Option<&str> = None;
+    let mut diagnostics = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--input" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(CliError::input("--input 需要 JSON 文件路径或 -"));
+                };
+                if input.replace(value.as_str()).is_some() {
+                    return Err(CliError::input("--input 只能出现一次"));
+                }
+                index += 2;
+            }
+            "--diagnostics" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(CliError::input("--diagnostics 需要参数：json"));
+                };
+                if value != "json" {
+                    return Err(CliError::input(format!(
+                        "--diagnostics 只支持 json，收到：{value}"
+                    )));
+                }
+                diagnostics = true;
+                index += 2;
+            }
+            other => {
+                return Err(CliError::input(format!(
+                    "未知参数：{other}；格式：labworkbench <tool> --input <json-file|-> [--diagnostics json]"
+                )));
+            }
+        }
+    }
+    let Some(input) = input else {
+        return Err(CliError::input("命令格式：labworkbench <tool> --input <json-file|->；用 `labworkbench tools --json` 查看工具，用 `labworkbench schema <tool>` 查看字段定义"));
+    };
+    Ok(Invocation { input, diagnostics })
+}
+fn output(tool: &str, result: Value, diagnostics: bool) {
+    println!("{}", success_envelope(tool, result, diagnostics));
+}
+
+fn success_envelope(tool: &str, result: Value, diagnostics: bool) -> Value {
+    let derived = if diagnostics {
+        result_diagnostics(&result)
+    } else {
+        Vec::new()
+    };
+    let mut envelope = json!({"ok":true,"tool":tool,"result":result});
+    if diagnostics {
+        envelope["diagnostics"] = Value::Array(derived);
+    }
+    envelope
+}
+
+/// Read-only validations (`agent_edit.validate`, `semantic.validate`, …) return
+/// their findings inside a successful result. Surface the same entries as
+/// structured diagnostics so one flag covers both envelopes.
+fn result_diagnostics(result: &Value) -> Vec<Value> {
+    result
+        .get("issues")
+        .and_then(Value::as_array)
+        .map(|issues| {
+            issues
+                .iter()
+                .map(Diagnostic::from_legacy_json)
+                .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 fn ensure_project(db: &Connection, id: &str) -> Result<(), CliError> {
     if !has_kind(db, id, "project")? {
@@ -8453,6 +8525,7 @@ pub fn run(args: &[String], data_dir: &Path) -> i32 {
             return fail(
                 "schema",
                 CliError::input("格式：labworkbench schema <tool>"),
+                false,
             );
         }
         return match schema(&args[1]) {
@@ -8466,39 +8539,87 @@ pub fn run(args: &[String], data_dir: &Path) -> i32 {
             None => fail(
                 &args[1],
                 CliError::missing("未知工具；请运行 `labworkbench tools --json`"),
+                false,
             ),
         };
     }
     let tool = args[0].as_str();
-    let path = match parse_args(&args[1..]) {
+    let requested_diagnostics = args.iter().any(|arg| arg == "--diagnostics");
+    let invocation = match parse_args(&args[1..]) {
         Ok(v) => v,
-        Err(e) => return fail(tool, e),
+        Err(e) => return fail(tool, e, requested_diagnostics),
     };
-    let result = dispatch(tool, path, data_dir);
+    let result = dispatch(tool, invocation.input, data_dir);
     match result {
         Ok(v) => {
-            output(tool, v);
+            output(tool, v, invocation.diagnostics);
             0
         }
-        Err(e) => fail(tool, e),
+        Err(e) => fail(tool, e, invocation.diagnostics),
     }
 }
-fn fail(tool: &str, e: CliError) -> i32 {
+fn fail(tool: &str, e: CliError, diagnostics: bool) -> i32 {
+    let exit = e.exit;
+    println!("{}", error_envelope(tool, &e, diagnostics));
+    exit
+}
+
+fn error_envelope(tool: &str, e: &CliError, diagnostics: bool) -> Value {
     let mut error = json!({"code":e.code,"message":e.message});
-    if let Some(path) = e.path {
+    if let Some(path) = &e.path {
         error["path"] = json!(path);
     }
     if let Some(current_version) = e.current_version {
         error["current_version"] = json!(current_version);
     }
-    if let Some(current_version_id) = e.current_version_id {
+    if let Some(current_version_id) = &e.current_version_id {
         error["current_version_id"] = json!(current_version_id);
     }
     if !e.issues.is_empty() {
-        error["issues"] = Value::Array(e.issues);
+        error["issues"] = Value::Array(e.issues.clone());
     }
-    println!("{}", json!({"ok":false,"tool":tool,"error":error}));
-    e.exit
+    let mut envelope = json!({"ok":false,"tool":tool,"error":error});
+    if diagnostics {
+        envelope["diagnostics"] = Value::Array(cli_diagnostics(e));
+    }
+    envelope
+}
+
+/// Normalize the legacy failure shape into structured diagnostics. Declared
+/// `issues` win; otherwise the error itself becomes one blocking diagnostic.
+fn cli_diagnostics(e: &CliError) -> Vec<Value> {
+    let mut diagnostics: Vec<Diagnostic> = e
+        .issues
+        .iter()
+        .map(Diagnostic::from_legacy_json)
+        .collect();
+    if diagnostics.is_empty() {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticSeverity::Blocking,
+                e.code,
+                e.path.clone().unwrap_or_default(),
+                e.message.clone(),
+            )
+            .with_next_action(next_action_for(e.code)),
+        );
+    }
+    diagnostics
+        .iter()
+        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+        .collect()
+}
+
+fn next_action_for(code: &str) -> &'static str {
+    match code {
+        "REVISION_CONFLICT" | "VERSION_CONFLICT" => "重新读取当前 revision 后重试",
+        "NOT_FOUND" => "确认对象 id 存在后重试",
+        "INVALID_INPUT" | "INVALID_PROPOSAL" | "INVALID_BINDING" | "UNIT_MISMATCH" => {
+            "修正输入字段后重试"
+        }
+        "INTERNAL" => "记录 tool 与输入，报告内部错误",
+        _ => "按 error.diagnostics 修正后重试",
+    }
 }
 fn print_help() {
     println!("AsterLab typed CLI\n\n  labworkbench tools --json\n  labworkbench schema <tool>\n  labworkbench <tool> --input <json-file|->\n\nAll tool inputs use a strict per-command schema; unknown fields are rejected. All output is one JSON envelope on stdout. Data directory follows LABWORKBENCH_DATA_DIR (default: ./data).");
@@ -10473,12 +10594,16 @@ fn result_schema(tool: &str) -> Value {
         _ => json!({"type":"object"}),
     }
 }
+fn diagnostic_schema() -> Value {
+    json!({"type":"object","additionalProperties":false,"required":["path","code","severity","message","affects","next_action","source"],"properties":{"path":{"type":"string"},"code":{"type":"string"},"severity":{"type":"string","enum":["blocking","needs_confirmation","advisory"]},"message":{"type":"string"},"affects":{"type":"array","items":{"type":"string"}},"next_action":{"type":"string"},"source":{"type":"string","enum":["user_confirmed","imported_record","referenced_protocol","derived","agent_suggestion","unknown"]}}})
+}
+
 fn output_schema(tool: &str) -> Value {
-    let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool)}});
+    let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool),"diagnostics":{"type":"array","items":diagnostic_schema()}}});
     let error = if matches!(tool, "agent_edit.validate" | "agent_edit.commit") {
-        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}}}})
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
     } else {
-        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}}}})
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
     };
     json!({"oneOf":[success,error]})
 }
@@ -11580,6 +11705,85 @@ pub(crate) fn list_asset_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostics_flag_is_parsed_with_input_in_any_order() {
+        let args = vec![
+            "--input".to_owned(),
+            "in.json".to_owned(),
+            "--diagnostics".to_owned(),
+            "json".to_owned(),
+        ];
+        let invocation = parse_args(&args).unwrap();
+        assert_eq!(invocation.input, "in.json");
+        assert!(invocation.diagnostics);
+
+        let args = vec![
+            "--diagnostics".to_owned(),
+            "json".to_owned(),
+            "--input".to_owned(),
+            "-".to_owned(),
+        ];
+        assert!(parse_args(&args).unwrap().diagnostics);
+
+        let args = vec!["--input".to_owned(), "in.json".to_owned()];
+        assert!(!parse_args(&args).unwrap().diagnostics);
+
+        let args = vec![
+            "--diagnostics".to_owned(),
+            "yaml".to_owned(),
+            "--input".to_owned(),
+            "-".to_owned(),
+        ];
+        assert_eq!(parse_args(&args).unwrap_err().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn error_envelope_carries_structured_diagnostics() {
+        let mut error = CliError::input("run.create 失败");
+        error.path = Some("manifest".to_owned());
+        error.issues = vec![json!("STEP_NOT_MATERIALIZED: cck8/seed")];
+        let envelope = error_envelope("run.create", &error, true);
+        let diagnostics = envelope["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0]["code"], "STEP_NOT_MATERIALIZED");
+        assert_eq!(diagnostics[0]["path"], "cck8/seed");
+        assert_eq!(diagnostics[0]["severity"], "blocking");
+        assert_eq!(diagnostics[0]["source"], "unknown");
+        assert!(diagnostics[0]["next_action"].is_string());
+
+        let plain = error_envelope("run.create", &error, false);
+        assert!(plain.get("diagnostics").is_none());
+
+        let mut bare = CliError::conflict("设计版本已更新；请先重新读取。");
+        bare.path = Some("revision".to_owned());
+        let envelope = error_envelope("design.revise", &bare, true);
+        assert_eq!(envelope["diagnostics"][0]["code"], "REVISION_CONFLICT");
+        assert_eq!(envelope["diagnostics"][0]["path"], "revision");
+        assert_eq!(envelope["diagnostics"][0]["severity"], "blocking");
+        assert_eq!(envelope["diagnostics"][0]["source"], "derived");
+    }
+
+    #[test]
+    fn success_envelope_derives_diagnostics_from_validation_issues() {
+        let result = json!({
+            "valid": false,
+            "issues": [{
+                "code": "unit_mismatch",
+                "path": "operation.temperature",
+                "message": "unit family differs"
+            }]
+        });
+        let envelope = success_envelope("semantic.validate", result.clone(), true);
+        assert_eq!(envelope["diagnostics"].as_array().unwrap().len(), 1);
+        assert_eq!(envelope["diagnostics"][0]["code"], "unit_mismatch");
+        assert_eq!(envelope["diagnostics"][0]["severity"], "blocking");
+        assert_eq!(envelope["diagnostics"][0]["source"], "derived");
+        assert_eq!(envelope["result"], result);
+
+        let plain = success_envelope("semantic.validate", result, false);
+        assert!(plain.get("diagnostics").is_none());
+    }
 
     #[test]
     fn agent_tools_are_discoverable() {

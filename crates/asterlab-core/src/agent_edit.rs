@@ -60,6 +60,23 @@ pub enum AgentEditErrorCode {
     IdempotencyMismatch,
 }
 
+impl AgentEditErrorCode {
+    /// Stable wire string, identical to the serde representation.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidProposal => "INVALID_PROPOSAL",
+            Self::InvalidBinding => "INVALID_BINDING",
+            Self::UnitMismatch => "UNIT_MISMATCH",
+            Self::StaleReference => "STALE_REFERENCE",
+            Self::ForbiddenField => "FORBIDDEN_FIELD",
+            Self::VersionConflict => "VERSION_CONFLICT",
+            Self::ConfirmationRequired => "CONFIRMATION_REQUIRED",
+            Self::ConfirmationMismatch => "CONFIRMATION_MISMATCH",
+            Self::IdempotencyMismatch => "IDEMPOTENCY_MISMATCH",
+        }
+    }
+}
+
 /// Three levels from `CONTEXT.md` `ValidationIssue`. v1 validation only
 /// produces `Blocking`; the other two are the shared vocabulary for the later
 /// contextual checks.
