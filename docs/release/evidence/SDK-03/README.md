@@ -8,8 +8,9 @@
   - Paths reuse the Protocol expansion addressing (`root`, `root/<use_id>`,
     `root/<use_id>/<use_id>`), so a deep sub-step edit is the same command.
   - Ops that leave the root tree are `FORBIDDEN_FIELD`; a well-formed path that
-    does not resolve is `STALE_REFERENCE`. No new error codes: the closed
-    agent-edit vocabulary is reused unchanged.
+    does not resolve is `STALE_REFERENCE`; a container op whose path names a text
+    step is `INVALID_PROPOSAL` (it never falls back to editing the parent block).
+    No new error codes: the closed agent-edit vocabulary is reused unchanged.
   - Version numbers are produced by Core: every changed block gets
     `previous_version + 1`, the plan is ordered child-first, and each parent's
     block use is rewritten to the child version created in the same commit.
@@ -32,9 +33,9 @@
 
 | Command | Expected | Observed | Output |
 |---|---|---|---|
-| `cargo test -p asterlab-core step_edit` | exit 0, ≥ 6 passed | exit 0, **12 passed** | [core-step-edit.txt](core-step-edit.txt) |
+| `cargo test -p asterlab-core step_edit` | exit 0, ≥ 6 passed | exit 0, **13 passed** | [core-step-edit.txt](core-step-edit.txt) |
 | `cargo test --bin labworkbench` | exit 0 | exit 0, **20 passed** | [labworkbench-tests.txt](labworkbench-tests.txt) |
-| `cargo run --bin labworkbench -- schema step.edit` | exit 0 | exit 0, 84-line schema JSON | [schema-step-edit.txt](schema-step-edit.txt) |
+| `cargo run --bin labworkbench -- schema step.edit` | exit 0 | exit 0, `ok: true` plus the full input/output schema | [schema-step-edit.txt](schema-step-edit.txt) |
 
 L1 suites from the card's work method:
 
@@ -43,13 +44,14 @@ L1 suites from the card's work method:
 | `cargo test -p asterlab-core` | exited 0, 316 lib + 3 + 6 + 2 passed | [core-tests.txt](core-tests.txt) |
 | `cargo test --manifest-path crates/asterlab-app/Cargo.toml` | exited 0, 26 passed | [app-tests.txt](app-tests.txt) |
 
-The `step_edit` filter matches the 11 tests in `step_edit::tests` plus the
+The `step_edit` filter matches the 12 tests in `step_edit::tests` plus the
 pre-existing `semantic_changeset::tests::protocol_step_edit_requires_location`
-(12 total). Tests cover: insert positioning, deep reuse with child-before-parent
+(13 total). Tests cover: insert positioning, deep reuse with child-before-parent
 version ordering, reorder permutation rejection, unit mismatch vs the slot unit,
-out-of-tree and unresolvable paths, stale `expected_version` / base version,
-missing or mismatched confirmation digest, idempotent replay, no-op rejection,
-cycle rejection, a concurrently moved child block, and the closed wire shape.
+out-of-tree and unresolvable paths, container ops on a text-step path, stale
+`expected_version` / base version, missing or mismatched confirmation digest,
+idempotent replay, no-op rejection, cycle rejection, a concurrently moved child
+block, and the closed wire shape.
 
 ## End-to-end CLI proof
 
@@ -75,9 +77,9 @@ cycle rejection, a concurrently moved child block, and the closed wire shape.
 
 - `cargo test -p asterlab-app` is not a valid invocation (the crate is not a root
   workspace member); the manifest-path form above is the one from `HANDOFF-VPS.md`.
-- The VPS build cache is shared (`CARGO_TARGET_DIR=/srv/build/asterlab-target`,
-  `RUSTC_WRAPPER=sccache`). During this card a sibling worktree's `asterlab-core`
-  artifact was observed to be selected by a later build, which made
+- The VPS build cache is shared across worktrees (`CARGO_TARGET_DIR` plus the
+  `sccache` Rust wrapper). During this card a sibling worktree's `asterlab-core`
+  artifact was selected by one later build, which made
   `cargo test --bin labworkbench` fail with `unresolved import
   asterlab_core::step_edit`. Each recorded run above was produced after touching
   the crate sources in the same command, so the artifact came from this worktree;
@@ -85,5 +87,6 @@ cycle rejection, a concurrently moved child block, and the closed wire shape.
 - `step.edit` only produces `protocol_block_version` records. A Protocol keeps
   pointing at its old root until `protocol.revise` is called with the returned
   `new_root_block_version_id`; frozen Runs keep their exact versions by design.
-- Absolute host paths in the captured output are replaced with
-  `[workspace path redacted]` / `[build output path redacted]`.
+- Host paths in the captured output are replaced with
+  `[workspace path redacted]` / `[build output path redacted]`, and the schema run
+  uses a temporary `LABWORKBENCH_DATA_DIR` so no user data directory is printed.

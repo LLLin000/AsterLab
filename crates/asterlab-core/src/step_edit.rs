@@ -104,15 +104,6 @@ impl StepEditOp {
             StepEditOp::Bind { .. } => StepEditOpKind::Bind,
         }
     }
-
-    pub fn path(&self) -> &str {
-        match self {
-            StepEditOp::Insert { path, .. }
-            | StepEditOp::Reorder { path, .. }
-            | StepEditOp::Reuse { path, .. }
-            | StepEditOp::Bind { path, .. } => path,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -507,6 +498,10 @@ struct PathTarget {
     container: usize,
     step: Option<(usize, usize)>,
     chain: Vec<String>,
+    /// True when the path names a container (`root` or a block use step).
+    /// A text step holds no steps, so container ops must reject it instead of
+    /// silently editing its parent block.
+    is_container: bool,
 }
 
 /// Split a step path into segments, rejecting anything that leaves the root
@@ -523,12 +518,11 @@ fn path_segments(path: &str) -> Result<Vec<&str>, AgentEditIssue> {
     }
     let segments = trimmed.split('/').collect::<Vec<_>>();
     if segments.len() > MAX_DEPTH + 1 {
-        return Err(issue_affecting(
-            AgentEditErrorCode::ForbiddenField,
+        return Err(issue(
+            AgentEditErrorCode::InvalidProposal,
             "path",
-            format!("path {path} 超过 {MAX_DEPTH} 层嵌套"),
+            format!("path {path} 超过 {MAX_DEPTH} 层嵌套上限"),
             "减少嵌套层级后重新组稿",
-            vec!["全部 op".to_owned()],
         ));
     }
     if segments[0] != "root" {
@@ -566,6 +560,7 @@ fn resolve_path(arena: &Arena, root: usize, path: &str) -> Result<PathTarget, Ag
     let segments = path_segments(path)?;
     let mut container = root;
     let mut step = None;
+    let mut is_container = true;
     let mut chain = vec![arena.blocks[root].block_id.clone()];
     for (offset, segment) in segments.iter().enumerate().skip(1) {
         let index = find_step(&arena.blocks[container].steps, segment).ok_or_else(|| {
@@ -609,6 +604,7 @@ fn resolve_path(arena: &Arena, root: usize, path: &str) -> Result<PathTarget, Ag
                         "只对块引用步骤继续向下寻址",
                     ));
                 }
+                is_container = false;
             }
         }
     }
@@ -616,6 +612,7 @@ fn resolve_path(arena: &Arena, root: usize, path: &str) -> Result<PathTarget, Ag
         container,
         step,
         chain,
+        is_container,
     })
 }
 
@@ -940,7 +937,7 @@ fn apply_one(
             position,
             step,
         } => {
-            let target = resolve_path(arena, root, path).map_err(issue_error)?;
+            let target = resolve_container(arena, root, path)?;
             let container_slots = arena.blocks[target.container].data.parameter_slots.clone();
             let container_steps = arena.blocks[target.container].steps.clone();
             let mut issues = validate_text_step(step, &container_steps, &container_slots, path);
@@ -982,7 +979,7 @@ fn apply_one(
             })
         }
         StepEditOp::Reorder { path, order } => {
-            let target = resolve_path(arena, root, path).map_err(issue_error)?;
+            let target = resolve_container(arena, root, path)?;
             let current = arena.blocks[target.container].steps.clone();
             let current_ids = current.iter().map(step_use_id).collect::<Vec<_>>();
             let mut sorted_order = order.clone();
@@ -1023,7 +1020,7 @@ fn apply_one(
             block_version_id,
             bindings,
         } => {
-            let target = resolve_path(arena, root, path).map_err(issue_error)?;
+            let target = resolve_container(arena, root, path)?;
             let container_steps = arena.blocks[target.container].steps.clone();
             let container_slots = arena.blocks[target.container].data.parameter_slots.clone();
             if *position > container_steps.len() {
@@ -1166,6 +1163,22 @@ fn apply_one(
 
 fn issue_error(found: AgentEditIssue) -> LoadError {
     LoadError::Issue(Box::new(found))
+}
+
+/// Resolve a path that must denote a container. `root/<text-use-id>` names a
+/// text step, which holds no steps: `insert` / `reorder` / `reuse` there is
+/// rejected instead of being applied to the parent block.
+fn resolve_container(arena: &Arena, root: usize, path: &str) -> Result<PathTarget, LoadError> {
+    let target = resolve_path(arena, root, path).map_err(issue_error)?;
+    if !target.is_container {
+        return Err(LoadError::Issue(Box::new(issue(
+            AgentEditErrorCode::InvalidProposal,
+            "path",
+            format!("{path} 是文字步骤，不能作为插入/重排/复用的容器"),
+            "把 path 指到 root 或某个块引用步骤",
+        ))));
+    }
+    Ok(target)
 }
 
 // ---------------------------------------------------------------------------
@@ -2224,6 +2237,18 @@ mod tests {
                 "{path}"
             );
         }
+        let deep = format!("root/{}", vec!["lyse"; 13].join("/"));
+        let too_deep = request(vec![StepEditOp::Bind {
+            path: deep,
+            bindings: Vec::new(),
+        }]);
+        let result = validate(&too_deep, &store).expect("validate");
+        assert_eq!(
+            serde_json::to_value(result.issues[0].code).unwrap(),
+            "INVALID_PROPOSAL",
+            "depth limit is a structure error, not an out-of-tree path"
+        );
+
         let missing = request(vec![StepEditOp::Bind {
             path: "root/missing".to_owned(),
             bindings: Vec::new(),
@@ -2364,6 +2389,50 @@ mod tests {
             "INVALID_PROPOSAL"
         );
         assert!(blocked.issues[0].message.contains("循环"));
+    }
+
+    #[test]
+    fn container_ops_reject_a_path_that_names_a_text_step() {
+        let store = MemoryStore::fixture();
+        let insert = request(vec![StepEditOp::Insert {
+            path: "root/prep".to_owned(),
+            position: 0,
+            step: text("sneaky"),
+        }]);
+        let blocked = validate(&insert, &store).expect("validate");
+        assert_eq!(blocked.status, ValidationStatus::Blocked);
+        assert_eq!(
+            serde_json::to_value(blocked.issues[0].code).unwrap(),
+            "INVALID_PROPOSAL"
+        );
+        assert_eq!(blocked.issues[0].path, "path");
+        assert!(blocked.blocks.is_empty());
+
+        let reorder = request(vec![StepEditOp::Reorder {
+            path: "root/prep".to_owned(),
+            order: vec!["lyse".to_owned(), "prep".to_owned()],
+        }]);
+        let blocked = validate(&reorder, &store).expect("validate");
+        assert_eq!(
+            serde_json::to_value(blocked.issues[0].code).unwrap(),
+            "INVALID_PROPOSAL"
+        );
+
+        // `bind` names the step itself, so the same path is a binding error.
+        let bind = request(vec![StepEditOp::Bind {
+            path: "root/prep".to_owned(),
+            bindings: vec![StepBinding {
+                slot: "volume_per_sample".to_owned(),
+                value: Some(serde_json::json!(1.0)),
+                source_slot: None,
+                unit: Some("uL".to_owned()),
+            }],
+        }]);
+        let blocked = validate(&bind, &store).expect("validate");
+        assert_eq!(
+            serde_json::to_value(blocked.issues[0].code).unwrap(),
+            "INVALID_BINDING"
+        );
     }
 
     #[test]

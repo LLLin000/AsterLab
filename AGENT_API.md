@@ -121,7 +121,8 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 规则：
 
 - `block_version_id` 必须是根步骤块的当前 head；`expected_version` 必须等于它的版本号，否则 `VERSION_CONFLICT`（不是 head 则为 `STALE_REFERENCE`）。被改动的子块也必须仍是各自块的 head，否则同样 `VERSION_CONFLICT`。
-- `path` 使用 Protocol 展开寻址：`root` 表示根块，`root/<use_id>` 表示某处块引用，`root/<use_id>/<use_id>` 可继续加深。不是以 `root` 开头、含空段/`.`/`..`、或超过 12 层 → `FORBIDDEN_FIELD`；格式合法但解析不到步骤 → `STALE_REFERENCE`。
+- `path` 使用 Protocol 展开寻址：`root` 表示根块，`root/<use_id>` 表示某处块引用，`root/<use_id>/<use_id>` 可继续加深。不是以 `root` 开头或含空段/`.`/`..` → `FORBIDDEN_FIELD`；格式合法但解析不到步骤 → `STALE_REFERENCE`；嵌套超过 12 层 → `INVALID_PROPOSAL`。
+  `insert` / `reorder` / `reuse` 的 `path` 必须是容器（`root` 或块引用步骤）；指向文字步骤返回 `INVALID_PROPOSAL`，不会退化成修改其父块。`bind` 的 `path` 必须指向块引用步骤，指向文字步骤返回 `INVALID_BINDING`。
 - `insert` 只接受 `step.kind = "text"`（`parameter_refs` 必须引用本块已声明的槽位）；复用已有步骤块用 `reuse`。`reorder.order` 必须是该容器当前 `use_id` 的完整排列。`bind` 按槽位 upsert，绑定规则与 `protocol.block.create` 一致：每个必填子槽位必须有值或映射，单位精确匹配、不做换算。
 - 版本号由 Core 生成：每个被改动的步骤块得到 `previous_version + 1` 的新版本，子块先于父块写入，父块引用自动指向同一事务里新建的子块版本。未改动的块保持原版本（复用）。每个新版本记录带 `based_on_version_id` 和 `step_edit`（`edit_id`、`edit_digest`、`confirmed_by`、`committed_at`、`idempotency_key`）。
 - `edit_digest` 只覆盖 `ops` 与版本前置条件，不覆盖 `confirmation` 本身；同一 `idempotency_key` + 同一 digest 重放返回原结果（`replayed: true`，不写第二个版本），同一 key 配不同 digest 返回 `IDEMPOTENCY_MISMATCH`。
