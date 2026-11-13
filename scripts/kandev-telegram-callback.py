@@ -90,13 +90,23 @@ def latest_verdict(task_id):
         """select m.content from task_session_messages m
             join task_sessions s on s.id=m.task_session_id
            where s.task_id=? and m.author_type='agent' and m.type='message'
-             and (m.content like '%REVIEW: APPROVED%' or m.content like '%REVIEW: CHANGES REQUESTED%')
+             and (m.content like '%VERDICT:%' or m.content like '%REVIEW: APPROVED%' or m.content like '%REVIEW: CHANGES REQUESTED%')
            order by m.created_at desc limit 5""",
         (task_id,),
     ).fetchall()
     con.close()
     for (content,) in rows:
-        if "你是 AsterLab 的 Review agent" in content[:300]:
+        if not content or "你是 AsterLab 的 Review agent" in content[:300]:
+            continue
+        first = content.strip().splitlines()[0].strip() if content.strip() else ""
+        if first == "VERDICT: APPROVED":
+            return "APPROVED"
+        if first == "VERDICT: CHANGES":
+            return "CHANGES_REQUESTED"
+        if first == "VERDICT: BLOCKED-NEEDS-HUMAN":
+            return "BLOCKED"
+    for (content,) in rows:
+        if not content or "你是 AsterLab 的 Review agent" in content[:300]:
             continue
         if "REVIEW: APPROVED" in content:
             return "APPROVED"

@@ -51,15 +51,23 @@ def main():
         """select t.title,m.content,max(m.created_at) c from task_session_messages m
             join task_sessions s on s.id=m.task_session_id join tasks t on t.id=s.task_id
            where m.created_at > datetime('now','-1 day') and m.author_type='agent' and m.type='message'
-             and (m.content like '%REVIEW: APPROVED%' or m.content like '%REVIEW: CHANGES REQUESTED%')
+             and (m.content like '%VERDICT:%' or m.content like '%REVIEW: APPROVED%' or m.content like '%REVIEW: CHANGES REQUESTED%')
            group by t.id order by c desc"""
     ).fetchall()
     L.append(f"📝 Review 结论 {len(verdicts)} 条：")
     for r in verdicts:
         c = r["content"]
-        v = "APPROVED" if "REVIEW: APPROVED" in c and "你是 AsterLab" not in c[:300] else (
-            "CHANGES" if "REVIEW: CHANGES REQUESTED" in c and "你是 AsterLab" not in c[:300] else "?"
-        )
+        first = c.strip().splitlines()[0].strip() if c.strip() else ""
+        if first == "VERDICT: APPROVED":
+            v = "APPROVED"
+        elif first == "VERDICT: CHANGES":
+            v = "CHANGES"
+        elif first == "VERDICT: BLOCKED-NEEDS-HUMAN":
+            v = "BLOCKED"
+        else:
+            v = "APPROVED" if "REVIEW: APPROVED" in c and "你是 AsterLab" not in c[:300] else (
+                "CHANGES" if "REVIEW: CHANGES REQUESTED" in c and "你是 AsterLab" not in c[:300] else "?"
+            )
         extra = ""
         if v == "CHANGES":
             # first finding line after the verdict

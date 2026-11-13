@@ -84,35 +84,67 @@ def ci_all_green(task_id):
 
 
 def scan_ci_ready(review_tasks):
-    """Rewake reviews that stopped on pending CI once CI is green.
+    """Rewake quiet reviews whose PR is now green and mergeable.
 
     Kandev's PR poller updates checks_state but never wakes the waiting
-    session. Bounce the card to trigger a fresh review turn.
+    session. If the card sits in Review with no live session, an open
+    mergeable PR, green checks, and no agent message for 10+ minutes,
+    bounce it to trigger a fresh review turn. No keyword matching:
+    agent wording varies too much to rely on.
     """
+    import datetime
+
     for task in review_tasks:
         labels = lane_labels(task)
         if "human-hold" in labels:
             continue
-        # Latest agent message (any type text), not just verdicts: some
-        # reviews stop on pending CI without writing a verdict line.
         try:
             import sqlite3
 
             con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-            row = con.execute(
-                """select m.content from task_session_messages m
-                    join task_sessions s on s.id=m.task_session_id
-                   where s.task_id=? and m.author_type='agent'
-                   order by m.created_at desc limit 3""",
+            live = con.execute(
+                "select count(*) from task_sessions where task_id=? and state in ('RUNNING','SCHEDULING')",
                 (task["id"],),
-            ).fetchall()
+            ).fetchone()[0]
+            last = con.execute(
+                """select max(m.created_at) from task_session_messages m
+                    join task_sessions s on s.id=m.task_session_id
+                   where s.task_id=? and m.author_type='agent'""",
+                (task["id"],),
+            ).fetchone()[0]
             con.close()
         except Exception:  # noqa: BLE001
             continue
-        content = "\n".join(r[0] or "" for r in row)
-        if not any(k in content for k in CI_WAIT_KEYWORDS):
+        if live:
+            continue
+        if not last:
+            continue
+        try:
+            dt = datetime.datetime.fromisoformat(last.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            idle = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 60
+        except Exception:  # noqa: BLE001
+            continue
+        if idle < 10:
+            continue
+        pr = task_pr(task["id"])
+        if not pr or pr.get("state") != "open":
             continue
         if not ci_all_green(task["id"]):
+            continue
+        # Also require mergeable: gh is source of truth, poller lacks it.
+        try:
+            import subprocess
+
+            out = subprocess.run(
+                ["gh", "pr", "view", str(pr["pr_number"]), "--json", "mergeable",
+                 "--repo", "LLLin000/AsterLab"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if json.loads(out.stdout or "{}").get("mergeable") != "MERGEABLE":
+                continue
+        except Exception:  # noqa: BLE001
             continue
         # Retire old sessions so reuse doesn't resurrect the stale one.
         try:
@@ -385,7 +417,7 @@ def rework_count(task_id):
             """select m.content from task_session_messages m
                 join task_sessions s on s.id=m.task_session_id
                where s.task_id=? and m.author_type='agent' and m.type='message'
-                 and m.content like '%REVIEW: CHANGES REQUESTED%'
+                 and (m.content like '%VERDICT: CHANGES%' or m.content like '%REVIEW: CHANGES REQUESTED%')
                order by m.created_at""",
             (task_id,),
         ).fetchall()
@@ -394,9 +426,11 @@ def rework_count(task_id):
         for (content,) in rows:
             if "你是 AsterLab 的 Review agent" in content[:300]:
                 continue  # review prompt quoting the format, not a verdict
-            # Count distinct verdict messages, not quoted copies.
-            if content.strip().startswith("**REVIEW: CHANGES REQUESTED") or content.strip().startswith("REVIEW: CHANGES REQUESTED"):
+            first = content.strip().splitlines()[0].strip() if content.strip() else ""
+            if first == "VERDICT: CHANGES":
                 n += 1
+            elif content.strip().startswith("**REVIEW: CHANGES REQUESTED") or content.strip().startswith("REVIEW: CHANGES REQUESTED"):
+                n += 1  # legacy format
         return n
     except Exception as exc:  # noqa: BLE001 - never block feeding on stats
         print(f"rework count failed: {exc}", file=sys.stderr)
@@ -442,7 +476,14 @@ def task_category(task):
 
 
 def latest_review_verdict(task_id):
-    """Latest REVIEW: APPROVED / CHANGES REQUESTED from agent messages, or ''."""
+    """Latest verdict from agent messages. Returns (verdict, content).
+
+    New format (strict): first line is exactly one of
+      VERDICT: APPROVED | VERDICT: CHANGES | VERDICT: BLOCKED-NEEDS-HUMAN
+    Legacy format (transitional): REVIEW: APPROVED / REVIEW: CHANGES REQUESTED
+    anywhere in the message. Legacy support can be dropped once all open
+    cards have cycled through the new prompt.
+    """
     try:
         import sqlite3
 
@@ -451,15 +492,25 @@ def latest_review_verdict(task_id):
             """select m.content from task_session_messages m
                 join task_sessions s on s.id=m.task_session_id
                where s.task_id=? and m.author_type='agent' and m.type='message'
-                 and (m.content like '%REVIEW: APPROVED%' or m.content like '%REVIEW: CHANGES REQUESTED%')
-               order by m.created_at desc limit 5""",
+               order by m.created_at desc limit 20""",
             (task_id,),
         ).fetchall()
         con.close()
         for (content,) in rows:
-            # Skip review prompts that merely quote the verdict format.
-            head = content[:300]
-            if "你是 AsterLab 的 Review agent" in head:
+            if not content:
+                continue
+            if "你是 AsterLab 的 Review agent" in content[:300]:
+                continue
+            first = content.strip().splitlines()[0].strip() if content.strip() else ""
+            if first == "VERDICT: APPROVED":
+                return "APPROVED", content
+            if first == "VERDICT: CHANGES":
+                return "CHANGES_REQUESTED", content
+            if first == "VERDICT: BLOCKED-NEEDS-HUMAN":
+                return "BLOCKED", content
+        # Legacy fallback: old REVIEW: format anywhere in message.
+        for (content,) in rows:
+            if not content or "你是 AsterLab 的 Review agent" in content[:300]:
                 continue
             if "REVIEW: APPROVED" in content:
                 return "APPROVED", content
@@ -606,7 +657,9 @@ def scan_cardfix(tasks):
         if "human-hold" in labels or "tg-cardfix-sent" in labels:
             continue
         verdict, content = latest_review_verdict(task["id"])
-        hit = verdict == "CHANGES_REQUESTED" and any(k in content for k in CARD_FIX_KEYWORDS)
+        hit = (verdict == "BLOCKED") or (
+            verdict == "CHANGES_REQUESTED" and any(k in content for k in CARD_FIX_KEYWORDS)
+        )
         if not hit:
             # Agent preflight: CARD-BROKEN in any recent agent message.
             try:
