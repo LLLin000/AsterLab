@@ -10843,7 +10843,7 @@ fn link_local_asset(
     if actor_id.len() > 200 || actor_id.chars().any(char::is_control) {
         return Err(CliError::input("actor_id is invalid"));
     }
-    let root_dir = request.root_dir.trim();
+    let root_dir = request.root_dir.as_str();
     if root_dir.is_empty() {
         return Err(CliError::input("root_dir is required"));
     }

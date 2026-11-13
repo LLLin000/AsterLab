@@ -92,7 +92,6 @@ pub fn classify(path: &Path) -> MediaType {
 /// Normalizes a relative path to forward slashes and rejects anything that
 /// could escape the logical root.
 pub fn normalize_relative_path(value: &str) -> Result<String, AssetError> {
-    let value = value.trim();
     if value.is_empty() {
         return Err(invalid("relative path is required"));
     }
@@ -154,14 +153,13 @@ pub fn resolve(root_dir: &Path, relative_path: &str) -> Result<PathBuf, AssetErr
     Ok(target)
 }
 
-/// Streams a file through SHA-256. No buffer proportional to the file size and
-/// no temporary copy is created.
-pub fn hash_file(path: &Path) -> Result<String, AssetError> {
-    let mut file = File::open(path)?;
+/// Streams a reader through SHA-256. No buffer proportional to the content
+/// size and no temporary copy is created.
+fn hash_reader<R: Read>(mut reader: R) -> Result<String, AssetError> {
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 8192];
     loop {
-        let read = file.read(&mut buffer)?;
+        let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
@@ -172,6 +170,15 @@ pub fn hash_file(path: &Path) -> Result<String, AssetError> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
+}
+
+/// Streams a regular file through SHA-256.
+pub fn hash_file(path: &Path) -> Result<String, AssetError> {
+    let metadata = fs::metadata(path)?;
+    if !metadata.is_file() {
+        return Err(invalid("asset path must be a regular file"));
+    }
+    hash_reader(File::open(path)?)
 }
 
 /// Builds a validated reference from a logical root and either an absolute
@@ -231,14 +238,21 @@ pub fn link(
     };
 
     let metadata = fs::metadata(&target)?;
-    if metadata.is_dir() {
+    if !metadata.is_file() {
+        return Err(invalid("asset path must be a regular file"));
+    }
+    let mut file = File::open(&target)?;
+    // Re-read from the opened handle so size, mtime and hash describe the same
+    // file generation even if the path was replaced between the checks.
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
         return Err(invalid("asset path must be a regular file"));
     }
     let mod_time = metadata
         .modified()
         .map(format_rfc3339)
         .unwrap_or_else(|_| String::new());
-    let sha256 = hash_file(&target)?;
+    let sha256 = hash_reader(&mut file)?;
     Ok(AssetRef {
         id: stable_id(root_id, &relative_path),
         root_id: root_id.to_owned(),
@@ -351,7 +365,25 @@ mod tests {
         assert!(normalize_relative_path("d1/../../secret.txt").is_err());
         assert!(normalize_relative_path("/abs/file").is_err());
         assert!(normalize_relative_path("./file").is_err());
-        assert!(normalize_relative_path("  ").is_err());
+        assert_eq!(normalize_relative_path("  ").unwrap(), "  ");
+    }
+
+    #[test]
+    fn link_preserves_spaces_in_legal_file_names() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.txt"), b"plain").unwrap();
+        fs::write(root.join(" a.txt"), b"spaced-content").unwrap();
+
+        let spaced = link("root", &root, None, Some(" a.txt")).unwrap();
+        let plain = link("root", &root, None, Some("a.txt")).unwrap();
+        assert_eq!(spaced.relative_path, " a.txt");
+        assert_eq!(spaced.size, b"spaced-content".len() as u64);
+        assert_ne!(
+            spaced.sha256, plain.sha256,
+            "the spaced name must not resolve to the unspaced file"
+        );
     }
 
     #[test]
@@ -427,6 +459,21 @@ mod tests {
         let tree = TempTree::new();
         let error = link("root", &tree.0, None, Some("missing.tif")).unwrap_err();
         assert!(error.0.contains("unavailable"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_rejects_non_regular_files_without_opening_them() {
+        use std::os::unix::net::UnixListener;
+
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        let socket = root.join("pipe.sock");
+        let _listener = UnixListener::bind(&socket).unwrap();
+
+        let error = link("root", &root, None, Some("pipe.sock")).unwrap_err();
+        assert!(error.0.contains("regular file"), "{error}");
     }
 
     #[test]
