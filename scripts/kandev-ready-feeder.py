@@ -383,9 +383,8 @@ forbid:
 6. 下一步方向：3-5 个候选，每个一句话 + 理由 + 依赖。不做决定，等人工拍板。
 
 输出：
-1. 写到 docs/release/retrospective-{stamp}.md
 2. 提交到分支 agent/RETRO-{stamp} 并开 PR（标题带 RETRO-{stamp}），PR 描述贴报告全文，PR 正文末尾附 `<!-- kandev-task: <本任务id> -->` 和上面的 scope 块原文
-3. 在任务评论写 REVIEW-READY
+3. 开完 PR 后直接结束 turn。不要写任务评论（你没有评论工具），不要合并 PR。系统检测到 PR 后会自动通知人工来看报告。
 不要合并 PR，等人工看完报告再决定。
 """
 
@@ -792,6 +791,8 @@ def scan_cardfix(tasks):
     these need a human card fix.
     """
     for task in tasks:
+        if task.get("title", "").startswith("RETRO-"):
+            continue  # retro cards report via scan_retro_ready, not cardfix
         labels = lane_labels(task)
         if "human-hold" in labels or "tg-cardfix-sent" in labels:
             continue
