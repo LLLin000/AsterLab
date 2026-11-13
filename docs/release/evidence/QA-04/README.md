@@ -20,7 +20,7 @@ Tested implementation commit: `48782d985e0f9868306f07731108493cfb65defc`
 
 ## Rust test output
 
-The required command was reported passing in the implementation session. Its PR description initially included only an excerpt. This review shell does not have Cargo installed (`cargo: command not found`), so the command could not be re-run here. The PR's Linux CI job ran the locked equivalent and passed all three Core test groups; complete job output is available at:
+The required command was rerun after the evidence correction using the installed Cargo executable with the requested manifest and test arguments; the bare `cargo` name is not on this shell's PATH. No build-cache environment variables were overridden. The rerun passed 256 unit tests, 3 catalog-draft tests, 6 operation-surface tests, and 0 doc tests. The Linux CI job below also ran the locked equivalent; its complete output is linked here:
 
 https://github.com/LLLin000/AsterLab/actions/runs/43375499648/job/131720929972
 
