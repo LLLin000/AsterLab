@@ -22,7 +22,7 @@ use crate::agent_edit::{
     AgentEditError, AgentEditErrorCode, CommitResult, ConfirmRequest, IssueSeverity,
     ResolvedFieldDiff, AGENT_EDIT_SCHEMA_VERSION,
 };
-use crate::agent_edit_validate::{proposal_digest, validate, EditTargetStore};
+use crate::agent_edit_validate::{normalize_unit, proposal_digest, validate, EditTargetStore};
 use crate::semantic_changeset::{ChangeTargetKind, FieldOperation};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -288,6 +288,12 @@ fn applied_diffs(diffs: &[ResolvedFieldDiff]) -> Vec<ResolvedFieldDiff> {
             let mut applied = diff.clone();
             if let Some(Value::Object(object)) = applied.requested.as_mut() {
                 object.insert("confirmed".to_owned(), Value::Bool(true));
+                if let Some(Value::String(unit)) = object.get("unit") {
+                    let normalized = normalize_unit(unit).to_owned();
+                    if &normalized != unit {
+                        object.insert("unit".to_owned(), Value::String(normalized));
+                    }
+                }
             }
             applied
         })
@@ -789,6 +795,20 @@ mod tests {
         let previous = &store.protocol("protocol-rna-v1").unwrap().data;
         assert_eq!(previous["root_bindings"], json!([]));
         assert!(previous.get("agent_edit").is_none());
+    }
+
+    #[test]
+    fn unit_alias_is_stored_as_ul() {
+        let mut store = root_store();
+        let mut proposal = proposal();
+        proposal.diffs[0].after = Some(binding("volume_per_sample", json!(250.0), Some("µL")));
+        let request = confirm(proposal, "key-unit-alias");
+        let result = commit(&request, &mut store).unwrap();
+
+        assert_eq!(result.applied[0].requested.as_ref().unwrap()["unit"], "uL");
+        let next = &store.protocol("protocol-rna-v2").unwrap().data;
+        assert_eq!(next["root_bindings"][0]["unit"], "uL");
+        assert_eq!(next["root_bindings"][0]["value"], 250.0);
     }
 
     #[test]
