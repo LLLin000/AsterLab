@@ -77,6 +77,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `plate.create` / `well.set` | 创建铺板布局、设置孔位标签 | create/update |
 | `note.create` | 给实验运行追加自由文本记录 | create |
 | `execution_event.create` | 追加结构化操作、材料使用、数值测量、偏差或观察事件 | create |
+| `readout.submit` / `readout.batch` | 幂等提交单条读数，或表格/孔板批量读数（`cells` 或 CSV），一次事务写入一条 measurement 事件 | create |
 | `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
 | `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
 | `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
@@ -117,6 +118,16 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 `run.workspace` 只读读取 Run 冻结的 `design_version_id` 和 `protocol_manifest`，返回 `frozen_design`、`scopes`、`steps`、`tasks`、`occurrences`、`materials`、`plates`、`events`；不存在冻结快照时返回错误，不回退当前 Design。旧事件没有 `occurrence_id` 时保留为历史，不自动生成执行实例。
 
 `run.revise` 必须提供 `id` 和当前 `expected_revision`，只接受 `title`、`scheduled_date`；日期可传 `null` 清除。状态仍通过 `run.set_status` 修订。设计版本、Protocol 清单、材料清单、轮次和来源关系属于创建时冻结快照，修订接口拒绝这些字段。HTTP API 与 CLI 共用同一补丁校验；网页不得整体替换 Run JSON。
+
+## 读数提交（readout.*）
+
+`readout.submit` 与 `readout.batch` 把读数写进现有 `execution_event` 追加记录；不新增记录类型，也不建第二份读数表。两者都只接受本次 Run 冻结清单内的 `step_path` + `protocol_version_id`（检测读数还需 `assay_id`；共享制备读数用 `planned_output_id`），引用校验复用 `execution_event.create` 的同一套逻辑。
+
+- `readout.submit` 输入 `{run_id, step_path, endpoint, protocol_version_id, value | qualifier, unit?, sample_id?, timepoint?, assay_id?, planned_output_id?, operator?, occurred_at?, content?}`。必须有且只有一个 `value` 或 `qualifier`（`not_detected` / `below_lod` / `above_uloq` / `invalid` / `other`）。数值同时写进 `measurements[]` 与 `readouts[]`；带 `qualifier` 的只写 `readouts[]`，不伪造成 0。输出 `{record, idempotency_key, replayed}`。
+- `readout.batch` 输入 `{run_id, step_path, protocol_version_id, plate_id, schema_id, schema_version=1, assay_id?, timepoint?, batch_id?, ...}`，读数用 `cells[]`（`row`/`column` 从 0 开始，可选 `field`、`value`、`unit`、`sample_id`、`group`、`replicate`、`status`）或 `csv` 二选一。CSV 表头 `row,column,field[,value,unit,sample_id,group,replicate,status]`，未知或重复列、缺列、行列越界、同批重复孔位、`status` 与 `value` 矛盾都会拒绝整批。输出 `{record, idempotency_key, replayed, accepted}`。
+- 幂等：`readout.submit` 的键是 `(run_id, step_path, endpoint, sample_id, timepoint)`；`readout.batch` 的键是同一组身份字段按孔位（`plate_id, row, column, field`）展开后的集合——同一批里多个孔位可以共享 endpoint/sample/timepoint，只用卡片元组会互相覆盖。`run_id` 属于键，因此不同 Run 的同名读数互不影响。重复提交返回首次记录并置 `replayed=true`；值属于内容不属于身份，故重放不会覆盖已记录值。
+- 原子性：整批在一个事务内校验并写入一条 `measurement` 事件；任何一行失败都返回 `INVALID_INPUT` 并附 `issues[]`，数据库不产生部分事件。`readout.batch` 必须能唯一确定本次 Run 的一块孔板，否则返回 `unresolved_plate` / `ambiguous_plate` / `unknown_plate`，不猜孔位。
+- 与 `execution_event.create` 的关系：后者仍是多用途底层追加接口（含操作、材料、检查等）；`readout.*` 只覆盖读数，`step_status`、`checks`、`controls` 不通过它写入。
 
 ## `step.edit`：步骤块级结构化编辑
 
@@ -161,7 +172,6 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - 错误码沿用 agent edit v1 的封闭集合（`INVALID_PROPOSAL`、`INVALID_BINDING`、`UNIT_MISMATCH`、`STALE_REFERENCE`、`FORBIDDEN_FIELD`、`VERSION_CONFLICT`、`CONFIRMATION_REQUIRED`、`CONFIRMATION_MISMATCH`、`IDEMPOTENCY_MISMATCH`），没有新增含义。退出码仍为 `0/2/3/4/5`。
 - 语义拒绝是结果而非传输错误：validate 阶段返回 `ok=true` + `status:"blocked"` + `issues[]`（`code`/`severity`/`path`/`message`/`affects`/`next_action`），blocked 结果不带 `blocks[]`，不得据此 commit。
 - 编辑结果只产生步骤块版本。Protocol 版本不可变，若要某个 Protocol 使用新根块，另调 `protocol.revise`（`root_block_version_id` 用返回的 `new_root_block_version_id`）；已冻结 Run 继续引用旧版本。
-
 ## 设计数据语义
 
 `design.create` 接收 `project_id` 和 `design` 对象。关键字段含义：
