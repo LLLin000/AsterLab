@@ -52,6 +52,30 @@ required = {"Experiment", "Group", "Assay", "Timepoint", "Step", "Block",
 print("objects covered:", ",".join(sorted(objects)))
 assert required <= objects, f"missing objects: {sorted(required - objects)}"
 
+# Readers must not claim design.map for fields the typed map does not expose.
+import re
+map_src = open("crates/asterlab-core/src/design_map.rs", encoding="utf-8").read()
+def struct_block(name):
+    m = re.search(r"pub struct " + name + r"\s*\{(.*?)\n\}", map_src, re.S)
+    assert m, f"struct {name} not found"
+    return m.group(1)
+map_content = struct_block("DesignMapContent")
+assay = struct_block("DesignAssay")
+output = struct_block("PlannedOutputSummary")
+for field in ("primary_endpoint", "sample_size_rationale", "planned_run_count"):
+    assert field not in map_content, f"{field} unexpectedly in DesignMapContent"
+assert "control_group_ids" not in assay, "control_group_ids unexpectedly in DesignAssay"
+assert "root_binding_count" in output
+for field in ("primary_endpoint", "sample_size_rationale", "planned_run_count",
+              "control_group_ids"):
+    rows = [l for l in body if f"`{field}`" in l]
+    assert rows, f"missing field row for {field}"
+    for row in rows:
+        assert "design.get" in row, f"reader for {field} must be design.get: {row}"
+root_rows = [l for l in body if "root_bindings" in l and "planned_outputs" in l]
+assert root_rows and all("design.get" in l and "root_binding_count" in l for l in root_rows)
+print("design.map coverage: raw-only fields point at design.get")
+
 for heading in ("## 2. 数据流表", "## 3. 冲突与重复清单",
                 "## 4. 模块目录与契约陈旧事实（供 DOC-05）", "## 5. 未决问题"):
     assert heading in lines, f"missing section {heading}"

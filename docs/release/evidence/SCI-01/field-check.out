@@ -1,6 +1,7 @@
 field table header + rows: 64
 field table violations: 0
 objects covered: Assay,Block,Experiment,Group,Notebook,Protocol,Readout,Run,Sample,Step,Timepoint
+design.map coverage: raw-only fields point at design.get
 sections: data-flow / conflicts / stale-facts / open-questions present
 authority mentions: 24
 manifest modules: 16

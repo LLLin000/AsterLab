@@ -33,9 +33,9 @@
 | Experiment | `research_question` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map` | 缺字段回退空，不继承 `objective` | 是 |
 | Experiment | `factors[]` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map` | 名称唯一、单因素≤50 水平；不从组名推断 | 是 |
 | Experiment | `experimental_unit` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map` | 缺失时进入 `unresolved`，不默认“孔” | 是 |
-| Experiment | `primary_endpoint` / `endpoint_method` / `endpoint_unit` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map` | 是概要字段；不自动关联到某个 Assay | 是 |
-| Experiment | `sample_size_rationale` / `randomization` / `blinding` / `analysis_plan` / 纳排标准 | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map` | 只存研究者原文，不生成依据 | 是 |
-| Experiment | `planned_run_count` / `planned_run_relationship` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map` | 轮次数不得换算成独立 n | 是 |
+| Experiment | `primary_endpoint` / `endpoint_method` / `endpoint_unit` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.get`（`design.map` 不返回该概要字段） | 是概要字段；不自动关联到某个 Assay | 是 |
+| Experiment | `sample_size_rationale` / `randomization` / `blinding` / `analysis_plan` / 纳排标准 | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.get`（`design.map` 不返回这些依据字段） | 只存研究者原文，不生成依据 | 是 |
+| Experiment | `planned_run_count` / `planned_run_relationship` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.get`（`design.map` 不返回轮次字段） | 轮次数不得换算成独立 n | 是 |
 | Group | `group_specs[].id` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.groups[].id` | Assay 对照通过该 ID 引用，不按名称猜 | 是 |
 | Group | `group_specs[].name` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.groups[].name` | 显示名；名称不承担引用身份 | 是 |
 | Group | `group_specs[].role` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.groups[].role` | 枚举校验；未知不猜 | 是 |
@@ -45,8 +45,8 @@
 | Assay | `assays[].id` / `assays[].title` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.assays[]` | ID 稳定；Run scope 引用该 ID | 是 |
 | Assay | `assays[].endpoint` / `method` / `unit` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.assays[]` | 测量指标不是原始读数 | 是 |
 | Assay | `assays[].group_ids[]` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.assays[].group_ids` | 必须引用本设计组 ID | 是 |
-| Assay | `assays[].control_group_ids[]` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.assays[]` | 对照关系用 ID；`controls[]` 文本只是说明 | 是 |
-| Assay | `assays[].protocol_version_id` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `protocol.block.preview`、`run.workspace.scopes` | `run.create` 解析为精确 `protocol_manifest` 条目 | 是 |
+| Assay | `assays[].control_group_ids[]` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.get`（`DesignAssay` 映射不含 `control_group_ids`） | 对照关系用 ID；`controls[]` 文本只是说明 | 是 |
+| Assay | `assays[].protocol_version_id` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.assays[]`、`run.workspace.scopes` | `run.create` 解析为精确 `protocol_manifest` 条目 | 是 |
 | Assay | `assays[].container_type` / `container_format` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.assays[]` | 计划容器类型；不生成实际坐标 | 是 |
 | Timepoint | `assays[].timepoints[]` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.assays[].timepoints` | 每项 Assay 自有；不从其他 Assay 继承 | 是 |
 | Timepoint | `assays[].timepoint_timing[]` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.assays[].timepoint_timing` | 锚点+偏移+窗口；标签顺序须与 `timepoints[]` 一致 | 是 |
@@ -65,22 +65,22 @@
 | Block | `steps[]`（`text` / `block_use`） | `protocol_block_version.data_json` | `protocol.block.create` / `protocol.block.revise` | `protocol.block.get`、`protocol.block.preview` | 组合块固定子块精确版本，禁环 | 是 |
 | Block | `StepBinding.value` / `source_slot` / `unit` | `protocol_block_version.data_json`（BlockUse）与 Protocol 根绑定 | `protocol.block.create/revise`、`protocol.create/revise` | `protocol.block.preview` | `value` 与 `source_slot` 二选一；父子映射必须显式 | 是 |
 | Block | `module_contract` / `module_origin` / `catalog_review` | `protocol_block_version.data_json` 可选 sidecar | `protocol.block.create/revise`（编译期写入） | `protocol.block.get` | 同一科学知识不得在 `StepMeta` 再存一份权威值 | 是 |
-| Protocol | `root_block_version_id` / `root_bindings[]` | `records.data_json(kind=protocol_version)` | `protocol.create` / `protocol.revise` | `protocol.block.preview` | 只改绑定不复制块；新版本追加 | 是 |
+| Protocol | `root_block_version_id` / `root_bindings[]` | `records.data_json(kind=protocol_version)` | `protocol.create` / `protocol.revise` | `record.get`（原始绑定）、`protocol.block.preview`（解析结果） | 只改绑定不复制块；新版本追加 | 是 |
 | Protocol | `resolved_parameters[]` / `unresolved_parameters[]` | 无独立存储 | 只读 | `protocol.block.preview`、`run.workspace.scopes` | 展开绑定后派生；`ready` 只表示必填绑定完成 | 是（manifest 结果） |
-| Run | `run.id` / `run_index` | `records`（`kind=run`） | `run.create` | `run.list`、`run.workspace` | 索引按设计递增 | 否（Run 身份本身） |
+| Run | `run.id` / `run_index` | `records`（`kind=run`） | `run.create` | `run.list`（摘要）、`record.get`（原始 `run_index`） | 索引按设计递增 | 否（Run 身份本身） |
 | Run | `status` | `records.data_json(kind=run)` | `run.create` / `run.set_status` | `run.list`、`run.workspace.status` | 参数未齐时拒绝 `in_progress` | 否 |
 | Run | `title` / `scheduled_date` | `records.data_json(kind=run)` | `run.create` / `run.revise` | `run.list` | `run.revise` 只接受这两个字段 | 否 |
-| Run | `design_version_id` / `design_revision` | `records.data_json(kind=run)` | `run.create` | `run.workspace.frozen_design` | 必须指向不可变 DesignVersion；缺失即错误，不回退 | 是（冻结指针） |
+| Run | `design_version_id` / `design_revision` | `records.data_json(kind=run)` | `run.create` | `run.workspace`（顶层字段）与 `run.workspace.frozen_design` | 必须指向不可变 DesignVersion；缺失即错误，不回退 | 是（冻结指针） |
 | Run | `protocol_manifest[]` | `records.data_json(kind=run)` | `run.create` | `run.workspace.scopes` / `.steps` | 冻结每个 Assay/PlannedOutput 的 Protocol 精确版本、根块、参数 | 是 |
 | Run | `material_manifest[]` | `records.data_json(kind=run)` | `run.create` | `run.workspace.materials` | 每个 `PlannedOutput` 一条；消费者只列引用 | 是 |
-| Run | `container_plan` / `labware_profiles` | `records.data_json(kind=run)` | `run.create` | `run.workspace`（计划容器上下文） | 冻结计划和 Profile 全文，避免 Registry 漂移 | 是 |
-| Run | `repeat_of_run_id` / `repeat_relationship` | `records.data_json(kind=run)` | `run.create` | `run.list`、`run.workspace` | 只表达再次执行；不证明样本独立 | 是 |
+| Run | `container_plan` / `labware_profiles` | `records.data_json(kind=run)` | `run.create` | `record.get`（冻结的 Run 原始数据） | 冻结计划和 Profile 全文，避免 Registry 漂移 | 是 |
+| Run | `repeat_of_run_id` / `repeat_relationship` | `records.data_json(kind=run)` | `run.create` | `record.get`（原始 Run 数据） | 只表达再次执行；不证明样本独立 | 是 |
 | Run | `occurrence_id` + 上下文 | `execution_event` 记录内首次写定的字段 | `execution_event.create` | `run.workspace.events[].occurrence_id` | 首次事件分配；旧事件不自动补；与 `idempotency_key` 分离 | 否（事实追加） |
 | Sample | `sample_allocations[].group_id` / `assay` / `planned_output_id` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.sample_links[]` | 计划分配关系，不是实际样本记录 | 是 |
 | Sample | `sample_allocations[].physical_slots_per_group` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.sample_links[]` | 计划位置数；≠实体样本数、≠n | 是 |
 | Sample | `sample_allocations[].physical_slots_scope` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.sample_links[]` | `per_timepoint` / `whole_assay_unique_positions` / `unknown` | 是 |
 | Sample | `sample_allocations[].timepoint_relation` / `source_relation` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.sample_links[]` | 时间关系与跨检测来源分开；禁写旧 `relation` | 是 |
-| Sample | `planned_outputs[].id` / `title` / `protocol_version_id` / `root_bindings[]` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.map.planned_outputs[]`、`run.workspace.materials` | 同 ID 才表示计划共用一份制备 | 是 |
+| Sample | `planned_outputs[].id` / `title` / `protocol_version_id` / `root_bindings[]` | `records.data_json(kind=design)` | `design.create` / `design.revise` | `design.get`（原始绑定）；`design.map` 只给摘要与 `root_binding_count`；`run.workspace.materials` 给冻结消费者 | 同 ID 才表示计划共用一份制备 | 是 |
 | Sample | `well.group_label` / `well.sample_id` / `well.note` | `records.data_json(kind=plate)`（`well` 映射） | `plate.create`、`well.set` | `run.workspace.plates[].wells[]` | 实际孔位映射；未映射不生成坐标 | 否（Run 读取实际板图） |
 | Sample | `event.sample_ids[]` / `materials[]` / `lineage[]` | `execution_event` 记录 | `execution_event.create` | `run.workspace.events[]` | 实际使用/分样/顺序关系；计划共用不证明材料共用 | 否（追加事实） |
 | Readout | `measurements[]` | `execution_event` 记录 | `execution_event.create` | `run.workspace.events[]`、`reading_facts` | 数值测量；`null` 不被写成 0 | 否 |
