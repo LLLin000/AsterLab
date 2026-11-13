@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 
+	"asterlab-mygo-prototype/internal/agentedit"
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/designer"
 	"asterlab-mygo-prototype/internal/theme"
@@ -13,6 +14,18 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 )
+var agentEditStates = map[*app]*agentedit.State{}
+func proposalState(a *app) *agentedit.State {
+	if s:=agentEditStates[a]; s!=nil{return s}
+	s:=&agentedit.State{Client:agentedit.CLIClient{},ConfirmedBy:"researcher",OnCommitted:func(agentedit.CommitResult){if a.designDoc!=nil{a.loadDesign(a.designDoc.DesignID)}}}
+	agentEditStates[a]=s;return s
+}
+// Agent proposal entry stays secondary to Create Run — UX-P1/P2/P3/P5 and UX-LAYOUT.
+func renderAgentProposal(c *ui.Context,a *app) {
+	s:=proposalState(a)
+	if components.Button(c,"Agent 提案",components.ButtonSecondary).Clicked(){s.Open=true;s.Closed=false}
+	if s.Open {components.Dialog(c,&s.Open,components.DialogOptions{Label:"Agent 提案"},func(panel ui.Element){panel.FillWidth().MaxWidth(720).MaxWidthPercent(94).MaxHeightPercent(90).Children(func(){agentedit.View(c,s)})});if !s.Open{s.Closed=true}}
+}
 
 func designPage(c *ui.Context, a *app) {
 	if a.designDoc != nil {
@@ -23,21 +36,22 @@ func designPage(c *ui.Context, a *app) {
 		ui.Column(c).Fill().Center().Gap(c.Theme().Space(2)).Children(func() {
 			ui.Text(c, "AsterDoc 设计无法读取").FontSize(16).Bold().TextColor(c.Theme().Danger)
 			ui.Text(c, a.designDocErr).FontSize(13).TextColor(c.Theme().TextMuted)
+			renderAgentProposal(c,a)
 		})
 		return
 	}
 	if a.designer != nil {
 		designer.View(c, a.designer)
+		renderAgentProposal(c,a)
 		return
 	}
 	t := c.Theme()
 	message := "请从项目页选择一个已保存的设计。"
-	if a.designSvc == nil {
-		message = "设计服务不可用。"
-	}
+	if a.designSvc == nil { message = "设计服务不可用。" }
 	ui.Column(c).Fill().Center().Gap(t.Space(2)).Children(func() {
 		components.Text(c, "还没有打开的设计").FontSize(t.Rem(1.15)).FontWeight(600)
 		components.Text(c, message).TextColor(t.TextMuted)
+		renderAgentProposal(c,a)
 	})
 }
 
@@ -54,7 +68,7 @@ func asterDesignPage(c *ui.Context, a *app) {
 		return
 	}
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(4)).Border(1, t.Border).
+		ui.Row(c).FillWidth().Wrap().Padding(t.Space(2), t.Space(4)).Border(1, t.Border).
 			Background(t.Surface).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 			ui.Text(c, "AsterDoc 设计").FontSize(16).Bold().TextColor(t.Text)
 			ui.Text(c, fmt.Sprintf("rev %d", a.designDoc.Revision)).FontSize(11).
@@ -96,6 +110,7 @@ func asterDesignPage(c *ui.Context, a *app) {
 				a.preflightRisk = false
 				a.preflightOpen = true
 			}
+			renderAgentProposal(c,a)
 		})
 		if a.designDocErr != "" {
 			ui.Row(c).FillWidth().Padding(6, 12).Background(theme.GetTokens(t).DangerBg).Children(func() {
