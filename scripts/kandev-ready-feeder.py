@@ -17,6 +17,10 @@ Environment:
   KANDEV_VPS_REVIEW_STEP   default Review step
   KANDEV_AGENT_WIP         default 2
   KANDEV_REVIEW_WIP        default 2
+  KANDEV_DB                default /var/lib/kandev/data/kandev.db (read-only, for rework counting)
+  KANDEV_REWORK_LIMIT      default 3 (Review->Agent trips before human hold)
+  TELEGRAM_BOT_TOKEN       optional; when set, human-hold alerts go to Telegram
+  TELEGRAM_CHAT_ID         optional; required with TELEGRAM_BOT_TOKEN
 """
 
 import argparse
@@ -37,7 +41,50 @@ AGENT = os.environ.get("KANDEV_VPS_AGENT_STEP", "47b1aac7-2bb9-4b26-b8e3-412c424
 REVIEW = os.environ.get("KANDEV_VPS_REVIEW_STEP", "2b6d9951-e9fd-4578-8bf4-6f3e7aa7ce31")
 WIP = int(os.environ.get("KANDEV_AGENT_WIP", "2"))
 REVIEW_WIP = int(os.environ.get("KANDEV_REVIEW_WIP", "2"))
+DB = os.environ.get("KANDEV_DB", "/var/lib/kandev/data/kandev.db")
+REWORK_LIMIT = int(os.environ.get("KANDEV_REWORK_LIMIT", "3"))
+TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 ACTIVE_STATES = {"IN_PROGRESS", "SCHEDULING", "WAITING_FOR_INPUT"}
+
+
+def rework_count(task_id):
+    """How many times an agent moved this task Review -> Agent."""
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        n = con.execute(
+            """select count(*) from task_step_transitions
+                where task_id=? and from_workflow_step_id=? and to_workflow_step_id=?
+                  and trigger='engine_transition' and actor_kind='agent'""",
+            (task_id, REVIEW, AGENT),
+        ).fetchone()[0]
+        con.close()
+        return n
+    except Exception as exc:  # noqa: BLE001 - never block feeding on stats
+        print(f"rework count failed: {exc}", file=sys.stderr)
+        return 0
+
+
+def notify_human_hold(task, rounds):
+    text = (
+        f"Kandev 熔断：{task['title'][:60]}\n"
+        f"返工 {rounds} 次仍未过 Review，已留在 Review 等人工。\n"
+        f"task_id={task['id']}"
+    )
+    if TG_TOKEN and TG_CHAT:
+        try:
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                data=json.dumps({"chat_id": TG_CHAT, "text": text}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=15)
+            print(f"telegram sent for {task['title'][:40]}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"telegram failed: {exc}", file=sys.stderr)
+    print(f"HUMAN HOLD: {text}", file=sys.stderr)
 
 
 def api(method, path, body=None):
@@ -127,8 +174,40 @@ def run_once():
         if task.get("workflow_step_id") == READY and not is_eligible(task):
             move(task, INBOX, "Ready blocked -> Inbox")
 
-    # Backpressure: do not feed new work while Review is full.
+    # Rework circuit breaker: a card that bounced Review -> Agent REWORK_LIMIT
+    # times stays in Review for a human. Notify once (tracked by label).
     review_tasks = [t for t in detailed if t.get("workflow_step_id") == REVIEW]
+    for task in review_tasks:
+        labels = lane_labels(task)
+        if "human-hold" in labels:
+            continue
+        rounds = rework_count(task["id"])
+        if rounds >= REWORK_LIMIT:
+            # Labels have no write API; the column is plain JSON text.
+            try:
+                import sqlite3
+
+                wcon = sqlite3.connect(DB)
+                cur = json.loads(
+                    wcon.execute(
+                        "select labels from tasks where id=?", (task["id"],)
+                    ).fetchone()[0]
+                    or "[]"
+                )
+                if "human-hold" not in cur:
+                    cur.append("human-hold")
+                    wcon.execute(
+                        "update tasks set labels=? where id=?",
+                        (json.dumps(cur), task["id"]),
+                    )
+                    wcon.commit()
+                    notify_human_hold(task, rounds)
+                wcon.close()
+            except Exception as exc:  # noqa: BLE001
+                print(f"human-hold label failed: {exc}", file=sys.stderr)
+
+    # Backpressure: do not feed new work while Review is full.
+    # human-hold cards still occupy Review slots: clear them by hand.
     if len(review_tasks) >= REVIEW_WIP:
         print(f"review full ({len(review_tasks)}/{REVIEW_WIP}); not feeding")
         return
