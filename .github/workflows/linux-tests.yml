@@ -81,3 +81,6 @@ jobs:
           python3 scripts/ci/test_native_generator_hash.py
           python3 scripts/ci/native_generator_hash.py --check
           python3 scripts/ci/native_generator_hash.py --regen 2
+      - name: Go tests
+        working-directory: prototypes/mygo-run
+        run: go test ./...

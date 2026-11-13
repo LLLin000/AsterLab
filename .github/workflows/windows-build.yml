@@ -72,6 +72,11 @@ jobs:
         # Runs `mygo native check .\modules\runs`, then `go build -tags=e2e`,
         # then writes dist/BUILD_INFO.txt with the commit and both hashes.
         run: ./scripts/mygo-build.ps1
+      - name: Go tests
+        working-directory: prototypes/mygo-run
+        run: |
+          go test -tags=e2e ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Generated bindings survive the Windows build
         # `mygo native check` regenerates whenever it cannot recognise an
