@@ -13,15 +13,15 @@
 
 | 分类 | 审查方法 | 合并权限 |
 |---|---|---|
-| `(Docs)` | diff 只落在 `scope.write`；运行卡片验收；检查链接、事实与版本 | Review agent 可 squash-merge |
-| `(Audit)` | 只读审计；检查证据、commit/file/命令、结论表 | Review agent 可 squash-merge |
-| `(Build)` | diff 只在 `.github/**` 或 `scripts/ci/**`；检查 YAML、命令、无 secrets | Review agent 可 squash-merge |
-| `(Contract)` | 契约一致性、类型可编译、错误码可引用 | 只给结论，人工合并 |
-| `(Core)` | diff、Rust 测试、冻结语义、错误路径 | 只给结论，人工合并 |
-| `(UI)` | diff、Windows 截图/录屏、`ux-contract.md` 规则 id | 只给结论，人工合并 |
-| `(Integration)` | fixture 路径、原始输出、证据目录、冻结数据 | 只给结论，人工合并 |
-| `(QA)` | 测试矩阵、隔离数据、数据库校验和、复现步骤 | 只给结论，人工合并 |
-| `(Release)` | 干净 Windows/CI、安装/升级/回滚证据、资产 hash | 只给结论，人工合并 |
+| `(Docs)` | diff 只落在 `scope.write`；运行卡片验收；检查链接、事实与版本 | 门槛通过且符合设计即 squash-merge |
+| `(Audit)` | 只读审计；检查证据、commit/file/命令、结论表 | 门槛通过且符合设计即 squash-merge |
+| `(Build)` | diff 只在 `.github/**` 或 `scripts/ci/**`；检查 YAML、命令、无 secrets | 门槛通过且符合设计即 squash-merge；`.github/**` 改动合并后通知人工 |
+| `(Contract)` | 契约一致性、类型可编译、错误码可引用 | 门槛通过且符合设计即 squash-merge |
+| `(Core)` | diff、Rust 测试、冻结语义、错误路径 | 门槛通过且符合设计即 squash-merge |
+| `(UI)` | diff、Windows 截图/录屏、`ux-contract.md` 规则 id | 门槛通过且符合设计即 squash-merge |
+| `(Integration)` | fixture 路径、原始输出、证据目录、冻结数据 | 门槛通过且符合设计即 squash-merge |
+| `(QA)` | 测试矩阵、隔离数据、数据库校验和、复现步骤 | 门槛通过且符合设计即 squash-merge |
+| `(Release)` | 干净 Windows/CI、安装/升级/回滚证据、资产 hash | 门槛通过且符合设计即 squash-merge |
 
 ## 3. 共同验收门槛
 
@@ -38,9 +38,9 @@ Review agent 必须逐条确认：
 
 | 结论 | 动作 |
 |---|---|
-| 快速合并分类且全部门槛通过 | `gh pr merge <n> --squash --delete-branch`，然后调用 `step_complete_kandev`；任务进入 `Merged` |
-| 非快速分类且门槛通过 | 评论 `REVIEW: APPROVED`，列出门槛证据；不合并，任务留在 Review 等人工 |
-| 任一门槛失败 | 评论 `REVIEW: CHANGES REQUESTED`，列出文件/行/命令；不合并；需要返工时把任务移回 `Agent` |
+| 门槛通过且符合设计 | `gh pr merge <n> --squash --delete-branch`，然后调用 `step_complete_kandev`；任务进入 `Merged` |
+| 门槛通过但拿不准设计 | 评论 `REVIEW: APPROVED` 列出门槛证据和疑虑；不合并，留在 Review 等人工 |
+| 任一门槛失败 | 评论 `REVIEW: CHANGES REQUESTED`，列出文件/行/命令；不合并；必须把任务移回 `Agent` |
 | 没有关联 PR | 评论并停止；不要合并 |
 
 Review agent 不在 Review 里改代码、提交、推送或 rebase。

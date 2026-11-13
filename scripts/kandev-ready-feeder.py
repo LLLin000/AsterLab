@@ -39,6 +39,7 @@ INBOX = os.environ.get("KANDEV_VPS_INBOX_STEP", "1141b1f5-2ea7-44bb-b182-d7490b3
 READY = os.environ.get("KANDEV_VPS_READY_STEP", "9e7881ac-cda4-480c-8652-d3665f78645e")
 AGENT = os.environ.get("KANDEV_VPS_AGENT_STEP", "47b1aac7-2bb9-4b26-b8e3-412c424b4f46")
 REVIEW = os.environ.get("KANDEV_VPS_REVIEW_STEP", "2b6d9951-e9fd-4578-8bf4-6f3e7aa7ce31")
+MERGED_STEP = "e22063df-1124-4836-8e5c-b0c0e387be68"
 WIP = int(os.environ.get("KANDEV_AGENT_WIP", "2"))
 REVIEW_WIP = int(os.environ.get("KANDEV_REVIEW_WIP", "2"))
 DB = os.environ.get("KANDEV_DB", "/var/lib/kandev/data/kandev.db")
@@ -169,8 +170,6 @@ def notify_human_hold(task, rounds):
     print(f"HUMAN HOLD: {text}", file=sys.stderr)
 
 
-FAST_MERGE = {"Docs", "Audit", "Build"}
-
 
 def task_category(task):
     import re
@@ -260,10 +259,12 @@ def notify_approval(task, pr):
 
 
 def scan_approvals(review_tasks):
-    """Push decision requests for non-fast categories stuck on APPROVED."""
+    """Push decision requests for APPROVED cards still sitting in Review.
+
+    The review agent merges by itself when confident; a card still in Review
+    with APPROVED means the agent was unsure and wants a human call.
+    """
     for task in review_tasks:
-        if task_category(task) in FAST_MERGE:
-            continue
         labels = lane_labels(task)
         if "human-hold" in labels or "tg-approved-sent" in labels:
             continue
@@ -278,6 +279,38 @@ def scan_approvals(review_tasks):
             add_label(task["id"], "tg-approved-sent")
         except Exception as exc:  # noqa: BLE001
             print(f"approved-sent label failed: {exc}", file=sys.stderr)
+
+
+def scan_ci_merges(detailed):
+    """FYI when a card touching .github/** gets merged."""
+    for task in detailed:
+        if task.get("workflow_step_id") != MERGED_STEP:
+            continue
+        labels = lane_labels(task)
+        if "tg-ci-merged-sent" in labels:
+            continue
+        try:
+            import sqlite3
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            desc = con.execute(
+                "select description from tasks where id=?", (task["id"],)
+            ).fetchone()[0] or ""
+            con.close()
+        except Exception:  # noqa: BLE001
+            continue
+        scope = desc.split("<!-- kandev-scope", 1)
+        if len(scope) < 2 or ".github/" not in scope[1].split("-->", 1)[0]:
+            continue
+        pr = task_pr(task["id"])
+        tg_send(
+            f"Kandev 知会：CI 配置已合并\n{task['title'][:60]}\n"
+            f"PR #{pr.get('pr_number', '?')} {pr.get('pr_url', '')}"
+        )
+        try:
+            add_label(task["id"], "tg-ci-merged-sent")
+        except Exception as exc:  # noqa: BLE001
+            print(f"ci-merged label failed: {exc}", file=sys.stderr)
 
 
 def api(method, path, body=None):
@@ -382,8 +415,11 @@ def run_once():
             except Exception as exc:  # noqa: BLE001
                 print(f"human-hold label failed: {exc}", file=sys.stderr)
 
-    # Decision push: non-fast APPROVED cards need a human merge call.
+    # Decision push: APPROVED cards still in Review mean the agent was unsure.
     scan_approvals(review_tasks)
+
+    # FYI: CI-config cards that got merged.
+    scan_ci_merges(detailed)
 
     # Stuck self-heal before backpressure: a card with no live session
     # gets bounced to trigger a fresh one; escalates after 3 fixes.
