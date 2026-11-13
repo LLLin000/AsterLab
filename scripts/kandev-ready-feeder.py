@@ -284,6 +284,74 @@ def scan_stale_prompt(detailed):
             move(task, step, "stale prompt -> back with new prompt")
 
 
+def validate_card(task_id):
+    """Static admission gate. Returns list of problems (empty = pass).
+
+    Checks (Stage A, deterministic, no LLM):
+    1. scope block parses (write/read/forbid present)
+    2. 证据 paths all covered by scope.write
+    3. 验收 has executable commands (backticks) or is Docs (prose ok)
+    4. labels include lane:*
+    5. no unresolved {{...}} placeholders
+    """
+    import re
+    import sqlite3
+
+    problems = []
+    try:
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        r = con.execute(
+            "select title,description,labels from tasks where id=?", (task_id,)
+        ).fetchone()
+        con.close()
+    except Exception as exc:  # noqa: BLE001
+        return [f"db read failed: {exc}"]
+    if not r:
+        return ["task not found"]
+    title, desc, labels = r["title"], r["description"] or "", r["labels"] or "[]"
+    cat_m = re.search(r"\((Docs|Audit|Contract|Core|UI|Integration|QA|Build|Release)\)", title)
+    cat = cat_m.group(1) if cat_m else ""
+    # 1. scope block
+    m = re.search(r"<!-- kandev-scope(.*?)-->", desc, re.DOTALL)
+    if not m:
+        problems.append("missing <!-- kandev-scope --> block")
+        return problems
+    body = m.group(1)
+    writes = []
+    cur = None
+    for line in body.splitlines():
+        ms = re.match(r"^(write|read|forbid)\s*:\s*(\[\s*\])?$", line.strip())
+        if ms:
+            cur = ms.group(1)
+            continue
+        me = re.match(r"^-\s+(.*)$", line.strip())
+        if me and cur == "write":
+            writes.append(me.group(1).strip().rstrip("/"))
+    if not writes:
+        problems.append("scope.write is empty")
+    # 2. evidence paths covered
+    me = re.search(r"## 证据[^\n]*\n([^\n#]+(?:\n[^\n#]+)*)", desc)
+    if me:
+        for em in re.finditer(r"[\w./-]*evidence/[\w./-]*", me.group(1)):
+            ev = em.group(0).rstrip("/")
+            if ev and not any(ev == w or ev.startswith(w.rstrip("*").rstrip("/")) for w in writes):
+                problems.append(f"evidence path not in scope.write: {ev}")
+    # 3. acceptance executable (Docs prose exempt)
+    ma = re.search(r"## 验收[^\n]*\n(.*?)(?=\n## |\Z)", desc, re.DOTALL)
+    if not ma:
+        problems.append("missing ## 验收 section")
+    elif cat != "Docs" and "`" not in ma.group(1):
+        problems.append("验收 has no executable commands (no backticks)")
+    # 4. lane label
+    if "lane:" not in labels:
+        problems.append("missing lane:* label")
+    # 5. placeholders
+    if re.search(r"\{\{[^}]+\}\}", desc):
+        problems.append("unresolved {{...}} placeholder in description")
+    return problems
+
+
 def scan_deadlock():
     """Detect blocked_by cycles; notify once per cycle (label on each member)."""
     try:
@@ -1056,9 +1124,24 @@ def run_once():
         print(f"review full ({len(review_tasks)}/{REVIEW_WIP}); not feeding")
         return
 
-    # Fill Ready with every eligible Inbox card.
+    # Fill Ready with every eligible Inbox card (admission gate first).
     for task in detailed:
         if task.get("workflow_step_id") == INBOX and is_eligible(task) and task.get("state") == "CREATED":
+            if "dor-fail" in lane_labels(task):
+                continue
+            problems = validate_card(task["id"])
+            if problems:
+                try:
+                    add_label(task["id"], "dor-fail")
+                except Exception:  # noqa: BLE001
+                    pass
+                tg_send(
+                    f"Kandev 建卡校验失败：{task['title'][:60]}\n"
+                    + "\n".join(f"· {p}" for p in problems[:8])
+                    + f"\n已打标 dor-fail 留在 Inbox，修好卡后去掉 label 即可放行。"
+                )
+                print(f"DOR FAIL {task['title'][:40]}: {problems}", file=sys.stderr)
+                continue
             move(task, READY, "Inbox eligible -> Ready")
 
     # Start eligible Ready cards while slots exist.
