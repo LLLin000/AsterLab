@@ -89,6 +89,51 @@ func TestExportFrozenPDFUsesVerifiedFrozenContent(t *testing.T) {
 	}
 }
 
+func TestExportFrozenPDFWithRunRecordsPaginatesDeterministically(t *testing.T) {
+	source := "# Frozen Protocol\n\nRun records follow."
+	frozen := FrozenAsterDoc{Revision: 8, Source: source, SourceHash: sourceHash(source)}
+	records := "Run Revision: 8\n" + strings.Repeat("Sample A1 value 0.82; measurement row\n", 120)
+	var first, second, withoutRecords bytes.Buffer
+	for _, output := range []*bytes.Buffer{&first, &second} {
+		if err := ExportFrozenPDFWithRunRecords(output, "Run Report", frozen, "run-8", "", records); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !bytes.Equal(first.Bytes(), second.Bytes()) {
+		t.Fatal("identical frozen Run records produced different PDF bytes")
+	}
+	if err := ExportFrozenPDFWithRunRecords(&withoutRecords, "Run Report", frozen, "run-8", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(first.Bytes(), withoutRecords.Bytes()) {
+		t.Fatal("Run records were omitted from the frozen PDF")
+	}
+	pdf := string(first.Bytes())
+	countAt := strings.Index(pdf, "/Count ")
+	if countAt < 0 {
+		t.Fatal("PDF page tree missing")
+	}
+	countText := strings.Fields(pdf[countAt+len("/Count "):])[0]
+	pages, err := strconv.Atoi(countText)
+	if err != nil || pages < 2 {
+		t.Fatalf("expected Run records to paginate, got page count %q", countText)
+	}
+	cjkFrozen := FrozenAsterDoc{Revision: 9, Source: "# 中文方案\n\n实验步骤", SourceHash: sourceHash("# 中文方案\n\n实验步骤")}
+	var baseline bytes.Buffer
+	if err := ExportFrozenPDFWithRunRecords(&baseline, "中文报告", cjkFrozen, "run-9", "", "Run Revision: 9\n- 培养温度: 37 °C\n"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 8; i++ {
+		var again bytes.Buffer
+		if err := ExportFrozenPDFWithRunRecords(&again, "中文报告", cjkFrozen, "run-9", "", "Run Revision: 9\n- 培养温度: 37 °C\n"); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(baseline.Bytes(), again.Bytes()) {
+			t.Fatalf("CJK frozen PDF differed on iteration %d", i)
+		}
+	}
+}
+
 func TestMarkdownOutsideAsterLabFences(t *testing.T) {
 	source := "# 标题\n\n正文段落。\n\n```asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\ngroups: {}\n```\n\n尾注。\n"
 	out := markdownOutsideAsterLabFences(source)
