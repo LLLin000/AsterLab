@@ -56,6 +56,14 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 - `Verify`：在目标机器上按卡片验收层级重跑并贴原始输出；`on_pr_merged` 会把任务推进到 `Merged`。
 - `Merged`：PR 合并后的终态，进入即完成任务。依赖卡只在这里之后解除阻塞。
 
+### 通知与升级（Telegram @kandev00bot）
+
+- 决策类实时推：非快速分类 `REVIEW: APPROVED` 附 ✅合并/👀看diff/❌打回 三按钮；返工满 3 次熔断（`human-hold`）。
+- 合并按钮执行前二次校验：仍在 Review、无 human-hold、结论仍 APPROVED、PR open+mergeable、三项 CI 全绿；任一失败则拒绝并说明原因。
+- 卡住自修：Agent/Review 里无存活 session 超 10 分钟自动弹回重拉；3 次无效后升级通知（`stuck-escalated`）。
+- 每天 08:00 日报：24h 合并、Review 结论、熔断/自修、失败 session、看板快照。
+- 配置在 `/etc/kandev-ready-feeder.env`（`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`，不进仓库）；服务 `kandev-telegram-callback` 常驻收按钮回调。
+
 ## 4. 开工前必须做
 
 1. 读取对应 Kandev 卡片，确认 `范围`、`验收`、`依赖`、`lane` 和 `milestone`。

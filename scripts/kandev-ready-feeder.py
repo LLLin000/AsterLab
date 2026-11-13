@@ -46,6 +46,78 @@ REWORK_LIMIT = int(os.environ.get("KANDEV_REWORK_LIMIT", "3"))
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 ACTIVE_STATES = {"IN_PROGRESS", "SCHEDULING", "WAITING_FOR_INPUT"}
+STUCK_MINUTES = int(os.environ.get("KANDEV_STUCK_MINUTES", "10"))
+STUCK_FIX_LIMIT = int(os.environ.get("KANDEV_STUCK_FIX_LIMIT", "3"))
+
+
+def stuck_fix_count(labels):
+    n = 0
+    for lb in labels:
+        if lb.startswith("stuck-fix-"):
+            try:
+                n = max(n, int(lb.split("-")[-1]))
+            except ValueError:
+                pass
+    return n
+
+
+def scan_stuck(detailed):
+    """Self-heal cards with no live session; escalate after STUCK_FIX_LIMIT."""
+    import datetime
+
+    for task in detailed:
+        step = task.get("workflow_step_id")
+        if step not in (AGENT, REVIEW):
+            continue
+        labels = lane_labels(task)
+        if "human-hold" in labels or "stuck-escalated" in labels:
+            continue
+        try:
+            import sqlite3
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            live = con.execute(
+                """select id from task_sessions
+                    where task_id=? and state in ('RUNNING','WAITING_FOR_INPUT','SCHEDULING')""",
+                (task["id"],),
+            ).fetchall()
+            last = con.execute(
+                "select max(occurred_at) from task_step_transitions where task_id=?",
+                (task["id"],),
+            ).fetchone()[0]
+            con.close()
+        except Exception as exc:  # noqa: BLE001
+            print(f"stuck scan failed: {exc}", file=sys.stderr)
+            continue
+        if live or not last:
+            continue
+        try:
+            dt = datetime.datetime.fromisoformat(last.replace("Z", "+00:00"))
+            idle_min = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 60
+        except Exception:  # noqa: BLE001
+            continue
+        if idle_min < STUCK_MINUTES:
+            continue
+        fixes = stuck_fix_count(labels)
+        if fixes >= STUCK_FIX_LIMIT:
+            try:
+                add_label(task["id"], "stuck-escalated")
+            except Exception as exc:  # noqa: BLE001
+                print(f"escalate label failed: {exc}", file=sys.stderr)
+            tg_send(
+                f"Kandev 卡住升级：{task['title'][:60]}\n"
+                f"无存活 session 已 {idle_min:.0f} 分钟，自修 {fixes} 次无效，等人工。\n"
+                f"task_id={task['id']}"
+            )
+            print(f"STUCK ESCALATED: {task['title'][:40]}", file=sys.stderr)
+            continue
+        if move(task, INBOX, f"stuck self-heal #{fixes + 1} -> Inbox"):
+            time.sleep(1)
+            if move(task, step, f"stuck self-heal #{fixes + 1} -> back"):
+                try:
+                    add_label(task["id"], f"stuck-fix-{fixes + 1}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"stuck-fix label failed: {exc}", file=sys.stderr)
 
 
 def rework_count(task_id):
@@ -67,24 +139,145 @@ def rework_count(task_id):
         return 0
 
 
+def tg_send(text, reply_markup=None):
+    """Send a Telegram message; no-op when token/chat unset."""
+    if not (TG_TOKEN and TG_CHAT):
+        return False
+    try:
+        body = {"chat_id": TG_CHAT, "text": text}
+        if reply_markup:
+            body["reply_markup"] = reply_markup
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=15)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"telegram failed: {exc}", file=sys.stderr)
+        return False
+
+
 def notify_human_hold(task, rounds):
     text = (
         f"Kandev 熔断：{task['title'][:60]}\n"
         f"返工 {rounds} 次仍未过 Review，已留在 Review 等人工。\n"
         f"task_id={task['id']}"
     )
-    if TG_TOKEN and TG_CHAT:
-        try:
-            req = urllib.request.Request(
-                f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                data=json.dumps({"chat_id": TG_CHAT, "text": text}).encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            urllib.request.urlopen(req, timeout=15)
-            print(f"telegram sent for {task['title'][:40]}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"telegram failed: {exc}", file=sys.stderr)
+    tg_send(text)
     print(f"HUMAN HOLD: {text}", file=sys.stderr)
+
+
+FAST_MERGE = {"Docs", "Audit", "Build"}
+
+
+def task_category(task):
+    import re
+
+    m = re.search(r"\((Docs|Audit|Contract|Core|UI|Integration|QA|Build|Release)\)", task.get("title", ""))
+    return m.group(1) if m else ""
+
+
+def latest_review_verdict(task_id):
+    """Latest REVIEW: APPROVED / CHANGES REQUESTED from agent messages, or ''."""
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        rows = con.execute(
+            """select m.content from task_session_messages m
+                join task_sessions s on s.id=m.task_session_id
+               where s.task_id=? and m.author_type='agent' and m.type='message'
+                 and (m.content like '%REVIEW: APPROVED%' or m.content like '%REVIEW: CHANGES REQUESTED%')
+               order by m.created_at desc limit 5""",
+            (task_id,),
+        ).fetchall()
+        con.close()
+        for (content,) in rows:
+            # Skip review prompts that merely quote the verdict format.
+            head = content[:300]
+            if "你是 AsterLab 的 Review agent" in head:
+                continue
+            if "REVIEW: APPROVED" in content:
+                return "APPROVED", content
+            if "REVIEW: CHANGES REQUESTED" in content:
+                return "CHANGES_REQUESTED", content
+        return "", ""
+    except Exception as exc:  # noqa: BLE001
+        print(f"verdict read failed: {exc}", file=sys.stderr)
+        return "", ""
+
+
+def task_pr(task_id):
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        r = con.execute(
+            "select pr_number,pr_url,state from github_task_prs where task_id=? order by pr_number desc limit 1",
+            (task_id,),
+        ).fetchone()
+        con.close()
+        return dict(r) if r else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def add_label(task_id, label):
+    """Append a label via direct DB write (no write API exists)."""
+    import sqlite3
+
+    wcon = sqlite3.connect(DB)
+    cur = json.loads(
+        wcon.execute("select labels from tasks where id=?", (task_id,)).fetchone()[0] or "[]"
+    )
+    if label not in cur:
+        cur.append(label)
+        wcon.execute("update tasks set labels=? where id=?", (json.dumps(cur), task_id))
+        wcon.commit()
+    wcon.close()
+
+
+def notify_approval(task, pr):
+    text = (
+        f"Kandev 待决策：{task['title'][:60]}\n"
+        f"REVIEW: APPROVED · PR #{pr.get('pr_number')} {pr.get('state','')}\n"
+        f"{pr.get('pr_url','')}"
+    )
+    markup = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ 合并", "callback_data": f"merge:{task['id']}"},
+                {"text": "👀 看diff", "callback_data": f"diff:{task['id']}"},
+                {"text": "❌ 打回", "callback_data": f"reject:{task['id']}"},
+            ]
+        ]
+    }
+    if tg_send(text, markup):
+        print(f"approval sent for {task['title'][:40]}")
+
+
+def scan_approvals(review_tasks):
+    """Push decision requests for non-fast categories stuck on APPROVED."""
+    for task in review_tasks:
+        if task_category(task) in FAST_MERGE:
+            continue
+        labels = lane_labels(task)
+        if "human-hold" in labels or "tg-approved-sent" in labels:
+            continue
+        verdict, _ = latest_review_verdict(task["id"])
+        if verdict != "APPROVED":
+            continue
+        pr = task_pr(task["id"])
+        if not pr or pr.get("state") != "open":
+            continue
+        notify_approval(task, pr)
+        try:
+            add_label(task["id"], "tg-approved-sent")
+        except Exception as exc:  # noqa: BLE001
+            print(f"approved-sent label failed: {exc}", file=sys.stderr)
 
 
 def api(method, path, body=None):
@@ -183,28 +376,18 @@ def run_once():
             continue
         rounds = rework_count(task["id"])
         if rounds >= REWORK_LIMIT:
-            # Labels have no write API; the column is plain JSON text.
             try:
-                import sqlite3
-
-                wcon = sqlite3.connect(DB)
-                cur = json.loads(
-                    wcon.execute(
-                        "select labels from tasks where id=?", (task["id"],)
-                    ).fetchone()[0]
-                    or "[]"
-                )
-                if "human-hold" not in cur:
-                    cur.append("human-hold")
-                    wcon.execute(
-                        "update tasks set labels=? where id=?",
-                        (json.dumps(cur), task["id"]),
-                    )
-                    wcon.commit()
-                    notify_human_hold(task, rounds)
-                wcon.close()
+                add_label(task["id"], "human-hold")
+                notify_human_hold(task, rounds)
             except Exception as exc:  # noqa: BLE001
                 print(f"human-hold label failed: {exc}", file=sys.stderr)
+
+    # Decision push: non-fast APPROVED cards need a human merge call.
+    scan_approvals(review_tasks)
+
+    # Stuck self-heal before backpressure: a card with no live session
+    # gets bounced to trigger a fresh one; escalates after 3 fixes.
+    scan_stuck(detailed)
 
     # Backpressure: do not feed new work while Review is full.
     # human-hold cards still occupy Review slots: clear them by hand.
