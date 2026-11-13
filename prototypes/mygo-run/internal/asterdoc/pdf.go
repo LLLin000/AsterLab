@@ -59,7 +59,7 @@ func ExportPDFWithRun(w io.Writer, title, revision, sourceHash, runID string, pr
 	pdf.SetSubject(traceability, false)
 	pdf.SetFooterFunc(func() {
 		pdf.SetY(-12)
-		pdf.SetFont("Helvetica", "", 8)
+		pdf.SetFont(font, "", 8)
 		pdf.CellFormat(0, 8, fmt.Sprintf("Page %d", pdf.PageNo()), "", 0, "C", false, 0, "")
 	})
 	pdf.AddPage()
@@ -84,6 +84,12 @@ func ExportPDFWithRun(w io.Writer, title, revision, sourceHash, runID string, pr
 // ExportFrozenPDF exports a verified frozen document to PDF. It refuses to
 // export if the source no longer matches the pinned source_hash.
 func ExportFrozenPDF(w io.Writer, title string, frozen FrozenAsterDoc, runID, plan string) error {
+	return ExportFrozenPDFWithRunRecords(w, title, frozen, runID, plan, "")
+}
+
+// ExportFrozenPDFWithRunRecords adds a Run record section to the verified
+// frozen document export.
+func ExportFrozenPDFWithRunRecords(w io.Writer, title string, frozen FrozenAsterDoc, runID, plan, runRecords string) error {
 	if !frozen.VerifySourceHash(frozen.Source) {
 		return fmt.Errorf("frozen source hash mismatch: document tampered after freeze")
 	}
@@ -100,6 +106,9 @@ func ExportFrozenPDF(w io.Writer, title string, frozen FrozenAsterDoc, runID, pl
 	}
 	if modules := StaticDocumentPreview(doc); modules != "" {
 		previews = append(previews, modules)
+	}
+	if strings.TrimSpace(runRecords) != "" {
+		previews = append(previews, runRecords)
 	}
 	return ExportPDFWithRun(w, title, fmt.Sprint(frozen.Revision), frozen.SourceHash, runID, previews)
 }
@@ -157,7 +166,7 @@ func renderPDFLine(pdf *gofpdf.Fpdf, font, line string) {
 		}
 		trimmed = strings.Join(cells, "   │   ")
 	} else if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
-		trimmed = "• " + strings.TrimSpace(trimmed[2:])
+		trimmed = "- " + strings.TrimSpace(trimmed[2:])
 	}
 	trimmed = strings.ReplaceAll(trimmed, "**", "")
 	trimmed = strings.ReplaceAll(trimmed, "`", "")
