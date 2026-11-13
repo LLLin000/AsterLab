@@ -3,16 +3,17 @@ Python 3.12.3
 $ python3 -m py_compile scripts/sdk/*.py
 exit=0
 $ python3 scripts/sdk/scaffold.py --kind probe_tmp --schema 1 --out "$OUT"
-scaffold probe_tmp@1: 6 files under /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1
-created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/README.md
-created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/manifest.json
-created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/module.go
-created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/module.rs
-created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/module_test.go
-created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/registration.go
+scaffold probe_tmp@1: 6 files under prototypes/mygo-run/internal/asterdoc/_scaffold_review/probe_tmp@1
+created prototypes/mygo-run/internal/asterdoc/_scaffold_review/probe_tmp@1/README.md
+created prototypes/mygo-run/internal/asterdoc/_scaffold_review/probe_tmp@1/manifest.json
+created prototypes/mygo-run/internal/asterdoc/_scaffold_review/probe_tmp@1/module.go
+created prototypes/mygo-run/internal/asterdoc/_scaffold_review/probe_tmp@1/module.rs
+created prototypes/mygo-run/internal/asterdoc/_scaffold_review/probe_tmp@1/module_test.go
+created prototypes/mygo-run/internal/asterdoc/_scaffold_review/probe_tmp@1/registration.go
 exit=0
 $ gofmt -l "$OUT/probe_tmp@1"
 (no output above: the generated Go files are gofmt-clean)
+$ rm -rf "$OUT"
 $ go version
 go version go1.27.3 linux/amd64
 $ python3 scripts/sdk/test_sdk_tools.py -v
@@ -34,7 +35,7 @@ test_refuses_unknown_category (__main__.ScaffoldTest.test_refuses_unknown_catego
 test_refuses_unregistered_rule (__main__.ScaffoldTest.test_refuses_unregistered_rule) ... ok
 
 ----------------------------------------------------------------------
-Ran 16 tests in 0.076s
+Ran 16 tests in 0.101s
 
 OK
 exit=0

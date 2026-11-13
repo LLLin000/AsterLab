@@ -77,8 +77,8 @@ def _check_manifest(report, manifest, port_types, categories, rules):
     )
 
 
-def _check_registration(report, manifest):
-    order = spec.go_registration_order(report["root"])
+def _check_registration(root, report, manifest):
+    order = spec.go_registration_order(root)
     duplicates = sorted({key for key in order if order.count(key) > 1})
     problems = [f"{key}: registered twice by BuiltinRegistry()" for key in duplicates]
     manifest_keys = {spec.module_key(module) for module in manifest["modules"]}
@@ -126,8 +126,8 @@ def _check_permissions(report, manifest, permissions):
     )
 
 
-def _check_catalog(report, manifest):
-    rows, module_claims, kind_claims = spec.catalog_facts(report["root"])
+def _check_catalog(root, report, manifest):
+    rows, module_claims, kind_claims = spec.catalog_facts(root)
     manifest_keys = {spec.module_key(module) for module in manifest["modules"]}
     kinds = {module.get("kind") for module in manifest["modules"]}
     problems = []
@@ -159,14 +159,14 @@ def _check_catalog(report, manifest):
     )
 
 
-def _check_parity(report):
-    go_rules = spec.go_rules(report["root"])
-    rust_rules = spec.rust_rules(report["root"])
-    go_types = spec.go_port_types(report["root"])
-    rust_types = spec.rust_port_types(report["root"])
-    go_categories = spec.go_categories(report["root"])
-    rust_categories = spec.rust_categories(report["root"])
-    dispatch = spec.rust_dispatch_rules(report["root"])
+def _check_parity(root, report):
+    go_rules = spec.go_rules(root)
+    rust_rules = spec.rust_rules(root)
+    go_types = spec.go_port_types(root)
+    rust_types = spec.rust_port_types(root)
+    go_categories = spec.go_categories(root)
+    rust_categories = spec.rust_categories(root)
+    dispatch = spec.rust_dispatch_rules(root)
     problems = []
     for name, go_set, rust_set in (
         ("rule name", go_rules, rust_rules),
@@ -187,9 +187,8 @@ def _check_parity(report):
     )
 
 
-def _check_scaffold(report, manifest, port_types, categories, go_rules, rust_rules, permissions):
-    root = Path(report["root"])
-    scaffold_root = root / spec.SCAFFOLD_ROOT
+def _check_scaffold(root, report, manifest, port_types, categories, go_rules, rust_rules, permissions):
+    scaffold_root = Path(root) / spec.SCAFFOLD_ROOT
     problems = []
     directories = []
     if scaffold_root.is_dir():
@@ -260,7 +259,6 @@ def check(root):
     permissions = spec.go_permissions(root)
     report = {
         "ok": True,
-        "root": str(root),
         "manifest": spec.MANIFEST,
         "sdkVersion": manifest.get("sdkVersion"),
         "modules": len(manifest["modules"]),
@@ -268,13 +266,13 @@ def check(root):
         "checks": [],
     }
     _check_manifest(report, manifest, port_types, categories, go_rules)
-    _check_registration(report, manifest)
+    _check_registration(root, report, manifest)
     _check_schema(report, manifest)
     _check_permissions(report, manifest, permissions)
-    _check_catalog(report, manifest)
-    _check_parity(report)
+    _check_catalog(root, report, manifest)
+    _check_parity(root, report)
     _check_scaffold(
-        report, manifest, port_types, categories, go_rules, rust_rules, permissions
+        root, report, manifest, port_types, categories, go_rules, rust_rules, permissions
     )
     return report
 

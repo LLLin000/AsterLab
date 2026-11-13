@@ -1,8 +1,8 @@
 $ python3 --version
 Python 3.12.3
-exit=0
-$ git rev-parse HEAD
+$ git merge-base origin/main HEAD
 ca69142a3ccaa50b94d01ae591171053d75a7569
+(head commit SHA: see the PR body and the task comment; evidence only pins the base)
 $ git rev-parse --abbrev-ref HEAD
 feature/sdk-01-build-scaffol-d1r
 $ python3 scripts/sdk/check.py
@@ -47,7 +47,7 @@ test_refuses_unknown_category (__main__.ScaffoldTest.test_refuses_unknown_catego
 test_refuses_unregistered_rule (__main__.ScaffoldTest.test_refuses_unregistered_rule) ... ok
 
 ----------------------------------------------------------------------
-Ran 16 tests in 0.074s
+Ran 16 tests in 0.192s
 
 OK
 exit=0
@@ -56,7 +56,6 @@ modules.json modules[]=16 check --json modules=16 match=True
 $ python3 scripts/sdk/check.py --json
 {
   "ok": true,
-  "root": "/var/lib/kandev/tasks/sdk-01-build-scaffol_hk53zkng/LLLin000-AsterLab",
   "manifest": "prototypes/mygo-run/internal/asterdoc/spec/modules.json",
   "sdkVersion": "1.0.0",
   "modules": 16,

@@ -1,6 +1,5 @@
 {
   "ok": true,
-  "root": "/var/lib/kandev/tasks/sdk-01-build-scaffol_hk53zkng/LLLin000-AsterLab",
   "manifest": "prototypes/mygo-run/internal/asterdoc/spec/modules.json",
   "sdkVersion": "1.0.0",
   "modules": 16,
