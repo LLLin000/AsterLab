@@ -139,6 +139,44 @@ def scan_ci_ready(review_tasks):
             move(task, REVIEW, "ci-ready -> Review re-review")
 
 
+def scan_no_pr(review_tasks):
+    """Bounce Review cards with no associated PR back to Agent.
+
+    Agent's on_turn_complete fires even when the turn produced nothing;
+    without a PR there is nothing to review.
+    """
+    for task in review_tasks:
+        labels = lane_labels(task)
+        if "human-hold" in labels:
+            continue
+        pr = task_pr(task["id"])
+        if pr:
+            continue
+        # Grace period: just entered Review, PR may be seconds away.
+        try:
+            import sqlite3
+            from datetime import datetime, timezone
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            last = con.execute(
+                "select max(occurred_at) from task_step_transitions where task_id=? and to_workflow_step_id=?",
+                (task["id"], REVIEW),
+            ).fetchone()[0]
+            con.close()
+        except Exception:  # noqa: BLE001
+            continue
+        if not last:
+            continue
+        try:
+            dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+            idle = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+        except Exception:  # noqa: BLE001
+            continue
+        if idle < 10:
+            continue
+        move(task, AGENT, "no PR in Review -> back to Agent")
+
+
 def scan_deadlock():
     """Detect blocked_by cycles; notify once per cycle (label on each member)."""
     try:
@@ -692,6 +730,7 @@ def run_once():
     scan_cardfix([t for t in detailed if t.get("workflow_step_id") in (AGENT, REVIEW)])
     scan_retro_ready(detailed)
     scan_ci_ready(review_tasks)
+    scan_no_pr(review_tasks)
 
     # FYI: CI-config cards that got merged.
     scan_ci_merges(detailed)
