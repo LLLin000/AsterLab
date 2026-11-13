@@ -212,11 +212,13 @@ func frozenAssayEndpoints(designData string) map[string][2]string {
 func toRunView(s runs.RunSnapshot) runui.RunView {
 	endpoints := frozenAssayEndpoints(s.DesignData)
 	v := runui.RunView{
-		Title:        s.Title,
-		Status:       s.Status,
-		Revision:     s.Revision,
+		Title: s.Title, Status: s.Status, Revision: s.Revision,
+		DesignRevision: s.DesignRevision,
 		Measurements: make([]runui.Measurement, 0, len(s.Measurements)),
 		Events:       make([]runui.Event, 0, len(s.Events)),
+	}
+	if s.AsterDoc != nil {
+		v.AsterDocRevision = s.AsterDoc.Revision
 	}
 	for _, t := range s.Tasks {
 		endpoint, unit := "", ""
@@ -226,7 +228,27 @@ func toRunView(s runs.RunSnapshot) runui.RunView {
 		task := runui.Task{
 			Key: t.Key, Title: t.Title, Timepoint: t.Timepoint, Status: t.Status,
 			AssayID: t.AssayID, DesignStepID: t.DesignStepID,
+			ProtocolVersionID: t.ProtocolVersionID, Instruction: t.Instruction,
 			Endpoint: endpoint, Unit: unit,
+		}
+		var params []struct {
+			Key string `json:"key"`
+			Label string `json:"label"`
+			Name string `json:"name"`
+			Value any `json:"value"`
+			Unit string `json:"unit"`
+		}
+		if json.Unmarshal([]byte(t.ParametersJSON), &params) == nil {
+			for _, p := range params {
+				label := p.Label
+				if label == "" { label = p.Name }
+				if label == "" { label = p.Key }
+				value := ""
+				if p.Value != nil { value = fmt.Sprint(p.Value) }
+				task.Parameters = append(task.Parameters, runui.FrozenParameter{
+					Key: p.Key, Label: label, Value: value, Unit: p.Unit,
+				})
+			}
 		}
 		for _, check := range t.Checks {
 			task.Checks = append(task.Checks, runui.TaskCheck{

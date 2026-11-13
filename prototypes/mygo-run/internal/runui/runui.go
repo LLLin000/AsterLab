@@ -43,8 +43,18 @@ type Task struct {
 	// DesignStepID is the frozen design's workflow node this task executes.
 	// Empty means unresolved; the surface says so instead of guessing.
 	DesignStepID string
+	ProtocolVersionID string
+	Instruction string
+	Parameters []FrozenParameter
 	// Checks are the frozen protocol step's real checks, never placeholders.
 	Checks []TaskCheck
+}
+
+type FrozenParameter struct {
+	Key string
+	Label string
+	Value string
+	Unit string
 }
 
 func (t Task) Done() bool { return t.Status == "completed" }
@@ -95,6 +105,8 @@ type RunView struct {
 	Title        string
 	Status       string
 	Revision     uint64
+	DesignRevision uint64
+	AsterDocRevision uint64
 	Tasks        []Task
 	Measurements []Measurement
 	Events       []Event
@@ -1093,6 +1105,28 @@ func taskPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
 		}
 		ui.Text(c, title).FontSize(13).Bold().TextColor(t.Text)
 		ui.Text(c, "任务 "+ct.Key+" · "+ct.Status).FontSize(11).TextColor(t.TextMuted)
+		// Right-side inspector keeps its existing primary recording flow visible: UX-P1/UX-LAYOUT.
+		// Frozen protocol details are an inspector section; UX-P2/P3 and UX-STATE.
+		ui.Divider(c)
+		ui.Text(c, "协议与参数 · 只读 · 已冻结").FontSize(12).Bold().TextColor(t.Text)
+		ui.Text(c, "已冻结 · 无编辑入口").FontSize(11).TextColor(t.TextMuted)
+		if ct.ProtocolVersionID != "" {
+			ui.Text(c, "协议版本 "+ct.ProtocolVersionID).FontSize(11).TextColor(t.TextMuted)
+		}
+		ui.Text(c, fmt.Sprintf("Run rev %d · Design rev %d · AsterDoc rev %d",
+			w.View.Revision, w.View.DesignRevision, w.View.AsterDocRevision)).
+			FontSize(11).TextColor(t.TextMuted)
+		if ct.Instruction != "" {
+			ui.Text(c, "操作说明").FontSize(11).Bold().TextColor(t.Text)
+			ui.Text(c, ct.Instruction).FontSize(12).TextColor(t.Text)
+		}
+		if len(ct.Parameters) > 0 {
+			ui.Text(c, "冻结参数").FontSize(11).Bold().TextColor(t.Text)
+			for _, p := range ct.Parameters {
+				value := strings.TrimSpace(strings.Join([]string{p.Value, p.Unit}, " "))
+				ui.Text(c, labelOr(p.Label, p.Key)+" · "+value).FontSize(11).TextColor(t.TextMuted)
+			}
+		}
 		if ct.AssayID != "" {
 			ui.Text(c, "Assay "+ct.AssayID).FontSize(11).TextColor(t.TextMuted)
 		}

@@ -37,6 +37,28 @@ func TestViewRendersRailAndPanel(t *testing.T) {
 	}
 }
 
+func TestProcedureShowsFrozenProtocolReadOnly(t *testing.T) {
+	snap := makeSnapshot()
+	snap.Tasks[1].ProtocolVersionID = "protocol-v2"
+	vm := BuildViewModel(snap, makeFrozenDoc())
+	task := vm.TaskByKey["t-read"]
+	if task.ProtocolVersionID != "protocol-v2" || task.Instruction != "读取 OD450 并记录。" ||
+		len(task.Parameters) != 1 || task.Parameters[0].Value != "0.82" {
+		t.Fatalf("view model did not retain frozen snapshot values: %+v", task)
+	}
+	s := NewState(vm, Callbacks{})
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		procedureLayer(c, s, c.Theme(), theme.GetTokens(c.Theme()), task)
+	}, 900, 700)
+	tt.Frame()
+	for _, text := range []string{"操作说明 · 已冻结 · 只读", "读取 OD450 并记录。", "操作参数 · 已冻结 · 只读", "OD450", "0.82 AU", "协议版本 protocol-v2", "冻结信息（只读 · 已冻结）"} {
+		if !tt.HasText(text) {
+			t.Errorf("frozen procedure detail missing %q", text)
+		}
+	}
+}
+
 func TestViewSelectsStepOnClick(t *testing.T) {
 	s := buildTestState()
 	var selectedKeys []string
