@@ -1,7 +1,7 @@
     Finished `test` profile [unoptimized] target(s) in 0.06s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-core/e4acddd1bf4767f5/out/asterlab_core-e4acddd1bf4767f5)
+     Running unittests src/lib.rs (<CARGO_TARGET_DIR>/debug/build/asterlab-core/e4acddd1bf4767f5/out/asterlab_core-e4acddd1bf4767f5)
 
-running 314 tests
+running 315 tests
 test agent_edit::tests::error_codes_are_stable_wire_strings ... ok
 test agent_edit::tests::commit_result_carries_server_confirmed_values ... ok
 test agent_edit::tests::rejected_examples_are_wire_valid_proposals ... ok
@@ -228,6 +228,7 @@ test sample_progress::tests::sample_progress_does_not_report_step_complete_for_p
 test sample_progress::tests::sample_progress_keeps_retry_attempts_separate ... ok
 test sample_progress::tests::sample_progress_honours_explicit_attempt_field ... ok
 test sample_progress::tests::sample_progress_marks_failed_sample_and_step ... ok
+test sample_progress::tests::sample_progress_isolated_by_timepoint_without_cross_product ... ok
 test sample_progress::tests::sample_progress_reads_stored_retry_lineage ... ok
 test sample_progress::tests::sample_progress_rejects_attempt_zero_and_gaps ... ok
 test sample_progress::tests::sample_progress_reports_skipped_matrix_without_claiming_completion ... ok
@@ -317,9 +318,9 @@ test workflow_tree::tests::run_projection_rejects_a_conflicting_design_step_iden
 test workflow_tree::tests::design_projection_uses_definition_identity_and_order ... ok
 test workflow_tree::tests::run_projection_keeps_multiple_timepoints_as_occurrences ... ok
 
-test result: ok. 314 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 315 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
 
-     Running tests/catalog_drafts.rs (/srv/build/asterlab-target/debug/build/asterlab-core/f19e871205f766df/out/catalog_drafts-f19e871205f766df)
+     Running tests/catalog_drafts.rs (<CARGO_TARGET_DIR>/debug/build/asterlab-core/f19e871205f766df/out/catalog_drafts-f19e871205f766df)
 
 running 3 tests
 test instrument_drafts_validate_but_remain_research_drafts ... ok
@@ -328,7 +329,7 @@ test operation_drafts_validate_structurally ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/operation_surface.rs (/srv/build/asterlab-target/debug/build/asterlab-core/a2a226fa5648ab97/out/operation_surface-a2a226fa5648ab97)
+     Running tests/operation_surface.rs (<CARGO_TARGET_DIR>/debug/build/asterlab-core/a2a226fa5648ab97/out/operation_surface-a2a226fa5648ab97)
 
 running 6 tests
 test incubation_has_an_explicit_time_anchor_and_state_change ... ok

@@ -462,6 +462,8 @@ struct WorkflowProgressInput {
     #[serde(default)]
     step_path: Option<String>,
     #[serde(default)]
+    timepoint: Option<String>,
+    #[serde(default)]
     sample_id: Option<String>,
     #[serde(default)]
     sample_ids: Vec<String>,
@@ -4435,6 +4437,7 @@ pub(crate) fn create_execution_event_tx(
         asterlab_core::sample_progress::plan_event_identity(
             run_id,
             event.protocol_step_path.as_deref(),
+            event.timepoint.as_deref(),
             &event.sample_ids,
             Some(attempt),
             &existing,
@@ -9393,6 +9396,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                     .map_err(|e| CliError::internal(e.to_string()))?;
             let query = asterlab_core::sample_progress::SampleProgressQuery {
                 step_path: i.step_path,
+                timepoint: i.timepoint,
                 sample_id: i.sample_id,
                 sample_ids: i.sample_ids,
             };
@@ -10491,9 +10495,10 @@ fn workflow_progress_output_schema() -> Value {
             "sample_ids":{"type":"array","items":{"type":"string"}},
             "steps":{"type":"array","items":{
                 "type":"object","additionalProperties":false,
-                "required":["step_path","status","complete","total_samples","completed_samples","failed_samples","skipped_samples","in_progress_samples","not_started_samples","last_event_at","samples"],
+                "required":["step_path","timepoint","status","complete","total_samples","completed_samples","failed_samples","skipped_samples","in_progress_samples","not_started_samples","last_event_at","samples"],
                 "properties":{
                     "step_path":{"type":"string"},
+                    "timepoint":{"type":["string","null"]},
                     "status":status,
                     "complete":{"type":"boolean"},
                     "total_samples":{"type":"integer","minimum":0},
@@ -10746,7 +10751,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["design_id","title"],"properties":{"design_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]}}})
         }
         "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"run_id":{"type":"string"}}}),
-        "workflow.progress" => json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"step_path":{"type":"string","minLength":1,"maxLength":500,"description":"只看一个冻结步骤"},"sample_id":{"type":"string","minLength":1,"maxLength":120,"description":"只看一个样本"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120},"description":"必须出现在矩阵里、即使尚无事件的样本"}}}),
+        "workflow.progress" => json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"step_path":{"type":"string","minLength":1,"maxLength":500,"description":"只看一个冻结步骤"},"timepoint":{"type":"string","minLength":1,"maxLength":100,"description":"只看该步骤的一个具体冻结时间点；省略时只返回事件实际携带的分组"},"sample_id":{"type":"string","minLength":1,"maxLength":120,"description":"只看一个样本"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120},"description":"仅与 step_path 和具体 timepoint 同时提供时，为该分组补入 not_started 样本"}}}),
         "task.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","scheduled_date"],"properties":{"project_id":{"type":"string"},"run_id":{"type":["string","null"]},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":"string","minLength":1,"format":"date"},"status":{"type":"string","enum":["planned","in_progress","done","blocked"]},"notes":{"type":"string"}}})
         }

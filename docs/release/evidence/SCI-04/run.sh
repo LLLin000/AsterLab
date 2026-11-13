@@ -72,22 +72,22 @@ run workflow.progress --input - <<EOF > "$out/workflow-progress-retry.out"
 {"run_id":"$RUN","step_path":"$STEP"}
 EOF
 
-# Partial matrix: one sample starts another step, the second sample never appears.
+# No samples are copied into these null-timepoint groups from other steps.
 run execution_event.create --input - <<EOF > /dev/null
 {"run_id":"$RUN","event_type":"operation","content":"S1 add ethanol in progress","step_status":"in_progress","protocol_step_path":"root/rna-extraction/03-ethanol","protocol_version_id":"$PV","assay_id":"assay-rtqpcr","sample_ids":["S1"],"attempt":1,"occurred_at":"2026-11-13T11:00:00Z"}
 EOF
-# Single completion: S1 completes a step alone; S2 stays not_started.
+# A single actual sample completion forms a complete one-sample group.
 run execution_event.create --input - <<EOF > /dev/null
 {"run_id":"$RUN","event_type":"operation","content":"S1 bind complete","step_status":"completed","protocol_step_path":"root/rna-extraction/04-bind","protocol_version_id":"$PV","assay_id":"assay-rtqpcr","sample_ids":["S1"],"attempt":1,"occurred_at":"2026-11-13T11:30:00Z","checks":[{"check_id":"c04-bind","status":"passed"}]}
 EOF
 
 {
-  echo "== step 03-ethanol: S1 in_progress, S2 not_started =="
+  echo "== step 03-ethanol: only its actual S1/null-timepoint event =="
   run workflow.progress --input - <<EOF
 {"run_id":"$RUN","step_path":"root/rna-extraction/03-ethanol"}
 EOF
   echo
-  echo "== step 04-bind: one completed sample does not complete the step =="
+  echo "== step 04-bind: one actual S1/null-timepoint sample =="
   run workflow.progress --input - <<EOF
 {"run_id":"$RUN","step_path":"root/rna-extraction/04-bind"}
 EOF

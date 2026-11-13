@@ -1,16 +1,15 @@
-   Compiling labworkbench v0.1.0 (/var/lib/kandev/tasks/sci-04-core_cj5k0h1q/LLLin000-AsterLab)
 warning: unused variable: `assay_index`
-    --> src/cli.rs:3387:9
+    --> src/cli.rs:3389:9
      |
-3387 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+3389 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
      |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
      |
      = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
 
 warning: variable does not need to be mutable
-    --> src/cli.rs:9258:17
+    --> src/cli.rs:9261:17
      |
-9258 |             let mut warnings: Vec<String> = Vec::new();
+9261 |             let mut warnings: Vec<String> = Vec::new();
      |                 ----^^^^^^^^
      |                 |
      |                 help: remove this `mut`
@@ -18,56 +17,56 @@ warning: variable does not need to be mutable
      = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
 
 warning: function `ywells` is never used
-    --> src/cli.rs:3347:4
+    --> src/cli.rs:3349:4
      |
-3347 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+3349 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
      |    ^^^^^^
      |
      = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: function `create_asterdoc_design` is never used
-    --> src/cli.rs:3723:15
+    --> src/cli.rs:3725:15
      |
-3723 | pub(crate) fn create_asterdoc_design(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+3725 | pub(crate) fn create_asterdoc_design(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
      |               ^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `list_designs` is never used
-    --> src/cli.rs:8052:15
+    --> src/cli.rs:8055:15
      |
-8052 | pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
+8055 | pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
      |               ^^^^^^^^^^^^
 
 warning: function `load_design` is never used
-    --> src/cli.rs:8056:15
+    --> src/cli.rs:8059:15
      |
-8056 | pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+8059 | pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
      |               ^^^^^^^^^^^
 
 warning: function `revise_design_record` is never used
-    --> src/cli.rs:8114:15
+    --> src/cli.rs:8117:15
      |
-8114 | pub(crate) fn revise_design_record(
+8117 | pub(crate) fn revise_design_record(
      |               ^^^^^^^^^^^^^^^^^^^^
 
 warning: function `create_run_for_design` is never used
-    --> src/cli.rs:8186:15
+    --> src/cli.rs:8189:15
      |
-8186 | pub(crate) fn create_run_for_design(
+8189 | pub(crate) fn create_run_for_design(
      |               ^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `save_asset_link` is never used
-     --> src/cli.rs:11504:15
+     --> src/cli.rs:11509:15
       |
-11504 | pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+11509 | pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
       |               ^^^^^^^^^^^^^^^
 
 warning: `labworkbench` (bin "labworkbench" test) generated 9 warnings (run `cargo fix --bin "labworkbench" -p labworkbench --tests` to apply 2 suggestions)
-    Finished `test` profile [unoptimized] target(s) in 10.56s
-     Running unittests src/main.rs (/srv/build/asterlab-target/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
+    Finished `test` profile [unoptimized] target(s) in 0.07s
+     Running unittests src/main.rs (<CARGO_TARGET_DIR>/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
 
 running 17 tests
-test cli::tests::assess_includes_run_creation_audit_warnings ... ok
 test cli::tests::assess_and_run_creation_reject_unmaterialized_steps ... ok
+test cli::tests::assess_includes_run_creation_audit_warnings ... ok
 test cli::tests::asset_link_rejects_paths_outside_the_root_without_writing ... ok
 test cli::tests::asterdoc_parity_samples ... ok
 test cli::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
@@ -79,10 +78,9 @@ test cli::tests::manifest_rule_must_be_registered_in_rust ... ok
 test cli::tests::read_only_tools_do_not_write ... ok
 test cli::tests::schema_migration_legacy_v0 ... ok
 test cli::tests::step_materialization_preserves_frozen_run_protocol_block_revision ... ok
-test cli::tests::concurrent_agent_edit_commits_leave_exactly_one_winner ... ok
 test cli::tests::agent_tools_are_discoverable ... ok
+test cli::tests::concurrent_agent_edit_commits_leave_exactly_one_winner ... ok
 test cli::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
 test cli::tests::asset_link_hashes_a_large_file_without_copying_it ... ok
 
-test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.59s
-
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.51s

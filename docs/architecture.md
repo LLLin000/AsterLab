@@ -341,29 +341,30 @@ endpoint/plate 过滤，返回：
 `crates/asterlab-core::sample_progress` 定义样本级执行身份：
 
 ```text
-run_id + step_path + sample_id + attempt
+run_id + step_path + timepoint? + sample_id + attempt
 ```
 
-- `attempt` 是样本在该冻结步骤上的尝试序号，从 1 开始；`execution_event.create` 的
-  可选 `attempt` 显式声明身份，必须同时提供冻结 `protocol_step_path` 和至少一个
-  `sample_ids`。
+- `timepoint` 是可空的 Run 冻结设计标签；缺失时保持 `null`，共享制备步骤不绑定时间点。
+  `execution_event.create` 的可选 `attempt` 显式声明身份，必须同时提供冻结
+  `protocol_step_path` 和至少一个 `sample_ids`。
 - 同一身份的重复完成不会产生第二条事实：存储层按
-  `step_path + sample_ids[] + attempt` 比较，已存在则返回原事件记录。
+  `step_path + timepoint + sample_ids[] + attempt` 比较，已存在则返回原事件记录。
 - 重试必须追加新 attempt：`attempt` 只能是当前最高 attempt 或 `最高 + 1`，跳跃被拒绝
-  （`INVALID_INPUT`）。旧 attempt 的事件永不修改，仍可在结果中查。
+  （`INVALID_INPUT`）。attempt 连续性按精确 `(step_path,timepoint,sample_id)` 隔离。
+  旧 attempt 的事件永不修改，仍可在结果中查。
 - 未写 `attempt` 的旧事件保持兼容：读取时若存在显式 retry 链（`retry_of_event_id`
   或 `lineage.relation = "retry"`）则按链深度推导，否则为 attempt 1。
 
-`workflow.progress` 是只读投影，输入 `{run_id, step_path?, sample_id?, sample_ids?}`，
-按 Run 返回每个冻结步骤的样本矩阵：
+`workflow.progress` 是只读投影，输入 `{run_id, step_path?, timepoint?, sample_id?, sample_ids?}`，
+按事件实际携带的 `(step_path,timepoint)` 分组返回；缺失时间点作为 `null` 组，不推断归属。
+不筛选时间点时只返回事件实际存在的分组，不构造 Run 全局样本 × 时间点笛卡尔积：
 
-- `steps[].samples[]`：每个样本的 `status`（`not_started` / `in_progress` /
-  `completed` / `failed` / `skipped`）、当前 `attempt`、`attempt_count` 和按 attempt
-  排列的 `attempts[]`（含 `event_ids`、`last_event_at`、`deviation`）；
-- 步骤汇总 `completed_samples` / `failed_samples` / `skipped_samples` /
-  `in_progress_samples` / `not_started_samples` 与 `last_event_at`；
-- 矩阵的样本集合来自本 Run 事件里出现的 `sample_ids`，加上调用方显式传入的
-  `sample_ids[]`。这样尚未开始的样本也有明确的 `not_started` 单元格，而不是消失。
+- `steps[]` 显式包含 `step_path` 和可空 `timepoint`；每组的 `samples[]` 含
+  `status`（`not_started` / `in_progress` / `completed` / `failed` / `skipped`）、
+  当前 `attempt`、`attempt_count` 和完整 `attempts[]` 历史；
+- 组内样本集合来自该组事件；只有同时指定 `step_path` 和具体 `timepoint` 时，
+  `sample_ids[]` 才补入该组的 `not_started` 样本，不扩散到其他时间点或共享步骤；
+- 步骤汇总计数和 `last_event_at` 也仅按该 `(step_path,timepoint)` 组计算。
 
 聚合规则是硬性的：
 

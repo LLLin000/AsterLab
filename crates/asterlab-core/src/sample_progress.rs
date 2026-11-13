@@ -4,7 +4,7 @@
 //! step. The execution identity of one *attempt* is:
 //!
 //! ```text
-//! run_id + step_path + sample_id + attempt
+//! run_id + step_path + timepoint? + sample_id + attempt
 //! ```
 //!
 //! Attempts are append-only: the first record of an identity is attempt 1, and
@@ -34,12 +34,13 @@ pub enum SampleStatus {
     Skipped,
 }
 
-/// One immutable attempt of one sample on one frozen step.
+/// One immutable attempt of one sample on one frozen step and timepoint.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SampleExecutionIdentity {
     pub run_id: String,
     pub step_path: String,
+    pub timepoint: Option<String>,
     pub sample_id: String,
     pub attempt: u32,
 }
@@ -59,9 +60,11 @@ pub struct ProgressIssue {
 pub struct SampleProgressQuery {
     /// Restrict the matrix to one frozen step path.
     pub step_path: Option<String>,
+    /// Restrict the matrix to one frozen timepoint; `None` selects actual event groups.
+    pub timepoint: Option<String>,
     /// Restrict the matrix to one sample.
     pub sample_id: Option<String>,
-    /// Additional samples that must appear even before their first event.
+    /// Additional samples, only used for an explicitly selected step/timepoint group.
     pub sample_ids: Vec<String>,
 }
 
@@ -70,6 +73,7 @@ pub struct SampleProgressQuery {
 pub struct ProgressEvent {
     pub event_id: String,
     pub step_path: Option<String>,
+    pub timepoint: Option<String>,
     pub sample_ids: Vec<String>,
     /// Explicit attempt carried by the write; `None` is derived from retries.
     pub attempt: Option<u32>,
@@ -108,6 +112,7 @@ pub struct SampleProgress {
 #[serde(deny_unknown_fields)]
 pub struct StepProgress {
     pub step_path: String,
+    pub timepoint: Option<String>,
     pub status: SampleStatus,
     /// True only when every sample is completed.
     pub complete: bool,
@@ -131,7 +136,7 @@ pub struct WorkflowProgress {
     pub issues: Vec<ProgressIssue>,
 }
 
-/// Project the sample matrix of one Run from its frozen steps and events.
+/// Project sample progress by the event's exact `(step_path, timepoint)` group.
 pub fn build(
     run_id: &str,
     step_paths: &[String],
@@ -142,88 +147,83 @@ pub fn build(
     let mut known_steps: Vec<String> = Vec::new();
     for path in step_paths {
         let path = path.trim();
-        if path.is_empty() || known_steps.iter().any(|known| known == path) {
-            continue;
+        if !path.is_empty() && !known_steps.iter().any(|known| known == path) {
+            known_steps.push(path.to_owned());
         }
-        known_steps.push(path.to_owned());
     }
-    let step_filter = query
-        .step_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|path| !path.is_empty());
-    let steps: Vec<String> = known_steps
-        .iter()
-        .filter(|path| step_filter.is_none_or(|filter| filter == path.as_str()))
-        .cloned()
-        .collect();
-
+    let step_filter = query.step_path.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let timepoint_filter = query.timepoint.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let resolved = resolve_events(events, &mut issues);
-
-    let mut samples: Vec<String> = Vec::new();
-    for event in &resolved {
-        for sample in &event.event.sample_ids {
-            let sample = sample.trim();
-            if sample.is_empty() || samples.iter().any(|known| known == sample) {
-                continue;
-            }
-            samples.push(sample.to_owned());
-        }
-    }
-    for sample in &query.sample_ids {
-        let sample = sample.trim();
-        if sample.is_empty() || samples.iter().any(|known| known == sample) {
-            continue;
-        }
-        samples.push(sample.to_owned());
-    }
-    if let Some(filter) = query
-        .sample_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|sample| !sample.is_empty())
-    {
-        if !samples.iter().any(|known| known == filter) {
-            samples.push(filter.to_owned());
-        }
-        samples.retain(|sample| sample == filter);
-    }
+    let mut groups: Vec<(String, Option<String>)> = Vec::new();
 
     for event in &resolved {
-        let event = event.event;
-        let Some(step) = event.step_path.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
-            issues.push(issue(
-                "missing_step",
-                "执行事件没有关联冻结步骤，不能进入样本矩阵",
-                None,
-                None,
-                Some(&event.event_id),
-            ));
+        let Some(step) = event.event.step_path.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+            issues.push(issue("missing_step", "执行事件没有关联冻结步骤，不能进入样本矩阵", None, None, Some(&event.event.event_id)));
             continue;
         };
+        if !known_steps.iter().any(|known| known == step) {
+            issues.push(issue("unknown_step", &format!("执行事件引用了本次冻结 Run 之外的步骤 {step}"), Some(step), None, Some(&event.event.event_id)));
+            continue;
+        }
         if step_filter.is_some_and(|filter| filter != step) {
             continue;
         }
-        if !known_steps.iter().any(|known| known == step) {
-            issues.push(issue(
-                "unknown_step",
-                &format!("执行事件引用了本次冻结 Run 之外的步骤 {step}"),
-                Some(step),
-                None,
-                Some(&event.event_id),
-            ));
+        if timepoint_filter.is_some_and(|filter| event.event.timepoint.as_deref().map(str::trim) != Some(filter)) {
+            continue;
+        }
+        let group = (step.to_owned(), event.event.timepoint.as_deref().map(str::trim).map(str::to_owned));
+        if !groups.contains(&group) {
+            groups.push(group);
+        }
+    }
+    if let (Some(step), Some(timepoint)) = (step_filter, timepoint_filter) {
+        if known_steps.iter().any(|known| known == step) {
+            let group = (step.to_owned(), Some(timepoint.to_owned()));
+            if !groups.contains(&group) {
+                groups.push(group);
+            }
         }
     }
 
-    let steps = steps
-        .into_iter()
-        .map(|step_path| step_progress(&step_path, &samples, &resolved))
-        .collect();
-
+    let mut all_samples = Vec::new();
+    let mut steps = Vec::new();
+    for (step_path, timepoint) in groups {
+        let mut samples = Vec::new();
+        for event in &resolved {
+            if event.event.step_path.as_deref().map(str::trim) != Some(step_path.as_str())
+                || event.event.timepoint.as_deref().map(str::trim) != timepoint.as_deref()
+            {
+                continue;
+            }
+            for sample in &event.event.sample_ids {
+                let sample = sample.trim();
+                if !sample.is_empty() && !samples.iter().any(|known| known == sample) {
+                    samples.push(sample.to_owned());
+                }
+            }
+        }
+        if step_filter.is_some() && timepoint_filter.is_some() {
+            for sample in &query.sample_ids {
+                let sample = sample.trim();
+                if !sample.is_empty() && !samples.iter().any(|known| known == sample) {
+                    samples.push(sample.to_owned());
+                }
+            }
+        }
+        if let Some(sample) = query.sample_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            samples.retain(|known| known == sample);
+        }
+        for sample in &samples {
+            if !all_samples.iter().any(|known| known == sample) {
+                all_samples.push(sample.clone());
+            }
+        }
+        steps.push(step_progress(&step_path, timepoint.as_deref(), &samples, &resolved));
+    }
     WorkflowProgress {
         schema_version: SAMPLE_PROGRESS_SCHEMA_VERSION,
         run_id: run_id.to_owned(),
-        sample_ids: samples,
+        sample_ids: all_samples,
         steps,
         issues,
     }
@@ -231,43 +231,28 @@ pub fn build(
 
 fn step_progress(
     step_path: &str,
+    timepoint: Option<&str>,
     samples: &[String],
     events: &[ResolvedEvent<'_>],
 ) -> StepProgress {
-    let step_events: Vec<(usize, u32)> = events
-        .iter()
-        .enumerate()
+    let step_events: Vec<(usize, u32)> = events.iter().enumerate()
         .filter(|(_, event)| {
-            event
-                .event
-                .step_path
-                .as_deref()
-                .map(str::trim)
-                == Some(step_path)
+            event.event.step_path.as_deref().map(str::trim) == Some(step_path)
+                && event.event.timepoint.as_deref().map(str::trim) == timepoint
         })
         .map(|(index, event)| (index, event.attempt))
         .collect();
-
     let last_event_at = step_events.last().and_then(|(index, _)| event_time(&events[*index].event));
-
-    let samples: Vec<SampleProgress> = samples
-        .iter()
+    let samples: Vec<SampleProgress> = samples.iter()
         .map(|sample_id| sample_progress(sample_id, events, &step_events))
         .collect();
-
     let total = samples.len() as u32;
-    let count = |status: SampleStatus| {
-        samples
-            .iter()
-            .filter(|sample| sample.status == status)
-            .count() as u32
-    };
+    let count = |status: SampleStatus| samples.iter().filter(|sample| sample.status == status).count() as u32;
     let completed = count(SampleStatus::Completed);
     let failed = count(SampleStatus::Failed);
     let skipped = count(SampleStatus::Skipped);
     let in_progress = count(SampleStatus::InProgress);
     let not_started = count(SampleStatus::NotStarted);
-
     let status = if total == 0 {
         SampleStatus::NotStarted
     } else if completed == total {
@@ -281,9 +266,9 @@ fn step_progress(
     } else {
         SampleStatus::InProgress
     };
-
     StepProgress {
         step_path: step_path.to_owned(),
+        timepoint: timepoint.map(str::to_owned),
         status,
         complete: total > 0 && completed == total,
         total_samples: total,
@@ -384,6 +369,7 @@ impl ProgressEvent {
         ProgressEvent {
             event_id: view.event_id.clone(),
             step_path: view.protocol_step_path.clone(),
+            timepoint: view.timepoint.clone(),
             sample_ids: view.sample_ids.clone(),
             attempt: view.attempt,
             retry_of_event_id: view
@@ -402,6 +388,7 @@ impl ProgressEvent {
     pub fn from_stored(value: &Value) -> Self {
         ProgressEvent {
             event_id: str_field(value, "id").or_else(|| str_field(value, "event_id")).unwrap_or_default(),
+            timepoint: str_field(value, "timepoint"),
             step_path: str_field(value, "protocol_step_path"),
             sample_ids: value["sample_ids"]
                 .as_array()
@@ -517,7 +504,7 @@ fn resolve_attempt(
         .filter(|id| !id.is_empty())
     {
         match by_id.get(target_id) {
-            Some(&target) if same_step(&events[ordered[target]], event) => {
+            Some(&target) if same_attempt_scope(&events[ordered[target]], event) => {
                 stack.push(position);
                 let base = resolve_attempt(target, events, ordered, by_id, cache, stack, issues);
                 stack.pop();
@@ -532,8 +519,13 @@ fn resolve_attempt(
     attempt
 }
 
-fn same_step(left: &ProgressEvent, right: &ProgressEvent) -> bool {
+fn same_attempt_scope(left: &ProgressEvent, right: &ProgressEvent) -> bool {
     left.step_path.as_deref().map(str::trim) == right.step_path.as_deref().map(str::trim)
+        && left.timepoint.as_deref().map(str::trim) == right.timepoint.as_deref().map(str::trim)
+        && left.sample_ids.len() == right.sample_ids.len()
+        && left.sample_ids.iter().all(|sample| {
+            right.sample_ids.iter().any(|candidate| candidate.trim() == sample.trim())
+        })
 }
 
 fn issue(
@@ -560,6 +552,7 @@ fn issue(
 pub fn plan_event_identity(
     run_id: &str,
     step_path: Option<&str>,
+    timepoint: Option<&str>,
     sample_ids: &[String],
     attempt: Option<u32>,
     existing: &[ProgressEvent],
@@ -629,6 +622,7 @@ pub fn plan_event_identity(
                     .as_deref()
                     .map(str::trim)
                     == Some(step_path)
+                    && event.event.timepoint.as_deref().map(str::trim) == timepoint.map(str::trim)
                     && event
                         .event
                         .sample_ids
@@ -654,9 +648,11 @@ pub fn plan_event_identity(
         identities.push(SampleExecutionIdentity {
             run_id: run_id.to_owned(),
             step_path: step_path.to_owned(),
+            timepoint: timepoint.map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned),
             sample_id: sample.to_owned(),
             attempt,
         });
+
     }
     if issues.is_empty() {
         Ok(identities)
@@ -774,13 +770,16 @@ mod tests {
 
     #[test]
     fn sample_progress_does_not_report_step_complete_for_partial_samples() {
-        let done = status(event("e1", "root/seed", &["S1"], "2026-11-13T10:00:00Z"), "completed");
+        let mut done = status(event("e1", "root/seed", &["S1"], "2026-11-13T10:00:00Z"), "completed");
+        done.timepoint = Some("D1".to_owned());
 
         let progress = build(
             "run-1",
             &[step("root/seed")],
             &[done],
             &SampleProgressQuery {
+                step_path: Some("root/seed".to_owned()),
+                timepoint: Some("D1".to_owned()),
                 sample_ids: vec!["S1".to_owned(), "S2".to_owned()],
                 ..SampleProgressQuery::default()
             },
@@ -892,28 +891,29 @@ mod tests {
             event("e1", "root/seed", &["S1"], "2026-11-13T10:00:00Z"),
             "blocked",
         )];
-        let zero = plan_event_identity("run-1", Some("root/seed"), &["S1".to_owned()], Some(0), &existing)
+        let zero = plan_event_identity("run-1", Some("root/seed"), None, &["S1".to_owned()], Some(0), &existing)
             .expect_err("attempt 0 is not a valid identity");
         assert_eq!(zero[0].code, "invalid_attempt");
 
-        let gap = plan_event_identity("run-1", Some("root/seed"), &["S1".to_owned()], Some(3), &existing)
+        let gap = plan_event_identity("run-1", Some("root/seed"), None, &["S1".to_owned()], Some(3), &existing)
             .expect_err("attempt 3 skips attempt 2");
         assert_eq!(gap[0].code, "attempt_gap");
 
-        let ok = plan_event_identity("run-1", Some("root/seed"), &["S1".to_owned()], Some(2), &existing)
+        let ok = plan_event_identity("run-1", Some("root/seed"), None, &["S1".to_owned()], Some(2), &existing)
             .expect("next attempt is accepted");
         assert_eq!(
             ok,
             vec![SampleExecutionIdentity {
                 run_id: "run-1".to_owned(),
                 step_path: "root/seed".to_owned(),
+                timepoint: None,
                 sample_id: "S1".to_owned(),
                 attempt: 2,
             }]
         );
 
         let missing_sample =
-            plan_event_identity("run-1", Some("root/seed"), &[], Some(1), &existing)
+            plan_event_identity("run-1", Some("root/seed"), None, &[], Some(1), &existing)
                 .expect_err("attempt without a sample has no identity");
         assert_eq!(missing_sample[0].code, "missing_sample");
     }
@@ -972,5 +972,49 @@ mod tests {
         );
         assert_eq!(sample(find(&progress, "root/seed"), "S1").attempt_count, 2);
     }
+    #[test]
+    fn sample_progress_isolated_by_timepoint_without_cross_product() {
+        let mut d1 = event("d1", "root/read", &["S1"], "2026-11-13T10:00:00Z");
+        d1.timepoint = Some("D1".to_owned());
+        d1.attempt = Some(1);
+        let mut d3 = event("d3", "root/read", &["S1"], "2026-11-13T11:00:00Z");
+        d3.timepoint = Some("D3".to_owned());
+        d3.attempt = Some(1);
+        let no_timepoint = event("shared", "root/seed", &["S2"], "2026-11-13T12:00:00Z");
+        let steps = vec![step("root/read"), step("root/seed")];
+
+        let progress = build("run-1", &steps, &[d1.clone(), d3.clone(), no_timepoint], &SampleProgressQuery::default());
+        assert_eq!(progress.steps.len(), 3);
+        assert!(progress.steps.iter().any(|group| group.step_path == "root/seed" && group.timepoint.is_none()));
+        let d1_group = progress.steps.iter().find(|group| group.timepoint.as_deref() == Some("D1")).unwrap();
+        let d3_group = progress.steps.iter().find(|group| group.timepoint.as_deref() == Some("D3")).unwrap();
+        assert_eq!(d1_group.samples.iter().map(|s| s.sample_id.as_str()).collect::<Vec<_>>(), vec!["S1"]);
+        assert_eq!(d3_group.samples.iter().map(|s| s.sample_id.as_str()).collect::<Vec<_>>(), vec!["S1"]);
+
+        let d1_existing = vec![d1, d3];
+        let d1_retry = plan_event_identity("run-1", Some("root/read"), Some("D1"), &["S1".to_owned()], Some(2), &d1_existing).unwrap();
+        let d3_first = plan_event_identity("run-1", Some("root/read"), Some("D3"), &["S1".to_owned()], Some(1), &d1_existing).unwrap();
+        assert_eq!(d1_retry[0].attempt, 2);
+        assert_eq!(d1_retry[0].timepoint.as_deref(), Some("D1"));
+        assert_eq!(d3_first[0].attempt, 1);
+        assert_eq!(d3_first[0].timepoint.as_deref(), Some("D3"));
+
+        let scoped = build("run-1", &steps, &[d1_existing[0].clone()], &SampleProgressQuery {
+            step_path: Some("root/read".to_owned()),
+            timepoint: Some("D1".to_owned()),
+            sample_ids: vec!["not-started".to_owned()],
+            ..SampleProgressQuery::default()
+        });
+        assert_eq!(scoped.steps.len(), 1);
+        assert_eq!(scoped.steps[0].timepoint.as_deref(), Some("D1"));
+        assert_eq!(scoped.steps[0].not_started_samples, 1);
+
+        let unscoped_samples = build("run-1", &steps, &[d1_existing[0].clone()], &SampleProgressQuery {
+            sample_ids: vec!["not-started".to_owned()],
+            ..SampleProgressQuery::default()
+        });
+        assert!(unscoped_samples.steps.iter().all(|group| group.samples.iter().all(|s| s.sample_id != "not-started")));
+    }
+
 }
 

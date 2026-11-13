@@ -991,7 +991,7 @@ warning: fields `exit` and `issues` are never read
 warning: `asterlab-app` (lib) generated 155 warnings (run `cargo fix --lib -p asterlab-app` to apply 2 suggestions)
 warning: `asterlab-app` (lib test) generated 112 warnings (111 duplicates)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-app/64318dc11aff0c44/out/asterlab_app-64318dc11aff0c44)
+     Running unittests src/lib.rs (<CARGO_TARGET_DIR>/debug/build/asterlab-app/64318dc11aff0c44/out/asterlab_app-64318dc11aff0c44)
 
 running 23 tests
 test agent_edit_preview::tests::preview_rejects_the_three_illegal_input_classes ... ok

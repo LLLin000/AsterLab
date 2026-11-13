@@ -8,16 +8,20 @@ Base: `0c93b93`
 
 | Command | Expectation | Result | File |
 |---|---|---|---|
-| `cargo test -p asterlab-core sample_progress` | exit 0, >= 5 passed | exit 0, 9 passed, 0 failed | `sample-progress-tests.out` |
+| `cargo test -p asterlab-core sample_progress` | exit 0, >= 5 passed | exit 0, 10 passed, 0 failed; includes D1/D3, null-timepoint and no-cross-product cases | `sample-progress-tests.out` |
 | `cargo test --bin labworkbench` | exit 0 | exit 0, 17 passed, 0 failed | `labworkbench-tests.out` |
-| `cargo run --bin labworkbench -- schema workflow.progress` | exit 0, output contains `sample_id` | exit 0, `ok:true`, `sample_id` in input and output schema | `schema-workflow-progress.out` |
+| `cargo run --bin labworkbench -- schema workflow.progress` | exit 0, output contains `sample_id` and `timepoint` semantics | exit 0, schema exposes both `sample_id` and `timepoint` | `schema-workflow-progress.out` |
 
 Extra (work method L1, not required by the card):
 
 | Command | Result | File |
 |---|---|---|
-| `cargo test -p asterlab-core` | exit 0, 314 + 3 + 6 + 2 passed | `core-suite.out` |
+| `cargo test -p asterlab-core` | exit 0, 315 + 3 + 6 + 2 passed | `core-suite.out` |
 | `cargo test --manifest-path crates/asterlab-app/Cargo.toml` | exit 0, 23 passed | `app-suite.out` |
+
+The only output normalization is the exact machine-specific Cargo target root
+`/srv/build/asterlab-target` → `<CARGO_TARGET_DIR>`; test results and all other
+output are unchanged.
 
 Reproduce the CLI scenario: `bash docs/release/evidence/SCI-04/run.sh`.
 
@@ -39,31 +43,25 @@ temp directory; nothing in the fixture changes.
    completed; S2 attempt 1 failed (`deviation: true`) and attempt 2 completed.
    Step `complete: true` because both samples completed; the failed attempt is
    still queryable.
-4. `workflow-progress-partial.out` — two negative cases:
-   - one sample in progress → step `in_progress`, `complete: false`, second
-     sample `not_started`;
-   - an event declaring `step_status = "completed"` for S1 only on
-     `root/rna-extraction/04-bind` → step `in_progress`, `complete: false`,
-     `not_started_samples: 1`. A step completion event is not a step-wide
-     success.
+4. `workflow-progress-partial.out` demonstrates the Run's actual unscoped `null`
+   timepoint group and confirms the query does not invent a second sample from
+   another step. Planned samples can be added only by a query scoped to a
+   concrete `step_path + timepoint`; the Core test covers that partial matrix.
 
 ## Files
 
 - `crates/asterlab-core/src/sample_progress.rs` — `SampleExecutionIdentity`,
-  `SampleStatus`, `ProgressEvent`, the append-only attempt resolver, the
-  per-step sample matrix projection (`build`, `build_from_workspace`) and the
-  write-side identity planner (`plan_event_identity`, `next_attempt`). Nine
-  tests cover retry separation, partial matrices, failures, skipped matrices,
-  last-event time, explicit attempts, attempt gaps/zero, unknown steps and
-  stored retry lineage.
-- `crates/asterlab-core/src/run_workspace.rs` — `ExecutionEventView.attempt`
-  carries the explicit attempt from stored events (`None` for legacy events).
+  `SampleStatus`, `ProgressEvent`, the append-only attempt resolver, grouped
+  projection and write-side identity planner. Ten tests cover retry separation,
+  partial matrices, D1/D3 identity and retry isolation, null timepoint, no
+  timepoint/sample Cartesian product, failures, skipped matrices, last-event
+  time, explicit attempts, attempt gaps/zero, unknown steps and retry lineage.
+- `crates/asterlab-core/src/run_workspace.rs` — `ExecutionEventView.timepoint`
+  and `.attempt` carry explicit event identity; legacy attempt remains `None`.
 - `crates/asterlab-core/src/lib.rs` — module registration.
-- `src/cli.rs` — `execution_event.create` accepts `attempt`, validates it
-  through `plan_event_identity`, stores it, and extends the completion dedupe
-  key from step scope to `sample_ids[] + attempt`; new read-only
-  `workflow.progress` command with input/output schema, description, side
-  effects and `writes_data=false`.
+- `src/cli.rs` — `execution_event.create` accepts `attempt`, validates identity
+  per timepoint, stores it, and deduplicates by timepoint/sample/attempt;
+  `workflow.progress` registers timepoint-aware input/output schemas.
 - `docs/architecture.md` §5.6 — identity, attempt rules, matrix aggregation.
 - `AGENT_API.md` — command catalogue, `workflow.progress` contract,
   `attempt` on `execution_event.create`, sample-scoped `step_status`.
@@ -80,11 +78,10 @@ Windows-only code.
    follows explicit retry links (`retry_of_event_id` or
    `lineage.relation = "retry"`) and defaults to attempt 1. Nothing is
    rewritten retroactively.
-3. **Sample universe.** The matrix is built from the samples that appear in
-   this Run's events plus `sample_ids[]` passed to the query. The Run does not
-   persist a separate planned-sample list, so a sample can only be
-   `not_started` when the caller names it or another step already mentions it.
-   The evidence names both `S1`/`S2` through events.
+3. **Sample universe.** Samples are grouped by exact `(step_path,timepoint)`.
+   Each group's matrix uses samples from that group's events; `sample_ids[]`
+   adds `not_started` cells only when both a step and concrete timepoint are
+   selected. The fixture's shared-step events remain in the `null` group.
 4. **Dedupe key change.** The old completion dedupe matched
    step/timepoint/assay/task only, which returned S1's record when S2 completed
    the same step. It now also compares the sorted `sample_ids` and `attempt`;
