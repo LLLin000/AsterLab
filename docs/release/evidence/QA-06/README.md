@@ -31,9 +31,9 @@
 2026-11-13 本轮结果（`export-scan.txt`）：
 
 ```text
-sha256 902f3a6e00a151407459564431b300b8fa4eecd1dba52b23338b381263653c90  .../qa06-hzxvgpvm/data/labworkbench.sqlite
-sha256_before_negative_cases 902f3a6e00a151407459564431b300b8fa4eecd1dba52b23338b381263653c90
-sha256_after_negative_cases  902f3a6e00a151407459564431b300b8fa4eecd1dba52b23338b381263653c90
+sha256 f606b1bd18d80dd37ebf9e9f4375fbd790e23ce44f81e8e02812b5b104951341  .../qa06-rxvpj1_o/data/labworkbench.sqlite
+sha256_before_negative_cases f606b1bd18d80dd37ebf9e9f4375fbd790e23ce44f81e8e02812b5b104951341
+sha256_after_negative_cases  f606b1bd18d80dd37ebf9e9f4375fbd790e23ce44f81e8e02812b5b104951341
 asset_rows_before=3 asset_rows_after=3
 ```
 

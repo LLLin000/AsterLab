@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 import pathlib
-import shutil
+import re
 import sqlite3
 import subprocess
 import sys
@@ -109,17 +109,21 @@ export_paths = {name: write_export(name + ".json", value) for name, value in exp
 say("")
 say("=== absolute-path scan of exported JSON ===")
 needles = [str(ASSET_ROOT), str(OUTSIDE), str(DATA), str(BASE)]
-generic = subprocess.run(
-    ["grep", "-nEo",
-     r"([A-Za-z]:\\\\|/srv/|/home/|/root/|/var/|/tmp/)[^\"[:space:]]*|\\\\\\\\[A-Za-z0-9._-]+\\\\\\\\"]
-    + [str(p) for p in export_paths.values()], capture_output=True, text=True)
+# POSIX absolute paths at a string boundary, Windows drive paths, UNC shares.
+GENERIC = re.compile(
+    r'(?<![\w."])/(?:srv|home|root|var|tmp|mnt|etc|Users)/'
+    r'|[A-Za-z]:[\\/]'
+    r'|\\\\[A-Za-z0-9._-]+\\[A-Za-z0-9._$-]+'
+)
 total = 0
+generic_hits = []
 for name, path in export_paths.items():
     text = path.read_text()
     hits = [n for n in needles if n in text]
     total += len(hits)
-    say(f"{name}: bytes={len(text)} absolute-path hits={len(hits)} {hits}")
-generic_hits = generic.stdout.strip().splitlines()
+    say(f"{name}: bytes={len(text)} local-path hits={len(hits)} {hits}")
+    for match in GENERIC.finditer(text):
+        generic_hits.append(f"{name}: {match.group(0)}")
 say(f"generic absolute-path regex hits: {len(generic_hits)}")
 for h in generic_hits:
     say("  " + h)
