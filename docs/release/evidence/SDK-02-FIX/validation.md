@@ -16,10 +16,10 @@ Exit code: 0.
 
 Command: `python3 tests/sdk-parity/run.py`
 
-Raw output:
+Output (local worktree prefix redacted):
 
 ```text
-python3: can't open file '/var/lib/kandev/tasks/sdk-02-fix-core-go-r_1q250d8s/LLLin000-AsterLab/tests/sdk-parity/run.py': [Errno 2] No such file or directory
+python3: can't open file '<worktree>/tests/sdk-parity/run.py': [Errno 2] No such file or directory
 ```
 
 Exit code: 2. The parity runner path is absent from this task worktree, so the acceptance criterion that `readout@1` no longer appears in its difference report could not be exercised here.
