@@ -10,7 +10,7 @@ QA execution is isolated and stateless with respect to user data. Go `Parse` run
 
 | Difference | Evidence | Disposition |
 |---|---|---|
-| Go parser does not register `readout@1`; Rust accepts the valid sample and validates malformed readout fields. | Three cases: `valid-readout-schema1`, `invalid-readout-schema1-missing-schema_id`, `invalid-readout-schema1-wrong-type-schema_id`. | Known compatibility gap. SDK-02 does not alter module implementation. Repair task `3553701c-89a8-4077-9887-5ef49d9250d5` was opened; SDK-02 is blocked by that task. |
+| Go parser in this task worktree does not register `readout@1`; Rust accepts the valid sample and validates malformed readout fields. | Three cases: `valid-readout-schema1`, `invalid-readout-schema1-missing-schema_id`, `invalid-readout-schema1-wrong-type-schema_id`. The current task worktree returns unsupported-kind errors for all three. | Known baseline difference only: SDK-02-FIX PR #36 is merged to main and registers `readout@1`; this task must not fetch/rebase, so its checkout still predates that fix. Do not treat the task-worktree result as the post-merge parity result. |
 | Go exposes parser error text, while Rust exposes `INVALID_INPUT` plus a message. | Rust rejection results use code `INVALID_INPUT`; Go `Parse` has no stable code API. | Compare normalized categories (`missing_field`, `invalid_type`, `unit_or_quantity`, `invalid_reference`, `rule_rejection`); retain both raw errors in `parity.json`. |
 
 ## Acceptance output
@@ -28,8 +28,10 @@ The command also prints the three known `readout@1` differences and their dispos
 `git status --short`:
 
 ```text
-?? docs/release/evidence/SDK-02/
-?? tests/sdk-parity/
+ M docs/release/evidence/SDK-02/README.md
+ M docs/release/evidence/SDK-02/parity.json
+ M docs/release/evidence/SDK-02/parity.txt
+ M tests/sdk-parity/run.py
 ```
 
 ## Reproduction

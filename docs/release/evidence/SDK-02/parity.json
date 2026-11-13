@@ -19,7 +19,7 @@
         "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09"
       },
       "reason": "accept/reject mismatch",
-      "disposition": "known: readout@1 is present in the Rust manifest but Go Parse does not register this kind"
+      "disposition": "known: this task branch predates SDK-02-FIX PR #36; the fix is merged to main, but this task baseline was not rebased"
     },
     {
       "name": "invalid-readout-schema1-missing-schema_id",
@@ -36,7 +36,7 @@
         "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09"
       },
       "reason": "error category mismatch",
-      "disposition": "known: readout@1 is present in the Rust manifest but Go Parse does not register this kind"
+      "disposition": "known: this task branch predates SDK-02-FIX PR #36; the fix is merged to main, but this task baseline was not rebased"
     },
     {
       "name": "invalid-readout-schema1-wrong-type-schema_id",
@@ -53,7 +53,7 @@
         "db_sha256": "47ccd9e552c5d00121dd9f7e011096ea9c2ed80f05a438b258f5bb791d60aa09"
       },
       "reason": "error category mismatch",
-      "disposition": "known: readout@1 is present in the Rust manifest but Go Parse does not register this kind"
+      "disposition": "known: this task branch predates SDK-02-FIX PR #36; the fix is merged to main, but this task baseline was not rebased"
     }
   ],
   "case_results": [
@@ -1171,9 +1171,9 @@
     },
     {
       "kind": "readout@1",
-      "go": "Go Parse rejects kind as unsupported",
-      "rust": "Rust validates the kind",
-      "disposition": "known compatibility gap; no module implementation changes allowed in this QA task"
+      "go": "this task branch rejects the kind as unsupported",
+      "rust": "validates the kind",
+      "disposition": "SDK-02-FIX PR #36 is merged to main; task baseline intentionally remains unchanged"
     }
   ],
   "isolated_data_sha256": "59f16ffc15abe43349b48701feb88e4351e80fb0750181414310597f5d9d1e4e"

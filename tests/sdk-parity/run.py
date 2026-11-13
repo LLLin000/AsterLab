@@ -177,7 +177,7 @@ def main() -> int:
         if not fixture["expected"] and (go_class != rust_class or go_class != fixture["expected_error"]):
             problems.append("error category mismatch")
         if problems and known_difference(fixture, left):
-            differences.append({"name": name, "go": left, "rust": right, "reason": "; ".join(problems), "disposition": "known: readout@1 is present in the Rust manifest but Go Parse does not register this kind"})
+            differences.append({"name": name, "go": left, "rust": right, "reason": "; ".join(problems), "disposition": "known: this task branch predates SDK-02-FIX PR #36; the fix is merged to main, but this task baseline was not rebased"})
             passed += 1
         elif problems:
             differences.append({"name": name, "go": left, "rust": right, "expected": fixture["expected"], "expected_error": fixture["expected_error"], "reason": "; ".join(problems)})
@@ -193,7 +193,7 @@ def main() -> int:
         "case_results": case_results,
         "known_differences": [
             {"go": "parser returns unstructured error text", "rust": "validator returns stable error codes", "disposition": "compare normalized categories; raw Go text and Rust code/message are included per case"},
-            {"kind": "readout@1", "go": "Go Parse rejects kind as unsupported", "rust": "Rust validates the kind", "disposition": "known compatibility gap; no module implementation changes allowed in this QA task"},
+            {"kind": "readout@1", "go": "this task branch rejects the kind as unsupported", "rust": "validates the kind", "disposition": "SDK-02-FIX PR #36 is merged to main; task baseline intentionally remains unchanged"},
         ],
         "isolated_data_sha256": db_hash,
     }
