@@ -295,7 +295,7 @@ def scan_approvals(review_tasks):
             print(f"approved-sent label failed: {exc}", file=sys.stderr)
 
 
-CARD_FIX_KEYWORDS = ("修卡", "人工修卡", "需要人工", "二选一", "改任务描述", "改卡", "CARD-BROKEN", "自矛盾")
+CARD_FIX_KEYWORDS = ("修卡", "人工修卡", "需要人工", "二选一", "改任务描述", "改卡", "CARD-BROKEN", "自矛盾", "澄清范围", "范围不一致", "scope 不一致", "先澄清")
 
 
 def scan_cardfix(tasks):
