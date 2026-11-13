@@ -1,0 +1,34 @@
+# command: cargo test -p asterlab-core step_edit
+   Compiling asterlab-core v0.1.0 ([workspace path redacted]/crates/asterlab-core)
+    Finished `test` profile [unoptimized] target(s) in 17.49s
+     Running unittests src/lib.rs ([build output path redacted]/debug/build/asterlab-core/e4acddd1bf4767f5/out/asterlab_core-e4acddd1bf4767f5)
+
+running 12 tests
+test semantic_changeset::tests::protocol_step_edit_requires_location ... ok
+test step_edit::tests::a_changed_child_that_is_no_longer_head_is_a_version_conflict ... ok
+test step_edit::tests::bind_rejects_a_wrong_unit_then_accepts_the_slot_unit ... ok
+test step_edit::tests::a_no_op_edit_is_rejected_and_reuse_cannot_form_a_cycle ... ok
+test step_edit::tests::commit_requires_a_matching_confirmation_digest ... ok
+test step_edit::tests::commit_replays_an_idempotency_key_without_a_second_version ... ok
+test step_edit::tests::deep_reuse_appends_the_child_before_its_parent ... ok
+test step_edit::tests::insert_adds_a_text_step_at_the_requested_position ... ok
+test step_edit::tests::reorder_requires_an_exact_permutation ... ok
+test step_edit::tests::paths_outside_the_root_tree_are_forbidden ... ok
+test step_edit::tests::the_wire_shape_is_closed_and_uses_the_four_op_kinds ... ok
+test step_edit::tests::stale_expected_version_and_stale_base_are_rejected ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 304 filtered out; finished in 0.01s
+
+     Running tests/catalog_drafts.rs ([build output path redacted]/debug/build/asterlab-core/f19e871205f766df/out/catalog_drafts-f19e871205f766df)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/operation_surface.rs ([build output path redacted]/debug/build/asterlab-core/a2a226fa5648ab97/out/operation_surface-a2a226fa5648ab97)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+EXIT:0

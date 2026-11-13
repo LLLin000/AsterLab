@@ -31,6 +31,11 @@ use asterlab_core::semantic_catalog::{compile_operation_module, CompilePolicy};
 use asterlab_core::semantic_changeset::ChangeSet;
 use asterlab_core::semantic_component::ProtocolScope;
 use asterlab_core::semantic_query::{assess_block_patch, inspect_block, search_modules};
+use asterlab_core::step_edit::{
+    commit as step_edit_commit_request, validate as step_edit_validate_request, CommittedStepEdit,
+    StepEditCommitError, StepEditCommitStore, StepEditRequest, StepEditStore, StoredBlockHead,
+    StoredEditBlock,
+};
 use asterlab_core::workflow_tree::{
     BlockDefinition, BlockParameter, BlockStep, DesignStep, Document, RunTask,
 };
@@ -4642,6 +4647,8 @@ pub(crate) fn create_protocol_block_records(
         module_origin: None,
         module_contract_authority: None,
         catalog_review: None,
+        based_on_version_id: None,
+        step_edit: None,
     };
     let serialized =
         serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
@@ -4699,6 +4706,8 @@ pub(crate) fn revise_protocol_block_records(
         module_origin,
         module_contract_authority,
         catalog_review: None,
+        based_on_version_id: None,
+        step_edit: None,
     };
     let serialized =
         serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
@@ -8808,6 +8817,199 @@ fn agent_edit_cli_error(error: AgentEditError) -> CliError {
     }
 }
 
+/// Read-only view for `step.edit` validation.
+struct CliStepEditStore<'a> {
+    conn: &'a Connection,
+}
+
+fn step_edit_block_version(
+    conn: &Connection,
+    version_id: &str,
+) -> Result<Option<StoredEditBlock>, String> {
+    let row = conn
+        .query_row(
+            "SELECT revision,parent_id,project_id,data_json FROM records \
+             WHERE kind='protocol_block_version' AND id=?1",
+            [version_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((revision, parent, project, raw)) = row else {
+        return Ok(None);
+    };
+    let data: ProtocolBlockVersionData = serde_json::from_str(&raw).map_err(|error| {
+        format!("protocol_block_version {version_id} data_json 无效：{error}")
+    })?;
+    Ok(Some(StoredEditBlock {
+        version_id: version_id.to_owned(),
+        block_id: parent.unwrap_or_else(|| data.block_id.clone()),
+        revision,
+        project_id: project,
+        data,
+    }))
+}
+
+fn step_edit_block_head(
+    conn: &Connection,
+    block_id: &str,
+) -> Result<Option<StoredBlockHead>, String> {
+    conn.query_row(
+        "SELECT id,revision FROM records \
+         WHERE kind='protocol_block_version' AND parent_id=?1 \
+         ORDER BY revision DESC LIMIT 1",
+        [block_id],
+        |row| {
+            Ok(StoredBlockHead {
+                block_id: block_id.to_owned(),
+                version_id: row.get(0)?,
+                revision: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
+impl StepEditStore for CliStepEditStore<'_> {
+    fn step_block_version(&self, version_id: &str) -> Result<Option<StoredEditBlock>, String> {
+        step_edit_block_version(self.conn, version_id)
+    }
+
+    fn step_block_head(&self, block_id: &str) -> Result<Option<StoredBlockHead>, String> {
+        step_edit_block_head(self.conn, block_id)
+    }
+}
+
+/// Transactional view for `step.edit` commit: the head re-read, the
+/// idempotency lookup and every append share one `BEGIN IMMEDIATE` transaction.
+struct CliStepEditCommitStore<'a, 'conn> {
+    tx: &'a Transaction<'conn>,
+}
+
+impl StepEditStore for CliStepEditCommitStore<'_, '_> {
+    fn step_block_version(&self, version_id: &str) -> Result<Option<StoredEditBlock>, String> {
+        step_edit_block_version(self.tx, version_id)
+    }
+
+    fn step_block_head(&self, block_id: &str) -> Result<Option<StoredBlockHead>, String> {
+        step_edit_block_head(self.tx, block_id)
+    }
+}
+
+impl StepEditCommitStore for CliStepEditCommitStore<'_, '_> {
+    fn step_store(&self) -> &dyn StepEditStore {
+        self
+    }
+
+    fn find_step_commit(
+        &self,
+        idempotency_key: &str,
+    ) -> Result<Vec<CommittedStepEdit>, String> {
+        let mut statement = self
+            .tx
+            .prepare(
+                "SELECT id,revision,data_json FROM records \
+                 WHERE kind='protocol_block_version' \
+                   AND json_extract(data_json,'$.step_edit.idempotency_key')=?1 \
+                 ORDER BY revision ASC, rowid ASC",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([idempotency_key], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (version_id, revision, raw) = row.map_err(|error| error.to_string())?;
+            let data: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+            out.push(CommittedStepEdit {
+                version_id,
+                revision,
+                provenance: data["step_edit"].clone(),
+            });
+        }
+        Ok(out)
+    }
+
+    fn timestamp(&self) -> String {
+        stamp()
+    }
+
+    fn append_block_version(
+        &mut self,
+        block_id: &str,
+        revision: i64,
+        data: Value,
+    ) -> Result<(String, i64), String> {
+        let (kind, project, _, _, _) = kind_id(self.tx, block_id)
+            .map_err(|error| error.message)?
+            .ok_or_else(|| format!("步骤块不存在：{block_id}"))?;
+        if kind != "protocol_block" {
+            return Err(format!("{block_id} 不是 protocol_block 记录"));
+        }
+        let record = insert(
+            self.tx,
+            "protocol_block_version",
+            project.as_deref(),
+            Some(block_id),
+            revision,
+            &data,
+        )
+        .map_err(|error| error.message)?;
+        Ok((
+            record["id"].as_str().unwrap_or_default().to_owned(),
+            record["revision"].as_i64().unwrap_or(revision),
+        ))
+    }
+}
+
+/// `step.edit`: validate (no `confirmation`) or commit (with `confirmation`)
+/// block-level structural edits in one command.
+pub(crate) fn step_edit_command(db: &mut Connection, input: Value) -> Result<Value, CliError> {
+    let request: StepEditRequest = serde_json::from_value(input)
+        .map_err(|error| CliError::input(format!("step.edit 载荷无效：{error}")))?;
+    if request.confirmation.is_none() {
+        let result = step_edit_validate_request(&request, &CliStepEditStore { conn: db })
+            .map_err(CliError::internal)?;
+        return serde_json::to_value(result).map_err(|error| CliError::internal(error.to_string()));
+    }
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let outcome = {
+        let mut store = CliStepEditCommitStore { tx: &tx };
+        step_edit_commit_request(&request, &mut store)
+    };
+    match outcome {
+        Ok(result) => {
+            tx.commit()
+                .map_err(|error| CliError::internal(error.to_string()))?;
+            serde_json::to_value(result).map_err(|error| CliError::internal(error.to_string()))
+        }
+        Err(StepEditCommitError::Rejected(error)) => {
+            tx.rollback().ok();
+            Err(agent_edit_cli_error(error))
+        }
+        Err(StepEditCommitError::Store(message)) => {
+            tx.rollback().ok();
+            Err(CliError::internal(message))
+        }
+    }
+}
+
 fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> {
     if tool == "workflow.inspect_tree" {
         let input: InspectTreeInput = parse_input(path)?;
@@ -9843,6 +10045,10 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let i: Value = parse_input(path)?;
             commit_agent_edit(&mut db, i)
         }
+        "step.edit" => {
+            let i: Value = parse_input(path)?;
+            step_edit_command(&mut db, i)
+        }
         "plate.create" => {
             let i: PlateCreate = parse_input(path)?;
             let (kind, project, _, _, _) =
@@ -10306,7 +10512,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":true})
         }
         "protocol_block_version" => {
-            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"module_contract":{"type":["object","null"]},"module_origin":{"type":["string","null"],"enum":["imported","derived","local_custom",null]},"module_contract_authority":{"type":["string","null"],"enum":["current","source_only",null]},"catalog_review":{"type":["object","null"]},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
+            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"module_contract":{"type":["object","null"]},"module_origin":{"type":["string","null"],"enum":["imported","derived","local_custom",null]},"module_contract_authority":{"type":["string","null"],"enum":["current","source_only",null]},"catalog_review":{"type":["object","null"]},"based_on_version_id":{"type":["string","null"]},"step_edit":{"type":["object","null"]},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
         }
         "plate" => {
             json!({"type":"object","additionalProperties":false,"required":["name","format","rows","columns"],"properties":{"name":{"type":"string"},"format":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48},"assay_id":{"type":["string","null"]},"timepoint":{"type":["string","null"]}}})
@@ -10417,6 +10623,10 @@ fn result_schema(tool: &str) -> Value {
         "agent_edit.commit" => {
             json!({"type":"object","additionalProperties":false,"required":["schema_version","proposal_id","proposal_digest","target","previous_version_id","new_version_id","new_revision","applied","invalidated_refs","confirmed_by","committed_at","idempotency_key","replayed"],"properties":{"schema_version":{"type":"integer"},"proposal_id":{"type":"string"},"proposal_digest":{"type":"string"},"target":{"type":"object","additionalProperties":true},"previous_version_id":{"type":"string"},"new_version_id":{"type":"string"},"new_revision":{"type":"integer"},"applied":{"type":"array","items":{"type":"object","additionalProperties":true}},"invalidated_refs":{"type":"array","items":{"type":"string"}},"confirmed_by":{"type":"string"},"committed_at":{"type":"string"},"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}})
         }
+        "step.edit" => json!({"oneOf":[
+            {"type":"object","additionalProperties":false,"required":["schema_version","edit_id","edit_digest","block_version_id","block_id","current_revision","status","requires_confirmation","ops","blocks","issues","invalidated_refs"],"properties":{"schema_version":{"type":"integer"},"edit_id":{"type":"string"},"edit_digest":{"type":"string"},"block_version_id":{"type":"string"},"block_id":{"type":"string"},"current_revision":{"type":"integer"},"status":{"type":"string","enum":["valid","needs_confirmation","blocked"]},"requires_confirmation":{"type":"boolean"},"confirmation_prompt":{"type":["string","null"]},"ops":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["op","path","changed","description"],"properties":{"op":{"type":"string","enum":["insert","reorder","reuse","bind"]},"path":{"type":"string"},"changed":{"type":"boolean"},"description":{"type":"string"}}}},"blocks":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["block_id","based_on_version_id","previous_version","new_version","order"],"properties":{"block_id":{"type":"string"},"based_on_version_id":{"type":"string"},"previous_version":{"type":"integer"},"new_version":{"type":"integer"},"order":{"type":"array","items":{"type":"string"}}}}}},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}},"invalidated_refs":{"type":"array","items":{"type":"string"}}},
+            {"type":"object","additionalProperties":false,"required":["schema_version","edit_id","edit_digest","block_version_id","block_id","previous_version_id","new_root_block_version_id","new_revision","created_versions","invalidated_refs","confirmed_by","committed_at","idempotency_key","replayed"],"properties":{"schema_version":{"type":"integer"},"edit_id":{"type":"string"},"edit_digest":{"type":"string"},"block_version_id":{"type":"string"},"block_id":{"type":"string"},"previous_version_id":{"type":"string"},"new_root_block_version_id":{"type":"string"},"new_revision":{"type":"integer"},"created_versions":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["block_id","based_on_version_id","version_id","version"],"properties":{"block_id":{"type":"string"},"based_on_version_id":{"type":"string"},"version_id":{"type":"string"},"version":{"type":"integer"}}}},"invalidated_refs":{"type":"array","items":{"type":"string"}},"confirmed_by":{"type":"string"},"committed_at":{"type":"string"},"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}}
+        ]}),
         "plate.create" => one("plate"),
         "well.set" => one("well"),
         "note.create" => one("note"),
@@ -10475,7 +10685,7 @@ fn result_schema(tool: &str) -> Value {
 }
 fn output_schema(tool: &str) -> Value {
     let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool)}});
-    let error = if matches!(tool, "agent_edit.validate" | "agent_edit.commit") {
+    let error = if matches!(tool, "agent_edit.validate" | "agent_edit.commit" | "step.edit") {
         json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}}}})
     } else {
         json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}}}})
@@ -10605,6 +10815,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "agent_edit.commit" => {
             json!({"type":"object","additionalProperties":false,"required":["proposal","proposal_digest","idempotency_key","confirmed_by"],"properties":{"schema_version":{"type":"integer"},"proposal":{"type":"object"},"proposal_digest":{"type":"string"},"idempotency_key":{"type":"string"},"confirmed_by":{"type":"string"},"acknowledged":{"type":"array","items":{"type":"string"}},"note":{"type":["string","null"]}}})
+        }
+        "step.edit" => {
+            json!({"type":"object","additionalProperties":false,"required":["edit_id","block_version_id","expected_version","origin","ops"],"properties":{"schema_version":{"type":"integer","minimum":1},"edit_id":{"type":"string","minLength":1,"maxLength":120},"block_version_id":{"type":"string","minLength":1},"expected_version":{"type":"integer","minimum":1},"origin":{"type":"object","additionalProperties":false,"required":["source"],"properties":{"source":{"type":"string","enum":["user","agent","tool"]},"rationale":{"type":["string","null"]}}},"ops":{"type":"array","minItems":1,"maxItems":100,"items":step_edit_op_input_schema()},"confirmation":{"type":"object","additionalProperties":false,"required":["edit_digest","confirmed_by","idempotency_key"],"properties":{"edit_digest":{"type":"string","minLength":1},"confirmed_by":{"type":"string","minLength":1},"idempotency_key":{"type":"string","minLength":1},"note":{"type":["string","null"]}}}}})
         }
         "plate.create" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","name","format","rows","columns"],"properties":{"run_id":{"type":"string"},"assay_id":{"type":"string","description":"可选；必须是 Run 冻结设计中的检测 ID"},"timepoint":{"type":"string","description":"可选；标注该实际板图所用的检测时间点，需与冻结设计一致"},"name":{"type":"string","minLength":1,"maxLength":100,"pattern":"\\S"},"format":{"type":"string","enum":["6","12","24","48","96","384","custom"]},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48}}})
@@ -10771,19 +10984,43 @@ fn step_binding_input_schema() -> Value {
         }
     })
 }
+fn text_step_input_schema() -> Value {
+    json!({"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction"],"properties":{
+        "kind":{"const":"text"},"use_id":{"type":"string","minLength":1,"maxLength":80},
+        "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
+        "instruction":{"type":"string","minLength":1,"maxLength":4000,"pattern":"\\S"},
+        "parameter_refs":{"type":"array","maxItems":100,"items":{"type":"string"}},
+        "visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},
+        "checks":{"type":"array","maxItems":50,"items":{"type":"object","additionalProperties":false,"required":["check_id","label"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80,"pattern":"\\S"},"label":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},"instruction":{"type":"string","maxLength":2000},"blocking":{"type":"boolean"}}}}
+    }})
+}
 fn protocol_step_input_schema() -> Value {
     json!({"oneOf":[
-        {"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction"],"properties":{
-            "kind":{"const":"text"},"use_id":{"type":"string","minLength":1,"maxLength":80},
-            "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
-            "instruction":{"type":"string","minLength":1,"maxLength":4000,"pattern":"\\S"},
-            "parameter_refs":{"type":"array","maxItems":100,"items":{"type":"string"}},
-            "visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},
-            "checks":{"type":"array","maxItems":50,"items":{"type":"object","additionalProperties":false,"required":["check_id","label"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80,"pattern":"\\S"},"label":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},"instruction":{"type":"string","maxLength":2000},"blocking":{"type":"boolean"}}}}
-        }},
+        text_step_input_schema(),
         {"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id"],"properties":{
             "kind":{"const":"block_use"},"use_id":{"type":"string","minLength":1,"maxLength":80},
             "block_version_id":{"type":"string"},"bindings":{"type":"array","maxItems":100,"items":step_binding_input_schema()}
+        }}
+    ]})
+}
+fn step_edit_op_input_schema() -> Value {
+    json!({"oneOf":[
+        {"type":"object","additionalProperties":false,"required":["op","path","position","step"],"properties":{
+            "op":{"const":"insert"},"path":{"type":"string","minLength":1},"position":{"type":"integer","minimum":0},
+            "step":text_step_input_schema()
+        }},
+        {"type":"object","additionalProperties":false,"required":["op","path","order"],"properties":{
+            "op":{"const":"reorder"},"path":{"type":"string","minLength":1},
+            "order":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","minLength":1}}
+        }},
+        {"type":"object","additionalProperties":false,"required":["op","path","position","use_id","block_version_id"],"properties":{
+            "op":{"const":"reuse"},"path":{"type":"string","minLength":1},"position":{"type":"integer","minimum":0},
+            "use_id":{"type":"string","minLength":1,"maxLength":80},"block_version_id":{"type":"string","minLength":1},
+            "bindings":{"type":"array","maxItems":100,"items":step_binding_input_schema()}
+        }},
+        {"type":"object","additionalProperties":false,"required":["op","path","bindings"],"properties":{
+            "op":{"const":"bind"},"path":{"type":"string","minLength":1},
+            "bindings":{"type":"array","minItems":1,"maxItems":100,"items":step_binding_input_schema()}
         }}
     ]})
 }
@@ -10850,6 +11087,7 @@ fn tool_specs() -> Vec<Value> {
         "protocol.revise",
         "agent_edit.validate",
         "agent_edit.commit",
+        "step.edit",
         "plate.create",
         "well.set",
         "note.create",
@@ -10967,6 +11205,7 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.revise" => "追加 Protocol 新版本；参数值可改变而不复制步骤块；必须提供 expected_version。",
         "agent_edit.validate" => "只读校验 agent 提案：解析绑定、版本和单位，返回 Core 计算的 digest、无效引用与确认提示；不写数据库。",
         "agent_edit.commit" => "提交人工确认过的 agent 提案：单事务重新校验版本并追加一个新版本；过期或并发提案返回 VERSION_CONFLICT，不覆盖旧数据。",
+        "step.edit" => "对步骤块树做 insert/reorder/reuse/bind 级编辑：无 confirmation 时只读校验并返回 plan 与 digest；带 confirmation 时单事务追加新版本。版本号由 Core 生成，冻结版本不改写。",
         "plate.create" => "为实验运行创建指定行列数的空布局。",
         "well.set" => "创建或覆盖一个板孔映射。",
         "note.create" => "向运行追加一条实际记录；事件时间必须显式提供或留空。",
@@ -11035,6 +11274,7 @@ fn tool_effects(tool: &str) -> &'static str {
         "protocol.revise" => "为 Protocol 追加一个不可变的新版本；不覆盖旧正文。",
         "agent_edit.validate" => "只读；不修改数据库。",
         "agent_edit.commit" => "在一个事务中追加一个不可变版本，并记录提案 ID、确认人和版本号；不修改旧版本或冻结 Run。",
+        "step.edit" => "无 confirmation 时只读；带 confirmation 时在一个事务中为每个被改动的步骤块追加一个不可变新版本，子块先于父块，并记录 edit digest 与确认人；不修改旧版本或冻结 Run。",
         "protocol.block.create" => "创建步骤块元数据和不可变 v1；步骤块只引用确切的其他版本。",
         "view.create" | "view.revise" => "保存新的 ViewDocument 版本；不改 Protocol/Run。",
         "view.get" => "只读；不修改数据库。",
@@ -12780,4 +13020,360 @@ protocol_version_id: protocol-v1
         assert_eq!(sha256_file(&db_file), before_hash);
         fs::remove_dir_all(data_dir).unwrap();
     }
+    struct StepEditFixture {
+        data_dir: std::path::PathBuf,
+        project_id: String,
+        protocol_version_id: String,
+        root_version_id: String,
+        child_version_id: String,
+        wash_version_id: String,
+        run_id: String,
+    }
+
+    fn seed_step_edit_fixture(db: &mut Connection) -> StepEditFixture {
+        let data_dir = std::env::temp_dir().join(format!("asterlab-step-edit-{}", Uuid::new_v4()));
+        fs::create_dir_all(&data_dir).unwrap();
+        let project = create_project(db, "step edit").unwrap();
+        let project_id = project["id"].as_str().unwrap().to_owned();
+        let child_version_id = {
+            let tx = db.unchecked_transaction().unwrap();
+            let result = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title": "Lysis",
+                    "summary": "lysis",
+                    "parameter_slots": [{
+                        "key": "volume_per_sample",
+                        "label": "Volume per sample",
+                        "value_type": "number",
+                        "unit": "uL",
+                        "required": true
+                    }],
+                    "steps": [{
+                        "kind": "text",
+                        "use_id": "iris",
+                        "title": "Iris",
+                        "instruction": "Aspirate supernatant"
+                    }]
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            result["version"]["id"].as_str().unwrap().to_owned()
+        };
+        let wash_version_id = {
+            let tx = db.unchecked_transaction().unwrap();
+            let result = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title": "Wash",
+                    "summary": "wash",
+                    "steps": [{
+                        "kind": "text",
+                        "use_id": "rinse",
+                        "title": "Rinse",
+                        "instruction": "Rinse once"
+                    }]
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            result["version"]["id"].as_str().unwrap().to_owned()
+        };
+        let root_version_id = {
+            let tx = db.unchecked_transaction().unwrap();
+            let result = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title": "RNA protocol block",
+                    "summary": "root",
+                    "parameter_slots": [{
+                        "key": "volume_per_sample",
+                        "label": "Volume per sample",
+                        "value_type": "number",
+                        "unit": "uL",
+                        "required": true
+                    }],
+                    "steps": [
+                        {"kind": "text", "use_id": "prep", "title": "Prep", "instruction": "Prepare bench"},
+                        {"kind": "block_use", "use_id": "lyse", "block_version_id": child_version_id,
+                         "bindings": [{"slot": "volume_per_sample", "value": 200.0, "unit": "uL"}]}
+                    ]
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            result["version"]["id"].as_str().unwrap().to_owned()
+        };
+        let protocol_version_id = {
+            let tx = db.unchecked_transaction().unwrap();
+            let protocol = insert(
+                &tx,
+                "protocol",
+                Some(&project_id),
+                Some(&project_id),
+                1,
+                &json!({"title": "RNA protocol"}),
+            )
+            .unwrap();
+            let protocol_id = protocol["id"].as_str().unwrap().to_owned();
+            let version = insert(
+                &tx,
+                "protocol_version",
+                Some(&project_id),
+                Some(&protocol_id),
+                1,
+                &json!({
+                    "protocol_id": protocol_id,
+                    "version": 1,
+                    "body": "",
+                    "root_block_version_id": root_version_id,
+                    "root_bindings": []
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            version["id"].as_str().unwrap().to_owned()
+        };
+        let design = create_design_record(db, &project_id, &json!({"title": "d"})).unwrap();
+        let design_id = design["design"]["id"].as_str().unwrap().to_owned();
+        let run = {
+            let tx = db
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            let run = create_run_in_transaction(
+                &tx,
+                &design_id,
+                "run",
+                None,
+                Some(&protocol_version_id),
+                None,
+                None,
+                "independent",
+                None,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            run
+        };
+        StepEditFixture {
+            data_dir,
+            project_id,
+            protocol_version_id,
+            root_version_id,
+            child_version_id,
+            wash_version_id,
+            run_id: run["id"].as_str().unwrap().to_owned(),
+        }
+    }
+
+    fn step_edit_request(fixture: &StepEditFixture) -> Value {
+        json!({
+            "schema_version": 1,
+            "edit_id": "sde-rna-001",
+            "block_version_id": fixture.root_version_id,
+            "expected_version": 1,
+            "origin": {"source": "agent", "rationale": "add a wash substep"},
+            "ops": [{
+                "op": "reuse",
+                "path": "root/lyse",
+                "position": 1,
+                "use_id": "wash",
+                "block_version_id": fixture.wash_version_id,
+                "bindings": []
+            }]
+        })
+    }
+
+    #[test]
+    fn step_edit_schema_is_registered_for_validate_and_commit() {
+        assert!(input_schema("step.edit").is_some());
+        let ops = input_schema("step.edit").unwrap()["properties"]["ops"].clone();
+        let variants = ops["items"]["oneOf"].as_array().unwrap();
+        let kinds: Vec<&str> = variants
+            .iter()
+            .map(|variant| variant["properties"]["op"]["const"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, ["insert", "reorder", "reuse", "bind"]);
+        let results = result_schema("step.edit")["oneOf"].as_array().unwrap().len();
+        assert_eq!(results, 2, "validate and commit result shapes");
+        let specs = tool_specs();
+        let names: Vec<&str> = specs
+            .iter()
+            .filter_map(|spec| spec["name"].as_str())
+            .collect();
+        assert!(names.contains(&"step.edit"));
+        assert!(!names.contains(&"protocol.block.step_edit"));
+        assert!(
+            tool_effects("step.edit").contains("只读"),
+            "the effect text must state the no-confirmation path is read-only"
+        );
+    }
+
+    #[test]
+    fn step_edit_commit_creates_child_and_parent_versions_and_keeps_the_frozen_run() {
+        let data_dir =
+            std::env::temp_dir().join(format!("asterlab-step-edit-db-{}", Uuid::new_v4()));
+        let mut db = open_db(&data_dir).unwrap();
+        let fixture = seed_step_edit_fixture(&mut db);
+        let request = step_edit_request(&fixture);
+
+        let preview = step_edit_command(&mut db, request.clone()).unwrap();
+        assert_eq!(preview["status"], "needs_confirmation");
+        assert!(preview["edit_digest"].as_str().unwrap().starts_with("sha256:"));
+        let planned: Vec<&str> = preview["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["block_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(planned.len(), 2);
+        assert_eq!(
+            preview["blocks"][0]["based_on_version_id"],
+            json!(fixture.child_version_id)
+        );
+        assert_eq!(
+            preview["blocks"][0]["order"],
+            json!(["iris", "wash"]),
+            "the deep edit lands inside the child block"
+        );
+        let digest = preview["edit_digest"].as_str().unwrap().to_owned();
+
+        let run_before = get(&db, &fixture.run_id).unwrap();
+        let protocol_version_before = get(&db, &fixture.protocol_version_id).unwrap();
+        let base_root_before = get(&db, &fixture.root_version_id).unwrap();
+        let base_child_before = get(&db, &fixture.child_version_id).unwrap();
+
+        let mut confirmed = request.clone();
+        confirmed["confirmation"] = json!({
+            "edit_digest": digest,
+            "confirmed_by": "researcher:zhang",
+            "idempotency_key": "sde-rna-001-confirm-1",
+            "note": "add wash"
+        });
+        let committed = step_edit_command(&mut db, confirmed.clone()).unwrap();
+        assert_eq!(committed["replayed"], false);
+        assert_eq!(committed["confirmed_by"], "researcher:zhang");
+        assert_eq!(committed["new_revision"], 2);
+        assert_eq!(committed["previous_version_id"], json!(fixture.root_version_id));
+        let created = committed["created_versions"].as_array().unwrap();
+        assert_eq!(created.len(), 2);
+        let child_block_id = get(&db, &fixture.child_version_id).unwrap()["parent_id"].clone();
+        assert_eq!(created[0]["block_id"], child_block_id);
+        assert_eq!(created[0]["based_on_version_id"], json!(fixture.child_version_id));
+        let child_new = created[0]["version_id"].as_str().unwrap().to_owned();
+        let root_new = committed["new_root_block_version_id"].as_str().unwrap().to_owned();
+        assert_eq!(created[1]["version_id"], json!(root_new));
+
+        // Immutable base versions and the frozen Run did not move.
+        assert_eq!(get(&db, &fixture.run_id).unwrap(), run_before);
+        assert_eq!(
+            get(&db, &fixture.protocol_version_id).unwrap(),
+            protocol_version_before
+        );
+        assert_eq!(get(&db, &fixture.root_version_id).unwrap(), base_root_before);
+        assert_eq!(get(&db, &fixture.child_version_id).unwrap(), base_child_before);
+        assert_eq!(
+            get(&db, &fixture.protocol_version_id).unwrap()["data"]["root_block_version_id"],
+            json!(fixture.root_version_id)
+        );
+
+        let new_root = get(&db, &root_new).unwrap();
+        assert_eq!(
+            new_root["data"]["based_on_version_id"],
+            json!(fixture.root_version_id)
+        );
+        assert_eq!(
+            new_root["data"]["steps"][1]["block_version_id"],
+            json!(child_new),
+            "the parent version references the child version created in the same commit"
+        );
+        assert_eq!(
+            new_root["data"]["step_edit"]["edit_id"],
+            json!("sde-rna-001")
+        );
+        assert_eq!(new_root["data"]["step_edit"]["edit_digest"], json!(digest));
+        assert_eq!(
+            new_root["data"]["step_edit"]["confirmed_by"],
+            json!("researcher:zhang")
+        );
+
+        // The protocol still previews through the old root; the new block does too.
+        let preview_new = block_preview(&db, &root_new, &[]).unwrap();
+        assert_eq!(preview_new["steps"].as_array().unwrap().len(), 3);
+        let paths: Vec<&str> = preview_new["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|step| step["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            ["root/prep", "root/lyse/iris", "root/lyse/wash/rinse"]
+        );
+
+        // Idempotent replay appends nothing.
+        let replayed = step_edit_command(&mut db, confirmed).unwrap();
+        assert_eq!(replayed["replayed"], true);
+        assert_eq!(replayed["created_versions"], json!(created));
+        let version_count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE kind='protocol_block_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version_count, 5, "three seeds plus two new versions");
+
+        // The old base version is no longer a valid edit target.
+        let stale = step_edit_command(&mut db, request).unwrap();
+        assert_eq!(stale["status"], "blocked");
+        assert_eq!(stale["issues"][0]["code"], "STALE_REFERENCE");
+
+        fs::remove_dir_all(&fixture.data_dir).ok();
+        drop(db);
+        fs::remove_dir_all(&data_dir).ok();
+    }
+
+    #[test]
+    fn step_edit_rejects_a_version_conflict_and_a_wrong_unit_without_writing() {
+        let data_dir =
+            std::env::temp_dir().join(format!("asterlab-step-edit-db-{}", Uuid::new_v4()));
+        let mut db = open_db(&data_dir).unwrap();
+        let fixture = seed_step_edit_fixture(&mut db);
+
+        let mut stale = step_edit_request(&fixture);
+        stale["expected_version"] = json!(2);
+        let blocked = step_edit_command(&mut db, stale).unwrap();
+        assert_eq!(blocked["status"], "blocked");
+        assert_eq!(blocked["issues"][0]["code"], "VERSION_CONFLICT");
+        assert_eq!(blocked["issues"][0]["path"], "expected_version");
+
+        let mut wrong_unit = step_edit_request(&fixture);
+        wrong_unit["ops"] = json!([{
+            "op": "bind",
+            "path": "root/lyse",
+            "bindings": [{"slot": "volume_per_sample", "value": 0.2, "unit": "mL"}]
+        }]);
+        let blocked = step_edit_command(&mut db, wrong_unit).unwrap();
+        assert_eq!(blocked["status"], "blocked");
+        assert_eq!(blocked["issues"][0]["code"], "UNIT_MISMATCH");
+
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE kind='protocol_block_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 3, "rejected edits append nothing");
+
+        fs::remove_dir_all(&fixture.data_dir).ok();
+        drop(db);
+        fs::remove_dir_all(&data_dir).ok();
+    }
+
 }

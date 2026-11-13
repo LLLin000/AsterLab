@@ -241,6 +241,8 @@ mod tests {
             module_origin: None,
             module_contract_authority: None,
             catalog_review: None,
+            based_on_version_id: None,
+            step_edit: None,
         }
     }
 
