@@ -44,7 +44,7 @@ L1 suites from the card's work method:
 | `cargo test -p asterlab-core` | exited 0, 316 lib + 3 + 6 + 2 passed | [core-tests.txt](core-tests.txt) |
 | `cargo test --manifest-path crates/asterlab-app/Cargo.toml` | exited 0, 26 passed | [app-tests.txt](app-tests.txt) |
 
-The `step_edit` filter matches the 12 tests in `step_edit::tests` plus the
+The `step_edit` filter matches 12 tests in `step_edit::tests` plus the
 pre-existing `semantic_changeset::tests::protocol_step_edit_requires_location`
 (13 total). Tests cover: insert positioning, deep reuse with child-before-parent
 version ordering, reorder permutation rejection, unit mismatch vs the slot unit,
