@@ -1,6 +1,6 @@
 # Kandev Review 与合并策略
 
-本文件固定 `VPS Dev` 工作流中 `Review` 步骤的 agent 行为。Review agent 与实现 agent 共用 `GPT-6 Luna 1017` profile（`omp-acp` / `opencode-go/gpt-6-luna`），进入 Review 时切换角色，不是独立模型。Luna 仍经由 OpenCode Go；provider 周配额耗尽时，切换模型名不会解除该 provider 限额。
+本文件固定 `VPS Dev` 工作流中 `Review` 步骤的 agent 行为。Review agent 与实现 agent 共用 `GPT-6 Luna 1017` profile（`omp-acp` / `openai-codex/gpt-6-luna`），进入 Review 时切换角色，不是独立模型。DeepSeek 使用 OpenCode Go；额度耗尽时只单向回退到 OpenAI Codex Luna。Luna 的额度错误不会触发回切 DS。`kandev-ready-feeder` 在 30 秒轮询中发现额度错误后执行回退。
 
 ## 1. 容量与背压
 
