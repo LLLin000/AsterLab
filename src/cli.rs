@@ -36,7 +36,7 @@ use asterlab_core::workflow_tree::{
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use sha2::{Digest, Sha256};
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -48,6 +48,8 @@ use std::{
 use uuid::Uuid;
 
 const INPUT_LIMIT: u64 = 2 * 1024 * 1024;
+
+const RECORDS_SCHEMA_VERSION: i64 = 1;
 
 #[derive(Debug)]
 pub(crate) struct CliError {
@@ -7638,6 +7640,111 @@ pub fn db_path(data_dir: &Path) -> PathBuf {
 }
 
 
+fn migrate_records_schema(db: &mut Connection) -> Result<(), CliError> {
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let user_version: i64 = tx
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    if user_version > RECORDS_SCHEMA_VERSION {
+        return Err(CliError::internal(format!(
+            "database schema version {user_version} is newer than supported version {RECORDS_SCHEMA_VERSION}"
+        )));
+    }
+    if user_version < 0 {
+        return Err(CliError::internal(format!(
+            "unsupported database schema version {user_version}"
+        )));
+    }
+    if user_version == RECORDS_SCHEMA_VERSION {
+        tx.commit()
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        return Ok(());
+    }
+
+    let records_exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='records')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    if !records_exists {
+        tx.execute_batch(
+            "CREATE TABLE records(\
+                id TEXT PRIMARY KEY,\
+                kind TEXT NOT NULL,\
+                project_id TEXT REFERENCES records(id),\
+                parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,\
+                revision INTEGER NOT NULL DEFAULT 1,\
+                data_json TEXT NOT NULL,\
+                created_at TEXT NOT NULL,\
+                updated_at TEXT NOT NULL\
+            );",
+        )
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    } else {
+        let columns = {
+            let mut statement = tx
+                .prepare("PRAGMA table_info(records)")
+                .map_err(|error| CliError::internal(error.to_string()))?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|error| CliError::internal(error.to_string()))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| CliError::internal(error.to_string()))?;
+            columns
+        };
+        for required in [
+            "id",
+            "kind",
+            "parent_id",
+            "revision",
+            "data_json",
+            "created_at",
+            "updated_at",
+        ] {
+            if !columns.iter().any(|column| column == required) {
+                return Err(CliError::internal(format!(
+                    "unsupported legacy records schema: missing {required} column"
+                )));
+            }
+        }
+        if !columns.iter().any(|column| column == "project_id") {
+            tx.execute_batch(
+                r#"ALTER TABLE records ADD COLUMN project_id TEXT REFERENCES records(id);
+                 WITH RECURSIVE project_ancestors(record_id, ancestor_id, kind, parent_id) AS (
+                     SELECT id, id, kind, parent_id FROM records
+                     UNION
+                     SELECT ancestors.record_id, parent.id, parent.kind, parent.parent_id
+                     FROM project_ancestors AS ancestors
+                     JOIN records AS parent ON parent.id=ancestors.parent_id
+                     WHERE ancestors.kind <> 'project'
+                 )
+                 UPDATE records
+                 SET project_id=(
+                     SELECT ancestor_id FROM project_ancestors
+                     WHERE record_id=records.id AND kind='project' LIMIT 1
+                 )
+                 WHERE kind <> 'project';"#,
+            )
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        }
+    }
+
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id);\
+         CREATE INDEX IF NOT EXISTS records_project ON records(project_id);",
+    )
+    .map_err(|error| CliError::internal(error.to_string()))?;
+    tx.pragma_update(None, "user_version", RECORDS_SCHEMA_VERSION)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    tx.commit()
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    Ok(())
+}
+
 pub(crate) fn open_db(path: &Path) -> Result<Connection, CliError> {
     let data_dir = if path.extension().map(|e| e == "sqlite").unwrap_or(false) {
         path.parent().unwrap_or(path).to_path_buf()
@@ -7646,9 +7753,13 @@ pub(crate) fn open_db(path: &Path) -> Result<Connection, CliError> {
     };
     ensure_data_dirs(&data_dir).map_err(|e| CliError::internal(e.to_string()))?;
     let db_file = data_dir.join("labworkbench.sqlite");
-    let db = Connection::open(&db_file).map_err(|e| CliError::internal(e.to_string()))?;
+    let mut db = Connection::open(&db_file).map_err(|e| CliError::internal(e.to_string()))?;
     db.busy_timeout(std::time::Duration::from_secs(10))
         .map_err(|e| CliError::internal(e.to_string()))?;
+    db.pragma_update(None, "foreign_keys", "ON")
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    migrate_records_schema(&mut db)?;
+
     // WAL is a persistent database property. A concurrent opener may hold the
     // exclusive lock needed to change it; keep the existing journal mode rather
     // than failing the whole connection. Writes remain transactional.
@@ -7658,10 +7769,6 @@ pub(crate) fn open_db(path: &Path) -> Result<Connection, CliError> {
             db_file.display()
         );
     }
-    db.pragma_update(None, "foreign_keys", "ON")
-        .map_err(|e| CliError::internal(e.to_string()))?;
-    db.execute_batch("CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT REFERENCES records(id),parent_id TEXT REFERENCES records(id) ON DELETE RESTRICT,revision INTEGER NOT NULL DEFAULT 1,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id); CREATE INDEX IF NOT EXISTS records_project ON records(project_id);")
-      .map_err(|e| CliError::internal(e.to_string()))?;
     log_data_dir_once(&data_dir);
     Ok(db)
 }
@@ -12500,5 +12607,177 @@ protocol_version_id: protocol-v1
 
         fs::remove_dir_all(&data_dir).ok();
         fs::remove_dir_all(&fixture.data_dir).ok();
+    }
+    fn migration_evidence_path(file: &str) -> PathBuf {
+        let relative = Path::new("docs/release/evidence/QA-05").join(file);
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .map(|directory| directory.join(&relative))
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| {
+                panic!(
+                    "migration evidence fixture not found: {}",
+                    relative.display()
+                )
+            })
+    }
+
+    fn legacy_v0_fixture_path() -> PathBuf {
+        migration_evidence_path("legacy-v0.sqlite")
+    }
+
+    fn migration_test_dir() -> PathBuf {
+        std::env::temp_dir().join(format!("asterlab-schema-migration-{}", Uuid::new_v4()))
+    }
+
+    type LegacyRecordRow = (String, String, Option<String>, i64, String, String, String);
+
+    fn legacy_rows(db: &Connection) -> Vec<LegacyRecordRow> {
+        let mut statement = db
+            .prepare(
+                "SELECT id,kind,parent_id,revision,data_json,created_at,updated_at \
+                 FROM records ORDER BY id",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    fn database_schema(db: &Connection) -> Vec<(String, String, Option<String>)> {
+        let mut statement = db
+            .prepare(
+                "SELECT type,name,sql FROM sqlite_master \
+                 WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    fn sqlite_user_version(db: &Connection) -> i64 {
+        db.query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    fn sha256_file(path: &Path) -> String {
+        format!("{:x}", Sha256::digest(fs::read(path).unwrap()))
+    }
+
+    #[test]
+    fn schema_migration_legacy_v0() {
+        let fixture = legacy_v0_fixture_path();
+        let fixture_hash = sha256_file(&fixture);
+        let source = Connection::open(&fixture).unwrap();
+        let original_rows = legacy_rows(&source);
+        assert_eq!(sqlite_user_version(&source), 0);
+        drop(source);
+
+        let data_dir = migration_test_dir();
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::copy(&fixture, data_dir.join("labworkbench.sqlite")).unwrap();
+
+        let db = open_db(&data_dir).expect("legacy v0 database should migrate");
+        assert_eq!(
+            db.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        assert_eq!(sqlite_user_version(&db), 1);
+        assert_eq!(legacy_rows(&db), original_rows);
+        assert_eq!(
+            db.query_row(
+                "SELECT project_id FROM records WHERE id='design-legacy'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap()
+            .as_deref(),
+            Some("project-legacy")
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM records \
+                 WHERE kind <> 'project' AND project_id IS NOT 'project-legacy'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
+        );
+        drop(db);
+
+        let restarted = open_db(&data_dir).expect("migrated database should reopen");
+        assert_eq!(sqlite_user_version(&restarted), 1);
+        assert_eq!(
+            restarted
+                .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        assert_eq!(legacy_rows(&restarted), original_rows);
+        drop(restarted);
+
+        assert_eq!(sha256_file(&fixture), fixture_hash, "source fixture changed");
+        fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn failed_schema_migration_preserves_database() {
+        let fixture = legacy_v0_fixture_path();
+        let data_dir = migration_test_dir();
+        fs::create_dir_all(&data_dir).unwrap();
+        let db_file = data_dir.join("labworkbench.sqlite");
+        fs::copy(&fixture, &db_file).unwrap();
+        {
+            let db = Connection::open(&db_file).unwrap();
+            let failure_sql =
+                fs::read_to_string(migration_evidence_path("failure-v0.sql")).unwrap();
+            db.execute_batch(&failure_sql).unwrap();
+        }
+
+        let before_hash = sha256_file(&db_file);
+        let before = Connection::open(&db_file).unwrap();
+        let before_schema = database_schema(&before);
+        let before_rows = legacy_rows(&before);
+        let before_count: i64 = before
+            .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))
+            .unwrap();
+        let before_version = sqlite_user_version(&before);
+        drop(before);
+
+        let error = open_db(&data_dir)
+            .err()
+            .expect("injected migration failure should abort opening the database");
+        assert!(error.message.contains("injected legacy schema migration failure"));
+
+        let after = Connection::open(&db_file).unwrap();
+        assert_eq!(database_schema(&after), before_schema);
+        assert_eq!(legacy_rows(&after), before_rows);
+        assert_eq!(
+            after
+                .query_row("SELECT COUNT(*) FROM records", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            before_count
+        );
+        assert_eq!(sqlite_user_version(&after), before_version);
+        drop(after);
+        assert_eq!(sha256_file(&db_file), before_hash);
+        fs::remove_dir_all(data_dir).unwrap();
     }
 }

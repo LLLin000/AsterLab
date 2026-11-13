@@ -1,0 +1,74 @@
+$ cargo test --bin labworkbench failed_schema_migration_preserves_database
+exit code: 0
+
+warning: unused variable: `assay_index`
+    --> src/cli.rs:3376:9
+     |
+3376 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/cli.rs:9182:17
+     |
+9182 |             let mut warnings: Vec<String> = Vec::new();
+     |                 ----^^^^^^^^
+     |                 |
+     |                 help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `ywells` is never used
+    --> src/cli.rs:3336:4
+     |
+3336 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+     |    ^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `create_asterdoc_design` is never used
+    --> src/cli.rs:3712:15
+     |
+3712 | pub(crate) fn create_asterdoc_design(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `list_designs` is never used
+    --> src/cli.rs:7976:15
+     |
+7976 | pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^
+
+warning: function `load_design` is never used
+    --> src/cli.rs:7980:15
+     |
+7980 | pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^
+
+warning: function `revise_design_record` is never used
+    --> src/cli.rs:8038:15
+     |
+8038 | pub(crate) fn revise_design_record(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_run_for_design` is never used
+    --> src/cli.rs:8110:15
+     |
+8110 | pub(crate) fn create_run_for_design(
+     |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `save_asset_link` is never used
+     --> src/cli.rs:11341:15
+      |
+11341 | pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+      |               ^^^^^^^^^^^^^^^
+
+warning: `labworkbench` (bin "labworkbench" test) generated 9 warnings (run `cargo fix --bin "labworkbench" -p labworkbench --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 0.06s
+     Running unittests src/main.rs (/srv/build/asterlab-target/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
+
+running 1 test
+test cli::tests::failed_schema_migration_preserves_database ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.01s
+
