@@ -258,7 +258,7 @@ def main():
                 continue
             raw = cq.get("data", "")
             action, _, tid = raw.partition(":")
-            if action not in ("merge", "diff", "reject", "cardfix") or not tid:
+            if action not in ("merge", "diff", "reject", "cardfix", "retro_go", "retro_hold", "retro_stop") or not tid:
                 continue
             _, task = kapi("GET", f"/api/v1/tasks/{tid}")
             title = (task or {}).get("title", tid[:8])
@@ -271,6 +271,13 @@ def main():
                 elif action == "cardfix":
                     res = (f"🔧 {title[:40]}：卡片问题已记录。\n"
                            "你改完任务描述后告诉我（回这条消息或发卡号），我来唤醒 review agent 重跑。")
+                elif action == "retro_go":
+                    res = ("✅ 收到，按报告建议开下一阶段。你把报告里认同的候选发我"
+                           "（卡号或一句话），我来建卡；或者直接说“全按报告来”。")
+                elif action == "retro_hold":
+                    res = "📝 好的，你改完报告（PR 评论或直接说）再告诉我，我来推进。"
+                elif action == "retro_stop":
+                    res = "⏸ 收到，lane 保持清空不动。有需要再叫我。"
                 else:
                     res = do_reject(tid, title)
             except Exception as exc:  # noqa: BLE001

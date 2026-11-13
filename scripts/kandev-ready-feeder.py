@@ -272,6 +272,53 @@ def notify_approval(task, pr):
         print(f"approval sent for {task['title'][:40]}")
 
 
+def scan_retro_ready(detailed):
+    """Push when a RETRO card's report PR is ready for human reading."""
+    for task in detailed:
+        if not task.get("title", "").startswith("RETRO-"):
+            continue
+        labels = lane_labels(task)
+        if "tg-retro-sent" in labels:
+            continue
+        try:
+            import sqlite3
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            row = con.execute(
+                """select m.content from task_session_messages m
+                    join task_sessions s on s.id=m.task_session_id
+                   where s.task_id=? and m.content like '%REVIEW-READY%'
+                   order by m.created_at desc limit 1""",
+                (task["id"],),
+            ).fetchone()
+            con.close()
+        except Exception:  # noqa: BLE001
+            continue
+        if not row:
+            continue
+        pr = task_pr(task["id"])
+        text = (
+            f"Kandev 阶段回顾已就绪：{task['title'][:50]}\n"
+            f"PR #{pr.get('pr_number', '?')} {pr.get('pr_url', '')}\n"
+            "看完报告后回复：按建议开卡 / 我改完再说 / 先停"
+        )
+        markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ 按建议开卡", "callback_data": f"retro_go:{task['id']}"},
+                    {"text": "📝 我改完再说", "callback_data": f"retro_hold:{task['id']}"},
+                    {"text": "⏸ 先停", "callback_data": f"retro_stop:{task['id']}"},
+                ]
+            ]
+        }
+        if tg_send(text, markup):
+            print(f"retro sent for {task['title'][:40]}")
+        try:
+            add_label(task["id"], "tg-retro-sent")
+        except Exception as exc:  # noqa: BLE001
+            print(f"retro-sent label failed: {exc}", file=sys.stderr)
+
+
 def scan_approvals(review_tasks):
     """Push decision requests for APPROVED cards still sitting in Review.
 
@@ -507,6 +554,7 @@ def run_once():
 
     scan_approvals(review_tasks)
     scan_cardfix([t for t in detailed if t.get("workflow_step_id") in (AGENT, REVIEW)])
+    scan_retro_ready(detailed)
 
     # FYI: CI-config cards that got merged.
     scan_ci_merges(detailed)
