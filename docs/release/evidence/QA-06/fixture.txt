@@ -1,0 +1,7 @@
+assess: warning []
+run: 4c2d7865-664b-42b7-8aaf-77e66238e9fd
+protocol tasks: 3
+  - root/seed/seed | timepoint: None
+  - root/readout/incubate | timepoint: None
+  - root/readout/read | timepoint: None
+ids: /srv/build/asterlab-target/qa06-hzxvgpvm/data/rc3-ids.json

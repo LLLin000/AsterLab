@@ -1,0 +1,104 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+   Compiling labworkbench v0.1.0 (/var/lib/kandev/tasks/qa-06-qa_u0qvdfi3/LLLin000-AsterLab)
+warning: unused variable: `assay_index`
+    --> src/cli.rs:3345:9
+     |
+3345 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/cli.rs:8742:17
+     |
+8742 |             let mut warnings: Vec<String> = Vec::new();
+     |                 ----^^^^^^^^
+     |                 |
+     |                 help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `ywells` is never used
+    --> src/cli.rs:3305:4
+     |
+3305 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+     |    ^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `create_asterdoc_design` is never used
+    --> src/cli.rs:3681:15
+     |
+3681 | pub(crate) fn create_asterdoc_design(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_project` is never used
+    --> src/cli.rs:7833:15
+     |
+7833 | pub(crate) fn create_project(db: &Connection, name: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^
+
+warning: function `list_designs` is never used
+    --> src/cli.rs:7840:15
+     |
+7840 | pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^
+
+warning: function `load_design` is never used
+    --> src/cli.rs:7844:15
+     |
+7844 | pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^
+
+warning: function `take_mygo_extension` is never used
+    --> src/cli.rs:7864:4
+     |
+7864 | fn take_mygo_extension(value: &mut Value) -> Option<Value> {
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_design_record` is never used
+    --> src/cli.rs:7868:15
+     |
+7868 | pub(crate) fn create_design_record(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_design_record` is never used
+    --> src/cli.rs:7902:15
+     |
+7902 | pub(crate) fn revise_design_record(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_run_for_design` is never used
+    --> src/cli.rs:7974:15
+     |
+7974 | pub(crate) fn create_run_for_design(
+     |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `save_asset_link` is never used
+     --> src/cli.rs:10868:15
+      |
+10868 | pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+      |               ^^^^^^^^^^^^^^^
+
+warning: `labworkbench` (bin "labworkbench" test) generated 12 warnings (run `cargo fix --bin "labworkbench" -p labworkbench --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 22.52s
+     Running unittests src/main.rs (/srv/build/asterlab-target/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
+
+running 13 tests
+test cli::tests::assess_includes_run_creation_audit_warnings ... ok
+test cli::tests::assess_and_run_creation_reject_unmaterialized_steps ... ok
+test cli::tests::asset_link_rejects_paths_outside_the_root_without_writing ... ok
+test cli::tests::asterdoc_parity_samples ... ok
+test cli::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
+test cli::tests::compiler_keeps_sample_identity_explicit_across_timepoints ... ok
+test cli::tests::manifest_rule_must_be_registered_in_rust ... ok
+test cli::tests::read_only_tools_do_not_write ... ok
+test cli::tests::step_materialization_preserves_frozen_run_protocol_block_revision ... ok
+test cli::tests::compiler_records_the_block_version_each_step_reuses ... ok
+test cli::tests::agent_tools_are_discoverable ... ok
+test cli::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
+test cli::tests::asset_link_hashes_a_large_file_without_copying_it ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.62s
+

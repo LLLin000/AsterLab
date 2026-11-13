@@ -1,0 +1,41 @@
+run_id=4c2d7865-664b-42b7-8aaf-77e66238e9fd task_key={"path":"root/seed/seed","scope":{"assay_id":"assay-cck8","kind":"assay"},"timepoint":null}
+positive relative_path link: ok
+positive absolute path link (derived relative): ok
+
+=== absolute-path scan of exported JSON ===
+asset-list: bytes=681 absolute-path hits=0 []
+asset-events: bytes=2346 absolute-path hits=0 []
+record-asset-link: bytes=1080 absolute-path hits=0 []
+record-asset-link-event: bytes=2346 absolute-path hits=0 []
+record-run: bytes=4149 absolute-path hits=0 []
+generic absolute-path regex hits: 0
+
+=== persisted data_json scan ===
+asset rows: 3
+rows containing a local root/outside/data path: []
+asset_link asset-link-596b80024973a2c9e9b981f3fcde98ba rootId=project-data relativePath=d1/readout.csv
+asset_link_event asset-event-af7f50f9-0156-45e3-b1ac-b158f6d766cc rootId=project-data relativePath=d1/readout.csv
+asset_link_event asset-event-4deae641-2fba-4a2a-aa74-80fc36be4ba8 rootId=project-data relativePath=d1/readout.csv
+sha256 902f3a6e00a151407459564431b300b8fa4eecd1dba52b23338b381263653c90  /srv/build/asterlab-target/qa06-hzxvgpvm/data/labworkbench.sqlite
+
+=== negative cases (isolated database) ===
+[absolute_root_id] {"error": {"code": "INVALID_INPUT", "message": "root ID must be a logical identifier, not an absolute path"}, "ok": false, "tool": "asset.link"}
+[drive_absolute_root_id] {"error": {"code": "INVALID_INPUT", "message": "root ID must be a logical identifier, not an absolute path"}, "ok": false, "tool": "asset.link"}
+[unc_root_id] {"error": {"code": "INVALID_INPUT", "message": "root ID must be a logical identifier, not an absolute path"}, "ok": false, "tool": "asset.link"}
+[parent_root_id] {"error": {"code": "INVALID_INPUT", "message": "root ID must not contain parent-directory segments"}, "ok": false, "tool": "asset.link"}
+[traversal] {"error": {"code": "INVALID_INPUT", "message": "relative path must not escape its root"}, "ok": false, "tool": "asset.link"}
+[traversal_inner] {"error": {"code": "INVALID_INPUT", "message": "relative path must not escape its root"}, "ok": false, "tool": "asset.link"}
+[absolute_relative] {"error": {"code": "INVALID_INPUT", "message": "relative path must not be absolute"}, "ok": false, "tool": "asset.link"}
+[drive_relative] {"error": {"code": "INVALID_INPUT", "message": "relative path must not be absolute"}, "ok": false, "tool": "asset.link"}
+[symlink_file] {"error": {"code": "INVALID_INPUT", "message": "asset resolves outside its root"}, "ok": false, "tool": "asset.link"}
+[symlink_dir] {"error": {"code": "INVALID_INPUT", "message": "asset resolves outside its root"}, "ok": false, "tool": "asset.link"}
+[absolute_path_outside] {"error": {"code": "INVALID_INPUT", "message": "asset is outside its root"}, "ok": false, "tool": "asset.link"}
+sha256_before_negative_cases 902f3a6e00a151407459564431b300b8fa4eecd1dba52b23338b381263653c90
+sha256_after_negative_cases  902f3a6e00a151407459564431b300b8fa4eecd1dba52b23338b381263653c90
+asset_rows_before=3 asset_rows_after=3
+
+=== inspect after the valid file is replaced by an escaping symlink ===
+re-read of the stored reference is covered by the Rust suite (assets::tests::symlinks_that_leave_the_root_are_rejected); the CLI has no read-only inspect tool that takes a root_dir.
+
+isolated base: /srv/build/asterlab-target/qa06-hzxvgpvm
+database: /srv/build/asterlab-target/qa06-hzxvgpvm/data/labworkbench.sqlite

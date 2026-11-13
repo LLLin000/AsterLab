@@ -1,0 +1,27 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-core/7a6e0bb0fcc4d289/out/asterlab_core-7a6e0bb0fcc4d289)
+
+running 20 tests
+test assets::tests::classify_uses_the_extension_without_guessing ... ok
+test assets::tests::exported_reference_contains_no_absolute_path_and_survives_a_restart ... ok
+test assets::tests::inspection_reports_deleted_and_modified_references_explicitly ... ok
+test assets::tests::concurrent_links_and_inspections_agree_without_writing ... ok
+test assets::tests::ambiguous_candidates_are_returned_without_choosing_one ... ok
+test assets::tests::link_derives_the_relative_path_from_an_absolute_file ... ok
+test assets::tests::link_preserves_spaces_in_legal_file_names ... ok
+test assets::tests::link_rejects_files_outside_the_root ... ok
+test assets::tests::link_records_observed_metadata_and_hash_without_copying ... ok
+test assets::tests::link_reports_a_missing_file_instead_of_inventing_metadata ... ok
+test assets::tests::link_rejects_non_regular_files_without_opening_them ... ok
+test assets::tests::normalize_rejects_escapes_and_unnormalized_paths ... ok
+test assets::tests::metadata_fallback_requires_an_unavailable_hash ... ok
+test assets::tests::rfc3339_formatting_is_utc_and_stable ... ok
+test assets::tests::moved_asset_matches_by_hash_and_rebind_preserves_the_original_reference ... ok
+test assets::tests::root_id_must_be_logical_not_an_absolute_path ... ok
+test assets::tests::symlinks_that_stay_inside_the_root_are_allowed ... ok
+test assets::tests::symlinks_that_leave_the_root_are_rejected ... ok
+test assets::tests::uppercase_stored_hash_still_matches_the_file ... ok
+test assets::tests::rebinding_rejects_a_candidate_changed_after_matching ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 226 filtered out; finished in 0.01s
+
