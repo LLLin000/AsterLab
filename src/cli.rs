@@ -1,3 +1,11 @@
+use asterlab_core::agent_edit::{
+    AgentEditError, AgentEditErrorCode, ConfirmRequest, Proposal,
+};
+use asterlab_core::agent_edit_commit::{commit as commit_agent_edit_request, CommitError, CommitStore, CommittedVersion};
+use asterlab_core::agent_edit_validate::{
+    validate as validate_agent_edit_request, EditTargetStore, StoredBlockVersion,
+    StoredProtocolVersion,
+};
 use asterlab_core::assets as asset_refs;
 use asterlab_core::component_data::{
     calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
@@ -15,7 +23,7 @@ use asterlab_core::operation_module::{
     ProtocolBlockVersionRef, ValueSource,
 };
 use asterlab_core::protocol_block::ReviewRecord;
-use asterlab_core::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep};
+use asterlab_core::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep, StepBinding};
 use asterlab_core::protocol_preview::{
     OperationStep, ProtocolPreview, ResolvedParameter, UnresolvedParameter,
 };
@@ -46,6 +54,11 @@ pub(crate) struct CliError {
     pub(crate) code: &'static str,
     pub(crate) message: String,
     pub(crate) exit: i32,
+    /// Agent edit v1 optional fields; empty for the older command set.
+    pub(crate) path: Option<String>,
+    pub(crate) current_version: Option<i64>,
+    pub(crate) current_version_id: Option<String>,
+    pub(crate) issues: Vec<Value>,
 }
 impl CliError {
     fn input(message: impl Into<String>) -> Self {
@@ -53,6 +66,10 @@ impl CliError {
             code: "INVALID_INPUT",
             message: message.into(),
             exit: 2,
+            path: None,
+            current_version: None,
+            current_version_id: None,
+            issues: Vec::new(),
         }
     }
     fn missing(message: impl Into<String>) -> Self {
@@ -60,6 +77,10 @@ impl CliError {
             code: "NOT_FOUND",
             message: message.into(),
             exit: 3,
+            path: None,
+            current_version: None,
+            current_version_id: None,
+            issues: Vec::new(),
         }
     }
     fn conflict(message: impl Into<String>) -> Self {
@@ -67,6 +88,10 @@ impl CliError {
             code: "REVISION_CONFLICT",
             message: message.into(),
             exit: 4,
+            path: None,
+            current_version: None,
+            current_version_id: None,
+            issues: Vec::new(),
         }
     }
     fn internal(message: impl Into<String>) -> Self {
@@ -74,6 +99,10 @@ impl CliError {
             code: "INTERNAL",
             message: message.into(),
             exit: 5,
+            path: None,
+            current_version: None,
+            current_version_id: None,
+            issues: Vec::new(),
         }
     }
 }
@@ -8348,10 +8377,20 @@ pub fn run(args: &[String], data_dir: &Path) -> i32 {
     }
 }
 fn fail(tool: &str, e: CliError) -> i32 {
-    println!(
-        "{}",
-        json!({"ok":false,"tool":tool,"error":{"code":e.code,"message":e.message}})
-    );
+    let mut error = json!({"code":e.code,"message":e.message});
+    if let Some(path) = e.path {
+        error["path"] = json!(path);
+    }
+    if let Some(current_version) = e.current_version {
+        error["current_version"] = json!(current_version);
+    }
+    if let Some(current_version_id) = e.current_version_id {
+        error["current_version_id"] = json!(current_version_id);
+    }
+    if !e.issues.is_empty() {
+        error["issues"] = Value::Array(e.issues);
+    }
+    println!("{}", json!({"ok":false,"tool":tool,"error":error}));
     e.exit
 }
 fn print_help() {
@@ -8365,6 +8404,300 @@ fn require_trusted_writer(tool: &str) -> Result<(), CliError> {
         Err(CliError::input(format!(
             "{tool} 只允许受信任的本地写入端调用；请设置 LABWORKBENCH_TRUSTED_WRITER=1"
         )))
+    }
+}
+
+/// Read-only record view shared by the validation and commit adapters.
+struct CliEditStore<'a> {
+    conn: &'a Connection,
+}
+
+fn edit_protocol_head(
+    conn: &Connection,
+    protocol_id: &str,
+) -> Result<Option<StoredProtocolVersion>, String> {
+    let row = conn
+        .query_row(
+            "SELECT id,revision,data_json FROM records \
+             WHERE kind='protocol_version' AND parent_id=?1 \
+             ORDER BY revision DESC LIMIT 1",
+            [protocol_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((version_id, revision, raw)) = row else {
+        return Ok(None);
+    };
+    let data: Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("protocol_version {version_id} data_json 无效：{error}"))?;
+    let root_block_version_id = data
+        .get("root_block_version_id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let root_bindings = match data.get("root_bindings") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(value) => serde_json::from_value::<Vec<StepBinding>>(value.clone())
+            .map_err(|error| format!("protocol_version {version_id} root_bindings 无效：{error}"))?,
+    };
+    Ok(Some(StoredProtocolVersion {
+        version_id,
+        protocol_id: protocol_id.to_owned(),
+        revision,
+        root_block_version_id,
+        root_bindings,
+    }))
+}
+
+fn edit_block_version(
+    conn: &Connection,
+    version_id: &str,
+) -> Result<Option<StoredBlockVersion>, String> {
+    let row = conn
+        .query_row(
+            "SELECT revision,data_json FROM records \
+             WHERE kind='protocol_block_version' AND id=?1",
+            [version_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((revision, raw)) = row else {
+        return Ok(None);
+    };
+    let data: ProtocolBlockVersionData = serde_json::from_str(&raw).map_err(|error| {
+        format!("protocol_block_version {version_id} data_json 无效：{error}")
+    })?;
+    Ok(Some(StoredBlockVersion {
+        version_id: version_id.to_owned(),
+        revision,
+        data,
+    }))
+}
+
+impl EditTargetStore for CliEditStore<'_> {
+    fn protocol_head(
+        &self,
+        protocol_id: &str,
+    ) -> Result<Option<StoredProtocolVersion>, String> {
+        edit_protocol_head(self.conn, protocol_id)
+    }
+
+    fn block_version(&self, version_id: &str) -> Result<Option<StoredBlockVersion>, String> {
+        edit_block_version(self.conn, version_id)
+    }
+}
+
+/// Transactional commit view: every read and the append go through one
+/// `BEGIN IMMEDIATE` transaction so a concurrent proposal cannot slip between
+/// the head re-read and the insert.
+struct CliCommitStore<'a, 'conn> {
+    tx: &'a Transaction<'conn>,
+}
+
+impl EditTargetStore for CliCommitStore<'_, '_> {
+    fn protocol_head(
+        &self,
+        protocol_id: &str,
+    ) -> Result<Option<StoredProtocolVersion>, String> {
+        edit_protocol_head(self.tx, protocol_id)
+    }
+
+    fn block_version(&self, version_id: &str) -> Result<Option<StoredBlockVersion>, String> {
+        edit_block_version(self.tx, version_id)
+    }
+}
+
+impl CommitStore for CliCommitStore<'_, '_> {
+    fn edit_store(&self) -> &dyn EditTargetStore {
+        self
+    }
+
+    fn protocol_version_data(&self, version_id: &str) -> Result<Option<Value>, String> {
+        let row = self
+            .tx
+            .query_row(
+                "SELECT data_json FROM records WHERE kind='protocol_version' AND id=?1",
+                [version_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        row.map(|raw| serde_json::from_str(&raw).map_err(|error| error.to_string()))
+            .transpose()
+    }
+
+    fn find_commit(&self, idempotency_key: &str) -> Result<Option<CommittedVersion>, String> {
+        let row = self
+            .tx
+            .query_row(
+                "SELECT id,revision,data_json FROM records \
+                 WHERE kind IN ('protocol_version','protocol_block_version') \
+                   AND json_extract(data_json,'$.agent_edit.idempotency_key')=?1 \
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                [idempotency_key],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let Some((version_id, revision, raw)) = row else {
+            return Ok(None);
+        };
+        let data: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+        Ok(Some(CommittedVersion {
+            version_id,
+            revision,
+            provenance: data["agent_edit"].clone(),
+        }))
+    }
+
+    fn timestamp(&self) -> String {
+        stamp()
+    }
+
+    fn append_protocol_version(
+        &mut self,
+        protocol_id: &str,
+        revision: i64,
+        data: Value,
+    ) -> Result<(String, i64), String> {
+        let (kind, project, _, _, _) = kind_id(self.tx, protocol_id)
+            .map_err(|error| error.message)?
+            .ok_or_else(|| format!("Protocol 不存在：{protocol_id}"))?;
+        if kind != "protocol" {
+            return Err(format!("{protocol_id} 不是 protocol 记录"));
+        }
+        let record = insert(
+            self.tx,
+            "protocol_version",
+            project.as_deref(),
+            Some(protocol_id),
+            revision,
+            &data,
+        )
+        .map_err(|error| error.message)?;
+        Ok((
+            record["id"].as_str().unwrap_or_default().to_owned(),
+            record["revision"].as_i64().unwrap_or(revision),
+        ))
+    }
+
+    fn append_block_version(
+        &mut self,
+        block_id: &str,
+        revision: i64,
+        data: Value,
+    ) -> Result<(String, i64), String> {
+        let (kind, project, _, _, _) = kind_id(self.tx, block_id)
+            .map_err(|error| error.message)?
+            .ok_or_else(|| format!("步骤块不存在：{block_id}"))?;
+        if kind != "protocol_block" {
+            return Err(format!("{block_id} 不是 protocol_block 记录"));
+        }
+        let record = insert(
+            self.tx,
+            "protocol_block_version",
+            project.as_deref(),
+            Some(block_id),
+            revision,
+            &data,
+        )
+        .map_err(|error| error.message)?;
+        Ok((
+            record["id"].as_str().unwrap_or_default().to_owned(),
+            record["revision"].as_i64().unwrap_or(revision),
+        ))
+    }
+}
+
+/// Read-only `agent_edit.validate`: resolve one proposal against the current
+/// head. Semantic rejections stay in the result (`status = blocked`).
+pub(crate) fn validate_agent_edit(db: &Connection, input: Value) -> Result<Value, CliError> {
+    let proposal: Proposal = serde_json::from_value(input).map_err(|error| {
+        CliError::input(format!(
+            "proposal 不是合法的 agent edit v1 载荷：{error}"
+        ))
+    })?;
+    let result = validate_agent_edit_request(&proposal, &CliEditStore { conn: db })
+        .map_err(CliError::internal)?;
+    serde_json::to_value(result).map_err(|error| CliError::internal(error.to_string()))
+}
+
+/// `agent_edit.commit`: append one confirmed version in a single write
+/// transaction. A stale or concurrent proposal returns `VERSION_CONFLICT` and
+/// writes nothing.
+pub(crate) fn commit_agent_edit(db: &mut Connection, input: Value) -> Result<Value, CliError> {
+    let request: ConfirmRequest = serde_json::from_value(input).map_err(|error| {
+        CliError::input(format!(
+            "commit 载荷不符合 agent edit v1 ConfirmRequest：{error}"
+        ))
+    })?;
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let outcome = {
+        let mut store = CliCommitStore { tx: &tx };
+        commit_agent_edit_request(&request, &mut store)
+    };
+    match outcome {
+        Ok(result) => {
+            tx.commit()
+                .map_err(|error| CliError::internal(error.to_string()))?;
+            serde_json::to_value(result).map_err(|error| CliError::internal(error.to_string()))
+        }
+        Err(CommitError::Rejected(error)) => {
+            tx.rollback().ok();
+            Err(agent_edit_cli_error(error))
+        }
+        Err(CommitError::Store(message)) => {
+            tx.rollback().ok();
+            Err(CliError::internal(message))
+        }
+    }
+}
+
+fn agent_edit_cli_error(error: AgentEditError) -> CliError {
+    let code = match error.code {
+        AgentEditErrorCode::InvalidProposal => "INVALID_PROPOSAL",
+        AgentEditErrorCode::InvalidBinding => "INVALID_BINDING",
+        AgentEditErrorCode::UnitMismatch => "UNIT_MISMATCH",
+        AgentEditErrorCode::StaleReference => "STALE_REFERENCE",
+        AgentEditErrorCode::ForbiddenField => "FORBIDDEN_FIELD",
+        AgentEditErrorCode::VersionConflict => "VERSION_CONFLICT",
+        AgentEditErrorCode::ConfirmationRequired => "CONFIRMATION_REQUIRED",
+        AgentEditErrorCode::ConfirmationMismatch => "CONFIRMATION_MISMATCH",
+        AgentEditErrorCode::IdempotencyMismatch => "IDEMPOTENCY_MISMATCH",
+    };
+    let exit = match error.code {
+        AgentEditErrorCode::VersionConflict => 4,
+        AgentEditErrorCode::StaleReference => 3,
+        _ => 2,
+    };
+    let issues = error
+        .issues
+        .into_iter()
+        .filter_map(|issue| serde_json::to_value(issue).ok())
+        .collect();
+    CliError {
+        code,
+        message: error.message,
+        exit,
+        path: error.path,
+        current_version: error.current_version,
+        current_version_id: error.current_version_id,
+        issues,
     }
 }
 
@@ -9395,6 +9728,14 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(json!({"version":v}))
         }
+        "agent_edit.validate" => {
+            let i: Value = parse_input(path)?;
+            validate_agent_edit(&db, i)
+        }
+        "agent_edit.commit" => {
+            let i: Value = parse_input(path)?;
+            commit_agent_edit(&mut db, i)
+        }
         "plate.create" => {
             let i: PlateCreate = parse_input(path)?;
             let (kind, project, _, _, _) =
@@ -9837,7 +10178,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["title"],"properties":{"title":{"type":"string"}}})
         }
         "protocol_version" => {
-            json!({"type":"object","additionalProperties":false,"required":["protocol_id","version","body"],"properties":{"protocol_id":{"type":"string"},"version":{"type":"integer","minimum":1},"body":{"type":"string"},"root_block_version_id":{"type":["string","null"]},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}}}})
+            json!({"type":"object","additionalProperties":false,"required":["protocol_id","version","body"],"properties":{"protocol_id":{"type":"string"},"version":{"type":"integer","minimum":1},"body":{"type":"string"},"root_block_version_id":{"type":["string","null"]},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"agent_edit":{"type":["object","null"],"additionalProperties":true}}})
         }
         "protocol_block" => {
             json!({"type":"object","additionalProperties":false,"required":["title","summary"],"properties":{"title":{"type":"string"},"summary":{"type":"string"}}})
@@ -9963,6 +10304,12 @@ fn result_schema(tool: &str) -> Value {
         "protocol.revise" => {
             json!({"type":"object","additionalProperties":false,"required":["version"],"properties":{"version":record_schema("protocol_version")}})
         }
+        "agent_edit.validate" => {
+            json!({"type":"object","additionalProperties":false,"required":["schema_version","proposal_id","proposal_digest","target","current_version_id","current_revision","status","diffs","issues","invalidated_refs","requires_confirmation"],"properties":{"schema_version":{"type":"integer"},"proposal_id":{"type":"string"},"proposal_digest":{"type":"string"},"target":{"type":"object","additionalProperties":true},"current_version_id":{"type":"string"},"current_revision":{"type":"integer"},"status":{"type":"string","enum":["valid","needs_confirmation","blocked"]},"diffs":{"type":"array","items":{"type":"object","additionalProperties":true}},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}},"invalidated_refs":{"type":"array","items":{"type":"string"}},"requires_confirmation":{"type":"boolean"},"confirmation_prompt":{"type":["string","null"]}}})
+        }
+        "agent_edit.commit" => {
+            json!({"type":"object","additionalProperties":false,"required":["schema_version","proposal_id","proposal_digest","target","previous_version_id","new_version_id","new_revision","applied","invalidated_refs","confirmed_by","committed_at","idempotency_key","replayed"],"properties":{"schema_version":{"type":"integer"},"proposal_id":{"type":"string"},"proposal_digest":{"type":"string"},"target":{"type":"object","additionalProperties":true},"previous_version_id":{"type":"string"},"new_version_id":{"type":"string"},"new_revision":{"type":"integer"},"applied":{"type":"array","items":{"type":"object","additionalProperties":true}},"invalidated_refs":{"type":"array","items":{"type":"string"}},"confirmed_by":{"type":"string"},"committed_at":{"type":"string"},"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}})
+        }
         "plate.create" => one("plate"),
         "well.set" => one("well"),
         "note.create" => one("note"),
@@ -10020,7 +10367,13 @@ fn result_schema(tool: &str) -> Value {
     }
 }
 fn output_schema(tool: &str) -> Value {
-    json!({"oneOf":[{"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool)}},{"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}}}}]})
+    let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool)}});
+    let error = if matches!(tool, "agent_edit.validate" | "agent_edit.commit") {
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}}}})
+    } else {
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}}}})
+    };
+    json!({"oneOf":[success,error]})
 }
 fn input_schema(tool: &str) -> Option<Value> {
     let s = match tool {
@@ -10139,6 +10492,12 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "protocol.revise" => {
             json!({"type":"object","additionalProperties":false,"required":["protocol_id","expected_version"],"anyOf":[{"required":["body"]},{"required":["root_block_version_id"]},{"required":["root_bindings"]}],"properties":{"protocol_id":{"type":"string"},"expected_version":{"type":"integer","minimum":1},"body":{"type":"string"},"root_block_version_id":{"type":["string","null"]},"root_bindings":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["slot","value"],"properties":{"slot":{"type":"string"},"value":{"type":["string","number","integer","boolean"]},"unit":{"type":"string","maxLength":40}}}}}})
+        }
+        "agent_edit.validate" => {
+            json!({"type":"object","additionalProperties":false,"required":["proposal_id","target","base_version_id","expected_version","origin","diffs"],"properties":{"schema_version":{"type":"integer"},"proposal_id":{"type":"string"},"target":{"type":"object"},"base_version_id":{"type":"string"},"expected_version":{"type":"integer"},"origin":{"type":"object"},"diffs":{"type":"array","items":{"type":"object"}}}})
+        }
+        "agent_edit.commit" => {
+            json!({"type":"object","additionalProperties":false,"required":["proposal","proposal_digest","idempotency_key","confirmed_by"],"properties":{"schema_version":{"type":"integer"},"proposal":{"type":"object"},"proposal_digest":{"type":"string"},"idempotency_key":{"type":"string"},"confirmed_by":{"type":"string"},"acknowledged":{"type":"array","items":{"type":"string"}},"note":{"type":["string","null"]}}})
         }
         "plate.create" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","name","format","rows","columns"],"properties":{"run_id":{"type":"string"},"assay_id":{"type":"string","description":"可选；必须是 Run 冻结设计中的检测 ID"},"timepoint":{"type":"string","description":"可选；标注该实际板图所用的检测时间点，需与冻结设计一致"},"name":{"type":"string","minLength":1,"maxLength":100,"pattern":"\\S"},"format":{"type":"string","enum":["6","12","24","48","96","384","custom"]},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48}}})
@@ -10382,6 +10741,8 @@ fn tool_specs() -> Vec<Value> {
         "protocol.block.preview",
         "protocol.create",
         "protocol.revise",
+        "agent_edit.validate",
+        "agent_edit.commit",
         "plate.create",
         "well.set",
         "note.create",
@@ -10428,6 +10789,7 @@ fn tool_writes(tool: &str) -> bool {
             | "protocol.block.list"
             | "protocol.block.get"
             | "protocol.block.preview"
+            | "agent_edit.validate"
             | "component.list"
             | "semantic.inspect"
             | "semantic.search"
@@ -10496,6 +10858,8 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.block.preview" => "只读展开组合步骤，返回操作顺序、参数来源和未填写槽位；不写入。",
         "protocol.create" => "创建 Protocol；可引用一个确切根步骤块版本及本版参数绑定，也兼容自由文本正文。",
         "protocol.revise" => "追加 Protocol 新版本；参数值可改变而不复制步骤块；必须提供 expected_version。",
+        "agent_edit.validate" => "只读校验 agent 提案：解析绑定、版本和单位，返回 Core 计算的 digest、无效引用与确认提示；不写数据库。",
+        "agent_edit.commit" => "提交人工确认过的 agent 提案：单事务重新校验版本并追加一个新版本；过期或并发提案返回 VERSION_CONFLICT，不覆盖旧数据。",
         "plate.create" => "为实验运行创建指定行列数的空布局。",
         "well.set" => "创建或覆盖一个板孔映射。",
         "note.create" => "向运行追加一条实际记录；事件时间必须显式提供或留空。",
@@ -10562,6 +10926,8 @@ fn tool_effects(tool: &str) -> &'static str {
         "task.create" => "创建一条日历任务。",
         "protocol.create" => "创建 Protocol 记录并创建不可变的 v1 正文版本。",
         "protocol.revise" => "为 Protocol 追加一个不可变的新版本；不覆盖旧正文。",
+        "agent_edit.validate" => "只读；不修改数据库。",
+        "agent_edit.commit" => "在一个事务中追加一个不可变版本，并记录提案 ID、确认人和版本号；不修改旧版本或冻结 Run。",
         "protocol.block.create" => "创建步骤块元数据和不可变 v1；步骤块只引用确切的其他版本。",
         "view.create" | "view.revise" => "保存新的 ViewDocument 版本；不改 Protocol/Run。",
         "view.get" => "只读；不修改数据库。",
@@ -11838,5 +12204,301 @@ protocol_version_id: protocol-v1
 
         fs::remove_dir_all(&root_dir).unwrap();
         fs::remove_file(&outside).unwrap();
+    }
+
+    struct AgentEditFixture {
+        data_dir: std::path::PathBuf,
+        protocol_id: String,
+        protocol_version_id: String,
+        run_id: String,
+    }
+
+    fn seed_agent_edit_fixture(db: &mut Connection) -> AgentEditFixture {
+        let data_dir = std::env::temp_dir().join(format!("asterlab-agent-edit-{}", Uuid::new_v4()));
+        fs::create_dir_all(&data_dir).unwrap();
+        let project = create_project(db, "agent edit").unwrap();
+        let project_id = project["id"].as_str().unwrap().to_owned();
+        let block = {
+            let tx = db.unchecked_transaction().unwrap();
+            let result = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title": "RNA lysis",
+                    "summary": "lysis",
+                    "parameter_slots": [{
+                        "key": "volume_per_sample",
+                        "label": "Volume per sample",
+                        "value_type": "number",
+                        "unit": "uL",
+                        "required": true
+                    }],
+                    "steps": [{
+                        "kind": "text",
+                        "use_id": "lyse",
+                        "title": "Lyse",
+                        "instruction": "Add buffer"
+                    }]
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            result
+        };
+        let block_version_id = block["version"]["id"].as_str().unwrap().to_owned();
+        let (protocol_id, protocol_version_id) = {
+            let tx = db.unchecked_transaction().unwrap();
+            let protocol = insert(
+                &tx,
+                "protocol",
+                Some(&project_id),
+                Some(&project_id),
+                1,
+                &json!({"title": "RNA protocol"}),
+            )
+            .unwrap();
+            let protocol_id = protocol["id"].as_str().unwrap().to_owned();
+            let version = insert(
+                &tx,
+                "protocol_version",
+                Some(&project_id),
+                Some(&protocol_id),
+                1,
+                &json!({
+                    "protocol_id": protocol_id,
+                    "version": 1,
+                    "body": "",
+                    "root_block_version_id": block_version_id,
+                    "root_bindings": []
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            (
+                protocol_id,
+                version["id"].as_str().unwrap().to_owned(),
+            )
+        };
+        let design = create_design_record(db, &project_id, &json!({"title": "d"})).unwrap();
+        let design_id = design["design"]["id"].as_str().unwrap().to_owned();
+        let run = {
+            let tx = db
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            let run = create_run_in_transaction(
+                &tx,
+                &design_id,
+                "run",
+                None,
+                Some(&protocol_version_id),
+                None,
+                None,
+                "independent",
+                None,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            run
+        };
+        AgentEditFixture {
+            data_dir,
+            protocol_id,
+            protocol_version_id,
+            run_id: run["id"].as_str().unwrap().to_owned(),
+        }
+    }
+
+    fn agent_edit_proposal(fixture: &AgentEditFixture) -> Value {
+        json!({
+            "schema_version": 1,
+            "proposal_id": "ae-rna-lyse-001",
+            "target": {
+                "kind": "protocol",
+                "object_id": fixture.protocol_id,
+                "location": {
+                    "protocol_version_id": fixture.protocol_version_id,
+                    "scope": {"kind": "unscoped"},
+                    "step_path": "root/lyse"
+                }
+            },
+            "base_version_id": fixture.protocol_version_id,
+            "expected_version": 1,
+            "origin": {"source": "agent", "rationale": "kit instruction update"},
+            "diffs": [{
+                "path": "params.volume_per_sample",
+                "operation": "set",
+                "after": {
+                    "parameter_key": "volume_per_sample",
+                    "value": 250.0,
+                    "unit": "uL",
+                    "source": "protocol_fixed",
+                    "source_reference": "rna-kit-ifu@2026-03#step-2",
+                    "confirmed": false
+                }
+            }]
+        })
+    }
+
+    fn agent_edit_confirm_request(
+        proposal: Value,
+        digest: &str,
+        idempotency_key: &str,
+    ) -> Value {
+        json!({
+            "schema_version": 1,
+            "proposal": proposal,
+            "proposal_digest": digest,
+            "idempotency_key": idempotency_key,
+            "confirmed_by": "researcher:zhang",
+            "acknowledged": [],
+            "note": "按试剂盒说明书更新体积。"
+        })
+    }
+
+    #[test]
+    fn agent_edit_commit_appends_a_version_and_keeps_the_frozen_run() {
+        let data_dir = std::env::temp_dir().join(format!("asterlab-agent-edit-{}", Uuid::new_v4()));
+        fs::create_dir_all(&data_dir).unwrap();
+        let mut db = open_db(&data_dir).unwrap();
+        let fixture = seed_agent_edit_fixture(&mut db);
+        let proposal = agent_edit_proposal(&fixture);
+        let validation = validate_agent_edit(&db, proposal.clone()).unwrap();
+        assert_eq!(validation["status"], "needs_confirmation");
+        let digest = validation["proposal_digest"].as_str().unwrap().to_owned();
+
+        let run_before = get(&db, &fixture.run_id).unwrap();
+        let previous_version_before = get(&db, &fixture.protocol_version_id).unwrap();
+
+        let request =
+            agent_edit_confirm_request(proposal, &digest, "ae-rna-lyse-001-confirm-1");
+        let result = commit_agent_edit(&mut db, request).unwrap();
+        assert_eq!(result["new_revision"], 2);
+        assert_eq!(result["previous_version_id"], fixture.protocol_version_id);
+        assert_eq!(result["replayed"], false);
+        assert_eq!(result["confirmed_by"], "researcher:zhang");
+        assert_eq!(result["applied"][0]["requested"]["confirmed"], true);
+        assert_eq!(
+            result["invalidated_refs"],
+            json!(["core:binding:unscoped:root/lyse/volume_per_sample"])
+        );
+
+        // The frozen Run still points at the previous version and did not move.
+        let run_after = get(&db, &fixture.run_id).unwrap();
+        assert_eq!(run_after, run_before);
+        assert_eq!(
+            run_after["data"]["protocol_manifest"][0]["protocol_version_id"],
+            fixture.protocol_version_id
+        );
+        // The previous version is immutable, including its bindings.
+        let previous_version_after = get(&db, &fixture.protocol_version_id).unwrap();
+        assert_eq!(previous_version_after, previous_version_before);
+
+        let new_version_id: String = db
+            .query_row(
+                "SELECT id FROM records WHERE kind='protocol_version' AND parent_id=?1 AND revision=2",
+                [&fixture.protocol_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let new_version = get(&db, &new_version_id).unwrap();
+        assert_eq!(
+            new_version["data"]["root_bindings"],
+            json!([{"slot": "volume_per_sample", "value": 250.0, "unit": "uL"}])
+        );
+        assert_eq!(
+            new_version["data"]["agent_edit"]["proposal_id"],
+            "ae-rna-lyse-001"
+        );
+        assert_eq!(
+            new_version["data"]["agent_edit"]["proposal_digest"],
+            digest
+        );
+        assert_eq!(
+            new_version["data"]["agent_edit"]["confirmed_by"],
+            "researcher:zhang"
+        );
+        assert_eq!(new_version["data"]["agent_edit"]["new_revision"], 2);
+
+        // A stale proposal on the same base is a version conflict, not a
+        // silent overwrite.
+        let mut stale = agent_edit_confirm_request(
+            agent_edit_proposal(&fixture),
+            &digest,
+            "ae-rna-lyse-001-confirm-2",
+        );
+        stale["proposal_digest"] = json!(validation["proposal_digest"]);
+        let error = commit_agent_edit(&mut db, stale).unwrap_err();
+        assert_eq!(error.code, "VERSION_CONFLICT");
+        assert_eq!(error.path.as_deref(), Some("expected_version"));
+        assert_eq!(error.current_version, Some(2));
+        assert_eq!(error.current_version_id.as_deref(), Some(new_version_id.as_str()));
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE kind='protocol_version' AND parent_id=?1",
+                [&fixture.protocol_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+
+        fs::remove_dir_all(&data_dir).ok();
+        fs::remove_dir_all(&fixture.data_dir).ok();
+    }
+
+    #[test]
+    fn concurrent_agent_edit_commits_leave_exactly_one_winner() {
+        let data_dir = std::env::temp_dir().join(format!("asterlab-agent-edit-{}", Uuid::new_v4()));
+        fs::create_dir_all(&data_dir).unwrap();
+        let mut seed = open_db(&data_dir).unwrap();
+        let fixture = seed_agent_edit_fixture(&mut seed);
+        let proposal = agent_edit_proposal(&fixture);
+        let validation = validate_agent_edit(&seed, proposal.clone()).unwrap();
+        let digest = validation["proposal_digest"].as_str().unwrap().to_owned();
+        drop(seed);
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let mut handles = Vec::new();
+        for key in ["ae-concurrent-a", "ae-concurrent-b"] {
+            let data_dir = data_dir.clone();
+            let proposal = proposal.clone();
+            let digest = digest.clone();
+            let barrier = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut db = open_db(&data_dir).unwrap();
+                barrier.wait();
+                commit_agent_edit(
+                    &mut db,
+                    agent_edit_confirm_request(proposal, &digest, key),
+                )
+            }));
+        }
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+        let successes = results.iter().filter(|result| result.is_ok()).count();
+        let conflicts = results
+            .iter()
+            .filter(|result| {
+                result
+                    .as_ref()
+                    .is_err_and(|error| error.code == "VERSION_CONFLICT")
+            })
+            .count();
+        assert_eq!(successes, 1, "{results:?}");
+        assert_eq!(conflicts, 1, "{results:?}");
+
+        let db = open_db(&data_dir).unwrap();
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE kind='protocol_version' AND parent_id=?1",
+                [&fixture.protocol_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2, "exactly one new version");
+
+        fs::remove_dir_all(&data_dir).ok();
+        fs::remove_dir_all(&fixture.data_dir).ok();
     }
 }
