@@ -19,7 +19,7 @@
 ## 出现的问题
 
 - **REL-01：**首轮评审指出 Beta 非目标覆盖不足，补充非目标说明（4f1f3ec）后，PR #2 的三项检查全绿并合并。
-- **REL-02：**PR #11 的评审日志多次记录 scope-check 未通过且任务带 `human-hold`，随后修正文档事实、ADR 冲突表述与 beta-scope 引用（a0d8b35），最终三项检查通过。
+- **REL-02：**PR #11 的 `scope-check` 连续失败，原因是 PR 正文缺少 `kandev-scope` 注释块（run 43344757749，diff 本身未越界）；任务随后带 `human-hold`，补正范围块并修正文档事实、ADR 冲突表述与 beta-scope 引用（a0d8b35）后三项检查通过。
 - **REL-05：**Windows CRLF checkout 会造成生成绑定 hash 漂移，PR #6 加入 `.gitattributes` 和双平台 hash 证据后通过。
 - **RUN-03a：**原始读数与派生值边界在首轮评审中不清，4a71d73 将派生 readout 排除在 raw facts 之外后获批。
 - **DOC-01：**资产路径检查未拒绝非普通文件且路径保真不足，125dfd9 补上拒绝条件与精确路径处理后合并。
@@ -36,6 +36,7 @@
 - REL-04 将 `linux-tests`、`windows-build`、`scope-check` 作为 PR 检查；REL-06 在两平台 workflow 加入 Go 测试，REL-07 从实测 CI 工具版本锁定 Rust 1.100.0，原因是避免稳定版漂移造成同一提交结果不一致。
 - REL-05 将行尾规范化纳入仓库配置并以 hash 对照验证生成器输出，原因是 Windows checkout 行尾差异已实际改变绑定 hash。
 - REL-01/REL-02 把 Beta 范围、非目标和文档权威关系写成可引用的文档基线，减少实现卡依据历史材料产生冲突。
+- REL-02 暴露 `scope-check` 直接读取任务描述/PR 正文的 `kandev-scope` 注释块：缺块即红，即使 diff 未越界；后续开 PR 必须携带任务 marker 与范围块。
 - 评审方面，Audit/Docs/Build 类按快速门槛审查，Core/Contract/QA 变更继续依赖人工 verdict；Kandev `human-hold` 标签用于标出重复返工后需人工介入的卡，但本次 DB 未保留独立熔断事件原因。
 
 ## 可能的问题
