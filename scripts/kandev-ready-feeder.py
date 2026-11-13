@@ -225,19 +225,19 @@ def session_capacity():
     return int(os.environ.get("KANDEV_MAX_CONCURRENT_SESSIONS", "4"))
 
 
-def live_session_ids():
-    """Sessions that occupy a capacity slot (RUNNING/WAITING)."""
+def running_session_count():
+    """Sessions with an active turn; WAITING sessions are idle, not slots."""
     import sqlite3
 
     try:
         con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-        rows = con.execute(
-            "select id from task_sessions where state in ('RUNNING','WAITING_FOR_INPUT')"
-        ).fetchall()
+        n = con.execute(
+            "select count(*) from task_sessions where state='RUNNING'"
+        ).fetchone()[0]
         con.close()
-        return {r[0] for r in rows}
+        return n
     except Exception:  # noqa: BLE001
-        return set()
+        return 0
 
 
 def _agent_procs():
@@ -741,7 +741,7 @@ def scan_stuck(detailed):
     import datetime
 
     cap = session_capacity()
-    if len(live_session_ids()) >= cap:
+    if running_session_count() >= cap:
         return  # cards waiting for a session slot are not stuck
     for task in detailed:
         step = task.get("workflow_step_id")
@@ -1309,7 +1309,7 @@ def run_once():
     scan_session_reaper(detailed)
     active = [t for t in agent_tasks if t.get("state") in ACTIVE_STATES]
     cap = session_capacity()
-    used = len(live_session_ids())
+    used = running_session_count()
     slots = max(0, min(WIP - len(active), cap - used))
 
     # A blocked card in Ready is a bug: put it back before it can start.
