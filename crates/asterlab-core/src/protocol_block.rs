@@ -63,6 +63,8 @@ pub enum ProtocolStep {
         visualization: Option<StepVisualization>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         time_scope: Option<StepTimeScope>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation_spec: Option<crate::operation_spec::OperationSpec>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         checks: Vec<StepCheck>,
     },

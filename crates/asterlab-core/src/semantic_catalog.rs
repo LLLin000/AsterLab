@@ -215,6 +215,7 @@ impl CompiledBlock {
                     parameter_refs: parameter_refs.clone(),
                     visualization: None,
                     time_scope: *time_scope,
+                    operation_spec: None,
                     checks: vec![],
                 },
             })

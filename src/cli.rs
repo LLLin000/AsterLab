@@ -818,7 +818,7 @@ fn validate_block_content(
     }
     let parent_slots = validate_parameter_slots(slots)?;
     let mut use_ids = HashSet::new();
-    for step in steps {
+    for (index, step) in steps.iter().enumerate() {
         let use_id = match step {
             ProtocolStep::Text { use_id, .. } | ProtocolStep::BlockUse { use_id, .. } => use_id,
         };
@@ -841,9 +841,34 @@ fn validate_block_content(
                 title,
                 instruction,
                 parameter_refs,
+                operation_spec,
                 checks,
                 ..
             } => {
+                if let Some(spec) = operation_spec {
+                    let spec_path = format!("steps[{index}].operation_spec");
+                    if !spec.is_supported_schema_version() {
+                        return Err(CliError::input(format!(
+                            "{spec_path}.schema_version: unsupported OperationSpec schema_version {}",
+                            spec.schema_version
+                        )));
+                    }
+                    if let Err(issues) = spec.validate() {
+                        let details = issues
+                            .into_iter()
+                            .map(|issue| {
+                                format!(
+                                    "{spec_path}.{}: {} ({})",
+                                    issue.path,
+                                    issue.message,
+                                    issue.code.as_str()
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        return Err(CliError::input(details));
+                    }
+                }
                 check_text(title, "步骤标题", 200)?;
                 check_text(instruction, "步骤说明", 4000)?;
                 if parameter_refs.len() > 100 {
@@ -1039,6 +1064,7 @@ fn expand_block(
                 visualization,
                 time_scope,
                 checks,
+                ..
             } => {
                 if acc.steps.len() >= 500 {
                     return Err(CliError::input("组合展开超过 500 个操作步骤；请拆分预览"));
@@ -12779,5 +12805,57 @@ protocol_version_id: protocol-v1
         drop(after);
         assert_eq!(sha256_file(&db_file), before_hash);
         fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn protocol_block_content_accepts_legacy_and_valid_specs_but_rejects_invalid_specs() {
+        let db = Connection::open_in_memory().unwrap();
+        let legacy: ProtocolStep = serde_json::from_value(json!({
+            "kind": "text",
+            "use_id": "legacy",
+            "title": "Legacy",
+            "instruction": "No sidecar"
+        }))
+        .unwrap();
+        validate_block_content(&db, "project-1", &[], &[legacy]).unwrap();
+
+        let valid: ProtocolStep = serde_json::from_value(json!({
+            "kind": "text",
+            "use_id": "typed",
+            "title": "Typed",
+            "instruction": "Has a sidecar",
+            "operation_spec": {
+                "schema_version": 1,
+                "operation": {
+                    "kind": "transfer",
+                    "volume": { "value": 10.0, "unit": "uL" },
+                    "source": { "container_id": "tube-1" },
+                    "destination": { "container_id": "plate-1" }
+                }
+            }
+        }))
+        .unwrap();
+        validate_block_content(&db, "project-1", &[], &[valid]).unwrap();
+
+        let invalid: ProtocolStep = serde_json::from_value(json!({
+            "kind": "text",
+            "use_id": "invalid",
+            "title": "Invalid",
+            "instruction": "Wrong unit",
+            "operation_spec": {
+                "schema_version": 1,
+                "operation": {
+                    "kind": "transfer",
+                    "volume": { "value": 10.0, "unit": "min" },
+                    "source": { "container_id": "tube-1" },
+                    "destination": { "container_id": "plate-1" }
+                }
+            }
+        }))
+        .unwrap();
+        let error = validate_block_content(&db, "project-1", &[], &[invalid]).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert!(error.message.contains("steps[0].operation_spec.operation.volume"));
+        assert!(error.message.contains("unit_mismatch"));
     }
 }

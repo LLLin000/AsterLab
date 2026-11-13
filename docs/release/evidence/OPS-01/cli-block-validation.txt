@@ -1,0 +1,73 @@
+   Compiling asterlab-core v0.1.0 (/var/lib/kandev/tasks/ops-01-core_m6u32krd/LLLin000-AsterLab/crates/asterlab-core)
+   Compiling labworkbench v0.1.0 (/var/lib/kandev/tasks/ops-01-core_m6u32krd/LLLin000-AsterLab)
+warning: unused variable: `assay_index`
+    --> src/cli.rs:3402:9
+     |
+3402 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/cli.rs:9208:17
+     |
+9208 |             let mut warnings: Vec<String> = Vec::new();
+     |                 ----^^^^^^^^
+     |                 |
+     |                 help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `ywells` is never used
+    --> src/cli.rs:3362:4
+     |
+3362 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+     |    ^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `create_asterdoc_design` is never used
+    --> src/cli.rs:3738:15
+     |
+3738 | pub(crate) fn create_asterdoc_design(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `list_designs` is never used
+    --> src/cli.rs:8002:15
+     |
+8002 | pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^
+
+warning: function `load_design` is never used
+    --> src/cli.rs:8006:15
+     |
+8006 | pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^
+
+warning: function `revise_design_record` is never used
+    --> src/cli.rs:8064:15
+     |
+8064 | pub(crate) fn revise_design_record(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_run_for_design` is never used
+    --> src/cli.rs:8136:15
+     |
+8136 | pub(crate) fn create_run_for_design(
+     |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `save_asset_link` is never used
+     --> src/cli.rs:11367:15
+      |
+11367 | pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+      |               ^^^^^^^^^^^^^^^
+
+warning: `labworkbench` (bin "labworkbench" test) generated 9 warnings (run `cargo fix --bin "labworkbench" -p labworkbench --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 24.76s
+     Running unittests src/main.rs (/srv/build/asterlab-target/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
+
+running 1 test
+test cli::tests::protocol_block_content_accepts_legacy_and_valid_specs_but_rejects_invalid_specs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s
+
