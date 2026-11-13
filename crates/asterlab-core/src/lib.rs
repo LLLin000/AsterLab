@@ -18,6 +18,7 @@ pub mod labware;
 pub mod component_data;
 pub mod scientific_facts;
 pub mod reading_facts;
+pub mod readout_schema;
 pub mod execution_timeline;
 pub mod workflow_tree;
 pub mod agent_edit;

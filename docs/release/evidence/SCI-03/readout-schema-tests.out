@@ -1,0 +1,35 @@
+$ cargo test -p asterlab-core readout_schema
+    Blocking waiting for file lock on build directory
+   Compiling asterlab-core v0.1.0 (/var/lib/kandev/tasks/sci-03-contract-read_daty5cam/LLLin000-AsterLab/crates/asterlab-core)
+    Finished `test` profile [unoptimized] target(s) in 24.24s
+     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-core/e4acddd1bf4767f5/out/asterlab_core-e4acddd1bf4767f5)
+
+running 12 tests
+test readout_schema::tests::cfu_count_keeps_unit_and_well_target ... ok
+test readout_schema::tests::cck8_plate_example_is_valid_and_maps_per_cell ... ok
+test readout_schema::tests::categorical_and_file_rules_are_enforced ... ok
+test readout_schema::tests::derived_readout_requires_method_and_sources ... ok
+test readout_schema::tests::closed_structs_reject_unknown_fields ... ok
+test readout_schema::tests::null_and_explicit_missing_reason_stay_distinct ... ok
+test readout_schema::tests::schema_requires_the_matching_kind_spec ... ok
+test readout_schema::tests::rna_purity_is_marked_derived_from_raw_readouts ... ok
+test readout_schema::tests::required_unit_timepoint_and_sample_are_reported ... ok
+test readout_schema::tests::standard_plate_format_fixes_its_dimensions ... ok
+test readout_schema::tests::schema_round_trips_all_five_value_kinds ... ok
+test readout_schema::tests::table_and_file_and_categorical_have_no_legacy_form ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 275 filtered out; finished in 0.00s
+
+     Running tests/catalog_drafts.rs (/srv/build/asterlab-target/debug/build/asterlab-core/f19e871205f766df/out/catalog_drafts-f19e871205f766df)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/operation_surface.rs (/srv/build/asterlab-target/debug/build/asterlab-core/a2a226fa5648ab97/out/operation_surface-a2a226fa5648ab97)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+exit=0

@@ -1,0 +1,5 @@
+$ cargo check -p asterlab-core
+    Blocking waiting for file lock on build directory
+    Checking asterlab-core v0.1.0 (/var/lib/kandev/tasks/sci-03-contract-read_daty5cam/LLLin000-AsterLab/crates/asterlab-core)
+    Finished `dev` profile [unoptimized] target(s) in 11.15s
+exit=0
