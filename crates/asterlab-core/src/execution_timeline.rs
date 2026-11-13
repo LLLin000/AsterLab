@@ -1004,22 +1004,17 @@ pub fn query_timeline(workspace: &RunWorkspace, query: &TimelineQuery) -> Timeli
             ));
             continue;
         }
-        if let (Some(retry_step), Some(target_step)) = (
-            events[index].step_path.as_deref(),
-            target.step_path.as_deref(),
-        ) {
-            if retry_step != target_step {
-                issues.push(issue(
-                    "retry_step_mismatch",
-                    &format!(
-                        "重试事件 {} 与目标 {} 不属于同一步骤",
-                        events[index].event_id, target_id
-                    ),
-                    Some(&events[index].event_id),
-                    events[index].step_path.as_deref(),
-                ));
-                continue;
-            }
+        if events[index].step_path.as_deref() != target.step_path.as_deref() {
+            issues.push(issue(
+                "retry_step_mismatch",
+                &format!(
+                    "重试事件 {} 与目标 {} 不属于同一步骤",
+                    events[index].event_id, target_id
+                ),
+                Some(&events[index].event_id),
+                events[index].step_path.as_deref(),
+            ));
+            continue;
         }
         retries.push(RetryRecord {
             event_id: events[index].event_id.clone(),
@@ -1411,15 +1406,13 @@ fn validate_retry_target(
             step_path,
         ));
     }
-    if let (Some(retry_step), Some(target_step)) = (step_path, target.step_path.as_deref()) {
-        if retry_step != target_step {
-            issues.push(issue(
-                "retry_step_mismatch",
-                "重试事件必须与被重试事件属于同一步骤",
-                None,
-                step_path,
-            ));
-        }
+    if step_path != target.step_path.as_deref() {
+        issues.push(issue(
+            "retry_step_mismatch",
+            "重试事件必须与被重试事件属于同一步骤",
+            None,
+            step_path,
+        ));
     }
     if let (Some(retry_task), Some(target_task)) = (task_key, target.task_key.as_deref()) {
         if retry_task != target_task {
@@ -1845,6 +1838,36 @@ mod tests {
         assert!(error
             .iter()
             .any(|issue| issue.code == "retry_target_not_failed"));
+    }
+
+    #[test]
+    fn retry_of_stepless_failure_is_rejected_and_reported() {
+        let legacy = json!({
+            "id":"e0",
+            "event_type":"deviation",
+            "content":"spill",
+            "deviation":"spill",
+            "recorded_at":"2026-01-01T00:00:01Z"
+        });
+        let mut draft = base_draft(EventIntent::Operation);
+        draft.retry_of_event_id = Some("e0".into());
+        let error = plan_event(&draft, &workspace(vec![legacy.clone()])).unwrap_err();
+        assert!(error
+            .iter()
+            .any(|issue| issue.code == "retry_step_mismatch"));
+
+        let mut retry = step_event("e2", "2026-01-01T00:00:02Z", "operation");
+        retry["retry_of_event_id"] = json!("e0");
+        let result = query_timeline(
+            &workspace(vec![legacy, retry]),
+            &TimelineQuery::default(),
+        );
+        assert!(result.retries.is_empty());
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| issue.code == "retry_step_mismatch"));
+        assert_eq!(result.events[1].attempt, 2);
     }
 
     #[test]
