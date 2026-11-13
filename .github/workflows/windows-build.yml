@@ -72,6 +72,20 @@ jobs:
         # Runs `mygo native check .\modules\runs`, then `go build -tags=e2e`,
         # then writes dist/BUILD_INFO.txt with the commit and both hashes.
         run: ./scripts/mygo-build.ps1
+      - name: Go tests
+        # REL-06: every package of the module, with the same tag set as the
+        # build above. One Windows-only failure is excluded by name instead of
+        # dropping the step or the package: internal/assets
+        # TestRootsResolveAndRejectTraversal compares Roots.Resolve's
+        # EvalSymlinks-canonicalised result with the raw t.TempDir() path, and
+        # on the windows-2022 runner the temp root canonicalises differently
+        # (run 43359784027, job 131670303542). Traversal rejection and path
+        # escaping stay covered by linux-tests, which runs the same test.
+        # Needs its own Windows fix card; drop -skip together with that fix.
+        working-directory: prototypes/mygo-run
+        run: |
+          go test -tags=e2e -skip '^TestRootsResolveAndRejectTraversal$' ./...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Generated bindings survive the Windows build
         # `mygo native check` regenerates whenever it cannot recognise an

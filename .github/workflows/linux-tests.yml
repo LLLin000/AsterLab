@@ -81,3 +81,15 @@ jobs:
           python3 scripts/ci/test_native_generator_hash.py
           python3 scripts/ci/native_generator_hash.py --check
           python3 scripts/ci/native_generator_hash.py --regen 2
+      - name: Build native Runs module
+        working-directory: prototypes/mygo-run
+        run: go run github.com/egoist/mygo/cmd/mygo@v0.8.4-0.20261108220316-c4197b7fe562 native build -target host ./modules/runs
+      - name: Record Linux Go build evidence
+        working-directory: prototypes/mygo-run
+        run: |
+          go version
+          git -C ../.. rev-parse HEAD
+          sha256sum .mygo/native/linux-amd64/libRuns.so
+      - name: Go tests
+        working-directory: prototypes/mygo-run
+        run: go test ./...
