@@ -19,3 +19,4 @@ pub mod scientific_facts;
 pub mod reading_facts;
 pub mod workflow_tree;
 pub mod agent_edit;
+pub mod agent_edit_validate;

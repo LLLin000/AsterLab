@@ -5,6 +5,8 @@
 #[path = "../../../src/cli.rs"]
 mod cli_impl;
 
+mod agent_edit_preview;
+
 use std::path::Path;
 use serde_json::{json, Value};
 use rusqlite::Connection;
@@ -260,6 +262,18 @@ impl AppCore {
 
     pub fn list_asset_links(&self, run_id: &str) -> Result<Value, String> {
         cli_impl::list_asset_links(&self.db, run_id).map_err(|e| e.message)
+    }
+
+    /// Read-only `agent_edit.validate`: resolve a proposal against the current
+    /// head and return the preview. Writes nothing; see
+    /// `docs/contracts/agent-edit-v1.md`.
+    pub fn agent_edit_validate(&self, proposal: Value) -> Result<Value, String> {
+        agent_edit_preview::validate_proposal_value(&self.db, proposal)
+    }
+
+    /// Digest over every record row; evidence helper for read-only commands.
+    pub fn records_digest(&self) -> Result<String, String> {
+        agent_edit_preview::records_digest(&self.db)
     }
 }
 
