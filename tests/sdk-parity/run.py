@@ -97,10 +97,11 @@ def rust_one(fixture: dict[str, object], temp_root: Path, rust_environment: dict
     value = response.get("result", response)
     if not isinstance(value, dict) or "valid" not in value:
         raise RuntimeError(f"Rust validator response has no validation result for {fixture['name']}: {response}")
-    error = value.get("error") or {}
+    valid = bool(value.get("valid"))
+    error = (value.get("error") or {}) if not valid else {}
     return {
         "name": fixture["name"],
-        "valid": bool(value.get("valid")),
+        "valid": valid,
         "error_code": error.get("code", "") if isinstance(error, dict) else "",
         "error_message": error.get("message", "") if isinstance(error, dict) else "",
         "db_sha256": file_digest_tree(data_dir),
@@ -127,6 +128,8 @@ def rust_results(fixtures: list[dict[str, object]]) -> tuple[dict[str, dict[str,
 
 def error_class(message: str) -> str:
     text = message.lower()
+    if "unsupported" in text:
+        return "unsupported_kind"
     if "quantity needs" in text:
         return "invalid_type"
     if any(word in text for word in ("missing required", "required field", "is required", "module needs")):
@@ -153,6 +156,7 @@ def main() -> int:
     go = go_results(fixtures)
     rust, db_hash = rust_results(fixtures)
     differences = []
+    case_results = []
     passed = 0
     fail = 0
     for fixture in fixtures:
@@ -160,6 +164,13 @@ def main() -> int:
         left, right = go[name], rust[name]
         go_class = error_class(str(left.get("error", ""))) if not left["valid"] else None
         rust_class = error_class(str(right.get("error_message", ""))) if not right["valid"] else None
+        case_results.append({
+            "name": name,
+            "expected": fixture["expected"],
+            "expected_error": fixture["expected_error"],
+            "go": {**left, "error_class": go_class},
+            "rust": {**right, "error_class": rust_class},
+        })
         problems = []
         if left["valid"] != right["valid"] or left["valid"] != fixture["expected"]:
             problems.append("accept/reject mismatch")
@@ -179,8 +190,9 @@ def main() -> int:
         "fail": fail,
         "difference_count": len(differences),
         "differences": differences,
+        "case_results": case_results,
         "known_differences": [
-            {"go": "parser returns unstructured error text", "rust": "validator returns stable error codes", "disposition": "compare normalized categories; preserve raw errors in per-case results"},
+            {"go": "parser returns unstructured error text", "rust": "validator returns stable error codes", "disposition": "compare normalized categories; raw Go text and Rust code/message are included per case"},
             {"kind": "readout@1", "go": "Go Parse rejects kind as unsupported", "rust": "Rust validates the kind", "disposition": "known compatibility gap; no module implementation changes allowed in this QA task"},
         ],
         "isolated_data_sha256": db_hash,
