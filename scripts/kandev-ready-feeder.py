@@ -122,18 +122,31 @@ def scan_stuck(detailed):
 
 
 def rework_count(task_id):
-    """How many times an agent moved this task Review -> Agent."""
+    """How many CHANGES REQUESTED verdicts this task got in Review.
+
+    Rework happens in place (same session, no step moves), so rounds are
+    counted by verdicts, not by Review -> Agent transitions.
+    """
     try:
         import sqlite3
 
         con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-        n = con.execute(
-            """select count(*) from task_step_transitions
-                where task_id=? and from_workflow_step_id=? and to_workflow_step_id=?
-                  and trigger='engine_transition' and actor_kind='agent'""",
-            (task_id, REVIEW, AGENT),
-        ).fetchone()[0]
+        rows = con.execute(
+            """select m.content from task_session_messages m
+                join task_sessions s on s.id=m.task_session_id
+               where s.task_id=? and m.author_type='agent' and m.type='message'
+                 and m.content like '%REVIEW: CHANGES REQUESTED%'
+               order by m.created_at""",
+            (task_id,),
+        ).fetchall()
         con.close()
+        n = 0
+        for (content,) in rows:
+            if "你是 AsterLab 的 Review agent" in content[:300]:
+                continue  # review prompt quoting the format, not a verdict
+            # Count distinct verdict messages, not quoted copies.
+            if content.strip().startswith("**REVIEW: CHANGES REQUESTED") or content.strip().startswith("REVIEW: CHANGES REQUESTED"):
+                n += 1
         return n
     except Exception as exc:  # noqa: BLE001 - never block feeding on stats
         print(f"rework count failed: {exc}", file=sys.stderr)

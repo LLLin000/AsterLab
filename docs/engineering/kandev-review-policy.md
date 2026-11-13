@@ -40,10 +40,9 @@ Review agent 必须逐条确认：
 |---|---|
 | 门槛通过且符合设计 | `gh pr merge <n> --squash --delete-branch`，然后调用 `step_complete_kandev`；任务进入 `Merged` |
 | 门槛通过但拿不准设计 | 评论 `REVIEW: APPROVED` 列出门槛证据和疑虑；不合并，留在 Review 等人工 |
-| 任一门槛失败 | 评论 `REVIEW: CHANGES REQUESTED`，列出文件/行/命令；不合并；必须把任务移回 `Agent` |
-| 没有关联 PR | 评论并停止；不要合并 |
+| 任一门槛失败 | 评论 `REVIEW: CHANGES REQUESTED` 列出可复现证据，**同一 session 就地返工**：修代码、提交、推送、重跑验收，修完后把门槛 1-7 全部重走一遍；不移卡，不调 move |
 
-Review agent 不在 Review 里改代码、提交、推送或 rebase。
+Review agent 不调 Kandev move、不把任务移出 Review；返工在同一 session 内完成。熔断口径：同一任务累计 3 次 `REVIEW: CHANGES REQUESTED` 结论后留在 Review 等人工（`human-hold`）。
 
 ## 5. 合并门
 
