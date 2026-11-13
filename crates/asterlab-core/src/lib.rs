@@ -15,4 +15,5 @@ pub mod component_framework;
 pub mod labware;
 pub mod component_data;
 pub mod scientific_facts;
+pub mod reading_facts;
 pub mod workflow_tree;
