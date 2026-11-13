@@ -26,12 +26,22 @@ pub enum MediaType {
     Unknown,
 }
 
-/// Whether the referenced file can be read right now.
+/// Whether the referenced file can be read and still matches its captured state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Availability {
     Available,
+    Missing,
+    Modified,
     Unavailable,
+}
+
+/// Evidence used to identify a moved file without changing its logical identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetMatchMethod {
+    Sha256,
+    Metadata,
 }
 
 /// Durable reference plus the state captured when the link was created.
@@ -47,8 +57,26 @@ pub struct AssetRef {
     pub media_type: MediaType,
     pub size: u64,
     pub mod_time: String,
+    #[serde(default)]
     pub sha256: String,
     pub availability: Availability,
+}
+
+/// A candidate relative path that matched the stored file evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetCandidate {
+    pub relative_path: String,
+    pub matched_by: AssetMatchMethod,
+}
+
+/// Immutable before/after evidence for rebinding a reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetRebinding {
+    pub previous: AssetRef,
+    pub updated: AssetRef,
+    pub matched_by: AssetMatchMethod,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,7 +293,159 @@ pub fn link(
     })
 }
 
-/// Stable 128-bit identity of a logical root plus relative path.
+/// Checks that the stored relative path still resolves to the captured file.
+/// Missing paths and changed contents are distinct from inaccessible paths.
+pub fn inspect(root_dir: &Path, asset: &AssetRef) -> Result<Availability, AssetError> {
+    let relative_path = normalize_relative_path(&asset.relative_path)?;
+    let root = match fs::canonicalize(root_dir) {
+        Ok(root) => root,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Availability::Missing);
+        }
+        Err(_) => return Ok(Availability::Unavailable),
+    };
+    let root_metadata = match fs::metadata(&root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Availability::Missing);
+        }
+        Err(_) => return Ok(Availability::Unavailable),
+    };
+    if !root_metadata.is_dir() {
+        return Ok(Availability::Unavailable);
+    }
+    let target = match fs::canonicalize(root.join(&relative_path)) {
+        Ok(target) => target,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Availability::Missing);
+        }
+        Err(_) => return Ok(Availability::Unavailable),
+    };
+    if !target.starts_with(&root) {
+        return Err(invalid("asset resolves outside its root"));
+    }
+    let mut file = match File::open(target) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Availability::Missing);
+        }
+        Err(_) => return Ok(Availability::Unavailable),
+    };
+    let metadata = match file.metadata() {
+        Ok(metadata) => metadata,
+        Err(_) => return Ok(Availability::Unavailable),
+    };
+    if !metadata.is_file() {
+        return Ok(Availability::Unavailable);
+    }
+    if !asset.sha256.is_empty() {
+        let current_hash = match hash_reader(&mut file) {
+            Ok(hash) => hash,
+            Err(_) => return Ok(Availability::Unavailable),
+        };
+        return Ok(if current_hash == asset.sha256 {
+            Availability::Available
+        } else {
+            Availability::Modified
+        });
+    }
+    let mod_time = metadata
+        .modified()
+        .map(format_rfc3339)
+        .unwrap_or_else(|_| String::new());
+    Ok(if !asset.mod_time.is_empty()
+        && metadata.len() == asset.size
+        && mod_time == asset.mod_time
+    {
+        Availability::Available
+    } else {
+        Availability::Modified
+    })
+}
+
+fn candidate_metadata(root_dir: &Path, relative_path: &str) -> Result<(u64, String), AssetError> {
+    let target = resolve(root_dir, relative_path)?;
+    let metadata = fs::metadata(target)?;
+    if !metadata.is_file() {
+        return Err(invalid("asset path must be a regular file"));
+    }
+    let mod_time = metadata
+        .modified()
+        .map(format_rfc3339)
+        .unwrap_or_else(|_| String::new());
+    Ok((metadata.len(), mod_time))
+}
+
+/// Finds matching files from caller-supplied candidate paths under the same root.
+/// A known hash is authoritative; size + modification time is only a legacy
+/// fallback when no hash was captured. Ambiguous matches are returned together.
+pub fn find_candidates(
+    root_dir: &Path,
+    asset: &AssetRef,
+    candidate_paths: &[&str],
+) -> Result<Vec<AssetCandidate>, AssetError> {
+    let mut matches = Vec::new();
+    for candidate_path in candidate_paths {
+        let relative_path = normalize_relative_path(candidate_path)?;
+        let matched_by = if asset.sha256.is_empty() {
+            let (size, mod_time) = candidate_metadata(root_dir, &relative_path)?;
+            (!asset.mod_time.is_empty() && size == asset.size && mod_time == asset.mod_time)
+                .then_some(AssetMatchMethod::Metadata)
+        } else {
+            let candidate = link(&asset.root_id, root_dir, None, Some(&relative_path))?;
+            (asset.sha256 == candidate.sha256).then_some(AssetMatchMethod::Sha256)
+        };
+        if let Some(matched_by) = matched_by {
+            matches.push(AssetCandidate {
+                relative_path,
+                matched_by,
+            });
+        }
+    }
+    Ok(matches)
+}
+
+/// Revalidates a selected candidate, preserving the asset ID and returning both
+/// the old and current references so callers can append history without loss.
+pub fn rebind(
+    root_dir: &Path,
+    asset: &AssetRef,
+    candidate: &AssetCandidate,
+) -> Result<AssetRebinding, AssetError> {
+    let mut updated = link(
+        &asset.root_id,
+        root_dir,
+        None,
+        Some(&candidate.relative_path),
+    )?;
+    let matched_by = match_method(asset, &updated)
+        .ok_or_else(|| invalid("candidate no longer matches the stored asset evidence"))?;
+    if matched_by != candidate.matched_by {
+        return Err(invalid("candidate match method changed; search again"));
+    }
+    updated.id = asset.id.clone();
+    Ok(AssetRebinding {
+        previous: asset.clone(),
+        updated,
+        matched_by,
+    })
+}
+
+fn match_method(asset: &AssetRef, candidate: &AssetRef) -> Option<AssetMatchMethod> {
+    if !asset.sha256.is_empty() {
+        (asset.sha256 == candidate.sha256).then_some(AssetMatchMethod::Sha256)
+    } else if !asset.mod_time.is_empty()
+        && asset.size == candidate.size
+        && asset.mod_time == candidate.mod_time
+    {
+        Some(AssetMatchMethod::Metadata)
+    } else {
+        None
+    }
+}
+
+/// Initial 128-bit identity of a logical root plus relative path.
+/// Rebinding retains the identity allocated by the original link.
 pub fn stable_id(root_id: &str, relative_path: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(root_id.as_bytes());
@@ -474,6 +654,113 @@ mod tests {
 
         let error = link("root", &root, None, Some("pipe.sock")).unwrap_err();
         assert!(error.0.contains("regular file"), "{error}");
+    }
+
+    #[test]
+    fn inspection_reports_deleted_and_modified_references_explicitly() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("sample.bin");
+        fs::write(&path, b"original").unwrap();
+        let asset = link("root", &root, None, Some("sample.bin")).unwrap();
+
+        fs::write(&path, b"replaced").unwrap();
+        assert_eq!(
+            inspect(&root, &asset).unwrap(),
+            Availability::Modified,
+            "same-size content replacement must be detected by hash"
+        );
+
+        fs::remove_file(&path).unwrap();
+        assert_eq!(inspect(&root, &asset).unwrap(), Availability::Missing);
+    }
+
+    #[test]
+    fn moved_asset_matches_by_hash_and_rebind_preserves_the_original_reference() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(root.join("before")).unwrap();
+        let old_path = root.join("before/image.tif");
+        fs::write(&old_path, b"image bytes").unwrap();
+        let asset = link("root", &root, None, Some("before/image.tif")).unwrap();
+        fs::create_dir_all(root.join("after")).unwrap();
+        fs::rename(&old_path, root.join("after/image.tif")).unwrap();
+        assert_eq!(inspect(&root, &asset).unwrap(), Availability::Missing);
+
+        let matches = find_candidates(&root, &asset, &["after/image.tif"]).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].relative_path, "after/image.tif");
+        assert_eq!(matches[0].matched_by, AssetMatchMethod::Sha256);
+
+        let rebinding = rebind(&root, &asset, &matches[0]).unwrap();
+        assert_eq!(rebinding.previous, asset);
+        assert_eq!(rebinding.updated.id, asset.id);
+        assert_eq!(rebinding.updated.relative_path, "after/image.tif");
+        assert_eq!(rebinding.updated.availability, Availability::Available);
+        assert_eq!(
+            inspect(&root, &rebinding.updated).unwrap(),
+            Availability::Available
+        );
+        assert_eq!(asset.relative_path, "before/image.tif");
+    }
+
+    #[test]
+    fn rebinding_rejects_a_candidate_changed_after_matching() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("original.txt"), b"same bytes").unwrap();
+        let asset = link("root", &root, None, Some("original.txt")).unwrap();
+        fs::copy(root.join("original.txt"), root.join("candidate.txt")).unwrap();
+        let matches = find_candidates(&root, &asset, &["candidate.txt"]).unwrap();
+        fs::write(root.join("candidate.txt"), b"changed bytes").unwrap();
+
+        assert!(rebind(&root, &asset, &matches[0]).is_err());
+    }
+
+    #[test]
+    fn metadata_fallback_requires_an_unavailable_hash() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        let old_path = root.join("old.csv");
+        fs::write(&old_path, b"x,y\n1,2\n").unwrap();
+        let linked = link("root", &root, None, Some("old.csv")).unwrap();
+        let mut serialized = serde_json::to_value(linked).unwrap();
+        serialized.as_object_mut().unwrap().remove("sha256");
+        let legacy: AssetRef = serde_json::from_value(serialized).unwrap();
+        assert_eq!(inspect(&root, &legacy).unwrap(), Availability::Available);
+        fs::rename(&old_path, root.join("new.csv")).unwrap();
+
+        let matches = find_candidates(&root, &legacy, &["new.csv"]).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].matched_by, AssetMatchMethod::Metadata);
+        let rebinding = rebind(&root, &legacy, &matches[0]).unwrap();
+        assert_eq!(rebinding.matched_by, AssetMatchMethod::Metadata);
+        assert_eq!(rebinding.updated.relative_path, "new.csv");
+
+        let mut known_hash = legacy.clone();
+        known_hash.sha256 = "different-content-hash".into();
+        assert!(find_candidates(&root, &known_hash, &["new.csv"])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn ambiguous_candidates_are_returned_without_choosing_one() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("first.txt"), b"same").unwrap();
+        let asset = link("root", &root, None, Some("first.txt")).unwrap();
+        fs::copy(root.join("first.txt"), root.join("second.txt")).unwrap();
+
+        let matches = find_candidates(&root, &asset, &["first.txt", "second.txt"]).unwrap();
+        assert_eq!(matches.len(), 2);
+        assert!(matches
+            .iter()
+            .all(|candidate| candidate.matched_by == AssetMatchMethod::Sha256));
     }
 
     #[test]
