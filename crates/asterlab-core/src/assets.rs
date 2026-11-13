@@ -117,6 +117,42 @@ pub fn classify(path: &Path) -> MediaType {
     }
 }
 
+/// True for a Windows drive prefix (`C:`, `C:/`, `C:\`) at the start of a
+/// path-like value. Checked on every platform so a reference created on Linux
+/// cannot become absolute when the data directory moves to Windows.
+fn starts_with_drive_prefix(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes.len() == 2 || matches!(bytes[2], b'/' | b'\\'))
+}
+
+/// A logical root ID is persisted and exported, so it must not be a filesystem
+/// path: an absolute path here would leak the local layout even though the
+/// referenced file itself stays relative.
+fn validate_root_id(value: &str) -> Result<(), AssetError> {
+    if value.is_empty() {
+        return Err(invalid("root ID is required"));
+    }
+    if value.len() > 200 || value.chars().any(char::is_control) {
+        return Err(invalid("root ID is invalid"));
+    }
+    if value.starts_with('/')
+        || value.starts_with('\\')
+        || starts_with_drive_prefix(value)
+        || Path::new(value).is_absolute()
+    {
+        return Err(invalid(
+            "root ID must be a logical identifier, not an absolute path",
+        ));
+    }
+    if value.split(['/', '\\']).any(|segment| segment == "..") {
+        return Err(invalid("root ID must not contain parent-directory segments"));
+    }
+    Ok(())
+}
+
 /// Normalizes a relative path to forward slashes and rejects anything that
 /// could escape the logical root.
 pub fn normalize_relative_path(value: &str) -> Result<String, AssetError> {
@@ -128,7 +164,7 @@ pub fn normalize_relative_path(value: &str) -> Result<String, AssetError> {
     }
     let normalized = value.replace('\\', "/");
     let path = Path::new(&normalized);
-    if path.is_absolute() {
+    if path.is_absolute() || starts_with_drive_prefix(&normalized) {
         return Err(invalid("relative path must not be absolute"));
     }
     let mut parts = Vec::new();
@@ -220,8 +256,10 @@ fn hashes_equal(stored: &str, computed: &str) -> bool {
 /// Builds a validated reference from a logical root and either an absolute
 /// file path or a path relative to the root.
 ///
-/// The file must exist and be readable: a link is created from observed
-/// metadata, never from caller-supplied size or hash fields.
+/// `root_id` is a logical identifier, never a filesystem path; `root_dir` is
+/// used for this call only and is not stored. The file must exist and be
+/// readable: a link is created from observed metadata, never from
+/// caller-supplied size or hash fields.
 pub fn link(
     root_id: &str,
     root_dir: &Path,
@@ -229,12 +267,7 @@ pub fn link(
     relative_path: Option<&str>,
 ) -> Result<AssetRef, AssetError> {
     let root_id = root_id.trim();
-    if root_id.is_empty() {
-        return Err(invalid("root ID is required"));
-    }
-    if root_id.len() > 200 || root_id.chars().any(char::is_control) {
-        return Err(invalid("root ID is invalid"));
-    }
+    validate_root_id(root_id)?;
     let root = fs::canonicalize(root_dir)
         .map_err(|error| invalid(format!("resolve asset root {}: {error}", root_dir.display())))?;
     if !fs::metadata(&root)
@@ -551,8 +584,13 @@ mod tests {
         );
         assert!(normalize_relative_path("../secret.txt").is_err());
         assert!(normalize_relative_path("d1/../../secret.txt").is_err());
+        assert!(normalize_relative_path("..").is_err());
+        assert!(normalize_relative_path("d1/..").is_err());
         assert!(normalize_relative_path("/abs/file").is_err());
         assert!(normalize_relative_path("./file").is_err());
+        assert!(normalize_relative_path("\\\\server\\share\\file").is_err());
+        assert!(normalize_relative_path("C:/Windows/win.ini").is_err());
+        assert_eq!(normalize_relative_path("a:b.csv").unwrap(), "a:b.csv");
         assert_eq!(normalize_relative_path("  ").unwrap(), "  ");
     }
 
@@ -802,5 +840,156 @@ mod tests {
     fn rfc3339_formatting_is_utc_and_stable() {
         assert_eq!(format_unix_seconds(0), "1970-01-01T00:00:00Z");
         assert_eq!(format_unix_seconds(1_700_000_000), "2023-11-14T22:13:20Z");
+    }
+
+    #[test]
+    fn root_id_must_be_logical_not_an_absolute_path() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.txt"), b"a").unwrap();
+
+        let rejected = vec![
+            root.to_str().unwrap().to_owned(),
+            "/var/data".to_owned(),
+            "C:\\data".to_owned(),
+            "C:/data".to_owned(),
+            "C:".to_owned(),
+            "\\\\server\\share".to_owned(),
+            "roots/../escape".to_owned(),
+        ];
+        for root_id in rejected {
+            let error = link(&root_id, &root, None, Some("a.txt")).unwrap_err();
+            assert!(
+                error.0.contains("logical identifier")
+                    || error.0.contains("parent-directory"),
+                "{root_id}: {error}"
+            );
+        }
+        assert!(link("root", &root, None, Some("a.txt")).is_ok());
+        assert!(link("root", &root, None, Some("/etc/passwd")).is_err());
+    }
+
+    #[test]
+    fn exported_reference_contains_no_absolute_path_and_survives_a_restart() {
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(root.join("d1")).unwrap();
+        let file = root.join("d1").join("readout.csv");
+        fs::write(&file, b"a,b\n1,2\n").unwrap();
+
+        let asset = link("project-data", &root, None, Some("d1/readout.csv")).unwrap();
+        let exported = serde_json::to_string_pretty(&asset).unwrap();
+        let root_text = root.to_str().unwrap();
+        let file_text = file.to_str().unwrap();
+        assert!(!exported.contains(root_text), "{exported}");
+        assert!(!exported.contains(file_text), "{exported}");
+        assert!(!exported.contains(tree.0.to_str().unwrap()), "{exported}");
+        assert!(exported.contains("\"relativePath\": \"d1/readout.csv\""));
+
+        // The exported bytes are the whole durable reference: a fresh process
+        // restores it without the local root directory.
+        let restored: AssetRef = serde_json::from_str(&exported).unwrap();
+        assert_eq!(restored, asset);
+        assert_eq!(inspect(&root, &restored).unwrap(), Availability::Available);
+
+        // After a restart a move is still detected and rebinding keeps identity.
+        fs::rename(&file, root.join("d1/moved.csv")).unwrap();
+        assert_eq!(inspect(&root, &restored).unwrap(), Availability::Missing);
+        let candidates = find_candidates(&root, &restored, &["d1/moved.csv"]).unwrap();
+        assert_eq!(candidates.len(), 1);
+        let rebinding = rebind(&root, &restored, &candidates[0]).unwrap();
+        assert_eq!(rebinding.updated.id, asset.id);
+        let exported_rebinding = serde_json::to_string(&rebinding).unwrap();
+        assert!(!exported_rebinding.contains(root_text));
+        assert!(!exported_rebinding.contains(file_text));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_that_leave_the_root_are_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        let outside = tree.0.join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.csv"), b"a,b\n1,2\n").unwrap();
+
+        // A file symlink whose target is outside the root.
+        symlink(outside.join("secret.csv"), root.join("leak.csv")).unwrap();
+        let error = link("root", &root, None, Some("leak.csv")).unwrap_err();
+        assert!(error.0.contains("outside its root"), "{error}");
+        let error = resolve(&root, "leak.csv").unwrap_err();
+        assert!(error.0.contains("outside its root"), "{error}");
+
+        // A directory symlink whose target is outside the root.
+        symlink(&outside, root.join("linked-dir")).unwrap();
+        let error = link("root", &root, None, Some("linked-dir/secret.csv")).unwrap_err();
+        assert!(error.0.contains("outside its root"), "{error}");
+
+        // Candidate search cannot be used to reach outside the root either.
+        fs::write(root.join("inside.csv"), b"a,b\n1,2\n").unwrap();
+        let asset = link("root", &root, None, Some("inside.csv")).unwrap();
+        assert!(find_candidates(&root, &asset, &["../outside/secret.csv"]).is_err());
+        assert!(find_candidates(&root, &asset, &["linked-dir/secret.csv"]).is_err());
+
+        // Replacing a valid reference with an escaping symlink fails visibly
+        // instead of reporting the outside file as available.
+        fs::remove_file(root.join("inside.csv")).unwrap();
+        symlink(outside.join("secret.csv"), root.join("inside.csv")).unwrap();
+        let error = inspect(&root, &asset).unwrap_err();
+        assert!(error.0.contains("outside its root"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_that_stay_inside_the_root_are_allowed() {
+        use std::os::unix::fs::symlink;
+
+        let tree = TempTree::new();
+        let root = tree.0.join("data");
+        fs::create_dir_all(root.join("real")).unwrap();
+        fs::write(root.join("real").join("readout.csv"), b"a,b\n1,2\n").unwrap();
+        symlink(root.join("real/readout.csv"), root.join("readout.csv")).unwrap();
+
+        let asset = link("root", &root, None, Some("readout.csv")).unwrap();
+        assert_eq!(asset.relative_path, "readout.csv");
+        assert_eq!(inspect(&root, &asset).unwrap(), Availability::Available);
+        let exported = serde_json::to_string(&asset).unwrap();
+        assert!(!exported.contains(root.to_str().unwrap()), "{exported}");
+        assert!(!exported.contains("real/readout.csv"), "{exported}");
+    }
+
+    #[test]
+    fn concurrent_links_and_inspections_agree_without_writing() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let tree = TempTree::new();
+        let root = Arc::new(tree.0.join("data"));
+        fs::create_dir_all(root.join("d1")).unwrap();
+        fs::write(root.join("d1/readout.csv"), b"a,b\n1,2\n").unwrap();
+
+        let expected = link("root", root.as_path(), None, Some("d1/readout.csv")).unwrap();
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let root = Arc::clone(&root);
+            let expected = expected.clone();
+            handles.push(thread::spawn(move || {
+                let asset = link("root", root.as_path(), None, Some("d1/readout.csv")).unwrap();
+                assert_eq!(asset, expected);
+                assert_eq!(
+                    inspect(root.as_path(), &asset).unwrap(),
+                    Availability::Available
+                );
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(fs::read_dir(root.join("d1")).unwrap().count(), 1);
+        assert_eq!(fs::read(root.join("d1/readout.csv")).unwrap(), b"a,b\n1,2\n");
     }
 }
