@@ -1,10 +1,10 @@
 # AsterDoc SDK 模块目录 v1
 
-> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，16 个 `kind@schema`，对应 14 个 `kind`；`step` 的 schema 1/2/3 是同一 kind 的三个版本）。本文只描述已实现的事实，不描述未实现能力。
+> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，17 个 `kind@schema`，对应 15 个 `kind`；`step` 的 schema 1/2/3 是同一 kind 的三个版本）。本文只描述已实现的事实，不描述未实现能力。
 
 ## 1. 已注册模块总表
 
-下表按 `kind@schema` 列出 16 条；`step@1`、`step@2`、`step@3` 不是三个 kind，而是 `step` 的三个 schema 版本（14 个 kind、16 个 `kind@schema`：其余 13 个 kind 各 1 个 schema，`step` 有 3 个）。计数与 `spec/modules.json` 的 `modules[]` 长度一致（`python3 -c "...print(len(...))"` → 16）。
+下表按 `kind@schema` 列出 17 条；`step@1`、`step@2`、`step@3` 不是三个 kind，而是 `step` 的三个 schema 版本（15 个 kind、17 个 `kind@schema`：其余 14 个 kind 各 1 个 schema，`step` 有 3 个）。计数与 `spec/modules.json` 的 `modules[]` 长度一致（`python3 -c "...print(len(...))"` → 17）。
 
 | kind@schema | category | capabilities | permissions | Design / Document / Run / Static | rules |
 |---|---|---|---|---|---|
@@ -24,8 +24,14 @@
 | container@1 | labware | container, well-map | (none) | generic.editor / container.viewer / generic.run / — | container-fields |
 | measurement_profile@1 | measurement | measurement-profile, calculator-reference | (none) | generic.editor / measurement_profile.viewer / generic.run / — | measurement-profile-fields |
 | rna_reagent_usage@1 | measurement | quantity, deterministic-calculation, derived-output | (none) | generic.editor / rna_reagent_usage.viewer / generic.run / — | rna-reagent-fields |
+| readout@1 | measurement | readout-schema, value-kind, run-record | run.readout | generic.editor / generic.editor / generic.run / — | (none) |
 
 说明：`renderers.static` 当前未声明；静态预览走 `StaticPreview`/`StaticDocumentPreview`。
+
+`readout@1` 是唯一「manifest 已声明、Go 原型未注册实现」的模块：Rust Core 从同一 `modules.json`
+校验 `readout` 文档（输入/端口/量纲），Go `BuiltinRegistry()` 没有对应 `ModuleSpec`，因此 MyGo 侧没有
+`readout` 的解析器、编辑器或 Run 视图；这是明确的能力缺口，不是回退猜测。读数本身不进入 AsterDoc
+文档：形状由 `readout@1` 声明，值只经 Core 写入 Run 事实（`docs/contracts/readout-schema-v1.md`）。
 
 `renderers` 是实际执行的契约。`Registry.RegisterRenderer` 将回调按 key 注册一次，多个 kind 可以共享；
 `generic.editor` 和只读 `generic.run` 是共享实现。`plate` 使用独立的 `plate.editor`、`plate.viewer`、
@@ -48,6 +54,7 @@
 | dilution@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无（derived，不写 Run 事实） |
 | instrument_profile@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无；无设备控制 |
 | material@1 / sample@1 / container@1 / measurement_profile@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
+| readout@1 | 仅 Rust（`src/cli.rs` 读 `modules.json`）；Go 未注册 | 无 | 无 | Core：`ReadoutRegistry` + `plan_readout_submission` 记录孔板/单值/表格读数，`query_readout_records` 读回 |
 
 说明：
 - 通用编辑器（`GenericModuleEditor`）对 `list/object/table/object-list/well-map/geometry` 字段为 read-only；复合字段目前无法在通用编辑器内组装。
@@ -120,6 +127,11 @@
 - inputs: kind/id/schema string|int required；sample_count int required；volume_per_sample quantity (volume) required；stock_concentration quantity (mass_concentration) required；target_concentration quantity (mass_concentration) required；extra_ratio decimal optional。
 - outputs: stock_volume quantity (volume) derived calculator rna.reagent_usage.v1；diluent_volume quantity (volume) derived calculator rna.reagent_usage.v1；total_volume quantity (volume) derived calculator rna.reagent_usage.v1。
 
+### readout@1
+- inputs: kind/id/schema string|int required；schema_id string required（`cck8_od450`、`rna_concentration`、`rna_purity`、`cfu_count` 等）；endpoint string required；value_kind enum{numeric,table,plate,categorical,file} required；unit string；missing_reasons list(string)；null_allowed bool；source_kinds list(string)；table_columns object-list；plate_format enum{6,12,24,48,96,384,custom}。
+- outputs: readout_shape object view；record_form enum{plate,single,table,categorical,file} view。
+- 记录路径：`crates/asterlab-core::readout_records`（`ReadoutRegistry`、`plan_readout_submission`、`query_readout_records`）；三种记录形态共用一次 schema 校验与一个 `execution_event` 写入，不新增记录表。
+
 ## 3. 模块如何被设计：12 维度与落点
 
 `docs/sdk/module-contract-v1.md` §1 列出 12 维度；本节只说明每维在何处落地：
@@ -144,7 +156,7 @@
 - `record_boundary` 固定为 `run`；document 模块不得写 Run 事实。
 - 量纲/UCUM：`prototypes/mygo-run/internal/asterdoc/spec/units.json` 仅 36 个符号、9 个维度（mass_concentration、mass、amount_concentration、length、time、volume、amount、dimensionless、temperature）；`units.go` 注释明确是"命名 UCUM 子集"，转换显式且不重写原值。
 - 引用：`reference.ref` 是非类型化的 `string`（`reference@1` 的 `ref` 字段为 `string`，仅 `target` 在引用端口声明）；typed reference 通过 `inputs[].type=reference + target` 实现，`ref` 本身不带类型。
-- Go 注册：`BuiltinRegistry()` 注册 16 个 `kind@schema`（14 个 kind）；`Register` 验证所声明的 renderer key 有已注册 callback。
+- Go 注册：`BuiltinRegistry()` 注册 16 个 `kind@schema`（14 个 kind）；`Register` 验证所声明的 renderer key 有已注册 callback。`readout@1` 由 manifest 声明、Rust Core 消费，Go 侧尚未注册（见 §1 说明）。
 - Rust 镜像：`src/cli.rs` 嵌入同一 `modules.json` 并校验；`asterdoc_module_spec(kind, schema)` 查找。
 
 ## 4. 新增模块：精确文件清单
