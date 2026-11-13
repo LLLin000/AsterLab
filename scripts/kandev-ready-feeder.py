@@ -40,6 +40,7 @@ READY = os.environ.get("KANDEV_VPS_READY_STEP", "9e7881ac-cda4-480c-8652-d3665f7
 AGENT = os.environ.get("KANDEV_VPS_AGENT_STEP", "47b1aac7-2bb9-4b26-b8e3-412c424b4f46")
 REVIEW = os.environ.get("KANDEV_VPS_REVIEW_STEP", "2b6d9951-e9fd-4578-8bf4-6f3e7aa7ce31")
 MERGED_STEP = "e22063df-1124-4836-8e5c-b0c0e387be68"
+VERIFY_STEP = "bc096440-6879-45fd-a04a-3d52568efcea"
 WIP = int(os.environ.get("KANDEV_AGENT_WIP", "2"))
 REVIEW_WIP = int(os.environ.get("KANDEV_REVIEW_WIP", "2"))
 DB = os.environ.get("KANDEV_DB", "/var/lib/kandev/data/kandev.db")
@@ -428,7 +429,14 @@ def run_once():
             except Exception as exc:  # noqa: BLE001
                 print(f"human-hold label failed: {exc}", file=sys.stderr)
 
-    # Decision push: APPROVED cards still in Review mean the agent was unsure.
+    # Merged sweep: PR merged but card still in Review/Verify (missed event).
+    for task in detailed:
+        if task.get("workflow_step_id") not in (REVIEW, VERIFY_STEP):
+            continue
+        pr = task_pr(task["id"])
+        if pr and pr.get("state") == "merged":
+            move(task, MERGED_STEP, "PR merged -> Merged (sweep)")
+
     scan_approvals(review_tasks)
 
     # FYI: CI-config cards that got merged.
