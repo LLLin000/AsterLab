@@ -24,7 +24,7 @@
 
 ## 2. 隔离数据与校验和
 
-`scan.py` 每次在 `CARGO_TARGET_DIR`（回退 `target/`）下新建 `qa06-*` 目录，内部的
+`scan.py` 每次在现有 `CARGO_TARGET_DIR`（未设置时回退 `target/`）下新建 `qa06-*` 目录，内部的
 `data/` 是本用例唯一数据库，`root/` 是被引用目录，`outside/` 是存放 `secret.csv` 的根外
 目录。全程不接触用户主库。
 
@@ -43,7 +43,6 @@ asset_rows_before=3 asset_rows_after=3
 ## 3. 复现步骤
 
 ```bash
-CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"   # 不改写，仅供脚本定位产物
 cargo build --locked --bin labworkbench
 python3 docs/release/evidence/QA-06/scan.py            # 重写 export-scan.txt
 cargo test --locked --manifest-path crates/asterlab-core/Cargo.toml
