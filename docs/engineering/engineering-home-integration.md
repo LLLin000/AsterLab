@@ -32,6 +32,24 @@ ENGINEERING_HOME=/srv/projects/home REPOS_ROOT=/srv/projects \
 
 The command is equivalent to `PYTHONPATH="$ENGINEERING_HOME/src" python3 -m engctl status --project asterlab`. If the token is missing, the wrapper exits with an explanatory error. It performs no SQLite writes; do not add direct database updates to this integration.
 
+## Shared cargo target
+
+The VPS sets `CARGO_TARGET_DIR=/srv/build/asterlab-target` and an sccache
+wrapper. That target is shared by task worktrees, so a core crate rebuilt from
+one branch can leave metadata that makes another branch fail with an unrelated
+enum-field error (for example `src/cli.rs` missing `operation_spec`). This is a
+build-cache mismatch, not a reason to widen a card's `scope.write`.
+
+Reproduce on a clean target before changing code:
+
+```sh
+CARGO_TARGET_DIR=/tmp/<card>-target cargo build --bin labworkbench
+```
+
+If that passes, clear the stale package from the shared target with
+`cargo clean -p asterlab-core` and rebuild in the task worktree. Do not edit
+`src/**` or expand scope to “fix” a cache-only failure.
+
 ## Ownership and migration
 
 Keep exactly one owner for each fact and action. Home provides shared policy/navigation, not a second AsterLab project contract or task ledger. Project-specific rules stay in AsterLab; task/session state stays in Kandev; PR, checks, and merge facts stay in GitHub. Before migrating an automation or state field, identify its current authoritative owner and move its readers/writers together; do not run dual writers or maintain parallel copies. Any future write-capable integration requires an explicit contract and tested enforcement rather than treating this status entry point as permission to write.
