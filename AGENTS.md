@@ -47,6 +47,13 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 - **Windows Gate** 承担 MyGo/Slint GUI、`runs.dll`、Windows 安装包和 PowerShell E2E。当前该流程没有 agent profile，也没有注册 Windows executor，是人工泳道；不要把它当作自动队列，也不要在 VPS 上假装执行。
 - 卡片的 `lane` 标签和所在流程不一致时，先对齐再执行。
 
+### Windows Gate 执行方法
+
+- Windows Gate 是人工泳道，不启动 Linux/VPS agent；开工前检查 Kandev 卡片的 `blocked_by`、范围和基线，依赖未完成时不开始。
+- 每张卡只用独立 `ovnfs` checkout，严格遵循卡片基线；不改共享脏 checkout，不复用其他卡分支或工作区。
+- 默认串行；Kandev `Windows Work` WIP=2 是上限。只有 `scope.write` 不重叠且数据隔离时才并行；GUI/native build/截图/E2E/最终集成始终串行。
+- 完成后附 PR/分支、验收原始输出与证据；满足卡片验收后才移至 `Done`。详细操作见 [`cross-platform-builds.md` §10](docs/engineering/cross-platform-builds.md#10-windows-gate-task-execution)。
+
 ### 状态语义
 
 - `Inbox` / `Todo`：待人工准入，不会被 agent 自动领取。

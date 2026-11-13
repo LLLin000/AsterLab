@@ -135,6 +135,7 @@ forbid:
 - 只在 Windows 实机验收；1360×880 与 900×600，浅色/深色截图。
 - 不改 Core 契约；需要 Core 变更时停止并开 Core 卡。
 - 证据放 docs/product/evidence/<ID>/。
+- Windows 卡按卡片基线使用独立 ovnfs checkout；遵循 Windows Gate 的并行上限，GUI/build/E2E 验收一律串行。
 ```
 
 ### `(Integration)`
@@ -190,5 +191,6 @@ forbid:
 - [ ] 依赖已写入 Kandev `blocked_by`，正文不重复完整列表。
 - [ ] 分类与泳道一致；跨 Core/UI 的工作已拆卡。
 - [ ] 没有 `TBD`、`可选`、`你确认` 这类不可执行表述。
-- [ ] 并行执行时，与同时在跑的卡 `write` 范围没有交集；有交集则串行。
-- [ ] 并行执行使用 Worktree executor（workspace default = `exec-worktree`）；任务 `workspace_path` 必须是独立 worktree，不能是共享 clone。
+- [ ] Parallel cards have disjoint machine-readable `scope.write` sets; overlapping or unclear ownership is serial, and real ordering is recorded with `blocked_by`.
+- [ ] Each parallel task has an isolated checkout: Windows Gate uses one ovnfs checkout per card; VPS Dev uses the Worktree executor. Never share a checkout.
+- [ ] Windows Gate defaults to serial and allows at most two independent work cards; Windows GUI/build/E2E/final integration always runs serially.
