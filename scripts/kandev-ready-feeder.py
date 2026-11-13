@@ -63,6 +63,82 @@ def stuck_fix_count(labels):
     return n
 
 
+CI_WAIT_KEYWORDS = ("pending", "仍在跑", "等 CI", "等待 CI", "未全绿", "CI 仍")
+REQUIRED_CHECKS = {"linux-tests", "windows-build", "scope-check"}
+
+
+def ci_all_green(task_id):
+    """True when Kandev's own PR poller says checks are success."""
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        r = con.execute(
+            "select checks_state from github_task_prs where task_id=? order by pr_number desc limit 1",
+            (task_id,),
+        ).fetchone()
+        con.close()
+        return bool(r and r[0] == "success")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def scan_ci_ready(review_tasks):
+    """Rewake reviews that stopped on pending CI once CI is green.
+
+    Kandev's PR poller updates checks_state but never wakes the waiting
+    session. Bounce the card to trigger a fresh review turn.
+    """
+    for task in review_tasks:
+        labels = lane_labels(task)
+        if "human-hold" in labels:
+            continue
+        # Latest agent message (any type text), not just verdicts: some
+        # reviews stop on pending CI without writing a verdict line.
+        try:
+            import sqlite3
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            row = con.execute(
+                """select m.content from task_session_messages m
+                    join task_sessions s on s.id=m.task_session_id
+                   where s.task_id=? and m.author_type='agent'
+                   order by m.created_at desc limit 3""",
+                (task["id"],),
+            ).fetchall()
+            con.close()
+        except Exception:  # noqa: BLE001
+            continue
+        content = "\n".join(r[0] or "" for r in row)
+        if not any(k in content for k in CI_WAIT_KEYWORDS):
+            continue
+        if not ci_all_green(task["id"]):
+            continue
+        # Retire old sessions so reuse doesn't resurrect the stale one.
+        try:
+            import sqlite3
+
+            wcon = sqlite3.connect(DB)
+            for (sid,) in wcon.execute(
+                "select id from task_sessions where task_id=? and state in ('RUNNING','WAITING_FOR_INPUT','SCHEDULING')",
+                (task["id"],),
+            ).fetchall():
+                wcon.execute(
+                    "update task_sessions set state='FAILED',completed_at=datetime('now') where id=?", (sid,)
+                )
+                wcon.execute(
+                    "update executors_running set status='stopped',local_pid=0,pid=0 where session_id=?", (sid,)
+                )
+            wcon.commit()
+            wcon.close()
+        except Exception as exc:  # noqa: BLE001
+            print(f"ci-ready retire failed: {exc}", file=sys.stderr)
+            continue
+        if move(task, INBOX, "ci-ready -> Inbox"):
+            time.sleep(1)
+            move(task, REVIEW, "ci-ready -> Review re-review")
+
+
 def scan_stuck(detailed):
     """Self-heal cards with no live session; escalate after STUCK_FIX_LIMIT."""
     import datetime
@@ -555,6 +631,7 @@ def run_once():
     scan_approvals(review_tasks)
     scan_cardfix([t for t in detailed if t.get("workflow_step_id") in (AGENT, REVIEW)])
     scan_retro_ready(detailed)
+    scan_ci_ready(review_tasks)
 
     # FYI: CI-config cards that got merged.
     scan_ci_merges(detailed)
