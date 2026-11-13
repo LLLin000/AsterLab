@@ -295,27 +295,46 @@ def scan_approvals(review_tasks):
             print(f"approved-sent label failed: {exc}", file=sys.stderr)
 
 
-CARD_FIX_KEYWORDS = ("修卡", "人工修卡", "需要人工", "二选一", "改任务描述", "改卡")
+CARD_FIX_KEYWORDS = ("修卡", "人工修卡", "需要人工", "二选一", "改任务描述", "改卡", "CARD-BROKEN", "自矛盾")
 
 
-def scan_cardfix(review_tasks):
-    """Push when CHANGES means 'the card itself is wrong', not the code.
+def scan_cardfix(tasks):
+    """Push when an agent reports the card itself is broken.
 
-    The agent cannot edit task descriptions; these need a human card fix.
+    Two sources: Review CHANGES verdicts mentioning a card fix, and Agent
+    preflight CARD-BROKEN reports. The agent cannot edit task descriptions;
+    these need a human card fix.
     """
-    for task in review_tasks:
+    for task in tasks:
         labels = lane_labels(task)
         if "human-hold" in labels or "tg-cardfix-sent" in labels:
             continue
         verdict, content = latest_review_verdict(task["id"])
-        if verdict != "CHANGES_REQUESTED":
-            continue
-        if not any(k in content for k in CARD_FIX_KEYWORDS):
-            continue
+        hit = verdict == "CHANGES_REQUESTED" and any(k in content for k in CARD_FIX_KEYWORDS)
+        if not hit:
+            # Agent preflight: CARD-BROKEN in any recent agent message.
+            try:
+                import sqlite3
+
+                con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+                row = con.execute(
+                    """select m.content from task_session_messages m
+                        join task_sessions s on s.id=m.task_session_id
+                       where s.task_id=? and m.author_type='agent'
+                         and m.content like '%CARD-BROKEN%'
+                       order by m.created_at desc limit 1""",
+                    (task["id"],),
+                ).fetchone()
+                con.close()
+            except Exception:  # noqa: BLE001
+                row = None
+            if not row:
+                continue
+            content = row[0]
         pr = task_pr(task["id"])
         text = (
             f"Kandev 修卡请求：{task['title'][:60]}\n"
-            f"代码已过，卡片自矛盾，agent 修不动。\n"
+            f"卡片自矛盾，agent 修不动，已停工等你。\n"
             f"PR #{pr.get('pr_number', '?')} {pr.get('pr_url', '')}\n"
             f"结论摘要：{content[:300]}"
         )
@@ -478,7 +497,7 @@ def run_once():
             move(task, MERGED_STEP, "PR merged -> Merged (sweep)")
 
     scan_approvals(review_tasks)
-    scan_cardfix(review_tasks)
+    scan_cardfix([t for t in detailed if t.get("workflow_step_id") in (AGENT, REVIEW)])
 
     # FYI: CI-config cards that got merged.
     scan_ci_merges(detailed)
