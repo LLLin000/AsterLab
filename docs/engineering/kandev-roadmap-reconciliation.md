@@ -36,7 +36,7 @@
 
 - `Review` 现在是 AI review agent，复用实现 profile，进入时切换角色；不是独立模型。
 - `(Docs)/(Audit)/(Build)` 在审查门槛通过时可由 Review agent 自动 squash-merge；其余分类只给结论，人工合并。
-- `Review` WIP=2。Review 满 2 个时，feeder 停止把 Inbox 卡提升到 Ready，也停止启动 Ready 卡；这是防止未审查工作堆积的背压。
+- `Review` WIP=4。Review 满 4 个时，feeder 停止把 Inbox 卡提升到 Ready，也停止启动 Ready 卡；这是防止未审查工作堆积的背压。
 - `Verify` 监听 `on_pr_merged`，PR 合并后进入 `Merged`；`Merged` 进入即完成任务。依赖卡只在 `Merged` 后解除阻塞。
 - 评审与合并细则见 [`kandev-review-policy.md`](kandev-review-policy.md)。
 
@@ -49,7 +49,7 @@
 
 ## 4. 并行策略
 
-- `VPS Dev` 的 `Agent` 列 WIP=2，原生 `pull_from` 已关闭。
+- `VPS Dev` 的 `Agent` 列 WIP=4，原生 `pull_from` 已关闭。
 - `scripts/kandev-ready-feeder.py` 负责依赖感知的队列：只把无阻塞的 `lane:vps` 卡从 `Inbox` 提升到 `Ready`，并在 `Agent` 有空位时移入 `Agent`。
 - 原因：实测 Kandev 原生 `pull_from=Ready` 不会跳过 blocked 卡，曾把 `REL-02` 直接启动。`Ready` 的手动拖动已关闭，避免同样问题。
 - 并行只允许在文件范围不重叠的卡之间进行；一张卡一个 Worktree。

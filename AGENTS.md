@@ -51,8 +51,8 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 
 - `Inbox` / `Todo`：待人工准入，不会被 agent 自动领取。
 - `Ready`：依赖感知候选队列。`scripts/kandev-ready-feeder.py` 只把**无阻塞**的 VPS 卡从 `Inbox` 提升到 `Ready`，并在 `Agent` 有空位时移入。不要手动把 blocked 卡放进 `Ready`：Kandev 原生 `pull_from` 不会跳过 blocked 卡，会直接启动 agent。
-- `Agent`：进入即自动启动 agent；WIP=2，最多两个 agent 并行。并行任务必须使用 Worktree executor；共享 checkout 只能串行。一轮正常结束会自动进入 `Review`。
-- `Review`：AI review agent（复用实现 profile）先按分类决定审查方法；`(Docs)/(Audit)/(Build)` 在门槛通过时可自动 squash-merge，其余分类只给 `APPROVED/CHANGES REQUESTED` 结论，由人工合并。WIP=2；满 2 个时 feeder 停止推进新卡。详见 [`docs/engineering/kandev-review-policy.md`](docs/engineering/kandev-review-policy.md)。
+- `Agent`：进入即自动启动 agent；WIP=4，最多四个 agent 并行。并行任务必须使用 Worktree executor；共享 checkout 只能串行。一轮正常结束会自动进入 `Review`。
+- `Review`：AI review agent（复用实现 profile）先按分类决定审查方法；`(Docs)/(Audit)/(Build)` 在门槛通过时可自动 squash-merge，其余分类只给 `APPROVED/CHANGES REQUESTED` 结论，由人工合并。WIP=4；满 4 个时 feeder 停止推进新卡。详见 [`docs/engineering/kandev-review-policy.md`](docs/engineering/kandev-review-policy.md)。
 - `Verify`：在目标机器上按卡片验收层级重跑并贴原始输出；`on_pr_merged` 会把任务推进到 `Merged`。
 - `Merged`：PR 合并后的终态，进入即完成任务。依赖卡只在这里之后解除阻塞。
 

@@ -4,10 +4,10 @@
 
 ## 1. 容量与背压
 
-- `Agent` WIP=2，最多两个实现 agent 并行。
-- `Review` WIP=2，最多两个任务停留/审查。
-- Review 满 2 个时，`scripts/kandev-ready-feeder.py` 停止把 Inbox 卡提升到 Ready，也停止把 Ready 卡放入 Agent。只有 Review 空出名额后才继续。
-- Review agent 与实现 agent 共用 profile 的 2 个 session 名额，因此 Review 可能排队；这是预期行为。
+- `Agent` WIP=4，最多四个实现 agent 并行。
+- `Review` WIP=4，最多四个任务停留/审查。
+- Review 满 4 个时，`scripts/kandev-ready-feeder.py` 停止把 Inbox 卡提升到 Ready，也停止把 Ready 卡放入 Agent。只有 Review 空出名额后才继续。
+- Review agent 与实现 agent 共用 profile 的 4 个 session 名额，因此 Review 可能排队；这是预期行为。
 
 ## 2. 分类审查方法
 
