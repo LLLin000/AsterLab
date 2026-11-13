@@ -1,0 +1,491 @@
+[
+  {
+    "name": "valid-plate-schema1",
+    "kind": "plate",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n```asterlab\nkind: \"plate\"\nid: \"plate-1\"\nschema: 1\nformat: 96\ngroups: {\"group-1\":[\"A1\"]}\n```\n"
+  },
+  {
+    "name": "invalid-plate-schema1-missing-format",
+    "kind": "plate",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n```asterlab\nkind: \"plate\"\nid: \"plate-1\"\nschema: 1\ngroups: {\"group-1\":[\"A1\"]}\n```\n"
+  },
+  {
+    "name": "invalid-plate-schema1-wrong-type-format",
+    "kind": "plate",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n```asterlab\nkind: \"plate\"\nid: \"plate-1\"\nschema: 1\nformat: {\"unexpected\":\"object\"}\ngroups: {\"group-1\":[\"A1\"]}\n```\n"
+  },
+  {
+    "name": "invalid-plate-schema1-out-of-range-well",
+    "kind": "plate",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "rule_rejection",
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n```asterlab\nkind: \"plate\"\nid: \"plate-1\"\nschema: 1\nformat: 96\ngroups: {\"group-1\":[\"Z99\"]}\n```\n"
+  },
+  {
+    "name": "valid-reference-schema1",
+    "kind": "reference",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"reference\"\nid: \"reference-1\"\nschema: 1\nref: \"value\"\n```\n"
+  },
+  {
+    "name": "invalid-reference-schema1-missing-ref",
+    "kind": "reference",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"reference\"\nid: \"reference-1\"\nschema: 1\n```\n"
+  },
+  {
+    "name": "invalid-reference-schema1-wrong-type-ref",
+    "kind": "reference",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"reference\"\nid: \"reference-1\"\nschema: 1\nref: {\"unexpected\":\"object\"}\n```\n"
+  },
+  {
+    "name": "valid-experiment-schema1",
+    "kind": "experiment",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"experiment\"\nid: \"experiment-1\"\nschema: 1\ntitle: \"value\"\n```\n"
+  },
+  {
+    "name": "invalid-experiment-schema1-missing-title",
+    "kind": "experiment",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"experiment\"\nid: \"experiment-1\"\nschema: 1\n```\n"
+  },
+  {
+    "name": "invalid-experiment-schema1-wrong-type-title",
+    "kind": "experiment",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"experiment\"\nid: \"experiment-1\"\nschema: 1\ntitle: {\"unexpected\":\"object\"}\n```\n"
+  },
+  {
+    "name": "valid-group-schema1",
+    "kind": "group",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n"
+  },
+  {
+    "name": "invalid-group-schema1-missing-name",
+    "kind": "group",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\n```\n"
+  },
+  {
+    "name": "invalid-group-schema1-wrong-type-name",
+    "kind": "group",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: {\"unexpected\":\"object\"}\n```\n"
+  },
+  {
+    "name": "valid-assay-schema1",
+    "kind": "assay",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n"
+  },
+  {
+    "name": "invalid-assay-schema1-missing-title",
+    "kind": "assay",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\n```\n"
+  },
+  {
+    "name": "invalid-assay-schema1-wrong-type-title",
+    "kind": "assay",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: {\"unexpected\":\"object\"}\n```\n"
+  },
+  {
+    "name": "invalid-assay-schema1-missing-reference",
+    "kind": "assay",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_reference",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\ngroup_refs: [\"missing-group\"]\n```\n"
+  },
+  {
+    "name": "valid-step-schema1",
+    "kind": "step",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": true,
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-1\"\nschema: 1\ntitle: \"value\"\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema1-missing-title",
+    "kind": "step",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-1\"\nschema: 1\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema1-wrong-type-title",
+    "kind": "step",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-1\"\nschema: 1\ntitle: {\"unexpected\":\"object\"}\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema1-missing-reference",
+    "kind": "step",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_reference",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-1\"\nschema: 1\ntitle: \"value\"\nassay: \"missing-assay\"\n```\n"
+  },
+  {
+    "name": "valid-workflow-schema1",
+    "kind": "workflow",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-1\"\nschema: 3\ntitle: \"value\"\nexecution: \"organizational\"\n```\n```asterlab\nkind: \"workflow\"\nid: \"workflow-1\"\nschema: 1\nsteps: [\"step-1\"]\n```\n"
+  },
+  {
+    "name": "invalid-workflow-schema1-missing-steps",
+    "kind": "workflow",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-1\"\nschema: 3\ntitle: \"value\"\nexecution: \"organizational\"\n```\n```asterlab\nkind: \"workflow\"\nid: \"workflow-1\"\nschema: 1\n```\n"
+  },
+  {
+    "name": "invalid-workflow-schema1-wrong-type-steps",
+    "kind": "workflow",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-1\"\nschema: 3\ntitle: \"value\"\nexecution: \"organizational\"\n```\n```asterlab\nkind: \"workflow\"\nid: \"workflow-1\"\nschema: 1\nsteps: {\"unexpected\":\"object\"}\n```\n"
+  },
+  {
+    "name": "valid-dilution-schema1",
+    "kind": "dilution",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"dilution\"\nid: \"dilution-1\"\nschema: 1\nstock: {\"value\":10,\"unit\":\"mg/mL\"}\ntarget: {\"value\":2,\"unit\":\"mg/mL\"}\nfinal_volume: {\"value\":1,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-dilution-schema1-missing-stock",
+    "kind": "dilution",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"dilution\"\nid: \"dilution-1\"\nschema: 1\ntarget: {\"value\":2,\"unit\":\"mg/mL\"}\nfinal_volume: {\"value\":1,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-dilution-schema1-wrong-type-stock",
+    "kind": "dilution",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"dilution\"\nid: \"dilution-1\"\nschema: 1\nstock: {\"unexpected\":\"object\"}\ntarget: {\"value\":2,\"unit\":\"mg/mL\"}\nfinal_volume: {\"value\":1,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-dilution-schema1-invalid-unit",
+    "kind": "dilution",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "unit_or_quantity",
+    "source": "```asterlab\nkind: \"dilution\"\nid: \"dilution-1\"\nschema: 1\nstock: {\"value\":10,\"unit\":\"mg/mL\"}\ntarget: {\"value\":2,\"unit\":\"mL\"}\nfinal_volume: {\"value\":1,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "valid-rna_reagent_usage-schema1",
+    "kind": "rna_reagent_usage",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"rna_reagent_usage\"\nid: \"rna-reagent-usage-1\"\nschema: 1\nsample_count: 10\nvolume_per_sample: {\"value\":20,\"unit\":\"uL\"}\nstock_concentration: {\"value\":10,\"unit\":\"mg/mL\"}\ntarget_concentration: {\"value\":2,\"unit\":\"mg/mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-rna_reagent_usage-schema1-missing-sample_count",
+    "kind": "rna_reagent_usage",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"rna_reagent_usage\"\nid: \"rna-reagent-usage-1\"\nschema: 1\nvolume_per_sample: {\"value\":20,\"unit\":\"uL\"}\nstock_concentration: {\"value\":10,\"unit\":\"mg/mL\"}\ntarget_concentration: {\"value\":2,\"unit\":\"mg/mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-rna_reagent_usage-schema1-wrong-type-sample_count",
+    "kind": "rna_reagent_usage",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"rna_reagent_usage\"\nid: \"rna-reagent-usage-1\"\nschema: 1\nsample_count: {\"unexpected\":\"object\"}\nvolume_per_sample: {\"value\":20,\"unit\":\"uL\"}\nstock_concentration: {\"value\":10,\"unit\":\"mg/mL\"}\ntarget_concentration: {\"value\":2,\"unit\":\"mg/mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-rna_reagent_usage-schema1-invalid-unit",
+    "kind": "rna_reagent_usage",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "unit_or_quantity",
+    "source": "```asterlab\nkind: \"rna_reagent_usage\"\nid: \"rna-reagent-usage-1\"\nschema: 1\nsample_count: 10\nvolume_per_sample: {\"value\":20,\"unit\":\"uL\"}\nstock_concentration: {\"value\":10,\"unit\":\"mg/mL\"}\ntarget_concentration: {\"value\":2,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "valid-instrument_profile-schema1",
+    "kind": "instrument_profile",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"instrument_profile\"\nid: \"instrument-profile-1\"\nschema: 1\nclass: \"value\"\ncapabilities: [{\"name\":\"speed\"}]\nsource: \"built_in\"\n```\n"
+  },
+  {
+    "name": "invalid-instrument_profile-schema1-missing-class",
+    "kind": "instrument_profile",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"instrument_profile\"\nid: \"instrument-profile-1\"\nschema: 1\ncapabilities: [{\"name\":\"speed\"}]\nsource: \"built_in\"\n```\n"
+  },
+  {
+    "name": "invalid-instrument_profile-schema1-wrong-type-class",
+    "kind": "instrument_profile",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"instrument_profile\"\nid: \"instrument-profile-1\"\nschema: 1\nclass: {\"unexpected\":\"object\"}\ncapabilities: [{\"name\":\"speed\"}]\nsource: \"built_in\"\n```\n"
+  },
+  {
+    "name": "valid-step-schema2",
+    "kind": "step",
+    "schema": 2,
+    "expected": true,
+    "expected_error": null,
+    "historical": true,
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-2\"\nschema: 2\ntitle: \"value\"\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema2-missing-title",
+    "kind": "step",
+    "schema": 2,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-2\"\nschema: 2\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema2-wrong-type-title",
+    "kind": "step",
+    "schema": 2,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-2\"\nschema: 2\ntitle: {\"unexpected\":\"object\"}\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema2-missing-reference",
+    "kind": "step",
+    "schema": 2,
+    "expected": false,
+    "expected_error": "invalid_reference",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-2\"\nschema: 2\ntitle: \"value\"\nassay: \"missing-assay\"\n```\n"
+  },
+  {
+    "name": "valid-step-schema3",
+    "kind": "step",
+    "schema": 3,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-3\"\nschema: 3\ntitle: \"value\"\nexecution: \"executable\"\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema3-missing-title",
+    "kind": "step",
+    "schema": 3,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-3\"\nschema: 3\nexecution: \"executable\"\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema3-wrong-type-title",
+    "kind": "step",
+    "schema": 3,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-3\"\nschema: 3\ntitle: {\"unexpected\":\"object\"}\nexecution: \"executable\"\nassay: \"assay-1\"\n```\n"
+  },
+  {
+    "name": "invalid-step-schema3-missing-reference",
+    "kind": "step",
+    "schema": 3,
+    "expected": false,
+    "expected_error": "invalid_reference",
+    "source": "```asterlab\nkind: \"assay\"\nid: \"assay-1\"\nschema: 1\ntitle: \"value\"\n```\n```asterlab\nkind: \"step\"\nid: \"step-3\"\nschema: 3\ntitle: \"value\"\nexecution: \"executable\"\nassay: \"missing-assay\"\n```\n"
+  },
+  {
+    "name": "valid-material-schema1",
+    "kind": "material",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"material\"\nid: \"material-1\"\nschema: 1\nname: \"value\"\nrole: \"control\"\nsource: \"built_in\"\n```\n"
+  },
+  {
+    "name": "invalid-material-schema1-missing-name",
+    "kind": "material",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"material\"\nid: \"material-1\"\nschema: 1\nrole: \"control\"\nsource: \"built_in\"\n```\n"
+  },
+  {
+    "name": "invalid-material-schema1-wrong-type-name",
+    "kind": "material",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"material\"\nid: \"material-1\"\nschema: 1\nname: {\"unexpected\":\"object\"}\nrole: \"control\"\nsource: \"built_in\"\n```\n"
+  },
+  {
+    "name": "valid-sample-schema1",
+    "kind": "sample",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n```asterlab\nkind: \"sample\"\nid: \"sample-1\"\nschema: 1\nsample_id: \"value\"\ngroup_ref: \"group-1\"\namount: {\"value\":1,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-sample-schema1-missing-sample_id",
+    "kind": "sample",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n```asterlab\nkind: \"sample\"\nid: \"sample-1\"\nschema: 1\ngroup_ref: \"group-1\"\namount: {\"value\":1,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-sample-schema1-wrong-type-sample_id",
+    "kind": "sample",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n```asterlab\nkind: \"sample\"\nid: \"sample-1\"\nschema: 1\nsample_id: {\"unexpected\":\"object\"}\ngroup_ref: \"group-1\"\namount: {\"value\":1,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "invalid-sample-schema1-missing-reference",
+    "kind": "sample",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_reference",
+    "source": "```asterlab\nkind: \"group\"\nid: \"group-1\"\nschema: 1\nname: \"value\"\n```\n```asterlab\nkind: \"sample\"\nid: \"sample-1\"\nschema: 1\nsample_id: \"value\"\ngroup_ref: \"missing-group\"\namount: {\"value\":1,\"unit\":\"mL\"}\n```\n"
+  },
+  {
+    "name": "valid-container-schema1",
+    "kind": "container",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"container\"\nid: \"container-1\"\nschema: 1\nformat: \"96-well\"\nwells: 1\n```\n"
+  },
+  {
+    "name": "invalid-container-schema1-missing-format",
+    "kind": "container",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"container\"\nid: \"container-1\"\nschema: 1\nwells: 1\n```\n"
+  },
+  {
+    "name": "invalid-container-schema1-wrong-type-format",
+    "kind": "container",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"container\"\nid: \"container-1\"\nschema: 1\nformat: {\"unexpected\":\"object\"}\nwells: 1\n```\n"
+  },
+  {
+    "name": "valid-measurement_profile-schema1",
+    "kind": "measurement_profile",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"measurement_profile\"\nid: \"measurement-profile-1\"\nschema: 1\nendpoint: \"value\"\nunit: \"value\"\n```\n"
+  },
+  {
+    "name": "invalid-measurement_profile-schema1-missing-endpoint",
+    "kind": "measurement_profile",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"measurement_profile\"\nid: \"measurement-profile-1\"\nschema: 1\nunit: \"value\"\n```\n"
+  },
+  {
+    "name": "invalid-measurement_profile-schema1-wrong-type-endpoint",
+    "kind": "measurement_profile",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"measurement_profile\"\nid: \"measurement-profile-1\"\nschema: 1\nendpoint: {\"unexpected\":\"object\"}\nunit: \"value\"\n```\n"
+  },
+  {
+    "name": "valid-readout-schema1",
+    "kind": "readout",
+    "schema": 1,
+    "expected": true,
+    "expected_error": null,
+    "historical": false,
+    "source": "```asterlab\nkind: \"readout\"\nid: \"readout-1\"\nschema: 1\nschema_id: \"value\"\nendpoint: \"value\"\nvalue_kind: \"numeric\"\n```\n"
+  },
+  {
+    "name": "invalid-readout-schema1-missing-schema_id",
+    "kind": "readout",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "missing_field",
+    "source": "```asterlab\nkind: \"readout\"\nid: \"readout-1\"\nschema: 1\nendpoint: \"value\"\nvalue_kind: \"numeric\"\n```\n"
+  },
+  {
+    "name": "invalid-readout-schema1-wrong-type-schema_id",
+    "kind": "readout",
+    "schema": 1,
+    "expected": false,
+    "expected_error": "invalid_type",
+    "source": "```asterlab\nkind: \"readout\"\nid: \"readout-1\"\nschema: 1\nschema_id: {\"unexpected\":\"object\"}\nendpoint: \"value\"\nvalue_kind: \"numeric\"\n```\n"
+  }
+]
