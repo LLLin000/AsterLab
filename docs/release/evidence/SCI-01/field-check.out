@@ -1,0 +1,25 @@
+field table header + rows: 64
+field table violations: 0
+objects covered: Assay,Block,Experiment,Group,Notebook,Protocol,Readout,Run,Sample,Step,Timepoint
+design.map coverage: raw-only fields point at design.get
+sections: data-flow / conflicts / stale-facts / open-questions present
+authority mentions: 24
+manifest modules: 16
+manifest permissions: ['document.edit']
+manifest renderer surfaces: ['design', 'document', 'run']
+manifest facts: OK
+--- stale-fact greps
+3:> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，15 个已注册模块）。本文只描述已实现的事实，不描述未实现能力。
+145:- Go 注册：`BuiltinRegistry()` 注册 15 个 `kind@schema`；`Register` 验证所声明的 renderer key 有已注册 callback。
+109:Current permissions: `document.edit`, `run.readout`, `notebook.append`. The renderer's `Mode` and `ReadOnly` flags are presentation context, never authorization.
+21:| 9 | Renderers | `renderers.design`, `.document`, `.static` | Which surfaces can show it? |
+195:The template shape is defined in the Foundation schema, but template instantiation is **not implemented** in this phase. Do not expose a template command as available.
+4:- 状态：P0 契约冻结；不是已实现代码。
+98:    pub ordered_steps: Vec<OperationStep>,
+102:    pub parameters_ready: bool, // 仅表示必填参数绑定完成
+103:    pub ready: bool,            // 兼容别名；等同于 parameters_ready，v1 保留
+107:- `ready` 不再暗示科学有效或可执行；新代码使用 `parameters_ready`。
+529:    let occurrences = Vec::new();
+24:| rna_reagent_usage@1 | measurement | quantity, deterministic-calculation, derived-output | (none) | generic.editor / rna_reagent_usage.viewer / generic.run / — | rna-reagent-fields |
+117:### rna_reagent_usage@1
+field-check: PASS

@@ -1,0 +1,18 @@
+$ test -f docs/sdk/science-field-ownership.md && grep -c "^| " docs/sdk/science-field-ownership.md
+108
+exit=0
+
+$ grep -c "权威" docs/sdk/science-field-ownership.md
+23
+exit=0
+
+$ bash docs/release/evidence/SCI-01/field-check.sh
+field-check: PASS
+exit=0
+
+$ git status --short
+ M docs/release/evidence/SCI-01/acceptance.out
+ M docs/sdk/science-field-ownership.md
+
+$ git status --short
+ M docs/sdk/science-field-ownership.md
