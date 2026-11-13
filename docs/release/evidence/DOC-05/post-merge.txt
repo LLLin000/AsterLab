@@ -1,0 +1,30 @@
+DOC-05 post-merge verification — raw output
+Worktree HEAD after merging PR #23: aec20ea (== main)
+
+$ git rev-parse HEAD
+aec20eab05a7c61ffcb12788da59d430172851be
+
+$ gh pr view 23 --json state,mergeCommit,mergedAt,headRefOid
+{"head":"868dab4a7a8fdab381bd8915bc42ddc90b7efa67","merge":"aec20eab05a7c61ffcb12788da59d430172851be","mergedAt":"2026-11-13T10:54:25Z","state":"MERGED"}
+
+$ gh pr checks 23
+linux-tests	pass	4m35s	https://github.com/LLLin000/AsterLab/actions/runs/43411896344/job/131840099948	
+scope-check	pass	12s	https://github.com/LLLin000/AsterLab/actions/runs/43411896612/job/131840100496	
+windows-build	pass	5m56s	https://github.com/LLLin000/AsterLab/actions/runs/43411896325/job/131840099736	
+
+$ python3 -c "import json;d=json.load(open('prototypes/mygo-run/internal/asterdoc/spec/modules.json'));print(len(d['modules']))"
+16
+[exit=0]
+
+$ grep -c '^| ' docs/sdk/module-catalog-v1.md
+41
+[exit=0]
+
+$ grep -n '尚未实现' docs/sdk/compatibility-and-gaps.md docs/contracts/agent-edit-v1.md
+docs/sdk/compatibility-and-gaps.md:108:一条 `asterdoc.command` 是一个原子版本提交；跨多条命令的 `asterdoc.batch` 尚未实现（依据：`src/cli.rs` 的工具分发没有 `asterdoc.batch` 入口，DOC-05 以 `grep -rn 'asterdoc.batch' src/cli.rs` 无输出核对）。复杂设计应按依赖顺序逐条提交，每条提交后使用返回的新 revision。
+[exit=0]
+
+$ python3 docs/release/evidence/DOC-05/compare_manifest.py
+manifest entries: 16 | table rows: 17 | extra rows: ['kind@schema']
+mismatches: 0
+[exit=0]
