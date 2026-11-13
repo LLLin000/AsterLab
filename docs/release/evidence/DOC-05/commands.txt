@@ -1,0 +1,41 @@
+DOC-05 acceptance commands — raw output
+Base: 6ca46c5e60b54000cb6900b7bdde1d4016b7a39d (origin/main)
+
+$ python3 -c "import json;d=json.load(open('prototypes/mygo-run/internal/asterdoc/spec/modules.json'));print(len(d['modules']))"
+16
+[exit=0]
+
+$ python3 -c "import json;m=json.load(open('prototypes/mygo-run/internal/asterdoc/spec/modules.json'))['modules'];print('kind@schema',len(m),'kinds',len({x['kind'] for x in m}))"
+kind@schema 16 kinds 14
+[exit=0]
+
+$ grep -c '^| ' docs/sdk/module-catalog-v1.md
+41
+[exit=0]
+
+$ grep -n '尚未实现' docs/sdk/compatibility-and-gaps.md docs/contracts/agent-edit-v1.md
+docs/sdk/compatibility-and-gaps.md:108:一条 `asterdoc.command` 是一个原子版本提交；跨多条命令的 `asterdoc.batch` 尚未实现（依据：`src/cli.rs` 的工具分发没有 `asterdoc.batch` 入口，DOC-05 以 `grep -rn 'asterdoc.batch' src/cli.rs` 无输出核对）。复杂设计应按依赖顺序逐条提交，每条提交后使用返回的新 revision。
+[exit=0]
+
+$ grep -rn 'asterdoc.batch' src/cli.rs
+[exit=1]
+
+$ grep -n "agent_edit" AGENT_API.md
+[exit=1]
+
+$ grep -rn "agent_edit" docs/README.md docs/contracts/core-v1.md
+[exit=1]
+
+$ grep -n "required_at\|IssueSeverity::" crates/asterlab-core/src/agent_edit_validate.rs
+808:        .any(|issue| issue.severity == IssueSeverity::Blocking);
+893:        severity: IssueSeverity::Blocking,
+[exit=0]
+
+$ python3 docs/release/evidence/DOC-05/compare_manifest.py
+manifest entries: 16 | table rows: 17 | extra rows: ['kind@schema']
+mismatches: 0
+[exit=0]
+
+Table rows = 16 module rows + 1 header (`kind@schema`). The comparison strips the intentional
+"(Workspace canvas)" annotation from `workflow@1`'s renderer cell; category, capabilities,
+permissions, renderers and rules then match for all 16 manifest entries.

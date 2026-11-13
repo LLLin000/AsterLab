@@ -1,8 +1,8 @@
 # Agent Edit v1（AG-01）
 
 - 日期：2026-11-13
-- 状态：**契约冻结候选**。类型已在 `crates/asterlab-core` 编译并有 wire 测试；`agent_edit.validate` / `agent_edit.commit` 命令**未实现**，由 AG-02 / AG-04 落地。
-- 代码：[`crates/asterlab-core/src/agent_edit.rs`](../../crates/asterlab-core/src/agent_edit.rs)
+- 状态：**已实现（validate / commit）**。类型在 `crates/asterlab-core` 编译并有 wire 测试；`agent_edit.validate` 由 AG-02 实现（PR #10，merge `8363d1c`），`agent_edit.commit` 由 AG-03 实现（PR #17，merge `2423959`）。仍未落地的部分见 §11。
+- 代码：[`crates/asterlab-core/src/agent_edit.rs`](../../crates/asterlab-core/src/agent_edit.rs)、[`agent_edit_validate.rs`](../../crates/asterlab-core/src/agent_edit_validate.rs)、[`agent_edit_commit.rs`](../../crates/asterlab-core/src/agent_edit_commit.rs)
 - 权威关系：领域术语与对象边界见 [`CONTEXT.md`](../../CONTEXT.md)；已实现 CLI/HTTP 字段与通用错误信封见 [`AGENT_API.md`](../../AGENT_API.md)；Core 查询/命令边界见 [`core-v1.md`](core-v1.md)；语义变更集见 [`semantic-component-contract.md`](semantic-component-contract.md) §4。
 - 索引登记：`docs/README.md` 与 `docs/contracts/core-v1.md` 不在 AG-01 的 write 范围，本文件暂由任务卡与 PR 引用；索引补齐留给文档卡。
 
@@ -21,7 +21,7 @@ propose（Agent 组稿） → validate（Core 只读校验） → confirm（人�
 - 不实现 `object-list` 行编辑、不编辑 `renderers.static`、不编辑 Run 事实。
 - 不做跨对象原子提交（一份 proposal 只对一个 target 产生一个版本）。
 - 不做电子签名。`confirmed_by` 只是记录标签（Beta 范围见 [`beta-scope.md`](../release/beta-scope.md) §3.3）。
-- 本文件不定义任何行为实现；AG-01 只交付契约与类型。
+- AG-01 只定义契约与类型；`validate` / `commit` 行为分别在 AG-02（PR #10）与 AG-03（PR #17）落地，实现文件见页首。
 
 ## 1. 四段流程
 
@@ -168,7 +168,7 @@ pub struct AgentEditError {
 | 无 blocking issue，且 `requires_confirmation = true` | `needs_confirmation` |
 | 无 blocking issue，且 `requires_confirmation = false` | `valid` |
 
-v1 的 validate 只产生 `blocking` issue；`needs_confirmation` / `advisory` 是 `CONTEXT.md` 三级检查项的完整词汇，留给 AG-02 的上下文校验使用，当前没有代码产生它们。
+v1 的 validate 只产生 `blocking` issue；`needs_confirmation` / `advisory` 是 `CONTEXT.md` 三级检查项的完整词汇。AG-02（PR #10）与 AG-03（PR #17）合入后仍没有代码产生这两级 issue（`agent_edit_validate.rs` 的 `issue()` 固定 `IssueSeverity::Blocking`），留给后续上下文校验卡。
 
 ## 3. 字段级 diff
 
@@ -260,7 +260,7 @@ v1 的 validate 只产生 `blocking` issue；`needs_confirmation` / `advisory` �
 
 - `issues[]` 只承载 validate 阶段的五个内容码（前五行）；`CONFIRMATION_*` / `IDEMPOTENCY_MISMATCH` 只出现在 `agent_edit.commit` 的错误信封里。
 - 退出码沿用 `AGENT_API.md` 固定集合：`0` 成功、`2` 输入/用法、`3` 目标不存在、`4` 版本冲突、`5` 内部错误。
-- 错误信封沿用 `AGENT_API.md` 的 `{"ok":false,"tool":"…","error":{"code","message"}}`；`path` / `current_version` / `current_version_id` / `issues` 是本契约新增的**可选**字段，AG-04 落地时在 `AGENT_API.md` 登记。旧的 `code`/`message` 不得删除。
+- 错误信封沿用 `AGENT_API.md` 的 `{"ok":false,"tool":"…","error":{"code","message"}}`；`path` / `current_version` / `current_version_id` / `issues` 是本契约新增的**可选**字段，仍需由 AG-04 在 `AGENT_API.md` 登记。截至 DOC-05 核对，`AGENT_API.md` 尚无 `agent_edit` 条目（`grep -n 'agent_edit' AGENT_API.md` 无输出），因此该登记仍是缺口。旧的 `code`/`message` 不得删除。
 - 不得用 `message` 文案判断结果；以 `code` 为准。
 
 ## 6. 版本、并发、幂等、回滚
@@ -593,7 +593,7 @@ ConfirmRequest {
 
 ## 10. 契约测试
 
-`crates/asterlab-core/src/agent_edit.rs` 的 `#[cfg(test)] mod tests` 只做 wire 形状验证，不实现行为。本文件的 ```json 代码块**直接**由 `include_str!` 读入测试，示例与契约不会各写一份。
+`crates/asterlab-core/src/agent_edit.rs` 的 `#[cfg(test)] mod tests` 只做 wire 形状验证。本文件的 ```json 代码块**直接**由 `include_str!` 读入测试，示例与契约不会各写一份。行为测试在 `crates/asterlab-core/src/agent_edit_validate.rs`、`agent_edit_commit.rs` 与 `src/cli.rs`（如 `agent_edit_commit_appends_a_version_and_keeps_the_frozen_run`）；`validate` / `commit` 的实现与测试随 AG-02（PR #10）、AG-03（PR #17）合入。
 
 | 测试 | 证明 |
 |---|---|
@@ -606,10 +606,10 @@ ConfirmRequest {
 | `rejected_examples_are_wire_valid_proposals` | §8.5 五份 payload 均为合法 `Proposal` 形状（拒绝发生在 validate，不是 serde） |
 | `unknown_fields_are_rejected` | 封闭 schema：`Proposal` 不接受额外字段（如自带的 `requires_confirmation`） |
 
-## 11. 未决项（不阻塞 AG-01）
+## 11. 未决项（不阻塞已实现的 validate / commit）
 
-1. 上下文校验（来源等级、`required_at` 生命周期、跨 Assay 冲突）由 AG-02 实现；v1 只校验 §4 的表格。
-2. `needs_confirmation` / `advisory` 的产出规则留给 AG-02，本契约不预设策略。
-3. 写入后新版本的 provenance 持久化字段（`records.data_json` 中的具体 key）由 AG-04 决定，本契约只要求可回读 `proposal_id` / `proposal_digest` / `confirmed_by` / `committed_at`。
+1. 上下文校验（来源等级、`required_at` 生命周期、跨 Assay 冲突）**仍未实现**。AG-02（PR #10）实现的是 §4 表格校验；上述三项不在其合入代码中。
+2. `needs_confirmation` / `advisory` 的产出规则**仍未实现**：AG-02/AG-03 之后 validate 仍只产生 `blocking` issue，`requires_confirmation` 固定为 `true`（`agent_edit_validate.rs` 的 `finish`）。
+3. **已实现（AG-03，PR #17）**：新版本把 `proposal_id` / `proposal_digest` / `confirmed_by` / `idempotency_key` / `committed_at` / `new_revision` 写入 `records.data_json.agent_edit`；`crates/asterlab-core/src/agent_edit_commit.rs` 的 `next["agent_edit"]` 断言与 `src/cli.rs` 的 `agent_edit_commit_appends_a_version_and_keeps_the_frozen_run` 覆盖该形状。
 4. `design` / `run` 目标的字段级编辑不在 v1；需要时另开契约版本（`schema_version` 提升）。
-5. 索引登记：`docs/README.md`、`docs/contracts/core-v1.md` §4 的指向由后续文档卡补齐。
+5. 索引登记**仍未实现**：`docs/README.md`、`docs/contracts/core-v1.md` §4 均无 `agent_edit` 指向（`grep -rn 'agent_edit' docs/README.md docs/contracts/core-v1.md` 无输出），留给后续文档卡。

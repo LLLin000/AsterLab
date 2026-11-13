@@ -1,8 +1,10 @@
 # AsterDoc SDK 模块目录 v1
 
-> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，15 个已注册模块）。本文只描述已实现的事实，不描述未实现能力。
+> 权威来源：`prototypes/mygo-run/internal/asterdoc/spec/modules.json`（foundationVersion 1，sdkVersion 1.0.0，16 个 `kind@schema`，对应 14 个 `kind`；`step` 的 schema 1/2/3 是同一 kind 的三个版本）。本文只描述已实现的事实，不描述未实现能力。
 
 ## 1. 已注册模块总表
+
+下表按 `kind@schema` 列出 16 条；`step@1`、`step@2`、`step@3` 不是三个 kind，而是 `step` 的三个 schema 版本（14 个 kind、16 个 `kind@schema`：其余 13 个 kind 各 1 个 schema，`step` 有 3 个）。计数与 `spec/modules.json` 的 `modules[]` 长度一致（`python3 -c "...print(len(...))"` → 16）。
 
 | kind@schema | category | capabilities | permissions | Design / Document / Run / Static | rules |
 |---|---|---|---|---|---|
@@ -142,7 +144,7 @@
 - `record_boundary` 固定为 `run`；document 模块不得写 Run 事实。
 - 量纲/UCUM：`prototypes/mygo-run/internal/asterdoc/spec/units.json` 仅 36 个符号、9 个维度（mass_concentration、mass、amount_concentration、length、time、volume、amount、dimensionless、temperature）；`units.go` 注释明确是"命名 UCUM 子集"，转换显式且不重写原值。
 - 引用：`reference.ref` 是非类型化的 `string`（`reference@1` 的 `ref` 字段为 `string`，仅 `target` 在引用端口声明）；typed reference 通过 `inputs[].type=reference + target` 实现，`ref` 本身不带类型。
-- Go 注册：`BuiltinRegistry()` 注册 15 个 `kind@schema`；`Register` 验证所声明的 renderer key 有已注册 callback。
+- Go 注册：`BuiltinRegistry()` 注册 16 个 `kind@schema`（14 个 kind）；`Register` 验证所声明的 renderer key 有已注册 callback。
 - Rust 镜像：`src/cli.rs` 嵌入同一 `modules.json` 并校验；`asterdoc_module_spec(kind, schema)` 查找。
 
 ## 4. 新增模块：精确文件清单
