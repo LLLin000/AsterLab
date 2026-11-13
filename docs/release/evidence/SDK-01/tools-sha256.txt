@@ -1,0 +1,4 @@
+6f833f441ab978032ff6b363557809237001fd54dbef1c5c4281bec51655240a  scripts/sdk/check.py
+6f429571db437397a8a5676a0bb979d2ef733eeeb9bc7938aae6e19b7dbc53f9  scripts/sdk/manifest_spec.py
+ac9189c24307a3f1cbfbefdce3325e58deb144e68299a9f69b07851e37b81dbf  scripts/sdk/scaffold.py
+11ae49d610924289debc994ddd253d4c086bdba19e6967c92f9f406060d98340  scripts/sdk/test_sdk_tools.py

@@ -1,0 +1,40 @@
+$ python3 --version
+Python 3.12.3
+$ python3 -m py_compile scripts/sdk/*.py
+exit=0
+$ python3 scripts/sdk/scaffold.py --kind probe_tmp --schema 1 --out "$OUT"
+scaffold probe_tmp@1: 6 files under /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1
+created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/README.md
+created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/manifest.json
+created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/module.go
+created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/module.rs
+created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/module_test.go
+created /srv/build/gotmp/tmp.uloDlQ55vW/probe_tmp@1/registration.go
+exit=0
+$ gofmt -l "$OUT/probe_tmp@1"
+(no output above: the generated Go files are gofmt-clean)
+$ go version
+go version go1.27.3 linux/amd64
+$ python3 scripts/sdk/test_sdk_tools.py -v
+test_catalog_count_mismatch_fails (__main__.CheckTest.test_catalog_count_mismatch_fails) ... ok
+test_duplicate_manifest_key_fails (__main__.CheckTest.test_duplicate_manifest_key_fails) ... ok
+test_duplicate_registration_fails (__main__.CheckTest.test_duplicate_registration_fails) ... ok
+test_json_report_carries_module_count (__main__.CheckTest.test_json_report_carries_module_count) ... ok
+test_rust_mirror_drift_fails (__main__.CheckTest.test_rust_mirror_drift_fails) ... ok
+test_schema_gap_fails (__main__.CheckTest.test_schema_gap_fails) ... ok
+test_undeclared_action_permission_fails (__main__.CheckTest.test_undeclared_action_permission_fails) ... ok
+test_unregistered_rule_fails (__main__.CheckTest.test_unregistered_rule_fails) ... ok
+test_valid_fixture_passes (__main__.CheckTest.test_valid_fixture_passes) ... ok
+test_dry_run_lists_files_and_writes_nothing (__main__.ScaffoldTest.test_dry_run_lists_files_and_writes_nothing) ... ok
+test_force_overwrites (__main__.ScaffoldTest.test_force_overwrites) ... ok
+test_generated_skeleton_satisfies_check (__main__.ScaffoldTest.test_generated_skeleton_satisfies_check) ... ok
+test_refuses_duplicate (__main__.ScaffoldTest.test_refuses_duplicate) ... ok
+test_refuses_schema_gap (__main__.ScaffoldTest.test_refuses_schema_gap) ... ok
+test_refuses_unknown_category (__main__.ScaffoldTest.test_refuses_unknown_category) ... ok
+test_refuses_unregistered_rule (__main__.ScaffoldTest.test_refuses_unregistered_rule) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.076s
+
+OK
+exit=0

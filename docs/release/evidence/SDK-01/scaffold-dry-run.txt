@@ -1,0 +1,8 @@
+scaffold probe_tmp@1: 6 files under prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/README.md
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/manifest.json
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module.go
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module.rs
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/module_test.go
+would create prototypes/mygo-run/internal/asterdoc/_scaffold/probe_tmp@1/registration.go
+dry run: no file written

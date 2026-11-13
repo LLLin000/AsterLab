@@ -1,0 +1,52 @@
+{
+  "ok": true,
+  "root": "/var/lib/kandev/tasks/sdk-01-build-scaffol_hk53zkng/LLLin000-AsterLab",
+  "manifest": "prototypes/mygo-run/internal/asterdoc/spec/modules.json",
+  "sdkVersion": "1.0.0",
+  "modules": 16,
+  "kinds": 14,
+  "checks": [
+    {
+      "id": "manifest",
+      "ok": true,
+      "detail": "16 modules declared",
+      "problems": []
+    },
+    {
+      "id": "registration",
+      "ok": true,
+      "detail": "16 Go registrations match the manifest",
+      "problems": []
+    },
+    {
+      "id": "schema",
+      "ok": true,
+      "detail": "every kind numbers its schemas 1..N without gaps",
+      "problems": []
+    },
+    {
+      "id": "permissions",
+      "ok": true,
+      "detail": "declared permissions are backed by 3 `Perm*` constants",
+      "problems": []
+    },
+    {
+      "id": "catalog",
+      "ok": true,
+      "detail": "catalog rows and counts match 16 manifest keys / 14 kinds",
+      "problems": []
+    },
+    {
+      "id": "parity",
+      "ok": true,
+      "detail": "Go/Rust agree on 16 rules, 21 port types, 6 categories and 16 dispatch arms",
+      "problems": []
+    },
+    {
+      "id": "scaffold",
+      "ok": true,
+      "detail": "0 scaffold directories consistent",
+      "problems": []
+    }
+  ]
+}
