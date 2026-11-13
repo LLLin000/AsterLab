@@ -921,6 +921,91 @@ mod tests {
     }
 
     #[test]
+    fn all_six_operations_roundtrip_through_json() {
+        let specimens = [
+            OperationSpec::v1(Operation::Transfer(TransferSpec {
+                volume: Some(Quantity {
+                    value: 100.0,
+                    unit: Unit::Microliter,
+                }),
+                source: ContainerRef {
+                    container_id: "tube-1".into(),
+                },
+                destination: ContainerRef {
+                    container_id: "plate-1".into(),
+                },
+            })),
+            OperationSpec::v1(Operation::Centrifuge(CentrifugeSpec {
+                drive: Some(CentrifugeDrive::Speed(SpeedDrive {
+                    speed: Quantity {
+                        value: 12000.0,
+                        unit: Unit::Rpm,
+                    },
+                })),
+                duration: Some(Quantity {
+                    value: 2.0,
+                    unit: Unit::Minute,
+                }),
+            })),
+            OperationSpec::v1(Operation::Incubate(IncubateSpec {
+                temperature: Some(Quantity {
+                    value: 37.0,
+                    unit: Unit::Celsius,
+                }),
+                duration: Some(Quantity {
+                    value: 24.0,
+                    unit: Unit::Hour,
+                }),
+            })),
+            OperationSpec::v1(Operation::Wash(WashSpec {
+                cycles: Some(3),
+                volume: Some(Quantity {
+                    value: 200.0,
+                    unit: Unit::Microliter,
+                }),
+            })),
+            OperationSpec::v1(Operation::Aliquot(AliquotSpec {
+                parts: Some(4),
+                per_part_volume: Some(Quantity {
+                    value: 50.0,
+                    unit: Unit::Microliter,
+                }),
+            })),
+            OperationSpec::v1(Operation::Measure(MeasureSpec {
+                endpoint_id: "endpoint-cck8-od450".into(),
+                unit: Some(Unit::AbsorbanceUnit),
+            })),
+        ];
+        assert_eq!(specimens.len(), 6);
+        for spec in specimens {
+            assert!(spec.validate().is_ok(), "{spec:?}");
+            let json = serde_json::to_value(&spec).expect("spec serializes");
+            let back: OperationSpec = serde_json::from_value(json).expect("spec parses");
+            assert_eq!(back, spec);
+        }
+    }
+
+    #[test]
+    fn non_finite_values_are_out_of_range() {
+        for value in [f64::NAN, f64::INFINITY] {
+            let spec = OperationSpec::v1(Operation::Incubate(IncubateSpec {
+                temperature: Some(Quantity {
+                    value,
+                    unit: Unit::Celsius,
+                }),
+                duration: Some(Quantity {
+                    value: 1.0,
+                    unit: Unit::Hour,
+                }),
+            }));
+            let issues = spec.validate().unwrap_err();
+            assert_eq!(issues[0].code, SpecErrorCode::ValueOutOfRange);
+            assert_eq!(issues[0].path, "operation.temperature");
+            assert_eq!(issues[0].message, "value must be a finite number");
+        }
+    }
+
+    #[test]
     fn dry_run_example_matches_validation_output() {
         let doc = include_str!("../../../docs/contracts/operation-spec-v1.md");
         let dry_run = section(doc, "## 9.", "## 10.");
