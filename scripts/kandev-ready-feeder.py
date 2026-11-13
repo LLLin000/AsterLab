@@ -213,6 +213,153 @@ def scan_no_pr(review_tasks):
         move(task, AGENT, "no PR in Review -> back to Agent")
 
 
+def _agent_procs():
+    """Live omp ACP processes: pid -> (cwd, start_epoch)."""
+    try:
+        btime = None
+        for line in open("/proc/stat"):
+            if line.startswith("btime "):
+                btime = int(line.split()[1])
+                break
+        hz = os.sysconf("SC_CLK_TCK")
+    except Exception:  # noqa: BLE001
+        return {}
+    procs = {}
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode(errors="replace")
+            if "omp" not in cmd or "acp" not in cmd:
+                continue
+            fields = open(f"/proc/{pid}/stat").read().rsplit(") ", 1)[1].split()
+            started = btime + int(fields[19]) / hz
+            procs[int(pid)] = (os.readlink(f"/proc/{pid}/cwd"), started)
+        except Exception:  # noqa: BLE001
+            continue
+    return procs
+
+
+def _kill_proc(pid):
+    import signal
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return
+    for _ in range(10):
+        time.sleep(0.5)
+        if not os.path.exists(f"/proc/{pid}"):
+            return
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def scan_session_reaper(detailed):
+    """Reconcile task_sessions with reality.
+
+    Kandev leaves sessions in RUNNING/WAITING_FOR_INPUT after a card is
+    merged, and its executors_running pid is not the omp pid, so teardown
+    misses processes. Match omp processes by worktree path and start time;
+    close sessions whose task has left Agent/Review and kill their process.
+    """
+    procs = _agent_procs()
+    if not procs:
+        return
+    step_of = {t["id"]: t.get("workflow_step_id") for t in detailed}
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        all_rows = [
+            dict(r)
+            for r in con.execute(
+                """select id,task_id,state,started_at,workspace_path from task_sessions"""
+            )
+            if r["task_id"] in step_of
+        ]
+        con.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"session scan failed: {exc}", file=sys.stderr)
+        return
+    rows = [s for s in all_rows if s["state"] in ("RUNNING", "WAITING_FOR_INPUT")]
+
+    def epoch(s):
+        from datetime import datetime, timezone
+
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+        except Exception:  # noqa: BLE001
+            return 0
+
+    # Match each process to the session that launched it (same worktree,
+    # closest start within a 15 min window).
+    matched = {}
+    for pid, (cwd, pstart) in procs.items():
+        best = None
+        for s in rows:
+            if s["workspace_path"] != cwd:
+                continue
+            delta = abs(pstart - epoch(s["started_at"] or ""))
+            if delta > 900:
+                continue
+            if best is None or delta < best[0]:
+                best = (delta, s)
+        if best:
+            matched.setdefault(best[1]["id"], []).append(pid)
+
+    stale = {}
+    for s in rows:
+        step = step_of.get(s["task_id"])
+        if step in (MERGED_STEP, INBOX, READY) or not matched.get(s["id"]):
+            stale[s["id"]] = s
+
+    # Processes in a known task worktree that belong to no live session:
+    # failed/retired sessions leave these behind.
+    keep = {s["id"] for s in rows if s["id"] not in stale}
+    keep_pids = {pid for sid in keep for pid in matched.get(sid, [])}
+    stale_pids = {pid for sid in stale for pid in matched.get(sid, [])}
+    known_cwds = {s["workspace_path"] for s in all_rows if s["workspace_path"]}
+    orphan_pids = [
+        pid
+        for pid, (cwd, pstart) in procs.items()
+        if pid not in keep_pids
+        and pid not in stale_pids
+        and cwd in known_cwds
+        and time.time() - pstart > 60
+    ]
+
+    if not stale and not orphan_pids:
+        return
+    try:
+        import sqlite3
+
+        wcon = sqlite3.connect(DB)
+        for sid, s in stale.items():
+            for pid in matched.get(sid, []):
+                _kill_proc(pid)
+            wcon.execute(
+                """update task_sessions set state='CANCELLED',completed_at=datetime('now'),
+                   updated_at=datetime('now'),error_message='reaped: no live agent process'
+                   where id=?""",
+                (sid,),
+            )
+            wcon.execute(
+                "update executors_running set status='stopped',local_pid=0,pid=0 where session_id=?",
+                (sid,),
+            )
+        for pid in orphan_pids:
+            _kill_proc(pid)
+        wcon.commit()
+        wcon.close()
+        print(f"reaped {len(stale)} stale sessions, killed {sum(len(matched.get(k, [])) for k in stale) + len(orphan_pids)} procs")
+    except Exception as exc:  # noqa: BLE001
+        print(f"session reap failed: {exc}", file=sys.stderr)
+
+
 def scan_stale_prompt(detailed):
     """Bounce sessions started before their step's prompt was updated.
 
@@ -1129,6 +1276,7 @@ def run_once():
             print(f"skip {task['title'][:40]}: {exc}", file=sys.stderr)
 
     agent_tasks = [t for t in detailed if t.get("workflow_step_id") == AGENT]
+    scan_session_reaper(detailed)
     active = [t for t in agent_tasks if t.get("state") in ACTIVE_STATES]
     slots = max(0, WIP - len(active))
 
