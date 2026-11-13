@@ -27,6 +27,7 @@ cargo test --bin labworkbench failed_schema_migration_preserves_database
 ```
 The card's literal `cargo test --bin labworkbench schema_migration_legacy_v0 -- --exact` filter matches zero tests because the harness name is `cli::tests::schema_migration_legacy_v0`. The qualified exact command was run twice; both outputs are retained.
 
+Cargo test output files retain the command, compiler diagnostics, test names, and results; only environment-specific absolute workspace/build paths are replaced with `[workspace path redacted]` or `[build output path redacted]` to avoid disclosing host filesystem layout.
 Raw command outputs: [legacy migration](legacy-migration-output.txt), [failed migration](failed-migration-output.txt), [literal exact filter, run 1](exact-filter-run-1.txt), [literal exact filter, run 2](exact-filter-run-2.txt), [qualified exact test, run 1](qualified-exact-run-1.txt), [qualified exact test, run 2](qualified-exact-run-2.txt), [full CLI suite](labworkbench-tests.txt), [Core suite](asterlab-core-tests.txt), and [App suite](asterlab-app-tests.txt).
 
 ## SQLite copy/restore acceptance

@@ -65,7 +65,7 @@ warning: function `save_asset_link` is never used
 
 warning: `labworkbench` (bin "labworkbench" test) generated 9 warnings (run `cargo fix --bin "labworkbench" -p labworkbench --tests` to apply 2 suggestions)
     Finished `test` profile [unoptimized] target(s) in 0.06s
-     Running unittests src/main.rs (/srv/build/asterlab-target/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
+     Running unittests src/main.rs ([build output path redacted])
 
 running 1 test
 test cli::tests::failed_schema_migration_preserves_database ... ok
