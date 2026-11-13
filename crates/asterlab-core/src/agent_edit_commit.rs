@@ -720,6 +720,8 @@ mod tests {
             module_origin: None,
             module_contract_authority: None,
             catalog_review: None,
+            based_on_version_id: None,
+            step_edit: None,
         };
         MemoryStore {
             protocols: vec![MemoryProtocol {
@@ -1098,6 +1100,8 @@ mod tests {
             module_origin: None,
             module_contract_authority: None,
             catalog_review: None,
+            based_on_version_id: None,
+            step_edit: None,
         };
         let root = ProtocolBlockVersionData {
             block_id: "block-rna-root".to_owned(),
@@ -1118,6 +1122,8 @@ mod tests {
             module_origin: None,
             module_contract_authority: None,
             catalog_review: None,
+            based_on_version_id: None,
+            step_edit: None,
         };
         let mut store = MemoryStore {
             protocols: vec![MemoryProtocol {

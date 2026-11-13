@@ -1,0 +1,61 @@
+# RDO-01 Go/AsterDoc 原始输出
+
+$ cd prototypes/mygo-run && go test ./internal/asterdoc/
+ok  	asterlab-mygo-prototype/internal/asterdoc	0.764s
+[exit 0]
+
+$ cd prototypes/mygo-run && go list ./... | grep -v '^asterlab-mygo-prototype$' | xargs go test
+?   	asterlab-mygo-prototype/cmd/studio	[no test files]
+ok  	asterlab-mygo-prototype/e2e	(cached)
+ok  	asterlab-mygo-prototype/internal/analysis	(cached)
+ok  	asterlab-mygo-prototype/internal/assays	(cached)
+ok  	asterlab-mygo-prototype/internal/assets	(cached)
+ok  	asterlab-mygo-prototype/internal/asterdoc	0.855s
+ok  	asterlab-mygo-prototype/internal/blocks	(cached)
+ok  	asterlab-mygo-prototype/internal/blockui	(cached)
+ok  	asterlab-mygo-prototype/internal/designer	1.121s
+ok  	asterlab-mygo-prototype/internal/notebook	(cached)
+ok  	asterlab-mygo-prototype/internal/protocol	0.255s
+ok  	asterlab-mygo-prototype/internal/resultgrid	0.201s
+ok  	asterlab-mygo-prototype/internal/runui	1.561s
+ok  	asterlab-mygo-prototype/internal/runworkspace	(cached)
+ok  	asterlab-mygo-prototype/internal/shell	0.492s
+ok  	asterlab-mygo-prototype/internal/state	(cached)
+ok  	asterlab-mygo-prototype/internal/theme	(cached)
+ok  	asterlab-mygo-prototype/internal/tools	0.122s
+?   	asterlab-mygo-prototype/internal/uikit/plate	[no test files]
+?   	asterlab-mygo-prototype/internal/uikit/workflownode	[no test files]
+ok  	asterlab-mygo-prototype/internal/workflow	0.153s
+ok  	asterlab-mygo-prototype/internal/workflowtree	(cached)
+?   	asterlab-mygo-prototype/modules/runs	[no test files]
+[exit 0]
+
+$ cd prototypes/mygo-run && go test .
+# 根包编译期依赖 native Runs 动态库；本 worktree 未构建（CI 在 Go tests 前跑 `mygo native build -target host ./modules/runs`）。失败行全部是 "the implementation of Runs is not built"。
+
+--- FAIL: TestProtocolBlockPreviewFixture (0.00s)
+    block_preview_test.go:15: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestDesignHierarchyWithoutRunFixture (0.00s)
+    design_hierarchy_test.go:19: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestDesignHierarchyUsesNativeCore (0.00s)
+    design_hierarchy_test.go:53: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestNativeWorkflowTreeDesignAndRunContract (0.00s)
+    inspect_tree_test.go:47: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestNativeWorkflowTreeHiddenModeRejectsMismatch (0.00s)
+    inspect_tree_test.go:101: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestInspectTreeRejectsRunDesignMismatch (0.00s)
+    inspect_tree_test.go:186: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestInspectTreeRunUsesFrozenRevisionNotLatest (0.00s)
+    inspect_tree_test.go:210: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestInspectTreeRejectsWrongRevisionForRun (0.00s)
+    inspect_tree_test.go:236: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestInspectTreeRunUsesFrozenRevision (0.00s)
+    inspect_tree_test.go:256: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestPathBoundRunTreeProjection (0.00s)
+    pathbound_tree_test.go:39: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+--- FAIL: TestPathBoundRunWorkspaceUsesNativeCore (0.00s)
+    pathbound_tree_test.go:109: native: the implementation of Runs is not built: run mygo dev, or mygo native build -target host /var/lib/kandev/tasks/rdo-01-core_losqnggc/LLLin000-AsterLab/prototypes/mygo-run/modules/runs (ffi: Runs has no build for linux-amd64)
+FAIL
+FAIL	asterlab-mygo-prototype	0.836s
+FAIL
+[exit 1]

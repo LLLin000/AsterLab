@@ -30,6 +30,35 @@ stdout 每次只输出一行 JSON。成功结构为：
 
 退出码固定为 `0` 成功、`2` 输入/用法错误、`3` 目标不存在、`4` 版本冲突、`5` 内部错误。不要从 stderr 文案推断业务结果；以 JSON 的 `ok` 与 `error.code` 为准。
 
+### 结构化诊断（`--diagnostics json`）
+
+任何业务命令都可追加 `--diagnostics json`：
+
+```powershell
+.\target\release\labworkbench.exe design.revise --input .\revise.json --diagnostics json
+```
+
+带该参数时，成功和失败响应都在顶层多一个 `diagnostics` 数组。成功响应通常为 `[]`；只读校验命令（如 `agent_edit.validate`、`semantic.validate`、`asterdoc.validate`）把结论放在 `result.issues`，这些条目也会同时出现在 `diagnostics`，因此 Agent 只读一个数组即可。诊断项是 `asterlab_core::diagnostic::Diagnostic`，字段固定为：
+
+```json
+{
+  "path": "assignments[0].position_id",
+  "code": "assignment_position_invalid",
+  "severity": "blocking",
+  "message": "assignment position A１ is not valid for container plate-1",
+  "affects": [],
+  "next_action": "correct assignments[0].position_id and re-run validation",
+  "source": "derived"
+}
+```
+
+- `severity` 只取 `blocking`、`needs_confirmation`、`advisory`；`blocking` 表示该写入/操作被拒绝。
+- `source` 只取 `user_confirmed`、`imported_record`、`referenced_protocol`、`derived`、`agent_suggestion`、`unknown`，说明这条结论的来源；Core 校验产生的结论是 `derived`。
+- `code` 是稳定机器码，Agent 必须按 `code` 分支，不解析 `message`。
+- `path` 定位字段/对象；`affects` 列出受影响的下游对象；`next_action` 给出下一步动作。
+- 失败时 `error.code` 与 `error.message` 保持不变，`error.issues` 也继续返回；`diagnostics` 是它们的规范化视图。未带 `--diagnostics json` 时响应完全不变。
+- 不带 `--diagnostics` 的旧调用方不受影响；`--diagnostics` 只接受 `json`，其他值返回 `INVALID_INPUT`。
+
 ## 命令目录
 
 | 命令 | 用途 | 写入 |
@@ -38,14 +67,17 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `design.list` / `design.get` / `design.map` / `design.create` / `design.revise` | 查询、只读实验地图、创建或修订实验设计 | create/revise |
 | `run.list` / `run.workspace` / `run.create` / `run.set_status` / `run.revise` | 查询、只读冻结工作区、创建运行、更新状态或只修订名称/计划日期 | create/update |
 | `workflow.inspect_tree` | 只读投影 Design（可选 Run）的 Use/Definition/Occurrence 层级树 | 否 |
+| `workflow.progress` | 只读投影一个 Run 每步骤的样本矩阵、attempt 历史与最后事件时间 | 否 |
 | `task.create` / `task.set_status` | 创建日历任务或更新状态 | create/update |
 | `protocol.list` / `protocol.create` / `protocol.revise` | 查询 Protocol、创建 v1、追加新版本 | create/revise |
 | `protocol.block.list` / `protocol.block.get` | 查询项目步骤块库和不可变版本 | 否 |
 | `protocol.block.create` / `protocol.block.revise` | 创建步骤块或基于预期版本追加新版本 | create/revise |
 | `protocol.block.preview` | 只读递归展开、解析参数来源并列出未填写槽位 | 否 |
+| `step.edit` | 步骤块级 insert/reorder/reuse/bind 编辑：无 `confirmation` 时只读校验，带 `confirmation` 时追加新版本 | validate 否 / commit 是 |
 | `plate.create` / `well.set` | 创建铺板布局、设置孔位标签 | create/update |
 | `note.create` | 给实验运行追加自由文本记录 | create |
 | `execution_event.create` | 追加结构化操作、材料使用、数值测量、偏差或观察事件 | create |
+| `readout.submit` / `readout.batch` | 幂等提交单条读数，或表格/孔板批量读数（`cells` 或 CSV），一次事务写入一条 measurement 事件 | create |
 | `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
 | `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
 | `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
@@ -81,10 +113,65 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 `workflow.inspect_tree` 是只读层级查询：输入 `{design_id, revision?, run_id?}`，返回 `roots[]`、`order`、`precedes`、`issues` 和节点上的 `identity`、`useId`、`blockVersionId`、`instruction`、`parameters`、`unresolvedParameters`、`taskKey`、`status`。`design=true` 表示没有 Run；带 `run_id` 时在相同层级上叠加 Occurrence。CLI 通过 `ASTERLAB_APP_BIN` 调用同一 Go 层级引擎，不在 Rust CLI 中复制投影算法。字段见 `docs/sdk/workflow-tree-contract-v1.md`。
 
+`workflow.progress` 是只读样本进度查询：输入 `{run_id, step_path?, timepoint?, sample_id?, sample_ids?}`，按实际事件携带的 `(step_path, timepoint)` 分组返回；`timepoint` 显式输出，缺失保持 `null`。不筛选时间点时只返回事件实际出现的分组，不构造 Run 全局样本 × 时间点笛卡尔积。只有同时提供 `step_path` 和具体 `timepoint` 时，`sample_ids[]` 才补入该组的 `not_started` 样本。结果含 `schema_version`、`run_id`、样本 ID 并集、`steps[]` 和 `issues[]`；每组含状态、`complete`、各状态计数、`last_event_at` 与 `samples[]`。样本含当前状态/attempt、`attempt_count`、按 attempt 排列的历史（`event_ids`、`last_event_at`、`deviation`）。样本级身份为 `run_id + step_path + timepoint? + sample_id + attempt`；不同时间点独立去重和 attempt 连续性，重试保留旧 attempt。`complete=true` 只在该 `(step_path,timepoint)` 组所有样本均完成时成立；单个事件的 `step_status = "completed"` 只表示该事件所列样本完成。事件时间取 `recorded_at`，缺失时回退 `occurred_at`。`issues` 报告 `missing_step`、`unknown_step`、`invalid_attempt`、`retry_cycle`，不推断样本状态。
+
 `run.workspace` 只读读取 Run 冻结的 `design_version_id` 和 `protocol_manifest`，返回 `frozen_design`、`scopes`、`steps`、`tasks`、`occurrences`、`materials`、`plates`、`events`；不存在冻结快照时返回错误，不回退当前 Design。旧事件没有 `occurrence_id` 时保留为历史，不自动生成执行实例。
 
 `run.revise` 必须提供 `id` 和当前 `expected_revision`，只接受 `title`、`scheduled_date`；日期可传 `null` 清除。状态仍通过 `run.set_status` 修订。设计版本、Protocol 清单、材料清单、轮次和来源关系属于创建时冻结快照，修订接口拒绝这些字段。HTTP API 与 CLI 共用同一补丁校验；网页不得整体替换 Run JSON。
 
+## 读数提交（readout.*）
+
+`readout.submit` 与 `readout.batch` 把读数写进现有 `execution_event` 追加记录；不新增记录类型，也不建第二份读数表。两者都只接受本次 Run 冻结清单内的 `step_path` + `protocol_version_id`（检测读数还需 `assay_id`；共享制备读数用 `planned_output_id`），引用校验复用 `execution_event.create` 的同一套逻辑。
+
+- `readout.submit` 输入 `{run_id, step_path, endpoint, protocol_version_id, value | qualifier, unit?, sample_id?, timepoint?, assay_id?, planned_output_id?, operator?, occurred_at?, content?}`。必须有且只有一个 `value` 或 `qualifier`（`not_detected` / `below_lod` / `above_uloq` / `invalid` / `other`）。数值同时写进 `measurements[]` 与 `readouts[]`；带 `qualifier` 的只写 `readouts[]`，不伪造成 0。输出 `{record, idempotency_key, replayed}`。
+- `readout.batch` 输入 `{run_id, step_path, protocol_version_id, plate_id, schema_id, schema_version=1, assay_id?, timepoint?, batch_id?, ...}`，读数用 `cells[]`（`row`/`column` 从 0 开始，可选 `field`、`value`、`unit`、`sample_id`、`group`、`replicate`、`status`）或 `csv` 二选一。CSV 表头 `row,column,field[,value,unit,sample_id,group,replicate,status]`，未知或重复列、缺列、行列越界、同批重复孔位、`status` 与 `value` 矛盾都会拒绝整批。输出 `{record, idempotency_key, replayed, accepted}`。
+- 幂等：`readout.submit` 的键是 `(run_id, step_path, endpoint, sample_id, timepoint)`；`readout.batch` 的键是同一组身份字段按孔位（`plate_id, row, column, field`）展开后的集合——同一批里多个孔位可以共享 endpoint/sample/timepoint，只用卡片元组会互相覆盖。`run_id` 属于键，因此不同 Run 的同名读数互不影响。重复提交返回首次记录并置 `replayed=true`；值属于内容不属于身份，故重放不会覆盖已记录值。
+- 原子性：整批在一个事务内校验并写入一条 `measurement` 事件；任何一行失败都返回 `INVALID_INPUT` 并附 `issues[]`，数据库不产生部分事件。`readout.batch` 必须能唯一确定本次 Run 的一块孔板，否则返回 `unresolved_plate` / `ambiguous_plate` / `unknown_plate`，不猜孔位。
+- 与 `execution_event.create` 的关系：后者仍是多用途底层追加接口（含操作、材料、检查等）；`readout.*` 只覆盖读数，`step_status`、`checks`、`controls` 不通过它写入。
+
+## `step.edit`：步骤块级结构化编辑
+
+`step.edit` 在 agent edit v1 的四段流程（propose → validate → confirm → commit）里承担步骤块结构修改，不引入第二套写入路径。同一个命令有两种阶段：
+
+- 不带 `confirmation`：只读校验，返回 `status`、`edit_digest`、解析后的 `ops` 和计划生成的 `blocks[]`；不写数据库。
+- 带 `confirmation`：单事务重新校验并追加新版本；旧版本、Protocol 版本与已冻结 Run 均不改写。
+
+```json
+{
+  "schema_version": 1,
+  "edit_id": "sde-rna-001",
+  "block_version_id": "<读取时的确切步骤块版本 id>",
+  "expected_version": 3,
+  "origin": {"source": "agent", "rationale": "补一个洗涤子步骤"},
+  "ops": [
+    {"op": "insert", "path": "root/lyse", "position": 1,
+     "step": {"kind": "text", "use_id": "wash", "title": "洗涤", "instruction": "加 200 uL 缓冲液后弃上清"}},
+    {"op": "reorder", "path": "root", "order": ["prep", "lyse"]},
+    {"op": "reuse", "path": "root", "position": 2, "use_id": "read",
+     "block_version_id": "<已存在的步骤块版本 id>",
+     "bindings": [{"slot": "volume_per_sample", "value": 200, "unit": "uL"}]},
+    {"op": "bind", "path": "root/lyse", "bindings": [{"slot": "volume_per_sample", "value": 250, "unit": "uL"}]}
+  ],
+  "confirmation": {
+    "edit_digest": "sha256:<validate 返回的 digest>",
+    "confirmed_by": "researcher:zhang",
+    "idempotency_key": "sde-rna-001-confirm-1",
+    "note": "按试剂盒说明书补洗涤步骤"
+  }
+}
+```
+
+规则：
+
+- `block_version_id` 必须是根步骤块的当前 head；`expected_version` 必须等于它的版本号，否则 `VERSION_CONFLICT`（不是 head 则为 `STALE_REFERENCE`）。被改动的子块也必须仍是各自块的 head，否则同样 `VERSION_CONFLICT`。
+- `path` 使用 Protocol 展开寻址：`root` 表示根块，`root/<use_id>` 表示某处块引用，`root/<use_id>/<use_id>` 可继续加深。不是以 `root` 开头或含空段/`.`/`..` → `FORBIDDEN_FIELD`；格式合法但解析不到步骤 → `STALE_REFERENCE`；嵌套超过 12 层 → `INVALID_PROPOSAL`。
+  `insert` / `reorder` / `reuse` 的 `path` 必须是容器（`root` 或块引用步骤）；指向文字步骤返回 `INVALID_PROPOSAL`，不会退化成修改其父块。`bind` 的 `path` 必须指向块引用步骤，指向文字步骤返回 `INVALID_BINDING`。
+- `insert` 只接受 `step.kind = "text"`（`parameter_refs` 必须引用本块已声明的槽位）；复用已有步骤块用 `reuse`。`reorder.order` 必须是该容器当前 `use_id` 的完整排列。`bind` 按槽位 upsert，绑定规则与 `protocol.block.create` 一致：每个必填子槽位必须有值或映射，单位精确匹配、不做换算。
+- 版本号由 Core 生成：每个被改动的步骤块得到 `previous_version + 1` 的新版本，子块先于父块写入，父块引用自动指向同一事务里新建的子块版本。未改动的块保持原版本（复用）。每个新版本记录带 `based_on_version_id` 和 `step_edit`（`edit_id`、`edit_digest`、`confirmed_by`、`committed_at`、`idempotency_key`）。
+- `edit_digest` 只覆盖 `ops` 与版本前置条件，不覆盖 `confirmation` 本身；同一 `idempotency_key` + 同一 digest 重放返回原结果（`replayed: true`，不写第二个版本），同一 key 配不同 digest 返回 `IDEMPOTENCY_MISMATCH`。
+- 错误码沿用 agent edit v1 的封闭集合（`INVALID_PROPOSAL`、`INVALID_BINDING`、`UNIT_MISMATCH`、`STALE_REFERENCE`、`FORBIDDEN_FIELD`、`VERSION_CONFLICT`、`CONFIRMATION_REQUIRED`、`CONFIRMATION_MISMATCH`、`IDEMPOTENCY_MISMATCH`），没有新增含义。退出码仍为 `0/2/3/4/5`。
+- 语义拒绝是结果而非传输错误：validate 阶段返回 `ok=true` + `status:"blocked"` + `issues[]`（`code`/`severity`/`path`/`message`/`affects`/`next_action`），blocked 结果不带 `blocks[]`，不得据此 commit。
+- 编辑结果只产生步骤块版本。Protocol 版本不可变，若要某个 Protocol 使用新根块，另调 `protocol.revise`（`root_block_version_id` 用返回的 `new_root_block_version_id`）；已冻结 Run 继续引用旧版本。
 ## 设计数据语义
 
 `design.create` 接收 `project_id` 和 `design` 对象。关键字段含义：
@@ -144,11 +231,11 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - 每次生成方案，明确区分“已提供”“从已保存记录读取”“计算所得”“待确认”；不使用“适量”“按常规”“视情况”等无法执行的值。
 - `run.create` 是受信任本地写入端操作，CLI 调用必须设置 `LABWORKBENCH_TRUSTED_WRITER=1`；外部 Agent 不应获得该权限，只生成 Protocol/Design/View Draft，由人类确认后通过本地 UI 创建 Run。
 - 创建运行时固定引用当前 `design_revision`，并生成 `protocol_manifest[]` 固定该版本各检测所引用的 Protocol 精确版本。`run_index` 按设计递增；再次执行可传 `repeat_of_run_id` 与 `repeat_relationship`（`independent`、`same_source`、`paired`、`unknown`），不能仅凭轮次数断言独立性。Protocol 修订创建新版本，不覆盖历史版本。
-- `note.create` 是追加式自由文本记录。`execution_event.create` 适合需要筛选、计算或追溯的实际事件：输入 `run_id`、`event_type`、`content`，可附 `occurred_at`（带时区 RFC 3339；不确定时留空）、`stage`、`operator`、`sample_ids[]`；`material_use` 事件可写 `materials[]`，`measurement` 事件必须含数值 `measurements[]` 或结构化 `readouts[]`，`deviation` 事件必须说明 `deviation`。
+- `note.create` 是追加式自由文本记录。`execution_event.create` 适合需要筛选、计算或追溯的实际事件：输入 `run_id`、`event_type`、`content`，可附 `occurred_at`（带时区 RFC 3339；不确定时留空）、`stage`、`operator`、`sample_ids[]`；`material_use` 事件可写 `materials[]`，`measurement` 事件必须含数值 `measurements[]` 或结构化 `readouts[]`，`deviation` 事件必须说明 `deviation`。声明样本级执行身份时另给 `attempt`（≥1）；它必须与冻结 `protocol_step_path` 和至少一个 `sample_ids` 同时出现，只能是该样本当前最高 attempt 或 `最高 + 1`。同一 `step_path + sample_ids[] + attempt` 的重复完成返回原事件记录，不追加新事实；重试必须使用下一个 attempt。
 - `readouts[]` 每项为可选 `readout_id`、`endpoint`、可选 `value` 或 `qualifier`（`not_detected` / `below_lod` / `above_uloq` / `invalid` / `other`），二者必须且只能填一个；`result_kind` 为 `raw` 或 `derived`。派生结果必须提供 `method` 与 `derived_from[]`；`derived_from[]` 引用本次 Run 中已存在的原始 `readout_id`，不能引用未知或派生读数。不得把计算结果写成原始读数。
 - `checks[]` 每项为 `check_id`、`status`（`passed` / `failed` / `blocked` / `skipped`）及可选 `checked_by`、`note`；`check_id` 必须存在于同一冻结 Protocol 步骤的 `checks[]`，同一事件不得重复，且检查结果必须关联该步骤。`skipped` 不等于通过；空白或未记录也不等于通过。`controls[]` 记录对照角色 `role`、`status`、样本/实验单位/观察；`lineage[]` 记录 `from_kind`、`from_id`、`to_kind`、`to_id`、`relation`。`actual_parameters[]` 记录实际执行参数 `key`、`value`、可选 `unit` 与 `source`，并与计划参数分开。
 - Protocol 文本步骤可定义 `checks[]`：`check_id`、`label`、可选 `instruction` 与 `blocking`。检查项随 ProtocolPreview、Run 冻结清单一同保存；AsterLab 只记录人工结果，不自动判定 gate 通过。
-- Protocol 步骤事件可附 `timepoint` 和 `step_status`。`timepoint` 仅用于明确属于某个检测时间点的步骤，并必须匹配 Run 冻结设计；共享制备步骤不应机械绑定某项检测的时间点。`step_status` 只能是 `in_progress`、`completed`、`blocked`、`skipped`，且必须同时关联冻结 Protocol 步骤；普通操作、观察、测量或偏差事件本身不代表步骤完成。未带时间点的旧事件不会被自动分配给 D1/D3。
+- Protocol 步骤事件可附 `timepoint` 和 `step_status`。`timepoint` 仅用于明确属于某个检测时间点的步骤，并必须匹配 Run 冻结设计；共享制备步骤不应机械绑定某项检测的时间点。`step_status` 只能是 `in_progress`、`completed`、`blocked`、`skipped`，且必须同时关联冻结 Protocol 步骤；普通操作、观察、测量或偏差事件本身不代表步骤完成。未带时间点的旧事件不会被自动分配给 D1/D3。带 `sample_ids` 的事件只改变这些样本的状态；整步完成由 `workflow.progress` 判定，要求全部样本完成。
 - 写入工具只返回记录 ID、所属关系、版本、数据和创建/更新时间；不声称实际实验已经执行。
 - 该 CLI 是本机原型，尚无多用户认证、审计签名、细粒度附件权限或撤销系统。不要把本地访问控制误称为云端安全边界。
 

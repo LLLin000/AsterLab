@@ -1,0 +1,13 @@
+```asterlab
+kind: readout
+id: readout-od450
+schema: 1
+schema_id: cck8_od450
+endpoint: od450
+value_kind: plate
+unit: AU
+missing_reasons: [not_detected, above_uloq]
+null_allowed: true
+source_kinds: [raw]
+plate_format: "96"
+```

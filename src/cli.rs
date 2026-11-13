@@ -10,6 +10,7 @@ use asterlab_core::assets as asset_refs;
 use asterlab_core::component_data::{
     calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
 };
+use asterlab_core::diagnostic::{Diagnostic, DiagnosticSeverity};
 use asterlab_core::component_framework::{
     default_registry, ComponentBindingContext, ComponentDefinition, ComponentDefinitionRef,
     ComponentInstance, ComponentRegistry, ContextValidationMode, ModelPathResolution, ModelRef,
@@ -22,6 +23,10 @@ use asterlab_core::operation_module::{
     ModuleBinding, ModuleOrigin, OperationModule, ParameterBinding, ParameterValueType,
     ProtocolBlockVersionRef, ValueSource,
 };
+use asterlab_core::readout_submit::{
+    plan_batch as plan_readout_batch, plan_submit as plan_readout_submit, ReadoutBatchRequest,
+    ReadoutSubmitRequest,
+};
 use asterlab_core::protocol_block::ReviewRecord;
 use asterlab_core::protocol_block::{ParameterSlot, ProtocolBlockVersionData, ProtocolStep, StepBinding};
 use asterlab_core::protocol_preview::{
@@ -31,6 +36,11 @@ use asterlab_core::semantic_catalog::{compile_operation_module, CompilePolicy};
 use asterlab_core::semantic_changeset::ChangeSet;
 use asterlab_core::semantic_component::ProtocolScope;
 use asterlab_core::semantic_query::{assess_block_patch, inspect_block, search_modules};
+use asterlab_core::step_edit::{
+    commit as step_edit_commit_request, validate as step_edit_validate_request, CommittedStepEdit,
+    StepEditCommitError, StepEditCommitStore, StepEditRequest, StepEditStore, StoredBlockHead,
+    StoredEditBlock,
+};
 use asterlab_core::workflow_tree::{
     BlockDefinition, BlockParameter, BlockStep, DesignStep, Document, RunTask,
 };
@@ -454,6 +464,19 @@ struct InspectTreeInput {
     revision: Option<u64>,
     #[serde(default)]
     run_id: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowProgressInput {
+    run_id: String,
+    #[serde(default)]
+    step_path: Option<String>,
+    #[serde(default)]
+    timepoint: Option<String>,
+    #[serde(default)]
+    sample_id: Option<String>,
+    #[serde(default)]
+    sample_ids: Vec<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -4393,6 +4416,29 @@ pub(crate) fn create_execution_event_tx(
                     continue;
                 }
             }
+            // A completion belongs to samples and one attempt, not to the whole
+            // step: completing S1 must not suppress the record for S2.
+            let mut stored_samples: Vec<&str> = data["sample_ids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .collect();
+            let mut new_samples: Vec<&str> = event
+                .sample_ids
+                .iter()
+                .map(String::as_str)
+                .map(str::trim)
+                .collect();
+            stored_samples.sort_unstable();
+            new_samples.sort_unstable();
+            if stored_samples != new_samples {
+                continue;
+            }
+            if data.get("attempt").and_then(Value::as_u64) != event.attempt.map(u64::from) {
+                continue;
+            }
             return Ok(json!({
                 "id": id,
                 "kind": "execution_event",
@@ -4404,6 +4450,44 @@ pub(crate) fn create_execution_event_tx(
                 "updated_at": updated
             }));
         }
+    }
+    if let Some(attempt) = event.attempt {
+        let mut stmt = tx
+            .prepare("SELECT id, data_json FROM records WHERE kind='execution_event' AND parent_id=?1")
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        let rows = stmt
+            .query_map([run_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        let mut existing = Vec::new();
+        for row in rows {
+            let (id, raw) = row.map_err(|e| CliError::internal(e.to_string()))?;
+            let mut data: Value =
+                serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+            data["id"] = json!(id);
+            existing.push(asterlab_core::sample_progress::ProgressEvent::from_stored(
+                &data,
+            ));
+        }
+        asterlab_core::sample_progress::plan_event_identity(
+            run_id,
+            event.protocol_step_path.as_deref(),
+            event.timepoint.as_deref(),
+            &event.sample_ids,
+            Some(attempt),
+            &existing,
+        )
+        .map_err(|issues| {
+            CliError::input(format!(
+                "样本执行身份无效：{}",
+                issues
+                    .iter()
+                    .map(|issue| issue.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("；")
+            ))
+        })?;
     }
     let occurred_at = event.occurred_at.clone().unwrap_or_else(stamp);
     let data = json!({
@@ -4420,6 +4504,7 @@ pub(crate) fn create_execution_event_tx(
         "planned_output_id":event.planned_output_id,
         "task_key":event.task_key,
         "sample_ids":event.sample_ids,
+        "attempt":event.attempt,
         "materials":event.materials.iter().map(|m|json!({"material":m.material,"planned_output_id":m.planned_output_id,"amount":m.amount,"unit":m.unit})).collect::<Vec<_>>(),
         "measurements":event.measurements.iter().map(|m|json!({"endpoint":m.endpoint,"value":m.value,"unit":m.unit,"sample_id":m.sample_id,"row":m.row,"column":m.column,"group":m.group,"replicate":m.replicate,"status":m.status,"field":m.field})).collect::<Vec<_>>(),
         "batch_id":event.batch_id,
@@ -4447,6 +4532,110 @@ pub(crate) fn create_execution_event_tx(
     )?;
     refresh_run_status_in_transaction(tx, run_id)?;
     Ok(event_record)
+}
+
+fn readout_issue_error(
+    action: &str,
+    issues: Vec<asterlab_core::reading_facts::ReadingIssue>,
+) -> CliError {
+    let detail = issues
+        .first()
+        .map(|issue| format!("：{}", issue.message))
+        .unwrap_or_default();
+    let mut error = CliError::input(format!("{action}校验失败{detail}"));
+    error.issues = issues
+        .into_iter()
+        .map(|issue| json!({"code":issue.code,"message":issue.message}))
+        .collect();
+    error
+}
+
+/// Look up an earlier readout submission by its idempotency key. The key is
+/// stored as `operation_id`; the query is scoped to this Run, so the same key
+/// in another Run is a different record.
+fn find_readout_submission(
+    db: &Connection,
+    run_id: &str,
+    operation_id: &str,
+) -> Result<Option<Value>, CliError> {
+    let id: Option<String> = db
+        .query_row(
+            "SELECT id FROM records WHERE kind='execution_event' AND parent_id=?1 \
+             AND json_extract(data_json,'$.operation_id')=?2 ORDER BY created_at LIMIT 1",
+            params![run_id, operation_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    match id {
+        Some(id) => Ok(Some(get(db, &id)?)),
+        None => Ok(None),
+    }
+}
+
+/// `readout.submit`: validate one readout and append exactly one measurement
+/// event. Re-submitting the same identity tuple returns the first record.
+pub(crate) fn submit_readout(
+    db: &mut Connection,
+    input: &ReadoutSubmitRequest,
+) -> Result<Value, CliError> {
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let workspace = run_workspace_typed(&tx, &input.run_id)?;
+    let plan = plan_readout_submit(input, &workspace)
+        .map_err(|issues| readout_issue_error("读数提交", issues))?;
+    if let Some(record) = find_readout_submission(&tx, &input.run_id, &plan.idempotency_key)? {
+        tx.commit()
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        return Ok(json!({
+            "record": record,
+            "idempotency_key": plan.idempotency_key,
+            "replayed": true
+        }));
+    }
+    let record = create_execution_event_tx(&tx, &input.run_id, &plan.event)?;
+    tx.commit()
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    Ok(json!({
+        "record": record,
+        "idempotency_key": plan.idempotency_key,
+        "replayed": false
+    }))
+}
+
+/// `readout.batch`: validate every cell of a table/plate batch and append one
+/// measurement event in a single transaction. Any invalid row aborts the whole
+/// batch; no earlier row is written.
+pub(crate) fn submit_readout_batch(
+    db: &mut Connection,
+    input: &ReadoutBatchRequest,
+) -> Result<Value, CliError> {
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let workspace = run_workspace_typed(&tx, &input.run_id)?;
+    let plan = plan_readout_batch(input, &workspace)
+        .map_err(|issues| readout_issue_error("读数批次", issues))?;
+    if let Some(record) = find_readout_submission(&tx, &input.run_id, &plan.idempotency_key)? {
+        tx.commit()
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        return Ok(json!({
+            "record": record,
+            "idempotency_key": plan.idempotency_key,
+            "replayed": true,
+            "accepted": plan.readout_count
+        }));
+    }
+    let record = create_execution_event_tx(&tx, &input.run_id, &plan.event)?;
+    tx.commit()
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    Ok(json!({
+        "record": record,
+        "idempotency_key": plan.idempotency_key,
+        "replayed": false,
+        "accepted": plan.readout_count
+    }))
 }
 fn merge_design_checks(run_data: &Value, frozen: &mut Value, step_path: &str) {
     let Some(design_checks) = run_data.get("design_checks").and_then(Value::as_array) else {
@@ -4668,6 +4857,8 @@ pub(crate) fn create_protocol_block_records(
         module_origin: None,
         module_contract_authority: None,
         catalog_review: None,
+        based_on_version_id: None,
+        step_edit: None,
     };
     let serialized =
         serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
@@ -4725,6 +4916,8 @@ pub(crate) fn revise_protocol_block_records(
         module_origin,
         module_contract_authority,
         catalog_review: None,
+        based_on_version_id: None,
+        step_edit: None,
     };
     let serialized =
         serde_json::to_value(version_data).map_err(|e| CliError::internal(e.to_string()))?;
@@ -6422,6 +6615,10 @@ struct ExecutionEventCreate {
     task_key: Option<String>,
     #[serde(default)]
     sample_ids: Vec<String>,
+    /// Sample-level attempt for one (step, sample) identity. Omitted for
+    /// step-level or legacy events; the read model then derives the attempt.
+    #[serde(default)]
+    attempt: Option<u32>,
     #[serde(default)]
     materials: Vec<EventMaterialUse>,
     #[serde(default)]
@@ -6767,6 +6964,31 @@ fn normalize_validate_design_data_with_registry(
 
 pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliError> {
     let run = get(db, run_id)?;
+    let workspace = run_workspace_typed(db, run_id)?;
+    let mut value =
+        serde_json::to_value(workspace).map_err(|error| CliError::internal(error.to_string()))?;
+    value["creation_audit"] = run["data"]
+        .get("creation_audit")
+        .cloned()
+        .unwrap_or(Value::Null);
+    value["asterdoc"] = run["data"]
+        .get("asterdoc")
+        .cloned()
+        .unwrap_or(Value::Null);
+    value["design_checks"] = run["data"]
+        .get("design_checks")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    Ok(value)
+}
+
+/// Typed counterpart of [`run_workspace`], used by commands that validate
+/// against the frozen Run before writing.
+pub(crate) fn run_workspace_typed(
+    db: &Connection,
+    run_id: &str,
+) -> Result<asterlab_core::run_workspace::RunWorkspace, CliError> {
+    let run = get(db, run_id)?;
     if run["kind"] != "run" {
         return Err(CliError::input("指定记录不是实验运行"));
     }
@@ -6848,21 +7070,7 @@ pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliE
         &events,
     )
     .map_err(|error| CliError::internal(error.to_string()))?;
-    let mut value =
-        serde_json::to_value(workspace).map_err(|error| CliError::internal(error.to_string()))?;
-    value["creation_audit"] = run["data"]
-        .get("creation_audit")
-        .cloned()
-        .unwrap_or(Value::Null);
-    value["asterdoc"] = run["data"]
-        .get("asterdoc")
-        .cloned()
-        .unwrap_or(Value::Null);
-    value["design_checks"] = run["data"]
-        .get("design_checks")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    Ok(value)
+    Ok(workspace)
 }
 
 fn inspect_workflow_tree(input: &InspectTreeInput, data_dir: &Path) -> Result<Value, CliError> {
@@ -7892,14 +8100,85 @@ fn parse_input<T: DeserializeOwned>(path: &str) -> Result<T, CliError> {
     serde_json::from_str(&raw)
         .map_err(|e| CliError::input(format!("JSON 输入不符合该工具的结构：{e}")))
 }
-fn parse_args(args: &[String]) -> Result<&str, CliError> {
-    if args.len() != 2 || args[0] != "--input" {
-        return Err(CliError::input("命令格式：labworkbench <tool> --input <json-file|->；用 `labworkbench tools --json` 查看工具，用 `labworkbench schema <tool>` 查看字段定义"));
-    }
-    Ok(&args[1])
+#[derive(Debug)]
+struct Invocation<'a> {
+    input: &'a str,
+    /// `--diagnostics json` was requested; envelopes then carry a structured
+    /// `diagnostics` array.
+    diagnostics: bool,
 }
-fn output(tool: &str, result: Value) {
-    println!("{}", json!({"ok":true,"tool":tool,"result":result}));
+
+fn parse_args(args: &[String]) -> Result<Invocation<'_>, CliError> {
+    let mut input: Option<&str> = None;
+    let mut diagnostics = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--input" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(CliError::input("--input 需要 JSON 文件路径或 -"));
+                };
+                if input.replace(value.as_str()).is_some() {
+                    return Err(CliError::input("--input 只能出现一次"));
+                }
+                index += 2;
+            }
+            "--diagnostics" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(CliError::input("--diagnostics 需要参数：json"));
+                };
+                if value != "json" {
+                    return Err(CliError::input(format!(
+                        "--diagnostics 只支持 json，收到：{value}"
+                    )));
+                }
+                diagnostics = true;
+                index += 2;
+            }
+            other => {
+                return Err(CliError::input(format!(
+                    "未知参数：{other}；格式：labworkbench <tool> --input <json-file|-> [--diagnostics json]"
+                )));
+            }
+        }
+    }
+    let Some(input) = input else {
+        return Err(CliError::input("命令格式：labworkbench <tool> --input <json-file|->；用 `labworkbench tools --json` 查看工具，用 `labworkbench schema <tool>` 查看字段定义"));
+    };
+    Ok(Invocation { input, diagnostics })
+}
+fn output(tool: &str, result: Value, diagnostics: bool) {
+    println!("{}", success_envelope(tool, result, diagnostics));
+}
+
+fn success_envelope(tool: &str, result: Value, diagnostics: bool) -> Value {
+    let derived = if diagnostics {
+        result_diagnostics(&result)
+    } else {
+        Vec::new()
+    };
+    let mut envelope = json!({"ok":true,"tool":tool,"result":result});
+    if diagnostics {
+        envelope["diagnostics"] = Value::Array(derived);
+    }
+    envelope
+}
+
+/// Read-only validations (`agent_edit.validate`, `semantic.validate`, …) return
+/// their findings inside a successful result. Surface the same entries as
+/// structured diagnostics so one flag covers both envelopes.
+fn result_diagnostics(result: &Value) -> Vec<Value> {
+    result
+        .get("issues")
+        .and_then(Value::as_array)
+        .map(|issues| {
+            issues
+                .iter()
+                .map(Diagnostic::from_legacy_json)
+                .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 fn ensure_project(db: &Connection, id: &str) -> Result<(), CliError> {
     if !has_kind(db, id, "project")? {
@@ -8479,6 +8758,7 @@ pub fn run(args: &[String], data_dir: &Path) -> i32 {
             return fail(
                 "schema",
                 CliError::input("格式：labworkbench schema <tool>"),
+                false,
             );
         }
         return match schema(&args[1]) {
@@ -8492,39 +8772,87 @@ pub fn run(args: &[String], data_dir: &Path) -> i32 {
             None => fail(
                 &args[1],
                 CliError::missing("未知工具；请运行 `labworkbench tools --json`"),
+                false,
             ),
         };
     }
     let tool = args[0].as_str();
-    let path = match parse_args(&args[1..]) {
+    let requested_diagnostics = args.iter().any(|arg| arg == "--diagnostics");
+    let invocation = match parse_args(&args[1..]) {
         Ok(v) => v,
-        Err(e) => return fail(tool, e),
+        Err(e) => return fail(tool, e, requested_diagnostics),
     };
-    let result = dispatch(tool, path, data_dir);
+    let result = dispatch(tool, invocation.input, data_dir);
     match result {
         Ok(v) => {
-            output(tool, v);
+            output(tool, v, invocation.diagnostics);
             0
         }
-        Err(e) => fail(tool, e),
+        Err(e) => fail(tool, e, invocation.diagnostics),
     }
 }
-fn fail(tool: &str, e: CliError) -> i32 {
+fn fail(tool: &str, e: CliError, diagnostics: bool) -> i32 {
+    let exit = e.exit;
+    println!("{}", error_envelope(tool, &e, diagnostics));
+    exit
+}
+
+fn error_envelope(tool: &str, e: &CliError, diagnostics: bool) -> Value {
     let mut error = json!({"code":e.code,"message":e.message});
-    if let Some(path) = e.path {
+    if let Some(path) = &e.path {
         error["path"] = json!(path);
     }
     if let Some(current_version) = e.current_version {
         error["current_version"] = json!(current_version);
     }
-    if let Some(current_version_id) = e.current_version_id {
+    if let Some(current_version_id) = &e.current_version_id {
         error["current_version_id"] = json!(current_version_id);
     }
     if !e.issues.is_empty() {
-        error["issues"] = Value::Array(e.issues);
+        error["issues"] = Value::Array(e.issues.clone());
     }
-    println!("{}", json!({"ok":false,"tool":tool,"error":error}));
-    e.exit
+    let mut envelope = json!({"ok":false,"tool":tool,"error":error});
+    if diagnostics {
+        envelope["diagnostics"] = Value::Array(cli_diagnostics(e));
+    }
+    envelope
+}
+
+/// Normalize the legacy failure shape into structured diagnostics. Declared
+/// `issues` win; otherwise the error itself becomes one blocking diagnostic.
+fn cli_diagnostics(e: &CliError) -> Vec<Value> {
+    let mut diagnostics: Vec<Diagnostic> = e
+        .issues
+        .iter()
+        .map(Diagnostic::from_legacy_json)
+        .collect();
+    if diagnostics.is_empty() {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticSeverity::Blocking,
+                e.code,
+                e.path.clone().unwrap_or_default(),
+                e.message.clone(),
+            )
+            .with_next_action(next_action_for(e.code)),
+        );
+    }
+    diagnostics
+        .iter()
+        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+        .collect()
+}
+
+fn next_action_for(code: &str) -> &'static str {
+    match code {
+        "REVISION_CONFLICT" | "VERSION_CONFLICT" => "重新读取当前 revision 后重试",
+        "NOT_FOUND" => "确认对象 id 存在后重试",
+        "INVALID_INPUT" | "INVALID_PROPOSAL" | "INVALID_BINDING" | "UNIT_MISMATCH" => {
+            "修正输入字段后重试"
+        }
+        "INTERNAL" => "记录 tool 与输入，报告内部错误",
+        _ => "按 error.diagnostics 修正后重试",
+    }
 }
 fn print_help() {
     println!("AsterLab typed CLI\n\n  labworkbench tools --json\n  labworkbench schema <tool>\n  labworkbench <tool> --input <json-file|->\n\nAll tool inputs use a strict per-command schema; unknown fields are rejected. All output is one JSON envelope on stdout. Data directory follows LABWORKBENCH_DATA_DIR (default: ./data).");
@@ -8831,6 +9159,199 @@ fn agent_edit_cli_error(error: AgentEditError) -> CliError {
         current_version: error.current_version,
         current_version_id: error.current_version_id,
         issues,
+    }
+}
+
+/// Read-only view for `step.edit` validation.
+struct CliStepEditStore<'a> {
+    conn: &'a Connection,
+}
+
+fn step_edit_block_version(
+    conn: &Connection,
+    version_id: &str,
+) -> Result<Option<StoredEditBlock>, String> {
+    let row = conn
+        .query_row(
+            "SELECT revision,parent_id,project_id,data_json FROM records \
+             WHERE kind='protocol_block_version' AND id=?1",
+            [version_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((revision, parent, project, raw)) = row else {
+        return Ok(None);
+    };
+    let data: ProtocolBlockVersionData = serde_json::from_str(&raw).map_err(|error| {
+        format!("protocol_block_version {version_id} data_json 无效：{error}")
+    })?;
+    Ok(Some(StoredEditBlock {
+        version_id: version_id.to_owned(),
+        block_id: parent.unwrap_or_else(|| data.block_id.clone()),
+        revision,
+        project_id: project,
+        data,
+    }))
+}
+
+fn step_edit_block_head(
+    conn: &Connection,
+    block_id: &str,
+) -> Result<Option<StoredBlockHead>, String> {
+    conn.query_row(
+        "SELECT id,revision FROM records \
+         WHERE kind='protocol_block_version' AND parent_id=?1 \
+         ORDER BY revision DESC LIMIT 1",
+        [block_id],
+        |row| {
+            Ok(StoredBlockHead {
+                block_id: block_id.to_owned(),
+                version_id: row.get(0)?,
+                revision: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
+impl StepEditStore for CliStepEditStore<'_> {
+    fn step_block_version(&self, version_id: &str) -> Result<Option<StoredEditBlock>, String> {
+        step_edit_block_version(self.conn, version_id)
+    }
+
+    fn step_block_head(&self, block_id: &str) -> Result<Option<StoredBlockHead>, String> {
+        step_edit_block_head(self.conn, block_id)
+    }
+}
+
+/// Transactional view for `step.edit` commit: the head re-read, the
+/// idempotency lookup and every append share one `BEGIN IMMEDIATE` transaction.
+struct CliStepEditCommitStore<'a, 'conn> {
+    tx: &'a Transaction<'conn>,
+}
+
+impl StepEditStore for CliStepEditCommitStore<'_, '_> {
+    fn step_block_version(&self, version_id: &str) -> Result<Option<StoredEditBlock>, String> {
+        step_edit_block_version(self.tx, version_id)
+    }
+
+    fn step_block_head(&self, block_id: &str) -> Result<Option<StoredBlockHead>, String> {
+        step_edit_block_head(self.tx, block_id)
+    }
+}
+
+impl StepEditCommitStore for CliStepEditCommitStore<'_, '_> {
+    fn step_store(&self) -> &dyn StepEditStore {
+        self
+    }
+
+    fn find_step_commit(
+        &self,
+        idempotency_key: &str,
+    ) -> Result<Vec<CommittedStepEdit>, String> {
+        let mut statement = self
+            .tx
+            .prepare(
+                "SELECT id,revision,data_json FROM records \
+                 WHERE kind='protocol_block_version' \
+                   AND json_extract(data_json,'$.step_edit.idempotency_key')=?1 \
+                 ORDER BY revision ASC, rowid ASC",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([idempotency_key], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (version_id, revision, raw) = row.map_err(|error| error.to_string())?;
+            let data: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+            out.push(CommittedStepEdit {
+                version_id,
+                revision,
+                provenance: data["step_edit"].clone(),
+            });
+        }
+        Ok(out)
+    }
+
+    fn timestamp(&self) -> String {
+        stamp()
+    }
+
+    fn append_block_version(
+        &mut self,
+        block_id: &str,
+        revision: i64,
+        data: Value,
+    ) -> Result<(String, i64), String> {
+        let (kind, project, _, _, _) = kind_id(self.tx, block_id)
+            .map_err(|error| error.message)?
+            .ok_or_else(|| format!("步骤块不存在：{block_id}"))?;
+        if kind != "protocol_block" {
+            return Err(format!("{block_id} 不是 protocol_block 记录"));
+        }
+        let record = insert(
+            self.tx,
+            "protocol_block_version",
+            project.as_deref(),
+            Some(block_id),
+            revision,
+            &data,
+        )
+        .map_err(|error| error.message)?;
+        Ok((
+            record["id"].as_str().unwrap_or_default().to_owned(),
+            record["revision"].as_i64().unwrap_or(revision),
+        ))
+    }
+}
+
+/// `step.edit`: validate (no `confirmation`) or commit (with `confirmation`)
+/// block-level structural edits in one command.
+pub(crate) fn step_edit_command(db: &mut Connection, input: Value) -> Result<Value, CliError> {
+    let request: StepEditRequest = serde_json::from_value(input)
+        .map_err(|error| CliError::input(format!("step.edit 载荷无效：{error}")))?;
+    if request.confirmation.is_none() {
+        let result = step_edit_validate_request(&request, &CliStepEditStore { conn: db })
+            .map_err(CliError::internal)?;
+        return serde_json::to_value(result).map_err(|error| CliError::internal(error.to_string()));
+    }
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let outcome = {
+        let mut store = CliStepEditCommitStore { tx: &tx };
+        step_edit_commit_request(&request, &mut store)
+    };
+    match outcome {
+        Ok(result) => {
+            tx.commit()
+                .map_err(|error| CliError::internal(error.to_string()))?;
+            serde_json::to_value(result).map_err(|error| CliError::internal(error.to_string()))
+        }
+        Err(StepEditCommitError::Rejected(error)) => {
+            tx.rollback().ok();
+            Err(agent_edit_cli_error(error))
+        }
+        Err(StepEditCommitError::Store(message)) => {
+            tx.rollback().ok();
+            Err(CliError::internal(message))
+        }
     }
 }
 
@@ -9332,6 +9853,25 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         "run.workspace" => {
             let i: IdInput = parse_input(path)?;
             Ok(run_workspace(&db, &i.id)?)
+        }
+        "workflow.progress" => {
+            let i: WorkflowProgressInput = parse_input(path)?;
+            if i.run_id.trim().is_empty() {
+                return Err(CliError::input("run_id 不能为空"));
+            }
+            let workspace: asterlab_core::run_workspace::RunWorkspace =
+                serde_json::from_value(run_workspace(&db, &i.run_id)?)
+                    .map_err(|e| CliError::internal(e.to_string()))?;
+            let query = asterlab_core::sample_progress::SampleProgressQuery {
+                step_path: i.step_path,
+                timepoint: i.timepoint,
+                sample_id: i.sample_id,
+                sample_ids: i.sample_ids,
+            };
+            serde_json::to_value(asterlab_core::sample_progress::build_from_workspace(
+                &workspace, &query,
+            ))
+            .map_err(|e| CliError::internal(e.to_string()))
         }
         "run.create" => {
             require_trusted_writer(tool)?;
@@ -9869,6 +10409,10 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let i: Value = parse_input(path)?;
             commit_agent_edit(&mut db, i)
         }
+        "step.edit" => {
+            let i: Value = parse_input(path)?;
+            step_edit_command(&mut db, i)
+        }
         "plate.create" => {
             let i: PlateCreate = parse_input(path)?;
             let (kind, project, _, _, _) =
@@ -10012,6 +10556,14 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let r = create_execution_event_tx(&tx, &i.run_id, &payload)?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
             Ok(json!({"record":r}))
+        }
+        "readout.submit" => {
+            let i: ReadoutSubmitRequest = parse_input(path)?;
+            submit_readout(&mut db, &i)
+        }
+        "readout.batch" => {
+            let i: ReadoutBatchRequest = parse_input(path)?;
+            submit_readout_batch(&mut db, &i)
         }
         "formula.create" => {
             let i: FormulaCreate = parse_input(path)?;
@@ -10332,7 +10884,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":true})
         }
         "protocol_block_version" => {
-            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"module_contract":{"type":["object","null"]},"module_origin":{"type":["string","null"],"enum":["imported","derived","local_custom",null]},"module_contract_authority":{"type":["string","null"],"enum":["current","source_only",null]},"catalog_review":{"type":["object","null"]},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
+            json!({"type":"object","additionalProperties":false,"required":["block_id","version","summary","parameter_slots","steps"],"properties":{"block_id":{"type":"string"},"version":{"type":"integer","minimum":1},"summary":{"type":"string"},"module_contract":{"type":["object","null"]},"module_origin":{"type":["string","null"],"enum":["imported","derived","local_custom",null]},"module_contract_authority":{"type":["string","null"],"enum":["current","source_only",null]},"catalog_review":{"type":["object","null"]},"based_on_version_id":{"type":["string","null"]},"step_edit":{"type":["object","null"]},"parameter_slots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","label","value_type","unit","required"],"properties":{"key":{"type":"string"},"label":{"type":"string"},"value_type":{"type":"string","enum":["text","number","integer","boolean"]},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"steps":{"type":"array","items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction","parameter_refs"],"properties":{"kind":{"const":"text"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameter_refs":{"type":"array","items":{"type":"string"}},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}}}},{"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id","bindings"],"properties":{"kind":{"const":"block_use"},"use_id":{"type":"string"},"block_version_id":{"type":"string"},"bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","source_slot","unit"],"properties":{"slot":{"type":"string"},"value":{},"source_slot":{"type":["string","null"]},"unit":{"type":["string","null"]}}}}}}]}}}})
         }
         "plate" => {
             json!({"type":"object","additionalProperties":false,"required":["name","format","rows","columns"],"properties":{"name":{"type":"string"},"format":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48},"assay_id":{"type":["string","null"]},"timepoint":{"type":["string","null"]}}})
@@ -10389,6 +10941,70 @@ fn any_record_schema() -> Value {
     ];
     json!({"oneOf":kinds.iter().map(|k|record_schema(k)).collect::<Vec<_>>()})
 }
+fn workflow_progress_output_schema() -> Value {
+    let status = json!({"type":"string","enum":["not_started","in_progress","completed","failed","skipped"]});
+    let attempt = json!({
+        "type":"object","additionalProperties":false,
+        "required":["attempt","status","event_ids","last_event_at","deviation"],
+        "properties":{
+            "attempt":{"type":"integer","minimum":1},
+            "status":status.clone(),
+            "event_ids":{"type":"array","items":{"type":"string"}},
+            "last_event_at":{"type":["string","null"]},
+            "deviation":{"type":"boolean"}
+        }
+    });
+    let sample = json!({
+        "type":"object","additionalProperties":false,
+        "required":["sample_id","status","attempt","attempt_count","last_event_at","attempts"],
+        "properties":{
+            "sample_id":{"type":"string"},
+            "status":status.clone(),
+            "attempt":{"type":["integer","null"],"minimum":1},
+            "attempt_count":{"type":"integer","minimum":0},
+            "last_event_at":{"type":["string","null"]},
+            "attempts":{"type":"array","items":attempt}
+        }
+    });
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["schema_version","run_id","sample_ids","steps","issues"],
+        "properties":{
+            "schema_version":{"type":"integer","minimum":1},
+            "run_id":{"type":"string"},
+            "sample_ids":{"type":"array","items":{"type":"string"}},
+            "steps":{"type":"array","items":{
+                "type":"object","additionalProperties":false,
+                "required":["step_path","timepoint","status","complete","total_samples","completed_samples","failed_samples","skipped_samples","in_progress_samples","not_started_samples","last_event_at","samples"],
+                "properties":{
+                    "step_path":{"type":"string"},
+                    "timepoint":{"type":["string","null"]},
+                    "status":status,
+                    "complete":{"type":"boolean"},
+                    "total_samples":{"type":"integer","minimum":0},
+                    "completed_samples":{"type":"integer","minimum":0},
+                    "failed_samples":{"type":"integer","minimum":0},
+                    "skipped_samples":{"type":"integer","minimum":0},
+                    "in_progress_samples":{"type":"integer","minimum":0},
+                    "not_started_samples":{"type":"integer","minimum":0},
+                    "last_event_at":{"type":["string","null"]},
+                    "samples":{"type":"array","items":sample}
+                }
+            }},
+            "issues":{"type":"array","items":{
+                "type":"object","additionalProperties":false,
+                "required":["code","message","step_path","sample_id","event_id"],
+                "properties":{
+                    "code":{"type":"string"},
+                    "message":{"type":"string"},
+                    "step_path":{"type":["string","null"]},
+                    "sample_id":{"type":["string","null"]},
+                    "event_id":{"type":["string","null"]}
+                }
+            }}
+        }
+    })
+}
 fn result_schema(tool: &str) -> Value {
     let arr = |kind: &str| json!({"type":"object","additionalProperties":false,"required":["records"],"properties":{"records":{"type":"array","items":record_schema(kind)}}});
     let asterdoc_version = || json!({"type":"object","additionalProperties":true,"required":["design_id","revision","source","source_hash","schema_version","compiler_version"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source":{"type":"string"},"source_hash":{"type":"string"},"schema_version":{"type":"integer","minimum":1},"compiler_version":{"type":"string"},"design_revision":{"type":"integer","minimum":0},"operation_id":{"type":["string","null"]},"actor_id":{"type":["string","null"]},"created_at":{"type":["string","null"]}}});
@@ -10414,6 +11030,7 @@ fn result_schema(tool: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["run_id","design_id","design_version_id","design_revision","frozen_design","protocol_version_id","status","scopes","steps","tasks","occurrences","materials","plates","events"],"properties":{"run_id":{"type":"string"},"design_id":{"type":"string"},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"frozen_design":{"type":"object","additionalProperties":true},"protocol_version_id":{"type":["string","null"]},"status":{"type":"string"},"scopes":{"type":"array","items":{"type":"object","additionalProperties":true}},"steps":{"type":"array","items":{"type":"object","additionalProperties":true}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},"occurrences":{"type":"array","items":{"type":"object","additionalProperties":true}},"materials":{"type":"array","items":{"type":"object","additionalProperties":true}},"plates":{"type":"array","items":{"type":"object","additionalProperties":true}},"events":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
         }
         "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["designId","revision","design","roots","order","precedes","issues"],"properties":{"designId":{"type":"string"},"revision":{"type":"integer","minimum":0},"runId":{"type":"string"},"design":{"type":"boolean"},"roots":{"type":"array","items":{"type":"object","additionalProperties":true}},"order":{"type":"array","items":{"type":"string"}},"precedes":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"issues":{"type":"array","items":{"type":"string"}}}}),
+        "workflow.progress" => workflow_progress_output_schema(),
         "task.create" => one("task"),
         "task.set_status" => one("task"),
         "protocol.list" => arr("protocol"),
@@ -10443,10 +11060,16 @@ fn result_schema(tool: &str) -> Value {
         "agent_edit.commit" => {
             json!({"type":"object","additionalProperties":false,"required":["schema_version","proposal_id","proposal_digest","target","previous_version_id","new_version_id","new_revision","applied","invalidated_refs","confirmed_by","committed_at","idempotency_key","replayed"],"properties":{"schema_version":{"type":"integer"},"proposal_id":{"type":"string"},"proposal_digest":{"type":"string"},"target":{"type":"object","additionalProperties":true},"previous_version_id":{"type":"string"},"new_version_id":{"type":"string"},"new_revision":{"type":"integer"},"applied":{"type":"array","items":{"type":"object","additionalProperties":true}},"invalidated_refs":{"type":"array","items":{"type":"string"}},"confirmed_by":{"type":"string"},"committed_at":{"type":"string"},"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}})
         }
+        "step.edit" => json!({"oneOf":[
+            {"type":"object","additionalProperties":false,"required":["schema_version","edit_id","edit_digest","block_version_id","block_id","current_revision","status","requires_confirmation","ops","blocks","issues","invalidated_refs"],"properties":{"schema_version":{"type":"integer"},"edit_id":{"type":"string"},"edit_digest":{"type":"string"},"block_version_id":{"type":"string"},"block_id":{"type":"string"},"current_revision":{"type":"integer"},"status":{"type":"string","enum":["valid","needs_confirmation","blocked"]},"requires_confirmation":{"type":"boolean"},"confirmation_prompt":{"type":["string","null"]},"ops":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["op","path","changed","description"],"properties":{"op":{"type":"string","enum":["insert","reorder","reuse","bind"]},"path":{"type":"string"},"changed":{"type":"boolean"},"description":{"type":"string"}}}},"blocks":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["block_id","based_on_version_id","previous_version","new_version","order"],"properties":{"block_id":{"type":"string"},"based_on_version_id":{"type":"string"},"previous_version":{"type":"integer"},"new_version":{"type":"integer"},"order":{"type":"array","items":{"type":"string"}}}}}},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}},"invalidated_refs":{"type":"array","items":{"type":"string"}}},
+            {"type":"object","additionalProperties":false,"required":["schema_version","edit_id","edit_digest","block_version_id","block_id","previous_version_id","new_root_block_version_id","new_revision","created_versions","invalidated_refs","confirmed_by","committed_at","idempotency_key","replayed"],"properties":{"schema_version":{"type":"integer"},"edit_id":{"type":"string"},"edit_digest":{"type":"string"},"block_version_id":{"type":"string"},"block_id":{"type":"string"},"previous_version_id":{"type":"string"},"new_root_block_version_id":{"type":"string"},"new_revision":{"type":"integer"},"created_versions":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["block_id","based_on_version_id","version_id","version"],"properties":{"block_id":{"type":"string"},"based_on_version_id":{"type":"string"},"version_id":{"type":"string"},"version":{"type":"integer"}}}},"invalidated_refs":{"type":"array","items":{"type":"string"}},"confirmed_by":{"type":"string"},"committed_at":{"type":"string"},"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}}
+        ]}),
         "plate.create" => one("plate"),
         "well.set" => one("well"),
         "note.create" => one("note"),
         "execution_event.create" => one("execution_event"),
+        "readout.submit" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}}),
+        "readout.batch" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed","accepted"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"},"accepted":{"type":"integer","minimum":1}}}),
         "formula.create" => one("formula"),
         "formula.revise" => one("formula"),
         "table.create" => one("library_table"),
@@ -10499,12 +11122,18 @@ fn result_schema(tool: &str) -> Value {
         _ => json!({"type":"object"}),
     }
 }
+fn diagnostic_schema() -> Value {
+    json!({"type":"object","additionalProperties":false,"required":["path","code","severity","message","affects","next_action","source"],"properties":{"path":{"type":"string"},"code":{"type":"string"},"severity":{"type":"string","enum":["blocking","needs_confirmation","advisory"]},"message":{"type":"string"},"affects":{"type":"array","items":{"type":"string"}},"next_action":{"type":"string"},"source":{"type":"string","enum":["user_confirmed","imported_record","referenced_protocol","derived","agent_suggestion","unknown"]}}})
+}
+
 fn output_schema(tool: &str) -> Value {
-    let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool)}});
-    let error = if matches!(tool, "agent_edit.validate" | "agent_edit.commit") {
-        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}}}})
+    let success = json!({"type":"object","additionalProperties":false,"required":["ok","tool","result"],"properties":{"ok":{"const":true},"tool":{"const":tool},"result":result_schema(tool),"diagnostics":{"type":"array","items":diagnostic_schema()}}});
+    let error = if matches!(tool, "agent_edit.validate" | "agent_edit.commit" | "step.edit") {
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_PROPOSAL","INVALID_BINDING","UNIT_MISMATCH","STALE_REFERENCE","FORBIDDEN_FIELD","VERSION_CONFLICT","CONFIRMATION_REQUIRED","CONFIRMATION_MISMATCH","IDEMPOTENCY_MISMATCH","INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"path":{"type":["string","null"]},"current_version":{"type":["integer","null"]},"current_version_id":{"type":["string","null"]},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
+    } else if matches!(tool, "readout.submit" | "readout.batch") {
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"},"issues":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string"},"message":{"type":"string"}}}}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
     } else {
-        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}}}})
+        json!({"type":"object","additionalProperties":false,"required":["ok","tool","error"],"properties":{"ok":{"const":false},"tool":{"const":tool},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"]},"message":{"type":"string"}}},"diagnostics":{"type":"array","items":diagnostic_schema()}}})
     };
     json!({"oneOf":[success,error]})
 }
@@ -10614,6 +11243,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["design_id","title"],"properties":{"design_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]}}})
         }
         "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"run_id":{"type":"string"}}}),
+        "workflow.progress" => json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"step_path":{"type":"string","minLength":1,"maxLength":500,"description":"只看一个冻结步骤"},"timepoint":{"type":"string","minLength":1,"maxLength":100,"description":"只看该步骤的一个具体冻结时间点；省略时只返回事件实际携带的分组"},"sample_id":{"type":"string","minLength":1,"maxLength":120,"description":"只看一个样本"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120},"description":"仅与 step_path 和具体 timepoint 同时提供时，为该分组补入 not_started 样本"}}}),
         "task.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","scheduled_date"],"properties":{"project_id":{"type":"string"},"run_id":{"type":["string","null"]},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":"string","minLength":1,"format":"date"},"status":{"type":"string","enum":["planned","in_progress","done","blocked"]},"notes":{"type":"string"}}})
         }
@@ -10632,6 +11262,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         "agent_edit.commit" => {
             json!({"type":"object","additionalProperties":false,"required":["proposal","proposal_digest","idempotency_key","confirmed_by"],"properties":{"schema_version":{"type":"integer"},"proposal":{"type":"object"},"proposal_digest":{"type":"string"},"idempotency_key":{"type":"string"},"confirmed_by":{"type":"string"},"acknowledged":{"type":"array","items":{"type":"string"}},"note":{"type":["string","null"]}}})
         }
+        "step.edit" => {
+            json!({"type":"object","additionalProperties":false,"required":["edit_id","block_version_id","expected_version","origin","ops"],"properties":{"schema_version":{"type":"integer","minimum":1},"edit_id":{"type":"string","minLength":1,"maxLength":120},"block_version_id":{"type":"string","minLength":1},"expected_version":{"type":"integer","minimum":1},"origin":{"type":"object","additionalProperties":false,"required":["source"],"properties":{"source":{"type":"string","enum":["user","agent","tool"]},"rationale":{"type":["string","null"]}}},"ops":{"type":"array","minItems":1,"maxItems":100,"items":step_edit_op_input_schema()},"confirmation":{"type":"object","additionalProperties":false,"required":["edit_digest","confirmed_by","idempotency_key"],"properties":{"edit_digest":{"type":"string","minLength":1},"confirmed_by":{"type":"string","minLength":1},"idempotency_key":{"type":"string","minLength":1},"note":{"type":["string","null"]}}}}})
+        }
         "plate.create" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","name","format","rows","columns"],"properties":{"run_id":{"type":"string"},"assay_id":{"type":"string","description":"可选；必须是 Run 冻结设计中的检测 ID"},"timepoint":{"type":"string","description":"可选；标注该实际板图所用的检测时间点，需与冻结设计一致"},"name":{"type":"string","minLength":1,"maxLength":100,"pattern":"\\S"},"format":{"type":"string","enum":["6","12","24","48","96","384","custom"]},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48}}})
         }
@@ -10642,7 +11275,13 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+        }
+        "readout.submit" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","endpoint","protocol_version_id"],"oneOf":[{"required":["value"]},{"required":["qualifier"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160}}})
+        }
+        "readout.batch" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","protocol_version_id","plate_id","schema_id"],"oneOf":[{"required":["cells"]},{"required":["csv"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"plate_id":{"type":"string","minLength":1,"maxLength":120,"description":"本次 Run 中唯一的孔板 ID；缺省无法归属孔位"},"schema_id":{"type":"string","minLength":1,"maxLength":120},"schema_version":{"type":"integer","enum":[1]},"assay_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"batch_id":{"type":["string","null"],"maxLength":120},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160},"cells":{"type":"array","maxItems":1000,"items":{"type":"object","additionalProperties":false,"required":["row","column","field"],"properties":{"row":{"type":"integer","minimum":0},"column":{"type":"integer","minimum":0},"field":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":["number","null"]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"group":{"type":["string","null"],"maxLength":120},"replicate":{"type":["integer","null"],"minimum":0},"status":{"type":["string","null"],"enum":["raw","missing",null]}}}},"csv":{"type":"string","maxLength":1000000,"description":"表头 row,column,field[,value,unit,sample_id,group,replicate,status]；行列从 0 开始"}}})
         }
         "formula.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","expression"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"expression":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -10797,19 +11436,43 @@ fn step_binding_input_schema() -> Value {
         }
     })
 }
+fn text_step_input_schema() -> Value {
+    json!({"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction"],"properties":{
+        "kind":{"const":"text"},"use_id":{"type":"string","minLength":1,"maxLength":80},
+        "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
+        "instruction":{"type":"string","minLength":1,"maxLength":4000,"pattern":"\\S"},
+        "parameter_refs":{"type":"array","maxItems":100,"items":{"type":"string"}},
+        "visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},
+        "checks":{"type":"array","maxItems":50,"items":{"type":"object","additionalProperties":false,"required":["check_id","label"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80,"pattern":"\\S"},"label":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},"instruction":{"type":"string","maxLength":2000},"blocking":{"type":"boolean"}}}}
+    }})
+}
 fn protocol_step_input_schema() -> Value {
     json!({"oneOf":[
-        {"type":"object","additionalProperties":false,"required":["kind","use_id","title","instruction"],"properties":{
-            "kind":{"const":"text"},"use_id":{"type":"string","minLength":1,"maxLength":80},
-            "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
-            "instruction":{"type":"string","minLength":1,"maxLength":4000,"pattern":"\\S"},
-            "parameter_refs":{"type":"array","maxItems":100,"items":{"type":"string"}},
-            "visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},
-            "checks":{"type":"array","maxItems":50,"items":{"type":"object","additionalProperties":false,"required":["check_id","label"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80,"pattern":"\\S"},"label":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},"instruction":{"type":"string","maxLength":2000},"blocking":{"type":"boolean"}}}}
-        }},
+        text_step_input_schema(),
         {"type":"object","additionalProperties":false,"required":["kind","use_id","block_version_id"],"properties":{
             "kind":{"const":"block_use"},"use_id":{"type":"string","minLength":1,"maxLength":80},
             "block_version_id":{"type":"string"},"bindings":{"type":"array","maxItems":100,"items":step_binding_input_schema()}
+        }}
+    ]})
+}
+fn step_edit_op_input_schema() -> Value {
+    json!({"oneOf":[
+        {"type":"object","additionalProperties":false,"required":["op","path","position","step"],"properties":{
+            "op":{"const":"insert"},"path":{"type":"string","minLength":1},"position":{"type":"integer","minimum":0},
+            "step":text_step_input_schema()
+        }},
+        {"type":"object","additionalProperties":false,"required":["op","path","order"],"properties":{
+            "op":{"const":"reorder"},"path":{"type":"string","minLength":1},
+            "order":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","minLength":1}}
+        }},
+        {"type":"object","additionalProperties":false,"required":["op","path","position","use_id","block_version_id"],"properties":{
+            "op":{"const":"reuse"},"path":{"type":"string","minLength":1},"position":{"type":"integer","minimum":0},
+            "use_id":{"type":"string","minLength":1,"maxLength":80},"block_version_id":{"type":"string","minLength":1},
+            "bindings":{"type":"array","maxItems":100,"items":step_binding_input_schema()}
+        }},
+        {"type":"object","additionalProperties":false,"required":["op","path","bindings"],"properties":{
+            "op":{"const":"bind"},"path":{"type":"string","minLength":1},
+            "bindings":{"type":"array","minItems":1,"maxItems":100,"items":step_binding_input_schema()}
         }}
     ]})
 }
@@ -10848,6 +11511,7 @@ fn tool_specs() -> Vec<Value> {
         "run.revise",
         "run.workspace",
         "workflow.inspect_tree",
+        "workflow.progress",
         "task.create",
         "task.set_status",
         "protocol.list",
@@ -10876,10 +11540,13 @@ fn tool_specs() -> Vec<Value> {
         "protocol.revise",
         "agent_edit.validate",
         "agent_edit.commit",
+        "step.edit",
         "plate.create",
         "well.set",
         "note.create",
         "execution_event.create",
+        "readout.submit",
+        "readout.batch",
         "formula.create",
         "formula.revise",
         "table.create",
@@ -10918,6 +11585,7 @@ fn tool_writes(tool: &str) -> bool {
             | "design.get"
             | "run.list"
             | "workflow.inspect_tree"
+            | "workflow.progress"
             | "protocol.list"
             | "protocol.block.list"
             | "protocol.block.get"
@@ -10962,6 +11630,7 @@ fn tool_description(tool: &str) -> &'static str {
         }
         "run.list" => "按项目查询实验运行。",
         "workflow.inspect_tree" => "只读投影 Design（可选 Run）的 Use/Definition/Occurrence 层级树；由 Rust Core 直接计算，不依赖桌面应用。",
+        "workflow.progress" => "只读投影一个 Run 每个冻结步骤的样本矩阵：每个样本的当前状态、attempt 历史与最后事件时间；步骤完成只在全部样本完成时成立。",
         "run.create" => "从设计当前版本创建运行并固定设计/Protocol 版本引用；仅受信任的本地写入端可调用，Agent 不得自行创建 Run。",
         "run.set_status" => "更新运行状态；必须提供读取时的 expected_revision。Protocol 必填参数未确认时拒绝开始运行。",
         "run.revise" => "按 expected_revision 修订运行名称或计划日期；设计版本、Protocol 清单、材料清单和重复关系不可改写。",
@@ -10993,10 +11662,13 @@ fn tool_description(tool: &str) -> &'static str {
         "protocol.revise" => "追加 Protocol 新版本；参数值可改变而不复制步骤块；必须提供 expected_version。",
         "agent_edit.validate" => "只读校验 agent 提案：解析绑定、版本和单位，返回 Core 计算的 digest、无效引用与确认提示；不写数据库。",
         "agent_edit.commit" => "提交人工确认过的 agent 提案：单事务重新校验版本并追加一个新版本；过期或并发提案返回 VERSION_CONFLICT，不覆盖旧数据。",
+        "step.edit" => "对步骤块树做 insert/reorder/reuse/bind 级编辑：无 confirmation 时只读校验并返回 plan 与 digest；带 confirmation 时单事务追加新版本。版本号由 Core 生成，冻结版本不改写。",
         "plate.create" => "为实验运行创建指定行列数的空布局。",
         "well.set" => "创建或覆盖一个板孔映射。",
         "note.create" => "向运行追加一条实际记录；事件时间必须显式提供或留空。",
         "execution_event.create" => "向运行追加结构化实际事件；事件时间不确定时留空，材料/测量必须填写明确单位或样本标识。",
+        "readout.submit" => "提交一条读数并映射为一个 measurement 事件；同一 (run_id, step_path, endpoint, sample_id, timepoint) 重复提交返回首次记录。",
+        "readout.batch" => "批量提交表格/孔板读数（cells 或 CSV），逐行校验并在单事务中写入一条事件；任一行失败则不写入。",
         "formula.create" => "保存公式表达式及变量单位说明，不执行公式代码。",
         "formula.revise" => "按 expected_revision 修订公式字段。",
         "table.create" => "创建列名固定、每行长度与列数一致的资料表。",
@@ -11036,6 +11708,7 @@ fn tool_effects(tool: &str) -> &'static str {
         | "run.list"
         | "run.workspace"
         | "workflow.inspect_tree"
+        | "workflow.progress"
         | "protocol.list"
         | "protocol.block.list"
         | "protocol.block.get"
@@ -11061,6 +11734,7 @@ fn tool_effects(tool: &str) -> &'static str {
         "protocol.revise" => "为 Protocol 追加一个不可变的新版本；不覆盖旧正文。",
         "agent_edit.validate" => "只读；不修改数据库。",
         "agent_edit.commit" => "在一个事务中追加一个不可变版本，并记录提案 ID、确认人和版本号；不修改旧版本或冻结 Run。",
+        "step.edit" => "无 confirmation 时只读；带 confirmation 时在一个事务中为每个被改动的步骤块追加一个不可变新版本，子块先于父块，并记录 edit digest 与确认人；不修改旧版本或冻结 Run。",
         "protocol.block.create" => "创建步骤块元数据和不可变 v1；步骤块只引用确切的其他版本。",
         "view.create" | "view.revise" => "保存新的 ViewDocument 版本；不改 Protocol/Run。",
         "view.get" => "只读；不修改数据库。",
@@ -11080,6 +11754,8 @@ fn tool_effects(tool: &str) -> &'static str {
         "well.set" => "新建孔位映射，或按 expected_revision 覆盖一个已有孔位。",
         "note.create" => "为运行追加一条实验记录；不修改既有记录。",
         "execution_event.create" => "为运行追加一条不可覆盖的结构化操作、材料使用、测量、偏差或观察事件。",
+        "readout.submit" => "为运行追加一条 measurement 执行事件；相同幂等键返回已有记录，不重复写入。",
+        "readout.batch" => "在同一事务中为运行追加一条 measurement 执行事件；任一行校验失败则整体回滚。",
         "asset.link" => "读取本地文件元数据并流式计算 sha256；创建或刷新一条 asset_link，并追加 linked 事件；不复制文件。",
         "asset.unlink" => "删除一条 asset_link 引用并追加 unlinked 事件；不删除原文件。",
         "asset.list" | "asset.events" => "只读；不修改数据库。",
@@ -11606,6 +12282,85 @@ pub(crate) fn list_asset_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostics_flag_is_parsed_with_input_in_any_order() {
+        let args = vec![
+            "--input".to_owned(),
+            "in.json".to_owned(),
+            "--diagnostics".to_owned(),
+            "json".to_owned(),
+        ];
+        let invocation = parse_args(&args).unwrap();
+        assert_eq!(invocation.input, "in.json");
+        assert!(invocation.diagnostics);
+
+        let args = vec![
+            "--diagnostics".to_owned(),
+            "json".to_owned(),
+            "--input".to_owned(),
+            "-".to_owned(),
+        ];
+        assert!(parse_args(&args).unwrap().diagnostics);
+
+        let args = vec!["--input".to_owned(), "in.json".to_owned()];
+        assert!(!parse_args(&args).unwrap().diagnostics);
+
+        let args = vec![
+            "--diagnostics".to_owned(),
+            "yaml".to_owned(),
+            "--input".to_owned(),
+            "-".to_owned(),
+        ];
+        assert_eq!(parse_args(&args).unwrap_err().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn error_envelope_carries_structured_diagnostics() {
+        let mut error = CliError::input("run.create 失败");
+        error.path = Some("manifest".to_owned());
+        error.issues = vec![json!("STEP_NOT_MATERIALIZED: cck8/seed")];
+        let envelope = error_envelope("run.create", &error, true);
+        let diagnostics = envelope["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0]["code"], "STEP_NOT_MATERIALIZED");
+        assert_eq!(diagnostics[0]["path"], "cck8/seed");
+        assert_eq!(diagnostics[0]["severity"], "blocking");
+        assert_eq!(diagnostics[0]["source"], "unknown");
+        assert!(diagnostics[0]["next_action"].is_string());
+
+        let plain = error_envelope("run.create", &error, false);
+        assert!(plain.get("diagnostics").is_none());
+
+        let mut bare = CliError::conflict("设计版本已更新；请先重新读取。");
+        bare.path = Some("revision".to_owned());
+        let envelope = error_envelope("design.revise", &bare, true);
+        assert_eq!(envelope["diagnostics"][0]["code"], "REVISION_CONFLICT");
+        assert_eq!(envelope["diagnostics"][0]["path"], "revision");
+        assert_eq!(envelope["diagnostics"][0]["severity"], "blocking");
+        assert_eq!(envelope["diagnostics"][0]["source"], "derived");
+    }
+
+    #[test]
+    fn success_envelope_derives_diagnostics_from_validation_issues() {
+        let result = json!({
+            "valid": false,
+            "issues": [{
+                "code": "unit_mismatch",
+                "path": "operation.temperature",
+                "message": "unit family differs"
+            }]
+        });
+        let envelope = success_envelope("semantic.validate", result.clone(), true);
+        assert_eq!(envelope["diagnostics"].as_array().unwrap().len(), 1);
+        assert_eq!(envelope["diagnostics"][0]["code"], "unit_mismatch");
+        assert_eq!(envelope["diagnostics"][0]["severity"], "blocking");
+        assert_eq!(envelope["diagnostics"][0]["source"], "derived");
+        assert_eq!(envelope["result"], result);
+
+        let plain = success_envelope("semantic.validate", result, false);
+        assert!(plain.get("diagnostics").is_none());
+    }
 
     #[test]
     fn agent_tools_are_discoverable() {
@@ -12857,5 +13612,598 @@ protocol_version_id: protocol-v1
         assert_eq!(error.code, "INVALID_INPUT");
         assert!(error.message.contains("steps[0].operation_spec.operation.volume"));
         assert!(error.message.contains("unit_mismatch"));
+    }
+
+    fn seed_readout_runs(db: &Connection) {
+        db.execute_batch(
+            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('project-1','project',NULL,NULL,1,?1,'now','now')",
+            [json!({"name":"p","description":""}).to_string()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('design-1','design','project-1',NULL,1,?1,'now','now')",
+            [json!({"title":"d"}).to_string()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('version-1','design_version','project-1','design-1',1,?1,'now','now')",
+            [json!({
+                "design_id":"design-1","design_revision":1,
+                "snapshot":{
+                    "title":"d","objective":"o","experimental_unit":"well",
+                    "group_specs":[],"sample_allocations":[],"planned_outputs":[],
+                    "assays":[{"id":"assay-1","title":"A","timepoints":["D1"],
+                        "group_ids":[],"timepoint_relation":"same_physical_sample_repeated"}]
+                }
+            })
+            .to_string()],
+        )
+        .unwrap();
+        let step = json!({
+            "path":"run/read","use_id":"u1","title":"Read","instruction":"read",
+            "parameters":[],"unresolved_parameter_refs":[],
+            "source_block_version_id":"b1","time_scope":"per_timepoint"
+        });
+        for run_id in ["run-1", "run-2"] {
+            db.execute(
+                "INSERT INTO records VALUES(?1,'run','project-1','design-1',1,?2,'now','now')",
+                params![
+                    run_id,
+                    json!({
+                        "title":run_id,"design_version_id":"version-1","design_revision":1,
+                        "status":"in_progress",
+                        "protocol_manifest":[{
+                            "assay_id":"assay-1","assay_title":"A","protocol_version_id":"pv1",
+                            "steps":[step.clone()]
+                        }]
+                    })
+                    .to_string()
+                ],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO records VALUES('plate-1','plate','project-1','run-1',1,?1,'now','now')",
+            [json!({"name":"96","format":"96","rows":8,"columns":12,
+                "assay_id":"assay-1","timepoint":"D1"})
+            .to_string()],
+        )
+        .unwrap();
+    }
+
+    fn readout_submit_request(run_id: &str) -> ReadoutSubmitRequest {
+        ReadoutSubmitRequest {
+            run_id: run_id.to_owned(),
+            step_path: "run/read".to_owned(),
+            endpoint: "od450".to_owned(),
+            protocol_version_id: "pv1".to_owned(),
+            assay_id: Some("assay-1".to_owned()),
+            planned_output_id: None,
+            timepoint: Some("D1".to_owned()),
+            sample_id: Some("S-1".to_owned()),
+            value: Some(1.234),
+            qualifier: None,
+            unit: Some("AU".to_owned()),
+            content: None,
+            occurred_at: None,
+            operator: None,
+        }
+    }
+
+    fn readout_batch_request() -> ReadoutBatchRequest {
+        ReadoutBatchRequest {
+            run_id: "run-1".to_owned(),
+            step_path: "run/read".to_owned(),
+            protocol_version_id: "pv1".to_owned(),
+            plate_id: "plate-1".to_owned(),
+            schema_id: "cck8.plate96.od450.v1".to_owned(),
+            schema_version: 1,
+            assay_id: Some("assay-1".to_owned()),
+            timepoint: Some("D1".to_owned()),
+            batch_id: Some("batch-1".to_owned()),
+            content: None,
+            occurred_at: None,
+            operator: None,
+            cells: vec![
+                asterlab_core::reading_facts::ReadingCellInput {
+                    row: 0,
+                    column: 0,
+                    field: "od450".to_owned(),
+                    value: Some(1.0),
+                    unit: Some("AU".to_owned()),
+                    sample_id: Some("S-1".to_owned()),
+                    group: Some("g1".to_owned()),
+                    replicate: Some(1),
+                    status: None,
+                },
+                asterlab_core::reading_facts::ReadingCellInput {
+                    row: 0,
+                    column: 1,
+                    field: "od450".to_owned(),
+                    value: None,
+                    unit: Some("AU".to_owned()),
+                    sample_id: Some("S-2".to_owned()),
+                    group: Some("g2".to_owned()),
+                    replicate: Some(1),
+                    status: None,
+                },
+            ],
+            csv: None,
+        }
+    }
+
+    fn execution_event_count(db: &Connection) -> i64 {
+        db.query_row(
+            "SELECT COUNT(*) FROM records WHERE kind='execution_event'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    struct StepEditFixture {
+        data_dir: std::path::PathBuf,
+        project_id: String,
+        protocol_version_id: String,
+        root_version_id: String,
+        child_version_id: String,
+        wash_version_id: String,
+        run_id: String,
+    }
+
+    fn seed_step_edit_fixture(db: &mut Connection) -> StepEditFixture {
+        let data_dir = std::env::temp_dir().join(format!("asterlab-step-edit-{}", Uuid::new_v4()));
+        fs::create_dir_all(&data_dir).unwrap();
+        let project = create_project(db, "step edit").unwrap();
+        let project_id = project["id"].as_str().unwrap().to_owned();
+        let child_version_id = {
+            let tx = db.unchecked_transaction().unwrap();
+            let result = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title": "Lysis",
+                    "summary": "lysis",
+                    "parameter_slots": [{
+                        "key": "volume_per_sample",
+                        "label": "Volume per sample",
+                        "value_type": "number",
+                        "unit": "uL",
+                        "required": true
+                    }],
+                    "steps": [{
+                        "kind": "text",
+                        "use_id": "iris",
+                        "title": "Iris",
+                        "instruction": "Aspirate supernatant"
+                    }]
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            result["version"]["id"].as_str().unwrap().to_owned()
+        };
+        let wash_version_id = {
+            let tx = db.unchecked_transaction().unwrap();
+            let result = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title": "Wash",
+                    "summary": "wash",
+                    "steps": [{
+                        "kind": "text",
+                        "use_id": "rinse",
+                        "title": "Rinse",
+                        "instruction": "Rinse once"
+                    }]
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            result["version"]["id"].as_str().unwrap().to_owned()
+        };
+        let root_version_id = {
+            let tx = db.unchecked_transaction().unwrap();
+            let result = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title": "RNA protocol block",
+                    "summary": "root",
+                    "parameter_slots": [{
+                        "key": "volume_per_sample",
+                        "label": "Volume per sample",
+                        "value_type": "number",
+                        "unit": "uL",
+                        "required": true
+                    }],
+                    "steps": [
+                        {"kind": "text", "use_id": "prep", "title": "Prep", "instruction": "Prepare bench"},
+                        {"kind": "block_use", "use_id": "lyse", "block_version_id": child_version_id,
+                         "bindings": [{"slot": "volume_per_sample", "value": 200.0, "unit": "uL"}]}
+                    ]
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            result["version"]["id"].as_str().unwrap().to_owned()
+        };
+        let protocol_version_id = {
+            let tx = db.unchecked_transaction().unwrap();
+            let protocol = insert(
+                &tx,
+                "protocol",
+                Some(&project_id),
+                Some(&project_id),
+                1,
+                &json!({"title": "RNA protocol"}),
+            )
+            .unwrap();
+            let protocol_id = protocol["id"].as_str().unwrap().to_owned();
+            let version = insert(
+                &tx,
+                "protocol_version",
+                Some(&project_id),
+                Some(&protocol_id),
+                1,
+                &json!({
+                    "protocol_id": protocol_id,
+                    "version": 1,
+                    "body": "",
+                    "root_block_version_id": root_version_id,
+                    "root_bindings": []
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            version["id"].as_str().unwrap().to_owned()
+        };
+        let design = create_design_record(db, &project_id, &json!({"title": "d"})).unwrap();
+        let design_id = design["design"]["id"].as_str().unwrap().to_owned();
+        let run = {
+            let tx = db
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            let run = create_run_in_transaction(
+                &tx,
+                &design_id,
+                "run",
+                None,
+                Some(&protocol_version_id),
+                None,
+                None,
+                "independent",
+                None,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            run
+        };
+        StepEditFixture {
+            data_dir,
+            project_id,
+            protocol_version_id,
+            root_version_id,
+            child_version_id,
+            wash_version_id,
+            run_id: run["id"].as_str().unwrap().to_owned(),
+        }
+    }
+
+    fn step_edit_request(fixture: &StepEditFixture) -> Value {
+        json!({
+            "schema_version": 1,
+            "edit_id": "sde-rna-001",
+            "block_version_id": fixture.root_version_id,
+            "expected_version": 1,
+            "origin": {"source": "agent", "rationale": "add a wash substep"},
+            "ops": [{
+                "op": "reuse",
+                "path": "root/lyse",
+                "position": 1,
+                "use_id": "wash",
+                "block_version_id": fixture.wash_version_id,
+                "bindings": []
+            }]
+        })
+    }
+
+    #[test]
+    fn step_edit_schema_is_registered_for_validate_and_commit() {
+        assert!(input_schema("step.edit").is_some());
+        let ops = input_schema("step.edit").unwrap()["properties"]["ops"].clone();
+        let variants = ops["items"]["oneOf"].as_array().unwrap();
+        let kinds: Vec<&str> = variants
+            .iter()
+            .map(|variant| variant["properties"]["op"]["const"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, ["insert", "reorder", "reuse", "bind"]);
+        let results = result_schema("step.edit")["oneOf"].as_array().unwrap().len();
+        assert_eq!(results, 2, "validate and commit result shapes");
+    }
+
+    #[test]
+    fn readout_tools_are_discoverable_and_write() {
+        let specs = tool_specs();
+        let names: Vec<&str> = specs
+            .iter()
+            .filter_map(|spec| spec["name"].as_str())
+            .collect();
+        for tool in ["readout.submit", "readout.batch"] {
+            assert!(names.contains(&tool), "missing {tool}");
+            assert!(input_schema(tool).is_some(), "missing input schema for {tool}");
+            assert!(tool_writes(tool), "{tool} must be a write tool");
+        }
+        assert_eq!(
+            result_schema("readout.batch")["required"],
+            json!(["record", "idempotency_key", "replayed", "accepted"])
+        );
+        for tool in ["readout.submit", "readout.batch"] {
+            assert_eq!(
+                output_schema(tool)["oneOf"][1]["properties"]["error"]["properties"]["issues"]
+                    ["items"]["required"],
+                json!(["code", "message"])
+            );
+        }
+    }
+
+    #[test]
+    fn readout_submit_replays_the_first_record_and_isolates_runs() {
+        let mut db = Connection::open_in_memory().unwrap();
+        seed_readout_runs(&db);
+
+        let first = submit_readout(&mut db, &readout_submit_request("run-1")).unwrap();
+        assert_eq!(first["replayed"], false);
+        let first_id = first["record"]["id"].as_str().unwrap().to_owned();
+        assert_eq!(first["record"]["data"]["event_type"], "measurement");
+        assert_eq!(first["record"]["data"]["readouts"][0]["value"], 1.234);
+
+        let replay = submit_readout(&mut db, &readout_submit_request("run-1")).unwrap();
+        assert_eq!(replay["replayed"], true);
+        assert_eq!(replay["record"]["id"], first_id.as_str());
+        assert_eq!(
+            replay["idempotency_key"],
+            first["idempotency_key"]
+        );
+        assert_eq!(execution_event_count(&db), 1);
+
+        let other = submit_readout(&mut db, &readout_submit_request("run-2")).unwrap();
+        assert_eq!(other["replayed"], false);
+        assert_ne!(other["record"]["id"], first_id.as_str());
+        assert_ne!(other["idempotency_key"], first["idempotency_key"]);
+        assert_eq!(execution_event_count(&db), 2);
+        assert_eq!(other["record"]["parent_id"], "run-2");
+    }
+
+    #[test]
+    fn readout_batch_writes_one_event_or_nothing() {
+        let mut db = Connection::open_in_memory().unwrap();
+        seed_readout_runs(&db);
+
+        let mut duplicate = readout_batch_request();
+        duplicate.cells[1].row = 0;
+        duplicate.cells[1].column = 0;
+        let error = submit_readout_batch(&mut db, &duplicate).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert!(error.issues.iter().any(|issue| issue["code"] == "duplicate_position"));
+        assert_eq!(execution_event_count(&db), 0, "a rejected batch writes nothing");
+
+        let mut stale = readout_batch_request();
+        stale.protocol_version_id = "pv-other".to_owned();
+        let error = submit_readout_batch(&mut db, &stale).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert_eq!(execution_event_count(&db), 0, "event creation failure rolls back");
+
+        let accepted = submit_readout_batch(&mut db, &readout_batch_request()).unwrap();
+        assert_eq!(accepted["replayed"], false);
+        assert_eq!(accepted["accepted"], 2);
+        assert_eq!(accepted["record"]["data"]["result_cells"].as_array().unwrap().len(), 2);
+        assert_eq!(execution_event_count(&db), 1);
+
+        let replay = submit_readout_batch(&mut db, &readout_batch_request()).unwrap();
+        assert_eq!(replay["replayed"], true);
+        assert_eq!(replay["record"]["id"], accepted["record"]["id"]);
+        assert_eq!(execution_event_count(&db), 1);
+    }
+
+    #[test]
+    fn readout_batch_accepts_csv_cells() {
+        let mut db = Connection::open_in_memory().unwrap();
+        seed_readout_runs(&db);
+        let mut request = readout_batch_request();
+        request.cells = Vec::new();
+        request.csv = Some(
+            "row,column,field,value,unit,sample_id,group,replicate\n\
+             0,0,od450,1.0,AU,S-1,g1,1\n\
+             0,1,od450,,AU,S-2,g2,1\n"
+                .to_owned(),
+        );
+        let accepted = submit_readout_batch(&mut db, &request).unwrap();
+        assert_eq!(accepted["accepted"], 2);
+        let cells = accepted["record"]["data"]["result_cells"].as_array().unwrap();
+        assert_eq!(cells[1]["status"], "missing");
+        assert_eq!(cells[1]["value"], Value::Null);
+    }
+    #[test]
+    fn step_edit_tool_is_registered() {
+        let specs = tool_specs();
+        let names: Vec<&str> = specs
+            .iter()
+            .filter_map(|spec| spec["name"].as_str())
+            .collect();
+        assert!(names.contains(&"step.edit"));
+        assert!(!names.contains(&"protocol.block.step_edit"));
+        assert!(
+            tool_effects("step.edit").contains("只读"),
+            "the effect text must state the no-confirmation path is read-only"
+        );
+    }
+
+    #[test]
+    fn step_edit_commit_creates_child_and_parent_versions_and_keeps_the_frozen_run() {
+        let data_dir =
+            std::env::temp_dir().join(format!("asterlab-step-edit-db-{}", Uuid::new_v4()));
+        let mut db = open_db(&data_dir).unwrap();
+        let fixture = seed_step_edit_fixture(&mut db);
+        let request = step_edit_request(&fixture);
+
+        let preview = step_edit_command(&mut db, request.clone()).unwrap();
+        assert_eq!(preview["status"], "needs_confirmation");
+        assert!(preview["edit_digest"].as_str().unwrap().starts_with("sha256:"));
+        let planned: Vec<&str> = preview["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["block_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(planned.len(), 2);
+        assert_eq!(
+            preview["blocks"][0]["based_on_version_id"],
+            json!(fixture.child_version_id)
+        );
+        assert_eq!(
+            preview["blocks"][0]["order"],
+            json!(["iris", "wash"]),
+            "the deep edit lands inside the child block"
+        );
+        let digest = preview["edit_digest"].as_str().unwrap().to_owned();
+
+        let run_before = get(&db, &fixture.run_id).unwrap();
+        let protocol_version_before = get(&db, &fixture.protocol_version_id).unwrap();
+        let base_root_before = get(&db, &fixture.root_version_id).unwrap();
+        let base_child_before = get(&db, &fixture.child_version_id).unwrap();
+
+        let mut confirmed = request.clone();
+        confirmed["confirmation"] = json!({
+            "edit_digest": digest,
+            "confirmed_by": "researcher:zhang",
+            "idempotency_key": "sde-rna-001-confirm-1",
+            "note": "add wash"
+        });
+        let committed = step_edit_command(&mut db, confirmed.clone()).unwrap();
+        assert_eq!(committed["replayed"], false);
+        assert_eq!(committed["confirmed_by"], "researcher:zhang");
+        assert_eq!(committed["new_revision"], 2);
+        assert_eq!(committed["previous_version_id"], json!(fixture.root_version_id));
+        let created = committed["created_versions"].as_array().unwrap();
+        assert_eq!(created.len(), 2);
+        let child_block_id = get(&db, &fixture.child_version_id).unwrap()["parent_id"].clone();
+        assert_eq!(created[0]["block_id"], child_block_id);
+        assert_eq!(created[0]["based_on_version_id"], json!(fixture.child_version_id));
+        let child_new = created[0]["version_id"].as_str().unwrap().to_owned();
+        let root_new = committed["new_root_block_version_id"].as_str().unwrap().to_owned();
+        assert_eq!(created[1]["version_id"], json!(root_new));
+
+        // Immutable base versions and the frozen Run did not move.
+        assert_eq!(get(&db, &fixture.run_id).unwrap(), run_before);
+        assert_eq!(
+            get(&db, &fixture.protocol_version_id).unwrap(),
+            protocol_version_before
+        );
+        assert_eq!(get(&db, &fixture.root_version_id).unwrap(), base_root_before);
+        assert_eq!(get(&db, &fixture.child_version_id).unwrap(), base_child_before);
+        assert_eq!(
+            get(&db, &fixture.protocol_version_id).unwrap()["data"]["root_block_version_id"],
+            json!(fixture.root_version_id)
+        );
+
+        let new_root = get(&db, &root_new).unwrap();
+        assert_eq!(
+            new_root["data"]["based_on_version_id"],
+            json!(fixture.root_version_id)
+        );
+        assert_eq!(
+            new_root["data"]["steps"][1]["block_version_id"],
+            json!(child_new),
+            "the parent version references the child version created in the same commit"
+        );
+        assert_eq!(
+            new_root["data"]["step_edit"]["edit_id"],
+            json!("sde-rna-001")
+        );
+        assert_eq!(new_root["data"]["step_edit"]["edit_digest"], json!(digest));
+        assert_eq!(
+            new_root["data"]["step_edit"]["confirmed_by"],
+            json!("researcher:zhang")
+        );
+
+        // The protocol still previews through the old root; the new block does too.
+        let preview_new = block_preview(&db, &root_new, &[]).unwrap();
+        assert_eq!(preview_new["steps"].as_array().unwrap().len(), 3);
+        let paths: Vec<&str> = preview_new["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|step| step["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            ["root/prep", "root/lyse/iris", "root/lyse/wash/rinse"]
+        );
+
+        // Idempotent replay appends nothing.
+        let replayed = step_edit_command(&mut db, confirmed).unwrap();
+        assert_eq!(replayed["replayed"], true);
+        assert_eq!(replayed["created_versions"], json!(created));
+        let version_count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE kind='protocol_block_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version_count, 5, "three seeds plus two new versions");
+
+        // The old base version is no longer a valid edit target.
+        let stale = step_edit_command(&mut db, request).unwrap();
+        assert_eq!(stale["status"], "blocked");
+        assert_eq!(stale["issues"][0]["code"], "STALE_REFERENCE");
+
+        fs::remove_dir_all(&fixture.data_dir).ok();
+        drop(db);
+        fs::remove_dir_all(&data_dir).ok();
+    }
+
+    #[test]
+    fn step_edit_rejects_a_version_conflict_and_a_wrong_unit_without_writing() {
+        let data_dir =
+            std::env::temp_dir().join(format!("asterlab-step-edit-db-{}", Uuid::new_v4()));
+        let mut db = open_db(&data_dir).unwrap();
+        let fixture = seed_step_edit_fixture(&mut db);
+
+        let mut stale = step_edit_request(&fixture);
+        stale["expected_version"] = json!(2);
+        let blocked = step_edit_command(&mut db, stale).unwrap();
+        assert_eq!(blocked["status"], "blocked");
+        assert_eq!(blocked["issues"][0]["code"], "VERSION_CONFLICT");
+        assert_eq!(blocked["issues"][0]["path"], "expected_version");
+
+        let mut wrong_unit = step_edit_request(&fixture);
+        wrong_unit["ops"] = json!([{
+            "op": "bind",
+            "path": "root/lyse",
+            "bindings": [{"slot": "volume_per_sample", "value": 0.2, "unit": "mL"}]
+        }]);
+        let blocked = step_edit_command(&mut db, wrong_unit).unwrap();
+        assert_eq!(blocked["status"], "blocked");
+        assert_eq!(blocked["issues"][0]["code"], "UNIT_MISMATCH");
+
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE kind='protocol_block_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 3, "rejected edits append nothing");
+
+        fs::remove_dir_all(&fixture.data_dir).ok();
+        drop(db);
+        fs::remove_dir_all(&data_dir).ok();
     }
 }

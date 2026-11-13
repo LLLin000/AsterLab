@@ -1,2 +1,0 @@
-    Checking asterlab-core v0.1.0 (/var/lib/kandev/tasks/ops-01-core_m6u32krd/LLLin000-AsterLab/crates/asterlab-core)
-    Finished `dev` profile [unoptimized] target(s) in 10.58s

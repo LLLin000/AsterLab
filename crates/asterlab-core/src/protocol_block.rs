@@ -205,4 +205,11 @@ pub struct ProtocolBlockVersionData {
     /// Additive review proof for imported catalog modules.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_review: Option<ReviewRecord>,
+    /// Exact base version this derived version was produced from. Set only for
+    /// versions created by `step.edit`; initially published versions omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub based_on_version_id: Option<String>,
+    /// Provenance of the `step.edit` commit that created this version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_edit: Option<crate::step_edit::StepEditProvenance>,
 }

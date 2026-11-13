@@ -240,6 +240,8 @@ impl CompiledBlock {
             module_origin: Some(self.binding.origin),
             module_contract_authority: Some(ModuleContractAuthority::Current),
             catalog_review: None,
+            based_on_version_id: None,
+            step_edit: None,
         })
     }
 

@@ -69,7 +69,7 @@
 |---|---|---|
 | P0 科学语义与契约 | `SCI-01`(Audit) 字段归属盘点、`SCI-02`(Contract) OperationSpec v1、`SCI-03`(Contract) ReadoutSchema v1、`SCI-04`(Core) 样本级执行身份 | 冻结参数、读数、样本的权威来源与类型 |
 | P1 SDK 扩展效率 | `SDK-03`(Core) 语义编辑、`SDK-05`(Core) Readout 写入、`SDK-04`(Core) 结构化诊断、`SDK-01`(Build) Scaffold、`SDK-02`(QA) Parity | 让 Agent 能安全编辑与批量记录 |
-| P2 真实实验验证 | `OPS-01`(Core) 操作模块、`RDO-01`(Core) 记录模块、`QA-07`(QA) 三组 fixture | 用 CCK-8、RNA/RT-qPCR、非孔板验证通用性 |
+| P2 真实实验验证 | `OPS-01`(Core) OperationSpec 步骤 sidecar、`RDO-01`(Core) 记录模块、`QA-07`(QA) 三组 fixture | 用 CCK-8、RNA/RT-qPCR、非孔板验证通用性 |
 
 依赖顺序：`SCI-01` → `SCI-02`/`SCI-03` → `SCI-04`、`SDK-03`、`SDK-04`、`SDK-05`、`SDK-01`、`OPS-01`、`RDO-01` → `SDK-02`、`QA-07`。`DOC-05`(Docs) 独立，修模块目录与契约状态。
 
@@ -77,6 +77,7 @@
 
 - `DOC-05` 独立成卡，不并进 `SCI-01`：`SCI-01` 是只读 Audit，修文档需要写权限。
 - 三组 fixture 合并为一张 `QA-07`：共用同一 runner 与契约，分开建会重复脚手架。
+- `OPS-01` 修卡按 `operation-spec-v1.md` 对齐：OperationSpec 是 ProtocolBlock 文本步骤的可选 sidecar，不是 `modules.json` kind；不扩大到 Go registry/CLI。目录级 `OperationModule` 是另一份契约，仍处 K1.1 待审查。
 
 已核实的事实（写入 `DOC-05` 验收）：`spec/modules.json` 有 16 个 `kind@schema`（目录文档写 15，`step@1/2/3` 是同一 kind 的三个版本）；`compatibility-and-gaps.md` 位于 `docs/sdk/` 而非 `docs/release/`。
 

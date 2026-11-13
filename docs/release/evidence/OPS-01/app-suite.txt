@@ -1,1 +1,2 @@
 error: package ID specification `asterlab-app` did not match any packages
+cargo test -p asterlab-app exit=101

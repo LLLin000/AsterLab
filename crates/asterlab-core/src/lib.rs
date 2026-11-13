@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod diagnostic;
 pub mod design_map;
 pub mod protocol_preview;
 pub mod run_workspace;
@@ -20,8 +21,12 @@ pub mod component_data;
 pub mod scientific_facts;
 pub mod reading_facts;
 pub mod readout_schema;
+pub mod readout_records;
+pub mod readout_submit;
 pub mod execution_timeline;
+pub mod sample_progress;
 pub mod workflow_tree;
 pub mod agent_edit;
 pub mod agent_edit_commit;
 pub mod agent_edit_validate;
+pub mod step_edit;
