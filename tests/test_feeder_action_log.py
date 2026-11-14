@@ -96,3 +96,22 @@ class FeederActionLogTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TaskMetadataTest(unittest.TestCase):
+    def test_meta_reads_latest_pr_head_and_session(self):
+        import sqlite3
+        module = load_feeder()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "db.sqlite3"
+            db = sqlite3.connect(path)
+            db.execute("create table github_task_prs(task_id text, pr_number integer, head_sha text)")
+            db.execute("create table task_sessions(id text, task_id text, started_at text)")
+            db.execute("insert into github_task_prs values('t', 7, ?)", ('a' * 40,))
+            db.execute("insert into task_sessions values('s1','t','2026-01-01')")
+            db.commit(); db.close()
+            module.DB = str(path)
+            meta = module._task_meta("t")
+            self.assertEqual(meta["pr_number"], 7)
+            self.assertEqual(meta["head_sha"], "a" * 40)
+            self.assertEqual(meta["session_id"], "s1")
