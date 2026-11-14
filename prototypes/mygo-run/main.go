@@ -2035,7 +2035,7 @@ func main() {
 			}
 			a.applySnap(snap)
 		},
-		Complete: func(taskKey string, checks []runworkspace.CheckAckView) {
+		Complete: func(taskKey string, checks []runworkspace.CheckAckView) error {
 			if taskKey == "" && a.runWS != nil {
 				taskKey = a.runWS.Selected
 			}
@@ -2061,10 +2061,12 @@ func main() {
 				Checks:            acks,
 			})
 			if err != nil {
-				a.err = state.MapError(err).Error()
-				return
+				mappedErr := state.MapError(err)
+				a.err = mappedErr.Error()
+				return mappedErr
 			}
 			a.applySnap(snap)
+			return nil
 		},
 		OpenBatch: func(batchID string) {
 			a.batchView = batchID

@@ -1,0 +1,8 @@
+$ O:\ag05\target\debug\labworkbench.exe run.workspace --input -
+{"id":"b4c5c432-9542-44ca-a293-f24350ac3452"}
+
+Result (after clicking 「标记完成」 in the real GUI):
+run_id: b4c5c432-9542-44ca-a293-f24350ac3452
+step_path: root/assay
+status: completed
+checks: []
