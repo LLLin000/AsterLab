@@ -3,8 +3,9 @@
 
 Kandev's pull_from_step_id feeder does not skip blocked tasks: putting a
 blocked card into Ready can start an agent anyway. This feeder is the
-dependency-aware replacement. It only touches lane:vps cards in the VPS Dev
-workflow and never moves work in Review/Verify/Done.
+dependency-aware replacement. It only touches cards in the VPS Dev workflow
+(membership by workflow id; lane:* labels are reporting only) and never moves
+work in Review/Verify/Done.
 
 Environment:
   KANDEV_API_TOKEN       required
@@ -53,6 +54,9 @@ REWORK_LIMIT = int(os.environ.get("KANDEV_REWORK_LIMIT", "3"))
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 ACTIVE_STATES = {"IN_PROGRESS", "SCHEDULING", "WAITING_FOR_INPUT"}
+# A card moved back to Inbox keeps state TODO (Kandev only resets the step), so
+# both states must pass admission or the card is invisible to the feeder.
+INBOX_STATES = {"CREATED", "TODO"}
 STUCK_MINUTES = int(os.environ.get("KANDEV_STUCK_MINUTES", "10"))
 STUCK_FIX_LIMIT = int(os.environ.get("KANDEV_STUCK_FIX_LIMIT", "3"))
 ACTION_LOG = os.environ.get(
@@ -1359,12 +1363,28 @@ def lane_labels(task):
         return []
 
 
-def is_vps(task):
-    return "lane:vps" in lane_labels(task)
+def lane_tasks(tasks):
+    """VPS lane membership is the workflow id, not the optional lane:* label.
+
+    Cards created through MCP/imports often carry no label; gating on it left
+    them stuck in Ready, which forbids manual moves.
+    """
+    return [t for t in tasks if t.get("workflow_id") == WORKFLOW]
 
 
 def is_eligible(task):
     return not task.get("blocked")
+
+
+def inbox_candidates(detailed):
+    """Inbox cards allowed to enter the admission gate (step, state, blockers)."""
+    return [
+        t
+        for t in detailed
+        if t.get("workflow_step_id") == INBOX
+        and is_eligible(t)
+        and t.get("state") in INBOX_STATES
+    ]
 
 
 def move(task, step_id, reason):
@@ -1404,7 +1424,7 @@ def move(task, step_id, reason):
 
 def run_once():
     tasks = list_tasks()
-    vps = [t for t in tasks if is_vps(t) and t.get("workflow_id") == WORKFLOW]
+    vps = lane_tasks(tasks)
     # Refresh each task: the list projection can lag behind blocked_by edits.
     detailed = []
     for task in vps:
@@ -1471,24 +1491,23 @@ def run_once():
         return
 
     # Fill Ready with every eligible Inbox card (admission gate first).
-    for task in detailed:
-        if task.get("workflow_step_id") == INBOX and is_eligible(task) and task.get("state") == "CREATED":
-            if "dor-fail" in lane_labels(task):
-                continue
-            problems = validate_card(task["id"])
-            if problems:
-                try:
-                    add_label(task["id"], "dor-fail")
-                except Exception:  # noqa: BLE001
-                    pass
-                tg_send(
-                    f"Kandev 建卡校验失败：{task['title'][:60]}\n"
-                    + "\n".join(f"· {p}" for p in problems[:8])
-                    + f"\n已打标 dor-fail 留在 Inbox，修好卡后去掉 label 即可放行。"
-                )
-                print(f"DOR FAIL {task['title'][:40]}: {problems}", file=sys.stderr)
-                continue
-            move(task, READY, "Inbox eligible -> Ready")
+    for task in inbox_candidates(detailed):
+        if "dor-fail" in lane_labels(task):
+            continue
+        problems = validate_card(task["id"])
+        if problems:
+            try:
+                add_label(task["id"], "dor-fail")
+            except Exception:  # noqa: BLE001
+                pass
+            tg_send(
+                f"Kandev 建卡校验失败：{task['title'][:60]}\n"
+                + "\n".join(f"· {p}" for p in problems[:8])
+                + f"\n已打标 dor-fail 留在 Inbox，修好卡后去掉 label 即可放行。"
+            )
+            print(f"DOR FAIL {task['title'][:40]}: {problems}", file=sys.stderr)
+            continue
+        move(task, READY, "Inbox eligible -> Ready")
 
     # Start eligible Ready cards while slots exist.
     if slots > 0:
