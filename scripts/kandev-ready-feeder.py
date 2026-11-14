@@ -24,6 +24,7 @@ Environment:
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -32,6 +33,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 BASE = os.environ.get("KANDEV_URL", "http://127.0.0.1:38429").rstrip("/")
 TOKEN = os.environ.get("KANDEV_API_TOKEN", "")
@@ -52,6 +54,64 @@ TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 ACTIVE_STATES = {"IN_PROGRESS", "SCHEDULING", "WAITING_FOR_INPUT"}
 STUCK_MINUTES = int(os.environ.get("KANDEV_STUCK_MINUTES", "10"))
 STUCK_FIX_LIMIT = int(os.environ.get("KANDEV_STUCK_FIX_LIMIT", "3"))
+ACTION_LOG = os.environ.get(
+    "KANDEV_ACTION_LOG", "/var/lib/kandev/logs/feeder-actions.jsonl"
+)
+
+
+def _snapshot_id(task, from_step=None, to_step=None):
+    """Stable decision snapshot; result is deliberately excluded."""
+    material = {
+        "task_id": task.get("id"),
+        "step": task.get("workflow_step_id"),
+        "state": task.get("state"),
+        "labels": task.get("labels"),
+        "from_step": from_step or "unknown",
+        "to_step": to_step or "unknown",
+    }
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _action_id(action, snapshot_id):
+    return hashlib.sha256(f"{action}:{snapshot_id}".encode("utf-8")).hexdigest()
+
+
+def log_action(action, task, *, reason="", result="attempted", session_id="",
+               head_sha="", from_step=None, to_step=None):
+    """Append a structured legacy-owner action record; never change control flow.
+
+    The attempted and terminal records for one decision share `action_id` and
+    `snapshot_id`; `result` and `ts` are not part of either identity.
+    """
+    snapshot_id = _snapshot_id(task, from_step, to_step)
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "source": "legacy_feeder",
+        "task_id": task.get("id", "unknown") or "unknown",
+        "action": action,
+        "action_id": _action_id(action, snapshot_id),
+        "reason": reason,
+        "session_id": session_id or task.get("session_id") or "unknown",
+        "head_sha": head_sha or task.get("head_sha") or "unknown",
+        "snapshot_id": snapshot_id,
+        "from_step": from_step or "unknown",
+        "to_step": to_step or "unknown",
+        "result": result,
+    }
+    try:
+        parent = os.path.dirname(ACTION_LOG)
+        if parent:
+            os.makedirs(parent, mode=0o700, exist_ok=True)
+        fd = os.open(ACTION_LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+            os.write(fd, (json.dumps(record, sort_keys=True) + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
+    except Exception as exc:  # noqa: BLE001 - observation must not break the feeder
+        print(f"action log failed: {exc}", file=sys.stderr)
 
 
 def stuck_fix_count(labels):
@@ -1282,14 +1342,26 @@ def is_eligible(task):
 
 
 def move(task, step_id, reason):
+    log_action(
+        "move_step", task, reason=reason, result="attempted",
+        from_step=task.get("workflow_step_id"), to_step=step_id,
+    )
     status, data = api(
         "POST",
         f"/api/v1/tasks/{task['id']}/move",
         {"workflow_id": WORKFLOW, "workflow_step_id": step_id},
     )
     if status == 200:
+        log_action(
+            "move_step", task, reason=reason, result="ok",
+            from_step=task.get("workflow_step_id"), to_step=step_id,
+        )
         print(f"move {task['title'][:52]} -> {reason}")
         return True
+    log_action(
+        "move_step", task, reason=reason, result=f"failed:{status}",
+        from_step=task.get("workflow_step_id"), to_step=step_id,
+    )
     print(f"move failed {task['title'][:52]} -> {reason}: {status} {data}", file=sys.stderr)
     return False
 
