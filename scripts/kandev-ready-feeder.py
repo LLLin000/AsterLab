@@ -979,13 +979,14 @@ def scan_retro_trigger():
     task_list = "\n".join(f"- {r[1]} (merged {r[2]})" for r in rows)
     task_ids = [r[0] for r in rows]
     stamp = datetime.datetime.now().strftime("%Y%m%d")
+    title = f"RETRO-{stamp} (Audit) VPS lane 阶段回顾"
     status, data = api(
         "POST",
         "/api/v1/tasks",
         {
             "workspace_id": WORKSPACE,
             "workflow_id": WORKFLOW,
-            "title": f"RETRO-{stamp} (Audit) VPS lane 阶段回顾",
+            "title": title,
             "description": RETRO_PROMPT.format(task_list=task_list, since=since, stamp=stamp),
             "labels": ["retro", "roadmap", "lane:vps"],
             "priority": "high",
@@ -1016,25 +1017,18 @@ def scan_retro_trigger():
         wcon.close()
     except Exception as exc:  # noqa: BLE001
         print(f"retro repo bind failed: {exc}", file=sys.stderr)
+        tg_send(
+            f"Kandev 阶段回顾建卡了，但仓库绑定失败，需要人工处理：\n{title}\n任务 ID {tid}\n{exc}"
+        )
         return
-        import sqlite3
-
-        wcon = sqlite3.connect(DB)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        wcon.execute(
-            "insert into kandev_meta(key,value) values('retro.vps.last_run_at',?) "
-            "on conflict(key) do update set value=excluded.value",
-            (now,),
-        )
-        wcon.execute(
-            "insert into kandev_meta(key,value) values('retro.vps.last_task_ids',?) "
-            "on conflict(key) do update set value=excluded.value",
-            (json.dumps(task_ids),),
-        )
-        wcon.commit()
-        wcon.close()
-    except Exception as exc:  # noqa: BLE001
-        print(f"retro watermark failed: {exc}", file=sys.stderr)
+    preview = "\n".join(f"· {r[1][:60]}" for r in rows[:10])
+    if len(rows) > 10:
+        preview += f"\n… 共 {len(rows)} 张"
+    tg_send(
+        f"Kandev 阶段回顾已建卡：{title}\n"
+        f"范围（watermark {since} 之后的合并）：\n{preview}\n"
+        f"任务 ID {tid}\n报告 PR 开好后我会再发一次链接。"
+    )
 
 
 def scan_stuck(detailed):
