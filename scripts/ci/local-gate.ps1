@@ -32,7 +32,11 @@ param(
     [string]$ReportRoot = ''
 )
 
-$ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 turns a native command's stderr into a terminating
+# error under 'Stop', which would abort on `git fetch`/`cargo` progress lines.
+# 'Continue' plus an explicit `$LASTEXITCODE` check in every step is the mode
+# this script is written for; cmdlet failures still throw explicitly.
+$ErrorActionPreference = 'Continue'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location -LiteralPath $repoRoot
 
@@ -80,7 +84,8 @@ Write-Log "- host: $([System.Environment]::OSVersion.VersionString)"
 Write-Log "- go: $((go version).Trim())"
 Write-Log "- lane: Windows Gate only; Linux tests are owned by the Linux lane (scripts/ci/local-gate.sh)"
 
-git fetch --no-tags --prune origin '+refs/heads/main:refs/remotes/origin/main' 2>&1 | ForEach-Object { Write-Log "  git: $_" }
+# Refresh main once; failure here is reported, not fatal (offline-safe).
+Write-Log "  git: $((git fetch --no-tags --prune origin '+refs/heads/main:refs/remotes/origin/main' 2>&1 | Out-String).Trim())"
 
 # 1. scope-check -------------------------------------------------------------
 if (-not $SkipScope) {
