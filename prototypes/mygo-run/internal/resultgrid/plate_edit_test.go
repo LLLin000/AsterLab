@@ -39,6 +39,13 @@ func TestPlateEditCommitsOnlyOnSubmit(t *testing.T) {
 	if g.EditDirty() {
 		t.Fatal("dirty flag survived a successful commit")
 	}
+	input, ok := g.InputAt(0, 0)
+	if !ok || *input != "0.82" {
+		t.Fatalf("committed input = %q, want 0.82", *input)
+	}
+	if g.Cells[0].Value == nil || *g.Cells[0].Value != 0.82 {
+		t.Fatalf("shared cell value = %+v", g.Cells[0])
+	}
 }
 
 func TestPlateSelectionCommitsPreviousCell(t *testing.T) {
