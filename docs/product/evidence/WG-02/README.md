@@ -32,6 +32,6 @@ $ mygo native build -target host
 $ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mygo-build.ps1
 ```
 
-The CLI calls used `LABWORKBENCH_DATA_DIR=C:\Users\Lin\AppData\Local\Temp\wg02-gui-data` and `LABWORKBENCH_TRUSTED_WRITER=1`. The UI used a fresh isolated data directory and the real-window automation socket; `0.82` was saved through the Run recording panel. Both regression tests pass with the fix; on the baseline the flow still unconditionally called `WorkflowTree` (also reproduced in the before screenshot). The baseline source predates `LoadProjection`, so the new package tests cannot compile against it as-is.
+The fixed checkout passed `go test ./internal/runworkspace ./... -count=1`. For the reverse direction, the same two regression test cases were added temporarily to an `origin/main` checkout and `go test ./internal/runworkspace -run '^TestWG02' -count=1` failed to build: both reported `undefined: LoadProjection`; the temporary probe was removed afterward. The origin/main GUI also reproduced the diagnostic in the before screenshot. The CLI calls used `LABWORKBENCH_DATA_DIR=C:\Users\Lin\AppData\Local\Temp\wg02-gui-data` and `LABWORKBENCH_TRUSTED_WRITER=1`; the fixed real-window run saved `0.82` through the Run recording panel.
 
 Remaining risk: a pinned AsterDoc revision that Core cannot load remains a visible diagnostic; repair/retry behavior is intentionally not hidden or otherwise changed.
