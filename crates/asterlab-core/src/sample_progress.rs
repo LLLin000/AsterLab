@@ -28,10 +28,15 @@ pub const SAMPLE_PROGRESS_SCHEMA_VERSION: u32 = 1;
 #[serde(rename_all = "snake_case")]
 pub enum SampleStatus {
     NotStarted,
+    Active,
     InProgress,
     Completed,
     Failed,
     Skipped,
+    SkippedByRule,
+    QcDropped,
+    CensoredDead,
+    Rework,
 }
 
 /// One immutable attempt of one sample on one frozen step and timepoint.
@@ -83,6 +88,9 @@ pub struct ProgressEvent {
     pub deviation: bool,
     pub recorded_at: Option<String>,
     pub occurred_at: Option<String>,
+    pub parent_sample_id: Option<String>,
+    pub aliquot_from: Option<String>,
+    pub blind_masked: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -106,6 +114,12 @@ pub struct SampleProgress {
     pub last_event_at: Option<String>,
     /// Every attempt, oldest first; old attempts are never dropped.
     pub attempts: Vec<AttemptProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_sample_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aliquot_from: Option<String>,
+    #[serde(default)]
+    pub blind_masked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -114,7 +128,7 @@ pub struct StepProgress {
     pub step_path: String,
     pub timepoint: Option<String>,
     pub status: SampleStatus,
-    /// True only when every sample is completed.
+    /// True when every sample is completed or explicitly excluded from this step.
     pub complete: bool,
     pub total_samples: u32,
     pub completed_samples: u32,
@@ -122,6 +136,16 @@ pub struct StepProgress {
     pub skipped_samples: u32,
     pub in_progress_samples: u32,
     pub not_started_samples: u32,
+    #[serde(default)]
+    pub active_samples: u32,
+    #[serde(default)]
+    pub skipped_by_rule_samples: u32,
+    #[serde(default)]
+    pub qc_dropped_samples: u32,
+    #[serde(default)]
+    pub censored_dead_samples: u32,
+    #[serde(default)]
+    pub rework_samples: u32,
     pub last_event_at: Option<String>,
     pub samples: Vec<SampleProgress>,
 }
@@ -253,16 +277,21 @@ fn step_progress(
     let skipped = count(SampleStatus::Skipped);
     let in_progress = count(SampleStatus::InProgress);
     let not_started = count(SampleStatus::NotStarted);
-    let status = if total == 0 {
-        SampleStatus::NotStarted
-    } else if completed == total {
+    let active = count(SampleStatus::Active);
+    let skipped_by_rule = count(SampleStatus::SkippedByRule);
+    let qc_dropped = count(SampleStatus::QcDropped);
+    let censored_dead = count(SampleStatus::CensoredDead);
+    let rework = count(SampleStatus::Rework);
+    let complete_samples = completed + skipped_by_rule + qc_dropped + censored_dead;
+    let complete = total > 0 && complete_samples == total;
+    let status = if complete {
         SampleStatus::Completed
     } else if failed > 0 {
         SampleStatus::Failed
+    } else if total == 0 || not_started == total {
+        SampleStatus::NotStarted
     } else if skipped == total {
         SampleStatus::Skipped
-    } else if not_started == total {
-        SampleStatus::NotStarted
     } else {
         SampleStatus::InProgress
     };
@@ -270,13 +299,18 @@ fn step_progress(
         step_path: step_path.to_owned(),
         timepoint: timepoint.map(str::to_owned),
         status,
-        complete: total > 0 && completed == total,
+        complete,
         total_samples: total,
         completed_samples: completed,
         failed_samples: failed,
         skipped_samples: skipped,
         in_progress_samples: in_progress,
         not_started_samples: not_started,
+        active_samples: active,
+        skipped_by_rule_samples: skipped_by_rule,
+        qc_dropped_samples: qc_dropped,
+        censored_dead_samples: censored_dead,
+        rework_samples: rework,
         last_event_at,
         samples,
     }
@@ -289,6 +323,9 @@ fn sample_progress(
 ) -> SampleProgress {
     let mut attempts: BTreeMap<u32, AttemptProgress> = BTreeMap::new();
     let mut last_event_at = None;
+    let mut parent_sample_id = None;
+    let mut aliquot_from = None;
+    let mut blind_masked = false;
     for (index, attempt) in step_events {
         let event = events[*index].event;
         if !event.sample_ids.iter().any(|sample| sample.trim() == sample_id) {
@@ -310,6 +347,13 @@ fn sample_progress(
         }
         entry.last_event_at = event_time(event);
         last_event_at = event_time(event);
+        if event.parent_sample_id.as_deref().is_some_and(|id| !id.trim().is_empty()) {
+            parent_sample_id = event.parent_sample_id.clone();
+        }
+        if event.aliquot_from.as_deref().is_some_and(|id| !id.trim().is_empty()) {
+            aliquot_from = event.aliquot_from.clone();
+        }
+        blind_masked |= event.blind_masked.unwrap_or(false);
     }
 
     let current = attempts.values().next_back();
@@ -320,6 +364,9 @@ fn sample_progress(
         attempt_count: attempts.len() as u32,
         last_event_at,
         attempts: attempts.into_values().collect(),
+        parent_sample_id,
+        aliquot_from,
+        blind_masked,
     }
 }
 
@@ -328,7 +375,12 @@ fn event_status(event: &ProgressEvent) -> SampleStatus {
         Some("completed") => SampleStatus::Completed,
         Some("blocked") => SampleStatus::Failed,
         Some("skipped") => SampleStatus::Skipped,
+        Some("active") => SampleStatus::Active,
         Some("in_progress") => SampleStatus::InProgress,
+        Some("skipped_by_rule") => SampleStatus::SkippedByRule,
+        Some("qc_dropped") => SampleStatus::QcDropped,
+        Some("censored_dead") => SampleStatus::CensoredDead,
+        Some("rework") => SampleStatus::Rework,
         _ if event.event_type.as_deref() == Some("deviation") || event.deviation => {
             SampleStatus::Failed
         }
@@ -381,6 +433,9 @@ impl ProgressEvent {
             deviation: view.deviation.is_some(),
             recorded_at: view.recorded_at.clone(),
             occurred_at: view.occurred_at.clone(),
+            parent_sample_id: None,
+            aliquot_from: None,
+            blind_masked: None,
         }
     }
 
@@ -413,6 +468,9 @@ impl ProgressEvent {
             deviation: value["deviation"].as_str().is_some_and(|value| !value.trim().is_empty()),
             recorded_at: str_field(value, "recorded_at"),
             occurred_at: str_field(value, "occurred_at"),
+            parent_sample_id: str_field(value, "parent_sample_id"),
+            aliquot_from: str_field(value, "aliquot_from"),
+            blind_masked: value["blind_masked"].as_bool(),
         }
     }
 }
@@ -1016,4 +1074,65 @@ mod tests {
         assert!(unscoped_samples.steps.iter().all(|group| group.samples.iter().all(|s| s.sample_id != "not-started")));
     }
 
+
+    #[test]
+    fn excluded_samples_do_not_block_step_completion_and_keep_lineage() {
+        let completed = status(event("done", "root/qc", &["S1"], "2026-11-14T10:00:00Z"), "completed");
+        let dropped = ProgressEvent::from_stored(&json!({
+            "id": "drop",
+            "protocol_step_path": "root/qc",
+            "sample_ids": ["S2"],
+            "step_status": "qc_dropped",
+            "parent_sample_id": "S0",
+            "aliquot_from": "tumor-parent",
+            "blind_masked": true,
+            "recorded_at": "2026-11-14T10:01:00Z"
+        }));
+        let progress = build(
+            "run-2",
+            &[step("root/qc")],
+            &[completed, dropped],
+            &SampleProgressQuery::default(),
+        );
+        let step = find(&progress, "root/qc");
+        assert!(step.complete);
+        assert_eq!(step.total_samples, 2);
+        assert_eq!(step.qc_dropped_samples, 1);
+        let excluded = sample(step, "S2");
+        assert_eq!(excluded.status, SampleStatus::QcDropped);
+        assert_eq!(excluded.parent_sample_id.as_deref(), Some("S0"));
+        assert_eq!(excluded.aliquot_from.as_deref(), Some("tumor-parent"));
+        assert!(excluded.blind_masked);
+    }
+
+    #[test]
+    fn step_sample_state_machine_counts_active_rework_and_all_exclusion_states() {
+        let events = [
+            ("active", "active"),
+            ("skipped", "skipped_by_rule"),
+            ("qc", "qc_dropped"),
+            ("dead", "censored_dead"),
+            ("retry", "rework"),
+        ].map(|(sample, state)| {
+            status(
+                event(sample, "root/measure", &[sample], "2026-11-14T12:00:00Z"),
+                state,
+            )
+        });
+        let progress = build(
+            "run-3",
+            &[step("root/measure")],
+            &events,
+            &SampleProgressQuery::default(),
+        );
+        let step = find(&progress, "root/measure");
+        assert!(!step.complete);
+        assert_eq!(step.active_samples, 1);
+        assert_eq!(step.skipped_by_rule_samples, 1);
+        assert_eq!(step.qc_dropped_samples, 1);
+        assert_eq!(step.censored_dead_samples, 1);
+        assert_eq!(step.rework_samples, 1);
+        assert_eq!(sample(step, "active").status, SampleStatus::Active);
+        assert_eq!(sample(step, "retry").status, SampleStatus::Rework);
+    }
 }
