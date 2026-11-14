@@ -33,6 +33,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 
 BASE = os.environ.get("KANDEV_URL", "http://127.0.0.1:38429").rstrip("/")
@@ -79,7 +80,7 @@ def _action_id(action, snapshot_id):
 
 
 def log_action(action, task, *, reason="", result="attempted", session_id="",
-               head_sha="", from_step=None, to_step=None):
+               head_sha="", from_step=None, to_step=None, action_id=None):
     """Append a structured legacy-owner action record; never change control flow.
 
     The attempted and terminal records for one decision share `action_id` and
@@ -91,7 +92,7 @@ def log_action(action, task, *, reason="", result="attempted", session_id="",
         "source": "legacy_feeder",
         "task_id": task.get("id", "unknown") or "unknown",
         "action": action,
-        "action_id": _action_id(action, snapshot_id),
+        "action_id": action_id or _action_id(action, snapshot_id) + ":" + uuid.uuid4().hex,
         "reason": reason,
         "session_id": session_id or task.get("session_id") or "unknown",
         "head_sha": head_sha or task.get("head_sha") or "unknown",
@@ -1342,9 +1343,13 @@ def is_eligible(task):
 
 
 def move(task, step_id, reason):
+    action_id = _action_id(
+        "move_step", _snapshot_id(task, task.get("workflow_step_id"), step_id)
+    ) + ":" + uuid.uuid4().hex
     log_action(
         "move_step", task, reason=reason, result="attempted",
         from_step=task.get("workflow_step_id"), to_step=step_id,
+        action_id=action_id,
     )
     status, data = api(
         "POST",
@@ -1355,12 +1360,14 @@ def move(task, step_id, reason):
         log_action(
             "move_step", task, reason=reason, result="ok",
             from_step=task.get("workflow_step_id"), to_step=step_id,
+            action_id=action_id,
         )
         print(f"move {task['title'][:52]} -> {reason}")
         return True
     log_action(
         "move_step", task, reason=reason, result=f"failed:{status}",
         from_step=task.get("workflow_step_id"), to_step=step_id,
+        action_id=action_id,
     )
     print(f"move failed {task['title'][:52]} -> {reason}: {status} {data}", file=sys.stderr)
     return False
