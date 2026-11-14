@@ -1,0 +1,44 @@
+{
+  "fixture": "QA-07",
+  "results": [
+    {
+      "boundary": "PASS",
+      "checksum": "a5fed5f6f50b08d06bd1bf56f0cfbb2cffe3712bedda19f958e2d7335abd7f7d",
+      "concurrent_queries": 2,
+      "design_id": "dbb7b7c0-26e5-41e7-a022-be1ae3b67379",
+      "event_id": "a8d2c5e0-76cb-481c-9186-61bdfacd77d3",
+      "name": "CCK-8",
+      "project_id": "0ac1c989-763e-4bd9-871f-29e5e530291d",
+      "readout_id": "cck8-readout-1",
+      "recovery": "PASS",
+      "run_id": "47b246f6-0ede-40d1-b321-656a8af8b26d",
+      "value": 0.735
+    },
+    {
+      "boundary": "PASS",
+      "checksum": "20c4ae9f559784434d5036c87051416e4e2169901422719b4781baac1d18b525",
+      "concurrent_queries": 2,
+      "design_id": "062e434d-d50d-4a5c-8a6f-f5f9c5a879f2",
+      "event_id": "d637b793-ef81-402d-9445-4906e5f75801",
+      "name": "RNA-RT-qPCR",
+      "project_id": "1a73717f-26c9-40e3-a89e-de49117a0e81",
+      "readout_id": "rtqpcr-readout-1",
+      "recovery": "PASS",
+      "run_id": "b9fa90ad-5a23-45b1-bda0-2c48a3d3697f",
+      "value": 22.4
+    },
+    {
+      "boundary": "PASS",
+      "checksum": "4a448b35c75c329fca8b9ae194abb2af555079f59d5e2bfb2e91c66d3d1210d7",
+      "concurrent_queries": 2,
+      "design_id": "fc15c7e5-54f1-4b3f-80c2-46cbffe04aad",
+      "event_id": "5e473832-7d6c-425c-be16-662b79ba6dc7",
+      "name": "non-plate",
+      "project_id": "2e98f2a0-6edf-4ad5-82d1-2da396f8e5cf",
+      "readout_id": "nonplate-readout-1",
+      "recovery": "PASS",
+      "run_id": "4e65b705-8a32-4130-a322-046da4a85884",
+      "value": 18.2
+    }
+  ]
+}

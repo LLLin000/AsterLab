@@ -1,0 +1,5 @@
+$ python3 tests/fixtures/run_qa07.py --all
+PASS CCK-8 checksum=31c3af4c4d532e7e9becfe935acbf4c9781934d2e85ff169c0dc1fe6e24a62e6 recovery=PASS boundary=PASS concurrent_queries=2
+PASS RNA-RT-qPCR checksum=f3f8ede30f1fb58783255444d5fdc71a70e514aef61403abb2a29d80cfe82d36 recovery=PASS boundary=PASS concurrent_queries=2
+PASS non-plate checksum=602f88e25a79ee2f7f4c4ca507dc48872d73bd69aa3c07f7dd1a95db73b8f45b recovery=PASS boundary=PASS concurrent_queries=2
+QA-07 PASS (3 fixture groups)
