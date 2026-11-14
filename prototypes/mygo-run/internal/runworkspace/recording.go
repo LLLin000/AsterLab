@@ -133,7 +133,7 @@ func (r *RecordingView) Render(c *ui.Context) {
 			// UX-STATE, UX-P5: make the unsaved state explicit beside Save.
 			ui.Text(c, "未保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.WarningText)
 			save := components.Button(c, "保存读数", components.ButtonPrimary)
-			save.Disabled(r.Grid.State == resultgrid.StateSaving)
+			save.Disabled(r.Grid.State == resultgrid.StateSaving || r.Grid.Error != "")
 			if r.Grid.State == resultgrid.StateSaving {
 				ui.Text(c, "保存中…").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 			}
@@ -225,53 +225,59 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 		return
 	}
 	g := r.Grid
-	ui.Grid(c).Columns(7).Gap(8).Children(func() {
-		ui.Text(c, "井位").FontSize(11).Bold().TextColor(t.TextMuted)
-		ui.Text(c, "样本").FontSize(11).Bold().TextColor(t.TextMuted)
-		ui.Text(c, "分组").FontSize(11).Bold().TextColor(t.TextMuted)
-		ui.Text(c, "重复").FontSize(11).Bold().TextColor(t.TextMuted)
-		ui.Text(c, "字段").FontSize(11).Bold().TextColor(t.TextMuted)
-		ui.Text(c, "数值").FontSize(11).Bold().TextColor(t.TextMuted)
-		ui.Text(c, "状态").FontSize(11).Bold().TextColor(t.TextMuted)
-		for _, cell := range g.Cells {
-			rr, cc := cell.Row, cell.Column
-			well := ""
-			if rr < len(g.Schema.RowLabels) && cc < len(g.Schema.ColumnLabels) {
-				well = g.Schema.RowLabels[rr] + g.Schema.ColumnLabels[cc]
-			}
-			ui.Text(c, well).FontSize(12).TextColor(t.Text)
-			ui.Text(c, cell.SampleID).FontSize(12).TextColor(t.Text)
-			ui.Text(c, cell.Group).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, fmt.Sprintf("%d", cell.Replicate)).FontSize(12).TextColor(t.TextMuted)
-			ui.Text(c, cell.Field).FontSize(12).TextColor(t.TextMuted)
-			input, ok := g.InputAt(rr, cc)
-			if !ok {
-				continue
-			}
-			e := ui.TextInput(c, input).Width(90).Padding(4).Placeholder("—")
-			if e.Changed() {
-				v, err := strconv.ParseFloat(*input, 64)
-				if *input == "" {
-					cell.Value = nil
-					cell.Status = "missing"
-					_ = g.SetCell(cell)
-				} else if err != nil {
-					g.Error = "Invalid numeric value"
-					g.State = resultgrid.StateError
-				} else {
-					cell.Value = &v
-					cell.Status = "raw"
-					g.Error = ""
-					_ = g.SetCell(cell)
+	// UX-P1, UX-P3, UX-P4, UX-P5, UX-LAYOUT: keep the themed record table usable at both breakpoints.
+	ui.ScrollBoth(c).Fill().Children(func() {
+		ui.Grid(c).Columns(7).Gap(8).Children(func() {
+			ui.Text(c, "孔位").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "样本").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "分组").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "重复").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "字段").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "数值").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "状态").FontSize(11).Bold().TextColor(t.TextMuted)
+			for _, cell := range g.Cells {
+				rr, cc := cell.Row, cell.Column
+				well := ""
+				if rr < len(g.Schema.RowLabels) && cc < len(g.Schema.ColumnLabels) {
+					well = g.Schema.RowLabels[rr] + g.Schema.ColumnLabels[cc]
 				}
+				ui.Text(c, well).FontSize(12).TextColor(t.Text)
+				ui.Text(c, cell.SampleID).FontSize(12).TextColor(t.Text)
+				ui.Text(c, cell.Group).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, fmt.Sprintf("%d", cell.Replicate)).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, cell.Field).FontSize(12).TextColor(t.TextMuted)
+				input, ok := g.InputAt(rr, cc)
+				if !ok {
+					continue
+				}
+				e := ui.TextInput(c, input).Width(90).Padding(4).Placeholder("—").Label(well + " 读数")
+				if e.Changed() {
+					if *input == "" {
+						cell.Value, cell.Status = nil, "missing"
+						if err := g.SetCell(cell); err != nil {
+							g.Error = err.Error()
+						}
+					} else if v, err := strconv.ParseFloat(*input, 64); err != nil {
+						g.Error = "请输入数字"
+						g.State = resultgrid.StateError
+					} else {
+						cell.Value, cell.Status = &v, "raw"
+						if err := g.SetCell(cell); err != nil {
+							g.Error = err.Error()
+						}
+					}
+				}
+				status := cell.Status
+				if status == "" {
+					status = "missing"
+				}
+				ui.Text(c, status).FontSize(11).TextColor(t.TextMuted)
 			}
-			status := cell.Status
-			if status == "" {
-				status = "missing"
-			}
-			ui.Text(c, status).FontSize(11).TextColor(t.TextMuted)
-		}
+		})
 	})
+	if g.Error != "" {
+		ui.Text(c, g.Error).FontSize(t.Rem(.75)).TextColor(t.Danger)
+	}
 }
 
 // renderGallery draws a file/image gallery plus the measured indicators.

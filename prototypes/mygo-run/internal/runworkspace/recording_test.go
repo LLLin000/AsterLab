@@ -1,6 +1,7 @@
 package runworkspace
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -113,5 +114,92 @@ func TestHumanSize(t *testing.T) {
 	}
 	if humanSize(5<<20) != "5.0 MB" {
 		t.Fatal(humanSize(5 << 20))
+	}
+}
+func TestRecordingGridViewsShareEditsAndSave(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	grid := resultgrid.New(resultgrid.Schema{
+		ID: "shared", RowLabels: []string{"A"}, ColumnLabels: []string{"1"},
+		Fields: []resultgrid.Field{{Key: "od", Label: "OD", Unit: "AU"}},
+	}, nil)
+	var saved []resultgrid.Cell
+	rv := &RecordingView{
+		Kind: ViewPlate, Grid: grid, Task: vm.TaskByKey["t-read"],
+		OnSaveBatch: func(cells []resultgrid.Cell) { saved = cells },
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+
+	draft, _ := grid.BeginEdit(0, 0)
+	*draft = "1.25"
+	grid.MarkEditDirty()
+	if err := tt.Click("表格"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if grid.Cells[0].Value == nil || *grid.Cells[0].Value != 1.25 {
+		t.Fatalf("plate edit not committed to shared cells: %+v", grid.Cells[0])
+	}
+	if input, ok := grid.InputAt(0, 0); !ok || *input != "1.25" {
+		t.Fatalf("table projection input = %v, want 1.25", input)
+	}
+
+	if err := tt.Click("A1 读数"); err != nil {
+		t.Fatalf("focus table value: %v", err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("2.5")
+	tt.Frame()
+	if grid.Cells[0].Value == nil || *grid.Cells[0].Value != 2.5 {
+		t.Fatalf("table edit not committed to shared cells: %+v", grid.Cells[0])
+	}
+	if input, ok := grid.InputAt(0, 0); !ok || *input != "2.5" {
+		t.Fatalf("table input = %v, want 2.5", input)
+	}
+
+	if err := tt.Click("孔板"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("已记录 1") || !tt.HasText("缺失 0") {
+		t.Fatalf("plate counts did not project updated cell: %v", tt.Texts())
+	}
+	if err := tt.Click("保存读数"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(saved) != 1 || saved[0].Value == nil || *saved[0].Value != 2.5 {
+		t.Fatalf("save callback did not receive exact shared cells: %+v", saved)
+	}
+}
+
+func TestRecordingGridLayoutsRenderAtBothBreakpointsAndThemes(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	rows, cols := make([]string, 8), make([]string, 12)
+	for i := range rows {
+		rows[i] = string(rune('A' + i))
+	}
+	for i := range cols {
+		cols[i] = fmt.Sprint(i + 1)
+	}
+	for _, size := range [][2]int{{1360, 880}, {900, 600}} {
+		for _, dark := range []bool{false, true} {
+			for _, view := range []ViewKind{ViewPlate, ViewTable} {
+				grid := resultgrid.New(resultgrid.Schema{ID: "96-well", RowLabels: rows, ColumnLabels: cols}, nil)
+				rv := &RecordingView{Kind: view, Grid: grid, Task: vm.TaskByKey["t-read"]}
+				tt := ui.NewTester(func(c *ui.Context) {
+					if dark {
+						c.SetTheme(theme.DarkTheme())
+					} else {
+						c.SetTheme(theme.LightTheme())
+					}
+					rv.Render(c)
+				}, size[0], size[1])
+				tt.Frame()
+			}
+		}
 	}
 }

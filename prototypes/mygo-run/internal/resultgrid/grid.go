@@ -169,6 +169,10 @@ func (g *Grid) SetCells(cells []Cell) error {
 		if cell.Value != nil {
 			g.inputs[idx] = strconv.FormatFloat(*cell.Value, 'g', -1, 64)
 		}
+		if g.editRow == cell.Row && g.editCol == cell.Column {
+			g.editDraft = g.inputs[idx]
+			g.editDirty = false
+		}
 	}
 	g.undo = append(g.undo, historyEntry{old: old, next: next})
 	g.redo = nil
