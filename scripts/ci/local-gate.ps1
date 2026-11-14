@@ -37,6 +37,10 @@ param(
 # 'Continue' plus an explicit `$LASTEXITCODE` check in every step is the mode
 # this script is written for; cmdlet failures still throw explicitly.
 $ErrorActionPreference = 'Continue'
+
+# gh/git/python emit UTF-8; Windows PowerShell decodes native stdout with the
+# console codepage unless told otherwise, which turns the PR body into mojibake.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location -LiteralPath $repoRoot
 
@@ -97,9 +101,9 @@ if (-not $SkipScope) {
         $bodyFile = $PrBody
         if (-not $bodyFile -and $Pr -gt 0) {
             $bodyFile = Join-Path $reportDir 'pr-body.md'
-            $body = gh pr view $Pr --json body -q .body
+            $body = (& gh pr view $Pr --json body -q .body) -join "`n"
             if ($LASTEXITCODE -ne 0) { throw "gh pr view $Pr failed (exit $LASTEXITCODE)" }
-            Set-Content -LiteralPath $bodyFile -Value $body -Encoding utf8
+            [System.IO.File]::WriteAllText($bodyFile, $body, (New-Object System.Text.UTF8Encoding($false)))
         }
         if (-not $bodyFile) {
             Write-Log 'notice: no PR body supplied; the scope block is read from the diff base only where the script allows it'
@@ -107,8 +111,10 @@ if (-not $SkipScope) {
             Set-Content -LiteralPath $bodyFile -Value '' -Encoding utf8
         }
         Write-Log "scope source: $bodyFile"
-        & $py[0] @($py[1..($py.Count - 1)] + @('scripts/ci/scope_check.py', '--pr-body-file', $bodyFile, '--base', $Base, '--head', 'HEAD'))
-        if ($LASTEXITCODE -ne 0) { throw "card scope violated (exit $LASTEXITCODE)" }
+        $scopeOut = & $py[0] @($py[1..($py.Count - 1)] + @('scripts/ci/scope_check.py', '--pr-body-file', $bodyFile, '--base', $Base, '--head', 'HEAD')) 2>&1
+        $scopeCode = $LASTEXITCODE
+        foreach ($line in $scopeOut) { Write-Log "  $line" }
+        if ($scopeCode -ne 0) { throw "card scope check failed (exit $scopeCode)" }
     }
 }
 
