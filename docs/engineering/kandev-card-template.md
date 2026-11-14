@@ -68,7 +68,8 @@ forbid:
 - ...
 
 ## 依赖 / 风险
-- blocked_by：以 Kandev Relations 为准，正文不重复完整列表。
+- upstream: none（或 `DES-00, RDO-01`，必须与 Kandev 的 blocked_by 完全一致）
+- downstream: DES-01（本卡解锁谁，只作说明，不构成阻塞）
 - 风险 / 回滚：...
 
 ## 工作方法（<Category>）
@@ -80,6 +81,8 @@ forbid:
 硬规则：
 
 - 不在正文重复 `lane`、`milestone`、`priority`、依赖列表；这些用 Kandev 的 label、priority 和 `blocked_by`。
+- 依赖只在 Kandev 里建边，正文只写一行 `upstream:` 镜像它：`upstream: none` 表示无前置。`kandev-ready-feeder` 的准入会比对两边——不一致就打 `dor-fail` 留在 Inbox，由建卡人修正；不要指望实现 agent 去解释或绕过这种矛盾。
+  - 2026-11-14 DES-00 的教训：正文写着"留给 DES-01"、Relations 里是 `blocks: DES-01`，结果两个实现 session 都把下游卡当成自己的阻塞，白跑两轮。方向只有一个：`upstream`/`blocked_by` 才是前置。
 - Relations 方向只有一个读法：`depends_on` / `blocked_by` 是本卡的前置卡，未 `COMPLETED` 就不开工；`blocks` 是本卡解锁的下游卡，**不影响本卡开工**。开工前把这两栏分开读，别把 `blocks` 当成被阻塞。
   - 反例（DES-00，2026-11-14）：实现 agent 把 `blocks: DES-01` 读成"被 DES-01 阻塞"，没写一行代码就结束，白跑一轮 session。
 - `范围` 必须机器可读。`(Build)` 的范围检查读取 `<!-- kandev-scope -->` 块，不解析自然语言。

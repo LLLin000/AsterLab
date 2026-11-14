@@ -104,5 +104,27 @@ class SessionLivenessTest(unittest.TestCase):
         self.assertTrue(feeder._session_process_live({}, "/var/lib/kandev/tasks/a", "1970-01-01T00:00:00+00:00"))
 
 
+class RelationStatementTest(unittest.TestCase):
+    def test_none_matches_an_unblocked_card(self):
+        self.assertEqual(feeder.relation_problems("## 依赖\nupstream: none\n", []), [])
+
+    def test_missing_line_is_reported(self):
+        self.assertEqual(
+            feeder.relation_problems("## 依赖\n- blocked_by：见 Kandev\n", []),
+            ["missing `upstream:` line (write `upstream: none` or the blocker ids)"],
+        )
+
+    def test_hidden_blocker_is_reported(self):
+        problems = feeder.relation_problems("upstream: none\n", ["DES-01"])
+        self.assertEqual(problems, ["upstream line omits Kandev blockers: DES-01"])
+
+    def test_invented_blocker_is_reported(self):
+        problems = feeder.relation_problems("upstream: DES-01\n", [])
+        self.assertEqual(problems, ["upstream line lists non-blockers: DES-01"])
+
+    def test_declared_blockers_must_match_exactly(self):
+        self.assertEqual(feeder.relation_problems("upstream: DES-00, RDO-01\n", ["RDO-01", "DES-00"]), [])
+
+
 if __name__ == "__main__":
     unittest.main()

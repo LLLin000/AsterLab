@@ -658,6 +658,47 @@ def scan_stale_prompt(detailed):
             move(task, step, "stale prompt -> back with new prompt")
 
 
+CARD_ID_PREFIX = re.compile(r"^([A-Z]+-\d+[a-z]?)")
+
+
+def parse_upstream(description):
+    """Upstream card ids declared on the card body, or None when missing."""
+    m = re.search(r"^\s*(?:[-*]\s+)?upstream\s*:\s*(.*)$", description or "", re.MULTILINE | re.IGNORECASE)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    head = re.split(r"[（(]", raw, 1)[0].strip().rstrip(".")
+    if head.lower() in ("none", "no", "无", "-", "[]"):
+        return set()
+    cards = set()
+    for part in re.split(r"[,，、\s]+", raw):
+        token = re.split(r"[（(]", part, 1)[0].strip()
+        if token:
+            cards.add(token)
+    return cards
+
+
+def relation_problems(description, blockers):
+    """Keep the card's own statement of dependencies and Kandev in sync.
+
+    blockers: upstream card ids ("DES-01") taken from Kandev, never guessed
+    from other cards. A mismatch is a card-authoring bug, so the card stays
+    in Inbox with dor-fail instead of asking an agent to resolve it.
+    """
+    declared = parse_upstream(description)
+    if declared is None:
+        return ["missing `upstream:` line (write `upstream: none` or the blocker ids)"]
+    actual = set(blockers)
+    problems = []
+    missing = sorted(actual - declared)
+    extra = sorted(declared - actual)
+    if missing:
+        problems.append("upstream line omits Kandev blockers: " + ", ".join(missing))
+    if extra:
+        problems.append("upstream line lists non-blockers: " + ", ".join(extra))
+    return problems
+
+
 def validate_card(task_id):
     """Static admission gate. Returns list of problems (empty = pass).
 
@@ -678,6 +719,16 @@ def validate_card(task_id):
         r = con.execute(
             "select title,description,labels from tasks where id=?", (task_id,)
         ).fetchone()
+        blockers = []
+        if r:
+            for (btitle,) in con.execute(
+                "select t.title from task_blockers b join tasks t on t.id=b.blocker_task_id "
+                "where b.task_id=?",
+                (task_id,),
+            ):
+                m = CARD_ID_PREFIX.match(btitle or "")
+                if m:
+                    blockers.append(m.group(1))
         con.close()
     except Exception as exc:  # noqa: BLE001
         return [f"db read failed: {exc}"]
@@ -723,6 +774,8 @@ def validate_card(task_id):
     # 5. placeholders
     if re.search(r"\{\{[^}]+\}\}", desc):
         problems.append("unresolved {{...}} placeholder in description")
+    # 6. relation consistency (Kandev blockers vs the body's upstream line)
+    problems.extend(relation_problems(desc, blockers))
     return problems
 
 
