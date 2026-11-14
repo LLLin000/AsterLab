@@ -190,6 +190,8 @@ def scan_ci_ready(review_tasks):
     import datetime
 
     for task in review_tasks:
+        if not still_at(task, REVIEW):
+            continue
         labels = lane_labels(task)
         if "human-hold" in labels:
             continue
@@ -280,6 +282,8 @@ def scan_rework(review_tasks):
     import datetime
 
     for task in review_tasks:
+        if not still_at(task, REVIEW):
+            continue
         labels = lane_labels(task)
         if "human-hold" in labels:
             continue
@@ -326,6 +330,8 @@ def scan_no_pr(review_tasks):
     without a PR there is nothing to review.
     """
     for task in review_tasks:
+        if not still_at(task, REVIEW):
+            continue
         labels = lane_labels(task)
         if "human-hold" in labels:
             continue
@@ -604,6 +610,8 @@ def scan_stale_prompt(detailed):
     for task in detailed:
         step = task.get("workflow_step_id")
         if step not in (AGENT, REVIEW):
+            continue
+        if not still_at(task, step):
             continue
         if "human-hold" in lane_labels(task):
             continue
@@ -995,6 +1003,8 @@ def scan_stuck(detailed):
     for task in detailed:
         step = task.get("workflow_step_id")
         if step not in (AGENT, REVIEW):
+            continue
+        if not still_at(task, step):
             continue
         labels = lane_labels(task)
         if "human-hold" in labels or "stuck-escalated" in labels:
@@ -1569,6 +1579,14 @@ def lane_tasks(tasks):
     them stuck in Ready, which forbids manual moves.
     """
     return [t for t in tasks if t.get("workflow_id") == WORKFLOW]
+
+
+def still_at(task, step):
+    """Fresh step check: several scans run on one stale snapshot per pass."""
+    try:
+        return get_task(task.get("id", "")).get("workflow_step_id") == step
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def is_eligible(task):
