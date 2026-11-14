@@ -1,1 +1,1 @@
-ok  	asterlab-mygo-prototype/internal/asterdoc	1.529s
+ok  	asterlab-mygo-prototype/internal/asterdoc	1.569s

@@ -133,7 +133,10 @@ pub fn project_time_budget(
         };
         let Some(timing) = &spec.timing else {
             if let Some(interval) = interval_s {
-                budget.total_span_s += interval * (schedule_count - 1) as f64;
+                budget.total_span_s += interval * f64::from(schedule_count - 1);
+                if !budget.total_span_s.is_finite() {
+                    return Err("projected time budget is not finite".into());
+                }
             }
             continue;
         };
@@ -143,27 +146,32 @@ pub fn project_time_budget(
             .seconds()
             .ok_or_else(|| format!("step[{step_index}] timing duration must use a time unit"))?;
         if !duration.is_finite() || duration <= 0.0 {
-            return Err(format!("step[{step_index}] timing duration must be finite and positive"));
+            return Err(format!(
+                "step[{step_index}] timing duration must be finite and positive"
+            ));
         }
-        let step_duration = duration * f64::from(repeat_count) * f64::from(schedule_count);
-        if !step_duration.is_finite() {
+        let occurrence_duration = duration * f64::from(repeat_count);
+        if !occurrence_duration.is_finite() {
             return Err(format!("step[{step_index}] expanded duration is not finite"));
         }
-        let start_s = budget.total_span_s;
-        budget.total_span_s += step_duration;
-        if timing.kind == crate::operation_spec::OperationTimeKind::HandsOn {
-            budget.hands_on_s += step_duration;
-        } else {
-            budget.parallel_windows.push(ParallelWindow {
-                step_index,
-                start_s,
-                end_s: budget.total_span_s,
-                duration_s: step_duration,
-                time_anchor_id: spec.time_anchor_id.clone(),
-            });
-        }
-        if let Some(interval) = interval_s {
-            budget.total_span_s += interval * f64::from(schedule_count - 1);
+
+        for occurrence in 0..schedule_count {
+            let start_s = budget.total_span_s;
+            budget.total_span_s += occurrence_duration;
+            if timing.kind == crate::operation_spec::OperationTimeKind::HandsOn {
+                budget.hands_on_s += occurrence_duration;
+            } else {
+                budget.parallel_windows.push(ParallelWindow {
+                    step_index,
+                    start_s,
+                    end_s: budget.total_span_s,
+                    duration_s: occurrence_duration,
+                    time_anchor_id: spec.time_anchor_id.clone(),
+                });
+            }
+            if occurrence + 1 < schedule_count {
+                budget.total_span_s += interval_s.unwrap_or(0.0);
+            }
         }
         if !budget.total_span_s.is_finite() || !budget.hands_on_s.is_finite() {
             return Err("projected time budget is not finite".into());
@@ -208,9 +216,14 @@ mod tests {
         let budget = project_time_budget(&specs).unwrap();
         assert_eq!(budget.hands_on_s, 60.0);
         assert_eq!(budget.total_span_s, 180_090.0);
-        assert_eq!(budget.parallel_windows.len(), 2);
-        assert_eq!(budget.parallel_windows[0].time_anchor_id.as_deref(), Some("cold_start"));
-        assert_eq!(budget.parallel_windows[0].duration_s, 7_200.0);
+        assert_eq!(budget.parallel_windows.len(), 4);
+        assert_eq!(
+            budget.parallel_windows[1..]
+                .iter()
+                .map(|window| (window.start_s, window.end_s, window.duration_s))
+                .collect::<Vec<_>>(),
+            [(7_260.0, 7_270.0, 10.0), (93_670.0, 93_680.0, 10.0), (180_080.0, 180_090.0, 10.0)]
+        );
     }
 
     #[test]

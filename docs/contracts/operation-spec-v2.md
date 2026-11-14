@@ -35,14 +35,17 @@ The existing closed semantic errors remain `unit_mismatch`, `missing_parameter`,
   "parallel_windows": [
     { "step_index": 1, "start_s": 60.0, "end_s": 7260.0,
       "duration_s": 7200.0, "time_anchor_id": "cold_start" },
-    { "step_index": 2, "start_s": 7260.0, "end_s": 7290.0,
-      "duration_s": 30.0, "time_anchor_id": "t0" }
+    { "step_index": 2, "start_s": 7260.0, "end_s": 7270.0,
+      "duration_s": 10.0, "time_anchor_id": "t0" },
+    { "step_index": 2, "start_s": 93670.0, "end_s": 93680.0,
+      "duration_s": 10.0, "time_anchor_id": "t0" },
+    { "step_index": 2, "start_s": 180080.0, "end_s": 180090.0,
+      "duration_s": 10.0, "time_anchor_id": "t0" }
   ]
-
 }
 ```
 
-Durations are converted to seconds for this projection only; the authored quantity and unit are unchanged. The projection sums known step durations in the supplied order. Repeat and schedule occurrence counts multiply the step duration; periodic interval gaps add `(occurrences - 1) × interval` to the span. `hands_on_s` sums only `hands_on` durations. `wait` and `timed_endpoint` create parallel windows and do not count as hands-on. A missing timing contributes no duration. Conditional skips are assumed not to occur, so estimates do not depend on runtime check outcomes. This is a deterministic estimate, not a runtime calendar or a claim that steps actually ran in parallel.
+Each `wait` or `timed_endpoint` occurrence produces its own parallel window. Durations are converted to seconds for this projection only; the authored quantity and unit are unchanged. The projection sums known step durations in the supplied order. Repeat count multiplies each occurrence duration; periodic interval gaps add `(occurrences - 1) × interval` to the span and separate the corresponding windows. `hands_on_s` sums only `hands_on` durations. `wait` and `timed_endpoint` create parallel windows and do not count as hands-on. A missing timing contributes no duration. Conditional skips are assumed not to occur, so estimates do not depend on runtime check outcomes. This is a deterministic estimate, not a runtime calendar or a claim that steps actually ran in parallel.
 
 ## Unit registry additions
 

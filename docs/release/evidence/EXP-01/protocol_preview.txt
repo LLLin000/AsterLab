@@ -1,21 +1,9 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-core/7a6e0bb0fcc4d289/out/asterlab_core-7a6e0bb0fcc4d289)
-
 running 3 tests
-test protocol_preview::tests::step_parameter_omits_path_but_global_keeps_it ... ok
-test protocol_preview::tests::visualization_is_omitted_when_absent ... ok
-test protocol_preview::tests::time_budget_separates_hands_on_span_and_parallel_wait_windows ... ok
-
+...
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 360 filtered out; finished in 0.00s
 
-     Running tests/catalog_drafts.rs (/srv/build/asterlab-target/debug/build/asterlab-core/b0027bea1b7af6c8/out/catalog_drafts-b0027bea1b7af6c8)
-
 running 0 tests
-
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
 
-     Running tests/operation_surface.rs (/srv/build/asterlab-target/debug/build/asterlab-core/dd305232b879448e/out/operation_surface-dd305232b879448e)
-
 running 0 tests
-
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
