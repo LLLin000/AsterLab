@@ -169,7 +169,8 @@ pub struct ExecutionEventView {
     pub schema_id: Option<String>,
     pub schema_version: Option<u32>,
     pub result_cells: Vec<Value>,
-
+    pub ad_hoc_step: bool,
+    pub skipped_by_rule: bool,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunWorkspaceError(pub String);
@@ -529,6 +530,8 @@ pub fn build(
             schema_id: opt_text(&event["schema_id"]),
             schema_version: event["schema_version"].as_u64().map(|v| v as u32),
             result_cells: event["result_cells"].as_array().cloned().unwrap_or_default(),
+            ad_hoc_step: event["ad_hoc_step"].as_bool().unwrap_or(false),
+            skipped_by_rule: opt_text(&event["event_type"]).as_deref() == Some("skipped_by_rule"),
         })
         .collect();
 
@@ -725,5 +728,29 @@ mod tests {
         let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events).unwrap();
         assert!(workspace.occurrences.is_empty());
         assert_eq!(workspace.events[0].occurrence_id, None);
+    }
+    #[test]
+    fn projects_rule_skips_and_ad_hoc_step_marker_without_blocking_task() {
+        let events = vec![json!({
+            "id":"e1","event_type":"skipped_by_rule","content":"No bubbles",
+            "recorded_at":"2026-11-15T10:00:00Z","protocol_step_path":"root/a",
+            "timepoint":"D1",
+            "protocol_version_id":"pv1","assay_id":"cck8","step_status":"skipped",
+            "ad_hoc_step":true
+        })];
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events).unwrap();
+        assert!(workspace.events[0].skipped_by_rule);
+        assert!(workspace.events[0].ad_hoc_step);
+        assert_eq!(workspace.tasks[0].status, "skipped");
+    }
+    #[test]
+    fn skipped_by_rule_is_projected_as_a_non_blocking_step_status() {
+        let events = vec![json!({"id":"skip-1","event_type":"skipped_by_rule",
+            "step_status":"skipped","protocol_step_path":"root/a","protocol_version_id":"pv1",
+            "timepoint":"D1",
+            "assay_id":"cck8","recorded_at":"2026-11-15T10:00:00Z"})];
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events).unwrap();
+        assert_eq!(workspace.tasks[0].status, "skipped");
+        assert!(workspace.events[0].skipped_by_rule);
     }
 }

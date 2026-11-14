@@ -62,6 +62,40 @@ pub struct AssetRef {
     pub availability: Availability,
 }
 
+/// Run association and optional physical/image coordinates for a linked asset.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetLink {
+    pub asset_id: String,
+    pub run_id: String,
+    pub task_key: String,
+    #[serde(default)]
+    pub sample_id: Option<String>,
+    #[serde(default)]
+    pub well_id: Option<String>,
+    #[serde(default)]
+    pub timepoint: Option<String>,
+    #[serde(default)]
+    pub fov_index: Option<u32>,
+}
+
+impl AssetLink {
+    /// Stable coordinate locator for navigation across Run and Record views.
+    pub fn coordinate_id(&self) -> Option<String> {
+        let well = self.well_id.as_deref()?;
+        if well.is_empty() { return None; }
+        let mut id = well.to_ascii_uppercase();
+        if let Some(timepoint) = self.timepoint.as_deref().filter(|v| !v.is_empty()) {
+            id.push('_');
+            id.push_str(timepoint);
+        }
+        if let Some(index) = self.fov_index {
+            id.push_str(&format!("_fov{index:02}"));
+        }
+        Some(id)
+    }
+}
+
 /// A candidate relative path that matched the stored file evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -996,5 +1030,20 @@ mod tests {
         }
         assert_eq!(fs::read_dir(root.join("d1")).unwrap().count(), 1);
         assert_eq!(fs::read(root.join("d1/readout.csv")).unwrap(), b"a,b\n1,2\n");
+    }
+    #[test]
+    fn asset_link_coordinate_id_is_stable_and_optional() {
+        let link = AssetLink {
+            asset_id: "asset-1".into(),
+            run_id: "run-1".into(),
+            task_key: "capture".into(),
+            sample_id: None,
+            well_id: Some("a1".into()),
+            timepoint: Some("t6h".into()),
+            fov_index: Some(1),
+        };
+        assert_eq!(link.coordinate_id().as_deref(), Some("A1_t6h_fov01"));
+        let no_location = AssetLink { well_id: None, ..link };
+        assert_eq!(no_location.coordinate_id(), None);
     }
 }
