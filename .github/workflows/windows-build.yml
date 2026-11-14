@@ -9,9 +9,10 @@ name: windows-build
 # Rust/Slint research prototype (docs/architecture.md §1) and is not built here.
 
 # Platform split: the Windows artifacts are built and verified on the Windows
-# machine (Windows Gate lane), not on every VPS pull request. This workflow is
-# manual until a self-hosted Windows runner exists; the VPS gates required on
-# PRs are `linux-tests` and `scope-check`.
+# machine (Windows Gate lane), not on every pull request. Hosted minutes are
+# exhausted, so the lane runs scripts/ci/local-gate.ps1 instead of this
+# workflow (docs/engineering/local-ci.md). The Linux lane owns `cargo test`
+# and the Linux Go suite; Windows never runs those.
 on:
   workflow_dispatch:
 
