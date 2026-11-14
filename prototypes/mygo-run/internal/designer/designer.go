@@ -1155,8 +1155,9 @@ func toolbar(c *ui.Context, d *Designer) {
 			components.Text(c, "加载中…").TextColor(t.TextMuted).FontSize(t.Rem(.85))
 		}
 		if d.Error != "" {
-			components.Text(c, d.Error).TextColor(t.Danger).FontSize(t.Rem(.85)).
-				SingleLine().Ellipsis("…").MaxWidth(360)
+			// UX-P5 / UX-STATE / UX-DONE: retain the rejected write cause and show a concrete retry.
+			components.Text(c, "未保存 · "+d.Error+" · 修复目标目录权限后点击保存重试。").
+				TextColor(t.Danger).FontSize(t.Rem(.75)).SingleLine().Ellipsis("…").MaxWidth(420)
 		}
 		saveBadge(c, d)
 		island(func() {

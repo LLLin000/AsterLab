@@ -609,3 +609,19 @@ func TestInspectorDockedAtWideAndSheetAtNarrow(t *testing.T) {
 		t.Fatalf("inspector sheet did not open at 900px: %q", narrow.Texts())
 	}
 }
+func TestCoreWriteErrorOffersRetry(t *testing.T) {
+	d := sampleDesigner(t)
+	d.Error = "permission denied: design root is read-only"
+	d.SaveState = SaveError
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, d)
+	}, 900, 600)
+	tt.Frame()
+	// UX-P5 / UX-STATE / UX-DONE: preserve the error cause and tell the user how to retry Save.
+	for _, text := range []string{"未保存", "permission denied: design root is read-only", "修复目标目录权限后点击保存重试"} {
+		if !tt.HasText(text) {
+			t.Fatalf("failed-write state missing %q: %q", text, tt.Texts())
+		}
+	}
+}

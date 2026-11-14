@@ -266,6 +266,15 @@ func (s *Shell) page(c *ui.Context) {
 	padding := t.Space(3)
 	ui.Column(c).Fill().Padding(inset, 0, 0, 0).Background(t.Background).Children(func() {
 		ui.Column(c).Grow(1).MinHeight(0).Padding(0, padding, padding, padding).Children(func() {
+			if s.Error != "" {
+				// UX-P5 / UX-STATE / UX-DONE: keep a failed write visible on every surface, with cause and recovery guidance.
+				ui.Column(c).FillWidth().Padding(t.Space(1), t.Space(2)).Gap(t.Space(.5)).
+					Background(t.Surface).Children(func() {
+					components.Text(c, "未保存 · "+s.Error).TextColor(t.Danger)
+					components.Text(c, "检查目标目录权限后，返回当前操作并重试保存。").
+						TextColor(t.TextMuted).FontSize(t.Rem(.8))
+				})
+			}
 			if s.Page == Project {
 				s.projectView(c)
 				return
@@ -308,13 +317,13 @@ func (s *Shell) projectView(c *ui.Context) {
 			})
 
 			ui.Row(c).Wrap().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
-				if s.OnCreate != nil && components.Button(c, "新建设计", components.ButtonPrimary).Clicked() {
+				if s.OnCreate != nil && len(s.Designs) > 0 && components.Button(c, "新建设计", components.ButtonPrimary).Clicked() {
 					s.OnCreate()
 				}
 				if s.OnImport != nil && components.Button(c, "导入设计", components.ButtonSecondary).Clicked() {
 					s.OnImport()
 				}
-				if s.OnContinue != nil && components.Button(c, "继续上次工作", components.ButtonGhost).Clicked() {
+				if s.OnContinue != nil && len(s.RecentRuns) > 0 && components.Button(c, "继续上次工作", components.ButtonGhost).Clicked() {
 					s.OnContinue()
 				}
 				ui.Spacer(c)
@@ -384,21 +393,22 @@ func (s *Shell) projectView(c *ui.Context) {
 			if s.Loading {
 				components.Text(c, "正在加载工作区…").TextColor(t.TextMuted)
 			}
-			if s.Error != "" {
-				components.Text(c, s.Error).TextColor(t.Danger)
-			}
 		})
 	})
 }
 
 func (s *Shell) homeEmpty(c *ui.Context) {
 	t := c.Theme()
+	title, detail := "未开始 · 还没有实验设计", "新建一个设计，或导入已有记录开始。"
+	if s.Project == "" && len(s.Projects) == 0 {
+		title, detail = "未开始 · 尚无项目", "新建设计开始工作；现有记录也可以导入。"
+	}
+	// UX-P5 / UX-STATE / UX-DONE: distinguish no-project from an empty project and offer a direct first action.
 	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Padding(t.Space(5)).Radius(t.Space(2)).
 		Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
 		components.Icon(c, lucide.FlaskConical()).Size(t.Space(6), t.Space(6)).TextColor(t.Accent)
-		components.Text(c, "还没有实验设计").FontSize(t.Rem(1.15)).FontWeight(600)
-		components.Text(c, "新建一个设计，或导入已有记录开始。").
-			TextColor(t.TextMuted).FontSize(t.Rem(.9))
+		components.Text(c, title).FontSize(t.Rem(1.15)).FontWeight(600)
+		components.Text(c, detail).TextColor(t.TextMuted).FontSize(t.Rem(.9))
 		if s.OnCreate != nil && components.Button(c, "新建设计", components.ButtonPrimary).Clicked() {
 			s.OnCreate()
 		}
