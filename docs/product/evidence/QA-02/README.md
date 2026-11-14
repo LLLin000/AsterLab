@@ -1,6 +1,8 @@
 # QA-02 RNA Run Evidence
-## 结论：BLOCKED
+## Rerun status: earlier block resolved
 
+The BLOCKED record from PR #89 below is historical. QA-04 (#90) added the RNA/root parameter slots and mappings; RUN-07 (#91) added the `标记完成` action. This rerun proves root parameter binding and two Core task completions. Rerun artifacts are listed at the end of this file.
+## Earlier finding: BLOCKED (PR #89; resolved by rerun)
 - `protocol.block.preview` -> `INVALID_INPUT: 步骤块不存在根参数槽位：lysis_vol` (fixture declares zero parameter slots and empty bindings). Raw output, `parameter-binding-error.txt`:
 
   ```json
@@ -91,3 +93,25 @@ The full value-by-value comparison is in `field-comparison.txt`; the raw CLI out
 - Raw `run.workspace`: [`workspace-before.json`](workspace-before.json), [`workspace-after.json`](workspace-after.json)
 - GUI step logs and restart snapshot: [`step-log.txt`](step-log.txt), [`restart-snapshot.txt`](restart-snapshot.txt)
 - Screenshots: 13 `qa02-step-*-1360x880-light.png` files and `qa02-restart-900x600-dark.png`.
+## Rerun evidence — 2026-11-14
+
+- Checkout `O:\qa02b`, branch `agent/QA-02-rna-rerun`; repository HEAD when the evidence binary was built and screenshots were taken: `720efd6`. [`rerun-build-info.txt`](rerun-build-info.txt) records the matching `BUILD_INFO.txt` commit and both artifact hashes.
+- Fixture run: `08ab91b7-4bd7-436f-bbff-1dc05f643f3f`, 13 tasks. The ids file is [`rerun-rna-ids.json`](rerun-rna-ids.json); raw seed output is [`rerun-fixture-output.txt`](rerun-fixture-output.txt).
+- Root binding probe with `lysis_vol=200 uL` and `lysis_time=10 min` returned `ready: true`; resolved values include `root/lysis_vol=200`, `root/rna/lysis_vol=200`, `root/lysis_time=10`, and `root/rna/lysis_time=10`. Raw CLI output: [`rerun-parameter-preview.json`](rerun-parameter-preview.json).
+- Opened the frozen Run in the real GUI, selected all 13 tasks (selection diffs: [`rerun-step-actions.txt`](rerun-step-actions.txt), [`rerun-step-walk.txt`](rerun-step-walk.txt)), and completed steps 1 and 2 with `标记完成`. Reopened in a fresh GUI process; [`rerun-reopen-snapshot.txt`](rerun-reopen-snapshot.txt) shows both as `已完成`. Core `run.workspace` after restart confirms both statuses: [`rerun-workspace-after.json`](rerun-workspace-after.json).
+- Baseline screenshot shows `planned`, `未开始`, and `0/10`; progress screenshot shows `2/10` and the selected step `已完成`. Both are 1360×880 light: [`rerun-before-1360x880-light.png`](rerun-before-1360x880-light.png), [`rerun-after-1360x880-light.png`](rerun-after-1360x880-light.png).
+
+### Frozen-field comparison after fresh-process reopen
+
+Raw Core captures: [`rerun-workspace-before.json`](rerun-workspace-before.json) and [`rerun-workspace-after.json`](rerun-workspace-after.json). Comparison details: [`rerun-field-comparison.txt`](rerun-field-comparison.txt).
+
+| Frozen field | Before == after |
+|---|---|
+| Protocol version ID / version | `745a4728-d851-4163-ac5c-f2fa149f2b70`, v1 == same |
+| Ordered step paths | 13 paths == same |
+| Per-step parameters | 13 empty lists == same |
+| Resolved / unresolved scope parameters | same |
+| Task timepoints | 13 null == same |
+
+Run status, revision, and task statuses are intentionally not frozen: the Run advanced from `planned`, revision 0, and `not_started` to `in_progress`, revision 2, with steps 1–2 `completed`.
+

@@ -1,0 +1,36 @@
+@e850 [button] "项目工作区" key="项目工作区"
+@e851 [button] "实验设计" key="实验设计"
+@e852 [button] "实验方案" key="实验方案"
+@e853 [button] "实验运行" key="实验运行" checked
+@e854 [button] "Notebook" key=Notebook
+@e855 [button] "资料与工具" key="资料与工具"
+@e857 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e889 [button] "查看冻结文档"
+@e890 [button] "导出 PDF"
+@e997 [treeItem] "01 RNA 提取   2/10 · 未开始" key="01 RNA 提取   2/10 · 未开始" expanded
+@e953 [treeItem] "01 收集细胞 · 已完成" key="01 收集细胞 · 已完成"
+@e998 [treeItem] "02 裂解与匀浆 · 已完成" key="02 裂解与匀浆 · 已完成" checked
+@e901 [treeItem] "03 加乙醇 · 未开始" key="03 加乙醇 · 未开始"
+@e902 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始"
+@e903 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始"
+@e904 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始"
+@e905 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始"
+@e906 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始"
+@e907 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始"
+@e908 [treeItem] "10 RNA 质检与保存 · 未开始" key="10 RNA 质检与保存 · 未开始"
+@e909 [treeItem] "02 RNA 质控   0/1 · 未开始" key="02 RNA 质控   0/1 · 未开始" expanded
+@e910 [treeItem] "RNA 质检 · 未开始" key="RNA 质检 · 未开始"
+@e911 [treeItem] "03 逆转录   0/1 · 未开始" key="03 逆转录   0/1 · 未开始" expanded
+@e912 [treeItem] "逆转录 · 未开始" key="逆转录 · 未开始"
+@e913 [treeItem] "04 qPCR 扩增及检测   0/1 · 未开始" key="04 qPCR 扩增及检测   0/1 · 未开始" expanded
+@e914 [treeItem] "qPCR 扩增 · 未开始" key="qPCR 扩增 · 未开始"
+@e917 [tab] "任务" checked
+@e918 [tab] "历史"
+@e919 [tab] "时间线"
+@e950 [button] "图片与文件"
+@e879 [button] "Toggle sidebar"
+@e880 [button] "新建设计"
+@e884 [button] "Minimize window"
+@e885 [button] "Maximize window"
+@e886 [button] "Close window"
+@e887 [splitter] "Resize sidebar" key=left-resize
