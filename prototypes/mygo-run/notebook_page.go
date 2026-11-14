@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/notebook"
 	"asterlab-mygo-prototype/internal/protocol"
+	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
@@ -20,6 +22,24 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 )
+
+type citePickerState struct {
+	open           bool
+	manual         bool
+	filter         string
+	dismissedToken string
+}
+
+var citePickers = map[*app]*citePickerState{}
+
+func (a *app) citePicker() *citePickerState {
+	st := citePickers[a]
+	if st == nil {
+		st = &citePickerState{filter: "all"}
+		citePickers[a] = st
+	}
+	return st
+}
 
 // notebookPage follows Obsidian's shape: one paper sheet, a floating toolbar,
 // and three modes over the same stored Markdown — live rich rendering, source
@@ -38,7 +58,7 @@ func notebookPage(c *ui.Context, a *app) {
 		a.loadNotebook()
 	}
 	ui.Column(c).Fill().Padding(t.Space(2), t.Space(3)).Gap(t.Space(2)).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Padding(0, t.Space(1)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Padding(0, t.Space(1)).Children(func() {
 			ui.Text(c, "Notebook").FontSize(11).Bold().TextColor(t.TextMuted)
 			ui.Text(c, "/").FontSize(11).TextColor(t.Border)
 			ui.Text(c, a.snap.Title).FontSize(11).TextColor(t.TextMuted).
@@ -62,7 +82,7 @@ func notebookPage(c *ui.Context, a *app) {
 			}
 		}
 		ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-			ui.Row(c).Padding(t.Space(1), t.Space(1.25)).Radius(t.Space(2.5)).
+			ui.Row(c).Wrap().MaxWidth(960).MaxWidthPercent(100).Padding(t.Space(1), t.Space(1.25)).Radius(t.Space(2.5)).
 				Background(t.Surface).Border(1, t.Border).
 				Shadow(0, 2, 16, 0, t.Text.Alpha(.10)).Gap(t.Space(.75)).
 				AlignItems(ui.Center).Children(func() {
@@ -92,32 +112,23 @@ func notebookPage(c *ui.Context, a *app) {
 						a.insertPlateModule()
 					}
 				}
-				// Citation affordance: prose may reference existing Run events
-				// but never creates them (UX §1.2). Inserts plain text only.
-				cite := components.Button(c, "引用事件", components.ButtonGhost)
+				// Citations only point to existing Run facts; no fact-writing controls live here (UX-P1, UX-P2, UX-P3).
+				st := a.citePicker()
+				cite := components.Button(c, "@引用", components.ButtonGhost)
 				cite.Disabled(a.noteMode == 2)
-				cite.Menu(func(m *ui.Menu) {
-					shown := 0
-					for i := len(a.snap.Events) - 1; i >= 0 && shown < 8; i-- {
-						ev := a.snap.Events[i]
-						if strings.TrimSpace(ev.ID) == "" {
-							continue
+				if cite.Clicked() && a.noteMode != 2 {
+					st.manual = !st.open
+					st.open = !st.open
+					st.filter = "all"
+					if !st.open {
+						if q, active := notebook.ExtractAtQuery(a.noteSource()); active {
+							st.dismissedToken = "@" + q
 						}
-						label := ev.Content
-						if strings.TrimSpace(label) == "" {
-							label = ev.ID
-						}
-						if m.Item(label).Chosen() {
-							a.insertEventCitation(ev)
-						}
-						shown++
 					}
-					if shown == 0 {
-						m.Item("无近期事件")
-					}
-				})
+				}
 
-				ui.Spacer(c)
+
+				ui.Box(c).Width(t.Space(1))
 				old := a.noteMode
 				parts := components.TabsWithLeading(c, &a.noteMode, components.TabsSegmented,
 					func(c *ui.Context, i int, size float32) {
@@ -137,10 +148,139 @@ func notebookPage(c *ui.Context, a *app) {
 				}
 			})
 		})
+		src := a.noteSource()
+		atQuery, atActive := notebook.ExtractAtQuery(src)
+		st := a.citePicker()
+		if a.noteMode != 2 && atActive {
+			tok := "@" + atQuery
+			if st.dismissedToken != tok {
+				st.open = true
+				st.manual = false
+			}
+		} else if !st.manual {
+			st.open = false
+			st.dismissedToken = ""
+		}
+		var gridForCite *resultgrid.Grid
+		if a.ws != nil {
+			gridForCite = a.ws.Grid
+		}
+		frozenSrc := ""
+		if a.asterDoc != nil {
+			frozenSrc = a.asterDoc.Source
+		}
+		if st.open && a.noteMode != 2 {
+			projName := a.snap.Title
+			if a.shell != nil && strings.TrimSpace(a.shell.Project) != "" {
+				projName = a.shell.Project
+			}
+			catalog := notebook.BuildCitationCatalog(projName, a.snap, a.runAssets, gridForCite, frozenSrc, atQuery)
+			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Column(c).FillWidth().MaxWidth(820).MaxWidthPercent(100).
+					Padding(t.Space(2), t.Space(2.5)).Radius(t.Space(2)).
+					Background(t.Surface).Border(1, t.Border).
+					Shadow(0, 4, 14, 0, t.Text.Alpha(.08)).Gap(t.Space(1.25)).Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "项目 · "+catalog.Project).FontSize(12).Bold().TextColor(t.Text)
+						if atActive {
+							ui.Text(c, "@"+atQuery).FontSize(11).TextColor(t.Accent)
+						}
+						ui.Spacer(c)
+						if components.Button(c, "关闭", components.ButtonGhost).Clicked() {
+							st.open = false
+							st.manual = false
+							if atActive {
+								st.dismissedToken = "@" + atQuery
+							}
+						}
+					})
+					ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(.75)).Children(func() {
+						for _, tab := range []struct{ key, label string }{
+							{"all", "全部"},
+							{"plate", "板图"},
+							{"summary", "统计结果"},
+							{"event", "总结语句"},
+							{"step", "步骤板块"},
+							{"asset", "文件"},
+							{"readout", "读数"},
+						} {
+							tab := tab
+							style := components.ButtonGhost
+							if st.filter == tab.key {
+								style = components.ButtonSecondary
+							}
+							if components.Button(c, tab.label, style).Clicked() {
+								st.filter = tab.key
+							}
+						}
+					})
+					ui.Scroll(c).MaxHeight(220).MinHeight(90).Children(func() {
+						ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+							shownGroups := 0
+							for _, grp := range catalog.Groups {
+								if st.filter != "all" && grp.Key != st.filter {
+									continue
+								}
+								shownGroups++
+								ui.Text(c, "▾ "+grp.Label).FontSize(11).Bold().TextColor(t.TextMuted)
+								ui.Column(c).FillWidth().Padding(0, 0, 0, t.Space(2)).Gap(t.Space(.5)).Children(func() {
+									for _, item := range grp.Items {
+										item := item
+										title := item.Label
+										if item.Detail != "" && item.Detail != item.Label {
+											title += " · " + item.Detail
+										}
+										if components.Button(c, title, components.ButtonSecondary).Clicked() {
+											a.insertCitation(item.Citation)
+											st.open = false
+											st.manual = false
+											st.dismissedToken = ""
+										}
+									}
+								})
+							}
+							if shownGroups == 0 {
+								ui.Text(c, "暂无可引用的记录").FontSize(12).TextColor(t.TextMuted)
+							}
+						})
+					})
+				})
+			})
+		}
 		if a.noteErr != "" {
 			ui.Row(c).FillWidth().Padding(6, 10).Radius(6).
 				Background(theme.GetTokens(t).DangerBg).Children(func() {
 				ui.Text(c, a.noteErr).FontSize(12).TextColor(theme.GetTokens(t).DangerText)
+			})
+		}
+		// Snapshot details stay read-only; removing a token changes prose only (UX-STATE, UX-P5, UX-P1, UX-P2, UX-P3, UX-LAYOUT).
+		citations := notebook.ResolveCitationsWith(src, a.snap, a.runAssets, gridForCite, frozenSrc)
+		if len(citations) > 0 {
+			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Column(c).FillWidth().MaxWidth(820).MaxWidthPercent(100).Padding(t.Space(2), t.Space(3)).
+					Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "引用快照").FontSize(11).Bold().TextColor(t.TextMuted)
+					for i, resolved := range citations {
+						i, resolved := i, resolved
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+							ui.Text(c, resolved.Citation.ID).FontSize(11).TextColor(t.TextMuted)
+							ui.Text(c, resolved.Citation.Snapshot).FontSize(12).TextColor(t.Text)
+							if resolved.Status != "current" {
+								warning := "已过期"
+								if resolved.Status == "missing" {
+									warning = "已过期 / 原记录不可用"
+								}
+								ui.Text(c, warning).FontSize(10).Bold().TextColor(t.Warning)
+							}
+							ui.Spacer(c)
+							remove := components.Button(c, "移除引用", components.ButtonGhost)
+							remove.Disabled(a.noteMode == 2)
+							if remove.Clicked() && a.noteMode != 2 {
+								a.removeCitation(i)
+							}
+						})
+					}
+				})
 			})
 		}
 		paper := func(children func()) {
@@ -285,21 +425,18 @@ func (a *app) noteSource() string {
 	return a.noteDraft
 }
 
-func (a *app) insertEventCitation(ev runs.RunEvent) {
-	token := fmt.Sprintf("[event %s]", ev.ID)
-	if strings.TrimSpace(ev.BatchID) != "" {
-		token = fmt.Sprintf("[batch %s]", ev.BatchID)
-	}
-	src := a.noteSource()
-	if strings.TrimSpace(src) != "" {
-		src += " " + token
-	} else {
-		src = token
-	}
-	a.noteDraft = src
+func (a *app) insertCitation(citation notebook.Citation) {
+	a.noteDraft = notebook.ApplyAtCitation(a.noteSource(), citation)
 	if a.noteMode == 0 {
 		a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
 	}
+	a.noteDirty = true
+	a.noteState = ""
+}
+
+func (a *app) removeCitation(index int) {
+	a.noteDraft = notebook.RemoveCitation(a.noteSource(), index)
+	if a.noteMode == 0 { a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft)) }
 	a.noteDirty = true
 	a.noteState = ""
 }
