@@ -50,9 +50,11 @@ func TestRecordingTableViewShowsMeasurements(t *testing.T) {
 func TestRecordingGalleryShowsFiles(t *testing.T) {
 	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
 	task := vm.TaskByKey["t-read"]
+	var relocated LinkedAsset
 	rv := &RecordingView{
 		Kind: ViewGallery,
 		Task: task,
+		OnRelocate: func(asset LinkedAsset) { relocated = asset },
 		Assets: []LinkedAsset{
 			{AssetID: "a1", RootID: "project-data", RelativePath: "huvec/d1/image_01.tif",
 				MediaType: "image/tiff", Size: 18742000, Available: true},
@@ -68,8 +70,43 @@ func TestRecordingGalleryShowsFiles(t *testing.T) {
 	if !tt.HasText("huvec/d1/image_01.tif") {
 		t.Fatal("asset path missing")
 	}
-	if !tt.HasText("文件不可用") {
-		t.Fatal("unavailable file marker missing")
+	// UX-P5 / UX-STATE / UX-DONE: unavailable links remain named and provide a relocation action.
+	if !tt.HasText("未解析 · 文件不可用") {
+		t.Fatalf("unavailable file state missing: %q", tt.Texts())
+	}
+	if err := tt.Click("重新定位"); err != nil {
+		t.Fatal(err)
+	}
+	if relocated.AssetID != "a2" {
+		t.Fatalf("relocated asset = %+v, want missing link a2", relocated)
+	}
+}
+
+func TestRecordingCoreWriteErrorOffersRetry(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	task := vm.TaskByKey["t-read"]
+	grid := resultgrid.New(resultgrid.Schema{
+		ID: "readout", Version: 1, RowLabels: []string{"A1"}, ColumnLabels: []string{"OD450"},
+	}, nil)
+	grid.State, grid.Error = resultgrid.StateError, "permission denied: asset root is read-only"
+	saved := false
+	rv := &RecordingView{Kind: ViewTable, Grid: grid, Task: task, OnSaveBatch: func([]resultgrid.Cell) { saved = true }}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+	// UX-P5 / UX-STATE / UX-DONE: show Core cause and permit an explicit retry.
+	for _, text := range []string{"未保存", "permission denied: asset root is read-only", "检查目标目录权限", "重试保存"} {
+		if !tt.HasText(text) {
+			t.Fatalf("failed-write state missing %q: %q", text, tt.Texts())
+		}
+	}
+	if err := tt.Click("重试保存"); err != nil {
+		t.Fatal(err)
+	}
+	if !saved {
+		t.Fatal("重试保存 did not invoke retry")
 	}
 }
 

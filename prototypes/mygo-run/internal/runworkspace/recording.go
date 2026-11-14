@@ -169,6 +169,16 @@ func (r *RecordingView) Render(c *ui.Context) {
 			}
 		}
 	})
+	if r.Grid != nil && r.Grid.State == resultgrid.StateError && r.Grid.Error != "" {
+		// UX-P5 / UX-STATE / UX-DONE: retain the Core rejection cause and give a concrete recovery action.
+		ui.Column(c).FillWidth().Padding(t.Space(.75), t.Space(1.25)).Gap(t.Space(.5)).
+			Background(tokens.DangerBg).Children(func() {
+			ui.Text(c, "未保存 · "+r.Grid.Error).FontSize(t.Rem(.76)).TextColor(tokens.DangerText)
+			ui.Text(c, "检查目标目录权限后，点击重试保存。").
+				FontSize(t.Rem(.72)).TextColor(tokens.DangerText)
+		})
+	}
+
 	if recovered && r.Grid != nil && r.Grid.State != resultgrid.StateSaved {
 		ui.Row(c).FillWidth().Padding(t.Space(.75), t.Space(1.25)).Radius(6).
 			Background(tokens.WarningBg).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
@@ -383,8 +393,9 @@ func assetRow(c *ui.Context, a LinkedAsset, open, relocate func(LinkedAsset), t 
 			}
 		})
 		if !a.Available {
+			// UX-P5 / UX-STATE: keep a missing asset link visible and offer relocation.
 			ui.Row(c).Padding(2, 7).Radius(5).Background(tokens.WarningBg).Children(func() {
-				ui.Text(c, "文件不可用").FontSize(t.Rem(.68)).Bold().TextColor(tokens.WarningText)
+				ui.Text(c, "未解析 · 文件不可用").FontSize(t.Rem(.68)).Bold().TextColor(tokens.WarningText)
 			})
 			if relocate != nil {
 				if components.Button(c, "重新定位", components.ButtonGhost).Clicked() {

@@ -182,6 +182,46 @@ func TestProjectWorkspaceDataAndActions(t *testing.T) {
 		t.Fatalf("workspace actions: project=%q created=%v imported=%v continued=%v", project, created, imported, continued)
 	}
 }
+func TestEmptyProjectWorkspaceOffersNextAction(t *testing.T) {
+	for _, tc := range []struct {
+		name, project, want string
+		projects            []string
+	}{
+		{name: "no project", want: "尚无项目"},
+		{name: "empty project", project: "Study A", projects: []string{"Study A"}, want: "还没有实验设计"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			created := false
+			s := &Shell{Page: Project, Project: tc.project, Projects: tc.projects, OnCreate: func() { created = true }}
+			tt := render(s.page, 900, 600)
+			tt.Frame()
+			// UX-P5 / UX-STATE / UX-DONE: each empty state names 未开始 and offers new design.
+			for _, text := range []string{"未开始", tc.want, "新建设计"} {
+				if !tt.HasText(text) {
+					t.Fatalf("empty workspace missing %q: %q", text, tt.Texts())
+				}
+			}
+			if err := tt.Click("新建设计"); err != nil {
+				t.Fatal(err)
+			}
+			if !created {
+				t.Fatal("新建设计 did not invoke its action")
+			}
+		})
+	}
+}
+
+func TestCoreWriteErrorOffersRecoveryAction(t *testing.T) {
+	s := &Shell{Page: Project, Error: "permission denied: asset root is read-only"}
+	tt := render(s.page, 900, 600)
+	tt.Frame()
+	// UX-P5 / UX-STATE / UX-DONE: preserve Core cause and identify permission repair plus retry.
+	for _, text := range []string{"未保存", "permission denied: asset root is read-only", "检查目标目录权限", "重试保存"} {
+		if !tt.HasText(text) {
+			t.Fatalf("failed-write state missing %q: %q", text, tt.Texts())
+		}
+	}
+}
 
 func TestShellResponsiveThemeScreenshots(t *testing.T) {
 	for _, size := range []struct {
