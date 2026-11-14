@@ -59,9 +59,9 @@ class FeederActionLogTest(unittest.TestCase):
 
     def test_attempted_and_result_share_action_and_snapshot_ids(self):
         self.module.log_action("move_step", TASK, reason="r", result="attempted",
-                               from_step="review", to_step="review")
+                               from_step="review", to_step="review", action_id="attempt-1")
         self.module.log_action("move_step", TASK, reason="r", result="ok",
-                               from_step="review", to_step="review")
+                               from_step="review", to_step="review", action_id="attempt-1")
         first, second = self.records()
         self.assertEqual(first["action_id"], second["action_id"])
         self.assertEqual(first["snapshot_id"], second["snapshot_id"])
@@ -80,6 +80,14 @@ class FeederActionLogTest(unittest.TestCase):
         records = self.records()
         self.assertEqual([r["result"] for r in records], ["attempted", "failed:500"])
         self.assertEqual(records[0]["action_id"], records[1]["action_id"])
+
+    def test_repeated_move_gets_a_new_action_id_but_same_snapshot(self):
+        with mock.patch.object(self.module, "api", return_value=(200, {})):
+            self.module.move(TASK, "review", "wake")
+            self.module.move(TASK, "review", "wake")
+        records = self.records()
+        self.assertEqual(len({r["action_id"] for r in records}), 2)
+        self.assertEqual(records[0]["snapshot_id"], records[2]["snapshot_id"])
 
     def test_log_write_failure_does_not_raise(self):
         self.module.ACTION_LOG = "/proc/1/no-such-action-log.jsonl"
