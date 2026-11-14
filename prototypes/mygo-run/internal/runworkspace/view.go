@@ -720,11 +720,13 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 			ui.Spacer(c)
 			ui.Text(c, "当前步骤").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		})
+		// The procedure and planned parameters are frozen; UX-STATE/UX-P2.
+		ui.Text(c, "操作说明 · 已冻结 · 只读").FontSize(t.Rem(.72)).Bold().TextColor(t.TextMuted)
 		ui.Text(c, instruction).FontSize(t.Rem(.82)).TextColor(t.Text)
 
 		if len(task.Parameters) > 0 {
 			ui.Divider(c)
-			ui.Text(c, "操作参数").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "操作参数 · 已冻结 · 只读").FontSize(t.Rem(.78)).Bold().TextColor(t.TextMuted)
 			ui.Row(c).Wrap().Gap(t.Space(2)).Children(func() {
 				for _, p := range task.Parameters {
 					paramChip(c, p, t, tokens)
@@ -786,12 +788,15 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 			})
 		}
 
-		ui.Divider(c)
 		frozen := []string{fallback(task.StepPath), fallback(task.AssayID, "未绑定"), fallback(task.Timepoint, "未绑定")}
 		if strings.TrimSpace(task.StepID) != "" {
 			frozen = append(frozen, "步骤 ID "+task.StepID)
 		}
-		ui.Text(c, "冻结信息（只读） · "+strings.Join(frozen, " · ")).
+		if strings.TrimSpace(task.ProtocolVersionID) != "" {
+			frozen = append(frozen, "协议版本 "+task.ProtocolVersionID)
+		}
+		// Frozen identity is informational only; UX-STATE and UX-P2.
+		ui.Text(c, "冻结信息（只读 · 已冻结） · "+strings.Join(frozen, " · ")).
 			FontSize(t.Rem(.68)).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 	})
 }

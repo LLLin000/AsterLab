@@ -111,6 +111,24 @@ func TestTaskAssayID(t *testing.T) {
 		t.Fatalf("expected AssayID assay-100 after selection, got %+v", ct2)
 	}
 }
+func TestTaskPanelShowsFrozenProtocolReadOnly(t *testing.T) {
+	v := sampleView()
+	v.DesignRevision, v.AsterDocRevision = 7, 4
+	v.Tasks[1].ProtocolVersionID = "protocol-v2"
+	v.Tasks[1].Instruction = "保持 4°C 并轻柔混匀"
+	v.Tasks[1].Parameters = []FrozenParameter{{Key: "temp", Label: "温度", Value: "4", Unit: "°C"}}
+	w := NewWorkspace(v, Callbacks{})
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		taskPanel(c, w, c.Theme(), theme.GetTokens(c.Theme()))
+	}, 700, 700)
+	tt.Frame()
+	for _, text := range []string{"协议与参数 · 只读 · 已冻结", "协议版本 protocol-v2", "Run rev 3 · Design rev 7 · AsterDoc rev 4", "保持 4°C 并轻柔混匀", "温度 · 4 °C"} {
+		if !tt.HasText(text) {
+			t.Errorf("frozen task detail missing %q", text)
+		}
+	}
+}
 
 func TestRunShortcuts(t *testing.T) {
 	v := sampleView()

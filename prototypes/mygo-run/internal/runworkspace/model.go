@@ -103,7 +103,7 @@ type RunTaskViewModel struct {
 	StepTitle string
 	Timepoint string
 	AssayID   string
-
+	ProtocolVersionID string
 	Status TaskStatus
 
 	Planned *PlannedStep
@@ -544,6 +544,7 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc, project
 			StepTitle:   t.Title,
 			Timepoint:   t.Timepoint,
 			AssayID:     t.AssayID,
+			ProtocolVersionID: t.ProtocolVersionID,
 			Status:      buildTaskStatus(t),
 			Instruction: t.Instruction,
 			Parameters:  params,
