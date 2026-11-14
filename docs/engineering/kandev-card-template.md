@@ -80,6 +80,8 @@ forbid:
 硬规则：
 
 - 不在正文重复 `lane`、`milestone`、`priority`、依赖列表；这些用 Kandev 的 label、priority 和 `blocked_by`。
+- Relations 方向只有一个读法：`depends_on` / `blocked_by` 是本卡的前置卡，未 `COMPLETED` 就不开工；`blocks` 是本卡解锁的下游卡，**不影响本卡开工**。开工前把这两栏分开读，别把 `blocks` 当成被阻塞。
+  - 反例（DES-00，2026-11-14）：实现 agent 把 `blocks: DES-01` 读成"被 DES-01 阻塞"，没写一行代码就结束，白跑一轮 session。
 - `范围` 必须机器可读。`(Build)` 的范围检查读取 `<!-- kandev-scope -->` 块，不解析自然语言。
 - 验收必须是命令 + 期望结果，或明确的截图规格 + 规则 id；不写“测试全绿”“实机走查”“你确认”。
 - `DoD` 只保留人工签核项；能自动验证的内容放 `验收`。
