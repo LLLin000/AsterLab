@@ -62,3 +62,48 @@ func TestViewScreenshot(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRenderVersionsListsSummariesWithoutRawIDs(t *testing.T) {
+	versions := []VersionSummary{
+		{ID: "id-1", Title: "CCK-8", Version: 1},
+		{ID: "id-2", Title: "CCK-8", Version: 2},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		RenderVersions(c, versions, "id-1", nil)
+	}, 900, 600)
+	tt.Frame()
+	for _, want := range []string{"CCK-8 · v1", "CCK-8 · v2"} {
+		if !tt.HasText(want) {
+			t.Fatalf("version list missing %q", want)
+		}
+	}
+	if tt.HasText("id-1") || tt.HasText("id-2") {
+		t.Fatal("version list exposed raw protocol identifiers")
+	}
+}
+
+func TestRenderProtocolStateVocabulary(t *testing.T) {
+	tests := []struct {
+		state string
+		runID string
+		rev   uint64
+		want  string
+		avoid string
+	}{
+		{state: "unresolved", want: "未解析"},
+		{state: "preview", rev: 7, want: "预览 · Design revision 7", avoid: "冻结"},
+		{state: "frozen", runID: "run-abc", rev: 4, want: "已冻结 · Run run-abc · revision 4"},
+	}
+	for _, test := range tests {
+		tt := ui.NewTester(func(c *ui.Context) {
+			RenderVersionState(c, test.state, test.runID, test.rev)
+		}, 900, 600)
+		tt.Frame()
+		if !tt.HasText(test.want) {
+			t.Errorf("%s state missing %q", test.state, test.want)
+		}
+		if test.avoid != "" && tt.HasText(test.avoid) {
+			t.Errorf("%s state incorrectly contained %q", test.state, test.avoid)
+		}
+	}
+}
