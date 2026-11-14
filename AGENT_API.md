@@ -105,6 +105,15 @@ stdout 每次只输出一行 JSON。成功结构为：
 
 ## Protocol 步骤块契约
 
+### ProtocolVersion 内容查询
+
+`protocol.version.get` 与 `protocol.version.list` 是只读查询：
+
+- `protocol.version.get` 输入 `{"protocol_version_id":"<immutable-version-id>"}`，返回单个 ProtocolVersion 的 `protocol_version_id`、`protocol_id`、`version`、`root_block_version_id`、`root_bindings`、根参数 `parameter_slots`、递归展开的 `steps`、`resolved_parameters`、`unresolved_parameters`、`block_version_ids` 与 `frozen: true`。
+- `protocol.version.list` 输入 `{"protocol_id":"<protocol-id>"}`，返回 `{"versions":[<上述内容>...]}`，按版本号升序。
+- 未知或类型不匹配的 ID 返回 `NOT_FOUND`（退出码 3），不返回空对象。自由文本 Protocol 无根块时返回空步骤/参数数组，`root_block_version_id: null`；其不可变版本仍标记为 `frozen: true`。
+- 两个查询都不写入数据库。精确字段约束以 `labworkbench schema protocol.version.get` / `labworkbench schema protocol.version.list` 为准。
+
 Protocol 可以继续保存旧式 body 文本，也可以引用一个确切的 root_block_version_id。步骤块是唯一的可复用操作对象。protocol.block.create 的 steps 接受两种项：
 
 - text：包含 use_id、title、instruction 和 parameter_refs，是普通可读操作。只有列入 parameter_refs 的槽位才作为该步骤的显式输入。
