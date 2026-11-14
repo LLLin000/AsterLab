@@ -1,5 +1,5 @@
     Blocking waiting for file lock on build directory
-   Compiling labworkbench v0.1.0 (/var/lib/kandev/tasks/des-06-core-protocol_prwmexkh/LLLin000-AsterLab)
+   Compiling labworkbench v0.1.0 (<repository-path-redacted>)
 warning: unused variable: `assay_index`
     --> src/cli.rs:3672:9
      |
@@ -73,7 +73,7 @@ warning: field `project_id` is never read
 
 warning: `labworkbench` (bin "labworkbench" test) generated 10 warnings (run `cargo fix --bin "labworkbench" -p labworkbench --tests` to apply 2 suggestions)
     Finished `test` profile [unoptimized] target(s) in 32.65s
-     Running unittests src/main.rs (/srv/build/asterlab-target/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
+     Running unittests src/main.rs (<build-artifact-path-redacted>)
 
 running 34 tests
 test cli::tests::assess_includes_run_creation_audit_warnings ... ok

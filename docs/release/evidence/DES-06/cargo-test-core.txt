@@ -1,6 +1,6 @@
     Blocking waiting for file lock on build directory
     Finished `test` profile [unoptimized + debuginfo] target(s) in 13.86s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-core/7a6e0bb0fcc4d289/out/asterlab_core-7a6e0bb0fcc4d289)
+     Running unittests src/lib.rs (<build-artifact-path-redacted>)
 
 running 363 tests
 test agent_edit::tests::commit_result_carries_server_confirmed_values ... ok
@@ -369,7 +369,7 @@ test workflow_tree::tests::run_projection_keeps_multiple_timepoints_as_occurrenc
 
 test result: ok. 363 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
 
-     Running tests/catalog_drafts.rs (/srv/build/asterlab-target/debug/build/asterlab-core/b0027bea1b7af6c8/out/catalog_drafts-b0027bea1b7af6c8)
+     Running tests/catalog_drafts.rs (<build-artifact-path-redacted>)
 
 running 3 tests
 test instrument_drafts_validate_but_remain_research_drafts ... ok
@@ -378,7 +378,7 @@ test drafts_cannot_produce_compatible_matches ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/operation_surface.rs (/srv/build/asterlab-target/debug/build/asterlab-core/dd305232b879448e/out/operation_surface-dd305232b879448e)
+     Running tests/operation_surface.rs (<build-artifact-path-redacted>)
 
 running 6 tests
 test aliquot_keeps_parent_and_child_identity ... ok

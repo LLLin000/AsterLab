@@ -1117,7 +1117,7 @@ warning: field `project_id` is never read
 warning: `asterlab-app` (lib) generated 175 warnings (run `cargo fix --lib -p asterlab-app` to apply 2 suggestions)
 warning: `asterlab-app` (lib test) generated 18 warnings (16 duplicates)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-app/34d8dcb50fbb943a/out/asterlab_app-34d8dcb50fbb943a)
+     Running unittests src/lib.rs (<build-artifact-path-redacted>)
 
 running 40 tests
 test agent_edit_preview::tests::preview_rejects_the_three_illegal_input_classes ... ok
