@@ -4,10 +4,11 @@ name: linux-tests
 # unit/integration suites from HANDOFF-VPS.md §3. Toolchain and build matrix:
 # docs/engineering/cross-platform-builds.md §3-5.
 
+# Hosted-runner minutes are exhausted, so the Linux lane runs on the VPS
+# instead: scripts/ci/local-gate.sh (docs/engineering/local-ci.md). The Windows
+# Gate lane never runs these tests. Manual dispatch stays for budget restoral.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,16 +20,46 @@ concurrency:
 jobs:
   linux-tests:
     name: linux-tests
-    runs-on: ubuntu-24.04
+    # The VPS host is the only self-hosted Linux runner in the repo.
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
+      # Self-hosted box: keep build artifacts outside the workspace so they
+      # survive checkout. `Swatinem/rust-cache` used to clean ~/.cargo/bin on
+      # this runner and deleted the host toolchain (2026-11-14); the cache
+      # action is gone, this directory is the cache.
+      CARGO_TARGET_DIR: /var/lib/actions-runner/cargo-target
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Decide scope
+        # Docs-only pull requests skip the Rust/Go gate; every code path still
+        # runs it. An unreadable diff falls back to running the full gate.
+        run: |
+          set -euo pipefail
+          changed=""
+          if [ -n "${{ github.base_ref }}" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}" || true
+            changed=$(git diff --name-only "FETCH_HEAD...HEAD" 2>/dev/null || true)
+          else
+            changed=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+          fi
+          if [ -z "$changed" ]; then
+            echo "RUN_HEAVY=1" >> "$GITHUB_ENV"
+            echo "no diff detected; running the full gate"
+          elif printf '%s\n' "$changed" | grep -Eq '^(src/|crates/|prototypes/|scripts/|tests/|Cargo\.(toml|lock)$|rust-toolchain\.toml|\.github/workflows/)'; then
+            echo "RUN_HEAVY=1" >> "$GITHUB_ENV"
+            echo "code change detected; running the full gate"
+          else
+            echo "RUN_HEAVY=0" >> "$GITHUB_ENV"
+            echo "docs-only change; heavy steps skipped"
+          fi
+
       - name: Install system dependencies
+        if: env.RUN_HEAVY == '1'
         # rusqlite is built with the bundled feature; the PDF test needs a CJK
         # font (HANDOFF-VPS.md §2).
         run: |
@@ -37,38 +68,35 @@ jobs:
             build-essential pkg-config libssl-dev fonts-droid-fallback
 
       - name: Install Rust toolchain
+        if: env.RUN_HEAVY == '1'
         # The channel lives only in rust-toolchain.toml (REL-07). `rustup install`
         # resolves that file and installs exactly that toolchain; a missing or
         # malformed pin fails here instead of silently using the runner's stable.
         run: rustup install --profile minimal --no-self-update
 
-      - name: Cache cargo registry and target directories
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            . -> target
-            crates/asterlab-core -> target
-            crates/asterlab-app -> target
-
       - name: Record toolchain versions
+        if: env.RUN_HEAVY == '1'
         run: |
           rustc --version
           cargo --version
           cc --version | sed -n 1p
 
       - name: L0 build
+        if: env.RUN_HEAVY == '1'
         run: |
           cargo build --locked --bin labworkbench
           cargo build --locked --manifest-path crates/asterlab-core/Cargo.toml
           cargo build --locked --manifest-path crates/asterlab-app/Cargo.toml
 
       - name: L1 tests
+        if: env.RUN_HEAVY == '1'
         run: |
           cargo test --locked --bin labworkbench
           cargo test --locked --manifest-path crates/asterlab-core/Cargo.toml
           cargo test --locked --manifest-path crates/asterlab-app/Cargo.toml
 
       - name: Install Go
+        if: env.RUN_HEAVY == '1'
         uses: actions/setup-go@v5
         with:
           # go 1.27.3, the pin in HANDOFF-VPS.md §2 and go.mod.
@@ -76,6 +104,7 @@ jobs:
           cache-dependency-path: prototypes/mygo-run/go.sum
 
       - name: Native generator hashes (two Linux generations)
+        if: env.RUN_HEAVY == '1'
         # REL-05: the committed MyGo binding output must hash identically on
         # Linux and Windows, and the pinned MyGo must regenerate it byte for
         # byte. Contract and golden file: scripts/ci/native_generator_hash.py,
@@ -85,14 +114,17 @@ jobs:
           python3 scripts/ci/native_generator_hash.py --check
           python3 scripts/ci/native_generator_hash.py --regen 2
       - name: Build native Runs module
+        if: env.RUN_HEAVY == '1'
         working-directory: prototypes/mygo-run
         run: go run github.com/egoist/mygo/cmd/mygo@v0.8.4-0.20261108220316-c4197b7fe562 native build -target host ./modules/runs
       - name: Record Linux Go build evidence
+        if: env.RUN_HEAVY == '1'
         working-directory: prototypes/mygo-run
         run: |
           go version
           git -C ../.. rev-parse HEAD
           sha256sum .mygo/native/linux-amd64/libRuns.so
       - name: Go tests
+        if: env.RUN_HEAVY == '1'
         working-directory: prototypes/mygo-run
         run: go test ./...

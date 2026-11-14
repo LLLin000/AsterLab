@@ -45,6 +45,8 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 
 - **VPS Dev** 承担 Core、CLI、Rust/Go 非 GUI 包、契约、文档和 Linux 可跑的测试。
 - **Windows Gate** 承担 MyGo/Slint GUI、`runs.dll`、Windows 安装包和 PowerShell E2E。当前该流程没有 agent profile，也没有注册 Windows executor，是人工泳道；不要把它当作自动队列，也不要在 VPS 上假装执行。
+- **检查按平台分工**：VPS 泳道的必需检查是 `linux-tests` 与 `scope-check`（跑在本机自托管 runner）；`windows-build` 只在 Windows 机器上验证（Windows Gate 泳道），不作为 VPS PR 的必需检查。
+- **泳道之间不建 `blocked_by` 边**：依赖是产品的执行顺序，不是泳道的运行约束；跨泳道顺序写进下游卡片正文的 `排序:` 一行，由人工泳道自己遵守。跨泳道边没有自动化去执行它，却会被实现 agent 读到并误判成自己被阻塞（2026-11-14 `DES-01 → DES-00` 的边让 Core 卡空转多轮）。
 - 卡片的 `lane` 标签和所在流程不一致时，先对齐再执行。
 
 ### 状态语义
@@ -52,7 +54,8 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 - `Inbox` / `Todo`：待人工准入，不会被 agent 自动领取。
 - `Ready`：依赖感知候选队列。`scripts/kandev-ready-feeder.py` 只把**无阻塞**的 VPS 卡从 `Inbox` 提升到 `Ready`，并在 `Agent` 有空位时移入。不要手动把 blocked 卡放进 `Ready`：Kandev 原生 `pull_from` 不会跳过 blocked 卡，会直接启动 agent。
 - `Agent`：进入即自动启动 agent；WIP=4，最多四个 agent 并行。并行任务必须使用 Worktree executor；共享 checkout 只能串行。一轮正常结束会自动进入 `Review`。
-- `Review`：AI review agent（复用实现 profile）先按分类决定审查方法；`(Docs)/(Audit)/(Build)` 在门槛通过时可自动 squash-merge，其余分类只给 `APPROVED/CHANGES REQUESTED` 结论，由人工合并。WIP=4；满 4 个时 feeder 停止推进新卡。详见 [`docs/engineering/kandev-review-policy.md`](docs/engineering/kandev-review-policy.md)。
+  - 实现 agent **不得**调用 Kandev 的 `move_task`/`update_task_state` 改本卡步骤（包括自己挪到 `Review`/`Merged`/`Done`）。流转由引擎的 turn 结束、feeder 或人工决定；违反会让卡在 PR 合并前被置为完成。
+- `Review`：独立 review session（进入即新开，`profile_session_start_policy: new`）按分类决定审查方法：只审核、不改代码、不推送、不合并；通过时输出 `VERDICT: APPROVED` 并用 `engctl review outcome record` 记录 ReviewOutcome，合并由 Home Merge Gate 执行。WIP=4；满 4 个时 feeder 停止推进新卡。详见 [`docs/engineering/kandev-review-policy.md`](docs/engineering/kandev-review-policy.md)。
 - `Verify`：在目标机器上按卡片验收层级重跑并贴原始输出；`on_pr_merged` 会把任务推进到 `Merged`。
 - `Merged`：PR 合并后的终态，进入即完成任务。依赖卡只在这里之后解除阻塞。
 
