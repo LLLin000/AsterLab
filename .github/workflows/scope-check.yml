@@ -23,7 +23,8 @@ concurrency:
 jobs:
   scope-check:
     name: scope-check
-    runs-on: [self-hosted, asterlab-vps]
+    # The VPS host is the only self-hosted Linux runner in the repo.
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
     steps:
       - name: Checkout
