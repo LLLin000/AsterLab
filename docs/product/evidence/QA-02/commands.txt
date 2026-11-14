@@ -1,0 +1,25 @@
+Baseline: origin/main 01e207a
+Checkout: O:\qa02
+Branch: agent/QA-02-rna-regression
+Isolated data: C:\Users\Lin\AppData\Local\Temp\qa02\data
+CLI: O:\ag05\target\debug\labworkbench.exe
+GUI: O:\ag05\prototypes\mygo-run\dist\mygo-run.exe
+
+Fixture seed (raw output: fixture-output.txt):
+ASTERLAB_DATA_DIR='C:/Users/Lin/AppData/Local/Temp/qa02/data' LABWORKBENCH_CLI='O:/ag05/target/debug/labworkbench.exe' python scripts/rna-fixture.py
+
+Pre-restart frozen Run read (raw stdout: workspace-before.json):
+labworkbench run.workspace --input -  {"id":"4dc1bd1e-68af-46b9-becf-de4b614275ed"}
+
+Parameter binding probe against fixture RNA block (raw stdout + stderr: parameter-binding-error.txt):
+labworkbench protocol.block.preview --input -  {"block_version_id":"<fixture rna_block version id>","bindings":[{"slot":"lysis_vol","value":200,"unit":"uL"},{"slot":"lysis_time","value":10,"unit":"min"}]}
+
+GUI session steps:
+- Open mygo-run.exe with LABWORKBENCH_DATA_DIR=C:\Users\Lin\AppData\Local\Temp\qa02\data, ASTERLAB_RUN_ID=4dc1bd1e-68af-46b9-becf-de4b614275ed, MYGO_AUTOMATION=<unique temporary socket>, ASTERLAB_THEME=light.
+- Navigate to 实验运行. Select each of the 13 leaves in fixture-output.txt order. Capture a full accessibility snapshot into step-log.txt and screenshot each selection at 1360x880.
+- Close and relaunch with the same data dir / Run ID, ASTERLAB_THEME=dark. Open 实验运行 at 900x600; capture restart-snapshot.txt and screenshot.
+
+Post-restart frozen Run read (raw stdout: workspace-after.json):
+labworkbench run.workspace --input -  {"id":"4dc1bd1e-68af-46b9-becf-de4b614275ed"}
+
+Frozen-field comparison: field-comparison.txt (all 17 result-level keys checked before == after).

@@ -1,0 +1,66 @@
+run.workspace pre/post-restart frozen-field comparison
+All top-level result fields:
+asterdoc: before == after: True
+creation_audit: before == after: True
+design_checks: before == after: True
+design_id: before == after: True
+design_revision: before == after: True
+design_version_id: before == after: True
+events: before == after: True
+frozen_design: before == after: True
+materials: before == after: True
+occurrences: before == after: True
+plates: before == after: True
+protocol_version_id: before == after: True
+run_id: before == after: True
+scopes: before == after: True
+status: before == after: True
+steps: before == after: True
+tasks: before == after: True
+
+run_id: 4dc1bd1e-68af-46b9-becf-de4b614275ed == 4dc1bd1e-68af-46b9-becf-de4b614275ed
+design_id: 5c048d72-6839-4cdc-9a16-4271551c3ee7 == 5c048d72-6839-4cdc-9a16-4271551c3ee7
+design_version_id: 7e0eb6d9-e48b-4a0f-8aa3-15f040a0cb54 == 7e0eb6d9-e48b-4a0f-8aa3-15f040a0cb54
+design_revision: 2 == 2
+asterdoc.revision: 1 == 1
+asterdoc.source_hash: 72c29a5e26f04bcf2416e7812e0752f6509cda03e0660562ce5564b089cffd7e == 72c29a5e26f04bcf2416e7812e0752f6509cda03e0660562ce5564b089cffd7e
+protocol_version_id (top-level): None == None
+scope.protocol_version_id: 551b8102-bf41-4537-a1bd-9346dc5a0074 == 551b8102-bf41-4537-a1bd-9346dc5a0074
+scope.protocol_version: 1 == 1
+scope.resolved_parameters: [] == []
+scope.unresolved_parameters: [] == []
+scope.step_paths (13): ["root/rna/step-01", "root/rna/step-02", "root/rna/step-03", "root/rna/step-04", "root/rna/step-05", "root/rna/step-06", "root/rna/step-07", "root/rna/step-08", "root/rna/step-09", "root/rna/step-10", "root/qc/qc", "root/rt/rt", "root/qpcr/qpcr"] == ["root/rna/step-01", "root/rna/step-02", "root/rna/step-03", "root/rna/step-04", "root/rna/step-05", "root/rna/step-06", "root/rna/step-07", "root/rna/step-08", "root/rna/step-09", "root/rna/step-10", "root/qc/qc", "root/rt/rt", "root/qpcr/qpcr"]
+
+steps count: 13 == 13
+step[1].path: 'root/rna/step-01' == 'root/rna/step-01'; title: '01 收集细胞' == '01 收集细胞'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[2].path: 'root/rna/step-02' == 'root/rna/step-02'; title: '02 裂解与匀浆' == '02 裂解与匀浆'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[3].path: 'root/rna/step-03' == 'root/rna/step-03'; title: '03 加乙醇' == '03 加乙醇'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[4].path: 'root/rna/step-04' == 'root/rna/step-04'; title: '04 上柱结合' == '04 上柱结合'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[5].path: 'root/rna/step-05' == 'root/rna/step-05'; title: '05 Wash I' == '05 Wash I'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[6].path: 'root/rna/step-06' == 'root/rna/step-06'; title: '06 Wash II 第一次' == '06 Wash II 第一次'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[7].path: 'root/rna/step-07' == 'root/rna/step-07'; title: '07 Wash II 第二次' == '07 Wash II 第二次'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[8].path: 'root/rna/step-08' == 'root/rna/step-08'; title: '08 干柱离心' == '08 干柱离心'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[9].path: 'root/rna/step-09' == 'root/rna/step-09'; title: '09 RNA 洗脱' == '09 RNA 洗脱'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[10].path: 'root/rna/step-10' == 'root/rna/step-10'; title: '10 RNA 质检与保存' == '10 RNA 质检与保存'; source_block_version_id: 'be8304b1-462f-40db-a4b8-f99de4deefe3' == 'be8304b1-462f-40db-a4b8-f99de4deefe3'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[11].path: 'root/qc/qc' == 'root/qc/qc'; title: 'RNA 质检' == 'RNA 质检'; source_block_version_id: '7531adc1-f3bc-4504-baff-88b3f6acef43' == '7531adc1-f3bc-4504-baff-88b3f6acef43'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[12].path: 'root/rt/rt' == 'root/rt/rt'; title: '逆转录' == '逆转录'; source_block_version_id: '133621ec-cd46-4e48-b7ed-e17686929292' == '133621ec-cd46-4e48-b7ed-e17686929292'; parameters: [] == []; unresolved_parameter_refs: [] == []
+step[13].path: 'root/qpcr/qpcr' == 'root/qpcr/qpcr'; title: 'qPCR 扩增' == 'qPCR 扩增'; source_block_version_id: '8e9c40a8-651b-4baf-9609-a3626f8e6f80' == '8e9c40a8-651b-4baf-9609-a3626f8e6f80'; parameters: [] == []; unresolved_parameter_refs: [] == []
+
+tasks count: 13 == 13
+task root/rna/step-01: path == root/rna/step-01; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-02: path == root/rna/step-02; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-03: path == root/rna/step-03; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-04: path == root/rna/step-04; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-05: path == root/rna/step-05; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-06: path == root/rna/step-06; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-07: path == root/rna/step-07; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-08: path == root/rna/step-08; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-09: path == root/rna/step-09; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rna/step-10: path == root/rna/step-10; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/qc/qc: path == root/qc/qc; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/rt/rt: path == root/rt/rt; timepoint: None == None; status: 'not_started' == 'not_started'
+task root/qpcr/qpcr: path == root/qpcr/qpcr; timepoint: None == None; status: 'not_started' == 'not_started'
+
+frozen_design.content.assays[0].protocol_version_id: 551b8102-bf41-4537-a1bd-9346dc5a0074 == 551b8102-bf41-4537-a1bd-9346dc5a0074
+frozen_design.content.assays[0].timepoints: [] == []
+frozen_design.mygo.stepTasks (4): before == after: True

@@ -1,0 +1,16 @@
+assess: warning []
+run: 4dc1bd1e-68af-46b9-becf-de4b614275ed tasks: 13
+  - root/rna/step-01
+  - root/rna/step-02
+  - root/rna/step-03
+  - root/rna/step-04
+  - root/rna/step-05
+  - root/rna/step-06
+  - root/rna/step-07
+  - root/rna/step-08
+  - root/rna/step-09
+  - root/rna/step-10
+  - root/qc/qc
+  - root/rt/rt
+  - root/qpcr/qpcr
+ids: C:\Users\Lin\AppData\Local\Temp\qa02\rna-ids.json
