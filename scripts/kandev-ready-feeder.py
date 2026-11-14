@@ -895,6 +895,22 @@ forbid:
   - docs/contracts/**
 -->
 
+## 依赖 / 风险
+- upstream: none
+- downstream: none
+- 风险 / 回滚：只新增一份回顾文档，不改代码与契约；异常时删除该文档。
+
+## 交付契约
+<!-- kandev-delivery
+version: 1
+type: docs
+required_artifacts:
+  - path: docs/release/retrospective-{stamp}.md
+    source: merged_pr_diff
+-->
+
+risk: L0
+
 ## 验收
 - 命令：`test -f docs/release/retrospective-{stamp}.md && grep -c '^## ' docs/release/retrospective-{stamp}.md` 期望：exit 0 且计数 >= 6（六节齐全）
 - 命令：`gh pr view --json state,mergeable --jq '"\\(.state) \\(.mergeable)"'`（在 PR 分支上） 期望：`OPEN MERGEABLE`
