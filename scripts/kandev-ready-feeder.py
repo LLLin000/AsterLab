@@ -1314,6 +1314,26 @@ def merged_pr_by_card(task):
     return found
 
 
+def open_pr_by_title(task):
+    """Open PR found by the card id in its title (Kandev link can lag)."""
+    m = re.match(r"^([A-Z]+-\d+[a-z]?)", task.get("title", ""))
+    if not m:
+        return {}
+    cid = m.group(1)
+    try:
+        out = subprocess.run(
+            ["gh", "pr", "list", "--repo", GH_REPO, "--state", "open",
+             "--search", f'"{cid}" in:title', "--json", "number,title,url", "--limit", "10"],
+            capture_output=True, text=True, timeout=25,
+        )
+        for pr in json.loads(out.stdout or "[]"):
+            if cid in pr.get("title", ""):
+                return {"pr_number": pr["number"], "pr_url": pr.get("url", ""), "state": "open"}
+    except Exception as exc:  # noqa: BLE001
+        print(f"open PR lookup failed for {cid}: {exc}", file=sys.stderr)
+    return {}
+
+
 def pr_for_task(task):
     """Linked PR, else a merged PR recovered by card id."""
     pr = task_pr(task["id"])
@@ -1369,7 +1389,7 @@ def scan_retro_ready(detailed):
         labels = lane_labels(task)
         if "tg-retro-sent" in labels:
             continue
-        pr = task_pr(task["id"])
+        pr = task_pr(task["id"]) or open_pr_by_title(task)
         if not pr or pr.get("state") != "open":
             continue
 
