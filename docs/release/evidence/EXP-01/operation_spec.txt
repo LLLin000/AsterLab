@@ -1,0 +1,40 @@
+    Compiling asterlab-core v0.1.0 (/var/lib/kandev/tasks/exp-01-core-operatio_qtk3fqqqk/LLLin000-AsterLab/crates/asterlab-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.90s
+     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-core/7a6e0bb0fcc4d289/out/asterlab_core-7a6e0bb0fcc4d289)
+
+running 21 tests
+test agent_edit_validate::tests::protocol_block_optional_operation_spec_roundtrips ... ok
+test operation_spec::tests::aliquot_requires_parts_and_per_part_volume ... ok
+test operation_spec::tests::blank_check_ids_are_missing_parameters ... ok
+test operation_spec::tests::all_six_operations_roundtrip_through_json ... ok
+test operation_spec::tests::centrifuge_rejects_rcf_declared_in_rpm ... ok
+test operation_spec::tests::blank_container_ids_are_missing_parameters ... ok
+test operation_spec::tests::documented_error_codes_match_the_closed_set ... ok
+test operation_spec::tests::centrifuge_accepts_force_or_speed_and_requires_duration ... ok
+test operation_spec::tests::incubate_requires_temperature_and_duration ... ok
+test operation_spec::tests::non_finite_values_are_out_of_range ... ok
+test operation_spec::tests::optional_v2_controls_preserve_v1_documents_and_validate_periodic_schedule ... ok
+test operation_spec::tests::documented_examples_validate_as_documented ... ok
+test operation_spec::tests::out_of_range_values_are_rejected ... ok
+test operation_spec::tests::measure_requires_endpoint_id_and_measurement_unit ... ok
+test operation_spec::tests::transfer_roundtrips_volume_and_containers ... ok
+test operation_spec::tests::dry_run_example_matches_validation_output ... ok
+test operation_spec::tests::unknown_fields_are_rejected ... ok
+test operation_spec::tests::unit_mismatch_is_semantic_not_a_parse_error ... ok
+test operation_spec::tests::v2_contract_example_parses_and_validates ... ok
+test operation_spec::tests::wash_requires_cycles_and_volume ... ok
+test operation_spec::tests::unsupported_schema_version_is_a_load_concern ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 342 filtered out; finished in 0.00s
+
+     Running tests/catalog_drafts.rs (/srv/build/asterlab-target/debug/build/asterlab-core/b0027bea1b7af6c8/out/catalog_drafts-b0027bea1b7af6c8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/operation_surface.rs (/srv/build/asterlab-target/debug/build/asterlab-core/dd305232b879448e/out/operation_surface-dd305232b879448e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s

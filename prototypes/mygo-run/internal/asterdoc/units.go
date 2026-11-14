@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// Foundation v1 deliberately validates a named UCUM subset. It records the
-// original value and unit; conversions are explicit and never rewrite the
-// authored quantity.
+// Foundation v1 validates the named unit subset in spec/units.json, including
+// the additional OperationSpec v2 laboratory units. Conversions are explicit
+// and never rewrite the authored value or unit.
 //
 //go:embed spec/units.json
 var unitSpecJSON []byte
@@ -127,7 +127,7 @@ func validateQuantity(value any, dimension string) error {
 	}
 	def, ok := unitFor(unit)
 	if !ok {
-		return fmt.Errorf("unit %q is not in the Foundation v1 UCUM subset", unit)
+		return fmt.Errorf("unit %q is not registered", unit)
 	}
 	if dimension != "" && def.Dimension != dimension {
 		return fmt.Errorf("unit %q is %s, not %s", unit, def.Dimension, dimension)
@@ -144,11 +144,11 @@ func quantityIn(value any, targetUnit string) (float64, error) {
 	}
 	from, ok := unitFor(unit)
 	if !ok {
-		return 0, fmt.Errorf("unit %q is not in the Foundation v1 UCUM subset", unit)
+		return 0, fmt.Errorf("unit %q is not registered", unit)
 	}
 	to, ok := unitFor(targetUnit)
 	if !ok {
-		return 0, fmt.Errorf("unit %q is not in the Foundation v1 UCUM subset", targetUnit)
+		return 0, fmt.Errorf("unit %q is not registered", targetUnit)
 	}
 	if from.Dimension != to.Dimension {
 		return 0, fmt.Errorf("cannot convert %s to %s", from.Dimension, to.Dimension)
