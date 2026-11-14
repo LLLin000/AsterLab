@@ -52,14 +52,14 @@ type State struct {
 	expansionFingerprint string
 	expansionInitialized bool
 
-	// ShowHistory toggles the third layer (operation history) for the selected task.
+	// WorkspaceTab selects task (0), history (1), or Run-wide timeline (2).
+	WorkspaceTab int
+
+	// ShowHistory toggles the selected task's operation-history layer.
 	ShowHistory bool
 
-	// ShowProcedure toggles procedure metadata when rendered below the recording
-	// panel (narrow layout); defaults to collapsed.
+	// ShowProcedure keeps narrow-layout procedure metadata collapsed by default.
 	ShowProcedure bool
-	// WorkspaceTab selects the task workspace (0) or the read-only history tab (1).
-	WorkspaceTab int
 
 	// railScrollKey remembers which selection was last scrolled into view.
 	railScrollKey string
@@ -649,7 +649,7 @@ func statusDot(c *ui.Context, status TaskStatus, t *ui.Theme, tokens theme.Token
 	ui.Box(c).Size(8, 8).Radius(4).Shrink(0).Background(color)
 }
 
-// taskWorkspace is the right column: task workspace and read-only history tab.
+// taskWorkspace is the task workspace plus read-only history and Run timeline tabs.
 func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	task := s.selectedTask()
 	if task == nil {
@@ -658,9 +658,13 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	}
 	ui.Column(c).FillWidth().Gap(12).Children(func() {
 		tab := &s.WorkspaceTab
-		components.Tabs(c, tab, components.TabsHighlight, "任务", "历史")
-		if *tab == 1 {
+		components.Tabs(c, tab, components.TabsHighlight, "任务", "历史", "时间线")
+		switch *tab {
+		case 1:
 			historyTab(c, s, t, tokens, task)
+			return
+		case 2:
+			timelineTab(c, s, t, tokens)
 			return
 		}
 		if s.shouldStack(c) {
@@ -1091,6 +1095,90 @@ func historyTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task 
 							s.Callbacks.OpenBatch(event.BatchID)
 						}
 					}
+				}
+			})
+		}
+	})
+}
+// timelineTab renders the Run's immutable Core events in recorded chronology (UX-LAYOUT).
+func timelineTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
+	events := BuildTimeline(s.VM)
+	if len(events) == 0 {
+		ui.Text(c, "尚无执行事件。").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+		return
+	}
+	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
+		for _, event := range events {
+			event := event
+			ui.Column(c).FillWidth().Gap(t.Space(.75)).Padding(t.Space(1.5), t.Space(2)).
+				Background(tokens.Elevated).Border(1, tokens.Border).Children(func() {
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+					title := eventTypeLabel(event.Type)
+					if title == "" {
+						title = "执行事件"
+					}
+					ui.Text(c, title).FontSize(t.Rem(.72)).Bold().TextColor(t.Text)
+					if task := s.VM.TaskByKey[event.TaskKey]; task != nil && task.StepTitle != "" {
+						ui.Text(c, task.StepTitle).FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+					}
+					if event.Badge != "" {
+						bg, fg := tokens.NeutralBg, tokens.NeutralText
+						switch event.Badge {
+						case "已确认", "已完成", "测量":
+							bg, fg = tokens.SuccessBg, tokens.SuccessText
+						case "失败":
+							bg, fg = tokens.DangerBg, tokens.DangerText
+						case "重试":
+							bg, fg = tokens.WarningBg, tokens.WarningText
+						case "偏差":
+							bg, fg = tokens.WarningBg, tokens.WarningText
+						}
+						ui.Row(c).Padding(1, 6).Radius(4).Background(bg).Children(func() {
+							ui.Text(c, event.Badge).FontSize(t.Rem(.64)).Bold().TextColor(fg)
+						})
+					}
+					if event.Attempt > 1 {
+						ui.Text(c, fmt.Sprintf("第 %d 次", event.Attempt)).
+							FontSize(t.Rem(.64)).TextColor(t.TextMuted)
+					}
+					ui.Spacer(c)
+					when := timelineTime(event)
+					ui.Text(c, when).FontSize(t.Rem(.64)).TextColor(t.TextMuted)
+				})
+				if event.Content != "" {
+					ui.Text(c, event.Content).FontSize(t.Rem(.74)).TextColor(t.Text)
+				}
+				if len(event.Checks) > 0 {
+					ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
+						for _, check := range event.Checks {
+							label, fg := timelineCheckStatus(check.Status), tokens.NeutralText
+							bg := tokens.NeutralBg
+							switch check.Status {
+							case "passed":
+								bg, fg = tokens.SuccessBg, tokens.SuccessText
+							case "failed", "blocked":
+								bg, fg = tokens.DangerBg, tokens.DangerText
+							case "skipped":
+								bg, fg = tokens.WarningBg, tokens.WarningText
+							}
+							ui.Row(c).Padding(1, 6).Radius(4).Background(bg).Children(func() {
+								ui.Text(c, "检查 · "+label).FontSize(t.Rem(.64)).TextColor(fg)
+							})
+						}
+					})
+				}
+				for _, measurement := range event.Measurements {
+					ui.Text(c, fmt.Sprintf("%s · %s %s %s", fallback(measurement.SampleID, "未分配"),
+						measurement.Field, measurement.Value, measurement.Unit)).
+						FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+				}
+				if event.Deviation != "" {
+					ui.Text(c, "偏差："+event.Deviation).FontSize(t.Rem(.68)).TextColor(tokens.WarningText)
+				}
+				if event.StepStatus == "completed" {
+					ui.Text(c, "步骤已完成").FontSize(t.Rem(.68)).TextColor(tokens.SuccessText)
+				} else if event.StepStatus == "blocked" {
+					ui.Text(c, "步骤阻塞").FontSize(t.Rem(.68)).TextColor(tokens.DangerText)
 				}
 			})
 		}

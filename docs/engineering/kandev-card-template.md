@@ -48,6 +48,18 @@ forbid:
 
 只读卡写 `write: []`。范围只列路径，不在块内写解释。
 
+卡的合并风险写在正文单独一行 `risk: L0|L1|L2|L3`（缺省按 L2 处理）：L0/L1 在门槛与独立审视通过后自动合并；L2 需要额外 `merge-approved` 标签；L3 只允许人工合并。
+
+交付契约给 Home 合并门做前置校验（只读，不改状态）：
+
+<!-- kandev-delivery
+version: 1
+type: core            # implementation|core|qa|contract|docs|audit|build|ui|integration
+required_artifacts:
+  - path: src/cli.rs  # 必须在 PR diff 里出现的路径
+    source: merged_pr_diff
+-->
+
 ## 实施
 1. ...
 2. ...
@@ -68,7 +80,8 @@ forbid:
 - ...
 
 ## 依赖 / 风险
-- blocked_by：以 Kandev Relations 为准，正文不重复完整列表。
+- upstream: none（或 `DES-00, RDO-01`，必须与 Kandev 的 blocked_by 完全一致）
+- downstream: DES-01（本卡解锁谁，只作说明，不构成阻塞）
 - 风险 / 回滚：...
 
 ## 工作方法（<Category>）
@@ -80,9 +93,13 @@ forbid:
 硬规则：
 
 - 不在正文重复 `lane`、`milestone`、`priority`、依赖列表；这些用 Kandev 的 label、priority 和 `blocked_by`。
+- 跨泳道不建 Kandev 边：把顺序写成正文的 `排序:` 一行（如 `排序: DES-00 合并后再开工`），由下游泳道自己遵守；`upstream:` 只镜像本泳道的前置卡。
+- 依赖只在 Kandev 里建边，正文只写一行 `upstream:` 镜像它：`upstream: none` 表示无前置。`kandev-ready-feeder` 的准入会比对两边——不一致就打 `dor-fail` 留在 Inbox，由建卡人修正；不要指望实现 agent 去解释或绕过这种矛盾。
+  - 2026-11-14 DES-00 的教训：正文写着"留给 DES-01"、Relations 里是 `blocks: DES-01`，结果两个实现 session 都把下游卡当成自己的阻塞，白跑两轮。方向只有一个：`upstream`/`blocked_by` 才是前置。
 - Relations 方向只有一个读法：`depends_on` / `blocked_by` 是本卡的前置卡，未 `COMPLETED` 就不开工；`blocks` 是本卡解锁的下游卡，**不影响本卡开工**。开工前把这两栏分开读，别把 `blocks` 当成被阻塞。
   - 反例（DES-00，2026-11-14）：实现 agent 把 `blocks: DES-01` 读成"被 DES-01 阻塞"，没写一行代码就结束，白跑一轮 session。
 - `范围` 必须机器可读。`(Build)` 的范围检查读取 `<!-- kandev-scope -->` 块，不解析自然语言。
+- 交付契约的 `acceptance:` 只写**由 CI 或 trusted worker 执行**的命令，并配 `acceptance_evidence`（`source: github_ci`/`trusted_worker`、`head_sha`、`conclusion`、`run_id`）；agent 自己跑的命令不要写进 `acceptance`，否则合并门会以 `ACCEPTANCE_UNVERIFIED` 拒绝。只靠 `required_artifacts` 也能通过合并门。
 - 验收必须是命令 + 期望结果，或明确的截图规格 + 规则 id；不写“测试全绿”“实机走查”“你确认”。
 - `DoD` 只保留人工签核项；能自动验证的内容放 `验收`。
 - 描述控制在 800–1500 字；逐步清单放任务 Plan，评审结论放评论。

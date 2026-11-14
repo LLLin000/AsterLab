@@ -203,3 +203,29 @@ func TestRecordingGridLayoutsRenderAtBothBreakpointsAndThemes(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectKindRoutesByAssayLayoutConfig(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	task := vm.TaskByKey["t-read"]
+
+	cck8Grid := resultgrid.New(resultgrid.Schema{
+		ID: "cck8.plate96.od450.v1", Layout: "plate96", RowLabels: []string{"A"}, ColumnLabels: []string{"1"},
+	}, nil)
+	if got := SelectKind(task, cck8Grid, nil); got != ViewPlate {
+		t.Fatalf("CCK-8 kind = %q, want plate", got)
+	}
+
+	qpcrGrid := resultgrid.New(resultgrid.Schema{
+		ID: "qpcr.sample_gene.cq.v1", Layout: "sample_gene", RowLabels: []string{"S1"}, ColumnLabels: []string{"GAPDH_R1"},
+	}, nil)
+	if got := SelectKind(task, qpcrGrid, nil); got != ViewTable {
+		t.Fatalf("RNA/qPCR kind = %q, want table", got)
+	}
+
+	wbGrid := resultgrid.New(resultgrid.Schema{
+		ID: "qpcr.sample_gene.cq.v1", Layout: "sample_target", RowLabels: []string{"Control"}, ColumnLabels: []string{"Target_R1"},
+	}, nil)
+	if got := SelectKind(task, wbGrid, nil); got != ViewTable {
+		t.Fatalf("WesternBlot kind = %q, want table", got)
+	}
+}

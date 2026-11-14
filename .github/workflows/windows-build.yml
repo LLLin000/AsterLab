@@ -8,10 +8,12 @@ name: windows-build
 # §4 maps "Desktop app" to scripts/mygo-build.ps1. apps/desktop is the retained
 # Rust/Slint research prototype (docs/architecture.md §1) and is not built here.
 
+# Platform split: the Windows artifacts are built and verified on the Windows
+# machine (Windows Gate lane), not on every VPS pull request. This workflow is
+# manual until a self-hosted Windows runner exists; the VPS gates required on
+# PRs are `linux-tests` and `scope-check`.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,7 +34,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Decide scope
+        # Docs-only pull requests skip the Windows build (the most expensive
+        # runner minutes we spend). An unreadable diff runs the full gate.
+        run: |
+          $changed = @()
+          if ($env:GITHUB_BASE_REF) {
+            git fetch --no-tags --depth=1 origin $env:GITHUB_BASE_REF 2>$null
+            $changed = git diff --name-only "FETCH_HEAD...HEAD" 2>$null
+          } else {
+            $changed = git diff --name-only HEAD~1 HEAD 2>$null
+          }
+          if (-not $changed) {
+            "RUN_HEAVY=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "no diff detected; running the full build"
+          } elseif ($changed -match '^(prototypes/mygo-run/|scripts/mygo-build\.ps1|scripts/ci/|\.github/workflows/|crates/|src/|Cargo\.(toml|lock)$|rust-toolchain\.toml)') {
+            "RUN_HEAVY=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "code change detected; running the full build"
+          } else {
+            "RUN_HEAVY=0" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "docs-only change; heavy steps skipped"
+          }
+
       - name: Install Go
+        if: env.RUN_HEAVY == '1'
         uses: actions/setup-go@v5
         with:
           # go 1.27.3, the pin in HANDOFF-VPS.md §2 and go.mod.
@@ -40,6 +65,7 @@ jobs:
           cache-dependency-path: prototypes/mygo-run/go.sum
 
       - name: Install Rust toolchain
+        if: env.RUN_HEAVY == '1'
         # The channel lives only in rust-toolchain.toml (REL-07). `rustup install`
         # resolves that file and installs exactly that toolchain; a missing or
         # malformed pin fails here instead of silently using the runner's stable.
@@ -48,6 +74,7 @@ jobs:
         run: rustup install --profile minimal --no-self-update
 
       - name: Record toolchain versions
+        if: env.RUN_HEAVY == '1'
         run: |
           go version
           go env GOOS GOARCH CGO_ENABLED
@@ -56,6 +83,7 @@ jobs:
           git rev-parse HEAD
 
       - name: Native generator hashes (two Windows generations)
+        if: env.RUN_HEAVY == '1'
         # REL-05: the same golden file the Linux job uses. This is the Windows
         # half of "one input, one hash": a CRLF checkout must not change these
         # hashes, and the pinned MyGo must regenerate the committed files byte
@@ -72,10 +100,12 @@ jobs:
           py -3 scripts/ci/native_generator_hash.py --regen 2
 
       - name: Build MyGo app and Runs.dll
+        if: env.RUN_HEAVY == '1'
         # Runs `mygo native check .\modules\runs`, then `go build -tags=e2e`,
         # then writes dist/BUILD_INFO.txt with the commit and both hashes.
         run: ./scripts/mygo-build.ps1
       - name: Go tests
+        if: env.RUN_HEAVY == '1'
         # REL-06: every package of the module, with the same tag set as the
         # build above. One Windows-only failure is excluded by name instead of
         # dropping the step or the package: internal/assets
@@ -91,6 +121,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Generated bindings survive the Windows build
+        if: env.RUN_HEAVY == '1'
         # `mygo native check` regenerates whenever it cannot recognise an
         # existing generated file, so a CRLF worktree silently rewrites the
         # committed bindings with a different interface hash (REL-05). Fail
@@ -102,6 +133,7 @@ jobs:
           if ($dirty) { throw "the Windows build rewrote the committed bindings:`n$dirty" }
 
       - name: Verify artifacts and record SHA256
+        if: env.RUN_HEAVY == '1'
         run: |
           $dist = Join-Path $PWD 'prototypes/mygo-run/dist'
           if (-not (Test-Path -LiteralPath $dist)) { throw "dist directory missing: $dist" }

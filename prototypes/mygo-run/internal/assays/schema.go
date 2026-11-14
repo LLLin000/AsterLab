@@ -137,14 +137,14 @@ func BuildSchema(designJSON []byte, assayID, timepoint string) (resultgrid.Schem
 			params.TechnicalReplicates = reps
 		}
 	}
-	switch id {
-	case CCK8:
-		return cck8Schema(doc, spec, params, assayID, timepoint, groups)
-	case RTqPCR:
-		return qpcrSchema(spec, params, assayID, timepoint, groups)
-	default:
+	cfg, ok := LookupLayout(id)
+	if !ok {
 		return resultgrid.Schema{}, nil, fmt.Errorf("unsupported assay %q", assayID)
 	}
+	if cfg.Build != nil {
+		return cfg.Build(doc, spec, params, assayID, timepoint, groups)
+	}
+	return matrixSchema(cfg, spec, params, assayID, timepoint, groups)
 }
 
 func cck8Schema(doc designDocument, spec assaySpec, params Design, assayID, timepoint string, groups map[string]groupSpec) (resultgrid.Schema, []resultgrid.Cell, error) {
@@ -320,14 +320,11 @@ func groupNames(spec assaySpec, groups map[string]groupSpec) string {
 }
 
 func normalizeAssayID(id string) string {
-	switch strings.ToLower(strings.TrimSpace(id)) {
-	case "cck8", "cck-8", "assay-cck8", "assay-cck-8":
-		return CCK8
-	case "qpcr", "rt-qpcr", "rtqpcr", "rt-q-pcr":
-		return RTqPCR
-	default:
-		return strings.ToLower(strings.TrimSpace(id))
+	key := strings.ToLower(strings.TrimSpace(id))
+	if canonical, ok := layoutAliases[key]; ok {
+		return canonical
 	}
+	return key
 }
 
 func contains(values []string, target string) bool {
