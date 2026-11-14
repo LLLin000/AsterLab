@@ -1,0 +1,14 @@
+$ git rev-parse HEAD
+ec5c933e43b559888f53f34f065e410fa229904f
+
+$ git rev-parse origin/main
+ec5c933e43b559888f53f34f065e410fa229904f
+
+$ git diff --stat origin/main -- crates/asterlab-core/src
+
+$ git diff --stat origin/main -- prototypes/mygo-run/internal/resultgrid
+
+$ git diff --name-only origin/main -- crates prototypes/mygo-run/internal/resultgrid
+
+$ git log -n 1 --oneline -- prototypes/mygo-run/internal/assays/layouts.go
+0246652 feat(RUN-05): assay layout registry and shared recording kernel views (#65)

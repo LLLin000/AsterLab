@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -193,5 +194,76 @@ func TestRenderRunRecordsIncludesGroupedAndUnassociatedData(t *testing.T) {
 	}
 	if strings.Contains(got, "### RNA 分组") {
 		t.Fatal("group container was rendered instead of its Run task children")
+	}
+}
+
+type batchRetrySpy struct {
+	runs.RunService
+	failRemaining int
+	opIDs         []string
+	snap          runs.RunSnapshot
+}
+
+func (s *batchRetrySpy) SaveReadoutsBatch(_ context.Context, input runs.BatchReadoutInput) (runs.BatchReadoutResult, error) {
+	s.opIDs = append(s.opIDs, input.OperationID)
+	if s.failRemaining > 0 {
+		s.failRemaining--
+		return runs.BatchReadoutResult{}, fmt.Errorf("transient write failure")
+	}
+	s.snap.Revision++
+	return runs.BatchReadoutResult{RunID: input.RunID, Revision: s.snap.Revision, Accepted: len(input.Cells)}, nil
+}
+
+func (s *batchRetrySpy) LoadRun(context.Context, string) (runs.RunSnapshot, error) {
+	return s.snap, nil
+}
+
+func (s *batchRetrySpy) WorkflowTree(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (s *batchRetrySpy) ListAssetLinks(context.Context, string) ([]runs.Asset, error) {
+	return nil, nil
+}
+
+func TestSaveBatchReusesOperationIDAcrossRetries(t *testing.T) {
+	t.Setenv("LABWORKBENCH_DATA_DIR", t.TempDir())
+	schema := resultgrid.Schema{
+		ID: "cck8.plate96.od450.v1", Version: 1,
+		RowLabels: []string{"A"}, ColumnLabels: []string{"1"},
+		Fields: []resultgrid.Field{{Key: "od450", Label: "OD450", Unit: "AU"}},
+	}
+	grid := resultgrid.New(schema, nil)
+	v := 0.85
+	_ = grid.SetCell(resultgrid.Cell{Row: 0, Column: 0, SampleID: "S1", Field: "od450", Value: &v, Status: "raw"})
+
+	spy := &batchRetrySpy{failRemaining: 1, snap: runs.RunSnapshot{RunID: "run-retry", Revision: 1, Tasks: []runs.RunTask{{Key: "t-1"}}}}
+	a := &app{
+		runSvc: spy,
+		snap:   spy.snap,
+		ws:     &runui.Workspace{Selected: "t-1", Grid: grid},
+	}
+
+	// First attempt fails -> error state preserved with PendingOpID.
+	a.saveBatch(schema, grid.Cells)
+	if grid.State != resultgrid.StateError || grid.PendingOpID == "" || len(spy.opIDs) != 1 {
+		t.Fatalf("after failure: state=%q op=%q ops=%v", grid.State, grid.PendingOpID, spy.opIDs)
+	}
+
+	// Retry unchanged cells -> must reuse exact same OperationID.
+	a.saveBatch(schema, grid.Cells)
+	if grid.State != resultgrid.StateSaved || grid.PendingOpID != "" || len(spy.opIDs) != 2 {
+		t.Fatalf("after retry: state=%q op=%q ops=%v", grid.State, grid.PendingOpID, spy.opIDs)
+	}
+	if spy.opIDs[0] != spy.opIDs[1] {
+		t.Fatalf("retry generated new operationID %q != %q", spy.opIDs[1], spy.opIDs[0])
+	}
+
+	// Subsequent edit after commit allocates a fresh OperationID.
+	v2 := 0.91
+	_ = grid.SetCell(resultgrid.Cell{Row: 0, Column: 0, SampleID: "S1", Field: "od450", Value: &v2, Status: "raw"})
+	a.saveBatch(schema, grid.Cells)
+	if len(spy.opIDs) != 3 || spy.opIDs[2] == spy.opIDs[1] {
+		t.Fatalf("new edit reused old operationID: %v", spy.opIDs)
 	}
 }

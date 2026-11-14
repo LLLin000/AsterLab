@@ -1,0 +1,22 @@
+SEEDED 75c73edb-b67b-4742-88f6-17f43cacefe8
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa-qa01\data
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa-qa01\data
+2026/11/14 21:57:23 native services: run=true(<nil>) design=true(<nil>)
+run.save_batch layer=core transaction=start run_id=75c73edb-b67b-4742-88f6-17f43cacefe8 operation_id=op-1794664645813243400-1 schema_id=cck8.plate96.od450.v1 cell_count=96
+run.save_batch layer=core transaction=commit run_id=75c73edb-b67b-4742-88f6-17f43cacefe8 operation_id=op-1794664645813243400-1 batch_id=batch-op-1794664645813243400-1 event_id=31730535-61a2-4122-91b8-e968821298fa cell_count=96
+QA01_PLATE_SAVED_OK
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa-qa01\data
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa-qa01\data
+2026/11/14 21:57:27 native services: run=true(<nil>) design=true(<nil>)
+QA01_PLATE_900_OK
+QA01_CORE_BEFORE_RESTART_OK {"0,0": 0.62, "1,0": 0.71}
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa-qa01\data
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa-qa01\data
+2026/11/14 21:57:30 native services: run=true(<nil>) design=true(<nil>)
+QA01_CROSS_READ_OK 1360x880
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa-qa01\data
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa-qa01\data
+2026/11/14 21:57:34 native services: run=true(<nil>) design=true(<nil>)
+QA01_CROSS_READ_OK 900x600
+QA01_RESTART_EQUAL_OK
+HARNESS_DONE qa01

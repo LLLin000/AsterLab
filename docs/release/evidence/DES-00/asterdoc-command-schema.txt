@@ -1,0 +1,86 @@
+   Compiling labworkbench v0.1.0 (<worktree>)
+warning: unused variable: `assay_index`
+    --> src/cli.rs:3587:9
+     |
+3587 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/cli.rs:9891:17
+     |
+9891 |             let mut warnings: Vec<String> = Vec::new();
+     |                 ----^^^^^^^^
+     |                 |
+     |                 help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `ywells` is never used
+    --> src/cli.rs:3547:4
+     |
+3547 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+     |    ^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `create_asterdoc_design` is never used
+    --> src/cli.rs:3923:15
+     |
+3923 | pub(crate) fn create_asterdoc_design(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_project` is never used
+    --> src/cli.rs:8436:15
+     |
+8436 | pub(crate) fn create_project(db: &Connection, name: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^
+
+warning: function `list_designs` is never used
+    --> src/cli.rs:8443:15
+     |
+8443 | pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^
+
+warning: function `load_design` is never used
+    --> src/cli.rs:8447:15
+     |
+8447 | pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^
+
+warning: function `take_mygo_extension` is never used
+    --> src/cli.rs:8467:4
+     |
+8467 | fn take_mygo_extension(value: &mut Value) -> Option<Value> {
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_design_record` is never used
+    --> src/cli.rs:8471:15
+     |
+8471 | pub(crate) fn create_design_record(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_design_record` is never used
+    --> src/cli.rs:8505:15
+     |
+8505 | pub(crate) fn revise_design_record(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_run_for_design` is never used
+    --> src/cli.rs:8577:15
+     |
+8577 | pub(crate) fn create_run_for_design(
+     |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `save_asset_link` is never used
+     --> src/cli.rs:12207:15
+      |
+12207 | pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+      |               ^^^^^^^^^^^^^^^
+
+warning: `labworkbench` (bin "labworkbench") generated 12 warnings (run `cargo fix --bin "labworkbench" -p labworkbench` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized] target(s) in 15.72s
+     Running `target/debug/labworkbench schema asterdoc.command`
+asterlab data dir: <tmp>/data
+{"input_schema":{"additionalProperties":false,"properties":{"actor_id":{"minLength":1,"type":"string"},"command":{"oneOf":[{"additionalProperties":false,"properties":{"module":{"properties":{"id":{"minLength":1,"type":"string"},"kind":{"type":"string"},"schema":{"minimum":1,"type":"integer"}},"required":["kind","id","schema"],"type":"object"},"type":{"const":"add_module"}},"required":["type","module"],"type":"object"},{"additionalProperties":false,"properties":{"module":{"properties":{"id":{"minLength":1,"type":"string"},"kind":{"const":"step"},"schema":{"minimum":1,"type":"integer"}},"required":["kind","id","schema"],"type":"object"},"type":{"const":"add_step"},"workflowId":{"type":"string"}},"required":["type","module"],"type":"object"},{"additionalProperties":false,"properties":{"moduleId":{"minLength":1,"type":"string"},"type":{"enum":["remove_module","remove_step","promote_step"]}},"required":["type","moduleId"],"type":"object"},{"additionalProperties":false,"properties":{"moduleId":{"minLength":1,"type":"string"},"parentId":{"minLength":1,"type":"string"},"type":{"const":"nest_step"}},"required":["type","moduleId","parentId"],"type":"object"},{"additionalProperties":false,"properties":{"moduleId":{"minLength":1,"type":"string"},"order":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"},"type":{"const":"reorder_steps"}},"required":["type","moduleId","order"],"type":"object"},{"additionalProperties":false,"properties":{"moduleId":{"minLength":1,"type":"string"},"properties":{"type":"object"},"type":{"const":"update_module"}},"required":["type","moduleId","properties"],"type":"object"},{"additionalProperties":false,"properties":{"group":{"minLength":1,"type":"string"},"moduleId":{"minLength":1,"type":"string"},"type":{"const":"assign_wells"},"wells":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"}},"required":["type","moduleId","group","wells"],"type":"object"},{"additionalProperties":false,"properties":{"moduleId":{"minLength":1,"type":"string"},"type":{"const":"clear_wells"},"wells":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"}},"required":["type","moduleId","wells"],"type":"object"},{"additionalProperties":false,"properties":{"from":{"minLength":1,"type":"string"},"moduleId":{"minLength":1,"type":"string"},"to":{"minLength":1,"type":"string"},"type":{"enum":["connect_steps","disconnect_steps"]}},"required":["type","moduleId","from","to"],"type":"object"}]},"design_id":{"minLength":1,"type":"string"},"expected_revision":{"minimum":0,"type":"integer"},"operation_id":{"minLength":1,"type":"string"}},"required":["design_id","expected_revision","command"],"type":"object"},"ok":true,"output_schema":{"oneOf":[{"additionalProperties":false,"properties":{"diagnostics":{"items":{"additionalProperties":false,"properties":{"affects":{"items":{"type":"string"},"type":"array"},"code":{"type":"string"},"message":{"type":"string"},"next_action":{"type":"string"},"path":{"type":"string"},"severity":{"enum":["blocking","needs_confirmation","advisory"],"type":"string"},"source":{"enum":["user_confirmed","imported_record","referenced_protocol","derived","agent_suggestion","unknown"],"type":"string"}},"required":["path","code","severity","message","affects","next_action","source"],"type":"object"},"type":"array"},"ok":{"const":true},"result":{"additionalProperties":true,"properties":{"actor_id":{"type":["string","null"]},"compiler_version":{"type":"string"},"created_at":{"type":["string","null"]},"design_id":{"type":"string"},"design_revision":{"minimum":0,"type":"integer"},"operation_id":{"type":["string","null"]},"revision":{"minimum":0,"type":"integer"},"schema_version":{"minimum":1,"type":"integer"},"source":{"type":"string"},"source_hash":{"type":"string"}},"required":["design_id","revision","source","source_hash","schema_version","compiler_version"],"type":"object"},"tool":{"const":"asterdoc.command"}},"required":["ok","tool","result"],"type":"object"},{"additionalProperties":false,"properties":{"diagnostics":{"items":{"additionalProperties":false,"properties":{"affects":{"items":{"type":"string"},"type":"array"},"code":{"type":"string"},"message":{"type":"string"},"next_action":{"type":"string"},"path":{"type":"string"},"severity":{"enum":["blocking","needs_confirmation","advisory"],"type":"string"},"source":{"enum":["user_confirmed","imported_record","referenced_protocol","derived","agent_suggestion","unknown"],"type":"string"}},"required":["path","code","severity","message","affects","next_action","source"],"type":"object"},"type":"array"},"error":{"additionalProperties":false,"properties":{"code":{"enum":["INVALID_INPUT","NOT_FOUND","REVISION_CONFLICT","INTERNAL"],"type":"string"},"message":{"type":"string"}},"required":["code","message"],"type":"object"},"ok":{"const":false},"tool":{"const":"asterdoc.command"}},"required":["ok","tool","error"],"type":"object"}]},"tool":"asterdoc.command"}

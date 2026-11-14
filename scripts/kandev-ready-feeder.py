@@ -895,6 +895,22 @@ forbid:
   - docs/contracts/**
 -->
 
+## 依赖 / 风险
+- upstream: none
+- downstream: none
+- 风险 / 回滚：只新增一份回顾文档，不改代码与契约；异常时删除该文档。
+
+## 交付契约
+<!-- kandev-delivery
+version: 1
+type: docs
+required_artifacts:
+  - path: docs/release/retrospective-{stamp}.md
+    source: merged_pr_diff
+-->
+
+risk: L0
+
 ## 验收
 - 命令：`test -f docs/release/retrospective-{stamp}.md && grep -c '^## ' docs/release/retrospective-{stamp}.md` 期望：exit 0 且计数 >= 6（六节齐全）
 - 命令：`gh pr view --json state,mergeable --jq '"\\(.state) \\(.mergeable)"'`（在 PR 分支上） 期望：`OPEN MERGEABLE`
@@ -963,13 +979,14 @@ def scan_retro_trigger():
     task_list = "\n".join(f"- {r[1]} (merged {r[2]})" for r in rows)
     task_ids = [r[0] for r in rows]
     stamp = datetime.datetime.now().strftime("%Y%m%d")
+    title = f"RETRO-{stamp} (Audit) VPS lane 阶段回顾"
     status, data = api(
         "POST",
         "/api/v1/tasks",
         {
             "workspace_id": WORKSPACE,
             "workflow_id": WORKFLOW,
-            "title": f"RETRO-{stamp} (Audit) VPS lane 阶段回顾",
+            "title": title,
             "description": RETRO_PROMPT.format(task_list=task_list, since=since, stamp=stamp),
             "labels": ["retro", "roadmap", "lane:vps"],
             "priority": "high",
@@ -1000,25 +1017,18 @@ def scan_retro_trigger():
         wcon.close()
     except Exception as exc:  # noqa: BLE001
         print(f"retro repo bind failed: {exc}", file=sys.stderr)
+        tg_send(
+            f"Kandev 阶段回顾建卡了，但仓库绑定失败，需要人工处理：\n{title}\n任务 ID {tid}\n{exc}"
+        )
         return
-        import sqlite3
-
-        wcon = sqlite3.connect(DB)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        wcon.execute(
-            "insert into kandev_meta(key,value) values('retro.vps.last_run_at',?) "
-            "on conflict(key) do update set value=excluded.value",
-            (now,),
-        )
-        wcon.execute(
-            "insert into kandev_meta(key,value) values('retro.vps.last_task_ids',?) "
-            "on conflict(key) do update set value=excluded.value",
-            (json.dumps(task_ids),),
-        )
-        wcon.commit()
-        wcon.close()
-    except Exception as exc:  # noqa: BLE001
-        print(f"retro watermark failed: {exc}", file=sys.stderr)
+    preview = "\n".join(f"· {r[1][:60]}" for r in rows[:10])
+    if len(rows) > 10:
+        preview += f"\n… 共 {len(rows)} 张"
+    tg_send(
+        f"Kandev 阶段回顾已建卡：{title}\n"
+        f"范围（watermark {since} 之后的合并）：\n{preview}\n"
+        f"任务 ID {tid}\n报告 PR 开好后我会再发一次链接。"
+    )
 
 
 def scan_stuck(detailed):
@@ -1304,6 +1314,26 @@ def merged_pr_by_card(task):
     return found
 
 
+def open_pr_by_title(task):
+    """Open PR found by the card id in its title (Kandev link can lag)."""
+    m = re.match(r"^([A-Z]+-\d+[a-z]?)", task.get("title", ""))
+    if not m:
+        return {}
+    cid = m.group(1)
+    try:
+        out = subprocess.run(
+            ["gh", "pr", "list", "--repo", GH_REPO, "--state", "open",
+             "--search", f'"{cid}" in:title', "--json", "number,title,url", "--limit", "10"],
+            capture_output=True, text=True, timeout=25,
+        )
+        for pr in json.loads(out.stdout or "[]"):
+            if cid in pr.get("title", ""):
+                return {"pr_number": pr["number"], "pr_url": pr.get("url", ""), "state": "open"}
+    except Exception as exc:  # noqa: BLE001
+        print(f"open PR lookup failed for {cid}: {exc}", file=sys.stderr)
+    return {}
+
+
 def pr_for_task(task):
     """Linked PR, else a merged PR recovered by card id."""
     pr = task_pr(task["id"])
@@ -1359,7 +1389,7 @@ def scan_retro_ready(detailed):
         labels = lane_labels(task)
         if "tg-retro-sent" in labels:
             continue
-        pr = task_pr(task["id"])
+        pr = task_pr(task["id"]) or open_pr_by_title(task)
         if not pr or pr.get("state") != "open":
             continue
 

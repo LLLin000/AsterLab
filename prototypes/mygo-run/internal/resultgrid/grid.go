@@ -1,7 +1,10 @@
 package resultgrid
 
 import (
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -62,6 +65,8 @@ type Grid struct {
 	Selection        Selection
 	State            SaveState
 	Error            string
+	PendingOpID      string
+	PendingOpHash    string
 	Preview          *PastePreview
 	ConfirmOverwrite bool
 	undo, redo       []historyEntry
@@ -100,6 +105,19 @@ func New(s Schema, cells []Cell) *Grid {
 		}
 	}
 	return g
+}
+// CellsDigest returns a deterministic hash of Schema.ID and all grid cells
+// so retries reuse the same OperationID only when the payload is unchanged.
+func (g *Grid) CellsDigest() string {
+	if g == nil {
+		return ""
+	}
+	b, _ := json.Marshal(struct {
+		SchemaID string `json:"schemaId"`
+		Cells    []Cell `json:"cells"`
+	}{g.Schema.ID, g.Cells})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 func (g *Grid) Rows() int                { return len(g.Schema.RowLabels) }
 func (g *Grid) Columns() int             { return len(g.Schema.ColumnLabels) }

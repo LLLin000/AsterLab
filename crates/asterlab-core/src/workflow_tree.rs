@@ -194,14 +194,43 @@ struct TaskRef {
 }
 
 /// Build the Design/Use/Definition tree. No Run occurrence is present.
+fn find_design_parent_mut<'a>(nodes: &'a mut [Node], path: &str) -> Option<&'a mut Node> {
+    for node in nodes {
+        if node.identity == "use" && node.path == path {
+            return Some(node);
+        }
+        if node.identity == "use" {
+            if let Some(parent) = find_design_parent_mut(&mut node.children, path) {
+                return Some(parent);
+            }
+        }
+    }
+    None
+}
+
+fn sort_design_nodes(nodes: &mut [Node], ranks: &HashMap<String, usize>) {
+    nodes.sort_by_key(|node| (ranks.get(&node.id).copied().unwrap_or(usize::MAX), node.order));
+    for node in nodes {
+        sort_design_nodes(&mut node.children, ranks);
+    }
+}
+
 pub fn build_design(
     document: &Document,
     blocks: &HashMap<String, Result<BlockDefinition, String>>,
 ) -> Value {
+    let ranks: HashMap<String, usize> = document.order.iter().enumerate()
+        .map(|(rank, id)| (id.clone(), rank)).collect();
     let mut steps = document.steps.clone();
-    steps.sort_by(|a, b| a.order.cmp(&b.order).then(a.path.cmp(&b.path)));
+    steps.sort_by(|a, b| {
+        let depth = |path: &str| path.split('/').count();
+        depth(&a.path).cmp(&depth(&b.path))
+            .then(ranks.get(&a.id).copied().unwrap_or(usize::MAX)
+                .cmp(&ranks.get(&b.id).copied().unwrap_or(usize::MAX)))
+            .then(a.order.cmp(&b.order))
+    });
 
-    let mut roots = Vec::new();
+    let mut flat_nodes = Vec::new();
     let mut issues = Vec::new();
     let mut seen_paths: HashMap<String, String> = HashMap::new();
 
@@ -238,7 +267,7 @@ pub fn build_design(
                     node.status = "organizational".into();
                     node.total = 0;
                 }
-                roots.push(node);
+                flat_nodes.push(node);
             }
             1 => {
                 let version = references[0].clone();
@@ -270,19 +299,27 @@ pub fn build_design(
                         node.issues.extend(definition_issues);
                     }
                 }
-                roots.push(node);
+                flat_nodes.push(node);
             }
             _ => {
                 node.issues
                     .push("step references multiple ProtocolBlock definitions".into());
-                roots.push(node);
+                flat_nodes.push(node);
             }
         }
-        if let Some(root) = roots.last() {
-            issues.extend(root.issues.clone());
+    }
+    issues.extend(flat_nodes.iter().flat_map(|node| node.issues.clone()));
+
+    let mut roots = Vec::new();
+    for node in flat_nodes {
+        let parent_path = node.path.rsplit_once('/').map(|(parent, _)| parent);
+        if let Some(parent) = parent_path.and_then(|path| find_design_parent_mut(&mut roots, path)) {
+            parent.children.push(node);
+        } else {
+            roots.push(node);
         }
     }
-
+    sort_design_nodes(&mut roots, &ranks);
     finalize(document, roots, issues, true)
 }
 
@@ -1011,6 +1048,26 @@ mod tests {
         assert_eq!(child["id"], "root/parent/a");
         assert_eq!(value["roots"][1]["id"], "step-leaf");
         assert_eq!(value["precedes"]["step-parent"][0], "step-leaf");
+    }
+
+    #[test]
+    fn design_projection_nests_step_paths_and_uses_business_order_for_siblings() {
+        let document = Document {
+            steps: vec![
+                DesignStep { id: "parent".into(), title: "Parent".into(), path: "root/parent".into(), order: 1, organizational: true, refs: vec![] },
+                DesignStep { id: "child-b".into(), title: "B".into(), path: "root/parent/b".into(), order: 2, organizational: true, refs: vec![] },
+                DesignStep { id: "child-a".into(), title: "A".into(), path: "root/parent/a".into(), order: 3, organizational: true, refs: vec![] },
+                DesignStep { id: "sibling".into(), title: "Sibling".into(), path: "root/sibling".into(), order: 4, organizational: true, refs: vec![] },
+            ],
+            order: vec!["parent".into(), "child-a".into(), "child-b".into(), "sibling".into()],
+            ..Document::default()
+        };
+        let value = build_design(&document, &HashMap::new());
+        assert_eq!(value["roots"][0]["id"], "parent");
+        assert_eq!(value["roots"][0]["children"][0]["id"], "child-a");
+        assert_eq!(value["roots"][0]["children"][1]["id"], "child-b");
+        assert_eq!(value["roots"][1]["id"], "sibling");
+        assert_eq!(value["order"], json!(["parent","child-a","child-b","sibling"]));
     }
 
     #[test]
