@@ -54,6 +54,9 @@ REWORK_LIMIT = int(os.environ.get("KANDEV_REWORK_LIMIT", "3"))
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 ACTIVE_STATES = {"IN_PROGRESS", "SCHEDULING", "WAITING_FOR_INPUT"}
+# Review re-run grace: a review that ended before CI finished must be woken
+# soon after the checks turn green, not after a full ten-minute wait.
+CI_READY_MINUTES = int(os.environ.get("KANDEV_CI_READY_MINUTES", "3"))
 # A card moved back to Inbox keeps state TODO (Kandev only resets the step), so
 # both states must pass admission or the card is invisible to the feeder.
 INBOX_STATES = {"CREATED", "TODO"}
@@ -218,7 +221,7 @@ def scan_ci_ready(review_tasks):
             idle = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 60
         except Exception:  # noqa: BLE001
             continue
-        if idle < 10:
+        if idle < CI_READY_MINUTES:
             continue
         pr = task_pr(task["id"])
         if not pr or pr.get("state") != "open":
