@@ -62,6 +62,19 @@ directories and the other cards it was written against, and `local-gate.ps1` wil
 even exist. Merging (never rebasing, never force-pushing) keeps the other lanes'
 commits intact.
 
+A checkout also inherits the source folder's ignored `prototypes/mygo-run/dist/`, which can
+be months old. Delete it and rebuild before taking any evidence:
+
+```powershell
+rm -rf prototypes/mygo-run/dist
+./scripts/mygo-build.ps1
+grep commit prototypes/mygo-run/dist/BUILD_INFO.txt   # must equal git rev-parse --short HEAD
+```
+
+A screenshot whose `BUILD_INFO.txt` names a different commit is not evidence: it shows a
+retired frontend. This bit once — a lane screenshotted a November 9 build of a card base
+that was itself 106 commits behind `main`.
+
 ## Merge rule
 
 A card merges when its lane reports `LOCAL_GATE: PASS` on the exact head commit
