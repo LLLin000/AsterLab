@@ -25,6 +25,11 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
+      # Self-hosted box: keep build artifacts outside the workspace so they
+      # survive checkout. `Swatinem/rust-cache` used to clean ~/.cargo/bin on
+      # this runner and deleted the host toolchain (2026-11-14); the cache
+      # action is gone, this directory is the cache.
+      CARGO_TARGET_DIR: /var/lib/actions-runner/cargo-target
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,15 +72,6 @@ jobs:
         # resolves that file and installs exactly that toolchain; a missing or
         # malformed pin fails here instead of silently using the runner's stable.
         run: rustup install --profile minimal --no-self-update
-
-      - name: Cache cargo registry and target directories
-        if: env.RUN_HEAVY == '1'
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            . -> target
-            crates/asterlab-core -> target
-            crates/asterlab-app -> target
 
       - name: Record toolchain versions
         if: env.RUN_HEAVY == '1'
