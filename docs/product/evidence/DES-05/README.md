@@ -2,7 +2,7 @@
 
 ## Baseline and scope
 - Checkout: `O:\des05`; branch: `agent/DES-05-protocol-nav`.
-- Base commit: `f4744e12aa401b649956fcd106c499f3b763e015` (`origin/main` after merge).
+- Base commit: `01e207a115286ed9f4bfa1c4fda2d6da302286da` (`origin/main` after merge).
 - UX rules applied: UX-IA-5 (Protocol is read-only), UX-P2 (no raw identifiers in the default view), UX-P3 (existing themed components), UX-P4 (document-shaped content), UX-P5 / UX-STATE (`预览`, `已冻结`, `未解析`), UX-LAYOUT (820px document maximum).
 
 ## What ran
