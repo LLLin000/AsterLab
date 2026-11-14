@@ -22,7 +22,8 @@ LABWORKBENCH_DATA_DIR=C:/Users/Lin/AppData/Local/Temp/des05-protocol-probe O:/ag
 LABWORKBENCH_DATA_DIR=C:/Users/Lin/AppData/Local/Temp/des05-protocol-probe O:/ag05/target/debug/labworkbench.exe asterdoc.create_run --input -
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/mygo-build.ps1
 go test ./internal/protocol ./... -count=1
-./scripts/ci/local-gate.ps1 -Pr <PR>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci/local-gate.ps1 -Pr 88
+LOCAL_GATE: PASS
 ```
 For CLI commands ending in `--input -`, JSON was passed on stdin as the corresponding CLI payload. The GUI was launched with `LABWORKBENCH_DATA_DIR=C:/Users/Lin/AppData/Local/Temp/des05-protocol-probe`, `ASTERLAB_DESIGN_ID=186e9b6d-ff34-4c0a-9184-0e392ff7ca5a` or `ASTERLAB_RUN_ID=0cdc3904-bd3d-4e56-a005-f7611a68744e`, `ASTERLAB_THEME=light|dark`, and `MYGO_AUTOMATION=<fresh socket>`; real windows were sized with `MoveWindow`, and screenshots were captured with `mygo-automation screenshot`.
 
