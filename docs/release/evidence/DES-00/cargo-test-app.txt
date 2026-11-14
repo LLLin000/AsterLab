@@ -1,3 +1,35 @@
+   Compiling shlex v2.0.1
+   Compiling syn v3.0.9
+   Compiling find-msvc-tools v0.1.15
+   Compiling pkg-config v0.3.34
+   Compiling cc v1.11.1
+   Compiling libc v0.2.191
+   Compiling autocfg v1.5.1
+   Compiling vcpkg v0.2.15
+   Compiling num-traits v0.2.19
+   Compiling getrandom v0.4.3
+   Compiling foldhash v0.1.5
+   Compiling hashbrown v0.15.5
+   Compiling equivalent v1.0.3
+   Compiling hashbrown v0.17.1
+   Compiling libsqlite3-sys v0.35.0
+   Compiling serde_derive v1.0.229
+   Compiling indexmap v2.14.2
+   Compiling hashlink v0.10.0
+   Compiling fallible-iterator v0.3.0
+   Compiling bitflags v2.13.2
+   Compiling smallvec v1.16.5
+   Compiling iana-time-zone v0.1.65
+   Compiling unsafe-libyaml v0.2.11
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling ryu v1.0.23
+   Compiling uuid v1.29.2
+   Compiling serde v1.0.229
+   Compiling asterlab-core v0.1.0 (<worktree>/crates/asterlab-core)
+   Compiling chrono v0.4.45
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling rusqlite v0.37.0
+   Compiling asterlab-app v0.1.0 (<worktree>/crates/asterlab-app)
 warning: unused variable: `assay_index`
     --> src/../../../src/cli.rs:3587:9
      |
@@ -1082,6 +1114,7 @@ warning: function `list_asset_events` is never used
 12401 | pub(crate) fn list_asset_events(
       |               ^^^^^^^^^^^^^^^^^
 
+warning: `asterlab-app` (lib) generated 173 warnings (run `cargo fix --lib -p asterlab-app` to apply 2 suggestions)
 warning: field `exit` is never read
   --> src/../../../src/cli.rs:68:16
    |
@@ -1102,34 +1135,33 @@ warning: field `project_id` is never read
 14019 |         project_id: String,
       |         ^^^^^^^^^^
 
-warning: `asterlab-app` (lib) generated 173 warnings (run `cargo fix --lib -p asterlab-app` to apply 2 suggestions)
 warning: `asterlab-app` (lib test) generated 112 warnings (110 duplicates)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
-     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/asterlab-app/febe139a2507ade0/out/asterlab_app-febe139a2507ade0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 42.41s
+     Running unittests src/lib.rs (target/debug/build/asterlab-app/febe139a2507ade0/out/asterlab_app-febe139a2507ade0)
 
 running 39 tests
 test agent_edit_preview::tests::preview_rejects_the_three_illegal_input_classes ... ok
 test agent_edit_preview::tests::preview_resolves_diffs_from_the_store_and_leaves_it_untouched ... ok
 test cli_impl::tests::agent_edit_commit_appends_a_version_and_keeps_the_frozen_run ... ok
-test cli_impl::tests::assess_includes_run_creation_audit_warnings ... ok
 test cli_impl::tests::assess_and_run_creation_reject_unmaterialized_steps ... ok
+test cli_impl::tests::assess_includes_run_creation_audit_warnings ... ok
 test cli_impl::tests::asterdoc_nests_and_promotes_steps_by_updating_paths ... ok
-test cli_impl::tests::asterdoc_parity_samples ... ok
 test cli_impl::tests::asset_link_rejects_paths_outside_the_root_without_writing ... ok
-test cli_impl::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
+test cli_impl::tests::asterdoc_parity_samples ... ok
 test cli_impl::tests::asterdoc_reorders_steps_only_with_a_complete_unique_permutation ... ok
+test cli_impl::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
 test cli_impl::tests::compiler_keeps_sample_identity_explicit_across_timepoints ... ok
 test cli_impl::tests::compiler_records_the_block_version_each_step_reuses ... ok
 test cli_impl::tests::diagnostics_flag_is_parsed_with_input_in_any_order ... ok
 test cli_impl::tests::error_envelope_carries_structured_diagnostics ... ok
-test cli_impl::tests::agent_tools_are_discoverable ... ok
+test cli_impl::tests::failed_schema_migration_preserves_database ... ok
 test cli_impl::tests::manifest_rule_must_be_registered_in_rust ... ok
 test cli_impl::tests::protocol_block_content_accepts_legacy_and_valid_specs_but_rejects_invalid_specs ... ok
 test cli_impl::tests::read_only_tools_do_not_write ... ok
-test cli_impl::tests::failed_schema_migration_preserves_database ... ok
 test cli_impl::tests::readout_batch_accepts_csv_cells ... ok
 test cli_impl::tests::readout_batch_writes_one_event_or_nothing ... ok
 test cli_impl::tests::concurrent_agent_edit_commits_leave_exactly_one_winner ... ok
+test cli_impl::tests::agent_tools_are_discoverable ... ok
 test cli_impl::tests::readout_submit_replays_the_first_record_and_isolates_runs ... ok
 test cli_impl::tests::remove_step_cleans_workflow_order_and_edges_when_unreferenced ... ok
 test cli_impl::tests::remove_step_rejects_run_and_step_references_without_revision_changes ... ok
@@ -1144,11 +1176,11 @@ test cli_impl::tests::step_edit_tool_is_registered ... ok
 test tests::concurrent_batch_writers_use_authoritative_revision ... ok
 test tests::idempotent_readout_and_rollback ... ok
 test tests::readout_persists_across_reopen ... ok
-test cli_impl::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
 test tests::batch_is_atomic_idempotent_and_preserves_missing_cells ... ok
+test cli_impl::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
 test cli_impl::tests::asset_link_hashes_a_large_file_without_copying_it ... ok
 
-test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.36s
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.22s
 
    Doc-tests asterlab_app
 
