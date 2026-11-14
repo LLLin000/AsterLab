@@ -3,6 +3,7 @@ package runworkspace
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/resultgrid"
@@ -75,11 +76,11 @@ func SelectKind(task *RunTaskViewModel, grid *resultgrid.Grid, assets []LinkedAs
 // RecordingView renders the unified recording module: the same data backed by
 // plate, table, gallery, or form. The host supplies the write callbacks.
 type RecordingView struct {
+	RunID  string
 	Kind   ViewKind
 	Grid   *resultgrid.Grid
 	Assets []LinkedAsset
 	Task   *RunTaskViewModel
-
 	OnOpenAsset  func(asset LinkedAsset)
 	OnRelocate   func(asset LinkedAsset)
 	OnLinkFile   func(asset LinkedAsset)
@@ -96,7 +97,21 @@ func (r *RecordingView) Render(c *ui.Context) {
 	}
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
-
+	recovered := syncGridDraft(r.RunID, r.Task.TaskKey, r.Grid, time.Now())
+	saveNow := func() {
+		if r.Grid == nil || r.OnSaveBatch == nil {
+			return
+		}
+		if err := r.Grid.CommitPendingEdit(); err != nil {
+			r.Grid.Error = err.Error()
+			return
+		}
+		r.Grid.Error = ""
+		r.OnSaveBatch(r.Grid.Cells)
+	}
+	if r.Grid != nil && r.OnSaveBatch != nil {
+		c.OnShortcut(ui.Cmd, ui.KeyS, saveNow)
+	}
 	views := r.availableViews()
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
 		for _, v := range views {
@@ -134,23 +149,36 @@ func (r *RecordingView) Render(c *ui.Context) {
 				ui.Text(c, "已保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.SuccessText)
 			})
 		} else if r.Grid != nil && r.OnSaveBatch != nil {
-			// UX-STATE, UX-P5: make the unsaved state explicit beside Save.
-			ui.Text(c, "未保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.WarningText)
-			save := components.Button(c, "保存读数", components.ButtonPrimary)
-			save.Disabled(r.Grid.State == resultgrid.StateSaving || r.Grid.Error != "")
+			// UX-STATE, UX-P5: make unsaved and retryable failure states explicit beside Save.
+			if r.Grid.State == resultgrid.StateError {
+				ui.Text(c, "保存失败").FontSize(t.Rem(.72)).Bold().TextColor(tokens.DangerText)
+			} else {
+				ui.Text(c, "未保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.WarningText)
+			}
+			saveLabel := "保存读数"
+			if r.Grid.State == resultgrid.StateError {
+				saveLabel = "重试保存"
+			}
+			save := components.Button(c, saveLabel, components.ButtonPrimary)
+			save.Disabled(r.Grid.State == resultgrid.StateSaving)
 			if r.Grid.State == resultgrid.StateSaving {
 				ui.Text(c, "保存中…").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 			}
 			if save.Clicked() {
-				if err := r.Grid.CommitPendingEdit(); err != nil {
-					r.Grid.Error = err.Error()
-				} else {
-					r.OnSaveBatch(r.Grid.Cells)
-				}
+				saveNow()
 			}
 		}
 	})
-
+	if recovered && r.Grid != nil && r.Grid.State != resultgrid.StateSaved {
+		ui.Row(c).FillWidth().Padding(t.Space(.75), t.Space(1.25)).Radius(6).
+			Background(tokens.WarningBg).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+			ui.Text(c, "已从上次未保存草稿恢复（Ctrl+S 保存到 Core）").FontSize(t.Rem(.72)).TextColor(tokens.WarningText)
+			ui.Spacer(c)
+			if components.Button(c, "丢弃草稿", components.ButtonGhost).Clicked() {
+				discardGridDraft(r.RunID, r.Task.TaskKey, r.Grid)
+			}
+		})
+	}
 	switch r.Kind {
 	case ViewPlate:
 		r.renderPlate(c)

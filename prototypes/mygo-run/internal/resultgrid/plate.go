@@ -429,7 +429,11 @@ func selectedEditor(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens, fi
 			OnSubmit(func() {
 				if err := g.CommitEdit(); err != nil {
 					g.Error = err.Error()
+					return
 				}
+				g.MoveSelection("enter", false)
+				g.BeginEdit(g.Selection.StartRow, g.Selection.StartColumn)
+				g.Error = ""
 			})
 		if field.Unit != "" {
 			ui.Text(c, field.Unit).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
