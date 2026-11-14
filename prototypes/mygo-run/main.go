@@ -506,22 +506,14 @@ func (a *app) buildRunWorkspaceVM() *runworkspace.RunWorkspaceViewModel {
 	if a.runSvc == nil || a.snap.RunID == "" {
 		return runworkspace.BuildViewModel(a.snap, a.asterDoc, runworkspace.Projection{})
 	}
-	raw, err := a.runSvc.WorkflowTree(context.Background(), a.snap.RunID)
-	if err != nil {
-		return runworkspace.BuildViewModel(a.snap, a.asterDoc, runworkspace.Projection{
-			Issues: []string{state.MapError(err).Error()},
-		})
-	}
-	tree, err := workflowtree.ParseJSON(raw)
-	if err != nil {
-		return runworkspace.BuildViewModel(a.snap, a.asterDoc, runworkspace.Projection{
-			Issues: []string{err.Error()},
-		})
-	}
-	return runworkspace.BuildViewModel(a.snap, a.asterDoc, runworkspace.Projection{
-		Tree:   tree,
-		Issues: tree.Issues,
+	projection := runworkspace.LoadProjection(a.snap, func() (*workflowtree.Tree, error) {
+		raw, err := a.runSvc.WorkflowTree(context.Background(), a.snap.RunID)
+		if err != nil {
+			return nil, state.MapError(err)
+		}
+		return workflowtree.ParseJSON(raw)
 	})
+	return runworkspace.BuildViewModel(a.snap, a.asterDoc, projection)
 }
 
 // loadFrozenAsterDoc loads the exact document revision frozen on the Run. The

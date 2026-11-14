@@ -512,6 +512,22 @@ type Projection struct {
 	Issues []string
 }
 
+// LoadProjection requests Core's hierarchy only for Runs with a frozen
+// AsterDoc reference. Failures remain visible with the cause and recovery path.
+func LoadProjection(snap runs.RunSnapshot, load func() (*workflowtree.Tree, error)) Projection {
+	if snap.AsterDoc == nil {
+		return Projection{}
+	}
+	tree, err := load()
+	if err != nil {
+		return Projection{Issues: []string{fmt.Sprintf(
+			"冻结 AsterDoc 层级读取失败：%v；请重试，若持续失败请检查 Run 冻结的文档版本。",
+			err,
+		)}}
+	}
+	return Projection{Tree: tree, Issues: tree.Issues}
+}
+
 // BuildViewModel constructs the run workspace view model from a frozen run
 // snapshot and its frozen AsterDoc. Production callers pass Core's Projection;
 // the no-projection path is a test-only oracle and must not be used by the GUI.

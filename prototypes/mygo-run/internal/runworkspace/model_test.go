@@ -1,9 +1,12 @@
 package runworkspace
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -347,5 +350,37 @@ func TestBuildViewModelShowsOrganizationalNodes(t *testing.T) {
 	vm := BuildViewModel(snap, doc)
 	if vm.Tree == nil || !vm.Tree.HasOrganizational() {
 		t.Fatalf("organizational workflow tree was hidden: %+v", vm.TreeIssues)
+	}
+}
+
+func TestLoadProjectionSkipsTreeWithoutFrozenAsterDoc(t *testing.T) {
+	called := false
+	projection := LoadProjection(runs.RunSnapshot{RunID: "run-1"}, func() (*workflowtree.Tree, error) {
+		called = true
+		return &workflowtree.Tree{}, nil
+	})
+	if called {
+		t.Fatal("WorkflowTree loader called without a frozen AsterDoc")
+	}
+	if projection.Tree != nil || len(projection.Issues) != 0 {
+		t.Fatalf("projection without frozen AsterDoc = %+v, want empty", projection)
+	}
+}
+
+func TestLoadProjectionSurfacesBrokenFrozenAsterDoc(t *testing.T) {
+	want := "NOT_FOUND: AsterDoc revision v2 does not exist"
+	projection := LoadProjection(runs.RunSnapshot{
+		RunID:    "run-1",
+		AsterDoc: &runs.AsterDocRef{DesignID: "design-1", Revision: 2},
+	}, func() (*workflowtree.Tree, error) {
+		return nil, errors.New(want)
+	})
+	if len(projection.Issues) != 1 {
+		t.Fatalf("projection issues = %v, want one diagnostic", projection.Issues)
+	}
+	for _, text := range []string{want, "请重试", "检查 Run 冻结的文档版本"} {
+		if !strings.Contains(projection.Issues[0], text) {
+			t.Errorf("diagnostic %q does not include %q", projection.Issues[0], text)
+		}
 	}
 }
