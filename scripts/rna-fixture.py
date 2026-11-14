@@ -59,10 +59,16 @@ RNA_STEPS = [
 ]
 
 
-def block(project, title, summary, steps):
+RNA_SLOTS = [
+    {"key": "lysis_vol", "label": "裂解体积", "value_type": "number", "unit": "uL", "required": True},
+    {"key": "lysis_time", "label": "裂解时间", "value_type": "number", "unit": "min", "required": True},
+]
+
+
+def block(project, title, summary, steps, slots=None):
     return run("protocol.block.create", {
         "project_id": project, "title": title, "summary": summary,
-        "parameter_slots": [], "steps": steps,
+        "parameter_slots": slots or [], "steps": steps,
     })["version"]["id"]
 
 
@@ -70,8 +76,9 @@ project = run("project.create", {"name": "G1 hierarchy gate"})
 pid = project["record"]["id"]
 
 rna = block(pid, "PureLink RNA extraction", "十步 RNA 提取块",
-            [{"kind": "text", "use_id": use_id, "title": title, "instruction": instruction}
-             for use_id, title, instruction in RNA_STEPS])
+            [{"kind": "text", "use_id": use_id, "title": title, "instruction": instruction,
+              **({"parameter_refs": ["lysis_vol", "lysis_time"]} if use_id == "step-02" else {})}
+             for use_id, title, instruction in RNA_STEPS], RNA_SLOTS)
 qc = block(pid, "RNA QC", "浓度与纯度", [
     {"kind": "text", "use_id": "qc", "title": "RNA 质检", "instruction": "记录 RNA 浓度与 A260/A280。"}])
 rt = block(pid, "Reverse transcription", "逆转录", [
@@ -79,12 +86,17 @@ rt = block(pid, "Reverse transcription", "逆转录", [
 qpcr = block(pid, "qPCR", "扩增与检测", [
     {"kind": "text", "use_id": "qpcr", "title": "qPCR 扩增", "instruction": "配置反应并运行 qPCR，记录 Ct。"}])
 
+# The root repeats the child's slots and maps them: Core rejects a required
+# child slot that is neither mapped to a parent slot nor given an explicit value.
 root = block(pid, "RT-qPCR protocol root", "RNA 提取 + 质控 + 逆转录 + qPCR", [
-    {"kind": "block_use", "use_id": "rna", "block_version_id": rna, "bindings": []},
+    {"kind": "block_use", "use_id": "rna", "block_version_id": rna, "bindings": [
+        {"slot": "lysis_vol", "source_slot": "lysis_vol"},
+        {"slot": "lysis_time", "source_slot": "lysis_time"},
+    ]},
     {"kind": "block_use", "use_id": "qc", "block_version_id": qc, "bindings": []},
     {"kind": "block_use", "use_id": "rt", "block_version_id": rt, "bindings": []},
     {"kind": "block_use", "use_id": "qpcr", "block_version_id": qpcr, "bindings": []},
-])
+], RNA_SLOTS)
 protocol = run("protocol.create", {
     "project_id": pid, "title": "RT-qPCR protocol", "root_block_version_id": root,
 })["version"]["id"]
@@ -296,6 +308,6 @@ for task in ws["tasks"]:
     print("  -", task["step_path"])
 
 ids = {"data": str(DATA), "project": pid, "design": did, "revision": rev, "run": rid,
-       "protocol": protocol, "rna_block": rna}
+       "protocol": protocol, "rna_block": rna, "root_block": root}
 (DATA.parent / "rna-ids.json").write_text(json.dumps(ids, indent=2), encoding="utf-8")
 print("ids:", DATA.parent / "rna-ids.json")
