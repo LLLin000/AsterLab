@@ -76,5 +76,33 @@ class MergedPrCycleGuardTest(unittest.TestCase):
         self.assertTrue(feeder.merged_in_current_cycle("2026-11-13T18:22:14Z", None))
 
 
+class SessionLivenessTest(unittest.TestCase):
+    START = 1_000_000.0
+
+    @staticmethod
+    def iso(ts):
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+    def test_process_must_match_the_session_worktree(self):
+        procs = {101: ("/var/lib/kandev/tasks/a", self.START)}
+        self.assertTrue(
+            feeder._session_process_live(procs, "/var/lib/kandev/tasks/a", self.iso(self.START + 60))
+        )
+        self.assertFalse(
+            feeder._session_process_live(procs, "/var/lib/kandev/tasks/b", self.iso(self.START + 60))
+        )
+
+    def test_start_time_must_be_within_the_match_window(self):
+        procs = {101: ("/var/lib/kandev/tasks/a", self.START)}
+        self.assertFalse(
+            feeder._session_process_live(procs, "/var/lib/kandev/tasks/a", self.iso(self.START + 3600))
+        )
+
+    def test_unreadable_process_table_stays_conservative(self):
+        self.assertTrue(feeder._session_process_live({}, "/var/lib/kandev/tasks/a", "1970-01-01T00:00:00+00:00"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -57,6 +57,9 @@ ACTIVE_STATES = {"IN_PROGRESS", "SCHEDULING", "WAITING_FOR_INPUT"}
 # A card moved back to Inbox keeps state TODO (Kandev only resets the step), so
 # both states must pass admission or the card is invisible to the feeder.
 INBOX_STATES = {"CREATED", "TODO"}
+# A review that asked for changes must reach the implementation agent
+# quickly; nobody else re-opens the card for rework.
+REWORK_MINUTES = int(os.environ.get("KANDEV_REWORK_MINUTES", "3"))
 STUCK_MINUTES = int(os.environ.get("KANDEV_STUCK_MINUTES", "10"))
 STUCK_FIX_LIMIT = int(os.environ.get("KANDEV_STUCK_FIX_LIMIT", "3"))
 ACTION_LOG = os.environ.get(
@@ -190,6 +193,9 @@ def scan_ci_ready(review_tasks):
         labels = lane_labels(task)
         if "human-hold" in labels:
             continue
+        verdict, _ = latest_review_verdict(task["id"])
+        if verdict == "CHANGES_REQUESTED":
+            continue  # owned by scan_rework
         try:
             import sqlite3
 
@@ -261,6 +267,56 @@ def scan_ci_ready(review_tasks):
         if move(task, INBOX, "ci-ready -> Inbox"):
             time.sleep(1)
             move(task, REVIEW, "ci-ready -> Review re-review")
+
+
+def scan_rework(review_tasks):
+    """Send a card that asked for changes back to the implementation agent.
+
+    Review is read-only since the independent-review cutover, so a CHANGES
+    verdict has no owner unless the card returns to Agent. Rework stays on
+    the task branch; the REWORK_LIMIT breaker still ends the loop with
+    human-hold.
+    """
+    import datetime
+
+    for task in review_tasks:
+        labels = lane_labels(task)
+        if "human-hold" in labels:
+            continue
+        verdict, _ = latest_review_verdict(task["id"])
+        if verdict != "CHANGES_REQUESTED":
+            continue
+        pr = task_pr(task["id"])
+        if not pr or pr.get("state") != "open":
+            continue
+        if has_live_session(task["id"]):
+            continue
+        try:
+            import sqlite3
+
+            con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+            last = con.execute(
+                "select max(created_at) from task_session_messages "
+                "where task_id=? and author_type='agent'",
+                (task["id"],),
+            ).fetchone()[0]
+            con.close()
+        except Exception:  # noqa: BLE001
+            continue
+        if not last:
+            continue
+        try:
+            dt = datetime.datetime.fromisoformat(last.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            idle = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds() / 60
+        except Exception:  # noqa: BLE001
+            continue
+        if idle < REWORK_MINUTES:
+            continue
+        if rework_count(task["id"]) >= REWORK_LIMIT:
+            continue
+        move(task, AGENT, "review CHANGES -> rework on the same branch")
 
 
 def scan_no_pr(review_tasks):
@@ -355,6 +411,56 @@ def _agent_procs():
         except Exception:  # noqa: BLE001
             continue
     return procs
+
+
+def _session_process_live(procs, workspace_path, started_at):
+    """True when a real agent process owns this session.
+
+    Matching mirrors scan_session_reaper: same worktree path, start within
+    15 minutes. With no visible process at all the caller must stay
+    conservative, so an explicit match is required.
+    """
+    if not procs:
+        return True
+    try:
+        from datetime import datetime
+
+        start = datetime.fromisoformat(str(started_at).replace("Z", "+00:00")).timestamp()
+    except Exception:  # noqa: BLE001
+        return True
+    for _pid, (cwd, pstart) in procs.items():
+        if cwd == workspace_path and abs(pstart - start) <= 900:
+            return True
+    return False
+
+
+def has_live_session(task_id):
+    """A session is live only when its agent process exists.
+
+    Kandev leaves WAITING_FOR_INPUT rows behind after a process dies, so the
+    row alone must not block stuck-heal or rework routing.
+    """
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        rows = con.execute(
+            "select state,workspace_path,started_at from task_sessions "
+            "where task_id=? and state in ('RUNNING','SCHEDULING','WAITING_FOR_INPUT')",
+            (task_id,),
+        ).fetchall()
+        con.close()
+    except Exception:  # noqa: BLE001
+        return True
+    if not rows:
+        return False
+    procs = _agent_procs()
+    for state, path, started in rows:
+        if state in ("RUNNING", "SCHEDULING"):
+            return True
+        if _session_process_live(procs, path, started):
+            return True
+    return False
 
 
 def _kill_proc(pid):
@@ -844,11 +950,6 @@ def scan_stuck(detailed):
             import sqlite3
 
             con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-            live = con.execute(
-                """select id from task_sessions
-                    where task_id=? and state in ('RUNNING','WAITING_FOR_INPUT','SCHEDULING')""",
-                (task["id"],),
-            ).fetchall()
             last = con.execute(
                 "select max(occurred_at) from task_step_transitions where task_id=?",
                 (task["id"],),
@@ -857,7 +958,7 @@ def scan_stuck(detailed):
         except Exception as exc:  # noqa: BLE001
             print(f"stuck scan failed: {exc}", file=sys.stderr)
             continue
-        if live or not last:
+        if has_live_session(task["id"]) or not last:
             continue
         try:
             dt = datetime.datetime.fromisoformat(last.replace("Z", "+00:00"))
@@ -1516,6 +1617,7 @@ def run_once():
     scan_approvals(review_tasks)
     scan_cardfix([t for t in detailed if t.get("workflow_step_id") in (AGENT, REVIEW)])
     scan_retro_ready(detailed)
+    scan_rework(review_tasks)
     scan_ci_ready(review_tasks)
     scan_no_pr(review_tasks)
 
