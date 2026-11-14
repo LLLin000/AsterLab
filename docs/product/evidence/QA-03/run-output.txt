@@ -1,0 +1,20 @@
+Third, non-plate assay type through the full record path (verbatim harness output)
+
+$ python3 qa-harness.py qa03 O:/qa03 O:/qa03/docs/product/evidence/QA-03
+
+SEEDED 7ebeb0fb-4b44-41ba-8a36-948ebe47ab54
+run.save_batch layer=core transaction=start run_id=7ebeb0fb-4b44-41ba-8a36-948ebe47ab54 operation_id=op-1794664130491269200-1 schema_id=qpcr.sample_gene.cq.v1 cell_count=8
+run.save_batch layer=core transaction=commit run_id=7ebeb0fb-4b44-41ba-8a36-948ebe47ab54 operation_id=op-1794664130491269200-1 batch_id=batch-op-1794664130491269200-1 event_id=67f27c7e-3eb1-473f-88a3-028cbb4da382 cell_count=8
+QA03_SAVED_OK
+QA03_CORE_OK {"0,0": 15200.0}
+QA03_RESTART_OK
+HARNESS_DONE qa03
+
+Notes
+- The type is `western-blot` (`Layout: sample_target`, field `intensity`, unit AU).
+  It records on the table projection, not a 96-well plate, so the matrix schema
+  id stays `qpcr.sample_gene.cq.v1` — the only id the Core batch writer accepts.
+- `cell_count=8` is the whole grid (2 groups x 2 targets x 2 technical replicates),
+  which is how `run.save_batch` stores a batch: the typed cell plus its neighbours.
+- The GUI was force-killed and relaunched between the save and the restart check;
+  the value and the `已保存` state survived.
