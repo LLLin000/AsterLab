@@ -689,6 +689,23 @@ def parse_upstream(description):
     return cards
 
 
+def cross_lane_problems(blockers):
+    """VPS cards must not wait on the manual Windows lane.
+
+    blockers: [(card_id, [labels])]. A cross-lane edge is not enforced by any
+    automation but it is visible to the implementation agent, which then reads
+    the edge as its own blocking (DES-01 -> DES-00, 2026-11-14).
+    """
+    offenders = sorted(cid for cid, labels in blockers if "lane:win" in labels)
+    if not offenders:
+        return []
+    return [
+        "cross-lane dependency on "
+        + ", ".join(offenders)
+        + ": remove the Kandev edge and record the order as `排序:` in the body"
+    ]
+
+
 def relation_problems(description, blockers):
     """Keep the card's own statement of dependencies and Kandev in sync.
 
@@ -731,15 +748,22 @@ def validate_card(task_id):
             "select title,description,labels from tasks where id=?", (task_id,)
         ).fetchone()
         blockers = []
+        blocker_rows = []
         if r:
-            for (btitle,) in con.execute(
-                "select t.title from task_blockers b join tasks t on t.id=b.blocker_task_id "
+            for btitle, blabels in con.execute(
+                "select t.title, t.labels from task_blockers b join tasks t on t.id=b.blocker_task_id "
                 "where b.task_id=?",
                 (task_id,),
             ):
                 m = CARD_ID_PREFIX.match(btitle or "")
+                cid = m.group(1) if m else (btitle or "")
+                try:
+                    labels_list = json.loads(blabels or "[]")
+                except json.JSONDecodeError:
+                    labels_list = []
+                blocker_rows.append((cid, labels_list))
                 if m:
-                    blockers.append(m.group(1))
+                    blockers.append(cid)
         con.close()
     except Exception as exc:  # noqa: BLE001
         return [f"db read failed: {exc}"]
@@ -787,6 +811,7 @@ def validate_card(task_id):
         problems.append("unresolved {{...}} placeholder in description")
     # 6. relation consistency (Kandev blockers vs the body's upstream line)
     problems.extend(relation_problems(desc, blockers))
+    problems.extend(cross_lane_problems(blocker_rows))
     return problems
 
 
