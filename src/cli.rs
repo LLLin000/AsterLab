@@ -1980,6 +1980,26 @@ pub(crate) fn apply_asterdoc_command(db: &mut Connection, input: &Value) -> Resu
     } else {
         load_asterdoc_at(db, design_id, expected)?["source"].as_str().unwrap_or("").to_owned()
     };
+    if command.get("type").and_then(Value::as_str) == Some("remove_step") {
+        let step_id = command.get("moduleId").and_then(Value::as_str).unwrap_or("");
+        let mut statement = db.prepare(
+            "SELECT data_json FROM records WHERE kind='run' AND parent_id=?1"
+        ).map_err(|error| CliError::internal(error.to_string()))?;
+        let rows = statement.query_map([design_id], |row| row.get::<_, String>(0))
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        for row in rows {
+            let data: Value = serde_json::from_str(&row.map_err(|error| CliError::internal(error.to_string()))?)
+                .map_err(|error| CliError::internal(error.to_string()))?;
+            let frozen_revision = data["asterdoc"]["revision"].as_u64().unwrap_or(0);
+            if frozen_revision == 0 { continue; }
+            let frozen = load_asterdoc_at(db, design_id, frozen_revision)?;
+            if asterdoc_blocks(frozen["source"].as_str().unwrap_or(""))?.iter()
+                .any(|block| yaml_kind(&block.value) == "step" && yaml_id(&block.value) == step_id)
+            {
+                return Err(step_reference_error(step_id));
+            }
+        }
+    }
     let next = apply_asterdoc_patch(&source, &command)?;
     save_asterdoc_version(db, &json!({
         "design_id": design_id,
@@ -2076,6 +2096,87 @@ fn apply_replacements(mut source: String, mut replacements: Vec<(usize, usize, S
     source
 }
 
+fn step_path(value: &serde_yaml::Value) -> String {
+    value.get("path").and_then(|path| path.as_str()).unwrap_or("").trim().to_owned()
+}
+
+fn rewrite_step_subtree(
+    source: &str,
+    step_id: &str,
+    new_path: &str,
+) -> Result<String, CliError> {
+    let blocks = asterdoc_blocks(source)?;
+    let target = blocks.iter().find(|block| yaml_id(&block.value) == step_id)
+        .ok_or_else(|| CliError::missing(format!("step {step_id} does not exist")))?;
+    let old_path = step_path(&target.value);
+    if old_path.is_empty() || new_path.is_empty() || old_path == new_path {
+        return Err(CliError::input("step path is missing or unchanged"));
+    }
+    let mut replacements = Vec::new();
+    for block in &blocks {
+        if yaml_kind(&block.value) != "step" {
+            continue;
+        }
+        let path = step_path(&block.value);
+        if path == old_path || path.strip_prefix(&old_path).is_some_and(|suffix| suffix.starts_with('/')) {
+            let mut value = block.value.clone();
+            let mapping = value.as_mapping_mut()
+                .ok_or_else(|| CliError::input("step module must be a mapping"))?;
+            let replacement = format!("{new_path}{}", &path[old_path.len()..]);
+            mapping.insert(
+                serde_yaml::Value::String("path".to_owned()),
+                serde_yaml::Value::String(replacement),
+            );
+            let raw = serde_yaml::to_string(&value).map_err(|e| CliError::internal(e.to_string()))?;
+            replacements.push((block.body_start, block.body_end, raw));
+        }
+    }
+    let next = apply_replacements(source.to_owned(), replacements);
+    let mut paths = HashSet::new();
+    for block in asterdoc_blocks(&next)? {
+        if yaml_kind(&block.value) == "step" {
+            let path = step_path(&block.value);
+            if path.is_empty() || !paths.insert(path.clone()) {
+                return Err(CliError::input(format!("step path conflict: {path}")));
+            }
+        }
+    }
+    Ok(next)
+}
+
+fn contains_step_reference(value: &serde_yaml::Value, step_id: &str, target_path: &str) -> bool {
+    match value {
+        serde_yaml::Value::Sequence(values) => values.iter()
+            .any(|value| contains_step_reference(value, step_id, target_path)),
+        serde_yaml::Value::Mapping(values) => values.iter().any(|(key, value)| {
+            let key = key.as_str().unwrap_or("");
+            let reference_key = matches!(
+                key,
+                "ref" | "step_ref" | "step_refs" | "step_id" | "stepId" | "step_ids" | "stepIds"
+                    | "parent_step_id" | "parentStepId" | "sub_steps" | "subSteps"
+            ) || key.ends_with("_step_id") || key.ends_with("_step_ids")
+                || key.ends_with("_ref") || key.ends_with("_refs");
+            (reference_key && (value.as_str() == Some(step_id)
+                || value.as_sequence().is_some_and(|items| items.iter().any(|item| item.as_str() == Some(step_id)))))
+                || (key == "step_path" && value.as_str() == Some(target_path))
+                || contains_step_reference(value, step_id, target_path)
+        }),
+        _ => false,
+    }
+}
+
+fn step_reference_error(step_id: &str) -> CliError {
+    CliError {
+        code: "STEP_REFERENCED",
+        message: format!("step {step_id} is referenced and cannot be removed"),
+        exit: 2,
+        path: Some(format!("step:{step_id}")),
+        current_version: None,
+        current_version_id: None,
+        issues: vec![json!({"code":"STEP_REFERENCED","step_id":step_id})],
+    }
+}
+
 fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<String, CliError> {
     let kind = command.get("type").and_then(Value::as_str)
         .ok_or_else(|| CliError::input("command.type is required"))?;
@@ -2135,10 +2236,71 @@ fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<String, CliErro
         next = apply_replacements(next, replacements);
         return Ok(next);
     }
+    if kind == "reorder_steps" {
+        let blocks = asterdoc_blocks(source)?;
+        let workflow = blocks.iter().find(|block|
+            yaml_kind(&block.value) == "workflow" && yaml_id(&block.value) == module_id
+        ).ok_or_else(|| CliError::missing(format!("workflow {module_id} does not exist")))?;
+        let declared: Vec<String> = workflow.value.get("steps").and_then(|value| value.as_sequence())
+            .into_iter().flatten().filter_map(|value| value.as_str().map(str::to_owned)).collect();
+        let requested: Vec<String> = command.get("order").and_then(Value::as_array)
+            .into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
+        let declared_set: HashSet<_> = declared.iter().collect();
+        let requested_set: HashSet<_> = requested.iter().collect();
+        if requested.len() != declared.len() || requested_set.len() != requested.len()
+            || requested_set != declared_set {
+            return Err(CliError::input("order must be a complete permutation of workflow.steps"));
+        }
+        let mut value = workflow.value.clone();
+        value.as_mapping_mut().ok_or_else(|| CliError::input("workflow module must be a mapping"))?
+            .insert(serde_yaml::Value::String("business_order".to_owned()),
+                serde_yaml::to_value(requested).map_err(|e| CliError::internal(e.to_string()))?);
+        let raw = serde_yaml::to_string(&value).map_err(|e| CliError::internal(e.to_string()))?;
+        return Ok(apply_replacements(source.to_owned(), vec![(workflow.body_start, workflow.body_end, raw)]));
+    }
+    if kind == "nest_step" || kind == "promote_step" {
+        let blocks = asterdoc_blocks(source)?;
+        let child = blocks.iter().find(|block| yaml_kind(&block.value) == "step" && yaml_id(&block.value) == module_id)
+            .ok_or_else(|| CliError::missing(format!("step {module_id} does not exist")))?;
+        let old_path = step_path(&child.value);
+        let leaf = old_path.rsplit('/').next().filter(|leaf| !leaf.is_empty())
+            .ok_or_else(|| CliError::input("step path must have a final segment"))?;
+        let new_path = if kind == "nest_step" {
+            let parent_id = command.get("parentId").and_then(Value::as_str).unwrap_or("");
+            if parent_id.is_empty() || parent_id == module_id {
+                return Err(CliError::input("nest_step needs a different parentId"));
+            }
+            let parent = blocks.iter().find(|block| yaml_kind(&block.value) == "step" && yaml_id(&block.value) == parent_id)
+                .ok_or_else(|| CliError::missing(format!("parent step {parent_id} does not exist")))?;
+            let parent_path = step_path(&parent.value);
+            if parent_path == old_path || parent_path.starts_with(&format!("{old_path}/")) {
+                return Err(CliError::input("nest_step would create a path cycle"));
+            }
+            format!("{parent_path}/{leaf}")
+        } else {
+            let parent_path = old_path.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+            let root = parent_path.rsplit_once('/').map(|(parent, _)| parent).unwrap_or(parent_path);
+            format!("{root}/{leaf}")
+        };
+        return rewrite_step_subtree(source, module_id, &new_path);
+    }
     if kind == "remove_step" {
         let blocks = asterdoc_blocks(source)?;
         let index = blocks.iter().position(|block| yaml_id(&block.value) == module_id)
             .ok_or_else(|| CliError::missing(format!("step {module_id} does not exist")))?;
+        let target = &blocks[index].value;
+        let target_path = step_path(target);
+        if target.get("protect_references").and_then(|value| value.as_bool()) == Some(true)
+            || blocks.iter().enumerate().any(|(other_index, candidate)| {
+                if other_index == index { return false; }
+                let path = step_path(&candidate.value);
+                (yaml_kind(&candidate.value) == "step"
+                    && path.starts_with(&format!("{target_path}/")))
+                    || contains_step_reference(&candidate.value, module_id, &target_path)
+            })
+        {
+            return Err(step_reference_error(module_id));
+        }
         let block = &blocks[index];
         let mut replacements: Vec<(usize, usize, String)> = vec![(
             block.fence_start,
@@ -11362,7 +11524,9 @@ fn input_schema(tool: &str) -> Option<Value> {
                 "command":{"oneOf":[
                     {"type":"object","additionalProperties":false,"required":["type","module"],"properties":{"type":{"const":"add_module"},"module":{"type":"object","required":["kind","id","schema"],"properties":{"kind":{"type":"string"},"id":{"type":"string","minLength":1},"schema":{"type":"integer","minimum":1}}}}},
                     {"type":"object","additionalProperties":false,"required":["type","module"],"properties":{"type":{"const":"add_step"},"workflowId":{"type":"string"},"module":{"type":"object","required":["kind","id","schema"],"properties":{"kind":{"const":"step"},"id":{"type":"string","minLength":1},"schema":{"type":"integer","minimum":1}}}}},
-                    {"type":"object","additionalProperties":false,"required":["type","moduleId"],"properties":{"type":{"enum":["remove_module","remove_step"]},"moduleId":{"type":"string","minLength":1}}},
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId"],"properties":{"type":{"enum":["remove_module","remove_step","promote_step"]},"moduleId":{"type":"string","minLength":1}}},
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId","parentId"],"properties":{"type":{"const":"nest_step"},"moduleId":{"type":"string","minLength":1},"parentId":{"type":"string","minLength":1}}},
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId","order"],"properties":{"type":{"const":"reorder_steps"},"moduleId":{"type":"string","minLength":1},"order":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
                     {"type":"object","additionalProperties":false,"required":["type","moduleId","properties"],"properties":{"type":{"const":"update_module"},"moduleId":{"type":"string","minLength":1},"properties":{"type":"object"}}},
                     {"type":"object","additionalProperties":false,"required":["type","moduleId","group","wells"],"properties":{"type":{"const":"assign_wells"},"moduleId":{"type":"string","minLength":1},"group":{"type":"string","minLength":1},"wells":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
                     {"type":"object","additionalProperties":false,"required":["type","moduleId","wells"],"properties":{"type":{"const":"clear_wells"},"moduleId":{"type":"string","minLength":1},"wells":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
@@ -12381,7 +12545,7 @@ mod tests {
                 kind["enum"].as_array().into_iter().flatten().filter_map(Value::as_str)
             )
         }).collect();
-        for action in ["add_module", "add_step", "update_module", "assign_wells", "clear_wells", "connect_steps", "disconnect_steps", "remove_module", "remove_step"] {
+        for action in ["add_module", "add_step", "update_module", "assign_wells", "clear_wells", "connect_steps", "disconnect_steps", "remove_module", "remove_step", "reorder_steps", "nest_step", "promote_step"] {
             assert!(declared_types.contains(&action), "command schema omits {action}");
         }
         assert_eq!(result_schema("sdk.modules")["required"][0], "modules");
@@ -12391,6 +12555,111 @@ mod tests {
         for field in ["samples", "replicates"] {
             assert!(plate["inputs"].as_array().unwrap().iter().any(|port| port["name"] == field));
         }
+    }
+
+    #[test]
+    fn asterdoc_reorders_steps_only_with_a_complete_unique_permutation() {
+        let source = "```asterlab\nkind: step\nid: a\nschema: 2\npath: root/a\n```\n\
+```asterlab\nkind: step\nid: b\nschema: 2\npath: root/b\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [a, b]\nedges: [{from: a, to: b}]\nbusiness_order: [a, b]\n```\n";
+        let reordered = apply_asterdoc_patch(
+            source,
+            &json!({"type":"reorder_steps","moduleId":"wf","order":["b","a"]}),
+        ).unwrap();
+        let workflow = asterdoc_blocks(&reordered).unwrap().into_iter()
+            .find(|block| yaml_id(&block.value) == "wf").unwrap().value;
+        assert_eq!(workflow["business_order"], serde_yaml::from_str::<serde_yaml::Value>("[b, a]").unwrap());
+        assert_eq!(workflow["edges"], serde_yaml::from_str::<serde_yaml::Value>("[{from: a, to: b}]").unwrap());
+        for order in [json!(["a"]), json!(["a","a"]), json!(["a","missing"])] {
+            let error = apply_asterdoc_patch(
+                source,
+                &json!({"type":"reorder_steps","moduleId":"wf","order":order}),
+            ).unwrap_err();
+            assert_eq!(error.code, "INVALID_INPUT");
+        }
+    }
+
+    #[test]
+    fn asterdoc_nests_and_promotes_steps_by_updating_paths() {
+        let source = "```asterlab\nkind: step\nid: parent\nschema: 2\npath: root/parent\n```\n\
+```asterlab\nkind: step\nid: child\nschema: 2\npath: root/child\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [parent, child]\nedges: []\nbusiness_order: [parent, child]\n```\n";
+        let nested = apply_asterdoc_patch(
+            source,
+            &json!({"type":"nest_step","moduleId":"child","parentId":"parent"}),
+        ).unwrap();
+        assert!(nested.contains("path: root/parent/child"));
+        let promoted = apply_asterdoc_patch(
+            &nested,
+            &json!({"type":"promote_step","moduleId":"child"}),
+        ).unwrap();
+        assert!(promoted.contains("path: root/child"));
+        let duplicate = apply_asterdoc_patch(
+            &source.replace("path: root/child", "path: root/parent"),
+            &json!({"type":"nest_step","moduleId":"child","parentId":"parent"}),
+        );
+        assert_eq!(duplicate.unwrap_err().code, "INVALID_INPUT");
+        let cycle = apply_asterdoc_patch(
+            &nested,
+            &json!({"type":"nest_step","moduleId":"parent","parentId":"child"}),
+        );
+        assert_eq!(cycle.unwrap_err().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn remove_step_cleans_workflow_order_and_edges_when_unreferenced() {
+        let source = "```asterlab\nkind: step\nid: a\nschema: 2\ntitle: A\npath: root/a\n```\n\
+```asterlab\nkind: step\nid: b\nschema: 2\ntitle: B\npath: root/b\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [a, b]\nedges: [{from: a, to: b}]\nbusiness_order: [a, b]\n```\n";
+        let removed = apply_asterdoc_patch(source, &json!({"type":"remove_step","moduleId":"a"})).unwrap();
+        let blocks = asterdoc_blocks(&removed).unwrap();
+        assert!(!blocks.iter().any(|block| yaml_id(&block.value) == "a"));
+        let workflow = blocks.iter().find(|block| yaml_id(&block.value) == "wf").unwrap();
+        assert_eq!(workflow.value["steps"], serde_yaml::from_str::<serde_yaml::Value>("[b]").unwrap());
+        assert_eq!(workflow.value["business_order"], serde_yaml::from_str::<serde_yaml::Value>("[b]").unwrap());
+        assert_eq!(workflow.value["edges"], serde_yaml::Value::Sequence(Vec::new()));
+    }
+
+    #[test]
+    fn remove_step_rejects_run_and_step_references_without_revision_changes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+             INSERT INTO records VALUES('project-1','project',NULL,NULL,1,'{}','now','now');
+             INSERT INTO records VALUES('design-1','design','project-1',NULL,1,'{}','now','now');",
+        ).unwrap();
+        let source = "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n\
+```asterlab\nkind: step\nid: target\nschema: 2\ntitle: Target\nassay: assay-1\npath: root/target\n```\n\
+```asterlab\nkind: step\nid: consumer\nschema: 2\ntitle: Consumer\nassay: assay-1\npath: root/consumer\nuses: [{ref: target, role: other}]\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [target, consumer]\nedges: [{from: target, to: consumer}]\nbusiness_order: [target, consumer]\n```\n";
+        save_asterdoc_version(&mut db, &json!({
+            "design_id":"design-1","source":source,"expected_revision":0
+        })).unwrap();
+        let error = apply_asterdoc_command(&mut db, &json!({
+            "design_id":"design-1","expected_revision":1,
+            "command":{"type":"remove_step","moduleId":"target"}
+        })).unwrap_err();
+        assert_eq!(error.code, "STEP_REFERENCED");
+        assert_eq!(error.issues[0]["code"], "STEP_REFERENCED");
+        let latest = load_asterdoc(&db, "design-1").unwrap();
+        assert_eq!(latest["revision"], 1);
+        assert_eq!(latest["source"], source);
+        let revisions: i64 = db.query_row(
+            "SELECT COUNT(*) FROM records WHERE kind='asterdoc_version' AND parent_id='design-1'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(revisions, 1);
+
+        db.execute(
+            "INSERT INTO records VALUES('run-1','run','project-1','design-1',1,?1,'now','now')",
+            [json!({"asterdoc":{"revision":1}}).to_string()],
+        ).unwrap();
+        let run_error = apply_asterdoc_command(&mut db, &json!({
+            "design_id":"design-1","expected_revision":1,
+            "command":{"type":"remove_step","moduleId":"consumer"}
+        })).unwrap_err();
+        assert_eq!(run_error.code, "STEP_REFERENCED");
+        assert_eq!(load_asterdoc(&db, "design-1").unwrap()["revision"], 1);
     }
 
     #[test]
