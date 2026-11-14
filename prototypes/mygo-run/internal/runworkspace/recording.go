@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/theme"
 
@@ -49,6 +50,9 @@ type AssetLink struct {
 // table, and any task with linked files can offer a gallery.
 func SelectKind(task *RunTaskViewModel, grid *resultgrid.Grid, assets []LinkedAsset) ViewKind {
 	if grid != nil && grid.Rows() > 0 && grid.Columns() > 0 {
+		if assays.DefaultViewForSchema(grid.Schema) == "table" {
+			return ViewTable
+		}
 		return ViewPlate
 	}
 	if task == nil {
@@ -162,7 +166,11 @@ func (r *RecordingView) Render(c *ui.Context) {
 func (r *RecordingView) availableViews() []ViewKind {
 	out := []ViewKind{}
 	if r.Grid != nil && r.Grid.Rows() > 0 && r.Grid.Columns() > 0 {
-		out = append(out, ViewPlate, ViewTable)
+		if assays.DefaultViewForSchema(r.Grid.Schema) == "table" {
+			out = append(out, ViewTable, ViewPlate)
+		} else {
+			out = append(out, ViewPlate, ViewTable)
+		}
 	} else if len(r.Task.Actual.Measurements) > 0 {
 		out = append(out, ViewTable)
 	}
@@ -225,53 +233,70 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 		return
 	}
 	g := r.Grid
-	// UX-P1, UX-P3, UX-P4, UX-P5, UX-LAYOUT: keep the themed record table usable at both breakpoints.
-	ui.ScrollBoth(c).Fill().Children(func() {
-		ui.Grid(c).Columns(7).Gap(8).Children(func() {
-			ui.Text(c, "孔位").FontSize(11).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "样本").FontSize(11).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "分组").FontSize(11).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "重复").FontSize(11).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "字段").FontSize(11).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "数值").FontSize(11).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "状态").FontSize(11).Bold().TextColor(t.TextMuted)
+	// UX-P1, UX-P3, UX-P4, UX-P5, UX-LAYOUT: keep the themed record table aligned and readable at both breakpoints.
+	ui.Scroll(c).Fill().Children(func() {
+		ui.Column(c).FillWidth().Gap(t.Space(.75)).Children(func() {
+			posHeader := "孔位"
+			if g.Schema.Layout != "" && g.Schema.Layout != "plate96" {
+				posHeader = "位置"
+			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Padding(t.Space(.5), t.Space(1)).Children(func() {
+				ui.Text(c, posHeader+" / 样本").Grow(1).MinWidth(0).FontSize(11).Bold().TextColor(t.TextMuted)
+				ui.Text(c, "字段").Width(68).FontSize(11).Bold().TextColor(t.TextMuted)
+				ui.Text(c, "数值").Width(88).FontSize(11).Bold().TextColor(t.TextMuted)
+				ui.Text(c, "状态").Width(44).FontSize(11).Bold().TextColor(t.TextMuted)
+			})
 			for _, cell := range g.Cells {
+				cell := cell
 				rr, cc := cell.Row, cell.Column
 				well := ""
 				if rr < len(g.Schema.RowLabels) && cc < len(g.Schema.ColumnLabels) {
-					well = g.Schema.RowLabels[rr] + g.Schema.ColumnLabels[cc]
+					if g.Schema.Layout == "" || g.Schema.Layout == "plate96" {
+						well = g.Schema.RowLabels[rr] + g.Schema.ColumnLabels[cc]
+					} else {
+						well = g.Schema.RowLabels[rr] + " · " + g.Schema.ColumnLabels[cc]
+					}
 				}
-				ui.Text(c, well).FontSize(12).TextColor(t.Text)
-				ui.Text(c, cell.SampleID).FontSize(12).TextColor(t.Text)
-				ui.Text(c, cell.Group).FontSize(12).TextColor(t.TextMuted)
-				ui.Text(c, fmt.Sprintf("%d", cell.Replicate)).FontSize(12).TextColor(t.TextMuted)
-				ui.Text(c, cell.Field).FontSize(12).TextColor(t.TextMuted)
 				input, ok := g.InputAt(rr, cc)
 				if !ok {
 					continue
 				}
-				e := ui.TextInput(c, input).Width(90).Padding(4).Placeholder("—").Label(well + " 读数")
-				if e.Changed() {
-					if *input == "" {
-						cell.Value, cell.Status = nil, "missing"
-						if err := g.SetCell(cell); err != nil {
-							g.Error = err.Error()
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).
+					Padding(t.Space(.75), t.Space(1)).Radius(6).
+					Background(t.Surface).Border(1, t.Border).Children(func() {
+					ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+						ui.Text(c, well).FontSize(12).Bold().TextColor(t.Text).SingleLine().Ellipsis("…")
+						meta := cell.SampleID
+						if cell.Group != "" && cell.Group != cell.SampleID {
+							meta += " · " + cell.Group
 						}
-					} else if v, err := strconv.ParseFloat(*input, 64); err != nil {
-						g.Error = "请输入数字"
-						g.State = resultgrid.StateError
-					} else {
-						cell.Value, cell.Status = &v, "raw"
-						if err := g.SetCell(cell); err != nil {
-							g.Error = err.Error()
+						meta += fmt.Sprintf(" · 重复 %d", cell.Replicate)
+						ui.Text(c, meta).FontSize(10).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+					})
+					ui.Text(c, cell.Field).Width(68).FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+					e := ui.TextInput(c, input).Width(88).Padding(4).Placeholder("—").Label(well + " 读数")
+					if e.Changed() {
+						if *input == "" {
+							cell.Value, cell.Status = nil, "missing"
+							if err := g.SetCell(cell); err != nil {
+								g.Error = err.Error()
+							}
+						} else if v, err := strconv.ParseFloat(*input, 64); err != nil {
+							g.Error = "请输入数字"
+							g.State = resultgrid.StateError
+						} else {
+							cell.Value, cell.Status = &v, "raw"
+							if err := g.SetCell(cell); err != nil {
+								g.Error = err.Error()
+							}
 						}
 					}
-				}
-				status := cell.Status
-				if status == "" {
-					status = "missing"
-				}
-				ui.Text(c, status).FontSize(11).TextColor(t.TextMuted)
+					status := cell.Status
+					if status == "" {
+						status = "missing"
+					}
+					ui.Text(c, status).Width(44).FontSize(11).TextColor(t.TextMuted)
+				})
 			}
 		})
 	})
