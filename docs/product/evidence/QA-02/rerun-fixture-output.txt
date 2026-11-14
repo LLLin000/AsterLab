@@ -1,0 +1,16 @@
+assess: warning []
+run: 08ab91b7-4bd7-436f-bbff-1dc05f643f3f tasks: 13
+  - root/rna/step-01
+  - root/rna/step-02
+  - root/rna/step-03
+  - root/rna/step-04
+  - root/rna/step-05
+  - root/rna/step-06
+  - root/rna/step-07
+  - root/rna/step-08
+  - root/rna/step-09
+  - root/rna/step-10
+  - root/qc/qc
+  - root/rt/rt
+  - root/qpcr/qpcr
+ids: C:\Users\Lin\AppData\Local\Temp\qa02b-rerun-verified\rna-ids.json

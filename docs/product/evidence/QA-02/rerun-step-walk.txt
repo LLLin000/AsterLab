@@ -1,0 +1,308 @@
+= @e1069 [tree]
+- @e1169 [treeItem] "01 RNA 提取   2/10 · 未开始" key="01 RNA 提取   2/10 · 未开始"
++ @e1169 [treeItem] "01 RNA 提取   2/10 · 未开始" key="01 RNA 提取   2/10 · 未开始" expanded
++ @e1191 [treeItem] "01 收集细胞 · 已完成" key="01 收集细胞 · 已完成"
++ @e1192 [treeItem] "02 裂解与匀浆 · 已完成" key="02 裂解与匀浆 · 已完成" checked
++ @e1193 [treeItem] "03 加乙醇 · 未开始" key="03 加乙醇 · 未开始"
++ @e1194 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始"
++ @e1195 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始"
++ @e1196 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始"
++ @e1197 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始"
++ @e1198 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始"
++ @e1199 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始"
++ @e1200 [treeItem] "10 RNA 质检与保存 · 未开始" key="10 RNA 质检与保存 · 未开始"
+= @e1081 [treeItem] "02 RNA 质控   0/1 · 未开始" key="02 RNA 质控   0/1 · 未开始" expanded
+@e1022 [button] "项目工作区" key="项目工作区"
+@e1023 [button] "实验设计" key="实验设计"
+@e1024 [button] "实验方案" key="实验方案"
+@e1025 [button] "实验运行" key="实验运行" checked
+@e1026 [button] "Notebook" key=Notebook
+@e1027 [button] "资料与工具" key="资料与工具"
+@e1029 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e1061 [button] "查看冻结文档"
+@e1062 [button] "导出 PDF"
+@e1169 [treeItem] "01 RNA 提取   2/10 · 未开始" key="01 RNA 提取   2/10 · 未开始" expanded
+@e1191 [treeItem] "01 收集细胞 · 已完成" key="01 收集细胞 · 已完成"
+@e1192 [treeItem] "02 裂解与匀浆 · 已完成" key="02 裂解与匀浆 · 已完成" checked
+@e1193 [treeItem] "03 加乙醇 · 未开始" key="03 加乙醇 · 未开始"
+@e1194 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始"
+@e1195 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始"
+@e1196 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始"
+@e1197 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始"
+@e1198 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始"
+@e1199 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始"
+@e1200 [treeItem] "10 RNA 质检与保存 · 未开始" key="10 RNA 质检与保存 · 未开始"
+@e1081 [treeItem] "02 RNA 质控   0/1 · 未开始" key="02 RNA 质控   0/1 · 未开始" expanded
+@e1082 [treeItem] "RNA 质检 · 未开始" key="RNA 质检 · 未开始"
+@e1083 [treeItem] "03 逆转录   0/1 · 未开始" key="03 逆转录   0/1 · 未开始" expanded
+@e1084 [treeItem] "逆转录 · 未开始" key="逆转录 · 未开始"
+@e1085 [treeItem] "04 qPCR 扩增及检测   0/1 · 未开始" key="04 qPCR 扩增及检测   0/1 · 未开始" expanded
+@e1086 [treeItem] "qPCR 扩增 · 未开始" key="qPCR 扩增 · 未开始"
+@e1089 [tab] "任务" checked
+@e1090 [tab] "历史"
+@e1091 [tab] "时间线"
+@e1122 [button] "图片与文件"
+@e1051 [button] "Toggle sidebar"
+@e1052 [button] "新建设计"
+@e1056 [button] "Minimize window"
+@e1057 [button] "Maximize window"
+@e1058 [button] "Close window"
+@e1059 [splitter] "Resize sidebar" key=left-resize
+= @e1191 [treeItem] "01 收集细胞 · 已完成" key="01 收集细胞 · 已完成"
+- @e1192 [treeItem] "02 裂解与匀浆 · 已完成" key="02 裂解与匀浆 · 已完成" checked
++ @e1192 [treeItem] "02 裂解与匀浆 · 已完成" key="02 裂解与匀浆 · 已完成"
+- @e1193 [treeItem] "03 加乙醇 · 未开始" key="03 加乙醇 · 未开始"
++ @e1193 [treeItem] "03 加乙醇 · 未开始" key="03 加乙醇 · 未开始" checked
+= @e1194 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始"
+= @e1091 [tab] "时间线"
+- @e1092 [text] "02 裂解与匀浆"
++ @e1092 [text] "03 加乙醇"
+- @e1093 [text] "已完成"
++ @e1093 [text] "未开始"
+= @e1094 [text] "当前步骤"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "加入裂解缓冲液，匀浆后离心。"
++ @e1096 [text] "加入等体积 70% 乙醇，混匀。"
++ @e1201 [button] "标记完成"
+- @e1170 [text] "要记录什么"
+- @e1171 [text] "已记录读数 0"
+- @e1172 [text] "执行确认 0/0"
+- @e1098 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
++ @e1098 [text] "要记录什么"
++ @e1202 [text] "已记录读数 0"
++ @e1203 [text] "执行确认 0/0"
++ @e1204 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
++ @e1205 [text] "下一步"
++ @e1206 [text] "录入读数并保存"
+- @e1173 [text] "下一步"
+- @e1174 [text] "录入读数并保存"
+- @e1175 [text] "步骤资源"
+- @e1176 [text] "reference"
+- @e1177 [text] "ref-rna-block"
+- @e1178 [text] "other"
+- @e1179 [text] "样本"
+- @e1180 [text] "rt-s01"
+- @e1181 [text] "sample"
+- @e1182 [text] "样本"
+- @e1183 [text] "rt-s02"
+- @e1184 [text] "sample"
+- @e1185 [text] "样本"
+- @e1186 [text] "rt-s03"
+- @e1187 [text] "sample"
+- @e1188 [text] "样本"
+- @e1189 [text] "rt-s04"
+- @e1190 [text] "sample"
+- @e1104 [text] "冻结信息（只读 · 已冻结） · root/rna/step-02 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1104 [text] "步骤资源"
++ @e1207 [text] "reference"
++ @e1208 [text] "ref-rna-block"
++ @e1209 [text] "other"
++ @e1210 [text] "样本"
++ @e1211 [text] "rt-s01"
++ @e1212 [text] "sample"
++ @e1213 [text] "样本"
++ @e1214 [text] "rt-s02"
++ @e1215 [text] "sample"
++ @e1216 [text] "样本"
++ @e1217 [text] "rt-s03"
++ @e1218 [text] "sample"
++ @e1219 [text] "样本"
++ @e1220 [text] "rt-s04"
++ @e1221 [text] "sample"
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-03 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
+= @e1121 [text] "实验记录"
+= @e1192 [treeItem] "02 裂解与匀浆 · 已完成" key="02 裂解与匀浆 · 已完成"
+- @e1193 [treeItem] "03 加乙醇 · 未开始" key="03 加乙醇 · 未开始" checked
++ @e1193 [treeItem] "03 加乙醇 · 未开始" key="03 加乙醇 · 未开始"
+- @e1194 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始"
++ @e1194 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始" checked
+= @e1195 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始"
+= @e1091 [tab] "时间线"
+- @e1092 [text] "03 加乙醇"
++ @e1092 [text] "04 上柱结合"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "加入等体积 70% 乙醇，混匀。"
++ @e1096 [text] "将混合液过柱，离心弃流出液。"
+= @e1201 [button] "标记完成"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-03 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-04 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
+= @e1121 [text] "实验记录"
+= @e1193 [treeItem] "03 加乙醇 · 未开始" key="03 加乙醇 · 未开始"
+- @e1194 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始" checked
++ @e1194 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始"
+- @e1195 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始"
++ @e1195 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始" checked
+= @e1196 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始"
+= @e1091 [tab] "时间线"
+- @e1092 [text] "04 上柱结合"
++ @e1092 [text] "05 Wash I"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "将混合液过柱，离心弃流出液。"
++ @e1096 [text] "加入 Wash Buffer I，离心弃流出液。"
+= @e1201 [button] "标记完成"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-04 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-05 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
+= @e1121 [text] "实验记录"
+= @e1194 [treeItem] "04 上柱结合 · 未开始" key="04 上柱结合 · 未开始"
+- @e1195 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始" checked
++ @e1195 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始"
+- @e1196 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始"
++ @e1196 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始" checked
+= @e1197 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始"
+= @e1091 [tab] "时间线"
+- @e1092 [text] "05 Wash I"
++ @e1092 [text] "06 Wash II 第一次"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "加入 Wash Buffer I，离心弃流出液。"
++ @e1096 [text] "加入 Wash Buffer II，离心弃流出液。"
+= @e1201 [button] "标记完成"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-05 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-06 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
+= @e1121 [text] "实验记录"
+= @e1195 [treeItem] "05 Wash I · 未开始" key="05 Wash I · 未开始"
+- @e1196 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始" checked
++ @e1196 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始"
+- @e1197 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始"
++ @e1197 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始" checked
+= @e1198 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始"
+= @e1091 [tab] "时间线"
+- @e1092 [text] "06 Wash II 第一次"
++ @e1092 [text] "07 Wash II 第二次"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "加入 Wash Buffer II，离心弃流出液。"
++ @e1096 [text] "再次加入 Wash Buffer II，离心弃流出液。"
+= @e1201 [button] "标记完成"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-06 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-07 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
+= @e1121 [text] "实验记录"
+= @e1196 [treeItem] "06 Wash II 第一次 · 未开始" key="06 Wash II 第一次 · 未开始"
+- @e1197 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始" checked
++ @e1197 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始"
+- @e1198 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始"
++ @e1198 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始" checked
+= @e1199 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始"
+= @e1091 [tab] "时间线"
+- @e1092 [text] "07 Wash II 第二次"
++ @e1092 [text] "08 干柱离心"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "再次加入 Wash Buffer II，离心弃流出液。"
++ @e1096 [text] "空柱离心 2 min，去除残留乙醇。"
+= @e1201 [button] "标记完成"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-07 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-08 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
+= @e1121 [text] "实验记录"
+= @e1197 [treeItem] "07 Wash II 第二次 · 未开始" key="07 Wash II 第二次 · 未开始"
+- @e1198 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始" checked
++ @e1198 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始"
+- @e1199 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始"
++ @e1199 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始" checked
+= @e1200 [treeItem] "10 RNA 质检与保存 · 未开始" key="10 RNA 质检与保存 · 未开始"
+= @e1091 [tab] "时间线"
+- @e1092 [text] "08 干柱离心"
++ @e1092 [text] "09 RNA 洗脱"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "空柱离心 2 min，去除残留乙醇。"
++ @e1096 [text] "加入无 RNase 水，离心收集 RNA。"
+= @e1201 [button] "标记完成"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-08 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-09 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
+= @e1121 [text] "实验记录"
+= @e1198 [treeItem] "08 干柱离心 · 未开始" key="08 干柱离心 · 未开始"
+- @e1199 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始" checked
++ @e1199 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始"
+- @e1200 [treeItem] "10 RNA 质检与保存 · 未开始" key="10 RNA 质检与保存 · 未开始"
++ @e1200 [treeItem] "10 RNA 质检与保存 · 未开始" key="10 RNA 质检与保存 · 未开始" checked
+= @e1081 [treeItem] "02 RNA 质控   0/1 · 未开始" key="02 RNA 质控   0/1 · 未开始" expanded
+= @e1091 [tab] "时间线"
+- @e1092 [text] "09 RNA 洗脱"
++ @e1092 [text] "10 RNA 质检与保存"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "加入无 RNase 水，离心收集 RNA。"
++ @e1096 [text] "测定浓度与 A260/A280，-80 °C 保存。"
+= @e1201 [button] "标记完成"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-09 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-10 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
+= @e1121 [text] "实验记录"
+= @e1199 [treeItem] "09 RNA 洗脱 · 未开始" key="09 RNA 洗脱 · 未开始"
+- @e1200 [treeItem] "10 RNA 质检与保存 · 未开始" key="10 RNA 质检与保存 · 未开始" checked
++ @e1200 [treeItem] "10 RNA 质检与保存 · 未开始" key="10 RNA 质检与保存 · 未开始"
+= @e1081 [treeItem] "02 RNA 质控   0/1 · 未开始" key="02 RNA 质控   0/1 · 未开始" expanded
+- @e1082 [treeItem] "RNA 质检 · 未开始" key="RNA 质检 · 未开始"
++ @e1082 [treeItem] "RNA 质检 · 未开始" key="RNA 质检 · 未开始" checked
+= @e1083 [treeItem] "03 逆转录   0/1 · 未开始" key="03 逆转录   0/1 · 未开始" expanded
+= @e1091 [tab] "时间线"
+- @e1092 [text] "10 RNA 质检与保存"
++ @e1092 [text] "RNA 质检"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "测定浓度与 A260/A280，-80 °C 保存。"
++ @e1096 [text] "记录 RNA 浓度与 A260/A280。"
+= @e1201 [button] "标记完成"
+= @e1207 [text] "reference"
+- @e1208 [text] "ref-rna-block"
++ @e1208 [text] "ref-qc-block"
+= @e1209 [text] "other"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rna/step-10 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2…" (3 more)
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/qc/qc · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-qc · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2b70"
+= @e1121 [text] "实验记录"
+= @e1081 [treeItem] "02 RNA 质控   0/1 · 未开始" key="02 RNA 质控   0/1 · 未开始" expanded
+- @e1082 [treeItem] "RNA 质检 · 未开始" key="RNA 质检 · 未开始" checked
++ @e1082 [treeItem] "RNA 质检 · 未开始" key="RNA 质检 · 未开始"
+= @e1083 [treeItem] "03 逆转录   0/1 · 未开始" key="03 逆转录   0/1 · 未开始" expanded
+- @e1084 [treeItem] "逆转录 · 未开始" key="逆转录 · 未开始"
++ @e1084 [treeItem] "逆转录 · 未开始" key="逆转录 · 未开始" checked
+= @e1085 [treeItem] "04 qPCR 扩增及检测   0/1 · 未开始" key="04 qPCR 扩增及检测   0/1 · 未开始" expanded
+= @e1091 [tab] "时间线"
+- @e1092 [text] "RNA 质检"
++ @e1092 [text] "逆转录"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "记录 RNA 浓度与 A260/A280。"
++ @e1096 [text] "RNA 逆转录为 cDNA。"
+= @e1201 [button] "标记完成"
+= @e1207 [text] "reference"
+- @e1208 [text] "ref-qc-block"
++ @e1208 [text] "ref-rt-block"
+= @e1209 [text] "other"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/qc/qc · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-qc · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2b70"
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/rt/rt · assay-rtqpcr · 未绑定 · 步骤 ID step-rt · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2b70"
+= @e1121 [text] "实验记录"
+= @e1083 [treeItem] "03 逆转录   0/1 · 未开始" key="03 逆转录   0/1 · 未开始" expanded
+- @e1084 [treeItem] "逆转录 · 未开始" key="逆转录 · 未开始" checked
++ @e1084 [treeItem] "逆转录 · 未开始" key="逆转录 · 未开始"
+= @e1085 [treeItem] "04 qPCR 扩增及检测   0/1 · 未开始" key="04 qPCR 扩增及检测   0/1 · 未开始" expanded
+- @e1086 [treeItem] "qPCR 扩增 · 未开始" key="qPCR 扩增 · 未开始"
++ @e1086 [treeItem] "qPCR 扩增 · 未开始" key="qPCR 扩增 · 未开始" checked
+= @e1087 [scroll]
+= @e1091 [tab] "时间线"
+- @e1092 [text] "逆转录"
++ @e1092 [text] "qPCR 扩增"
+= @e1093 [text] "未开始"
+= @e1095 [text] "操作说明 · 已冻结 · 只读"
+- @e1096 [text] "RNA 逆转录为 cDNA。"
++ @e1096 [text] "配置反应并运行 qPCR，记录 Ct。"
+= @e1201 [button] "标记完成"
+= @e1207 [text] "reference"
+- @e1208 [text] "ref-rt-block"
++ @e1208 [text] "ref-qpcr-block"
+= @e1209 [text] "other"
+= @e1221 [text] "sample"
+- @e1222 [text] "冻结信息（只读 · 已冻结） · root/rt/rt · assay-rtqpcr · 未绑定 · 步骤 ID step-rt · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2b70"
++ @e1222 [text] "冻结信息（只读 · 已冻结） · root/qpcr/qpcr · assay-rtqpcr · 未绑定 · 步骤 ID step-qpcr · 协议版本 745a4728-d851-4163-ac5c-f2fa149f2b70"
+= @e1121 [text] "实验记录"

@@ -1,0 +1,8 @@
+Frozen field | before == after
+protocol_version_id | 745a4728-d851-4163-ac5c-f2fa149f2b70 == 745a4728-d851-4163-ac5c-f2fa149f2b70
+protocol_version | 1 == 1
+ordered step paths (13) | True
+per-step parameters | True (13 empty step parameter lists)
+resolved/unresolved scope parameters | True
+task timepoints | True (13 null)
+run revision/status and task statuses intentionally changed | planned -> in_progress not_started -> completed ; run rev from GUI 0 -> 2
