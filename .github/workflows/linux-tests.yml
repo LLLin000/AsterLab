@@ -4,10 +4,11 @@ name: linux-tests
 # unit/integration suites from HANDOFF-VPS.md §3. Toolchain and build matrix:
 # docs/engineering/cross-platform-builds.md §3-5.
 
+# One self-hosted runner serialises jobs, and the PR gate already runs on the
+# exact tree that gets merged; re-running the full suite on main only queues
+# other PRs behind it. Keep this workflow PR-only.
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
