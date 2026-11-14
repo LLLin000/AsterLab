@@ -98,3 +98,28 @@ func TestBuildSchemaAcceptsAsterDocAssayIDs(t *testing.T) {
 		t.Fatalf("AsterDoc assay id was not accepted: %+v cells=%d", schema, len(cells))
 	}
 }
+
+func TestBuildSchemaThirdAssayViaLayoutConfigOnly(t *testing.T) {
+	doc := []byte(`{
+		"group_specs": [
+			{"id": "grp-ctrl", "name": "Control", "role": "control", "technical_repeats": 2},
+			{"id": "grp-treat", "name": "Treatment", "role": "treatment", "technical_repeats": 2}
+		],
+		"assays": [
+			{"id": "western-blot", "timepoints": ["24 h"], "group_ids": ["grp-ctrl", "grp-treat"]}
+		]
+	}`)
+	schema, cells, err := BuildSchema(doc, "western-blot", "24 h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.ID != "qpcr.sample_gene.cq.v1" || schema.Layout != "sample_target" || DefaultViewForSchema(schema) != "table" {
+		t.Fatalf("unexpected third-assay layout schema: %+v", schema)
+	}
+	if len(schema.RowLabels) != 2 || len(schema.ColumnLabels) != 4 || len(cells) != 8 {
+		t.Fatalf("rows=%v cols=%v cells=%d", schema.RowLabels, schema.ColumnLabels, len(cells))
+	}
+	if cells[0].Field != "intensity" || schema.Fields[0].Unit != "AU" {
+		t.Fatalf("unexpected field: %+v / %+v", cells[0], schema.Fields)
+	}
+}
