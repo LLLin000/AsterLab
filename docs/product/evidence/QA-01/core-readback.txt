@@ -1,0 +1,6 @@
+$ labworkbench run.workspace {id:75c73edb-b67b-4742-88f6-17f43cacefe8}
+events(measurement) = 1
+revision = None
+batch_id = batch-op-1794664645813243400-1
+schema_id = cck8.plate96.od450.v1
+result cells (row,col) = {"0,0": 0.62, "1,0": 0.71}

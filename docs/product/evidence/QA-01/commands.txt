@@ -1,0 +1,11 @@
+$ git rev-parse HEAD
+29e230ca00cf4b03e54e59beed5b3468f23a34ec
+
+$ git rev-parse origin/main
+29e230ca00cf4b03e54e59beed5b3468f23a34ec
+
+$ git diff --stat origin/main -- crates prototypes
+(empty: no source change; this card is evidence only)
+
+$ git status --short
+?? docs/product/evidence/QA-01/
