@@ -1,0 +1,58 @@
+# Local CI: Windows Gate and Linux lane
+
+Status: binding from 2026-11-14. GitHub-hosted runner minutes are exhausted, so
+pull-request verification runs on the two real hosts instead of Actions.
+
+## Who runs what
+
+| Lane | Host | Command | Never runs |
+|---|---|---|---|
+| Windows Gate | Windows workstation | `./scripts/ci/local-gate.ps1 -Pr <n>` | any Linux test, `cargo test` of the Rust targets |
+| Linux lane | VPS | `scripts/ci/local-gate.sh --label <name>` | Windows build, GUI, screenshots |
+
+The Windows Gate lane does not run Linux tests even though it could: the Linux
+lane owns them, and a second copy of the same suite on a different OS hides
+which lane a failure belongs to. `windows-build.yml` and `linux-tests.yml`
+therefore keep only `workflow_dispatch`; `scope-check.yml` still runs because
+its runner is self-hosted and costs no minutes.
+
+## Windows Gate gate
+
+```powershell
+./scripts/ci/local-gate.ps1 -Pr 69
+```
+
+Steps, mirroring the retired workflows minus every Linux-only step:
+
+1. `scripts/ci/test_scope_check.py` then `scripts/ci/scope_check.py` against the
+   PR diff and the card's `<!-- kandev-scope -->` block.
+2. REL-05 native generator hashes: selftest, `--check`, `--regen 2`.
+3. `scripts/mygo-build.ps1` -> `prototypes/mygo-run/dist/{mygo-run.exe,Runs.dll}`.
+4. `go test -tags=e2e -count=1 ./...` for `prototypes/mygo-run`.
+5. The build must not rewrite committed bindings.
+6. SHA256 of both artifacts into `target/local-gate/<label>/artifacts.txt`.
+
+Exit code 0 means PASS; the report lands in
+`target/local-gate/<label>/report.md` and is not committed (`/target` is
+ignored). Paste the `LOCAL_GATE: PASS` line with the artifact hashes into the
+Kandev card evidence section, not into git.
+
+## Linux lane gate
+
+```bash
+scripts/ci/local-gate.sh --label RUN-05
+```
+
+L0 `cargo build` and L1 `cargo test` for `labworkbench`, `crates/asterlab-core`
+and `crates/asterlab-app`; REL-05 hashes; native `Runs` module for
+`linux-amd64`; `go test ./...`. Report: `target/local-gate/<label>/report.md`.
+
+## Merge rule
+
+A card merges when its lane reports `LOCAL_GATE: PASS` on the exact head commit
+being merged, and `scope-check` (self-hosted) is green when the runner is
+online. Required status checks on `main` no longer list `linux-tests`: a job
+that cannot run must not be able to block a merge.
+
+Evidence stays on the card and in the PR body; the machine-readable report is a
+local artifact, so no lane can rewrite history to look green.
