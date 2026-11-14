@@ -1927,69 +1927,7 @@ func main() {
 			}
 		},
 		SaveBatch: func(schema resultgrid.Schema, cells []resultgrid.Cell) {
-			if a.ws == nil || a.runSvc == nil {
-				return
-			}
-			taskKey := a.ws.Selected
-			task := currentRunTask(a.snap.Tasks)
-			for _, candidate := range a.snap.Tasks {
-				if candidate.Key == taskKey {
-					task = candidate
-					break
-				}
-			}
-			batchCells := make([]runs.ResultCell, 0, len(cells))
-			for _, cell := range cells {
-				batchCells = append(batchCells, runs.ResultCell{
-					Row: cell.Row, Column: cell.Column, SampleID: cell.SampleID,
-					Group: cell.Group, Replicate: cell.Replicate, Field: cell.Field,
-					Value: cell.Value, Status: cell.Status,
-				})
-			}
-			batchResult, err := a.runSvc.SaveReadoutsBatch(context.Background(), runs.BatchReadoutInput{
-				RunID: a.snap.RunID, OperationID: a.nextOp(), TaskKey: task.Key,
-				AssayID: task.AssayID, Timepoint: task.Timepoint,
-				ProtocolStepPath: taskStepPath(task), ProtocolVersionID: task.ProtocolVersionID,
-				SchemaID: schema.ID, SchemaVersion: schema.Version, Cells: batchCells,
-				ExpectedRevision: a.snap.Revision,
-			})
-			if err != nil {
-				message := state.MapError(err).Error()
-				a.ws.State = runui.StateError
-				a.ws.Error, a.ws.Grid.Error = message, message
-				a.ws.Grid.State = resultgrid.StateError
-				a.err = message
-				return
-			}
-			if batchResult.Accepted != len(batchCells) {
-				message := fmt.Sprintf("批量保存未接受全部单元格：%d/%d", batchResult.Accepted, len(batchCells))
-				a.ws.State = runui.StateError
-				a.ws.Error, a.ws.Grid.Error = message, message
-				a.ws.Grid.State = resultgrid.StateError
-				a.err = message
-				return
-			}
-			snap, err := a.runSvc.LoadRun(context.Background(), a.snap.RunID)
-			if err != nil {
-				message := state.MapError(err).Error()
-				a.ws.State = runui.StateError
-				a.ws.Error, a.ws.Grid.Error = message, message
-				a.ws.Grid.State = resultgrid.StateError
-				a.err = message
-				return
-			}
-			if batchResult.Revision > a.snap.Revision {
-				a.snap.Revision = batchResult.Revision
-			}
-			savedGrid := a.ws.Grid
-			savedGrid.State = resultgrid.StateSaved
-			a.clearTaskRecordingFor(a.snap.RunID, task.Key)
-			a.applySnap(snap)
-			a.ws.State = runui.StateSaved
-			a.ws.Grid = savedGrid
-			if a.runWS != nil {
-				a.runWS.SetRecordingDirty(task.Key, false)
-			}
+			a.saveBatch(schema, cells)
 		},
 		SaveChecks: func(taskKey string, checks []runui.CheckAck) {
 			if a.ws == nil {
@@ -2162,7 +2100,7 @@ func main() {
 				kind = runworkspace.SelectKind(task, grid, linkedAssets)
 			}
 			rv := runworkspace.RecordingView{
-				Kind: kind, Grid: grid, Assets: linkedAssets, Task: task,
+				RunID: a.snap.RunID, Kind: kind, Grid: grid, Assets: linkedAssets, Task: task,
 				OnKindChange: func(kind runworkspace.ViewKind) {
 					a.runViewKinds[kindKey] = kind
 				},
@@ -2198,6 +2136,7 @@ func main() {
 	a.ws = runui.NewWorkspace(toRunView(a.snap), cb)
 	a.selectedTask = a.ws.Selected
 	a.runWSVM = a.buildRunWorkspaceVM()
+
 	a.runWS = runworkspace.NewState(a.runWSVM, rwcb)
 	// The Run surface renders the frozen design's modules through the same
 	// blockui the Designer uses: Run for open tasks, Review once completed.
@@ -2264,6 +2203,81 @@ func main() {
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
+	}
+}
+func (a *app) saveBatch(schema resultgrid.Schema, cells []resultgrid.Cell) {
+	if a.ws == nil || a.runSvc == nil {
+		return
+	}
+	taskKey := a.ws.Selected
+	task := currentRunTask(a.snap.Tasks)
+	for _, candidate := range a.snap.Tasks {
+		if candidate.Key == taskKey {
+			task = candidate
+			break
+		}
+	}
+	batchCells := make([]runs.ResultCell, 0, len(cells))
+	for _, cell := range cells {
+		batchCells = append(batchCells, runs.ResultCell{
+			Row: cell.Row, Column: cell.Column, SampleID: cell.SampleID,
+			Group: cell.Group, Replicate: cell.Replicate, Field: cell.Field,
+			Value: cell.Value, Status: cell.Status,
+		})
+	}
+	cellsDigest := a.ws.Grid.CellsDigest()
+	if a.ws.Grid.PendingOpID == "" || a.ws.Grid.PendingOpHash != cellsDigest {
+		a.ws.Grid.PendingOpID = a.nextOp()
+		a.ws.Grid.PendingOpHash = cellsDigest
+	}
+	opID := a.ws.Grid.PendingOpID
+	_ = runworkspace.SaveGridDraft(a.snap.RunID, task.Key, a.ws.Grid)
+	batchResult, err := a.runSvc.SaveReadoutsBatch(context.Background(), runs.BatchReadoutInput{
+		RunID: a.snap.RunID, OperationID: opID, TaskKey: task.Key,
+		AssayID: task.AssayID, Timepoint: task.Timepoint,
+		ProtocolStepPath: taskStepPath(task), ProtocolVersionID: task.ProtocolVersionID,
+		SchemaID: schema.ID, SchemaVersion: schema.Version, Cells: batchCells,
+		ExpectedRevision: a.snap.Revision,
+	})
+	if err != nil {
+		message := state.MapError(err).Error()
+		a.ws.State = runui.StateError
+		a.ws.Error, a.ws.Grid.Error = message, message
+		a.ws.Grid.State = resultgrid.StateError
+		a.err = message
+		return
+	}
+	if batchResult.Accepted != len(batchCells) {
+		message := fmt.Sprintf("批量保存未接受全部单元格：%d/%d", batchResult.Accepted, len(batchCells))
+		a.ws.State = runui.StateError
+		a.ws.Error, a.ws.Grid.Error = message, message
+		a.ws.Grid.State = resultgrid.StateError
+		a.err = message
+		return
+	}
+	snap, err := a.runSvc.LoadRun(context.Background(), a.snap.RunID)
+	if err != nil {
+		message := state.MapError(err).Error()
+		a.ws.State = runui.StateError
+		a.ws.Error, a.ws.Grid.Error = message, message
+		a.ws.Grid.State = resultgrid.StateError
+		a.err = message
+		return
+	}
+	if batchResult.Revision > a.snap.Revision {
+		a.snap.Revision = batchResult.Revision
+	}
+	savedGrid := a.ws.Grid
+	savedGrid.PendingOpID = ""
+	savedGrid.PendingOpHash = ""
+	savedGrid.State = resultgrid.StateSaved
+	runworkspace.ClearGridDraft(a.snap.RunID, task.Key)
+	a.clearTaskRecordingFor(a.snap.RunID, task.Key)
+	a.applySnap(snap)
+	a.ws.State = runui.StateSaved
+	a.ws.Grid = savedGrid
+	if a.runWS != nil {
+		a.runWS.SetRecordingDirty(task.Key, false)
 	}
 }
 
