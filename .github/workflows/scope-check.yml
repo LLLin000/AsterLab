@@ -23,7 +23,7 @@ concurrency:
 jobs:
   scope-check:
     name: scope-check
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, asterlab-vps]
     timeout-minutes: 15
     steps:
       - name: Checkout

@@ -19,7 +19,7 @@ concurrency:
 jobs:
   linux-tests:
     name: linux-tests
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, asterlab-vps]
     timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
