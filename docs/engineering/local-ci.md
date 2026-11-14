@@ -47,6 +47,21 @@ L0 `cargo build` and L1 `cargo test` for `labworkbench`, `crates/asterlab-core`
 and `crates/asterlab-app`; REL-05 hashes; native `Runs` module for
 `linux-amd64`; `go test ./...`. Report: `target/local-gate/<label>/report.md`.
 
+## Per-card checkouts
+
+`ovnfs new --name <card> --rev origin/main` copies the source folder's refs, and that
+folder is often on a feature branch with a stale `origin/main`. Every checkout must
+start with
+
+```bash
+git fetch origin main && git merge origin/main
+```
+
+before branching; otherwise the card base is older than the CI scripts, the evidence
+directories and the other cards it was written against, and `local-gate.ps1` will not
+even exist. Merging (never rebasing, never force-pushing) keeps the other lanes'
+commits intact.
+
 ## Merge rule
 
 A card merges when its lane reports `LOCAL_GATE: PASS` on the exact head commit
