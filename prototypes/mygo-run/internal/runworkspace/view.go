@@ -20,7 +20,7 @@ type Callbacks struct {
 	// ToggleTree persists expansion changes after a parent row is clicked.
 	ToggleTree func()
 	SaveChecks func(taskKey string, checks []CheckAckView)
-	Complete   func(taskKey string, checks []CheckAckView)
+	Complete   func(taskKey string, checks []CheckAckView) error
 	OpenBatch  func(batchID string)
 	// Recording renders the recording module for a task. The host supplies it so
 	// the same module serves Design, Run, Notebook and PDF.
@@ -68,6 +68,9 @@ type State struct {
 
 	// RecordingDirty tracks unsaved recording edits per task (UX-STATE, UX-P5).
 	RecordingDirty map[string]bool
+	Completing          bool
+	CompletionError     string
+	CompletionErrorTask string
 }
 
 // NewState constructs the runtime state from a view model.
@@ -716,6 +719,7 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 		instruction = "执行本步骤，并在下方实验记录中录入读数。"
 	}
 
+
 	ui.Column(c).FillWidth().Padding(16).Radius(float32(tokens.PanelRadius)).
 		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(2)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
@@ -727,6 +731,11 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 		// The procedure and planned parameters are frozen; UX-STATE/UX-P2.
 		ui.Text(c, "操作说明 · 已冻结 · 只读").FontSize(t.Rem(.72)).Bold().TextColor(t.TextMuted)
 		ui.Text(c, instruction).FontSize(t.Rem(.82)).TextColor(t.Text)
+		// UX-P1, UX-P5, UX-STATE, UX-DONE: the no-readout step has one retryable primary action.
+		if !s.shouldStack(c) {
+			completionAction(c, s, t, tokens, task)
+		}
+
 
 		if len(task.Parameters) > 0 {
 			ui.Divider(c)
@@ -804,6 +813,63 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 			FontSize(t.Rem(.68)).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 	})
 }
+
+// canMarkComplete keeps the no-readout completion path exclusive with checks
+// and measurement plans (UX-P1, UX-STATE, UX-DONE).
+func canMarkComplete(task *RunTaskViewModel) bool {
+	if task == nil || task.Status == TaskStatusCompleted || len(task.Checks) != 0 {
+		return false
+	}
+	for _, module := range task.Modules {
+		if module.Kind == "measurement_profile" {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *State) complete(task *RunTaskViewModel) {
+	if s == nil || task == nil || s.Completing || s.Callbacks.Complete == nil {
+		return
+	}
+	s.Completing = true
+	s.CompletionError = ""
+	err := s.Callbacks.Complete(task.TaskKey, s.acks(task))
+	s.Completing = false
+	if err != nil {
+		s.CompletionError = err.Error()
+		s.CompletionErrorTask = task.TaskKey
+	}
+}
+func completionAction(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	if !canMarkComplete(task) {
+		return
+	}
+	errorText := ""
+	if s.CompletionErrorTask == task.TaskKey {
+		errorText = s.CompletionError
+	}
+	ui.Divider(c)
+	if errorText != "" {
+		ui.Row(c).FillWidth().Padding(8, 10).Radius(6).
+			Background(tokens.DangerBg).Border(1, tokens.DangerText).Children(func() {
+			ui.Text(c, "完成失败："+errorText).FontSize(t.Rem(.74)).
+				TextColor(tokens.DangerText)
+		})
+	}
+	label := "标记完成"
+	if errorText != "" {
+		label = "重试完成"
+	} else if s.Completing {
+		label = "提交中…"
+	}
+	button := components.Button(c, label, components.ButtonPrimary)
+	button.Disabled(s.Completing || s.Callbacks.Complete == nil)
+	if button.Clicked() && !s.Completing && s.Callbacks.Complete != nil {
+		s.complete(task)
+	}
+}
+
 
 func statChip(c *ui.Context, label string, t *ui.Theme, tokens theme.Tokens) {
 	ui.Row(c).Padding(2, 7).Radius(5).Background(tokens.Elevated).
@@ -939,6 +1005,9 @@ func recordingLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 					TextColor(t.TextMuted)
 			}
 		})
+		if s.shouldStack(c) {
+			completionAction(c, s, t, tokens, task)
+		}
 		if s.Callbacks.Recording != nil {
 			s.Callbacks.Recording(c, task)
 			return

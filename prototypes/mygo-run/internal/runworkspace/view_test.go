@@ -1,6 +1,7 @@
 package runworkspace
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -179,6 +180,111 @@ func TestOpenBlockingCountsUnconfirmed(t *testing.T) {
 				t.Fatalf("blocking check %s not reported open", c.CheckID)
 			}
 		}
+	}
+}
+func TestEmptyCheckTaskOffersCompletion(t *testing.T) {
+	s := buildTestState()
+	task := s.VM.TaskByKey["t-read"]
+	task.Checks = nil
+	s.Selected = task.TaskKey
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+	if !tt.HasText("标记完成") {
+		t.Fatalf("empty-check task missing completion action: %v", tt.Texts())
+	}
+}
+
+func TestTaskWithChecksDoesNotOfferMarkComplete(t *testing.T) {
+	s := buildTestState()
+	task := s.VM.TaskByKey["t-read"]
+	s.Selected = task.TaskKey
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+	if tt.HasText("标记完成") {
+		t.Fatalf("task with checks showed completion action: %v", tt.Texts())
+	}
+}
+
+func TestMarkCompleteCallsCallbackOnce(t *testing.T) {
+	s := buildTestState()
+	task := s.VM.TaskByKey["t-read"]
+	task.Checks = nil
+	s.Selected = task.TaskKey
+	calls := 0
+	s.Callbacks.Complete = func(taskKey string, checks []CheckAckView) error {
+		calls++
+		if taskKey != "t-read" || len(checks) != 0 {
+			t.Fatalf("Complete(%q, %v)", taskKey, checks)
+		}
+		return nil
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+	if err := tt.Click("标记完成"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if calls != 1 {
+		t.Fatalf("Complete called %d times, want once", calls)
+	}
+}
+
+func TestFailedCompletionShowsCauseAndRetry(t *testing.T) {
+	s := buildTestState()
+	task := s.VM.TaskByKey["t-read"]
+	task.Checks = nil
+	s.Selected = task.TaskKey
+	calls := 0
+	s.Callbacks.Complete = func(string, []CheckAckView) error {
+		calls++
+		if calls == 1 {
+			return fmt.Errorf("Core rejected completion")
+		}
+		return nil
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+	if err := tt.Click("标记完成"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("Core rejected completion") || !tt.HasText("重试完成") {
+		t.Fatalf("failed completion missing cause/retry: %v", tt.Texts())
+	}
+	if err := tt.Click("重试完成"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if calls != 2 || tt.HasText("Core rejected completion") {
+		t.Fatalf("retry did not re-invoke completion: calls=%d texts=%v", calls, tt.Texts())
+	}
+}
+
+func TestTaskWithMeasurementPlanDoesNotOfferMarkComplete(t *testing.T) {
+	s := buildTestState()
+	task := s.VM.TaskByKey["t-read"]
+	task.Checks = nil
+	task.Modules = append(task.Modules, ModuleRef{Kind: "measurement_profile"})
+	s.Selected = task.TaskKey
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+	if tt.HasText("标记完成") {
+		t.Fatalf("task with measurement plan showed completion action: %v", tt.Texts())
 	}
 }
 
