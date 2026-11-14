@@ -139,7 +139,7 @@ type LineageView struct {
 	Note     string
 }
 
-// EventViewModel is the read-only audit entry for a task.
+// EventViewModel is the read-only audit entry projected from one Core event.
 type EventViewModel struct {
 	ID         string
 	BatchID    string
@@ -150,6 +150,11 @@ type EventViewModel struct {
 	Operator   string
 	TaskKey    string
 	StepPath   string
+	StepStatus string
+	Sequence   int
+	Attempt    int
+	Retry      bool
+	Badge      string
 
 	Checks       []CheckAckView
 	Materials    []MaterialUseView
@@ -408,7 +413,7 @@ func eventViewModel(e runs.RunEvent) EventViewModel {
 		ID: e.ID, Type: e.EventType, Content: e.Content,
 		BatchID:    e.BatchID,
 		OccurredAt: e.OccurredAt, RecordedAt: e.RecordedAt,
-		TaskKey: e.TaskKey, StepPath: e.ProtocolStepPath,
+		TaskKey: e.TaskKey, StepPath: e.ProtocolStepPath, StepStatus: e.StepStatus,
 	}
 	for _, check := range e.Checks {
 		event.Checks = append(event.Checks, CheckAckView{CheckID: check.CheckID, Status: check.Status})
@@ -611,8 +616,9 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc, project
 		}
 	}
 
-	for _, e := range snap.Events {
+	for sequence, e := range snap.Events {
 		event := eventViewModel(e)
+		event.Sequence = sequence
 		if target := findTaskForRecord(vm, e.TaskKey, e.ProtocolStepPath); target != nil {
 			target.Events = append(target.Events, event)
 		} else {
