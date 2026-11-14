@@ -76,5 +76,55 @@ class MergedPrCycleGuardTest(unittest.TestCase):
         self.assertTrue(feeder.merged_in_current_cycle("2026-11-13T18:22:14Z", None))
 
 
+class SessionLivenessTest(unittest.TestCase):
+    START = 1_000_000.0
+
+    @staticmethod
+    def iso(ts):
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+    def test_process_must_match_the_session_worktree(self):
+        procs = {101: ("/var/lib/kandev/tasks/a", self.START)}
+        self.assertTrue(
+            feeder._session_process_live(procs, "/var/lib/kandev/tasks/a", self.iso(self.START + 60))
+        )
+        self.assertFalse(
+            feeder._session_process_live(procs, "/var/lib/kandev/tasks/b", self.iso(self.START + 60))
+        )
+
+    def test_start_time_must_be_within_the_match_window(self):
+        procs = {101: ("/var/lib/kandev/tasks/a", self.START)}
+        self.assertFalse(
+            feeder._session_process_live(procs, "/var/lib/kandev/tasks/a", self.iso(self.START + 3600))
+        )
+
+    def test_unreadable_process_table_stays_conservative(self):
+        self.assertTrue(feeder._session_process_live({}, "/var/lib/kandev/tasks/a", "1970-01-01T00:00:00+00:00"))
+
+
+class RelationStatementTest(unittest.TestCase):
+    def test_none_matches_an_unblocked_card(self):
+        self.assertEqual(feeder.relation_problems("## 依赖\nupstream: none\n", []), [])
+
+    def test_missing_line_is_reported(self):
+        self.assertEqual(
+            feeder.relation_problems("## 依赖\n- blocked_by：见 Kandev\n", []),
+            ["missing `upstream:` line (write `upstream: none` or the blocker ids)"],
+        )
+
+    def test_hidden_blocker_is_reported(self):
+        problems = feeder.relation_problems("upstream: none\n", ["DES-01"])
+        self.assertEqual(problems, ["upstream line omits Kandev blockers: DES-01"])
+
+    def test_invented_blocker_is_reported(self):
+        problems = feeder.relation_problems("upstream: DES-01\n", [])
+        self.assertEqual(problems, ["upstream line lists non-blockers: DES-01"])
+
+    def test_declared_blockers_must_match_exactly(self):
+        self.assertEqual(feeder.relation_problems("upstream: DES-00, RDO-01\n", ["RDO-01", "DES-00"]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
