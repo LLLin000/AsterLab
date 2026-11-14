@@ -58,5 +58,23 @@ class InboxAdmissionTest(unittest.TestCase):
         )
 
 
+class MergedPrCycleGuardTest(unittest.TestCase):
+    def test_merge_before_the_current_cycle_is_not_accepted(self):
+        cycle = "2026-11-14 01:21:20.121452+00:00"
+        self.assertFalse(
+            feeder.merged_in_current_cycle("2026-11-13T18:22:14Z", cycle)
+        )
+
+    def test_merge_inside_the_current_cycle_is_accepted(self):
+        cycle = "2026-11-14 01:21:20.121452+00:00"
+        self.assertTrue(
+            feeder.merged_in_current_cycle("2026-11-14T02:00:00Z", cycle)
+        )
+
+    def test_missing_timestamps_keep_the_previous_behaviour(self):
+        self.assertTrue(feeder.merged_in_current_cycle(None, "2026-11-14 01:21:20+00:00"))
+        self.assertTrue(feeder.merged_in_current_cycle("2026-11-13T18:22:14Z", None))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1007,6 +1007,42 @@ def latest_review_verdict(task_id):
         return "", ""
 
 
+def card_cycle_start(task_id):
+    """When the card last (re-)entered the build pipeline, or None.
+
+    A card that is bounced back keeps its id, so older merged PRs carry the
+    same card id. Anything merged before this timestamp belongs to a previous
+    round and must not complete the current one.
+    """
+    try:
+        import sqlite3
+
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        row = con.execute(
+            "select max(occurred_at) from task_step_transitions "
+            "where task_id=? and to_workflow_step_id in (?,?)",
+            (task_id, INBOX, AGENT),
+        ).fetchone()
+        con.close()
+        return row[0] if row and row[0] else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def merged_in_current_cycle(merged_at, cycle_start):
+    """True when a merge belongs to the card's current round."""
+    if not merged_at or not cycle_start:
+        return True
+    try:
+        from datetime import datetime
+
+        merged = datetime.fromisoformat(str(merged_at).replace("Z", "+00:00"))
+        start = datetime.fromisoformat(str(cycle_start).replace("Z", "+00:00"))
+        return merged >= start
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def task_pr(task_id):
     try:
         import sqlite3
@@ -1014,13 +1050,19 @@ def task_pr(task_id):
         con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         r = con.execute(
-            "select pr_number,pr_url,state from github_task_prs where task_id=? order by pr_number desc limit 1",
+            "select pr_number,pr_url,state,merged_at from github_task_prs "
+            "where task_id=? order by pr_number desc limit 1",
             (task_id,),
         ).fetchone()
         con.close()
-        return dict(r) if r else {}
+        pr = dict(r) if r else {}
     except Exception:  # noqa: BLE001
         return {}
+    if pr.get("state") == "merged" and not merged_in_current_cycle(
+        pr.get("merged_at"), card_cycle_start(task_id)
+    ):
+        return {}
+    return pr
 
 
 GH_REPO = "LLLin000/AsterLab"
@@ -1052,8 +1094,11 @@ def merged_pr_by_card(task):
             ],
             capture_output=True, text=True, timeout=25,
         )
+        start = card_cycle_start(task["id"])
         for pr in json.loads(out.stdout or "[]"):
             if cid not in pr.get("title", ""):
+                continue
+            if not merged_in_current_cycle(pr.get("mergedAt"), start):
                 continue
             found = {
                 "pr_number": pr["number"],
