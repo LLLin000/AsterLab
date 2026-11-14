@@ -8,10 +8,12 @@ name: windows-build
 # §4 maps "Desktop app" to scripts/mygo-build.ps1. apps/desktop is the retained
 # Rust/Slint research prototype (docs/architecture.md §1) and is not built here.
 
+# Platform split: the Windows artifacts are built and verified on the Windows
+# machine (Windows Gate lane), not on every VPS pull request. This workflow is
+# manual until a self-hosted Windows runner exists; the VPS gates required on
+# PRs are `linux-tests` and `scope-check`.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read

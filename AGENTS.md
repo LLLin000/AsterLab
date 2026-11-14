@@ -45,6 +45,7 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 
 - **VPS Dev** 承担 Core、CLI、Rust/Go 非 GUI 包、契约、文档和 Linux 可跑的测试。
 - **Windows Gate** 承担 MyGo/Slint GUI、`runs.dll`、Windows 安装包和 PowerShell E2E。当前该流程没有 agent profile，也没有注册 Windows executor，是人工泳道；不要把它当作自动队列，也不要在 VPS 上假装执行。
+- **检查按平台分工**：VPS 泳道的必需检查是 `linux-tests` 与 `scope-check`（跑在本机自托管 runner）；`windows-build` 只在 Windows 机器上验证（Windows Gate 泳道），不作为 VPS PR 的必需检查。
 - **泳道之间不建 `blocked_by` 边**：依赖是产品的执行顺序，不是泳道的运行约束；跨泳道顺序写进下游卡片正文的 `排序:` 一行，由人工泳道自己遵守。跨泳道边没有自动化去执行它，却会被实现 agent 读到并误判成自己被阻塞（2026-11-14 `DES-01 → DES-00` 的边让 Core 卡空转多轮）。
 - 卡片的 `lane` 标签和所在流程不一致时，先对齐再执行。
 
