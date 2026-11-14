@@ -93,6 +93,7 @@ required_artifacts:
 硬规则：
 
 - 不在正文重复 `lane`、`milestone`、`priority`、依赖列表；这些用 Kandev 的 label、priority 和 `blocked_by`。
+- 跨泳道不建 Kandev 边：把顺序写成正文的 `排序:` 一行（如 `排序: DES-00 合并后再开工`），由下游泳道自己遵守；`upstream:` 只镜像本泳道的前置卡。
 - 依赖只在 Kandev 里建边，正文只写一行 `upstream:` 镜像它：`upstream: none` 表示无前置。`kandev-ready-feeder` 的准入会比对两边——不一致就打 `dor-fail` 留在 Inbox，由建卡人修正；不要指望实现 agent 去解释或绕过这种矛盾。
   - 2026-11-14 DES-00 的教训：正文写着"留给 DES-01"、Relations 里是 `blocks: DES-01`，结果两个实现 session 都把下游卡当成自己的阻塞，白跑两轮。方向只有一个：`upstream`/`blocked_by` 才是前置。
 - Relations 方向只有一个读法：`depends_on` / `blocked_by` 是本卡的前置卡，未 `COMPLETED` 就不开工；`blocks` 是本卡解锁的下游卡，**不影响本卡开工**。开工前把这两栏分开读，别把 `blocks` 当成被阻塞。

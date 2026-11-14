@@ -126,5 +126,19 @@ class RelationStatementTest(unittest.TestCase):
         self.assertEqual(feeder.relation_problems("upstream: DES-00, RDO-01\n", ["RDO-01", "DES-00"]), [])
 
 
+class CrossLaneDependencyTest(unittest.TestCase):
+    def test_vps_card_may_not_wait_on_the_windows_lane(self):
+        problems = feeder.cross_lane_problems([("DES-01", ["lane:win"])])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("DES-01", problems[0])
+        self.assertIn("排序", problems[0])
+
+    def test_same_lane_blockers_are_allowed(self):
+        self.assertEqual(feeder.cross_lane_problems([("RDO-01", ["lane:vps"])]), [])
+
+    def test_unlabelled_blockers_are_not_flagged(self):
+        self.assertEqual(feeder.cross_lane_problems([("DES-00", [])]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
