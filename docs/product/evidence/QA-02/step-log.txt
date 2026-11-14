@@ -1,0 +1,1104 @@
+=== STEP 01: 01 收集细胞 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞" checked
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "01 收集细胞"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "收集约 5×10^6 细胞，弃上清。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-01 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 02: 02 裂解与匀浆 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆" checked
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "02 裂解与匀浆"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "加入裂解缓冲液，匀浆后离心。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-02 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 03: 03 加乙醇 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇" checked
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "03 加乙醇"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "加入等体积 70% 乙醇，混匀。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-03 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 04: 04 上柱结合 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合" checked
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "04 上柱结合"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "将混合液过柱，离心弃流出液。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-04 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 05: 05 Wash I ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I" checked
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "05 Wash I"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "加入 Wash Buffer I，离心弃流出液。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-05 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 06: 06 Wash II 第一次 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次" checked
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "06 Wash II 第一次"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "加入 Wash Buffer II，离心弃流出液。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-06 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 07: 07 Wash II 第二次 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次" checked
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "07 Wash II 第二次"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "再次加入 Wash Buffer II，离心弃流出液。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-07 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 08: 08 干柱离心 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心" checked
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "08 干柱离心"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "空柱离心 2 min，去除残留乙醇。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-08 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 09: 09 RNA 洗脱 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱" checked
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "09 RNA 洗脱"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "加入无 RNase 水，离心收集 RNA。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-09 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 10: 10 RNA 质检与保存 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存" checked
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "10 RNA 质检与保存"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "测定浓度与 A260/A280，-80 °C 保存。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rna-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rna/step-10 · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-extract"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 11: RNA 质检 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检" checked
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "RNA 质检"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "记录 RNA 浓度与 A260/A280。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-qc-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/qc/qc · assay-rtqpcr · 未绑定 · 步骤 ID step-rna-qc"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 12: 逆转录 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录" checked
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增"
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "逆转录"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "RNA 逆转录为 cDNA。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-rt-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/rt/rt · assay-rtqpcr · 未绑定 · 步骤 ID step-rt"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+
+
+=== STEP 13: qPCR 扩增 ===
+@e472 [scroll]
+  @e473 [text] "工作区"
+  @e474 [button] "项目工作区" key="项目工作区"
+  @e475 [button] "实验设计" key="实验设计"
+  @e476 [button] "实验方案" key="实验方案"
+  @e477 [button] "实验运行" key="实验运行" checked
+  @e478 [button] "Notebook" key=Notebook
+  @e479 [button] "资料与工具" key="资料与工具"
+  @e480 [text] "最近设计"
+  @e503 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e482 [toolbar]
+  @e483 [text] "AsterLab · 原生设计工作台"
+@e504 [text] "冻结文档 Revision: 1"
+@e505 [button] "查看冻结文档"
+@e506 [button] "导出 PDF"
+@e507 [text] "RT-qPCR parent workflow"
+@e508 [text] "planned"
+@e509 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e510 [text] "0/4 步已完成"
+@e511 [scroll]
+  @e512 [text] "实验流程"
+  @e513 [tree]
+    @e514 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e515 [treeItem] "01 收集细胞" key="01 收集细胞"
+    @e516 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e517 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e518 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e519 [treeItem] "05 Wash I" key="05 Wash I"
+    @e520 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e521 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e522 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e523 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e524 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e525 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e526 [treeItem] "RNA 质检" key="RNA 质检"
+    @e527 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e528 [treeItem] "逆转录" key="逆转录"
+    @e529 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded
+    @e530 [treeItem] "qPCR 扩增" key="qPCR 扩增" checked
+@e531 [scroll]
+  @e532 [tabList]
+    @e533 [tab] "任务" checked
+    @e534 [tab] "历史"
+  @e535 [text] "qPCR 扩增"
+  @e536 [text] "未开始"
+  @e537 [text] "当前步骤"
+  @e538 [text] "配置反应并运行 qPCR，记录 Ct。"
+  @e539 [text] "要记录什么"
+  @e540 [text] "已记录读数 0"
+  @e541 [text] "执行确认 0/0"
+  @e542 [text] "在下方「实验记录」中录入读数；保存后写入 Run 记录。"
+  @e543 [text] "下一步"
+  @e544 [text] "录入读数并保存"
+  @e545 [text] "步骤资源"
+  @e546 [text] "reference"
+  @e547 [text] "ref-qpcr-block"
+  @e548 [text] "other"
+  @e549 [text] "样本"
+  @e550 [text] "rt-s01"
+  @e551 [text] "sample"
+  @e552 [text] "样本"
+  @e553 [text] "rt-s02"
+  @e554 [text] "sample"
+  @e555 [text] "样本"
+  @e556 [text] "rt-s03"
+  @e557 [text] "sample"
+  @e558 [text] "样本"
+  @e559 [text] "rt-s04"
+  @e560 [text] "sample"
+  @e561 [text] "冻结信息（只读） · root/qpcr/qpcr · assay-rtqpcr · 未绑定 · 步骤 ID step-qpcr"
+  @e562 [text] "实验记录"
+  @e563 [button] "图片与文件"
+  @e564 [text] "此步骤没有计划参数。"
+@e494 [button] "Toggle sidebar"
+@e495 [button] "新建设计"
+@e496 [text] "AsterLab"
+@e497 [text] "/"
+@e498 [text] "G1 hierarchy gate"
+@e499 [button] "Minimize window"
+@e500 [button] "Maximize window"
+@e501 [button] "Close window"
+@e502 [splitter] "Resize sidebar" key=left-resize
+

@@ -1,0 +1,2 @@
+{"error":{"code":"INVALID_INPUT","message":"步骤块不存在根参数槽位：lysis_vol"},"ok":false,"tool":"protocol.block.preview"}
+asterlab data dir: C:\Users\Lin\AppData\Local\Temp\qa02\data

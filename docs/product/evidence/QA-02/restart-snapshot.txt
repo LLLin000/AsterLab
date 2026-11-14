@@ -1,0 +1,55 @@
+@e1 [scroll]
+  @e2 [text] "工作区"
+  @e3 [button] "项目工作区" key="项目工作区"
+  @e4 [button] "实验设计" key="实验设计"
+  @e5 [button] "实验方案" key="实验方案"
+  @e6 [button] "实验运行" key="实验运行" checked
+  @e7 [button] "Notebook" key=Notebook
+  @e8 [button] "资料与工具" key="资料与工具"
+  @e9 [text] "最近设计"
+  @e32 [button] "RT-qPCR parent workflow" key="RT-qPCR parent workflow"
+@e11 [toolbar]
+  @e12 [text] "AsterLab · 原生设计工作台"
+@e33 [text] "冻结文档 Revision: 1"
+@e34 [button] "查看冻结文档"
+@e35 [button] "导出 PDF"
+@e36 [text] "RT-qPCR parent workflow"
+@e37 [text] "planned"
+@e38 [text] "Run rev 0 · Design rev 2 · AsterDoc rev 1"
+@e39 [text] "0/4 步已完成"
+@e94 [scroll]
+  @e95 [text] "实验流程"
+  @e96 [tree]
+    @e97 [treeItem] "01 RNA 提取   0/10" key="01 RNA 提取   0/10" expanded
+    @e98 [treeItem] "01 收集细胞" key="01 收集细胞" checked
+    @e99 [treeItem] "02 裂解与匀浆" key="02 裂解与匀浆"
+    @e100 [treeItem] "03 加乙醇" key="03 加乙醇"
+    @e101 [treeItem] "04 上柱结合" key="04 上柱结合"
+    @e102 [treeItem] "05 Wash I" key="05 Wash I"
+    @e103 [treeItem] "06 Wash II 第一次" key="06 Wash II 第一次"
+    @e104 [treeItem] "07 Wash II 第二次" key="07 Wash II 第二次"
+    @e105 [treeItem] "08 干柱离心" key="08 干柱离心"
+    @e106 [treeItem] "09 RNA 洗脱" key="09 RNA 洗脱"
+    @e107 [treeItem] "10 RNA 质检与保存" key="10 RNA 质检与保存"
+    @e108 [treeItem] "02 RNA 质控   0/1" key="02 RNA 质控   0/1" expanded
+    @e109 [treeItem] "RNA 质检" key="RNA 质检"
+    @e110 [treeItem] "03 逆转录   0/1" key="03 逆转录   0/1" expanded
+    @e111 [treeItem] "逆转录" key="逆转录"
+    @e112 [treeItem] "04 qPCR 扩增及检测   0/1" key="04 qPCR 扩增及检测   0/1" expanded offscreen
+    @e113 [treeItem] "qPCR 扩增" key="qPCR 扩增" offscreen
+  @e114 [tabList] offscreen
+    @e115 [tab] "任务" checked offscreen
+    @e116 [tab] "历史" offscreen
+  @e117 [text] "实验记录" offscreen
+  @e118 [button] "图片与文件" offscreen
+  @e119 [text] "此步骤没有计划参数。" offscreen
+  @e120 [disclosure] "操作说明与元数据" offscreen
+@e23 [button] "Toggle sidebar"
+@e24 [button] "新建设计"
+@e25 [text] "AsterLab"
+@e26 [text] "/"
+@e27 [text] "G1 hierarchy gate"
+@e28 [button] "Minimize window"
+@e29 [button] "Maximize window"
+@e30 [button] "Close window"
+@e31 [splitter] "Resize sidebar" key=left-resize
