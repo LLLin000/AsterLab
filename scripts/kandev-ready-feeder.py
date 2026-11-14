@@ -79,8 +79,32 @@ def _action_id(action, snapshot_id):
     return hashlib.sha256(f"{action}:{snapshot_id}".encode("utf-8")).hexdigest()
 
 
+def _task_meta(task_id):
+    """Best-effort read-only metadata for action observation."""
+    import sqlite3
+    try:
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+        pr = con.execute(
+            "select pr_number,head_sha from github_task_prs where task_id=? order by rowid desc limit 1",
+            (task_id,),
+        ).fetchone()
+        session = con.execute(
+            "select id from task_sessions where task_id=? order by started_at desc limit 1",
+            (task_id,),
+        ).fetchone()
+        con.close()
+        return {
+            "pr_number": pr[0] if pr else "unknown",
+            "head_sha": (pr[1] or "unknown") if pr else "unknown",
+            "session_id": (session[0] or "unknown") if session else "unknown",
+        }
+    except Exception:  # noqa: BLE001
+        return {"pr_number": "unknown", "head_sha": "unknown", "session_id": "unknown"}
+
+
 def log_action(action, task, *, reason="", result="attempted", session_id="",
-               head_sha="", from_step=None, to_step=None, action_id=None):
+               head_sha="", from_step=None, to_step=None, action_id=None,
+               pr_number="unknown"):
     """Append a structured legacy-owner action record; never change control flow.
 
     The attempted and terminal records for one decision share `action_id` and
@@ -96,6 +120,7 @@ def log_action(action, task, *, reason="", result="attempted", session_id="",
         "reason": reason,
         "session_id": session_id or task.get("session_id") or "unknown",
         "head_sha": head_sha or task.get("head_sha") or "unknown",
+        "pr_number": pr_number,
         "snapshot_id": snapshot_id,
         "from_step": from_step or "unknown",
         "to_step": to_step or "unknown",
@@ -1343,13 +1368,15 @@ def is_eligible(task):
 
 
 def move(task, step_id, reason):
+    meta = _task_meta(task.get("id"))
     action_id = _action_id(
         "move_step", _snapshot_id(task, task.get("workflow_step_id"), step_id)
     ) + ":" + uuid.uuid4().hex
     log_action(
         "move_step", task, reason=reason, result="attempted",
         from_step=task.get("workflow_step_id"), to_step=step_id,
-        action_id=action_id,
+        action_id=action_id, session_id=meta["session_id"],
+        head_sha=meta["head_sha"], pr_number=meta["pr_number"],
     )
     status, data = api(
         "POST",
@@ -1360,14 +1387,16 @@ def move(task, step_id, reason):
         log_action(
             "move_step", task, reason=reason, result="ok",
             from_step=task.get("workflow_step_id"), to_step=step_id,
-            action_id=action_id,
+            action_id=action_id, session_id=meta["session_id"],
+            head_sha=meta["head_sha"], pr_number=meta["pr_number"],
         )
         print(f"move {task['title'][:52]} -> {reason}")
         return True
     log_action(
         "move_step", task, reason=reason, result=f"failed:{status}",
         from_step=task.get("workflow_step_id"), to_step=step_id,
-        action_id=action_id,
+        action_id=action_id, session_id=meta["session_id"],
+        head_sha=meta["head_sha"], pr_number=meta["pr_number"],
     )
     print(f"move failed {task['title'][:52]} -> {reason}: {status} {data}", file=sys.stderr)
     return False
