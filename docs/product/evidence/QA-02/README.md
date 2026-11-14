@@ -1,4 +1,21 @@
 # QA-02 RNA Run Evidence
+## 结论：BLOCKED
+
+- `protocol.block.preview` -> `INVALID_INPUT: 步骤块不存在根参数槽位：lysis_vol` (fixture declares zero parameter slots and empty bindings). Raw output, `parameter-binding-error.txt`:
+
+  ```json
+  {"error":{"code":"INVALID_INPUT","message":"步骤块不存在根参数槽位：lysis_vol"},"ok":false,"tool":"protocol.block.preview"}
+  ```
+
+- Runs UI exposes no completion control for a step with no checks and no recording plan; all 13 tasks stay `未开始` / 0 counts. Raw snapshot excerpt, `step-log.txt`:
+
+  ```text
+  @e1562 [text] "0/4 步已完成"
+  @e1588 [text] "未开始"
+  @e1593 [text] "执行确认 0/0"
+  @e1616 [text] "此步骤没有计划参数。"
+  ```
+
 
 ## Baseline and fixture
 
