@@ -67,6 +67,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `design.list` / `design.get` / `design.map` / `design.create` / `design.revise` | 查询、只读实验地图、创建或修订实验设计 | create/revise |
 | `run.list` / `run.workspace` / `run.create` / `run.set_status` / `run.revise` | 查询、只读冻结工作区、创建运行、更新状态或只修订名称/计划日期 | create/update |
 | `workflow.inspect_tree` | 只读投影 Design（可选 Run）的 Use/Definition/Occurrence 层级树 | 否 |
+| `asterdoc.command` | 按 revision 新增步骤、重排/嵌套/提升，或安全删除 Design 步骤 | revise |
 | `workflow.progress` | 只读投影一个 Run 每步骤的样本矩阵、attempt 历史与最后事件时间 | 否 |
 | `task.create` / `task.set_status` | 创建日历任务或更新状态 | create/update |
 | `protocol.list` / `protocol.create` / `protocol.revise` | 查询 Protocol、创建 v1、追加新版本 | create/revise |
@@ -89,6 +90,18 @@ stdout 每次只输出一行 JSON。成功结构为：
 设计读取与版本写入有固定结果形状：`design.get`、`design.create` 返回 `{ "design": <当前设计记录>, "version": <对应 design_version 记录> }`；`design.revise` 返回 `{ "record": <修订后的设计记录>, "version": <新建的 design_version 记录> }`。`protocol.create` 返回 Protocol 记录和 v1 正文版本，`protocol.revise` 只返回新建的正文版本记录。所有成功响应使用 `ok=true` 和工具名；失败响应使用 `ok=false`、稳定错误码和可读 `message`。每项输出字段以工具自己的 `output_schema` 为准。
 
 `design.map` 是只读实验地图投影：输入 `{ "id": "<design-id>" }`，输出 `design_id`、`revision`、`title`、`objective`、`experimental_unit`、`groups[]`、`assays[]`、`sample_links[]`、`planned_outputs[]`、`conflicts[]` 和 `unresolved[]`。它只复制已有设计字段，并由显式缺失/未解决冲突生成 `unresolved`（如独立 n、时间点、Protocol、时间点关系缺失）；不补造组别、对照、n、剂量、时间点或孔位，也不写数据库。HTTP 对应 `GET /api/designs/{id}/map`。
+
+## `asterdoc.command`：Design 步骤树写入
+
+输入使用 `{design_id, expected_revision, command, operation_id?}`。`expected_revision` 必须等于正在编辑的 AsterDoc revision；成功追加一个不可变 revision，`operation_id` 用于重试幂等，外层成功/错误结构遵循通用 CLI 契约。完整闭合 schema 与输出字段以 `labworkbench schema asterdoc.command` 为准。
+
+新增命令：
+
+- `reorder_steps`：`{type, moduleId: <workflow-id>, order: [<step-id>...]}`。`order` 必须是 workflow `steps` 的完整、无重复置换，只更新 `business_order`，不改变 `edges`。
+- `nest_step`：`{type, moduleId: <step-id>, parentId: <parent-step-id>}`；`promote_step`：`{type, moduleId: <step-id>}`。两者更新目标步骤及其后代的 `path`；路径冲突和循环嵌套返回 `INVALID_INPUT`，不保存部分 revision。
+- `remove_step` 遇到被冻结 Run、其他模块/步骤引用、子步骤或 `protect_references: true` 时返回稳定错误 `STEP_REFERENCED`，不写入新 revision。允许删除时，workflow 的 `steps`、`business_order` 和关联 edges 在同一 AsterDoc revision 中清理。
+
+既有 `add_step`、`connect_steps`、`disconnect_steps` 等命令负载保持兼容。`workflow.inspect_tree` 与 `asterdoc.compile` 使用同一 revision 中的稳定 step ID、path、business order 和显式依赖 edges；顺序不隐式生成依赖关系。
 
 ## Protocol 步骤块契约
 
