@@ -279,6 +279,27 @@ pub fn default_labware_registry() -> LabwareRegistry {
     registry
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainerTopology {
+    #[default]
+    TwoD,
+    #[serde(rename = "lane_1d")]
+    Lane1d,
+    CageCohort,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicalSplitChild {
+    pub container_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_id: Option<String>,
+    pub aliquot_from: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PlannedContainer {
@@ -287,6 +308,18 @@ pub struct PlannedContainer {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+}
+
+/// Extended topology metadata kept separate so existing `PlannedContainer`
+/// struct literals and frozen container plans remain source-compatible.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicalContainer {
+    pub container: PlannedContainer,
+    #[serde(default)]
+    pub topology: ContainerTopology,
+    #[serde(default)]
+    pub split_children: Vec<PhysicalSplitChild>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1008,5 +1041,34 @@ mod tests {
             1
         );
         plan.validate(&registry).unwrap();
+    }
+
+    #[test]
+    fn planned_containers_represent_lanes_cages_and_split_lineage() {
+        let lane: PhysicalContainer = serde_json::from_value(serde_json::json!({
+            "container": {
+                "id": "wb-lanes",
+                "profile_ref": {"id": "labware.western_blot_membrane", "version": 1},
+                "label": "WB membrane"
+            },
+            "topology": "lane_1d",
+            "split_children": [
+                {"container_id": "tumor-formalin", "sample_id": "aliquot-formalin", "aliquot_from": "tumor-1"},
+                {"container_id": "tumor-rna", "sample_id": "aliquot-rna", "aliquot_from": "tumor-1"},
+                {"container_id": "tumor-protein", "sample_id": "aliquot-protein", "aliquot_from": "tumor-1"}
+            ]
+        })).unwrap();
+        assert_eq!(lane.topology, ContainerTopology::Lane1d);
+        assert_eq!(lane.split_children[0].aliquot_from, "tumor-1");
+        assert_eq!(lane.split_children.len(), 3);
+        let cage: PhysicalContainer = serde_json::from_value(serde_json::json!({
+            "container": {
+                "id": "cage",
+                "profile_ref": {"id": "labware.mouse_cage", "version": 1},
+                "label": "Cage 2"
+            },
+            "topology": "cage_cohort"
+        })).unwrap();
+        assert_eq!(cage.topology, ContainerTopology::CageCohort);
     }
 }
