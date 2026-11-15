@@ -15,3 +15,7 @@
 
 - 分组依据 Core 返回的 `PantryItem.Status`：仅 `near_expiry` 进入“临期”组，其余进入“其他”；临期使用主题 `Warning` token 高亮，过期/用尽使用 `Danger` token。
 - “导出贴标清单”调用 Core 的 `ExportPantryLabels`。只有 Core 返回成功才显示成功提示，并将 Core 返回的 manifest JSON 展示为插件清单；失败展示原因和“重试”入口。
+
+## 门禁说明
+
+官方 `scripts/mygo-build.ps1` 在本 checkout 不重写 `mygo-plugin.json`；只有额外手动运行 `mygo native build -target windows-amd64` 才会重写它。

@@ -471,7 +471,7 @@ func importView(c *ui.Context, w *Workspace, t *ui.Theme) {
 	}
 }
 func pantryView(c *ui.Context, w *Workspace, t *ui.Theme, tok theme.Tokens) {
-	ui.Row(c).Gap(8).Children(func() {
+	ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
 		ui.Text(c, "储藏室台账").FontSize(float32(tok.TextSection)).Bold().TextColor(t.Text)
 		ui.Spacer(c)
 		if ui.Button(c, "导出贴标清单").Clicked() {
@@ -479,16 +479,16 @@ func pantryView(c *ui.Context, w *Workspace, t *ui.Theme, tok theme.Tokens) {
 		}
 	})
 	ui.Text(c, "名称 · 位置 · 购入/开封日 · 保质期").FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
-	ui.Row(c).Gap(6).Children(func() {
+	ui.Row(c).Gap(float32(tok.Spacing4)).Children(func() {
 		ui.TextInput(c, &w.PantryName).Placeholder("名称")
 		ui.TextInput(c, &w.PantryLocation).Placeholder("位置")
 	})
-	ui.Row(c).Gap(6).Children(func() {
+	ui.Row(c).Gap(float32(tok.Spacing4)).Children(func() {
 		ui.TextInput(c, &w.PantryPurchasedOn).Placeholder("购入日 YYYY-MM-DD")
 		ui.TextInput(c, &w.PantryOpenedOn).Placeholder("开封日 YYYY-MM-DD")
 		ui.TextInput(c, &w.PantryShelfLifeDays).Placeholder("保质期（天）")
 	})
-	ui.Row(c).Gap(8).Children(func() {
+	ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
 		if ui.Button(c, "状态："+pantryStatusText(w.PantryExhausted, w.PantryOpenedOn != "")+"（点击切换）").Clicked() {
 			w.PantryExhausted = !w.PantryExhausted
 		}
@@ -500,7 +500,7 @@ func pantryView(c *ui.Context, w *Workspace, t *ui.Theme, tok theme.Tokens) {
 		}
 	})
 	if w.PantryLoaded {
-		ui.Row(c).Gap(8).Children(func() {
+		ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Text(c, "物品").Bold()
 			ui.Spacer(c)
 			if ui.Button(c, "刷新").Clicked() {
