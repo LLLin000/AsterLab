@@ -1,19 +1,19 @@
-# UX-02 — Recoverable empty and error states
+# UX-02 — 四态恢复证据
 
-Required capture format: real desktop window, light theme, 1360×880 and 900×600. Seed each state in an isolated data directory; do not fabricate records to make an empty state look populated.
+真实桌面窗口尺寸为 1360×880 和 900×600，浅色主题；当前 Windows 显示缩放下，PNG 像素尺寸分别为 2018×1308 和 1328×888。空态数据在隔离的 `LABWORKBENCH_DATA_DIR` 中创建。
+Core 拒绝复现：隔离目录 `D:/.ci-cache/ux02-data` 中创建冻结 Run；CLI `asset.link` 以 `root_dir=D:/.ci-cache/qa-lb06-assets`、路径 `D:/.ci-cache/qa-lb06/qa01-1-plate-1360x880-light.png` 请求关联，Core 返回 `INVALID_INPUT: asset is outside its root`。GUI 截图记录了同一越界文件关联失败后的恢复提示。
 
-| State | What the user sees | Next action | Rule id | Real-GUI evidence |
-|---|---|---|---|---|
-| 未开始 — no project | Empty workspace says “未开始 · 尚无项目” | 新建设计 | UX-P5, UX-STATE, UX-DONE | [1360×880](ux02-no-project-1360x880-light.png) · [900×600](ux02-no-project-900x600-light.png) |
-| 未开始 — project has no designs/runs | Empty project says “未开始 · 还没有实验设计” | 新建设计 or 导入设计 | UX-P5, UX-STATE, UX-DONE | [1360×880](ux02-empty-project-1360x880-light.png) · [900×600](ux02-empty-project-900x600-light.png) |
-| 未解析 — linked asset unavailable | Original Run asset path is retained and marked unavailable | 重新定位 | UX-P5, UX-STATE, UX-DONE | [1360×880](ux02-unavailable-asset-1360x880-light.png) · [900×600](ux02-unavailable-asset-900x600-light.png) |
-| NOT VERIFIED — Core-rejected write | No recovery state could be captured. The host `OnLinkFile` error path only emits a toast; see failure below. | Required host callback must expose the error to the internal view before a retry action can be rendered. | UX-P5, UX-STATE, UX-DONE | NOT VERIFIED |
+| 状态 | 截图 | 下一步动作 |
+|---|---|---|
+| 无项目 — 尚无项目 | [1360×880](ux02-no-project-1360x880-light.png) · [900×600](ux02-no-project-900x600-light.png) | 新建设计 |
+| 空项目 — 尚无实验设计 | [1360×880](ux02-empty-project-1360x880-light.png) · [900×600](ux02-empty-project-900x600-light.png) | 新建设计或导入设计 |
+| 关联文件不可用 — 文件路径不可访问 | [1360×880](ux02-unavailable-asset-1360x880-light.png) · [900×600](ux02-unavailable-asset-900x600-light.png) | 重新定位 |
+| Core 拒绝写请求 — 关联失败并显示原因 | [1360×880](core-rejection-1360x880-light.png) · [900×600](core-rejection-900x600-light.png) | 重新关联 |
 
-## Seed and failure record
+## 构建与接线
 
-- No-project: empty `LABWORKBENCH_DATA_DIR`.
-- Empty project: `project.create` seeded project `UX-02 Empty Project`, with no designs or Runs.
-- Missing asset: created a real Run through `asterdoc.create_run`, linked an existing local file with `asset.link`, then deleted that file. The Run workspace rendered `未解析 · 文件不可用` and `重新定位`.
-- Core-write failure: attempted a write with the isolated data directory made non-writable using `icacls`. The desktop app disconnected before the UI error could be captured; the exact failed command was `mygo-automation press @e52 --settle` (`idle: the app did not answer: read unix @->C:\\Users\\Lin\\AppData\\Local\\Temp\\ux02-evidence\\core-rejection.sock: wsarecv: An existing connection was forcibly closed by the remote host`). The `icacls` operation also reported `拒绝访问` for `labworkbench.sqlite`.
-- `asset.link` with a root ID not previously registered was accepted by Core, so it did not produce the requested rejection.
-- App host call site `prototypes/mygo-run/main.go:1923-1926` catches linked-asset write errors with a toast and does not pass the error to `internal/runworkspace.RecordingView`; the requested UI recovery treatment cannot be completed within this card's write scope.
+- 构建戳：`b2acf22`（`dist/BUILD_INFO.txt` 中的 `commit` 与 `git rev-parse --short HEAD` 一致）。
+- 错误写入状态：`prototypes/mygo-run/main.go:2988-2995`。
+- 错误传入记录视图：`prototypes/mygo-run/main.go:2529-2541`。
+- 横幅与重试按钮：`prototypes/mygo-run/internal/runworkspace/recording.go:464-473`。
+- 本 PR 无代码改动；仅更新本目录中的证据。
