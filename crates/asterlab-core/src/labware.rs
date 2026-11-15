@@ -466,7 +466,11 @@ impl ContainerPlan {
         let mut assignment_positions = HashSet::new();
         for (index, assignment) in self.assignments.iter().enumerate() {
             let path = format!("assignments[{index}]");
-            let key = format!("{}::{}", assignment.container_id, assignment.position_id);
+            let key = occupied_slot_key(
+                profiles.get(assignment.container_id.as_str()).copied(),
+                &assignment.container_id,
+                &assignment.position_id,
+            );
             if !assignment_positions.insert(key) {
                 issues.push(Diagnostic::blocking(
                     "assignment_duplicate",
@@ -593,9 +597,10 @@ impl ContainerPlan {
                     ),
                 ));
             }
-            let position_key = format!(
-                "{}::{}",
-                placement.parent_container_id, placement.position_id
+            let position_key = occupied_slot_key(
+                profiles.get(placement.parent_container_id.as_str()).copied(),
+                &placement.parent_container_id,
+                &placement.position_id,
             );
             if !placement_positions.insert(position_key) {
                 issues.push(Diagnostic::blocking(
@@ -860,6 +865,24 @@ fn parse_canonical_number(digits: &str) -> Option<u64> {
         return None;
     }
     digits.parse().ok()
+}
+
+/// Physical slot key used by duplicate detection.
+///
+/// `Lane3` and `A3` name the same slot of a single-row container, so both
+/// collapse to the same `(row, column)` address. Positions that do not parse
+/// keep their raw text: they are already reported as invalid, and raw text
+/// still flags two assignments that repeat the same invalid address.
+fn occupied_slot_key(
+    profile: Option<&LabwareProfile>,
+    container_id: &str,
+    position_id: &str,
+) -> String {
+    match profile.and_then(|profile| parse_container_position(profile, position_id)) {
+        Some(ContainerPosition::Well { row, column }) => format!("{container_id}::{row}:{column}"),
+        Some(ContainerPosition::Lane { index }) => format!("{container_id}::1:{index}"),
+        None => format!("{container_id}::{position_id}"),
+    }
 }
 
 #[cfg(test)]
@@ -1372,5 +1395,57 @@ mod tests {
             issue.code == "assignment_position_invalid"
                 && issue.path == "assignments[0].position_id"
         }));
+    }
+
+    #[test]
+    fn lane_aliases_share_one_slot_for_duplicate_detection() {
+        let registry = lane_registry();
+        let gel = |id: &str| PlannedContainer {
+            id: id.into(),
+            profile_ref: ProfileRef {
+                id: "labware.lane_gel_10".into(),
+                version: 1,
+            },
+            label: id.into(),
+            source: None,
+        };
+        let placement = |child: &str, position: &str| ContainerPlacement {
+            parent_container_id: "lane-gel".into(),
+            position_id: position.into(),
+            child_container_id: child.into(),
+            relationship: "inserted".into(),
+            source: None,
+        };
+        let mut plan = ContainerPlan {
+            containers: vec![gel("lane-gel"), gel("gel-a"), gel("gel-b")],
+            assignments: vec![
+                lane_assignment("Lane1", None),
+                lane_assignment("A1", None),
+                lane_assignment("L1", None),
+            ],
+            placements: vec![placement("gel-a", "Lane1"), placement("gel-b", "A1")],
+        };
+        let issues = plan.validate_diagnostics(&registry).unwrap_err();
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|issue| issue.code == "assignment_duplicate")
+                .count(),
+            2,
+            "Lane1 / A1 / L1 are the same slot of the single-row gel: {issues:?}"
+        );
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|issue| issue.code == "placement_position_occupied")
+                .count(),
+            1,
+            "a child placed at A1 occupies the slot already taken by Lane1: {issues:?}"
+        );
+
+        plan.assignments.truncate(2);
+        plan.assignments[1].position_id = "Lane2".into();
+        plan.placements[1].position_id = "Lane2".into();
+        plan.validate(&registry).unwrap();
     }
 }
