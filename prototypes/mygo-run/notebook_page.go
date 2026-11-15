@@ -213,9 +213,9 @@ func notebookPage(c *ui.Context, a *app) {
 					Background(t.Surface).Border(1, t.Border).
 					Shadow(0, 4, 14, 0, t.Text.Alpha(.08)).Gap(t.Space(1.25)).Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-						ui.Text(c, "项目 · "+catalog.Project).FontSize(12).Bold().TextColor(t.Text)
+						ui.Text(c, "项目 · "+catalog.Project).FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.Text)
 						if atActive {
-							ui.Text(c, "@"+atQuery).FontSize(11).TextColor(t.Accent)
+							ui.Text(c, "@"+atQuery).FontSize(float32(tokens.TextData)).TextColor(t.Accent)
 						}
 						ui.Spacer(c)
 						if components.Button(c, "关闭", components.ButtonGhost).Clicked() {
@@ -254,7 +254,7 @@ func notebookPage(c *ui.Context, a *app) {
 									continue
 								}
 								shownGroups++
-								ui.Text(c, "▾ "+grp.Label).FontSize(11).Bold().TextColor(t.TextMuted)
+								ui.Text(c, "▾ "+grp.Label).FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.TextMuted)
 								ui.Column(c).FillWidth().Padding(0, 0, 0, t.Space(2)).Gap(t.Space(.5)).Children(func() {
 									for _, item := range grp.Items {
 										item := item
@@ -272,7 +272,7 @@ func notebookPage(c *ui.Context, a *app) {
 								})
 							}
 							if shownGroups == 0 {
-								ui.Text(c, "暂无可引用的记录").FontSize(12).TextColor(t.TextMuted)
+								ui.Text(c, "暂无可引用的记录").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
 							}
 						})
 					})
@@ -312,7 +312,7 @@ func notebookPage(c *ui.Context, a *app) {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
 				ui.Column(c).FillWidth().MaxWidth(820).MaxWidthPercent(100).Padding(t.Space(2), t.Space(3)).
 					Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Gap(t.Space(1)).Children(func() {
-					ui.Text(c, "引用快照").FontSize(11).Bold().TextColor(t.TextMuted)
+					ui.Text(c, "引用快照").FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.TextMuted)
 					for i, resolved := range citations {
 						i, resolved := i, resolved
 						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
@@ -328,7 +328,7 @@ func notebookPage(c *ui.Context, a *app) {
 								if resolved.Status == "missing" {
 									warning = "已过期 / 原记录不可用"
 								}
-								ui.Text(c, warning).FontSize(10).Bold().TextColor(t.Warning)
+								ui.Text(c, warning).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Warning)
 							}
 							ui.Spacer(c)
 							// A citation that names a stored entry can jump to that
@@ -342,7 +342,7 @@ func notebookPage(c *ui.Context, a *app) {
 									a.jumpToTimeline(target.EntryID)
 								}
 							} else {
-								ui.Text(c, "无可定位记录").FontSize(10).TextColor(t.TextMuted)
+								ui.Text(c, "无可定位记录").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
 							}
 							remove := components.Button(c, "移除引用", components.ButtonGhost)
 							remove.Disabled(a.noteMode == 2)
