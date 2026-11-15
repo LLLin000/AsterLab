@@ -1,6 +1,7 @@
 package designer
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -219,5 +220,26 @@ func TestStepCardSummaryText(t *testing.T) {
 	budget := d.designBudget()
 	if budget.Steps != 1 || budget.HasTotal || budget.HasHandsOn {
 		t.Fatalf("budget invented durations: %+v", budget)
+	}
+}
+
+func TestStepEditCommandPayloads(t *testing.T) {
+	order := []string{"step-a", "step-b", "step-c"}
+	for _, tc := range []struct {
+		action string
+		step   string
+		parent string
+		want   map[string]any
+	}{
+		{"move_up", "step-b", "", map[string]any{"type": "reorder_steps", "moduleId": "wf", "order": []string{"step-b", "step-a", "step-c"}}},
+		{"move_down", "step-b", "", map[string]any{"type": "reorder_steps", "moduleId": "wf", "order": []string{"step-a", "step-c", "step-b"}}},
+		{"indent", "step-b", "step-a", map[string]any{"type": "nest_step", "moduleId": "step-b", "parentId": "step-a"}},
+		{"outdent", "step-b", "", map[string]any{"type": "promote_step", "moduleId": "step-b"}},
+		{"delete", "step-b", "", map[string]any{"type": "remove_step", "moduleId": "step-b"}},
+	} {
+		got, ok := StepEditCommand(tc.action, "wf", tc.step, tc.parent, order)
+		if !ok || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s = %#v, %v; want %#v", tc.action, got, ok, tc.want)
+		}
 	}
 }
