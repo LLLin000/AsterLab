@@ -61,6 +61,10 @@ type State struct {
 	// ShowProcedure keeps narrow-layout procedure metadata collapsed by default.
 	ShowProcedure bool
 
+	// ShowTechnical reveals the raw step/block/protocol identifiers. It stays
+	// collapsed so the default view is identifier-free (UX-P2).
+	ShowTechnical bool
+
 	// railScrollKey remembers which selection was last scrolled into view.
 	railScrollKey string
 
@@ -282,16 +286,16 @@ func View(c *ui.Context, s *State) {
 		runHeader(c, s, t, tokens)
 		if s.VM.Status == "loading" {
 			ui.Row(c).Fill().Center().Children(func() {
-				ui.Text(c, "正在加载实验运行数据…").FontSize(14).TextColor(t.TextMuted)
+				ui.Text(c, "正在加载实验运行数据…").FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
 			})
 			return
 		}
 		if len(s.VM.Steps) == 0 {
 			ui.Row(c).Fill().Center().Children(func() {
 				ui.Column(c).Gap(8).Center().Children(func() {
-					ui.Text(c, "此运行没有任务").FontSize(16).Bold().TextColor(t.Text)
+					ui.Text(c, "此运行没有任务").FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text)
 					ui.Text(c, "冻结方案中没有可执行步骤，或步骤未绑定检测。").
-						FontSize(12).TextColor(t.TextMuted)
+						FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
 				})
 			})
 			return
@@ -308,6 +312,7 @@ func View(c *ui.Context, s *State) {
 			})
 			return
 		}
+		// ≥1100: left flow chain, middle record projection, right properties.
 		ui.Row(c).Grow(1).MinHeight(0).Children(func() {
 			ui.Box(c).Width(railWidth(c)).Shrink(0).FillHeight().
 				Background(tokens.RailBackground).
@@ -319,8 +324,17 @@ func View(c *ui.Context, s *State) {
 			ui.Column(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
 				ui.Scroll(c).Grow(1).Children(func() {
 					ui.Column(c).FillWidth().Padding(16, 20).Children(func() {
-						taskWorkspace(c, s, t, tokens)
+						recordingWorkspace(c, s, t, tokens)
 						unassociatedRecords(c, s, t, tokens)
+					})
+				})
+			})
+			ui.Box(c).Width(propertiesWidth(c)).Shrink(0).FillHeight().
+				Background(tokens.Canvas).
+				Border(1, tokens.Border).Children(func() {
+				ui.Scroll(c).FillHeight().Children(func() {
+					ui.Column(c).FillWidth().Padding(16).Children(func() {
+						propertiesPanel(c, s, t, tokens)
 					})
 				})
 			})
@@ -333,7 +347,7 @@ func (s *State) shouldStack(c *ui.Context) bool {
 		return true
 	}
 	if c != nil {
-		if w, _ := c.Size(); w > 0 && w <= 1000 {
+		if w, _ := c.Size(); w > 0 && w < 1100 {
 			return true
 		}
 	}
@@ -349,6 +363,17 @@ func railWidth(c *ui.Context) float32 {
 	return 272
 }
 
+// propertiesWidth keeps the right column compact so the middle recording panel
+// stays the widest region (UX-LAYOUT).
+func propertiesWidth(c *ui.Context) float32 {
+	if c != nil {
+		if w, _ := c.Size(); w > 0 && w < 1360 {
+			return 300
+		}
+	}
+	return 360
+}
+
 // runHeader is the compact title bar: run title, status, frozen revision.
 func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	vm := s.VM
@@ -362,7 +387,7 @@ func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	ui.Row(c).FillWidth().Height(52).Padding(0, 16).
 		Background(tokens.Surface).Border(1, tokens.Border).
 		AlignItems(ui.Center).Children(func() {
-		ui.Text(c, vm.Title).FontSize(16).Bold().TextColor(t.Text).
+		ui.Text(c, vm.Title).FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text).
 			SingleLine().Ellipsis("…").Shrink(1).MaxWidth(420)
 		ui.Spacer(c)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -370,33 +395,37 @@ func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 				statusPill(c, vm.Status, tokens)
 			}
 			ui.Text(c, fmt.Sprintf("Run rev %d · Design rev %d · AsterDoc rev %d",
-				vm.Revision, vm.DesignRevision, vm.AsterDocRevision)).FontSize(11).
+				vm.Revision, vm.DesignRevision, vm.AsterDocRevision)).FontSize(float32(tokens.TextMeta)).
 				TextColor(t.TextMuted)
-			ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(11).
+			ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(float32(tokens.TextMeta)).
 				TextColor(t.TextMuted).FontFeatures("tnum")
 		})
 	})
 }
 
 func statusPill(c *ui.Context, status string, tokens theme.Tokens) {
+	label := treeStatusLabel(status)
+	if label == "" {
+		label = "未开始"
+	}
 	bg, fg := tokens.NeutralBg, tokens.NeutralText
-	switch status {
-	case "completed", "done":
-		bg, fg = tokens.SuccessBg, tokens.SuccessText
-	case "running", "in_progress", "active":
+	switch label {
+	case "进行中":
 		bg, fg = tokens.WarningBg, tokens.WarningText
-	case "blocked", "error":
+	case "已完成":
+		bg, fg = tokens.SuccessBg, tokens.SuccessText
+	case "阻塞":
 		bg, fg = tokens.DangerBg, tokens.DangerText
 	}
 	ui.Row(c).Padding(3, 9).Radius(6).Background(bg).Children(func() {
-		ui.Text(c, status).FontSize(11).Bold().TextColor(fg)
+		ui.Text(c, label).FontSize(float32(tokens.TextMeta)).Bold().TextColor(fg)
 	})
 }
 
 // flowRail is the vertical execution navigation on the left (UX-STATE).
 func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline bool) {
 	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3), t.Space(2)).Children(func() {
-		ui.Text(c, "实验流程").FontSize(11).Bold().TextColor(t.TextMuted).
+		ui.Text(c, "实验流程").FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.TextMuted).
 			Padding(0, 0, t.Space(2), 0)
 		if len(s.VM.TreeIssues) > 0 {
 			ui.Row(c).FillWidth().Padding(6, 8).Radius(6).Background(tokens.WarningBg).
@@ -523,14 +552,14 @@ func treeStatusColor(status string, t *ui.Theme, tokens theme.Tokens) ui.Color {
 
 func treeStatusLabel(status string) string {
 	switch status {
-	case "pending", "not_started", "not-started":
+	case "pending", "not_started", "not-started", "planned":
 		return "未开始"
 	case "current", "running", "in_progress":
 		return "进行中"
 	case "completed", "done":
 		return "已完成"
 	case "blocked":
-		return "已阻塞"
+		return "阻塞"
 	default:
 		return ""
 	}
@@ -652,11 +681,12 @@ func statusDot(c *ui.Context, status TaskStatus, t *ui.Theme, tokens theme.Token
 	ui.Box(c).Size(8, 8).Radius(4).Shrink(0).Background(color)
 }
 
-// taskWorkspace is the task workspace plus read-only history and Run timeline tabs.
+// taskWorkspace is the narrow single column: recording first, then the
+// procedure metadata collapsed below it (UX-P1, UX-LAYOUT).
 func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	task := s.selectedTask()
 	if task == nil {
-		ui.Text(c, "选择一个步骤查看操作说明").FontSize(13).TextColor(t.TextMuted)
+		ui.Text(c, "选择一个步骤查看操作说明").FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
 		return
 	}
 	ui.Column(c).FillWidth().Gap(12).Children(func() {
@@ -670,24 +700,46 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			timelineTab(c, s, t, tokens)
 			return
 		}
-		if s.shouldStack(c) {
-			recordingLayer(c, s, t, tokens, task)
-			open := s.ShowProcedure
-			components.Collapsible(c, "操作说明与元数据", &open, components.CollapsibleOptions{}, func() {
-				procedureLayer(c, s, t, tokens, task)
-			})
-			s.ShowProcedure = open
-		} else {
-			ui.Row(c).FillWidth().Gap(16).Children(func() {
-				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-					procedureLayer(c, s, t, tokens, task)
-				})
-				ui.Column(c).Width(420).Shrink(0).Children(func() {
-					recordingLayer(c, s, t, tokens, task)
-				})
-			})
-		}
+		recordingLayer(c, s, t, tokens, task)
+		open := s.ShowProcedure
+		components.Collapsible(c, "操作说明与元数据", &open, components.CollapsibleOptions{}, func() {
+			procedureLayer(c, s, t, tokens, task)
+		})
+		s.ShowProcedure = open
 	})
+}
+
+// recordingWorkspace is the middle column at ≥1100: the same record projection
+// as the narrow layout, reusing RecordingView (no second fact store).
+func recordingWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
+	task := s.selectedTask()
+	if task == nil {
+		ui.Text(c, "选择一个步骤查看操作说明").FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
+		return
+	}
+	ui.Column(c).FillWidth().Gap(12).Children(func() {
+		tab := &s.WorkspaceTab
+		components.Tabs(c, tab, components.TabsHighlight, "任务", "历史", "时间线")
+		switch *tab {
+		case 1:
+			historyTab(c, s, t, tokens, task)
+			return
+		case 2:
+			timelineTab(c, s, t, tokens)
+			return
+		}
+		recordingLayer(c, s, t, tokens, task)
+	})
+}
+
+// propertiesPanel is the compact right column: the frozen procedure, its live
+// checks, and the collapsed raw identifiers (UX-P2, UX-LAYOUT).
+func propertiesPanel(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
+	task := s.selectedTask()
+	if task == nil {
+		return
+	}
+	procedureLayer(c, s, t, tokens, task)
 }
 
 func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
@@ -801,17 +853,53 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 			})
 		}
 
-		frozen := []string{fallback(task.StepPath), fallback(task.AssayID, "未绑定"), fallback(task.Timepoint, "未绑定")}
-		if strings.TrimSpace(task.StepID) != "" {
-			frozen = append(frozen, "步骤 ID "+task.StepID)
+		if identity := frozenIdentity(task); len(identity) > 0 {
+			if s.shouldStack(c) {
+				// The narrow procedure panel is itself collapsed, so its body
+				// may carry the identifiers directly: one click on
+				// 操作说明与元数据 reveals them (UX-P2).
+				ui.Text(c, "技术属性 · "+strings.Join(identity, " · ")).
+					FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+			} else {
+				open := s.ShowTechnical
+				components.Collapsible(c, "技术属性（只读）", &open, components.CollapsibleOptions{}, func() {
+					ui.Column(c).FillWidth().Gap(2).Children(func() {
+						for _, line := range identity {
+							ui.Text(c, line).FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+						}
+					})
+				})
+				s.ShowTechnical = open
+			}
 		}
-		if strings.TrimSpace(task.ProtocolVersionID) != "" {
-			frozen = append(frozen, "协议版本 "+task.ProtocolVersionID)
-		}
-		// Frozen identity is informational only; UX-STATE and UX-P2.
-		ui.Text(c, "冻结信息（只读 · 已冻结） · "+strings.Join(frozen, " · ")).
-			FontSize(t.Rem(.68)).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 	})
+}
+
+// frozenIdentity lists the raw step/block/protocol identifiers. They are hidden
+// behind the properties disclosure by default (UX-P2).
+func frozenIdentity(task *RunTaskViewModel) []string {
+	if task == nil {
+		return nil
+	}
+	var out []string
+	if v := strings.TrimSpace(task.StepPath); v != "" {
+		out = append(out, "路径 "+v)
+	}
+	if v := strings.TrimSpace(task.AssayID); v != "" {
+		out = append(out, "检测 "+v)
+	}
+	if v := strings.TrimSpace(task.StepID); v != "" {
+		out = append(out, "步骤 ID "+v)
+	}
+	if v := strings.TrimSpace(task.ProtocolVersionID); v != "" {
+		out = append(out, "协议版本 "+v)
+	}
+	for _, m := range task.Modules {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			out = append(out, "资源 "+id)
+		}
+	}
+	return out
 }
 
 // canMarkComplete keeps the no-readout completion path exclusive with checks
@@ -879,17 +967,17 @@ func statChip(c *ui.Context, label string, t *ui.Theme, tokens theme.Tokens) {
 }
 
 func taskStatusPill(c *ui.Context, status TaskStatus, t *ui.Theme, tokens theme.Tokens) {
-	label, bg, fg := "未开始", tokens.NeutralBg, tokens.NeutralText
+	bg, fg := tokens.NeutralBg, tokens.NeutralText
 	switch status {
 	case TaskStatusCurrent:
-		label, bg, fg = "进行中", tokens.WarningBg, tokens.WarningText
+		bg, fg = tokens.WarningBg, tokens.WarningText
 	case TaskStatusCompleted:
-		label, bg, fg = "已完成", tokens.SuccessBg, tokens.SuccessText
+		bg, fg = tokens.SuccessBg, tokens.SuccessText
 	case TaskStatusBlocked:
-		label, bg, fg = "已阻塞", tokens.DangerBg, tokens.DangerText
+		bg, fg = tokens.DangerBg, tokens.DangerText
 	}
 	ui.Row(c).Padding(2, 7).Radius(5).Background(bg).Children(func() {
-		ui.Text(c, label).FontSize(t.Rem(.68)).Bold().TextColor(fg)
+		ui.Text(c, StatusLabel(status)).FontSize(t.Rem(.68)).Bold().TextColor(fg)
 	})
 }
 
@@ -919,9 +1007,8 @@ func moduleChip(c *ui.Context, m ModuleRef, t *ui.Theme, tokens theme.Tokens) {
 	ui.Row(c).Padding(4, 9).Radius(6).Background(tokens.Elevated).
 		Border(1, tokens.Border).Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, moduleLabel(m.Kind, m.Title)).FontSize(t.Rem(.76)).TextColor(t.Text)
-		if m.ID != "" {
-			ui.Text(c, m.ID).FontSize(t.Rem(.66)).TextColor(t.TextMuted)
-		}
+		// The raw module id is provenance: it stays in the properties
+		// disclosure instead of the default view (UX-P2).
 		if m.Role != "" {
 			ui.Text(c, m.Role).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		}
