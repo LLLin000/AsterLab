@@ -1,0 +1,38 @@
+LB-08 acceptance checks (command -> exit code -> result)
+
+cargo test --bin labworkbench
+  exit=0, 46 passed; 0 failed; 0 ignored
+  includes cli::tests::asset_link_update_changes_only_coordinates_and_records_the_previous_values,
+           asset_link_update_rejects_invalid_coordinates_and_unknown_links_without_writing,
+           asset_link_update_rejects_omitted_coordinate_fields_instead_of_clearing_them,
+           asset_link_update_clears_timepoint_and_fov_only_when_explicitly_null
+
+cargo test --manifest-path crates/asterlab-core/Cargo.toml
+  exit=0, 413 passed + 3 passed + 6 passed + 2 passed; 0 failed
+
+cargo run --bin labworkbench -- schema asset.link.update
+  exit=0, stdout is the success envelope (ok=true, tool=asset.link.update)
+  input_schema.required = ["id","well_id","timepoint","fov_index"]
+  input_schema.properties = actor_id, fov_index, id, timepoint, well_id
+  output_schema.contains(record, event) -> asset_link / asset_link_event record schemas
+
+Real CLI update (temporary data dir seeded by scripts/rc3-fixture.py; transcript in asset-link-update-run.txt)
+  exit=0 for asset.link, asset.link.update, asset.list, asset.events, run.workspace
+  record id stable across update: true
+  file identity stable (id/rootId/relativePath/size/modTime/mediaType/availability): true
+  sha256 unchanged: true (4a48ee83c8efd5b3341e452920279217892c719ba4cbb16282d11bf87072f5e8)
+  association unchanged (runId/taskKey/sampleId): true
+  coordinates changed: A1_t6h_fov01 -> B2_t12h_fov02
+  updated event carries previous = {wellId:A1, timepoint:t6h, fovIndex:1, coordinateId:A1_t6h_fov01}
+  asset.list and run.workspace read back the new coordinates (linked_assets, asset_coverage)
+  rejected calls wrote nothing: true
+
+Stable error paths (same transcript)
+  fov_index=0          -> exit=2 INVALID_INPUT "fov_index must start at 1"
+  malformed well_id    -> exit=2 INVALID_INPUT "孔位格式应为字母行号加数字列号，例如 B4"
+  omitted timepoint    -> exit=2 INVALID_INPUT "timepoint is required; pass null to clear it"
+  unknown record id    -> exit=3 NOT_FOUND "记录不存在：asset-link-does-not-exist"
+
+Path hygiene
+  Evidence files contain no task-worktree absolute path; repository paths are rewritten to <repo>.
+  stderr build diagnostics for the schema run were kept out of the JSON artifact (stdout only).

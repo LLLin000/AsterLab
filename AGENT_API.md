@@ -80,7 +80,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `execution_event.create` | 追加结构化操作、材料使用、数值测量、偏差或观察事件 | create |
 | `readout.submit` / `readout.batch` | 幂等提交单条读数，或表格/孔板批量读数（`cells` 或 CSV），一次事务写入一条 measurement 事件 | create |
 | `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
-| `asset.link` / `asset.unlink` / `asset.list` / `asset.events` | 关联或解除 Run 任务的本地文件引用（可带孔位/时间点/视野坐标），或按 Run 查询链接与事件历史 | link/unlink 是，list/events 否 |
+| `asset.link` / `asset.link.update` / `asset.unlink` / `asset.list` / `asset.events` | 关联、就地更新坐标或解除 Run 任务的本地文件引用，或按 Run 查询链接与事件历史 | link/update/unlink 是，list/events 否 |
 | `pantry.list` / `label.export` | 只读列出储藏室条目及其效期状态，或导出贴标/扫码插件用的短 ID 清单 | 否 |
 | `pantry.upsert` | 创建或整条覆盖一个储藏室条目 | create/update |
 | `pantry.delete` | 停用并隐藏一个储藏室条目；短标签 ID 保留不复用 | delete |
@@ -157,6 +157,16 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - 旧记录的链接缺这三个字段：回读为 `null`，不补默认值、不迁移。
 - `run.workspace` 的 `linked_assets[]` 直接复用同一套字段；`asset_coverage[]` 只聚合带 `well_id` 的链接，按 `well_id`、`timepoint` 升序排列，`fov_indices[]` 与 `asset_ids[]` 去重升序。没有 `well_id` 的链接不进入分组，但仍出现在 `linked_assets[]`。
 - MyGo 侧 `runs.AssetLink` 镜像同名字段与 JSON tag；`FOVIndex == 0` 表示未记录。
+
+`asset.link.update` 就地改写一条已存在链接的坐标，不重新读取文件：
+
+- 输入 `{id, well_id, timepoint, fov_index, actor_id?}`。三个坐标键必须出现；`timepoint` / `fov_index` 用显式 `null` 表示清空，省略键返回 `INVALID_INPUT` —— “没传”不等于“清空”。
+- 只重写 `link.wellId`、`link.timepoint`、`link.fovIndex` 与重新派生的 `link.coordinateId`；`id`、`rootId`、`relativePath`、`size`、`modTime`、`sha256`、`mediaType`、`availability`、`runId`、`taskKey`、`sampleId`、`linkedAt` 原样保留。
+- 记录更新与一条 `asset_link_event` 在同一事务提交：`action = "updated"`，`previous` 为更新前的 `{wellId, timepoint, fovIndex, coordinateId}`。`asset.events` 的 `action` 过滤新增 `updated`。
+- 输出 `{record, event}`，与 `asset.link` 同形状。未知或已解绑的记录返回 `NOT_FOUND`（退出码 3）；坐标非法、缺字段或 `id` 不是 `asset_link` 返回 `INVALID_INPUT`（退出码 2）。
+- 记录 ID 是创建时的定位句柄，更新坐标不重算。移动坐标用本命令；用 `asset.link` 重新关联同一文件与新坐标会因 ID 由坐标派生而新增一条记录。
+- `runs.RunService` 的原生桥接尚未暴露该命令（LB-10）；本卡只保证 CLI 契约。
+- 完整规则与回滚说明见 [docs/contracts/asset-coordinates-v1.md](docs/contracts/asset-coordinates-v1.md) §5。
 
 ## 读数提交（readout.*）
 

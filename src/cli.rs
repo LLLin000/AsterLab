@@ -11857,6 +11857,11 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 unlink_asset_link(&mut db, &i.id, i.actor_id.as_deref().unwrap_or(""))?;
             Ok(json!({"removed":removed,"event":event}))
         }
+        "asset.link.update" => {
+            let i: AssetLinkUpdateInput = parse_input(path)?;
+            let (record, event) = update_asset_link(&mut db, &i)?;
+            Ok(json!({"record":record,"event":event}))
+        }
         "asset.list" => {
             let i: AssetListInput = parse_input(path)?;
             Ok(json!({"records":list_asset_links(&db,&i.run_id)?}))
@@ -11981,7 +11986,7 @@ fn asset_link_event_payload_schema() -> Value {
         "required":["id","action","assetId","rootId","relativePath","mediaType","size","modTime","sha256","availability","link","at","actorId"],
         "properties":{
             "id":{"type":"string"},
-            "action":{"type":"string","enum":["linked","unlinked"]},
+            "action":{"type":"string","enum":["linked","unlinked","updated"]},
             "assetId":{"type":"string"},
             "rootId":{"type":"string"},
             "relativePath":{"type":"string"},
@@ -11991,6 +11996,7 @@ fn asset_link_event_payload_schema() -> Value {
             "sha256":{"type":"string","maxLength":64},
             "availability":{"type":"string","enum":["available","unavailable"]},
             "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":1},"coordinateId":{"type":["string","null"]}}},
+            "previous":{"type":"object","additionalProperties":false,"required":["wellId","timepoint","fovIndex","coordinateId"],"properties":{"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"]},"coordinateId":{"type":["string","null"]}}},
             "at":{"type":"string"},
             "actorId":{"type":"string"}
         }
@@ -12270,6 +12276,9 @@ fn result_schema(tool: &str) -> Value {
         "asset.link" => {
             json!({"type":"object","additionalProperties":false,"required":["record","event"],"properties":{"record":record_schema("asset_link"),"event":record_schema("asset_link_event")}})
         }
+        "asset.link.update" => {
+            json!({"type":"object","additionalProperties":false,"required":["record","event"],"properties":{"record":record_schema("asset_link"),"event":record_schema("asset_link_event")}})
+        }
         "asset.unlink" => {
             json!({"type":"object","additionalProperties":false,"required":["removed","event"],"properties":{"removed":record_schema("asset_link"),"event":record_schema("asset_link_event")}})
         }
@@ -12505,6 +12514,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         "asset.link" => {
             json!({"type":"object","additionalProperties":false,"required":["root_id","root_dir","run_id","task_key"],"anyOf":[{"required":["relative_path"]},{"required":["path"]}],"properties":{"root_id":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S","description":"逻辑根 ID；只保存它和相对路径，不保存绝对路径"},"root_dir":{"type":"string","minLength":1,"description":"本机根目录；仅用于本次读取元数据与计算 sha256，不写入记录"},"relative_path":{"type":"string","minLength":1,"description":"相对 root_dir 的文件路径；不得包含 .. 或绝对路径"},"path":{"type":"string","minLength":1,"description":"本机文件绝对路径；与 root_dir 一起用于推导 relative_path"},"run_id":{"type":"string","minLength":1},"task_key":{"type":"string","minLength":1,"maxLength":1000},"sample_id":{"type":["string","null"],"maxLength":200},"well_id":{"type":["string","null"],"maxLength":40},"timepoint":{"type":["string","null"],"maxLength":100},"fov_index":{"type":["integer","null"],"minimum":0},"actor_id":{"type":["string","null"],"maxLength":200}}})
         }
+        "asset.link.update" => {
+            json!({"type":"object","additionalProperties":false,"required":["id","well_id","timepoint","fov_index"],"properties":{"id":{"type":"string","minLength":1,"description":"asset_link 记录 ID"},"well_id":{"type":"string","minLength":1,"maxLength":40,"description":"新孔位，如 A1；必填，不能用来清空坐标"},"timepoint":{"type":["string","null"],"maxLength":100,"description":"新时间点；显式 null 表示该链接不记录时间点"},"fov_index":{"type":["integer","null"],"minimum":1,"description":"新视野序号，从 1 开始；显式 null 表示不记录视野"},"actor_id":{"type":["string","null"],"maxLength":200}}})
+        }
         "asset.unlink" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1,"description":"asset_link 记录 ID"},"actor_id":{"type":["string","null"],"maxLength":200}}})
         }
@@ -12512,7 +12524,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1}}})
         }
         "asset.events" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"action":{"type":"string","enum":["linked","unlinked"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"action":{"type":"string","enum":["linked","unlinked","updated"]}}})
         }
         "import.study.preview" | "import.study.apply" => {
             json!({"type":"object","additionalProperties":false,"required":["project"],"properties":{"project":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"description":{"type":"string"}}},"designs":{"type":"array","maxItems":500,"items":design_schema()},"protocols":{"type":"array","maxItems":500,"items":{"type":"object","additionalProperties":false,"required":["title","body"],"properties":{"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"body":{"type":"string"}}}}}})
@@ -12779,6 +12791,7 @@ fn tool_specs() -> Vec<Value> {
         "record.list",
         "record.get",
         "asset.link",
+        "asset.link.update",
         "asset.unlink",
         "asset.list",
         "asset.events",
@@ -12917,6 +12930,7 @@ fn tool_description(tool: &str) -> &'static str {
         "record.list" => "按允许的 kind 和项目筛选记录，不返回停用的旧草稿。",
         "record.get" => "按 id 读取一条允许的记录，不返回停用的旧草稿。",
         "asset.link" => "关联本地文件到 Run 任务：只保存逻辑根、相对路径与实测 size/mtime/类型/sha256，不复制文件；同时追加 linked 事件。",
+        "asset.link.update" => "把一条已有资产链接的坐标（well_id/timepoint/fov_index）就地改成新坐标；文件身份与 sha256 不变，旧坐标写进 updated 事件。",
         "asset.unlink" => "解除一条 asset_link 并追加 unlinked 事件；只删除引用，不删除原文件。",
         "asset.list" => "按 Run 查询当前有效的本地文件引用；只读。",
         "asset.events" => "按 Run 查询 linked/unlinked 事件历史；只读。",
@@ -13009,6 +13023,7 @@ fn tool_effects(tool: &str) -> &'static str {
         "readout.submit" => "为运行追加一条 measurement 执行事件；相同幂等键返回已有记录，不重复写入。",
         "readout.batch" => "在同一事务中为运行追加一条 measurement 执行事件；任一行校验失败则整体回滚。",
         "asset.link" => "读取本地文件元数据并流式计算 sha256；创建或刷新一条 asset_link，并追加 linked 事件；不复制文件。",
+        "asset.link.update" => "在一个事务中更新 asset_link 的坐标字段并追加 updated 事件；不改写文件身份、链接 ID 或 sha256。",
         "asset.unlink" => "删除一条 asset_link 引用并追加 unlinked 事件；不删除原文件。",
         "asset.list" | "asset.events" => "只读；不修改数据库。",
         "formula.create" => "创建一条公式记录。",
@@ -13055,6 +13070,33 @@ struct AssetUnlinkInput {
     id: String,
     #[serde(default)]
     actor_id: Option<String>,
+}
+
+/// `asset.link.update` carries the complete coordinate triple. An omitted field
+/// would silently clear a recorded coordinate, so `timepoint` / `fov_index`
+/// use the double-option idiom: `None` = key absent, `Some(None)` = explicit
+/// `null`. Only explicit `null` clears a field.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetLinkUpdateInput {
+    id: String,
+    well_id: String,
+    #[serde(default, deserialize_with = "deserialize_some")]
+    timepoint: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_some")]
+    fov_index: Option<Option<u32>>,
+    #[serde(default)]
+    actor_id: Option<String>,
+}
+
+/// Wraps a present JSON value (including `null`) in `Some` so the caller can
+/// tell "absent" apart from "explicitly null" with `#[serde(default)]`.
+fn deserialize_some<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
@@ -13530,21 +13572,7 @@ pub(crate) fn unlink_asset_link(
         actor_id
     };
     let event_id = format!("asset-event-{}", Uuid::new_v4());
-    let event = json!({
-        "id": event_id,
-        "action": "unlinked",
-        "assetId": data["id"],
-        "rootId": data["rootId"],
-        "relativePath": data["relativePath"],
-        "mediaType": data["mediaType"],
-        "size": data["size"],
-        "modTime": data["modTime"],
-        "sha256": data["sha256"],
-        "availability": data["availability"],
-        "link": data["link"],
-        "at": at,
-        "actorId": actor_id
-    });
+    let event = asset_link_event_from_data(&event_id, "unlinked", &data, &at, actor_id, None);
     let tx = db
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| CliError::internal(e.to_string()))?;
@@ -13568,14 +13596,137 @@ pub(crate) fn unlink_asset_link(
     Ok((record, get(db, &event_id)?))
 }
 
+/// Builds one `asset_link_event` payload from the link's durable data so the
+/// event always mirrors the record it describes. `previous` is present only on
+/// `updated` events and carries the replaced coordinate values.
+fn asset_link_event_from_data(
+    event_id: &str,
+    action: &str,
+    data: &Value,
+    at: &str,
+    actor_id: &str,
+    previous: Option<Value>,
+) -> Value {
+    let mut event = json!({
+        "id": event_id,
+        "action": action,
+        "assetId": data["id"],
+        "rootId": data["rootId"],
+        "relativePath": data["relativePath"],
+        "mediaType": data["mediaType"],
+        "size": data["size"],
+        "modTime": data["modTime"],
+        "sha256": data["sha256"],
+        "availability": data["availability"],
+        "link": data["link"],
+        "at": at,
+        "actorId": actor_id
+    });
+    if let Some(previous) = previous {
+        event["previous"] = previous;
+    }
+    event
+}
+
+/// `asset.link.update`: replaces the coordinate triple of one existing link.
+///
+/// Only `link.wellId/timepoint/fovIndex/coordinateId` change. The file identity
+/// (`id`, `rootId`, `relativePath`, `sha256`, size, modTime, mediaType,
+/// availability) and the association (`runId`, `taskKey`, `sampleId`) are
+/// copied verbatim. The record id is the link's creation handle and is not
+/// recomputed. The update and the `updated` event land in one transaction; a
+/// validation failure leaves both untouched.
+fn update_asset_link(
+    db: &mut Connection,
+    request: &AssetLinkUpdateInput,
+) -> Result<(Value, Value), CliError> {
+    let id = request.id.trim();
+    let actor_id = request.actor_id.as_deref().unwrap_or("").trim();
+    if actor_id.len() > 200 || actor_id.chars().any(char::is_control) {
+        return Err(CliError::input("actor_id is invalid"));
+    }
+    let well_id = request.well_id.as_str();
+    let timepoint = request
+        .timepoint
+        .clone()
+        .ok_or_else(|| CliError::input("timepoint is required; pass null to clear it"))?;
+    let fov_index = request
+        .fov_index
+        .ok_or_else(|| CliError::input("fov_index is required; pass null to clear it"))?;
+    validate_asset_coordinates(Some(well_id), timepoint.as_deref(), fov_index)?;
+
+    let record = get(db, id)?;
+    if record["kind"] != "asset_link" {
+        return Err(CliError::input("id must point to an asset_link"));
+    }
+    let run_id = record["parent_id"]
+        .as_str()
+        .ok_or_else(|| CliError::internal("asset_link 缺少所属 Run"))?;
+    if !has_kind(db, run_id, "run")? {
+        return Err(CliError::internal("asset_link 所属 Run 不存在"));
+    }
+    let project = record["project_id"].as_str().unwrap_or("");
+    let coordinates = asset_coordinates(Some(well_id), timepoint.as_deref(), fov_index);
+    let at = stamp();
+    let actor_id = if actor_id.is_empty() {
+        record["data"]["actorId"].as_str().unwrap_or("")
+    } else {
+        actor_id
+    };
+
+    let mut data = record["data"].clone();
+    let link = data
+        .get_mut("link")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| CliError::internal("asset_link 缺少 link"))?;
+    let previous = json!({
+        "wellId": link.get("wellId").cloned().unwrap_or(Value::Null),
+        "timepoint": link.get("timepoint").cloned().unwrap_or(Value::Null),
+        "fovIndex": link.get("fovIndex").cloned().unwrap_or(Value::Null),
+        "coordinateId": link.get("coordinateId").cloned().unwrap_or(Value::Null)
+    });
+    for field in ["wellId", "timepoint", "fovIndex", "coordinateId"] {
+        link.insert(field.to_owned(), coordinates[field].clone());
+    }
+    let data_json =
+        serde_json::to_string(&data).map_err(|e| CliError::internal(e.to_string()))?;
+    let event_id = format!("asset-event-{}", Uuid::new_v4());
+    let event = asset_link_event_from_data(&event_id, "updated", &data, &at, actor_id, Some(previous));
+    let event_json =
+        serde_json::to_string(&event).map_err(|e| CliError::internal(e.to_string()))?;
+
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let updated = tx
+        .execute(
+            "UPDATE records SET data_json=?1, updated_at=?2 WHERE id=?3",
+            params![data_json, at, id],
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    if updated != 1 {
+        return Err(CliError::internal("asset_link 在更新时消失"));
+    }
+    tx.execute(
+        "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
+        params![event_id, "asset_link_event", project, run_id, 1i64, event_json, at],
+    )
+    .map_err(|e| CliError::internal(e.to_string()))?;
+    tx.commit()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    Ok((get(db, id)?, get(db, &event_id)?))
+}
+
 pub(crate) fn list_asset_events(
     db: &Connection,
     run_id: &str,
     action: Option<&str>,
 ) -> Result<Value, CliError> {
     if let Some(action) = action {
-        if !matches!(action, "linked" | "unlinked") {
-            return Err(CliError::input("action must be linked or unlinked"));
+        if !matches!(action, "linked" | "unlinked" | "updated") {
+            return Err(CliError::input(
+                "action must be linked, unlinked or updated",
+            ));
         }
     }
     let (kind, _, _, _, _) =
@@ -14814,6 +14965,248 @@ mix_factor_final_concentration: {value: 50, unit: ng/mL}
 
         fs::remove_dir_all(&root_dir).unwrap();
         fs::remove_file(&outside).unwrap();
+    }
+
+    const RECORDS_TABLE: &str = "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);";
+
+    /// Seeds one Run plus one linked asset at `A1 / t6h / fov 1` and returns
+    /// the asset_link record id and the stored payload.
+    fn seed_asset_link(db: &mut Connection) -> (String, Value) {
+        let task_key = seed_asset_run(db);
+        let data = save_asset_link(
+            db,
+            &json!({
+                "asset": {
+                    "id": "asset-1",
+                    "rootId": "project-data",
+                    "relativePath": "d1/a1.tif",
+                    "mediaType": "image",
+                    "size": 2048,
+                    "modTime": "2026-11-15T10:00:00Z",
+                    "sha256": "ab".repeat(32),
+                    "availability": "available",
+                    "link": {
+                        "runId": "run-1",
+                        "taskKey": task_key,
+                        "sampleId": "sample-1",
+                        "wellId": "A1",
+                        "timepoint": "t6h",
+                        "fovIndex": 1
+                    },
+                    "linkedAt": "2026-11-15T10:00:00Z",
+                    "actorId": "tester"
+                }
+            }),
+        )
+        .unwrap();
+        let record_id: String = db
+            .query_row("SELECT id FROM records WHERE kind='asset_link'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        (record_id, data)
+    }
+
+    fn asset_actions(db: &Connection) -> Vec<String> {
+        list_asset_events(db, "run-1", None)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["data"]["action"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn asset_link_update_changes_only_coordinates_and_records_the_previous_values() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(RECORDS_TABLE).unwrap();
+        let (record_id, linked) = seed_asset_link(&mut db);
+
+        let (record, event) = update_asset_link(
+            &mut db,
+            &AssetLinkUpdateInput {
+                id: record_id.clone(),
+                well_id: "B2".into(),
+                timepoint: Some(Some("t12h".into())),
+                fov_index: Some(Some(2)),
+                actor_id: Some("operator".into()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(record["id"], json!(record_id));
+        let data = &record["data"];
+        for (field, expected) in [
+            ("id", json!(linked["id"])),
+            ("rootId", json!("project-data")),
+            ("relativePath", json!("d1/a1.tif")),
+            ("sha256", json!("ab".repeat(32))),
+            ("mediaType", json!("image")),
+            ("size", json!(2048)),
+            ("availability", json!("available")),
+            ("linkedAt", json!("2026-11-15T10:00:00Z")),
+        ] {
+            assert_eq!(data[field], expected, "{field} must not change");
+        }
+        assert_eq!(data["link"]["runId"], json!("run-1"));
+        assert_eq!(data["link"]["taskKey"], linked["link"]["taskKey"]);
+        assert_eq!(data["link"]["sampleId"], json!("sample-1"));
+        assert_eq!(data["link"]["wellId"], json!("B2"));
+        assert_eq!(data["link"]["timepoint"], json!("t12h"));
+        assert_eq!(data["link"]["fovIndex"], json!(2));
+        assert_eq!(data["link"]["coordinateId"], json!("B2_t12h_fov02"));
+
+        assert_eq!(event["kind"], json!("asset_link_event"));
+        assert_eq!(event["data"]["action"], json!("updated"));
+        assert_eq!(event["data"]["assetId"], linked["id"]);
+        assert_eq!(event["data"]["sha256"], json!("ab".repeat(32)));
+        assert_eq!(event["data"]["actorId"], json!("operator"));
+        assert_eq!(event["data"]["link"]["coordinateId"], json!("B2_t12h_fov02"));
+        assert_eq!(
+            event["data"]["previous"],
+            json!({"wellId":"A1","timepoint":"t6h","fovIndex":1,"coordinateId":"A1_t6h_fov01"})
+        );
+
+        let workspace = run_workspace(&db, "run-1").unwrap();
+        assert_eq!(workspace["linked_assets"].as_array().unwrap().len(), 1);
+        assert_eq!(workspace["linked_assets"][0]["asset_id"], linked["id"]);
+        assert_eq!(workspace["linked_assets"][0]["well_id"], json!("B2"));
+        assert_eq!(
+            workspace["linked_assets"][0]["coordinate_id"],
+            json!("B2_t12h_fov02")
+        );
+        assert_eq!(
+            list_asset_links(&db, "run-1").unwrap()[0]["sha256"],
+            json!("ab".repeat(32))
+        );
+        assert_eq!(asset_actions(&db), ["linked", "updated"]);
+        assert_eq!(
+            list_asset_events(&db, "run-1", Some("updated"))
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn asset_link_update_rejects_invalid_coordinates_and_unknown_links_without_writing() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(RECORDS_TABLE).unwrap();
+        let (record_id, _) = seed_asset_link(&mut db);
+        let before = get(&db, &record_id).unwrap();
+
+        let request = |well: &str, timepoint: Option<&str>, fov: Option<u32>| AssetLinkUpdateInput {
+            id: record_id.clone(),
+            well_id: well.into(),
+            timepoint: Some(timepoint.map(str::to_owned)),
+            fov_index: Some(fov),
+            actor_id: None,
+        };
+        for (input, expected) in [
+            (request("A1", Some("t6h"), Some(0)), "fov_index must start at 1"),
+            (request("A1x2", None, None), "孔位格式"),
+            (request("", None, None), "孔位格式"),
+        ] {
+            let error = update_asset_link(&mut db, &input).unwrap_err();
+            assert_eq!(error.code, "INVALID_INPUT", "{:?}", error.message);
+            assert!(error.message.contains(expected), "{:?}", error.message);
+        }
+
+        let mut unknown = request("A1", None, None);
+        unknown.id = "asset-link-missing".into();
+        assert_eq!(
+            update_asset_link(&mut db, &unknown).unwrap_err().code,
+            "NOT_FOUND"
+        );
+
+        let mut wrong_kind = request("A1", None, None);
+        wrong_kind.id = "run-1".into();
+        assert_eq!(
+            update_asset_link(&mut db, &wrong_kind).unwrap_err().code,
+            "INVALID_INPUT"
+        );
+
+        // Every rejected call leaves the record and the event log untouched.
+        assert_eq!(get(&db, &record_id).unwrap(), before);
+        assert_eq!(asset_actions(&db), ["linked"]);
+
+        // An unlinked record is gone for this command too: updating it is
+        // NOT_FOUND, never a resurrected link.
+        unlink_asset_link(&mut db, &record_id, "tester").unwrap();
+        assert_eq!(
+            update_asset_link(&mut db, &request("A1", None, None))
+                .unwrap_err()
+                .code,
+            "NOT_FOUND"
+        );
+        assert_eq!(asset_actions(&db), ["linked", "unlinked"]);
+        assert_eq!(list_asset_links(&db, "run-1").unwrap(), json!([]));
+    }
+
+    #[test]
+    fn asset_link_update_rejects_omitted_coordinate_fields_instead_of_clearing_them() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(RECORDS_TABLE).unwrap();
+        let (record_id, _) = seed_asset_link(&mut db);
+        let before = get(&db, &record_id).unwrap();
+
+        // Only an explicit `null` clears a field; a missing key is rejected.
+        for missing in ["timepoint", "fov_index"] {
+            let mut value = json!({
+                "id": record_id.clone(),
+                "well_id": "B2",
+                "timepoint": "t12h",
+                "fov_index": 2
+            });
+            value.as_object_mut().unwrap().remove(missing);
+            let input: AssetLinkUpdateInput = serde_json::from_value(value).unwrap();
+            let error = update_asset_link(&mut db, &input).unwrap_err();
+            assert_eq!(error.code, "INVALID_INPUT", "{:?}", error.message);
+            assert!(error.message.contains(missing), "{:?}", error.message);
+        }
+        // `well_id` is structurally required: it never parses when omitted.
+        assert!(
+            serde_json::from_value::<AssetLinkUpdateInput>(json!({
+                "id": record_id.clone(), "timepoint": null, "fov_index": null
+            }))
+            .is_err()
+        );
+
+        assert_eq!(get(&db, &record_id).unwrap(), before);
+        assert_eq!(asset_actions(&db), ["linked"]);
+    }
+
+    #[test]
+    fn asset_link_update_clears_timepoint_and_fov_only_when_explicitly_null() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(RECORDS_TABLE).unwrap();
+        let (record_id, _) = seed_asset_link(&mut db);
+
+        let (record, event) = update_asset_link(
+            &mut db,
+            &AssetLinkUpdateInput {
+                id: record_id,
+                well_id: "C3".into(),
+                timepoint: Some(None),
+                fov_index: Some(None),
+                actor_id: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(record["data"]["link"]["wellId"], json!("C3"));
+        assert_eq!(record["data"]["link"]["timepoint"], Value::Null);
+        assert_eq!(record["data"]["link"]["fovIndex"], Value::Null);
+        assert_eq!(record["data"]["link"]["coordinateId"], json!("C3"));
+        assert_eq!(record["data"]["link"]["sampleId"], json!("sample-1"));
+        assert_eq!(record["data"]["sha256"], json!("ab".repeat(32)));
+        assert_eq!(event["data"]["actorId"], json!("tester"));
+        assert_eq!(
+            event["data"]["previous"],
+            json!({"wellId":"A1","timepoint":"t6h","fovIndex":1,"coordinateId":"A1_t6h_fov01"})
+        );
     }
 
     struct AgentEditFixture {
