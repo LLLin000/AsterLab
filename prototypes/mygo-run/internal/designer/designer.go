@@ -123,6 +123,16 @@ type Designer struct {
 
 	OnCreateRun func(runs.RunSnapshot)
 
+	// CanvasMode selects the workflow canvas instead of the default step-card
+	// list. It is view state only: both views read the same design.
+	CanvasMode bool
+	// Section selects the Design pane (流程 / 12 孔板 / 配液单). Switching it
+	// leaves the selected step and the draft untouched.
+	Section Section
+	// PropertiesOpen remembers each card's folded technical bindings. The
+	// pointers are stable across frames so the Collapsible owns its own state.
+	PropertiesOpen map[string]*bool
+
 	InspectorOpen         bool
 	InspectorUserToggled bool
 	InspectorDock         Dock
@@ -157,6 +167,7 @@ func New(designID, title string, revision uint64, svc runs.DesignService) *Desig
 		Service:        svc,
 		InspectorOpen:  true,
 		Empty:          true,
+		PropertiesOpen: map[string]*bool{},
 	}
 	d.Editor.OnSelect = func(id string) {
 		d.historySuspend = true
@@ -1161,6 +1172,9 @@ func toolbar(c *ui.Context, d *Designer) {
 		}
 		saveBadge(c, d)
 		island(func() {
+			if components.IconButton(c, lucide.LayoutList(), "列表视图", components.IconButtonPlain).Clicked() {
+				d.CanvasMode = false
+			}
 			if components.IconButton(c, lucide.Play(), "创建运行", components.IconButtonPlain).Clicked() {
 				d.RequestCreateRun(context.Background())
 			}
