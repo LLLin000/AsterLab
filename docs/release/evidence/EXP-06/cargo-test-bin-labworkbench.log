@@ -1,0 +1,118 @@
+warning: unused variable: `assay_index`
+    --> src/cli.rs:3866:9
+     |
+3866 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+     --> src/cli.rs:10767:17
+      |
+10767 |             let mut warnings: Vec<String> = Vec::new();
+      |                 ----^^^^^^^^
+      |                 |
+      |                 help: remove this `mut`
+      |
+      = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `ywells` is never used
+    --> src/cli.rs:3826:4
+     |
+3826 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+     |    ^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `create_asterdoc_design` is never used
+    --> src/cli.rs:4202:15
+     |
+4202 | pub(crate) fn create_asterdoc_design(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `list_designs` is never used
+    --> src/cli.rs:8814:15
+     |
+8814 | pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^
+
+warning: function `load_design` is never used
+    --> src/cli.rs:8818:15
+     |
+8818 | pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^
+
+warning: function `revise_design_record` is never used
+    --> src/cli.rs:8876:15
+     |
+8876 | pub(crate) fn revise_design_record(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_run_for_design` is never used
+    --> src/cli.rs:8948:15
+     |
+8948 | pub(crate) fn create_run_for_design(
+     |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `save_asset_link` is never used
+     --> src/cli.rs:13278:15
+      |
+13278 | pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Value, CliError> {
+      |               ^^^^^^^^^^^^^^^
+
+warning: field `project_id` is never read
+     --> src/cli.rs:15328:9
+      |
+15326 |     struct StepEditFixture {
+      |            --------------- field in this struct
+15327 |         data_dir: std::path::PathBuf,
+15328 |         project_id: String,
+      |         ^^^^^^^^^^
+
+warning: `labworkbench` (bin "labworkbench" test) generated 10 warnings (run `cargo fix --bin "labworkbench" -p labworkbench --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 0.07s
+     Running unittests src/main.rs (<target-dir>/debug/build/labworkbench/126ec1ea51a95b3d/out/labworkbench-126ec1ea51a95b3d)
+
+running 39 tests
+test cli::tests::assess_and_run_creation_reject_unmaterialized_steps ... ok
+test cli::tests::assess_includes_run_creation_audit_warnings ... ok
+test cli::tests::asset_link_rejects_paths_outside_the_root_without_writing ... ok
+test cli::tests::asterdoc_nests_and_promotes_steps_by_updating_paths ... ok
+test cli::tests::asterdoc_parity_samples ... ok
+test cli::tests::asterdoc_plate_mix_fields_match_go_calculator_cases ... ok
+test cli::tests::asterdoc_reorders_steps_only_with_a_complete_unique_permutation ... ok
+test cli::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
+test cli::tests::compiler_keeps_sample_identity_explicit_across_timepoints ... ok
+test cli::tests::agent_edit_commit_appends_a_version_and_keeps_the_frozen_run ... ok
+test cli::tests::compiler_records_the_block_version_each_step_reuses ... ok
+test cli::tests::diagnostics_flag_is_parsed_with_input_in_any_order ... ok
+test cli::tests::error_envelope_carries_structured_diagnostics ... ok
+test cli::tests::concurrent_agent_edit_commits_leave_exactly_one_winner ... ok
+test cli::tests::agent_tools_are_discoverable ... ok
+test cli::tests::manifest_rule_must_be_registered_in_rust ... ok
+test cli::tests::failed_schema_migration_preserves_database ... ok
+test cli::tests::plate_mix_calculators_match_the_huvec_case ... ok
+test cli::tests::protocol_block_content_accepts_legacy_and_valid_specs_but_rejects_invalid_specs ... ok
+test cli::tests::execution_event_rejects_unknown_pantry_item_and_warns_on_expired_one ... ok
+test cli::tests::read_only_tools_do_not_write ... ok
+test cli::tests::readout_batch_accepts_csv_cells ... ok
+test cli::tests::readout_batch_writes_one_event_or_nothing ... ok
+test cli::tests::readout_submit_replays_the_first_record_and_isolates_runs ... ok
+test cli::tests::protocol_version_queries_return_expansion_and_stable_not_found ... ok
+test cli::tests::remove_step_cleans_workflow_order_and_edges_when_unreferenced ... ok
+test cli::tests::remove_step_rejects_run_and_step_references_without_revision_changes ... ok
+test cli::tests::rule_skip_event_requires_skip_status_and_projects_ad_hoc_marker ... ok
+test cli::tests::readout_tools_are_discoverable_and_write ... ok
+test cli::tests::schema_migration_legacy_v0 ... ok
+test cli::tests::step_edit_rejects_a_version_conflict_and_a_wrong_unit_without_writing ... ok
+test cli::tests::step_edit_schema_is_registered_for_validate_and_commit ... ok
+test cli::tests::step_edit_commit_creates_child_and_parent_versions_and_keeps_the_frozen_run ... ok
+test cli::tests::step_materialization_preserves_frozen_run_protocol_block_revision ... ok
+test cli::tests::success_envelope_derives_diagnostics_from_validation_issues ... ok
+test cli::tests::pantry_commands_project_expiry_and_export_stable_label_codes ... ok
+test cli::tests::step_edit_tool_is_registered ... ok
+test cli::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
+test cli::tests::asset_link_hashes_a_large_file_without_copying_it ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.77s
+

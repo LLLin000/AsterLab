@@ -80,6 +80,8 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `execution_event.create` | 追加结构化操作、材料使用、数值测量、偏差或观察事件 | create |
 | `readout.submit` / `readout.batch` | 幂等提交单条读数，或表格/孔板批量读数（`cells` 或 CSV），一次事务写入一条 measurement 事件 | create |
 | `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
+| `pantry.list` / `label.export` | 只读列出储藏室条目及其效期状态，或导出贴标/扫码插件用的短 ID 清单 | 否 |
+| `pantry.upsert` | 创建或整条覆盖一个储藏室条目 | create/update |
 | `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
 | `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
 | `calculator.*`（4 个） | 稀释、溶液质量、系列稀释、反应体积 | 否 |
@@ -152,6 +154,30 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - 幂等：`readout.submit` 的键是 `(run_id, step_path, endpoint, sample_id, timepoint)`；`readout.batch` 的键是同一组身份字段按孔位（`plate_id, row, column, field`）展开后的集合——同一批里多个孔位可以共享 endpoint/sample/timepoint，只用卡片元组会互相覆盖。`run_id` 属于键，因此不同 Run 的同名读数互不影响。重复提交返回首次记录并置 `replayed=true`；值属于内容不属于身份，故重放不会覆盖已记录值。
 - 原子性：整批在一个事务内校验并写入一条 `measurement` 事件；任何一行失败都返回 `INVALID_INPUT` 并附 `issues[]`，数据库不产生部分事件。`readout.batch` 必须能唯一确定本次 Run 的一块孔板，否则返回 `unresolved_plate` / `ambiguous_plate` / `unknown_plate`，不猜孔位。
 - 与 `execution_event.create` 的关系：后者仍是多用途底层追加接口（含操作、材料、检查等）；`readout.*` 只覆盖读数，`step_status`、`checks`、`controls` 不通过它写入。
+
+## 储藏室台账（`pantry.*`）与贴标导出（`label.export`）
+
+储藏室是**可选的轻量台账**，不是 Design/Run 的必填依赖。它存在辅助 SQLite 表 `pantry_items`（`id`、`label_code`、`project_id`、`name`、`location`、`purchased_on`、`opened_on`、`shelf_life_days`、`opened_shelf_life_days`、`exhausted`、`revision`、时间戳），不进入 `records`，不参与 Design/Protocol/Run 冻结，也不改变 `PRAGMA user_version`。不建条目时系统行为与之前完全相同。
+
+- `pantry.upsert`：输入 `{id?, project_id?, name, location?, purchased_on?, opened_on?, shelf_life_days?, opened_shelf_life_days?, exhausted?, expected_revision?}`。省略 `id` 创建新条目；提供 `id` 时必须已存在。这是**整条覆盖**写入：省略的可选字段会被清空，不做字段级合并。`project_id` 提供时必须指向已存在的项目。`expected_revision` 提供时按版本校验，不一致返回 `REVISION_CONFLICT`（退出码 4）；省略则不校验版本。日期必须是真实存在的 `YYYY-MM-DD`；开封日早于购入日、保质期不是 1–3650 天、名称/位置超长都返回 `INVALID_INPUT`（退出码 2）。输出 `{item}`，含 `label_code` 与当前 `status`。
+- `pantry.list`：输入 `{project_id?, include_exhausted?, as_of?, near_expiry_days?}`，输出 `{as_of, near_expiry_days, items[]}`。`as_of` 是效期计算所依据的日期（`YYYY-MM-DD`），省略时取当前 UTC 日期；`near_expiry_days` 默认 14，允许 0–3650。`include_exhausted` 默认 `true`，为 `false` 时省略已耗尽条目。只读。
+- `label.export`：同一输入，输出 `{schema_version:1, generated_at, as_of, near_expiry_days, labels[]}`，每条为 `{label_code, pantry_item_id, name, location, status, expires_on, days_remaining, revision}`，按 `label_code` 排序，便于外部贴标/扫码插件直接消费和比对。只读；不驱动打印机、不生成图形、不写数据库。
+
+效期语义（`status`）：
+
+| 状态 | 判定 |
+|---|---|
+| `unopened` | 未记录开封，且未进入临期窗口 |
+| `opened` | 已记录开封，且未进入临期窗口 |
+| `near_expiry` | 距 `expires_on` 0–`near_expiry_days` 天（含当天） |
+| `expired` | 已超过 `expires_on` |
+| `exhausted` | 已记录耗尽；优先于所有日期规则 |
+
+`expires_on` 与 `expiry_basis` 只从显式字段推导：有 `opened_on + opened_shelf_life_days` 时用开封后窗口（`opened_shelf_life`），否则用 `purchased_on + shelf_life_days`（`shelf_life`）。两者都不全时不编造日期：`expires_on`、`days_remaining`、`expiry_basis` 均为 `null`，状态只反映是否开封/耗尽。
+
+`label_code` 由条目的不可变 `id` 派生（`PN-` + 前 8 位大写字母数字），首次分配后持久保存；同一 `label_code` 已被占用时依次追加 `-2`、`-3` 等后缀。因此重贴标签或重复导出都不会改变扫码结果。
+
+`execution_event.create` 可附带可选的 `pantry_item_id`：省略时事件结构不变；提供时必须是已存在的条目，否则返回 `NOT_FOUND`（退出码 3）。成功输出因此固定为 `{record, pantry_notices[]}`；条目处于 `near_expiry` 或 `expired` 时 `pantry_notices` 返回一条 `{code:"pantry_item_expiry_notice", severity:"advisory", …}`，**不阻断写入**；其他情况为空数组。Design 阶段不要求绑定储藏室条目。
 
 ## `step.edit`：步骤块级结构化编辑
 
@@ -261,6 +287,7 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - Protocol 文本步骤可定义 `checks[]`：`check_id`、`label`、可选 `instruction` 与 `blocking`。检查项随 ProtocolPreview、Run 冻结清单一同保存；AsterLab 只记录人工结果，不自动判定 gate 通过。
 - Protocol 步骤事件可附 `timepoint` 和 `step_status`。`timepoint` 仅用于明确属于某个检测时间点的步骤，并必须匹配 Run 冻结设计；共享制备步骤不应机械绑定某项检测的时间点。`step_status` 只能是 `in_progress`、`completed`、`blocked`、`skipped`，且必须同时关联冻结 Protocol 步骤；普通操作、观察、测量或偏差事件本身不代表步骤完成。未带时间点的旧事件不会被自动分配给 D1/D3。带 `sample_ids` 的事件只改变这些样本的状态；整步完成由 `workflow.progress` 判定，要求全部样本完成。
 - `execution_event.create` 的 `event_type` 另接受 `skipped_by_rule`（按规则跳过）；它仍需 `content`，并与其他事件一样经同一套冻结步骤/样本校验写入追加事实。临时补加的步骤必须显式传 `ad_hoc_step: true`（省略即 `false`）：为真时允许 `protocol_step_path` 不属于冻结清单，为假时仍按冻结清单拒绝未知路径；该字段只在输入中出现，回读记录也带同名布尔值，不能用来绕过 `sample_ids`、`attempt` 或检查项校验。
+- `execution_event.create` 另接受可选 `pantry_item_id`，把事件关联到储藏室条目。省略时事件与旧版本一致；提供时条目必须已存在（否则 `NOT_FOUND`）。该关联不改变任何校验门：条目临期或过期只在输出的 `pantry_notices[]` 里返回 `advisory` 提示，不阻断写入。详见「储藏室台账」一节。
 - 写入工具只返回记录 ID、所属关系、版本、数据和创建/更新时间；不声称实际实验已经执行。
 - 该 CLI 是本机原型，尚无多用户认证、审计签名、细粒度附件权限或撤销系统。不要把本地访问控制误称为云端安全边界。
 

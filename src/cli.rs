@@ -28,6 +28,7 @@ use asterlab_core::operation_module::{
     ModuleBinding, ModuleOrigin, OperationModule, ParameterBinding, ParameterValueType,
     ProtocolBlockVersionRef, ValueSource,
 };
+use asterlab_core::pantry::{self, CalendarDate, PantryDraft, PantryItem};
 use asterlab_core::readout_submit::{
     plan_batch as plan_readout_batch, plan_submit as plan_readout_submit, ReadoutBatchRequest,
     ReadoutSubmitRequest,
@@ -4951,6 +4952,7 @@ pub(crate) fn create_execution_event_tx(
         "protocol_version_id":event.protocol_version_id,
         "assay_id":event.assay_id,
         "planned_output_id":event.planned_output_id,
+        "pantry_item_id":event.pantry_item_id,
         "task_key":event.task_key,
         "sample_ids":event.sample_ids,
         "attempt":event.attempt,
@@ -7062,6 +7064,10 @@ struct ExecutionEventCreate {
     assay_id: Option<String>,
     #[serde(default)]
     planned_output_id: Option<String>,
+    /// Optional pantry ledger reference. Absent keeps the event unchanged;
+    /// present must resolve to a stored item, and only produces an advisory.
+    #[serde(default)]
+    pantry_item_id: Option<String>,
     #[serde(default)]
     task_key: Option<String>,
     #[serde(default)]
@@ -8372,6 +8378,27 @@ pub fn db_path(data_dir: &Path) -> PathBuf {
 }
 
 
+/// The pantry ledger is an auxiliary table, not a versioned `records` kind: it
+/// never participates in Design/Protocol/Run freezing, and existing databases
+/// gain it without a `records` schema migration or a `user_version` bump.
+const PANTRY_TABLE: &str = "\
+CREATE TABLE IF NOT EXISTS pantry_items(\
+    id TEXT PRIMARY KEY,\
+    label_code TEXT NOT NULL UNIQUE,\
+    project_id TEXT,\
+    name TEXT NOT NULL,\
+    location TEXT NOT NULL,\
+    purchased_on TEXT,\
+    opened_on TEXT,\
+    shelf_life_days INTEGER,\
+    opened_shelf_life_days INTEGER,\
+    exhausted INTEGER NOT NULL DEFAULT 0,\
+    revision INTEGER NOT NULL DEFAULT 1,\
+    created_at TEXT NOT NULL,\
+    updated_at TEXT NOT NULL\
+);\
+CREATE INDEX IF NOT EXISTS pantry_items_project ON pantry_items(project_id);";
+
 fn migrate_records_schema(db: &mut Connection) -> Result<(), CliError> {
     let tx = db
         .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -8491,6 +8518,8 @@ pub(crate) fn open_db(path: &Path) -> Result<Connection, CliError> {
     db.pragma_update(None, "foreign_keys", "ON")
         .map_err(|e| CliError::internal(e.to_string()))?;
     migrate_records_schema(&mut db)?;
+    db.execute_batch(PANTRY_TABLE)
+        .map_err(|e| CliError::internal(e.to_string()))?;
 
     // WAL is a persistent database property. A concurrent opener may hold the
     // exclusive lock needed to change it; keep the existing journal mode rather
@@ -9859,6 +9888,395 @@ pub(crate) fn step_edit_command(db: &mut Connection, input: Value) -> Result<Val
     }
 }
 
+// ---------------------------------------------------------------------------
+// Pantry ledger (储藏室). Optional and non-blocking: Design never requires an
+// item, and a Run event only may reference one.
+// ---------------------------------------------------------------------------
+
+/// Column order read by [`pantry_read`]; keep in sync with its row mapper.
+const PANTRY_COLUMNS: &str = "id,label_code,project_id,name,location,purchased_on,opened_on,\
+shelf_life_days,opened_shelf_life_days,exhausted,revision,created_at,updated_at";
+
+/// `pantry.upsert` is a whole-object write: omitted optional fields are
+/// cleared, so a stale reader can never merge half of two edits.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PantryUpsertInput {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+    name: String,
+    #[serde(default)]
+    location: String,
+    #[serde(default)]
+    purchased_on: Option<String>,
+    #[serde(default)]
+    opened_on: Option<String>,
+    #[serde(default)]
+    shelf_life_days: Option<u32>,
+    #[serde(default)]
+    opened_shelf_life_days: Option<u32>,
+    #[serde(default)]
+    exhausted: bool,
+    #[serde(default)]
+    expected_revision: Option<i64>,
+}
+
+/// Shared read input for `pantry.list` and `label.export`. `as_of` exists so a
+/// caller (and a test) can pin the date the status is computed against.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PantryQueryInput {
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    include_exhausted: Option<bool>,
+    #[serde(default)]
+    as_of: Option<String>,
+    #[serde(default)]
+    near_expiry_days: Option<u32>,
+}
+
+fn pantry_read(
+    db: &Connection,
+    id: &str,
+) -> Result<Option<(PantryItem, String, String)>, CliError> {
+    db.query_row(
+        &format!("SELECT {PANTRY_COLUMNS} FROM pantry_items WHERE id=?1"),
+        [id],
+        |row| {
+            Ok((
+                PantryItem {
+                    id: row.get(0)?,
+                    label_code: row.get(1)?,
+                    project_id: row.get(2)?,
+                    revision: row.get(10)?,
+                    draft: PantryDraft {
+                        name: row.get(3)?,
+                        location: row.get(4)?,
+                        purchased_on: row.get(5)?,
+                        opened_on: row.get(6)?,
+                        shelf_life_days: row.get::<_, Option<i64>>(7)?.map(|days| days as u32),
+                        opened_shelf_life_days: row
+                            .get::<_, Option<i64>>(8)?
+                            .map(|days| days as u32),
+                        exhausted: row.get::<_, i64>(9)? != 0,
+                    },
+                },
+                row.get::<_, String>(11)?,
+                row.get::<_, String>(12)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|e| CliError::internal(e.to_string()))
+}
+
+/// First free `PN-XXXXXXXX` variant for a new item. The suffix is persisted, so
+/// an already printed label stays scannable for the life of the item.
+fn pantry_label_code(db: &Connection, id: &str) -> Result<String, CliError> {
+    let base = pantry::base_label_code(id);
+    for sequence in 1..=1000u32 {
+        let candidate = pantry::label_code_with_suffix(&base, sequence);
+        let taken: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pantry_items WHERE label_code=?1)",
+                [&candidate],
+                |row| row.get(0),
+            )
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        if !taken {
+            return Ok(candidate);
+        }
+    }
+    Err(CliError::internal("无法为储藏室条目分配唯一短 ID"))
+}
+
+fn pantry_as_of(input: &PantryQueryInput) -> Result<CalendarDate, CliError> {
+    match input.as_of.as_deref().map(str::trim) {
+        Some(raw) => CalendarDate::parse(raw)
+            .ok_or_else(|| CliError::input("as_of 必须是 YYYY-MM-DD 的真实日期")),
+        None => CalendarDate::parse(&Utc::now().date_naive().to_string())
+            .ok_or_else(|| CliError::internal("无法解析当前日期")),
+    }
+}
+
+fn pantry_near_expiry_days(input: &PantryQueryInput) -> Result<u32, CliError> {
+    let days = input
+        .near_expiry_days
+        .unwrap_or(pantry::NEAR_EXPIRY_DAYS);
+    if days > pantry::MAX_SHELF_LIFE_DAYS {
+        return Err(CliError::input(format!(
+            "near_expiry_days 不能超过 {} 天",
+            pantry::MAX_SHELF_LIFE_DAYS
+        )));
+    }
+    Ok(days)
+}
+
+/// Flat JSON shape shared by `pantry.list`, `pantry.upsert` and `label.export`.
+fn pantry_item_json(
+    item: &PantryItem,
+    created_at: &str,
+    updated_at: &str,
+    as_of: CalendarDate,
+    near_expiry_days: u32,
+) -> Value {
+    let evaluation = pantry::evaluate(item, as_of, near_expiry_days);
+    json!({
+        "id": item.id,
+        "label_code": item.label_code,
+        "project_id": item.project_id,
+        "name": item.draft.name,
+        "location": item.draft.location,
+        "purchased_on": item.draft.purchased_on,
+        "opened_on": item.draft.opened_on,
+        "shelf_life_days": item.draft.shelf_life_days,
+        "opened_shelf_life_days": item.draft.opened_shelf_life_days,
+        "exhausted": item.draft.exhausted,
+        "revision": item.revision,
+        "status": evaluation.status,
+        "expires_on": evaluation.expires_on,
+        "days_remaining": evaluation.days_remaining,
+        "expiry_basis": evaluation.basis,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    })
+}
+
+fn pantry_blanks_as_none(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+}
+
+pub(crate) fn pantry_upsert(
+    db: &mut Connection,
+    input: &PantryUpsertInput,
+) -> Result<Value, CliError> {
+    let draft = PantryDraft {
+        name: input.name.trim().to_owned(),
+        location: input.location.trim().to_owned(),
+        purchased_on: pantry_blanks_as_none(input.purchased_on.as_deref()),
+        opened_on: pantry_blanks_as_none(input.opened_on.as_deref()),
+        shelf_life_days: input.shelf_life_days,
+        opened_shelf_life_days: input.opened_shelf_life_days,
+        exhausted: input.exhausted,
+    };
+    draft.validate().map_err(CliError::input)?;
+    let project_id = pantry_blanks_as_none(input.project_id.as_deref());
+    if let Some(project_id) = project_id.as_deref() {
+        ensure_project(db, project_id)?;
+    }
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let now = stamp();
+    let existing_id = pantry_blanks_as_none(input.id.as_deref());
+    let (item, created_at) = match existing_id {
+        Some(id) => {
+            let (existing, created_at, _) = pantry_read(&tx, &id)?
+                .ok_or_else(|| CliError::missing(format!("储藏室条目不存在：{id}")))?;
+            if let Some(expected) = input.expected_revision {
+                if existing.revision != expected {
+                    return Err(CliError::conflict(format!(
+                        "储藏室条目版本已从 v{expected} 更新为 v{}；请先重新读取。",
+                        existing.revision
+                    )));
+                }
+            }
+            let revision = existing.revision + 1;
+            tx.execute(
+                "UPDATE pantry_items SET project_id=?2,name=?3,location=?4,purchased_on=?5,\
+opened_on=?6,shelf_life_days=?7,opened_shelf_life_days=?8,exhausted=?9,revision=?10,\
+updated_at=?11 WHERE id=?1",
+                params![
+                    id,
+                    project_id,
+                    draft.name,
+                    draft.location,
+                    draft.purchased_on,
+                    draft.opened_on,
+                    draft.shelf_life_days,
+                    draft.opened_shelf_life_days,
+                    i64::from(draft.exhausted),
+                    revision,
+                    now,
+                ],
+            )
+            .map_err(|e| CliError::internal(e.to_string()))?;
+            (
+                PantryItem {
+                    id,
+                    label_code: existing.label_code,
+                    project_id,
+                    revision,
+                    draft,
+                },
+                created_at,
+            )
+        }
+        None => {
+            let id = make_id();
+            let label_code = pantry_label_code(&tx, &id)?;
+            tx.execute(
+                "INSERT INTO pantry_items(id,label_code,project_id,name,location,purchased_on,\
+opened_on,shelf_life_days,opened_shelf_life_days,exhausted,revision,created_at,updated_at)\
+ VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11,?11)",
+                params![
+                    id,
+                    label_code,
+                    project_id,
+                    draft.name,
+                    draft.location,
+                    draft.purchased_on,
+                    draft.opened_on,
+                    draft.shelf_life_days,
+                    draft.opened_shelf_life_days,
+                    i64::from(draft.exhausted),
+                    now,
+                ],
+            )
+            .map_err(|e| CliError::internal(e.to_string()))?;
+            (
+                PantryItem {
+                    id,
+                    label_code,
+                    project_id,
+                    revision: 1,
+                    draft,
+                },
+                now.clone(),
+            )
+        }
+    };
+    tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+    let as_of = pantry_as_of(&PantryQueryInput::default())?;
+    Ok(json!({
+        "item": pantry_item_json(&item, &created_at, &now, as_of, pantry::NEAR_EXPIRY_DAYS)
+    }))
+}
+
+fn pantry_rows(
+    db: &Connection,
+    input: &PantryQueryInput,
+) -> Result<Vec<(PantryItem, String, String)>, CliError> {
+    let project_id = pantry_blanks_as_none(input.project_id.as_deref());
+    let include_exhausted = input.include_exhausted.unwrap_or(true);
+    let mut statement = db
+        .prepare(&format!(
+            "SELECT {PANTRY_COLUMNS} FROM pantry_items \
+WHERE (?1 IS NULL OR project_id=?1) AND (?2 OR exhausted=0) ORDER BY name, label_code"
+        ))
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let rows = statement
+        .query_map(params![project_id, include_exhausted], |row| {
+            Ok((
+                PantryItem {
+                    id: row.get(0)?,
+                    label_code: row.get(1)?,
+                    project_id: row.get(2)?,
+                    revision: row.get(10)?,
+                    draft: PantryDraft {
+                        name: row.get(3)?,
+                        location: row.get(4)?,
+                        purchased_on: row.get(5)?,
+                        opened_on: row.get(6)?,
+                        shelf_life_days: row.get::<_, Option<i64>>(7)?.map(|days| days as u32),
+                        opened_shelf_life_days: row
+                            .get::<_, Option<i64>>(8)?
+                            .map(|days| days as u32),
+                        exhausted: row.get::<_, i64>(9)? != 0,
+                    },
+                },
+                row.get::<_, String>(11)?,
+                row.get::<_, String>(12)?,
+            ))
+        })
+        .map_err(|e| CliError::internal(e.to_string()))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    Ok(rows)
+}
+
+pub(crate) fn pantry_list(db: &Connection, input: &PantryQueryInput) -> Result<Value, CliError> {
+    let as_of = pantry_as_of(input)?;
+    let near_expiry_days = pantry_near_expiry_days(input)?;
+    let items = pantry_rows(db, input)?
+        .iter()
+        .map(|(item, created_at, updated_at)| {
+            pantry_item_json(item, created_at, updated_at, as_of, near_expiry_days)
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "as_of": as_of.to_iso(),
+        "near_expiry_days": near_expiry_days,
+        "items": items,
+    }))
+}
+
+pub(crate) fn pantry_export_labels(
+    db: &Connection,
+    input: &PantryQueryInput,
+) -> Result<Value, CliError> {
+    let as_of = pantry_as_of(input)?;
+    let near_expiry_days = pantry_near_expiry_days(input)?;
+    let mut rows = pantry_rows(db, input)?;
+    rows.sort_by(|left, right| left.0.label_code.cmp(&right.0.label_code));
+    let labels = rows
+        .iter()
+        .map(|(item, _, _)| {
+            let evaluation = pantry::evaluate(item, as_of, near_expiry_days);
+            json!({
+                "label_code": item.label_code,
+                "pantry_item_id": item.id,
+                "name": item.draft.name,
+                "location": item.draft.location,
+                "status": evaluation.status,
+                "expires_on": evaluation.expires_on,
+                "days_remaining": evaluation.days_remaining,
+                "revision": item.revision,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "schema_version": 1,
+        "generated_at": stamp(),
+        "as_of": as_of.to_iso(),
+        "near_expiry_days": near_expiry_days,
+        "labels": labels,
+    }))
+}
+
+/// Advisory attached to an execution event that names a pantry item. Never
+/// blocks the write; it only surfaces an item that is近临期 or already overdue.
+fn pantry_event_notice(db: &Connection, item_id: Option<&str>) -> Result<Option<Value>, CliError> {
+    let Some(item_id) = item_id else {
+        return Ok(None);
+    };
+    let Some((item, _, _)) = pantry_read(db, item_id)? else {
+        return Ok(None);
+    };
+    let as_of = pantry_as_of(&PantryQueryInput::default())?;
+    let evaluation = pantry::evaluate(&item, as_of, pantry::NEAR_EXPIRY_DAYS);
+    if !evaluation.needs_notice() {
+        return Ok(None);
+    }
+    Ok(Some(json!({
+        "code": "pantry_item_expiry_notice",
+        "severity": "advisory",
+        "pantry_item_id": item.id,
+        "label_code": item.label_code,
+        "name": item.draft.name,
+        "status": evaluation.status,
+        "expires_on": evaluation.expires_on,
+        "days_remaining": evaluation.days_remaining,
+        "next_action": "核对或更换该储藏室条目；提示不阻断事件写入",
+    })))
+}
+
 fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> {
     if tool == "workflow.inspect_tree" {
         let input: InspectTreeInput = parse_input(path)?;
@@ -11176,6 +11594,12 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         }
         "execution_event.create" => {
             let i: ExecutionEventCreate = parse_input(path)?;
+            if let Some(item_id) = pantry_blanks_as_none(i.pantry_item_id.as_deref()) {
+                check_text(&item_id, "储藏室条目 ID", 120)?;
+                if pantry_read(&db, &item_id)?.is_none() {
+                    return Err(CliError::missing(format!("储藏室条目不存在：{item_id}")));
+                }
+            }
             let payload =
                 serde_json::to_value(&i).map_err(|e| CliError::internal(e.to_string()))?;
             let tx = db
@@ -11183,7 +11607,23 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 .map_err(|e| CliError::internal(e.to_string()))?;
             let r = create_execution_event_tx(&tx, &i.run_id, &payload)?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
-            Ok(json!({"record":r}))
+            let notice = pantry_event_notice(&db, i.pantry_item_id.as_deref())?;
+            Ok(json!({
+                "record": r,
+                "pantry_notices": notice.into_iter().collect::<Vec<_>>(),
+            }))
+        }
+        "pantry.list" => {
+            let i: PantryQueryInput = parse_input(path)?;
+            pantry_list(&db, &i)
+        }
+        "pantry.upsert" => {
+            let i: PantryUpsertInput = parse_input(path)?;
+            pantry_upsert(&mut db, &i)
+        }
+        "label.export" => {
+            let i: PantryQueryInput = parse_input(path)?;
+            pantry_export_labels(&db, &i)
         }
         "readout.submit" => {
             let i: ReadoutSubmitRequest = parse_input(path)?;
@@ -11524,7 +11964,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["content","event_time","observation","result","deviation"],"properties":{"content":{"type":"string"},"event_time":{"type":["string","null"],"format":"date-time"},"event_time_local":{"type":["string","null"]},"event_timezone":{"type":["string","null"]},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event" => {
-            json!({"type":"object","additionalProperties":false,"required":["event_type","content","occurred_at","stage","timepoint","step_status","sample_ids","materials","measurements","deviation"],"properties":{"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"]},"timepoint":{"type":["string","null"],"maxLength":100},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null]},"protocol_step_path":{"type":["string","null"]},"protocol_version_id":{"type":["string","null"]},"assay_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]},"sample_ids":{"type":"array","items":{"type":"string"}},"materials":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["material","planned_output_id","amount","unit"],"properties":{"material":{"type":"string"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"]},"unit":{"type":["string","null"]}}}},"measurements":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["endpoint","value","unit","sample_id"],"properties":{"endpoint":{"type":"string"},"value":{"type":"number"},"unit":{"type":["string","null"]},"sample_id":{"type":["string","null"]}}}},"readouts":{"type":"array","items":{"type":"object","additionalProperties":true}},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}},"controls":{"type":"array","items":{"type":"object","additionalProperties":true}},"lineage":{"type":"array","items":{"type":"object","additionalProperties":true}},"actual_parameters":{"type":"array","items":{"type":"object","additionalProperties":true}},"operator":{"type":["string","null"]},"deviation":{"type":["string","null"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["event_type","content","occurred_at","stage","timepoint","step_status","sample_ids","materials","measurements","deviation"],"properties":{"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"]},"timepoint":{"type":["string","null"],"maxLength":100},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null]},"protocol_step_path":{"type":["string","null"]},"protocol_version_id":{"type":["string","null"]},"assay_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]},"pantry_item_id":{"type":["string","null"]},"sample_ids":{"type":"array","items":{"type":"string"}},"materials":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["material","planned_output_id","amount","unit"],"properties":{"material":{"type":"string"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"]},"unit":{"type":["string","null"]}}}},"measurements":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["endpoint","value","unit","sample_id"],"properties":{"endpoint":{"type":"string"},"value":{"type":"number"},"unit":{"type":["string","null"]},"sample_id":{"type":["string","null"]}}}},"readouts":{"type":"array","items":{"type":"object","additionalProperties":true}},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}},"controls":{"type":"array","items":{"type":"object","additionalProperties":true}},"lineage":{"type":"array","items":{"type":"object","additionalProperties":true}},"actual_parameters":{"type":"array","items":{"type":"object","additionalProperties":true}},"operator":{"type":["string","null"]},"deviation":{"type":["string","null"]}}})
         }
         "formula" => {
             json!({"type":"object","additionalProperties":false,"required":["title","expression","variables","notes"],"properties":{"title":{"type":"string"},"expression":{"type":"string"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -11645,6 +12085,10 @@ fn result_schema(tool: &str) -> Value {
     let asterdoc_version = || json!({"type":"object","additionalProperties":true,"required":["design_id","revision","source","source_hash","schema_version","compiler_version"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source":{"type":"string"},"source_hash":{"type":"string"},"schema_version":{"type":"integer","minimum":1},"compiler_version":{"type":"string"},"design_revision":{"type":"integer","minimum":0},"operation_id":{"type":["string","null"]},"actor_id":{"type":["string","null"]},"created_at":{"type":["string","null"]}}});
     let one = |kind: &str| json!({"type":"object","additionalProperties":false,"required":["record"],"properties":{"record":record_schema(kind)}});
     let record_and_version = |record_kind: &str| json!({"type":"object","additionalProperties":false,"required":["record","version"],"properties":{"record":record_schema(record_kind),"version":record_schema("design_version")}});
+    let pantry_status = || json!({"type":"string","enum":["unopened","opened","near_expiry","expired","exhausted"]});
+    let pantry_item = || json!({"type":"object","additionalProperties":false,"required":["id","label_code","project_id","name","location","purchased_on","opened_on","shelf_life_days","opened_shelf_life_days","exhausted","revision","status","expires_on","days_remaining","expiry_basis","created_at","updated_at"],"properties":{"id":{"type":"string"},"label_code":{"type":"string"},"project_id":{"type":["string","null"]},"name":{"type":"string"},"location":{"type":"string"},"purchased_on":{"type":["string","null"],"format":"date"},"opened_on":{"type":["string","null"],"format":"date"},"shelf_life_days":{"type":["integer","null"],"minimum":1},"opened_shelf_life_days":{"type":["integer","null"],"minimum":1},"exhausted":{"type":"boolean"},"revision":{"type":"integer","minimum":1},"status":pantry_status(),"expires_on":{"type":["string","null"],"format":"date"},"days_remaining":{"type":["integer","null"]},"expiry_basis":{"type":["string","null"],"enum":["shelf_life","opened_shelf_life",null]},"created_at":{"type":"string"},"updated_at":{"type":"string"}}});
+    let pantry_notice = || json!({"type":"object","additionalProperties":false,"required":["code","severity","pantry_item_id","label_code","name","status","expires_on","days_remaining","next_action"],"properties":{"code":{"const":"pantry_item_expiry_notice"},"severity":{"const":"advisory"},"pantry_item_id":{"type":"string"},"label_code":{"type":"string"},"name":{"type":"string"},"status":{"type":"string","enum":["near_expiry","expired"]},"expires_on":{"type":["string","null"],"format":"date"},"days_remaining":{"type":["integer","null"]},"next_action":{"type":"string"}}});
+    let pantry_label = || json!({"type":"object","additionalProperties":false,"required":["label_code","pantry_item_id","name","location","status","expires_on","days_remaining","revision"],"properties":{"label_code":{"type":"string"},"pantry_item_id":{"type":"string"},"name":{"type":"string"},"location":{"type":"string"},"status":pantry_status(),"expires_on":{"type":["string","null"],"format":"date"},"days_remaining":{"type":["integer","null"]},"revision":{"type":"integer","minimum":1}}});
     match tool {
         "project.list" => arr("project"),
         "project.create" => one("project"),
@@ -11722,7 +12166,10 @@ fn result_schema(tool: &str) -> Value {
         "plate.create" => one("plate"),
         "well.set" => one("well"),
         "note.create" => one("note"),
-        "execution_event.create" => one("execution_event"),
+        "execution_event.create" => json!({"type":"object","additionalProperties":false,"required":["record","pantry_notices"],"properties":{"record":record_schema("execution_event"),"pantry_notices":{"type":"array","maxItems":1,"items":pantry_notice()}}}),
+        "pantry.list" => json!({"type":"object","additionalProperties":false,"required":["as_of","near_expiry_days","items"],"properties":{"as_of":{"type":"string","format":"date"},"near_expiry_days":{"type":"integer","minimum":0},"items":{"type":"array","items":pantry_item()}}}),
+        "pantry.upsert" => json!({"type":"object","additionalProperties":false,"required":["item"],"properties":{"item":pantry_item()}}),
+        "label.export" => json!({"type":"object","additionalProperties":false,"required":["schema_version","generated_at","as_of","near_expiry_days","labels"],"properties":{"schema_version":{"const":1},"generated_at":{"type":"string"},"as_of":{"type":"string","format":"date"},"near_expiry_days":{"type":"integer","minimum":0},"labels":{"type":"array","items":pantry_label()}}}),
         "readout.submit" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}}),
         "readout.batch" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed","accepted"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"},"accepted":{"type":"integer","minimum":1}}}),
         "formula.create" => one("formula"),
@@ -11941,8 +12388,10 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"ad_hoc_step":{"type":"boolean","default":false,"description":"临时补加步骤：允许 protocol_step_path 不属于冻结清单；省略时为 false"},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"ad_hoc_step":{"type":"boolean","default":false,"description":"临时补加步骤：允许 protocol_step_path 不属于冻结清单；省略时为 false"},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"pantry_item_id":{"type":["string","null"],"maxLength":120,"description":"可选；关联已存在的储藏室条目。缺失不阻断；条目临期或过期时在 pantry_notices 返回提示"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
+        "pantry.list" | "label.export" => json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":["string","null"]},"include_exhausted":{"type":"boolean","default":true,"description":"false 时省略已耗尽的条目"},"as_of":{"type":"string","format":"date","description":"YYYY-MM-DD；省略时用当前 UTC 日期"},"near_expiry_days":{"type":"integer","minimum":0,"maximum":3650,"description":"临期窗口天数；默认 14"}}}),
+        "pantry.upsert" => json!({"type":"object","additionalProperties":false,"required":["name"],"properties":{"id":{"type":["string","null"],"maxLength":120,"description":"省略时创建新条目；提供时必须已存在"},"project_id":{"type":["string","null"],"maxLength":120,"description":"可选；提供时必须指向已存在的项目"},"name":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},"location":{"type":"string","maxLength":200},"purchased_on":{"type":["string","null"],"format":"date"},"opened_on":{"type":["string","null"],"format":"date"},"shelf_life_days":{"type":["integer","null"],"minimum":1,"maximum":3650,"description":"未开封保质期天数；与 purchased_on 一起决定未开封效期"},"opened_shelf_life_days":{"type":["integer","null"],"minimum":1,"maximum":3650,"description":"开封后可用天数；与 opened_on 一起优先生效"},"exhausted":{"type":"boolean","default":false},"expected_revision":{"type":["integer","null"],"minimum":1,"description":"更新已有条目时用于并发保护；省略则不校验版本"}}}),
         "readout.submit" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","endpoint","protocol_version_id"],"oneOf":[{"required":["value"]},{"required":["qualifier"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160}}})
         }
@@ -12231,6 +12680,9 @@ fn tool_specs() -> Vec<Value> {
         "well.set",
         "note.create",
         "execution_event.create",
+        "pantry.list",
+        "pantry.upsert",
+        "label.export",
         "readout.submit",
         "readout.batch",
         "formula.create",
@@ -12270,6 +12722,8 @@ fn tool_writes(tool: &str) -> bool {
     !matches!(
         tool,
         "project.list"
+            | "pantry.list"
+            | "label.export"
             | "design.list"
             | "design.get"
             | "run.list"
@@ -12313,6 +12767,9 @@ fn tool_writes(tool: &str) -> bool {
 fn tool_description(tool: &str) -> &'static str {
     match tool {
         "project.list" => "列出项目，返回稳定 id 和版本字段。",
+        "pantry.list" => "只读列出储藏室条目及其效期状态；可指定 as_of 固定计算日期。",
+        "pantry.upsert" => "创建或整条覆盖一个储藏室条目（名称/位置/购入开封日/保质期/耗尽状态），返回短标签 ID 与效期状态。",
+        "label.export" => "只读导出贴标/扫码插件使用的稳定短 ID 清单（label_code + 效期状态）；不打印、不写数据库。",
         "project.create" => "创建一个新项目。",
         "project.revise" => "按 expected_revision 修订项目名称或说明。",
         "design.list" => "按项目查询实验设计。",
@@ -12416,6 +12873,8 @@ fn tool_effects(tool: &str) -> &'static str {
         | "protocol.block.preview"
         | "record.list"
         | "record.get" => "只读；不修改数据库。",
+        "pantry.list" | "label.export" => "只读；只返回储藏室台账的效期投影，不写数据库。",
+        "pantry.upsert" => "创建或整条覆盖一行储藏室台账并递增 revision；不修改 Design、Protocol 或已冻结 Run。",
         "import.study.preview" => "只校验导入内容并返回警告；不写入数据库。",
         "calculator.dilution"
         | "calculator.solution"
@@ -15324,5 +15783,225 @@ mix_factor_final_concentration: {value: 50, unit: ng/mL}
         fs::remove_dir_all(&fixture.data_dir).ok();
         drop(db);
         fs::remove_dir_all(&data_dir).ok();
+    }
+
+    #[test]
+    fn pantry_commands_project_expiry_and_export_stable_label_codes() {
+        let dir = std::env::temp_dir().join(format!("pantry-cli-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write_input = |name: &str, value: Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, value.to_string()).unwrap();
+            path
+        };
+        let created = dispatch(
+            "pantry.upsert",
+            write_input(
+                "create.json",
+                json!({
+                    "name":"DMEM",
+                    "location":"4C shelf 2",
+                    "purchased_on":"2026-01-01",
+                    "opened_on":"2026-11-01",
+                    "shelf_life_days":3650,
+                    "opened_shelf_life_days":21
+                }),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(created["item"]["expires_on"], "2026-11-22");
+        assert_eq!(created["item"]["expiry_basis"], "opened_shelf_life");
+        assert_eq!(created["item"]["revision"], 1);
+        let item_id = created["item"]["id"].as_str().unwrap().to_owned();
+        let label_code = created["item"]["label_code"].as_str().unwrap().to_owned();
+        assert_eq!(label_code, pantry::base_label_code(&item_id));
+
+        let listed = dispatch(
+            "pantry.list",
+            write_input("list.json", json!({"as_of":"2026-11-15"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(listed["as_of"], "2026-11-15");
+        assert_eq!(listed["near_expiry_days"], pantry::NEAR_EXPIRY_DAYS);
+        assert_eq!(listed["items"][0]["status"], "near_expiry");
+        assert_eq!(listed["items"][0]["days_remaining"], 7);
+
+        let stale = dispatch(
+            "pantry.upsert",
+            write_input(
+                "stale.json",
+                json!({"id":item_id,"name":"DMEM","expected_revision":7}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(stale.code, "REVISION_CONFLICT");
+        let invalid = dispatch(
+            "pantry.upsert",
+            write_input(
+                "invalid.json",
+                json!({"name":"DMEM","purchased_on":"2026-02-30"}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(invalid.code, "INVALID_INPUT");
+
+        let first_export = dispatch(
+            "label.export",
+            write_input("export.json", json!({"as_of":"2026-11-15"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(first_export["schema_version"], 1);
+        assert_eq!(first_export["labels"][0]["label_code"], label_code);
+        assert_eq!(first_export["labels"][0]["pantry_item_id"], item_id);
+        assert_eq!(first_export["labels"][0]["status"], "near_expiry");
+        let second_export = dispatch(
+            "label.export",
+            write_input("export2.json", json!({"as_of":"2026-11-15"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(
+            first_export["labels"], second_export["labels"],
+            "label codes must not drift between exports"
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+        for tool in ["pantry.list", "pantry.upsert", "label.export"] {
+            assert!(input_schema(tool).is_some(), "{tool} input schema");
+            assert!(tool_specs().iter().any(|spec| spec["name"] == tool));
+        }
+        assert!(!tool_writes("pantry.list"));
+        assert!(!tool_writes("label.export"));
+        assert!(tool_writes("pantry.upsert"));
+    }
+
+    #[test]
+    fn execution_event_rejects_unknown_pantry_item_and_warns_on_expired_one() {
+        let dir = std::env::temp_dir().join(format!("pantry-event-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write_input = |name: &str, value: Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, value.to_string()).unwrap();
+            path
+        };
+        let run_id = {
+            let db = open_db(&dir).unwrap();
+            let project = create_project(&db, "pantry").unwrap();
+            let project_id = project["id"].as_str().unwrap().to_owned();
+            let tx = db.unchecked_transaction().unwrap();
+            let design = insert(
+                &tx,
+                "design",
+                Some(&project_id),
+                Some(&project_id),
+                1,
+                &json!({"title":"d"}),
+            )
+            .unwrap();
+            let design_id = design["id"].as_str().unwrap().to_owned();
+            let version = insert(
+                &tx,
+                "design_version",
+                Some(&project_id),
+                Some(&design_id),
+                1,
+                &json!({"design_id":design_id,"design_revision":1,"snapshot":{"title":"d"}}),
+            )
+            .unwrap();
+            let run = insert(
+                &tx,
+                "run",
+                Some(&project_id),
+                Some(&design_id),
+                1,
+                &json!({
+                    "title":"pantry run",
+                    "scheduled_date":null,
+                    "protocol_version_id":null,
+                    "design_version_id":version["id"],
+                    "design_revision":1,
+                    "status":"in_progress",
+                    "protocol_manifest":[],
+                    "material_manifest":[]
+                }),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            run["id"].as_str().unwrap().to_owned()
+        };
+        let expired = dispatch(
+            "pantry.upsert",
+            write_input(
+                "expired.json",
+                json!({"name":"Old serum","purchased_on":"2020-01-01","shelf_life_days":30}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        let expired_id = expired["item"]["id"].as_str().unwrap().to_owned();
+
+        let unknown = dispatch(
+            "execution_event.create",
+            write_input(
+                "unknown.json",
+                json!({"run_id":run_id,"event_type":"operation","content":"pipette","pantry_item_id":"missing-item"}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(unknown.code, "NOT_FOUND");
+
+        let recorded = dispatch(
+            "execution_event.create",
+            write_input(
+                "event.json",
+                json!({"run_id":run_id,"event_type":"operation","content":"pipette","pantry_item_id":expired_id}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(recorded["record"]["data"]["pantry_item_id"], expired_id);
+        assert_eq!(recorded["pantry_notices"][0]["code"], "pantry_item_expiry_notice");
+        assert_eq!(recorded["pantry_notices"][0]["severity"], "advisory");
+        assert_eq!(recorded["pantry_notices"][0]["status"], "expired");
+
+        let plain = dispatch(
+            "execution_event.create",
+            write_input(
+                "plain.json",
+                json!({"run_id":run_id,"event_type":"operation","content":"pipette"}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(plain["record"]["data"]["pantry_item_id"], Value::Null);
+        assert!(plain["pantry_notices"].as_array().unwrap().is_empty());
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

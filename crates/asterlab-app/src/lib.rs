@@ -35,6 +35,29 @@ impl AppCore {
         &self.db
     }
 
+    /// Create (no `id`) or replace (existing `id`) one pantry ledger row.
+    /// Whole-object write; omitted optional fields are cleared.
+    pub fn pantry_upsert(&mut self, input: Value) -> Result<Value, String> {
+        let parsed: cli_impl::PantryUpsertInput =
+            serde_json::from_value(input).map_err(|e| format!("INVALID_INPUT: {e}"))?;
+        cli_impl::pantry_upsert(&mut self.db, &parsed).map_err(|e| e.message)
+    }
+
+    /// Read-only pantry projection. `as_of` pins the date expiry is computed
+    /// against; omitting it uses the current UTC date.
+    pub fn pantry_list(&self, input: Value) -> Result<Value, String> {
+        let parsed: cli_impl::PantryQueryInput =
+            serde_json::from_value(input).map_err(|e| format!("INVALID_INPUT: {e}"))?;
+        cli_impl::pantry_list(&self.db, &parsed).map_err(|e| e.message)
+    }
+
+    /// Stable short-id manifest for external label/printer plugins. Read-only.
+    pub fn pantry_export_labels(&self, input: Value) -> Result<Value, String> {
+        let parsed: cli_impl::PantryQueryInput =
+            serde_json::from_value(input).map_err(|e| format!("INVALID_INPUT: {e}"))?;
+        cli_impl::pantry_export_labels(&self.db, &parsed).map_err(|e| e.message)
+    }
+
     pub fn load_run(&self, run_id: &str) -> Result<Value, String> {
         let mut v = cli_impl::run_workspace(&self.db, run_id).map_err(|e| e.message)?;
         v["revision"] = json!(self.revision(run_id)?);
@@ -536,6 +559,60 @@ mod tests {
         assert_eq!(restored.len(), 1);
         assert!(restored[0].started_at_utc.is_some());
         assert_eq!(restored[0].status, asterlab_core::timer::TimerStatus::Running);
+        let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn pantry_ledger_persists_across_reopen_and_keeps_label_codes_stable() {
+        let dir = std::env::temp_dir().join(format!("asterlab-pantry-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let (item_id, label_code) = {
+            let mut core = AppCore::open(&dir).unwrap();
+            let created = core
+                .pantry_upsert(json!({
+                    "name":"Trypsin-EDTA",
+                    "location":"4C door",
+                    "purchased_on":"2026-01-01",
+                    "opened_on":"2026-06-01",
+                    "shelf_life_days":365,
+                    "opened_shelf_life_days":30
+                }))
+                .unwrap();
+            assert_eq!(created["item"]["expires_on"], "2026-07-01");
+            assert_eq!(created["item"]["revision"], 1);
+            (
+                created["item"]["id"].as_str().unwrap().to_owned(),
+                created["item"]["label_code"].as_str().unwrap().to_owned(),
+            )
+        };
+        assert!(label_code.starts_with("PN-"));
+
+        let mut core = AppCore::open(&dir).unwrap();
+        let listed = core.pantry_list(json!({"as_of":"2026-06-25"})).unwrap();
+        assert_eq!(listed["items"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["items"][0]["status"], "near_expiry");
+        assert_eq!(listed["items"][0]["days_remaining"], 6);
+        assert_eq!(listed["items"][0]["label_code"], label_code);
+
+        let updated = core
+            .pantry_upsert(json!({
+                "id":item_id,
+                "name":"Trypsin-EDTA",
+                "exhausted":true,
+                "expected_revision":1
+            }))
+            .unwrap();
+        assert_eq!(updated["item"]["revision"], 2);
+        assert_eq!(updated["item"]["status"], "exhausted");
+        assert_eq!(updated["item"]["label_code"], label_code, "label code is not rederived");
+
+        let with_exhausted = core.pantry_export_labels(json!({"as_of":"2026-06-25"})).unwrap();
+        assert_eq!(with_exhausted["schema_version"], 1);
+        assert_eq!(with_exhausted["labels"][0]["label_code"], label_code);
+        assert_eq!(with_exhausted["labels"][0]["pantry_item_id"], item_id);
+        let without = core
+            .pantry_export_labels(json!({"as_of":"2026-06-25","include_exhausted":false}))
+            .unwrap();
+        assert!(without["labels"].as_array().unwrap().is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 }
