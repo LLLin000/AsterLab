@@ -20,8 +20,8 @@ projects (`notebook.CitationTargetOf`) and can jump there (**定位到运行记�
 entry is highlighted and scrolled into view. A citation carries identity only —
 it is a pointer into the authoritative record, never a second copy of it.
 
-The toolbar names the save state in the contract's words — `就绪` / `未保存` /
-`已保存` — instead of a bare colour dot (`UX-06`).
+The toolbar names the save state in the contract's words — `未保存` / `已保存`,
+via `notebook.SaveStateLabel` — instead of a bare colour dot (`UX-06`).
 
 Layout (`UX-P1`/`UX-LAYOUT`): at ≥1100 the two projections sit side by side;
 below 1100 (covers 900×600) they **switch** as two tabs, so the prose keeps a
