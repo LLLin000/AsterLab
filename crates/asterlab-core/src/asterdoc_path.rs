@@ -38,7 +38,7 @@ pub fn derive_step_path(step_id: &str) -> Result<String, StepPathError> {
             "step_path_derivation_failed",
             format!(
                 "step path cannot be derived: a step id must be non-empty and must not contain \"/\" \
-                 (the derived path is root/<step-id>); set path explicitly on this step instead of id \"{}\"",
+                 (the derived path is root/<step-id>); set path explicitly on step id \"{}\"",
                 step_id.trim()
             ),
         ));

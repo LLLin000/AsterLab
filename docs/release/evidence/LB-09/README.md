@@ -10,7 +10,9 @@
 | `cargo-test-asterlab-core.txt` | `cargo test --manifest-path crates/asterlab-core/Cargo.toml` | 424 + 3 + 6 + 2 passed; 0 failed; exit=0 |
 | `cli-smoke.txt` | 真实 CLI 跑 LB-07 的空 path HUVEC 设计 | 见下 |
 
-构建缓存绝对路径在证据里已脱敏为 `<target-dir>`。
+构建缓存与 worktree 绝对路径在证据里已脱敏为 `<target-dir>` / `<worktree>`。
+
+并行 agent 共享 `CARGO_TARGET_DIR`，同名的 core 测试产物可能被别的工作树覆盖。两次验收都在同一命令里先 touch 源码再运行，并校验输出含本卡新增测试（`asterdoc_path::tests::*`、`asterdoc_nest_materializes_a_pathless_parent_for_a_pathful_child`）、不含其他工作树的测试名后才记录。
 
 ## 新增测试
 
