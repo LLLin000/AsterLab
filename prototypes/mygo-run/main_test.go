@@ -289,3 +289,75 @@ func TestRunAssetsForTaskPreservesCoordinatesAndUnlabelledAssets(t *testing.T) {
 		t.Fatalf("missing coordinates were inferred: %+v", got)
 	}
 }
+
+func TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero(t *testing.T) {
+	wells, times := []string{"A1", "B1"}, []string{"6 h", "24 h"}
+	for _, tc := range []struct {
+		name, well, timepoint, fov string
+	}{
+		{"unknown well", "Z9", "6 h", "1"},
+		{"unknown timepoint", "A1", "48 h", "1"},
+		{"zero FOV", "A1", "6 h", "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := validateAssetCoordinates(tc.well, tc.timepoint, tc.fov, wells, times); err == nil {
+				t.Fatal("invalid coordinate was accepted")
+			}
+		})
+	}
+}
+
+func TestBatchLinkInheritsCoordinateForEveryPickedPath(t *testing.T) {
+	want := runs.AssetLink{RunID: "run", TaskKey: "task", WellID: "B1", Timepoint: "24 h", FOVIndex: 2}
+	var paths []string
+	var links []runs.AssetLink
+	err := linkPickedAssets([]string{"one.tif", "two.tif"}, want, func(path string, link runs.AssetLink) error {
+		paths = append(paths, path)
+		links = append(links, link)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 || len(links) != 2 || links[0] != want || links[1] != want {
+		t.Fatalf("batch paths=%v links=%+v, want two identical coordinates %+v", paths, links, want)
+	}
+}
+
+func TestDesignPlateWellsUsesConfiguredPlateGeometry(t *testing.T) {
+	wells := designPlateWells(`{"mygo":{"instances":{"step":[{"id":"plate","type":"plate_12","props":{"rows":3,"cols":4}}]},"assays":{"assay":{"plateInstanceId":"plate"}}}}`, "assay")
+	if len(wells) != 12 || wells[0] != "A1" || wells[len(wells)-1] != "C4" {
+		t.Fatalf("plate geometry wells = %v", wells)
+	}
+}
+
+func TestOpenAssetLinkFormRetainsGapCoordinatesAndUsesRunTimepoints(t *testing.T) {
+	a := &app{snap: runs.RunSnapshot{
+		Tasks: []runs.RunTask{
+			{Key: "task", AssayID: "assay", Timepoint: "24 h"},
+			{Key: "task-2", Timepoint: "6 h"},
+		},
+		DesignData: `{"mygo":{"instances":{"step":[{"id":"plate","type":"plate_12","props":{"rows":3,"cols":4}}]},"assays":{"assay":{"plateInstanceId":"plate"}}}}`,
+	}}
+	a.openAssetLinkForm("task", runworkspace.LinkedAsset{
+		WellID: "B2", Timepoint: "24 h", FOVIndex: 2,
+	})
+	if !a.linkDialogOpen || a.linkDialogWell != "B2" || a.linkDialogTimepoint != "24 h" || a.linkDialogFOV != "2" {
+		t.Fatalf("form did not preserve gap coordinate: %+v", a)
+	}
+	if len(a.linkDialogWells) != 12 || a.linkDialogWells[0] != "A1" ||
+		len(a.linkDialogTimepoints) != 2 || a.linkDialogTimepoints[0] != "24 h" || a.linkDialogTimepoints[1] != "6 h" {
+		t.Fatalf("form options = wells %v, timepoints %v", a.linkDialogWells, a.linkDialogTimepoints)
+	}
+}
+
+func TestAssetCoordinateOptionsUseFrozenAssayTimepointsWhenRunTaskOmitsOne(t *testing.T) {
+	a := &app{snap: runs.RunSnapshot{
+		Tasks:      []runs.RunTask{{Key: "task", AssayID: "assay"}},
+		DesignData: `{"mygo":{"assays":{"assay":{"timepoints":["6 h","24 h"]}}}}`,
+	}}
+	_, got := a.assetCoordinateOptions("task")
+	if len(got) != 2 || got[0] != "6 h" || got[1] != "24 h" {
+		t.Fatalf("task timepoint options = %v", got)
+	}
+}

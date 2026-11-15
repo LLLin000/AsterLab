@@ -59,7 +59,7 @@ func TestRecordingGalleryShowsFiles(t *testing.T) {
 			{AssetID: "a1", RootID: "project-data", RelativePath: "huvec/d1/image_01.tif",
 				MediaType: "image/tiff", Size: 18742000, Available: true},
 			{AssetID: "a2", RootID: "project-data", RelativePath: "huvec/d1/missing.tif",
-				MediaType: "image/tiff", Available: false},
+				MediaType: "image/tiff", Available: false, WellID: "A1", Timepoint: "t6h", FOVIndex: 1},
 		},
 	}
 	tt := ui.NewTester(func(c *ui.Context) {
@@ -371,5 +371,51 @@ func TestRecordingMatrixRendersEmptyPairsAsGaps(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("1 个缺口 · 未关联视野") {
 		t.Fatalf("empty matrix pair not explicit: %q", tt.Texts())
+	}
+}
+
+func TestRecordingMatrixGapPrefillUsesCellCoordinates(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	var picked LinkedAsset
+	rv := &RecordingView{
+		Kind: ViewGallery, Task: vm.TaskByKey["t-read"],
+		Assets: []LinkedAsset{
+			{AssetID: "a", WellID: "A1", Timepoint: "t6h", FOVIndex: 1},
+			{AssetID: "b", WellID: "A1", Timepoint: "t24h", FOVIndex: 1},
+			{AssetID: "c", WellID: "A1", Timepoint: "t24h", FOVIndex: 3},
+		},
+		OnLinkFile: func(asset LinkedAsset) { picked = asset },
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+	if err := tt.Click("补齐 FOV 2"); err != nil {
+		t.Fatal(err)
+	}
+	if picked.WellID != "A1" || picked.Timepoint != "t24h" || picked.FOVIndex != 2 {
+		t.Fatalf("gap prefill = %+v, want A1/t24h/FOV2", picked)
+	}
+}
+
+func TestUnlabelledAssetExplainsCoreGapWithoutAction(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	rv := &RecordingView{
+		Kind: ViewGallery, Task: vm.TaskByKey["t-read"],
+		Assets:      []LinkedAsset{{AssetID: "unlabelled", RelativePath: "sample.tif", Available: true}},
+		OnOpenAsset: func(LinkedAsset) { t.Fatal("unlabelled asset offered open action") },
+		OnRelocate:  func(LinkedAsset) { t.Fatal("unlabelled asset offered relocate action") },
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+	if !tt.HasText("未标注 · 需要 Core 提供坐标更新/解除关联接口") {
+		t.Fatalf("Core gap explanation missing: %q", tt.Texts())
+	}
+	if tt.HasText("打开") || tt.HasText("重新定位") || tt.HasText("重设坐标") {
+		t.Fatalf("unlabelled asset offered an action: %q", tt.Texts())
 	}
 }

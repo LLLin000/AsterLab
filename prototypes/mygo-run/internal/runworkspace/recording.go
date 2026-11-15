@@ -499,11 +499,26 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 									if !exists {
 										ui.Text(c, "1 个缺口 · 未关联视野").
 											FontSize(t.Rem(.7)).TextColor(tokens.WarningText)
+										if r.OnLinkFile != nil && components.Button(c, "补齐", components.ButtonSecondary).Clicked() {
+											r.OnLinkFile(LinkedAsset{
+												WellID: well, Timepoint: timepoint, FOVIndex: 1,
+												LinkedTo: AssetLink{TaskKey: r.Task.TaskKey},
+											})
+										}
 										return
 									}
 									if len(cell.Gaps) > 0 {
 										ui.Text(c, fmt.Sprintf("%d 个缺口 · FOV %v", len(cell.Gaps), cell.Gaps)).
 											FontSize(t.Rem(.7)).TextColor(tokens.WarningText)
+										for _, gap := range cell.Gaps {
+											gap := gap
+											if r.OnLinkFile != nil && components.Button(c, fmt.Sprintf("补齐 FOV %d", gap), components.ButtonSecondary).Clicked() {
+												r.OnLinkFile(LinkedAsset{
+													WellID: well, Timepoint: timepoint, FOVIndex: gap,
+													LinkedTo: AssetLink{TaskKey: r.Task.TaskKey},
+												})
+											}
+										}
 									}
 									ui.Text(c, fmt.Sprintf("FOV %v", cell.FOVIndices)).
 										FontSize(t.Rem(.7)).TextColor(t.Text)
@@ -546,10 +561,10 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 }
 
 func matrixCellBox(c *ui.Context, title string, tokens theme.Tokens, t *ui.Theme, width float32, body func()) {
-	ui.Column(c).Width(width).Padding(t.Space(1), t.Space(1.5)).
-		Background(tokens.Elevated).Border(1, tokens.Border).Gap(t.Space(.5)).Children(func() {
+	ui.Column(c).Width(width).MinHeight(76).Padding(t.Space(1), t.Space(1.25)).
+		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(.5)).Children(func() {
 		if title != "" {
-			ui.Text(c, title).FontSize(t.Rem(.72)).Bold().TextColor(t.Text)
+			ui.Text(c, title).FontSize(t.Rem(.75)).Bold().TextColor(t.Text)
 		}
 		body()
 	})
@@ -581,7 +596,14 @@ func assetRow(c *ui.Context, a LinkedAsset, open, relocate func(LinkedAsset), t 
 				ui.Text(c, meta).FontSize(t.Rem(.7)).TextColor(t.TextMuted).
 					SingleLine().Ellipsis("…")
 			}
+			if a.WellID == "" || a.Timepoint == "" || a.FOVIndex == 0 {
+				ui.Text(c, "未标注 · 需要 Core 提供坐标更新/解除关联接口").
+					FontSize(t.Rem(.68)).Bold().TextColor(tokens.WarningText)
+			}
 		})
+		if a.WellID == "" || a.Timepoint == "" || a.FOVIndex == 0 {
+			return
+		}
 		if !a.Available {
 			// UX-P5 / UX-STATE: keep a missing asset link visible and offer relocation.
 			ui.Row(c).Padding(2, 7).Radius(5).Background(tokens.WarningBg).Children(func() {

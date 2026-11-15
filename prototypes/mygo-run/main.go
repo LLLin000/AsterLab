@@ -1,18 +1,6 @@
 package main
 
 import (
-	"context"
-	_ "embed"
-	"encoding/json"
-	"fmt"
-	"log"
-	"math"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync/atomic"
-	"time"
-
 	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/assets"
 	"asterlab-mygo-prototype/internal/asterdoc"
@@ -31,6 +19,19 @@ import (
 	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
+	"context"
+	_ "embed"
+	"encoding/json"
+	"fmt"
+	"log"
+	"math"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
 
 	mygo "github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -127,6 +128,14 @@ type app struct {
 	noteErr                    string
 	createRunErr               string
 	linkErr                    string
+	linkDialogOpen             bool
+	linkDialogTask             string
+	linkDialogWell             string
+	linkDialogTimepoint        string
+	linkDialogFOV              string
+	linkDialogWells            []string
+	linkDialogTimepoints       []string
+	linkDialogErr              string
 	noteMode                   int
 	noteEditMode               int
 	noteDoc                    *richtext.Document
@@ -447,7 +456,182 @@ func (a *app) relocateRunAsset(asset runworkspace.LinkedAsset) error {
 	return nil
 }
 
-func (a *app) linkRunAsset(taskKey string) error {
+func validateAssetCoordinates(well, timepoint, fov string, wells, timepoints []string) (runs.AssetLink, error) {
+	valid := func(value string, allowed []string) bool {
+		for _, option := range allowed {
+			if value == option {
+				return true
+			}
+		}
+		return false
+	}
+	if !valid(well, wells) {
+		return runs.AssetLink{}, fmt.Errorf("未知孔位：%s", well)
+	}
+	if !valid(timepoint, timepoints) {
+		return runs.AssetLink{}, fmt.Errorf("未知时间点：%s", timepoint)
+	}
+	index, err := strconv.ParseUint(strings.TrimSpace(fov), 10, 32)
+	if err != nil || index < 1 {
+		return runs.AssetLink{}, fmt.Errorf("FOV 必须是大于等于 1 的整数")
+	}
+	return runs.AssetLink{WellID: well, Timepoint: timepoint, FOVIndex: uint32(index)}, nil
+}
+
+func linkPickedAssets(paths []string, coordinate runs.AssetLink, link func(string, runs.AssetLink) error) error {
+	for _, path := range paths {
+		if err := link(path, coordinate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *app) openAssetLinkForm(taskKey string, prefill runworkspace.LinkedAsset) {
+	a.linkDialogTask = taskKey
+	a.linkDialogWells, a.linkDialogTimepoints = a.assetCoordinateOptions(taskKey)
+	a.linkDialogWell = prefill.WellID
+	a.linkDialogTimepoint = prefill.Timepoint
+	a.linkDialogFOV = strconv.FormatUint(uint64(prefill.FOVIndex), 10)
+	if a.linkDialogWell == "" && len(a.linkDialogWells) > 0 {
+		a.linkDialogWell = a.linkDialogWells[0]
+	}
+	if a.linkDialogTimepoint == "" {
+		for _, task := range a.snap.Tasks {
+			if task.Key == taskKey {
+				a.linkDialogTimepoint = task.Timepoint
+				break
+			}
+		}
+	}
+	if a.linkDialogTimepoint == "" && len(a.linkDialogTimepoints) > 0 {
+		a.linkDialogTimepoint = a.linkDialogTimepoints[0]
+	}
+	if a.linkDialogFOV == "0" || a.linkDialogFOV == "" {
+		a.linkDialogFOV = "1"
+	}
+	a.linkDialogErr = ""
+	a.linkDialogOpen = true
+}
+
+func designPlateWells(raw, assayID string) []string {
+	var doc struct {
+		MyGo struct {
+			Instances map[string][]blocks.Instance `json:"instances"`
+			Assays    map[string]struct {
+				PlateInstanceID string `json:"plateInstanceId"`
+			} `json:"assays"`
+		} `json:"mygo"`
+	}
+	if json.Unmarshal([]byte(raw), &doc) != nil {
+		return nil
+	}
+	plateID := doc.MyGo.Assays[assayID].PlateInstanceID
+	keys := make([]string, 0, len(doc.MyGo.Instances))
+	for key := range doc.MyGo.Instances {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var plate *blocks.Instance
+	for _, key := range keys {
+		for i := range doc.MyGo.Instances[key] {
+			instance := &doc.MyGo.Instances[key][i]
+			if instance.Type != blocks.TypePlate96 && instance.Type != blocks.TypePlate12 {
+				continue
+			}
+			if plateID == "" || instance.ID == plateID {
+				plate = instance
+				break
+			}
+		}
+		if plate != nil {
+			break
+		}
+	}
+	if plate == nil {
+		return nil
+	}
+	var dimensions struct {
+		Rows int `json:"rows"`
+		Cols int `json:"cols"`
+	}
+	if json.Unmarshal(plate.RawProps, &dimensions) != nil {
+		return nil
+	}
+	if dimensions.Rows == 0 || dimensions.Cols == 0 {
+		if plate.Type == blocks.TypePlate12 {
+			dimensions.Rows, dimensions.Cols = 3, 4
+		} else {
+			dimensions.Rows, dimensions.Cols = 8, 12
+		}
+	}
+	wells := make([]string, 0, dimensions.Rows*dimensions.Cols)
+	for row := 0; row < dimensions.Rows && row < 26; row++ {
+		for column := 1; column <= dimensions.Cols; column++ {
+			wells = append(wells, string(rune('A'+row))+strconv.Itoa(column))
+		}
+	}
+	return wells
+}
+
+func frozenAssayTimepoints(raw, assayID string) []string {
+	var doc struct {
+		MyGo struct {
+			Assays map[string]assays.Design `json:"assays"`
+		} `json:"mygo"`
+	}
+	if json.Unmarshal([]byte(raw), &doc) != nil {
+		return nil
+	}
+	return doc.MyGo.Assays[assayID].Timepoints
+}
+
+func (a *app) assetCoordinateOptions(taskKey string) ([]string, []string) {
+	timepoints := make([]string, 0, len(a.snap.Tasks))
+	seenTimes := map[string]bool{}
+	for _, task := range a.snap.Tasks {
+		value := strings.TrimSpace(task.Timepoint)
+		if value != "" && !seenTimes[value] {
+			seenTimes[value] = true
+			timepoints = append(timepoints, value)
+		}
+	}
+
+	selectedAssay := ""
+	for _, task := range a.snap.Tasks {
+		if task.Key == taskKey {
+			selectedAssay = task.AssayID
+			break
+		}
+	}
+	designData := a.snap.DesignData
+	if designData == "" && a.designSnap != nil {
+		designData = a.designSnap.Data
+	}
+	if len(timepoints) == 0 && selectedAssay != "" {
+		for _, value := range frozenAssayTimepoints(designData, selectedAssay) {
+			value = strings.TrimSpace(value)
+			if value != "" && !seenTimes[value] {
+				seenTimes[value] = true
+				timepoints = append(timepoints, value)
+			}
+		}
+	}
+	wells := designPlateWells(designData, selectedAssay)
+	if len(wells) == 0 && selectedAssay != "" {
+		if schema, _, err := assays.BuildSchema([]byte(designData), selectedAssay, ""); err == nil &&
+			(schema.Layout == "plate96" || schema.Layout == "plate12") {
+			for _, row := range schema.RowLabels {
+				for _, column := range schema.ColumnLabels {
+					wells = append(wells, row+column)
+				}
+			}
+		}
+	}
+	return wells, timepoints
+}
+
+func (a *app) linkRunAsset(taskKey string, coordinate runs.AssetLink) error {
 	if a.runSvc == nil || a.snap.RunID == "" || taskKey == "" {
 		return fmt.Errorf("当前没有可关联文件的 Run 任务")
 	}
@@ -475,31 +659,38 @@ func (a *app) linkRunAsset(taskKey string) error {
 		a.saveSession()
 	}
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Parent: mygo.FocusedWindow(), Title: "关联实验文件", DefaultPath: rootDir,
+		Parent: mygo.FocusedWindow(), Title: "关联实验文件", DefaultPath: rootDir, Multiple: true,
 	})
 	if err != nil || len(paths) == 0 {
 		return err
 	}
-	linked, err := assets.NewLink(rootID, rootDir, paths[0], assets.Link{
-		RunID: a.snap.RunID, TaskKey: taskKey,
-	}, "local-user", true)
-	if err != nil {
-		return err
-	}
-	saved, err := a.runSvc.SaveAssetLink(context.Background(), runs.AssetLinkInput{Asset: runAssetFromLocal(linked)})
-	if err != nil {
-		return state.MapError(err)
-	}
-	for i, old := range a.runAssets {
-		if old.RootID == saved.RootID && old.RelativePath == saved.RelativePath &&
-			old.Link.RunID == saved.Link.RunID && old.Link.TaskKey == saved.Link.TaskKey &&
-			old.Link.SampleID == saved.Link.SampleID {
-			a.runAssets[i] = saved
-			return nil
+	coordinate.RunID, coordinate.TaskKey = a.snap.RunID, taskKey
+	return linkPickedAssets(paths, coordinate, func(path string, link runs.AssetLink) error {
+		asset, err := assets.NewLink(rootID, rootDir, path, assets.Link{
+			RunID: link.RunID, TaskKey: link.TaskKey,
+		}, "local-user", true)
+		if err != nil {
+			return err
 		}
-	}
-	a.runAssets = append(a.runAssets, saved)
-	return nil
+		savedAsset := runAssetFromLocal(asset)
+		savedAsset.Link.WellID = link.WellID
+		savedAsset.Link.Timepoint = link.Timepoint
+		savedAsset.Link.FOVIndex = link.FOVIndex
+		saved, err := a.runSvc.SaveAssetLink(context.Background(), runs.AssetLinkInput{Asset: savedAsset})
+		if err != nil {
+			return state.MapError(err)
+		}
+		for i, old := range a.runAssets {
+			if old.RootID == saved.RootID && old.RelativePath == saved.RelativePath &&
+				old.Link.RunID == saved.Link.RunID && old.Link.TaskKey == saved.Link.TaskKey &&
+				old.Link.SampleID == saved.Link.SampleID {
+				a.runAssets[i] = saved
+				return nil
+			}
+		}
+		a.runAssets = append(a.runAssets, saved)
+		return nil
+	})
 }
 
 // buildRunWorkspaceVM asks Core for the frozen Run hierarchy. Go only decodes
@@ -2117,12 +2308,8 @@ func main() {
 						a.shell.Invalidate()
 					}
 				},
-				OnLinkFile: func(_ runworkspace.LinkedAsset) {
-					if err := a.linkRunAsset(task.TaskKey); err != nil {
-						a.linkErr = err.Error()
-					} else {
-						a.linkErr = ""
-					}
+				OnLinkFile: func(prefill runworkspace.LinkedAsset) {
+					a.openAssetLinkForm(task.TaskKey, prefill)
 					if a.shell != nil {
 						a.shell.Invalidate()
 					}
@@ -2302,6 +2489,66 @@ func contentPage(c *ui.Context, a *app) {
 	a.renderNewDesignDialog(c)
 	a.renderImportDialog(c)
 	a.renderDesignSwitchConfirmation(c)
+	a.renderAssetLinkDialog(c)
+}
+
+func (a *app) renderAssetLinkDialog(c *ui.Context) {
+	if !a.linkDialogOpen {
+		return
+	}
+	t := c.Theme()
+	tokens := theme.GetTokens(t)
+	open := a.linkDialogOpen
+	components.Dialog(c, &open, components.DialogOptions{Label: "关联本地文件"}, func(panel ui.Element) {
+		panel.Width(520).Children(func() {
+			ui.Text(c, "关联本地文件").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
+			ui.Text(c, "先标注孔位、时间点和视野；所选坐标应用于本次选择的每个文件。").
+				FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "孔位").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted).Width(68)
+				ui.Select(c, &a.linkDialogWell, a.linkDialogWells).FillWidth()
+			})
+			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "时间点").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted).Width(68)
+				ui.Select(c, &a.linkDialogTimepoint, a.linkDialogTimepoints).FillWidth()
+			})
+			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "FOV").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted).Width(68)
+				ui.TextInput(c, &a.linkDialogFOV).Placeholder("≥ 1").FillWidth()
+			})
+			if a.linkDialogErr != "" {
+				ui.Text(c, a.linkDialogErr).FontSize(float32(tokens.TextMeta)).TextColor(t.Danger)
+			}
+			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(t.Space(1)).Children(func() {
+				if components.Button(c, "取消", components.ButtonSecondary).Clicked() {
+					a.linkDialogOpen = false
+				}
+				selectFiles := components.Button(c, "选择文件", components.ButtonPrimary)
+				selectFiles.Disabled(len(a.linkDialogWells) == 0 || len(a.linkDialogTimepoints) == 0)
+				if selectFiles.Clicked() {
+					coordinate, err := validateAssetCoordinates(
+						a.linkDialogWell, a.linkDialogTimepoint, a.linkDialogFOV,
+						a.linkDialogWells, a.linkDialogTimepoints,
+					)
+					if err != nil {
+						a.linkDialogErr = err.Error()
+						return
+					}
+					a.linkDialogOpen = false
+					a.linkErr = ""
+					if err := a.linkRunAsset(a.linkDialogTask, coordinate); err != nil {
+						a.linkErr = err.Error()
+					}
+					if a.shell != nil {
+						a.shell.Invalidate()
+					}
+				}
+			})
+		})
+	})
+	if !open {
+		a.linkDialogOpen = false
+	}
 }
 
 // batchPage shows one stored readout batch as a read-only plate. Values come
