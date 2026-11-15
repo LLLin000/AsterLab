@@ -465,6 +465,14 @@ struct IdInput {
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RunWorkspaceInput {
+    id: String,
+    /// `blind` masks frozen group identity; `unblinded` (default) renders it.
+    #[serde(default)]
+    view: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InspectTreeInput {
     design_id: String,
     #[serde(default)]
@@ -4374,13 +4382,20 @@ pub(crate) fn create_execution_event_tx(
     {
         return Err(CliError::input("timepoint 不能为空且不能超过 100 个字符"));
     }
-    if event
-        .step_status
-        .as_deref()
-        .is_some_and(|status| !["in_progress", "completed", "blocked", "skipped"].contains(&status))
-    {
+    if event.step_status.as_deref().is_some_and(|status| {
+        ![
+            "in_progress",
+            "completed",
+            "blocked",
+            "skipped",
+            "qc_dropped",
+            "censored_dead",
+            "rework",
+        ]
+        .contains(&status)
+    }) {
         return Err(CliError::input(
-            "step_status 必须是 in_progress、completed、blocked 或 skipped",
+            "step_status 必须是 in_progress、completed、blocked、skipped、qc_dropped、censored_dead 或 rework",
         ));
     }
     if event.step_status.is_some() && event.protocol_step_path.is_none() {
@@ -4400,6 +4415,8 @@ pub(crate) fn create_execution_event_tx(
         (event.protocol_version_id.as_deref(), "Protocol 版本 ID"),
         (event.assay_id.as_deref(), "检测 ID"),
         (event.planned_output_id.as_deref(), "计划产物 ID"),
+        (event.parent_sample_id.as_deref(), "父样本编号"),
+        (event.aliquot_from.as_deref(), "分样来源编号"),
     ] {
         if let Some(value) = value {
             check_text(value, label, 120)?;
@@ -5002,6 +5019,9 @@ pub(crate) fn create_execution_event_tx(
         "pantry_item_id":event.pantry_item_id,
         "task_key":event.task_key,
         "sample_ids":event.sample_ids,
+        "parent_sample_id":event.parent_sample_id,
+        "aliquot_from":event.aliquot_from,
+        "blind_masked":event.blind_masked,
         "attempt":event.attempt,
         "materials":event.materials.iter().map(|m|json!({"material":m.material,"planned_output_id":m.planned_output_id,"amount":m.amount,"unit":m.unit})).collect::<Vec<_>>(),
         "measurements":event.measurements.iter().map(|m|json!({"endpoint":m.endpoint,"value":m.value,"unit":m.unit,"sample_id":m.sample_id,"row":m.row,"column":m.column,"group":m.group,"replicate":m.replicate,"status":m.status,"field":m.field})).collect::<Vec<_>>(),
@@ -7119,6 +7139,18 @@ struct ExecutionEventCreate {
     task_key: Option<String>,
     #[serde(default)]
     sample_ids: Vec<String>,
+    /// Parent sample the `sample_ids` were derived from. Omitted for events
+    /// without sample lineage; does not gate any existing write.
+    #[serde(default)]
+    parent_sample_id: Option<String>,
+    /// Sample this event's `sample_ids` were aliquoted from. Separate from
+    /// `parent_sample_id` because a parent remains the source across aliquots.
+    #[serde(default)]
+    aliquot_from: Option<String>,
+    /// Marks the event as recorded under a blind view. `None` only for legacy
+    /// rows; the read model treats a missing flag as "not masked".
+    #[serde(default)]
+    blind_masked: Option<bool>,
     /// Sample-level attempt for one (step, sample) identity. Omitted for
     /// step-level or legacy events; the read model then derives the attempt.
     #[serde(default)]
@@ -7514,8 +7546,35 @@ fn normalize_validate_design_data_with_registry(
 }
 
 pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliError> {
+    run_workspace_for_view(
+        db,
+        run_id,
+        asterlab_core::record_projection::ProjectionView::Unblinded,
+    )
+}
+
+/// Parse the optional `view` selector shared by the CLI and the native bridge.
+/// Empty or absent keeps the unblinded record view; `blind` masks group
+/// identity only for a frozen Design that declared a blinding basis.
+pub(crate) fn parse_projection_view(
+    raw: Option<&str>,
+) -> Result<asterlab_core::record_projection::ProjectionView, CliError> {
+    match raw.map(str::trim).unwrap_or("") {
+        "" | "unblinded" => Ok(asterlab_core::record_projection::ProjectionView::Unblinded),
+        "blind" => Ok(asterlab_core::record_projection::ProjectionView::Blind),
+        other => Err(CliError::input(format!(
+            "view 只能是 blind 或 unblinded，收到 {other}"
+        ))),
+    }
+}
+
+pub(crate) fn run_workspace_for_view(
+    db: &Connection,
+    run_id: &str,
+    view: asterlab_core::record_projection::ProjectionView,
+) -> Result<Value, CliError> {
     let run = get(db, run_id)?;
-    let workspace = run_workspace_typed(db, run_id)?;
+    let workspace = run_workspace_typed_for_view(db, run_id, view)?;
     let mut value =
         serde_json::to_value(workspace).map_err(|error| CliError::internal(error.to_string()))?;
     value["creation_audit"] = run["data"]
@@ -7538,6 +7597,18 @@ pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliE
 pub(crate) fn run_workspace_typed(
     db: &Connection,
     run_id: &str,
+) -> Result<asterlab_core::run_workspace::RunWorkspace, CliError> {
+    run_workspace_typed_for_view(
+        db,
+        run_id,
+        asterlab_core::record_projection::ProjectionView::Unblinded,
+    )
+}
+
+pub(crate) fn run_workspace_typed_for_view(
+    db: &Connection,
+    run_id: &str,
+    view: asterlab_core::record_projection::ProjectionView,
 ) -> Result<asterlab_core::run_workspace::RunWorkspace, CliError> {
     let run = get(db, run_id)?;
     if run["kind"] != "run" {
@@ -7617,7 +7688,7 @@ pub(crate) fn run_workspace_typed(
         plate["wells"] = json!(wells_by_plate.remove(&plate_id).unwrap_or_default());
     }
 
-    let workspace = asterlab_core::run_workspace::build(
+    let workspace = asterlab_core::run_workspace::build_for_view(
         run_id,
         design_id,
         version_id,
@@ -7627,6 +7698,7 @@ pub(crate) fn run_workspace_typed(
         &plates,
         &events,
         &asset_links,
+        view,
     )
     .map_err(|error| CliError::internal(error.to_string()))?;
     Ok(workspace)
@@ -7673,6 +7745,33 @@ pub(crate) fn workflow_tree_for_db(
                     "Run 冻结的 AsterDoc revision 为 {revision}，请求为 {requested}"
                 )));
             }
+        }
+        let asterdoc = &workspace["asterdoc"];
+        let frozen_asterdoc = asterdoc
+            .get("revision")
+            .and_then(Value::as_u64)
+            .is_some_and(|revision| revision > 0)
+            || asterdoc
+                .get("source")
+                .and_then(Value::as_str)
+                .is_some_and(|source| !source.trim().is_empty());
+        if !frozen_asterdoc {
+            // A classic `design.create` Run freezes a DesignVersion but never
+            // stores an AsterDoc document. There is no revision to load, so
+            // returning an empty tree with an explicit status is the honest
+            // answer; only a Run that names a revision must be loadable.
+            return Ok(json!({
+                "designId": frozen_design_id,
+                "revision": revision,
+                "runId": run_id,
+                "design": false,
+                "roots": [],
+                "order": [],
+                "precedes": {},
+                "issues": [format!(
+                    "Run 由经典 design.create 冻结，没有 AsterDoc 文档；不存在 AsterDoc revision v{revision}，层级树为空"
+                )]
+            }));
         }
         let document = load_asterdoc_at(db, &frozen_design_id, revision)?;
         let frozen_hash = workspace["asterdoc"]["source_hash"].as_str().unwrap_or("");
@@ -11016,8 +11115,9 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             }
         }
         "run.workspace" => {
-            let i: IdInput = parse_input(path)?;
-            Ok(run_workspace(&db, &i.id)?)
+            let i: RunWorkspaceInput = parse_input(path)?;
+            let view = parse_projection_view(i.view.as_deref())?;
+            run_workspace_for_view(&db, &i.id, view)
         }
         "workflow.progress" => {
             let i: WorkflowProgressInput = parse_input(path)?;
@@ -12101,7 +12201,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["content","event_time","observation","result","deviation"],"properties":{"content":{"type":"string"},"event_time":{"type":["string","null"],"format":"date-time"},"event_time_local":{"type":["string","null"]},"event_timezone":{"type":["string","null"]},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event" => {
-            json!({"type":"object","additionalProperties":false,"required":["event_type","content","occurred_at","stage","timepoint","step_status","sample_ids","materials","measurements","deviation"],"properties":{"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"]},"timepoint":{"type":["string","null"],"maxLength":100},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null]},"protocol_step_path":{"type":["string","null"]},"protocol_version_id":{"type":["string","null"]},"assay_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]},"pantry_item_id":{"type":["string","null"]},"sample_ids":{"type":"array","items":{"type":"string"}},"materials":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["material","planned_output_id","amount","unit"],"properties":{"material":{"type":"string"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"]},"unit":{"type":["string","null"]}}}},"measurements":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["endpoint","value","unit","sample_id"],"properties":{"endpoint":{"type":"string"},"value":{"type":"number"},"unit":{"type":["string","null"]},"sample_id":{"type":["string","null"]}}}},"readouts":{"type":"array","items":{"type":"object","additionalProperties":true}},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}},"controls":{"type":"array","items":{"type":"object","additionalProperties":true}},"lineage":{"type":"array","items":{"type":"object","additionalProperties":true}},"actual_parameters":{"type":"array","items":{"type":"object","additionalProperties":true}},"operator":{"type":["string","null"]},"deviation":{"type":["string","null"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["event_type","content","occurred_at","stage","timepoint","step_status","sample_ids","materials","measurements","deviation"],"properties":{"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"]},"timepoint":{"type":["string","null"],"maxLength":100},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped","qc_dropped","censored_dead","rework",null]},"parent_sample_id":{"type":["string","null"],"maxLength":120},"aliquot_from":{"type":["string","null"],"maxLength":120},"blind_masked":{"type":["boolean","null"]},"protocol_step_path":{"type":["string","null"]},"protocol_version_id":{"type":["string","null"]},"assay_id":{"type":["string","null"]},"planned_output_id":{"type":["string","null"]},"pantry_item_id":{"type":["string","null"]},"sample_ids":{"type":"array","items":{"type":"string"}},"materials":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["material","planned_output_id","amount","unit"],"properties":{"material":{"type":"string"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"]},"unit":{"type":["string","null"]}}}},"measurements":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["endpoint","value","unit","sample_id"],"properties":{"endpoint":{"type":"string"},"value":{"type":"number"},"unit":{"type":["string","null"]},"sample_id":{"type":["string","null"]}}}},"readouts":{"type":"array","items":{"type":"object","additionalProperties":true}},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}},"controls":{"type":"array","items":{"type":"object","additionalProperties":true}},"lineage":{"type":"array","items":{"type":"object","additionalProperties":true}},"actual_parameters":{"type":"array","items":{"type":"object","additionalProperties":true}},"operator":{"type":["string","null"]},"deviation":{"type":["string","null"]}}})
         }
         "formula" => {
             json!({"type":"object","additionalProperties":false,"required":["title","expression","variables","notes"],"properties":{"title":{"type":"string"},"expression":{"type":"string"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -12154,7 +12254,7 @@ fn any_record_schema() -> Value {
     json!({"oneOf":kinds.iter().map(|k|record_schema(k)).collect::<Vec<_>>()})
 }
 fn workflow_progress_output_schema() -> Value {
-    let status = json!({"type":"string","enum":["not_started","in_progress","completed","failed","skipped"]});
+    let status = json!({"type":"string","enum":["not_started","active","in_progress","completed","failed","skipped","skipped_by_rule","qc_dropped","censored_dead","rework"]});
     let attempt = json!({
         "type":"object","additionalProperties":false,
         "required":["attempt","status","event_ids","last_event_at","deviation"],
@@ -12175,6 +12275,9 @@ fn workflow_progress_output_schema() -> Value {
             "attempt":{"type":["integer","null"],"minimum":1},
             "attempt_count":{"type":"integer","minimum":0},
             "last_event_at":{"type":["string","null"]},
+            "parent_sample_id":{"type":["string","null"]},
+            "aliquot_from":{"type":["string","null"]},
+            "blind_masked":{"type":"boolean"},
             "attempts":{"type":"array","items":attempt}
         }
     });
@@ -12197,6 +12300,11 @@ fn workflow_progress_output_schema() -> Value {
                     "completed_samples":{"type":"integer","minimum":0},
                     "failed_samples":{"type":"integer","minimum":0},
                     "skipped_samples":{"type":"integer","minimum":0},
+                    "active_samples":{"type":"integer","minimum":0},
+                    "skipped_by_rule_samples":{"type":"integer","minimum":0},
+                    "qc_dropped_samples":{"type":"integer","minimum":0},
+                    "censored_dead_samples":{"type":"integer","minimum":0},
+                    "rework_samples":{"type":"integer","minimum":0},
                     "in_progress_samples":{"type":"integer","minimum":0},
                     "not_started_samples":{"type":"integer","minimum":0},
                     "last_event_at":{"type":["string","null"]},
@@ -12417,7 +12525,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":"string"}}})
         }
         "run.workspace" => {
-            json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
+            json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"},"view":{"type":"string","enum":["blind","unblinded"],"description":"blind 只遮蔽已声明盲法依据的冻结设计分组身份；默认 unblinded"}}})
         }
         "protocol.block.list" => {
             json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":"string"}}})
@@ -12529,7 +12637,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"ad_hoc_step":{"type":"boolean","default":false,"description":"临时补加步骤：允许 protocol_step_path 不属于冻结清单；省略时为 false"},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"pantry_item_id":{"type":["string","null"],"maxLength":120,"description":"可选；关联已存在的储藏室条目。缺失不阻断；条目临期或过期时在 pantry_notices 返回提示"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped","qc_dropped","censored_dead","rework",null],"description":"显式步骤状态；qc_dropped/censored_dead/rework 表示样本被剔除、删失或需要重做"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"ad_hoc_step":{"type":"boolean","default":false,"description":"临时补加步骤：允许 protocol_step_path 不属于冻结清单；省略时为 false"},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"pantry_item_id":{"type":["string","null"],"maxLength":120,"description":"可选；关联已存在的储藏室条目。缺失不阻断；条目临期或过期时在 pantry_notices 返回提示"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"parent_sample_id":{"type":["string","null"],"maxLength":120,"description":"可选；这些样本的父样本编号"},"aliquot_from":{"type":["string","null"],"maxLength":120,"description":"可选；这些样本的分样来源编号"},"blind_masked":{"type":["boolean","null"],"description":"可选；该事件在盲法视图下记录"},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "pantry.list" | "label.export" => json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":["string","null"]},"include_exhausted":{"type":"boolean","default":true,"description":"false 时省略已耗尽的条目"},"as_of":{"type":"string","format":"date","description":"YYYY-MM-DD；省略时用当前 UTC 日期"},"near_expiry_days":{"type":"integer","minimum":0,"maximum":3650,"description":"临期窗口天数；默认 14"}}}),
         "pantry.delete" => json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1,"maxLength":120,"description":"要停用的储藏室条目 ID"},"expected_revision":{"type":["integer","null"],"minimum":1,"description":"提供时按版本校验，不一致返回 REVISION_CONFLICT"}}}),
@@ -12559,7 +12667,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
         }
         "asset.link" => {
-            json!({"type":"object","additionalProperties":false,"required":["root_id","root_dir","run_id","task_key"],"anyOf":[{"required":["relative_path"]},{"required":["path"]}],"properties":{"root_id":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S","description":"逻辑根 ID；只保存它和相对路径，不保存绝对路径"},"root_dir":{"type":"string","minLength":1,"description":"本机根目录；仅用于本次读取元数据与计算 sha256，不写入记录"},"relative_path":{"type":"string","minLength":1,"description":"相对 root_dir 的文件路径；不得包含 .. 或绝对路径"},"path":{"type":"string","minLength":1,"description":"本机文件绝对路径；与 root_dir 一起用于推导 relative_path"},"run_id":{"type":"string","minLength":1},"task_key":{"type":"string","minLength":1,"maxLength":1000},"sample_id":{"type":["string","null"],"maxLength":200},"well_id":{"type":["string","null"],"maxLength":40},"timepoint":{"type":["string","null"],"maxLength":100},"fov_index":{"type":["integer","null"],"minimum":0},"actor_id":{"type":["string","null"],"maxLength":200}}})
+            json!({"type":"object","additionalProperties":false,"required":["root_id","root_dir","run_id","task_key"],"anyOf":[{"required":["relative_path"]},{"required":["path"]}],"properties":{"root_id":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S","description":"逻辑根 ID；只保存它和相对路径，不保存绝对路径"},"root_dir":{"type":"string","minLength":1,"description":"本机根目录；仅用于本次读取元数据与计算 sha256，不写入记录"},"relative_path":{"type":"string","minLength":1,"description":"相对 root_dir 的文件路径；不得包含 .. 或绝对路径"},"path":{"type":"string","minLength":1,"description":"本机文件绝对路径；与 root_dir 一起用于推导 relative_path"},"run_id":{"type":"string","minLength":1},"task_key":{"type":"string","minLength":1,"maxLength":1000},"sample_id":{"type":["string","null"],"maxLength":200},"well_id":{"type":["string","null"],"maxLength":40},"timepoint":{"type":["string","null"],"maxLength":100},"fov_index":{"type":["integer","null"],"minimum":1},"actor_id":{"type":["string","null"],"maxLength":200}}})
         }
         "asset.link.update" => {
             json!({"type":"object","additionalProperties":false,"required":["id","well_id","timepoint","fov_index"],"properties":{"id":{"type":"string","minLength":1,"description":"asset_link 记录 ID"},"well_id":{"type":"string","minLength":1,"maxLength":40,"description":"新孔位，如 A1；必填，不能用来清空坐标"},"timepoint":{"type":["string","null"],"maxLength":100,"description":"新时间点；显式 null 表示该链接不记录时间点"},"fov_index":{"type":["integer","null"],"minimum":1,"description":"新视野序号，从 1 开始；显式 null 表示不记录视野"},"actor_id":{"type":["string","null"],"maxLength":200}}})
@@ -14635,9 +14743,17 @@ protocol_version_id: protocol-v1
             },
             &data_dir,
         )
-        .expect_err("legacy Run without a frozen document must fail explicitly");
-        assert_eq!(old_run.code, "NOT_FOUND");
-        assert!(old_run.message.contains("AsterDoc revision"));
+        .expect("legacy Run without a frozen document returns an empty tree");
+        assert_eq!(old_run["design"], false);
+        assert!(old_run["roots"].as_array().unwrap().is_empty());
+        assert!(
+            old_run["issues"][0]
+                .as_str()
+                .unwrap_or("")
+                .contains("经典 design.create"),
+            "{}",
+            old_run["issues"]
+        );
         fs::remove_dir_all(&data_dir).expect("remove temp data dir");
     }
 
@@ -14912,6 +15028,294 @@ mix_factor_final_concentration: {value: 50, unit: ng/mL}
         assert_eq!(projected["events"][0]["skipped_by_rule"], true);
         assert_eq!(projected["events"][0]["ad_hoc_step"], true);
         assert_eq!(projected["tasks"][0]["status"], "skipped");
+    }
+
+    #[test]
+    fn execution_event_writes_exclusion_statuses_and_sample_lineage() {
+        let dir = std::env::temp_dir().join(format!("asterlab-event-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let db = open_db(&dir).unwrap();
+            seed_asset_run(&db);
+        }
+        let write_input = |name: &str, value: Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, value.to_string()).unwrap();
+            path
+        };
+
+        for (file, status) in [
+            ("qc.json", "qc_dropped"),
+            ("dead.json", "censored_dead"),
+            ("rework.json", "rework"),
+        ] {
+            let sample_id = format!("sample-{status}");
+            let created = dispatch(
+                "execution_event.create",
+                write_input(
+                    file,
+                    json!({
+                        "run_id":"run-1","event_type":"operation","content":status,
+                        "step_status":status,"protocol_step_path":"s/1",
+                        "protocol_version_id":"pv1","assay_id":"assay-1",
+                        "sample_ids":[sample_id],
+                        "parent_sample_id":"parent-1","aliquot_from":"parent-1",
+                        "blind_masked":true
+                    }),
+                )
+                .to_str()
+                .unwrap(),
+                &dir,
+            )
+            .unwrap();
+            assert_eq!(created["record"]["data"]["step_status"], status);
+            assert_eq!(created["record"]["data"]["parent_sample_id"], "parent-1");
+            assert_eq!(created["record"]["data"]["aliquot_from"], "parent-1");
+            assert_eq!(created["record"]["data"]["blind_masked"], true);
+        }
+
+        // The exclusion statuses are what the progress read model counts; an
+        // unknown status is still rejected.
+        let progress = dispatch(
+            "workflow.progress",
+            write_input("progress.json", json!({"run_id":"run-1"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(progress["steps"][0]["qc_dropped_samples"], 1);
+        assert_eq!(progress["steps"][0]["censored_dead_samples"], 1);
+        assert_eq!(progress["steps"][0]["rework_samples"], 1);
+        let mut statuses: Vec<&str> = progress["steps"][0]["samples"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|sample| sample["status"].as_str())
+            .collect();
+        statuses.sort_unstable();
+        assert_eq!(statuses, ["censored_dead", "qc_dropped", "rework"]);
+
+        let rejected = dispatch(
+            "execution_event.create",
+            write_input(
+                "bad.json",
+                json!({
+                    "run_id":"run-1","event_type":"operation","content":"bad",
+                    "step_status":"abandoned","protocol_step_path":"s/1",
+                    "protocol_version_id":"pv1","assay_id":"assay-1"
+                }),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(rejected.code, "INVALID_INPUT");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn run_workspace_cli_blind_view_masks_identity_and_projects_occurrences() {
+        let dir = std::env::temp_dir().join(format!("asterlab-blind-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let db = open_db(&dir).unwrap();
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('project-1','project',NULL,NULL,1,?1,'now','now')",
+                [json!({"name":"p","description":""}).to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('design-1','design','project-1',NULL,1,?1,'now','now')",
+                [json!({"title":"d"}).to_string()],
+            )
+            .unwrap();
+            let snapshot = json!({
+                "title":"d","objective":"o","experimental_unit":"well",
+                "blinding":"研究者与操作者均盲，按笼号编号给药",
+                "group_specs":[{"id":"g1","name":"Control","role":"control",
+                    "condition":"vehicle","independent_n":3,"technical_repeats":2}],
+                "assays":[{"id":"assay-1","title":"CCK-8","endpoint":"OD450",
+                    "group_ids":["g1"],"group_names":["Control"]}],
+                "sample_allocations":[],"planned_outputs":[],"evidence_conflicts":[]
+            });
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('version-1','design_version','project-1','design-1',1,?1,'now','now')",
+                [json!({
+                    "design_id":"design-1","design_revision":1,"snapshot":snapshot
+                })
+                .to_string()],
+            )
+            .unwrap();
+            let step = json!({
+                "path":"s/1","use_id":"u1","title":"T","instruction":"I",
+                "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b1"
+            });
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('run-1','run','project-1','design-1',1,?1,'now','now')",
+                [json!({
+                    "title":"r","design_version_id":"version-1","design_revision":1,
+                    "status":"in_progress",
+                    "protocol_manifest":[{"assay_id":"assay-1","assay_title":"A",
+                        "protocol_version_id":"pv1","steps":[step]}]
+                })
+                .to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('plate-1','plate','project-1','run-1',1,?1,'now','now')",
+                [json!({"name":"Plate","format":"96","rows":8,"columns":12,"assay_id":"assay-1"}).to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('well-1','well','project-1','plate-1',1,?1,'now','now')",
+                [json!({"well_id":"A1","group_label":"Control","sample_id":"s1","note":""}).to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('event-1','execution_event','project-1','run-1',1,?1,'now','now')",
+                [json!({
+                    "event_type":"operation","content":"dose","occurred_at":"2026-11-20T00:00:00Z",
+                    "protocol_step_path":"s/1","protocol_version_id":"pv1",
+                    "assay_id":"assay-1","occurrence_id":"occ-1","sample_ids":["s1"]
+                })
+                .to_string()],
+            )
+            .unwrap();
+        }
+        let write_input = |name: &str, value: Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, value.to_string()).unwrap();
+            path
+        };
+
+        let unblinded = dispatch(
+            "run.workspace",
+            write_input("plain.json", json!({"id":"run-1"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(unblinded["frozen_design"]["content"]["groups"][0]["name"], "Control");
+        assert_eq!(unblinded["occurrences"][0]["occurrence_id"], "occ-1");
+        assert_eq!(unblinded["occurrences"][0]["context"]["step_path"], "s/1");
+        assert_eq!(unblinded["occurrences"][0]["context"]["target"]["kind"], "many");
+
+        let blind = dispatch(
+            "run.workspace",
+            write_input("blind.json", json!({"id":"run-1","view":"blind"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(blind["frozen_design"]["content"]["groups"][0]["id"], "");
+        assert_eq!(blind["frozen_design"]["content"]["groups"][0]["name"], "");
+        assert_eq!(blind["plates"][0]["wells"][0]["group_label"], Value::Null);
+        // Blinding removes identity, not execution facts.
+        assert_eq!(blind["occurrences"][0]["occurrence_id"], "occ-1");
+
+        let unknown = dispatch(
+            "run.workspace",
+            write_input("bad-view.json", json!({"id":"run-1","view":"masked"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(unknown.code, "INVALID_INPUT");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn exclusion_and_fov_schemas_match_the_core_contract() {
+        let event = input_schema("execution_event.create").unwrap();
+        let statuses = event["properties"]["step_status"]["enum"]
+            .as_array()
+            .unwrap();
+        for status in ["qc_dropped", "censored_dead", "rework"] {
+            assert!(statuses.contains(&json!(status)), "missing {status}");
+        }
+        for field in ["parent_sample_id", "aliquot_from", "blind_masked"] {
+            assert!(
+                event["properties"][field].is_object(),
+                "missing event field {field}"
+            );
+        }
+        let progress_schema = output_schema("workflow.progress");
+        let progress_statuses = progress_schema["oneOf"][0]["properties"]["result"]["properties"]
+            ["steps"]["items"]["properties"]["status"]["enum"]
+            .as_array()
+            .unwrap();
+        for status in ["skipped_by_rule", "qc_dropped", "censored_dead", "rework"] {
+            assert!(progress_statuses.contains(&json!(status)), "missing {status}");
+        }
+        assert_eq!(
+            input_schema("asset.link").unwrap()["properties"]["fov_index"]["minimum"],
+            json!(1)
+        );
+        assert_eq!(
+            input_schema("run.workspace").unwrap()["properties"]["view"]["enum"],
+            json!(["blind", "unblinded"])
+        );
+    }
+
+    #[test]
+    fn asset_link_rejects_fov_zero_for_a_new_link() {
+        let dir = std::env::temp_dir().join(format!("asterlab-fov-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let task_key = {
+            let db = open_db(&dir).unwrap();
+            seed_asset_run(&db)
+        };
+        let input = dir.join("link.json");
+        std::fs::write(
+            &input,
+            json!({
+                "root_id":"r","root_dir":dir,"relative_path":"missing.tif",
+                "run_id":"run-1","task_key":task_key,
+                "well_id":"A1","fov_index":0
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let error = dispatch("asset.link", input.to_str().unwrap(), &dir).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert!(error.message.contains("fov_index must start at 1"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn workflow_inspect_tree_falls_back_for_a_classic_design_run() {
+        let dir = std::env::temp_dir().join(format!("asterlab-tree-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let db = open_db(&dir).unwrap();
+            seed_asset_run(&db);
+        }
+        let input = dir.join("tree.json");
+        std::fs::write(
+            &input,
+            json!({"design_id":"design-1","run_id":"run-1"}).to_string(),
+        )
+        .unwrap();
+        let tree = dispatch("workflow.inspect_tree", input.to_str().unwrap(), &dir).unwrap();
+        assert_eq!(tree["design"], false);
+        assert_eq!(tree["runId"], "run-1");
+        assert_eq!(tree["revision"], 1);
+        assert!(tree["roots"].as_array().unwrap().is_empty());
+        assert!(tree["order"].as_array().unwrap().is_empty());
+        let issues = tree["issues"].as_array().unwrap();
+        assert!(
+            issues.iter().any(|issue| issue
+                .as_str()
+                .unwrap_or("")
+                .contains("经典 design.create")),
+            "{issues:?}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn dir_size(path: &Path) -> u64 {
