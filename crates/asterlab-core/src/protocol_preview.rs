@@ -131,6 +131,22 @@ pub fn project_time_budget(
         } else {
             None
         };
+        // An offset delays the first occurrence from the anchor; it never makes
+        // later occurrences drift from the declared interval.
+        let offset_s = match schedule.and_then(|rule| rule.offset.as_ref()) {
+            Some(offset) => {
+                let offset = offset.seconds().ok_or_else(|| {
+                    format!("step[{step_index}] schedule offset must use a time unit")
+                })?;
+                if !offset.is_finite() || offset < 0.0 {
+                    return Err(format!(
+                        "step[{step_index}] schedule offset must be finite and non-negative"
+                    ));
+                }
+                offset
+            }
+            None => 0.0,
+        };
         let Some(timing) = &spec.timing else {
             if let Some(interval) = interval_s {
                 budget.total_span_s += interval * f64::from(schedule_count - 1);
@@ -150,11 +166,26 @@ pub fn project_time_budget(
                 "step[{step_index}] timing duration must be finite and positive"
             ));
         }
-        let occurrence_duration = duration * f64::from(repeat_count);
+        let minimum_duration = match &timing.minimum_duration {
+            Some(minimum) => {
+                let minimum = minimum.seconds().ok_or_else(|| {
+                    format!("step[{step_index}] timing minimum_duration must use a time unit")
+                })?;
+                if !minimum.is_finite() || minimum <= 0.0 {
+                    return Err(format!(
+                        "step[{step_index}] timing minimum_duration must be finite and positive"
+                    ));
+                }
+                minimum
+            }
+            None => 0.0,
+        };
+        let occurrence_duration = duration.max(minimum_duration) * f64::from(repeat_count);
         if !occurrence_duration.is_finite() {
             return Err(format!("step[{step_index}] expanded duration is not finite"));
         }
 
+        budget.total_span_s += offset_s;
         for occurrence in 0..schedule_count {
             let start_s = budget.total_span_s;
             budget.total_span_s += occurrence_duration;
@@ -184,6 +215,74 @@ pub fn project_time_budget(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn minimum_duration_and_anchor_offset_drive_the_projected_budget() {
+        use crate::operation_spec::OperationSpec;
+
+        let specs: Vec<OperationSpec> = serde_json::from_value(json!([
+            {
+                "schema_version": 2,
+                "operation": { "kind": "incubate", "temperature": { "value": 4.0, "unit": "C" },
+                    "duration": { "value": 2.0, "unit": "h" } },
+                "timing": { "kind": "wait", "duration": { "value": 30.0, "unit": "min" },
+                    "minimum_duration": { "value": 2.0, "unit": "h" } },
+                "time_anchor_id": "cold_start"
+            },
+            {
+                "schema_version": 2,
+                "operation": { "kind": "measure", "endpoint_id": "readout", "unit": "AU" },
+                "timing": { "kind": "timed_endpoint", "duration": { "value": 10.0, "unit": "s" } },
+                "time_anchor_id": "t0",
+                "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 3,
+                    "offset": { "value": 6.0, "unit": "h" } }
+            },
+            {
+                "schema_version": 2,
+                "operation": { "kind": "measure", "endpoint_id": "counter", "unit": "count" },
+                "timing": { "kind": "hands_on", "duration": { "value": 30.0, "unit": "min" },
+                    "minimum_duration": { "value": 10.0, "unit": "min" } }
+            }
+        ]))
+        .unwrap();
+
+        let budget = project_time_budget(&specs).unwrap();
+        // 2h minimum beats the 30min declared wait, then t0+6h/12h/18h occur,
+        // and the 30min hands-on duration beats its 10min minimum.
+        assert_eq!(budget.hands_on_s, 1_800.0);
+        assert_eq!(budget.total_span_s, 73_830.0);
+        assert_eq!(
+            budget
+                .parallel_windows
+                .iter()
+                .map(|window| (window.start_s, window.end_s))
+                .collect::<Vec<_>>(),
+            [(0.0, 7_200.0), (28_800.0, 28_810.0), (50_410.0, 50_420.0), (72_020.0, 72_030.0)]
+        );
+        assert!(budget.parallel_windows[1..]
+            .iter()
+            .all(|window| window.time_anchor_id.as_deref() == Some("t0")));
+    }
+
+    #[test]
+    fn negative_schedule_offset_is_rejected_by_the_projection() {
+        use crate::operation_spec::OperationSpec;
+
+        let specs: Vec<OperationSpec> = serde_json::from_value(json!([{
+            "schema_version": 2,
+            "operation": { "kind": "measure", "endpoint_id": "readout", "unit": "AU" },
+            "timing": { "kind": "wait", "duration": { "value": 1.0, "unit": "h" } },
+            "time_anchor_id": "t0",
+            "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 3,
+                "offset": { "value": -6.0, "unit": "h" } }
+        }]))
+        .unwrap();
+
+        assert_eq!(
+            project_time_budget(&specs).unwrap_err(),
+            "step[0] schedule offset must be finite and non-negative"
+        );
+    }
 
     #[test]
     fn time_budget_separates_hands_on_span_and_parallel_wait_windows() {
