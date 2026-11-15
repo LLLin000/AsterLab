@@ -622,14 +622,114 @@ fn design_declares_blinding(design_snapshot: &Value) -> bool {
     opt_text(&design_snapshot["blinding"]).is_some()
 }
 
+/// Replacement for an identity string removed from free text. It is a marker
+/// that text was masked, not a stand-in group label.
+const BLIND_PLACEHOLDER: &str = "***";
+
+/// Frozen group identity as it would appear in free text.
+///
+/// Typed fields are cleared outright; text written by researchers or generated
+/// validation prompts can still repeat the same strings, so the blind view also
+/// scrubs them. Tokens shorter than two characters are skipped: a single-letter
+/// name would otherwise rewrite unrelated prose.
+fn identity_tokens(frozen: &FrozenDesignView) -> Vec<String> {
+    fn push(tokens: &mut Vec<String>, seen: &mut std::collections::HashSet<String>, value: &str) {
+        let value = value.trim();
+        if value.chars().count() >= 2 && seen.insert(value.to_owned()) {
+            tokens.push(value.to_owned());
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut tokens = Vec::new();
+    for group in &frozen.content.groups {
+        push(&mut tokens, &mut seen, &group.id);
+        push(&mut tokens, &mut seen, &group.name);
+        push(&mut tokens, &mut seen, group.role.as_deref().unwrap_or(""));
+        push(&mut tokens, &mut seen, group.condition.as_deref().unwrap_or(""));
+    }
+    for link in &frozen.content.sample_links {
+        push(&mut tokens, &mut seen, link.group_id.as_deref().unwrap_or(""));
+        push(&mut tokens, &mut seen, &link.group_name);
+    }
+    // Longest first, so a name that contains another token is replaced whole.
+    tokens.sort_by_key(|token| std::cmp::Reverse(token.chars().count()));
+    tokens
+}
+
+fn scrub_identity(text: &mut String, tokens: &[String]) {
+    for token in tokens {
+        if text.contains(token.as_str()) {
+            *text = text.replace(token.as_str(), BLIND_PLACEHOLDER);
+        }
+    }
+}
+
+fn scrub_json_identity(value: &mut Value, tokens: &[String]) {
+    match value {
+        Value::String(text) => scrub_identity(text, tokens),
+        Value::Array(items) => {
+            for item in items {
+                scrub_json_identity(item, tokens);
+            }
+        }
+        Value::Object(entries) => {
+            for entry in entries.values_mut() {
+                scrub_json_identity(entry, tokens);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Scrubs the identity tokens from every free-text surface a blind workspace
+/// still returns, including design validation prompts generated from group
+/// names and the legacy `asterlab` mirror.
+fn scrub_free_text(frozen: &mut FrozenDesignView, plates: &mut [RunPlateView], tokens: &[String]) {
+    let content = &mut frozen.content;
+    scrub_identity(&mut content.title, tokens);
+    scrub_identity(&mut content.objective, tokens);
+    if let Some(question) = content.research_question.as_mut() {
+        scrub_identity(question, tokens);
+    }
+    for assay in &mut content.assays {
+        scrub_identity(&mut assay.title, tokens);
+        for control in &mut assay.controls {
+            scrub_identity(control, tokens);
+        }
+    }
+    for output in &mut content.planned_outputs {
+        scrub_identity(&mut output.title, tokens);
+    }
+    for conflict in &mut content.conflicts {
+        scrub_identity(&mut conflict.topic, tokens);
+    }
+    for issue in &mut content.unresolved {
+        scrub_identity(&mut issue.question, tokens);
+    }
+    if let Some(mirror) = frozen.asterlab.as_mut() {
+        scrub_json_identity(mirror, tokens);
+    }
+    for plate in plates {
+        scrub_identity(&mut plate.name, tokens);
+        for well in &mut plate.wells {
+            if let Some(note) = well.note.as_mut() {
+                scrub_identity(note, tokens);
+            }
+        }
+    }
+}
+
 /// Removes frozen group identity from a workspace built for the blind view.
 ///
-/// Identity is removed, never replaced: names and ids become empty and the
-/// group counts are dropped, matching [`ProjectionView::Blind`] in the Record
-/// projection. The legacy `mygo` mirror repeats assay control and calibrator
-/// group names, so the blind view drops the whole mirror instead of guessing
-/// which of its keys are identity.
+/// Typed identity is removed, never replaced: names and ids become empty, the
+/// group counts are dropped (matching [`ProjectionView::Blind`] in the Record
+/// projection) and the legacy `mygo` mirror is dropped whole because it repeats
+/// assay control and calibrator group names. Strings that repeat the group id,
+/// name, role or condition in free text — researcher prose, validation prompts
+/// generated from group names, the `asterlab` mirror and plate notes — are
+/// scrubbed afterwards so they cannot carry the assignment back.
 fn mask_group_identity(frozen: &mut FrozenDesignView, plates: &mut [RunPlateView]) {
+    let tokens = identity_tokens(frozen);
     frozen.mygo = None;
     for group in &mut frozen.content.groups {
         group.id.clear();
@@ -647,11 +747,12 @@ fn mask_group_identity(frozen: &mut FrozenDesignView, plates: &mut [RunPlateView
         link.group_id = None;
         link.group_name.clear();
     }
-    for plate in plates {
+    for plate in plates.iter_mut() {
         for well in &mut plate.wells {
             well.group_label = None;
         }
     }
+    scrub_free_text(frozen, plates, &tokens);
 }
 
 /// Build a frozen Run workspace from stored JSON.
@@ -1321,6 +1422,55 @@ mod tests {
                 Some("Control")
             );
         }
+    }
+
+    #[test]
+    fn blind_view_scrubs_group_identity_from_free_text_and_generated_prompts() {
+        // A group without `independent_n` makes design_map generate an
+        // unresolved prompt that embeds the group name; free text and the
+        // legacy `asterlab` mirror can name the group just as well.
+        let mut design = timed_design();
+        design["group_specs"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("independent_n");
+        design["objective"] = json!("vehicle 对照下 Control 组的 OD450");
+        design["assays"][0]["controls"] = json!(["Control 空白"]);
+        design["evidence_conflicts"] = json!([{
+            "id":"c1","topic":"Control 组缺少独立重复",
+            "affected_assay_ids":["cck8"],"affects_container_estimate":false
+        }]);
+        design["asterlab"] = json!({
+            "foundationVersion":1,"sdkVersion":"1.0.0",
+            "modules":[{"kind":"dilution","parameters":[{"key":"group","value":"g1"}]}]
+        });
+        let workspace = build_for_view(
+            "r1", "d1", "dv1", 1, &design, &timed_run(),
+            &labeled_plates(), &[], &[], ProjectionView::Blind,
+        )
+        .unwrap();
+        // The prompt survives so the operator knows what is missing; only the
+        // group identity inside it is gone.
+        let prompts = &workspace.frozen_design.content.unresolved;
+        assert!(prompts
+            .iter()
+            .any(|issue| issue.question.contains("独立实验单位数")));
+        let serialized = serde_json::to_string(&workspace).unwrap();
+        for identity in ["Control", "g1", "vehicle"] {
+            assert!(
+                !serialized.contains(identity),
+                "blind workspace still exposes {identity}: {serialized}"
+            );
+        }
+        // The unblinded view keeps the same facts verbatim.
+        let plain = build_for_view(
+            "r1", "d1", "dv1", 1, &design, &timed_run(),
+            &labeled_plates(), &[], &[], ProjectionView::Unblinded,
+        )
+        .unwrap();
+        let plain = serde_json::to_string(&plain).unwrap();
+        assert!(plain.contains("Control"));
+        assert!(plain.contains("vehicle"));
     }
 
     #[test]
