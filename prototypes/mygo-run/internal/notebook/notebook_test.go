@@ -149,6 +149,92 @@ func TestTraceStateIsDerivedFromStoredSources(t *testing.T) {
 	}
 }
 
+// TestTimelineProjectsEventsInRecordedOrder pins the timeline contract: the
+// projection lists one entry per stored record, ordered by its stored time,
+// and never reorders the records that have a time.
+func TestTimelineProjectsEventsInRecordedOrder(t *testing.T) {
+	snap := fixture()
+	nb := Build(snap)
+	var ids []string
+	for _, entry := range nb.Entries[1:] {
+		ids = append(ids, entry.SourceID)
+	}
+	// batch 10:42, completion 10:50, then the untimed observation by id.
+	want := []string{"evt-batch", "evt-done", "evt-legacy"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("timeline order = %v, want %v", ids, want)
+	}
+}
+
+// TestCitationResolvesToTimelineEntryId checks that a citation points at an
+// timeline entry that exists, instead of inventing a place for it.
+func TestCitationResolvesToTimelineEntryId(t *testing.T) {
+	snap := fixture()
+	eventCitation := NewEventCitation(snap.Events[0])
+	target, ok := CitationTargetOf(eventCitation, snap, nil)
+	if !ok {
+		t.Fatal("event citation did not resolve")
+	}
+	if target.EntryID != "event:evt-batch" {
+		t.Fatalf("event citation entry = %q", target.EntryID)
+	}
+	// The target must name the same entry Build produces.
+	var found bool
+	for _, entry := range Build(snap).Entries {
+		if entry.ID == target.EntryID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("citation target %q is not a projected entry", target.EntryID)
+	}
+
+	batchCitation := Citation{Kind: "batch", ID: "batch-1"}
+	if target, ok = CitationTargetOf(batchCitation, snap, nil); !ok || target.EntryID != "event:evt-batch" {
+		t.Fatalf("batch citation target = %+v ok=%v", target, ok)
+	}
+
+	// A step citation resolves to the entry of the task it names.
+	stepCitation := NewStepCitation(snap.Tasks[0])
+	if target, ok = CitationTargetOf(stepCitation, snap, nil); !ok || target.EntryID != "event:evt-batch" {
+		t.Fatalf("step citation target = %+v ok=%v", target, ok)
+	}
+
+	// An unknown citation must not resolve.
+	if _, ok = CitationTargetOf(Citation{Kind: "event", ID: "evt-absent"}, snap, nil); ok {
+		t.Fatal("absent event citation resolved")
+	}
+}
+
+// TestCitationTargetCopiesNoContent guards the "citation, not a second copy"
+// rule: the target carries only identity and a label, never stored content.
+func TestCitationTargetCopiesNoContent(t *testing.T) {
+	snap := fixture()
+	citation := NewEventCitation(snap.Events[2]) // "孔板边缘有气泡"
+	before := Build(snap)
+	target, ok := CitationTargetOf(citation, snap, nil)
+	if !ok {
+		t.Fatal("observation citation did not resolve")
+	}
+	if target.SourceID != "evt-legacy" || target.EntryID != "event:evt-legacy" {
+		t.Fatalf("target lost its identity: %+v", target)
+	}
+	// Resolution must not add a second store of the event: the projection is
+	// deeply equal before and after, so the citation only points at it.
+	if after := Build(snap); !reflect.DeepEqual(before, after) {
+		t.Fatal("resolving a citation changed the timeline projection")
+	}
+	var matches int
+	for _, entry := range before.Entries {
+		if entry.SourceID == citation.ID {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("event appears %d times in the timeline, want exactly one", matches)
+	}
+}
+
 // UX-STATE: the Notebook toolbar names the saved/unsaved states explicitly, in
 // the same words the rest of the product uses.
 func TestSaveStateLabelNamesBothStates(t *testing.T) {
