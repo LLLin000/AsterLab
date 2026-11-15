@@ -41,7 +41,13 @@ func designPage(c *ui.Context, a *app) {
 		return
 	}
 	if a.designer != nil {
-		designer.View(c, a.designer)
+		// The step-card list is the Design surface's default; the workflow
+		// canvas stays one toggle away and is not deleted.
+		if a.designer.CanvasMode {
+			designer.View(c, a.designer)
+		} else {
+			designer.ListView(c, a.designer)
+		}
 		renderAgentProposal(c,a)
 		return
 	}
