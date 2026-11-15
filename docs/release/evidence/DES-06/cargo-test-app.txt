@@ -1094,6 +1094,7 @@ warning: function `list_asset_events` is never used
 12524 | pub(crate) fn list_asset_events(
       |               ^^^^^^^^^^^^^^^^^
 
+warning: `asterlab-app` (lib) generated 175 warnings (run `cargo fix --lib -p asterlab-app` to apply 2 suggestions)
 warning: field `exit` is never read
   --> src/../../../src/cli.rs:68:16
    |
@@ -1114,21 +1115,20 @@ warning: field `project_id` is never read
 14202 |         project_id: String,
       |         ^^^^^^^^^^
 
-warning: `asterlab-app` (lib) generated 175 warnings (run `cargo fix --lib -p asterlab-app` to apply 2 suggestions)
 warning: `asterlab-app` (lib test) generated 18 warnings (16 duplicates)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
      Running unittests src/lib.rs (<build-artifact-path-redacted>)
 
 running 40 tests
 test agent_edit_preview::tests::preview_rejects_the_three_illegal_input_classes ... ok
 test agent_edit_preview::tests::preview_resolves_diffs_from_the_store_and_leaves_it_untouched ... ok
-test cli_impl::tests::assess_includes_run_creation_audit_warnings ... ok
 test cli_impl::tests::assess_and_run_creation_reject_unmaterialized_steps ... ok
 test cli_impl::tests::agent_edit_commit_appends_a_version_and_keeps_the_frozen_run ... ok
+test cli_impl::tests::assess_includes_run_creation_audit_warnings ... ok
 test cli_impl::tests::asterdoc_nests_and_promotes_steps_by_updating_paths ... ok
 test cli_impl::tests::asset_link_rejects_paths_outside_the_root_without_writing ... ok
-test cli_impl::tests::asterdoc_reorders_steps_only_with_a_complete_unique_permutation ... ok
 test cli_impl::tests::asterdoc_parity_samples ... ok
+test cli_impl::tests::asterdoc_reorders_steps_only_with_a_complete_unique_permutation ... ok
 test cli_impl::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
 test cli_impl::tests::compiler_keeps_sample_identity_explicit_across_timepoints ... ok
 test cli_impl::tests::compiler_records_the_block_version_each_step_reuses ... ok
@@ -1137,31 +1137,31 @@ test cli_impl::tests::error_envelope_carries_structured_diagnostics ... ok
 test cli_impl::tests::failed_schema_migration_preserves_database ... ok
 test cli_impl::tests::manifest_rule_must_be_registered_in_rust ... ok
 test cli_impl::tests::protocol_block_content_accepts_legacy_and_valid_specs_but_rejects_invalid_specs ... ok
-test cli_impl::tests::agent_tools_are_discoverable ... ok
-test cli_impl::tests::read_only_tools_do_not_write ... ok
 test cli_impl::tests::concurrent_agent_edit_commits_leave_exactly_one_winner ... ok
+test cli_impl::tests::read_only_tools_do_not_write ... ok
 test cli_impl::tests::readout_batch_accepts_csv_cells ... ok
-test cli_impl::tests::readout_batch_writes_one_event_or_nothing ... ok
+test cli_impl::tests::agent_tools_are_discoverable ... ok
 test cli_impl::tests::readout_submit_replays_the_first_record_and_isolates_runs ... ok
+test cli_impl::tests::readout_batch_writes_one_event_or_nothing ... ok
 test cli_impl::tests::remove_step_cleans_workflow_order_and_edges_when_unreferenced ... ok
 test cli_impl::tests::remove_step_rejects_run_and_step_references_without_revision_changes ... ok
 test cli_impl::tests::schema_migration_legacy_v0 ... ok
-test cli_impl::tests::protocol_version_queries_return_expansion_and_stable_not_found ... ok
 test cli_impl::tests::step_edit_commit_creates_child_and_parent_versions_and_keeps_the_frozen_run ... ok
+test cli_impl::tests::protocol_version_queries_return_expansion_and_stable_not_found ... ok
 test cli_impl::tests::step_edit_schema_is_registered_for_validate_and_commit ... ok
-test cli_impl::tests::readout_tools_are_discoverable_and_write ... ok
+test cli_impl::tests::step_edit_rejects_a_version_conflict_and_a_wrong_unit_without_writing ... ok
 test cli_impl::tests::step_materialization_preserves_frozen_run_protocol_block_revision ... ok
 test cli_impl::tests::success_envelope_derives_diagnostics_from_validation_issues ... ok
-test cli_impl::tests::step_edit_rejects_a_version_conflict_and_a_wrong_unit_without_writing ... ok
+test cli_impl::tests::readout_tools_are_discoverable_and_write ... ok
 test cli_impl::tests::step_edit_tool_is_registered ... ok
 test tests::concurrent_batch_writers_use_authoritative_revision ... ok
-test tests::batch_is_atomic_idempotent_and_preserves_missing_cells ... ok
 test tests::idempotent_readout_and_rollback ... ok
 test tests::readout_persists_across_reopen ... ok
+test tests::batch_is_atomic_idempotent_and_preserves_missing_cells ... ok
 test cli_impl::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
 test cli_impl::tests::asset_link_hashes_a_large_file_without_copying_it ... ok
 
-test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.45s
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.57s
 
    Doc-tests asterlab_app
 
