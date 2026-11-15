@@ -4,10 +4,13 @@ name: linux-tests
 # unit/integration suites from HANDOFF-VPS.md §3. Toolchain and build matrix:
 # docs/engineering/cross-platform-builds.md §3-5.
 
-# Hosted-runner minutes are exhausted, so the Linux lane runs on the VPS
-# instead: scripts/ci/local-gate.sh (docs/engineering/local-ci.md). The Windows
-# Gate lane never runs these tests. Manual dispatch stays for budget restoral.
+# The repository is public, so standard GitHub-hosted runners are free again
+# and this workflow is the machine-checkable Linux gate on every pull request.
+# The VPS local gate (scripts/ci/local-gate.sh) remains the fast inner loop.
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
