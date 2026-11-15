@@ -141,9 +141,9 @@ func notebookPage(c *ui.Context, a *app) {
 				}
 				if a.noteDirty {
 					ui.Box(c).Size(6, 6).Radius(3).Background(t.Warning)
-					ui.Text(c, "未保存").FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.WarningText)
+					ui.Text(c, notebook.SaveStateLabel(true)).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.WarningText)
 				} else {
-					ui.Text(c, "已保存").FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.SuccessText)
+					ui.Text(c, notebook.SaveStateLabel(false)).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.SuccessText)
 				}
 				save := components.IconButton(c, lucide.Save(), "保存笔记", components.IconButtonCompact)
 				save.Disabled(a.noteMode == 2)
