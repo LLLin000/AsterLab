@@ -7,6 +7,8 @@ import (
 
 	"asterlab-mygo-prototype/internal/blocks"
 	"github.com/egoist/mygo/ui"
+	"errors"
+	"asterlab-mygo-prototype/modules/runs"
 )
 
 func TestToolDraftsAndImport(t *testing.T) {
@@ -90,5 +92,91 @@ func TestToolsWorkspacePNG(t *testing.T) {
 	defer f.Close()
 	if err := png.Encode(f, tester.Image()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPantryLedgerCRUDAndExpiryGroups(t *testing.T) {
+	var items []runs.PantryItem
+	nextID := 0
+	w := New(Callbacks{
+		ListPantry: func() (runs.PantryLedger, error) {
+			return runs.PantryLedger{Items: append([]runs.PantryItem(nil), items...)}, nil
+		},
+		UpsertPantry: func(input runs.PantryUpsert) (runs.PantryItem, error) {
+			for i := range items {
+				if items[i].ID == input.ID {
+					if input.ExpectedRevision == nil || *input.ExpectedRevision != items[i].Revision {
+						t.Fatalf("update missing revision guard: %+v", input)
+					}
+					items[i].Name, items[i].Location = input.Name, input.Location
+					items[i].Revision++
+					return items[i], nil
+				}
+			}
+			nextID++
+			item := runs.PantryItem{ID: "item", Name: input.Name, Location: input.Location, Revision: int64(nextID), Status: "unopened"}
+			items = append(items, item)
+			return item, nil
+		},
+		DeletePantry: func(input runs.PantryDelete) error {
+			for i, item := range items {
+				if item.ID == input.ID {
+					if input.ExpectedRevision == nil || *input.ExpectedRevision != item.Revision {
+						t.Fatalf("delete missing revision guard: %+v", input)
+					}
+					items = append(items[:i], items[i+1:]...)
+					return nil
+				}
+			}
+			return errors.New("not found")
+		},
+	})
+	if !w.PantryLoaded || len(w.Pantry.Items) != 0 {
+		t.Fatalf("initial read: loaded=%v items=%+v", w.PantryLoaded, w.Pantry.Items)
+	}
+	w.PantryName, w.PantryLocation = "PBS", "冷藏柜"
+	w.SavePantry()
+	if len(w.Pantry.Items) != 1 || w.Pantry.Items[0].Name != "PBS" || w.Pantry.Items[0].ID != "item" {
+		t.Fatalf("create/read: %+v", w.Pantry.Items)
+	}
+	w.EditPantry(w.Pantry.Items[0])
+	w.PantryName = "PBS 1x"
+	w.SavePantry()
+	if len(w.Pantry.Items) != 1 || w.Pantry.Items[0].Name != "PBS 1x" || w.Pantry.Items[0].Revision != 2 {
+		t.Fatalf("update/read: %+v", w.Pantry.Items)
+	}
+	w.DeletePantry(w.Pantry.Items[0])
+	if len(w.Pantry.Items) != 0 || len(items) != 0 {
+		t.Fatalf("delete/read: workspace=%+v service=%+v", w.Pantry.Items, items)
+	}
+
+	near, other := groupPantryItems([]runs.PantryItem{
+		{ID: "soon", Status: "near_expiry"},
+		{ID: "fresh", Status: "opened"},
+		{ID: "old", Status: "expired"},
+	})
+	if len(near) != 1 || near[0].ID != "soon" || len(other) != 2 {
+		t.Fatalf("expiry groups: near=%+v other=%+v", near, other)
+	}
+}
+
+func TestPantryExportOnlyReportsCoreSuccess(t *testing.T) {
+	fail := true
+	w := New(Callbacks{
+		ExportPantry: func() (runs.PantryLabels, error) {
+			if fail {
+				return runs.PantryLabels{}, errors.New("core unavailable")
+			}
+			return runs.PantryLabels{Labels: []runs.PantryLabel{{LabelCode: "P-1", Name: "PBS"}}}, nil
+		},
+	})
+	w.ExportPantryLabels()
+	if w.Status != "" || w.Error != "core unavailable" || w.PantryRetry == nil {
+		t.Fatalf("failed export state: status=%q error=%q retry=%v", w.Status, w.Error, w.PantryRetry != nil)
+	}
+	fail = false
+	w.PantryRetry()
+	if w.Error != "" || w.Status != "贴标清单已就绪 · 1 项" || w.PantryExportJSON == "" {
+		t.Fatalf("successful retry state: status=%q error=%q json=%q", w.Status, w.Error, w.PantryExportJSON)
 	}
 }
