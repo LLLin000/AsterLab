@@ -267,3 +267,25 @@ func TestSaveBatchReusesOperationIDAcrossRetries(t *testing.T) {
 		t.Fatalf("new edit reused old operationID: %v", spy.opIDs)
 	}
 }
+func TestRunAssetsForTaskPreservesCoordinatesAndUnlabelledAssets(t *testing.T) {
+	a := &app{runAssets: []runs.Asset{
+		{
+			ID: "full", RelativePath: "images/A1_24h_F03.tif",
+			Link: runs.AssetLink{TaskKey: "task", WellID: "B2", Timepoint: "t6h", FOVIndex: 3},
+		},
+		{
+			ID: "empty", RelativePath: "images/A1_24h_F03.tif",
+			Link: runs.AssetLink{TaskKey: "task"},
+		},
+	}}
+	projected := a.runAssetsForTask("task")
+	if len(projected) != 2 {
+		t.Fatalf("projected %d assets, want 2", len(projected))
+	}
+	if got := projected[0]; got.WellID != "B2" || got.Timepoint != "t6h" || got.FOVIndex != 3 {
+		t.Fatalf("full coordinates lost in projection: %+v", got)
+	}
+	if got := projected[1]; got.WellID != "" || got.Timepoint != "" || got.FOVIndex != 0 {
+		t.Fatalf("missing coordinates were inferred: %+v", got)
+	}
+}

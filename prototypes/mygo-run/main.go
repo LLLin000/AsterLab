@@ -399,6 +399,7 @@ func (a *app) runAssetsForTask(taskKey string) []runworkspace.LinkedAsset {
 			AssetID: linked.ID, RootID: linked.RootID, RelativePath: linked.RelativePath,
 			MediaType: linked.MediaType, Size: linked.Size, ModTime: linked.ModTime,
 			SHA256: linked.SHA256, Available: available,
+			WellID: linked.Link.WellID, Timepoint: linked.Link.Timepoint, FOVIndex: linked.Link.FOVIndex,
 			LinkedTo: runworkspace.AssetLink{
 				RunID: linked.Link.RunID, TaskKey: linked.Link.TaskKey, SampleID: linked.Link.SampleID,
 			},
@@ -2099,6 +2100,10 @@ func main() {
 				LinkErr: a.linkErr,
 				OnKindChange: func(kind runworkspace.ViewKind) {
 					a.runViewKinds[kindKey] = kind
+				},
+				OnTimeline: func() {
+					a.runWS.WorkspaceTab = 2
+					a.runWS.SelectedTimelineTask = task.TaskKey
 				},
 				OnOpenAsset: func(asset runworkspace.LinkedAsset) {
 					if err := a.openRunAsset(asset); err != nil {

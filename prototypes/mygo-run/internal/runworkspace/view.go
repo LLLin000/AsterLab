@@ -54,6 +54,8 @@ type State struct {
 
 	// WorkspaceTab selects task (0), history (1), or Run-wide timeline (2).
 	WorkspaceTab int
+	// SelectedTimelineTask highlights this task's entries after asset navigation.
+	SelectedTimelineTask string
 
 	// ShowHistory toggles the selected task's operation-history layer.
 	ShowHistory bool
@@ -1103,7 +1105,10 @@ func recordingLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 	ui.Column(c).FillWidth().Padding(16).Radius(float32(tokens.PanelRadius)).
 		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(2)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "实验记录").FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
+			ui.Column(c).Gap(t.Space(.5)).Children(func() {
+				ui.Text(c, "实验记录").FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
+				ui.Text(c, task.StepTitle).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			})
 			ui.Spacer(c)
 			recorded := len(task.Actual.Measurements)
 			if recorded > 0 {
@@ -1285,8 +1290,12 @@ func timelineTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
 		for _, event := range events {
 			event := event
+			background := tokens.Elevated
+			if event.TaskKey == s.SelectedTimelineTask {
+				background = t.Selection
+			}
 			ui.Column(c).FillWidth().Gap(t.Space(.75)).Padding(t.Space(1.5), t.Space(2)).
-				Background(tokens.Elevated).Border(1, tokens.Border).Children(func() {
+				Background(background).Border(1, tokens.Border).Children(func() {
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
 					title := eventTypeLabel(event.Type)
 					if title == "" {
