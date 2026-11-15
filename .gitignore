@@ -36,3 +36,7 @@
 /crates/asterlab-core/target/
 /prototypes/mygo-run/target/
 /prototypes/mygo-run/dist2/
+
+# Python bytecode (Home controller/test runs)
+__pycache__/
+*.pyc
