@@ -43,6 +43,11 @@ type RunService interface {
 	UpdateTimer(ctx context.Context, input TimerActionInput) (TimerRecord, error)
 	// ListTimers returns the Run's timers ordered by task key then timer id.
 	ListTimers(ctx context.Context, runID string) ([]TimerRecord, error)
+	// ListActiveTimers returns every running timer across all Runs in one call,
+	// ordered by remaining time then by run id and timer id. NowUTC is the
+	// caller-supplied instant elapsed and remaining seconds are measured at.
+	// Paused, ready and completed timers are not part of the global timer bar.
+	ListActiveTimers(ctx context.Context, nowUTC string) ([]ActiveTimer, error)
 	// ListPantry returns the pantry ledger projection as of the given date.
 	// AsOf is a strict YYYY-MM-DD date; empty means today (UTC).
 	ListPantry(ctx context.Context, query PantryQuery) (PantryLedger, error)
@@ -576,6 +581,25 @@ type TimerRecord struct {
 	RoundCount    *uint32 `json:"roundCount,omitempty"`
 	AnchorEventID *string `json:"anchorEventId,omitempty"`
 	AnchorTaskKey *string `json:"anchorTaskKey,omitempty"`
+}
+
+// ActiveTimer is one running timer across every experiment, for the global
+// timer bar and parallel clocks. It is a read model over the same durable
+// timer_records rows SaveTimer and UpdateTimer write. ElapsedS is measured at
+// the caller's NowUTC; RemainingS is empty for a mode with no planned duration
+// (a stopwatch). TimeAnchorID is the timer's anchor identity: its anchor event
+// id when it is anchored to an event, otherwise its anchor task key, and empty
+// when the timer has neither.
+type ActiveTimer struct {
+	RunID        string  `json:"runId"`
+	RunTitle     string  `json:"runTitle"`
+	TimerID      string  `json:"timerId"`
+	TaskKey      string  `json:"taskKey"`
+	Mode         string  `json:"mode"`
+	Status       string  `json:"status"`
+	ElapsedS     uint64  `json:"elapsedS"`
+	RemainingS   *uint64 `json:"remainingS,omitempty"`
+	TimeAnchorID string  `json:"timeAnchorId,omitempty"`
 }
 
 // TimerActionInput applies one lifecycle action to a timer. Action is start,

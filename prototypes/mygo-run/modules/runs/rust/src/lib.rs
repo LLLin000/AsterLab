@@ -273,6 +273,10 @@ impl RunService for CoreRunService {
         self.list_timers_impl(&run_id)
     }
 
+    fn list_active_timers(&self, _ctx: &Context, now_utc: String) -> Result<Vec<ActiveTimer>, Error> {
+        self.list_active_timers_impl(&now_utc)
+    }
+
     fn list_pantry(&self, _ctx: &Context, query: PantryQuery) -> Result<PantryLedger, Error> {
         self.list_pantry_impl(&query)
     }
@@ -339,6 +343,64 @@ impl CoreRunService {
         let core = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
         let timers = core.load_timer_records(run_id).map_err(Error::Go)?;
         Ok(timers.iter().map(timer_from_core).collect())
+    }
+
+    /// Every running timer in one query. The rows are the ones SaveTimer and
+    /// UpdateTimer write, decoded with the same Core type, so the global bar
+    /// never sees a second serialization. Remaining time is measured at
+    /// `now_utc`; a timer with no planned duration sorts after the countdowns.
+    fn list_active_timers_impl(&self, now_utc: &str) -> Result<Vec<ActiveTimer>, Error> {
+        let guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let db = core.raw_db();
+        let mut statement = db
+            .prepare(
+                "SELECT t.data_json, r.data_json FROM timer_records t \
+                 JOIN records r ON r.id=t.run_id AND r.kind='run'",
+            )
+            .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (timer_raw, run_raw) = row.map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+            let timer: CoreTimerRecord = serde_json::from_str(&timer_raw)
+                .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+            if timer.status != TimerStatus::Running {
+                continue;
+            }
+            let run: serde_json::Value =
+                serde_json::from_str(&run_raw).unwrap_or_else(|_| serde_json::json!({}));
+            let elapsed_s = timer
+                .elapsed_s(now_utc)
+                .map_err(|e| Error::Go(format!("INVALID: {e}")))?;
+            let remaining_s = timer
+                .remaining_s(now_utc)
+                .map_err(|e| Error::Go(format!("INVALID: {e}")))?;
+            out.push(ActiveTimer {
+                run_id: timer.run_id.clone(),
+                run_title: run["title"].as_str().unwrap_or("").to_owned(),
+                timer_id: timer.timer_id.clone(),
+                task_key: timer.task_key.clone(),
+                mode: timer_mode_text(timer.mode),
+                status: timer_status_text(timer.status),
+                elapsed_s,
+                remaining_s,
+                time_anchor_id: timer
+                    .anchor_event_id
+                    .clone()
+                    .or_else(|| timer.anchor_task_key.clone())
+                    .unwrap_or_default(),
+            });
+        }
+        out.sort_by(|a, b| {
+            (a.remaining_s.is_none(), a.remaining_s.unwrap_or_default(), &a.run_id, &a.timer_id)
+                .cmp(&(b.remaining_s.is_none(), b.remaining_s.unwrap_or_default(), &b.run_id, &b.timer_id))
+        });
+        Ok(out)
     }
 
     fn list_pantry_impl(&self, query: &PantryQuery) -> Result<PantryLedger, Error> {
@@ -570,23 +632,35 @@ fn timer_to_core(timer: &TimerRecord) -> Result<CoreTimerRecord, Error> {
 }
 
 fn timer_from_core(timer: &CoreTimerRecord) -> TimerRecord {
-    let mode = serde_json::to_value(timer.mode).ok();
-    let status = serde_json::to_value(timer.status).ok();
     TimerRecord {
         timer_id: timer.timer_id.clone(),
         run_id: timer.run_id.clone(),
         task_key: timer.task_key.clone(),
         phase_index: timer.phase_index,
-        mode: mode.and_then(|value| value.as_str().map(str::to_owned)).unwrap_or_default(),
+        mode: timer_mode_text(timer.mode),
         planned_s: timer.planned_s,
         started_at_utc: timer.started_at_utc.clone(),
         accumulated_s: timer.accumulated_s,
-        status: status.and_then(|value| value.as_str().map(str::to_owned)).unwrap_or_default(),
+        status: timer_status_text(timer.status),
         round_index: timer.round_index,
         round_count: timer.round_count,
         anchor_event_id: timer.anchor_event_id.clone(),
         anchor_task_key: timer.anchor_task_key.clone(),
     }
+}
+
+fn timer_mode_text(mode: TimerMode) -> String {
+    serde_json::to_value(mode)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+fn timer_status_text(status: TimerStatus) -> String {
+    serde_json::to_value(status)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
 }
 
 fn pantry_query_json(query: &PantryQuery) -> serde_json::Value {
@@ -1754,6 +1828,102 @@ mod tests {
                 now_utc: "2026-11-15T09:10:00Z".into(),
             })
             .is_err());
+    }
+
+    /// A service over its own data directory, so a query across every Run sees
+    /// only the rows the test writes.
+    fn isolated_service(label: &str) -> (CoreRunService, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "asterlab-runs-active-{label}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create isolated data dir");
+        let core = AppCore::open(&dir).expect("open isolated core");
+        ensure_module_tables(core.raw_db()).expect("module tables");
+        let service = CoreRunService { core: Mutex::new(Some(core)) };
+        (service, dir)
+    }
+
+    fn insert_run(db: &rusqlite::Connection, run_id: &str, title: &str) {
+        db.execute(
+            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) \
+             VALUES(?1,'run',NULL,NULL,1,?2,'2026-11-15T08:00:00Z','2026-11-15T08:00:00Z')",
+            rusqlite::params![run_id, serde_json::json!({"title": title, "status": "in_progress"}).to_string()],
+        )
+        .expect("insert run");
+    }
+
+    #[test]
+    fn list_active_timers_returns_only_running_timers_across_runs_in_remaining_order() {
+        let (svc, dir) = isolated_service("cross-run");
+        let db = cli_impl::open_db(&dir).expect("open isolated db");
+        insert_run(&db, "run-a", "Alpha");
+        insert_run(&db, "run-b", "Beta");
+
+        let save = |timer_id: &str, run_id: &str, task_key: &str, mode: &str, status: &str,
+                    started: Option<&str>, accumulated_s: u64, anchor_event: Option<&str>,
+                    anchor_task: Option<&str>| {
+            svc.save_timer_impl(TimerRecord {
+                timer_id: timer_id.into(),
+                run_id: run_id.into(),
+                task_key: task_key.into(),
+                mode: mode.into(),
+                status: status.into(),
+                planned_s: if mode == "stopwatch" { None } else { Some(600) },
+                started_at_utc: started.map(str::to_owned),
+                accumulated_s,
+                anchor_event_id: anchor_event.map(str::to_owned),
+                anchor_task_key: anchor_task.map(str::to_owned),
+                ..TimerRecord::default()
+            })
+            .expect("save timer");
+        };
+        // Both Run have a running countdown; run-a has two with the same
+        // remaining time so the run id and timer id decide.
+        save("timer-b", "run-a", "wash", "countdown", "running", Some("2026-11-15T09:08:00Z"), 0, None, None);
+        save("timer-a", "run-a", "spin", "countdown", "running", Some("2026-11-15T09:08:00Z"), 0, None, Some("task-anchor"));
+        save("timer-c", "run-b", "incubate", "countdown", "running", Some("2026-11-15T09:05:00Z"), 0, Some("event-t0"), None);
+        // Neither paused, completed nor a stopwatch may enter the global bar;
+        // the stopwatch has no remaining time, so it sorts after the countdowns.
+        save("timer-d", "run-a", "done", "countdown", "completed", None, 600, None, None);
+        save("timer-e", "run-b", "held", "countdown", "paused", None, 120, None, None);
+        save("timer-f", "run-b", "observe", "stopwatch", "running", Some("2026-11-15T09:00:00Z"), 0, None, None);
+
+        let active = svc.list_active_timers_impl("2026-11-15T09:10:00Z").expect("list active timers");
+        let order: Vec<(&str, &str)> = active.iter().map(|timer| (timer.run_id.as_str(), timer.timer_id.as_str())).collect();
+        assert_eq!(
+            order,
+            vec![("run-b", "timer-c"), ("run-a", "timer-a"), ("run-a", "timer-b"), ("run-b", "timer-f")],
+            "countdowns by remaining time, ties by run id then timer id, stopwatch last"
+        );
+
+        let first = &active[0];
+        assert_eq!(first.run_title, "Beta");
+        assert_eq!(first.task_key, "incubate");
+        assert_eq!(first.mode, "countdown");
+        assert_eq!(first.status, "running");
+        assert_eq!(first.elapsed_s, 300);
+        assert_eq!(first.remaining_s, Some(300));
+        assert_eq!(first.time_anchor_id, "event-t0");
+        assert_eq!(active[1].time_anchor_id, "task-anchor");
+        assert_eq!(active[2].time_anchor_id, "");
+
+        let stopwatch = &active[3];
+        assert_eq!(stopwatch.elapsed_s, 600);
+        assert_eq!(stopwatch.remaining_s, None);
+
+        assert!(
+            svc.list_active_timers_impl("not-a-timestamp").is_err(),
+            "a running timer needs the caller's clock, never an invented one"
+        );
+    }
+
+    #[test]
+    fn list_active_timers_is_an_empty_list_without_timers() {
+        let (svc, _dir) = isolated_service("empty");
+        let active = svc.list_active_timers_impl("2026-11-15T09:10:00Z").expect("list active timers");
+        assert!(active.is_empty(), "an empty database is not an error");
     }
 
     #[test]
