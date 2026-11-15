@@ -24,7 +24,10 @@ jobs:
   scope-check:
     name: scope-check
     # The VPS host is the only self-hosted Linux runner in the repo.
-    runs-on: [self-hosted, linux, x64]
+    # Hosted runner: the repository is public and standard runners are free.
+    # Self-hosted runners must never serve a public repository, where fork pull
+    # requests would execute untrusted code on the VPS.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout

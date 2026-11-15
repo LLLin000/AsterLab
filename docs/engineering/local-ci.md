@@ -84,3 +84,4 @@ that cannot run must not be able to block a merge.
 
 Evidence stays on the card and in the PR body; the machine-readable report is a
 local artifact, so no lane can rewrite history to look green.
+
