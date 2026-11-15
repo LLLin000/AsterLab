@@ -48,17 +48,9 @@ forbid:
 
 只读卡写 `write: []`。范围只列路径，不在块内写解释。
 
-卡的合并风险写在正文单独一行 `risk: L0|L1|L2|L3`（缺省按 L2 处理）：L0/L1 在门槛与独立审视通过后自动合并；L2 需要额外 `merge-approved` 标签；L3 只允许人工合并。
+卡的合并风险写在正文单独一行 `risk: L1`，准入按 `^\s*risk:\s*L[0-3]\s*$` 逐行匹配：必须是裸行，不能带行内注释、不能写成列表项，全文只认一行；缺省按 L2 处理。取值 L0–L3，自动合并上限为 L1（合并门默认 `max_risk: L1`，超限报 `risk_not_authorized`）：L0/L1 在门槛与独立审视通过后自动合并；L2 需要额外 `merge-approved` 标签；L3 只允许人工合并。
 
-交付契约给 Home 合并门做前置校验（只读，不改状态）：
-
-<!-- kandev-delivery
-version: 1
-type: core            # implementation|core|qa|contract|docs|audit|build|ui|integration
-required_artifacts:
-  - path: src/cli.rs  # 必须在 PR diff 里出现的路径
-    source: merged_pr_diff
--->
+交付契约给 Home 合并门做前置校验（只读，不改状态）。没写块、或块内不是合法 YAML 映射时，准入分别报 `missing_delivery_contract` / `invalid_delivery_contract`；`version` 只支持 `1`；`type` 与标题分类对应（`(Docs)`→`docs`、`(Core)`→`core`、`(Contract)`→`contract`、`(QA)`→`qa`、`(Build)`→`build`、`(UI)`→`ui`、`(Integration)`→`integration`、`(Audit)`→`audit`，其余实现类用 `implementation`）；`required_artifacts` 至少一条，路径是仓库相对路径且落在 `scope.write` 内，PR diff 里缺这条路径时合并门报 `MISSING_ARTIFACT`。块放在模板末尾，与正文内容一起粘进卡片描述。
 
 ## 实施
 1. ...
@@ -84,8 +76,18 @@ required_artifacts:
 - downstream: DES-01（本卡解锁谁，只作说明，不构成阻塞）
 - 风险 / 回滚：...
 
+risk: L1
+
 ## 工作方法（<Category>）
 <从第 3 节复制的分类 prompt>
+
+<!-- kandev-delivery
+version: 1
+type: docs            # 与标题分类对应：implementation|core|qa|contract|docs|audit|build|ui|integration
+required_artifacts:
+  - path: path/to/file-or-dir   # 必须落在上面 scope.write 内，且出现在 PR diff 里
+    source: merged_pr_diff
+-->
 ```
 
 评审、合并权限和 Review WIP 见 [`kandev-review-policy.md`](kandev-review-policy.md)。
@@ -99,6 +101,7 @@ required_artifacts:
 - Relations 方向只有一个读法：`depends_on` / `blocked_by` 是本卡的前置卡，未 `COMPLETED` 就不开工；`blocks` 是本卡解锁的下游卡，**不影响本卡开工**。开工前把这两栏分开读，别把 `blocks` 当成被阻塞。
   - 反例（DES-00，2026-11-14）：实现 agent 把 `blocks: DES-01` 读成"被 DES-01 阻塞"，没写一行代码就结束，白跑一轮 session。
 - `范围` 必须机器可读。`(Build)` 的范围检查读取 `<!-- kandev-scope -->` 块，不解析自然语言。
+- PR 正文末尾必须带 `<!-- kandev-task: <任务 uuid> -->` 和完整的 `<!-- kandev-scope -->` 块原文：`scope-check` 用 marker 关联卡片范围，缺 marker 时退回读 PR 正文里的 scope 块，正文也没有就直接失败。
 - 交付契约的 `acceptance:` 只写**由 CI 或 trusted worker 执行**的命令，并配 `acceptance_evidence`（`source: github_ci`/`trusted_worker`、`head_sha`、`conclusion`、`run_id`）；agent 自己跑的命令不要写进 `acceptance`，否则合并门会以 `ACCEPTANCE_UNVERIFIED` 拒绝。只靠 `required_artifacts` 也能通过合并门。
 - 验收必须是命令 + 期望结果，或明确的截图规格 + 规则 id；不写“测试全绿”“实机走查”“你确认”。
 - `DoD` 只保留人工签核项；能自动验证的内容放 `验收`。
@@ -203,6 +206,8 @@ required_artifacts:
 - [ ] 标题含稳定卡片 ID 和英文分类标签。
 - [ ] `结果` 是可观察的用户/系统结果，不是活动描述。
 - [ ] `范围` 是机器可读的 `kandev-scope` 块，包含 write/read/forbid。
+- [ ] 正文有且只有一行裸 `risk: Lx`（L0–L3，不带注释、不写成列表项）。
+- [ ] `kandev-delivery` 块可解析（`version: 1`、合法 `type`），且每个 `required_artifacts.path` 落在 `scope.write` 内。
 - [ ] `验收` 有命令 + 期望结果，或截图规格 + 规则 id。
 - [ ] `证据` 有固定路径。
 - [ ] `非目标` 至少 3 条。
