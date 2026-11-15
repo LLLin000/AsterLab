@@ -66,6 +66,9 @@ jobs:
             "RUN_HEAVY=0" | Out-File -FilePath $env:GITHUB_ENV -Append
             Write-Host "docs-only change; heavy steps skipped"
           }
+          # git diff/fetch return non-zero for "differences found" or shallow
+          # refs; the classification above is the outcome, not that status.
+          exit 0
 
       - name: Install Go
         if: env.RUN_HEAVY == '1'
