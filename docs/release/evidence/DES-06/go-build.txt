@@ -1,0 +1,3 @@
+$ cd prototypes/mygo-run && go build ./...
+
+[exit 0]

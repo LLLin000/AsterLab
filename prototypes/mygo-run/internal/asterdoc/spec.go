@@ -111,6 +111,7 @@ var knownModuleRules = map[string]bool{
 	"dilution-fields": true, "instrument-profile-fields": true,
 	"material-fields": true, "sample-fields": true, "container-fields": true,
 	"measurement-profile-fields": true, "rna-reagent-fields": true,
+	"plate-mix-fields": true,
 }
 
 func validateSpecModule(module specModule, sdkVersion string) error {
@@ -226,6 +227,10 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 			switch rule {
 			case "plate-wells", "plate-geometry-wells":
 				if _, err := plateFromData(data); err != nil {
+					return err
+				}
+			case "plate-mix-fields":
+				if _, _, err := plateMixPlansFor(data); err != nil {
 					return err
 				}
 			case "reference-ref":

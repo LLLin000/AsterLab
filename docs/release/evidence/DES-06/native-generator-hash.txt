@@ -1,0 +1,18 @@
+$ python3 scripts/ci/native_generator_hash.py --check --regen 2
+native-generator-hash: commit=8cb4527b50def95b5537e940548f0ec8b788713f
+native-generator-hash: platform=linux x86_64 python=3.12.3
+native-generator-hash: generator github.com/egoist/mygo v0.8.4-0.20261108220316-c4197b7fe562 (pinned in prototypes/mygo-run/go.mod, scripts/mygo-build.ps1, scripts/mygo-native-linux.sh)
+native-generator-hash: interface hash 10636f00b9dca6c7 format 2
+native-generator-hash: input sha256 3a1df0800458843460e5a803b8d4a8e32614e55cb0d0c1f14b8d1f301c6af2d9
+native-generator-hash: output sha256 31ee4df60e840391acaa5ec41d45317d593e4eaddb119e934201e67d5e70f18b
+native-generator-hash:   prototypes/mygo-run/modules/runs/runs_native.go sha256 e89df49445a1141ec0dd1964a5293fe97dd66dc7a2b29de2501a09ddd9f0183d drift none
+native-generator-hash:   prototypes/mygo-run/modules/runs/rust/src/mygo.rs sha256 af76c2b972aed2477d84d2eca6002b01c32ffda4aa4a88d5294a10d5d1bcd834 drift none
+native-generator-hash: OK golden scripts/ci/native_generator_hashes.json
+native-generator-hash: regen 1 output sha256 31ee4df60e840391acaa5ec41d45317d593e4eaddb119e934201e67d5e70f18b (post-generation build: required by package `runs v0.1.0 (<generator-temp-dir-redacted>/modules/runs/rust)`)
+native-generator-hash:   regen 1 prototypes/mygo-run/modules/runs/runs_native.go sha256 e89df49445a1141ec0dd1964a5293fe97dd66dc7a2b29de2501a09ddd9f0183d
+native-generator-hash:   regen 1 prototypes/mygo-run/modules/runs/rust/src/mygo.rs sha256 af76c2b972aed2477d84d2eca6002b01c32ffda4aa4a88d5294a10d5d1bcd834
+native-generator-hash: regen 2 output sha256 31ee4df60e840391acaa5ec41d45317d593e4eaddb119e934201e67d5e70f18b (post-generation build: required by package `runs v0.1.0 (<generator-temp-dir-redacted>/modules/runs/rust)`)
+native-generator-hash:   regen 2 prototypes/mygo-run/modules/runs/runs_native.go sha256 e89df49445a1141ec0dd1964a5293fe97dd66dc7a2b29de2501a09ddd9f0183d
+native-generator-hash:   regen 2 prototypes/mygo-run/modules/runs/rust/src/mygo.rs sha256 af76c2b972aed2477d84d2eca6002b01c32ffda4aa4a88d5294a10d5d1bcd834
+native-generator-hash: OK 2 regeneration(s) identical, generator v0.8.4-0.20261108220316-c4197b7fe562
+[exit 0]

@@ -105,6 +105,17 @@ stdout 每次只输出一行 JSON。成功结构为：
 
 ## Protocol 步骤块契约
 
+### ProtocolVersion 内容查询
+
+`protocol.version.get` 与 `protocol.version.list` 是只读查询：
+
+- `protocol.version.get` 输入 `{"protocol_version_id":"<immutable-version-id>"}`，返回单个 ProtocolVersion 的 `protocol_version_id`、`protocol_id`、`version`、`root_block_version_id`、`root_bindings`、根参数 `parameter_slots`、递归展开的 `steps`、`resolved_parameters`、`unresolved_parameters`、`block_version_ids` 与 `frozen: true`。
+- `protocol.version.list` 输入 `{"protocol_id":"<protocol-id>"}`，返回 `{"versions":[<上述内容>...]}`，按版本号升序。
+- 未知或类型不匹配的 ID 返回 `NOT_FOUND`（退出码 3），不返回空对象。自由文本 Protocol 无根块时返回空步骤/参数数组，`root_block_version_id: null`；其不可变版本仍标记为 `frozen: true`。
+- 两个查询都不写入数据库。精确字段约束以 `labworkbench schema protocol.version.get` / `labworkbench schema protocol.version.list` 为准。
+
+MyGo 侧是同一份数据的只读入口：`DesignService.GetProtocolVersion(ctx, protocol_version_id)` 与 `DesignService.ListProtocolVersions(ctx, protocol_id)`（后者按版本号升序）。标量字段与 CLI 输出同名同义：`protocol_version_id`、`protocol_id`、`version`、`root_block_version_id`（可空）、`block_version_ids`（字符串数组）、`frozen`。`root_bindings`、`parameter_slots`、`steps`、`resolved_parameters`、`unresolved_parameters` 以 CLI 的 JSON 文本透传，和 `WorkflowTree` 同一约定：解码即用，不在 Go 侧重建。这些展开项含任意 JSON 值（参数 `value`、`provenance`），桥接层没有对应类型，因此不作为 Go struct 跨边界。未知 ID 经 `internal/state.MapError` 归为 `state.ErrNotFound`，返回错误而非空对象。
+
 Protocol 可以继续保存旧式 body 文本，也可以引用一个确切的 root_block_version_id。步骤块是唯一的可复用操作对象。protocol.block.create 的 steps 接受两种项：
 
 - text：包含 use_id、title、instruction 和 parameter_refs，是普通可读操作。只有列入 parameter_refs 的槽位才作为该步骤的显式输入。
@@ -249,6 +260,7 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - `checks[]` 每项为 `check_id`、`status`（`passed` / `failed` / `blocked` / `skipped`）及可选 `checked_by`、`note`；`check_id` 必须存在于同一冻结 Protocol 步骤的 `checks[]`，同一事件不得重复，且检查结果必须关联该步骤。`skipped` 不等于通过；空白或未记录也不等于通过。`controls[]` 记录对照角色 `role`、`status`、样本/实验单位/观察；`lineage[]` 记录 `from_kind`、`from_id`、`to_kind`、`to_id`、`relation`。`actual_parameters[]` 记录实际执行参数 `key`、`value`、可选 `unit` 与 `source`，并与计划参数分开。
 - Protocol 文本步骤可定义 `checks[]`：`check_id`、`label`、可选 `instruction` 与 `blocking`。检查项随 ProtocolPreview、Run 冻结清单一同保存；AsterLab 只记录人工结果，不自动判定 gate 通过。
 - Protocol 步骤事件可附 `timepoint` 和 `step_status`。`timepoint` 仅用于明确属于某个检测时间点的步骤，并必须匹配 Run 冻结设计；共享制备步骤不应机械绑定某项检测的时间点。`step_status` 只能是 `in_progress`、`completed`、`blocked`、`skipped`，且必须同时关联冻结 Protocol 步骤；普通操作、观察、测量或偏差事件本身不代表步骤完成。未带时间点的旧事件不会被自动分配给 D1/D3。带 `sample_ids` 的事件只改变这些样本的状态；整步完成由 `workflow.progress` 判定，要求全部样本完成。
+- `execution_event.create` 的 `event_type` 另接受 `skipped_by_rule`（按规则跳过）；它仍需 `content`，并与其他事件一样经同一套冻结步骤/样本校验写入追加事实。临时补加的步骤必须显式传 `ad_hoc_step: true`（省略即 `false`）：为真时允许 `protocol_step_path` 不属于冻结清单，为假时仍按冻结清单拒绝未知路径；该字段只在输入中出现，回读记录也带同名布尔值，不能用来绕过 `sample_ids`、`attempt` 或检查项校验。
 - 写入工具只返回记录 ID、所属关系、版本、数据和创建/更新时间；不声称实际实验已经执行。
 - 该 CLI 是本机原型，尚无多用户认证、审计签名、细粒度附件权限或撤销系统。不要把本地访问控制误称为云端安全边界。
 

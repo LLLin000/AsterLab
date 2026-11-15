@@ -166,7 +166,8 @@ func TestNotebookStateWordIsExplicit(t *testing.T) {
 		notebookPage(c, a)
 	}, 1360, 880)
 	tt.Frame()
-	if !tt.HasText("就绪") {
+	// UX-06 vocabulary: a fresh note is 已保存, a changed one 未保存.
+	if !tt.HasText("已保存") {
 		t.Fatalf("initial state word missing: %q", tt.Texts())
 	}
 	a.noteDirty = true

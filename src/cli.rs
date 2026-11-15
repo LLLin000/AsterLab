@@ -7,6 +7,11 @@ use asterlab_core::agent_edit_validate::{
     StoredProtocolVersion,
 };
 use asterlab_core::assets as asset_refs;
+use asterlab_core::calculators::{
+    cell_seeding as cell_seeding_calc, gel_mastermix as gel_mastermix_calc,
+    runtime_normalize as runtime_normalize_calc, CellSeedingGroup, CellSeedingInput,
+    GelMastermixGroup, GelMastermixInput, RuntimeNormalizeInput,
+};
 use asterlab_core::component_data::{
     calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
 };
@@ -718,6 +723,16 @@ struct ProtocolBlockList {
 struct ProtocolBlockGet {
     id: String,
 }
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtocolVersionGet {
+    protocol_version_id: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtocolVersionList {
+    protocol_id: String,
+}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct RootParameterValue {
@@ -1242,6 +1257,81 @@ pub fn protocol_block_manifest(
         "unresolved_parameters":preview["unresolved_parameters"]
     }))
 }
+pub(crate) fn protocol_version_get(
+    db: &Connection,
+    protocol_version_id: &str,
+) -> Result<Value, CliError> {
+    let (kind, _, protocol_id, revision, raw) = kind_id(db, protocol_version_id)?
+        .ok_or_else(|| CliError::missing(format!("Protocol 版本不存在：{protocol_version_id}")))?;
+    if kind != "protocol_version" {
+        return Err(CliError::missing(format!(
+            "Protocol 版本不存在：{protocol_version_id}"
+        )));
+    }
+    let protocol_id = protocol_id.ok_or_else(|| CliError::internal("Protocol 版本缺少所属 Protocol"))?;
+    let data: Value = serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+    let bindings: Vec<RootParameterValue> = serde_json::from_value(
+        data.get("root_bindings").cloned().unwrap_or_else(|| json!([])),
+    )
+    .map_err(|e| CliError::internal(format!("Protocol root_bindings 无效：{e}")))?;
+    let preview = match data["root_block_version_id"].as_str() {
+        Some(root_id) => block_preview(db, root_id, &bindings)?,
+        None => json!({
+            "steps": [], "resolved_parameters": [], "unresolved_parameters": [],
+            "block_version_ids": [], "ready": true
+        }),
+    };
+    let parameter_slots = match data["root_block_version_id"].as_str() {
+        Some(root_id) => block_version_data(db, root_id)?.1.parameter_slots,
+        None => Vec::new(),
+    };
+    let view = asterlab_core::protocol_version::ProtocolVersionView {
+        protocol_version_id: protocol_version_id.to_owned(),
+        protocol_id,
+        version: data["version"].as_i64().unwrap_or(revision),
+        root_block_version_id: data["root_block_version_id"].as_str().map(str::to_owned),
+        root_bindings: serde_json::to_value(bindings)
+            .map_err(|e| CliError::internal(e.to_string()))?
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+        parameter_slots,
+        steps: serde_json::from_value(preview["steps"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?,
+        resolved_parameters: serde_json::from_value(preview["resolved_parameters"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?,
+        unresolved_parameters: serde_json::from_value(preview["unresolved_parameters"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?,
+        block_version_ids: serde_json::from_value(preview["block_version_ids"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?,
+        frozen: true,
+    };
+    serde_json::to_value(view).map_err(|e| CliError::internal(e.to_string()))
+}
+
+pub(crate) fn protocol_version_list(
+    db: &Connection,
+    protocol_id: &str,
+) -> Result<Vec<Value>, CliError> {
+    let (kind, _, _, _, _) = kind_id(db, protocol_id)?
+        .ok_or_else(|| CliError::missing(format!("Protocol 不存在：{protocol_id}")))?;
+    if kind != "protocol" {
+        return Err(CliError::missing(format!("Protocol 不存在：{protocol_id}")));
+    }
+    let mut versions = list(db, Some("protocol_version"), None)?
+        .into_iter()
+        .filter(|record| record["parent_id"] == protocol_id)
+        .map(|record| {
+            record["id"]
+                .as_str()
+                .ok_or_else(|| CliError::internal("Protocol 版本记录缺少 id"))
+                .and_then(|id| protocol_version_get(db, id))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    versions.sort_by_key(|version| version["version"].as_i64().unwrap_or_default());
+    Ok(versions)
+}
+
 pub(crate) fn protocol_manifest_entry(
     db: &Connection,
     version_id: &str,
@@ -2827,6 +2917,7 @@ const ASTERDOC_RULES: &[&str] = &[
     "container-fields",
     "measurement-profile-fields",
     "rna-reagent-fields",
+    "plate-mix-fields",
 ];
 
 fn validate_asterdoc_spec(spec: &Value) -> Result<(), String> {
@@ -3153,6 +3244,192 @@ fn role_allowed_for_module(role: &str, spec: &Value) -> bool {
     required.iter().any(|required| declared.contains(required))
 }
 
+fn asterdoc_plate_mix_fields(mapping: &serde_yaml::Mapping) -> Result<(), CliError> {
+    let field = |key: &str| mapping.get(serde_yaml::Value::String(key.to_owned()));
+    let present = |key: &str| field(key).is_some_and(|value| !value.is_null());
+    let ratio = |key: &str| -> Result<Option<f64>, CliError> {
+        let Some(value) = field(key) else {
+            return Ok(None);
+        };
+        if value.is_null() {
+            return Ok(None);
+        }
+        let number = value
+            .as_f64()
+            .ok_or_else(|| CliError::input(format!("{key} must be a number")))?;
+        if !number.is_finite() || number < 0.0 {
+            return Err(CliError::input(format!(
+                "{key} must be a non-negative finite number"
+            )));
+        }
+        Ok(Some(number))
+    };
+    let quantity = |key: &str, dimension: &str| -> Result<f64, CliError> {
+        let value = field(key)
+            .ok_or_else(|| CliError::input(format!("mix plan needs {key}")))?;
+        let (number, unit, actual, factor) = asterdoc_quantity_parts(value)?;
+        if actual != dimension {
+            return Err(CliError::input(format!(
+                "{key} unit {unit} is {actual}, not {dimension}"
+            )));
+        }
+        Ok(number * factor)
+    };
+
+    let gel_plan = present("mix_gelma_percent_by_group")
+        || present("mix_lap_stock_percent")
+        || present("mix_lap_final_percent");
+    let cell_plan = present("mix_cell_density")
+        || present("mix_factor_stock_concentration")
+        || present("mix_factor_final_concentration");
+    if !gel_plan && !cell_plan {
+        if present("mix_volume_per_well") || present("mix_excess_ratio") {
+            return Err(CliError::input(
+                "mix_volume_per_well and mix_excess_ratio need a gel or cell plan",
+            ));
+        }
+        return Ok(());
+    }
+    if !present("mix_volume_per_well") {
+        return Err(CliError::input("mix plan needs mix_volume_per_well"));
+    }
+    let volume_per_well_ul = quantity("mix_volume_per_well", "volume")? / 1e-6;
+    if volume_per_well_ul <= 0.0 {
+        return Err(CliError::input("mix_volume_per_well must be positive"));
+    }
+    let excess_ratio = ratio("mix_excess_ratio")?.unwrap_or(0.0);
+
+    let groups = field("groups")
+        .and_then(|value| value.as_mapping())
+        .ok_or_else(|| CliError::input("plate needs groups"))?;
+    let mut wells_by_group = std::collections::BTreeMap::new();
+    for (group, wells) in groups {
+        let name = group.as_str().unwrap_or("").trim().to_owned();
+        if name.is_empty() {
+            return Err(CliError::input("plate group name cannot be empty"));
+        }
+        let count = wells.as_sequence().map(|items| items.len()).unwrap_or(0);
+        if count == 0 {
+            return Err(CliError::input(format!(
+                "plate group {name} has no wells"
+            )));
+        }
+        wells_by_group.insert(name, count as u32);
+    }
+    if wells_by_group.is_empty() {
+        return Err(CliError::input("mix plan needs at least one plate group"));
+    }
+
+    if gel_plan {
+        let percents = field("mix_gelma_percent_by_group")
+            .and_then(|value| value.as_mapping())
+            .ok_or_else(|| CliError::input("mix_gelma_percent_by_group must be a mapping"))?;
+        let stock_percent = ratio("mix_lap_stock_percent")?
+            .ok_or_else(|| CliError::input("gel plan needs mix_lap_stock_percent"))?;
+        let final_percent = ratio("mix_lap_final_percent")?
+            .ok_or_else(|| CliError::input("gel plan needs mix_lap_final_percent"))?;
+        if stock_percent <= 0.0 {
+            return Err(CliError::input("mix_lap_stock_percent must be positive"));
+        }
+        if final_percent > stock_percent {
+            return Err(CliError::input(
+                "mix_lap_final_percent cannot exceed mix_lap_stock_percent",
+            ));
+        }
+        let mut gel_groups = Vec::with_capacity(wells_by_group.len());
+        for (name, wells) in &wells_by_group {
+            let raw = percents
+                .get(serde_yaml::Value::String(name.clone()))
+                .ok_or_else(|| {
+                    CliError::input(format!(
+                        "mix_gelma_percent_by_group is missing group {name}"
+                    ))
+                })?;
+            let percent = raw.as_f64().ok_or_else(|| {
+                CliError::input(format!("group {name} GelMA percent must be a number"))
+            })?;
+            if !percent.is_finite() || percent <= 0.0 || percent > 100.0 {
+                return Err(CliError::input(format!(
+                    "group {name} GelMA percent must be in (0, 100]"
+                )));
+            }
+            gel_groups.push(GelMastermixGroup {
+                name: name.clone(),
+                gelma_percent_wv: percent,
+                wells: *wells,
+            });
+        }
+        for key in percents.keys() {
+            let name = key.as_str().unwrap_or("");
+            if !wells_by_group.contains_key(name) {
+                return Err(CliError::input(format!(
+                    "mix_gelma_percent_by_group names unknown group {name}"
+                )));
+            }
+        }
+        gel_mastermix_calc(&GelMastermixInput {
+            volume_per_well_ul,
+            excess_ratio,
+            lap_stock_percent_wv: stock_percent,
+            lap_final_percent_wv: final_percent,
+            groups: gel_groups,
+        })
+        .map_err(CliError::input)?;
+    }
+
+    if cell_plan {
+        if !present("mix_cell_density") {
+            return Err(CliError::input("cell plan needs mix_cell_density"));
+        }
+        let density = quantity("mix_cell_density", "cells_per_well")?;
+        if density <= 0.0 {
+            return Err(CliError::input("mix_cell_density must be positive"));
+        }
+        if present("mix_factor_stock_concentration")
+            != present("mix_factor_final_concentration")
+        {
+            return Err(CliError::input(
+                "factor stock and final concentration must be provided together",
+            ));
+        }
+        let stock = if present("mix_factor_stock_concentration") {
+            quantity("mix_factor_stock_concentration", "mass_concentration")?
+        } else {
+            0.0
+        };
+        let final_concentration = if present("mix_factor_final_concentration") {
+            quantity("mix_factor_final_concentration", "mass_concentration")?
+        } else {
+            0.0
+        };
+        if stock <= 0.0 && final_concentration > 0.0 {
+            return Err(CliError::input("factor stock concentration must be positive"));
+        }
+        if stock > 0.0 && final_concentration > stock {
+            return Err(CliError::input(
+                "factor final concentration cannot exceed stock concentration",
+            ));
+        }
+        let groups = wells_by_group
+            .iter()
+            .map(|(name, wells)| CellSeedingGroup {
+                name: name.clone(),
+                wells: *wells,
+            })
+            .collect();
+        cell_seeding_calc(&CellSeedingInput {
+            density_cells_per_well: density,
+            volume_per_well_ul,
+            excess_ratio,
+            factor_stock_mg_per_ml: stock,
+            factor_final_mg_per_ml: final_concentration,
+            groups,
+        })
+        .map_err(CliError::input)?;
+    }
+    Ok(())
+}
+
 fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> {
     let value: serde_yaml::Value = serde_yaml::from_str(body)
         .map_err(|e| CliError::input(format!("asterlab block near line {line_no}: {e}")))?;
@@ -3309,6 +3586,7 @@ fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> 
                     }
                 }
             }
+            "plate-mix-fields" => asterdoc_plate_mix_fields(mapping)?,
             "reference-ref" => {
                 if text("ref").is_empty() {
                     return Err(CliError::input("reference needs a ref"));
@@ -4018,11 +4296,12 @@ pub(crate) fn create_execution_event_tx(
         "measurement",
         "deviation",
         "observation",
+        "skipped_by_rule",
     ]
     .contains(&event.event_type.as_str())
     {
         return Err(CliError::input(
-            "event_type 必须是 operation、material_use、measurement、deviation 或 observation",
+            "event_type 必须是 operation、material_use、measurement、deviation、observation 或 skipped_by_rule",
         ));
     }
     check_text(&event.content, "事件内容", 5000)?;
@@ -4109,11 +4388,10 @@ pub(crate) fn create_execution_event_tx(
                 manifest["protocol_version_id"].as_str() == Some(protocol_version_id)
                     && event.planned_output_id.is_none()
                     && manifest["assay_id"].as_str() == event.assay_id.as_deref()
-                    && manifest["steps"].as_array().is_some_and(|steps| {
-                        steps
-                            .iter()
-                            .any(|step| step["path"].as_str() == Some(step_path.as_str()))
-                    })
+                    && (event.ad_hoc_step
+                        || manifest["steps"].as_array().is_some_and(|steps| {
+                            steps.iter().any(|step| step["path"].as_str() == Some(step_path.as_str()))
+                        }))
             });
         let in_materials = run_data
             .get("material_manifest")
@@ -4462,6 +4740,14 @@ pub(crate) fn create_execution_event_tx(
     if event.event_type != "measurement" && (!event.readouts.is_empty()) {
         return Err(CliError::input("结构化读数请使用 measurement 事件类型"));
     }
+    if event.event_type == "skipped_by_rule" {
+        if event.step_status.as_deref() != Some("skipped") {
+            return Err(CliError::input("skipped_by_rule event requires step_status=skipped"));
+        }
+        if event.protocol_step_path.as_deref().is_none_or(str::is_empty) {
+            return Err(CliError::input("skipped_by_rule event requires protocol_step_path"));
+        }
+    }
     match event.event_type.as_str() {
         "material_use" if event.materials.is_empty() => {
             return Err(CliError::input("材料使用事件至少需要一项材料"));
@@ -4660,6 +4946,7 @@ pub(crate) fn create_execution_event_tx(
         "stage":event.stage,
         "timepoint":event.timepoint,
         "step_status":event.step_status,
+        "ad_hoc_step":event.ad_hoc_step,
         "protocol_step_path":event.protocol_step_path,
         "protocol_version_id":event.protocol_version_id,
         "assay_id":event.assay_id,
@@ -6766,6 +7053,8 @@ struct ExecutionEventCreate {
     #[serde(default)]
     step_status: Option<String>,
     #[serde(default)]
+    ad_hoc_step: bool,
+    #[serde(default)]
     protocol_step_path: Option<String>,
     #[serde(default)]
     protocol_version_id: Option<String>,
@@ -6896,6 +7185,53 @@ struct ReactionComponent {
 struct ReactionVolumeCalc {
     target_volume_ul: f64,
     components: Vec<ReactionComponent>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GelMastermixCalcGroup {
+    name: String,
+    gelma_percent_wv: f64,
+    wells: u32,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GelMastermixCalc {
+    volume_per_well_ul: f64,
+    #[serde(default)]
+    excess_ratio: f64,
+    lap_stock_percent_wv: f64,
+    lap_final_percent_wv: f64,
+    groups: Vec<GelMastermixCalcGroup>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CellSeedingCalcGroup {
+    name: String,
+    wells: u32,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CellSeedingCalc {
+    density_cells_per_well: f64,
+    volume_per_well_ul: f64,
+    #[serde(default)]
+    excess_ratio: f64,
+    #[serde(default)]
+    factor_stock_mg_per_ml: f64,
+    #[serde(default)]
+    factor_final_mg_per_ml: f64,
+    groups: Vec<CellSeedingCalcGroup>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeNormalizeCalc {
+    planned_wells: u32,
+    actual_wells: u32,
+    volume_per_well_ul: f64,
+    #[serde(default)]
+    excess_ratio: f64,
+    dead_volume_ul: f64,
+    prepared_volume_ul: f64,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -8433,6 +8769,12 @@ fn volume_factor(unit: &str) -> Result<f64, CliError> {
     }
 }
 
+// Derived mix values are exact f64 arithmetic; round only at the CLI boundary
+// so JSON reads as 2030 instead of 2030.0000000000002. 1e-6 uL is 1 nL.
+fn display_quantity(value: f64) -> f64 {
+    (value * 1e6).round() / 1e6
+}
+
 pub(crate) fn create_project(db: &Connection, name: &str) -> Result<Value, CliError> {
     let tx = db.unchecked_transaction().map_err(|e| CliError::internal(e.to_string()))?;
     let r = insert(&tx, "project", None, None, 1, &json!({"name": name, "description": ""}))?;
@@ -9636,6 +9978,122 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             json!({"allocated_volume_ul":used,"remaining_volume_ul":i.target_volume_ul-used,"unit":"µL","assumption":"按输入组分体积求和；未判断配方科学适用性"}),
         );
     }
+    if tool == "calculator.gel_mastermix" {
+        let i: GelMastermixCalc = parse_input(path)?;
+        if i.groups.len() > 100 {
+            return Err(CliError::input("组别最多 100 项"));
+        }
+        for group in &i.groups {
+            check_text(&group.name, "组名", 120)?;
+        }
+        let output = gel_mastermix_calc(&GelMastermixInput {
+            volume_per_well_ul: i.volume_per_well_ul,
+            excess_ratio: i.excess_ratio,
+            lap_stock_percent_wv: i.lap_stock_percent_wv,
+            lap_final_percent_wv: i.lap_final_percent_wv,
+            groups: i
+                .groups
+                .into_iter()
+                .map(|group| GelMastermixGroup {
+                    name: group.name,
+                    gelma_percent_wv: group.gelma_percent_wv,
+                    wells: group.wells,
+                })
+                .collect(),
+        })
+        .map_err(CliError::input)?;
+        let groups: Vec<Value> = output
+            .groups
+            .iter()
+            .map(|group| {
+                json!({
+                    "name": group.name,
+                    "wells": group.wells,
+                    "gelma_percent_wv": group.gelma_percent_wv,
+                    "volume_ul": display_quantity(group.volume_ul),
+                    "gelma_mass_mg": display_quantity(group.gelma_mass_mg),
+                    "lap_stock_volume_ul": display_quantity(group.lap_stock_volume_ul),
+                    "solvent_volume_ul": display_quantity(group.solvent_volume_ul),
+                })
+            })
+            .collect();
+        return Ok(json!({
+            "groups": groups,
+            "total_volume_ul": display_quantity(output.volume_ul),
+            "total_gelma_mass_mg": display_quantity(output.gelma_mass_mg),
+            "total_lap_stock_volume_ul": display_quantity(output.lap_stock_volume_ul),
+            "total_solvent_volume_ul": display_quantity(output.solvent_volume_ul),
+            "formula": "volume_ul = wells × volume_per_well_ul × (1 + excess_ratio)；mass_mg = volume_ul × % w/v ÷ 100；LAP_stock_ul = volume_ul × LAP_final% ÷ LAP_stock%；solvent_ul = volume_ul − LAP_stock_ul",
+            "assumption": "组孔数取实际复孔数；GelMA 干粉体积忽略不计；LAP 母液计入溶剂体积；未计过滤损失或纯度修正"
+        }));
+    }
+    if tool == "calculator.cell_seeding" {
+        let i: CellSeedingCalc = parse_input(path)?;
+        if i.groups.len() > 100 {
+            return Err(CliError::input("组别最多 100 项"));
+        }
+        for group in &i.groups {
+            check_text(&group.name, "组名", 120)?;
+        }
+        let output = cell_seeding_calc(&CellSeedingInput {
+            density_cells_per_well: i.density_cells_per_well,
+            volume_per_well_ul: i.volume_per_well_ul,
+            excess_ratio: i.excess_ratio,
+            factor_stock_mg_per_ml: i.factor_stock_mg_per_ml,
+            factor_final_mg_per_ml: i.factor_final_mg_per_ml,
+            groups: i
+                .groups
+                .into_iter()
+                .map(|group| CellSeedingGroup {
+                    name: group.name,
+                    wells: group.wells,
+                })
+                .collect(),
+        })
+        .map_err(CliError::input)?;
+        let groups: Vec<Value> = output
+            .groups
+            .iter()
+            .map(|group| {
+                json!({
+                    "name": group.name,
+                    "wells": group.wells,
+                    "total_cells": group.total_cells,
+                    "suspension_volume_ul": display_quantity(group.suspension_volume_ul),
+                    "factor_stock_volume_ul": display_quantity(group.factor_stock_volume_ul),
+                })
+            })
+            .collect();
+        return Ok(json!({
+            "groups": groups,
+            "total_cells": output.total_cells,
+            "total_suspension_volume_ul": display_quantity(output.suspension_volume_ul),
+            "total_factor_stock_volume_ul": display_quantity(output.factor_stock_volume_ul),
+            "formula": "cells = ceil(density_cells_per_well × wells × (1 + excess_ratio))；suspension_ul = wells × volume_per_well_ul × (1 + excess_ratio)；factor_stock_ul = suspension_ul × final_mg_per_ml ÷ stock_mg_per_ml",
+            "assumption": "按实际复孔数计数并向上取整细胞数；因子母液体积包含在悬液体积内，不再另行扣减；未计接种回收率或活率修正"
+        }));
+    }
+    if tool == "calculator.runtime_normalize" {
+        let i: RuntimeNormalizeCalc = parse_input(path)?;
+        let output = runtime_normalize_calc(&RuntimeNormalizeInput {
+            planned_wells: i.planned_wells,
+            actual_wells: i.actual_wells,
+            volume_per_well_ul: i.volume_per_well_ul,
+            excess_ratio: i.excess_ratio,
+            dead_volume_ul: i.dead_volume_ul,
+            prepared_volume_ul: i.prepared_volume_ul,
+        })
+        .map_err(CliError::input)?;
+        return Ok(json!({
+            "planned_volume_ul": display_quantity(output.planned_volume_ul),
+            "required_volume_ul": display_quantity(output.required_volume_ul),
+            "dead_volume_ul": display_quantity(output.dead_volume_ul),
+            "additional_volume_ul": display_quantity(output.additional_volume_ul),
+            "unused_volume_ul": display_quantity(output.unused_volume_ul),
+            "formula": "required_ul = actual_wells × volume_per_well_ul × (1 + excess_ratio) + dead_volume_ul",
+            "assumption": "死体积按每个配制管只加一次；余量只作用于工作体积；不改写冻结计划，只返回运行期配平建议"
+        }));
+    }
     let mut db = open_db(data_dir)?;
     match tool {
         "project.list" => {
@@ -10034,6 +10492,14 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 &workspace, &query,
             ))
             .map_err(|e| CliError::internal(e.to_string()))
+        }
+        "protocol.version.get" => {
+            let input: ProtocolVersionGet = parse_input(path)?;
+            protocol_version_get(&db, &input.protocol_version_id)
+        }
+        "protocol.version.list" => {
+            let input: ProtocolVersionList = parse_input(path)?;
+            Ok(json!({"versions":protocol_version_list(&db, &input.protocol_id)?}))
         }
         "run.create" => {
             require_trusted_writer(tool)?;
@@ -10979,7 +11445,7 @@ fn asset_link_payload_schema() -> Value {
             "modTime":{"type":"string"},
             "sha256":{"type":"string","maxLength":64},
             "availability":{"type":"string","enum":["available","unavailable"]},
-            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]}}},
+            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":1},"coordinateId":{"type":["string","null"]}}},
             "linkedAt":{"type":"string"},
             "actorId":{"type":"string"}
         }
@@ -11000,7 +11466,7 @@ fn asset_link_event_payload_schema() -> Value {
             "modTime":{"type":"string"},
             "sha256":{"type":"string","maxLength":64},
             "availability":{"type":"string","enum":["available","unavailable"]},
-            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]}}},
+            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":1},"coordinateId":{"type":["string","null"]}}},
             "at":{"type":"string"},
             "actorId":{"type":"string"}
         }
@@ -11073,6 +11539,13 @@ fn record_data_schema(kind: &str) -> Value {
 }
 fn record_schema(kind: &str) -> Value {
     let mut data = record_data_schema(kind);
+    if kind == "execution_event" {
+        data["properties"]["event_type"]["enum"]
+            .as_array_mut()
+            .expect("execution_event event_type enum")
+            .push(json!("skipped_by_rule"));
+        data["properties"]["ad_hoc_step"] = json!({"type":"boolean"});
+    }
     data["additionalProperties"] = json!(false);
     json!({"type":"object","additionalProperties":false,"required":["id","kind","project_id","parent_id","revision","data","created_at","updated_at"],"properties":{"id":{"type":"string"},"kind":{"const":kind},"project_id":{"type":["string","null"]},"parent_id":{"type":["string","null"]},"revision":{"type":"integer","minimum":1},"data":data,"created_at":{"type":"string","format":"date-time"},"updated_at":{"type":"string","format":"date-time"}}})
 }
@@ -11186,6 +11659,26 @@ fn result_schema(tool: &str) -> Value {
         "design.revise" => record_and_version("design"),
         "run.list" => arr("run"),
         "run.create" => one("run"),
+        "protocol.version.get" | "protocol.version.list" => {
+            let item = json!({
+                "type":"object","additionalProperties":false,
+                "required":["protocol_version_id","protocol_id","version","root_block_version_id","root_bindings","parameter_slots","steps","resolved_parameters","unresolved_parameters","block_version_ids","frozen"],
+                "properties":{
+                    "protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},
+                    "version":{"type":"integer"},"root_block_version_id":{"type":["string","null"]},
+                    "root_bindings":{"type":"array","items":{"type":"object"}},
+                    "parameter_slots":{"type":"array","items":{"type":"object"}},
+                    "steps":{"type":"array","items":{"type":"object"}},
+                    "resolved_parameters":{"type":"array","items":{"type":"object"}},
+                    "unresolved_parameters":{"type":"array","items":{"type":"object"}},
+                    "block_version_ids":{"type":"array","items":{"type":"string"}},
+                    "frozen":{"const":true}
+                }
+            });
+            if tool.ends_with(".list") {
+                json!({"type":"object","additionalProperties":false,"required":["versions"],"properties":{"versions":{"type":"array","items":item}}})
+            } else { item }
+        }
         "run.set_status" => one("run"),
         "run.revise" => one("run"),
         "run.workspace" => {
@@ -11272,6 +11765,15 @@ fn result_schema(tool: &str) -> Value {
         "calculator.reaction_volume" => {
             json!({"type":"object","additionalProperties":false,"required":["allocated_volume_ul","remaining_volume_ul","unit","assumption"],"properties":{"allocated_volume_ul":{"type":"number","minimum":0},"remaining_volume_ul":{"type":"number","minimum":0},"unit":{"const":"µL"},"assumption":{"type":"string"}}})
         }
+        "calculator.gel_mastermix" => {
+            json!({"type":"object","additionalProperties":false,"required":["groups","total_volume_ul","total_gelma_mass_mg","total_lap_stock_volume_ul","total_solvent_volume_ul","formula","assumption"],"properties":{"groups":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["name","wells","gelma_percent_wv","volume_ul","gelma_mass_mg","lap_stock_volume_ul","solvent_volume_ul"],"properties":{"name":{"type":"string"},"wells":{"type":"integer","minimum":1},"gelma_percent_wv":{"type":"number","exclusiveMinimum":0},"volume_ul":{"type":"number","minimum":0},"gelma_mass_mg":{"type":"number","minimum":0},"lap_stock_volume_ul":{"type":"number","minimum":0},"solvent_volume_ul":{"type":"number","minimum":0}}}},"total_volume_ul":{"type":"number","minimum":0},"total_gelma_mass_mg":{"type":"number","minimum":0},"total_lap_stock_volume_ul":{"type":"number","minimum":0},"total_solvent_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
+        "calculator.cell_seeding" => {
+            json!({"type":"object","additionalProperties":false,"required":["groups","total_cells","total_suspension_volume_ul","total_factor_stock_volume_ul","formula","assumption"],"properties":{"groups":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["name","wells","total_cells","suspension_volume_ul","factor_stock_volume_ul"],"properties":{"name":{"type":"string"},"wells":{"type":"integer","minimum":1},"total_cells":{"type":"integer","minimum":1},"suspension_volume_ul":{"type":"number","minimum":0},"factor_stock_volume_ul":{"type":"number","minimum":0}}}},"total_cells":{"type":"integer","minimum":1},"total_suspension_volume_ul":{"type":"number","minimum":0},"total_factor_stock_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
+        "calculator.runtime_normalize" => {
+            json!({"type":"object","additionalProperties":false,"required":["planned_volume_ul","required_volume_ul","dead_volume_ul","additional_volume_ul","unused_volume_ul","formula","assumption"],"properties":{"planned_volume_ul":{"type":"number","minimum":0},"required_volume_ul":{"type":"number","minimum":0},"dead_volume_ul":{"type":"number","minimum":0},"additional_volume_ul":{"type":"number","minimum":0},"unused_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
         "sdk.modules" => json!({"type":"object","additionalProperties":false,"required":["modules"],"properties":{"modules":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1},"title":{"type":["string","null"]},"category":{"type":["string","null"]},"capabilities":{"type":["array","null"]},"renderers":{"type":["object","null"]},"actions":{"type":["array","null"]}}}}}}),
         "sdk.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled","errors","warnings","modules"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","schema"],"properties":{"kind":{},"schema":{}}}},"design":{"type":"object","additionalProperties":true}}}),
         "asterdoc.inspect" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","modules"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","id","schema","data","manifest"],"properties":{"kind":{"type":"string"},"id":{"type":"string"},"schema":{"type":"integer","minimum":0},"data":{"type":"object","additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}}}}}),
@@ -11300,7 +11802,7 @@ fn output_schema(tool: &str) -> Value {
     json!({"oneOf":[success,error]})
 }
 fn input_schema(tool: &str) -> Option<Value> {
-    let s = match tool {
+    let mut s = match tool {
         "project.list" => json!({"type":"object","additionalProperties":false,"properties":{}}),
         "project.create" => {
             json!({"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"description":{"type":"string"}}})
@@ -11332,6 +11834,8 @@ fn input_schema(tool: &str) -> Option<Value> {
         "protocol.block.list" => {
             json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":"string"}}})
         }
+        "protocol.version.get" => json!({"type":"object","additionalProperties":false,"required":["protocol_version_id"],"properties":{"protocol_version_id":{"type":"string","minLength":1}}}),
+        "protocol.version.list" => json!({"type":"object","additionalProperties":false,"required":["protocol_id"],"properties":{"protocol_id":{"type":"string","minLength":1}}}),
         "protocol.block.get" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
         }
@@ -11437,7 +11941,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"ad_hoc_step":{"type":"boolean","default":false,"description":"临时补加步骤：允许 protocol_step_path 不属于冻结清单；省略时为 false"},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "readout.submit" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","endpoint","protocol_version_id"],"oneOf":[{"required":["value"]},{"required":["qualifier"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160}}})
@@ -11464,7 +11968,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
         }
         "asset.link" => {
-            json!({"type":"object","additionalProperties":false,"required":["root_id","root_dir","run_id","task_key"],"anyOf":[{"required":["relative_path"]},{"required":["path"]}],"properties":{"root_id":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S","description":"逻辑根 ID；只保存它和相对路径，不保存绝对路径"},"root_dir":{"type":"string","minLength":1,"description":"本机根目录；仅用于本次读取元数据与计算 sha256，不写入记录"},"relative_path":{"type":"string","minLength":1,"description":"相对 root_dir 的文件路径；不得包含 .. 或绝对路径"},"path":{"type":"string","minLength":1,"description":"本机文件绝对路径；与 root_dir 一起用于推导 relative_path"},"run_id":{"type":"string","minLength":1},"task_key":{"type":"string","minLength":1,"maxLength":1000},"sample_id":{"type":["string","null"],"maxLength":200},"actor_id":{"type":["string","null"],"maxLength":200}}})
+            json!({"type":"object","additionalProperties":false,"required":["root_id","root_dir","run_id","task_key"],"anyOf":[{"required":["relative_path"]},{"required":["path"]}],"properties":{"root_id":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S","description":"逻辑根 ID；只保存它和相对路径，不保存绝对路径"},"root_dir":{"type":"string","minLength":1,"description":"本机根目录；仅用于本次读取元数据与计算 sha256，不写入记录"},"relative_path":{"type":"string","minLength":1,"description":"相对 root_dir 的文件路径；不得包含 .. 或绝对路径"},"path":{"type":"string","minLength":1,"description":"本机文件绝对路径；与 root_dir 一起用于推导 relative_path"},"run_id":{"type":"string","minLength":1},"task_key":{"type":"string","minLength":1,"maxLength":1000},"sample_id":{"type":["string","null"],"maxLength":200},"well_id":{"type":["string","null"],"maxLength":40},"timepoint":{"type":["string","null"],"maxLength":100},"fov_index":{"type":["integer","null"],"minimum":0},"actor_id":{"type":["string","null"],"maxLength":200}}})
         }
         "asset.unlink" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1,"description":"asset_link 记录 ID"},"actor_id":{"type":["string","null"],"maxLength":200}}})
@@ -11489,6 +11993,15 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "calculator.reaction_volume" => {
             json!({"type":"object","additionalProperties":false,"required":["target_volume_ul","components"],"properties":{"target_volume_ul":{"type":"number","exclusiveMinimum":0},"components":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","volume_ul"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"volume_ul":{"type":"number","minimum":0}}}}}})
+        }
+        "calculator.gel_mastermix" => {
+            json!({"type":"object","additionalProperties":false,"required":["volume_per_well_ul","lap_stock_percent_wv","lap_final_percent_wv","groups"],"properties":{"volume_per_well_ul":{"type":"number","exclusiveMinimum":0},"excess_ratio":{"type":"number","minimum":0},"lap_stock_percent_wv":{"type":"number","exclusiveMinimum":0},"lap_final_percent_wv":{"type":"number","minimum":0},"groups":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","gelma_percent_wv","wells"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"gelma_percent_wv":{"type":"number","exclusiveMinimum":0},"wells":{"type":"integer","minimum":1,"maximum":100000}}}}}})
+        }
+        "calculator.cell_seeding" => {
+            json!({"type":"object","additionalProperties":false,"required":["density_cells_per_well","volume_per_well_ul","groups"],"properties":{"density_cells_per_well":{"type":"number","exclusiveMinimum":0},"volume_per_well_ul":{"type":"number","exclusiveMinimum":0},"excess_ratio":{"type":"number","minimum":0},"factor_stock_mg_per_ml":{"type":"number","minimum":0},"factor_final_mg_per_ml":{"type":"number","minimum":0},"groups":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","wells"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"wells":{"type":"integer","minimum":1,"maximum":100000}}}}}})
+        }
+        "calculator.runtime_normalize" => {
+            json!({"type":"object","additionalProperties":false,"required":["planned_wells","actual_wells","volume_per_well_ul","dead_volume_ul","prepared_volume_ul"],"properties":{"planned_wells":{"type":"integer","minimum":0,"maximum":100000},"actual_wells":{"type":"integer","minimum":0,"maximum":100000},"volume_per_well_ul":{"type":"number","exclusiveMinimum":0},"excess_ratio":{"type":"number","minimum":0},"dead_volume_ul":{"type":"number","minimum":0},"prepared_volume_ul":{"type":"number","minimum":0}}})
         }
         "sdk.modules" => {
             json!({"type":"object","additionalProperties":false,"properties":{}})
@@ -11542,6 +12055,13 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         _ => return None,
     };
+    if tool == "execution_event.create" {
+        s["properties"]["event_type"]["enum"]
+            .as_array_mut()
+            .expect("execution_event.create event_type enum")
+            .push(json!("skipped_by_rule"));
+        s["properties"]["ad_hoc_step"] = json!({"type":"boolean"});
+    }
     Some(s)
 }
 fn design_schema() -> Value {
@@ -11679,6 +12199,8 @@ fn tool_specs() -> Vec<Value> {
         "task.create",
         "task.set_status",
         "protocol.list",
+        "protocol.version.get",
+        "protocol.version.list",
         "protocol.block.list",
         "protocol.block.get",
         "protocol.block.create",
@@ -11727,6 +12249,9 @@ fn tool_specs() -> Vec<Value> {
         "calculator.solution",
         "calculator.serial_dilution",
         "calculator.reaction_volume",
+        "calculator.gel_mastermix",
+        "calculator.cell_seeding",
+        "calculator.runtime_normalize",
         "sdk.modules",
         "sdk.validate",
         "sdk.describe",
@@ -11751,6 +12276,8 @@ fn tool_writes(tool: &str) -> bool {
             | "workflow.inspect_tree"
             | "workflow.progress"
             | "protocol.list"
+            | "protocol.version.get"
+            | "protocol.version.list"
             | "protocol.block.list"
             | "protocol.block.get"
             | "protocol.block.preview"
@@ -11770,6 +12297,9 @@ fn tool_writes(tool: &str) -> bool {
             | "calculator.solution"
             | "calculator.serial_dilution"
             | "calculator.reaction_volume"
+            | "calculator.gel_mastermix"
+            | "calculator.cell_seeding"
+            | "calculator.runtime_normalize"
             | "sdk.modules"
             | "sdk.describe"
             | "sdk.validate"
@@ -11801,6 +12331,8 @@ fn tool_description(tool: &str) -> &'static str {
         "task.create" => "按项目、日期和可选运行创建日历任务。",
         "task.set_status" => "更新任务状态；必须提供读取时的 expected_revision。",
         "protocol.list" => "按项目查询 Protocol。",
+        "protocol.version.get" => "读取确切不可变 ProtocolVersion 并递归展开步骤、参数槽位；只读。",
+        "protocol.version.list" => "列出一个 Protocol 的全部不可变版本及展开内容；只读。",
         "protocol.block.list" => "按项目列出可复用步骤块。",
         "protocol.block.get" => "读取步骤块及其全部不可变版本。",
         "protocol.block.create" => "创建可作为完整 Protocol 或子步骤复用的版本化步骤块；只记录明确提供的操作和参数槽位。",
@@ -11849,6 +12381,9 @@ fn tool_description(tool: &str) -> &'static str {
         "calculator.solution" => "按 m=C×V×MW 计算理论质量。",
         "calculator.serial_dilution" => "按相同体积单位计算逐级稀释浓度。",
         "calculator.reaction_volume" => "求反应已分配体积与剩余体积，不判断配方科学适用性。",
+        "calculator.gel_mastermix" => "按组别 % w/v、实际孔数、每孔体积与余量导出各组 GelMA 干粉质量、LAP 母液体积与溶剂体积。",
+        "calculator.cell_seeding" => "按目标 cells/well、实际孔数、每孔悬液体积与余量导出细胞总数与因子母液加入量。",
+        "calculator.runtime_normalize" => "按实际孔数与死体积重算运行期配平体积，返回需追加或未用完的体积。",
         "sdk.modules" => "从嵌入的 modules.json 返回 AsterDoc 模块摘要（kind/schema/title/category/capabilities/renderers/actions）；只读。",
         "sdk.describe" => "按 kind+schema 返回完整的 AsterDoc 模块 manifest；只读。",
         "sdk.validate" => "校验 AsterDoc 源码或已保存设计并尝试编译；不写入。",
@@ -11874,6 +12409,8 @@ fn tool_effects(tool: &str) -> &'static str {
         | "workflow.inspect_tree"
         | "workflow.progress"
         | "protocol.list"
+        | "protocol.version.get"
+        | "protocol.version.list"
         | "protocol.block.list"
         | "protocol.block.get"
         | "protocol.block.preview"
@@ -11883,7 +12420,10 @@ fn tool_effects(tool: &str) -> &'static str {
         "calculator.dilution"
         | "calculator.solution"
         | "calculator.serial_dilution"
-        | "calculator.reaction_volume" => "只返回算术结果；不保存输入或结果。",
+        | "calculator.reaction_volume"
+        | "calculator.gel_mastermix"
+        | "calculator.cell_seeding"
+        | "calculator.runtime_normalize" => "只返回算术结果；不保存输入或结果。",
         "project.create" => "创建一个项目记录。",
         "project.revise" => "按 expected_revision 更新一个项目记录并递增 revision。",
         "design.create" => "创建实验设计并创建不可变的 v1 设计快照。",
@@ -11952,6 +12492,12 @@ struct AssetLinkCreate {
     #[serde(default)]
     sample_id: Option<String>,
     #[serde(default)]
+    well_id: Option<String>,
+    #[serde(default)]
+    timepoint: Option<String>,
+    #[serde(default)]
+    fov_index: Option<u32>,
+    #[serde(default)]
     actor_id: Option<String>,
 }
 
@@ -12019,6 +12565,7 @@ fn asset_link_record_id(
     run_id: &str,
     task_key: &str,
     sample_id: &str,
+    coordinates: &Value,
 ) -> String {
     let mut hasher = Sha256::new();
     for part in [
@@ -12027,6 +12574,7 @@ fn asset_link_record_id(
         run_id,
         task_key,
         sample_id,
+        coordinates["coordinateId"].as_str().unwrap_or(""),
     ] {
         hasher.update(part.as_bytes());
         hasher.update(b"\0");
@@ -12039,6 +12587,49 @@ fn asset_link_record_id(
     record_id
 }
 
+fn validate_asset_coordinates(
+    well_id: Option<&str>,
+    timepoint: Option<&str>,
+    fov_index: Option<u32>,
+) -> Result<(), CliError> {
+    for (field, value, limit) in [("well_id", well_id, 40), ("timepoint", timepoint, 100)] {
+        if value.is_some_and(|v| v.chars().count() > limit || v.chars().any(char::is_control)) {
+            return Err(CliError::input(format!("{field} is invalid")));
+        }
+    }
+    if let Some(well) = well_id {
+        split_well(well)?;
+    }
+    if fov_index == Some(0) {
+        return Err(CliError::input("fov_index must start at 1"));
+    }
+    if well_id.is_none() && (timepoint.is_some() || fov_index.is_some()) {
+        return Err(CliError::input("timepoint and fov_index require well_id"));
+    }
+    Ok(())
+}
+
+fn asset_coordinate_id(well_id: Option<&str>, timepoint: Option<&str>, fov_index: Option<u32>) -> Option<String> {
+    let well = well_id.filter(|value| !value.trim().is_empty())?;
+    if fov_index == Some(0) {
+        return None;
+    }
+    let mut id = well.to_ascii_uppercase();
+    if let Some(timepoint) = timepoint.filter(|value| !value.is_empty()) {
+        id.push('_');
+        id.push_str(timepoint);
+    }
+    if let Some(fov) = fov_index {
+        id.push_str(&format!("_fov{fov:02}"));
+    }
+    Some(id)
+}
+
+fn asset_coordinates(well_id: Option<&str>, timepoint: Option<&str>, fov_index: Option<u32>) -> Value {
+    json!({"wellId":well_id,"timepoint":timepoint,"fovIndex":fov_index,
+        "coordinateId":asset_coordinate_id(well_id,timepoint,fov_index)})
+}
+
 fn asset_link_data(
     asset: &asset_refs::AssetRef,
     run_id: &str,
@@ -12046,6 +12637,7 @@ fn asset_link_data(
     sample_id: &str,
     linked_at: &str,
     actor_id: &str,
+    coordinates: &Value,
 ) -> Value {
     json!({
         "id": asset.id,
@@ -12059,7 +12651,11 @@ fn asset_link_data(
         "link": {
             "runId": run_id,
             "taskKey": task_key,
-            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) }
+            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) },
+            "wellId": coordinates["wellId"],
+            "timepoint": coordinates["timepoint"],
+            "fovIndex": coordinates["fovIndex"],
+            "coordinateId": coordinates["coordinateId"]
         },
         "linkedAt": linked_at,
         "actorId": actor_id
@@ -12075,6 +12671,7 @@ fn asset_link_event_data(
     sample_id: &str,
     at: &str,
     actor_id: &str,
+    coordinates: &Value,
 ) -> Value {
     json!({
         "id": event_id,
@@ -12090,7 +12687,11 @@ fn asset_link_event_data(
         "link": {
             "runId": run_id,
             "taskKey": task_key,
-            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) }
+            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) },
+            "wellId": coordinates["wellId"],
+            "timepoint": coordinates["timepoint"],
+            "fovIndex": coordinates["fovIndex"],
+            "coordinateId": coordinates["coordinateId"]
         },
         "at": at,
         "actorId": actor_id
@@ -12107,12 +12708,13 @@ fn store_asset_link(
     sample_id: &str,
     linked_at: &str,
     actor_id: &str,
+    coordinates: &Value,
 ) -> Result<(Value, Value), CliError> {
-    let record_id = asset_link_record_id(asset, run_id, task_key, sample_id);
-    let data = asset_link_data(asset, run_id, task_key, sample_id, linked_at, actor_id);
+    let record_id = asset_link_record_id(asset, run_id, task_key, sample_id, coordinates);
+    let data = asset_link_data(asset, run_id, task_key, sample_id, linked_at, actor_id, coordinates);
     let event_id = format!("asset-event-{}", Uuid::new_v4());
     let event = asset_link_event_data(
-        &event_id, "linked", asset, run_id, task_key, sample_id, linked_at, actor_id,
+        &event_id, "linked", asset, run_id, task_key, sample_id, linked_at, actor_id, coordinates,
     );
     let tx = db
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -12178,6 +12780,16 @@ fn link_local_asset(
     let task_key = request.task_key.trim();
     let sample_id = request.sample_id.as_deref().unwrap_or("").trim();
     check_asset_sample_id(sample_id)?;
+    let coordinates = asset_coordinates(
+        request.well_id.as_deref(),
+        request.timepoint.as_deref(),
+        request.fov_index,
+    );
+    validate_asset_coordinates(
+        request.well_id.as_deref(),
+        request.timepoint.as_deref(),
+        request.fov_index,
+    )?;
     let actor_id = request.actor_id.as_deref().unwrap_or("").trim();
     if actor_id.len() > 200 || actor_id.chars().any(char::is_control) {
         return Err(CliError::input("actor_id is invalid"));
@@ -12197,7 +12809,7 @@ fn link_local_asset(
     .map_err(|error| CliError::input(error.to_string()))?;
     store_asset_link(
         db, &asset, &project, run_id, task_key, sample_id,
-        &stamp(), actor_id,
+        &stamp(), actor_id, &coordinates,
     )
 }
 
@@ -12294,6 +12906,16 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
+    let coordinates = asset_coordinates(
+        link.get("wellId").and_then(Value::as_str),
+        link.get("timepoint").and_then(Value::as_str),
+        link.get("fovIndex").and_then(Value::as_u64).map(|v| v as u32),
+    );
+    validate_asset_coordinates(
+        link.get("wellId").and_then(Value::as_str),
+        link.get("timepoint").and_then(Value::as_str),
+        link.get("fovIndex").and_then(Value::as_u64).map(|v| v as u32),
+    )?;
 
     let reference = asset_refs::AssetRef {
         id: asset_refs::stable_id(&root_id, &relative_path),
@@ -12306,7 +12928,7 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         availability,
     };
     let (record, _) = store_asset_link(
-        db, &reference, &project, &run_id, &task_key, &sample_id, &linked_at, &actor_id,
+        db, &reference, &project, &run_id, &task_key, &sample_id, &linked_at, &actor_id, &coordinates,
     )?;
     Ok(record["data"].clone())
 }
@@ -12446,6 +13068,66 @@ pub(crate) fn list_asset_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_version_queries_return_expansion_and_stable_not_found() {
+        let dir = std::env::temp_dir().join(format!("protocol-version-query-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = open_db(&dir).unwrap();
+        let project = create_project(&db, "query test").unwrap();
+        let project_id = project["id"].as_str().unwrap().to_owned();
+        let block = {
+            let tx = db.unchecked_transaction().unwrap();
+            let block = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title":"root",
+                    "parameter_slots":[{"key":"volume","label":"Volume","value_type":"number","unit":"uL","required":true}],
+                    "steps":[{"kind":"text","use_id":"add","title":"Add","instruction":"Add liquid","parameter_refs":["volume"]}]
+                }),
+            ).unwrap();
+            tx.commit().unwrap();
+            block
+        };
+        let block_version_id = block["version"]["id"].as_str().unwrap();
+        let (protocol_id, version_id) = {
+            let tx = db.unchecked_transaction().unwrap();
+            let protocol = insert(&tx, "protocol", Some(&project_id), Some(&project_id), 1, &json!({"title":"protocol"})).unwrap();
+            let protocol_id = protocol["id"].as_str().unwrap().to_owned();
+            let version = insert(
+                &tx, "protocol_version", Some(&project_id), Some(&protocol_id), 1,
+                &json!({"protocol_id":protocol_id,"version":1,"body":"","root_block_version_id":block_version_id,"root_bindings":[]}),
+            ).unwrap();
+            tx.commit().unwrap();
+            (protocol_id, version["id"].as_str().unwrap().to_owned())
+        };
+        let get_input = dir.join("get.json");
+        std::fs::write(&get_input, json!({"protocol_version_id":version_id}).to_string()).unwrap();
+        let version = dispatch("protocol.version.get", get_input.to_str().unwrap(), &dir).unwrap();
+        assert_eq!(version["protocol_id"], protocol_id);
+        assert_eq!(version["version"], 1);
+        assert_eq!(version["root_block_version_id"], block_version_id);
+        assert_eq!(version["steps"][0]["path"], "root/add");
+        assert_eq!(version["parameter_slots"][0]["key"], "volume");
+        assert_eq!(version["frozen"], true);
+        let list_input = dir.join("list.json");
+        std::fs::write(&list_input, json!({"protocol_id":protocol_id}).to_string()).unwrap();
+        assert_eq!(
+            dispatch("protocol.version.list", list_input.to_str().unwrap(), &dir).unwrap()["versions"].as_array().unwrap().len(),
+            1
+        );
+        std::fs::write(&get_input, json!({"protocol_version_id":"missing"}).to_string()).unwrap();
+        assert_eq!(dispatch("protocol.version.get", get_input.to_str().unwrap(), &dir).unwrap_err().code, "NOT_FOUND");
+        std::fs::write(&list_input, json!({"protocol_id":"missing"}).to_string()).unwrap();
+        assert_eq!(dispatch("protocol.version.list", list_input.to_str().unwrap(), &dir).unwrap_err().code, "NOT_FOUND");
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(input_schema("protocol.version.get").is_some());
+        assert!(input_schema("protocol.version.list").is_some());
+        assert!(!tool_writes("protocol.version.get"));
+        assert!(!tool_writes("protocol.version.list"));
+        assert!(tool_specs().iter().any(|tool| tool["name"] == "protocol.version.get"));
+    }
 
     #[test]
     fn diagnostics_flag_is_parsed_with_input_in_any_order() {
@@ -13144,6 +13826,142 @@ protocol_version_id: protocol-v1
         }
     }
 
+    #[test]
+    fn asterdoc_plate_mix_fields_match_go_calculator_cases() {
+        let valid = r#"```asterlab
+kind: group
+id: "3%"
+schema: 1
+name: 3% GelMA
+```
+```asterlab
+kind: group
+id: "5%"
+schema: 1
+name: 5% GelMA
+```
+```asterlab
+kind: group
+id: "7%"
+schema: 1
+name: 7% GelMA
+```
+```asterlab
+kind: plate
+id: plate-huvec
+schema: 1
+format: 12
+groups:
+  "3%": [A1, A2, A3]
+  "5%": [B1, B2, B3]
+  "7%": [C1, C2, C3]
+mix_volume_per_well: {value: 200, unit: uL}
+mix_excess_ratio: 0.1
+mix_gelma_percent_by_group:
+  "3%": 3
+  "5%": 5
+  "7%": 7
+mix_lap_stock_percent: 0.5
+mix_lap_final_percent: 0.05
+mix_cell_density: {value: 20000, unit: cells/well}
+mix_factor_stock_concentration: {value: 10, unit: ug/mL}
+mix_factor_final_concentration: {value: 50, unit: ng/mL}
+```"#;
+        assert!(
+            validate_asterdoc_source(valid).is_ok(),
+            "valid mix source rejected: {:?}",
+            validate_asterdoc_source(valid).err().map(|e| e.message)
+        );
+        let invalid = [
+            valid.replace("mix_lap_final_percent: 0.05", "mix_lap_final_percent: 0.6"),
+            valid.replace("  \"7%\": 7\n", ""),
+            valid.replace(
+                "mix_factor_final_concentration: {value: 50, unit: ng/mL}",
+                "mix_factor_final_concentration: {value: 20, unit: mg/mL}",
+            ),
+            valid.replace(
+                "mix_factor_stock_concentration: {value: 10, unit: ug/mL}\n",
+                "",
+            ),
+        ];
+        for source in invalid {
+            assert!(
+                validate_asterdoc_source(&source).is_err(),
+                "invalid mix source accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn plate_mix_calculators_match_the_huvec_case() {
+        fn write_calc_input(dir: &std::path::Path, name: &str, value: Value) -> String {
+            let path = dir.join(name);
+            fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+            path.to_string_lossy().into_owned()
+        }
+
+        let dir = std::env::temp_dir().join(format!("asterlab-exp02-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let groups = json!([
+            {"name":"3%","wells":3},
+            {"name":"5%","wells":3},
+            {"name":"7%","wells":3}
+        ]);
+
+        let gel_input = write_calc_input(&dir, "gel.json", json!({
+            "volume_per_well_ul": 200.0,
+            "excess_ratio": 0.1,
+            "lap_stock_percent_wv": 0.5,
+            "lap_final_percent_wv": 0.05,
+            "groups": [
+                {"name":"3%","gelma_percent_wv":3.0,"wells":3},
+                {"name":"5%","gelma_percent_wv":5.0,"wells":3},
+                {"name":"7%","gelma_percent_wv":7.0,"wells":3}
+            ]
+        }));
+        let gel = dispatch("calculator.gel_mastermix", &gel_input, &dir).unwrap();
+        assert_eq!(gel["groups"].as_array().unwrap().len(), 3);
+        assert!((gel["total_gelma_mass_mg"].as_f64().unwrap() - 99.0).abs() < 1e-9);
+        assert!((gel["total_lap_stock_volume_ul"].as_f64().unwrap() - 198.0).abs() < 1e-9);
+        assert!((gel["total_solvent_volume_ul"].as_f64().unwrap() - 1782.0).abs() < 1e-9);
+
+        let cells_input = write_calc_input(&dir, "cells.json", json!({
+            "density_cells_per_well": 20000.0,
+            "volume_per_well_ul": 200.0,
+            "excess_ratio": 0.1,
+            "factor_stock_mg_per_ml": 0.01,
+            "factor_final_mg_per_ml": 0.00005,
+            "groups": groups
+        }));
+        let cells = dispatch("calculator.cell_seeding", &cells_input, &dir).unwrap();
+        assert_eq!(cells["total_cells"], json!(198000));
+        assert!((cells["total_factor_stock_volume_ul"].as_f64().unwrap() - 9.9).abs() < 1e-9);
+
+        let runtime_input = write_calc_input(&dir, "runtime.json", json!({
+            "planned_wells": 9,
+            "actual_wells": 7,
+            "volume_per_well_ul": 200.0,
+            "excess_ratio": 0.1,
+            "dead_volume_ul": 50.0,
+            "prepared_volume_ul": 2000.0
+        }));
+        let runtime = dispatch("calculator.runtime_normalize", &runtime_input, &dir).unwrap();
+        assert!((runtime["required_volume_ul"].as_f64().unwrap() - 1590.0).abs() < 1e-9);
+        assert!((runtime["unused_volume_ul"].as_f64().unwrap() - 410.0).abs() < 1e-9);
+
+        let bad = write_calc_input(&dir, "bad.json", json!({
+            "volume_per_well_ul": 200.0,
+            "lap_stock_percent_wv": 0.5,
+            "lap_final_percent_wv": 0.6,
+            "groups": [{"name":"3%","gelma_percent_wv":3.0,"wells":3}]
+        }));
+        assert_eq!(
+            dispatch("calculator.gel_mastermix", &bad, &dir).unwrap_err().code,
+            "INVALID_INPUT"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
     fn seed_asset_run(db: &Connection) -> String {
         db.execute(
             "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES('project-1','project',NULL,NULL,1,?1,'now','now')",
@@ -13169,7 +13987,7 @@ protocol_version_id: protocol-v1
             [json!({
                 "title":"r","design_version_id":"version-1","design_revision":1,
                 "status":"in_progress",
-                "protocol_manifest":[{"assay_id":"assay-1","assay_title":"A","steps":[step]}]
+                "protocol_manifest":[{"assay_id":"assay-1","assay_title":"A","protocol_version_id":"pv1","steps":[step]}]
             })
             .to_string()],
         )
@@ -13178,6 +13996,31 @@ protocol_version_id: protocol-v1
             .as_str()
             .expect("task key")
             .to_owned()
+    }
+    #[test]
+    fn rule_skip_event_requires_skip_status_and_projects_ad_hoc_marker() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);").unwrap();
+        let task_key = seed_asset_run(&db);
+        let tx = db.unchecked_transaction().unwrap();
+        let invalid = json!({"event_type":"skipped_by_rule","content":"No bubbles",
+            "step_status":"completed","protocol_step_path":"s/1","protocol_version_id":"pv1",
+            "assay_id":"assay-1","task_key":task_key,"ad_hoc_step":true});
+        let invalid_error = create_execution_event_tx(&tx, "run-1", &invalid).unwrap_err();
+        assert!(
+            invalid_error.message.contains("step_status=skipped"),
+            "{invalid_error:?}"
+        );
+        let valid = json!({"event_type":"skipped_by_rule","content":"No bubbles",
+            "step_status":"skipped","protocol_step_path":"s/1","protocol_version_id":"pv1",
+            "assay_id":"assay-1","task_key":task_key,"ad_hoc_step":true});
+        let saved = create_execution_event_tx(&tx, "run-1", &valid).unwrap();
+        tx.commit().unwrap();
+        let projected = run_workspace(&db, "run-1").unwrap();
+        assert_eq!(saved["data"]["event_type"], "skipped_by_rule");
+        assert_eq!(projected["events"][0]["skipped_by_rule"], true);
+        assert_eq!(projected["events"][0]["ad_hoc_step"], true);
+        assert_eq!(projected["tasks"][0]["status"], "skipped");
     }
 
     fn dir_size(path: &Path) -> u64 {
@@ -13248,6 +14091,9 @@ protocol_version_id: protocol-v1
             run_id: "run-1".into(),
             task_key: task_key.clone(),
             sample_id: Some("sample-1".into()),
+            well_id: Some("A1".into()),
+            timepoint: Some("t6h".into()),
+            fov_index: Some(1),
             actor_id: Some("tester".into()),
         };
         let (record, event) = link_local_asset(&mut db, &request).unwrap();
@@ -13269,6 +14115,7 @@ protocol_version_id: protocol-v1
         assert_eq!(data["relativePath"], "d1/large.tif");
         assert_eq!(data["rootId"], "project-data");
         assert_eq!(data["link"]["sampleId"], "sample-1");
+        assert_eq!(data["link"]["coordinateId"], "A1_t6h_fov01");
         assert!(
             !data.to_string().contains(&root_dir.display().to_string()),
             "absolute root path must not be persisted: {data}"
@@ -13339,6 +14186,9 @@ protocol_version_id: protocol-v1
             run_id: "run-1".into(),
             task_key: task.to_owned(),
             sample_id: None,
+            well_id: None,
+            timepoint: None,
+            fov_index: None,
             actor_id: None,
         };
         let error = link_local_asset(

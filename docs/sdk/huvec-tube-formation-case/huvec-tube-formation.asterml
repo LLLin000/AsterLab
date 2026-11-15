@@ -1,0 +1,512 @@
+# HUVEC 体外成管实验（GelMA 浓度梯度 + 405 nm 光固化）
+
+> 说明：本文件仅使用 AsterLab 当前已注册模块（`modules.json` sdk 1.0.0）编写，作为“纸面设计 → 现有系统映射 → 缺口对照”的基线文档。关于循环、计时器、条件跳过与多视野图像槽等尚未实现的扩展需求，见同目录 `DESIGN.md`。
+
+```asterlab
+kind: experiment
+id: exp-huvec-gelma
+schema: 1
+title: 不同浓度 GelMA 水凝胶基质对 HUVEC 体外成管的影响
+research_question: 在统一添加 10 ng/mL VEGF 的高糖 DMEM + 10% FBS 体系中，3%、5%、7% (w/v) GelMA 水凝胶（0.25% LAP 溶剂，405 nm 光固化）对 HUVEC 在 6 h、12 h、24 h 管腔形成是否有差异？
+objective: 比较 3%、5%、7% GelMA 水凝胶铺板后，HUVEC 接种 6 h、12 h、24 h 的光镜成管形态并采集每孔 6 视野图像。
+hypothesis: 不同浓度 GelMA 交联后的基质刚度与孔隙结构会影响 HUVEC 迁移与管腔网络形成。
+experimental_unit: 12 孔板单孔（Well，单批次细胞悬液，每组 3 个技术复孔）
+controls: 组间浓度梯度对照（3% vs 5% vs 7% GelMA，均含 10 ng/mL VEGF；A4/B4/C4 留空或加 PBS 防蒸发）
+factors:
+  - name: GelMA 浓度
+    levels: [3% (w/v), 5% (w/v), 7% (w/v)]
+timepoints: [6h, 12h, 24h]
+primary_endpoint: 管腔形成光镜显微图像（6 视野/孔；定量形态学指标留待图像后处理提取）
+endpoint_method: 明场倒置光学显微镜多时间点成像
+endpoint_unit: images (6 FOV/well)
+sample_size_rationale: 3 组 × 3 复孔 = 9 孔，使用单块 12 孔板（A1-C3）；3 个时间点 × 9 孔 × 6 视野 = 162 张图像。
+planned_run_count: 1
+planned_run_relationship: single_longitudinal_plate
+analysis_plan: 完成 6h/12h/24h 全板 6 视野图像采集后，按分组×时间点进行管腔长度、节点数等图像定量分析（本次 Run 不阻断图像后处理指标）。
+```
+
+## 分组定义（3 组 × 3 复孔）
+
+```asterlab
+kind: group
+id: g-gelma-3
+schema: 1
+name: 3% GelMA + VEGF
+role: treatment
+condition: 3% (w/v) GelMA 溶于 0.25% LAP，405 nm 固化；DMEM 高糖 + 10% FBS + 10 ng/mL VEGF
+independent_n: 1
+technical_repeats: 3
+```
+
+```asterlab
+kind: group
+id: g-gelma-5
+schema: 1
+name: 5% GelMA + VEGF
+role: treatment
+condition: 5% (w/v) GelMA 溶于 0.25% LAP，405 nm 固化；DMEM 高糖 + 10% FBS + 10 ng/mL VEGF
+independent_n: 1
+technical_repeats: 3
+```
+
+```asterlab
+kind: group
+id: g-gelma-7
+schema: 1
+name: 7% GelMA + VEGF
+role: treatment
+condition: 7% (w/v) GelMA 溶于 0.25% LAP，405 nm 固化；DMEM 高糖 + 10% FBS + 10 ng/mL VEGF
+independent_n: 1
+technical_repeats: 3
+```
+
+## 材料与配液计算（注意：现有 UCUM 子集无 `%`，浓度以 mg/mL 等价表达）
+
+```asterlab
+kind: material
+id: mat-lap-025
+schema: 1
+name: LAP 光引发剂溶液（0.25% w/v）
+role: control
+condition: 0.25% (w/v) 固定溶剂，用于配制各浓度 GelMA
+concentration: {value: 2.5, unit: mg/mL}
+source: lab_imported
+```
+
+```asterlab
+kind: material
+id: mat-gelma-3
+schema: 1
+name: 3% GelMA 水凝胶（0.25% LAP 溶剂）
+role: treatment
+condition: 3% (w/v)，按 4 孔余量配 2.0 mL（60 mg GelMA + 2.0 mL 0.25% LAP）
+concentration: {value: 30, unit: mg/mL}
+source: lab_imported
+```
+
+```asterlab
+kind: material
+id: mat-gelma-5
+schema: 1
+name: 5% GelMA 水凝胶（0.25% LAP 溶剂）
+role: treatment
+condition: 5% (w/v)，按 4 孔余量配 2.0 mL（100 mg GelMA + 2.0 mL 0.25% LAP）
+concentration: {value: 50, unit: mg/mL}
+source: lab_imported
+```
+
+```asterlab
+kind: material
+id: mat-gelma-7
+schema: 1
+name: 7% GelMA 水凝胶（0.25% LAP 溶剂）
+role: treatment
+condition: 7% (w/v)，按 4 孔余量配 2.0 mL（140 mg GelMA + 2.0 mL 0.25% LAP）
+concentration: {value: 70, unit: mg/mL}
+source: lab_imported
+```
+
+```asterlab
+kind: material
+id: mat-vegf
+schema: 1
+name: 重组人 VEGF（工作浓度 10 ng/mL）
+role: treatment
+condition: 接种时提前加入细胞悬液（2×10^5 cells/mL，DMEM 高糖 + 10% FBS）
+concentration: {value: 10, unit: ng/mL}
+source: lab_imported
+```
+
+```asterlab
+kind: dilution
+id: calc-vegf-dilution
+schema: 1
+stock: {value: 10, unit: ug/mL}
+target: {value: 10, unit: ng/mL}
+final_volume: {value: 5, unit: mL}
+```
+
+## 仪器档案
+
+```asterlab
+kind: instrument_profile
+id: inst-waterbath-80
+schema: 1
+class: water_bath
+model: 恒温水浴锅（80°C）
+capabilities:
+  - name: heating
+    temperature: 80 Cel
+source: lab_imported
+```
+
+```asterlab
+kind: instrument_profile
+id: inst-centrifuge
+schema: 1
+class: centrifuge
+model: 台式离心机（2000 rpm 脱泡）
+capabilities:
+  - name: degas_centrifugation
+    speed: 2000 rpm
+source: lab_imported
+```
+
+```asterlab
+kind: instrument_profile
+id: inst-uv-405
+schema: 1
+class: uv_curing
+model: 405 nm 光固化灯
+capabilities:
+  - name: photo_crosslinking
+    wavelength: 405 nm
+constraints:
+  - note: 计划照射约 120 s，实际以目测完全固化为准并记录实际秒数
+source: lab_imported
+```
+
+```asterlab
+kind: instrument_profile
+id: inst-microscope
+schema: 1
+class: light_microscope
+model: 倒置明场显微镜
+capabilities:
+  - name: brightfield_imaging
+    fields_per_well: 6
+source: lab_imported
+```
+
+## 样本与 12 孔板布局
+
+```asterlab
+kind: sample
+id: s-w01
+schema: 1
+sample_id: HUVEC-3%-1
+group_ref: g-gelma-3
+material_refs: [mat-gelma-3, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-w02
+schema: 1
+sample_id: HUVEC-3%-2
+group_ref: g-gelma-3
+material_refs: [mat-gelma-3, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-w03
+schema: 1
+sample_id: HUVEC-3%-3
+group_ref: g-gelma-3
+material_refs: [mat-gelma-3, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-w04
+schema: 1
+sample_id: HUVEC-5%-1
+group_ref: g-gelma-5
+material_refs: [mat-gelma-5, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-w05
+schema: 1
+sample_id: HUVEC-5%-2
+group_ref: g-gelma-5
+material_refs: [mat-gelma-5, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-w06
+schema: 1
+sample_id: HUVEC-5%-3
+group_ref: g-gelma-5
+material_refs: [mat-gelma-5, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-w07
+schema: 1
+sample_id: HUVEC-7%-1
+group_ref: g-gelma-7
+material_refs: [mat-gelma-7, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-w08
+schema: 1
+sample_id: HUVEC-7%-2
+group_ref: g-gelma-7
+material_refs: [mat-gelma-7, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: sample
+id: s-w09
+schema: 1
+sample_id: HUVEC-7%-3
+group_ref: g-gelma-7
+material_refs: [mat-gelma-7, mat-vegf]
+amount: {value: 0.5, unit: mL}
+```
+
+```asterlab
+kind: assay
+id: assay-tube-formation
+schema: 1
+title: HUVEC 体外成管明场观察
+endpoint: 管腔网络光镜图像采集（6 视野/孔）
+method: 12 孔板 GelMA 基质接种 + 倒置明场显微镜
+unit: images
+group_refs: [g-gelma-3, g-gelma-5, g-gelma-7]
+timepoints: [6h, 12h, 24h]
+timepoint_relation: longitudinal_same_wells_anchored_at_seeding
+technical_replicates: 3
+```
+
+```asterlab
+kind: plate
+id: plate-12w-main
+schema: 1
+format: 12
+assay: assay-tube-formation
+timepoint: 6h/12h/24h
+groups:
+  g-gelma-3: [A1, A2, A3]
+  g-gelma-5: [B1, B2, B3]
+  g-gelma-7: [C1, C2, C3]
+samples:
+  A1: HUVEC-3%-1
+  A2: HUVEC-3%-2
+  A3: HUVEC-3%-3
+  B1: HUVEC-5%-1
+  B2: HUVEC-5%-2
+  B3: HUVEC-5%-3
+  C1: HUVEC-7%-1
+  C2: HUVEC-7%-2
+  C3: HUVEC-7%-3
+replicates:
+  A1: 1
+  A2: 2
+  A3: 3
+  B1: 1
+  B2: 2
+  B3: 3
+  C1: 1
+  C2: 2
+  C3: 3
+```
+
+```asterlab
+kind: measurement_profile
+id: mp-tube-imaging
+schema: 1
+endpoint: 明场显微图像（6 视野/孔）
+unit: images
+readout_schema:
+  per_well_fov_count: 6
+  total_wells: 9
+  timepoints: [6h, 12h, 24h]
+  post_run_metrics_deferred: [total_tube_length, junction_count, mesh_count]
+```
+
+## 执行步骤与流程（`step@2` + `workflow@1`）
+
+```asterlab
+kind: step
+id: step-01-sterilize
+schema: 2
+title: 01 GelMA 热冷循环消毒与脱泡
+assay: assay-tube-formation
+path: huvec/01-sterilize-degas
+order: 1
+uses:
+  - {ref: mat-gelma-3, role: material}
+  - {ref: mat-gelma-5, role: material}
+  - {ref: mat-gelma-7, role: material}
+  - {ref: inst-waterbath-80, role: instrument}
+  - {ref: inst-centrifuge, role: instrument}
+tasks:
+  - {id: cycle-1, title: "第1轮：80°C 水浴 5 min → 冰上 10 min", kind: procedure}
+  - {id: cycle-2, title: "第2轮：80°C 水浴 5 min → 冰上 10 min", kind: procedure}
+  - {id: cycle-3, title: "第3轮：80°C 水浴 5 min → 冰上 10 min", kind: procedure}
+  - {id: degas, title: "2000 rpm 离心脱泡（无明显气泡可按方案跳过）", kind: procedure}
+checks:
+  - {checkId: chk-cycles, title: "3 轮 80°C(5min)/冰上(10min) 循环完成", blocking: true}
+  - {checkId: chk-degas, title: "气泡状态确认（已离心或确认无气泡豁免）", blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-02-coat-cure
+schema: 2
+title: 02 12孔板铺胶与 405nm 光固化
+assay: assay-tube-formation
+path: huvec/02-coat-cure
+order: 2
+uses:
+  - {ref: plate-12w-main, role: labware}
+  - {ref: inst-uv-405, role: instrument}
+  - {ref: mat-gelma-3, role: material}
+  - {ref: mat-gelma-5, role: material}
+  - {ref: mat-gelma-7, role: material}
+tasks:
+  - {id: dispense, title: "按 A1-A3(3%)、B1-B3(5%)、C1-C3(7%) 铺胶 0.5 mL/孔并铺匀", kind: procedure}
+  - {id: cure, title: "405 nm 紫外照射至完全固化（参考 120 s，记录实际秒数）", kind: procedure}
+checks:
+  - {checkId: chk-even, title: "各孔铺胶均匀、无大面积缺胶或气泡", blocking: true}
+  - {checkId: chk-cured, title: "405 nm 完全固化并记录实际照射时长", blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-03-soak
+schema: 2
+title: 03 完全培养基 4°C 浸泡平衡
+assay: assay-tube-formation
+path: huvec/03-soak
+order: 3
+uses:
+  - {ref: plate-12w-main, role: labware}
+tasks:
+  - {id: add-medium, title: "每孔加入 1.0 mL 完全培养基（DMEM 高糖 + 10% FBS，共 9 mL）", kind: procedure}
+  - {id: incubate-4c, title: "4°C 冰箱浸泡 ≥ 2 h，确保培养基完全浸没水凝胶", kind: procedure}
+checks:
+  - {checkId: chk-submerged, title: "水凝胶完全浸没且 4°C 浸泡时间 ≥ 2 h", blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-04-seed
+schema: 2
+title: 04 复温与接种 HUVEC（建立 t0 锚点）
+assay: assay-tube-formation
+path: huvec/04-seed
+order: 4
+uses:
+  - {ref: plate-12w-main, role: labware}
+  - {ref: mat-vegf, role: material}
+  - {ref: calc-vegf-dilution, role: calculator}
+  - {ref: s-w01, role: sample}
+  - {ref: s-w02, role: sample}
+  - {ref: s-w03, role: sample}
+  - {ref: s-w04, role: sample}
+  - {ref: s-w05, role: sample}
+  - {ref: s-w06, role: sample}
+  - {ref: s-w07, role: sample}
+  - {ref: s-w08, role: sample}
+  - {ref: s-w09, role: sample}
+tasks:
+  - {id: rewarm, title: "孔板复温并吸去浸泡培养基", kind: procedure}
+  - {id: prep-cells, title: "配制 2×10^5/mL HUVEC 悬液 + 10 ng/mL VEGF（配制 5.0 mL 余量）", kind: procedure}
+  - {id: seed, title: "每孔接种 0.5 mL（1×10^5 cells/孔），放回培养箱并记录 t0", kind: procedure}
+checks:
+  - {checkId: chk-vegf, title: "细胞悬液已提前添加 10 ng/mL VEGF 并混匀", blocking: true}
+  - {checkId: chk-t0, title: "接种完成放回培养箱时刻 (t0) 已记录", blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-05a-img-6h
+schema: 2
+title: 05a 6h 光镜观察与采集（54 张）
+assay: assay-tube-formation
+timepoints: [6h]
+path: huvec/05-imaging-6h
+order: 5
+uses:
+  - {ref: plate-12w-main, role: labware}
+  - {ref: inst-microscope, role: instrument}
+  - {ref: mp-tube-imaging, role: other}
+tasks:
+  - {id: img-6h, title: "t0 + 6h：A1-C3 每孔拍摄 6 个代表性视野（共 54 张）", kind: measurement}
+checks:
+  - {checkId: chk-6h-count, title: "9 孔 × 6 视野共 54 张图像已关联", blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-05b-img-12h
+schema: 2
+title: 05b 12h 光镜观察与采集（54 张）
+assay: assay-tube-formation
+timepoints: [12h]
+path: huvec/05-imaging-12h
+order: 6
+uses:
+  - {ref: plate-12w-main, role: labware}
+  - {ref: inst-microscope, role: instrument}
+  - {ref: mp-tube-imaging, role: other}
+tasks:
+  - {id: img-12h, title: "t0 + 12h：A1-C3 每孔拍摄 6 个代表性视野（共 54 张）", kind: measurement}
+checks:
+  - {checkId: chk-12h-count, title: "9 孔 × 6 视野共 54 张图像已关联", blocking: true}
+```
+
+```asterlab
+kind: step
+id: step-05c-img-24h
+schema: 2
+title: 05c 24h 光镜观察与采集（54 张）
+assay: assay-tube-formation
+timepoints: [24h]
+path: huvec/05-imaging-24h
+order: 7
+uses:
+  - {ref: plate-12w-main, role: labware}
+  - {ref: inst-microscope, role: instrument}
+  - {ref: mp-tube-imaging, role: other}
+tasks:
+  - {id: img-24h, title: "t0 + 24h：A1-C3 每孔拍摄 6 个代表性视野（共 54 张）", kind: measurement}
+checks:
+  - {checkId: chk-24h-count, title: "9 孔 × 6 视野共 54 张图像已关联", blocking: true}
+```
+
+```asterlab
+kind: workflow
+id: wf-huvec-gelma
+schema: 1
+steps:
+  - step-01-sterilize
+  - step-02-coat-cure
+  - step-03-soak
+  - step-04-seed
+  - step-05a-img-6h
+  - step-05b-img-12h
+  - step-05c-img-24h
+edges:
+  - {from: step-01-sterilize, to: step-02-coat-cure}
+  - {from: step-02-coat-cure, to: step-03-soak}
+  - {from: step-03-soak, to: step-04-seed}
+  - {from: step-04-seed, to: step-05a-img-6h}
+  - {from: step-05a-img-6h, to: step-05b-img-12h}
+  - {from: step-05b-img-12h, to: step-05c-img-24h}
+business_order:
+  - step-01-sterilize
+  - step-02-coat-cure
+  - step-03-soak
+  - step-04-seed
+  - step-05a-img-6h
+  - step-05b-img-12h
+  - step-05c-img-24h
+```

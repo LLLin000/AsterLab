@@ -4,10 +4,13 @@ name: linux-tests
 # unit/integration suites from HANDOFF-VPS.md §3. Toolchain and build matrix:
 # docs/engineering/cross-platform-builds.md §3-5.
 
-# Hosted-runner minutes are exhausted, so the Linux lane runs on the VPS
-# instead: scripts/ci/local-gate.sh (docs/engineering/local-ci.md). The Windows
-# Gate lane never runs these tests. Manual dispatch stays for budget restoral.
+# The repository is public, so standard GitHub-hosted runners are free again
+# and this workflow is the machine-checkable Linux gate on every pull request.
+# The VPS local gate (scripts/ci/local-gate.sh) remains the fast inner loop.
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +24,10 @@ jobs:
   linux-tests:
     name: linux-tests
     # The VPS host is the only self-hosted Linux runner in the repo.
-    runs-on: [self-hosted, linux, x64]
+    # Hosted runner: the repository is public and standard runners are free.
+    # Self-hosted runners must never serve a public repository, where fork pull
+    # requests would execute untrusted code on the VPS.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
@@ -30,7 +36,9 @@ jobs:
       # survive checkout. `Swatinem/rust-cache` used to clean ~/.cargo/bin on
       # this runner and deleted the host toolchain (2026-11-14); the cache
       # action is gone, this directory is the cache.
-      CARGO_TARGET_DIR: /var/lib/actions-runner/cargo-target
+      # Hosted runner: keep the target dir inside the job workspace so it is
+      # cached per runner image and needs no privileged path.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - name: Checkout
         uses: actions/checkout@v4

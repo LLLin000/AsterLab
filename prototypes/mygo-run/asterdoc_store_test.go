@@ -17,6 +17,8 @@ const parityInstrumentDoc = "```asterlab\nkind: instrument_profile\nid: instrume
 
 const parityRnaDoc = "```asterlab\nkind: rna_reagent_usage\nid: rna-01\nschema: 1\nsample_count: 10\nvolume_per_sample:\n  value: 20\n  unit: uL\nstock_concentration:\n  value: 10\n  unit: mg/mL\ntarget_concentration:\n  value: 2\n  unit: mg/mL\nextra_ratio: 0.1\n```\n"
 
+const parityPlateMixDoc = "```asterlab\nkind: group\nid: \"3%\"\nschema: 1\nname: 3% GelMA\n```\n```asterlab\nkind: group\nid: \"5%\"\nschema: 1\nname: 5% GelMA\n```\n```asterlab\nkind: group\nid: \"7%\"\nschema: 1\nname: 7% GelMA\n```\n```asterlab\nkind: plate\nid: plate-huvec\nschema: 1\nformat: 12\ngroups:\n  \"3%\": [A1, A2, A3]\n  \"5%\": [B1, B2, B3]\n  \"7%\": [C1, C2, C3]\nmix_volume_per_well: {value: 200, unit: uL}\nmix_excess_ratio: 0.1\nmix_gelma_percent_by_group:\n  \"3%\": 3\n  \"5%\": 5\n  \"7%\": 7\nmix_lap_stock_percent: 0.5\nmix_lap_final_percent: 0.05\nmix_cell_density: {value: 20000, unit: cells/well}\nmix_factor_stock_concentration: {value: 10, unit: ug/mL}\nmix_factor_final_concentration: {value: 50, unit: ng/mL}\n```\n"
+
 func TestAsterDocStoreIsImmutableAndConflictChecked(t *testing.T) {
 	copyFixtureDB(t)
 	ctx := context.Background()
@@ -140,6 +142,11 @@ func TestAsterDocGoRustParity(t *testing.T) {
 		{"valid rna reagent", parityRnaDoc},
 		{"invalid rna target>stock", strings.Replace(parityRnaDoc, "value: 2\n  unit: mg/mL", "value: 20\n  unit: mg/mL", 1)},
 		{"invalid rna extra_ratio", strings.Replace(parityRnaDoc, "extra_ratio: 0.1", "extra_ratio: -0.1", 1)},
+		{"valid plate mix", parityPlateMixDoc},
+		{"invalid plate mix lap", strings.Replace(parityPlateMixDoc, "mix_lap_final_percent: 0.05", "mix_lap_final_percent: 0.6", 1)},
+		{"invalid plate mix group percent", strings.Replace(parityPlateMixDoc, "  \"7%\": 7\n", "", 1)},
+		{"invalid plate mix factor", strings.Replace(parityPlateMixDoc, "mix_factor_final_concentration: {value: 50, unit: ng/mL}", "mix_factor_final_concentration: {value: 20, unit: mg/mL}", 1)},
+		{"invalid plate mix partial factor", strings.Replace(parityPlateMixDoc, "mix_factor_stock_concentration: {value: 10, unit: ug/mL}\n", "", 1)},
 	}
 	revision := uint64(0)
 	for index, sample := range samples {

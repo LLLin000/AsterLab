@@ -68,11 +68,12 @@ func (a *app) noteView() *noteViewState {
 // editing, reading, and the AsterML document. Each save appends one notebook-stage event.
 func notebookPage(c *ui.Context, a *app) {
 	t := c.Theme()
+	tokens := theme.GetTokens(t)
 	if a.snap.RunID == "" {
 		ui.Column(c).Fill().Center().Gap(t.Space(2)).Children(func() {
-			ui.Text(c, "Notebook").FontSize(20).Bold().TextColor(t.Text)
+			ui.Text(c, "Notebook").FontSize(float32(tokens.TextPage)).Bold().TextColor(t.Text)
 			ui.Text(c, "先选择或加载一个 Run，笔记会记录在它的执行历史中。").
-				FontSize(13).TextColor(t.TextMuted)
+				FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
 		})
 		return
 	}
@@ -81,18 +82,18 @@ func notebookPage(c *ui.Context, a *app) {
 	}
 	ui.Column(c).Fill().Padding(t.Space(2), t.Space(3)).Gap(t.Space(2)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Padding(0, t.Space(1)).Children(func() {
-			ui.Text(c, "Notebook").FontSize(11).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "/").FontSize(11).TextColor(t.Border)
-			ui.Text(c, a.snap.Title).FontSize(11).TextColor(t.TextMuted).
+			ui.Text(c, "Notebook").FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "/").FontSize(float32(tokens.TextMeta)).TextColor(t.Border)
+			ui.Text(c, a.snap.Title).FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted).
 				SingleLine().Ellipsis("…").MaxWidth(420)
 			if a.snap.AsterDoc == nil && a.snap.DesignRevision > 0 {
 				ui.Text(c, fmt.Sprintf("Document Revision: %d", a.snap.DesignRevision)).
-					FontSize(10).TextColor(t.TextMuted)
+					FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 			}
 			ui.Spacer(c)
 			a.documentExportButton(c)
 			ui.Text(c, fmt.Sprintf("%d / 5000", len([]rune(a.noteSource())))).
-				FontSize(10).TextColor(t.TextMuted).FontFeatures("tnum")
+				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).FontFeatures("tnum")
 		})
 		// Floating toolbar above the sheet, following Obsidian's editing
 		// toolbar: mode switch, editing commands, then one save action.
@@ -159,17 +160,12 @@ func notebookPage(c *ui.Context, a *app) {
 				if parts.List.Changed() {
 					a.applyNoteModeChange(old)
 				}
-				// UX-STATE / UX-06: one explicit state word beside Save — never
-				// a bare dot. It is the same vocabulary as the other surfaces.
-				switch {
-				case a.noteErr != "":
-					components.Badge(c, "未保存", components.BadgeOptions{Tone: components.BadgeDanger})
-				case a.noteDirty:
-					components.Badge(c, "未保存", components.BadgeOptions{Tone: components.BadgeWarning})
-				case a.noteState == "saved":
-					components.Badge(c, "已保存", components.BadgeOptions{Tone: components.BadgeSuccess})
-				default:
-					components.Badge(c, "就绪", components.BadgeOptions{Tone: components.BadgeNeutral})
+				// UX-STATE / UX-06: one explicit state word beside Save, from the
+				// projection's single vocabulary — never a bare colour dot.
+				if a.noteDirty || a.noteErr != "" {
+					ui.Text(c, notebook.SaveStateLabel(true)).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.WarningText)
+				} else {
+					ui.Text(c, notebook.SaveStateLabel(false)).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.SuccessText)
 				}
 				save := components.IconButton(c, lucide.Save(), "保存笔记", components.IconButtonCompact)
 				save.Disabled(a.noteMode == 2)

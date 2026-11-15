@@ -450,3 +450,12 @@ func (e Entry) DisplayTime() string {
 	}
 	return raw
 }
+
+// SaveStateLabel names the Notebook save state in the contract vocabulary
+// (UX-STATE) so the toolbar and its tests share one word.
+func SaveStateLabel(dirty bool) string {
+	if dirty {
+		return "未保存"
+	}
+	return "已保存"
+}
