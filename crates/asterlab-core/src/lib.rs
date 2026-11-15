@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod calculators;
 pub mod timer;
 pub mod diagnostic;
 pub mod design_map;

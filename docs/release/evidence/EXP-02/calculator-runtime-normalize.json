@@ -1,0 +1,1 @@
+{"ok":true,"result":{"additional_volume_ul":0.0,"assumption":"死体积按每个配制管只加一次；余量只作用于工作体积；不改写冻结计划，只返回运行期配平建议","dead_volume_ul":50.0,"formula":"required_ul = actual_wells × volume_per_well_ul × (1 + excess_ratio) + dead_volume_ul","planned_volume_ul":2030.0,"required_volume_ul":1590.0,"unused_volume_ul":410.0},"tool":"calculator.runtime_normalize"}

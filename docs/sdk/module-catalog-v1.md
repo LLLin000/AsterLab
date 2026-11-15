@@ -8,7 +8,7 @@
 
 | kind@schema | category | capabilities | permissions | Design / Document / Run / Static | rules |
 |---|---|---|---|---|---|
-| plate@1 | labware | well-plate, well-assignment, plate-geometry | document.edit | plate.editor / plate.viewer / plate.run / — | plate-geometry-wells |
+| plate@1 | labware | well-plate, well-assignment, plate-geometry, quantity, deterministic-calculation, derived-output | document.edit | plate.editor / plate.viewer / plate.run / — | plate-geometry-wells, plate-mix-fields |
 | reference@1 | document | typed-reference | (none) | generic.editor / reference.viewer / generic.run / — | reference-ref |
 | experiment@1 | workflow | experiment-plan | (none) | generic.editor / experiment.viewer / generic.run / — | (none) |
 | group@1 | workflow | group-definition | (none) | generic.editor / group.viewer / generic.run / — | group-fields |
@@ -44,7 +44,7 @@
 
 | kind@schema | schema/校验 | Design 编辑器 | Run 视图 | 记录闭环 |
 |---|---|---|---|---|
-| plate@1 | Go+Rust parity；格式 6/12/24/48/96/384 | **96 孔交互式分配/清空**；6/12/24/48/384 为忠实只读矩阵，非完整专用编辑器 | 只读 `plate.run` 摘要 | 仅 CCK-8 结果网格 / Run Core 路径 |
+| plate@1 | Go+Rust parity；格式 6/12/24/48/96/384 | **96 孔交互式分配/清空**；6/12/24/48/384 为忠实只读矩阵，非完整专用编辑器 | 只读 `plate.run` 摘要 | 仅 CCK-8 结果网格 / Run Core 路径；`mix_*` 派生配平值由 Core/Go 计算，未写入 Run 事实 |
 | reference@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
 | experiment@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
 | group@1 | Go+Rust | 通用编辑器仅标量字段；复合字段只读 | 只读摘要 | 无 |
@@ -65,8 +65,9 @@
 
 
 ### plate@1
-- inputs: kind string required；id string required；schema int required；format int required（6/12/24/48/96/384）；assay reference→assay；timepoint timepoint；groups well-map required；samples object（well→显式 sample ID，可选）；replicates object（well→正整数技术重复编号，可选，须有对应 sample ID）。未填写的身份保持未解析，不根据组别或孔位顺序推断。
-- outputs: rows int view；columns int view；wells well-map view；samples object view；replicates object view。clear_wells 同时清除目标孔位的组别、样本和重复映射。
+- inputs: kind string required；id string required；schema int required；format int required（6/12/24/48/96/384）；assay reference→assay；timepoint timepoint；groups well-map required；samples object（well→显式 sample ID，可选）；replicates object（well→正整数技术重复编号，可选，须有对应 sample ID）；mix_volume_per_well quantity (volume)；mix_excess_ratio decimal；mix_gelma_percent_by_group object（组名→% w/v）；mix_lap_stock_percent decimal；mix_lap_final_percent decimal；mix_cell_density quantity (cells_per_well)；mix_factor_stock_concentration quantity (mass_concentration)；mix_factor_final_concentration quantity (mass_concentration)。未填写的身份保持未解析，不根据组别或孔位顺序推断。
+- outputs: rows int view；columns int view；wells well-map view；samples object view；replicates object view；mix_gel_mastermix object derived calculator `gel.mastermix.v1`；mix_cell_seeding object derived calculator `cell.seeding.v1`。clear_wells 同时清除目标孔位的组别、样本和重复映射。
+- `mix_*` 是可选的配平联动字段：孔数与分组一律取 `groups` 的实际孔位/复孔，不另行声明 wells。`mix_gelma_percent_by_group` 的键必须与 `groups` 完全一致；`mix_lap_final_percent` 不得高于 `mix_lap_stock_percent`；因子母液与终浓度必须同时提供或同时省略。公式：`volume_ul = wells × mix_volume_per_well × (1 + mix_excess_ratio)`；`gelma_mass_mg = volume_ul × % w/v ÷ 100`；`LAP_stock_ul = volume_ul × mix_lap_final_percent ÷ mix_lap_stock_percent`；`solvent_ul = volume_ul − LAP_stock_ul`；`total_cells = ceil(mix_cell_density × wells × (1 + mix_excess_ratio))`。派生值只读，不写 Run 事实。
 
 ### reference@1
 - inputs: kind string required；id string required；schema int required；ref string required；view string。
@@ -193,6 +194,7 @@ Rust 侧 `validate_asterdoc_module` 的 rule 匹配是穷举的：已知 rule �
 - 无代码生成：Go 与 Rust 校验器并行维护；`TestAsterDocGoRustParity` 覆盖 plate、引用、稀释、仪器档案和字段校验样本，但不逐一覆盖每个模块的每个字段。
 - 无 manifest/schema 校验或代码生成 CLI；目前的工具 `sdk.modules`、`sdk.describe` 从嵌入的 manifest 发现/描述模块，`asterdoc.validate` 校验候选 AsterDoc 并尝试编译。Go 与 Rust 校验器仍并行维护。
 - 无模板市场：模板 shape 在 Foundation schema 中定义；实例化已在 `internal/asterdoc/template.go` 实现（`InstantiateTemplate` / `TemplateManifest`），但无模板市场、无远程下载、无模板管理 CLI。
+- 配平 CLI：`calculator.gel_mastermix`、`calculator.cell_seeding`、`calculator.runtime_normalize` 只返回算术结果，不写数据库；`runtime_normalize` 按实际孔数与死体积给出追加/未用完体积，不改写冻结计划。
 - 通用编辑器对 `list/object/table/object-list/well-map/geometry` 字段显示为 read-only（`GenericModuleEditor`，`view.go`）；因此复合字段目前无法在通用编辑器内组装，需要专用编辑器或后续的结构化控件。
 - 无模块生命周期（register/activate/dispose）：模块是纯函数，加载即全部注册，失败即暴露 `BuiltinError`。
 - `step@1`/`step@2` 语义不变；`step@2` 新增 `uses`；`step@3` 显式声明执行/组织语义并要求可执行步骤有精确 ProtocolBlock 来源。

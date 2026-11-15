@@ -2,6 +2,8 @@ package asterdoc
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -52,6 +54,264 @@ func plateSpec() ModuleSpec {
 			"plate.run":    renderPlate,
 		},
 	}
+}
+
+// plateMixGroup is one row of the derived GelMA mastermix plan. It is computed
+// from the plate's actual group wells; it is never written back to the
+// document or to a Run fact.
+type plateMixGroup struct {
+	Name             string
+	Wells            int
+	GelmaPercent     float64
+	VolumeUL         float64
+	GelmaMassMG      float64
+	LapStockVolumeUL float64
+	SolventVolumeUL  float64
+}
+
+type plateGelMastermix struct {
+	Groups           []plateMixGroup
+	VolumeUL         float64
+	GelmaMassMG      float64
+	LapStockVolumeUL float64
+	SolventVolumeUL  float64
+}
+
+type plateCellSeedingGroup struct {
+	Name                string
+	Wells               int
+	TotalCells          int64
+	SuspensionVolumeUL  float64
+	FactorStockVolumeUL float64
+}
+
+type plateCellSeeding struct {
+	Groups              []plateCellSeedingGroup
+	TotalCells          int64
+	SuspensionVolumeUL  float64
+	FactorStockVolumeUL float64
+}
+
+func plateMixField(data map[string]any, key string) (any, bool) {
+	value, ok := data[key]
+	if !ok || value == nil {
+		return nil, false
+	}
+	return value, true
+}
+
+func plateMixQuantity(data map[string]any, key, dimension string) (float64, error) {
+	value, unit, err := quantityParts(data[key])
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	spec, ok := unitFor(unit)
+	if !ok {
+		return 0, fmt.Errorf("%s: unit %q is not registered", key, unit)
+	}
+	if spec.Dimension != dimension {
+		return 0, fmt.Errorf("%s: unit %q is %s, not %s", key, unit, spec.Dimension, dimension)
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, fmt.Errorf("%s: value must be finite", key)
+	}
+	return value * spec.Factor, nil
+}
+
+func plateMixVolumeUL(data map[string]any, key string) (float64, error) {
+	base, err := plateMixQuantity(data, key, "volume")
+	if err != nil {
+		return 0, err
+	}
+	return base / 1e-6, nil
+}
+
+func plateMixRatio(data map[string]any, key string, fallback float64) (float64, error) {
+	value, ok := plateMixField(data, key)
+	if !ok {
+		return fallback, nil
+	}
+	number, ok := numericValue(value)
+	if !ok || math.IsNaN(number) || math.IsInf(number, 0) {
+		return 0, fmt.Errorf("%s must be a finite number", key)
+	}
+	if number < 0 {
+		return 0, fmt.Errorf("%s must be non-negative", key)
+	}
+	return number, nil
+}
+
+func plateSortedGroups(plate Plate) []string {
+	names := make([]string, 0, len(plate.Groups))
+	for name := range plate.Groups {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func plateGroupWells(plate Plate) (map[string]int, error) {
+	counts := make(map[string]int, len(plate.Groups))
+	for name, wells := range plate.Groups {
+		if len(wells) == 0 {
+			return nil, fmt.Errorf("plate group %q has no wells", name)
+		}
+		counts[name] = len(wells)
+	}
+	return counts, nil
+}
+
+// plateMixPlansFor derives the GelMA mastermix and cell seeding rows from a
+// plate's actual groups. It is additive: a plate without any mix_* field keeps
+// the original plate@1 contract and returns zero plans.
+func plateMixPlansFor(data map[string]any) (plateGelMastermix, plateCellSeeding, error) {
+	var gel plateGelMastermix
+	var cells plateCellSeeding
+	gelmaPercent, hasGelma := plateMixField(data, "mix_gelma_percent_by_group")
+	_, hasLapStock := plateMixField(data, "mix_lap_stock_percent")
+	_, hasLapFinal := plateMixField(data, "mix_lap_final_percent")
+	_, hasDensity := plateMixField(data, "mix_cell_density")
+	_, hasFactorStock := plateMixField(data, "mix_factor_stock_concentration")
+	_, hasFactorFinal := plateMixField(data, "mix_factor_final_concentration")
+	_, hasVolume := plateMixField(data, "mix_volume_per_well")
+	_, hasExcess := plateMixField(data, "mix_excess_ratio")
+
+	gelPlan := hasGelma || hasLapStock || hasLapFinal
+	cellPlan := hasDensity || hasFactorStock || hasFactorFinal
+	if !gelPlan && !cellPlan {
+		if hasVolume || hasExcess {
+			return gel, cells, fmt.Errorf("mix_volume_per_well and mix_excess_ratio need a gel or cell plan")
+		}
+		return gel, cells, nil
+	}
+	if !hasVolume {
+		return gel, cells, fmt.Errorf("mix plan needs mix_volume_per_well")
+	}
+	volumePerWellUL, err := plateMixVolumeUL(data, "mix_volume_per_well")
+	if err != nil {
+		return gel, cells, err
+	}
+	if volumePerWellUL <= 0 {
+		return gel, cells, fmt.Errorf("mix_volume_per_well must be positive")
+	}
+	excess, err := plateMixRatio(data, "mix_excess_ratio", 0)
+	if err != nil {
+		return gel, cells, err
+	}
+	plate, err := plateFromData(data)
+	if err != nil {
+		return gel, cells, err
+	}
+	wellsByGroup, err := plateGroupWells(plate)
+	if err != nil {
+		return gel, cells, err
+	}
+	if len(wellsByGroup) == 0 {
+		return gel, cells, fmt.Errorf("mix plan needs at least one plate group")
+	}
+	groupNames := plateSortedGroups(plate)
+
+	if gelPlan {
+		percents, ok := gelmaPercent.(map[string]any)
+		if !ok {
+			return gel, cells, fmt.Errorf("mix_gelma_percent_by_group must be a mapping")
+		}
+		stockPercent, err := plateMixRatio(data, "mix_lap_stock_percent", 0)
+		if err != nil {
+			return gel, cells, err
+		}
+		finalPercent, err := plateMixRatio(data, "mix_lap_final_percent", 0)
+		if err != nil {
+			return gel, cells, err
+		}
+		if stockPercent <= 0 {
+			return gel, cells, fmt.Errorf("mix_lap_stock_percent must be positive")
+		}
+		if finalPercent > stockPercent {
+			return gel, cells, fmt.Errorf("mix_lap_final_percent cannot exceed mix_lap_stock_percent")
+		}
+		for _, name := range groupNames {
+			raw, ok := percents[name]
+			if !ok {
+				return gel, cells, fmt.Errorf("mix_gelma_percent_by_group is missing group %q", name)
+			}
+			percent, ok := numericValue(raw)
+			if !ok || math.IsNaN(percent) || math.IsInf(percent, 0) || percent <= 0 || percent > 100 {
+				return gel, cells, fmt.Errorf("group %q GelMA percent must be in (0, 100]", name)
+			}
+			groupWells := wellsByGroup[name]
+			groupVolume := volumePerWellUL * float64(groupWells) * (1 + excess)
+			row := plateMixGroup{
+				Name:             name,
+				Wells:            groupWells,
+				GelmaPercent:     percent,
+				VolumeUL:         groupVolume,
+				GelmaMassMG:      groupVolume * percent / 100,
+				LapStockVolumeUL: groupVolume * finalPercent / stockPercent,
+			}
+			row.SolventVolumeUL = groupVolume - row.LapStockVolumeUL
+			gel.Groups = append(gel.Groups, row)
+			gel.VolumeUL += row.VolumeUL
+			gel.GelmaMassMG += row.GelmaMassMG
+			gel.LapStockVolumeUL += row.LapStockVolumeUL
+			gel.SolventVolumeUL += row.SolventVolumeUL
+		}
+		for name := range percents {
+			if _, ok := wellsByGroup[name]; !ok {
+				return gel, cells, fmt.Errorf("mix_gelma_percent_by_group names unknown group %q", name)
+			}
+		}
+	}
+
+	if cellPlan {
+		if !hasDensity {
+			return gel, cells, fmt.Errorf("cell plan needs mix_cell_density")
+		}
+		density, err := plateMixQuantity(data, "mix_cell_density", "cells_per_well")
+		if err != nil {
+			return gel, cells, err
+		}
+		if density <= 0 {
+			return gel, cells, fmt.Errorf("mix_cell_density must be positive")
+		}
+		if hasFactorStock != hasFactorFinal {
+			return gel, cells, fmt.Errorf("factor stock and final concentration must be provided together")
+		}
+		stockConc, err := plateMixQuantity(data, "mix_factor_stock_concentration", "mass_concentration")
+		if err != nil && hasFactorStock {
+			return gel, cells, err
+		}
+		finalConc, err := plateMixQuantity(data, "mix_factor_final_concentration", "mass_concentration")
+		if err != nil && hasFactorFinal {
+			return gel, cells, err
+		}
+		if stockConc <= 0 && finalConc > 0 {
+			return gel, cells, fmt.Errorf("factor stock concentration must be positive")
+		}
+		if stockConc > 0 && finalConc > stockConc {
+			return gel, cells, fmt.Errorf("factor final concentration cannot exceed stock concentration")
+		}
+		for _, name := range groupNames {
+			groupWells := wellsByGroup[name]
+			suspension := volumePerWellUL * float64(groupWells) * (1 + excess)
+			totalCells := int64(math.Ceil(density * float64(groupWells) * (1 + excess)))
+			factorVolume := 0.0
+			if stockConc > 0 {
+				factorVolume = suspension * finalConc / stockConc
+			}
+			cells.Groups = append(cells.Groups, plateCellSeedingGroup{
+				Name:                name,
+				Wells:               groupWells,
+				TotalCells:          totalCells,
+				SuspensionVolumeUL:  suspension,
+				FactorStockVolumeUL: factorVolume,
+			})
+			cells.TotalCells += totalCells
+			cells.SuspensionVolumeUL += suspension
+			cells.FactorStockVolumeUL += factorVolume
+		}
+	}
+	return gel, cells, nil
 }
 
 func moduleDocumentSpec(descriptor Descriptor, validate func(map[string]any) error, render RendererFunc) ModuleSpec {
@@ -299,10 +559,10 @@ func dilutionSpec() ModuleSpec {
 // rnaReagentResult is a pure derived view. It never writes a Run fact; the
 // authored quantities remain the source of truth.
 type rnaReagentResult struct {
-	StockVolume  float64
+	StockVolume   float64
 	DiluentVolume float64
-	TotalVolume  float64
-	Unit         string
+	TotalVolume   float64
+	Unit          string
 }
 
 func rnaReagentResultFor(data map[string]any) (rnaReagentResult, error) {
