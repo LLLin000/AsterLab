@@ -317,6 +317,11 @@ pub enum OperationTimeKind {
 pub struct OperationTiming {
     pub kind: OperationTimeKind,
     pub duration: Quantity,
+    /// Lower bound on one occurrence's elapsed time, expressed in a time unit.
+    /// The budget projection uses `max(duration, minimum_duration)`; a value
+    /// below `duration` never shortens an occurrence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_duration: Option<Quantity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -345,6 +350,11 @@ pub struct SkipCondition {
 pub struct ScheduleRule {
     pub interval: Quantity,
     pub occurrences: u32,
+    /// Delay between `time_anchor_id` and the first occurrence, in a time
+    /// unit. Zero and positive values only; later occurrences keep the declared
+    /// `interval`. Absent means the first occurrence starts at the anchor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<Quantity>,
 }
 
 
@@ -539,6 +549,14 @@ impl OperationSpec {
                 UnitFamily::Time,
                 &mut issues,
             );
+            if let Some(minimum) = &timing.minimum_duration {
+                validate_quantity(
+                    minimum,
+                    "timing.minimum_duration",
+                    UnitFamily::Time,
+                    &mut issues,
+                );
+            }
         }
         if let Some(repeat) = &self.repeat {
             validate_positive_count(Some(repeat.count), "repeat.count", &mut issues);
@@ -565,10 +583,17 @@ impl OperationSpec {
                 "schedule.occurrences",
                 &mut issues,
             );
+            if let Some(offset) = &schedule.offset {
+                validate_non_negative_duration(offset, "schedule.offset", &mut issues);
+            }
             if self.time_anchor_id.as_deref().unwrap_or("").trim().is_empty() {
                 issues.push(missing(
                     "time_anchor_id",
-                    "periodic schedule requires a time anchor",
+                    if schedule.offset.is_some() {
+                        "periodic schedule offset requires a time anchor"
+                    } else {
+                        "periodic schedule requires a time anchor"
+                    },
                 ));
             }
         }
@@ -644,6 +669,35 @@ fn validate_quantity(
             code: SpecErrorCode::ValueOutOfRange,
             path: path.into(),
             message: "value must be greater than zero".into(),
+        });
+    }
+}
+
+/// A time quantity that may be zero but never negative, such as a schedule
+/// offset. A missing or non-time unit follows the same rejection classes as
+/// [`validate_quantity`].
+fn validate_non_negative_duration(
+    quantity: &Quantity,
+    path: &str,
+    issues: &mut Vec<SpecIssue>,
+) {
+    if quantity.unit.family() != UnitFamily::Time {
+        validate_unit(quantity.unit, path, UnitFamily::Time, issues);
+        return;
+    }
+    if !quantity.value.is_finite() {
+        issues.push(SpecIssue {
+            code: SpecErrorCode::ValueOutOfRange,
+            path: path.into(),
+            message: "value must be a finite number".into(),
+        });
+        return;
+    }
+    if quantity.value < 0.0 {
+        issues.push(SpecIssue {
+            code: SpecErrorCode::ValueOutOfRange,
+            path: path.into(),
+            message: "value must be zero or greater".into(),
         });
     }
 }
@@ -743,14 +797,87 @@ mod tests {
         ]);
     }
     #[test]
-    fn v2_contract_example_parses_and_validates() {
+    fn timing_minimum_duration_and_schedule_offset_validate_and_stay_optional() {
+        let legacy_v2 = spec_from(json!({
+            "schema_version": 2,
+            "operation": { "kind": "incubate", "temperature": { "value": 4.0, "unit": "C" },
+                "duration": { "value": 2.0, "unit": "h" } },
+            "timing": { "kind": "wait", "duration": { "value": 2.0, "unit": "h" } },
+            "time_anchor_id": "t0",
+            "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 3 }
+        }));
+        assert!(legacy_v2.validate().is_ok());
+        assert_eq!(legacy_v2.timing.as_ref().unwrap().minimum_duration, None);
+        assert_eq!(legacy_v2.schedule.as_ref().unwrap().offset, None);
+        let legacy_json = serde_json::to_value(&legacy_v2).unwrap();
+        assert!(legacy_json["timing"].get("minimum_duration").is_none());
+        assert!(legacy_json["schedule"].get("offset").is_none());
+
+        let extended = spec_from(json!({
+            "schema_version": 2,
+            "operation": { "kind": "incubate", "temperature": { "value": 4.0, "unit": "C" },
+                "duration": { "value": 2.0, "unit": "h" } },
+            "timing": { "kind": "wait", "duration": { "value": 2.0, "unit": "h" },
+                "minimum_duration": { "value": 2.0, "unit": "h" } },
+            "time_anchor_id": "t0",
+            "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 3,
+                "offset": { "value": 6.0, "unit": "h" } }
+        }));
+        assert!(extended.validate().is_ok());
+
+        let zero_minimum = spec_from(json!({
+            "schema_version": 2,
+            "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" },
+            "timing": { "kind": "wait", "duration": { "value": 2.0, "unit": "h" },
+                "minimum_duration": { "value": 0.0, "unit": "h" } }
+        }));
+        let issues = zero_minimum.validate().unwrap_err();
+        assert_eq!(issues[0].code, SpecErrorCode::ValueOutOfRange);
+        assert_eq!(issues[0].path, "timing.minimum_duration");
+
+        let negative_offset = spec_from(json!({
+            "schema_version": 2,
+            "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" },
+            "timing": { "kind": "wait", "duration": { "value": 2.0, "unit": "h" } },
+            "time_anchor_id": "t0",
+            "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 3,
+                "offset": { "value": -1.0, "unit": "h" } }
+        }));
+        let issues = negative_offset.validate().unwrap_err();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].code, SpecErrorCode::ValueOutOfRange);
+        assert_eq!(issues[0].path, "schedule.offset");
+
+        let offset_without_anchor = spec_from(json!({
+            "schema_version": 2,
+            "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" },
+            "timing": { "kind": "wait", "duration": { "value": 2.0, "unit": "h" } },
+            "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 3,
+                "offset": { "value": 6.0, "unit": "h" } }
+        }));
+        let issues = offset_without_anchor.validate().unwrap_err();
+        assert_eq!(
+            issues.iter().map(|issue| (issue.code, issue.path.as_str())).collect::<Vec<_>>(),
+            [(SpecErrorCode::MissingParameter, "time_anchor_id")]
+        );
+    }
+
+    #[test]
+    fn v2_contract_examples_parse_and_validate() {
         let doc = include_str!("../../../docs/contracts/operation-spec-v2.md");
-        let example = doc.split("## Example").nth(1).unwrap();
-        let blocks = json_blocks(example);
-        assert_eq!(blocks.len(), 1);
-        let spec: OperationSpec = serde_json::from_str(blocks[0]).expect("v2 example parses");
-        assert!(spec.is_supported_schema_version());
-        assert!(spec.validate().is_ok());
+        let examples: Vec<&str> = doc.split("## Example").skip(1).collect();
+        assert_eq!(examples.len(), 2);
+        let mut parsed = 0;
+        for example in examples {
+            for block in json_blocks(example) {
+                let spec: OperationSpec =
+                    serde_json::from_str(block).expect("v2 example parses");
+                assert!(spec.is_supported_schema_version());
+                assert!(spec.validate().is_ok());
+                parsed += 1;
+            }
+        }
+        assert_eq!(parsed, 2);
     }
 
 

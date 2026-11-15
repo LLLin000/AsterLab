@@ -16,11 +16,11 @@ All fields below are optional and default to `None`.
 
 | Field | Shape | Meaning and validation |
 |---|---|---|
-| `timing` | `{ "kind": "hands_on" | "wait" | "timed_endpoint", "duration": Quantity }` | Positive finite duration in `s`, `min`, `h`, or `d`. `hands_on` contributes to net hands-on time; other kinds contribute to elapsed span and a parallel window. |
+| `timing` | `{ "kind": "hands_on" | "wait" | "timed_endpoint", "duration": Quantity, "minimum_duration"?: Quantity }` | Positive finite duration in `s`, `min`, `h`, or `d`. `hands_on` contributes to net hands-on time; other kinds contribute to elapsed span and a parallel window. `minimum_duration` is an optional lower bound for one occurrence, in a time unit and greater than zero; the projection charges `max(duration, minimum_duration)`, so it expresses `4°C ≥ 2h` without changing `duration`. |
 | `repeat` | `{ "count": positive integer }` | Repeats the step consecutively. Missing means one occurrence. |
 | `skip_condition` | `{ "check_id": non-empty string, "outcome": "passed" | "failed" }` | Declares the check outcome that conditionally skips the step. It is descriptive; this type does not evaluate checks. |
 | `time_anchor_id` | non-empty string | Stable reference to a protocol/design time origin, such as `t0`. Required when `schedule` is present. |
-| `schedule` | `{ "interval": Quantity, "occurrences": positive integer }` | Periodic occurrences separated by a positive interval in a time unit. Uses `time_anchor_id` as its origin. |
+| `schedule` | `{ "interval": Quantity, "occurrences": positive integer, "offset"?: Quantity }` | Periodic occurrences separated by a positive interval in a time unit. Uses `time_anchor_id` as its origin. `offset` is an optional delay from the anchor to the rule's first occurrence, in a time unit and zero or greater; later occurrences keep `interval` as the gap after the previous occurrence, so with occurrence duration `d` the starts are `offset`, `offset + d + interval`, `offset + 2d + 2 × interval`, and so on. A uniform `interval` cannot express a non-uniform `t0 + 6h/12h/24h` series; use one anchored rule per time mark. A negative offset is `value_out_of_range`; an offset without `time_anchor_id` is `missing_parameter`. |
 
 The existing closed semantic errors remain `unit_mismatch`, `missing_parameter`, and `value_out_of_range`. Validation reports deterministic paths under these fields. It does not infer missing durations, evaluate a condition, or convert scientific quantities.
 
@@ -45,7 +45,7 @@ The existing closed semantic errors remain `unit_mismatch`, `missing_parameter`,
 }
 ```
 
-Each `wait` or `timed_endpoint` occurrence produces its own parallel window. Durations are converted to seconds for this projection only; the authored quantity and unit are unchanged. The projection sums known step durations in the supplied order. Repeat count multiplies each occurrence duration; periodic interval gaps add `(occurrences - 1) × interval` to the span and separate the corresponding windows. `hands_on_s` sums only `hands_on` durations. `wait` and `timed_endpoint` create parallel windows and do not count as hands-on. A missing timing contributes no duration. Conditional skips are assumed not to occur, so estimates do not depend on runtime check outcomes. This is a deterministic estimate, not a runtime calendar or a claim that steps actually ran in parallel.
+Each `wait` or `timed_endpoint` occurrence produces its own parallel window. Durations are converted to seconds for this projection only; the authored quantity and unit are unchanged. One occurrence costs `max(duration, minimum_duration)` when `minimum_duration` is present, so a declared `2 h` incubation with `minimum_duration: 2 h` charges `2 h` and a lower bound above `duration` wins. The projection sums known step durations in the supplied order. Repeat count multiplies each occurrence duration; a schedule `offset` delays only the first occurrence and therefore adds that delay to the span once before the occurrence windows. Periodic interval gaps add `(occurrences - 1) × interval` to the span and separate the corresponding windows, so consecutive occurrence starts differ by the occurrence duration plus one interval. The projection is serial: it does not resolve `time_anchor_id` to absolute times, so a step after another starts later than its own anchor offset alone would suggest. `hands_on_s` sums only `hands_on` durations. `wait` and `timed_endpoint` create parallel windows and do not count as hands-on. A missing timing contributes no duration, so an `offset` without `timing` adds nothing. Conditional skips are assumed not to occur, so estimates do not depend on runtime check outcomes. This is a deterministic estimate, not a runtime calendar or a claim that steps actually ran in parallel.
 
 ## Unit registry additions
 
@@ -73,16 +73,44 @@ The Go validator embeds `spec/units.json`; it reads the same symbols, dimensions
   },
   "timing": {
     "kind": "timed_endpoint",
-    "duration": { "value": 18, "unit": "min" }
+    "duration": { "value": 18, "unit": "min" },
+    "minimum_duration": { "value": 20, "unit": "min" }
   },
   "repeat": { "count": 3 },
   "skip_condition": { "check_id": "no_bubbles", "outcome": "passed" },
   "time_anchor_id": "t0",
   "schedule": {
     "interval": { "value": 6, "unit": "h" },
-    "occurrences": 3
+    "occurrences": 3,
+    "offset": { "value": 0, "unit": "min" }
   }
 }
 ```
 
 The time model records estimates and declared schedule structure only. It does not persist timers, execution facts, endpoint values, or frozen Run changes.
+
+## Example: cold chain with anchor offsets
+
+```json
+{
+  "schema_version": 2,
+  "operation": {
+    "kind": "incubate",
+    "temperature": { "value": 4, "unit": "C" },
+    "duration": { "value": 2, "unit": "h" }
+  },
+  "timing": {
+    "kind": "wait",
+    "duration": { "value": 2, "unit": "h" },
+    "minimum_duration": { "value": 2, "unit": "h" }
+  },
+  "time_anchor_id": "t0",
+  "schedule": {
+    "interval": { "value": 6, "unit": "h" },
+    "occurrences": 3,
+    "offset": { "value": 6, "unit": "h" }
+  }
+}
+```
+
+Each occurrence costs `max(2h, 2h) = 2h`, and the `6h` interval is a gap after that occurrence, so the three `2h` parallel windows start at `t0 + 6h`, `t0 + 14h`, and `t0 + 22h` for a 24h total span. This is a single-step projection; the serial projection never resolves `time_anchor_id`, so preceding steps shift every later start. A uniform `interval` therefore cannot produce a non-uniform `t0 + 6h/12h/24h` series in one rule; express that series as three anchored rules with `occurrences: 1` and offsets `6h`, `12h`, and `24h`.
