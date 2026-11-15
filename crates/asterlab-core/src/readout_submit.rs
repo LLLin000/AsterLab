@@ -13,6 +13,18 @@
 //! and return the payload. The CLI wraps the actual insert in one transaction,
 //! so a rejected row leaves no partial event behind.
 //!
+//! # Qualifiers in a batch
+//!
+//! A batch cell records either a number or an explicit missing reason, never
+//! both — the same rule `readout.submit` applies. The CSV form carries the
+//! reason in an optional `qualifier` column (`not_detected` / `below_lod` /
+//! `above_uloq` / `invalid` / `other`), and qPCR exports that write
+//! `Undetermined` in the `value` column are read as `not_detected` instead of
+//! being rejected as non-numeric. A qualifier cell is stored with
+//! `status = "missing"`, stays out of `measurements[]` (a not-detected well is
+//! not fabricated as a number) and is kept per cell in `result_cells[]`. Any
+//! other non-numeric token still rejects the whole batch.
+//!
 //! # Idempotency
 //!
 //! `readout.submit` keys on the identity tuple from the SDK-05 contract:
@@ -94,6 +106,32 @@ pub struct ReadoutBatchRequest {
 fn default_schema_version() -> u32 {
     1
 }
+
+/// One `readout.batch` cell: the frozen numeric cell shape plus the optional
+/// missing reason the CSV form admits.
+///
+/// [`ReadingCellInput`] is the stored cell shape and stays closed, so a JSON
+/// `cells[]` entry wraps with `qualifier = None`; record a reason through the
+/// CSV `qualifier` column.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BatchCell {
+    pub cell: ReadingCellInput,
+    /// Explicit missing reason; requires `cell.value == None`.
+    pub qualifier: Option<MissingReason>,
+}
+
+impl BatchCell {
+    /// Wrap a JSON `cells[]` entry, which carries no qualifier.
+    pub fn recorded(cell: ReadingCellInput) -> Self {
+        Self {
+            cell,
+            qualifier: None,
+        }
+    }
+}
+
+/// The `value` token qPCR exports write instead of a number.
+const UNDETERMINED: &str = "undetermined";
 
 /// A validated submission: the exact `execution_event.create` payload, the
 /// idempotency key that payload is stored under, and how many readouts it
@@ -340,7 +378,7 @@ pub fn plan_batch(
             ));
             Vec::new()
         }
-        (cells, _) if !cells.is_empty() => cells.to_vec(),
+        (cells, _) if !cells.is_empty() => cells.iter().cloned().map(BatchCell::recorded).collect(),
         (_, Some(text)) => match parse_csv_cells(text) {
             Ok(cells) => cells,
             Err(csv_issues) => {
@@ -367,7 +405,7 @@ pub fn plan_batch(
         timepoint: optional_text(&request.timepoint),
         batch_id: optional_text(&request.batch_id),
         operation_id: None,
-        cells: cells.clone(),
+        cells: cells.iter().map(|cell| cell.cell.clone()).collect(),
     };
     let plan = plan_reading_batch(&batch, workspace)?;
 
@@ -376,10 +414,10 @@ pub fn plan_batch(
         .map(|cell| {
             json!([
                 request.plate_id.trim(),
-                cell.row,
-                cell.column,
-                cell.field.trim(),
-                optional_text(&cell.sample_id),
+                cell.cell.row,
+                cell.cell.column,
+                cell.cell.field.trim(),
+                optional_text(&cell.cell.sample_id),
             ])
         })
         .collect();
@@ -409,12 +447,42 @@ pub fn plan_batch(
     {
         event["content"] = json!(content);
     }
+    record_qualifiers(&mut event, &cells);
 
     Ok(ReadoutPlan {
         event,
         idempotency_key,
         readout_count: cells.len(),
     })
+}
+
+/// Keep every qualifier on its own cell in `result_cells[]`. Position and field
+/// identify a batch cell (duplicate positions are rejected earlier), so the
+/// reason survives without changing the frozen `execution_event.create` shape.
+fn record_qualifiers(event: &mut Value, cells: &[BatchCell]) {
+    if !cells.iter().any(|cell| cell.qualifier.is_some()) {
+        return;
+    }
+    let Some(result_cells) = event["result_cells"].as_array_mut() else {
+        return;
+    };
+    for entry in result_cells.iter_mut() {
+        let row = entry["row"].as_u64();
+        let column = entry["column"].as_u64();
+        let field = entry["field"].as_str().unwrap_or_default();
+        let qualifier = cells
+            .iter()
+            .find(|cell| {
+                cell.qualifier.is_some()
+                    && Some(u64::from(cell.cell.row)) == row
+                    && Some(u64::from(cell.cell.column)) == column
+                    && cell.cell.field.trim() == field
+            })
+            .and_then(|cell| cell.qualifier);
+        if let Some(qualifier) = qualifier {
+            entry["qualifier"] = json!(qualifier);
+        }
+    }
 }
 
 fn check_optional_len(
@@ -432,10 +500,14 @@ fn check_optional_len(
 /// Parse the `cells` CSV form used by `readout.batch`.
 ///
 /// Header names are case-insensitive: `row`, `column`, `field` are required;
-/// `value`, `unit`, `sample_id`, `group`, `replicate`, `status` are optional.
-/// Rows are 0-based, matching `reading_facts::ReadingCellInput`. Unknown or
-/// duplicated headers are rejected instead of ignored.
-pub fn parse_csv_cells(csv: &str) -> Result<Vec<ReadingCellInput>, Vec<ReadingIssue>> {
+/// `value`, `qualifier`, `unit`, `sample_id`, `group`, `replicate`, `status`
+/// are optional. `value` holds a finite number or the qPCR token
+/// `Undetermined`, which records `not_detected`; `qualifier` holds one of
+/// `not_detected` / `below_lod` / `above_uloq` / `invalid` / `other` and cannot
+/// coexist with a number. Rows are 0-based, matching
+/// `reading_facts::ReadingCellInput`. Unknown or duplicated headers are
+/// rejected instead of ignored.
+pub fn parse_csv_cells(csv: &str) -> Result<Vec<BatchCell>, Vec<ReadingIssue>> {
     let records = split_csv(csv);
     let mut issues = Vec::new();
     let mut records = records.into_iter().filter(|record| {
@@ -456,6 +528,7 @@ pub fn parse_csv_cells(csv: &str) -> Result<Vec<ReadingCellInput>, Vec<ReadingIs
                 | "column"
                 | "field"
                 | "value"
+                | "qualifier"
                 | "unit"
                 | "sample_id"
                 | "group"
@@ -528,19 +601,56 @@ pub fn parse_csv_cells(csv: &str) -> Result<Vec<ReadingCellInput>, Vec<ReadingIs
             }
         };
         let field = field_of(&record, "field").unwrap_or_default();
-        let value = match field_of(&record, "value") {
-            Some(raw) => match raw.parse::<f64>() {
-                Ok(value) if value.is_finite() => Some(value),
-                _ => {
+        let qualifier = match field_of(&record, "qualifier") {
+            Some(raw) => match parse_missing_reason(&raw) {
+                Some(reason) => Some(reason),
+                None => {
                     issues.push(issue(
-                        "csv_invalid_value",
-                        format!("csv 第 {line} 行 value 必须是有限数值"),
+                        "csv_invalid_qualifier",
+                        format!(
+                            "csv 第 {line} 行 qualifier 必须是 not_detected/below_lod/above_uloq/invalid/other"
+                        ),
                     ));
                     continue;
                 }
             },
             None => None,
         };
+        let (value, qualifier) = match field_of(&record, "value") {
+            None => (None, qualifier),
+            // qPCR exports write `Undetermined` instead of a number; that is a
+            // not-detected result, not a non-numeric value.
+            Some(raw) if raw.eq_ignore_ascii_case(UNDETERMINED) => {
+                (None, qualifier.or(Some(MissingReason::NotDetected)))
+            }
+            Some(raw) => match raw.parse::<f64>() {
+                Ok(value) if value.is_finite() => {
+                    if qualifier.is_some() {
+                        issues.push(issue(
+                            "readout_value_or_qualifier",
+                            format!("csv 第 {line} 行必须且只能填写 value 或 qualifier 之一"),
+                        ));
+                        continue;
+                    }
+                    (Some(value), None)
+                }
+                _ => {
+                    issues.push(issue(
+                        "csv_invalid_value",
+                        format!("csv 第 {line} 行 value 必须是有限数值或 Undetermined"),
+                    ));
+                    continue;
+                }
+            },
+        };
+        let status = field_of(&record, "status");
+        if qualifier.is_some() && status.as_deref().is_some_and(|status| status.trim() == "raw") {
+            issues.push(issue(
+                "qualifier_status_conflict",
+                format!("csv 第 {line} 行 qualifier 只能与 status=missing 一起记录"),
+            ));
+            continue;
+        }
         let replicate = match field_of(&record, "replicate") {
             Some(raw) => match raw.parse::<u32>() {
                 Ok(replicate) => Some(replicate),
@@ -554,16 +664,19 @@ pub fn parse_csv_cells(csv: &str) -> Result<Vec<ReadingCellInput>, Vec<ReadingIs
             },
             None => None,
         };
-        cells.push(ReadingCellInput {
-            row,
-            column,
-            field,
-            value,
-            unit: field_of(&record, "unit"),
-            sample_id: field_of(&record, "sample_id"),
-            group: field_of(&record, "group"),
-            replicate,
-            status: field_of(&record, "status"),
+        cells.push(BatchCell {
+            cell: ReadingCellInput {
+                row,
+                column,
+                field,
+                value,
+                unit: field_of(&record, "unit"),
+                sample_id: field_of(&record, "sample_id"),
+                group: field_of(&record, "group"),
+                replicate,
+                status,
+            },
+            qualifier,
         });
     }
     if issues.is_empty() && cells.is_empty() {
@@ -573,6 +686,16 @@ pub fn parse_csv_cells(csv: &str) -> Result<Vec<ReadingCellInput>, Vec<ReadingIs
         return Err(issues);
     }
     Ok(cells)
+}
+
+/// Map a CSV token to the frozen [`MissingReason`] vocabulary. Only the five
+/// values `readouts[].qualifier` already admits are accepted; no alias is
+/// invented, so a typo rejects the batch instead of recording a new category.
+fn parse_missing_reason(raw: &str) -> Option<MissingReason> {
+    serde_json::from_value::<MissingReason>(Value::String(
+        raw.trim().to_ascii_lowercase(),
+    ))
+    .ok()
 }
 
 /// RFC 4180-style record split: commas separate fields, `""` escapes a quote,
@@ -855,7 +978,87 @@ mod tests {
         assert!(issues.iter().any(|issue| issue.code == "csv_invalid_value"));
 
         let cells = parse_csv_cells("\u{feff}row,column,field,value\n0,0,\"od,450\",1.5\n").unwrap();
-        assert_eq!(cells[0].field, "od,450");
-        assert_eq!(cells[0].value, Some(1.5));
+        assert_eq!(cells[0].cell.field, "od,450");
+        assert_eq!(cells[0].cell.value, Some(1.5));
+        assert_eq!(cells[0].qualifier, None);
+    }
+
+    fn csv_batch(csv: &str) -> ReadoutBatchRequest {
+        let mut request = batch(Vec::new());
+        request.csv = Some(csv.to_owned());
+        request
+    }
+
+    #[test]
+    fn readout_batch_csv_keeps_qualifiers_and_undetermined_cells() {
+        let workspace = ws("r1");
+        let request = csv_batch(
+            "row,column,field,value,unit,sample_id,qualifier\n\
+             0,0,ct,18.4,cycles,S-1,\n\
+             1,0,ct,Undetermined,cycles,S-1,\n\
+             2,0,ct,,cycles,S-1,not_detected\n\
+             3,0,ct,,cycles,S-1,below_lod\n\
+             4,0,ct,,cycles,S-1,above_uloq\n",
+        );
+        let plan = plan_batch(&request, &workspace).unwrap();
+        assert_eq!(plan.readout_count, 5);
+
+        let cells = plan.event["result_cells"].as_array().unwrap();
+        assert_eq!(cells[0]["value"], 18.4);
+        assert!(cells[0].get("qualifier").is_none());
+        assert_eq!(cells[0]["status"], "raw");
+
+        assert_eq!(cells[1]["qualifier"], "not_detected");
+        assert_eq!(cells[1]["status"], "missing");
+        assert!(cells[1]["value"].is_null());
+        assert_eq!(cells[2]["qualifier"], "not_detected");
+        assert_eq!(cells[3]["qualifier"], "below_lod");
+        assert_eq!(cells[4]["qualifier"], "above_uloq");
+
+        // Qualifier cells stay out of `measurements[]`: a not-detected qPCR well
+        // is not fabricated as a number.
+        assert_eq!(plan.event["measurements"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn readout_batch_csv_rejects_a_bad_value_or_reason_for_the_whole_batch() {
+        let workspace = ws("r1");
+
+        let invalid_value = csv_batch(
+            "row,column,field,value,qualifier\n\
+             0,0,ct,Undetermined,\n\
+             1,0,ct,nope,\n",
+        );
+        let issues = plan_batch(&invalid_value, &workspace).unwrap_err();
+        assert!(issues.iter().any(|issue| issue.code == "csv_invalid_value"));
+
+        let invalid_reason = csv_batch("row,column,field,value,qualifier\n0,0,ct,,detected\n");
+        let issues = plan_batch(&invalid_reason, &workspace).unwrap_err();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.code == "csv_invalid_qualifier"));
+
+        let value_and_reason = csv_batch("row,column,field,value,qualifier\n0,0,ct,18.4,below_lod\n");
+        let issues = plan_batch(&value_and_reason, &workspace).unwrap_err();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.code == "readout_value_or_qualifier"));
+
+        let raw_with_reason = csv_batch("row,column,field,value,status,qualifier\n0,0,ct,,raw,below_lod\n");
+        let issues = plan_batch(&raw_with_reason, &workspace).unwrap_err();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.code == "qualifier_status_conflict"));
+    }
+
+    #[test]
+    fn readout_batch_qualifier_is_content_not_identity() {
+        let workspace = ws("r1");
+        let detected = csv_batch("row,column,field,value,qualifier\n0,0,ct,,not_detected\n");
+        let saturated = csv_batch("row,column,field,value,qualifier\n0,0,ct,,above_uloq\n");
+        assert_eq!(
+            plan_batch(&detected, &workspace).unwrap().idempotency_key,
+            plan_batch(&saturated, &workspace).unwrap().idempotency_key
+        );
     }
 }
