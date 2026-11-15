@@ -87,6 +87,7 @@ type RecordingView struct {
 	Task            *RunTaskViewModel
 	OnOpenAsset     func(asset LinkedAsset)
 	OnRelocate      func(asset LinkedAsset)
+	OnRelabelAsset  func(asset LinkedAsset)
 	OnLinkFile      func(asset LinkedAsset)
 	OnTimeline     func()
 	// LinkErr holds the Core rejection cause for the last link attempt on this
@@ -550,7 +551,7 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 			})
 		}
 		for _, a := range r.Assets {
-			assetRow(c, a, r.OnOpenAsset, r.OnRelocate, t, tokens)
+			assetRow(c, a, r.OnOpenAsset, r.OnRelocate, r.OnRelabelAsset, t, tokens)
 		}
 		if len(r.Task.Actual.Measurements) > 0 {
 			ui.Divider(c)
@@ -577,7 +578,7 @@ func fovLabel(index uint32) string {
 	return strconv.FormatUint(uint64(index), 10)
 }
 
-func assetRow(c *ui.Context, a LinkedAsset, open, relocate func(LinkedAsset), t *ui.Theme, tokens theme.Tokens) {
+func assetRow(c *ui.Context, a LinkedAsset, open, relocate, relabel func(LinkedAsset), t *ui.Theme, tokens theme.Tokens) {
 	ui.Row(c).FillWidth().Padding(t.Space(1.5), t.Space(2)).Radius(6).
 		Background(tokens.Elevated).Border(1, tokens.Border).
 		Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
@@ -602,6 +603,11 @@ func assetRow(c *ui.Context, a LinkedAsset, open, relocate func(LinkedAsset), t 
 			}
 		})
 		if a.WellID == "" || a.Timepoint == "" || a.FOVIndex == 0 {
+			if relabel != nil {
+				if components.Button(c, "重设坐标", components.ButtonGhost).Clicked() {
+					relabel(a)
+				}
+			}
 			return
 		}
 		if !a.Available {

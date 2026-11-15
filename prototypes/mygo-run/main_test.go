@@ -835,3 +835,173 @@ func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
 		}
 	})
 }
+
+type assetRelabelSpy struct {
+	runs.RunService
+	calls []struct {
+		runID     string
+		assetID   string
+		wellID    string
+		timepoint string
+		fovIndex  uint32
+	}
+	err   error
+	asset runs.Asset
+}
+
+func (s *assetRelabelSpy) UpdateAssetLinkCoordinates(
+	_ context.Context,
+	runID, assetID, wellID, timepoint string,
+	fovIndex uint32,
+) (runs.Asset, error) {
+	s.calls = append(s.calls, struct {
+		runID     string
+		assetID   string
+		wellID    string
+		timepoint string
+		fovIndex  uint32
+	}{runID, assetID, wellID, timepoint, fovIndex})
+	if s.err != nil {
+		return runs.Asset{}, s.err
+	}
+	updated := s.asset
+	updated.ID = assetID
+	updated.Link.RunID = runID
+	updated.Link.WellID = wellID
+	updated.Link.Timepoint = timepoint
+	updated.Link.FOVIndex = fovIndex
+	return updated, nil
+}
+
+func newRelabelTestApp(spy runs.RunService) *app {
+	unlabelled := runs.Asset{
+		ID:           "asset-1",
+		RootID:       "design-data-design-1",
+		RelativePath: "images/sample.tif",
+		MediaType:    "image/tiff",
+		Link:         runs.AssetLink{RunID: "run-1", TaskKey: "task-1"},
+	}
+	return &app{
+		runSvc: spy,
+		snap: runs.RunSnapshot{
+			RunID:    "run-1",
+			DesignID: "design-1",
+			Tasks: []runs.RunTask{
+				{Key: "task-1", Title: "显微成像", AssayID: "assay", Timepoint: "24 h"},
+			},
+			DesignData: `{"mygo":{"instances":{"step":[{"id":"plate","type":"plate_12","props":{"rows":3,"cols":4}}]},"assays":{"assay":{"plateInstanceId":"plate","timepoints":["6 h","24 h"]}}}}`,
+		},
+		runAssets: []runs.Asset{unlabelled},
+	}
+}
+
+func TestRelabelUnlabelledAssetUpdatesRunAssetsAndMatrix(t *testing.T) {
+	spy := &assetRelabelSpy{}
+	a := newRelabelTestApp(spy)
+	spy.asset = a.runAssets[0]
+
+	projected := a.runAssetsForTask("task-1")
+	a.openAssetLinkForm("task-1", projected[0])
+	if !a.linkDialogOpen || a.linkDialogAssetID != "asset-1" {
+		t.Fatalf("openAssetLinkForm did not enter relabel mode: open=%v asset=%q", a.linkDialogOpen, a.linkDialogAssetID)
+	}
+	if a.linkDialogWell != "A1" || a.linkDialogTimepoint != "24 h" || a.linkDialogFOV != "1" {
+		t.Fatalf("relabel prefill = (%q, %q, %q), want (A1, 24 h, 1)", a.linkDialogWell, a.linkDialogTimepoint, a.linkDialogFOV)
+	}
+
+	a.linkDialogWell = "B2"
+	a.linkDialogTimepoint = "24 h"
+	a.linkDialogFOV = "2"
+	a.submitAssetLinkForm(a.relabelRunAsset)
+
+	if len(spy.calls) != 1 {
+		t.Fatalf("UpdateAssetLinkCoordinates calls = %d, want 1", len(spy.calls))
+	}
+	call := spy.calls[0]
+	if call.runID != "run-1" || call.assetID != "asset-1" || call.wellID != "B2" || call.timepoint != "24 h" || call.fovIndex != 2 {
+		t.Fatalf("UpdateAssetLinkCoordinates call = %+v", call)
+	}
+	if a.linkDialogOpen || a.linkDialogErr != "" || a.linkDialogAssetID != "" {
+		t.Fatalf("form did not close/clear on success: open=%v err=%q asset=%q", a.linkDialogOpen, a.linkDialogErr, a.linkDialogAssetID)
+	}
+	if len(a.runAssets) != 1 || a.runAssets[0].Link.WellID != "B2" || a.runAssets[0].Link.Timepoint != "24 h" || a.runAssets[0].Link.FOVIndex != 2 {
+		t.Fatalf("runAssets not refreshed: %+v", a.runAssets)
+	}
+
+	vm := runworkspace.BuildViewModel(a.snap, nil, runworkspace.Projection{})
+	rv := &runworkspace.RecordingView{
+		Kind:   runworkspace.ViewGallery,
+		Task:   vm.TaskByKey["task-1"],
+		Assets: a.runAssetsForTask("task-1"),
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+	if !tt.HasText("B2") {
+		t.Fatalf("matrix did not show relabelled well B2: %q", tt.Texts())
+	}
+	if tt.HasText("未标注") {
+		t.Fatalf("matrix still showed unlabelled after relabel: %q", tt.Texts())
+	}
+}
+
+func TestRelabelUnlabelledAssetRejectsInvalidCoordinateWithoutMutatingRunAssets(t *testing.T) {
+	spy := &assetRelabelSpy{}
+	a := newRelabelTestApp(spy)
+	spy.asset = a.runAssets[0]
+
+	a.openAssetLinkForm("task-1", a.runAssetsForTask("task-1")[0])
+	a.linkDialogFOV = "0"
+	a.submitAssetLinkForm(a.relabelRunAsset)
+
+	if len(spy.calls) != 0 {
+		t.Fatalf("local invalid FOV still called Core %d times", len(spy.calls))
+	}
+	if got := a.runAssets[0].Link; got.WellID != "" || got.Timepoint != "" || got.FOVIndex != 0 {
+		t.Fatalf("runAssets mutated after invalid local FOV: %+v", a.runAssets)
+	}
+	if a.linkDialogErr == "" || !a.linkDialogOpen {
+		t.Fatalf("form did not stay open with error on invalid local FOV: open=%v err=%q", a.linkDialogOpen, a.linkDialogErr)
+	}
+
+	spy.err = fmt.Errorf("INVALID: well B2 is not in frozen plate")
+	a.linkDialogWell = "B2"
+	a.linkDialogFOV = "1"
+	a.submitAssetLinkForm(a.relabelRunAsset)
+
+	if len(spy.calls) != 1 {
+		t.Fatalf("Core INVALID calls = %d, want 1", len(spy.calls))
+	}
+	if got := a.runAssets[0].Link; got.WellID != "" || got.Timepoint != "" || got.FOVIndex != 0 {
+		t.Fatalf("runAssets mutated after Core INVALID: %+v", a.runAssets)
+	}
+	if !strings.Contains(a.linkDialogErr, "INVALID:") || !a.linkDialogOpen {
+		t.Fatalf("form did not retain Core INVALID error open: open=%v err=%q", a.linkDialogOpen, a.linkDialogErr)
+	}
+}
+
+func TestRelabelUnlabelledAssetSurfacesNotFoundWithoutMutatingRunAssets(t *testing.T) {
+	spy := &assetRelabelSpy{
+		err: fmt.Errorf("NOT_FOUND: asset link asset-1 not found"),
+	}
+	a := newRelabelTestApp(spy)
+	spy.asset = a.runAssets[0]
+
+	a.openAssetLinkForm("task-1", a.runAssetsForTask("task-1")[0])
+	a.linkDialogWell = "A1"
+	a.linkDialogTimepoint = "24 h"
+	a.linkDialogFOV = "1"
+	a.submitAssetLinkForm(a.relabelRunAsset)
+
+	if len(spy.calls) != 1 {
+		t.Fatalf("Core NOT_FOUND calls = %d, want 1", len(spy.calls))
+	}
+	if got := a.runAssets[0].Link; got.WellID != "" || got.Timepoint != "" || got.FOVIndex != 0 {
+		t.Fatalf("runAssets mutated after Core NOT_FOUND: %+v", a.runAssets)
+	}
+	if !strings.Contains(a.linkDialogErr, "NOT_FOUND:") || !a.linkDialogOpen {
+		t.Fatalf("form did not retain Core NOT_FOUND error open: open=%v err=%q", a.linkDialogOpen, a.linkDialogErr)
+	}
+}

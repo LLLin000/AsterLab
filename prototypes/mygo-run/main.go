@@ -134,6 +134,7 @@ type app struct {
 	linkErr                    string
 	linkDialogOpen             bool
 	linkDialogTask             string
+	linkDialogAssetID          string
 	linkDialogWell             string
 	linkDialogTimepoint        string
 	linkDialogFOV              string
@@ -493,6 +494,7 @@ func linkPickedAssets(paths []string, coordinate runs.AssetLink, link func(strin
 
 func (a *app) openAssetLinkForm(taskKey string, prefill runworkspace.LinkedAsset) {
 	a.linkDialogTask = taskKey
+	a.linkDialogAssetID = strings.TrimSpace(prefill.AssetID)
 	a.linkDialogWells, a.linkDialogTimepoints = a.assetCoordinateOptions(taskKey)
 	a.linkDialogWell = strings.TrimSpace(prefill.WellID)
 	a.linkDialogTimepoint = strings.TrimSpace(prefill.Timepoint)
@@ -689,14 +691,37 @@ func (a *app) linkRunAsset(taskKey string, coordinate runs.AssetLink) error {
 
 func (a *app) upsertRunAsset(saved runs.Asset) {
 	for i, old := range a.runAssets {
-		if old.RootID == saved.RootID && old.RelativePath == saved.RelativePath &&
-			old.Link.RunID == saved.Link.RunID && old.Link.TaskKey == saved.Link.TaskKey &&
-			old.Link.SampleID == saved.Link.SampleID {
+		if (saved.ID != "" && old.ID == saved.ID) ||
+			(old.RootID == saved.RootID && old.RelativePath == saved.RelativePath &&
+				old.Link.RunID == saved.Link.RunID && old.Link.TaskKey == saved.Link.TaskKey &&
+				old.Link.SampleID == saved.Link.SampleID) {
 			a.runAssets[i] = saved
 			return
 		}
 	}
 	a.runAssets = append(a.runAssets, saved)
+}
+
+func (a *app) relabelRunAsset(_ string, coordinate runs.AssetLink) error {
+	if a.runSvc == nil || a.snap.RunID == "" || strings.TrimSpace(a.linkDialogAssetID) == "" {
+		return fmt.Errorf("当前没有可重设坐标的 Run 资产")
+	}
+	updated, err := a.runSvc.UpdateAssetLinkCoordinates(
+		context.Background(),
+		a.snap.RunID,
+		a.linkDialogAssetID,
+		coordinate.WellID,
+		coordinate.Timepoint,
+		coordinate.FOVIndex,
+	)
+	if err != nil {
+		return state.MapError(err)
+	}
+	a.upsertRunAsset(updated)
+	if a.runWS != nil {
+		a.refreshRunWorkspace()
+	}
+	return nil
 }
 
 // linkAssetPaths validates every selected path against rootDir before saving
@@ -2391,6 +2416,12 @@ func main() {
 						a.shell.Invalidate()
 					}
 				},
+				OnRelabelAsset: func(asset runworkspace.LinkedAsset) {
+					a.openAssetLinkForm(task.TaskKey, asset)
+					if a.shell != nil {
+						a.shell.Invalidate()
+					}
+				},
 				OnLinkFile: func(prefill runworkspace.LinkedAsset) {
 					a.openAssetLinkForm(task.TaskKey, prefill)
 					if a.shell != nil {
@@ -2617,10 +2648,19 @@ func (a *app) renderAssetLinkDialog(c *ui.Context) {
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
 	open := a.linkDialogOpen
-	components.Dialog(c, &open, components.DialogOptions{Label: "关联本地文件"}, func(panel ui.Element) {
+	relabelMode := a.linkDialogAssetID != ""
+	title := "关联本地文件"
+	subtitle := "先标注孔位、时间点和视野；所选坐标应用于本次选择的每个文件。"
+	submitLabel := "选择文件"
+	if relabelMode {
+		title = "重设资产坐标"
+		subtitle = "为未标注资产补齐孔位、时间点和视野坐标。"
+		submitLabel = "保存坐标"
+	}
+	components.Dialog(c, &open, components.DialogOptions{Label: title}, func(panel ui.Element) {
 		panel.Width(520).Children(func() {
-			ui.Text(c, "关联本地文件").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
-			ui.Text(c, "先标注孔位、时间点和视野；所选坐标应用于本次选择的每个文件。").
+			ui.Text(c, title).FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
+			ui.Text(c, subtitle).
 				FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
 			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "孔位").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted).Width(68)
@@ -2640,17 +2680,23 @@ func (a *app) renderAssetLinkDialog(c *ui.Context) {
 			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(t.Space(1)).Children(func() {
 				if components.Button(c, "取消", components.ButtonSecondary).Clicked() {
 					a.linkDialogOpen = false
+					a.linkDialogAssetID = ""
 				}
-				selectFiles := components.Button(c, "选择文件", components.ButtonPrimary)
-				selectFiles.Disabled(len(a.linkDialogWells) == 0 || len(a.linkDialogTimepoints) == 0)
-				if selectFiles.Clicked() {
-					a.submitAssetLinkForm(a.linkRunAsset)
+				submit := components.Button(c, submitLabel, components.ButtonPrimary)
+				submit.Disabled(len(a.linkDialogWells) == 0 || len(a.linkDialogTimepoints) == 0)
+				if submit.Clicked() {
+					if relabelMode {
+						a.submitAssetLinkForm(a.relabelRunAsset)
+					} else {
+						a.submitAssetLinkForm(a.linkRunAsset)
+					}
 				}
 			})
 		})
 	})
 	if !open {
 		a.linkDialogOpen = false
+		a.linkDialogAssetID = ""
 	}
 }
 
@@ -2673,6 +2719,7 @@ func (a *app) submitAssetLinkForm(linker func(string, runs.AssetLink) error) {
 		return
 	}
 	a.linkDialogOpen = false
+	a.linkDialogAssetID = ""
 	if a.shell != nil {
 		a.shell.Invalidate()
 	}
