@@ -96,7 +96,7 @@ func PlateView(c *ui.Context, g *Grid) {
 						err = g.CommitPaste()
 					}
 					if err != nil {
-						g.Error = err.Error()
+						setGridError(g, err)
 					}
 				}
 				if ui.Button(c, "取消").Clicked() {
@@ -324,7 +324,7 @@ func drawPlate(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens) {
 	})
 	plate.OnClick(func() {
 		if err := g.CommitPendingEdit(); err != nil {
-			g.Error = err.Error()
+			setGridError(g, err)
 			return
 		}
 		switch hitZone {
@@ -347,7 +347,7 @@ func drawPlate(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens) {
 				return
 			}
 			if err := g.SelectCell(hitRow, hitCol); err != nil {
-				g.Error = err.Error()
+				setGridError(g, err)
 			}
 		}
 	})
@@ -355,7 +355,7 @@ func drawPlate(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens) {
 
 	move := func(key string, extend bool) {
 		if err := g.CommitPendingEdit(); err != nil {
-			g.Error = err.Error()
+			setGridError(g, err)
 			return
 		}
 		g.MoveSelection(key, extend)
@@ -429,7 +429,7 @@ func selectedEditor(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens, fi
 			OnChange(func() { g.MarkEditDirty() }).
 			OnSubmit(func() {
 				if err := g.CommitEdit(); err != nil {
-					g.Error = err.Error()
+					setGridError(g, err)
 					return
 				}
 				g.MoveSelection("enter", false)
@@ -476,14 +476,21 @@ func statusPill(c *ui.Context, status string, t *ui.Theme, tokens theme.Tokens) 
 	})
 }
 
+func setGridError(g *Grid, err error) {
+	if g == nil || err == nil {
+		return
+	}
+	g.Error = err.Error()
+	g.State = StateError
+}
+
 func pasteClipboard(c *ui.Context, g *Grid) {
 	if err := g.CommitPendingEdit(); err != nil {
-		g.Error = err.Error()
+		setGridError(g, err)
 		return
 	}
 	if _, err := g.PasteTSV(c.ReadClipboard()); err != nil {
-		g.Error = err.Error()
-		g.State = StateError
+		setGridError(g, err)
 	}
 }
 

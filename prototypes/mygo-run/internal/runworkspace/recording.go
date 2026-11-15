@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"asterlab-mygo-prototype/internal/assays"
@@ -92,9 +93,13 @@ type RecordingView struct {
 	OnTimeline     func()
 	// LinkErr holds the Core rejection cause for the last link attempt on this
 	// task so the recording surface can show cause + retry (UX-P5).
-	LinkErr      string
-	OnKindChange func(kind ViewKind)
-	OnSaveBatch  func(cells []resultgrid.Cell)
+	LinkErr string
+	// AssetErr holds the failure cause for the last asset open/relocate/load
+	// attempt so the asset list renders a persistent banner with retry (UX-P5).
+	AssetErr        string
+	OnRetryAssetErr func()
+	OnKindChange    func(kind ViewKind)
+	OnSaveBatch     func(cells []resultgrid.Cell)
 }
 
 // Render draws the selected view plus a compact view switcher and the single
@@ -111,8 +116,12 @@ func (r *RecordingView) Render(c *ui.Context) {
 		if r.Grid == nil || r.OnSaveBatch == nil {
 			return
 		}
+		if r.Grid.State == resultgrid.StateSaving {
+			return
+		}
 		if err := r.Grid.CommitPendingEdit(); err != nil {
 			r.Grid.Error = err.Error()
+			r.Grid.State = resultgrid.StateError
 			return
 		}
 		r.Grid.Error = ""
@@ -142,6 +151,7 @@ func (r *RecordingView) Render(c *ui.Context) {
 				if r.Grid != nil {
 					if err := r.Grid.CommitPendingEdit(); err != nil {
 						r.Grid.Error = err.Error()
+						r.Grid.State = resultgrid.StateError
 						blocked = true
 					}
 				}
@@ -158,10 +168,13 @@ func (r *RecordingView) Render(c *ui.Context) {
 				ui.Text(c, "已保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.SuccessText)
 			})
 		} else if r.Grid != nil && r.OnSaveBatch != nil {
-			// UX-STATE, UX-P5: make unsaved and retryable failure states explicit beside Save.
-			if r.Grid.State == resultgrid.StateError {
+			// UX-STATE, UX-P5: make unsaved, saving, and retryable failure states explicit beside Save.
+			switch r.Grid.State {
+			case resultgrid.StateError:
 				ui.Text(c, "保存失败").FontSize(t.Rem(.72)).Bold().TextColor(tokens.DangerText)
-			} else {
+			case resultgrid.StateSaving:
+				ui.Text(c, "保存中…").FontSize(t.Rem(.72)).Bold().TextColor(t.TextMuted)
+			default:
 				ui.Text(c, "未保存").FontSize(t.Rem(.72)).Bold().TextColor(tokens.WarningText)
 			}
 			saveLabel := "保存读数"
@@ -170,22 +183,22 @@ func (r *RecordingView) Render(c *ui.Context) {
 			}
 			save := components.Button(c, saveLabel, components.ButtonPrimary)
 			save.Disabled(r.Grid.State == resultgrid.StateSaving)
-			if r.Grid.State == resultgrid.StateSaving {
-				ui.Text(c, "保存中…").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-			}
-			if save.Clicked() {
+			if save.Clicked() && r.Grid.State != resultgrid.StateSaving {
 				saveNow()
 			}
 		}
 	})
 	if r.Grid != nil && r.Grid.State == resultgrid.StateError && r.Grid.Error != "" {
-		// UX-P5 / UX-STATE / UX-DONE: retain the Core rejection cause and give a concrete recovery action.
+		// UX-P5 / UX-STATE / UX-DONE: retain the Core rejection cause and choose guidance per cause.
+		headline, guidance := gridErrorPresentation(r.Grid.Error)
 		ui.Column(c).FillWidth().Padding(t.Space(.75), t.Space(1.25)).Gap(t.Space(.5)).
 			Background(tokens.DangerBg).Children(func() {
-			ui.Text(c, "未保存 · "+r.Grid.Error).FontSize(t.Rem(.76)).TextColor(tokens.DangerText)
-			ui.Text(c, "检查目标目录权限后，点击重试保存。").
-				FontSize(t.Rem(.72)).TextColor(tokens.DangerText)
+			ui.Text(c, headline).FontSize(t.Rem(.76)).TextColor(tokens.DangerText)
+			ui.Text(c, guidance).FontSize(t.Rem(.72)).TextColor(tokens.DangerText)
 		})
+	}
+	if r.Kind != ViewGallery && r.AssetErr != "" {
+		renderAssetErrBanner(c, r.AssetErr, r.OnRetryAssetErr, t, tokens)
 	}
 
 	if recovered && r.Grid != nil && r.Grid.State != resultgrid.StateSaved {
@@ -345,6 +358,7 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 							cell.Value, cell.Status = nil, "missing"
 							if err := g.SetCell(cell); err != nil {
 								g.Error = err.Error()
+								g.State = resultgrid.StateError
 							}
 						} else if v, err := strconv.ParseFloat(*input, 64); err != nil {
 							g.Error = "请输入数字"
@@ -353,6 +367,7 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 							cell.Value, cell.Status = &v, "raw"
 							if err := g.SetCell(cell); err != nil {
 								g.Error = err.Error()
+								g.State = resultgrid.StateError
 							}
 						}
 					}
@@ -456,6 +471,9 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 					r.OnLinkFile(LinkedAsset{LinkedTo: AssetLink{TaskKey: r.Task.TaskKey}})
 				}
 			})
+		}
+		if r.AssetErr != "" {
+			renderAssetErrBanner(c, r.AssetErr, r.OnRetryAssetErr, t, tokens)
 		}
 		if len(r.Assets) == 0 {
 			ui.Text(c, "尚未关联本地文件。").FontSize(12).TextColor(t.TextMuted)
@@ -625,6 +643,41 @@ func assetRow(c *ui.Context, a LinkedAsset, open, relocate, relabel func(LinkedA
 		if open != nil {
 			if components.Button(c, "打开", components.ButtonGhost).Clicked() {
 				open(a)
+			}
+		}
+	})
+}
+
+func gridErrorPresentation(errMsg string) (string, string) {
+	lower := strings.ToLower(errMsg)
+	switch {
+	case strings.Contains(errMsg, "刷新") && (strings.Contains(errMsg, "已写入 Core") || strings.Contains(errMsg, "已保存到 Core")):
+		return errMsg, "读数已写入 Core，仅最新视图刷新失败；请点击重试刷新或重新打开当前 Run。"
+	case strings.Contains(lower, "conflict") || strings.Contains(errMsg, "冲突") || strings.Contains(lower, "revision"):
+		return "未保存 · " + errMsg, "Core 修订版本已发生变化（修订冲突）；请重新加载当前 Run 核对最新数据后再重试保存。"
+	case strings.Contains(errMsg, "未接受全部单元格") || strings.Contains(errMsg, "被 Core 拒绝") || strings.Contains(lower, "rejected") || strings.Contains(lower, "invalid"):
+		return "未保存 · " + errMsg, "Core 拒绝了部分或全部单元格；请核对单元格数值、状态与孔位定义后，点击重试保存。"
+	case strings.Contains(lower, "permission") || strings.Contains(lower, "read-only") || strings.Contains(lower, "denied") || strings.Contains(errMsg, "权限") || strings.Contains(errMsg, "只读"):
+		return "未保存 · " + errMsg, "检查目标目录权限后，点击重试保存。"
+	case strings.Contains(errMsg, "请输入数字") || strings.Contains(lower, "cell coordinate") || strings.Contains(lower, "must be finite") || strings.Contains(lower, "missing status"):
+		return "未保存 · " + errMsg, "请修正无效的单元格输入后，重新提交并保存。"
+	default:
+		return "未保存 · " + errMsg, "请根据上方错误原因排查后，点击重试保存。"
+	}
+}
+
+func renderAssetErrBanner(c *ui.Context, message string, onRetry func(), t *ui.Theme, tokens theme.Tokens) {
+	if message == "" {
+		return
+	}
+	ui.Row(c).FillWidth().Padding(6, 10).Radius(6).
+		Background(tokens.DangerBg).Border(1, tokens.DangerText).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+		ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+			ui.Text(c, message).FontSize(t.Rem(.72)).Bold().TextColor(tokens.DangerText)
+		})
+		if onRetry != nil {
+			if components.Button(c, "重试", components.ButtonPrimary).Clicked() {
+				onRetry()
 			}
 		}
 	})
