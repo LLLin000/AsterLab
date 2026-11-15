@@ -399,13 +399,17 @@ func TestRecordingMatrixGapPrefillUsesCellCoordinates(t *testing.T) {
 	}
 }
 
-func TestUnlabelledAssetExplainsCoreGapWithoutAction(t *testing.T) {
+func TestUnlabelledAssetOffersRelabelActionAndLabelledDoesNot(t *testing.T) {
 	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	var relabelled []LinkedAsset
 	rv := &RecordingView{
 		Kind: ViewGallery, Task: vm.TaskByKey["t-read"],
-		Assets:      []LinkedAsset{{AssetID: "unlabelled", RelativePath: "sample.tif", Available: true}},
+		Assets: []LinkedAsset{{AssetID: "unlabelled", RelativePath: "sample.tif", Available: true}},
 		OnOpenAsset: func(LinkedAsset) { t.Fatal("unlabelled asset offered open action") },
 		OnRelocate:  func(LinkedAsset) { t.Fatal("unlabelled asset offered relocate action") },
+		OnRelabelAsset: func(asset LinkedAsset) {
+			relabelled = append(relabelled, asset)
+		},
 	}
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
@@ -413,9 +417,28 @@ func TestUnlabelledAssetExplainsCoreGapWithoutAction(t *testing.T) {
 	}, 900, 600)
 	tt.Frame()
 	if !tt.HasText("未标注 · 需要 Core 提供坐标更新/解除关联接口") {
-		t.Fatalf("Core gap explanation missing: %q", tt.Texts())
+		t.Fatalf("unlabelled explanation missing: %q", tt.Texts())
 	}
-	if tt.HasText("打开") || tt.HasText("重新定位") || tt.HasText("重设坐标") {
-		t.Fatalf("unlabelled asset offered an action: %q", tt.Texts())
+	if tt.HasText("打开") || tt.HasText("重新定位") {
+		t.Fatalf("unlabelled asset offered unexpected open/relocate action: %q", tt.Texts())
+	}
+	if err := tt.Click("重设坐标"); err != nil {
+		t.Fatalf("unlabelled asset did not offer relabel action: %v", err)
+	}
+	if len(relabelled) != 1 || relabelled[0].AssetID != "unlabelled" {
+		t.Fatalf("relabel callback = %+v, want unlabelled asset", relabelled)
+	}
+
+	rv.Assets = []LinkedAsset{{
+		AssetID: "labelled", RelativePath: "labelled.tif", Available: true,
+		WellID: "A1", Timepoint: "t6h", FOVIndex: 1,
+	}}
+	rv.OnOpenAsset = func(LinkedAsset) {}
+	tt.Frame()
+	if tt.HasText("重设坐标") {
+		t.Fatalf("labelled asset unexpectedly offered relabel action: %q", tt.Texts())
+	}
+	if !tt.HasText("打开") {
+		t.Fatalf("labelled asset did not offer open action: %q", tt.Texts())
 	}
 }
