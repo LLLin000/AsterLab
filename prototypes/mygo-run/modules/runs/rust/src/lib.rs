@@ -293,6 +293,20 @@ impl DesignService for CoreDesignService {
         Ok(out)
     }
 
+    fn get_protocol_version(&self, _ctx: &Context, protocol_version_id: String) -> Result<ProtocolVersionContent, Error> {
+        let guard = self.db.lock().map_err(|_| Error::Go("INTERNAL: db lock poisoned".into()))?;
+        let db = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let view = cli_impl::protocol_version_get(db, &protocol_version_id).map_err(map_cli)?;
+        protocol_version_content(&view)
+    }
+
+    fn list_protocol_versions(&self, _ctx: &Context, protocol_id: String) -> Result<Vec<ProtocolVersionContent>, Error> {
+        let guard = self.db.lock().map_err(|_| Error::Go("INTERNAL: db lock poisoned".into()))?;
+        let db = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let versions = cli_impl::protocol_version_list(db, &protocol_id).map_err(map_cli)?;
+        versions.iter().map(protocol_version_content).collect()
+    }
+
     fn preview_protocol_block(&self, _ctx: &Context, block_version_id: String) -> Result<ProtocolBlockPreview, Error> {
         let guard = self.db.lock().map_err(|_| Error::Go("INTERNAL: db lock poisoned".into()))?;
         let db = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
@@ -519,6 +533,30 @@ fn map_cli(e: cli_impl::CliError) -> Error {
         "REVISION_CONFLICT" => Error::Go(format!("CONFLICT: {}", e.message)),
         _ => Error::Go(format!("INTERNAL: {}", e.message)),
     }
+}
+
+fn protocol_version_content(view: &serde_json::Value) -> Result<ProtocolVersionContent, Error> {
+    let blob = |key: &str| -> Result<String, Error> {
+        serde_json::to_string(&view[key]).map_err(|e| Error::Go(format!("INTERNAL: {e}")))
+    };
+    Ok(ProtocolVersionContent {
+        protocol_version_id: view["protocol_version_id"].as_str().unwrap_or_default().to_owned(),
+        protocol_id: view["protocol_id"].as_str().unwrap_or_default().to_owned(),
+        version: view["version"].as_i64().unwrap_or_default(),
+        root_block_version_id: view["root_block_version_id"].as_str().map(str::to_owned),
+        root_bindings: blob("root_bindings")?,
+        parameter_slots: blob("parameter_slots")?,
+        steps: blob("steps")?,
+        resolved_parameters: blob("resolved_parameters")?,
+        unresolved_parameters: blob("unresolved_parameters")?,
+        block_versions: view["block_version_ids"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|id| id.as_str().map(str::to_owned))
+            .collect(),
+        frozen: view["frozen"].as_bool().unwrap_or(false),
+    })
 }
 
 fn asterdoc_snapshot(v: serde_json::Value) -> AsterDocSnapshot {

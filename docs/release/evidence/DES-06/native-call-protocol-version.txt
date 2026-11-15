@@ -1,0 +1,13 @@
+$ LABWORKBENCH_DATA_DIR=<temp-data-dir-redacted> go run github.com/egoist/mygo/cmd/mygo@v0.8.4-0.20261108220316-c4197b7fe562 native call ./modules/runs DesignService.GetProtocolVersion {"protocolVersionID":"<seeded-version-id>"}
+asterlab data dir: <temp-data-dir-redacted>
+{"protocol_version_id":"<seeded-version-id>","protocol_id":"<seeded-protocol-id>","version":1,"root_block_version_id":"<seeded-block-version-id>","root_bindings":"[{\"slot\":\"volume\",\"unit\":\"uL\",\"value\":100}]","parameter_slots":"[{\"key\":\"volume\",\"label\":\"Volume\",\"required\":true,\"unit\":\"uL\",\"value_type\":\"number\"}]","steps":"[{\"instruction\":\"Add liquid\",\"parameters\":[{\"label\":\"Volume\",\"provenance\":[{\"kind\":\"preview_input\",\"slot\":\"volume\"}],\"slot\":\"volume\",\"unit\":\"uL\",\"value\":100}],\"path\":\"root/add\",\"source_block_version_id\":\"<seeded-block-version-id>\",\"title\":\"Add\",\"unresolved_parameter_refs\":[],\"use_id\":\"add\"}]","resolved_parameters":"[{\"label\":\"Volume\",\"path\":\"root/volume\",\"provenance\":[{\"kind\":\"preview_input\",\"slot\":\"volume\"}],\"slot\":\"volume\",\"unit\":\"uL\",\"value\":100}]","unresolved_parameters":"[]","block_version_ids":["<seeded-block-version-id>"],"frozen":true}
+
+$ ... DesignService.ListProtocolVersions {"protocolID":"<seeded-protocol-id>"}
+asterlab data dir: <temp-data-dir-redacted>
+[{"protocol_version_id":"<seeded-version-id>","protocol_id":"<seeded-protocol-id>","version":1,"root_block_version_id":"<seeded-block-version-id>","root_bindings":"[{\"slot\":\"volume\",\"unit\":\"uL\",\"value\":100}]","parameter_slots":"[{\"key\":\"volume\",\"label\":\"Volume\",\"required\":true,\"unit\":\"uL\",\"value_type\":\"number\"}]","steps":"[{\"instruction\":\"Add liquid\",\"parameters\":[{\"label\":\"Volume\",\"provenance\":[{\"kind\":\"preview_input\",\"slot\":\"volume\"}],\"slot\":\"volume\",\"unit\":\"uL\",\"value\":100}],\"path\":\"root/add\",\"source_block_version_id\":\"<seeded-block-version-id>\",\"title\":\"Add\",\"unresolved_parameter_refs\":[],\"use_id\":\"add\"}]","resolved_parameters":"[{\"label\":\"Volume\",\"path\":\"root/volume\",\"provenance\":[{\"kind\":\"preview_input\",\"slot\":\"volume\"}],\"slot\":\"volume\",\"unit\":\"uL\",\"value\":100}]","unresolved_parameters":"[]","block_version_ids":["<seeded-block-version-id>"],"frozen":true}]
+
+$ ... DesignService.GetProtocolVersion {"protocolVersionID":"missing"}
+asterlab data dir: <temp-data-dir-redacted>
+NOT_FOUND: Protocol 版本不存在：missing
+exit status 1
+exit status 1

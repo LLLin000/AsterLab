@@ -723,6 +723,16 @@ struct ProtocolBlockList {
 struct ProtocolBlockGet {
     id: String,
 }
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtocolVersionGet {
+    protocol_version_id: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtocolVersionList {
+    protocol_id: String,
+}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct RootParameterValue {
@@ -1247,6 +1257,81 @@ pub fn protocol_block_manifest(
         "unresolved_parameters":preview["unresolved_parameters"]
     }))
 }
+pub(crate) fn protocol_version_get(
+    db: &Connection,
+    protocol_version_id: &str,
+) -> Result<Value, CliError> {
+    let (kind, _, protocol_id, revision, raw) = kind_id(db, protocol_version_id)?
+        .ok_or_else(|| CliError::missing(format!("Protocol 版本不存在：{protocol_version_id}")))?;
+    if kind != "protocol_version" {
+        return Err(CliError::missing(format!(
+            "Protocol 版本不存在：{protocol_version_id}"
+        )));
+    }
+    let protocol_id = protocol_id.ok_or_else(|| CliError::internal("Protocol 版本缺少所属 Protocol"))?;
+    let data: Value = serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+    let bindings: Vec<RootParameterValue> = serde_json::from_value(
+        data.get("root_bindings").cloned().unwrap_or_else(|| json!([])),
+    )
+    .map_err(|e| CliError::internal(format!("Protocol root_bindings 无效：{e}")))?;
+    let preview = match data["root_block_version_id"].as_str() {
+        Some(root_id) => block_preview(db, root_id, &bindings)?,
+        None => json!({
+            "steps": [], "resolved_parameters": [], "unresolved_parameters": [],
+            "block_version_ids": [], "ready": true
+        }),
+    };
+    let parameter_slots = match data["root_block_version_id"].as_str() {
+        Some(root_id) => block_version_data(db, root_id)?.1.parameter_slots,
+        None => Vec::new(),
+    };
+    let view = asterlab_core::protocol_version::ProtocolVersionView {
+        protocol_version_id: protocol_version_id.to_owned(),
+        protocol_id,
+        version: data["version"].as_i64().unwrap_or(revision),
+        root_block_version_id: data["root_block_version_id"].as_str().map(str::to_owned),
+        root_bindings: serde_json::to_value(bindings)
+            .map_err(|e| CliError::internal(e.to_string()))?
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+        parameter_slots,
+        steps: serde_json::from_value(preview["steps"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?,
+        resolved_parameters: serde_json::from_value(preview["resolved_parameters"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?,
+        unresolved_parameters: serde_json::from_value(preview["unresolved_parameters"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?,
+        block_version_ids: serde_json::from_value(preview["block_version_ids"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?,
+        frozen: true,
+    };
+    serde_json::to_value(view).map_err(|e| CliError::internal(e.to_string()))
+}
+
+pub(crate) fn protocol_version_list(
+    db: &Connection,
+    protocol_id: &str,
+) -> Result<Vec<Value>, CliError> {
+    let (kind, _, _, _, _) = kind_id(db, protocol_id)?
+        .ok_or_else(|| CliError::missing(format!("Protocol 不存在：{protocol_id}")))?;
+    if kind != "protocol" {
+        return Err(CliError::missing(format!("Protocol 不存在：{protocol_id}")));
+    }
+    let mut versions = list(db, Some("protocol_version"), None)?
+        .into_iter()
+        .filter(|record| record["parent_id"] == protocol_id)
+        .map(|record| {
+            record["id"]
+                .as_str()
+                .ok_or_else(|| CliError::internal("Protocol 版本记录缺少 id"))
+                .and_then(|id| protocol_version_get(db, id))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    versions.sort_by_key(|version| version["version"].as_i64().unwrap_or_default());
+    Ok(versions)
+}
+
 pub(crate) fn protocol_manifest_entry(
     db: &Connection,
     version_id: &str,
@@ -10408,6 +10493,14 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             ))
             .map_err(|e| CliError::internal(e.to_string()))
         }
+        "protocol.version.get" => {
+            let input: ProtocolVersionGet = parse_input(path)?;
+            protocol_version_get(&db, &input.protocol_version_id)
+        }
+        "protocol.version.list" => {
+            let input: ProtocolVersionList = parse_input(path)?;
+            Ok(json!({"versions":protocol_version_list(&db, &input.protocol_id)?}))
+        }
         "run.create" => {
             require_trusted_writer(tool)?;
             let i: RunCreate = parse_input(path)?;
@@ -11566,6 +11659,26 @@ fn result_schema(tool: &str) -> Value {
         "design.revise" => record_and_version("design"),
         "run.list" => arr("run"),
         "run.create" => one("run"),
+        "protocol.version.get" | "protocol.version.list" => {
+            let item = json!({
+                "type":"object","additionalProperties":false,
+                "required":["protocol_version_id","protocol_id","version","root_block_version_id","root_bindings","parameter_slots","steps","resolved_parameters","unresolved_parameters","block_version_ids","frozen"],
+                "properties":{
+                    "protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},
+                    "version":{"type":"integer"},"root_block_version_id":{"type":["string","null"]},
+                    "root_bindings":{"type":"array","items":{"type":"object"}},
+                    "parameter_slots":{"type":"array","items":{"type":"object"}},
+                    "steps":{"type":"array","items":{"type":"object"}},
+                    "resolved_parameters":{"type":"array","items":{"type":"object"}},
+                    "unresolved_parameters":{"type":"array","items":{"type":"object"}},
+                    "block_version_ids":{"type":"array","items":{"type":"string"}},
+                    "frozen":{"const":true}
+                }
+            });
+            if tool.ends_with(".list") {
+                json!({"type":"object","additionalProperties":false,"required":["versions"],"properties":{"versions":{"type":"array","items":item}}})
+            } else { item }
+        }
         "run.set_status" => one("run"),
         "run.revise" => one("run"),
         "run.workspace" => {
@@ -11721,6 +11834,8 @@ fn input_schema(tool: &str) -> Option<Value> {
         "protocol.block.list" => {
             json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":"string"}}})
         }
+        "protocol.version.get" => json!({"type":"object","additionalProperties":false,"required":["protocol_version_id"],"properties":{"protocol_version_id":{"type":"string","minLength":1}}}),
+        "protocol.version.list" => json!({"type":"object","additionalProperties":false,"required":["protocol_id"],"properties":{"protocol_id":{"type":"string","minLength":1}}}),
         "protocol.block.get" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
         }
@@ -12084,6 +12199,8 @@ fn tool_specs() -> Vec<Value> {
         "task.create",
         "task.set_status",
         "protocol.list",
+        "protocol.version.get",
+        "protocol.version.list",
         "protocol.block.list",
         "protocol.block.get",
         "protocol.block.create",
@@ -12159,6 +12276,8 @@ fn tool_writes(tool: &str) -> bool {
             | "workflow.inspect_tree"
             | "workflow.progress"
             | "protocol.list"
+            | "protocol.version.get"
+            | "protocol.version.list"
             | "protocol.block.list"
             | "protocol.block.get"
             | "protocol.block.preview"
@@ -12212,6 +12331,8 @@ fn tool_description(tool: &str) -> &'static str {
         "task.create" => "按项目、日期和可选运行创建日历任务。",
         "task.set_status" => "更新任务状态；必须提供读取时的 expected_revision。",
         "protocol.list" => "按项目查询 Protocol。",
+        "protocol.version.get" => "读取确切不可变 ProtocolVersion 并递归展开步骤、参数槽位；只读。",
+        "protocol.version.list" => "列出一个 Protocol 的全部不可变版本及展开内容；只读。",
         "protocol.block.list" => "按项目列出可复用步骤块。",
         "protocol.block.get" => "读取步骤块及其全部不可变版本。",
         "protocol.block.create" => "创建可作为完整 Protocol 或子步骤复用的版本化步骤块；只记录明确提供的操作和参数槽位。",
@@ -12288,6 +12409,8 @@ fn tool_effects(tool: &str) -> &'static str {
         | "workflow.inspect_tree"
         | "workflow.progress"
         | "protocol.list"
+        | "protocol.version.get"
+        | "protocol.version.list"
         | "protocol.block.list"
         | "protocol.block.get"
         | "protocol.block.preview"
@@ -12945,6 +13068,66 @@ pub(crate) fn list_asset_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_version_queries_return_expansion_and_stable_not_found() {
+        let dir = std::env::temp_dir().join(format!("protocol-version-query-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = open_db(&dir).unwrap();
+        let project = create_project(&db, "query test").unwrap();
+        let project_id = project["id"].as_str().unwrap().to_owned();
+        let block = {
+            let tx = db.unchecked_transaction().unwrap();
+            let block = create_protocol_block_records(
+                &tx,
+                &project_id,
+                &json!({
+                    "title":"root",
+                    "parameter_slots":[{"key":"volume","label":"Volume","value_type":"number","unit":"uL","required":true}],
+                    "steps":[{"kind":"text","use_id":"add","title":"Add","instruction":"Add liquid","parameter_refs":["volume"]}]
+                }),
+            ).unwrap();
+            tx.commit().unwrap();
+            block
+        };
+        let block_version_id = block["version"]["id"].as_str().unwrap();
+        let (protocol_id, version_id) = {
+            let tx = db.unchecked_transaction().unwrap();
+            let protocol = insert(&tx, "protocol", Some(&project_id), Some(&project_id), 1, &json!({"title":"protocol"})).unwrap();
+            let protocol_id = protocol["id"].as_str().unwrap().to_owned();
+            let version = insert(
+                &tx, "protocol_version", Some(&project_id), Some(&protocol_id), 1,
+                &json!({"protocol_id":protocol_id,"version":1,"body":"","root_block_version_id":block_version_id,"root_bindings":[]}),
+            ).unwrap();
+            tx.commit().unwrap();
+            (protocol_id, version["id"].as_str().unwrap().to_owned())
+        };
+        let get_input = dir.join("get.json");
+        std::fs::write(&get_input, json!({"protocol_version_id":version_id}).to_string()).unwrap();
+        let version = dispatch("protocol.version.get", get_input.to_str().unwrap(), &dir).unwrap();
+        assert_eq!(version["protocol_id"], protocol_id);
+        assert_eq!(version["version"], 1);
+        assert_eq!(version["root_block_version_id"], block_version_id);
+        assert_eq!(version["steps"][0]["path"], "root/add");
+        assert_eq!(version["parameter_slots"][0]["key"], "volume");
+        assert_eq!(version["frozen"], true);
+        let list_input = dir.join("list.json");
+        std::fs::write(&list_input, json!({"protocol_id":protocol_id}).to_string()).unwrap();
+        assert_eq!(
+            dispatch("protocol.version.list", list_input.to_str().unwrap(), &dir).unwrap()["versions"].as_array().unwrap().len(),
+            1
+        );
+        std::fs::write(&get_input, json!({"protocol_version_id":"missing"}).to_string()).unwrap();
+        assert_eq!(dispatch("protocol.version.get", get_input.to_str().unwrap(), &dir).unwrap_err().code, "NOT_FOUND");
+        std::fs::write(&list_input, json!({"protocol_id":"missing"}).to_string()).unwrap();
+        assert_eq!(dispatch("protocol.version.list", list_input.to_str().unwrap(), &dir).unwrap_err().code, "NOT_FOUND");
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(input_schema("protocol.version.get").is_some());
+        assert!(input_schema("protocol.version.list").is_some());
+        assert!(!tool_writes("protocol.version.get"));
+        assert!(!tool_writes("protocol.version.list"));
+        assert!(tool_specs().iter().any(|tool| tool["name"] == "protocol.version.get"));
+    }
 
     #[test]
     fn diagnostics_flag_is_parsed_with_input_in_any_order() {

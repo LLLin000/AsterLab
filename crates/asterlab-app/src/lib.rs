@@ -226,6 +226,14 @@ impl AppCore {
         cli_impl::load_design(&self.db, design_id).map_err(|e| e.message)
     }
 
+    pub fn get_protocol_version(&self, protocol_version_id: &str) -> Result<Value, String> {
+        cli_impl::protocol_version_get(&self.db, protocol_version_id).map_err(|e| e.message)
+    }
+
+    pub fn list_protocol_versions(&self, protocol_id: &str) -> Result<Value, String> {
+        let versions = cli_impl::protocol_version_list(&self.db, protocol_id).map_err(|e| e.message)?;
+        Ok(json!({"versions": versions}))
+    }
     pub fn save_design(&mut self, input: Value) -> Result<Value, String> {
         // create path
         if let (Some(project_id), Some(design)) = (

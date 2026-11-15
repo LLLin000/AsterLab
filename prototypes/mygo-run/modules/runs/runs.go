@@ -48,6 +48,10 @@ type DesignService interface {
 	ListProjects(ctx context.Context) ([]ProjectSummary, error)
 	// ListProtocols returns the protocol versions available for assay binding.
 	ListProtocols(ctx context.Context) ([]ProtocolSummary, error)
+	// GetProtocolVersion returns one immutable version and its expanded read model.
+	GetProtocolVersion(ctx context.Context, protocolVersionID string) (ProtocolVersionContent, error)
+	// ListProtocolVersions returns all immutable versions owned by one Protocol.
+	ListProtocolVersions(ctx context.Context, protocolID string) ([]ProtocolVersionContent, error)
 	// PreviewProtocolBlock expands one immutable ProtocolBlock version for
 	// read-only Design hierarchy browsing. It never writes or creates a Run.
 	PreviewProtocolBlock(ctx context.Context, blockVersionID string) (ProtocolBlockPreview, error)
@@ -295,6 +299,24 @@ type ProtocolSummary struct {
 	ProtocolID        string `json:"protocolId"`
 	Title             string `json:"title"`
 	Version           int    `json:"version"`
+}
+
+// ProtocolVersionContent is the read-only expanded content of an immutable
+// ProtocolVersion. The expanded arrays cross the module boundary as the exact
+// CLI JSON text, the same contract WorkflowTree uses: decode it, never rebuild
+// it in Go. Their members carry protocol values that are not bridge types.
+type ProtocolVersionContent struct {
+	ProtocolVersionID    string   `json:"protocol_version_id"`
+	ProtocolID           string   `json:"protocol_id"`
+	Version              int      `json:"version"`
+	RootBlockVersionID   *string  `json:"root_block_version_id"`
+	RootBindings         string   `json:"root_bindings"`
+	ParameterSlots       string   `json:"parameter_slots"`
+	Steps                string   `json:"steps"`
+	ResolvedParameters   string   `json:"resolved_parameters"`
+	UnresolvedParameters string   `json:"unresolved_parameters"`
+	BlockVersions        []string `json:"block_version_ids"`
+	Frozen               bool     `json:"frozen"`
 }
 
 // ProtocolBlockStep is one expanded definition step inside a ProtocolBlock
