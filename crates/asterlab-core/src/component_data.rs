@@ -327,6 +327,9 @@ mod tests {
                     counts_as_independent_unit: true,
                     source: None,
                 }],
+                target: None,
+                well_role: None,
+                dilution_factor: None,
             }],
             placements: vec![],
         }
