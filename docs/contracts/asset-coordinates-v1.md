@@ -2,7 +2,7 @@
 
 - 日期：2026-11-15
 - 状态：v1 契约；只增字段，不改旧链接语义。
-- 代码：`crates/asterlab-core/src/assets.rs`（`AssetLink`）、`crates/asterlab-core/src/run_workspace.rs`（`LinkedAssetView`、`AssetCoverageGroup`）、`src/cli.rs`（`asset.link`、`run.workspace`）。
+- 代码：`crates/asterlab-core/src/assets.rs`（`AssetLink`）、`crates/asterlab-core/src/run_workspace.rs`（`LinkedAssetView`、`AssetCoverageGroup`）、`src/cli.rs`（`asset.link`、`asset.link.update`、`asset.unlink`、`run.workspace`）。
 - 关联：[UI-REDESIGN](../sdk/huvec-tube-formation-case/UI-REDESIGN.md) §2.2、[AGENT_API](../../AGENT_API.md)、[CONTEXT](../../CONTEXT.md) 读模型与“载体 / 孔位”。
 
 ## 0. 目标与边界
@@ -104,7 +104,45 @@ wellId 大写                                -> "A1"
   - Core 不补“应有几张”，也不生成空组；前端/Record 用冻结计划与 `fov_indices` 求差集。
 - 只读：`run.workspace` 不写数据库，不改链接。
 
-## 5. Go 侧镜像
+## 5. 坐标更新（`asset.link.update`）
+
+`asset.link.update` 只改一条已存在链接的坐标三元组：不解绑、不重新计算记录 ID、不改文件身份。
+它让“未标注”的资产在不重新读取文件的情况下补上孔位/时间点/视野，或把标错的坐标就地改正。
+
+输入（坐标三个键必须出现；`timepoint` / `fov_index` 可用显式 `null` 清空）：
+
+| 字段 | 规则 | 失败码 |
+|---|---|---|
+| `id` | 已存在的 `asset_link` 记录 ID；未知或已解绑（记录已删除）都是 `NOT_FOUND` | `NOT_FOUND` |
+| `id` | 指向其他 kind（如 `run`） | `INVALID_INPUT` |
+| `well_id` | 同第 3 节孔位规则；必填，本命令不能把链接退回“无坐标” | `INVALID_INPUT` |
+| `timepoint` | 同第 3 节；显式 `null` 表示该链接不记录时间点 | `INVALID_INPUT` |
+| `fov_index` | 同第 3 节，从 `1` 开始；显式 `null` 表示不记录视野 | `INVALID_INPUT` |
+| 缺少 `well_id` / `timepoint` / `fov_index` 键 | 拒绝；缺失不是“清空”的同义词 | `INVALID_INPUT` |
+| `actor_id` | 最长 200 字符、无控制字符；省略时沿用记录上的 `actorId` | `INVALID_INPUT` |
+
+写入规则：
+
+- 只重写 `link.wellId`、`link.timepoint`、`link.fovIndex` 和重新派生的 `link.coordinateId`。
+  `data.id`（文件身份）、`rootId`、`relativePath`、`size`、`modTime`、`sha256`、`mediaType`、
+  `availability`、`linkedAt` 以及 `runId`、`taskKey`、`sampleId` 原样保留。
+- 一次调用写两件事：`asset_link` 记录的新坐标与一条 `asset_link_event`（`action = "updated"`）。
+  两者在同一事务内提交；校验失败或任一步失败都不留半态。
+- `updated` 事件额外带 `previous: {wellId, timepoint, fovIndex, coordinateId}`，即被替换前的坐标；
+  历史 `linked` / `unlinked` 事件不被改写。
+- 事件载荷的其余字段（`assetId`、`rootId`、`relativePath`、`sha256` …）复制记录值，`link` 是更新后的坐标。
+- 输出 `{record, event}`，与 `asset.link` 同形状；`record` 是更新后的 `asset_link` 记录。
+
+两条必须知道的边界：
+
+- **记录 ID 是创建时的定位句柄**，由 `asset.link` 的
+  `(rootId, relativePath, runId, taskKey, sampleId, coordinateId)` 派生，更新坐标不重算。
+  因此修改坐标后再次 `asset.link` 同一文件与新坐标会新增一条记录（ID 由坐标派生）；
+  移动坐标请用 `asset.link.update`，不要重新关联。
+- 提交与当前完全相同的坐标不是错误：仍写一条 `updated` 事件，`previous` 与当前值相同。
+  这保证事件流严格按调用顺序可审计。
+
+## 6. Go 侧镜像
 
 `prototypes/mygo-run/modules/runs` 的 `AssetLink` 增加同名字段与 JSON tag：
 
@@ -122,14 +160,16 @@ type AssetLink struct {
 - `FOVIndex == 0` 表示未记录（Core 不会写入 0），与 JSON `null`/缺省一致。
 - 桥接层只是透传 Core 的 JSON；缺字段的旧记录解码后是该类型的零值，不推断。
 
-## 6. 版本与回滚
+## 7. 版本与回滚
 
 - 全部字段可选，缺少时读模型输出 `null`，因此不需要新的 schema 版本号；旧消费者忽略新字段即可。
+- `asset.link.update` 是新增命令，不改变 `asset.link` 的输入/输出；`asset_link_event.action` 增加 `updated`，事件多一个 `previous` 对象。按 Run 查事件时可按 `updated` 过滤，旧调用方按 `linked` / `unlinked` 过滤不受影响。
 - 去掉 `linked_assets`/`asset_coverage` 或把缺失坐标补成默认值属于破坏性变更，必须新卡并按契约评审。
-- 回滚方式：撤回读模型两个字段；`asset_link` 里已经写入的坐标字段保留但不再被读模型带出（不迁移、不改写）。
+- 回滚方式：撤回读模型两个字段；`asset_link` 里已经写入的坐标字段保留但不再被读模型带出（不迁移、不改写）。撤回 `asset.link.update` 时已写事件保留，坐标保持最后写入值。
 
-## 7. 非目标
+## 8. 非目标
 
 - 不做孔板 UI、拖拽填槽、批量导入（Windows 泳道）。
 - 不判断“162 张是否拍全”，不定义每孔应有视野数。
 - 不引入新的记录类型或第二份资产表；坐标仍只存在 `asset_link` 记录里。
+- 不做 Go 原生桥接：`RunService` 的解除/更新方法拆在 LB-10，CLI 是当前唯一写入路径。
