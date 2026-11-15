@@ -280,7 +280,7 @@ func TestRecordingLinkErrorShowsCauseAndRetry(t *testing.T) {
 		rv.Render(c)
 	}, 900, 600)
 	tt.Frame()
-	for _, text := range []string{"原始图片与文件", "关联失败：root is read-only: permission denied", "重新关联"} {
+	for _, text := range []string{"孔位 × 时间点", "关联失败：root is read-only: permission denied", "重新关联"} {
 		if !tt.HasText(text) {
 			t.Fatalf("link-error surface missing %q: %q", text, tt.Texts())
 		}
@@ -290,5 +290,86 @@ func TestRecordingLinkErrorShowsCauseAndRetry(t *testing.T) {
 	}
 	if linked != 1 {
 		t.Fatalf("重新关联 did not invoke OnLinkFile: linked=%d", linked)
+	}
+}
+
+func TestAssetMatrixGroupsCoordinatesAndCountsFOVGapsOnce(t *testing.T) {
+	cells := assetMatrix([]LinkedAsset{
+		{AssetID: "fov3-a", WellID: "A1", Timepoint: "t6h", FOVIndex: 3},
+		{AssetID: "fov1", WellID: "A1", Timepoint: "t6h", FOVIndex: 1},
+		{AssetID: "fov3-b", WellID: "A1", Timepoint: "t6h", FOVIndex: 3},
+		{AssetID: "other", WellID: "B1", Timepoint: "t6h", FOVIndex: 1},
+	})
+	if len(cells) != 2 || cells[0].WellID != "A1" || cells[0].Timepoint != "t6h" ||
+		cells[1].WellID != "B1" || cells[1].Timepoint != "t6h" {
+		t.Fatalf("matrix keys = %+v", cells)
+	}
+	if len(cells[0].Assets) != 3 || cells[0].Assets[0].FOVIndex != 1 || cells[0].Assets[1].FOVIndex != 3 {
+		t.Fatalf("assets not ordered: %+v", cells[0].Assets)
+	}
+	if len(cells[0].FOVIndices) != 2 || cells[0].FOVIndices[0] != 1 || cells[0].FOVIndices[1] != 3 {
+		t.Fatalf("FOV indices not unique and ordered: %+v", cells[0].FOVIndices)
+	}
+	if len(cells[0].Gaps) != 1 || cells[0].Gaps[0] != 2 {
+		t.Fatalf("FOV gap counted incorrectly: %+v", cells[0].Gaps)
+	}
+}
+
+func TestAssetMatrixKeepsMissingCoordinatesUnlabelledWithoutPathInference(t *testing.T) {
+	cells := assetMatrix([]LinkedAsset{{
+		AssetID: "unlabelled", RelativePath: "A1_24h_F03.tif",
+	}})
+	if len(cells) != 1 || cells[0].WellID != "未标注" || len(cells[0].Assets) != 1 ||
+		cells[0].Assets[0].WellID != "" || cells[0].Assets[0].Timepoint != "" ||
+		cells[0].Assets[0].FOVIndex != 0 {
+		t.Fatalf("filename-derived or dropped asset: %+v", cells)
+	}
+}
+func TestRecordingAssetPreviewShowsCoordinatesAndTimelineLink(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	task := vm.TaskByKey["t-read"]
+	timeline := false
+	rv := &RecordingView{
+		Kind: ViewGallery, Task: task,
+		Assets: []LinkedAsset{{
+			AssetID: "a1", RelativePath: "images/A1_24h_F02.tif",
+			WellID: "A1", Timepoint: "t6h", FOVIndex: 2,
+		}},
+		OnTimeline: func() { timeline = true },
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+	for _, text := range []string{"孔位：A1 · 时间点：t6h · 视野：2", "返回 Run 时间线"} {
+		if !tt.HasText(text) {
+			t.Fatalf("asset preview missing %q: %q", text, tt.Texts())
+		}
+	}
+	if err := tt.Click("返回 Run 时间线"); err != nil {
+		t.Fatal(err)
+	}
+	if !timeline {
+		t.Fatal("timeline link did not invoke callback")
+	}
+}
+
+func TestRecordingMatrixRendersEmptyPairsAsGaps(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	rv := &RecordingView{
+		Kind: ViewGallery, Task: vm.TaskByKey["t-read"],
+		Assets: []LinkedAsset{
+			{AssetID: "a", WellID: "A1", Timepoint: "t6h", FOVIndex: 1},
+			{AssetID: "b", WellID: "B1", Timepoint: "t12h", FOVIndex: 1},
+		},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+	if !tt.HasText("1 个缺口 · 未关联视野") {
+		t.Fatalf("empty matrix pair not explicit: %q", tt.Texts())
 	}
 }

@@ -2,6 +2,7 @@ package runworkspace
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -35,6 +36,9 @@ type LinkedAsset struct {
 	ModTime      string
 	SHA256       string
 	Available    bool
+	WellID       string
+	Timepoint    string
+	FOVIndex     uint32
 	LinkedTo     AssetLink
 }
 
@@ -76,14 +80,15 @@ func SelectKind(task *RunTaskViewModel, grid *resultgrid.Grid, assets []LinkedAs
 // RecordingView renders the unified recording module: the same data backed by
 // plate, table, gallery, or form. The host supplies the write callbacks.
 type RecordingView struct {
-	RunID       string
-	Kind        ViewKind
-	Grid        *resultgrid.Grid
-	Assets      []LinkedAsset
-	Task        *RunTaskViewModel
-	OnOpenAsset func(asset LinkedAsset)
-	OnRelocate  func(asset LinkedAsset)
-	OnLinkFile  func(asset LinkedAsset)
+	RunID           string
+	Kind            ViewKind
+	Grid            *resultgrid.Grid
+	Assets          []LinkedAsset
+	Task            *RunTaskViewModel
+	OnOpenAsset     func(asset LinkedAsset)
+	OnRelocate      func(asset LinkedAsset)
+	OnLinkFile      func(asset LinkedAsset)
+	OnTimeline     func()
 	// LinkErr holds the Core rejection cause for the last link attempt on this
 	// task so the recording surface can show cause + retry (UX-P5).
 	LinkErr      string
@@ -364,24 +369,82 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 	}
 }
 
-// renderGallery draws a file/image gallery plus the measured indicators.
+// assetMatrix groups linked assets strictly by Core coordinates. Missing any
+// coordinate stays in the explicit unlabelled bucket; paths are never parsed.
+type assetMatrixCell struct {
+	WellID     string
+	Timepoint  string
+	Assets     []LinkedAsset
+	FOVIndices []uint32
+	Gaps       []uint32
+}
+
+func assetMatrix(assets []LinkedAsset) []assetMatrixCell {
+	type key struct{ well, timepoint string }
+	groups := map[key][]LinkedAsset{}
+	for _, asset := range assets {
+		k := key{asset.WellID, asset.Timepoint}
+		if k.well == "" || k.timepoint == "" || asset.FOVIndex == 0 {
+			k = key{"未标注", ""}
+		}
+		groups[k] = append(groups[k], asset)
+	}
+	keys := make([]key, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].well != keys[j].well {
+			return keys[i].well < keys[j].well
+		}
+		return keys[i].timepoint < keys[j].timepoint
+	})
+	cells := make([]assetMatrixCell, 0, len(keys))
+	for _, k := range keys {
+		cell := assetMatrixCell{WellID: k.well, Timepoint: k.timepoint, Assets: groups[k]}
+		if k.well != "未标注" {
+			seen, max := map[uint32]bool{}, uint32(0)
+			for _, asset := range cell.Assets {
+				if !seen[asset.FOVIndex] {
+					cell.FOVIndices = append(cell.FOVIndices, asset.FOVIndex)
+					seen[asset.FOVIndex] = true
+				}
+				if asset.FOVIndex > max {
+					max = asset.FOVIndex
+				}
+			}
+			sort.Slice(cell.FOVIndices, func(i, j int) bool {
+				return cell.FOVIndices[i] < cell.FOVIndices[j]
+			})
+			for i := uint32(1); i < max; i++ {
+				if !seen[i] {
+					cell.Gaps = append(cell.Gaps, i)
+				}
+			}
+		}
+		sort.Slice(cell.Assets, func(i, j int) bool {
+			return cell.Assets[i].FOVIndex < cell.Assets[j].FOVIndex
+		})
+		cells = append(cells, cell)
+	}
+	return cells
+}
+
+// renderGallery draws the coordinate matrix, one asset preview, and file actions.
+// The preview uses Core coordinates only, never path-derived data.
 func (r *RecordingView) renderGallery(c *ui.Context) {
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
+	cells := assetMatrix(r.Assets)
 	ui.Column(c).Key("recording-gallery").Gap(t.Space(2)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Text(c, "原始图片与文件").FontSize(12).Bold().TextColor(t.TextMuted)
-			if len(r.Assets) > 0 {
-				ui.Text(c, fmt.Sprintf("%d 个文件 · 本地引用", len(r.Assets))).
-					FontSize(11).TextColor(t.TextMuted)
-			}
+			ui.Text(c, "孔位 × 时间点").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, fmt.Sprintf("%d 个文件 · 本地引用", len(r.Assets))).
+				FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
 			if r.OnLinkFile != nil && components.Button(c, "关联本地文件", components.ButtonSecondary).Clicked() {
 				r.OnLinkFile(LinkedAsset{LinkedTo: AssetLink{TaskKey: r.Task.TaskKey}})
 			}
 		})
-		if len(r.Assets) == 0 {
-			ui.Text(c, "尚未关联本地文件。").FontSize(12).TextColor(t.TextMuted)
-		}
 		if r.LinkErr != "" {
 			ui.Row(c).Padding(6, 10).Radius(6).
 				Background(tokens.DangerBg).Border(1, tokens.DangerText).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
@@ -390,6 +453,84 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 				retry := components.Button(c, "重新关联", components.ButtonPrimary)
 				if retry.Clicked() && r.OnLinkFile != nil {
 					r.OnLinkFile(LinkedAsset{LinkedTo: AssetLink{TaskKey: r.Task.TaskKey}})
+				}
+			})
+		}
+		if len(r.Assets) == 0 {
+			ui.Text(c, "尚未关联本地文件。").FontSize(12).TextColor(t.TextMuted)
+		}
+		if len(cells) > 0 {
+			byKey, wells, times := map[[2]string]assetMatrixCell{}, []string{}, []string{}
+			wellSet, timeSet := map[string]bool{}, map[string]bool{}
+			var unlabelled *assetMatrixCell
+			for i := range cells {
+				cell := cells[i]
+				if cell.WellID == "未标注" {
+					unlabelled = &cell
+					continue
+				}
+				byKey[[2]string{cell.WellID, cell.Timepoint}] = cell
+				if !wellSet[cell.WellID] {
+					wellSet[cell.WellID] = true
+					wells = append(wells, cell.WellID)
+				}
+				if !timeSet[cell.Timepoint] {
+					timeSet[cell.Timepoint] = true
+					times = append(times, cell.Timepoint)
+				}
+			}
+			sort.Strings(wells)
+			sort.Strings(times)
+			ui.Scroll(c).FillWidth().Children(func() {
+				ui.Column(c).MinWidth(float32(180 + 184*len(times))).Gap(t.Space(.5)).Children(func() {
+					ui.Row(c).Gap(t.Space(.5)).Children(func() {
+						matrixCellBox(c, "孔位", tokens, t, 180, func() {})
+						for _, timepoint := range times {
+							matrixCellBox(c, timepoint, tokens, t, 180, func() {})
+						}
+					})
+					for _, well := range wells {
+						well := well
+						ui.Row(c).Gap(t.Space(.5)).Children(func() {
+							matrixCellBox(c, well, tokens, t, 180, func() {})
+							for _, timepoint := range times {
+								cell, exists := byKey[[2]string{well, timepoint}]
+								matrixCellBox(c, "", tokens, t, 180, func() {
+									if !exists {
+										ui.Text(c, "1 个缺口 · 未关联视野").
+											FontSize(t.Rem(.7)).TextColor(tokens.WarningText)
+										return
+									}
+									if len(cell.Gaps) > 0 {
+										ui.Text(c, fmt.Sprintf("%d 个缺口 · FOV %v", len(cell.Gaps), cell.Gaps)).
+											FontSize(t.Rem(.7)).TextColor(tokens.WarningText)
+									}
+									ui.Text(c, fmt.Sprintf("FOV %v", cell.FOVIndices)).
+										FontSize(t.Rem(.7)).TextColor(t.Text)
+								})
+							}
+						})
+					}
+					if unlabelled != nil {
+						matrixCellBox(c, "未标注", tokens, t, 180, func() {
+							ui.Text(c, fmt.Sprintf("%d 个未标注文件", len(unlabelled.Assets))).
+								FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+						})
+					}
+				})
+			})
+		}
+		if len(r.Assets) > 0 {
+			selected := r.Assets[0]
+			ui.Column(c).FillWidth().Padding(t.Space(1.5), t.Space(2)).
+				Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(.75)).Children(func() {
+				ui.Text(c, "资产预览").FontSize(t.Rem(.78)).Bold().TextColor(t.Text)
+				ui.Text(c, selected.RelativePath).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+				ui.Text(c, fmt.Sprintf("孔位：%s · 时间点：%s · 视野：%s",
+					labelOr(selected.WellID, "未标注"), labelOr(selected.Timepoint, "未标注"),
+					fovLabel(selected.FOVIndex))).FontSize(t.Rem(.72)).TextColor(t.Text)
+				if r.OnTimeline != nil && components.Button(c, "返回 Run 时间线", components.ButtonGhost).Clicked() {
+					r.OnTimeline()
 				}
 			})
 		}
@@ -402,6 +543,23 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 			r.renderTable(c)
 		}
 	})
+}
+
+func matrixCellBox(c *ui.Context, title string, tokens theme.Tokens, t *ui.Theme, width float32, body func()) {
+	ui.Column(c).Width(width).Padding(t.Space(1), t.Space(1.5)).
+		Background(tokens.Elevated).Border(1, tokens.Border).Gap(t.Space(.5)).Children(func() {
+		if title != "" {
+			ui.Text(c, title).FontSize(t.Rem(.72)).Bold().TextColor(t.Text)
+		}
+		body()
+	})
+}
+
+func fovLabel(index uint32) string {
+	if index == 0 {
+		return "未标注"
+	}
+	return strconv.FormatUint(uint64(index), 10)
 }
 
 func assetRow(c *ui.Context, a LinkedAsset, open, relocate func(LinkedAsset), t *ui.Theme, tokens theme.Tokens) {
