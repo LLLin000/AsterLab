@@ -2,9 +2,23 @@
 //!
 //! Steps are definitions, tasks are plans, and occurrences are actual execution
 //! instances. This module never reads the current Design.
+//!
+//! Two entry points project the same facts: [`build`] keeps the unblinded view
+//! every existing caller already gets, and [`build_for_view`] accepts a
+//! [`ProjectionView`]. A blind view removes frozen group identity — id, name,
+//! role, condition, group counts, well group labels and the legacy `mygo`
+//! mirror that repeats them — but only when the frozen Design records a
+//! `blinding` basis; the view alone never blanks a design that declared none.
+//!
+//! [`PlannedTask::schedule`] is the plan side of the timeline: it shifts the
+//! Run's `scheduled_date` by the frozen assay `time_anchor_event` and
+//! `timepoint_timing`. It is not a [`StepOccurrence`]; occurrences are read back
+//! from events that carry an `occurrence_id`, never synthesized from a plan.
 
 use crate::design_map::FrozenDesignView;
+use crate::pantry::CalendarDate;
 use crate::protocol_preview::{OperationStep, ResolvedParameter, StepTimeScope, UnresolvedParameter};
+use crate::record_projection::ProjectionView;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -61,10 +75,36 @@ pub struct PlannedTask {
     pub target: TargetSelection,
     #[serde(default = "default_task_status")]
     pub status: String,
+    /// Planned execution window; absent when the Run date or the frozen timing
+    /// cannot place this task on a calendar.
+    #[serde(default)]
+    pub schedule: Option<TaskSchedule>,
 }
 
 fn default_task_status() -> String {
     "not_started".to_owned()
+}
+
+/// Planned execution window of one [`PlannedTask`].
+///
+/// The stored plan carries a calendar date, not a clock time, so `window_start`
+/// and `window_end` are RFC3339 UTC instants anchored at `00:00` of
+/// `anchor_date`. They describe when the task is planned, not when it happened;
+/// actual times live in [`ExecutionEventView`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskSchedule {
+    pub timepoint: String,
+    /// Frozen `time_anchor_event` the offset is measured from.
+    pub anchor_event: String,
+    /// Run `scheduled_date`, read as the anchor's day.
+    pub anchor_date: String,
+    pub offset_value: f64,
+    /// `min`, `h` or `day`, as stored.
+    pub unit: String,
+    pub window_before: Option<f64>,
+    pub window_after: Option<f64>,
+    pub window_start: String,
+    pub window_end: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -429,10 +469,297 @@ fn explicit_step_timepoints(design_snapshot: &Value) -> std::collections::HashMa
     out
 }
 
+const SECONDS_PER_HOUR: f64 = 3_600.0;
+const SECONDS_PER_DAY: f64 = 86_400.0;
+
+fn time_unit_seconds(unit: &str) -> Option<f64> {
+    match unit {
+        "min" => Some(60.0),
+        "h" => Some(SECONDS_PER_HOUR),
+        "day" => Some(SECONDS_PER_DAY),
+        _ => None,
+    }
+}
+
+fn finite_number(value: &Value) -> Option<f64> {
+    value.as_f64().filter(|value| value.is_finite())
+}
+
+/// Planned execution window of one task.
+///
+/// The window is the Run's `scheduled_date` shifted by the frozen timepoint
+/// offset and widened by its allowed window. The stored plan carries a calendar
+/// date, not a clock time, so both bounds anchor at `00:00` of that date rather
+/// than inventing a time of day. Anything the plan does not state — no date, a
+/// timepoint without timing, no `time_anchor_event`, an offset-less window —
+/// leaves the task unscheduled instead of producing a guessed window.
+fn task_schedule(
+    design: &crate::design_map::DesignMapContent,
+    scheduled_date: Option<CalendarDate>,
+    scope: &StepScope,
+    timepoint: &str,
+) -> Option<TaskSchedule> {
+    let base = scheduled_date?;
+    let StepScope::Assay { assay_id } = scope else {
+        return None;
+    };
+    let assay = design.assays.iter().find(|assay| assay.id == *assay_id)?;
+    let anchor_event = assay
+        .time_anchor_event
+        .clone()
+        .filter(|anchor| !anchor.trim().is_empty())?;
+    let timing = assay
+        .timepoint_timing
+        .as_array()?
+        .iter()
+        .find(|timing| timing["timepoint"].as_str() == Some(timepoint))?;
+    let offset_value = finite_number(&timing["offset_value"])?;
+    let unit = timing["unit"].as_str()?;
+    let scale = time_unit_seconds(unit)?;
+    let window_before = match timing.get("window_before") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(finite_number(value).filter(|value| *value >= 0.0)?),
+    };
+    let window_after = match timing.get("window_after") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(finite_number(value).filter(|value| *value >= 0.0)?),
+    };
+    let offset_s = offset_value * scale;
+    let before_s = window_before.unwrap_or(0.0) * scale;
+    let after_s = window_after.unwrap_or(0.0) * scale;
+    Some(TaskSchedule {
+        timepoint: timepoint.to_owned(),
+        anchor_event,
+        anchor_date: base.to_iso(),
+        offset_value,
+        unit: unit.to_owned(),
+        window_before,
+        window_after,
+        window_start: instant(base, offset_s - before_s)?,
+        window_end: instant(base, offset_s + after_s)?,
+    })
+}
+
+/// `base` at `00:00:00Z` plus a signed second offset, rounded to whole seconds.
+fn instant(base: CalendarDate, offset_s: f64) -> Option<String> {
+    if !offset_s.is_finite() {
+        return None;
+    }
+    let seconds = offset_s.round();
+    if seconds.abs() >= 1e15 {
+        return None;
+    }
+    let seconds = seconds as i64;
+    let date = base.checked_add_days(seconds.div_euclid(SECONDS_PER_DAY as i64))?;
+    let of_day = seconds.rem_euclid(SECONDS_PER_DAY as i64);
+    Some(format!(
+        "{}T{:02}:{:02}:{:02}Z",
+        date.to_iso(),
+        of_day / 3_600,
+        (of_day % 3_600) / 60,
+        of_day % 60
+    ))
+}
+
+/// Reads actual execution instances back from stored events.
+///
+/// Only events that recorded an `occurrence_id` produce a [`StepOccurrence`];
+/// legacy events stay history. An event that names an occurrence but no
+/// Protocol version cannot be placed in the frozen Run, so it is not promoted
+/// either. The first event of an instance fixes its context; later events of
+/// the same instance add facts, not a second instance.
+fn occurrences_from_events(run_id: &str, events: &[ExecutionEventView]) -> Vec<StepOccurrence> {
+    let mut seen = std::collections::HashSet::new();
+    let mut occurrences = Vec::new();
+    for event in events {
+        let Some(occurrence_id) = event.occurrence_id.as_deref() else {
+            continue;
+        };
+        let Some(protocol_version_id) = event.protocol_version_id.clone() else {
+            continue;
+        };
+        if !seen.insert(occurrence_id.to_owned()) {
+            continue;
+        }
+        let scope = if let Some(assay_id) = event.assay_id.clone() {
+            StepScope::Assay { assay_id }
+        } else if let Some(planned_output_id) = event.planned_output_id.clone() {
+            StepScope::PlannedOutput { planned_output_id }
+        } else {
+            StepScope::Unscoped
+        };
+        let target = if event.sample_ids.is_empty() {
+            TargetSelection::Unresolved
+        } else {
+            TargetSelection::Many {
+                targets: event
+                    .sample_ids
+                    .iter()
+                    .map(|sample_id| TargetRef::Sample {
+                        sample_id: sample_id.clone(),
+                    })
+                    .collect(),
+            }
+        };
+        occurrences.push(StepOccurrence {
+            occurrence_id: occurrence_id.to_owned(),
+            context: StepOccurrenceContext {
+                run_id: run_id.to_owned(),
+                protocol_version_id,
+                scope,
+                step_path: event.protocol_step_path.clone().unwrap_or_default(),
+                timepoint: event.timepoint.clone(),
+                target,
+            },
+        });
+    }
+    occurrences
+}
+
+/// A blind view only masks a design that recorded a blinding basis; asking for
+/// blindness on an unblinded design must not blank its group identity.
+fn design_declares_blinding(design_snapshot: &Value) -> bool {
+    opt_text(&design_snapshot["blinding"]).is_some()
+}
+
+/// Replacement for an identity string removed from free text. It is a marker
+/// that text was masked, not a stand-in group label.
+const BLIND_PLACEHOLDER: &str = "***";
+
+/// Frozen group identity as it would appear in free text.
+///
+/// Typed fields are cleared outright; text written by researchers or generated
+/// validation prompts can still repeat the same strings, so the blind view also
+/// scrubs them. Tokens shorter than two characters are skipped: a single-letter
+/// name would otherwise rewrite unrelated prose.
+fn identity_tokens(frozen: &FrozenDesignView) -> Vec<String> {
+    fn push(tokens: &mut Vec<String>, seen: &mut std::collections::HashSet<String>, value: &str) {
+        let value = value.trim();
+        if value.chars().count() >= 2 && seen.insert(value.to_owned()) {
+            tokens.push(value.to_owned());
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut tokens = Vec::new();
+    for group in &frozen.content.groups {
+        push(&mut tokens, &mut seen, &group.id);
+        push(&mut tokens, &mut seen, &group.name);
+        push(&mut tokens, &mut seen, group.role.as_deref().unwrap_or(""));
+        push(&mut tokens, &mut seen, group.condition.as_deref().unwrap_or(""));
+    }
+    for link in &frozen.content.sample_links {
+        push(&mut tokens, &mut seen, link.group_id.as_deref().unwrap_or(""));
+        push(&mut tokens, &mut seen, &link.group_name);
+    }
+    // Longest first, so a name that contains another token is replaced whole.
+    tokens.sort_by_key(|token| std::cmp::Reverse(token.chars().count()));
+    tokens
+}
+
+fn scrub_identity(text: &mut String, tokens: &[String]) {
+    for token in tokens {
+        if text.contains(token.as_str()) {
+            *text = text.replace(token.as_str(), BLIND_PLACEHOLDER);
+        }
+    }
+}
+
+fn scrub_json_identity(value: &mut Value, tokens: &[String]) {
+    match value {
+        Value::String(text) => scrub_identity(text, tokens),
+        Value::Array(items) => {
+            for item in items {
+                scrub_json_identity(item, tokens);
+            }
+        }
+        Value::Object(entries) => {
+            for entry in entries.values_mut() {
+                scrub_json_identity(entry, tokens);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Scrubs the identity tokens from every free-text surface a blind workspace
+/// still returns, including design validation prompts generated from group
+/// names and the legacy `asterlab` mirror.
+fn scrub_free_text(frozen: &mut FrozenDesignView, plates: &mut [RunPlateView], tokens: &[String]) {
+    let content = &mut frozen.content;
+    scrub_identity(&mut content.title, tokens);
+    scrub_identity(&mut content.objective, tokens);
+    if let Some(question) = content.research_question.as_mut() {
+        scrub_identity(question, tokens);
+    }
+    for assay in &mut content.assays {
+        scrub_identity(&mut assay.title, tokens);
+        for control in &mut assay.controls {
+            scrub_identity(control, tokens);
+        }
+    }
+    for output in &mut content.planned_outputs {
+        scrub_identity(&mut output.title, tokens);
+    }
+    for conflict in &mut content.conflicts {
+        scrub_identity(&mut conflict.topic, tokens);
+    }
+    for issue in &mut content.unresolved {
+        scrub_identity(&mut issue.question, tokens);
+    }
+    if let Some(mirror) = frozen.asterlab.as_mut() {
+        scrub_json_identity(mirror, tokens);
+    }
+    for plate in plates {
+        scrub_identity(&mut plate.name, tokens);
+        for well in &mut plate.wells {
+            if let Some(note) = well.note.as_mut() {
+                scrub_identity(note, tokens);
+            }
+        }
+    }
+}
+
+/// Removes frozen group identity from a workspace built for the blind view.
+///
+/// Typed identity is removed, never replaced: names and ids become empty, the
+/// group counts are dropped (matching [`ProjectionView::Blind`] in the Record
+/// projection) and the legacy `mygo` mirror is dropped whole because it repeats
+/// assay control and calibrator group names. Strings that repeat the group id,
+/// name, role or condition in free text — researcher prose, validation prompts
+/// generated from group names, the `asterlab` mirror and plate notes — are
+/// scrubbed afterwards so they cannot carry the assignment back.
+fn mask_group_identity(frozen: &mut FrozenDesignView, plates: &mut [RunPlateView]) {
+    let tokens = identity_tokens(frozen);
+    frozen.mygo = None;
+    for group in &mut frozen.content.groups {
+        group.id.clear();
+        group.name.clear();
+        group.role = None;
+        group.condition = None;
+        group.independent_n = None;
+        group.technical_repeats = None;
+    }
+    for assay in &mut frozen.content.assays {
+        assay.group_ids.clear();
+        assay.group_names.clear();
+    }
+    for link in &mut frozen.content.sample_links {
+        link.group_id = None;
+        link.group_name.clear();
+    }
+    for plate in plates.iter_mut() {
+        for well in &mut plate.wells {
+            well.group_label = None;
+        }
+    }
+    scrub_free_text(frozen, plates, &tokens);
+}
+
 /// Build a frozen Run workspace from stored JSON.
 ///
 /// `design_snapshot` must be the payload of the Run's exact DesignVersion,
-/// never the current Design record.
+/// never the current Design record. This is the unblinded entry point every
+/// existing caller uses; see [`build_for_view`] for the blind view.
 pub fn build(
     run_id: &str,
     design_id: &str,
@@ -444,6 +771,41 @@ pub fn build(
     event_data: &[Value],
     link_data: &[Value],
 ) -> Result<RunWorkspace, RunWorkspaceError> {
+    build_for_view(
+        run_id,
+        design_id,
+        design_version_id,
+        design_revision,
+        design_snapshot,
+        run_data,
+        plate_data,
+        event_data,
+        link_data,
+        ProjectionView::Unblinded,
+    )
+}
+
+/// Build a frozen Run workspace for an explicit [`ProjectionView`].
+///
+/// Arguments and validation are identical to [`build`]; only the exposed group
+/// identity differs. Blind masking requires the frozen Design to declare a
+/// `blinding` basis, so a blind request never blanks a design that declared
+/// none.
+pub fn build_for_view(
+    run_id: &str,
+    design_id: &str,
+    design_version_id: &str,
+    design_revision: i64,
+    design_snapshot: &Value,
+    run_data: &Value,
+    plate_data: &[Value],
+    event_data: &[Value],
+    link_data: &[Value],
+    view: ProjectionView,
+) -> Result<RunWorkspace, RunWorkspaceError> {
+    let blind = view.is_blind() && design_declares_blinding(design_snapshot);
+    let scheduled_date = opt_text(&run_data["scheduled_date"])
+        .and_then(|raw| CalendarDate::parse(&raw));
     let frozen = FrozenDesignView::from_version(
         design_id,
         design_version_id,
@@ -514,6 +876,7 @@ pub fn build(
                 timepoint: None,
                 target: TargetSelection::Unresolved,
                 status: default_task_status(),
+                schedule: None,
             });
         } else {
             for timepoint in timepoints {
@@ -528,6 +891,8 @@ pub fn build(
                 if !task_keys.insert(key.clone()) {
                     return Err(RunWorkspaceError(format!("duplicate task key {key}")));
                 }
+                let schedule =
+                    task_schedule(&frozen.content, scheduled_date, &step.scope, &timepoint);
                 tasks.push(PlannedTask {
                     task_key: key,
                     step_path: step.step.path.clone(),
@@ -535,6 +900,7 @@ pub fn build(
                     timepoint: Some(timepoint),
                     target: TargetSelection::Unresolved,
                     status: default_task_status(),
+                    schedule,
                 });
             }
         }
@@ -592,7 +958,7 @@ pub fn build(
         })
         .collect();
 
-    let events = event_data
+    let events: Vec<ExecutionEventView> = event_data
         .iter()
         .map(|event| ExecutionEventView {
             event_id: text(&event["id"]),
@@ -638,7 +1004,7 @@ pub fn build(
         .collect();
 
     // Old events do not have occurrence_id. Do not synthesize an instance.
-    let occurrences = Vec::new();
+    let occurrences = occurrences_from_events(run_id, &events);
     let linked_assets = linked_asset_views(link_data);
     let asset_coverage = asset_coverage(&linked_assets);
 
@@ -677,6 +1043,9 @@ pub fn build(
         task.status = latest
             .and_then(|event| event.step_status.clone())
             .unwrap_or_else(|| "not_started".to_owned());
+    }
+    if blind {
+        mask_group_identity(&mut workspace.frozen_design, &mut workspace.plates);
     }
     Ok(workspace)
 }
@@ -932,6 +1301,286 @@ mod tests {
         assert_eq!(zero.coordinate_id.as_deref(), Some("C1"));
         assert_eq!(workspace.asset_coverage.len(), 1);
         assert!(workspace.asset_coverage[0].fov_indices.is_empty());
+    }
+
+    fn timed_design() -> Value {
+        json!({
+            "title":"d","objective":"o","experimental_unit":"well",
+            "blinding":"研究者与操作者均盲，按笼号编号给药",
+            "group_specs":[{"id":"g1","name":"Control","role":"control",
+                "condition":"vehicle","independent_n":3,"technical_repeats":2}],
+            "assays":[{"id":"cck8","title":"CCK-8","endpoint":"OD450","method":"absorbance",
+                "unit":"AU","timepoints":["D0","D3","D6"],
+                "time_anchor_event":"treatment_start",
+                "timepoint_timing":[
+                    {"timepoint":"D0","offset_value":0.0,"unit":"day"},
+                    {"timepoint":"D3","offset_value":3.0,"unit":"day",
+                     "window_before":0.5,"window_after":0.5},
+                    {"timepoint":"D6","offset_value":144.0,"unit":"h"}
+                ],
+                "group_ids":["g1"],"group_names":["Control"],
+                "timepoint_relation":"same_physical_sample_repeated"}],
+            "sample_allocations":[{"assay_id":"cck8","group_id":"g1","group_name":"Control",
+                "physical_slots_per_group":3}],
+            "planned_outputs":[],"evidence_conflicts":[],
+            "mygo":{"stepTasks":[]}
+        })
+    }
+
+    fn timed_run() -> Value {
+        json!({
+            "status":"planned",
+            "scheduled_date":"2026-11-20",
+            "protocol_manifest":[{
+                "assay_id":"cck8","assay_title":"CCK-8","protocol_version_id":"pv1",
+                "steps":[{
+                    "path":"root/dose","use_id":"dose","title":"Dose","instruction":"dose",
+                    "parameters":[],"unresolved_parameter_refs":[],
+                    "source_block_version_id":"b1","time_scope":"per_timepoint"
+                }]
+            }],
+            "material_manifest":[]
+        })
+    }
+
+    fn labeled_plates() -> Vec<Value> {
+        vec![json!({
+            "id":"p1","name":"Plate","format":"96","rows":8,"columns":12,
+            "assay_id":"cck8","wells":[
+                {"well_id":"A1","group_label":"Control","sample_id":"s1"}
+            ]
+        })]
+    }
+
+    #[test]
+    fn blind_view_masks_frozen_group_identity_and_well_labels() {
+        let workspace = build_for_view(
+            "r1", "d1", "dv1", 1, &timed_design(), &timed_run(),
+            &labeled_plates(), &[], &[], ProjectionView::Blind,
+        )
+        .unwrap();
+        let group = &workspace.frozen_design.content.groups[0];
+        assert_eq!(group.id, "");
+        assert_eq!(group.name, "");
+        assert_eq!(group.role, None);
+        assert_eq!(group.condition, None);
+        assert_eq!(group.independent_n, None);
+        assert_eq!(group.technical_repeats, None);
+        let assay = &workspace.frozen_design.content.assays[0];
+        assert!(assay.group_ids.is_empty());
+        assert!(assay.group_names.is_empty());
+        let link = &workspace.frozen_design.content.sample_links[0];
+        assert_eq!(link.group_id, None);
+        assert_eq!(link.group_name, "");
+        // The legacy mygo mirror embeds control/calibrator group names; a blind
+        // view drops the mirror instead of guessing which of its keys leak.
+        assert_eq!(workspace.frozen_design.mygo, None);
+        assert_eq!(workspace.plates[0].wells[0].group_label, None);
+        assert_eq!(workspace.plates[0].wells[0].sample_id.as_deref(), Some("s1"));
+        // Blinding removes identity, not the schedule or the timepoints.
+        assert_eq!(assay.timepoints, vec!["D0", "D3", "D6"]);
+        assert_eq!(workspace.tasks.len(), 3);
+    }
+
+    #[test]
+    fn explicit_unblinded_view_keeps_group_plaintext_for_a_blind_design() {
+        let workspace = build_for_view(
+            "r1", "d1", "dv1", 1, &timed_design(), &timed_run(),
+            &labeled_plates(), &[], &[], ProjectionView::Unblinded,
+        )
+        .unwrap();
+        let group = &workspace.frozen_design.content.groups[0];
+        assert_eq!(group.id, "g1");
+        assert_eq!(group.name, "Control");
+        assert_eq!(group.role.as_deref(), Some("control"));
+        assert_eq!(group.condition.as_deref(), Some("vehicle"));
+        assert_eq!(workspace.plates[0].wells[0].group_label.as_deref(), Some("Control"));
+        assert!(workspace.frozen_design.mygo.is_some());
+        // The default entry point stays unblinded so existing callers are
+        // unchanged.
+        let default = build(
+            "r1", "d1", "dv1", 1, &timed_design(), &timed_run(),
+            &labeled_plates(), &[], &[],
+        )
+        .unwrap();
+        assert_eq!(default.frozen_design.content.groups[0].name, "Control");
+    }
+
+    #[test]
+    fn blind_view_without_a_declared_blinding_basis_changes_nothing() {
+        for declaration in [json!(""), json!(null)] {
+            let mut design = timed_design();
+            design["blinding"] = declaration;
+            let workspace = build_for_view(
+                "r1", "d1", "dv1", 1, &design, &timed_run(),
+                &labeled_plates(), &[], &[], ProjectionView::Blind,
+            )
+            .unwrap();
+            assert_eq!(workspace.frozen_design.content.groups[0].name, "Control");
+            assert_eq!(
+                workspace.plates[0].wells[0].group_label.as_deref(),
+                Some("Control")
+            );
+        }
+    }
+
+    #[test]
+    fn blind_view_scrubs_group_identity_from_free_text_and_generated_prompts() {
+        // A group without `independent_n` makes design_map generate an
+        // unresolved prompt that embeds the group name; free text and the
+        // legacy `asterlab` mirror can name the group just as well.
+        let mut design = timed_design();
+        design["group_specs"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("independent_n");
+        design["objective"] = json!("vehicle 对照下 Control 组的 OD450");
+        design["assays"][0]["controls"] = json!(["Control 空白"]);
+        design["evidence_conflicts"] = json!([{
+            "id":"c1","topic":"Control 组缺少独立重复",
+            "affected_assay_ids":["cck8"],"affects_container_estimate":false
+        }]);
+        design["asterlab"] = json!({
+            "foundationVersion":1,"sdkVersion":"1.0.0",
+            "modules":[{"kind":"dilution","parameters":[{"key":"group","value":"g1"}]}]
+        });
+        let workspace = build_for_view(
+            "r1", "d1", "dv1", 1, &design, &timed_run(),
+            &labeled_plates(), &[], &[], ProjectionView::Blind,
+        )
+        .unwrap();
+        // The prompt survives so the operator knows what is missing; only the
+        // group identity inside it is gone.
+        let prompts = &workspace.frozen_design.content.unresolved;
+        assert!(prompts
+            .iter()
+            .any(|issue| issue.question.contains("独立实验单位数")));
+        let serialized = serde_json::to_string(&workspace).unwrap();
+        for identity in ["Control", "g1", "vehicle"] {
+            assert!(
+                !serialized.contains(identity),
+                "blind workspace still exposes {identity}: {serialized}"
+            );
+        }
+        // The unblinded view keeps the same facts verbatim.
+        let plain = build_for_view(
+            "r1", "d1", "dv1", 1, &design, &timed_run(),
+            &labeled_plates(), &[], &[], ProjectionView::Unblinded,
+        )
+        .unwrap();
+        let plain = serde_json::to_string(&plain).unwrap();
+        assert!(plain.contains("Control"));
+        assert!(plain.contains("vehicle"));
+    }
+
+    #[test]
+    fn occurrences_are_projected_from_events_that_carry_an_occurrence_id() {
+        let events = vec![
+            json!({"id":"e1","event_type":"operation","timepoint":"D0",
+                "protocol_step_path":"root/dose","protocol_version_id":"pv1",
+                "assay_id":"cck8","occurrence_id":"occ-1","sample_ids":["s1","s2"],
+                "recorded_at":"2026-11-20T09:00:00Z"}),
+            json!({"id":"e2","event_type":"measurement","timepoint":"D0",
+                "protocol_step_path":"root/dose","protocol_version_id":"pv1",
+                "assay_id":"cck8","occurrence_id":"occ-1",
+                "recorded_at":"2026-11-20T10:00:00Z"}),
+            json!({"id":"e3","event_type":"operation","timepoint":"D3",
+                "protocol_step_path":"root/dose","protocol_version_id":"pv1",
+                "assay_id":"cck8"}),
+        ];
+        let workspace =
+            build("r1", "d1", "dv1", 1, &timed_design(), &timed_run(), &[], &events, &[]).unwrap();
+        assert_eq!(workspace.occurrences.len(), 1);
+        let occurrence = &workspace.occurrences[0];
+        assert_eq!(occurrence.occurrence_id, "occ-1");
+        assert_eq!(occurrence.context.run_id, "r1");
+        assert_eq!(occurrence.context.protocol_version_id, "pv1");
+        assert_eq!(
+            occurrence.context.scope,
+            StepScope::Assay { assay_id: "cck8".to_owned() }
+        );
+        assert_eq!(occurrence.context.step_path, "root/dose");
+        assert_eq!(occurrence.context.timepoint.as_deref(), Some("D0"));
+        assert_eq!(
+            occurrence.context.target,
+            TargetSelection::Many {
+                targets: vec![
+                    TargetRef::Sample { sample_id: "s1".to_owned() },
+                    TargetRef::Sample { sample_id: "s2".to_owned() },
+                ]
+            }
+        );
+        // A legacy event without the id is history, not a new instance.
+        assert_eq!(workspace.events[2].occurrence_id, None);
+    }
+
+    #[test]
+    fn occurrence_id_without_a_protocol_version_is_not_synthesized() {
+        let events = vec![json!({"id":"e1","event_type":"operation","timepoint":"D0",
+            "protocol_step_path":"root/dose","assay_id":"cck8","occurrence_id":"occ-1"})];
+        let workspace =
+            build("r1", "d1", "dv1", 1, &timed_design(), &timed_run(), &[], &events, &[]).unwrap();
+        assert!(workspace.occurrences.is_empty());
+    }
+
+    #[test]
+    fn periodic_timepoints_project_execution_windows_from_the_run_date() {
+        let workspace =
+            build("r1", "d1", "dv1", 1, &timed_design(), &timed_run(), &[], &[], &[]).unwrap();
+        assert_eq!(workspace.tasks.len(), 3);
+        let schedule = |label: &str| {
+            workspace
+                .tasks
+                .iter()
+                .find(|task| task.timepoint.as_deref() == Some(label))
+                .and_then(|task| task.schedule.as_ref())
+                .unwrap_or_else(|| panic!("no schedule for {label}"))
+        };
+        let d0 = schedule("D0");
+        assert_eq!(d0.timepoint, "D0");
+        assert_eq!(d0.anchor_event, "treatment_start");
+        assert_eq!(d0.anchor_date, "2026-11-20");
+        assert_eq!(d0.unit, "day");
+        assert_eq!(d0.window_before, None);
+        assert_eq!(d0.window_after, None);
+        assert_eq!(d0.window_start, "2026-11-20T00:00:00Z");
+        assert_eq!(d0.window_end, "2026-11-20T00:00:00Z");
+        let d3 = schedule("D3");
+        assert_eq!(d3.offset_value, 3.0);
+        assert_eq!(d3.window_before, Some(0.5));
+        assert_eq!(d3.window_after, Some(0.5));
+        assert_eq!(d3.window_start, "2026-11-22T12:00:00Z");
+        assert_eq!(d3.window_end, "2026-11-23T12:00:00Z");
+        let d6 = schedule("D6");
+        assert_eq!(d6.unit, "h");
+        assert_eq!(d6.offset_value, 144.0);
+        assert_eq!(d6.window_start, "2026-11-26T00:00:00Z");
+        assert_eq!(d6.window_end, "2026-11-26T00:00:00Z");
+    }
+
+    #[test]
+    fn a_task_without_a_run_date_timing_or_anchor_gets_no_window() {
+        let mut undated = timed_run();
+        undated.as_object_mut().unwrap().remove("scheduled_date");
+        let workspace =
+            build("r1", "d1", "dv1", 1, &timed_design(), &undated, &[], &[], &[]).unwrap();
+        assert_eq!(workspace.tasks.len(), 3);
+        assert!(workspace.tasks.iter().all(|task| task.schedule.is_none()));
+
+        let mut untimed = timed_design();
+        untimed["assays"][0]["timepoint_timing"] = json!([]);
+        let workspace =
+            build("r1", "d1", "dv1", 1, &untimed, &timed_run(), &[], &[], &[]).unwrap();
+        assert!(workspace.tasks.iter().all(|task| task.schedule.is_none()));
+
+        let mut unanchored = timed_design();
+        unanchored["assays"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("time_anchor_event");
+        let workspace =
+            build("r1", "d1", "dv1", 1, &unanchored, &timed_run(), &[], &[], &[]).unwrap();
+        assert!(workspace.tasks.iter().all(|task| task.schedule.is_none()));
     }
 
     #[test]
