@@ -70,6 +70,10 @@ type app struct {
 	taskGrids                  map[string]*resultgrid.Grid
 	taskDrafts                 map[string]runui.Draft
 	designDocErr               string
+	designLoadErr              string
+	designLoadID               string
+	designDocLoadFailed        bool
+	pendingRunID               string
 	projects                   []runs.ProjectSummary
 	protocols                  []runs.ProtocolSummary
 	readiness                  *runs.AsterDocAssessment
@@ -1148,23 +1152,50 @@ func (a *app) createAsterDocDesign(source, title string) {
 }
 
 func (a *app) selectRun(runID string) {
-	if a.runSvc == nil || runID == "" {
+	if runID == "" {
+		return
+	}
+	a.pendingRunID = runID
+	if a.runSvc == nil {
+		err := fmt.Errorf("Rust RunService 不可用")
+		a.applyRun(nil, err)
+		if a.shell != nil {
+			a.shell.Error = err.Error()
+		}
 		return
 	}
 	snap, err := a.runSvc.LoadRun(context.Background(), runID)
 	if err != nil {
-		a.err = state.MapError(err).Error()
+		mapped := state.MapError(err)
+		a.applyRun(nil, mapped)
 		if a.shell != nil {
-			a.shell.Error = a.err
+			a.shell.Error = mapped.Error()
 		}
 		return
 	}
 	a.applyRun(&snap, nil)
 	if a.shell != nil {
+		a.shell.Error = ""
 		a.shell.Page = shell.Run
 		a.shell.Selected = snap.DesignID
 		a.saveSession()
 	}
+}
+
+func (a *app) retryLoadRun() {
+	runID := a.pendingRunID
+	if runID == "" {
+		runID = os.Getenv("ASTERLAB_RUN_ID")
+	}
+	if runID == "" {
+		runID = a.snap.RunID
+	}
+	if runID == "" {
+		snap, err := a.fetchRun()
+		a.applyRun(snap, err)
+		return
+	}
+	a.selectRun(runID)
 }
 
 type workspaceSession struct {
@@ -1545,9 +1576,21 @@ func (a *app) prepareGrid() {
 }
 
 func (a *app) loadDesign(id string) {
+	if id != "" {
+		a.designLoadID = id
+	}
 	if a.designSvc == nil {
+		a.designLoadErr = "设计服务不可用"
+		a.err = a.designLoadErr
 		return
 	}
+	snap, err := a.designSvc.LoadDesign(context.Background(), id)
+	if err != nil {
+		a.designLoadErr = state.MapError(err).Error()
+		a.err = a.designLoadErr
+		return
+	}
+	a.designLoadErr = ""
 	a.designer = designer.New(id, "", 0, a.designSvc)
 	a.designer.OnCreateRun = func(snap runs.RunSnapshot) {
 		// The new run replaces the previous run's revision/task state.
@@ -1571,15 +1614,12 @@ func (a *app) loadDesign(id string) {
 		a.shell.Page = shell.Run
 	}
 	a.designer.Load(context.Background(), id)
-	snap, err := a.designSvc.LoadDesign(context.Background(), id)
-	if err != nil {
-		a.err = state.MapError(err).Error()
-		return
-	}
+	prevDoc := a.designDoc
 	a.designSnap = &snap
 	a.designDoc = nil
 	a.designView = nil
 	a.designDocErr = ""
+	a.designDocLoadFailed = false
 	a.designHistory = nil
 	a.designFuture = nil
 	a.resetAsterDraftHistory()
@@ -1602,12 +1642,23 @@ func (a *app) loadDesign(id string) {
 	a.designSelected = ""
 	if doc, docErr := a.designSvc.LoadAsterDoc(context.Background(), id); docErr != nil {
 		a.designDocErr = state.MapError(docErr).Error()
+		a.designDocLoadFailed = true
+		if prevDoc != nil && prevDoc.DesignID == id {
+			a.designDoc = prevDoc
+		}
 	} else if doc.Revision > 0 {
 		a.designDoc = &doc
 		a.refreshReadiness()
 	}
 	a.preflightOpen = false
 	a.preflightRisk = false
+}
+
+func (a *app) retryDesignID() string {
+	if a.designLoadID != "" {
+		return a.designLoadID
+	}
+	return a.currentDesignID()
 }
 
 func (a *app) currentDesignID() string {
@@ -1754,7 +1805,7 @@ func (a *app) selectDesign(id string) {
 	if id == "" {
 		return
 	}
-	if a.designer != nil && id == a.designer.DesignID {
+	if a.designer != nil && id == a.designer.DesignID && a.designLoadErr == "" && !a.designDocLoadFailed {
 		a.shell.Selected = id
 		return
 	}
@@ -1766,6 +1817,9 @@ func (a *app) selectDesign(id string) {
 	}
 	a.shell.Selected = id
 	a.loadDesign(id)
+	if a.designLoadErr != "" && a.designer != nil && a.designer.DesignID != "" {
+		a.shell.Selected = a.designer.DesignID
+	}
 	a.saveSession()
 }
 
@@ -1839,7 +1893,25 @@ func (a *app) applyRun(snap *runs.RunSnapshot, err error) {
 			a.ws.Error = err.Error()
 		}
 		a.err = err.Error()
+		if a.snap.RunID == "" || a.snap.Status == "loading" {
+			a.snap = runs.RunSnapshot{Title: "实验运行加载失败", Status: "error"}
+			a.runWSVM = &runworkspace.RunWorkspaceViewModel{
+				Title:  "实验运行加载失败",
+				Status: "error",
+			}
+			a.runWSKey = ""
+			if a.runWS != nil {
+				a.runWS.SyncFrom(a.runWSVM)
+			}
+		}
+		if a.runWS != nil {
+			a.runWS.LoadError = err.Error()
+		}
 		return
+	}
+	a.err = ""
+	if a.shell != nil {
+		a.shell.Error = ""
 	}
 	if snap == nil {
 		a.snap = runs.RunSnapshot{}
@@ -1901,6 +1973,7 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 		return false
 	}
 	a.designDocErr = ""
+	a.designDocLoadFailed = false
 	a.designHistory = append(a.designHistory, previous)
 	a.designFuture = nil
 	a.resetAsterDraftHistory()
@@ -1942,6 +2015,7 @@ func (a *app) designUndo() {
 	a.designHistory = a.designHistory[:len(a.designHistory)-1]
 	a.designFuture = append(a.designFuture, current)
 	a.designDocErr = ""
+	a.designDocLoadFailed = false
 	a.designDoc = &updated
 	a.designView = nil
 	a.designCanvas = nil
@@ -1979,6 +2053,7 @@ func (a *app) designRedo() {
 	a.designFuture = a.designFuture[:len(a.designFuture)-1]
 	a.designHistory = append(a.designHistory, current)
 	a.designDocErr = ""
+	a.designDocLoadFailed = false
 	a.designDoc = &updated
 	a.designView = nil
 	a.designCanvas = nil
@@ -2230,32 +2305,11 @@ func main() {
 		ToggleTree: func() {
 			a.saveSession()
 		},
-		SaveChecks: func(taskKey string, checks []runworkspace.CheckAckView) {
-			if a.runWS == nil {
-				return
-			}
-			timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
-			for _, t := range a.snap.Tasks {
-				if t.Key == taskKey {
-					timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, taskStepPath(t), t.ProtocolVersionID
-				}
-			}
-			acks := make([]runs.CheckAck, 0, len(checks))
-			for _, check := range checks {
-				acks = append(acks, runs.CheckAck{CheckID: check.CheckID, Status: check.Status})
-			}
-			snap, err := a.runSvc.SaveTaskChecks(context.Background(), runs.TaskCheckInput{
-				RunID: a.snap.RunID, TaskKey: taskKey, OperationID: a.nextOp(),
-				AssayID: assayID, Timepoint: timepoint,
-				ProtocolStepPath: stepPath, ProtocolVersionID: protocolVersion,
-				Checks: acks,
-			})
-			if err != nil {
-				log.Printf("save task checks: %v", err)
-				a.err = state.MapError(err).Error()
-				return
-			}
-			a.applySnap(snap)
+		SaveChecks: func(taskKey string, checks []runworkspace.CheckAckView) error {
+			return a.saveRunChecks(taskKey, checks)
+		},
+		RetryLoad: func() {
+			a.retryLoadRun()
 		},
 		Complete: func(taskKey string, checks []runworkspace.CheckAckView) error {
 			if taskKey == "" && a.runWS != nil {
@@ -2425,6 +2479,41 @@ func main() {
 		log.Fatal(err)
 	}
 }
+func (a *app) saveRunChecks(taskKey string, checks []runworkspace.CheckAckView) error {
+	if a.runWS == nil {
+		return nil
+	}
+	if a.runSvc == nil {
+		err := fmt.Errorf("运行服务不可用")
+		a.err = err.Error()
+		return err
+	}
+	timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
+	for _, t := range a.snap.Tasks {
+		if t.Key == taskKey {
+			timepoint, assayID, stepPath, protocolVersion = t.Timepoint, t.AssayID, taskStepPath(t), t.ProtocolVersionID
+		}
+	}
+	acks := make([]runs.CheckAck, 0, len(checks))
+	for _, check := range checks {
+		acks = append(acks, runs.CheckAck{CheckID: check.CheckID, Status: check.Status})
+	}
+	snap, err := a.runSvc.SaveTaskChecks(context.Background(), runs.TaskCheckInput{
+		RunID: a.snap.RunID, TaskKey: taskKey, OperationID: a.nextOp(),
+		AssayID: assayID, Timepoint: timepoint,
+		ProtocolStepPath: stepPath, ProtocolVersionID: protocolVersion,
+		Checks: acks,
+	})
+	if err != nil {
+		log.Printf("save task checks: %v", err)
+		mappedErr := state.MapError(err)
+		a.err = mappedErr.Error()
+		return mappedErr
+	}
+	a.applySnap(snap)
+	return nil
+}
+
 func (a *app) saveBatch(schema resultgrid.Schema, cells []resultgrid.Cell) {
 	if a.ws == nil || a.runSvc == nil {
 		return

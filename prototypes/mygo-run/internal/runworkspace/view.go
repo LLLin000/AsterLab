@@ -19,9 +19,10 @@ type Callbacks struct {
 	SelectTask func(taskKey string)
 	// ToggleTree persists expansion changes after a parent row is clicked.
 	ToggleTree func()
-	SaveChecks func(taskKey string, checks []CheckAckView)
+	SaveChecks func(taskKey string, checks []CheckAckView) error
 	Complete   func(taskKey string, checks []CheckAckView) error
 	OpenBatch  func(batchID string)
+	RetryLoad  func()
 	// Recording renders the recording module for a task. The host supplies it so
 	// the same module serves Design, Run, Notebook and PDF.
 	Recording func(c *ui.Context, task *RunTaskViewModel)
@@ -76,10 +77,14 @@ type State struct {
 	Narrow bool
 
 	// RecordingDirty tracks unsaved recording edits per task (UX-STATE, UX-P5).
-	RecordingDirty map[string]bool
+	RecordingDirty      map[string]bool
+	LoadError           string
 	Completing          bool
 	CompletionError     string
 	CompletionErrorTask string
+	CheckError          string
+	CheckErrorTask      string
+	pendingCheckAcks    []CheckAckView
 }
 
 // NewState constructs the runtime state from a view model.
@@ -159,6 +164,17 @@ func (s *State) SyncFrom(vm *RunWorkspaceViewModel) {
 		return
 	}
 	s.VM = vm
+	if vm.Status != "error" {
+		s.LoadError = ""
+	}
+	for taskKey, task := range vm.TaskByKey {
+		for _, c := range task.Checks {
+			key := taskKey + "\x00" + c.CheckID
+			if v, ok := s.Checks[key]; ok && v != nil {
+				*v = c.Status == "passed"
+			}
+		}
+	}
 	if s.Selected != "" {
 		if _, ok := vm.TaskByKey[s.Selected]; ok {
 			return
@@ -289,6 +305,13 @@ func View(c *ui.Context, s *State) {
 
 	ui.Column(c).Fill().Background(tokens.Canvas).Children(func() {
 		runHeader(c, s, t, tokens)
+		if (s.LoadError != "" || s.VM.Status == "error") && len(s.VM.Steps) == 0 {
+			runLoadErrorState(c, s, t, tokens)
+			return
+		}
+		if s.LoadError != "" {
+			runLoadErrorBanner(c, s, t, tokens)
+		}
 		if s.VM.Status == "loading" {
 			ui.Row(c).Fill().Center().Children(func() {
 				ui.Text(c, "正在加载实验运行数据…").FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
@@ -419,6 +442,12 @@ func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 
 func statusPill(c *ui.Context, status string, tokens theme.Tokens) {
 	label := treeStatusLabel(status)
+	switch status {
+	case "error":
+		label = "阻塞"
+	case "loading":
+		label = "加载中"
+	}
 	if label == "" {
 		label = "未开始"
 	}
@@ -1075,7 +1104,7 @@ func checkList(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *
 		on := s.checkOn(task.TaskKey, check.CheckID)
 		box := components.Checkbox(c, on, labelOr(check.Label, check.CheckID))
 		if box.Changed() && s.Callbacks.SaveChecks != nil {
-			s.Callbacks.SaveChecks(task.TaskKey, s.acks(task))
+			s.saveChecks(task)
 		}
 		statusText, statusColor := "未知", t.TextMuted
 		switch check.Status {
@@ -1092,6 +1121,110 @@ func checkList(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *
 				Padding(0, 0, 0, t.Space(1))
 		}
 	}
+	if s.CheckErrorTask == task.TaskKey && s.CheckError != "" {
+		ui.Column(c).FillWidth().Padding(8, 10).Radius(6).Gap(6).
+			Background(tokens.DangerBg).Border(1, tokens.DangerText).Children(func() {
+			ui.Text(c, "未保存 · "+s.CheckError).FontSize(t.Rem(.74)).
+				TextColor(tokens.DangerText)
+			retryBtn := components.Button(c, "重试", components.ButtonSecondary)
+			retryBtn.Disabled(s.Callbacks.SaveChecks == nil)
+			if retryBtn.Clicked() && s.Callbacks.SaveChecks != nil {
+				s.retryChecks(task)
+			}
+		})
+	}
+}
+
+func (s *State) saveChecks(task *RunTaskViewModel) {
+	if s == nil || task == nil {
+		return
+	}
+	s.persistChecks(task, s.acks(task), false)
+}
+
+func (s *State) retryChecks(task *RunTaskViewModel) {
+	if s == nil || task == nil {
+		return
+	}
+	acks := s.pendingCheckAcks
+	if len(acks) == 0 {
+		acks = s.acks(task)
+	}
+	s.persistChecks(task, acks, true)
+}
+
+func (s *State) persistChecks(task *RunTaskViewModel, acks []CheckAckView, applyOnSuccess bool) {
+	if s.Callbacks.SaveChecks == nil {
+		return
+	}
+	s.CheckError = ""
+	s.CheckErrorTask = ""
+	if err := s.Callbacks.SaveChecks(task.TaskKey, acks); err != nil {
+		s.CheckError = err.Error()
+		s.CheckErrorTask = task.TaskKey
+		s.pendingCheckAcks = append([]CheckAckView(nil), acks...)
+		s.revertChecks(task)
+		return
+	}
+	s.pendingCheckAcks = nil
+	if applyOnSuccess {
+		s.applyCheckAcks(task.TaskKey, acks)
+	}
+}
+
+func (s *State) revertChecks(task *RunTaskViewModel) {
+	if s == nil || task == nil {
+		return
+	}
+	for _, check := range task.Checks {
+		*s.checkOn(task.TaskKey, check.CheckID) = check.Status == "passed"
+	}
+}
+
+func (s *State) applyCheckAcks(taskKey string, acks []CheckAckView) {
+	if s == nil {
+		return
+	}
+	for _, ack := range acks {
+		*s.checkOn(taskKey, ack.CheckID) = ack.Status == "passed"
+	}
+}
+
+func runLoadErrorState(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
+	reason := strings.TrimSpace(s.LoadError)
+	if reason == "" {
+		reason = "无法读取实验运行数据。"
+	}
+	ui.Row(c).Fill().Center().Padding(t.Space(4)).Children(func() {
+		ui.Column(c).MaxWidth(520).Padding(16).Radius(float32(tokens.PanelRadius)).
+			Background(tokens.DangerBg).Border(1, tokens.DangerText).Gap(t.Space(2)).Children(func() {
+			ui.Text(c, "实验运行加载失败").FontSize(float32(tokens.TextSection)).Bold().TextColor(tokens.DangerText)
+			ui.Text(c, reason).FontSize(float32(tokens.TextBody)).TextColor(t.Text)
+			if s.Callbacks.RetryLoad != nil {
+				if components.Button(c, "重试", components.ButtonPrimary).Clicked() {
+					s.Callbacks.RetryLoad()
+				}
+			}
+		})
+	})
+}
+
+func runLoadErrorBanner(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
+	reason := strings.TrimSpace(s.LoadError)
+	if reason == "" {
+		return
+	}
+	ui.Row(c).FillWidth().Padding(8, 16).Background(tokens.DangerBg).Border(1, tokens.DangerText).
+		AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+			ui.Text(c, "实验运行加载失败："+reason).FontSize(t.Rem(.78)).TextColor(tokens.DangerText)
+		})
+		if s.Callbacks.RetryLoad != nil {
+			if components.Button(c, "重试", components.ButtonSecondary).Clicked() {
+				s.Callbacks.RetryLoad()
+			}
+		}
+	})
 }
 
 func labelOr(value, fallback string) string {
