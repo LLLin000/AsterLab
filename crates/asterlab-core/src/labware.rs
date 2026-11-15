@@ -343,12 +343,40 @@ pub struct AssignedTarget {
     pub source: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// One planned position and what is assigned to it.
+///
+/// `target`, `well_role` and `dilution_factor` are optional detection-layout
+/// annotations. They default to `None`, so plans serialized before they existed
+/// deserialize without migration and old records stay byte-compatible.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PositionAssignment {
     pub container_id: String,
     pub position_id: String,
     pub targets: Vec<AssignedTarget>,
+    /// Planned detection target label, for example a gene or analyte name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// Planned role of this position in the detection layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub well_role: Option<WellRole>,
+    /// Planned dilution factor at this position; unitless and positive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dilution_factor: Option<f64>,
+}
+
+/// Planned role of a well or 1D lane in a detection layout.
+///
+/// A superset of [`crate::readout_schema::WellRole`]: a planned layout also
+/// marks positive controls, which a readout records only when the instrument
+/// reports them.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum WellRole {
+    Unknown,
+    Ntc,
+    Standard,
+    PositiveControl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -362,7 +390,8 @@ pub struct ContainerPlacement {
     pub source: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// A plan holds `dilution_factor: Option<f64>`, so it is only [`PartialEq`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ContainerPlan {
     #[serde(default)]
@@ -437,7 +466,11 @@ impl ContainerPlan {
         let mut assignment_positions = HashSet::new();
         for (index, assignment) in self.assignments.iter().enumerate() {
             let path = format!("assignments[{index}]");
-            let key = format!("{}::{}", assignment.container_id, assignment.position_id);
+            let key = occupied_slot_key(
+                profiles.get(assignment.container_id.as_str()).copied(),
+                &assignment.container_id,
+                &assignment.position_id,
+            );
             if !assignment_positions.insert(key) {
                 issues.push(Diagnostic::blocking(
                     "assignment_duplicate",
@@ -564,9 +597,10 @@ impl ContainerPlan {
                     ),
                 ));
             }
-            let position_key = format!(
-                "{}::{}",
-                placement.parent_container_id, placement.position_id
+            let position_key = occupied_slot_key(
+                profiles.get(placement.parent_container_id.as_str()).copied(),
+                &placement.parent_container_id,
+                &placement.position_id,
             );
             if !placement_positions.insert(position_key) {
                 issues.push(Diagnostic::blocking(
@@ -754,41 +788,101 @@ fn has_placement_cycle(edges: &HashMap<String, Vec<String>>) -> bool {
     edges.keys().any(|node| visit(node, edges, &mut state))
 }
 
+/// Canonical address of a planned container position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ContainerPosition {
+    /// 2D plate well; `row` and `column` are 1-based (`A1` is row 1, column 1).
+    Well { row: u64, column: u64 },
+    /// 1D slot of a single-row container (`Lane3`, `L3`, `Tube3`); 1-based.
+    Lane { index: u64 },
+}
+
+/// Parse a canonical position for `profile`, or `None` when it is not valid.
+///
+/// Two-dimensional plates address wells as `<row><column>`, where the row is one
+/// or two uppercase letters (`A1`, `AA12`). A single-row container
+/// (`rows == 1`) additionally accepts 1D slot names `Lane<N>`, `L<N>` and
+/// `Tube<N>`. Input must already be canonical: lowercase, zero-padded, unicode
+/// or out-of-range addresses are rejected rather than normalized.
+pub fn parse_container_position(
+    profile: &LabwareProfile,
+    position: &str,
+) -> Option<ContainerPosition> {
+    let rows = geometry_value(profile, "rows")?;
+    let columns = geometry_value(profile, "columns")?;
+    if rows == 0 || columns == 0 {
+        return None;
+    }
+    if rows == 1 {
+        if let Some(index) = parse_lane_index(position) {
+            return (1..=columns)
+                .contains(&index)
+                .then_some(ContainerPosition::Lane { index });
+        }
+    }
+    let (row, column) = parse_well_position(position)?;
+    (row <= rows && (1..=columns).contains(&column))
+        .then_some(ContainerPosition::Well { row, column })
+}
+
 fn position_is_valid(profile: &LabwareProfile, position: &str) -> bool {
-    let rows = profile
-        .fields
-        .get("rows")
-        .and_then(|field| field.value.as_ref())
-        .and_then(Value::as_u64);
-    let columns = profile
-        .fields
-        .get("columns")
-        .and_then(|field| field.value.as_ref())
-        .and_then(Value::as_u64);
-    let (Some(rows), Some(columns)) = (rows, columns) else {
-        return false;
-    };
-    let mut chars = position.chars();
-    let Some(row_char) = chars.next() else {
-        return false;
-    };
-    // Canonical form only: uppercase row + canonical decimal column.
-    // a1 / A01 must be normalized by the caller or rejected.
-    if !row_char.is_ascii_uppercase() {
-        return false;
+    parse_container_position(profile, position).is_some()
+}
+
+fn geometry_value(profile: &LabwareProfile, key: &str) -> Option<u64> {
+    profile.fields.get(key)?.value.as_ref()?.as_u64()
+}
+
+fn parse_lane_index(position: &str) -> Option<u64> {
+    // `Lane` is checked before `L`, otherwise `Lane4` would parse as `ane4`.
+    ["Lane", "Tube", "L"]
+        .into_iter()
+        .find_map(|prefix| position.strip_prefix(prefix))
+        .and_then(parse_canonical_number)
+}
+
+fn parse_well_position(position: &str) -> Option<(u64, u64)> {
+    let letters_end = position
+        .char_indices()
+        .find(|(_, ch)| !ch.is_ascii_uppercase())
+        .map_or(position.len(), |(index, _)| index);
+    let (row_letters, column_digits) = position.split_at(letters_end);
+    if row_letters.is_empty() || row_letters.len() > 2 {
+        return None;
     }
-    let row = row_char as u64;
-    if !(b'A' as u64..b'A' as u64 + rows).contains(&row) {
-        return false;
+    if !column_digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
     }
-    let suffix = chars.as_str();
-    if suffix.is_empty() || suffix.starts_with('0') {
-        return false;
+    let row = row_letters
+        .bytes()
+        .fold(0u64, |row, byte| row * 26 + u64::from(byte - b'A') + 1);
+    let column = parse_canonical_number(column_digits)?;
+    Some((row, column))
+}
+
+fn parse_canonical_number(digits: &str) -> Option<u64> {
+    if digits.is_empty() || digits.len() > 2 || digits.starts_with('0') {
+        return None;
     }
-    suffix
-        .parse::<u64>()
-        .ok()
-        .is_some_and(|column| (1..=columns).contains(&column))
+    digits.parse().ok()
+}
+
+/// Physical slot key used by duplicate detection.
+///
+/// `Lane3` and `A3` name the same slot of a single-row container, so both
+/// collapse to the same `(row, column)` address. Positions that do not parse
+/// keep their raw text: they are already reported as invalid, and raw text
+/// still flags two assignments that repeat the same invalid address.
+fn occupied_slot_key(
+    profile: Option<&LabwareProfile>,
+    container_id: &str,
+    position_id: &str,
+) -> String {
+    match profile.and_then(|profile| parse_container_position(profile, position_id)) {
+        Some(ContainerPosition::Well { row, column }) => format!("{container_id}::{row}:{column}"),
+        Some(ContainerPosition::Lane { index }) => format!("{container_id}::1:{index}"),
+        None => format!("{container_id}::{position_id}"),
+    }
 }
 
 #[cfg(test)]
@@ -898,6 +992,9 @@ mod tests {
                     counts_as_independent_unit: true,
                     source: None,
                 }],
+                target: None,
+                well_role: None,
+                dilution_factor: None,
             }],
             placements: vec![
                 ContainerPlacement {
@@ -968,6 +1065,9 @@ mod tests {
                     counts_as_independent_unit: true,
                     source: None,
                 }],
+                target: None,
+                well_role: None,
+                dilution_factor: None,
             }],
             placements: vec![ContainerPlacement {
                 parent_container_id: "plate-1".into(),
@@ -995,6 +1095,9 @@ mod tests {
                     counts_as_independent_unit: true,
                     source: None,
                 }],
+                target: None,
+                well_role: None,
+                dilution_factor: None,
             }],
             placements: vec![],
         };
@@ -1029,6 +1132,9 @@ mod tests {
                         source: None,
                     },
                 ],
+                target: None,
+                well_role: None,
+                dilution_factor: None,
             }],
             placements: vec![],
         };
@@ -1070,5 +1176,276 @@ mod tests {
             "topology": "cage_cohort"
         })).unwrap();
         assert_eq!(cage.topology, ContainerTopology::CageCohort);
+    }
+
+    fn lane_registry() -> LabwareRegistry {
+        let mut registry = LabwareRegistry::default();
+        registry
+            .register(LabwareProfile {
+                profile: ProfileRef {
+                    id: "labware.lane_gel_10".into(),
+                    version: 1,
+                },
+                family: LabwareFamily::Container,
+                title: "10-lane gel".into(),
+                fields: BTreeMap::from([
+                    ("rows".into(), ProfileField::known(1.into())),
+                    ("columns".into(), ProfileField::known(10.into())),
+                ]),
+                review_status: "research_draft".into(),
+            })
+            .unwrap();
+        registry
+    }
+
+    fn lane_profile(registry: &LabwareRegistry) -> &LabwareProfile {
+        registry
+            .get(&ProfileRef {
+                id: "labware.lane_gel_10".into(),
+                version: 1,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn single_row_containers_accept_lane_and_tube_positions() {
+        let registry = lane_registry();
+        let profile = lane_profile(&registry);
+        for index in 1..=10 {
+            for position in [
+                format!("Lane{index}"),
+                format!("L{index}"),
+                format!("Tube{index}"),
+            ] {
+                assert_eq!(
+                    parse_container_position(profile, &position),
+                    Some(ContainerPosition::Lane { index }),
+                    "{position}"
+                );
+            }
+        }
+        assert_eq!(
+            parse_container_position(profile, "A1"),
+            Some(ContainerPosition::Well { row: 1, column: 1 })
+        );
+        for position in [
+            "Lane11", "L11", "Tube11", "Lane0", "Lane01", "lane1", "Lane", "Lane-1", "B1", "A11",
+        ] {
+            assert_eq!(
+                parse_container_position(profile, position),
+                None,
+                "{position}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_d_plate_positions_keep_their_contract() {
+        let registry = default_labware_registry();
+        let plate = registry
+            .get(&ProfileRef {
+                id: "labware.pcr_96".into(),
+                version: 1,
+            })
+            .unwrap();
+        assert_eq!(
+            parse_container_position(plate, "A1"),
+            Some(ContainerPosition::Well { row: 1, column: 1 })
+        );
+        assert_eq!(
+            parse_container_position(plate, "H12"),
+            Some(ContainerPosition::Well { row: 8, column: 12 })
+        );
+        for position in [
+            "A0", "A01", "A13", "I1", "AA1", "a1", "A１", "A", "1A", "Lane1", "L1", "Tube1",
+        ] {
+            assert_eq!(parse_container_position(plate, position), None, "{position}");
+        }
+
+        let mut registry = default_labware_registry();
+        registry
+            .register(LabwareProfile {
+                profile: ProfileRef {
+                    id: "labware.wide_2d_27".into(),
+                    version: 1,
+                },
+                family: LabwareFamily::DeepWellPlate,
+                title: "27 x 12 deep well plate".into(),
+                fields: BTreeMap::from([
+                    ("rows".into(), ProfileField::known(27.into())),
+                    ("columns".into(), ProfileField::known(12.into())),
+                ]),
+                review_status: "research_draft".into(),
+            })
+            .unwrap();
+        let wide = registry
+            .get(&ProfileRef {
+                id: "labware.wide_2d_27".into(),
+                version: 1,
+            })
+            .unwrap();
+        assert_eq!(
+            parse_container_position(wide, "AA1"),
+            Some(ContainerPosition::Well { row: 27, column: 1 })
+        );
+        // On a multi-row container `L1` is the 2D well at row L, not a lane.
+        assert_eq!(
+            parse_container_position(wide, "L1"),
+            Some(ContainerPosition::Well { row: 12, column: 1 })
+        );
+        assert_eq!(parse_container_position(wide, "AB1"), None);
+    }
+
+    #[test]
+    fn well_metadata_fields_are_optional_and_backward_compatible() {
+        let legacy: PositionAssignment = serde_json::from_value(serde_json::json!({
+            "container_id": "plate-1",
+            "position_id": "A1",
+            "targets": [{
+                "target": {"kind": "sample", "id": "s1"},
+                "role": "primary",
+                "relationship": "contains"
+            }]
+        }))
+        .unwrap();
+        assert_eq!(legacy.target, None);
+        assert_eq!(legacy.well_role, None);
+        assert_eq!(legacy.dilution_factor, None);
+        let legacy_value = serde_json::to_value(&legacy).unwrap();
+        for key in ["target", "well_role", "dilution_factor"] {
+            assert!(legacy_value.get(key).is_none(), "{key}");
+        }
+
+        for (label, role) in [
+            ("unknown", WellRole::Unknown),
+            ("ntc", WellRole::Ntc),
+            ("standard", WellRole::Standard),
+            ("positive_control", WellRole::PositiveControl),
+        ] {
+            let annotated: PositionAssignment = serde_json::from_value(serde_json::json!({
+                "container_id": "plate-1",
+                "position_id": "A1",
+                "targets": [],
+                "target": "GAPDH",
+                "well_role": label,
+                "dilution_factor": 4.0
+            }))
+            .unwrap();
+            assert_eq!(annotated.target.as_deref(), Some("GAPDH"));
+            assert_eq!(annotated.well_role, Some(role), "{label}");
+            assert_eq!(annotated.dilution_factor, Some(4.0));
+            let round_trip = serde_json::to_value(&annotated).unwrap();
+            assert_eq!(round_trip["well_role"], serde_json::json!(label));
+        }
+
+        assert!(serde_json::from_value::<PositionAssignment>(serde_json::json!({
+            "container_id": "plate-1",
+            "position_id": "A1",
+            "targets": [],
+            "well_role": "sample"
+        }))
+        .is_err());
+    }
+
+    fn lane_assignment(position_id: &str, role: Option<WellRole>) -> PositionAssignment {
+        PositionAssignment {
+            container_id: "lane-gel".into(),
+            position_id: position_id.into(),
+            targets: vec![AssignedTarget {
+                target: PlanTargetRef::Sample {
+                    id: format!("sample-{position_id}"),
+                },
+                role: "primary".into(),
+                relationship: "contains".into(),
+                counts_as_independent_unit: true,
+                source: None,
+            }],
+            target: Some("GAPDH".into()),
+            well_role: role,
+            dilution_factor: Some(4.0),
+        }
+    }
+
+    #[test]
+    fn lane_positions_and_metadata_validate_end_to_end() {
+        let registry = lane_registry();
+        let mut plan = ContainerPlan {
+            containers: vec![PlannedContainer {
+                id: "lane-gel".into(),
+                profile_ref: ProfileRef {
+                    id: "labware.lane_gel_10".into(),
+                    version: 1,
+                },
+                label: "Gel".into(),
+                source: None,
+            }],
+            assignments: vec![
+                lane_assignment("Lane1", Some(WellRole::PositiveControl)),
+                lane_assignment("Tube10", Some(WellRole::Ntc)),
+                lane_assignment("L5", Some(WellRole::Standard)),
+            ],
+            placements: vec![],
+        };
+        plan.validate(&registry).unwrap();
+        assert_eq!(plan.assignments[1].well_role, Some(WellRole::Ntc));
+
+        plan.assignments[0].position_id = "Lane11".into();
+        let issues = plan.validate_diagnostics(&registry).unwrap_err();
+        assert!(issues.iter().any(|issue| {
+            issue.code == "assignment_position_invalid"
+                && issue.path == "assignments[0].position_id"
+        }));
+    }
+
+    #[test]
+    fn lane_aliases_share_one_slot_for_duplicate_detection() {
+        let registry = lane_registry();
+        let gel = |id: &str| PlannedContainer {
+            id: id.into(),
+            profile_ref: ProfileRef {
+                id: "labware.lane_gel_10".into(),
+                version: 1,
+            },
+            label: id.into(),
+            source: None,
+        };
+        let placement = |child: &str, position: &str| ContainerPlacement {
+            parent_container_id: "lane-gel".into(),
+            position_id: position.into(),
+            child_container_id: child.into(),
+            relationship: "inserted".into(),
+            source: None,
+        };
+        let mut plan = ContainerPlan {
+            containers: vec![gel("lane-gel"), gel("gel-a"), gel("gel-b")],
+            assignments: vec![
+                lane_assignment("Lane1", None),
+                lane_assignment("A1", None),
+                lane_assignment("L1", None),
+            ],
+            placements: vec![placement("gel-a", "Lane1"), placement("gel-b", "A1")],
+        };
+        let issues = plan.validate_diagnostics(&registry).unwrap_err();
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|issue| issue.code == "assignment_duplicate")
+                .count(),
+            2,
+            "Lane1 / A1 / L1 are the same slot of the single-row gel: {issues:?}"
+        );
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|issue| issue.code == "placement_position_occupied")
+                .count(),
+            1,
+            "a child placed at A1 occupies the slot already taken by Lane1: {issues:?}"
+        );
+
+        plan.assignments.truncate(2);
+        plan.assignments[1].position_id = "Lane2".into();
+        plan.placements[1].position_id = "Lane2".into();
+        plan.validate(&registry).unwrap();
     }
 }
