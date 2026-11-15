@@ -107,13 +107,14 @@ impl AppCore {
         }
         event["operation_payload"] = input.clone();
         let saved = cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e| e.message)?;
-        tx.commit().map_err(|e| e.to_string())?;
-        self.trigger_timers_for_anchor(
+        Self::trigger_timers_for_anchor_tx(
+            &tx,
             &run_id,
             saved["id"].as_str().unwrap_or_default(),
             saved["data"]["task_key"].as_str(),
             saved["data"]["occurred_at"].as_str().unwrap_or_default(),
         )?;
+        tx.commit().map_err(|e| e.to_string())?;
         self.load_run(&run_id)
     }
 
@@ -170,8 +171,8 @@ impl AppCore {
         let occurred_at = saved["data"]["occurred_at"].as_str().unwrap_or_default().to_owned();
         let task_key = saved["data"]["task_key"].as_str().map(str::to_owned);
         let revision = revision + 1;
+        Self::trigger_timers_for_anchor_tx(&tx, &run_id, &event_id, task_key.as_deref(), &occurred_at)?;
         tx.commit().map_err(|e|e.to_string())?;
-        self.trigger_timers_for_anchor(&run_id, &event_id, task_key.as_deref(), &occurred_at)?;
         eprintln!("run.save_batch layer=core transaction=commit run_id={} operation_id={} batch_id={} event_id={} cell_count={}", run_id, operation_id, batch_id, event_id, cells.len());
         Ok(json!({"run_id":run_id,"revision":revision,"batch_id":batch_id,"event_id":event_id,"accepted":cells.len(),"rejected":[]}))
     }
@@ -206,13 +207,14 @@ impl AppCore {
         }
         event["operation_payload"] = input.clone();
         let saved = cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e| e.message)?;
-        tx.commit().map_err(|e| e.to_string())?;
-        self.trigger_timers_for_anchor(
+        Self::trigger_timers_for_anchor_tx(
+            &tx,
             &run_id,
             saved["id"].as_str().unwrap_or_default(),
             saved["data"]["task_key"].as_str(),
             saved["data"]["occurred_at"].as_str().unwrap_or_default(),
         )?;
+        tx.commit().map_err(|e| e.to_string())?;
         self.load_run(&run_id)
     }
 
@@ -318,6 +320,18 @@ impl AppCore {
 
     pub fn trigger_timers_for_anchor(&mut self, run_id: &str, event_id: &str, task_key: Option<&str>, occurred_at_utc: &str) -> Result<usize, String> {
         let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        let triggered = Self::trigger_timers_for_anchor_tx(&tx, run_id, event_id, task_key, occurred_at_utc)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(triggered)
+    }
+
+    /// Apply anchor-triggered timers inside the caller's transaction so a saved
+    /// event and its t0 timer start commit atomically. If this fails, the event
+    /// is rolled back and a retry cannot observe an event without its timer.
+    pub(crate) fn trigger_timers_for_anchor_tx(
+        tx: &rusqlite::Transaction<'_>, run_id: &str, event_id: &str,
+        task_key: Option<&str>, occurred_at_utc: &str,
+    ) -> Result<usize, String> {
         let mut statement = tx.prepare(
             "SELECT timer_id,data_json FROM timer_records WHERE run_id=?1 ORDER BY timer_id"
         ).map_err(|e| e.to_string())?;
@@ -336,7 +350,6 @@ impl AppCore {
             tx.execute("UPDATE timer_records SET data_json=?1,updated_at=datetime('now') WHERE timer_id=?2", rusqlite::params![payload,id])
                 .map_err(|e| e.to_string())?;
         }
-        tx.commit().map_err(|e| e.to_string())?;
         Ok(updates.len())
     }
     /// Read-only `agent_edit.validate`: resolve a proposal against the current

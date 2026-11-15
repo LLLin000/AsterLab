@@ -84,6 +84,7 @@ impl AssetLink {
     pub fn coordinate_id(&self) -> Option<String> {
         let well = self.well_id.as_deref()?;
         if well.is_empty() { return None; }
+        if self.fov_index == Some(0) { return None; }
         let mut id = well.to_ascii_uppercase();
         if let Some(timepoint) = self.timepoint.as_deref().filter(|v| !v.is_empty()) {
             id.push('_');

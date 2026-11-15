@@ -890,12 +890,6 @@ warning: function `validate_import` is never used
 10948 | fn validate_import(i: &StudyImport) -> Result<(), CliError> {
       |    ^^^^^^^^^^^^^^^
 
-warning: function `split_well` is never used
-     --> src/../../../src/cli.rs:10963:4
-      |
-10963 | fn split_well(value: &str) -> Result<(String, String), CliError> {
-      |    ^^^^^^^^^^
-
 warning: function `design_payload_schema` is never used
      --> src/../../../src/cli.rs:10977:4
       |
@@ -1065,21 +1059,21 @@ warning: struct `AssetEventsInput` is never constructed
       |        ^^^^^^^^^^^^^^^^
 
 warning: function `link_local_asset` is never used
-     --> src/../../../src/cli.rs:12233:4
+     --> src/../../../src/cli.rs:12258:4
       |
-12233 | fn link_local_asset(
+12258 | fn link_local_asset(
       |    ^^^^^^^^^^^^^^^^
 
 warning: function `unlink_asset_link` is never used
-     --> src/../../../src/cli.rs:12425:15
+     --> src/../../../src/cli.rs:12443:15
       |
-12425 | pub(crate) fn unlink_asset_link(
+12443 | pub(crate) fn unlink_asset_link(
       |               ^^^^^^^^^^^^^^^^^
 
 warning: function `list_asset_events` is never used
-     --> src/../../../src/cli.rs:12490:15
+     --> src/../../../src/cli.rs:12508:15
       |
-12490 | pub(crate) fn list_asset_events(
+12508 | pub(crate) fn list_asset_events(
       |               ^^^^^^^^^^^^^^^^^
 
 warning: field `exit` is never read
@@ -1094,18 +1088,18 @@ warning: field `exit` is never read
    = note: `CliError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
 
 warning: field `project_id` is never read
-     --> src/../../../src/cli.rs:14140:9
+     --> src/../../../src/cli.rs:14158:9
       |
-14138 |     struct StepEditFixture {
+14156 |     struct StepEditFixture {
       |            --------------- field in this struct
-14139 |         data_dir: std::path::PathBuf,
-14140 |         project_id: String,
+14157 |         data_dir: std::path::PathBuf,
+14158 |         project_id: String,
       |         ^^^^^^^^^^
 
 
 running 41 tests
 .........................................
-test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.30s
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.19s
 
 
 running 0 tests

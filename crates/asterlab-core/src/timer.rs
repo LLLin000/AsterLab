@@ -128,8 +128,19 @@ fn parse_utc_seconds(value: &str) -> Result<i64, String> {
     };
     let (year, month, day) = (number(0,4)?, number(5,7)?, number(8,10)?);
     let (hour, minute, second) = (number(11,13)?, number(14,16)?, number(17,19)?);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+    if !(1..=12).contains(&month) || day < 1 || hour > 23 || hour < 0
+        || !(0..=59).contains(&minute) || !(0..=60).contains(&second)
+    {
         return Err("invalid timestamp".into());
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let month_days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        _ => if leap { 29 } else { 28 },
+    };
+    if day > month_days {
+        return Err("invalid timestamp: day does not exist in that month".into());
     }
     let days = days_from_civil(year, month, day);
     let mut offset = 0i64;
@@ -204,6 +215,19 @@ mod tests {
         assert!(timer.advance_countdown("2026-11-15T10:00:10Z").unwrap());
         assert_eq!(timer.round_index, 1);
         assert_eq!(timer.started_at_utc.as_deref(), Some("2026-11-15T10:00:10Z"));
+    }
+
+    #[test]
+    fn rejects_calendar_dates_that_do_not_exist() {
+        let mut timer = timer(TimerMode::Stopwatch);
+        assert!(timer.start("2026-02-31T10:00:00Z").is_err());
+        assert!(timer.start("2026-04-31T10:00:00Z").is_err());
+        assert!(timer.start("2025-02-29T10:00:00Z").is_err());
+        assert!(timer.start("2026-13-01T10:00:00Z").is_err());
+        assert!(timer.start("2026-01-01T24:00:00Z").is_err());
+        assert!(timer.start("2026-01-01T10:60:00Z").is_err());
+        timer.start("2024-02-29T10:00:00Z").unwrap();
+        assert_eq!(timer.elapsed_s("2024-02-29T10:00:01Z").unwrap(), 1);
     }
 
     #[test]

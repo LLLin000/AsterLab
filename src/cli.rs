@@ -10990,7 +10990,7 @@ fn asset_link_payload_schema() -> Value {
             "modTime":{"type":"string"},
             "sha256":{"type":"string","maxLength":64},
             "availability":{"type":"string","enum":["available","unavailable"]},
-            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":0},"coordinateId":{"type":["string","null"]}}},
+            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":1},"coordinateId":{"type":["string","null"]}}},
             "linkedAt":{"type":"string"},
             "actorId":{"type":"string"}
         }
@@ -11011,7 +11011,7 @@ fn asset_link_event_payload_schema() -> Value {
             "modTime":{"type":"string"},
             "sha256":{"type":"string","maxLength":64},
             "availability":{"type":"string","enum":["available","unavailable"]},
-            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":0},"coordinateId":{"type":["string","null"]}}},
+            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":1},"coordinateId":{"type":["string","null"]}}},
             "at":{"type":"string"},
             "actorId":{"type":"string"}
         }
@@ -11455,7 +11455,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"ad_hoc_step":{"type":"boolean","default":false,"description":"临时补加步骤：允许 protocol_step_path 不属于冻结清单；省略时为 false"},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "readout.submit" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","endpoint","protocol_version_id"],"oneOf":[{"required":["value"]},{"required":["qualifier"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160}}})
@@ -12072,8 +12072,33 @@ fn asset_link_record_id(
     record_id
 }
 
+fn validate_asset_coordinates(
+    well_id: Option<&str>,
+    timepoint: Option<&str>,
+    fov_index: Option<u32>,
+) -> Result<(), CliError> {
+    for (field, value, limit) in [("well_id", well_id, 40), ("timepoint", timepoint, 100)] {
+        if value.is_some_and(|v| v.chars().count() > limit || v.chars().any(char::is_control)) {
+            return Err(CliError::input(format!("{field} is invalid")));
+        }
+    }
+    if let Some(well) = well_id {
+        split_well(well)?;
+    }
+    if fov_index == Some(0) {
+        return Err(CliError::input("fov_index must start at 1"));
+    }
+    if well_id.is_none() && (timepoint.is_some() || fov_index.is_some()) {
+        return Err(CliError::input("timepoint and fov_index require well_id"));
+    }
+    Ok(())
+}
+
 fn asset_coordinate_id(well_id: Option<&str>, timepoint: Option<&str>, fov_index: Option<u32>) -> Option<String> {
     let well = well_id.filter(|value| !value.trim().is_empty())?;
+    if fov_index == Some(0) {
+        return None;
+    }
     let mut id = well.to_ascii_uppercase();
     if let Some(timepoint) = timepoint.filter(|value| !value.is_empty()) {
         id.push('_');
@@ -12245,23 +12270,11 @@ fn link_local_asset(
         request.timepoint.as_deref(),
         request.fov_index,
     );
-    for (field, value, limit) in [
-        ("well_id", request.well_id.as_deref(), 40),
-        ("timepoint", request.timepoint.as_deref(), 100),
-    ] {
-        if value.is_some_and(|v| v.chars().count() > limit || v.chars().any(char::is_control)) {
-            return Err(CliError::input(format!("{field} is invalid")));
-        }
-    }
-    if let Some(well_id) = request.well_id.as_deref() {
-        split_well(well_id)?;
-    }
-    if request.fov_index == Some(0) {
-        return Err(CliError::input("fov_index must start at 1"));
-    }
-    if request.well_id.is_none() && (request.timepoint.is_some() || request.fov_index.is_some()) {
-        return Err(CliError::input("timepoint and fov_index require well_id"));
-    }
+    validate_asset_coordinates(
+        request.well_id.as_deref(),
+        request.timepoint.as_deref(),
+        request.fov_index,
+    )?;
     let actor_id = request.actor_id.as_deref().unwrap_or("").trim();
     if actor_id.len() > 200 || actor_id.chars().any(char::is_control) {
         return Err(CliError::input("actor_id is invalid"));
@@ -12383,6 +12396,11 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         link.get("timepoint").and_then(Value::as_str),
         link.get("fovIndex").and_then(Value::as_u64).map(|v| v as u32),
     );
+    validate_asset_coordinates(
+        link.get("wellId").and_then(Value::as_str),
+        link.get("timepoint").and_then(Value::as_str),
+        link.get("fovIndex").and_then(Value::as_u64).map(|v| v as u32),
+    )?;
 
     let reference = asset_refs::AssetRef {
         id: asset_refs::stable_id(&root_id, &relative_path),
