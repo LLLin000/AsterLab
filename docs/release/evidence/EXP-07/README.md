@@ -77,15 +77,17 @@ catches interface implementations outside the module.
 
 ## 2. Scope note
 
-Two changed paths are outside the card's `kandev-scope`:
+Two paths are outside the originally listed `write:` entries and were added to
+the card `kandev-scope` on 2026-11-15 with the card owner's approval; `forbid`
+became empty, so the write allowlist alone denies everything else:
 
 | Path | Why it is required |
 |---|---|
 | `scripts/ci/native_generator_hashes.json` | Any change to `modules/runs/runs.go` changes the REL-05 input/output hashes. Leaving the golden stale makes `linux-tests` fail at `native_generator_hash.py --check`; `--update-golden` is the only documented way to record a reviewed binding. |
 | `prototypes/mygo-run/internal/state/fake.go` | `DesignService` gained `DeriveDesignFromRun`. The explicit `FakeDesignService` in `internal/state` no longer satisfies the interface, which breaks `internal/designer` tests and `go test ./...`. One stub method restores it; no page UI is touched, matching the card's non-goal wording. |
 
-The card should add both paths to `write:` (and the second one is inside the
-current `forbid:` prefix) before the merge gate can pass.
+The REL-04 gate now passes with the updated card (`scope-check.out`, 13 changed
+paths, 0 violations); it still rejects every path the card does not list.
 
 ## 3. Redaction
 
