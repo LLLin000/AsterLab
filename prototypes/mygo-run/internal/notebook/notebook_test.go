@@ -148,3 +148,14 @@ func TestTraceStateIsDerivedFromStoredSources(t *testing.T) {
 		t.Fatalf("entry without event id trace = %q, want missing", got)
 	}
 }
+
+// UX-STATE: the Notebook toolbar names the saved/unsaved states explicitly, in
+// the same words the rest of the product uses.
+func TestSaveStateLabelNamesBothStates(t *testing.T) {
+	if got := SaveStateLabel(true); got != "未保存" {
+		t.Fatalf("dirty state label = %q, want 未保存", got)
+	}
+	if got := SaveStateLabel(false); got != "已保存" {
+		t.Fatalf("saved state label = %q, want 已保存", got)
+	}
+}
