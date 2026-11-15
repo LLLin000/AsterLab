@@ -2262,17 +2262,48 @@ func (a *app) createRunFromDesignDoc() {
 	a.shell.Page = shell.Run
 }
 
+func (a *app) newToolsWorkspace() *tools.Workspace {
+	return tools.New(tools.Callbacks{
+		ListPantry: func() (runs.PantryLedger, error) {
+			if a.runSvc == nil {
+				return runs.PantryLedger{}, fmt.Errorf("运行服务不可用")
+			}
+			return a.runSvc.ListPantry(context.Background(), runs.PantryQuery{})
+		},
+		UpsertPantry: func(input runs.PantryUpsert) (runs.PantryItem, error) {
+			if a.runSvc == nil {
+				return runs.PantryItem{}, fmt.Errorf("运行服务不可用")
+			}
+			return a.runSvc.UpsertPantry(context.Background(), input)
+		},
+		DeletePantry: func(input runs.PantryDelete) error {
+			if a.runSvc == nil {
+				return fmt.Errorf("运行服务不可用")
+			}
+			_, err := a.runSvc.DeletePantry(context.Background(), input)
+			return err
+		},
+		ExportPantry: func() (runs.PantryLabels, error) {
+			if a.runSvc == nil {
+				return runs.PantryLabels{}, fmt.Errorf("运行服务不可用")
+			}
+			return a.runSvc.ExportPantryLabels(context.Background(), runs.PantryQuery{})
+		},
+	})
+}
+
 func toolsPage(c *ui.Context, a *app) {
 	t := c.Theme()
+	tokens := theme.GetTokens(t)
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(4)).Border(1, t.Border).
 			Background(t.Surface).Children(func() {
-			ui.Text(c, "资料与工具").FontSize(16).Bold().TextColor(t.Text)
+			ui.Text(c, "资料与工具").FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text)
 			ui.Spacer(c)
-			ui.Text(c, "方法与参考材料").FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "储藏室台账与方法工具").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
 		})
 		if a.tools == nil {
-			a.tools = tools.New(tools.Callbacks{})
+			a.tools = a.newToolsWorkspace()
 		}
 		tools.View(c, a.tools)
 	})
@@ -2580,7 +2611,7 @@ func main() {
 			rv.Render(c)
 		},
 	}
-	a.tools = tools.New(tools.Callbacks{})
+	a.tools = a.newToolsWorkspace()
 	a.ws = runui.NewWorkspace(toRunView(a.snap), cb)
 	a.selectedTask = a.ws.Selected
 	a.runWSVM = a.buildRunWorkspaceVM()
