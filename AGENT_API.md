@@ -249,6 +249,7 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - `checks[]` 每项为 `check_id`、`status`（`passed` / `failed` / `blocked` / `skipped`）及可选 `checked_by`、`note`；`check_id` 必须存在于同一冻结 Protocol 步骤的 `checks[]`，同一事件不得重复，且检查结果必须关联该步骤。`skipped` 不等于通过；空白或未记录也不等于通过。`controls[]` 记录对照角色 `role`、`status`、样本/实验单位/观察；`lineage[]` 记录 `from_kind`、`from_id`、`to_kind`、`to_id`、`relation`。`actual_parameters[]` 记录实际执行参数 `key`、`value`、可选 `unit` 与 `source`，并与计划参数分开。
 - Protocol 文本步骤可定义 `checks[]`：`check_id`、`label`、可选 `instruction` 与 `blocking`。检查项随 ProtocolPreview、Run 冻结清单一同保存；AsterLab 只记录人工结果，不自动判定 gate 通过。
 - Protocol 步骤事件可附 `timepoint` 和 `step_status`。`timepoint` 仅用于明确属于某个检测时间点的步骤，并必须匹配 Run 冻结设计；共享制备步骤不应机械绑定某项检测的时间点。`step_status` 只能是 `in_progress`、`completed`、`blocked`、`skipped`，且必须同时关联冻结 Protocol 步骤；普通操作、观察、测量或偏差事件本身不代表步骤完成。未带时间点的旧事件不会被自动分配给 D1/D3。带 `sample_ids` 的事件只改变这些样本的状态；整步完成由 `workflow.progress` 判定，要求全部样本完成。
+- `execution_event.create` 的 `event_type` 另接受 `skipped_by_rule`（按规则跳过）；它仍需 `content`，并与其他事件一样经同一套冻结步骤/样本校验写入追加事实。临时补加的步骤必须显式传 `ad_hoc_step: true`（省略即 `false`）：为真时允许 `protocol_step_path` 不属于冻结清单，为假时仍按冻结清单拒绝未知路径；该字段只在输入中出现，回读记录也带同名布尔值，不能用来绕过 `sample_ids`、`attempt` 或检查项校验。
 - 写入工具只返回记录 ID、所属关系、版本、数据和创建/更新时间；不声称实际实验已经执行。
 - 该 CLI 是本机原型，尚无多用户认证、审计签名、细粒度附件权限或撤销系统。不要把本地访问控制误称为云端安全边界。
 

@@ -9,7 +9,7 @@ mod agent_edit_preview;
 
 use std::path::Path;
 use serde_json::{json, Value};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 pub struct AppCore {
     db: Connection,
@@ -18,6 +18,16 @@ pub struct AppCore {
 impl AppCore {
     pub fn open(data_dir: &Path) -> Result<AppCore, String> {
         let db = cli_impl::open_db(data_dir).map_err(|e| e.message)?;
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS timer_records(\
+                timer_id TEXT PRIMARY KEY,\
+                run_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,\
+                task_key TEXT NOT NULL,\
+                data_json TEXT NOT NULL,\
+                updated_at TEXT NOT NULL\
+            );\
+            CREATE INDEX IF NOT EXISTS timer_records_run ON timer_records(run_id, task_key);",
+        ).map_err(|e| e.to_string())?;
         Ok(AppCore { db })
     }
 
@@ -96,7 +106,14 @@ impl AppCore {
             event["operation_id"] = json!(op);
         }
         event["operation_payload"] = input.clone();
-        cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e| e.message)?;
+        let saved = cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e| e.message)?;
+        Self::trigger_timers_for_anchor_tx(
+            &tx,
+            &run_id,
+            saved["id"].as_str().unwrap_or_default(),
+            saved["data"]["task_key"].as_str(),
+            saved["data"]["occurred_at"].as_str().unwrap_or_default(),
+        )?;
         tx.commit().map_err(|e| e.to_string())?;
         self.load_run(&run_id)
     }
@@ -149,9 +166,12 @@ impl AppCore {
         }
         let batch_id = format!("batch-{operation_id}");
         let event = json!({"run_id":run_id,"event_type":"measurement","content":"Structured readout batch","task_key":input["task_key"],"assay_id":input["assay_id"],"timepoint":input["timepoint"],"protocol_step_path":input["protocol_step_path"],"protocol_version_id":input["protocol_version_id"],"measurements":measurements,"result_cells":cells,"readouts":readouts,"operation_id":operation_id,"operation_payload":input,"batch_id":batch_id,"schema_id":schema,"schema_version":1});
-        cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e|e.message)?;
-        let event_id: String = tx.query_row("SELECT id FROM records WHERE kind='execution_event' AND parent_id=?1 ORDER BY rowid DESC LIMIT 1", [&run_id], |r|r.get(0)).map_err(|e|e.to_string())?;
+        let saved = cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e| e.message)?;
+        let event_id = saved["id"].as_str().unwrap_or_default().to_owned();
+        let occurred_at = saved["data"]["occurred_at"].as_str().unwrap_or_default().to_owned();
+        let task_key = saved["data"]["task_key"].as_str().map(str::to_owned);
         let revision = revision + 1;
+        Self::trigger_timers_for_anchor_tx(&tx, &run_id, &event_id, task_key.as_deref(), &occurred_at)?;
         tx.commit().map_err(|e|e.to_string())?;
         eprintln!("run.save_batch layer=core transaction=commit run_id={} operation_id={} batch_id={} event_id={} cell_count={}", run_id, operation_id, batch_id, event_id, cells.len());
         Ok(json!({"run_id":run_id,"revision":revision,"batch_id":batch_id,"event_id":event_id,"accepted":cells.len(),"rejected":[]}))
@@ -186,7 +206,14 @@ impl AppCore {
             event["operation_id"] = json!(op);
         }
         event["operation_payload"] = input.clone();
-        cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e| e.message)?;
+        let saved = cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(|e| e.message)?;
+        Self::trigger_timers_for_anchor_tx(
+            &tx,
+            &run_id,
+            saved["id"].as_str().unwrap_or_default(),
+            saved["data"]["task_key"].as_str(),
+            saved["data"]["occurred_at"].as_str().unwrap_or_default(),
+        )?;
         tx.commit().map_err(|e| e.to_string())?;
         self.load_run(&run_id)
     }
@@ -264,6 +291,67 @@ impl AppCore {
         cli_impl::list_asset_links(&self.db, run_id).map_err(|e| e.message)
     }
 
+    pub fn save_timer_record(&mut self, timer: &asterlab_core::timer::TimerRecord) -> Result<(), String> {
+        let run_kind: Option<String> = self.db.query_row(
+            "SELECT kind FROM records WHERE id=?1", [&timer.run_id], |row| row.get(0)
+        ).optional().map_err(|e| e.to_string())?;
+        if run_kind.as_deref() != Some("run") {
+            return Err("timer run_id must reference a Run".into());
+        }
+        let payload = serde_json::to_string(timer).map_err(|e| e.to_string())?;
+        self.db.execute(
+            "INSERT INTO timer_records(timer_id,run_id,task_key,data_json,updated_at) VALUES(?1,?2,?3,?4,datetime('now')) \
+             ON CONFLICT(timer_id) DO UPDATE SET run_id=excluded.run_id,task_key=excluded.task_key,data_json=excluded.data_json,updated_at=excluded.updated_at",
+            rusqlite::params![timer.timer_id, timer.run_id, timer.task_key, payload],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn load_timer_records(&self, run_id: &str) -> Result<Vec<asterlab_core::timer::TimerRecord>, String> {
+        let mut statement = self.db.prepare(
+            "SELECT data_json FROM timer_records WHERE run_id=?1 ORDER BY task_key,timer_id"
+        ).map_err(|e| e.to_string())?;
+        let rows = statement.query_map([run_id], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        rows.map(|row| {
+            let json = row.map_err(|e| e.to_string())?;
+            serde_json::from_str(&json).map_err(|e| e.to_string())
+        }).collect()
+    }
+
+    pub fn trigger_timers_for_anchor(&mut self, run_id: &str, event_id: &str, task_key: Option<&str>, occurred_at_utc: &str) -> Result<usize, String> {
+        let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        let triggered = Self::trigger_timers_for_anchor_tx(&tx, run_id, event_id, task_key, occurred_at_utc)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(triggered)
+    }
+
+    /// Apply anchor-triggered timers inside the caller's transaction so a saved
+    /// event and its t0 timer start commit atomically. If this fails, the event
+    /// is rolled back and a retry cannot observe an event without its timer.
+    pub(crate) fn trigger_timers_for_anchor_tx(
+        tx: &rusqlite::Transaction<'_>, run_id: &str, event_id: &str,
+        task_key: Option<&str>, occurred_at_utc: &str,
+    ) -> Result<usize, String> {
+        let mut statement = tx.prepare(
+            "SELECT timer_id,data_json FROM timer_records WHERE run_id=?1 ORDER BY timer_id"
+        ).map_err(|e| e.to_string())?;
+        let rows = statement.query_map([run_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?;
+        let mut updates = Vec::new();
+        for row in rows {
+            let (id, json) = row.map_err(|e| e.to_string())?;
+            let mut timer: asterlab_core::timer::TimerRecord = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            if timer.trigger_anchor(event_id, task_key, occurred_at_utc)? {
+                updates.push((id, serde_json::to_string(&timer).map_err(|e| e.to_string())?));
+            }
+        }
+        drop(statement);
+        for (id, payload) in &updates {
+            tx.execute("UPDATE timer_records SET data_json=?1,updated_at=datetime('now') WHERE timer_id=?2", rusqlite::params![payload,id])
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(updates.len())
+    }
     /// Read-only `agent_edit.validate`: resolve a proposal against the current
     /// head and return the preview. Writes nothing; see
     /// `docs/contracts/agent-edit-v1.md`.
@@ -413,5 +501,33 @@ mod tests {
         assert!(v["revision"].as_i64().unwrap() > 0);
         let _ = std::fs::remove_dir_all(&d);
         std::env::remove_var("LABWORKBENCH_DATA_DIR");
+    }
+    #[test]
+    fn timer_records_persist_across_app_reopen_and_t0_triggers_window() {
+        let (dir, run_id) = fixture();
+        let timer = asterlab_core::timer::TimerRecord {
+            timer_id: "window-6h".into(), run_id: run_id.clone(), task_key: "readout".into(),
+            phase_index: 1, mode: asterlab_core::timer::TimerMode::Window, planned_s: Some(21_600),
+            started_at_utc: None, accumulated_s: 0, status: asterlab_core::timer::TimerStatus::Ready,
+            round_index: 0, round_count: None, anchor_event_id: None,
+            anchor_task_key: Some("t0-task".into()),
+        };
+        {
+            let mut app = AppCore::open(&dir).unwrap();
+            app.save_timer_record(&timer).unwrap();
+            app.save_readout(json!({
+                "run_id":run_id,
+                "task_key":"t0-task",
+                "event_type":"measurement",
+                "content":"t0 readout",
+                "measurements":[{"endpoint":"od450","value":1.0}]
+            })).unwrap();
+        }
+        let app = AppCore::open(&dir).unwrap();
+        let restored = app.load_timer_records(&run_id).unwrap();
+        assert_eq!(restored.len(), 1);
+        assert!(restored[0].started_at_utc.is_some());
+        assert_eq!(restored[0].status, asterlab_core::timer::TimerStatus::Running);
+        let _ = fs::remove_dir_all(dir);
     }
 }
