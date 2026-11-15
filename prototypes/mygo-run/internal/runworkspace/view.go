@@ -63,6 +63,9 @@ type State struct {
 
 	// railScrollKey remembers which selection was last scrolled into view.
 	railScrollKey string
+	// railInline reports that the flow rail shares the page scroll at narrow
+	// width, where revealing its selection must not scroll the recording away.
+	railInline bool
 
 	Narrow bool
 
@@ -298,7 +301,10 @@ func View(c *ui.Context, s *State) {
 		}
 		if s.shouldStack(c) {
 			// UX-P1, UX-LAYOUT: at narrow widths put the recording action before
-			// navigation and procedure details in the initial viewport.
+			// navigation and procedure details in the initial viewport. The rail
+			// shares this scroll, so it must not reveal its selection here: that
+			// scrolled the recording's first rows off screen (UX-03).
+			s.railInline = true
 			ui.Scroll(c).Grow(1).Children(func() {
 				ui.Column(c).FillWidth().Gap(12).Padding(12).Children(func() {
 					taskWorkspace(c, s, t, tokens)
@@ -307,6 +313,12 @@ func View(c *ui.Context, s *State) {
 				})
 			})
 			return
+		}
+		if s.railInline {
+			// The rail has its own scroll again after a wider layout: reveal the
+			// selection there instead of keeping the stale inline key (UX-03).
+			s.railInline = false
+			s.railScrollKey = ""
 		}
 		ui.Row(c).Grow(1).MinHeight(0).Children(func() {
 			ui.Box(c).Width(railWidth(c)).Shrink(0).FillHeight().
@@ -488,7 +500,7 @@ func treeLeafItem(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, tit
 	item := components.TreeItemWithLeading(c, label, nil, selected, func(c *ui.Context, size float32) {
 		ui.Box(c).Size(7, 7).Radius(3.5).Background(treeStatusColor(task.Status, t, tokens))
 	}, nil)
-	if selected && s.railScrollKey != task.ID {
+	if !s.railInline && selected && s.railScrollKey != task.ID {
 		item.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
 		s.railScrollKey = task.ID
 	}
@@ -585,14 +597,21 @@ func stepNode(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, step *R
 				}
 			}
 		})
-		if selected && s.railScrollKey != step.TaskKey {
+		if !s.railInline && selected && s.railScrollKey != step.TaskKey {
 			b.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
 			s.railScrollKey = step.TaskKey
 		}
 		if b.Clicked() {
-			s.Selected = step.TaskKey
+			target := step.TaskKey
+			if len(step.Children) > 0 {
+				// A step group's TaskKey is a synthetic step id, not a Core
+				// task key: selecting it cannot survive a session restore
+				// (UX-03). Select the first real task instead.
+				target = step.Children[0].TaskKey
+			}
+			s.Selected = target
 			if s.Callbacks.SelectTask != nil {
-				s.Callbacks.SelectTask(step.TaskKey)
+				s.Callbacks.SelectTask(target)
 			}
 		}
 		// Collapsed by default when multiple tasks; the selected task is always
@@ -627,7 +646,7 @@ func childItem(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *
 		ui.Text(c, label).FontSize(t.Rem(.78)).TextColor(t.TextMuted).
 			SingleLine().Ellipsis("…")
 	})
-	if selected && s.railScrollKey != task.TaskKey {
+	if !s.railInline && selected && s.railScrollKey != task.TaskKey {
 		row.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
 		s.railScrollKey = task.TaskKey
 	}

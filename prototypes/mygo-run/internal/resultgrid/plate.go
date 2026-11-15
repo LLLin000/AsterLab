@@ -424,7 +424,8 @@ func selectedEditor(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens, fi
 		})
 		ui.Spacer(c)
 		ui.Text(c, field.Label).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-		ui.TextInput(c, draft).Width(104).Placeholder("—").
+		input := ui.TextInput(c, draft).Width(104).Placeholder("—").
+			FocusBind(&g.FocusInput, well).
 			OnChange(func() { g.MarkEditDirty() }).
 			OnSubmit(func() {
 				if err := g.CommitEdit(); err != nil {
@@ -435,6 +436,10 @@ func selectedEditor(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens, fi
 				g.BeginEdit(g.Selection.StartRow, g.Selection.StartColumn)
 				g.Error = ""
 			})
+		if well == g.FocusInput {
+			// Focus follows the selected well across a breakpoint rebuild (UX-03).
+			input.AutoFocus()
+		}
 		if field.Unit != "" {
 			ui.Text(c, field.Unit).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 		}
