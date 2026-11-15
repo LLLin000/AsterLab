@@ -43,11 +43,7 @@ func plateSpec() ModuleSpec {
 			v.moduleError(c, err)
 			return
 		}
-		if plate.Format == 96 {
-			v.plate(c, &plate)
-			return
-		}
-		v.genericPlate(c, &plate)
+		v.plate(c, &plate)
 	}
 	return ModuleSpec{
 		Descriptor: builtinDescriptor("plate"),

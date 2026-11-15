@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"image/png"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -269,6 +270,62 @@ func TestPlateZoomOverlaySelectsWellsAndReportsAssignment(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("3 孔") {
 		t.Fatalf("marquee selection missing: %q", tt.Texts())
+	}
+}
+
+func TestPlateFormatsUseEditableOverlay(t *testing.T) {
+	for _, tc := range []struct {
+		format int
+		well   string
+	}{
+		{6, "B3"},
+		{12, "C4"},
+		{24, "D6"},
+		{48, "F8"},
+		{96, "H12"},
+		{384, "P24"},
+	} {
+		tc := tc
+		t.Run(strconv.Itoa(tc.format), func(t *testing.T) {
+			source := strings.Replace(sample, "format: 96", "format: "+strconv.Itoa(tc.format), 1)
+			doc, err := Parse(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var gotModule, gotGroup string
+			var gotWells []string
+			v := &View{
+				Doc:     doc,
+				Allowed: map[string]bool{PermDocumentEdit: true},
+				OnAssignWells: func(moduleID, group string, wells []string) {
+					gotModule, gotGroup = moduleID, group
+					gotWells = append([]string(nil), wells...)
+				},
+			}
+			tt := ui.NewTester(func(c *ui.Context) {
+				c.SetTheme(theme.LightTheme())
+				v.Render(c)
+			}, 1200, 900)
+			tt.Frame()
+			if err := tt.Click("放大孔板"); err != nil {
+				t.Fatalf("%d-well overlay: %v", tc.format, err)
+			}
+			tt.Frame()
+			if err := tt.Click("孔 " + tc.well); err != nil {
+				t.Fatalf("%d-well %s selection: %v", tc.format, tc.well, err)
+			}
+			tt.Frame()
+			if !tt.HasText("1 孔") {
+				t.Fatalf("%d-well selection missing: %q", tc.format, tt.Texts())
+			}
+			if err := tt.Click("分配到 control"); err != nil {
+				t.Fatalf("%d-well assignment: %v", tc.format, err)
+			}
+			if gotModule != "plate-cck8-d3" || gotGroup != "control" ||
+				len(gotWells) != 1 || gotWells[0] != tc.well {
+				t.Fatalf("%d-well assignment = %s/%s/%v", tc.format, gotModule, gotGroup, gotWells)
+			}
+		})
 	}
 }
 

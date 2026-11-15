@@ -12,7 +12,6 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/protocol"
-	"asterlab-mygo-prototype/internal/theme"
 	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 )
 
@@ -168,8 +167,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 		counts[group]++
 		wells[well] = plateui.WellState{Group: group}
 	}
-	// The 96-well editor previews inline; editing happens in the enlarged overlay.
-	// Other formats use genericPlate below and remain read-only.
+	// Every supported format previews inline and opens the format-aware editor.
 	ui.Row(c).FillWidth().Children(func() {
 		ui.Column(c).FillWidth().Gap(t.Space(1.5)).Padding(t.Space(3)).
 			Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
@@ -670,57 +668,6 @@ func groupColor(group string) ui.Color {
 		sum += int(r)
 	}
 	return palette[sum%len(palette)]
-}
-
-// genericPlate renders formats other than 96 as a read-only matrix. Their
-// professional editors are a later phase; the document view must still be
-// faithful and clickable only for details.
-func (v *View) genericPlate(c *ui.Context, p *Plate) {
-	t := c.Theme()
-	tokens := theme.GetTokens(t)
-	geometry, ok := geometryFor(p.Format)
-	if !ok {
-		v.moduleError(c, fmt.Errorf("format %d is not registered", p.Format))
-		return
-	}
-	wells := p.WellGroups()
-	counts := map[string]int{}
-	for _, group := range wells {
-		counts[group]++
-	}
-	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).
-		Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-			ui.Text(c, fmt.Sprintf("%d 孔板", p.Format)).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
-			ui.Text(c, p.ID).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-			ui.Spacer(c)
-			for _, group := range p.GroupNames() {
-				ui.Text(c, fmt.Sprintf("%s · %d", group, counts[group])).
-					FontSize(t.Rem(.72)).TextColor(tokens.NeutralText)
-			}
-		})
-		ui.Grid(c).Columns(geometry.Columns + 1).Gap(3).Children(func() {
-			ui.Text(c, "").FontSize(t.Rem(.65))
-			for col := 1; col <= geometry.Columns; col++ {
-				ui.Text(c, fmt.Sprintf("%d", col)).FontSize(t.Rem(.65)).
-					TextColor(t.TextMuted).Center()
-			}
-			for row := 0; row < geometry.Rows; row++ {
-				row := row
-				ui.Text(c, rowLabel(row)).FontSize(t.Rem(.65)).TextColor(t.TextMuted)
-				for col := 1; col <= geometry.Columns; col++ {
-					well := fmt.Sprintf("%s%d", rowLabel(row), col)
-					group := wells[well]
-					bg := tokens.NeutralBg
-					if group != "" {
-						bg = t.Accent.Alpha(.18)
-					}
-					ui.Box(c).Height(t.Space(3)).Radius(t.Space(.75)).Background(bg).
-						Border(1, t.Border)
-				}
-			}
-		})
-	})
 }
 
 // Assign moves wells into group in the current document and reports the new
