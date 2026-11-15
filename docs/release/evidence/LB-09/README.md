@@ -6,7 +6,7 @@
 
 | 文件 | 命令 | 结果 |
 |---|---|---|
-| `cargo-test-bin-labworkbench.txt` | `cargo test --bin labworkbench` | 46 passed; 0 failed; exit=0 |
+| `cargo-test-bin-labworkbench.txt` | `cargo test --bin labworkbench` | 47 passed; 0 failed; exit=0 |
 | `cargo-test-asterlab-core.txt` | `cargo test --manifest-path crates/asterlab-core/Cargo.toml` | 424 + 3 + 6 + 2 passed; 0 failed; exit=0 |
 | `cli-smoke.txt` | 真实 CLI 跑 LB-07 的空 path HUVEC 设计 | 见下 |
 
@@ -16,6 +16,7 @@
 
 - `crates/asterlab-core/src/asterdoc_path.rs::tests`：派生规则、循环、已嵌套、顶层提升、路径冲突 11 条。
 - `src/cli.rs::tests::asterdoc_derives_missing_step_paths_when_nesting_and_promoting`：派生成功分支（`nest_step` 同时补全父步骤）。
+- `src/cli.rs::tests::asterdoc_nest_materializes_a_pathless_parent_for_a_pathful_child`：父步骤缺路径时同 revision 内补全。
 - `src/cli.rs::tests::asterdoc_rejects_a_derived_step_path_that_collides`：派生路径冲突的明确拒绝分支。
 - `src/cli.rs::tests::asterdoc_rejects_promoting_a_step_that_is_already_top_level`：已在最外层的拒绝。
 - `src/cli.rs::tests::asterdoc_add_step_derives_a_path_when_the_module_omits_one`：创建侧派生。

@@ -13913,6 +13913,20 @@ mod tests {
     }
 
     #[test]
+    fn asterdoc_nest_materializes_a_pathless_parent_for_a_pathful_child() {
+        let source = "```asterlab\nkind: step\nid: parent\nschema: 2\n```\n\
+```asterlab\nkind: step\nid: child\nschema: 2\npath: root/child\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [parent, child]\nedges: []\nbusiness_order: [parent, child]\n```\n";
+        let nested = apply_asterdoc_patch(
+            source,
+            &json!({"type":"nest_step","moduleId":"child","parentId":"parent"}),
+        ).unwrap();
+        let paths = step_paths_by_id(&nested);
+        assert_eq!(paths["parent"], "root/parent");
+        assert_eq!(paths["child"], "root/parent/child");
+    }
+
+    #[test]
     fn asterdoc_rejects_a_derived_step_path_that_collides() {
         let source = "```asterlab\nkind: step\nid: imaging\nschema: 2\npath: root/seed\n```\n\
 ```asterlab\nkind: step\nid: seed\nschema: 2\n```\n\
