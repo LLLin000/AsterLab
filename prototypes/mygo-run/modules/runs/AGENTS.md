@@ -25,3 +25,17 @@ Check the module without opening the app:
 mygo native check            # generate, build and vet: every problem as file:line
 mygo native call Greeter.Greet '{"name": "Ada"}'   # call a method, print its result
 ```
+
+## Module-owned tables
+
+The Rust implementation opens the same SQLite database as Core and creates two
+tables on open, idempotently:
+
+- `timer_records` — the same schema `asterlab-app` creates; timer state is Run
+  data, so both writers must agree on it.
+- `run_archive_state` — the terminal record lifecycle (`recording`,
+  `summarizing`, `signed`, `archived`) plus the signature and archive manifest.
+  Core exposes the transitions as pure functions but does not store them, so
+  this table is where the adapter persists them.
+
+Neither table changes `records` or `user_version`.

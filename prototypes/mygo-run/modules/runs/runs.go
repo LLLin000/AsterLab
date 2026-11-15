@@ -34,6 +34,38 @@ type RunService interface {
 	// Run's frozen AsterDoc. The JSON is the single contract shared with the
 	// CLI and must be decoded, never rebuilt in Go.
 	WorkflowTree(ctx context.Context, runID string) (string, error)
+	// SaveTimer stores one durable timer state for a frozen Run. Core keeps
+	// paused time in AccumulatedS and never infers it from process uptime.
+	SaveTimer(ctx context.Context, timer TimerRecord) (TimerRecord, error)
+	// UpdateTimer applies one lifecycle action (start, pause or advance) at the
+	// caller-supplied UTC instant, stores the result and returns it. The caller
+	// supplies the clock so the transition is deterministic.
+	UpdateTimer(ctx context.Context, input TimerActionInput) (TimerRecord, error)
+	// ListTimers returns the Run's timers ordered by task key then timer id.
+	ListTimers(ctx context.Context, runID string) ([]TimerRecord, error)
+	// ListPantry returns the pantry ledger projection as of the given date.
+	// AsOf is a strict YYYY-MM-DD date; empty means today (UTC).
+	ListPantry(ctx context.Context, query PantryQuery) (PantryLedger, error)
+	// UpsertPantry creates (empty ID) or replaces (existing ID) one ledger row.
+	UpsertPantry(ctx context.Context, input PantryUpsert) (PantryItem, error)
+	// DeletePantry retires one row. The row stays as a tombstone so its printed
+	// label code is never reissued.
+	DeletePantry(ctx context.Context, input PantryDelete) (PantryDeleteResult, error)
+	// ExportPantryLabels returns the stable short-id manifest for label and
+	// printer plugins. It never exposes retail barcode text.
+	ExportPantryLabels(ctx context.Context, query PantryQuery) (PantryLabels, error)
+	// RecordProjection returns Core's single read-only Record projection for one
+	// frozen Run, as the exact CLI JSON text. Decode it in Go; never rebuild the
+	// nested readings, timeline or archive members here.
+	RecordProjection(ctx context.Context, input RecordProjectionInput) (string, error)
+	// NormalizeRuntime recomputes the live mix volume when the actual well count
+	// differs from the frozen plan. It writes nothing.
+	NormalizeRuntime(ctx context.Context, input RuntimeNormalizeInput) (RuntimeNormalizeOutput, error)
+	// SignAndArchiveRun ends a Run's record: a recording state is summarized
+	// first, then signed and archived with a manifest fingerprinting every
+	// linked asset, every note and the projection itself. Signed and archived
+	// states are rejected, never re-signed.
+	SignAndArchiveRun(ctx context.Context, input SignAndArchiveInput) (ArchiveState, error)
 	// Close releases the database connection.
 	Close() error
 }
@@ -87,6 +119,10 @@ type DesignService interface {
 	// WorkflowTree returns Core's read-only hierarchy projection for one
 	// design revision; revision 0 means the latest immutable revision.
 	WorkflowTree(ctx context.Context, designID string, revision uint64) (string, error)
+	// DeriveDesignFromRun derives the next Design revision from one finished
+	// Run's measured parameters and timers. It writes nothing: persist
+	// DesignJSON through SaveDesign with ExpectedRevision.
+	DeriveDesignFromRun(ctx context.Context, input DeriveDesignInput) (DerivedDesign, error)
 	// Close releases the database connection.
 	Close() error
 }
@@ -469,4 +505,205 @@ type AssetLink struct {
 // AssetLinkInput carries one asset reference to persist for a Run.
 type AssetLinkInput struct {
 	Asset Asset `json:"asset"`
+}
+
+// TimerRecord is one durable timer state. Mode is countdown, stopwatch or
+// window; Status is ready, running, paused or completed. PlannedS is the
+// planned duration and is empty for a stopwatch; StartedAtUTC is the running
+// interval's UTC anchor and is empty while not running.
+type TimerRecord struct {
+	TimerID       string  `json:"timerId"`
+	RunID         string  `json:"runId"`
+	TaskKey       string  `json:"taskKey"`
+	PhaseIndex    uint32  `json:"phaseIndex"`
+	Mode          string  `json:"mode"`
+	PlannedS      *uint64 `json:"plannedS,omitempty"`
+	StartedAtUTC  *string `json:"startedAtUtc,omitempty"`
+	AccumulatedS  uint64  `json:"accumulatedS"`
+	Status        string  `json:"status"`
+	RoundIndex    uint32  `json:"roundIndex"`
+	RoundCount    *uint32 `json:"roundCount,omitempty"`
+	AnchorEventID *string `json:"anchorEventId,omitempty"`
+	AnchorTaskKey *string `json:"anchorTaskKey,omitempty"`
+}
+
+// TimerActionInput applies one lifecycle action to a timer. Action is start,
+// pause or advance (advance completes a countdown round when its planned
+// duration has elapsed). NowUTC is a caller-supplied RFC 3339 instant.
+type TimerActionInput struct {
+	Timer  TimerRecord `json:"timer"`
+	Action string      `json:"action"`
+	NowUTC string      `json:"nowUtc"`
+}
+
+// PantryQuery is the shared read input for the pantry ledger and label export.
+// Empty AsOf means today; empty NearExpiryDays means Core's default (14 days).
+// IncludeExhausted is a tri-state: nil keeps exhausted rows (Core's default).
+type PantryQuery struct {
+	ProjectID        string  `json:"projectId,omitempty"`
+	AsOf             string  `json:"asOf,omitempty"`
+	NearExpiryDays   *uint32 `json:"nearExpiryDays,omitempty"`
+	IncludeExhausted *bool   `json:"includeExhausted,omitempty"`
+}
+
+// PantryItem is one ledger row with Core's derived expiry evaluation. The empty
+// strings and nil pointers mean "not recorded", never a guessed value.
+type PantryItem struct {
+	ID                  string  `json:"id"`
+	LabelCode           string  `json:"labelCode"`
+	ProjectID           string  `json:"projectId,omitempty"`
+	Name                string  `json:"name"`
+	Location            string  `json:"location"`
+	PurchasedOn         string  `json:"purchasedOn,omitempty"`
+	OpenedOn            string  `json:"openedOn,omitempty"`
+	ShelfLifeDays       *uint32 `json:"shelfLifeDays,omitempty"`
+	OpenedShelfLifeDays *uint32 `json:"openedShelfLifeDays,omitempty"`
+	Exhausted           bool    `json:"exhausted"`
+	Revision            int64   `json:"revision"`
+	// Status is unopened, opened, near_expiry, expired or exhausted.
+	Status string `json:"status"`
+	// ExpiresOn is the computed YYYY-MM-DD date; empty means no expiry rule.
+	ExpiresOn string `json:"expiresOn,omitempty"`
+	// DaysRemaining is negative once overdue; nil means no expiry rule.
+	DaysRemaining *int64 `json:"daysRemaining,omitempty"`
+	// ExpiryBasis is shelf_life or opened_shelf_life; empty means no rule.
+	ExpiryBasis string `json:"expiryBasis,omitempty"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+}
+
+// PantryLedger is the pantry read model: the pinned evaluation date plus rows.
+type PantryLedger struct {
+	AsOf           string       `json:"asOf"`
+	NearExpiryDays uint32       `json:"nearExpiryDays"`
+	Items          []PantryItem `json:"items"`
+}
+
+// PantryUpsert creates (empty ID) or replaces (existing ID) one ledger row.
+// Omitted optional fields are cleared; ExpectedRevision guards replacement.
+type PantryUpsert struct {
+	ID                  string  `json:"id,omitempty"`
+	ProjectID           string  `json:"projectId,omitempty"`
+	Name                string  `json:"name"`
+	Location            string  `json:"location"`
+	PurchasedOn         string  `json:"purchasedOn,omitempty"`
+	OpenedOn            string  `json:"openedOn,omitempty"`
+	ShelfLifeDays       *uint32 `json:"shelfLifeDays,omitempty"`
+	OpenedShelfLifeDays *uint32 `json:"openedShelfLifeDays,omitempty"`
+	Exhausted           bool    `json:"exhausted"`
+	ExpectedRevision    *int64  `json:"expectedRevision,omitempty"`
+}
+
+// PantryDelete retires one row; ExpectedRevision guards the write.
+type PantryDelete struct {
+	ID               string `json:"id"`
+	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
+}
+
+// PantryDeleteResult confirms the tombstone; LabelCode stays reserved.
+type PantryDeleteResult struct {
+	ID        string `json:"id"`
+	LabelCode string `json:"labelCode"`
+	Revision  int64  `json:"revision"`
+	Deleted   bool   `json:"deleted"`
+}
+
+// PantryLabel is one stable short-id label for an external printer plugin.
+type PantryLabel struct {
+	LabelCode     string `json:"labelCode"`
+	PantryItemID  string `json:"pantryItemId"`
+	Name          string `json:"name"`
+	Location      string `json:"location"`
+	Status        string `json:"status"`
+	ExpiresOn     string `json:"expiresOn,omitempty"`
+	DaysRemaining *int64 `json:"daysRemaining,omitempty"`
+	Revision      int64  `json:"revision"`
+}
+
+// PantryLabels is the label manifest. GeneratedAt makes two calls differ; the
+// label codes and ids are the stable contract.
+type PantryLabels struct {
+	SchemaVersion  int           `json:"schemaVersion"`
+	GeneratedAt    string        `json:"generatedAt"`
+	AsOf           string        `json:"asOf"`
+	NearExpiryDays uint32        `json:"nearExpiryDays"`
+	Labels         []PantryLabel `json:"labels"`
+}
+
+// RecordProjectionInput selects the view and the timer watermark for the
+// read-only Record projection. View is blind or unblinded; empty is unblinded.
+// FOVPerWell 0 means Core's default of one planned slot per well. NowUTC is
+// required to measure a running timer; without it no elapsed time is invented
+// and Core reports a timer_watermark_missing issue.
+type RecordProjectionInput struct {
+	RunID      string `json:"runId"`
+	View       string `json:"view,omitempty"`
+	FOVPerWell uint32 `json:"fovPerWell"`
+	NowUTC     string `json:"nowUtc,omitempty"`
+}
+
+// RuntimeNormalizeInput is the frozen plan next to the actual well count.
+type RuntimeNormalizeInput struct {
+	PlannedWells     uint32  `json:"plannedWells"`
+	ActualWells      uint32  `json:"actualWells"`
+	VolumePerWellUL  float64 `json:"volumePerWellUl"`
+	ExcessRatio      float64 `json:"excessRatio"`
+	DeadVolumeUL     float64 `json:"deadVolumeUl"`
+	PreparedVolumeUL float64 `json:"preparedVolumeUl"`
+}
+
+// RuntimeNormalizeOutput is the recomputed live mix. AdditionalVolumeUL and
+// UnusedVolumeUL are both zero when the plan exactly matches the actual plate.
+type RuntimeNormalizeOutput struct {
+	PlannedVolumeUL    float64 `json:"plannedVolumeUl"`
+	RequiredVolumeUL   float64 `json:"requiredVolumeUl"`
+	DeadVolumeUL       float64 `json:"deadVolumeUl"`
+	AdditionalVolumeUL float64 `json:"additionalVolumeUl"`
+	UnusedVolumeUL     float64 `json:"unusedVolumeUl"`
+}
+
+// SignAndArchiveInput ends a Run's record. SignedAtUTC is a caller-supplied
+// RFC 3339 instant, like every other timestamp; Core has no clock.
+type SignAndArchiveInput struct {
+	RunID       string `json:"runId"`
+	View        string `json:"view,omitempty"`
+	FOVPerWell  uint32 `json:"fovPerWell"`
+	NowUTC      string `json:"nowUtc,omitempty"`
+	SignedBy    string `json:"signedBy"`
+	SignedAtUTC string `json:"signedAtUtc"`
+	Statement   string `json:"statement,omitempty"`
+}
+
+// ArchiveState is the persisted lifecycle of a Run record. Status is recording,
+// summarizing, signed or archived. ManifestJSON is the exact manifest text,
+// empty until archived; NotesLocked is true once archived.
+type ArchiveState struct {
+	RunID        string `json:"runId"`
+	Status       string `json:"status"`
+	SignedBy     string `json:"signedBy,omitempty"`
+	SignedAtUTC  string `json:"signedAtUtc,omitempty"`
+	Statement    string `json:"statement,omitempty"`
+	ManifestJSON string `json:"manifestJson,omitempty"`
+	NotesLocked  bool   `json:"notesLocked"`
+}
+
+// DeriveDesignInput names the finished Run and optional replacements.
+type DeriveDesignInput struct {
+	RunID     string `json:"runId"`
+	Title     string `json:"title,omitempty"`
+	Objective string `json:"objective,omitempty"`
+	Note      string `json:"note,omitempty"`
+}
+
+// DerivedDesign is the next Design version payload. DesignJSON is the exact
+// design data JSON (including the derived_from evidence); persist it through
+// SaveDesign with ExpectedRevision. The Run and its DesignVersion are only read.
+type DerivedDesign struct {
+	DesignID              string `json:"designId"`
+	SourceDesignVersionID string `json:"sourceDesignVersionId"`
+	SourceDesignRevision  int64  `json:"sourceDesignRevision"`
+	ExpectedRevision      int64  `json:"expectedRevision"`
+	SourceRunID           string `json:"sourceRunId"`
+	DesignJSON            string `json:"designJson"`
+	Note                  string `json:"note,omitempty"`
 }
