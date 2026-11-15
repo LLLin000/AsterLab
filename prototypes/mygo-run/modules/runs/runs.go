@@ -45,9 +45,13 @@ type RunService interface {
 	// paused time in AccumulatedS and never infers it from process uptime.
 	SaveTimer(ctx context.Context, timer TimerRecord) (TimerRecord, error)
 	// UpdateTimer applies one lifecycle action (start, pause or advance) at the
-	// caller-supplied UTC instant, stores the result and returns it. The caller
-	// supplies the clock so the transition is deterministic.
-	UpdateTimer(ctx context.Context, input TimerActionInput) (TimerRecord, error)
+	// caller-supplied UTC instant, stores the result and returns it with the
+	// round fact an advance completed. The caller supplies the clock so the
+	// transition is deterministic, and Phases supplies the sequence the advance
+	// walks (empty means the timer's own single phase). A completed round is a
+	// returned fact: append it through CreateExecutionEvent, which is where the
+	// round history is read back from.
+	UpdateTimer(ctx context.Context, input TimerActionInput) (TimerUpdateResult, error)
 	// ListTimers returns the Run's timers ordered by task key then timer id.
 	ListTimers(ctx context.Context, runID string) ([]TimerRecord, error)
 	// ListActiveTimers returns every running timer across all Runs in one call,
@@ -700,13 +704,55 @@ type ActiveTimer struct {
 	TimeAnchorID string  `json:"timeAnchorId,omitempty"`
 }
 
+// TimerPhase is one stage of a timer's plan. Name labels the stage, PlannedS is
+// its countdown duration, Mode is the stage's own mode (countdown, stopwatch or
+// window) and Rounds is how many countdown rounds the stage runs. Nil Rounds
+// means the stage repeats until the caller stops the timer.
+type TimerPhase struct {
+	Name     string  `json:"name"`
+	PlannedS *uint64 `json:"plannedS,omitempty"`
+	Mode     string  `json:"mode"`
+	Rounds   *uint32 `json:"rounds,omitempty"`
+}
+
+// TimerRound is one completed countdown round. PlannedS and ActualS are the
+// round's planned and measured seconds, StartedAtUTC is the round's running
+// anchor and EndedAtUTC the instant the caller advanced it. PhaseCompleted and
+// TimerCompleted say whether the round ended its phase or the whole sequence.
+// It is a returned fact, not stored timer state: append it through
+// CreateExecutionEvent and read the history back from the Run's events.
+type TimerRound struct {
+	PhaseIndex     uint32  `json:"phaseIndex"`
+	RoundIndex     uint32  `json:"roundIndex"`
+	PhaseName      string  `json:"phaseName"`
+	Mode           string  `json:"mode"`
+	PlannedS       *uint64 `json:"plannedS,omitempty"`
+	ActualS        uint64  `json:"actualS"`
+	StartedAtUTC   string  `json:"startedAtUtc"`
+	EndedAtUTC     string  `json:"endedAtUtc"`
+	PhaseCompleted bool    `json:"phaseCompleted"`
+	TimerCompleted bool    `json:"timerCompleted"`
+}
+
+// TimerUpdateResult is the stored timer plus the round an advance completed.
+// Completed is false and Round is the zero value for start, pause, or an
+// advance that had not reached the round's planned duration.
+type TimerUpdateResult struct {
+	Timer     TimerRecord `json:"timer"`
+	Completed bool        `json:"completed"`
+	Round     TimerRound  `json:"round"`
+}
+
 // TimerActionInput applies one lifecycle action to a timer. Action is start,
 // pause or advance (advance completes a countdown round when its planned
-// duration has elapsed). NowUTC is a caller-supplied RFC 3339 instant.
+// duration has elapsed). NowUTC is a caller-supplied RFC 3339 instant. Phases
+// is the sequence an advance walks; empty means the timer's own single phase,
+// exactly as timers created before sequences existed behaved.
 type TimerActionInput struct {
-	Timer  TimerRecord `json:"timer"`
-	Action string      `json:"action"`
-	NowUTC string      `json:"nowUtc"`
+	Timer  TimerRecord  `json:"timer"`
+	Action string       `json:"action"`
+	NowUTC string       `json:"nowUtc"`
+	Phases []TimerPhase `json:"phases,omitempty"`
 }
 
 // PantryQuery is the shared read input for the pantry ledger and label export.

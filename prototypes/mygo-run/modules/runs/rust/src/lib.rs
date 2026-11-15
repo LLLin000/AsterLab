@@ -18,7 +18,10 @@ use asterlab_core::record_projection::{
     RecordArchiveState, RecordCommandError, RecordNote, RecordProjectionInput as CoreProjectionInput,
     RecordStatus,
 };
-use asterlab_core::timer::{TimerMode, TimerRecord as CoreTimerRecord, TimerStatus};
+use asterlab_core::timer::{
+    TimerMode, TimerPhase as CoreTimerPhase, TimerRecord as CoreTimerRecord,
+    TimerRound as CoreTimerRound, TimerSequence, TimerStatus,
+};
 use rusqlite::OptionalExtension;
 
 pub fn make_run_service() -> Result<Arc<dyn RunService>, Error> {
@@ -269,7 +272,7 @@ impl RunService for CoreRunService {
         self.save_timer_impl(timer)
     }
 
-    fn update_timer(&self, _ctx: &Context, input: TimerActionInput) -> Result<TimerRecord, Error> {
+    fn update_timer(&self, _ctx: &Context, input: TimerActionInput) -> Result<TimerUpdateResult, Error> {
         self.update_timer_impl(input)
     }
 
@@ -357,20 +360,31 @@ impl CoreRunService {
         Ok(timer)
     }
 
-    fn update_timer_impl(&self, input: TimerActionInput) -> Result<TimerRecord, Error> {
+    /// Applies one lifecycle action and, for an advance, returns the completed
+    /// round as a fact. The phase plan is supplied by the caller (the record
+    /// keeps only the `phase_index`/`round_index` cursor), so a timer created
+    /// before sequences existed passes no phases and keeps its single phase.
+    fn update_timer_impl(&self, input: TimerActionInput) -> Result<TimerUpdateResult, Error> {
         let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
         let mut timer = timer_to_core(&input.timer)?;
-        match input.action.as_str() {
-            "start" => timer.start(&input.now_utc),
-            "pause" => timer.pause(&input.now_utc),
-            "advance" => timer.advance_countdown(&input.now_utc).map(|_| ()),
+        let round = match input.action.as_str() {
+            "start" => timer.start(&input.now_utc).map(|()| None),
+            "pause" => timer.pause(&input.now_utc).map(|()| None),
+            "advance" => {
+                let sequence = timer_sequence(&input.phases, &timer)?;
+                timer.advance_countdown(&sequence, &input.now_utc)
+            }
             "" => Err("action is required: start, pause or advance".to_owned()),
             other => Err(format!("unsupported timer action {other}; use start, pause or advance")),
         }
-        .map_err(|e| Error::Go(format!("INVALID: {e}")))?;
+        .map_err(|message| Error::Go(format!("INVALID: {message}")))?;
         core.save_timer_record(&timer).map_err(Error::Go)?;
-        Ok(timer_from_core(&timer))
+        Ok(TimerUpdateResult {
+            timer: timer_from_core(&timer),
+            completed: round.is_some(),
+            round: round.as_ref().map(round_from_core).unwrap_or_default(),
+        })
     }
 
     fn list_timers_impl(&self, run_id: &str) -> Result<Vec<TimerRecord>, Error> {
@@ -681,6 +695,42 @@ fn timer_from_core(timer: &CoreTimerRecord) -> TimerRecord {
         round_count: timer.round_count,
         anchor_event_id: timer.anchor_event_id.clone(),
         anchor_task_key: timer.anchor_task_key.clone(),
+    }
+}
+
+/// The phase plan for one action: the caller's explicit sequence when it sent
+/// one, otherwise the single phase the record itself describes. Nothing extra is
+/// stored on the timer row, so an old timer and a one-phase plan behave alike.
+fn timer_sequence(phases: &[TimerPhase], timer: &CoreTimerRecord) -> Result<TimerSequence, Error> {
+    if phases.is_empty() {
+        return Ok(TimerSequence::from_record(timer));
+    }
+    let mut converted = Vec::with_capacity(phases.len());
+    for phase in phases {
+        converted.push(CoreTimerPhase {
+            name: phase.name.clone(),
+            planned_s: phase.planned_s,
+            mode: timer_mode(&phase.mode)?,
+            rounds: phase.rounds,
+        });
+    }
+    TimerSequence::new(converted).map_err(|message| Error::Go(format!("INVALID: {message}")))
+}
+
+/// The completed round as the bridge reports it. Core owns the numbers; the
+/// caller only forwards the fact to `execution_event.create`.
+fn round_from_core(round: &CoreTimerRound) -> TimerRound {
+    TimerRound {
+        phase_index: round.phase_index,
+        round_index: round.round_index,
+        phase_name: round.phase_name.clone(),
+        mode: timer_mode_text(round.mode),
+        planned_s: Some(round.planned_s),
+        actual_s: round.actual_s,
+        started_at_utc: round.started_at_utc.clone(),
+        ended_at_utc: round.ended_at_utc.clone(),
+        phase_completed: round.phase_completed,
+        timer_completed: round.timer_completed,
     }
 }
 
@@ -2151,20 +2201,23 @@ mod tests {
                 timer: timer.clone(),
                 action: "start".into(),
                 now_utc: "2026-11-15T09:00:00Z".into(),
+                phases: vec![],
             })
             .expect("start timer");
-        assert_eq!(started.status, "running");
-        assert_eq!(started.started_at_utc.as_deref(), Some("2026-11-15T09:00:00Z"));
+        assert_eq!(started.timer.status, "running");
+        assert_eq!(started.timer.started_at_utc.as_deref(), Some("2026-11-15T09:00:00Z"));
+        assert!(!started.completed);
 
         let paused = svc
             .update_timer_impl(TimerActionInput {
-                timer: started,
+                timer: started.timer,
                 action: "pause".into(),
                 now_utc: "2026-11-15T09:10:00Z".into(),
+                phases: vec![],
             })
             .expect("pause timer");
-        assert_eq!(paused.status, "paused");
-        assert_eq!(paused.accumulated_s, 600);
+        assert_eq!(paused.timer.status, "paused");
+        assert_eq!(paused.timer.accumulated_s, 600);
 
         let listed = svc.list_timers_impl(&seeded.run_id).expect("list timers");
         assert_eq!(listed.len(), 1);
@@ -2172,11 +2225,88 @@ mod tests {
 
         assert!(svc
             .update_timer_impl(TimerActionInput {
-                timer: paused,
+                timer: paused.timer,
                 action: "warp".into(),
                 now_utc: "2026-11-15T09:10:00Z".into(),
+                phases: vec![],
             })
             .is_err());
+    }
+
+    #[test]
+    fn advance_walks_the_supplied_phases_and_reports_each_completed_round() {
+        let seeded = seed_run(false, false);
+        let svc = service();
+        let timer = svc
+            .save_timer_impl(TimerRecord {
+                timer_id: "timer-seq".into(),
+                run_id: seeded.run_id.clone(),
+                task_key: "stain".into(),
+                mode: "countdown".into(),
+                status: "running".into(),
+                planned_s: Some(5),
+                started_at_utc: Some("2026-11-15T09:00:00Z".into()),
+                ..TimerRecord::default()
+            })
+            .expect("save timer");
+        let phases = vec![
+            TimerPhase { name: "stain".into(), planned_s: Some(5), mode: "countdown".into(), rounds: Some(1) },
+            TimerPhase { name: "wash".into(), planned_s: Some(20), mode: "countdown".into(), rounds: Some(1) },
+        ];
+        let first = svc
+            .update_timer_impl(TimerActionInput {
+                timer: timer.clone(),
+                action: "advance".into(),
+                now_utc: "2026-11-15T09:00:05Z".into(),
+                phases: phases.clone(),
+            })
+            .expect("advance the stain phase");
+        assert!(first.completed);
+        assert_eq!(first.round.phase_name, "stain");
+        assert_eq!((first.round.planned_s, first.round.actual_s), (Some(5), 5));
+        assert!(first.round.phase_completed && !first.round.timer_completed);
+        assert_eq!((first.timer.phase_index, first.timer.round_index), (1, 0));
+        assert_eq!(first.timer.planned_s, Some(20), "the wash phase becomes the current plan");
+        assert_eq!(first.timer.started_at_utc.as_deref(), Some("2026-11-15T09:00:05Z"));
+
+        let second = svc
+            .update_timer_impl(TimerActionInput {
+                timer: first.timer,
+                action: "advance".into(),
+                now_utc: "2026-11-15T09:00:25Z".into(),
+                phases,
+            })
+            .expect("advance the wash phase");
+        assert_eq!(second.round.phase_name, "wash");
+        assert_eq!(second.round.actual_s, 20);
+        assert!(second.round.timer_completed);
+        assert_eq!(second.timer.status, "completed");
+
+        let early = svc
+            .update_timer_impl(TimerActionInput {
+                timer: second.timer.clone(),
+                action: "advance".into(),
+                now_utc: "2026-11-15T09:00:26Z".into(),
+                phases: vec![],
+            })
+            .expect("a completed timer is not an error");
+        assert!(!early.completed, "a completed timer never advances");
+
+        let invalid = svc.update_timer_impl(TimerActionInput {
+            timer,
+            action: "advance".into(),
+            now_utc: "2026-11-15T09:00:05Z".into(),
+            phases: vec![TimerPhase {
+                name: String::new(),
+                planned_s: Some(5),
+                mode: "countdown".into(),
+                rounds: Some(1),
+            }],
+        });
+        assert!(
+            format!("{:?}", invalid.expect_err("an unnamed phase is rejected")).contains("INVALID"),
+            "a malformed plan is INVALID, not a silent single-phase fallback"
+        );
     }
 
     /// A service over its own data directory, so a query across every Run sees
