@@ -1005,3 +1005,287 @@ func TestRelabelUnlabelledAssetSurfacesNotFoundWithoutMutatingRunAssets(t *testi
 		t.Fatalf("form did not retain Core NOT_FOUND error open: open=%v err=%q", a.linkDialogOpen, a.linkDialogErr)
 	}
 }
+
+type readinessTestService struct {
+	runs.DesignService
+	designs         map[string]runs.DesignSnapshot
+	docs            map[string]runs.AsterDocSnapshot
+	failAssess      bool
+	assessCalls     int
+	failCreateRun   bool
+	createRunCalls  int
+	failApply       bool
+	applyCalls      int
+	lastApply       runs.AsterDocCommandInput
+	assessState     string
+}
+
+func (s *readinessTestService) LoadDesign(_ context.Context, id string) (runs.DesignSnapshot, error) {
+	return s.designs[id], nil
+}
+
+func (s *readinessTestService) LoadAsterDoc(_ context.Context, id string) (runs.AsterDocSnapshot, error) {
+	return s.docs[id], nil
+}
+
+func (s *readinessTestService) AssessAsterDoc(_ context.Context, id string, rev uint64) (runs.AsterDocAssessment, error) {
+	s.assessCalls++
+	if s.failAssess {
+		return runs.AsterDocAssessment{}, fmt.Errorf("INTERNAL: assessment service timeout for %s rev %d", id, rev)
+	}
+	st := s.assessState
+	if st == "" {
+		st = "ready"
+	}
+	return runs.AsterDocAssessment{DesignID: id, Revision: rev, State: st}, nil
+}
+
+func (s *readinessTestService) ApplyAsterDocCommand(_ context.Context, in runs.AsterDocCommandInput) (runs.AsterDocSnapshot, error) {
+	s.applyCalls++
+	s.lastApply = in
+	if s.failApply {
+		return runs.AsterDocSnapshot{}, fmt.Errorf("CONFLICT: expected revision %d stale END_OF_APPLY_ERR", in.ExpectedRevision)
+	}
+	doc := s.docs[in.DesignID]
+	doc.Revision++
+	s.docs[in.DesignID] = doc
+	return doc, nil
+}
+
+func (s *readinessTestService) CreateRunFromAsterDoc(_ context.Context, in runs.AsterDocRunInput) (runs.RunSnapshot, error) {
+	s.createRunCalls++
+	if s.failCreateRun {
+		return runs.RunSnapshot{}, fmt.Errorf("CREATE_RUN_CONFLICT: protocol binding mismatch across multiple assay stages and timepoints END_OF_CREATE_RUN_ERROR")
+	}
+	return runs.RunSnapshot{RunID: "run-created", DesignID: in.DesignID, Title: "Created Run", Revision: 1, Status: "running"}, nil
+}
+
+func TestDesignReadinessStatesAndRetryOnFailure(t *testing.T) {
+	raw, err := os.ReadFile("internal/asterdoc/testdata/cck8-experiment.asterml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &readinessTestService{
+		designs:    map[string]runs.DesignSnapshot{"d1": {DesignID: "d1", Title: "D1", Revision: 2}},
+		docs:       map[string]runs.AsterDocSnapshot{"d1": {DesignID: "d1", Revision: 2, Source: string(raw)}},
+		failAssess: true,
+	}
+	a := &app{designSvc: svc, shell: &shell.Shell{Page: shell.Design}}
+	a.loadDesign("d1")
+
+	if a.readiness != nil || !strings.Contains(a.readinessErr, "INTERNAL: assessment service timeout") {
+		t.Fatalf("unexpected readiness after failure: readiness=%+v err=%q", a.readiness, a.readinessErr)
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		designPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+
+	if !tt.HasText("未解析") || !tt.HasText("INTERNAL: assessment service timeout for d1 rev 2") || !tt.HasText("重试") {
+		t.Fatalf("readiness failure missing state/reason/retry: %v", tt.Texts())
+	}
+
+	// Preflight dialog also shows 未解析, reason, and 重试.
+	a.preflightOpen = true
+	tt.Frame()
+	if !tt.HasText("未解析 · 无法获取 Core 校验结果") || !tt.HasText("INTERNAL: assessment service timeout for d1 rev 2") {
+		t.Fatalf("preflight dialog missing reason on assessment failure: %v", tt.Texts())
+	}
+
+	svc.failAssess = false
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if svc.assessCalls < 2 || a.readiness == nil || a.readinessErr != "" {
+		t.Fatalf("retry did not recover readiness: calls=%d readiness=%+v err=%q", svc.assessCalls, a.readiness, a.readinessErr)
+	}
+	if !tt.HasText("就绪") {
+		t.Fatalf("top bar missing 就绪 after retry: %v", tt.Texts())
+	}
+
+	// 校验中 state disables 创建 Run.
+	a.preflightOpen = false
+	a.readinessLoading = true
+	tt.Frame()
+	if !tt.HasText("校验中") {
+		t.Fatalf("missing 校验中 state word: %v", tt.Texts())
+	}
+	_ = tt.Click("创建 Run")
+	tt.Frame()
+	if a.preflightOpen {
+		t.Fatal("创建 Run opened preflight while 校验中")
+	}
+}
+
+func TestDesignCreateRunCommandErrorsAndSilentNoOp(t *testing.T) {
+	raw, err := os.ReadFile("internal/asterdoc/testdata/cck8-experiment.asterml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Empty service/document is never a silent no-op.
+	empty := &app{}
+	if empty.applyDesignRaw(map[string]any{"type": "update_module"}) {
+		t.Fatal("applyDesignRaw succeeded with nil service")
+	}
+	if empty.designDocErr == "" {
+		t.Fatal("applyDesignRaw failed silently with nil service")
+	}
+	empty.designSvc = &readinessTestService{}
+	empty.designDocErr = ""
+	if empty.applyDesignRaw(map[string]any{"type": "update_module"}) {
+		t.Fatal("applyDesignRaw succeeded with nil designDoc")
+	}
+	if empty.designDocErr == "" {
+		t.Fatal("applyDesignRaw failed silently with nil designDoc")
+	}
+
+	svc := &readinessTestService{
+		designs:       map[string]runs.DesignSnapshot{"d1": {DesignID: "d1", Title: "D1", Revision: 2}},
+		docs:          map[string]runs.AsterDocSnapshot{"d1": {DesignID: "d1", Revision: 2, Source: string(raw)}},
+		failCreateRun: true,
+		failApply:     true,
+	}
+	a := &app{designSvc: svc, shell: &shell.Shell{Page: shell.Design}}
+	a.loadDesign("d1")
+
+	a.createRunFromDesignDoc()
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		designPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+	if !tt.HasText("END_OF_CREATE_RUN_ERROR") || !tt.HasText("重试") {
+		t.Fatalf("createRunErr truncated or missing retry: %v", tt.Texts())
+	}
+
+	svc.failCreateRun = false
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if svc.createRunCalls != 2 || a.createRunErr != "" || a.shell.Page != shell.Run {
+		t.Fatalf("createRun retry failed: calls=%d err=%q page=%v", svc.createRunCalls, a.createRunErr, a.shell.Page)
+	}
+
+	// Command failure banner also shows full message + 重试.
+	a.shell.Page = shell.Design
+	if a.applyDesignRaw(map[string]any{"type": "update_module", "moduleId": "step-seed", "properties": map[string]any{"title": "X"}}) {
+		t.Fatal("expected applyDesignRaw failure")
+	}
+	tt.Frame()
+	if !tt.HasText("END_OF_APPLY_ERR") || !tt.HasText("重试") {
+		t.Fatalf("designDocErr missing full text or retry: %v", tt.Texts())
+	}
+	svc.failApply = false
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if svc.applyCalls != 2 || a.designDocErr != "" {
+		t.Fatalf("command retry failed: calls=%d err=%q", svc.applyCalls, a.designDocErr)
+	}
+}
+
+func TestDesignStepSwitchKeepsAndWarnsAboutPropertyDraft(t *testing.T) {
+	raw, err := os.ReadFile("internal/asterdoc/testdata/cck8-experiment.asterml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &readinessTestService{
+		designs: map[string]runs.DesignSnapshot{"d1": {DesignID: "d1", Title: "D1", Revision: 2}},
+		docs:    map[string]runs.AsterDocSnapshot{"d1": {DesignID: "d1", Revision: 2, Source: string(raw)}},
+	}
+	a := &app{designSvc: svc, shell: &shell.Shell{Page: shell.Design}}
+	a.loadDesign("d1")
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		asterDesignPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+
+	if err := tt.Click("seed"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tt.HasText("未保存") {
+		t.Fatalf("unexpected 未保存 before edit: %v", tt.Texts())
+	}
+
+	a.canvasTitle = "seed-edited-draft"
+	tt.Frame()
+	if !tt.HasText("未保存") {
+		t.Fatalf("missing 未保存 hint after editing drawer: %v", tt.Texts())
+	}
+
+	// Switching to another step keeps the draft and warns the operator.
+	if err := tt.Click("read"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.designSelected != "step-read" {
+		t.Fatalf("selected = %q, want step-read", a.designSelected)
+	}
+	if !tt.HasText("未保存") || !tt.HasText("已保留") || !tt.HasText("切回草稿") {
+		t.Fatalf("missing draft switch warning: %v", tt.Texts())
+	}
+
+	// Switching back restores the exact unsaved draft.
+	if err := tt.Click("seed"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.designSelected != "step-seed" || a.canvasTitle != "seed-edited-draft" {
+		t.Fatalf("draft dropped on step switch: selected=%q title=%q", a.designSelected, a.canvasTitle)
+	}
+
+	if err := tt.Click("保存属性"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if svc.applyCalls != 1 || !strings.Contains(svc.lastApply.Command, "seed-edited-draft") {
+		t.Fatalf("save did not submit edited draft: calls=%d cmd=%q", svc.applyCalls, svc.lastApply.Command)
+	}
+	if len(a.stepDrafts) != 0 {
+		t.Fatalf("stepDrafts not cleared after save: %+v", a.stepDrafts)
+	}
+}
+
+func TestDesignerListViewFullErrorRetryAndLoadingState(t *testing.T) {
+	d := designer.New("design-1", "Fallback List", 2, nil)
+	saveCalls := 0
+	d.Callbacks.SaveDesign = func(_ context.Context, in runs.DesignSaveInput) (runs.DesignSnapshot, error) {
+		saveCalls++
+		return runs.DesignSnapshot{DesignID: in.DesignID, Revision: in.ExpectedRevision + 1}, nil
+	}
+	d.Touch()
+	d.SaveState = designer.SaveError
+	d.Error = "CONFLICT: design revision 2 differs from Core revision 4 because another session committed changes TAIL_END_UNCLIPPED"
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		designer.ListView(c, d)
+	}, 1360, 880)
+	tt.Frame()
+
+	if !tt.HasText("未保存") || !tt.HasText("TAIL_END_UNCLIPPED") || !tt.HasText("重试") {
+		t.Fatalf("ListView missing full error, 未保存, or 重试: %v", tt.Texts())
+	}
+
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if saveCalls != 1 || d.Error != "" || d.SaveState != designer.SaveSaved {
+		t.Fatalf("ListView retry failed: calls=%d err=%q state=%s", saveCalls, d.Error, d.SaveState)
+	}
+
+	d.Loading = true
+	tt.Frame()
+	if !tt.HasText("校验中") {
+		t.Fatalf("ListView missing 校验中 while loading: %v", tt.Texts())
+	}
+}

@@ -263,6 +263,7 @@ func ListView(c *ui.Context, d *Designer) {
 
 	ui.Column(c).Fill().Background(c.Theme().Background).Children(func() {
 		listToolbar(c, d)
+		listErrorBanner(c, d)
 		budgetBar(c, d)
 		sectionSwitch(c, d)
 		ui.Box(c).Fill().Grow(1).MinHeight(0).Children(func() {
@@ -287,26 +288,53 @@ func ListView(c *ui.Context, d *Designer) {
 
 func listToolbar(c *ui.Context, d *Designer) {
 	t := c.Theme()
-	ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(4)).Background(t.Surface).
+	ui.Row(c).FillWidth().Wrap().Padding(t.Space(2), t.Space(4)).Background(t.Surface).
 		Border(1, t.Border).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 		components.Text(c, d.listTitle()).FontSize(t.Rem(1.05)).FontWeight(600).TextColor(t.Text)
 		components.Text(c, fmt.Sprintf("rev %d", d.Revision)).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 		listStateChip(c, d)
 		ui.Spacer(c)
-		if d.Error != "" {
-			components.Text(c, "未保存 · "+d.Error).TextColor(t.Danger).FontSize(t.Rem(.75)).
-				SingleLine().Ellipsis("…").MaxWidth(360)
-		}
 		if components.IconButton(c, lucide.Workflow(), "画布视图", components.IconButtonCompact).Clicked() {
 			d.CanvasMode = true
 		}
 		if components.IconButton(c, lucide.Save(), "保存", components.IconButtonCompact).Clicked() {
 			d.Save(context.Background())
 		}
-		if components.Button(c, "创建 Run", components.ButtonPrimary).Clicked() {
+		createBtn := components.Button(c, "创建 Run", components.ButtonPrimary)
+		createBtn.Disabled(d.Loading)
+		if createBtn.Clicked() && !d.Loading {
 			d.RequestCreateRun(context.Background())
 		}
 	})
+}
+
+func listErrorBanner(c *ui.Context, d *Designer) {
+	if d.Error == "" {
+		return
+	}
+	t := c.Theme()
+	ui.Row(c).FillWidth().Padding(t.Space(1.5), t.Space(4)).
+		Background(t.Danger.Alpha(.08)).Border(1, t.Danger.Alpha(.25)).
+		AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+			components.Text(c, "未保存 · "+d.Error).TextColor(t.Danger).FontSize(t.Rem(.78))
+		})
+		if components.Button(c, "重试", components.ButtonSecondary).Clicked() {
+			d.retryListError(context.Background())
+		}
+	})
+}
+
+func (d *Designer) retryListError(ctx context.Context) {
+	if d.Dirty {
+		d.Save(ctx)
+		return
+	}
+	if d.Revision == 0 && d.DesignID != "" {
+		d.Load(ctx, d.DesignID)
+		return
+	}
+	d.RequestCreateRun(ctx)
 }
 
 func (d *Designer) listTitle() string {
@@ -320,6 +348,8 @@ func (d *Designer) listTitle() string {
 // the same one the canvas toolbar's save badge uses.
 func listStateChip(c *ui.Context, d *Designer) {
 	switch {
+	case d.Loading:
+		components.Badge(c, "校验中", components.BadgeOptions{Tone: components.BadgeNeutral})
 	case d.SaveState == SaveSaving:
 		components.Badge(c, "正在保存…", components.BadgeOptions{Tone: components.BadgeNeutral})
 	case d.SaveState == SaveError:
