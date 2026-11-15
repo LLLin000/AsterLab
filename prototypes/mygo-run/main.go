@@ -41,6 +41,13 @@ import (
 
 type sample struct{ id, value string }
 
+type stepPropDraft struct {
+	Title      string
+	Assay      string
+	Timepoints string
+	Tasks      []canvasTaskDraft
+}
+
 type pdfExportResult struct {
 	path     string
 	err      error
@@ -73,10 +80,13 @@ type app struct {
 	designLoadErr              string
 	designLoadID               string
 	designDocLoadFailed        bool
+	retryDesignDoc             func()
 	pendingRunID               string
 	projects                   []runs.ProjectSummary
 	protocols                  []runs.ProtocolSummary
 	readiness                  *runs.AsterDocAssessment
+	readinessLoading           bool
+	readinessErr               string
 	preflightOpen              bool
 	preflightRisk              bool
 	newDesignOpen              bool
@@ -125,6 +135,8 @@ type app struct {
 	canvasChecks               []canvasCheckDraft
 	canvasUses                 []canvasUseDraft
 	canvasUsePick              string
+	stepDrafts                 map[string]stepPropDraft
+	stepPropSaved              string
 	noteDraft                  string
 	noteRunID                  string
 	noteDirty                  bool
@@ -1645,6 +1657,11 @@ func (a *app) loadDesign(id string) {
 	a.designView = nil
 	a.designDocErr = ""
 	a.designDocLoadFailed = false
+	a.retryDesignDoc = nil
+	a.createRunErr = ""
+	a.readiness = nil
+	a.readinessErr = ""
+	a.readinessLoading = false
 	a.designHistory = nil
 	a.designFuture = nil
 	a.resetAsterDraftHistory()
@@ -1665,6 +1682,11 @@ func (a *app) loadDesign(id string) {
 	// Keep per-design layouts loaded from the session; selecting a design uses
 	// its own saved coordinates. (no-op)
 	a.designSelected = ""
+	a.canvasSelLoaded = ""
+	a.stepPropSaved = ""
+	if prevDoc == nil || prevDoc.DesignID != id {
+		a.stepDrafts = nil
+	}
 	if doc, docErr := a.designSvc.LoadAsterDoc(context.Background(), id); docErr != nil {
 		a.designDocErr = state.MapError(docErr).Error()
 		a.designDocLoadFailed = true
@@ -1673,6 +1695,7 @@ func (a *app) loadDesign(id string) {
 		}
 	} else if doc.Revision > 0 {
 		a.designDoc = &doc
+		a.stepDrafts = nil
 		a.refreshReadiness()
 	}
 	a.preflightOpen = false
@@ -1980,13 +2003,26 @@ func (a *app) applyDesignCommand(kind, moduleID, group string, wells []string) {
 // applyDesignRaw sends one semantic command and reloads the document on
 // success. It is the only write seam for professional editors.
 func (a *app) applyDesignRaw(command map[string]any) bool {
-	if a.designSvc == nil || a.designDoc == nil {
+	if a.designSvc == nil {
+		a.designDocErr = "设计服务不可用，无法保存修改"
+		a.designDocLoadFailed = false
+		a.retryDesignDoc = func() { _ = a.applyDesignRaw(command) }
+		a.err = a.designDocErr
+		return false
+	}
+	if a.designDoc == nil {
+		a.designDocErr = "尚未加载 AsterDoc 设计文档，无法应用修改"
+		a.designDocLoadFailed = false
+		a.retryDesignDoc = func() { _ = a.applyDesignRaw(command) }
+		a.err = a.designDocErr
 		return false
 	}
 	previous := *a.designDoc
 	raw, err := json.Marshal(command)
 	if err != nil {
 		a.designDocErr = err.Error()
+		a.designDocLoadFailed = false
+		a.retryDesignDoc = func() { _ = a.applyDesignRaw(command) }
 		return false
 	}
 	updated, err := a.designSvc.ApplyAsterDocCommand(context.Background(), runs.AsterDocCommandInput{
@@ -1995,10 +2031,13 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 	})
 	if err != nil {
 		a.designDocErr = state.MapError(err).Error()
+		a.designDocLoadFailed = false
+		a.retryDesignDoc = func() { _ = a.applyDesignRaw(command) }
 		return false
 	}
 	a.designDocErr = ""
 	a.designDocLoadFailed = false
+	a.retryDesignDoc = nil
 	a.designHistory = append(a.designHistory, previous)
 	a.designFuture = nil
 	a.resetAsterDraftHistory()
@@ -2035,12 +2074,15 @@ func (a *app) designUndo() {
 	})
 	if err != nil {
 		a.designDocErr = state.MapError(err).Error()
+		a.designDocLoadFailed = false
+		a.retryDesignDoc = func() { a.designUndo() }
 		return
 	}
 	a.designHistory = a.designHistory[:len(a.designHistory)-1]
 	a.designFuture = append(a.designFuture, current)
 	a.designDocErr = ""
 	a.designDocLoadFailed = false
+	a.retryDesignDoc = nil
 	a.designDoc = &updated
 	a.designView = nil
 	a.designCanvas = nil
@@ -2073,12 +2115,15 @@ func (a *app) designRedo() {
 	})
 	if err != nil {
 		a.designDocErr = state.MapError(err).Error()
+		a.designDocLoadFailed = false
+		a.retryDesignDoc = func() { a.designRedo() }
 		return
 	}
 	a.designFuture = a.designFuture[:len(a.designFuture)-1]
 	a.designHistory = append(a.designHistory, current)
 	a.designDocErr = ""
 	a.designDocLoadFailed = false
+	a.retryDesignDoc = nil
 	a.designDoc = &updated
 	a.designView = nil
 	a.designCanvas = nil
@@ -2096,9 +2141,15 @@ func (a *app) designRedo() {
 }
 
 func (a *app) createRunFromDesignDoc() {
-	if a.designSvc == nil || a.designDoc == nil {
+	if a.designSvc == nil {
+		a.createRunErr = "设计服务不可用，无法创建 Run"
 		return
 	}
+	if a.designDoc == nil {
+		a.createRunErr = "尚未加载 AsterDoc 设计文档，无法创建 Run"
+		return
+	}
+	a.createRunErr = ""
 	acknowledged := []string{}
 	if a.preflightRisk && a.readiness != nil {
 		acknowledged = append(acknowledged, a.readiness.Warnings...)
@@ -2853,13 +2904,24 @@ func batchGridCells(cells []runs.ResultCell) []resultgrid.Cell {
 }
 
 func (a *app) refreshReadiness() {
-	if a.designSvc == nil || a.designDoc == nil {
+	a.readinessErr = ""
+	if a.designDoc == nil {
+		a.readinessLoading = false
 		a.readiness = nil
 		return
 	}
+	if a.designSvc == nil {
+		a.readinessLoading = false
+		a.readiness = nil
+		a.readinessErr = "设计服务不可用，无法获取 Core 校验结果"
+		return
+	}
+	a.readinessLoading = true
 	assessment, err := a.designSvc.AssessAsterDoc(context.Background(), a.designDoc.DesignID, a.designDoc.Revision)
+	a.readinessLoading = false
 	if err != nil {
 		a.readiness = nil
+		a.readinessErr = state.MapError(err).Error()
 		return
 	}
 	a.readiness = &assessment
@@ -2876,9 +2938,33 @@ func (a *app) renderPreflight(c *ui.Context) {
 			ui.Text(c, "创建运行前检查").FontSize(15).Bold()
 			ui.Text(c, fmt.Sprintf("文档 rev %d · 校验由 Rust Core 生成", a.designDoc.Revision)).
 				FontSize(11).TextColor(t.TextMuted)
+			if a.readinessLoading {
+				ui.Text(c, "校验中 · 正在等待 Core 校验结果…").FontSize(12).TextColor(t.TextMuted)
+				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(8).Children(func() {
+					if components.Button(c, "返回修改", components.ButtonSecondary).Clicked() {
+						a.preflightOpen = false
+					}
+					create := components.Button(c, "创建 Run", components.ButtonPrimary)
+					create.Disabled(true)
+				})
+				return
+			}
 			assessment := a.readiness
 			if assessment == nil {
-				ui.Text(c, "无法获取 Core 校验结果").FontSize(12).TextColor(t.Danger)
+				ui.Text(c, "未解析 · 无法获取 Core 校验结果").FontSize(12).Bold().TextColor(t.Danger)
+				if a.readinessErr != "" {
+					ui.Box(c).FillWidth().Padding(6, 8).Radius(t.Space(1)).Background(t.Danger.Alpha(.06)).Children(func() {
+						ui.Text(c, a.readinessErr).FontSize(12).TextColor(t.Danger)
+					})
+				}
+				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(8).Children(func() {
+					if components.Button(c, "返回修改", components.ButtonSecondary).Clicked() {
+						a.preflightOpen = false
+					}
+					if components.Button(c, "重试", components.ButtonPrimary).Clicked() {
+						a.refreshReadiness()
+					}
+				})
 				return
 			}
 			if len(assessment.Errors) > 0 {

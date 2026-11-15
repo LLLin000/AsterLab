@@ -28,23 +28,67 @@ func renderAgentProposal(c *ui.Context,a *app) {
 	if s.Open {components.Dialog(c,&s.Open,components.DialogOptions{Label:"Agent 提案"},func(panel ui.Element){panel.FillWidth().MaxWidth(720).MaxWidthPercent(94).MaxHeightPercent(90).Children(func(){agentedit.View(c,s)})});if !s.Open{s.Closed=true}}
 }
 
-func renderDesignErrorBanner(c *ui.Context, a *app, message string, showRetry bool) {
+func renderDesignErrorBanner(c *ui.Context, message string, onRetry func()) {
 	if message == "" {
 		return
 	}
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
 	ui.Row(c).FillWidth().Padding(6, 12).Background(tokens.DangerBg).
-		AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		Border(1, t.Danger.Alpha(.25)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 		ui.Box(c).Grow(1).MinWidth(0).Children(func() {
 			ui.Text(c, message).FontSize(float32(tokens.TextMeta)).TextColor(tokens.DangerText)
 		})
-		if showRetry && a.retryDesignID() != "" {
+		if onRetry != nil {
 			if components.Button(c, "重试", components.ButtonSecondary).Clicked() {
-				a.loadDesign(a.retryDesignID())
+				onRetry()
 			}
 		}
 	})
+}
+
+func (a *app) retryDesignFunc() func() {
+	id := a.retryDesignID()
+	if id == "" {
+		return nil
+	}
+	return func() { a.loadDesign(id) }
+}
+
+func (a *app) designDocRetryFunc() func() {
+	if a.designDocLoadFailed {
+		return a.retryDesignFunc()
+	}
+	if a.retryDesignDoc != nil {
+		return a.retryDesignDoc
+	}
+	return a.retryDesignFunc()
+}
+
+func designReadinessState(a *app) (string, components.BadgeTone) {
+	if a.readinessLoading {
+		return "校验中", components.BadgeNeutral
+	}
+	if a.readinessErr != "" {
+		return "未解析", components.BadgeWarning
+	}
+	if a.readiness == nil {
+		return "草稿", components.BadgeNeutral
+	}
+	switch a.readiness.State {
+	case "loading", "checking":
+		return "校验中", components.BadgeNeutral
+	case "unresolved":
+		return "未解析", components.BadgeWarning
+	case "incomplete":
+		return "不完整", components.BadgeDanger
+	case "warning":
+		return "待确认", components.BadgeWarning
+	case "ready":
+		return "就绪", components.BadgeSuccess
+	default:
+		return "草稿", components.BadgeNeutral
+	}
 }
 
 func designPage(c *ui.Context, a *app) {
@@ -52,13 +96,14 @@ func designPage(c *ui.Context, a *app) {
 		asterDesignPage(c, a)
 		return
 	}
+	retryLoad := a.retryDesignFunc()
 	if a.designer != nil {
 		ui.Column(c).Fill().Children(func() {
 			if a.designLoadErr != "" {
-				renderDesignErrorBanner(c, a, "设计加载失败："+a.designLoadErr, true)
+				renderDesignErrorBanner(c, "设计加载失败："+a.designLoadErr, retryLoad)
 			}
 			if a.designDocErr != "" {
-				renderDesignErrorBanner(c, a, "AsterDoc 设计无法读取："+a.designDocErr, true)
+				renderDesignErrorBanner(c, "AsterDoc 设计无法读取："+a.designDocErr, retryLoad)
 			}
 			ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 				// The step-card list is the Design surface's default; the workflow
@@ -123,20 +168,10 @@ func asterDesignPage(c *ui.Context, a *app) {
 			ui.Text(c, "AsterDoc 设计").FontSize(16).Bold().TextColor(t.Text)
 			ui.Text(c, fmt.Sprintf("rev %d", a.designDoc.Revision)).FontSize(11).
 				TextColor(t.TextMuted)
-			if a.readiness != nil {
-				label, color := "草稿", t.TextMuted
-				switch a.readiness.State {
-				case "incomplete":
-					label = "不完整"
-					color = t.Danger
-				case "warning":
-					label = "待确认"
-					color = t.Warning
-				case "ready":
-					label = "就绪"
-					color = t.Success
-				}
-				ui.Text(c, label).FontSize(10).Bold().TextColor(color)
+			stateLabel, stateTone := designReadinessState(a)
+			components.Badge(c, stateLabel, components.BadgeOptions{Tone: stateTone})
+			if a.hasUnsavedStepDrafts(doc) {
+				components.Badge(c, "未保存", components.BadgeOptions{Tone: components.BadgeWarning})
 			}
 			tab := a.designTab
 			components.Tabs(c, &tab, components.TabsSegmented, "流程", "文档")
@@ -152,21 +187,25 @@ func asterDesignPage(c *ui.Context, a *app) {
 			if redo.Clicked() {
 				a.designRedo()
 			}
-			if a.createRunErr != "" {
-				ui.Text(c, a.createRunErr).FontSize(11).TextColor(t.Danger).
-					SingleLine().Ellipsis("…").MaxWidth(360)
-			}
-			if components.Button(c, "创建 Run", components.ButtonPrimary).Clicked() {
+			createBtn := components.Button(c, "创建 Run", components.ButtonPrimary)
+			createBtn.Disabled(stateLabel == "校验中")
+			if createBtn.Clicked() && stateLabel != "校验中" {
 				a.preflightRisk = false
 				a.preflightOpen = true
 			}
 			renderAgentProposal(c,a)
 		})
 		if a.designLoadErr != "" {
-			renderDesignErrorBanner(c, a, "设计加载失败："+a.designLoadErr, true)
+			renderDesignErrorBanner(c, "设计加载失败："+a.designLoadErr, a.retryDesignFunc())
 		}
 		if a.designDocErr != "" {
-			renderDesignErrorBanner(c, a, a.designDocErr, a.designDocLoadFailed)
+			renderDesignErrorBanner(c, a.designDocErr, a.designDocRetryFunc())
+		}
+		if a.readinessErr != "" {
+			renderDesignErrorBanner(c, "Core 校验失败："+a.readinessErr, func() { a.refreshReadiness() })
+		}
+		if a.createRunErr != "" {
+			renderDesignErrorBanner(c, "创建 Run 失败："+a.createRunErr, func() { a.createRunFromDesignDoc() })
 		}
 		if a.designTab == 0 {
 			renderAsterStepList(c, a, doc)
@@ -249,11 +288,13 @@ func renderAsterStepList(c *ui.Context, a *app, doc *asterdoc.Document) {
 			stepPaths[path] = true
 		}
 	}
-	selected := steps[a.designSelected]
 	narrow := designNarrow(c)
 	drawList := func() {
 		ui.Column(c).FillWidth().Padding(t.Space(2), t.Space(3)).Gap(t.Space(1)).
 			Children(func() {
+				if unsaved := a.otherUnsavedStepIDs(order, steps); len(unsaved) > 0 {
+					renderUnsavedDraftWarning(c, a, steps, unsaved)
+				}
 				for i, id := range order {
 					step := steps[id]
 					if step == nil {
@@ -275,8 +316,10 @@ func renderAsterStepList(c *ui.Context, a *app, doc *asterdoc.Document) {
 							TextColor(t.TextMuted).FontFeatures("tnum")
 						ui.Box(c).Width(t.Space(float32(strings.Count(path, "/")) * 2)).Shrink(0)
 						if components.Button(c, title, components.ButtonSecondary).Clicked() {
-							a.designSelected = id
-							a.canvasSelLoaded = ""
+							a.selectAsterStep(steps[a.designSelected], step)
+						}
+						if a.stepHasUnsavedDraft(step) {
+							components.Badge(c, "未保存", components.BadgeOptions{Tone: components.BadgeWarning})
 						}
 						if summary := stepParameterSummary(doc, step); summary != "" {
 							ui.Text(c, summary).FontSize(t.Rem(.78)).TextColor(t.TextMuted).
@@ -335,7 +378,7 @@ func renderAsterStepList(c *ui.Context, a *app, doc *asterdoc.Document) {
 			ui.Scroll(c).Fill().Children(func() {
 				ui.Column(c).FillWidth().Children(func() {
 					drawList()
-					if selected != nil {
+					if selected := steps[a.designSelected]; selected != nil {
 						stepPropertiesDrawer(c, a, doc, selected, true)
 					}
 				})
@@ -344,10 +387,184 @@ func renderAsterStepList(c *ui.Context, a *app, doc *asterdoc.Document) {
 		}
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 			ui.Scroll(c).Grow(1).MinWidth(0).Children(drawList)
-			if selected != nil {
+			if selected := steps[a.designSelected]; selected != nil {
 				stepPropertiesDrawer(c, a, doc, selected, false)
 			}
 		})
+	})
+}
+
+func stepBaseProps(step *asterdoc.Module) stepPropDraft {
+	draft := stepPropDraft{
+		Title:      moduleString(step.Data, "title"),
+		Assay:      moduleString(step.Data, "assay"),
+		Timepoints: strings.Join(moduleStrings(step.Data, "timepoints"), ", "),
+	}
+	if tasks, ok := step.Data["tasks"].([]any); ok {
+		for _, raw := range tasks {
+			task, _ := raw.(map[string]any)
+			draft.Tasks = append(draft.Tasks, canvasTaskDraft{
+				ID: moduleString(task, "id"), Title: moduleString(task, "title"),
+				Kind: moduleString(task, "kind"), Readout: moduleString(task, "readout"),
+			})
+		}
+	}
+	return draft
+}
+
+func stepPropDraftEqual(x, y stepPropDraft) bool {
+	if x.Title != y.Title || x.Assay != y.Assay || x.Timepoints != y.Timepoints || len(x.Tasks) != len(y.Tasks) {
+		return false
+	}
+	for i := range x.Tasks {
+		if x.Tasks[i] != y.Tasks[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *app) currentDrawerDraft() stepPropDraft {
+	return stepPropDraft{
+		Title:      a.canvasTitle,
+		Assay:      a.canvasAssay,
+		Timepoints: a.canvasTimepoints,
+		Tasks:      append([]canvasTaskDraft(nil), a.canvasTasks...),
+	}
+}
+
+func (a *app) applyDrawerDraft(stepID string, d stepPropDraft) {
+	a.canvasSelLoaded = stepID
+	a.canvasTitle = d.Title
+	a.canvasAssay = d.Assay
+	a.canvasTimepoints = d.Timepoints
+	a.canvasTasks = append([]canvasTaskDraft(nil), d.Tasks...)
+}
+
+func (a *app) loadStepDraft(step *asterdoc.Module) {
+	if step == nil {
+		return
+	}
+	if draft, ok := a.stepDrafts[step.ID]; ok {
+		a.applyDrawerDraft(step.ID, draft)
+		return
+	}
+	a.applyDrawerDraft(step.ID, stepBaseProps(step))
+}
+
+func (a *app) isCurrentDrawerDirty(step *asterdoc.Module) bool {
+	if step == nil || a.canvasSelLoaded != step.ID {
+		return false
+	}
+	return !stepPropDraftEqual(a.currentDrawerDraft(), stepBaseProps(step))
+}
+
+func (a *app) syncCurrentStepDraft(step *asterdoc.Module) bool {
+	if step == nil || a.canvasSelLoaded != step.ID {
+		return false
+	}
+	cur := a.currentDrawerDraft()
+	base := stepBaseProps(step)
+	if stepPropDraftEqual(cur, base) {
+		delete(a.stepDrafts, step.ID)
+		return false
+	}
+	if a.stepDrafts == nil {
+		a.stepDrafts = map[string]stepPropDraft{}
+	}
+	a.stepDrafts[step.ID] = cur
+	return true
+}
+
+func (a *app) selectAsterStep(prev, next *asterdoc.Module) {
+	if next == nil {
+		return
+	}
+	if prev != nil && prev.ID == next.ID {
+		if a.canvasSelLoaded != next.ID {
+			a.loadStepDraft(next)
+		}
+		return
+	}
+	if prev != nil {
+		a.syncCurrentStepDraft(prev)
+	}
+	a.designSelected = next.ID
+	a.stepPropSaved = ""
+	a.loadStepDraft(next)
+}
+
+func (a *app) stepHasUnsavedDraft(step *asterdoc.Module) bool {
+	if step == nil {
+		return false
+	}
+	if a.canvasSelLoaded == step.ID {
+		return !stepPropDraftEqual(a.currentDrawerDraft(), stepBaseProps(step))
+	}
+	_, ok := a.stepDrafts[step.ID]
+	return ok
+}
+
+func (a *app) hasUnsavedStepDrafts(doc *asterdoc.Document) bool {
+	if doc == nil {
+		return false
+	}
+	for i := range doc.Modules {
+		if doc.Modules[i].Kind == "step" && a.stepHasUnsavedDraft(&doc.Modules[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *app) otherUnsavedStepIDs(order []string, steps map[string]*asterdoc.Module) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range order {
+		if id == a.designSelected || steps[id] == nil {
+			continue
+		}
+		if _, ok := a.stepDrafts[id]; ok {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+	for id := range a.stepDrafts {
+		if id != a.designSelected && !seen[id] && steps[id] != nil {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func renderUnsavedDraftWarning(c *ui.Context, a *app, steps map[string]*asterdoc.Module, ids []string) {
+	t := c.Theme()
+	tokens := theme.GetTokens(t)
+	titles := make([]string, 0, len(ids))
+	for _, id := range ids {
+		title := ""
+		if step := steps[id]; step != nil {
+			title = moduleString(step.Data, "title")
+		}
+		if title == "" {
+			title = "未命名步骤"
+		}
+		titles = append(titles, title)
+	}
+	ui.Row(c).FillWidth().Wrap().Padding(6, 12).Background(tokens.WarningBg).
+		Border(1, t.Warning.Alpha(.3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+			ui.Text(c, fmt.Sprintf("未保存 · 步骤「%s」有未保存的属性草稿，已保留", strings.Join(titles, "、"))).
+				FontSize(float32(tokens.TextMeta)).TextColor(tokens.WarningText)
+		})
+		if target := steps[ids[0]]; target != nil {
+			if components.Button(c, "切回草稿", components.ButtonSecondary).Clicked() {
+				a.selectAsterStep(steps[a.designSelected], target)
+			}
+		}
+		if components.Button(c, "放弃草稿", components.ButtonGhost).Clicked() {
+			delete(a.stepDrafts, ids[0])
+		}
 	})
 }
 
@@ -381,28 +598,23 @@ func (a *app) applyStepListCommand(action string, wf *asterdoc.Module, stepID, p
 		workflowID = wf.ID
 	}
 	if command, ok := designer.StepEditCommand(action, workflowID, stepID, parentID, order); ok && a.applyDesignRaw(command) && action == "delete" {
-		a.designSelected = ""
-		a.canvasSelLoaded = ""
+		delete(a.stepDrafts, stepID)
+		if a.designSelected == stepID {
+			a.designSelected = ""
+			a.canvasSelLoaded = ""
+		}
 	}
 }
 
 func stepPropertiesDrawer(c *ui.Context, a *app, doc *asterdoc.Document, step *asterdoc.Module, bottom bool) {
 	t := c.Theme()
+	tokens := theme.GetTokens(t)
 	if a.canvasSelLoaded != step.ID {
-		a.canvasSelLoaded = step.ID
-		a.canvasTitle = moduleString(step.Data, "title")
-		a.canvasAssay = moduleString(step.Data, "assay")
-		a.canvasTimepoints = strings.Join(moduleStrings(step.Data, "timepoints"), ", ")
-		a.canvasTasks = nil
-		if tasks, ok := step.Data["tasks"].([]any); ok {
-			for _, raw := range tasks {
-				task, _ := raw.(map[string]any)
-				a.canvasTasks = append(a.canvasTasks, canvasTaskDraft{
-					ID: moduleString(task, "id"), Title: moduleString(task, "title"),
-					Kind: moduleString(task, "kind"), Readout: moduleString(task, "readout"),
-				})
-			}
-		}
+		a.loadStepDraft(step)
+	}
+	dirty := a.isCurrentDrawerDirty(step)
+	if dirty {
+		a.stepPropSaved = ""
 	}
 	panel := ui.Column(c).Width(t.Space(90)).MinWidth(320).Shrink(0).FillHeight().
 		Padding(t.Space(3)).Gap(t.Space(1.5)).Background(t.Surface).Border(1, t.Border)
@@ -411,7 +623,15 @@ func stepPropertiesDrawer(c *ui.Context, a *app, doc *asterdoc.Document, step *a
 			Background(t.Surface).Border(1, t.Border)
 	}
 	panel.Children(func() {
-		ui.Text(c, "步骤属性").FontSize(t.Rem(.95)).Bold().TextColor(t.Text)
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+			ui.Text(c, "步骤属性").FontSize(t.Rem(.95)).Bold().TextColor(t.Text)
+			ui.Spacer(c)
+			if dirty {
+				components.Badge(c, "未保存", components.BadgeOptions{Tone: components.BadgeWarning})
+			} else if a.stepPropSaved == step.ID {
+				components.Badge(c, "已保存", components.BadgeOptions{Tone: components.BadgeSuccess})
+			}
+		})
 		ui.Text(c, "标题").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 		ui.TextInput(c, &a.canvasTitle).FillWidth()
 		if len(a.canvasTasks) > 0 {
@@ -422,41 +642,55 @@ func stepPropertiesDrawer(c *ui.Context, a *app, doc *asterdoc.Document, step *a
 		ui.TextInput(c, &a.canvasAssay).FillWidth()
 		ui.Text(c, "时间点").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 		ui.TextInput(c, &a.canvasTimepoints).FillWidth()
+		dirty = a.syncCurrentStepDraft(step)
+		if dirty {
+			ui.Text(c, "已修改属性，点击「保存属性」写入 Core").FontSize(t.Rem(.72)).TextColor(tokens.WarningText)
+		}
 		if summary := stepParameterSummary(doc, step); summary != "" {
 			ui.Text(c, "当前参数摘要 · "+summary).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 		}
-		if components.Button(c, "保存属性", components.ButtonSecondary).Clicked() {
-			times := []any{}
-			for _, value := range strings.Split(a.canvasTimepoints, ",") {
-				if value = strings.TrimSpace(value); value != "" {
-					times = append(times, value)
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+			if components.Button(c, "保存属性", components.ButtonSecondary).Clicked() {
+				times := []any{}
+				for _, value := range strings.Split(a.canvasTimepoints, ",") {
+					if value = strings.TrimSpace(value); value != "" {
+						times = append(times, value)
+					}
+				}
+				properties := map[string]any{"title": a.canvasTitle, "assay": a.canvasAssay, "timepoints": times}
+				if rawTasks, ok := step.Data["tasks"].([]any); ok && len(rawTasks) > 0 {
+					tasks := make([]any, len(rawTasks))
+					for i, raw := range rawTasks {
+						task, ok := raw.(map[string]any)
+						if !ok {
+							tasks[i] = raw
+							continue
+						}
+						updated := make(map[string]any, len(task))
+						for key, value := range task {
+							updated[key] = value
+						}
+						if i == 0 && len(a.canvasTasks) > 0 {
+							updated["title"] = a.canvasTasks[0].Title
+						}
+						tasks[i] = updated
+					}
+					properties["tasks"] = tasks
+				}
+				if a.applyDesignRaw(map[string]any{
+					"type": "update_module", "moduleId": step.ID, "properties": properties,
+				}) {
+					delete(a.stepDrafts, step.ID)
+					a.stepPropSaved = step.ID
+					a.canvasSelLoaded = ""
 				}
 			}
-			properties := map[string]any{"title": a.canvasTitle, "assay": a.canvasAssay, "timepoints": times}
-			if rawTasks, ok := step.Data["tasks"].([]any); ok && len(rawTasks) > 0 {
-				tasks := make([]any, len(rawTasks))
-				for i, raw := range rawTasks {
-					task, ok := raw.(map[string]any)
-					if !ok {
-						tasks[i] = raw
-						continue
-					}
-					updated := make(map[string]any, len(task))
-					for key, value := range task {
-						updated[key] = value
-					}
-					if i == 0 && len(a.canvasTasks) > 0 {
-						updated["title"] = a.canvasTasks[0].Title
-					}
-					tasks[i] = updated
+			if dirty {
+				if components.Button(c, "放弃修改", components.ButtonGhost).Clicked() {
+					delete(a.stepDrafts, step.ID)
+					a.applyDrawerDraft(step.ID, stepBaseProps(step))
 				}
-				properties["tasks"] = tasks
 			}
-			if a.applyDesignRaw(map[string]any{
-				"type": "update_module", "moduleId": step.ID, "properties": properties,
-			}) {
-				a.canvasSelLoaded = ""
-			}
-		}
+		})
 	})
 }
