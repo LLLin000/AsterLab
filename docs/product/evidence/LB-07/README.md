@@ -16,3 +16,5 @@ theme, from an isolated copy of the RNA extraction fixture database.
 ## Core 缺口
 
 `src/cli.rs` `step_path()` returns `""` for a step without `path`, and `nest_step`/`promote_step` reject it with `step path must have a final segment`; the HUVEC sample has empty `path` on all steps. Indent/outdent remain disabled until the step has a non-empty path and a valid parent; the UI shows `需要先设置步骤路径`.
+
+已由 LB-09 (#126, `5e8e52b`) 在 Core 侧补全；UI 仍不合成路径。
