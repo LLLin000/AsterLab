@@ -490,8 +490,8 @@ func linkPickedAssets(paths []string, coordinate runs.AssetLink, link func(strin
 func (a *app) openAssetLinkForm(taskKey string, prefill runworkspace.LinkedAsset) {
 	a.linkDialogTask = taskKey
 	a.linkDialogWells, a.linkDialogTimepoints = a.assetCoordinateOptions(taskKey)
-	a.linkDialogWell = prefill.WellID
-	a.linkDialogTimepoint = prefill.Timepoint
+	a.linkDialogWell = strings.TrimSpace(prefill.WellID)
+	a.linkDialogTimepoint = strings.TrimSpace(prefill.Timepoint)
 	a.linkDialogFOV = strconv.FormatUint(uint64(prefill.FOVIndex), 10)
 	if a.linkDialogWell == "" && len(a.linkDialogWells) > 0 {
 		a.linkDialogWell = a.linkDialogWells[0]
@@ -499,7 +499,7 @@ func (a *app) openAssetLinkForm(taskKey string, prefill runworkspace.LinkedAsset
 	if a.linkDialogTimepoint == "" {
 		for _, task := range a.snap.Tasks {
 			if task.Key == taskKey {
-				a.linkDialogTimepoint = task.Timepoint
+				a.linkDialogTimepoint = strings.TrimSpace(task.Timepoint)
 				break
 			}
 		}
@@ -576,6 +576,10 @@ func designPlateWells(raw, assayID string) []string {
 
 func frozenAssayTimepoints(raw, assayID string) []string {
 	var doc struct {
+		Assays []struct {
+			ID         string   `json:"id"`
+			Timepoints []string `json:"timepoints"`
+		} `json:"assays"`
 		MyGo struct {
 			Assays map[string]assays.Design `json:"assays"`
 		} `json:"mygo"`
@@ -583,20 +587,18 @@ func frozenAssayTimepoints(raw, assayID string) []string {
 	if json.Unmarshal([]byte(raw), &doc) != nil {
 		return nil
 	}
-	return doc.MyGo.Assays[assayID].Timepoints
+	if tps := doc.MyGo.Assays[assayID].Timepoints; len(tps) > 0 {
+		return tps
+	}
+	for _, assay := range doc.Assays {
+		if assay.ID == assayID && len(assay.Timepoints) > 0 {
+			return assay.Timepoints
+		}
+	}
+	return nil
 }
 
 func (a *app) assetCoordinateOptions(taskKey string) ([]string, []string) {
-	timepoints := make([]string, 0, len(a.snap.Tasks))
-	seenTimes := map[string]bool{}
-	for _, task := range a.snap.Tasks {
-		value := strings.TrimSpace(task.Timepoint)
-		if value != "" && !seenTimes[value] {
-			seenTimes[value] = true
-			timepoints = append(timepoints, value)
-		}
-	}
-
 	selectedAssay := ""
 	for _, task := range a.snap.Tasks {
 		if task.Key == taskKey {
@@ -604,17 +606,30 @@ func (a *app) assetCoordinateOptions(taskKey string) ([]string, []string) {
 			break
 		}
 	}
+
+	timepoints := make([]string, 0, len(a.snap.Tasks))
+	seenTimes := map[string]bool{}
+	addTimepoint := func(raw string) {
+		value := strings.TrimSpace(raw)
+		if value != "" && !seenTimes[value] {
+			seenTimes[value] = true
+			timepoints = append(timepoints, value)
+		}
+	}
+	for _, task := range a.snap.Tasks {
+		if task.AssayID != selectedAssay {
+			continue
+		}
+		addTimepoint(task.Timepoint)
+	}
+
 	designData := a.snap.DesignData
 	if designData == "" && a.designSnap != nil {
 		designData = a.designSnap.Data
 	}
-	if len(timepoints) == 0 && selectedAssay != "" {
+	if selectedAssay != "" {
 		for _, value := range frozenAssayTimepoints(designData, selectedAssay) {
-			value = strings.TrimSpace(value)
-			if value != "" && !seenTimes[value] {
-				seenTimes[value] = true
-				timepoints = append(timepoints, value)
-			}
+			addTimepoint(value)
 		}
 	}
 	wells := designPlateWells(designData, selectedAssay)
@@ -665,32 +680,46 @@ func (a *app) linkRunAsset(taskKey string, coordinate runs.AssetLink) error {
 		return err
 	}
 	coordinate.RunID, coordinate.TaskKey = a.snap.RunID, taskKey
-	return linkPickedAssets(paths, coordinate, func(path string, link runs.AssetLink) error {
+	return a.linkAssetPaths(rootID, rootDir, paths, coordinate)
+}
+
+func (a *app) upsertRunAsset(saved runs.Asset) {
+	for i, old := range a.runAssets {
+		if old.RootID == saved.RootID && old.RelativePath == saved.RelativePath &&
+			old.Link.RunID == saved.Link.RunID && old.Link.TaskKey == saved.Link.TaskKey &&
+			old.Link.SampleID == saved.Link.SampleID {
+			a.runAssets[i] = saved
+			return
+		}
+	}
+	a.runAssets = append(a.runAssets, saved)
+}
+
+// linkAssetPaths validates every selected path against rootDir before saving
+// any link so an out-of-bounds or unreadable file leaves Core untouched.
+func (a *app) linkAssetPaths(rootID, rootDir string, paths []string, coordinate runs.AssetLink) error {
+	staged := make([]runs.Asset, 0, len(paths))
+	for _, path := range paths {
 		asset, err := assets.NewLink(rootID, rootDir, path, assets.Link{
-			RunID: link.RunID, TaskKey: link.TaskKey,
+			RunID: coordinate.RunID, TaskKey: coordinate.TaskKey,
 		}, "local-user", true)
 		if err != nil {
 			return err
 		}
 		savedAsset := runAssetFromLocal(asset)
-		savedAsset.Link.WellID = link.WellID
-		savedAsset.Link.Timepoint = link.Timepoint
-		savedAsset.Link.FOVIndex = link.FOVIndex
+		savedAsset.Link.WellID = coordinate.WellID
+		savedAsset.Link.Timepoint = coordinate.Timepoint
+		savedAsset.Link.FOVIndex = coordinate.FOVIndex
+		staged = append(staged, savedAsset)
+	}
+	for _, savedAsset := range staged {
 		saved, err := a.runSvc.SaveAssetLink(context.Background(), runs.AssetLinkInput{Asset: savedAsset})
 		if err != nil {
 			return state.MapError(err)
 		}
-		for i, old := range a.runAssets {
-			if old.RootID == saved.RootID && old.RelativePath == saved.RelativePath &&
-				old.Link.RunID == saved.Link.RunID && old.Link.TaskKey == saved.Link.TaskKey &&
-				old.Link.SampleID == saved.Link.SampleID {
-				a.runAssets[i] = saved
-				return nil
-			}
-		}
-		a.runAssets = append(a.runAssets, saved)
-		return nil
-	})
+		a.upsertRunAsset(saved)
+	}
+	return nil
 }
 
 // buildRunWorkspaceVM asks Core for the frozen Run hierarchy. Go only decodes
@@ -2526,28 +2555,37 @@ func (a *app) renderAssetLinkDialog(c *ui.Context) {
 				selectFiles := components.Button(c, "选择文件", components.ButtonPrimary)
 				selectFiles.Disabled(len(a.linkDialogWells) == 0 || len(a.linkDialogTimepoints) == 0)
 				if selectFiles.Clicked() {
-					coordinate, err := validateAssetCoordinates(
-						a.linkDialogWell, a.linkDialogTimepoint, a.linkDialogFOV,
-						a.linkDialogWells, a.linkDialogTimepoints,
-					)
-					if err != nil {
-						a.linkDialogErr = err.Error()
-						return
-					}
-					a.linkDialogOpen = false
-					a.linkErr = ""
-					if err := a.linkRunAsset(a.linkDialogTask, coordinate); err != nil {
-						a.linkErr = err.Error()
-					}
-					if a.shell != nil {
-						a.shell.Invalidate()
-					}
+					a.submitAssetLinkForm(a.linkRunAsset)
 				}
 			})
 		})
 	})
 	if !open {
 		a.linkDialogOpen = false
+	}
+}
+
+func (a *app) submitAssetLinkForm(linker func(string, runs.AssetLink) error) {
+	coordinate, err := validateAssetCoordinates(
+		a.linkDialogWell, a.linkDialogTimepoint, a.linkDialogFOV,
+		a.linkDialogWells, a.linkDialogTimepoints,
+	)
+	if err != nil {
+		a.linkDialogErr = err.Error()
+		return
+	}
+	a.linkDialogErr = ""
+	a.linkErr = ""
+	if err := linker(a.linkDialogTask, coordinate); err != nil {
+		a.linkDialogErr = err.Error()
+		if a.shell != nil {
+			a.shell.Invalidate()
+		}
+		return
+	}
+	a.linkDialogOpen = false
+	if a.shell != nil {
+		a.shell.Invalidate()
 	}
 }
 
