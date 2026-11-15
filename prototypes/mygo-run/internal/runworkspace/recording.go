@@ -76,14 +76,17 @@ func SelectKind(task *RunTaskViewModel, grid *resultgrid.Grid, assets []LinkedAs
 // RecordingView renders the unified recording module: the same data backed by
 // plate, table, gallery, or form. The host supplies the write callbacks.
 type RecordingView struct {
-	RunID  string
-	Kind   ViewKind
-	Grid   *resultgrid.Grid
-	Assets []LinkedAsset
-	Task   *RunTaskViewModel
-	OnOpenAsset  func(asset LinkedAsset)
-	OnRelocate   func(asset LinkedAsset)
-	OnLinkFile   func(asset LinkedAsset)
+	RunID       string
+	Kind        ViewKind
+	Grid        *resultgrid.Grid
+	Assets      []LinkedAsset
+	Task        *RunTaskViewModel
+	OnOpenAsset func(asset LinkedAsset)
+	OnRelocate  func(asset LinkedAsset)
+	OnLinkFile  func(asset LinkedAsset)
+	// LinkErr holds the Core rejection cause for the last link attempt on this
+	// task so the recording surface can show cause + retry (UX-P5).
+	LinkErr      string
 	OnKindChange func(kind ViewKind)
 	OnSaveBatch  func(cells []resultgrid.Cell)
 }
@@ -360,6 +363,17 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 		})
 		if len(r.Assets) == 0 {
 			ui.Text(c, "尚未关联本地文件。").FontSize(12).TextColor(t.TextMuted)
+		}
+		if r.LinkErr != "" {
+			ui.Row(c).Padding(6, 10).Radius(6).
+				Background(tokens.DangerBg).Border(1, tokens.DangerText).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+				ui.Text(c, "关联失败："+r.LinkErr).FontSize(t.Rem(.72)).Bold().TextColor(tokens.DangerText)
+				ui.Spacer(c)
+				retry := components.Button(c, "重新关联", components.ButtonPrimary)
+				if retry.Clicked() && r.OnLinkFile != nil {
+					r.OnLinkFile(LinkedAsset{LinkedTo: AssetLink{TaskKey: r.Task.TaskKey}})
+				}
+			})
 		}
 		for _, a := range r.Assets {
 			assetRow(c, a, r.OnOpenAsset, r.OnRelocate, t, tokens)
