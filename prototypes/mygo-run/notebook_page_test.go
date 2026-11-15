@@ -94,3 +94,109 @@ func TestNotebookDocumentModeCanInsertPlateModule(t *testing.T) {
 		t.Fatalf("inserted module did not render: %q", tt.Texts())
 	}
 }
+func dualRenderApp() *app {
+	return &app{snap: runs.RunSnapshot{
+		RunID: "run-1", Title: "CCK-8", DesignID: "design-1", DesignRevision: 3,
+		Tasks: []runs.RunTask{{Key: "task-1", DesignStepID: "step-s1"}},
+		Events: []runs.RunEvent{
+			{ID: "evt-batch", EventType: "measurement", TaskKey: "task-1", BatchID: "batch-1",
+				SchemaID: "cck8.plate96.od450.v1", SchemaVersion: 1,
+				OccurredAt: "2026-11-10T10:42:00+08:00", RecordedAt: "2026-11-10T10:43:00+08:00",
+				ResultCells: []runs.ResultCell{{Row: 0, Column: 0, SampleID: "S1", Field: "OD450"}}},
+			{ID: "evt-done", EventType: "operation", Content: "完成测量任务",
+				TaskKey: "task-1", StepStatus: "completed",
+				OccurredAt: "2026-11-10T10:50:00+08:00", RecordedAt: "2026-11-10T10:50:30+08:00"},
+			{ID: "evt-note", Stage: "notebook", Content: "# 今日观察\n\n`@` 板图 6h",
+				RecordedAt: "2026-11-10T11:00:00+08:00"},
+		},
+	}}
+}
+
+// TestNotebookWideShowsProseAndTimelineTogether pins UI-REDESIGN §2.3: at wide
+// widths the prose paper and the read-only Run timeline are both rendered,
+// from the same snapshot.
+func TestNotebookWideShowsProseAndTimelineTogether(t *testing.T) {
+	a := dualRenderApp()
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+	if !tt.HasText("运行记录") || !tt.HasText("只读") {
+		t.Fatalf("timeline header missing: %q", tt.Texts())
+	}
+	if !tt.HasText("保存读数批次") {
+		t.Fatalf("timeline did not project the stored batch: %q", tt.Texts())
+	}
+	if !tt.HasText("实时") {
+		t.Fatalf("prose toolbar missing at wide width: %q", tt.Texts())
+	}
+}
+
+// TestNotebookNarrowSwitchesSections pins UX-P1/UX-LAYOUT: below 1100 the two
+// sections switch, and Save stays in the first viewport.
+func TestNotebookNarrowSwitchesSections(t *testing.T) {
+	a := dualRenderApp()
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 900, 600)
+	tt.Frame()
+	if !tt.HasText("笔记") || !tt.HasText("运行记录") {
+		t.Fatalf("narrow switch missing: %q", tt.Texts())
+	}
+	// Timeline starts hidden: the prose paper is the default projection.
+	if tt.HasText("保存读数批次") {
+		t.Fatalf("narrow default showed both sections: %q", tt.Texts())
+	}
+	view := a.noteView()
+	view.split = 1
+	tt.Frame()
+	if !tt.HasText("保存读数批次") {
+		t.Fatalf("switching to the timeline did not show it: %q", tt.Texts())
+	}
+}
+
+// TestNotebookStateWordIsExplicit pins UX-STATE / UX-06: the toolbar names
+// the saved state instead of showing only a colour dot.
+func TestNotebookStateWordIsExplicit(t *testing.T) {
+	a := dualRenderApp()
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+	if !tt.HasText("就绪") {
+		t.Fatalf("initial state word missing: %q", tt.Texts())
+	}
+	a.noteDirty = true
+	tt.Frame()
+	if !tt.HasText("未保存") {
+		t.Fatalf("unsaved state word missing: %q", tt.Texts())
+	}
+	a.noteDirty = false
+	a.noteState = "saved"
+	tt.Frame()
+	if !tt.HasText("已保存") {
+		t.Fatalf("saved state word missing: %q", tt.Texts())
+	}
+}
+
+// TestNotebookCitationJumpsToTimelineEntry pins the citation jump: a resolved
+// citation that names a stored record highlights that timeline entry.
+func TestNotebookCitationJumpsToTimelineEntry(t *testing.T) {
+	a := dualRenderApp()
+	view := a.noteView()
+	a.jumpToTimeline("event:evt-batch")
+	if view.highlightID != "event:evt-batch" || view.split != 1 {
+		t.Fatalf("jump state = %+v", view)
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+	if !tt.HasText("保存读数批次") {
+		t.Fatalf("jump target entry not rendered: %q", tt.Texts())
+	}
+}

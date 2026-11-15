@@ -321,3 +321,132 @@ func titleFor(event runs.RunEvent, category Category) string {
 	}
 	return "执行记录"
 }
+
+// CitationTarget identifies one timeline entry that a citation can jump to.
+// It never copies event content: it carries only references into the stored
+// snapshot, so a citation is a pointer, never a second copy of a fact.
+type CitationTarget struct {
+	EntryID    string
+	SourceID   string
+	SourceKind string
+	Label      string
+}
+
+// CitationTargetOf resolves a parsed citation to a timeline entry id when the
+// entry the citation names exists in this snapshot. The target carries only
+// references; it never copies the cited record's content, so a citation stays
+// a pointer into the authoritative run instead of a second copy of it.
+//
+// An event or batch resolves to its own entry. A readout or step resolves to
+// the entry of the task it was recorded under, and a file asset to the entry
+// of the task the asset is linked to. Anything without a timeline entry is
+// unresolved and the surface must say so instead of inventing one.
+func CitationTargetOf(c Citation, snap runs.RunSnapshot, assets []runs.Asset) (CitationTarget, bool) {
+	entries := Build(snap).Entries
+	findEntry := func(id string) (Entry, bool) {
+		for _, entry := range entries {
+			if entry.ID == id {
+				return entry, true
+			}
+		}
+		return Entry{}, false
+	}
+	findTask := func(taskKey string) (Entry, bool) {
+		if taskKey == "" {
+			return Entry{}, false
+		}
+		for _, entry := range entries {
+			if entry.TaskID == taskKey && entry.SourceType == "execution_event" {
+				return entry, true
+			}
+		}
+		return Entry{}, false
+	}
+	// A task-linked citation points at the task's own record; when the task
+	// has no stored event yet the citation is unresolved rather than guessed.
+	assetTarget := func(assetID, label string) (CitationTarget, bool) {
+		for _, asset := range assets {
+			if asset.ID != assetID || asset.Link.RunID != snap.RunID {
+				continue
+			}
+			entry, ok := findTask(asset.Link.TaskKey)
+			if !ok {
+				return CitationTarget{}, false
+			}
+			return CitationTarget{EntryID: entry.ID, SourceID: asset.ID,
+				SourceKind: "asset", Label: label}, true
+		}
+		return CitationTarget{}, false
+	}
+
+	switch c.Kind {
+	case "event":
+		if entry, ok := findEntry("event:" + c.ID); ok {
+			return CitationTarget{EntryID: entry.ID, SourceID: c.ID,
+				SourceKind: entry.SourceType, Label: entry.Title}, true
+		}
+	case "batch":
+		for _, event := range snap.Events {
+			if event.BatchID == c.ID {
+				if entry, ok := findEntry("event:" + event.ID); ok {
+					return CitationTarget{EntryID: entry.ID, SourceID: event.ID,
+						SourceKind: entry.SourceType, Label: entry.Title}, true
+				}
+			}
+		}
+	case "readout":
+		for _, event := range snap.Events {
+			for _, cell := range event.ResultCells {
+				if cell.SampleID != c.ID {
+					continue
+				}
+				if entry, ok := findEntry("event:" + event.ID); ok {
+					return CitationTarget{EntryID: entry.ID, SourceID: event.ID,
+						SourceKind: entry.SourceType, Label: entry.Title}, true
+				}
+				break
+			}
+		}
+		for _, m := range snap.Measurements {
+			if m.SampleID != c.ID {
+				continue
+			}
+			if entry, ok := findTask(m.TaskKey); ok {
+				return CitationTarget{EntryID: entry.ID, SourceID: m.SampleID,
+					SourceKind: "measurement", Label: entry.Title}, true
+			}
+			break
+		}
+	case "step":
+		for _, task := range snap.Tasks {
+			if task.Key != c.ID {
+				continue
+			}
+			if entry, ok := findTask(task.Key); ok {
+				return CitationTarget{EntryID: entry.ID, SourceID: task.Key,
+					SourceKind: "run_task", Label: entry.Title}, true
+			}
+			break
+		}
+	case "asset":
+		return assetTarget(c.ID, c.Title)
+	}
+	return CitationTarget{}, false
+}
+
+// DisplayTime is the short label for an entry's stored time: the recorded
+// time when present, else the occurred time, else an explicit "时间未记录".
+// It never invents a time, and it is the one place both projections word it.
+func (e Entry) DisplayTime() string {
+	raw := e.RecordedAt
+	if strings.TrimSpace(raw) == "" {
+		raw = e.OccurredAt
+	}
+	if strings.TrimSpace(raw) == "" {
+		return "时间未记录"
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return parsed.Format("15:04")
+	}
+	return raw
+}
