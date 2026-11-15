@@ -9,6 +9,7 @@ pub mod run_workspace;
 pub mod record_projection;
 pub mod design_commands;
 pub mod operation_module;
+pub mod pantry;
 pub mod operation_spec;
 pub mod instrument_matching;
 pub mod semantic_component;
