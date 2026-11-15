@@ -1,0 +1,53 @@
+@e490 [scroll]
+  @e491 [text] "工作区"
+  @e492 [button] "项目工作区" key="项目工作区"
+  @e493 [button] "实验设计" key="实验设计"
+  @e494 [button] "实验方案" key="实验方案"
+  @e495 [button] "实验运行" key="实验运行"
+  @e496 [button] "Notebook" key=Notebook checked
+  @e497 [button] "资料与工具" key="资料与工具"
+  @e498 [text] "最近设计"
+  @e499 [button] "LB-03 Notebook" key="LB-03 Notebook"
+@e500 [toolbar]
+  @e501 [text] "AsterLab · 原生设计工作台"
+@e527 [text] "Notebook"
+@e528 [text] "/"
+@e529 [text] "LB-03 Notebook"
+@e530 [button] "导出 PDF"
+@e531 [text] "118 / 5000"
+@e532 [button] "撤销" disabled
+@e533 [button] "重做" disabled
+@e534 [button] "粗体"
+@e535 [button] "斜体"
+@e536 [button] "删除线"
+@e537 [button] "行内代码"
+@e538 [button] "一级标题"
+@e539 [button] "二级标题"
+@e540 [button] "项目列表"
+@e541 [button] "编号列表"
+@e542 [button] "引用"
+@e543 [button] "@引用"
+@e544 [tabList]
+  @e545 [tab] "实时" checked
+  @e546 [tab] "编辑"
+  @e547 [tab] "阅读"
+  @e548 [tab] "文档"
+@e549 [text] "就绪" key="{就绪}"
+@e550 [button] "保存笔记"
+@e551 [text] "引用快照"
+@e552 [text] "7dea84f1-94e5-47b8-849b-37b8aba1624d"
+@e553 [button] "定位到运行记录"
+@e554 [button] "移除引用"
+@e555 [tabList]
+  @e556 [tab] "笔记" checked
+  @e557 [tab] "运行记录"
+@e558 [textField] "Notebook" value="LB-03 观察\n对照孔 A1 的读数已保存，见引用 @OD450 读数。\n今日观察：贴壁均匀，无气泡。" multiline
+@e518 [button] "Toggle sidebar"
+@e519 [button] "新建设计"
+@e520 [text] "AsterLab"
+@e521 [text] "/"
+@e522 [text] "LB-03 Notebook 双渲染"
+@e523 [button] "Minimize window"
+@e524 [button] "Maximize window"
+@e525 [button] "Close window"
+@e526 [splitter] "Resize sidebar" key=left-resize
