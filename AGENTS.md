@@ -56,6 +56,14 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 - 默认串行；Kandev `Windows Work` WIP=2 是上限。只有 `scope.write` 不重叠且数据隔离时才并行；GUI/native build/截图/E2E/最终集成始终串行。
 - 完成后附 PR/分支、验收原始输出与证据；满足卡片验收后才移至 `Done`。详细操作见 [`cross-platform-builds.md` §10](docs/engineering/cross-platform-builds.md#10-windows-gate-task-execution)。
 
+### UI 工作方法（强制）
+
+- 动任何界面之前先读 [`docs/product/design-system.md`](docs/product/design-system.md)：它规定了唯一 token 源、4 倍数间距、三档圆角、需求→组件对照表（Do/Don't）与文案规则。
+- 组件按语义选，不自造：先查 `github.com/oneo-me/onevra/source/components`（本地副本 `~/go/pkg/mod/github.com/oneo-me/onevra/source@*/components/`）与仓库既有包；同类控件全项目只有一种用法。
+- 颜色/字号/间距/圆角一律取自 `internal/theme` 的 `Tokens`（或随主题缩放的 `t.Rem`/`t.Space`）；字面值只在 `theme.go` 出现。
+- 需要新组件时，先确认仓库与 onevra 都没有等价实现，并在 `design-system.md` 的组件表登记原因。
+- 视觉相关 PR 必须带 `## 设计一致性` 小节（用了哪些 token、复用了哪些组件、新增了什么及原因），规则 id 用 `UX-DESIGN`。
+
 ### 状态语义
 
 - `Inbox` / `Todo`：待人工准入，不会被 agent 自动领取。

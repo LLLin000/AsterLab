@@ -167,3 +167,21 @@ A page change is done only when all hold:
 
 Cite as `UX-IA-<n>`, `UX-P<1-5>`, `UX-STATE`, `UX-LAYOUT`, `UX-DONE`. Example:
 "Run recording moved above procedure — UX-P1, UX-LAYOUT".
+
+## 8. Design system
+
+`docs/product/design-system.md` is the enforceable visual contract behind P3: the
+single token source, the 4-multiple spacing scale, the three radii, the
+requirement→component table (Do/Don't) and the copy rules. A UI task must read it
+before writing code.
+
+Binding on every UI task:
+
+- Values come from `internal/theme/theme.go` `Tokens`; a literal colour, font
+  size, padding or radius outside the theme fails P3.
+- Pick the component from the table first; restyle later, never the reverse.
+- A new component is allowed only when neither `oneo-me/onevra/source/components`
+  nor an existing package has an equivalent, and it must be registered in the
+  table with a reason.
+- The PR carries a `## 设计一致性` section: tokens used, components reused, new
+  components (if any) and why. `UX-DESIGN` is the rule id for these items.
