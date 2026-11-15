@@ -10,8 +10,11 @@ use asterlab_core::assets as asset_refs;
 use asterlab_core::asterdoc_path as ast;
 use asterlab_core::calculators::{
     cell_seeding as cell_seeding_calc, gel_mastermix as gel_mastermix_calc,
-    runtime_normalize as runtime_normalize_calc, CellSeedingGroup, CellSeedingInput,
-    GelMastermixGroup, GelMastermixInput, RuntimeNormalizeInput,
+    in_vivo_dosing as in_vivo_dosing_calc,
+    runtime_normalize as runtime_normalize_calc,
+    sample_normalize_batch as sample_normalize_batch_calc, CellSeedingGroup, CellSeedingInput,
+    GelMastermixGroup, GelMastermixInput, InVivoDosingInput, MassConcentration,
+    MassConcentrationUnit, RuntimeNormalizeInput, SampleMeasurement, SampleNormalizeBatchInput,
 };
 use asterlab_core::component_data::{
     calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
@@ -23,13 +26,17 @@ use asterlab_core::component_framework::{
     ViewChangeSet, ViewDocument, WorkflowEdge, WorkflowGraph, WorkflowNode,
 };
 use asterlab_core::labware::{
-    default_labware_registry, ContainerPlan, LabwareProfile, LabwareRegistry,
+    default_labware_registry, ContainerPlan, LabwareProfile, LabwareRegistry, WellRole,
 };
 use asterlab_core::operation_module::{
     ModuleBinding, ModuleOrigin, OperationModule, ParameterBinding, ParameterValueType,
     ProtocolBlockVersionRef, ValueSource,
 };
 use asterlab_core::pantry::{self, CalendarDate, PantryDraft, PantryItem};
+use asterlab_core::readout_records::{
+    plan_readout_submission, ReadoutRegistry, ReadoutSubmission, ReadoutSubmissionIssue,
+};
+use asterlab_core::readout_schema::{Readout, ReadoutSchema};
 use asterlab_core::readout_submit::{
     plan_batch as plan_readout_batch, plan_submit as plan_readout_submit, ReadoutBatchRequest,
     ReadoutSubmitRequest,
@@ -525,6 +532,8 @@ struct RunCreate {
     repeat_of_run_id: Option<String>,
     #[serde(default)]
     repeat_relationship: RunRelationship,
+    #[serde(default)]
+    source_run_id: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1742,6 +1751,34 @@ pub(crate) fn create_run_in_transaction(
     repeat_relationship: &str,
     operation_id: Option<&str>,
 ) -> Result<Value, CliError> {
+    create_run_with_source_in_transaction(
+        tx,
+        design_id,
+        title,
+        scheduled_date,
+        global_protocol_version_id,
+        view_id,
+        repeat_of_run_id,
+        repeat_relationship,
+        None,
+        operation_id,
+    )
+}
+
+/// `create_run_in_transaction` plus the optional upstream sample-source Run.
+/// Separate so the MyGo bridge and existing tests keep the 9-argument call.
+pub(crate) fn create_run_with_source_in_transaction(
+    tx: &Transaction<'_>,
+    design_id: &str,
+    title: &str,
+    scheduled_date: Option<&str>,
+    global_protocol_version_id: Option<&str>,
+    view_id: Option<&str>,
+    repeat_of_run_id: Option<&str>,
+    repeat_relationship: &str,
+    source_run_id: Option<&str>,
+    operation_id: Option<&str>,
+) -> Result<Value, CliError> {
     check_text(title, "运行名称", 160)?;
     if let Some(date) = scheduled_date.filter(|date| !date.trim().is_empty()) {
         validate_date(date, "计划开始日期")?;
@@ -1802,6 +1839,21 @@ pub(crate) fn create_run_in_transaction(
             ));
         }
     }
+    // A Run may name one upstream harvest Run it draws samples from. The
+    // relation is project-scoped, so it can cross Designs; it never rewrites
+    // `repeat_of_run_id`, which stays the same-Design re-execution relation.
+    if let Some(source_id) = source_run_id.filter(|id| !id.is_empty()) {
+        let (source_kind, source_project, _, _, _) = kind_id(tx, source_id)?
+            .ok_or_else(|| CliError::missing("source_run_id 指向的上游 Run 不存在"))?;
+        if source_kind != "run" {
+            return Err(CliError::input("source_run_id 必须指向实验运行"));
+        }
+        if source_project.as_deref() != Some(project.as_str()) {
+            return Err(CliError::input(
+                "source_run_id 必须指向同一项目下的上游 Run；跨项目引用不成立",
+            ));
+        }
+    }
     let run_index: i64 = tx
         .query_row(
             "SELECT COUNT(*) + 1 FROM records WHERE kind='run' AND parent_id=?1",
@@ -1824,6 +1876,7 @@ pub(crate) fn create_run_in_transaction(
         "run_index":run_index,
         "repeat_of_run_id":repeat_of_run_id.filter(|id| !id.is_empty()),
         "repeat_relationship":repeat_relationship,
+        "source_run_id":source_run_id.filter(|id| !id.is_empty()),
         "creation_audit":creation_audit,
         "design_checks":design_checks,
         "status":"planned"
@@ -5068,6 +5121,280 @@ fn readout_issue_error(
     error
 }
 
+fn readout_submission_issue_error(
+    action: &str,
+    issues: Vec<ReadoutSubmissionIssue>,
+) -> CliError {
+    let detail = issues
+        .first()
+        .map(|issue| format!("：{}", issue.message))
+        .unwrap_or_default();
+    let mut error = CliError::input(format!("{action}校验失败{detail}"));
+    error.issues = issues
+        .into_iter()
+        .map(|issue| json!({"code":issue.code,"path":issue.path,"message":issue.message}))
+        .collect();
+    error
+}
+
+/// One typed `readout.submit`: a batch of v1 readouts recorded through the
+/// shared schema pipeline. Unlike the scalar form it can carry `table`,
+/// `categorical`, `plate` and `file` values, and each readout names its schema.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TypedReadoutSubmit {
+    run_id: String,
+    step_path: String,
+    protocol_version_id: String,
+    #[serde(default)]
+    assay_id: Option<String>,
+    #[serde(default)]
+    timepoint: Option<String>,
+    #[serde(default)]
+    batch_id: Option<String>,
+    #[serde(default)]
+    occurred_at: Option<String>,
+    #[serde(default)]
+    operator: Option<String>,
+    readouts: Vec<Readout>,
+    /// Schemas this submission relies on, on top of the builtin registry. A
+    /// definition is checked by `ReadoutRegistry::insert` and never replaces a
+    /// different definition of the same `schema_id`.
+    #[serde(default)]
+    readout_schemas: Vec<ReadoutSchema>,
+}
+
+/// Stable idempotency key over the submission's identity. Values are content,
+/// not identity, so a replay returns the first event instead of overwriting it.
+fn typed_readout_key(submission: &ReadoutSubmission) -> String {
+    let mut hasher = Sha256::new();
+    let parts = json!([
+        submission.run_id.trim(),
+        submission.step_path.trim(),
+        submission.assay_id,
+        submission.timepoint,
+        submission.readouts,
+    ]);
+    hasher.update(serde_json::to_vec(&parts).unwrap_or_default());
+    let digest: String = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("readout:typed:{digest}")
+}
+
+/// `readout.submit` entry point: route the scalar form to the frozen numeric
+/// path and the typed form through `plan_readout_submission`.
+fn submit_readout_input(
+    db: &mut Connection,
+    input: Value,
+) -> Result<Value, CliError> {
+    if input.get("readouts").is_some() {
+        let typed: TypedReadoutSubmit = serde_json::from_value(input)
+            .map_err(|error| CliError::input(format!("读数提交字段无效：{error}")))?;
+        return submit_typed_readouts(db, &typed);
+    }
+    let request: ReadoutSubmitRequest = serde_json::from_value(input)
+        .map_err(|error| CliError::input(format!("读数提交字段无效：{error}")))?;
+    submit_readout(db, &request)
+}
+
+/// Record one batch of typed readouts as a single measurement event.
+fn submit_typed_readouts(
+    db: &mut Connection,
+    input: &TypedReadoutSubmit,
+) -> Result<Value, CliError> {
+    if input.readouts.is_empty() {
+        return Err(CliError::input("readouts 至少需要一个读数"));
+    }
+    let mut registry = ReadoutRegistry::builtin();
+    for schema in &input.readout_schemas {
+        registry
+            .insert(schema.clone())
+            .map_err(|issues| readout_submission_issue_error("读数 schema", issues))?;
+    }
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let workspace = run_workspace_typed(&tx, &input.run_id)?;
+    // Same scope rule as the scalar and batch forms: the step must belong to
+    // this Run's frozen manifest, never to a step the Run does not execute.
+    let step_path = input.step_path.trim();
+    if !workspace
+        .steps
+        .iter()
+        .any(|step| step.step.path.trim() == step_path)
+    {
+        return Err(CliError::input(format!(
+            "步骤 {step_path} 不属于本次 Run 的冻结清单"
+        )));
+    }
+    let submission = ReadoutSubmission {
+        run_id: input.run_id.trim().to_owned(),
+        step_path: step_path.to_owned(),
+        batch_id: input
+            .batch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        assay_id: input
+            .assay_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        timepoint: input
+            .timepoint
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        readouts: input.readouts.clone(),
+    };
+    let plan = plan_readout_submission(&registry, &submission, &workspace)
+        .map_err(|issues| readout_submission_issue_error("读数提交", issues))?;
+    let key = typed_readout_key(&submission);
+    let accepted = plan.readouts.len().max(input.readouts.len());
+    let mut event = plan.event;
+    // The typed planner builds the shared measurement payload; the CLI adds the
+    // frozen Protocol scope the other readout tools already require.
+    event["protocol_version_id"] = json!(input.protocol_version_id.trim());
+    if let Some(at) = input.occurred_at.as_deref().filter(|v| !v.trim().is_empty()) {
+        event["occurred_at"] = json!(at.trim());
+    }
+    if let Some(operator) = input
+        .operator
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        event["operator"] = json!(operator);
+    }
+    event["operation_id"] = json!(key);
+    event["operation_payload"] = serde_json::to_value(&input.readouts).unwrap_or(Value::Null);
+    if let Some(record) = find_readout_submission(&tx, &input.run_id, &key)? {
+        tx.commit()
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        return Ok(json!({
+            "record": record,
+            "idempotency_key": key,
+            "replayed": true,
+            "accepted": accepted
+        }));
+    }
+    let record = create_execution_event_tx(&tx, &input.run_id, &event)?;
+    tx.commit()
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    Ok(json!({
+        "record": record,
+        "idempotency_key": key,
+        "replayed": false,
+        "accepted": accepted
+    }))
+}
+
+/// JSON `cells[]` columns, in CSV order. `qualifier` is the reason a cell has
+/// no number; the core CSV parser is the one validation path for it.
+const BATCH_CELL_COLUMNS: [&str; 10] = [
+    "row", "column", "field", "value", "unit", "sample_id", "group", "replicate", "status",
+    "qualifier",
+];
+
+fn csv_field(value: &str) -> String {
+    let escaped = value.replace('"', "\"\"");
+    format!("\"{escaped}\"")
+}
+
+fn batch_cell_text(cell: &Value, column: &str) -> Result<String, &'static str> {
+    let Some(value) = cell.get(column) else {
+        return Ok(String::new());
+    };
+    if value.is_null() {
+        return Ok(String::new());
+    }
+    match column {
+        "value" => value
+            .as_f64()
+            .map(|number| number.to_string())
+            .ok_or("必须是有限数值"),
+        "row" | "column" | "replicate" => value
+            .as_u64()
+            .map(|number| number.to_string())
+            .ok_or("必须是非负整数"),
+        _ => value.as_str().map(str::to_owned).ok_or("必须是字符串"),
+    }
+}
+
+/// Re-encode JSON `cells[]` as the CSV form so a `qualifier` cell goes through
+/// the same parser, `Undetermined` mapping and status rules as a CSV upload.
+fn cells_json_as_csv(cells: &[Value]) -> Result<String, CliError> {
+    let mut csv = String::new();
+    csv.push_str(&BATCH_CELL_COLUMNS.join(","));
+    csv.push('\n');
+    for (index, cell) in cells.iter().enumerate() {
+        let mut fields = Vec::with_capacity(BATCH_CELL_COLUMNS.len());
+        for column in BATCH_CELL_COLUMNS {
+            let text = batch_cell_text(cell, column)
+                .map_err(|expectation| {
+                    CliError::input(format!("cells[{index}].{column} {expectation}"))
+                })?;
+            fields.push(csv_field(&text));
+        }
+        csv.push_str(&fields.join(","));
+        csv.push('\n');
+    }
+    Ok(csv)
+}
+
+/// Accept a `qualifier` in JSON `cells[]` by handing the batch to the CSV path.
+/// Cells without a qualifier keep the plain JSON route, so their error paths and
+/// messages do not change.
+fn readout_batch_request_from_json(input: Value) -> Result<ReadoutBatchRequest, CliError> {
+    let has_csv = input.get("csv").is_some_and(|value| !value.is_null());
+    let cells = input.get("cells").and_then(Value::as_array).cloned();
+    let qualified = cells.as_deref().is_some_and(|cells| {
+        cells
+            .iter()
+            .any(|cell| cell.get("qualifier").is_some_and(|value| !value.is_null()))
+    });
+    if !qualified || has_csv {
+        if qualified && has_csv {
+            return Err(CliError::input(
+                "读数批次的 cells 与 csv 只能提供一种",
+            ));
+        }
+        let mut input = input;
+        // An explicit `"qualifier": null` is the same as omitting it; strip it
+        // so the closed cell shape keeps accepting the request.
+        if let Some(cells) = input.get_mut("cells").and_then(Value::as_array_mut) {
+            for cell in cells.iter_mut() {
+                if let Some(object) = cell.as_object_mut() {
+                    if object.get("qualifier").is_some_and(Value::is_null) {
+                        object.remove("qualifier");
+                    }
+                }
+            }
+        }
+        return serde_json::from_value(input)
+            .map_err(|error| CliError::input(format!("读数批次字段无效：{error}")));
+    }
+    let csv = cells_json_as_csv(cells.as_deref().unwrap_or_default())?;
+    let mut object = match input {
+        Value::Object(object) => object,
+        _ => {
+            return Err(CliError::input(
+                "读数批次输入必须是 JSON 对象",
+            ))
+        }
+    };
+    object.remove("cells");
+    object.insert("csv".to_owned(), Value::String(csv));
+    serde_json::from_value(Value::Object(object))
+        .map_err(|error| CliError::input(format!("读数批次字段无效：{error}")))
+}
+
 /// Look up an earlier readout submission by its idempotency key. The key is
 /// stored as `operation_id`; the query is scoped to this Run, so the same key
 /// in another Run is a different record.
@@ -6986,6 +7313,15 @@ struct WellSet {
     sample_id: String,
     #[serde(default)]
     note: String,
+    /// Planned detection target label for this position.
+    #[serde(default)]
+    target: Option<String>,
+    /// Planned role of this position in the detection layout.
+    #[serde(default)]
+    well_role: Option<WellRole>,
+    /// Planned dilution factor; unitless and positive.
+    #[serde(default)]
+    dilution_factor: Option<f64>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -7317,6 +7653,31 @@ struct RuntimeNormalizeCalc {
     excess_ratio: f64,
     dead_volume_ul: f64,
     prepared_volume_ul: f64,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SampleNormalizeCalcSample {
+    name: String,
+    concentration: f64,
+    unit: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SampleNormalizeBatchCalc {
+    target_mass_ng: f64,
+    reaction_volume_ul: f64,
+    samples: Vec<SampleNormalizeCalcSample>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InVivoDosingCalc {
+    body_weights_g: Vec<f64>,
+    dose_mg_per_kg: f64,
+    dose_volume_ml_per_kg: f64,
+    #[serde(default)]
+    overage_ratio: f64,
+    stock_concentration: f64,
+    stock_unit: String,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -8957,6 +9318,45 @@ fn concentration_factor(unit: &str) -> Result<f64, CliError> {
         _ => Err(CliError::input("浓度单位只能是 M、mM、µM、nM")),
     }
 }
+/// Concentration units in one of the two dimensions the CLI speaks.
+///
+/// Molarity and mass concentration never convert into each other here: a
+/// molecular weight is missing, and `calculator.solution` is the tool that owns
+/// that conversion. `Dilution` therefore only allows a same-dimension pair.
+enum ConcentrationScale {
+    Molar(f64),
+    Mass(f64),
+}
+
+impl ConcentrationScale {
+    /// Factor to the dimension's base unit (`M` or `ng/µL`).
+    fn factor(&self) -> f64 {
+        match self {
+            Self::Molar(factor) | Self::Mass(factor) => *factor,
+        }
+    }
+
+    fn is_mass(&self) -> bool {
+        matches!(self, Self::Mass(_))
+    }
+}
+
+fn concentration_scale(unit: &str) -> Result<ConcentrationScale, CliError> {
+    if let Ok(factor) = concentration_factor(unit) {
+        return Ok(ConcentrationScale::Molar(factor));
+    }
+    match unit.parse::<MassConcentrationUnit>() {
+        Ok(mass) => Ok(ConcentrationScale::Mass(mass.ng_per_ul_factor())),
+        Err(_) => Err(CliError::input(
+            "浓度单位只能是 M、mM、µM、nM 或 mg/mL、µg/mL、ng/µL",
+        )),
+    }
+}
+
+fn mass_concentration_unit(unit: &str) -> Result<MassConcentrationUnit, CliError> {
+    unit.parse::<MassConcentrationUnit>()
+        .map_err(CliError::input)
+}
 fn volume_factor(unit: &str) -> Result<f64, CliError> {
     match unit {
         "L" => Ok(1.0),
@@ -10538,8 +10938,15 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
     }
     if tool == "calculator.dilution" {
         let i: DilutionCalc = parse_input(path)?;
-        let c1 = concentration_factor(&i.stock_unit)?;
-        let c2 = concentration_factor(&i.target_unit)?;
+        let stock = concentration_scale(&i.stock_unit)?;
+        let target = concentration_scale(&i.target_unit)?;
+        if stock.is_mass() != target.is_mass() {
+            return Err(CliError::input(
+                "储液浓度与目标浓度必须同一量纲：摩尔（M、mM、µM、nM）或质量浓度（mg/mL、µg/mL、ng/µL）不能混用",
+            ));
+        }
+        let c1 = stock.factor();
+        let c2 = target.factor();
         let vf = volume_factor(&i.volume_unit)?;
         if !(i.stock_concentration.is_finite()
             && i.stock_concentration > 0.0
@@ -10558,7 +10965,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         let v1_l =
             (i.target_concentration * c2) * (i.final_volume * vf) / (i.stock_concentration * c1);
         return Ok(
-            json!({"stock_volume":v1_l/vf,"volume_unit":i.volume_unit,"diluent_volume":i.final_volume-v1_l/vf,"formula":"C1 × V1 = C2 × V2","assumption":"浓度与体积单位已按输入换算；未计死体积、回收率或纯度修正"}),
+            json!({"stock_volume":v1_l/vf,"volume_unit":i.volume_unit,"diluent_volume":i.final_volume-v1_l/vf,"formula":"C1 × V1 = C2 × V2","assumption":"浓度与体积单位已按输入换算；摩尔与质量浓度是不同量纲，不互相换算；未计死体积、回收率或纯度修正"}),
         );
     }
     if tool == "calculator.solution" {
@@ -10736,6 +11143,92 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             "unused_volume_ul": display_quantity(output.unused_volume_ul),
             "formula": "required_ul = actual_wells × volume_per_well_ul × (1 + excess_ratio) + dead_volume_ul",
             "assumption": "死体积按每个配制管只加一次；余量只作用于工作体积；不改写冻结计划，只返回运行期配平建议"
+        }));
+    }
+    if tool == "calculator.sample_normalize_batch" {
+        let i: SampleNormalizeBatchCalc = parse_input(path)?;
+        if i.samples.len() > 100 {
+            return Err(CliError::input("样本最多 100 项"));
+        }
+        let mut samples = Vec::with_capacity(i.samples.len());
+        for sample in &i.samples {
+            check_text(&sample.name, "样本名称", 120)?;
+            samples.push(SampleMeasurement {
+                name: sample.name.trim().to_owned(),
+                concentration: MassConcentration {
+                    value: sample.concentration,
+                    unit: mass_concentration_unit(&sample.unit)?,
+                },
+            });
+        }
+        let output = sample_normalize_batch_calc(&SampleNormalizeBatchInput {
+            target_mass_ng: i.target_mass_ng,
+            reaction_volume_ul: i.reaction_volume_ul,
+            samples,
+        })
+        .map_err(CliError::input)?;
+        let rows: Vec<Value> = output
+            .rows
+            .iter()
+            .map(|row| {
+                json!({
+                    "name": row.name,
+                    "concentration_ng_per_ul": display_quantity(row.concentration_ng_per_ul),
+                    "required_sample_volume_ul": display_quantity(row.required_sample_volume_ul),
+                    "sample_volume_ul": display_quantity(row.sample_volume_ul),
+                    "diluent_volume_ul": display_quantity(row.diluent_volume_ul),
+                    "achieved_mass_ng": display_quantity(row.achieved_mass_ng),
+                    "insufficient": row.insufficient,
+                })
+            })
+            .collect();
+        let insufficient_count = output.rows.iter().filter(|row| row.insufficient).count();
+        return Ok(json!({
+            "rows": rows,
+            "insufficient_count": insufficient_count,
+            "formula": "sample_ul = target_mass_ng ÷ (C_ng/µL)；超过反应体积时按反应体积封顶并标 insufficient；diluent_ul = 反应体积 − sample_ul",
+            "assumption": "每个样本按自身实测质量浓度换算；目标质量不是实测值，稀释液补足反应体积；未计移液死体积、回收率或纯度修正"
+        }));
+    }
+    if tool == "calculator.in_vivo_dosing" {
+        let i: InVivoDosingCalc = parse_input(path)?;
+        if i.body_weights_g.len() > 200 {
+            return Err(CliError::input("体重最多 200 项"));
+        }
+        let output = in_vivo_dosing_calc(&InVivoDosingInput {
+            body_weights_g: i.body_weights_g,
+            dose_mg_per_kg: i.dose_mg_per_kg,
+            dose_volume_ml_per_kg: i.dose_volume_ml_per_kg,
+            overage_ratio: i.overage_ratio,
+            stock_concentration: MassConcentration {
+                value: i.stock_concentration,
+                unit: mass_concentration_unit(&i.stock_unit)?,
+            },
+        })
+        .map_err(CliError::input)?;
+        let rows: Vec<Value> = output
+            .rows
+            .iter()
+            .map(|row| {
+                json!({
+                    "index": row.index,
+                    "body_weight_g": display_quantity(row.body_weight_g),
+                    "dose_mass_mg": display_quantity(row.dose_mass_mg),
+                    "injection_volume_ul": display_quantity(row.injection_volume_ul),
+                })
+            })
+            .collect();
+        return Ok(json!({
+            "rows": rows,
+            "total_body_weight_g": display_quantity(output.total_body_weight_g),
+            "total_dose_mass_mg": display_quantity(output.total_dose_mass_mg),
+            "total_injection_volume_ul": display_quantity(output.total_injection_volume_ul),
+            "prepared_dose_mass_mg": display_quantity(output.prepared_dose_mass_mg),
+            "preparation_volume_ul": display_quantity(output.preparation_volume_ul),
+            "stock_volume_ul": display_quantity(output.stock_volume_ul),
+            "diluent_volume_ul": display_quantity(output.diluent_volume_ul),
+            "formula": "injection_ul = weight_g × dose_volume_mL/kg；dose_mg = weight_g ÷ 1000 × dose_mg/kg；制备量按 (1 + overage_ratio) 放大；stock_ul = prepared_mass_mg × 10^6 ÷ C_ng/µL",
+            "assumption": "体重是输入值而非估算；余量只放大配制管，不放大单只注射量；母液过稀导致剂量装不进制备体积时整体拒绝；未计注射器死体积或浓度复核"
         }));
     }
     let mut db = open_db(data_dir)?;
@@ -11108,7 +11601,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                     "design": design
                 })),
                 Err(error) => Ok(json!({
-                    "valid": true,
+                    "valid": false,
                     "compiled": false,
                     "error": {"code": error.code, "message": error.message}
                 })),
@@ -11152,7 +11645,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let tx = db
                 .unchecked_transaction()
                 .map_err(|e| CliError::internal(e.to_string()))?;
-            let record = create_run_in_transaction(
+            let record = create_run_with_source_in_transaction(
                 &tx,
                 &i.design_id,
                 &i.title,
@@ -11161,6 +11654,7 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 i.view_id.as_deref(),
                 i.repeat_of_run_id.as_deref(),
                 i.repeat_relationship.as_str(),
+                i.source_run_id.as_deref(),
                 None,
             )?;
             tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
@@ -11748,33 +12242,64 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
                 .ok_or_else(|| CliError::missing("板布局不存在"))?;
             let plate: Value =
                 serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
-            let (letters, digits) = split_well(&i.well_id)?;
-            let row = letters.chars().fold(0usize, |n, c| {
-                n * 26 + (c.to_ascii_uppercase() as usize - 'A' as usize + 1)
-            });
-            let col = digits
-                .parse::<usize>()
-                .map_err(|_| CliError::input("孔位列号无效"))?;
-            if row == 0
-                || row > plate["rows"].as_u64().unwrap_or(0) as usize
-                || col == 0
-                || col > plate["columns"].as_u64().unwrap_or(0) as usize
-            {
-                return Err(CliError::input("孔位超出板型范围"));
+            let rows = plate["rows"].as_u64().unwrap_or(0) as usize;
+            let columns = plate["columns"].as_u64().unwrap_or(0) as usize;
+            let position = parse_plate_position(rows, columns, &i.well_id)?;
+            if let Some(target) = i.target.as_deref() {
+                check_text(target, "检测目标", 120)?;
             }
-            let old:Option<(String,i64)>=db.query_row("SELECT id,revision FROM records WHERE kind='well' AND parent_id=?1 AND upper(json_extract(data_json,'$.well_id'))=?2",params![i.plate_id,i.well_id.to_ascii_uppercase()],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|e|CliError::internal(e.to_string()))?;
-            let data = json!({"well_id":i.well_id.to_ascii_uppercase(),"group_label":i.group_label,"sample_id":i.sample_id,"note":i.note});
-            let r = if let Some(id) = old {
+            if let Some(factor) = i.dilution_factor {
+                if !factor.is_finite() || factor <= 0.0 {
+                    return Err(CliError::input("dilution_factor 必须是大于 0 的有限数值"));
+                }
+            }
+            let mut existing: Vec<(String, i64, Value)> = Vec::new();
+            {
+                let mut stmt = db
+                    .prepare("SELECT id,revision,data_json FROM records WHERE kind='well' AND parent_id=?1")
+                    .map_err(|e| CliError::internal(e.to_string()))?;
+                let mut rows_iter = stmt
+                    .query(params![i.plate_id])
+                    .map_err(|e| CliError::internal(e.to_string()))?;
+                while let Some(row) = rows_iter
+                    .next()
+                    .map_err(|e| CliError::internal(e.to_string()))?
+                {
+                    let data_json: String = row.get(2).map_err(|e| CliError::internal(e.to_string()))?;
+                    let data: Value = serde_json::from_str(&data_json)
+                        .map_err(|e| CliError::internal(e.to_string()))?;
+                    existing.push((
+                        row.get(0).map_err(|e| CliError::internal(e.to_string()))?,
+                        row.get(1).map_err(|e| CliError::internal(e.to_string()))?,
+                        data,
+                    ));
+                }
+            }
+            // `Lane3` / `L3` / `A3` name one slot of a single-row container, so
+            // the lookup compares parsed slots instead of raw position text.
+            let old = existing.into_iter().find(|(_, _, data)| {
+                well_slot_key(rows, columns, data["well_id"].as_str().unwrap_or_default())
+                    == Some(position.slot_key)
+            });
+            let data = json!({
+                "well_id": position.address,
+                "group_label": i.group_label,
+                "sample_id": i.sample_id,
+                "note": i.note,
+                "target": i.target.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+                "well_role": i.well_role,
+                "dilution_factor": i.dilution_factor,
+            });
+            let r = if let Some((id, revision, _)) = old {
                 let expected = i.expected_revision.ok_or_else(|| {
                     CliError::conflict("孔位已存在；修订时必须提供 expected_revision")
                 })?;
-                if expected != id.1 {
+                if expected != revision {
                     return Err(CliError::conflict(format!(
-                        "孔位版本已从 v{expected} 更新为 v{}；请先重新读取。",
-                        id.1
+                        "孔位版本已从 v{expected} 更新为 v{revision}；请先重新读取。"
                     )));
                 }
-                update_data(&db, &id.0, expected, "well", &data)?
+                update_data(&db, &id, expected, "well", &data)?
             } else {
                 if i.expected_revision.is_some() {
                     return Err(CliError::conflict(
@@ -11857,12 +12382,13 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             pantry_export_labels(&db, &i)
         }
         "readout.submit" => {
-            let i: ReadoutSubmitRequest = parse_input(path)?;
-            submit_readout(&mut db, &i)
+            let input: Value = parse_input(path)?;
+            submit_readout_input(&mut db, input)
         }
         "readout.batch" => {
-            let i: ReadoutBatchRequest = parse_input(path)?;
-            submit_readout_batch(&mut db, &i)
+            let input: Value = parse_input(path)?;
+            let request = readout_batch_request_from_json(input)?;
+            submit_readout_batch(&mut db, &request)
         }
         "formula.create" => {
             let i: FormulaCreate = parse_input(path)?;
@@ -12105,6 +12631,78 @@ fn split_well(value: &str) -> Result<(String, String), CliError> {
     Ok((letters, digits))
 }
 
+/// One addressable plate slot, resolved from user input.
+///
+/// Mirrors the EXP-11 1D rules of `asterlab_core::labware`: a single-row
+/// container also accepts `Lane<N>` / `L<N>` / `Tube<N>`, and every alias of one
+/// slot resolves to the same `slot_key` so a lane can never be written twice.
+struct PlatePosition {
+    /// Canonical stored address: `A1` for 2D wells, `Lane<N>` for a 1D slot.
+    address: String,
+    /// Parsed `(row, column)` used for duplicate detection.
+    slot_key: (usize, usize),
+}
+
+fn parse_plate_position(
+    rows: usize,
+    columns: usize,
+    raw: &str,
+) -> Result<PlatePosition, CliError> {
+    let text = raw.trim();
+    if rows == 0 || columns == 0 {
+        return Err(CliError::internal("板布局缺少行列数"));
+    }
+    if rows == 1 {
+        if let Some(index) = parse_lane_index(text) {
+            if index == 0 || index > columns {
+                return Err(CliError::input("泳道超出板型范围"));
+            }
+            return Ok(PlatePosition {
+                address: format!("Lane{index}"),
+                slot_key: (1, index),
+            });
+        }
+    }
+    let (letters, digits) = split_well(text)?;
+    let row = letters.chars().fold(0usize, |n, c| {
+        n * 26 + (c.to_ascii_uppercase() as usize - 'A' as usize + 1)
+    });
+    let column = digits
+        .parse::<usize>()
+        .map_err(|_| CliError::input("孔位列号无效"))?;
+    if row == 0 || row > rows || column == 0 || column > columns {
+        return Err(CliError::input("孔位超出板型范围"));
+    }
+    Ok(PlatePosition {
+        address: format!("{letters}{column}"),
+        slot_key: (row, column),
+    })
+}
+
+/// 1-based lane index for `Lane<N>` / `L<N>` / `Tube<N>`, matched
+/// case-insensitively. `Lane` is tried before `L`, otherwise `Lane4` would
+/// parse as a lane named `ane4`.
+fn parse_lane_index(value: &str) -> Option<usize> {
+    let lower = value.to_ascii_lowercase();
+    ["lane", "tube", "l"]
+        .into_iter()
+        .find_map(|prefix| lower.strip_prefix(prefix))
+        .filter(|digits| {
+            !digits.is_empty()
+                && digits.len() <= 2
+                && digits.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        .and_then(|digits| digits.parse().ok())
+}
+
+/// Duplicate-detection key for a stored position; `None` for legacy text that
+/// does not parse, which can never collide with a newly validated position.
+fn well_slot_key(rows: usize, columns: usize, stored: &str) -> Option<(usize, usize)> {
+    parse_plate_position(rows, columns, stored)
+        .ok()
+        .map(|position| position.slot_key)
+}
+
 fn design_payload_schema() -> Value {
     design_schema()
 }
@@ -12159,7 +12757,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["design_id","design_revision","snapshot"],"properties":{"design_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"snapshot":design_payload_schema()}})
         }
         "run" => {
-            json!({"type":"object","additionalProperties":false,"required":["title","scheduled_date","protocol_version_id","design_version_id","design_revision","status"],"properties":{"title":{"type":"string"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"status":{"type":"string","enum":["planned","in_progress","completed","blocked","cancelled"]},"run_index":{"type":"integer","minimum":1},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]},"container_plan":{"type":"object","additionalProperties":true},"labware_profiles":{"type":"array","items":{"type":"object","additionalProperties":true}},"material_manifest":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["planned_output_id","title","evidence_id","producer_protocol","consumers"],"properties":{"planned_output_id":{"type":"string"},"title":{"type":"string"},"evidence_id":{"type":["string","null"]},"producer_protocol":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","protocol_version_id","protocol_id","protocol_title","protocol_version","root_block_version_id","block_version_ids","root_bindings","protocol_ready","steps","resolved_parameters","unresolved_parameters"],"properties":{"module_contracts":{"type":"array","items":{"type":"object","additionalProperties":true}},"assay_id":{"type":["string","null"]},"assay_title":{"type":"string"},"protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},"protocol_title":{"type":"string"},"protocol_version":{"type":"integer","minimum":1},"root_block_version_id":{"type":["string","null"]},"block_version_ids":{"type":"array","items":{"type":"string"}},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","unit"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"protocol_ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object"}},"resolved_parameters":{"type":"array","items":{"type":"object"}},"unresolved_parameters":{"type":"array","items":{"type":"object"}}}},"consumers":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","group_id","group_name"],"properties":{"assay_id":{"type":"string"},"assay_title":{"type":"string"},"group_id":{"type":["string","null"]},"group_name":{"type":"string"}}}}}}},"protocol_manifest":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","protocol_version_id","protocol_id","protocol_title","protocol_version"],"properties":{"module_contracts":{"type":"array","items":{"type":"object","additionalProperties":true}},"assay_id":{"type":["string","null"]},"assay_title":{"type":"string"},"protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},"protocol_title":{"type":"string"},"protocol_version":{"type":"integer","minimum":1},"root_block_version_id":{"type":["string","null"]},"block_version_ids":{"type":"array","items":{"type":"string"}},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","unit"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"protocol_ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object"}},"resolved_parameters":{"type":"array","items":{"type":"object"}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}}}}}}})
+            json!({"type":"object","additionalProperties":false,"required":["title","scheduled_date","protocol_version_id","design_version_id","design_revision","status"],"properties":{"title":{"type":"string"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"status":{"type":"string","enum":["planned","in_progress","completed","blocked","cancelled"]},"run_index":{"type":"integer","minimum":1},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]},"source_run_id":{"type":["string","null"]},"container_plan":{"type":"object","additionalProperties":true},"labware_profiles":{"type":"array","items":{"type":"object","additionalProperties":true}},"material_manifest":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["planned_output_id","title","evidence_id","producer_protocol","consumers"],"properties":{"planned_output_id":{"type":"string"},"title":{"type":"string"},"evidence_id":{"type":["string","null"]},"producer_protocol":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","protocol_version_id","protocol_id","protocol_title","protocol_version","root_block_version_id","block_version_ids","root_bindings","protocol_ready","steps","resolved_parameters","unresolved_parameters"],"properties":{"module_contracts":{"type":"array","items":{"type":"object","additionalProperties":true}},"assay_id":{"type":["string","null"]},"assay_title":{"type":"string"},"protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},"protocol_title":{"type":"string"},"protocol_version":{"type":"integer","minimum":1},"root_block_version_id":{"type":["string","null"]},"block_version_ids":{"type":"array","items":{"type":"string"}},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","unit"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"protocol_ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object"}},"resolved_parameters":{"type":"array","items":{"type":"object"}},"unresolved_parameters":{"type":"array","items":{"type":"object"}}}},"consumers":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","group_id","group_name"],"properties":{"assay_id":{"type":"string"},"assay_title":{"type":"string"},"group_id":{"type":["string","null"]},"group_name":{"type":"string"}}}}}}},"protocol_manifest":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["assay_id","assay_title","protocol_version_id","protocol_id","protocol_title","protocol_version"],"properties":{"module_contracts":{"type":"array","items":{"type":"object","additionalProperties":true}},"assay_id":{"type":["string","null"]},"assay_title":{"type":"string"},"protocol_version_id":{"type":"string"},"protocol_id":{"type":"string"},"protocol_title":{"type":"string"},"protocol_version":{"type":"integer","minimum":1},"root_block_version_id":{"type":["string","null"]},"block_version_ids":{"type":"array","items":{"type":"string"}},"root_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","value","unit"],"properties":{"slot":{"type":"string"},"value":{},"unit":{"type":["string","null"]}}}},"protocol_ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object"}},"resolved_parameters":{"type":"array","items":{"type":"object"}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}}}}}}})
         }
         "task" => {
             json!({"type":"object","additionalProperties":false,"required":["title","scheduled_date","status","notes"],"properties":{"title":{"type":"string"},"scheduled_date":{"type":"string","format":"date"},"status":{"type":"string","enum":["planned","in_progress","done","blocked"]},"notes":{"type":"string"}}})
@@ -12195,7 +12793,7 @@ fn record_data_schema(kind: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["name","format","rows","columns"],"properties":{"name":{"type":"string"},"format":{"type":"string"},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48},"assay_id":{"type":["string","null"]},"timepoint":{"type":["string","null"]}}})
         }
         "well" => {
-            json!({"type":"object","additionalProperties":false,"required":["well_id","group_label","sample_id","note"],"properties":{"well_id":{"type":"string"},"group_label":{"type":"string"},"sample_id":{"type":"string"},"note":{"type":"string"}}})
+            json!({"type":"object","additionalProperties":false,"required":["well_id","group_label","sample_id","note"],"properties":{"well_id":{"type":"string"},"group_label":{"type":"string"},"sample_id":{"type":"string"},"note":{"type":"string"},"target":{"type":["string","null"]},"well_role":{"type":["string","null"],"enum":["unknown","ntc","standard","positive_control",null]},"dilution_factor":{"type":["number","null"],"exclusiveMinimum":0}}})
         }
         "note" => {
             json!({"type":"object","additionalProperties":false,"required":["content","event_time","observation","result","deviation"],"properties":{"content":{"type":"string"},"event_time":{"type":["string","null"],"format":"date-time"},"event_time_local":{"type":["string","null"]},"event_timezone":{"type":["string","null"]},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
@@ -12416,7 +13014,7 @@ fn result_schema(tool: &str) -> Value {
         "pantry.upsert" => json!({"type":"object","additionalProperties":false,"required":["item"],"properties":{"item":pantry_item()}}),
         "pantry.delete" => json!({"type":"object","additionalProperties":false,"required":["pantry_item_id","label_code","revision","deleted"],"properties":{"pantry_item_id":{"type":"string"},"label_code":{"type":"string"},"revision":{"type":"integer","minimum":2},"deleted":{"const":true}}}),
         "label.export" => json!({"type":"object","additionalProperties":false,"required":["schema_version","generated_at","as_of","near_expiry_days","labels"],"properties":{"schema_version":{"const":1},"generated_at":{"type":"string"},"as_of":{"type":"string","format":"date"},"near_expiry_days":{"type":"integer","minimum":0},"labels":{"type":"array","items":pantry_label()}}}),
-        "readout.submit" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}}),
+        "readout.submit" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"},"accepted":{"type":"integer","minimum":1,"description":"多值型 readouts[] 提交时记录的读数条数"}}}),
         "readout.batch" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed","accepted"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"},"accepted":{"type":"integer","minimum":1}}}),
         "formula.create" => one("formula"),
         "formula.revise" => one("formula"),
@@ -12469,6 +13067,12 @@ fn result_schema(tool: &str) -> Value {
         }
         "calculator.runtime_normalize" => {
             json!({"type":"object","additionalProperties":false,"required":["planned_volume_ul","required_volume_ul","dead_volume_ul","additional_volume_ul","unused_volume_ul","formula","assumption"],"properties":{"planned_volume_ul":{"type":"number","minimum":0},"required_volume_ul":{"type":"number","minimum":0},"dead_volume_ul":{"type":"number","minimum":0},"additional_volume_ul":{"type":"number","minimum":0},"unused_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
+        "calculator.sample_normalize_batch" => {
+            json!({"type":"object","additionalProperties":false,"required":["rows","insufficient_count","formula","assumption"],"properties":{"rows":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","concentration_ng_per_ul","required_sample_volume_ul","sample_volume_ul","diluent_volume_ul","achieved_mass_ng","insufficient"],"properties":{"name":{"type":"string"},"concentration_ng_per_ul":{"type":"number","exclusiveMinimum":0},"required_sample_volume_ul":{"type":"number","minimum":0},"sample_volume_ul":{"type":"number","minimum":0},"diluent_volume_ul":{"type":"number","minimum":0},"achieved_mass_ng":{"type":"number","minimum":0},"insufficient":{"type":"boolean"}}}},"insufficient_count":{"type":"integer","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
+        "calculator.in_vivo_dosing" => {
+            json!({"type":"object","additionalProperties":false,"required":["rows","total_body_weight_g","total_dose_mass_mg","total_injection_volume_ul","prepared_dose_mass_mg","preparation_volume_ul","stock_volume_ul","diluent_volume_ul","formula","assumption"],"properties":{"rows":{"type":"array","minItems":1,"maxItems":200,"items":{"type":"object","additionalProperties":false,"required":["index","body_weight_g","dose_mass_mg","injection_volume_ul"],"properties":{"index":{"type":"integer","minimum":1},"body_weight_g":{"type":"number","exclusiveMinimum":0},"dose_mass_mg":{"type":"number","minimum":0},"injection_volume_ul":{"type":"number","minimum":0}}}},"total_body_weight_g":{"type":"number","minimum":0},"total_dose_mass_mg":{"type":"number","minimum":0},"total_injection_volume_ul":{"type":"number","minimum":0},"prepared_dose_mass_mg":{"type":"number","minimum":0},"preparation_volume_ul":{"type":"number","minimum":0},"stock_volume_ul":{"type":"number","minimum":0},"diluent_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
         }
         "sdk.modules" => json!({"type":"object","additionalProperties":false,"required":["modules"],"properties":{"modules":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1},"title":{"type":["string","null"]},"category":{"type":["string","null"]},"capabilities":{"type":["array","null"]},"renderers":{"type":["object","null"]},"actions":{"type":["array","null"]}}}}}}),
         "sdk.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled","errors","warnings","modules"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","schema"],"properties":{"kind":{},"schema":{}}}},"design":{"type":"object","additionalProperties":true}}}),
@@ -12602,7 +13206,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["id","expected_revision"],"anyOf":[{"required":["title"]},{"required":["scheduled_date"]}],"properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":1},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"}}})
         }
         "run.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["design_id","title"],"properties":{"design_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["design_id","title"],"properties":{"design_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"scheduled_date":{"type":["string","null"],"format":"date"},"protocol_version_id":{"type":["string","null"]},"repeat_of_run_id":{"type":["string","null"]},"repeat_relationship":{"type":"string","enum":["independent","same_source","paired","unknown"]},"source_run_id":{"type":["string","null"],"description":"同项目下提供样本的上游收获 Run；可跨 Design，与 repeat_of_run_id 不是同一关系"}}})
         }
         "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["design_id"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":1},"run_id":{"type":"string"}}}),
         "workflow.progress" => json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"step_path":{"type":"string","minLength":1,"maxLength":500,"description":"只看一个冻结步骤"},"timepoint":{"type":"string","minLength":1,"maxLength":100,"description":"只看该步骤的一个具体冻结时间点；省略时只返回事件实际携带的分组"},"sample_id":{"type":"string","minLength":1,"maxLength":120,"description":"只看一个样本"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120},"description":"仅与 step_path 和具体 timepoint 同时提供时，为该分组补入 not_started 样本"}}}),
@@ -12631,7 +13235,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","name","format","rows","columns"],"properties":{"run_id":{"type":"string"},"assay_id":{"type":"string","description":"可选；必须是 Run 冻结设计中的检测 ID"},"timepoint":{"type":"string","description":"可选；标注该实际板图所用的检测时间点，需与冻结设计一致"},"name":{"type":"string","minLength":1,"maxLength":100,"pattern":"\\S"},"format":{"type":"string","enum":["6","12","24","48","96","384","custom"]},"rows":{"type":"integer","minimum":1,"maximum":32},"columns":{"type":"integer","minimum":1,"maximum":48}}})
         }
         "well.set" => {
-            json!({"type":"object","additionalProperties":false,"required":["plate_id","well_id"],"properties":{"plate_id":{"type":"string"},"well_id":{"type":"string","pattern":"^[A-Za-z]{1,2}[0-9]{1,2}$"},"expected_revision":{"type":"integer","minimum":1,"description":"仅覆盖已存在孔位时必需；创建新孔位时省略"},"group_label":{"type":"string"},"sample_id":{"type":"string"},"note":{"type":"string"}}})
+            json!({"type":"object","additionalProperties":false,"required":["plate_id","well_id"],"properties":{"plate_id":{"type":"string"},"well_id":{"type":"string","pattern":"^(?:[A-Za-z]{1,2}[0-9]{1,2}|[Ll]ane[0-9]{1,2}|[Ll][0-9]{1,2}|[Tt]ube[0-9]{1,2})$","description":"2D 孔位 A1..AA99；单行容器（rows=1）另接受 Lane3 / L3 / Tube3，三种写法与 A3 指向同一槽位"},"expected_revision":{"type":"integer","minimum":1,"description":"仅覆盖已存在孔位时必需；创建新孔位时省略"},"group_label":{"type":"string"},"sample_id":{"type":"string"},"note":{"type":"string"},"target":{"type":["string","null"],"maxLength":120,"description":"计划检测目标（基因/分析物）；不是读数"},"well_role":{"type":["string","null"],"enum":["unknown","ntc","standard","positive_control",null],"description":"该孔位在检测布局中的计划角色"},"dilution_factor":{"type":["number","null"],"exclusiveMinimum":0,"description":"该孔位的计划稀释倍数；无单位、必须大于 0"}}})
         }
         "note.create" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
@@ -12643,10 +13247,10 @@ fn input_schema(tool: &str) -> Option<Value> {
         "pantry.delete" => json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1,"maxLength":120,"description":"要停用的储藏室条目 ID"},"expected_revision":{"type":["integer","null"],"minimum":1,"description":"提供时按版本校验，不一致返回 REVISION_CONFLICT"}}}),
         "pantry.upsert" => json!({"type":"object","additionalProperties":false,"required":["name"],"properties":{"id":{"type":["string","null"],"maxLength":120,"description":"省略时创建新条目；提供时必须已存在"},"project_id":{"type":["string","null"],"maxLength":120,"description":"可选；提供时必须指向已存在的项目"},"name":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},"location":{"type":"string","maxLength":200},"purchased_on":{"type":["string","null"],"format":"date"},"opened_on":{"type":["string","null"],"format":"date"},"shelf_life_days":{"type":["integer","null"],"minimum":1,"maximum":3650,"description":"未开封保质期天数；与 purchased_on 一起决定未开封效期"},"opened_shelf_life_days":{"type":["integer","null"],"minimum":1,"maximum":3650,"description":"开封后可用天数；与 opened_on 一起优先生效"},"exhausted":{"type":"boolean","default":false},"expected_revision":{"type":["integer","null"],"minimum":1,"description":"更新已有条目时用于并发保护；省略则不校验版本"}}}),
         "readout.submit" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","endpoint","protocol_version_id"],"oneOf":[{"required":["value"]},{"required":["qualifier"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","protocol_version_id"],"oneOf":[{"required":["endpoint","value"],"not":{"required":["readouts"]}},{"required":["endpoint","qualifier"],"not":{"required":["readouts"]}},{"required":["readouts"],"not":{"required":["endpoint","value","qualifier"]}}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S","description":"标量读数必填；多值型 readouts[] 里由各读数的 schema 决定"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120,"description":"仅标量读数可用"},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160},"batch_id":{"type":["string","null"],"maxLength":120,"description":"仅多值型 readouts[] 可用"},"readouts":{"type":"array","minItems":1,"maxItems":1000,"items":{"type":"object","description":"v1 Readout：readout_id?/schema_id/schema_version/value（numeric|table|plate|categorical|file）/unit?/missing?/source/link；字段与校验以 docs/contracts/readout-schema-v1.md 为准"},"description":"多值型读数：同一节点写入分类、表格、孔板或文件读数；不能与 value/qualifier/endpoint 同时使用"},"readout_schemas":{"type":"array","maxItems":100,"items":{"type":"object","description":"v1 ReadoutSchema 定义；本次提交声明，按其 schema_id 解析 readouts[]"},"description":"本次提交额外依赖的读数 schema；同一 id 不得给出不同定义"}}})
         }
         "readout.batch" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","protocol_version_id","plate_id","schema_id"],"oneOf":[{"required":["cells"]},{"required":["csv"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"plate_id":{"type":"string","minLength":1,"maxLength":120,"description":"本次 Run 中唯一的孔板 ID；缺省无法归属孔位"},"schema_id":{"type":"string","minLength":1,"maxLength":120},"schema_version":{"type":"integer","enum":[1]},"assay_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"batch_id":{"type":["string","null"],"maxLength":120},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160},"cells":{"type":"array","maxItems":1000,"items":{"type":"object","additionalProperties":false,"required":["row","column","field"],"properties":{"row":{"type":"integer","minimum":0},"column":{"type":"integer","minimum":0},"field":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":["number","null"]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"group":{"type":["string","null"],"maxLength":120},"replicate":{"type":["integer","null"],"minimum":0},"status":{"type":["string","null"],"enum":["raw","missing",null]}}}},"csv":{"type":"string","maxLength":1000000,"description":"表头 row,column,field[,value,unit,sample_id,group,replicate,status]；行列从 0 开始"}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","protocol_version_id","plate_id","schema_id"],"oneOf":[{"required":["cells"]},{"required":["csv"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"plate_id":{"type":"string","minLength":1,"maxLength":120,"description":"本次 Run 中唯一的孔板 ID；缺省无法归属孔位"},"schema_id":{"type":"string","minLength":1,"maxLength":120},"schema_version":{"type":"integer","enum":[1]},"assay_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"batch_id":{"type":["string","null"],"maxLength":120},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160},"cells":{"type":"array","maxItems":1000,"items":{"type":"object","additionalProperties":false,"required":["row","column","field"],"properties":{"row":{"type":"integer","minimum":0},"column":{"type":"integer","minimum":0},"field":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":["number","null"]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"group":{"type":["string","null"],"maxLength":120},"replicate":{"type":["integer","null"],"minimum":0},"status":{"type":["string","null"],"enum":["raw","missing",null]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null],"description":"显式缺失原因；与 value 互斥。提供时 CLI 按 CSV 同一路径解析"}}}},"csv":{"type":"string","maxLength":1000000,"description":"表头 row,column,field[,value,unit,sample_id,group,replicate,status,qualifier]；行列从 0 开始；value 可写 Undetermined 记 not_detected；qualifier 只能与 status=missing 一起记录"}}})
         }
         "formula.create" => {
             json!({"type":"object","additionalProperties":false,"required":["project_id","title","expression"],"properties":{"project_id":{"type":"string"},"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"expression":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},"variables":{"type":"string"},"notes":{"type":"string"}}})
@@ -12685,7 +13289,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["project"],"properties":{"project":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"description":{"type":"string"}}},"designs":{"type":"array","maxItems":500,"items":design_schema()},"protocols":{"type":"array","maxItems":500,"items":{"type":"object","additionalProperties":false,"required":["title","body"],"properties":{"title":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"body":{"type":"string"}}}}}})
         }
         "calculator.dilution" => {
-            json!({"type":"object","additionalProperties":false,"required":["stock_concentration","stock_unit","target_concentration","target_unit","final_volume","volume_unit"],"properties":{"stock_concentration":{"type":"number","exclusiveMinimum":0},"stock_unit":{"type":"string","enum":["M","mM","µM","nM"]},"target_concentration":{"type":"number","minimum":0},"target_unit":{"type":"string","enum":["M","mM","µM","nM"]},"final_volume":{"type":"number","exclusiveMinimum":0},"volume_unit":{"type":"string","enum":["L","mL","µL"]}}})
+            json!({"type":"object","additionalProperties":false,"required":["stock_concentration","stock_unit","target_concentration","target_unit","final_volume","volume_unit"],"properties":{"stock_concentration":{"type":"number","exclusiveMinimum":0},"stock_unit":{"type":"string","enum":["M","mM","µM","nM","mg/mL","µg/mL","ng/µL"],"description":"摩尔或质量浓度；两者不能混用"},"target_concentration":{"type":"number","minimum":0},"target_unit":{"type":"string","enum":["M","mM","µM","nM","mg/mL","µg/mL","ng/µL"],"description":"必须与 stock_unit 同一量纲"},"final_volume":{"type":"number","exclusiveMinimum":0},"volume_unit":{"type":"string","enum":["L","mL","µL"]}}})
         }
         "calculator.solution" => {
             json!({"type":"object","additionalProperties":false,"required":["concentration_mol_l","final_volume","volume_unit","molecular_weight_g_mol"],"properties":{"concentration_mol_l":{"type":"number","exclusiveMinimum":0},"final_volume":{"type":"number","exclusiveMinimum":0},"volume_unit":{"type":"string","enum":["L","mL","µL"]},"molecular_weight_g_mol":{"type":"number","exclusiveMinimum":0}}})
@@ -12704,6 +13308,12 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "calculator.runtime_normalize" => {
             json!({"type":"object","additionalProperties":false,"required":["planned_wells","actual_wells","volume_per_well_ul","dead_volume_ul","prepared_volume_ul"],"properties":{"planned_wells":{"type":"integer","minimum":0,"maximum":100000},"actual_wells":{"type":"integer","minimum":0,"maximum":100000},"volume_per_well_ul":{"type":"number","exclusiveMinimum":0},"excess_ratio":{"type":"number","minimum":0},"dead_volume_ul":{"type":"number","minimum":0},"prepared_volume_ul":{"type":"number","minimum":0}}})
+        }
+        "calculator.sample_normalize_batch" => {
+            json!({"type":"object","additionalProperties":false,"required":["target_mass_ng","reaction_volume_ul","samples"],"properties":{"target_mass_ng":{"type":"number","exclusiveMinimum":0,"description":"每个样本需贡献到一次反应的质量（ng）"},"reaction_volume_ul":{"type":"number","exclusiveMinimum":0,"description":"该反应允许占用的总体积（µL），也是样本体积上限"},"samples":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","concentration","unit"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"concentration":{"type":"number","exclusiveMinimum":0},"unit":{"type":"string","enum":["mg/mL","µg/mL","ng/µL"],"description":"实测质量浓度；摩尔单位不属于本工具"}}}}}})
+        }
+        "calculator.in_vivo_dosing" => {
+            json!({"type":"object","additionalProperties":false,"required":["body_weights_g","dose_mg_per_kg","dose_volume_ml_per_kg","stock_concentration","stock_unit"],"properties":{"body_weights_g":{"type":"array","minItems":1,"maxItems":200,"items":{"type":"number","exclusiveMinimum":0},"description":"每只动物的实测体重（g）；不按组均值估算"},"dose_mg_per_kg":{"type":"number","exclusiveMinimum":0},"dose_volume_ml_per_kg":{"type":"number","exclusiveMinimum":0},"overage_ratio":{"type":"number","minimum":0,"description":"配制管余量比例；只放大制备量，不放大单次注射量"},"stock_concentration":{"type":"number","exclusiveMinimum":0},"stock_unit":{"type":"string","enum":["mg/mL","µg/mL","ng/µL"]}}})
         }
         "sdk.modules" => {
             json!({"type":"object","additionalProperties":false,"properties":{}})
@@ -12959,6 +13569,8 @@ fn tool_specs() -> Vec<Value> {
         "calculator.gel_mastermix",
         "calculator.cell_seeding",
         "calculator.runtime_normalize",
+        "calculator.sample_normalize_batch",
+        "calculator.in_vivo_dosing",
         "sdk.modules",
         "sdk.validate",
         "sdk.describe",
@@ -13009,6 +13621,8 @@ fn tool_writes(tool: &str) -> bool {
             | "calculator.gel_mastermix"
             | "calculator.cell_seeding"
             | "calculator.runtime_normalize"
+            | "calculator.sample_normalize_batch"
+            | "calculator.in_vivo_dosing"
             | "sdk.modules"
             | "sdk.describe"
             | "sdk.validate"
@@ -13098,6 +13712,8 @@ fn tool_description(tool: &str) -> &'static str {
         "calculator.gel_mastermix" => "按组别 % w/v、实际孔数、每孔体积与余量导出各组 GelMA 干粉质量、LAP 母液体积与溶剂体积。",
         "calculator.cell_seeding" => "按目标 cells/well、实际孔数、每孔悬液体积与余量导出细胞总数与因子母液加入量。",
         "calculator.runtime_normalize" => "按实际孔数与死体积重算运行期配平体积，返回需追加或未用完的体积。",
+        "calculator.sample_normalize_batch" => "按统一目标质量与反应体积平衡多个样本的实测质量浓度，给出各样本体积、稀释液体积与不达标标记。",
+        "calculator.in_vivo_dosing" => "按每只动物体重与 mg/kg 剂量换算单次注射量与制备量，并给出母液与稀释液体积。",
         "sdk.modules" => "从嵌入的 modules.json 返回 AsterDoc 模块摘要（kind/schema/title/category/capabilities/renderers/actions）；只读。",
         "sdk.describe" => "按 kind+schema 返回完整的 AsterDoc 模块 manifest；只读。",
         "sdk.validate" => "校验 AsterDoc 源码或已保存设计并尝试编译；不写入。",
@@ -13140,7 +13756,9 @@ fn tool_effects(tool: &str) -> &'static str {
         | "calculator.reaction_volume"
         | "calculator.gel_mastermix"
         | "calculator.cell_seeding"
-        | "calculator.runtime_normalize" => "只返回算术结果；不保存输入或结果。",
+        | "calculator.runtime_normalize"
+        | "calculator.sample_normalize_batch"
+        | "calculator.in_vivo_dosing" => "只返回算术结果；不保存输入或结果。",
         "project.create" => "创建一个项目记录。",
         "project.revise" => "按 expected_revision 更新一个项目记录并递增 revision。",
         "design.create" => "创建实验设计并创建不可变的 v1 设计快照。",
@@ -16272,7 +16890,7 @@ mix_factor_final_concentration: {value: 50, unit: ng/mL}
 
     fn seed_readout_runs(db: &Connection) {
         db.execute_batch(
-            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);",
+            "CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);",
         )
         .unwrap();
         db.execute(
@@ -17238,6 +17856,762 @@ INSERT INTO pantry_items VALUES(\
         )
         .unwrap();
         assert_eq!(deleted["revision"], 2);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn calculator_input(dir: &std::path::Path, name: &str, value: Value) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, value.to_string()).unwrap();
+        path
+    }
+
+    #[test]
+    fn quality_concentration_calculators_accept_mass_units_and_balance_samples() {
+        let dir = std::env::temp_dir().join(format!("asterlab-quality-calc-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 2 mg/mL = 2000 ng/µL, so 100 µL at 50 ng/µL needs 2.5 µL of stock.
+        let dilution = dispatch(
+            "calculator.dilution",
+            calculator_input(&dir, "dilution.json", json!({
+                "stock_concentration": 2.0,
+                "stock_unit": "mg/mL",
+                "target_concentration": 50.0,
+                "target_unit": "ng/µL",
+                "final_volume": 100.0,
+                "volume_unit": "µL"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert!((dilution["stock_volume"].as_f64().unwrap() - 2.5).abs() < 1e-9);
+        assert!((dilution["diluent_volume"].as_f64().unwrap() - 97.5).abs() < 1e-9);
+
+        // Molar C1V1 keeps its old numbers.
+        let molar = dispatch(
+            "calculator.dilution",
+            calculator_input(&dir, "molar.json", json!({
+                "stock_concentration": 10.0,
+                "stock_unit": "mM",
+                "target_concentration": 1.0,
+                "target_unit": "mM",
+                "final_volume": 1.0,
+                "volume_unit": "mL"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert!((molar["stock_volume"].as_f64().unwrap() - 0.1).abs() < 1e-9);
+
+        // Molar and mass concentration are different dimensions and never mix.
+        let mixed = dispatch(
+            "calculator.dilution",
+            calculator_input(&dir, "mixed.json", json!({
+                "stock_concentration": 2.0,
+                "stock_unit": "mg/mL",
+                "target_concentration": 50.0,
+                "target_unit": "µM",
+                "final_volume": 100.0,
+                "volume_unit": "µL"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(mixed.code, "INVALID_INPUT");
+        assert!(
+            mixed.message.contains("同一量纲"),
+            "message = {}",
+            mixed.message
+        );
+
+        let batch = dispatch(
+            "calculator.sample_normalize_batch",
+            calculator_input(&dir, "normalize.json", json!({
+                "target_mass_ng": 100.0,
+                "reaction_volume_ul": 10.0,
+                "samples": [
+                    {"name": "S1", "concentration": 20.0, "unit": "ng/µL"},
+                    {"name": "S2", "concentration": 5.0, "unit": "ng/µL"}
+                ]
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        let rows = batch["rows"].as_array().unwrap();
+        assert_eq!(rows[0]["concentration_ng_per_ul"], 20.0);
+        assert_eq!(rows[0]["required_sample_volume_ul"], 5.0);
+        assert_eq!(rows[0]["sample_volume_ul"], 5.0);
+        assert_eq!(rows[0]["diluent_volume_ul"], 5.0);
+        assert_eq!(rows[0]["achieved_mass_ng"], 100.0);
+        assert_eq!(rows[0]["insufficient"], false);
+        // 5 ng/µL needs 20 µL, more than the reaction allows: capped, reported.
+        assert_eq!(rows[1]["required_sample_volume_ul"], 20.0);
+        assert_eq!(rows[1]["sample_volume_ul"], 10.0);
+        assert_eq!(rows[1]["diluent_volume_ul"], 0.0);
+        assert_eq!(rows[1]["achieved_mass_ng"], 50.0);
+        assert_eq!(rows[1]["insufficient"], true);
+        assert_eq!(batch["insufficient_count"], 1);
+
+        // Molar units are not mass concentrations for this tool.
+        let molar_batch = dispatch(
+            "calculator.sample_normalize_batch",
+            calculator_input(&dir, "normalize-molar.json", json!({
+                "target_mass_ng": 100.0,
+                "reaction_volume_ul": 10.0,
+                "samples": [{"name": "S1", "concentration": 1.0, "unit": "µM"}]
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(molar_batch.code, "INVALID_INPUT");
+
+        let dosing = dispatch(
+            "calculator.in_vivo_dosing",
+            calculator_input(&dir, "dosing.json", json!({
+                "body_weights_g": [25.0, 30.0],
+                "dose_mg_per_kg": 10.0,
+                "dose_volume_ml_per_kg": 10.0,
+                "overage_ratio": 0.1,
+                "stock_concentration": 5.0,
+                "stock_unit": "mg/mL"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        let dose_rows = dosing["rows"].as_array().unwrap();
+        assert_eq!(dose_rows[0]["index"], 1);
+        assert_eq!(dose_rows[0]["body_weight_g"], 25.0);
+        assert_eq!(dose_rows[0]["dose_mass_mg"], 0.25);
+        assert_eq!(dose_rows[0]["injection_volume_ul"], 250.0);
+        assert_eq!(dose_rows[1]["injection_volume_ul"], 300.0);
+        assert_eq!(dosing["total_injection_volume_ul"], 550.0);
+        assert_eq!(dosing["preparation_volume_ul"], 605.0);
+        assert_eq!(dosing["prepared_dose_mass_mg"], 0.605);
+        // 0.605 mg at 5 mg/mL is 121 µL of stock.
+        assert_eq!(dosing["stock_volume_ul"], 121.0);
+        assert_eq!(dosing["diluent_volume_ul"], 484.0);
+
+        let too_dilute = dispatch(
+            "calculator.in_vivo_dosing",
+            calculator_input(&dir, "dosing-weak.json", json!({
+                "body_weights_g": [25.0],
+                "dose_mg_per_kg": 10.0,
+                "dose_volume_ml_per_kg": 10.0,
+                "stock_concentration": 0.001,
+                "stock_unit": "ng/µL"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(too_dilute.code, "INVALID_INPUT");
+        assert!(
+            too_dilute.message.contains("stock concentration is too low"),
+            "message = {}",
+            too_dilute.message
+        );
+
+        for tool in [
+            "calculator.sample_normalize_batch",
+            "calculator.in_vivo_dosing",
+        ] {
+            assert!(input_schema(tool).is_some(), "{tool} has no input schema");
+            assert!(result_schema(tool)["type"].as_str() == Some("object"));
+            assert!(!tool_writes(tool), "{tool} must stay read-only");
+            assert!(tool_specs().iter().any(|spec| spec["name"] == tool));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn seed_lane_plate(db: &mut Connection) {
+        seed_readout_runs(db);
+        db.execute(
+            "INSERT INTO records VALUES('lane-plate','plate','project-1','run-1',1,?1,'now','now')",
+            [json!({"name":"lanes","format":"custom","rows":1,"columns":12}).to_string()],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn well_set_accepts_1d_lanes_and_detection_metadata() {
+        let dir = std::env::temp_dir().join(format!("asterlab-lane-wells-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let mut db = open_db(&dir).unwrap();
+            seed_lane_plate(&mut db);
+        }
+
+        let first = dispatch(
+            "well.set",
+            calculator_input(&dir, "well1.json", json!({
+                "plate_id": "lane-plate",
+                "well_id": "Lane3",
+                "group_label": "G1"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(first["record"]["data"]["well_id"], "Lane3");
+        assert!(first["record"]["data"]["target"].is_null());
+        assert!(first["record"]["data"]["well_role"].is_null());
+        assert!(first["record"]["data"]["dilution_factor"].is_null());
+
+        // `L3` is the same physical slot as `Lane3`, so it is an overwrite.
+        let alias = dispatch(
+            "well.set",
+            calculator_input(&dir, "well-alias.json", json!({
+                "plate_id": "lane-plate",
+                "well_id": "L3"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(alias.code, "REVISION_CONFLICT");
+
+        let updated = dispatch(
+            "well.set",
+            calculator_input(&dir, "well2.json", json!({
+                "plate_id": "lane-plate",
+                "well_id": "A3",
+                "expected_revision": 1,
+                "group_label": "G1",
+                "target": "GAPDH",
+                "well_role": "positive_control",
+                "dilution_factor": 10
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(updated["record"]["revision"], 2);
+        assert_eq!(updated["record"]["data"]["well_id"], "A3");
+        assert_eq!(updated["record"]["data"]["target"], "GAPDH");
+        assert_eq!(updated["record"]["data"]["well_role"], "positive_control");
+        assert_eq!(updated["record"]["data"]["dilution_factor"], 10.0);
+
+        let out_of_range = dispatch(
+            "well.set",
+            calculator_input(&dir, "well3.json", json!({
+                "plate_id": "lane-plate",
+                "well_id": "Tube13"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(out_of_range.code, "INVALID_INPUT");
+        assert!(
+            out_of_range.message.contains("泳道超出板型范围"),
+            "message = {}",
+            out_of_range.message
+        );
+
+        let zero_factor = dispatch(
+            "well.set",
+            calculator_input(&dir, "well4.json", json!({
+                "plate_id": "lane-plate",
+                "well_id": "Lane4",
+                "dilution_factor": 0
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(zero_factor.code, "INVALID_INPUT");
+
+        // A 2D plate has no 1D slots.
+        let two_dimensional = dispatch(
+            "well.set",
+            calculator_input(&dir, "well5.json", json!({
+                "plate_id": "plate-1",
+                "well_id": "Lane3"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(two_dimensional.code, "INVALID_INPUT");
+
+        let well_count: i64 = {
+            let db = open_db(&dir).unwrap();
+            db.query_row("SELECT COUNT(*) FROM records WHERE kind='well'", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(well_count, 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn readout_batch_accepts_json_and_csv_qualifiers() {
+        let dir = std::env::temp_dir().join(format!("asterlab-batch-qualifier-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let mut db = open_db(&dir).unwrap();
+            seed_readout_runs(&mut db);
+        }
+
+        let accepted = dispatch(
+            "readout.batch",
+            calculator_input(&dir, "batch-json.json", json!({
+                "run_id": "run-1",
+                "step_path": "run/read",
+                "protocol_version_id": "pv1",
+                "plate_id": "plate-1",
+                "schema_id": "cck8.plate96.od450.v1",
+                "assay_id": "assay-1",
+                "timepoint": "D1",
+                "cells": [
+                    {"row": 0, "column": 0, "field": "od450", "value": 1.0, "unit": "AU"},
+                    {"row": 0, "column": 1, "field": "od450", "qualifier": "not_detected"},
+                    {"row": 0, "column": 2, "field": "od450", "value": null, "qualifier": "below_lod"}
+                ]
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(accepted["accepted"], 3);
+        assert_eq!(accepted["replayed"], false);
+        let cells = accepted["record"]["data"]["result_cells"]
+            .as_array()
+            .unwrap();
+        assert_eq!(cells[0]["status"], "raw");
+        assert!(cells[0].get("qualifier").is_none());
+        assert_eq!(cells[1]["status"], "missing");
+        assert!(cells[1]["value"].is_null());
+        assert_eq!(cells[1]["qualifier"], "not_detected");
+        assert_eq!(cells[2]["qualifier"], "below_lod");
+        // A not-detected cell is not fabricated as a measurement.
+        assert_eq!(
+            accepted["record"]["data"]["measurements"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let conflicting = dispatch(
+            "readout.batch",
+            calculator_input(&dir, "batch-conflict.json", json!({
+                "run_id": "run-1",
+                "step_path": "run/read",
+                "protocol_version_id": "pv1",
+                "plate_id": "plate-1",
+                "schema_id": "cck8.plate96.od450.v1",
+                "assay_id": "assay-1",
+                "timepoint": "D1",
+                "batch_id": "batch-conflict",
+                "cells": [
+                    {"row": 1, "column": 0, "field": "od450", "value": 1.0, "qualifier": "below_lod"}
+                ]
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(conflicting.code, "INVALID_INPUT");
+        assert!(
+            conflicting
+                .issues
+                .iter()
+                .any(|issue| issue["code"] == "readout_value_or_qualifier"),
+            "issues = {:?}",
+            conflicting.issues
+        );
+
+        // An explicit null qualifier is the same as omitting it.
+        let null_qualifier = dispatch(
+            "readout.batch",
+            calculator_input(&dir, "batch-null-qualifier.json", json!({
+                "run_id": "run-1",
+                "step_path": "run/read",
+                "protocol_version_id": "pv1",
+                "plate_id": "plate-1",
+                "schema_id": "cck8.plate96.od450.v1",
+                "assay_id": "assay-1",
+                "timepoint": "D1",
+                "batch_id": "batch-null",
+                "cells": [
+                    {"row": 2, "column": 0, "field": "od450", "value": 0.8, "unit": "AU", "qualifier": null}
+                ]
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(null_qualifier["accepted"], 1);
+
+        let mixed_modes = dispatch(
+            "readout.batch",
+            calculator_input(&dir, "batch-mixed.json", json!({
+                "run_id": "run-1",
+                "step_path": "run/read",
+                "protocol_version_id": "pv1",
+                "plate_id": "plate-1",
+                "schema_id": "cck8.plate96.od450.v1",
+                "assay_id": "assay-1",
+                "timepoint": "D1",
+                "batch_id": "batch-mixed",
+                "cells": [{"row": 3, "column": 0, "field": "od450", "qualifier": "invalid"}],
+                "csv": "row,column,field,value\n4,0,od450,1.0\n"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(mixed_modes.code, "INVALID_INPUT");
+        assert!(
+            mixed_modes.message.contains("只能提供一种"),
+            "message = {}",
+            mixed_modes.message
+        );
+
+        let csv = dispatch(
+            "readout.batch",
+            calculator_input(&dir, "batch-csv.json", json!({
+                "run_id": "run-1",
+                "step_path": "run/read",
+                "protocol_version_id": "pv1",
+                "plate_id": "plate-1",
+                "schema_id": "cck8.plate96.od450.v1",
+                "assay_id": "assay-1",
+                "timepoint": "D1",
+                "batch_id": "batch-csv",
+                "csv": "row,column,field,value,unit\n0,0,od450,Undetermined,AU\n1,0,od450,1.5,AU\n"
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(csv["accepted"], 2);
+        let csv_cells = csv["record"]["data"]["result_cells"].as_array().unwrap();
+        assert_eq!(csv_cells[0]["qualifier"], "not_detected");
+        assert_eq!(csv_cells[0]["status"], "missing");
+        assert_eq!(csv_cells[1]["value"], 1.5);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn readout_submit_records_categorical_and_table_readouts_once() {
+        let dir = std::env::temp_dir().join(format!("asterlab-typed-readout-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let mut db = open_db(&dir).unwrap();
+            seed_readout_runs(&mut db);
+        }
+
+        let request = json!({
+            "run_id": "run-1",
+            "step_path": "run/read",
+            "protocol_version_id": "pv1",
+            "assay_id": "assay-1",
+            "readout_schemas": [
+                {
+                    "schema_id": "wb_grade",
+                    "schema_version": 1,
+                    "endpoint": "wb_grade",
+                    "value_kind": "categorical",
+                    "unit": {"canonical": null, "required": false},
+                    "missing": {"allowed": [], "null_allowed": false},
+                    "source": {"raw": true, "derived": false},
+                    "link": {"timepoint_required": false, "sample_required": false},
+                    "categorical": {"options": ["positive", "negative"], "allow_other": false}
+                },
+                {
+                    "schema_id": "wb_table",
+                    "schema_version": 1,
+                    "endpoint": "wb_table",
+                    "value_kind": "table",
+                    "unit": {"canonical": null, "required": false},
+                    "missing": {"allowed": [], "null_allowed": true},
+                    "source": {"raw": true, "derived": false},
+                    "link": {"timepoint_required": false, "sample_required": false},
+                    "table": {"columns": [
+                        {"key": "lane", "label": "Lane", "value_kind": "numeric"},
+                        {"key": "grade", "label": "Grade", "value_kind": "categorical"}
+                    ]}
+                }
+            ],
+            "readouts": [
+                {
+                    "schema_id": "wb_grade",
+                    "schema_version": 1,
+                    "value": {"kind": "categorical", "category": "positive"},
+                    "source": {"kind": "raw", "derived_from": []}
+                },
+                {
+                    "schema_id": "wb_table",
+                    "schema_version": 1,
+                    "value": {
+                        "kind": "table",
+                        "columns": ["lane", "grade"],
+                        "rows": [[1, "+"], [2, "+++"]]
+                    },
+                    "source": {"kind": "raw", "derived_from": []}
+                }
+            ]
+        });
+        let path = calculator_input(&dir, "typed-readout.json", request.clone());
+        let accepted = dispatch("readout.submit", path.to_str().unwrap(), &dir).unwrap();
+        assert_eq!(accepted["accepted"], 2);
+        assert_eq!(accepted["replayed"], false);
+        let records: Vec<Value> = accepted["record"]["data"]["result_cells"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|cell| cell["kind"] == "record")
+            .cloned()
+            .collect();
+        assert_eq!(records.len(), 2, "records = {records:?}");
+        assert_eq!(records[0]["readout"]["value"]["kind"], "categorical");
+        assert_eq!(records[0]["readout"]["value"]["category"], "positive");
+        assert_eq!(records[1]["readout"]["value"]["kind"], "table");
+        assert_eq!(
+            records[1]["readout"]["value"]["rows"],
+            json!([[1.0, "+"], [2.0, "+++"]])
+        );
+        // Non-scalar readouts stay out of the frozen `readouts[]` projection.
+        assert!(
+            accepted["record"]["data"]["readouts"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+
+        let replayed = dispatch("readout.submit", path.to_str().unwrap(), &dir).unwrap();
+        assert_eq!(replayed["replayed"], true);
+        assert_eq!(replayed["record"]["id"], accepted["record"]["id"]);
+
+        let unknown_step = request.clone();
+        let mut unknown_step = unknown_step;
+        unknown_step["step_path"] = json!("run/does-not-exist");
+        let error = dispatch(
+            "readout.submit",
+            calculator_input(&dir, "typed-unknown-step.json", unknown_step)
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+
+        let mut invalid_category = request;
+        invalid_category["readouts"][0]["value"]["category"] = json!("variable");
+        let rejected = dispatch(
+            "readout.submit",
+            calculator_input(&dir, "typed-invalid-category.json", invalid_category)
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(rejected.code, "INVALID_INPUT");
+        assert!(
+            rejected
+                .issues
+                .iter()
+                .any(|issue| issue["code"] == "category_not_allowed"),
+            "issues = {:?}",
+            rejected.issues
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn run_create_records_a_same_project_cross_design_source_run() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+             INSERT INTO records VALUES('project-1','project',NULL,NULL,1,'{}','now','now');
+             INSERT INTO records VALUES('project-2','project',NULL,NULL,1,'{}','now','now');
+             INSERT INTO records VALUES('protocol-1','protocol','project-1',NULL,1,'{\"title\":\"CCK-8\"}','now','now');
+             INSERT INTO records VALUES('protocol-v1','protocol_version','project-1','protocol-1',1,'{\"protocol_id\":\"protocol-1\",\"version\":1,\"body\":\"\",\"root_block_version_id\":\"block-v1\",\"root_bindings\":[]}','now','now');
+             INSERT INTO records VALUES('block-1','protocol_block','project-1',NULL,1,'{\"title\":\"CCK-8 block\",\"summary\":\"\"}','now','now');",
+        ).unwrap();
+        let source = r#"```asterlab
+kind: experiment
+id: exp-1
+schema: 1
+title: CCK-8
+```
+```asterlab
+kind: group
+id: g-1
+schema: 1
+name: Control
+role: control
+```
+```asterlab
+kind: assay
+id: assay-cck8
+schema: 1
+title: CCK-8
+endpoint: OD450
+unit: AU
+group_refs: [g-1]
+protocol_version_id: protocol-v1
+```
+"#;
+        let mut design = compile_asterdoc_to_design(source).unwrap();
+        let design_object = design.as_object_mut().unwrap();
+        design_object.remove("mygo");
+        design_object.remove("asterlab");
+        let design_json = serde_json::to_string(&design).unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('design-1','design','project-1',NULL,1,?1,'now','now')",
+            rusqlite::params![design_json],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('design-1-v1','design_version','project-1','design-1',1,'{}','now','now')",
+            [],
+        )
+        .unwrap();
+        let block_v1 = json!({
+            "block_id":"block-1", "version":1, "summary":"",
+            "parameter_slots":[],
+            "steps":[{"kind":"text","use_id":"seed","title":"Seed","instruction":"Seed cells"}]
+        });
+        db.execute(
+            "INSERT INTO records VALUES('block-v1','protocol_block_version','project-1','block-1',1,?1,'now','now')",
+            rusqlite::params![serde_json::to_string(&block_v1).unwrap()],
+        )
+        .unwrap();
+        // The upstream harvest Run lives in another Design of the same project.
+        db.execute(
+            "INSERT INTO records VALUES('run-harvest','run','project-1','design-harvest',1,'{\"title\":\"harvest\"}','now','now')",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO records VALUES('run-foreign','run','project-2','design-foreign',1,'{\"title\":\"foreign\"}','now','now')",
+            [],
+        )
+        .unwrap();
+
+        let tx = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let run = create_run_with_source_in_transaction(
+            &tx,
+            "design-1",
+            "assay",
+            None,
+            None,
+            None,
+            None,
+            "independent",
+            Some("run-harvest"),
+            None,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(run["data"]["source_run_id"], "run-harvest");
+        assert!(run["data"]["repeat_of_run_id"].is_null());
+
+        let tx = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let foreign = create_run_with_source_in_transaction(
+            &tx,
+            "design-1",
+            "assay",
+            None,
+            None,
+            None,
+            None,
+            "independent",
+            Some("run-foreign"),
+            None,
+        )
+        .unwrap_err();
+        tx.rollback().ok();
+        assert_eq!(foreign.code, "INVALID_INPUT");
+        assert!(
+            foreign.message.contains("同一项目"),
+            "message = {}",
+            foreign.message
+        );
+
+        let tx = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let missing = create_run_with_source_in_transaction(
+            &tx,
+            "design-1",
+            "assay",
+            None,
+            None,
+            None,
+            None,
+            "independent",
+            Some("run-missing"),
+            None,
+        )
+        .unwrap_err();
+        tx.rollback().ok();
+        assert_eq!(missing.code, "NOT_FOUND");
+
+        let input: RunCreate = serde_json::from_value(json!({
+            "design_id": "design-1",
+            "title": "assay",
+            "source_run_id": "run-harvest"
+        }))
+        .unwrap();
+        assert_eq!(input.source_run_id.as_deref(), Some("run-harvest"));
+        assert!(
+            input_schema("run.create").unwrap()["properties"]["source_run_id"].is_object()
+        );
+        assert!(record_data_schema("run")["properties"]["source_run_id"].is_object());
+    }
+
+    #[test]
+    fn asterdoc_validate_reports_invalid_when_the_projection_fails() {
+        let dir = std::env::temp_dir().join(format!("asterlab-validate-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let mut db = open_db(&dir).unwrap();
+            create_project(&db, "validate").unwrap();
+        }
+        // Source-only validation passes (it is prose), but the design projection
+        // cannot produce a design without exactly one experiment module.
+        let input = calculator_input(
+            &dir,
+            "validate.json",
+            json!({"source": "只有说明文字，没有任何 asterlab 模块。\n"}),
+        );
+        let result = dispatch("asterdoc.validate", input.to_str().unwrap(), &dir).unwrap();
+        assert_eq!(result["valid"], false);
+        assert_eq!(result["compiled"], false);
+        assert!(result["error"]["message"].as_str().is_some_and(|message| !message.is_empty()));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

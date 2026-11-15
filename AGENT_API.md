@@ -75,7 +75,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `protocol.block.create` / `protocol.block.revise` | 创建步骤块或基于预期版本追加新版本 | create/revise |
 | `protocol.block.preview` | 只读递归展开、解析参数来源并列出未填写槽位 | 否 |
 | `step.edit` | 步骤块级 insert/reorder/reuse/bind 编辑：无 `confirmation` 时只读校验，带 `confirmation` 时追加新版本 | validate 否 / commit 是 |
-| `plate.create` / `well.set` | 创建铺板布局、设置孔位标签 | create/update |
+| `plate.create` / `well.set` | 创建铺板布局、设置孔位标签或 1D 泳道、检测目标/角色/稀释倍数 | create/update |
 | `note.create` | 给实验运行追加自由文本记录 | create |
 | `execution_event.create` | 追加结构化操作、材料使用、数值测量、偏差或观察事件 | create |
 | `readout.submit` / `readout.batch` | 幂等提交单条读数，或表格/孔板批量读数（`cells` 或 CSV），一次事务写入一条 measurement 事件 | create |
@@ -86,7 +86,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `pantry.delete` | 停用并隐藏一个储藏室条目；短标签 ID 保留不复用 | delete |
 | `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
 | `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
-| `calculator.*`（4 个） | 稀释、溶液质量、系列稀释、反应体积 | 否 |
+| `calculator.*`（9 个） | 稀释（摩尔或质量浓度）、溶液质量、系列稀释、反应体积、GelMA 配液、细胞接种、运行期配平、多样本质量配平、体内给药 | 否 |
 | `import.study.preview` / `import.study.apply` | 预检并导入项目、设计和 Protocol | apply only |
 
 所有工具的字段细节以 `labworkbench schema <命令>` 为准。Agent 不得自行扩展字段或把别的记录类型塞进现有工具。删除与覆盖不是 CLI 能力。
@@ -139,6 +139,8 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 为旧数据保留的全局 protocol_version_id 也会进入同一清单，assay_id 为 null，避免全局 Protocol 的根步骤块和参数在 Run 快照中遗漏；新设计优先在各 Assay 上分别指定 Protocol 版本。
 
+`run.create` 另接受可选 `source_run_id`：同项目内提供样本的上游收获 Run。它允许指向**不同 Design** 的 Run（跨 Design 样本血统），校验只有两条——目标必须存在且必须是 Run，所属项目必须与本 Run 相同；跨项目引用返回 `INVALID_INPUT`，未知 ID 返回 `NOT_FOUND`。它和 `repeat_of_run_id` 是两种关系：后者仍是同一 Design 的再次执行，`source_run_id` 只表达材料来源，二者可同时出现，也不改变重复关系语义。
+
 当前 CLI 支持多步骤和递归组合；网页编辑器可创建基础文字步骤块、填写参数并预览/绑定根步骤块。复杂多步骤或嵌套组合请使用封闭的 CLI 工具契约，网页展示仍可读取并预览这些组合。
 
 运行可以先按草案状态创建，以便排期和核对；若其 Protocol manifest 中仍有必填参数未确认，run.set_status 切换到 in_progress 会被拒绝。先追加带完整参数的新 Protocol 版本，再按该版本建立新的 Run。未解决的可选槽位不会自动阻断。
@@ -180,11 +182,22 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 `readout.submit` 与 `readout.batch` 把读数写进现有 `execution_event` 追加记录；不新增记录类型，也不建第二份读数表。两者都只接受本次 Run 冻结清单内的 `step_path` + `protocol_version_id`（检测读数还需 `assay_id`；共享制备读数用 `planned_output_id`），引用校验复用 `execution_event.create` 的同一套逻辑。
 
-- `readout.submit` 输入 `{run_id, step_path, endpoint, protocol_version_id, value | qualifier, unit?, sample_id?, timepoint?, assay_id?, planned_output_id?, operator?, occurred_at?, content?}`。必须有且只有一个 `value` 或 `qualifier`（`not_detected` / `below_lod` / `above_uloq` / `invalid` / `other`）。数值同时写进 `measurements[]` 与 `readouts[]`；带 `qualifier` 的只写 `readouts[]`，不伪造成 0。输出 `{record, idempotency_key, replayed}`。
-- `readout.batch` 输入 `{run_id, step_path, protocol_version_id, plate_id, schema_id, schema_version=1, assay_id?, timepoint?, batch_id?, ...}`，读数用 `cells[]`（`row`/`column` 从 0 开始，可选 `field`、`value`、`unit`、`sample_id`、`group`、`replicate`、`status`）或 `csv` 二选一。CSV 表头 `row,column,field[,value,unit,sample_id,group,replicate,status]`，未知或重复列、缺列、行列越界、同批重复孔位、`status` 与 `value` 矛盾都会拒绝整批。输出 `{record, idempotency_key, replayed, accepted}`。
-- 幂等：`readout.submit` 的键是 `(run_id, step_path, endpoint, sample_id, timepoint)`；`readout.batch` 的键是同一组身份字段按孔位（`plate_id, row, column, field`）展开后的集合——同一批里多个孔位可以共享 endpoint/sample/timepoint，只用卡片元组会互相覆盖。`run_id` 属于键，因此不同 Run 的同名读数互不影响。重复提交返回首次记录并置 `replayed=true`；值属于内容不属于身份，故重放不会覆盖已记录值。
+- `readout.submit` 有两种互斥形态。标量形态输入 `{run_id, step_path, endpoint, protocol_version_id, value | qualifier, unit?, sample_id?, timepoint?, assay_id?, planned_output_id?, operator?, occurred_at?, content?}`，必须有且只有一个 `value` 或 `qualifier`（`not_detected` / `below_lod` / `above_uloq` / `invalid` / `other`）。数值同时写进 `measurements[]` 与 `readouts[]`；带 `qualifier` 的只写 `readouts[]`，不伪造成 0。输出 `{record, idempotency_key, replayed}`。
+- 多值形态输入 `{run_id, step_path, protocol_version_id, assay_id?, timepoint?, batch_id?, operator?, occurred_at?, readouts[], readout_schemas[]?}`，`readouts[]` 是 v1 `Readout` 数组（`schema_id`、`schema_version`、`value` 为 `numeric`/`table`/`plate`/`categorical`/`file` 之一、`unit?`、`missing?`、`source`、`link`），按 `docs/contracts/readout-schema-v1.md` 的同一流水线（schema 校验 → 读数校验 → 派生来源校验）落盘。`readout_schemas[]` 声明本次提交额外依赖的 schema 定义：`ReadoutRegistry` 会校验定义，同一 `schema_id` 不能给出不同定义；内置 schema（`cck8_od450`、`rna_concentration`、`rna_purity`、`cfu_count`）始终可用。`readout_schemas[]` 只作用于本次提交，不落库，也不改变内置注册表。分类、表格、文件读数在 `result_cells[]` 里按 `{"kind": "record", "readout": …}` 保存，不进 `measurements[]`，也不伪造 `readouts[]` 投影。输出 `{record, idempotency_key, replayed, accepted}`，`accepted` 是本次记录的读数条数。
+- `readout.batch` 输入 `{run_id, step_path, protocol_version_id, plate_id, schema_id, schema_version=1, assay_id?, timepoint?, batch_id?, ...}`，读数用 `cells[]`（`row`/`column` 从 0 开始，可选 `field`、`value`、`unit`、`sample_id`、`group`、`replicate`、`status`、`qualifier`）或 `csv` 二选一。`qualifier`（`not_detected` / `below_lod` / `above_uloq` / `invalid` / `other`）必须与 `value` 互斥（显式写 `null` 等同省略）；`cells` 与 `csv` 只能提供一种；JSON `cells[]` 带 `qualifier` 时 CLI 按 CSV 同一路径解析，缺失原因的校验、`status=missing` 写入和 `result_cells[]` 保留方式与 CSV 完全一致。CSV 表头 `row,column,field[,value,unit,sample_id,group,replicate,status,qualifier]`：`value` 可写 qPCR 导出的 `Undetermined`，记为 `not_detected` 而不是非法数值；未知或重复列、缺列、行列越界、同批重复孔位、`status` 与 `value` 矛盾都会拒绝整批。带缺失原因的孔位不写进 `measurements[]`。输出 `{record, idempotency_key, replayed, accepted}`。
+- 幂等：标量 `readout.submit` 的键是 `(run_id, step_path, endpoint, sample_id, timepoint)`，多值形态的键是 `(run_id, step_path, assay_id, timepoint, readouts[])` 的规范 JSON 摘要；`readout.batch` 的键是同一组身份字段按孔位（`plate_id, row, column, field`）展开后的集合——同一批里多个孔位可以共享 endpoint/sample/timepoint，只用卡片元组会互相覆盖。`run_id` 属于键，因此不同 Run 的同名读数互不影响。重复提交返回首次记录并置 `replayed=true`；值属于内容不属于身份，故重放不会覆盖已记录值。
 - 原子性：整批在一个事务内校验并写入一条 `measurement` 事件；任何一行失败都返回 `INVALID_INPUT` 并附 `issues[]`，数据库不产生部分事件。`readout.batch` 必须能唯一确定本次 Run 的一块孔板，否则返回 `unresolved_plate` / `ambiguous_plate` / `unknown_plate`，不猜孔位。
 - 与 `execution_event.create` 的关系：后者仍是多用途底层追加接口（含操作、材料、检查等）；`readout.*` 只覆盖读数，`step_status`、`checks`、`controls` 不通过它写入。
+
+## 计算器（`calculator.*`）与 1D 孔位
+
+计算器只做确定性算术，`writes_data=false`：不保存输入或结果，不产生执行事件，也不替研究者判断配方是否科学适用。所有 `calculator.*` 的输入/输出字段以 `labworkbench schema <命令>` 为准。
+
+- `calculator.dilution`：按 `C1V1 = C2V2` 求储液体积。`stock_unit` / `target_unit` 接受摩尔单位 `M`、`mM`、`µM`、`nM` 或质量浓度 `mg/mL`、`µg/mL`、`ng/µL`；两者必须同一量纲，混用返回 `INVALID_INPUT`。摩尔与质量浓度是不同维度，这里不借分子量互相换算（质量→摩尔是 `calculator.solution` 的职责）。目标浓度高于储液浓度时拒绝。
+- `calculator.sample_normalize_batch`：输入 `{target_mass_ng, reaction_volume_ul, samples[]}`，每个样本给出 `name` 与实测质量浓度（`concentration` + `unit`，只接受 `mg/mL`、`µg/mL`、`ng/µL`）。输出每行的 `concentration_ng_per_ul`、`required_sample_volume_ul`、`sample_volume_ul`、`diluent_volume_ul`、`achieved_mass_ng` 与 `insufficient`：样本过稀、所需体积超过反应体积时按反应体积封顶并把该行标为 `insufficient`，不向上取整或静默达标；`insufficient_count` 汇总行数。目标质量不是实测值。
+- `calculator.in_vivo_dosing`：输入 `{body_weights_g[], dose_mg_per_kg, dose_volume_ml_per_kg, overage_ratio?, stock_concentration, stock_unit}`。输出每只动物的 `body_weight_g` / `dose_mass_mg` / `injection_volume_ul`，以及 `total_*`、`prepared_dose_mass_mg`、`preparation_volume_ul`、`stock_volume_ul`、`diluent_volume_ul`。`overage_ratio` 只放大配制管，不放大单只注射量；母液过稀导致剂量无法装进制备体积时整体拒绝（`INVALID_INPUT`），不通过放大注射体积掩盖。体重是输入值而非估算。
+
+`well.set` 的位置字段按容器形状解析：2D 板接受 `<行字母><列号>`（`A1`、`AA12`）；`rows = 1` 的单行容器另接受 `Lane<N>`、`L<N>`、`Tube<N>`，并与 `A<N>` 指向同一物理槽位——同一槽位的再次写入被视为覆盖（需要 `expected_revision`），不会产生两个孔位记录。存储地址规范化为 `Lane<N>`（1D）或大写 2D 坐标。可选 `target`（检测目标标签）、`well_role`（`unknown` / `ntc` / `standard` / `positive_control`）和 `dilution_factor`（无单位、必须大于 0）是**计划**注释：它们不写读数，也不参与冻结设计计算。省略这些字段时按 `null` 存储；带 `expected_revision` 的覆盖是整条字段替换，旧注释不会自动保留。
 
 ## 储藏室台账（`pantry.*`）与贴标导出（`label.export`）
 
@@ -312,7 +325,8 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - 只从用户提供的文件、当前项目记录或用户明确确认的来源提取事实。数值、单位、时间、剂量、样本数、处理条件不得猜填。
 - 每次生成方案，明确区分“已提供”“从已保存记录读取”“计算所得”“待确认”；不使用“适量”“按常规”“视情况”等无法执行的值。
 - `run.create` 是受信任本地写入端操作，CLI 调用必须设置 `LABWORKBENCH_TRUSTED_WRITER=1`；外部 Agent 不应获得该权限，只生成 Protocol/Design/View Draft，由人类确认后通过本地 UI 创建 Run。
-- 创建运行时固定引用当前 `design_revision`，并生成 `protocol_manifest[]` 固定该版本各检测所引用的 Protocol 精确版本。`run_index` 按设计递增；再次执行可传 `repeat_of_run_id` 与 `repeat_relationship`（`independent`、`same_source`、`paired`、`unknown`），不能仅凭轮次数断言独立性。Protocol 修订创建新版本，不覆盖历史版本。
+- 创建运行时固定引用当前 `design_revision`，并生成 `protocol_manifest[]` 固定该版本各检测所引用的 Protocol 精确版本。`run_index` 按设计递增；再次执行可传 `repeat_of_run_id` 与 `repeat_relationship`（`independent`、`same_source`、`paired`、`unknown`），不能仅凭轮次数断言独立性；上游样本来源用 `source_run_id`，可跨同项目的其他 Design。Protocol 修订创建新版本，不覆盖历史版本。
+- `asterdoc.validate` 的 `valid` 表示“源码可以产出设计”，不是“YAML 结构没报错”：结构校验通过但设计投影失败（例如缺少唯一的 `experiment` 模块、步骤无法物化）时返回 `valid=false`、`compiled=false` 和结构化 `error`，不会同时给出 `valid: true`。判断能否建 Run 仍以 `asterdoc.compile` / `asterdoc.assess` 的结果为准。
 - `note.create` 是追加式自由文本记录。`execution_event.create` 适合需要筛选、计算或追溯的实际事件：输入 `run_id`、`event_type`、`content`，可附 `occurred_at`（带时区 RFC 3339；不确定时留空）、`stage`、`operator`、`sample_ids[]`；`material_use` 事件可写 `materials[]`，`measurement` 事件必须含数值 `measurements[]` 或结构化 `readouts[]`，`deviation` 事件必须说明 `deviation`。声明样本级执行身份时另给 `attempt`（≥1）；它必须与冻结 `protocol_step_path` 和至少一个 `sample_ids` 同时出现，只能是该样本当前最高 attempt 或 `最高 + 1`。同一 `step_path + sample_ids[] + attempt` 的重复完成返回原事件记录，不追加新事实；重试必须使用下一个 attempt。
 - `readouts[]` 每项为可选 `readout_id`、`endpoint`、可选 `value` 或 `qualifier`（`not_detected` / `below_lod` / `above_uloq` / `invalid` / `other`），二者必须且只能填一个；`result_kind` 为 `raw` 或 `derived`。派生结果必须提供 `method` 与 `derived_from[]`；`derived_from[]` 引用本次 Run 中已存在的原始 `readout_id`，不能引用未知或派生读数。不得把计算结果写成原始读数。
 - `checks[]` 每项为 `check_id`、`status`（`passed` / `failed` / `blocked` / `skipped`）及可选 `checked_by`、`note`；`check_id` 必须存在于同一冻结 Protocol 步骤的 `checks[]`，同一事件不得重复，且检查结果必须关联该步骤。`skipped` 不等于通过；空白或未记录也不等于通过。`controls[]` 记录对照角色 `role`、`status`、样本/实验单位/观察；`lineage[]` 记录 `from_kind`、`from_id`、`to_kind`、`to_id`、`relation`。`actual_parameters[]` 记录实际执行参数 `key`、`value`、可选 `unit` 与 `source`，并与计划参数分开。
