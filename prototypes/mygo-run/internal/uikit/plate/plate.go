@@ -3,6 +3,7 @@ package plate
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -32,63 +33,83 @@ const (
 	defaultCols = 12
 )
 
-var rowLabels = [...]string{"A", "B", "C", "D", "E", "F", "G", "H"}
+// supportedPlateSizes are the geometries AsterLab renders: 6, 12, 24, 48, 96
+// and 384 wells as rows×cols. Unsupported dimensions fall back to 96 wells.
+var supportedPlateSizes = [...]struct{ Wells, Rows, Cols int }{
+	{6, 2, 3},
+	{12, 3, 4},
+	{24, 4, 6},
+	{48, 6, 8},
+	{96, 8, 12},
+	{384, 16, 24},
+}
+
+func wellGrid(rows, cols int) bool {
+	for _, size := range supportedPlateSizes {
+		if size.Rows == rows && size.Cols == cols {
+			return true
+		}
+	}
+	return false
+}
+
+func rowLabel(row int) string {
+	if row < 26 {
+		return string(rune('A' + row))
+	}
+	return fmt.Sprintf("A%c", rune('A'+row-26))
+}
 
 func wellID(row, col int) string {
-	return fmt.Sprintf("%s%d", rowLabels[row], col+1)
+	return fmt.Sprintf("%s%d", rowLabel(row), col+1)
+}
+
+func wellPosition(id string, rows, cols int) (int, int, bool) {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	row, i := 0, 0
+	for i < len(id) && id[i] >= 'A' && id[i] <= 'Z' {
+		row = row*26 + int(id[i]-'A'+1)
+		i++
+	}
+	if i == 0 || i == len(id) {
+		return 0, 0, false
+	}
+	row--
+	col, err := strconv.Atoi(id[i:])
+	if err != nil || col < 1 {
+		return 0, 0, false
+	}
+	col--
+	return row, col, row >= 0 && row < rows && col >= 0 && col < cols
 }
 
 func GroupColor(group string, dark bool) ui.Color {
 	g := strings.ToLower(strings.TrimSpace(group))
+	t := theme.GetTokens(theme.Palette(dark))
 	switch {
 	case g == "":
 		return ui.Color{}
 	case strings.Contains(g, "nc"), strings.Contains(g, "对照"), strings.Contains(g, "control"):
-		if dark {
-			return ui.Hex("#4a463c")
-		}
-		return ui.Hex("#dcd6c8")
+		return t.NeutralBg
 	case strings.Contains(g, "pc"), strings.Contains(g, "阳性"), strings.Contains(g, "positive"):
-		if dark {
-			return ui.Hex("#5d4a23")
-		}
-		return ui.Hex("#f2e2bf")
+		return t.WarningBg
 	case g == "c1":
-		if dark {
-			return ui.Hex("#433a63")
-		}
-		return ui.Hex("#cfc4f0")
+		return t.Accent
 	case g == "c2":
-		if dark {
-			return ui.Hex("#3a4460")
-		}
-		return ui.Hex("#c9d6f0")
+		return t.Success
 	case g == "c3":
-		if dark {
-			return ui.Hex("#5a3a44")
-		}
-		return ui.Hex("#f0c8ce")
+		return t.Warning
 	case g == "c4":
-		if dark {
-			return ui.Hex("#3c5148")
-		}
-		return ui.Hex("#c9e3d2")
+		return t.Danger
 	case g == "c5":
-		if dark {
-			return ui.Hex("#5a4a2c")
-		}
-		return ui.Hex("#efdab4")
+		return t.AccentHover
 	default:
-		palette := [...]string{"#d9d0f2", "#eddcc0", "#ccd9ee", "#eed3dc"}
-		darkPalette := [...]string{"#3f3a55", "#4d4331", "#333f52", "#4a3742"}
+		palette := [...]ui.Color{t.Accent, t.Success, t.Warning, t.Danger}
 		index := 0
 		for _, r := range g {
 			index = (index*31 + int(r)) % len(palette)
 		}
-		if dark {
-			return ui.Hex(darkPalette[uint32(index)%uint32(len(darkPalette))])
-		}
-		return ui.Hex(palette[index%len(palette)])
+		return palette[index]
 	}
 }
 
@@ -100,9 +121,26 @@ func selectedSet(props Props) map[string]bool {
 	return out
 }
 
+func nextSelection(selected map[string]bool, id string, additive bool) map[string]bool {
+	next := make(map[string]bool, len(selected)+1)
+	if additive {
+		for selectedID := range selected {
+			next[selectedID] = true
+		}
+	} else if len(selected) == 1 && selected[id] {
+		return next
+	}
+	if additive && next[id] {
+		delete(next, id)
+	} else {
+		next[id] = true
+	}
+	return next
+}
+
 // View renders the plate. Drag-rectangle selection is not implemented:
 // MyGo exposes no pointer-coordinate API for a marquee without a separate model.
-// Click toggles one well; Shift+click adds to the current selection.
+// Click selects one well; clicking it again clears it. Shift+click toggles a well in the selection.
 
 func View(c *ui.Context, props Props) {
 	th := c.Theme()
@@ -117,18 +155,18 @@ func View(c *ui.Context, props Props) {
 	if cols == 0 {
 		cols = defaultCols
 	}
-	if rows < 1 || rows > len(rowLabels) || cols < 1 || cols > defaultCols {
+	if !wellGrid(rows, cols) {
 		rows, cols = defaultRows, defaultCols
 	}
-	wellSize := float32(22)
-	gap := float32(5)
-	labelSize := th.Rem(.78)
-	leftLabel := float32(20)
-	topLabel := float32(18)
+	wellSize := float32(t.Spacing24)
+	gap := float32(t.Spacing4)
+	labelSize := float32(t.TextMeta)
+	leftLabel := float32(t.Spacing24)
+	topLabel := float32(t.Spacing16)
 	gridW := float32(cols)*wellSize + float32(cols-1)*gap
 	gridH := float32(rows)*wellSize + float32(rows-1)*gap
-	width := leftLabel + gridW + 4
-	height := topLabel + gridH + 28
+	width := leftLabel + gridW + float32(t.Spacing4)
+	height := topLabel + gridH + float32(t.Spacing32)
 	selected := selectedSet(props)
 	groupCounts := make(map[string]int)
 	for _, well := range props.Wells {
@@ -137,15 +175,15 @@ func View(c *ui.Context, props Props) {
 		}
 	}
 
-	ui.Column(c).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Column(c).Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
 		var el ui.Element
 		el = ui.Box(c).Size(width, height).Draw(func(p *ui.Painter, r ui.Rect) {
 			for col := 0; col < cols; col++ {
-				x := r.X + leftLabel + float32(col)*(wellSize+gap) + wellSize/2 - 4
-				p.Text(x, r.Y+2, fmt.Sprintf("%d", col+1), labelSize, t.TextMuted)
+				x := r.X + leftLabel + float32(col)*(wellSize+gap) + wellSize/2 - float32(t.Spacing4)
+				p.Text(x, r.Y+float32(t.Spacing4), fmt.Sprintf("%d", col+1), labelSize, t.TextMuted)
 			}
 			for row := 0; row < rows; row++ {
-				p.Text(r.X+2, r.Y+topLabel+float32(row)*(wellSize+gap)+wellSize/2+3, rowLabels[row], labelSize, t.TextMuted)
+				p.Text(r.X+float32(t.Spacing4), r.Y+topLabel+float32(row)*(wellSize+gap)+wellSize/2+float32(t.Spacing4), rowLabel(row), labelSize, t.TextMuted)
 				for col := 0; col < cols; col++ {
 					id := wellID(row, col)
 					x := r.X + leftLabel + float32(col)*(wellSize+gap)
@@ -161,16 +199,16 @@ func View(c *ui.Context, props Props) {
 					p.Fill(wr, fill, wellSize/2)
 					p.Stroke(wr, t.Border, wellSize/2, 1)
 					if well.Ambiguous {
-						p.Text(x+7, y+3, "!", th.Rem(.75), t.Text)
+						p.Text(x+float32(t.Spacing8), y+float32(t.Spacing4), "!", float32(t.TextMeta), t.Text)
 					}
 					if selected[id] {
 						p.Stroke(wr, t.Accent, wellSize/2, 2)
-						p.Line(x+5, y+11, x+9, y+15.5, 2, t.Accent)
-						p.Line(x+9, y+15.5, x+17, y+6.5, 2, t.Accent)
+						p.Line(x+float32(t.Spacing4), y+float32(t.Spacing12), x+float32(t.Spacing8), y+float32(t.Spacing16), 2, t.Accent)
+						p.Line(x+float32(t.Spacing8), y+float32(t.Spacing16), x+float32(t.Spacing16), y+float32(t.Spacing8), 2, t.Accent)
 					}
 				}
 			}
-			hudY := r.Y + topLabel + gridH + 6
+			hudY := r.Y + topLabel + gridH + float32(t.Spacing8)
 			if lastHoverWell != "" {
 				well, assigned := props.Wells[lastHoverWell]
 				parts := []string{lastHoverWell}
@@ -188,9 +226,9 @@ func View(c *ui.Context, props Props) {
 						parts = append(parts, well.Timepoint)
 					}
 				}
-				p.Text(r.X+leftLabel, hudY+10, strings.Join(parts, " · "), th.Rem(.75), t.Text)
+				p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), strings.Join(parts, " · "), float32(t.TextMeta), t.Text)
 			} else if len(props.Wells) == 0 {
-				p.Text(r.X+leftLabel, hudY+10, "尚无计划孔位分配", th.Rem(.75), t.TextMuted)
+				p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), "尚无计划孔位分配", float32(t.TextMeta), t.TextMuted)
 			}
 		}).HitTest(func(x, y float32, r ui.Rect) bool {
 			lastHitWell, lastHoverWell = "", ""
@@ -216,15 +254,7 @@ func View(c *ui.Context, props Props) {
 			if !props.Interactive || lastHitWell == "" {
 				return
 			}
-			next := make(map[string]bool, len(selected)+1)
-			if el.ClickModifiers()&ui.Shift != 0 {
-				for id := range selected {
-					next[id] = true
-				}
-				next[lastHitWell] = true
-			} else {
-				next[lastHitWell] = true
-			}
+			next := nextSelection(selected, lastHitWell, el.ClickModifiers()&ui.Shift != 0)
 			ids := make([]string, 0, len(next))
 			for id := range next {
 				ids = append(ids, id)
@@ -241,15 +271,15 @@ func View(c *ui.Context, props Props) {
 				groups = append(groups, group)
 			}
 			sort.Strings(groups)
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
 				for _, group := range groups {
-					ui.Row(c).Gap(3).AlignItems(ui.Center).Children(func() {
-						ui.Box(c).Size(7, 7).Radius(4).Background(GroupColor(group, dark))
-						ui.Text(c, fmt.Sprintf("%s %d", group, groupCounts[group])).FontSize(th.Rem(.75)).TextColor(t.TextMuted)
+					ui.Row(c).Gap(float32(t.Spacing4)).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius)).Background(GroupColor(group, dark))
+						ui.Text(c, fmt.Sprintf("%s %d", group, groupCounts[group])).FontSize(float32(t.TextMeta)).TextColor(t.TextMuted)
 					})
 				}
 			})
 		}
-		ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 单击选择，Shift+单击多选", len(props.Wells), rows*cols)).FontSize(th.Rem(.75)).TextColor(t.TextMuted)
+		ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 单击选择，Shift+单击多选", len(props.Wells), rows*cols)).FontSize(float32(t.TextMeta)).TextColor(t.TextMuted)
 	})
 }

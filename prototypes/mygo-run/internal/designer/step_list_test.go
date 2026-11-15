@@ -1,6 +1,7 @@
 package designer
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,13 +11,25 @@ import (
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/workflow"
-
+	"asterlab-mygo-prototype/modules/runs"
 	"github.com/egoist/mygo/ui"
 )
 
-// TestStepCardShowsRecordedParameters pins the card contract: the step's own
-// structured parameters are the summary, the budget bar sums the durations
-// they record, and a step with nothing recorded never shows a placeholder.
+type fakeTimeBudgetService struct {
+	input  runs.ProjectTimeBudgetInput
+	calls  int
+	budget runs.TimeBudget
+	err    error
+}
+
+func (f *fakeTimeBudgetService) ProjectTimeBudget(_ context.Context, input runs.ProjectTimeBudgetInput) (runs.TimeBudget, error) {
+	f.input = input
+	f.calls++
+	return f.budget, f.err
+}
+
+// TestStepCardShowsRecordedParameters pins card summaries and the source-labeled
+// annotated-duration fallback when Core has no OperationSpec projection.
 func TestStepCardShowsRecordedParameters(t *testing.T) {
 	d := New("design-1", "HUVEC 成管", 2, &state.FakeDesignService{})
 	d.Editor.Doc.Nodes = []workflow.Node{
@@ -29,6 +42,9 @@ func TestStepCardShowsRecordedParameters(t *testing.T) {
 			},
 		},
 	}
+
+	budgetSvc := &fakeTimeBudgetService{}
+	d.TimeBudgetSvc = budgetSvc
 	d.SelectedNode, d.Editor.SelectedNode = "n1", "n1"
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
@@ -41,12 +57,41 @@ func TestStepCardShowsRecordedParameters(t *testing.T) {
 			t.Fatalf("card summary missing %q: %q", want, tt.Texts())
 		}
 	}
-	// The budget bar totals the recorded durations (5m total, 45m hands-on).
-	if !tt.HasText("总跨度") || !tt.HasText("5m") || !tt.HasText("占手") {
-		t.Fatalf("budget bar missing totals: %q", tt.Texts())
+	if !tt.HasText("总跨度") || !tt.HasText("设计标注") || !tt.HasText("净占手") ||
+		!tt.HasText("5m") || !tt.HasText("45m") || !tt.HasText("尚无 OperationSpec v2 时间数据") {
+		t.Fatalf("annotation budget fallback missing values: %q", tt.Texts())
+	}
+	if budgetSvc.calls != 1 || budgetSvc.input.SpecsJSON != "[]" {
+		t.Fatalf("Core budget service calls = %d input=%q", budgetSvc.calls, budgetSvc.input.SpecsJSON)
 	}
 	if tt.HasText("未填写参数") {
 		t.Fatalf("placeholder leaked into the card: %q", tt.Texts())
+	}
+}
+
+func TestCoreTimeBudgetRendersReturnedProjection(t *testing.T) {
+	service := &fakeTimeBudgetService{budget: runs.TimeBudget{
+		TotalSpanS: 9000, HandsOnS: 2700,
+		ParallelWindows: []runs.TimeBudgetWindow{{StepIndex: 2, StartS: 3600, EndS: 10800, DurationS: 7200, TimeAnchorID: "t0"}},
+	}}
+	d := New("design-1", "设计", 1, &state.FakeDesignService{})
+	d.TimeBudgetSvc = service
+	d.Editor.Doc.Nodes = []workflow.Node{{
+		ID: "n1", Kind: workflow.KindFlask, Title: "孵育",
+		Params: []workflow.NodeParam{{Key: "耗时", Val: "5m"}},
+	}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		ListView(c, d)
+	}, 1360, 880)
+	tt.Frame()
+	for _, want := range []string{"Core 时间预算", "2h30m", "净占手", "45m", "步骤03 2h (1h–3h) · t0"} {
+		if !tt.HasText(want) {
+			t.Fatalf("Core budget missing %q: %q", want, tt.Texts())
+		}
+	}
+	if tt.HasText("设计标注") || service.calls != 1 || service.input.SpecsJSON != "[]" {
+		t.Fatalf("budget source/call mismatch: texts=%q calls=%d input=%q", tt.Texts(), service.calls, service.input.SpecsJSON)
 	}
 }
 
@@ -129,9 +174,9 @@ func TestPlateAndDilutionSections(t *testing.T) {
 	dilution, err := blocks.NewInstance("dilution-1", blocks.Definition{
 		ID: "dilution", Version: 1, Type: blocks.TypeDilutionCalculator,
 		Props: blocks.DilutionProps{
-			Input: blocks.DilutionInput{StockConc: 10, FinalConc: 2, FinalVol: 10},
+			Input:  blocks.DilutionInput{StockConc: 10, FinalConc: 2, FinalVol: 10},
 			Result: blocks.DilutionResult{StockVol: 2.5, DiluentVol: 7.5},
-			Valid: true,
+			Valid:  true,
 		},
 	})
 	if err != nil {
@@ -202,6 +247,7 @@ func TestTechnicalBindingsFoldedByDefault(t *testing.T) {
 // the assay/timepoint fallback and the duration label parsing.
 func TestStepCardSummaryText(t *testing.T) {
 	d := New("design-1", "设计", 1, nil)
+	d.TimeBudgetSvc = &fakeTimeBudgetService{}
 	node := d.Editor.AddNode(workflow.KindFlask, "孵育", workflow.Position{})
 	d.StepAssays[node] = "cck8"
 	d.StepTimepoints[node] = []string{"D1", "D3"}
@@ -218,7 +264,7 @@ func TestStepCardSummaryText(t *testing.T) {
 		t.Fatalf("duration invented with no recorded cost: %q", cards[0].durationLabel())
 	}
 	budget := d.designBudget()
-	if budget.Steps != 1 || budget.HasTotal || budget.HasHandsOn {
+	if budget.Steps != 1 || budget.Core.TotalSpanS != 0 || budget.Core.HandsOnS != 0 || budget.CoreErr != nil {
 		t.Fatalf("budget invented durations: %+v", budget)
 	}
 }

@@ -162,6 +162,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 	t := c.Theme()
 	groups := p.GroupNames()
 	counts := map[string]int{}
+	geometry, _ := geometryFor(p.Format)
 	wells := map[string]plateui.WellState{}
 	for well, group := range p.WellGroups() {
 		counts[group]++
@@ -203,7 +204,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					})
 				}
 			})
-			plateui.View(c, plateui.Props{Wells: wells, Interactive: false})
+			plateui.View(c, plateui.Props{Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns, Interactive: false})
 			ui.Text(c, "放大查看与编辑；行内只读。").
 				FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		})
