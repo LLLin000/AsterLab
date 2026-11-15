@@ -1,26 +1,21 @@
-# UX-06 evidence — write-error state + Notebook state word
+# UX-06 — 引用选择器改用主题字号
 
-Build provenance (screenshots must come from this build):
+## 已关闭缺陷
 
-- Build commit (code HEAD built): `7f75359`
-- mygo pin: `v0.8.4-0.20261108220316-c4197b7fe562`
-- `Runs.dll` SHA256: `615C49225F3308EA449EB7256E2D9C59F8C8EDCA719C4BFD13FBB9C309140927`
-- `mygo-run.exe` SHA256: `5A0507F05EB3BB5EB611F3624C533246EF3542103624E176FAD8C068764588B7`
+- 缺陷 A（链接失败错误可见）：已由 LB-17（#140，`b2acf22`）关闭。`main.go:2988-2995` 保存 Core 链接失败原因并使界面刷新；`internal/runworkspace/recording.go:464-473` 显示 `关联失败：…` 与 `重新关联` 重试按钮。
+- 缺陷 B（Notebook 状态词）：已由 LB-15（#139，`b70a0f6`）关闭。`notebook_page.go:786-800` 按实际状态显示 `保存中`、`未保存`、`已保存`、`草稿`。
 
-Target states (1360x880, light):
+## 本次改动
 
-- (a) Run where Core rejects the asset link: the recording gallery now shows the
-  Core reason (`关联失败：…`) with a `重新关联` retry affordance (UX-P5).
-- (b) Notebook in saved state: the toolbar shows `已保存` (and `未保存` while a
-  change is pending), replacing the unsaved-only dot (UX-STATE), and no font
-  size outside the theme scale (UX-P3).
+引用选择器及引用快照区域的 7 处固定 `FontSize(<数字>)` 改用 `tokens.TextMeta` / `tokens.TextData`，字号遵循主题文字比例（UX-P3）。
 
-Automated verification (`go test ./... -count=1`, exit 0, at the code commit):
+真实窗口截图：[`citation-selector-1360x880-light.png`](citation-selector-1360x880-light.png)，1360×880 浅色主题；`@` 引用选择器已展开。
 
-- `TestRecordingLinkErrorShowsCauseAndRetry` (internal/runworkspace) — a failing
-  `OnLinkFile` surfaces the Core message + `重新关联`, and retry re-invokes it.
-- `TestSaveStateLabelNamesBothStates` (internal/notebook) — `已保存` / `未保存`
-  are returned in the right states and rendered by the Notebook toolbar.
+## 构建戳
 
-Note: real-GUI screenshots were not captured in this run; capture (a)/(b) from
-the build above before merge.
+- 构建 commit：`b2acf22`
+- mygo pin：`v0.8.4-0.20261108220316-c4197b7fe562`
+- `Runs.dll` SHA256：`8D23FD899295DB49DAE6BAEBD4F85952FB4BC8C8E24B892B98857873EA7CDE26`
+- `mygo-run.exe` SHA256：`B1FF08E419C516B79E9B549936FCF395444EAA4DD3C612712B753FE45370E434`
+- `go build ./...`：通过
+- `go test ./... -count=1`：通过（23 packages ok，2 no tests）；首次因 Runs 原生模块缓存过期失败，刷新模块后通过。
