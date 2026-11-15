@@ -5,7 +5,7 @@
       "kind": "plate",
       "schema": 1,
       "title": "孔板",
-      "description": "参数化孔板；format 选择孔板几何，groups 分配组别，samples 与 replicates 显式记录孔位身份。",
+      "description": "参数化孔板；format 选择孔板几何，groups 分配组别，samples 与 replicates 显式记录孔位身份；可选 mix_* 字段按实际孔位/复孔导出 GelMA 配平与细胞接种派生值。",
       "modes": [
         "design",
         "protocol",
@@ -64,6 +64,50 @@
           "name": "replicates",
           "type": "object",
           "description": "孔位到正整数技术重复编号；每个重复编号都必须关联显式 sample ID。"
+        },
+        {
+          "name": "mix_volume_per_well",
+          "type": "quantity",
+          "dimension": "volume",
+          "description": "每孔工作体积；孔数取自 groups 的实际孔位，技术复孔按实际孔位计数。"
+        },
+        {
+          "name": "mix_excess_ratio",
+          "type": "decimal",
+          "description": "配制余量比例，例如 0.1 表示多配 10%；只作用于工作体积，不加到死体积。"
+        },
+        {
+          "name": "mix_gelma_percent_by_group",
+          "type": "object",
+          "description": "组名到 GelMA 目标浓度 % w/v（g/100 mL）的映射；键必须与 groups 完全一致。"
+        },
+        {
+          "name": "mix_lap_stock_percent",
+          "type": "decimal",
+          "description": "LAP 母液浓度 % w/v；与 mix_lap_final_percent 一起决定母液体积。"
+        },
+        {
+          "name": "mix_lap_final_percent",
+          "type": "decimal",
+          "description": "LAP 工作浓度 % w/v；不得高于 mix_lap_stock_percent。"
+        },
+        {
+          "name": "mix_cell_density",
+          "type": "quantity",
+          "dimension": "cells_per_well",
+          "description": "目标接种密度；与 groups 孔数、每孔悬液体积和余量一起导出细胞总数。"
+        },
+        {
+          "name": "mix_factor_stock_concentration",
+          "type": "quantity",
+          "dimension": "mass_concentration",
+          "description": "因子母液浓度；与 mix_factor_final_concentration 同时提供或同时省略。"
+        },
+        {
+          "name": "mix_factor_final_concentration",
+          "type": "quantity",
+          "dimension": "mass_concentration",
+          "description": "因子工作浓度；不得高于母液浓度。"
         }
       ],
       "outputs": [
@@ -96,6 +140,20 @@
           "type": "object",
           "description": "孔位到技术重复编号",
           "origin": "view"
+        },
+        {
+          "name": "mix_gel_mastermix",
+          "type": "object",
+          "description": "按 groups 实际孔数导出的组级 GelMA 干粉质量、LAP 母液体积与溶剂体积；只读派生值。",
+          "origin": "derived",
+          "calculator": "gel.mastermix.v1"
+        },
+        {
+          "name": "mix_cell_seeding",
+          "type": "object",
+          "description": "按 groups 实际孔数导出的组级细胞总数、悬液体积与因子母液加入量；只读派生值。",
+          "origin": "derived",
+          "calculator": "cell.seeding.v1"
         }
       ],
       "actions": [
@@ -119,14 +177,18 @@
         }
       ],
       "rules": [
-        "plate-geometry-wells"
+        "plate-geometry-wells",
+        "plate-mix-fields"
       ],
       "sdk": "1.0.0",
       "category": "labware",
       "capabilities": [
         "well-plate",
         "well-assignment",
-        "plate-geometry"
+        "plate-geometry",
+        "quantity",
+        "deterministic-calculation",
+        "derived-output"
       ],
       "permissions": [
         "document.edit"

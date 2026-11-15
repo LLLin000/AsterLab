@@ -1,0 +1,25 @@
+ok  	asterlab-mygo-prototype	1.673s
+?   	asterlab-mygo-prototype/cmd/studio	[no test files]
+ok  	asterlab-mygo-prototype/e2e	0.005s
+ok  	asterlab-mygo-prototype/internal/agentedit	0.077s
+ok  	asterlab-mygo-prototype/internal/analysis	0.004s
+ok  	asterlab-mygo-prototype/internal/assays	0.009s
+ok  	asterlab-mygo-prototype/internal/assets	0.010s
+ok  	asterlab-mygo-prototype/internal/asterdoc	1.227s
+ok  	asterlab-mygo-prototype/internal/blocks	0.078s
+ok  	asterlab-mygo-prototype/internal/blockui	0.131s
+ok  	asterlab-mygo-prototype/internal/designer	0.909s
+ok  	asterlab-mygo-prototype/internal/notebook	0.024s
+ok  	asterlab-mygo-prototype/internal/protocol	0.222s
+ok  	asterlab-mygo-prototype/internal/resultgrid	0.093s
+ok  	asterlab-mygo-prototype/internal/runui	1.405s
+ok  	asterlab-mygo-prototype/internal/runworkspace	0.750s
+ok  	asterlab-mygo-prototype/internal/shell	0.550s
+ok  	asterlab-mygo-prototype/internal/state	0.011s
+ok  	asterlab-mygo-prototype/internal/theme	0.008s
+ok  	asterlab-mygo-prototype/internal/tools	0.159s
+?   	asterlab-mygo-prototype/internal/uikit/plate	[no test files]
+?   	asterlab-mygo-prototype/internal/uikit/workflownode	[no test files]
+ok  	asterlab-mygo-prototype/internal/workflow	0.132s
+ok  	asterlab-mygo-prototype/internal/workflowtree	0.039s
+?   	asterlab-mygo-prototype/modules/runs	[no test files]

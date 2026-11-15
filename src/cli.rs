@@ -7,6 +7,11 @@ use asterlab_core::agent_edit_validate::{
     StoredProtocolVersion,
 };
 use asterlab_core::assets as asset_refs;
+use asterlab_core::calculators::{
+    cell_seeding as cell_seeding_calc, gel_mastermix as gel_mastermix_calc,
+    runtime_normalize as runtime_normalize_calc, CellSeedingGroup, CellSeedingInput,
+    GelMastermixGroup, GelMastermixInput, RuntimeNormalizeInput,
+};
 use asterlab_core::component_data::{
     calculate_reagent, project_well_plate, reagent_table, run_reagent_tool,
 };
@@ -2827,6 +2832,7 @@ const ASTERDOC_RULES: &[&str] = &[
     "container-fields",
     "measurement-profile-fields",
     "rna-reagent-fields",
+    "plate-mix-fields",
 ];
 
 fn validate_asterdoc_spec(spec: &Value) -> Result<(), String> {
@@ -3153,6 +3159,192 @@ fn role_allowed_for_module(role: &str, spec: &Value) -> bool {
     required.iter().any(|required| declared.contains(required))
 }
 
+fn asterdoc_plate_mix_fields(mapping: &serde_yaml::Mapping) -> Result<(), CliError> {
+    let field = |key: &str| mapping.get(serde_yaml::Value::String(key.to_owned()));
+    let present = |key: &str| field(key).is_some_and(|value| !value.is_null());
+    let ratio = |key: &str| -> Result<Option<f64>, CliError> {
+        let Some(value) = field(key) else {
+            return Ok(None);
+        };
+        if value.is_null() {
+            return Ok(None);
+        }
+        let number = value
+            .as_f64()
+            .ok_or_else(|| CliError::input(format!("{key} must be a number")))?;
+        if !number.is_finite() || number < 0.0 {
+            return Err(CliError::input(format!(
+                "{key} must be a non-negative finite number"
+            )));
+        }
+        Ok(Some(number))
+    };
+    let quantity = |key: &str, dimension: &str| -> Result<f64, CliError> {
+        let value = field(key)
+            .ok_or_else(|| CliError::input(format!("mix plan needs {key}")))?;
+        let (number, unit, actual, factor) = asterdoc_quantity_parts(value)?;
+        if actual != dimension {
+            return Err(CliError::input(format!(
+                "{key} unit {unit} is {actual}, not {dimension}"
+            )));
+        }
+        Ok(number * factor)
+    };
+
+    let gel_plan = present("mix_gelma_percent_by_group")
+        || present("mix_lap_stock_percent")
+        || present("mix_lap_final_percent");
+    let cell_plan = present("mix_cell_density")
+        || present("mix_factor_stock_concentration")
+        || present("mix_factor_final_concentration");
+    if !gel_plan && !cell_plan {
+        if present("mix_volume_per_well") || present("mix_excess_ratio") {
+            return Err(CliError::input(
+                "mix_volume_per_well and mix_excess_ratio need a gel or cell plan",
+            ));
+        }
+        return Ok(());
+    }
+    if !present("mix_volume_per_well") {
+        return Err(CliError::input("mix plan needs mix_volume_per_well"));
+    }
+    let volume_per_well_ul = quantity("mix_volume_per_well", "volume")? / 1e-6;
+    if volume_per_well_ul <= 0.0 {
+        return Err(CliError::input("mix_volume_per_well must be positive"));
+    }
+    let excess_ratio = ratio("mix_excess_ratio")?.unwrap_or(0.0);
+
+    let groups = field("groups")
+        .and_then(|value| value.as_mapping())
+        .ok_or_else(|| CliError::input("plate needs groups"))?;
+    let mut wells_by_group = std::collections::BTreeMap::new();
+    for (group, wells) in groups {
+        let name = group.as_str().unwrap_or("").trim().to_owned();
+        if name.is_empty() {
+            return Err(CliError::input("plate group name cannot be empty"));
+        }
+        let count = wells.as_sequence().map(|items| items.len()).unwrap_or(0);
+        if count == 0 {
+            return Err(CliError::input(format!(
+                "plate group {name} has no wells"
+            )));
+        }
+        wells_by_group.insert(name, count as u32);
+    }
+    if wells_by_group.is_empty() {
+        return Err(CliError::input("mix plan needs at least one plate group"));
+    }
+
+    if gel_plan {
+        let percents = field("mix_gelma_percent_by_group")
+            .and_then(|value| value.as_mapping())
+            .ok_or_else(|| CliError::input("mix_gelma_percent_by_group must be a mapping"))?;
+        let stock_percent = ratio("mix_lap_stock_percent")?
+            .ok_or_else(|| CliError::input("gel plan needs mix_lap_stock_percent"))?;
+        let final_percent = ratio("mix_lap_final_percent")?
+            .ok_or_else(|| CliError::input("gel plan needs mix_lap_final_percent"))?;
+        if stock_percent <= 0.0 {
+            return Err(CliError::input("mix_lap_stock_percent must be positive"));
+        }
+        if final_percent > stock_percent {
+            return Err(CliError::input(
+                "mix_lap_final_percent cannot exceed mix_lap_stock_percent",
+            ));
+        }
+        let mut gel_groups = Vec::with_capacity(wells_by_group.len());
+        for (name, wells) in &wells_by_group {
+            let raw = percents
+                .get(serde_yaml::Value::String(name.clone()))
+                .ok_or_else(|| {
+                    CliError::input(format!(
+                        "mix_gelma_percent_by_group is missing group {name}"
+                    ))
+                })?;
+            let percent = raw.as_f64().ok_or_else(|| {
+                CliError::input(format!("group {name} GelMA percent must be a number"))
+            })?;
+            if !percent.is_finite() || percent <= 0.0 || percent > 100.0 {
+                return Err(CliError::input(format!(
+                    "group {name} GelMA percent must be in (0, 100]"
+                )));
+            }
+            gel_groups.push(GelMastermixGroup {
+                name: name.clone(),
+                gelma_percent_wv: percent,
+                wells: *wells,
+            });
+        }
+        for key in percents.keys() {
+            let name = key.as_str().unwrap_or("");
+            if !wells_by_group.contains_key(name) {
+                return Err(CliError::input(format!(
+                    "mix_gelma_percent_by_group names unknown group {name}"
+                )));
+            }
+        }
+        gel_mastermix_calc(&GelMastermixInput {
+            volume_per_well_ul,
+            excess_ratio,
+            lap_stock_percent_wv: stock_percent,
+            lap_final_percent_wv: final_percent,
+            groups: gel_groups,
+        })
+        .map_err(CliError::input)?;
+    }
+
+    if cell_plan {
+        if !present("mix_cell_density") {
+            return Err(CliError::input("cell plan needs mix_cell_density"));
+        }
+        let density = quantity("mix_cell_density", "cells_per_well")?;
+        if density <= 0.0 {
+            return Err(CliError::input("mix_cell_density must be positive"));
+        }
+        if present("mix_factor_stock_concentration")
+            != present("mix_factor_final_concentration")
+        {
+            return Err(CliError::input(
+                "factor stock and final concentration must be provided together",
+            ));
+        }
+        let stock = if present("mix_factor_stock_concentration") {
+            quantity("mix_factor_stock_concentration", "mass_concentration")?
+        } else {
+            0.0
+        };
+        let final_concentration = if present("mix_factor_final_concentration") {
+            quantity("mix_factor_final_concentration", "mass_concentration")?
+        } else {
+            0.0
+        };
+        if stock <= 0.0 && final_concentration > 0.0 {
+            return Err(CliError::input("factor stock concentration must be positive"));
+        }
+        if stock > 0.0 && final_concentration > stock {
+            return Err(CliError::input(
+                "factor final concentration cannot exceed stock concentration",
+            ));
+        }
+        let groups = wells_by_group
+            .iter()
+            .map(|(name, wells)| CellSeedingGroup {
+                name: name.clone(),
+                wells: *wells,
+            })
+            .collect();
+        cell_seeding_calc(&CellSeedingInput {
+            density_cells_per_well: density,
+            volume_per_well_ul,
+            excess_ratio,
+            factor_stock_mg_per_ml: stock,
+            factor_final_mg_per_ml: final_concentration,
+            groups,
+        })
+        .map_err(CliError::input)?;
+    }
+    Ok(())
+}
+
 fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> {
     let value: serde_yaml::Value = serde_yaml::from_str(body)
         .map_err(|e| CliError::input(format!("asterlab block near line {line_no}: {e}")))?;
@@ -3309,6 +3501,7 @@ fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> 
                     }
                 }
             }
+            "plate-mix-fields" => asterdoc_plate_mix_fields(mapping)?,
             "reference-ref" => {
                 if text("ref").is_empty() {
                     return Err(CliError::input("reference needs a ref"));
@@ -6910,6 +7103,53 @@ struct ReactionVolumeCalc {
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct GelMastermixCalcGroup {
+    name: String,
+    gelma_percent_wv: f64,
+    wells: u32,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GelMastermixCalc {
+    volume_per_well_ul: f64,
+    #[serde(default)]
+    excess_ratio: f64,
+    lap_stock_percent_wv: f64,
+    lap_final_percent_wv: f64,
+    groups: Vec<GelMastermixCalcGroup>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CellSeedingCalcGroup {
+    name: String,
+    wells: u32,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CellSeedingCalc {
+    density_cells_per_well: f64,
+    volume_per_well_ul: f64,
+    #[serde(default)]
+    excess_ratio: f64,
+    #[serde(default)]
+    factor_stock_mg_per_ml: f64,
+    #[serde(default)]
+    factor_final_mg_per_ml: f64,
+    groups: Vec<CellSeedingCalcGroup>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeNormalizeCalc {
+    planned_wells: u32,
+    actual_wells: u32,
+    volume_per_well_ul: f64,
+    #[serde(default)]
+    excess_ratio: f64,
+    dead_volume_ul: f64,
+    prepared_volume_ul: f64,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StudyImport {
     project: ProjectCreate,
     #[serde(default)]
@@ -8444,6 +8684,12 @@ fn volume_factor(unit: &str) -> Result<f64, CliError> {
     }
 }
 
+// Derived mix values are exact f64 arithmetic; round only at the CLI boundary
+// so JSON reads as 2030 instead of 2030.0000000000002. 1e-6 uL is 1 nL.
+fn display_quantity(value: f64) -> f64 {
+    (value * 1e6).round() / 1e6
+}
+
 pub(crate) fn create_project(db: &Connection, name: &str) -> Result<Value, CliError> {
     let tx = db.unchecked_transaction().map_err(|e| CliError::internal(e.to_string()))?;
     let r = insert(&tx, "project", None, None, 1, &json!({"name": name, "description": ""}))?;
@@ -9646,6 +9892,122 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
         return Ok(
             json!({"allocated_volume_ul":used,"remaining_volume_ul":i.target_volume_ul-used,"unit":"µL","assumption":"按输入组分体积求和；未判断配方科学适用性"}),
         );
+    }
+    if tool == "calculator.gel_mastermix" {
+        let i: GelMastermixCalc = parse_input(path)?;
+        if i.groups.len() > 100 {
+            return Err(CliError::input("组别最多 100 项"));
+        }
+        for group in &i.groups {
+            check_text(&group.name, "组名", 120)?;
+        }
+        let output = gel_mastermix_calc(&GelMastermixInput {
+            volume_per_well_ul: i.volume_per_well_ul,
+            excess_ratio: i.excess_ratio,
+            lap_stock_percent_wv: i.lap_stock_percent_wv,
+            lap_final_percent_wv: i.lap_final_percent_wv,
+            groups: i
+                .groups
+                .into_iter()
+                .map(|group| GelMastermixGroup {
+                    name: group.name,
+                    gelma_percent_wv: group.gelma_percent_wv,
+                    wells: group.wells,
+                })
+                .collect(),
+        })
+        .map_err(CliError::input)?;
+        let groups: Vec<Value> = output
+            .groups
+            .iter()
+            .map(|group| {
+                json!({
+                    "name": group.name,
+                    "wells": group.wells,
+                    "gelma_percent_wv": group.gelma_percent_wv,
+                    "volume_ul": display_quantity(group.volume_ul),
+                    "gelma_mass_mg": display_quantity(group.gelma_mass_mg),
+                    "lap_stock_volume_ul": display_quantity(group.lap_stock_volume_ul),
+                    "solvent_volume_ul": display_quantity(group.solvent_volume_ul),
+                })
+            })
+            .collect();
+        return Ok(json!({
+            "groups": groups,
+            "total_volume_ul": display_quantity(output.volume_ul),
+            "total_gelma_mass_mg": display_quantity(output.gelma_mass_mg),
+            "total_lap_stock_volume_ul": display_quantity(output.lap_stock_volume_ul),
+            "total_solvent_volume_ul": display_quantity(output.solvent_volume_ul),
+            "formula": "volume_ul = wells × volume_per_well_ul × (1 + excess_ratio)；mass_mg = volume_ul × % w/v ÷ 100；LAP_stock_ul = volume_ul × LAP_final% ÷ LAP_stock%；solvent_ul = volume_ul − LAP_stock_ul",
+            "assumption": "组孔数取实际复孔数；GelMA 干粉体积忽略不计；LAP 母液计入溶剂体积；未计过滤损失或纯度修正"
+        }));
+    }
+    if tool == "calculator.cell_seeding" {
+        let i: CellSeedingCalc = parse_input(path)?;
+        if i.groups.len() > 100 {
+            return Err(CliError::input("组别最多 100 项"));
+        }
+        for group in &i.groups {
+            check_text(&group.name, "组名", 120)?;
+        }
+        let output = cell_seeding_calc(&CellSeedingInput {
+            density_cells_per_well: i.density_cells_per_well,
+            volume_per_well_ul: i.volume_per_well_ul,
+            excess_ratio: i.excess_ratio,
+            factor_stock_mg_per_ml: i.factor_stock_mg_per_ml,
+            factor_final_mg_per_ml: i.factor_final_mg_per_ml,
+            groups: i
+                .groups
+                .into_iter()
+                .map(|group| CellSeedingGroup {
+                    name: group.name,
+                    wells: group.wells,
+                })
+                .collect(),
+        })
+        .map_err(CliError::input)?;
+        let groups: Vec<Value> = output
+            .groups
+            .iter()
+            .map(|group| {
+                json!({
+                    "name": group.name,
+                    "wells": group.wells,
+                    "total_cells": group.total_cells,
+                    "suspension_volume_ul": display_quantity(group.suspension_volume_ul),
+                    "factor_stock_volume_ul": display_quantity(group.factor_stock_volume_ul),
+                })
+            })
+            .collect();
+        return Ok(json!({
+            "groups": groups,
+            "total_cells": output.total_cells,
+            "total_suspension_volume_ul": display_quantity(output.suspension_volume_ul),
+            "total_factor_stock_volume_ul": display_quantity(output.factor_stock_volume_ul),
+            "formula": "cells = ceil(density_cells_per_well × wells × (1 + excess_ratio))；suspension_ul = wells × volume_per_well_ul × (1 + excess_ratio)；factor_stock_ul = suspension_ul × final_mg_per_ml ÷ stock_mg_per_ml",
+            "assumption": "按实际复孔数计数并向上取整细胞数；因子母液体积包含在悬液体积内，不再另行扣减；未计接种回收率或活率修正"
+        }));
+    }
+    if tool == "calculator.runtime_normalize" {
+        let i: RuntimeNormalizeCalc = parse_input(path)?;
+        let output = runtime_normalize_calc(&RuntimeNormalizeInput {
+            planned_wells: i.planned_wells,
+            actual_wells: i.actual_wells,
+            volume_per_well_ul: i.volume_per_well_ul,
+            excess_ratio: i.excess_ratio,
+            dead_volume_ul: i.dead_volume_ul,
+            prepared_volume_ul: i.prepared_volume_ul,
+        })
+        .map_err(CliError::input)?;
+        return Ok(json!({
+            "planned_volume_ul": display_quantity(output.planned_volume_ul),
+            "required_volume_ul": display_quantity(output.required_volume_ul),
+            "dead_volume_ul": display_quantity(output.dead_volume_ul),
+            "additional_volume_ul": display_quantity(output.additional_volume_ul),
+            "unused_volume_ul": display_quantity(output.unused_volume_ul),
+            "formula": "required_ul = actual_wells × volume_per_well_ul × (1 + excess_ratio) + dead_volume_ul",
+            "assumption": "死体积按每个配制管只加一次；余量只作用于工作体积；不改写冻结计划，只返回运行期配平建议"
+        }));
     }
     let mut db = open_db(data_dir)?;
     match tool {
@@ -11290,6 +11652,15 @@ fn result_schema(tool: &str) -> Value {
         "calculator.reaction_volume" => {
             json!({"type":"object","additionalProperties":false,"required":["allocated_volume_ul","remaining_volume_ul","unit","assumption"],"properties":{"allocated_volume_ul":{"type":"number","minimum":0},"remaining_volume_ul":{"type":"number","minimum":0},"unit":{"const":"µL"},"assumption":{"type":"string"}}})
         }
+        "calculator.gel_mastermix" => {
+            json!({"type":"object","additionalProperties":false,"required":["groups","total_volume_ul","total_gelma_mass_mg","total_lap_stock_volume_ul","total_solvent_volume_ul","formula","assumption"],"properties":{"groups":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["name","wells","gelma_percent_wv","volume_ul","gelma_mass_mg","lap_stock_volume_ul","solvent_volume_ul"],"properties":{"name":{"type":"string"},"wells":{"type":"integer","minimum":1},"gelma_percent_wv":{"type":"number","exclusiveMinimum":0},"volume_ul":{"type":"number","minimum":0},"gelma_mass_mg":{"type":"number","minimum":0},"lap_stock_volume_ul":{"type":"number","minimum":0},"solvent_volume_ul":{"type":"number","minimum":0}}}},"total_volume_ul":{"type":"number","minimum":0},"total_gelma_mass_mg":{"type":"number","minimum":0},"total_lap_stock_volume_ul":{"type":"number","minimum":0},"total_solvent_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
+        "calculator.cell_seeding" => {
+            json!({"type":"object","additionalProperties":false,"required":["groups","total_cells","total_suspension_volume_ul","total_factor_stock_volume_ul","formula","assumption"],"properties":{"groups":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"required":["name","wells","total_cells","suspension_volume_ul","factor_stock_volume_ul"],"properties":{"name":{"type":"string"},"wells":{"type":"integer","minimum":1},"total_cells":{"type":"integer","minimum":1},"suspension_volume_ul":{"type":"number","minimum":0},"factor_stock_volume_ul":{"type":"number","minimum":0}}}},"total_cells":{"type":"integer","minimum":1},"total_suspension_volume_ul":{"type":"number","minimum":0},"total_factor_stock_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
+        "calculator.runtime_normalize" => {
+            json!({"type":"object","additionalProperties":false,"required":["planned_volume_ul","required_volume_ul","dead_volume_ul","additional_volume_ul","unused_volume_ul","formula","assumption"],"properties":{"planned_volume_ul":{"type":"number","minimum":0},"required_volume_ul":{"type":"number","minimum":0},"dead_volume_ul":{"type":"number","minimum":0},"additional_volume_ul":{"type":"number","minimum":0},"unused_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
         "sdk.modules" => json!({"type":"object","additionalProperties":false,"required":["modules"],"properties":{"modules":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1},"title":{"type":["string","null"]},"category":{"type":["string","null"]},"capabilities":{"type":["array","null"]},"renderers":{"type":["object","null"]},"actions":{"type":["array","null"]}}}}}}),
         "sdk.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled","errors","warnings","modules"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","schema"],"properties":{"kind":{},"schema":{}}}},"design":{"type":"object","additionalProperties":true}}}),
         "asterdoc.inspect" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","modules"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","id","schema","data","manifest"],"properties":{"kind":{"type":"string"},"id":{"type":"string"},"schema":{"type":"integer","minimum":0},"data":{"type":"object","additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}}}}}),
@@ -11507,6 +11878,15 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "calculator.reaction_volume" => {
             json!({"type":"object","additionalProperties":false,"required":["target_volume_ul","components"],"properties":{"target_volume_ul":{"type":"number","exclusiveMinimum":0},"components":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","volume_ul"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"volume_ul":{"type":"number","minimum":0}}}}}})
+        }
+        "calculator.gel_mastermix" => {
+            json!({"type":"object","additionalProperties":false,"required":["volume_per_well_ul","lap_stock_percent_wv","lap_final_percent_wv","groups"],"properties":{"volume_per_well_ul":{"type":"number","exclusiveMinimum":0},"excess_ratio":{"type":"number","minimum":0},"lap_stock_percent_wv":{"type":"number","exclusiveMinimum":0},"lap_final_percent_wv":{"type":"number","minimum":0},"groups":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","gelma_percent_wv","wells"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"gelma_percent_wv":{"type":"number","exclusiveMinimum":0},"wells":{"type":"integer","minimum":1,"maximum":100000}}}}}})
+        }
+        "calculator.cell_seeding" => {
+            json!({"type":"object","additionalProperties":false,"required":["density_cells_per_well","volume_per_well_ul","groups"],"properties":{"density_cells_per_well":{"type":"number","exclusiveMinimum":0},"volume_per_well_ul":{"type":"number","exclusiveMinimum":0},"excess_ratio":{"type":"number","minimum":0},"factor_stock_mg_per_ml":{"type":"number","minimum":0},"factor_final_mg_per_ml":{"type":"number","minimum":0},"groups":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["name","wells"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"wells":{"type":"integer","minimum":1,"maximum":100000}}}}}})
+        }
+        "calculator.runtime_normalize" => {
+            json!({"type":"object","additionalProperties":false,"required":["planned_wells","actual_wells","volume_per_well_ul","dead_volume_ul","prepared_volume_ul"],"properties":{"planned_wells":{"type":"integer","minimum":0,"maximum":100000},"actual_wells":{"type":"integer","minimum":0,"maximum":100000},"volume_per_well_ul":{"type":"number","exclusiveMinimum":0},"excess_ratio":{"type":"number","minimum":0},"dead_volume_ul":{"type":"number","minimum":0},"prepared_volume_ul":{"type":"number","minimum":0}}})
         }
         "sdk.modules" => {
             json!({"type":"object","additionalProperties":false,"properties":{}})
@@ -11752,6 +12132,9 @@ fn tool_specs() -> Vec<Value> {
         "calculator.solution",
         "calculator.serial_dilution",
         "calculator.reaction_volume",
+        "calculator.gel_mastermix",
+        "calculator.cell_seeding",
+        "calculator.runtime_normalize",
         "sdk.modules",
         "sdk.validate",
         "sdk.describe",
@@ -11795,6 +12178,9 @@ fn tool_writes(tool: &str) -> bool {
             | "calculator.solution"
             | "calculator.serial_dilution"
             | "calculator.reaction_volume"
+            | "calculator.gel_mastermix"
+            | "calculator.cell_seeding"
+            | "calculator.runtime_normalize"
             | "sdk.modules"
             | "sdk.describe"
             | "sdk.validate"
@@ -11874,6 +12260,9 @@ fn tool_description(tool: &str) -> &'static str {
         "calculator.solution" => "按 m=C×V×MW 计算理论质量。",
         "calculator.serial_dilution" => "按相同体积单位计算逐级稀释浓度。",
         "calculator.reaction_volume" => "求反应已分配体积与剩余体积，不判断配方科学适用性。",
+        "calculator.gel_mastermix" => "按组别 % w/v、实际孔数、每孔体积与余量导出各组 GelMA 干粉质量、LAP 母液体积与溶剂体积。",
+        "calculator.cell_seeding" => "按目标 cells/well、实际孔数、每孔悬液体积与余量导出细胞总数与因子母液加入量。",
+        "calculator.runtime_normalize" => "按实际孔数与死体积重算运行期配平体积，返回需追加或未用完的体积。",
         "sdk.modules" => "从嵌入的 modules.json 返回 AsterDoc 模块摘要（kind/schema/title/category/capabilities/renderers/actions）；只读。",
         "sdk.describe" => "按 kind+schema 返回完整的 AsterDoc 模块 manifest；只读。",
         "sdk.validate" => "校验 AsterDoc 源码或已保存设计并尝试编译；不写入。",
@@ -11908,7 +12297,10 @@ fn tool_effects(tool: &str) -> &'static str {
         "calculator.dilution"
         | "calculator.solution"
         | "calculator.serial_dilution"
-        | "calculator.reaction_volume" => "只返回算术结果；不保存输入或结果。",
+        | "calculator.reaction_volume"
+        | "calculator.gel_mastermix"
+        | "calculator.cell_seeding"
+        | "calculator.runtime_normalize" => "只返回算术结果；不保存输入或结果。",
         "project.create" => "创建一个项目记录。",
         "project.revise" => "按 expected_revision 更新一个项目记录并递增 revision。",
         "design.create" => "创建实验设计并创建不可变的 v1 设计快照。",
@@ -13249,6 +13641,142 @@ protocol_version_id: protocol-v1
             let actual = validate_asterdoc_source(source).is_ok();
             assert_eq!(actual, expected, "sample {} mismatch", sample["name"]);
         }
+    }
+
+    #[test]
+    fn asterdoc_plate_mix_fields_match_go_calculator_cases() {
+        let valid = r#"```asterlab
+kind: group
+id: "3%"
+schema: 1
+name: 3% GelMA
+```
+```asterlab
+kind: group
+id: "5%"
+schema: 1
+name: 5% GelMA
+```
+```asterlab
+kind: group
+id: "7%"
+schema: 1
+name: 7% GelMA
+```
+```asterlab
+kind: plate
+id: plate-huvec
+schema: 1
+format: 12
+groups:
+  "3%": [A1, A2, A3]
+  "5%": [B1, B2, B3]
+  "7%": [C1, C2, C3]
+mix_volume_per_well: {value: 200, unit: uL}
+mix_excess_ratio: 0.1
+mix_gelma_percent_by_group:
+  "3%": 3
+  "5%": 5
+  "7%": 7
+mix_lap_stock_percent: 0.5
+mix_lap_final_percent: 0.05
+mix_cell_density: {value: 20000, unit: cells/well}
+mix_factor_stock_concentration: {value: 10, unit: ug/mL}
+mix_factor_final_concentration: {value: 50, unit: ng/mL}
+```"#;
+        assert!(
+            validate_asterdoc_source(valid).is_ok(),
+            "valid mix source rejected: {:?}",
+            validate_asterdoc_source(valid).err().map(|e| e.message)
+        );
+        let invalid = [
+            valid.replace("mix_lap_final_percent: 0.05", "mix_lap_final_percent: 0.6"),
+            valid.replace("  \"7%\": 7\n", ""),
+            valid.replace(
+                "mix_factor_final_concentration: {value: 50, unit: ng/mL}",
+                "mix_factor_final_concentration: {value: 20, unit: mg/mL}",
+            ),
+            valid.replace(
+                "mix_factor_stock_concentration: {value: 10, unit: ug/mL}\n",
+                "",
+            ),
+        ];
+        for source in invalid {
+            assert!(
+                validate_asterdoc_source(&source).is_err(),
+                "invalid mix source accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn plate_mix_calculators_match_the_huvec_case() {
+        fn write_calc_input(dir: &std::path::Path, name: &str, value: Value) -> String {
+            let path = dir.join(name);
+            fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+            path.to_string_lossy().into_owned()
+        }
+
+        let dir = std::env::temp_dir().join(format!("asterlab-exp02-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let groups = json!([
+            {"name":"3%","wells":3},
+            {"name":"5%","wells":3},
+            {"name":"7%","wells":3}
+        ]);
+
+        let gel_input = write_calc_input(&dir, "gel.json", json!({
+            "volume_per_well_ul": 200.0,
+            "excess_ratio": 0.1,
+            "lap_stock_percent_wv": 0.5,
+            "lap_final_percent_wv": 0.05,
+            "groups": [
+                {"name":"3%","gelma_percent_wv":3.0,"wells":3},
+                {"name":"5%","gelma_percent_wv":5.0,"wells":3},
+                {"name":"7%","gelma_percent_wv":7.0,"wells":3}
+            ]
+        }));
+        let gel = dispatch("calculator.gel_mastermix", &gel_input, &dir).unwrap();
+        assert_eq!(gel["groups"].as_array().unwrap().len(), 3);
+        assert!((gel["total_gelma_mass_mg"].as_f64().unwrap() - 99.0).abs() < 1e-9);
+        assert!((gel["total_lap_stock_volume_ul"].as_f64().unwrap() - 198.0).abs() < 1e-9);
+        assert!((gel["total_solvent_volume_ul"].as_f64().unwrap() - 1782.0).abs() < 1e-9);
+
+        let cells_input = write_calc_input(&dir, "cells.json", json!({
+            "density_cells_per_well": 20000.0,
+            "volume_per_well_ul": 200.0,
+            "excess_ratio": 0.1,
+            "factor_stock_mg_per_ml": 0.01,
+            "factor_final_mg_per_ml": 0.00005,
+            "groups": groups
+        }));
+        let cells = dispatch("calculator.cell_seeding", &cells_input, &dir).unwrap();
+        assert_eq!(cells["total_cells"], json!(198000));
+        assert!((cells["total_factor_stock_volume_ul"].as_f64().unwrap() - 9.9).abs() < 1e-9);
+
+        let runtime_input = write_calc_input(&dir, "runtime.json", json!({
+            "planned_wells": 9,
+            "actual_wells": 7,
+            "volume_per_well_ul": 200.0,
+            "excess_ratio": 0.1,
+            "dead_volume_ul": 50.0,
+            "prepared_volume_ul": 2000.0
+        }));
+        let runtime = dispatch("calculator.runtime_normalize", &runtime_input, &dir).unwrap();
+        assert!((runtime["required_volume_ul"].as_f64().unwrap() - 1590.0).abs() < 1e-9);
+        assert!((runtime["unused_volume_ul"].as_f64().unwrap() - 410.0).abs() < 1e-9);
+
+        let bad = write_calc_input(&dir, "bad.json", json!({
+            "volume_per_well_ul": 200.0,
+            "lap_stock_percent_wv": 0.5,
+            "lap_final_percent_wv": 0.6,
+            "groups": [{"name":"3%","gelma_percent_wv":3.0,"wells":3}]
+        }));
+        assert_eq!(
+            dispatch("calculator.gel_mastermix", &bad, &dir).unwrap_err().code,
+            "INVALID_INPUT"
+        );
+        fs::remove_dir_all(&dir).ok();
     }
 
     fn seed_asset_run(db: &Connection) -> String {
