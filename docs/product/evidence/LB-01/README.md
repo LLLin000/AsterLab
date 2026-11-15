@@ -5,8 +5,8 @@ is now a vertical step-card list with a top budget bar, a `流程 / 12 孔板 /
 配液单` switch, and per-card folded technical properties.
 
 - Build: `prototypes/mygo-run/dist/mygo-run.exe`, `BUILD_INFO.txt` in this
-  folder records `commit 38dc5a0` — the code commit this evidence was built
-  from (the evidence commit itself adds only these files).
+  folder records `commit 4722a87` — the merge-commit HEAD this evidence was
+  built and captured from (the evidence update itself adds only these files).
 - Window: `mygo-run.exe` resized with `user32 MoveWindow` to 1360×880 and
   900×600, `ASTERLAB_THEME=light|dark`.
 - Data: isolated `LABWORKBENCH_DATA_DIR` (copy of an existing fixture DB). The
