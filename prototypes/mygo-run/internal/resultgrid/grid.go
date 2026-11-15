@@ -67,6 +67,7 @@ type Grid struct {
 	Error            string
 	PendingOpID      string
 	PendingOpHash    string
+	FocusInput       string // well whose reading field holds focus; view state, not data
 	Preview          *PastePreview
 	ConfirmOverwrite bool
 	undo, redo       []historyEntry

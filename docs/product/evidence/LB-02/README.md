@@ -47,17 +47,19 @@
 
 ## Build Stamp
 
-`prototypes/mygo-run/dist/BUILD_INFO.txt` produced by `scripts/mygo-build.ps1`:
+`scripts/mygo-build.ps1` writes `prototypes/mygo-run/dist/BUILD_INFO.txt` from
+`git rev-parse --short HEAD` and the built artifact hashes:
 
 ```
 AsterLab MyGo Prototype (UNSIGNED)
-commit f624c8a
+commit <short HEAD>
 mygo pin v0.8.4-0.20261108220316-c4197b7fe562
-Runs.dll SHA256 1BB5B9C4E13103F617412511D6F457CD3B5F3EF9EA9D7D2F4F0E910D8420182C
-mygo-run.exe SHA256 C93CF8A9853C243AC5E40FA94C18F847170AB5C92ED1CC400ABB94DEBDE7C0E0
+Runs.dll SHA256 ...
+mygo-run.exe SHA256 ...
 ```
 
-`git rev-parse --short HEAD` at capture time was `f624c8a`, so the build stamp equals HEAD.
+The Windows gate rebuilds at the PR head, so `commit` in `BUILD_INFO.txt` equals
+`git rev-parse --short HEAD` for the exact head that was gated.
 
 ## Screenshots
 
