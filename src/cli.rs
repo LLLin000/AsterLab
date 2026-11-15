@@ -7528,6 +7528,13 @@ pub(crate) fn run_workspace_typed(
         data["id"] = record["id"].clone();
         events.push(data);
     }
+    let mut asset_links = Vec::new();
+    for record in list(db, Some("asset_link"), project)? {
+        if record["parent_id"].as_str() != Some(run_id) {
+            continue;
+        }
+        asset_links.push(record["data"].clone());
+    }
     let mut plates = Vec::new();
     for record in list(db, Some("plate"), project)? {
         if record["parent_id"].as_str() != Some(run_id) {
@@ -7572,6 +7579,7 @@ pub(crate) fn run_workspace_typed(
         &run["data"],
         &plates,
         &events,
+        &asset_links,
     )
     .map_err(|error| CliError::internal(error.to_string()))?;
     Ok(workspace)
@@ -12202,7 +12210,7 @@ fn result_schema(tool: &str) -> Value {
         "run.set_status" => one("run"),
         "run.revise" => one("run"),
         "run.workspace" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","design_id","design_version_id","design_revision","frozen_design","protocol_version_id","status","scopes","steps","tasks","occurrences","materials","plates","events"],"properties":{"run_id":{"type":"string"},"design_id":{"type":"string"},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"frozen_design":{"type":"object","additionalProperties":true},"protocol_version_id":{"type":["string","null"]},"status":{"type":"string"},"scopes":{"type":"array","items":{"type":"object","additionalProperties":true}},"steps":{"type":"array","items":{"type":"object","additionalProperties":true}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},"occurrences":{"type":"array","items":{"type":"object","additionalProperties":true}},"materials":{"type":"array","items":{"type":"object","additionalProperties":true}},"plates":{"type":"array","items":{"type":"object","additionalProperties":true}},"events":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","design_id","design_version_id","design_revision","frozen_design","protocol_version_id","status","scopes","steps","tasks","occurrences","materials","plates","linked_assets","asset_coverage","events"],"properties":{"run_id":{"type":"string"},"design_id":{"type":"string"},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"frozen_design":{"type":"object","additionalProperties":true},"protocol_version_id":{"type":["string","null"]},"status":{"type":"string"},"scopes":{"type":"array","items":{"type":"object","additionalProperties":true}},"steps":{"type":"array","items":{"type":"object","additionalProperties":true}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},"occurrences":{"type":"array","items":{"type":"object","additionalProperties":true}},"materials":{"type":"array","items":{"type":"object","additionalProperties":true}},"plates":{"type":"array","items":{"type":"object","additionalProperties":true}},"linked_assets":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["asset_id","task_key","sample_id","well_id","timepoint","fov_index","coordinate_id"],"properties":{"asset_id":{"type":"string"},"task_key":{"type":"string"},"sample_id":{"type":["string","null"]},"well_id":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fov_index":{"type":["integer","null"],"minimum":1},"coordinate_id":{"type":["string","null"]}}}},"asset_coverage":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["well_id","timepoint","fov_indices","asset_ids"],"properties":{"well_id":{"type":"string"},"timepoint":{"type":["string","null"]},"fov_indices":{"type":"array","items":{"type":"integer","minimum":1}},"asset_ids":{"type":"array","items":{"type":"string"}}}}},"events":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
         }
         "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["designId","revision","design","roots","order","precedes","issues"],"properties":{"designId":{"type":"string"},"revision":{"type":"integer","minimum":0},"runId":{"type":"string"},"design":{"type":"boolean"},"roots":{"type":"array","items":{"type":"object","additionalProperties":true}},"order":{"type":"array","items":{"type":"string"}},"precedes":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"issues":{"type":"array","items":{"type":"string"}}}}),
         "workflow.progress" => workflow_progress_output_schema(),
@@ -14537,6 +14545,61 @@ mix_factor_final_concentration: {value: 50, unit: ng/mL}
             .expect("task key")
             .to_owned()
     }
+    #[test]
+    fn run_workspace_carries_asset_coordinates_and_the_gap_grouping() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);").unwrap();
+        let task_key = seed_asset_run(&db);
+        let link = |id: &str, well: Option<&str>, timepoint: Option<&str>, fov: Option<u32>| {
+            json!({
+                "id": id,
+                "link": {"runId":"run-1","taskKey":task_key,"sampleId":"sample-1",
+                    "wellId":well,"timepoint":timepoint,"fovIndex":fov}
+            })
+        };
+        for (index, data) in [
+            link("asset-1", Some("A1"), Some("t6h"), Some(1)),
+            link("asset-2", Some("A1"), Some("t6h"), Some(2)),
+            link("asset-3", None, None, None),
+        ]
+        .iter()
+        .enumerate()
+        {
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,'asset_link','project-1','run-1',1,?2,'now','now')",
+                params![format!("link-{index}"), data.to_string()],
+            )
+            .unwrap();
+        }
+
+        let workspace = run_workspace(&db, "run-1").unwrap();
+        let assets = workspace["linked_assets"].as_array().unwrap();
+        assert_eq!(assets.len(), 3);
+        let asset = |id: &str| {
+            assets
+                .iter()
+                .find(|asset| asset["asset_id"] == id)
+                .unwrap_or_else(|| panic!("missing {id}"))
+        };
+        assert_eq!(asset("asset-1")["task_key"], task_key);
+        assert_eq!(asset("asset-1")["sample_id"], "sample-1");
+        assert_eq!(asset("asset-1")["well_id"], "A1");
+        assert_eq!(asset("asset-1")["timepoint"], "t6h");
+        assert_eq!(asset("asset-1")["fov_index"], 1);
+        assert_eq!(asset("asset-1")["coordinate_id"], "A1_t6h_fov01");
+        assert_eq!(asset("asset-2")["fov_index"], 2);
+        assert_eq!(asset("asset-3")["well_id"], Value::Null);
+        assert_eq!(asset("asset-3")["fov_index"], Value::Null);
+        assert_eq!(asset("asset-3")["coordinate_id"], Value::Null);
+
+        let groups = workspace["asset_coverage"].as_array().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0]["well_id"], "A1");
+        assert_eq!(groups[0]["timepoint"], "t6h");
+        assert_eq!(groups[0]["fov_indices"], json!([1, 2]));
+        assert_eq!(groups[0]["asset_ids"], json!(["asset-1", "asset-2"]));
+    }
+
     #[test]
     fn rule_skip_event_requires_skip_status_and_projects_ad_hoc_marker() {
         let db = Connection::open_in_memory().unwrap();

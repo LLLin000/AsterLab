@@ -23,6 +23,10 @@ pub struct RunWorkspace {
     pub occurrences: Vec<StepOccurrence>,
     pub materials: Vec<MaterialManifestView>,
     pub plates: Vec<RunPlateView>,
+    /// Linked assets with the coordinates they were recorded with.
+    pub linked_assets: Vec<LinkedAssetView>,
+    /// Grouping basis for the capture-gap check, one row per well × timepoint.
+    pub asset_coverage: Vec<AssetCoverageGroup>,
     pub events: Vec<ExecutionEventView>,
 }
 
@@ -172,6 +176,36 @@ pub struct ExecutionEventView {
     pub ad_hoc_step: bool,
     pub skipped_by_rule: bool,
 }
+/// One linked asset as the Run read model exposes it.
+///
+/// Every coordinate stays `None` when the stored link never recorded it; the
+/// read model fills no default and infers no well from a task or a sample.
+/// `coordinate_id` is derived from the recorded coordinates by the same rule
+/// `asset.link` uses, so Run and Record navigation share one locator.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LinkedAssetView {
+    pub asset_id: String,
+    pub task_key: String,
+    pub sample_id: Option<String>,
+    pub well_id: Option<String>,
+    pub timepoint: Option<String>,
+    pub fov_index: Option<u32>,
+    pub coordinate_id: Option<String>,
+}
+
+/// Capture-gap grouping basis: one row per `(well_id, timepoint)`.
+///
+/// Only links that recorded a `well_id` form a group. A link without a well
+/// stays in [`RunWorkspace::linked_assets`] and never invents a group.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AssetCoverageGroup {
+    pub well_id: String,
+    pub timepoint: Option<String>,
+    /// Distinct recorded FOV indexes, ascending; empty when none was recorded.
+    pub fov_indices: Vec<u32>,
+    pub asset_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunWorkspaceError(pub String);
 
@@ -193,6 +227,73 @@ fn opt_text(value: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
+}
+
+/// Reads stored `asset_link` payloads. Coordinates are copied as recorded:
+/// a missing or zero FOV index stays `None` instead of becoming "FOV 0".
+fn linked_asset_views(link_data: &[Value]) -> Vec<LinkedAssetView> {
+    link_data
+        .iter()
+        .map(|item| {
+            let link = &item["link"];
+            let well_id = opt_text(&link["wellId"]);
+            let timepoint = opt_text(&link["timepoint"]);
+            let fov_index = link["fovIndex"].as_u64().map(|v| v as u32).filter(|v| *v > 0);
+            let coordinate_id = crate::assets::AssetLink {
+                asset_id: text(&item["id"]),
+                run_id: opt_text(&link["runId"]).unwrap_or_default(),
+                task_key: opt_text(&link["taskKey"]).unwrap_or_default(),
+                sample_id: opt_text(&link["sampleId"]),
+                well_id: well_id.clone(),
+                timepoint: timepoint.clone(),
+                fov_index,
+            }
+            .coordinate_id();
+            LinkedAssetView {
+                asset_id: text(&item["id"]),
+                task_key: opt_text(&link["taskKey"]).unwrap_or_default(),
+                sample_id: opt_text(&link["sampleId"]),
+                well_id,
+                timepoint,
+                fov_index,
+                coordinate_id,
+            }
+        })
+        .collect()
+}
+
+fn asset_coverage(links: &[LinkedAssetView]) -> Vec<AssetCoverageGroup> {
+    let mut groups: std::collections::BTreeMap<(String, Option<String>), AssetCoverageGroup> =
+        std::collections::BTreeMap::new();
+    for link in links {
+        let Some(well_id) = link.well_id.as_deref() else {
+            continue;
+        };
+        let group = groups
+            .entry((well_id.to_owned(), link.timepoint.clone()))
+            .or_insert_with(|| AssetCoverageGroup {
+                well_id: well_id.to_owned(),
+                timepoint: link.timepoint.clone(),
+                fov_indices: Vec::new(),
+                asset_ids: Vec::new(),
+            });
+        if let Some(fov) = link.fov_index {
+            if !group.fov_indices.contains(&fov) {
+                group.fov_indices.push(fov);
+            }
+        }
+        if !group.asset_ids.contains(&link.asset_id) {
+            group.asset_ids.push(link.asset_id.clone());
+        }
+    }
+    groups
+        .into_values()
+        .map(|mut group| {
+            group.fov_indices.sort_unstable();
+            group.asset_ids.sort();
+            group
+        })
+        .collect()
 }
 
 
@@ -341,6 +442,7 @@ pub fn build(
     run_data: &Value,
     plate_data: &[Value],
     event_data: &[Value],
+    link_data: &[Value],
 ) -> Result<RunWorkspace, RunWorkspaceError> {
     let frozen = FrozenDesignView::from_version(
         design_id,
@@ -537,6 +639,8 @@ pub fn build(
 
     // Old events do not have occurrence_id. Do not synthesize an instance.
     let occurrences = Vec::new();
+    let linked_assets = linked_asset_views(link_data);
+    let asset_coverage = asset_coverage(&linked_assets);
 
     let mut workspace = RunWorkspace {
         run_id: run_id.to_owned(),
@@ -552,6 +656,8 @@ pub fn build(
         occurrences,
         materials,
         plates,
+        linked_assets,
+        asset_coverage,
         events,
     };
     for task in &mut workspace.tasks {
@@ -625,7 +731,7 @@ mod tests {
 
     #[test]
     fn tasks_use_explicit_timepoints_without_targets() {
-        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &[]).unwrap();
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &[], &[]).unwrap();
         assert_eq!(workspace.steps.len(), 2);
         assert_eq!(workspace.tasks.len(), 4);
         assert!(workspace.tasks.iter().all(|task| task.target == TargetSelection::Unresolved));
@@ -646,7 +752,7 @@ mod tests {
                 "parameters":[],"unresolved_parameter_refs":[],"source_block_version_id":"b2"
             }]}
         ]);
-        let workspace = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[]).unwrap();
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[], &[]).unwrap();
         assert_eq!(workspace.steps.len(), 2);
         assert_ne!(workspace.steps[0].view_id, workspace.steps[1].view_id);
     }
@@ -658,7 +764,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("time_scope");
-        let workspace = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[]).unwrap();
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[], &[]).unwrap();
         assert_eq!(workspace.tasks.len(), 3);
         assert!(workspace
             .tasks
@@ -679,7 +785,7 @@ mod tests {
     fn duplicate_task_keys_are_rejected_not_silently_merged() {
         let mut run = run();
         run["protocol_manifest"][0]["steps"][1]["path"] = json!("root/a");
-        assert!(build("r1", "d1", "dv1", 1, &design(), &run, &[], &[]).is_err());
+        assert!(build("r1", "d1", "dv1", 1, &design(), &run, &[], &[], &[]).is_err());
     }
 
     #[test]
@@ -687,7 +793,7 @@ mod tests {
         let mut design = design();
         design["asterlab"] = json!({"foundationVersion":1,"sdkVersion":"1.0.0",
             "modules":[{"kind":"dilution","id":"d1","schema":1}]});
-        let workspace = build("r1", "d1", "dv1", 1, &design, &run(), &[], &[]).unwrap();
+        let workspace = build("r1", "d1", "dv1", 1, &design, &run(), &[], &[], &[]).unwrap();
         assert_eq!(workspace.frozen_design.asterlab.as_ref().unwrap()["modules"][0]["kind"], "dilution");
     }
 
@@ -704,7 +810,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("time_scope");
-        let workspace = build("r1", "d1", "dv1", 1, &design, &run, &[], &[]).unwrap();
+        let workspace = build("r1", "d1", "dv1", 1, &design, &run, &[], &[], &[]).unwrap();
         let root_a: Vec<_> = workspace.tasks.iter().filter(|task| task.step_path == "root/a").collect();
         assert_eq!(root_a.len(), 1);
         assert_eq!(root_a[0].timepoint.as_deref(), Some("D1"));
@@ -717,7 +823,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("path");
-        let error = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[]).unwrap_err();
+        let error = build("r1", "d1", "dv1", 1, &design(), &run, &[], &[], &[]).unwrap_err();
         assert!(error.to_string().contains("step[0]"), "{error}");
     }
 
@@ -725,7 +831,7 @@ mod tests {
     fn old_events_remain_legacy_without_occurrence_id() {
         let events = vec![json!({"id":"e1","event_type":"operation","timepoint":"D1",
             "protocol_step_path":"root/a","protocol_version_id":"pv1","assay_id":"cck8"})];
-        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events).unwrap();
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events, &[]).unwrap();
         assert!(workspace.occurrences.is_empty());
         assert_eq!(workspace.events[0].occurrence_id, None);
     }
@@ -738,7 +844,7 @@ mod tests {
             "protocol_version_id":"pv1","assay_id":"cck8","step_status":"skipped",
             "ad_hoc_step":true
         })];
-        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events).unwrap();
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events, &[]).unwrap();
         assert!(workspace.events[0].skipped_by_rule);
         assert!(workspace.events[0].ad_hoc_step);
         assert_eq!(workspace.tasks[0].status, "skipped");
@@ -749,8 +855,95 @@ mod tests {
             "step_status":"skipped","protocol_step_path":"root/a","protocol_version_id":"pv1",
             "timepoint":"D1",
             "assay_id":"cck8","recorded_at":"2026-11-15T10:00:00Z"})];
-        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events).unwrap();
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events, &[]).unwrap();
         assert_eq!(workspace.tasks[0].status, "skipped");
         assert!(workspace.events[0].skipped_by_rule);
+    }
+
+    fn link(id: &str, well: Option<&str>, timepoint: Option<&str>, fov: Option<u32>) -> Value {
+        json!({
+            "id": id,
+            "link": {
+                "runId": "r1",
+                "taskKey": "root/b",
+                "sampleId": "sample-1",
+                "wellId": well,
+                "timepoint": timepoint,
+                "fovIndex": fov
+            }
+        })
+    }
+
+    #[test]
+    fn linked_assets_carry_their_coordinates_and_group_by_well_and_timepoint() {
+        let links = vec![
+            link("asset-2", Some("A1"), Some("t6h"), Some(2)),
+            link("asset-1", Some("A1"), Some("t6h"), Some(1)),
+            link("asset-3", Some("A1"), Some("t12h"), Some(1)),
+            link("asset-4", Some("B1"), None, None),
+        ];
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &[], &links).unwrap();
+        assert_eq!(workspace.linked_assets.len(), 4);
+        assert_eq!(workspace.linked_assets[0].coordinate_id.as_deref(), Some("A1_t6h_fov02"));
+        assert_eq!(workspace.linked_assets[3].coordinate_id.as_deref(), Some("B1"));
+        assert_eq!(
+            workspace.asset_coverage,
+            vec![
+                AssetCoverageGroup {
+                    well_id: "A1".into(),
+                    timepoint: Some("t12h".into()),
+                    fov_indices: vec![1],
+                    asset_ids: vec!["asset-3".into()],
+                },
+                AssetCoverageGroup {
+                    well_id: "A1".into(),
+                    timepoint: Some("t6h".into()),
+                    fov_indices: vec![1, 2],
+                    asset_ids: vec!["asset-1".into(), "asset-2".into()],
+                },
+                AssetCoverageGroup {
+                    well_id: "B1".into(),
+                    timepoint: None,
+                    fov_indices: vec![],
+                    asset_ids: vec!["asset-4".into()],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_links_keep_coordinates_empty_and_group_nothing() {
+        let links = vec![
+            json!({"id":"asset-old","link":{"runId":"r1","taskKey":"root/b"}}),
+            json!({"id":"asset-zero","link":{"runId":"r1","taskKey":"root/b",
+                "wellId":"C1","timepoint":"","fovIndex":0}}),
+        ];
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &[], &links).unwrap();
+        let old = &workspace.linked_assets[0];
+        assert_eq!(old.well_id, None);
+        assert_eq!(old.timepoint, None);
+        assert_eq!(old.fov_index, None);
+        assert_eq!(old.coordinate_id, None);
+        // An empty timepoint and a zero FOV index are absent, not "0".
+        let zero = &workspace.linked_assets[1];
+        assert_eq!(zero.well_id.as_deref(), Some("C1"));
+        assert_eq!(zero.timepoint, None);
+        assert_eq!(zero.fov_index, None);
+        assert_eq!(zero.coordinate_id.as_deref(), Some("C1"));
+        assert_eq!(workspace.asset_coverage.len(), 1);
+        assert!(workspace.asset_coverage[0].fov_indices.is_empty());
+    }
+
+    #[test]
+    fn linked_asset_outside_any_well_stays_visible_without_a_group() {
+        let links = vec![
+            link("asset-1", None, Some("t6h"), Some(1)),
+            link("asset-2", Some("A1"), Some("t6h"), Some(1)),
+        ];
+        let workspace = build("r1", "d1", "dv1", 1, &design(), &run(), &[], &[], &links).unwrap();
+        assert_eq!(workspace.linked_assets.len(), 2);
+        assert_eq!(workspace.linked_assets[0].coordinate_id, None);
+        assert_eq!(workspace.asset_coverage.len(), 1);
+        assert_eq!(workspace.asset_coverage[0].asset_ids, vec!["asset-2".to_owned()]);
     }
 }

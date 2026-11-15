@@ -1585,7 +1585,7 @@ mod tests {
     }
 
     fn workspace(events: Vec<Value>) -> RunWorkspace {
-        run_workspace::build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events).unwrap()
+        run_workspace::build("r1", "d1", "dv1", 1, &design(), &run(), &[], &events, &[]).unwrap()
     }
 
     fn step_event(id: &str, recorded_at: &str, event_type: &str) -> Value {

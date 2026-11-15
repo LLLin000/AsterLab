@@ -981,7 +981,7 @@ mod tests {
     }
 
     fn run_workspace(events: &[Value]) -> RunWorkspace {
-        build("r1", "d1", "dv1", 1, &design(), &run(), &[plate()], events).unwrap()
+        build("r1", "d1", "dv1", 1, &design(), &run(), &[plate()], events, &[]).unwrap()
     }
 
     fn registry() -> ReadoutRegistry {

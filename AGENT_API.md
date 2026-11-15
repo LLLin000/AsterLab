@@ -80,6 +80,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `execution_event.create` | 追加结构化操作、材料使用、数值测量、偏差或观察事件 | create |
 | `readout.submit` / `readout.batch` | 幂等提交单条读数，或表格/孔板批量读数（`cells` 或 CSV），一次事务写入一条 measurement 事件 | create |
 | `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
+| `asset.link` / `asset.unlink` / `asset.list` / `asset.events` | 关联或解除 Run 任务的本地文件引用（可带孔位/时间点/视野坐标），或按 Run 查询链接与事件历史 | link/unlink 是，list/events 否 |
 | `pantry.list` / `label.export` | 只读列出储藏室条目及其效期状态，或导出贴标/扫码插件用的短 ID 清单 | 否 |
 | `pantry.upsert` | 创建或整条覆盖一个储藏室条目 | create/update |
 | `pantry.delete` | 停用并隐藏一个储藏室条目；短标签 ID 保留不复用 | delete |
@@ -142,9 +143,20 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 `workflow.progress` 是只读样本进度查询：输入 `{run_id, step_path?, timepoint?, sample_id?, sample_ids?}`，按实际事件携带的 `(step_path, timepoint)` 分组返回；`timepoint` 显式输出，缺失保持 `null`。不筛选时间点时只返回事件实际出现的分组，不构造 Run 全局样本 × 时间点笛卡尔积。只有同时提供 `step_path` 和具体 `timepoint` 时，`sample_ids[]` 才补入该组的 `not_started` 样本。结果含 `schema_version`、`run_id`、样本 ID 并集、`steps[]` 和 `issues[]`；每组含状态、`complete`、各状态计数、`last_event_at` 与 `samples[]`。样本含当前状态/attempt、`attempt_count`、按 attempt 排列的历史（`event_ids`、`last_event_at`、`deviation`）。样本级身份为 `run_id + step_path + timepoint? + sample_id + attempt`；不同时间点独立去重和 attempt 连续性，重试保留旧 attempt。`complete=true` 只在该 `(step_path,timepoint)` 组所有样本均完成时成立；单个事件的 `step_status = "completed"` 只表示该事件所列样本完成。事件时间取 `recorded_at`，缺失时回退 `occurred_at`。`issues` 报告 `missing_step`、`unknown_step`、`invalid_attempt`、`retry_cycle`，不推断样本状态。
 
-`run.workspace` 只读读取 Run 冻结的 `design_version_id` 和 `protocol_manifest`，返回 `frozen_design`、`scopes`、`steps`、`tasks`、`occurrences`、`materials`、`plates`、`events`；不存在冻结快照时返回错误，不回退当前 Design。旧事件没有 `occurrence_id` 时保留为历史，不自动生成执行实例。
+`run.workspace` 只读读取 Run 冻结的 `design_version_id` 和 `protocol_manifest`，返回 `frozen_design`、`scopes`、`steps`、`tasks`、`occurrences`、`materials`、`plates`、`linked_assets`、`asset_coverage`、`events`；不存在冻结快照时返回错误，不回退当前 Design。旧事件没有 `occurrence_id` 时保留为历史，不自动生成执行实例。`linked_assets[]` 逐条带出 `asset_id`、`task_key`、`sample_id`、`well_id`、`timepoint`、`fov_index`、`coordinate_id`；`asset_coverage[]` 按 `(well_id, timepoint)` 分组给出 `fov_indices[]` 与 `asset_ids[]`，作为孔位 × 时间点缺漏检查的分组依据（Core 不判断“应有几张”）。字段语义与缺省规则见 [docs/contracts/asset-coordinates-v1.md](docs/contracts/asset-coordinates-v1.md)。
 
 `run.revise` 必须提供 `id` 和当前 `expected_revision`，只接受 `title`、`scheduled_date`；日期可传 `null` 清除。状态仍通过 `run.set_status` 修订。设计版本、Protocol 清单、材料清单、轮次和来源关系属于创建时冻结快照，修订接口拒绝这些字段。HTTP API 与 CLI 共用同一补丁校验；网页不得整体替换 Run JSON。
+
+## 资产坐标（`asset.link` 与 `run.workspace`）
+
+`asset.link` 在 `{run_id, task_key, sample_id?}` 之外接受 `well_id`、`timepoint`、`fov_index`：
+
+- `well_id` 形如 `A1`；`fov_index` 从 `1` 开始；`timepoint` 原文保存（如 `t6h`）。给出 `timepoint` 或 `fov_index` 时必须同时给出 `well_id`，否则 `INVALID_INPUT`。
+- 三者都可省略；省略表示“该链接没有记录坐标”，Core 不按任务名、样本或文件名推断孔位。
+- 输出 `record.data.link` 回显 `wellId`、`timepoint`、`fovIndex` 与派生的 `coordinateId`（`A1` / `A1_t6h` / `A1_t6h_fov01`）。坐标不同即不同链接；同一坐标重复关联只刷新原记录并追加 `linked` 事件。
+- 旧记录的链接缺这三个字段：回读为 `null`，不补默认值、不迁移。
+- `run.workspace` 的 `linked_assets[]` 直接复用同一套字段；`asset_coverage[]` 只聚合带 `well_id` 的链接，按 `well_id`、`timepoint` 升序排列，`fov_indices[]` 与 `asset_ids[]` 去重升序。没有 `well_id` 的链接不进入分组，但仍出现在 `linked_assets[]`。
+- MyGo 侧 `runs.AssetLink` 镜像同名字段与 JSON tag；`FOVIndex == 0` 表示未记录。
 
 ## 读数提交（readout.*）
 
