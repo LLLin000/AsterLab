@@ -1,0 +1,146 @@
+# AsterLab 设计系统
+
+本文是 AsterLab UI 的唯一视觉与语义规范。任何 UI 改动开工前必读，验收时必须能引用本文条目。
+
+权威关系：色彩/间距/圆角/字号的**取值**由 `prototypes/mygo-run/internal/theme/theme.go` 的 `Tokens` 定义；本文规定**怎么用**。两者冲突时以 `Tokens` 为准，并修本文。
+
+## 1. 单一参数源
+
+所有视觉参数来自 `theme.GetTokens(c.Theme())`。禁止在调用点写字面值。
+
+| 类别 | 唯一来源 | 禁止写法 | 正确写法 |
+|---|---|---|---|
+| 颜色 | `Tokens`（`Canvas/Surface/Elevated/Border/Text/TextMuted/Accent/Success/Warning/Danger` 及 `*Bg/*Text`） | `ui.Hex("#dcd6c8")`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DangerText` |
+| 字号 | `TextPage/TextSection/TextBody/TextMeta/TextData`，或 `t.Rem(x)`（随主题缩放） | `FontSize(12)`、`FontSize(11)` | `FontSize(float32(tokens.TextMeta))`、`.FontSize(t.Rem(.85))` |
+| 间距 | `Spacing4/8/12/16/24/32/48`，或 `t.Space(n)`（n 为 4 的倍数，`Theme.Spacing=4`） | `Padding(3, 8)`、`Padding(6, 12)`、`Gap(5)` | `Padding(t.Space(2), t.Space(4))`、`Gap(t.Space(1))` |
+| 圆角 | `ControlRadius`（控件）/`PanelRadius`（面板）/`DialogRadius`（对话框），或 `t.Radius` 缩放 | `Radius(3)`、`Radius(5)`、`Radius(7)` | `.Radius(float32(tokens.ControlRadius))` |
+| 控件高度 | `ButtonHeight/InputHeight/RowHeight` | `Height(28)`、`MinHeight(33)` | `.Height(float32(tokens.ButtonHeight))` |
+
+颜色字面值只允许出现在 `internal/theme/theme.go`（定义）与确有科学语义的调色板（如孔板分组色）中；后者也必须有一个具名函数（例如 `plate.GroupColor`），不得散落在渲染代码里。
+
+## 2. 间距体系
+
+- 基础单位 4；只用 4 / 8 / 12 / 16 / 24 / 32 / 48。
+- 语义嵌套：容器内边距 ≥ 子元素间距；同一层嵌套的上下左右取同一档。
+- 相邻同级元素均分剩余空间，不要在个别兄弟上加补偿 padding。
+- 行内文字与控件间隔用 4/8；区块之间用 16/24；页面级分隔用 32/48。
+- 900×600 下先压缩 32/48 到 24/32，不要压缩到 4 以下。
+
+## 3. 圆角
+
+三档，不做第四种：控件 `ControlRadius`(6)、面板 `PanelRadius`(10)、对话框 `DialogRadius`(12)。同类容器全项目一致。嵌套圆角保持内小外大，不要出现内外同值或内大外小。连续圆角在性能允许时优先；性能不允许时在本文记录例外，不在代码里各写各的。
+
+## 4. 组件语义
+
+先选组件，再套样式；不要给错误的组件换皮。来源：`github.com/oneo-me/onevra/source/components`（本地 `~/go/pkg/mod/github.com/oneo-me/onevra/source@*/components/`）、mygo `ui.*` 原语、仓库 `internal/uikit` 与各 `internal/<domain>` 包。
+
+| 需求 | 唯一组件 | Do | Don't |
+|---|---|---|---|
+| 主/次操作 | `components.Button`（Primary/Secondary/Ghost 三档） | 一个表面只有一个 Primary | 用 `ui.ButtonBase` 手搓按钮外观 |
+| 图标操作 | `components.IconButton` + `lucide.*` | 提供 tooltip 文案 | 用文字按钮做图标动作 |
+| 分段切换 | `components.TabsSegmented` | 视图切换（流程/孔板/配液单） | 自己写一排可点 Box |
+| 状态标签 | `components.Badge` | 用 §3 状态词 | 自造彩色圆点标签 |
+| 表格 | `components.Table` / `TableVirtualized` | 记录、参数表 | 用 Column+Row 拼表头 |
+| 键值对 | 标签 `TextMeta` + 值 `TextData/TextBody`，值加 `tnum` | 数值对齐 | 标语式大字号 |
+| 空态 | 一行 `TextMeta` + 一个下一步动作 | 说清下一步 | 插画 + 营销文案 |
+| 错误/警告 | `Badge` + 行内横幅（`*Bg`/`*Text` token） | 原因 + 重试 | 只弹 Toast 就消失 |
+| 对话框 | `components.Dialog`（`DialogRadius`） | 破坏性动作二次确认 | 自建浮层 |
+| 侧栏/导航 | `components.Sidebar` / `components.Tabs` | 沿用既有 shell | 每页新写一套导航 |
+| 进度/预算 | `components.Progress` 或既有 `budgetBar` | 数值来自单一来源并标注来源 | 同一指标两套组件 |
+| 骨架屏 | `components.Skeleton` | 首屏加载 | 长时间显示「加载中…」而无结构 |
+
+规则：同类控件全项目只有一种用法。需要变体时，在既有组件上加参数，不新写第二个。
+
+## 5. 文案
+
+- 先定页面定位，再写字。一个页面只有一个标题。
+- 只保留核心标题、关键键值对与必要的动作标签；说明性文字能删就删。
+- 书面语，禁止营销腔、感叹号、emoji、口语（「搞定」「一键起飞」）。
+- 低频说明折叠进 tooltip / alert / 悬停详情 / 可展开行，不常驻。
+- 状态词只能取 `ux-contract.md` §3 的词表，不自造同义词。
+- 单位与数值：数值右对齐 + `tnum`；单位与数值之间留一个空格。
+
+## 6. 反模式基线（2026-11-16，`b2acf22`）
+
+以下为当前代码里真实存在的违规计数（`prototypes/mygo-run`，排除 `_test.go`）。清理按这张清单另开卡，不要在功能卡里顺手重构。
+
+| 反模式 | 总数 | 集中位置 |
+|---|---|---|
+| `ui.Hex(...)` 颜色字面值 | 30 | `internal/uikit/plate/plate.go` 16（孔板分组色，应具名化）、`internal/asterdoc/view.go` 3、`internal/theme/theme.go` 11（允许，是定义处） |
+| `FontSize(数字)` | 186 | `internal/runui/runui.go` 80、`main.go` 49、`internal/protocol/view.go` 25、`internal/runworkspace/recording.go` 22、`internal/tools/tools.go` 9 |
+| `Padding(数字)` | 100 | `internal/runworkspace` 31、`internal/runui` 23、`main.go` 16、`internal/asterdoc` 10、`internal/resultgrid` 7 |
+| `Radius(数字)` | 59 | `internal/runworkspace` 30、`internal/runui` 19、`internal/resultgrid` 5 |
+| 非 4 倍数的 `Padding` | 3 | `internal/resultgrid/view.go:54,60,81`（`Padding(6)`） |
+| 不在 6/10/12 档的 `Radius` | 19 | `internal/asterdoc/view.go:493` `Radius(3)`、`internal/resultgrid/plate.go:124,417,474`、`internal/runui/runui.go:630,725,730,755`（`Radius(8)`） |
+
+已合规的范式（照它写）：`internal/designer/step_list.go` 的 `budgetBar`/`listToolbar`/`sectionSwitch` 全部用 `t.Space(n)` + `t.Rem(x)` + `components.*`，没有字面值。
+
+## 7. 验收方式
+
+UI 卡的 PR 必须带 `## 设计一致性` 小节，写明：
+
+1. 用到的 token（列出实际引用，例如 `tokens.Spacing16`、`tokens.TextMeta`）；
+2. 复用的既有组件（列名 + 文件）；
+3. 新增组件（若有）：名字 + 为何仓库与 onevra 都没有等价实现；
+4. 若引入本文未列的新做法，先改本文并说明理由。
+
+可机器检查的部分（后续可加进本地门禁）：
+
+```text
+grep -rn "ui\.Hex(" prototypes/mygo-run --include=*.go | grep -v internal/theme/    # 应为 0（或仅具名调色板函数内）
+grep -rn "FontSize([0-9]" prototypes/mygo-run --include=*.go                      # 应为 0
+grep -rnE "Padding\(([0-9]+, )?[0-9]+" prototypes/mygo-run --include=*.go         # 应为 0
+grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                        # 应为 0
+```
+
+## 8. Do / Don't 范例
+
+每条取自本仓库真实代码或真实违规点，可直接对照。
+
+**D1 颜色**
+- Do: `components.Text(c, title).TextColor(tokens.Text)`。
+- Don't: `ui.Hex("#dcd6c8")`（`internal/uikit/plate/plate.go:50` 一带的孔板分组色；应提成 `plate.GroupColor` 具名函数并在内部用 token）。
+
+**D2 字号**
+- Do: `.FontSize(t.Rem(.85))` 或 `.FontSize(float32(tokens.TextMeta))`。
+- Don't: `.FontSize(12)`（`internal/runui/runui.go` 有 80 处；主题字号变化时它们不跟随）。
+
+**D3 间距**
+- Do: `.Padding(t.Space(2), t.Space(4))`。
+- Don't: `.Padding(6, 12)`（`design_page.go:37`、`design_canvas.go:111`）——6 不是 4 的倍数，且绕过了 `t.Space` 的缩放。
+
+**D4 圆角**
+- Do: `.Radius(float32(tokens.ControlRadius))`。
+- Don't: `.Radius(8)`（`internal/runui/runui.go:630,725,730,755`）——不在 6/10/12 三档内，同类控件随后各写各的。
+
+**D5 按钮**
+- Do: `components.Button(c, "创建 Run", components.ButtonPrimary)`，一屏只有一个 Primary。
+- Don't: `ui.ButtonBase(c).Radius(8).Padding(6, 12)` 手搓按钮（`internal/runui/runui.go:629`）。
+
+**D6 分段控件**
+- Do: `components.Tabs(c, &index, components.TabsSegmented, ...)`。
+- Don't: 自己写一排可点 `ui.Box` 冒充分段控件。
+
+**D7 状态标签**
+- Do: `components.Badge` + `ux-contract.md` §3 的词（`草稿`/`未保存`/`校验中`/`未解析`）。
+- Don't: 自造色点 + 新词（如把 `校验中` 写成「检查中」）。
+
+**D8 错误呈现**
+- Do: 行内横幅（`tokens.DangerBg`/`DangerText`）+ 原因 + `重试`。
+- Don't: 只 `c.AddToast(...)` 让原因一闪而过。
+
+**D9 表格与数值**
+- Do: `components.Table`；数值列 `.FontFeatures("tnum")` 右对齐。
+- Don't: 用 `Column`+`Row` 手拼表头，或数值左对齐导致列抖动。
+
+**D10 空态**
+- Do: 一行 `TextMeta` 说明 + 一个明确的下一步动作。
+- Don't: 插画 + 营销文案，或只有「暂无数据」而不给出口。
+
+**D11 文案**
+- Do: 标题「实验设计」、值「9/12 孔」、动作「创建 Run」。
+- Don't: 「一键搞定你的实验！」这类营销腔，或常驻的三段说明文字（应折叠进 tooltip）。
+
+**D12 新增组件**
+- Do: 先在 onevra `components/` 与仓库既有包里找等价实现，复用或加参数。
+- Don't: 每个页面新写一套视觉词汇（P3 直接失败）。
