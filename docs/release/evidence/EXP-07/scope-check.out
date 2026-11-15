@@ -1,0 +1,20 @@
+# REL-04 scope gate, Kandev API source, run locally on the EXP-07 branch.
+# The PR body supplies <!-- kandev-task: ... -->; KANDEV_API_URL selects the card description.
+$ KANDEV_API_URL=http://127.0.0.1:38429 python3 scripts/ci/scope_check.py --pr-body-file pr-body.md --base origin/main --head HEAD
+scope-check: scope source = Kandev API task a5b8eee2-8c5e-4cf8-ae54-fbf25c2968e5
+scope-check: diff source  = git diff --name-status origin/main...HEAD
+  ok       A  docs/release/evidence/EXP-07/README.md  <- docs/release/evidence/EXP-07/
+  ok       A  docs/release/evidence/EXP-07/cargo-test.out  <- docs/release/evidence/EXP-07/
+  ok       A  docs/release/evidence/EXP-07/go-test-all.out  <- docs/release/evidence/EXP-07/
+  ok       A  docs/release/evidence/EXP-07/go-test-modules-runs.out  <- docs/release/evidence/EXP-07/
+  ok       A  docs/release/evidence/EXP-07/native-generator-hash.txt  <- docs/release/evidence/EXP-07/
+  ok       M  prototypes/mygo-run/internal/state/fake.go  <- prototypes/mygo-run/internal/state/fake.go
+  ok       M  prototypes/mygo-run/modules/runs/AGENTS.md  <- prototypes/mygo-run/modules/runs/
+  ok       M  prototypes/mygo-run/modules/runs/runs.go  <- prototypes/mygo-run/modules/runs/
+  ok       M  prototypes/mygo-run/modules/runs/runs_native.go  <- prototypes/mygo-run/modules/runs/
+  ok       A  prototypes/mygo-run/modules/runs/runs_test.go  <- prototypes/mygo-run/modules/runs/
+  ok       M  prototypes/mygo-run/modules/runs/rust/src/lib.rs  <- prototypes/mygo-run/modules/runs/
+  ok       M  prototypes/mygo-run/modules/runs/rust/src/mygo.rs  <- prototypes/mygo-run/modules/runs/
+  ok       M  scripts/ci/native_generator_hashes.json  <- scripts/ci/native_generator_hashes.json
+scope-check: 13 changed path(s), 13 allowed, 0 violation(s)
+exit 0

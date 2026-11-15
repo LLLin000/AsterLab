@@ -171,4 +171,10 @@ func (f *FakeDesignService) WorkflowTree(ctx context.Context, designID string, r
 	}
 	return `{"roots":[],"order":[],"precedes":{},"design":true}`, nil
 }
+func (f *FakeDesignService) DeriveDesignFromRun(ctx context.Context, input runs.DeriveDesignInput) (runs.DerivedDesign, error) {
+	if f.Err != nil {
+		return runs.DerivedDesign{}, MapError(f.Err)
+	}
+	return runs.DerivedDesign{SourceRunID: input.RunID}, nil
+}
 func (f *FakeDesignService) Close() error { return nil }

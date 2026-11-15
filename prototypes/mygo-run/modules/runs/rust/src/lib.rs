@@ -8,17 +8,52 @@ use std::sync::{Arc, Mutex};
 mod cli_impl;
 
 use asterlab_app::AppCore;
+use asterlab_core::assets::{AssetLink as CoreAssetLink, AssetRef};
+use asterlab_core::calculators::{runtime_normalize, RuntimeNormalizeInput as CoreNormalizeInput};
+use asterlab_core::design_commands::{derive_design_from_run, DeriveDesignCommand};
+use asterlab_core::record_projection::{
+    build_record_projection, sign_and_archive, summarize_record, ArchiveSignature, ProjectionView,
+    RecordArchiveState, RecordCommandError, RecordNote, RecordProjectionInput as CoreProjectionInput,
+    RecordStatus,
+};
+use asterlab_core::timer::{TimerMode, TimerRecord as CoreTimerRecord, TimerStatus};
+use rusqlite::OptionalExtension;
 
 pub fn make_run_service() -> Result<Arc<dyn RunService>, Error> {
     let dir = cli_impl::data_dir().map_err(map_cli)?;
     let core = AppCore::open(&dir).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    ensure_module_tables(core.raw_db())?;
     Ok(Arc::new(CoreRunService { core: Mutex::new(Some(core)) }))
 }
 
 pub fn make_design_service() -> Result<Arc<dyn DesignService>, Error> {
     let dir = cli_impl::data_dir().map_err(map_cli)?;
     let db = cli_impl::open_db(&dir).map_err(|e| map_cli(e))?;
+    ensure_module_tables(&db)?;
     Ok(Arc::new(CoreDesignService { db: Mutex::new(Some(db)) }))
+}
+
+/// Creates the two tables this module owns on the shared database. `timer_records`
+/// is the same schema `asterlab-app` creates; `run_archive_state` persists the
+/// terminal record lifecycle, which Core exposes as a pure transition but does
+/// not store. Creating them is idempotent, so either service may open first.
+fn ensure_module_tables(db: &rusqlite::Connection) -> Result<(), Error> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS timer_records(\
+            timer_id TEXT PRIMARY KEY,\
+            run_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,\
+            task_key TEXT NOT NULL,\
+            data_json TEXT NOT NULL,\
+            updated_at TEXT NOT NULL\
+        );\
+        CREATE INDEX IF NOT EXISTS timer_records_run ON timer_records(run_id, task_key);\
+        CREATE TABLE IF NOT EXISTS run_archive_state(\
+            run_id TEXT PRIMARY KEY,\
+            data_json TEXT NOT NULL,\
+            updated_at TEXT NOT NULL\
+        );",
+    )
+    .map_err(|e| Error::Go(format!("INTERNAL: {e}")))
 }
 
 struct CoreRunService { core: Mutex<Option<AppCore>> }
@@ -210,9 +245,232 @@ impl RunService for CoreRunService {
         Ok(value.to_string())
     }
 
+    fn save_timer(&self, _ctx: &Context, timer: TimerRecord) -> Result<TimerRecord, Error> {
+        self.save_timer_impl(timer)
+    }
+
+    fn update_timer(&self, _ctx: &Context, input: TimerActionInput) -> Result<TimerRecord, Error> {
+        self.update_timer_impl(input)
+    }
+
+    fn list_timers(&self, _ctx: &Context, run_id: String) -> Result<Vec<TimerRecord>, Error> {
+        self.list_timers_impl(&run_id)
+    }
+
+    fn list_pantry(&self, _ctx: &Context, query: PantryQuery) -> Result<PantryLedger, Error> {
+        self.list_pantry_impl(&query)
+    }
+
+    fn upsert_pantry(&self, _ctx: &Context, input: PantryUpsert) -> Result<PantryItem, Error> {
+        self.upsert_pantry_impl(input)
+    }
+
+    fn delete_pantry(&self, _ctx: &Context, input: PantryDelete) -> Result<PantryDeleteResult, Error> {
+        self.delete_pantry_impl(input)
+    }
+
+    fn export_pantry_labels(&self, _ctx: &Context, query: PantryQuery) -> Result<PantryLabels, Error> {
+        self.export_pantry_labels_impl(&query)
+    }
+
+    fn record_projection(&self, _ctx: &Context, input: RecordProjectionInput) -> Result<String, Error> {
+        self.record_projection_impl(&input)
+    }
+
+    fn normalize_runtime(&self, _ctx: &Context, input: RuntimeNormalizeInput) -> Result<RuntimeNormalizeOutput, Error> {
+        self.normalize_runtime_impl(&input)
+    }
+
+    fn sign_and_archive_run(&self, _ctx: &Context, input: SignAndArchiveInput) -> Result<ArchiveState, Error> {
+        self.sign_and_archive_run_impl(&input)
+    }
+
     fn close(&self) -> Result<(), Error> {
         if let Ok(mut g) = self.core.lock() { g.take(); }
         Ok(())
+    }
+}
+
+/// The bodies behind the RunService methods. They take no context so the tests
+/// can exercise the bridge without the generated Go-side context.
+impl CoreRunService {
+    fn save_timer_impl(&self, timer: TimerRecord) -> Result<TimerRecord, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let record = timer_to_core(&timer)?;
+        core.save_timer_record(&record).map_err(Error::Go)?;
+        Ok(timer)
+    }
+
+    fn update_timer_impl(&self, input: TimerActionInput) -> Result<TimerRecord, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let mut timer = timer_to_core(&input.timer)?;
+        match input.action.as_str() {
+            "start" => timer.start(&input.now_utc),
+            "pause" => timer.pause(&input.now_utc),
+            "advance" => timer.advance_countdown(&input.now_utc).map(|_| ()),
+            "" => Err("action is required: start, pause or advance".to_owned()),
+            other => Err(format!("unsupported timer action {other}; use start, pause or advance")),
+        }
+        .map_err(|e| Error::Go(format!("INVALID: {e}")))?;
+        core.save_timer_record(&timer).map_err(Error::Go)?;
+        Ok(timer_from_core(&timer))
+    }
+
+    fn list_timers_impl(&self, run_id: &str) -> Result<Vec<TimerRecord>, Error> {
+        let guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let timers = core.load_timer_records(run_id).map_err(Error::Go)?;
+        Ok(timers.iter().map(timer_from_core).collect())
+    }
+
+    fn list_pantry_impl(&self, query: &PantryQuery) -> Result<PantryLedger, Error> {
+        let guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let value = core.pantry_list(pantry_query_json(query)).map_err(Error::Go)?;
+        Ok(PantryLedger {
+            as_of: text_field(&value, "as_of"),
+            near_expiry_days: value["near_expiry_days"].as_u64().unwrap_or_default() as u32,
+            items: value["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(pantry_item_from_value)
+                .collect(),
+        })
+    }
+
+    fn upsert_pantry_impl(&self, input: PantryUpsert) -> Result<PantryItem, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let mut request = serde_json::json!({
+            "name": input.name,
+            "location": input.location,
+            "exhausted": input.exhausted
+        });
+        if !input.id.is_empty() { request["id"] = serde_json::json!(input.id); }
+        if !input.project_id.is_empty() { request["project_id"] = serde_json::json!(input.project_id); }
+        if !input.purchased_on.is_empty() { request["purchased_on"] = serde_json::json!(input.purchased_on); }
+        if !input.opened_on.is_empty() { request["opened_on"] = serde_json::json!(input.opened_on); }
+        if let Some(days) = input.shelf_life_days { request["shelf_life_days"] = serde_json::json!(days); }
+        if let Some(days) = input.opened_shelf_life_days { request["opened_shelf_life_days"] = serde_json::json!(days); }
+        if let Some(revision) = input.expected_revision { request["expected_revision"] = serde_json::json!(revision); }
+        let value = core.pantry_upsert(request).map_err(Error::Go)?;
+        Ok(pantry_item_from_value(&value["item"]))
+    }
+
+    fn delete_pantry_impl(&self, input: PantryDelete) -> Result<PantryDeleteResult, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let mut request = serde_json::json!({"id": input.id});
+        if let Some(revision) = input.expected_revision { request["expected_revision"] = serde_json::json!(revision); }
+        let value = core.pantry_delete(request).map_err(Error::Go)?;
+        Ok(PantryDeleteResult {
+            id: text_field(&value, "pantry_item_id"),
+            label_code: text_field(&value, "label_code"),
+            revision: value["revision"].as_i64().unwrap_or_default(),
+            deleted: value["deleted"].as_bool().unwrap_or(false),
+        })
+    }
+
+    fn export_pantry_labels_impl(&self, query: &PantryQuery) -> Result<PantryLabels, Error> {
+        let guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let value = core.pantry_export_labels(pantry_query_json(query)).map_err(Error::Go)?;
+        Ok(PantryLabels {
+            schema_version: value["schema_version"].as_i64().unwrap_or_default(),
+            generated_at: text_field(&value, "generated_at"),
+            as_of: text_field(&value, "as_of"),
+            near_expiry_days: value["near_expiry_days"].as_u64().unwrap_or_default() as u32,
+            labels: value["labels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|label| PantryLabel {
+                    label_code: text_field(label, "label_code"),
+                    pantry_item_id: text_field(label, "pantry_item_id"),
+                    name: text_field(label, "name"),
+                    location: text_field(label, "location"),
+                    status: text_field(label, "status"),
+                    expires_on: text_field(label, "expires_on"),
+                    days_remaining: label["days_remaining"].as_i64(),
+                    revision: label["revision"].as_i64().unwrap_or_default(),
+                })
+                .collect(),
+        })
+    }
+
+    fn record_projection_impl(&self, input: &RecordProjectionInput) -> Result<String, Error> {
+        let guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let db = core.raw_db();
+        let workspace = cli_impl::run_workspace_typed(db, &input.run_id).map_err(map_cli)?;
+        let timers = core.load_timer_records(&input.run_id).map_err(Error::Go)?;
+        let (links, _) = load_asset_links(db, &input.run_id)?;
+        let projection_input = CoreProjectionInput {
+            view: projection_view(&input.view)?,
+            fov_per_well: if input.fov_per_well == 0 { 1 } else { input.fov_per_well },
+            notes: load_notes(db, &input.run_id)?,
+            archive: load_archive_state(db, &input.run_id)?,
+            now_utc: opt_string(&input.now_utc),
+        };
+        let projection = build_record_projection(&workspace, &links, &timers, &projection_input);
+        serde_json::to_string(&projection).map_err(|e| Error::Go(format!("INTERNAL: {e}")))
+    }
+
+    fn normalize_runtime_impl(&self, input: &RuntimeNormalizeInput) -> Result<RuntimeNormalizeOutput, Error> {
+        let output = runtime_normalize(&CoreNormalizeInput {
+            planned_wells: input.planned_wells,
+            actual_wells: input.actual_wells,
+            volume_per_well_ul: input.volume_per_well_ul,
+            excess_ratio: input.excess_ratio,
+            dead_volume_ul: input.dead_volume_ul,
+            prepared_volume_ul: input.prepared_volume_ul,
+        })
+        .map_err(|e| Error::Go(format!("INVALID: {e}")))?;
+        Ok(RuntimeNormalizeOutput {
+            planned_volume_ul: output.planned_volume_ul,
+            required_volume_ul: output.required_volume_ul,
+            dead_volume_ul: output.dead_volume_ul,
+            additional_volume_ul: output.additional_volume_ul,
+            unused_volume_ul: output.unused_volume_ul,
+        })
+    }
+
+    fn sign_and_archive_run_impl(&self, input: &SignAndArchiveInput) -> Result<ArchiveState, Error> {
+        let guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let db = core.raw_db();
+        let workspace = cli_impl::run_workspace_typed(db, &input.run_id).map_err(map_cli)?;
+        let timers = core.load_timer_records(&input.run_id).map_err(Error::Go)?;
+        let notes = load_notes(db, &input.run_id)?;
+        let (links, assets) = load_asset_links(db, &input.run_id)?;
+        let mut state = load_archive_state(db, &input.run_id)?;
+        if state.status == RecordStatus::Recording {
+            state = summarize_record(&state).map_err(record_error)?;
+        }
+        let projection = build_record_projection(
+            &workspace,
+            &links,
+            &timers,
+            &CoreProjectionInput {
+                view: projection_view(&input.view)?,
+                fov_per_well: if input.fov_per_well == 0 { 1 } else { input.fov_per_well },
+                notes,
+                archive: state.clone(),
+                now_utc: opt_string(&input.now_utc),
+            },
+        );
+        let signature = ArchiveSignature {
+            signed_by: input.signed_by.clone(),
+            signed_at_utc: input.signed_at_utc.clone(),
+            statement: opt_string(&input.statement),
+        };
+        let archived = sign_and_archive(&state, &signature, &projection, &links, &assets)
+            .map_err(record_error)?;
+        save_archive_state(db, &input.run_id, &archived)?;
+        Ok(archive_state_out(&input.run_id, &archived))
     }
 }
 
@@ -243,6 +501,250 @@ fn parameter_text(value: &serde_json::Value) -> String {
         serde_json::Value::Bool(flag) => flag.to_string(),
         serde_json::Value::Null => String::new(),
         other => other.to_string(),
+    }
+}
+
+fn text_field(value: &serde_json::Value, key: &str) -> String {
+    value.get(key).and_then(|field| field.as_str()).unwrap_or_default().to_owned()
+}
+
+fn opt_string(value: &str) -> Option<String> {
+    if value.trim().is_empty() { None } else { Some(value.to_owned()) }
+}
+
+fn projection_view(view: &str) -> Result<ProjectionView, Error> {
+    match view.trim() {
+        "" | "unblinded" => Ok(ProjectionView::Unblinded),
+        "blind" => Ok(ProjectionView::Blind),
+        other => Err(Error::Go(format!(
+            "INVALID: unknown projection view {other}; use blind or unblinded"
+        ))),
+    }
+}
+
+fn timer_mode(text: &str) -> Result<TimerMode, Error> {
+    serde_json::from_value(serde_json::json!(text))
+        .map_err(|_| Error::Go(format!("INVALID: unknown timer mode {text}")))
+}
+
+fn timer_status(text: &str) -> Result<TimerStatus, Error> {
+    serde_json::from_value(serde_json::json!(text))
+        .map_err(|_| Error::Go(format!("INVALID: unknown timer status {text}")))
+}
+
+fn timer_to_core(timer: &TimerRecord) -> Result<CoreTimerRecord, Error> {
+    Ok(CoreTimerRecord {
+        timer_id: timer.timer_id.clone(),
+        run_id: timer.run_id.clone(),
+        task_key: timer.task_key.clone(),
+        phase_index: timer.phase_index,
+        mode: timer_mode(&timer.mode)?,
+        planned_s: timer.planned_s,
+        started_at_utc: timer.started_at_utc.clone(),
+        accumulated_s: timer.accumulated_s,
+        status: timer_status(&timer.status)?,
+        round_index: timer.round_index,
+        round_count: timer.round_count,
+        anchor_event_id: timer.anchor_event_id.clone(),
+        anchor_task_key: timer.anchor_task_key.clone(),
+    })
+}
+
+fn timer_from_core(timer: &CoreTimerRecord) -> TimerRecord {
+    let mode = serde_json::to_value(timer.mode).ok();
+    let status = serde_json::to_value(timer.status).ok();
+    TimerRecord {
+        timer_id: timer.timer_id.clone(),
+        run_id: timer.run_id.clone(),
+        task_key: timer.task_key.clone(),
+        phase_index: timer.phase_index,
+        mode: mode.and_then(|value| value.as_str().map(str::to_owned)).unwrap_or_default(),
+        planned_s: timer.planned_s,
+        started_at_utc: timer.started_at_utc.clone(),
+        accumulated_s: timer.accumulated_s,
+        status: status.and_then(|value| value.as_str().map(str::to_owned)).unwrap_or_default(),
+        round_index: timer.round_index,
+        round_count: timer.round_count,
+        anchor_event_id: timer.anchor_event_id.clone(),
+        anchor_task_key: timer.anchor_task_key.clone(),
+    }
+}
+
+fn pantry_query_json(query: &PantryQuery) -> serde_json::Value {
+    let mut value = serde_json::json!({});
+    if !query.project_id.is_empty() { value["project_id"] = serde_json::json!(query.project_id); }
+    if !query.as_of.is_empty() { value["as_of"] = serde_json::json!(query.as_of); }
+    if let Some(days) = query.near_expiry_days { value["near_expiry_days"] = serde_json::json!(days); }
+    if let Some(flag) = query.include_exhausted { value["include_exhausted"] = serde_json::json!(flag); }
+    value
+}
+
+fn pantry_item_from_value(value: &serde_json::Value) -> PantryItem {
+    PantryItem {
+        id: text_field(value, "id"),
+        label_code: text_field(value, "label_code"),
+        project_id: text_field(value, "project_id"),
+        name: text_field(value, "name"),
+        location: text_field(value, "location"),
+        purchased_on: text_field(value, "purchased_on"),
+        opened_on: text_field(value, "opened_on"),
+        shelf_life_days: value["shelf_life_days"].as_u64().map(|days| days as u32),
+        opened_shelf_life_days: value["opened_shelf_life_days"].as_u64().map(|days| days as u32),
+        exhausted: value["exhausted"].as_bool().unwrap_or(false),
+        revision: value["revision"].as_i64().unwrap_or_default(),
+        status: text_field(value, "status"),
+        expires_on: text_field(value, "expires_on"),
+        days_remaining: value["days_remaining"].as_i64(),
+        expiry_basis: text_field(value, "expiry_basis"),
+        created_at: text_field(value, "created_at"),
+        updated_at: text_field(value, "updated_at"),
+    }
+}
+
+fn record_error(error: RecordCommandError) -> Error {
+    let prefix = match error.code.as_str() {
+        "invalid_transition" | "already_archived" | "asset_checksum_missing" => "CONFLICT",
+        "missing_signer" | "invalid_timestamp" | "unsupported_manifest" | "invalid_checksum" => "INVALID",
+        _ => "INTERNAL",
+    };
+    Error::Go(format!("{prefix}: {}", error.message))
+}
+
+/// Prose notes of a Run: `note` records plus the notebook-stage observations
+/// this module's SaveNotebook writes. Both are prose, never facts; a note's
+/// markdown citations are resolved by the projection, not here.
+fn load_notes(db: &rusqlite::Connection, run_id: &str) -> Result<Vec<RecordNote>, Error> {
+    let mut statement = db
+        .prepare(
+            "SELECT id,kind,data_json,updated_at FROM records \
+             WHERE parent_id=?1 AND (kind='note' OR kind='execution_event') \
+             ORDER BY created_at ASC, rowid ASC",
+        )
+        .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    let rows = statement
+        .query_map([run_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    let mut notes = Vec::new();
+    for row in rows.flatten() {
+        let (id, kind, raw, updated_at) = row;
+        let data: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+        if kind == "execution_event" && data["stage"].as_str() != Some("notebook") {
+            continue;
+        }
+        let title = if kind == "note" {
+            data.get("title").and_then(|value| value.as_str()).map(str::to_owned)
+        } else {
+            None
+        };
+        notes.push(RecordNote {
+            note_id: id,
+            title,
+            markdown: text_field(&data, "content"),
+            updated_at_utc: updated_at,
+        });
+    }
+    Ok(notes)
+}
+
+/// Stored asset links, in the two shapes Core needs: the Run association and
+/// the observed file evidence used for the archive checksums.
+fn load_asset_links(
+    db: &rusqlite::Connection,
+    run_id: &str,
+) -> Result<(Vec<CoreAssetLink>, Vec<AssetRef>), Error> {
+    let value = cli_impl::list_asset_links(db, run_id).map_err(map_cli)?;
+    let mut links = Vec::new();
+    let mut assets = Vec::new();
+    for item in value.as_array().into_iter().flatten() {
+        let asset: AssetRef = serde_json::from_value(item.clone())
+            .map_err(|e| Error::Go(format!("INTERNAL: invalid asset link: {e}")))?;
+        let link = &item["link"];
+        links.push(CoreAssetLink {
+            asset_id: asset.id.clone(),
+            run_id: run_id.to_owned(),
+            task_key: text_field(link, "taskKey"),
+            sample_id: opt_string(&text_field(link, "sampleId")),
+            well_id: opt_string(&text_field(link, "wellId")),
+            timepoint: opt_string(&text_field(link, "timepoint")),
+            fov_index: link["fovIndex"].as_u64().map(|index| index as u32),
+        });
+        assets.push(asset);
+    }
+    Ok((links, assets))
+}
+
+fn load_timers(db: &rusqlite::Connection, run_id: &str) -> Result<Vec<CoreTimerRecord>, Error> {
+    let mut statement = db
+        .prepare("SELECT data_json FROM timer_records WHERE run_id=?1 ORDER BY task_key,timer_id")
+        .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    let rows = statement
+        .query_map([run_id], |row| row.get::<_, String>(0))
+        .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    let mut timers = Vec::new();
+    for raw in rows.flatten() {
+        timers.push(serde_json::from_str(&raw).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?);
+    }
+    Ok(timers)
+}
+
+fn load_archive_state(db: &rusqlite::Connection, run_id: &str) -> Result<RecordArchiveState, Error> {
+    let raw: Option<String> = db
+        .query_row(
+            "SELECT data_json FROM run_archive_state WHERE run_id=?1",
+            [run_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    match raw {
+        Some(raw) => serde_json::from_str(&raw).map_err(|e| Error::Go(format!("INTERNAL: {e}"))),
+        None => Ok(RecordArchiveState::recording()),
+    }
+}
+
+fn save_archive_state(
+    db: &rusqlite::Connection,
+    run_id: &str,
+    state: &RecordArchiveState,
+) -> Result<(), Error> {
+    let payload = serde_json::to_string(state).map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    db.execute(
+        "INSERT INTO run_archive_state(run_id,data_json,updated_at) VALUES(?1,?2,datetime('now')) \
+         ON CONFLICT(run_id) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at",
+        rusqlite::params![run_id, payload],
+    )
+    .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    Ok(())
+}
+
+fn archive_state_out(run_id: &str, state: &RecordArchiveState) -> ArchiveState {
+    let (signed_by, signed_at_utc, statement) = match &state.signature {
+        Some(signature) => (
+            signature.signed_by.clone(),
+            signature.signed_at_utc.clone(),
+            signature.statement.clone().unwrap_or_default(),
+        ),
+        None => (String::new(), String::new(), String::new()),
+    };
+    ArchiveState {
+        run_id: run_id.to_owned(),
+        status: state.status.as_str().to_owned(),
+        signed_by,
+        signed_at_utc,
+        statement,
+        manifest_json: state
+            .manifest
+            .as_ref()
+            .and_then(|manifest| serde_json::to_string(manifest).ok())
+            .unwrap_or_default(),
+        notes_locked: state.notes_locked(),
     }
 }
 
@@ -520,9 +1022,42 @@ impl DesignService for CoreDesignService {
         Ok(value.to_string())
     }
 
+    fn derive_design_from_run(&self, _ctx: &Context, input: DeriveDesignInput) -> Result<DerivedDesign, Error> {
+        self.derive_design_from_run_impl(&input)
+    }
+
     fn close(&self) -> Result<(), Error> {
         if let Ok(mut g) = self.db.lock() { g.take(); }
         Ok(())
+    }
+}
+
+/// The bodies behind the DesignService methods; see [`CoreRunService`].
+impl CoreDesignService {
+    fn derive_design_from_run_impl(&self, input: &DeriveDesignInput) -> Result<DerivedDesign, Error> {
+        let guard = self.db.lock().map_err(|_| Error::Go("INTERNAL: db lock poisoned".into()))?;
+        let db = guard.as_ref().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let workspace = cli_impl::run_workspace_typed(db, &input.run_id).map_err(map_cli)?;
+        let timers = load_timers(db, &input.run_id)?;
+        let command = DeriveDesignCommand {
+            run_id: input.run_id.clone(),
+            title: opt_string(&input.title),
+            objective: opt_string(&input.objective),
+            note: opt_string(&input.note),
+        };
+        let derived = derive_design_from_run(&workspace, &timers, &command)
+            .map_err(|e| Error::Go(format!("INVALID: {}", e.message)))?;
+        let design_json = serde_json::to_string(&derived.to_design_json())
+            .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        Ok(DerivedDesign {
+            design_id: derived.design_id,
+            source_design_version_id: derived.source_design_version_id,
+            source_design_revision: derived.source_design_revision,
+            expected_revision: derived.expected_revision,
+            source_run_id: derived.source_run_id,
+            design_json,
+            note: derived.note.unwrap_or_default(),
+        })
     }
 }
 
@@ -910,4 +1445,379 @@ fn snapshot(v: serde_json::Value) -> RunSnapshot {
         s.title = v["title"].as_str().unwrap_or("").into();
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+
+    /// One data directory for the whole binary: LABWORKBENCH_DATA_DIR is read
+    /// when a service opens, so tests must not race on it. Every test seeds its
+    /// own ids, so they can share the database.
+    fn data_dir() -> PathBuf {
+        static DIR: OnceLock<PathBuf> = OnceLock::new();
+        DIR.get_or_init(|| {
+            let dir = std::env::temp_dir()
+                .join(format!("asterlab-runs-module-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).expect("create data dir");
+            std::env::set_var("LABWORKBENCH_DATA_DIR", &dir);
+            dir
+        })
+        .clone()
+    }
+
+    struct Seeded {
+        design_id: String,
+        design_version_id: String,
+        run_id: String,
+        note_id: String,
+    }
+
+    /// Writes the minimum records `run_workspace_typed` needs: a project, a
+    /// design, one immutable design version and a frozen Run. Optional note and
+    /// asset link rows make the projection and archive non-empty.
+    fn seed_run(with_note: bool, with_asset: bool) -> Seeded {
+        let project_id = format!("proj-{}", uuid::Uuid::new_v4());
+        let design_id = format!("design-{}", uuid::Uuid::new_v4());
+        let design_version_id = format!("dv-{}", uuid::Uuid::new_v4());
+        let run_id = format!("run-{}", uuid::Uuid::new_v4());
+        let note_id = format!("note-{}", uuid::Uuid::new_v4());
+        let db = cli_impl::open_db(&data_dir()).expect("open seeded db");
+        ensure_module_tables(&db).expect("module tables");
+        let at = "2026-11-15T09:00:00Z";
+        let insert = |id: &str, kind: &str, project: Option<&str>, parent: Option<&str>, data: &serde_json::Value| {
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) \
+                 VALUES(?1,?2,?3,?4,1,?5,?6,?6)",
+                rusqlite::params![id, kind, project, parent, data.to_string(), at],
+            )
+            .expect("insert record");
+        };
+        insert(&project_id, "project", None, None, &serde_json::json!({"title": "Module tests"}));
+        insert(&design_id, "design", Some(&project_id), None, &serde_json::json!({"title": "Design"}));
+        insert(
+            &design_version_id,
+            "design_version",
+            Some(&project_id),
+            Some(&design_id),
+            &serde_json::json!({
+                "design_revision": 1,
+                "snapshot": {"title": "Derived design", "objective": "compare groups"}
+            }),
+        );
+        insert(
+            &run_id,
+            "run",
+            Some(&project_id),
+            Some(&design_id),
+            &serde_json::json!({
+                "design_version_id": design_version_id,
+                "title": "Frozen run",
+                "status": "in_progress",
+                "protocol_manifest": [],
+                "material_manifest": []
+            }),
+        );
+        if with_note {
+            insert(
+                &note_id,
+                "note",
+                Some(&project_id),
+                Some(&run_id),
+                &serde_json::json!({"content": "Observed confluency at 80%."}),
+            );
+        }
+        if with_asset {
+            insert(
+                &format!("asset-link-{}", uuid::Uuid::new_v4()),
+                "asset_link",
+                Some(&project_id),
+                Some(&run_id),
+                &serde_json::json!({
+                    "id": format!("asset-{}", uuid::Uuid::new_v4()),
+                    "rootId": "project-data",
+                    "relativePath": "huvec/d1/image_01.tif",
+                    "mediaType": "image",
+                    "size": 12,
+                    "modTime": "2026-01-01T00:00:00Z",
+                    "sha256": "a".repeat(64),
+                    "availability": "available",
+                    "link": {
+                        "runId": run_id,
+                        "taskKey": "task-1",
+                        "sampleId": null,
+                        "wellId": "A1",
+                        "timepoint": null,
+                        "fovIndex": null,
+                        "coordinateId": "A1"
+                    },
+                    "linkedAt": "2026-01-01T00:00:00Z",
+                    "actorId": "tester"
+                }),
+            );
+        }
+        Seeded { design_id, design_version_id, run_id, note_id }
+    }
+
+    fn service() -> CoreRunService {
+        let core = AppCore::open(&data_dir()).expect("open core");
+        ensure_module_tables(core.raw_db()).expect("module tables");
+        CoreRunService { core: Mutex::new(Some(core)) }
+    }
+
+    fn design_service() -> CoreDesignService {
+        let db = cli_impl::open_db(&data_dir()).expect("open design db");
+        ensure_module_tables(&db).expect("module tables");
+        CoreDesignService { db: Mutex::new(Some(db)) }
+    }
+
+    fn projection_json(run_id: &str) -> serde_json::Value {
+        let raw = service()
+            .record_projection_impl(&RecordProjectionInput {
+                run_id: run_id.to_owned(),
+                view: String::new(),
+                fov_per_well: 1,
+                now_utc: String::new(),
+            })
+            .expect("record projection");
+        serde_json::from_str(&raw).expect("projection JSON")
+    }
+
+    #[test]
+    fn runtime_normalize_bridges_the_live_mix() {
+        let output = service()
+            .normalize_runtime_impl(&RuntimeNormalizeInput {
+                planned_wells: 9,
+                actual_wells: 10,
+                volume_per_well_ul: 200.0,
+                excess_ratio: 0.1,
+                dead_volume_ul: 50.0,
+                prepared_volume_ul: 2030.0,
+            })
+            .expect("normalize");
+        assert!((output.planned_volume_ul - 2030.0).abs() < 1e-9);
+        assert!((output.required_volume_ul - 2250.0).abs() < 1e-9);
+        assert!((output.additional_volume_ul - 220.0).abs() < 1e-9);
+        assert!(service()
+            .normalize_runtime_impl(&RuntimeNormalizeInput {
+                planned_wells: 9,
+                actual_wells: 9,
+                volume_per_well_ul: f64::NAN,
+                ..RuntimeNormalizeInput::default()
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn pantry_round_trip_keeps_label_codes_stable() {
+        let svc = service();
+        let item = svc
+            .upsert_pantry_impl(PantryUpsert {
+                name: "Trypsin-EDTA".into(),
+                location: "fridge-2".into(),
+                purchased_on: "2026-01-01".into(),
+                opened_on: "2026-06-01".into(),
+                shelf_life_days: Some(365),
+                ..PantryUpsert::default()
+            })
+            .expect("upsert pantry");
+        assert!(item.label_code.starts_with("PN-"), "label code {}", item.label_code);
+        assert_eq!(item.revision, 1);
+
+        let ledger = svc
+            .list_pantry_impl(&PantryQuery {
+                as_of: "2026-06-25".into(),
+                ..PantryQuery::default()
+            })
+            .expect("list pantry");
+        assert_eq!(ledger.as_of, "2026-06-25");
+        let listed = ledger.items.iter().find(|row| row.id == item.id).expect("item listed");
+        assert_eq!(listed.status, "opened");
+        assert_eq!(listed.expires_on, "2027-01-01");
+
+        let labels = svc
+            .export_pantry_labels_impl(&PantryQuery {
+                as_of: "2026-06-25".into(),
+                ..PantryQuery::default()
+            })
+            .expect("export labels");
+        assert_eq!(labels.schema_version, 1);
+        assert!(labels.labels.iter().any(|label| label.pantry_item_id == item.id));
+
+        let deleted = svc
+            .delete_pantry_impl(PantryDelete {
+                id: item.id.clone(),
+                expected_revision: Some(item.revision),
+            })
+            .expect("delete pantry");
+        assert!(deleted.deleted);
+        assert_eq!(deleted.revision, 2);
+        assert!(svc
+            .upsert_pantry_impl(PantryUpsert {
+                id: item.id,
+                name: "Trypsin-EDTA".into(),
+                ..PantryUpsert::default()
+            })
+            .is_err(), "a retired item must not be revived");
+    }
+
+    #[test]
+    fn timer_lifecycle_rejects_unknown_actions_and_records_elapsed_time() {
+        let seeded = seed_run(false, false);
+        let svc = service();
+        let timer = svc
+            .save_timer_impl(TimerRecord {
+                timer_id: "timer-1".into(),
+                run_id: seeded.run_id.clone(),
+                task_key: "readout".into(),
+                mode: "countdown".into(),
+                status: "ready".into(),
+                planned_s: Some(600),
+                ..TimerRecord::default()
+            })
+            .expect("save timer");
+        assert_eq!(timer.status, "ready");
+
+        let started = svc
+            .update_timer_impl(TimerActionInput {
+                timer: timer.clone(),
+                action: "start".into(),
+                now_utc: "2026-11-15T09:00:00Z".into(),
+            })
+            .expect("start timer");
+        assert_eq!(started.status, "running");
+        assert_eq!(started.started_at_utc.as_deref(), Some("2026-11-15T09:00:00Z"));
+
+        let paused = svc
+            .update_timer_impl(TimerActionInput {
+                timer: started,
+                action: "pause".into(),
+                now_utc: "2026-11-15T09:10:00Z".into(),
+            })
+            .expect("pause timer");
+        assert_eq!(paused.status, "paused");
+        assert_eq!(paused.accumulated_s, 600);
+
+        let listed = svc.list_timers_impl(&seeded.run_id).expect("list timers");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].accumulated_s, 600);
+
+        assert!(svc
+            .update_timer_impl(TimerActionInput {
+                timer: paused,
+                action: "warp".into(),
+                now_utc: "2026-11-15T09:10:00Z".into(),
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn record_projection_exposes_notes_and_the_recording_state() {
+        let seeded = seed_run(true, true);
+        let projection = projection_json(&seeded.run_id);
+        assert_eq!(projection["run_id"], seeded.run_id);
+        assert_eq!(projection["schema_version"], 1);
+        assert_eq!(projection["archive"]["status"], "recording");
+        assert_eq!(projection["notes_locked"], false);
+        let notes = projection["notes"].as_array().expect("notes array");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0]["note_id"], seeded.note_id);
+        assert_eq!(notes[0]["markdown"], "Observed confluency at 80%.");
+        assert_eq!(projection["assets"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn sign_and_archive_is_terminal_and_fingerprints_every_member() {
+        let seeded = seed_run(true, true);
+        let svc = service();
+        let archived = svc
+            .sign_and_archive_run_impl(&SignAndArchiveInput {
+                run_id: seeded.run_id.clone(),
+                view: String::new(),
+                fov_per_well: 1,
+                now_utc: String::new(),
+                signed_by: "operator".into(),
+                signed_at_utc: "2026-11-15T10:00:00Z".into(),
+                statement: "Run complete".into(),
+            })
+            .expect("sign and archive");
+        assert_eq!(archived.status, "archived");
+        assert_eq!(archived.signed_by, "operator");
+        assert!(archived.notes_locked);
+        let manifest: serde_json::Value =
+            serde_json::from_str(&archived.manifest_json).expect("manifest JSON");
+        assert_eq!(manifest["run_id"], seeded.run_id);
+        assert_eq!(manifest["design_version_id"], seeded.design_version_id);
+        let paths: Vec<&str> = manifest["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .filter_map(|entry| entry["logical_path"].as_str())
+            .collect();
+        assert!(paths.contains(&"projection.json"));
+        assert!(paths.contains(&"project-data/huvec/d1/image_01.tif"));
+        assert!(paths.contains(&format!("notes/{}.md", seeded.note_id).as_str()));
+
+        let projection = projection_json(&seeded.run_id);
+        assert_eq!(projection["archive"]["status"], "archived");
+        assert_eq!(projection["notes_locked"], true);
+
+        assert!(svc
+            .sign_and_archive_run_impl(&SignAndArchiveInput {
+                run_id: seeded.run_id,
+                signed_by: "operator".into(),
+                signed_at_utc: "2026-11-15T10:05:00Z".into(),
+                ..SignAndArchiveInput::default()
+            })
+            .is_err(), "an archived Run is terminal");
+    }
+
+    #[test]
+    fn derive_design_carries_measured_drift_without_writing() {
+        let seeded = seed_run(false, false);
+        let run_service = service();
+        run_service
+            .save_timer_impl(TimerRecord {
+                timer_id: "timer-derive".into(),
+                run_id: seeded.run_id.clone(),
+                task_key: "readout".into(),
+                mode: "countdown".into(),
+                status: "paused".into(),
+                planned_s: Some(300),
+                accumulated_s: 600,
+                ..TimerRecord::default()
+            })
+            .expect("save timer");
+
+        let design_service = design_service();
+        let derived = design_service
+            .derive_design_from_run_impl(&DeriveDesignInput {
+                run_id: seeded.run_id.clone(),
+                title: String::new(),
+                objective: String::new(),
+                note: "measured overrun".into(),
+            })
+            .expect("derive design");
+        assert_eq!(derived.design_id, seeded.design_id);
+        assert_eq!(derived.source_design_version_id, seeded.design_version_id);
+        assert_eq!(derived.source_run_id, seeded.run_id);
+        assert_eq!(derived.expected_revision, 1);
+        assert_eq!(derived.note, "measured overrun");
+        let design: serde_json::Value = serde_json::from_str(&derived.design_json).expect("design JSON");
+        assert_eq!(design["title"], "Derived design");
+        assert_eq!(design["derived_from"]["run_id"], seeded.run_id);
+        assert_eq!(design["derived_from"]["duration_updates"][0]["actual_s"], 600);
+        // Pure derivation: the frozen Run and Design stay untouched.
+        let db = cli_impl::open_db(&data_dir()).expect("open db");
+        let revision: i64 = db
+            .query_row(
+                "SELECT revision FROM records WHERE id=?1",
+                [&seeded.run_id],
+                |row| row.get(0),
+            )
+            .expect("run revision");
+        assert_eq!(revision, 1);
+    }
 }
