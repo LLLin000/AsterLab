@@ -127,6 +127,22 @@ type DesignService interface {
 	Close() error
 }
 
+// TimeBudgetService projects declared step times with Core's single budget
+// algorithm.
+//
+// It is its own service because the projection owns no state: it reads no
+// database, keeps no clock and writes nothing, so no Design or Run service has
+// to be open to ask for a budget. The object is released when Go drops it, so
+// it has no Close.
+//
+//mygo:native
+type TimeBudgetService interface {
+	// ProjectTimeBudget turns OperationSpec v2 documents into Core's budget:
+	// repeat expands one occurrence, schedule spreads the occurrences across
+	// parallel windows, and a step without timing adds no duration.
+	ProjectTimeBudget(ctx context.Context, input ProjectTimeBudgetInput) (TimeBudget, error)
+}
+
 type RunSnapshot struct {
 	RunID          string        `json:"runId"`
 	DesignID       string        `json:"designId"`
@@ -380,6 +396,34 @@ type ProtocolBlockPreview struct {
 	BlockVersionID string              `json:"blockVersionId"`
 	Ready          bool                `json:"ready"`
 	Steps          []ProtocolBlockStep `json:"steps"`
+}
+
+// ProjectTimeBudgetInput carries OperationSpec v2 documents in protocol order.
+// SpecsJSON is the exact JSON array Core's contract accepts
+// (docs/contracts/operation-spec-v2.md); "[]" means no steps, and a malformed
+// array is an INVALID error rather than an empty budget.
+type ProjectTimeBudgetInput struct {
+	SpecsJSON string `json:"specs_json"`
+}
+
+// TimeBudget is Core's unique time projection. Wait and timed-endpoint
+// durations count towards the span, not towards hands-on time; the field names
+// are Core's, so a caller never renames or re-sums them.
+type TimeBudget struct {
+	TotalSpanS      float64            `json:"total_span_s"`
+	HandsOnS        float64            `json:"hands_on_s"`
+	ParallelWindows []TimeBudgetWindow `json:"parallel_windows"`
+}
+
+// TimeBudgetWindow is one wait or timed-endpoint occurrence. StepIndex is the
+// index into the supplied spec array, StartS/EndS are offsets into the span,
+// and TimeAnchorID is empty when the spec declared no anchor.
+type TimeBudgetWindow struct {
+	StepIndex    uint32  `json:"step_index"`
+	StartS       float64 `json:"start_s"`
+	EndS         float64 `json:"end_s"`
+	DurationS    float64 `json:"duration_s"`
+	TimeAnchorID string  `json:"time_anchor_id,omitempty"`
 }
 
 type RunSummary struct {

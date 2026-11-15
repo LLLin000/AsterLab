@@ -11,6 +11,8 @@ use asterlab_app::AppCore;
 use asterlab_core::assets::{AssetLink as CoreAssetLink, AssetRef};
 use asterlab_core::calculators::{runtime_normalize, RuntimeNormalizeInput as CoreNormalizeInput};
 use asterlab_core::design_commands::{derive_design_from_run, DeriveDesignCommand};
+use asterlab_core::operation_spec::OperationSpec;
+use asterlab_core::protocol_preview::project_time_budget as core_time_budget;
 use asterlab_core::record_projection::{
     build_record_projection, sign_and_archive, summarize_record, ArchiveSignature, ProjectionView,
     RecordArchiveState, RecordCommandError, RecordNote, RecordProjectionInput as CoreProjectionInput,
@@ -31,6 +33,20 @@ pub fn make_design_service() -> Result<Arc<dyn DesignService>, Error> {
     let db = cli_impl::open_db(&dir).map_err(|e| map_cli(e))?;
     ensure_module_tables(&db)?;
     Ok(Arc::new(CoreDesignService { db: Mutex::new(Some(db)) }))
+}
+
+/// The budget projection is Core's pure function: no data directory is opened,
+/// nothing is locked and nothing is stored.
+pub fn make_time_budget_service() -> Result<Arc<dyn TimeBudgetService>, Error> {
+    Ok(Arc::new(CoreTimeBudgetService))
+}
+
+struct CoreTimeBudgetService;
+
+impl TimeBudgetService for CoreTimeBudgetService {
+    fn project_time_budget(&self, _ctx: &Context, input: ProjectTimeBudgetInput) -> Result<TimeBudget, Error> {
+        project_time_budget_json(&input.specs_json)
+    }
 }
 
 /// Creates the two tables this module owns on the shared database. `timer_records`
@@ -1097,6 +1113,30 @@ fn protocol_version_content(view: &serde_json::Value) -> Result<ProtocolVersionC
     })
 }
 
+/// Projects Core's single time budget from the exact OperationSpec JSON array.
+/// No database is read and no duration is summed here: Core owns the arithmetic,
+/// so the bridge cannot drift from `project_time_budget`.
+fn project_time_budget_json(specs_json: &str) -> Result<TimeBudget, Error> {
+    let specs: Vec<OperationSpec> = serde_json::from_str(specs_json)
+        .map_err(|e| Error::Go(format!("INVALID: specs_json: {e}")))?;
+    let budget = core_time_budget(&specs).map_err(|e| Error::Go(format!("INVALID: {e}")))?;
+    Ok(TimeBudget {
+        total_span_s: budget.total_span_s,
+        hands_on_s: budget.hands_on_s,
+        parallel_windows: budget
+            .parallel_windows
+            .iter()
+            .map(|window| TimeBudgetWindow {
+                step_index: window.step_index as u32,
+                start_s: window.start_s,
+                end_s: window.end_s,
+                duration_s: window.duration_s,
+                time_anchor_id: window.time_anchor_id.clone().unwrap_or_default(),
+            })
+            .collect(),
+    })
+}
+
 fn asterdoc_snapshot(v: serde_json::Value) -> AsterDocSnapshot {
     AsterDocSnapshot {
         design_id: v["design_id"].as_str().unwrap_or("").into(),
@@ -1822,5 +1862,127 @@ mod tests {
             )
             .expect("run revision");
         assert_eq!(revision, 1);
+    }
+
+    fn time_budget_of(specs: serde_json::Value) -> TimeBudget {
+        project_time_budget_json(&specs.to_string()).expect("time budget")
+    }
+
+    /// One hands-on step is both span and hands-on time; nothing is a window.
+    #[test]
+    fn time_budget_single_step_is_hands_on() {
+        let budget = time_budget_of(serde_json::json!([
+            {
+                "schema_version": 2,
+                "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" },
+                "timing": { "kind": "hands_on", "duration": { "value": 5.0, "unit": "min" } }
+            }
+        ]));
+        assert_eq!(budget.total_span_s, 300.0);
+        assert_eq!(budget.hands_on_s, 300.0);
+        assert!(budget.parallel_windows.is_empty());
+    }
+
+    /// The card's case: `(80°C 5m -> 冰 10m) × 3` is 45 minutes of span with 15
+    /// hands-on. Repeat multiplies one occurrence, so the waits stay one window.
+    #[test]
+    fn time_budget_repeat_count_expands_each_occurrence() {
+        let budget = time_budget_of(serde_json::json!([
+            {
+                "schema_version": 2,
+                "operation": { "kind": "incubate",
+                    "temperature": { "value": 80.0, "unit": "C" },
+                    "duration": { "value": 5.0, "unit": "min" } },
+                "timing": { "kind": "hands_on", "duration": { "value": 5.0, "unit": "min" } },
+                "repeat": { "count": 3 }
+            },
+            {
+                "schema_version": 2,
+                "operation": { "kind": "incubate",
+                    "temperature": { "value": -20.0, "unit": "C" },
+                    "duration": { "value": 10.0, "unit": "min" } },
+                "timing": { "kind": "wait", "duration": { "value": 10.0, "unit": "min" } },
+                "repeat": { "count": 3 }
+            }
+        ]));
+        assert_eq!(budget.total_span_s, 2_700.0);
+        assert_eq!(budget.hands_on_s, 900.0);
+        assert_eq!(
+            budget.parallel_windows,
+            vec![TimeBudgetWindow {
+                step_index: 1,
+                start_s: 900.0,
+                end_s: 2_700.0,
+                duration_s: 1_800.0,
+                time_anchor_id: String::new(),
+            }]
+        );
+    }
+
+    /// A `wait >= 2h` occurrence is a window with its anchor, not hands-on time.
+    #[test]
+    fn time_budget_wait_creates_a_parallel_window() {
+        let budget = time_budget_of(serde_json::json!([
+            {
+                "schema_version": 2,
+                "operation": { "kind": "measure", "endpoint_id": "capture", "unit": "count" },
+                "timing": { "kind": "hands_on", "duration": { "value": 30.0, "unit": "s" } }
+            },
+            {
+                "schema_version": 2,
+                "operation": { "kind": "incubate",
+                    "temperature": { "value": 4.0, "unit": "C" },
+                    "duration": { "value": 2.0, "unit": "h" } },
+                "timing": { "kind": "wait", "duration": { "value": 2.0, "unit": "h" } },
+                "time_anchor_id": "cold_start"
+            }
+        ]));
+        assert_eq!(budget.total_span_s, 7_230.0);
+        assert_eq!(budget.hands_on_s, 30.0);
+        assert_eq!(
+            budget.parallel_windows,
+            vec![TimeBudgetWindow {
+                step_index: 1,
+                start_s: 30.0,
+                end_s: 7_230.0,
+                duration_s: 7_200.0,
+                time_anchor_id: "cold_start".into(),
+            }]
+        );
+    }
+
+    /// A step without `timing` adds no duration: the projection never invents
+    /// one, and the remaining hands-on step still measures.
+    #[test]
+    fn time_budget_missing_timing_adds_no_duration() {
+        let budget = time_budget_of(serde_json::json!([
+            {
+                "schema_version": 2,
+                "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" },
+                "timing": { "kind": "hands_on", "duration": { "value": 1.0, "unit": "min" } }
+            },
+            {
+                "schema_version": 2,
+                "operation": { "kind": "incubate", "temperature": { "value": 37.0, "unit": "C" } }
+            }
+        ]));
+        assert_eq!(budget.total_span_s, 60.0);
+        assert_eq!(budget.hands_on_s, 60.0);
+        assert!(budget.parallel_windows.is_empty());
+    }
+
+    /// The input is the OperationSpec array, so a malformed document is an
+    /// INVALID error and never a silently empty budget.
+    #[test]
+    fn time_budget_rejects_documents_that_are_not_operation_specs() {
+        let error = project_time_budget_json(r#"[{"schema_version":2,"operation":{"kind":"measure"}}]"#)
+            .expect_err("missing endpoint_id");
+        match error {
+            Error::Go(message) => {
+                assert!(message.starts_with("INVALID: "), "{message}");
+                assert!(message.contains("endpoint_id"), "{message}");
+            }
+            other => panic!("unexpected error {other:?}"),
+        }
     }
 }
