@@ -4,10 +4,13 @@ name: linux-tests
 # unit/integration suites from HANDOFF-VPS.md §3. Toolchain and build matrix:
 # docs/engineering/cross-platform-builds.md §3-5.
 
-# Hosted-runner minutes are exhausted, so the Linux lane runs on the VPS
-# instead: scripts/ci/local-gate.sh (docs/engineering/local-ci.md). The Windows
-# Gate lane never runs these tests. Manual dispatch stays for budget restoral.
+# Runs on the self-hosted VPS runner, so it costs no hosted minutes and stays a
+# required check on `main`. The Windows Gate lane never runs these tests
+# (docs/engineering/local-ci.md); it uses scripts/ci/local-gate.ps1 instead.
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:

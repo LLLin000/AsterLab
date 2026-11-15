@@ -13,8 +13,10 @@ pull-request verification runs on the two real hosts instead of Actions.
 The Windows Gate lane does not run Linux tests even though it could: the Linux
 lane owns them, and a second copy of the same suite on a different OS hides
 which lane a failure belongs to. `windows-build.yml` and `linux-tests.yml`
-therefore keep only `workflow_dispatch`; `scope-check.yml` still runs because
-its runner is self-hosted and costs no minutes.
+therefore keep only `workflow_dispatch`. `scope-check` and `linux-tests` still
+run on pull requests because their runner is the self-hosted VPS and costs no
+minutes; they stay in the `main` ruleset, and the Windows lane never runs the
+Linux suite itself.
 
 ## Windows Gate gate
 
