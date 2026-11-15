@@ -30,8 +30,10 @@ readable measure and Save stays in the first viewport.
 ## Build stamp
 
 All screenshots come from `prototypes/mygo-run/dist/mygo-run.exe` built at
-repository HEAD `82f90b3` (`BUILD_INFO.txt` → `commit 82f90b3`, matching
-`git rev-parse --short HEAD`).
+repository HEAD `82f90b3` — the build stamp matched HEAD at capture time. The
+only commits after that are this evidence directory, so the product binary and
+the UI it captured are unchanged; `scripts/ci/local-gate.ps1 -Pr 110` rebuilds
+the same tree at the PR head.
 
 ```text
 AsterLab MyGo Prototype (UNSIGNED)
