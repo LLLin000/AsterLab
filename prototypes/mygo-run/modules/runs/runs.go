@@ -177,6 +177,22 @@ type TimeBudgetService interface {
 	ProjectTimeBudget(ctx context.Context, input ProjectTimeBudgetInput) (TimeBudget, error)
 }
 
+// MixPlanService derives a plate's mix numbers with Core's single calculator.
+//
+// It is its own service because the calculation owns no state: it reads no
+// database, keeps no clock and writes nothing, so no Design or Run service has
+// to be open to ask for a mix plan. The object is released when Go drops it, so
+// it has no Close.
+//
+//mygo:native
+type MixPlanService interface {
+	// PlateMixPlan derives the GelMA mastermix and cell seeding rows from the
+	// plate's authored mix_* fields and its actual group wells. Core owns the
+	// formulas, the defaults and every rejection; a nil Gel or Cells means the
+	// plate declares no such plan.
+	PlateMixPlan(ctx context.Context, input PlateMixInput) (PlateMixResult, error)
+}
+
 type RunSnapshot struct {
 	RunID          string        `json:"runId"`
 	DesignID       string        `json:"designId"`
@@ -897,6 +913,90 @@ type RuntimeNormalizeOutput struct {
 	DeadVolumeUL       float64 `json:"deadVolumeUl"`
 	AdditionalVolumeUL float64 `json:"additionalVolumeUl"`
 	UnusedVolumeUL     float64 `json:"unusedVolumeUl"`
+}
+
+// PlateMixInput is a plate's authored mix_* fields after unit normalisation. A
+// nil pointer means the document omitted the field: Core owns the default and
+// the rejection, so the caller never invents a zero.
+type PlateMixInput struct {
+	VolumePerWellUL *float64          `json:"volumePerWellUl,omitempty"`
+	ExcessRatio     *float64          `json:"excessRatio,omitempty"`
+	Gel             *PlateMixGelPlan  `json:"gel,omitempty"`
+	Cells           *PlateMixCellPlan `json:"cells,omitempty"`
+	Groups          []PlateMixGroup   `json:"groups"`
+}
+
+// PlateMixGroup is one plate group's authored name and actual well count.
+type PlateMixGroup struct {
+	Name  string `json:"name"`
+	Wells uint32 `json:"wells"`
+}
+
+// PlateMixGelPlan is the GelMA plan. An omitted LAP percent stays nil so Core
+// names the missing field instead of the caller defaulting it.
+type PlateMixGelPlan struct {
+	LapStockPercentWV *float64             `json:"lapStockPercentWv,omitempty"`
+	LapFinalPercentWV *float64             `json:"lapFinalPercentWv,omitempty"`
+	PercentByGroup    []PlateMixGelPercent `json:"percentByGroup"`
+}
+
+// PlateMixGelPercent is one group's authored GelMA target. Percent is nil when
+// the document value is not a number, so Core can name that group in its error.
+type PlateMixGelPercent struct {
+	Name    string   `json:"name"`
+	Percent *float64 `json:"percent,omitempty"`
+}
+
+// PlateMixCellPlan is the cell seeding plan. Both factor concentrations absent
+// means no factor is added; exactly one present is a rejection.
+type PlateMixCellPlan struct {
+	DensityPerWell     *float64 `json:"densityPerWell,omitempty"`
+	FactorStockMGPerML *float64 `json:"factorStockMgPerMl,omitempty"`
+	FactorFinalMGPerML *float64 `json:"factorFinalMgPerMl,omitempty"`
+}
+
+// PlateMixResult is Core's derived plan. Either half is nil when the plate
+// declares no such plan.
+type PlateMixResult struct {
+	Gel   *PlateMixGelResult  `json:"gel,omitempty"`
+	Cells *PlateMixCellResult `json:"cells,omitempty"`
+}
+
+// PlateMixGelResult is the GelMA mastermix per group plus its totals. The
+// volumes are microlitres and the mass is milligrams, as Core computes them.
+type PlateMixGelResult struct {
+	Groups           []PlateMixGelGroup `json:"groups"`
+	VolumeUL         float64            `json:"volumeUl"`
+	GelmaMassMG      float64            `json:"gelmaMassMg"`
+	LapStockVolumeUL float64            `json:"lapStockVolumeUl"`
+	SolventVolumeUL  float64            `json:"solventVolumeUl"`
+}
+
+type PlateMixGelGroup struct {
+	Name             string  `json:"name"`
+	Wells            uint32  `json:"wells"`
+	GelmaPercent     float64 `json:"gelmaPercent"`
+	VolumeUL         float64 `json:"volumeUl"`
+	GelmaMassMG      float64 `json:"gelmaMassMg"`
+	LapStockVolumeUL float64 `json:"lapStockVolumeUl"`
+	SolventVolumeUL  float64 `json:"solventVolumeUl"`
+}
+
+// PlateMixCellResult is the cell suspension per group plus its totals. Cells
+// are counts and volumes are microlitres, as Core computes them.
+type PlateMixCellResult struct {
+	Groups              []PlateMixCellGroup `json:"groups"`
+	TotalCells          uint64              `json:"totalCells"`
+	SuspensionVolumeUL  float64             `json:"suspensionVolumeUl"`
+	FactorStockVolumeUL float64             `json:"factorStockVolumeUl"`
+}
+
+type PlateMixCellGroup struct {
+	Name                string  `json:"name"`
+	Wells               uint32  `json:"wells"`
+	TotalCells          uint64  `json:"totalCells"`
+	SuspensionVolumeUL  float64 `json:"suspensionVolumeUl"`
+	FactorStockVolumeUL float64 `json:"factorStockVolumeUl"`
 }
 
 // SignAndArchiveInput ends a Run's record. SignedAtUTC is a caller-supplied

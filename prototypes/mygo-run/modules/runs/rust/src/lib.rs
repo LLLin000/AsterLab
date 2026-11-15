@@ -9,7 +9,12 @@ mod cli_impl;
 
 use asterlab_app::AppCore;
 use asterlab_core::assets::{AssetLink as CoreAssetLink, AssetRef};
-use asterlab_core::calculators::{runtime_normalize, RuntimeNormalizeInput as CoreNormalizeInput};
+use asterlab_core::calculators::{
+    plate_mix_plan, runtime_normalize, PlateMixCellPlan as CorePlateMixCellPlan,
+    PlateMixGelPercent as CorePlateMixGelPercent, PlateMixGelPlan as CorePlateMixGelPlan,
+    PlateMixGroup as CorePlateMixGroup, PlateMixInput as CorePlateMixInput,
+    RuntimeNormalizeInput as CoreNormalizeInput,
+};
 use asterlab_core::design_commands::{derive_design_from_run, DeriveDesignCommand};
 use asterlab_core::operation_spec::OperationSpec;
 use asterlab_core::protocol_preview::project_time_budget as core_time_budget;
@@ -50,6 +55,96 @@ impl TimeBudgetService for CoreTimeBudgetService {
     fn project_time_budget(&self, _ctx: &Context, input: ProjectTimeBudgetInput) -> Result<TimeBudget, Error> {
         project_time_budget_json(&input.specs_json)
     }
+}
+
+/// The plate mix plan is Core's pure function: no data directory is opened,
+/// nothing is locked and nothing is stored.
+pub fn make_mix_plan_service() -> Result<Arc<dyn MixPlanService>, Error> {
+    Ok(Arc::new(CoreMixPlanService))
+}
+
+struct CoreMixPlanService;
+
+impl MixPlanService for CoreMixPlanService {
+    fn plate_mix_plan(
+        &self,
+        _ctx: &Context,
+        input: PlateMixInput,
+    ) -> Result<PlateMixResult, Error> {
+        plate_mix_plan_impl(&input)
+    }
+}
+
+/// Map the generated bridge input onto Core's calculator and back. Core owns
+/// every formula, default and rejection; nothing is filled in here.
+fn plate_mix_plan_impl(input: &PlateMixInput) -> Result<PlateMixResult, Error> {
+    let output = plate_mix_plan(&CorePlateMixInput {
+        volume_per_well_ul: input.volume_per_well_ul,
+        excess_ratio: input.excess_ratio,
+        gel: input.gel.as_ref().map(|plan| CorePlateMixGelPlan {
+            lap_stock_percent_wv: plan.lap_stock_percent_wv,
+            lap_final_percent_wv: plan.lap_final_percent_wv,
+            percent_by_group: plan
+                .percent_by_group
+                .iter()
+                .map(|entry| CorePlateMixGelPercent {
+                    name: entry.name.clone(),
+                    percent: entry.percent,
+                })
+                .collect(),
+        }),
+        cells: input.cells.as_ref().map(|plan| CorePlateMixCellPlan {
+            density_per_well: plan.density_per_well,
+            factor_stock_mg_per_ml: plan.factor_stock_mg_per_ml,
+            factor_final_mg_per_ml: plan.factor_final_mg_per_ml,
+        }),
+        groups: input
+            .groups
+            .iter()
+            .map(|group| CorePlateMixGroup {
+                name: group.name.clone(),
+                wells: group.wells,
+            })
+            .collect(),
+    })
+    .map_err(|e| Error::Go(format!("INVALID: {e}")))?;
+    Ok(PlateMixResult {
+        gel: output.gel.map(|gel| PlateMixGelResult {
+            groups: gel
+                .groups
+                .into_iter()
+                .map(|group| PlateMixGelGroup {
+                    name: group.name,
+                    wells: group.wells,
+                    gelma_percent: group.gelma_percent_wv,
+                    volume_ul: group.volume_ul,
+                    gelma_mass_mg: group.gelma_mass_mg,
+                    lap_stock_volume_ul: group.lap_stock_volume_ul,
+                    solvent_volume_ul: group.solvent_volume_ul,
+                })
+                .collect(),
+            volume_ul: gel.volume_ul,
+            gelma_mass_mg: gel.gelma_mass_mg,
+            lap_stock_volume_ul: gel.lap_stock_volume_ul,
+            solvent_volume_ul: gel.solvent_volume_ul,
+        }),
+        cells: output.cells.map(|cells| PlateMixCellResult {
+            groups: cells
+                .groups
+                .into_iter()
+                .map(|group| PlateMixCellGroup {
+                    name: group.name,
+                    wells: group.wells,
+                    total_cells: group.total_cells,
+                    suspension_volume_ul: group.suspension_volume_ul,
+                    factor_stock_volume_ul: group.factor_stock_volume_ul,
+                })
+                .collect(),
+            total_cells: cells.total_cells,
+            suspension_volume_ul: cells.suspension_volume_ul,
+            factor_stock_volume_ul: cells.factor_stock_volume_ul,
+        }),
+    })
 }
 
 /// Creates the two tables this module owns on the shared database. `timer_records`
@@ -2075,6 +2170,117 @@ mod tests {
                 ..RuntimeNormalizeInput::default()
             })
             .is_err());
+    }
+
+    fn huvec_plate_mix_input() -> PlateMixInput {
+        PlateMixInput {
+            volume_per_well_ul: Some(200.0),
+            excess_ratio: Some(0.1),
+            gel: Some(PlateMixGelPlan {
+                lap_stock_percent_wv: Some(0.5),
+                lap_final_percent_wv: Some(0.05),
+                percent_by_group: vec![
+                    PlateMixGelPercent {
+                        name: "3%".into(),
+                        percent: Some(3.0),
+                    },
+                    PlateMixGelPercent {
+                        name: "5%".into(),
+                        percent: Some(5.0),
+                    },
+                    PlateMixGelPercent {
+                        name: "7%".into(),
+                        percent: Some(7.0),
+                    },
+                ],
+            }),
+            cells: Some(PlateMixCellPlan {
+                density_per_well: Some(20_000.0),
+                factor_stock_mg_per_ml: Some(0.01),
+                factor_final_mg_per_ml: Some(0.00005),
+            }),
+            groups: vec![
+                PlateMixGroup {
+                    name: "3%".into(),
+                    wells: 3,
+                },
+                PlateMixGroup {
+                    name: "5%".into(),
+                    wells: 3,
+                },
+                PlateMixGroup {
+                    name: "7%".into(),
+                    wells: 3,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn plate_mix_plan_bridges_the_huvec_plate() {
+        let result = plate_mix_plan_impl(&huvec_plate_mix_input()).expect("plate mix plan");
+        let gel = result.gel.expect("gel plan");
+        assert_eq!(gel.groups.len(), 3);
+        assert!((gel.groups[0].volume_ul - 660.0).abs() < 1e-9);
+        assert!((gel.groups[0].gelma_mass_mg - 19.8).abs() < 1e-9);
+        assert!((gel.groups[0].lap_stock_volume_ul - 66.0).abs() < 1e-9);
+        assert!((gel.groups[0].solvent_volume_ul - 594.0).abs() < 1e-9);
+        assert!((gel.volume_ul - 1980.0).abs() < 1e-9);
+        assert!((gel.gelma_mass_mg - 99.0).abs() < 1e-9);
+        assert!((gel.lap_stock_volume_ul - 198.0).abs() < 1e-9);
+        assert!((gel.solvent_volume_ul - 1782.0).abs() < 1e-9);
+
+        let cells = result.cells.expect("cell plan");
+        assert_eq!(cells.groups.len(), 3);
+        assert_eq!(cells.groups[0].total_cells, 66_000);
+        assert_eq!(cells.total_cells, 198_000);
+        assert!((cells.suspension_volume_ul - 1980.0).abs() < 1e-9);
+        assert!((cells.factor_stock_volume_ul - 9.9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn plate_mix_plan_bridges_the_half_millilitre_plate() {
+        let result = plate_mix_plan_impl(&PlateMixInput {
+            volume_per_well_ul: Some(500.0),
+            ..huvec_plate_mix_input()
+        })
+        .expect("0.5 mL plate mix plan");
+        let gel = result.gel.expect("gel plan");
+        assert!((gel.groups[0].volume_ul - 1650.0).abs() < 1e-9);
+        assert!((gel.groups[2].gelma_mass_mg - 115.5).abs() < 1e-9);
+        assert!((gel.volume_ul - 4950.0).abs() < 1e-9);
+        assert!((gel.lap_stock_volume_ul - 495.0).abs() < 1e-9);
+        let cells = result.cells.expect("cell plan");
+        assert_eq!(cells.total_cells, 198_000);
+        assert!((cells.suspension_volume_ul - 4950.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn plate_mix_plan_returns_core_errors() {
+        let lap_above_stock = plate_mix_plan_impl(&PlateMixInput {
+            gel: Some(PlateMixGelPlan {
+                lap_final_percent_wv: Some(0.6),
+                ..huvec_plate_mix_input().gel.expect("gel plan")
+            }),
+            ..huvec_plate_mix_input()
+        })
+        .expect_err("lap final above stock");
+        assert!(
+            format!("{lap_above_stock:?}")
+                .contains("mix_lap_final_percent cannot exceed mix_lap_stock_percent"),
+            "unexpected error: {lap_above_stock:?}"
+        );
+
+        let volume_without_plan = plate_mix_plan_impl(&PlateMixInput {
+            gel: None,
+            cells: None,
+            ..huvec_plate_mix_input()
+        })
+        .expect_err("volume without a plan");
+        assert!(
+            format!("{volume_without_plan:?}").contains("need a gel or cell plan"),
+            "unexpected error: {volume_without_plan:?}"
+        );
     }
 
     #[test]

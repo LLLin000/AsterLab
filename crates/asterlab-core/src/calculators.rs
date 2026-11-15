@@ -79,6 +79,57 @@ pub struct CellSeedingOutput {
     pub factor_stock_volume_ul: f64,
 }
 
+/// One plate group: its authored name and its actual well count.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateMixGroup {
+    pub name: String,
+    pub wells: u32,
+}
+
+/// One group's target from `mix_gelma_percent_by_group`. `percent` is `None`
+/// when the document value is not a number, so Core reports it instead of the
+/// caller guessing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateMixGelPercent {
+    pub name: String,
+    pub percent: Option<f64>,
+}
+
+/// A plate's GelMA plan. `None` on a lap field means the document omitted it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateMixGelPlan {
+    pub lap_stock_percent_wv: Option<f64>,
+    pub lap_final_percent_wv: Option<f64>,
+    pub percent_by_group: Vec<PlateMixGelPercent>,
+}
+
+/// A plate's cell seeding plan. Both factor concentrations absent means no
+/// factor is added; exactly one present is an error.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateMixCellPlan {
+    pub density_per_well: Option<f64>,
+    pub factor_stock_mg_per_ml: Option<f64>,
+    pub factor_final_mg_per_ml: Option<f64>,
+}
+
+/// The plate `mix_*` fields after unit normalisation. `None` means the field is
+/// absent from the document: Core owns every default and every rejection, so a
+/// caller never has to invent `0.0`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateMixInput {
+    pub volume_per_well_ul: Option<f64>,
+    pub excess_ratio: Option<f64>,
+    pub gel: Option<PlateMixGelPlan>,
+    pub cells: Option<PlateMixCellPlan>,
+    pub groups: Vec<PlateMixGroup>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateMixOutput {
+    pub gel: Option<GelMastermixOutput>,
+    pub cells: Option<CellSeedingOutput>,
+}
+
 /// Inputs for `runtime_normalize`: recompute the live mix volume when the
 /// actual well count differs from the frozen plan.
 #[derive(Debug, Clone, PartialEq)]
@@ -269,6 +320,153 @@ pub fn cell_seeding(input: &CellSeedingInput) -> Result<CellSeedingOutput, Strin
     })
 }
 
+/// Compute a plate's plan from its authored `mix_*` fields.
+///
+/// This is the single authority for the plate mix numbers: the GelMA mastermix
+/// and the cell seeding rows are the same `gel_mastermix`/`cell_seeding`
+/// results, and every document rule (a missing lap percent, a group without a
+/// target, a factor above its stock) is a rejection here. A plate that names no
+/// mix field and sets no volume returns no plan.
+pub fn plate_mix_plan(input: &PlateMixInput) -> Result<PlateMixOutput, String> {
+    if input.gel.is_none() && input.cells.is_none() {
+        if input.volume_per_well_ul.is_some() || input.excess_ratio.is_some() {
+            return Err("mix_volume_per_well and mix_excess_ratio need a gel or cell plan".into());
+        }
+        return Ok(PlateMixOutput {
+            gel: None,
+            cells: None,
+        });
+    }
+    let volume_per_well_ul = positive(
+        input
+            .volume_per_well_ul
+            .ok_or("mix plan needs mix_volume_per_well")?,
+        "mix_volume_per_well",
+    )?;
+    let excess_ratio = match input.excess_ratio {
+        Some(value) => non_negative(value, "mix_excess_ratio")?,
+        None => 0.0,
+    };
+    checked_groups(
+        &input.groups,
+        |group| group.name.as_str(),
+        |group| group.wells,
+    )?;
+
+    let gel = match &input.gel {
+        Some(plan) => Some(plate_gel_mastermix(plan, volume_per_well_ul, excess_ratio, &input.groups)?),
+        None => None,
+    };
+    let cells = match &input.cells {
+        Some(plan) => Some(plate_cell_seeding(plan, volume_per_well_ul, excess_ratio, &input.groups)?),
+        None => None,
+    };
+    Ok(PlateMixOutput { gel, cells })
+}
+
+fn plate_gel_mastermix(
+    plan: &PlateMixGelPlan,
+    volume_per_well_ul: f64,
+    excess_ratio: f64,
+    groups: &[PlateMixGroup],
+) -> Result<GelMastermixOutput, String> {
+    let lap_stock_percent_wv = plan
+        .lap_stock_percent_wv
+        .ok_or("gel plan needs mix_lap_stock_percent")?;
+    let lap_final_percent_wv = plan
+        .lap_final_percent_wv
+        .ok_or("gel plan needs mix_lap_final_percent")?;
+    // The two guards below repeat the arithmetic checks inside `gel_mastermix`
+    // so the message names the document field the author edits.
+    if !(lap_stock_percent_wv > 0.0) {
+        return Err("mix_lap_stock_percent must be positive".into());
+    }
+    if lap_final_percent_wv > lap_stock_percent_wv {
+        return Err("mix_lap_final_percent cannot exceed mix_lap_stock_percent".into());
+    }
+    let mut gel_groups = Vec::with_capacity(groups.len());
+    for group in groups {
+        let name = group.name.trim();
+        let entry = plan
+            .percent_by_group
+            .iter()
+            .find(|entry| entry.name.trim() == name)
+            .ok_or_else(|| format!("mix_gelma_percent_by_group is missing group {name}"))?;
+        let percent = entry
+            .percent
+            .ok_or_else(|| format!("group {name} GelMA percent must be a number"))?;
+        if !(percent.is_finite() && percent > 0.0 && percent <= 100.0) {
+            return Err(format!("group {name} GelMA percent must be in (0, 100]"));
+        }
+        gel_groups.push(GelMastermixGroup {
+            name: group.name.clone(),
+            gelma_percent_wv: percent,
+            wells: group.wells,
+        });
+    }
+    for entry in &plan.percent_by_group {
+        let name = entry.name.trim();
+        if !groups.iter().any(|group| group.name.trim() == name) {
+            return Err(format!(
+                "mix_gelma_percent_by_group names unknown group {name}"
+            ));
+        }
+    }
+    gel_mastermix(&GelMastermixInput {
+        volume_per_well_ul,
+        excess_ratio,
+        lap_stock_percent_wv,
+        lap_final_percent_wv,
+        groups: gel_groups,
+    })
+}
+
+fn plate_cell_seeding(
+    plan: &PlateMixCellPlan,
+    volume_per_well_ul: f64,
+    excess_ratio: f64,
+    groups: &[PlateMixGroup],
+) -> Result<CellSeedingOutput, String> {
+    let density_cells_per_well = plan
+        .density_per_well
+        .ok_or("cell plan needs mix_cell_density")?;
+    // Same reason as the gel plan: name the document field the author edits.
+    if !(density_cells_per_well > 0.0) {
+        return Err("mix_cell_density must be positive".into());
+    }
+    let (factor_stock_mg_per_ml, factor_final_mg_per_ml) =
+        match (plan.factor_stock_mg_per_ml, plan.factor_final_mg_per_ml) {
+            (Some(stock), Some(final_concentration)) => (stock, final_concentration),
+            (None, None) => (0.0, 0.0),
+            _ => {
+                return Err(
+                    "factor stock and final concentration must be provided together".into(),
+                )
+            }
+        };
+    if factor_stock_mg_per_ml <= 0.0 && factor_final_mg_per_ml > 0.0 {
+        return Err("factor stock concentration must be positive".into());
+    }
+    if factor_stock_mg_per_ml > 0.0 && factor_final_mg_per_ml > factor_stock_mg_per_ml {
+        return Err("factor final concentration cannot exceed stock concentration".into());
+    }
+    let groups = groups
+        .iter()
+        .map(|group| CellSeedingGroup {
+            name: group.name.clone(),
+            wells: group.wells,
+        })
+        .collect();
+    cell_seeding(&CellSeedingInput {
+        density_cells_per_well,
+        volume_per_well_ul,
+        excess_ratio,
+        factor_stock_mg_per_ml,
+        factor_final_mg_per_ml,
+        groups,
+    })
+}
+
 /// Recompute the live mix volume from the actual well count. The dead volume
 /// is added once per prepared tube; excess applies only to the per-well
 /// working volume, never to the dead volume.
@@ -451,6 +649,189 @@ mod tests {
             }
         };
         assert!(cell_seeding(&above_stock).is_err());
+    }
+
+    fn plate_mix_groups() -> Vec<PlateMixGroup> {
+        ["3%", "5%", "7%"]
+            .into_iter()
+            .map(|name| PlateMixGroup {
+                name: name.into(),
+                wells: 3,
+            })
+            .collect()
+    }
+
+    /// The shared HUVEC fixture: 3 groups x 3 wells on a 12-well plate,
+    /// 200 uL/well, 10% excess, 0.5% LAP stock diluted to 0.05%, 20k cells/well
+    /// and a factor dosed from a 10 ug/mL stock to 50 ng/mL. The Go parity test
+    /// (`internal/asterdoc`) pins the same numbers through the native bridge.
+    fn huvec_plate_mix() -> PlateMixInput {
+        PlateMixInput {
+            volume_per_well_ul: Some(200.0),
+            excess_ratio: Some(0.1),
+            gel: Some(PlateMixGelPlan {
+                lap_stock_percent_wv: Some(0.5),
+                lap_final_percent_wv: Some(0.05),
+                percent_by_group: vec![
+                    PlateMixGelPercent {
+                        name: "3%".into(),
+                        percent: Some(3.0),
+                    },
+                    PlateMixGelPercent {
+                        name: "5%".into(),
+                        percent: Some(5.0),
+                    },
+                    PlateMixGelPercent {
+                        name: "7%".into(),
+                        percent: Some(7.0),
+                    },
+                ],
+            }),
+            cells: Some(PlateMixCellPlan {
+                density_per_well: Some(20_000.0),
+                factor_stock_mg_per_ml: Some(0.01),
+                factor_final_mg_per_ml: Some(0.00005),
+            }),
+            groups: plate_mix_groups(),
+        }
+    }
+
+    #[test]
+    fn plate_mix_plan_derives_the_huvec_rows() {
+        let output = plate_mix_plan(&huvec_plate_mix()).expect("valid HUVEC plate");
+
+        let gel = output.gel.expect("gel plan");
+        assert_eq!(gel.groups.len(), 3);
+        close(gel.groups[0].volume_ul, 660.0);
+        close(gel.groups[0].gelma_mass_mg, 19.8);
+        close(gel.groups[0].lap_stock_volume_ul, 66.0);
+        close(gel.groups[0].solvent_volume_ul, 594.0);
+        close(gel.volume_ul, 1980.0);
+        close(gel.gelma_mass_mg, 99.0);
+        close(gel.lap_stock_volume_ul, 198.0);
+        close(gel.solvent_volume_ul, 1782.0);
+
+        let cells = output.cells.expect("cell plan");
+        assert_eq!(cells.groups.len(), 3);
+        assert_eq!(cells.groups[0].total_cells, 66_000);
+        assert_eq!(cells.total_cells, 198_000);
+        close(cells.suspension_volume_ul, 1980.0);
+        close(cells.factor_stock_volume_ul, 9.9);
+    }
+
+    /// The acceptance case: 3%/5%/7%, nine wells, 0.5 mL per well, 10% excess.
+    #[test]
+    fn plate_mix_plan_covers_the_half_millilitre_plate() {
+        let output = plate_mix_plan(&PlateMixInput {
+            volume_per_well_ul: Some(500.0),
+            cells: Some(PlateMixCellPlan {
+                density_per_well: Some(20_000.0),
+                factor_stock_mg_per_ml: None,
+                factor_final_mg_per_ml: None,
+            }),
+            ..huvec_plate_mix()
+        })
+        .expect("valid 0.5 mL plate");
+
+        let gel = output.gel.expect("gel plan");
+        close(gel.groups[0].volume_ul, 1650.0);
+        close(gel.groups[1].gelma_mass_mg, 82.5);
+        close(gel.groups[2].gelma_mass_mg, 115.5);
+        close(gel.volume_ul, 4950.0);
+        close(gel.gelma_mass_mg, 247.5);
+        close(gel.lap_stock_volume_ul, 495.0);
+        close(gel.solvent_volume_ul, 4455.0);
+
+        let cells = output.cells.expect("cell plan");
+        assert_eq!(cells.groups[1].total_cells, 66_000);
+        assert_eq!(cells.total_cells, 198_000);
+        close(cells.suspension_volume_ul, 4950.0);
+        close(cells.factor_stock_volume_ul, 0.0);
+    }
+
+    #[test]
+    fn plate_mix_plan_stays_empty_without_mix_fields() {
+        let output = plate_mix_plan(&PlateMixInput {
+            volume_per_well_ul: None,
+            excess_ratio: None,
+            gel: None,
+            cells: None,
+            groups: plate_mix_groups(),
+        })
+        .expect("plate without a mix plan");
+        assert!(output.gel.is_none());
+        assert!(output.cells.is_none());
+    }
+
+    #[test]
+    fn plate_mix_plan_rejects_incomplete_and_inconsistent_plans() {
+        let volume_without_plan = PlateMixInput {
+            gel: None,
+            cells: None,
+            ..huvec_plate_mix()
+        };
+        assert!(plate_mix_plan(&volume_without_plan).is_err());
+
+        let mut missing_percent = huvec_plate_mix();
+        missing_percent
+            .gel
+            .as_mut()
+            .unwrap()
+            .percent_by_group
+            .pop();
+        assert!(plate_mix_plan(&missing_percent).is_err());
+
+        let mut unknown_group = huvec_plate_mix();
+        unknown_group
+            .gel
+            .as_mut()
+            .unwrap()
+            .percent_by_group
+            .push(PlateMixGelPercent {
+                name: "9%".into(),
+                percent: Some(9.0),
+            });
+        assert!(plate_mix_plan(&unknown_group).is_err());
+
+        let mut non_numeric_percent = huvec_plate_mix();
+        non_numeric_percent.gel.as_mut().unwrap().percent_by_group[0].percent = None;
+        assert!(plate_mix_plan(&non_numeric_percent).is_err());
+
+        let mut lap_above_stock = huvec_plate_mix();
+        lap_above_stock.gel.as_mut().unwrap().lap_final_percent_wv = Some(0.6);
+        assert!(plate_mix_plan(&lap_above_stock).is_err());
+
+        let mut missing_lap_stock = huvec_plate_mix();
+        missing_lap_stock.gel.as_mut().unwrap().lap_stock_percent_wv = None;
+        assert!(plate_mix_plan(&missing_lap_stock).is_err());
+
+        let mut factor_above_stock = huvec_plate_mix();
+        factor_above_stock
+            .cells
+            .as_mut()
+            .unwrap()
+            .factor_final_mg_per_ml = Some(0.02);
+        assert!(plate_mix_plan(&factor_above_stock).is_err());
+
+        let mut factor_without_final = huvec_plate_mix();
+        factor_without_final
+            .cells
+            .as_mut()
+            .unwrap()
+            .factor_final_mg_per_ml = None;
+        assert!(plate_mix_plan(&factor_without_final).is_err());
+
+        let mut missing_density = huvec_plate_mix();
+        missing_density.cells.as_mut().unwrap().density_per_well = None;
+        assert!(plate_mix_plan(&missing_density).is_err());
+
+        let mut non_finite_volume = huvec_plate_mix();
+        non_finite_volume.volume_per_well_ul = Some(f64::NAN);
+        assert!(plate_mix_plan(&non_finite_volume).is_err());
+
+        let mut no_groups = huvec_plate_mix();
+        no_groups.groups.clear();
+        assert!(plate_mix_plan(&no_groups).is_err());
     }
 
     #[test]
