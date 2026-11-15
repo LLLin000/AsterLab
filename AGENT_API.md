@@ -82,6 +82,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `record.list` / `record.get` | 按 kind / project 查询，或按 id 读取一条记录 | 否 |
 | `pantry.list` / `label.export` | 只读列出储藏室条目及其效期状态，或导出贴标/扫码插件用的短 ID 清单 | 否 |
 | `pantry.upsert` | 创建或整条覆盖一个储藏室条目 | create/update |
+| `pantry.delete` | 停用并隐藏一个储藏室条目；短标签 ID 保留不复用 | delete |
 | `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
 | `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
 | `calculator.*`（4 个） | 稀释、溶液质量、系列稀释、反应体积 | 否 |
@@ -157,10 +158,11 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 ## 储藏室台账（`pantry.*`）与贴标导出（`label.export`）
 
-储藏室是**可选的轻量台账**，不是 Design/Run 的必填依赖。它存在辅助 SQLite 表 `pantry_items`（`id`、`label_code`、`project_id`、`name`、`location`、`purchased_on`、`opened_on`、`shelf_life_days`、`opened_shelf_life_days`、`exhausted`、`revision`、时间戳），不进入 `records`，不参与 Design/Protocol/Run 冻结，也不改变 `PRAGMA user_version`。不建条目时系统行为与之前完全相同。
+储藏室是**可选的轻量台账**，不是 Design/Run 的必填依赖。它存在辅助 SQLite 表 `pantry_items`（`id`、`label_code`、`project_id`、`name`、`location`、`purchased_on`、`opened_on`、`shelf_life_days`、`opened_shelf_life_days`、`exhausted`、`revision`、`deleted`、时间戳），不进入 `records`，不参与 Design/Protocol/Run 冻结，也不改变 `PRAGMA user_version`。不建条目时系统行为与之前完全相同。
 
-- `pantry.upsert`：输入 `{id?, project_id?, name, location?, purchased_on?, opened_on?, shelf_life_days?, opened_shelf_life_days?, exhausted?, expected_revision?}`。省略 `id` 创建新条目；提供 `id` 时必须已存在。这是**整条覆盖**写入：省略的可选字段会被清空，不做字段级合并。`project_id` 提供时必须指向已存在的项目。`expected_revision` 提供时按版本校验，不一致返回 `REVISION_CONFLICT`（退出码 4）；省略则不校验版本。日期必须是真实存在的 `YYYY-MM-DD`；开封日早于购入日、保质期不是 1–3650 天、名称/位置超长都返回 `INVALID_INPUT`（退出码 2）。输出 `{item}`，含 `label_code` 与当前 `status`。
-- `pantry.list`：输入 `{project_id?, include_exhausted?, as_of?, near_expiry_days?}`，输出 `{as_of, near_expiry_days, items[]}`。`as_of` 是效期计算所依据的日期（`YYYY-MM-DD`），省略时取当前 UTC 日期；`near_expiry_days` 默认 14，允许 0–3650。`include_exhausted` 默认 `true`，为 `false` 时省略已耗尽条目。只读。
+- `pantry.upsert`：输入 `{id?, project_id?, name, location?, purchased_on?, opened_on?, shelf_life_days?, opened_shelf_life_days?, exhausted?, expected_revision?}`。省略 `id` 创建新条目；提供 `id` 时必须已存在且未停用。这是**整条覆盖**写入：省略的可选字段会被清空，不做字段级合并。`project_id` 提供时必须指向已存在的项目。`expected_revision` 提供时按版本校验，不一致返回 `REVISION_CONFLICT`（退出码 4）；省略则不校验版本。日期必须是真实存在的 `YYYY-MM-DD`；开封日早于购入日、保质期不是 1–3650 天、名称/位置超长都返回 `INVALID_INPUT`（退出码 2）。输出 `{item}`，含 `label_code` 与当前 `status`。
+- `pantry.delete`：输入 `{id, expected_revision?}`，把条目标记为已停用（`deleted=1`）并递增 `revision`，输出 `{pantry_item_id, label_code, revision, deleted:true}`。这是**墓碑式删除**，不物理删行：短标签 ID 可能已经贴在实物上，保留它可保证不被重新分配给别的条目；停用后 `pantry.list`、`label.export` 不再返回该条目，`pantry.upsert` 与 `execution_event.create` 把它当作 `NOT_FOUND`（退出码 3），也不可复活。重复停用同样返回 `NOT_FOUND`。
+- `pantry.list`：输入 `{project_id?, include_exhausted?, as_of?, near_expiry_days?}`，输出 `{as_of, near_expiry_days, items[]}`。`as_of` 是效期计算所依据的日期（`YYYY-MM-DD`），省略时取当前 UTC 日期；`near_expiry_days` 默认 14，允许 0–3650。`include_exhausted` 默认 `true`，为 `false` 时省略已耗尽条目。只读；不含已停用条目。
 - `label.export`：同一输入，输出 `{schema_version:1, generated_at, as_of, near_expiry_days, labels[]}`，每条为 `{label_code, pantry_item_id, name, location, status, expires_on, days_remaining, revision}`，按 `label_code` 排序，便于外部贴标/扫码插件直接消费和比对。只读；不驱动打印机、不生成图形、不写数据库。
 
 效期语义（`status`）：
@@ -175,7 +177,7 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 
 `expires_on` 与 `expiry_basis` 只从显式字段推导：有 `opened_on + opened_shelf_life_days` 时用开封后窗口（`opened_shelf_life`），否则用 `purchased_on + shelf_life_days`（`shelf_life`）。两者都不全时不编造日期：`expires_on`、`days_remaining`、`expiry_basis` 均为 `null`，状态只反映是否开封/耗尽。
 
-`label_code` 由条目的不可变 `id` 派生（`PN-` + 前 8 位大写字母数字），首次分配后持久保存；同一 `label_code` 已被占用时依次追加 `-2`、`-3` 等后缀。因此重贴标签或重复导出都不会改变扫码结果。
+`label_code` 由条目的不可变 `id` 派生（`PN-` + 前 8 位大写字母数字），首次分配后持久保存；同一 `label_code` 已被占用时依次追加 `-2`、`-3` 等后缀。停用（`pantry.delete`）的条目仍占用其短 ID，不会被重新分配。因此重贴标签、重复导出或停用条目都不会改变扫码结果。
 
 `execution_event.create` 可附带可选的 `pantry_item_id`：省略时事件结构不变；提供时必须是已存在的条目，否则返回 `NOT_FOUND`（退出码 3）。成功输出因此固定为 `{record, pantry_notices[]}`；条目处于 `near_expiry` 或 `expired` 时 `pantry_notices` 返回一条 `{code:"pantry_item_expiry_notice", severity:"advisory", …}`，**不阻断写入**；其他情况为空数组。Design 阶段不要求绑定储藏室条目。
 

@@ -58,6 +58,14 @@ impl AppCore {
         cli_impl::pantry_export_labels(&self.db, &parsed).map_err(|e| e.message)
     }
 
+    /// Retire one pantry item. The row stays as a tombstone so its printed
+    /// short id is never reissued; reads stop returning it.
+    pub fn pantry_delete(&mut self, input: Value) -> Result<Value, String> {
+        let parsed: cli_impl::PantryDeleteInput =
+            serde_json::from_value(input).map_err(|e| format!("INVALID_INPUT: {e}"))?;
+        cli_impl::pantry_delete(&mut self.db, &parsed).map_err(|e| e.message)
+    }
+
     pub fn load_run(&self, run_id: &str) -> Result<Value, String> {
         let mut v = cli_impl::run_workspace(&self.db, run_id).map_err(|e| e.message)?;
         v["revision"] = json!(self.revision(run_id)?);
@@ -613,6 +621,25 @@ mod tests {
             .pantry_export_labels(json!({"as_of":"2026-06-25","include_exhausted":false}))
             .unwrap();
         assert!(without["labels"].as_array().unwrap().is_empty());
+
+        let retired = core
+            .pantry_delete(json!({"id":item_id,"expected_revision":2}))
+            .unwrap();
+        assert_eq!(retired["deleted"], true);
+        assert_eq!(retired["label_code"], label_code);
+        assert_eq!(retired["revision"], 3);
+        drop(core);
+
+        let mut core = AppCore::open(&dir).unwrap();
+        assert!(core
+            .pantry_list(json!({"as_of":"2026-06-25"}))
+            .unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(core
+            .pantry_upsert(json!({"id":item_id,"name":"Trypsin-EDTA"}))
+            .is_err());
         let _ = fs::remove_dir_all(dir);
     }
 }

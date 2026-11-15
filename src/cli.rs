@@ -8394,6 +8394,7 @@ CREATE TABLE IF NOT EXISTS pantry_items(\
     opened_shelf_life_days INTEGER,\
     exhausted INTEGER NOT NULL DEFAULT 0,\
     revision INTEGER NOT NULL DEFAULT 1,\
+    deleted INTEGER NOT NULL DEFAULT 0,\
     created_at TEXT NOT NULL,\
     updated_at TEXT NOT NULL\
 );\
@@ -8520,6 +8521,19 @@ pub(crate) fn open_db(path: &Path) -> Result<Connection, CliError> {
     migrate_records_schema(&mut db)?;
     db.execute_batch(PANTRY_TABLE)
         .map_err(|e| CliError::internal(e.to_string()))?;
+    // Databases created before the tombstone column existed cannot be fixed by
+    // `CREATE TABLE IF NOT EXISTS`; adding the column is the only migration.
+    if !pantry_has_deleted_column(&db)? {
+        if let Err(error) =
+            db.execute_batch("ALTER TABLE pantry_items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+        {
+            // A concurrent opener may have added the column between the check
+            // and the ALTER; that outcome is the one we wanted anyway.
+            if !error.to_string().contains("duplicate column name") {
+                return Err(CliError::internal(error.to_string()));
+            }
+        }
+    }
 
     // WAL is a persistent database property. A concurrent opener may hold the
     // exclusive lock needed to change it; keep the existing journal mode rather
@@ -9938,12 +9952,34 @@ pub(crate) struct PantryQueryInput {
     near_expiry_days: Option<u32>,
 }
 
+/// `pantry.delete` retires a row instead of erasing it: its `label_code` may
+/// already be printed on a package, so it must never be handed to another item.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PantryDeleteInput {
+    id: String,
+    #[serde(default)]
+    expected_revision: Option<i64>,
+}
+
+fn pantry_has_deleted_column(db: &Connection) -> Result<bool, CliError> {
+    let mut statement = db
+        .prepare("PRAGMA table_info(pantry_items)")
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| CliError::internal(e.to_string()))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    Ok(columns.iter().any(|column| column == "deleted"))
+}
+
 fn pantry_read(
     db: &Connection,
     id: &str,
 ) -> Result<Option<(PantryItem, String, String)>, CliError> {
     db.query_row(
-        &format!("SELECT {PANTRY_COLUMNS} FROM pantry_items WHERE id=?1"),
+        &format!("SELECT {PANTRY_COLUMNS} FROM pantry_items WHERE id=?1 AND deleted=0"),
         [id],
         |row| {
             Ok((
@@ -10168,7 +10204,7 @@ fn pantry_rows(
     let mut statement = db
         .prepare(&format!(
             "SELECT {PANTRY_COLUMNS} FROM pantry_items \
-WHERE (?1 IS NULL OR project_id=?1) AND (?2 OR exhausted=0) ORDER BY name, label_code"
+WHERE deleted=0 AND (?1 IS NULL OR project_id=?1) AND (?2 OR exhausted=0) ORDER BY name, label_code"
         ))
         .map_err(|e| CliError::internal(e.to_string()))?;
     let rows = statement
@@ -10250,8 +10286,44 @@ pub(crate) fn pantry_export_labels(
     }))
 }
 
+/// Retire one item. The row stays as a tombstone so `label_code` remains
+/// reserved; every read path filters it out, and the id cannot be revived.
+pub(crate) fn pantry_delete(
+    db: &mut Connection,
+    input: &PantryDeleteInput,
+) -> Result<Value, CliError> {
+    let id = input.id.trim().to_owned();
+    check_text(&id, "储藏室条目 ID", 120)?;
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let (existing, _, _) = pantry_read(&tx, &id)?
+        .ok_or_else(|| CliError::missing(format!("储藏室条目不存在：{id}")))?;
+    if let Some(expected) = input.expected_revision {
+        if existing.revision != expected {
+            return Err(CliError::conflict(format!(
+                "储藏室条目版本已从 v{expected} 更新为 v{}；请先重新读取。",
+                existing.revision
+            )));
+        }
+    }
+    let revision = existing.revision + 1;
+    tx.execute(
+        "UPDATE pantry_items SET deleted=1,revision=?2,updated_at=?3 WHERE id=?1",
+        params![id, revision, stamp()],
+    )
+    .map_err(|e| CliError::internal(e.to_string()))?;
+    tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+    Ok(json!({
+        "pantry_item_id": existing.id,
+        "label_code": existing.label_code,
+        "revision": revision,
+        "deleted": true,
+    }))
+}
+
 /// Advisory attached to an execution event that names a pantry item. Never
-/// blocks the write; it only surfaces an item that is近临期 or already overdue.
+/// blocks the write; it only surfaces an item that is near expiry or overdue.
 fn pantry_event_notice(db: &Connection, item_id: Option<&str>) -> Result<Option<Value>, CliError> {
     let Some(item_id) = item_id else {
         return Ok(None);
@@ -11621,6 +11693,10 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             let i: PantryUpsertInput = parse_input(path)?;
             pantry_upsert(&mut db, &i)
         }
+        "pantry.delete" => {
+            let i: PantryDeleteInput = parse_input(path)?;
+            pantry_delete(&mut db, &i)
+        }
         "label.export" => {
             let i: PantryQueryInput = parse_input(path)?;
             pantry_export_labels(&db, &i)
@@ -12169,6 +12245,7 @@ fn result_schema(tool: &str) -> Value {
         "execution_event.create" => json!({"type":"object","additionalProperties":false,"required":["record","pantry_notices"],"properties":{"record":record_schema("execution_event"),"pantry_notices":{"type":"array","maxItems":1,"items":pantry_notice()}}}),
         "pantry.list" => json!({"type":"object","additionalProperties":false,"required":["as_of","near_expiry_days","items"],"properties":{"as_of":{"type":"string","format":"date"},"near_expiry_days":{"type":"integer","minimum":0},"items":{"type":"array","items":pantry_item()}}}),
         "pantry.upsert" => json!({"type":"object","additionalProperties":false,"required":["item"],"properties":{"item":pantry_item()}}),
+        "pantry.delete" => json!({"type":"object","additionalProperties":false,"required":["pantry_item_id","label_code","revision","deleted"],"properties":{"pantry_item_id":{"type":"string"},"label_code":{"type":"string"},"revision":{"type":"integer","minimum":2},"deleted":{"const":true}}}),
         "label.export" => json!({"type":"object","additionalProperties":false,"required":["schema_version","generated_at","as_of","near_expiry_days","labels"],"properties":{"schema_version":{"const":1},"generated_at":{"type":"string"},"as_of":{"type":"string","format":"date"},"near_expiry_days":{"type":"integer","minimum":0},"labels":{"type":"array","items":pantry_label()}}}),
         "readout.submit" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"}}}),
         "readout.batch" => json!({"type":"object","additionalProperties":false,"required":["record","idempotency_key","replayed","accepted"],"properties":{"record":record_schema("execution_event"),"idempotency_key":{"type":"string"},"replayed":{"type":"boolean"},"accepted":{"type":"integer","minimum":1}}}),
@@ -12391,6 +12468,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"ad_hoc_step":{"type":"boolean","default":false,"description":"临时补加步骤：允许 protocol_step_path 不属于冻结清单；省略时为 false"},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"pantry_item_id":{"type":["string","null"],"maxLength":120,"description":"可选；关联已存在的储藏室条目。缺失不阻断；条目临期或过期时在 pantry_notices 返回提示"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "pantry.list" | "label.export" => json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":["string","null"]},"include_exhausted":{"type":"boolean","default":true,"description":"false 时省略已耗尽的条目"},"as_of":{"type":"string","format":"date","description":"YYYY-MM-DD；省略时用当前 UTC 日期"},"near_expiry_days":{"type":"integer","minimum":0,"maximum":3650,"description":"临期窗口天数；默认 14"}}}),
+        "pantry.delete" => json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1,"maxLength":120,"description":"要停用的储藏室条目 ID"},"expected_revision":{"type":["integer","null"],"minimum":1,"description":"提供时按版本校验，不一致返回 REVISION_CONFLICT"}}}),
         "pantry.upsert" => json!({"type":"object","additionalProperties":false,"required":["name"],"properties":{"id":{"type":["string","null"],"maxLength":120,"description":"省略时创建新条目；提供时必须已存在"},"project_id":{"type":["string","null"],"maxLength":120,"description":"可选；提供时必须指向已存在的项目"},"name":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},"location":{"type":"string","maxLength":200},"purchased_on":{"type":["string","null"],"format":"date"},"opened_on":{"type":["string","null"],"format":"date"},"shelf_life_days":{"type":["integer","null"],"minimum":1,"maximum":3650,"description":"未开封保质期天数；与 purchased_on 一起决定未开封效期"},"opened_shelf_life_days":{"type":["integer","null"],"minimum":1,"maximum":3650,"description":"开封后可用天数；与 opened_on 一起优先生效"},"exhausted":{"type":"boolean","default":false},"expected_revision":{"type":["integer","null"],"minimum":1,"description":"更新已有条目时用于并发保护；省略则不校验版本"}}}),
         "readout.submit" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","endpoint","protocol_version_id"],"oneOf":[{"required":["value"]},{"required":["qualifier"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160}}})
@@ -12682,6 +12760,7 @@ fn tool_specs() -> Vec<Value> {
         "execution_event.create",
         "pantry.list",
         "pantry.upsert",
+        "pantry.delete",
         "label.export",
         "readout.submit",
         "readout.batch",
@@ -12769,6 +12848,7 @@ fn tool_description(tool: &str) -> &'static str {
         "project.list" => "列出项目，返回稳定 id 和版本字段。",
         "pantry.list" => "只读列出储藏室条目及其效期状态；可指定 as_of 固定计算日期。",
         "pantry.upsert" => "创建或整条覆盖一个储藏室条目（名称/位置/购入开封日/保质期/耗尽状态），返回短标签 ID 与效期状态。",
+        "pantry.delete" => "停用并隐藏一个储藏室条目；短标签 ID 保留不被重新分配，条目不可复活。",
         "label.export" => "只读导出贴标/扫码插件使用的稳定短 ID 清单（label_code + 效期状态）；不打印、不写数据库。",
         "project.create" => "创建一个新项目。",
         "project.revise" => "按 expected_revision 修订项目名称或说明。",
@@ -12875,6 +12955,7 @@ fn tool_effects(tool: &str) -> &'static str {
         | "record.get" => "只读；不修改数据库。",
         "pantry.list" | "label.export" => "只读；只返回储藏室台账的效期投影，不写数据库。",
         "pantry.upsert" => "创建或整条覆盖一行储藏室台账并递增 revision；不修改 Design、Protocol 或已冻结 Run。",
+        "pantry.delete" => "把一行储藏室台账标记为已停用并递增 revision；行与短标签 ID 保留，读路径不再返回它。",
         "import.study.preview" => "只校验导入内容并返回警告；不写入数据库。",
         "calculator.dilution"
         | "calculator.solution"
@@ -16002,6 +16083,164 @@ mix_factor_final_concentration: {value: 50, unit: ng/mL}
         assert_eq!(plain["record"]["data"]["pantry_item_id"], Value::Null);
         assert!(plain["pantry_notices"].as_array().unwrap().is_empty());
 
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pantry_delete_retires_an_item_and_keeps_its_label_code_out_of_reuse() {
+        let dir = std::env::temp_dir().join(format!("pantry-delete-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write_input = |name: &str, value: Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, value.to_string()).unwrap();
+            path
+        };
+        let created = dispatch(
+            "pantry.upsert",
+            write_input(
+                "create.json",
+                json!({"name":"Stale PBS","location":"bench shelf"}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        let item_id = created["item"]["id"].as_str().unwrap().to_owned();
+        let label_code = created["item"]["label_code"].as_str().unwrap().to_owned();
+
+        let stale = dispatch(
+            "pantry.delete",
+            write_input(
+                "stale.json",
+                json!({"id":item_id,"expected_revision":9}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(stale.code, "REVISION_CONFLICT");
+
+        let deleted = dispatch(
+            "pantry.delete",
+            write_input(
+                "delete.json",
+                json!({"id":item_id,"expected_revision":1}),
+            )
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(deleted["deleted"], true);
+        assert_eq!(deleted["pantry_item_id"], item_id);
+        assert_eq!(deleted["label_code"], label_code);
+        assert_eq!(deleted["revision"], 2);
+
+        let listed = dispatch(
+            "pantry.list",
+            write_input("list.json", json!({"as_of":"2026-11-15"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert!(listed["items"].as_array().unwrap().is_empty());
+        let exported = dispatch(
+            "label.export",
+            write_input("export.json", json!({"as_of":"2026-11-15"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert!(exported["labels"].as_array().unwrap().is_empty());
+
+        for (name, tool, payload) in [
+            ("again.json", "pantry.delete", json!({"id":item_id})),
+            (
+                "revive.json",
+                "pantry.upsert",
+                json!({"id":item_id,"name":"Stale PBS"}),
+            ),
+        ] {
+            let err = dispatch(tool, write_input(name, payload).to_str().unwrap(), &dir).unwrap_err();
+            assert_eq!(err.code, "NOT_FOUND", "{tool} on a retired item");
+        }
+
+        let reserved: i64 = {
+            let db = open_db(&dir).unwrap();
+            db.query_row(
+                "SELECT deleted FROM pantry_items WHERE label_code=?1",
+                [&label_code],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            reserved, 1,
+            "the retired row keeps its label code reserved"
+        );
+        assert!(tool_writes("pantry.delete"));
+        assert!(input_schema("pantry.delete").is_some());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pantry_table_from_an_earlier_build_gains_the_tombstone_column() {
+        let dir = std::env::temp_dir().join(format!("pantry-migrate-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let legacy = Connection::open(dir.join("labworkbench.sqlite")).unwrap();
+            legacy
+                .execute_batch(
+                    "CREATE TABLE pantry_items(\
+id TEXT PRIMARY KEY,\
+label_code TEXT NOT NULL UNIQUE,\
+project_id TEXT,\
+name TEXT NOT NULL,\
+location TEXT NOT NULL,\
+purchased_on TEXT,\
+opened_on TEXT,\
+shelf_life_days INTEGER,\
+opened_shelf_life_days INTEGER,\
+exhausted INTEGER NOT NULL DEFAULT 0,\
+revision INTEGER NOT NULL DEFAULT 1,\
+created_at TEXT NOT NULL,\
+updated_at TEXT NOT NULL);\
+INSERT INTO pantry_items VALUES(\
+'legacy-1','PN-LEGACY01',NULL,'Legacy PBS','bench',NULL,NULL,NULL,NULL,0,1,\
+'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');",
+                )
+                .unwrap();
+        }
+        let write_input = |name: &str, value: Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, value.to_string()).unwrap();
+            path
+        };
+        let listed = dispatch(
+            "pantry.list",
+            write_input("list.json", json!({"as_of":"2026-11-15"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(listed["items"][0]["label_code"], "PN-LEGACY01");
+        assert_eq!(listed["items"][0]["status"], "unopened");
+
+        let deleted = dispatch(
+            "pantry.delete",
+            write_input("delete.json", json!({"id":"legacy-1"}))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(deleted["revision"], 2);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
