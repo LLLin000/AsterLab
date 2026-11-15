@@ -1,0 +1,27 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src/lib.rs (<build-dir>)
+
+running 8 tests
+test design_commands::tests::assay_cannot_reference_unknown_group ... ok
+test design_commands::tests::derive_design_rejects_a_foreign_run_id ... ok
+test design_commands::tests::derived_design_json_round_trips_the_draft ... ok
+test design_commands::tests::draft_round_trips_through_design_json ... ok
+test design_commands::tests::duplicate_group_ids_are_rejected ... ok
+test design_commands::tests::duplicate_timepoints_are_rejected ... ok
+test design_commands::tests::empty_groups_and_assays_are_valid_draft_unknowns ... ok
+test design_commands::tests::derive_design_copies_frozen_draft_and_measured_drift ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 383 filtered out; finished in 0.00s
+
+     Running tests/catalog_drafts.rs (<build-dir>)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/operation_surface.rs (<build-dir>)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

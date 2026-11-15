@@ -6,6 +6,7 @@ pub mod design_map;
 pub mod protocol_preview;
 pub mod protocol_version;
 pub mod run_workspace;
+pub mod record_projection;
 pub mod design_commands;
 pub mod operation_module;
 pub mod operation_spec;

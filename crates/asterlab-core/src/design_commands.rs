@@ -4,7 +4,12 @@
 //! validation. Persistence is an adapter concern; CLI, HTTP and the desktop
 //! application must call the same Application Service.
 
+use crate::design_map::FrozenDesignView;
+use crate::record_projection::{compare_parameters, ParameterComparison, ParameterStatus};
+use crate::run_workspace::RunWorkspace;
+use crate::timer::TimerRecord;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -278,6 +283,226 @@ pub fn validate_draft(draft: &DesignDraft) -> Result<(), DesignCommandError> {
     Ok(())
 }
 
+impl DesignDraft {
+    /// Rebuild the editable draft from the frozen DesignVersion a Run points at.
+    ///
+    /// Fields the frozen map does not carry (`group_names`, `controls`,
+    /// `timepoint_timing`) are not invented; the adapter keeps them in the
+    /// stored design JSON.
+    pub fn from_frozen_design(frozen: &FrozenDesignView) -> Self {
+        Self {
+            title: frozen.content.title.clone(),
+            objective: frozen.content.objective.clone(),
+            experimental_unit: frozen.content.experimental_unit.clone(),
+            groups: frozen
+                .content
+                .groups
+                .iter()
+                .map(|group| DesignGroupDraft {
+                    id: group.id.clone(),
+                    name: group.name.clone(),
+                    role: group.role.clone(),
+                    condition: group.condition.clone(),
+                    independent_n: group.independent_n,
+                    technical_repeats: group.technical_repeats,
+                })
+                .collect(),
+            assays: frozen
+                .content
+                .assays
+                .iter()
+                .map(|assay| DesignAssayDraft {
+                    id: assay.id.clone(),
+                    title: assay.title.clone(),
+                    endpoint: assay.endpoint.clone(),
+                    method: assay.method.clone(),
+                    unit: assay.unit.clone(),
+                    group_ids: assay.group_ids.clone(),
+                    timepoints: assay.timepoints.clone(),
+                    timepoint_relation: assay.timepoint_relation.clone(),
+                    protocol_version_id: assay.protocol_version_id.clone(),
+                    container_type: assay.container_type.clone(),
+                    container_format: assay.container_format.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Request the next Design revision derived from one finished Run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeriveDesignCommand {
+    pub run_id: String,
+    /// Optional replacement title; the frozen title is reused when absent.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Optional replacement research question.
+    #[serde(default)]
+    pub objective: Option<String>,
+    pub note: Option<String>,
+}
+
+/// A measured parameter that should become the next version's binding.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DerivedParameterUpdate {
+    pub scope_id: String,
+    pub step_path: Option<String>,
+    pub parameter_key: String,
+    pub label: Option<String>,
+    pub unit: Option<String>,
+    pub planned: Option<Value>,
+    pub actual: Value,
+    pub event_id: String,
+}
+
+/// A measured duration that should become the next version's time budget input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DerivedDurationUpdate {
+    pub timer_id: String,
+    pub task_key: String,
+    pub phase_index: u32,
+    pub planned_s: Option<u64>,
+    pub actual_s: u64,
+}
+
+/// Next Design version payload derived from one Run.
+///
+/// The frozen Run and its DesignVersion are only read: the caller persists this
+/// as a new revision through [`ReviseDesign`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DerivedDesign {
+    pub design_id: String,
+    pub source_design_version_id: String,
+    pub source_design_revision: i64,
+    /// Revision the adapter must pass as `ReviseDesign.expected_revision`.
+    pub expected_revision: i64,
+    pub source_run_id: String,
+    pub draft: DesignDraft,
+    pub parameter_updates: Vec<DerivedParameterUpdate>,
+    pub duration_updates: Vec<DerivedDurationUpdate>,
+    pub note: Option<String>,
+}
+
+impl DerivedDesign {
+    pub fn to_design_json(&self) -> Value {
+        let mut data = self.draft.to_design_json();
+        data["derived_from"] = json!({
+            "design_version_id": self.source_design_version_id,
+            "design_revision": self.source_design_revision,
+            "run_id": self.source_run_id,
+            "parameter_updates": self.parameter_updates.iter().map(|update| json!({
+                "scope_id": update.scope_id,
+                "step_path": update.step_path,
+                "parameter_key": update.parameter_key,
+                "label": update.label,
+                "unit": update.unit,
+                "planned": update.planned,
+                "actual": update.actual,
+                "event_id": update.event_id,
+            })).collect::<Vec<_>>(),
+            "duration_updates": self.duration_updates.iter().map(|update| json!({
+                "timer_id": update.timer_id,
+                "task_key": update.task_key,
+                "phase_index": update.phase_index,
+                "planned_s": update.planned_s,
+                "actual_s": update.actual_s,
+            })).collect::<Vec<_>>(),
+            "note": self.note,
+        });
+        data
+    }
+}
+
+/// Derive the next Design version from a Run's measured parameters and timers.
+///
+/// Pure: the frozen Run workspace is only read, and nothing is persisted here.
+/// Only measured drift enters `parameter_updates`; planned-but-unrecorded slots
+/// and matching values stay out so the next version does not lose unknowns.
+pub fn derive_design_from_run(
+    workspace: &RunWorkspace,
+    timers: &[TimerRecord],
+    command: &DeriveDesignCommand,
+) -> Result<DerivedDesign, DesignCommandError> {
+    if command.run_id.trim() != workspace.run_id {
+        return Err(DesignCommandError {
+            code: "WRONG_RUN".to_owned(),
+            path: Some("run_id".to_owned()),
+            message: format!(
+                "Run {} 与冻结工作区 {} 不一致",
+                command.run_id, workspace.run_id
+            ),
+        });
+    }
+
+    let frozen = &workspace.frozen_design;
+    let mut draft = DesignDraft::from_frozen_design(frozen);
+    if let Some(title) = command.title.as_deref() {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(DesignCommandError::invalid("title", "设计名称不能为空"));
+        }
+        draft.title = title.to_owned();
+    }
+    if let Some(objective) = command.objective.as_deref() {
+        draft.objective = objective.to_owned();
+    }
+    validate_draft(&draft).map_err(|error| DesignCommandError {
+        code: "INVALID_DERIVED_DESIGN".to_owned(),
+        path: error.path,
+        message: error.message,
+    })?;
+
+    let parameter_updates = derived_parameter_updates(&compare_parameters(workspace));
+    let duration_updates = timers
+        .iter()
+        .filter(|timer| timer.accumulated_s > 0)
+        .filter(|timer| timer.status != crate::timer::TimerStatus::Running)
+        .map(|timer| DerivedDurationUpdate {
+            timer_id: timer.timer_id.clone(),
+            task_key: timer.task_key.clone(),
+            phase_index: timer.phase_index,
+            planned_s: timer.planned_s,
+            actual_s: timer.accumulated_s,
+        })
+        .collect();
+
+    Ok(DerivedDesign {
+        design_id: frozen.design_id.clone(),
+        source_design_version_id: frozen.design_version_id.clone(),
+        source_design_revision: frozen.design_revision,
+        expected_revision: frozen.design_revision,
+        source_run_id: workspace.run_id.clone(),
+        draft,
+        parameter_updates,
+        duration_updates,
+        note: command.note.clone(),
+    })
+}
+
+fn derived_parameter_updates(comparisons: &[ParameterComparison]) -> Vec<DerivedParameterUpdate> {
+    let mut updates = Vec::new();
+    for row in comparisons {
+        if matches!(row.status, ParameterStatus::Matches | ParameterStatus::MissingActual) {
+            continue;
+        }
+        // `actual` is chronological; the last recording is the Run's final value.
+        let Some(actual) = row.actual.last() else {
+            continue;
+        };
+        updates.push(DerivedParameterUpdate {
+            scope_id: row.scope_id.clone(),
+            step_path: row.step_path.clone(),
+            parameter_key: row.slot.clone(),
+            label: row.label.clone(),
+            unit: actual.unit.clone().or_else(|| row.unit.clone()),
+            planned: row.planned.clone(),
+            actual: actual.value.clone(),
+            event_id: actual.event_id.clone(),
+        });
+    }
+    updates
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,5 +580,166 @@ mod tests {
             timepoint_relation: None, protocol_version_id: None, container_type: None, container_format: None,
         }];
         assert!(validate_draft(&draft).is_err());
+    }
+
+    fn derive_design() -> Value {
+        serde_json::json!({
+            "title":"HUVEC 成管",
+            "objective":"比较 3%/5%/7% GelMA",
+            "experimental_unit":"well",
+            "group_specs":[
+                {"id":"g3","name":"3%","role":"treatment","condition":"3% GelMA","technical_repeats":6},
+                {"id":"g5","name":"5%","role":"treatment","condition":"5% GelMA"}
+            ],
+            "assays":[{
+                "id":"tube","title":"Tube formation","endpoint":"tube_length",
+                "method":"microscopy","unit":"um","group_ids":["g3","g5"],
+                "timepoints":["6h","12h","24h"],
+                "timepoint_relation":"same_physical_sample_repeated",
+                "protocol_version_id":"pv1"
+            }],
+            "sample_allocations":[],"planned_outputs":[],"evidence_conflicts":[]
+        })
+    }
+
+    fn derive_run() -> Value {
+        serde_json::json!({
+            "status":"completed",
+            "protocol_manifest":[{
+                "assay_id":"tube","assay_title":"Tube formation","protocol_version_id":"pv1",
+                "resolved_parameters":[
+                    {"slot":"curing_s","label":"405nm 固化秒数","value":45,"unit":"s","provenance":[]},
+                    {"slot":"seeding_density","label":"接种密度","value":10000,"unit":"cells/well","provenance":[]}
+                ],
+                "unresolved_parameters":[],
+                "steps":[
+                    {"path":"root/seed","use_id":"seed","title":"Seed","instruction":"seed",
+                     "parameters":[],"unresolved_parameter_refs":[],
+                     "source_block_version_id":"b1","time_scope":"once"}
+                ]
+            }],
+            "material_manifest":[]
+        })
+    }
+
+    fn derive_workspace(events: Vec<Value>) -> RunWorkspace {
+        crate::run_workspace::build(
+            "r1", "d1", "dv1", 4, &derive_design(), &derive_run(), &[], &events,
+        )
+        .expect("workspace")
+    }
+
+    fn completed_timer(accumulated_s: u64) -> TimerRecord {
+        TimerRecord {
+            timer_id: "t1".into(),
+            run_id: "r1".into(),
+            task_key: "task-seed".into(),
+            phase_index: 0,
+            mode: crate::timer::TimerMode::Countdown,
+            planned_s: Some(45),
+            started_at_utc: None,
+            accumulated_s,
+            status: crate::timer::TimerStatus::Completed,
+            round_index: 0,
+            round_count: None,
+            anchor_event_id: None,
+            anchor_task_key: None,
+        }
+    }
+
+    #[test]
+    fn derive_design_copies_frozen_draft_and_measured_drift() {
+        let events = vec![serde_json::json!({
+            "id":"e1","event_type":"measurement","protocol_step_path":"root/seed",
+            "assay_id":"tube","recorded_at":"2026-11-15T08:00:00Z",
+            "actual_parameters":[
+                {"key":"curing_s","value":52,"unit":"s"},
+                {"key":"seeding_density","value":10000,"unit":"cells/well"}
+            ]
+        })];
+        let workspace = derive_workspace(events);
+        let before = serde_json::to_string(&workspace).expect("snapshot");
+
+        let derived = derive_design_from_run(
+            &workspace,
+            &[completed_timer(52)],
+            &DeriveDesignCommand {
+                run_id: "r1".into(),
+                title: Some("HUVEC 成管 v2".into()),
+                objective: Some("按实测固化时间比较".into()),
+                note: Some("固化实测 52s".into()),
+            },
+        )
+        .expect("derive");
+
+        assert_eq!(derived.design_id, "d1");
+        assert_eq!(derived.source_design_version_id, "dv1");
+        assert_eq!(derived.source_design_revision, 4);
+        assert_eq!(derived.expected_revision, 4);
+        assert_eq!(derived.source_run_id, "r1");
+        assert_eq!(derived.draft.title, "HUVEC 成管 v2");
+        assert_eq!(derived.draft.objective, "按实测固化时间比较");
+        assert_eq!(derived.draft.experimental_unit.as_deref(), Some("well"));
+        assert_eq!(derived.draft.groups.len(), 2);
+        assert_eq!(derived.draft.groups[0].technical_repeats, Some(6));
+        assert_eq!(derived.draft.assays[0].group_ids, vec!["g3", "g5"]);
+        assert_eq!(derived.draft.assays[0].timepoints, vec!["6h", "12h", "24h"]);
+
+        // Only the drifted slot becomes an update; the matching one is dropped.
+        assert_eq!(derived.parameter_updates.len(), 1);
+        let update = &derived.parameter_updates[0];
+        assert_eq!(update.parameter_key, "curing_s");
+        assert_eq!(update.planned, Some(serde_json::json!(45)));
+        assert_eq!(update.actual, serde_json::json!(52));
+        assert_eq!(update.event_id, "e1");
+        assert_eq!(derived.duration_updates.len(), 1);
+        assert_eq!(derived.duration_updates[0].actual_s, 52);
+        assert_eq!(derived.duration_updates[0].planned_s, Some(45));
+
+        // The frozen Run is untouched by the derivation.
+        assert_eq!(
+            serde_json::to_string(&workspace).expect("snapshot"),
+            before
+        );
+    }
+
+    #[test]
+    fn derive_design_rejects_a_foreign_run_id() {
+        let workspace = derive_workspace(Vec::new());
+        let error = derive_design_from_run(
+            &workspace,
+            &[],
+            &DeriveDesignCommand {
+                run_id: "other".into(),
+                title: None,
+                objective: None,
+                note: None,
+            },
+        )
+        .expect_err("wrong run");
+        assert_eq!(error.code, "WRONG_RUN");
+        assert_eq!(error.path.as_deref(), Some("run_id"));
+    }
+
+    #[test]
+    fn derived_design_json_round_trips_the_draft() {
+        let workspace = derive_workspace(Vec::new());
+        let derived = derive_design_from_run(
+            &workspace,
+            &[],
+            &DeriveDesignCommand {
+                run_id: "r1".into(),
+                title: None,
+                objective: None,
+                note: None,
+            },
+        )
+        .expect("derive");
+        let data = derived.to_design_json();
+        assert_eq!(DesignDraft::from_design_json(&data), derived.draft);
+        assert_eq!(data["derived_from"]["run_id"], "r1");
+        assert_eq!(data["derived_from"]["design_version_id"], "dv1");
+        assert!(derived.parameter_updates.is_empty());
+        assert!(derived.duration_updates.is_empty());
     }
 }
