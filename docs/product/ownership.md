@@ -78,3 +78,11 @@ restart and unsaved-state recovery.
   once at Wave 4.
 - No slice reformats files it does not own.
 - No slice changes `sdk-v1-rc3` or rewrites a frozen Run.
+
+## 6. Windows Gate
+
+Windows-host concurrency, ovnfs checkout isolation, and GUI/E2E sequencing
+are defined in
+[`cross-platform-builds.md` §10](../engineering/cross-platform-builds.md#10-windows-gate-task-execution).
+The one-writer-per-production-file rule in this document remains binding:
+overlapping write scopes serialize regardless of the Kandev WIP cap.

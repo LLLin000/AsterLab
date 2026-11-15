@@ -173,3 +173,44 @@ have run. A Linux-only green run does not prove the GUI.
   Canvas/Run rail still uses the Go producer; keep the shared evidence test
   green and migrate the GUI producer before calling the two implementations a
   single code path.
+
+## 10. Windows Gate task execution
+
+Kandev `Windows Gate` is a manual Windows-host lane. It must never dispatch work
+to a Linux/VPS agent.
+
+### Entry and checkout
+
+1. Use a Kandev card as the source of truth for scope, dependencies, acceptance,
+   and baseline. Do not start while any `blocked_by` dependency is incomplete.
+2. Create one isolated ovnfs checkout per card, at that card's declared baseline:
+   `ovnfs new --name <lowercase-card-slug> --rev <baseline>`. Do not substitute
+   `origin/main` when the card names another baseline. Leave the shared checkout
+   and its user changes untouched; never share a checkout or task branch.
+3. Run only the platform/build/test commands required by the card. Preserve
+   per-task data directories and build artifacts; never reuse mutable Windows
+   app state between concurrent cards.
+
+### Serial and parallel work
+
+- Default to serial execution. `Windows Work` has WIP=2 as a hard ceiling, not
+  a target.
+- At most two implementation cards may overlap only when both have machine-
+  readable, disjoint `scope.write` sets, all real ordering is represented by
+  Kandev `blocked_by`, and each uses its own ovnfs checkout and isolated data.
+  Overlapping or unclear scopes are serial.
+- One Windows host is a shared resource: native/app builds that share outputs,
+  GUI operation, screenshots, PowerShell E2E, and final integration always run
+  serially, even when independent code edits were parallel.
+
+### Handoff
+
+- Enter `Windows Work` and mark `IN_PROGRESS` only after scope and dependencies
+  are checked.
+- Move to `Windows Verify` with the PR/branch, exact command output, and
+  card-specific evidence attached.
+- Verify only the card's acceptance criteria on Windows. UI evidence uses
+  1360×880 and 900×600 plus light/dark themes when required, and cites UX rule
+  IDs.
+- Move to `Done` only after every acceptance item and its evidence pass. A
+  failed check stays visible in `Windows Verify` or returns to `Windows Work`.
