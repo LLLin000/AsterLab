@@ -2,11 +2,13 @@ package runworkspace
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 
+	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
@@ -340,5 +342,118 @@ func TestHistoryTabListsStoredEventAndOpensBatch(t *testing.T) {
 	}
 	if opened != "batch-1" {
 		t.Fatalf("opened batch = %q, want batch-1", opened)
+	}
+}
+
+// TestStackedRunViewStartsAtRecordingAndKeepsTableFirstRow pins UX-03: at
+// 900x600 the inline flow rail must not reveal its selection by scrolling the
+// shared page, which used to push the recording header and the table's first
+// rows off screen and leak the offset into the table view.
+func TestStackedRunViewStartsAtRecordingAndKeepsTableFirstRow(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	rows, cols := make([]string, 8), make([]string, 12)
+	for i := range rows {
+		rows[i] = string(rune('A' + i))
+	}
+	for i := range cols {
+		cols[i] = strconv.Itoa(i + 1)
+	}
+	grid := resultgrid.New(resultgrid.Schema{
+		ID: "cck8.plate96.od450.v1", Layout: "plate96",
+		RowLabels: rows, ColumnLabels: cols,
+		Fields: []resultgrid.Field{{Key: "od450", Label: "OD450", Unit: "AU"}},
+	}, nil)
+	kind := ViewPlate
+	s := NewState(vm, Callbacks{Recording: func(c *ui.Context, task *RunTaskViewModel) {
+		rv := &RecordingView{Kind: kind, Grid: grid, Task: task}
+		rv.Render(c)
+	}})
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 900, 600)
+	tt.Frame()
+	header, ok := tt.Find("实验记录")
+	if !ok || header.W == 0 || header.Y < 0 || header.Y >= 600 {
+		t.Fatalf("recording header not in the initial viewport at 900x600: %+v ok=%v", header, ok)
+	}
+	kind = ViewTable
+	tt.Frame()
+	first, ok := tt.Find("A1")
+	if !ok || first.W == 0 || first.Y < 0 || first.Y >= 600 {
+		t.Fatalf("table first row A1 not in the viewport after switching views: %+v ok=%v", first, ok)
+	}
+	second, ok := tt.Find("A2")
+	if !ok || second.Y <= first.Y {
+		t.Fatalf("table rows lost their order after switching views: A1=%+v A2=%+v", first, second)
+	}
+}
+
+// TestReadingFieldKeepsFocusAcrossBreakpointResize pins UX-03: the reading
+// field the operator is typing in keeps keyboard focus when the window crosses
+// the 1360/900 layout breakpoint, which rebuilds the whole recording subtree.
+func TestReadingFieldKeepsFocusAcrossBreakpointResize(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	rows, cols := make([]string, 8), make([]string, 12)
+	for i := range rows {
+		rows[i] = string(rune('A' + i))
+	}
+	for i := range cols {
+		cols[i] = strconv.Itoa(i + 1)
+	}
+	grid := resultgrid.New(resultgrid.Schema{
+		ID: "cck8.plate96.od450.v1", Layout: "plate96",
+		RowLabels: rows, ColumnLabels: cols,
+		Fields: []resultgrid.Field{{Key: "od450", Label: "OD450", Unit: "AU"}},
+	}, nil)
+	s := NewState(vm, Callbacks{Recording: func(c *ui.Context, task *RunTaskViewModel) {
+		rv := &RecordingView{Kind: ViewTable, Grid: grid, Task: task}
+		rv.Render(c)
+	}})
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+	if err := tt.Click("A1 读数"); err != nil {
+		t.Fatalf("focus A1 reading: %v", err)
+	}
+	tt.Frame()
+	if !tt.Focused("A1 读数") {
+		t.Fatal("A1 reading did not take focus at 1360x880")
+	}
+	tt.SetSize(900, 600)
+	tt.Frame()
+	if !tt.Focused("A1 读数") {
+		t.Fatal("A1 reading lost focus crossing to 900x600")
+	}
+	tt.SetSize(1360, 880)
+	tt.Frame()
+	if !tt.Focused("A1 读数") {
+		t.Fatal("A1 reading lost focus crossing back to 1360x880")
+	}
+}
+
+// TestSelectingStepGroupReportsTaskKey pins UX-03: a step group's synthetic
+// step id is not a Core task key, so reporting it as the selection made the
+// chosen task impossible to restore from the session. Selecting the group must
+// report the real task key of its task.
+func TestSelectingStepGroupReportsTaskKey(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	var selected string
+	s := NewState(vm, Callbacks{SelectTask: func(key string) { selected = key }})
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1200, 760)
+	tt.Frame()
+	if err := tt.Click("CCK-8 检测"); err != nil {
+		t.Fatal(err)
+	}
+	if selected != "t-read" {
+		t.Fatalf("step group reported selection %q, want the Core task key t-read", selected)
+	}
+	if s.Selected != "t-read" {
+		t.Fatalf("state selection = %q, want t-read", s.Selected)
 	}
 }
