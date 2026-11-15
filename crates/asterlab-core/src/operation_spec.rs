@@ -863,14 +863,21 @@ mod tests {
     }
 
     #[test]
-    fn v2_contract_example_parses_and_validates() {
+    fn v2_contract_examples_parse_and_validate() {
         let doc = include_str!("../../../docs/contracts/operation-spec-v2.md");
-        let example = doc.split("## Example").nth(1).unwrap();
-        let blocks = json_blocks(example);
-        assert_eq!(blocks.len(), 1);
-        let spec: OperationSpec = serde_json::from_str(blocks[0]).expect("v2 example parses");
-        assert!(spec.is_supported_schema_version());
-        assert!(spec.validate().is_ok());
+        let examples: Vec<&str> = doc.split("## Example").skip(1).collect();
+        assert_eq!(examples.len(), 2);
+        let mut parsed = 0;
+        for example in examples {
+            for block in json_blocks(example) {
+                let spec: OperationSpec =
+                    serde_json::from_str(block).expect("v2 example parses");
+                assert!(spec.is_supported_schema_version());
+                assert!(spec.validate().is_ok());
+                parsed += 1;
+            }
+        }
+        assert_eq!(parsed, 2);
     }
 
 

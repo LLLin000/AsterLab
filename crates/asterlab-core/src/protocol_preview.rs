@@ -247,8 +247,10 @@ mod tests {
         .unwrap();
 
         let budget = project_time_budget(&specs).unwrap();
-        // 2h minimum beats the 30min declared wait, then t0+6h/12h/18h occur,
-        // and the 30min hands-on duration beats its 10min minimum.
+        // The 2h minimum beats the 30min declared wait. The schedule step adds
+        // its 6h offset after that 2h, so its occurrences start at t0+8h,
+        // t0+14h+10s, and t0+20h+20s: each 10s occurrence plus a 6h gap. The
+        // 30min hands-on duration beats its 10min minimum.
         assert_eq!(budget.hands_on_s, 1_800.0);
         assert_eq!(budget.total_span_s, 73_830.0);
         assert_eq!(
@@ -262,6 +264,59 @@ mod tests {
         assert!(budget.parallel_windows[1..]
             .iter()
             .all(|window| window.time_anchor_id.as_deref() == Some("t0")));
+    }
+
+    #[test]
+    fn three_anchored_rules_express_the_six_twelve_twentyfour_hour_series() {
+        use crate::operation_spec::OperationSpec;
+
+        // A uniform interval cannot produce a non-uniform series, so the
+        // t0+6h/12h/24h example is three anchored rules. Each rule's first
+        // occurrence lands on its declared offset when projected from the
+        // anchor; the serial projection does not resolve anchors across steps.
+        for (hours, expected_start) in [(6.0, 21_600.0), (12.0, 43_200.0), (24.0, 86_400.0)] {
+            let spec: OperationSpec = serde_json::from_value(json!({
+                "schema_version": 2,
+                "operation": { "kind": "measure", "endpoint_id": "readout", "unit": "AU" },
+                "timing": { "kind": "timed_endpoint", "duration": { "value": 10.0, "unit": "s" } },
+                "time_anchor_id": "t0",
+                "schedule": { "interval": { "value": 1.0, "unit": "h" }, "occurrences": 1,
+                    "offset": { "value": hours, "unit": "h" } }
+            }))
+            .unwrap();
+            assert!(spec.validate().is_ok());
+            let budget = project_time_budget(std::slice::from_ref(&spec)).unwrap();
+            assert_eq!(budget.parallel_windows.len(), 1);
+            assert_eq!(budget.parallel_windows[0].start_s, expected_start);
+            assert_eq!(budget.parallel_windows[0].time_anchor_id.as_deref(), Some("t0"));
+        }
+    }
+
+    #[test]
+    fn cold_chain_doc_example_projects_the_documented_starts() {
+        use crate::operation_spec::OperationSpec;
+
+        let doc = include_str!("../../../docs/contracts/operation-spec-v2.md");
+        let section = doc
+            .split("## Example: cold chain")
+            .nth(1)
+            .expect("cold chain example section");
+        let open = section.find("```json").expect("json fence") + "```json".len();
+        let close = section[open..].find("```").expect("closing fence") + open;
+        let spec: OperationSpec =
+            serde_json::from_str(&section[open..close]).expect("cold chain example parses");
+        assert!(spec.validate().is_ok());
+
+        let budget = project_time_budget(std::slice::from_ref(&spec)).unwrap();
+        assert_eq!(budget.total_span_s, 86_400.0);
+        assert_eq!(
+            budget
+                .parallel_windows
+                .iter()
+                .map(|window| (window.start_s, window.end_s))
+                .collect::<Vec<_>>(),
+            [(21_600.0, 28_800.0), (50_400.0, 57_600.0), (79_200.0, 86_400.0)]
+        );
     }
 
     #[test]
