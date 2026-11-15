@@ -8,7 +8,7 @@ Base commit: `0ab3f2a` (origin/main)
 - `cargo 1.100.0 (3acc79c0c 2026-11-05)`, `rustc 1.100.0 (0ef1bc386 2026-11-09)`
 - `go version go1.27.3 linux/amd64`
 - Shared build cache used as-is (`CARGO_TARGET_DIR=/srv/build/asterlab-target`, `RUSTC_WRAPPER=sccache`); no target-dir override.
-- Repository paths in the captured output are rewritten to `<repo>`; no `/var/lib/kandev/...` absolute path is stored.
+- Repository paths in the captured output are rewritten to `<repo>`; the raw files store no task-worktree absolute path.
 
 ## Acceptance commands
 
