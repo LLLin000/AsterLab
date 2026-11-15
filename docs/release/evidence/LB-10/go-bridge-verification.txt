@@ -1,0 +1,11 @@
+=== RUN   TestLB10BridgeVerification
+asterlab data dir: /srv/build/gotmp/lb10-fixture
+asterlab data dir: /srv/build/gotmp/lb10-fixture
+    zz_lb10_verify_test.go:32: run=d083269b-e703-4092-8b22-d3bbf98b2b9d task={"path":"root/seed/seed","scope":{"assay_id":"assay-cck8","kind":"assay"},"timepoint":null}
+    zz_lb10_verify_test.go:52: linked id=asset-3604fc5efe1fe5bfac93a0190f93a893 well="" timepoint="" fov=0
+    zz_lb10_verify_test.go:64: updated well="A1" timepoint="t6h" fov=1 id=asset-3604fc5efe1fe5bfac93a0190f93a893
+    zz_lb10_verify_test.go:91: cleared well="B2" timepoint="" fov=0
+    zz_lb10_verify_test.go:111: unlinked id=asset-3604fc5efe1fe5bfac93a0190f93a893; remaining links=0
+--- PASS: TestLB10BridgeVerification (0.08s)
+PASS
+ok  	asterlab-mygo-prototype/modules/runs	0.087s

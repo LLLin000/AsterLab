@@ -28,6 +28,24 @@ type RunService interface {
 	// ListAssetLinks returns all asset links for a Run, including after a
 	// fresh service reload.
 	ListAssetLinks(ctx context.Context, runID string) ([]Asset, error)
+	// UnlinkAssetLink removes the Run's link for one asset and appends an
+	// `unlinked` event; the referenced file is never touched. AssetID is
+	// Asset.ID as ListAssetLinks and SaveAssetLink report it, resolved inside
+	// runID: an asset this Run has no link for — including one already
+	// unlinked — is NOT_FOUND and nothing is written. The removed link's
+	// stored metadata is returned.
+	UnlinkAssetLink(ctx context.Context, runID string, assetID string) (Asset, error)
+	// UpdateAssetLinkCoordinates replaces one existing link's coordinate triple
+	// without changing the file identity: id, root, relative path, sha256,
+	// size, mod time, media type and availability are copied verbatim. AssetID
+	// is Asset.ID, resolved inside runID as in UnlinkAssetLink. WellID is
+	// required; an empty Timepoint and a FOVIndex of 0 mean "not recorded" and
+	// are stored as null, matching Core's asset-coordinates contract, while a
+	// well Core rejects is INVALID. The link is updated in place, so the file
+	// is never re-linked under a new record. An asset linked at more than one
+	// coordinate in the same Run cannot be addressed by asset id alone and is
+	// rejected rather than guessed. The updated link is returned.
+	UpdateAssetLinkCoordinates(ctx context.Context, runID string, assetID string, wellID string, timepoint string, fovIndex uint32) (Asset, error)
 	// CompleteTask marks a task completed and returns the persisted snapshot.
 	CompleteTask(ctx context.Context, input CompleteTaskInput) (RunSnapshot, error)
 	// CreateExecutionEvent appends one structured actual event (operation,

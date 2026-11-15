@@ -1,0 +1,11 @@
+$ labworkbench asset.events --input -
+{"run_id":"d083269b-e703-4092-8b22-d3bbf98b2b9d"}
+linked None previous=None asset=asset-3604fc5efe1fe5bfac93a0190f93a893
+updated A1_t6h_fov01 previous=None asset=asset-3604fc5efe1fe5bfac93a0190f93a893
+updated B2 previous=A1_t6h_fov01 asset=asset-3604fc5efe1fe5bfac93a0190f93a893
+unlinked B2 previous=None asset=asset-3604fc5efe1fe5bfac93a0190f93a893
+events: 4
+
+$ labworkbench asset.list --input -
+{"run_id":"d083269b-e703-4092-8b22-d3bbf98b2b9d"}
+{"ok":true,"result":{"records":[]},"tool":"asset.list"}

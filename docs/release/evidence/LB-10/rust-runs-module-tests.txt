@@ -1,0 +1,1377 @@
+    Blocking waiting for file lock on build directory
+   Compiling asterlab-app v0.1.0 (<repo>
+warning: unused variable: `assay_index`
+    --> <repo>:3913:9
+     |
+3913 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+     --> <repo>:10894:17
+      |
+10894 |             let mut warnings: Vec<String> = Vec::new();
+      |                 ----^^^^^^^^
+      |                 |
+      |                 help: remove this `mut`
+      |
+      = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `find_operation_event` is never used
+  --> <repo>:90:8
+   |
+18 | impl AppCore {
+   | ------------ method in this implementation
+...
+90 |     fn find_operation_event(&self, run_id: &str, op_id: &str) -> Option<Value> {
+   |        ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `INPUT_LIMIT` is never used
+  --> <repo>:67:7
+   |
+67 | const INPUT_LIMIT: u64 = 2 * 1024 * 1024;
+   |       ^^^^^^^^^^^
+
+warning: fields `code`, `exit`, `path`, `current_version`, `current_version_id`, and `issues` are never read
+  --> <repo>:73:16
+   |
+72 | pub(crate) struct CliError {
+   |                   -------- fields in this struct
+73 |     pub(crate) code: &'static str,
+   |                ^^^^
+74 |     pub(crate) message: String,
+75 |     pub(crate) exit: i32,
+   |                ^^^^
+76 |     /// Agent edit v1 optional fields; empty for the older command set.
+77 |     pub(crate) path: Option<String>,
+   |                ^^^^
+78 |     pub(crate) current_version: Option<i64>,
+   |                ^^^^^^^^^^^^^^^
+79 |     pub(crate) current_version_id: Option<String>,
+   |                ^^^^^^^^^^^^^^^^^^
+80 |     pub(crate) issues: Vec<Value>,
+   |                ^^^^^^
+   |
+   = note: `CliError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `as_str` is never used
+   --> <repo>:217:8
+    |
+216 | impl RunRelationship {
+    | -------------------- method in this implementation
+217 |     fn as_str(&self) -> &'static str {
+    |        ^^^^^^
+
+warning: struct `DesignCreate` is never constructed
+   --> <repo>:409:8
+    |
+409 | struct DesignCreate {
+    |        ^^^^^^^^^^^^
+
+warning: struct `DesignRevise` is never constructed
+   --> <repo>:448:8
+    |
+448 | struct DesignRevise {
+    |        ^^^^^^^^^^^^
+
+warning: struct `ProjectFilter` is never constructed
+   --> <repo>:455:8
+    |
+455 | struct ProjectFilter {
+    |        ^^^^^^^^^^^^^
+
+warning: struct `EmptyInput` is never constructed
+   --> <repo>:460:8
+    |
+460 | struct EmptyInput {}
+    |        ^^^^^^^^^^
+
+warning: struct `IdInput` is never constructed
+   --> <repo>:463:8
+    |
+463 | struct IdInput {
+    |        ^^^^^^^
+
+warning: struct `InspectTreeInput` is never constructed
+   --> <repo>:468:8
+    |
+468 | struct InspectTreeInput {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: struct `WorkflowProgressInput` is never constructed
+   --> <repo>:477:8
+    |
+477 | struct WorkflowProgressInput {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProjectCreate` is never constructed
+   --> <repo>:490:8
+    |
+490 | struct ProjectCreate {
+    |        ^^^^^^^^^^^^^
+
+warning: struct `ProjectRevise` is never constructed
+   --> <repo>:497:8
+    |
+497 | struct ProjectRevise {
+    |        ^^^^^^^^^^^^^
+
+warning: struct `RunCreate` is never constructed
+   --> <repo>:507:8
+    |
+507 | struct RunCreate {
+    |        ^^^^^^^^^
+
+warning: struct `RunRevise` is never constructed
+   --> <repo>:523:8
+    |
+523 | struct RunRevise {
+    |        ^^^^^^^^^
+
+warning: struct `RunPatch` is never constructed
+   --> <repo>:533:8
+    |
+533 | struct RunPatch {
+    |        ^^^^^^^^
+
+warning: struct `TaskCreate` is never constructed
+   --> <repo>:543:8
+    |
+543 | struct TaskCreate {
+    |        ^^^^^^^^^^
+
+warning: struct `StatusUpdate` is never constructed
+   --> <repo>:556:8
+    |
+556 | struct StatusUpdate {
+    |        ^^^^^^^^^^^^
+
+warning: function `planned` is never used
+   --> <repo>:561:4
+    |
+561 | fn planned() -> String {
+    |    ^^^^^^^
+
+warning: struct `ProtocolCreate` is never constructed
+   --> <repo>:566:8
+    |
+566 | struct ProtocolCreate {
+    |        ^^^^^^^^^^^^^^
+
+warning: struct `ProtocolRevise` is never constructed
+   --> <repo>:579:8
+    |
+579 | struct ProtocolRevise {
+    |        ^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockCreate` is never constructed
+   --> <repo>:591:8
+    |
+591 | struct ProtocolBlockCreate {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CatalogOperationImport` is never constructed
+   --> <repo>:602:8
+    |
+602 | struct CatalogOperationImport {
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `SemanticInspectInput` is never constructed
+   --> <repo>:612:8
+    |
+612 | struct SemanticInspectInput {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `SemanticSearchInput` is never constructed
+   --> <repo>:617:8
+    |
+617 | struct SemanticSearchInput {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `SemanticPatchInput` is never constructed
+   --> <repo>:625:8
+    |
+625 | struct SemanticPatchInput {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ViewCreate` is never constructed
+   --> <repo>:630:8
+    |
+630 | struct ViewCreate {
+    |        ^^^^^^^^^^
+
+warning: struct `LabwareDefine` is never constructed
+   --> <repo>:637:8
+    |
+637 | struct LabwareDefine {
+    |        ^^^^^^^^^^^^^
+
+warning: struct `ComponentDefine` is never constructed
+   --> <repo>:642:8
+    |
+642 | struct ComponentDefine {
+    |        ^^^^^^^^^^^^^^^
+
+warning: struct `ViewProject` is never constructed
+   --> <repo>:647:8
+    |
+647 | struct ViewProject {
+    |        ^^^^^^^^^^^
+
+warning: struct `ViewDataPreview` is never constructed
+   --> <repo>:656:8
+    |
+656 | struct ViewDataPreview {
+    |        ^^^^^^^^^^^^^^^
+
+warning: struct `ViewGet` is never constructed
+   --> <repo>:672:8
+    |
+672 | struct ViewGet {
+    |        ^^^^^^^
+
+warning: struct `ViewRevise` is never constructed
+   --> <repo>:677:8
+    |
+677 | struct ViewRevise {
+    |        ^^^^^^^^^^
+
+warning: struct `ViewProposalCreate` is never constructed
+   --> <repo>:683:8
+    |
+683 | struct ViewProposalCreate {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ViewProposalAction` is never constructed
+   --> <repo>:691:8
+    |
+691 | struct ViewProposalAction {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ViewProposalList` is never constructed
+   --> <repo>:697:8
+    |
+697 | struct ViewProposalList {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: struct `CatalogReviewCreate` is never constructed
+   --> <repo>:702:8
+    |
+702 | struct CatalogReviewCreate {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockRevise` is never constructed
+   --> <repo>:708:8
+    |
+708 | struct ProtocolBlockRevise {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockList` is never constructed
+   --> <repo>:719:8
+    |
+719 | struct ProtocolBlockList {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockGet` is never constructed
+   --> <repo>:725:8
+    |
+725 | struct ProtocolBlockGet {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolVersionGet` is never constructed
+   --> <repo>:730:8
+    |
+730 | struct ProtocolVersionGet {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolVersionList` is never constructed
+   --> <repo>:735:8
+    |
+735 | struct ProtocolVersionList {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProtocolBlockPreview` is never constructed
+   --> <repo>:748:8
+    |
+748 | struct ProtocolBlockPreview {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `validate_block_content` is never used
+   --> <repo>:850:4
+    |
+850 | fn validate_block_content(
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `ywells` is never used
+    --> <repo>:3873:4
+     |
+3873 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+     |    ^^^^^^
+
+warning: function `patch_run` is never used
+    --> <repo>:4270:15
+     |
+4270 | pub(crate) fn patch_run(
+     |               ^^^^^^^^^
+
+warning: function `readout_issue_error` is never used
+    --> <repo>:5035:4
+     |
+5035 | fn readout_issue_error(
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_readout_submission` is never used
+    --> <repo>:5054:4
+     |
+5054 | fn find_readout_submission(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `submit_readout` is never used
+    --> <repo>:5076:15
+     |
+5076 | pub(crate) fn submit_readout(
+     |               ^^^^^^^^^^^^^^
+
+warning: function `submit_readout_batch` is never used
+    --> <repo>:5108:15
+     |
+5108 | pub(crate) fn submit_readout_batch(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `preview_protocol_block` is never used
+    --> <repo>:5316:15
+     |
+5316 | pub(crate) fn preview_protocol_block(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_protocol_block_records` is never used
+    --> <repo>:5325:15
+     |
+5325 | pub(crate) fn create_protocol_block_records(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_protocol_block_records` is never used
+    --> <repo>:5373:15
+     |
+5373 | pub(crate) fn revise_protocol_block_records(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `apply_binding_changes` is never used
+    --> <repo>:5432:4
+     |
+5432 | fn apply_binding_changes(
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `DbComponentContext` is never constructed
+    --> <repo>:5532:8
+     |
+5532 | struct DbComponentContext<'a> {
+     |        ^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `with_design`, `design_versions`, `scope_exists`, `owned_record`, and `resolve_path` are never used
+    --> <repo>:5539:8
+     |
+5538 | impl<'a> DbComponentContext<'a> {
+     | ------------------------------- associated items in this implementation
+5539 |     fn new(db: &'a Connection, project_id: &'a str) -> Self {
+     |        ^^^
+...
+5547 |     fn with_design(
+     |        ^^^^^^^^^^^
+...
+5559 |     fn design_versions(&self) -> Vec<Value> {
+     |        ^^^^^^^^^^^^^^^
+...
+5573 |     fn scope_exists(&self, protocol_version_id: &str, scope: &ProtocolScope) -> bool {
+     |        ^^^^^^^^^^^^
+...
+5605 |     fn owned_record(&self, id: &str, kind: &str) -> Option<Value> {
+     |        ^^^^^^^^^^^^
+...
+5613 |     fn resolve_path(&self, value: &Value, path: &str) -> ModelPathResolution {
+     |        ^^^^^^^^^^^^
+
+warning: function `load_component_registry` is never used
+    --> <repo>:5713:4
+     |
+5713 | fn load_component_registry(db: &Connection) -> Result<ComponentRegistry, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_labware_profile` is never used
+    --> <repo>:5725:15
+     |
+5725 | pub(crate) fn create_labware_profile(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_component_definition` is never used
+    --> <repo>:5746:15
+     |
+5746 | pub(crate) fn create_component_definition(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_view_tx` is never used
+    --> <repo>:5784:15
+     |
+5784 | pub(crate) fn revise_view_tx(
+     |               ^^^^^^^^^^^^^^
+
+warning: function `view_step_detail` is never used
+    --> <repo>:5793:15
+     |
+5793 | pub(crate) fn view_step_detail(
+     |               ^^^^^^^^^^^^^^^^
+
+warning: function `create_view_proposal_tx` is never used
+    --> <repo>:5898:15
+     |
+5898 | pub(crate) fn create_view_proposal_tx(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `list_view_proposals` is never used
+    --> <repo>:5935:15
+     |
+5935 | pub(crate) fn list_view_proposals(db: &Connection, view_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `latest_view_proposal` is never used
+    --> <repo>:5960:4
+     |
+5960 | fn latest_view_proposal(
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `accept_view_proposal_tx` is never used
+    --> <repo>:5979:15
+     |
+5979 | pub(crate) fn accept_view_proposal_tx(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `reject_view_proposal_tx` is never used
+    --> <repo>:6005:15
+     |
+6005 | pub(crate) fn reject_view_proposal_tx(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `view_selection_context` is never used
+    --> <repo>:6028:15
+     |
+6028 | pub(crate) fn view_selection_context(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_slot_position` is never used
+    --> <repo>:6103:4
+     |
+6103 | fn find_slot_position(value: &Value, instance_id: &str) -> Option<(String, String, usize)> {
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `operation_changes` is never used
+    --> <repo>:6141:4
+     |
+6141 | fn operation_changes(
+     |    ^^^^^^^^^^^^^^^^^
+
+warning: function `view_proposal` is never used
+    --> <repo>:6226:15
+     |
+6226 | pub(crate) fn view_proposal(
+     |               ^^^^^^^^^^^^^
+
+warning: function `project_view_records` is never used
+    --> <repo>:6320:15
+     |
+6320 | pub(crate) fn project_view_records(db: &Connection, data: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `ensure_design_workflow` is never used
+    --> <repo>:6404:15
+     |
+6404 | pub(crate) fn ensure_design_workflow(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_component` is never used
+    --> <repo>:6495:4
+     |
+6495 | fn find_component<'a>(value: &'a Value, instance_id: &str) -> Option<&'a Value> {
+     |    ^^^^^^^^^^^^^^
+
+warning: function `find_planned_container` is never used
+    --> <repo>:6524:4
+     |
+6524 | fn find_planned_container(value: &Value, instance_id: &str) -> Option<(String, String)> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `view_data_preview` is never used
+    --> <repo>:6536:15
+     |
+6536 | pub(crate) fn view_data_preview(db: &Connection, data: &Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^
+
+warning: function `view_design_version` is never used
+    --> <repo>:6643:4
+     |
+6643 | fn view_design_version(document: &ViewDocument) -> Result<Option<String>, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_view_records` is never used
+    --> <repo>:6671:15
+     |
+6671 | pub(crate) fn create_view_records(
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_view_records` is never used
+    --> <repo>:6714:15
+     |
+6714 | pub(crate) fn revise_view_records(
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `record_document` is never used
+    --> <repo>:6770:4
+     |
+6770 | fn record_document(db: &Connection, id: &str) -> Result<(Value, ViewDocument), CliError> {
+     |    ^^^^^^^^^^^^^^^
+
+warning: function `create_catalog_review_records` is never used
+    --> <repo>:6780:15
+     |
+6780 | pub(crate) fn create_catalog_review_records(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `import_catalog_operation_records` is never used
+    --> <repo>:6809:15
+     |
+6809 | pub(crate) fn import_catalog_operation_records(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `semantic_error_with_conflict` is never used
+    --> <repo>:6879:4
+     |
+6879 | fn semantic_error_with_conflict(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `semantic_error` is never used
+    --> <repo>:6894:4
+     |
+6894 | fn semantic_error(issues: Vec<asterlab_core::semantic_component::SemanticIssue>) -> CliError {
+     |    ^^^^^^^^^^^^^^
+
+warning: function `ensure_run_protocol_ready` is never used
+    --> <repo>:6903:15
+     |
+6903 | pub(crate) fn ensure_run_protocol_ready(db: &Connection, run_id: &str) -> Result<(), CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `PlateCreate` is never constructed
+    --> <repo>:6945:8
+     |
+6945 | struct PlateCreate {
+     |        ^^^^^^^^^^^
+
+warning: struct `WellSet` is never constructed
+    --> <repo>:6958:8
+     |
+6958 | struct WellSet {
+     |        ^^^^^^^
+
+warning: struct `NoteCreate` is never constructed
+    --> <repo>:6972:8
+     |
+6972 | struct NoteCreate {
+     |        ^^^^^^^^^^
+
+warning: struct `FormulaCreate` is never constructed
+    --> <repo>:7163:8
+     |
+7163 | struct FormulaCreate {
+     |        ^^^^^^^^^^^^^
+
+warning: struct `FormulaRevise` is never constructed
+    --> <repo>:7174:8
+     |
+7174 | struct FormulaRevise {
+     |        ^^^^^^^^^^^^^
+
+warning: struct `TableCreate` is never constructed
+    --> <repo>:7188:8
+     |
+7188 | struct TableCreate {
+     |        ^^^^^^^^^^^
+
+warning: struct `TableRevise` is never constructed
+    --> <repo>:7196:8
+     |
+7196 | struct TableRevise {
+     |        ^^^^^^^^^^^
+
+warning: struct `DilutionCalc` is never constructed
+    --> <repo>:7205:8
+     |
+7205 | struct DilutionCalc {
+     |        ^^^^^^^^^^^^
+
+warning: struct `SolutionCalc` is never constructed
+    --> <repo>:7215:8
+     |
+7215 | struct SolutionCalc {
+     |        ^^^^^^^^^^^^
+
+warning: struct `SerialDilutionCalc` is never constructed
+    --> <repo>:7223:8
+     |
+7223 | struct SerialDilutionCalc {
+     |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReactionComponent` is never constructed
+    --> <repo>:7232:8
+     |
+7232 | struct ReactionComponent {
+     |        ^^^^^^^^^^^^^^^^^
+
+warning: struct `ReactionVolumeCalc` is never constructed
+    --> <repo>:7238:8
+     |
+7238 | struct ReactionVolumeCalc {
+     |        ^^^^^^^^^^^^^^^^^^
+
+warning: struct `GelMastermixCalcGroup` is never constructed
+    --> <repo>:7244:8
+     |
+7244 | struct GelMastermixCalcGroup {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `GelMastermixCalc` is never constructed
+    --> <repo>:7251:8
+     |
+7251 | struct GelMastermixCalc {
+     |        ^^^^^^^^^^^^^^^^
+
+warning: struct `CellSeedingCalcGroup` is never constructed
+    --> <repo>:7261:8
+     |
+7261 | struct CellSeedingCalcGroup {
+     |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CellSeedingCalc` is never constructed
+    --> <repo>:7267:8
+     |
+7267 | struct CellSeedingCalc {
+     |        ^^^^^^^^^^^^^^^
+
+warning: struct `RuntimeNormalizeCalc` is never constructed
+    --> <repo>:7280:8
+     |
+7280 | struct RuntimeNormalizeCalc {
+     |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `StudyImport` is never constructed
+    --> <repo>:7291:8
+     |
+7291 | struct StudyImport {
+     |        ^^^^^^^^^^^
+
+warning: struct `ProtocolBody` is never constructed
+    --> <repo>:7300:8
+     |
+7300 | struct ProtocolBody {
+     |        ^^^^^^^^^^^^
+
+warning: function `normalize_validate_design_data` is never used
+    --> <repo>:7493:15
+     |
+7493 | pub(crate) fn normalize_validate_design_data(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `inspect_workflow_tree` is never used
+    --> <repo>:7635:4
+     |
+7635 | fn inspect_workflow_tree(input: &InspectTreeInput, data_dir: &Path) -> Result<Value, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `workflow_tree_for_db` is never used
+    --> <repo>:7648:15
+     |
+7648 | pub(crate) fn workflow_tree_for_db(
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_workflow_document` is never used
+    --> <repo>:7715:4
+     |
+7715 | fn parse_workflow_document(source: &str) -> Result<Document, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `load_workflow_blocks` is never used
+    --> <repo>:7805:4
+     |
+7805 | fn load_workflow_blocks(
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `workflow_block_definition` is never used
+    --> <repo>:7827:4
+     |
+7827 | fn workflow_block_definition(value: Value) -> Result<BlockDefinition, String> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `workflow_tasks_from_workspace` is never used
+    --> <repo>:7903:4
+     |
+7903 | fn workflow_tasks_from_workspace(workspace: &Value) -> Vec<RunTask> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `design_map` is never used
+    --> <repo>:8073:15
+     |
+8073 | pub(crate) fn design_map(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^
+
+warning: function `data_dir` is never used
+    --> <repo>:8391:8
+     |
+8391 | pub fn data_dir() -> Result<PathBuf, CliError> {
+     |        ^^^^^^^^
+
+warning: function `db_path` is never used
+    --> <repo>:8431:8
+     |
+8431 | pub fn db_path(data_dir: &Path) -> PathBuf {
+     |        ^^^^^^^
+
+warning: function `parse_input` is never used
+    --> <repo>:8674:4
+     |
+8674 | fn parse_input<T: DeserializeOwned>(path: &str) -> Result<T, CliError> {
+     |    ^^^^^^^^^^^
+
+warning: struct `Invocation` is never constructed
+    --> <repo>:8700:8
+     |
+8700 | struct Invocation<'a> {
+     |        ^^^^^^^^^^
+
+warning: function `parse_args` is never used
+    --> <repo>:8707:4
+     |
+8707 | fn parse_args(args: &[String]) -> Result<Invocation<'_>, CliError> {
+     |    ^^^^^^^^^^
+
+warning: function `output` is never used
+    --> <repo>:8746:4
+     |
+8746 | fn output(tool: &str, result: Value, diagnostics: bool) {
+     |    ^^^^^^
+
+warning: function `success_envelope` is never used
+    --> <repo>:8750:4
+     |
+8750 | fn success_envelope(tool: &str, result: Value, diagnostics: bool) -> Value {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `result_diagnostics` is never used
+    --> <repo>:8766:4
+     |
+8766 | fn result_diagnostics(result: &Value) -> Vec<Value> {
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `update_data` is never used
+    --> <repo>:8785:4
+     |
+8785 | fn update_data(
+     |    ^^^^^^^^^^^
+
+warning: function `set_status` is never used
+    --> <repo>:8824:4
+     |
+8824 | fn set_status(
+     |    ^^^^^^^^^^
+
+warning: function `concentration_factor` is never used
+    --> <repo>:8852:4
+     |
+8852 | fn concentration_factor(unit: &str) -> Result<f64, CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `volume_factor` is never used
+    --> <repo>:8861:4
+     |
+8861 | fn volume_factor(unit: &str) -> Result<f64, CliError> {
+     |    ^^^^^^^^^^^^^
+
+warning: function `display_quantity` is never used
+    --> <repo>:8872:4
+     |
+8872 | fn display_quantity(value: f64) -> f64 {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `create_project` is never used
+    --> <repo>:8876:15
+     |
+8876 | pub(crate) fn create_project(db: &Connection, name: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^
+
+warning: function `run` is never used
+    --> <repo>:9345:8
+     |
+9345 | pub fn run(args: &[String], data_dir: &Path) -> i32 {
+     |        ^^^
+
+warning: function `fail` is never used
+    --> <repo>:9396:4
+     |
+9396 | fn fail(tool: &str, e: CliError, diagnostics: bool) -> i32 {
+     |    ^^^^
+
+warning: function `error_envelope` is never used
+    --> <repo>:9402:4
+     |
+9402 | fn error_envelope(tool: &str, e: &CliError, diagnostics: bool) -> Value {
+     |    ^^^^^^^^^^^^^^
+
+warning: function `cli_diagnostics` is never used
+    --> <repo>:9425:4
+     |
+9425 | fn cli_diagnostics(e: &CliError) -> Vec<Value> {
+     |    ^^^^^^^^^^^^^^^
+
+warning: function `next_action_for` is never used
+    --> <repo>:9448:4
+     |
+9448 | fn next_action_for(code: &str) -> &'static str {
+     |    ^^^^^^^^^^^^^^^
+
+warning: function `print_help` is never used
+    --> <repo>:9459:4
+     |
+9459 | fn print_help() {
+     |    ^^^^^^^^^^
+
+warning: function `require_trusted_writer` is never used
+    --> <repo>:9463:4
+     |
+9463 | fn require_trusted_writer(tool: &str) -> Result<(), CliError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CliEditStore` is never constructed
+    --> <repo>:9474:8
+     |
+9474 | struct CliEditStore<'a> {
+     |        ^^^^^^^^^^^^
+
+warning: function `edit_protocol_head` is never used
+    --> <repo>:9478:4
+     |
+9478 | fn edit_protocol_head(
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `edit_block_version` is never used
+    --> <repo>:9521:4
+     |
+9521 | fn edit_block_version(
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: struct `CliCommitStore` is never constructed
+    --> <repo>:9563:8
+     |
+9563 | struct CliCommitStore<'a, 'conn> {
+     |        ^^^^^^^^^^^^^^
+
+warning: function `validate_agent_edit` is never used
+    --> <repo>:9690:15
+     |
+9690 | pub(crate) fn validate_agent_edit(db: &Connection, input: Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `commit_agent_edit` is never used
+    --> <repo>:9704:15
+     |
+9704 | pub(crate) fn commit_agent_edit(db: &mut Connection, input: Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^
+
+warning: function `agent_edit_cli_error` is never used
+    --> <repo>:9734:4
+     |
+9734 | fn agent_edit_cli_error(error: AgentEditError) -> CliError {
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CliStepEditStore` is never constructed
+    --> <repo>:9768:8
+     |
+9768 | struct CliStepEditStore<'a> {
+     |        ^^^^^^^^^^^^^^^^
+
+warning: function `step_edit_block_version` is never used
+    --> <repo>:9772:4
+     |
+9772 | fn step_edit_block_version(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `step_edit_block_head` is never used
+    --> <repo>:9807:4
+     |
+9807 | fn step_edit_block_head(
+     |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CliStepEditCommitStore` is never constructed
+    --> <repo>:9840:8
+     |
+9840 | struct CliStepEditCommitStore<'a, 'conn> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `step_edit_command` is never used
+    --> <repo>:9928:15
+     |
+9928 | pub(crate) fn step_edit_command(db: &mut Connection, input: Value) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^^^^^^
+
+warning: function `pantry_event_notice` is never used
+     --> <repo>:10382:4
+      |
+10382 | fn pantry_event_notice(db: &Connection, item_id: Option<&str>) -> Result<Option<Value>, CliError> {
+      |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `dispatch` is never used
+     --> <repo>:10407:4
+      |
+10407 | fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> {
+      |    ^^^^^^^^
+
+warning: struct `RecordList` is never constructed
+     --> <repo>:11973:8
+      |
+11973 | struct RecordList {
+      |        ^^^^^^^^^^
+
+warning: function `validate_import` is never used
+     --> <repo>:11979:4
+      |
+11979 | fn validate_import(i: &StudyImport) -> Result<(), CliError> {
+      |    ^^^^^^^^^^^^^^^
+
+warning: function `design_payload_schema` is never used
+     --> <repo>:12008:4
+      |
+12008 | fn design_payload_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `asset_link_payload_schema` is never used
+     --> <repo>:12011:4
+      |
+12011 | fn asset_link_payload_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `asset_link_event_payload_schema` is never used
+     --> <repo>:12030:4
+      |
+12030 | fn asset_link_event_payload_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `record_data_schema` is never used
+     --> <repo>:12052:4
+      |
+12052 | fn record_data_schema(kind: &str) -> Value {
+      |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `record_schema` is never used
+     --> <repo>:12117:4
+      |
+12117 | fn record_schema(kind: &str) -> Value {
+      |    ^^^^^^^^^^^^^
+
+warning: function `any_record_schema` is never used
+     --> <repo>:12129:4
+      |
+12129 | fn any_record_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^
+
+warning: function `workflow_progress_output_schema` is never used
+     --> <repo>:12156:4
+      |
+12156 | fn workflow_progress_output_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `result_schema` is never used
+     --> <repo>:12220:4
+      |
+12220 | fn result_schema(tool: &str) -> Value {
+      |    ^^^^^^^^^^^^^
+
+warning: function `diagnostic_schema` is never used
+     --> <repo>:12377:4
+      |
+12377 | fn diagnostic_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^
+
+warning: function `output_schema` is never used
+     --> <repo>:12381:4
+      |
+12381 | fn output_schema(tool: &str) -> Value {
+      |    ^^^^^^^^^^^^^
+
+warning: function `input_schema` is never used
+     --> <repo>:12392:4
+      |
+12392 | fn input_schema(tool: &str) -> Option<Value> {
+      |    ^^^^^^^^^^^^
+
+warning: function `design_schema` is never used
+     --> <repo>:12661:4
+      |
+12661 | fn design_schema() -> Value {
+      |    ^^^^^^^^^^^^^
+
+warning: function `schema` is never used
+     --> <repo>:12689:4
+      |
+12689 | fn schema(tool: &str) -> Option<Value> {
+      |    ^^^^^^
+
+warning: function `parameter_slot_input_schema` is never used
+     --> <repo>:12692:4
+      |
+12692 | fn parameter_slot_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `step_binding_input_schema` is never used
+     --> <repo>:12705:4
+      |
+12705 | fn step_binding_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `text_step_input_schema` is never used
+     --> <repo>:12717:4
+      |
+12717 | fn text_step_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `protocol_step_input_schema` is never used
+     --> <repo>:12727:4
+      |
+12727 | fn protocol_step_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `step_edit_op_input_schema` is never used
+     --> <repo>:12736:4
+      |
+12736 | fn step_edit_op_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `root_parameter_values_input_schema` is never used
+     --> <repo>:12757:4
+      |
+12757 | fn root_parameter_values_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `timepoint_timing_input_schema` is never used
+     --> <repo>:12762:4
+      |
+12762 | fn timepoint_timing_input_schema() -> Value {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `tool_specs` is never used
+     --> <repo>:12776:4
+      |
+12776 | fn tool_specs() -> Vec<Value> {
+      |    ^^^^^^^^^^
+
+warning: function `tool_writes` is never used
+     --> <repo>:12868:4
+      |
+12868 | fn tool_writes(tool: &str) -> bool {
+      |    ^^^^^^^^^^^
+
+warning: function `tool_description` is never used
+     --> <repo>:12914:4
+      |
+12914 | fn tool_description(tool: &str) -> &'static str {
+      |    ^^^^^^^^^^^^^^^^
+
+warning: function `tool_effects` is never used
+     --> <repo>:13007:4
+      |
+13007 | fn tool_effects(tool: &str) -> &'static str {
+      |    ^^^^^^^^^^^^
+
+warning: struct `AssetLinkCreate` is never constructed
+     --> <repo>:13093:8
+      |
+13093 | struct AssetLinkCreate {
+      |        ^^^^^^^^^^^^^^^
+
+warning: struct `AssetUnlinkInput` is never constructed
+     --> <repo>:13116:8
+      |
+13116 | struct AssetUnlinkInput {
+      |        ^^^^^^^^^^^^^^^^
+
+warning: struct `AssetLinkUpdateInput` is never constructed
+     --> <repo>:13133:19
+      |
+13133 | pub(crate) struct AssetLinkUpdateInput {
+      |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `deserialize_some` is never used
+     --> <repo>:13146:4
+      |
+13146 | fn deserialize_some<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+      |    ^^^^^^^^^^^^^^^^
+
+warning: struct `AssetListInput` is never constructed
+     --> <repo>:13156:8
+      |
+13156 | struct AssetListInput {
+      |        ^^^^^^^^^^^^^^
+
+warning: struct `AssetEventsInput` is never constructed
+     --> <repo>:13162:8
+      |
+13162 | struct AssetEventsInput {
+      |        ^^^^^^^^^^^^^^^^
+
+warning: function `link_local_asset` is never used
+     --> <repo>:13415:4
+      |
+13415 | fn link_local_asset(
+      |    ^^^^^^^^^^^^^^^^
+
+warning: function `unlink_asset_link` is never used
+     --> <repo>:13600:15
+      |
+13600 | pub(crate) fn unlink_asset_link(
+      |               ^^^^^^^^^^^^^^^^^
+
+warning: function `asset_link_event_from_data` is never used
+     --> <repo>:13654:4
+      |
+13654 | fn asset_link_event_from_data(
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `update_asset_link` is never used
+     --> <repo>:13695:15
+      |
+13695 | pub(crate) fn update_asset_link(
+      |               ^^^^^^^^^^^^^^^^^
+
+warning: function `list_asset_events` is never used
+     --> <repo>:13776:15
+      |
+13776 | pub(crate) fn list_asset_events(
+      |               ^^^^^^^^^^^^^^^^^
+
+warning: `asterlab-app` (lib) generated 185 warnings (run `cargo fix --lib -p asterlab-app` to apply 2 suggestions)
+   Compiling runs v0.1.0 (<repo>
+warning: unused import: `std::path::PathBuf`
+ --> src/lib.rs:4:5
+  |
+4 | use std::path::PathBuf;
+  |     ^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `assay_index`
+    --> src/../../../../../../src/cli.rs:3913:9
+     |
+3913 |     let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_assay_index`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+     --> src/../../../../../../src/cli.rs:10894:17
+      |
+10894 |             let mut warnings: Vec<String> = Vec::new();
+      |                 ----^^^^^^^^
+      |                 |
+      |                 help: remove this `mut`
+      |
+      = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `exit` is never read
+  --> src/../../../../../../src/cli.rs:75:16
+   |
+72 | pub(crate) struct CliError {
+   |                   -------- field in this struct
+...
+75 |     pub(crate) exit: i32,
+   |                ^^^^
+   |
+   = note: `CliError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `ywells` is never used
+    --> src/../../../../../../src/cli.rs:3873:4
+     |
+3873 | fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
+     |    ^^^^^^
+
+warning: function `preview_protocol_block` is never used
+    --> src/../../../../../../src/cli.rs:5316:15
+     |
+5316 | pub(crate) fn preview_protocol_block(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `revise_view_tx` is never used
+    --> src/../../../../../../src/cli.rs:5784:15
+     |
+5784 | pub(crate) fn revise_view_tx(
+     |               ^^^^^^^^^^^^^^
+
+warning: function `view_step_detail` is never used
+    --> src/../../../../../../src/cli.rs:5793:15
+     |
+5793 | pub(crate) fn view_step_detail(
+     |               ^^^^^^^^^^^^^^^^
+
+warning: function `view_selection_context` is never used
+    --> src/../../../../../../src/cli.rs:6028:15
+     |
+6028 | pub(crate) fn view_selection_context(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `ensure_design_workflow` is never used
+    --> src/../../../../../../src/cli.rs:6404:15
+     |
+6404 | pub(crate) fn ensure_design_workflow(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `normalize_validate_design_data` is never used
+    --> src/../../../../../../src/cli.rs:7493:15
+     |
+7493 | pub(crate) fn normalize_validate_design_data(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `db_path` is never used
+    --> src/../../../../../../src/cli.rs:8431:8
+     |
+8431 | pub fn db_path(data_dir: &Path) -> PathBuf {
+     |        ^^^^^^^
+
+warning: function `output` is never used
+    --> src/../../../../../../src/cli.rs:8746:4
+     |
+8746 | fn output(tool: &str, result: Value, diagnostics: bool) {
+     |    ^^^^^^
+
+warning: function `list_designs` is never used
+    --> src/../../../../../../src/cli.rs:8883:15
+     |
+8883 | pub(crate) fn list_designs(db: &Connection, project_id: Option<&str>) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^^
+
+warning: function `load_design` is never used
+    --> src/../../../../../../src/cli.rs:8887:15
+     |
+8887 | pub(crate) fn load_design(db: &Connection, design_id: &str) -> Result<Value, CliError> {
+     |               ^^^^^^^^^^^
+
+warning: function `run` is never used
+    --> src/../../../../../../src/cli.rs:9345:8
+     |
+9345 | pub fn run(args: &[String], data_dir: &Path) -> i32 {
+     |        ^^^
+
+warning: function `fail` is never used
+    --> src/../../../../../../src/cli.rs:9396:4
+     |
+9396 | fn fail(tool: &str, e: CliError, diagnostics: bool) -> i32 {
+     |    ^^^^
+
+warning: function `print_help` is never used
+    --> src/../../../../../../src/cli.rs:9459:4
+     |
+9459 | fn print_help() {
+     |    ^^^^^^^^^^
+
+warning: function `schema` is never used
+     --> src/../../../../../../src/cli.rs:12689:4
+      |
+12689 | fn schema(tool: &str) -> Option<Value> {
+      |    ^^^^^^
+
+warning: field `project_id` is never read
+     --> src/../../../../../../src/cli.rs:16002:9
+      |
+16000 |     struct StepEditFixture {
+      |            --------------- field in this struct
+16001 |         data_dir: std::path::PathBuf,
+16002 |         project_id: String,
+      |         ^^^^^^^^^^
+
+warning: `runs` (lib test) generated 20 warnings (run `cargo fix --lib -p runs --tests` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 14s
+     Running unittests src/lib.rs (/srv/build/asterlab-target/debug/build/runs/fcfce0e5f51faad5/out/runs-fcfce0e5f51faad5)
+
+running 72 tests
+test cli_impl::tests::assess_and_run_creation_reject_unmaterialized_steps ... ok
+test cli_impl::tests::assess_includes_run_creation_audit_warnings ... ok
+test cli_impl::tests::asset_link_rejects_paths_outside_the_root_without_writing ... ok
+test cli_impl::tests::asset_link_update_changes_only_coordinates_and_records_the_previous_values ... ok
+test cli_impl::tests::asset_link_update_clears_timepoint_and_fov_only_when_explicitly_null ... ok
+test cli_impl::tests::asset_link_update_rejects_invalid_coordinates_and_unknown_links_without_writing ... ok
+test cli_impl::tests::agent_edit_commit_appends_a_version_and_keeps_the_frozen_run ... ok
+test cli_impl::tests::asset_link_update_rejects_omitted_coordinate_fields_instead_of_clearing_them ... ok
+test cli_impl::tests::asterdoc_add_step_derives_a_path_when_the_module_omits_one ... ok
+test cli_impl::tests::asterdoc_nest_materializes_a_pathless_parent_for_a_pathful_child ... ok
+test cli_impl::tests::asterdoc_derives_missing_step_paths_when_nesting_and_promoting ... ok
+test cli_impl::tests::asterdoc_nests_and_promotes_steps_by_updating_paths ... ok
+test cli_impl::tests::asterdoc_parity_samples ... ok
+test cli_impl::tests::asterdoc_rejects_a_derived_step_path_that_collides ... ok
+test cli_impl::tests::asterdoc_rejects_promoting_a_step_that_is_already_top_level ... ok
+test cli_impl::tests::asterdoc_reorders_steps_only_with_a_complete_unique_permutation ... ok
+test cli_impl::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
+test cli_impl::tests::asterdoc_plate_mix_fields_match_go_calculator_cases ... ok
+test cli_impl::tests::compiler_keeps_sample_identity_explicit_across_timepoints ... ok
+test cli_impl::tests::compiler_records_the_block_version_each_step_reuses ... ok
+test cli_impl::tests::diagnostics_flag_is_parsed_with_input_in_any_order ... ok
+test cli_impl::tests::error_envelope_carries_structured_diagnostics ... ok
+test cli_impl::tests::agent_tools_are_discoverable ... ok
+test cli_impl::tests::failed_schema_migration_preserves_database ... ok
+test cli_impl::tests::manifest_rule_must_be_registered_in_rust ... ok
+test cli_impl::tests::concurrent_agent_edit_commits_leave_exactly_one_winner ... ok
+test cli_impl::tests::execution_event_rejects_unknown_pantry_item_and_warns_on_expired_one ... ok
+test cli_impl::tests::pantry_delete_retires_an_item_and_keeps_its_label_code_out_of_reuse ... ok
+test cli_impl::tests::plate_mix_calculators_match_the_huvec_case ... ok
+test cli_impl::tests::protocol_block_content_accepts_legacy_and_valid_specs_but_rejects_invalid_specs ... ok
+test cli_impl::tests::pantry_table_from_an_earlier_build_gains_the_tombstone_column ... ok
+test cli_impl::tests::read_only_tools_do_not_write ... ok
+test cli_impl::tests::readout_batch_accepts_csv_cells ... ok
+test cli_impl::tests::readout_batch_writes_one_event_or_nothing ... ok
+test cli_impl::tests::readout_submit_replays_the_first_record_and_isolates_runs ... ok
+test cli_impl::tests::protocol_version_queries_return_expansion_and_stable_not_found ... ok
+test cli_impl::tests::remove_step_cleans_workflow_order_and_edges_when_unreferenced ... ok
+test cli_impl::tests::remove_step_rejects_run_and_step_references_without_revision_changes ... ok
+test cli_impl::tests::rule_skip_event_requires_skip_status_and_projects_ad_hoc_marker ... ok
+test cli_impl::tests::run_workspace_carries_asset_coordinates_and_the_gap_grouping ... ok
+test cli_impl::tests::schema_migration_legacy_v0 ... ok
+test cli_impl::tests::step_edit_commit_creates_child_and_parent_versions_and_keeps_the_frozen_run ... ok
+test cli_impl::tests::readout_tools_are_discoverable_and_write ... ok
+test cli_impl::tests::step_edit_schema_is_registered_for_validate_and_commit ... ok
+test cli_impl::tests::step_edit_rejects_a_version_conflict_and_a_wrong_unit_without_writing ... ok
+test cli_impl::tests::step_materialization_preserves_frozen_run_protocol_block_revision ... ok
+test cli_impl::tests::success_envelope_derives_diagnostics_from_validation_issues ... ok
+test cli_impl::tests::step_edit_tool_is_registered ... ok
+test cli_impl::tests::pantry_commands_project_expiry_and_export_stable_label_codes ... ok
+test tests::advance_walks_the_supplied_phases_and_reports_each_completed_round ... ok
+test tests::expired_pantry_item_only_adds_an_advisory_notice ... ok
+test tests::list_active_timers_is_an_empty_list_without_timers ... ok
+test tests::derive_design_carries_measured_drift_without_writing ... ok
+test tests::pantry_round_trip_keeps_label_codes_stable ... ok
+test tests::record_projection_exposes_notes_and_the_recording_state ... ok
+test tests::runtime_normalize_bridges_the_live_mix ... ok
+test tests::list_active_timers_returns_only_running_timers_across_runs_in_remaining_order ... ok
+test tests::skipped_by_rule_event_is_appended_and_projects_a_skipped_step ... ok
+test tests::time_budget_missing_timing_adds_no_duration ... ok
+test tests::time_budget_rejects_documents_that_are_not_operation_specs ... ok
+test tests::time_budget_repeat_count_expands_each_occurrence ... ok
+test tests::time_budget_single_step_is_hands_on ... ok
+test tests::time_budget_wait_creates_a_parallel_window ... ok
+test tests::sign_and_archive_is_terminal_and_fingerprints_every_member ... ok
+test tests::timer_lifecycle_rejects_unknown_actions_and_records_elapsed_time ... ok
+test tests::unknown_step_is_rejected_and_writes_nothing ... ok
+test tests::update_asset_link_coordinates_clears_zero_values ... ok
+test tests::update_asset_link_coordinates_keeps_file_identity ... ok
+test tests::update_asset_link_coordinates_rejects_bad_input_without_writing ... ok
+test tests::unlink_asset_link_removes_the_row_and_appends_the_event ... ok
+test cli_impl::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
+test cli_impl::tests::asset_link_hashes_a_large_file_without_copying_it ... ok
+
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.44s
+

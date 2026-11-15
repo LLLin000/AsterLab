@@ -260,6 +260,22 @@ impl RunService for CoreRunService {
         Ok(arr.iter().map(asset_from_value).collect())
     }
 
+    fn unlink_asset_link(&self, _ctx: &Context, run_id: String, asset_id: String) -> Result<Asset, Error> {
+        self.unlink_asset_link_impl(&run_id, &asset_id)
+    }
+
+    fn update_asset_link_coordinates(
+        &self,
+        _ctx: &Context,
+        run_id: String,
+        asset_id: String,
+        well_id: String,
+        timepoint: String,
+        fov_index: u32,
+    ) -> Result<Asset, Error> {
+        self.update_asset_link_coordinates_impl(&run_id, &asset_id, &well_id, &timepoint, fov_index)
+    }
+
     fn workflow_tree(&self, _ctx: &Context, run_id: String) -> Result<String, Error> {
         let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
@@ -321,6 +337,47 @@ impl RunService for CoreRunService {
 /// The bodies behind the RunService methods. They take no context so the tests
 /// can exercise the bridge without the generated Go-side context.
 impl CoreRunService {
+    /// Removes one Run's link for an asset. `assetID` is Core's durable asset
+    /// id, so the link record is resolved inside the Run first; the CLI's
+    /// `asset.unlink` then does the delete and the `unlinked` event in one
+    /// transaction, and the file is never touched.
+    fn unlink_asset_link_impl(&self, run_id: &str, asset_id: &str) -> Result<Asset, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let record_id = asset_link_record_id(core.raw_db(), run_id, asset_id)?;
+        let (removed, _event) =
+            cli_impl::unlink_asset_link(core.raw_db_mut(), &record_id, "").map_err(map_cli)?;
+        Ok(asset_from_value(&removed["data"]))
+    }
+
+    /// Replaces one link's coordinate triple through `asset.link.update`, so
+    /// Core keeps the single copy of the coordinate rules, the record identity
+    /// and the `updated` event. Go has no absent value: an empty timepoint and
+    /// a FOV index of 0 are "not recorded" and become an explicit null, while
+    /// both keys are always supplied.
+    fn update_asset_link_coordinates_impl(
+        &self,
+        run_id: &str,
+        asset_id: &str,
+        well_id: &str,
+        timepoint: &str,
+        fov_index: u32,
+    ) -> Result<Asset, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let record_id = asset_link_record_id(core.raw_db(), run_id, asset_id)?;
+        let request = cli_impl::AssetLinkUpdateInput {
+            id: record_id,
+            well_id: well_id.to_owned(),
+            timepoint: Some(opt_string(timepoint)),
+            fov_index: Some(if fov_index == 0 { None } else { Some(fov_index) }),
+            actor_id: None,
+        };
+        let (record, _event) =
+            cli_impl::update_asset_link(core.raw_db_mut(), &request).map_err(map_cli)?;
+        Ok(asset_from_value(&record["data"]))
+    }
+
     /// Append one event through Core's own `execution_event.create` writer and
     /// read the Run back inside the same transaction, so the event, the Run
     /// status refresh and the projection commit together or not at all. Core
@@ -621,6 +678,46 @@ fn asset_from_value(v: &serde_json::Value) -> Asset {
         },
         linked_at: v.get("linkedAt").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
         actor_id: v.get("actorId").and_then(|x| x.as_str()).unwrap_or("").to_owned(),
+    }
+}
+
+/// The stored `asset_link` record id for one Run-scoped asset id.
+///
+/// Core derives the record id from the file, the association and the
+/// coordinates, so it is read from storage instead of recomputed here. A file
+/// linked at two coordinates in the same Run has two records; that is ambiguous
+/// for a call addressed by asset id alone, and guessing would update or delete
+/// the wrong link.
+fn asset_link_record_id(
+    db: &rusqlite::Connection,
+    run_id: &str,
+    asset_id: &str,
+) -> Result<String, Error> {
+    let mut statement = db
+        .prepare(
+            "SELECT id, data_json FROM records \
+             WHERE kind='asset_link' AND parent_id=?1 ORDER BY created_at ASC, rowid ASC",
+        )
+        .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    let rows = statement
+        .query_map([run_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+    let mut found = Vec::new();
+    for row in rows.flatten() {
+        let data: serde_json::Value =
+            serde_json::from_str(&row.1).unwrap_or(serde_json::Value::Null);
+        if data["id"].as_str() == Some(asset_id) {
+            found.push(row.0);
+        }
+    }
+    match found.len() {
+        0 => Err(Error::Go(format!(
+            "NOT_FOUND: asset {asset_id} is not linked to this run"
+        ))),
+        1 => Ok(found.remove(0)),
+        _ => Err(Error::Go(format!(
+            "INVALID: asset {asset_id} is linked at more than one coordinate in this run"
+        ))),
     }
 }
 
@@ -2633,5 +2730,216 @@ mod tests {
             }
             other => panic!("unexpected error {other:?}"),
         }
+    }
+
+    /// Inserts one asset_link row for a seeded Run. The record id keeps Core's
+    /// creation-handle shape but is otherwise arbitrary: the bridge resolves it
+    /// from the asset id, so the test only has to make the row addressable.
+    fn seed_asset_link(
+        run_id: &str,
+        asset_id: &str,
+        well_id: Option<&str>,
+        timepoint: Option<&str>,
+        fov_index: Option<u32>,
+    ) -> String {
+        let db = cli_impl::open_db(&data_dir()).expect("open db");
+        let project: String = db
+            .query_row("SELECT project_id FROM records WHERE id=?1", [run_id], |row| row.get(0))
+            .expect("run project");
+        let coordinate_id = well_id.map(|well| {
+            let mut id = well.to_ascii_uppercase();
+            if let Some(timepoint) = timepoint {
+                id.push('_');
+                id.push_str(timepoint);
+            }
+            if let Some(fov) = fov_index {
+                id.push_str(&format!("_fov{fov:02}"));
+            }
+            id
+        });
+        let record_id = format!("asset-link-{}", uuid::Uuid::new_v4());
+        let data = serde_json::json!({
+            "id": asset_id,
+            "rootId": "project-data",
+            "relativePath": format!("huvec/d1/{asset_id}.tif"),
+            "mediaType": "image",
+            "size": 12,
+            "modTime": "2026-01-01T00:00:00Z",
+            "sha256": "b".repeat(64),
+            "availability": "available",
+            "link": {
+                "runId": run_id,
+                "taskKey": "task-1",
+                "sampleId": null,
+                "wellId": well_id,
+                "timepoint": timepoint,
+                "fovIndex": fov_index,
+                "coordinateId": coordinate_id
+            },
+            "linkedAt": "2026-01-01T00:00:00Z",
+            "actorId": "tester"
+        });
+        db.execute(
+            "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) \
+             VALUES(?1,'asset_link',?2,?3,1,?4,'2026-02-02T00:00:00Z','2026-02-02T00:00:00Z')",
+            rusqlite::params![record_id, project, run_id, data.to_string()],
+        )
+        .expect("insert asset link");
+        record_id
+    }
+
+    /// Stored asset_link rows of a Run, newest last: (record id, data).
+    fn asset_link_rows(run_id: &str) -> Vec<(String, serde_json::Value)> {
+        let db = cli_impl::open_db(&data_dir()).expect("open db");
+        let mut statement = db
+            .prepare(
+                "SELECT id, data_json FROM records WHERE kind='asset_link' AND parent_id=?1 \
+                 ORDER BY created_at ASC, rowid ASC",
+            )
+            .expect("prepare");
+        let rows = statement
+            .query_map([run_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("query")
+            .flatten()
+            .map(|(id, raw)| (id, serde_json::from_str(&raw).expect("link JSON")))
+            .collect();
+        rows
+    }
+
+    /// Asset link events of a Run with one action, newest last.
+    fn asset_events(run_id: &str, action: &str) -> Vec<serde_json::Value> {
+        let db = cli_impl::open_db(&data_dir()).expect("open db");
+        let mut statement = db
+            .prepare(
+                "SELECT data_json FROM records WHERE kind='asset_link_event' AND parent_id=?1 \
+                 ORDER BY created_at ASC, rowid ASC",
+            )
+            .expect("prepare");
+        statement
+            .query_map([run_id], |row| row.get::<_, String>(0))
+            .expect("query")
+            .flatten()
+            .map(|raw| serde_json::from_str::<serde_json::Value>(&raw).expect("event JSON"))
+            .filter(|event| event["action"].as_str() == Some(action))
+            .collect()
+    }
+
+    #[test]
+    fn update_asset_link_coordinates_keeps_file_identity() {
+        let seeded = seed_run(false, false);
+        let record_id = seed_asset_link(&seeded.run_id, "asset-scan-1", None, None, None);
+        let svc = service();
+
+        let updated = svc
+            .update_asset_link_coordinates_impl(&seeded.run_id, "asset-scan-1", "B2", "t12h", 2)
+            .expect("update coordinates");
+        assert_eq!(updated.id, "asset-scan-1");
+        assert_eq!(updated.link.well_id, "B2");
+        assert_eq!(updated.link.timepoint, "t12h");
+        assert_eq!(updated.link.fov_index, 2);
+        // File identity and the association are copied verbatim.
+        assert_eq!(updated.sha256, "b".repeat(64));
+        assert_eq!(updated.relative_path, "huvec/d1/asset-scan-1.tif");
+        assert_eq!(updated.link.task_key, "task-1");
+
+        let rows = asset_link_rows(&seeded.run_id);
+        assert_eq!(rows.len(), 1, "a coordinate update re-links nothing");
+        assert_eq!(rows[0].0, record_id, "the record id is the creation handle");
+        assert_eq!(rows[0].1["link"]["coordinateId"], "B2_t12h_fov02");
+
+        let events = asset_events(&seeded.run_id, "updated");
+        assert_eq!(events.len(), 1, "one updated event");
+        assert_eq!(events[0]["previous"]["wellId"], serde_json::Value::Null);
+        assert_eq!(events[0]["previous"]["coordinateId"], serde_json::Value::Null);
+        assert_eq!(events[0]["link"]["wellId"], "B2");
+    }
+
+    #[test]
+    fn update_asset_link_coordinates_clears_zero_values() {
+        let seeded = seed_run(false, false);
+        seed_asset_link(&seeded.run_id, "asset-scan-2", Some("A1"), Some("t6h"), Some(1));
+        let svc = service();
+
+        // Go's zero values are Core's "not recorded", not an illegal FOV 0.
+        let updated = svc
+            .update_asset_link_coordinates_impl(&seeded.run_id, "asset-scan-2", "C3", "", 0)
+            .expect("clear coordinates");
+        assert_eq!(updated.link.well_id, "C3");
+        assert_eq!(updated.link.timepoint, "");
+        assert_eq!(updated.link.fov_index, 0);
+        assert_eq!(
+            asset_link_rows(&seeded.run_id)[0].1["link"]["coordinateId"],
+            "C3"
+        );
+    }
+
+    #[test]
+    fn update_asset_link_coordinates_rejects_bad_input_without_writing() {
+        let seeded = seed_run(false, false);
+        seed_asset_link(&seeded.run_id, "asset-scan-3", Some("A1"), None, Some(1));
+        let svc = service();
+
+        let malformed = svc
+            .update_asset_link_coordinates_impl(&seeded.run_id, "asset-scan-3", "A", "t6h", 1)
+            .expect_err("a well without a column is invalid");
+        assert!(
+            matches!(&malformed, Error::Go(message) if message.starts_with("INVALID: ")),
+            "{malformed:?}"
+        );
+        let unknown = svc
+            .update_asset_link_coordinates_impl(&seeded.run_id, "asset-missing", "A1", "t6h", 1)
+            .expect_err("an unlinked asset cannot be updated");
+        assert!(
+            matches!(&unknown, Error::Go(message) if message.starts_with("NOT_FOUND: ")),
+            "{unknown:?}"
+        );
+
+        // Rejected calls leave the stored coordinates and the event stream alone.
+        let rows = asset_link_rows(&seeded.run_id);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1["link"]["wellId"], "A1");
+        assert!(asset_events(&seeded.run_id, "updated").is_empty());
+    }
+
+    #[test]
+    fn unlink_asset_link_removes_the_row_and_appends_the_event() {
+        let seeded = seed_run(false, false);
+        let record_id = seed_asset_link(&seeded.run_id, "asset-scan-4", Some("A1"), Some("t6h"), Some(1));
+        let svc = service();
+
+        let removed = svc
+            .unlink_asset_link_impl(&seeded.run_id, "asset-scan-4")
+            .expect("unlink asset");
+        assert_eq!(removed.id, "asset-scan-4");
+        assert_eq!(removed.link.well_id, "A1", "the removed link is returned as stored");
+        assert!(asset_link_rows(&seeded.run_id).is_empty());
+
+        let events = asset_events(&seeded.run_id, "unlinked");
+        assert_eq!(events.len(), 1, "one unlinked event");
+        assert_eq!(events[0]["assetId"], "asset-scan-4");
+        assert_eq!(events[0]["link"]["coordinateId"], "A1_t6h_fov01");
+
+        // A second unlink finds nothing: the row is gone, and a link of another
+        // Run is out of reach too.
+        let again = svc
+            .unlink_asset_link_impl(&seeded.run_id, "asset-scan-4")
+            .expect_err("already unlinked");
+        assert!(
+            matches!(&again, Error::Go(message) if message.starts_with("NOT_FOUND: ")),
+            "{again:?}"
+        );
+        let other_run = seed_run(false, false);
+        let refused = svc
+            .unlink_asset_link_impl(&other_run.run_id, "asset-scan-4")
+            .expect_err("another Run cannot see this link");
+        assert!(
+            matches!(&refused, Error::Go(message) if message.starts_with("NOT_FOUND: ")),
+            "{refused:?}"
+        );
+        assert_eq!(asset_link_rows(&seeded.run_id).len(), 0);
+        assert_eq!(asset_events(&seeded.run_id, "unlinked").len(), 1);
+        let _ = record_id;
     }
 }

@@ -17,7 +17,7 @@
 
 - 只增字段。`{runId, taskKey, sampleId}` 的身份与语义不变；`asset.link` 的输入/输出只加可选字段。
 - 不在 Core 里计算“应为几张图”。计划视野数来自冻结设计与 `ReadoutSchema`/`RecordProjection` 的 `ImageSlotMatrix`；本契约只提供分组依据。
-- 不做 UI、不做 Go 行为改动：`prototypes/mygo-run/modules/runs` 只镜像类型字段与 JSON tag。
+- 不做 UI。Go 侧在 LB-08 只镜像类型字段与 JSON tag；LB-10 起 `RunService` 也暴露解绑与坐标更新（§6.1），实现仍是 CLI 的同一份 Core 代码。
 - 不改冻结 Run 的历史字段语义；旧链接回读保持空值。
 
 ## 1. 字段
@@ -160,6 +160,34 @@ type AssetLink struct {
 - `FOVIndex == 0` 表示未记录（Core 不会写入 0），与 JSON `null`/缺省一致。
 - 桥接层只是透传 Core 的 JSON；缺字段的旧记录解码后是该类型的零值，不推断。
 
+### 6.1 Go 服务方法（LB-10）
+
+`RunService` 在 `ListAssetLinks` 之后增加两个方法，语义直接复用 CLI 的
+`asset.unlink` / `asset.link.update`（同一份 `cli_impl` 实现，不另写 SQL），
+差别只在身份参数：
+
+```go
+UnlinkAssetLink(ctx context.Context, runID string, assetID string) (Asset, error)
+UpdateAssetLinkCoordinates(ctx context.Context, runID string, assetID string, wellID string, timepoint string, fovIndex uint32) (Asset, error)
+```
+
+- `assetID` 是 `Asset.ID`（文件的持久身份，`ListAssetLinks` / `SaveAssetLink` 返回的那个），
+  在 `runID` 内解析成 `asset_link` 记录 ID。记录 ID 由 Core 从
+  `(rootId, relativePath, runId, taskKey, sampleId, coordinateId)` 派生，桥接层从存储读取，
+  **不重算、不暴露给调用方**。
+- 零值映射：Go 没有“键缺失”状态，`timepoint == ""` 与 `fovIndex == 0` 是第 2 节的
+  “未记录”，桥接层始终显式传键，写成 `null`。`wellID` 必填。
+- 错误：该 Run 没有这个资产的链接（含已解绑）→ `NOT_FOUND`；坐标非法 →
+  `INVALID_INPUT`。Go 侧形态是 `NOT_FOUND: …` / `INVALID: …` / `INTERNAL: …` 字符串，
+  与桥接层其他命令一致。
+- 同一资产在同一 Run 内有多个坐标链接时（只有 CLI 的 `asset.link` 带坐标能造出这种状态，
+  `SaveAssetLink` 不接受坐标），按资产 ID 定位有歧义：桥接层返回 `INVALID_INPUT`，
+  不猜要改哪一条，也不批量删除。
+- 返回值都是 `Asset`：更新返回新坐标的链接，解绑返回被删除链接的原始元数据。
+  `unlinked` / `updated` 事件与 CLI 完全一致（§5），文件本身从未被修改。
+- 生成文件 `runs_native.go` 与 `rust/src/mygo.rs` 由固定 MyGo pin 重新生成，
+  `scripts/ci/native_generator_hashes.json` 同步 pin；两个生成文件都不手改。
+
 ## 7. 版本与回滚
 
 - 全部字段可选，缺少时读模型输出 `null`，因此不需要新的 schema 版本号；旧消费者忽略新字段即可。
@@ -172,4 +200,4 @@ type AssetLink struct {
 - 不做孔板 UI、拖拽填槽、批量导入（Windows 泳道）。
 - 不判断“162 张是否拍全”，不定义每孔应有视野数。
 - 不引入新的记录类型或第二份资产表；坐标仍只存在 `asset_link` 记录里。
-- 不做 Go 原生桥接：`RunService` 的解除/更新方法拆在 LB-10，CLI 是当前唯一写入路径。
+- 不做 Go 原生桥接之外的新写入路径：`UnlinkAssetLink` / `UpdateAssetLinkCoordinates` 复用 `asset.unlink` / `asset.link.update` 的实现，CLI 与桥接不各写一套。
