@@ -17,6 +17,102 @@ pub enum TimerStatus {
     Completed,
 }
 
+/// One stage of a timer's plan. `name` labels the stage, `planned_s` is its
+/// countdown duration, `mode` is the stage's own mode, and `rounds` is how many
+/// countdown rounds the stage runs; `rounds: None` means the stage repeats
+/// until the caller stops the timer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimerPhase {
+    pub name: String,
+    pub planned_s: Option<u64>,
+    pub mode: TimerMode,
+    #[serde(default)]
+    pub rounds: Option<u32>,
+}
+
+/// The ordered phases a timer walks through.
+///
+/// [`TimerRecord`] stores only the cursor (`phase_index`, `round_index`); the
+/// plan itself stays with the caller, like the clock does. A timer created
+/// before phase sequences existed uses [`TimerSequence::from_record`], which
+/// reproduces its single `planned_s`/`mode`/`round_count` exactly.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TimerSequence {
+    pub phases: Vec<TimerPhase>,
+}
+
+impl TimerSequence {
+    /// The one-phase plan an existing timer already implies.
+    pub fn from_record(timer: &TimerRecord) -> Self {
+        Self {
+            phases: vec![TimerPhase {
+                name: timer.task_key.clone(),
+                planned_s: timer.planned_s,
+                mode: timer.mode,
+                rounds: timer.round_count,
+            }],
+        }
+    }
+
+    /// Validates an explicit plan: named phases, a countdown duration for every
+    /// countdown phase, and at least one round when a phase bounds its rounds.
+    pub fn new(phases: Vec<TimerPhase>) -> Result<Self, String> {
+        if phases.is_empty() {
+            return Err("a timer sequence needs at least one phase".into());
+        }
+        for (index, phase) in phases.iter().enumerate() {
+            if phase.name.trim().is_empty() {
+                return Err(format!("phase {index} needs a name"));
+            }
+            if phase.rounds == Some(0) {
+                return Err(format!("phase {index} needs at least one round"));
+            }
+            if phase.mode == TimerMode::Countdown && phase.planned_s.is_none() {
+                return Err(format!("phase {index} is a countdown and needs planned_s"));
+            }
+        }
+        Ok(Self { phases })
+    }
+
+    pub fn phase(&self, index: u32) -> Result<&TimerPhase, String> {
+        self.phases.get(index as usize).ok_or_else(|| {
+            format!("phase_index {index} is outside the timer's {} phase(s)", self.phases.len())
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.phases.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.phases.is_empty()
+    }
+}
+
+/// One completed countdown round: what the timer planned, how long it actually
+/// ran, and when. It is a returned fact, not a stored table — the caller
+/// appends it through Core's execution-event entry, which is where the round
+/// history is read back from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimerRound {
+    pub phase_index: u32,
+    pub round_index: u32,
+    pub phase_name: String,
+    pub mode: TimerMode,
+    pub planned_s: u64,
+    pub actual_s: u64,
+    /// The completed round's running anchor. Paused time is included in
+    /// `actual_s`, never in the interval between this instant and
+    /// `ended_at_utc`.
+    pub started_at_utc: String,
+    pub ended_at_utc: String,
+    pub phase_completed: bool,
+    pub timer_completed: bool,
+}
+
 /// Durable timer state. `started_at_utc` is the running interval's UTC anchor;
 /// paused time is held in `accumulated_s` and is never inferred from process uptime.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,25 +190,66 @@ impl TimerRecord {
         Ok(true)
     }
 
-    /// Advances a completed countdown cycle to the next numbered round.
-    pub fn advance_countdown(&mut self, now_utc: &str) -> Result<bool, String> {
-        if self.mode != TimerMode::Countdown || self.status != TimerStatus::Running {
-            return Ok(false);
+    /// Advances a countdown once its current round has run its planned time.
+    ///
+    /// `sequence` is the plan being run; a single-phase timer passes
+    /// [`TimerSequence::from_record`] and keeps the exact previous behaviour.
+    /// Every completed round is returned as a [`TimerRound`] fact, so the
+    /// previous round's accumulation is never dropped silently. The record
+    /// keeps `accumulated_s` as the *current* round's accumulation and resets
+    /// only that round's runtime state; crossing into the next phase also moves
+    /// `mode` and `planned_s` to that phase's values, which the read models
+    /// report for the current cycle.
+    pub fn advance_countdown(&mut self, sequence: &TimerSequence, now_utc: &str) -> Result<Option<TimerRound>, String> {
+        if self.status != TimerStatus::Running {
+            return Ok(None);
         }
-        let Some(planned) = self.planned_s else { return Err("countdown requires planned_s".into()) };
-        if self.elapsed_s(now_utc)? < planned {
-            return Ok(false);
+        let phase = sequence.phase(self.phase_index)?.clone();
+        if phase.mode != TimerMode::Countdown {
+            return Ok(None);
         }
-        if self.round_count.is_some_and(|total| self.round_index + 1 >= total) {
+        let planned = phase.planned_s.or(self.planned_s).ok_or("countdown requires planned_s")?;
+        parse_utc_seconds(now_utc)?;
+        let actual = self.elapsed_s(now_utc)?;
+        if actual < planned {
+            return Ok(None);
+        }
+        let started_at_utc = self
+            .started_at_utc
+            .clone()
+            .ok_or("running timer is missing started_at_utc")?;
+        let phase_completed = phase.rounds.is_some_and(|total| self.round_index + 1 >= total);
+        let timer_completed = phase_completed && self.phase_index as usize + 1 >= sequence.len();
+        let round = TimerRound {
+            phase_index: self.phase_index,
+            round_index: self.round_index,
+            phase_name: phase.name,
+            mode: TimerMode::Countdown,
+            planned_s: planned,
+            actual_s: actual,
+            started_at_utc,
+            ended_at_utc: now_utc.to_owned(),
+            phase_completed,
+            timer_completed,
+        };
+        if timer_completed {
             self.accumulated_s = planned;
             self.started_at_utc = None;
             self.status = TimerStatus::Completed;
+        } else if phase_completed {
+            let next = sequence.phase(self.phase_index + 1)?.clone();
+            self.phase_index += 1;
+            self.round_index = 0;
+            self.mode = next.mode;
+            self.planned_s = next.planned_s;
+            self.accumulated_s = 0;
+            self.started_at_utc = Some(now_utc.to_owned());
         } else {
             self.round_index += 1;
             self.accumulated_s = 0;
             self.started_at_utc = Some(now_utc.to_owned());
         }
-        Ok(true)
+        Ok(Some(round))
     }
 }
 
@@ -207,14 +344,152 @@ mod tests {
         assert_eq!(timer.elapsed_s("2026-11-16T10:00:05Z").unwrap(), 42);
     }
 
+    fn at(seconds: u64) -> String {
+        format!("2026-11-15T10:{:02}:{:02}Z", seconds / 60, seconds % 60)
+    }
+
+    fn phase(name: &str, planned_s: Option<u64>, mode: TimerMode, rounds: Option<u32>) -> TimerPhase {
+        TimerPhase { name: name.into(), planned_s, mode, rounds }
+    }
+
     #[test]
     fn countdown_advances_round_only_after_planned_duration() {
         let mut timer = timer(TimerMode::Countdown);
+        let plan = TimerSequence::from_record(&timer);
         timer.start("2026-11-15T10:00:00Z").unwrap();
-        assert!(!timer.advance_countdown("2026-11-15T10:00:09Z").unwrap());
-        assert!(timer.advance_countdown("2026-11-15T10:00:10Z").unwrap());
+        assert!(timer.advance_countdown(&plan, "2026-11-15T10:00:09Z").unwrap().is_none());
+        let round = timer
+            .advance_countdown(&plan, "2026-11-15T10:00:10Z")
+            .unwrap()
+            .expect("the round completes at its planned duration");
+        assert_eq!(round.phase_name, "task-1");
+        assert_eq!((round.phase_index, round.round_index), (0, 0));
+        assert_eq!((round.planned_s, round.actual_s), (10, 10));
+        assert_eq!((round.phase_completed, round.timer_completed), (false, false));
         assert_eq!(timer.round_index, 1);
         assert_eq!(timer.started_at_utc.as_deref(), Some("2026-11-15T10:00:10Z"));
+    }
+
+    #[test]
+    fn single_phase_timer_completes_after_its_round_count() {
+        let mut timer = timer(TimerMode::Countdown);
+        let plan = TimerSequence::from_record(&timer);
+        timer.start("2026-11-15T10:00:00Z").unwrap();
+        let mut rounds = Vec::new();
+        for second in [10, 20, 30] {
+            rounds.push(timer.advance_countdown(&plan, &at(second)).unwrap().expect("round"));
+        }
+        assert_eq!(
+            rounds.iter().map(|round| (round.round_index, round.actual_s)).collect::<Vec<_>>(),
+            vec![(0, 10), (1, 10), (2, 10)]
+        );
+        assert!(rounds[2].phase_completed && rounds[2].timer_completed);
+        assert_eq!(timer.status, TimerStatus::Completed);
+        assert_eq!(timer.accumulated_s, 10);
+        assert!(timer.started_at_utc.is_none());
+    }
+
+    #[test]
+    fn two_phases_of_three_rounds_report_each_round_in_order() {
+        let mut timer = timer(TimerMode::Countdown);
+        timer.round_count = None;
+        timer.planned_s = Some(5);
+        let plan = TimerSequence::new(vec![
+            phase("stain", Some(5), TimerMode::Countdown, Some(3)),
+            phase("wash", Some(20), TimerMode::Countdown, Some(3)),
+        ])
+        .expect("two named countdown phases");
+        timer.start("2026-11-15T10:00:00Z").unwrap();
+
+        let mut history = Vec::new();
+        let mut second = 0;
+        for _ in 0..3 {
+            second += 5;
+            history.push(timer.advance_countdown(&plan, &at(second)).unwrap().expect("stain round"));
+        }
+        assert_eq!(timer.phase_index, 1, "the stain phase is done");
+        assert_eq!(timer.planned_s, Some(20), "the record carries the current phase's plan");
+        for _ in 0..3 {
+            second += 20;
+            history.push(timer.advance_countdown(&plan, &at(second)).unwrap().expect("wash round"));
+        }
+
+        let order: Vec<(u32, u32, &str, u64, bool, bool)> = history
+            .iter()
+            .map(|round| {
+                (
+                    round.phase_index,
+                    round.round_index,
+                    round.phase_name.as_str(),
+                    round.actual_s,
+                    round.phase_completed,
+                    round.timer_completed,
+                )
+            })
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                (0, 0, "stain", 5, false, false),
+                (0, 1, "stain", 5, false, false),
+                (0, 2, "stain", 5, true, false),
+                (1, 0, "wash", 20, false, false),
+                (1, 1, "wash", 20, false, false),
+                (1, 2, "wash", 20, true, true),
+            ]
+        );
+        assert_eq!(timer.status, TimerStatus::Completed);
+        assert_eq!(timer.accumulated_s, 20);
+    }
+
+    #[test]
+    fn pause_and_resume_keeps_the_round_position_and_reports_the_paused_seconds() {
+        let mut timer = timer(TimerMode::Countdown);
+        let plan = TimerSequence::from_record(&timer);
+        timer.start("2026-11-15T10:00:00Z").unwrap();
+        timer.pause("2026-11-15T10:00:04Z").unwrap();
+        assert_eq!(timer.accumulated_s, 4);
+        assert!(timer.advance_countdown(&plan, "2026-11-15T10:00:04Z").unwrap().is_none());
+        timer.start("2026-11-15T10:00:10Z").unwrap();
+        let round = timer
+            .advance_countdown(&plan, "2026-11-15T10:00:16Z")
+            .unwrap()
+            .expect("six running seconds complete the paused round");
+        assert_eq!(round.actual_s, 10, "paused time stays in the round's actual seconds");
+        assert_eq!(round.started_at_utc, "2026-11-15T10:00:10Z");
+        assert_eq!(round.ended_at_utc, "2026-11-15T10:00:16Z");
+        assert_eq!(timer.round_index, 1);
+        assert_eq!(timer.status, TimerStatus::Running);
+        assert_eq!(timer.accumulated_s, 0, "only the new round's runtime is reset");
+    }
+
+    #[test]
+    fn a_sequence_rejects_unnamed_or_undated_countdown_phases() {
+        assert!(TimerSequence::new(vec![]).is_err());
+        assert!(TimerSequence::new(vec![phase(" ", Some(5), TimerMode::Countdown, Some(1))]).is_err());
+        assert!(TimerSequence::new(vec![phase("stain", None, TimerMode::Countdown, Some(1))]).is_err());
+        assert!(TimerSequence::new(vec![phase("stain", Some(5), TimerMode::Countdown, Some(0))]).is_err());
+        assert!(TimerSequence::new(vec![phase("observe", None, TimerMode::Stopwatch, None)]).is_ok());
+    }
+
+    #[test]
+    fn advance_rejects_a_cursor_outside_the_supplied_sequence() {
+        let mut timer = timer(TimerMode::Countdown);
+        let plan = TimerSequence::from_record(&timer);
+        timer.start("2026-11-15T10:00:00Z").unwrap();
+        timer.phase_index = 1;
+        let error = timer.advance_countdown(&plan, "2026-11-15T10:00:10Z").unwrap_err();
+        assert!(error.contains("phase_index 1"), "{error}");
+    }
+
+    #[test]
+    fn non_countdown_phases_do_not_advance() {
+        let mut timer = timer(TimerMode::Stopwatch);
+        timer.planned_s = None;
+        let plan = TimerSequence::new(vec![phase("observe", None, TimerMode::Stopwatch, None)]).unwrap();
+        timer.start("2026-11-15T10:00:00Z").unwrap();
+        assert!(timer.advance_countdown(&plan, "2026-11-15T11:00:00Z").unwrap().is_none());
+        assert_eq!(timer.status, TimerStatus::Running);
     }
 
     #[test]
