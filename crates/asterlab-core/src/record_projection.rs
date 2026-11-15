@@ -184,7 +184,8 @@ pub struct ImageSlotMatrix {
     pub missing_slots: u32,
     /// Assets that name no known well coordinate.
     pub unlocated_asset_ids: Vec<String>,
-    /// Assets that fill no planned slot (unknown FOV index or no plan row).
+    /// Assets that fill no planned slot (FOV index above the plan, or no plan
+    /// row). An unrecorded FOV (`None`/`0`) is not an unplanned asset.
     pub unplanned_asset_ids: Vec<String>,
 }
 
@@ -865,8 +866,12 @@ fn build_image_matrix(
             .map(str::trim)
             .filter(|tp| !tp.is_empty())
             .map(str::to_owned);
-        let fov = link.fov_index.unwrap_or(0);
-        if fov >= fov_per_well {
+        // `fovIndex` is 1-based; `None` and `0` both mean "not recorded" and
+        // fill no planned slot.
+        let Some(fov) = link.fov_index.filter(|index| *index > 0) else {
+            continue;
+        };
+        if fov > fov_per_well {
             unplanned.push(link.asset_id.clone());
             issues.push(RecordIssue::new(
                 "fov_out_of_range",
@@ -906,7 +911,7 @@ fn build_image_matrix(
             let mut slots = Vec::new();
             let mut filled = 0u32;
             for timepoint in &timepoints {
-                for fov in 0..fov_per_well {
+                for fov in 1..=fov_per_well {
                     let asset_id = slot_assets
                         .get(&(
                             plate.plate_id.clone(),
@@ -1710,7 +1715,7 @@ mod tests {
     #[test]
     fn blind_projection_masks_group_identity_and_keeps_slots() {
         let workspace = twelve_well_workspace();
-        let links = vec![link("a1", Some("A1"), Some("6h"), Some(0))];
+        let links = vec![link("a1", Some("A1"), Some("6h"), Some(1))];
         let unblinded = build_record_projection(
             &workspace,
             &links,
@@ -1769,7 +1774,7 @@ mod tests {
             vec![plate(wells)],
             vec![],
         );
-        let links = (0..6)
+        let links = (1..=6)
             .map(|fov| link(&format!("img-{fov}"), Some("A1"), None, Some(fov)))
             .collect::<Vec<_>>();
         let projection = build_record_projection(
@@ -1792,14 +1797,145 @@ mod tests {
         assert_eq!(a2.filled_slots, 0);
         assert_eq!(a2.planned_slots, 6);
         assert!(projection.issues.is_empty());
+        // Slots are numbered from 1, once per planned timepoint.
+        let indices = a1
+            .slots
+            .iter()
+            .map(|slot| slot.fov_index)
+            .collect::<Vec<_>>();
+        assert_eq!(indices, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn image_matrix_slots_are_one_based_across_timepoints() {
+        let workspace = twelve_well_workspace();
+        let projection = build_record_projection(
+            &workspace,
+            &[],
+            &[],
+            &RecordProjectionInput {
+                fov_per_well: 6,
+                ..RecordProjectionInput::default()
+            },
+        );
+        let a1 = &projection.images.plates[0].wells[0];
+        // design_snapshot plans 3 timepoints, each with FOV 1..=6.
+        assert_eq!(
+            a1.slots
+                .iter()
+                .map(|slot| slot.fov_index)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6]
+        );
+        assert_eq!(a1.planned_slots, 18);
+        assert_eq!(projection.images.plates[0].planned_slots, 4 * 18);
+        assert!(a1.slots.iter().all(|slot| slot.asset_id.is_none()));
+        assert!(projection.issues.is_empty());
+    }
+
+    #[test]
+    fn unrecorded_fov_fills_no_slot() {
+        let workspace = twelve_well_workspace();
+        let links = vec![
+            link("no-fov", Some("A1"), Some("6h"), None),
+            link("zero-fov", Some("A1"), Some("6h"), Some(0)),
+        ];
+        let projection = build_record_projection(
+            &workspace,
+            &links,
+            &[],
+            &RecordProjectionInput {
+                fov_per_well: 6,
+                ..RecordProjectionInput::default()
+            },
+        );
+        // No slot at all is filled, and the assets are neither unplanned nor
+        // unlocated: an unrecorded FOV is "not recorded", not a plan violation.
+        assert_eq!(projection.images.filled_slots, 0);
+        assert_eq!(
+            projection.images.missing_slots,
+            projection.images.planned_slots
+        );
+        assert!(projection.images.unplanned_asset_ids.is_empty());
+        assert!(projection.images.unlocated_asset_ids.is_empty());
+        assert!(projection.issues.is_empty());
+        assert!(projection.images.plates[0].wells[0]
+            .slots
+            .iter()
+            .all(|slot| slot.asset_id.is_none()));
+    }
+
+    #[test]
+    fn last_planned_fov_is_legal_and_one_past_is_unplanned() {
+        let workspace = twelve_well_workspace();
+        let links = vec![
+            link("fov-6", Some("A1"), Some("6h"), Some(6)),
+            link("fov-7", Some("A1"), Some("6h"), Some(7)),
+        ];
+        let projection = build_record_projection(
+            &workspace,
+            &links,
+            &[],
+            &RecordProjectionInput {
+                fov_per_well: 6,
+                ..RecordProjectionInput::default()
+            },
+        );
+        assert_eq!(projection.images.filled_slots, 1);
+        assert_eq!(
+            projection.images.unplanned_asset_ids,
+            vec!["fov-7".to_owned()]
+        );
+        let filled = projection.images.plates[0].wells[0]
+            .slots
+            .iter()
+            .filter(|slot| slot.asset_id.is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(filled.len(), 1);
+        assert_eq!(filled[0].fov_index, 6);
+        assert_eq!(filled[0].asset_id.as_deref(), Some("fov-6"));
+        let codes = projection
+            .issues
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(codes, vec!["fov_out_of_range"]);
+    }
+
+    #[test]
+    fn twelve_well_plate_plans_216_slots_over_three_timepoints() {
+        let coordinates = [
+            "A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "C4",
+        ];
+        let wells = coordinates
+            .iter()
+            .map(|coordinate| well(coordinate, "3%"))
+            .collect::<Vec<_>>();
+        let workspace = workspace_with(&design_snapshot(), vec![plate(wells)], vec![]);
+        let projection = build_record_projection(
+            &workspace,
+            &[],
+            &[],
+            &RecordProjectionInput {
+                fov_per_well: 6,
+                ..RecordProjectionInput::default()
+            },
+        );
+        assert_eq!(projection.images.plates[0].timepoints.len(), 3);
+        assert_eq!(projection.images.planned_slots, 216);
+        assert_eq!(projection.images.filled_slots, 0);
+        assert_eq!(projection.images.missing_slots, 216);
+        for well in &projection.images.plates[0].wells {
+            assert_eq!(well.planned_slots, 18);
+        }
     }
 
     #[test]
     fn duplicate_slot_keeps_first_asset_and_partial_timepoints_are_reported() {
         let workspace = twelve_well_workspace();
         let links = vec![
-            link("first", Some("A1"), Some("6h"), Some(0)),
-            link("second", Some("A1"), Some("6h"), Some(0)),
+            link("first", Some("A1"), Some("6h"), Some(1)),
+            link("second", Some("A1"), Some("6h"), Some(1)),
         ];
         let projection = build_record_projection(
             &workspace,
@@ -1971,8 +2107,8 @@ mod tests {
     fn notes_resolve_matrix_and_params_references_and_flag_unknown_ones() {
         let workspace = twelve_well_workspace();
         let links = vec![
-            link("a1", Some("A1"), Some("6h"), Some(0)),
-            link("a2", Some("A1"), Some("12h"), Some(0)),
+            link("a1", Some("A1"), Some("6h"), Some(1)),
+            link("a2", Some("A1"), Some("12h"), Some(1)),
         ];
         let markdown = "6h 组形成最好。 @matrix(6h, 12h) 与 @params(curing_s) 见上；@bogus 未知。";
         let projection = build_record_projection(
@@ -2047,7 +2183,7 @@ mod tests {
     #[test]
     fn sign_and_archive_locks_notes_and_fingerprints_every_member() {
         let workspace = twelve_well_workspace();
-        let links = vec![link("a1", Some("A1"), Some("6h"), Some(0))];
+        let links = vec![link("a1", Some("A1"), Some("6h"), Some(1))];
         let assets = vec![asset_ref("a1", "fov/A1_fov00.png", &checksum("image-bytes"))];
         let notes = vec![note("@matrix(6h)")];
         let projection = build_record_projection(
@@ -2126,7 +2262,7 @@ mod tests {
     #[test]
     fn archive_requires_summary_state_and_real_checksums() {
         let workspace = twelve_well_workspace();
-        let links = vec![link("a1", Some("A1"), Some("6h"), Some(0))];
+        let links = vec![link("a1", Some("A1"), Some("6h"), Some(1))];
         let assets = vec![asset_ref("a1", "fov/A1_fov00.png", "")];
         let projection = build_record_projection(
             &workspace,
