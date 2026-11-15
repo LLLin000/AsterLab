@@ -30,15 +30,15 @@ readable measure and Save stays in the first viewport.
 ## Build stamp
 
 All screenshots come from `prototypes/mygo-run/dist/mygo-run.exe` built at
-repository HEAD `34489e0` (`BUILD_INFO.txt` → `commit 34489e0`, matching
+repository HEAD `82f90b3` (`BUILD_INFO.txt` → `commit 82f90b3`, matching
 `git rev-parse --short HEAD`).
 
 ```text
 AsterLab MyGo Prototype (UNSIGNED)
-commit 34489e0
+commit 82f90b3
 mygo pin v0.8.4-0.20261108220316-c4197b7fe562
-Runs.dll SHA256 3C0E3C3C8FC96CE5B54346D2E2BBCA846A418EF4CB92EBC28614DA19DE48DE91
-mygo-run.exe SHA256 2891EEE9842AF721E847B54BBF902F2AB6FCAF666844959E2F701E0668CC58C3
+Runs.dll SHA256 E57CE2F12C7D8A29DCAE61CAA44E5058A10571BECF7B6A7F56EC851B2E1F2DDE
+mygo-run.exe SHA256 B9509695E0D6BFCB534008DE46695EE2A98F90830BBBCFDD49D758A73399EAAD
 ```
 
 ## Evidence (real application windows, light, isolated data)
@@ -56,7 +56,7 @@ window text is auditable without re-running the app.
 
 ## Seed
 
-Isolated data `%TEMP%\lb03-gui\data`, Run `a2dad20c-c504-44b9-9443-a2871e69bbae`.
+Isolated data `%TEMP%\lb03-gui\data`, Run `273d4522-e542-4f63-bda1-0bab746d5479`.
 Seeded through the CLI only: `project.create` → `protocol.block.create` /
 `protocol.create` → `design.create` → `asterdoc.save` / `asterdoc.create_run` →
 one real `readout.submit` (OD450 0.62 AU, Control-1) → one completion
@@ -93,11 +93,11 @@ the stored events.
 ## Artifact hashes (SHA256)
 
 ```text
-cdcb799791f6122b99c32a9839e84974ba59509fa583152bce806d445aefa01f  lb03-citation-after-900x600-light.png
-eea1b8b20fffb3c966655f4fbcd9efdcb833af1e8371eac4dec3376edb48622a  lb03-citation-before-900x600-light.png
-e0361c88ce2ccb572e70e8200fc315ef32eb76fc2fd407c21fcb87ed27a822e5  lb03-notebook-dual-1360x880-light.png
-eea1b8b20fffb3c966655f4fbcd9efdcb833af1e8371eac4dec3376edb48622a  lb03-notebook-switch-900x600-light.png
-fdae423602cde9bff841e0d4b0a8c037d1ca8cbc57336b3df361d21c2803e234  lb03-notebook-timeline-900x600-light.png
+5b26fa8e67297d3966c0e72777efc09f8bf5f884c726fd42420100ed78c00cb1  lb03-citation-after-900x600-light.png
+0f279058e14c2e2d5778e246ac04839bcc477aaf24814d24779162b8c5f1abdd  lb03-citation-before-900x600-light.png
+e3dbcd6b3da5299681f2e49e4e81c4eb73c2c7adffa68f07b7cdfbd6685c2c89  lb03-notebook-dual-1360x880-light.png
+0f279058e14c2e2d5778e246ac04839bcc477aaf24814d24779162b8c5f1abdd  lb03-notebook-switch-900x600-light.png
+20014d9917b84efce59e247531e1d34cb17332b7c459100bf978c9697a2515d5  lb03-notebook-timeline-900x600-light.png
 ```
 
 The citation "before" shot is the same prose view as the 900×600 switch shot — the jump starts from that state, so the two captures are byte-identical; both are kept because they document different moments (tab switch vs pre-jump).
