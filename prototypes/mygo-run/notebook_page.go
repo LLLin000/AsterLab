@@ -5,9 +5,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
@@ -50,6 +55,7 @@ type noteViewState struct {
 	split       int
 	highlightID string
 	scrolledID  string
+	expanded    map[string]bool
 }
 
 var noteViews = map[*app]*noteViewState{}
@@ -87,7 +93,7 @@ func notebookPage(c *ui.Context, a *app) {
 			ui.Text(c, a.snap.Title).FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted).
 				SingleLine().Ellipsis("…").MaxWidth(420)
 			if a.snap.AsterDoc == nil && a.snap.DesignRevision > 0 {
-				ui.Text(c, fmt.Sprintf("Document Revision: %d", a.snap.DesignRevision)).
+				ui.Text(c, fmt.Sprintf("设计版本 %d", a.snap.DesignRevision)).
 					FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 			}
 			ui.Spacer(c)
@@ -103,6 +109,9 @@ func notebookPage(c *ui.Context, a *app) {
 			} else {
 				a.setNoteMode(2)
 			}
+		}
+		if c.Shortcut(ui.Cmd, ui.KeyS) && a.noteMode != 2 && a.noteState != "saving" {
+			a.saveNotebook()
 		}
 		ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
 			ui.Row(c).Wrap().MaxWidth(960).MaxWidthPercent(100).Padding(t.Space(1), t.Space(1.25)).Radius(t.Space(2.5)).
@@ -162,14 +171,11 @@ func notebookPage(c *ui.Context, a *app) {
 				}
 				// UX-STATE / UX-06: one explicit state word beside Save, from the
 				// projection's single vocabulary — never a bare colour dot.
-				if a.noteDirty || a.noteErr != "" {
-					ui.Text(c, notebook.SaveStateLabel(true)).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.WarningText)
-				} else {
-					ui.Text(c, notebook.SaveStateLabel(false)).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.SuccessText)
-				}
+				stateLabel, stateColor := a.notebookToolbarState(tokens)
+				ui.Text(c, stateLabel).FontSize(float32(tokens.TextData)).Bold().TextColor(stateColor)
 				save := components.IconButton(c, lucide.Save(), "保存笔记", components.IconButtonCompact)
-				save.Disabled(a.noteMode == 2)
-				if save.Clicked() && a.noteMode != 2 {
+				save.Disabled(a.noteMode == 2 || a.noteState == "saving")
+				if save.Clicked() && a.noteMode != 2 && a.noteState != "saving" {
 					a.saveNotebook()
 				}
 			})
@@ -273,10 +279,31 @@ func notebookPage(c *ui.Context, a *app) {
 				})
 			})
 		}
-		if a.noteErr != "" {
-			ui.Row(c).FillWidth().Padding(6, 10).Radius(6).
-				Background(theme.GetTokens(t).DangerBg).Children(func() {
-				ui.Text(c, a.noteErr).FontSize(12).TextColor(theme.GetTokens(t).DangerText)
+		if a.noteState == "error" || a.noteErr != "" {
+			reason := strings.TrimSpace(a.noteErr)
+			if reason == "" {
+				reason = "保存失败"
+			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).
+				Padding(t.Space(1.5), t.Space(2.5)).Radius(float32(tokens.ControlRadius)).
+				Background(tokens.DangerBg).Border(1, t.Danger).Children(func() {
+				ui.Text(c, fmt.Sprintf("未保存（%s）", reason)).
+					FontSize(float32(tokens.TextMeta)).TextColor(tokens.DangerText).Grow(1).MinWidth(0)
+				retry := components.Button(c, "重试", components.ButtonSecondary)
+				retry.Disabled(a.noteState == "saving")
+				if retry.Clicked() && a.noteState != "saving" {
+					a.saveNotebook()
+				}
+			})
+		} else if a.noteRecovered && a.noteDirty {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).
+				Padding(t.Space(1), t.Space(2)).Radius(float32(tokens.ControlRadius)).
+				Background(tokens.WarningBg).Border(1, t.Border).Children(func() {
+				ui.Text(c, "已从本地草稿恢复未保存修改。").
+					FontSize(float32(tokens.TextMeta)).TextColor(tokens.WarningText).Grow(1).MinWidth(0)
+				if components.Button(c, "丢弃草稿", components.ButtonGhost).Clicked() {
+					a.discardNotebookDraft()
+				}
 			})
 		}
 		// Snapshot details stay read-only; removing a token changes prose only (UX-STATE, UX-P5, UX-P1, UX-P2, UX-P3, UX-LAYOUT).
@@ -289,8 +316,13 @@ func notebookPage(c *ui.Context, a *app) {
 					for i, resolved := range citations {
 						i, resolved := i, resolved
 						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-							ui.Text(c, resolved.Citation.ID).FontSize(11).TextColor(t.TextMuted)
-							ui.Text(c, resolved.Citation.Snapshot).FontSize(12).TextColor(t.Text)
+							citeLabel := strings.TrimSpace(resolved.Citation.Title)
+							if citeLabel == "" {
+								citeLabel = citationKindLabel(resolved.Citation.Kind)
+							}
+							ui.Text(c, citeLabel).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).
+								Tooltip(resolved.Citation.ID)
+							ui.Text(c, resolved.Citation.Snapshot).FontSize(float32(tokens.TextMeta)).TextColor(t.Text)
 							if resolved.Status != "current" {
 								warning := "已过期"
 								if resolved.Status == "missing" {
@@ -378,8 +410,7 @@ func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
 					Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
 					OnChange: func(source string) {
 						a.noteDraft = source
-						a.noteDirty = true
-						a.noteState = ""
+						a.markNotebookDirty()
 					}}
 			}
 			a.noteAster.Render(c)
@@ -392,8 +423,16 @@ func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
 					Background(t.Surface).Border(1, t.Border).Radius(t.Space(2.5)).
 					Padding(t.Space(7), t.Space(8)).Children(func() {
 					if strings.TrimSpace(a.noteDraft) == "" {
-						ui.Text(c, "还没有内容。切换到“编辑”开始写。").
-							FontSize(13).TextColor(t.TextMuted)
+						tokens := theme.GetTokens(t)
+						stateWord := "未开始"
+						if a.noteDirty {
+							stateWord = "草稿"
+						}
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+							components.Badge(c, stateWord, components.BadgeOptions{Tone: components.BadgeNeutral})
+							ui.Text(c, "尚未记录笔记内容，切换到“实时”或“编辑”开始撰写。").
+								FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
+						})
 						return
 					}
 					protocol.RenderMarkdown(c, a.noteDraft)
@@ -405,8 +444,7 @@ func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
 			area := ui.TextAreaBase(c, &a.noteDraft)
 			area.Fill().Grow(1).MinWidth(0).MinHeight(0)
 			if area.Changed() {
-				a.noteDirty = true
-				a.noteState = ""
+				a.markNotebookDirty()
 			}
 		})
 	default: // live rich rendering
@@ -419,8 +457,7 @@ func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
 			})
 			editor.Fill().Grow(1).MinWidth(0).MinHeight(0)
 			if editor.Changed() {
-				a.noteDirty = true
-				a.noteState = ""
+				a.markNotebookDirty()
 			}
 		})
 	}
@@ -433,12 +470,26 @@ func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
 func notebookTimeline(c *ui.Context, a *app, t *ui.Theme, projection notebook.Notebook) {
 	tokens := theme.GetTokens(t)
 	view := a.noteView()
+	if view.expanded == nil {
+		view.expanded = map[string]bool{}
+	}
+	taskTitles := make(map[string]string, len(a.snap.Tasks))
+	for _, task := range a.snap.Tasks {
+		title := strings.TrimSpace(task.Title)
+		if title == "" {
+			title = "执行步骤"
+		}
+		if tp := strings.TrimSpace(task.Timepoint); tp != "" {
+			title += " · " + tp
+		}
+		taskTitles[task.Key] = title
+	}
 	ui.Scroll(c).Grow(1).FillWidth().Children(func() {
 		ui.Column(c).FillWidth().Padding(t.Space(2), 0, t.Space(4), 0).Gap(t.Space(1.5)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 				ui.Text(c, "运行记录").FontSize(t.Rem(1.0)).FontWeight(600).TextColor(t.Text)
 				components.Badge(c, "只读", components.BadgeOptions{Tone: components.BadgeNeutral})
-				ui.Text(c, fmt.Sprintf("Design rev %d · %d 条", projection.DesignRevision, len(projection.Entries))).
+				ui.Text(c, fmt.Sprintf("设计版本 %d · %d 条", projection.DesignRevision, len(projection.Entries))).
 					FontSize(t.Rem(.78)).TextColor(t.TextMuted).FontFeatures("tnum")
 			})
 			if len(projection.Entries) == 0 {
@@ -452,6 +503,8 @@ func notebookTimeline(c *ui.Context, a *app, t *ui.Theme, projection notebook.No
 				if highlighted {
 					row.Background(tokens.WarningBg).Border(1, t.Warning)
 				}
+				rawRef := notebookEntryRawLabel(entry)
+				summary := notebookEntrySummary(entry, a.snap, taskTitles)
 				row.Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(t.Space(1.5)).Children(func() {
 						cat := iconForCategory(entry.Category)
@@ -464,14 +517,36 @@ func notebookTimeline(c *ui.Context, a *app, t *ui.Theme, projection notebook.No
 								ui.Text(c, entry.DisplayTime()).FontSize(t.Rem(.75)).
 									TextColor(t.TextMuted).FontFeatures("tnum")
 							})
-							ui.Text(c, entry.SourceType+" "+entry.SourceID).FontSize(t.Rem(.7)).
+							summaryText := ui.Text(c, summary).FontSize(float32(tokens.TextData)).
 								TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+							if rawRef != "" {
+								summaryText.Tooltip(rawRef)
+							}
 							switch entry.Trace {
 							case notebook.TraceInvalid:
 								ui.Text(c, "来源失效").FontSize(t.Rem(.7)).TextColor(t.Warning)
 							case notebook.TraceMissing:
 								ui.Text(c, "来源未记录").FontSize(t.Rem(.7)).TextColor(t.Warning)
 							}
+							open := view.expanded[entry.ID]
+							components.Collapsible(c, "来源详情", &open, components.CollapsibleOptions{}, func() {
+								if rawRef != "" {
+									ui.Text(c, "原始来源："+rawRef).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+								}
+								if entry.TaskID != "" {
+									ui.Text(c, "任务标识："+entry.TaskID).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+								}
+								if entry.DesignStepID != "" {
+									ui.Text(c, "设计步骤："+entry.DesignStepID).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+								}
+								for _, detail := range entry.Details {
+									ui.Text(c, detail.Label+"："+detail.Value).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+								}
+								for _, ref := range entry.References {
+									ui.Text(c, "关联引用："+ref.Label+" "+ref.ID).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+								}
+							})
+							view.expanded[entry.ID] = open
 						})
 					})
 				})
@@ -512,8 +587,14 @@ func (a *app) applyNoteModeChange(old int) {
 	if a.noteMode == 0 {
 		a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
 	}
+	if a.noteMode == 3 {
+		a.noteAster = nil
+	}
 	if a.noteMode != 2 {
 		a.noteEditMode = a.noteMode
+	}
+	if a.noteDirty {
+		a.persistNotebookDraft()
 	}
 }
 
@@ -527,8 +608,7 @@ func (a *app) insertPlateModule() {
 	} else {
 		a.noteDraft = strings.TrimLeft(block, "\n")
 	}
-	a.noteDirty = true
-	a.noteState = ""
+	a.markNotebookDirty()
 }
 
 func (a *app) setNoteMode(mode int) {
@@ -542,10 +622,16 @@ func (a *app) setNoteMode(mode int) {
 	if mode == 0 {
 		a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
 	}
+	if mode == 3 {
+		a.noteAster = nil
+	}
 	if mode != 2 {
 		a.noteEditMode = mode
 	}
 	a.noteMode = mode
+	if a.noteDirty {
+		a.persistNotebookDraft()
+	}
 }
 
 // iconCmd renders one compact toolbar command. Formatting commands act on the
@@ -560,8 +646,7 @@ func (a *app) iconCmd(c *ui.Context, icon *ui.SVG, label string, active, enabled
 	b.Disabled(!enabled)
 	if b.Clicked() && enabled {
 		act()
-		a.noteDirty = true
-		a.noteState = ""
+		a.markNotebookDirty()
 	}
 }
 
@@ -578,8 +663,7 @@ func (a *app) insertCitation(citation notebook.Citation) {
 	if a.noteMode == 0 {
 		a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
 	}
-	a.noteDirty = true
-	a.noteState = ""
+	a.markNotebookDirty()
 }
 
 func (a *app) removeCitation(index int) {
@@ -587,8 +671,7 @@ func (a *app) removeCitation(index int) {
 	if a.noteMode == 0 {
 		a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
 	}
-	a.noteDirty = true
-	a.noteState = ""
+	a.markNotebookDirty()
 }
 
 // jumpToTimeline points the surface at the entry a citation named. At narrow
@@ -602,29 +685,53 @@ func (a *app) jumpToTimeline(entryID string) {
 }
 
 func (a *app) loadNotebook() {
+	if a.noteRunID != "" && a.noteRunID != a.snap.RunID && (a.noteDirty || a.noteErr != "") {
+		a.persistNotebookDraft()
+	}
 	a.noteRunID = a.snap.RunID
 	a.noteDraft = ""
 	a.noteDirty = false
+	a.noteRecovered = false
 	a.noteState = ""
 	a.noteErr = ""
-	var latest *runs.RunEvent
-	for i := range a.snap.Events {
-		event := &a.snap.Events[i]
-		if event.Stage != "notebook" {
-			continue
-		}
-		if latest == nil || event.RecordedAt >= latest.RecordedAt {
-			latest = event
+	a.noteAster = nil
+
+	latestContent, hasSaved := latestNotebookRevision(a.snap.Events)
+	var recovered *notebookDraft
+	if a.snap.RunID != "" {
+		if d, ok := a.noteDrafts[a.snap.RunID]; ok {
+			recovered = &d
+		} else if d, ok := loadNotebookDraftFile(a.snap.RunID); ok {
+			recovered = &d
 		}
 	}
-	if latest != nil {
-		a.noteDraft = latest.Content
-	}
-	a.noteMode = 0
+
+	mode := 0
 	if os.Getenv("ASTERLAB_NOTE_MODE") == "doc" {
-		a.noteMode = 3
+		mode = 3
 	}
-	a.noteEditMode = 0
+	if recovered != nil && (recovered.Markdown != latestContent || (!hasSaved && recovered.Markdown != "")) {
+		a.noteDraft = recovered.Markdown
+		a.noteDirty = true
+		a.noteRecovered = true
+		if recovered.Mode >= 0 && recovered.Mode <= 3 && recovered.Mode != 2 {
+			mode = recovered.Mode
+		}
+	} else {
+		if recovered != nil {
+			a.clearNotebookDraft(a.snap.RunID)
+		}
+		a.noteDraft = latestContent
+		if hasSaved {
+			a.noteState = "saved"
+		}
+	}
+	a.noteMode = mode
+	if mode != 2 {
+		a.noteEditMode = mode
+	} else {
+		a.noteEditMode = 0
+	}
 	a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
 }
 
@@ -634,28 +741,308 @@ func (a *app) saveNotebook() {
 	if a.runSvc == nil {
 		a.noteErr = "运行服务不可用"
 		a.noteState = "error"
+		if strings.TrimSpace(source) != "" || a.noteDirty {
+			a.noteDirty = true
+			a.persistNotebookDraft()
+		}
 		return
 	}
 	if strings.TrimSpace(source) == "" {
 		a.noteErr = "Notebook 不能为空"
 		a.noteState = "error"
+		if a.noteDirty {
+			a.persistNotebookDraft()
+		}
 		return
 	}
 	if len([]rune(source)) > 5000 {
 		a.noteErr = "Notebook 超过 5000 个字符；请拆分。"
 		a.noteState = "error"
+		a.noteDirty = true
+		a.persistNotebookDraft()
 		return
 	}
+	a.noteState = "saving"
+	a.noteErr = ""
 	snap, err := a.runSvc.SaveNotebook(context.Background(), runs.NotebookInput{
 		RunID: a.snap.RunID, Markdown: source, OperationID: a.nextOp(),
 	})
 	if err != nil {
 		a.noteErr = state.MapError(err).Error()
 		a.noteState = "error"
+		a.noteDirty = true
+		a.persistNotebookDraft()
 		return
 	}
 	a.noteErr = ""
 	a.noteState = "saved"
 	a.noteDirty = false
+	a.noteRecovered = false
+	a.clearNotebookDraft(a.snap.RunID)
 	a.applySnap(snap)
+}
+
+func (a *app) notebookToolbarState(tokens theme.Tokens) (string, ui.Color) {
+	switch {
+	case a.noteState == "saving":
+		return "保存中", tokens.TextMuted
+	case a.noteState == "error" || a.noteErr != "":
+		return notebook.SaveStateLabel(true), tokens.DangerText
+	case a.noteDirty:
+		return notebook.SaveStateLabel(true), tokens.WarningText
+	case a.noteState == "saved" || hasSavedNotebookEvent(a.snap.Events):
+		return notebook.SaveStateLabel(false), tokens.SuccessText
+	default:
+		return "草稿", tokens.TextMuted
+	}
+}
+
+func latestNotebookRevision(events []runs.RunEvent) (string, bool) {
+	var latest *runs.RunEvent
+	for i := range events {
+		event := &events[i]
+		if event.Stage != "notebook" {
+			continue
+		}
+		if latest == nil || event.RecordedAt >= latest.RecordedAt {
+			latest = event
+		}
+	}
+	if latest == nil {
+		return "", false
+	}
+	return latest.Content, true
+}
+
+func hasSavedNotebookEvent(events []runs.RunEvent) bool {
+	_, ok := latestNotebookRevision(events)
+	return ok
+}
+
+func (a *app) markNotebookDirty() {
+	if a.noteMode == 0 && a.noteDoc != nil {
+		a.noteDraft = a.noteDoc.Text().Markdown()
+	}
+	a.noteDirty = true
+	a.noteState = ""
+	a.noteErr = ""
+	a.persistNotebookDraft()
+}
+
+func (a *app) persistNotebookDraft() {
+	if strings.TrimSpace(a.noteRunID) == "" {
+		return
+	}
+	src := a.noteSource()
+	if a.noteDrafts == nil {
+		a.noteDrafts = map[string]notebookDraft{}
+	}
+	draft := notebookDraft{
+		RunID:     a.noteRunID,
+		Markdown:  src,
+		Mode:      a.noteMode,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	a.noteDrafts[a.noteRunID] = draft
+	_ = saveNotebookDraftFile(a.noteRunID, src, a.noteMode)
+}
+
+func (a *app) clearNotebookDraft(runID string) {
+	if strings.TrimSpace(runID) == "" {
+		return
+	}
+	if a.noteDrafts != nil {
+		delete(a.noteDrafts, runID)
+	}
+	clearNotebookDraftFile(runID)
+}
+
+func (a *app) discardNotebookDraft() {
+	if a.snap.RunID != "" {
+		a.clearNotebookDraft(a.snap.RunID)
+	}
+	content, hasSaved := latestNotebookRevision(a.snap.Events)
+	a.noteDraft = content
+	a.noteDirty = false
+	a.noteRecovered = false
+	a.noteErr = ""
+	a.noteAster = nil
+	if hasSaved {
+		a.noteState = "saved"
+	} else {
+		a.noteState = ""
+	}
+	a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
+}
+
+type notebookDraft struct {
+	RunID     string `json:"runId"`
+	Markdown  string `json:"markdown"`
+	Mode      int    `json:"mode,omitempty"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+func notebookDraftDataDir() string {
+	if dir := strings.TrimSpace(os.Getenv("LABWORKBENCH_DATA_DIR")); dir != "" {
+		return dir
+	}
+	if testing.Testing() {
+		return ""
+	}
+	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "AsterLab")
+	}
+	return ""
+}
+
+func notebookDraftPath(runID string) string {
+	dir := notebookDraftDataDir()
+	if dir == "" || strings.TrimSpace(runID) == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("notebook\x00" + runID))
+	return filepath.Join(dir, "drafts", "notebook-"+hex.EncodeToString(sum[:16])+".json")
+}
+
+func saveNotebookDraftFile(runID, markdown string, mode int) error {
+	p := notebookDraftPath(runID)
+	if p == "" {
+		return nil
+	}
+	raw, err := json.Marshal(notebookDraft{
+		RunID:     runID,
+		Markdown:  markdown,
+		Mode:      mode,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
+func loadNotebookDraftFile(runID string) (notebookDraft, bool) {
+	p := notebookDraftPath(runID)
+	if p == "" {
+		return notebookDraft{}, false
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return notebookDraft{}, false
+	}
+	var draft notebookDraft
+	if err := json.Unmarshal(raw, &draft); err != nil || draft.RunID != runID {
+		return notebookDraft{}, false
+	}
+	return draft, true
+}
+
+func clearNotebookDraftFile(runID string) {
+	p := notebookDraftPath(runID)
+	if p != "" {
+		_ = os.Remove(p)
+	}
+}
+
+func notebookEntryRawLabel(entry notebook.Entry) string {
+	return strings.TrimSpace(entry.SourceType + " " + entry.SourceID)
+}
+
+func notebookEntrySummary(entry notebook.Entry, snap runs.RunSnapshot, taskTitles map[string]string) string {
+	if entry.SourceType == "run" {
+		if strings.TrimSpace(entry.Note) != "" {
+			return "实验运行 · " + entry.Note
+		}
+		parts := []string{"实验运行"}
+		if st := notebookStatusWord(snap.Status); st != "" {
+			parts = append(parts, st)
+		}
+		if snap.DesignRevision > 0 {
+			parts = append(parts, fmt.Sprintf("冻结设计版本 %d", snap.DesignRevision))
+		}
+		return strings.Join(parts, " · ")
+	}
+	parts := []string{notebookCategoryLabel(entry.Category)}
+	if entry.TaskID != "" {
+		if title := taskTitles[entry.TaskID]; title != "" {
+			parts = append(parts, title)
+		}
+	}
+	for _, detail := range entry.Details {
+		switch detail.Label {
+		case "单元格":
+			parts = append(parts, detail.Value+"单元格")
+		case "步骤状态":
+			if st := notebookStatusWord(detail.Value); st != "" {
+				parts = append(parts, st)
+			}
+		case "时间点":
+			if taskTitle := taskTitles[entry.TaskID]; !strings.Contains(taskTitle, detail.Value) {
+				parts = append(parts, detail.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func notebookCategoryLabel(category notebook.Category) string {
+	switch category {
+	case notebook.Measurement:
+		return "测量记录"
+	case notebook.Observation:
+		return "观察记录"
+	case notebook.Deviation:
+		return "偏差记录"
+	case notebook.Checklist:
+		return "检查记录"
+	case notebook.System:
+		return "系统记录"
+	default:
+		return "执行记录"
+	}
+}
+
+func notebookStatusWord(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "not_started", "pending", "idle", "created":
+		return "未开始"
+	case "running", "in_progress", "active":
+		return "进行中"
+	case "completed", "done", "passed":
+		return "已完成"
+	case "blocked", "failed", "error":
+		return "阻塞"
+	case "frozen":
+		return "已冻结"
+	case "draft":
+		return "草稿"
+	default:
+		return ""
+	}
+}
+
+func citationKindLabel(kind string) string {
+	switch kind {
+	case "plate":
+		return "板图"
+	case "batch":
+		return "读数批次"
+	case "readout":
+		return "测量读数"
+	case "event":
+		return "运行事件"
+	case "step":
+		return "执行步骤"
+	case "asset":
+		return "实验文件"
+	default:
+		return "运行引用"
+	}
 }
