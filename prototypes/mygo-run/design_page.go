@@ -195,6 +195,9 @@ func asterDesignPage(c *ui.Context, a *app) {
 			}
 			renderAgentProposal(c,a)
 		})
+		if a.designer != nil {
+			designer.BudgetBar(c, a.designer)
+		}
 		if a.designLoadErr != "" {
 			renderDesignErrorBanner(c, "设计加载失败："+a.designLoadErr, a.retryDesignFunc())
 		}

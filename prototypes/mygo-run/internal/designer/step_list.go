@@ -291,7 +291,7 @@ func ListView(c *ui.Context, d *Designer) {
 	ui.Column(c).Fill().Background(c.Theme().Background).Children(func() {
 		listToolbar(c, d)
 		listErrorBanner(c, d)
-		budgetBar(c, d)
+		BudgetBar(c, d)
 		sectionSwitch(c, d)
 		ui.Box(c).Fill().Grow(1).MinHeight(0).Children(func() {
 			switch d.Section {
@@ -392,9 +392,8 @@ func listStateChip(c *ui.Context, d *Designer) {
 	}
 }
 
-// budgetBar shows only Core's time projection. Step and well counts remain
-// document facts; undeclared OperationSpecs do not become guessed durations.
-func budgetBar(c *ui.Context, d *Designer) {
+// BudgetBar renders Core time when available and separately labeled design annotations otherwise.
+func BudgetBar(c *ui.Context, d *Designer) {
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
 	b := d.designBudget()
