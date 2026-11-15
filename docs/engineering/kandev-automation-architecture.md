@@ -1,4 +1,6 @@
 # Kandev 自动化运行架构：现状、故障分类与目标工作流
+> **已过时（2026-11-15 起）**：控制面已迁至 LLLin000/home 的 `engineering-home-controller` 与 `engineering-home-merge-worker`；权威运行手册为该仓库的 [`docs/loop.md`](https://github.com/LLLin000/home/blob/main/docs/loop.md)。本文保留为迁移前分析。
+
 
 ## 结论
 
@@ -24,17 +26,18 @@
 
 ### 2.1 运行状态
 
-本次只读采样：
+当前运行状态（2026-11-15）：
 
-- `kandev.service`、`kandev-ready-feeder.service`、`kandev-telegram-callback.service` 均运行；feeder 每 30 秒循环，配置中的 Agent/Review WIP 均为 4。
-- Kandev、feeder、Telegram callback 的 systemd `User` 为空/为默认 root；`kandev.service` 明确以 root 运行。仓库既有路线图已把无人值守 root executor 记为风险。
-- `kandev-zombie-reaper.timer` 每小时触发；`kandev-session-reaper.timer` 当前 disabled；日报 timer 已启用。callback 的 `Restart=no`，进程异常退出后 systemd 不会自动重启。
-- 当前工作流快照：Merged 26 张；Review 4 张（4/4 满）；Inbox 3 张，其中 2 张 `CREATED`、1 张 task state 为 `REVIEW`；Ready/Agent 无卡。Review 满载时 feeder 会停止接收新工作，这是预期背压，不是模型额度问题。
-- Kandev DB 中 `automations`、`automation_triggers`、`automation_runs` 均无记录；当前队列控制主要来自自建 feeder，而不是已配置的 workspace automation。
-
+- `kandev-ready-feeder.service` 与 Home scheduler 均已 disabled；`kandev-telegram-callback` 已停止并删除。Home 的 `engineering-home-controller` 与 `engineering-home-merge-worker` active。
+- 工作流已新增原生 Hold 步骤；no-signal 重试/Review 返工耗尽后进入 Hold，由人工处理后手动移回 Ready。Hold 是人工门，不应由自动化直接绕过。
+- 以下队列、systemd 用户、timer 和数据库配置观察均为迁移前采样，不代表当前状态。
+- 迁移前采样：Kandev、feeder、Telegram callback 的 systemd `User` 为空/为默认 root；`kandev.service` 明确以 root 运行。仓库既有路线图已把无人值守 root executor 记为风险。
+- 迁移前采样：`kandev-zombie-reaper.timer` 每小时触发；`kandev-session-reaper.timer` disabled；日报 timer 已启用。callback 的 `Restart=no`，进程异常退出后 systemd 不会自动重启。
+- 迁移前工作流快照：Merged 26 张；Review 4 张（4/4 满）；Inbox 3 张，其中 2 张 `CREATED`、1 张 task state 为 `REVIEW`；Ready/Agent 无卡。Review 满载时 feeder 会停止接收新工作，这是预期背压，不是模型额度问题。
+- 迁移前 Kandev DB 中 `automations`、`automation_triggers`、`automation_runs` 均无记录；当时队列控制主要来自自建 feeder，而不是已配置的 workspace automation。
 ### 2.2 正在运行/等待的任务
 
-以下是本次 Kandev DB 与 PR 快照，不是重新执行 CI：
+以下是迁移前的 Kandev DB 与 PR 快照，不是重新执行 CI，也不代表当前状态：
 
 | 卡 | 当前观察 | 处置含义 |
 |---|---|---|
@@ -47,19 +50,22 @@
 
 ### 2.3 代码和流程问题
 
-1. `scripts/kandev-ready-feeder.py` 把 admission、容量、PR 扫描、session/process 回收、卡片停滞、review verdict、Telegram 通知、retro 创建和归档混在一个循环中。`scripts/kandev_model_quota.py`、session reaper、zombie reaper、callback 又分别承担生命周期动作；没有唯一动作账本。
-2. feeder 和 quota handler 直接写 Kandev SQLite：session state、executor state、workflow step profile、labels、task repository 等。这样绕过 Kandev 的 API 校验、事件和 recovery 所需的持久化不变量；官方 session 文档明确禁止通过改 DB 绕过 recovery。
-3. 控制决策读取 `VERDICT:` 自由文本、关键词、PR 标题和 DB 聚合状态。模型措辞变化、引用 prompt、旧 session 消息、PR watcher 延迟都可能导致错判。机器动作应依据有 schema 的 outcome 和外部真实状态，而不是自然语言片段。
-4. 多个状态被混用：workflow step、task state、session state、executor process、PR state、CI state。SDK-03 当前已经出现 task 在 Inbox、task state 为 REVIEW、PR 仍 open 的可观测分歧。
+1. `scripts/kandev-ready-feeder.py` 曾把 admission、容量、PR 扫描、session/process 回收、卡片停滞、review verdict、Telegram 通知、retro 创建和归档混在一个循环中。旧 feeder 已不再部署；移卡、合并及 label 操作已收敛到 Home 账本与 worker。
+2. 旧 feeder 和 quota handler 曾直接写 Kandev SQLite，绕过 API 校验、事件和 recovery 持久化不变量。当前 Home 控制器不写 Kandev 内部数据库；Kandev 状态通过受支持的 workflow API 操作。
+3. 迁移前控制决策会读取 `VERDICT:` 自由文本、关键词、PR 标题和 DB 聚合状态，存在措辞变化、引用 prompt 或 watcher 延迟导致错判的风险。当前 Home 控制面不以聊天文本作为控制信号，以账本及 Kandev/GitHub 权威状态对账。
+4. 多个状态曾被混用：workflow step、task state、session state、executor process、PR state、CI state。SDK-03 当前已经出现 task 在 Inbox、task state 为 REVIEW、PR 仍 open 的可观测分歧。
 5. `validate_card()` 只检查 scope 块、证据路径覆盖、非 Docs 验收中是否出现反引号、lane label 和 `{{...}}` 占位符；不检查自然语言自相矛盾、路径是否绝对、命令是否存在/可运行、依赖图是否合理或验收结果是否真实。
 6. 配额策略符合当前产品决定：DeepSeek 明确 quota error 时单向切到 `openai-codex/gpt-6-luna`；Luna quota 不切回 DeepSeek。但当前检测依赖错误消息中的固定文本；未识别的错误不能被误当成可恢复 quota。
 7. `scan_retro_trigger()` 的 watermark 更新代码位于 `except` 分支的 `return` 之后，成功路径不可达。watermark 不推进时，队列再次排空后可能重复创建覆盖同一批任务的 RETRO 卡。
 8. `kandev-telegram-callback.py` 只核对 chat id，不核对 callback 发起人的 allowlist；merge/reject 是有副作用的操作。Telegram 应是通知/带身份校验的审批界面，不应成为无身份约束的权限边界。
+   **现状：**`kandev-telegram-callback` 已停止并删除，merge/reject 不再经由该 callback 执行。
 9. `tests/test_kandev_model_quota.py` 覆盖配额检测和单向 profile 回退；`tests/test_kandev*` 没有 feeder、PR 状态机、重启恢复或 Telegram 授权测试。
 
 ## 3. 故障分类：哪些可以不靠人工 prompt
 
 定义：**是** = 可从结构化事实自动恢复；**部分** = 自动等待/重试/收集证据，但最终决策需人；**否** = 语义、权限或安全判断不能猜。
+
+实现载体已由 feeder 换为 Home 控制器；分类结论不变。
 
 | 阶段/故障 | 不依赖人工 prompt 的自动处理 | 自动化边界 |
 |---|---|---|
