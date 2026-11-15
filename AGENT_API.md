@@ -114,6 +114,8 @@ stdout 每次只输出一行 JSON。成功结构为：
 - 未知或类型不匹配的 ID 返回 `NOT_FOUND`（退出码 3），不返回空对象。自由文本 Protocol 无根块时返回空步骤/参数数组，`root_block_version_id: null`；其不可变版本仍标记为 `frozen: true`。
 - 两个查询都不写入数据库。精确字段约束以 `labworkbench schema protocol.version.get` / `labworkbench schema protocol.version.list` 为准。
 
+MyGo 侧是同一份数据的只读入口：`DesignService.GetProtocolVersion(ctx, protocol_version_id)` 与 `DesignService.ListProtocolVersions(ctx, protocol_id)`（后者按版本号升序）。标量字段与 CLI 输出同名同义：`protocol_version_id`、`protocol_id`、`version`、`root_block_version_id`（可空）、`block_version_ids`（字符串数组）、`frozen`。`root_bindings`、`parameter_slots`、`steps`、`resolved_parameters`、`unresolved_parameters` 以 CLI 的 JSON 文本透传，和 `WorkflowTree` 同一约定：解码即用，不在 Go 侧重建。这些展开项含任意 JSON 值（参数 `value`、`provenance`），桥接层没有对应类型，因此不作为 Go struct 跨边界。未知 ID 经 `internal/state.MapError` 归为 `state.ErrNotFound`，返回错误而非空对象。
+
 Protocol 可以继续保存旧式 body 文本，也可以引用一个确切的 root_block_version_id。步骤块是唯一的可复用操作对象。protocol.block.create 的 steps 接受两种项：
 
 - text：包含 use_id、title、instruction 和 parameter_refs，是普通可读操作。只有列入 parameter_refs 的槽位才作为该步骤的显式输入。

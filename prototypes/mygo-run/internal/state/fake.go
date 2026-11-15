@@ -62,6 +62,27 @@ func (f *FakeDesignService) ListProtocols(ctx context.Context) ([]runs.ProtocolS
 	}
 	return nil, nil
 }
+func (f *FakeDesignService) GetProtocolVersion(ctx context.Context, protocolVersionID string) (runs.ProtocolVersionContent, error) {
+	if f.Err != nil {
+		return runs.ProtocolVersionContent{}, MapError(f.Err)
+	}
+	return runs.ProtocolVersionContent{
+		ProtocolVersionID:    protocolVersionID,
+		RootBindings:         "[]",
+		ParameterSlots:       "[]",
+		Steps:                "[]",
+		ResolvedParameters:   "[]",
+		UnresolvedParameters: "[]",
+		BlockVersions:        []string{},
+		Frozen:               true,
+	}, nil
+}
+func (f *FakeDesignService) ListProtocolVersions(ctx context.Context, protocolID string) ([]runs.ProtocolVersionContent, error) {
+	if f.Err != nil {
+		return nil, MapError(f.Err)
+	}
+	return nil, nil
+}
 func (f *FakeDesignService) PreviewProtocolBlock(ctx context.Context, blockVersionID string) (runs.ProtocolBlockPreview, error) {
 	if f.Err != nil {
 		return runs.ProtocolBlockPreview{}, MapError(f.Err)

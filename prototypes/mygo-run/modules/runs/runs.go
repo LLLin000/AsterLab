@@ -1,10 +1,7 @@
 // Package runs exposes the frozen Run and Design services to MyGo.
 package runs
 
-import (
-	"context"
-	"encoding/json"
-)
+import "context"
 
 // RunService loads a frozen Run and records measurements in it.
 //
@@ -304,19 +301,22 @@ type ProtocolSummary struct {
 	Version           int    `json:"version"`
 }
 
-// ProtocolVersionContent is the read-only expanded content of an immutable ProtocolVersion.
+// ProtocolVersionContent is the read-only expanded content of an immutable
+// ProtocolVersion. The expanded arrays cross the module boundary as the exact
+// CLI JSON text, the same contract WorkflowTree uses: decode it, never rebuild
+// it in Go. Their members carry protocol values that are not bridge types.
 type ProtocolVersionContent struct {
-	ProtocolVersionID    string            `json:"protocol_version_id"`
-	ProtocolID           string            `json:"protocol_id"`
-	Version              int               `json:"version"`
-	RootBlockVersionID   *string           `json:"root_block_version_id"`
-	RootBindings         []json.RawMessage `json:"root_bindings"`
-	ParameterSlots       []json.RawMessage `json:"parameter_slots"`
-	Steps                []json.RawMessage `json:"steps"`
-	ResolvedParameters   []json.RawMessage `json:"resolved_parameters"`
-	UnresolvedParameters []json.RawMessage `json:"unresolved_parameters"`
-	BlockVersionIDs      []string          `json:"block_version_ids"`
-	Frozen               bool              `json:"frozen"`
+	ProtocolVersionID    string   `json:"protocol_version_id"`
+	ProtocolID           string   `json:"protocol_id"`
+	Version              int      `json:"version"`
+	RootBlockVersionID   *string  `json:"root_block_version_id"`
+	RootBindings         string   `json:"root_bindings"`
+	ParameterSlots       string   `json:"parameter_slots"`
+	Steps                string   `json:"steps"`
+	ResolvedParameters   string   `json:"resolved_parameters"`
+	UnresolvedParameters string   `json:"unresolved_parameters"`
+	BlockVersions        []string `json:"block_version_ids"`
+	Frozen               bool     `json:"frozen"`
 }
 
 // ProtocolBlockStep is one expanded definition step inside a ProtocolBlock
