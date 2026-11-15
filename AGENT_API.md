@@ -169,8 +169,12 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - 记录更新与一条 `asset_link_event` 在同一事务提交：`action = "updated"`，`previous` 为更新前的 `{wellId, timepoint, fovIndex, coordinateId}`。`asset.events` 的 `action` 过滤新增 `updated`。
 - 输出 `{record, event}`，与 `asset.link` 同形状。未知或已解绑的记录返回 `NOT_FOUND`（退出码 3）；坐标非法、缺字段或 `id` 不是 `asset_link` 返回 `INVALID_INPUT`（退出码 2）。
 - 记录 ID 是创建时的定位句柄，更新坐标不重算。移动坐标用本命令；用 `asset.link` 重新关联同一文件与新坐标会因 ID 由坐标派生而新增一条记录。
-- `runs.RunService` 的原生桥接尚未暴露该命令（LB-10）；本卡只保证 CLI 契约。
-- 完整规则与回滚说明见 [docs/contracts/asset-coordinates-v1.md](docs/contracts/asset-coordinates-v1.md) §5。
+- `runs.RunService` 的原生桥接（LB-10）按资产 ID 暴露同一语义，不按记录 ID：
+  - `UnlinkAssetLink(ctx, runID, assetID) (runs.Asset, error)`：解除该 Run 上这个资产的链接并追加 `unlinked` 事件，返回被删除链接的原始元数据；文件本身不动。
+  - `UpdateAssetLinkCoordinates(ctx, runID, assetID, wellID, timepoint, fovIndex) (runs.Asset, error)`：把链接的坐标三元组就地改成新值，文件身份与记录 ID 不变。`wellID` 必填；`timepoint == ""` 与 `fovIndex == 0` 是 Go 的“未记录”，写入 `null`（Go 没有“键缺失”状态，所以两项始终显式给出）。
+  - `assetID` 是 `ListAssetLinks` / `SaveAssetLink` 返回的 `Asset.ID`，在 `runID` 范围内解析。该 Run 没有这个资产的链接（含已解绑）→ `NOT_FOUND`；坐标非法 → `INVALID_INPUT`；同一资产在同一 Run 内有多个坐标链接（只有 CLI 能造出这种状态）→ `INVALID_INPUT`，不猜是哪一条。
+  - 错误形态是 Go 字符串：`NOT_FOUND: …` / `INVALID: …` / `INTERNAL: …`，与桥接层其他命令一致。
+- 完整规则与回滚说明见 [docs/contracts/asset-coordinates-v1.md](docs/contracts/asset-coordinates-v1.md) §5、§6。
 
 ## 读数提交（readout.*）
 

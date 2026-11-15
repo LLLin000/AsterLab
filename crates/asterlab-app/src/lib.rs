@@ -35,6 +35,13 @@ impl AppCore {
         &self.db
     }
 
+    /// Mutable handle for Core writers that own their transaction, as the CLI
+    /// does. The MyGo native bridge uses it to call the same `cli_impl`
+    /// functions instead of keeping a second copy of their SQL.
+    pub fn raw_db_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
+
     /// Create (no `id`) or replace (existing `id`) one pantry ledger row.
     /// Whole-object write; omitted optional fields are cleared.
     pub fn pantry_upsert(&mut self, input: Value) -> Result<Value, String> {

@@ -13123,17 +13123,22 @@ struct AssetUnlinkInput {
 /// would silently clear a recorded coordinate, so `timepoint` / `fov_index`
 /// use the double-option idiom: `None` = key absent, `Some(None)` = explicit
 /// `null`. Only explicit `null` clears a field.
+///
+/// The fields are crate-visible because the MyGo native bridge calls
+/// `update_asset_link` with the same validation instead of re-deriving Core's
+/// coordinate rules; the bridge has no absent/`null` distinction, so it always
+/// passes `Some(..)`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AssetLinkUpdateInput {
-    id: String,
-    well_id: String,
+pub(crate) struct AssetLinkUpdateInput {
+    pub(crate) id: String,
+    pub(crate) well_id: String,
     #[serde(default, deserialize_with = "deserialize_some")]
-    timepoint: Option<Option<String>>,
+    pub(crate) timepoint: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_some")]
-    fov_index: Option<Option<u32>>,
+    pub(crate) fov_index: Option<Option<u32>>,
     #[serde(default)]
-    actor_id: Option<String>,
+    pub(crate) actor_id: Option<String>,
 }
 
 /// Wraps a present JSON value (including `null`) in `Some` so the caller can
@@ -13683,7 +13688,11 @@ fn asset_link_event_from_data(
 /// copied verbatim. The record id is the link's creation handle and is not
 /// recomputed. The update and the `updated` event land in one transaction; a
 /// validation failure leaves both untouched.
-fn update_asset_link(
+///
+/// Crate-visible because the MyGo native bridge exposes the same command as
+/// `RunService.UpdateAssetLinkCoordinates`; there is exactly one implementation
+/// of the coordinate rules.
+pub(crate) fn update_asset_link(
     db: &mut Connection,
     request: &AssetLinkUpdateInput,
 ) -> Result<(Value, Value), CliError> {
