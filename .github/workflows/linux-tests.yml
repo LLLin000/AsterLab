@@ -36,7 +36,9 @@ jobs:
       # survive checkout. `Swatinem/rust-cache` used to clean ~/.cargo/bin on
       # this runner and deleted the host toolchain (2026-11-14); the cache
       # action is gone, this directory is the cache.
-      CARGO_TARGET_DIR: /var/lib/actions-runner/cargo-target
+      # Hosted runner: keep the target dir inside the job workspace so it is
+      # cached per runner image and needs no privileged path.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - name: Checkout
         uses: actions/checkout@v4
