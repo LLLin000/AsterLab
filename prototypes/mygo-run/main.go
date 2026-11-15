@@ -140,6 +140,8 @@ type app struct {
 	noteDraft                  string
 	noteRunID                  string
 	noteDirty                  bool
+	noteRecovered              bool
+	noteDrafts                 map[string]notebookDraft
 	noteState                  string
 	noteErr                    string
 	createRunErr               string
@@ -307,17 +309,29 @@ func toRunView(s runs.RunSnapshot) runui.RunView {
 }
 
 func (a *app) applySnap(snap runs.RunSnapshot) {
+	switchingRun := a.snap.RunID != "" && snap.RunID != "" && a.snap.RunID != snap.RunID
+	if switchingRun {
+		// StaleGuard tracks revisions within a single Run; switching Runs resets it so
+		// returning to a lower-revision Run is not dropped as stale.
+		a.guard = state.StaleGuard{}
+	}
 	if !a.guard.Accept(snap.Revision) {
 		a.err = "忽略过期快照"
 		return
 	}
-	newSnap, err := state.ApplySnapshot(a.snap, snap)
-	if err != nil {
-		a.err = err.Error()
-		return
-	}
-	if err := state.ConflictIfDifferent(a.snap, snap); err != nil {
-		a.err = err.Error()
+	var newSnap runs.RunSnapshot
+	if switchingRun {
+		newSnap = snap
+	} else {
+		var err error
+		newSnap, err = state.ApplySnapshot(a.snap, snap)
+		if err != nil {
+			a.err = err.Error()
+			return
+		}
+		if err := state.ConflictIfDifferent(a.snap, snap); err != nil {
+			a.err = err.Error()
+		}
 	}
 	previousRunID := a.snap.RunID
 	if previousRunID != "" && previousRunID != snap.RunID {
@@ -351,9 +365,9 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 		}
 		a.prepareGrid()
 		a.selectTaskFromEnv()
-		if a.noteRunID != a.snap.RunID {
-			a.loadNotebook()
-		}
+	}
+	if a.noteRunID != a.snap.RunID {
+		a.loadNotebook()
 	}
 }
 
@@ -1962,6 +1976,9 @@ func (a *app) applyRun(snap *runs.RunSnapshot, err error) {
 		a.shell.Error = ""
 	}
 	if snap == nil {
+		if a.noteRunID != "" && (a.noteDirty || a.noteErr != "") {
+			a.persistNotebookDraft()
+		}
 		a.snap = runs.RunSnapshot{}
 		if a.ws != nil {
 			a.ws.View = toRunView(a.snap)

@@ -1006,6 +1006,271 @@ func TestRelabelUnlabelledAssetSurfacesNotFoundWithoutMutatingRunAssets(t *testi
 	}
 }
 
+type notebookSaveFailSpy struct {
+	runs.RunService
+	failRemaining int
+	saveCalls     int
+	opIDs         []string
+	snap          runs.RunSnapshot
+}
+
+func (s *notebookSaveFailSpy) SaveNotebook(_ context.Context, input runs.NotebookInput) (runs.RunSnapshot, error) {
+	s.saveCalls++
+	s.opIDs = append(s.opIDs, input.OperationID)
+	if s.failRemaining > 0 {
+		s.failRemaining--
+		return runs.RunSnapshot{}, fmt.Errorf("CONFLICT: notebook write rejected")
+	}
+	s.snap.Revision++
+	s.snap.Events = append(s.snap.Events, runs.RunEvent{
+		ID:         fmt.Sprintf("evt-note-%d", s.saveCalls),
+		Stage:      "notebook",
+		EventType:  "observation",
+		Content:    input.Markdown,
+		RecordedAt: fmt.Sprintf("2026-11-16T00:00:0%dZ", s.saveCalls),
+	})
+	return s.snap, nil
+}
+
+func (s *notebookSaveFailSpy) WorkflowTree(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (s *notebookSaveFailSpy) ListAssetLinks(context.Context, string) ([]runs.Asset, error) {
+	return nil, nil
+}
+
+func TestNotebookSaveFailureVisibleAndRetrySaves(t *testing.T) {
+	t.Setenv("LABWORKBENCH_DATA_DIR", t.TempDir())
+	spy := &notebookSaveFailSpy{
+		failRemaining: 1,
+		snap: runs.RunSnapshot{
+			RunID:          "run-note-fail",
+			Title:          "Notebook Failure Test",
+			Status:         "running",
+			DesignRevision: 3,
+		},
+	}
+	a := &app{
+		runSvc: spy,
+		snap:   spy.snap,
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+
+	if !tt.HasText("草稿") {
+		t.Fatalf("initial unsaved notebook missing 草稿 state word: %q", tt.Texts())
+	}
+
+	if err := tt.Click("编辑"); err != nil {
+		t.Fatalf("switch to 编辑: %v", err)
+	}
+	tt.Frame()
+	a.noteDraft = "# 失败重试测试\n\n- 细胞状态稳定"
+	a.markNotebookDirty()
+	tt.Frame()
+	if !tt.HasText("未保存") {
+		t.Fatalf("dirty notebook missing 未保存 state word: %q", tt.Texts())
+	}
+
+	if err := tt.Click("保存笔记"); err != nil {
+		t.Fatalf("click 保存笔记: %v", err)
+	}
+	tt.Frame()
+	if spy.saveCalls != 1 {
+		t.Fatalf("SaveNotebook calls = %d, want 1", spy.saveCalls)
+	}
+	if !tt.HasText("未保存（CONFLICT: notebook write rejected）") || !tt.HasText("重试") {
+		t.Fatalf("save failure reason or retry button missing: %q", tt.Texts())
+	}
+	if a.noteDraft != "# 失败重试测试\n\n- 细胞状态稳定" || !a.noteDirty {
+		t.Fatalf("failed save mutated draft=%q dirty=%v", a.noteDraft, a.noteDirty)
+	}
+
+	a.noteState = "saving"
+	tt.Frame()
+	if !tt.HasText("保存中") {
+		t.Fatalf("saving state missing 保存中 label: %q", tt.Texts())
+	}
+	a.noteState = "error"
+	tt.Frame()
+
+	if err := tt.Click("重试"); err != nil {
+		t.Fatalf("click 重试: %v", err)
+	}
+	tt.Frame()
+	if spy.saveCalls != 2 {
+		t.Fatalf("SaveNotebook calls after retry = %d, want 2", spy.saveCalls)
+	}
+	if tt.HasText("CONFLICT: notebook write rejected") {
+		t.Fatalf("error banner remained after retry succeeded: %q", tt.Texts())
+	}
+	if !tt.HasText("已保存") || a.noteDirty {
+		t.Fatalf("notebook did not reach 已保存 after retry: dirty=%v texts=%q", a.noteDirty, tt.Texts())
+	}
+}
+
+func TestNotebookDraftSurvivesRunSwitchAndRestart(t *testing.T) {
+	t.Setenv("LABWORKBENCH_DATA_DIR", t.TempDir())
+	snapA := runs.RunSnapshot{
+		RunID:          "run-a-draft",
+		Title:          "Run A",
+		Status:         "running",
+		Revision:       1,
+		DesignRevision: 1,
+	}
+	snapB := runs.RunSnapshot{
+		RunID:          "run-b-saved",
+		Title:          "Run B",
+		Status:         "running",
+		Revision:       3,
+		DesignRevision: 2,
+		Events: []runs.RunEvent{
+			{ID: "evt-b", Stage: "notebook", Content: "Run B 已保存笔记", RecordedAt: "2026-11-16T00:00:00Z"},
+		},
+	}
+
+	a := &app{snap: snapA}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+
+	if err := tt.Click("编辑"); err != nil {
+		t.Fatalf("switch to 编辑: %v", err)
+	}
+	tt.Frame()
+	a.noteDraft = "Run A 未保存草稿"
+	a.markNotebookDirty()
+	tt.Frame()
+	if !tt.HasText("未保存") {
+		t.Fatalf("Run A dirty state not rendered: %q", tt.Texts())
+	}
+
+	// Switch to Run B: Run B loads its own persisted note, while Run A's draft is kept.
+	a.applySnap(snapB)
+	tt.Frame()
+	if a.noteDraft != "Run B 已保存笔记" || a.noteDirty || !tt.HasText("已保存") {
+		t.Fatalf("Run B state wrong: draft=%q dirty=%v texts=%q", a.noteDraft, a.noteDirty, tt.Texts())
+	}
+
+	// Switch back to Run A: Run A restores its dirty draft instead of clearing it.
+	a.applySnap(snapA)
+	tt.Frame()
+	if a.noteDraft != "Run A 未保存草稿" || !a.noteDirty || !tt.HasText("未保存") {
+		t.Fatalf("Run A draft was lost on Run switch: draft=%q dirty=%v texts=%q", a.noteDraft, a.noteDirty, tt.Texts())
+	}
+
+	// Simulate full process restart with empty in-memory state and same LABWORKBENCH_DATA_DIR.
+	spy := &notebookSaveFailSpy{snap: snapA}
+	restarted := &app{runSvc: spy, snap: snapA}
+	ttRestart := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, restarted)
+	}, 1360, 880)
+	ttRestart.Frame()
+	if restarted.noteDraft != "Run A 未保存草稿" || !restarted.noteDirty {
+		t.Fatalf("Run A draft was lost across restart: draft=%q dirty=%v", restarted.noteDraft, restarted.noteDirty)
+	}
+	if !ttRestart.HasText("已从本地草稿恢复未保存修改。") || !ttRestart.HasText("未保存") {
+		t.Fatalf("restarted recovery banner/state missing: %q", ttRestart.Texts())
+	}
+
+	// Saving clears the local disk draft so a subsequent restart starts clean at 已保存.
+	if err := ttRestart.Click("保存笔记"); err != nil {
+		t.Fatalf("save recovered draft: %v", err)
+	}
+	ttRestart.Frame()
+	if restarted.noteDirty || !ttRestart.HasText("已保存") {
+		t.Fatalf("recovered draft failed to save: dirty=%v texts=%q", restarted.noteDirty, ttRestart.Texts())
+	}
+	afterSave := &app{snap: spy.snap}
+	ttClean := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, afterSave)
+	}, 1360, 880)
+	ttClean.Frame()
+	if afterSave.noteDirty || ttClean.HasText("已从本地草稿恢复未保存修改。") || !ttClean.HasText("已保存") {
+		t.Fatalf("cleared disk draft still recovered: dirty=%v texts=%q", afterSave.noteDirty, ttClean.Texts())
+	}
+}
+
+func TestNotebookStateWordsChineseLabelsAndProgressiveDisclosure(t *testing.T) {
+	t.Setenv("LABWORKBENCH_DATA_DIR", t.TempDir())
+	val := 0.85
+	a := &app{
+		snap: runs.RunSnapshot{
+			RunID:          "run-uuid-999",
+			Title:          "CCK-8 实验",
+			Status:         "running",
+			DesignRevision: 7,
+			Tasks: []runs.RunTask{
+				{Key: "task-od-raw", Title: "酶标仪读数", Timepoint: "24 h"},
+			},
+			Events: []runs.RunEvent{
+				{
+					ID:         "evt-uuid-123",
+					EventType:  "measurement",
+					TaskKey:    "task-od-raw",
+					BatchID:    "batch-uuid-456",
+					RecordedAt: "2026-11-16T01:02:03Z",
+					ResultCells: []runs.ResultCell{
+						{Row: 0, Column: 0, SampleID: "S1", Field: "od450", Value: &val, Status: "raw"},
+					},
+				},
+			},
+		},
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+
+	for _, want := range []string{"草稿", "设计版本 7", "设计版本 7 · 2 条", "测量记录 · 酶标仪读数 · 24 h · 1 个单元格"} {
+		if !tt.HasText(want) {
+			t.Fatalf("missing expected Chinese text %q in %q", want, tt.Texts())
+		}
+	}
+	for _, forbid := range []string{"Document Revision", "Design rev", "execution_event evt-uuid-123", "run run-uuid-999", "batch-uuid-456"} {
+		if tt.HasText(forbid) {
+			t.Fatalf("unexpected mixed-language or raw ID %q in default view: %q", forbid, tt.Texts())
+		}
+	}
+
+	// Raw identifier is reachable in 1 click via the timeline detail disclosure.
+	if err := tt.Click("来源详情"); err != nil {
+		t.Fatalf("click 来源详情: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("原始来源：run run-uuid-999") {
+		t.Fatalf("clicking 来源详情 did not reveal raw run identifier: %q", tt.Texts())
+	}
+	view := a.noteView()
+	view.expanded["event:evt-uuid-123"] = true
+	tt.Frame()
+	if !tt.HasText("原始来源：execution_event evt-uuid-123") {
+		t.Fatalf("expanded detail did not reveal raw event identifier: %q", tt.Texts())
+	}
+
+	// Read-only empty state uses §3 state word and matches 实时/编辑 tabs.
+	if err := tt.Click("阅读"); err != nil {
+		t.Fatalf("switch to 阅读: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("未开始") || !tt.HasText("尚未记录笔记内容") {
+		t.Fatalf("read-only empty state missing §3 word or Chinese guidance: %q", tt.Texts())
+	}
+	if tt.HasText("还没有内容") {
+		t.Fatalf("legacy empty state text still present: %q", tt.Texts())
+	}
+}
+
 type readinessTestService struct {
 	runs.DesignService
 	designs         map[string]runs.DesignSnapshot
