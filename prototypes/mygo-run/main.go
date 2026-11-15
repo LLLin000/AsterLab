@@ -126,6 +126,7 @@ type app struct {
 	noteState                  string
 	noteErr                    string
 	createRunErr               string
+	linkErr                    string
 	noteMode                   int
 	noteEditMode               int
 	noteDoc                    *richtext.Document
@@ -2095,6 +2096,7 @@ func main() {
 			}
 			rv := runworkspace.RecordingView{
 				RunID: a.snap.RunID, Kind: kind, Grid: grid, Assets: linkedAssets, Task: task,
+				LinkErr: a.linkErr,
 				OnKindChange: func(kind runworkspace.ViewKind) {
 					a.runViewKinds[kindKey] = kind
 				},
@@ -2112,8 +2114,11 @@ func main() {
 				},
 				OnLinkFile: func(_ runworkspace.LinkedAsset) {
 					if err := a.linkRunAsset(task.TaskKey); err != nil {
-						c.AddToast(ui.Toast{Title: "文件关联失败", Description: err.Error(), Type: components.ToastError})
-					} else if a.shell != nil {
+						a.linkErr = err.Error()
+					} else {
+						a.linkErr = ""
+					}
+					if a.shell != nil {
 						a.shell.Invalidate()
 					}
 				},

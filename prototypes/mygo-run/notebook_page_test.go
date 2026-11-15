@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -92,5 +93,52 @@ func TestNotebookDocumentModeCanInsertPlateModule(t *testing.T) {
 	}
 	if !tt.HasText("96 孔板") {
 		t.Fatalf("inserted module did not render: %q", tt.Texts())
+	}
+}
+
+type notebookSaveSpy struct {
+	runs.RunService
+	saved bool
+}
+
+func (s *notebookSaveSpy) SaveNotebook(context.Context, runs.NotebookInput) (runs.RunSnapshot, error) {
+	s.saved = true
+	return runs.RunSnapshot{RunID: "run-1"}, nil
+}
+
+func TestNotebookShowsSavedAndUnsavedState(t *testing.T) {
+	a := &app{
+		snap: runs.RunSnapshot{RunID: "run-1", Title: "CCK-8",
+			Events: []runs.RunEvent{{ID: "n1", Stage: "notebook", Content: "# 记录", RecordedAt: "2026-11-10T10:00:00Z"}}},
+		runSvc: &notebookSaveSpy{},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1200, 760)
+	tt.Frame()
+	// Fresh load: nothing changed, so saved state is shown.
+	if !tt.HasText("已保存") {
+		t.Fatalf("fresh notebook should show 已保存: %q", tt.Texts())
+	}
+	if tt.HasText("未保存") {
+		t.Fatalf("fresh notebook should not show 未保存: %q", tt.Texts())
+	}
+	// A pending change shows unsaved explicitly.
+	a.noteDirty = true
+	tt.Frame()
+	if !tt.HasText("未保存") {
+		t.Fatalf("dirty notebook should show 未保存: %q", tt.Texts())
+	}
+	if tt.HasText("已保存") {
+		t.Fatalf("dirty notebook should not show 已保存: %q", tt.Texts())
+	}
+	// Saving returns to the explicit saved state.
+	if err := tt.Click("保存笔记"); err != nil {
+		t.Fatalf("save action: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("已保存") {
+		t.Fatalf("saved notebook should show 已保存: %q", tt.Texts())
 	}
 }

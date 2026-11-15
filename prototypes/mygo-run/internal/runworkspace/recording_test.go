@@ -266,3 +266,29 @@ func TestSelectKindRoutesByAssayLayoutConfig(t *testing.T) {
 		t.Fatalf("WesternBlot kind = %q, want table", got)
 	}
 }
+
+func TestRecordingLinkErrorShowsCauseAndRetry(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	task := vm.TaskByKey["t-read"]
+	var linked int
+	rv := &RecordingView{
+		Kind: ViewGallery, Task: task, LinkErr: "root is read-only: permission denied",
+		OnLinkFile: func(asset LinkedAsset) { linked++ },
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+	for _, text := range []string{"原始图片与文件", "关联失败：root is read-only: permission denied", "重新关联"} {
+		if !tt.HasText(text) {
+			t.Fatalf("link-error surface missing %q: %q", text, tt.Texts())
+		}
+	}
+	if err := tt.Click("重新关联"); err != nil {
+		t.Fatal(err)
+	}
+	if linked != 1 {
+		t.Fatalf("重新关联 did not invoke OnLinkFile: linked=%d", linked)
+	}
+}
