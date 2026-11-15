@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -335,7 +337,7 @@ func TestOpenAssetLinkFormRetainsGapCoordinatesAndUsesRunTimepoints(t *testing.T
 	a := &app{snap: runs.RunSnapshot{
 		Tasks: []runs.RunTask{
 			{Key: "task", AssayID: "assay", Timepoint: "24 h"},
-			{Key: "task-2", Timepoint: "6 h"},
+			{Key: "task-2", AssayID: "assay", Timepoint: "6 h"},
 		},
 		DesignData: `{"mygo":{"instances":{"step":[{"id":"plate","type":"plate_12","props":{"rows":3,"cols":4}}]},"assays":{"assay":{"plateInstanceId":"plate"}}}}`,
 	}}
@@ -359,5 +361,122 @@ func TestAssetCoordinateOptionsUseFrozenAssayTimepointsWhenRunTaskOmitsOne(t *te
 	_, got := a.assetCoordinateOptions("task")
 	if len(got) != 2 || got[0] != "6 h" || got[1] != "24 h" {
 		t.Fatalf("task timepoint options = %v", got)
+	}
+}
+
+func TestAssetCoordinateOptionsRejectsOtherAssayTimepoint(t *testing.T) {
+	a := &app{snap: runs.RunSnapshot{
+		Tasks: []runs.RunTask{
+			{Key: "task-a", AssayID: "assay-a", Timepoint: "24 h"},
+			{Key: "task-b", AssayID: "assay-b", Timepoint: "48 h"},
+		},
+		DesignData: `{"mygo":{"instances":{"step":[{"id":"plate","type":"plate_12","props":{"rows":3,"cols":4}}]},"assays":{"assay-a":{"plateInstanceId":"plate","timepoints":["6 h","24 h"]},"assay-b":{"plateInstanceId":"plate","timepoints":["48 h"]}}}}`,
+	}}
+	wells, times := a.assetCoordinateOptions("task-a")
+	if _, err := validateAssetCoordinates("A1", "48 h", "1", wells, times); err == nil {
+		t.Fatalf("another assay's timepoint 48 h was accepted: options=%v", times)
+	}
+	if len(times) != 2 || times[0] != "24 h" || times[1] != "6 h" {
+		t.Fatalf("assay-a timepoint options = %v, want [24 h 6 h]", times)
+	}
+}
+
+func TestAssetCoordinateOptionsIncludesAllFrozenTimepointsForGapPrefill(t *testing.T) {
+	a := &app{snap: runs.RunSnapshot{
+		Tasks:      []runs.RunTask{{Key: "task", AssayID: "assay", Timepoint: "24 h"}},
+		DesignData: `{"mygo":{"instances":{"step":[{"id":"plate","type":"plate_12","props":{"rows":3,"cols":4}}]},"assays":{"assay":{"plateInstanceId":"plate","timepoints":["6 h","24 h"]}}}}`,
+	}}
+	a.openAssetLinkForm("task", runworkspace.LinkedAsset{
+		WellID: "A1", Timepoint: "6 h", FOVIndex: 1,
+	})
+	if len(a.linkDialogTimepoints) != 2 || a.linkDialogTimepoints[0] != "24 h" || a.linkDialogTimepoints[1] != "6 h" {
+		t.Fatalf("timepoint options = %v, want both [24 h 6 h]", a.linkDialogTimepoints)
+	}
+	got, err := validateAssetCoordinates(
+		a.linkDialogWell, a.linkDialogTimepoint, a.linkDialogFOV,
+		a.linkDialogWells, a.linkDialogTimepoints,
+	)
+	if err != nil || got.Timepoint != "6 h" {
+		t.Fatalf("gap prefill validation failed: got=%+v err=%v", got, err)
+	}
+}
+
+func TestOpenAssetLinkFormTrimsDefaultTaskTimepoint(t *testing.T) {
+	a := &app{snap: runs.RunSnapshot{
+		Tasks:      []runs.RunTask{{Key: "task", AssayID: "assay", Timepoint: "  24 h \t"}},
+		DesignData: `{"mygo":{"instances":{"step":[{"id":"plate","type":"plate_12","props":{"rows":3,"cols":4}}]},"assays":{"assay":{"plateInstanceId":"plate"}}}}`,
+	}}
+	a.openAssetLinkForm("task", runworkspace.LinkedAsset{})
+	if a.linkDialogTimepoint != "24 h" {
+		t.Fatalf("default timepoint = %q, want %q", a.linkDialogTimepoint, "24 h")
+	}
+	if _, err := validateAssetCoordinates(
+		a.linkDialogWell, a.linkDialogTimepoint, a.linkDialogFOV,
+		a.linkDialogWells, a.linkDialogTimepoints,
+	); err != nil {
+		t.Fatalf("default trimmed timepoint failed validation: %v", err)
+	}
+}
+
+type assetSaveSpy struct {
+	runs.RunService
+	saveCalls int
+	saved     []runs.Asset
+}
+
+func (s *assetSaveSpy) SaveAssetLink(_ context.Context, input runs.AssetLinkInput) (runs.Asset, error) {
+	s.saveCalls++
+	s.saved = append(s.saved, input.Asset)
+	return input.Asset, nil
+}
+
+func TestLinkAssetPathsRejectsOutOfBoundsBatchWithoutSavingFirstFile(t *testing.T) {
+	rootDir := t.TempDir()
+	outsideDir := t.TempDir()
+	first := filepath.Join(rootDir, "one.tif")
+	validSecond := filepath.Join(rootDir, "two.tif")
+	outsideSecond := filepath.Join(outsideDir, "outside.tif")
+	for _, p := range []string{first, validSecond, outsideSecond} {
+		if err := os.WriteFile(p, []byte("tif-data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spy := &assetSaveSpy{}
+	a := &app{
+		runSvc:              spy,
+		snap:                runs.RunSnapshot{RunID: "run-1", DesignID: "design-1"},
+		linkDialogOpen:      true,
+		linkDialogTask:      "task-1",
+		linkDialogWells:     []string{"A1"},
+		linkDialogTimepoints: []string{"24 h"},
+		linkDialogWell:      "A1",
+		linkDialogTimepoint: "24 h",
+		linkDialogFOV:       "1",
+	}
+
+	a.submitAssetLinkForm(func(taskKey string, coordinate runs.AssetLink) error {
+		coordinate.RunID, coordinate.TaskKey = a.snap.RunID, taskKey
+		return a.linkAssetPaths("design-data-design-1", rootDir, []string{first, outsideSecond}, coordinate)
+	})
+	if spy.saveCalls != 0 {
+		t.Fatalf("SaveAssetLink called %d times when 2nd path was out of bounds, want 0", spy.saveCalls)
+	}
+	if len(a.runAssets) != 0 {
+		t.Fatalf("runAssets mutated after failed batch: %+v", a.runAssets)
+	}
+	if a.linkDialogErr == "" || !a.linkDialogOpen {
+		t.Fatalf("form did not keep error open on batch failure: open=%v err=%q", a.linkDialogOpen, a.linkDialogErr)
+	}
+
+	a.submitAssetLinkForm(func(taskKey string, coordinate runs.AssetLink) error {
+		coordinate.RunID, coordinate.TaskKey = a.snap.RunID, taskKey
+		return a.linkAssetPaths("design-data-design-1", rootDir, []string{first, validSecond}, coordinate)
+	})
+	if spy.saveCalls != 2 || len(a.runAssets) != 2 {
+		t.Fatalf("valid batch saved %d calls / %d assets, want 2", spy.saveCalls, len(a.runAssets))
+	}
+	if a.linkDialogErr != "" || a.linkDialogOpen {
+		t.Fatalf("form did not clear error/close after valid batch: open=%v err=%q", a.linkDialogOpen, a.linkDialogErr)
 	}
 }
