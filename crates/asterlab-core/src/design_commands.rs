@@ -624,7 +624,7 @@ mod tests {
 
     fn derive_workspace(events: Vec<Value>) -> RunWorkspace {
         crate::run_workspace::build(
-            "r1", "d1", "dv1", 4, &derive_design(), &derive_run(), &[], &events,
+            "r1", "d1", "dv1", 4, &derive_design(), &derive_run(), &[], &events, &[],
         )
         .expect("workspace")
     }

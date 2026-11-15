@@ -1040,7 +1040,7 @@ mod tests {
     }
 
     fn workspace(plates: &[Value], events: &[Value]) -> RunWorkspace {
-        crate::run_workspace::build("r1", "d1", "dv1", 1, &design(), &run(), plates, events)
+        crate::run_workspace::build("r1", "d1", "dv1", 1, &design(), &run(), plates, events, &[])
             .unwrap()
     }
 

@@ -1,0 +1,60 @@
+
+running 50 tests
+test agent_edit_preview::tests::preview_rejects_the_three_illegal_input_classes ... ok
+test agent_edit_preview::tests::preview_resolves_diffs_from_the_store_and_leaves_it_untouched ... ok
+test cli_impl::tests::agent_edit_commit_appends_a_version_and_keeps_the_frozen_run ... ok
+test cli_impl::tests::assess_and_run_creation_reject_unmaterialized_steps ... ok
+test cli_impl::tests::assess_includes_run_creation_audit_warnings ... ok
+test cli_impl::tests::asterdoc_nests_and_promotes_steps_by_updating_paths ... ok
+test cli_impl::tests::asset_link_rejects_paths_outside_the_root_without_writing ... ok
+test cli_impl::tests::asterdoc_parity_samples ... ok
+test cli_impl::tests::asterdoc_reorders_steps_only_with_a_complete_unique_permutation ... ok
+test cli_impl::tests::asterdoc_plate_mix_fields_match_go_calculator_cases ... ok
+test cli_impl::tests::clear_wells_removes_sample_and_replicate_mappings ... ok
+test cli_impl::tests::compiler_keeps_sample_identity_explicit_across_timepoints ... ok
+test cli_impl::tests::agent_tools_are_discoverable ... ok
+test cli_impl::tests::diagnostics_flag_is_parsed_with_input_in_any_order ... ok
+test cli_impl::tests::error_envelope_carries_structured_diagnostics ... ok
+test cli_impl::tests::compiler_records_the_block_version_each_step_reuses ... ok
+test cli_impl::tests::failed_schema_migration_preserves_database ... ok
+test cli_impl::tests::manifest_rule_must_be_registered_in_rust ... ok
+test cli_impl::tests::concurrent_agent_edit_commits_leave_exactly_one_winner ... ok
+test cli_impl::tests::execution_event_rejects_unknown_pantry_item_and_warns_on_expired_one ... ok
+test cli_impl::tests::pantry_table_from_an_earlier_build_gains_the_tombstone_column ... ok
+test cli_impl::tests::pantry_delete_retires_an_item_and_keeps_its_label_code_out_of_reuse ... ok
+test cli_impl::tests::plate_mix_calculators_match_the_huvec_case ... ok
+test cli_impl::tests::protocol_block_content_accepts_legacy_and_valid_specs_but_rejects_invalid_specs ... ok
+test cli_impl::tests::read_only_tools_do_not_write ... ok
+test cli_impl::tests::readout_batch_accepts_csv_cells ... ok
+test cli_impl::tests::readout_batch_writes_one_event_or_nothing ... ok
+test cli_impl::tests::readout_submit_replays_the_first_record_and_isolates_runs ... ok
+test cli_impl::tests::readout_tools_are_discoverable_and_write ... ok
+test cli_impl::tests::remove_step_cleans_workflow_order_and_edges_when_unreferenced ... ok
+test cli_impl::tests::remove_step_rejects_run_and_step_references_without_revision_changes ... ok
+test cli_impl::tests::rule_skip_event_requires_skip_status_and_projects_ad_hoc_marker ... ok
+test cli_impl::tests::run_workspace_carries_asset_coordinates_and_the_gap_grouping ... ok
+test cli_impl::tests::schema_migration_legacy_v0 ... ok
+test cli_impl::tests::pantry_commands_project_expiry_and_export_stable_label_codes ... ok
+test cli_impl::tests::protocol_version_queries_return_expansion_and_stable_not_found ... ok
+test cli_impl::tests::step_edit_schema_is_registered_for_validate_and_commit ... ok
+test cli_impl::tests::step_edit_commit_creates_child_and_parent_versions_and_keeps_the_frozen_run ... ok
+test cli_impl::tests::step_materialization_preserves_frozen_run_protocol_block_revision ... ok
+test cli_impl::tests::success_envelope_derives_diagnostics_from_validation_issues ... ok
+test cli_impl::tests::step_edit_rejects_a_version_conflict_and_a_wrong_unit_without_writing ... ok
+test cli_impl::tests::step_edit_tool_is_registered ... ok
+test tests::concurrent_batch_writers_use_authoritative_revision ... ok
+test cli_impl::tests::workflow_inspect_tree_matches_shared_go_evidence ... ok
+test tests::pantry_ledger_persists_across_reopen_and_keeps_label_codes_stable ... ok
+test tests::idempotent_readout_and_rollback ... ok
+test tests::batch_is_atomic_idempotent_and_preserves_missing_cells ... ok
+test tests::readout_persists_across_reopen ... ok
+test tests::timer_records_persist_across_app_reopen_and_t0_triggers_window ... ok
+test cli_impl::tests::asset_link_hashes_a_large_file_without_copying_it ... ok
+
+test result: ok. 50 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.83s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

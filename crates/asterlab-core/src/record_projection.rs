@@ -1655,7 +1655,7 @@ mod tests {
         plate_data: Vec<Value>,
         events: Vec<Value>,
     ) -> RunWorkspace {
-        run_workspace::build("r1", "d1", "dv1", 1, design, &run_data(), &plate_data, &events)
+        run_workspace::build("r1", "d1", "dv1", 1, design, &run_data(), &plate_data, &events, &[])
             .expect("workspace")
     }
 

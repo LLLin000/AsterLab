@@ -656,7 +656,7 @@ mod tests {
     }
 
     fn ws(run_id: &str) -> RunWorkspace {
-        crate::run_workspace::build(run_id, "d1", "dv1", 1, &design(), &run(), &[plate()], &[])
+        crate::run_workspace::build(run_id, "d1", "dv1", 1, &design(), &run(), &[plate()], &[], &[])
             .unwrap()
     }
 

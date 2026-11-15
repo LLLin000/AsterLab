@@ -495,11 +495,18 @@ type Asset struct {
 	ActorID      string    `json:"actorId,omitempty"`
 }
 
-// AssetLink names the experiment object an asset belongs to.
+// AssetLink names the experiment object an asset belongs to. The coordinates
+// mirror Core's asset_link "link" object: wellId/timepoint/fovIndex stay empty
+// when the link was recorded without them, and FOVIndex 0 means "not recorded"
+// (Core never stores 0). The read model (run.workspace linked_assets) carries
+// the same three fields.
 type AssetLink struct {
-	RunID    string `json:"runId"`
-	TaskKey  string `json:"taskKey"`
-	SampleID string `json:"sampleId,omitempty"`
+	RunID     string `json:"runId"`
+	TaskKey   string `json:"taskKey"`
+	SampleID  string `json:"sampleId,omitempty"`
+	WellID    string `json:"wellId,omitempty"`
+	Timepoint string `json:"timepoint,omitempty"`
+	FOVIndex  uint32 `json:"fovIndex,omitempty"`
 }
 
 // AssetLinkInput carries one asset reference to persist for a Run.
