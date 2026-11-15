@@ -483,6 +483,359 @@ func TestLinkAssetPathsRejectsOutOfBoundsBatchWithoutSavingFirstFile(t *testing.
 	}
 }
 
+type checkFailRunService struct {
+	runs.RunService
+	failChecks int
+	checkCalls int
+	failLoad   int
+	loadCalls  int
+	snap       runs.RunSnapshot
+}
+
+func (s *checkFailRunService) SaveTaskChecks(_ context.Context, input runs.TaskCheckInput) (runs.RunSnapshot, error) {
+	s.checkCalls++
+	if s.failChecks > 0 {
+		s.failChecks--
+		return runs.RunSnapshot{}, fmt.Errorf("CONFLICT: checklist write rejected")
+	}
+	for ti := range s.snap.Tasks {
+		if s.snap.Tasks[ti].Key == input.TaskKey {
+			for ci := range s.snap.Tasks[ti].Checks {
+				for _, ack := range input.Checks {
+					if s.snap.Tasks[ti].Checks[ci].CheckID == ack.CheckID {
+						s.snap.Tasks[ti].Checks[ci].Status = ack.Status
+					}
+				}
+			}
+		}
+	}
+	s.snap.Revision++
+	return s.snap, nil
+}
+
+func (s *checkFailRunService) LoadRun(_ context.Context, runID string) (runs.RunSnapshot, error) {
+	s.loadCalls++
+	if s.failLoad > 0 {
+		s.failLoad--
+		return runs.RunSnapshot{}, fmt.Errorf("NOT_FOUND: run %s not found", runID)
+	}
+	return s.snap, nil
+}
+
+func (s *checkFailRunService) WorkflowTree(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (s *checkFailRunService) ListAssetLinks(context.Context, string) ([]runs.Asset, error) {
+	return nil, nil
+}
+
+func TestSaveRunChecksFailureRevertsAndRetriesThroughApp(t *testing.T) {
+	svc := &checkFailRunService{
+		failChecks: 1,
+		snap: runs.RunSnapshot{
+			RunID:    "run-1",
+			Title:    "Run 1",
+			Revision: 1,
+			Status:   "running",
+			Tasks: []runs.RunTask{
+				{
+					Key:    "task-1",
+					Title:  "步骤一",
+					Status: "not_started",
+					Checks: []runs.TaskCheck{
+						{CheckID: "chk-1", Label: "台面已消毒", Blocking: true, Status: "pending"},
+					},
+				},
+			},
+		},
+	}
+	a := &app{
+		runSvc: svc,
+		snap:   svc.snap,
+		ws:     runui.NewWorkspace(runui.RunView{}, runui.Callbacks{}),
+	}
+	a.runWSVM = a.buildRunWorkspaceVM()
+	a.runWS = runworkspace.NewState(a.runWSVM, runworkspace.Callbacks{
+		SaveChecks: a.saveRunChecks,
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		runworkspace.View(c, a.runWS)
+	}, 1360, 880)
+	tt.Frame()
+
+	if err := tt.Click("台面已消毒"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if svc.checkCalls != 1 {
+		t.Fatalf("SaveTaskChecks calls = %d, want 1", svc.checkCalls)
+	}
+	if !tt.HasText("CONFLICT: checklist write rejected") || !tt.HasText("重试") {
+		t.Fatalf("check error/retry not visible: %v", tt.Texts())
+	}
+	if a.runWS.VM.TaskByKey["task-1"].Checks[0].Status != "pending" {
+		t.Fatalf("persisted status mutated on failure: %+v", a.runWS.VM.TaskByKey["task-1"].Checks)
+	}
+
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if svc.checkCalls != 2 {
+		t.Fatalf("SaveTaskChecks calls after retry = %d, want 2", svc.checkCalls)
+	}
+	if tt.HasText("CONFLICT: checklist write rejected") {
+		t.Fatalf("check error did not clear on retry: %v", tt.Texts())
+	}
+	if a.runWS.VM.TaskByKey["task-1"].Checks[0].Status != "passed" {
+		t.Fatalf("persisted status not updated after retry: %+v", a.runWS.VM.TaskByKey["task-1"].Checks)
+	}
+}
+
+func TestApplyRunLoadErrorUpdatesRunWorkspaceAndRetries(t *testing.T) {
+	svc := &checkFailRunService{
+		failLoad: 1,
+		snap: runs.RunSnapshot{
+			RunID:    "run-missing",
+			Title:    "恢复后的运行",
+			Revision: 2,
+			Status:   "running",
+			Tasks: []runs.RunTask{
+				{Key: "task-1", Title: "接种步骤", Status: "not_started"},
+			},
+		},
+	}
+	a := &app{
+		runSvc: svc,
+		snap:   runs.RunSnapshot{Title: "加载中", Status: "loading"},
+		shell:  &shell.Shell{Page: shell.Run},
+		ws:     &runui.Workspace{State: runui.StateLoading},
+	}
+	a.runWSVM = a.buildRunWorkspaceVM()
+	a.runWS = runworkspace.NewState(a.runWSVM, runworkspace.Callbacks{
+		RetryLoad: a.retryLoadRun,
+	})
+
+	a.selectRun("run-missing")
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		runPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+
+	if tt.HasText("正在加载实验运行数据…") {
+		t.Fatalf("Run panel stayed stuck on loading message: %v", tt.Texts())
+	}
+	if !tt.HasText("NOT_FOUND: run run-missing not found") || !tt.HasText("重试") {
+		t.Fatalf("Run load failure missing error or retry: %v", tt.Texts())
+	}
+
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if svc.loadCalls != 2 {
+		t.Fatalf("LoadRun calls after retry = %d, want 2", svc.loadCalls)
+	}
+	if tt.HasText("NOT_FOUND: run run-missing not found") || !tt.HasText("恢复后的运行") {
+		t.Fatalf("retry did not load Run workspace: %v", tt.Texts())
+	}
+}
+
+type designLoadFakeService struct {
+	runs.DesignService
+	designs      map[string]runs.DesignSnapshot
+	docs         map[string]runs.AsterDocSnapshot
+	loadDesign   func(id string) (runs.DesignSnapshot, error)
+	loadAsterDoc func(id string) (runs.AsterDocSnapshot, error)
+	designCalls  []string
+	docCalls     []string
+}
+
+func (s *designLoadFakeService) LoadDesign(_ context.Context, designID string) (runs.DesignSnapshot, error) {
+	s.designCalls = append(s.designCalls, designID)
+	if s.loadDesign != nil {
+		return s.loadDesign(designID)
+	}
+	snap, ok := s.designs[designID]
+	if !ok {
+		return runs.DesignSnapshot{}, fmt.Errorf("NOT_FOUND: design %s not found", designID)
+	}
+	return snap, nil
+}
+
+func (s *designLoadFakeService) LoadAsterDoc(_ context.Context, designID string) (runs.AsterDocSnapshot, error) {
+	s.docCalls = append(s.docCalls, designID)
+	if s.loadAsterDoc != nil {
+		return s.loadAsterDoc(designID)
+	}
+	doc, ok := s.docs[designID]
+	if !ok {
+		return runs.AsterDocSnapshot{}, fmt.Errorf("NOT_FOUND: asterdoc %s not found", designID)
+	}
+	return doc, nil
+}
+
+func (s *designLoadFakeService) AssessAsterDoc(_ context.Context, designID string, revision uint64) (runs.AsterDocAssessment, error) {
+	return runs.AsterDocAssessment{DesignID: designID, Revision: revision, State: "ready"}, nil
+}
+
+func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
+	raw, err := os.ReadFile("internal/asterdoc/testdata/cck8-experiment.asterml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+
+	t.Run("LoadDesign failure keeps existing design visible and retries", func(t *testing.T) {
+		failB := true
+		svc := &designLoadFakeService{
+			designs: map[string]runs.DesignSnapshot{
+				"design-a": {DesignID: "design-a", Title: "Design A", Revision: 1},
+				"design-b": {DesignID: "design-b", Title: "Design B", Revision: 2},
+			},
+			docs: map[string]runs.AsterDocSnapshot{
+				"design-a": {DesignID: "design-a", Revision: 1, Source: source},
+				"design-b": {DesignID: "design-b", Revision: 2, Source: strings.Replace(source, "title: ", "title: B-", 1)},
+			},
+		}
+		svc.loadDesign = func(id string) (runs.DesignSnapshot, error) {
+			if id == "design-b" && failB {
+				return runs.DesignSnapshot{}, fmt.Errorf("NOT_FOUND: design-b unavailable")
+			}
+			return svc.designs[id], nil
+		}
+
+		a := &app{designSvc: svc, shell: &shell.Shell{Page: shell.Design}}
+		a.loadDesign("design-a")
+		if a.designDoc == nil || a.designDoc.DesignID != "design-a" {
+			t.Fatalf("failed to load initial design-a: %+v", a.designDoc)
+		}
+
+		a.loadDesign("design-b")
+		if a.designDoc == nil || a.designDoc.DesignID != "design-a" {
+			t.Fatalf("failed LoadDesign overwrote loaded design-a: %+v", a.designDoc)
+		}
+
+		tt := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(theme.LightTheme())
+			designPage(c, a)
+		}, 1360, 880)
+		tt.Frame()
+
+		if !tt.HasText("AsterDoc 设计") || !tt.HasText("rev 1") {
+			t.Fatalf("already loaded design-a was hidden on LoadDesign error: %v", tt.Texts())
+		}
+		if !tt.HasText("NOT_FOUND: design-b unavailable") || !tt.HasText("重试") {
+			t.Fatalf("LoadDesign error or retry missing: %v", tt.Texts())
+		}
+
+		failB = false
+		if err := tt.Click("重试"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if a.designDoc == nil || a.designDoc.DesignID != "design-b" {
+			t.Fatalf("retry did not load design-b: %+v", a.designDoc)
+		}
+		if tt.HasText("NOT_FOUND: design-b unavailable") || !tt.HasText("rev 2") {
+			t.Fatalf("error stayed or new design not rendered after retry: %v", tt.Texts())
+		}
+	})
+
+	t.Run("LoadDesign failure on empty workspace offers retry", func(t *testing.T) {
+		failOnce := true
+		svc := &designLoadFakeService{
+			designs: map[string]runs.DesignSnapshot{
+				"design-1": {DesignID: "design-1", Title: "Design 1", Revision: 1},
+			},
+			docs: map[string]runs.AsterDocSnapshot{
+				"design-1": {DesignID: "design-1", Revision: 1, Source: source},
+			},
+		}
+		svc.loadDesign = func(id string) (runs.DesignSnapshot, error) {
+			if failOnce {
+				failOnce = false
+				return runs.DesignSnapshot{}, fmt.Errorf("NOT_FOUND: design-1 missing")
+			}
+			return svc.designs[id], nil
+		}
+
+		a := &app{designSvc: svc, shell: &shell.Shell{Page: shell.Design}}
+		a.loadDesign("design-1")
+
+		tt := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(theme.LightTheme())
+			designPage(c, a)
+		}, 1360, 880)
+		tt.Frame()
+
+		if !tt.HasText("NOT_FOUND: design-1 missing") || !tt.HasText("重试") {
+			t.Fatalf("empty workspace LoadDesign failure missing error or retry: %v", tt.Texts())
+		}
+
+		if err := tt.Click("重试"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if a.designDoc == nil || a.designDoc.DesignID != "design-1" {
+			t.Fatalf("retry did not load design-1: %+v", a.designDoc)
+		}
+		if tt.HasText("NOT_FOUND: design-1 missing") || !tt.HasText("AsterDoc 设计") {
+			t.Fatalf("AsterDoc surface not shown after retry: %v", tt.Texts())
+		}
+	})
+
+	t.Run("LoadAsterDoc failure keeps designer visible and retries", func(t *testing.T) {
+		failDoc := true
+		svc := &designLoadFakeService{
+			designs: map[string]runs.DesignSnapshot{
+				"design-1": {DesignID: "design-1", Title: "Legacy Fallback Design", Revision: 3},
+			},
+			docs: map[string]runs.AsterDocSnapshot{
+				"design-1": {DesignID: "design-1", Revision: 4, Source: source},
+			},
+		}
+		svc.loadAsterDoc = func(id string) (runs.AsterDocSnapshot, error) {
+			if failDoc {
+				return runs.AsterDocSnapshot{}, fmt.Errorf("INTERNAL: asterdoc read failed")
+			}
+			return svc.docs[id], nil
+		}
+
+		a := &app{designSvc: svc, shell: &shell.Shell{Page: shell.Design}}
+		a.loadDesign("design-1")
+
+		tt := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(theme.LightTheme())
+			designPage(c, a)
+		}, 1360, 880)
+		tt.Frame()
+
+		if !tt.HasText("Legacy Fallback Design") {
+			t.Fatalf("already loaded designer was hidden when LoadAsterDoc failed: %v", tt.Texts())
+		}
+		if !tt.HasText("INTERNAL: asterdoc read failed") || !tt.HasText("重试") {
+			t.Fatalf("LoadAsterDoc error or retry missing: %v", tt.Texts())
+		}
+
+		failDoc = false
+		if err := tt.Click("重试"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if a.designDoc == nil || a.designDoc.Revision != 4 {
+			t.Fatalf("retry did not load AsterDoc: %+v", a.designDoc)
+		}
+		if tt.HasText("INTERNAL: asterdoc read failed") || !tt.HasText("AsterDoc 设计") {
+			t.Fatalf("AsterDoc surface not restored after retry: %v", tt.Texts())
+		}
+	})
+}
+
 type assetRelabelSpy struct {
 	runs.RunService
 	calls []struct {

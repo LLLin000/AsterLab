@@ -166,16 +166,112 @@ func TestRecordingDirtyTracksEachTask(t *testing.T) {
 func TestCheckTogglesCallback(t *testing.T) {
 	s := buildTestState()
 	var saved []CheckAckView
-	s.Callbacks.SaveChecks = func(taskKey string, checks []CheckAckView) { saved = checks }
+	s.Callbacks.SaveChecks = func(taskKey string, checks []CheckAckView) error {
+		saved = checks
+		return nil
+	}
 	task := s.selectedTask()
 	if task == nil || len(task.Checks) == 0 {
 		t.Skip("no checks in fixture")
 	}
 	on := s.checkOn(task.TaskKey, task.Checks[0].CheckID)
 	*on = true
-	s.Callbacks.SaveChecks(task.TaskKey, s.acks(task))
+	_ = s.Callbacks.SaveChecks(task.TaskKey, s.acks(task))
 	if len(saved) == 0 || saved[0].Status != "passed" {
 		t.Fatalf("check ack not passed: %+v", saved)
+	}
+}
+
+func TestSaveChecksFailureShowsErrorRevertsCheckboxAndRetries(t *testing.T) {
+	s := buildTestState()
+	task := s.VM.TaskByKey["t-read"]
+	s.Selected = task.TaskKey
+	calls := 0
+	var lastAcks []CheckAckView
+	s.Callbacks.SaveChecks = func(taskKey string, checks []CheckAckView) error {
+		calls++
+		lastAcks = append([]CheckAckView(nil), checks...)
+		if calls == 1 {
+			return fmt.Errorf("CONFLICT: checks write rejected")
+		}
+		return nil
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+
+	if err := tt.Click("板与密度已确认"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if calls != 1 {
+		t.Fatalf("SaveChecks calls = %d, want 1", calls)
+	}
+	if *s.checkOn(task.TaskKey, "c-plate") {
+		t.Fatal("checkbox stayed checked after SaveChecks failure; expected revert to false")
+	}
+	if !tt.HasText("未保存 · CONFLICT: checks write rejected") || !tt.HasText("重试") {
+		t.Fatalf("failed SaveChecks missing error or retry: %v", tt.Texts())
+	}
+
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if calls != 2 {
+		t.Fatalf("SaveChecks calls after retry = %d, want 2", calls)
+	}
+	if len(lastAcks) == 0 || lastAcks[0].Status != "passed" {
+		t.Fatalf("retry did not resend passed check ack: %+v", lastAcks)
+	}
+	if !*s.checkOn(task.TaskKey, "c-plate") {
+		t.Fatal("checkbox did not reflect retried passed state after retry succeeded")
+	}
+	if tt.HasText("CONFLICT: checks write rejected") {
+		t.Fatalf("error stayed visible after retry succeeded: %v", tt.Texts())
+	}
+}
+
+func TestRunLoadErrorShowsReasonRetryAndNeverShowsLoading(t *testing.T) {
+	vm := &RunWorkspaceViewModel{Title: "加载中", Status: "loading"}
+	retries := 0
+	var s *State
+	s = NewState(vm, Callbacks{
+		RetryLoad: func() {
+			retries++
+			s.SyncFrom(BuildViewModel(makeSnapshot(), makeFrozenDoc()))
+		},
+	})
+	s.VM.Status = "error"
+	s.LoadError = "NOT_FOUND: run missing"
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+
+	if tt.HasText("正在加载实验运行数据…") {
+		t.Fatalf("failed load rendered loading placeholder: %v", tt.Texts())
+	}
+	if tt.HasText("此运行没有任务") {
+		t.Fatalf("failed load rendered empty-tasks placeholder: %v", tt.Texts())
+	}
+	if !tt.HasText("NOT_FOUND: run missing") || !tt.HasText("重试") {
+		t.Fatalf("failed load missing error reason or retry: %v", tt.Texts())
+	}
+
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if retries != 1 {
+		t.Fatalf("RetryLoad called %d times, want 1", retries)
+	}
+	if tt.HasText("NOT_FOUND: run missing") || !tt.HasText("实验流程") {
+		t.Fatalf("retry did not restore loaded run workspace: %v", tt.Texts())
 	}
 }
 

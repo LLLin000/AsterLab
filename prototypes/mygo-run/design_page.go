@@ -28,28 +28,71 @@ func renderAgentProposal(c *ui.Context,a *app) {
 	if s.Open {components.Dialog(c,&s.Open,components.DialogOptions{Label:"Agent 提案"},func(panel ui.Element){panel.FillWidth().MaxWidth(720).MaxWidthPercent(94).MaxHeightPercent(90).Children(func(){agentedit.View(c,s)})});if !s.Open{s.Closed=true}}
 }
 
+func renderDesignErrorBanner(c *ui.Context, a *app, message string, showRetry bool) {
+	if message == "" {
+		return
+	}
+	t := c.Theme()
+	tokens := theme.GetTokens(t)
+	ui.Row(c).FillWidth().Padding(6, 12).Background(tokens.DangerBg).
+		AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+			ui.Text(c, message).FontSize(float32(tokens.TextMeta)).TextColor(tokens.DangerText)
+		})
+		if showRetry && a.retryDesignID() != "" {
+			if components.Button(c, "重试", components.ButtonSecondary).Clicked() {
+				a.loadDesign(a.retryDesignID())
+			}
+		}
+	})
+}
+
 func designPage(c *ui.Context, a *app) {
 	if a.designDoc != nil {
 		asterDesignPage(c, a)
 		return
 	}
-	if a.designDocErr != "" {
-		ui.Column(c).Fill().Center().Gap(c.Theme().Space(2)).Children(func() {
-			ui.Text(c, "AsterDoc 设计无法读取").FontSize(16).Bold().TextColor(c.Theme().Danger)
-			ui.Text(c, a.designDocErr).FontSize(13).TextColor(c.Theme().TextMuted)
-			renderAgentProposal(c,a)
+	if a.designer != nil {
+		ui.Column(c).Fill().Children(func() {
+			if a.designLoadErr != "" {
+				renderDesignErrorBanner(c, a, "设计加载失败："+a.designLoadErr, true)
+			}
+			if a.designDocErr != "" {
+				renderDesignErrorBanner(c, a, "AsterDoc 设计无法读取："+a.designDocErr, true)
+			}
+			ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+				// The step-card list is the Design surface's default; the workflow
+				// canvas stays one toggle away and is not deleted.
+				if a.designer.CanvasMode {
+					designer.View(c, a.designer)
+				} else {
+					designer.ListView(c, a.designer)
+				}
+			})
+			renderAgentProposal(c, a)
 		})
 		return
 	}
-	if a.designer != nil {
-		// The step-card list is the Design surface's default; the workflow
-		// canvas stays one toggle away and is not deleted.
-		if a.designer.CanvasMode {
-			designer.View(c, a.designer)
-		} else {
-			designer.ListView(c, a.designer)
+	if a.designLoadErr != "" || a.designDocErr != "" {
+		title := "设计无法读取"
+		msg := a.designLoadErr
+		if msg == "" {
+			title = "AsterDoc 设计无法读取"
+			msg = a.designDocErr
 		}
-		renderAgentProposal(c,a)
+		t := c.Theme()
+		ui.Column(c).Fill().Center().Gap(t.Space(2)).Padding(t.Space(4)).Children(func() {
+			ui.Text(c, title).FontSize(16).Bold().TextColor(t.Danger)
+			ui.Text(c, msg).FontSize(13).TextColor(t.TextMuted)
+			ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+				if retryID := a.retryDesignID(); retryID != "" {
+					if components.Button(c, "重试", components.ButtonPrimary).Clicked() {
+						a.loadDesign(retryID)
+					}
+				}
+				renderAgentProposal(c, a)
+			})
+		})
 		return
 	}
 	t := c.Theme()
@@ -119,10 +162,11 @@ func asterDesignPage(c *ui.Context, a *app) {
 			}
 			renderAgentProposal(c,a)
 		})
+		if a.designLoadErr != "" {
+			renderDesignErrorBanner(c, a, "设计加载失败："+a.designLoadErr, true)
+		}
 		if a.designDocErr != "" {
-			ui.Row(c).FillWidth().Padding(6, 12).Background(theme.GetTokens(t).DangerBg).Children(func() {
-				ui.Text(c, a.designDocErr).FontSize(11).TextColor(theme.GetTokens(t).DangerText)
-			})
+			renderDesignErrorBanner(c, a, a.designDocErr, a.designDocLoadFailed)
 		}
 		if a.designTab == 0 {
 			renderAsterStepList(c, a, doc)
