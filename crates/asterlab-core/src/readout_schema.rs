@@ -175,6 +175,14 @@ pub struct ReadoutSchema {
     pub file: Option<FileSpec>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WellRole {
+    Unknown,
+    Ntc,
+    Standard,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlateCell {
@@ -183,6 +191,12 @@ pub struct PlateCell {
     pub number: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub missing: Option<MissingReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_gene: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub well_role: Option<WellRole>,
 }
 
 /// The recorded value. The tag is `kind`, mirroring [`ReadingTarget`]; the
@@ -362,6 +376,7 @@ pub enum ReadoutIssueCode {
     MissingReasonNotAllowed,
     TopLevelMissingNotApplicable,
     DuplicatePlateCoordinate,
+    InvalidPlateMapping,
     TableColumnsMismatch,
     TableRowWidthMismatch,
     CategoryNotAllowed,
@@ -769,6 +784,15 @@ pub fn validate_readout(schema: &ReadoutSchema, readout: &Readout) -> Vec<Readou
                             format!("孔位 {} 的数值不是有限数", cell.coordinate),
                         ));
                     }
+                }
+                if cell.sample_id.as_deref().is_some_and(blank)
+                    || cell.target_gene.as_deref().is_some_and(blank)
+                {
+                    issues.push(issue(
+                        ReadoutIssueCode::InvalidPlateMapping,
+                        "value.cells",
+                        format!("孔位 {} 的样本和目标基因标识不得为空", cell.coordinate),
+                    ));
                 }
                 push_missing_pair(
                     cell.number.is_some(),
@@ -1636,5 +1660,30 @@ mod tests {
             "confidence": 0.9
         });
         assert!(serde_json::from_value::<Readout>(unknown_readout_field).is_err());
+    }
+
+    #[test]
+    fn plate_readouts_preserve_sample_gene_well_role_mapping() {
+        let mut readout = cck8_readout();
+        if let ReadoutValue::Plate { cells, .. } = &mut readout.value {
+            cells[0].sample_id = Some("sample-1".into());
+            cells[0].target_gene = Some("Gapdh".into());
+            cells[0].well_role = Some(WellRole::Unknown);
+            cells[1].well_role = Some(WellRole::Ntc);
+            cells[2].well_role = Some(WellRole::Standard);
+        } else {
+            unreachable!();
+        }
+        let encoded = serde_json::to_value(&readout).unwrap();
+        let decoded: Readout = serde_json::from_value(encoded).unwrap();
+        let ReadoutValue::Plate { cells, .. } = decoded.value else {
+            unreachable!();
+        };
+        assert_eq!(cells[0].sample_id.as_deref(), Some("sample-1"));
+        assert_eq!(cells[0].target_gene.as_deref(), Some("Gapdh"));
+        assert_eq!(cells[0].well_role, Some(WellRole::Unknown));
+        assert_eq!(cells[1].well_role, Some(WellRole::Ntc));
+        assert_eq!(cells[2].well_role, Some(WellRole::Standard));
+        assert!(validate_readout(&cck8_schema(), &readout).is_empty());
     }
 }

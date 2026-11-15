@@ -8,12 +8,22 @@ name: windows-build
 # §4 maps "Desktop app" to scripts/mygo-build.ps1. apps/desktop is the retained
 # Rust/Slint research prototype (docs/architecture.md §1) and is not built here.
 
-# Platform split: the Windows artifacts are built and verified on the Windows
-# machine (Windows Gate lane), not on every pull request. Hosted minutes are
-# exhausted, so the lane runs scripts/ci/local-gate.ps1 instead of this
-# workflow (docs/engineering/local-ci.md). The Linux lane owns `cargo test`
-# and the Linux Go suite; Windows never runs those.
+# Platform split: Windows-hosted minutes are free again on this public
+# repository, so the desktop artifacts are built on pull requests that touch
+# the Windows-owned paths. It stays non-blocking: Windows runner capacity and
+# the MyGo toolchain must never block a Core-only change. The Windows Gate lane
+# still owns GUI/PowerShell acceptance on a real machine.
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-build.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'apps/desktop/**'
+      - 'crates/**'
+      - 'prototypes/mygo-run/**'
+      - 'scripts/**'
+      - 'src/**'
   workflow_dispatch:
 
 permissions:
@@ -56,6 +66,9 @@ jobs:
             "RUN_HEAVY=0" | Out-File -FilePath $env:GITHUB_ENV -Append
             Write-Host "docs-only change; heavy steps skipped"
           }
+          # git diff/fetch return non-zero for "differences found" or shallow
+          # refs; the classification above is the outcome, not that status.
+          exit 0
 
       - name: Install Go
         if: env.RUN_HEAVY == '1'

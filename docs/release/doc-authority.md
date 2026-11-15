@@ -18,7 +18,7 @@
 |---|---|---|---|
 | [`README.md`](../../README.md) | 权威 | 项目入口导览、交付方向与当前限制；「启动」「当前工作流」节为历史 Web 包记录 | 2026-11-13 |
 | [`docs/architecture.md`](../architecture.md) | 权威 | 模块依赖、分层、读写方向与迁移方向；§3/§6 的 Slint 前端内容为历史记录 | 2026-11-13 |
-| [`docs/implementation-plan.md`](../implementation-plan.md) | 历史 | 2026-11-05 起稿的 P0–P6/S0–S4 Slint 路线、完成项与验收；仅供追溯 | 2026-11-13（标记） |
+| [`docs/archive/planning-historical/implementation-plan.md`](../archive/planning-historical/implementation-plan.md) | 历史（已归档） | 2026-11-05 起稿的 P0–P6/S0–S4 Slint 路线；已移入 `docs/archive/` | 2026-11-15 |
 | [`docs/release/beta-scope.md`](beta-scope.md) | 权威（文档自述为范围冻结候选） | v0.1.0 Beta 交付平台、交付物、必须闭环、非目标与发布 DoD | 2026-11-13 |
 | [`CONTEXT.md`](../../CONTEXT.md) | 权威 | 领域术语与对象边界 | 2026-11-05 |
 | [`AGENT_API.md`](../../AGENT_API.md) | 权威 | 当前已实现 CLI/HTTP 字段、枚举、错误码 | 2026-11-12 |
@@ -27,6 +27,8 @@
 | [`docs/product/ux-contract.md`](../product/ux-contract.md) | 权威 | UI 信息架构、规则 id 与交互约束 | 2026-11-12 |
 | [`docs/product/ownership.md`](../product/ownership.md) | 权威 | 文件所有权与并行写规则 | 2026-11-12 |
 | [`docs/research/`](../research)、[`prototypes/`](../prototypes) | 研究 | 调研证据、候选方案与历史原型 | 各文档自身日期 |
+| [`docs/archive/`](../archive/README.md) | 历史（已归档） | 早期 Rune/Slint/Web 设计、旧根目录文档与 E2E 哨兵文件 | 2026-11-15 |
+| [`docs/sdk/huvec-tube-formation-case/`](../sdk/huvec-tube-formation-case/UI-REDESIGN.md) & [`cross-assay-primitives-audit.md`](../sdk/cross-assay-primitives-audit.md) | 权威候选（V2 演进基线） | HUVEC 纸面设计、三板块重排、五大通用原语与非强制储藏室规范 | 2026-11-15 |
 
 平台结论：**v0.1.0 Beta 的正式交付平台是 Windows x64 + MyGo Native 桌面应用 + 本地 Rust Core。** Web 包是历史交付物，Slint 是研究资产；两者都不是正式交付前端。交付物、验收泳道与非目标见 [`beta-scope.md`](beta-scope.md) §1、§3。
 
@@ -36,12 +38,11 @@
 
 | 位置 | 现表述 | 冲突 | 处置 |
 |---|---|---|---|
-| [`docs/README.md`](../README.md) 权威文档表 | `implementation-plan.md` 是「唯一当前实施计划」 | 与本文将其标记为历史不一致 | REL-02 的 write 范围不含 `docs/README.md`；本表按 Beta 范围标记为历史，权威表修订留给后续卡片，修订前以 `beta-scope.md` 与本文为准 |
-| [`CONTEXT.md`](../../CONTEXT.md) 文档权威节 | `implementation-plan.md` 是「唯一当前实施计划」 | 同上 | 同上；不改 CONTEXT 以免改变术语权威 |
-| [`docs/adr/0001-web-first-beta.md`](../adr/0001-web-first-beta.md) | Web UI 是产品壳；Slint 不作第二正式前端 | 未被新 ADR 取代，但 `beta-scope.md` §1 已按 MyGo Native 冻结 | 本表不改 ADR；DS-12 要求在发布前新增取代其前端条款的 ADR。在 ADR 落地前，`README.md` 与 `docs/architecture.md` 只声明「按 Beta 范围」而非「平台决策已获批准」 |
+| [`docs/README.md`](../README.md) 权威文档表 | `implementation-plan.md` 是「唯一当前实施计划」 | **已解决（2026-11-15）**：`docs/README.md` 已同步更新，`implementation-plan.md` 已归档至 `docs/archive/` | — |
+| [`CONTEXT.md`](../../CONTEXT.md) 文档权威节 | `implementation-plan.md` 是「唯一当前实施计划」 | 同上，引用前以 `beta-scope.md` 与本文为准 | 不改 `CONTEXT.md` 以免改变术语权威 |
+| [`docs/adr/0001-web-first-beta.md`](../adr/0001-web-first-beta.md) | Web UI 是产品壳；Slint 不作第二正式前端 | 未被新 ADR 取代，但 `beta-scope.md` §1 已按 MyGo Native 冻结 | DS-12 要求在发布前新增取代其前端条款的 ADR |
 | [`docs/architecture.md`](../architecture.md) §3、§6 | Slint 组件树与时序图 | 早期 Slint 原型记录，非现行前端 | 保留原文，章节头标「历史」，现行前端见 `ux-contract.md` §1 |
-| [`beta-scope.md`](beta-scope.md) §1.4 第 2、3 行 | 记 `README.md` 第 3 行与 `docs/architecture.md` 第 38 行仍写「Web 是正式交付前端」「Beta 交付面是 Web」 | REL-02 已取消这两处表述，该两行现为过期记录（`beta-scope.md` 不在本卡 write 范围） | 以本文 §2 与两文档头部为准；`beta-scope.md` §1.4 该两行随 DS-12 卡一并更新 |
-| [`docs/implementation-plan.md`](../implementation-plan.md) 全文 | P0–P6 以 Slint 为执行/编辑面 | 现行 Beta 前端为 MyGo Native | 保留原文，文首加迁移说明并把「当前结论 / 下一步」标为历史 |
+| [`beta-scope.md`](beta-scope.md) §1.4 第 2、3 行 | 记 `README.md` 与 `docs/architecture.md` 仍写「Web 是正式交付前端」 | 过期记录 | 随 DS-12 卡一并更新 |
 
 ## 4. 历史文档阅读规则
 

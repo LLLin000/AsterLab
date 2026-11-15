@@ -76,14 +76,17 @@ func SelectKind(task *RunTaskViewModel, grid *resultgrid.Grid, assets []LinkedAs
 // RecordingView renders the unified recording module: the same data backed by
 // plate, table, gallery, or form. The host supplies the write callbacks.
 type RecordingView struct {
-	RunID  string
-	Kind   ViewKind
-	Grid   *resultgrid.Grid
-	Assets []LinkedAsset
-	Task   *RunTaskViewModel
-	OnOpenAsset  func(asset LinkedAsset)
-	OnRelocate   func(asset LinkedAsset)
-	OnLinkFile   func(asset LinkedAsset)
+	RunID       string
+	Kind        ViewKind
+	Grid        *resultgrid.Grid
+	Assets      []LinkedAsset
+	Task        *RunTaskViewModel
+	OnOpenAsset func(asset LinkedAsset)
+	OnRelocate  func(asset LinkedAsset)
+	OnLinkFile  func(asset LinkedAsset)
+	// LinkErr holds the Core rejection cause for the last link attempt on this
+	// task so the recording surface can show cause + retry (UX-P5).
+	LinkErr      string
 	OnKindChange func(kind ViewKind)
 	OnSaveBatch  func(cells []resultgrid.Cell)
 }
@@ -240,7 +243,9 @@ func (r *RecordingView) renderPlate(c *ui.Context) {
 		ui.Text(c, "当前任务没有孔板记录 schema。").FontSize(12).TextColor(c.Theme().TextMuted)
 		return
 	}
-	resultgrid.PlateView(c, r.Grid)
+	ui.Column(c).Key("recording-plate").FillWidth().Children(func() {
+		resultgrid.PlateView(c, r.Grid)
+	})
 }
 
 // renderTable draws a table projection of the same Core-backed grid. It never
@@ -272,7 +277,7 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 	}
 	g := r.Grid
 	// UX-P1, UX-P3, UX-P4, UX-P5, UX-LAYOUT: keep the themed record table aligned and readable at both breakpoints.
-	ui.Scroll(c).Fill().Children(func() {
+	ui.Scroll(c).Key("recording-table").Fill().Children(func() {
 		ui.Column(c).FillWidth().Gap(t.Space(.75)).Children(func() {
 			posHeader := "孔位"
 			if g.Schema.Layout != "" && g.Schema.Layout != "plate96" {
@@ -312,7 +317,13 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 						ui.Text(c, meta).FontSize(10).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 					})
 					ui.Text(c, cell.Field).Width(68).FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
-					e := ui.TextInput(c, input).Width(88).Padding(4).Placeholder("—").Label(well + " 读数")
+					e := ui.TextInput(c, input).Width(88).Padding(4).Placeholder("—").Label(well+" 读数").
+						FocusBind(&g.FocusInput, well)
+					if well == g.FocusInput {
+						// Focus follows the same well when a breakpoint rebuilds
+						// the field (UX-03).
+						e.AutoFocus()
+					}
 					if e.Changed() {
 						if *input == "" {
 							cell.Value, cell.Status = nil, "missing"
@@ -347,7 +358,7 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 func (r *RecordingView) renderGallery(c *ui.Context) {
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
-	ui.Column(c).Gap(t.Space(2)).Children(func() {
+	ui.Column(c).Key("recording-gallery").Gap(t.Space(2)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, "原始图片与文件").FontSize(12).Bold().TextColor(t.TextMuted)
 			if len(r.Assets) > 0 {
@@ -360,6 +371,17 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 		})
 		if len(r.Assets) == 0 {
 			ui.Text(c, "尚未关联本地文件。").FontSize(12).TextColor(t.TextMuted)
+		}
+		if r.LinkErr != "" {
+			ui.Row(c).Padding(6, 10).Radius(6).
+				Background(tokens.DangerBg).Border(1, tokens.DangerText).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+				ui.Text(c, "关联失败："+r.LinkErr).FontSize(t.Rem(.72)).Bold().TextColor(tokens.DangerText)
+				ui.Spacer(c)
+				retry := components.Button(c, "重新关联", components.ButtonPrimary)
+				if retry.Clicked() && r.OnLinkFile != nil {
+					r.OnLinkFile(LinkedAsset{LinkedTo: AssetLink{TaskKey: r.Task.TaskKey}})
+				}
+			})
 		}
 		for _, a := range r.Assets {
 			assetRow(c, a, r.OnOpenAsset, r.OnRelocate, t, tokens)
@@ -433,7 +455,7 @@ func (r *RecordingView) renderForm(c *ui.Context) {
 		ui.Text(c, "此步骤没有计划参数。").FontSize(12).TextColor(t.TextMuted)
 		return
 	}
-	ui.Column(c).Gap(t.Space(1.5)).Children(func() {
+	ui.Column(c).Key("recording-form").Gap(t.Space(1.5)).Children(func() {
 		ui.Text(c, "计划与实际参数").FontSize(12).Bold().TextColor(t.TextMuted)
 		for _, p := range planned.Parameters {
 			p := p

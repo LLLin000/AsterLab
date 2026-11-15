@@ -4018,11 +4018,12 @@ pub(crate) fn create_execution_event_tx(
         "measurement",
         "deviation",
         "observation",
+        "skipped_by_rule",
     ]
     .contains(&event.event_type.as_str())
     {
         return Err(CliError::input(
-            "event_type 必须是 operation、material_use、measurement、deviation 或 observation",
+            "event_type 必须是 operation、material_use、measurement、deviation、observation 或 skipped_by_rule",
         ));
     }
     check_text(&event.content, "事件内容", 5000)?;
@@ -4109,11 +4110,10 @@ pub(crate) fn create_execution_event_tx(
                 manifest["protocol_version_id"].as_str() == Some(protocol_version_id)
                     && event.planned_output_id.is_none()
                     && manifest["assay_id"].as_str() == event.assay_id.as_deref()
-                    && manifest["steps"].as_array().is_some_and(|steps| {
-                        steps
-                            .iter()
-                            .any(|step| step["path"].as_str() == Some(step_path.as_str()))
-                    })
+                    && (event.ad_hoc_step
+                        || manifest["steps"].as_array().is_some_and(|steps| {
+                            steps.iter().any(|step| step["path"].as_str() == Some(step_path.as_str()))
+                        }))
             });
         let in_materials = run_data
             .get("material_manifest")
@@ -4462,6 +4462,14 @@ pub(crate) fn create_execution_event_tx(
     if event.event_type != "measurement" && (!event.readouts.is_empty()) {
         return Err(CliError::input("结构化读数请使用 measurement 事件类型"));
     }
+    if event.event_type == "skipped_by_rule" {
+        if event.step_status.as_deref() != Some("skipped") {
+            return Err(CliError::input("skipped_by_rule event requires step_status=skipped"));
+        }
+        if event.protocol_step_path.as_deref().is_none_or(str::is_empty) {
+            return Err(CliError::input("skipped_by_rule event requires protocol_step_path"));
+        }
+    }
     match event.event_type.as_str() {
         "material_use" if event.materials.is_empty() => {
             return Err(CliError::input("材料使用事件至少需要一项材料"));
@@ -4660,6 +4668,7 @@ pub(crate) fn create_execution_event_tx(
         "stage":event.stage,
         "timepoint":event.timepoint,
         "step_status":event.step_status,
+        "ad_hoc_step":event.ad_hoc_step,
         "protocol_step_path":event.protocol_step_path,
         "protocol_version_id":event.protocol_version_id,
         "assay_id":event.assay_id,
@@ -6765,6 +6774,8 @@ struct ExecutionEventCreate {
     timepoint: Option<String>,
     #[serde(default)]
     step_status: Option<String>,
+    #[serde(default)]
+    ad_hoc_step: bool,
     #[serde(default)]
     protocol_step_path: Option<String>,
     #[serde(default)]
@@ -10979,7 +10990,7 @@ fn asset_link_payload_schema() -> Value {
             "modTime":{"type":"string"},
             "sha256":{"type":"string","maxLength":64},
             "availability":{"type":"string","enum":["available","unavailable"]},
-            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]}}},
+            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":1},"coordinateId":{"type":["string","null"]}}},
             "linkedAt":{"type":"string"},
             "actorId":{"type":"string"}
         }
@@ -11000,7 +11011,7 @@ fn asset_link_event_payload_schema() -> Value {
             "modTime":{"type":"string"},
             "sha256":{"type":"string","maxLength":64},
             "availability":{"type":"string","enum":["available","unavailable"]},
-            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]}}},
+            "link":{"type":"object","additionalProperties":false,"required":["runId","taskKey","sampleId","wellId","timepoint","fovIndex","coordinateId"],"properties":{"runId":{"type":"string"},"taskKey":{"type":"string"},"sampleId":{"type":["string","null"]},"wellId":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fovIndex":{"type":["integer","null"],"minimum":1},"coordinateId":{"type":["string","null"]}}},
             "at":{"type":"string"},
             "actorId":{"type":"string"}
         }
@@ -11073,6 +11084,13 @@ fn record_data_schema(kind: &str) -> Value {
 }
 fn record_schema(kind: &str) -> Value {
     let mut data = record_data_schema(kind);
+    if kind == "execution_event" {
+        data["properties"]["event_type"]["enum"]
+            .as_array_mut()
+            .expect("execution_event event_type enum")
+            .push(json!("skipped_by_rule"));
+        data["properties"]["ad_hoc_step"] = json!({"type":"boolean"});
+    }
     data["additionalProperties"] = json!(false);
     json!({"type":"object","additionalProperties":false,"required":["id","kind","project_id","parent_id","revision","data","created_at","updated_at"],"properties":{"id":{"type":"string"},"kind":{"const":kind},"project_id":{"type":["string","null"]},"parent_id":{"type":["string","null"]},"revision":{"type":"integer","minimum":1},"data":data,"created_at":{"type":"string","format":"date-time"},"updated_at":{"type":"string","format":"date-time"}}})
 }
@@ -11300,7 +11318,7 @@ fn output_schema(tool: &str) -> Value {
     json!({"oneOf":[success,error]})
 }
 fn input_schema(tool: &str) -> Option<Value> {
-    let s = match tool {
+    let mut s = match tool {
         "project.list" => json!({"type":"object","additionalProperties":false,"properties":{}}),
         "project.create" => {
             json!({"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"description":{"type":"string"}}})
@@ -11437,7 +11455,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["run_id","content"],"properties":{"run_id":{"type":"string"},"content":{"type":"string","minLength":1,"maxLength":10000,"pattern":"\\S"},"event_time":{"type":["string","null"],"format":"date-time"},"observation":{"type":"string"},"result":{"type":"string"},"deviation":{"type":"string"}}})
         }
         "execution_event.create" => {
-            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
+            json!({"type":"object","additionalProperties":false,"required":["run_id","event_type","content"],"properties":{"run_id":{"type":"string"},"event_type":{"type":"string","enum":["operation","material_use","measurement","deviation","observation"]},"content":{"type":"string","minLength":1,"maxLength":5000,"pattern":"\\S"},"occurred_at":{"type":["string","null"],"format":"date-time"},"stage":{"type":["string","null"],"maxLength":160},"timepoint":{"type":["string","null"],"maxLength":100,"description":"检测步骤的计划时间点；必须属于Run冻结设计中的该检测"},"step_status":{"type":["string","null"],"enum":["in_progress","completed","blocked","skipped",null],"description":"显式步骤状态；普通事件不代表步骤完成"},"protocol_step_path":{"type":["string","null"],"maxLength":500},"ad_hoc_step":{"type":"boolean","default":false,"description":"临时补加步骤：允许 protocol_step_path 不属于冻结清单；省略时为 false"},"protocol_version_id":{"type":["string","null"],"description":"关联步骤所引用的冻结 Protocol 版本"},"assay_id":{"type":["string","null"],"description":"关联步骤所属的冻结检测；共享制备步骤留空"},"planned_output_id":{"type":["string","null"],"description":"共享制备步骤所属计划产物；检测步骤留空"},"sample_ids":{"type":"array","maxItems":100,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"}},"attempt":{"type":["integer","null"],"minimum":1,"maximum":1000,"description":"样本级 attempt；必须关联冻结步骤与样本，且只能是当前 attempt 或下一个 attempt"},"materials":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["material"],"properties":{"material":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"planned_output_id":{"type":["string","null"]},"amount":{"type":["number","null"],"minimum":0},"unit":{"type":["string","null"],"maxLength":40}}}},"measurements":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint","value"],"properties":{"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"value":{"type":"number"},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120}}}},"readouts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["endpoint"],"properties":{"readout_id":{"type":["string","null"],"maxLength":160},"endpoint":{"type":"string","minLength":1,"maxLength":300},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"sample_id":{"type":["string","null"],"maxLength":120},"result_kind":{"type":"string","enum":["raw","derived"]},"method":{"type":["string","null"],"maxLength":300},"derived_from":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":160}}}}},"checks":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["check_id","status"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped"]},"note":{"type":["string","null"],"maxLength":2000},"checked_by":{"type":["string","null"],"maxLength":160}}}},"controls":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["role","status"],"properties":{"role":{"type":"string","enum":["blank","negative","positive","standard","vehicle","untreated","unstained","other"]},"subtype":{"type":["string","null"],"maxLength":80},"status":{"type":"string","enum":["passed","failed","blocked","skipped","not_run"]},"control_id":{"type":["string","null"],"maxLength":500},"sample_id":{"type":["string","null"],"maxLength":500},"experimental_unit":{"type":["string","null"],"maxLength":500},"expected":{"type":["string","null"],"maxLength":500},"observed":{"type":["string","null"],"maxLength":500},"note":{"type":["string","null"],"maxLength":500}}}},"lineage":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["from_kind","from_id","to_kind","to_id","relation"],"properties":{"from_kind":{"type":"string","minLength":1,"maxLength":120},"from_id":{"type":"string","minLength":1,"maxLength":120},"to_kind":{"type":"string","minLength":1,"maxLength":120},"to_id":{"type":"string","minLength":1,"maxLength":120},"relation":{"type":"string","minLength":1,"maxLength":120},"note":{"type":["string","null"],"maxLength":500}}}},"actual_parameters":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["key","value"],"properties":{"key":{"type":"string","minLength":1,"maxLength":120},"value":{},"unit":{"type":["string","null"],"maxLength":40},"source":{"type":["string","null"],"maxLength":300}}}},"operator":{"type":["string","null"],"maxLength":160},"deviation":{"type":["string","null"],"maxLength":5000}}})
         }
         "readout.submit" => {
             json!({"type":"object","additionalProperties":false,"required":["run_id","step_path","endpoint","protocol_version_id"],"oneOf":[{"required":["value"]},{"required":["qualifier"]}],"properties":{"run_id":{"type":"string","minLength":1,"maxLength":120},"step_path":{"type":"string","minLength":1,"maxLength":500,"pattern":"\\S","description":"本次 Run 冻结 Protocol 中的步骤路径"},"endpoint":{"type":"string","minLength":1,"maxLength":300,"pattern":"\\S"},"protocol_version_id":{"type":"string","minLength":1,"maxLength":120},"assay_id":{"type":["string","null"],"maxLength":120},"planned_output_id":{"type":["string","null"],"maxLength":120},"timepoint":{"type":["string","null"],"maxLength":100},"sample_id":{"type":["string","null"],"maxLength":120},"value":{"type":["number","null"]},"qualifier":{"type":["string","null"],"enum":["not_detected","below_lod","above_uloq","invalid","other",null]},"unit":{"type":["string","null"],"maxLength":40},"content":{"type":["string","null"],"maxLength":5000},"occurred_at":{"type":["string","null"],"format":"date-time"},"operator":{"type":["string","null"],"maxLength":160}}})
@@ -11464,7 +11482,7 @@ fn input_schema(tool: &str) -> Option<Value> {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}})
         }
         "asset.link" => {
-            json!({"type":"object","additionalProperties":false,"required":["root_id","root_dir","run_id","task_key"],"anyOf":[{"required":["relative_path"]},{"required":["path"]}],"properties":{"root_id":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S","description":"逻辑根 ID；只保存它和相对路径，不保存绝对路径"},"root_dir":{"type":"string","minLength":1,"description":"本机根目录；仅用于本次读取元数据与计算 sha256，不写入记录"},"relative_path":{"type":"string","minLength":1,"description":"相对 root_dir 的文件路径；不得包含 .. 或绝对路径"},"path":{"type":"string","minLength":1,"description":"本机文件绝对路径；与 root_dir 一起用于推导 relative_path"},"run_id":{"type":"string","minLength":1},"task_key":{"type":"string","minLength":1,"maxLength":1000},"sample_id":{"type":["string","null"],"maxLength":200},"actor_id":{"type":["string","null"],"maxLength":200}}})
+            json!({"type":"object","additionalProperties":false,"required":["root_id","root_dir","run_id","task_key"],"anyOf":[{"required":["relative_path"]},{"required":["path"]}],"properties":{"root_id":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S","description":"逻辑根 ID；只保存它和相对路径，不保存绝对路径"},"root_dir":{"type":"string","minLength":1,"description":"本机根目录；仅用于本次读取元数据与计算 sha256，不写入记录"},"relative_path":{"type":"string","minLength":1,"description":"相对 root_dir 的文件路径；不得包含 .. 或绝对路径"},"path":{"type":"string","minLength":1,"description":"本机文件绝对路径；与 root_dir 一起用于推导 relative_path"},"run_id":{"type":"string","minLength":1},"task_key":{"type":"string","minLength":1,"maxLength":1000},"sample_id":{"type":["string","null"],"maxLength":200},"well_id":{"type":["string","null"],"maxLength":40},"timepoint":{"type":["string","null"],"maxLength":100},"fov_index":{"type":["integer","null"],"minimum":0},"actor_id":{"type":["string","null"],"maxLength":200}}})
         }
         "asset.unlink" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1,"description":"asset_link 记录 ID"},"actor_id":{"type":["string","null"],"maxLength":200}}})
@@ -11542,6 +11560,13 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         _ => return None,
     };
+    if tool == "execution_event.create" {
+        s["properties"]["event_type"]["enum"]
+            .as_array_mut()
+            .expect("execution_event.create event_type enum")
+            .push(json!("skipped_by_rule"));
+        s["properties"]["ad_hoc_step"] = json!({"type":"boolean"});
+    }
     Some(s)
 }
 fn design_schema() -> Value {
@@ -11952,6 +11977,12 @@ struct AssetLinkCreate {
     #[serde(default)]
     sample_id: Option<String>,
     #[serde(default)]
+    well_id: Option<String>,
+    #[serde(default)]
+    timepoint: Option<String>,
+    #[serde(default)]
+    fov_index: Option<u32>,
+    #[serde(default)]
     actor_id: Option<String>,
 }
 
@@ -12019,6 +12050,7 @@ fn asset_link_record_id(
     run_id: &str,
     task_key: &str,
     sample_id: &str,
+    coordinates: &Value,
 ) -> String {
     let mut hasher = Sha256::new();
     for part in [
@@ -12027,6 +12059,7 @@ fn asset_link_record_id(
         run_id,
         task_key,
         sample_id,
+        coordinates["coordinateId"].as_str().unwrap_or(""),
     ] {
         hasher.update(part.as_bytes());
         hasher.update(b"\0");
@@ -12039,6 +12072,49 @@ fn asset_link_record_id(
     record_id
 }
 
+fn validate_asset_coordinates(
+    well_id: Option<&str>,
+    timepoint: Option<&str>,
+    fov_index: Option<u32>,
+) -> Result<(), CliError> {
+    for (field, value, limit) in [("well_id", well_id, 40), ("timepoint", timepoint, 100)] {
+        if value.is_some_and(|v| v.chars().count() > limit || v.chars().any(char::is_control)) {
+            return Err(CliError::input(format!("{field} is invalid")));
+        }
+    }
+    if let Some(well) = well_id {
+        split_well(well)?;
+    }
+    if fov_index == Some(0) {
+        return Err(CliError::input("fov_index must start at 1"));
+    }
+    if well_id.is_none() && (timepoint.is_some() || fov_index.is_some()) {
+        return Err(CliError::input("timepoint and fov_index require well_id"));
+    }
+    Ok(())
+}
+
+fn asset_coordinate_id(well_id: Option<&str>, timepoint: Option<&str>, fov_index: Option<u32>) -> Option<String> {
+    let well = well_id.filter(|value| !value.trim().is_empty())?;
+    if fov_index == Some(0) {
+        return None;
+    }
+    let mut id = well.to_ascii_uppercase();
+    if let Some(timepoint) = timepoint.filter(|value| !value.is_empty()) {
+        id.push('_');
+        id.push_str(timepoint);
+    }
+    if let Some(fov) = fov_index {
+        id.push_str(&format!("_fov{fov:02}"));
+    }
+    Some(id)
+}
+
+fn asset_coordinates(well_id: Option<&str>, timepoint: Option<&str>, fov_index: Option<u32>) -> Value {
+    json!({"wellId":well_id,"timepoint":timepoint,"fovIndex":fov_index,
+        "coordinateId":asset_coordinate_id(well_id,timepoint,fov_index)})
+}
+
 fn asset_link_data(
     asset: &asset_refs::AssetRef,
     run_id: &str,
@@ -12046,6 +12122,7 @@ fn asset_link_data(
     sample_id: &str,
     linked_at: &str,
     actor_id: &str,
+    coordinates: &Value,
 ) -> Value {
     json!({
         "id": asset.id,
@@ -12059,7 +12136,11 @@ fn asset_link_data(
         "link": {
             "runId": run_id,
             "taskKey": task_key,
-            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) }
+            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) },
+            "wellId": coordinates["wellId"],
+            "timepoint": coordinates["timepoint"],
+            "fovIndex": coordinates["fovIndex"],
+            "coordinateId": coordinates["coordinateId"]
         },
         "linkedAt": linked_at,
         "actorId": actor_id
@@ -12075,6 +12156,7 @@ fn asset_link_event_data(
     sample_id: &str,
     at: &str,
     actor_id: &str,
+    coordinates: &Value,
 ) -> Value {
     json!({
         "id": event_id,
@@ -12090,7 +12172,11 @@ fn asset_link_event_data(
         "link": {
             "runId": run_id,
             "taskKey": task_key,
-            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) }
+            "sampleId": if sample_id.is_empty() { Value::Null } else { Value::String(sample_id.to_owned()) },
+            "wellId": coordinates["wellId"],
+            "timepoint": coordinates["timepoint"],
+            "fovIndex": coordinates["fovIndex"],
+            "coordinateId": coordinates["coordinateId"]
         },
         "at": at,
         "actorId": actor_id
@@ -12107,12 +12193,13 @@ fn store_asset_link(
     sample_id: &str,
     linked_at: &str,
     actor_id: &str,
+    coordinates: &Value,
 ) -> Result<(Value, Value), CliError> {
-    let record_id = asset_link_record_id(asset, run_id, task_key, sample_id);
-    let data = asset_link_data(asset, run_id, task_key, sample_id, linked_at, actor_id);
+    let record_id = asset_link_record_id(asset, run_id, task_key, sample_id, coordinates);
+    let data = asset_link_data(asset, run_id, task_key, sample_id, linked_at, actor_id, coordinates);
     let event_id = format!("asset-event-{}", Uuid::new_v4());
     let event = asset_link_event_data(
-        &event_id, "linked", asset, run_id, task_key, sample_id, linked_at, actor_id,
+        &event_id, "linked", asset, run_id, task_key, sample_id, linked_at, actor_id, coordinates,
     );
     let tx = db
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -12178,6 +12265,16 @@ fn link_local_asset(
     let task_key = request.task_key.trim();
     let sample_id = request.sample_id.as_deref().unwrap_or("").trim();
     check_asset_sample_id(sample_id)?;
+    let coordinates = asset_coordinates(
+        request.well_id.as_deref(),
+        request.timepoint.as_deref(),
+        request.fov_index,
+    );
+    validate_asset_coordinates(
+        request.well_id.as_deref(),
+        request.timepoint.as_deref(),
+        request.fov_index,
+    )?;
     let actor_id = request.actor_id.as_deref().unwrap_or("").trim();
     if actor_id.len() > 200 || actor_id.chars().any(char::is_control) {
         return Err(CliError::input("actor_id is invalid"));
@@ -12197,7 +12294,7 @@ fn link_local_asset(
     .map_err(|error| CliError::input(error.to_string()))?;
     store_asset_link(
         db, &asset, &project, run_id, task_key, sample_id,
-        &stamp(), actor_id,
+        &stamp(), actor_id, &coordinates,
     )
 }
 
@@ -12294,6 +12391,16 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
+    let coordinates = asset_coordinates(
+        link.get("wellId").and_then(Value::as_str),
+        link.get("timepoint").and_then(Value::as_str),
+        link.get("fovIndex").and_then(Value::as_u64).map(|v| v as u32),
+    );
+    validate_asset_coordinates(
+        link.get("wellId").and_then(Value::as_str),
+        link.get("timepoint").and_then(Value::as_str),
+        link.get("fovIndex").and_then(Value::as_u64).map(|v| v as u32),
+    )?;
 
     let reference = asset_refs::AssetRef {
         id: asset_refs::stable_id(&root_id, &relative_path),
@@ -12306,7 +12413,7 @@ pub(crate) fn save_asset_link(db: &mut Connection, input: &Value) -> Result<Valu
         availability,
     };
     let (record, _) = store_asset_link(
-        db, &reference, &project, &run_id, &task_key, &sample_id, &linked_at, &actor_id,
+        db, &reference, &project, &run_id, &task_key, &sample_id, &linked_at, &actor_id, &coordinates,
     )?;
     Ok(record["data"].clone())
 }
@@ -13169,7 +13276,7 @@ protocol_version_id: protocol-v1
             [json!({
                 "title":"r","design_version_id":"version-1","design_revision":1,
                 "status":"in_progress",
-                "protocol_manifest":[{"assay_id":"assay-1","assay_title":"A","steps":[step]}]
+                "protocol_manifest":[{"assay_id":"assay-1","assay_title":"A","protocol_version_id":"pv1","steps":[step]}]
             })
             .to_string()],
         )
@@ -13178,6 +13285,31 @@ protocol_version_id: protocol-v1
             .as_str()
             .expect("task key")
             .to_owned()
+    }
+    #[test]
+    fn rule_skip_event_requires_skip_status_and_projects_ad_hoc_marker() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);").unwrap();
+        let task_key = seed_asset_run(&db);
+        let tx = db.unchecked_transaction().unwrap();
+        let invalid = json!({"event_type":"skipped_by_rule","content":"No bubbles",
+            "step_status":"completed","protocol_step_path":"s/1","protocol_version_id":"pv1",
+            "assay_id":"assay-1","task_key":task_key,"ad_hoc_step":true});
+        let invalid_error = create_execution_event_tx(&tx, "run-1", &invalid).unwrap_err();
+        assert!(
+            invalid_error.message.contains("step_status=skipped"),
+            "{invalid_error:?}"
+        );
+        let valid = json!({"event_type":"skipped_by_rule","content":"No bubbles",
+            "step_status":"skipped","protocol_step_path":"s/1","protocol_version_id":"pv1",
+            "assay_id":"assay-1","task_key":task_key,"ad_hoc_step":true});
+        let saved = create_execution_event_tx(&tx, "run-1", &valid).unwrap();
+        tx.commit().unwrap();
+        let projected = run_workspace(&db, "run-1").unwrap();
+        assert_eq!(saved["data"]["event_type"], "skipped_by_rule");
+        assert_eq!(projected["events"][0]["skipped_by_rule"], true);
+        assert_eq!(projected["events"][0]["ad_hoc_step"], true);
+        assert_eq!(projected["tasks"][0]["status"], "skipped");
     }
 
     fn dir_size(path: &Path) -> u64 {
@@ -13248,6 +13380,9 @@ protocol_version_id: protocol-v1
             run_id: "run-1".into(),
             task_key: task_key.clone(),
             sample_id: Some("sample-1".into()),
+            well_id: Some("A1".into()),
+            timepoint: Some("t6h".into()),
+            fov_index: Some(1),
             actor_id: Some("tester".into()),
         };
         let (record, event) = link_local_asset(&mut db, &request).unwrap();
@@ -13269,6 +13404,7 @@ protocol_version_id: protocol-v1
         assert_eq!(data["relativePath"], "d1/large.tif");
         assert_eq!(data["rootId"], "project-data");
         assert_eq!(data["link"]["sampleId"], "sample-1");
+        assert_eq!(data["link"]["coordinateId"], "A1_t6h_fov01");
         assert!(
             !data.to_string().contains(&root_dir.display().to_string()),
             "absolute root path must not be persisted: {data}"
@@ -13339,6 +13475,9 @@ protocol_version_id: protocol-v1
             run_id: "run-1".into(),
             task_key: task.to_owned(),
             sample_id: None,
+            well_id: None,
+            timepoint: None,
+            fov_index: None,
             actor_id: None,
         };
         let error = link_local_asset(

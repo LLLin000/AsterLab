@@ -1,10 +1,10 @@
-//! Typed operation contract (OperationSpec v1).
+//! Typed operation contract (OperationSpec v2).
 //!
 //! `ProtocolBlock` stays the authority for what a protocol executes. An
 //! [`OperationSpec`] is a typed description of one operation inside a block; it
-//! never carries a second execution path. Blocks without a spec keep running
-//! (v1 compatibility). The normative contract lives in
-//! `docs/contracts/operation-spec-v1.md`.
+//! never carries a second execution path. v1 documents remain readable and all
+//! v2 extensions are optional. The normative contract lives in
+//! `docs/contracts/operation-spec-v2.md`.
 //!
 //! This module is contract-only: types, serde and structural validation. It
 //! has no executor, no store access and no CLI/GUI wiring.
@@ -48,8 +48,9 @@
 use crate::protocol_preview::StepCheck;
 use serde::{Deserialize, Serialize};
 
-/// Schema version written and accepted by this crate.
-pub const OPERATION_SPEC_SCHEMA_VERSION: u32 = 1;
+/// Latest schema written for new OperationSpec values.
+pub const OPERATION_SPEC_SCHEMA_VERSION: u32 = 2;
+const OPERATION_SPEC_V1_SCHEMA_VERSION: u32 = 1;
 
 /// The three semantic rejection classes. This set is closed: no other code is
 /// produced by [`OperationSpec::validate`].
@@ -73,9 +74,7 @@ pub enum OperationKind {
     Measure,
 }
 
-/// Declared unit. Values are never converted in v1: the value and the unit stay
-/// exactly as declared. Unknown unit tokens are rejected by serde, which is a
-/// parse error and therefore outside the closed semantic error set.
+/// Declared unit. Values are never converted during deserialization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Unit {
     #[serde(rename = "uL")]
@@ -90,6 +89,8 @@ pub enum Unit {
     Minute,
     #[serde(rename = "h")]
     Hour,
+    #[serde(rename = "d")]
+    Day,
     #[serde(rename = "C")]
     Celsius,
     /// Relative centrifugal force, relative to standard gravity.
@@ -105,8 +106,7 @@ pub enum Unit {
     Count,
 }
 
-/// Dimension of a [`Unit`]. A field declares the family it accepts, so a wrong
-/// unit is a semantic rejection instead of a silently accepted number.
+/// Dimension of a [`Unit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitFamily {
     Volume,
@@ -134,7 +134,7 @@ impl Unit {
     pub fn family(self) -> UnitFamily {
         match self {
             Unit::Microliter | Unit::Milliliter | Unit::Liter => UnitFamily::Volume,
-            Unit::Second | Unit::Minute | Unit::Hour => UnitFamily::Time,
+            Unit::Second | Unit::Minute | Unit::Hour | Unit::Day => UnitFamily::Time,
             Unit::Celsius => UnitFamily::Temperature,
             Unit::RcfG => UnitFamily::Force,
             Unit::Rpm => UnitFamily::Rotation,
@@ -152,6 +152,7 @@ impl Unit {
             Unit::Second => "s",
             Unit::Minute => "min",
             Unit::Hour => "h",
+            Unit::Day => "d",
             Unit::Celsius => "C",
             Unit::RcfG => "xg",
             Unit::Rpm => "rpm",
@@ -162,12 +163,26 @@ impl Unit {
     }
 }
 
+
 /// A number plus its declared unit. No conversion, no default unit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Quantity {
     pub value: f64,
     pub unit: Unit,
+}
+
+impl Quantity {
+    pub fn seconds(&self) -> Option<f64> {
+        let factor = match self.unit {
+            Unit::Second => 1.0,
+            Unit::Minute => 60.0,
+            Unit::Hour => 3_600.0,
+            Unit::Day => 86_400.0,
+            _ => return None,
+        };
+        Some(self.value * factor)
+    }
 }
 
 /// A stable project container reference. A bare well coordinate (`A1`) is not a
@@ -288,6 +303,51 @@ impl Operation {
     }
 }
 
+/// Meaning assigned to a declared duration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationTimeKind {
+    HandsOn,
+    Wait,
+    TimedEndpoint,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperationTiming {
+    pub kind: OperationTimeKind,
+    pub duration: Quantity,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepeatSpec {
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckOutcome {
+    Passed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkipCondition {
+    pub check_id: String,
+    pub outcome: CheckOutcome,
+}
+
+/// A periodic occurrence sequence, anchored by `time_anchor_id` on the spec.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleRule {
+    pub interval: Quantity,
+    pub occurrences: u32,
+}
+
+
 /// Typed description of one operation. Execution semantics stay in the owning
 /// `ProtocolBlockVersionData`; this is a sidecar-shaped description, not a
 /// runtime.
@@ -300,21 +360,45 @@ pub struct OperationSpec {
     /// `protocol_preview`; the spec never defines a second check vocabulary.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<StepCheck>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<OperationTiming>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<RepeatSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_condition: Option<SkipCondition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_anchor_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<ScheduleRule>,
 }
 
 impl OperationSpec {
     pub fn v1(operation: Operation) -> Self {
         OperationSpec {
-            schema_version: OPERATION_SPEC_SCHEMA_VERSION,
+            schema_version: OPERATION_SPEC_V1_SCHEMA_VERSION,
             operation,
             checks: Vec::new(),
+            timing: None,
+            repeat: None,
+            skip_condition: None,
+            time_anchor_id: None,
+            schedule: None,
         }
     }
 
+    pub fn v2(operation: Operation) -> Self {
+        let mut spec = Self::v1(operation);
+        spec.schema_version = OPERATION_SPEC_SCHEMA_VERSION;
+        spec
+    }
+
     /// Version refusal is a load-time decision, not one of the three semantic
-    /// codes. Consumers must check this before trusting a loaded spec.
+    /// codes. Both v1 and v2 are readable; unsupported versions are rejected.
     pub fn is_supported_schema_version(&self) -> bool {
-        self.schema_version == OPERATION_SPEC_SCHEMA_VERSION
+        matches!(
+            self.schema_version,
+            OPERATION_SPEC_V1_SCHEMA_VERSION | OPERATION_SPEC_SCHEMA_VERSION
+        )
     }
 
     /// Structural checks over the spec's own fields.
@@ -448,6 +532,47 @@ impl OperationSpec {
                 ));
             }
         }
+        if let Some(timing) = &self.timing {
+            validate_quantity(
+                &timing.duration,
+                "timing.duration",
+                UnitFamily::Time,
+                &mut issues,
+            );
+        }
+        if let Some(repeat) = &self.repeat {
+            validate_positive_count(Some(repeat.count), "repeat.count", &mut issues);
+        }
+        if let Some(condition) = &self.skip_condition {
+            if condition.check_id.trim().is_empty() {
+                issues.push(missing("skip_condition.check_id", "check id is not set"));
+            }
+        }
+        if let Some(anchor) = &self.time_anchor_id {
+            if anchor.trim().is_empty() {
+                issues.push(missing("time_anchor_id", "time anchor id is not set"));
+            }
+        }
+        if let Some(schedule) = &self.schedule {
+            validate_quantity(
+                &schedule.interval,
+                "schedule.interval",
+                UnitFamily::Time,
+                &mut issues,
+            );
+            validate_positive_count(
+                Some(schedule.occurrences),
+                "schedule.occurrences",
+                &mut issues,
+            );
+            if self.time_anchor_id.as_deref().unwrap_or("").trim().is_empty() {
+                issues.push(missing(
+                    "time_anchor_id",
+                    "periodic schedule requires a time anchor",
+                ));
+            }
+        }
+
 
         if issues.is_empty() {
             Ok(())
@@ -581,6 +706,53 @@ mod tests {
             .map(|issue| issue.code.as_str())
             .collect()
     }
+
+    #[test]
+    fn optional_v2_controls_preserve_v1_documents_and_validate_periodic_schedule() {
+        let legacy = spec_from(json!({
+            "schema_version": 1,
+            "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" }
+        }));
+        let legacy_json = serde_json::to_value(&legacy).unwrap();
+        for field in ["timing", "repeat", "skip_condition", "time_anchor_id", "schedule"] {
+            assert!(legacy_json.get(field).is_none(), "unexpected {field}");
+        }
+
+        let scheduled = spec_from(json!({
+            "schema_version": 2,
+            "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" },
+            "timing": { "kind": "wait", "duration": { "value": 6.0, "unit": "h" } },
+            "repeat": { "count": 3 },
+            "skip_condition": { "check_id": "qc_pass", "outcome": "passed" },
+            "time_anchor_id": "t0",
+            "schedule": { "interval": { "value": 1.0, "unit": "d" }, "occurrences": 3 }
+        }));
+        assert!(scheduled.validate().is_ok());
+        assert_eq!(serde_json::to_value(&scheduled).unwrap()["schedule"]["occurrences"], 3);
+
+        let invalid_schedule = spec_from(json!({
+            "schema_version": 2,
+            "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" },
+            "schedule": { "interval": { "value": 0.0, "unit": "d" }, "occurrences": 0 }
+        }));
+        let issues = invalid_schedule.validate().unwrap_err();
+        assert_eq!(issues.iter().map(|issue| issue.path.as_str()).collect::<Vec<_>>(), [
+            "schedule.interval",
+            "schedule.occurrences",
+            "time_anchor_id"
+        ]);
+    }
+    #[test]
+    fn v2_contract_example_parses_and_validates() {
+        let doc = include_str!("../../../docs/contracts/operation-spec-v2.md");
+        let example = doc.split("## Example").nth(1).unwrap();
+        let blocks = json_blocks(example);
+        assert_eq!(blocks.len(), 1);
+        let spec: OperationSpec = serde_json::from_str(blocks[0]).expect("v2 example parses");
+        assert!(spec.is_supported_schema_version());
+        assert!(spec.validate().is_ok());
+    }
+
 
     #[test]
     fn transfer_roundtrips_volume_and_containers() {
@@ -842,6 +1014,8 @@ mod tests {
         }));
         assert!(spec.is_supported_schema_version());
         spec.schema_version = 2;
+        assert!(spec.is_supported_schema_version());
+        spec.schema_version = 3;
         assert!(!spec.is_supported_schema_version());
         // Version refusal never leaks into the closed semantic code set.
         assert!(spec.validate().is_ok());
