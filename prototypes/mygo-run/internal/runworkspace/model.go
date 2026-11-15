@@ -734,3 +734,18 @@ func buildTaskStatus(task runs.RunTask) TaskStatus {
 	}
 	return TaskStatusPending
 }
+
+// StatusLabel returns the UX contract word for a task status (UX-STATE). Every
+// run surface prints this, never the raw Core value.
+func StatusLabel(status TaskStatus) string {
+	switch status {
+	case TaskStatusCurrent:
+		return "进行中"
+	case TaskStatusCompleted:
+		return "已完成"
+	case TaskStatusBlocked:
+		return "阻塞"
+	default:
+		return "未开始"
+	}
+}

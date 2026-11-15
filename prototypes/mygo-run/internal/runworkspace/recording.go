@@ -237,6 +237,20 @@ func viewLabel(kind ViewKind) string {
 	}
 }
 
+// cellStatusLabel maps a Core cell status to operator-facing wording, never the
+// raw enum value (UX-STATE).
+func cellStatusLabel(status string) string {
+	switch status {
+	case "raw", "recorded":
+		return "已记录"
+	case "missing", "":
+		return "缺失"
+	case "excluded":
+		return "排除"
+	}
+	return status
+}
+
 // renderPlate draws the plate view fed by the result grid.
 func (r *RecordingView) renderPlate(c *ui.Context) {
 	if r.Grid == nil {
@@ -266,11 +280,7 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 				ui.Text(c, m.SampleID).FontSize(12).TextColor(t.Text)
 				ui.Text(c, m.Field).FontSize(12).TextColor(t.TextMuted)
 				ui.Text(c, m.Value+" "+m.Unit).FontSize(12).FontFeatures("tnum")
-				status := m.Status
-				if status == "" {
-					status = "raw"
-				}
-				ui.Text(c, status).FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, cellStatusLabel(m.Status)).FontSize(11).TextColor(t.TextMuted)
 			}
 		})
 		return
@@ -344,7 +354,7 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 					if status == "" {
 						status = "missing"
 					}
-					ui.Text(c, status).Width(44).FontSize(11).TextColor(t.TextMuted)
+					ui.Text(c, cellStatusLabel(status)).Width(44).FontSize(11).TextColor(t.TextMuted)
 				})
 			}
 		})

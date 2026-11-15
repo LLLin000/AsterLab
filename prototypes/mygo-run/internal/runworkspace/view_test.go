@@ -52,14 +52,30 @@ func TestProcedureShowsFrozenProtocolReadOnly(t *testing.T) {
 		t.Fatalf("view model did not retain frozen snapshot values: %+v", task)
 	}
 	s := NewState(vm, Callbacks{})
-	tt := ui.NewTester(func(c *ui.Context) {
+	s.Selected = "t-read"
+	render := func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
-		procedureLayer(c, s, c.Theme(), theme.GetTokens(c.Theme()), task)
-	}, 900, 700)
-	tt.Frame()
-	for _, text := range []string{"操作说明 · 已冻结 · 只读", "读取 OD450 并记录。", "操作参数 · 已冻结 · 只读", "OD450", "0.82 AU", "协议版本 protocol-v2", "冻结信息（只读 · 已冻结）"} {
-		if !tt.HasText(text) {
+		View(c, s)
+	}
+	closed := ui.NewTester(render, 1360, 880)
+	closed.Frame()
+	for _, text := range []string{"操作说明 · 已冻结 · 只读", "读取 OD450 并记录。", "操作参数 · 已冻结 · 只读", "OD450", "0.82 AU", "技术属性（只读）"} {
+		if !closed.HasText(text) {
 			t.Errorf("frozen procedure detail missing %q", text)
+		}
+	}
+	for _, id := range []string{"protocol-v2", "step-read", "root/read", "assay-cck8"} {
+		if closed.HasText(id) {
+			t.Errorf("raw identifier %q leaked into the default view", id)
+		}
+	}
+	// One click on 技术属性 reveals the frozen identity.
+	s.ShowTechnical = true
+	opened := ui.NewTester(render, 1360, 880)
+	opened.Frame()
+	for _, want := range []string{"协议版本 protocol-v2", "步骤 ID step-read", "路径 root/read"} {
+		if !opened.HasText(want) {
+			t.Errorf("expanded technical properties missing %q: %v", want, opened.Texts())
 		}
 	}
 }
@@ -121,7 +137,7 @@ func TestFlowRailShowsHierarchyProgressTimepointAndCoreStatus(t *testing.T) {
 	tt.Frame()
 	text := strings.Join(tt.Texts(), "\n")
 	for _, want := range []string{
-		"Workflow group", "1/4", "D0", "未开始", "进行中", "已完成", "已阻塞",
+		"Workflow group", "1/4", "D0", "未开始", "进行中", "已完成", "阻塞",
 		"Organization", "组织节点", "Done task",
 	} {
 		if !strings.Contains(text, want) {
@@ -455,5 +471,86 @@ func TestSelectingStepGroupReportsTaskKey(t *testing.T) {
 	}
 	if s.Selected != "t-read" {
 		t.Fatalf("state selection = %q, want t-read", s.Selected)
+	}
+}
+
+// TestWideLayoutPlacesRecordingBetweenFlowAndProperties enforces UX-LAYOUT at
+// ≥1100: left flow chain, middle record projection, right compact properties.
+func TestWideLayoutPlacesRecordingBetweenFlowAndProperties(t *testing.T) {
+	s := buildTestState()
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, s)
+	}, 1360, 880)
+	tt.Frame()
+	flow, okFlow := tt.Find("实验流程")
+	recording, okRecording := tt.Find("实验记录")
+	properties, okProperties := tt.Find("操作说明 · 已冻结 · 只读")
+	if !okFlow || !okRecording || !okProperties {
+		t.Fatalf("column anchors missing: flow=%v recording=%v properties=%v (%v)",
+			okFlow, okRecording, okProperties, tt.Texts())
+	}
+	if !(flow.X < recording.X && recording.X < properties.X) {
+		t.Fatalf("expected flow < recording < properties, got x=%0.1f/%0.1f/%0.1f",
+			flow.X, recording.X, properties.X)
+	}
+}
+
+// TestDefaultViewHidesRawIdentifiers enforces UX-P2: the default run view
+// never shows a raw step/block/protocol identifier at either breakpoint.
+func TestDefaultViewHidesRawIdentifiers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		width  int
+		height int
+		narrow bool
+	}{
+		{"three-column", 1360, 880, false},
+		{"single-column", 900, 600, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := buildTestState()
+			s.Narrow = tc.narrow
+			tt := ui.NewTester(func(c *ui.Context) {
+				c.SetTheme(theme.LightTheme())
+				View(c, s)
+			}, tc.width, tc.height)
+			tt.Frame()
+			text := strings.Join(tt.Texts(), "\n")
+			for _, id := range []string{
+				"step-seed", "step-read", "root/seed", "root/read",
+				"assay-cck8", "t-seed", "t-read", "uv-reader", "dil-stock",
+			} {
+				if strings.Contains(text, id) {
+					t.Errorf("%dx%d default view leaked raw identifier %q: %v",
+						tc.width, tc.height, id, tt.Texts())
+				}
+			}
+			for _, raw := range []string{"in_progress", "planned", "running"} {
+				if strings.Contains(text, raw) {
+					t.Errorf("%dx%d default view leaked raw status %q: %v",
+						tc.width, tc.height, raw, tt.Texts())
+				}
+			}
+		})
+	}
+}
+
+// TestStatusLabelContractVocabulary enforces UX-STATE: every frozen status maps
+// to the contract word, including the raw planned/in_progress spellings.
+func TestStatusLabelContractVocabulary(t *testing.T) {
+	cases := map[string]string{
+		"planned":     "未开始",
+		"in_progress": "进行中",
+		"completed":   "已完成",
+		"blocked":     "阻塞",
+	}
+	for raw, want := range cases {
+		if got := treeStatusLabel(raw); got != want {
+			t.Errorf("treeStatusLabel(%q) = %q, want %q", raw, got, want)
+		}
+		if got := StatusLabel(buildTaskStatus(runs.RunTask{Status: raw})); got != want {
+			t.Errorf("StatusLabel(buildTaskStatus(%q)) = %q, want %q", raw, got, want)
+		}
 	}
 }
