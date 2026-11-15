@@ -1,0 +1,44 @@
+# LB-09 CLI smoke: empty step path through asterdoc.command
+# source: docs/sdk/huvec-tube-formation-case/huvec-tube-formation.asterml
+#         with every 'path: <x>' replaced by 'path: ""' (the LB-07 state)
+
+$ project.create
+project: 2423eeb7-2e7a-4e07-b134-22606188f25b
+
+$ design.create
+design: dd38b95d-7099-4aed-b640-620f25c42a81
+
+$ asterdoc.save (7 steps, all path: "")
+empty paths in source: 7
+ok: True revision: 1
+
+$ asterdoc.command nest_step step-04-seed under step-03-soak (revision 1 -> 2)
+ok: True revision: 2
+path: ""
+path: ""
+path: root/step-03-soak
+path: root/step-03-soak/step-04-seed
+path: ""
+path: ""
+path: ""
+
+$ asterdoc.command promote_step step-04-seed (revision 2 -> 3)
+ok: True revision: 3
+path: ""
+path: ""
+path: root/step-03-soak
+path: root/step-04-seed
+path: ""
+path: ""
+path: ""
+
+$ asterdoc.command promote_step step-04-seed again (revision 3; already top level)
+{"error":{"code":"INVALID_INPUT","message":"step step-04-seed is already at the top level (path root/step-04-seed); promote_step needs a nested step — nest it under a parent step first"},"ok":false,"tool":"asterdoc.command"}
+exit=2
+
+$ asterdoc.command update_module step-05c-img-24h path root/step-05a-img-6h (revision 3 -> 4)
+ok: True revision: 4
+
+$ asterdoc.command promote_step step-05a-img-6h (derived path root/step-05a-img-6h is taken, revision 4)
+{"error":{"code":"INVALID_INPUT","message":"steps step-05a-img-6h and step-05c-img-24h would both use path root/step-05a-img-6h; step paths must stay unique — give one of them a different path (for example path: root/step-05a-img-6h-2) and retry"},"ok":false,"tool":"asterdoc.command"}
+exit=2

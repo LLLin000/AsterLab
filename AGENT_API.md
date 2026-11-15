@@ -102,7 +102,11 @@ stdout 每次只输出一行 JSON。成功结构为：
 新增命令：
 
 - `reorder_steps`：`{type, moduleId: <workflow-id>, order: [<step-id>...]}`。`order` 必须是 workflow `steps` 的完整、无重复置换，只更新 `business_order`，不改变 `edges`。
+- `add_step`：`{type, module, workflowId?}`。`module.path` 缺失、空串或纯空白时，Core 写入派生路径 `root/<step-id>`；步骤因此从一开始就在 `workflow.inspect_tree` 中可达。已带 `path` 的模块原样保存。
 - `nest_step`：`{type, moduleId: <step-id>, parentId: <parent-step-id>}`；`promote_step`：`{type, moduleId: <step-id>}`。两者更新目标步骤及其后代的 `path`；路径冲突和循环嵌套返回 `INVALID_INPUT`，不保存部分 revision。
+  - 目标步骤缺 `path` 时先按稳定规则派生 `root/<step-id>`：`nest_step` 得到 `<parent_path>/<step-id>`（父步骤也缺 `path` 时同一次 revision 内补全 `root/<parent-id>`），`promote_step` 只补全 `root/<step-id>`。
+  - 派生不能产生唯一无环路径时明确拒绝：`step_path_derivation_failed`（id 为空/含 `/` 或路径无最终段）、`step_path_already_nested`、`step_path_already_top_level`、`step_path_cycle`、`step_path_conflict`（消息指出两个步骤 id、冲突路径与改名示例）。完整规则见 [docs/contracts/asterdoc-step-path-v1.md](docs/contracts/asterdoc-step-path-v1.md)。
+  - 已带 `path` 的步骤不被改写；补全只写新的 revision，冻结 Run 与历史 revision 的路径字节不变。
 - `remove_step` 遇到被冻结 Run、其他模块/步骤引用、子步骤或 `protect_references: true` 时返回稳定错误 `STEP_REFERENCED`，不写入新 revision。允许删除时，workflow 的 `steps`、`business_order` 和关联 edges 在同一 AsterDoc revision 中清理。
 
 既有 `add_step`、`connect_steps`、`disconnect_steps` 等命令负载保持兼容。`workflow.inspect_tree` 与 `asterdoc.compile` 使用同一 revision 中的稳定 step ID、path、business order 和显式依赖 edges；顺序不隐式生成依赖关系。

@@ -7,6 +7,7 @@ use asterlab_core::agent_edit_validate::{
     StoredProtocolVersion,
 };
 use asterlab_core::assets as asset_refs;
+use asterlab_core::asterdoc_path as ast;
 use asterlab_core::calculators::{
     cell_seeding as cell_seeding_calc, gel_mastermix as gel_mastermix_calc,
     runtime_normalize as runtime_normalize_calc, CellSeedingGroup, CellSeedingInput,
@@ -2191,46 +2192,67 @@ fn step_path(value: &serde_yaml::Value) -> String {
     value.get("path").and_then(|path| path.as_str()).unwrap_or("").trim().to_owned()
 }
 
+fn step_path_cli_error(error: ast::StepPathError) -> CliError {
+    CliError::input(error.message)
+}
+
+/// Apply the path rewrite for one step and, when the step already had a path,
+/// for its descendants. A step without a path has no identifiable descendants,
+/// so only that block is rewritten.
 fn rewrite_step_subtree(
     source: &str,
     step_id: &str,
+    old_path: &str,
     new_path: &str,
+    extra_paths: &[(String, String)],
 ) -> Result<String, CliError> {
     let blocks = asterdoc_blocks(source)?;
-    let target = blocks.iter().find(|block| yaml_id(&block.value) == step_id)
-        .ok_or_else(|| CliError::missing(format!("step {step_id} does not exist")))?;
-    let old_path = step_path(&target.value);
-    if old_path.is_empty() || new_path.is_empty() || old_path == new_path {
-        return Err(CliError::input("step path is missing or unchanged"));
+    if !blocks.iter().any(|block| yaml_kind(&block.value) == "step" && yaml_id(&block.value) == step_id) {
+        return Err(CliError::missing(format!("step {step_id} does not exist")));
+    }
+    let old_path = old_path.trim();
+    if new_path.is_empty() {
+        return Err(CliError::input(format!(
+            "step {step_id} has no target path; retry nest_step or promote_step"
+        )));
     }
     let mut replacements = Vec::new();
     for block in &blocks {
         if yaml_kind(&block.value) != "step" {
             continue;
         }
+        let id = yaml_id(&block.value);
         let path = step_path(&block.value);
-        if path == old_path || path.strip_prefix(&old_path).is_some_and(|suffix| suffix.starts_with('/')) {
-            let mut value = block.value.clone();
-            let mapping = value.as_mapping_mut()
-                .ok_or_else(|| CliError::input("step module must be a mapping"))?;
-            let replacement = format!("{new_path}{}", &path[old_path.len()..]);
-            mapping.insert(
-                serde_yaml::Value::String("path".to_owned()),
-                serde_yaml::Value::String(replacement),
-            );
-            let raw = serde_yaml::to_string(&value).map_err(|e| CliError::internal(e.to_string()))?;
-            replacements.push((block.body_start, block.body_end, raw));
-        }
+        let replacement = if id == step_id {
+            Some(new_path.to_owned())
+        } else if !old_path.is_empty()
+            && (path == old_path
+                || path.strip_prefix(old_path).is_some_and(|suffix| suffix.starts_with('/')))
+        {
+            Some(format!("{new_path}{}", &path[old_path.len()..]))
+        } else {
+            extra_paths.iter()
+                .find(|(extra_id, _)| *extra_id == id)
+                .map(|(_, extra_path)| extra_path.clone())
+        };
+        let Some(replacement) = replacement else { continue };
+        let mut value = block.value.clone();
+        let mapping = value.as_mapping_mut()
+            .ok_or_else(|| CliError::input(format!("step {id} module must be a mapping")))?;
+        mapping.insert(
+            serde_yaml::Value::String("path".to_owned()),
+            serde_yaml::Value::String(replacement),
+        );
+        let raw = serde_yaml::to_string(&value).map_err(|e| CliError::internal(e.to_string()))?;
+        replacements.push((block.body_start, block.body_end, raw));
     }
     let next = apply_replacements(source.to_owned(), replacements);
-    let mut paths = HashSet::new();
-    for block in asterdoc_blocks(&next)? {
-        if yaml_kind(&block.value) == "step" {
-            let path = step_path(&block.value);
-            if path.is_empty() || !paths.insert(path.clone()) {
-                return Err(CliError::input(format!("step path conflict: {path}")));
-            }
-        }
+    let entries: Vec<(String, String)> = asterdoc_blocks(&next)?.iter()
+        .filter(|block| yaml_kind(&block.value) == "step")
+        .map(|block| (yaml_id(&block.value), step_path(&block.value)))
+        .collect();
+    if let Some(error) = ast::find_step_path_conflict(&entries) {
+        return Err(step_path_cli_error(error));
     }
     Ok(next)
 }
@@ -2277,11 +2299,22 @@ fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<String, CliErro
         if module.is_null() {
             return Err(CliError::input("add_step needs module"));
         }
-        let module_yaml: serde_yaml::Value = serde_json::from_value(module)
+        let mut module_yaml: serde_yaml::Value = serde_json::from_value(module)
             .map_err(|e| CliError::input(format!("module is invalid: {e}")))?;
         let step_id = yaml_id(&module_yaml);
         if step_id.is_empty() {
             return Err(CliError::input("step needs an id"));
+        }
+        // A step without a path is unreachable in the workflow tree, so the
+        // writer derives root/<step-id> instead of storing an empty path.
+        if yaml_kind(&module_yaml) == "step" && step_path(&module_yaml).is_empty() {
+            let derived = ast::derive_step_path(&step_id).map_err(step_path_cli_error)?;
+            module_yaml.as_mapping_mut()
+                .ok_or_else(|| CliError::input(format!("step {step_id} module must be a mapping")))?
+                .insert(
+                    serde_yaml::Value::String("path".to_owned()),
+                    serde_yaml::Value::String(derived),
+                );
         }
         let mut next = append_asterdoc_module(source, &module_yaml)?;
         let blocks = asterdoc_blocks(&next)?;
@@ -2353,27 +2386,41 @@ fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<String, CliErro
         let blocks = asterdoc_blocks(source)?;
         let child = blocks.iter().find(|block| yaml_kind(&block.value) == "step" && yaml_id(&block.value) == module_id)
             .ok_or_else(|| CliError::missing(format!("step {module_id} does not exist")))?;
-        let old_path = step_path(&child.value);
-        let leaf = old_path.rsplit('/').next().filter(|leaf| !leaf.is_empty())
-            .ok_or_else(|| CliError::input("step path must have a final segment"))?;
+        let child_id = module_id.to_owned();
+        let child_path = step_path(&child.value);
+        let mut extra_paths: Vec<(String, String)> = Vec::new();
         let new_path = if kind == "nest_step" {
             let parent_id = command.get("parentId").and_then(Value::as_str).unwrap_or("");
-            if parent_id.is_empty() || parent_id == module_id {
-                return Err(CliError::input("nest_step needs a different parentId"));
+            if parent_id.is_empty() {
+                return Err(CliError::input(
+                    "nest_step needs a parentId naming the step that becomes the parent; pass the target step id"
+                ));
+            }
+            if parent_id == module_id {
+                return Err(CliError::input(format!(
+                    "nest_step cannot nest step {module_id} under itself; pass a different parentId"
+                )));
             }
             let parent = blocks.iter().find(|block| yaml_kind(&block.value) == "step" && yaml_id(&block.value) == parent_id)
                 .ok_or_else(|| CliError::missing(format!("parent step {parent_id} does not exist")))?;
             let parent_path = step_path(&parent.value);
-            if parent_path == old_path || parent_path.starts_with(&format!("{old_path}/")) {
-                return Err(CliError::input("nest_step would create a path cycle"));
+            let resolved_parent = ast::resolve_step_path(parent_id, &parent_path)
+                .map_err(step_path_cli_error)?;
+            // A missing parent path is materialized in the same revision;
+            // otherwise the child would point at a path no step actually has.
+            if parent_path.is_empty() {
+                extra_paths.push((parent_id.to_owned(), resolved_parent.clone()));
             }
-            format!("{parent_path}/{leaf}")
+            ast::nest_step_path(&child_id, &child_path, parent_id, &resolved_parent)
+                .map_err(step_path_cli_error)?
+        } else if child_path.is_empty() {
+            // Nothing to promote out of: materialize the derived top-level path.
+            ast::resolve_step_path(&child_id, "")
+                .map_err(step_path_cli_error)?
         } else {
-            let parent_path = old_path.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
-            let root = parent_path.rsplit_once('/').map(|(parent, _)| parent).unwrap_or(parent_path);
-            format!("{root}/{leaf}")
+            ast::promote_step_path(&child_id, &child_path).map_err(step_path_cli_error)?
         };
-        return rewrite_step_subtree(source, module_id, &new_path);
+        return rewrite_step_subtree(source, &child_id, &child_path, &new_path, &extra_paths);
     }
     if kind == "remove_step" {
         let blocks = asterdoc_blocks(source)?;
@@ -13617,6 +13664,13 @@ pub(crate) fn list_asset_events(
 mod tests {
     use super::*;
 
+    fn step_paths_by_id(source: &str) -> std::collections::HashMap<String, String> {
+        asterdoc_blocks(source).unwrap().into_iter()
+            .filter(|block| yaml_kind(&block.value) == "step")
+            .map(|block| (yaml_id(&block.value), step_path(&block.value)))
+            .collect()
+    }
+
     #[test]
     fn protocol_version_queries_return_expansion_and_stable_not_found() {
         let dir = std::env::temp_dir().join(format!("protocol-version-query-{}", Uuid::new_v4()));
@@ -13834,6 +13888,66 @@ mod tests {
             &json!({"type":"nest_step","moduleId":"parent","parentId":"child"}),
         );
         assert_eq!(cycle.unwrap_err().code, "INVALID_INPUT");
+    }
+
+    #[test]
+    fn asterdoc_derives_missing_step_paths_when_nesting_and_promoting() {
+        let source = "```asterlab\nkind: step\nid: soak\nschema: 2\ntitle: Soak\npath: ''\n```\n\
+```asterlab\nkind: step\nid: seed\nschema: 2\ntitle: Seed\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [soak, seed]\nedges: []\nbusiness_order: [soak, seed]\n```\n";
+        let nested = apply_asterdoc_patch(
+            source,
+            &json!({"type":"nest_step","moduleId":"seed","parentId":"soak"}),
+        ).unwrap();
+        let paths = step_paths_by_id(&nested);
+        assert_eq!(paths["soak"], "root/soak");
+        assert_eq!(paths["seed"], "root/soak/seed");
+
+        let promoted = apply_asterdoc_patch(
+            &nested,
+            &json!({"type":"promote_step","moduleId":"seed"}),
+        ).unwrap();
+        let paths = step_paths_by_id(&promoted);
+        assert_eq!(paths["soak"], "root/soak");
+        assert_eq!(paths["seed"], "root/seed");
+    }
+
+    #[test]
+    fn asterdoc_rejects_a_derived_step_path_that_collides() {
+        let source = "```asterlab\nkind: step\nid: imaging\nschema: 2\npath: root/seed\n```\n\
+```asterlab\nkind: step\nid: seed\nschema: 2\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [imaging, seed]\nedges: []\nbusiness_order: [imaging, seed]\n```\n";
+        let error = apply_asterdoc_patch(
+            source,
+            &json!({"type":"promote_step","moduleId":"seed"}),
+        ).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert!(error.message.contains("seed"), "{}", error.message);
+        assert!(error.message.contains("imaging"), "{}", error.message);
+        assert!(error.message.contains("root/seed"), "{}", error.message);
+    }
+
+    #[test]
+    fn asterdoc_rejects_promoting_a_step_that_is_already_top_level() {
+        let source = "```asterlab\nkind: step\nid: child\nschema: 2\npath: root/child\n```\n\
+```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [child]\nedges: []\nbusiness_order: [child]\n```\n";
+        let error = apply_asterdoc_patch(
+            source,
+            &json!({"type":"promote_step","moduleId":"child"}),
+        ).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert!(error.message.contains("top level"), "{}", error.message);
+        assert!(error.message.contains("root/child"), "{}", error.message);
+    }
+
+    #[test]
+    fn asterdoc_add_step_derives_a_path_when_the_module_omits_one() {
+        let added = apply_asterdoc_patch(
+            "",
+            &json!({"type":"add_step","module":{"kind":"step","id":"seed","schema":2,"path":""}}),
+        ).unwrap();
+        let paths = step_paths_by_id(&added);
+        assert_eq!(paths["seed"], "root/seed");
     }
 
     #[test]
