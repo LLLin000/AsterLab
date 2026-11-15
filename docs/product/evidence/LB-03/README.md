@@ -29,18 +29,16 @@ readable measure and Save stays in the first viewport.
 
 ## Build stamp
 
-All screenshots come from `prototypes/mygo-run/dist/mygo-run.exe` built at
-repository HEAD `82f90b3` — the build stamp matched HEAD at capture time. The
-only commits after that are this evidence directory, so the product binary and
-the UI it captured are unchanged; `scripts/ci/local-gate.ps1 -Pr 110` rebuilds
-the same tree at the PR head.
+The original screenshot set above was captured from
+`prototypes/mygo-run/dist/mygo-run.exe` built at HEAD `82f90b3`. The new
+wide-layout and citation-jump captures below use build commit `c55ae66`.
 
 ```text
 AsterLab MyGo Prototype (UNSIGNED)
-commit 82f90b3
+commit c55ae66
 mygo pin v0.8.4-0.20261108220316-c4197b7fe562
-Runs.dll SHA256 E57CE2F12C7D8A29DCAE61CAA44E5058A10571BECF7B6A7F56EC851B2E1F2DDE
-mygo-run.exe SHA256 B9509695E0D6BFCB534008DE46695EE2A98F90830BBBCFDD49D758A73399EAAD
+Runs.dll SHA256 220E9C9CB0550C54F7E6C85EDDF698F04313FC8190C014BF070BAA94BB3BE238
+mygo-run.exe SHA256 5E0F8D2BC32761A694B2B378FD2A4ED61BA190319ADBBAD9D39CA716A0348793
 ```
 
 ## Evidence (real application windows, light, isolated data)
@@ -58,13 +56,12 @@ window text is auditable without re-running the app.
 
 ## Seed
 
-Isolated data `%TEMP%\lb03-gui\data`, Run `273d4522-e542-4f63-bda1-0bab746d5479`.
-Seeded through the CLI only: `project.create` → `protocol.block.create` /
-`protocol.create` → `design.create` → `asterdoc.save` / `asterdoc.create_run` →
-one real `readout.submit` (OD450 0.62 AU, Control-1) → one completion
-`execution_event.create` → one notebook-stage observation carrying a real
-`cite://event/<id>` token. Nothing was fabricated: the timeline entries are
-the stored events.
+Isolated data `%TEMP%\lb03-gui\data`, Run `369ec46b-ab25-4820-8fb0-25b1b762de51`.
+Seeded through CLI: project/protocol/design/AsterDoc creation, one real
+`readout.submit` (OD450 0.62 AU, Control-1), one completion event, a local
+`asset.link`, and Notebook observations containing event and file citations.
+The file citation jump was exercised in the real window; no content was
+fabricated.
 
 ## Tests
 
@@ -82,15 +79,29 @@ the stored events.
   starts on prose; state word is explicit; a citation jump sets the
   highlight.
 
-## NOT VERIFIED
+## Real-window evidence addendum
 
-- **Citation jump from the raw `@` popover on the wide layout** — the seeded
-  note already carried the citation, so the captured jump is from the 引用快照
-  action at 900×600. The wide 定位到运行记录 path renders the same control but
-  was not separately photographed.
-- **Asset citation jump** — `CitationTargetOf` maps a file asset to the task
-  entry it is linked to; no seeded file asset was linked, so that branch has
-  unit-level coverage only, no screenshot.
+Captured 2026-11-15 from launched `prototypes/mygo-run/dist/mygo-run.exe`.
+The outer window was resized to 1360×880; the screenshot client area is
+1344×871. Each image has an adjacent accessibility snapshot (`*.txt`).
+
+Run `369ec46b-ab25-4820-8fb0-25b1b762de51` was seeded through the CLI with
+one measurement task and one OD450 readout. CLI `asset.link` linked the local
+file `linked-protocol-note.txt` (`asset-a9856d627eadfe8b70add39c21c3b576`,
+SHA256 `b900d311046c76b8342ee28dcf16119d8eee24315a4fed3909847cecd7e6d379`);
+the Notebook note cites it with `cite://asset/<id>`.
+
+| Real-window image | Window size | Theme | What it shows | PNG SHA256 |
+|---|---:|---|---|---|
+| `lb03-real-notebook-dual-1360x880-light.png` | 1360×880 | light | Notebook prose and read-only timeline side by side | `87bce953bf4fd47260f244db41b14d922bb2779d01bd461a66eca9f07e62d5f3` |
+| `lb03-real-citation-event-before-1360x880-light.png` | 1360×880 | light | before readout citation jump; `定位到运行记录` visible | `87bce953bf4fd47260f244db41b14d922bb2779d01bd461a66eca9f07e62d5f3` |
+| `lb03-real-citation-event-after-1360x880-light.png` | 1360×880 | light | after readout citation jump; timeline row highlighted | `a916f05d2e5cf3f8107938906409f9edaba9dd1eb295c43a58aff009c4158333` |
+| `lb03-real-citation-asset-before-1360x880-light.png` | 1360×880 | light | before local-file citation jump | `a916f05d2e5cf3f8107938906409f9edaba9dd1eb295c43a58aff009c4158333` |
+| `lb03-real-citation-asset-after-1360x880-light.png` | 1360×880 | light | after local-file citation jump; task timeline row highlighted | `28a12b02f8c32bb974a18c259a55947bf77463495f271f99c440ce4bcf5a6e86` |
+
+The initial Notebook and event-before captures are identical. The event-after
+and asset-before captures are identical because both citations resolve to the
+same task row; the asset-after capture shows that row highlighted after its jump.
 
 ## Artifact hashes (SHA256)
 

@@ -75,6 +75,30 @@ Rendered from the same `runworkspace.View` that the app mounts, with a plate/tab
 | `lb02-properties-collapsed-1360x880-light.png` | 1360×880 | light | before: `技术属性（只读）` collapsed, no raw identifiers |
 | `lb02-properties-expanded-1360x880-light.png` | 1360×880 | light | after: paths, step id, protocol version and module ids revealed in one click |
 
+## Real-window evidence addendum
+
+Captured 2026-11-15 by launching `prototypes/mygo-run/dist/mygo-run.exe` and
+resizing its real window with `MoveWindow`. The recorded window sizes are the
+outer-window sizes; the screenshot tool captures the client area (1344×871 at
+1360×880, 884×591 at 900×600). Run `369ec46b-ab25-4820-8fb0-25b1b762de51`
+contains one frozen task with a measurement plan and one saved OD450 readout
+(0.62 AU, Control-1), seeded through the AsterDoc CLI.
+
+Build commit: `c55ae66`.
+
+```text
+Runs.dll SHA256 220E9C9CB0550C54F7E6C85EDDF698F04313FC8190C014BF070BAA94BB3BE238
+mygo-run.exe SHA256 5E0F8D2BC32761A694B2B378FD2A4ED61BA190319ADBBAD9D39CA716A0348793
+```
+
+| Real-window image | Window size | Theme | State | PNG SHA256 |
+|---|---:|---|---|---|
+| `lb02-real-1360x880-light-properties-collapsed.png` | 1360×880 | light | properties collapsed | `a50b1c56c24ebc39eee84b160203320ab588973a209d074d29e2786935cecff4` |
+| `lb02-real-1360x880-light-properties-expanded.png` | 1360×880 | light | properties expanded | `0a11ce58bd9268e25a9586a3f198e2256e6071bb1ab7b86a26c03b71ebe187ae` |
+| `lb02-real-1360x880-dark-properties-collapsed.png` | 1360×880 | dark | properties collapsed | `7969047ea165c185881e2421be9e1b2a6ee0469bdea1decbb20883c8fea94879` |
+| `lb02-real-900x600-light-properties-collapsed.png` | 900×600 | light | properties collapsed | `71499a189696a5fbace27653ccacc2b3834fb3be38c7dedcaf1267d265cfcebd` |
+| `lb02-real-900x600-dark-properties-collapsed.png` | 900×600 | dark | properties collapsed | `86e0d374171896c3ad4fe34d06dd757404b1b9216fedf389a31db08caacdba6e` |
+
 Regenerate with:
 
 ```
