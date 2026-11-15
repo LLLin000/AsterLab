@@ -18,6 +18,7 @@ const (
 	TypeParameterTable     BlockType = "parameter_table"
 	TypeMeasurementTable   BlockType = "measurement_table"
 	TypePlate96            BlockType = "plate_96"
+	TypePlate12            BlockType = "plate_12"
 	TypeDilutionCalculator BlockType = "dilution_calculator"
 	TypeChecklist          BlockType = "checklist"
 	TypeNestedWorkflow     BlockType = "nested_workflow"
@@ -26,7 +27,7 @@ const (
 // AllTypes lists every supported block type.
 func AllTypes() []BlockType {
 	return []BlockType{
-		TypeNote, TypeParameterTable, TypeMeasurementTable, TypePlate96,
+		TypeNote, TypeParameterTable, TypeMeasurementTable, TypePlate96, TypePlate12,
 		TypeDilutionCalculator, TypeChecklist, TypeNestedWorkflow,
 	}
 }
@@ -67,6 +68,8 @@ type Plate96Props struct {
 	Colors   map[int]string `json:"colors"`
 	Labels   map[int]string `json:"labels"`
 }
+
+type Plate12Props Plate96Props
 
 type DilutionInput struct {
 	StockConc float64 `json:"stockConc"`
@@ -314,19 +317,31 @@ func validateRaw(t BlockType, raw json.RawMessage) error {
 				return fmt.Errorf("well index out of range: %d", w)
 			}
 		}
-		for w := range p.Groups {
-			if w < 0 || w >= 96 {
+		for _, wells := range []map[int]string{p.Groups, p.Colors, p.Labels} {
+			for w := range wells {
+				if w < 0 || w >= 96 {
+					return fmt.Errorf("well index out of range: %d", w)
+				}
+			}
+		}
+	case TypePlate12:
+		var p Plate12Props
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return err
+		}
+		if (p.Rows != 0 && p.Rows != 3) || (p.Cols != 0 && p.Cols != 4) {
+			return fmt.Errorf("plate must be 3x4, got %dx%d", p.Rows, p.Cols)
+		}
+		for _, w := range p.Selected {
+			if w < 0 || w >= 12 {
 				return fmt.Errorf("well index out of range: %d", w)
 			}
 		}
-		for w := range p.Colors {
-			if w < 0 || w >= 96 {
-				return fmt.Errorf("well index out of range: %d", w)
-			}
-		}
-		for w := range p.Labels {
-			if w < 0 || w >= 96 {
-				return fmt.Errorf("well index out of range: %d", w)
+		for _, wells := range []map[int]string{p.Groups, p.Colors, p.Labels} {
+			for w := range wells {
+				if w < 0 || w >= 12 {
+					return fmt.Errorf("well index out of range: %d", w)
+				}
 			}
 		}
 	case TypeDilutionCalculator:

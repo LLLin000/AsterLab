@@ -43,6 +43,25 @@ func TestPlateSelection(t *testing.T) {
 	}
 }
 
+func TestPlate12InstanceRender(t *testing.T) {
+	def := Definition{
+		ID: "plate12", Version: 1, Type: TypePlate12,
+		Props: Plate12Props{
+			Rows: 3, Cols: 4, Selected: []int{11},
+			Groups: map[int]string{}, Colors: map[int]string{}, Labels: map[int]string{11: "C4"},
+		},
+	}
+	inst, err := NewInstance("plate12-1", def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tester := ui.NewTester(func(c *ui.Context) { View(c, inst) }, 240, 180)
+	tester.Frame()
+	if !tester.HasText("Plate 3x4 selected=1") || !tester.HasText("C4") {
+		t.Fatalf("12-well block not rendered: %q", tester.Texts())
+	}
+}
+
 func TestTableEdit(t *testing.T) {
 	props := ParameterTableProps{Rows: []ParamRow{{Key: "temp", Value: "37", Unit: "C"}}}
 	props.Rows[0].Value = "42"

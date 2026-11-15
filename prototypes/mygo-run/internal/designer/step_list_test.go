@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
@@ -112,6 +113,44 @@ func TestSectionSwitchPreservesSelectionAndDraft(t *testing.T) {
 		}
 		if !d.Dirty {
 			t.Fatalf("dirty flag cleared by section switch %q", step.label)
+		}
+	}
+}
+
+func TestPlateAndDilutionSections(t *testing.T) {
+	d := New("design-1", "HUVEC 成管", 1, &state.FakeDesignService{})
+	d.SelectedNode, d.AssayIDDraft = "step-1", assays.CCK8
+	d.Assays[assays.CCK8] = assays.Design{Wells: []assays.WellAssignment{
+		{WellID: "A1", GroupID: "G1"},
+		{WellID: "A2", GroupID: "G1"},
+		{WellID: "A3", GroupID: "G2"},
+	}}
+	dilution, err := blocks.NewInstance("dilution-1", blocks.Definition{
+		ID: "dilution", Version: 1, Type: blocks.TypeDilutionCalculator,
+		Props: blocks.DilutionProps{
+			Input: blocks.DilutionInput{StockConc: 10, FinalConc: 2, FinalVol: 10},
+			Result: blocks.DilutionResult{StockVol: 2.5, DiluentVol: 7.5},
+			Valid: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Instances[d.SelectedNode] = []blocks.Instance{dilution}
+
+	d.Section = SectionPlate
+	plate := ui.NewTester(func(c *ui.Context) { ListView(c, d) }, 900, 600)
+	plate.Frame()
+	if !plate.HasText("3 / 12 孔已分配 · 单击选择，Shift+单击多选") {
+		t.Fatalf("12-well section missing: %q", plate.Texts())
+	}
+
+	d.Section = SectionDilution
+	dilutionView := ui.NewTester(func(c *ui.Context) { ListView(c, d) }, 900, 600)
+	dilutionView.Frame()
+	for _, text := range []string{"A1", "A2", "G1", "2 孔", "母液 5.0 µL · 稀释液 15.0 µL", "G2", "1 孔"} {
+		if !dilutionView.HasText(text) {
+			t.Fatalf("dilution totals missing %q: %q", text, dilutionView.Texts())
 		}
 	}
 }

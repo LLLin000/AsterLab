@@ -1,0 +1,135 @@
+@e2465 [scroll]
+  @e2466 [text] "工作区"
+  @e2467 [button] "项目工作区" key="项目工作区"
+  @e2468 [button] "实验设计" key="实验设计" checked
+  @e2469 [button] "实验方案" key="实验方案"
+  @e2470 [button] "实验运行" key="实验运行"
+  @e2471 [button] "Notebook" key=Notebook
+  @e2472 [button] "资料与工具" key="资料与工具"
+  @e2473 [text] "最近设计"
+  @e2474 [button] "LB-05 HUVEC 12-well GelMA" key="LB-05 HUVEC 12-well GelMA" checked
+@e2475 [toolbar]
+  @e2476 [text] "AsterLab · 原生设计工作台"
+@e2502 [text] "LB-05 HUVEC 12-well GelMA"
+@e2503 [text] "rev 1"
+@e2504 [text] "草稿" key="{草稿}"
+@e2505 [button] "画布视图"
+@e2506 [button] "保存"
+@e2507 [button] "创建 Run"
+@e2508 [text] "总跨度"
+@e2509 [text] "—"
+@e2510 [text] "占手"
+@e2511 [text] "—"
+@e2512 [text] "步骤"
+@e2513 [text] "1"
+@e2514 [text] "孔位"
+@e2515 [text] "12"
+@e2516 [tabList]
+  @e2517 [tab] "流程"
+  @e2518 [tab] "12 孔板"
+  @e2519 [tab] "配液单" checked
+@e2520 [scroll]
+  @e2531 [text] "模块" offscreen
+  @e2532 [menuButton] "添加模块" offscreen haspopup=menu
+  @e2533 [text] "稀释计算器" offscreen
+  @e2534 [text] "只计算，不写入计划值" offscreen
+  @e2535 [text] "母液浓度" offscreen
+  @e2536 [text] "与目标浓度同一单位" offscreen
+  @e2537 [group] offscreen
+    @e2538 [textField] "母液浓度" value="0.5" offscreen
+    @e2539 [button] "母液浓度 Increase" offscreen
+    @e2540 [button] "母液浓度 Decrease" offscreen
+  @e2541 [text] "目标浓度" offscreen
+  @e2542 [text] "与母液浓度同一单位" offscreen
+  @e2543 [group] offscreen
+    @e2544 [textField] "目标浓度" value="0.05" offscreen
+    @e2545 [button] "目标浓度 Increase" offscreen
+    @e2546 [button] "目标浓度 Decrease" offscreen
+  @e2547 [text] "终体积" offscreen
+  @e2548 [text] "单位 µL" offscreen
+  @e2549 [group] offscreen
+    @e2550 [textField] "终体积" value="200" offscreen
+    @e2551 [button] "终体积 Increase" offscreen
+    @e2552 [button] "终体积 Decrease" offscreen
+  @e2553 [text] "需取母液" offscreen
+  @e2554 [text] "20.0 µL" offscreen
+  @e2555 [text] "稀释液" offscreen
+  @e2556 [text] "180.0 µL" offscreen
+  @e2557 [text] "检测参数" offscreen
+  @e2558 [text] "检测时间点" offscreen
+  @e2559 [text] "该检测自己的时间点，用逗号分隔" offscreen
+  @e2560 [text] "6 h" offscreen
+  @e2561 [button] "Remove 6 h" offscreen
+  @e2562 [textField] "检测时间点" key="{}" offscreen
+  @e2563 [text] "孔板实例 ID" offscreen
+  @e2564 [text] "引用已有孔板实例；未知时留空" offscreen
+  @e2565 [textField] "孔板实例 ID" value="plate12-plan" offscreen
+  @e2566 [text] "技术重复数" offscreen
+  @e2567 [text] "正整数；未知时留空" offscreen
+  @e2568 [textField] "技术重复数" offscreen
+  @e2569 [text] "对照组" offscreen
+  @e2570 [text] "用于比较的组别" offscreen
+  @e2571 [popUpButton] "未设置" offscreen
+  @e2572 [text] "校准组" offscreen
+  @e2573 [text] "用于校准的组别" offscreen
+  @e2574 [popUpButton] "未设置" offscreen
+  @e2575 [text] "这些是设计参数；实际仪器设置和执行记录属于 Run。" offscreen
+  @e2576 [text] "配液用量（按已保存的单孔计算结果）" offscreen
+  @e2577 [text] "A1" offscreen
+  @e2578 [text] "3%" offscreen
+  @e2579 [text] "母液 20.0 µL · 稀释液 180.0 µL" offscreen
+  @e2580 [text] "A2" offscreen
+  @e2581 [text] "3%" offscreen
+  @e2582 [text] "母液 20.0 µL · 稀释液 180.0 µL" offscreen
+  @e2583 [text] "A3" offscreen
+  @e2584 [text] "3%" offscreen
+  @e2585 [text] "母液 20.0 µL · 稀释液 180.0 µL" offscreen
+  @e2586 [text] "A4" offscreen
+  @e2587 [text] "3%" offscreen
+  @e2588 [text] "母液 20.0 µL · 稀释液 180.0 µL" offscreen
+  @e2589 [text] "B1" offscreen
+  @e2590 [text] "5%" offscreen
+  @e2591 [text] "母液 20.0 µL · 稀释液 180.0 µL" offscreen
+  @e2592 [text] "B2" offscreen
+  @e2593 [text] "5%" offscreen
+  @e2594 [text] "母液 20.0 µL · 稀释液 180.0 µL" offscreen
+  @e2595 [text] "B3" offscreen
+  @e2596 [text] "5%" offscreen
+  @e2597 [text] "母液 20.0 µL · 稀释液 180.0 µL" offscreen
+  @e2598 [text] "B4" offscreen
+  @e2599 [text] "5%" offscreen
+  @e2600 [text] "母液 20.0 µL · 稀释液 180.0 µL"
+  @e2601 [text] "C1"
+  @e2602 [text] "7%"
+  @e2603 [text] "母液 20.0 µL · 稀释液 180.0 µL"
+  @e2604 [text] "C2"
+  @e2605 [text] "7%"
+  @e2606 [text] "母液 20.0 µL · 稀释液 180.0 µL"
+  @e2607 [text] "C3"
+  @e2608 [text] "7%"
+  @e2609 [text] "母液 20.0 µL · 稀释液 180.0 µL"
+  @e2610 [text] "C4"
+  @e2611 [text] "7%"
+  @e2612 [text] "母液 20.0 µL · 稀释液 180.0 µL"
+  @e2613 [text] "3%"
+  @e2614 [text] "4 孔"
+  @e2615 [text] "母液 80.0 µL · 稀释液 720.0 µL"
+  @e2616 [text] "5%"
+  @e2617 [text] "4 孔"
+  @e2618 [text] "母液 80.0 µL · 稀释液 720.0 µL"
+  @e2619 [text] "7%"
+  @e2620 [text] "4 孔"
+  @e2621 [text] "母液 80.0 µL · 稀释液 720.0 µL"
+@e2527 [text] "1 个步骤 · 1 条检测 · 12 个计划孔位"
+@e2528 [text] "已选：12 孔板 GelMA 配制"
+@e2529 [text] "⌘I 检查器 · ⌘K 命令 · ⌘S 保存"
+@e2530 [button] "Agent 提案"
+@e2493 [button] "Toggle sidebar"
+@e2494 [button] "新建设计"
+@e2495 [text] "AsterLab"
+@e2496 [text] "/"
+@e2497 [text] "LB-05 HUVEC 12-well GelMA"
+@e2498 [button] "Minimize window"
+@e2499 [button] "Maximize window"
+@e2500 [button] "Close window"
+@e2501 [splitter] "Resize sidebar" key=left-resize

@@ -998,7 +998,7 @@ func plateModule(c *ui.Context, d *Designer) {
 		}
 		wells[id] = current
 	}
-	properties(c, "96 孔板计划映射", func(list *propertyList) {
+	properties(c, "12 孔板计划映射", func(list *propertyList) {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			components.Text(c, fmt.Sprintf("%d 个孔位 · %d 条时间点分配", assignedCount, len(params.Wells))).
 				TextColor(t.TextMuted).FontSize(t.Rem(.78))
@@ -1015,11 +1015,76 @@ func plateModule(c *ui.Context, d *Designer) {
 				Wells: wells, SelectedIDs: d.SelectedWells,
 				Interactive: d.SelectedNode != "" && d.AssayIDDraft != "",
 				OnSelect:    func(ids []string) { d.selectWells(ids) },
+				Rows:        3,
+				Cols:        4,
 			})
 		})
 		components.Text(c, "孔位颜色表示计划组别；映射属于设计，不是实际执行记录。").
 			TextColor(t.TextMuted).FontSize(t.Rem(.75))
 	})
+}
+
+func dilutionTotalsSection(c *ui.Context, d *Designer) {
+	params := d.Assays[d.AssayIDDraft]
+	wellGroups := map[string]string{}
+	ambiguous := map[string]bool{}
+	for _, well := range params.Wells {
+		id := strings.ToUpper(strings.TrimSpace(well.WellID))
+		group := strings.TrimSpace(well.GroupID)
+		if group == "" {
+			group = "未分组"
+		}
+		if previous, exists := wellGroups[id]; exists {
+			if previous != group {
+				ambiguous[id] = true
+			}
+			continue
+		}
+		wellGroups[id] = group
+	}
+	for id := range ambiguous {
+		delete(wellGroups, id)
+	}
+	byGroup := map[string]int{}
+	for _, group := range wellGroups {
+		byGroup[group]++
+	}
+	insts := d.Instances[d.SelectedNode]
+	for _, inst := range insts {
+		if inst.Type != blocks.TypeDilutionCalculator {
+			continue
+		}
+		var p blocks.DilutionProps
+		if inst.DecodeProps(&p) != nil || !p.Valid {
+			continue
+		}
+		properties(c, "配液用量（按已保存的单孔计算结果）", func(list *propertyList) {
+			wells := make([]string, 0, len(wellGroups))
+			for id := range wellGroups {
+				wells = append(wells, id)
+			}
+			sort.Strings(wells)
+			for _, id := range wells {
+				list.row(id, wellGroups[id], func() {
+					components.Text(c, fmt.Sprintf("母液 %.1f µL · 稀释液 %.1f µL", p.Result.StockVol, p.Result.DiluentVol)).
+						FontFeatures("tnum")
+				})
+			}
+			groups := make([]string, 0, len(byGroup))
+			for group := range byGroup {
+				groups = append(groups, group)
+			}
+			sort.Strings(groups)
+			for _, group := range groups {
+				count := byGroup[group]
+				list.row(group, fmt.Sprintf("%d 孔", count), func() {
+					components.Text(c, fmt.Sprintf("母液 %.1f µL · 稀释液 %.1f µL",
+						p.Result.StockVol*float64(count), p.Result.DiluentVol*float64(count))).
+						FontFeatures("tnum")
+				})
+			}
+		})
+	}
 }
 
 func assayInspector(c *ui.Context, d *Designer) {

@@ -273,6 +273,7 @@ func ListView(c *ui.Context, d *Designer) {
 				listSection(c, func() {
 					modulesSection(c, d)
 					assayInspector(c, d)
+					dilutionTotalsSection(c, d)
 				})
 			default:
 				stepCardList(c, d)
