@@ -1,0 +1,53 @@
+@e2390 [scroll]
+  @e2391 [text] "工作区"
+  @e2392 [button] "项目工作区" key="项目工作区"
+  @e2393 [button] "实验设计" key="实验设计" checked
+  @e2394 [button] "实验方案" key="实验方案"
+  @e2395 [button] "实验运行" key="实验运行"
+  @e2396 [button] "Notebook" key=Notebook
+  @e2397 [button] "资料与工具" key="资料与工具"
+  @e2398 [text] "最近设计"
+  @e2399 [button] "LB-05 HUVEC 12-well GelMA" key="LB-05 HUVEC 12-well GelMA" checked
+@e2400 [toolbar]
+  @e2401 [text] "AsterLab · 原生设计工作台"
+@e2427 [text] "LB-05 HUVEC 12-well GelMA"
+@e2428 [text] "rev 1"
+@e2429 [text] "草稿" key="{草稿}"
+@e2430 [button] "画布视图"
+@e2431 [button] "保存"
+@e2432 [button] "创建 Run"
+@e2433 [text] "总跨度"
+@e2434 [text] "—"
+@e2435 [text] "占手"
+@e2436 [text] "—"
+@e2437 [text] "步骤"
+@e2438 [text] "1"
+@e2439 [text] "孔位"
+@e2440 [text] "12"
+@e2441 [tabList]
+  @e2442 [tab] "流程"
+  @e2443 [tab] "12 孔板" checked
+  @e2444 [tab] "配液单"
+@e2445 [scroll]
+  @e2456 [text] "12 孔板计划映射"
+  @e2457 [text] "12 个孔位 · 12 条时间点分配"
+  @e2458 [button] "清空"
+  @e2459 [button]
+  @e2460 [text] "3% 4"
+  @e2461 [text] "5% 4"
+  @e2462 [text] "7% 4"
+  @e2463 [text] "12 / 12 孔已分配 · 单击选择，Shift+单击多选"
+  @e2464 [text] "孔位颜色表示计划组别；映射属于设计，不是实际执行记录。"
+@e2452 [text] "1 个步骤 · 1 条检测 · 12 个计划孔位"
+@e2453 [text] "已选：12 孔板 GelMA 配制"
+@e2454 [text] "⌘I 检查器 · ⌘K 命令 · ⌘S 保存"
+@e2455 [button] "Agent 提案"
+@e2418 [button] "Toggle sidebar"
+@e2419 [button] "新建设计"
+@e2420 [text] "AsterLab"
+@e2421 [text] "/"
+@e2422 [text] "LB-05 HUVEC 12-well GelMA"
+@e2423 [button] "Minimize window"
+@e2424 [button] "Maximize window"
+@e2425 [button] "Close window"
+@e2426 [splitter] "Resize sidebar" key=left-resize
