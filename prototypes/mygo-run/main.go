@@ -62,7 +62,7 @@ type app struct {
 	runSvc                     runs.RunService
 	designSvc                  runs.DesignService
 	snap                       runs.RunSnapshot
-	err                        string
+	syncErr                    string
 	batchView                  string
 	asterDoc                   *asterdoc.FrozenAsterDoc
 	asterErr                   string
@@ -144,6 +144,10 @@ type app struct {
 	noteErr                    string
 	createRunErr               string
 	linkErr                    string
+	linkErrTask                string
+	assetErr                   string
+	assetErrTask               string
+	assetErrRetry              func()
 	linkDialogOpen             bool
 	linkDialogTask             string
 	linkDialogAssetID          string
@@ -166,6 +170,7 @@ type app struct {
 	designer            *designer.Designer
 	pendingDesignID     string
 	confirmDesignSwitch bool
+	windowReady         bool
 	guard               state.StaleGuard
 
 	designSnap *runs.DesignSnapshot
@@ -308,20 +313,29 @@ func toRunView(s runs.RunSnapshot) runui.RunView {
 
 func (a *app) applySnap(snap runs.RunSnapshot) {
 	if !a.guard.Accept(snap.Revision) {
-		a.err = "忽略过期快照"
+		a.syncErr = fmt.Sprintf("忽略过期快照（收到 rev %d，当前已应用 rev %d）", snap.Revision, a.guard.Latest())
 		return
 	}
 	newSnap, err := state.ApplySnapshot(a.snap, snap)
 	if err != nil {
-		a.err = err.Error()
+		a.syncErr = fmt.Sprintf("快照应用失败：%v", err)
 		return
 	}
-	if err := state.ConflictIfDifferent(a.snap, snap); err != nil {
-		a.err = err.Error()
+	if a.snap.RunID != "" && a.snap.RunID == snap.RunID {
+		if err := state.ConflictIfDifferent(a.snap, snap); err != nil {
+			a.syncErr = fmt.Sprintf("检测到同修订快照冲突（rev %d）：%v", snap.Revision, err)
+		} else {
+			a.syncErr = ""
+		}
+	} else {
+		a.syncErr = ""
 	}
 	previousRunID := a.snap.RunID
 	if previousRunID != "" && previousRunID != snap.RunID {
 		a.clearTaskRecording()
+		a.clearAssetError()
+		a.linkErr = ""
+		a.linkErrTask = ""
 		a.selectedTask = ""
 		if a.ws != nil {
 			a.ws.Selected = ""
@@ -395,6 +409,18 @@ func localAssetFromView(asset runworkspace.LinkedAsset) assets.Asset {
 	}
 }
 
+func (a *app) setAssetError(taskKey, msg string, retry func()) {
+	a.assetErr = msg
+	a.assetErrTask = taskKey
+	a.assetErrRetry = retry
+}
+
+func (a *app) clearAssetError() {
+	a.assetErr = ""
+	a.assetErrTask = ""
+	a.assetErrRetry = nil
+}
+
 func (a *app) loadRunAssets() {
 	if a.snap.RunID == "" || a.runSvc == nil {
 		a.runAssets = nil
@@ -402,8 +428,11 @@ func (a *app) loadRunAssets() {
 	}
 	linked, err := a.runSvc.ListAssetLinks(context.Background(), a.snap.RunID)
 	if err != nil {
-		a.err = state.MapError(err).Error()
+		a.setAssetError("", "加载关联文件列表失败："+state.MapError(err).Error(), a.loadRunAssets)
 		return
+	}
+	if a.assetErrTask == "" {
+		a.clearAssetError()
 	}
 	a.runAssets = linked
 }
@@ -444,6 +473,40 @@ func (a *app) openRunAsset(asset runworkspace.LinkedAsset) error {
 		return fmt.Errorf("文件校验失败：%s", reason)
 	}
 	go mygo.Shell.OpenPath(path)
+	return nil
+}
+
+func (a *app) tryOpenRunAsset(taskKey string, asset runworkspace.LinkedAsset) error {
+	if err := a.openRunAsset(asset); err != nil {
+		a.setAssetError(taskKey, "无法打开文件："+err.Error(), func() {
+			_ = a.tryOpenRunAsset(taskKey, asset)
+		})
+		if a.shell != nil {
+			a.shell.Invalidate()
+		}
+		return err
+	}
+	a.clearAssetError()
+	if a.shell != nil {
+		a.shell.Invalidate()
+	}
+	return nil
+}
+
+func (a *app) tryRelocateRunAsset(taskKey string, asset runworkspace.LinkedAsset) error {
+	if err := a.relocateRunAsset(asset); err != nil {
+		a.setAssetError(taskKey, "文件重新定位失败："+err.Error(), func() {
+			_ = a.tryRelocateRunAsset(taskKey, asset)
+		})
+		if a.shell != nil {
+			a.shell.Invalidate()
+		}
+		return err
+	}
+	a.clearAssetError()
+	if a.shell != nil {
+		a.shell.Invalidate()
+	}
 	return nil
 }
 
@@ -1154,13 +1217,18 @@ var blankAsterDoc string
 
 func (a *app) createAsterDocDesign(source, title string) {
 	if a.designSvc == nil {
-		a.err = "设计服务不可用"
+		msg := "设计服务不可用"
+		a.syncErr = msg
+		if a.shell != nil {
+			a.shell.Error = msg
+		}
 		return
 	}
 	if len(a.projects) == 0 {
-		a.err = "没有可用项目；请先从 Core 导入项目"
+		msg := "没有可用项目；请先从 Core 导入项目"
+		a.syncErr = msg
 		if a.shell != nil {
-			a.shell.Error = a.err
+			a.shell.Error = msg
 		}
 		return
 	}
@@ -1170,12 +1238,14 @@ func (a *app) createAsterDocDesign(source, title string) {
 		OperationID: a.nextOp(), ActorID: os.Getenv("USERNAME"),
 	})
 	if err != nil {
-		a.err = state.MapError(err).Error()
+		msg := state.MapError(err).Error()
+		a.syncErr = msg
 		if a.shell != nil {
-			a.shell.Error = a.err
+			a.shell.Error = msg
 		}
 		return
 	}
+	a.syncErr = ""
 	if a.shell != nil {
 		a.shell.Designs = append([]shell.DesignItem{{
 			ID: doc.DesignID, Title: title, Meta: fmt.Sprintf("rev %d", doc.Revision),
@@ -1618,13 +1688,11 @@ func (a *app) loadDesign(id string) {
 	}
 	if a.designSvc == nil {
 		a.designLoadErr = "设计服务不可用"
-		a.err = a.designLoadErr
 		return
 	}
 	snap, err := a.designSvc.LoadDesign(context.Background(), id)
 	if err != nil {
 		a.designLoadErr = state.MapError(err).Error()
-		a.err = a.designLoadErr
 		return
 	}
 	a.designLoadErr = ""
@@ -1834,8 +1902,7 @@ func (a *app) fetchDesigns() ([]shell.DesignItem, error) {
 
 func (a *app) applyDesigns(items []shell.DesignItem, err error) {
 	if err != nil {
-		a.err = err.Error()
-		a.shell.Error = a.err
+		a.shell.Error = err.Error()
 		return
 	}
 	a.shell.Designs = items
@@ -1940,7 +2007,6 @@ func (a *app) applyRun(snap *runs.RunSnapshot, err error) {
 			a.ws.State = runui.StateBlocked
 			a.ws.Error = err.Error()
 		}
-		a.err = err.Error()
 		if a.snap.RunID == "" || a.snap.Status == "loading" {
 			a.snap = runs.RunSnapshot{Title: "实验运行加载失败", Status: "error"}
 			a.runWSVM = &runworkspace.RunWorkspaceViewModel{
@@ -1957,7 +2023,7 @@ func (a *app) applyRun(snap *runs.RunSnapshot, err error) {
 		}
 		return
 	}
-	a.err = ""
+	a.syncErr = ""
 	if a.shell != nil {
 		a.shell.Error = ""
 	}
@@ -2007,14 +2073,12 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 		a.designDocErr = "设计服务不可用，无法保存修改"
 		a.designDocLoadFailed = false
 		a.retryDesignDoc = func() { _ = a.applyDesignRaw(command) }
-		a.err = a.designDocErr
 		return false
 	}
 	if a.designDoc == nil {
 		a.designDocErr = "尚未加载 AsterDoc 设计文档，无法应用修改"
 		a.designDocLoadFailed = false
 		a.retryDesignDoc = func() { _ = a.applyDesignRaw(command) }
-		a.err = a.designDocErr
 		return false
 	}
 	previous := *a.designDoc
@@ -2221,17 +2285,20 @@ func main() {
 		snap:       runs.RunSnapshot{Title: "加载中", Status: "loading"},
 		assetRoots: map[string]string{}, runViewKinds: map[string]runworkspace.ViewKind{},
 	}
+	initErr := ""
 	if designErr != nil {
-		a.err = "设计服务：" + designErr.Error()
+		initErr = "设计服务：" + designErr.Error()
 	} else if runErr != nil {
-		a.err = "运行服务：" + runErr.Error()
+		initErr = "运行服务：" + runErr.Error()
 	} else if designSvc == nil {
-		a.err = "设计服务返回空实现"
+		initErr = "设计服务返回空实现"
 	}
+	a.syncErr = initErr
 	log.Printf("native services: run=%v(%v) design=%v(%v)", runSvc != nil, runErr, designSvc != nil, designErr)
 	a.shell = &shell.Shell{
 		Project:     "",
 		Page:        shell.Project,
+		Error:       initErr,
 		OnSelect:    func(id string) { a.selectDesign(id) },
 		OnRunSelect: func(id string) { a.selectRun(id) },
 		OnCreate:    func() { a.newDesignOpen = true },
@@ -2276,7 +2343,6 @@ func main() {
 				a.ws.State = runui.StateBlocked
 				a.ws.Error = state.MapError(err).Error()
 				a.ws.Draft.Error = state.MapError(err).Error()
-				a.err = state.MapError(err).Error()
 				return
 			}
 			a.clearTaskRecordingFor(a.snap.RunID, taskKey)
@@ -2320,7 +2386,6 @@ func main() {
 				a.ws.SyncChecks()
 				a.ws.State = runui.StateError
 				a.ws.Error = state.MapError(err).Error()
-				a.err = a.ws.Error
 				return
 			}
 			a.applySnap(snap)
@@ -2356,7 +2421,6 @@ func main() {
 			if err != nil {
 				a.ws.State = runui.StateError
 				a.ws.Error = state.MapError(err).Error()
-				a.err = state.MapError(err).Error()
 				return
 			}
 			a.applySnap(snap)
@@ -2414,7 +2478,6 @@ func main() {
 			})
 			if err != nil {
 				mappedErr := state.MapError(err)
-				a.err = mappedErr.Error()
 				return mappedErr
 			}
 			a.applySnap(snap)
@@ -2445,9 +2508,21 @@ func main() {
 			if !ok {
 				kind = runworkspace.SelectKind(task, grid, linkedAssets)
 			}
+			linkErr := ""
+			if a.linkErr != "" && (a.linkErrTask == "" || a.linkErrTask == task.TaskKey) {
+				linkErr = a.linkErr
+			}
+			assetErr := ""
+			var onRetryAsset func()
+			if a.assetErr != "" && (a.assetErrTask == "" || a.assetErrTask == task.TaskKey) {
+				assetErr = a.assetErr
+				onRetryAsset = a.assetErrRetry
+			}
 			rv := runworkspace.RecordingView{
 				RunID: a.snap.RunID, Kind: kind, Grid: grid, Assets: linkedAssets, Task: task,
-				LinkErr: a.linkErr,
+				LinkErr:         linkErr,
+				AssetErr:        assetErr,
+				OnRetryAssetErr: onRetryAsset,
 				OnKindChange: func(kind runworkspace.ViewKind) {
 					a.runViewKinds[kindKey] = kind
 				},
@@ -2456,15 +2531,13 @@ func main() {
 					a.runWS.SelectedTimelineTask = task.TaskKey
 				},
 				OnOpenAsset: func(asset runworkspace.LinkedAsset) {
-					if err := a.openRunAsset(asset); err != nil {
+					if err := a.tryOpenRunAsset(task.TaskKey, asset); err != nil {
 						c.AddToast(ui.Toast{Title: "无法打开文件", Description: err.Error(), Type: components.ToastError})
 					}
 				},
 				OnRelocate: func(asset runworkspace.LinkedAsset) {
-					if err := a.relocateRunAsset(asset); err != nil {
+					if err := a.tryRelocateRunAsset(task.TaskKey, asset); err != nil {
 						c.AddToast(ui.Toast{Title: "文件重新定位失败", Description: err.Error(), Type: components.ToastError})
-					} else if a.shell != nil {
-						a.shell.Invalidate()
 					}
 				},
 				OnRelabelAsset: func(asset runworkspace.LinkedAsset) {
@@ -2480,9 +2553,10 @@ func main() {
 					}
 				},
 				OnSaveBatch: func(cells []resultgrid.Cell) {
-					if grid != nil {
-						cb.SaveBatch(grid.Schema, cells)
+					if grid == nil || grid.State == resultgrid.StateSaving {
+						return
 					}
+					a.startSaveBatch(grid, task.TaskKey, cells)
 				},
 			}
 			rv.Render(c)
@@ -2554,6 +2628,7 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		a.shell.NewWindow()
+		a.windowReady = true
 		a.shell.Quit()
 		a.preload()
 	})
@@ -2566,9 +2641,7 @@ func (a *app) saveRunChecks(taskKey string, checks []runworkspace.CheckAckView) 
 		return nil
 	}
 	if a.runSvc == nil {
-		err := fmt.Errorf("运行服务不可用")
-		a.err = err.Error()
-		return err
+		return fmt.Errorf("运行服务不可用")
 	}
 	timepoint, assayID, stepPath, protocolVersion := "", "", "", ""
 	for _, t := range a.snap.Tasks {
@@ -2588,19 +2661,49 @@ func (a *app) saveRunChecks(taskKey string, checks []runworkspace.CheckAckView) 
 	})
 	if err != nil {
 		log.Printf("save task checks: %v", err)
-		mappedErr := state.MapError(err)
-		a.err = mappedErr.Error()
-		return mappedErr
+		return state.MapError(err)
 	}
 	a.applySnap(snap)
 	return nil
 }
 
-func (a *app) saveBatch(schema resultgrid.Schema, cells []resultgrid.Cell) {
-	if a.ws == nil || a.runSvc == nil {
-		return
+type batchSaveRequest struct {
+	grid       *resultgrid.Grid
+	runID      string
+	taskKey    string
+	input      runs.BatchReadoutInput
+	totalCells int
+}
+
+type batchSaveOutcome struct {
+	result  runs.BatchReadoutResult
+	err     error
+	snap    runs.RunSnapshot
+	loadErr error
+}
+
+func (a *app) prepareBatchSaveForTask(grid *resultgrid.Grid, taskKey string, schema resultgrid.Schema, cells []resultgrid.Cell) (batchSaveRequest, bool) {
+	if grid == nil && a.ws != nil {
+		grid = a.ws.Grid
 	}
-	taskKey := a.ws.Selected
+	if a.runSvc == nil {
+		msg := "运行服务不可用"
+		if grid != nil {
+			grid.Error = msg
+			grid.State = resultgrid.StateError
+		}
+		if a.ws != nil {
+			a.ws.State = runui.StateError
+			a.ws.Error = msg
+		}
+		return batchSaveRequest{}, false
+	}
+	if grid == nil {
+		return batchSaveRequest{}, false
+	}
+	if taskKey == "" && a.ws != nil {
+		taskKey = a.ws.Selected
+	}
 	task := currentRunTask(a.snap.Tasks)
 	for _, candidate := range a.snap.Tasks {
 		if candidate.Key == taskKey {
@@ -2616,76 +2719,177 @@ func (a *app) saveBatch(schema resultgrid.Schema, cells []resultgrid.Cell) {
 			Value: cell.Value, Status: cell.Status,
 		})
 	}
-	cellsDigest := a.ws.Grid.CellsDigest()
-	if a.ws.Grid.PendingOpID == "" || a.ws.Grid.PendingOpHash != cellsDigest {
-		a.ws.Grid.PendingOpID = a.nextOp()
-		a.ws.Grid.PendingOpHash = cellsDigest
+	grid.State = resultgrid.StateSaving
+	grid.Error = ""
+	if a.ws != nil {
+		a.ws.State = runui.StateSaving
+		a.ws.Error = ""
 	}
-	opID := a.ws.Grid.PendingOpID
-	_ = runworkspace.SaveGridDraft(a.snap.RunID, task.Key, a.ws.Grid)
-	batchResult, err := a.runSvc.SaveReadoutsBatch(context.Background(), runs.BatchReadoutInput{
-		RunID: a.snap.RunID, OperationID: opID, TaskKey: task.Key,
-		AssayID: task.AssayID, Timepoint: task.Timepoint,
-		ProtocolStepPath: taskStepPath(task), ProtocolVersionID: task.ProtocolVersionID,
-		SchemaID: schema.ID, SchemaVersion: schema.Version, Cells: batchCells,
-		ExpectedRevision: a.snap.Revision,
-	})
+	cellsDigest := grid.CellsDigest()
+	if grid.PendingOpID == "" || grid.PendingOpHash != cellsDigest {
+		grid.PendingOpID = a.nextOp()
+		grid.PendingOpHash = cellsDigest
+	}
+	_ = runworkspace.SaveGridDraft(a.snap.RunID, task.Key, grid)
+	return batchSaveRequest{
+		grid:       grid,
+		runID:      a.snap.RunID,
+		taskKey:    task.Key,
+		totalCells: len(batchCells),
+		input: runs.BatchReadoutInput{
+			RunID: a.snap.RunID, OperationID: grid.PendingOpID, TaskKey: task.Key,
+			AssayID: task.AssayID, Timepoint: task.Timepoint,
+			ProtocolStepPath: taskStepPath(task), ProtocolVersionID: task.ProtocolVersionID,
+			SchemaID: schema.ID, SchemaVersion: schema.Version, Cells: batchCells,
+			ExpectedRevision: a.snap.Revision,
+		},
+	}, true
+}
+
+func executeBatchSave(svc runs.RunService, req batchSaveRequest) batchSaveOutcome {
+	batchResult, err := svc.SaveReadoutsBatch(context.Background(), req.input)
 	if err != nil {
-		message := state.MapError(err).Error()
-		a.ws.State = runui.StateError
-		a.ws.Error, a.ws.Grid.Error = message, message
-		a.ws.Grid.State = resultgrid.StateError
-		a.err = message
+		return batchSaveOutcome{err: err}
+	}
+	if batchResult.Accepted != req.totalCells {
+		return batchSaveOutcome{result: batchResult}
+	}
+	snap, loadErr := svc.LoadRun(context.Background(), req.runID)
+	return batchSaveOutcome{result: batchResult, snap: snap, loadErr: loadErr}
+}
+
+func (a *app) applyBatchSaveOutcome(req batchSaveRequest, out batchSaveOutcome) {
+	setErr := func(message string) {
+		if req.grid != nil {
+			req.grid.Error = message
+			req.grid.State = resultgrid.StateError
+		}
+		if a.ws != nil {
+			a.ws.State = runui.StateError
+			a.ws.Error = message
+		}
+	}
+	if out.err != nil {
+		setErr(state.MapError(out.err).Error())
 		return
 	}
-	if batchResult.Accepted != len(batchCells) {
-		message := fmt.Sprintf("批量保存未接受全部单元格：%d/%d", batchResult.Accepted, len(batchCells))
-		a.ws.State = runui.StateError
-		a.ws.Error, a.ws.Grid.Error = message, message
-		a.ws.Grid.State = resultgrid.StateError
-		a.err = message
+	if out.result.Accepted != req.totalCells {
+		setErr(fmt.Sprintf("批量保存未接受全部单元格：%d/%d", out.result.Accepted, req.totalCells))
 		return
 	}
-	snap, err := a.runSvc.LoadRun(context.Background(), a.snap.RunID)
-	if err != nil {
-		message := state.MapError(err).Error()
-		a.ws.State = runui.StateError
-		a.ws.Error, a.ws.Grid.Error = message, message
-		a.ws.Grid.State = resultgrid.StateError
-		a.err = message
+	if out.loadErr != nil {
+		if out.result.Revision > a.snap.Revision {
+			a.snap.Revision = out.result.Revision
+		}
+		setErr("已写入 Core，但刷新 Run 失败：" + state.MapError(out.loadErr).Error())
 		return
 	}
-	if batchResult.Revision > a.snap.Revision {
-		a.snap.Revision = batchResult.Revision
-	}
-	savedGrid := a.ws.Grid
+	savedGrid := req.grid
 	savedGrid.PendingOpID = ""
 	savedGrid.PendingOpHash = ""
+	savedGrid.Error = ""
 	savedGrid.State = resultgrid.StateSaved
-	runworkspace.ClearGridDraft(a.snap.RunID, task.Key)
-	a.clearTaskRecordingFor(a.snap.RunID, task.Key)
-	a.applySnap(snap)
-	a.ws.State = runui.StateSaved
-	a.ws.Grid = savedGrid
-	if a.runWS != nil {
-		a.runWS.SetRecordingDirty(task.Key, false)
+	runworkspace.ClearGridDraft(req.runID, req.taskKey)
+	a.clearTaskRecordingFor(req.runID, req.taskKey)
+	a.applySnap(out.snap)
+	if a.ws != nil {
+		a.ws.State = runui.StateSaved
+		a.ws.Error = ""
+		if a.ws.Selected == req.taskKey || a.ws.Selected == "" {
+			a.ws.Grid = savedGrid
+		}
 	}
+	if a.taskGrids == nil {
+		a.taskGrids = map[string]*resultgrid.Grid{}
+	}
+	a.taskGrids[runTaskCacheKey(req.runID, req.taskKey)] = savedGrid
+	if a.runWS != nil {
+		a.runWS.SetRecordingDirty(req.taskKey, false)
+	}
+}
+
+func (a *app) saveBatch(schema resultgrid.Schema, cells []resultgrid.Cell) {
+	if a.ws == nil {
+		return
+	}
+	req, ok := a.prepareBatchSaveForTask(a.ws.Grid, a.ws.Selected, schema, cells)
+	if !ok {
+		return
+	}
+	out := executeBatchSave(a.runSvc, req)
+	a.applyBatchSaveOutcome(req, out)
+}
+
+func (a *app) startSaveBatch(grid *resultgrid.Grid, taskKey string, cells []resultgrid.Cell) {
+	if grid == nil {
+		return
+	}
+	req, ok := a.prepareBatchSaveForTask(grid, taskKey, grid.Schema, cells)
+	if !ok {
+		return
+	}
+	if !a.windowReady {
+		out := executeBatchSave(a.runSvc, req)
+		a.applyBatchSaveOutcome(req, out)
+		return
+	}
+	if a.shell != nil {
+		a.shell.Invalidate()
+	}
+	svc := a.runSvc
+	go func() {
+		out := executeBatchSave(svc, req)
+		mygo.RunOnMain(func() {
+			a.applyBatchSaveOutcome(req, out)
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		})
+	}()
+}
+
+func (a *app) renderSyncErrorBanner(c *ui.Context) {
+	if a.syncErr == "" {
+		return
+	}
+	t := c.Theme()
+	tokens := theme.GetTokens(t)
+	ui.Row(c).FillWidth().Padding(t.Space(1), t.Space(2)).
+		Background(tokens.DangerBg).Border(1, tokens.DangerText).
+		AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+		ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+			ui.Text(c, a.syncErr).FontSize(t.Rem(.78)).TextColor(tokens.DangerText)
+		})
+		if a.runSvc != nil && (a.pendingRunID != "" || a.snap.RunID != "") {
+			if components.Button(c, "重新加载 Run", components.ButtonSecondary).Clicked() {
+				a.retryLoadRun()
+			}
+		}
+		if components.Button(c, "忽略", components.ButtonGhost).Clicked() {
+			a.syncErr = ""
+		}
+	})
 }
 
 func contentPage(c *ui.Context, a *app) {
 	a.pollPDFExport(c)
-	switch a.shell.Page {
-	case shell.Design:
-		designPage(c, a)
-	case shell.Run:
-		runPage(c, a)
-	case shell.Protocol:
-		protocolPage(c, a)
-	case shell.Notebook:
-		notebookPage(c, a)
-	case shell.Tools:
-		toolsPage(c, a)
-	}
+	ui.Column(c).Fill().Children(func() {
+		a.renderSyncErrorBanner(c)
+		ui.Box(c).Grow(1).MinHeight(0).FillWidth().Children(func() {
+			switch a.shell.Page {
+			case shell.Design:
+				designPage(c, a)
+			case shell.Run:
+				runPage(c, a)
+			case shell.Protocol:
+				protocolPage(c, a)
+			case shell.Notebook:
+				notebookPage(c, a)
+			case shell.Tools:
+				toolsPage(c, a)
+			}
+		})
+	})
 	a.renderNewDesignDialog(c)
 	a.renderImportDialog(c)
 	a.renderDesignSwitchConfirmation(c)
@@ -2762,8 +2966,11 @@ func (a *app) submitAssetLinkForm(linker func(string, runs.AssetLink) error) {
 	}
 	a.linkDialogErr = ""
 	a.linkErr = ""
+	a.linkErrTask = ""
 	if err := linker(a.linkDialogTask, coordinate); err != nil {
 		a.linkDialogErr = err.Error()
+		a.linkErr = err.Error()
+		a.linkErrTask = a.linkDialogTask
 		if a.shell != nil {
 			a.shell.Invalidate()
 		}

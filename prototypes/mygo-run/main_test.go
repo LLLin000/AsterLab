@@ -1289,3 +1289,347 @@ func TestDesignerListViewFullErrorRetryAndLoadingState(t *testing.T) {
 		t.Fatalf("ListView missing 校验中 while loading: %v", tt.Texts())
 	}
 }
+
+func TestGridCommitFailureSetsStateErrorAndShowsBannerWithRetry(t *testing.T) {
+	t.Setenv("LABWORKBENCH_DATA_DIR", t.TempDir())
+	schema := resultgrid.Schema{
+		ID: "cck8.plate96.od450.v1", Version: 1,
+		RowLabels: []string{"A"}, ColumnLabels: []string{"1"},
+		Fields: []resultgrid.Field{{Key: "od450", Label: "OD450", Unit: "AU"}},
+	}
+	grid := resultgrid.New(schema, nil)
+	task := &runworkspace.RunTaskViewModel{TaskKey: "t-1", StepTitle: "酶标仪读数"}
+	saveCalls := 0
+	rv := &runworkspace.RecordingView{
+		RunID: "run-commit-err",
+		Kind:  runworkspace.ViewPlate,
+		Grid:  grid,
+		Task:  task,
+		OnSaveBatch: func([]resultgrid.Cell) {
+			saveCalls++
+		},
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 1360, 880)
+	tt.Frame()
+
+	// Pending invalid draft blocks view switch and sets StateError + banner + 重试保存.
+	draft, ok := grid.BeginEdit(0, 0)
+	if !ok {
+		t.Fatal("BeginEdit failed")
+	}
+	*draft = "not-a-number"
+	grid.MarkEditDirty()
+	if err := tt.Click("表格"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if rv.Kind != runworkspace.ViewPlate {
+		t.Fatalf("view switched despite invalid pending edit: kind=%q", rv.Kind)
+	}
+	if grid.State != resultgrid.StateError || grid.Error != "请输入数字" {
+		t.Fatalf("view switch commit failure did not set StateError: state=%q err=%q", grid.State, grid.Error)
+	}
+	if !tt.HasText("保存失败") || !tt.HasText("未保存 · 请输入数字") || !tt.HasText("重试保存") {
+		t.Fatalf("banner/retry missing after view switch commit failure: %v", tt.Texts())
+	}
+	if tt.HasText("检查目标目录权限") {
+		t.Fatalf("unexpected generic directory permission hint on commit failure: %v", tt.Texts())
+	}
+
+	// Clicking 保存读数 / 重试保存 with invalid pending edit also fails with StateError and never invokes OnSaveBatch.
+	grid.State = resultgrid.StateDraft
+	grid.Error = ""
+	tt.Frame()
+	if err := tt.Click("保存读数"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if saveCalls != 0 {
+		t.Fatalf("OnSaveBatch called despite commit error: calls=%d", saveCalls)
+	}
+	if grid.State != resultgrid.StateError || grid.Error != "请输入数字" {
+		t.Fatalf("saveNow commit failure did not set StateError: state=%q err=%q", grid.State, grid.Error)
+	}
+	if !tt.HasText("未保存 · 请输入数字") || !tt.HasText("重试保存") {
+		t.Fatalf("banner/retry missing after save commit failure: %v", tt.Texts())
+	}
+}
+
+type saveBatchCauseSpy struct {
+	runs.RunService
+	observedGridState resultgrid.SaveState
+	saveErr           error
+	accepted          int
+	loadErr           error
+	snap              runs.RunSnapshot
+}
+
+func (s *saveBatchCauseSpy) SaveReadoutsBatch(_ context.Context, input runs.BatchReadoutInput) (runs.BatchReadoutResult, error) {
+	if s.saveErr != nil {
+		return runs.BatchReadoutResult{}, s.saveErr
+	}
+	accepted := len(input.Cells)
+	if s.accepted >= 0 {
+		accepted = s.accepted
+	}
+	s.snap.Revision++
+	return runs.BatchReadoutResult{RunID: input.RunID, Revision: s.snap.Revision, Accepted: accepted}, nil
+}
+
+func (s *saveBatchCauseSpy) LoadRun(context.Context, string) (runs.RunSnapshot, error) {
+	if s.loadErr != nil {
+		return runs.RunSnapshot{}, s.loadErr
+	}
+	return s.snap, nil
+}
+
+func (s *saveBatchCauseSpy) WorkflowTree(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (s *saveBatchCauseSpy) ListAssetLinks(context.Context, string) ([]runs.Asset, error) {
+	return nil, nil
+}
+
+type saveBatchObserver struct {
+	*saveBatchCauseSpy
+	grid *resultgrid.Grid
+}
+
+func (o *saveBatchObserver) SaveReadoutsBatch(ctx context.Context, input runs.BatchReadoutInput) (runs.BatchReadoutResult, error) {
+	o.observedGridState = o.grid.State
+	return o.saveBatchCauseSpy.SaveReadoutsBatch(ctx, input)
+}
+
+func TestSaveBatchPassesThroughStateSavingAndDistinguishesCauses(t *testing.T) {
+	t.Setenv("LABWORKBENCH_DATA_DIR", t.TempDir())
+	schema := resultgrid.Schema{
+		ID: "cck8.plate96.od450.v1", Version: 1,
+		RowLabels: []string{"A"}, ColumnLabels: []string{"1", "2"},
+		Fields: []resultgrid.Field{{Key: "od450", Label: "OD450", Unit: "AU"}},
+	}
+	grid := resultgrid.New(schema, nil)
+	v := 0.72
+	_ = grid.SetCell(resultgrid.Cell{Row: 0, Column: 0, SampleID: "S1", Field: "od450", Value: &v, Status: "raw"})
+	task := &runworkspace.RunTaskViewModel{TaskKey: "t-1", StepTitle: "酶标仪读数"}
+
+	spy := &saveBatchCauseSpy{
+		accepted: -1,
+		snap: runs.RunSnapshot{
+			RunID: "run-causes", Revision: 1, Status: "running",
+			Tasks: []runs.RunTask{{Key: "t-1", Title: "酶标仪读数"}},
+		},
+	}
+	obs := &saveBatchObserver{saveBatchCauseSpy: spy, grid: grid}
+	a := &app{
+		runSvc: obs,
+		snap:   spy.snap,
+		ws:     &runui.Workspace{Selected: "t-1", Grid: grid},
+	}
+
+	// Verify OnSaveBatch passes through StateSaving.
+	a.startSaveBatch(grid, "t-1", grid.Cells)
+	if obs.observedGridState != resultgrid.StateSaving {
+		t.Fatalf("SaveReadoutsBatch did not observe StateSaving: got %q", obs.observedGridState)
+	}
+
+	// Verify RecordingView renders 保存中… and disables duplicate save clicks when StateSaving.
+	savingCalls := 0
+	savingGrid := resultgrid.New(schema, nil)
+	savingGrid.State = resultgrid.StateSaving
+	rv := &runworkspace.RecordingView{
+		RunID: "run-causes", Kind: runworkspace.ViewPlate, Grid: savingGrid, Task: task,
+		OnSaveBatch: func([]resultgrid.Cell) { savingCalls++ },
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 1360, 880)
+	tt.Frame()
+	if !tt.HasText("保存中…") {
+		t.Fatalf("StateSaving did not render 保存中…: %v", tt.Texts())
+	}
+	_ = tt.Click("保存读数")
+	tt.Frame()
+	if savingCalls != 0 {
+		t.Fatalf("disabled button fired OnSaveBatch during StateSaving")
+	}
+
+	// Cause 1: revision conflict.
+	spy.saveErr = fmt.Errorf("CONFLICT: expected revision 1, got 2")
+	a.saveBatch(schema, grid.Cells)
+	rv.Grid = grid
+	tt.Frame()
+	if grid.State != resultgrid.StateError || !tt.HasText("CONFLICT: expected revision 1, got 2") || !tt.HasText("修订冲突") || !tt.HasText("重试保存") {
+		t.Fatalf("revision conflict banner incorrect: state=%q texts=%v", grid.State, tt.Texts())
+	}
+	if tt.HasText("检查目标目录权限") {
+		t.Fatalf("revision conflict misattributed to directory permissions: %v", tt.Texts())
+	}
+
+	// Cause 2: rejected cells.
+	spy.saveErr = nil
+	spy.accepted = 1
+	a.saveBatch(schema, grid.Cells)
+	tt.Frame()
+	if grid.State != resultgrid.StateError || !tt.HasText("1/2") || !tt.HasText("单元格") || !tt.HasText("重试保存") {
+		t.Fatalf("rejected cells banner incorrect: state=%q texts=%v", grid.State, tt.Texts())
+	}
+	if tt.HasText("检查目标目录权限") {
+		t.Fatalf("rejected cells misattributed to directory permissions: %v", tt.Texts())
+	}
+
+	// Cause 3: Core write succeeded, LoadRun refresh failed.
+	spy.accepted = -1
+	spy.loadErr = fmt.Errorf("INTERNAL: sqlite busy during refresh")
+	a.saveBatch(schema, grid.Cells)
+	tt.Frame()
+	if grid.State != resultgrid.StateError || !tt.HasText("已写入 Core") || !tt.HasText("INTERNAL: sqlite busy during refresh") || !tt.HasText("重试保存") {
+		t.Fatalf("refresh failure banner incorrect: state=%q texts=%v", grid.State, tt.Texts())
+	}
+	if tt.HasText("未保存 · ") || tt.HasText("检查目标目录权限") {
+		t.Fatalf("refresh failure lied as unsaved or directory permissions: %v", tt.Texts())
+	}
+}
+
+type assetFailSpy struct {
+	runs.RunService
+	listErr error
+	assets  []runs.Asset
+}
+
+func (s *assetFailSpy) ListAssetLinks(context.Context, string) ([]runs.Asset, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.assets, nil
+}
+
+func (s *assetFailSpy) WorkflowTree(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable(t *testing.T) {
+	root := t.TempDir()
+	spy := &assetFailSpy{
+		assets: []runs.Asset{{
+			ID:           "asset-1",
+			RootID:       "design-data-d1",
+			RelativePath: "images/missing.tif",
+			MediaType:    "image/tiff",
+			Size:         3,
+			SHA256:       strings.Repeat("a", 64),
+			Availability: "available",
+			Link:         runs.AssetLink{RunID: "run-asset", TaskKey: "t-img", WellID: "A1", Timepoint: "24 h", FOVIndex: 1},
+		}},
+	}
+	imgPath := filepath.Join(root, "images", "missing.tif")
+	if err := os.MkdirAll(filepath.Dir(imgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Size matches (fast verify keeps Available=true so 打开 is clickable), but SHA256 mismatches when 打开 runs Verify(digest=true).
+	if err := os.WriteFile(imgPath, []byte("bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{
+		runSvc:     spy,
+		assetRoots: map[string]string{"design-data-d1": root},
+		snap: runs.RunSnapshot{
+			RunID:    "run-asset",
+			DesignID: "d1",
+			Title:    "资产测试运行",
+			Status:   "running",
+			Tasks:    []runs.RunTask{{Key: "t-img", Title: "显微成像", Status: "not_started"}},
+		},
+		runAssets: spy.assets,
+		shell:     &shell.Shell{Page: shell.Run},
+	}
+	a.runWSVM = a.buildRunWorkspaceVM()
+	a.runWS = runworkspace.NewState(a.runWSVM, runworkspace.Callbacks{
+		Recording: func(c *ui.Context, task *runworkspace.RunTaskViewModel) {
+			linked := a.runAssetsForTask(task.TaskKey)
+			rv := runworkspace.RecordingView{
+				RunID: a.snap.RunID, Kind: runworkspace.ViewGallery, Assets: linked, Task: task,
+				LinkErr: a.linkErr, AssetErr: a.assetErr, OnRetryAssetErr: a.assetErrRetry,
+				OnOpenAsset: func(asset runworkspace.LinkedAsset) {
+					_ = a.tryOpenRunAsset(task.TaskKey, asset)
+				},
+			}
+			rv.Render(c)
+		},
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		contentPage(c, a)
+	}, 1360, 880)
+	tt.Frame()
+
+	if err := tt.Click("打开"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.assetErr == "" {
+		t.Fatal("openRunAsset failure did not record page-level assetErr")
+	}
+	if !tt.HasText("无法打开文件") || !tt.HasText("重试") {
+		t.Fatalf("page-level asset open failure banner or retry missing: %v", tt.Texts())
+	}
+
+	// Re-verify retry invokes open attempt again (remove root mapping to verify new reason appears on retry).
+	delete(a.assetRoots, "design-data-d1")
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !strings.Contains(a.assetErr, "根目录") && !strings.Contains(a.assetErr, "root") {
+		t.Fatalf("retry did not re-run openRunAsset with updated state: %q", a.assetErr)
+	}
+
+	// Also verify submitAssetLinkForm failure populates a.linkErr so the gallery link banner is reachable.
+	relSpy := &assetRelabelSpy{err: fmt.Errorf("CONFLICT: coordinate conflict")}
+	relApp := newRelabelTestApp(relSpy)
+	relApp.openAssetLinkForm("task-1", relApp.runAssetsForTask("task-1")[0])
+	relApp.linkDialogWell = "A1"
+	relApp.linkDialogTimepoint = "24 h"
+	relApp.linkDialogFOV = "1"
+	relApp.submitAssetLinkForm(relApp.relabelRunAsset)
+	if !strings.Contains(relApp.linkErr, "CONFLICT: coordinate conflict") {
+		t.Fatalf("submitAssetLinkForm did not populate linkErr: %q", relApp.linkErr)
+	}
+}
+
+func TestSnapshotRejectionAndConflictRenderedOnContentPage(t *testing.T) {
+	a := &app{
+		snap: runs.RunSnapshot{
+			RunID: "run-1", Revision: 3, Status: "running",
+			Tasks: []runs.RunTask{{Key: "t-1", Title: "步骤一"}},
+		},
+		shell: &shell.Shell{Page: shell.Run},
+	}
+	a.guard.Accept(3)
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		contentPage(c, a)
+	}, 1360, 880)
+
+	// Stale snapshot rejected by StaleGuard must be visibly rendered.
+	a.applySnap(runs.RunSnapshot{RunID: "run-1", Revision: 2, Status: "running"})
+	tt.Frame()
+	if !tt.HasText("忽略过期快照") {
+		t.Fatalf("stale snapshot rejection not rendered: %v", tt.Texts())
+	}
+
+	// Same-revision conflicting snapshot must be visibly rendered.
+	a.applySnap(runs.RunSnapshot{RunID: "run-1", Revision: 3, Status: "completed"})
+	tt.Frame()
+	if !tt.HasText("检测到同修订快照冲突") {
+		t.Fatalf("snapshot conflict not rendered: %v", tt.Texts())
+	}
+}
