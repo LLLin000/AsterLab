@@ -14,7 +14,7 @@
       "scripts/mygo-native-linux.sh"
     ]
   },
-  "input_sha256": "6ebab51b13b7474de9ab255ae2e2b0c2c35c634a9ae0027cef923d99d6822484",
+  "input_sha256": "e6d9d298bf66f945b74b3cf3de3c80ac7c26017d985bc7b3fb9ab6a49156e45e",
   "note": "Written by scripts/ci/native_generator_hash.py --update-golden. Linux and Windows CI must both reproduce these hashes; see docs/engineering/cross-platform-builds.md and docs/release/evidence/REL-05/.",
   "output_sha256": "c45fa8d94b42097d6a818af0d003cdc4ae206212a411b28a59ea7f528dfb7d4a"
 }
