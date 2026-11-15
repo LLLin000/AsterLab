@@ -1751,3 +1751,43 @@ func (d *Designer) addModule(nodeID string, typ blocks.BlockType) {
 	d.ComponentRefsDraft = strings.Join(refs, ", ")
 	d.Touch()
 }
+
+// StepEditCommand maps a step-list action to the Core AsterDoc command contract.
+func StepEditCommand(action, workflowID, stepID, parentID string, order []string) (map[string]any, bool) {
+	switch action {
+	case "move_up", "move_down":
+		if workflowID == "" {
+			return nil, false
+		}
+		index := -1
+		for i, id := range order {
+			if id == stepID {
+				index = i
+				break
+			}
+		}
+		next := index
+		if action == "move_up" {
+			next--
+		} else {
+			next++
+		}
+		if index < 0 || next < 0 || next >= len(order) {
+			return nil, false
+		}
+		reordered := append([]string(nil), order...)
+		reordered[index], reordered[next] = reordered[next], reordered[index]
+		return map[string]any{"type": "reorder_steps", "moduleId": workflowID, "order": reordered}, true
+	case "indent":
+		if parentID == "" || parentID == stepID {
+			return nil, false
+		}
+		return map[string]any{"type": "nest_step", "moduleId": stepID, "parentId": parentID}, true
+	case "outdent":
+		return map[string]any{"type": "promote_step", "moduleId": stepID}, true
+	case "delete":
+		return map[string]any{"type": "remove_step", "moduleId": stepID}, true
+	default:
+		return nil, false
+	}
+}
