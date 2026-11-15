@@ -1,8 +1,10 @@
-//! Deterministic mix arithmetic derived from a plate plan.
+//! Deterministic arithmetic derived from a plate plan, a batch of measured
+//! sample concentrations, or an in vivo dose schedule.
 //!
 //! These functions are pure: no store, no transaction, no Run fact. Callers
-//! keep the authored plate document as the source of truth and render the
-//! returned numbers as derived values.
+//! keep the authored document as the source of truth and render the returned
+//! numbers as derived values. Measurements and targets stay separate fields, so
+//! a dropdown default never becomes a reported measurement.
 
 /// One GelMA mastermix group: a group name, its target % w/v and its actual
 /// well count (technical replicates included).
@@ -174,6 +176,20 @@ fn non_negative(value: f64, field: &str) -> Result<f64, String> {
     Ok(value)
 }
 
+fn checked_names<'a>(names: impl Iterator<Item = &'a str>, noun: &str) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for name in names {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(format!("{noun} name cannot be empty"));
+        }
+        if !seen.insert(name.to_owned()) {
+            return Err(format!("{noun} {name} is duplicated"));
+        }
+    }
+    Ok(())
+}
+
 fn checked_groups<'a, T>(
     groups: &'a [T],
     name: impl Fn(&T) -> &str,
@@ -182,17 +198,13 @@ fn checked_groups<'a, T>(
     if groups.is_empty() {
         return Err("at least one group is required".into());
     }
-    let mut seen = std::collections::HashSet::new();
+    checked_names(groups.iter().map(&name), "group")?;
     for group in groups {
-        let group_name = name(group).trim();
-        if group_name.is_empty() {
-            return Err("group name cannot be empty".into());
-        }
-        if !seen.insert(group_name.to_owned()) {
-            return Err(format!("group {group_name} is duplicated"));
-        }
         if wells(group) == 0 {
-            return Err(format!("group {group_name} needs at least one well"));
+            return Err(format!(
+                "group {} needs at least one well",
+                name(group).trim()
+            ));
         }
     }
     Ok(())
@@ -489,6 +501,250 @@ pub fn runtime_normalize(
         dead_volume_ul: dead_volume,
         additional_volume_ul: delta.max(0.0),
         unused_volume_ul: (-delta).max(0.0),
+    })
+}
+
+/// A mass concentration unit.
+///
+/// This is a different dimension from the molar units the dilution tool speaks
+/// (`M`/`mM`/`µM`/`nM`): nothing here converts between the two, and the parser
+/// rejects every molar spelling, so a mass concentration can never be fed into
+/// the molar `C1V1 = C2V2` path as if the two were interchangeable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MassConcentrationUnit {
+    MgPerMl,
+    UgPerMl,
+    NgPerUl,
+}
+
+impl MassConcentrationUnit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MgPerMl => "mg/mL",
+            Self::UgPerMl => "µg/mL",
+            Self::NgPerUl => "ng/µL",
+        }
+    }
+
+    /// How many `ng/µL` one unit of this concentration is.
+    ///
+    /// `1 mg/mL = 10^6 ng / 10^3 µL = 1000 ng/µL` and
+    /// `1 µg/mL = 10^3 ng / 10^3 µL = 1 ng/µL`.
+    pub fn ng_per_ul_factor(self) -> f64 {
+        match self {
+            Self::MgPerMl => 1000.0,
+            Self::UgPerMl | Self::NgPerUl => 1.0,
+        }
+    }
+}
+
+impl std::str::FromStr for MassConcentrationUnit {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        match text.trim() {
+            "mg/mL" => Ok(Self::MgPerMl),
+            "µg/mL" => Ok(Self::UgPerMl),
+            "ng/µL" => Ok(Self::NgPerUl),
+            other => Err(format!(
+                "{other} is not a mass concentration unit (mg/mL, µg/mL, ng/µL); \
+                 molar units are a separate dimension"
+            )),
+        }
+    }
+}
+
+/// A measured or specified mass concentration. `value` is in `unit`, never in
+/// moles: the molar conversion needs a molecular weight and belongs to another
+/// tool.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MassConcentration {
+    pub value: f64,
+    pub unit: MassConcentrationUnit,
+}
+
+impl MassConcentration {
+    pub fn ng_per_ul(&self) -> Result<f64, String> {
+        let value = non_negative(self.value, "mass concentration")?;
+        Ok(value * self.unit.ng_per_ul_factor())
+    }
+}
+
+/// One sample's measured mass concentration, as its own value: a measurement
+/// is not the target concentration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SampleMeasurement {
+    pub name: String,
+    pub concentration: MassConcentration,
+}
+
+/// Inputs for `sample_normalize_batch`. `target_mass_ng` is the mass every
+/// sample must contribute to one reaction; `reaction_volume_ul` is the total
+/// volume that reaction may occupy, so it caps the sample volume.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SampleNormalizeBatchInput {
+    pub target_mass_ng: f64,
+    pub reaction_volume_ul: f64,
+    pub samples: Vec<SampleMeasurement>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SampleNormalizeRow {
+    pub name: String,
+    pub concentration_ng_per_ul: f64,
+    /// Volume the target mass needs at this concentration; it may exceed the
+    /// reaction volume, which is what `insufficient` reports.
+    pub required_sample_volume_ul: f64,
+    /// Volume actually pipetted: the required volume, capped by the reaction.
+    pub sample_volume_ul: f64,
+    pub diluent_volume_ul: f64,
+    /// Mass the pipetted volume delivers; it falls below `target_mass_ng`
+    /// exactly when `insufficient` is set.
+    pub achieved_mass_ng: f64,
+    pub insufficient: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SampleNormalizeBatchOutput {
+    pub rows: Vec<SampleNormalizeRow>,
+}
+
+/// Balance every sample to the same mass in the same reaction volume.
+///
+/// Unequal measured concentrations mean unequal sample volumes; the diluent
+/// makes up the rest. A sample too dilute to reach the target mass inside the
+/// reaction volume is reported with `insufficient`, not silently rounded up:
+/// the row then carries the capped volume and the mass it can actually deliver.
+pub fn sample_normalize_batch(
+    input: &SampleNormalizeBatchInput,
+) -> Result<SampleNormalizeBatchOutput, String> {
+    let target_mass = positive(input.target_mass_ng, "target_mass_ng")?;
+    let reaction_volume = positive(input.reaction_volume_ul, "reaction_volume_ul")?;
+    if input.samples.is_empty() {
+        return Err("at least one sample is required".into());
+    }
+    checked_names(
+        input.samples.iter().map(|sample| sample.name.as_str()),
+        "sample",
+    )?;
+
+    let mut rows = Vec::with_capacity(input.samples.len());
+    for sample in &input.samples {
+        let concentration = sample.concentration.ng_per_ul()?;
+        if concentration <= 0.0 {
+            return Err(format!(
+                "sample {} concentration must be positive",
+                sample.name
+            ));
+        }
+        let required_sample_volume_ul = target_mass / concentration;
+        let insufficient = required_sample_volume_ul > reaction_volume;
+        let sample_volume_ul = required_sample_volume_ul.min(reaction_volume);
+        rows.push(SampleNormalizeRow {
+            name: sample.name.clone(),
+            concentration_ng_per_ul: concentration,
+            required_sample_volume_ul,
+            sample_volume_ul,
+            diluent_volume_ul: reaction_volume - sample_volume_ul,
+            achieved_mass_ng: sample_volume_ul * concentration,
+            insufficient,
+        });
+    }
+    Ok(SampleNormalizeBatchOutput { rows })
+}
+
+/// Inputs for `in_vivo_dosing`. Weights are grams; the dose is `mg/kg`; the
+/// dose volume is `mL/kg`; `overage_ratio` is the dead-volume margin prepared
+/// on top of the summed injections; `stock_concentration` is the stock the
+/// working solution is drawn from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InVivoDosingInput {
+    pub body_weights_g: Vec<f64>,
+    pub dose_mg_per_kg: f64,
+    pub dose_volume_ml_per_kg: f64,
+    pub overage_ratio: f64,
+    pub stock_concentration: MassConcentration,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InVivoDoseRow {
+    /// 1-based position in the submitted weight list; animals carry no names.
+    pub index: usize,
+    pub body_weight_g: f64,
+    pub dose_mass_mg: f64,
+    pub injection_volume_ul: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InVivoDosingOutput {
+    pub rows: Vec<InVivoDoseRow>,
+    pub total_body_weight_g: f64,
+    pub total_dose_mass_mg: f64,
+    pub total_injection_volume_ul: f64,
+    /// Totals after `overage_ratio`, i.e. what the working solution must hold.
+    pub prepared_dose_mass_mg: f64,
+    pub preparation_volume_ul: f64,
+    pub stock_volume_ul: f64,
+    pub diluent_volume_ul: f64,
+}
+
+/// Compute each animal's injection from its body weight and the preparation
+/// the summed doses need.
+///
+/// `weight_g × mL/kg` is already microlitres: `g × 10^-3 = kg` and
+/// `kg × mL/kg = mL = 10^3 µL`, so the factors cancel. Overage scales the
+/// prepared tube, never an individual injection. A stock too dilute to fit the
+/// prepared mass into the prepared volume is a rejection, because diluting it
+/// would break the `mL/kg` dose volume.
+pub fn in_vivo_dosing(input: &InVivoDosingInput) -> Result<InVivoDosingOutput, String> {
+    if input.body_weights_g.is_empty() {
+        return Err("at least one body weight is required".into());
+    }
+    let dose_mg_per_kg = positive(input.dose_mg_per_kg, "dose_mg_per_kg")?;
+    let dose_volume_ml_per_kg =
+        positive(input.dose_volume_ml_per_kg, "dose_volume_ml_per_kg")?;
+    let overage = non_negative(input.overage_ratio, "overage_ratio")?;
+    let stock_ng_per_ul = input.stock_concentration.ng_per_ul()?;
+    if stock_ng_per_ul <= 0.0 {
+        return Err("stock concentration must be positive".into());
+    }
+
+    let mut rows = Vec::with_capacity(input.body_weights_g.len());
+    let mut total_body_weight_g = 0.0;
+    let mut total_dose_mass_mg = 0.0;
+    let mut total_injection_volume_ul = 0.0;
+    for (offset, weight) in input.body_weights_g.iter().enumerate() {
+        let body_weight_g = positive(*weight, "body_weight_g")?;
+        let dose_mass_mg = body_weight_g / 1000.0 * dose_mg_per_kg;
+        let injection_volume_ul = body_weight_g * dose_volume_ml_per_kg;
+        total_body_weight_g += body_weight_g;
+        total_dose_mass_mg += dose_mass_mg;
+        total_injection_volume_ul += injection_volume_ul;
+        rows.push(InVivoDoseRow {
+            index: offset + 1,
+            body_weight_g,
+            dose_mass_mg,
+            injection_volume_ul,
+        });
+    }
+
+    let prepared_dose_mass_mg = total_dose_mass_mg * (1.0 + overage);
+    let preparation_volume_ul = total_injection_volume_ul * (1.0 + overage);
+    let stock_volume_ul = prepared_dose_mass_mg * 1_000_000.0 / stock_ng_per_ul;
+    if stock_volume_ul > preparation_volume_ul {
+        return Err(
+            "stock concentration is too low: the dose does not fit the prepared volume".into(),
+        );
+    }
+    Ok(InVivoDosingOutput {
+        rows,
+        total_body_weight_g,
+        total_dose_mass_mg,
+        total_injection_volume_ul,
+        prepared_dose_mass_mg,
+        preparation_volume_ul,
+        stock_volume_ul,
+        diluent_volume_ul: preparation_volume_ul - stock_volume_ul,
     })
 }
 
@@ -885,5 +1141,278 @@ mod tests {
             ..invalid
         };
         assert!(runtime_normalize(&negative_dead).is_err());
+    }
+
+    fn mass(value: f64, unit: MassConcentrationUnit) -> MassConcentration {
+        MassConcentration { value, unit }
+    }
+
+    fn batch_samples(concentrations: &[(&str, f64)]) -> Vec<SampleMeasurement> {
+        concentrations
+            .iter()
+            .map(|(name, value)| SampleMeasurement {
+                name: (*name).into(),
+                concentration: mass(*value, MassConcentrationUnit::NgPerUl),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mass_concentration_units_convert_to_ng_per_ul() {
+        close(
+            mass(1.0, MassConcentrationUnit::MgPerMl)
+                .ng_per_ul()
+                .expect("finite"),
+            1000.0,
+        );
+        close(
+            mass(2.5, MassConcentrationUnit::UgPerMl)
+                .ng_per_ul()
+                .expect("finite"),
+            2.5,
+        );
+        close(
+            mass(750.0, MassConcentrationUnit::NgPerUl)
+                .ng_per_ul()
+                .expect("finite"),
+            750.0,
+        );
+        assert_eq!(
+            "mg/mL".parse::<MassConcentrationUnit>(),
+            Ok(MassConcentrationUnit::MgPerMl)
+        );
+        assert_eq!(
+            "µg/mL".parse::<MassConcentrationUnit>(),
+            Ok(MassConcentrationUnit::UgPerMl)
+        );
+        assert_eq!(
+            "ng/µL".parse::<MassConcentrationUnit>(),
+            Ok(MassConcentrationUnit::NgPerUl)
+        );
+        assert_eq!(MassConcentrationUnit::MgPerMl.as_str(), "mg/mL");
+    }
+
+    /// Molar units are a different dimension: the mass unit parser must never
+    /// hand back a unit the dilution math would treat as moles.
+    #[test]
+    fn mass_concentration_rejects_molar_units_and_invalid_values() {
+        for molar in ["M", "mM", "µM", "nM", "mg/L", ""] {
+            let error = molar
+                .parse::<MassConcentrationUnit>()
+                .expect_err("not a mass concentration unit");
+            assert!(
+                error.contains("mass concentration"),
+                "unexpected message for {molar}: {error}"
+            );
+        }
+        assert!(mass(-1.0, MassConcentrationUnit::NgPerUl)
+            .ng_per_ul()
+            .is_err());
+        assert!(mass(f64::INFINITY, MassConcentrationUnit::MgPerMl)
+            .ng_per_ul()
+            .is_err());
+        assert!(mass(f64::NAN, MassConcentrationUnit::MgPerMl)
+            .ng_per_ul()
+            .is_err());
+    }
+
+    #[test]
+    fn sample_normalize_batch_balances_each_sample_to_the_target_mass() {
+        let output = sample_normalize_batch(&SampleNormalizeBatchInput {
+            target_mass_ng: 1000.0,
+            reaction_volume_ul: 20.0,
+            samples: batch_samples(&[("A1", 50.0), ("A2", 200.0), ("A3", 100.0)]),
+        })
+        .expect("valid batch");
+
+        assert_eq!(output.rows.len(), 3);
+        let boundary = &output.rows[0];
+        close(boundary.required_sample_volume_ul, 20.0);
+        close(boundary.sample_volume_ul, 20.0);
+        close(boundary.diluent_volume_ul, 0.0);
+        close(boundary.achieved_mass_ng, 1000.0);
+        assert!(!boundary.insufficient);
+
+        close(output.rows[1].sample_volume_ul, 5.0);
+        close(output.rows[1].diluent_volume_ul, 15.0);
+        close(output.rows[1].achieved_mass_ng, 1000.0);
+        assert!(!output.rows[1].insufficient);
+
+        close(output.rows[2].sample_volume_ul, 10.0);
+        close(output.rows[2].diluent_volume_ul, 10.0);
+        close(output.rows[2].achieved_mass_ng, 1000.0);
+    }
+
+    #[test]
+    fn sample_normalize_batch_flags_a_low_concentration_sample() {
+        let output = sample_normalize_batch(&SampleNormalizeBatchInput {
+            target_mass_ng: 1000.0,
+            reaction_volume_ul: 20.0,
+            samples: batch_samples(&[("low", 25.0), ("ok", 100.0)]),
+        })
+        .expect("valid batch");
+
+        let low = &output.rows[0];
+        close(low.concentration_ng_per_ul, 25.0);
+        close(low.required_sample_volume_ul, 40.0);
+        close(low.sample_volume_ul, 20.0);
+        close(low.diluent_volume_ul, 0.0);
+        close(low.achieved_mass_ng, 500.0);
+        assert!(low.insufficient);
+
+        assert!(!output.rows[1].insufficient);
+        close(output.rows[1].achieved_mass_ng, 1000.0);
+    }
+
+    #[test]
+    fn sample_normalize_batch_converts_mixed_units_before_balancing() {
+        let output = sample_normalize_batch(&SampleNormalizeBatchInput {
+            target_mass_ng: 1000.0,
+            reaction_volume_ul: 20.0,
+            samples: vec![
+                SampleMeasurement {
+                    name: "mg".into(),
+                    concentration: mass(0.05, MassConcentrationUnit::MgPerMl),
+                },
+                SampleMeasurement {
+                    name: "ug".into(),
+                    concentration: mass(200.0, MassConcentrationUnit::UgPerMl),
+                },
+            ],
+        })
+        .expect("valid batch");
+
+        close(output.rows[0].concentration_ng_per_ul, 50.0);
+        close(output.rows[0].sample_volume_ul, 20.0);
+        close(output.rows[0].diluent_volume_ul, 0.0);
+        close(output.rows[1].concentration_ng_per_ul, 200.0);
+        close(output.rows[1].sample_volume_ul, 5.0);
+        close(output.rows[1].diluent_volume_ul, 15.0);
+    }
+
+    #[test]
+    fn sample_normalize_batch_rejects_invalid_inputs() {
+        let base = SampleNormalizeBatchInput {
+            target_mass_ng: 1000.0,
+            reaction_volume_ul: 20.0,
+            samples: batch_samples(&[("A1", 50.0)]),
+        };
+        assert!(sample_normalize_batch(&SampleNormalizeBatchInput {
+            target_mass_ng: 0.0,
+            ..base.clone()
+        })
+        .is_err());
+        assert!(sample_normalize_batch(&SampleNormalizeBatchInput {
+            target_mass_ng: f64::NAN,
+            ..base.clone()
+        })
+        .is_err());
+        assert!(sample_normalize_batch(&SampleNormalizeBatchInput {
+            reaction_volume_ul: -1.0,
+            ..base.clone()
+        })
+        .is_err());
+        assert!(sample_normalize_batch(&SampleNormalizeBatchInput {
+            samples: Vec::new(),
+            ..base.clone()
+        })
+        .is_err());
+        assert!(sample_normalize_batch(&SampleNormalizeBatchInput {
+            samples: batch_samples(&[("A1", 50.0), ("A1", 60.0)]),
+            ..base.clone()
+        })
+        .is_err());
+        assert!(sample_normalize_batch(&SampleNormalizeBatchInput {
+            samples: batch_samples(&[("  ", 50.0)]),
+            ..base.clone()
+        })
+        .is_err());
+        assert!(sample_normalize_batch(&SampleNormalizeBatchInput {
+            samples: batch_samples(&[("A1", 0.0)]),
+            ..base.clone()
+        })
+        .is_err());
+        assert!(sample_normalize_batch(&SampleNormalizeBatchInput {
+            samples: batch_samples(&[("A1", -5.0)]),
+            ..base
+        })
+        .is_err());
+    }
+
+    fn in_vivo_input() -> InVivoDosingInput {
+        InVivoDosingInput {
+            body_weights_g: vec![20.0, 25.0, 30.0],
+            dose_mg_per_kg: 10.0,
+            dose_volume_ml_per_kg: 10.0,
+            overage_ratio: 0.2,
+            stock_concentration: mass(5.0, MassConcentrationUnit::MgPerMl),
+        }
+    }
+
+    #[test]
+    fn in_vivo_dosing_computes_each_injection_and_the_preparation_totals() {
+        let output = in_vivo_dosing(&in_vivo_input()).expect("valid dosing plan");
+
+        assert_eq!(output.rows.len(), 3);
+        close(output.rows[0].body_weight_g, 20.0);
+        close(output.rows[0].dose_mass_mg, 0.2);
+        close(output.rows[0].injection_volume_ul, 200.0);
+        close(output.rows[1].dose_mass_mg, 0.25);
+        close(output.rows[1].injection_volume_ul, 250.0);
+        close(output.rows[2].dose_mass_mg, 0.3);
+        close(output.rows[2].injection_volume_ul, 300.0);
+
+        close(output.total_body_weight_g, 75.0);
+        close(output.total_dose_mass_mg, 0.75);
+        close(output.total_injection_volume_ul, 750.0);
+        close(output.prepared_dose_mass_mg, 0.9);
+        close(output.preparation_volume_ul, 900.0);
+        close(output.stock_volume_ul, 180.0);
+        close(output.diluent_volume_ul, 720.0);
+    }
+
+    #[test]
+    fn in_vivo_dosing_rejects_invalid_inputs() {
+        assert!(in_vivo_dosing(&InVivoDosingInput {
+            body_weights_g: Vec::new(),
+            ..in_vivo_input()
+        })
+        .is_err());
+        assert!(in_vivo_dosing(&InVivoDosingInput {
+            body_weights_g: vec![0.0],
+            ..in_vivo_input()
+        })
+        .is_err());
+        assert!(in_vivo_dosing(&InVivoDosingInput {
+            body_weights_g: vec![20.0, f64::NAN],
+            ..in_vivo_input()
+        })
+        .is_err());
+        assert!(in_vivo_dosing(&InVivoDosingInput {
+            dose_mg_per_kg: 0.0,
+            ..in_vivo_input()
+        })
+        .is_err());
+        assert!(in_vivo_dosing(&InVivoDosingInput {
+            dose_volume_ml_per_kg: -1.0,
+            ..in_vivo_input()
+        })
+        .is_err());
+        assert!(in_vivo_dosing(&InVivoDosingInput {
+            overage_ratio: -0.1,
+            ..in_vivo_input()
+        })
+        .is_err());
+        assert!(in_vivo_dosing(&InVivoDosingInput {
+            stock_concentration: mass(0.0, MassConcentrationUnit::MgPerMl),
+            ..in_vivo_input()
+        })
+        .is_err());
+        // The stock is too dilute to fit the dose inside the injection volume.
+        assert!(in_vivo_dosing(&InVivoDosingInput {
+            stock_concentration: mass(0.5, MassConcentrationUnit::MgPerMl),
+            ..in_vivo_input()
+        })
+        .is_err());
     }
 }
