@@ -199,6 +199,16 @@ pub struct PlateCell {
     pub well_role: Option<WellRole>,
 }
 
+/// One table cell. `numeric` columns hold a number; `categorical` columns hold
+/// a label such as a WB grade (`+`, `++`, `+++`). Untagged so v1 records that
+/// wrote `[[1.98, null]]` keep deserializing and reserializing byte-identically.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TableCell {
+    Number(f64),
+    Category(String),
+}
+
 /// The recorded value. The tag is `kind`, mirroring [`ReadingTarget`]; the
 /// schema side names the same concept `value_kind`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -210,9 +220,10 @@ pub enum ReadoutValue {
     },
     Table {
         columns: Vec<String>,
-        /// Row-major cells. A table cell carries no missing reason; use numeric
+        /// Row-major cells; each cell's shape must match its column's
+        /// `value_kind`. A table cell carries no missing reason; use numeric
         /// or plate readouts when the reason must be recorded per cell.
-        rows: Vec<Vec<Option<f64>>>,
+        rows: Vec<Vec<Option<TableCell>>>,
     },
     Plate {
         plate_id: String,
@@ -379,6 +390,7 @@ pub enum ReadoutIssueCode {
     InvalidPlateMapping,
     TableColumnsMismatch,
     TableRowWidthMismatch,
+    TableCellKindMismatch,
     CategoryNotAllowed,
     FileMediaTypeNotAllowed,
     FileChecksumRequired,
@@ -840,6 +852,35 @@ pub fn validate_readout(schema: &ReadoutSchema, readout: &Readout) -> Vec<Readou
                         "value.rows",
                         "schema 不允许 null，但表格含未记录单元格",
                     ));
+                }
+                let Some(spec) = &schema.table else {
+                    continue;
+                };
+                for (index, cell) in row.iter().enumerate() {
+                    let (Some(cell), Some(column)) = (cell, spec.columns.get(index)) else {
+                        continue;
+                    };
+                    match (column.value_kind, cell) {
+                        (ValueKind::Numeric, TableCell::Number(number)) => {
+                            if !number.is_finite() {
+                                issues.push(issue(
+                                    ReadoutIssueCode::NonFiniteNumber,
+                                    "value.rows",
+                                    format!("列 {} 的数值必须是有限数", column.key),
+                                ));
+                            }
+                        }
+                        (ValueKind::Categorical, TableCell::Category(category))
+                            if !blank(category) => {}
+                        (_, cell) => issues.push(issue(
+                            ReadoutIssueCode::TableCellKindMismatch,
+                            "value.rows",
+                            format!(
+                                "列 {} 的 value_kind 为 {:?}，不接受单元格 {cell:?}",
+                                column.key, column.value_kind
+                            ),
+                        )),
+                    }
                 }
             }
         }
@@ -1685,5 +1726,206 @@ mod tests {
         assert_eq!(cells[1].well_role, Some(WellRole::Ntc));
         assert_eq!(cells[2].well_role, Some(WellRole::Standard));
         assert!(validate_readout(&cck8_schema(), &readout).is_empty());
+    }
+
+    fn wb_band_schema() -> ReadoutSchema {
+        schema_from(json!({
+            "schema_id": "wb_band",
+            "schema_version": 1,
+            "endpoint": "band",
+            "value_kind": "table",
+            "unit": {"canonical": null, "required": false},
+            "missing": {"allowed": [], "null_allowed": true},
+            "source": {"raw": true, "derived": false},
+            "link": {"timepoint_required": false, "sample_required": false},
+            "table": {"columns": [
+                {"key": "target", "label": "目标蛋白", "value_kind": "categorical"},
+                {"key": "grade", "label": "条带等级", "value_kind": "categorical"},
+                {"key": "normalized", "label": "归一化强度", "value_kind": "numeric"}
+            ]}
+        }))
+    }
+
+    #[test]
+    fn table_cells_carry_categories_alongside_numbers() {
+        let schema = wb_band_schema();
+        let readout = readout_from(json!({
+            "readout_id": "ro-wb-1",
+            "schema_id": "wb_band",
+            "schema_version": 1,
+            "value": {
+                "kind": "table",
+                "columns": ["target", "grade", "normalized"],
+                "rows": [["GAPDH", "+++", 1.0], ["ACTB", "++", null], [null, null, 0.42]]
+            },
+            "source": {"kind": "raw", "derived_from": []}
+        }));
+
+        assert!(validate_schema(&schema).is_empty());
+        assert_eq!(validate_readout(&schema, &readout), Vec::new());
+        assert_eq!(schema.legacy_form(), LegacyReadoutForm::Unsupported);
+
+        let encoded = serde_json::to_value(&readout).unwrap();
+        assert_eq!(
+            encoded["value"]["rows"][0],
+            json!(["GAPDH", "+++", 1.0])
+        );
+        let decoded: Readout = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, readout);
+    }
+
+    #[test]
+    fn table_cell_kind_must_match_its_column() {
+        let schema = wb_band_schema();
+        let category_in_numeric = readout_from(json!({
+            "schema_id": "wb_band",
+            "schema_version": 1,
+            "value": {
+                "kind": "table",
+                "columns": ["target", "grade", "normalized"],
+                "rows": [["GAPDH", "+++", "+++"]]
+            },
+            "source": {"kind": "raw", "derived_from": []}
+        }));
+        assert_eq!(
+            codes(&validate_readout(&schema, &category_in_numeric)),
+            vec![ReadoutIssueCode::TableCellKindMismatch]
+        );
+
+        let number_in_categorical = readout_from(json!({
+            "schema_id": "wb_band",
+            "schema_version": 1,
+            "value": {
+                "kind": "table",
+                "columns": ["target", "grade", "normalized"],
+                "rows": [["GAPDH", 3.0, 1.0]]
+            },
+            "source": {"kind": "raw", "derived_from": []}
+        }));
+        assert_eq!(
+            codes(&validate_readout(&schema, &number_in_categorical)),
+            vec![ReadoutIssueCode::TableCellKindMismatch]
+        );
+
+        let blank_category = readout_from(json!({
+            "schema_id": "wb_band",
+            "schema_version": 1,
+            "value": {
+                "kind": "table",
+                "columns": ["target", "grade", "normalized"],
+                "rows": [["GAPDH", " ", 1.0]]
+            },
+            "source": {"kind": "raw", "derived_from": []}
+        }));
+        assert_eq!(
+            codes(&validate_readout(&schema, &blank_category)),
+            vec![ReadoutIssueCode::TableCellKindMismatch]
+        );
+
+        let mut non_finite = readout_from(json!({
+            "schema_id": "wb_band",
+            "schema_version": 1,
+            "value": {
+                "kind": "table",
+                "columns": ["target", "grade", "normalized"],
+                "rows": [["GAPDH", "+++", 1.0]]
+            },
+            "source": {"kind": "raw", "derived_from": []}
+        }));
+        let ReadoutValue::Table { rows, .. } = &mut non_finite.value else {
+            unreachable!();
+        };
+        rows[0][2] = Some(TableCell::Number(f64::INFINITY));
+        assert_eq!(
+            codes(&validate_readout(&schema, &non_finite)),
+            vec![ReadoutIssueCode::NonFiniteNumber]
+        );
+    }
+
+    #[test]
+    fn categorical_kind_accepts_declared_wb_grades() {
+        let schema = schema_from(json!({
+            "schema_id": "wb_grade",
+            "schema_version": 1,
+            "endpoint": "band_grade",
+            "value_kind": "categorical",
+            "unit": {"canonical": null, "required": false},
+            "missing": {"allowed": ["not_detected"], "null_allowed": true},
+            "source": {"raw": true, "derived": false},
+            "link": {"timepoint_required": false, "sample_required": false},
+            "categorical": {"options": ["-", "+", "++", "+++"], "allow_other": false}
+        }));
+        let strong = readout_from(json!({
+            "schema_id": "wb_grade",
+            "schema_version": 1,
+            "value": {"kind": "categorical", "category": "+++"},
+            "source": {"kind": "raw", "derived_from": []}
+        }));
+        assert!(validate_schema(&schema).is_empty());
+        assert_eq!(validate_readout(&schema, &strong), Vec::new());
+
+        let out_of_scale = readout_from(json!({
+            "schema_id": "wb_grade",
+            "schema_version": 1,
+            "value": {"kind": "categorical", "category": "++++"},
+            "source": {"kind": "raw", "derived_from": []}
+        }));
+        assert_eq!(
+            codes(&validate_readout(&schema, &out_of_scale)),
+            vec![ReadoutIssueCode::CategoryNotAllowed]
+        );
+    }
+
+    #[test]
+    fn numeric_table_rows_from_v1_deserialize_and_reserialize_unchanged() {
+        let encoded = json!({
+            "kind": "table",
+            "columns": ["a260", "pass"],
+            "rows": [[1.98, null]]
+        });
+        let value: ReadoutValue = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(
+            value,
+            ReadoutValue::Table {
+                columns: vec!["a260".to_owned(), "pass".to_owned()],
+                rows: vec![vec![Some(TableCell::Number(1.98)), None]],
+            }
+        );
+        assert_eq!(serde_json::to_value(&value).unwrap(), encoded);
+    }
+
+    #[test]
+    fn standard_curve_point_table_round_trips() {
+        let schema = schema_from(json!({
+            "schema_id": "bca_standard_curve",
+            "schema_version": 1,
+            "endpoint": "a562",
+            "value_kind": "table",
+            "unit": {"canonical": "AU", "required": false},
+            "missing": {"allowed": [], "null_allowed": true},
+            "source": {"raw": true, "derived": false},
+            "link": {"timepoint_required": false, "sample_required": false},
+            "table": {"columns": [
+                {"key": "concentration", "label": "标准浓度", "value_kind": "numeric", "unit": "µg/mL"},
+                {"key": "a562", "label": "A562", "value_kind": "numeric", "unit": "AU"}
+            ]}
+        }));
+        let readout = readout_from(json!({
+            "readout_id": "ro-bca-std-1",
+            "schema_id": "bca_standard_curve",
+            "schema_version": 1,
+            "value": {
+                "kind": "table",
+                "columns": ["concentration", "a562"],
+                "rows": [[0.0, 0.0], [25.0, 0.121], [125.0, 0.587], [250.0, 1.148], [500.0, 2.201]]
+            },
+            "source": {"kind": "raw", "derived_from": []}
+        }));
+
+        assert!(validate_schema(&schema).is_empty());
+        assert_eq!(validate_readout(&schema, &readout), Vec::new());
+        assert_eq!(schema.legacy_form(), LegacyReadoutForm::Unsupported);
+        let encoded = serde_json::to_value(&readout).unwrap();
+        assert_eq!(serde_json::from_value::<Readout>(encoded).unwrap(), readout);
     }
 }
