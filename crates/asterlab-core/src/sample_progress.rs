@@ -371,20 +371,70 @@ fn sample_progress(
 }
 
 fn event_status(event: &ProgressEvent) -> SampleStatus {
-    match event.step_status.as_deref().map(str::trim) {
-        Some("completed") => SampleStatus::Completed,
-        Some("blocked") => SampleStatus::Failed,
-        Some("skipped") => SampleStatus::Skipped,
-        Some("active") => SampleStatus::Active,
-        Some("in_progress") => SampleStatus::InProgress,
-        Some("skipped_by_rule") => SampleStatus::SkippedByRule,
-        Some("qc_dropped") => SampleStatus::QcDropped,
-        Some("censored_dead") => SampleStatus::CensoredDead,
-        Some("rework") => SampleStatus::Rework,
-        _ if event.event_type.as_deref() == Some("deviation") || event.deviation => {
-            SampleStatus::Failed
+    let event_type = event.event_type.as_deref().map(str::trim);
+    // A rule skip is written as `event_type = skipped_by_rule`. Newer rows also
+    // carry the legacy `step_status = skipped`, so the event type must win or
+    // the sample stays a plain skip and never counts as `skipped_by_rule`.
+    if event_type == Some("skipped_by_rule") {
+        return SampleStatus::SkippedByRule;
+    }
+    let explicit = match event.step_status.as_deref().map(str::trim) {
+        Some("completed") => Some(SampleStatus::Completed),
+        Some("blocked") => Some(SampleStatus::Failed),
+        Some("skipped") => Some(SampleStatus::Skipped),
+        Some("active") => Some(SampleStatus::Active),
+        Some("in_progress") => Some(SampleStatus::InProgress),
+        Some("skipped_by_rule") => Some(SampleStatus::SkippedByRule),
+        Some("qc_dropped") => Some(SampleStatus::QcDropped),
+        Some("censored_dead") => Some(SampleStatus::CensoredDead),
+        Some("rework") => Some(SampleStatus::Rework),
+        _ => None,
+    };
+    if let Some(status) = explicit {
+        return status;
+    }
+    if event_type == Some("deviation") || event.deviation {
+        return SampleStatus::Failed;
+    }
+    // A stored measurement (`readout.submit` / `readout.batch`) is the readout
+    // itself, so the sample leaves `not_started` and completes that step.
+    if event_type == Some("measurement") {
+        return SampleStatus::Completed;
+    }
+    SampleStatus::InProgress
+}
+
+/// Append the samples a readout measurement names through its units.
+///
+/// `readout.submit` and `readout.batch` record the sample inside each
+/// measurement or result cell, never in the top-level `sample_ids`, so progress
+/// must read the units themselves. A `missing` cell recorded no reading and so
+/// does not start the sample.
+fn merge_reading_samples(samples: &mut Vec<String>, measurements: &[Value], cells: &[Value]) {
+    for measurement in measurements {
+        if measurement["status"].as_str().map(str::trim) == Some("missing") {
+            continue;
         }
-        _ => SampleStatus::InProgress,
+        push_sample(samples, measurement);
+    }
+    for cell in cells {
+        if cell["status"].as_str().map(str::trim) != Some("raw") {
+            continue;
+        }
+        push_sample(samples, cell);
+    }
+}
+
+fn push_sample(samples: &mut Vec<String>, unit: &Value) {
+    let Some(sample) = unit["sample_id"]
+        .as_str()
+        .map(str::trim)
+        .filter(|sample| !sample.is_empty())
+    else {
+        return;
+    };
+    if !samples.iter().any(|known| known == sample) {
+        samples.push(sample.to_owned());
     }
 }
 
@@ -418,11 +468,13 @@ pub fn build_from_workspace(
 
 impl ProgressEvent {
     pub fn from_view(view: &ExecutionEventView) -> Self {
+        let mut sample_ids = view.sample_ids.clone();
+        merge_reading_samples(&mut sample_ids, &view.measurements, &view.result_cells);
         ProgressEvent {
             event_id: view.event_id.clone(),
             step_path: view.protocol_step_path.clone(),
             timepoint: view.timepoint.clone(),
-            sample_ids: view.sample_ids.clone(),
+            sample_ids,
             attempt: view.attempt,
             retry_of_event_id: view
                 .retry_of_event_id
@@ -441,22 +493,25 @@ impl ProgressEvent {
 
     /// Read one stored `execution_event` data object (plus its `id`).
     pub fn from_stored(value: &Value) -> Self {
+        let mut sample_ids: Vec<String> = value["sample_ids"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|sample| !sample.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let units = |key: &str| value[key].as_array().map(Vec::as_slice).unwrap_or_default();
+        merge_reading_samples(&mut sample_ids, units("measurements"), units("result_cells"));
         ProgressEvent {
             event_id: str_field(value, "id").or_else(|| str_field(value, "event_id")).unwrap_or_default(),
             timepoint: str_field(value, "timepoint"),
             step_path: str_field(value, "protocol_step_path"),
-            sample_ids: value["sample_ids"]
-                .as_array()
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::trim)
-                        .filter(|sample| !sample.is_empty())
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default(),
+            sample_ids,
             attempt: value["attempt"].as_u64().map(|attempt| attempt as u32),
             retry_of_event_id: str_field(value, "retry_of_event_id").or_else(|| {
                 value["lineage"]
@@ -1134,5 +1189,104 @@ mod tests {
         assert_eq!(step.rework_samples, 1);
         assert_eq!(sample(step, "active").status, SampleStatus::Active);
         assert_eq!(sample(step, "retry").status, SampleStatus::Rework);
+    }
+
+    #[test]
+    fn sample_progress_projects_rule_skip_from_event_type() {
+        let legacy = ProgressEvent::from_stored(&json!({
+            "id": "skip-1",
+            "event_type": "skipped_by_rule",
+            "protocol_step_path": "root/seed",
+            "sample_ids": ["S1"],
+            "step_status": "skipped",
+            "recorded_at": "2026-11-16T10:00:00Z"
+        }));
+        assert_eq!(legacy.event_type.as_deref(), Some("skipped_by_rule"));
+
+        let progress = build(
+            "run-skip",
+            &[step("root/seed")],
+            &[legacy],
+            &SampleProgressQuery::default(),
+        );
+
+        let step = find(&progress, "root/seed");
+        assert_eq!(sample(step, "S1").status, SampleStatus::SkippedByRule);
+        assert_eq!(step.skipped_by_rule_samples, 1);
+        assert_eq!(step.skipped_samples, 0, "a rule skip is not a plain skip");
+        assert!(step.complete, "a rule-skipped sample does not block completion");
+    }
+
+    #[test]
+    fn sample_progress_advances_readout_measurements_per_sample() {
+        let submit = ProgressEvent::from_stored(&json!({
+            "id": "readout-1",
+            "event_type": "measurement",
+            "protocol_step_path": "root/readout",
+            "timepoint": "D1",
+            "recorded_at": "2026-11-16T10:00:00Z",
+            "measurements": [{
+                "endpoint": "od450",
+                "value": 1.2,
+                "unit": "AU",
+                "sample_id": "S1",
+                "status": "raw"
+            }]
+        }));
+        assert_eq!(submit.sample_ids, vec!["S1".to_owned()], "readout events carry samples in their units");
+
+        let batch = ProgressEvent::from_stored(&json!({
+            "id": "readout-2",
+            "event_type": "measurement",
+            "protocol_step_path": "root/readout",
+            "timepoint": "D1",
+            "recorded_at": "2026-11-16T10:05:00Z",
+            "result_cells": [
+                {
+                    "kind": "cell",
+                    "readout_id": "ro-cck8",
+                    "plate_id": "p1",
+                    "row": 1,
+                    "column": 2,
+                    "field": "od450",
+                    "value": 0.8,
+                    "unit": "AU",
+                    "sample_id": "S2",
+                    "status": "raw"
+                },
+                {
+                    "kind": "cell",
+                    "readout_id": "ro-cck8",
+                    "plate_id": "p1",
+                    "row": 1,
+                    "column": 3,
+                    "field": "od450",
+                    "value": null,
+                    "unit": "AU",
+                    "sample_id": "S3",
+                    "status": "missing"
+                }
+            ]
+        }));
+
+        let progress = build(
+            "run-readout",
+            &[step("root/readout")],
+            &[submit, batch],
+            &SampleProgressQuery::default(),
+        );
+
+        let step = find(&progress, "root/readout");
+        assert_eq!(step.timepoint.as_deref(), Some("D1"));
+        assert_eq!(step.total_samples, 2);
+        assert_eq!(sample(step, "S1").status, SampleStatus::Completed);
+        assert_eq!(sample(step, "S2").status, SampleStatus::Completed);
+        assert_eq!(step.completed_samples, 2);
+        assert_eq!(step.not_started_samples, 0);
+        assert!(step.complete);
+        assert!(
+            step.samples.iter().all(|sample| sample.sample_id != "S3"),
+            "a missing cell is not a measured sample"
+        );
     }
 }
