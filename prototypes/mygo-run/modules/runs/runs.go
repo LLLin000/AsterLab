@@ -30,6 +30,13 @@ type RunService interface {
 	ListAssetLinks(ctx context.Context, runID string) ([]Asset, error)
 	// CompleteTask marks a task completed and returns the persisted snapshot.
 	CompleteTask(ctx context.Context, input CompleteTaskInput) (RunSnapshot, error)
+	// CreateExecutionEvent appends one structured actual event (operation,
+	// material_use, deviation, observation or skipped_by_rule) and returns the
+	// Run's authoritative snapshot plus Core's pantry advisory. It is the native
+	// entry point for execution_event.create: Core owns the freeze checks (step,
+	// sample, attempt and pantry reference), the event identity and the
+	// append-only fact, so the caller never writes a second table.
+	CreateExecutionEvent(ctx context.Context, input ExecutionEventInput) (ExecutionEventResult, error)
 	// WorkflowTree returns Core's read-only hierarchy projection for the
 	// Run's frozen AsterDoc. The JSON is the single contract shared with the
 	// CLI and must be decoded, never rebuilt in Go.
@@ -344,6 +351,97 @@ type CompleteTaskInput struct {
 	// Checks carries the acknowledgements shown in the UI. Core revalidates
 	// blocking checks; completion without them is rejected.
 	Checks []CheckAck `json:"checks,omitempty"`
+}
+
+// ExecutionEventInput is one execution_event.create payload. RunID, EventType
+// and Content are required. EventType is operation, material_use, deviation,
+// observation or skipped_by_rule, and Core keeps its per-type rules: a
+// material_use event needs Materials and a deviation event needs Deviation.
+// Readouts keep their own entry points (SaveReadout and SaveReadoutsBatch);
+// this input carries none, so a measurement event fails Core's validation.
+// A step reference is only valid inside the frozen version, assay or planned
+// output it belongs to, so StepPath also needs ProtocolVersionID and either
+// AssayID or PlannedOutputID; Timepoint belongs to that assay.
+type ExecutionEventInput struct {
+	RunID     string `json:"runId"`
+	EventType string `json:"eventType"`
+	Content   string `json:"content"`
+	// OccurredAt is when the event happened, as a zoned RFC 3339 instant. Empty
+	// means Core stamps the write; an unknown time is never invented.
+	OccurredAt string `json:"occurredAt,omitempty"`
+	// Operator is the person who recorded the event.
+	Operator string `json:"operator,omitempty"`
+	// Samples names the samples the event concerns, using the frozen Run's own
+	// identifiers. Core refers to them as sample_ids.
+	Samples []string `json:"sampleIds,omitempty"`
+	// Attempt is the sample-level repetition (>=1). It is only valid together
+	// with StepPath and at least one sample, and it must be the sample's current
+	// highest attempt or the next one; Core rejects anything else.
+	Attempt *uint32 `json:"attempt,omitempty"`
+	// ActualParameters are the values the operator actually used, for example a
+	// real incubation time. ValueJSON carries the value's exact JSON text, so a
+	// number, string or boolean crosses the boundary unchanged.
+	ActualParameters []EventActualParameter `json:"actualParameters,omitempty"`
+	// Materials are the consumed materials of a material_use event.
+	Materials []EventMaterialUse `json:"materials,omitempty"`
+	// Deviation explains what actually differed. Core requires it for a
+	// deviation event and rejects an empty explanation.
+	Deviation string `json:"deviation,omitempty"`
+	// PantryItemID links the event to one pantry ledger row. An unknown or
+	// retired item is NOT_FOUND; a near-expiry or expired item only adds an
+	// advisory notice and never blocks the write.
+	PantryItemID string `json:"pantryItemId,omitempty"`
+	// Timepoint and StepPath name the frozen step the event belongs to.
+	Timepoint string `json:"timepoint,omitempty"`
+	StepPath  string `json:"stepPath,omitempty"`
+	// ProtocolVersionID, AssayID and PlannedOutputID are the frozen step's
+	// scope. A step event names exactly one assay or one planned output.
+	ProtocolVersionID string `json:"protocolVersionId,omitempty"`
+	AssayID           string `json:"assayId,omitempty"`
+	PlannedOutputID   string `json:"plannedOutputId,omitempty"`
+}
+
+// EventMaterialUse is one material consumed by a material_use event. Amount and
+// Unit are recorded together or not at all. PlannedOutputID names the frozen
+// material manifest entry the material came from.
+type EventMaterialUse struct {
+	Material        string   `json:"material"`
+	PlannedOutputID string   `json:"plannedOutputId,omitempty"`
+	Amount          *float64 `json:"amount,omitempty"`
+	Unit            string   `json:"unit,omitempty"`
+}
+
+// EventActualParameter is one parameter value the operator actually used. The
+// key is the protocol parameter key, ValueJSON its exact JSON value (never
+// null), and Source names where the value came from when that is not obvious.
+type EventActualParameter struct {
+	Key       string `json:"key"`
+	ValueJSON string `json:"valueJson"`
+	Unit      string `json:"unit,omitempty"`
+	Source    string `json:"source,omitempty"`
+}
+
+// PantryNotice is Core's advisory for an event that named a pantry item. It is
+// never a failure: status is near_expiry or expired, and DaysRemaining is
+// negative once overdue. An empty notice list means nothing to report.
+type PantryNotice struct {
+	Code          string `json:"code"`
+	Severity      string `json:"severity"`
+	PantryItemID  string `json:"pantryItemId"`
+	LabelCode     string `json:"labelCode"`
+	Name          string `json:"name"`
+	Status        string `json:"status"`
+	ExpiresOn     string `json:"expiresOn,omitempty"`
+	DaysRemaining *int64 `json:"daysRemaining,omitempty"`
+	NextAction    string `json:"nextAction"`
+}
+
+// ExecutionEventResult is the appended event's Run plus Core's advisory. The
+// snapshot is the authoritative read model of the same write, so a caller never
+// re-derives the event from its input.
+type ExecutionEventResult struct {
+	Snapshot      RunSnapshot    `json:"snapshot"`
+	PantryNotices []PantryNotice `json:"pantryNotices"`
 }
 
 type ProjectSummary struct {

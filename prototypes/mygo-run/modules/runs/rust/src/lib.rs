@@ -219,6 +219,10 @@ impl RunService for CoreRunService {
         Ok(snapshot(v))
     }
 
+    fn create_execution_event(&self, _ctx: &Context, input: ExecutionEventInput) -> Result<ExecutionEventResult, Error> {
+        self.create_execution_event_impl(input)
+    }
+
     fn save_asset_link(&self, _ctx: &Context, input: AssetLinkInput) -> Result<Asset, Error> {
         let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
@@ -314,6 +318,37 @@ impl RunService for CoreRunService {
 /// The bodies behind the RunService methods. They take no context so the tests
 /// can exercise the bridge without the generated Go-side context.
 impl CoreRunService {
+    /// Append one event through Core's own `execution_event.create` writer and
+    /// read the Run back inside the same transaction, so the event, the Run
+    /// status refresh and the projection commit together or not at all. Core
+    /// keeps every freeze rule (step, sample, attempt, pantry reference) and
+    /// its completed-step idempotency; no second fact table is involved.
+    fn create_execution_event_impl(&self, input: ExecutionEventInput) -> Result<ExecutionEventResult, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let event = execution_event_payload(&input)?;
+        let db = core.raw_db();
+        let tx = db.unchecked_transaction().map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        // A pantry reference is resolved before the write, as the CLI does: an
+        // unknown or retired item is NOT_FOUND and nothing is appended.
+        let notice = pantry_event_notice(&tx, &input.pantry_item_id)?;
+        cli_impl::create_execution_event_tx(&tx, &input.run_id, &event).map_err(map_cli)?;
+        let mut value = cli_impl::run_workspace(&tx, &input.run_id).map_err(map_cli)?;
+        let revision: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE kind='execution_event' AND parent_id=?1",
+                [&input.run_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        value["revision"] = serde_json::json!(revision);
+        tx.commit().map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
+        Ok(ExecutionEventResult {
+            snapshot: snapshot(value),
+            pantry_notices: notice.into_iter().collect(),
+        })
+    }
+
     fn save_timer_impl(&self, timer: TimerRecord) -> Result<TimerRecord, Error> {
         let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
@@ -692,6 +727,128 @@ fn pantry_item_from_value(value: &serde_json::Value) -> PantryItem {
         created_at: text_field(value, "created_at"),
         updated_at: text_field(value, "updated_at"),
     }
+}
+
+/// The exact `execution_event.create` payload for one bridge input. Empty
+/// optional fields are omitted instead of stored as empty strings, so the
+/// caller never has to distinguish "not recorded" from "recorded as blank".
+/// `skipped_by_rule` carries Core's mandatory `step_status=skipped` itself: the
+/// event type is the datum, and the caller must not repeat it.
+fn execution_event_payload(input: &ExecutionEventInput) -> Result<serde_json::Value, Error> {
+    let mut event = serde_json::json!({
+        "run_id": input.run_id,
+        "event_type": input.event_type,
+        "content": input.content,
+    });
+    if !input.occurred_at.is_empty() {
+        event["occurred_at"] = serde_json::json!(input.occurred_at);
+    }
+    if !input.operator.is_empty() {
+        event["operator"] = serde_json::json!(input.operator);
+    }
+    if !input.samples.is_empty() {
+        event["sample_ids"] = serde_json::json!(input.samples);
+    }
+    if let Some(attempt) = input.attempt {
+        event["attempt"] = serde_json::json!(attempt);
+    }
+    if !input.actual_parameters.is_empty() {
+        let mut parameters = Vec::with_capacity(input.actual_parameters.len());
+        for parameter in &input.actual_parameters {
+            let value: serde_json::Value = serde_json::from_str(&parameter.value_json)
+                .map_err(|e| Error::Go(format!("INVALID: 实际参数 {} 的值不是合法 JSON：{e}", parameter.key)))?;
+            if value.is_null() {
+                return Err(Error::Go(format!("INVALID: 实际参数 {} 的值不能为 null", parameter.key)));
+            }
+            let mut entry = serde_json::json!({"key": parameter.key, "value": value});
+            if !parameter.unit.is_empty() {
+                entry["unit"] = serde_json::json!(parameter.unit);
+            }
+            if !parameter.source.is_empty() {
+                entry["source"] = serde_json::json!(parameter.source);
+            }
+            parameters.push(entry);
+        }
+        event["actual_parameters"] = serde_json::json!(parameters);
+    }
+    if !input.materials.is_empty() {
+        let materials: Vec<serde_json::Value> = input
+            .materials
+            .iter()
+            .map(|material| {
+                let mut entry = serde_json::json!({"material": material.material});
+                if !material.planned_output_id.is_empty() {
+                    entry["planned_output_id"] = serde_json::json!(material.planned_output_id);
+                }
+                if let Some(amount) = material.amount {
+                    entry["amount"] = serde_json::json!(amount);
+                }
+                if !material.unit.is_empty() {
+                    entry["unit"] = serde_json::json!(material.unit);
+                }
+                entry
+            })
+            .collect();
+        event["materials"] = serde_json::json!(materials);
+    }
+    if !input.deviation.is_empty() {
+        event["deviation"] = serde_json::json!(input.deviation);
+    }
+    if !input.pantry_item_id.is_empty() {
+        event["pantry_item_id"] = serde_json::json!(input.pantry_item_id);
+    }
+    if !input.timepoint.is_empty() {
+        event["timepoint"] = serde_json::json!(input.timepoint);
+    }
+    if !input.step_path.is_empty() {
+        event["protocol_step_path"] = serde_json::json!(input.step_path);
+    }
+    if !input.protocol_version_id.is_empty() {
+        event["protocol_version_id"] = serde_json::json!(input.protocol_version_id);
+    }
+    if !input.assay_id.is_empty() {
+        event["assay_id"] = serde_json::json!(input.assay_id);
+    }
+    if !input.planned_output_id.is_empty() {
+        event["planned_output_id"] = serde_json::json!(input.planned_output_id);
+    }
+    if input.event_type == "skipped_by_rule" {
+        event["step_status"] = serde_json::json!("skipped");
+    }
+    Ok(event)
+}
+
+/// Core's advisory for an event that named a pantry item, resolved through the
+/// same ledger read `pantry.list` uses: an unknown or retired item is
+/// `NOT_FOUND`, and a near-expiry or expired one adds one advisory notice.
+/// The notice never blocks the event write.
+fn pantry_event_notice(db: &rusqlite::Connection, item_id: &str) -> Result<Option<PantryNotice>, Error> {
+    let item_id = item_id.trim();
+    if item_id.is_empty() {
+        return Ok(None);
+    }
+    let ledger = cli_impl::pantry_list(db, &cli_impl::PantryQueryInput::default()).map_err(map_cli)?;
+    let item = ledger["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|item| item["id"].as_str() == Some(item_id))
+        .ok_or_else(|| Error::Go(format!("NOT_FOUND: 储藏室条目不存在：{item_id}")))?;
+    let status = item["status"].as_str().unwrap_or_default();
+    if !matches!(status, "near_expiry" | "expired") {
+        return Ok(None);
+    }
+    Ok(Some(PantryNotice {
+        code: "pantry_item_expiry_notice".into(),
+        severity: "advisory".into(),
+        pantry_item_id: item_id.to_owned(),
+        label_code: text_field(item, "label_code"),
+        name: text_field(item, "name"),
+        status: status.to_owned(),
+        expires_on: text_field(item, "expires_on"),
+        days_remaining: item["days_remaining"].as_i64(),
+        next_action: "核对或更换该储藏室条目；提示不阻断事件写入".into(),
+    }))
 }
 
 fn record_error(error: RecordCommandError) -> Error {
@@ -1678,6 +1835,52 @@ mod tests {
         Seeded { design_id, design_version_id, run_id, note_id }
     }
 
+    /// A frozen Run whose protocol manifest declares one assay step, so step
+    /// references can be accepted or rejected against a real frozen list.
+    fn seed_frozen_step_run(protocol_version_id: &str, assay_id: &str, step_path: &str) -> Seeded {
+        let seeded = seed_run(false, false);
+        let db = cli_impl::open_db(&data_dir()).expect("open db");
+        let raw: String = db
+            .query_row(
+                "SELECT data_json FROM records WHERE id=?1",
+                [&seeded.run_id],
+                |row| row.get(0),
+            )
+            .expect("run data");
+        let mut data: serde_json::Value = serde_json::from_str(&raw).expect("run JSON");
+        data["protocol_manifest"] = serde_json::json!([{
+            "assay_id": assay_id,
+            "assay_title": "Assay",
+            "protocol_version_id": protocol_version_id,
+            "steps": [{
+                "path": step_path,
+                "use_id": "use-1",
+                "title": "Incubate",
+                "instruction": "Incubate the plate",
+                "parameters": [],
+                "unresolved_parameter_refs": [],
+                "source_block_version_id": "block-1"
+            }]
+        }]);
+        db.execute(
+            "UPDATE records SET data_json=?2 WHERE id=?1",
+            rusqlite::params![&seeded.run_id, data.to_string()],
+        )
+        .expect("update run manifest");
+        seeded
+    }
+
+    fn event_count(run_id: &str) -> i64 {
+        cli_impl::open_db(&data_dir())
+            .expect("open db")
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE kind='execution_event' AND parent_id=?1",
+                [run_id],
+                |row| row.get(0),
+            )
+            .expect("count events")
+    }
+
     fn service() -> CoreRunService {
         let core = AppCore::open(&data_dir()).expect("open core");
         ensure_module_tables(core.raw_db()).expect("module tables");
@@ -1778,6 +1981,152 @@ mod tests {
                 ..PantryUpsert::default()
             })
             .is_err(), "a retired item must not be revived");
+    }
+
+    /// A skipped step is one appended event, not a second status column: the
+    /// frozen step, the samples, the attempt and the actual parameters all come
+    /// back from the same write.
+    #[test]
+    fn skipped_by_rule_event_is_appended_and_projects_a_skipped_step() {
+        let seeded = seed_frozen_step_run("pv-1", "assay-1", "01-incubate");
+        let svc = service();
+        let result = svc
+            .create_execution_event_impl(ExecutionEventInput {
+                run_id: seeded.run_id.clone(),
+                event_type: "skipped_by_rule".into(),
+                content: "Confluency below 70%, rule R3 skips the passage".into(),
+                samples: vec!["S1".into()],
+                attempt: Some(1),
+                actual_parameters: vec![EventActualParameter {
+                    key: "confluency_pct".into(),
+                    value_json: "62".into(),
+                    unit: "%".into(),
+                    source: "microscope".into(),
+                }],
+                step_path: "01-incubate".into(),
+                protocol_version_id: "pv-1".into(),
+                assay_id: "assay-1".into(),
+                operator: "operator-1".into(),
+                ..ExecutionEventInput::default()
+            })
+            .expect("append skipped_by_rule event");
+
+        assert!(result.pantry_notices.is_empty(), "no pantry reference, no advisory");
+        let event = result
+            .snapshot
+            .events
+            .iter()
+            .find(|event| event.event_type == "skipped_by_rule")
+            .expect("the skip is in the read model");
+        assert_eq!(event.step_status, "skipped", "Core's mandatory skip status");
+        assert_eq!(event.protocol_step_path, "01-incubate");
+        assert_eq!(event.task_key, "");
+        let data: serde_json::Value = serde_json::from_str(&event.data_json).expect("event JSON");
+        assert_eq!(data["sample_ids"], serde_json::json!(["S1"]));
+        assert_eq!(data["attempt"], 1);
+        assert_eq!(data["actual_parameters"][0]["value"], 62);
+        assert_eq!(data["actual_parameters"][0]["unit"], "%");
+        assert_eq!(data["actual_parameters"][0]["source"], "microscope");
+        let task = result
+            .snapshot
+            .tasks
+            .iter()
+            .find(|task| task.path == "01-incubate")
+            .expect("the frozen step is a task");
+        assert_eq!(task.status, "skipped");
+        assert_eq!(event_count(&seeded.run_id), 1, "one append-only fact");
+    }
+
+    #[test]
+    fn unknown_step_is_rejected_and_writes_nothing() {
+        let seeded = seed_frozen_step_run("pv-1", "assay-1", "01-incubate");
+        let svc = service();
+        let error = svc
+            .create_execution_event_impl(ExecutionEventInput {
+                run_id: seeded.run_id.clone(),
+                event_type: "skipped_by_rule".into(),
+                content: "Skip the wash".into(),
+                step_path: "02-wash".into(),
+                protocol_version_id: "pv-1".into(),
+                assay_id: "assay-1".into(),
+                ..ExecutionEventInput::default()
+            })
+            .expect_err("a step outside the frozen list must be rejected");
+        let message = format!("{error:?}");
+        assert!(message.contains("INVALID"), "{message}");
+        assert!(message.contains("Protocol 步骤引用"), "{message}");
+        assert_eq!(event_count(&seeded.run_id), 0, "nothing is appended");
+    }
+
+    #[test]
+    fn expired_pantry_item_only_adds_an_advisory_notice() {
+        let seeded = seed_frozen_step_run("pv-1", "assay-1", "01-incubate");
+        let svc = service();
+        let item = svc
+            .upsert_pantry_impl(PantryUpsert {
+                name: "Anti-CD3 antibody".into(),
+                location: "fridge-1".into(),
+                purchased_on: "2020-01-01".into(),
+                shelf_life_days: Some(1),
+                ..PantryUpsert::default()
+            })
+            .expect("upsert pantry");
+
+        let result = svc
+            .create_execution_event_impl(ExecutionEventInput {
+                run_id: seeded.run_id.clone(),
+                event_type: "deviation".into(),
+                content: "Incubated 12 minutes instead of 10".into(),
+                deviation: "The plate stayed in the incubator two minutes longer".into(),
+                pantry_item_id: item.id.clone(),
+                step_path: "01-incubate".into(),
+                protocol_version_id: "pv-1".into(),
+                assay_id: "assay-1".into(),
+                ..ExecutionEventInput::default()
+            })
+            .expect("an expired pantry item must not block the event");
+
+        assert_eq!(result.pantry_notices.len(), 1);
+        let notice = &result.pantry_notices[0];
+        assert_eq!(notice.code, "pantry_item_expiry_notice");
+        assert_eq!(notice.severity, "advisory");
+        assert_eq!(notice.pantry_item_id, item.id);
+        assert_eq!(notice.label_code, item.label_code);
+        assert_eq!(notice.status, "expired");
+        assert!(notice.days_remaining.is_some_and(|days| days < 0));
+        let event = result
+            .snapshot
+            .events
+            .iter()
+            .find(|event| event.event_type == "deviation")
+            .expect("the deviation is in the read model");
+        assert_eq!(event.protocol_step_path, "01-incubate");
+        let data: serde_json::Value = serde_json::from_str(&event.data_json).expect("event JSON");
+        assert_eq!(data["deviation"], "The plate stayed in the incubator two minutes longer");
+        // The pantry reference is stored on the append-only record; the Run read
+        // model reports it as the advisory above.
+        let stored: String = cli_impl::open_db(&data_dir())
+            .expect("open db")
+            .query_row(
+                "SELECT data_json FROM records WHERE kind='execution_event' AND parent_id=?1",
+                [&seeded.run_id],
+                |row| row.get(0),
+            )
+            .expect("stored event");
+        let stored: serde_json::Value = serde_json::from_str(&stored).expect("stored JSON");
+        assert_eq!(stored["pantry_item_id"], item.id);
+
+        let error = svc
+            .create_execution_event_impl(ExecutionEventInput {
+                run_id: seeded.run_id.clone(),
+                event_type: "observation".into(),
+                content: "Looks confluent".into(),
+                pantry_item_id: "missing-item".into(),
+                ..ExecutionEventInput::default()
+            })
+            .expect_err("an unknown pantry item is NOT_FOUND");
+        assert!(format!("{error:?}").contains("NOT_FOUND"), "{error:?}");
+        assert_eq!(event_count(&seeded.run_id), 1, "the rejected reference wrote nothing");
     }
 
     #[test]
