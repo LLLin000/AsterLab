@@ -62,6 +62,33 @@ func View(c *ui.Context, inst Instance) {
 				})
 			}
 		})
+	case TypePlate12:
+		var p Plate12Props
+		_ = inst.DecodeProps(&p)
+		if p.Rows == 0 {
+			p.Rows = 3
+		}
+		if p.Cols == 0 {
+			p.Cols = 4
+		}
+		ui.Column(c).Gap(2).Children(func() {
+			ui.Text(c, fmt.Sprintf("Plate %dx%d selected=%d", p.Rows, p.Cols, len(p.Selected)))
+			for i := range p.Rows {
+				ui.Row(c).Gap(2).Children(func() {
+					for j := range p.Cols {
+						idx := i*p.Cols + j
+						mark := "."
+						if containsInt(p.Selected, idx) {
+							mark = "X"
+						}
+						if lbl, ok := p.Labels[idx]; ok && lbl != "" {
+							mark = lbl
+						}
+						ui.Text(c, mark)
+					}
+				})
+			}
+		})
 	case TypeDilutionCalculator:
 		var p DilutionProps
 		_ = inst.DecodeProps(&p)

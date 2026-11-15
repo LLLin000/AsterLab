@@ -23,14 +23,16 @@ type Props struct {
 	SelectedIDs []string
 	OnSelect    func(wellIDs []string)
 	Interactive bool
+	Rows        int
+	Cols        int
 }
 
 const (
-	rows = 8
-	cols = 12
+	defaultRows = 8
+	defaultCols = 12
 )
 
-var rowLabels = [rows]string{"A", "B", "C", "D", "E", "F", "G", "H"}
+var rowLabels = [...]string{"A", "B", "C", "D", "E", "F", "G", "H"}
 
 func wellID(row, col int) string {
 	return fmt.Sprintf("%s%d", rowLabels[row], col+1)
@@ -108,6 +110,16 @@ func View(c *ui.Context, props Props) {
 	dark := th != nil && th.Dark
 	var lastHitWell, lastHoverWell string
 
+	rows, cols := props.Rows, props.Cols
+	if rows == 0 {
+		rows = defaultRows
+	}
+	if cols == 0 {
+		cols = defaultCols
+	}
+	if rows < 1 || rows > len(rowLabels) || cols < 1 || cols > defaultCols {
+		rows, cols = defaultRows, defaultCols
+	}
 	wellSize := float32(22)
 	gap := float32(5)
 	labelSize := th.Rem(.78)
@@ -238,6 +250,6 @@ func View(c *ui.Context, props Props) {
 				}
 			})
 		}
-		ui.Text(c, fmt.Sprintf("%d / 96 孔已分配 · 单击选择，Shift+单击多选", len(props.Wells))).FontSize(th.Rem(.75)).TextColor(t.TextMuted)
+		ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 单击选择，Shift+单击多选", len(props.Wells), rows*cols)).FontSize(th.Rem(.75)).TextColor(t.TextMuted)
 	})
 }
