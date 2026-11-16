@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"image"
+	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
@@ -137,8 +140,9 @@ func boardTestSnap(runID string) (runs.RunSnapshot, []runs.Asset) {
 				BatchID: "batch-1", OccurredAt: "2026-11-10T16:00:00+08:00",
 				RecordedAt: "2026-11-10T16:01:00+08:00",
 				ResultCells: []runs.ResultCell{
-					{Row: 0, Column: 0, SampleID: "S1", Field: "OD450", Value: new(0.82)},
-					{Row: 0, Column: 1, SampleID: "S2", Field: "OD450", Value: new(0.91)},
+					{Row: 0, Column: 0, SampleID: "S1", Group: "3%", Field: "OD450", Value: new(0.82)},
+					{Row: 0, Column: 1, SampleID: "S2", Group: "5%", Field: "OD450", Value: new(0.91)},
+					{Row: 0, Column: 2, SampleID: "S3", Field: "OD450", Value: new(0.77)},
 				},
 			},
 			{ID: "note-1", Stage: "notebook", Content: "# 研判\n\n贴壁良好 @matrix(6h)", RecordedAt: "2026-11-10T17:00:00Z"},
@@ -166,7 +170,8 @@ func TestNotebookBoardRendersSharedProjection(t *testing.T) {
 	}
 	tt.Frame()
 	for _, want := range []string{
-		"记录图板", "计划 vs 实际", "任务完成 1/1", "矩阵实测值", "代表视野矩阵",
+		"记录图板", "计划 vs 实际", "任务完成 1/1", "矩阵实测值", "代表视野（分组",
+		"代表视野矩阵", "3%", "5%", "未分组", "6h",
 		"固化秒数", "FOV 1", "FOV 6", "缺", "派生设计", "签核归档", "@matrix(6h)",
 	} {
 		if !tt.HasText(want) {
@@ -186,6 +191,55 @@ func TestNotebookBoardRendersSharedProjection(t *testing.T) {
 	}
 }
 
+// TestNotebookGroupBoardDecodesPreviews pins the inline image path: a
+// coordinated asset whose file exists decodes into the board cache and
+// renders in the group matrix, while a missing file stays an explicit gap
+// instead of failing the frame.
+func TestNotebookGroupBoardDecodesPreviews(t *testing.T) {
+	dir := t.TempDir()
+	pngPath := filepath.Join(dir, "fov1.png")
+	file, err := os.Create(pngPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(file, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snap, assets := boardTestSnap("run-board-img")
+	assets = append(assets, runs.Asset{
+		ID: "img-real", RootID: "root-1", RelativePath: "fov1.png", MediaType: "image",
+		Link: runs.AssetLink{RunID: "run-board-img", WellID: "A1", Timepoint: "6h", FOVIndex: 3},
+	})
+	a := &app{snap: snap, runAssets: assets, assetRoots: map[string]string{"root-1": dir}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1200, 760)
+	tt.Frame()
+	if err := tt.Click("图板"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	// The 3% x 6h slot shows A1; with FOV 3 selected it previews the real file.
+	if err := tt.Click("FOV 3"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if src := a.recordBoard().imgs["img-real"]; src == nil {
+		t.Fatalf("real image was not decoded into the board cache: %q", tt.Texts())
+	}
+	if a.recordBoard().imgFailed["img-real"] {
+		t.Fatal("decodable image marked failed")
+	}
+	// The fixture images have no roots configured: explicit gap text, no crash.
+	if a.recordBoard().imgFailed["img-1"] && a.recordBoard().imgs["img-1"] != nil {
+		t.Fatal("missing file produced a preview")
+	}
+}
+
 func TestNotebookSignLocksAndUnlockRestores(t *testing.T) {
 	snap, assets := boardTestSnap("run-seal-1")
 	svc := &sealStubSvc{snap: snap}
@@ -193,7 +247,9 @@ func TestNotebookSignLocksAndUnlockRestores(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
 		notebookPage(c, a)
-	}, 1200, 760)
+		// The board is a scrolling surface; the taller window keeps the
+		// sign-off controls in reach without changing what is asserted.
+	}, 1200, 1050)
 	tt.Frame()
 	if err := tt.Click("图板"); err != nil {
 		t.Fatal(err)

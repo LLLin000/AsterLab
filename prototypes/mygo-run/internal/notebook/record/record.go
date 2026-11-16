@@ -67,15 +67,81 @@ type MatrixImage struct {
 }
 
 // MatrixCell is one representative Well x Timepoint cell. Images holds the
-// FOV 1..6 slots in order; an unfilled slot is a gap.
+// FOV 1..6 slots in order; an unfilled slot is a gap. Groups names the
+// explicit assay groups measured in the well (ResultCell.Group only, never
+// inferred); a cell with no recorded group reads as ungrouped.
 type MatrixCell struct {
 	Well      string
 	Samples   []string
+	Groups    []string
 	Timepoint string
 	Values    []Measure
 	Images    [FOVSlots]MatrixImage
 	Overflow  int
 	TaskKeys  []string
+}
+
+// InGroup reports whether the cell belongs to the named group. The empty
+// group selects cells with no recorded group.
+func (cell MatrixCell) InGroup(group string) bool {
+	if group == "" {
+		return len(cell.Groups) == 0
+	}
+	for _, g := range cell.Groups {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
+// RepresentativeGroup picks the cell a group x timepoint slot shows: the
+// first well (in matrix order) whose selected FOV slot is filled, falling
+// back to the first well of the slot. ok is false when the slot has no cell
+// at all. The returned image is nil for a gap.
+func (proj RecordProjection) RepresentativeGroup(group, timepoint string, fov int) (MatrixCell, *MatrixImage, bool) {
+	var first *MatrixCell
+	for i := range proj.Matrix {
+		cell := &proj.Matrix[i]
+		if cell.Timepoint != timepoint || !cell.InGroup(group) {
+			continue
+		}
+		if first == nil {
+			first = cell
+		}
+		if img := cell.Representative(fov); img != nil {
+			return *cell, img, true
+		}
+	}
+	if first == nil {
+		return MatrixCell{}, nil, false
+	}
+	return *first, first.Representative(fov), true
+}
+
+// Groups lists every explicit assay group in the matrix, sorted, with the
+// ungrouped bucket ("") last when any cell has no recorded group.
+func (proj RecordProjection) Groups() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	ungrouped := false
+	for _, cell := range proj.Matrix {
+		if len(cell.Groups) == 0 {
+			ungrouped = true
+			continue
+		}
+		for _, g := range cell.Groups {
+			if !seen[g] {
+				seen[g] = true
+				out = append(out, g)
+			}
+		}
+	}
+	sort.Strings(out)
+	if ungrouped {
+		out = append(out, "")
+	}
+	return out
 }
 
 // Representative returns the image for the given 1-based FOV slot, or nil when
@@ -205,6 +271,7 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 
 	// Wells from result cells, row-major.
 	wellSamples := map[string]map[string]bool{}
+	wellGroups := map[string]map[string]bool{}
 	wellOrder := []string{}
 	cellEvents := map[string]map[string]bool{} // well -> timepoint -> true
 	cellValues := map[string][]Measure{}       // well\x00timepoint -> values
@@ -217,10 +284,14 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 			well := wellLabel(rc.Row, rc.Column)
 			if wellSamples[well] == nil {
 				wellSamples[well] = map[string]bool{}
+				wellGroups[well] = map[string]bool{}
 				wellOrder = append(wellOrder, well)
 			}
 			if strings.TrimSpace(rc.SampleID) != "" {
 				wellSamples[well][rc.SampleID] = true
+			}
+			if group := strings.TrimSpace(rc.Group); group != "" {
+				wellGroups[well][group] = true
 			}
 			tp := ev.Timepoint
 			if cellEvents[well] == nil {
@@ -279,13 +350,18 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 				samples = append(samples, s)
 			}
 			sort.Strings(samples)
+			groups := []string{}
+			for g := range wellGroups[well] {
+				groups = append(groups, g)
+			}
+			sort.Strings(groups)
 			tasks := []string{}
 			for k := range cellTasks[key] {
 				tasks = append(tasks, k)
 			}
 			sort.Strings(tasks)
 			proj.Matrix = append(proj.Matrix, MatrixCell{
-				Well: well, Samples: samples, Timepoint: tp,
+				Well: well, Samples: samples, Groups: groups, Timepoint: tp,
 				Values:   cellValues[key],
 				TaskKeys: tasks,
 			})

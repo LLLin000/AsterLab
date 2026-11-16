@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"asterlab-mygo-prototype/internal/assets"
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/notebook"
 	"asterlab-mygo-prototype/internal/notebook/record"
@@ -76,6 +77,11 @@ func (a *app) noteView() *noteViewState {
 // Well x Timepoint matrix shows. It names no fact; the projection owns the data.
 type recordBoardView struct {
 	fov int
+	// imgs caches decoded previews by asset ID so frames never re-read the
+	// files; imgFailed remembers unloadable assets to avoid retrying them
+	// every frame. Both are view caches only, never facts.
+	imgs      map[string]ui.ImageSource
+	imgFailed map[string]bool
 }
 
 // recordBoards keys board state by Run so switching Runs never leaks one
@@ -85,11 +91,17 @@ var recordBoards = map[string]*recordBoardView{}
 func (a *app) recordBoard() *recordBoardView {
 	st := recordBoards[a.snap.RunID]
 	if st == nil {
-		st = &recordBoardView{fov: 1}
+		st = &recordBoardView{fov: 1, imgs: map[string]ui.ImageSource{}, imgFailed: map[string]bool{}}
 		recordBoards[a.snap.RunID] = st
 	}
 	if st.fov < 1 || st.fov > record.FOVSlots {
 		st.fov = 1
+	}
+	if st.imgs == nil {
+		st.imgs = map[string]ui.ImageSource{}
+	}
+	if st.imgFailed == nil {
+		st.imgFailed = map[string]bool{}
 	}
 	return st
 }
@@ -1162,6 +1174,7 @@ func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 						FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).FontFeatures("tnum")
 				})
 				a.recordSummarySection(c, t, tokens, proj)
+				a.recordGroupBoardSection(c, t, tokens, proj, board)
 				a.recordMatrixSection(c, t, tokens, proj, board)
 				a.recordRefsSection(c, t, tokens, proj, sealed)
 				a.recordDerivedSection(c, t, tokens, proj)
@@ -1500,4 +1513,88 @@ func (a *app) exportRecordFile(c *ui.Context, title, filename, content string) {
 		return
 	}
 	c.AddToast(ui.Toast{Title: filename + " 已保存", Description: path, Type: components.ToastSuccess})
+}
+// recordImageSource resolves a matrix image to a decoded preview, cached per
+// Run on the board view. Anything unloadable (unconfigured root, missing
+// file, undecodable bytes) returns nil and is remembered, so the board shows
+// an explicit gap instead of retrying every frame.
+func (a *app) recordImageSource(board *recordBoardView, img record.MatrixImage) ui.ImageSource {
+	if src, ok := board.imgs[img.AssetID]; ok {
+		return src
+	}
+	if board.imgFailed[img.AssetID] {
+		return nil
+	}
+	fail := func() ui.ImageSource {
+		board.imgFailed[img.AssetID] = true
+		return nil
+	}
+	if strings.TrimSpace(img.RootID) == "" || strings.TrimSpace(img.RelativePath) == "" {
+		return fail()
+	}
+	path, err := assets.Roots(a.assetRoots).Resolve(assets.Asset{RootID: img.RootID, RelativePath: img.RelativePath})
+	if err != nil {
+		return fail()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fail()
+	}
+	src, err := ui.DecodeImage(data)
+	if err != nil {
+		return fail()
+	}
+	board.imgs[img.AssetID] = src
+	return src
+}
+
+// recordGroupBoardSection renders the representative-view matrix the design
+// doc requires: assay group rows (ResultCell.Group only; wells without a
+// recorded group read as an explicit 未分组 row) by timepoint columns, each
+// slot showing the selected FOV's inline preview or an explicit gap. Group
+// identity is never inferred from filenames or samples.
+func (a *app) recordGroupBoardSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection, board *recordBoardView) {
+	recordBoardSection(c, t, fmt.Sprintf("代表视野（分组 × 时间点 · FOV %d）", board.fov))
+	groups := proj.Groups()
+	if len(groups) == 0 || len(proj.Timepoints) == 0 {
+		ui.Text(c, "无分组矩阵数据。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+		return
+	}
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+		ui.Text(c, "分组 ＼ 时间点").FontSize(float32(tokens.TextData)).Bold().TextColor(t.TextMuted)
+		for _, tp := range proj.Timepoints {
+			tp := tp
+			ui.Text(c, tp).FontSize(float32(tokens.TextData)).Bold().TextColor(t.TextMuted)
+		}
+	})
+	for _, group := range groups {
+		group := group
+		label := group
+		if label == "" {
+			label = "未分组"
+		}
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Text(c, label).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
+			for _, tp := range proj.Timepoints {
+				tp := tp
+				cell, img, ok := proj.RepresentativeGroup(group, tp, board.fov)
+				if !ok {
+					ui.Text(c, "—").FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+					continue
+				}
+				ui.Column(c).Width(140).Gap(t.Space(.5)).Children(func() {
+					if img != nil {
+						if src := a.recordImageSource(board, *img); src != nil {
+							ui.Image(c, src).Size(132, 96).Fit(ui.Contain)
+						} else {
+							ui.Text(c, "图不可读").FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+						}
+					} else {
+						ui.Text(c, "缺").FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+					}
+					ui.Text(c, cell.Well).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+				})
+			}
+		})
+	}
 }

@@ -419,3 +419,61 @@ func TestOneStoredMeasurementYieldsOneSummaryRow(t *testing.T) {
 		t.Fatalf("DataJSON parameters lost: %+v", proj.Summary[0].Actual)
 	}
 }
+
+// TestGroupsComeFromResultCellsOnly pins explicit group identity: cell groups
+// derive from ResultCell.Group alone, never from filenames or samples, and
+// RepresentativeGroup prefers the filled FOV slot within the slot's wells.
+func TestGroupsComeFromResultCellsOnly(t *testing.T) {
+	snap := runs.RunSnapshot{
+		RunID: "run-1", DesignID: "design-1", DesignRevision: 3,
+		Tasks: []runs.RunTask{
+			{Key: "task-image", Title: "采图", Timepoint: "6h", Status: "in_progress"},
+		},
+		Events: []runs.RunEvent{
+			{
+				ID: "evt-1", EventType: "measurement", TaskKey: "task-image", Timepoint: "6h",
+				OccurredAt: "2026-11-10T16:00:00+08:00", RecordedAt: "2026-11-10T16:01:00+08:00",
+				ResultCells: []runs.ResultCell{
+					{Row: 0, Column: 0, SampleID: "S1", Group: "3%", Field: "OD450", Value: new(0.82)},
+					{Row: 0, Column: 1, SampleID: "S2", Group: "5%", Field: "OD450", Value: new(0.91)},
+					{Row: 0, Column: 2, SampleID: "S3", Field: "OD450", Value: new(0.77)},
+				},
+			},
+		},
+	}
+	assets := []runs.Asset{
+		{ID: "img-a2", RelativePath: "run/6h/A2-fov1.png", MediaType: "image",
+			Link: runs.AssetLink{RunID: "run-1", WellID: "A2", Timepoint: "6h", FOVIndex: 1}},
+	}
+	proj := Project(snap, assets)
+	byWell := map[string]MatrixCell{}
+	for _, cell := range proj.Matrix {
+		byWell[cell.Well] = cell
+	}
+	if !reflect.DeepEqual(byWell["A1"].Groups, []string{"3%"}) {
+		t.Fatalf("A1 groups = %+v", byWell["A1"].Groups)
+	}
+	if !reflect.DeepEqual(byWell["A2"].Groups, []string{"5%"}) {
+		t.Fatalf("A2 groups = %+v", byWell["A2"].Groups)
+	}
+	if len(byWell["A3"].Groups) != 0 {
+		t.Fatalf("A3 groups = %+v, want ungrouped", byWell["A3"].Groups)
+	}
+	if got := proj.Groups(); !reflect.DeepEqual(got, []string{"3%", "5%", ""}) {
+		t.Fatalf("groups = %+v", got)
+	}
+	// The 5% slot shows A2 with its filled FOV 1.
+	cell, img, ok := proj.RepresentativeGroup("5%", "6h", 1)
+	if !ok || cell.Well != "A2" || img == nil || img.AssetID != "img-a2" {
+		t.Fatalf("representative = %+v %+v %v", cell, img, ok)
+	}
+	// The 3% slot exists but its FOV 1 is a gap.
+	_, img, ok = proj.RepresentativeGroup("3%", "6h", 1)
+	if !ok || img != nil {
+		t.Fatalf("expected a gap, got %+v %v", img, ok)
+	}
+	// Unknown timepoints select nothing.
+	if _, _, ok := proj.RepresentativeGroup("5%", "12h", 1); ok {
+		t.Fatal("unknown timepoint selected a cell")
+	}
+}
