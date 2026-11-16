@@ -7681,6 +7681,25 @@ struct InVivoDosingCalc {
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct BiofilmCfuPlate {
+    raw_id: String,
+    sample_id: String,
+    colonies: f64,
+    dilution_fractions: Vec<f64>,
+    plated_volume: f64,
+    plated_unit: String,
+    suspension_volume: f64,
+    suspension_unit: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BiofilmCfuCalc {
+    plates: Vec<BiofilmCfuPlate>,
+    countable_min: f64,
+    countable_max: f64,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StudyImport {
     project: ProjectCreate,
     #[serde(default)]
@@ -11231,6 +11250,156 @@ fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value, CliError> 
             "assumption": "体重是输入值而非估算；余量只放大配制管，不放大单只注射量；母液过稀导致剂量装不进制备体积时整体拒绝；未计注射器死体积或浓度复核"
         }));
     }
+    if tool == "calculator.biofilm_cfu" {
+        let i: BiofilmCfuCalc = parse_input(path)?;
+        if i.plates.is_empty() || i.plates.len() > 100 {
+            return Err(CliError::input("每板记录需要 1–100 项"));
+        }
+        for (label, bound) in [("计数下限", i.countable_min), ("计数上限", i.countable_max)] {
+            if !(bound.is_finite() && bound >= 0.0 && bound.fract() == 0.0) {
+                return Err(CliError::input(format!("{label}必须是大于等于 0 的整数")));
+            }
+        }
+        if i.countable_min > i.countable_max {
+            return Err(CliError::input("计数下限不能大于计数上限"));
+        }
+        struct CfuPlate {
+            raw_id: String,
+            sample_id: String,
+            colonies: f64,
+            total_dilution: f64,
+            plated_ml: f64,
+            suspension_ml: f64,
+        }
+        let mut seen_raw = std::collections::HashSet::new();
+        let mut suspensions: std::collections::HashMap<String, f64> =
+            std::collections::HashMap::new();
+        let mut parsed: Vec<CfuPlate> = Vec::with_capacity(i.plates.len());
+        for plate in &i.plates {
+            check_text(&plate.raw_id, "每板 raw ID", 160)?;
+            check_text(&plate.sample_id, "样品 ID", 120)?;
+            let raw_id = plate.raw_id.trim().to_owned();
+            let sample_id = plate.sample_id.trim().to_owned();
+            if !seen_raw.insert(raw_id.clone()) {
+                return Err(CliError::input(format!("重复的每板 raw ID：{raw_id}")));
+            }
+            if !(plate.colonies.is_finite() && plate.colonies >= 0.0 && plate.colonies.fract() == 0.0)
+            {
+                return Err(CliError::input("菌落数必须是大于等于 0 的整数"));
+            }
+            if plate.dilution_fractions.is_empty() || plate.dilution_fractions.len() > 30 {
+                return Err(CliError::input("每板逐管稀释分数需要 1–30 项"));
+            }
+            let mut total_dilution = 1.0f64;
+            for fraction in &plate.dilution_fractions {
+                if !(*fraction > 0.0 && *fraction <= 1.0) {
+                    return Err(CliError::input("逐管稀释分数必须在 (0, 1] 内"));
+                }
+                total_dilution *= *fraction;
+            }
+            if !(plate.plated_volume.is_finite() && plate.plated_volume > 0.0) {
+                return Err(CliError::input("涂布体积必须是正数"));
+            }
+            if !(plate.suspension_volume.is_finite() && plate.suspension_volume > 0.0) {
+                return Err(CliError::input("悬液体积必须是正数"));
+            }
+            // volume_factor returns liters; CFU arithmetic is in mL.
+            let plated_ml = plate.plated_volume * volume_factor(&plate.plated_unit)? * 1000.0;
+            let suspension_ml = plate.suspension_volume * volume_factor(&plate.suspension_unit)? * 1000.0;
+            match suspensions.get(&sample_id) {
+                Some(known) if (known - suspension_ml).abs() <= 1e-9 * known.max(1.0) => {}
+                Some(_) => {
+                    return Err(CliError::input(format!("同样品悬液量冲突：{sample_id}")));
+                }
+                None => {
+                    suspensions.insert(sample_id.clone(), suspension_ml);
+                }
+            }
+            parsed.push(CfuPlate {
+                raw_id,
+                sample_id,
+                colonies: plate.colonies,
+                total_dilution,
+                plated_ml,
+                suspension_ml,
+            });
+        }
+        struct CfuGroup {
+            key: String,
+            sample_id: String,
+            total_dilution: f64,
+            plated_ml: f64,
+            suspension_ml: f64,
+            members: Vec<usize>,
+        }
+        let mut groups: Vec<CfuGroup> = Vec::new();
+        let mut excluded: Vec<Value> = Vec::new();
+        for (index, plate) in parsed.iter().enumerate() {
+            if plate.colonies < i.countable_min || plate.colonies > i.countable_max {
+                let reason = if plate.colonies < i.countable_min {
+                    "below_window"
+                } else {
+                    "above_window"
+                };
+                excluded.push(json!({
+                    "raw_id": plate.raw_id,
+                    "sample_id": plate.sample_id,
+                    "colonies": plate.colonies,
+                    "total_dilution": plate.total_dilution,
+                    "reason": reason,
+                }));
+                continue;
+            }
+            let key = format!(
+                "{}\0{:.12e}\0{:.12e}",
+                plate.sample_id, plate.total_dilution, plate.plated_ml
+            );
+            match groups.iter_mut().find(|group| group.key == key) {
+                Some(group) => group.members.push(index),
+                None => groups.push(CfuGroup {
+                    key,
+                    sample_id: plate.sample_id.clone(),
+                    total_dilution: plate.total_dilution,
+                    plated_ml: plate.plated_ml,
+                    suspension_ml: plate.suspension_ml,
+                    members: vec![index],
+                }),
+            }
+        }
+        let mut groups_json: Vec<Value> = Vec::with_capacity(groups.len());
+        for (group_no, group) in groups.iter().enumerate() {
+            let sum: f64 = group.members.iter().map(|member| parsed[*member].colonies).sum();
+            let mean = sum / group.members.len() as f64;
+            let cfu_per_ml = mean / (group.total_dilution * group.plated_ml);
+            let cfu_per_sample = cfu_per_ml * group.suspension_ml;
+            let derived_from: Vec<Value> = group
+                .members
+                .iter()
+                .map(|member| json!(parsed[*member].raw_id))
+                .collect();
+            groups_json.push(json!({
+                "sample_id": group.sample_id,
+                "total_dilution": group.total_dilution,
+                "plated_volume_ml": group.plated_ml,
+                "suspension_volume_ml": group.suspension_ml,
+                "plate_count": group.members.len(),
+                "mean_colonies": display_quantity(mean),
+                "cfu_per_ml": display_quantity(cfu_per_ml),
+                "cfu_per_sample": display_quantity(cfu_per_sample),
+                "readouts": [
+                    {"readout_id": format!("biofilm-cfu-g{:02}-per-ml", group_no + 1), "endpoint": "cfu_per_ml", "value": display_quantity(cfu_per_ml), "unit": "CFU/mL", "sample_id": group.sample_id, "result_kind": "derived", "method": "calculator.biofilm_cfu@1", "derived_from": derived_from.clone()},
+                    {"readout_id": format!("biofilm-cfu-g{:02}-per-sample", group_no + 1), "endpoint": "cfu_per_sample", "value": display_quantity(cfu_per_sample), "unit": "CFU", "sample_id": group.sample_id, "result_kind": "derived", "method": "calculator.biofilm_cfu@1", "derived_from": derived_from},
+                ],
+            }));
+        }
+        return Ok(json!({
+            "groups": groups_json,
+            "excluded": excluded,
+            "excluded_count": excluded.len(),
+            "formula": "CFU/mL = mean_colonies ÷ (total_dilution × plated_volume_mL)；CFU/sample = CFU/mL × suspension_volume_mL",
+            "assumption": "只平均同组重复（同样品、总稀释度、涂布量），不合并或择优不同稀释度；计数上下限含边界；窗外板只说明排除原因，不估算；同样品悬液量必须一致，冲突即拒绝；体积单位只复用 L/mL/µL，不推断默认值"
+        }));
+    }
     let mut db = open_db(data_dir)?;
     match tool {
         "project.list" => {
@@ -13074,6 +13243,9 @@ fn result_schema(tool: &str) -> Value {
         "calculator.in_vivo_dosing" => {
             json!({"type":"object","additionalProperties":false,"required":["rows","total_body_weight_g","total_dose_mass_mg","total_injection_volume_ul","prepared_dose_mass_mg","preparation_volume_ul","stock_volume_ul","diluent_volume_ul","formula","assumption"],"properties":{"rows":{"type":"array","minItems":1,"maxItems":200,"items":{"type":"object","additionalProperties":false,"required":["index","body_weight_g","dose_mass_mg","injection_volume_ul"],"properties":{"index":{"type":"integer","minimum":1},"body_weight_g":{"type":"number","exclusiveMinimum":0},"dose_mass_mg":{"type":"number","minimum":0},"injection_volume_ul":{"type":"number","minimum":0}}}},"total_body_weight_g":{"type":"number","minimum":0},"total_dose_mass_mg":{"type":"number","minimum":0},"total_injection_volume_ul":{"type":"number","minimum":0},"prepared_dose_mass_mg":{"type":"number","minimum":0},"preparation_volume_ul":{"type":"number","minimum":0},"stock_volume_ul":{"type":"number","minimum":0},"diluent_volume_ul":{"type":"number","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
         }
+        "calculator.biofilm_cfu" => {
+            json!({"type":"object","additionalProperties":false,"required":["groups","excluded","excluded_count","formula","assumption"],"properties":{"groups":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["sample_id","total_dilution","plated_volume_ml","suspension_volume_ml","plate_count","mean_colonies","cfu_per_ml","cfu_per_sample","readouts"],"properties":{"sample_id":{"type":"string"},"total_dilution":{"type":"number","exclusiveMinimum":0},"plated_volume_ml":{"type":"number","exclusiveMinimum":0},"suspension_volume_ml":{"type":"number","exclusiveMinimum":0},"plate_count":{"type":"integer","minimum":1},"mean_colonies":{"type":"number","minimum":0},"cfu_per_ml":{"type":"number","minimum":0},"cfu_per_sample":{"type":"number","minimum":0},"readouts":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"object","additionalProperties":false,"required":["readout_id","endpoint","value","unit","sample_id","result_kind","method","derived_from"],"properties":{"readout_id":{"type":"string"},"endpoint":{"type":"string","enum":["cfu_per_ml","cfu_per_sample"]},"value":{"type":"number","minimum":0},"unit":{"type":"string"},"sample_id":{"type":"string"},"result_kind":{"type":"string"},"method":{"type":"string"},"derived_from":{"type":"array","minItems":1,"items":{"type":"string"}}}}}}}},"excluded":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["raw_id","sample_id","colonies","total_dilution","reason"],"properties":{"raw_id":{"type":"string"},"sample_id":{"type":"string"},"colonies":{"type":"number","minimum":0},"total_dilution":{"type":"number","exclusiveMinimum":0},"reason":{"type":"string","enum":["below_window","above_window"]}}}},"excluded_count":{"type":"integer","minimum":0},"formula":{"type":"string"},"assumption":{"type":"string"}}})
+        }
         "sdk.modules" => json!({"type":"object","additionalProperties":false,"required":["modules"],"properties":{"modules":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1},"title":{"type":["string","null"]},"category":{"type":["string","null"]},"capabilities":{"type":["array","null"]},"renderers":{"type":["object","null"]},"actions":{"type":["array","null"]}}}}}}),
         "sdk.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled","errors","warnings","modules"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","schema"],"properties":{"kind":{},"schema":{}}}},"design":{"type":"object","additionalProperties":true}}}),
         "asterdoc.inspect" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","modules"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","id","schema","data","manifest"],"properties":{"kind":{"type":"string"},"id":{"type":"string"},"schema":{"type":"integer","minimum":0},"data":{"type":"object","additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}}}}}),
@@ -13314,6 +13486,9 @@ fn input_schema(tool: &str) -> Option<Value> {
         }
         "calculator.in_vivo_dosing" => {
             json!({"type":"object","additionalProperties":false,"required":["body_weights_g","dose_mg_per_kg","dose_volume_ml_per_kg","stock_concentration","stock_unit"],"properties":{"body_weights_g":{"type":"array","minItems":1,"maxItems":200,"items":{"type":"number","exclusiveMinimum":0},"description":"每只动物的实测体重（g）；不按组均值估算"},"dose_mg_per_kg":{"type":"number","exclusiveMinimum":0},"dose_volume_ml_per_kg":{"type":"number","exclusiveMinimum":0},"overage_ratio":{"type":"number","minimum":0,"description":"配制管余量比例；只放大制备量，不放大单次注射量"},"stock_concentration":{"type":"number","exclusiveMinimum":0},"stock_unit":{"type":"string","enum":["mg/mL","µg/mL","ng/µL"]}}})
+        }
+        "calculator.biofilm_cfu" => {
+            json!({"type":"object","additionalProperties":false,"required":["plates","countable_min","countable_max"],"properties":{"plates":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["raw_id","sample_id","colonies","dilution_fractions","plated_volume","plated_unit","suspension_volume","suspension_unit"],"properties":{"raw_id":{"type":"string","minLength":1,"maxLength":160,"pattern":"\\S"},"sample_id":{"type":"string","minLength":1,"maxLength":120,"pattern":"\\S"},"colonies":{"type":"number","minimum":0},"dilution_fractions":{"type":"array","minItems":1,"maxItems":30,"items":{"type":"number","exclusiveMinimum":0,"maximum":1}},"plated_volume":{"type":"number","exclusiveMinimum":0},"plated_unit":{"type":"string","enum":["L","mL","µL"]},"suspension_volume":{"type":"number","exclusiveMinimum":0},"suspension_unit":{"type":"string","enum":["L","mL","µL"]}}}},"countable_min":{"type":"number","minimum":0,"description":"计数下限，含边界"},"countable_max":{"type":"number","minimum":0,"description":"计数上限，含边界"}}})
         }
         "sdk.modules" => {
             json!({"type":"object","additionalProperties":false,"properties":{}})
@@ -13571,6 +13746,7 @@ fn tool_specs() -> Vec<Value> {
         "calculator.runtime_normalize",
         "calculator.sample_normalize_batch",
         "calculator.in_vivo_dosing",
+        "calculator.biofilm_cfu",
         "sdk.modules",
         "sdk.validate",
         "sdk.describe",
@@ -13623,6 +13799,7 @@ fn tool_writes(tool: &str) -> bool {
             | "calculator.runtime_normalize"
             | "calculator.sample_normalize_batch"
             | "calculator.in_vivo_dosing"
+            | "calculator.biofilm_cfu"
             | "sdk.modules"
             | "sdk.describe"
             | "sdk.validate"
@@ -13714,6 +13891,7 @@ fn tool_description(tool: &str) -> &'static str {
         "calculator.runtime_normalize" => "按实际孔数与死体积重算运行期配平体积，返回需追加或未用完的体积。",
         "calculator.sample_normalize_batch" => "按统一目标质量与反应体积平衡多个样本的实测质量浓度，给出各样本体积、稀释液体积与不达标标记。",
         "calculator.in_vivo_dosing" => "按每只动物体重与 mg/kg 剂量换算单次注射量与制备量，并给出母液与稀释液体积。",
+        "calculator.biofilm_cfu" => "按样品、总稀释度与涂布量分组，由菌落数推导 CFU/mL 与 CFU/sample 派生读数；窗外板只记排除原因，不估算。",
         "sdk.modules" => "从嵌入的 modules.json 返回 AsterDoc 模块摘要（kind/schema/title/category/capabilities/renderers/actions）；只读。",
         "sdk.describe" => "按 kind+schema 返回完整的 AsterDoc 模块 manifest；只读。",
         "sdk.validate" => "校验 AsterDoc 源码或已保存设计并尝试编译；不写入。",
@@ -13759,6 +13937,7 @@ fn tool_effects(tool: &str) -> &'static str {
         | "calculator.runtime_normalize"
         | "calculator.sample_normalize_batch"
         | "calculator.in_vivo_dosing" => "只返回算术结果；不保存输入或结果。",
+        "calculator.biofilm_cfu" => "只返回算术结果；不保存输入或结果。",
         "project.create" => "创建一个项目记录。",
         "project.revise" => "按 expected_revision 更新一个项目记录并递增 revision。",
         "design.create" => "创建实验设计并创建不可变的 v1 设计快照。",
@@ -18027,12 +18206,183 @@ INSERT INTO pantry_items VALUES(\
         for tool in [
             "calculator.sample_normalize_batch",
             "calculator.in_vivo_dosing",
+            "calculator.biofilm_cfu",
         ] {
             assert!(input_schema(tool).is_some(), "{tool} has no input schema");
             assert!(result_schema(tool)["type"].as_str() == Some("object"));
             assert!(!tool_writes(tool), "{tool} must stay read-only");
             assert!(tool_specs().iter().any(|spec| spec["name"] == tool));
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn biofilm_cfu_groups_replicates_and_reports_exclusions() {
+        let dir = std::env::temp_dir().join(format!("asterlab-biofilm-cfu-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let output = dispatch(
+            "calculator.biofilm_cfu",
+            calculator_input(&dir, "cfu.json", json!({
+                "plates": [
+                    {"raw_id": "ro-cfu-a1", "sample_id": "S1", "colonies": 51.0,
+                     "dilution_fractions": [0.1, 0.1], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 2.0, "suspension_unit": "mL"},
+                    {"raw_id": "ro-cfu-a2", "sample_id": "S1", "colonies": 63.0,
+                     "dilution_fractions": [0.01], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 2.0, "suspension_unit": "mL"},
+                    {"raw_id": "ro-cfu-a3", "sample_id": "S1", "colonies": 350.0,
+                     "dilution_fractions": [0.01], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 2.0, "suspension_unit": "mL"}
+                ],
+                "countable_min": 30.0,
+                "countable_max": 300.0
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        let groups = output["groups"].as_array().unwrap();
+        assert_eq!(groups.len(), 1, "same sample + dilution + plated volume averages");
+        assert!((groups[0]["cfu_per_ml"].as_f64().unwrap() - 57000.0).abs() < 1e-6);
+        assert!((groups[0]["cfu_per_sample"].as_f64().unwrap() - 114000.0).abs() < 1e-6);
+        let readouts = groups[0]["readouts"].as_array().unwrap();
+        assert_eq!(readouts.len(), 2);
+        assert_eq!(readouts[0]["endpoint"], "cfu_per_ml");
+        assert_eq!(readouts[0]["unit"], "CFU/mL");
+        assert_eq!(readouts[0]["method"], "calculator.biofilm_cfu@1");
+        assert_eq!(readouts[0]["derived_from"], json!(["ro-cfu-a1", "ro-cfu-a2"]));
+        assert_eq!(readouts[1]["endpoint"], "cfu_per_sample");
+        assert_eq!(readouts[1]["unit"], "CFU");
+        assert_eq!(output["excluded_count"], 1);
+        let excluded = output["excluded"].as_array().unwrap();
+        assert_eq!(excluded[0]["raw_id"], "ro-cfu-a3");
+        assert_eq!(excluded[0]["reason"], "above_window");
+        // Boundary counts are countable; different dilutions never merge.
+        let boundary = dispatch(
+            "calculator.biofilm_cfu",
+            calculator_input(&dir, "cfu-boundary.json", json!({
+                "plates": [
+                    {"raw_id": "ro-min", "sample_id": "S1", "colonies": 30.0,
+                     "dilution_fractions": [0.01], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 2.0, "suspension_unit": "mL"},
+                    {"raw_id": "ro-max", "sample_id": "S1", "colonies": 300.0,
+                     "dilution_fractions": [0.001], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 2.0, "suspension_unit": "mL"}
+                ],
+                "countable_min": 30.0,
+                "countable_max": 300.0
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(boundary["groups"].as_array().unwrap().len(), 2);
+        assert_eq!(boundary["excluded"].as_array().unwrap().len(), 0);
+        assert!(input_schema("calculator.biofilm_cfu").is_some());
+        assert!(result_schema("calculator.biofilm_cfu")["type"].as_str() == Some("object"));
+        assert!(!tool_writes("calculator.biofilm_cfu"));
+        assert!(tool_specs().iter().any(|spec| spec["name"] == "calculator.biofilm_cfu"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn biofilm_cfu_rejects_invalid_inputs() {
+        let dir = std::env::temp_dir().join(format!("asterlab-biofilm-cfu-bad-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = |raw_id: &str, colonies: f64, fractions: Vec<f64>, suspension: f64| {
+            json!({
+                "plates": [
+                    {"raw_id": raw_id, "sample_id": "S1", "colonies": colonies,
+                     "dilution_fractions": fractions, "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": suspension, "suspension_unit": "mL"}
+                ],
+                "countable_min": 30.0,
+                "countable_max": 300.0
+            })
+        };
+        let dup = dispatch(
+            "calculator.biofilm_cfu",
+            calculator_input(&dir, "dup.json", json!({
+                "plates": [
+                    {"raw_id": "ro-same", "sample_id": "S1", "colonies": 51.0,
+                     "dilution_fractions": [0.01], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 2.0, "suspension_unit": "mL"},
+                    {"raw_id": "ro-same", "sample_id": "S1", "colonies": 63.0,
+                     "dilution_fractions": [0.01], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 2.0, "suspension_unit": "mL"}
+                ],
+                "countable_min": 30.0,
+                "countable_max": 300.0
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(dup.code, "INVALID_INPUT");
+        assert!(dup.message.contains("raw ID"), "message = {}", dup.message);
+        let conflict = dispatch(
+            "calculator.biofilm_cfu",
+            calculator_input(&dir, "suspension.json", json!({
+                "plates": [
+                    {"raw_id": "ro-1", "sample_id": "S1", "colonies": 51.0,
+                     "dilution_fractions": [0.01], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 2.0, "suspension_unit": "mL"},
+                    {"raw_id": "ro-2", "sample_id": "S1", "colonies": 55.0,
+                     "dilution_fractions": [0.01], "plated_volume": 100.0,
+                     "plated_unit": "µL", "suspension_volume": 3.0, "suspension_unit": "mL"}
+                ],
+                "countable_min": 30.0,
+                "countable_max": 300.0
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(conflict.code, "INVALID_INPUT");
+        for (name, payload) in [
+            ("bad-fraction", base("ro-x", 51.0, vec![1.5], 2.0)),
+            ("empty-fraction", base("ro-x", 51.0, vec![], 2.0)),
+        ] {
+            let err = dispatch(
+                "calculator.biofilm_cfu",
+                calculator_input(&dir, &format!("{name}.json"), payload).to_str().unwrap(),
+                &dir,
+            )
+            .unwrap_err();
+            assert_eq!(err.code, "INVALID_INPUT", "{name}");
+        }
+        let unit_err = dispatch(
+            "calculator.biofilm_cfu",
+            calculator_input(&dir, "bad-unit.json", json!({
+                "plates": [
+                    {"raw_id": "ro-x", "sample_id": "S1", "colonies": 51.0,
+                     "dilution_fractions": [0.01], "plated_volume": 100.0,
+                     "plated_unit": "oz", "suspension_volume": 2.0, "suspension_unit": "mL"}
+                ],
+                "countable_min": 30.0,
+                "countable_max": 300.0
+            }))
+            .to_str()
+            .unwrap(),
+            &dir,
+        )
+        .unwrap_err();
+        assert_eq!(unit_err.code, "INVALID_INPUT");
+        let empty = dispatch(
+            "calculator.biofilm_cfu",
+            calculator_input(&dir, "empty.json", base("ro-x", 5.0, vec![0.01], 2.0))
+                .to_str()
+                .unwrap(),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(empty["groups"].as_array().unwrap().len(), 0);
+        assert_eq!(empty["excluded_count"], 1);
+        assert_eq!(empty["excluded"][0]["reason"], "below_window");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
