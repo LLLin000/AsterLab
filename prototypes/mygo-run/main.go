@@ -1521,11 +1521,11 @@ func (a *app) selectTaskFromEnv() {
 }
 
 // deepLinkArg returns the first startup argument that is an AsterLab deep
-// link. The OS passes the URL untouched when the user opens one; anything
-// else on the command line is ignored here.
+// link. Non-link arguments are ignored.
 func deepLinkArg(args []string) string {
+	const scheme = "asterlab://"
 	for _, arg := range args {
-		if strings.HasPrefix(arg, "asterlab://") {
+		if len(arg) >= len(scheme) && strings.EqualFold(arg[:len(scheme)], scheme) {
 			return arg
 		}
 	}
