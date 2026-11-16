@@ -4,7 +4,9 @@ name: scope-check
 # `write:` in its `<!-- kandev-scope -->` block. This hosted job injects no
 # Kandev API secrets, so the scope block is always read from the PR body
 # (which must carry both `<!-- kandev-task: <uuid> -->` and the exact
-# `kandev-scope` block); the API path stays available for self-hosted use.
+# `kandev-scope` block). The `scope_check.py` API mode stays available only
+# where KANDEV_API_URL/KANDEV_API_TOKEN are explicitly supplied by a
+# self-hosted or locally configured step; this hosted workflow exposes neither.
 # Contract: scripts/ci/README.md.
 #
 # Also validates the workflow YAML itself, so a broken CI file fails here.
