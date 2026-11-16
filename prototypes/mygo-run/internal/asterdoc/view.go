@@ -209,6 +209,34 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 	})
 }
 
+const (
+	plateGridLabelWidth   = float32(24)
+	plateGridHeaderHeight = float32(18)
+	plateGridGap          = float32(4)
+	plateGridWellSize     = float32(18)
+)
+
+// ponytail: the canvas is sized for the largest supported 384-well plate; grow it if larger formats are added.
+func plateGridLayout(geometry Geometry, zoom float32) (viewportW, viewportH, cell float32) {
+	maxGeometry, _ := geometryFor(384)
+	viewportW = plateGridLabelWidth + plateGridGap +
+		float32(maxGeometry.Columns)*plateGridWellSize*zoom +
+		float32(maxGeometry.Columns-1)*plateGridGap
+	viewportH = plateGridHeaderHeight + plateGridGap +
+		float32(maxGeometry.Rows)*plateGridWellSize*zoom +
+		float32(maxGeometry.Rows-1)*plateGridGap
+
+	cellW := (viewportW - plateGridLabelWidth - plateGridGap -
+		float32(geometry.Columns-1)*plateGridGap) / float32(geometry.Columns)
+	cellH := (viewportH - plateGridHeaderHeight - plateGridGap -
+		float32(geometry.Rows-1)*plateGridGap) / float32(geometry.Rows)
+	cell = cellW
+	if cellH < cell {
+		cell = cellH
+	}
+	return viewportW, viewportH, cell
+}
+
 // plateOverlay floats the enlarged plate over a dimmed canvas. There is no
 // modal panel or inspector: the plate itself is the surface, with one floating
 // toolbar for zoom, group choice and batch assignment.
@@ -346,10 +374,14 @@ func (v *View) plateOverlay(c *ui.Context) {
 								}
 							})
 						})
-						cell := float32(30) * zoom
-						if plate.Format == 384 {
-							cell = 18 * zoom
-						}
+						viewportW, viewportH, cell := plateGridLayout(geometry, zoom)
+						gridW := plateGridLabelWidth + plateGridGap +
+							float32(geometry.Columns)*cell +
+							float32(geometry.Columns-1)*plateGridGap
+						gridH := plateGridHeaderHeight + plateGridGap +
+							float32(geometry.Rows)*cell +
+							float32(geometry.Rows-1)*plateGridGap
+						offsetX, offsetY := (viewportW-gridW)/2, (viewportH-gridH)/2
 						selectMany := func(ids []string, additive bool) {
 							if !additive {
 								v.ExpandedWells = nil
@@ -360,80 +392,82 @@ func (v *View) plateOverlay(c *ui.Context) {
 								}
 							}
 						}
-						const labelW = float32(24)
-						const headerH = float32(18)
-						const gap = float32(4)
-						grid := ui.Box(c).Key("plate-grid").Children(func() {
-							ui.Row(c).Gap(gap).Children(func() {
-								ui.Box(c).Width(labelW).Height(headerH)
-								for col := 1; col <= geometry.Columns; col++ {
-									col := col
-									btn := ui.ButtonBase(c).Width(cell).Height(headerH).
-										Label(fmt.Sprintf("选择第 %d 列", col))
-									btn.Children(func() {
-										ui.Text(c, fmt.Sprintf("%d", col)).FontSize(t.Rem(.62)).
-											TextColor(t.TextMuted).Center()
-									})
-									if btn.Clicked() && !v.gridDragging {
-										ids := make([]string, 0, geometry.Rows)
-										for row := 0; row < geometry.Rows; row++ {
-											ids = append(ids, fmt.Sprintf("%s%d", rowLabel(row), col))
-										}
-										selectMany(ids, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
-									}
-								}
-							})
-							for row := 0; row < geometry.Rows; row++ {
-								row := row
-								ui.Row(c).Gap(gap).Children(func() {
-									btn := ui.ButtonBase(c).Width(labelW).Height(cell).
-										Label("选择第 " + rowLabel(row) + " 行")
-									btn.Children(func() {
-										ui.Text(c, rowLabel(row)).FontSize(t.Rem(.62)).TextColor(t.TextMuted).Center()
-									})
-									if btn.Clicked() && !v.gridDragging {
-										ids := make([]string, 0, geometry.Columns)
-										for col := 1; col <= geometry.Columns; col++ {
-											ids = append(ids, fmt.Sprintf("%s%d", rowLabel(row), col))
-										}
-										selectMany(ids, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
-									}
+						grid := ui.Box(c).Key("plate-grid").Size(viewportW, viewportH).Children(func() {
+							ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+								ui.Row(c).Gap(plateGridGap).Children(func() {
+									ui.Box(c).Width(plateGridLabelWidth).Height(plateGridHeaderHeight)
 									for col := 1; col <= geometry.Columns; col++ {
-										well := fmt.Sprintf("%s%d", rowLabel(row), col)
-										group := wells[well]
-										selected := containsString(v.ExpandedWells, well)
-										bg := t.Background
-										if group != "" {
-											bg = groupColor(group)
-										}
-										border := t.Border
-										width := float32(1)
-										if selected {
-											border, width = t.Accent, 2
-										}
-										btn := ui.ButtonBase(c).Key(well).Size(cell, cell).Radius(cell/2).
-											Background(bg).Border(width, border).Label("孔 " + well)
+										col := col
+										btn := ui.ButtonBase(c).Width(cell).Height(plateGridHeaderHeight).
+											Label(fmt.Sprintf("选择第 %d 列", col))
+										btn.Children(func() {
+											ui.Text(c, fmt.Sprintf("%d", col)).FontSize(t.Rem(.62)).
+												TextColor(t.TextMuted).Center()
+										})
 										if btn.Clicked() && !v.gridDragging {
-											mods := btn.ClickModifiers()
-											if mods&(ui.Shift|ui.Cmd) != 0 {
-												if selected {
-													v.ExpandedWells = removeString(v.ExpandedWells, well)
-												} else {
-													v.ExpandedWells = append(v.ExpandedWells, well)
-												}
-											} else {
-												v.ExpandedWells = []string{well}
+											ids := make([]string, 0, geometry.Rows)
+											for row := 0; row < geometry.Rows; row++ {
+												ids = append(ids, fmt.Sprintf("%s%d", rowLabel(row), col))
 											}
+											selectMany(ids, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
 										}
 									}
 								})
-							}
+								for row := 0; row < geometry.Rows; row++ {
+									row := row
+									ui.Row(c).Gap(plateGridGap).Children(func() {
+										btn := ui.ButtonBase(c).Width(plateGridLabelWidth).Height(cell).
+											Label("选择第 " + rowLabel(row) + " 行")
+										btn.Children(func() {
+											ui.Text(c, rowLabel(row)).FontSize(t.Rem(.62)).TextColor(t.TextMuted).Center()
+										})
+										if btn.Clicked() && !v.gridDragging {
+											ids := make([]string, 0, geometry.Columns)
+											for col := 1; col <= geometry.Columns; col++ {
+												ids = append(ids, fmt.Sprintf("%s%d", rowLabel(row), col))
+											}
+											selectMany(ids, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
+										}
+										for col := 1; col <= geometry.Columns; col++ {
+											well := fmt.Sprintf("%s%d", rowLabel(row), col)
+											group := wells[well]
+											selected := containsString(v.ExpandedWells, well)
+											bg := t.Background
+											if group != "" {
+												bg = groupColor(group)
+											}
+											border := t.Border
+											width := float32(1)
+											if selected {
+												border, width = t.Accent, 2
+											}
+											btn := ui.ButtonBase(c).Key(well).Size(cell, cell).Radius(cell/2).
+												Background(bg).Border(width, border).Label("孔 " + well)
+											if btn.Clicked() && !v.gridDragging {
+												mods := btn.ClickModifiers()
+												if mods&(ui.Shift|ui.Cmd) != 0 {
+													if selected {
+														v.ExpandedWells = removeString(v.ExpandedWells, well)
+													} else {
+														v.ExpandedWells = append(v.ExpandedWells, well)
+													}
+												} else {
+													v.ExpandedWells = []string{well}
+												}
+											}
+										}
+									})
+								}
+							})
 						})
 						grid.Draggable(&v.gridDrag, ui.DraggableOptions{})
 						if grid.Dragging() {
 							px, py, ok := grid.PointerPosition()
 							if ok {
-								local := ui.Point{X: px - labelW - gap, Y: py - headerH - gap}
+								local := ui.Point{
+									X: px - offsetX - plateGridLabelWidth - plateGridGap,
+									Y: py - offsetY - plateGridHeaderHeight - plateGridGap,
+								}
 								if !v.gridDragging {
 									v.gridDragging = true
 									v.gridStart, v.gridLast = local, local
@@ -445,7 +479,7 @@ func (v *View) plateOverlay(c *ui.Context) {
 								v.gridLast = local
 								r := ui.Rect{X: v.gridStart.X, Y: v.gridStart.Y,
 									W: local.X - v.gridStart.X, H: local.Y - v.gridStart.Y}
-								selected := WellsInRect(geometry, cell, gap, r)
+								selected := WellsInRect(geometry, cell, plateGridGap, r)
 								v.ExpandedWells = append([]string(nil), v.gridBase...)
 								for _, id := range selected {
 									if !containsString(v.ExpandedWells, id) {

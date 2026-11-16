@@ -329,6 +329,39 @@ func TestPlateFormatsUseEditableOverlay(t *testing.T) {
 	}
 }
 
+func TestPlateGridLayoutKeepsCanvasAndScalesWells(t *testing.T) {
+	formats := []int{6, 12, 24, 48, 96, 384}
+	var viewportW, viewportH, previousCell float32
+	for i, format := range formats {
+		geometry, ok := geometryFor(format)
+		if !ok {
+			t.Fatalf("%d-well geometry is unavailable", format)
+		}
+		width, height, cell := plateGridLayout(geometry, 1)
+		if i == 0 {
+			viewportW, viewportH = width, height
+		} else if width != viewportW || height != viewportH {
+			t.Fatalf("%d-well viewport = %gx%g; want %gx%g",
+				format, width, height, viewportW, viewportH)
+		}
+		if i > 0 && cell >= previousCell {
+			t.Fatalf("%d-well cell = %g; want smaller than %g",
+				format, cell, previousCell)
+		}
+		gridW := plateGridLabelWidth + plateGridGap +
+			float32(geometry.Columns)*cell +
+			float32(geometry.Columns-1)*plateGridGap
+		gridH := plateGridHeaderHeight + plateGridGap +
+			float32(geometry.Rows)*cell +
+			float32(geometry.Rows-1)*plateGridGap
+		if gridW > width+0.01 || gridH > height+0.01 {
+			t.Fatalf("%d-well grid %gx%g exceeds viewport %gx%g",
+				format, gridW, gridH, width, height)
+		}
+		previousCell = cell
+	}
+}
+
 func TestHUVECTubeExperimentParses(t *testing.T) {
 	raw, err := os.ReadFile("testdata/huvec-tube.asterml")
 	if err != nil {
