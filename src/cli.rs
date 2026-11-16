@@ -75,22 +75,54 @@ const INPUT_LIMIT: u64 = 2 * 1024 * 1024;
 
 const RECORDS_SCHEMA_VERSION: i64 = 1;
 
-mod common;
-mod design_types;
-mod protocol_block;
-mod asterdoc;
-mod run_write;
-mod readout;
-mod protocol_views;
-mod run_read;
-mod store;
-mod design_run;
-mod entry;
-mod agent_edit;
-mod pantry_ledger;
-mod dispatch;
-mod schemas;
-mod assets;
+mod common {
+    include!("cli/common.rs");
+}
+mod design_types {
+    include!("cli/design_types.rs");
+}
+mod protocol_block {
+    include!("cli/protocol_block.rs");
+}
+mod asterdoc {
+    include!("cli/asterdoc.rs");
+}
+mod run_write {
+    include!("cli/run_write.rs");
+}
+mod readout {
+    include!("cli/readout.rs");
+}
+mod protocol_views {
+    include!("cli/protocol_views.rs");
+}
+mod run_read {
+    include!("cli/run_read.rs");
+}
+mod store {
+    include!("cli/store.rs");
+}
+mod design_run {
+    include!("cli/design_run.rs");
+}
+mod entry {
+    include!("cli/entry.rs");
+}
+mod agent_edit {
+    include!("cli/agent_edit.rs");
+}
+mod pantry_ledger {
+    include!("cli/pantry_ledger.rs");
+}
+mod dispatch {
+    include!("cli/dispatch.rs");
+}
+mod schemas {
+    include!("cli/schemas.rs");
+}
+mod assets {
+    include!("cli/assets.rs");
+}
 pub(crate) use self::common::*;
 pub(crate) use self::design_types::*;
 pub(crate) use self::protocol_block::*;
