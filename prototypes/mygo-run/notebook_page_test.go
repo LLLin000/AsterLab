@@ -1,11 +1,12 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
-
 	"github.com/egoist/mygo/ui"
 
+	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
 )
@@ -92,5 +93,139 @@ func TestNotebookDocumentModeCanInsertPlateModule(t *testing.T) {
 	}
 	if !tt.HasText("96 孔板") {
 		t.Fatalf("inserted module did not render: %q", tt.Texts())
+	}
+}
+// sealStubSvc persists Notebook prose in memory: the sign path is the same
+// SaveNotebook call the GUI uses, with no native service involved.
+type sealStubSvc struct {
+	runs.RunService
+	snap runs.RunSnapshot
+}
+
+func (s *sealStubSvc) SaveNotebook(_ context.Context, in runs.NotebookInput) (runs.RunSnapshot, error) {
+	snap := s.snap
+	snap.Events = append(append([]runs.RunEvent{}, snap.Events...), runs.RunEvent{
+		ID: "evt-note-test", EventType: "observation", Stage: "notebook",
+		Content: in.Markdown, RecordedAt: "2026-11-16T12:00:00Z",
+	})
+	snap.Revision++
+	s.snap = snap
+	return snap, nil
+}
+
+func boardTestSnap(runID string) (runs.RunSnapshot, []runs.Asset) {
+	snap := runs.RunSnapshot{
+		RunID: runID, Title: "HUVEC 成管",
+		DesignID: "design-1", DesignRevision: 3, Status: "in_progress",
+		Tasks: []runs.RunTask{
+			{
+				Key: "task-cure", Title: "405nm 固化", Timepoint: "0h",
+				Status: "completed", DesignStepID: "step-2",
+				ParametersJSON: `[{"key":"cure_s","label":"固化秒数","value":60,"unit":"s"}]`,
+			},
+		},
+		Events: []runs.RunEvent{
+			{
+				ID: "evt-cure", EventType: "operation", TaskKey: "task-cure", Timepoint: "0h",
+				OccurredAt: "2026-11-10T10:00:00+08:00", RecordedAt: "2026-11-10T10:01:00+08:00",
+				DataJSON: `{"actual_parameters":[{"key":"cure_s","value":75,"unit":"s"}]}`,
+			},
+			{
+				ID: "evt-read", EventType: "measurement", TaskKey: "task-cure", Timepoint: "6h",
+				BatchID: "batch-1", OccurredAt: "2026-11-10T16:00:00+08:00",
+				RecordedAt: "2026-11-10T16:01:00+08:00",
+				ResultCells: []runs.ResultCell{
+					{Row: 0, Column: 0, SampleID: "S1", Field: "OD450", Value: new(0.82)},
+					{Row: 0, Column: 1, SampleID: "S2", Field: "OD450", Value: new(0.91)},
+				},
+			},
+			{ID: "note-1", Stage: "notebook", Content: "# 研判\n\n贴壁良好 @matrix(6h)", RecordedAt: "2026-11-10T17:00:00Z"},
+		},
+	}
+	assets := []runs.Asset{
+		{ID: "img-1", RelativePath: "run/6h/S1-fov1.png", MediaType: "image",
+			Link: runs.AssetLink{RunID: runID, TaskKey: "task-cure", SampleID: "S1", WellID: "A1", Timepoint: "6h", FOVIndex: 1}},
+		{ID: "img-2", RelativePath: "run/6h/S1-fov2.png", MediaType: "image",
+			Link: runs.AssetLink{RunID: runID, TaskKey: "task-cure", SampleID: "S1", WellID: "A1", Timepoint: "6h", FOVIndex: 2}},
+	}
+	return snap, assets
+}
+
+func TestNotebookBoardRendersSharedProjection(t *testing.T) {
+	snap, assets := boardTestSnap("run-board-1")
+	a := &app{snap: snap, runAssets: assets}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1200, 760)
+	tt.Frame()
+	if err := tt.Click("图板"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	for _, want := range []string{
+		"记录图板", "计划 vs 实际", "任务完成 1/1", "代表视野矩阵",
+		"固化秒数", "FOV 1", "FOV 6", "缺", "派生设计", "签核归档", "@matrix(6h)",
+	} {
+		if !tt.HasText(want) {
+			t.Fatalf("board missing %q: %q", want, tt.Texts())
+		}
+	}
+	// FOV 1 shows the coordinated image; switching layers follows the slot.
+	if !tt.HasText("S1-fov1.png") {
+		t.Fatalf("FOV 1 representative missing: %q", tt.Texts())
+	}
+	if err := tt.Click("FOV 2"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("S1-fov2.png") {
+		t.Fatalf("FOV 2 representative missing: %q", tt.Texts())
+	}
+}
+
+func TestNotebookSignLocksAndUnlockRestores(t *testing.T) {
+	snap, assets := boardTestSnap("run-seal-1")
+	svc := &sealStubSvc{snap: snap}
+	a := &app{snap: snap, runAssets: assets, runSvc: svc}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1200, 760)
+	tt.Frame()
+	if err := tt.Click("图板"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("签核归档"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.noteMode != 2 {
+		t.Fatalf("signed record did not move to reading mode: %d", a.noteMode)
+	}
+	if !tt.HasText("已签核归档") {
+		t.Fatalf("sealed state word missing: %q", tt.Texts())
+	}
+	if _, ok := record.Verify(a.noteSource()); !ok {
+		t.Fatal("signed prose does not verify")
+	}
+	// The sealed record still reaches the board, where 解锁 lives.
+	if err := tt.Click("图板"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("解锁") {
+		t.Fatalf("unlock missing on sealed board: %q", tt.Texts())
+	}
+	if err := tt.Click("解锁"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.noteDirty || !tt.HasText("未保存") {
+		t.Fatalf("unlock did not return to editable state: dirty=%v %q", a.noteDirty, tt.Texts())
+	}
+	if _, ok := record.Verify(a.noteSource()); ok {
+		t.Fatal("trailer survived unlock")
 	}
 }

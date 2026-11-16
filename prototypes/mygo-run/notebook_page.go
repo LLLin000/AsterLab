@@ -17,11 +17,13 @@ import (
 
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/notebook"
+	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/protocol"
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
+	mygo "github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/richtext"
 	"github.com/oneo-me/onevra/source/components"
@@ -69,9 +71,46 @@ func (a *app) noteView() *noteViewState {
 	return st
 }
 
+// recordBoardView holds the record board's UI-only state: which FOV layer the
+// Well x Timepoint matrix shows. It names no fact; the projection owns the data.
+type recordBoardView struct {
+	fov int
+}
+
+// recordBoards keys board state by Run so switching Runs never leaks one
+// Run's FOV selection into another.
+var recordBoards = map[string]*recordBoardView{}
+
+func (a *app) recordBoard() *recordBoardView {
+	st := recordBoards[a.snap.RunID]
+	if st == nil {
+		st = &recordBoardView{fov: 1}
+		recordBoards[a.snap.RunID] = st
+	}
+	if st.fov < 1 || st.fov > record.FOVSlots {
+		st.fov = 1
+	}
+	return st
+}
+
+// recordProjection is the single shared read model for this surface: the
+// automatic board, the protocol archive, and the Run history audit rendering
+// all project from it, so neither surface re-derives summaries from the
+// snapshot on its own.
+func (a *app) recordProjection() record.RecordProjection {
+	return record.Project(a.snap, a.runAssets)
+}
+
+// recordSeal verifies the current prose against its signature trailer.
+// ok means the prose is signed, unmodified, and locked for editing.
+func (a *app) recordSeal() (record.Signature, bool) {
+	return record.Verify(a.noteSource())
+}
+
 // notebookPage follows Obsidian's shape: one paper sheet, a floating toolbar,
-// and four modes over the same stored Markdown — live rich rendering, source
-// editing, reading, and the AsterML document. Each save appends one notebook-stage event.
+// and five modes over the same stored Markdown — live rich rendering, source
+// editing, reading, the AsterML document, and the record board. Each save
+// appends one notebook-stage event.
 func notebookPage(c *ui.Context, a *app) {
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
@@ -102,15 +141,20 @@ func notebookPage(c *ui.Context, a *app) {
 				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).FontFeatures("tnum")
 		})
 		// Floating toolbar above the sheet, following Obsidian's editing
-		// toolbar: mode switch, editing commands, then one save action.
-		if c.Shortcut(ui.Cmd, ui.KeyE) {
+		// toolbar: mode switch, editing commands, then one save action. A
+		// sealed (signed) record locks editing until explicitly unlocked.
+		sealed := false
+		if !a.noteDirty {
+			_, sealed = a.recordSeal()
+		}
+		if c.Shortcut(ui.Cmd, ui.KeyE) && !sealed {
 			if a.noteMode == 2 {
 				a.setNoteMode(a.noteEditMode)
 			} else {
 				a.setNoteMode(2)
 			}
 		}
-		if c.Shortcut(ui.Cmd, ui.KeyS) && a.noteMode != 2 && a.noteState != "saving" {
+		if c.Shortcut(ui.Cmd, ui.KeyS) && a.noteMode != 2 && !sealed && a.noteState != "saving" {
 			a.saveNotebook()
 		}
 		ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
@@ -147,8 +191,8 @@ func notebookPage(c *ui.Context, a *app) {
 				// Citations only point to existing Run facts; no fact-writing controls live here (UX-P1, UX-P2, UX-P3).
 				st := a.citePicker()
 				cite := components.Button(c, "@引用", components.ButtonGhost)
-				cite.Disabled(a.noteMode == 2)
-				if cite.Clicked() && a.noteMode != 2 {
+				cite.Disabled(a.noteMode == 2 || sealed)
+				if cite.Clicked() && a.noteMode != 2 && !sealed {
 					st.manual = !st.open
 					st.open = !st.open
 					st.filter = "all"
@@ -163,19 +207,26 @@ func notebookPage(c *ui.Context, a *app) {
 				old := a.noteMode
 				parts := components.TabsWithLeading(c, &a.noteMode, components.TabsSegmented,
 					func(c *ui.Context, i int, size float32) {
-						icon := []*ui.SVG{lucide.Sparkles(), lucide.PenLine(), lucide.BookOpen(), lucide.Blocks()}[i]
+						icon := []*ui.SVG{lucide.Sparkles(), lucide.PenLine(), lucide.BookOpen(), lucide.Blocks(), lucide.LayoutGrid()}[i]
 						components.Icon(c, icon).Size(size, size)
-					}, "实时", "编辑", "阅读", "文档")
+					}, "实时", "编辑", "阅读", "文档", "图板")
 				if parts.List.Changed() {
-					a.applyNoteModeChange(old)
+					// The sealed record locks the editing modes, but the
+					// read-only board stays reachable: it hosts 解锁.
+					if sealed && a.noteMode != 2 && a.noteMode != 4 {
+						a.noteMode = old
+						c.AddToast(ui.Toast{Title: "已签核归档", Description: "记录已锁定，解锁后可编辑。", Type: components.ToastWarning})
+					} else {
+						a.applyNoteModeChange(old)
+					}
 				}
 				// UX-STATE / UX-06: one explicit state word beside Save, from the
 				// projection's single vocabulary — never a bare colour dot.
 				stateLabel, stateColor := a.notebookToolbarState(tokens)
 				ui.Text(c, stateLabel).FontSize(float32(tokens.TextData)).Bold().TextColor(stateColor)
 				save := components.IconButton(c, lucide.Save(), "保存笔记", components.IconButtonCompact)
-				save.Disabled(a.noteMode == 2 || a.noteState == "saving")
-				if save.Clicked() && a.noteMode != 2 && a.noteState != "saving" {
+				save.Disabled(a.noteMode == 2 || sealed || a.noteState == "saving")
+				if save.Clicked() && a.noteMode != 2 && !sealed && a.noteState != "saving" {
 					a.saveNotebook()
 				}
 			})
@@ -354,10 +405,16 @@ func notebookPage(c *ui.Context, a *app) {
 				})
 			})
 		}
-		// UI-REDESIGN §2.3 / UX-IA-4: two projections of one source. The prose
-		// paper is the editable interpretation; the Run record is a read-only
-		// timeline built from the same RunSnapshot. No third history store and
-		// no fact-writing control exist in either projection.
+		// UI-REDESIGN §2.3 / UX-IA-4: the prose paper is the editable
+		// interpretation; the Run record is a read-only timeline built from
+		// the same RunSnapshot; the board renders the same snapshot through
+		// the shared RecordProjection (planned-vs-actual plus the Well x
+		// Timepoint x FOV matrix). No third history store and no
+		// fact-writing control exist in any projection.
+		if a.noteMode == 4 {
+			a.recordBoardPage(c, t)
+			return
+		}
 		view := a.noteView()
 		projection := notebook.Build(a.snap)
 		width, _ := c.Size()
@@ -389,6 +446,13 @@ func notebookPage(c *ui.Context, a *app) {
 // notebookProse renders the editable paper of one mode: live rich text,
 // source editing, reading, or the AsterML document. It writes prose only.
 func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
+	// A sealed record locks every editing mode: the prose verifies against
+	// its signature, so the paper shows the lock instead of an editor until
+	// explicitly unlocked. Reading stays available.
+	if _, ok := a.recordSeal(); ok && !a.noteDirty && a.noteMode != 2 && a.noteMode != 4 {
+		a.recordLockedNotice(c, t)
+		return
+	}
 	paper := func(children func()) {
 		ui.Column(c).Grow(1).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Grow(1).FillWidth().MaxWidth(820).MaxWidthPercent(100).
@@ -590,7 +654,7 @@ func (a *app) applyNoteModeChange(old int) {
 	if a.noteMode == 3 {
 		a.noteAster = nil
 	}
-	if a.noteMode != 2 {
+	if a.noteMode != 2 && a.noteMode != 4 {
 		a.noteEditMode = a.noteMode
 	}
 	if a.noteDirty {
@@ -625,7 +689,7 @@ func (a *app) setNoteMode(mode int) {
 	if mode == 3 {
 		a.noteAster = nil
 	}
-	if mode != 2 {
+	if mode != 2 && mode != 4 {
 		a.noteEditMode = mode
 	}
 	a.noteMode = mode
@@ -726,6 +790,11 @@ func (a *app) loadNotebook() {
 			a.noteState = "saved"
 		}
 	}
+	// A sealed record opens in reading mode: the prose verifies against its
+	// signature, so no editing mode is shown until explicitly unlocked.
+	if _, ok := record.Verify(a.noteDraft); ok {
+		mode = 2
+	}
 	a.noteMode = mode
 	if mode != 2 {
 		a.noteEditMode = mode
@@ -783,6 +852,11 @@ func (a *app) saveNotebook() {
 }
 
 func (a *app) notebookToolbarState(tokens theme.Tokens) (string, ui.Color) {
+	// A verified signature outranks everything: the prose is signed,
+	// unmodified, and locked.
+	if _, ok := record.Verify(a.noteSource()); ok && !a.noteDirty {
+		return string(record.StateSealed), tokens.SuccessText
+	}
 	switch {
 	case a.noteState == "saving":
 		return "保存中", tokens.TextMuted
@@ -820,6 +894,11 @@ func hasSavedNotebookEvent(events []runs.RunEvent) bool {
 }
 
 func (a *app) markNotebookDirty() {
+	// A sealed record refuses to dirty: unlocking strips the signature
+	// explicitly, so no edit path can silently break the lock.
+	if _, ok := record.Verify(a.noteSource()); ok {
+		return
+	}
 	if a.noteMode == 0 && a.noteDoc != nil {
 		a.noteDraft = a.noteDoc.Text().Markdown()
 	}
@@ -1045,4 +1124,352 @@ func citationKindLabel(kind string) string {
 	default:
 		return "运行引用"
 	}
+}
+// recordBoardPage renders the automatic record board (mode 图板): the shared
+// RecordProjection as planned-vs-actual summary plus the representative
+// Well x Timepoint x FOV matrix, with dynamic references, derived design
+// parameters, and sign/lock controls. It writes no facts: inserting a matrix
+// token edits prose, and signing persists prose through the existing save.
+func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
+	tokens := theme.GetTokens(t)
+	proj := a.recordProjection()
+	board := a.recordBoard()
+	_, sigOK := record.Verify(a.noteSource())
+	sealed := sigOK && !a.noteDirty
+	state := record.ClassifyRecordState(a.noteDirty, sigOK)
+	ui.Scroll(c).Grow(1).Children(func() {
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Column(c).FillWidth().MaxWidth(960).MaxWidthPercent(100).
+				Padding(t.Space(4), t.Space(5)).Gap(t.Space(2.5)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+					ui.Text(c, "记录图板").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
+					components.Badge(c, string(state), components.BadgeOptions{Tone: recordBoardTone(state)})
+					ui.Spacer(c)
+					ui.Text(c, fmt.Sprintf("任务完成 %d/%d · 实测 %d 个 · 缺 %d 个 FOV 槽",
+						proj.CompletedTasks(), len(proj.Summary), proj.MeasurementCount(), proj.Gaps)).
+						FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+				})
+				a.recordSummarySection(c, t, tokens, proj)
+				a.recordMatrixSection(c, t, tokens, proj, board)
+				a.recordRefsSection(c, t, tokens, proj, sealed)
+				a.recordDerivedSection(c, t, tokens, proj)
+				a.recordSignSection(c, t, tokens, proj, sealed)
+			})
+		})
+	})
+}
+
+func recordBoardTone(state record.RecordState) components.BadgeTone {
+	switch state {
+	case record.StateSealed:
+		return components.BadgeSuccess
+	case record.StateUnsaved:
+		return components.BadgeWarning
+	default:
+		return components.BadgeNeutral
+	}
+}
+
+func recordBoardSection(c *ui.Context, t *ui.Theme, title string) {
+	tokens := theme.GetTokens(t)
+	ui.Text(c, title).FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
+}
+
+// recordSummarySection renders one planned-vs-actual row per frozen task from
+// the shared projection. No surface re-derives it.
+func (a *app) recordSummarySection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection) {
+	recordBoardSection(c, t, "计划 vs 实际")
+	if len(proj.Summary) == 0 {
+		ui.Text(c, "无冻结任务。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+		return
+	}
+	for _, sum := range proj.Summary {
+		sum := sum
+		title := strings.TrimSpace(sum.Title)
+		if title == "" {
+			title = strings.TrimSpace(sum.TaskKey)
+		}
+		head := title
+		if strings.TrimSpace(sum.Timepoint) != "" {
+			head += " · " + sum.Timepoint
+		}
+		if word := notebookStatusWord(sum.Status); word != "" {
+			head += " · " + word
+		}
+		ui.Text(c, head).FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.Text)
+		actual := map[string]record.Param{}
+		order := []string{}
+		for _, p := range sum.Actual {
+			if _, ok := actual[p.Key]; !ok {
+				order = append(order, p.Key)
+			}
+			actual[p.Key] = p
+		}
+		for _, p := range sum.Planned {
+			if _, ok := actual[p.Key]; !ok {
+				order = append(order, p.Key)
+				actual[p.Key] = record.Param{Key: p.Key, Label: p.Label, Unit: p.Unit}
+			}
+		}
+		planned := map[string]record.Param{}
+		for _, p := range sum.Planned {
+			planned[p.Key] = p
+		}
+		for _, key := range order {
+			act, plan := actual[key], planned[key]
+			label := plan.Label
+			if strings.TrimSpace(label) == "" {
+				label = act.Label
+			}
+			if strings.TrimSpace(label) == "" {
+				label = key
+			}
+			line := label + "：计划 " + orDash(plan.Value) + " → 实际 " + orDash(act.Value)
+			unit := act.Unit
+			if unit == "" {
+				unit = plan.Unit
+			}
+			if unit != "" {
+				line += " " + unit
+			}
+			ui.Text(c, line).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+		}
+		if sum.Skipped {
+			ui.Text(c, "条件跳过：按规则跳过").FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+		}
+		for _, dev := range sum.Deviations {
+			ui.Text(c, "偏差："+dev).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
+		}
+	}
+}
+
+func orDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "—"
+	}
+	return value
+}
+
+// recordMatrixSection renders the representative Well x Timepoint matrix for
+// the selected FOV layer. Clicking FOV 1–6 switches the layer; empty slots
+// read as gaps, never placeholders.
+func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection, board *recordBoardView) {
+	recordBoardSection(c, t, "代表视野矩阵（孔位 × 时间点 × FOV）")
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+		for fov := 1; fov <= record.FOVSlots; fov++ {
+			fov := fov
+			style := components.ButtonGhost
+			if board.fov == fov {
+				style = components.ButtonSecondary
+			}
+			if components.Button(c, fmt.Sprintf("FOV %d", fov), style).Clicked() {
+				board.fov = fov
+			}
+		}
+	})
+	if len(proj.Matrix) == 0 {
+		ui.Text(c, "无实测孔位数据。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+		return
+	}
+	for _, cell := range proj.Matrix {
+		cell := cell
+		main := record.MatrixCellText(cell)
+		img := cell.Representative(board.fov)
+		sub := fmt.Sprintf("FOV %d 缺", board.fov)
+		if img != nil {
+			sub = "图·" + img.Label
+		}
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Text(c, cell.Well+" · "+cell.Timepoint).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
+			ui.Text(c, main).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+			ui.Text(c, sub).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+			if img != nil {
+				if components.Button(c, "打开原图", components.ButtonGhost).Clicked() {
+					err := a.openRunAsset(runworkspace.LinkedAsset{
+						AssetID: img.AssetID, RootID: img.RootID, RelativePath: img.RelativePath,
+						MediaType: "image",
+						LinkedTo:  runworkspace.AssetLink{RunID: a.snap.RunID},
+					})
+					if err != nil {
+						c.AddToast(ui.Toast{Title: "打开原图失败", Description: err.Error(), Type: components.ToastError})
+					}
+				}
+			}
+		})
+	}
+	if len(proj.UnassignedLabels) > 0 {
+		ui.Text(c, fmt.Sprintf("未定位图 %d 张：%s", proj.UnassignedImages, strings.Join(proj.UnassignedLabels, "、"))).
+			FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+	}
+}
+
+// recordRefsSection lists the dynamic references in the current prose and
+// offers one-tap insertion of timepoint tokens. Insertion edits prose only.
+func (a *app) recordRefsSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection, sealed bool) {
+	recordBoardSection(c, t, "动态引用 @matrix(…)")
+	refs := record.FindMatrixRefs(a.noteSource())
+	if len(refs) == 0 {
+		ui.Text(c, "正文暂无矩阵引用。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+	} else {
+		for _, ref := range refs {
+			ref := ref
+			cells, unknown := record.ResolveMatrixRef(proj, ref)
+			line := ref.Raw + " → " + fmt.Sprintf("%d 个单元格", len(cells))
+			if len(unknown) > 0 {
+				line += "（未记录时间点 " + strings.Join(unknown, "、") + "）"
+			}
+			ui.Text(c, line).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+		}
+	}
+	if sealed || len(proj.Timepoints) == 0 {
+		return
+	}
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+		for _, tp := range proj.Timepoints {
+			tp := tp
+			if components.Button(c, "插入 @matrix("+tp+")", components.ButtonGhost).Clicked() {
+				tok := "@matrix(" + tp + ")"
+				src := strings.TrimSpace(a.noteSource())
+				if src != "" {
+					src += "\n\n" + tok
+				} else {
+					src = tok
+				}
+				a.noteDraft = src
+				a.markNotebookDirty()
+			}
+		}
+	})
+}
+
+// recordDerivedSection renders the new-design draft grown from measured data,
+// with its provenance, plus a JSON handoff export.
+func (a *app) recordDerivedSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection) {
+	recordBoardSection(c, t, "派生设计（源自实测）")
+	derived := record.DeriveDesign(proj)
+	if len(derived.Parameters) == 0 {
+		ui.Text(c, "无实测参数可派生。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+		return
+	}
+	ui.Text(c, derived.Title+" · 源自 "+derived.SourceRunID+" · 设计 rev "+fmt.Sprintf("%d", derived.SourceDesignRevision)).
+		FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+	for _, param := range derived.Parameters {
+		param := param
+		line := param.Label + "：计划 " + orDash(param.Planned) + " → 实测 " + orDash(param.Measured)
+		if param.Unit != "" {
+			line += " " + param.Unit
+		}
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Text(c, line).FontSize(float32(tokens.TextData)).TextColor(t.Text)
+			ui.Text(c, param.Source).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+		})
+	}
+	if components.Button(c, "导出派生参数", components.ButtonSecondary).Clicked() {
+		a.exportRecordFile(c, "导出派生参数", "derived-design-"+a.snap.RunID+".json", derived.JSON())
+	}
+}
+
+// recordSignSection hosts sign/lock and archive export. Signing persists the
+// prose through the existing save path with a signature trailer; the lock is
+// the verified signature, not a separate flag.
+func (a *app) recordSignSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection, sealed bool) {
+	recordBoardSection(c, t, "签核与归档")
+	if sealed {
+		sig, _ := a.recordSeal()
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Text(c, "已签核归档 · "+sig.Actor+" · "+sig.At).
+				FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.SuccessText)
+			ui.Spacer(c)
+			if components.Button(c, "解锁", components.ButtonSecondary).Clicked() {
+				a.unlockRecord()
+			}
+		})
+		ui.Text(c, "记录已锁定：切换到笔记页查看只读正文，或解锁后继续编辑。").
+			FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+	} else {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			if components.Button(c, "签核归档", components.ButtonSecondary).Clicked() {
+				a.signRecord()
+			}
+			ui.Text(c, "签核保存正文并锁定编辑；归档包在实验方案页导出。").
+				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+		})
+	}
+	if components.Button(c, "导出归档包", components.ButtonGhost).Clicked() {
+		arch := protocol.BuildArchive(proj, a.noteSource(), time.Now())
+		a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", arch.Markdown())
+	}
+}
+
+// recordLockedNotice replaces every editing mode while the record is sealed.
+func (a *app) recordLockedNotice(c *ui.Context, t *ui.Theme) {
+	tokens := theme.GetTokens(t)
+	ui.Column(c).Grow(1).FillWidth().AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).FillWidth().MaxWidth(820).MaxWidthPercent(100).
+			Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "已签核归档").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
+			ui.Text(c, "记录已锁定为只读。切换到“阅读”查看正文，或解锁后继续编辑。").
+				FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+			if components.Button(c, "解锁", components.ButtonSecondary).Clicked() {
+				a.unlockRecord()
+			}
+		})
+	})
+}
+
+// signRecord signs the current prose and persists it through the existing
+// Notebook save path, then moves to reading mode under the lock.
+func (a *app) signRecord() {
+	if a.runSvc == nil {
+		a.noteErr = "运行服务不可用"
+		a.noteState = "error"
+		return
+	}
+	source := strings.TrimSpace(a.noteSource())
+	if source == "" {
+		a.noteErr = "Notebook 不能为空"
+		a.noteState = "error"
+		return
+	}
+	if len([]rune(source)) > 4800 {
+		a.noteErr = "内容过长，签核前请精简（签核附带约 200 字符）。"
+		a.noteState = "error"
+		return
+	}
+	signed, _ := record.Sign(source, a.snap.RunID, a.snap.DesignRevision, "local-user", time.Now())
+	a.noteDraft = signed
+	a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(signed))
+	a.saveNotebook()
+	if a.noteState == "saved" {
+		a.setNoteMode(2)
+	}
+}
+
+// unlockRecord strips the signature trailer and returns the prose to the
+// editable 未保存 state. Unlocking never edits the prose itself.
+func (a *app) unlockRecord() {
+	a.noteDraft = record.StripSignature(a.noteSource())
+	a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
+	a.markNotebookDirty()
+}
+
+// exportRecordFile writes a record artifact (derived JSON or archive
+// Markdown) through a save dialog, following the document export pattern.
+func (a *app) exportRecordFile(c *ui.Context, title, filename, content string) {
+	home, _ := os.UserHomeDir()
+	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Parent: mygo.FocusedWindow(), Title: title, DefaultPath: filepath.Join(home, filename),
+	})
+	if err != nil {
+		c.AddToast(ui.Toast{Title: title + "失败", Description: err.Error(), Type: components.ToastError})
+		return
+	}
+	if path == "" {
+		return
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		c.AddToast(ui.Toast{Title: title + "失败", Description: err.Error(), Type: components.ToastError})
+		return
+	}
+	c.AddToast(ui.Toast{Title: filename + " 已保存", Description: path, Type: components.ToastSuccess})
 }
