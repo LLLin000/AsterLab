@@ -87,6 +87,19 @@ jobs:
         # profile already ships its std; no extra `targets` input is needed.
         run: rustup install --profile minimal --no-self-update
 
+      - name: Cache Rust dependencies and target
+        if: env.RUN_HEAVY == '1'
+        # Hosted ephemeral runner: safe to cache cargo registry/git plus the
+        # workspace target dir, so Runs.dll rebuilds incrementally instead of
+        # from zero every run. The linux-tests.yml comment about rust-cache
+        # deleting a toolchain was a self-hosted-box incident (it cleaned
+        # ~/.cargo/bin on a persistent runner); this job runs on a fresh
+        # windows-2022 image that is discarded afterwards, so there is no
+        # host toolchain to harm. Never copy this step to a self-hosted job.
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-mygo
+
       - name: Record toolchain versions
         if: env.RUN_HEAVY == '1'
         run: |
