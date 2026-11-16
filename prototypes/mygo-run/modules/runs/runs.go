@@ -55,6 +55,30 @@ type RunService interface {
 	// sample, attempt and pantry reference), the event identity and the
 	// append-only fact, so the caller never writes a second table.
 	CreateExecutionEvent(ctx context.Context, input ExecutionEventInput) (ExecutionEventResult, error)
+	// ExecuteCommand is the generic write entry point (INT-01 Bridge v2). The
+	// Go side passes one envelope; Core dispatches on Kind to the same
+	// implementation the CLI tool of that name uses, in one transaction, with
+	// the same validation. Kind is a command name such as
+	// execution_event.create; unknown Kind values are rejected with
+	// INVALID_INPUT and no new symbol is minted for them. PayloadJSON is the
+	// exact CLI --input JSON text, decoded by Core and never rebuilt in Go;
+	// unknown fields are rejected and the caller never invents defaults.
+	// IdempotencyKey is required: the same key + same payload replays the
+	// first result (Replayed true, no second write); the same key with a
+	// different payload is IDEMPOTENCY_MISMATCH and writes nothing, mirroring
+	// the OperationID rule in RunService. ExpectedRevision is required
+	// exactly when the underlying command revises a versioned record and is
+	// omitted for append-only commands; a stale revision is
+	// REVISION_CONFLICT. There is no dry-run flag on writes.
+	ExecuteCommand(ctx context.Context, input ExecuteCommandInput) (ExecuteCommandResult, error)
+	// QueryProjection is the generic read entry point. It is side-effect
+	// free: it never writes records, creates timers, or invents defaults.
+	// The result is the CLI result JSON verbatim (the same shape as --json
+	// stdout); Go decodes it and never re-derives numbers, states, or
+	// groupings from it. Kind is a query name such as run.workspace; unknown
+	// Kind values are INVALID_INPUT. ParamsJSON is the exact CLI input JSON
+	// for the matching read command.
+	QueryProjection(ctx context.Context, input QueryProjectionInput) (QueryProjectionResult, error)
 	// WorkflowTree returns Core's read-only hierarchy projection for the
 	// Run's frozen AsterDoc. The JSON is the single contract shared with the
 	// CLI and must be decoded, never rebuilt in Go.
@@ -102,6 +126,42 @@ type RunService interface {
 	SignAndArchiveRun(ctx context.Context, input SignAndArchiveInput) (ArchiveState, error)
 	// Close releases the database connection.
 	Close() error
+}
+
+// ExecuteCommandInput is one Bridge v2 generic write envelope.
+// Kind is the command name, e.g. execution_event.create, readout.submit,
+// readout.batch, run.create, note.create, run.revise, run.set_status.
+// IdempotencyKey is required (one per user action, never per retry).
+// ExpectedRevision is required exactly when the underlying command revises a
+// versioned record; omit it for append-only commands. PayloadJSON is the
+// exact CLI --input JSON text for that command.
+type ExecuteCommandInput struct {
+	Kind             string  `json:"kind"`
+	IdempotencyKey   string  `json:"idempotencyKey"`
+	ExpectedRevision *uint64 `json:"expectedRevision,omitempty"`
+	PayloadJSON      string  `json:"payloadJson"`
+}
+
+// ExecuteCommandResult is Core's command result JSON verbatim (the same shape
+// as the CLI --json result), plus the replay flag Core reports for an
+// idempotent re-submission.
+type ExecuteCommandResult struct {
+	ResultJSON string `json:"resultJson"`
+	Replayed   bool   `json:"replayed"`
+}
+
+// QueryProjectionInput is one Bridge v2 generic read envelope. Kind is the
+// query name, e.g. run.workspace, workflow.progress, workflow.inspect_tree.
+// ParamsJSON is the exact CLI input JSON for the matching read command.
+type QueryProjectionInput struct {
+	Kind       string `json:"kind"`
+	ParamsJSON string `json:"paramsJson"`
+}
+
+// QueryProjectionResult is Core's query result JSON verbatim (the same shape
+// as the CLI --json result).
+type QueryProjectionResult struct {
+	ResultJSON string `json:"resultJson"`
 }
 
 // DesignService manages experiment designs.

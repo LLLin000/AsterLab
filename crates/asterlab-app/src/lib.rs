@@ -405,7 +405,686 @@ impl AppCore {
         agent_edit_preview::validate_proposal_value(&self.db, proposal)
     }
 
-    /// Digest over every record row; evidence helper for read-only commands.
+    /// Bridge v2 generic write channel (INT-01 §ExecuteCommand): one envelope,
+    /// routed to the same CLI-side functions the named tools use, in one
+    /// transaction, with the same validation. Go passes the envelope; Core
+    /// decodes `payload_json` (the exact CLI `--input` JSON text) and never
+    /// lets Go rebuild or default it.
+    ///
+    /// Supported `kind` values (frozen exposure list, `mygo-v1-contract.md` §BE-08/BE-09):
+    /// `execution_event.create` (append-only actuals, incl. extended lineage
+    /// fields and `well.set` 1D lanes through the same Core validators),
+    /// `readout.submit` (scalar + multi-value), `readout.batch` (`cells` or
+    /// `csv`, one transaction), `run.create` (incl. cross-Design
+    /// `source_run_id`), plus `note.create`, `run.revise`, `run.set_status`.
+    pub fn execute_command(&mut self, kind: &str, payload: Value, idempotency_key: &str) -> Result<Value, String> {
+        if idempotency_key.trim().is_empty() {
+            return Err("INVALID_INPUT: idempotency_key is required (one per user action, never per retry)".into());
+        }
+        match kind {
+            "execution_event.create" => {
+                let run_id = payload.get("run_id").and_then(Value::as_str).unwrap_or("").to_owned();
+                let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
+                if let Some(existing) = find_command_event_tx(&tx, &run_id, idempotency_key).map_err(|e| e.to_string())? {
+                    let same = existing.get("operation_payload").cloned().unwrap_or(Value::Null) == payload;
+                    let pantry_item = payload.get("pantry_item_id").and_then(Value::as_str).map(str::to_owned);
+                    let notice = pantry_notice_for(&tx, pantry_item.as_deref())?;
+                    tx.commit().map_err(|e| e.to_string())?;
+                    if same {
+                        let mut out = serde_json::json!({"record": existing, "replayed": true});
+                        if let Some(notice) = notice {
+                            out["pantry_notices"] = serde_json::json!([notice]);
+                        } else {
+                            out["pantry_notices"] = serde_json::json!([]);
+                        }
+                        return Ok(out);
+                    }
+                    return Err("IDEMPOTENCY_MISMATCH: same idempotency_key with different payload; mint a new key for a new action".into());
+                }
+                let mut event = payload.clone();
+                event["operation_id"] = serde_json::json!(idempotency_key);
+                event["operation_payload"] = payload.clone();
+                let (item_id, notice) = {
+                    let item = payload.get("pantry_item_id").and_then(Value::as_str).map(str::to_owned);
+                    let notice = pantry_notice_for(&tx, item.as_deref()).map_err(|e| e.to_string())?;
+                    (item, notice)
+                };
+                if let Some(item_id) = item_id.as_deref() {
+                    if item_id.trim().is_empty() {
+                        return Err("INVALID_INPUT: 储藏室条目 ID不能为空".into());
+                    }
+                    if pantry_lookup(&tx, item_id).map_err(|e| e.to_string())?.is_none() {
+                        return Err(format!("NOT_FOUND: 储藏室条目不存在：{item_id}"));
+                    }
+                }
+                let record = cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(map_command_error)?;
+                tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
+                let mut out = serde_json::json!({"record": record, "replayed": false});
+                if let Some(notice) = notice {
+                    out["pantry_notices"] = serde_json::json!([notice]);
+                } else {
+                    out["pantry_notices"] = serde_json::json!([]);
+                }
+                Ok(out)
+            }
+            "readout.submit" | "readout.batch" => {
+                let request = payload.clone();
+                let planned = {
+                    let workspace = load_typed_workspace(&self.db, request.get("run_id").and_then(Value::as_str).unwrap_or(""))?;
+                    plan_readout_request(kind, request.clone(), &workspace)?
+                };
+                let run_id = request.get("run_id").and_then(Value::as_str).unwrap_or("").to_owned();
+                let tx = self.db.unchecked_transaction().map_err(|e| format!("INTERNAL: {e}"))?;
+                if let Some(existing) = find_readout_tx(&tx, &run_id, &planned.key).map_err(|e| e.to_string())? {
+                    let same = existing.get("operation_payload").cloned().unwrap_or(Value::Null) == planned.payload;
+                    tx.commit().map_err(|e| e.to_string())?;
+                    if same {
+                        return Ok(serde_json::json!({"record": existing, "idempotency_key": planned.key, "replayed": true, "accepted": planned.count}));
+                    }
+                    return Err("IDEMPOTENCY_MISMATCH: same idempotency_key with different payload; mint a new key for a new action".into());
+                }
+                let submitted = if kind == "readout.submit" {
+                    submit_scalar_or_typed_tx(&tx, &run_id, request, idempotency_key)?
+                } else {
+                    submit_batch_tx(&tx, &run_id, request, idempotency_key)?
+                };
+                tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
+                Ok(submitted)
+            }
+            "run.create" => {
+                let tx = self.db.unchecked_transaction().map_err(|e| format!("INTERNAL: {e}"))?;
+                if let Some(existing) = find_run_tx(&tx, idempotency_key).map_err(|e| e.to_string())? {
+                    let same = existing.get("data").and_then(|d| d.get("operation_payload")).cloned().unwrap_or(Value::Null) == payload;
+                    tx.commit().map_err(|e| e.to_string())?;
+                    if same {
+                        return Ok(serde_json::json!({"record": existing, "replayed": true}));
+                    }
+                    return Err("IDEMPOTENCY_MISMATCH: same idempotency_key with different payload; mint a new key for a new action".into());
+                }
+                let record = create_run_tx(&tx, &payload, Some(idempotency_key)).map_err(|e| e)?;
+                tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
+                Ok(serde_json::json!({"record": record, "replayed": false}))
+            }
+            "note.create" | "run.revise" | "run.set_status" => {
+                let record = apply_simple_command(&mut self.db, kind, &payload).map_err(|e: String| e)?;
+                Ok(serde_json::json!({"record": record, "replayed": false}))
+            }
+            other => Err(format!("INVALID_INPUT: unknown command kind: {other}")),
+        }
+    }
+
+    /// Bridge v2 generic read channel (INT-01 §QueryProjection): side-effect
+    /// free; never writes records, creates timers, or invents defaults. Go
+    /// decodes the returned CLI-result JSON; it never re-derives numbers,
+    /// states, or groupings from it.
+    ///
+    /// Supported `kind` values: `run.workspace` (input `{id, view?}`;
+    /// `view=blind` masks frozen group identity only when the frozen design
+    /// declared a non-empty `blinding` basis), `workflow.progress` (groups by
+    /// actual event `(step_path, timepoint)`), `workflow.inspect_tree`
+    /// (identity/hierarchy; classic-Design Runs return empty roots with an
+    /// explanatory issue, never `NOT_FOUND`).
+    pub fn query_projection(&self, kind: &str, params: Value) -> Result<Value, String> {
+        match kind {
+            "run.workspace" => {
+                let id = params.get("id").and_then(Value::as_str).unwrap_or("");
+                if id.trim().is_empty() {
+                    return Err("INVALID_INPUT: run.workspace requires id".into());
+                }
+                let view = match params.get("view").and_then(Value::as_str).map(str::trim).unwrap_or("") {
+                    "" | "unblinded" => asterlab_core::record_projection::ProjectionView::Unblinded,
+                    "blind" => asterlab_core::record_projection::ProjectionView::Blind,
+                    other => return Err(format!("INVALID_INPUT: view 只能是 blind 或 unblinded，收到 {other}")),
+                };
+                cli_impl::run_workspace_for_view(&self.db, id, view).map_err(map_command_error)
+            }
+            "workflow.progress" => {
+                let run_id = params.get("run_id").and_then(Value::as_str).unwrap_or("");
+                if run_id.trim().is_empty() {
+                    return Err("INVALID_INPUT: run_id 不能为空".into());
+                }
+                let workspace: asterlab_core::run_workspace::RunWorkspace =
+                    serde_json::from_value(cli_impl::run_workspace(&self.db, run_id).map_err(map_command_error)?)
+                        .map_err(|e| format!("INTERNAL: {e}"))?;
+                let query = asterlab_core::sample_progress::SampleProgressQuery {
+                    step_path: params.get("step_path").and_then(Value::as_str).map(str::to_owned),
+                    timepoint: params.get("timepoint").and_then(Value::as_str).map(str::to_owned),
+                    sample_id: params.get("sample_id").and_then(Value::as_str).map(str::to_owned),
+                    sample_ids: params.get("sample_ids").and_then(Value::as_array).map(|a| {
+                        a.iter().filter_map(Value::as_str).map(str::to_owned).collect()
+                    }).unwrap_or_default(),
+                };
+                serde_json::to_value(asterlab_core::sample_progress::build_from_workspace(&workspace, &query))
+                    .map_err(|e| format!("INTERNAL: {e}"))
+            }
+            "workflow.inspect_tree" => {
+                let design_id = params.get("design_id").and_then(Value::as_str).map(str::to_owned);
+                let run_id = params.get("run_id").and_then(Value::as_str).map(str::to_owned);
+                if design_id.as_deref().is_none_or(str::is_empty) && run_id.as_deref().is_none_or(str::is_empty) {
+                    return Err("INVALID_INPUT: workflow.inspect_tree requires design_id or run_id".into());
+                }
+                cli_impl::workflow_tree_for_db(
+                    &self.db,
+                    design_id.as_deref(),
+                    params.get("revision").and_then(Value::as_u64),
+                    run_id.as_deref(),
+                ).map_err(map_command_error)
+            }
+            other => Err(format!("INVALID_INPUT: unknown query kind: {other}")),
+        }
+    }
+}
+/// Map the shared CLI error into the Bridge v2 envelope prefix. Stable Core
+/// `code` values travel verbatim in the `ok: false` envelope; `message` is
+/// display-only and Go maps the prefix (`INVALID:` / `NOT_FOUND:` /
+/// `CONFLICT:`) to its typed errors without parsing message text.
+fn map_command_error(e: cli_impl::CliError) -> String {
+    match e.code {
+        "INVALID_INPUT" | "INVALID_PROPOSAL" | "INVALID_BINDING" | "UNIT_MISMATCH"
+        | "FORBIDDEN_FIELD" | "CONFIRMATION_REQUIRED" | "CONFIRMATION_MISMATCH"
+        | "STEP_REFERENCED" => format!("INVALID_INPUT: {}", e.message),
+        "NOT_FOUND" | "STALE_REFERENCE" => format!("NOT_FOUND: {}", e.message),
+        "REVISION_CONFLICT" | "VERSION_CONFLICT" => format!("REVISION_CONFLICT: {}", e.message),
+        "IDEMPOTENCY_MISMATCH" => format!("IDEMPOTENCY_MISMATCH: {}", e.message),
+        _ => format!("INTERNAL: {}", e.message),
+    }
+}
+
+/// Envelope-keyed replay lookup for `execution_event.create`: the generic
+/// channel stores the caller-supplied `idempotency_key` as `operation_id` and
+/// the exact `payload_json` as `operation_payload`, so the same key + same
+/// payload replays the first result and a different payload is a mismatch.
+fn find_command_event_tx(tx: &rusqlite::Transaction<'_>, run_id: &str, key: &str) -> Result<Option<Value>, String> {
+    let id: Option<String> = tx.query_row(
+        "SELECT id FROM records WHERE kind='execution_event' AND parent_id=?1 AND json_extract(data_json,'$.operation_id')=?2 ORDER BY created_at LIMIT 1",
+        rusqlite::params![run_id, key],
+        |row| row.get(0),
+    ).optional().map_err(|e| e.to_string())?;
+    match id {
+        Some(id) => {
+            let (raw, created, updated): (String, String, String) = tx.query_row(
+                "SELECT data_json,created_at,updated_at FROM records WHERE id=?1",
+                [&id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).map_err(|e| e.to_string())?;
+            let mut data: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            data["id"] = json!(id.clone());
+            data["kind"] = json!("execution_event");
+            data["parent_id"] = json!(run_id);
+            data["created_at"] = json!(created);
+            data["updated_at"] = json!(updated);
+            Ok(Some(data))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Readout replay lookup keyed by the planner-derived content key (same rule
+/// as the named `readout.*` tools); the envelope key only gates the
+/// mismatch check for `run.create`-style envelope idempotency.
+fn find_readout_tx(tx: &rusqlite::Transaction<'_>, run_id: &str, key: &str) -> Result<Option<Value>, String> {
+    let id: Option<String> = tx.query_row(
+        "SELECT id FROM records WHERE kind='execution_event' AND parent_id=?1 AND json_extract(data_json,'$.operation_id')=?2 ORDER BY created_at LIMIT 1",
+        rusqlite::params![run_id, key],
+        |row| row.get(0),
+    ).optional().map_err(|e| e.to_string())?;
+    match id {
+        Some(id) => {
+            let (raw, created, updated): (String, String, String) = tx.query_row(
+                "SELECT data_json,created_at,updated_at FROM records WHERE id=?1",
+                [&id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).map_err(|e| e.to_string())?;
+            let mut data: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            data["id"] = json!(id.clone());
+            data["kind"] = json!("execution_event");
+            data["parent_id"] = json!(run_id);
+            data["created_at"] = json!(created);
+            data["updated_at"] = json!(updated);
+            Ok(Some(data))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Envelope-keyed replay lookup for `run.create`: Runs store the envelope
+/// `idempotency_key` as `data.operation_id` and the exact payload as
+/// `data.operation_payload`.
+fn find_run_tx(tx: &rusqlite::Transaction<'_>, key: &str) -> Result<Option<Value>, String> {
+    let id: Option<String> = tx.query_row(
+        "SELECT id FROM records WHERE kind='run' AND json_extract(data_json,'$.operation_id')=?1 ORDER BY created_at LIMIT 1",
+        [key],
+        |row| row.get(0),
+    ).optional().map_err(|e| e.to_string())?;
+    match id {
+        Some(id) => {
+            let (raw, created, updated): (String, String, String) = tx.query_row(
+                "SELECT data_json,created_at,updated_at FROM records WHERE id=?1",
+                [&id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).map_err(|e| e.to_string())?;
+            let data: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            Ok(Some(json!({"id":id,"kind":"run","data":data,"created_at":created,"updated_at":updated})))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Pantry advisory for the generic channel, resolved through the same ledger
+/// read `pantry.list` uses: unknown/retired is `NOT_FOUND`, near-expiry or
+/// expired adds one advisory notice and never blocks the write.
+fn pantry_notice_for(tx: &rusqlite::Transaction<'_>, item_id: Option<&str>) -> Result<Option<Value>, String> {
+    use asterlab_core::pantry::{self, CalendarDate, PantryDraft, PantryItem};
+    let Some(item_id) = item_id else { return Ok(None) };
+    let item_id = item_id.trim();
+    if item_id.is_empty() { return Ok(None) }
+    let row: Option<(String, String, Option<String>, String, String, Option<String>, Option<String>, Option<i64>, Option<i64>, i64, i64)> = tx.query_row(
+        "SELECT id,label_code,project_id,name,location,purchased_on,opened_on,shelf_life_days,opened_shelf_life_days,exhausted,revision FROM pantry_items WHERE id=?1",
+        [item_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?)),
+    ).optional().map_err(|e| e.to_string())?;
+    let Some((id, label_code, project_id, name, location, purchased_on, opened_on, shelf, opened_shelf, exhausted, revision)) = row else {
+        return Err(format!("NOT_FOUND: 储藏室条目不存在：{item_id}"));
+    };
+    // Tombstoned rows stay reserved; every read path filters them out.
+    let deleted: bool = tx.query_row(
+        "SELECT deleted FROM pantry_items WHERE id=?1",
+        [item_id],
+        |row| row.get(0),
+    ).optional().map_err(|e| e.to_string())?.unwrap_or(false);
+    if deleted {
+        return Err(format!("NOT_FOUND: 储藏室条目不存在：{item_id}"));
+    }
+    let item = PantryItem {
+        id, label_code: label_code.clone(), project_id, revision,
+        draft: PantryDraft {
+            name: name.clone(), location,
+            purchased_on, opened_on,
+            shelf_life_days: shelf.map(|d| d as u32),
+            opened_shelf_life_days: opened_shelf.map(|d| d as u32),
+            exhausted: exhausted != 0,
+        },
+    };
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let as_of = CalendarDate::parse(&today).ok_or_else(|| "INTERNAL: 系统日期无效".to_string())?;
+    let evaluation = pantry::evaluate(&item, as_of, pantry::NEAR_EXPIRY_DAYS);
+    if !evaluation.needs_notice() {
+        return Ok(None);
+    }
+    Ok(Some(json!({
+        "code": "pantry_item_expiry_notice",
+        "severity": "advisory",
+        "pantry_item_id": item_id,
+        "label_code": label_code,
+        "name": name,
+        "status": evaluation.status,
+        "expires_on": evaluation.expires_on,
+        "days_remaining": evaluation.days_remaining,
+        "next_action": "核对或更换该储藏室条目；提示不阻断事件写入",
+    })))
+}
+
+/// Pantry existence check through the same ledger table the CLI reads.
+fn pantry_lookup(tx: &rusqlite::Transaction<'_>, item_id: &str) -> Result<Option<Value>, String> {
+    let row: Option<(String,)> = tx.query_row(
+        "SELECT data_json FROM pantry_items WHERE id=?1",
+        [item_id],
+        |row| Ok((row.get::<_, String>(0)?,)),
+    ).optional().map_err(|e| e.to_string())?;
+    match row {
+        Some((raw,)) => {
+            let data: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            if data.get("deleted").and_then(Value::as_bool).unwrap_or(false) {
+                return Ok(None);
+            }
+            Ok(Some(data))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Typed workspace loader the readout planners validate against: the same
+/// frozen Run the named `readout.*` tools check scope with.
+fn load_typed_workspace(db: &Connection, run_id: &str) -> Result<asterlab_core::run_workspace::RunWorkspace, String> {
+    cli_impl::run_workspace_typed(db, run_id).map_err(map_command_error)
+}
+
+/// Planned readout identity: scalar `readout.submit` (numeric or `qualifier`),
+/// multi-value `readout.submit` (`readouts[]` + call-scoped
+/// `readout_schemas[]`), and `readout.batch` (`cells[]` or `csv`). The plan
+/// carries the content-derived idempotency key, the stored
+/// `operation_payload` for mismatch comparison, and the accepted count.
+struct PlannedReadout {
+    key: String,
+    payload: Value,
+    count: usize,
+}
+
+/// Derive the readout plan without writing: same content-key rule as the named
+/// tools, so the generic channel and the typed entry points replay each
+/// other.
+fn plan_readout_request(kind: &str, request: Value, workspace: &asterlab_core::run_workspace::RunWorkspace) -> Result<PlannedReadout, String> {
+    use asterlab_core::readout_records::{plan_readout_submission as plan_typed, ReadoutRegistry, ReadoutSubmission};
+    use asterlab_core::readout_submit::{plan_batch, plan_submit, ReadoutBatchRequest, ReadoutSubmitRequest};
+    let run_id = request.get("run_id").and_then(Value::as_str).unwrap_or("").to_owned();
+    if kind == "readout.batch" {
+        let parsed: ReadoutBatchRequest = serde_json::from_value(request.clone())
+            .map_err(|e| format!("INVALID_INPUT: 读数批次字段无效：{e}"))?;
+        let plan = plan_batch(&parsed, workspace).map_err(|issues| {
+            let first = issues.first().map(|i| i.message.as_str()).unwrap_or("校验失败");
+            format!("INVALID_INPUT: 读数批次校验失败：{first}")
+        })?;
+        return Ok(PlannedReadout { key: plan.idempotency_key.clone(), payload: plan.event.get("operation_payload").cloned().unwrap_or(Value::Null), count: plan.readout_count });
+    }
+    if request.get("readouts").is_some() {
+        let mut registry = ReadoutRegistry::builtin();
+        for schema in request.get("readout_schemas").and_then(Value::as_array).into_iter().flatten() {
+            let parsed: asterlab_core::readout_schema::ReadoutSchema = serde_json::from_value(schema.clone())
+                .map_err(|e| format!("INVALID_INPUT: 读数 schema 无效：{e}"))?;
+            registry.insert(parsed).map_err(|issues| {
+                let first = issues.first().map(|i| i.message.as_str()).unwrap_or("校验失败");
+                format!("INVALID_INPUT: 读数 schema 校验失败：{first}")
+            })?;
+        }
+        let step_path = request.get("step_path").and_then(Value::as_str).unwrap_or("").trim().to_owned();
+        if step_path.is_empty() {
+            return Err("INVALID_INPUT: 缺少 Protocol 步骤路径".into());
+        }
+        let submission: ReadoutSubmission = serde_json::from_value(json!({
+            "run_id": run_id,
+            "step_path": step_path,
+            "batch_id": request.get("batch_id").cloned().unwrap_or(Value::Null),
+            "assay_id": request.get("assay_id").cloned().unwrap_or(Value::Null),
+            "timepoint": request.get("timepoint").cloned().unwrap_or(Value::Null),
+            "readouts": request.get("readouts").cloned().unwrap_or(json!([])),
+        })).map_err(|e| format!("INVALID_INPUT: 读数提交字段无效：{e}"))?;
+        let plan = plan_typed(&registry, &submission, workspace).map_err(|issues| {
+            let first = issues.first().map(|i| i.message.as_str()).unwrap_or("校验失败");
+            format!("INVALID_INPUT: 读数提交校验失败：{first}")
+        })?;
+        let key = format!("readout:typed:{}", sha256_hex(&serde_json::to_vec(&json!([
+            submission.run_id, submission.step_path, submission.assay_id,
+            submission.timepoint, submission.readouts,
+        ])).unwrap_or_default()));
+        let payload = request.get("readouts").cloned().unwrap_or(Value::Null);
+        return Ok(PlannedReadout { key, payload, count: plan.readouts.len().max(submission.readouts.len()) });
+    }
+    let parsed: ReadoutSubmitRequest = serde_json::from_value(request.clone())
+        .map_err(|e| format!("INVALID_INPUT: 读数提交字段无效：{e}"))?;
+    let plan = plan_submit(&parsed, workspace).map_err(|issues| {
+        let first = issues.first().map(|i| i.message.as_str()).unwrap_or("校验失败");
+        format!("INVALID_INPUT: 读数提交校验失败：{first}")
+    })?;
+    Ok(PlannedReadout { key: plan.idempotency_key.clone(), payload: plan.event.get("operation_payload").cloned().unwrap_or(Value::Null), count: plan.readout_count })
+}
+
+/// Hex SHA-256 used for the typed multi-value readout key (same rule as
+/// `src/cli.rs::typed_readout_key`).
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Submit one scalar or multi-value `readout.submit` inside the caller's
+/// transaction. Replays the content key; the envelope key only gates the
+/// `run.create`-style mismatch path, never the readout identity.
+fn submit_scalar_or_typed_tx(tx: &rusqlite::Transaction<'_>, run_id: &str, request: Value, _envelope_key: &str) -> Result<Value, String> {
+    let workspace: asterlab_core::run_workspace::RunWorkspace =
+        serde_json::from_value(cli_impl::run_workspace(tx, run_id).map_err(map_command_error)?)
+            .map_err(|e| format!("INTERNAL: {e}"))?;
+    let planned = plan_readout_request("readout.submit", request.clone(), &workspace)?;
+    if let Some(existing) = find_readout_tx(tx, run_id, &planned.key).map_err(|e| e.to_string())? {
+        if existing.get("operation_payload").cloned().unwrap_or(Value::Null) == planned.payload {
+            return Ok(json!({"record": existing, "idempotency_key": planned.key, "replayed": true, "accepted": planned.count}));
+        }
+        return Err("IDEMPOTENCY_MISMATCH: same readout identity with different payload".into());
+    }
+    let event = if request.get("readouts").is_some() {
+        build_typed_event(&request, &planned, &workspace)?
+    } else {
+        use asterlab_core::readout_submit::{plan_submit, ReadoutSubmitRequest};
+        let parsed: ReadoutSubmitRequest = serde_json::from_value(request.clone())
+            .map_err(|e| format!("INVALID_INPUT: 读数提交字段无效：{e}"))?;
+        plan_submit(&parsed, &workspace).map_err(|issues| {
+            let first = issues.first().map(|i| i.message.as_str()).unwrap_or("校验失败");
+            format!("INVALID_INPUT: 读数提交校验失败：{first}")
+        })?.event
+    };
+    let record = cli_impl::create_execution_event_tx(tx, run_id, &event).map_err(map_command_error)?;
+    Ok(json!({"record": record, "idempotency_key": planned.key, "replayed": false, "accepted": planned.count}))
+}
+
+/// Submit one `readout.batch` (`cells[]` or `csv`) inside the caller's
+/// transaction. Atomic: any row failure rejects the batch with
+/// `INVALID_INPUT` + `issues[]` and writes nothing.
+fn submit_batch_tx(tx: &rusqlite::Transaction<'_>, run_id: &str, request: Value, _envelope_key: &str) -> Result<Value, String> {
+    use asterlab_core::readout_submit::{plan_batch, ReadoutBatchRequest};
+    let workspace: asterlab_core::run_workspace::RunWorkspace =
+        serde_json::from_value(cli_impl::run_workspace(tx, run_id).map_err(map_command_error)?)
+            .map_err(|e| format!("INTERNAL: {e}"))?;
+    let mut normalized = request.clone();
+    if normalized.get("csv").is_none_or(Value::is_null)
+        && normalized.get("cells").and_then(Value::as_array).is_some_and(|cells| {
+            cells.iter().any(|c| c.get("qualifier").is_some_and(|q| !q.is_null()))
+        }) {
+        use asterlab_core::readout_submit::parse_csv_cells;
+        let cells = normalized.get("cells").and_then(Value::as_array).cloned().unwrap_or_default();
+        let header = "row,column,field,value,unit,sample_id,group,replicate,status,qualifier";
+        let mut csv = String::from(header);
+        for cell in &cells {
+            let text = |key: &str| match cell.get(key) {
+                None | Some(Value::Null) => String::new(),
+                Some(Value::String(s)) => format!("\"{}\"", s.replace('"', "\"\"")),
+                Some(v) => v.to_string(),
+            };
+            csv.push_str(&format!("\n\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"",
+                text("row"), text("column"), text("field"), text("value"), text("unit"),
+                text("sample_id"), text("group"), text("replicate"), text("status"), text("qualifier")));
+        }
+        normalized.as_object_mut().map(|o| { o.remove("cells"); o.insert("csv".into(), json!(csv)); });
+    }
+    for cell in normalized.get_mut("cells").and_then(Value::as_array_mut).into_iter().flatten() {
+        if let Some(o) = cell.as_object_mut() {
+            if o.get("qualifier").is_some_and(Value::is_null) { o.remove("qualifier"); }
+        }
+    }
+    let parsed: ReadoutBatchRequest = serde_json::from_value(normalized.clone())
+        .map_err(|e| format!("INVALID_INPUT: 读数批次字段无效：{e}"))?;
+    let planned = plan_batch(&parsed, &workspace).map_err(|issues| {
+        let detail = issues.first().map(|i| format!("{}：{}", i.code, i.message)).unwrap_or_else(|| "校验失败".into());
+        format!("INVALID_INPUT: 读数批次校验失败：{detail}")
+    })?;
+    let record = cli_impl::create_execution_event_tx(tx, run_id, &planned.event).map_err(map_command_error)?;
+    Ok(json!({"record": record, "idempotency_key": planned.idempotency_key, "replayed": false, "accepted": planned.readout_count}))
+}
+
+/// Build the stored multi-value event for the generic channel: the same
+/// schema pipeline the named typed tool runs, plus the frozen Protocol scope
+/// the other readout tools require, with the content-derived key stored as
+/// `operation_id` so both channels replay each other.
+fn build_typed_event(request: &Value, planned: &PlannedReadout, workspace: &asterlab_core::run_workspace::RunWorkspace) -> Result<Value, String> {
+    use asterlab_core::readout_records::{plan_readout_submission as plan_typed, ReadoutRegistry, ReadoutSubmission};
+    let mut registry = ReadoutRegistry::builtin();
+    for schema in request.get("readout_schemas").and_then(Value::as_array).into_iter().flatten() {
+        let parsed: asterlab_core::readout_schema::ReadoutSchema = serde_json::from_value(schema.clone())
+            .map_err(|e| format!("INVALID_INPUT: 读数 schema 无效：{e}"))?;
+        registry.insert(parsed).map_err(|issues| {
+            let first = issues.first().map(|i| i.message.as_str()).unwrap_or("校验失败");
+            format!("INVALID_INPUT: 读数 schema 校验失败：{first}")
+        })?;
+    }
+    let submission: ReadoutSubmission = serde_json::from_value(json!({
+        "run_id": request.get("run_id").cloned().unwrap_or(Value::Null),
+        "step_path": request.get("step_path").cloned().unwrap_or(Value::Null),
+        "batch_id": request.get("batch_id").cloned().unwrap_or(Value::Null),
+        "assay_id": request.get("assay_id").cloned().unwrap_or(Value::Null),
+        "timepoint": request.get("timepoint").cloned().unwrap_or(Value::Null),
+        "readouts": request.get("readouts").cloned().unwrap_or(json!([])),
+    })).map_err(|e| format!("INVALID_INPUT: 读数提交字段无效：{e}"))?;
+    let plan = plan_typed(&registry, &submission, workspace).map_err(|issues| {
+        let first = issues.first().map(|i| i.message.as_str()).unwrap_or("校验失败");
+        format!("INVALID_INPUT: 读数提交校验失败：{first}")
+    })?;
+    let protocol_version_id = request.get("protocol_version_id").and_then(Value::as_str).unwrap_or("").trim();
+    if protocol_version_id.is_empty() {
+        return Err("INVALID_INPUT: 关联 Protocol 步骤时必须提供 protocol_version_id".into());
+    }
+    let mut event = plan.event.clone();
+    event["protocol_version_id"] = json!(protocol_version_id);
+    if let Some(at) = request.get("occurred_at").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+        event["occurred_at"] = json!(at);
+    }
+    if let Some(op) = request.get("operator").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+        event["operator"] = json!(op);
+    }
+    event["operation_id"] = json!(planned.key);
+    event["operation_payload"] = request.get("readouts").cloned().unwrap_or(Value::Null);
+    Ok(event)
+}
+
+/// Create one Run inside the caller's transaction: same project scope as the
+/// CLI `run.create` (cross-Design `source_run_id` allowed, cross-project
+/// rejected), with the envelope key stored as `data.operation_id` for replay.
+fn create_run_tx(tx: &rusqlite::Transaction<'_>, payload: &Value, operation_id: Option<&str>) -> Result<Value, String> {
+    use rusqlite::params;
+    let design_id = payload.get("design_id").and_then(Value::as_str).unwrap_or("");
+    if design_id.trim().is_empty() {
+        return Err("INVALID_INPUT: design_id 不能为空".into());
+    }
+    let title = payload.get("title").and_then(Value::as_str).unwrap_or("").to_owned();
+    if title.trim().is_empty() {
+        return Err("INVALID_INPUT: 运行名称不能为空".into());
+    }
+    let scheduled = payload.get("scheduled_date").and_then(Value::as_str).map(str::to_owned);
+    let global_pv = payload.get("protocol_version_id").and_then(Value::as_str).map(str::to_owned);
+    let view = payload.get("view_id").and_then(Value::as_str).map(str::to_owned);
+    let repeat_of = payload.get("repeat_of_run_id").and_then(Value::as_str).map(str::to_owned);
+    let relationship = payload.get("repeat_relationship").and_then(Value::as_str).unwrap_or("independent").to_owned();
+    let source = payload.get("source_run_id").and_then(Value::as_str).map(str::to_owned);
+    let mut record = cli_impl::create_run_with_source_in_transaction(
+        tx, design_id, &title,
+        scheduled.as_deref(), global_pv.as_deref(), view.as_deref(),
+        repeat_of.as_deref(), &relationship, source.as_deref(), operation_id,
+    ).map_err(map_command_error)?;
+    // Stamp the exact envelope payload for mismatch comparison on replay.
+    let id = record.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
+    if !id.is_empty() {
+        let mut data: Value = record.get("data").cloned().unwrap_or(json!({}));
+        data["operation_payload"] = payload.clone();
+        let raw = serde_json::to_string(&data).map_err(|e| format!("INTERNAL: {e}"))?;
+        tx.execute(
+            "UPDATE records SET data_json=?1,updated_at=?2 WHERE id=?3",
+            params![raw, chrono::Utc::now().to_rfc3339(), id],
+        ).map_err(|e| format!("INTERNAL: {e}"))?;
+        record["data"] = data;
+    }
+    Ok(record)
+}
+
+/// Append-only simples that need no idempotency envelope: `note.create`
+/// (Run prose), `run.revise` (title/scheduled_date only, expected_revision
+/// guarded), `run.set_status` (planned/in_progress/completed/blocked/cancelled).
+fn apply_simple_command(db: &mut Connection, kind: &str, payload: &Value) -> Result<Value, String> {
+    use chrono::DateTime;
+    use rusqlite::params;
+    use uuid::Uuid;
+    match kind {
+        "note.create" => {
+            let run_id = payload.get("run_id").and_then(Value::as_str).unwrap_or("");
+            let content = payload.get("content").and_then(Value::as_str).unwrap_or("");
+            if run_id.trim().is_empty() {
+                return Err("INVALID_INPUT: run_id 不能为空".into());
+            }
+            if content.trim().is_empty() || content.chars().count() > 10000 {
+                return Err("INVALID_INPUT: 记录内容不能为空且不能超过 10000 个字符".into());
+            }
+            let (kind_name, project, _, _, _) = db.query_row(
+                "SELECT kind,project_id,parent_id,revision,data_json FROM records WHERE id=?1",
+                [run_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, i64>(3)?, row.get::<_, String>(4)?)),
+            ).optional().map_err(|e| format!("INTERNAL: {e}"))?
+                .ok_or_else(|| "NOT_FOUND: 实验运行不存在".to_string())?;
+            if kind_name != "run" {
+                return Err("INVALID_INPUT: run_id 必须指向实验运行".into());
+            }
+            if let Some(time) = payload.get("event_time").and_then(Value::as_str) {
+                if DateTime::parse_from_rfc3339(time).is_err() {
+                    return Err("INVALID_INPUT: event_time 必须是带时区的 RFC 3339 时间".into());
+                }
+            }
+            let id = Uuid::new_v4().to_string();
+            let at = chrono::Utc::now().to_rfc3339();
+            let data = json!({
+                "content": content,
+                "event_time": payload.get("event_time").cloned().unwrap_or(Value::Null),
+                "observation": payload.get("observation").cloned().unwrap_or(Value::Null),
+                "result": payload.get("result").cloned().unwrap_or(Value::Null),
+                "deviation": payload.get("deviation").cloned().unwrap_or(Value::Null),
+            });
+            db.execute(
+                "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,'note',?2,?3,1,?4,?5,?5)",
+                params![id, project, run_id, serde_json::to_string(&data).map_err(|e| format!("INTERNAL: {e}"))?, at],
+            ).map_err(|e| format!("INTERNAL: {e}"))?;
+            Ok(json!({"id":id,"kind":"note","project_id":project,"parent_id":run_id,"revision":1,"data":data,"created_at":at,"updated_at":at}))
+        }
+        "run.revise" => {
+            let id = payload.get("id").and_then(Value::as_str).unwrap_or("");
+            let expected = payload.get("expected_revision").and_then(Value::as_i64).ok_or_else(|| "INVALID_INPUT: expected_revision is required".to_string())?;
+            if id.trim().is_empty() {
+                return Err("INVALID_INPUT: id 不能为空".into());
+            }
+            cli_impl::patch_run(db, id, expected, &json!({
+                "title": payload.get("title").cloned().unwrap_or(Value::Null),
+                "scheduled_date": payload.get("scheduled_date").cloned().unwrap_or(Value::Null),
+            })).map_err(map_command_error)
+        }
+        "run.set_status" => {
+            let id = payload.get("id").and_then(Value::as_str).unwrap_or("");
+            let expected = payload.get("expected_revision").and_then(Value::as_i64).ok_or_else(|| "INVALID_INPUT: expected_revision is required".to_string())?;
+            let status = payload.get("status").and_then(Value::as_str).unwrap_or("").to_owned();
+            if id.trim().is_empty() || status.is_empty() {
+                return Err("INVALID_INPUT: id 与 status 不能为空".into());
+            }
+            if !["planned","in_progress","completed","blocked","cancelled"].contains(&status.as_str()) {
+                return Err("INVALID_INPUT: 运行状态必须是 planned、in_progress、completed、blocked 或 cancelled".into());
+            }
+            let (kind_name, _, _, revision, raw) = db.query_row(
+                "SELECT kind,project_id,parent_id,revision,data_json FROM records WHERE id=?1",
+                [id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, i64>(3)?, row.get::<_, String>(4)?)),
+            ).optional().map_err(|e| format!("INTERNAL: {e}"))?
+                .ok_or_else(|| "NOT_FOUND: 实验运行不存在".to_string())?;
+            if kind_name != "run" {
+                return Err("INVALID_INPUT: id 必须指向实验运行".into());
+            }
+            if revision != expected {
+                return Err(format!("REVISION_CONFLICT: 运行版本已从 v{expected} 更新为 v{revision}；请先重新读取。"));
+            }
+            let mut data: Value = serde_json::from_str(&raw).map_err(|e| format!("INTERNAL: {e}"))?;
+            data["status"] = json!(status);
+            let tx = db.unchecked_transaction().map_err(|e| format!("INTERNAL: {e}"))?;
+            let changed = tx.execute(
+                "UPDATE records SET revision=?2,data_json=?3,updated_at=?4 WHERE id=?1 AND revision=?5",
+                params![id, revision + 1, serde_json::to_string(&data).map_err(|e| format!("INTERNAL: {e}"))?, chrono::Utc::now().to_rfc3339(), revision],
+            ).map_err(|e| format!("INTERNAL: {e}"))?;
+            if changed != 1 {
+                return Err("REVISION_CONFLICT: 记录已被其他操作更新；请重新读取。".into());
+            }
+            tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
+            let raw2: (String, String, String) = db.query_row(
+                "SELECT data_json,created_at,updated_at FROM records WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).map_err(|e| format!("INTERNAL: {e}"))?;
+            Ok(json!({"id":id,"kind":"run","revision":revision+1,"data":raw2.0,"created_at":raw2.1,"updated_at":raw2.2}))
+        }
+        other => Err(format!("INVALID_INPUT: 未知命令：{other}")),
+    }
+}
+
+impl AppCore {
     pub fn records_digest(&self) -> Result<String, String> {
         agent_edit_preview::records_digest(&self.db)
     }
@@ -647,6 +1326,37 @@ mod tests {
         assert!(core
             .pantry_upsert(json!({"id":item_id,"name":"Trypsin-EDTA"}))
             .is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn generic_channel_replays_execution_event_and_maps_errors() {
+        let (dir, run_id) = fixture();
+        let mut core = AppCore::open(&dir).unwrap();
+        let payload = json!({"run_id": run_id, "event_type": "observation", "content": "generic channel"});
+        let first = core.execute_command("execution_event.create", payload.clone(), "generic-1").unwrap();
+        assert_eq!(first["replayed"], false);
+        let replay = core.execute_command("execution_event.create", payload.clone(), "generic-1").unwrap();
+        assert_eq!(replay["replayed"], true);
+        assert_eq!(replay["record"]["id"], first["record"]["id"]);
+        let mismatch = core.execute_command("execution_event.create", json!({"run_id": run_id, "event_type": "observation", "content": "different"}), "generic-1").unwrap_err();
+        assert!(mismatch.starts_with("IDEMPOTENCY_MISMATCH"), "unexpected: {mismatch}");
+        assert!(core.execute_command("nope.create", payload.clone(), "generic-2").unwrap_err().starts_with("INVALID_INPUT"));
+        assert!(core.execute_command("execution_event.create", payload.clone(), "").unwrap_err().starts_with("INVALID_INPUT"));
+        assert!(core.query_projection("nope.workspace", json!({})).unwrap_err().starts_with("INVALID_INPUT"));
+        assert!(core.query_projection("run.workspace", json!({"id": "missing"})).unwrap_err().starts_with("NOT_FOUND"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn generic_channel_reads_workspace_and_progress() {
+        let (dir, run_id) = fixture();
+        let mut core = AppCore::open(&dir).unwrap();
+        let workspace = core.query_projection("run.workspace", json!({"id": run_id})).unwrap();
+        assert_eq!(workspace["design_id"].as_str().is_some(), true);
+        let progress = core.query_projection("workflow.progress", json!({"run_id": run_id})).unwrap();
+        assert_eq!(progress["run_id"], run_id);
+        let tree = core.query_projection("workflow.inspect_tree", json!({"run_id": run_id})).unwrap();
+        assert!(tree.get("roots").is_some() || tree.get("issues").is_some());
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -177,6 +177,42 @@ func TestDeriveDesignFromRunRequiresAFrozenRun(t *testing.T) {
 	}
 }
 
+func TestGenericChannelRejectsBadEnvelopes(t *testing.T) {
+	svc, _ := newServices(t)
+	ctx := context.Background()
+
+	// Unknown command kind: INVALID, nothing written.
+	if _, err := svc.ExecuteCommand(ctx, ExecuteCommandInput{
+		Kind: "nope.create", IdempotencyKey: "k-1", PayloadJSON: `{}`,
+	}); err == nil {
+		t.Fatal("unknown command kind must be rejected")
+	}
+	// Malformed payload JSON: INVALID before Core sees it.
+	if _, err := svc.ExecuteCommand(ctx, ExecuteCommandInput{
+		Kind: "execution_event.create", IdempotencyKey: "k-2", PayloadJSON: `{oops`,
+	}); err == nil {
+		t.Fatal("malformed payload_json must be rejected")
+	}
+	// Missing idempotency key: INVALID, never a write.
+	if _, err := svc.ExecuteCommand(ctx, ExecuteCommandInput{
+		Kind: "execution_event.create", PayloadJSON: `{"run_id":"r"}`,
+	}); err == nil {
+		t.Fatal("missing idempotency_key must be rejected")
+	}
+	// Unknown query kind: INVALID.
+	if _, err := svc.QueryProjection(ctx, QueryProjectionInput{
+		Kind: "nope.workspace", ParamsJSON: `{}`,
+	}); err == nil {
+		t.Fatal("unknown query kind must be rejected")
+	}
+	// Missing run on a known query: NOT_FOUND, never an empty object.
+	if _, err := svc.QueryProjection(ctx, QueryProjectionInput{
+		Kind: "run.workspace", ParamsJSON: `{"id":"no-such-run"}`,
+	}); err == nil {
+		t.Fatal("missing run must not project")
+	}
+}
+
 func closeEnough(t *testing.T, label string, got, want float64) {
 	t.Helper()
 	if math.Abs(got-want) > 1e-9 {
