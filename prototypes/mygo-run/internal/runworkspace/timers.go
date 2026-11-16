@@ -143,7 +143,7 @@ func WindowLine(display TimerDisplay) string {
 }
 
 // timerHeadline is the one-line checkpoint summary per timer.
-func timerHeadline(display TimerDisplay, phases []runs.TimerPhase, now time.Time) string {
+func timerHeadline(display TimerDisplay, phases []runs.TimerPhase) string {
 	record := display.Record
 	if record.Mode == "window" {
 		return WindowLine(display)
@@ -228,7 +228,7 @@ func renderTimerRow(c *ui.Context, s *State, task *RunTaskViewModel, record runs
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, TimerModeLabel(record.Mode)).FontSize(t.Rem(.72)).Bold().TextColor(t.TextMuted)
 			ui.Text(c, TimerStatusLabel(record.Status)).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-			headline := timerHeadline(display, phases, now)
+			headline := timerHeadline(display, phases)
 			ui.Text(c, headline).FontSize(t.Rem(.85)).FontWeight(600).TextColor(t.Text).FontFeatures("tnum")
 			if display.Over {
 				ui.Text(c, "超时").FontSize(t.Rem(.68)).Bold().TextColor(tokens.DangerText)
@@ -310,11 +310,17 @@ func renderTimerCreate(c *ui.Context, s *State, task *RunTaskViewModel, existing
 	})
 }
 
+// maxPlannedSeconds is the largest whole-second span a time.Duration can
+// hold. WindowLine renders the t0 target as started_at + planned, so a
+// larger plan would overflow the clock math; nothing on the bench needs
+// more than ~292 years.
+const maxPlannedSeconds = float64(math.MaxInt64 / int64(time.Second))
+
 // parseMinutes parses the operator's duration input strictly: the whole
 // string must be one finite number (strconv rejects "5mins" where Sscanf
 // accepted a numeric prefix). Fractional minutes truncate toward zero, as
-// before; a sub-second result and anything outside uint64 seconds is an
-// error the surface reports. No duration is ever defaulted.
+// before; a sub-second result and anything outside the representable clock
+// range is an error the surface reports. No duration is ever defaulted.
 func parseMinutes(raw string) (uint64, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -325,8 +331,8 @@ func parseMinutes(raw string) (uint64, error) {
 		return 0, fmt.Errorf("分钟数必须是纯数字（如 30 或 1.5）")
 	}
 	seconds := minutes * 60
-	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 1 || seconds >= 1<<63 {
-		return 0, fmt.Errorf("分钟数超出范围（至少 1 秒）")
+	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 1 || seconds > maxPlannedSeconds {
+		return 0, fmt.Errorf("分钟数超出可计时范围（至少 1 秒）")
 	}
 	return uint64(seconds), nil
 }

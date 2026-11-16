@@ -124,6 +124,15 @@ func TestParseMinutesStrict(t *testing.T) {
 	if got, err := parseMinutes("0.05"); err != nil || got != 3 {
 		t.Fatalf("parseMinutes(0.05) = %d, %v; want 3", got, err)
 	}
+	// A large but clock-representable plan stays valid; anything beyond
+	// what time.Duration can hold as seconds must fail before WindowLine
+	// converts it.
+	if got, err := parseMinutes("100000000"); err != nil || got != 6000000000 {
+		t.Fatalf("parseMinutes(100000000) = %d, %v; want 6000000000", got, err)
+	}
+	if got, err := parseMinutes("200000000"); err == nil {
+		t.Fatalf("parseMinutes(200000000) = %d, want an overflow error", got)
+	}
 	// Sscanf("%g") accepted a numeric prefix; strconv must reject it.
 	for _, raw := range []string{"", "  ", "abc", "5mins", "30 分钟", "NaN", "Inf", "-Inf", "1,5", "0", "-3", "0.001", "1e400"} {
 		if got, err := parseMinutes(raw); err == nil {
