@@ -82,3 +82,22 @@ go test -run 'TestNotebook|TestProtocol' . -count=1
    签核→锁定→解锁、归档切换＋导出 `.md`、派生 JSON 导出。
 2. 全量套件＋原生模块检查（`mygo native build` 后）。
 3. 截图附本目录（本卡未在 Linux 生成 GUI 截图；`ui.Tester` 覆盖见上）。
+
+## Windows Gate 实窗验证（`a01b174`，coordinator 执行）
+
+- 二进制：`dist/mygo-run.exe`（sha256
+  `E0CEC576C25C8AB871AAB41325C1EEAF2979B40801F74232305BA99A4C48EA65`）＋
+  `dist/Runs.dll`（sha256
+  `9AE542FDC5F685470807524D78B69D69C99E648111CE92EEF69A3277D9F68AC7`），
+  `BUILD_INFO` commit `a01b174` 与 head 一致；`LOCAL_GATE: PASS`。
+- 数据：隔离拷贝既有 `gui-final` 库，追加一条 `6h` 读数事件
+  （A1 `3%`/S1、A2 `5%`/S2）与两条 `asset_link`
+  （A1/6h/FOV1 PNG、A1/6h/FOV2 TIFF），`asset_roots` 经 session 指向隔离目录。
+- `ui-rec-board-fov1-1360x880-light.png`：3% 行 A1 渲染 PNG 内联预览，
+  5% 行 A2 显示缺（无图资产），矩阵行 `A1·6h od450 0.81`。
+- `ui-rec-board-fov2-1360x880-light.png`：切 FOV 2 后 TIFF 解码渲染，
+  旧层位图释放，无卡死、无崩溃（覆盖异步加载＋层切换＋stale 守卫）。
+- 同孔跨时点隔离与含空格签核由单测覆盖
+  （`TestProjectGroupAndSampleStayWithinTheirTimepoint`、
+  `TestSignVerifiesActorWithSpaces`）；签核点击流与归档 `.md`
+  导出不在本次修复 diff 内，沿用既有单测。
