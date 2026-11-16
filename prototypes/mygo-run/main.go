@@ -188,6 +188,9 @@ type app struct {
 	tools        *tools.Workspace
 	// timersPoll throttles the global timer-strip refresh; see pollTimers.
 	timersPoll time.Time
+	// runLinkArg carries a startup-URL deep link (asterlab://…) handed to
+	// the exe by the OS; the automation env hook stays as fallback.
+	runLinkArg string
 }
 
 func (a *app) nextOp() string {
@@ -1517,6 +1520,18 @@ func (a *app) selectTaskFromEnv() {
 	}
 }
 
+// deepLinkArg returns the first startup argument that is an AsterLab deep
+// link. The OS passes the URL untouched when the user opens one; anything
+// else on the command line is ignored here.
+func deepLinkArg(args []string) string {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "asterlab://") {
+			return arg
+		}
+	}
+	return ""
+}
+
 // openRunLinkFromEnv applies an explicit automation deep link from
 // ASTERLAB_RUN_LINK, alongside ASTERLAB_TASK_PATH. Invalid links become a
 // visible shell error, never a panic. UX-P5, UX-IA-3, UX-DESIGN.
@@ -1926,8 +1941,15 @@ func (a *app) preload() {
 			if os.Getenv("ASTERLAB_RUN_ID") == "" && os.Getenv("ASTERLAB_DESIGN_ID") == "" {
 				a.restoreSession()
 			}
-			// An explicit deep link wins over the restored session.
-			a.openRunLinkFromEnv()
+			// An explicit deep link wins over the restored session. A startup
+			// URL argument takes precedence over the automation env hook.
+			// Selection stays on the Run's current recording task; a well
+			// outside that grid is a visible error, never a silent success.
+			if a.runLinkArg != "" {
+				a.openRunWellLink(a.runLinkArg)
+			} else {
+				a.openRunLinkFromEnv()
+			}
 			a.shell.Invalidate()
 		})
 	}()
@@ -2413,6 +2435,9 @@ func toolsPage(c *ui.Context, a *app) {
 }
 
 func main() {
+	// A startup-URL deep link (mygo-run.exe asterlab://run/…/well/…) takes
+	// precedence over the ASTERLAB_RUN_LINK automation hook. UX-IA-3.
+	runLink := deepLinkArg(os.Args[1:])
 	if len(os.Args) > 1 && os.Args[1] == "--inspect-tree" {
 		if err := runInspectTree(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -2439,6 +2464,7 @@ func main() {
 		timeBudgetErr: timeBudgetErr,
 		snap:       runs.RunSnapshot{Title: "加载中", Status: "loading"},
 		assetRoots: map[string]string{}, runViewKinds: map[string]runworkspace.ViewKind{},
+		runLinkArg: runLink,
 	}
 	initErr := ""
 	if designErr != nil {
