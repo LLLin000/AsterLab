@@ -1,11 +1,11 @@
 {
   "files": {
-    "prototypes/mygo-run/modules/runs/runs_native.go": "dcac3f1241a746f76081627788f618f6689c699691e64509414f4d516bbc3793",
-    "prototypes/mygo-run/modules/runs/rust/src/mygo.rs": "78aa788cb962b7ec4527854c3ed1d057b2669e131e496d3bd2a5ad5ee6085dba"
+    "prototypes/mygo-run/modules/runs/runs_native.go": "20b47a7a8e8dbe31edbe73c30dfb7ad5029cf7091318c332b22e2e847f1f8bed",
+    "prototypes/mygo-run/modules/runs/rust/src/mygo.rs": "39fe67cb71232a963fd30111a40363534c0ae2e4d81aba39b1e948b7e1563ab7"
   },
   "generator": {
     "format": 2,
-    "interface_hash": "3cd0d74c09a3623c",
+    "interface_hash": "75781e4e990223d0",
     "module": "github.com/egoist/mygo",
     "pin": "v0.8.4-0.20261108220316-c4197b7fe562",
     "pin_sources": [
@@ -14,7 +14,7 @@
       "scripts/mygo-native-linux.sh"
     ]
   },
-  "input_sha256": "f345876261a9808609c6196c6328126fe00fb1b26ba48a8782d34d0f75608a0f",
+  "input_sha256": "e64fab3fc592a0343a409f52379cd20bae0c50f47362df7d54c3757a0df227d3",
   "note": "Written by scripts/ci/native_generator_hash.py --update-golden. Linux and Windows CI must both reproduce these hashes; see docs/engineering/cross-platform-builds.md and docs/release/evidence/REL-05/.",
-  "output_sha256": "e5ea03ab948d3a7ea1bd4e28b3af02e5b0e77e9860251cfb37b02577eef2246c"
+  "output_sha256": "f535d2cf15f499d47c60724e77f8f5ce10f652136b4f696c09b1dfa22c2feb1f"
 }

@@ -321,6 +321,40 @@ impl RunService for CoreRunService {
         self.create_execution_event_impl(input)
     }
 
+    fn execute_command(&self, _ctx: &Context, input: ExecuteCommandInput) -> Result<ExecuteCommandResult, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let payload: serde_json::Value = serde_json::from_str(&input.payload_json)
+            .map_err(|e| Error::Go(format!("INVALID: payload_json 不是合法 JSON：{e}")))?;
+        let expected = input.expected_revision;
+        // expected_revision is enforced exactly when the underlying command
+        // revises a versioned record; append-only commands ignore it.
+        let mut payload = payload;
+        if matches!(input.kind.as_str(), "run.revise" | "run.set_status") {
+            let Some(expected) = expected else {
+                return Err(Error::Go("INVALID: expected_revision is required for this command".into()));
+            };
+            payload["expected_revision"] = serde_json::json!(expected as i64);
+        }
+        if input.kind == "run.create" && payload.get("operation_id").is_none() {
+            payload["operation_id"] = serde_json::json!(input.idempotency_key);
+        }
+        let out = core.execute_command(&input.kind, payload, &input.idempotency_key).map_err(map_envelope_error)?;
+        Ok(ExecuteCommandResult {
+            result_json: out["record"].to_string(),
+            replayed: out.get("replayed").and_then(|v| v.as_bool()).unwrap_or(false),
+        })
+    }
+
+    fn query_projection(&self, _ctx: &Context, input: QueryProjectionInput) -> Result<QueryProjectionResult, Error> {
+        let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
+        let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        let params: serde_json::Value = serde_json::from_str(&input.params_json)
+            .map_err(|e| Error::Go(format!("INVALID: params_json 不是合法 JSON：{e}")))?;
+        let out = core.query_projection(&input.kind, params).map_err(map_envelope_error)?;
+        Ok(QueryProjectionResult { result_json: out.to_string() })
+    }
+
     fn save_asset_link(&self, _ctx: &Context, input: AssetLinkInput) -> Result<Asset, Error> {
         let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
@@ -1559,6 +1593,19 @@ fn map_cli(e: cli_impl::CliError) -> Error {
         "NOT_FOUND" => Error::Go(format!("NOT_FOUND: {}", e.message)),
         "REVISION_CONFLICT" => Error::Go(format!("CONFLICT: {}", e.message)),
         _ => Error::Go(format!("INTERNAL: {}", e.message)),
+    }
+}
+/// Map the Bridge v2 envelope error string to a Go-typed error. The Core
+/// prefix decides the Go class (`INVALID:` / `NOT_FOUND:` / `CONFLICT:` via
+/// `internal/state.MapError`); the message is display-only and the caller
+/// never parses it for control flow.
+fn map_envelope_error(e: String) -> Error {
+    let (prefix, rest) = e.split_once(':').map(|(p, r)| (p.trim(), r.trim())).unwrap_or(("INTERNAL", e.as_str()));
+    match prefix {
+        "INVALID_INPUT" => Error::Go(format!("INVALID: {rest}")),
+        "NOT_FOUND" => Error::Go(format!("NOT_FOUND: {rest}")),
+        "REVISION_CONFLICT" | "VERSION_CONFLICT" | "IDEMPOTENCY_MISMATCH" => Error::Go(format!("CONFLICT: {rest}")),
+        _ => Error::Go(format!("INTERNAL: {rest}")),
     }
 }
 
