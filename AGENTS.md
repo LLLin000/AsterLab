@@ -67,20 +67,21 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 ### 状态语义
 
 - `Inbox` / `Todo`：待人工准入，不会被 agent 自动领取。
-- `Ready`：依赖感知候选队列。`scripts/kandev-ready-feeder.py` 只把**无阻塞**的 VPS 卡从 `Inbox` 提升到 `Ready`，并在 `Agent` 有空位时移入。不要手动把 blocked 卡放进 `Ready`：Kandev 原生 `pull_from` 不会跳过 blocked 卡，会直接启动 agent。
+- `Ready`：依赖感知候选队列。Home 控制器（`engctl auto --dispatch`，30 秒一轮）只把**无阻塞**的 VPS 卡从 `Inbox` 提升到 `Ready`，并在 `Agent` 有空位时移入。不要手动把 blocked 卡放进 `Ready`：Kandev 原生 `pull_from` 不会跳过 blocked 卡，会直接启动 agent。旧 `scripts/kandev-ready-feeder.py` 已停用（2026-11-15 起），不要再按 feeder 描述理解调度。
 - `Agent`：进入即自动启动 agent；WIP=4，最多四个 agent 并行。并行任务必须使用 Worktree executor；共享 checkout 只能串行。一轮正常结束会自动进入 `Review`。
-  - 实现 agent **不得**调用 Kandev 的 `move_task`/`update_task_state` 改本卡步骤（包括自己挪到 `Review`/`Merged`/`Done`）。流转由引擎的 turn 结束、feeder 或人工决定；违反会让卡在 PR 合并前被置为完成。
-- `Review`：独立 review session（进入即新开，`profile_session_start_policy: new`）按分类决定审查方法：只审核、不改代码、不推送、不合并；通过时输出 `VERDICT: APPROVED` 并用 `engctl review outcome record` 记录 ReviewOutcome，合并由 Home Merge Gate 执行。WIP=4；满 4 个时 feeder 停止推进新卡。详见 [`docs/engineering/kandev-review-policy.md`](docs/engineering/kandev-review-policy.md)。
+  - 实现 agent **不得**调用 Kandev 的 `move_task`/`update_task_state` 改本卡步骤（包括自己挪到 `Review`/`Merged`/`Done`）。流转由引擎的 turn 结束、Home 控制器或人工决定；违反会让卡在 PR 合并前被置为完成。
+- `Review`：独立 review session（进入即新开，`profile_session_start_policy: new`）按分类决定审查方法：只审核、不改代码、不推送、不合并；通过时输出 `VERDICT: APPROVED` 并用 `engctl review outcome record` 记录 ReviewOutcome，合并由 Home Merge Gate 执行。WIP=4；满 4 个时控制器停止推进新卡。详见 [`docs/engineering/kandev-review-policy.md`](docs/engineering/kandev-review-policy.md)。
 - `Verify`：在目标机器上按卡片验收层级重跑并贴原始输出；`on_pr_merged` 会把任务推进到 `Merged`。
 - `Merged`：PR 合并后的终态，进入即完成任务。依赖卡只在这里之后解除阻塞。
+- 注意 `state` 与步骤是两套东西：`state` 枚举只有 `CREATED`/`IN_PROGRESS`/`REVIEW`/`COMPLETED`，没有 `MERGED`；`Merged` 只是步骤名。依赖只认 `COMPLETED`，步骤到了 Merged 但 `state` 没到 `COMPLETED` 的卡仍会阻塞下游（2026-11-17 EXP-13/EXP-15 教训）。手工修状态只允许打合法枚举值。
 
 ### 通知与升级（Telegram @kandev00bot）
 
-- 决策类实时推：非快速分类 `REVIEW: APPROVED` 附 ✅合并/👀看diff/❌打回 三按钮；返工满 3 次熔断（`human-hold`）。
-- 合并按钮执行前二次校验：仍在 Review、无 human-hold、结论仍 APPROVED、PR open+mergeable、三项 CI 全绿；任一失败则拒绝并说明原因。
-- 卡住自修：Agent/Review 里无存活 session 超 10 分钟自动弹回重拉；3 次无效后升级通知（`stuck-escalated`）。
+- 通知由 Home 控制器发出（`engctl auto --notify` 经 `TelegramTransport`），旧 `kandev-telegram-callback` 服务已下线，三按钮合并回调已失效；合并走 Home Merge Gate。
+- 决策类实时推：`REVIEW: APPROVED`、返工熔断（`human-hold`）、卡住升级（`stuck-escalated`）、CHECK_FAILED 等。
+- 卡住自修：无信号轮次经 Ready 重试，上限 2 次后移 Hold 并通知人工；RUNNING 超 600 秒无更新发一次 `STALLED` 通知，不停转。
 - 每天 08:00 日报：24h 合并、Review 结论、熔断/自修、失败 session、看板快照。
-- 配置在 `/etc/kandev-ready-feeder.env`（`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`，不进仓库）；服务 `kandev-telegram-callback` 常驻收按钮回调。
+- 配置在 `/etc/kandev-ready-feeder.env`（`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`，不进仓库）。
 
 ## 4. 开工前必须做
 
@@ -111,9 +112,9 @@ curl -s -H "Authorization: Bearer $KANDEV_API_TOKEN" \
   | python3 -m json.tool
 ```
 
-## 7. Engineering Home（只读集成）
+## 7. Engineering Home（调度与合并门）
 
-`LLLin000/home` 是跨项目规范、项目注册和只读控制入口。当前已接入：
+`LLLin000/home` 是跨项目规范、项目注册与 VPS 调度/合并入口。当前已接入：
 
 ```bash
 set -a
@@ -122,7 +123,10 @@ set +a
 scripts/kandev-home-status.sh   # 只读；等价于 engctl status --project asterlab
 ```
 
+- Kandev 使用方法（地址、API、状态机、排查）见 Home 的 [`docs/kandev-guide.md`](https://github.com/LLLin000/home/blob/main/docs/kandev-guide.md)；Web UI 在 `https://dev.asterlab.party`。
+- 实际调度者是 Home 控制器常驻进程（`engctl auto --dispatch --notify` + `engctl merge-worker`，30 秒一轮），旧 feeder 服务已停用。
+- `gh pr merge` 在本机被拦截，所有合并走 `engctl merge drive`；零 PR 的 Audit 卡走 `engctl completion audit`。
 - 详细安装和迁移边界见 [`docs/engineering/engineering-home-integration.md`](docs/engineering/engineering-home-integration.md)。
 - Home 不是任务权威：任务范围、依赖和状态仍以 Kandev 为准；项目技术语义仍以本仓库权威文档为准。
-- 当前 Home 只做读取和对账建议；`reconcile --apply` 尚未实现。不要因为 Home 有策略文件就直接写 Kandev SQLite 或改变合并权限。
+- 不要直接写 Kandev SQLite 或改变合并权限；状态修复用 Kandev API 并随后对账。
 
