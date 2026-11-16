@@ -86,7 +86,7 @@ stdout 每次只输出一行 JSON。成功结构为：
 | `pantry.delete` | 停用并隐藏一个储藏室条目；短标签 ID 保留不复用 | delete |
 | `formula.create` / `formula.revise` | 创建或按版本修订公式 | create/revise |
 | `table.create` / `table.revise` | 创建或按版本替换资料表 | create/revise |
-| `calculator.*`（9 个） | 稀释（摩尔或质量浓度）、溶液质量、系列稀释、反应体积、GelMA 配液、细胞接种、运行期配平、多样本质量配平、体内给药 | 否 |
+| `calculator.*`（10 个） | 稀释（摩尔或质量浓度）、溶液质量、系列稀释、反应体积、GelMA 配液、细胞接种、运行期配平、多样本质量配平、体内给药、生物膜 CFU | 否 |
 | `import.study.preview` / `import.study.apply` | 预检并导入项目、设计和 Protocol | apply only |
 
 所有工具的字段细节以 `labworkbench schema <命令>` 为准。Agent 不得自行扩展字段或把别的记录类型塞进现有工具。删除与覆盖不是 CLI 能力。
@@ -196,6 +196,7 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - `calculator.dilution`：按 `C1V1 = C2V2` 求储液体积。`stock_unit` / `target_unit` 接受摩尔单位 `M`、`mM`、`µM`、`nM` 或质量浓度 `mg/mL`、`µg/mL`、`ng/µL`；两者必须同一量纲，混用返回 `INVALID_INPUT`。摩尔与质量浓度是不同维度，这里不借分子量互相换算（质量→摩尔是 `calculator.solution` 的职责）。目标浓度高于储液浓度时拒绝。
 - `calculator.sample_normalize_batch`：输入 `{target_mass_ng, reaction_volume_ul, samples[]}`，每个样本给出 `name` 与实测质量浓度（`concentration` + `unit`，只接受 `mg/mL`、`µg/mL`、`ng/µL`）。输出每行的 `concentration_ng_per_ul`、`required_sample_volume_ul`、`sample_volume_ul`、`diluent_volume_ul`、`achieved_mass_ng` 与 `insufficient`：样本过稀、所需体积超过反应体积时按反应体积封顶并把该行标为 `insufficient`，不向上取整或静默达标；`insufficient_count` 汇总行数。目标质量不是实测值。
 - `calculator.in_vivo_dosing`：输入 `{body_weights_g[], dose_mg_per_kg, dose_volume_ml_per_kg, overage_ratio?, stock_concentration, stock_unit}`。输出每只动物的 `body_weight_g` / `dose_mass_mg` / `injection_volume_ul`，以及 `total_*`、`prepared_dose_mass_mg`、`preparation_volume_ul`、`stock_volume_ul`、`diluent_volume_ul`。`overage_ratio` 只放大配制管，不放大单只注射量；母液过稀导致剂量无法装进制备体积时整体拒绝（`INVALID_INPUT`），不通过放大注射体积掩盖。体重是输入值而非估算。
+- `calculator.biofilm_cfu`：只读生物膜 CFU 派生（`calculator.biofilm_cfu@1`）。输入 `{plates[], countable_min, countable_max}`，每板给出 `raw_id`、`sample_id`、`colonies`、逐管稀释分数 `dilution_fractions[]`、涂布体积 + `plated_unit`（L/mL/µL）、悬液体积 + `suspension_unit`（L/mL/µL）。输出 `groups[]`（同样品 + 总稀释度乘积 + 涂布量分组，只平均同组重复）与 `excluded[]`（`below_window` / `above_window`，保留 `raw_id` 与来源总稀释度）。组内 `CFU/mL = mean_colonies ÷ (total_dilution × plated_volume_mL)`，`CFU/sample = CFU/mL × suspension_volume_mL`；每组带 2 条派生读数（`cfu_per_ml` / `CFU/mL`、`cfu_per_sample` / `CFU`，`method = calculator.biofilm_cfu@1`，`derived_from` 列出组内每板 raw ID，`result_kind = derived`）。计数上下限必填且含边界；稀释分数必须在 `(0, 1]` 内，体积必须为正，单位只接受 L/mL/µL，不推断默认值；重复 raw ID、同样品悬液量冲突、非法稀释/体积返回 `INVALID_INPUT`；无可计数板时 `groups` 为空且不估算。计算不写库；保存派生读数时用 `execution_event.create` 附带 `method` 与 `derived_from`。
 
 `well.set` 的位置字段按容器形状解析：2D 板接受 `<行字母><列号>`（`A1`、`AA12`）；`rows = 1` 的单行容器另接受 `Lane<N>`、`L<N>`、`Tube<N>`，并与 `A<N>` 指向同一物理槽位——同一槽位的再次写入被视为覆盖（需要 `expected_revision`），不会产生两个孔位记录。存储地址规范化为 `Lane<N>`（1D）或大写 2D 坐标。可选 `target`（检测目标标签）、`well_role`（`unknown` / `ntc` / `standard` / `positive_control`）和 `dilution_factor`（无单位、必须大于 0）是**计划**注释：它们不写读数，也不参与冻结设计计算。省略这些字段时按 `null` 存储；带 `expected_revision` 的覆盖是整条字段替换，旧注释不会自动保留。
 
