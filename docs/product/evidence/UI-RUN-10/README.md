@@ -72,3 +72,16 @@
 - [ ] 按规则跳过后步骤显示「已跳过」且无完成按钮；时间线显示「步骤已跳过」。
 - [ ] 设盲视图下图例/选中孔不出现分组名；关闭后恢复。
 - [ ] 近效期耗材挂事件后，成功行出现耗材提示。
+
+## Windows Gate 历史同源验证（`5f30680`，coordinator 执行）
+
+- 二进制：`dist/mygo-run.exe`（sha256
+  `4A84CBD890BBE01B3AAB1E6562DF60EED27FD9B76E1EA52A05170C509EB555D9`）＋
+  `dist/Runs.dll`（sha256
+  `381C5A93FE0C9D14B59DAC1DB5570FAB32C9260714B2CF6AA9A3FF5CABD17FC7`），
+  `BUILD_INFO` commit `5f30680` 与 head 一致；`LOCAL_GATE: PASS`。
+- 数据：隔离库含一条 `6h` 读数事件（A1 `3%`、A2 `5%`）与两条 A1/6h
+  资产链接（FOV1 PNG、FOV2 TIFF）。
+- `ui-run-history-1360x880-light.png`：历史 Tab 头部渲染同源 `计划 vs 实际`。
+- `ui-run-history-matrix-1360x880-light.png`：`采图对账` 显示 `2 孔位 · 缺 10 视野`、
+  `A1·6h 2/6 3%`（两资产落槽计数）、`A2·6h 0/6 5%`；下方条目时间线原样保留。
