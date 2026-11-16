@@ -30,6 +30,7 @@ import (
 	"github.com/egoist/mygo/ui/richtext"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
+	_ "golang.org/x/image/tiff" // preview TIFFs: ui.DecodeImage has no TIFF format until registered
 )
 
 type citePickerState struct {
@@ -79,16 +80,46 @@ type recordBoardView struct {
 	fov int
 	// imgs caches decoded previews by asset ID so frames never re-read the
 	// files; imgFailed remembers unloadable assets to avoid retrying them
-	// every frame. Both are view caches only, never facts.
-	imgs      map[string]ui.ImageSource
-	imgFailed map[string]bool
+	// every frame; imgLoading marks loads a worker has not finished yet so
+	// the board reads "loading" instead of retrying or flashing unreadable.
+	// runID and fovCached name the Run and FOV layer the cache belongs to;
+	// gen counts their changes so late worker results for an older layer
+	// drop instead of landing in the wrong cell. All maps move on the view
+	// thread only; the worker carries plain values, never the maps.
+	imgs       map[string]ui.ImageSource
+	imgFailed  map[string]bool
+	imgLoading map[string]bool
+	runID      string
+	fovCached  int
+	gen        uint64
 }
 
 // recordBoards keys board state by Run so switching Runs never leaks one
 // Run's FOV selection into another.
 var recordBoards = map[string]*recordBoardView{}
 
+// releaseBoardPreviews drops decoded CPU pixels when a cache stops being the
+// active Run/FOV layer. It runs on the view thread, where ReleasePixels is
+// safe per the MyGo docs (call it once the bitmap has shown, on the main
+// thread); non-bitmap sources have nothing to release.
+func releaseBoardPreviews(board *recordBoardView) {
+	for id, src := range board.imgs {
+		if bmp, ok := src.(*ui.Bitmap); ok && bmp != nil {
+			bmp.ReleasePixels()
+		}
+		delete(board.imgs, id)
+	}
+}
+
 func (a *app) recordBoard() *recordBoardView {
+	// Bound the cache to the active Run: leaving a Run releases its
+	// previews instead of retaining every visited Run's bitmaps.
+	for id, other := range recordBoards {
+		if id != a.snap.RunID {
+			releaseBoardPreviews(other)
+			delete(recordBoards, id)
+		}
+	}
 	st := recordBoards[a.snap.RunID]
 	if st == nil {
 		st = &recordBoardView{fov: 1, imgs: map[string]ui.ImageSource{}, imgFailed: map[string]bool{}}
@@ -102,6 +133,19 @@ func (a *app) recordBoard() *recordBoardView {
 	}
 	if st.imgFailed == nil {
 		st.imgFailed = map[string]bool{}
+	}
+	if st.imgLoading == nil {
+		st.imgLoading = map[string]bool{}
+	}
+	// Bound the cache to the selected FOV layer: switching layers releases
+	// the old layer's previews, and gen retires its in-flight loads.
+	if st.runID != a.snap.RunID || st.fovCached != st.fov {
+		releaseBoardPreviews(st)
+		st.imgFailed = map[string]bool{}
+		st.imgLoading = map[string]bool{}
+		st.runID = a.snap.RunID
+		st.fovCached = st.fov
+		st.gen++
 	}
 	return st
 }
@@ -1515,15 +1559,29 @@ func (a *app) exportRecordFile(c *ui.Context, title, filename, content string) {
 	c.AddToast(ui.Toast{Title: filename + " 已保存", Description: path, Type: components.ToastSuccess})
 }
 
-// recordImageSource resolves a matrix image to a decoded preview, cached per
-// Run on the board view. Anything unloadable (unconfigured root, missing
-// file, undecodable bytes) returns nil and is remembered, so the board shows
-// an explicit gap instead of retrying every frame.
+// decodePreviewImage decodes board preview bytes through the pinned MyGo
+// decoder. The TIFF import above is what makes .tif/.tiff assets decode
+// instead of landing in the unreadable bucket; both load paths below share
+// this one helper so they cannot drift apart.
+func decodePreviewImage(data []byte) (ui.ImageSource, error) {
+	return ui.DecodeImage(data)
+}
+
+// recordImageSource resolves a matrix image to a decoded preview, cached on
+// the board view for the active Run and selected FOV layer. The file read
+// and decode run off the view callback: with a window they move to a worker
+// whose result lands through mygo.RunOnMain plus a shell invalidation (the
+// startSaveBatch pattern in main.go); headless (tests) they run inline on
+// the same thread, since no event loop drains the main queue there. While a
+// load is in flight the board reads an explicit loading state. Anything
+// unloadable (unconfigured root, missing file, undecodable bytes) returns
+// nil and is remembered, so the board shows an explicit gap instead of
+// retrying every frame.
 func (a *app) recordImageSource(board *recordBoardView, img record.MatrixImage) ui.ImageSource {
 	if src, ok := board.imgs[img.AssetID]; ok {
 		return src
 	}
-	if board.imgFailed[img.AssetID] {
+	if board.imgFailed[img.AssetID] || board.imgLoading[img.AssetID] {
 		return nil
 	}
 	fail := func() ui.ImageSource {
@@ -1537,16 +1595,55 @@ func (a *app) recordImageSource(board *recordBoardView, img record.MatrixImage) 
 	if err != nil {
 		return fail()
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fail()
+	if !a.windowReady {
+		data, err := os.ReadFile(path)
+		var src ui.ImageSource
+		if err == nil {
+			src, err = decodePreviewImage(data)
+		}
+		a.finishPreviewLoad(board, a.snap.RunID, board.gen, board.fov, img.AssetID, src, err)
+		return board.imgs[img.AssetID]
 	}
-	src, err := ui.DecodeImage(data)
-	if err != nil {
-		return fail()
+	board.imgLoading[img.AssetID] = true
+	gen, runID, fov, assetID := board.gen, a.snap.RunID, board.fov, img.AssetID
+	go func() {
+		data, err := os.ReadFile(path)
+		var src ui.ImageSource
+		if err == nil {
+			src, err = decodePreviewImage(data)
+		}
+		mygo.RunOnMain(func() {
+			a.finishPreviewLoad(board, runID, gen, fov, assetID, src, err)
+		})
+	}()
+	return nil
+}
+
+// finishPreviewLoad applies one worker's decoded preview on the view thread.
+// Results for a Run or FOV layer the board has since left drop (releasing
+// their pixels) instead of landing in the wrong cell; only the active layer
+// inserts or records failure, then asks for a redraw.
+func (a *app) finishPreviewLoad(board *recordBoardView, runID string, gen uint64, fov int, assetID string, src ui.ImageSource, err error) {
+	delete(board.imgLoading, assetID)
+	if err != nil || src == nil {
+		if a.snap.RunID == runID && board.gen == gen && board.fov == fov {
+			board.imgFailed[assetID] = true
+		}
+		if a.shell != nil {
+			a.shell.Invalidate()
+		}
+		return
 	}
-	board.imgs[img.AssetID] = src
-	return src
+	if a.snap.RunID != runID || board.gen != gen || board.fov != fov {
+		if bmp, ok := src.(*ui.Bitmap); ok && bmp != nil {
+			bmp.ReleasePixels()
+		}
+		return
+	}
+	board.imgs[assetID] = src
+	if a.shell != nil {
+		a.shell.Invalidate()
+	}
 }
 
 // recordGroupBoardSection renders the representative-view matrix the design
@@ -1587,6 +1684,8 @@ func (a *app) recordGroupBoardSection(c *ui.Context, t *ui.Theme, tokens theme.T
 					if img != nil {
 						if src := a.recordImageSource(board, *img); src != nil {
 							ui.Image(c, src).Size(132, 96).Fit(ui.Contain)
+						} else if board.imgLoading[img.AssetID] {
+							ui.Text(c, "图加载中…").FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 						} else {
 							ui.Text(c, "图不可读").FontSize(float32(tokens.TextData)).TextColor(t.Warning)
 						}

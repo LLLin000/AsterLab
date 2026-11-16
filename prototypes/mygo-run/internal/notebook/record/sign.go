@@ -50,7 +50,10 @@ type Signature struct {
 	Actor    string
 }
 
-var signatureRe = regexp.MustCompile(`(?s)<!--\s*record-sign\s+run=(\S+)\s+rev=(\d+)\s+hash=([0-9a-f]{64})\s+at=(\S+)\s+actor=(\S+)\s*-->[ \t]*$`)
+// actor is the last field and may contain internal spaces (Windows USERNAME
+// can be "Jane Doe"), so it captures everything up to the closing comment.
+// Signatures written before spaces were allowed (actor=\S+) still match.
+var signatureRe = regexp.MustCompile(`(?s)<!--\s*record-sign\s+run=(\S+)\s+rev=(\d+)\s+hash=([0-9a-f]{64})\s+at=(\S+)\s+actor=(.+?)\s*-->[ \t]*$`)
 
 // signatureBody strips any existing signature trailer so re-signing covers
 // the prose, not the previous signature.

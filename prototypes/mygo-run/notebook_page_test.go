@@ -4,8 +4,10 @@ import (
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
+	"bytes"
 	"context"
 	"github.com/egoist/mygo/ui"
+	"golang.org/x/image/tiff"
 	"image"
 	"image/png"
 	"os"
@@ -323,5 +325,73 @@ func TestNotebookSealedRecordNeverExposesEditor(t *testing.T) {
 	}
 	if tt.HasText("record-sign") {
 		t.Fatalf("signature trailer leaked into a rendered view: %q", tt.Texts())
+	}
+}
+
+// TestNotebookGroupBoardDecodesTiffPreview pins TIFF support on the record
+// preview path: a real .tif asset decodes into the board cache through
+// recordImageSource instead of landing in the unreadable bucket.
+func TestNotebookGroupBoardDecodesTiffPreview(t *testing.T) {
+	dir := t.TempDir()
+	file, err := os.Create(filepath.Join(dir, "fov3.tif"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tiff.Encode(file, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snap, assets := boardTestSnap("run-board-tif")
+	assets = append(assets, runs.Asset{
+		ID: "img-tif", RootID: "root-1", RelativePath: "fov3.tif", MediaType: "image/tiff",
+		Link: runs.AssetLink{RunID: "run-board-tif", TaskKey: "task-cure", SampleID: "S1", WellID: "A1", Timepoint: "6h", FOVIndex: 3},
+	})
+	a := &app{snap: snap, runAssets: assets, assetRoots: map[string]string{"root-1": dir}}
+	proj := a.recordProjection()
+	var tifImg *record.MatrixImage
+	for i := range proj.Matrix {
+		if img := proj.Matrix[i].Representative(3); img != nil && img.AssetID == "img-tif" {
+			tifImg = img
+		}
+	}
+	if tifImg == nil {
+		t.Fatalf("tiff asset not placed in any cell: %+v", proj.Matrix)
+	}
+	board := a.recordBoard()
+	if src := a.recordImageSource(board, *tifImg); src == nil {
+		t.Fatal("valid TIFF preview did not decode")
+	}
+	if board.imgFailed["img-tif"] {
+		t.Fatal("decodable TIFF marked unreadable")
+	}
+	if board.imgs["img-tif"] == nil {
+		t.Fatal("decoded TIFF missing from the board cache")
+	}
+}
+
+// TestNotebookPreviewDropsStaleLayerResults pins the stale guard: a worker
+// finishing after the board moved to another Run or FOV layer must neither
+// plant its bitmap in the active layer nor mark it failed.
+func TestNotebookPreviewDropsStaleLayerResults(t *testing.T) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	src, err := decodePreviewImage(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := boardTestSnap("run-board-stale")
+	a := &app{snap: snap}
+	board := a.recordBoard()
+	a.finishPreviewLoad(board, "run-board-stale", board.gen+1, board.fov, "img-stale", src, nil)
+	if board.imgs["img-stale"] != nil || board.imgFailed["img-stale"] {
+		t.Fatal("stale completion reached the active layer")
+	}
+	a.finishPreviewLoad(board, "run-board-stale", board.gen, board.fov, "img-stale", src, nil)
+	if board.imgs["img-stale"] == nil {
+		t.Fatal("current-layer completion did not land in the cache")
 	}
 }

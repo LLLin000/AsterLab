@@ -269,9 +269,12 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 	}
 	proj.Summary = summaries
 
-	// Wells from result cells, row-major.
-	wellSamples := map[string]map[string]bool{}
-	wellGroups := map[string]map[string]bool{}
+	// Wells from result cells, row-major. Samples and groups key by
+	// well\x00timepoint: the assay schema assigns a group per
+	// well@timepoint, so one well can read 3% at 6h and 5% at 12h without
+	// either leaking into the other's cell.
+	keySamples := map[string]map[string]bool{}
+	keyGroups := map[string]map[string]bool{}
 	wellOrder := []string{}
 	cellEvents := map[string]map[string]bool{} // well -> timepoint -> true
 	cellValues := map[string][]Measure{}       // well\x00timepoint -> values
@@ -282,20 +285,23 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 		}
 		for _, rc := range ev.ResultCells {
 			well := wellLabel(rc.Row, rc.Column)
-			if wellSamples[well] == nil {
-				wellSamples[well] = map[string]bool{}
-				wellGroups[well] = map[string]bool{}
+			tp := ev.Timepoint
+			key := well + "\x00" + tp
+			if cellEvents[well] == nil {
+				cellEvents[well] = map[string]bool{}
 				wellOrder = append(wellOrder, well)
 			}
 			if strings.TrimSpace(rc.SampleID) != "" {
-				wellSamples[well][rc.SampleID] = true
+				if keySamples[key] == nil {
+					keySamples[key] = map[string]bool{}
+				}
+				keySamples[key][rc.SampleID] = true
 			}
 			if group := strings.TrimSpace(rc.Group); group != "" {
-				wellGroups[well][group] = true
-			}
-			tp := ev.Timepoint
-			if cellEvents[well] == nil {
-				cellEvents[well] = map[string]bool{}
+				if keyGroups[key] == nil {
+					keyGroups[key] = map[string]bool{}
+				}
+				keyGroups[key][group] = true
 			}
 			cellEvents[well][tp] = true
 			if strings.TrimSpace(rc.Field) != "" || rc.Value != nil {
@@ -346,12 +352,12 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 		for _, tp := range tps {
 			key := well + "\x00" + tp
 			samples := []string{}
-			for s := range wellSamples[well] {
+			for s := range keySamples[key] {
 				samples = append(samples, s)
 			}
 			sort.Strings(samples)
 			groups := []string{}
-			for g := range wellGroups[well] {
+			for g := range keyGroups[key] {
 				groups = append(groups, g)
 			}
 			sort.Strings(groups)

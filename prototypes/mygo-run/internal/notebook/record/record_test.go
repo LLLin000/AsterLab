@@ -1,7 +1,10 @@
 package record
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -475,5 +478,94 @@ func TestGroupsComeFromResultCellsOnly(t *testing.T) {
 	// Unknown timepoints select nothing.
 	if _, _, ok := proj.RepresentativeGroup("5%", "12h", 1); ok {
 		t.Fatal("unknown timepoint selected a cell")
+	}
+}
+
+// TestProjectGroupAndSampleStayWithinTheirTimepoint pins the assay rule that
+// a group is assigned per well@timepoint: the same well reads 3% at 6h and
+// 5% at 12h, and neither cell leaks the other's group, sample, or
+// representative slot.
+func TestProjectGroupAndSampleStayWithinTheirTimepoint(t *testing.T) {
+	snap := runs.RunSnapshot{
+		RunID: "run-1", DesignID: "design-1", DesignRevision: 3,
+		Tasks: []runs.RunTask{
+			{Key: "task-6", Title: "采图", Timepoint: "6h", Status: "completed"},
+			{Key: "task-12", Title: "采图", Timepoint: "12h", Status: "in_progress"},
+		},
+		Events: []runs.RunEvent{
+			{
+				ID: "evt-6", EventType: "measurement", TaskKey: "task-6", Timepoint: "6h",
+				OccurredAt: "2026-11-10T16:00:00+08:00", RecordedAt: "2026-11-10T16:01:00+08:00",
+				ResultCells: []runs.ResultCell{
+					{Row: 0, Column: 0, SampleID: "S1", Group: "3%", Field: "OD450", Value: new(0.82)},
+				},
+			},
+			{
+				ID: "evt-12", EventType: "measurement", TaskKey: "task-12", Timepoint: "12h",
+				OccurredAt: "2026-11-10T22:00:00+08:00", RecordedAt: "2026-11-10T22:01:00+08:00",
+				ResultCells: []runs.ResultCell{
+					{Row: 0, Column: 0, SampleID: "S2", Group: "5%", Field: "OD450", Value: new(0.91)},
+				},
+			},
+		},
+	}
+	proj := Project(snap, nil)
+	byKey := map[string]MatrixCell{}
+	for _, cell := range proj.Matrix {
+		byKey[cell.Well+"\x00"+cell.Timepoint] = cell
+	}
+	early, ok := byKey["A1\x006h"]
+	if !ok {
+		t.Fatalf("missing A1@6h cell: %+v", proj.Matrix)
+	}
+	if !reflect.DeepEqual(early.Groups, []string{"3%"}) || !reflect.DeepEqual(early.Samples, []string{"S1"}) {
+		t.Fatalf("A1@6h leaked: groups=%+v samples=%+v", early.Groups, early.Samples)
+	}
+	late, ok := byKey["A1\x0012h"]
+	if !ok {
+		t.Fatalf("missing A1@12h cell: %+v", proj.Matrix)
+	}
+	if !reflect.DeepEqual(late.Groups, []string{"5%"}) || !reflect.DeepEqual(late.Samples, []string{"S2"}) {
+		t.Fatalf("A1@12h leaked: groups=%+v samples=%+v", late.Groups, late.Samples)
+	}
+	// Neither timepoint's group slot may resolve through the other cell.
+	if _, _, ok := proj.RepresentativeGroup("3%", "12h", 1); ok {
+		t.Fatal("3% leaked into the 12h slot")
+	}
+	if _, _, ok := proj.RepresentativeGroup("5%", "6h", 1); ok {
+		t.Fatal("5% leaked into the 6h slot")
+	}
+	if cell, _, ok := proj.RepresentativeGroup("3%", "6h", 1); !ok || cell.Well != "A1" {
+		t.Fatalf("3pct at 6h representative = %+v %v", cell, ok)
+	}
+	if cell, _, ok := proj.RepresentativeGroup("5%", "12h", 1); !ok || cell.Well != "A1" {
+		t.Fatalf("5pct at 12h representative = %+v %v", cell, ok)
+	}
+}
+
+// TestSignVerifiesActorWithSpaces pins signatures for actors whose Windows
+// USERNAME contains whitespace: the value survives the round trip byte for
+// byte, and a legacy no-space trailer verifies exactly as before.
+func TestSignVerifiesActorWithSpaces(t *testing.T) {
+	signed, sig := Sign("# 研判\n\n贴壁良好\n", "run-1", 7, "Jane Doe", time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC))
+	if sig.Actor != "Jane Doe" {
+		t.Fatalf("actor = %q", sig.Actor)
+	}
+	got, ok := Verify(signed)
+	if !ok || got.Actor != "Jane Doe" || got.Hash != sig.Hash {
+		t.Fatalf("spaced actor did not verify: %+v %v", got, ok)
+	}
+	if _, ok := Verify(signed + "\n多加一句\n"); ok {
+		t.Fatal("tampered spaced-actor prose verified")
+	}
+	// A trailer written before spaces were allowed verifies unchanged.
+	legacyBody := "# 旧正文\n"
+	sum := sha256.Sum256([]byte(legacyBody))
+	legacy := legacyBody + "\n" + fmt.Sprintf(
+		"<!-- record-sign run=%s rev=%d hash=%s at=%s actor=%s -->\n",
+		"run-1", 3, hex.EncodeToString(sum[:]), "2026-11-16T12:00:00Z", "lin")
+	legacySig, ok := Verify(legacy)
+	if !ok || legacySig.Actor != "lin" || legacySig.Revision != 3 {
+		t.Fatalf("legacy signature stopped verifying: %+v %v", legacySig, ok)
 	}
 }
