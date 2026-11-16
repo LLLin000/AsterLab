@@ -82,9 +82,9 @@ scope-check: FAILED - the pull request touches paths outside the card scope
 2. `--pr-body-file <file>`：先找 `<!-- kandev-task: <uuid> -->`。找到且 `KANDEV_API_URL`、`KANDEV_API_TOKEN` 都有值时走 API；否则读 PR body 里的 `kandev-scope` 块，并在日志打 `notice:`。
 3. `--description-file <file>` 或 `--description-stdin`。
 
-GitHub 托管 runner 无法访问 `127.0.0.1:38429` 上的 Kandev，因此托管 runner 走第 2 条的 PR body 回退；自托管 runner 配好 `KANDEV_API_URL` / `KANDEV_API_TOKEN` secrets 后自动切到 API。两条路径都失败即 exit 2，不跳过检查。
+GitHub 托管 runner 无法访问 `127.0.0.1:38429` 上的 Kandev，且 `scope-check.yml` 的托管步骤不注入 `KANDEV_API_URL` / `KANDEV_API_TOKEN`，因此托管 runner 固定走第 2 条的 PR body 回退（日志打 `notice:`），不会因 API 404 把检查直接判失败；自托管 runner 配好这两个 secrets 后自动切到 API。两条路径都失败即 exit 2，不跳过检查。
 
-PR body 必须带 `<!-- kandev-task: <uuid> -->` 和卡片的 `kandev-scope` 块，前者让 API 路径可启用，后者是没有 API 时的唯一依据。
+托管 PR 的 body 必须同时带 `<!-- kandev-task: <uuid> -->` 和卡片 `kandev-scope` 块的逐字复制：前者标识任务，后者是托管 runner 上唯一的范围依据。工作流在调用解析器前先校验 marker（与 `scope_check.py` 同一条 36 位 `[0-9a-fA-F-]` 正则），缺失或格式非法即 exit 2；scope 块缺失或格式错误由 `scope_check.py` 报 exit 2。复制时不要改写路径或增删 `write`/`read`/`forbid` 行，否则越界判定以改后块为准。
 
 ## 本地运行
 
