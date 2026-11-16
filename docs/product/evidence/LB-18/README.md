@@ -89,8 +89,10 @@ $ grep -n 'FontSize([0-9]\|Padding([0-9]\|Radius([0-9]\|ui\.Hex(' internal/desig
 ```text
 $ grep -rn 'design-system.md' AGENTS.md docs/product/ux-contract.md docs/product/ownership.md
 AGENTS.md:61:- 动任何界面之前先读 [`docs/product/design-system.md`](docs/product/design-system.md)：它规定了唯一 token 源、4 倍数间距、三档圆角、需求→组件对照表（Do/Don't）与文案规则。
-AGENTS.md:64:- 需要新组件时，先确认仓库与 onevra 都没有等价实现，并在 `design-system.md` 的组件表登记原因。
+AGENTS.md:63:- 通用颜色/圆角/控件高度取自 `internal/theme` 的 `Tokens`；字号用文本 token 或 `t.Rem`，间距用间距 token 或 `t.Space`；科学语义颜色只能复用 `docs/product/design-system.md` §1 登记的具名调色板；调用点不写字面值。
+AGENTS.md:64:- 需要新组件时，先确认仓库与 onevra 都没有等价实现，并在 `docs/product/design-system.md` 的组件表登记原因。
 docs/product/ux-contract.md:173:`docs/product/design-system.md` is the enforceable visual contract behind P3: the
+docs/product/ux-contract.md:183:  in `docs/product/design-system.md` §1; call sites must not contain literals.
 ```
 
 ## 4. 规范条目计数
