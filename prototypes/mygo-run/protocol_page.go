@@ -6,13 +6,20 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/protocol"
 	"asterlab-mygo-prototype/modules/runs"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
+	"github.com/oneo-me/onevra/source/components"
 )
+
+// protocolArchives keys the document/archive view toggle by Run, so switching
+// Runs never leaks one Run's 终态归档 view into another.
+var protocolArchives = map[string]bool{}
 
 type protocolPageState struct {
 	selectedVersionID string
@@ -141,16 +148,34 @@ func protocolPage(c *ui.Context, a *app) {
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(4)).Gap(t.Space(2)).
 			AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "Protocol versions · 只读").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-				protocol.RenderVersions(c, versions, state.selectedVersionID, func(id string) {
-					state.selectedByUser = true
-					state.selectedVersionID = id
-				})
+			ui.Text(c, "Protocol versions · 只读").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			protocol.RenderVersions(c, versions, state.selectedVersionID, func(id string) {
+				state.selectedByUser = true
+				state.selectedVersionID = id
 			})
+		})
 
 		// UX-STATE: a Run remains frozen even when a listed version is unresolved.
 		if frozen {
 			protocol.RenderVersionState(c, "frozen", shortID(a.snap.RunID), a.snap.AsterDoc.Revision)
+			showArchive := protocolArchives[a.snap.RunID]
+			ui.Row(c).FillWidth().Padding(t.Space(1), t.Space(4)).Gap(t.Space(1.5)).
+				AlignItems(ui.Center).Children(func() {
+				docStyle, archStyle := components.ButtonSecondary, components.ButtonGhost
+				if showArchive {
+					docStyle, archStyle = archStyle, docStyle
+				}
+				if components.Button(c, "冻结文档", docStyle).Clicked() {
+					protocolArchives[a.snap.RunID] = false
+				}
+				if components.Button(c, "终态归档", archStyle).Clicked() {
+					protocolArchives[a.snap.RunID] = true
+				}
+			})
+			if showArchive {
+				a.renderProtocolArchive(c)
+				return
+			}
 			if a.asterDoc == nil && a.asterErr == "" {
 				ui.Text(c, "正在读取冻结文档…").FontSize(t.Rem(.85)).TextColor(t.TextMuted)
 				return
@@ -216,38 +241,87 @@ func renderProtocolDocument(c *ui.Context, source string, mode asterdoc.Mode, re
 				ui.Box(c).FillWidth().MaxWidth(820).MaxWidthPercent(100).
 					Radius(t.Radius).Border(1, t.Border).Background(t.Surface).
 					Padding(t.Space(7), t.Space(8)).Children(func() {
-						view := &asterdoc.View{
-							Doc: doc, Registry: asterdoc.BuiltinRegistry(), Mode: mode,
-							ReadOnly: true, DocumentRevision: fmt.Sprint(revision),
+					view := &asterdoc.View{
+						Doc: doc, Registry: asterdoc.BuiltinRegistry(), Mode: mode,
+						ReadOnly: true, DocumentRevision: fmt.Sprint(revision),
+					}
+					index := 0
+					protocol.RenderMarkdownWith(c, source, func(c *ui.Context, block *markdown.CodeBlockView) {
+						if block.Language != "asterlab" {
+							markdown.DefaultCodeBlock(c, block)
+							return
 						}
-						index := 0
-						protocol.RenderMarkdownWith(c, source, func(c *ui.Context, block *markdown.CodeBlockView) {
-							if block.Language != "asterlab" {
-								markdown.DefaultCodeBlock(c, block)
-								return
-							}
-							if index >= len(doc.Modules) {
-								return
-							}
-							module := doc.Modules[index]
-							index++
-							// UX-P2: references and workflow IDs are navigation metadata, not prose.
-							if module.Kind == "reference" || module.Kind == "workflow" {
-								return
-							}
-							data := make(map[string]any, len(module.Data))
-							for key, value := range module.Data {
-								data[key] = value
-							}
-							delete(data, "id")
-							if module.Kind == "step" {
-								delete(data, "assay")
-								delete(data, "path")
-							}
-							view.RenderModule(c, module.Kind, module.Schema, data)
-						})
+						if index >= len(doc.Modules) {
+							return
+						}
+						module := doc.Modules[index]
+						index++
+						// UX-P2: references and workflow IDs are navigation metadata, not prose.
+						if module.Kind == "reference" || module.Kind == "workflow" {
+							return
+						}
+						data := make(map[string]any, len(module.Data))
+						for key, value := range module.Data {
+							data[key] = value
+						}
+						delete(data, "id")
+						if module.Kind == "step" {
+							delete(data, "assay")
+							delete(data, "path")
+						}
+						view.RenderModule(c, module.Kind, module.Schema, data)
 					})
+				})
 			})
 	})
 }
 
+// renderProtocolArchive renders the 终态归档: the shared RecordProjection as
+// an exportable end state, with the signed prose (dynamic references
+// flattened) and the derived design draft. It reads the same projection the
+// Notebook board and the Run history read from; it writes nothing.
+func (a *app) renderProtocolArchive(c *ui.Context) {
+	t := c.Theme()
+	proj := record.Project(a.snap, a.runAssets)
+	prose := ""
+	if a.noteRunID == a.snap.RunID {
+		prose = a.noteSource()
+	} else if latest, ok := latestNotebookRevision(a.snap.Events); ok {
+		prose = latest
+	}
+	_, sigOK := record.Verify(prose)
+	// The preview is render-stable: it carries no export stamp, so every
+	// frame renders the same document. The stamp is applied only when the
+	// operator actually exports the package.
+	arch := protocol.BuildArchive(proj, prose, time.Time{})
+	state := record.ClassifyRecordState(a.noteDirty, sigOK)
+	ui.Column(c).Grow(1).FillWidth().Padding(t.Space(2), t.Space(4)).Gap(t.Space(2)).Children(func() {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Text(c, "终态归档").FontSize(t.Rem(.95)).Bold().TextColor(t.Text)
+			ui.Text(c, string(state)).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted)
+			ui.Spacer(c)
+			if components.Button(c, "导出归档包", components.ButtonSecondary).Clicked() {
+				exported := protocol.BuildArchive(proj, prose, time.Now())
+				a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", exported.Markdown())
+			}
+		})
+		if sigOK {
+			if arch.Signature != nil {
+				ui.Text(c, "签核 "+arch.Signature.Actor+" · "+arch.Signature.At).
+					FontSize(t.Rem(.8)).TextColor(t.TextMuted)
+			}
+		} else {
+			ui.Text(c, "未签核：签核在 Notebook 图板完成，归档包随之锁定。").
+				FontSize(t.Rem(.8)).TextColor(t.TextMuted)
+		}
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Box(c).FillWidth().MaxWidth(820).MaxWidthPercent(100).
+					Radius(t.Radius).Border(1, t.Border).Background(t.Surface).
+					Padding(t.Space(7), t.Space(8)).Children(func() {
+					protocol.RenderMarkdown(c, arch.Markdown())
+				})
+			})
+		})
+	})
+}
