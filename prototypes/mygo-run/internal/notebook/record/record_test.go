@@ -344,3 +344,78 @@ func TestCoordinatedImageCreatesItsOwnCell(t *testing.T) {
 		t.Fatalf("unassigned = %d", proj.UnassignedImages)
 	}
 }
+
+// TestStepPathPrefixNeverMatches pins exact step identity for keyless legacy
+// rows: only a ProtocolStepPath equal to the task's Path attaches, and only
+// when exactly one task carries it. A prefix ("root/readout" vs "root/read")
+// or an empty path never attaches; those rows land in the explicit
+// unassigned bucket instead of being guessed or dropped.
+func TestStepPathPrefixNeverMatches(t *testing.T) {
+	snap := runs.RunSnapshot{
+		RunID: "run-1", DesignID: "design-1", DesignRevision: 3,
+		Tasks: []runs.RunTask{
+			{Key: "task-image", Title: "采图", Timepoint: "6h", Status: "in_progress", Path: "root/read"},
+		},
+		Measurements: []runs.Measurement{
+			{SampleID: "S10", Endpoint: "OD450", Value: 0.5, ProtocolStepPath: "root/read"},
+			{SampleID: "S1", Endpoint: "OD450", Value: 0.82, ProtocolStepPath: "root/readout"},
+			{SampleID: "S2", Endpoint: "OD450", Value: 0.9},
+		},
+	}
+	proj := Project(snap, nil)
+	if len(proj.Summary) != 1 {
+		t.Fatalf("summaries = %+v", proj.Summary)
+	}
+	if len(proj.Summary[0].Measurements) != 1 || proj.Summary[0].Measurements[0].SampleID != "S10" {
+		t.Fatalf("attached = %+v", proj.Summary[0].Measurements)
+	}
+	unassigned := map[string]bool{}
+	for _, m := range proj.UnassignedMeasurements {
+		unassigned[m.SampleID] = true
+	}
+	if !unassigned["S1"] || !unassigned["S2"] {
+		t.Fatalf("unassigned = %+v", proj.UnassignedMeasurements)
+	}
+	if len(proj.UnassignedMeasurements) != 2 {
+		t.Fatalf("unassigned = %+v", proj.UnassignedMeasurements)
+	}
+}
+
+// TestOneStoredMeasurementYieldsOneSummaryRow pins the single source: the
+// bridge copies every event's measurements[] into snap.Measurements, so an
+// event DataJSON measurement must not add a second row for the same stored
+// fact. Parameters and deviations still come from DataJSON.
+func TestOneStoredMeasurementYieldsOneSummaryRow(t *testing.T) {
+	snap := runs.RunSnapshot{
+		RunID: "run-1", DesignID: "design-1", DesignRevision: 3,
+		Tasks: []runs.RunTask{
+			{Key: "task-image", Title: "采图", Timepoint: "6h", Status: "in_progress"},
+		},
+		Events: []runs.RunEvent{
+			{
+				ID: "evt-1", EventType: "measurement", TaskKey: "task-image", Timepoint: "6h",
+				OccurredAt: "2026-11-10T16:00:00+08:00", RecordedAt: "2026-11-10T16:01:00+08:00",
+				DataJSON: `{"measurements":[{"sample_id":"S10","endpoint":"OD450","value":0.5}],"actual_parameters":[{"key":"cure_s","value":75,"unit":"s"}]}`,
+			},
+		},
+		Measurements: []runs.Measurement{
+			{SampleID: "S10", Endpoint: "OD450", Value: 0.5, Unit: "", TaskKey: "task-image"},
+		},
+	}
+	proj := Project(snap, nil)
+	if len(proj.Summary) != 1 {
+		t.Fatalf("summaries = %+v", proj.Summary)
+	}
+	rows := 0
+	for _, m := range proj.Summary[0].Measurements {
+		if m.Endpoint == "OD450" && m.SampleID == "S10" {
+			rows++
+		}
+	}
+	if rows != 1 {
+		t.Fatalf("stored measurement yielded %d summary rows: %+v", rows, proj.Summary[0].Measurements)
+	}
+	if len(proj.Summary[0].Actual) != 1 || proj.Summary[0].Actual[0].Value != "75" {
+		t.Fatalf("DataJSON parameters lost: %+v", proj.Summary[0].Actual)
+	}
+}

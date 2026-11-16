@@ -133,6 +133,15 @@ func (arch Archive) Markdown() string {
 		}
 		sb.WriteString("\n")
 	}
+	if len(proj.UnassignedMeasurements) > 0 {
+		sb.WriteString(fmt.Sprintf("未定位实测 %d 条（无任务认领：未知任务键，或步骤路径无歧义匹配；列出但不归入任务行）：\n\n",
+			len(proj.UnassignedMeasurements)))
+		for _, m := range proj.UnassignedMeasurements {
+			sb.WriteString(fmt.Sprintf("- %s%s：%s %s\n",
+				measureEndpoint(m), measureSample(m), m.Value, m.Unit))
+		}
+		sb.WriteString("\n")
+	}
 
 	sb.WriteString("## 研判记录\n\n")
 	if strings.TrimSpace(stripSignatureBlock(arch.Prose)) == "" {

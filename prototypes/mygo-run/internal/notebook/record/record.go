@@ -123,6 +123,10 @@ type RecordProjection struct {
 	// into a slot.
 	UnassignedImages int
 	UnassignedLabels []string
+	// UnassignedMeasurements holds stored measurements no task claims: rows
+	// with an unknown TaskKey, or keyless legacy rows whose ProtocolStepPath
+	// matches no task or more than one. Listed explicitly, never dropped.
+	UnassignedMeasurements []Measure
 }
 
 // Project builds the shared projection from one stored snapshot and its
@@ -140,10 +144,16 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 		DesignRevision: snap.DesignRevision,
 	}
 
-	// Task summaries in frozen task order.
+	// Task summaries in frozen task order. Measurements come from one source
+	// only — snap.Measurements — because the bridge copies every event's
+	// measurements[] into the snapshot as well; reading DataJSON too would
+	// list every stored fact twice. DataJSON still carries parameters,
+	// deviations and skips.
 	summaries := make([]TaskSummary, 0, len(snap.Tasks))
 	actualByTask := collectActuals(snap.Events)
-	for _, task := range snap.Tasks {
+	byKey := make(map[string]int, len(snap.Tasks))
+	byPath := make(map[string][]int)
+	for i, task := range snap.Tasks {
 		sum := TaskSummary{
 			TaskKey:   task.Key,
 			Title:     task.Title,
@@ -153,23 +163,43 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 		}
 		if actual, ok := actualByTask[task.Key]; ok {
 			sum.Actual = actual.params
-			sum.Measurements = actual.measurements
 			sum.Deviations = actual.deviations
 			sum.Skipped = actual.skipped
 		}
-		for _, m := range snap.Measurements {
-			if m.TaskKey != "" && m.TaskKey != task.Key {
-				continue
-			}
-			if m.TaskKey == "" && !eventSampleMentions(snap.Events, task.Key, m.SampleID) {
-				continue
-			}
-			sum.Measurements = append(sum.Measurements, Measure{
-				SampleID: m.SampleID, Endpoint: m.Endpoint,
-				Value: formatNumber(m.Value), Unit: m.Unit, Source: "measurement",
-			})
-		}
 		summaries = append(summaries, sum)
+		byKey[task.Key] = i
+		if path := taskEffectivePath(task); path != "" {
+			byPath[path] = append(byPath[path], i)
+		}
+	}
+	// Measurement routing is exact, never guessed: a TaskKey names its task;
+	// a keyless legacy row resolves only through an unambiguous
+	// ProtocolStepPath match. Anything else lands in the explicit unassigned
+	// bucket instead of being dropped or misattributed.
+	toMeasure := func(m runs.Measurement) Measure {
+		return Measure{
+			SampleID: m.SampleID, Endpoint: m.Endpoint,
+			Value: formatNumber(m.Value), Unit: m.Unit, Source: "measurement",
+		}
+	}
+	for _, m := range snap.Measurements {
+		measure := toMeasure(m)
+		if m.TaskKey != "" {
+			if idx, ok := byKey[m.TaskKey]; ok {
+				summaries[idx].Measurements = append(summaries[idx].Measurements, measure)
+				continue
+			}
+			proj.UnassignedMeasurements = append(proj.UnassignedMeasurements, measure)
+			continue
+		}
+		path := strings.TrimSpace(m.ProtocolStepPath)
+		if path != "" {
+			if idxs := byPath[path]; len(idxs) == 1 {
+				summaries[idxs[0]].Measurements = append(summaries[idxs[0]].Measurements, measure)
+				continue
+			}
+		}
+		proj.UnassignedMeasurements = append(proj.UnassignedMeasurements, measure)
 	}
 	proj.Summary = summaries
 
@@ -267,13 +297,14 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 	return proj
 }
 
-// taskActuals accumulates what stored events recorded for one task.
+// taskActuals accumulates what stored events recorded for one task, minus
+// measurements: those come from snap.Measurements alone (single source), so
+// DataJSON contributes only parameters, deviations and skips here.
 type taskActuals struct {
-	params       []Param
-	paramIndex   map[string]int
-	measurements []Measure
-	deviations   []string
-	skipped      bool
+	params     []Param
+	paramIndex map[string]int
+	deviations []string
+	skipped    bool
 }
 
 func collectActuals(events []runs.RunEvent) map[string]*taskActuals {
@@ -295,63 +326,59 @@ func collectActuals(events []runs.RunEvent) map[string]*taskActuals {
 				Value any    `json:"value"`
 				Unit  string `json:"unit"`
 			} `json:"actual_parameters"`
-			Measurements []struct {
-				SampleID string   `json:"sample_id"`
-				Endpoint string   `json:"endpoint"`
-				Value    *float64 `json:"value"`
-				Unit     string   `json:"unit"`
-			} `json:"measurements"`
 			Deviation     *string `json:"deviation"`
 			SkippedByRule any     `json:"skipped_by_rule"`
 		}
-		if strings.TrimSpace(ev.DataJSON) != "" {
-			if json.Unmarshal([]byte(ev.DataJSON), &data) != nil {
-				continue
+		if strings.TrimSpace(ev.DataJSON) == "" {
+			continue
+		}
+		if json.Unmarshal([]byte(ev.DataJSON), &data) != nil {
+			continue
+		}
+		for _, p := range data.ActualParameters {
+			value := ""
+			if p.Value != nil {
+				value = fmt.Sprint(p.Value)
 			}
-			for _, p := range data.ActualParameters {
-				value := ""
-				if p.Value != nil {
-					value = fmt.Sprint(p.Value)
-				}
-				param := Param{Key: p.Key, Label: p.Key, Value: value, Unit: p.Unit}
-				if idx, ok := a.paramIndex[p.Key]; ok {
-					a.params[idx] = param
-				} else {
-					a.paramIndex[p.Key] = len(a.params)
-					a.params = append(a.params, param)
-				}
-			}
-			for _, m := range data.Measurements {
-				a.measurements = append(a.measurements, Measure{
-					SampleID: m.SampleID, Endpoint: m.Endpoint,
-					Value: formatValuePtr(m.Value), Unit: m.Unit, Source: "event",
-				})
-			}
-			if data.Deviation != nil && strings.TrimSpace(*data.Deviation) != "" {
-				a.deviations = append(a.deviations, *data.Deviation)
-			}
-			switch v := data.SkippedByRule.(type) {
-			case bool:
-				if v {
-					a.skipped = true
-				}
-			case string:
-				if strings.TrimSpace(v) != "" && !strings.EqualFold(v, "false") {
-					a.skipped = true
-				}
+			param := Param{Key: p.Key, Label: p.Key, Value: value, Unit: p.Unit}
+			if idx, ok := a.paramIndex[p.Key]; ok {
+				a.params[idx] = param
+			} else {
+				a.paramIndex[p.Key] = len(a.params)
+				a.params = append(a.params, param)
 			}
 		}
-		for _, rc := range ev.ResultCells {
-			if strings.TrimSpace(rc.Field) == "" && rc.Value == nil {
-				continue
+		if data.Deviation != nil && strings.TrimSpace(*data.Deviation) != "" {
+			a.deviations = append(a.deviations, *data.Deviation)
+		}
+		switch v := data.SkippedByRule.(type) {
+		case bool:
+			if v {
+				a.skipped = true
 			}
-			a.measurements = append(a.measurements, Measure{
-				SampleID: rc.SampleID, Endpoint: rc.Field,
-				Value: formatValuePtr(rc.Value), Unit: "", Source: "result_cell",
-			})
+		case string:
+			if strings.TrimSpace(v) != "" && !strings.EqualFold(v, "false") {
+				a.skipped = true
+			}
 		}
 	}
 	return out
+}
+
+// taskEffectivePath is the stable frozen-step identity a legacy measurement
+// row can name: the task Path, falling back to the path carried by legacy
+// frozen task keys, exactly as the Run surface resolves them.
+func taskEffectivePath(task runs.RunTask) string {
+	if path := strings.TrimSpace(task.Path); path != "" {
+		return path
+	}
+	var parsed struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(task.Key), &parsed) != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Path)
 }
 
 // ensureImageCells adds matrix cells for coordinated images whose (well,
@@ -541,28 +568,6 @@ func parseParameters(raw string) []Param {
 	return out
 }
 
-// eventSampleMentions reports whether any event for the task mentions the
-// sample, so task-level snapshot measurements attach only where the task
-// actually recorded that sample.
-func eventSampleMentions(events []runs.RunEvent, taskKey, sampleID string) bool {
-	if strings.TrimSpace(sampleID) == "" {
-		return false
-	}
-	for _, ev := range events {
-		if ev.TaskKey != taskKey {
-			continue
-		}
-		for _, rc := range ev.ResultCells {
-			if rc.SampleID == sampleID {
-				return true
-			}
-		}
-		if strings.Contains(ev.DataJSON, sampleID) {
-			return true
-		}
-	}
-	return false
-}
 
 func formatNumber(value float64) string {
 	return fmt.Sprintf("%g", value)

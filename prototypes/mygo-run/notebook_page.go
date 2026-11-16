@@ -1313,6 +1313,10 @@ func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Token
 		ui.Text(c, fmt.Sprintf("未定位图 %d 张：%s", proj.UnassignedImages, strings.Join(proj.UnassignedLabels, "、"))).
 			FontSize(float32(tokens.TextData)).TextColor(t.Warning)
 	}
+	if len(proj.UnassignedMeasurements) > 0 {
+		ui.Text(c, fmt.Sprintf("未定位实测 %d 条：无任务认领，见终态归档", len(proj.UnassignedMeasurements))).
+			FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+	}
 }
 
 // recordRefsSection lists the dynamic references in the current prose and
