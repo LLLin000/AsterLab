@@ -2,8 +2,8 @@ package asterdoc
 
 import (
 	"encoding/json"
-	"image/png"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -103,10 +103,6 @@ func TestViewRendersNativePlateAndAssignRewritesSource(t *testing.T) {
 		v.Render(c)
 	}, 1000, 900)
 	tt.Frame()
-	if f, err := os.Create("evidence-asterdoc.png"); err == nil {
-		png.Encode(f, tt.Image())
-		f.Close()
-	}
 	if !tt.HasText("96 孔板") || !tt.HasText("plate-cck8-d3") {
 		t.Fatalf("plate module did not render: %q", tt.Texts())
 	}
@@ -227,10 +223,6 @@ func TestPlateZoomOverlaySelectsWellsAndReportsAssignment(t *testing.T) {
 	if !tt.HasText("1 孔") {
 		t.Fatalf("selection missing: %q", tt.Texts())
 	}
-	if f, err := os.Create("evidence-plate-zoom.png"); err == nil {
-		png.Encode(f, tt.Image())
-		f.Close()
-	}
 	if err := tt.Click("分配到 control"); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
@@ -267,8 +259,138 @@ func TestPlateZoomOverlaySelectsWellsAndReportsAssignment(t *testing.T) {
 	tt.Frame()
 	tt.Release(cx, cy)
 	tt.Frame()
-	if !tt.HasText("3 孔") {
-		t.Fatalf("marquee selection missing: %q", tt.Texts())
+	if _, ok := tt.Find("3 孔"); !ok || len(v.ExpandedWells) != 3 ||
+		!containsString(v.ExpandedWells, "A1") ||
+		!containsString(v.ExpandedWells, "A2") ||
+		!containsString(v.ExpandedWells, "A3") {
+		t.Fatalf("marquee selected %v; want A1, A2, A3", v.ExpandedWells)
+	}
+}
+func TestPlate384OverlayMarqueeUsesRows(t *testing.T) {
+	source := strings.Replace(sample, "format: 96", "format: 384", 1)
+	doc, err := Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &View{Doc: doc, Allowed: map[string]bool{PermDocumentEdit: true}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		v.Render(c)
+	}, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("放大孔板"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	center := func(well string) (float32, float32) {
+		rect, ok := tt.Find("孔 " + well)
+		if !ok {
+			t.Fatalf("well %s not found", well)
+		}
+		return rect.X + rect.W/2, rect.Y + rect.H/2
+	}
+	ax, ay := center("A1")
+	cx, cy := center("C1")
+	tt.Press(ax, ay)
+	tt.Frame()
+	tt.Move(cx, cy)
+	tt.Frame()
+	tt.Release(cx, cy)
+	tt.Frame()
+	if _, ok := tt.Find("3 孔"); !ok || len(v.ExpandedWells) != 3 ||
+		!containsString(v.ExpandedWells, "A1") ||
+		!containsString(v.ExpandedWells, "B1") ||
+		!containsString(v.ExpandedWells, "C1") {
+		t.Fatalf("vertical marquee selected %v; want A1, B1, C1", v.ExpandedWells)
+	}
+}
+
+func TestPlateFormatsUseEditableOverlay(t *testing.T) {
+	for _, tc := range []struct {
+		format int
+		well   string
+	}{
+		{6, "B3"},
+		{12, "C4"},
+		{24, "D6"},
+		{48, "F8"},
+		{96, "H12"},
+		{384, "P24"},
+	} {
+		tc := tc
+		t.Run(strconv.Itoa(tc.format), func(t *testing.T) {
+			source := strings.Replace(sample, "format: 96", "format: "+strconv.Itoa(tc.format), 1)
+			doc, err := Parse(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var gotModule, gotGroup string
+			var gotWells []string
+			v := &View{
+				Doc:     doc,
+				Allowed: map[string]bool{PermDocumentEdit: true},
+				OnAssignWells: func(moduleID, group string, wells []string) {
+					gotModule, gotGroup = moduleID, group
+					gotWells = append([]string(nil), wells...)
+				},
+			}
+			tt := ui.NewTester(func(c *ui.Context) {
+				c.SetTheme(theme.LightTheme())
+				v.Render(c)
+			}, 1200, 900)
+			tt.Frame()
+			if err := tt.Click("放大孔板"); err != nil {
+				t.Fatalf("%d-well overlay: %v", tc.format, err)
+			}
+			tt.Frame()
+			if err := tt.Click("孔 " + tc.well); err != nil {
+				t.Fatalf("%d-well %s selection: %v", tc.format, tc.well, err)
+			}
+			tt.Frame()
+			if !tt.HasText("1 孔") {
+				t.Fatalf("%d-well selection missing: %q", tc.format, tt.Texts())
+			}
+			if err := tt.Click("分配到 control"); err != nil {
+				t.Fatalf("%d-well assignment: %v", tc.format, err)
+			}
+			if gotModule != "plate-cck8-d3" || gotGroup != "control" ||
+				len(gotWells) != 1 || gotWells[0] != tc.well {
+				t.Fatalf("%d-well assignment = %s/%s/%v", tc.format, gotModule, gotGroup, gotWells)
+			}
+		})
+	}
+}
+
+func TestPlateGridLayoutKeepsCanvasAndScalesWells(t *testing.T) {
+	formats := []int{6, 12, 24, 48, 96, 384}
+	var viewportW, viewportH, previousCell float32
+	for i, format := range formats {
+		geometry, ok := geometryFor(format)
+		if !ok {
+			t.Fatalf("%d-well geometry is unavailable", format)
+		}
+		width, height, cell := plateGridLayout(geometry, 1)
+		if i == 0 {
+			viewportW, viewportH = width, height
+		} else if width != viewportW || height != viewportH {
+			t.Fatalf("%d-well viewport = %gx%g; want %gx%g",
+				format, width, height, viewportW, viewportH)
+		}
+		if i > 0 && cell >= previousCell {
+			t.Fatalf("%d-well cell = %g; want smaller than %g",
+				format, cell, previousCell)
+		}
+		gridW := plateGridLabelWidth + plateGridGap +
+			float32(geometry.Columns)*cell +
+			float32(geometry.Columns-1)*plateGridGap
+		gridH := plateGridHeaderHeight + plateGridGap +
+			float32(geometry.Rows)*cell +
+			float32(geometry.Rows-1)*plateGridGap
+		if gridW > width+0.01 || gridH > height+0.01 {
+			t.Fatalf("%d-well grid %gx%g exceeds viewport %gx%g",
+				format, gridW, gridH, width, height)
+		}
+		previousCell = cell
 	}
 }
 

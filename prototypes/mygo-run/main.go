@@ -61,6 +61,8 @@ type app struct {
 
 	runSvc                     runs.RunService
 	designSvc                  runs.DesignService
+	timeBudgetSvc              runs.TimeBudgetService
+	timeBudgetErr              error
 	snap                       runs.RunSnapshot
 	syncErr                    string
 	batchView                  string
@@ -1712,6 +1714,10 @@ func (a *app) loadDesign(id string) {
 	}
 	a.designLoadErr = ""
 	a.designer = designer.New(id, "", 0, a.designSvc)
+	a.designer.TimeBudgetSvc = a.timeBudgetSvc
+	if a.timeBudgetErr != nil {
+		a.designer.TimeBudgetError = a.timeBudgetErr.Error()
+	}
 	a.designer.OnCreateRun = func(snap runs.RunSnapshot) {
 		// The new run replaces the previous run's revision/task state.
 		a.snap = snap
@@ -2325,12 +2331,15 @@ func main() {
 
 	runSvc, runErr := runs.NewRunService()
 	designSvc, designErr := runs.NewDesignService()
+	timeBudgetSvc, timeBudgetErr := runs.NewTimeBudgetService()
 
 	a := &app{
 		page:       &page,
 		step:       &step,
 		runSvc:     runSvc,
 		designSvc:  designSvc,
+		timeBudgetSvc: timeBudgetSvc,
+		timeBudgetErr: timeBudgetErr,
 		snap:       runs.RunSnapshot{Title: "加载中", Status: "loading"},
 		assetRoots: map[string]string{}, runViewKinds: map[string]runworkspace.ViewKind{},
 	}
@@ -2343,7 +2352,7 @@ func main() {
 		initErr = "设计服务返回空实现"
 	}
 	a.syncErr = initErr
-	log.Printf("native services: run=%v(%v) design=%v(%v)", runSvc != nil, runErr, designSvc != nil, designErr)
+	log.Printf("native services: run=%v(%v) design=%v(%v) time-budget=%v(%v)", runSvc != nil, runErr, designSvc != nil, designErr, timeBudgetSvc != nil, timeBudgetErr)
 	a.shell = &shell.Shell{
 		Project:     "",
 		Page:        shell.Project,

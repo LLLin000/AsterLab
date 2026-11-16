@@ -118,8 +118,13 @@ type Designer struct {
 	Loading   bool
 	Empty     bool
 
-	Service   runs.DesignService
-	Callbacks Callbacks
+	Service         runs.DesignService
+	TimeBudgetSvc   runs.TimeBudgetService
+	TimeBudgetError string
+	budget          runs.TimeBudget
+	budgetLoaded    bool
+	budgetErr       error
+	Callbacks       Callbacks
 
 	OnCreateRun func(runs.RunSnapshot)
 
@@ -837,6 +842,7 @@ func inspectorColumn(c *ui.Context, d *Designer) {
 		panelBody(c, d)
 	})
 }
+
 // inspectorPanel floats above the canvas. It restates Onevra's dialog panel:
 // the same material, doubled radius, hairline edge and soft lift, but
 // non-modal so the canvas keeps working behind it. A handle at its top center

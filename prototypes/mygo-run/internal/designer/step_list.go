@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/workflow"
-
+	"asterlab-mygo-prototype/modules/runs"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
@@ -86,10 +87,11 @@ type designBudget struct {
 	Steps, Wells                 int
 	TotalMinutes, HandsOnMinutes int
 	HasTotal, HasHandsOn         bool
+	Core                         runs.TimeBudget
+	HasCore                      bool
+	CoreErr                      error
 }
 
-// designBudget sums the step costs the design already records. Unknown costs
-// stay unknown; the bar never invents a duration.
 func (d *Designer) designBudget() designBudget {
 	b := designBudget{
 		Steps: len(d.Editor.Doc.Nodes),
@@ -105,6 +107,24 @@ func (d *Designer) designBudget() designBudget {
 			b.HasHandsOn = true
 		}
 	}
+	const input = "[]"
+	if !d.budgetLoaded {
+		d.budgetLoaded = true
+		d.budget = runs.TimeBudget{}
+		d.budgetErr = nil
+		if d.TimeBudgetSvc == nil {
+			message := "Core 时间预算服务不可用"
+			if d.TimeBudgetError != "" {
+				message += ": " + d.TimeBudgetError
+			}
+			d.budgetErr = fmt.Errorf("%s", message)
+		} else {
+			d.budget, d.budgetErr = d.TimeBudgetSvc.ProjectTimeBudget(context.Background(),
+				runs.ProjectTimeBudgetInput{SpecsJSON: input})
+		}
+	}
+	b.Core, b.CoreErr = d.budget, d.budgetErr
+	b.HasCore = b.CoreErr == nil && (b.Core.TotalSpanS > 0 || b.Core.HandsOnS > 0 || len(b.Core.ParallelWindows) > 0)
 	return b
 }
 
@@ -250,6 +270,13 @@ func formatMinutes(minutes int) string {
 	return fmt.Sprintf("%dh%dm", h, m)
 }
 
+func formatBudget(minutes int, known bool) string {
+	if !known {
+		return "—"
+	}
+	return formatMinutes(minutes)
+}
+
 // ListView is the Design surface: one budget bar, one section switch and one
 // vertical list of step cards. The workflow canvas stays available behind the
 // 画布 toggle; it is not deleted, only demoted from the default view.
@@ -264,7 +291,7 @@ func ListView(c *ui.Context, d *Designer) {
 	ui.Column(c).Fill().Background(c.Theme().Background).Children(func() {
 		listToolbar(c, d)
 		listErrorBanner(c, d)
-		budgetBar(c, d)
+		BudgetBar(c, d)
 		sectionSwitch(c, d)
 		ui.Box(c).Fill().Grow(1).MinHeight(0).Children(func() {
 			switch d.Section {
@@ -365,34 +392,86 @@ func listStateChip(c *ui.Context, d *Designer) {
 	}
 }
 
-// budgetBar is the top time and plate budget: total span, hands-on time and
-// step count, filled only from what the design already records.
-func budgetBar(c *ui.Context, d *Designer) {
+// BudgetBar renders Core time when available and separately labeled design annotations otherwise.
+func BudgetBar(c *ui.Context, d *Designer) {
 	t := c.Theme()
+	tokens := theme.GetTokens(t)
 	b := d.designBudget()
 	chip := func(label, value string) {
-		ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-			components.Text(c, label).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-			components.Text(c, value).FontSize(t.Rem(.85)).FontWeight(600).
-				TextColor(t.Text).FontFeatures("tnum")
+		ui.Row(c).Gap(float32(tokens.Spacing4)).AlignItems(ui.Center).Children(func() {
+			components.Text(c, label).FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
+			components.Text(c, value).FontSize(float32(tokens.TextBody)).FontWeight(600).
+				TextColor(tokens.Text).FontFeatures("tnum")
 		})
 	}
-	ui.Row(c).FillWidth().Padding(t.Space(1.5), t.Space(4)).Background(t.Background).
-		AlignItems(ui.Center).Gap(t.Space(4)).Children(func() {
-		chip("总跨度", formatBudget(b.TotalMinutes, b.HasTotal))
-		chip("占手", formatBudget(b.HandsOnMinutes, b.HasHandsOn))
+	ui.Row(c).FillWidth().Wrap().Padding(float32(tokens.Spacing8), float32(tokens.Spacing16)).
+		Background(tokens.Canvas).AlignItems(ui.Center).Gap(float32(tokens.Spacing16)).Children(func() {
+		if b.HasCore {
+			chip("来源", "Core 时间预算")
+			chip("总跨度", formatBudgetSeconds(b.Core.TotalSpanS, true))
+			chip("净占手", formatBudgetSeconds(b.Core.HandsOnS, true))
+			chip("可并行空窗", formatBudgetWindows(b.Core.ParallelWindows))
+		} else {
+			chip("来源", "设计标注")
+			chip("总跨度", formatBudget(b.TotalMinutes, b.HasTotal))
+			chip("净占手", formatBudget(b.HandsOnMinutes, b.HasHandsOn))
+			chip("可并行空窗", "—")
+			if b.CoreErr != nil {
+				components.Text(c, "Core 时间预算不可用："+b.CoreErr.Error()).
+					FontSize(float32(tokens.TextMeta)).TextColor(tokens.Danger)
+			} else {
+				components.Text(c, "尚无 OperationSpec v2 时间数据").
+					FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
+			}
+		}
 		chip("步骤", fmt.Sprintf("%d", b.Steps))
 		if b.Wells > 0 {
 			chip("孔位", fmt.Sprintf("%d", b.Wells))
 		}
+		if b.CoreErr != nil {
+			if components.Button(c, "重试预算", components.ButtonSecondary).Clicked() {
+				d.budgetLoaded = false
+				d.designBudget()
+			}
+		}
 	})
 }
 
-func formatBudget(minutes int, known bool) string {
-	if !known {
+func formatBudgetSeconds(seconds float64, known bool) string {
+	if !known || seconds < 0 {
 		return "—"
 	}
-	return formatMinutes(minutes)
+	total := int64(seconds + .5)
+	hours, minutes, secs := total/3600, total%3600/60, total%60
+	switch {
+	case hours > 0 && minutes > 0:
+		return fmt.Sprintf("%dh%dm", hours, minutes)
+	case hours > 0:
+		return fmt.Sprintf("%dh", hours)
+	case minutes > 0 && secs > 0:
+		return fmt.Sprintf("%dm%ds", minutes, secs)
+	case minutes > 0:
+		return fmt.Sprintf("%dm", minutes)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
+}
+
+func formatBudgetWindows(windows []runs.TimeBudgetWindow) string {
+	if len(windows) == 0 {
+		return "—"
+	}
+	labels := make([]string, 0, len(windows))
+	for _, window := range windows {
+		label := fmt.Sprintf("步骤%02d %s (%s–%s)", window.StepIndex+1,
+			formatBudgetSeconds(window.DurationS, true),
+			formatBudgetSeconds(window.StartS, true), formatBudgetSeconds(window.EndS, true))
+		if window.TimeAnchorID != "" {
+			label += " · " + window.TimeAnchorID
+		}
+		labels = append(labels, label)
+	}
+	return strings.Join(labels, "；")
 }
 
 // sectionSwitch is the 流程 / 12 孔板 / 配液单 segmented control. Choosing a
@@ -444,7 +523,7 @@ func stepCard(c *ui.Context, d *Designer, card stepCardView) {
 	if selected {
 		border = t.Accent
 	}
-	ui.Box(c).FillWidth().Key("step-"+card.ID).Children(func() {
+	ui.Box(c).FillWidth().Key("step-" + card.ID).Children(func() {
 		ui.Column(c).FillWidth().Padding(t.Space(3), t.Space(3)).Gap(t.Space(1.5)).
 			Background(t.Surface).Border(1, border).Radius(t.Space(1.5)).Children(func() {
 			ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(t.Space(1.5)).
