@@ -217,4 +217,4 @@ required_artifacts:
 - [ ] 没有 `TBD`、`可选`、`你确认` 这类不可执行表述。
 - [ ] Parallel cards have disjoint machine-readable `scope.write` sets; overlapping or unclear ownership is serial, and real ordering is recorded with `blocked_by`.
 - [ ] Each parallel task has an isolated checkout: Windows Gate uses one ovnfs checkout per card; VPS Dev uses the Worktree executor. Never share a checkout.
-- [ ] Windows Gate defaults to serial and allows at most two independent work cards; Windows GUI/build/E2E/final integration always runs serially.
+- [ ] Windows Gate defaults to serial and allows at most four independent work cards; Windows GUI/build/E2E/final integration always runs serially.

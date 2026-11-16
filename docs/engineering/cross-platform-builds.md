@@ -193,9 +193,9 @@ to a Linux/VPS agent.
 
 ### Serial and parallel work
 
-- Default to serial execution. `Windows Work` has WIP=2 as a hard ceiling, not
+- Default to serial execution. `Windows Work` has WIP=4 as a hard ceiling, not
   a target.
-- At most two implementation cards may overlap only when both have machine-
+- At most four implementation cards may overlap only when all have machine-
   readable, disjoint `scope.write` sets, all real ordering is represented by
   Kandev `blocked_by`, and each uses its own ovnfs checkout and isolated data.
   Overlapping or unclear scopes are serial.
