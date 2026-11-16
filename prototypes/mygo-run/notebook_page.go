@@ -102,10 +102,16 @@ func (a *app) recordProjection() record.RecordProjection {
 	return record.Project(a.snap, a.runAssets)
 }
 
-// recordSeal verifies the current prose against its signature trailer.
-// ok means the prose is signed, unmodified, and locked for editing.
+// recordSeal verifies the persisted draft against its signature trailer. ok
+// means the prose is signed, unmodified, and locked for editing. The seal
+// covers the draft rather than the live rich-text document because the
+// document's Markdown round-trip drops the HTML trailer; the draft is what
+// gets persisted, so it is the correct thing to verify.
 func (a *app) recordSeal() (record.Signature, bool) {
-	return record.Verify(a.noteSource())
+	if a.noteDirty {
+		return record.Signature{}, false
+	}
+	return record.Verify(a.noteDraft)
 }
 
 // notebookPage follows Obsidian's shape: one paper sheet, a floating toolbar,
@@ -144,10 +150,7 @@ func notebookPage(c *ui.Context, a *app) {
 		// Floating toolbar above the sheet, following Obsidian's editing
 		// toolbar: mode switch, editing commands, then one save action. A
 		// sealed (signed) record locks editing until explicitly unlocked.
-		sealed := false
-		if !a.noteDirty {
-			_, sealed = a.recordSeal()
-		}
+		_, sealed := a.recordSeal()
 		if c.Shortcut(ui.Cmd, ui.KeyE) && !sealed {
 			if a.noteMode == 2 {
 				a.setNoteMode(a.noteEditMode)
@@ -450,7 +453,7 @@ func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
 	// A sealed record locks every editing mode: the prose verifies against
 	// its signature, so the paper shows the lock instead of an editor until
 	// explicitly unlocked. Reading stays available.
-	if _, ok := a.recordSeal(); ok && !a.noteDirty && a.noteMode != 2 && a.noteMode != 4 {
+	if _, ok := a.recordSeal(); ok && a.noteMode != 2 && a.noteMode != 4 {
 		a.recordLockedNotice(c, t)
 		return
 	}
@@ -854,8 +857,8 @@ func (a *app) saveNotebook() {
 
 func (a *app) notebookToolbarState(tokens theme.Tokens) (string, ui.Color) {
 	// A verified signature outranks everything: the prose is signed,
-	// unmodified, and locked.
-	if _, ok := record.Verify(a.noteSource()); ok && !a.noteDirty {
+	// unmodified, and locked. Verified against the draft (see recordSeal).
+	if _, ok := a.recordSeal(); ok {
 		return string(record.StateSealed), tokens.SuccessText
 	}
 	switch {
@@ -895,10 +898,13 @@ func hasSavedNotebookEvent(events []runs.RunEvent) bool {
 }
 
 func (a *app) markNotebookDirty() {
-	// A sealed record refuses to dirty: unlocking strips the signature
-	// explicitly, so no edit path can silently break the lock.
-	if _, ok := record.Verify(a.noteSource()); ok {
-		return
+	// A sealed record refuses to dirty before syncing: the seal covers the
+	// persisted draft, so a live-document mutation can never land in sealed
+	// prose. Unlocking strips the signature explicitly instead.
+	if !a.noteDirty {
+		if _, ok := record.Verify(a.noteDraft); ok {
+			return
+		}
 	}
 	if a.noteMode == 0 && a.noteDoc != nil {
 		a.noteDraft = a.noteDoc.Text().Markdown()
@@ -1136,11 +1142,15 @@ func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 	tokens := theme.GetTokens(t)
 	proj := a.recordProjection()
 	board := a.recordBoard()
-	_, sigOK := record.Verify(a.noteSource())
-	sealed := sigOK && !a.noteDirty
+	_, sigOK := a.recordSeal()
+	sealed := sigOK
 	state := record.ClassifyRecordState(a.noteDirty, sigOK)
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			// UX-P4 / UX-LAYOUT: the board is a structured table (summary rows
+			// plus a Well x Timepoint matrix), not a prose paper, so it takes
+			// a wider measure than the 820 prose cap. Counts use tabular
+			// numerals like the rest of the surface.
 			ui.Column(c).FillWidth().MaxWidth(960).MaxWidthPercent(100).
 				Padding(t.Space(4), t.Space(5)).Gap(t.Space(2.5)).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
@@ -1149,7 +1159,7 @@ func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 					ui.Spacer(c)
 					ui.Text(c, fmt.Sprintf("任务完成 %d/%d · 实测 %d 个 · 缺 %d 个 FOV 槽",
 						proj.CompletedTasks(), len(proj.Summary), proj.MeasurementCount(), proj.Gaps)).
-						FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+						FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).FontFeatures("tnum")
 				})
 				a.recordSummarySection(c, t, tokens, proj)
 				a.recordMatrixSection(c, t, tokens, proj, board)
@@ -1438,13 +1448,25 @@ func (a *app) signRecord() {
 		a.noteState = "error"
 		return
 	}
-	signed, _ := record.Sign(source, a.snap.RunID, a.snap.DesignRevision, "local-user", time.Now())
+	signed, _ := record.Sign(source, a.snap.RunID, a.snap.DesignRevision, recordActor(), time.Now())
 	a.noteDraft = signed
 	a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(signed))
 	a.saveNotebook()
 	if a.noteState == "saved" {
 		a.setNoteMode(2)
 	}
+}
+
+// recordActor names the signing operator with the same session identity the
+// app already uses for operator writes (os.Getenv("USERNAME"), as in the
+// Core command paths in main.go), falling back to the asset-link convention
+// "local-user" when the environment names no user. It invents no identity:
+// an empty environment reads exactly as the local fallback.
+func recordActor() string {
+	if name := strings.TrimSpace(os.Getenv("USERNAME")); name != "" {
+		return name
+	}
+	return "local-user"
 }
 
 // unlockRecord strips the signature trailer and returns the prose to the

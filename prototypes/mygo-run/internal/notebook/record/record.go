@@ -139,10 +139,6 @@ func Project(snap runs.RunSnapshot, assets []runs.Asset) RecordProjection {
 		DesignID:       snap.DesignID,
 		DesignRevision: snap.DesignRevision,
 	}
-	byKey := make(map[string]*runs.RunTask, len(snap.Tasks))
-	for i := range snap.Tasks {
-		byKey[snap.Tasks[i].Key] = &snap.Tasks[i]
-	}
 
 	// Task summaries in frozen task order.
 	summaries := make([]TaskSummary, 0, len(snap.Tasks))

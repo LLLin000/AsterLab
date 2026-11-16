@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"github.com/egoist/mygo/ui"
 	"strings"
 	"testing"
+	"time"
 
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
@@ -228,5 +228,43 @@ func TestNotebookSignLocksAndUnlockRestores(t *testing.T) {
 	}
 	if _, ok := record.Verify(a.noteSource()); ok {
 		t.Fatal("trailer survived unlock")
+	}
+}
+
+// TestNotebookSealedRecordNeverExposesEditor pins the sealed-mode transitions:
+// a signed Run opens in reading mode, and even a forced live mode shows the
+// lock instead of the editor, so the signature trailer is never editable and
+// never duplicated by a second sign.
+func TestNotebookSealedRecordNeverExposesEditor(t *testing.T) {
+	signed, _ := record.Sign("# 研判\n\n贴壁良好", "run-seal-mode-1", 3, "lin",
+		time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC))
+	snap := runs.RunSnapshot{
+		RunID: "run-seal-mode-1", Title: "HUVEC 成管",
+		DesignID: "design-1", DesignRevision: 3,
+		Events: []runs.RunEvent{
+			{ID: "note-1", Stage: "notebook", Content: signed, RecordedAt: "2026-11-10T17:00:00Z"},
+		},
+	}
+	a := &app{snap: snap}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		notebookPage(c, a)
+	}, 1200, 760)
+	tt.Frame()
+	if a.noteMode != 2 {
+		t.Fatalf("sealed record did not open in reading mode: %d", a.noteMode)
+	}
+	if !tt.HasText("已签核归档") {
+		t.Fatalf("sealed state word missing: %q", tt.Texts())
+	}
+	// Even if live mode is forced, the prose guard shows the lock instead of
+	// the editor, and the trailer stays out of every rendered view.
+	a.noteMode = 0
+	tt.Frame()
+	if !tt.HasText("已签核归档") || !tt.HasText("解锁") {
+		t.Fatalf("sealed live mode did not lock: %q", tt.Texts())
+	}
+	if tt.HasText("record-sign") {
+		t.Fatalf("signature trailer leaked into a rendered view: %q", tt.Texts())
 	}
 }
