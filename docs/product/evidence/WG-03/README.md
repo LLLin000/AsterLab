@@ -108,15 +108,20 @@ cannot access 'docs/product/evidence/WG-03/': No such file or directory   # crea
 
 ## No-conflict statement
 
-After this card, both owned engineering-doc policy entries (`cross-platform-builds.md`
-and `kandev-card-template.md`) read WIP=4. `AGENTS.md:56` remains WIP=2
-pending the coordinated LB-18 change; historical WG-01 evidence also records
-the old limit. The parallel-work guards remain pairwise-disjoint `scope.write`,
-separate `ovnfs` checkouts, Kandev `blocked_by` before parallel work, and serial
+At baseline `ad8ed02`, all three active policy files read WIP=2. This card
+updates the two owned engineering docs to WIP=4; LB-18 PR #155 updates
+`AGENTS.md:56` to WIP=4. Historical WG-01 evidence still records the old limit.
+The parallel-work guards remain pairwise-disjoint `scope.write`, separate
+`ovnfs` checkouts, Kandev `blocked_by` before parallel work, and serial
 GUI/build/E2E.
 
-## Verification still needed (coordinator runs)
+## Coordinator verification
 
-- `git diff --check`, confirm only these three files changed, Kandev
-  card/status transitions. This card ran no builds, tests, formatters,
-  `git diff --check`, or commit/push; the coordinator verifies and integrates.
+- The active-parallelism scan found the WIP=4 cap in both owned engineering
+  docs; the stale `WIP=2` / `at most two` scan returned no matches.
+- The trailing-whitespace scan of all three changed documents returned no
+  matches. `git diff --check` was not run; the coordinator used a scoped
+  `awk` scan instead.
+- PR #154 (`agent/wg03-wip4-docs-20261116`), commit `23ab0fc2b7`; all three
+  files are within this card's `scope.write`.
+
