@@ -53,8 +53,10 @@ type Callbacks struct {
 	RequestBatchLink func(taskKey string)
 	// HistoryInputs supplies the stored snapshot plus already-linked assets
 	// for the shared record projection. It is a cheap getter the bench may
-	// call every render; the projection itself is memoized by Run revision.
-	// Nil hides the summary/matrix and keeps the entry-level timeline only.
+	// call every render; the projection is memoized by Run revision plus
+	// every asset's identity and coordinates (link writes never bump the
+	// Run revision). Nil hides the summary/matrix and keeps the
+	// entry-level timeline only.
 	HistoryInputs func() (runs.RunSnapshot, []runs.Asset)
 }
 

@@ -36,7 +36,8 @@
 5. **Run 历史审计（UI-REC-10 同源）**：历史 Tab 改读
    `internal/notebook/record.Project(snap, assets)` 的 `Summary`（计划-vs-实际行）
    与 `Matrix`（采图对账），替代各自推导；条目级时间线仍归 `notebook.Build`
-   领域（本 Tab 的事件列表原样保留）。投影按 Run 修订＋资产数记忆化，
+   领域（本 Tab 的事件列表原样保留）。投影按 Run 修订＋各资产标识与坐标
+   记忆化（link/update/unlink 不 bump Run 修订，同数重标必须换键）；
    台账输入只是快照与资产表的廉价交接。设盲同样遮罩矩阵分组名。
 
 ## Core 契约核实（已读实现，非推测）

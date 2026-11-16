@@ -2,6 +2,8 @@ package runworkspace
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"asterlab-mygo-prototype/internal/notebook/record"
@@ -12,12 +14,15 @@ import (
 )
 
 // historyProjection returns the shared record projection for the history
-// tab, memoized by Run revision. Inputs are re-read every call (the host
-// getter only hands over the stored snapshot and asset list), but the
-// derivation itself runs only when the revision or asset count moves; the UI
-// never re-derives it. A nil callback (or nil inputs) means the host has
-// nothing to project, and the history tab keeps its entry-level rendering
-// only.
+// tab, memoized by Run revision plus every linked asset's identity and
+// coordinates. Asset link/update/unlink never bump the Run revision, so a
+// bare count would reuse a stale projection after a coordinate relink with
+// an unchanged asset count; the tokens below make the relink a new key.
+// Inputs are re-read every call (the host getter only hands over the stored
+// snapshot and asset list), but the derivation itself runs only when the key
+// moves; the UI never re-derives it. A nil callback (or nil inputs) means
+// the host has nothing to project, and the history tab keeps its
+// entry-level rendering only.
 func (s *State) historyProjection() *record.RecordProjection {
 	if s == nil || s.Callbacks.HistoryInputs == nil {
 		return nil
@@ -27,13 +32,31 @@ func (s *State) historyProjection() *record.RecordProjection {
 		return nil
 	}
 	bench := s.bench()
-	key := fmt.Sprintf("%s|%d|%d", snap.RunID, snap.Revision, len(assets))
+	key := historyMemoKey(snap, assets)
 	if bench.historyProj == nil || bench.historyKey != key {
 		proj := record.Project(snap, assets)
 		bench.historyProj = &proj
 		bench.historyKey = key
 	}
 	return bench.historyProj
+}
+
+// historyMemoKey keeps the RunID|Revision prefix and folds every linked
+// asset's identity plus its recorded coordinates into the key, sorted so
+// link-list order never matters. A relinked well, timepoint or FOV is a new
+// key even when the asset count is unchanged.
+func historyMemoKey(snap runs.RunSnapshot, assets []runs.Asset) string {
+	tokens := make([]string, 0, len(assets))
+	for _, asset := range assets {
+		tokens = append(tokens, strings.Join([]string{
+			asset.ID,
+			asset.Link.WellID,
+			asset.Link.Timepoint,
+			strconv.FormatUint(uint64(asset.Link.FOVIndex), 10),
+		}, "\x00"))
+	}
+	sort.Strings(tokens)
+	return snap.RunID + "|" + strconv.FormatUint(snap.Revision, 10) + "|" + strings.Join(tokens, "\x01")
 }
 
 // renderHistoryRecord draws the shared projection above the entry timeline:

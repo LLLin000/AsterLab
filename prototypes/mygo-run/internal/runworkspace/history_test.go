@@ -3,6 +3,7 @@ package runworkspace
 import (
 	"testing"
 
+	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
 
@@ -58,4 +59,51 @@ func TestHistoryTabRendersSharedProjection(t *testing.T) {
 			t.Fatalf("history missing %q: %q", want, tt.Texts())
 		}
 	}
+}
+
+func TestHistoryProjectionRebuildsOnRelink(t *testing.T) {
+	snap := makeSnapshot()
+	assets := []runs.Asset{
+		{ID: "img-1", RootID: "r", RelativePath: "run/a1.tif", MediaType: "image/tiff",
+			Link: runs.AssetLink{RunID: snap.RunID, TaskKey: "t-read", WellID: "A1", Timepoint: "D1", FOVIndex: 1}},
+		{ID: "img-2", RootID: "r", RelativePath: "run/a2.tif", MediaType: "image/tiff",
+			Link: runs.AssetLink{RunID: snap.RunID, TaskKey: "t-read", WellID: "A2", Timepoint: "D1", FOVIndex: 1}},
+	}
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	s := NewState(vm, Callbacks{
+		HistoryInputs: func() (runs.RunSnapshot, []runs.Asset) {
+			return snap, assets
+		},
+	})
+	before := s.historyProjection()
+	if filled := matrixFilled(before, "A1", "D1"); filled != 1 {
+		t.Fatalf("A1/D1 filled slots = %d, want 1", filled)
+	}
+	// An LB-12-style coordinate relink: same Run revision, same asset
+	// count, one well changed. Asset link writes never bump the Run
+	// revision, so the count alone would reuse the stale projection.
+	assets[0].Link.WellID = "A3"
+	after := s.historyProjection()
+	if after == before {
+		t.Fatal("relinked coordinates must rebuild the projection")
+	}
+	// The vacated well leaves no phantom cell; the new well fills one slot.
+	if filled := matrixFilled(after, "A1", "D1"); filled != -1 {
+		t.Fatalf("A1/D1 filled slots = %d, want cell absent after relink", filled)
+	}
+	if filled := matrixFilled(after, "A3", "D1"); filled != 1 {
+		t.Fatalf("A3/D1 filled slots = %d, want 1 after relink", filled)
+	}
+}
+
+func matrixFilled(proj *record.RecordProjection, well, timepoint string) int {
+	if proj == nil {
+		return -1
+	}
+	for _, cell := range proj.Matrix {
+		if cell.Well == well && cell.Timepoint == timepoint {
+			return cell.FilledSlots()
+		}
+	}
+	return -1
 }
