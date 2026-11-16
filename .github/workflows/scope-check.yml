@@ -1,10 +1,11 @@
 name: scope-check
 
 # REL-04: a pull request may only touch paths the Kandev card lists under
-# `write:` in its `<!-- kandev-scope -->` block. The description comes from the
-# Kandev API when KANDEV_API_URL/KANDEV_API_TOKEN are configured and the PR body
-# carries `<!-- kandev-task: <uuid> -->`; otherwise the scope block is read from
-# the PR body, with a notice in the log. Contract: scripts/ci/README.md.
+# `write:` in its `<!-- kandev-scope -->` block. This hosted job injects no
+# Kandev API secrets, so the scope block is always read from the PR body
+# (which must carry both `<!-- kandev-task: <uuid> -->` and the exact
+# `kandev-scope` block); the API path stays available for self-hosted use.
+# Contract: scripts/ci/README.md.
 #
 # Also validates the workflow YAML itself, so a broken CI file fails here.
 
@@ -57,8 +58,6 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_REF: ${{ github.base_ref }}
-          KANDEV_API_URL: ${{ secrets.KANDEV_API_URL }}
-          KANDEV_API_TOKEN: ${{ secrets.KANDEV_API_TOKEN }}
         run: |
           set -o pipefail
           body_file="${RUNNER_TEMP}/pr-body.md"
