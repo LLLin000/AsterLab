@@ -568,7 +568,6 @@ func parseParameters(raw string) []Param {
 	return out
 }
 
-
 func formatNumber(value float64) string {
 	return fmt.Sprintf("%g", value)
 }
