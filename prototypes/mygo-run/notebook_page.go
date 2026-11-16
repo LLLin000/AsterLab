@@ -1514,6 +1514,7 @@ func (a *app) exportRecordFile(c *ui.Context, title, filename, content string) {
 	}
 	c.AddToast(ui.Toast{Title: filename + " 已保存", Description: path, Type: components.ToastSuccess})
 }
+
 // recordImageSource resolves a matrix image to a decoded preview, cached per
 // Run on the board view. Anything unloadable (unconfigured root, missing
 // file, undecodable bytes) returns nil and is remembered, so the board shows

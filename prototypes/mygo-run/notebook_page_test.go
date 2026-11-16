@@ -1,7 +1,11 @@
 package main
 
 import (
+	"asterlab-mygo-prototype/internal/notebook/record"
+	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/modules/runs"
 	"context"
+	"github.com/egoist/mygo/ui"
 	"image"
 	"image/png"
 	"os"
@@ -9,10 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"asterlab-mygo-prototype/internal/notebook/record"
-	"asterlab-mygo-prototype/internal/theme"
-	"asterlab-mygo-prototype/modules/runs"
-	"github.com/egoist/mygo/ui"
 )
 
 func TestNotebookPageLoadsLatestMarkdown(t *testing.T) {
