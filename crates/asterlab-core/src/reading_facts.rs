@@ -234,16 +234,7 @@ pub fn query_readings(workspace: &RunWorkspace, request: &ReadingQuery) -> Readi
     // The stored read model may hand events newest-first; revisions must follow
     // recorded time, not array position. `time_key` normalizes RFC 3339
     // fractional digits so string comparison is chronological.
-    let mut events: Vec<&ExecutionEventView> = workspace.events.iter().collect();
-    events.sort_by_key(|event| {
-        time_key(
-            event
-                .recorded_at
-                .as_deref()
-                .or(event.occurred_at.as_deref())
-                .unwrap_or_default(),
-        )
-    });
+    let events = ordered_events(workspace);
     for event in events {
         let has_readings = !event.measurements.is_empty()
             || !event.result_cells.is_empty()
@@ -989,6 +980,43 @@ fn blocking(code: &str, message: &str) -> ReadingIssue {
         message: message.to_owned(),
         event_id: None,
         step_path: None,
+        target: None,
+    }
+}
+
+/// Events in recorded-time order (never caller array order).
+///
+/// Both readout query paths share this ordering: revisions follow recorded
+/// time, so string comparison goes through [`time_key`]'s normalized form.
+pub fn ordered_events(
+    workspace: &RunWorkspace,
+) -> Vec<&crate::run_workspace::ExecutionEventView> {
+    let mut events: Vec<&crate::run_workspace::ExecutionEventView> =
+        workspace.events.iter().collect();
+    events.sort_by_key(|event| {
+        time_key(
+            event
+                .recorded_at
+                .as_deref()
+                .or(event.occurred_at.as_deref())
+                .unwrap_or_default(),
+        )
+    });
+    events
+}
+
+/// One shared malformed-stored-record issue for both readout query paths.
+pub fn malformed_record_issue(
+    code: &str,
+    message: impl Into<String>,
+    event_id: Option<String>,
+    step_path: Option<String>,
+) -> ReadingIssue {
+    ReadingIssue {
+        code: code.to_owned(),
+        message: message.into(),
+        event_id,
+        step_path,
         target: None,
     }
 }

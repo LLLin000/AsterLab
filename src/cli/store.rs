@@ -162,7 +162,16 @@ pub(crate) fn migrate_records_schema(db: &mut Connection) -> Result<(), CliError
 
     tx.execute_batch(
         "CREATE INDEX IF NOT EXISTS records_kind_parent ON records(kind,parent_id);\
-         CREATE INDEX IF NOT EXISTS records_project ON records(project_id);",
+         CREATE INDEX IF NOT EXISTS records_project ON records(project_id);\
+         CREATE TABLE IF NOT EXISTS projection_cache(\
+            entity_id TEXT NOT NULL,\
+            source_revision INTEGER NOT NULL,\
+            projection_kind TEXT NOT NULL,\
+            payload_json TEXT NOT NULL,\
+            payload_hash TEXT NOT NULL,\
+            updated_at TEXT NOT NULL,\
+            PRIMARY KEY (entity_id, source_revision, projection_kind)\
+         );",
     )
     .map_err(|error| CliError::internal(error.to_string()))?;
     tx.pragma_update(None, "user_version", RECORDS_SCHEMA_VERSION)

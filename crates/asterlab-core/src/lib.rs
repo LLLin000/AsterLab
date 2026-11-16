@@ -3,6 +3,7 @@ pub mod calculators;
 pub mod timer;
 pub mod diagnostic;
 pub mod design_map;
+pub mod projection_cache;
 pub mod protocol_preview;
 pub mod protocol_version;
 pub mod run_workspace;

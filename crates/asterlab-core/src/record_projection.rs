@@ -31,9 +31,9 @@ use crate::readout_records::{
     query_readout_records, ReadoutRecord, ReadoutRecordQuery, ReadoutRecordQueryResult,
 };
 use crate::reading_facts::{
-    query_readings, time_key, ReadingFact, ReadingIssue, ReadingQuery,
+    ordered_events, query_readings, ReadingFact, ReadingIssue, ReadingQuery,
 };
-use crate::run_workspace::{ExecutionEventView, RunPlateView, RunWorkspace};
+use crate::run_workspace::{RunPlateView, RunWorkspace};
 use crate::timer::{TimerMode, TimerRecord, TimerStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -563,22 +563,9 @@ pub fn compare_parameters(workspace: &RunWorkspace) -> Vec<ParameterComparison> 
         }
     }
 
-    let mut ordered: Vec<(usize, &ExecutionEventView)> =
-        workspace.events.iter().enumerate().collect();
-    ordered.sort_by_key(|(index, event)| {
-        (
-            time_key(
-                event
-                    .recorded_at
-                    .as_deref()
-                    .or(event.occurred_at.as_deref())
-                    .unwrap_or_default(),
-            ),
-            *index,
-        )
-    });
-
-    for (_, event) in ordered {
+    // Recorded-time order comes from the shared `ordered_events` helper (stable
+    // sort, so ties keep caller array order — identical to the old inline sort).
+    for event in ordered_events(workspace) {
         let scope_id = event
             .assay_id
             .clone()
