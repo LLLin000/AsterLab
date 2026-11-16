@@ -66,21 +66,21 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 
 ### 状态语义
 
-- `Inbox` / `Todo`：待人工准入，不会被 agent 自动领取。
-- `Ready`：依赖感知候选队列。`scripts/kandev-ready-feeder.py` 只把**无阻塞**的 VPS 卡从 `Inbox` 提升到 `Ready`，并在 `Agent` 有空位时移入。不要手动把 blocked 卡放进 `Ready`：Kandev 原生 `pull_from` 不会跳过 blocked 卡，会直接启动 agent。
-- `Agent`：进入即自动启动 agent；WIP=4，最多四个 agent 并行。并行任务必须使用 Worktree executor；共享 checkout 只能串行。一轮正常结束会自动进入 `Review`。
-  - 实现 agent **不得**调用 Kandev 的 `move_task`/`update_task_state` 改本卡步骤（包括自己挪到 `Review`/`Merged`/`Done`）。流转由引擎的 turn 结束、feeder 或人工决定；违反会让卡在 PR 合并前被置为完成。
-- `Review`：独立 review session（进入即新开，`profile_session_start_policy: new`）按分类决定审查方法：只审核、不改代码、不推送、不合并；通过时输出 `VERDICT: APPROVED` 并用 `engctl review outcome record` 记录 ReviewOutcome，合并由 Home Merge Gate 执行。WIP=4；满 4 个时 feeder 停止推进新卡。详见 [`docs/engineering/kandev-review-policy.md`](docs/engineering/kandev-review-policy.md)。
+- `Inbox` / `Todo`：待人工准入，不会被自动领取。Home 控制器只从 `Inbox` 取卡；`Todo` 是 Windows Gate 人工泳道入口。
+- `Ready`：依赖感知候选队列。调度者是 Home 控制器（`engctl auto --dispatch`，30 秒 tick，Inbox→Ready→Agent），旧 `scripts/kandev-ready-feeder.py` 自 2026-11-15 起已停用（disabled，不再部署）。不要手动把 blocked 卡放进 `Ready`：Kandev 原生 `pull_from` 不会跳过 blocked 卡，会直接启动 agent。
+- `Agent`：进入即自动启动 agent；WIP=4，最多四个 agent 并行。并行任务必须使用 Worktree executor；共享 checkout 只能串行。一轮正常结束由 agent 调用 `step_complete_kandev` 进入 `Review`；无信号 turn 由 Home 控制器按 loop 规则回收（最多重试 2 次后进 Hold），不是 feeder。
+  - 实现 agent **不得**调用 Kandev 的 `move_task`/`update_task_state` 改本卡步骤（包括自己挪到 `Review`/`Merged`/`Done`）。流转由 agent 的 turn 结束信号、Home 控制器或人工决定；违反会让卡在 PR 合并前被置为完成。
+- `Review`：独立 review session（进入即新开，`profile_session_start_policy: new`）按分类决定审查方法：只审核、不改代码、不推送、不合并；通过时输出 `VERDICT: APPROVED` 并用 `engctl review outcome record` 记录 ReviewOutcome，合并由 Home Merge Gate 执行。WIP=4；满 4 个时 Home 控制器停止推进新卡（旧 feeder 的同名背压逻辑已随停用失效）。详见 [`docs/engineering/kandev-review-policy.md`](docs/engineering/kandev-review-policy.md)。
 - `Verify`：在目标机器上按卡片验收层级重跑并贴原始输出；`on_pr_merged` 会把任务推进到 `Merged`。
-- `Merged`：PR 合并后的终态，进入即完成任务。依赖卡只在这里之后解除阻塞。
+- `Merged`：PR 合并后的终态，进入即完成任务。依赖卡只在这里之后解除阻塞。注意：`Merged` 是 workflow step 名，不是 task state——state 枚举里没有 `MERGED`，依赖只认 `COMPLETED`（见 Home `docs/kandev-guide.md`“Lifecycle: step vs state”）。
 
 ### 通知与升级（Telegram @kandev00bot）
 
-- 决策类实时推：非快速分类 `REVIEW: APPROVED` 附 ✅合并/👀看diff/❌打回 三按钮；返工满 3 次熔断（`human-hold`）。
-- 合并按钮执行前二次校验：仍在 Review、无 human-hold、结论仍 APPROVED、PR open+mergeable、三项 CI 全绿；任一失败则拒绝并说明原因。
-- 卡住自修：Agent/Review 里无存活 session 超 10 分钟自动弹回重拉；3 次无效后升级通知（`stuck-escalated`）。
+- 通知由 Home 控制器经 `TelegramTransport` 发出（`engctl auto --notify` 持久 outbox + 重试）；旧 `kandev-telegram-callback` 已停止并删除，合并/打回不再经 callback 执行，旧三按钮（✅合并/👀看diff/❌打回）已失效。
+- 决策类实时推：非快速分类 `REVIEW: APPROVED` 通知人工；返工耗尽进 Hold（`loop_retry`/`loop_rework` 各封顶 2 次），由人工处理后手动移回。
+- 卡住自修：Agent/Review 里无存活 session、卡片 idle 超控制器 90 秒 grace 窗口时由 Home 控制器按 loop 规则回收；RUNNING 但 600 秒无更新只发一次 `STALLED` 通知，不停 turn、不重排。
 - 每天 08:00 日报：24h 合并、Review 结论、熔断/自修、失败 session、看板快照。
-- 配置在 `/etc/kandev-ready-feeder.env`（`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`，不进仓库）；服务 `kandev-telegram-callback` 常驻收按钮回调。
+- 配置在 `/etc/kandev-ready-feeder.env`（`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`，不进仓库）；凭据只走受保护环境配置，不粘贴回聊天或 issue。
 
 ## 4. 开工前必须做
 
@@ -111,9 +111,9 @@ curl -s -H "Authorization: Bearer $KANDEV_API_TOKEN" \
   | python3 -m json.tool
 ```
 
-## 7. Engineering Home（只读集成）
+## 7. Engineering Home（调度与合并门）
 
-`LLLin000/home` 是跨项目规范、项目注册和只读控制入口。当前已接入：
+`LLLin000/home` 是跨项目规范、调度与合并门的拥有者：Home 常驻控制器（`engineering-home-controller` + `engineering-home-merge-worker`，均为 active）负责 Inbox→Ready→Agent 调度、无信号回收、ReviewOutcome 对账与合并执行；Kandev 仍拥有任务/工作流/session 状态，GitHub 仍拥有 PR/check/merge 事实。旧 feeder 停用不断档、留档：`scripts/kandev-ready-feeder.py` 保留在仓库但不再部署。
 
 ```bash
 set -a
@@ -122,7 +122,7 @@ set +a
 scripts/kandev-home-status.sh   # 只读；等价于 engctl status --project asterlab
 ```
 
-- 详细安装和迁移边界见 [`docs/engineering/engineering-home-integration.md`](docs/engineering/engineering-home-integration.md)。
-- Home 不是任务权威：任务范围、依赖和状态仍以 Kandev 为准；项目技术语义仍以本仓库权威文档为准。
-- 当前 Home 只做读取和对账建议；`reconcile --apply` 尚未实现。不要因为 Home 有策略文件就直接写 Kandev SQLite 或改变合并权限。
-
+- 运行手册：Home [`docs/loop.md`](https://github.com/LLLin000/home/blob/main/docs/loop.md)（控制循环）与 [`docs/kandev-guide.md`](https://github.com/LLLin000/home/blob/main/docs/kandev-guide.md)（操作入口，含 `dev.asterlab.party` Web UI 地址、step-vs-state 对照、merge/audit 命令）。
+- Web UI（人工）：`https://dev.asterlab.party`。
+- Home 不是任务权威：任务范围、依赖和状态仍以 Kandev 为准；项目技术语义仍以本仓库权威文档为准。迁移/对账边界见 [`docs/engineering/engineering-home-integration.md`](docs/engineering/engineering-home-integration.md)。
+- 状态枚举防呆：task `state` 合法值只有 `CREATED`、`IN_PROGRESS`、`REVIEW`、`COMPLETED`，没有 `MERGED`；手打 `MERGED` 会被 `engctl` 的 `KandevClient.set_task_state` 拒绝。依赖只认 `COMPLETED`——落在 `Merged` step 但 `state != COMPLETED` 的卡不会解锁下游。
