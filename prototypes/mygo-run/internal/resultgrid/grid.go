@@ -68,6 +68,9 @@ type Grid struct {
 	PendingOpID      string
 	PendingOpHash    string
 	FocusInput       string // well whose reading field holds focus; view state, not data
+	// Blind masks group identity in plate rendering. It is view state, not
+	// data: cells keep their groups so unmasking restores the legend.
+	Blind bool
 	Preview          *PastePreview
 	ConfirmOverwrite bool
 	undo, redo       []historyEntry

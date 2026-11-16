@@ -114,12 +114,14 @@ func PlateView(c *ui.Context, g *Grid) {
 }
 
 func plateLabel(rows, cols int) string {
-	if rows == 8 && cols == 12 {
-		return "96 孔板"
+	// Standard labware reads by well count; a 3×4 grid is a 12-well plate,
+	// not a "3 × 4 孔板". Unknown geometries keep the raw dimensions.
+	switch rows * cols {
+	case 6, 12, 24, 48, 96, 384:
+		return fmt.Sprintf("%d 孔板", rows*cols)
 	}
 	return fmt.Sprintf("%d × %d 孔板", rows, cols)
 }
-
 func countChip(c *ui.Context, label string, bg, fg ui.Color, t *ui.Theme) {
 	ui.Row(c).Padding(2, 7).Radius(5).Background(bg).Children(func() {
 		ui.Text(c, label).FontSize(t.Rem(.7)).Bold().TextColor(fg)
@@ -143,6 +145,13 @@ func legendRow(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens) {
 		legendItem(c, tokens.Accent, "有读数", t)
 		legendItem(c, tokens.Canvas, "缺失", t)
 		legendItem(c, tokens.Warning, "排除", t)
+		if g.Blind {
+			// Run blinding mask: group identity stays hidden, counts stay
+			// visible through the recorded/missing chips above.
+			ui.Box(c).Width(1).Height(12).Background(tokens.Border)
+			ui.Text(c, "已设盲 · 分组已隐藏").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+			return
+		}
 		if len(names) > 0 {
 			ui.Box(c).Width(1).Height(12).Background(tokens.Border)
 		}
@@ -257,10 +266,13 @@ func drawPlate(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens) {
 				p.Fill(wr, fill, radius)
 				p.Stroke(wr, stroke, radius, 1)
 
-				if cellData.Group != "" {
-					p.Fill(ui.Rect{X: x + 5, Y: y + 5, W: 4, H: 4},
-						plateui.GroupColor(cellData.Group, t.Dark), 2)
+			if cellData.Group != "" {
+				dot := plateui.GroupColor(cellData.Group, t.Dark)
+				if g.Blind {
+					dot = t.Border
 				}
+				p.Fill(ui.Rect{X: x + 5, Y: y + 5, W: 4, H: 4}, dot, 2)
+			}
 				if cellData.Value != nil {
 					value := formatWellValue(*cellData.Value)
 					size := cell * .28
@@ -409,6 +421,11 @@ func selectedEditor(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens, fi
 	meta := cell.Group
 	if meta == "" {
 		meta = "未分组"
+	}
+	if g.Blind {
+		// The Run blinding mask hides group identity wherever the plate
+		// surfaces it, including the selected-well readout.
+		meta = "已设盲"
 	}
 	if cell.Replicate > 0 {
 		meta += fmt.Sprintf(" · 重复 %d", cell.Replicate)

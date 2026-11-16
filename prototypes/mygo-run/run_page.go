@@ -13,6 +13,8 @@ import (
 // runPage renders the selected Run: an optional frozen document strip, then the
 // workspace, a stored readout batch, or the legacy UI in that order.
 func runPage(c *ui.Context, a *app) {
+	a.syncRunBenchCallbacks()
+	a.pollRunBench()
 	ui.Column(c).Fill().Children(func() {
 		a.documentToolbar(c)
 		if a.showFrozenDoc && a.snap.AsterDoc != nil {

@@ -19,6 +19,9 @@ const (
 	TaskStatusCurrent   TaskStatus = "current"   // in progress
 	TaskStatusCompleted TaskStatus = "completed" // done
 	TaskStatusBlocked   TaskStatus = "blocked"   // blocked by unmet checks
+	// TaskStatusSkipped marks a step Core projected as skipped (rule skip or
+	// equivalent). A skipped step is terminal: it never offers completion.
+	TaskStatusSkipped TaskStatus = "skipped"
 )
 
 // PlannedParameter is a planned input parameter from the frozen design.
@@ -731,6 +734,8 @@ func buildTaskStatus(task runs.RunTask) TaskStatus {
 		return TaskStatusCurrent
 	case "blocked":
 		return TaskStatusBlocked
+	case "skipped", "skipped_by_rule":
+		return TaskStatusSkipped
 	}
 	return TaskStatusPending
 }
@@ -745,6 +750,8 @@ func StatusLabel(status TaskStatus) string {
 		return "已完成"
 	case TaskStatusBlocked:
 		return "阻塞"
+	case TaskStatusSkipped:
+		return "已跳过"
 	default:
 		return "未开始"
 	}
