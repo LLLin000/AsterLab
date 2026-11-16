@@ -78,6 +78,18 @@ jobs:
           go-version-file: prototypes/mygo-run/go.mod
           cache-dependency-path: prototypes/mygo-run/go.sum
 
+      - name: Cache Go build cache
+        if: env.RUN_HEAVY == '1'
+        # setup-go caches only the downloaded modules; compiled artifacts
+        # (GOCACHE) are rebuilt from zero every run without this. The cache
+        # is content-addressed, so sharing it across runs is safe; the go.sum
+        # hash busts it whenever dependencies change.
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\go-build
+          key: windows-go-build-${{ hashFiles('prototypes/mygo-run/go.sum') }}
+          restore-keys: windows-go-build-
+
       - name: Install Rust toolchain
         if: env.RUN_HEAVY == '1'
         # The channel lives only in rust-toolchain.toml (REL-07). `rustup install`
