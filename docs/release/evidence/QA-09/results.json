@@ -1,0 +1,72 @@
+{
+  "failed": false,
+  "cases": [
+    {
+      "case": "HUVEC tube formation",
+      "project_id": "97d94689-0223-4b3d-aa65-b47e7dcbf1ef",
+      "design_id": "6fe56776-db13-4c6a-8fb2-6edda024c728",
+      "asterdoc_revision": 1,
+      "protocol_version_id": "e694d809-7161-4544-94aa-e36a67427a96",
+      "run_id": "941f8ffb-e03a-48cc-9197-9f0eecdc5445",
+      "frozen_tasks": 7,
+      "planned_well_timepoints": 27,
+      "image_links": 162,
+      "asset_coverage_cells": 27,
+      "rollback": "PASS",
+      "boundary": "PASS",
+      "restart": {
+        "events": 1,
+        "tasks": 7,
+        "steps": 7
+      },
+      "concurrent_queries": 2,
+      "checksum": "48fd7d61184a8f7227c0a797cf2f03b7a4ff2ca655553d22866ca9b4e32de928"
+    },
+    {
+      "case": "RT-qPCR cross plate",
+      "project_id": "70bdb391-1721-42ec-bcf6-693ec8d4df4d",
+      "design_id": "c16d2395-a18c-4395-bd1a-626b3c4f178b",
+      "protocol_version_id": "b3279b74-3c41-4745-bd74-a508b414c952",
+      "run_id": "671e614a-bed2-47a5-bbc4-da3d27ef4fb5",
+      "plate_id": "e6506fed-81e2-4d8d-ac2f-67a299cc15fe",
+      "normalization_insufficient": 1,
+      "qc_dropped_event": "ee702e6e-5602-44df-bd00-0f3577f8bb1a",
+      "retry_event": "6be9ccdc-e477-4b74-8190-8e9ac350ef42",
+      "ct_rows": 4,
+      "rollback": "PASS",
+      "boundary": "PASS",
+      "restart": {
+        "events": 7,
+        "tasks": 3,
+        "steps": 3
+      },
+      "concurrent_queries": 2,
+      "checksum": "5a5dcdbf615bcbb53133abbc71f440d649e442071202c2658dcbead6b8ed1a0e"
+    },
+    {
+      "case": "in-vivo efficacy + WB/BCA-ELISA",
+      "project_id": "068d7469-1d8d-475a-b373-43076ec5196f",
+      "protocol_versions": {
+        "efficacy": "4b6c62f8-9b13-4ef0-85e1-b648613d5d59",
+        "wb": "82fc67df-b1c3-4c78-b94d-c93a80ba44e0",
+        "bca_elisa": "2e9eb1c6-5156-421b-af61-29e79f6d9a7c"
+      },
+      "run_id": "6af27d12-69ba-4a72-ae4e-b80c5f031a61",
+      "scheduled_tasks": 5,
+      "dosing_events": 4,
+      "censored_dead_event": "m-04",
+      "aliquot_event": "af0874e9-713e-4d2b-8d6a-467264528fa5",
+      "wb_lanes": 3,
+      "non_scalar_readouts": 2,
+      "rollback": "PASS",
+      "boundary": "PASS",
+      "restart": {
+        "events": 8,
+        "tasks": 7,
+        "steps": 3
+      },
+      "concurrent_queries": 2,
+      "checksum": "b59deb577d353473c78ff219a788809a1e794cb274a1d81de843f2c60250173c"
+    }
+  ]
+}

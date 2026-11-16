@@ -21,7 +21,7 @@ endpoint_method: 明场倒置光学显微镜多时间点成像
 endpoint_unit: images (6 FOV/well)
 sample_size_rationale: 3 组 × 3 复孔 = 9 孔，使用单块 12 孔板（A1-C3）；3 个时间点 × 9 孔 × 6 视野 = 162 张图像。
 planned_run_count: 1
-planned_run_relationship: single_longitudinal_plate
+planned_run_relationship: same_source
 analysis_plan: 完成 6h/12h/24h 全板 6 视野图像采集后，按分组×时间点进行管腔长度、节点数等图像定量分析（本次 Run 不阻断图像后处理指标）。
 ```
 
@@ -280,8 +280,9 @@ method: 12 孔板 GelMA 基质接种 + 倒置明场显微镜
 unit: images
 group_refs: [g-gelma-3, g-gelma-5, g-gelma-7]
 timepoints: [6h, 12h, 24h]
-timepoint_relation: longitudinal_same_wells_anchored_at_seeding
+timepoint_relation: same_experimental_unit_repeated
 technical_replicates: 3
+protocol_version_id: "{{protocol_version:huvec-tube-formation}}"
 ```
 
 ```asterlab
@@ -290,7 +291,6 @@ id: plate-12w-main
 schema: 1
 format: 12
 assay: assay-tube-formation
-timepoint: 6h/12h/24h
 groups:
   g-gelma-3: [A1, A2, A3]
   g-gelma-5: [B1, B2, B3]
@@ -330,17 +330,84 @@ readout_schema:
   post_run_metrics_deferred: [total_tube_length, junction_count, mesh_count]
 ```
 
-## 执行步骤与流程（`step@2` + `workflow@1`）
+## 步骤块引用（ProtocolBlock 精确版本）
+
+每个可执行 `step@3` 通过 `uses` 指向一个 `reference` 模块；`reference.ref` 是该项目中
+ProtocolBlock 版本的真实 UUID。ProtocolBlock 版本是不可变、按数据库生成的 UUID，
+因此样板把该值写成固定占位词 `protocol_block_version` + 步骤 ID 的双花括号形式，
+由 fixture（`tests/fixtures/three_protocol_cli_acceptance.py`）在建库后绑定为实际版本 ID。
+未绑定的占位词仍可通过 `asterdoc.validate` / `asterdoc.compile`，但 `asterdoc.create_run`
+要求 `reference.ref` 是该 Run 的冻结 ProtocolVersion 中的实际块版本。
+
+```asterlab
+kind: reference
+id: ref-block-step-01-sterilize
+schema: 1
+ref: "{{protocol_block_version:step-01-sterilize}}"
+view: protocol_block
+```
+
+```asterlab
+kind: reference
+id: ref-block-step-02-coat-cure
+schema: 1
+ref: "{{protocol_block_version:step-02-coat-cure}}"
+view: protocol_block
+```
+
+```asterlab
+kind: reference
+id: ref-block-step-03-soak
+schema: 1
+ref: "{{protocol_block_version:step-03-soak}}"
+view: protocol_block
+```
+
+```asterlab
+kind: reference
+id: ref-block-step-04-seed
+schema: 1
+ref: "{{protocol_block_version:step-04-seed}}"
+view: protocol_block
+```
+
+```asterlab
+kind: reference
+id: ref-block-step-05a-img-6h
+schema: 1
+ref: "{{protocol_block_version:step-05a-img-6h}}"
+view: protocol_block
+```
+
+```asterlab
+kind: reference
+id: ref-block-step-05b-img-12h
+schema: 1
+ref: "{{protocol_block_version:step-05b-img-12h}}"
+view: protocol_block
+```
+
+```asterlab
+kind: reference
+id: ref-block-step-05c-img-24h
+schema: 1
+ref: "{{protocol_block_version:step-05c-img-24h}}"
+view: protocol_block
+```
+
+## 执行步骤与流程（`step@3` + `workflow@1`）
 
 ```asterlab
 kind: step
 id: step-01-sterilize
-schema: 2
+schema: 3
+execution: executable
 title: 01 GelMA 热冷循环消毒与脱泡
 assay: assay-tube-formation
 path: huvec/01-sterilize-degas
 order: 1
 uses:
+  - {ref: ref-block-step-01-sterilize, role: other}
   - {ref: mat-gelma-3, role: material}
   - {ref: mat-gelma-5, role: material}
   - {ref: mat-gelma-7, role: material}
@@ -359,12 +426,14 @@ checks:
 ```asterlab
 kind: step
 id: step-02-coat-cure
-schema: 2
+schema: 3
+execution: executable
 title: 02 12孔板铺胶与 405nm 光固化
 assay: assay-tube-formation
 path: huvec/02-coat-cure
 order: 2
 uses:
+  - {ref: ref-block-step-02-coat-cure, role: other}
   - {ref: plate-12w-main, role: labware}
   - {ref: inst-uv-405, role: instrument}
   - {ref: mat-gelma-3, role: material}
@@ -381,12 +450,14 @@ checks:
 ```asterlab
 kind: step
 id: step-03-soak
-schema: 2
+schema: 3
+execution: executable
 title: 03 完全培养基 4°C 浸泡平衡
 assay: assay-tube-formation
 path: huvec/03-soak
 order: 3
 uses:
+  - {ref: ref-block-step-03-soak, role: other}
   - {ref: plate-12w-main, role: labware}
 tasks:
   - {id: add-medium, title: "每孔加入 1.0 mL 完全培养基（DMEM 高糖 + 10% FBS，共 9 mL）", kind: procedure}
@@ -398,12 +469,14 @@ checks:
 ```asterlab
 kind: step
 id: step-04-seed
-schema: 2
+schema: 3
+execution: executable
 title: 04 复温与接种 HUVEC（建立 t0 锚点）
 assay: assay-tube-formation
 path: huvec/04-seed
 order: 4
 uses:
+  - {ref: ref-block-step-04-seed, role: other}
   - {ref: plate-12w-main, role: labware}
   - {ref: mat-vegf, role: material}
   - {ref: calc-vegf-dilution, role: calculator}
@@ -428,13 +501,15 @@ checks:
 ```asterlab
 kind: step
 id: step-05a-img-6h
-schema: 2
+schema: 3
+execution: executable
 title: 05a 6h 光镜观察与采集（54 张）
 assay: assay-tube-formation
 timepoints: [6h]
 path: huvec/05-imaging-6h
 order: 5
 uses:
+  - {ref: ref-block-step-05a-img-6h, role: other}
   - {ref: plate-12w-main, role: labware}
   - {ref: inst-microscope, role: instrument}
   - {ref: mp-tube-imaging, role: other}
@@ -447,13 +522,15 @@ checks:
 ```asterlab
 kind: step
 id: step-05b-img-12h
-schema: 2
+schema: 3
+execution: executable
 title: 05b 12h 光镜观察与采集（54 张）
 assay: assay-tube-formation
 timepoints: [12h]
 path: huvec/05-imaging-12h
 order: 6
 uses:
+  - {ref: ref-block-step-05b-img-12h, role: other}
   - {ref: plate-12w-main, role: labware}
   - {ref: inst-microscope, role: instrument}
   - {ref: mp-tube-imaging, role: other}
@@ -466,13 +543,15 @@ checks:
 ```asterlab
 kind: step
 id: step-05c-img-24h
-schema: 2
+schema: 3
+execution: executable
 title: 05c 24h 光镜观察与采集（54 张）
 assay: assay-tube-formation
 timepoints: [24h]
 path: huvec/05-imaging-24h
 order: 7
 uses:
+  - {ref: ref-block-step-05c-img-24h, role: other}
   - {ref: plate-12w-main, role: labware}
   - {ref: inst-microscope, role: instrument}
   - {ref: mp-tube-imaging, role: other}
