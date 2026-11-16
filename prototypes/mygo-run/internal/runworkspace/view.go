@@ -7,6 +7,7 @@ import (
 
 	"asterlab-mygo-prototype/internal/theme"
 	workflowtree "asterlab-mygo-prototype/internal/workflowtree"
+	"asterlab-mygo-prototype/modules/runs"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -26,6 +27,37 @@ type Callbacks struct {
 	// Recording renders the recording module for a task. The host supplies it so
 	// the same module serves Design, Run, Notebook and PDF.
 	Recording func(c *ui.Context, task *RunTaskViewModel)
+	// LoadTimers lists the run's persisted timers; the bench renders them
+	// from these checkpoints only.
+	LoadTimers func(runID string) ([]runs.TimerRecord, error)
+	// SaveTimer persists one timer row for a task.
+	SaveTimer func(timer runs.TimerRecord) (runs.TimerRecord, error)
+	// TimerAction applies one lifecycle action at the caller's clock.
+	TimerAction func(input runs.TimerActionInput) (runs.TimerUpdateResult, error)
+	// TimerPhases supplies the relay plan an advance walks. Nil means the
+	// timer's own single phase.
+	TimerPhases func(taskKey string) []runs.TimerPhase
+	// AppendEvent appends one execution event (skipped_by_rule, deviation,
+	// observation, completed round) through CreateExecutionEvent. It returns
+	// Core's pantry advisory for the composer to display ("" when none).
+	AppendEvent func(taskKey string, input runs.ExecutionEventInput) (string, error)
+	// LoadPantry lists the pantry ledger for the optional event reference.
+	LoadPantry func() (runs.PantryLedger, error)
+	// TaskAssets returns the task's linked assets for the capture strip.
+	TaskAssets func(taskKey string) []LinkedAsset
+	// CaptureWells returns the planned wells in fill order plus the frozen
+	// per-well FOV count (0 when the plan declares none).
+	CaptureWells func(taskKey string) (wells []string, fovPerWell int)
+	// RequestBatchLink opens the host file picker and links the chosen files
+	// across capture slots for the task.
+	RequestBatchLink func(taskKey string)
+	// HistoryInputs supplies the stored snapshot plus already-linked assets
+	// for the shared record projection. It is a cheap getter the bench may
+	// call every render; the projection is memoized by Run revision plus
+	// every asset's identity and coordinates (link writes never bump the
+	// Run revision). Nil hides the summary/matrix and keeps the
+	// entry-level timeline only.
+	HistoryInputs func() (runs.RunSnapshot, []runs.Asset)
 }
 
 // CheckAckView is one operator verdict sent back to Core.
@@ -77,7 +109,9 @@ type State struct {
 	Narrow bool
 
 	// RecordingDirty tracks unsaved recording edits per task (UX-STATE, UX-P5).
-	RecordingDirty      map[string]bool
+	RecordingDirty map[string]bool
+	// Bench holds the run bench (timers, event composer, capture, blinding).
+	Bench               *BenchState
 	LoadError           string
 	Completing          bool
 	CompletionError     string
@@ -587,6 +621,8 @@ func treeStatusColor(status string, t *ui.Theme, tokens theme.Tokens) ui.Color {
 		return t.Accent
 	case "blocked":
 		return t.Danger
+	case "skipped", "skipped_by_rule":
+		return t.Warning
 	case "unresolved":
 		return t.Warning
 	}
@@ -603,6 +639,8 @@ func treeStatusLabel(status string) string {
 		return "已完成"
 	case "blocked":
 		return "阻塞"
+	case "skipped", "skipped_by_rule":
+		return "已跳过"
 	default:
 		return ""
 	}
@@ -739,7 +777,7 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 		ui.Text(c, "选择一个步骤查看操作说明").FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
 		return
 	}
-	ui.Column(c).FillWidth().Gap(12).Children(func() {
+	ui.Column(c).FillWidth().Gap(float32(tokens.Spacing12)).Children(func() {
 		tab := &s.WorkspaceTab
 		components.Tabs(c, tab, components.TabsHighlight, "任务", "历史", "时间线")
 		switch *tab {
@@ -750,6 +788,9 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			timelineTab(c, s, t, tokens)
 			return
 		}
+		// UX-P1: the bench (timers, skip/deviation entry, capture) leads the
+		// task column so the step's primary action stays in the first viewport.
+		renderBench(c, s, task, t, tokens)
 		recordingLayer(c, s, t, tokens, task)
 		open := s.ShowProcedure
 		components.Collapsible(c, "操作说明与元数据", &open, components.CollapsibleOptions{}, func() {
@@ -767,7 +808,7 @@ func recordingWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Token
 		ui.Text(c, "选择一个步骤查看操作说明").FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
 		return
 	}
-	ui.Column(c).FillWidth().Gap(12).Children(func() {
+	ui.Column(c).FillWidth().Gap(float32(tokens.Spacing12)).Children(func() {
 		tab := &s.WorkspaceTab
 		components.Tabs(c, tab, components.TabsHighlight, "任务", "历史", "时间线")
 		switch *tab {
@@ -778,6 +819,7 @@ func recordingWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Token
 			timelineTab(c, s, t, tokens)
 			return
 		}
+		renderBench(c, s, task, t, tokens)
 		recordingLayer(c, s, t, tokens, task)
 	})
 }
@@ -955,7 +997,7 @@ func frozenIdentity(task *RunTaskViewModel) []string {
 // canMarkComplete keeps the no-readout completion path exclusive with checks
 // and measurement plans (UX-P1, UX-STATE, UX-DONE).
 func canMarkComplete(task *RunTaskViewModel) bool {
-	if task == nil || task.Status == TaskStatusCompleted || len(task.Checks) != 0 {
+	if task == nil || task.Status == TaskStatusCompleted || task.Status == TaskStatusSkipped || len(task.Checks) != 0 {
 		return false
 	}
 	for _, module := range task.Modules {
@@ -1025,6 +1067,8 @@ func taskStatusPill(c *ui.Context, status TaskStatus, t *ui.Theme, tokens theme.
 		bg, fg = tokens.SuccessBg, tokens.SuccessText
 	case TaskStatusBlocked:
 		bg, fg = tokens.DangerBg, tokens.DangerText
+	case TaskStatusSkipped:
+		bg, fg = tokens.WarningBg, tokens.WarningText
 	}
 	ui.Row(c).Padding(2, 7).Radius(5).Background(bg).Children(func() {
 		ui.Text(c, StatusLabel(status)).FontSize(t.Rem(.68)).Bold().TextColor(fg)
@@ -1350,6 +1394,8 @@ func eventTypeLabel(kind string) string {
 		return "观察"
 	case "check":
 		return "检查"
+	case "skipped_by_rule":
+		return "按规则跳过"
 	}
 	return kind
 }
@@ -1381,13 +1427,19 @@ func unassociatedRecords(c *ui.Context, s *State, t *ui.Theme, tokens theme.Toke
 // (same source as the task events) and opens the original plate for events that
 // carry a BatchID.
 func historyTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
-	if len(task.Events) == 0 {
+	// The shared projection renders the audit head (planned-vs-actual and
+	// capture reconciliation); the entry list below stays the notebook.Build
+	// domain and is never re-derived here.
+	proj := s.historyProjection()
+	if len(task.Events) == 0 && proj == nil {
 		ui.Text(c, "尚无执行事件。").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 		return
 	}
-	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
+	ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+		if proj != nil {
+			renderHistoryRecord(c, s, proj, t, tokens)
+		}
 		for _, event := range task.Events {
-			event := event
 			ui.Column(c).FillWidth().Gap(t.Space(.5)).Padding(t.Space(1.5), t.Space(2)).
 				Radius(6).Background(tokens.Elevated).Border(1, tokens.Border).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
@@ -1413,6 +1465,7 @@ func historyTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task 
 		}
 	})
 }
+
 // timelineTab renders the Run's immutable Core events in recorded chronology (UX-LAYOUT).
 func timelineTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	events := BuildTimeline(s.VM)
@@ -1496,6 +1549,8 @@ func timelineTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 					ui.Text(c, "步骤已完成").FontSize(t.Rem(.68)).TextColor(tokens.SuccessText)
 				} else if event.StepStatus == "blocked" {
 					ui.Text(c, "步骤阻塞").FontSize(t.Rem(.68)).TextColor(tokens.DangerText)
+				} else if event.StepStatus == "skipped" {
+					ui.Text(c, "步骤已跳过").FontSize(t.Rem(.68)).TextColor(tokens.WarningText)
 				}
 			})
 		}

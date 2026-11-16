@@ -400,3 +400,26 @@ func TestTaskChecksPersistAndBlockCompletion(t *testing.T) {
 		t.Fatalf("completion did not carry the confirmed checks: %+v", completed)
 	}
 }
+
+func TestSkippedTaskNeverCompletesLegacySurface(t *testing.T) {
+	v := RunView{
+		Title: "Skip Test",
+		Tasks: []Task{
+			{Key: "t1", Title: "离心", Timepoint: "D1", Status: "skipped"},
+		},
+	}
+	completed := false
+	w := NewWorkspace(v, Callbacks{
+		CompleteTask: func(taskKey string, checks []CheckAck) { completed = true },
+	})
+	w.complete()
+	if completed {
+		t.Fatal("a skipped step must not complete on the legacy surface")
+	}
+	if w.State == StateSaving {
+		t.Fatal("a skipped step must not enter the saving state")
+	}
+	if taskSkipped(nil) || !taskSkipped(&Task{Status: "skipped_by_rule"}) {
+		t.Fatal("taskSkipped must match Core's skip statuses only")
+	}
+}
