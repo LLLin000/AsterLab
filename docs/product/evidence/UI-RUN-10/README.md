@@ -33,6 +33,11 @@
    Core 的 near-expiry/expired advisory 显示在成功行）。
    设盲为纯展示遮罩（图例、孔点、选中孔分组名），不碰 Record 盲投影。
    台面三段在 900×600 有渲染测试覆盖文本可达（`TestBenchRendersAtNarrowWidth`）。
+5. **Run 历史审计（UI-REC-10 同源）**：历史 Tab 改读
+   `internal/notebook/record.Project(snap, assets)` 的 `Summary`（计划-vs-实际行）
+   与 `Matrix`（采图对账），替代各自推导；条目级时间线仍归 `notebook.Build`
+   领域（本 Tab 的事件列表原样保留）。投影按 Run 修订＋资产数记忆化，
+   台账输入只是快照与资产表的廉价交接。设盲同样遮罩矩阵分组名。
 
 ## Core 契约核实（已读实现，非推测）
 

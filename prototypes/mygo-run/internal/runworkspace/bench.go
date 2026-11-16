@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
 
@@ -61,6 +62,11 @@ type BenchState struct {
 	timersKey string
 	// timersAt is the last successful load instant.
 	timersAt time.Time
+	// historyKey/historyProj memoize the shared record projection by Run
+	// revision and asset count; the projection itself lives in the
+	// notebook/record leaf package, never here.
+	historyKey  string
+	historyProj *record.RecordProjection
 }
 
 func (s *State) bench() *BenchState {

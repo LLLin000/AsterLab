@@ -51,6 +51,11 @@ type Callbacks struct {
 	// RequestBatchLink opens the host file picker and links the chosen files
 	// across capture slots for the task.
 	RequestBatchLink func(taskKey string)
+	// HistoryInputs supplies the stored snapshot plus already-linked assets
+	// for the shared record projection. It is a cheap getter the bench may
+	// call every render; the projection itself is memoized by Run revision.
+	// Nil hides the summary/matrix and keeps the entry-level timeline only.
+	HistoryInputs func() (runs.RunSnapshot, []runs.Asset)
 }
 
 // CheckAckView is one operator verdict sent back to Core.
@@ -1420,13 +1425,19 @@ func unassociatedRecords(c *ui.Context, s *State, t *ui.Theme, tokens theme.Toke
 // (same source as the task events) and opens the original plate for events that
 // carry a BatchID.
 func historyTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
-	if len(task.Events) == 0 {
+	// The shared projection renders the audit head (planned-vs-actual and
+	// capture reconciliation); the entry list below stays the notebook.Build
+	// domain and is never re-derived here.
+	proj := s.historyProjection()
+	if len(task.Events) == 0 && proj == nil {
 		ui.Text(c, "尚无执行事件。").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 		return
 	}
-	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
+	ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+		if proj != nil {
+			renderHistoryRecord(c, s, proj, t, tokens)
+		}
 		for _, event := range task.Events {
-			event := event
 			ui.Column(c).FillWidth().Gap(t.Space(.5)).Padding(t.Space(1.5), t.Space(2)).
 				Radius(6).Background(tokens.Elevated).Border(1, tokens.Border).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
@@ -1452,6 +1463,7 @@ func historyTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task 
 		}
 	})
 }
+
 // timelineTab renders the Run's immutable Core events in recorded chronology (UX-LAYOUT).
 func timelineTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	events := BuildTimeline(s.VM)

@@ -41,6 +41,11 @@ func (a *app) syncRunBenchCallbacks() {
 	cb.TaskAssets = a.runAssetsForTask
 	cb.CaptureWells = a.captureWellsForTask
 	cb.RequestBatchLink = a.requestBatchLink
+	// The shared record projection reads the stored snapshot plus
+	// already-linked assets; the bench memoizes it by Run revision.
+	cb.HistoryInputs = func() (runs.RunSnapshot, []runs.Asset) {
+		return a.snap, a.runAssets
+	}
 	// The blind flag is view state on the bench; grids are Core-backed data
 	// the flag only masks at render time.
 	blind := a.runWS.Bench != nil && a.runWS.Bench.Blind
