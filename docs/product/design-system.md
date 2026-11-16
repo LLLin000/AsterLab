@@ -2,21 +2,21 @@
 
 本文是 AsterLab UI 的唯一视觉与语义规范。任何 UI 改动开工前必读，验收时必须能引用本文条目。
 
-权威关系：色彩/间距/圆角/字号的**取值**由 `prototypes/mygo-run/internal/theme/theme.go` 的 `Tokens` 定义；本文规定**怎么用**。两者冲突时以 `Tokens` 为准，并修本文。
+权威关系：通用颜色/间距/圆角/字号由 `Tokens` 定义；具备科学语义的颜色由本文登记的具名调色板提供。本文规定使用方式与允许的例外；实现与本文冲突时，以对应的 `Tokens` 或具名调色板函数为准，并修本文。
 
 ## 1. 单一参数源
 
-所有视觉参数来自 `theme.GetTokens(c.Theme())`。禁止在调用点写字面值。
+所有通用视觉参数来自 `theme.GetTokens(c.Theme())`；唯一例外是本文件登记的具名科学语义颜色调色板。禁止在调用点写字面值。
 
 | 类别 | 唯一来源 | 禁止写法 | 正确写法 |
 |---|---|---|---|
-| 颜色 | `Tokens`（`Canvas/Surface/Elevated/Border/Text/TextMuted/Accent/Success/Warning/Danger` 及 `*Bg/*Text`） | `ui.Hex("#dcd6c8")`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DangerText` |
+| 颜色 | `Tokens`（`Canvas/Surface/Elevated/Border/Text/TextMuted/Accent/Success/Warning/Danger` 及 `*Bg/*Text`）；具名科学调色板（见 §1 例外） | 在渲染/组件调用点写 `ui.Hex(...)`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DangerText`；调色板色复用具名函数 |
 | 字号 | `TextPage/TextSection/TextBody/TextMeta/TextData`，或 `t.Rem(x)`（随主题缩放） | `FontSize(12)`、`FontSize(11)` | `FontSize(float32(tokens.TextMeta))`、`.FontSize(t.Rem(.85))` |
-| 间距 | `Spacing4/8/12/16/24/32/48`，或 `t.Space(n)`（n 为 4 的倍数，`Theme.Spacing=4`） | `Padding(3, 8)`、`Padding(6, 12)`、`Gap(5)` | `Padding(t.Space(2), t.Space(4))`、`Gap(t.Space(1))` |
-| 圆角 | `ControlRadius`（控件）/`PanelRadius`（面板）/`DialogRadius`（对话框），或 `t.Radius` 缩放 | `Radius(3)`、`Radius(5)`、`Radius(7)` | `.Radius(float32(tokens.ControlRadius))` |
+| 间距 | `Spacing4/8/12/16/24/32/48`，或 `t.Space(n)`（n 是单位倍数；`Theme.Spacing=4`，`t.Space(1/2/3/4/6/8/12)` 对应 `4/8/12/16/24/32/48`） | `Padding(3, 8)`、`Padding(6, 12)`、`Gap(5)` | `Padding(t.Space(2), t.Space(4))`、`Gap(t.Space(1))` |
+| 圆角 | `ControlRadius`（控件）/`PanelRadius`（面板）/`DialogRadius`（对话框） | `Radius(3)`、`Radius(5)`、`Radius(7)` | `.Radius(float32(tokens.ControlRadius))` |
 | 控件高度 | `ButtonHeight/InputHeight/RowHeight` | `Height(28)`、`MinHeight(33)` | `.Height(float32(tokens.ButtonHeight))` |
 
-颜色字面值只允许出现在 `internal/theme/theme.go`（定义）与确有科学语义的调色板（如孔板分组色）中；后者也必须有一个具名函数（例如 `plate.GroupColor`），不得散落在渲染代码里。
+颜色字面值只允许出现在 `internal/theme/theme.go`（定义）与确有科学语义的具名调色板函数（如孔板分组色）中；已有同语义调色板时必须复用，不得散落在渲染代码里。
 
 ## 2. 间距体系
 
@@ -60,20 +60,21 @@
 - 状态词只能取 `ux-contract.md` §3 的词表，不自造同义词。
 - 单位与数值：数值右对齐 + `tnum`；单位与数值之间留一个空格。
 
-## 6. 反模式基线（2026-11-16，`b2acf22`）
+## 6. 反模式基线（2026-11-16，`ad8ed02`）
 
 以下为当前代码里真实存在的违规计数（`prototypes/mygo-run`，排除 `_test.go`）。清理按这张清单另开卡，不要在功能卡里顺手重构。
 
 | 反模式 | 总数 | 集中位置 |
 |---|---|---|
-| `ui.Hex(...)` 颜色字面值 | 30 | `internal/uikit/plate/plate.go` 16（孔板分组色，应具名化）、`internal/asterdoc/view.go` 3、`internal/theme/theme.go` 11（允许，是定义处） |
-| `FontSize(数字)` | 186 | `internal/runui/runui.go` 80、`main.go` 49、`internal/protocol/view.go` 25、`internal/runworkspace/recording.go` 22、`internal/tools/tools.go` 9 |
-| `Padding(数字)` | 100 | `internal/runworkspace` 31、`internal/runui` 23、`main.go` 16、`internal/asterdoc` 10、`internal/resultgrid` 7 |
-| `Radius(数字)` | 59 | `internal/runworkspace` 30、`internal/runui` 19、`internal/resultgrid` 5 |
-| 非 4 倍数的 `Padding` | 3 | `internal/resultgrid/view.go:54,60,81`（`Padding(6)`） |
-| 不在 6/10/12 档的 `Radius` | 19 | `internal/asterdoc/view.go:493` `Radius(3)`、`internal/resultgrid/plate.go:124,417,474`、`internal/runui/runui.go:630,725,730,755`（`Radius(8)`） |
+| `ui.Hex(...)` 颜色字面值 | 3 行（定义处 `theme.go` 另有 11 行，允许） | `internal/asterdoc/view.go:735,736,739`（`groupColor` 本地调色板）；`uikit` 已收进 `plate.GroupColor`，无字面值 |
+| `FontSize(数字)` | 175 | `internal/runui/runui.go` 80、根目录 40（`main.go` 34、`design_page.go` 4、`design_canvas.go` 2）、`internal/protocol` 25、`internal/runworkspace` 22、`internal/tools` 7、`internal/resultgrid` 1 |
+| `Padding(数字)` | 97 | `internal/runworkspace` 31、`internal/runui` 23、根目录 16（`main.go` 6、`design_canvas.go` 5、`design_page.go` 2、`notebook_page.go` 3）、`internal/asterdoc` 10、`internal/resultgrid` 7、`internal/designer` 4、`internal/protocol` 3，另 `internal/shell`/`blockui`/`blocks` 各 1 |
+| `Radius(数字)` | 58 | `internal/runworkspace` 30、`internal/runui` 19、`internal/resultgrid` 5、`internal/asterdoc` 3、`main.go` 1 |
+| 单参数 `Padding(6)`（6 不是 4 的倍数） | 3 | `internal/resultgrid/view.go:54,60,81`（全项目仅有的三处单参数 `Padding(6)`） |
+| 不在 6/10/12 档的 `Radius` | 30 | `runui` 7（`runui.go:630,725,730,755,760,1095` 为 8；`:1139` 为 5）、`runworkspace` 15（`recording.go:138,633,720`；`view.go:536,561,628,692,731,1013,1029,1096,1278,1296,1453,1481`）、`resultgrid` 4（`plate.go:124,474` 为 5；`:162` 为 4；`:417` 为 8）、`asterdoc` 3（`view.go:198,371` 为 4.5；`:567` 为 3）、`main.go:3140`（4） |
 
-已合规的范式（照它写）：`internal/designer/step_list.go` 的 `budgetBar`/`listToolbar`/`sectionSwitch` 全部用 `t.Space(n)` + `t.Rem(x)` + `components.*`，没有字面值。
+已合规的范式：`internal/uikit/plate/plate.go:277` 以 `t.ControlRadius` 设控件圆角；`internal/runworkspace/view.go` 以 `tokens.PanelRadius` 设面板圆角。间距用 `t.Space(n)`，字号缩放用 `t.Rem(x)`。
+`internal/designer/step_list.go:528,558` 当前用 `Radius(t.Space(...))`；这属于现存的不合规圆角用法，不应复制为范例。代码清理不在本次文档卡范围内。
 
 ## 7. 验收方式
 
@@ -98,8 +99,8 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 每条取自本仓库真实代码或真实违规点，可直接对照。
 
 **D1 颜色**
-- Do: `components.Text(c, title).TextColor(tokens.Text)`。
-- Don't: `ui.Hex("#dcd6c8")`（`internal/uikit/plate/plate.go:50` 一带的孔板分组色；应提成 `plate.GroupColor` 具名函数并在内部用 token）。
+- Do: `components.Text(c, title).TextColor(tokens.Text)`；分组色复用 `plate.GroupColor`（`internal/uikit/plate/plate.go:86`，内部已用 token，无字面值）。
+- Don't: 在视图里自建调色板（`internal/asterdoc/view.go:734-739` `groupColor`，7 个 `ui.Hex` 字面值）；应复用 `plate.GroupColor` 或收进 `theme`。
 
 **D2 字号**
 - Do: `.FontSize(t.Rem(.85))` 或 `.FontSize(float32(tokens.TextMeta))`。
@@ -111,11 +112,11 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 
 **D4 圆角**
 - Do: `.Radius(float32(tokens.ControlRadius))`。
-- Don't: `.Radius(8)`（`internal/runui/runui.go:630,725,730,755`）——不在 6/10/12 三档内，同类控件随后各写各的。
+- Don't: `.Radius(8)`（`internal/runui/runui.go:630,725,730,755,760,1095`；另 `:1139` 为 `Radius(5)`）——不在 6/10/12 三档内，同类容器随后各写各的。
 
 **D5 按钮**
 - Do: `components.Button(c, "创建 Run", components.ButtonPrimary)`，一屏只有一个 Primary。
-- Don't: `ui.ButtonBase(c).Radius(8).Padding(6, 12)` 手搓按钮（`internal/runui/runui.go:629`）。
+- Don't: `ui.ButtonBase(c).Radius(8).Padding(6, 12)` 手搓按钮（`internal/runui/runui.go:630`）。
 
 **D6 分段控件**
 - Do: `components.Tabs(c, &index, components.TabsSegmented, ...)`。
