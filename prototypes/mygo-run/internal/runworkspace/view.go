@@ -52,6 +52,7 @@ type Callbacks struct {
 	// across capture slots for the task.
 	RequestBatchLink func(taskKey string)
 }
+
 // CheckAckView is one operator verdict sent back to Core.
 type CheckAckView struct {
 	CheckID string
@@ -101,9 +102,9 @@ type State struct {
 	Narrow bool
 
 	// RecordingDirty tracks unsaved recording edits per task (UX-STATE, UX-P5).
-	RecordingDirty      map[string]bool
+	RecordingDirty map[string]bool
 	// Bench holds the run bench (timers, event composer, capture, blinding).
-	Bench *BenchState
+	Bench               *BenchState
 	LoadError           string
 	Completing          bool
 	CompletionError     string
@@ -613,6 +614,8 @@ func treeStatusColor(status string, t *ui.Theme, tokens theme.Tokens) ui.Color {
 		return t.Accent
 	case "blocked":
 		return t.Danger
+	case "skipped", "skipped_by_rule":
+		return t.Warning
 	case "unresolved":
 		return t.Warning
 	}
@@ -629,6 +632,8 @@ func treeStatusLabel(status string) string {
 		return "已完成"
 	case "blocked":
 		return "阻塞"
+	case "skipped", "skipped_by_rule":
+		return "已跳过"
 	default:
 		return ""
 	}
@@ -765,7 +770,7 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 		ui.Text(c, "选择一个步骤查看操作说明").FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
 		return
 	}
-	ui.Column(c).FillWidth().Gap(12).Children(func() {
+	ui.Column(c).FillWidth().Gap(float32(tokens.Spacing12)).Children(func() {
 		tab := &s.WorkspaceTab
 		components.Tabs(c, tab, components.TabsHighlight, "任务", "历史", "时间线")
 		switch *tab {
@@ -796,7 +801,7 @@ func recordingWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Token
 		ui.Text(c, "选择一个步骤查看操作说明").FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
 		return
 	}
-	ui.Column(c).FillWidth().Gap(12).Children(func() {
+	ui.Column(c).FillWidth().Gap(float32(tokens.Spacing12)).Children(func() {
 		tab := &s.WorkspaceTab
 		components.Tabs(c, tab, components.TabsHighlight, "任务", "历史", "时间线")
 		switch *tab {
@@ -1055,6 +1060,8 @@ func taskStatusPill(c *ui.Context, status TaskStatus, t *ui.Theme, tokens theme.
 		bg, fg = tokens.SuccessBg, tokens.SuccessText
 	case TaskStatusBlocked:
 		bg, fg = tokens.DangerBg, tokens.DangerText
+	case TaskStatusSkipped:
+		bg, fg = tokens.WarningBg, tokens.WarningText
 	}
 	ui.Row(c).Padding(2, 7).Radius(5).Background(bg).Children(func() {
 		ui.Text(c, StatusLabel(status)).FontSize(t.Rem(.68)).Bold().TextColor(fg)

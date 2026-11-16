@@ -1,13 +1,18 @@
 package runworkspace
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
 
 	"github.com/egoist/mygo/ui"
 )
+
+// errTestThrottle stands in for a persistent Core failure.
+var errTestThrottle = errors.New("Core 不可用")
 
 // benchHarness builds a selected task state with fake Core seams.
 func benchHarness() (*State, **runs.ExecutionEventInput, *[]runs.TimerRecord) {
@@ -99,5 +104,60 @@ func TestBenchBlindToggleMasksCapture(t *testing.T) {
 	}
 	if !tt.HasText("分组已隐藏") {
 		t.Fatalf("blind notice missing: %q", tt.Texts())
+	}
+}
+
+func TestRefreshTimersBacksOffFailingLoads(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	calls := 0
+	s := NewState(vm, Callbacks{
+		LoadTimers: func(runID string) ([]runs.TimerRecord, error) {
+			calls++
+			return nil, errTestThrottle
+		},
+	})
+	// A persistent Core failure must not retry ListTimers on every frame:
+	// the first attempt records the failure, immediate repeats back off.
+	if !s.RefreshTimers(false, time.Minute) {
+		t.Fatal("first load must run")
+	}
+	if s.RefreshTimers(false, time.Minute) {
+		t.Fatal("immediate repeat must back off")
+	}
+	if s.RefreshTimers(false, time.Minute) {
+		t.Fatal("immediate repeat must keep backing off")
+	}
+	if calls != 1 {
+		t.Fatalf("failing LoadTimers ran %d times, want 1", calls)
+	}
+	if msg := s.bench().TimersErr[s.Selected]; msg == "" {
+		t.Fatal("failure cause must stay visible")
+	}
+	// Forcing retries; a zero maxAge disables time-based refresh.
+	if !s.RefreshTimers(true, time.Minute) {
+		t.Fatal("forced load must run")
+	}
+	if s.RefreshTimers(false, 0) {
+		t.Fatal("zero maxAge must not time-refresh")
+	}
+	if calls != 2 {
+		t.Fatalf("failing LoadTimers ran %d times, want 2", calls)
+	}
+}
+
+func TestTreeSkippedStatusReadsWarning(t *testing.T) {
+	tokens := theme.LightTokens()
+	th := theme.LightTheme()
+	if got := treeStatusLabel("skipped"); got != "已跳过" {
+		t.Fatalf("tree skipped label = %q", got)
+	}
+	if got := treeStatusLabel("skipped_by_rule"); got != "已跳过" {
+		t.Fatalf("tree rule-skip label = %q", got)
+	}
+	if got := treeStatusColor("skipped", th, tokens); got != th.Warning {
+		t.Fatalf("tree skipped color not warning: %v", got)
+	}
+	if got := StatusLabel(TaskStatusSkipped); got != "已跳过" {
+		t.Fatalf("pill skipped label = %q", got)
 	}
 }

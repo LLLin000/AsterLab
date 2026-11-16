@@ -136,6 +136,12 @@ func (s *State) RefreshTimers(force bool, maxAge time.Duration) bool {
 		return false
 	}
 	timers, err := s.Callbacks.LoadTimers(s.VM.RunID)
+	// A failed attempt still records the key and instant: the run page
+	// polls every frame, and a persistent Core failure must back off to
+	// maxAge instead of retrying ListTimers on every frame. Forcing or a
+	// new key/expired age retries.
+	bench.timersKey = key
+	bench.timersAt = time.Now()
 	if err != nil {
 		bench.TimersErr[s.Selected] = err.Error()
 		return true
@@ -263,7 +269,7 @@ func renderBench(c *ui.Context, s *State, task *RunTaskViewModel, t *ui.Theme, t
 	if !hasTimers && !hasEvents && !hasCapture {
 		return
 	}
-	ui.Column(c).FillWidth().Padding(16).Radius(float32(tokens.PanelRadius)).
+	ui.Column(c).FillWidth().Padding(float32(tokens.Spacing16)).Radius(float32(tokens.PanelRadius)).
 		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(2.5)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, "执行台面").FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)

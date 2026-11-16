@@ -271,54 +271,54 @@ func renderCaptureStrip(c *ui.Context, s *State, task *RunTaskViewModel, wells [
 		if bench.BatchDone != "" {
 			ui.Text(c, bench.BatchDone).FontSize(t.Rem(.74)).TextColor(tokens.SuccessText)
 		}
-	match := func(cell CoverageCell) bool {
-		return timepoint == "" || cell.Timepoint == timepoint
-	}
-	wellLabel := func(cell CoverageCell) string {
-		if timepoint != "" || strings.TrimSpace(cell.Timepoint) == "" {
-			return cell.WellID
+		match := func(cell CoverageCell) bool {
+			return timepoint == "" || cell.Timepoint == timepoint
 		}
-		return cell.WellID + " · " + cell.Timepoint
-	}
-	full, total := 0, 0
-	for _, cell := range cov {
-		if !match(cell) {
-			continue
+		wellLabel := func(cell CoverageCell) string {
+			if timepoint != "" || strings.TrimSpace(cell.Timepoint) == "" {
+				return cell.WellID
+			}
+			return cell.WellID + " · " + cell.Timepoint
 		}
-		total++
-		if len(cell.Gaps) == 0 && cell.Filled > 0 {
-			full++
-		}
-	}
-	ui.Text(c, fmt.Sprintf("%d/%d 孔已传满", full, total)).FontSize(t.Rem(.74)).TextColor(t.TextMuted)
-	ui.Row(c).FillWidth().Wrap().Gap(t.Space(1)).Children(func() {
+		full, total := 0, 0
 		for _, cell := range cov {
 			if !match(cell) {
 				continue
 			}
-			cell := cell
-			label := fmt.Sprintf("%s %d/%d", wellLabel(cell), cell.Filled, cell.Slots)
-			bg, fg := tokens.Elevated, t.TextMuted
+			total++
 			if len(cell.Gaps) == 0 && cell.Filled > 0 {
-				bg, fg = tokens.SuccessBg, tokens.SuccessText
-			} else if cell.Filled > 0 {
-				bg, fg = tokens.WarningBg, tokens.WarningText
+				full++
 			}
-			ui.Row(c).Padding(3, 8).Radius(5).Background(bg).Border(1, tokens.Border).
-				Children(func() {
-					ui.Text(c, label).FontSize(t.Rem(.7)).Bold().TextColor(fg).FontFeatures("tnum")
-				})
 		}
-	})
-	// Gap detail stays one glance away: only wells that still miss slots
-	// name them, so the strip never invents a missing file.
-	for _, cell := range cov {
-		if !match(cell) || len(cell.Gaps) == 0 {
-			continue
+		ui.Text(c, fmt.Sprintf("%d/%d 孔已传满", full, total)).FontSize(t.Rem(.74)).TextColor(t.TextMuted)
+		ui.Row(c).FillWidth().Wrap().Gap(t.Space(1)).Children(func() {
+			for _, cell := range cov {
+				if !match(cell) {
+					continue
+				}
+				cell := cell
+				label := fmt.Sprintf("%s %d/%d", wellLabel(cell), cell.Filled, cell.Slots)
+				bg, fg := tokens.Elevated, t.TextMuted
+				if len(cell.Gaps) == 0 && cell.Filled > 0 {
+					bg, fg = tokens.SuccessBg, tokens.SuccessText
+				} else if cell.Filled > 0 {
+					bg, fg = tokens.WarningBg, tokens.WarningText
+				}
+				ui.Row(c).Padding(3, 8).Radius(5).Background(bg).Border(1, tokens.Border).
+					Children(func() {
+						ui.Text(c, label).FontSize(t.Rem(.7)).Bold().TextColor(fg).FontFeatures("tnum")
+					})
+			}
+		})
+		// Gap detail stays one glance away: only wells that still miss slots
+		// name them, so the strip never invents a missing file.
+		for _, cell := range cov {
+			if !match(cell) || len(cell.Gaps) == 0 {
+				continue
+			}
+			ui.Text(c, fmt.Sprintf("%s 缺 FOV %v", wellLabel(cell), cell.Gaps)).
+				FontSize(t.Rem(.68)).TextColor(tokens.WarningText)
 		}
-		ui.Text(c, fmt.Sprintf("%s 缺 FOV %v", wellLabel(cell), cell.Gaps)).
-			FontSize(t.Rem(.68)).TextColor(tokens.WarningText)
-	}
 	})
 }
 

@@ -60,17 +60,17 @@ type historyEntry struct {
 	old, next []Cell
 }
 type Grid struct {
-	Schema           Schema
-	Cells            []Cell
-	Selection        Selection
-	State            SaveState
-	Error            string
-	PendingOpID      string
-	PendingOpHash    string
-	FocusInput       string // well whose reading field holds focus; view state, not data
+	Schema        Schema
+	Cells         []Cell
+	Selection     Selection
+	State         SaveState
+	Error         string
+	PendingOpID   string
+	PendingOpHash string
+	FocusInput    string // well whose reading field holds focus; view state, not data
 	// Blind masks group identity in plate rendering. It is view state, not
 	// data: cells keep their groups so unmasking restores the legend.
-	Blind bool
+	Blind            bool
 	Preview          *PastePreview
 	ConfirmOverwrite bool
 	undo, redo       []historyEntry

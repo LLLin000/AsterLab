@@ -266,13 +266,13 @@ func drawPlate(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens) {
 				p.Fill(wr, fill, radius)
 				p.Stroke(wr, stroke, radius, 1)
 
-			if cellData.Group != "" {
-				dot := plateui.GroupColor(cellData.Group, t.Dark)
-				if g.Blind {
-					dot = t.Border
+				if cellData.Group != "" {
+					dot := plateui.GroupColor(cellData.Group, t.Dark)
+					if g.Blind {
+						dot = t.Border
+					}
+					p.Fill(ui.Rect{X: x + 5, Y: y + 5, W: 4, H: 4}, dot, 2)
 				}
-				p.Fill(ui.Rect{X: x + 5, Y: y + 5, W: 4, H: 4}, dot, 2)
-			}
 				if cellData.Value != nil {
 					value := formatWellValue(*cellData.Value)
 					size := cell * .28

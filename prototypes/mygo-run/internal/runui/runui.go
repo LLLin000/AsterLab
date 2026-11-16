@@ -59,6 +59,12 @@ type FrozenParameter struct {
 
 func (t Task) Done() bool { return t.Status == "completed" }
 
+// taskSkipped reports the terminal rule-skip status Core projects. A skipped
+// step never offers completion in any Run surface.
+func taskSkipped(t *Task) bool {
+	return t != nil && (t.Status == "skipped" || t.Status == "skipped_by_rule")
+}
+
 type TaskCheck struct {
 	CheckID     string
 	Label       string
@@ -336,6 +342,12 @@ func (w *Workspace) save() {
 func (w *Workspace) complete() {
 	t := w.currentTask()
 	if t == nil {
+		return
+	}
+	if taskSkipped(t) {
+		// A rule-skipped step is terminal: completing it would contradict
+		// Core's projected status. The button is disabled too; this guards
+		// programmatic callers.
 		return
 	}
 	if len(w.openBlocking(t)) > 0 {
@@ -758,8 +770,8 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 			})
 
 			btnComplete := ui.Button(c, "完成本步").Radius(8).Padding(8, 16).
-				Disabled(len(open) > 0)
-			if btnComplete.Clicked() && len(open) == 0 {
+				Disabled(len(open) > 0 || taskSkipped(ct))
+			if btnComplete.Clicked() && len(open) == 0 && !taskSkipped(ct) {
 				w.complete()
 			}
 		})

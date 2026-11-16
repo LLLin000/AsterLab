@@ -14,8 +14,8 @@ import (
 
 // Composer kinds. Empty means the composer is folded away.
 const (
-	eventKindSkip       = "skip"
-	eventKindDeviation  = "deviation"
+	eventKindSkip        = "skip"
+	eventKindDeviation   = "deviation"
 	eventKindObservation = "observation"
 )
 

@@ -28,6 +28,12 @@ func (s *runServiceSpy) LoadRun(context.Context, string) (runs.RunSnapshot, erro
 	return runs.RunSnapshot{}, nil
 }
 
+// ListTimers keeps the run bench alive on tests whose fake predates the
+// timer bridge: no persisted timers, never a nil-embedded panic.
+func (s *runServiceSpy) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
+	return nil, nil
+}
+
 func TestLoadRunWithoutConfiguredIDDoesNotInventRun(t *testing.T) {
 	t.Setenv("ASTERLAB_RUN_ID", "")
 	service := &runServiceSpy{}
@@ -227,6 +233,12 @@ func (s *batchRetrySpy) WorkflowTree(context.Context, string) (string, error) {
 }
 
 func (s *batchRetrySpy) ListAssetLinks(context.Context, string) ([]runs.Asset, error) {
+	return nil, nil
+}
+
+// ListTimers keeps the run bench alive on tests whose fake predates the
+// timer bridge: no persisted timers, never a nil-embedded panic.
+func (s *batchRetrySpy) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
 	return nil, nil
 }
 
@@ -432,6 +444,12 @@ func (s *assetSaveSpy) SaveAssetLink(_ context.Context, input runs.AssetLinkInpu
 	return input.Asset, nil
 }
 
+// ListTimers keeps the run bench alive on tests whose fake predates the
+// timer bridge: no persisted timers, never a nil-embedded panic.
+func (s *assetSaveSpy) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
+	return nil, nil
+}
+
 func TestLinkAssetPathsRejectsOutOfBoundsBatchWithoutSavingFirstFile(t *testing.T) {
 	rootDir := t.TempDir()
 	outsideDir := t.TempDir()
@@ -527,6 +545,12 @@ func (s *checkFailRunService) WorkflowTree(context.Context, string) (string, err
 }
 
 func (s *checkFailRunService) ListAssetLinks(context.Context, string) ([]runs.Asset, error) {
+	return nil, nil
+}
+
+// ListTimers keeps the run bench alive on tests whose fake predates the
+// timer bridge: no persisted timers, never a nil-embedded panic.
+func (s *checkFailRunService) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
 	return nil, nil
 }
 
@@ -873,6 +897,12 @@ func (s *assetRelabelSpy) UpdateAssetLinkCoordinates(
 	return updated, nil
 }
 
+// ListTimers keeps the run bench alive on tests whose fake predates the
+// timer bridge: no persisted timers, never a nil-embedded panic.
+func (s *assetRelabelSpy) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
+	return nil, nil
+}
+
 func newRelabelTestApp(spy runs.RunService) *app {
 	unlabelled := runs.Asset{
 		ID:           "asset-1",
@@ -1037,6 +1067,12 @@ func (s *notebookSaveFailSpy) WorkflowTree(context.Context, string) (string, err
 }
 
 func (s *notebookSaveFailSpy) ListAssetLinks(context.Context, string) ([]runs.Asset, error) {
+	return nil, nil
+}
+
+// ListTimers keeps the run bench alive on tests whose fake predates the
+// timer bridge: no persisted timers, never a nil-embedded panic.
+func (s *notebookSaveFailSpy) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
 	return nil, nil
 }
 
@@ -1660,6 +1696,12 @@ func (s *saveBatchCauseSpy) ListAssetLinks(context.Context, string) ([]runs.Asse
 	return nil, nil
 }
 
+// ListTimers keeps the run bench alive on tests whose fake predates the
+// timer bridge: no persisted timers, never a nil-embedded panic.
+func (s *saveBatchCauseSpy) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
+	return nil, nil
+}
+
 type saveBatchObserver struct {
 	*saveBatchCauseSpy
 	grid *resultgrid.Grid
@@ -1776,6 +1818,12 @@ func (s *assetFailSpy) ListAssetLinks(context.Context, string) ([]runs.Asset, er
 
 func (s *assetFailSpy) WorkflowTree(context.Context, string) (string, error) {
 	return "", nil
+}
+
+// ListTimers keeps the run bench alive on tests whose fake predates the
+// timer bridge: no persisted timers, never a nil-embedded panic.
+func (s *assetFailSpy) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
+	return nil, nil
 }
 
 func TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable(t *testing.T) {
