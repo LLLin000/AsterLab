@@ -2847,6 +2847,78 @@ mix_factor_final_concentration: {value: 50, unit: ng/mL}
         assert_eq!(execution_event_count(&db), 2);
         assert_eq!(other["record"]["parent_id"], "run-2");
     }
+    #[test]
+    fn projection_cache_hits_without_changing_authority() {
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate_records_schema(&mut db).unwrap();
+        seed_readout_runs(&db);
+
+        let view = asterlab_core::record_projection::ProjectionView::Unblinded;
+        let first = run_workspace_typed_for_view(&db, "run-1", view).unwrap();
+        assert_eq!(execution_event_count(&db), 0);
+
+        // Second read hits the cache row written by the first.
+        let second = run_workspace_typed_for_view(&db, "run-1", view).unwrap();
+        assert_eq!(second, first);
+        let cached: String = db
+            .query_row(
+                "SELECT payload_json FROM projection_cache WHERE entity_id='run-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(cached.contains("run-1"));
+        // Authority is untouched: no event, well, or plate rows appeared.
+        assert_eq!(execution_event_count(&db), 0);
+    }
+
+    #[test]
+    fn projection_cache_invalidates_when_events_grow() {
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate_records_schema(&mut db).unwrap();
+        seed_readout_runs(&db);
+
+        let view = asterlab_core::record_projection::ProjectionView::Unblinded;
+        let before = run_workspace_typed_for_view(&db, "run-1", view).unwrap();
+        assert!(before.occurrences.is_empty());
+
+        submit_readout(&mut db, &readout_submit_request("run-1")).unwrap();
+        let after = run_workspace_typed_for_view(&db, "run-1", view).unwrap();
+        // A scalar readout event carries no occurrence_id, so occurrences stay
+        // empty; the new measurement event must still show up.
+        assert_eq!(after.events.len(), before.events.len() + 1);
+        assert!(after.events.iter().any(|event| event.event_type.as_deref() == Some("measurement")));
+    }
+
+    #[test]
+    fn projection_cache_falls_back_when_table_or_row_is_missing() {
+        // Seeded without `migrate_records_schema`: no projection_cache table.
+        let mut db = Connection::open_in_memory().unwrap();
+        seed_readout_runs(&db);
+        let view = asterlab_core::record_projection::ProjectionView::Unblinded;
+        let workspace = run_workspace_typed_for_view(&db, "run-1", view).unwrap();
+        assert_eq!(workspace.run_id, "run-1");
+        // Corrupt payload row: unparseable JSON forces live recompute.
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate_records_schema(&mut db).unwrap();
+        seed_readout_runs(&db);
+        db.execute(
+            "INSERT INTO projection_cache(entity_id, source_revision, projection_kind, payload_json, payload_hash, updated_at) VALUES('run-1', 0, 'run_workspace', 'not-json{{{', 'deadbeef', 'now')",
+            [],
+        )
+        .unwrap();
+        let workspace = run_workspace_typed_for_view(&db, "run-1", view).unwrap();
+        assert_eq!(workspace.run_id, "run-1");
+        // The stale corrupt row is ignored; a fresh row holds live data.
+        let payloads: Vec<String> = db
+            .prepare("SELECT payload_json FROM projection_cache WHERE entity_id='run-1'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|row| row.ok())
+            .collect();
+        assert!(payloads.iter().any(|payload| payload.contains("run-1")));
+    }
 
     #[test]
     fn readout_batch_writes_one_event_or_nothing() {

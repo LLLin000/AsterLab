@@ -22,7 +22,7 @@
 //! them back.
 
 use crate::reading_facts::{
-    parse_coordinate, query_readings, resolve_plate_for, time_key, ReadingIssue, ReadingKey,
+    parse_coordinate, query_readings, resolve_plate_for, ReadingIssue, ReadingKey,
     ReadingOverwrite, ReadingQuery, ReadingTarget,
 };
 use crate::readout_schema::{
@@ -752,28 +752,12 @@ pub fn query_readout_records(
     workspace: &RunWorkspace,
     request: &ReadoutRecordQuery,
 ) -> ReadoutRecordQueryResult {
-    let mut events: Vec<(String, &crate::run_workspace::ExecutionEventView)> = workspace
-        .events
-        .iter()
-        .map(|event| {
-            (
-                time_key(
-                    event
-                        .recorded_at
-                        .as_deref()
-                        .or(event.occurred_at.as_deref())
-                        .unwrap_or_default(),
-                ),
-                event,
-            )
-        })
-        .collect();
-    events.sort_by(|left, right| left.0.cmp(&right.0));
+    let events = crate::reading_facts::ordered_events(workspace);
 
     let mut latest: HashMap<String, usize> = HashMap::new();
     let mut records: Vec<ReadoutRecord> = Vec::new();
     let mut issues: Vec<ReadingIssue> = Vec::new();
-    for (_, event) in events {
+    for event in events {
         let step_path = event
             .protocol_step_path
             .as_deref()
@@ -788,13 +772,12 @@ pub fn query_readout_records(
             let readout: Readout = match serde_json::from_value(entry["readout"].clone()) {
                 Ok(readout) => readout,
                 Err(error) => {
-                    issues.push(ReadingIssue {
-                        code: "invalid_readout_record".to_owned(),
-                        message: format!("存储的读数记录无法解析：{error}"),
-                        event_id: Some(event.event_id.clone()),
-                        step_path: Some(step_path.clone()),
-                        target: None,
-                    });
+                    issues.push(crate::reading_facts::malformed_record_issue(
+                        "invalid_readout_record",
+                        format!("存储的读数记录无法解析：{error}"),
+                        Some(event.event_id.clone()),
+                        Some(step_path.clone()),
+                    ));
                     continue;
                 }
             };

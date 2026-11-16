@@ -698,6 +698,115 @@ pub(crate) fn run_workspace_typed(
     )
 }
 
+/// Derived-only cache helpers for [`run_workspace_typed_for_view`].
+///
+/// `projection_cache` never stores authority: rows are keyed by
+/// `(entity_id, source_revision, projection_kind)` where the revision is a
+/// fingerprint over every Run-scoped input row (the Run record itself plus
+/// its events, asset links, plates and wells). Any write to those inputs
+/// changes the fingerprint, so a stale row never matches. Every cache path
+/// falls back to live computation: a missing table (pre-migration database),
+/// a missing or mismatched row, or an unparseable payload all recompute.
+pub(crate) fn projection_cache_table_exists(db: &Connection) -> bool {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='projection_cache')",
+        [],
+        |row| row.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
+}
+
+pub(crate) fn projection_source_revision(db: &Connection, run_id: &str) -> Option<i64> {
+    let mut stmt = db
+        .prepare(
+            "SELECT id, revision, updated_at FROM records WHERE id=?1 OR parent_id=?1 OR parent_id IN (SELECT id FROM records WHERE kind='plate' AND parent_id=?1) ORDER BY id",
+        )
+        .ok()?;
+    let rows: Vec<(String, i64, String)> = stmt
+        .query_map([run_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .ok()?
+        .filter_map(|row| row.ok())
+        .collect();
+    if rows.is_empty() {
+        return None;
+    }
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for (id, revision, updated_at) in &rows {
+        hasher.update(id.as_bytes());
+        hasher.update([0]);
+        hasher.update(revision.to_le_bytes());
+        hasher.update([0]);
+        hasher.update(updated_at.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&digest[..8]);
+    Some((i64::from_le_bytes(bytes) & i64::MAX) ^ (rows.len() as i64))
+}
+
+fn read_cached_workspace(
+    db: &Connection,
+    run_id: &str,
+    source_revision: i64,
+    view: asterlab_core::record_projection::ProjectionView,
+) -> Option<asterlab_core::run_workspace::RunWorkspace> {
+    use asterlab_core::projection_cache::{validate_cached, ProjectionCacheKey, ProjectionKind};
+    let kind = match view {
+        asterlab_core::record_projection::ProjectionView::Blind => return None,
+        asterlab_core::record_projection::ProjectionView::Unblinded => ProjectionKind::RunWorkspace,
+    };
+    let requested = ProjectionCacheKey::new(run_id, source_revision, kind);
+    let (stored_revision, stored_kind, stored_hash, payload_raw): (i64, String, String, String) =
+        db.query_row(
+            "SELECT source_revision, projection_kind, payload_hash, payload_json FROM projection_cache WHERE entity_id=?1 AND source_revision=?2 AND projection_kind=?3",
+            rusqlite::params![run_id, source_revision, kind.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .ok()?;
+    let payload: Value = serde_json::from_str(&payload_raw).ok()?;
+    validate_cached(
+        &requested,
+        run_id,
+        stored_revision,
+        &stored_kind,
+        &stored_hash,
+        payload.clone(),
+    )?;
+    serde_json::from_value(payload).ok()
+}
+
+fn write_cached_workspace(
+    db: &Connection,
+    run_id: &str,
+    source_revision: i64,
+    workspace: &asterlab_core::run_workspace::RunWorkspace,
+) {
+    use asterlab_core::projection_cache::{cache_entry, ProjectionCacheKey, ProjectionKind};
+    let Ok(payload) = serde_json::to_value(workspace) else {
+        return;
+    };
+    let key = ProjectionCacheKey::new(run_id, source_revision, ProjectionKind::RunWorkspace);
+    let entry = cache_entry(key, payload, stamp());
+    let payload_raw = serde_json::to_string(&entry.payload).unwrap_or_default();
+    if payload_raw.is_empty() {
+        return;
+    }
+    let _ = db.execute(
+        "INSERT INTO projection_cache(entity_id, source_revision, projection_kind, payload_json, payload_hash, updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(entity_id, source_revision, projection_kind) DO UPDATE SET payload_json=excluded.payload_json, payload_hash=excluded.payload_hash, updated_at=excluded.updated_at",
+        rusqlite::params![
+            entry.key.entity_id,
+            entry.key.source_revision,
+            entry.key.kind.as_str(),
+            payload_raw,
+            entry.payload_hash,
+            entry.updated_at,
+        ],
+    );
+}
 pub(crate) fn run_workspace_typed_for_view(
     db: &Connection,
     run_id: &str,
@@ -781,6 +890,16 @@ pub(crate) fn run_workspace_typed_for_view(
         plate["wells"] = json!(wells_by_plate.remove(&plate_id).unwrap_or_default());
     }
 
+    let cached_revision = if projection_cache_table_exists(db) {
+        projection_source_revision(db, run_id)
+    } else {
+        None
+    };
+    if let Some(source_revision) = cached_revision {
+        if let Some(cached) = read_cached_workspace(db, run_id, source_revision, view) {
+            return Ok(cached);
+        }
+    }
     let workspace = asterlab_core::run_workspace::build_for_view(
         run_id,
         design_id,
@@ -794,6 +913,14 @@ pub(crate) fn run_workspace_typed_for_view(
         view,
     )
     .map_err(|error| CliError::internal(error.to_string()))?;
+    if let Some(source_revision) = cached_revision {
+        if matches!(
+            view,
+            asterlab_core::record_projection::ProjectionView::Unblinded
+        ) {
+            write_cached_workspace(db, run_id, source_revision, &workspace);
+        }
+    }
     Ok(workspace)
 }
 
