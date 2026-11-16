@@ -7,6 +7,7 @@ import (
 
 	"asterlab-mygo-prototype/internal/runui"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/modules/runs"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -220,6 +221,40 @@ func TestCoreWriteErrorOffersRecoveryAction(t *testing.T) {
 		if !tt.HasText(text) {
 			t.Fatalf("failed-write state missing %q: %q", text, tt.Texts())
 		}
+	}
+}
+
+func TestTimerStripShowsRunningTimers(t *testing.T) {
+	remaining := uint64(125)
+	selected := ""
+	s := &Shell{Page: Run, OnTimerSelect: func(id string) { selected = id }, ActiveTimers: []runs.ActiveTimer{
+		{RunID: "r1", RunTitle: "L929 夜间孵育", TimerID: "t1", ElapsedS: 300, RemainingS: &remaining},
+		{RunID: "r2", RunTitle: "CCK-8 读板", TimerID: "t2", ElapsedS: 61},
+	}}
+	tt := render(s.page, 900, 600)
+	tt.Frame()
+	// UX-LAYOUT / UX-P3 / UX-DESIGN: running timers from every experiment
+	// share one strip built from theme tokens and components.Button.
+	for _, text := range []string{"计时中", "L929 夜间孵育", "剩余 2:05", "CCK-8 读板", "已计时 1:01"} {
+		if !tt.HasText(text) {
+			t.Fatalf("timer strip missing %q: %q", text, tt.Texts())
+		}
+	}
+	if err := tt.Click("L929 夜间孵育 · 剩余 2:05"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if selected != "r1" {
+		t.Fatalf("timer click selected run %q, want r1", selected)
+	}
+}
+
+func TestTimerStripEmptyRendersNothing(t *testing.T) {
+	s := &Shell{Page: Run}
+	tt := render(s.page, 900, 600)
+	tt.Frame()
+	if tt.HasText("计时中") {
+		t.Fatalf("empty timer strip must reserve no space: %q", tt.Texts())
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/modules/runs"
 )
 
 type Page int
@@ -98,19 +99,23 @@ type RecentRun struct{ ID, Title, Meta string }
 // Shell owns AsterLab's window-level state: the page, the selected project and
 // design, and the window Onevra draws.
 type Shell struct {
-	Project     string
-	Projects    []string
-	Designs     []DesignItem
-	RecentRuns  []RecentRun
-	Selected    string
-	Page        Page
-	Loading     bool
-	Error       string
-	OnSelect    func(string)
-	OnProject   func(string)
-	OnRunSelect func(string)
-	OnPage      func(Page)
-	OnSidebar   func(bool)
+	Project    string
+	Projects   []string
+	Designs    []DesignItem
+	RecentRuns []RecentRun
+	Selected   string
+	Page       Page
+	Loading    bool
+	Error      string
+	// ActiveTimers feeds the persistent cross-page timer strip. Empty means
+	// no strip at all: no placeholder, no reserved space. UX-LAYOUT, UX-DESIGN.
+	ActiveTimers  []runs.ActiveTimer
+	OnTimerSelect func(runID string)
+	OnSelect      func(string)
+	OnProject     func(string)
+	OnRunSelect   func(string)
+	OnPage        func(Page)
+	OnSidebar     func(bool)
 
 	Query      string
 	OnContinue func()
@@ -151,10 +156,10 @@ func (s *Shell) Invalidate() {
 	}
 }
 
+// breadcrumb is the trimmed top bar: the window title already says AsterLab,
+// so only the location and live states render here. UX-P1, UX-LAYOUT, UX-DESIGN.
 func (s *Shell) breadcrumb(c *ui.Context) {
 	t := c.Theme()
-	components.Text(c, "AsterLab").FontWeight(600).SingleLine()
-	components.Text(c, "/").TextColor(t.TextMuted)
 	components.Text(c, s.location()).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 	ui.Spacer(c)
 	if s.Loading {
@@ -265,6 +270,10 @@ func (s *Shell) page(c *ui.Context) {
 	}
 	padding := t.Space(3)
 	ui.Column(c).Fill().Padding(inset, 0, 0, 0).Background(t.Background).Children(func() {
+		// UX-LAYOUT / UX-DESIGN: the global timer strip sits above every page
+		// and renders nothing at all when no timer runs — no placeholder, no
+		// reserved space.
+		s.timerStrip(c)
 		ui.Column(c).Grow(1).MinHeight(0).Padding(0, padding, padding, padding).Children(func() {
 			if s.Error != "" {
 				// UX-P5 / UX-STATE / UX-DONE: keep a failed write visible on every surface, with cause and recovery guidance.
@@ -284,6 +293,47 @@ func (s *Shell) page(c *ui.Context) {
 			}
 		})
 	})
+}
+
+// timerStrip is the persistent cross-page global timer bar. It shows running
+// timers only — across experiments, countdowns and windows — and renders
+// nothing when the list is empty. Actions use components.Button Ghost, the
+// quiet one-action control; all values come from theme tokens. UX-IA-3,
+// UX-P3, UX-DESIGN.
+func (s *Shell) timerStrip(c *ui.Context) {
+	if len(s.ActiveTimers) == 0 {
+		return
+	}
+	t := c.Theme()
+	ui.Row(c).FillWidth().Padding(t.Space(1), t.Space(2)).Gap(t.Space(2)).
+		Background(t.Surface).Children(func() {
+		components.Text(c, "计时中").TextColor(t.TextMuted).FontSize(t.Rem(.8))
+		for _, timer := range s.ActiveTimers {
+			timer := timer
+			label := timer.RunTitle + " · " + formatTimerClock(timer)
+			if components.Button(c, label, components.ButtonGhost).Clicked() && s.OnTimerSelect != nil {
+				s.OnTimerSelect(timer.RunID)
+			}
+		}
+	})
+}
+
+// formatTimerClock renders one running timer: remaining time for a countdown,
+// elapsed time for a stopwatch with no planned duration.
+func formatTimerClock(timer runs.ActiveTimer) string {
+	if timer.RemainingS != nil {
+		return "剩余 " + formatDuration(*timer.RemainingS)
+	}
+	return "已计时 " + formatDuration(timer.ElapsedS)
+}
+
+// formatDuration renders seconds as mm:ss, or h:mm:ss past the hour.
+func formatDuration(total uint64) string {
+	h, m, sec := total/3600, (total%3600)/60, total%60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, sec)
+	}
+	return fmt.Sprintf("%d:%02d", m, sec)
 }
 
 func (s *Shell) projectView(c *ui.Context) {
