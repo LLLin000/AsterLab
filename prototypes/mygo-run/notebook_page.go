@@ -20,6 +20,7 @@ import (
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/protocol"
 	"asterlab-mygo-prototype/internal/resultgrid"
+	"asterlab-mygo-prototype/internal/runworkspace"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
@@ -1125,6 +1126,7 @@ func citationKindLabel(kind string) string {
 		return "运行引用"
 	}
 }
+
 // recordBoardPage renders the automatic record board (mode 图板): the shared
 // RecordProjection as planned-vs-actual summary plus the representative
 // Well x Timepoint x FOV matrix, with dynamic references, derived design

@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"github.com/egoist/mygo/ui"
 	"strings"
 	"testing"
-	"github.com/egoist/mygo/ui"
 
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
@@ -95,6 +95,7 @@ func TestNotebookDocumentModeCanInsertPlateModule(t *testing.T) {
 		t.Fatalf("inserted module did not render: %q", tt.Texts())
 	}
 }
+
 // sealStubSvc persists Notebook prose in memory: the sign path is the same
 // SaveNotebook call the GUI uses, with no native service involved.
 type sealStubSvc struct {

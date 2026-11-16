@@ -148,12 +148,12 @@ func protocolPage(c *ui.Context, a *app) {
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(4)).Gap(t.Space(2)).
 			AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "Protocol versions · 只读").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-				protocol.RenderVersions(c, versions, state.selectedVersionID, func(id string) {
-					state.selectedByUser = true
-					state.selectedVersionID = id
-				})
+			ui.Text(c, "Protocol versions · 只读").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			protocol.RenderVersions(c, versions, state.selectedVersionID, func(id string) {
+				state.selectedByUser = true
+				state.selectedVersionID = id
 			})
+		})
 
 		// UX-STATE: a Run remains frozen even when a listed version is unresolved.
 		if frozen {
@@ -241,37 +241,37 @@ func renderProtocolDocument(c *ui.Context, source string, mode asterdoc.Mode, re
 				ui.Box(c).FillWidth().MaxWidth(820).MaxWidthPercent(100).
 					Radius(t.Radius).Border(1, t.Border).Background(t.Surface).
 					Padding(t.Space(7), t.Space(8)).Children(func() {
-						view := &asterdoc.View{
-							Doc: doc, Registry: asterdoc.BuiltinRegistry(), Mode: mode,
-							ReadOnly: true, DocumentRevision: fmt.Sprint(revision),
+					view := &asterdoc.View{
+						Doc: doc, Registry: asterdoc.BuiltinRegistry(), Mode: mode,
+						ReadOnly: true, DocumentRevision: fmt.Sprint(revision),
+					}
+					index := 0
+					protocol.RenderMarkdownWith(c, source, func(c *ui.Context, block *markdown.CodeBlockView) {
+						if block.Language != "asterlab" {
+							markdown.DefaultCodeBlock(c, block)
+							return
 						}
-						index := 0
-						protocol.RenderMarkdownWith(c, source, func(c *ui.Context, block *markdown.CodeBlockView) {
-							if block.Language != "asterlab" {
-								markdown.DefaultCodeBlock(c, block)
-								return
-							}
-							if index >= len(doc.Modules) {
-								return
-							}
-							module := doc.Modules[index]
-							index++
-							// UX-P2: references and workflow IDs are navigation metadata, not prose.
-							if module.Kind == "reference" || module.Kind == "workflow" {
-								return
-							}
-							data := make(map[string]any, len(module.Data))
-							for key, value := range module.Data {
-								data[key] = value
-							}
-							delete(data, "id")
-							if module.Kind == "step" {
-								delete(data, "assay")
-								delete(data, "path")
-							}
-							view.RenderModule(c, module.Kind, module.Schema, data)
-						})
+						if index >= len(doc.Modules) {
+							return
+						}
+						module := doc.Modules[index]
+						index++
+						// UX-P2: references and workflow IDs are navigation metadata, not prose.
+						if module.Kind == "reference" || module.Kind == "workflow" {
+							return
+						}
+						data := make(map[string]any, len(module.Data))
+						for key, value := range module.Data {
+							data[key] = value
+						}
+						delete(data, "id")
+						if module.Kind == "step" {
+							delete(data, "assay")
+							delete(data, "path")
+						}
+						view.RenderModule(c, module.Kind, module.Schema, data)
 					})
+				})
 			})
 	})
 }
