@@ -1157,7 +1157,7 @@ func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "记录图板").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
 					components.Badge(c, string(state), components.BadgeOptions{Tone: recordBoardTone(state)})
 					ui.Spacer(c)
-					ui.Text(c, fmt.Sprintf("任务完成 %d/%d · 实测 %d 个 · 缺 %d 个 FOV 槽",
+					ui.Text(c, fmt.Sprintf("任务完成 %d/%d · 矩阵实测值 %d 个 · 缺 %d 个 FOV 槽",
 						proj.CompletedTasks(), len(proj.Summary), proj.MeasurementCount(), proj.Gaps)).
 						FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).FontFeatures("tnum")
 				})

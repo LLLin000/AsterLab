@@ -282,3 +282,65 @@ func TestDeriveDesign(t *testing.T) {
 		t.Fatal("derived JSON is not a handoff payload")
 	}
 }
+
+// TestMeasurementCountCoversMatrixCellsOnly pins the narrow contract: the
+// count covers matrix-cell values, never the per-task measurements, because
+// the same fact can appear in both and the two cannot be deduplicated safely.
+func TestMeasurementCountCoversMatrixCellsOnly(t *testing.T) {
+	snap, assets := recordFixture()
+	snap.Measurements = append(snap.Measurements, runs.Measurement{
+		SampleID: "S9", Endpoint: "RNA 浓度", Value: 70.1, Unit: "ng/uL", TaskKey: "task-image",
+	})
+	proj := Project(snap, assets)
+	matrixValues := 0
+	for _, cell := range proj.Matrix {
+		matrixValues += len(cell.Values)
+	}
+	if proj.MeasurementCount() != matrixValues {
+		t.Fatalf("count = %d, matrix values = %d", proj.MeasurementCount(), matrixValues)
+	}
+	if proj.MeasurementCount() != 2 {
+		t.Fatalf("count = %d, want the 2 result-cell values", proj.MeasurementCount())
+	}
+	// The extra task-level measurement is still listed, just not counted.
+	found := false
+	for _, sum := range proj.Summary {
+		for _, m := range sum.Measurements {
+			if m.SampleID == "S9" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("task-level measurement disappeared from the summary")
+	}
+}
+
+// TestCoordinatedImageCreatesItsOwnCell pins the finding-false case: a
+// coordinated image whose well has no measured cell still gets a cell, fills
+// its exact FOV slot, and is never reported unassigned. ensureImageCells runs
+// before assignImages, so no coordinated asset can disappear.
+func TestCoordinatedImageCreatesItsOwnCell(t *testing.T) {
+	snap := runs.RunSnapshot{RunID: "run-1", DesignID: "design-1", DesignRevision: 3}
+	assets := []runs.Asset{
+		{ID: "img-lone", RelativePath: "run/12h/B3-fov3.png", MediaType: "image",
+			Link: runs.AssetLink{RunID: "run-1", WellID: "B3", Timepoint: "12h", FOVIndex: 3}},
+	}
+	proj := Project(snap, assets)
+	if len(proj.Matrix) != 1 {
+		t.Fatalf("matrix = %+v", proj.Matrix)
+	}
+	cell := proj.Matrix[0]
+	if cell.Well != "B3" || cell.Timepoint != "12h" {
+		t.Fatalf("cell = %+v", cell)
+	}
+	if got := cell.Representative(3); got == nil || got.AssetID != "img-lone" {
+		t.Fatalf("FOV 3 = %+v", got)
+	}
+	if proj.Gaps != FOVSlots-1 {
+		t.Fatalf("gaps = %d", proj.Gaps)
+	}
+	if proj.UnassignedImages != 0 {
+		t.Fatalf("unassigned = %d", proj.UnassignedImages)
+	}
+}

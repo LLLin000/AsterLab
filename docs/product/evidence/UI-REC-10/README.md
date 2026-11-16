@@ -59,14 +59,22 @@ go test ./internal/notebook/... ./internal/protocol/... -count=1
 go test -run 'TestNotebook|TestProtocol' . -count=1
 ```
 
-- 通过：`internal/notebook`、`internal/notebook/record`（新增 8 项）、
-  `internal/protocol`（新增 2 项归档）、页面新增 4 项
-  （图板渲染＋FOV 切换、签核锁定/解锁、归档切换、签核态）。
+- 通过：`internal/notebook`、`internal/notebook/record`（投影/矩阵/引用/签核/
+  派生/计数口径/无测量孔位成格）、`internal/protocol`（归档展平/签核保持/
+  预览戳稳定/计数口径）、页面新增 5 项
+  （图板渲染＋FOV 切换、签核锁定/解锁、密封模式锁定、归档切换、签核态）。
 - 既有 `TestNotebook*`、`TestProtocolNever*` 全过。
 - `TestProtocolBlockPreviewFixture` 在本 checkout 失败，原因系原生绑定
   陈旧（`native: the implementation of Runs is older than its sources`），
   与本卡无关，需 coordinator 在 Windows Gate 做 `mygo native build` 后重跑；
   本卡未改 `modules/runs`、`crates/**`、`src/**`。
+
+## 已确认的范围缺口（不在本卡写范围内，需 follow-up 卡）
+
+- PDF 归档包：设计文档要求导出 PDF 自动展平为实拍图板＋参数对照，但既有
+  `asterdoc.ExportPDFWithRun`／`ExportFrozenPDFWithRunRecords` 只渲染文本行
+  （`renderPDFLine` 无图片嵌入），不能满足实拍图要求。本卡不扩展写范围
+  去实现图片版 PDF，归档导出保持 `.md`；PDF 由 coordinator 另起 follow-up。
 
 ## 留给 coordinator 人工验证（Windows Gate，不在本卡执行）
 

@@ -82,3 +82,36 @@ func TestBuildArchiveKeepsSignature(t *testing.T) {
 		t.Fatal("signature block leaked or missing from the archive")
 	}
 }
+
+// TestArchivePreviewStampIsStable pins the render-stable preview: a zero
+// export time renders the same document on every frame with an explicit
+// preview marker, and the stamp is applied only to real exports.
+func TestArchivePreviewStampIsStable(t *testing.T) {
+	proj, prose := archiveFixture()
+	first := BuildArchive(proj, prose, time.Time{})
+	second := BuildArchive(proj, prose, time.Time{})
+	if first.Markdown() != second.Markdown() {
+		t.Fatal("preview archive is not render-stable")
+	}
+	if !strings.Contains(first.Markdown(), "未导出（预览）") {
+		t.Fatalf("preview stamp missing:\n%s", first.Markdown())
+	}
+	stamped := BuildArchive(proj, prose, time.Date(2026, 11, 16, 13, 0, 0, 0, time.UTC))
+	if !strings.Contains(stamped.Markdown(), "2026-11-16T13:00:00Z") {
+		t.Fatalf("export stamp missing:\n%s", stamped.Markdown())
+	}
+}
+
+// TestArchiveHeaderCountsMatrixValuesOnly pins the truthful label: the header
+// count covers matrix-cell values, and the label says so instead of claiming
+// every measurement.
+func TestArchiveHeaderCountsMatrixValuesOnly(t *testing.T) {
+	proj, prose := archiveFixture()
+	doc := BuildArchive(proj, prose, time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)).Markdown()
+	if !strings.Contains(doc, "矩阵实测值") {
+		t.Fatalf("header label is not narrow:\n%s", doc)
+	}
+	if strings.Contains(doc, "· 实测值 ") {
+		t.Fatalf("broad measurement claim leaked:\n%s", doc)
+	}
+}

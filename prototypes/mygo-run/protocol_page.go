@@ -290,7 +290,10 @@ func (a *app) renderProtocolArchive(c *ui.Context) {
 		prose = latest
 	}
 	_, sigOK := record.Verify(prose)
-	arch := protocol.BuildArchive(proj, prose, time.Now())
+	// The preview is render-stable: it carries no export stamp, so every
+	// frame renders the same document. The stamp is applied only when the
+	// operator actually exports the package.
+	arch := protocol.BuildArchive(proj, prose, time.Time{})
 	state := record.ClassifyRecordState(a.noteDirty, sigOK)
 	ui.Column(c).Grow(1).FillWidth().Padding(t.Space(2), t.Space(4)).Gap(t.Space(2)).Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
@@ -298,7 +301,8 @@ func (a *app) renderProtocolArchive(c *ui.Context) {
 			ui.Text(c, string(state)).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted)
 			ui.Spacer(c)
 			if components.Button(c, "导出归档包", components.ButtonSecondary).Clicked() {
-				a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", arch.Markdown())
+				exported := protocol.BuildArchive(proj, prose, time.Now())
+				a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", exported.Markdown())
 			}
 		})
 		if sigOK {

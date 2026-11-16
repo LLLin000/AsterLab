@@ -166,7 +166,7 @@ func TestNotebookBoardRendersSharedProjection(t *testing.T) {
 	}
 	tt.Frame()
 	for _, want := range []string{
-		"记录图板", "计划 vs 实际", "任务完成 1/1", "代表视野矩阵",
+		"记录图板", "计划 vs 实际", "任务完成 1/1", "矩阵实测值", "代表视野矩阵",
 		"固化秒数", "FOV 1", "FOV 6", "缺", "派生设计", "签核归档", "@matrix(6h)",
 	} {
 		if !tt.HasText(want) {

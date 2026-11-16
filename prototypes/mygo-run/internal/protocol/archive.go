@@ -53,14 +53,21 @@ func (arch Archive) Markdown() string {
 	sb.WriteString(fmt.Sprintf("- Run：%s\n", displayValue(proj.RunID)))
 	sb.WriteString(fmt.Sprintf("- 设计：%s · 冻结 rev %d\n", displayValue(proj.DesignID), proj.DesignRevision))
 	sb.WriteString(fmt.Sprintf("- 状态：%s\n", displayValue(proj.Status)))
-	sb.WriteString(fmt.Sprintf("- 导出时间：%s\n", arch.ExportedAt.UTC().Format(time.RFC3339)))
+	if arch.ExportedAt.IsZero() {
+		sb.WriteString("- 导出时间：未导出（预览）\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("- 导出时间：%s\n", arch.ExportedAt.UTC().Format(time.RFC3339)))
+	}
 	if arch.Sealed && arch.Signature != nil {
 		sb.WriteString(fmt.Sprintf("- 签核：%s · %s · %s\n",
 			arch.Signature.Actor, arch.Signature.At, arch.Signature.Hash[:16]))
 	} else {
 		sb.WriteString("- 签核：未签核\n")
 	}
-	sb.WriteString(fmt.Sprintf("- 任务完成：%d/%d · 实测值 %d 个 · 缺 %d 个 FOV 槽\n\n",
+	// The count covers matrix-cell values only: the same fact can also appear
+	// in per-task measurements, and the two cannot be deduplicated safely, so
+	// the label stays narrow instead of claiming every measurement.
+	sb.WriteString(fmt.Sprintf("- 任务完成：%d/%d · 矩阵实测值 %d 个 · 缺 %d 个 FOV 槽\n\n",
 		proj.CompletedTasks(), len(proj.Summary), proj.MeasurementCount(), proj.Gaps))
 
 	sb.WriteString("## 计划 vs 实际\n\n")

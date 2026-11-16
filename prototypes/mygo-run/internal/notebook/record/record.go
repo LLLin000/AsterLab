@@ -617,7 +617,10 @@ func (proj RecordProjection) CompletedTasks() int {
 	return n
 }
 
-// MeasurementCount counts recorded values across the matrix and summaries.
+// MeasurementCount counts matrix-cell values (ResultCell readouts placed in
+// Well x Timepoint cells). It deliberately does not roll up per-task
+// measurements: the same fact can appear in both, and the two cannot be
+// deduplicated safely, so consumers must label this count narrowly.
 func (proj RecordProjection) MeasurementCount() int {
 	n := 0
 	for _, cell := range proj.Matrix {
