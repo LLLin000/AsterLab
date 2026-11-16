@@ -186,6 +186,8 @@ type app struct {
 
 	selectedTask string
 	tools        *tools.Workspace
+	// timersPoll throttles the global timer-strip refresh; see pollTimers.
+	timersPoll time.Time
 }
 
 func (a *app) nextOp() string {
@@ -1515,6 +1517,99 @@ func (a *app) selectTaskFromEnv() {
 	}
 }
 
+// openRunLinkFromEnv applies an explicit automation deep link from
+// ASTERLAB_RUN_LINK, alongside ASTERLAB_TASK_PATH. Invalid links become a
+// visible shell error, never a panic. UX-P5, UX-IA-3, UX-DESIGN.
+func (a *app) openRunLinkFromEnv() {
+	raw := os.Getenv("ASTERLAB_RUN_LINK")
+	if raw == "" {
+		return
+	}
+	a.openRunWellLink(raw)
+}
+
+// openRunWellLink resolves asterlab://run/<runID>/well/<well> into a Run-page
+// navigation intent with the well selected on the recording grid.
+func (a *app) openRunWellLink(raw string) {
+	link, err := state.ParseRunWellLink(raw)
+	if err != nil {
+		if a.shell != nil {
+			a.shell.Error = err.Error()
+		}
+		return
+	}
+	a.selectRun(link.RunID)
+	if a.shell == nil || a.shell.Page != shell.Run {
+		return
+	}
+	if a.ws == nil || a.ws.Grid == nil {
+		a.shell.Error = "实验已打开，但当前任务没有可定位的孔板"
+		return
+	}
+	schema := a.ws.Grid.Schema
+	row, col, ok := state.FindWellCell(link.Well, schema.RowLabels, schema.ColumnLabels)
+	if !ok {
+		a.shell.Error = "孔位 " + link.Well + " 不在当前任务的孔板上"
+		return
+	}
+	a.ws.Grid.SetSelection(resultgrid.Selection{StartRow: row, StartColumn: col, EndRow: row, EndColumn: col})
+	a.shell.Error = ""
+}
+
+// pollTimers refreshes the global timer strip at most every five seconds, so
+// countdowns stay live without a Core call on every frame. Only successful
+// reads replace the strip; a failed poll keeps the last known timers, and a
+// failing service must never crash the frame loop. UX-P5, UX-DESIGN.
+func (a *app) pollTimers() {
+	if a.runSvc == nil || a.shell == nil {
+		return
+	}
+	now := time.Now()
+	if !a.timersPoll.IsZero() && now.Sub(a.timersPoll) < 5*time.Second {
+		return
+	}
+	a.timersPoll = now
+	timers, err := listActiveTimers(a.runSvc, now)
+	if err != nil {
+		return
+	}
+	if !equalTimers(a.shell.ActiveTimers, timers) {
+		a.shell.ActiveTimers = timers
+		a.shell.Invalidate()
+	}
+}
+
+// listActiveTimers calls the service with a panic guard: the poller runs on
+// the frame loop, so a torn implementation must degrade to stale timers.
+func listActiveTimers(svc runs.RunService, now time.Time) (timers []runs.ActiveTimer, err error) {
+	defer func() {
+		if recover() != nil {
+			timers, err = nil, fmt.Errorf("计时服务不可用")
+		}
+	}()
+	return svc.ListActiveTimers(context.Background(), now.UTC().Format(time.RFC3339))
+}
+
+func equalTimers(a, b []runs.ActiveTimer) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].TimerID != b[i].TimerID || a[i].RunID != b[i].RunID ||
+			a[i].ElapsedS != b[i].ElapsedS || remainingS(a[i]) != remainingS(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func remainingS(t runs.ActiveTimer) uint64 {
+	if t.RemainingS == nil {
+		return 0
+	}
+	return *t.RemainingS
+}
+
 func taskStepPath(task runs.RunTask) string {
 	if task.Path != "" {
 		return task.Path
@@ -1831,6 +1926,8 @@ func (a *app) preload() {
 			if os.Getenv("ASTERLAB_RUN_ID") == "" && os.Getenv("ASTERLAB_DESIGN_ID") == "" {
 				a.restoreSession()
 			}
+			// An explicit deep link wins over the restored session.
+			a.openRunLinkFromEnv()
 			a.shell.Invalidate()
 		})
 	}()
@@ -2354,15 +2451,16 @@ func main() {
 	a.syncErr = initErr
 	log.Printf("native services: run=%v(%v) design=%v(%v) time-budget=%v(%v)", runSvc != nil, runErr, designSvc != nil, designErr, timeBudgetSvc != nil, timeBudgetErr)
 	a.shell = &shell.Shell{
-		Project:     "",
-		Page:        shell.Project,
-		Error:       initErr,
-		OnSelect:    func(id string) { a.selectDesign(id) },
-		OnRunSelect: func(id string) { a.selectRun(id) },
-		OnCreate:    func() { a.newDesignOpen = true },
-		OnImport:    func() { a.importOpen = true },
-		OnPage:      func(p shell.Page) { a.shell.Page = p; a.saveSession() },
-		Content:     func(c *ui.Context) { contentPage(c, a) },
+		Project:       "",
+		Page:          shell.Project,
+		Error:         initErr,
+		OnSelect:      func(id string) { a.selectDesign(id) },
+		OnRunSelect:   func(id string) { a.selectRun(id) },
+		OnTimerSelect: func(id string) { a.selectRun(id) },
+		OnCreate:      func() { a.newDesignOpen = true },
+		OnImport:      func() { a.importOpen = true },
+		OnPage:        func(p shell.Page) { a.shell.Page = p; a.saveSession() },
+		Content:       func(c *ui.Context) { contentPage(c, a) },
 	}
 
 	// runui workspace.
@@ -2931,6 +3029,7 @@ func (a *app) renderSyncErrorBanner(c *ui.Context) {
 
 func contentPage(c *ui.Context, a *app) {
 	a.pollPDFExport(c)
+	a.pollTimers()
 	ui.Column(c).Fill().Children(func() {
 		a.renderSyncErrorBanner(c)
 		ui.Box(c).Grow(1).MinHeight(0).FillWidth().Children(func() {
