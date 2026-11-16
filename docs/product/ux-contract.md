@@ -177,8 +177,11 @@ before writing code.
 
 Binding on every UI task:
 
-- Values come from `internal/theme/theme.go` `Tokens`; a literal colour, font
-  size, padding or radius outside the theme fails P3.
+- Generic colors, radii, and control heights come from `Tokens`; typography
+  uses text tokens or theme-scaled `t.Rem`, and spacing uses spacing tokens or
+  `t.Space`. Scientific semantic colors may only use named palettes registered
+  in `docs/product/design-system.md` §1; call sites must not contain literals.
+  Violations fail P3.
 - Pick the component from the table first; restyle later, never the reverse.
 - A new component is allowed only when neither `oneo-me/onevra/source/components`
   nor an existing package has an equivalent, and it must be registered in the
