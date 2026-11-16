@@ -65,10 +65,15 @@ jobs:
           body_file="${RUNNER_TEMP}/pr-body.md"
           printf '%s' "$PR_BODY" > "$body_file"
           status=0
-          python3 scripts/ci/scope_check.py \
-            --pr-body-file "$body_file" \
-            --base "origin/${BASE_REF}" \
-            --head HEAD > scope-check.log 2>&1 || status=$?
+          if ! grep -Eq '<!--[[:space:]]*kandev-task:[[:space:]]*[0-9A-Fa-f-]{36}[[:space:]]*-->' "$body_file"; then
+            echo '::error::scope-check: PR body must carry a valid <!-- kandev-task: <uuid> --> marker' | tee scope-check.log
+            status=2
+          else
+            python3 scripts/ci/scope_check.py \
+              --pr-body-file "$body_file" \
+              --base "origin/${BASE_REF}" \
+              --head HEAD > scope-check.log 2>&1 || status=$?
+          fi
           cat scope-check.log
           {
             echo '## scope-check'
