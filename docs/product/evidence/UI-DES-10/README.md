@@ -22,9 +22,15 @@ Post-change captures rendered through the `ui.Tester` harness against the produc
 - [design-plate-tester-900x600.png](design-plate-tester-900x600.png) — Design pane `12 孔板` section with the `流程 / 12 孔板 / 配液单` switch (the prep-calculator link) and the source-labeled budget bar.
 - [design-prep-tester-900x600.png](design-prep-tester-900x600.png) — Design pane `配液单` dilution-calculator surface (`母液 2.5 µL · 稀释液 7.5 µL`).
 
-All captures show the `设计标注` fallback with Core budget fields `—` and no OperationSpec v2 time data; the sources are not combined. `internal/asterdoc` tests cover the shared canvas, scaled wells, and interactive 6/12/24/48/96/384 geometry. The legacy assay assignment path remains 12-well-specific.
+Post-change native-app captures after the fixed-canvas update (`mygo-automation`; 900×600 logical window, emitted as 1328×888 PNGs on this Windows host). The modal overlays the Design page; these prove well sizing and selection, not prep linkage or budget-bar content:
+- [native-12-light-900x600.png](native-12-light-900x600.png) — light, 12 wells, C4 selected and assigned to `g-control`.
+- [native-12-dark-900x600.png](native-12-dark-900x600.png) — dark, 12 wells, C4 selected and assigned to `g-control`.
+- [native-384-light-900x600.png](native-384-light-900x600.png) — light, 384 wells, P24 selected and assigned to `g-control`.
+- [native-384-dark-900x600.png](native-384-dark-900x600.png) — dark, 384 wells, P24 selected and assigned to `g-control`.
 
-Verification (`O:/des10/prototypes/mygo-run`, 2026-11-16):
+The design-page captures show the `设计标注` fallback with Core budget fields `—` and no OperationSpec v2 time data; the sources are not combined. Native-app overlays focus on well geometry and are not budget-bar evidence. `internal/asterdoc` tests cover the shared canvas, scaled wells, and interactive 6/12/24/48/96/384 geometry. The legacy assay assignment path remains 12-well-specific.
+
+Verification (`O:/ui-des10fix/prototypes/mygo-run`, 2026-11-16):
 
 ```text
 ok  asterlab-mygo-prototype/internal/asterdoc      1.810s
@@ -33,7 +39,7 @@ ok  asterlab-mygo-prototype/internal/workflowtree  0.324s
 ok  asterlab-mygo-prototype/internal/uikit/plate   2.181s
 ```
 
-Focused plate runs: `TestPlateZoomOverlaySelectsWellsAndReportsAssignment`, `TestPlateFormatsUseEditableOverlay` (6/12/24/48/96/384), `TestPlateGridLayoutKeepsCanvasAndScalesWells`, `TestPlateMixPlanDerivesGelAndSeedingRows`, `TestPlateMixRejectsInconsistentPlans` — all PASS. Impeccable `detect --json internal/asterdoc/view.go` — `[]` (no findings).
+Package-suite coverage includes `TestPlateZoomOverlaySelectsWellsAndReportsAssignment`, `TestPlateFormatsUseEditableOverlay` (6/12/24/48/96/384), `TestPlateGridLayoutKeepsCanvasAndScalesWells`, `TestPlateMixPlanDerivesGelAndSeedingRows`, and `TestPlateMixRejectsInconsistentPlans` — all PASS.
 
 ## 缺口
 

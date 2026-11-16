@@ -53,12 +53,11 @@ type View struct {
 	PlateReplicateStart string
 	PlateSampleError    string
 	PlateZoom           float32
-	marqueeActive       bool
-	marqueeRow          int
-	marqueeCol          int
-	marqueeBase         []string
-	gridDrag            ui.Point
+	gridPointerDown     bool
+	gridPointerStart    ui.Point
 	gridDragging        bool
+	gridAdditive        bool
+	gridSuppressClick   bool
 	gridStart           ui.Point
 	gridLast            ui.Point
 	gridBase            []string
@@ -241,6 +240,8 @@ func plateGridLayout(geometry Geometry, zoom float32) (viewportW, viewportH, cel
 // modal panel or inspector: the plate itself is the surface, with one floating
 // toolbar for zoom, group choice and batch assignment.
 func (v *View) plateOverlay(c *ui.Context) {
+	suppressGridClick := v.gridSuppressClick
+	v.gridSuppressClick = false
 	if v.ExpandedPlate == "" {
 		return
 	}
@@ -375,13 +376,6 @@ func (v *View) plateOverlay(c *ui.Context) {
 							})
 						})
 						viewportW, viewportH, cell := plateGridLayout(geometry, zoom)
-						gridW := plateGridLabelWidth + plateGridGap +
-							float32(geometry.Columns)*cell +
-							float32(geometry.Columns-1)*plateGridGap
-						gridH := plateGridHeaderHeight + plateGridGap +
-							float32(geometry.Rows)*cell +
-							float32(geometry.Rows-1)*plateGridGap
-						offsetX, offsetY := (viewportW-gridW)/2, (viewportH-gridH)/2
 						selectMany := func(ids []string, additive bool) {
 							if !additive {
 								v.ExpandedWells = nil
@@ -392,8 +386,29 @@ func (v *View) plateOverlay(c *ui.Context) {
 								}
 							}
 						}
-						grid := ui.Box(c).Key("plate-grid").Size(viewportW, viewportH).Children(func() {
-							ui.Column(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+						applyMarquee := func() {
+							x0, y0 := v.gridStart.X, v.gridStart.Y
+							x1, y1 := v.gridLast.X, v.gridLast.Y
+							if x0 > x1 {
+								x0, x1 = x1, x0
+							}
+							if y0 > y1 {
+								y0, y1 = y1, y0
+							}
+							selected := WellsInRect(geometry, cell, plateGridGap,
+								ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0})
+							v.ExpandedWells = v.ExpandedWells[:0]
+							if v.gridAdditive {
+								v.ExpandedWells = append(v.ExpandedWells, v.gridBase...)
+							}
+							for _, id := range selected {
+								if !containsString(v.ExpandedWells, id) {
+									v.ExpandedWells = append(v.ExpandedWells, id)
+								}
+							}
+						}
+						ui.Box(c).Key("plate-grid").Size(viewportW, viewportH).Children(func() {
+							ui.Column(c).Fill().Gap(plateGridGap).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 								ui.Row(c).Gap(plateGridGap).Children(func() {
 									ui.Box(c).Width(plateGridLabelWidth).Height(plateGridHeaderHeight)
 									for col := 1; col <= geometry.Columns; col++ {
@@ -404,7 +419,7 @@ func (v *View) plateOverlay(c *ui.Context) {
 											ui.Text(c, fmt.Sprintf("%d", col)).FontSize(t.Rem(.62)).
 												TextColor(t.TextMuted).Center()
 										})
-										if btn.Clicked() && !v.gridDragging {
+										if btn.Clicked() && !v.gridDragging && !suppressGridClick {
 											ids := make([]string, 0, geometry.Rows)
 											for row := 0; row < geometry.Rows; row++ {
 												ids = append(ids, fmt.Sprintf("%s%d", rowLabel(row), col))
@@ -421,7 +436,7 @@ func (v *View) plateOverlay(c *ui.Context) {
 										btn.Children(func() {
 											ui.Text(c, rowLabel(row)).FontSize(t.Rem(.62)).TextColor(t.TextMuted).Center()
 										})
-										if btn.Clicked() && !v.gridDragging {
+										if btn.Clicked() && !v.gridDragging && !suppressGridClick {
 											ids := make([]string, 0, geometry.Columns)
 											for col := 1; col <= geometry.Columns; col++ {
 												ids = append(ids, fmt.Sprintf("%s%d", rowLabel(row), col))
@@ -429,6 +444,7 @@ func (v *View) plateOverlay(c *ui.Context) {
 											selectMany(ids, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
 										}
 										for col := 1; col <= geometry.Columns; col++ {
+											col := col
 											well := fmt.Sprintf("%s%d", rowLabel(row), col)
 											group := wells[well]
 											selected := containsString(v.ExpandedWells, well)
@@ -443,7 +459,65 @@ func (v *View) plateOverlay(c *ui.Context) {
 											}
 											btn := ui.ButtonBase(c).Key(well).Size(cell, cell).Radius(cell/2).
 												Background(bg).Border(width, border).Label("孔 " + well)
-											if btn.Clicked() && !v.gridDragging {
+											cellPoint := func(x, y float32) ui.Point {
+												return ui.Point{
+													X: float32(col-1)*(cell+plateGridGap) + x,
+													Y: float32(row)*(cell+plateGridGap) + y,
+												}
+											}
+											btn = btn.HandleInput(func(event ui.InputEvent) bool {
+												if (event.Kind == ui.InputPointerDown || event.Kind == ui.InputPointerUp) &&
+													event.Button != 0 {
+													return false
+												}
+												switch event.Kind {
+												case ui.InputPointerDown:
+													point := cellPoint(event.X, event.Y)
+													v.gridPointerDown = true
+													v.gridPointerStart = ui.Point{X: event.X, Y: event.Y}
+													v.gridStart, v.gridLast = point, point
+													v.gridDragging = false
+													v.gridAdditive = event.Mods&(ui.Shift|ui.Cmd) != 0
+													v.gridBase = append(v.gridBase[:0], v.ExpandedWells...)
+													return false
+												case ui.InputPointerMove:
+													if !v.gridPointerDown {
+														return false
+													}
+													dx := event.X - v.gridPointerStart.X
+													dy := event.Y - v.gridPointerStart.Y
+													if !v.gridDragging {
+														if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+															return false
+														}
+														v.gridDragging = true
+													}
+													v.gridLast = cellPoint(event.X, event.Y)
+													applyMarquee()
+													return true
+												case ui.InputPointerUp:
+													if !v.gridPointerDown {
+														return false
+													}
+													v.gridPointerDown = false
+													if !v.gridDragging {
+														v.gridBase = nil
+														return false
+													}
+													if event.Canceled {
+														v.ExpandedWells = append(v.ExpandedWells[:0], v.gridBase...)
+													} else {
+														v.gridLast = cellPoint(event.X, event.Y)
+														applyMarquee()
+													}
+													v.gridDragging = false
+													v.gridSuppressClick = true
+													v.gridBase = nil
+													return true
+												}
+												return false
+											})
+											if btn.Clicked() && !v.gridDragging && !suppressGridClick {
 												mods := btn.ClickModifiers()
 												if mods&(ui.Shift|ui.Cmd) != 0 {
 													if selected {
@@ -460,39 +534,6 @@ func (v *View) plateOverlay(c *ui.Context) {
 								}
 							})
 						})
-						grid.Draggable(&v.gridDrag, ui.DraggableOptions{})
-						if grid.Dragging() {
-							px, py, ok := grid.PointerPosition()
-							if ok {
-								local := ui.Point{
-									X: px - offsetX - plateGridLabelWidth - plateGridGap,
-									Y: py - offsetY - plateGridHeaderHeight - plateGridGap,
-								}
-								if !v.gridDragging {
-									v.gridDragging = true
-									v.gridStart, v.gridLast = local, local
-									v.gridBase = append([]string(nil), v.ExpandedWells...)
-									if c.Modifiers()&(ui.Shift|ui.Cmd) == 0 {
-										v.ExpandedWells = nil
-									}
-								}
-								v.gridLast = local
-								r := ui.Rect{X: v.gridStart.X, Y: v.gridStart.Y,
-									W: local.X - v.gridStart.X, H: local.Y - v.gridStart.Y}
-								selected := WellsInRect(geometry, cell, plateGridGap, r)
-								v.ExpandedWells = append([]string(nil), v.gridBase...)
-								for _, id := range selected {
-									if !containsString(v.ExpandedWells, id) {
-										v.ExpandedWells = append(v.ExpandedWells, id)
-									}
-								}
-							}
-						} else if v.gridDragging {
-							v.gridDragging = false
-							if v.gridLast.X == v.gridStart.X && v.gridLast.Y == v.gridStart.Y {
-								v.ExpandedWells = append([]string(nil), v.gridBase...)
-							}
-						}
 					})
 				})
 				// Floating toolbar: directly above the plate, not a modal panel.

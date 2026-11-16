@@ -2,7 +2,6 @@ package asterdoc
 
 import (
 	"encoding/json"
-	"image/png"
 	"os"
 	"strconv"
 	"strings"
@@ -104,10 +103,6 @@ func TestViewRendersNativePlateAndAssignRewritesSource(t *testing.T) {
 		v.Render(c)
 	}, 1000, 900)
 	tt.Frame()
-	if f, err := os.Create("evidence-asterdoc.png"); err == nil {
-		png.Encode(f, tt.Image())
-		f.Close()
-	}
 	if !tt.HasText("96 孔板") || !tt.HasText("plate-cck8-d3") {
 		t.Fatalf("plate module did not render: %q", tt.Texts())
 	}
@@ -228,10 +223,6 @@ func TestPlateZoomOverlaySelectsWellsAndReportsAssignment(t *testing.T) {
 	if !tt.HasText("1 孔") {
 		t.Fatalf("selection missing: %q", tt.Texts())
 	}
-	if f, err := os.Create("evidence-plate-zoom.png"); err == nil {
-		png.Encode(f, tt.Image())
-		f.Close()
-	}
 	if err := tt.Click("分配到 control"); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
@@ -268,8 +259,49 @@ func TestPlateZoomOverlaySelectsWellsAndReportsAssignment(t *testing.T) {
 	tt.Frame()
 	tt.Release(cx, cy)
 	tt.Frame()
-	if !tt.HasText("3 孔") {
-		t.Fatalf("marquee selection missing: %q", tt.Texts())
+	if _, ok := tt.Find("3 孔"); !ok || len(v.ExpandedWells) != 3 ||
+		!containsString(v.ExpandedWells, "A1") ||
+		!containsString(v.ExpandedWells, "A2") ||
+		!containsString(v.ExpandedWells, "A3") {
+		t.Fatalf("marquee selected %v; want A1, A2, A3", v.ExpandedWells)
+	}
+}
+func TestPlate384OverlayMarqueeUsesRows(t *testing.T) {
+	source := strings.Replace(sample, "format: 96", "format: 384", 1)
+	doc, err := Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &View{Doc: doc, Allowed: map[string]bool{PermDocumentEdit: true}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		v.Render(c)
+	}, 1200, 900)
+	tt.Frame()
+	if err := tt.Click("放大孔板"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	center := func(well string) (float32, float32) {
+		rect, ok := tt.Find("孔 " + well)
+		if !ok {
+			t.Fatalf("well %s not found", well)
+		}
+		return rect.X + rect.W/2, rect.Y + rect.H/2
+	}
+	ax, ay := center("A1")
+	cx, cy := center("C1")
+	tt.Press(ax, ay)
+	tt.Frame()
+	tt.Move(cx, cy)
+	tt.Frame()
+	tt.Release(cx, cy)
+	tt.Frame()
+	if _, ok := tt.Find("3 孔"); !ok || len(v.ExpandedWells) != 3 ||
+		!containsString(v.ExpandedWells, "A1") ||
+		!containsString(v.ExpandedWells, "B1") ||
+		!containsString(v.ExpandedWells, "C1") {
+		t.Fatalf("vertical marquee selected %v; want A1, B1, C1", v.ExpandedWells)
 	}
 }
 
