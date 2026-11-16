@@ -2,6 +2,8 @@ package runworkspace
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,7 +119,7 @@ func PhaseName(phases []runs.TimerPhase, phaseIndex uint32) string {
 
 // WindowLine describes a t0 window from its checkpoint: before the anchor
 // fires it waits; after, it counts down to started_at + planned.
-func WindowLine(display TimerDisplay, now time.Time) string {
+func WindowLine(display TimerDisplay) string {
 	record := display.Record
 	if record.Status != "running" || record.StartedAtUTC == nil {
 		anchor := record.AnchorTaskKey
@@ -137,7 +139,6 @@ func WindowLine(display TimerDisplay, now time.Time) string {
 		return fmt.Sprintf("剩余 %s", FormatHMS(*display.RemainingS))
 	}
 	target := started.Add(time.Duration(*record.PlannedS) * time.Second)
-	_ = now
 	return fmt.Sprintf("目标 %s · 剩余 %s", target.Format("15:04"), FormatHMS(*display.RemainingS))
 }
 
@@ -145,7 +146,7 @@ func WindowLine(display TimerDisplay, now time.Time) string {
 func timerHeadline(display TimerDisplay, phases []runs.TimerPhase, now time.Time) string {
 	record := display.Record
 	if record.Mode == "window" {
-		return WindowLine(display, now)
+		return WindowLine(display)
 	}
 	if record.Mode == "stopwatch" {
 		return fmt.Sprintf("已用 %s", FormatHMS(display.ElapsedS))
@@ -309,16 +310,23 @@ func renderTimerCreate(c *ui.Context, s *State, task *RunTaskViewModel, existing
 	})
 }
 
-// parseMinutes parses the operator's duration input. Empty or invalid input
-// is an error the surface reports; no duration is ever defaulted.
+// parseMinutes parses the operator's duration input strictly: the whole
+// string must be one finite number (strconv rejects "5mins" where Sscanf
+// accepted a numeric prefix). Fractional minutes truncate toward zero, as
+// before; a sub-second result and anything outside uint64 seconds is an
+// error the surface reports. No duration is ever defaulted.
 func parseMinutes(raw string) (uint64, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return 0, fmt.Errorf("请填写分钟数")
 	}
-	var minutes float64
-	if _, err := fmt.Sscanf(trimmed, "%g", &minutes); err != nil || minutes <= 0 {
-		return 0, fmt.Errorf("分钟数必须是正数")
+	minutes, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil || math.IsNaN(minutes) || math.IsInf(minutes, 0) {
+		return 0, fmt.Errorf("分钟数必须是纯数字（如 30 或 1.5）")
 	}
-	return uint64(minutes * 60), nil
+	seconds := minutes * 60
+	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 1 || seconds >= 1<<63 {
+		return 0, fmt.Errorf("分钟数超出范围（至少 1 秒）")
+	}
+	return uint64(seconds), nil
 }

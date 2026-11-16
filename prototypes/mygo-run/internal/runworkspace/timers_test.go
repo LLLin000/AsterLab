@@ -83,7 +83,7 @@ func TestWindowLineWaitsForT0(t *testing.T) {
 	display := DescribeTimer(runs.TimerRecord{
 		Mode: "window", Status: "ready", AnchorTaskKey: &anchor, AccumulatedS: 0,
 	}, timerNow())
-	line := WindowLine(display, timerNow())
+	line := WindowLine(display)
 	if !strings.Contains(line, "step-04") || !strings.Contains(line, "t0") {
 		t.Fatalf("window line = %q, want t0 wait naming the anchor", line)
 	}
@@ -93,7 +93,7 @@ func TestWindowLineWaitsForT0(t *testing.T) {
 		Mode: "window", Status: "running", PlannedS: &planned,
 		StartedAtUTC: &started, AccumulatedS: 0,
 	}, timerNow())
-	if line := WindowLine(running, timerNow()); !strings.Contains(line, "目标") {
+	if line := WindowLine(running); !strings.Contains(line, "目标") {
 		t.Fatalf("running window line = %q, want target clock", line)
 	}
 }
@@ -109,6 +109,26 @@ func TestRoundLabelRelay(t *testing.T) {
 	}
 	if got := PhaseName(nil, 0); got != "" {
 		t.Fatalf("empty plan must name nothing, got %q", got)
+	}
+}
+
+func TestParseMinutesStrict(t *testing.T) {
+	for _, raw := range []string{"30", " 30 ", "1.5", "0.05", "1e2"} {
+		if _, err := parseMinutes(raw); err != nil {
+			t.Fatalf("parseMinutes(%q) = %v, want seconds", raw, err)
+		}
+	}
+	if got, err := parseMinutes("1.5"); err != nil || got != 90 {
+		t.Fatalf("parseMinutes(1.5) = %d, %v; want 90", got, err)
+	}
+	if got, err := parseMinutes("0.05"); err != nil || got != 3 {
+		t.Fatalf("parseMinutes(0.05) = %d, %v; want 3", got, err)
+	}
+	// Sscanf("%g") accepted a numeric prefix; strconv must reject it.
+	for _, raw := range []string{"", "  ", "abc", "5mins", "30 分钟", "NaN", "Inf", "-Inf", "1,5", "0", "-3", "0.001", "1e400"} {
+		if got, err := parseMinutes(raw); err == nil {
+			t.Fatalf("parseMinutes(%q) = %d, want an error", raw, got)
+		}
 	}
 }
 
@@ -185,11 +205,6 @@ func TestRunTimerActionFilesCompletedRound(t *testing.T) {
 }
 
 func TestSkippedTaskNeverCompletes(t *testing.T) {
-	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
-	s := NewState(vm, Callbacks{})
-	skipped := &RunTaskViewModel{TaskKey: "t-skip", Status: TaskStatus(""), Checks: nil}
-	_ = s
-	_ = skipped
 	if got := buildTaskStatus(runs.RunTask{Status: "skipped"}); got != TaskStatusSkipped {
 		t.Fatalf("Core skipped maps to %q, want skipped", got)
 	}
