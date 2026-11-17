@@ -1,0 +1,38 @@
+run: 1b0f363a-2226-45f0-bf10-f20173b4faa8 status: completed
+tasks:
+  root/rna/step-01 | - | completed
+  root/rna/step-02 | - | completed
+  root/rna/step-03 | - | completed
+  root/rna/step-04 | - | completed
+  root/rna/step-05 | - | completed
+  root/rna/step-06 | - | completed
+  root/rna/step-07 | - | completed
+  root/rna/step-08 | - | completed
+  root/rna/step-09 | - | completed
+  root/rna/step-10 | - | completed
+  root/qc/qc | - | completed
+  root/rt/rt | - | completed
+  root/qpcr/qpcr | - | completed
+events: 22
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "a8b5a719-7cdd-40ac-86d3-09879d639de6", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "2ea05640-5af5-4f10-a2d1-85b97c73dbd6", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "38601392-fbbf-4097-a152-938492e5d1e0", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "41dec476-e539-4062-b1e1-e41596670b92", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "a71387ea-a164-4eb8-b38e-8c4aeb41ddcc", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "65cc34b6-5a30-4084-8991-45950dadd78d", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "f71fea54-b6e9-4ea5-8956-9af331d57b93", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "9e4d5f30-8ce9-417c-9445-b2c37c9f8d93", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "d30a145a-36cf-4a8e-aaf2-68f62e50a5b0", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "848406b2-022a-4307-abe4-4c5188bec43b", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "518c1941-8dab-43da-8b80-eef1e034a60a", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "86fd7029-7a52-4cce-b6c1-a4222574a59e", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": true, "checks": [], "content": "完成任务", "controls": [], "deviation": null, "event_id": "9ade1ba8-1081-4f60-83b1-d24f62573b68", "event_type": "operation", "lineage": [], "materia
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "QC 剔除：A260/A280=1.52 疑似蛋白污染，不进入逆转录", "controls": [], "deviation": null, "event_id": "00b76b77-2e00-4016-bd51-e2d34477cfed", "event_type": "oper
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "读数提交：a260_a280", "controls": [], "deviation": null, "event_id": "2518520d-6ff6-4a78-b16f-43d1a4149241", "event_type": "measurement", "lineage":
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "读数提交：a260_a280", "controls": [], "deviation": null, "event_id": "5df244b1-d4fb-4683-ab7b-90d52606155b", "event_type": "measurement", "lineage":
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "读数提交：a260_a280", "controls": [], "deviation": null, "event_id": "61dca7bc-603b-488c-b638-6e287580c8a3", "event_type": "measurement", "lineage":
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "读数提交：a260_a280", "controls": [], "deviation": null, "event_id": "9ca9b773-84ca-46a3-91fc-62b83b968036", "event_type": "measurement", "lineage":
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "读数提交：rna_conc_ng_ul", "controls": [], "deviation": null, "event_id": "adb742d3-fec1-47d9-a9e8-c9d9a800fadf", "event_type": "measurement", "line
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "读数提交：rna_conc_ng_ul", "controls": [], "deviation": null, "event_id": "ddf4d2b2-8fea-46b3-a11d-73bbceda9a2d", "event_type": "measurement", "line
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "读数提交：rna_conc_ng_ul", "controls": [], "deviation": null, "event_id": "fc0ae7e5-8a02-4b1c-80c5-3734278babe1", "event_type": "measurement", "line
+  - {"actual_parameters": [], "ad_hoc_step": false, "assay_id": "assay-rtqpcr", "attempt": null, "batch_id": null, "check_ack": false, "checks": [], "content": "读数提交：rna_conc_ng_ul", "controls": [], "deviation": null, "event_id": "16a5ac3d-8783-4a4a-89db-56c603ec8822", "event_type": "measurement", "line

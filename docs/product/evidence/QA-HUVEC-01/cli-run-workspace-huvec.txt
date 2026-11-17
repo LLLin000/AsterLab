@@ -1,0 +1,24 @@
+run: c2431573-1fef-41d7-bd21-745d5108d791
+design: f660070f-6135-4860-ad58-285d99b233ac rev 2
+status: in_progress
+tasks: 11
+  root/gel/gel-cycle | - | not_started
+  root/gel/gel-spin | - | skipped
+  root/cast/cast-spread | - | completed
+  root/cast/cast-cure | - | completed
+  root/soak/soak-add | - | completed
+  root/soak/soak-wait | - | not_started
+  root/seed/seed-susp | - | completed
+  root/seed/seed-t0 | - | completed
+  root/observe/obs-image | 6 h | not_started
+  root/observe/obs-image | 12 h | not_started
+  root/observe/obs-image | 24 h | not_started
+events: 8
+  - observation  {'actual_parameters': [], 'ad_hoc_step': False, 'assay_id': None, 'attempt': None, 'batch_id': None, 'check_ack': False, 'checks': [], 'content': '@matrix(6 h)\
+  - operation  {'actual_parameters': [], 'ad_hoc_step': False, 'assay_id': 'assay-tube', 'attempt': None, 'batch_id': None, 'check_ack': True, 'checks': [], 'content': '完成任务',
+  - operation  {'actual_parameters': [], 'ad_hoc_step': False, 'assay_id': 'assay-tube', 'attempt': None, 'batch_id': None, 'check_ack': True, 'checks': [], 'content': '完成任务',
+  - observation  {'actual_parameters': [], 'ad_hoc_step': False, 'assay_id': 'assay-tube', 'attempt': None, 'batch_id': None, 'check_ack': False, 'checks': [], 'content': '整板一次曝
+  - operation  {'actual_parameters': [], 'ad_hoc_step': False, 'assay_id': 'assay-tube', 'attempt': None, 'batch_id': None, 'check_ack': True, 'checks': [], 'content': '完成任务',
+  - operation  {'actual_parameters': [], 'ad_hoc_step': False, 'assay_id': 'assay-tube', 'attempt': None, 'batch_id': None, 'check_ack': True, 'checks': [], 'content': '完成任务',
+  - operation  {'actual_parameters': [], 'ad_hoc_step': False, 'assay_id': 'assay-tube', 'attempt': None, 'batch_id': None, 'check_ack': True, 'checks': [], 'content': '完成任务',
+  - skipped_by_rule  {'actual_parameters': [], 'ad_hoc_step': False, 'assay_id': 'assay-tube', 'attempt': None, 'batch_id': None, 'check_ack': False, 'checks': [], 'content': '按规则跳过
