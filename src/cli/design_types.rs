@@ -347,6 +347,35 @@ pub(crate) struct RunWorkspaceInput {
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct RecordProjectionQuery {
+    pub(crate) run_id: String,
+    /// `blind` masks frozen group identity; `unblinded` (default) renders it.
+    #[serde(default)]
+    pub(crate) view: Option<String>,
+    /// Planned FOV slots per well; 0 or omitted means one planned slot.
+    #[serde(default)]
+    pub(crate) fov_per_well: Option<u32>,
+    /// Watermark for running timers; omitted leaves running elapsed unmeasured.
+    #[serde(default)]
+    pub(crate) now_utc: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordSignArchive {
+    pub(crate) run_id: String,
+    #[serde(default)]
+    pub(crate) view: Option<String>,
+    #[serde(default)]
+    pub(crate) fov_per_well: Option<u32>,
+    #[serde(default)]
+    pub(crate) now_utc: Option<String>,
+    pub(crate) signed_by: String,
+    pub(crate) signed_at_utc: String,
+    #[serde(default)]
+    pub(crate) statement: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct InspectTreeInput {
     pub(crate) design_id: String,
     #[serde(default)]

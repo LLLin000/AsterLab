@@ -171,9 +171,15 @@ pub(crate) fn migrate_records_schema(db: &mut Connection) -> Result<(), CliError
             payload_hash TEXT NOT NULL,\
             updated_at TEXT NOT NULL,\
             PRIMARY KEY (entity_id, source_revision, projection_kind)\
-         );",
+         );\
+         CREATE TABLE IF NOT EXISTS run_archive_state(\
+            run_id TEXT PRIMARY KEY,\
+            data_json TEXT NOT NULL,\
+            updated_at TEXT NOT NULL\
+        );",
     )
     .map_err(|error| CliError::internal(error.to_string()))?;
+
     tx.pragma_update(None, "user_version", RECORDS_SCHEMA_VERSION)
         .map_err(|error| CliError::internal(error.to_string()))?;
     tx.commit()

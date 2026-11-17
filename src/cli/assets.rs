@@ -101,6 +101,7 @@ pub(crate) fn asset_link_scope(db: &Connection, run_id: &str, task_key: &str) ->
     if kind != "run" {
         return Err(CliError::input("run_id must point to a run"));
     }
+    ensure_run_not_archived(db, run_id)?;
     if task_key.is_empty() || task_key.len() > 1000 || task_key.chars().any(char::is_control) {
         return Err(CliError::input("task_key is invalid"));
     }
@@ -529,6 +530,7 @@ pub(crate) fn unlink_asset_link(
         return Err(CliError::internal("asset_link 所属 Run 不存在"));
     }
     let project = record["project_id"].as_str().unwrap_or("");
+    ensure_run_not_archived(db, run_id)?;
     let at = stamp();
     let actor_id = if actor_id.is_empty() {
         data["actorId"].as_str().unwrap_or("")
@@ -634,6 +636,7 @@ pub(crate) fn update_asset_link(
         return Err(CliError::internal("asset_link 所属 Run 不存在"));
     }
     let project = record["project_id"].as_str().unwrap_or("");
+    ensure_run_not_archived(db, run_id)?;
     let coordinates = asset_coordinates(Some(well_id), timepoint.as_deref(), fov_index);
     let at = stamp();
     let actor_id = if actor_id.is_empty() {

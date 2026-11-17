@@ -26,7 +26,12 @@ impl AppCore {
                 data_json TEXT NOT NULL,\
                 updated_at TEXT NOT NULL\
             );\
-            CREATE INDEX IF NOT EXISTS timer_records_run ON timer_records(run_id, task_key);",
+            CREATE INDEX IF NOT EXISTS timer_records_run ON timer_records(run_id, task_key);\
+            CREATE TABLE IF NOT EXISTS run_archive_state(\
+                run_id TEXT PRIMARY KEY,\
+                data_json TEXT NOT NULL,\
+                updated_at TEXT NOT NULL\
+            );",
         ).map_err(|e| e.to_string())?;
         Ok(AppCore { db })
     }
@@ -102,6 +107,26 @@ impl AppCore {
         None
     }
 
+    fn ensure_writable(&self, run_id: &str) -> Result<(), String> {
+        let raw: Option<String> = self
+            .db
+            .query_row(
+                "SELECT data_json FROM run_archive_state WHERE run_id=?1",
+                [run_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if let Some(raw) = raw {
+            let state: asterlab_core::record_projection::RecordArchiveState =
+                serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            if state.notes_locked() {
+                return Err("CONFLICT: Run 已签核归档，记录只读".into());
+            }
+        }
+        Ok(())
+    }
+
     fn find_operation_event_tx(tx: &rusqlite::Transaction<'_>, run_id: &str, op_id: &str) -> Option<Value> {
         let mut stmt = tx.prepare(
             "SELECT id,data_json FROM records WHERE kind='execution_event' AND parent_id=?1",
@@ -121,6 +146,7 @@ impl AppCore {
     pub fn save_readout(&mut self, input: Value) -> Result<Value, String> {
         let run_id = input.get("run_id").and_then(Value::as_str).map(str::to_owned)
             .ok_or_else(|| "run_id is required".to_owned())?;
+        self.ensure_writable(&run_id)?;
         let op_id = input.get("operation_id").and_then(Value::as_str).map(str::to_owned);
         let tx = self.db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         if let Some(op) = &op_id {
@@ -159,6 +185,7 @@ impl AppCore {
     pub fn save_readouts_batch(&mut self, input: Value) -> Result<Value, String> {
         let run_id = input["run_id"].as_str().ok_or("run_id is required")?.to_owned();
         let operation_id = input["operation_id"].as_str().filter(|s| !s.is_empty()).ok_or("operation_id is required")?.to_owned();
+        self.ensure_writable(&run_id)?;
         let cells = input["cells"].as_array().ok_or("cells is required")?;
         let schema = input["schema_id"].as_str().filter(|s| !s.is_empty()).ok_or("schema_id is required")?;
         if !matches!(schema, "cck8.plate96.od450.v1" | "qpcr.sample_gene.cq.v1") || input["schema_version"].as_u64() != Some(1) {
@@ -218,6 +245,7 @@ impl AppCore {
     pub fn complete_task(&mut self, input: Value) -> Result<Value, String> {
         let run_id = input.get("run_id").and_then(Value::as_str).map(str::to_owned)
             .ok_or_else(|| "run_id is required".to_owned())?;
+        self.ensure_writable(&run_id)?;
         let op_id = input.get("operation_id").and_then(Value::as_str).map(str::to_owned);
         let tx = self.db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         if let Some(op) = &op_id {
@@ -338,6 +366,7 @@ impl AppCore {
     }
 
     pub fn save_timer_record(&mut self, timer: &asterlab_core::timer::TimerRecord) -> Result<(), String> {
+        self.ensure_writable(&timer.run_id)?;
         let run_kind: Option<String> = self.db.query_row(
             "SELECT kind FROM records WHERE id=?1", [&timer.run_id], |row| row.get(0)
         ).optional().map_err(|e| e.to_string())?;
@@ -519,6 +548,32 @@ impl AppCore {
                 let record = apply_simple_command(&mut self.db, kind, &payload).map_err(|e: String| e)?;
                 Ok(serde_json::json!({"record": record, "replayed": false}))
             }
+            "record.sign_archive" => {
+                let run_id = payload.get("run_id").and_then(Value::as_str).unwrap_or("");
+                let signed_by = payload.get("signed_by").and_then(Value::as_str).unwrap_or("").trim();
+                let signed_at_utc = payload.get("signed_at_utc").and_then(Value::as_str).unwrap_or("");
+                if run_id.trim().is_empty() || signed_by.is_empty() || signed_at_utc.trim().is_empty() {
+                    return Err("INVALID_INPUT: record.sign_archive requires run_id, signed_by and signed_at_utc".into());
+                }
+                let view = match payload.get("view").and_then(Value::as_str).map(str::trim).unwrap_or("") {
+                    "" | "unblinded" => asterlab_core::record_projection::ProjectionView::Unblinded,
+                    "blind" => asterlab_core::record_projection::ProjectionView::Blind,
+                    other => return Err(format!("INVALID_INPUT: view 只能是 blind 或 unblinded，收到 {other}")),
+                };
+                let state = cli_impl::sign_and_archive_record(
+                    &self.db,
+                    run_id,
+                    view,
+                    payload.get("fov_per_well").and_then(Value::as_u64).unwrap_or(1) as u32,
+                    payload.get("now_utc").and_then(Value::as_str),
+                    asterlab_core::record_projection::ArchiveSignature {
+                        signed_by: signed_by.to_owned(),
+                        signed_at_utc: signed_at_utc.to_owned(),
+                        statement: payload.get("statement").and_then(Value::as_str).filter(|text| !text.trim().is_empty()).map(str::to_owned),
+                    },
+                ).map_err(map_command_error)?;
+                Ok(serde_json::json!({"record": state, "replayed": false}))
+            }
             other => Err(format!("INVALID_INPUT: unknown command kind: {other}")),
         }
     }
@@ -547,6 +602,33 @@ impl AppCore {
                     other => return Err(format!("INVALID_INPUT: view 只能是 blind 或 unblinded，收到 {other}")),
                 };
                 cli_impl::run_workspace_for_view(&self.db, id, view).map_err(map_command_error)
+            }
+            "record.projection" => {
+                let run_id = params.get("run_id").and_then(Value::as_str).unwrap_or("");
+                if run_id.trim().is_empty() {
+                    return Err("INVALID_INPUT: record.projection requires run_id".into());
+                }
+                let view = match params.get("view").and_then(Value::as_str).map(str::trim).unwrap_or("") {
+                    "" | "unblinded" => asterlab_core::record_projection::ProjectionView::Unblinded,
+                    "blind" => asterlab_core::record_projection::ProjectionView::Blind,
+                    other => return Err(format!("INVALID_INPUT: view 只能是 blind 或 unblinded，收到 {other}")),
+                };
+                cli_impl::record_projection(
+                    &self.db,
+                    run_id,
+                    view,
+                    params.get("fov_per_well").and_then(Value::as_u64).unwrap_or(1) as u32,
+                    params.get("now_utc").and_then(Value::as_str),
+                ).map_err(map_command_error)
+            }
+            "record.archive_state" => {
+                let run_id = params.get("run_id").and_then(Value::as_str).unwrap_or("");
+                if run_id.trim().is_empty() {
+                    return Err("INVALID_INPUT: record.archive_state requires run_id".into());
+                }
+                cli_impl::load_archive_state(&self.db, run_id)
+                    .and_then(|state| serde_json::to_value(&state).map_err(|e| cli_impl::CliError::internal(e.to_string())))
+                    .map_err(map_command_error)
             }
             "workflow.progress" => {
                 let run_id = params.get("run_id").and_then(Value::as_str).unwrap_or("");
@@ -1045,6 +1127,18 @@ fn create_note_tx(db: &mut Connection, payload: &Value, idempotency_key: &str) -
     if kind_name != "run" {
         return Err("INVALID_INPUT: run_id 必须指向实验运行".into());
     }
+    let locked: Option<String> = tx.query_row(
+        "SELECT data_json FROM run_archive_state WHERE run_id=?1",
+        [run_id],
+        |row| row.get(0),
+    ).optional().map_err(|e| format!("INTERNAL: {e}"))?;
+    if let Some(raw) = locked {
+        let state: asterlab_core::record_projection::RecordArchiveState =
+            serde_json::from_str(&raw).map_err(|e| format!("INTERNAL: {e}"))?;
+        if state.notes_locked() {
+            return Err("CONFLICT: Run 已签核归档，记录只读".into());
+        }
+    }
     let id = Uuid::new_v4().to_string();
     let at = chrono::Utc::now().to_rfc3339();
     let data = json!({
@@ -1091,6 +1185,18 @@ fn apply_simple_command(db: &mut Connection, kind: &str, payload: &Value) -> Res
                 .ok_or_else(|| "NOT_FOUND: 实验运行不存在".to_string())?;
             if kind_name != "run" {
                 return Err("INVALID_INPUT: run_id 必须指向实验运行".into());
+            }
+            let locked: Option<String> = db.query_row(
+                "SELECT data_json FROM run_archive_state WHERE run_id=?1",
+                [run_id],
+                |row| row.get(0),
+            ).optional().map_err(|e| format!("INTERNAL: {e}"))?;
+            if let Some(raw) = locked {
+                let state: asterlab_core::record_projection::RecordArchiveState =
+                    serde_json::from_str(&raw).map_err(|e| format!("INTERNAL: {e}"))?;
+                if state.notes_locked() {
+                    return Err("CONFLICT: Run 已签核归档，记录只读".into());
+                }
             }
             if let Some(time) = payload.get("event_time").and_then(Value::as_str) {
                 if DateTime::parse_from_rfc3339(time).is_err() {
@@ -1518,6 +1624,59 @@ mod tests {
         assert_eq!(after_reopen["replayed"], true);
         assert_eq!(after_reopen["record"]["id"], first["record"]["id"]);
         assert_eq!(note_count(&reopened, &run_id), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn bridge_archive_state_persists_and_locks_all_write_entries() {
+        let (dir, run_id) = fixture();
+        let mut core = AppCore::open(&dir).unwrap();
+        // Recording by default.
+        let state = core
+            .query_projection("record.archive_state", json!({"run_id": run_id}))
+            .unwrap();
+        assert_eq!(state["status"], "recording");
+        // The shared CLI helper signs an empty run; Core derives the rest.
+        let signed = core
+            .execute_command(
+                "record.sign_archive",
+                json!({
+                    "run_id": run_id,
+                    "signed_by": "operator",
+                    "signed_at_utc": "2026-11-15T10:00:00Z",
+                }),
+                "archive-key-1",
+            )
+            .unwrap();
+        assert_eq!(signed["record"]["status"], "archived");
+        let projection = core
+            .query_projection("record.projection", json!({"run_id": run_id}))
+            .unwrap();
+        assert_eq!(projection["archive"]["status"], "archived");
+        assert_eq!(projection["notes_locked"], true);
+        // Restart keeps the lock: this is the persisted row, not memory.
+        drop(core);
+        let mut reopened = AppCore::open(&dir).unwrap();
+        let state = reopened
+            .query_projection("record.archive_state", json!({"run_id": run_id}))
+            .unwrap();
+        assert_eq!(state["status"], "archived");
+        // Every write entry shares the guard: notes, events, revisions, timers.
+        let note = reopened
+            .execute_command(
+                "note.create",
+                json!({"run_id": run_id, "content": "late note"}),
+                "note-after-archive",
+            )
+            .unwrap_err();
+        assert!(note.starts_with("CONFLICT") || note.starts_with("REVISION_CONFLICT"), "unexpected: {note}");
+        let event = reopened
+            .execute_command(
+                "execution_event.create",
+                json!({"run_id": run_id, "event_type": "observation", "content": "late"}),
+                "event-after-archive",
+            )
+            .unwrap_err();
+        assert!(event.starts_with("CONFLICT") || event.starts_with("REVISION_CONFLICT"), "unexpected: {event}");
         let _ = fs::remove_dir_all(dir);
     }
 }

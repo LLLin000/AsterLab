@@ -623,6 +623,7 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
         }
         "run.set_status" => {
             let i: StatusUpdate = parse_input(path)?;
+            ensure_run_not_archived(&db, &i.id)?;
             if i.status == "in_progress" {
                 ensure_run_protocol_ready(&db, &i.id)?;
             }
@@ -858,6 +859,43 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
             let i: RunWorkspaceInput = parse_input(path)?;
             let view = parse_projection_view(i.view.as_deref())?;
             run_workspace_for_view(&db, &i.id, view)
+        }
+        "record.projection" => {
+            let i: RecordProjectionQuery = parse_input(path)?;
+            let view = parse_projection_view(i.view.as_deref())?;
+            record_projection(
+                &db,
+                &i.run_id,
+                view,
+                i.fov_per_well.unwrap_or(1),
+                i.now_utc.as_deref(),
+            )
+        }
+        "record.sign_archive" => {
+            let i: RecordSignArchive = parse_input(path)?;
+            let view = parse_projection_view(i.view.as_deref())?;
+            if i.signed_by.trim().is_empty() {
+                return Err(CliError::input("签核必须记录签核人"));
+            }
+            sign_and_archive_record(
+                &db,
+                &i.run_id,
+                view,
+                i.fov_per_well.unwrap_or(1),
+                i.now_utc.as_deref(),
+                asterlab_core::record_projection::ArchiveSignature {
+                    signed_by: i.signed_by.trim().to_owned(),
+                    signed_at_utc: i.signed_at_utc,
+                    statement: i.statement.filter(|text| !text.trim().is_empty()),
+                },
+            )
+        }
+        "record.archive_state" => {
+            let i: RecordProjectionQuery = parse_input(path)?;
+            let state = load_archive_state(&db, &i.run_id)?;
+            // The projection already carries this state; this read exists so
+            // restart/rollback checks do not need to render the whole record.
+            serde_json::to_value(&state).map_err(|e| CliError::internal(e.to_string()))
         }
         "workflow.progress" => {
             let i: WorkflowProgressInput = parse_input(path)?;
@@ -1434,6 +1472,7 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
             if kind != "run" {
                 return Err(CliError::input("run_id 必须指向实验运行"));
             }
+            ensure_run_not_archived(&db, &i.run_id)?;
             if let Some(assay_id) = i.assay_id.as_deref().filter(|id| !id.is_empty()) {
                 validate_run_assay_reference(&db, &i.run_id, assay_id, i.timepoint.as_deref())?;
             } else if i
@@ -1484,9 +1523,12 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
         }
         "well.set" => {
             let i: WellSet = parse_input(path)?;
-            let (_, project, _, _, raw) = kind_id(&db, &i.plate_id)?
+            let (_, project, plate_parent, _, raw) = kind_id(&db, &i.plate_id)?
                 .filter(|r| r.0 == "plate")
                 .ok_or_else(|| CliError::missing("板布局不存在"))?;
+            if let Some(run_id) = plate_parent.as_deref() {
+                ensure_run_not_archived(&db, run_id)?;
+            }
             let plate: Value =
                 serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
             let rows = plate["rows"].as_u64().unwrap_or(0) as usize;
@@ -1569,6 +1611,7 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
             if kind != "run" {
                 return Err(CliError::input("run_id 必须指向实验运行"));
             }
+            ensure_run_not_archived(&db, &i.run_id)?;
             check_text(&i.content, "记录内容", 10000)?;
             if let Some(time) = &i.event_time {
                 if DateTime::parse_from_rfc3339(time).is_err() {
@@ -2219,6 +2262,12 @@ pub(crate) fn result_schema(tool: &str) -> Value {
             json!({"type":"object","additionalProperties":false,"required":["run_id","design_id","design_version_id","design_revision","frozen_design","protocol_version_id","status","scopes","steps","tasks","occurrences","materials","plates","linked_assets","asset_coverage","events"],"properties":{"run_id":{"type":"string"},"design_id":{"type":"string"},"design_version_id":{"type":"string"},"design_revision":{"type":"integer","minimum":1},"frozen_design":{"type":"object","additionalProperties":true},"protocol_version_id":{"type":["string","null"]},"status":{"type":"string"},"scopes":{"type":"array","items":{"type":"object","additionalProperties":true}},"steps":{"type":"array","items":{"type":"object","additionalProperties":true}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},"occurrences":{"type":"array","items":{"type":"object","additionalProperties":true}},"materials":{"type":"array","items":{"type":"object","additionalProperties":true}},"plates":{"type":"array","items":{"type":"object","additionalProperties":true}},"linked_assets":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["asset_id","task_key","sample_id","well_id","timepoint","fov_index","coordinate_id"],"properties":{"asset_id":{"type":"string"},"task_key":{"type":"string"},"sample_id":{"type":["string","null"]},"well_id":{"type":["string","null"]},"timepoint":{"type":["string","null"]},"fov_index":{"type":["integer","null"],"minimum":1},"coordinate_id":{"type":["string","null"]}}}},"asset_coverage":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["well_id","timepoint","fov_indices","asset_ids"],"properties":{"well_id":{"type":"string"},"timepoint":{"type":["string","null"]},"fov_indices":{"type":"array","items":{"type":"integer","minimum":1}},"asset_ids":{"type":"array","items":{"type":"string"}}}}},"events":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
         }
         "workflow.inspect_tree" => json!({"type":"object","additionalProperties":false,"required":["designId","revision","design","roots","order","precedes","issues"],"properties":{"designId":{"type":"string"},"revision":{"type":"integer","minimum":0},"runId":{"type":"string"},"design":{"type":"boolean"},"roots":{"type":"array","items":{"type":"object","additionalProperties":true}},"order":{"type":"array","items":{"type":"string"}},"precedes":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"issues":{"type":"array","items":{"type":"string"}}}}),
+        "record.projection" => {
+            json!({"type":"object","additionalProperties":false,"required":["schema_version","run_id","view","design","parameters","timers","images","assets","readings","readouts","timeline","notes","notes_locked","archive","issues"],"properties":{"schema_version":{"type":"integer"},"run_id":{"type":"string"},"view":{"type":"string"},"design":{"type":"object","additionalProperties":true},"parameters":{"type":"array","items":{"type":"object","additionalProperties":true}},"timers":{"type":"array","items":{"type":"object","additionalProperties":true}},"images":{"type":"object","additionalProperties":true},"assets":{"type":"array","items":{"type":"object","additionalProperties":true}},"readings":{"type":"array","items":{"type":"object","additionalProperties":true}},"readouts":{"type":"array","items":{"type":"object","additionalProperties":true}},"timeline":{"type":"object","additionalProperties":true},"notes":{"type":"array","items":{"type":"object","additionalProperties":true}},"notes_locked":{"type":"boolean"},"archive":{"type":"object","additionalProperties":true},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
+        }
+        "record.sign_archive" | "record.archive_state" => {
+            json!({"type":"object","additionalProperties":false,"required":["status"],"properties":{"status":{"type":"string","enum":["recording","summarizing","signed","archived"]},"signature":{"type":["object","null"],"additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}})
+        }
         "workflow.progress" => workflow_progress_output_schema(),
         "task.create" => one("task"),
         "task.set_status" => one("task"),
@@ -2380,6 +2429,12 @@ pub(crate) fn input_schema(tool: &str) -> Option<Value> {
         }
         "run.workspace" => {
             json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"},"view":{"type":"string","enum":["blind","unblinded"],"description":"blind 只遮蔽已声明盲法依据的冻结设计分组身份；默认 unblinded"}}})
+        }
+        "record.projection" | "record.archive_state" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id"],"properties":{"run_id":{"type":"string","minLength":1},"view":{"type":"string","enum":["blind","unblinded"],"description":"blind 只遮蔽已声明盲法依据的冻结设计分组身份；默认 unblinded"},"fov_per_well":{"type":["integer","null"],"minimum":0,"description":"每孔计划视野数；0 或省略按 1 个计划槽位"},"now_utc":{"type":["string","null"],"format":"date-time","description":"运行计时器的度量水位；省略时运行中计时器不上报已耗时间"}}})
+        }
+        "record.sign_archive" => {
+            json!({"type":"object","additionalProperties":false,"required":["run_id","signed_by","signed_at_utc"],"properties":{"run_id":{"type":"string","minLength":1},"view":{"type":"string","enum":["blind","unblinded"]},"fov_per_well":{"type":["integer","null"],"minimum":0},"now_utc":{"type":["string","null"],"format":"date-time"},"signed_by":{"type":"string","minLength":1,"maxLength":200},"signed_at_utc":{"type":"string","format":"date-time","description":"调用方提供的签核时钟；Core 不读时钟"},"statement":{"type":["string","null"],"maxLength":2000}}})
         }
         "protocol.block.list" => {
             json!({"type":"object","additionalProperties":false,"properties":{"project_id":{"type":"string"}}})
