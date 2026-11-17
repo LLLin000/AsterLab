@@ -505,7 +505,17 @@ impl AppCore {
                 tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
                 Ok(serde_json::json!({"record": record, "replayed": false}))
             }
-            "note.create" | "run.revise" | "run.set_status" => {
+            "note.create" => {
+                let record = create_note_tx(&mut self.db, &payload, idempotency_key)?;
+                Ok(record)
+            }
+            "run.revise" | "run.set_status" => {
+                if kind == "run.set_status"
+                    && payload.get("status").and_then(Value::as_str) == Some("in_progress")
+                {
+                    let id = payload.get("id").and_then(Value::as_str).unwrap_or("");
+                    cli_impl::ensure_run_protocol_ready(&self.db, id).map_err(map_command_error)?;
+                }
                 let record = apply_simple_command(&mut self.db, kind, &payload).map_err(|e: String| e)?;
                 Ok(serde_json::json!({"record": record, "replayed": false}))
             }
@@ -983,9 +993,82 @@ fn create_run_tx(tx: &rusqlite::Transaction<'_>, payload: &Value, operation_id: 
     Ok(record)
 }
 
-/// Append-only simples that need no idempotency envelope: `note.create`
-/// (Run prose), `run.revise` (title/scheduled_date only, expected_revision
-/// guarded), `run.set_status` (planned/in_progress/completed/blocked/cancelled).
+/// Idempotent `note.create` for the Bridge generic channel: the envelope
+/// `idempotency_key` is stored as `data.operation_id` with the exact payload
+/// as `data.operation_payload`. Same key + same payload replays the first
+/// record; a different payload is a mismatch. The named CLI `note.create`
+/// keeps its append-only shape (no envelope fields) and is untouched.
+fn create_note_tx(db: &mut Connection, payload: &Value, idempotency_key: &str) -> Result<Value, String> {
+    use chrono::DateTime;
+    use rusqlite::params;
+    use uuid::Uuid;
+    let run_id = payload.get("run_id").and_then(Value::as_str).unwrap_or("");
+    if run_id.trim().is_empty() {
+        return Err("INVALID_INPUT: run_id 不能为空".into());
+    }
+    let tx = db.unchecked_transaction().map_err(|e| format!("INTERNAL: {e}"))?;
+    let existing: Option<(String, String)> = tx.query_row(
+        "SELECT id,data_json FROM records WHERE kind='note' AND parent_id=?1 AND json_extract(data_json,'$.operation_id')=?2 ORDER BY created_at LIMIT 1",
+        params![run_id, idempotency_key],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(|e| format!("INTERNAL: {e}"))?;
+    if let Some((id, raw)) = existing {
+        let data: Value = serde_json::from_str(&raw).map_err(|e| format!("INTERNAL: {e}"))?;
+        let same = data.get("operation_payload").cloned().unwrap_or(Value::Null) == *payload;
+        let (project, parent, created, updated): (Option<String>, Option<String>, String, String) = tx.query_row(
+            "SELECT project_id,parent_id,created_at,updated_at FROM records WHERE id=?1",
+            [&id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).map_err(|e| format!("INTERNAL: {e}"))?;
+        tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
+        if same {
+            let record = json!({"id":id,"kind":"note","project_id":project,"parent_id":parent,"revision":1,"data":data,"created_at":created,"updated_at":updated});
+            return Ok(json!({"record": record, "replayed": true}));
+        }
+        return Err("IDEMPOTENCY_MISMATCH: same idempotency_key with different payload; mint a new key for a new action".into());
+    }
+    let content = payload.get("content").and_then(Value::as_str).unwrap_or("");
+    if content.trim().is_empty() || content.chars().count() > 10000 {
+        return Err("INVALID_INPUT: 记录内容不能为空且不能超过 10000 个字符".into());
+    }
+    if let Some(time) = payload.get("event_time").and_then(Value::as_str) {
+        if DateTime::parse_from_rfc3339(time).is_err() {
+            return Err("INVALID_INPUT: event_time 必须是带时区的 RFC 3339 时间".into());
+        }
+    }
+    let (kind_name, project): (String, Option<String>) = tx.query_row(
+        "SELECT kind,project_id FROM records WHERE id=?1",
+        [run_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(|e| format!("INTERNAL: {e}"))?
+        .ok_or_else(|| "NOT_FOUND: 实验运行不存在".to_string())?;
+    if kind_name != "run" {
+        return Err("INVALID_INPUT: run_id 必须指向实验运行".into());
+    }
+    let id = Uuid::new_v4().to_string();
+    let at = chrono::Utc::now().to_rfc3339();
+    let data = json!({
+        "content": content,
+        "event_time": payload.get("event_time").cloned().unwrap_or(Value::Null),
+        "observation": payload.get("observation").cloned().unwrap_or(Value::Null),
+        "result": payload.get("result").cloned().unwrap_or(Value::Null),
+        "deviation": payload.get("deviation").cloned().unwrap_or(Value::Null),
+        "operation_id": idempotency_key,
+        "operation_payload": payload.clone(),
+    });
+    tx.execute(
+        "INSERT INTO records(id,kind,project_id,parent_id,revision,data_json,created_at,updated_at) VALUES(?1,'note',?2,?3,1,?4,?5,?5)",
+        params![id, project, run_id, serde_json::to_string(&data).map_err(|e| format!("INTERNAL: {e}"))?, at],
+    ).map_err(|e| format!("INTERNAL: {e}"))?;
+    tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
+    Ok(json!({"record": json!({"id":id,"kind":"note","project_id":project,"parent_id":run_id,"revision":1,"data":data,"created_at":at,"updated_at":at}), "replayed": false}))
+}
+/// CLI-shaped append-only simples: `note.create` (Run prose),
+/// `run.revise` (title/scheduled_date only, expected_revision guarded),
+/// `run.set_status` (planned/in_progress/completed/blocked/cancelled).
+/// The Bridge routes `note.create` through `create_note_tx` (envelope
+/// idempotency) and re-checks the protocol-ready guard before `run.set_status`;
+/// this function holds the shared field validation and writes.
 fn apply_simple_command(db: &mut Connection, kind: &str, payload: &Value) -> Result<Value, String> {
     use chrono::DateTime;
     use rusqlite::params;
@@ -1357,6 +1440,84 @@ mod tests {
         assert_eq!(progress["run_id"], run_id);
         let tree = core.query_projection("workflow.inspect_tree", json!({"run_id": run_id})).unwrap();
         assert!(tree.get("roots").is_some() || tree.get("issues").is_some());
+        let _ = fs::remove_dir_all(dir);
+    }
+    fn run_record_revision(core: &AppCore, run_id: &str) -> i64 {
+        core.db.query_row(
+            "SELECT revision FROM records WHERE id=?1",
+            [run_id],
+            |row| row.get(0),
+        ).unwrap()
+    }
+
+    fn note_count(core: &AppCore, run_id: &str) -> i64 {
+        core.db.query_row(
+            "SELECT COUNT(*) FROM records WHERE kind='note' AND parent_id=?1",
+            [run_id],
+            |row| row.get::<_, i64>(0),
+        ).unwrap()
+    }
+
+    fn mark_run_protocol_unready(core: &AppCore, run_id: &str) {
+        let raw: String = core.db.query_row(
+            "SELECT data_json FROM records WHERE id=?1",
+            [run_id],
+            |row| row.get(0),
+        ).unwrap();
+        let mut data: Value = serde_json::from_str(&raw).unwrap();
+        data["protocol_manifest"] = json!([{
+            "protocol_ready": false,
+            "unresolved_parameters": [{"path": "root/dose", "required": true}],
+        }]);
+        core.db.execute(
+            "UPDATE records SET data_json=?1 WHERE id=?2",
+            rusqlite::params![serde_json::to_string(&data).unwrap(), run_id],
+        ).unwrap();
+    }
+
+    #[test]
+    fn bridge_set_status_reuses_protocol_ready_guard() {
+        let (dir, run_id) = fixture();
+        let core = AppCore::open(&dir).unwrap();
+        mark_run_protocol_unready(&core, &run_id);
+        let revision = run_record_revision(&core, &run_id);
+        drop(core);
+        let mut core = AppCore::open(&dir).unwrap();
+        let err = core.execute_command(
+            "run.set_status",
+            json!({"id": run_id, "expected_revision": revision, "status": "in_progress"}),
+            "status-guard-1",
+        ).unwrap_err();
+        assert!(err.contains("Protocol"), "bridge skipped protocol-ready guard: {err}");
+        assert_eq!(run_record_revision(&core, &run_id), revision);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bridge_note_create_is_idempotent() {
+        let (dir, run_id) = fixture();
+        let mut core = AppCore::open(&dir).unwrap();
+        let payload = json!({"run_id": run_id, "content": "bridge note"});
+        let first = core.execute_command("note.create", payload.clone(), "note-key-1").unwrap();
+        assert_eq!(first["replayed"], false);
+        assert_eq!(note_count(&core, &run_id), 1);
+        let replay = core.execute_command("note.create", payload.clone(), "note-key-1").unwrap();
+        assert_eq!(replay["replayed"], true);
+        assert_eq!(replay["record"]["id"], first["record"]["id"]);
+        assert_eq!(note_count(&core, &run_id), 1);
+        let mismatch = core.execute_command(
+            "note.create",
+            json!({"run_id": run_id, "content": "different content"}),
+            "note-key-1",
+        ).unwrap_err();
+        assert!(mismatch.starts_with("IDEMPOTENCY_MISMATCH"), "unexpected: {mismatch}");
+        assert_eq!(note_count(&core, &run_id), 1);
+        drop(core);
+        let mut reopened = AppCore::open(&dir).unwrap();
+        let after_reopen = reopened.execute_command("note.create", payload.clone(), "note-key-1").unwrap();
+        assert_eq!(after_reopen["replayed"], true);
+        assert_eq!(after_reopen["record"]["id"], first["record"]["id"]);
+        assert_eq!(note_count(&reopened, &run_id), 1);
         let _ = fs::remove_dir_all(dir);
     }
 }
