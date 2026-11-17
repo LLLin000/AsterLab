@@ -1877,10 +1877,11 @@ func TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable(t *testing.
 		},
 	})
 
+	// Height 1080 keeps the 1360 tier but gives headroom for the taller Bridge v2 bench.
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
 		contentPage(c, a)
-	}, 1360, 880)
+	}, 1360, 1080)
 	tt.Frame()
 
 	if err := tt.Click("打开"); err != nil {

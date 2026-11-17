@@ -58,6 +58,14 @@ type Callbacks struct {
 	// Run revision). Nil hides the summary/matrix and keeps the
 	// entry-level timeline only.
 	HistoryInputs func() (runs.RunSnapshot, []runs.Asset)
+	// QueryProjection reads Core through the Bridge v2 generic channel
+	// (INT-01). The blind switch uses kind run.workspace with
+	// view=blind|unblinded; the host decodes ResultJSON verbatim.
+	QueryProjection func(input runs.QueryProjectionInput) (runs.QueryProjectionResult, error)
+	// ExecuteCommand writes through the Bridge v2 generic channel. Sample
+	// exclusion uses kind execution_event.create and categorical/table
+	// readout entry uses kind readout.submit; Core owns all validation.
+	ExecuteCommand func(input runs.ExecuteCommandInput) (runs.ExecuteCommandResult, error)
 }
 
 // CheckAckView is one operator verdict sent back to Core.
@@ -99,6 +107,9 @@ type State struct {
 	// ShowTechnical reveals the raw step/block/protocol identifiers. It stays
 	// collapsed so the default view is identifier-free (UX-P2).
 	ShowTechnical bool
+	// BlindErr carries the last blind-projection failure. The mask stays as
+	// it was and the header shows cause + retry (UX-STATE, UX-P5).
+	BlindErr string
 
 	// railScrollKey remembers which selection was last scrolled into view.
 	railScrollKey string
@@ -445,7 +456,12 @@ func propertiesWidth(c *ui.Context) float32 {
 	return 360
 }
 
-// runHeader is the compact title bar: run title, status, frozen revision.
+// runHeader is the compact title bar: run title, status, frozen revision, and
+// the blind switch. The switch consumes run.workspace view=blind|unblinded
+// through QueryProjection (Bridge v2): blind mode hides real group treatment
+// names — pure display masking, wells stay visible as coordinates — and Core
+// grants it only to designs that declare a blinding basis (UX-P2, UX-P3,
+// UX-STATE, UX-DESIGN).
 func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	vm := s.VM
 	done, total := 0, 0
@@ -470,8 +486,32 @@ func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 				TextColor(t.TextMuted)
 			ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(float32(tokens.TextMeta)).
 				TextColor(t.TextMuted).FontFeatures("tnum")
+			if b := components.Button(c, blindSwitchLabel(s.bench().Blind), components.ButtonGhost); b.Clicked() {
+				s.toggleBlind()
+			}
 		})
 	})
+	// The banners below only exist when visible, so the default header stays
+	// pixel-identical to main: same 52px row, same border, nothing above it.
+	if s.bench().Blind {
+		ui.Row(c).FillWidth().Padding(2, 16).Background(tokens.Surface).Border(1, tokens.Border).
+			AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+			ui.Text(c, "已设盲 · 分组已隐藏，孔位坐标保持可见").FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+		})
+	}
+	// UX-STATE, UX-P5: a rejected blind projection keeps the current mask
+	// and names cause + retry instead of failing silently.
+	if s.BlindErr != "" {
+		ui.Row(c).FillWidth().Padding(6, 16).Background(tokens.DangerBg).
+			AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Text(c, "设盲视图："+s.BlindErr).FontSize(t.Rem(.72)).TextColor(tokens.DangerText)
+			ui.Spacer(c)
+			if components.Button(c, "重试", components.ButtonGhost).Clicked() {
+				s.BlindErr = ""
+				s.toggleBlind()
+			}
+		})
+	}
 }
 
 func statusPill(c *ui.Context, status string, tokens theme.Tokens) {
