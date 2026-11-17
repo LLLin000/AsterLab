@@ -495,8 +495,8 @@ func View(c *ui.Context, w *Workspace) {
 		// Header bar with status and metadata
 		ui.Row(c).Height(52).Padding(0, 16).AlignItems(ui.Center).Background(tokens.CardBackground).
 			Border(1, tokens.CardBorder).Children(func() {
-			ui.Text(c, w.View.Title).FontSize(18).Bold().TextColor(t.Text).
-				SingleLine().Ellipsis("…").Shrink(1).MaxWidth(520)
+			ui.Text(c, w.View.Title).FontSize(t.Rem(1.29)).Bold().TextColor(t.Text).
+				SingleLine().Ellipsis("…").Shrink(1).MaxWidth(520) // UX-P3: 18px → Rem.
 			tab := 0
 			if w.NotebookView {
 				tab = 1
@@ -511,11 +511,11 @@ func View(c *ui.Context, w *Workspace) {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				if w.View.Status != "" {
 					ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-						ui.Text(c, w.View.Status).FontSize(11).TextColor(tokens.NeutralText).Bold()
+						ui.Text(c, w.View.Status).FontSize(t.Rem(0.79)).TextColor(tokens.NeutralText).Bold() // UX-P3: 11px → Rem.
 					})
 				}
 				ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-					ui.Text(c, fmt.Sprintf("rev %d", w.View.Revision)).FontSize(11).TextColor(tokens.NeutralText).Bold()
+					ui.Text(c, fmt.Sprintf("rev %d", w.View.Revision)).FontSize(t.Rem(0.79)).TextColor(tokens.NeutralText).Bold() // UX-P3: 11px → Rem.
 				})
 				// Save State Badge
 				renderStateBadge(c, w.State, tokens)
@@ -524,7 +524,7 @@ func View(c *ui.Context, w *Workspace) {
 
 		if w.State == StateLoading {
 			ui.Row(c).Fill().Center().Children(func() {
-				ui.Text(c, "正在加载实验运行数据…").FontSize(14).TextColor(t.TextMuted)
+				ui.Text(c, "正在加载实验运行数据…").FontSize(t.Rem(1)).TextColor(t.TextMuted) // UX-P3: 14px → Rem.
 			})
 			return
 		}
@@ -534,15 +534,15 @@ func View(c *ui.Context, w *Workspace) {
 		}
 		if w.State == StateEmpty {
 			ui.Row(c).Fill().Center().Children(func() {
-				ui.Text(c, "当前运行暂无任务与测量记录").FontSize(14).TextColor(t.TextMuted)
+				ui.Text(c, "当前运行暂无任务与测量记录").FontSize(t.Rem(1)).TextColor(t.TextMuted) // UX-P3: 14px → Rem.
 			})
 			return
 		}
 		if w.State == StateBlocked {
 			ui.Row(c).Fill().Center().Children(func() {
 				ui.Column(c).Gap(8).Center().Children(func() {
-					ui.Text(c, "运行阻塞").FontSize(16).Bold().TextColor(t.Danger)
-					ui.Text(c, w.Error).FontSize(13).TextColor(t.TextMuted)
+					ui.Text(c, "运行阻塞").FontSize(t.Rem(1.14)).Bold().TextColor(t.Danger) // UX-P3: 16px → Rem.
+					ui.Text(c, w.Error).FontSize(t.Rem(0.93)).TextColor(t.TextMuted) // UX-P3: 13px → Rem.
 				})
 			})
 			return
@@ -578,23 +578,23 @@ func renderStateBadge(c *ui.Context, state State, tokens theme.Tokens) {
 	switch state {
 	case StateSaving:
 		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.WarningBg).Children(func() {
-			ui.Text(c, "⏳ 保存中…").FontSize(11).TextColor(tokens.WarningText).Bold()
+			ui.Text(c, "⏳ 保存中…").FontSize(c.Theme().Rem(0.79)).TextColor(tokens.WarningText).Bold() // UX-P3: 11px → Rem.
 		})
 	case StateSaved:
 		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.SuccessBg).Children(func() {
-			ui.Text(c, "✓ 已保存").FontSize(11).TextColor(tokens.SuccessText).Bold()
+			ui.Text(c, "✓ 已保存").FontSize(c.Theme().Rem(0.79)).TextColor(tokens.SuccessText).Bold() // UX-P3: 11px → Rem.
 		})
 	case StateValidationError, StateError, StateBlocked:
 		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.DangerBg).Children(func() {
-			ui.Text(c, "⚠ 错误").FontSize(11).TextColor(tokens.DangerText).Bold()
+			ui.Text(c, "⚠ 错误").FontSize(c.Theme().Rem(0.79)).TextColor(tokens.DangerText).Bold() // UX-P3: 11px → Rem.
 		})
 	case StateDraft:
 		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-			ui.Text(c, "● 草稿 (未保存)").FontSize(11).TextColor(tokens.NeutralText)
+			ui.Text(c, "● 草稿 (未保存)").FontSize(c.Theme().Rem(0.79)).TextColor(tokens.NeutralText) // UX-P3: 11px → Rem.
 		})
 	default:
 		ui.Row(c).Padding(3, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-			ui.Text(c, "● 就绪").FontSize(11).TextColor(tokens.NeutralText)
+			ui.Text(c, "● 就绪").FontSize(c.Theme().Rem(0.79)).TextColor(tokens.NeutralText) // UX-P3: 11px → Rem.
 		})
 	}
 }
@@ -607,14 +607,14 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 			taskTitle = "当前任务 · " + ct.Title
 		}
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, taskTitle).FontSize(16).Bold().TextColor(t.Text)
+			ui.Text(c, taskTitle).FontSize(t.Rem(1.14)).Bold().TextColor(t.Text) // UX-P3: 16px → Rem.
 			ui.Spacer(c)
 			done, total := w.taskCounts()
 			ui.Row(c).Padding(2, 8).Radius(6).Background(tokens.NeutralBg).Children(func() {
-				ui.Text(c, fmt.Sprintf("任务进度 %d/%d", done, total)).FontSize(11).TextColor(tokens.NeutralText).Bold()
+				ui.Text(c, fmt.Sprintf("任务进度 %d/%d", done, total)).FontSize(t.Rem(0.79)).TextColor(tokens.NeutralText).Bold() // UX-P3: 11px → Rem.
 			})
 		})
-		ui.Text(c, "具体操作条件继承已选 Protocol").FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, "具体操作条件继承已选 Protocol").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 
 		// Task chips stepper
 		// Task chips stepper with wrapping to avoid clipping
@@ -641,7 +641,7 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 				key := task.Key
 				b := ui.ButtonBase(c).Radius(8).Padding(6, 12).Background(bg)
 				b.Children(func() {
-					ui.Text(c, label).FontSize(12).TextColor(txtColor).Bold()
+					ui.Text(c, label).FontSize(t.Rem(0.86)).TextColor(txtColor).Bold() // UX-P3: 12px → Rem.
 				})
 				if b.Clicked() {
 					w.Selected = key
@@ -696,13 +696,13 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 				}
 			}
 			ui.Column(c).Gap(6).Children(func() {
-				ui.Text(c, label).FontSize(15).Bold().TextColor(t.Text)
-				ui.Text(c, "仅记录原始读数；派生结果由 assay 结果表独立呈现").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, label).FontSize(t.Rem(1.07)).Bold().TextColor(t.Text) // UX-P3: 15px → Rem.
+				ui.Text(c, "仅记录原始读数；派生结果由 assay 结果表独立呈现").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 			})
 			ui.Grid(c).Columns(3).ColumnTracks(ui.Fr(1), ui.Fr(1), ui.Fixed(36)).Gap(8).Children(func() {
-				ui.Text(c, "样本 / 孔位").FontSize(11).TextColor(t.TextMuted).Bold()
-				ui.Text(c, "原始测量值").FontSize(11).TextColor(t.TextMuted).Bold()
-				ui.Text(c, "").FontSize(11)
+				ui.Text(c, "样本 / 孔位").FontSize(t.Rem(0.79)).TextColor(t.TextMuted).Bold() // UX-P3: 11px → Rem.
+				ui.Text(c, "原始测量值").FontSize(t.Rem(0.79)).TextColor(t.TextMuted).Bold() // UX-P3: 11px → Rem.
+				ui.Text(c, "").FontSize(t.Rem(0.79)) // UX-P3: 11px → Rem.
 				for i := range w.Draft.Rows {
 					i := i
 					inp1 := ui.TextInput(c, &w.Draft.Rows[i].SampleID).Placeholder("样本编号 (如 Control-1)")
@@ -735,12 +735,12 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 				msg = w.Error
 			}
 			ui.Row(c).Padding(10, 14).Radius(8).Background(tokens.DangerBg).Border(1, tokens.DangerText).Children(func() {
-				ui.Text(c, "⚠ "+msg).FontSize(12).TextColor(tokens.DangerText).Bold()
+				ui.Text(c, "⚠ "+msg).FontSize(t.Rem(0.86)).TextColor(tokens.DangerText).Bold() // UX-P3: 12px → Rem.
 			})
 		}
 		if w.State == StateSaved {
 			ui.Row(c).Padding(10, 14).Radius(8).Background(tokens.SuccessBg).Border(1, tokens.SuccessText).Children(func() {
-				ui.Text(c, "✓ 记录已成功持久化至实验记录").FontSize(12).TextColor(tokens.SuccessText).Bold()
+				ui.Text(c, "✓ 记录已成功持久化至实验记录").FontSize(t.Rem(0.86)).TextColor(tokens.SuccessText).Bold() // UX-P3: 12px → Rem.
 			})
 		}
 
@@ -755,8 +755,8 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 				names = append(names, labelOr(check.Label, check.CheckID))
 			}
 			ui.Row(c).Padding(8, 12).Radius(6).Background(tokens.WarningBg).Children(func() {
-				ui.Text(c, "完成前需确认："+strings.Join(names, "、")).FontSize(12).
-					TextColor(tokens.WarningText)
+				ui.Text(c, "完成前需确认："+strings.Join(names, "、")).FontSize(t.Rem(0.86)).
+					TextColor(tokens.WarningText) // UX-P3: 12px → Rem.
 			})
 		}
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -766,7 +766,7 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 			}
 			btnSave := ui.ButtonBase(c).Radius(8).Padding(8, 20).Background(t.Accent).OnClick(func() { w.save() })
 			btnSave.Children(func() {
-				ui.Text(c, saveLabel).FontSize(13).Bold().TextColor(t.AccentText)
+				ui.Text(c, saveLabel).FontSize(t.Rem(0.93)).Bold().TextColor(t.AccentText) // UX-P3: 13px → Rem.
 			})
 
 			btnComplete := ui.Button(c, "完成本步").Radius(8).Padding(8, 16).
@@ -780,9 +780,9 @@ func recordPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) 
 
 func plateCard(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
 	ui.Column(c).Gap(12).Padding(20).Radius(12).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
-		ui.Text(c, "空间板视图 · 只读").FontSize(15).Bold().TextColor(t.Text)
+		ui.Text(c, "空间板视图 · 只读").FontSize(t.Rem(1.07)).Bold().TextColor(t.Text) // UX-P3: 15px → Rem.
 		if w.Grid == nil {
-			ui.Text(c, "当前任务尚无 assay schema").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "当前任务尚无 assay schema").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 			return
 		}
 		plateGrid(c, w.Grid)
@@ -797,10 +797,10 @@ func plateGrid(c *ui.Context, grid *resultgrid.Grid) {
 		ui.Grid(c).Columns(grid.Columns() + 1).Gap(3).Children(func() {
 			ui.Text(c, "")
 			for _, label := range grid.Schema.ColumnLabels {
-				ui.Text(c, label).FontSize(9).Bold()
+				ui.Text(c, label).FontSize(c.Theme().Rem(0.64)).Bold() // UX-P3: 9px → Rem.
 			}
 			for row, label := range grid.Schema.RowLabels {
-				ui.Text(c, label).FontSize(9).Bold()
+				ui.Text(c, label).FontSize(c.Theme().Rem(0.64)).Bold() // UX-P3: 9px → Rem.
 				for col := range grid.Columns() {
 					cell, _ := grid.CellAt(row, col)
 					value := "—"
@@ -840,13 +840,13 @@ func notebookPanel(c *ui.Context, w *Workspace, t *ui.Theme) {
 	}
 	ui.Column(c).Grow(1).FillWidth().Padding(t.Space(6)).Gap(t.Space(3)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-			ui.Text(c, "运行日志").FontSize(20).Bold().TextColor(t.Text)
-			ui.Text(c, "只读 · 系统记录").FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "运行日志").FontSize(t.Rem(1.43)).Bold().TextColor(t.Text) // UX-P3: 20px → Rem.
+			ui.Text(c, "只读 · 系统记录").FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 			ui.Text(c, fmt.Sprintf("Design rev %d · %d 条记录", w.Notebook.DesignRevision, len(entries))).
-				FontSize(12).TextColor(t.TextMuted)
+				FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 		})
 		if len(entries) == 0 {
-			ui.Text(c, "此运行还没有可追溯的记录。").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "此运行还没有可追溯的记录。").FontSize(t.Rem(0.93)).TextColor(t.TextMuted) // UX-P3: 13px → Rem.
 			return
 		}
 		components.List(c, &w.NotebookList, len(rows), func(i int) {
@@ -854,7 +854,7 @@ func notebookPanel(c *ui.Context, w *Workspace, t *ui.Theme) {
 			if row.entry == nil {
 				ui.Row(c).FillWidth().Padding(t.Space(3), 0).Gap(t.Space(2)).AlignItems(ui.Center).
 					Children(func() {
-						ui.Text(c, row.day).FontSize(11).Bold().TextColor(t.TextMuted).Shrink(0)
+						ui.Text(c, row.day).FontSize(t.Rem(0.79)).Bold().TextColor(t.TextMuted).Shrink(0) // UX-P3: 11px → Rem.
 						ui.Box(c).Grow(1).Height(1).Background(t.Border)
 					})
 				return
@@ -1065,96 +1065,96 @@ func timeOnly(raw string) string {
 func reviewPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
 	review := resultgrid.Summarize(w.Grid)
 	ui.Column(c).Gap(8).Children(func() {
-		ui.Text(c, "结果审阅").FontSize(15).Bold().TextColor(t.Text)
+		ui.Text(c, "结果审阅").FontSize(t.Rem(1.07)).Bold().TextColor(t.Text) // UX-P3: 15px → Rem.
 		ui.Text(c, fmt.Sprintf("%s · v%d · 冻结设计", review.SchemaID, review.SchemaVersion)).
-			FontSize(11).TextColor(t.TextMuted)
+			FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		if len(review.Rows) == 0 {
-			ui.Text(c, "尚无已记录的读数。").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "尚无已记录的读数。").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 			return
 		}
 		ui.Row(c).Gap(12).Children(func() {
 			for _, header := range []string{"样本", "组别", "字段", "记录", "缺失", "排除", "均值", "SD"} {
-				ui.Text(c, header).FontSize(11).Bold().TextColor(t.TextMuted)
+				ui.Text(c, header).FontSize(t.Rem(0.79)).Bold().TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 			}
 		})
 		for _, row := range review.Rows {
 			ui.Row(c).Gap(12).Children(func() {
-				ui.Text(c, row.SampleID).FontSize(12).TextColor(t.Text)
-				ui.Text(c, row.Group).FontSize(12).TextColor(t.TextMuted)
-				ui.Text(c, row.Field).FontSize(12).TextColor(t.TextMuted)
-				ui.Text(c, fmt.Sprintf("%d", row.Recorded)).FontSize(12).FontFeatures("tnum")
-				ui.Text(c, fmt.Sprintf("%d", row.Missing)).FontSize(12).TextColor(t.Warning).FontFeatures("tnum")
-				ui.Text(c, fmt.Sprintf("%d", row.Excluded)).FontSize(12).TextColor(t.TextMuted).FontFeatures("tnum")
+				ui.Text(c, row.SampleID).FontSize(t.Rem(0.86)).TextColor(t.Text) // UX-P3: 12px → Rem.
+				ui.Text(c, row.Group).FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
+				ui.Text(c, row.Field).FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
+				ui.Text(c, fmt.Sprintf("%d", row.Recorded)).FontSize(t.Rem(0.86)).FontFeatures("tnum") // UX-P3: 12px → Rem.
+				ui.Text(c, fmt.Sprintf("%d", row.Missing)).FontSize(t.Rem(0.86)).TextColor(t.Warning).FontFeatures("tnum") // UX-P3: 12px → Rem.
+				ui.Text(c, fmt.Sprintf("%d", row.Excluded)).FontSize(t.Rem(0.86)).TextColor(t.TextMuted).FontFeatures("tnum") // UX-P3: 12px → Rem.
 				if row.Recorded == 0 {
-					ui.Text(c, "—").FontSize(12).TextColor(t.TextMuted)
-					ui.Text(c, "—").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "—").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
+					ui.Text(c, "—").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 					return
 				}
-				ui.Text(c, fmt.Sprintf("%.4g", row.Mean)).FontSize(12).FontFeatures("tnum")
+				ui.Text(c, fmt.Sprintf("%.4g", row.Mean)).FontSize(t.Rem(0.86)).FontFeatures("tnum") // UX-P3: 12px → Rem.
 				if row.Recorded < 2 {
-					ui.Text(c, "—").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "—").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 				} else {
-					ui.Text(c, fmt.Sprintf("%.4g", row.SD)).FontSize(12).FontFeatures("tnum")
+					ui.Text(c, fmt.Sprintf("%.4g", row.SD)).FontSize(t.Rem(0.86)).FontFeatures("tnum") // UX-P3: 12px → Rem.
 				}
 			})
 		}
 		ui.Text(c, "按样本汇总技术重复（算术均值、样本 SD，n−1）；生物学重复 n 不由孔位或行数推导。").
-			FontSize(11).TextColor(t.TextMuted)
+			FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 	})
 }
 
 func taskPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
 	ui.Column(c).Gap(8).Padding(16).Radius(8).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
 		ct := w.currentTask()
-		ui.Text(c, "任务与结果").FontSize(15).Bold().TextColor(t.Text)
+		ui.Text(c, "任务与结果").FontSize(t.Rem(1.07)).Bold().TextColor(t.Text) // UX-P3: 15px → Rem.
 		if ct == nil {
-			ui.Text(c, "当前运行没有任务").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "当前运行没有任务").FontSize(t.Rem(0.93)).TextColor(t.TextMuted) // UX-P3: 13px → Rem.
 			return
 		}
 		title := ct.Title
 		if ct.Timepoint != "" {
 			title = ct.Timepoint + " · " + title
 		}
-		ui.Text(c, title).FontSize(13).Bold().TextColor(t.Text)
-		ui.Text(c, "任务 "+ct.Key+" · "+ct.Status).FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, title).FontSize(t.Rem(0.93)).Bold().TextColor(t.Text) // UX-P3: 13px → Rem.
+		ui.Text(c, "任务 "+ct.Key+" · "+ct.Status).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		// Right-side inspector keeps its existing primary recording flow visible: UX-P1/UX-LAYOUT.
 		// Frozen protocol details are an inspector section; UX-P2/P3 and UX-STATE.
 		ui.Divider(c)
-		ui.Text(c, "协议与参数 · 只读 · 已冻结").FontSize(12).Bold().TextColor(t.Text)
-		ui.Text(c, "已冻结 · 无编辑入口").FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, "协议与参数 · 只读 · 已冻结").FontSize(t.Rem(0.86)).Bold().TextColor(t.Text) // UX-P3: 12px → Rem.
+		ui.Text(c, "已冻结 · 无编辑入口").FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		if ct.ProtocolVersionID != "" {
-			ui.Text(c, "协议版本 "+ct.ProtocolVersionID).FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "协议版本 "+ct.ProtocolVersionID).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		}
 		ui.Text(c, fmt.Sprintf("Run rev %d · Design rev %d · AsterDoc rev %d",
 			w.View.Revision, w.View.DesignRevision, w.View.AsterDocRevision)).
-			FontSize(11).TextColor(t.TextMuted)
+			FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		if ct.Instruction != "" {
-			ui.Text(c, "操作说明").FontSize(11).Bold().TextColor(t.Text)
-			ui.Text(c, ct.Instruction).FontSize(12).TextColor(t.Text)
+			ui.Text(c, "操作说明").FontSize(t.Rem(0.79)).Bold().TextColor(t.Text) // UX-P3: 11px → Rem.
+			ui.Text(c, ct.Instruction).FontSize(t.Rem(0.86)).TextColor(t.Text) // UX-P3: 12px → Rem.
 		}
 		if len(ct.Parameters) > 0 {
-			ui.Text(c, "冻结参数").FontSize(11).Bold().TextColor(t.Text)
+			ui.Text(c, "冻结参数").FontSize(t.Rem(0.79)).Bold().TextColor(t.Text) // UX-P3: 11px → Rem.
 			for _, p := range ct.Parameters {
 				value := strings.TrimSpace(strings.Join([]string{p.Value, p.Unit}, " "))
-				ui.Text(c, labelOr(p.Label, p.Key)+" · "+value).FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, labelOr(p.Label, p.Key)+" · "+value).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 			}
 		}
 		if ct.AssayID != "" {
-			ui.Text(c, "Assay "+ct.AssayID).FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "Assay "+ct.AssayID).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		}
 		if len(ct.Checks) > 0 {
 			ui.Divider(c)
 			ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-				ui.Text(c, "执行检查").FontSize(12).Bold().TextColor(t.Text)
+				ui.Text(c, "执行检查").FontSize(t.Rem(0.86)).Bold().TextColor(t.Text) // UX-P3: 12px → Rem.
 				open := w.openBlocking(ct)
 				if len(open) > 0 {
 					ui.Row(c).Padding(2, 6).Radius(5).Background(tokens.DangerBg).Children(func() {
-						ui.Text(c, fmt.Sprintf("%d 项阻塞", len(open))).FontSize(10).
-							TextColor(tokens.DangerText).Bold()
+						ui.Text(c, fmt.Sprintf("%d 项阻塞", len(open))).FontSize(t.Rem(0.71)).
+							TextColor(tokens.DangerText).Bold() // UX-P3: 10px → Rem.
 					})
 				} else {
 					ui.Text(c, fmt.Sprintf("%d/%d 已确认", len(ct.Checks)-len(open), len(ct.Checks))).
-						FontSize(11).TextColor(t.TextMuted)
+						FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 				}
 			})
 			for _, check := range ct.Checks {
@@ -1165,57 +1165,57 @@ func taskPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
 					w.pendingCheck = ct.Key
 				}
 				if check.Instruction != "" {
-					ui.Text(c, check.Instruction).FontSize(11).TextColor(t.TextMuted)
+					ui.Text(c, check.Instruction).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 				}
 				if check.Blocking && !*on {
-					ui.Text(c, "阻塞：未确认").FontSize(11).TextColor(tokens.DangerText)
+					ui.Text(c, "阻塞：未确认").FontSize(t.Rem(0.79)).TextColor(tokens.DangerText) // UX-P3: 11px → Rem.
 				}
 			}
 		}
 		if w.Modules != nil {
 			ui.Divider(c)
 			if ct.DesignStepID == "" {
-				ui.Text(c, "未关联设计步骤").FontSize(12).Bold().TextColor(t.TextMuted)
+				ui.Text(c, "未关联设计步骤").FontSize(t.Rem(0.86)).Bold().TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 				ui.Text(c, "该任务没有 design_step_id：可能来自旧运行，或设计把同一检测关联到了多个步骤。不按标题猜测对应模块。").
-					FontSize(11).TextColor(t.TextMuted)
+					FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 			} else {
-				ui.Text(c, "设计模块 · "+ct.DesignStepID).FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, "设计模块 · "+ct.DesignStepID).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 				w.Modules(c, *ct)
 			}
 		}
 		if w.Grid != nil {
-			ui.Text(c, fmt.Sprintf("结果表 %s · %d × %d", w.Grid.Schema.ID, w.Grid.Rows(), w.Grid.Columns())).FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, fmt.Sprintf("结果表 %s · %d × %d", w.Grid.Schema.ID, w.Grid.Rows(), w.Grid.Columns())).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		} else if len(w.View.Measurements) > 0 {
-			ui.Text(c, fmt.Sprintf("已记录 %d 条原始测量", len(w.View.Measurements))).FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, fmt.Sprintf("已记录 %d 条原始测量", len(w.View.Measurements))).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		} else {
-			ui.Text(c, "尚无结果记录").FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "尚无结果记录").FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		}
 	})
 }
 
 func readinessCard(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
 	ui.Column(c).Gap(14).Padding(20).Radius(12).Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
-		ui.Text(c, "实验就绪检查").FontSize(15).Bold().TextColor(t.Text)
+		ui.Text(c, "实验就绪检查").FontSize(t.Rem(1.07)).Bold().TextColor(t.Text) // UX-P3: 15px → Rem.
 
 		if w.View.Audit != nil {
 			ui.Divider(c)
-			ui.Text(c, "创建记录").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "创建记录").FontSize(t.Rem(0.79)).Bold().TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 			actor := w.View.Audit.ActorID
 			if actor == "" {
 				actor = "未记录"
 			}
 			ui.Text(c, "操作者 "+actor+" · "+valueOrUnrecorded(w.View.Audit.RecordedAt)).
-				FontSize(11).TextColor(t.TextMuted)
+				FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 			for _, warning := range w.View.Audit.Warnings {
-				ui.Text(c, "警告："+warning).FontSize(11).TextColor(tokens.WarningText)
+				ui.Text(c, "警告："+warning).FontSize(t.Rem(0.79)).TextColor(tokens.WarningText) // UX-P3: 11px → Rem.
 			}
 		}
 		if len(w.View.Events) > 0 {
 			ui.Divider(c)
-			ui.Text(c, "运行事件").FontSize(13).Bold().TextColor(t.Text)
+			ui.Text(c, "运行事件").FontSize(t.Rem(0.93)).Bold().TextColor(t.Text) // UX-P3: 13px → Rem.
 			for _, e := range w.View.Events {
 				ui.Row(c).Padding(3, 6).Children(func() {
-					ui.Text(c, e.Kind+": "+e.Message).FontSize(11).TextColor(t.TextMuted)
+					ui.Text(c, e.Kind+": "+e.Message).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 				})
 			}
 		}
