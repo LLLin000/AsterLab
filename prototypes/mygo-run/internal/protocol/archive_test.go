@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -241,5 +242,23 @@ func TestArchivePDFNilLoaderWithImagesFails(t *testing.T) {
 	err := arch.PDF(io.Discard, nil)
 	if err == nil || !strings.Contains(err.Error(), "img-a1") {
 		t.Fatalf("nil loader did not name the first asset: %v", err)
+	}
+}
+
+// TestArchivePDFWorksWithoutSystemFonts pins the hosted-runner case: no CJK
+// font on disk must still export the full board (core Helvetica fallback),
+// with no dangling family/weight reference.
+func TestArchivePDFWorksWithoutSystemFonts(t *testing.T) {
+	old := recordPDFFontCandidates
+	recordPDFFontCandidates = []string{filepath.Join(t.TempDir(), "no-such-font.ttf")}
+	defer func() { recordPDFFontCandidates = old }()
+	proj, prose, load := pdfImageFixture(t)
+	var buf bytes.Buffer
+	arch := BuildArchive(proj, prose, time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC))
+	if err := arch.PDF(&buf, load); err != nil {
+		t.Fatalf("fontless export failed: %v", err)
+	}
+	if got := pdfImageObjects(buf.Bytes()); got != 2 {
+		t.Fatalf("fontless export embedded %d image objects, want 2", got)
 	}
 }

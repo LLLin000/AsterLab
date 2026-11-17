@@ -286,8 +286,10 @@ func (arch Archive) PDF(w io.Writer, load ImageLoader) error {
 		if err != nil {
 			continue
 		}
+		// Single-style registration only: headings are sized, not bolded,
+		// so a fontless machine falls back to core Helvetica (which always
+		// defines "") with no dangling family/weight reference.
 		pdf.AddUTF8FontFromBytes("RecordCJK", "", data)
-		pdf.AddUTF8FontFromBytes("RecordCJK", "B", data)
 		if err := pdf.Error(); err != nil {
 			return fmt.Errorf("record PDF: load CJK font %q: %w", path, err)
 		}
@@ -302,12 +304,12 @@ func (arch Archive) PDF(w io.Writer, load ImageLoader) error {
 		pdf.CellFormat(0, 8, fmt.Sprintf("Page %d", pdf.PageNo()), "", 0, "C", false, 0, "")
 	})
 	h1 := func(text string) {
-		pdf.SetFont(font, "B", 14)
+		pdf.SetFont(font, "", 15)
 		pdf.MultiCell(0, 8, text, "", "", false)
 		pdf.Ln(1)
 	}
 	h2 := func(text string) {
-		pdf.SetFont(font, "B", 11)
+		pdf.SetFont(font, "", 12)
 		pdf.MultiCell(0, 7, text, "", "", false)
 	}
 	body := func(text string) {
@@ -341,7 +343,7 @@ func (arch Archive) PDF(w io.Writer, load ImageLoader) error {
 		body("无冻结任务。")
 	}
 	for _, sum := range proj.Summary {
-		pdf.SetFont(font, "B", 10)
+		pdf.SetFont(font, "", 10)
 		pdf.MultiCell(0, 6, taskTitle(sum), "", "", false)
 		if strings.TrimSpace(sum.Timepoint) != "" {
 			body("时间点：" + sum.Timepoint)
