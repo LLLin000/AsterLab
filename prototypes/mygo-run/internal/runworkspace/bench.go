@@ -48,6 +48,10 @@ type BenchState struct {
 	timerForms map[string]*timerForm
 	// eventForms holds the composer drafts per task.
 	eventForms map[string]*eventForm
+	// exclusionForms holds the sample-exclusion drafts per task.
+	exclusionForms map[string]*exclusionForm
+	// readoutForms holds the categorical/table readout drafts per task.
+	readoutForms map[string]*typedReadoutForm
 	// Pantry caches the last ListPantry ledger for the composer.
 	Pantry       *runs.PantryLedger
 	PantryLoaded bool
@@ -270,9 +274,13 @@ func renderBench(c *ui.Context, s *State, task *RunTaskViewModel, t *ui.Theme, t
 	}
 	hasTimers := s.Callbacks.LoadTimers != nil
 	hasEvents := s.Callbacks.AppendEvent != nil
+	// hasChannel gates the Bridge v2 composers (sample exclusion and
+	// categorical/table readout entry); without it both sections stay
+	// hidden and the bench keeps its old shape.
+	hasChannel := s.Callbacks.ExecuteCommand != nil
 	wells, timepoint, fov := capturePlan(s, task)
 	hasCapture := len(wells) > 0 && fov > 0
-	if !hasTimers && !hasEvents && !hasCapture {
+	if !hasTimers && !hasEvents && !hasCapture && !hasChannel {
 		return
 	}
 	ui.Column(c).FillWidth().Padding(float32(tokens.Spacing16)).Radius(float32(tokens.PanelRadius)).
@@ -291,6 +299,13 @@ func renderBench(c *ui.Context, s *State, task *RunTaskViewModel, t *ui.Theme, t
 		if hasEvents {
 			renderEventComposer(c, s, task, t, tokens)
 		}
+		// UX-P1, UX-P4, UX-STATE: exclusion and typed readout entry live in
+		// the bench as their own sections with one write action each; Core
+		// owns all validation and every failure names cause + retry.
+		if hasChannel {
+			renderExclusionSection(c, s, task, t, tokens)
+			renderTypedReadoutSection(c, s, task, t, tokens)
+		}
 	})
 }
 
@@ -305,16 +320,15 @@ func capturePlan(s *State, task *RunTaskViewModel) (wells []string, timepoint st
 	return wells, strings.TrimSpace(task.Timepoint), fovPerWell
 }
 
-// renderBlindToggle flips the run blinding mask. Masked capture panels hide
-// group identity; the authoritative blind projection stays in Record.
+// renderBlindToggle flips the run blinding mask through the same Core
+// confirmation as the Run top-bar switch: entering blind consumes the
+// run.workspace blind projection, leaving blind unmasks locally. Masked
+// capture panels hide group identity; the authoritative blind projection
+// stays in Record. UX-P3, UX-STATE, UX-DESIGN.
 func renderBlindToggle(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 	bench := s.bench()
-	label := "○ 设盲视图"
-	if bench.Blind {
-		label = "● 设盲视图"
-	}
-	if components.Button(c, label, components.ButtonGhost).Clicked() {
-		bench.Blind = !bench.Blind
+	if components.Button(c, blindSwitchLabel(bench.Blind), components.ButtonGhost).Clicked() {
+		s.toggleBlind()
 	}
 	if bench.Blind {
 		ui.Text(c, "分组已隐藏").FontSize(t.Rem(.68)).TextColor(t.TextMuted)

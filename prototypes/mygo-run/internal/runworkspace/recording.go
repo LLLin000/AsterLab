@@ -81,15 +81,19 @@ func SelectKind(task *RunTaskViewModel, grid *resultgrid.Grid, assets []LinkedAs
 // RecordingView renders the unified recording module: the same data backed by
 // plate, table, gallery, or form. The host supplies the write callbacks.
 type RecordingView struct {
-	RunID           string
-	Kind            ViewKind
-	Grid            *resultgrid.Grid
-	Assets          []LinkedAsset
-	Task            *RunTaskViewModel
-	OnOpenAsset     func(asset LinkedAsset)
-	OnRelocate      func(asset LinkedAsset)
-	OnRelabelAsset  func(asset LinkedAsset)
-	OnLinkFile      func(asset LinkedAsset)
+	RunID string
+	Kind  ViewKind
+	Grid  *resultgrid.Grid
+	// Blind masks group identity in plate and table rendering. It is view
+	// state, not data: the toggle lives in the Run header/bench and Core's
+	// run.workspace blind projection is the authority (UX-P3, UX-DESIGN).
+	Blind          bool
+	Assets         []LinkedAsset
+	Task           *RunTaskViewModel
+	OnOpenAsset    func(asset LinkedAsset)
+	OnRelocate     func(asset LinkedAsset)
+	OnRelabelAsset func(asset LinkedAsset)
+	OnLinkFile     func(asset LinkedAsset)
 	OnTimeline     func()
 	// LinkErr holds the Core rejection cause for the last link attempt on this
 	// task so the recording surface can show cause + retry (UX-P5).
@@ -112,6 +116,12 @@ func (r *RecordingView) Render(c *ui.Context) {
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
 	recovered := syncGridDraft(r.RunID, r.Task.TaskKey, r.Grid, time.Now())
+	// The Run blind switch is the single mask source: the grid's Blind flag
+	// is re-applied every render so plate and table never disagree, and
+	// unmasking restores the groups already in the cells.
+	if r.Grid != nil {
+		r.Grid.Blind = r.Blind
+	}
 	saveNow := func() {
 		if r.Grid == nil || r.OnSaveBatch == nil {
 			return
@@ -339,7 +349,10 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 					ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 						ui.Text(c, well).FontSize(12).Bold().TextColor(t.Text).SingleLine().Ellipsis("…")
 						meta := cell.SampleID
-						if cell.Group != "" && cell.Group != cell.SampleID {
+						// UX-P2, UX-DESIGN: the blind mask hides group
+						// treatment names in table rows too; sample
+						// coordinates stay visible.
+						if !r.Blind && cell.Group != "" && cell.Group != cell.SampleID {
 							meta += " · " + cell.Group
 						}
 						meta += fmt.Sprintf(" · 重复 %d", cell.Replicate)

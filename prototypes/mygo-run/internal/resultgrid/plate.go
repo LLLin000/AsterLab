@@ -107,20 +107,88 @@ func PlateView(c *ui.Context, g *Grid) {
 
 		legendRow(c, g, t, tokens)
 
-		drawPlate(c, g, t, tokens)
+		// UX-P4, UX-P3, UX-DESIGN: a 1D container (tube rack, animal-number
+		// sequence) reads as a lane strip, not a plate matrix. The strip
+		// shares the 2D status palette and the same Grid data source.
+		if rows == 1 || cols == 1 {
+			drawRack(c, g, t, tokens)
+		} else {
+			drawPlate(c, g, t, tokens)
+		}
 
 		selectedEditor(c, g, t, tokens, field)
 	})
 }
 
 func plateLabel(rows, cols int) string {
-	// Standard labware reads by well count; a 3×4 grid is a 12-well plate,
-	// not a "3 × 4 孔板". Unknown geometries keep the raw dimensions.
+	// A single row or column is a 1D container (tube rack, animal-number
+	// sequence, Core Lane<N>), not a plate: it reads by tube count even
+	// when the count matches a plate format (UX-P4). Standard labware
+	// reads by well count; unknown 2D geometries keep raw dimensions.
+	if (rows == 1 || cols == 1) && rows*cols > 1 {
+		return fmt.Sprintf("%d 管架", rows*cols)
+	}
 	switch rows * cols {
 	case 6, 12, 24, 48, 96, 384:
 		return fmt.Sprintf("%d 孔板", rows*cols)
 	}
 	return fmt.Sprintf("%d × %d 孔板", rows, cols)
+}
+
+// drawRack renders a 1D grid through the shared tube-rack widget. Slot order
+// is fill order along the single axis and positions are Core canonical
+// Lane<N>; the selection maps back onto grid coordinates so the same editor
+// below keeps working. Group treatment names follow the grid Blind flag.
+func drawRack(c *ui.Context, g *Grid, t *ui.Theme, tokens theme.Tokens) {
+	rows, cols := g.Rows(), g.Columns()
+	n := rows * cols
+	lanes := make([]plateui.LaneState, 0, n)
+	for i := range n {
+		r, col := 0, i
+		if cols == 1 {
+			r, col = i, 0
+		}
+		cell, _ := g.CellAt(r, col)
+		status := cell.Status
+		if status == "" {
+			status = "missing"
+		}
+		lanes = append(lanes, plateui.LaneState{
+			Position: plateui.LanePosition(i),
+			SampleID: cell.SampleID,
+			Group:    cell.Group,
+			Status:   status,
+			HasValue: cell.Value != nil,
+		})
+	}
+	selected := ""
+	if g.Selection.StartRow >= 0 && g.Selection.StartColumn >= 0 {
+		i := g.Selection.StartRow*cols + g.Selection.StartColumn
+		if i >= 0 && i < len(lanes) {
+			selected = lanes[i].Position
+		}
+	}
+	plateui.Rack(c, plateui.RackProps{
+		Lanes:       lanes,
+		Blind:       g.Blind,
+		Selected:    selected,
+		Interactive: true,
+		OnSelect: func(position string) {
+			for i, lane := range lanes {
+				if lane.Position != position {
+					continue
+				}
+				r, col := 0, i
+				if cols == 1 {
+					r, col = i, 0
+				}
+				if err := g.SelectCell(r, col); err != nil {
+					setGridError(g, err)
+				}
+				return
+			}
+		},
+	})
 }
 func countChip(c *ui.Context, label string, bg, fg ui.Color, t *ui.Theme) {
 	ui.Row(c).Padding(2, 7).Radius(5).Background(bg).Children(func() {
