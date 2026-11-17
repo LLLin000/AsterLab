@@ -249,6 +249,49 @@ func TestTimerStripShowsRunningTimers(t *testing.T) {
 	}
 }
 
+func TestTimerStripCollapsesOverflow(t *testing.T) {
+	rSoon, rLater := uint64(30), uint64(3600)
+	selected := ""
+	s := &Shell{Page: Run, OnTimerSelect: func(id string) { selected = id }, ActiveTimers: []runs.ActiveTimer{
+		{RunID: "r1", RunTitle: "L929 夜间孵育", TimerID: "t1", ElapsedS: 300, RemainingS: &rLater},
+		{RunID: "r2", RunTitle: "CCK-8 读板", TimerID: "t2", ElapsedS: 61},
+		{RunID: "r3", RunTitle: "RT-qPCR 扩增", TimerID: "t3", ElapsedS: 10, RemainingS: &rSoon},
+	}}
+	tt := render(s.page, 900, 600)
+	tt.Frame()
+	// UX-LAYOUT: expiring first, the rest behind one toggle; nothing
+	// horizontal to overflow the narrow viewport.
+	for _, text := range []string{"RT-qPCR 扩增 · 剩余 0:30", "L929 夜间孵育 · 剩余 1:00:00", "＋1 更多"} {
+		if !tt.HasText(text) {
+			t.Fatalf("compact strip missing %q: %q", text, tt.Texts())
+		}
+	}
+	if tt.HasText("CCK-8 读板") {
+		t.Fatalf("overflow timer must collapse by default: %q", tt.Texts())
+	}
+	if err := tt.Click("＋1 更多"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("CCK-8 读板") || !tt.HasText("收起") {
+		t.Fatalf("expanded strip must locate every timer: %q", tt.Texts())
+	}
+	if err := tt.Click("CCK-8 读板 · 已计时 1:01"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if selected != "r2" {
+		t.Fatalf("timer click selected run %q, want r2", selected)
+	}
+	if err := tt.Click("收起"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tt.HasText("CCK-8 读板") {
+		t.Fatalf("collapsed strip must hide the tail again: %q", tt.Texts())
+	}
+}
+
 func TestTimerStripEmptyRendersNothing(t *testing.T) {
 	s := &Shell{Page: Run}
 	tt := render(s.page, 900, 600)

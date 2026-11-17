@@ -17,6 +17,13 @@ func TestParseRunWellLinkValid(t *testing.T) {
 	if link.RunID != "run-7" || link.Well != "A1" {
 		t.Fatalf("normalization failed: %+v", link)
 	}
+	link, err = ParseRunWellLink("asterlab://run/run-7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link.RunID != "run-7" || link.Well != "" {
+		t.Fatalf("run-only route failed: %+v", link)
+	}
 }
 
 func TestParseRunWellLinkInvalid(t *testing.T) {
@@ -25,8 +32,8 @@ func TestParseRunWellLinkInvalid(t *testing.T) {
 		"not a link",
 		"http://run/r1/well/A1",
 		"asterlab://design/d1/well/A1",
-		"asterlab://run//well/A1",
-		"asterlab://run/r1/A1",
+		"asterlab://run/",
+		"asterlab://run",
 		"asterlab://run/r1/well/",
 		"asterlab://run/r1/well/A0",
 		"asterlab://run/r1/well/1A",

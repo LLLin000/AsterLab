@@ -93,17 +93,80 @@ func TestBenchSkipFlowAppendsEvent(t *testing.T) {
 	}
 }
 
-func TestBenchBlindToggleMasksCapture(t *testing.T) {
+// TestBenchHasNoBlindSwitch keeps one blind entry: the Run top-bar switch in
+// runHeader consumes Core's run.workspace blind projection, so the bench
+// offers no second switch. Toggling and masking stay covered by the
+// top-bar tests in blind_test.go. UX-IA-1, UX-STATE.
+func TestBenchHasNoBlindSwitch(t *testing.T) {
 	s, _, _ := benchHarness()
 	tt := renderBenchAt(t, s, 1200, 800)
-	if err := tt.Click("○ 设盲视图"); err != nil {
-		t.Fatal(err)
+	if tt.HasText("设盲视图") {
+		t.Fatalf("bench must not offer a blind switch: %q", tt.Texts())
 	}
-	if s.Bench == nil || !s.Bench.Blind {
-		t.Fatal("blind toggle did not flip")
+}
+
+// TestBenchSampleSectionsFollowTaskCapability renders exclusion and typed
+// readout entry only for sample-bearing tasks (measurement plan, recorded
+// measurements, or capture slots); procedure-only steps keep the generic
+// skip/deviation/observation composer. UX-IA-1, UX-P1.
+func TestBenchSampleSectionsFollowTaskCapability(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	s := NewState(vm, Callbacks{
+		AppendEvent: func(string, runs.ExecutionEventInput) (string, error) { return "", nil },
+		ExecuteCommand: func(runs.ExecuteCommandInput) (runs.ExecuteCommandResult, error) {
+			return runs.ExecuteCommandResult{}, nil
+		},
+		CaptureWells: func(taskKey string) ([]string, int) { return nil, 0 },
+	})
+	renderAt := func(task *RunTaskViewModel) *ui.Tester {
+		tt := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(theme.LightTheme())
+			renderBench(c, s, task, c.Theme(), theme.GetTokens(c.Theme()))
+		}, 1200, 800)
+		tt.Frame()
+		return tt
 	}
-	if !tt.HasText("分组已隐藏") {
-		t.Fatalf("blind notice missing: %q", tt.Texts())
+	// t-read carries recorded measurements: sample sections render.
+	s.Selected = "t-read"
+	read := renderAt(vm.TaskByKey["t-read"])
+	for _, want := range []string{"样本排除", "分类与表格读数", "偏差与跳过"} {
+		if !read.HasText(want) {
+			t.Fatalf("sample task bench missing %q: %q", want, read.Texts())
+		}
+	}
+	// A procedure-only step carries no samples: generic composer only.
+	pure := &RunTaskViewModel{TaskKey: "t-pure", StepTitle: "离心", Status: TaskStatusCurrent}
+	got := renderAt(pure)
+	if !got.HasText("偏差与跳过") {
+		t.Fatalf("procedure task bench missing composer: %q", got.Texts())
+	}
+	for _, hidden := range []string{"样本排除", "分类与表格读数"} {
+		if got.HasText(hidden) {
+			t.Fatalf("procedure task bench must not show %q: %q", hidden, got.Texts())
+		}
+	}
+}
+
+func TestTaskCarriesSamples(t *testing.T) {
+	if taskCarriesSamples(nil, nil) {
+		t.Fatal("nil task carries no samples")
+	}
+	plain := &RunTaskViewModel{TaskKey: "t-pure", Status: TaskStatusCurrent}
+	if taskCarriesSamples(plain, nil) {
+		t.Fatal("procedure task without slots carries no samples")
+	}
+	if !taskCarriesSamples(plain, []string{"A1"}) {
+		t.Fatal("capture slots mean samples")
+	}
+	measured := &RunTaskViewModel{TaskKey: "t-read", Status: TaskStatusCurrent,
+		Actual: &ActualRecord{Measurements: []MeasurementView{{SampleID: "M1"}}}}
+	if !taskCarriesSamples(measured, nil) {
+		t.Fatal("recorded measurements mean samples")
+	}
+	planned := &RunTaskViewModel{TaskKey: "t-plan", Status: TaskStatusCurrent,
+		Modules: []ModuleRef{{Kind: "measurement_profile"}}}
+	if !taskCarriesSamples(planned, nil) {
+		t.Fatal("measurement plan means samples")
 	}
 }
 

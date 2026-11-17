@@ -179,7 +179,7 @@ func renderSkipForm(c *ui.Context, s *State, task *RunTaskViewModel, form *event
 		ui.Text(c, "跳过原因（可选）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 		ui.TextInput(c, &form.Text).FillWidth().Placeholder("例如：无气泡，符合跳过条件")
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-			if submit := components.Button(c, "确认按规则跳过", components.ButtonPrimary); submit.Clicked() && !form.Busy {
+			if submit := components.Button(c, "确认按规则跳过", components.ButtonSecondary); submit.Clicked() && !form.Busy {
 				s.submitEvent(task, form, SkipEventInput(task, form.Text))
 			}
 			if form.Busy {
@@ -195,7 +195,7 @@ func renderDeviationForm(c *ui.Context, s *State, task *RunTaskViewModel, form *
 		ui.TextInput(c, &form.Text).FillWidth().Placeholder("例如：实际离心 5 分钟，与方案 3 分钟不符")
 		renderPantryRow(c, s, form, t, tokens)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-			if submit := components.Button(c, "记录偏差", components.ButtonPrimary); submit.Clicked() && !form.Busy {
+			if submit := components.Button(c, "记录偏差", components.ButtonSecondary); submit.Clicked() && !form.Busy {
 				if strings.TrimSpace(form.Text) == "" {
 					form.Err = "请填写偏差说明"
 					return
@@ -215,7 +215,7 @@ func renderObservationForm(c *ui.Context, s *State, task *RunTaskViewModel, form
 		ui.TextInput(c, &form.Text).FillWidth().Placeholder("例如：3% 组 405nm 固化 42 秒，表面平整")
 		renderPantryRow(c, s, form, t, tokens)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-			if submit := components.Button(c, "记录观察", components.ButtonPrimary); submit.Clicked() && !form.Busy {
+			if submit := components.Button(c, "记录观察", components.ButtonSecondary); submit.Clicked() && !form.Busy {
 				if strings.TrimSpace(form.Text) == "" {
 					form.Err = "请填写观察内容"
 					return

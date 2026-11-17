@@ -4,7 +4,6 @@ package main
 // Notebook/Protocol Owner after Wave 1 extraction.
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1577,21 +1576,6 @@ func (a *app) recordSignSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens,
 				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 		})
 	}
-	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-		if components.Button(c, "导出归档包", components.ButtonGhost).Clicked() {
-			arch := protocol.BuildArchive(proj, tasks, record.StripLegacySignature(a.noteSource()), time.Now())
-			a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", arch.Markdown())
-		}
-		if components.Button(c, "导出归档 PDF", components.ButtonGhost).Clicked() {
-			exported := protocol.BuildArchive(proj, tasks, record.StripLegacySignature(a.noteSource()), time.Now())
-			var buf bytes.Buffer
-			if err := exported.PDF(&buf, a.recordPDFLoader()); err != nil {
-				c.AddToast(ui.Toast{Title: "PDF 导出失败", Description: err.Error(), Type: components.ToastError})
-			} else {
-				a.exportRecordBytes(c, "导出归档 PDF", "record-"+a.snap.RunID+".pdf", buf.Bytes())
-			}
-		}
-	})
 }
 
 // signAndArchiveRun ends the Run's record with one Core command, then drops

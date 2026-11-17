@@ -12,7 +12,6 @@ import (
 	"asterlab-mygo-prototype/modules/runs"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/oneo-me/onevra/source/components"
 )
 
 // timerForm holds the create-timer draft per task. Group is the optional
@@ -307,10 +306,12 @@ func renderBench(c *ui.Context, s *State, task *RunTaskViewModel, t *ui.Theme, t
 	}
 	ui.Column(c).FillWidth().Padding(float32(tokens.Spacing16)).Radius(float32(tokens.PanelRadius)).
 		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(2.5)).Children(func() {
+		// The Run top-bar switch (view.go runHeader) is the single blind
+		// entry: it consumes Core's run.workspace blind projection. The
+		// bench keeps no second switch. UX-IA-1, UX-STATE.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, "执行台面").FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
 			ui.Spacer(c)
-			renderBlindToggle(c, s, t, tokens)
 		})
 		if hasTimers {
 			renderTimerSection(c, s, task, t, tokens)
@@ -321,10 +322,12 @@ func renderBench(c *ui.Context, s *State, task *RunTaskViewModel, t *ui.Theme, t
 		if hasEvents {
 			renderEventComposer(c, s, task, t, tokens)
 		}
-		// UX-P1, UX-P4, UX-STATE: exclusion and typed readout entry live in
-		// the bench as their own sections with one write action each; Core
-		// owns all validation and every failure names cause + retry.
-		if hasChannel {
+		// UX-IA-1, UX-P1, UX-P4, UX-STATE: exclusion and typed readout
+		// entry render only for sample-bearing tasks (measurement plan,
+		// recorded measurements, or capture slots); procedure-only steps
+		// keep the generic skip/deviation/observation composer. Core owns
+		// all validation and every failure names cause + retry.
+		if hasChannel && taskCarriesSamples(task, wells) {
 			renderExclusionSection(c, s, task, t, tokens)
 			renderTypedReadoutSection(c, s, task, t, tokens)
 		}
@@ -342,19 +345,30 @@ func capturePlan(s *State, task *RunTaskViewModel) (wells []string, timepoint st
 	return wells, strings.TrimSpace(task.Timepoint), fovPerWell
 }
 
-// renderBlindToggle flips the run blinding mask through the same Core
-// confirmation as the Run top-bar switch: entering blind consumes the
-// run.workspace blind projection, leaving blind unmasks locally. Masked
-// capture panels hide group identity; the authoritative blind projection
-// stays in Record. UX-P3, UX-STATE, UX-DESIGN.
-func renderBlindToggle(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
-	bench := s.bench()
-	if components.Button(c, blindSwitchLabel(bench.Blind), components.ButtonGhost).Clicked() {
-		s.toggleBlind()
+// taskCarriesSamples reports whether sample-scoped commands (sample
+// exclusion, categorical/table readout entry) fit the task: a measurement
+// plan, recorded measurements, or capture slots. Procedure-only steps keep
+// the generic skip/deviation/observation composer. UX-IA-1, UX-P1.
+func taskCarriesSamples(task *RunTaskViewModel, wells []string) bool {
+	if task == nil || task.Actual == nil {
+		return len(wells) > 0 || hasMeasurementModule(task)
 	}
-	if bench.Blind {
-		ui.Text(c, "分组已隐藏").FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+	if len(wells) > 0 || len(task.Actual.Measurements) > 0 {
+		return true
 	}
+	return hasMeasurementModule(task)
+}
+
+func hasMeasurementModule(task *RunTaskViewModel) bool {
+	if task == nil {
+		return false
+	}
+	for _, m := range task.Modules {
+		if m.Kind == "measurement_profile" {
+			return true
+		}
+	}
+	return false
 }
 
 // NoteBatchResult records the last batch-link outcome for the capture strip

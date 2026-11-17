@@ -6,15 +6,23 @@ import (
 	"strings"
 )
 
-// RunWellLink is a Run-page navigation intent: open the Run and select the
-// well on its recording grid. UX-IA-3, UX-P5.
+// RunWellLink is a Run-page navigation intent: open the Run and, when Well
+// is set, select the well on its recording grid. An empty Well opens the
+// Run without moving the grid. UX-IA-3, UX-P5.
 type RunWellLink struct {
 	RunID string
 	Well  string
 }
 
-// ParseRunWellLink parses asterlab://run/<runID>/well/<well> deep links.
-// Invalid links return visible errors, never panic.
+// runLinkUsage names both accepted routes in every rejection so the operator
+// can fix the link instead of guessing.
+const runLinkUsage = "应为 asterlab://run/<实验ID> 或 asterlab://run/<实验ID>/well/<孔位>"
+
+// ParseRunWellLink parses the run routes of the asterlab:// scheme:
+// asterlab://run/<runID> opens the Run, and
+// asterlab://run/<runID>/well/<well> additionally selects the well.
+// No shell is ever invoked: the result is a navigation intent the app
+// resolves in-process. Invalid links return visible errors, never panic.
 func ParseRunWellLink(raw string) (RunWellLink, error) {
 	trimmed := strings.TrimSpace(raw)
 	u, err := url.Parse(trimmed)
@@ -22,11 +30,14 @@ func ParseRunWellLink(raw string) (RunWellLink, error) {
 		return RunWellLink{}, fmt.Errorf("打不开实验链接：链接格式不正确")
 	}
 	if !strings.EqualFold(u.Scheme, "asterlab") || !strings.EqualFold(u.Host, "run") {
-		return RunWellLink{}, fmt.Errorf("打不开实验链接：应为 asterlab://run/<实验ID>/well/<孔位>")
+		return RunWellLink{}, fmt.Errorf("打不开实验链接：%s", runLinkUsage)
 	}
 	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(segments) == 1 && segments[0] != "" {
+		return RunWellLink{RunID: segments[0]}, nil
+	}
 	if len(segments) != 3 || segments[0] == "" || !strings.EqualFold(segments[1], "well") || segments[2] == "" {
-		return RunWellLink{}, fmt.Errorf("打不开实验链接：应为 asterlab://run/<实验ID>/well/<孔位>")
+		return RunWellLink{}, fmt.Errorf("打不开实验链接：%s", runLinkUsage)
 	}
 	well := strings.ToUpper(strings.TrimSpace(segments[2]))
 	if !validWell(well) {

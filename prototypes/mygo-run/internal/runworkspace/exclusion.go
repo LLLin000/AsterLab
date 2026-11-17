@@ -181,7 +181,7 @@ func renderExclusionSection(c *ui.Context, s *State, task *RunTaskViewModel, t *
 			ui.Text(c, "原因（可选，随事件写入）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 			ui.TextInput(c, &form.Reason).FillWidth().Placeholder("例如：溶血，OD 异常偏高")
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-				if submit := components.Button(c, "记录排除", components.ButtonPrimary); submit.Clicked() && !form.Busy {
+				if submit := components.Button(c, "记录排除", components.ButtonSecondary); submit.Clicked() && !form.Busy {
 					s.submitExclusion(task, form)
 				}
 				if form.Busy {
