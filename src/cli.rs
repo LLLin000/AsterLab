@@ -203,7 +203,10 @@ mod tests {
         assert_eq!(dispatch("protocol.version.get", get_input.to_str().unwrap(), &dir).unwrap_err().code, "NOT_FOUND");
         std::fs::write(&list_input, json!({"protocol_id":"missing"}).to_string()).unwrap();
         assert_eq!(dispatch("protocol.version.list", list_input.to_str().unwrap(), &dir).unwrap_err().code, "NOT_FOUND");
-        std::fs::remove_dir_all(dir).unwrap();
+        // Close the SQLite handle before removing the temp dir: on Windows an
+        // open handle keeps labworkbench.sqlite locked and remove_dir_all fails.
+        drop(db);
+        std::fs::remove_dir_all(&dir).unwrap();
         assert!(input_schema("protocol.version.get").is_some());
         assert!(input_schema("protocol.version.list").is_some());
         assert!(!tool_writes("protocol.version.get"));
