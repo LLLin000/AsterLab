@@ -90,6 +90,10 @@ type designBudget struct {
 	Core                         runs.TimeBudget
 	HasCore                      bool
 	CoreErr                      error
+	// Unknown counts steps without usable timing; Problems carries the
+	// step-scoped cause so the bar never estimates over gaps.
+	Unknown  int
+	Problems []string
 }
 
 func (d *Designer) designBudget() designBudget {
@@ -107,11 +111,17 @@ func (d *Designer) designBudget() designBudget {
 			b.HasHandsOn = true
 		}
 	}
-	const input = "[]"
+	// Timing inputs are the only feed into Core's projection: steps without
+	// usable timing are counted unknown, never estimated. The cache is
+	// invalidated by Touch, Save and Load.
+	input, known, unknown, problems := BudgetInput(d.Editor.Doc.Nodes)
+	_ = known
 	if !d.budgetLoaded {
 		d.budgetLoaded = true
 		d.budget = runs.TimeBudget{}
 		d.budgetErr = nil
+		d.budgetUnknown = unknown
+		d.budgetProblems = problems
 		if d.TimeBudgetSvc == nil {
 			message := "Core 时间预算服务不可用"
 			if d.TimeBudgetError != "" {
@@ -124,6 +134,7 @@ func (d *Designer) designBudget() designBudget {
 		}
 	}
 	b.Core, b.CoreErr = d.budget, d.budgetErr
+	b.Unknown, b.Problems = d.budgetUnknown, d.budgetProblems
 	b.HasCore = b.CoreErr == nil && (b.Core.TotalSpanS > 0 || b.Core.HandsOnS > 0 || len(b.Core.ParallelWindows) > 0)
 	return b
 }
@@ -423,6 +434,15 @@ func BudgetBar(c *ui.Context, d *Designer) {
 				components.Text(c, "尚无 OperationSpec v2 时间数据").
 					FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
 			}
+		}
+		// Unknowns are named, never estimated: a step without usable timing
+		// contributes nothing to Core's projection.
+		if b.Unknown > 0 {
+			chip("未知", fmt.Sprintf("%d 步", b.Unknown))
+		}
+		if len(b.Problems) > 0 {
+			components.Text(c, b.Problems[0]).
+				FontSize(float32(tokens.TextMeta)).TextColor(tokens.Danger)
 		}
 		chip("步骤", fmt.Sprintf("%d", b.Steps))
 		if b.Wells > 0 {

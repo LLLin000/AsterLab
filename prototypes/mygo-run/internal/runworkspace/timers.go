@@ -97,6 +97,37 @@ func TimerModeLabel(mode string) string {
 	}
 }
 
+// TimerIdentity renders one timer's explicit identity and scope without raw
+// identifiers (UX-P2): mode plus sequence plus the operator group when the
+// id carries one (task/mode/seq or task/mode/seq@group). Unparseable ids
+// fall back to the mode label, never the raw id (QA-HUVEC F1, UX-STATE).
+func TimerIdentity(record runs.TimerRecord) string {
+	mode := TimerModeLabel(record.Mode)
+	tail := record.TimerID
+	if i := strings.LastIndex(tail, "/"); i >= 0 {
+		tail = tail[i+1:]
+	}
+	group := ""
+	if i := strings.Index(tail, "@"); i >= 0 {
+		group = strings.TrimSpace(tail[i+1:])
+		tail = tail[:i]
+	}
+	seq := strings.TrimSpace(tail)
+	if seq == "" {
+		return mode
+	}
+	for _, r := range seq {
+		if r < '0' || r > '9' {
+			return mode
+		}
+	}
+	out := mode + " #" + seq
+	if group != "" {
+		out += " · " + group
+	}
+	return out
+}
+
 // RoundLabel prints the relay cursor: rounds are 1-based for the operator
 // while the record keeps the 0-based index.
 func RoundLabel(record runs.TimerRecord) string {
@@ -226,8 +257,11 @@ func renderTimerRow(c *ui.Context, s *State, task *RunTaskViewModel, record runs
 	ui.Column(c).FillWidth().Padding(t.Space(1.5), t.Space(2)).Radius(6).
 		Background(tokens.Elevated).Border(1, tokens.Border).Gap(t.Space(1)).Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Text(c, TimerModeLabel(record.Mode)).FontSize(t.Rem(.72)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, TimerIdentity(record)).FontSize(t.Rem(.72)).Bold().TextColor(t.TextMuted)
 			ui.Text(c, TimerStatusLabel(record.Status)).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			if task.Timepoint != "" {
+				ui.Text(c, task.Timepoint).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			}
 			headline := timerHeadline(display, phases)
 			ui.Text(c, headline).FontSize(t.Rem(.85)).FontWeight(600).TextColor(t.Text).FontFeatures("tnum")
 			if display.Over {
@@ -248,7 +282,11 @@ func renderTimerRow(c *ui.Context, s *State, task *RunTaskViewModel, record runs
 			// only start and pause. The action set follows the stored mode so
 			// an invalid transition is never offered.
 			if record.Status != "running" {
-				if start := components.Button(c, "开始", components.ButtonSecondary); start.Clicked() && !busy {
+				startLabel := "开始"
+				if record.Status == "paused" {
+					startLabel = "继续"
+				}
+				if start := components.Button(c, startLabel, components.ButtonSecondary); start.Clicked() && !busy {
 					s.runTimerAction(task, record, phases, "start")
 				}
 			} else {
@@ -301,6 +339,8 @@ func renderTimerCreate(c *ui.Context, s *State, task *RunTaskViewModel, existing
 		} else {
 			ui.Text(c, "分组秒表不设时长").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 		}
+		ui.Text(c, "分组").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+		ui.TextInput(c, &form.Group).Width(64).Placeholder("可选，如 5%")
 		if create := components.Button(c, "创建计时器", components.ButtonSecondary); create.Clicked() && !bench.CreateBusy {
 			s.createTimer(task, form, existing)
 		}
