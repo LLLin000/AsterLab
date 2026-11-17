@@ -2434,6 +2434,69 @@ mix_factor_final_concentration: {value: 50, unit: ng/mL}
     }
 
     #[test]
+    fn time_budget_projects_persisted_specs_without_title_guessing() {
+        use super::protocol_time_budget;
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);",
+        )
+        .unwrap();
+        seed_readout_runs(&db);
+        let tx = db.unchecked_transaction().unwrap();
+        let result = create_protocol_block_records(
+            &tx,
+            "project-1",
+            &json!({
+                "project_id": "project-1",
+                "title": "Cold chain",
+                "steps": [
+                    {
+                        "kind": "text", "use_id": "cold", "title": "Cold hold", "instruction": "Hold at 4C",
+                        "operation_spec": {
+                            "schema_version": 2,
+                            "operation": { "kind": "incubate", "temperature": { "value": 4.0, "unit": "C" }, "duration": { "value": 2.0, "unit": "h" } },
+                            "timing": { "kind": "wait", "duration": { "value": 2.0, "unit": "h" } },
+                            "time_anchor_id": "t0",
+                            "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 3, "offset": { "value": 6.0, "unit": "h" } }
+                        }
+                    },
+                    {
+                        "kind": "text", "use_id": "read1", "title": "Read 1", "instruction": "Read the plate",
+                        "operation_spec": {
+                            "schema_version": 2,
+                            "operation": { "kind": "measure", "endpoint_id": "od450", "unit": "AU" },
+                            "timing": { "kind": "timed_endpoint", "duration": { "value": 10.0, "unit": "s" } },
+                            "time_anchor_id": "t0",
+                            "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 1, "offset": { "value": 12.0, "unit": "h" } }
+                        }
+                    },
+                    {
+                        "kind": "text", "use_id": "note", "title": "A note without timing", "instruction": "No declared duration"
+                    }
+                ]
+            }),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let version_id = result["version"]["id"].as_str().unwrap();
+        let preview: Value = block_preview(&db, version_id, &[]).unwrap();
+        assert_eq!(preview["steps"].as_array().unwrap().len(), 3);
+        assert!(preview["steps"][0].get("operation_spec").is_some(), "preview must carry the persisted sidecar");
+        assert_eq!(preview["steps"][0]["operation_spec"]["time_anchor_id"], "t0");
+        assert!(preview["steps"][2].get("operation_spec").is_none());
+        let budget = protocol_time_budget(&db, version_id).unwrap();
+        assert_eq!(budget["steps_with_timing"], 2);
+        assert_eq!(budget["steps_without_timing"], 1);
+        // Windows anchor from persisted offsets, never from titles. The serial
+        // projection stacks the 12h-anchored read after the first step's 24h
+        // span, so its start is span-relative: 86400 + 43200 = 129600.
+        let starts: Vec<f64> = budget["parallel_windows"].as_array().unwrap().iter().map(|w| w["start_s"].as_f64().unwrap()).collect();
+        assert_eq!(starts, vec![21_600.0, 50_400.0, 79_200.0, 129_600.0]);
+        assert_eq!(budget["total_span_s"], 129_610.0);
+        assert!(budget["parallel_windows"].as_array().unwrap().iter().all(|w| w["time_anchor_id"] == "t0"));
+    }
+
+    #[test]
     fn protocol_block_content_accepts_legacy_and_valid_specs_but_rejects_invalid_specs() {
         let db = Connection::open_in_memory().unwrap();
         let legacy: ProtocolStep = serde_json::from_value(json!({

@@ -347,6 +347,11 @@ pub(crate) struct RunWorkspaceInput {
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct ProtocolTimeBudgetInput {
+    pub(crate) block_version_id: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RecordProjectionQuery {
     pub(crate) run_id: String,
     /// `blind` masks frozen group identity; `unblinded` (default) renders it.

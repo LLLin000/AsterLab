@@ -44,6 +44,7 @@ pub(crate) fn tool_specs() -> Vec<Value> {
         "catalog.operation.import",
         "protocol.block.revise",
         "protocol.block.preview",
+        "protocol.time_budget",
         "protocol.create",
         "protocol.revise",
         "agent_edit.validate",
@@ -113,6 +114,7 @@ pub(crate) fn tool_writes(tool: &str) -> bool {
             | "protocol.block.list"
             | "protocol.block.get"
             | "protocol.block.preview"
+            | "protocol.time_budget"
             | "agent_edit.validate"
             | "component.list"
             | "semantic.inspect"
@@ -195,6 +197,7 @@ pub(crate) fn tool_description(tool: &str) -> &'static str {
         "catalog.operation.import" => "在受控事务中导入审核过的 OperationModule，分配本地 Block/Version ID，并保存 module_contract 与 ReviewRecord。",
         "protocol.block.revise" => "按 expected_version 创建步骤块新版本；旧版本和引用不变。",
         "protocol.block.preview" => "只读展开组合步骤，返回操作顺序、参数来源和未填写槽位；不写入。",
+        "protocol.time_budget" => "对一个步骤块版本的展开步骤做 Core 串行时间投影（repeat/schedule/anchor），返回 total_span_s/hands_on_s/parallel_windows；只读。",
         "protocol.create" => "创建 Protocol；可引用一个确切根步骤块版本及本版参数绑定，也兼容自由文本正文。",
         "protocol.revise" => "追加 Protocol 新版本；参数值可改变而不复制步骤块；必须提供 expected_version。",
         "agent_edit.validate" => "只读校验 agent 提案：解析绑定、版本和单位，返回 Core 计算的 digest、无效引用与确认提示；不写数据库。",
@@ -259,6 +262,7 @@ pub(crate) fn tool_effects(tool: &str) -> &'static str {
         | "protocol.block.list"
         | "protocol.block.get"
         | "protocol.block.preview"
+        | "protocol.time_budget"
         | "record.list"
         | "record.get"
         | "record.projection"

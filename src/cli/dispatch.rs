@@ -1331,6 +1331,10 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
             let i: ProtocolBlockPreview = parse_input(path)?;
             Ok(block_preview(&db, &i.block_version_id, &i.bindings)?)
         }
+        "protocol.time_budget" => {
+            let i: ProtocolTimeBudgetInput = parse_input(path)?;
+            Ok(protocol_time_budget(&db, &i.block_version_id)?)
+        }
         "protocol.create" => {
             let i: ProtocolCreate = parse_input(path)?;
             check_text(&i.title, "Protocol 名称", 160)?;
@@ -2286,6 +2290,9 @@ pub(crate) fn result_schema(tool: &str) -> Value {
         "protocol.block.preview" => {
             json!({"type":"object","additionalProperties":false,"required":["block_version_id","block_id","title","version","ready","steps","resolved_parameters","unresolved_parameters","block_version_ids"],"properties":{"module_contracts":{"type":"array","items":{"type":"object","additionalProperties":true}},"block_version_id":{"type":"string"},"block_id":{"type":"string"},"title":{"type":"string"},"version":{"type":"integer"},"ready":{"type":"boolean"},"steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","use_id","title","instruction","parameters","unresolved_parameter_refs","source_block_version_id"],"properties":{"path":{"type":"string"},"use_id":{"type":"string"},"title":{"type":"string"},"instruction":{"type":"string"},"parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slot","label","value","unit","provenance"],"properties":{"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameter_refs":{"type":"array","items":{"type":"string"}},"source_block_version_id":{"type":"string"},"visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},"checks":{"type":"array","items":{"type":"object","additionalProperties":true}}}}},"resolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","value","unit","provenance"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"value":{},"unit":{"type":["string","null"]},"provenance":{"type":"array","items":{"type":"object"}}}}},"unresolved_parameters":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","slot","label","unit","required"],"properties":{"path":{"type":"string"},"slot":{"type":"string"},"label":{"type":"string"},"unit":{"type":["string","null"]},"required":{"type":"boolean"}}}},"block_version_ids":{"type":"array","items":{"type":"string"}}}})
         }
+        "protocol.time_budget" => {
+            json!({"type":"object","additionalProperties":false,"required":["block_version_id","step_count","steps_with_timing","steps_without_timing","total_span_s","hands_on_s","parallel_windows"],"properties":{"block_version_id":{"type":"string"},"step_count":{"type":"integer","minimum":0},"steps_with_timing":{"type":"integer","minimum":0},"steps_without_timing":{"type":"integer","minimum":0},"total_span_s":{"type":"number","minimum":0},"hands_on_s":{"type":"number","minimum":0},"parallel_windows":{"type":"array","items":{"type":"object","additionalProperties":true}}}})
+        }
         "protocol.create" => {
             json!({"type":"object","additionalProperties":false,"required":["protocol","version"],"properties":{"protocol":record_schema("protocol"),"version":record_schema("protocol_version")}})
         }
@@ -2503,6 +2510,9 @@ pub(crate) fn input_schema(tool: &str) -> Option<Value> {
         }
         "protocol.block.preview" => {
             json!({"type":"object","additionalProperties":false,"required":["block_version_id"],"properties":{"block_version_id":{"type":"string"},"bindings":root_parameter_values_input_schema()}})
+        }
+        "protocol.time_budget" => {
+            json!({"type":"object","additionalProperties":false,"required":["block_version_id"],"properties":{"block_version_id":{"type":"string","minLength":1}}})
         }
         "run.set_status" => {
             json!({"type":"object","additionalProperties":false,"required":["id","expected_revision","status"],"properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":1},"status":{"type":"string","enum":["planned","in_progress","completed","blocked","cancelled"]}}})
@@ -2747,6 +2757,7 @@ pub(crate) fn text_step_input_schema() -> Value {
         "instruction":{"type":"string","minLength":1,"maxLength":4000,"pattern":"\\S"},
         "parameter_refs":{"type":"array","maxItems":100,"items":{"type":"string"}},
         "visualization":{"type":"string","enum":["transfer","incubation","plate_layout","sample_split","measurement"]},"time_scope":{"type":"string","enum":["once","per_timepoint","per_assay","unresolved"]},
+        "operation_spec":{"type":"object","description":"OperationSpec v2 sidecar：timing/repeat/time_anchor_id/schedule；执行语义仍以步骤块为准，预算投影只读此字段"},
         "checks":{"type":"array","maxItems":50,"items":{"type":"object","additionalProperties":false,"required":["check_id","label"],"properties":{"check_id":{"type":"string","minLength":1,"maxLength":80,"pattern":"\\S"},"label":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},"instruction":{"type":"string","maxLength":2000},"blocking":{"type":"boolean"}}}}
     }})
 }

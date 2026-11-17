@@ -588,7 +588,9 @@ impl AppCore {
     /// declared a non-empty `blinding` basis), `workflow.progress` (groups by
     /// actual event `(step_path, timepoint)`), `workflow.inspect_tree`
     /// (identity/hierarchy; classic-Design Runs return empty roots with an
-    /// explanatory issue, never `NOT_FOUND`).
+    /// explanatory issue, never `NOT_FOUND`), `protocol.time_budget`
+    /// (Core serial projection over one block version's persisted
+    /// OperationSpec v2 sidecars; read-only).
     pub fn query_projection(&self, kind: &str, params: Value) -> Result<Value, String> {
         match kind {
             "run.workspace" => {
@@ -629,6 +631,13 @@ impl AppCore {
                 cli_impl::load_archive_state(&self.db, run_id)
                     .and_then(|state| serde_json::to_value(&state).map_err(|e| cli_impl::CliError::internal(e.to_string())))
                     .map_err(map_command_error)
+            }
+            "protocol.time_budget" => {
+                let block_version_id = params.get("block_version_id").and_then(Value::as_str).unwrap_or("");
+                if block_version_id.trim().is_empty() {
+                    return Err("INVALID_INPUT: protocol.time_budget requires block_version_id".into());
+                }
+                cli_impl::protocol_time_budget(&self.db, block_version_id).map_err(map_command_error)
             }
             "workflow.progress" => {
                 let run_id = params.get("run_id").and_then(Value::as_str).unwrap_or("");
@@ -1416,6 +1425,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::env::remove_var("LABWORKBENCH_DATA_DIR");
     }
+    #[test]
+    fn freeze_timer_phases_persist_and_advance_through_the_supplied_plan() {
+        use asterlab_core::timer::{TimerMode, TimerRecord, TimerSequence, TimerStatus};
+        let (dir, run_id) = fixture();
+        // Cold-hot alternation plan: 5min x3 then 10min x3. The plan stays
+        // with the caller; the durable row keeps only the cursor.
+        let plan = TimerSequence::new(vec![
+            asterlab_core::timer::TimerPhase { name: "cold".into(), planned_s: Some(300), mode: TimerMode::Countdown, rounds: Some(3) },
+            asterlab_core::timer::TimerPhase { name: "hot".into(), planned_s: Some(600), mode: TimerMode::Countdown, rounds: Some(3) },
+        ])
+        .unwrap();
+        let timer = TimerRecord {
+            timer_id: "freeze-alt".into(), run_id: run_id.clone(), task_key: "incubate".into(),
+            phase_index: 0, mode: TimerMode::Countdown, planned_s: Some(300),
+            started_at_utc: Some("2026-11-17T06:00:00Z".into()), accumulated_s: 0, status: TimerStatus::Running,
+            round_index: 0, round_count: None, anchor_event_id: None, anchor_task_key: None,
+        };
+        let mut app = AppCore::open(&dir).unwrap();
+        app.save_timer_record(&timer).unwrap();
+        drop(app);
+        // Restart: the row survives reopen with the same cursor.
+        let app = AppCore::open(&dir).unwrap();
+        let mut restored = app.load_timer_records(&run_id).unwrap().into_iter().next().unwrap();
+        assert_eq!((restored.phase_index, restored.round_index), (0, 0));
+        // Rounds 1-2 stay in the cold phase; each completed round is a fact
+        // the caller appends through execution_event.create.
+        let first = restored.advance_countdown(&plan, "2026-11-17T06:05:00Z").unwrap().unwrap();
+        assert_eq!((first.phase_name.as_str(), first.timer_completed), ("cold", false));
+        assert!(!first.phase_completed);
+        let second = restored.advance_countdown(&plan, "2026-11-17T06:10:00Z").unwrap().unwrap();
+        assert!(!second.phase_completed);
+        let third = restored.advance_countdown(&plan, "2026-11-17T06:15:00Z").unwrap().unwrap();
+        assert!(third.phase_completed);
+        assert!(!third.timer_completed);
+        // Crossing into the hot phase moves the durable mode/plan cursor.
+        assert_eq!((restored.phase_index, restored.round_index), (1, 0));
+        assert_eq!((restored.mode, restored.planned_s), (TimerMode::Countdown, Some(600)));
+        let _ = fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn timer_records_persist_across_app_reopen_and_t0_triggers_window() {
         let (dir, run_id) = fixture();
