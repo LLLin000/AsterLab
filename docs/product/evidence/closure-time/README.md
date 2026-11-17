@@ -68,3 +68,11 @@
 - Second timing phase is unanchored by default (window phases stay manual in Run); schedules omitted (caveat by design).
 - `internal/protocol/archive_test.go` + `internal/runworkspace/history_test.go` show CRLF-only diffs from the
   Windows checkout (content identical, `git diff --ignore-cr-at-eol` empty); left untouched, not committed.
+
+## Windows Gate 独立验证（`edfd644`，coordinator 执行）
+
+- 二进制：门禁构建（`BUILD_INFO` commit `edfd644` 与 head 一致；`LOCAL_GATE: PASS`），隔离种子库。
+- 设计计时：原生设计检查器渲染计时类型/时长/重复/锚点（`close05-timing`）；填 5m×3 保存后 rev 3，预算条消费 Core 预算（总跨度/净占手含 15；无数据时显式"未知"）（`close05-budget`）。注：AsterDoc 设计走文档视图，原生计时检查器仅 legacy/mygo 设计可见。
+- F1：同任务双正计时秒表落库为 `…/stopwatch/1`＋`/2`，UI 显示`正计时 #1/#2`，无覆盖无静默（`close05-twostopwatch`）。
+- 重启：杀进程重开后双表回来，`timer_records` 仍 2 行（无复记）。
+- Run 台面计时区与接力文案见 `close05-bench`。
