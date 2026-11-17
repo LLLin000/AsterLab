@@ -66,11 +66,12 @@ type BenchState struct {
 	timersKey string
 	// timersAt is the last successful load instant.
 	timersAt time.Time
-	// historyKey/historyProj memoize the shared record projection by Run
-	// revision and asset count; the projection itself lives in the
-	// notebook/record leaf package, never here.
+	// historyKey/historyProj/historyErr memoize the shared Core record
+	// projection by the host's opaque key; the projection itself lives in
+	// the notebook/record leaf package, never here.
 	historyKey  string
-	historyProj *record.RecordProjection
+	historyProj *record.Projection
+	historyErr  string
 }
 
 func (s *State) bench() *BenchState {

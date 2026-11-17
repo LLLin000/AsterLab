@@ -1,11 +1,7 @@
 package record
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,177 +9,161 @@ import (
 	"asterlab-mygo-prototype/modules/runs"
 )
 
-func recordFixture() (runs.RunSnapshot, []runs.Asset) {
-	snap := runs.RunSnapshot{
-		RunID: "run-1", Title: "HUVEC 成管",
-		DesignID: "design-1", DesignRevision: 3, Status: "in_progress",
-		Tasks: []runs.RunTask{
-			{
-				Key: "task-cure", Title: "405nm 固化", Timepoint: "0h",
-				Status: "completed", DesignStepID: "step-2",
-				ParametersJSON: `[{"key":"cure_s","label":"固化秒数","value":60,"unit":"s"},{"key":"gel_pct","label":"GelMA 浓度","value":5,"unit":"%"}]`,
-			},
-			{
-				Key: "task-image", Title: "采图", Timepoint: "6h",
-				Status: "in_progress", DesignStepID: "step-5",
-				ParametersJSON: `[{"key":"fov","label":"视野数","value":6}]`,
-			},
+func projFixture() Projection {
+	str := func(s string) *string { return &s }
+	u64 := func(v uint64) *uint64 { return &v }
+	f64 := func(v float64) *float64 { return &v }
+	eventType := func(s string) *string { return &s }
+	return Projection{
+		SchemaVersion: 1,
+		RunID:         "run-1",
+		Design: DesignSummary{
+			DesignID: "design-1", DesignRevision: 3, Title: "HUVEC 成管",
+			Groups: []Group{{Name: "3%"}, {Name: "5%"}},
+			Assays: []Assay{{AssayID: "assay-huvec", Title: "成管", Endpoint: "OD450", Timepoints: []string{"0h", "6h"}}},
 		},
-		Events: []runs.RunEvent{
-			{
-				ID: "evt-cure", EventType: "operation", TaskKey: "task-cure",
-				Timepoint: "0h", Content: "按组固化",
-				OccurredAt: "2026-11-10T10:00:00+08:00", RecordedAt: "2026-11-10T10:01:00+08:00",
-				DataJSON: `{"actual_parameters":[{"key":"cure_s","value":75,"unit":"s"}],"operator":"lin"}`,
-			},
-			{
-				ID: "evt-skip", EventType: "operation", TaskKey: "task-cure",
-				Timepoint: "0h", Content: "离心跳过",
-				OccurredAt: "2026-11-10T10:05:00+08:00", RecordedAt: "2026-11-10T10:05:00+08:00",
-				DataJSON: `{"skipped_by_rule":"no-bubble","deviation":"流出液未完全弃置"}`,
-			},
-			{
-				ID: "evt-read", EventType: "measurement", TaskKey: "task-image",
-				Timepoint: "6h", BatchID: "batch-1",
-				SchemaID: "huvec.tube.v1", SchemaVersion: 1,
-				OccurredAt: "2026-11-10T16:00:00+08:00", RecordedAt: "2026-11-10T16:01:00+08:00",
-				ResultCells: []runs.ResultCell{
-					{Row: 0, Column: 0, SampleID: "S1", Field: "OD450", Value: new(0.82)},
-					{Row: 0, Column: 1, SampleID: "S2", Field: "OD450", Value: new(0.91)},
+		Parameters: []ParamCompare{
+			{ScopeID: "root/cure", StepPath: str("root/cure"), Slot: "cure_s", Label: str("固化秒数"), Unit: str("s"),
+				Planned: json.RawMessage(`60`), Actual: []ActualParam{{Value: json.RawMessage(`75`), Unit: str("s"), EventID: "e1"}}, Status: "differs"},
+			{ScopeID: "root/cure", StepPath: str("root/cure"), Slot: "gel_pct", Label: str("GelMA 浓度"), Unit: str("%"),
+				Planned: json.RawMessage(`5`), Status: "missing_actual"},
+			{ScopeID: "root/extra", Slot: "stray", Planned: json.RawMessage(`1`),
+				Actual: []ActualParam{{Value: json.RawMessage(`2`), EventID: "e2"}}, Status: "unplanned"},
+		},
+		Timers: []TimerObserve{
+			{TimerID: "t1", TaskKey: "task-cure", Mode: "countdown", Status: "completed", PlannedS: u64(60), ElapsedS: u64(75)},
+			{TimerID: "t2", TaskKey: "task-image", Mode: "countdown", Status: "running", PlannedS: u64(30)},
+		},
+		Images: ImageMatrix{
+			FOVPerWell: 1, PlannedSlots: 2, FilledSlots: 1, MissingSlots: 1,
+			UnlocatedAssetIDs: []string{"img-stray"}, UnplannedAssetIDs: []string{"img-extra"},
+			Plates: []ImagePlateRow{{
+				PlateID: "p1", Timepoints: []*string{str("0h"), str("6h")},
+				PlannedSlots: 2, FilledSlots: 1,
+				Wells: []ImageWellRow{
+					{Coordinate: "A1", GroupLabel: str("3%"), PlannedSlots: 1, FilledSlots: 1,
+						Slots: []ImageSlot{{Timepoint: str("6h"), FOVIndex: 1, AssetID: str("img-1")}}},
+					{Coordinate: "A2", PlannedSlots: 1, Slots: []ImageSlot{{Timepoint: str("6h"), FOVIndex: 1}}},
 				},
+			}},
+		},
+		Assets: []RecordAsset{{AssetID: "img-1", TaskKey: "task-image", WellID: str("A1"), Timepoint: str("6h")}},
+		Readings: []Reading{
+			{RunID: "run-1", StepPath: "root/read", Endpoint: "OD450", Value: f64(0.82), Unit: str("AU"), SourceEventID: "e1"},
+			{RunID: "run-1", StepPath: "root/read", Endpoint: "OD450", Unit: str("AU"), SourceEventID: "e2"},
+		},
+		Readouts: []ReadoutRecord{{Readout: json.RawMessage(`{"field":"OD450"}`), EventID: "e1", StepPath: "root/read"}},
+		Timeline: TimelineSummary{
+			SkippedByRule: 1,
+			Events: []TimelineEvent{
+				{EventID: "e1", EventType: eventType("operation"), TaskKey: str("task-cure"), Content: str("固化"), Deviation: str("流出液未完全弃置")},
+				{EventID: "e2", EventType: eventType("skipped_by_rule"), TaskKey: str("task-cure"), Content: str("离心跳过")},
 			},
 		},
-		Measurements: []runs.Measurement{
-			{SampleID: "S1", Endpoint: "RNA 浓度", Value: 63.8, Unit: "ng/uL", TaskKey: "task-image"},
-		},
+		Notes:   []NoteView{{NoteID: "n1", Markdown: "# 研判\n\n结论见对比 @matrix(6h)\n"}},
+		Archive: ArchiveState{Status: "recording"},
+		Issues:  []Issue{{Code: "timer_watermark_missing", Message: "缺水印", Path: str("timers/t2")}},
 	}
-	assets := []runs.Asset{
-		{ID: "img-1", RelativePath: "run-1/6h/S1-fov1.png", MediaType: "image",
-			Link: runs.AssetLink{RunID: "run-1", TaskKey: "task-image", SampleID: "S1", WellID: "A1", Timepoint: "6h", FOVIndex: 1}},
-		{ID: "img-2", RelativePath: "run-1/6h/S1-fov2.png", MediaType: "image",
-			Link: runs.AssetLink{RunID: "run-1", TaskKey: "task-image", SampleID: "S1", WellID: "A1", Timepoint: "6h", FOVIndex: 2}},
-		{ID: "img-dup", RelativePath: "run-1/6h/S1-fov1b.png", MediaType: "image",
-			Link: runs.AssetLink{RunID: "run-1", TaskKey: "task-image", SampleID: "S1", WellID: "A1", Timepoint: "6h", FOVIndex: 1}},
-		// No Core coordinates: stays unassigned even though the sample
-		// matches a measured well. Coordinates are never guessed.
-		{ID: "img-sample-only", RelativePath: "run-1/sample.png", MediaType: "image",
-			Link: runs.AssetLink{RunID: "run-1", TaskKey: "task-image", SampleID: "S1"}},
-		{ID: "img-orphan", RelativePath: "run-1/stray.png", MediaType: "image",
-			Link: runs.AssetLink{RunID: "run-1", TaskKey: "task-unknown", SampleID: "SX"}},
-		{ID: "doc-1", RelativePath: "run-1/notes.pdf", MediaType: "document",
-			Link: runs.AssetLink{RunID: "run-1", TaskKey: "task-image"}},
-	}
-	return snap, assets
 }
 
-func TestProjectPlannedVsActual(t *testing.T) {
-	snap, assets := recordFixture()
-	proj := Project(snap, assets)
-	if proj.RunID != "run-1" || proj.DesignRevision != 3 {
-		t.Fatalf("header = %+v", proj)
+func TestSummarizeOneCounting(t *testing.T) {
+	proj := projFixture()
+	tasks := SnapshotTasks([]runs.RunTask{
+		{Key: "task-cure", Title: "固化", Timepoint: "0h", Status: "completed"},
+		{Key: "task-image", Title: "采图", Timepoint: "6h", Status: "in_progress"},
+	})
+	if len(tasks) != 2 || tasks[0].Title != "固化" || tasks[1].Timepoint != "6h" {
+		t.Fatalf("tasks = %+v", tasks)
 	}
-	if len(proj.Summary) != 2 {
-		t.Fatalf("summaries = %d", len(proj.Summary))
+	c := Summarize(proj, tasks)
+	if c.TasksTotal != 2 || c.TasksCompleted != 1 {
+		t.Fatalf("tasks = %+v", c)
 	}
-	cure := proj.Summary[0]
-	if len(cure.Planned) != 2 || cure.Planned[0].Value != "60" {
-		t.Fatalf("planned = %+v", cure.Planned)
+	// Measurements: 1 valued reading + 1 readout; missing: 1 valueless
+	// reading + 1 missing slot.
+	if c.Measurements != 2 {
+		t.Fatalf("measurements = %d", c.Measurements)
 	}
-	actual := map[string]Param{}
-	for _, p := range cure.Actual {
-		actual[p.Key] = p
+	if c.Missing != 2 {
+		t.Fatalf("missing = %d", c.Missing)
 	}
-	if actual["cure_s"].Value != "75" {
-		t.Fatalf("actual cure_s = %+v", cure.Actual)
+	// Excluded: 1 unplanned param + 1 unlocated + 1 unplanned asset.
+	if c.Excluded != 3 {
+		t.Fatalf("excluded = %d", c.Excluded)
 	}
-	if !cure.Skipped {
-		t.Fatal("skipped_by_rule was not detected")
+	if c.SkippedByRule != 1 || c.Deviations != 1 {
+		t.Fatalf("skips/deviations = %+v", c)
 	}
-	if len(cure.Deviations) != 1 || !strings.Contains(cure.Deviations[0], "流出液") {
-		t.Fatalf("deviations = %+v", cure.Deviations)
+	if c.Timers != 2 || c.TimersRunning != 1 {
+		t.Fatalf("timers = %+v", c)
 	}
-	image := proj.Summary[1]
-	if len(image.Measurements) == 0 {
-		t.Fatalf("image measurements = %+v", image.Measurements)
+	if c.Groups != 2 || c.Assets != 1 {
+		t.Fatalf("groups/assets = %+v", c)
 	}
-	found := false
-	for _, m := range image.Measurements {
-		if m.Endpoint == "RNA 浓度" && m.Value == "63.8" {
-			found = true
+	if c.ImagesPlanned != 2 || c.ImagesFilled != 1 || c.ImagesMissing != 1 {
+		t.Fatalf("images = %+v", c)
+	}
+	if c.Issues != 1 {
+		t.Fatalf("issues = %+v", c)
+	}
+	head := Headline(c)
+	for _, want := range []string{"任务完成 1/2", "实测 2 个", "缺 2 个", "排除 3 个", "跳过 1 次", "计时 2 个"} {
+		if !strings.Contains(head, want) {
+			t.Fatalf("headline %q missing %q", head, want)
 		}
 	}
-	if !found {
-		t.Fatalf("task-level snapshot measurement missing: %+v", image.Measurements)
+}
+
+func TestGroupParameters(t *testing.T) {
+	proj := projFixture()
+	groups := GroupParameters(proj.Parameters)
+	if len(groups) != 2 {
+		t.Fatalf("groups = %+v", groups)
+	}
+	if !strings.Contains(groups[0].Title, "root/cure") {
+		t.Fatalf("group title = %q", groups[0].Title)
+	}
+	byLabel := map[string]ParamRow{}
+	for _, row := range groups[0].Rows {
+		byLabel[row.Label] = row
+	}
+	if byLabel["固化秒数"].Planned != "60" || byLabel["固化秒数"].Actual != "75 s" {
+		t.Fatalf("cure row = %+v", byLabel["固化秒数"])
+	}
+	if !strings.Contains(byLabel["GelMA 浓度"].Status, "缺") {
+		t.Fatalf("missing status = %+v", byLabel["GelMA 浓度"])
+	}
+	if groups[1].Rows[0].Status != ParamStatusWord("unplanned") {
+		t.Fatalf("unplanned status = %q", groups[1].Rows[0].Status)
 	}
 }
 
-func TestProjectMatrixFOVAndGaps(t *testing.T) {
-	snap, assets := recordFixture()
-	proj := Project(snap, assets)
-	if !reflect.DeepEqual(proj.Wells, []string{"A1", "A2"}) {
-		t.Fatalf("wells = %+v", proj.Wells)
+func TestStatusWords(t *testing.T) {
+	if TaskStatusWord("completed") == "" || TaskStatusWord("mystery") != "mystery" {
+		t.Fatal("task status word must pass unknown statuses through")
 	}
-	if !reflect.DeepEqual(proj.Timepoints, []string{"0h", "6h"}) {
-		t.Fatalf("timepoints = %+v", proj.Timepoints)
+	if !strings.Contains(ParamStatusWord("missing_actual"), "缺") {
+		t.Fatal("missing_actual must read 缺")
 	}
-	// Only the 6h task recorded result cells: two cells, each with 6 FOV slots.
-	if len(proj.Matrix) != 2 {
-		t.Fatalf("matrix cells = %+v", proj.Matrix)
-	}
-	var a1 *MatrixCell
-	for i := range proj.Matrix {
-		if proj.Matrix[i].Well == "A1" {
-			a1 = &proj.Matrix[i]
-		}
-	}
-	if a1 == nil || a1.FilledSlots() != 2 {
-		t.Fatalf("A1 cell = %+v", a1)
-	}
-	if got := a1.Representative(1); got == nil || got.AssetID != "img-1" {
-		t.Fatalf("FOV 1 = %+v", got)
-	}
-	if got := a1.Representative(2); got == nil || got.AssetID != "img-2" {
-		t.Fatalf("FOV 2 = %+v", got)
-	}
-	if got := a1.Representative(3); got != nil {
-		t.Fatalf("FOV 3 should be a gap, got %+v", got)
-	}
-	// 2 cells x 6 slots - 2 filled = 10 gaps. The duplicate FOV 1 claim
-	// overflows instead of displacing the first image.
-	if proj.Gaps != 10 {
-		t.Fatalf("gaps = %d", proj.Gaps)
-	}
-	if a1.Overflow != 1 {
-		t.Fatalf("A1 overflow = %d", a1.Overflow)
-	}
-	// The sample-only image stays unassigned: coordinates are never guessed.
-	if proj.UnassignedImages != 2 || len(proj.UnassignedLabels) != 2 {
-		t.Fatalf("unassigned = %d %v", proj.UnassignedImages, proj.UnassignedLabels)
-	}
-	if len(proj.Matrix[0].Values) == 0 {
-		t.Fatal("matrix cell lost its measured values")
+	if ArchiveStatusWord("archived") == "" || ArchiveStatusWord("recording") == "" {
+		t.Fatal("archive status words must name the lifecycle")
 	}
 }
 
-func TestProjectIsDeterministicAndReadOnly(t *testing.T) {
-	snap, assets := recordFixture()
-	before, _ := json.Marshal(snap)
-	first := Project(snap, assets)
-	second := Project(snap, assets)
-	a, _ := json.Marshal(first)
-	b, _ := json.Marshal(second)
-	if string(a) != string(b) {
-		t.Fatal("projection is not deterministic")
+func TestStripLegacySignature(t *testing.T) {
+	trailer := "<!-- record-sign run=run-1 rev=3 hash=" + strings.Repeat("a", 64) + " at=2026-11-16T12:00:00Z actor=lin -->"
+	got := StripLegacySignature("# 研判\n\n贴壁良好\n" + trailer)
+	if strings.Contains(got, "record-sign") {
+		t.Fatalf("trailer not stripped: %q", got)
 	}
-	after, _ := json.Marshal(snap)
-	if string(before) != string(after) {
-		t.Fatal("projection mutated the snapshot")
+	plain := "# 无签名正文\n"
+	if StripLegacySignature(plain) != strings.TrimSpace(plain) {
+		t.Fatalf("plain prose changed: %q", StripLegacySignature(plain))
 	}
 }
 
-func TestFindAndResolveMatrixRefs(t *testing.T) {
-	snap, assets := recordFixture()
-	proj := Project(snap, assets)
+func TestMatrixRefsCellsAndImages(t *testing.T) {
+	proj := projFixture()
 	refs := FindMatrixRefs("研判 @matrix(6h,12h) 与 @matrix(*) 结束")
 	if len(refs) != 2 || refs[0].Raw != "@matrix(6h,12h)" || !refs[1].All {
 		t.Fatalf("refs = %+v", refs)
@@ -193,379 +173,116 @@ func TestFindAndResolveMatrixRefs(t *testing.T) {
 		t.Fatalf("cells = %d unknown = %v", len(cells), unknown)
 	}
 	all, _ := ResolveMatrixRef(proj, refs[1])
-	if len(all) != len(proj.Matrix) {
-		t.Fatalf("all = %d, matrix = %d", len(all), len(proj.Matrix))
+	if len(all) != 2 {
+		t.Fatalf("all = %d", len(all))
 	}
-}
-
-func TestExpandMatrixRefs(t *testing.T) {
-	snap, assets := recordFixture()
-	proj := Project(snap, assets)
-	out := ExpandMatrixRefs("结论：@matrix(6h)", proj)
-	if strings.Contains(out, "@matrix") {
+	if got := MatrixCellText(MatrixCell{Well: "A1", Timepoint: "6h", Filled: 1, Planned: 1}); got != "图1/1" {
+		t.Fatalf("cell text = %q", got)
+	}
+	if got := MatrixCellText(MatrixCell{Well: "A2", Timepoint: "6h"}); got != "缺" {
+		t.Fatalf("gap text = %q", got)
+	}
+	if img := SlotImage(proj, "a1", "6h", 1); img == nil || img.AssetID != "img-1" {
+		t.Fatalf("slot = %+v", img)
+	}
+	if img := SlotImage(proj, "A2", "6h", 1); img != nil {
+		t.Fatalf("gap slot must be nil: %+v", img)
+	}
+	well, img, ok := RepresentativeGroup(proj, "3%", "6h", 1)
+	if !ok || well != "A1" || img == nil || img.AssetID != "img-1" {
+		t.Fatalf("representative = %q %+v %v", well, img, ok)
+	}
+	if _, _, ok := RepresentativeGroup(proj, "5%", "6h", 1); ok {
+		t.Fatal("unknown group must select nothing")
+	}
+	if groups := MatrixGroups(proj); len(groups) != 2 || groups[0] != "3%" || groups[1] != "" {
+		t.Fatalf("groups = %+v", groups)
+	}
+	if got := GroupDisplayName(proj, ""); got != "未分组" {
+		t.Fatalf("ungrouped label = %q", got)
+	}
+	if out := ExpandMatrixRefs("结论：@matrix(6h)", proj); strings.Contains(out, "@matrix") {
 		t.Fatalf("token not expanded: %q", out)
 	}
-	if !strings.Contains(out, "A1") || !strings.Contains(out, "0.82") {
-		t.Fatalf("table missing well or value: %q", out)
-	}
-	plain := ExpandMatrixRefs("无引用正文", proj)
-	if plain != "无引用正文" {
+	if plain := ExpandMatrixRefs("无引用正文", proj); plain != "无引用正文" {
 		t.Fatalf("plain prose changed: %q", plain)
 	}
 }
 
-func TestSignVerifyRoundTrip(t *testing.T) {
-	signed, sig := Sign("# 研判\n\n贴壁良好\n", "run-1", 7, "lin", time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC))
-	if sig.RunID != "run-1" || sig.Revision != 7 || len(sig.Hash) != 64 {
-		t.Fatalf("sig = %+v", sig)
-	}
-	if got, ok := Verify(signed); !ok || got.Hash != sig.Hash {
-		t.Fatalf("verify = %+v %v", got, ok)
-	}
-	if _, ok := Verify(signed + "\n多加一句\n"); ok {
-		t.Fatal("tampered prose verified")
-	}
-	if _, ok := Verify("# 无签名正文\n"); ok {
-		t.Fatal("unsigned prose verified")
-	}
-	if got := StripSignature(signed); strings.Contains(got, "record-sign") {
-		t.Fatalf("trailer not stripped: %q", got)
-	}
-	// Re-signing covers the prose, never the old trailer.
-	resigned, _ := Sign(signed, "run-1", 8, "lin", time.Now())
-	if strings.Count(resigned, "record-sign") != 1 {
-		t.Fatalf("double trailer: %q", resigned)
-	}
-	if _, ok := Verify(resigned); !ok {
-		t.Fatal("resigned prose does not verify")
+func derivedFixture() runs.DerivedDesign {
+	return runs.DerivedDesign{
+		DesignID: "design-1", SourceDesignVersionID: "dv-3", SourceDesignRevision: 3,
+		ExpectedRevision: 4, SourceRunID: "run-1",
+		DesignJSON: `{"title":"HUVEC 成管 v2","timepoints":["0h","6h"],` +
+			`"derived_from":{"design_version_id":"dv-3","design_revision":3,"run_id":"run-1",` +
+			`"parameter_updates":[{"scope_id":"root/cure","parameter_key":"cure_s","planned":60,"actual":75,"event_id":"e1"}],` +
+			`"duration_updates":[{"timer_id":"t1","task_key":"task-cure","phase_index":0,"planned_s":60,"actual_s":75}]}}`,
 	}
 }
 
-func TestClassifyRecordState(t *testing.T) {
-	if ClassifyRecordState(true, true) != StateUnsaved {
-		t.Fatal("dirty prose must read 未保存 even with a stale signature")
+func TestDecodeDerivedEvidence(t *testing.T) {
+	ev, err := DecodeDerived(derivedFixture())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if ClassifyRecordState(false, true) != StateSealed {
-		t.Fatal("verified prose must read 已签核归档")
+	if ev.SourceRunID != "run-1" || ev.SourceDesignRevision != 3 || ev.ExpectedRevision != 4 {
+		t.Fatalf("provenance = %+v", ev)
 	}
-	if ClassifyRecordState(false, false) != StateSaved {
-		t.Fatal("clean unsigned prose must read 已保存")
+	if len(ev.Params) != 1 || ev.Params[0].ParameterKey != "cure_s" || ev.Params[0].EventID != "e1" {
+		t.Fatalf("params = %+v", ev.Params)
 	}
-	if ClassifyRecordState(true, false) != StateUnsaved {
-		t.Fatal("dirty prose must read 未保存")
-	}
-	if string(StateSealed) != "已签核归档" || string(StateSaved) != "已保存" || string(StateUnsaved) != "未保存" {
-		t.Fatal("status vocabulary drifted")
+	if len(ev.Durations) != 1 || ev.Durations[0].ActualS != 75 {
+		t.Fatalf("durations = %+v", ev.Durations)
 	}
 }
 
-func TestDeriveDesign(t *testing.T) {
-	snap, assets := recordFixture()
-	derived := DeriveDesign(Project(snap, assets))
-	if derived.SourceRunID != "run-1" || derived.SourceDesignRevision != 3 {
-		t.Fatalf("provenance = %+v", derived)
+func TestChangesForDerived(t *testing.T) {
+	derived := derivedFixture()
+	ev, err := DecodeDerived(derived)
+	if err != nil {
+		t.Fatal(err)
 	}
-	byKey := map[string]DerivedParameter{}
-	for _, p := range derived.Parameters {
-		byKey[p.TaskKey+"\x00"+p.Key] = p
+	out, err := ChangesForDerived(`{"title":"HUVEC 成管"}`, derived, ev, time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
 	}
-	cure := byKey["task-cure\x00cure_s"]
-	if cure.Measured != "75" || cure.Planned != "60" || !strings.Contains(cure.Source, "actual_parameters") {
-		t.Fatalf("cure_s = %+v", cure)
+	var shaped map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &shaped); err != nil {
+		t.Fatal(err)
 	}
-	gel := byKey["task-cure\x00gel_pct"]
-	if gel.Measured != "" || !strings.Contains(gel.Source, "unmeasured") {
-		t.Fatalf("gel_pct = %+v", gel)
+	if _, ok := shaped["derived_from"]; ok {
+		t.Fatal("derived_from must be stripped: design.revise rejects it")
 	}
-	rna, ok := byKey["task-image\x00measure:RNA 浓度"]
-	if !ok || rna.Measured != "63.8" {
-		t.Fatalf("rna = %+v %v", rna, ok)
+	if _, ok := shaped["source_evidence"]; !ok {
+		t.Fatal("source_evidence entry must be appended")
 	}
-	if derived.JSON() == "{}" || !strings.Contains(derived.JSON(), "sourceRunId") {
-		t.Fatal("derived JSON is not a handoff payload")
+	var existing struct {
+		SourceEvidence []struct {
+			ID string `json:"id"`
+		} `json:"source_evidence"`
 	}
-}
-
-// TestMeasurementCountCoversMatrixCellsOnly pins the narrow contract: the
-// count covers matrix-cell values, never the per-task measurements, because
-// the same fact can appear in both and the two cannot be deduplicated safely.
-func TestMeasurementCountCoversMatrixCellsOnly(t *testing.T) {
-	snap, assets := recordFixture()
-	snap.Measurements = append(snap.Measurements, runs.Measurement{
-		SampleID: "S9", Endpoint: "RNA 浓度", Value: 70.1, Unit: "ng/uL", TaskKey: "task-image",
-	})
-	proj := Project(snap, assets)
-	matrixValues := 0
-	for _, cell := range proj.Matrix {
-		matrixValues += len(cell.Values)
+	if err := json.Unmarshal([]byte(`{"source_evidence":[{"id":"manual-1"}]}`), &existing); err != nil {
+		t.Fatal(err)
 	}
-	if proj.MeasurementCount() != matrixValues {
-		t.Fatalf("count = %d, matrix values = %d", proj.MeasurementCount(), matrixValues)
+	// Existing evidence is preserved: append, never replace.
+	out2, err := ChangesForDerived(`{"title":"HUVEC 成管","source_evidence":[{"id":"manual-1"}]}`, derived, ev, time.Now())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if proj.MeasurementCount() != 2 {
-		t.Fatalf("count = %d, want the 2 result-cell values", proj.MeasurementCount())
+	var merged struct {
+		SourceEvidence []map[string]any `json:"source_evidence"`
 	}
-	// The extra task-level measurement is still listed, just not counted.
-	found := false
-	for _, sum := range proj.Summary {
-		for _, m := range sum.Measurements {
-			if m.SampleID == "S9" {
-				found = true
-			}
-		}
+	if err := json.Unmarshal([]byte(out2), &merged); err != nil {
+		t.Fatal(err)
 	}
-	if !found {
-		t.Fatal("task-level measurement disappeared from the summary")
+	if len(merged.SourceEvidence) != 2 || merged.SourceEvidence[0]["id"] != "manual-1" {
+		t.Fatalf("evidence = %+v", merged.SourceEvidence)
 	}
-}
-
-// TestCoordinatedImageCreatesItsOwnCell pins the finding-false case: a
-// coordinated image whose well has no measured cell still gets a cell, fills
-// its exact FOV slot, and is never reported unassigned. ensureImageCells runs
-// before assignImages, so no coordinated asset can disappear.
-func TestCoordinatedImageCreatesItsOwnCell(t *testing.T) {
-	snap := runs.RunSnapshot{RunID: "run-1", DesignID: "design-1", DesignRevision: 3}
-	assets := []runs.Asset{
-		{ID: "img-lone", RelativePath: "run/12h/B3-fov3.png", MediaType: "image",
-			Link: runs.AssetLink{RunID: "run-1", WellID: "B3", Timepoint: "12h", FOVIndex: 3}},
-	}
-	proj := Project(snap, assets)
-	if len(proj.Matrix) != 1 {
-		t.Fatalf("matrix = %+v", proj.Matrix)
-	}
-	cell := proj.Matrix[0]
-	if cell.Well != "B3" || cell.Timepoint != "12h" {
-		t.Fatalf("cell = %+v", cell)
-	}
-	if got := cell.Representative(3); got == nil || got.AssetID != "img-lone" {
-		t.Fatalf("FOV 3 = %+v", got)
-	}
-	if proj.Gaps != FOVSlots-1 {
-		t.Fatalf("gaps = %d", proj.Gaps)
-	}
-	if proj.UnassignedImages != 0 {
-		t.Fatalf("unassigned = %d", proj.UnassignedImages)
-	}
-}
-
-// TestStepPathPrefixNeverMatches pins exact step identity for keyless legacy
-// rows: only a ProtocolStepPath equal to the task's Path attaches, and only
-// when exactly one task carries it. A prefix ("root/readout" vs "root/read")
-// or an empty path never attaches; those rows land in the explicit
-// unassigned bucket instead of being guessed or dropped.
-func TestStepPathPrefixNeverMatches(t *testing.T) {
-	snap := runs.RunSnapshot{
-		RunID: "run-1", DesignID: "design-1", DesignRevision: 3,
-		Tasks: []runs.RunTask{
-			{Key: "task-image", Title: "采图", Timepoint: "6h", Status: "in_progress", Path: "root/read"},
-		},
-		Measurements: []runs.Measurement{
-			{SampleID: "S10", Endpoint: "OD450", Value: 0.5, ProtocolStepPath: "root/read"},
-			{SampleID: "S1", Endpoint: "OD450", Value: 0.82, ProtocolStepPath: "root/readout"},
-			{SampleID: "S2", Endpoint: "OD450", Value: 0.9},
-		},
-	}
-	proj := Project(snap, nil)
-	if len(proj.Summary) != 1 {
-		t.Fatalf("summaries = %+v", proj.Summary)
-	}
-	if len(proj.Summary[0].Measurements) != 1 || proj.Summary[0].Measurements[0].SampleID != "S10" {
-		t.Fatalf("attached = %+v", proj.Summary[0].Measurements)
-	}
-	unassigned := map[string]bool{}
-	for _, m := range proj.UnassignedMeasurements {
-		unassigned[m.SampleID] = true
-	}
-	if !unassigned["S1"] || !unassigned["S2"] {
-		t.Fatalf("unassigned = %+v", proj.UnassignedMeasurements)
-	}
-	if len(proj.UnassignedMeasurements) != 2 {
-		t.Fatalf("unassigned = %+v", proj.UnassignedMeasurements)
-	}
-}
-
-// TestOneStoredMeasurementYieldsOneSummaryRow pins the single source: the
-// bridge copies every event's measurements[] into snap.Measurements, so an
-// event DataJSON measurement must not add a second row for the same stored
-// fact. Parameters and deviations still come from DataJSON.
-func TestOneStoredMeasurementYieldsOneSummaryRow(t *testing.T) {
-	snap := runs.RunSnapshot{
-		RunID: "run-1", DesignID: "design-1", DesignRevision: 3,
-		Tasks: []runs.RunTask{
-			{Key: "task-image", Title: "采图", Timepoint: "6h", Status: "in_progress"},
-		},
-		Events: []runs.RunEvent{
-			{
-				ID: "evt-1", EventType: "measurement", TaskKey: "task-image", Timepoint: "6h",
-				OccurredAt: "2026-11-10T16:00:00+08:00", RecordedAt: "2026-11-10T16:01:00+08:00",
-				DataJSON: `{"measurements":[{"sample_id":"S10","endpoint":"OD450","value":0.5}],"actual_parameters":[{"key":"cure_s","value":75,"unit":"s"}]}`,
-			},
-		},
-		Measurements: []runs.Measurement{
-			{SampleID: "S10", Endpoint: "OD450", Value: 0.5, Unit: "", TaskKey: "task-image"},
-		},
-	}
-	proj := Project(snap, nil)
-	if len(proj.Summary) != 1 {
-		t.Fatalf("summaries = %+v", proj.Summary)
-	}
-	rows := 0
-	for _, m := range proj.Summary[0].Measurements {
-		if m.Endpoint == "OD450" && m.SampleID == "S10" {
-			rows++
-		}
-	}
-	if rows != 1 {
-		t.Fatalf("stored measurement yielded %d summary rows: %+v", rows, proj.Summary[0].Measurements)
-	}
-	if len(proj.Summary[0].Actual) != 1 || proj.Summary[0].Actual[0].Value != "75" {
-		t.Fatalf("DataJSON parameters lost: %+v", proj.Summary[0].Actual)
-	}
-}
-
-// TestGroupsComeFromResultCellsOnly pins explicit group identity: cell groups
-// derive from ResultCell.Group alone, never from filenames or samples, and
-// RepresentativeGroup prefers the filled FOV slot within the slot's wells.
-func TestGroupsComeFromResultCellsOnly(t *testing.T) {
-	snap := runs.RunSnapshot{
-		RunID: "run-1", DesignID: "design-1", DesignRevision: 3,
-		Tasks: []runs.RunTask{
-			{Key: "task-image", Title: "采图", Timepoint: "6h", Status: "in_progress"},
-		},
-		Events: []runs.RunEvent{
-			{
-				ID: "evt-1", EventType: "measurement", TaskKey: "task-image", Timepoint: "6h",
-				OccurredAt: "2026-11-10T16:00:00+08:00", RecordedAt: "2026-11-10T16:01:00+08:00",
-				ResultCells: []runs.ResultCell{
-					{Row: 0, Column: 0, SampleID: "S1", Group: "3%", Field: "OD450", Value: new(0.82)},
-					{Row: 0, Column: 1, SampleID: "S2", Group: "5%", Field: "OD450", Value: new(0.91)},
-					{Row: 0, Column: 2, SampleID: "S3", Field: "OD450", Value: new(0.77)},
-				},
-			},
-		},
-	}
-	assets := []runs.Asset{
-		{ID: "img-a2", RelativePath: "run/6h/A2-fov1.png", MediaType: "image",
-			Link: runs.AssetLink{RunID: "run-1", WellID: "A2", Timepoint: "6h", FOVIndex: 1}},
-	}
-	proj := Project(snap, assets)
-	byWell := map[string]MatrixCell{}
-	for _, cell := range proj.Matrix {
-		byWell[cell.Well] = cell
-	}
-	if !reflect.DeepEqual(byWell["A1"].Groups, []string{"3%"}) {
-		t.Fatalf("A1 groups = %+v", byWell["A1"].Groups)
-	}
-	if !reflect.DeepEqual(byWell["A2"].Groups, []string{"5%"}) {
-		t.Fatalf("A2 groups = %+v", byWell["A2"].Groups)
-	}
-	if len(byWell["A3"].Groups) != 0 {
-		t.Fatalf("A3 groups = %+v, want ungrouped", byWell["A3"].Groups)
-	}
-	if got := proj.Groups(); !reflect.DeepEqual(got, []string{"3%", "5%", ""}) {
-		t.Fatalf("groups = %+v", got)
-	}
-	// The 5% slot shows A2 with its filled FOV 1.
-	cell, img, ok := proj.RepresentativeGroup("5%", "6h", 1)
-	if !ok || cell.Well != "A2" || img == nil || img.AssetID != "img-a2" {
-		t.Fatalf("representative = %+v %+v %v", cell, img, ok)
-	}
-	// The 3% slot exists but its FOV 1 is a gap.
-	_, img, ok = proj.RepresentativeGroup("3%", "6h", 1)
-	if !ok || img != nil {
-		t.Fatalf("expected a gap, got %+v %v", img, ok)
-	}
-	// Unknown timepoints select nothing.
-	if _, _, ok := proj.RepresentativeGroup("5%", "12h", 1); ok {
-		t.Fatal("unknown timepoint selected a cell")
-	}
-}
-
-// TestProjectGroupAndSampleStayWithinTheirTimepoint pins the assay rule that
-// a group is assigned per well@timepoint: the same well reads 3% at 6h and
-// 5% at 12h, and neither cell leaks the other's group, sample, or
-// representative slot.
-func TestProjectGroupAndSampleStayWithinTheirTimepoint(t *testing.T) {
-	snap := runs.RunSnapshot{
-		RunID: "run-1", DesignID: "design-1", DesignRevision: 3,
-		Tasks: []runs.RunTask{
-			{Key: "task-6", Title: "采图", Timepoint: "6h", Status: "completed"},
-			{Key: "task-12", Title: "采图", Timepoint: "12h", Status: "in_progress"},
-		},
-		Events: []runs.RunEvent{
-			{
-				ID: "evt-6", EventType: "measurement", TaskKey: "task-6", Timepoint: "6h",
-				OccurredAt: "2026-11-10T16:00:00+08:00", RecordedAt: "2026-11-10T16:01:00+08:00",
-				ResultCells: []runs.ResultCell{
-					{Row: 0, Column: 0, SampleID: "S1", Group: "3%", Field: "OD450", Value: new(0.82)},
-				},
-			},
-			{
-				ID: "evt-12", EventType: "measurement", TaskKey: "task-12", Timepoint: "12h",
-				OccurredAt: "2026-11-10T22:00:00+08:00", RecordedAt: "2026-11-10T22:01:00+08:00",
-				ResultCells: []runs.ResultCell{
-					{Row: 0, Column: 0, SampleID: "S2", Group: "5%", Field: "OD450", Value: new(0.91)},
-				},
-			},
-		},
-	}
-	proj := Project(snap, nil)
-	byKey := map[string]MatrixCell{}
-	for _, cell := range proj.Matrix {
-		byKey[cell.Well+"\x00"+cell.Timepoint] = cell
-	}
-	early, ok := byKey["A1\x006h"]
-	if !ok {
-		t.Fatalf("missing A1@6h cell: %+v", proj.Matrix)
-	}
-	if !reflect.DeepEqual(early.Groups, []string{"3%"}) || !reflect.DeepEqual(early.Samples, []string{"S1"}) {
-		t.Fatalf("A1@6h leaked: groups=%+v samples=%+v", early.Groups, early.Samples)
-	}
-	late, ok := byKey["A1\x0012h"]
-	if !ok {
-		t.Fatalf("missing A1@12h cell: %+v", proj.Matrix)
-	}
-	if !reflect.DeepEqual(late.Groups, []string{"5%"}) || !reflect.DeepEqual(late.Samples, []string{"S2"}) {
-		t.Fatalf("A1@12h leaked: groups=%+v samples=%+v", late.Groups, late.Samples)
-	}
-	// Neither timepoint's group slot may resolve through the other cell.
-	if _, _, ok := proj.RepresentativeGroup("3%", "12h", 1); ok {
-		t.Fatal("3% leaked into the 12h slot")
-	}
-	if _, _, ok := proj.RepresentativeGroup("5%", "6h", 1); ok {
-		t.Fatal("5% leaked into the 6h slot")
-	}
-	if cell, _, ok := proj.RepresentativeGroup("3%", "6h", 1); !ok || cell.Well != "A1" {
-		t.Fatalf("3pct at 6h representative = %+v %v", cell, ok)
-	}
-	if cell, _, ok := proj.RepresentativeGroup("5%", "12h", 1); !ok || cell.Well != "A1" {
-		t.Fatalf("5pct at 12h representative = %+v %v", cell, ok)
-	}
-}
-
-// TestSignVerifiesActorWithSpaces pins signatures for actors whose Windows
-// USERNAME contains whitespace: the value survives the round trip byte for
-// byte, and a legacy no-space trailer verifies exactly as before.
-func TestSignVerifiesActorWithSpaces(t *testing.T) {
-	signed, sig := Sign("# 研判\n\n贴壁良好\n", "run-1", 7, "Jane Doe", time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC))
-	if sig.Actor != "Jane Doe" {
-		t.Fatalf("actor = %q", sig.Actor)
-	}
-	got, ok := Verify(signed)
-	if !ok || got.Actor != "Jane Doe" || got.Hash != sig.Hash {
-		t.Fatalf("spaced actor did not verify: %+v %v", got, ok)
-	}
-	if _, ok := Verify(signed + "\n多加一句\n"); ok {
-		t.Fatal("tampered spaced-actor prose verified")
-	}
-	// A trailer written before spaces were allowed verifies unchanged.
-	legacyBody := "# 旧正文\n"
-	sum := sha256.Sum256([]byte(legacyBody))
-	legacy := legacyBody + "\n" + fmt.Sprintf(
-		"<!-- record-sign run=%s rev=%d hash=%s at=%s actor=%s -->\n",
-		"run-1", 3, hex.EncodeToString(sum[:]), "2026-11-16T12:00:00Z", "lin")
-	legacySig, ok := Verify(legacy)
-	if !ok || legacySig.Actor != "lin" || legacySig.Revision != 3 {
-		t.Fatalf("legacy signature stopped verifying: %+v %v", legacySig, ok)
+	// Unknown draft keys fail loudly: persisting a partial draft would
+	// silently lose design data.
+	bad := derived
+	bad.DesignJSON = `{"title":"x","mystery_field":1,"derived_from":{"run_id":"run-1"}}`
+	if _, err := ChangesForDerived(`{}`, bad, ev, time.Now()); err == nil {
+		t.Fatal("unknown draft key must fail, not silently drop")
 	}
 }

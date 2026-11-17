@@ -4,6 +4,7 @@ package main
 // the Design Owner after Wave 1 extraction; routing lives in main.go.
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -89,6 +90,31 @@ func designReadinessState(a *app) (string, components.BadgeTone) {
 	default:
 		return "草稿", components.BadgeNeutral
 	}
+}
+
+// designProvenanceLine names the source Run and design revision when this
+// design revision was persisted from a DeriveDesignFromRun draft. The claim
+// is the persisted source_evidence entry, never a live derivation.
+func designProvenanceLine(a *app) string {
+	if a == nil || a.designSnap == nil || strings.TrimSpace(a.designSnap.Data) == "" {
+		return ""
+	}
+	var doc struct {
+		SourceEvidence []struct {
+			ID             string `json:"id"`
+			SourceDocument string `json:"source_document"`
+		} `json:"source_evidence"`
+	}
+	if err := json.Unmarshal([]byte(a.designSnap.Data), &doc); err != nil {
+		return ""
+	}
+	for i := len(doc.SourceEvidence) - 1; i >= 0; i-- {
+		entry := doc.SourceEvidence[i]
+		if strings.HasPrefix(entry.ID, "derived-run-") && strings.TrimSpace(entry.SourceDocument) != "" {
+			return "派生自" + entry.SourceDocument
+		}
+	}
+	return ""
 }
 
 func designPage(c *ui.Context, a *app) {
@@ -195,6 +221,13 @@ func asterDesignPage(c *ui.Context, a *app) {
 			}
 			renderAgentProposal(c,a)
 		})
+		// Derived provenance: when this revision was persisted from a
+		// DeriveDesignFromRun draft, the persisted source_evidence names the
+		// source Run and design revision. Designs without it show nothing.
+		if line := designProvenanceLine(a); line != "" {
+			ui.Text(c, line).FontSize(t.Rem(0.79)).TextColor(t.TextMuted).
+				Padding(t.Space(1), t.Space(4))
+		}
 		if a.designer != nil {
 			designer.BudgetBar(c, a.designer)
 		}

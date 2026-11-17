@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"asterlab-mygo-prototype/internal/assets"
+	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/runworkspace"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/modules/runs"
@@ -41,10 +42,11 @@ func (a *app) syncRunBenchCallbacks() {
 	cb.TaskAssets = a.runAssetsForTask
 	cb.CaptureWells = a.captureWellsForTask
 	cb.RequestBatchLink = a.requestBatchLink
-	// The shared record projection reads the stored snapshot plus
-	// already-linked assets; the bench memoizes it by Run revision.
-	cb.HistoryInputs = func() (runs.RunSnapshot, []runs.Asset) {
-		return a.snap, a.runAssets
+	// The shared record projection reads Core through the app memo
+	// (runID|rev|assets|fov|view); the bench memoizes the pointer by the
+	// host key.
+	cb.FetchRecord = func() (runworkspace.RecordKey, record.Projection, error) {
+		return a.fetchRecord()
 	}
 	// Bridge v2 generic channel (INT-01, BE-10): the blind switch reads
 	// run.workspace view=blind|unblinded and the exclusion/typed-readout

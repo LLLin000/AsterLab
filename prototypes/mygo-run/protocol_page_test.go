@@ -2,13 +2,11 @@ package main
 
 import (
 	"testing"
-	"time"
-
-	"github.com/egoist/mygo/ui"
 
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestProtocolNeverFallsBackToLiveDesignForSelectedRun(t *testing.T) {
@@ -78,10 +76,13 @@ func TestProtocolArchiveToggleRendersEndState(t *testing.T) {
 }
 
 func TestProtocolArchiveShowsSealedState(t *testing.T) {
-	signed, _ := record.Sign("# 研判\n\n贴壁良好", "run-arch-2", 3, "lin",
-		time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC))
+	snap := archiveTestSnap("run-arch-2", "# 研判\n\n贴壁良好")
+	proj := boardTestProj("")
+	proj.Archive.Status = "signed"
+	proj.Archive.Signature = &record.ArchiveSignature{SignedBy: "lin", SignedAtUTC: "2026-11-16T12:00:00Z"}
 	a := &app{
-		snap:     archiveTestSnap("run-arch-2", signed),
+		snap:     snap,
+		runSvc:   &sealStubSvc{snap: snap, proj: proj},
 		asterErr: "冻结文档损坏（测试夹具）",
 	}
 	tt := ui.NewTester(func(c *ui.Context) {
@@ -95,5 +96,8 @@ func TestProtocolArchiveShowsSealedState(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("已签核归档") {
 		t.Fatalf("sealed state missing: %q", tt.Texts())
+	}
+	if !tt.HasText("lin") {
+		t.Fatalf("signer missing from sealed archive: %q", tt.Texts())
 	}
 }

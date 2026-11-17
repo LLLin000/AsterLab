@@ -4,12 +4,14 @@ package main
 // two distinct objects (UX-STATE): a Run-backed document is 已冻结; preview is 预览.
 
 import (
+	"encoding/json"
 	"bytes"
 	"context"
 	"fmt"
 	"image"
 	"image/png"
 	"os"
+	"strings"
 	"time"
 
 	"asterlab-mygo-prototype/internal/assets"
@@ -283,36 +285,38 @@ func renderProtocolDocument(c *ui.Context, source string, mode asterdoc.Mode, re
 	})
 }
 
-// renderProtocolArchive renders the 终态归档: the shared RecordProjection as
-// an exportable end state, with the signed prose (dynamic references
-// flattened) and the derived design draft. It reads the same projection the
-// Notebook board and the Run history read from; it writes nothing.
+// renderProtocolArchive renders the 终态归档: Core's shared RecordProjection
+// as an exportable end state, with the prose (legacy trailers stripped,
+// dynamic references flattened). It reads the same memo the Notebook board
+// and the Run history read from; it writes nothing. The bundle export
+// additionally verifies every manifest member byte-for-byte.
 func (a *app) renderProtocolArchive(c *ui.Context) {
 	t := c.Theme()
-	proj := record.Project(a.snap, a.runAssets)
+	proj, tasks, fetchErr := a.recordProjection()
 	prose := ""
 	if a.noteRunID == a.snap.RunID {
-		prose = a.noteSource()
+		prose = record.StripLegacySignature(a.noteSource())
 	} else if latest, ok := latestNotebookRevision(a.snap.Events); ok {
-		prose = latest
+		prose = record.StripLegacySignature(latest)
 	}
-	_, sigOK := record.Verify(prose)
+	sealed := a.recordArchived()
 	// The preview is render-stable: it carries no export stamp, so every
 	// frame renders the same document. The stamp is applied only when the
 	// operator actually exports the package.
-	arch := protocol.BuildArchive(proj, prose, time.Time{})
-	state := record.ClassifyRecordState(a.noteDirty, sigOK)
+	arch := protocol.BuildArchive(proj, tasks, prose, time.Time{})
+	counts := record.Summarize(proj, tasks)
+	state := record.ArchiveStatusWord(proj.Archive.Status)
 	ui.Column(c).Grow(1).FillWidth().Padding(t.Space(2), t.Space(4)).Gap(t.Space(2)).Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, "终态归档").FontSize(t.Rem(.95)).Bold().TextColor(t.Text)
-			ui.Text(c, string(state)).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, state+" · "+record.Headline(counts)).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted)
 			ui.Spacer(c)
 			if components.Button(c, "导出归档包", components.ButtonSecondary).Clicked() {
-				exported := protocol.BuildArchive(proj, prose, time.Now())
+				exported := protocol.BuildArchive(proj, tasks, prose, time.Now())
 				a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", exported.Markdown())
 			}
 			if components.Button(c, "导出 PDF", components.ButtonSecondary).Clicked() {
-				exported := protocol.BuildArchive(proj, prose, time.Now())
+				exported := protocol.BuildArchive(proj, tasks, prose, time.Now())
 				var buf bytes.Buffer
 				if err := exported.PDF(&buf, a.recordPDFLoader()); err != nil {
 					c.AddToast(ui.Toast{Title: "PDF 导出失败", Description: err.Error(), Type: components.ToastError})
@@ -320,12 +324,26 @@ func (a *app) renderProtocolArchive(c *ui.Context) {
 					a.exportRecordBytes(c, "导出 PDF", "record-"+a.snap.RunID+".pdf", buf.Bytes())
 				}
 			}
-		})
-		if sigOK {
-			if arch.Signature != nil {
-				ui.Text(c, "签核 "+arch.Signature.Actor+" · "+arch.Signature.At).
-					FontSize(t.Rem(.8)).TextColor(t.TextMuted)
+			if sealed && proj.Archive.Manifest != nil {
+				if components.Button(c, "导出校验包", components.ButtonSecondary).Clicked() {
+					stamped := protocol.BuildArchive(proj, tasks, prose, time.Now())
+					a.exportRecordBundle(c, stamped, archiveManifestJSON(proj))
+				}
 			}
+		})
+		if strings.TrimSpace(fetchErr) != "" {
+			ui.Text(c, "记录读取失败："+fetchErr).FontSize(t.Rem(.8)).TextColor(t.Danger)
+		}
+		if sealed {
+			sig := proj.Archive.Signature
+			line := "已签核归档"
+			if sig != nil && strings.TrimSpace(sig.SignedBy) != "" {
+				line += " · " + sig.SignedBy
+			}
+			if sig != nil && strings.TrimSpace(sig.SignedAtUTC) != "" {
+				line += " · " + sig.SignedAtUTC
+			}
+			ui.Text(c, line).FontSize(t.Rem(.8)).TextColor(t.TextMuted)
 		} else {
 			ui.Text(c, "未签核：签核在 Notebook 图板完成，归档包随之锁定。").
 				FontSize(t.Rem(.8)).TextColor(t.TextMuted)
@@ -342,18 +360,86 @@ func (a *app) renderProtocolArchive(c *ui.Context) {
 	})
 }
 
+// archiveManifestJSON carries Core's stored manifest verbatim into the
+// bundle builder: entries and the digest claim are Core's own, so the
+// byte-for-byte verification checks Core's facts, never Go's rendering.
+func archiveManifestJSON(proj record.Projection) string {
+	if proj.Archive.Manifest == nil {
+		return ""
+	}
+	raw, err := json.Marshal(proj.Archive.Manifest)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// exportRecordBundle writes the checksum bundle (PDF + Markdown + every
+// manifest member verified byte-for-byte) through a save dialog. Any member
+// mismatch aborts loudly instead of shipping a fake-success package.
+func (a *app) exportRecordBundle(c *ui.Context, arch protocol.Archive, manifestJSON string) {
+	home, _ := os.UserHomeDir()
+	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Parent: mygo.FocusedWindow(), Title: "导出校验包", DefaultPath: filepath.Join(home, "record-"+a.snap.RunID+".zip"),
+	})
+	if err != nil {
+		c.AddToast(ui.Toast{Title: "导出校验包失败", Description: err.Error(), Type: components.ToastError})
+		return
+	}
+	if path == "" {
+		return
+	}
+	var buf bytes.Buffer
+	if err := arch.WriteBundle(&buf, manifestJSON, a.recordPDFLoader(), a.recordAssetBytes()); err != nil {
+		c.AddToast(ui.Toast{Title: "导出校验包失败", Description: err.Error(), Type: components.ToastError})
+		return
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		c.AddToast(ui.Toast{Title: "导出校验包失败", Description: err.Error(), Type: components.ToastError})
+		return
+	}
+	c.AddToast(ui.Toast{Title: "record-" + a.snap.RunID + ".zip 已保存", Description: path, Type: components.ToastSuccess})
+}
+
+// recordAssetBytes returns the original bytes of one archived member named
+// by its manifest logical path. Assets resolve through the linked file,
+// never from an inferred path; notes render from the projection.
+func (a *app) recordAssetBytes() protocol.AssetBytesLoader {
+	return func(logicalPath string) ([]byte, error) {
+		for _, asset := range a.runAssets {
+			if asset.RelativePath == logicalPath || asset.ID == logicalPath {
+				path, err := assets.Roots(a.assetRoots).Resolve(assets.Asset{
+					ID: asset.ID, RootID: asset.RootID, RelativePath: asset.RelativePath,
+				})
+				if err != nil {
+					return nil, err
+				}
+				return os.ReadFile(path)
+			}
+		}
+		return nil, fmt.Errorf("归档成员 %q 未关联到本 Run", logicalPath)
+	}
+}
+
 // recordPDFLoader resolves one placed matrix image to PNG bytes for the
 // archive PDF: Roots.Resolve locates the file (never inferred from names),
 // the shared decoder reads the master (TIFF included), and png.Encode gives
 // gofpdf what it embeds. Any failure names the asset so the export can say
 // exactly which image is missing instead of dropping it.
 func (a *app) recordPDFLoader() protocol.ImageLoader {
-	return func(img record.MatrixImage) ([]byte, error) {
-		if img.RootID == "" || img.RelativePath == "" {
+	return func(img record.PlacedImage) ([]byte, error) {
+		var linked *runs.Asset
+		for i := range a.runAssets {
+			if a.runAssets[i].ID == img.AssetID {
+				linked = &a.runAssets[i]
+				break
+			}
+		}
+		if linked == nil || linked.RootID == "" || linked.RelativePath == "" {
 			return nil, fmt.Errorf("asset %q has no linked file", img.AssetID)
 		}
 		path, err := assets.Roots(a.assetRoots).Resolve(assets.Asset{
-			ID: img.AssetID, RootID: img.RootID, RelativePath: img.RelativePath,
+			ID: linked.ID, RootID: linked.RootID, RelativePath: linked.RelativePath,
 		})
 		if err != nil {
 			return nil, err
@@ -364,11 +450,11 @@ func (a *app) recordPDFLoader() protocol.ImageLoader {
 		}
 		decoded, _, err := image.Decode(bytes.NewReader(data))
 		if err != nil {
-			return nil, fmt.Errorf("decode %q: %w", img.Label, err)
+			return nil, fmt.Errorf("decode %q: %w", img.AssetID, err)
 		}
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, decoded); err != nil {
-			return nil, fmt.Errorf("encode %q: %w", img.Label, err)
+			return nil, fmt.Errorf("encode %q: %w", img.AssetID, err)
 		}
 		return buf.Bytes(), nil
 	}
