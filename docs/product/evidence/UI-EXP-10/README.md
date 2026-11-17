@@ -84,3 +84,18 @@ payload pin（含 `columns/rows [[1,"+"]]`)、表格解析错误、rack 渲染/�
    payload 保持省略（与旧版本一致），后续卡可加。
 4. **盲法脱敏以 Core 为准**：UI 只做展示遮罩；`blind_masked: true` 随排除事件
    上报发生在遮罩下的写入。
+
+## Windows Gate 实窗验证（`df314a3`，coordinator 执行）
+
+- 二进制：`dist/mygo-run.exe`（sha256
+  `F9B6731CD97AA5A645C0C9C9E194A166582479B88F7E01A9A74DB758E3D5BAEC`）＋
+  `dist/Runs.dll`（sha256
+  `EF20CD8787CF9BC587E0BC0F6AC44DB2E2E4E9EF5EDE2981E61D891058265371`），
+  `BUILD_INFO` commit `df314a3` 与 head 一致；`LOCAL_GATE: PASS`。
+- `ui-exp-run-1360x880-light.png`：Run 台面头部 `○ 设盲视图` 开关、台面
+  `样本排除`（QC 剔除/删失/重做）与 `分类与表格读数`（分类/表格）分区就位。
+- `ui-exp-blind-1360x880-light.png`：开盲后 `● 设盲视图`＋`已设盲` 横幅，
+  图例显示 `已设盲·分组已隐藏`，孔位坐标保持可见。
+- 未验证：1D 管架实窗渲染（种子库无 1D 容器数据；`rack_test`＋`plate_lane_test`
+  单测覆盖）。排除提交/读数提交的真实 Core 写入未在 Gate 点（单测 pin 住
+  精确 JSON，留 QA-HUVEC 全链路覆盖）。
