@@ -272,11 +272,12 @@ func notebookPage(c *ui.Context, a *app) {
 						components.Icon(c, icon).Size(size, size)
 					}, "实时", "编辑", "阅读", "文档", "图板")
 				if parts.List.Changed() {
-					// The sealed record locks the editing modes, but the
-					// read-only board stays reachable: it hosts 解锁.
+					// The sealed record locks the editing modes; only the
+					// read-only board (mode 4) and reading stay reachable.
+					// Sign/archive is final: there is no unlock.
 					if sealed && a.noteMode != 2 && a.noteMode != 4 {
 						a.noteMode = old
-						c.AddToast(ui.Toast{Title: "已签核归档", Description: "记录已锁定，解锁后可编辑。", Type: components.ToastWarning})
+						c.AddToast(ui.Toast{Title: "已签核归档", Description: "记录已锁定为终态归档，不可撤销。切换到阅读查看正文。", Type: components.ToastWarning})
 					} else {
 						a.applyNoteModeChange(old)
 					}
