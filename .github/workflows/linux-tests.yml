@@ -134,5 +134,21 @@ jobs:
           sha256sum .mygo/native/linux-amd64/libRuns.so
       - name: Go tests
         if: env.RUN_HEAVY == '1'
+        # QA-10: one hosted-only flaky crash is excluded by name instead of
+        # dropping the step or the package, mirroring the windows-build.yml
+        # entry (same test, same -skip-by-name format):
+        # TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable dies
+        # nondeterministically on hosted runners only (ubuntu-24.04 and
+        # windows-2022) with a Go runtime GC fatal (`found pointer to free
+        # object` / `bad pointer in Go heap`) inside the pinned MyGo Tester's
+        # render chain (ui.NewTester/Frame/Click in main_test.go), which kills
+        # the whole test binary instead of failing the test. It never
+        # reproduces locally (see docs/product/evidence/QA-10/README.md), so
+        # there is no test-side fix; the real fix belongs to a MyGo upgrade
+        # (pin v0.8.4-0.20261108220316-c4197b7fe562, do not bump here).
+        # The banner/retry/linkErr assertions stay covered by the local gate
+        # (scripts/ci/local-gate.sh runs the unskipped suite). QA-10
+        # (c40bf7e1-ad9f-4c1d-8573-aab98cdbb2b1) owns the real fix; drop -skip
+        # together with that fix.
         working-directory: prototypes/mygo-run
-        run: go test ./...
+        run: go test -skip '^TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable$' ./...
