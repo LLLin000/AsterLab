@@ -1,0 +1,1189 @@
+=== RUN   TestAssetLinkSurvivesServiceReload
+    asset_link_persistence_test.go:11: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestAssetLinkSurvivesServiceReload (0.00s)
+=== RUN   TestAsterDraftUndoRedoRestoresFields
+--- PASS: TestAsterDraftUndoRedoRestoresFields (0.00s)
+=== RUN   TestAsterDraftSelectionReloadDoesNotCreateHistory
+--- PASS: TestAsterDraftSelectionReloadDoesNotCreateHistory (0.00s)
+=== RUN   TestAsterDocCLIReadsSameRevision
+    asterdoc_cli_test.go:15: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestAsterDocCLIReadsSameRevision (0.00s)
+=== RUN   TestAsterDocSemanticCommandsPatchOnlyTargetModule
+    asterdoc_command_test.go:14: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestAsterDocSemanticCommandsPatchOnlyTargetModule (0.00s)
+=== RUN   TestAsterDocStepCommandsUpdateWorkflowAtomically
+    asterdoc_command_test.go:105: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestAsterDocStepCommandsUpdateWorkflowAtomically (0.00s)
+=== RUN   TestInspectorTaskAndCheckPropertiesReachProjection
+    asterdoc_command_test.go:191: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestInspectorTaskAndCheckPropertiesReachProjection (0.00s)
+=== RUN   TestCompileAsterDocProjectsGroupsAssaysAndSteps
+    asterdoc_compile_test.go:13: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCompileAsterDocProjectsGroupsAssaysAndSteps (0.00s)
+=== RUN   TestCompileAsterDocPreservesSDKModules
+    asterdoc_compile_test.go:95: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCompileAsterDocPreservesSDKModules (0.00s)
+=== RUN   TestCompileAsterDocProjectsStepUses
+    asterdoc_compile_test.go:142: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCompileAsterDocProjectsStepUses (0.00s)
+=== RUN   TestCreateAsterDocDesignCreatesAuthoritativeDocument
+    asterdoc_create_test.go:12: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCreateAsterDocDesignCreatesAuthoritativeDocument (0.00s)
+=== RUN   TestAssessAsterDocReportsIncompleteStarter
+    asterdoc_create_test.go:51: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestAssessAsterDocReportsIncompleteStarter (0.00s)
+=== RUN   TestProtocolBindingMakesStarterReadinessExecutable
+    asterdoc_create_test.go:83: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestProtocolBindingMakesStarterReadinessExecutable (0.00s)
+=== RUN   TestCreateRunFromAsterDocFreezesDocumentAndDesign
+    asterdoc_freeze_test.go:14: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCreateRunFromAsterDocFreezesDocumentAndDesign (0.00s)
+=== RUN   TestAsterDocStoreIsImmutableAndConflictChecked
+    asterdoc_store_test.go:23: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestAsterDocStoreIsImmutableAndConflictChecked (0.00s)
+=== RUN   TestAsterDocGoRustParity
+    asterdoc_store_test.go:95: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestAsterDocGoRustParity (0.00s)
+=== RUN   TestLoadAsterDocAtReturnsExactImmutableRevision
+    asterdoc_store_test.go:168: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestLoadAsterDocAtReturnsExactImmutableRevision (0.00s)
+=== RUN   TestBatchPageShowsStoredCellsReadOnly
+--- PASS: TestBatchPageShowsStoredCellsReadOnly (0.12s)
+=== RUN   TestProtocolBlockPreviewFixture
+asterlab data dir: D:\.ci-cache\tmp\TestProtocolBlockPreviewFixture84955197\001
+--- PASS: TestProtocolBlockPreviewFixture (3.73s)
+=== RUN   TestWorkspaceSessionCanvasLayoutRoundTrip
+--- PASS: TestWorkspaceSessionCanvasLayoutRoundTrip (0.00s)
+=== RUN   TestCCK8VerticalSliceLoop
+    cck8_loop_test.go:27: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCCK8VerticalSliceLoop (0.00s)
+=== RUN   TestConcurrencyWorker
+    concurrency_cross_process_test.go:34: worker entrypoint only
+--- SKIP: TestConcurrencyWorker (0.00s)
+=== RUN   TestCrossProcessConcurrentReadouts
+    concurrency_cross_process_test.go:197: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCrossProcessConcurrentReadouts (0.00s)
+=== RUN   TestCrossProcessDuplicateOperation
+    concurrency_cross_process_test.go:288: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCrossProcessDuplicateOperation (0.00s)
+=== RUN   TestCrossProcessConflictOperation
+    concurrency_cross_process_test.go:360: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCrossProcessConflictOperation (0.00s)
+=== RUN   TestCrossProcessInvalidRollback
+    concurrency_cross_process_test.go:424: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCrossProcessInvalidRollback (0.00s)
+=== RUN   TestCrossProcessCreateRunDuplicate
+    concurrency_cross_process_test.go:498: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCrossProcessCreateRunDuplicate (0.00s)
+=== RUN   TestContractSameSQLiteCopy
+    contract_integration_test.go:37: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestContractSameSQLiteCopy (0.00s)
+=== RUN   TestContractOperationIDIdempotency
+    contract_integration_test.go:94: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestContractOperationIDIdempotency (0.00s)
+=== RUN   TestContractRollbackRevisionUnchanged
+    contract_integration_test.go:124: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestContractRollbackRevisionUnchanged (0.00s)
+=== RUN   TestContractDesignCRUD
+    contract_integration_test.go:145: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestContractDesignCRUD (0.00s)
+=== RUN   TestCreateRunFromRealDesignIsIdempotent
+    create_run_test.go:18: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCreateRunFromRealDesignIsIdempotent (0.00s)
+=== RUN   TestCoreRejectsInvalidWellAtRunCreation
+    creation_audit_test.go:15: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCoreRejectsInvalidWellAtRunCreation (0.00s)
+=== RUN   TestAsterDesignPageRendersFrozenDocumentSurface
+--- PASS: TestAsterDesignPageRendersFrozenDocumentSurface (0.12s)
+=== RUN   TestWorkflowTabRendersDocStepsAndInspector
+--- PASS: TestWorkflowTabRendersDocStepsAndInspector (0.01s)
+=== RUN   TestPreflightDialogShowsCoreIssues
+--- PASS: TestPreflightDialogShowsCoreIssues (0.02s)
+=== RUN   TestStepInspectorShowsAsterDocProperties
+--- PASS: TestStepInspectorShowsAsterDocProperties (0.01s)
+=== RUN   TestDesignHierarchyWithoutRunFixture
+--- PASS: TestDesignHierarchyWithoutRunFixture (0.04s)
+=== RUN   TestDesignHierarchyUsesNativeCore
+--- PASS: TestDesignHierarchyUsesNativeCore (0.03s)
+=== RUN   TestCanvasStepsCarryCompositeMarker
+--- PASS: TestCanvasStepsCarryCompositeMarker (0.02s)
+=== RUN   TestDefinitionNodeParamsStatus
+--- PASS: TestDefinitionNodeParamsStatus (0.00s)
+=== RUN   TestStepCommandReloadsReturnedRevisionAndRecordsUndo
+--- PASS: TestStepCommandReloadsReturnedRevisionAndRecordsUndo (0.00s)
+=== RUN   TestRejectedStepDeleteKeepsDocumentAndShowsCoreReason
+--- PASS: TestRejectedStepDeleteKeepsDocumentAndShowsCoreReason (0.00s)
+=== RUN   TestStepCommandUndoRedoAcrossDifferentOperations
+--- PASS: TestStepCommandUndoRedoAcrossDifferentOperations (0.00s)
+=== RUN   TestCreateRunBindsExplicitStepTasks
+    design_step_link_test.go:20: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestCreateRunBindsExplicitStepTasks (0.00s)
+=== RUN   TestSeedGUIRun
+    gui_seed_test.go:20: set ASTERLAB_SEED_GUI=1 to seed the GUI data directory
+--- SKIP: TestSeedGUIRun (0.00s)
+=== RUN   TestInspectTreeContractJSON
+--- PASS: TestInspectTreeContractJSON (0.00s)
+=== RUN   TestNativeWorkflowTreeDesignAndRunContract
+asterlab data dir: D:\.ci-cache\tmp\TestNativeWorkflowTreeDesignAndRunContract1180629900\001
+--- PASS: TestNativeWorkflowTreeDesignAndRunContract (0.11s)
+=== RUN   TestNativeWorkflowTreeHiddenModeRejectsMismatch
+--- PASS: TestNativeWorkflowTreeHiddenModeRejectsMismatch (0.09s)
+=== RUN   TestEnrichRunTreeKeepsOccurrenceIdentity
+--- PASS: TestEnrichRunTreeKeepsOccurrenceIdentity (0.00s)
+=== RUN   TestEnrichRunTreeRejectsAmbiguousIdentity
+--- PASS: TestEnrichRunTreeRejectsAmbiguousIdentity (0.00s)
+=== RUN   TestEnrichRunTreeMatchesAssayScope
+--- PASS: TestEnrichRunTreeMatchesAssayScope (0.00s)
+=== RUN   TestInspectTreeRejectsRunDesignMismatch
+--- PASS: TestInspectTreeRejectsRunDesignMismatch (0.08s)
+=== RUN   TestInspectTreeRunUsesFrozenRevisionNotLatest
+--- PASS: TestInspectTreeRunUsesFrozenRevisionNotLatest (0.06s)
+=== RUN   TestInspectTreeRejectsWrongRevisionForRun
+--- PASS: TestInspectTreeRejectsWrongRevisionForRun (0.11s)
+=== RUN   TestInspectTreeRunUsesFrozenRevision
+--- PASS: TestInspectTreeRunUsesFrozenRevision (0.09s)
+=== RUN   TestBuildDesignKeepsTwoUsesOfSameBlockIndependent
+--- PASS: TestBuildDesignKeepsTwoUsesOfSameBlockIndependent (0.00s)
+=== RUN   TestLoadRunWithoutConfiguredIDDoesNotInventRun
+--- PASS: TestLoadRunWithoutConfiguredIDDoesNotInventRun (0.00s)
+=== RUN   TestSelectDesignKeepsDirtyDraftUntilUserConfirms
+--- PASS: TestSelectDesignKeepsDirtyDraftUntilUserConfirms (0.00s)
+=== RUN   TestSelectTaskPreservesUnsavedDraft
+--- PASS: TestSelectTaskPreservesUnsavedDraft (0.00s)
+=== RUN   TestRenderRunRecordsIncludesGroupedAndUnassociatedData
+--- PASS: TestRenderRunRecordsIncludesGroupedAndUnassociatedData (0.00s)
+=== RUN   TestSaveBatchReusesOperationIDAcrossRetries
+--- PASS: TestSaveBatchReusesOperationIDAcrossRetries (0.01s)
+=== RUN   TestRunAssetsForTaskPreservesCoordinatesAndUnlabelledAssets
+--- PASS: TestRunAssetsForTaskPreservesCoordinatesAndUnlabelledAssets (0.00s)
+=== RUN   TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero
+=== RUN   TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero/unknown_well
+=== RUN   TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero/unknown_timepoint
+=== RUN   TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero/zero_FOV
+--- PASS: TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero (0.00s)
+    --- PASS: TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero/unknown_well (0.00s)
+    --- PASS: TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero/unknown_timepoint (0.00s)
+    --- PASS: TestValidateAssetCoordinatesRejectsUnknownValuesAndFOVZero/zero_FOV (0.00s)
+=== RUN   TestBatchLinkInheritsCoordinateForEveryPickedPath
+--- PASS: TestBatchLinkInheritsCoordinateForEveryPickedPath (0.00s)
+=== RUN   TestDesignPlateWellsUsesConfiguredPlateGeometry
+--- PASS: TestDesignPlateWellsUsesConfiguredPlateGeometry (0.00s)
+=== RUN   TestOpenAssetLinkFormRetainsGapCoordinatesAndUsesRunTimepoints
+--- PASS: TestOpenAssetLinkFormRetainsGapCoordinatesAndUsesRunTimepoints (0.00s)
+=== RUN   TestAssetCoordinateOptionsUseFrozenAssayTimepointsWhenRunTaskOmitsOne
+--- PASS: TestAssetCoordinateOptionsUseFrozenAssayTimepointsWhenRunTaskOmitsOne (0.00s)
+=== RUN   TestAssetCoordinateOptionsRejectsOtherAssayTimepoint
+--- PASS: TestAssetCoordinateOptionsRejectsOtherAssayTimepoint (0.00s)
+=== RUN   TestAssetCoordinateOptionsIncludesAllFrozenTimepointsForGapPrefill
+--- PASS: TestAssetCoordinateOptionsIncludesAllFrozenTimepointsForGapPrefill (0.00s)
+=== RUN   TestOpenAssetLinkFormTrimsDefaultTaskTimepoint
+--- PASS: TestOpenAssetLinkFormTrimsDefaultTaskTimepoint (0.00s)
+=== RUN   TestLinkAssetPathsRejectsOutOfBoundsBatchWithoutSavingFirstFile
+--- PASS: TestLinkAssetPathsRejectsOutOfBoundsBatchWithoutSavingFirstFile (0.03s)
+=== RUN   TestSaveRunChecksFailureRevertsAndRetriesThroughApp
+2026/11/17 13:40:23 save task checks: CONFLICT: checklist write rejected
+--- PASS: TestSaveRunChecksFailureRevertsAndRetriesThroughApp (0.02s)
+=== RUN   TestApplyRunLoadErrorUpdatesRunWorkspaceAndRetries
+--- PASS: TestApplyRunLoadErrorUpdatesRunWorkspaceAndRetries (0.01s)
+=== RUN   TestLoadDesignFailuresVisibleKeepLoadedAndRetry
+=== RUN   TestLoadDesignFailuresVisibleKeepLoadedAndRetry/LoadDesign_failure_keeps_existing_design_visible_and_retries
+=== RUN   TestLoadDesignFailuresVisibleKeepLoadedAndRetry/LoadDesign_failure_on_empty_workspace_offers_retry
+=== RUN   TestLoadDesignFailuresVisibleKeepLoadedAndRetry/LoadAsterDoc_failure_keeps_designer_visible_and_retries
+--- PASS: TestLoadDesignFailuresVisibleKeepLoadedAndRetry (0.02s)
+    --- PASS: TestLoadDesignFailuresVisibleKeepLoadedAndRetry/LoadDesign_failure_keeps_existing_design_visible_and_retries (0.01s)
+    --- PASS: TestLoadDesignFailuresVisibleKeepLoadedAndRetry/LoadDesign_failure_on_empty_workspace_offers_retry (0.00s)
+    --- PASS: TestLoadDesignFailuresVisibleKeepLoadedAndRetry/LoadAsterDoc_failure_keeps_designer_visible_and_retries (0.01s)
+=== RUN   TestRelabelUnlabelledAssetUpdatesRunAssetsAndMatrix
+--- PASS: TestRelabelUnlabelledAssetUpdatesRunAssetsAndMatrix (0.00s)
+=== RUN   TestRelabelUnlabelledAssetRejectsInvalidCoordinateWithoutMutatingRunAssets
+--- PASS: TestRelabelUnlabelledAssetRejectsInvalidCoordinateWithoutMutatingRunAssets (0.00s)
+=== RUN   TestRelabelUnlabelledAssetSurfacesNotFoundWithoutMutatingRunAssets
+--- PASS: TestRelabelUnlabelledAssetSurfacesNotFoundWithoutMutatingRunAssets (0.00s)
+=== RUN   TestNotebookSaveFailureVisibleAndRetrySaves
+--- PASS: TestNotebookSaveFailureVisibleAndRetrySaves (0.01s)
+=== RUN   TestNotebookDraftSurvivesRunSwitchAndRestart
+--- PASS: TestNotebookDraftSurvivesRunSwitchAndRestart (0.04s)
+=== RUN   TestNotebookStateWordsChineseLabelsAndProgressiveDisclosure
+--- PASS: TestNotebookStateWordsChineseLabelsAndProgressiveDisclosure (0.02s)
+=== RUN   TestDesignReadinessStatesAndRetryOnFailure
+--- PASS: TestDesignReadinessStatesAndRetryOnFailure (0.09s)
+=== RUN   TestDesignCreateRunCommandErrorsAndSilentNoOp
+--- PASS: TestDesignCreateRunCommandErrorsAndSilentNoOp (0.01s)
+=== RUN   TestDesignStepSwitchKeepsAndWarnsAboutPropertyDraft
+--- PASS: TestDesignStepSwitchKeepsAndWarnsAboutPropertyDraft (0.14s)
+=== RUN   TestDesignerListViewFullErrorRetryAndLoadingState
+--- PASS: TestDesignerListViewFullErrorRetryAndLoadingState (0.01s)
+=== RUN   TestGridCommitFailureSetsStateErrorAndShowsBannerWithRetry
+--- PASS: TestGridCommitFailureSetsStateErrorAndShowsBannerWithRetry (0.01s)
+=== RUN   TestSaveBatchPassesThroughStateSavingAndDistinguishesCauses
+--- PASS: TestSaveBatchPassesThroughStateSavingAndDistinguishesCauses (0.01s)
+=== RUN   TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable
+--- PASS: TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable (0.03s)
+=== RUN   TestSnapshotRejectionAndConflictRenderedOnContentPage
+--- PASS: TestSnapshotRejectionAndConflictRenderedOnContentPage (0.00s)
+=== RUN   TestRustModuleReadsAndWritesSQLite
+    module_test.go:19: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestRustModuleReadsAndWritesSQLite (0.00s)
+=== RUN   TestNotebookPageLoadsLatestMarkdown
+--- PASS: TestNotebookPageLoadsLatestMarkdown (0.01s)
+=== RUN   TestNotebookAsterDocModeRendersPlateModule
+--- PASS: TestNotebookAsterDocModeRendersPlateModule (0.01s)
+=== RUN   TestNotebookDocumentModeCanInsertPlateModule
+--- PASS: TestNotebookDocumentModeCanInsertPlateModule (0.01s)
+=== RUN   TestNotebookBoardRendersSharedProjection
+--- PASS: TestNotebookBoardRendersSharedProjection (0.02s)
+=== RUN   TestNotebookGroupBoardDecodesPreviews
+--- PASS: TestNotebookGroupBoardDecodesPreviews (0.02s)
+=== RUN   TestNotebookSignLocksAndUnlockRestores
+--- PASS: TestNotebookSignLocksAndUnlockRestores (0.05s)
+=== RUN   TestNotebookSealedRecordNeverExposesEditor
+--- PASS: TestNotebookSealedRecordNeverExposesEditor (0.00s)
+=== RUN   TestNotebookGroupBoardDecodesTiffPreview
+--- PASS: TestNotebookGroupBoardDecodesTiffPreview (0.02s)
+=== RUN   TestNotebookPreviewDropsStaleLayerResults
+--- PASS: TestNotebookPreviewDropsStaleLayerResults (0.00s)
+=== RUN   TestPathBoundRunTreeProjection
+--- PASS: TestPathBoundRunTreeProjection (0.06s)
+=== RUN   TestPathBoundRunWorkspaceUsesNativeCore
+--- PASS: TestPathBoundRunWorkspaceUsesNativeCore (0.05s)
+=== RUN   TestProtocolNeverFallsBackToLiveDesignForSelectedRun
+--- PASS: TestProtocolNeverFallsBackToLiveDesignForSelectedRun (0.00s)
+=== RUN   TestProtocolArchiveToggleRendersEndState
+--- PASS: TestProtocolArchiveToggleRendersEndState (0.01s)
+=== RUN   TestProtocolArchiveShowsSealedState
+--- PASS: TestProtocolArchiveShowsSealedState (0.00s)
+=== RUN   TestReadoutWithTaskProtocolContext
+    readout_protocol_test.go:16: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestReadoutWithTaskProtocolContext (0.00s)
+=== RUN   TestFrozenAssayEndpointsReadsDesign
+--- PASS: TestFrozenAssayEndpointsReadsDesign (0.00s)
+=== RUN   TestSDKModulesFromFrozenDesign
+--- PASS: TestSDKModulesFromFrozenDesign (0.00s)
+=== RUN   TestStepModuleRefsUsesStableStepID
+--- PASS: TestStepModuleRefsUsesStableStepID (0.00s)
+=== RUN   TestRestoreTaskKeyPrefersKeyAndRequiresUniquePath
+--- PASS: TestRestoreTaskKeyPrefersKeyAndRequiresUniquePath (0.00s)
+=== RUN   TestSnap
+--- PASS: TestSnap (0.14s)
+=== RUN   TestDesignerRealCopiedDBSaveReopenCreateRun
+    snap_test.go:48: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestDesignerRealCopiedDBSaveReopenCreateRun (0.00s)
+=== RUN   TestStaleDesignRevisionLeavesNoPartialCommit
+    stale_revision_rollback_test.go:11: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestStaleDesignRevisionLeavesNoPartialCommit (0.00s)
+PASS
+ok  	asterlab-mygo-prototype	5.980s
+?   	asterlab-mygo-prototype/cmd/studio	[no test files]
+=== RUN   TestTwoReadoutsPersistAndCrossRead
+    two_readouts_test.go:20: fixture DB unavailable: open D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/target/asterlab-ui-runtime3/labworkbench.sqlite: The system cannot find the path specified.
+--- SKIP: TestTwoReadoutsPersistAndCrossRead (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/e2e	4.530s
+=== RUN   TestGroupedDiffAndRejectNoCommit
+--- PASS: TestGroupedDiffAndRejectNoCommit (0.02s)
+=== RUN   TestBlockedCodesAreSurfaced
+=== RUN   TestBlockedCodesAreSurfaced/VERSION_CONFLICT
+=== RUN   TestBlockedCodesAreSurfaced/UNIT_MISMATCH
+=== RUN   TestBlockedCodesAreSurfaced/CONFIRMATION_REQUIRED
+=== RUN   TestBlockedCodesAreSurfaced/INVALID_BINDING
+=== RUN   TestBlockedCodesAreSurfaced/STALE_REFERENCE
+=== RUN   TestBlockedCodesAreSurfaced/FORBIDDEN_FIELD
+=== RUN   TestBlockedCodesAreSurfaced/CONFIRMATION_MISMATCH
+=== RUN   TestBlockedCodesAreSurfaced/IDEMPOTENCY_MISMATCH
+--- PASS: TestBlockedCodesAreSurfaced (0.00s)
+    --- PASS: TestBlockedCodesAreSurfaced/VERSION_CONFLICT (0.00s)
+    --- PASS: TestBlockedCodesAreSurfaced/UNIT_MISMATCH (0.00s)
+    --- PASS: TestBlockedCodesAreSurfaced/CONFIRMATION_REQUIRED (0.00s)
+    --- PASS: TestBlockedCodesAreSurfaced/INVALID_BINDING (0.00s)
+    --- PASS: TestBlockedCodesAreSurfaced/STALE_REFERENCE (0.00s)
+    --- PASS: TestBlockedCodesAreSurfaced/FORBIDDEN_FIELD (0.00s)
+    --- PASS: TestBlockedCodesAreSurfaced/CONFIRMATION_MISMATCH (0.00s)
+    --- PASS: TestBlockedCodesAreSurfaced/IDEMPOTENCY_MISMATCH (0.00s)
+=== RUN   TestViewRendersWideAndNarrow
+--- PASS: TestViewRendersWideAndNarrow (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/agentedit	4.052s
+=== RUN   TestAnalyzeCCK8HandReference
+--- PASS: TestAnalyzeCCK8HandReference (0.00s)
+=== RUN   TestAnalyzeQPCRHandReference
+--- PASS: TestAnalyzeQPCRHandReference (0.00s)
+=== RUN   TestAnalyzeRejectsUnusableInputs
+--- PASS: TestAnalyzeRejectsUnusableInputs (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/analysis	1.768s
+=== RUN   TestBuildSchemaCCK8Fixture
+--- PASS: TestBuildSchemaCCK8Fixture (0.01s)
+=== RUN   TestBuildSchemaQPCRFixture
+--- PASS: TestBuildSchemaQPCRFixture (0.01s)
+=== RUN   TestBuildSchemaCCK8MapsOnlySelectedWells
+--- PASS: TestBuildSchemaCCK8MapsOnlySelectedWells (0.00s)
+=== RUN   TestBuildSchemaQPCRMapping
+--- PASS: TestBuildSchemaQPCRMapping (0.00s)
+=== RUN   TestBuildSchemaAcceptsAsterDocAssayIDs
+--- PASS: TestBuildSchemaAcceptsAsterDocAssayIDs (0.00s)
+=== RUN   TestBuildSchemaThirdAssayViaLayoutConfigOnly
+--- PASS: TestBuildSchemaThirdAssayViaLayoutConfigOnly (0.00s)
+=== RUN   TestWellMappingPreservesExplicitSampleAndReplicate
+--- PASS: TestWellMappingPreservesExplicitSampleAndReplicate (0.00s)
+=== RUN   TestWellMappingDoesNotInferOptionalIdentity
+--- PASS: TestWellMappingDoesNotInferOptionalIdentity (0.00s)
+=== RUN   TestWellMappingScopesTechnicalReplicateByTimepoint
+--- PASS: TestWellMappingScopesTechnicalReplicateByTimepoint (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/assays	1.897s
+=== RUN   TestNewLinkUsesRelativePath
+--- PASS: TestNewLinkUsesRelativePath (0.00s)
+=== RUN   TestAssetIDUsesStableLogicalRootAndRelativePath
+--- PASS: TestAssetIDUsesStableLogicalRootAndRelativePath (0.00s)
+=== RUN   TestNewLinkRejectsPathEscapingRoot
+--- PASS: TestNewLinkRejectsPathEscapingRoot (0.00s)
+=== RUN   TestRootsResolveAndRejectTraversal
+--- PASS: TestRootsResolveAndRejectTraversal (0.00s)
+=== RUN   TestVerifyDetectsChangedSize
+--- PASS: TestVerifyDetectsChangedSize (0.02s)
+=== RUN   TestUnavailableKeepsLink
+--- PASS: TestUnavailableKeepsLink (0.00s)
+=== RUN   TestClassify
+--- PASS: TestClassify (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/assets	1.776s
+=== RUN   TestParseRoundTripsProseAndPlate
+--- PASS: TestParseRoundTripsProseAndPlate (0.00s)
+=== RUN   TestUpdatePlateReplacesOnlyTheFenceBody
+--- PASS: TestUpdatePlateReplacesOnlyTheFenceBody (0.00s)
+=== RUN   TestRejectsDuplicateWellAndUnknownKind
+--- PASS: TestRejectsDuplicateWellAndUnknownKind (0.00s)
+=== RUN   TestViewRendersNativePlateAndAssignRewritesSource
+--- PASS: TestViewRendersNativePlateAndAssignRewritesSource (0.03s)
+=== RUN   TestRegistryManifestDescribesInputsOutputsAndPermissions
+--- PASS: TestRegistryManifestDescribesInputsOutputsAndPermissions (0.00s)
+=== RUN   TestCustomModuleCanBeRegisteredAndParsed
+--- PASS: TestCustomModuleCanBeRegisteredAndParsed (0.00s)
+=== RUN   TestEditRequiresExplicitPermission
+--- PASS: TestEditRequiresExplicitPermission (0.00s)
+=== RUN   TestPlateZoomOverlaySelectsWellsAndReportsAssignment
+--- PASS: TestPlateZoomOverlaySelectsWellsAndReportsAssignment (0.04s)
+=== RUN   TestPlate384OverlayMarqueeUsesRows
+--- PASS: TestPlate384OverlayMarqueeUsesRows (0.02s)
+=== RUN   TestPlateFormatsUseEditableOverlay
+=== RUN   TestPlateFormatsUseEditableOverlay/6
+=== RUN   TestPlateFormatsUseEditableOverlay/12
+=== RUN   TestPlateFormatsUseEditableOverlay/24
+=== RUN   TestPlateFormatsUseEditableOverlay/48
+=== RUN   TestPlateFormatsUseEditableOverlay/96
+=== RUN   TestPlateFormatsUseEditableOverlay/384
+--- PASS: TestPlateFormatsUseEditableOverlay (0.11s)
+    --- PASS: TestPlateFormatsUseEditableOverlay/6 (0.01s)
+    --- PASS: TestPlateFormatsUseEditableOverlay/12 (0.02s)
+    --- PASS: TestPlateFormatsUseEditableOverlay/24 (0.02s)
+    --- PASS: TestPlateFormatsUseEditableOverlay/48 (0.02s)
+    --- PASS: TestPlateFormatsUseEditableOverlay/96 (0.02s)
+    --- PASS: TestPlateFormatsUseEditableOverlay/384 (0.03s)
+=== RUN   TestPlateGridLayoutKeepsCanvasAndScalesWells
+--- PASS: TestPlateGridLayoutKeepsCanvasAndScalesWells (0.00s)
+=== RUN   TestHUVECTubeExperimentParses
+--- PASS: TestHUVECTubeExperimentParses (0.02s)
+=== RUN   TestWellsInRectUsesGeometry
+--- PASS: TestWellsInRectUsesGeometry (0.00s)
+=== RUN   TestDilutionModuleValidatesAndDerivesVolumes
+--- PASS: TestDilutionModuleValidatesAndDerivesVolumes (0.00s)
+=== RUN   TestDilutionRejectsUnknownUnitAndConcentration
+--- PASS: TestDilutionRejectsUnknownUnitAndConcentration (0.00s)
+=== RUN   TestInstrumentProfileDeclaresCapabilitiesWithoutHardware
+--- PASS: TestInstrumentProfileDeclaresCapabilitiesWithoutHardware (0.00s)
+=== RUN   TestTypedReferenceReportsTargetKind
+--- PASS: TestTypedReferenceReportsTargetKind (0.00s)
+=== RUN   TestManifestDeclaresFoundationAndReferenceModules
+--- PASS: TestManifestDeclaresFoundationAndReferenceModules (0.00s)
+=== RUN   TestFoundationSchemaIsShippedAndHasCoreDefinitions
+--- PASS: TestFoundationSchemaIsShippedAndHasCoreDefinitions (0.00s)
+=== RUN   TestManifestContractRejectsDerivedWithoutCalculator
+--- PASS: TestManifestContractRejectsDerivedWithoutCalculator (0.00s)
+=== RUN   TestStep2UsesStableModuleReferences
+--- PASS: TestStep2UsesStableModuleReferences (0.00s)
+=== RUN   TestStep3DeclaresExecutionSemantics
+--- PASS: TestStep3DeclaresExecutionSemantics (0.00s)
+=== RUN   TestBuiltinModuleConformance
+--- PASS: TestBuiltinModuleConformance (0.00s)
+=== RUN   TestUpdateModulePreservesProseAndOtherFences
+--- PASS: TestUpdateModulePreservesProseAndOtherFences (0.00s)
+=== RUN   TestUpdateModuleRejectsInvalidQuantityUnit
+--- PASS: TestUpdateModuleRejectsInvalidQuantityUnit (0.00s)
+=== RUN   TestGenericEditorRendersDilutionFieldsAndSave
+--- PASS: TestGenericEditorRendersDilutionFieldsAndSave (0.00s)
+=== RUN   TestGenericEditorReadOnlyNoSave
+--- PASS: TestGenericEditorReadOnlyNoSave (0.00s)
+=== RUN   TestGenericEditorSavesChangedInstrumentModel
+--- PASS: TestGenericEditorSavesChangedInstrumentModel (0.00s)
+=== RUN   TestGenericEditorEditsStringList
+--- PASS: TestGenericEditorEditsStringList (0.00s)
+=== RUN   TestGenericEditorLeavesUnchangedListOutOfSave
+--- PASS: TestGenericEditorLeavesUnchangedListOutOfSave (0.00s)
+=== RUN   TestSharedParityFixture
+=== RUN   TestSharedParityFixture/valid-experiment
+=== RUN   TestSharedParityFixture/valid-group
+=== RUN   TestSharedParityFixture/valid-dilution
+=== RUN   TestSharedParityFixture/valid-reference
+=== RUN   TestSharedParityFixture/invalid-unclosed-fence
+=== RUN   TestSharedParityFixture/invalid-plate-duplicate-well
+=== RUN   TestSharedParityFixture/invalid-dilution-target-exceeds-stock
+=== RUN   TestSharedParityFixture/invalid-unknown-module-kind
+=== RUN   TestSharedParityFixture/invalid-missing-required-field
+=== RUN   TestSharedParityFixture/valid-rna-reagent
+=== RUN   TestSharedParityFixture/invalid-rna-target-exceeds-stock
+=== RUN   TestSharedParityFixture/invalid-rna-negative-extra
+--- PASS: TestSharedParityFixture (0.02s)
+    --- PASS: TestSharedParityFixture/valid-experiment (0.00s)
+    --- PASS: TestSharedParityFixture/valid-group (0.00s)
+    --- PASS: TestSharedParityFixture/valid-dilution (0.00s)
+    --- PASS: TestSharedParityFixture/valid-reference (0.00s)
+    --- PASS: TestSharedParityFixture/invalid-unclosed-fence (0.00s)
+    --- PASS: TestSharedParityFixture/invalid-plate-duplicate-well (0.00s)
+    --- PASS: TestSharedParityFixture/invalid-dilution-target-exceeds-stock (0.00s)
+    --- PASS: TestSharedParityFixture/invalid-unknown-module-kind (0.00s)
+    --- PASS: TestSharedParityFixture/invalid-missing-required-field (0.00s)
+    --- PASS: TestSharedParityFixture/valid-rna-reagent (0.00s)
+    --- PASS: TestSharedParityFixture/invalid-rna-target-exceeds-stock (0.00s)
+    --- PASS: TestSharedParityFixture/invalid-rna-negative-extra (0.00s)
+=== RUN   TestPlateMixPlanDerivesGelAndSeedingRows
+--- PASS: TestPlateMixPlanDerivesGelAndSeedingRows (0.39s)
+=== RUN   TestPlateMixRejectsInconsistentPlans
+=== RUN   TestPlateMixRejectsInconsistentPlans/factor_final_above_stock
+=== RUN   TestPlateMixRejectsInconsistentPlans/volume_without_plan
+=== RUN   TestPlateMixRejectsInconsistentPlans/lap_final_above_stock
+=== RUN   TestPlateMixRejectsInconsistentPlans/missing_group_percent
+=== RUN   TestPlateMixRejectsInconsistentPlans/unknown_percent_group
+--- PASS: TestPlateMixRejectsInconsistentPlans (0.00s)
+    --- PASS: TestPlateMixRejectsInconsistentPlans/factor_final_above_stock (0.00s)
+    --- PASS: TestPlateMixRejectsInconsistentPlans/volume_without_plan (0.00s)
+    --- PASS: TestPlateMixRejectsInconsistentPlans/lap_final_above_stock (0.00s)
+    --- PASS: TestPlateMixRejectsInconsistentPlans/missing_group_percent (0.00s)
+    --- PASS: TestPlateMixRejectsInconsistentPlans/unknown_percent_group (0.00s)
+=== RUN   TestManifestDeclaresPlateMixDerivedOutputs
+--- PASS: TestManifestDeclaresPlateMixDerivedOutputs (0.00s)
+=== RUN   TestManifestRuleMustBeRegisteredInGo
+--- PASS: TestManifestRuleMustBeRegisteredInGo (0.00s)
+=== RUN   TestExportPDFDeterministic
+--- PASS: TestExportPDFDeterministic (0.00s)
+=== RUN   TestExportPDFContentTraceabilityAndPagination
+--- PASS: TestExportPDFContentTraceabilityAndPagination (0.00s)
+=== RUN   TestExportFrozenPDFUsesVerifiedFrozenContent
+--- PASS: TestExportFrozenPDFUsesVerifiedFrozenContent (0.02s)
+=== RUN   TestExportFrozenPDFWithRunRecordsPaginatesDeterministically
+--- PASS: TestExportFrozenPDFWithRunRecordsPaginatesDeterministically (0.17s)
+=== RUN   TestMarkdownOutsideAsterLabFences
+--- PASS: TestMarkdownOutsideAsterLabFences (0.00s)
+=== RUN   TestStaticPlatePreviewListsCoordinatesAndGroups
+--- PASS: TestStaticPlatePreviewListsCoordinatesAndGroups (0.00s)
+=== RUN   TestFrozenRenderDiffersAfterRevision
+--- PASS: TestFrozenRenderDiffersAfterRevision (0.00s)
+=== RUN   TestViewerRejectsWriteWhenReadOnly
+--- PASS: TestViewerRejectsWriteWhenReadOnly (0.00s)
+=== RUN   TestApplyPlateSamplesMapsSharedSampleAndReplicates
+--- PASS: TestApplyPlateSamplesMapsSharedSampleAndReplicates (0.00s)
+=== RUN   TestApplyPlateSamplesNoReplicateLeavesAbsent
+--- PASS: TestApplyPlateSamplesNoReplicateLeavesAbsent (0.00s)
+=== RUN   TestApplyPlateSamplesRejectsInvalid
+=== RUN   TestApplyPlateSamplesRejectsInvalid/blank_sample
+=== RUN   TestApplyPlateSamplesRejectsInvalid/negative_replicate
+=== RUN   TestApplyPlateSamplesRejectsInvalid/ungrouped_well
+=== RUN   TestApplyPlateSamplesRejectsInvalid/invalid_well
+=== RUN   TestApplyPlateSamplesRejectsInvalid/blank_well
+=== RUN   TestApplyPlateSamplesRejectsInvalid/duplicate_technical_replicate
+--- PASS: TestApplyPlateSamplesRejectsInvalid (0.00s)
+    --- PASS: TestApplyPlateSamplesRejectsInvalid/blank_sample (0.00s)
+    --- PASS: TestApplyPlateSamplesRejectsInvalid/negative_replicate (0.00s)
+    --- PASS: TestApplyPlateSamplesRejectsInvalid/ungrouped_well (0.00s)
+    --- PASS: TestApplyPlateSamplesRejectsInvalid/invalid_well (0.00s)
+    --- PASS: TestApplyPlateSamplesRejectsInvalid/blank_well (0.00s)
+    --- PASS: TestApplyPlateSamplesRejectsInvalid/duplicate_technical_replicate (0.00s)
+=== RUN   TestParseReadoutSchemaV1
+=== RUN   TestParseReadoutSchemaV1/minimal_numeric
+=== RUN   TestParseReadoutSchemaV1/numeric_with_unit_and_source_policy
+=== RUN   TestParseReadoutSchemaV1/table_columns
+=== RUN   TestParseReadoutSchemaV1/plate_format
+=== RUN   TestParseReadoutSchemaV1/categorical_without_unit
+=== RUN   TestParseReadoutSchemaV1/file_without_unit
+=== RUN   TestParseReadoutSchemaV1/missing_schema_id
+=== RUN   TestParseReadoutSchemaV1/blank_schema_id
+=== RUN   TestParseReadoutSchemaV1/schema_id_wrong_type
+=== RUN   TestParseReadoutSchemaV1/missing_endpoint
+=== RUN   TestParseReadoutSchemaV1/endpoint_wrong_type
+=== RUN   TestParseReadoutSchemaV1/missing_value_kind
+=== RUN   TestParseReadoutSchemaV1/value_kind_enum
+=== RUN   TestParseReadoutSchemaV1/unit_wrong_type
+=== RUN   TestParseReadoutSchemaV1/unit_null
+=== RUN   TestParseReadoutSchemaV1/null_allowed_null
+=== RUN   TestParseReadoutSchemaV1/missing_reasons_null
+=== RUN   TestParseReadoutSchemaV1/source_kinds_null
+=== RUN   TestParseReadoutSchemaV1/blank_unit_means_no_canonical_unit
+=== RUN   TestParseReadoutSchemaV1/table_columns_null
+=== RUN   TestParseReadoutSchemaV1/plate_format_null
+=== RUN   TestParseReadoutSchemaV1/plate_format_wrong_type
+=== RUN   TestParseReadoutSchemaV1/unit_not_applicable
+=== RUN   TestParseReadoutSchemaV1/null_allowed_wrong_type
+=== RUN   TestParseReadoutSchemaV1/source_kinds_wrong_type
+=== RUN   TestParseReadoutSchemaV1/source_kind_enum
+=== RUN   TestParseReadoutSchemaV1/derived_requires_raw
+=== RUN   TestParseReadoutSchemaV1/table_requires_columns
+=== RUN   TestParseReadoutSchemaV1/table_columns_wrong_type
+=== RUN   TestParseReadoutSchemaV1/table_column_missing_key
+=== RUN   TestParseReadoutSchemaV1/table_column_kind_enum
+=== RUN   TestParseReadoutSchemaV1/plate_requires_format
+=== RUN   TestParseReadoutSchemaV1/plate_format_enum
+--- PASS: TestParseReadoutSchemaV1 (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/minimal_numeric (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/numeric_with_unit_and_source_policy (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/table_columns (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/plate_format (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/categorical_without_unit (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/file_without_unit (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/missing_schema_id (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/blank_schema_id (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/schema_id_wrong_type (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/missing_endpoint (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/endpoint_wrong_type (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/missing_value_kind (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/value_kind_enum (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/unit_wrong_type (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/unit_null (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/null_allowed_null (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/missing_reasons_null (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/source_kinds_null (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/blank_unit_means_no_canonical_unit (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/table_columns_null (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/plate_format_null (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/plate_format_wrong_type (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/unit_not_applicable (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/null_allowed_wrong_type (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/source_kinds_wrong_type (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/source_kind_enum (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/derived_requires_raw (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/table_requires_columns (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/table_columns_wrong_type (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/table_column_missing_key (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/table_column_kind_enum (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/plate_requires_format (0.00s)
+    --- PASS: TestParseReadoutSchemaV1/plate_format_enum (0.00s)
+=== RUN   TestBuiltInRenderersMatchDeclaredSurfaces
+--- PASS: TestBuiltInRenderersMatchDeclaredSurfaces (0.00s)
+=== RUN   TestRegisterRejectsUnimplementedDeclaredRenderer
+--- PASS: TestRegisterRejectsUnimplementedDeclaredRenderer (0.00s)
+=== RUN   TestRendererKeysAreReusableAcrossModuleKindsAndModes
+--- PASS: TestRendererKeysAreReusableAcrossModuleKindsAndModes (0.00s)
+=== RUN   TestMissingRunSurfaceDoesNotFallBackToDocumentRenderer
+--- PASS: TestMissingRunSurfaceDoesNotFallBackToDocumentRenderer (0.00s)
+=== RUN   TestGenericRunSummaryHonorsDensityAndIsReadOnly
+--- PASS: TestGenericRunSummaryHonorsDensityAndIsReadOnly (0.00s)
+=== RUN   TestInstantiateTemplateRemapsIDs
+--- PASS: TestInstantiateTemplateRemapsIDs (0.00s)
+=== RUN   TestInstantiateTemplateIndependence
+--- PASS: TestInstantiateTemplateIndependence (0.00s)
+=== RUN   TestInstantiateTemplateComplexAllModules
+--- PASS: TestInstantiateTemplateComplexAllModules (0.02s)
+=== RUN   TestInstantiateTemplateStepUsesRemapped
+    template_test.go:148: ORIGINAL step step-seed uses ref=uv-reader
+    template_test.go:148: ORIGINAL step step-seed uses ref=dil-stock
+    template_test.go:148: ORIGINAL step step-read uses ref=uv-reader
+    template_test.go:167: INSTANCE step step-seed-b6182f9e4f6d uses ref=uv-reader-b6182f9e4f6d
+    template_test.go:167: INSTANCE step step-seed-b6182f9e4f6d uses ref=dil-stock-b6182f9e4f6d
+    template_test.go:167: INSTANCE step step-read-b6182f9e4f6d uses ref=uv-reader-b6182f9e4f6d
+--- PASS: TestInstantiateTemplateStepUsesRemapped (0.00s)
+=== RUN   TestInstantiateTemplateReferenceTargetsRemapped
+--- PASS: TestInstantiateTemplateReferenceTargetsRemapped (0.01s)
+=== RUN   TestInstantiateTemplateInstanceIndependence
+--- PASS: TestInstantiateTemplateInstanceIndependence (0.01s)
+=== RUN   TestInstantiateTemplateWorkflowEdgesPreserved
+    template_test.go:294: ORIGINAL edge: step-seed->step-read
+    template_test.go:310: INSTANCE edge: step-seed-48703f7f1e80->step-read-48703f7f1e80
+--- PASS: TestInstantiateTemplateWorkflowEdgesPreserved (0.01s)
+PASS
+ok  	asterlab-mygo-prototype/internal/asterdoc	1.104s
+=== RUN   TestPlateSelection
+--- PASS: TestPlateSelection (0.00s)
+=== RUN   TestPlate12InstanceRender
+--- PASS: TestPlate12InstanceRender (0.02s)
+=== RUN   TestTableEdit
+--- PASS: TestTableEdit (0.00s)
+=== RUN   TestCalculatorValidation
+--- PASS: TestCalculatorValidation (0.00s)
+=== RUN   TestSerializationRoundtrip
+--- PASS: TestSerializationRoundtrip (0.00s)
+=== RUN   TestBlocksPNG
+--- PASS: TestBlocksPNG (0.06s)
+PASS
+ok  	asterlab-mygo-prototype/internal/blocks	3.546s
+=== RUN   TestDefinitionsProduceValidInstances
+--- PASS: TestDefinitionsProduceValidInstances (0.00s)
+=== RUN   TestWellIndexRoundTrip
+--- PASS: TestWellIndexRoundTrip (0.00s)
+=== RUN   TestWriteStoresProps
+--- PASS: TestWriteStoresProps (0.00s)
+=== RUN   TestModulesRenderInBothModes
+--- PASS: TestModulesRenderInBothModes (0.03s)
+=== RUN   TestReviewSummarisesRecordedRows
+--- PASS: TestReviewSummarisesRecordedRows (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/blockui	4.042s
+=== RUN   TestSaveCallback
+--- PASS: TestSaveCallback (0.00s)
+=== RUN   TestErrorDraftRetention
+--- PASS: TestErrorDraftRetention (0.00s)
+=== RUN   TestLoadApply
+--- PASS: TestLoadApply (0.00s)
+=== RUN   TestEmptyState
+--- PASS: TestEmptyState (0.03s)
+=== RUN   TestScreenshot
+--- PASS: TestScreenshot (0.10s)
+=== RUN   TestDesignerUIMapSaveReopenCreateRun
+--- PASS: TestDesignerUIMapSaveReopenCreateRun (0.13s)
+=== RUN   TestAssignSelectedWellsPreservesOtherTimepoints
+--- PASS: TestAssignSelectedWellsPreservesOtherTimepoints (0.00s)
+=== RUN   TestCreateRunRejectsEmptyDesign
+--- PASS: TestCreateRunRejectsEmptyDesign (0.00s)
+=== RUN   TestOnevraDesignerScreenshot
+--- PASS: TestOnevraDesignerScreenshot (0.17s)
+=== RUN   TestToolbarAddsSteps
+--- PASS: TestToolbarAddsSteps (0.14s)
+=== RUN   TestInspectorPanelControls
+--- PASS: TestInspectorPanelControls (0.02s)
+=== RUN   TestDesignerAuthorsStepTasks
+--- PASS: TestDesignerAuthorsStepTasks (0.00s)
+=== RUN   TestDesignerLoadsStepTasks
+--- PASS: TestDesignerLoadsStepTasks (0.00s)
+=== RUN   TestCreateRunPreflightWarnsOnUnlinkedTasks
+--- PASS: TestCreateRunPreflightWarnsOnUnlinkedTasks (0.00s)
+=== RUN   TestCreateRunPreflightDetectsDuplicateClaimsAndUndeclaredTimepoints
+--- PASS: TestCreateRunPreflightDetectsDuplicateClaimsAndUndeclaredTimepoints (0.00s)
+=== RUN   TestCreateRunDialogFlow
+--- PASS: TestCreateRunDialogFlow (0.03s)
+=== RUN   TestInspectorDockedAtWideAndSheetAtNarrow
+--- PASS: TestInspectorDockedAtWideAndSheetAtNarrow (0.02s)
+=== RUN   TestCoreWriteErrorOffersRetry
+--- PASS: TestCoreWriteErrorOffersRetry (0.01s)
+=== RUN   TestDraftUndoRedoRestoresFieldsAndCanvas
+--- PASS: TestDraftUndoRedoRestoresFieldsAndCanvas (0.00s)
+=== RUN   TestSelectionReloadDoesNotCreateDraftHistory
+--- PASS: TestSelectionReloadDoesNotCreateDraftHistory (0.00s)
+=== RUN   TestCaptureSkipsActiveNodeDrag
+--- PASS: TestCaptureSkipsActiveNodeDrag (0.00s)
+=== RUN   TestDesignerViewCapturesDraftChanges
+--- PASS: TestDesignerViewCapturesDraftChanges (0.01s)
+=== RUN   TestStepCardShowsRecordedParameters
+--- PASS: TestStepCardShowsRecordedParameters (0.01s)
+=== RUN   TestCoreTimeBudgetRendersReturnedProjection
+--- PASS: TestCoreTimeBudgetRendersReturnedProjection (0.01s)
+=== RUN   TestStepCardWithoutParametersShowsNoPlaceholder
+--- PASS: TestStepCardWithoutParametersShowsNoPlaceholder (0.01s)
+=== RUN   TestSectionSwitchPreservesSelectionAndDraft
+--- PASS: TestSectionSwitchPreservesSelectionAndDraft (0.03s)
+=== RUN   TestPlateAndDilutionSections
+--- PASS: TestPlateAndDilutionSections (0.01s)
+=== RUN   TestTechnicalBindingsFoldedByDefault
+--- PASS: TestTechnicalBindingsFoldedByDefault (0.01s)
+=== RUN   TestStepCardSummaryText
+--- PASS: TestStepCardSummaryText (0.00s)
+=== RUN   TestStepEditCommandPayloads
+--- PASS: TestStepEditCommandPayloads (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/designer	1.074s
+=== RUN   TestCitationInsertionAndSnapshotResolution
+--- PASS: TestCitationInsertionAndSnapshotResolution (0.00s)
+=== RUN   TestCitationStalenessAndMissingAssets
+--- PASS: TestCitationStalenessAndMissingAssets (0.00s)
+=== RUN   TestRemoveCitationOnlyChangesMarkdown
+--- PASS: TestRemoveCitationOnlyChangesMarkdown (0.00s)
+=== RUN   TestAtMentionTriggerCatalogAndRichtextRoundTrip
+--- PASS: TestAtMentionTriggerCatalogAndRichtextRoundTrip (0.00s)
+=== RUN   TestBuildAggregatesBatchesAndKeepsTimesApart
+--- PASS: TestBuildAggregatesBatchesAndKeepsTimesApart (0.01s)
+=== RUN   TestBuildIsDeterministicAndReadOnly
+--- PASS: TestBuildIsDeterministicAndReadOnly (0.00s)
+=== RUN   TestBuildMarksUntraceableRecords
+--- PASS: TestBuildMarksUntraceableRecords (0.00s)
+=== RUN   TestTraceStateIsDerivedFromStoredSources
+--- PASS: TestTraceStateIsDerivedFromStoredSources (0.00s)
+=== RUN   TestTimelineProjectsEventsInRecordedOrder
+--- PASS: TestTimelineProjectsEventsInRecordedOrder (0.00s)
+=== RUN   TestCitationResolvesToTimelineEntryId
+--- PASS: TestCitationResolvesToTimelineEntryId (0.00s)
+=== RUN   TestCitationTargetCopiesNoContent
+--- PASS: TestCitationTargetCopiesNoContent (0.00s)
+=== RUN   TestSaveStateLabelNamesBothStates
+--- PASS: TestSaveStateLabelNamesBothStates (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/notebook	0.357s
+=== RUN   TestProjectPlannedVsActual
+--- PASS: TestProjectPlannedVsActual (0.00s)
+=== RUN   TestProjectMatrixFOVAndGaps
+--- PASS: TestProjectMatrixFOVAndGaps (0.00s)
+=== RUN   TestProjectIsDeterministicAndReadOnly
+--- PASS: TestProjectIsDeterministicAndReadOnly (0.00s)
+=== RUN   TestFindAndResolveMatrixRefs
+--- PASS: TestFindAndResolveMatrixRefs (0.00s)
+=== RUN   TestExpandMatrixRefs
+--- PASS: TestExpandMatrixRefs (0.00s)
+=== RUN   TestSignVerifyRoundTrip
+--- PASS: TestSignVerifyRoundTrip (0.00s)
+=== RUN   TestClassifyRecordState
+--- PASS: TestClassifyRecordState (0.00s)
+=== RUN   TestDeriveDesign
+--- PASS: TestDeriveDesign (0.00s)
+=== RUN   TestMeasurementCountCoversMatrixCellsOnly
+--- PASS: TestMeasurementCountCoversMatrixCellsOnly (0.00s)
+=== RUN   TestCoordinatedImageCreatesItsOwnCell
+--- PASS: TestCoordinatedImageCreatesItsOwnCell (0.00s)
+=== RUN   TestStepPathPrefixNeverMatches
+--- PASS: TestStepPathPrefixNeverMatches (0.00s)
+=== RUN   TestOneStoredMeasurementYieldsOneSummaryRow
+--- PASS: TestOneStoredMeasurementYieldsOneSummaryRow (0.00s)
+=== RUN   TestGroupsComeFromResultCellsOnly
+--- PASS: TestGroupsComeFromResultCellsOnly (0.00s)
+=== RUN   TestProjectGroupAndSampleStayWithinTheirTimepoint
+--- PASS: TestProjectGroupAndSampleStayWithinTheirTimepoint (0.00s)
+=== RUN   TestSignVerifiesActorWithSpaces
+--- PASS: TestSignVerifiesActorWithSpaces (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/notebook/record	4.292s
+=== RUN   TestBuildArchiveFlattensRefs
+--- PASS: TestBuildArchiveFlattensRefs (0.00s)
+=== RUN   TestBuildArchiveKeepsSignature
+--- PASS: TestBuildArchiveKeepsSignature (0.00s)
+=== RUN   TestArchivePreviewStampIsStable
+--- PASS: TestArchivePreviewStampIsStable (0.00s)
+=== RUN   TestArchiveHeaderCountsMatrixValuesOnly
+--- PASS: TestArchiveHeaderCountsMatrixValuesOnly (0.00s)
+=== RUN   TestArchivePDFDeterministic
+--- PASS: TestArchivePDFDeterministic (0.04s)
+=== RUN   TestArchivePDFEmbedsImages
+--- PASS: TestArchivePDFEmbedsImages (0.02s)
+=== RUN   TestArchivePDFMissingAssetNamesIt
+--- PASS: TestArchivePDFMissingAssetNamesIt (0.01s)
+=== RUN   TestArchivePDFNilLoaderWithImagesFails
+--- PASS: TestArchivePDFNilLoaderWithImagesFails (0.01s)
+=== RUN   TestArchivePDFWorksWithoutSystemFonts
+--- PASS: TestArchivePDFWorksWithoutSystemFonts (0.00s)
+=== RUN   TestArchivePDFSkipsUnparsableFontCandidate
+--- PASS: TestArchivePDFSkipsUnparsableFontCandidate (0.03s)
+=== RUN   TestBuildProtocolIsDeterministicAndNamesGaps
+--- PASS: TestBuildProtocolIsDeterministicAndNamesGaps (0.00s)
+=== RUN   TestViewDocumentShowsFrozenVersion
+--- PASS: TestViewDocumentShowsFrozenVersion (0.11s)
+=== RUN   TestStepIDsUsesBusinessOrderAndIncludesRemainingNodes
+--- PASS: TestStepIDsUsesBusinessOrderAndIncludesRemainingNodes (0.00s)
+=== RUN   TestViewScreenshot
+--- PASS: TestViewScreenshot (0.07s)
+=== RUN   TestRenderVersionsListsSummariesWithoutRawIDs
+--- PASS: TestRenderVersionsListsSummariesWithoutRawIDs (0.00s)
+=== RUN   TestRenderProtocolStateVocabulary
+--- PASS: TestRenderProtocolStateVocabulary (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/protocol	0.700s
+=== RUN   TestEightByTwelvePasteAndSelection
+--- PASS: TestEightByTwelvePasteAndSelection (0.00s)
+=== RUN   TestBlankInvalidOverwriteAndUndo
+--- PASS: TestBlankInvalidOverwriteAndUndo (0.00s)
+=== RUN   TestGridUIAndScreenshot
+--- PASS: TestGridUIAndScreenshot (0.09s)
+=== RUN   TestPlateLabelReadsWellCount
+--- PASS: TestPlateLabelReadsWellCount (0.00s)
+=== RUN   TestPlateLegendBlindMask
+--- PASS: TestPlateLegendBlindMask (0.00s)
+=== RUN   TestPlateEditCommitsOnlyOnSubmit
+--- PASS: TestPlateEditCommitsOnlyOnSubmit (0.00s)
+=== RUN   TestPlateSelectionCommitsPreviousCell
+--- PASS: TestPlateSelectionCommitsPreviousCell (0.00s)
+=== RUN   TestPlateEditClearsToMissing
+--- PASS: TestPlateEditClearsToMissing (0.00s)
+=== RUN   TestPlateColumnPasteFillsSelectedColumn
+--- PASS: TestPlateColumnPasteFillsSelectedColumn (0.00s)
+=== RUN   TestPaste96CellsUndoAsOneStep
+--- PASS: TestPaste96CellsUndoAsOneStep (0.00s)
+=== RUN   TestPasteRejectsInvalidInputWithoutMutation
+--- PASS: TestPasteRejectsInvalidInputWithoutMutation (0.00s)
+=== RUN   TestPasteUndoRestoresPreviousValues
+--- PASS: TestPasteUndoRestoresPreviousValues (0.00s)
+=== RUN   TestPlateLabelReads1DAsRack
+--- PASS: TestPlateLabelReads1DAsRack (0.00s)
+=== RUN   TestPlateViewRendersLaneStrip
+--- PASS: TestPlateViewRendersLaneStrip (0.01s)
+=== RUN   TestSummarizeCountsMissingAndExcluded
+--- PASS: TestSummarizeCountsMissingAndExcluded (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/resultgrid	1.220s
+=== RUN   TestSaveCallback
+--- PASS: TestSaveCallback (0.04s)
+=== RUN   TestErrorDraftRetention
+--- PASS: TestErrorDraftRetention (0.00s)
+=== RUN   TestTaskCounts
+--- PASS: TestTaskCounts (0.00s)
+=== RUN   TestNarrowLayout
+--- PASS: TestNarrowLayout (0.01s)
+=== RUN   TestScreenshot
+--- PASS: TestScreenshot (0.05s)
+=== RUN   TestTaskAssayID
+--- PASS: TestTaskAssayID (0.00s)
+=== RUN   TestTaskPanelShowsFrozenProtocolReadOnly
+--- PASS: TestTaskPanelShowsFrozenProtocolReadOnly (0.00s)
+=== RUN   TestRunShortcuts
+--- PASS: TestRunShortcuts (0.00s)
+=== RUN   TestScalingAndThemesEvidence
+--- PASS: TestScalingAndThemesEvidence (0.69s)
+=== RUN   TestReviewViewSummarizesRecordedCells
+--- PASS: TestReviewViewSummarizesRecordedCells (0.05s)
+=== RUN   TestNotebookViewRendersStoredTimeline
+--- PASS: TestNotebookViewRendersStoredTimeline (0.07s)
+=== RUN   TestTaskChecksPersistAndBlockCompletion
+--- PASS: TestTaskChecksPersistAndBlockCompletion (0.12s)
+=== RUN   TestSkippedTaskNeverCompletesLegacySurface
+--- PASS: TestSkippedTaskNeverCompletesLegacySurface (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/runui	1.310s
+=== RUN   TestBenchRendersAtNarrowWidth
+--- PASS: TestBenchRendersAtNarrowWidth (0.03s)
+=== RUN   TestBenchSkipFlowAppendsEvent
+--- PASS: TestBenchSkipFlowAppendsEvent (0.01s)
+=== RUN   TestBenchBlindToggleMasksCapture
+--- PASS: TestBenchBlindToggleMasksCapture (0.00s)
+=== RUN   TestRefreshTimersBacksOffFailingLoads
+--- PASS: TestRefreshTimersBacksOffFailingLoads (0.00s)
+=== RUN   TestTreeSkippedStatusReadsWarning
+--- PASS: TestTreeSkippedStatusReadsWarning (0.00s)
+=== RUN   TestBlindQueryParamsIsExactCLIJSON
+--- PASS: TestBlindQueryParamsIsExactCLIJSON (0.00s)
+=== RUN   TestBlindToggleConsumesWorkspaceProjection
+--- PASS: TestBlindToggleConsumesWorkspaceProjection (0.01s)
+=== RUN   TestBlindToggleSurfacesInvalidBasis
+--- PASS: TestBlindToggleSurfacesInvalidBasis (0.01s)
+=== RUN   TestBlindToggleWithoutCallback
+--- PASS: TestBlindToggleWithoutCallback (0.00s)
+=== RUN   TestRecordingBlindMasksTableGroups
+--- PASS: TestRecordingBlindMasksTableGroups (0.00s)
+=== RUN   TestCoverageByWellMirrorsCoreGrouping
+--- PASS: TestCoverageByWellMirrorsCoreGrouping (0.00s)
+=== RUN   TestPlanBatchDropsRollsToNextWell
+--- PASS: TestPlanBatchDropsRollsToNextWell (0.00s)
+=== RUN   TestFOVPerWellForStepReadsFrozenPlan
+--- PASS: TestFOVPerWellForStepReadsFrozenPlan (0.00s)
+=== RUN   TestSkipPayloadScope
+--- PASS: TestSkipPayloadScope (0.00s)
+=== RUN   TestGridDraftCrashRecoveryAndClear
+--- PASS: TestGridDraftCrashRecoveryAndClear (0.03s)
+=== RUN   TestParseSampleIDs
+--- PASS: TestParseSampleIDs (0.00s)
+=== RUN   TestExclusionLabelsHideRawEnum
+--- PASS: TestExclusionLabelsHideRawEnum (0.00s)
+=== RUN   TestBuildExclusionCommandMatchesCoreInput
+--- PASS: TestBuildExclusionCommandMatchesCoreInput (0.00s)
+=== RUN   TestBuildExclusionCommandRejectsLocally
+--- PASS: TestBuildExclusionCommandRejectsLocally (0.00s)
+=== RUN   TestSubmitExclusionReportsCauseAndRetry
+--- PASS: TestSubmitExclusionReportsCauseAndRetry (0.00s)
+=== RUN   TestHistoryProjectionMemoizesByRevision
+--- PASS: TestHistoryProjectionMemoizesByRevision (0.00s)
+=== RUN   TestHistoryTabRendersSharedProjection
+--- PASS: TestHistoryTabRendersSharedProjection (0.00s)
+=== RUN   TestHistoryProjectionRebuildsOnRelink
+--- PASS: TestHistoryProjectionRebuildsOnRelink (0.00s)
+=== RUN   TestLB02Evidence
+    lb02_evidence_test.go:20: set LB02_EVIDENCE=1 to regenerate docs/product/evidence/LB-02
+--- SKIP: TestLB02Evidence (0.00s)
+=== RUN   TestBuildViewModelRemapsModules
+--- PASS: TestBuildViewModelRemapsModules (0.00s)
+=== RUN   TestBuildViewModelInstanceIndependence
+--- PASS: TestBuildViewModelInstanceIndependence (0.00s)
+=== RUN   TestBuildViewModelWorkflowEdges
+--- PASS: TestBuildViewModelWorkflowEdges (0.00s)
+=== RUN   TestBuildViewModelBlockedTask
+--- PASS: TestBuildViewModelBlockedTask (0.00s)
+=== RUN   TestAggregateStatus
+--- PASS: TestAggregateStatus (0.00s)
+=== RUN   TestBuildViewModelAssociatesMeasurementsAndAuditEvents
+--- PASS: TestBuildViewModelAssociatesMeasurementsAndAuditEvents (0.00s)
+=== RUN   TestBuildViewModelShowsOrganizationalNodes
+--- PASS: TestBuildViewModelShowsOrganizationalNodes (0.00s)
+=== RUN   TestLoadProjectionSkipsTreeWithoutFrozenAsterDoc
+--- PASS: TestLoadProjectionSkipsTreeWithoutFrozenAsterDoc (0.00s)
+=== RUN   TestLoadProjectionSurfacesBrokenFrozenAsterDoc
+--- PASS: TestLoadProjectionSurfacesBrokenFrozenAsterDoc (0.00s)
+=== RUN   TestBuildCategoricalCommandMatchesCoreInput
+--- PASS: TestBuildCategoricalCommandMatchesCoreInput (0.00s)
+=== RUN   TestBuildCategoricalCommandIncludesSchemaDef
+--- PASS: TestBuildCategoricalCommandIncludesSchemaDef (0.00s)
+=== RUN   TestParseTableValue
+--- PASS: TestParseTableValue (0.00s)
+=== RUN   TestBuildTableCommandMatchesCoreInput
+--- PASS: TestBuildTableCommandMatchesCoreInput (0.00s)
+=== RUN   TestRecordingPlateView
+--- PASS: TestRecordingPlateView (0.00s)
+=== RUN   TestRecordingTableViewShowsMeasurements
+--- PASS: TestRecordingTableViewShowsMeasurements (0.00s)
+=== RUN   TestRecordingGalleryShowsFiles
+--- PASS: TestRecordingGalleryShowsFiles (0.00s)
+=== RUN   TestRecordingCoreWriteErrorOffersRetry
+--- PASS: TestRecordingCoreWriteErrorOffersRetry (0.00s)
+=== RUN   TestRecordingFormShowsPlannedParameters
+--- PASS: TestRecordingFormShowsPlannedParameters (0.00s)
+=== RUN   TestSelectKindPrefersPlate
+--- PASS: TestSelectKindPrefersPlate (0.00s)
+=== RUN   TestHumanSize
+--- PASS: TestHumanSize (0.00s)
+=== RUN   TestRecordingGridViewsShareEditsAndSave
+--- PASS: TestRecordingGridViewsShareEditsAndSave (0.00s)
+=== RUN   TestRecordingGridLayoutsRenderAtBothBreakpointsAndThemes
+--- PASS: TestRecordingGridLayoutsRenderAtBothBreakpointsAndThemes (0.03s)
+=== RUN   TestSelectKindRoutesByAssayLayoutConfig
+--- PASS: TestSelectKindRoutesByAssayLayoutConfig (0.00s)
+=== RUN   TestRecordingLinkErrorShowsCauseAndRetry
+--- PASS: TestRecordingLinkErrorShowsCauseAndRetry (0.00s)
+=== RUN   TestAssetMatrixGroupsCoordinatesAndCountsFOVGapsOnce
+--- PASS: TestAssetMatrixGroupsCoordinatesAndCountsFOVGapsOnce (0.00s)
+=== RUN   TestAssetMatrixKeepsMissingCoordinatesUnlabelledWithoutPathInference
+--- PASS: TestAssetMatrixKeepsMissingCoordinatesUnlabelledWithoutPathInference (0.00s)
+=== RUN   TestRecordingAssetPreviewShowsCoordinatesAndTimelineLink
+--- PASS: TestRecordingAssetPreviewShowsCoordinatesAndTimelineLink (0.00s)
+=== RUN   TestRecordingMatrixRendersEmptyPairsAsGaps
+--- PASS: TestRecordingMatrixRendersEmptyPairsAsGaps (0.01s)
+=== RUN   TestRecordingMatrixGapPrefillUsesCellCoordinates
+--- PASS: TestRecordingMatrixGapPrefillUsesCellCoordinates (0.01s)
+=== RUN   TestUnlabelledAssetOffersRelabelActionAndLabelledDoesNot
+--- PASS: TestUnlabelledAssetOffersRelabelActionAndLabelledDoesNot (0.00s)
+=== RUN   TestBuildTimelineChronologicalAndStable
+--- PASS: TestBuildTimelineChronologicalAndStable (0.00s)
+=== RUN   TestBuildTimelineUsesEventOutcomesAndRetry
+--- PASS: TestBuildTimelineUsesEventOutcomesAndRetry (0.00s)
+=== RUN   TestTimelineTabRendersCoreFactsAtSupportedLayouts
+=== RUN   TestTimelineTabRendersCoreFactsAtSupportedLayouts/light-1360x880
+=== RUN   TestTimelineTabRendersCoreFactsAtSupportedLayouts/dark-1360x880
+=== RUN   TestTimelineTabRendersCoreFactsAtSupportedLayouts/light-900x600
+=== RUN   TestTimelineTabRendersCoreFactsAtSupportedLayouts/dark-900x600
+--- PASS: TestTimelineTabRendersCoreFactsAtSupportedLayouts (0.01s)
+    --- PASS: TestTimelineTabRendersCoreFactsAtSupportedLayouts/light-1360x880 (0.01s)
+    --- PASS: TestTimelineTabRendersCoreFactsAtSupportedLayouts/dark-1360x880 (0.00s)
+    --- PASS: TestTimelineTabRendersCoreFactsAtSupportedLayouts/light-900x600 (0.00s)
+    --- PASS: TestTimelineTabRendersCoreFactsAtSupportedLayouts/dark-900x600 (0.00s)
+=== RUN   TestDescribeTimerRunningCountdown
+--- PASS: TestDescribeTimerRunningCountdown (0.00s)
+=== RUN   TestDescribeTimerPausedFreezesAtAccumulation
+--- PASS: TestDescribeTimerPausedFreezesAtAccumulation (0.00s)
+=== RUN   TestDescribeTimerRunningWithoutAnchorIsFlagged
+--- PASS: TestDescribeTimerRunningWithoutAnchorIsFlagged (0.00s)
+=== RUN   TestDescribeTimerOverrunAndStopwatch
+--- PASS: TestDescribeTimerOverrunAndStopwatch (0.00s)
+=== RUN   TestWindowLineWaitsForT0
+--- PASS: TestWindowLineWaitsForT0 (0.00s)
+=== RUN   TestRoundLabelRelay
+--- PASS: TestRoundLabelRelay (0.00s)
+=== RUN   TestParseMinutesStrict
+--- PASS: TestParseMinutesStrict (0.00s)
+=== RUN   TestCreateTimerRefusesExistingID
+--- PASS: TestCreateTimerRefusesExistingID (0.00s)
+=== RUN   TestRunTimerActionFilesCompletedRound
+--- PASS: TestRunTimerActionFilesCompletedRound (0.00s)
+=== RUN   TestSkippedTaskNeverCompletes
+--- PASS: TestSkippedTaskNeverCompletes (0.00s)
+=== RUN   TestViewRendersRailAndPanel
+--- PASS: TestViewRendersRailAndPanel (0.00s)
+=== RUN   TestProcedureShowsFrozenProtocolReadOnly
+--- PASS: TestProcedureShowsFrozenProtocolReadOnly (0.02s)
+=== RUN   TestViewSelectsStepOnClick
+--- PASS: TestViewSelectsStepOnClick (0.00s)
+=== RUN   TestViewNarrowStacks
+--- PASS: TestViewNarrowStacks (0.01s)
+=== RUN   TestFlowRailShowsHierarchyProgressTimepointAndCoreStatus
+--- PASS: TestFlowRailShowsHierarchyProgressTimepointAndCoreStatus (0.01s)
+=== RUN   TestRecordingDirtyTracksEachTask
+--- PASS: TestRecordingDirtyTracksEachTask (0.00s)
+=== RUN   TestCheckTogglesCallback
+--- PASS: TestCheckTogglesCallback (0.00s)
+=== RUN   TestSaveChecksFailureShowsErrorRevertsCheckboxAndRetries
+--- PASS: TestSaveChecksFailureShowsErrorRevertsCheckboxAndRetries (0.01s)
+=== RUN   TestRunLoadErrorShowsReasonRetryAndNeverShowsLoading
+--- PASS: TestRunLoadErrorShowsReasonRetryAndNeverShowsLoading (0.01s)
+=== RUN   TestOpenBlockingCountsUnconfirmed
+--- PASS: TestOpenBlockingCountsUnconfirmed (0.00s)
+=== RUN   TestEmptyCheckTaskOffersCompletion
+--- PASS: TestEmptyCheckTaskOffersCompletion (0.00s)
+=== RUN   TestTaskWithChecksDoesNotOfferMarkComplete
+--- PASS: TestTaskWithChecksDoesNotOfferMarkComplete (0.01s)
+=== RUN   TestMarkCompleteCallsCallbackOnce
+--- PASS: TestMarkCompleteCallsCallbackOnce (0.01s)
+=== RUN   TestFailedCompletionShowsCauseAndRetry
+--- PASS: TestFailedCompletionShowsCauseAndRetry (0.01s)
+=== RUN   TestTaskWithMeasurementPlanDoesNotOfferMarkComplete
+--- PASS: TestTaskWithMeasurementPlanDoesNotOfferMarkComplete (0.00s)
+=== RUN   TestSyncFromKeepsSelection
+--- PASS: TestSyncFromKeepsSelection (0.00s)
+=== RUN   TestTreeExpansionRoundTrip
+--- PASS: TestTreeExpansionRoundTrip (0.00s)
+=== RUN   TestHistoryTabListsStoredEventAndOpensBatch
+--- PASS: TestHistoryTabListsStoredEventAndOpensBatch (0.00s)
+=== RUN   TestStackedRunViewStartsAtRecordingAndKeepsTableFirstRow
+--- PASS: TestStackedRunViewStartsAtRecordingAndKeepsTableFirstRow (0.01s)
+=== RUN   TestReadingFieldKeepsFocusAcrossBreakpointResize
+--- PASS: TestReadingFieldKeepsFocusAcrossBreakpointResize (0.03s)
+=== RUN   TestSelectingStepGroupReportsTaskKey
+--- PASS: TestSelectingStepGroupReportsTaskKey (0.01s)
+=== RUN   TestWideLayoutPlacesRecordingBetweenFlowAndProperties
+--- PASS: TestWideLayoutPlacesRecordingBetweenFlowAndProperties (0.00s)
+=== RUN   TestDefaultViewHidesRawIdentifiers
+=== RUN   TestDefaultViewHidesRawIdentifiers/three-column
+=== RUN   TestDefaultViewHidesRawIdentifiers/single-column
+--- PASS: TestDefaultViewHidesRawIdentifiers (0.01s)
+    --- PASS: TestDefaultViewHidesRawIdentifiers/three-column (0.00s)
+    --- PASS: TestDefaultViewHidesRawIdentifiers/single-column (0.00s)
+=== RUN   TestStatusLabelContractVocabulary
+--- PASS: TestStatusLabelContractVocabulary (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/runworkspace	0.569s
+=== RUN   TestNavigationShowsPagesAndDesigns
+--- PASS: TestNavigationShowsPagesAndDesigns (0.06s)
+=== RUN   TestPageShortcuts
+--- PASS: TestPageShortcuts (0.00s)
+=== RUN   TestShellThemes
+--- PASS: TestShellThemes (0.01s)
+=== RUN   TestShellUserDimensions1186x753
+--- PASS: TestShellUserDimensions1186x753 (0.08s)
+=== RUN   TestProjectWorkspaceDataAndActions
+--- PASS: TestProjectWorkspaceDataAndActions (0.07s)
+=== RUN   TestEmptyProjectWorkspaceOffersNextAction
+=== RUN   TestEmptyProjectWorkspaceOffersNextAction/no_project
+=== RUN   TestEmptyProjectWorkspaceOffersNextAction/empty_project
+--- PASS: TestEmptyProjectWorkspaceOffersNextAction (0.00s)
+    --- PASS: TestEmptyProjectWorkspaceOffersNextAction/no_project (0.00s)
+    --- PASS: TestEmptyProjectWorkspaceOffersNextAction/empty_project (0.00s)
+=== RUN   TestCoreWriteErrorOffersRecoveryAction
+--- PASS: TestCoreWriteErrorOffersRecoveryAction (0.00s)
+=== RUN   TestTimerStripShowsRunningTimers
+--- PASS: TestTimerStripShowsRunningTimers (0.00s)
+=== RUN   TestTimerStripEmptyRendersNothing
+--- PASS: TestTimerStripEmptyRendersNothing (0.00s)
+=== RUN   TestShellResponsiveThemeScreenshots
+--- PASS: TestShellResponsiveThemeScreenshots (0.24s)
+PASS
+ok  	asterlab-mygo-prototype/internal/shell	0.712s
+=== RUN   TestParseRunWellLinkValid
+--- PASS: TestParseRunWellLinkValid (0.00s)
+=== RUN   TestParseRunWellLinkInvalid
+--- PASS: TestParseRunWellLinkInvalid (0.00s)
+=== RUN   TestFindWellCell
+--- PASS: TestFindWellCell (0.00s)
+=== RUN   TestStaleGuardAcceptsNewer
+--- PASS: TestStaleGuardAcceptsNewer (0.00s)
+=== RUN   TestApplySnapshotStaleIgnored
+--- PASS: TestApplySnapshotStaleIgnored (0.00s)
+=== RUN   TestConflictIfDifferent
+--- PASS: TestConflictIfDifferent (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/state	3.235s
+=== RUN   TestDesignTokens
+--- PASS: TestDesignTokens (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/theme	1.619s
+=== RUN   TestToolDraftsAndImport
+--- PASS: TestToolDraftsAndImport (0.00s)
+=== RUN   TestToolsWorkspacePNG
+--- PASS: TestToolsWorkspacePNG (0.12s)
+=== RUN   TestPantryLedgerCRUDAndExpiryGroups
+--- PASS: TestPantryLedgerCRUDAndExpiryGroups (0.00s)
+=== RUN   TestPantryExportOnlyReportsCoreSuccess
+--- PASS: TestPantryExportOnlyReportsCoreSuccess (0.00s)
+=== RUN   TestImportFailureChineseCause
+--- PASS: TestImportFailureChineseCause (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/tools	0.395s
+=== RUN   TestTwelveWellGeometry
+--- PASS: TestTwelveWellGeometry (0.01s)
+=== RUN   TestPlateGeometriesAndWellSelectionRoundTrip
+=== RUN   TestPlateGeometriesAndWellSelectionRoundTrip/6
+=== RUN   TestPlateGeometriesAndWellSelectionRoundTrip/12
+=== RUN   TestPlateGeometriesAndWellSelectionRoundTrip/24
+=== RUN   TestPlateGeometriesAndWellSelectionRoundTrip/48
+=== RUN   TestPlateGeometriesAndWellSelectionRoundTrip/96
+=== RUN   TestPlateGeometriesAndWellSelectionRoundTrip/384
+--- PASS: TestPlateGeometriesAndWellSelectionRoundTrip (0.01s)
+    --- PASS: TestPlateGeometriesAndWellSelectionRoundTrip/6 (0.00s)
+    --- PASS: TestPlateGeometriesAndWellSelectionRoundTrip/12 (0.00s)
+    --- PASS: TestPlateGeometriesAndWellSelectionRoundTrip/24 (0.00s)
+    --- PASS: TestPlateGeometriesAndWellSelectionRoundTrip/48 (0.00s)
+    --- PASS: TestPlateGeometriesAndWellSelectionRoundTrip/96 (0.00s)
+    --- PASS: TestPlateGeometriesAndWellSelectionRoundTrip/384 (0.00s)
+=== RUN   TestLanePositionIsCanonical
+--- PASS: TestLanePositionIsCanonical (0.00s)
+=== RUN   TestRackRendersSequenceNotMatrix
+--- PASS: TestRackRendersSequenceNotMatrix (0.00s)
+=== RUN   TestRackBlindMasksGroups
+--- PASS: TestRackBlindMasksGroups (0.00s)
+=== RUN   TestRackSelectsLane
+--- PASS: TestRackSelectsLane (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/uikit/plate	0.994s
+?   	asterlab-mygo-prototype/internal/uikit/workflownode	[no test files]
+=== RUN   TestWheelNavigationZoomsCanvas
+--- PASS: TestWheelNavigationZoomsCanvas (0.01s)
+=== RUN   TestSelectInBoundsAndToggleMultiSelection
+--- PASS: TestSelectInBoundsAndToggleMultiSelection (0.00s)
+=== RUN   TestDeleteSelectedRemovesWholeMultiSelectionOnce
+--- PASS: TestDeleteSelectedRemovesWholeMultiSelectionOnce (0.00s)
+=== RUN   TestMarqueeOnEmptyCanvasSelectsNode
+--- PASS: TestMarqueeOnEmptyCanvasSelectsNode (0.00s)
+=== RUN   TestDraggingSelectedNodeMovesWholeSelection
+--- PASS: TestDraggingSelectedNodeMovesWholeSelection (0.00s)
+=== RUN   TestShiftActivationExtendsNodeSelection
+--- PASS: TestShiftActivationExtendsNodeSelection (0.00s)
+=== RUN   TestWorkflowAddSelectUndo
+--- PASS: TestWorkflowAddSelectUndo (0.00s)
+=== RUN   TestWorkflowHeadlessPNG
+--- PASS: TestWorkflowHeadlessPNG (0.04s)
+=== RUN   TestWorkflowCanvasEmptyState
+--- PASS: TestWorkflowCanvasEmptyState (0.00s)
+=== RUN   TestWorkflowCanvasShowsStepCards
+--- PASS: TestWorkflowCanvasShowsStepCards (0.00s)
+=== RUN   TestDragUsesSingleUndoEntry
+--- PASS: TestDragUsesSingleUndoEntry (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/workflow	2.648s
+=== RUN   TestBuildDesignWithoutRun
+--- PASS: TestBuildDesignWithoutRun (0.00s)
+=== RUN   TestBuildDesignRejectsMissingBlockProvider
+--- PASS: TestBuildDesignRejectsMissingBlockProvider (0.00s)
+=== RUN   TestBuildDesignKeepsOrganizationalStepsExplicit
+--- PASS: TestBuildDesignKeepsOrganizationalStepsExplicit (0.00s)
+=== RUN   TestBuildDesignReusesSameBlockVersionIndependently
+--- PASS: TestBuildDesignReusesSameBlockVersionIndependently (0.00s)
+=== RUN   TestBuildDesignKeepsOldVersionReference
+--- PASS: TestBuildDesignKeepsOldVersionReference (0.00s)
+=== RUN   TestProjectionBuildsFourParentsAndTenRNAOperations
+--- PASS: TestProjectionBuildsFourParentsAndTenRNAOperations (0.00s)
+=== RUN   TestProjectionKeepsDisplayOrderAndDependenciesIndependent
+--- PASS: TestProjectionKeepsDisplayOrderAndDependenciesIndependent (0.00s)
+=== RUN   TestProjectionRejectsOrphansAndAmbiguity
+--- PASS: TestProjectionRejectsOrphansAndAmbiguity (0.00s)
+=== RUN   TestProjectionRejectsCompositeWithoutDefinition
+--- PASS: TestProjectionRejectsCompositeWithoutDefinition (0.00s)
+=== RUN   TestRunTreeKeepsOrganizationalStepsWithoutTasks
+--- PASS: TestRunTreeKeepsOrganizationalStepsWithoutTasks (0.00s)
+=== RUN   TestProjectionBuildsNestedContainment
+--- PASS: TestProjectionBuildsNestedContainment (0.00s)
+=== RUN   TestProjectionRejectsWrongBlockVersion
+--- PASS: TestProjectionRejectsWrongBlockVersion (0.00s)
+=== RUN   TestProjectionJoinsByDesignStepIdentity
+--- PASS: TestProjectionJoinsByDesignStepIdentity (0.00s)
+=== RUN   TestProjectionLinksSeedAndReadoutByExactBlockVersion
+--- PASS: TestProjectionLinksSeedAndReadoutByExactBlockVersion (0.00s)
+PASS
+ok  	asterlab-mygo-prototype/internal/workflowtree	0.283s
+=== RUN   TestNormalizeRuntimeRecomputesLiveMix
+asterlab data dir: D:\.ci-cache\tmp\TestNormalizeRuntimeRecomputesLiveMix3154443739\001
+asterlab data dir: D:\.ci-cache\tmp\TestNormalizeRuntimeRecomputesLiveMix3154443739\001
+--- PASS: TestNormalizeRuntimeRecomputesLiveMix (0.09s)
+=== RUN   TestPantryLedgerRoundTripAcrossReload
+--- PASS: TestPantryLedgerRoundTripAcrossReload (0.09s)
+=== RUN   TestTimerAndRecordProjectionRequireAFrozenRun
+--- PASS: TestTimerAndRecordProjectionRequireAFrozenRun (0.07s)
+=== RUN   TestDeriveDesignFromRunRequiresAFrozenRun
+--- PASS: TestDeriveDesignFromRunRequiresAFrozenRun (0.07s)
+=== RUN   TestGenericChannelRejectsBadEnvelopes
+--- PASS: TestGenericChannelRejectsBadEnvelopes (0.07s)
+PASS
+ok  	asterlab-mygo-prototype/modules/runs	3.705s
