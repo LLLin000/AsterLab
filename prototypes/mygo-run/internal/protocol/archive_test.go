@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -260,5 +261,33 @@ func TestArchivePDFWorksWithoutSystemFonts(t *testing.T) {
 	}
 	if got := pdfImageObjects(buf.Bytes()); got != 2 {
 		t.Fatalf("fontless export embedded %d image objects, want 2", got)
+	}
+}
+
+// TestArchivePDFSkipsUnparsableFontCandidate pins the TTC-poisoning case: a
+// readable-but-unusable candidate (a .ttc collection, corrupt .ttf bytes)
+// must be skipped, not registered — gofpdf reports the damage only later as
+// a sticky 'undefined font'. The export still succeeds on Helvetica.
+func TestArchivePDFSkipsUnparsableFontCandidate(t *testing.T) {
+	dir := t.TempDir()
+	ttc := filepath.Join(dir, "fake.ttc")
+	if err := os.WriteFile(ttc, []byte("ttcf\x00\x01\x00\x00garbage"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := filepath.Join(dir, "corrupt.ttf")
+	if err := os.WriteFile(corrupt, []byte("not a font at all"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	old := recordPDFFontCandidates
+	recordPDFFontCandidates = []string{ttc, corrupt}
+	defer func() { recordPDFFontCandidates = old }()
+	proj, prose, load := pdfImageFixture(t)
+	var buf bytes.Buffer
+	arch := BuildArchive(proj, prose, time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC))
+	if err := arch.PDF(&buf, load); err != nil {
+		t.Fatalf("export with unusable font candidates failed: %v", err)
+	}
+	if got := pdfImageObjects(buf.Bytes()); got != 2 {
+		t.Fatalf("export embedded %d image objects, want 2", got)
 	}
 }

@@ -252,15 +252,37 @@ func paramRows(sum record.TaskSummary) []string {
 	return rows
 }
 
-// recordPDFFontCandidates mirrors the CJK search in internal/asterdoc/pdf.go:
-// the record PDF needs the same system font for Chinese output. Unlike the
-// frozen-document export, a missing font is not fatal here: the PDF still
-// builds with Helvetica (Chinese glyphs degrade) so the image board and the
-// parameter facts always export. Windows Gate machines carry simhei.ttf.
+// recordPDFFontCandidates copies the working set from internal/asterdoc/pdf.go
+// (chineseFontCandidates): only single-font .ttf files, never .ttc
+// collections — gofpdf cannot parse TTC (e.g. simsun.ttc), and a TTC-shaped
+// candidate poisons the family without an immediate error. protocol cannot
+// import asterdoc for the list (asterdoc/view.go imports protocol), so the
+// copy is deliberate; keep the two in sync. Unlike the frozen-document
+// export, a missing font is not fatal here: the PDF still builds with
+// Helvetica (Chinese glyphs degrade) so the image board and the parameter
+// facts always export. Windows Gate machines carry simhei.ttf.
 var recordPDFFontCandidates = []string{
 	"C:/Windows/Fonts/simhei.ttf",
-	"C:/Windows/Fonts/simsun.ttc",
+	"C:/Windows/Fonts/simsunb.ttf",
+	"C:/Windows/Fonts/NotoSansSC-VF.ttf",
 	"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+}
+
+// usableFontFile reports whether data looks like a single-font file gofpdf
+// can parse: a .ttf/.otf suffix plus a TrueType/OpenType sfnt magic. This
+// rejects .ttc collections ('ttcf') and corrupt bytes before they reach
+// gofpdf, where a bad registration surfaces only later as a sticky
+// 'undefined font' failure far from the cause.
+func usableFontFile(path string, data []byte) bool {
+	lower := strings.ToLower(path)
+	if !strings.HasSuffix(lower, ".ttf") && !strings.HasSuffix(lower, ".otf") {
+		return false
+	}
+	if len(data) < 4 {
+		return false
+	}
+	magic := string(data[:4])
+	return magic == "\x00\x01\x00\x00" || magic == "OTTO" || magic == "true" || magic == "typ1"
 }
 
 // ImageLoader returns PNG bytes for one placed matrix image. The caller wires
@@ -283,7 +305,7 @@ func (arch Archive) PDF(w io.Writer, load ImageLoader) error {
 	font := "Helvetica"
 	for _, path := range recordPDFFontCandidates {
 		data, err := os.ReadFile(path)
-		if err != nil {
+		if err != nil || !usableFontFile(path, data) {
 			continue
 		}
 		// Single-style registration only: headings are sized, not bolded,
