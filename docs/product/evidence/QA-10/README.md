@@ -1,6 +1,6 @@
 # QA-10 — Hosted-only GC fatal in `TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable`
 
-- Task card: `QA-10` (`c40bf7e1-ad9f-4d1d-8573-a64cdbb2b1`), Windows Gate lane.
+- Task card: `QA-10` (`c40bf7e1-ad9f-4c1d-8573-aab98cdbb2b1`), Windows Gate lane.
 - Test: `prototypes/mygo-run/main_test.go:1829`
   (`TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable`).
 - Symptom (hosted only): the test binary dies with a Go runtime GC fatal —

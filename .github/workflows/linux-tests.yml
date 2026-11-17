@@ -148,7 +148,7 @@ jobs:
         # (pin v0.8.4-0.20261108220316-c4197b7fe562, do not bump here).
         # The banner/retry/linkErr assertions stay covered by the local gate
         # (scripts/ci/local-gate.sh runs the unskipped suite). QA-10
-        # (c40bf7e1-ad9f-4d1d-8573-a64cdbb2b1) owns the real fix; drop -skip
+        # (c40bf7e1-ad9f-4c1d-8573-aab98cdbb2b1) owns the real fix; drop -skip
         # together with that fix.
         working-directory: prototypes/mygo-run
         run: go test -skip '^TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable$' ./...
