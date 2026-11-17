@@ -61,3 +61,11 @@ for traceability (pre-existing export format, out of scope for P2).
   refusal; no real-window derive-save exists.
 - The 900×600 shots show the initial viewport; board/archive content below
   the fold scrolls (same component behavior as the rest of the app).
+
+## Windows Gate 独立验证（`fdd2fad`，coordinator 执行）
+
+- 二进制：门禁构建（`BUILD_INFO` commit `fdd2fad` 与 head 一致；`LOCAL_GATE: PASS`），隔离种子库（6h 事件＋PNG/TIFF 双资产）。
+- `gate-board-1360x880-light.png`：图板渲染 Core 投影（计划 vs 实际、代表视野矩阵/分组、签核与归档区）。
+- `gate-sealed-1360x880-light.png`：签核后已签核归档徽标＋只读，无解锁入口；尝试切编辑被终态 toast 拦截。
+- 重启一致性：杀进程重开同一库，仍为已签核归档（Core 持久化，非 UI 态）。
+- `gate-derived-1360x880-light.png`：派生评审显示来源（Run/设计 rev）；种子设计为 AsterDoc 管理，保存时 Core 诚实拒绝（“该设计由 AsterLab 文档管理…”），符合 UX-P5；legacy 设计成功路径由集成测试覆盖。
