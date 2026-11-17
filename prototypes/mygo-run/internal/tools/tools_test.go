@@ -180,3 +180,33 @@ func TestPantryExportOnlyReportsCoreSuccess(t *testing.T) {
 		t.Fatalf("successful retry state: status=%q error=%q json=%q", w.Status, w.Error, w.PantryExportJSON)
 	}
 }
+
+// UX-P5: import/handoff failures speak §3 vocabulary with cause; success
+// states carry no English strings.
+func TestImportFailureChineseCause(t *testing.T) {
+	w := New(Callbacks{})
+	w.ImportJSON = ""
+	if err := w.Import(); err == nil || err.Error() != "请粘贴 Typed block 实例或 assay 设计 JSON" {
+		t.Fatalf("empty import: %v", err)
+	}
+	w.ImportJSON = "not-json{{{"
+	if err := w.Import(); err == nil || len(err.Error()) < len("JSON 无效") || err.Error()[:len("JSON 无效")] != "JSON 无效" {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	w.ImportJSON = `{"wells":[]}`
+	if err := w.Import(); err == nil || err.Error() != "assay 设计至少需要一个孔位分配" {
+		t.Fatalf("empty wells: %v", err)
+	}
+	w.Active = ToolImport
+	w.handoff()
+	if w.Error != "请先选择一个草稿再导入" {
+		t.Fatalf("handoff default: %q", w.Error)
+	}
+	w.ImportJSON = `{"id":"x","definitionId":"custom","definitionVersion":1,"type":"note","props":{"title":"T","text":"S"}}`
+	if err := w.Import(); err != nil {
+		t.Fatal(err)
+	}
+	if w.Error != "" || w.Status != "导入成功" {
+		t.Fatalf("import success state: err=%q status=%q", w.Error, w.Status)
+	}
+}

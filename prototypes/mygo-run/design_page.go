@@ -127,8 +127,8 @@ func designPage(c *ui.Context, a *app) {
 		}
 		t := c.Theme()
 		ui.Column(c).Fill().Center().Gap(t.Space(2)).Padding(t.Space(4)).Children(func() {
-			ui.Text(c, title).FontSize(16).Bold().TextColor(t.Danger)
-			ui.Text(c, msg).FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, title).FontSize(t.Rem(1.14)).Bold().TextColor(t.Danger) // UX-P3: 16px → Rem.
+			ui.Text(c, msg).FontSize(t.Rem(0.93)).TextColor(t.TextMuted) // UX-P3: 13px → Rem.
 			ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
 				if retryID := a.retryDesignID(); retryID != "" {
 					if components.Button(c, "重试", components.ButtonPrimary).Clicked() {
@@ -165,9 +165,9 @@ func asterDesignPage(c *ui.Context, a *app) {
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Wrap().Padding(t.Space(2), t.Space(4)).Border(1, t.Border).
 			Background(t.Surface).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-			ui.Text(c, "AsterDoc 设计").FontSize(16).Bold().TextColor(t.Text)
-			ui.Text(c, fmt.Sprintf("rev %d", a.designDoc.Revision)).FontSize(11).
-				TextColor(t.TextMuted)
+			ui.Text(c, "AsterDoc 设计").FontSize(t.Rem(1.14)).Bold().TextColor(t.Text) // UX-P3: 16px → Rem.
+			ui.Text(c, fmt.Sprintf("rev %d", a.designDoc.Revision)).FontSize(t.Rem(0.79)).
+				TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 			stateLabel, stateTone := designReadinessState(a)
 			components.Badge(c, stateLabel, components.BadgeOptions{Tone: stateTone})
 			if a.hasUnsavedStepDrafts(doc) {

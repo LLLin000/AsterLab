@@ -49,6 +49,9 @@ type Workspace struct {
 	ImportJSON           string
 	Error                string
 	Status               string
+	// Retry re-runs the last failed non-pantry action (import validation).
+	// UX-P5: every failure offers cause + retry. Pantry keeps PantryRetry.
+	Retry                func()
 	NextDraftID          uint64
 	Callbacks            Callbacks
 
@@ -235,7 +238,7 @@ func (w *Workspace) handoff() {
 	case ToolLibrary:
 		inst, err = w.template(w.SelectedType)
 	default:
-		w.Error = "Choose a draft to import"
+		w.Error = "请先选择一个草稿再导入" // UX-P5: §3 state vocabulary (was English).
 		return
 	}
 	if err != nil {
@@ -244,7 +247,7 @@ func (w *Workspace) handoff() {
 	}
 	w.NextDraftID++
 	inst.ID = fmt.Sprintf("tool-draft-%d", w.NextDraftID)
-	w.Error, w.Status = "", "Draft ready"
+	w.Error, w.Status = "", "草稿已就绪" // UX-P5: §3 state vocabulary (was English).
 	if w.Callbacks.UseInDesigner != nil {
 		w.Callbacks.UseInDesigner(inst)
 	}
@@ -279,12 +282,12 @@ func (w *Workspace) template(kind blocks.BlockType) (blocks.Instance, error) {
 func (w *Workspace) Import() error {
 	trim := strings.TrimSpace(w.ImportJSON)
 	if trim == "" {
-		return fmt.Errorf("paste a block instance or assay design JSON")
+		return fmt.Errorf("请粘贴 Typed block 实例或 assay 设计 JSON") // UX-P5: was English.
 	}
 	var inst blocks.Instance
 	if err := json.Unmarshal([]byte(trim), &inst); err == nil && inst.ID != "" {
 		if err := inst.Validate(); err != nil {
-			return fmt.Errorf("invalid block instance: %w", err)
+			return fmt.Errorf("Typed block 实例无效：%w", err) // UX-P5: cause in Chinese; detail from blocks.
 		}
 		if w.Callbacks.UseInDesigner != nil {
 			w.Callbacks.UseInDesigner(inst)
@@ -292,23 +295,23 @@ func (w *Workspace) Import() error {
 		if w.Callbacks.CreateDraft != nil {
 			w.Callbacks.CreateDraft(Draft{Block: &inst})
 		}
-		w.Error, w.Status = "", "Import accepted"
+	w.Error, w.Status = "", "导入成功" // UX-P5: §3 state vocabulary (was English).
 		return nil
 	}
 	var design assays.Design
 	if err := json.Unmarshal([]byte(trim), &design); err != nil {
-		return fmt.Errorf("invalid JSON: %w", err)
+		return fmt.Errorf("JSON 无效：%w", err) // UX-P5: was English.
 	}
 	if err := assays.ValidateWellAssignments(design.Wells); err != nil {
 		return err
 	}
 	if len(design.Wells) == 0 {
-		return fmt.Errorf("assay design needs at least one well assignment")
+		return fmt.Errorf("assay 设计至少需要一个孔位分配") // UX-P5: was English.
 	}
 	if w.Callbacks.CreateDraft != nil {
 		w.Callbacks.CreateDraft(Draft{Assay: &design})
 	}
-	w.Error, w.Status = "", "Import accepted"
+	w.Error, w.Status = "", "导入成功" // UX-P5: §3 state vocabulary (was English).
 	return nil
 }
 
@@ -322,7 +325,11 @@ func View(c *ui.Context, w *Workspace) {
 		ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Text(c, "Tools & Components").FontSize(float32(tok.TextPage)).Bold().TextColor(t.Text)
 		})
-		ui.Row(c).Grow(1).Gap(float32(tok.Spacing12)).Children(func() {
+		// UX-P1/UX-LAYOUT: the content pane scrolls (both axes: the 96-well
+		// matrix is wider than 900px) so the handoff primary and every well
+		// stay reachable at 900×600 on every tool. Stretch gives the pane a
+		// bounded height so it actually scrolls instead of sizing to content.
+		ui.Row(c).Grow(1).Gap(float32(tok.Spacing12)).AlignItems(ui.Stretch).Children(func() {
 			ui.Column(c).Width(190).FillHeight().Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).Background(tok.SidebarBackground).Children(func() {
 				ui.Text(c, "WORKSPACE").FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 				for _, item := range []struct {
@@ -332,37 +339,44 @@ func View(c *ui.Context, w *Workspace) {
 					item := item
 					if ui.Button(c, item.label).Clicked() {
 						w.Active = item.tool
-						if w.PantryRetry == nil {
+						if w.PantryRetry == nil && w.Retry == nil {
 							w.Error, w.Status = "", ""
 						}
 					}
 				}
 			})
-			ui.Column(c).Grow(1).FillHeight().Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Background(t.Surface).Children(func() {
-				switch w.Active {
-				case ToolPantry:
-					pantryView(c, w, t, tok)
-				case ToolPlate:
-					plateView(c, w, t)
-				case ToolDilution:
-					dilutionView(c, w, t)
-				case ToolParameters:
-					parameterView(c, w, t)
-				case ToolLibrary:
-					libraryView(c, w, t)
-				case ToolImport:
-					importView(c, w, t)
-				}
-				if w.Error != "" {
-					ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
-						ui.Text(c, w.Error).TextColor(t.Danger)
-						if w.PantryRetry != nil && ui.Button(c, "重试").Clicked() {
-							w.PantryRetry()
-						}
-					})
-				} else if w.Status != "" {
-					ui.Text(c, w.Status).TextColor(t.Success)
-				}
+			// UX-P1/UX-LAYOUT: the content pane scrolls so the handoff
+			// primary stays reachable at 900×600 on every tool.
+			ui.ScrollBoth(c).Grow(1).Children(func() {
+				ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Background(t.Surface).Children(func() {
+					switch w.Active {
+					case ToolPantry:
+						pantryView(c, w, t, tok)
+					case ToolPlate:
+						plateView(c, w, t)
+					case ToolDilution:
+						dilutionView(c, w, t)
+					case ToolParameters:
+						parameterView(c, w, t)
+					case ToolLibrary:
+						libraryView(c, w, t)
+					case ToolImport:
+						importView(c, w, t)
+					}
+					if w.Error != "" {
+						ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Text(c, w.Error).TextColor(t.Danger)
+							// UX-P5: cause + retry for pantry ops and import validation.
+							if w.PantryRetry != nil && ui.Button(c, "重试").Clicked() {
+								w.PantryRetry()
+							} else if w.Retry != nil && ui.Button(c, "重试").Clicked() {
+								w.Retry()
+							}
+						})
+					} else if w.Status != "" {
+						ui.Text(c, w.Status).TextColor(t.Success)
+					}
+				})
 			})
 		})
 	})
@@ -370,11 +384,11 @@ func View(c *ui.Context, w *Workspace) {
 
 func plateView(c *ui.Context, w *Workspace, t *ui.Theme) {
 	ui.Text(c, "Plate layout").Bold()
-	ui.Text(c, fmt.Sprintf("96 wells · %d selected", w.Plate.SelectedCount())).FontSize(12).TextColor(t.TextMuted)
+	ui.Text(c, fmt.Sprintf("96 wells · %d selected", w.Plate.SelectedCount())).FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 	for row := range 8 {
 		r := row
 		ui.Row(c).Gap(3).Children(func() {
-			ui.Text(c, string(rune('A'+r))).FontSize(12)
+			ui.Text(c, string(rune('A'+r))).FontSize(t.Rem(0.86)) // UX-P3: 12px → Rem.
 			for col := range 12 {
 				idx := r*12 + col
 				label := fmt.Sprintf("%d", col+1)
@@ -391,7 +405,7 @@ func plateView(c *ui.Context, w *Workspace, t *ui.Theme) {
 			}
 		})
 	}
-	ui.Text(c, "Group label for selected wells").FontSize(12)
+	ui.Text(c, "Group label for selected wells").FontSize(t.Rem(0.86)) // UX-P3: 12px → Rem.
 	if ui.TextInput(c, &w.Group).Placeholder("e.g. Control").Changed() {
 		for _, well := range w.Plate.Props.Selected {
 			_ = w.Plate.SetGroup(well, w.Group)
@@ -403,7 +417,7 @@ func plateView(c *ui.Context, w *Workspace, t *ui.Theme) {
 }
 func dilutionView(c *ui.Context, w *Workspace, t *ui.Theme) {
 	ui.Text(c, "Dilution calculator").Bold()
-	ui.Text(c, "C₁V₁ = C₂V₂ · use consistent units").FontSize(12).TextColor(t.TextMuted)
+	ui.Text(c, "C₁V₁ = C₂V₂ · use consistent units").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 	ui.Text(c, "Stock concentration")
 	ui.TextInput(c, &w.Stock).Placeholder("e.g. 100")
 	ui.Text(c, "Target concentration")
@@ -423,7 +437,7 @@ func dilutionView(c *ui.Context, w *Workspace, t *ui.Theme) {
 }
 func parameterView(c *ui.Context, w *Workspace, t *ui.Theme) {
 	ui.Text(c, "Parameter table").Bold()
-	ui.Text(c, "Edit the rows, then hand off as a typed component.").FontSize(12).TextColor(t.TextMuted)
+	ui.Text(c, "Edit the rows, then hand off as a typed component.").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 	for i := range w.Rows {
 		r := &w.Rows[i]
 		ui.Row(c).Gap(6).Children(func() {
@@ -443,7 +457,7 @@ func parameterView(c *ui.Context, w *Workspace, t *ui.Theme) {
 }
 func libraryView(c *ui.Context, w *Workspace, t *ui.Theme) {
 	ui.Text(c, "Component library").Bold()
-	ui.Text(c, "Built-in typed block definitions").FontSize(12).TextColor(t.TextMuted)
+	ui.Text(c, "Built-in typed block definitions").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 	for _, kind := range blocks.AllTypes() {
 		k := kind
 		if ui.Button(c, string(k)).Clicked() {
@@ -462,11 +476,21 @@ func libraryView(c *ui.Context, w *Workspace, t *ui.Theme) {
 }
 func importView(c *ui.Context, w *Workspace, t *ui.Theme) {
 	ui.Text(c, "Structured import").Bold()
-	ui.Text(c, "Paste a typed block instance or assays.Design JSON. Imported values are validated before handoff.").FontSize(12).TextColor(t.TextMuted)
+	ui.Text(c, "Paste a typed block instance or assays.Design JSON. Imported values are validated before handoff.").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
 	ui.TextInput(c, &w.ImportJSON).Placeholder(`{"id":"...","definitionId":"...","definitionVersion":1,"type":"parameter_table","props":{"rows":[]}}`)
 	if ui.Button(c, "Validate and create draft").Clicked() {
 		if err := w.Import(); err != nil {
 			w.Error, w.Status = err.Error(), ""
+			// UX-P5: the error row offers 重试, which re-runs validation.
+			w.Retry = func() {
+				if err := w.Import(); err != nil {
+					w.Error, w.Status = err.Error(), ""
+					return
+				}
+				w.Retry = nil
+			}
+		} else {
+			w.Retry = nil
 		}
 	}
 }

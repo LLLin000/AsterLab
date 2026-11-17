@@ -117,7 +117,10 @@ type Shell struct {
 	OnPage        func(Page)
 	OnSidebar     func(bool)
 
-	Query      string
+	Query string
+	// ShowAllRuns expands the truncated in-progress run list. UX-LAYOUT:
+	// the workspace grid has an explicit "show all" affordance.
+	ShowAllRuns bool
 	OnContinue func()
 	OnCreate   func()
 	OnImport   func()
@@ -393,8 +396,12 @@ func (s *Shell) projectView(c *ui.Context) {
 						inProgress = append(inProgress, run)
 					}
 				}
-				if len(inProgress) > 2 {
-					inProgress = inProgress[:2]
+				shown := inProgress
+				// UX-LAYOUT: the in-progress preview is truncated, never the
+				// grid — designs are uncapped and the grid scrolls (UX-IA-1).
+				// The truncation carries an explicit show-all affordance.
+				if len(inProgress) > 2 && !s.ShowAllRuns {
+					shown = inProgress[:2]
 				}
 				// No hard item cap: hiding designs made older work unreachable
 				// from the workspace (UX-IA-1). The grid scrolls instead.
@@ -411,13 +418,22 @@ func (s *Shell) projectView(c *ui.Context) {
 						return
 					}
 					ui.Grid(c).Columns(columns).Gap(t.Space(1)).Children(func() {
-						for _, run := range inProgress {
+						for _, run := range shown {
 							s.runCard(c, run)
 						}
 						for _, design := range designs {
 							s.designCard(c, design)
 						}
 					})
+					if len(inProgress) > 2 && !s.ShowAllRuns {
+						if components.Button(c, fmt.Sprintf("显示全部 %d 个进行中", len(inProgress)), components.ButtonGhost).Clicked() {
+							s.ShowAllRuns = true
+						}
+					} else if len(inProgress) > 2 {
+						if components.Button(c, "收起", components.ButtonGhost).Clicked() {
+							s.ShowAllRuns = false
+						}
+					}
 				})
 				s.homeTemplates(c)
 				s.homeRuns(c)
@@ -498,7 +514,7 @@ func (s *Shell) designCard(c *ui.Context, design DesignItem) {
 func statusLabel(status string) string {
 	switch status {
 	case "in_progress":
-		return "执行中"
+		return "进行中" // UX-P5: canonical in-progress wording (was 执行中).
 	case "planned":
 		return "计划中"
 	case "completed":

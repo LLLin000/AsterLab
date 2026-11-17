@@ -166,9 +166,9 @@ func (a *app) deleteStepDialog(c *ui.Context, doc *asterdoc.Document) {
 	open := a.confirmDeleteStep != ""
 	components.Dialog(c, &open, components.DialogOptions{Label: "删除步骤"}, func(panel ui.Element) {
 		panel.Width(460).Children(func() {
-			ui.Text(c, "删除这个步骤？").FontSize(15).Bold()
+			ui.Text(c, "删除这个步骤？").FontSize(c.Theme().Rem(1.07)).Bold() // UX-P3: 15px → Rem.
 			ui.Text(c, fmt.Sprintf("该步骤有 %d 条连接、%d 个任务、%d 个检查项。删除会同时移除相关连接。", edges, tasks, checks)).
-				FontSize(12).TextColor(c.Theme().TextMuted)
+				FontSize(c.Theme().Rem(0.86)).TextColor(c.Theme().TextMuted) // UX-P3: 12px → Rem.
 			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(8).Children(func() {
 				if components.Button(c, "取消", components.ButtonSecondary).Clicked() {
 					a.confirmDeleteStep = ""
