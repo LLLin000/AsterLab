@@ -21,8 +21,9 @@ commit/PR and its evidence; anything without merged evidence is out of scope.
 - **Record panel**: same-source dual rendering (auto board + terminal
   archive) — UI-REC-10, merged `898d002` (PR #165).
 - **Experiment interactions**: blind switch, 1D lanes, exclusion, typed
-  readout — UI-EXP-10, merged `a31e04c` (PR #173); global timer strip and
-  run-well deep links — `feat(ui-int-10)`, merged `9e8a87a` (PR #162).
+  readout — UI-EXP-10, merged `a31e04c` (PR #173).
+- **Global timer strip + run-well deep links** — `feat(ui-int-10)`, merged `9e8a87a` (PR #162).
+- CLOSE-02…CLOSE-07 收口已合并（`0fac770` 前）：CLOSE-01 bridge 校验/笔记幂等（#182）；CLOSE-02 记录投影 + 归档终态持久化（`53a1a63`，#184）；CLOSE-03 OperationSpec/预算/多阶段计时（`2f2ce20`，#185）；CLOSE-04 记录面消费 Core 投影（`62fa199`，#186）；CLOSE-05 设计预算/冻结阶段计时（`431a404`，#187）；CLOSE-06 冻结蓝图采图补缺（`6010ab9`，#188）；CLOSE-07 统一入口/计时条/`asterlab://` 深链/导出命名（`0fac770`，#189）。
 - Smoke evidence that the panels ship in the installed app: RC-01 first
   launch shows the `AsterLab` main window with workspace nav
   (`evidence/RC-01/first-launch.png`).
@@ -44,7 +45,7 @@ commit/PR and its evidence; anything without merged evidence is out of scope.
 - Terminal record archive PDF export with embedded image board —
   `feat(ui-rec-pdf)`, merged `2ba3369` (PR #172).
 - Semantics (frozen-source hash check, revision/source-hash/Run-ID header,
-  wrapped CJK pagination, temp-file + rename write): `pdf-export.md`.
+  wrapped CJK pagination, temp-file + rename write): `release/pdf-export.md`.
 - Record text/vocabulary behind the export: RDO-01
   (`evidence/RDO-01/acceptance.txt`, L1 green).
 

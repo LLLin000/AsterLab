@@ -13,7 +13,7 @@
 | [`product/ux-contract.md`](product/ux-contract.md) | 当前六表面信息架构、UX 规则与布局契约 |
 | [`product/ownership.md`](product/ownership.md) | 文件所有权与并发开发泳道约束 |
 | [`architecture.md`](architecture.md) | 模块依赖、前后端职责、迁移方向（Slint 节为历史） |
-| [`contracts/core-v1.md`](contracts/core-v1.md) | P0 Core 查询/命令/身份/兼容契约（以及同目录 `operation-spec-v1.md` / `readout-schema-v1.md`） |
+| [`contracts/core-v1.md`](contracts/core-v1.md) | P0 Core 查询/命令/身份/兼容契约（以及同目录 `operation-spec-v1.md` / `operation-spec-v2.md`（v2 为 CLOSE-03 时间模型 sidecar 权威）/ `readout-schema-v1.md`；归档终态见 `record-closure.md`，多阶段计时见 `time-plan-closure.md`） |
 | [`sdk/README.md`](sdk/README.md) | AsterML Foundation v1、统一模块契约、SDK 开发指南 |
 | [`../DESIGN.md`](../DESIGN.md) | 视觉与交互规范；不反向定义领域对象 |
 | [`sdk/huvec-tube-formation-case/UI-REDESIGN.md`](sdk/huvec-tube-formation-case/UI-REDESIGN.md) | V2 实验台重构基线（含 `DESIGN.md` 与 [`sdk/cross-assay-primitives-audit.md`](sdk/cross-assay-primitives-audit.md)） |
@@ -28,7 +28,7 @@
 1. [`../README.md`](../README.md) & [`release/doc-authority.md`](release/doc-authority.md)
 2. [`../CONTEXT.md`](../CONTEXT.md) & [`../AGENT_API.md`](../AGENT_API.md)
 3. [`release/beta-scope.md`](release/beta-scope.md) & [`product/ux-contract.md`](product/ux-contract.md)
-4. [`contracts/core-v1.md`](contracts/core-v1.md)、[`contracts/operation-spec-v1.md`](contracts/operation-spec-v1.md)、[`contracts/readout-schema-v1.md`](contracts/readout-schema-v1.md)
+4. [`contracts/core-v1.md`](contracts/core-v1.md)、[`contracts/operation-spec-v1.md`](contracts/operation-spec-v1.md)、[`contracts/operation-spec-v2.md`](contracts/operation-spec-v2.md)、[`contracts/readout-schema-v1.md`](contracts/readout-schema-v1.md)（归档：[`contracts/record-closure.md`](contracts/record-closure.md)；计时：[`contracts/time-plan-closure.md`](contracts/time-plan-closure.md)）
 5. [`sdk/huvec-tube-formation-case/DESIGN.md`](sdk/huvec-tube-formation-case/DESIGN.md) → [`UI-REDESIGN.md`](sdk/huvec-tube-formation-case/UI-REDESIGN.md) → [`sdk/cross-assay-primitives-audit.md`](sdk/cross-assay-primitives-audit.md)
 ## 状态标记
 

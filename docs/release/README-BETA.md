@@ -33,9 +33,7 @@ state, not a defect (`beta-scope.md` §1.2).
 1. Launch **AsterLab MyGo** from the Start Menu or Desktop shortcut.
 2. A real `AsterLab` main window opens (workspace nav, `新建设计` available;
    captured in `evidence/RC-01/first-launch.png`).
-3. First launch creates `labworkbench.sqlite*` under the data directory:
-   default `%LOCALAPPDATA%\AsterLab`; override with `LABWORKBENCH_DATA_DIR`
-   (RC-01 verified first launch against an isolated data dir).
+3. First launch creates `labworkbench.sqlite*` under the data directory: default `%LOCALAPPDATA%\AsterLab\data` (data file `%LOCALAPPDATA%\AsterLab\data\labworkbench.sqlite`; `store.rs` falls back to `~/.local/share/AsterLab/data` only when `LOCALAPPDATA` is unset, i.e. non-Windows dev runs — not a Beta path). Override with `LABWORKBENCH_DATA_DIR` (RC-01 verified first launch against an isolated data dir).
 
 ## First workflow
 
@@ -43,8 +41,7 @@ Project → Design → Protocol → View/Workflow → Run → Actual Records →
 
 - Run creation is a human action in the UI.
 - Synthetic examples are explicitly marked synthetic.
-- `operator` / `checked_by` are recorded labels, not authenticated signatures.
-- Backup/restore: see `BACKUP_RESTORE.md`. Problems: see `TROUBLESHOOTING.md`.
+- Backup/restore: see `BACKUP_RESTORE.md` (in-app buttons) and the file semantics behind them. Proven: QA-05 closed-file copy/restore (4/4 rows, `integrity_check` ok). **Not proven:** the in-app button path end-to-end (RC-05 `notes-vs-scope.md`, DS-09 partial); concurrent restore / restore during writes is unsupported — finish writes first. Problems: see `TROUBLESHOOTING.md`.
 - What changed in this Beta: see `CHANGELOG.md`.
 
 ## Uninstall
