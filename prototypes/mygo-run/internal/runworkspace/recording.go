@@ -87,14 +87,24 @@ type RecordingView struct {
 	// Blind masks group identity in plate and table rendering. It is view
 	// state, not data: the toggle lives in the Run header/bench and Core's
 	// run.workspace blind projection is the authority (UX-P3, UX-DESIGN).
-	Blind          bool
-	Assets         []LinkedAsset
-	Task           *RunTaskViewModel
-	OnOpenAsset    func(asset LinkedAsset)
-	OnRelocate     func(asset LinkedAsset)
-	OnRelabelAsset func(asset LinkedAsset)
-	OnLinkFile     func(asset LinkedAsset)
-	OnTimeline     func()
+	Blind  bool
+	Assets []LinkedAsset
+	// PlannedWells/PlannedTimepoints/PlannedFOV carry the frozen plan's
+	// capture slots into the gallery so whole unphotographed wells render
+	// as gaps from the same source as the bench strip (UX-P4, UX-P5).
+	// Empty means the plan declares no slots; recorded extras still show.
+	PlannedWells      []string
+	PlannedTimepoints []string
+	PlannedFOV        int
+	Task              *RunTaskViewModel
+	OnOpenAsset       func(asset LinkedAsset)
+	OnRelocate        func(asset LinkedAsset)
+	OnRelabelAsset    func(asset LinkedAsset)
+	// OnUnlinkAsset drops one link through Core; the host syncs every
+	// surface after the write (UX-P5, UX-STATE).
+	OnUnlinkAsset func(asset LinkedAsset)
+	OnLinkFile    func(asset LinkedAsset)
+	OnTimeline    func()
 	// LinkErr holds the Core rejection cause for the last link attempt on this
 	// task so the recording surface can show cause + retry (UX-P5).
 	LinkErr string
@@ -400,6 +410,11 @@ func (r *RecordingView) renderTable(c *ui.Context) {
 
 // assetMatrix groups linked assets strictly by Core coordinates. Missing any
 // coordinate stays in the explicit unlabelled bucket; paths are never parsed.
+// Planned wells/timepoints from the frozen plan are unioned in so whole
+// unphotographed wells render as gaps instead of vanishing (UX-P4, UX-P5):
+// plan order first, recorded extras after. Gaps on planned-but-empty cells
+// are 1..fovPerWell; without a plan FOV only holes between recorded frames
+// are flagged, never a total.
 type assetMatrixCell struct {
 	WellID     string
 	Timepoint  string
@@ -408,7 +423,7 @@ type assetMatrixCell struct {
 	Gaps       []uint32
 }
 
-func assetMatrix(assets []LinkedAsset) []assetMatrixCell {
+func assetMatrix(assets []LinkedAsset, planWells, planTimepoints []string, fovPerWell int) []assetMatrixCell {
 	type key struct{ well, timepoint string }
 	groups := map[key][]LinkedAsset{}
 	for _, asset := range assets {
@@ -418,36 +433,90 @@ func assetMatrix(assets []LinkedAsset) []assetMatrixCell {
 		}
 		groups[k] = append(groups[k], asset)
 	}
-	keys := make([]key, 0, len(groups))
-	for k := range groups {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].well != keys[j].well {
-			return keys[i].well < keys[j].well
+	// The plan leads: planned wells render even with zero links.
+	wanted := map[string]bool{}
+	orderedWells := make([]string, 0, len(planWells))
+	for _, well := range planWells {
+		if well = strings.TrimSpace(well); well != "" && !wanted[well] {
+			wanted[well] = true
+			orderedWells = append(orderedWells, well)
 		}
-		return keys[i].timepoint < keys[j].timepoint
-	})
+	}
+	extraWells := []string{}
+	for k := range groups {
+		if k.well == "未标注" || wanted[k.well] {
+			continue
+		}
+		wanted[k.well] = true
+		extraWells = append(extraWells, k.well)
+	}
+	sort.Strings(extraWells)
+	orderedWells = append(orderedWells, extraWells...)
+	wantTime := map[string]bool{}
+	orderedTimes := make([]string, 0, len(planTimepoints))
+	for _, tp := range planTimepoints {
+		if tp = strings.TrimSpace(tp); tp != "" && !wantTime[tp] {
+			wantTime[tp] = true
+			orderedTimes = append(orderedTimes, tp)
+		}
+	}
+	extraTimes := []string{}
+	for k := range groups {
+		if k.timepoint == "" || wantTime[k.timepoint] {
+			continue
+		}
+		wantTime[k.timepoint] = true
+		extraTimes = append(extraTimes, k.timepoint)
+	}
+	sort.Strings(extraTimes)
+	orderedTimes = append(orderedTimes, extraTimes...)
+	keys := make([]key, 0, len(orderedWells)*len(orderedTimes)+1)
+	for _, well := range orderedWells {
+		for _, tp := range orderedTimes {
+			keys = append(keys, key{well, tp})
+		}
+	}
+	if _, ok := groups[key{"未标注", ""}]; ok {
+		keys = append(keys, key{"未标注", ""})
+	}
 	cells := make([]assetMatrixCell, 0, len(keys))
 	for _, k := range keys {
 		cell := assetMatrixCell{WellID: k.well, Timepoint: k.timepoint, Assets: groups[k]}
 		if k.well != "未标注" {
-			seen, max := map[uint32]bool{}, uint32(0)
+			seen := map[uint32]bool{}
 			for _, asset := range cell.Assets {
 				if !seen[asset.FOVIndex] {
 					cell.FOVIndices = append(cell.FOVIndices, asset.FOVIndex)
 					seen[asset.FOVIndex] = true
 				}
-				if asset.FOVIndex > max {
-					max = asset.FOVIndex
-				}
 			}
 			sort.Slice(cell.FOVIndices, func(i, j int) bool {
 				return cell.FOVIndices[i] < cell.FOVIndices[j]
 			})
-			for i := uint32(1); i < max; i++ {
-				if !seen[i] {
-					cell.Gaps = append(cell.Gaps, i)
+			if len(cell.Assets) == 0 {
+				// Whole well unphotographed: every planned slot is a gap.
+				for i := 1; i <= fovPerWell; i++ {
+					cell.Gaps = append(cell.Gaps, uint32(i))
+				}
+			} else if fovPerWell > 0 {
+				// Planned total bounds the row, like the bench strip.
+				for i := 1; i <= fovPerWell; i++ {
+					if !seen[uint32(i)] {
+						cell.Gaps = append(cell.Gaps, uint32(i))
+					}
+				}
+			} else {
+				// No plan: only flag holes, never a total.
+				var max uint32
+				for _, fov := range cell.FOVIndices {
+					if fov > max {
+						max = fov
+					}
+				}
+				for i := uint32(1); i < max; i++ {
+					if !seen[i] {
+						cell.Gaps = append(cell.Gaps, i)
+					}
 				}
 			}
 		}
@@ -464,7 +533,7 @@ func assetMatrix(assets []LinkedAsset) []assetMatrixCell {
 func (r *RecordingView) renderGallery(c *ui.Context) {
 	t := c.Theme()
 	tokens := theme.GetTokens(t)
-	cells := assetMatrix(r.Assets)
+	cells := assetMatrix(r.Assets, r.PlannedWells, r.PlannedTimepoints, r.PlannedFOV)
 	ui.Column(c).Key("recording-gallery").Gap(t.Space(2)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, "孔位 × 时间点").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.TextMuted)
@@ -511,8 +580,9 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 					times = append(times, cell.Timepoint)
 				}
 			}
-			sort.Strings(wells)
-			sort.Strings(times)
+			// Cells arrive in plan fill order (planned wells/timepoints
+			// first, recorded extras after); keep it so the strip and the
+			// gallery read the same frozen plan in the same order (UX-P4).
 			ui.Scroll(c).FillWidth().Children(func() {
 				ui.Column(c).MinWidth(float32(180 + 184*len(times))).Gap(t.Space(.5)).Children(func() {
 					ui.Row(c).Gap(t.Space(.5)).Children(func() {
@@ -528,7 +598,7 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 							for _, timepoint := range times {
 								cell, exists := byKey[[2]string{well, timepoint}]
 								matrixCellBox(c, "", tokens, t, 180, func() {
-									if !exists {
+									if !exists || (len(cell.Assets) == 0 && len(cell.Gaps) == 0) {
 										ui.Text(c, "1 个缺口 · 未关联视野").
 											FontSize(t.Rem(.7)).TextColor(tokens.WarningText)
 										if r.OnLinkFile != nil && components.Button(c, "补齐", components.ButtonSecondary).Clicked() {
@@ -552,8 +622,10 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 											}
 										}
 									}
-									ui.Text(c, fmt.Sprintf("FOV %v", cell.FOVIndices)).
-										FontSize(t.Rem(.7)).TextColor(t.Text)
+									if len(cell.FOVIndices) > 0 {
+										ui.Text(c, fmt.Sprintf("FOV %v", cell.FOVIndices)).
+											FontSize(t.Rem(.7)).TextColor(t.Text)
+									}
 								})
 							}
 						})
@@ -582,7 +654,7 @@ func (r *RecordingView) renderGallery(c *ui.Context) {
 			})
 		}
 		for _, a := range r.Assets {
-			assetRow(c, a, r.OnOpenAsset, r.OnRelocate, r.OnRelabelAsset, t, tokens)
+			assetRow(c, a, r.OnOpenAsset, r.OnRelocate, r.OnRelabelAsset, r.OnUnlinkAsset, t, tokens)
 		}
 		if len(r.Task.Actual.Measurements) > 0 {
 			ui.Divider(c)
@@ -609,7 +681,11 @@ func fovLabel(index uint32) string {
 	return strconv.FormatUint(uint64(index), 10)
 }
 
-func assetRow(c *ui.Context, a LinkedAsset, open, relocate, relabel func(LinkedAsset), t *ui.Theme, tokens theme.Tokens) {
+// assetRow renders one linked file with the actions its state allows: labelled
+// links can be opened, relabelled or unlinked; missing files keep relocation;
+// unlabelled files only offer relabelling. Every write goes through the host
+// callbacks into Core, and the host syncs all surfaces after (UX-P5, UX-STATE).
+func assetRow(c *ui.Context, a LinkedAsset, open, relocate, relabel, unlink func(LinkedAsset), t *ui.Theme, tokens theme.Tokens) {
 	ui.Row(c).FillWidth().Padding(t.Space(1.5), t.Space(2)).Radius(6).
 		Background(tokens.Elevated).Border(1, tokens.Border).
 		Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
@@ -629,7 +705,7 @@ func assetRow(c *ui.Context, a LinkedAsset, open, relocate, relabel func(LinkedA
 					SingleLine().Ellipsis("…")
 			}
 			if a.WellID == "" || a.Timepoint == "" || a.FOVIndex == 0 {
-				ui.Text(c, "未标注 · 需要 Core 提供坐标更新/解除关联接口").
+				ui.Text(c, "未标注 · 可重设坐标或解除关联").
 					FontSize(t.Rem(.68)).Bold().TextColor(tokens.WarningText)
 			}
 		})
@@ -637,6 +713,11 @@ func assetRow(c *ui.Context, a LinkedAsset, open, relocate, relabel func(LinkedA
 			if relabel != nil {
 				if components.Button(c, "重设坐标", components.ButtonGhost).Clicked() {
 					relabel(a)
+				}
+			}
+			if unlink != nil {
+				if components.Button(c, "解除关联", components.ButtonGhost).Clicked() {
+					unlink(a)
 				}
 			}
 			return
@@ -651,11 +732,26 @@ func assetRow(c *ui.Context, a LinkedAsset, open, relocate, relabel func(LinkedA
 					relocate(a)
 				}
 			}
+			if unlink != nil {
+				if components.Button(c, "解除关联", components.ButtonGhost).Clicked() {
+					unlink(a)
+				}
+			}
 			return
 		}
 		if open != nil {
 			if components.Button(c, "打开", components.ButtonGhost).Clicked() {
 				open(a)
+			}
+		}
+		if relabel != nil {
+			if components.Button(c, "重设坐标", components.ButtonGhost).Clicked() {
+				relabel(a)
+			}
+		}
+		if unlink != nil {
+			if components.Button(c, "解除关联", components.ButtonGhost).Clicked() {
+				unlink(a)
 			}
 		}
 	})

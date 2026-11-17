@@ -299,7 +299,7 @@ func TestAssetMatrixGroupsCoordinatesAndCountsFOVGapsOnce(t *testing.T) {
 		{AssetID: "fov1", WellID: "A1", Timepoint: "t6h", FOVIndex: 1},
 		{AssetID: "fov3-b", WellID: "A1", Timepoint: "t6h", FOVIndex: 3},
 		{AssetID: "other", WellID: "B1", Timepoint: "t6h", FOVIndex: 1},
-	})
+	}, nil, nil, 0)
 	if len(cells) != 2 || cells[0].WellID != "A1" || cells[0].Timepoint != "t6h" ||
 		cells[1].WellID != "B1" || cells[1].Timepoint != "t6h" {
 		t.Fatalf("matrix keys = %+v", cells)
@@ -318,7 +318,7 @@ func TestAssetMatrixGroupsCoordinatesAndCountsFOVGapsOnce(t *testing.T) {
 func TestAssetMatrixKeepsMissingCoordinatesUnlabelledWithoutPathInference(t *testing.T) {
 	cells := assetMatrix([]LinkedAsset{{
 		AssetID: "unlabelled", RelativePath: "A1_24h_F03.tif",
-	}})
+	}}, nil, nil, 0)
 	if len(cells) != 1 || cells[0].WellID != "未标注" || len(cells[0].Assets) != 1 ||
 		cells[0].Assets[0].WellID != "" || cells[0].Assets[0].Timepoint != "" ||
 		cells[0].Assets[0].FOVIndex != 0 {
@@ -399,16 +399,19 @@ func TestRecordingMatrixGapPrefillUsesCellCoordinates(t *testing.T) {
 	}
 }
 
-func TestUnlabelledAssetOffersRelabelActionAndLabelledDoesNot(t *testing.T) {
+func TestUnlabelledAssetOffersRelabelAndLabelledOffersRelabelUnlink(t *testing.T) {
 	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
-	var relabelled []LinkedAsset
+	var relabelled, unlinked []LinkedAsset
 	rv := &RecordingView{
 		Kind: ViewGallery, Task: vm.TaskByKey["t-read"],
-		Assets: []LinkedAsset{{AssetID: "unlabelled", RelativePath: "sample.tif", Available: true}},
+		Assets:      []LinkedAsset{{AssetID: "unlabelled", RelativePath: "sample.tif", Available: true}},
 		OnOpenAsset: func(LinkedAsset) { t.Fatal("unlabelled asset offered open action") },
 		OnRelocate:  func(LinkedAsset) { t.Fatal("unlabelled asset offered relocate action") },
 		OnRelabelAsset: func(asset LinkedAsset) {
 			relabelled = append(relabelled, asset)
+		},
+		OnUnlinkAsset: func(asset LinkedAsset) {
+			unlinked = append(unlinked, asset)
 		},
 	}
 	tt := ui.NewTester(func(c *ui.Context) {
@@ -416,7 +419,7 @@ func TestUnlabelledAssetOffersRelabelActionAndLabelledDoesNot(t *testing.T) {
 		rv.Render(c)
 	}, 900, 600)
 	tt.Frame()
-	if !tt.HasText("未标注 · 需要 Core 提供坐标更新/解除关联接口") {
+	if !tt.HasText("未标注 · 可重设坐标或解除关联") {
 		t.Fatalf("unlabelled explanation missing: %q", tt.Texts())
 	}
 	if tt.HasText("打开") || tt.HasText("重新定位") {
@@ -428,6 +431,12 @@ func TestUnlabelledAssetOffersRelabelActionAndLabelledDoesNot(t *testing.T) {
 	if len(relabelled) != 1 || relabelled[0].AssetID != "unlabelled" {
 		t.Fatalf("relabel callback = %+v, want unlabelled asset", relabelled)
 	}
+	if err := tt.Click("解除关联"); err != nil {
+		t.Fatalf("unlabelled asset did not offer unlink action: %v", err)
+	}
+	if len(unlinked) != 1 || unlinked[0].AssetID != "unlabelled" {
+		t.Fatalf("unlink callback = %+v, want unlabelled asset", unlinked)
+	}
 
 	rv.Assets = []LinkedAsset{{
 		AssetID: "labelled", RelativePath: "labelled.tif", Available: true,
@@ -435,10 +444,69 @@ func TestUnlabelledAssetOffersRelabelActionAndLabelledDoesNot(t *testing.T) {
 	}}
 	rv.OnOpenAsset = func(LinkedAsset) {}
 	tt.Frame()
-	if tt.HasText("重设坐标") {
-		t.Fatalf("labelled asset unexpectedly offered relabel action: %q", tt.Texts())
+	// A labelled link can be opened, relabelled to a corrected slot, or
+	// unlinked; all three go through Core and sync every surface (UX-P5).
+	for _, want := range []string{"打开", "重设坐标", "解除关联"} {
+		if !tt.HasText(want) {
+			t.Fatalf("labelled asset missing action %q: %q", want, tt.Texts())
+		}
 	}
-	if !tt.HasText("打开") {
-		t.Fatalf("labelled asset did not offer open action: %q", tt.Texts())
+}
+
+func TestAssetMatrixUnionsFrozenPlanWholeWellsAsGaps(t *testing.T) {
+	cells := assetMatrix([]LinkedAsset{
+		{AssetID: "a1", WellID: "A1", Timepoint: "6h", FOVIndex: 1},
+	}, []string{"A1", "A2", "A3"}, []string{"6h"}, 6)
+	if len(cells) != 3 {
+		t.Fatalf("plan union cells = %+v, want 3", cells)
+	}
+	byWell := map[string]assetMatrixCell{}
+	for _, cell := range cells {
+		byWell[cell.WellID] = cell
+	}
+	// Plan fill order leads; recorded extras would follow.
+	if cells[0].WellID != "A1" || cells[1].WellID != "A2" || cells[2].WellID != "A3" {
+		t.Fatalf("plan order lost: %+v", cells)
+	}
+	a1 := byWell["A1"]
+	if len(a1.Gaps) != 5 || a1.Gaps[0] != 2 || a1.Gaps[4] != 6 {
+		t.Fatalf("A1 gaps = %v, want [2..6]", a1.Gaps)
+	}
+	// Whole unphotographed wells surface every planned slot as a gap.
+	for _, well := range []string{"A2", "A3"} {
+		cell := byWell[well]
+		if len(cell.Assets) != 0 || len(cell.Gaps) != 6 || cell.Gaps[0] != 1 || cell.Gaps[5] != 6 {
+			t.Fatalf("%s = %+v, want empty with 6 gaps", well, cell)
+		}
+	}
+}
+
+func TestRecordingGalleryRendersWholePlanGapsWithRefill(t *testing.T) {
+	vm := BuildViewModel(makeSnapshot(), makeFrozenDoc())
+	var picked LinkedAsset
+	rv := &RecordingView{
+		Kind: ViewGallery, Task: vm.TaskByKey["t-read"],
+		Assets: []LinkedAsset{
+			{AssetID: "a1", WellID: "A1", Timepoint: "6h", FOVIndex: 1},
+		},
+		PlannedWells:      []string{"A1", "A2"},
+		PlannedTimepoints: []string{"6h"},
+		PlannedFOV:        2,
+		OnLinkFile:        func(asset LinkedAsset) { picked = asset },
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		rv.Render(c)
+	}, 900, 600)
+	tt.Frame()
+	// The unphotographed A2 renders from the plan with its own refill.
+	if !tt.HasText("2 个缺口 · FOV [1 2]") {
+		t.Fatalf("whole-plan gap missing: %q", tt.Texts())
+	}
+	if err := tt.Click("补齐 FOV 1"); err != nil {
+		t.Fatal(err)
+	}
+	if picked.WellID != "A2" || picked.Timepoint != "6h" || picked.FOVIndex != 1 {
+		t.Fatalf("whole-plan refill prefill = %+v, want A2/6h/FOV1", picked)
 	}
 }
