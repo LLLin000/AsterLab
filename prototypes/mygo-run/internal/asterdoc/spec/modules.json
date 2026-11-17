@@ -1,194 +1,19 @@
 {
   "schemaVersion": 1,
+  "foundationVersion": 1,
+  "sdkVersion": "2.0.0",
   "modules": [
     {
       "kind": "plate",
       "schema": 1,
-      "title": "孔板",
-      "description": "参数化孔板；format 选择孔板几何，groups 分配组别，samples 与 replicates 显式记录孔位身份；可选 mix_* 字段按实际孔位/复孔导出 GelMA 配平与细胞接种派生值。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true,
-          "description": "固定为 plate"
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true,
-          "description": "文档内稳定 ID"
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true,
-          "description": "模块版本，当前为 1"
-        },
-        {
-          "name": "format",
-          "type": "int",
-          "required": true,
-          "description": "孔数：6/12/24/48/96/384"
-        },
-        {
-          "name": "assay",
-          "type": "reference",
-          "description": "关联检测 ID",
-          "target": "assay"
-        },
-        {
-          "name": "timepoint",
-          "type": "timepoint",
-          "description": "该布局所属时间点"
-        },
-        {
-          "name": "groups",
-          "type": "well-map",
-          "required": true,
-          "description": "组名到孔位列表"
-        },
-        {
-          "name": "samples",
-          "type": "object",
-          "description": "孔位到显式 sample ID；不可根据组别或孔位顺序推断独立样本。"
-        },
-        {
-          "name": "replicates",
-          "type": "object",
-          "description": "孔位到正整数技术重复编号；每个重复编号都必须关联显式 sample ID。"
-        },
-        {
-          "name": "mix_volume_per_well",
-          "type": "quantity",
-          "dimension": "volume",
-          "description": "每孔工作体积；孔数取自 groups 的实际孔位，技术复孔按实际孔位计数。"
-        },
-        {
-          "name": "mix_excess_ratio",
-          "type": "decimal",
-          "description": "配制余量比例，例如 0.1 表示多配 10%；只作用于工作体积，不加到死体积。"
-        },
-        {
-          "name": "mix_gelma_percent_by_group",
-          "type": "object",
-          "description": "组名到 GelMA 目标浓度 % w/v（g/100 mL）的映射；键必须与 groups 完全一致。"
-        },
-        {
-          "name": "mix_lap_stock_percent",
-          "type": "decimal",
-          "description": "LAP 母液浓度 % w/v；与 mix_lap_final_percent 一起决定母液体积。"
-        },
-        {
-          "name": "mix_lap_final_percent",
-          "type": "decimal",
-          "description": "LAP 工作浓度 % w/v；不得高于 mix_lap_stock_percent。"
-        },
-        {
-          "name": "mix_cell_density",
-          "type": "quantity",
-          "dimension": "cells_per_well",
-          "description": "目标接种密度；与 groups 孔数、每孔悬液体积和余量一起导出细胞总数。"
-        },
-        {
-          "name": "mix_factor_stock_concentration",
-          "type": "quantity",
-          "dimension": "mass_concentration",
-          "description": "因子母液浓度；与 mix_factor_final_concentration 同时提供或同时省略。"
-        },
-        {
-          "name": "mix_factor_final_concentration",
-          "type": "quantity",
-          "dimension": "mass_concentration",
-          "description": "因子工作浓度；不得高于母液浓度。"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "rows",
-          "type": "int",
-          "description": "由 format 决定的行数",
-          "origin": "view"
-        },
-        {
-          "name": "columns",
-          "type": "int",
-          "description": "由 format 决定的列数",
-          "origin": "view"
-        },
-        {
-          "name": "wells",
-          "type": "well-map",
-          "description": "孔位到组名",
-          "origin": "view"
-        },
-        {
-          "name": "samples",
-          "type": "object",
-          "description": "孔位到显式 sample ID",
-          "origin": "view"
-        },
-        {
-          "name": "replicates",
-          "type": "object",
-          "description": "孔位到技术重复编号",
-          "origin": "view"
-        },
-        {
-          "name": "mix_gel_mastermix",
-          "type": "object",
-          "description": "按 groups 实际孔数导出的组级 GelMA 干粉质量、LAP 母液体积与溶剂体积；只读派生值。",
-          "origin": "derived",
-          "calculator": "gel.mastermix.v1"
-        },
-        {
-          "name": "mix_cell_seeding",
-          "type": "object",
-          "description": "按 groups 实际孔数导出的组级细胞总数、悬液体积与因子母液加入量；只读派生值。",
-          "origin": "derived",
-          "calculator": "cell.seeding.v1"
-        }
-      ],
-      "actions": [
-        {
-          "id": "assign_wells",
-          "title": "将选中孔位归入组别",
-          "permission": "document.edit",
-          "writes": [
-            "groups"
-          ]
-        },
-        {
-          "id": "clear_wells",
-          "title": "清除所选孔位",
-          "permission": "document.edit",
-          "writes": [
-            "groups",
-            "samples",
-            "replicates"
-          ]
-        }
-      ],
-      "rules": [
-        "plate-geometry-wells",
-        "plate-mix-fields"
-      ],
-      "sdk": "1.0.0",
+      "title": "标准容器 / 孔板",
+      "description": "通用实验容器几何与组别/样本/孔位角色映射（6/12/24/48/96/384孔板、1D管架/泳道、培养皿、笼位）；不含任何实验专用配液公式。",
+      "sdk": "2.0.0",
       "category": "labware",
       "capabilities": [
         "well-plate",
         "well-assignment",
-        "plate-geometry",
-        "quantity",
-        "deterministic-calculation",
-        "derived-output"
+        "plate-geometry"
       ],
       "permissions": [
         "document.edit"
@@ -209,13 +34,7 @@
       "provenance": {
         "origin": "planned",
         "record_boundary": "run"
-      }
-    },
-    {
-      "kind": "reference",
-      "schema": 1,
-      "title": "引用",
-      "description": "引用已有对象（孔板、读数批次或事件），不复制其数据。",
+      },
       "modes": [
         "design",
         "protocol",
@@ -224,53 +43,403 @@
         "review"
       ],
       "inputs": [
+        {"name": "kind", "type": "string", "required": true, "description": "固定为 plate"},
+        {"name": "id", "type": "string", "required": true, "description": "文档内稳定 ID"},
+        {"name": "schema", "type": "int", "required": true, "description": "模块版本，当前为 1"},
+        {"name": "title", "type": "string", "description": "容器标题"},
+        {"name": "format", "type": "int", "required": true, "description": "标准孔板孔数 6/12/24/48/96/384，或自定义槽位数"},
         {
-          "name": "kind",
-          "type": "string",
-          "required": true,
-          "description": "固定为 reference"
+          "name": "topology",
+          "type": "enum",
+          "values": ["plate", "rack_1d", "dish", "cohort"],
+          "description": "容器拓扑类型，默认 plate"
         },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true,
-          "description": "文档内稳定 ID"
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true,
-          "description": "模块版本，当前为 1"
-        },
-        {
-          "name": "ref",
-          "type": "string",
-          "required": true,
-          "description": "目标对象 ID，可带类型前缀"
-        },
-        {
-          "name": "view",
-          "type": "string",
-          "description": "目标视图，例如 plate-readout"
-        }
+        {"name": "rows", "type": "int", "description": "自定义行数"},
+        {"name": "columns", "type": "int", "description": "自定义列数"},
+        {"name": "assay", "type": "reference", "target": "assay", "description": "关联检测 ID"},
+        {"name": "timepoint", "type": "timepoint", "description": "所属时间点"},
+        {"name": "groups", "type": "well-map", "required": true, "description": "组别 ID 到孔位/槽位列表"},
+        {"name": "samples", "type": "object", "description": "孔位到显式 sample ID"},
+        {"name": "replicates", "type": "object", "description": "孔位到正整数技术重复编号"},
+        {"name": "roles", "type": "object", "description": "孔位到角色（sample/blank/vehicle/positive_control/negative_control/standard/ntc）"}
       ],
       "outputs": [
-        {
-          "name": "target",
-          "type": "string",
-          "description": "解析后的目标 ID；未解析时为空",
-          "origin": "view"
-        }
+        {"name": "rows", "type": "int", "origin": "view"},
+        {"name": "columns", "type": "int", "origin": "view"},
+        {"name": "wells", "type": "well-map", "origin": "view"},
+        {"name": "samples", "type": "object", "origin": "view"},
+        {"name": "replicates", "type": "object", "origin": "view"}
+      ],
+      "actions": [
+        {"id": "assign_wells", "title": "将选中孔位归入组别", "permission": "document.edit", "writes": ["groups"]},
+        {"id": "clear_wells", "title": "清除所选孔位", "permission": "document.edit", "writes": ["groups", "samples", "replicates", "roles"]}
+      ],
+      "rules": ["plate-geometry-wells"]
+    },
+    {
+      "kind": "prose",
+      "schema": 1,
+      "title": "富文本 / 注意事项",
+      "description": "通用说明段落、操作提示、安全或关键质控注意卡片。",
+      "sdk": "2.0.0",
+      "category": "document",
+      "capabilities": ["rich-text", "callout"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "prose.editor",
+        "document": "prose.viewer",
+        "run": "prose.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {"name": "tone", "type": "enum", "values": ["plain", "note", "warning", "tip"]},
+        {"name": "body", "type": "string", "required": true}
+      ],
+      "outputs": [],
+      "actions": [],
+      "rules": ["prose-fields"]
+    },
+    {
+      "kind": "group_table",
+      "schema": 1,
+      "title": "分组表",
+      "description": "以紧凑结构化表格集中定义实验分组、角色、处理条件、独立样本数与技术重复。",
+      "sdk": "2.0.0",
+      "category": "workflow",
+      "capabilities": ["group-definition"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "group_table.editor",
+        "document": "group_table.viewer",
+        "run": "group_table.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {"name": "rows", "type": "object-list", "required": true, "description": "分组行：{id, name, role, condition, independent_n, technical_repeats}"}
+      ],
+      "outputs": [
+        {"name": "group_specs", "type": "object", "origin": "view"}
       ],
       "actions": [],
-      "rules": [
-        "reference-ref"
+      "rules": ["group_table-fields"]
+    },
+    {
+      "kind": "param_table",
+      "schema": 1,
+      "title": "参数表",
+      "description": "通用步骤参数表：Design 记录计划值与单位，Run 可按需补记实测值与偏差。",
+      "sdk": "2.0.0",
+      "category": "measurement",
+      "capabilities": ["parameter-table", "quantity"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "param_table.editor",
+        "document": "param_table.viewer",
+        "run": "param_table.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {"name": "rows", "type": "object-list", "required": true, "description": "参数行：{key, label, value, unit, record_actual, note}"}
       ],
-      "sdk": "1.0.0",
+      "outputs": [
+        {"name": "parameters", "type": "object", "origin": "view"}
+      ],
+      "actions": [],
+      "rules": ["param_table-fields"]
+    },
+    {
+      "kind": "figure",
+      "schema": 1,
+      "title": "图片 / SVG 示意图",
+      "description": "只承担视觉补充表达（手绘图、Agent 生成 SVG、本地图片引用），不承担结构化科学数据职责。",
+      "sdk": "2.0.0",
       "category": "document",
-      "capabilities": [
-        "typed-reference"
+      "capabilities": ["figure", "svg-illustration"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "figure.editor",
+        "document": "figure.viewer",
+        "run": "figure.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {"name": "src", "type": "string", "description": "本地相对路径或外部文件引用"},
+        {"name": "svg", "type": "string", "description": "内联 SVG 矢量源码"},
+        {"name": "caption", "type": "string"},
+        {"name": "annotations", "type": "object-list", "description": "可选叠加标签 {x, y, label}"},
+        {"name": "max_height", "type": "int"}
       ],
+      "outputs": [],
+      "actions": [],
+      "rules": ["figure-fields"]
+    },
+    {
+      "kind": "data_table",
+      "schema": 1,
+      "title": "通用数据表",
+      "description": "自定义列结构（文本/数值+单位/分类/公式列/有效区间校验），Design 定义表头与预填行，Run 支持 CSV 粘贴、缺失限定词与实测写入。",
+      "sdk": "2.0.0",
+      "category": "measurement",
+      "capabilities": ["data-table", "readout-schema"],
+      "permissions": ["document.edit", "run.readout"],
+      "renderers": {
+        "design": "data_table.editor",
+        "document": "data_table.viewer",
+        "run": "data_table.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {"name": "schema_id", "type": "string"},
+        {"name": "endpoint", "type": "string"},
+        {"name": "bind_groups", "type": "bool"},
+        {"name": "container_ref", "type": "reference", "target": "plate"},
+        {"name": "columns", "type": "object-list", "required": true, "description": "列定义：{key, label, value_kind, unit, options, formula, min, max}"},
+        {"name": "rows", "type": "object-list", "description": "可选预填计划行"}
+      ],
+      "outputs": [
+        {"name": "table_view", "type": "object", "origin": "view"}
+      ],
+      "actions": [],
+      "rules": ["data_table-fields"]
+    },
+    {
+      "kind": "checklist",
+      "schema": 1,
+      "title": "检查清单",
+      "description": "步骤内可自由穿插的核对清单与条件豁免规则（支持必检项与按规则跳过）。",
+      "sdk": "2.0.0",
+      "category": "workflow",
+      "capabilities": ["checklist", "rule-skip"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "checklist.editor",
+        "document": "checklist.viewer",
+        "run": "checklist.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {"name": "items", "type": "object-list", "required": true, "description": "{id, label, blocking, allow_rule_skip, skip_rule}"}
+      ],
+      "outputs": [],
+      "actions": [],
+      "rules": ["checklist-fields"]
+    },
+    {
+      "kind": "calculator",
+      "schema": 1,
+      "title": "通用计算器",
+      "description": "能力级通用配方与算量模块：支持溶液稀释、分组配平母液、梯度稀释、逐样本配平与自定义算术公式；派生值只读，不写 Run 事实。",
+      "sdk": "2.0.0",
+      "category": "measurement",
+      "capabilities": ["quantity", "deterministic-calculation", "derived-output"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "calculator.editor",
+        "document": "calculator.viewer",
+        "run": "calculator.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {
+          "name": "mode",
+          "type": "enum",
+          "values": ["dilution", "group_mastermix", "serial_dilution", "sample_normalize", "formula"],
+          "required": true
+        },
+        {"name": "stock", "type": "quantity"},
+        {"name": "target", "type": "quantity"},
+        {"name": "final_volume", "type": "quantity", "dimension": "volume"},
+        {"name": "sample_count", "type": "int"},
+        {"name": "volume_per_unit", "type": "quantity", "dimension": "volume"},
+        {"name": "excess_ratio", "type": "decimal"},
+        {"name": "plate_ref", "type": "reference", "target": "plate"},
+        {"name": "components", "type": "object-list"},
+        {"name": "dilution_factor", "type": "decimal"},
+        {"name": "steps_count", "type": "int"},
+        {"name": "formula", "type": "string"},
+        {"name": "inputs", "type": "object"}
+      ],
+      "outputs": [
+        {"name": "derived_table", "type": "object", "origin": "derived", "calculator": "calculator.v2"}
+      ],
+      "actions": [],
+      "rules": ["calculator-fields"]
+    },
+    {
+      "kind": "timer",
+      "schema": 1,
+      "title": "计时器",
+      "description": "可自由嵌入步骤的倒计时、正计时秒表、多阶段循环计时与时间锚点窗口，由 Core 持久化状态机执行。",
+      "sdk": "2.0.0",
+      "category": "workflow",
+      "capabilities": ["timer", "time-schedule"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "timer.editor",
+        "document": "timer.viewer",
+        "run": "timer.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {"name": "mode", "type": "enum", "values": ["countdown", "stopwatch", "cycle", "window"], "required": true},
+        {"name": "duration", "type": "quantity", "dimension": "time"},
+        {"name": "rounds", "type": "int"},
+        {"name": "phases", "type": "object-list"},
+        {"name": "anchor", "type": "string"},
+        {"name": "offset", "type": "quantity", "dimension": "time"},
+        {"name": "schedule_window", "type": "string"}
+      ],
+      "outputs": [],
+      "actions": [],
+      "rules": ["timer-fields"]
+    },
+    {
+      "kind": "attachment",
+      "schema": 1,
+      "title": "文件附件与采图槽",
+      "description": "通用文件与照片挂载模块：Design 挂载参考资料/SOP，Run 支持步骤现场随手拍或按容器坐标多槽位采图。",
+      "sdk": "2.0.0",
+      "category": "document",
+      "capabilities": ["attachment", "asset-link"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "attachment.editor",
+        "document": "attachment.viewer",
+        "run": "attachment.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string"},
+        {"name": "scope", "type": "enum", "values": ["design_ref", "step_evidence", "container_grid"], "required": true},
+        {"name": "container_ref", "type": "reference", "target": "plate"},
+        {"name": "slots_per_cell", "type": "int"},
+        {"name": "media_hint", "type": "string"},
+        {"name": "files", "type": "object-list"}
+      ],
+      "outputs": [],
+      "actions": [],
+      "rules": ["attachment-fields"]
+    },
+    {
+      "kind": "subflow",
+      "schema": 1,
+      "title": "子流程",
+      "description": "步骤内可折叠的细分子操作列表，用于收拢多步细节而不撑爆主流程导航。",
+      "sdk": "2.0.0",
+      "category": "workflow",
+      "capabilities": ["subflow", "step-definition"],
+      "permissions": ["document.edit"],
+      "renderers": {
+        "design": "subflow.editor",
+        "document": "subflow.viewer",
+        "run": "subflow.run"
+      },
+      "lifecycle": {
+        "states": ["draft", "validated", "frozen"],
+        "freeze": "immutable-revision"
+      },
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string", "required": true},
+        {"name": "collapsed", "type": "bool"},
+        {"name": "items", "type": "object-list", "required": true, "description": "{id, title, note, duration, check}"}
+      ],
+      "outputs": [],
+      "actions": [],
+      "rules": ["subflow-fields"]
+    },
+    {
+      "kind": "reference",
+      "schema": 1,
+      "title": "引用",
+      "description": "引用已有对象（孔板、读数批次或事件），不复制其数据。",
+      "sdk": "2.0.0",
+      "category": "document",
+      "capabilities": ["typed-reference"],
       "permissions": [],
       "renderers": {
         "design": "generic.editor",
@@ -278,138 +447,32 @@
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "ref", "type": "string", "required": true},
+        {"name": "view", "type": "string"}
+      ],
+      "outputs": [
+        {"name": "target", "type": "string", "origin": "view"}
+      ],
+      "actions": [],
+      "rules": ["reference-ref"]
     },
     {
       "kind": "experiment",
       "schema": 1,
       "title": "实验",
-      "description": "实验级科研语义与计划字段。模块只保存计划，实际执行由 Run 记录。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "title",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "objective",
-          "type": "string"
-        },
-        {
-          "name": "research_question",
-          "type": "string"
-        },
-        {
-          "name": "hypothesis",
-          "type": "string"
-        },
-        {
-          "name": "experimental_unit",
-          "type": "string"
-        },
-        {
-          "name": "factors",
-          "type": "object-list"
-        },
-        {
-          "name": "timepoints",
-          "type": "string[]"
-        },
-        {
-          "name": "primary_endpoint",
-          "type": "string"
-        },
-        {
-          "name": "endpoint_method",
-          "type": "string"
-        },
-        {
-          "name": "endpoint_unit",
-          "type": "string"
-        },
-        {
-          "name": "controls",
-          "type": "string"
-        },
-        {
-          "name": "analysis_plan",
-          "type": "string"
-        },
-        {
-          "name": "sample_size_rationale",
-          "type": "string"
-        },
-        {
-          "name": "randomization",
-          "type": "string"
-        },
-        {
-          "name": "blinding",
-          "type": "string"
-        },
-        {
-          "name": "inclusion_criteria",
-          "type": "string"
-        },
-        {
-          "name": "exclusion_criteria",
-          "type": "string"
-        },
-        {
-          "name": "planned_run_count",
-          "type": "int"
-        },
-        {
-          "name": "planned_run_relationship",
-          "type": "string"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "design_fields",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [],
-      "sdk": "1.0.0",
+      "description": "实验级科研语义与计划字段；只保存计划，实际执行由 Run 记录。",
+      "sdk": "2.0.0",
       "category": "workflow",
-      "capabilities": [
-        "experiment-plan"
-      ],
+      "capabilities": ["experiment-plan"],
       "permissions": [],
       "renderers": {
         "design": "generic.editor",
@@ -417,84 +480,49 @@
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string", "required": true},
+        {"name": "objective", "type": "string"},
+        {"name": "research_question", "type": "string"},
+        {"name": "hypothesis", "type": "string"},
+        {"name": "experimental_unit", "type": "string"},
+        {"name": "factors", "type": "object-list"},
+        {"name": "timepoints", "type": "string[]"},
+        {"name": "primary_endpoint", "type": "string"},
+        {"name": "endpoint_method", "type": "string"},
+        {"name": "endpoint_unit", "type": "string"},
+        {"name": "controls", "type": "string"},
+        {"name": "analysis_plan", "type": "string"},
+        {"name": "sample_size_rationale", "type": "string"},
+        {"name": "randomization", "type": "string"},
+        {"name": "blinding", "type": "string"},
+        {"name": "inclusion_criteria", "type": "string"},
+        {"name": "exclusion_criteria", "type": "string"},
+        {"name": "planned_run_count", "type": "int"},
+        {"name": "planned_run_relationship", "type": "string"}
+      ],
+      "outputs": [
+        {"name": "design_fields", "type": "object", "origin": "view"}
+      ],
+      "actions": [],
+      "rules": []
     },
     {
       "kind": "group",
       "schema": 1,
       "title": "分组",
       "description": "稳定分组身份与科学属性；颜色等显示配置不属于身份。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "role",
-          "type": "string"
-        },
-        {
-          "name": "condition",
-          "type": "string"
-        },
-        {
-          "name": "independent_n",
-          "type": "int"
-        },
-        {
-          "name": "technical_repeats",
-          "type": "int"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "group_spec",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "group-fields"
-      ],
-      "sdk": "1.0.0",
+      "sdk": "2.0.0",
       "category": "workflow",
-      "capabilities": [
-        "group-definition"
-      ],
+      "capabilities": ["group-definition"],
       "permissions": [],
       "renderers": {
         "design": "generic.editor",
@@ -502,121 +530,35 @@
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "name", "type": "string", "required": true},
+        {"name": "role", "type": "string"},
+        {"name": "condition", "type": "string"},
+        {"name": "independent_n", "type": "int"},
+        {"name": "technical_repeats", "type": "int"}
+      ],
+      "outputs": [
+        {"name": "group_spec", "type": "object", "origin": "view"}
+      ],
+      "actions": [],
+      "rules": ["group-fields"]
     },
     {
       "kind": "assay",
       "schema": 1,
       "title": "检测",
-      "description": "检测定义、protocol 版本与时间点；执行读数仍由 Run 记录。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "title",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "endpoint",
-          "type": "string"
-        },
-        {
-          "name": "method",
-          "type": "string"
-        },
-        {
-          "name": "unit",
-          "type": "string"
-        },
-        {
-          "name": "group_refs",
-          "type": "list",
-          "item_type": "reference",
-          "target": "group"
-        },
-        {
-          "name": "timepoints",
-          "type": "string[]"
-        },
-        {
-          "name": "protocol_version_id",
-          "type": "string"
-        },
-        {
-          "name": "controls",
-          "type": "string[]"
-        },
-        {
-          "name": "timepoint_relation",
-          "type": "string"
-        },
-        {
-          "name": "technical_replicates",
-          "type": "int"
-        },
-        {
-          "name": "control_group_ref",
-          "type": "reference",
-          "target": "group"
-        },
-        {
-          "name": "calibrator_group_ref",
-          "type": "reference",
-          "target": "group"
-        },
-        {
-          "name": "reference_genes",
-          "type": "string[]"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "assay_plan",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "assay-fields"
-      ],
-      "sdk": "1.0.0",
+      "description": "通用检测定义与测量端点；移除具体实验专用字段。",
+      "sdk": "2.0.0",
       "category": "measurement",
-      "capabilities": [
-        "assay-plan",
-        "measurement-endpoint"
-      ],
+      "capabilities": ["assay-plan", "measurement-endpoint"],
       "permissions": [],
       "renderers": {
         "design": "generic.editor",
@@ -624,419 +566,116 @@
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string", "required": true},
+        {"name": "endpoint", "type": "string"},
+        {"name": "method", "type": "string"},
+        {"name": "unit", "type": "string"},
+        {"name": "group_refs", "type": "list", "item_type": "reference", "target": "group"},
+        {"name": "timepoints", "type": "string[]"},
+        {"name": "protocol_version_id", "type": "string"},
+        {"name": "controls", "type": "string[]"},
+        {"name": "timepoint_relation", "type": "string"},
+        {"name": "technical_replicates", "type": "int"},
+        {"name": "control_group_ref", "type": "reference", "target": "group"}
+      ],
+      "outputs": [
+        {"name": "assay_plan", "type": "object", "origin": "view"}
+      ],
+      "actions": [],
+      "rules": ["assay-fields"]
     },
     {
       "kind": "step",
       "schema": 1,
       "title": "步骤",
-      "description": "一个可执行步骤；通过 path 绑定 protocol 步骤，不靠标题推断。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "title",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "assay",
-          "type": "reference",
-          "target": "assay"
-        },
-        {
-          "name": "timepoints",
-          "type": "string[]"
-        },
-        {
-          "name": "path",
-          "type": "string"
-        },
-        {
-          "name": "order",
-          "type": "int"
-        },
-        {
-          "name": "checks",
-          "type": "object-list"
-        },
-        {
-          "name": "tasks",
-          "type": "object-list",
-          "description": "步骤计划中的任务/检查项"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "step_task",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "step-fields"
-      ],
-      "sdk": "1.0.0",
+      "description": "AsterML v2 自包含可自由组合步骤：通过 blocks[] 按任意顺序嵌入通用内容模块，并可选引用共享模块 ID。",
+      "sdk": "2.0.0",
       "category": "workflow",
-      "capabilities": [
-        "step-definition",
-        "workflow-edge"
-      ],
-      "permissions": [],
+      "capabilities": ["step-definition", "workflow-edge"],
+      "permissions": ["document.edit"],
       "renderers": {
         "design": "generic.editor",
         "document": "step.viewer",
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
+      "inputs": [
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "title", "type": "string", "required": true},
+        {"name": "execution", "type": "enum", "values": ["executable", "organizational"]},
+        {"name": "assay", "type": "reference", "target": "assay"},
+        {"name": "timepoints", "type": "string[]"},
+        {"name": "path", "type": "string"},
+        {"name": "order", "type": "int"},
+        {"name": "block_refs", "type": "string[]", "description": "引用的顶层共享模块 ID 列表"},
+        {"name": "blocks", "type": "object-list", "description": "步骤内有序排列的通用内容模块数组"},
+        {"name": "checks", "type": "object-list"},
+        {"name": "tasks", "type": "object-list"},
+        {"name": "uses", "type": "list", "item_type": "object"}
+      ],
+      "outputs": [
+        {"name": "step_task", "type": "object", "origin": "view"}
+      ],
+      "actions": [],
+      "rules": ["step-execution", "step-blocks"]
     },
     {
       "kind": "workflow",
       "schema": 1,
       "title": "流程",
-      "description": "步骤依赖与业务顺序；画布坐标不属于科学事实。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "steps",
-          "type": "list",
-          "required": true,
-          "item_type": "reference",
-          "target": "step"
-        },
-        {
-          "name": "edges",
-          "type": "object-list"
-        },
-        {
-          "name": "business_order",
-          "type": "string[]"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "workflow_graph",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "workflow-fields"
-      ],
-      "sdk": "1.0.0",
+      "description": "步骤依赖与业务顺序；可选块，省略时按步骤声明顺序投影。",
+      "sdk": "2.0.0",
       "category": "workflow",
-      "capabilities": [
-        "workflow-graph"
-      ],
+      "capabilities": ["workflow-graph"],
       "permissions": [],
       "renderers": {
         "document": "workflow.viewer",
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
-    },
-    {
-      "kind": "dilution",
-      "schema": 1,
-      "title": "稀释计算",
-      "description": "由母液浓度、目标浓度和终体积计算母液体积与稀释液体积；输出是派生值，不写 Run 事实。",
-      "sdk": "1.0.0",
-      "category": "measurement",
-      "capabilities": [
-        "quantity",
-        "deterministic-calculation",
-        "derived-output"
-      ],
-      "permissions": [],
-      "renderers": {
-        "design": "generic.editor",
-        "document": "dilution.viewer",
-        "run": "generic.run"
-      },
-      "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
-        "freeze": "immutable-revision"
-      },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      },
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
       "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "stock",
-          "type": "quantity",
-          "required": true,
-          "dimension": "mass_concentration",
-          "description": "母液浓度，例如 20 mg/mL"
-        },
-        {
-          "name": "target",
-          "type": "quantity",
-          "required": true,
-          "dimension": "mass_concentration",
-          "description": "目标浓度，例如 2 mg/mL"
-        },
-        {
-          "name": "final_volume",
-          "type": "quantity",
-          "required": true,
-          "dimension": "volume",
-          "description": "终体积，例如 5 mL"
-        }
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "steps", "type": "list", "item_type": "reference", "target": "step", "required": true},
+        {"name": "edges", "type": "object-list"},
+        {"name": "business_order", "type": "string[]"}
       ],
       "outputs": [
-        {
-          "name": "stock_volume",
-          "type": "quantity",
-          "dimension": "volume",
-          "origin": "derived",
-          "calculator": "dilution.v1",
-          "description": "所需母液体积"
-        },
-        {
-          "name": "diluent_volume",
-          "type": "quantity",
-          "dimension": "volume",
-          "origin": "derived",
-          "calculator": "dilution.v1",
-          "description": "补足到终体积的稀释液体积"
-        }
+        {"name": "workflow_graph", "type": "object", "origin": "view"}
       ],
       "actions": [],
-      "rules": [
-        "dilution-fields"
-      ]
-    },
-    {
-      "kind": "rna_reagent_usage",
-      "schema": 1,
-      "title": "RNA reagent usage calculator",
-      "description": "由样本数、每样本体积、母液浓度、目标浓度与额外比例计算母液体积、稀释液体积与总体积；输出是派生值，不写 Run 事实。",
-      "sdk": "1.0.0",
-      "category": "measurement",
-      "capabilities": [
-        "quantity",
-        "deterministic-calculation",
-        "derived-output"
-      ],
-      "permissions": [],
-      "renderers": {
-        "design": "generic.editor",
-        "document": "rna_reagent_usage.viewer",
-        "run": "generic.run"
-      },
-      "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
-        "freeze": "immutable-revision"
-      },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      },
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "sample_count",
-          "type": "int",
-          "required": true,
-          "description": "样本数"
-        },
-        {
-          "name": "volume_per_sample",
-          "type": "quantity",
-          "required": true,
-          "dimension": "volume",
-          "description": "每样本体积"
-        },
-        {
-          "name": "stock_concentration",
-          "type": "quantity",
-          "required": true,
-          "dimension": "mass_concentration",
-          "description": "母液浓度"
-        },
-        {
-          "name": "target_concentration",
-          "type": "quantity",
-          "required": true,
-          "dimension": "mass_concentration",
-          "description": "目标浓度"
-        },
-        {
-          "name": "extra_ratio",
-          "type": "decimal",
-          "required": false,
-          "description": "额外比例"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "stock_volume",
-          "type": "quantity",
-          "dimension": "volume",
-          "origin": "derived",
-          "calculator": "rna.reagent_usage.v1",
-          "description": "所需母液体积"
-        },
-        {
-          "name": "diluent_volume",
-          "type": "quantity",
-          "dimension": "volume",
-          "origin": "derived",
-          "calculator": "rna.reagent_usage.v1",
-          "description": "稀释液体积"
-        },
-        {
-          "name": "total_volume",
-          "type": "quantity",
-          "dimension": "volume",
-          "origin": "derived",
-          "calculator": "rna.reagent_usage.v1",
-          "description": "总体积"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "rna-reagent-fields"
-      ]
+      "rules": ["workflow-fields"]
     },
     {
       "kind": "instrument_profile",
       "schema": 1,
       "title": "仪器能力档案",
-      "description": "仪器/型号的能力与限制声明；不是某台设备、校准状态或执行记录，也不连接硬件。",
-      "sdk": "1.0.0",
+      "description": "仪器/型号的能力与限制声明，不连接硬件。",
+      "sdk": "2.0.0",
       "category": "resource",
-      "capabilities": [
-        "instrument-profile",
-        "capability-declaration"
-      ],
+      "capabilities": ["instrument-profile", "capability-declaration"],
       "permissions": [],
       "renderers": {
         "design": "generic.editor",
@@ -1044,319 +683,36 @@
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      },
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
       "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "class",
-          "type": "string",
-          "required": true,
-          "description": "能力类别，例如 plate_reader、centrifuge、uv_curing"
-        },
-        {
-          "name": "model",
-          "type": "string",
-          "description": "型号或档案名称；未知时留空"
-        },
-        {
-          "name": "capabilities",
-          "type": "list",
-          "item_type": "object",
-          "required": true,
-          "description": "能力项；每项至少包含 name"
-        },
-        {
-          "name": "constraints",
-          "type": "list",
-          "item_type": "object",
-          "description": "限制项，例如板型、体积或波长范围"
-        },
-        {
-          "name": "source",
-          "type": "enum",
-          "values": [
-            "built_in",
-            "lab_imported",
-            "unknown"
-          ],
-          "required": true
-        },
-        {
-          "name": "evidence",
-          "type": "list",
-          "item_type": "artifact",
-          "description": "能力来源文件；只引用，不复制文件内容"
-        }
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "class", "type": "string", "required": true},
+        {"name": "model", "type": "string"},
+        {"name": "capabilities", "type": "list", "item_type": "object", "required": true},
+        {"name": "constraints", "type": "list", "item_type": "object"},
+        {"name": "source", "type": "enum", "values": ["built_in", "lab_imported", "unknown"], "required": true},
+        {"name": "evidence", "type": "list", "item_type": "artifact"}
       ],
       "outputs": [
-        {
-          "name": "profile_view",
-          "type": "object",
-          "origin": "view"
-        }
+        {"name": "profile_view", "type": "object", "origin": "view"}
       ],
       "actions": [],
-      "rules": [
-        "instrument-profile-fields"
-      ]
-    },
-    {
-      "kind": "step",
-      "schema": 2,
-      "title": "步骤 v2（模块绑定）",
-      "description": "步骤的模块引用：uses 以稳定 ID 绑定仪器、材料、计算器等；不改变 step@1 语义。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "title",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "assay",
-          "type": "reference",
-          "target": "assay"
-        },
-        {
-          "name": "timepoints",
-          "type": "string[]"
-        },
-        {
-          "name": "path",
-          "type": "string"
-        },
-        {
-          "name": "order",
-          "type": "int"
-        },
-        {
-          "name": "checks",
-          "type": "object-list"
-        },
-        {
-          "name": "tasks",
-          "type": "object-list",
-          "description": "步骤计划中的任务/检查项"
-        },
-        {
-          "name": "uses",
-          "type": "list",
-          "item_type": "object",
-          "description": "模块绑定；每项 {ref, role}"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "step_task",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "step-fields",
-        "step-uses"
-      ],
-      "sdk": "1.0.0",
-      "category": "workflow",
-      "capabilities": [
-        "step-definition",
-        "workflow-edge"
-      ],
-      "permissions": [],
-      "renderers": {
-        "design": "generic.editor",
-        "document": "step.viewer",
-        "run": "generic.run"
-      },
-      "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
-        "freeze": "immutable-revision"
-      },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
-    },
-    {
-      "kind": "step",
-      "schema": 3,
-      "title": "步骤 v3（执行语义）",
-      "description": "显式区分可执行步骤与流程组织节点；可执行步骤必须绑定 ProtocolBlock。",
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "title",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "execution",
-          "type": "enum",
-          "values": [
-            "executable",
-            "organizational"
-          ],
-          "required": true
-        },
-        {
-          "name": "assay",
-          "type": "reference",
-          "target": "assay"
-        },
-        {
-          "name": "timepoints",
-          "type": "string[]"
-        },
-        {
-          "name": "path",
-          "type": "string"
-        },
-        {
-          "name": "order",
-          "type": "int"
-        },
-        {
-          "name": "checks",
-          "type": "object-list"
-        },
-        {
-          "name": "tasks",
-          "type": "object-list",
-          "description": "步骤计划中的任务/检查项"
-        },
-        {
-          "name": "uses",
-          "type": "list",
-          "item_type": "object",
-          "description": "模块绑定；可执行步骤的 ProtocolBlock 通过 reference.view: protocol_block 指向精确版本"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "step_task",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "step-execution",
-        "step-uses"
-      ],
-      "sdk": "1.0.0",
-      "category": "workflow",
-      "capabilities": [
-        "step-definition",
-        "workflow-edge"
-      ],
-      "permissions": [],
-      "renderers": {
-        "design": "generic.editor",
-        "document": "step.viewer",
-        "run": "generic.run"
-      },
-      "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
-        "freeze": "immutable-revision"
-      },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      }
+      "rules": ["instrument-profile-fields"]
     },
     {
       "kind": "material",
       "schema": 1,
-      "title": "材料",
-      "description": "材料/试剂声明。",
-      "sdk": "1.0.0",
+      "title": "材料 / 试剂",
+      "description": "材料、试剂、基质或缓冲液声明，可选关联储藏室短码。",
+      "sdk": "2.0.0",
       "category": "resource",
-      "capabilities": [
-        "material",
-        "role-declaration"
-      ],
+      "capabilities": ["material", "role-declaration"],
       "permissions": [],
       "renderers": {
         "design": "generic.editor",
@@ -1364,102 +720,36 @@
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      },
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
       "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "材料名称"
-        },
-        {
-          "name": "role",
-          "type": "enum",
-          "values": [
-            "control",
-            "treatment"
-          ],
-          "required": true,
-          "description": "实验角色"
-        },
-        {
-          "name": "condition",
-          "type": "string",
-          "description": "处理条件描述"
-        },
-        {
-          "name": "concentration",
-          "type": "quantity",
-          "dimension": "mass_concentration",
-          "description": "标称浓度"
-        },
-        {
-          "name": "source",
-          "type": "enum",
-          "values": [
-            "built_in",
-            "lab_imported",
-            "unknown"
-          ],
-          "required": true,
-          "description": "材料来源"
-        }
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "name", "type": "string", "required": true},
+        {"name": "role", "type": "enum", "values": ["control", "treatment", "reagent", "buffer", "matrix"], "required": true},
+        {"name": "condition", "type": "string"},
+        {"name": "concentration", "type": "quantity", "dimension": "mass_concentration"},
+        {"name": "source", "type": "enum", "values": ["built_in", "lab_imported", "unknown"], "required": true},
+        {"name": "pantry_code", "type": "string", "description": "可选储藏室标签短码 PN-*"}
       ],
       "outputs": [
-        {
-          "name": "material_view",
-          "type": "object",
-          "origin": "view"
-        }
+        {"name": "material_view", "type": "object", "origin": "view"}
       ],
       "actions": [],
-      "rules": [
-        "material-fields"
-      ]
+      "rules": ["material-fields"]
     },
     {
       "kind": "sample",
       "schema": 1,
       "title": "样本",
-      "description": "样本声明。",
-      "sdk": "1.0.0",
+      "description": "显式样本声明。",
+      "sdk": "2.0.0",
       "category": "resource",
-      "capabilities": [
-        "sample",
-        "sample-tracking"
-      ],
+      "capabilities": ["sample", "sample-tracking"],
       "permissions": [],
       "renderers": {
         "design": "generic.editor",
@@ -1467,417 +757,76 @@
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      },
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
       "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "sample_id",
-          "type": "string",
-          "required": true,
-          "description": "样本编号"
-        },
-        {
-          "name": "group_ref",
-          "type": "reference",
-          "target": "group",
-          "required": true,
-          "description": "所属分组"
-        },
-        {
-          "name": "material_refs",
-          "type": "list",
-          "item_type": "reference",
-          "description": "关联材料",
-          "target": "material"
-        },
-        {
-          "name": "amount",
-          "type": "quantity",
-          "dimension": "volume",
-          "required": true,
-          "description": "样本用量"
-        }
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "sample_id", "type": "string", "required": true},
+        {"name": "group_ref", "type": "reference", "target": "group", "required": true},
+        {"name": "material_refs", "type": "list", "item_type": "reference", "target": "material"},
+        {"name": "amount", "type": "quantity", "dimension": "volume", "required": true}
       ],
       "outputs": [
-        {
-          "name": "sample_view",
-          "type": "object",
-          "origin": "view"
-        }
+        {"name": "sample_view", "type": "object", "origin": "view"}
       ],
       "actions": [],
-      "rules": [
-        "sample-fields"
-      ]
-    },
-    {
-      "kind": "container",
-      "schema": 1,
-      "title": "容器/板型",
-      "description": "实验容器与孔位映射。",
-      "sdk": "1.0.0",
-      "category": "labware",
-      "capabilities": [
-        "container",
-        "well-map"
-      ],
-      "permissions": [],
-      "renderers": {
-        "design": "generic.editor",
-        "document": "container.viewer",
-        "run": "generic.run"
-      },
-      "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
-        "freeze": "immutable-revision"
-      },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      },
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "format",
-          "type": "string",
-          "required": true,
-          "description": "容器格式"
-        },
-        {
-          "name": "wells",
-          "type": "int",
-          "required": true,
-          "description": "孔数"
-        },
-        {
-          "name": "geometry",
-          "type": "geometry",
-          "description": "几何/布局"
-        },
-        {
-          "name": "sample_map",
-          "type": "well-map",
-          "description": "孔位到样本的映射"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "container_view",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "container-fields"
-      ]
-    },
-    {
-      "kind": "measurement_profile",
-      "schema": 1,
-      "title": "测量方案",
-      "description": "测量端点、单位、读数结构与计算器引用。",
-      "sdk": "1.0.0",
-      "category": "measurement",
-      "capabilities": [
-        "measurement-profile",
-        "calculator-reference"
-      ],
-      "permissions": [],
-      "renderers": {
-        "design": "generic.editor",
-        "document": "measurement_profile.viewer",
-        "run": "generic.run"
-      },
-      "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
-        "freeze": "immutable-revision"
-      },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      },
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
-      "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "endpoint",
-          "type": "string",
-          "required": true,
-          "description": "测量端点"
-        },
-        {
-          "name": "unit",
-          "type": "string",
-          "required": true,
-          "description": "读数单位"
-        },
-        {
-          "name": "readout_schema",
-          "type": "object",
-          "description": "读数结构"
-        },
-        {
-          "name": "calculator_refs",
-          "type": "list",
-          "item_type": "string",
-          "description": "关联计算器"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "profile_view",
-          "type": "object",
-          "origin": "view"
-        }
-      ],
-      "actions": [],
-      "rules": [
-        "measurement-profile-fields"
-      ]
+      "rules": ["sample-fields"]
     },
     {
       "kind": "readout",
       "schema": 1,
       "title": "读数结构",
-      "description": "一次 Run 读数的形状声明：numeric/table/plate/categorical/file 五种 value_kind 共用单位、缺失语义、来源与 timepoint/sample 关联。只声明形状；读数本身经 Core 写入 Run 事实，文档不保存记录值。",
-      "sdk": "1.0.0",
+      "description": "一次 Run 读数的形状声明（numeric/table/plate/categorical/file），不保存记录值。",
+      "sdk": "2.0.0",
       "category": "measurement",
-      "capabilities": [
-        "readout-schema",
-        "value-kind",
-        "run-record"
-      ],
-      "permissions": [
-        "run.readout"
-      ],
+      "capabilities": ["readout-schema", "value-kind", "run-record"],
+      "permissions": ["run.readout"],
       "renderers": {
         "design": "generic.editor",
         "document": "generic.editor",
         "run": "generic.run"
       },
       "lifecycle": {
-        "states": [
-          "draft",
-          "validated",
-          "frozen"
-        ],
+        "states": ["draft", "validated", "frozen"],
         "freeze": "immutable-revision"
       },
-      "provenance": {
-        "origin": "planned",
-        "record_boundary": "run"
-      },
-      "modes": [
-        "design",
-        "protocol",
-        "run",
-        "notebook",
-        "review"
-      ],
+      "provenance": {"origin": "planned", "record_boundary": "run"},
+      "modes": ["design", "protocol", "run", "notebook", "review"],
       "inputs": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "id",
-          "type": "string",
-          "required": true
-        },
-        {
-          "name": "schema",
-          "type": "int",
-          "required": true
-        },
-        {
-          "name": "schema_id",
-          "type": "string",
-          "required": true,
-          "description": "读数 schema 稳定 ID，例如 cck8_od450、rna_concentration、cfu_count"
-        },
-        {
-          "name": "endpoint",
-          "type": "string",
-          "required": true,
-          "description": "测量指标字段，例如 od450、cfu、a260_a280"
-        },
-        {
-          "name": "value_kind",
-          "type": "enum",
-          "values": [
-            "numeric",
-            "table",
-            "plate",
-            "categorical",
-            "file"
-          ],
-          "required": true
-        },
-        {
-          "name": "unit",
-          "type": "string",
-          "description": "记录单位；file/categorical 不携带标量单位"
-        },
-        {
-          "name": "missing_reasons",
-          "type": "list",
-          "item_type": "string",
-          "description": "允许的缺失原因：not_detected、below_lod、above_uloq、invalid、other"
-        },
-        {
-          "name": "null_allowed",
-          "type": "bool",
-          "description": "是否允许“未记录”：既无值也无原因"
-        },
-        {
-          "name": "source_kinds",
-          "type": "list",
-          "item_type": "string",
-          "description": "允许来源 raw、derived；允许 derived 时必须同时允许 raw"
-        },
-        {
-          "name": "table_columns",
-          "type": "object-list",
-          "description": "table 读数的列：{key,label,value_kind,unit}"
-        },
-        {
-          "name": "plate_format",
-          "type": "enum",
-          "values": [
-            "6",
-            "12",
-            "24",
-            "48",
-            "96",
-            "384",
-            "custom"
-          ],
-          "description": "plate 读数的板型"
-        }
+        {"name": "kind", "type": "string", "required": true},
+        {"name": "id", "type": "string", "required": true},
+        {"name": "schema", "type": "int", "required": true},
+        {"name": "schema_id", "type": "string", "required": true},
+        {"name": "endpoint", "type": "string", "required": true},
+        {"name": "value_kind", "type": "enum", "values": ["numeric", "table", "plate", "categorical", "file"], "required": true},
+        {"name": "unit", "type": "string"},
+        {"name": "missing_reasons", "type": "list", "item_type": "string"},
+        {"name": "null_allowed", "type": "bool"},
+        {"name": "source_kinds", "type": "list", "item_type": "string"},
+        {"name": "table_columns", "type": "object-list"},
+        {"name": "plate_format", "type": "enum", "values": ["6", "12", "24", "48", "96", "384", "custom"]}
       ],
       "outputs": [
-        {
-          "name": "readout_shape",
-          "type": "object",
-          "origin": "view"
-        },
-        {
-          "name": "record_form",
-          "type": "enum",
-          "values": [
-            "plate",
-            "single",
-            "table",
-            "categorical",
-            "file"
-          ],
-          "origin": "view"
-        }
+        {"name": "readout_shape", "type": "object", "origin": "view"},
+        {"name": "record_form", "type": "enum", "values": ["plate", "single", "table", "categorical", "file"], "origin": "view"}
       ],
       "actions": [],
       "rules": []
     }
   ],
   "foundationVersion": 1,
-  "sdkVersion": "1.0.0",
+  "sdkVersion": "2.0.0",
   "roleCapabilities": {
-    "instrument": [
-      "instrument-profile"
-    ],
-    "calculator": [
-      "deterministic-calculation"
-    ],
-    "labware": [
-      "well-plate"
-    ],
-    "material": [
-      "material"
-    ],
-    "sample": [
-      "sample"
-    ],
+    "instrument": ["instrument-profile"],
+    "calculator": ["deterministic-calculation"],
+    "labware": ["well-plate"],
+    "material": ["material"],
+    "sample": ["sample"],
     "other": []
   }
 }

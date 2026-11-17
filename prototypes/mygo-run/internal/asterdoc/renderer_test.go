@@ -12,8 +12,8 @@ func TestBuiltInRenderersMatchDeclaredSurfaces(t *testing.T) {
 		t.Fatalf("shipped registry rejected its own modules: %v", err)
 	}
 	registry := BuiltinRegistry()
-	if got := len(registry.Descriptors()); got != 17 {
-		t.Fatalf("registered module count = %d, want 17", got)
+	if got := len(registry.Descriptors()); got != 21 {
+		t.Fatalf("registered module count = %d, want 21", got)
 	}
 	for _, spec := range registry.specs {
 		for surface, rendererKey := range spec.declaredRenderers() {

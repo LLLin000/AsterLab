@@ -489,15 +489,24 @@ pub(crate) fn assess_asterdoc(db: &Connection, input: &Value) -> Result<Value, C
                 if assays.is_empty() {
                     errors.push("还没有检测（assay）".to_owned());
                 }
+                let mut bound_assays = Vec::new();
                 for assay in &assays {
-                    let id = assay["id"].as_str().unwrap_or("");
-                    if assay["protocol_version_id"].as_str().unwrap_or("").is_empty() {
-                        errors.push(format!("检测 {id} 没有绑定 protocol 版本，Run 无法生成可执行任务"));
+                    let pv_id = assay["protocol_version_id"].as_str().unwrap_or("").trim();
+                    if !pv_id.is_empty() {
+                        bound_assays.push(pv_id.to_owned());
                     }
                 }
-                match asterdoc_step_materialization_issues(db, design_id, &design) {
-                    Ok(issues) => errors.extend(issues),
-                    Err(error) => errors.push(error.message),
+                if !bound_assays.is_empty() {
+                    match asterdoc_step_materialization_issues(db, design_id, &design) {
+                        Ok(issues) => errors.extend(issues),
+                        Err(error) => errors.push(error.message),
+                    }
+                } else if let Some(exec_map) = design["mygo"]["stepExecution"].as_object() {
+                    let has_exec = !exec_map.is_empty()
+                        && exec_map.values().any(|v| v.as_str() == Some("executable"));
+                    if !exec_map.is_empty() && !has_exec {
+                        errors.push("NO_EXECUTABLE_STEP: design has no executable Step".to_owned());
+                    }
                 }
                 let groups = design["group_specs"].as_array().cloned().unwrap_or_default();
                 if groups.is_empty() {
@@ -527,6 +536,347 @@ pub(crate) fn assess_asterdoc(db: &Connection, input: &Value) -> Result<Value, C
     }))
 }
 
+fn sanitize_ascii_ident(raw: &str, prefix: &str, allow_hyphen: bool) -> String {
+    let mut out = String::new();
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || (allow_hyphen && ch == '-') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() || (!allow_hyphen && !out.chars().next().is_some_and(|c| c.is_ascii_alphabetic())) {
+        out = format!("{prefix}_{out}");
+    }
+    if out.len() > 72 {
+        out.truncate(72);
+    }
+    out
+}
+
+fn materialize_asterdoc_protocols_tx(
+    tx: &Transaction<'_>,
+    project_id: &str,
+    design: &mut Value,
+) -> Result<(), CliError> {
+    let nodes = design["mygo"]["workflow"]["Nodes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let step_titles: std::collections::HashMap<String, String> = nodes
+        .iter()
+        .filter_map(|n| {
+            Some((
+                n["id"].as_str()?.to_owned(),
+                n["title"].as_str().unwrap_or("步骤").to_owned(),
+            ))
+        })
+        .collect();
+    let mut step_paths: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for task in design["mygo"]["stepTasks"].as_array().into_iter().flatten() {
+        if let (Some(sid), Some(path)) = (task["stepId"].as_str(), task["path"].as_str()) {
+            step_paths.entry(sid.to_owned()).or_insert_with(|| path.to_owned());
+        }
+    }
+    let business_order: Vec<String> = design["mygo"]["workflow"]["BusinessOrder"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    let ordered_step_ids: Vec<String> = if !business_order.is_empty() {
+        business_order
+    } else {
+        nodes.iter().filter_map(|n| n["id"].as_str().map(str::to_owned)).collect()
+    };
+
+    let asterlab_steps = design["asterlab"]["steps"].as_object().cloned().unwrap_or_default();
+    let step_assays = design["mygo"]["stepAssays"].as_object().cloned().unwrap_or_default();
+    let step_exec = design["mygo"]["stepExecution"].as_object().cloned().unwrap_or_default();
+    let mut step_checks_map: std::collections::HashMap<String, Vec<Value>> = std::collections::HashMap::new();
+    for entry in design["mygo"]["stepChecks"].as_array().into_iter().flatten() {
+        if let (Some(sid), Some(checks)) = (entry["stepId"].as_str(), entry["checks"].as_array()) {
+            step_checks_map.insert(sid.to_owned(), checks.clone());
+        }
+    }
+
+    let assay_count = design["assays"].as_array().map(|a| a.len()).unwrap_or(0);
+    let existing_step_blocks = design["mygo"]["stepBlocks"].clone();
+    let mut updated_step_blocks: Vec<(String, String)> = Vec::new();
+    let mut updated_step_paths: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let assays_mut = design["assays"]
+        .as_array_mut()
+        .ok_or_else(|| CliError::internal("design.assays must be an array"))?;
+    for assay in assays_mut.iter_mut() {
+        if assay["protocol_version_id"]
+            .as_str()
+            .is_some_and(|s| !s.trim().is_empty())
+        {
+            continue;
+        }
+        let assay_id = assay["id"].as_str().unwrap_or("assay-main").to_owned();
+        let assay_title = {
+            let t = assay["title"].as_str().unwrap_or("").trim();
+            if t.is_empty() { "自动物化实验流程".to_owned() } else { t.to_owned() }
+        };
+        let mut root_steps: Vec<Value> = Vec::new();
+        let mut used_use_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for (step_idx, step_id) in ordered_step_ids.iter().enumerate() {
+            let is_exec = step_exec
+                .get(step_id)
+                .and_then(Value::as_str)
+                .is_none_or(|e| e == "executable");
+            if !is_exec {
+                continue;
+            }
+            let step_assay = step_assays.get(step_id).and_then(Value::as_str).unwrap_or("");
+            if !step_assay.is_empty() && step_assay != assay_id && assay_count > 1 {
+                continue;
+            }
+            let mut use_id = sanitize_ascii_ident(step_id, "step", true);
+            if !used_use_ids.insert(use_id.clone()) {
+                use_id = format!("{use_id}_{step_idx}");
+                used_use_ids.insert(use_id.clone());
+            }
+
+            if let Some(existing_bv) = existing_step_blocks[step_id]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+            {
+                root_steps.push(json!({
+                    "kind": "block_use",
+                    "use_id": use_id,
+                    "block_version_id": existing_bv,
+                    "bindings": []
+                }));
+                continue;
+            }
+
+            let step_title = step_titles
+                .get(step_id)
+                .filter(|s| !s.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| step_id.clone());
+            let mut prose_parts: Vec<String> = Vec::new();
+            let mut parameter_slots: Vec<Value> = Vec::new();
+            let mut parameter_refs: Vec<String> = Vec::new();
+            let mut literal_bindings: Vec<Value> = Vec::new();
+            let mut seen_slot_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+            for blk in asterlab_steps.get(step_id).and_then(Value::as_array).into_iter().flatten() {
+                match blk["kind"].as_str().unwrap_or("") {
+                    "prose" => {
+                        if let Some(body) = blk["body"].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                            prose_parts.push(body.to_owned());
+                        }
+                    }
+                    "param_table" => {
+                        for (row_idx, row) in blk["rows"].as_array().into_iter().flatten().enumerate() {
+                            if parameter_slots.len() >= 100 {
+                                break;
+                            }
+                            let raw_key = row["key"]
+                                .as_str()
+                                .or_else(|| row["label"].as_str())
+                                .unwrap_or("param");
+                            let mut slot_key = sanitize_ascii_ident(raw_key, "p", false);
+                            if !seen_slot_keys.insert(slot_key.clone()) {
+                                slot_key = format!("p_{row_idx}_{slot_key}");
+                                if slot_key.len() > 72 {
+                                    slot_key.truncate(72);
+                                }
+                                seen_slot_keys.insert(slot_key.clone());
+                            }
+                            let label = row["label"]
+                                .as_str()
+                                .filter(|s| !s.trim().is_empty())
+                                .unwrap_or(&slot_key)
+                                .chars()
+                                .take(120)
+                                .collect::<String>();
+                            let raw_val = row.get("value").cloned().unwrap_or(Value::Null);
+                            let (value_type, typed_val, unit_opt) = if let Some(b) = raw_val.as_bool() {
+                                ("boolean", json!(b), None)
+                            } else if let Some(n) = raw_val.as_f64().filter(|n| n.is_finite()) {
+                                let u = row["unit"]
+                                    .as_str()
+                                    .map(str::trim)
+                                    .filter(|s| !s.is_empty() && s.len() <= 40)
+                                    .map(str::to_owned);
+                                ("number", json!(n), u)
+                            } else {
+                                let s = match raw_val {
+                                    Value::String(s) => s,
+                                    other => other.to_string(),
+                                };
+                                ("text", json!(s), None)
+                            };
+                            let mut slot_json = json!({
+                                "key": slot_key,
+                                "label": label,
+                                "value_type": value_type,
+                                "required": false
+                            });
+                            if let Some(u) = &unit_opt {
+                                slot_json["unit"] = json!(u);
+                            }
+                            parameter_slots.push(slot_json);
+                            parameter_refs.push(slot_key.clone());
+                            let mut binding = json!({
+                                "slot": slot_key,
+                                "value": typed_val
+                            });
+                            if let Some(u) = &unit_opt {
+                                binding["unit"] = json!(u);
+                            }
+                            literal_bindings.push(binding);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let mut instruction = if prose_parts.is_empty() {
+                step_title.clone()
+            } else {
+                prose_parts.join("\n")
+            };
+            if instruction.chars().count() > 4000 {
+                instruction = instruction.chars().take(4000).collect();
+            }
+            let checks: Vec<Value> = step_checks_map
+                .get(step_id)
+                .into_iter()
+                .flatten()
+                .take(50)
+                .enumerate()
+                .filter_map(|(ci, chk)| {
+                    let cid = chk["check_id"].as_str().unwrap_or("").trim();
+                    let lbl = chk["label"].as_str().unwrap_or("").trim();
+                    if lbl.is_empty() {
+                        return None;
+                    }
+                    let cid = if cid.is_empty() { format!("chk-{ci}") } else { cid.chars().take(80).collect() };
+                    Some(json!({
+                        "check_id": cid,
+                        "label": lbl.chars().take(200).collect::<String>(),
+                        "blocking": chk["blocking"].as_bool().unwrap_or(false)
+                    }))
+                })
+                .collect();
+
+            let block_title = step_title.chars().take(160).collect::<String>();
+            let created_block = create_protocol_block_records(
+                tx,
+                project_id,
+                &json!({
+                    "title": block_title,
+                    "summary": format!("Auto-materialized AsterML step {}", step_paths.get(step_id).map(String::as_str).unwrap_or(step_id)),
+                    "parameter_slots": parameter_slots,
+                    "steps": [{
+                        "kind": "text",
+                        "use_id": "exec",
+                        "title": step_title.chars().take(200).collect::<String>(),
+                        "instruction": instruction,
+                        "parameter_refs": parameter_refs,
+                        "checks": checks
+                    }]
+                }),
+            )?;
+            let bv_id = created_block["version"]["id"]
+                .as_str()
+                .ok_or_else(|| CliError::internal("auto-materialized protocol_block_version missing id"))?
+                .to_owned();
+            updated_step_blocks.push((step_id.clone(), bv_id.clone()));
+            updated_step_paths.insert(step_id.clone(), format!("root/{use_id}/exec"));
+            root_steps.push(json!({
+                "kind": "block_use",
+                "use_id": use_id,
+                "block_version_id": bv_id,
+                "bindings": literal_bindings
+            }));
+        }
+
+        if root_steps.is_empty() {
+            root_steps.push(json!({
+                "kind": "text",
+                "use_id": "exec",
+                "title": assay_title.chars().take(200).collect::<String>(),
+                "instruction": assay_title.chars().take(4000).collect::<String>(),
+                "parameter_refs": [],
+                "checks": []
+            }));
+        }
+        let root_block = create_protocol_block_records(
+            tx,
+            project_id,
+            &json!({
+                "title": assay_title.chars().take(160).collect::<String>(),
+                "summary": format!("Auto-materialized assay {assay_id}"),
+                "parameter_slots": [],
+                "steps": root_steps
+            }),
+        )?;
+        let root_bv_id = root_block["version"]["id"]
+            .as_str()
+            .ok_or_else(|| CliError::internal("root protocol_block_version missing id"))?
+            .to_owned();
+        let protocol = insert(
+            tx,
+            "protocol",
+            Some(project_id),
+            Some(project_id),
+            1,
+            &json!({"title": assay_title}),
+        )?;
+        let protocol_id = protocol["id"]
+            .as_str()
+            .ok_or_else(|| CliError::internal("auto-materialized protocol missing id"))?
+            .to_owned();
+        let pv = insert(
+            tx,
+            "protocol_version",
+            Some(project_id),
+            Some(&protocol_id),
+            1,
+            &json!({
+                "protocol_id": protocol_id,
+                "version": 1,
+                "body": "",
+                "root_block_version_id": root_bv_id,
+                "root_bindings": []
+            }),
+        )?;
+        let pv_id = pv["id"]
+            .as_str()
+            .ok_or_else(|| CliError::internal("auto-materialized protocol_version missing id"))?
+            .to_owned();
+        assay["protocol_version_id"] = json!(pv_id);
+    }
+    if let Some(sb_map) = design["mygo"]["stepBlocks"].as_object_mut() {
+        for (sid, bvid) in updated_step_blocks {
+            sb_map.insert(sid, json!([bvid]));
+        }
+    }
+    for task in design["mygo"]["stepTasks"].as_array_mut().into_iter().flatten() {
+        if let Some(sid) = task["stepId"].as_str().map(str::to_owned) {
+            if let Some(mpath) = updated_step_paths.get(&sid) {
+                task["path"] = json!(mpath);
+            }
+        }
+    }
+    for chk in design["mygo"]["stepChecks"].as_array_mut().into_iter().flatten() {
+        if let Some(sid) = chk["stepId"].as_str().map(str::to_owned) {
+            if let Some(mpath) = updated_step_paths.get(&sid) {
+                chk["path"] = json!(mpath);
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn create_run_from_asterdoc(
     db: &mut Connection,
     design_id: &str,
@@ -540,9 +890,7 @@ pub(crate) fn create_run_from_asterdoc(
     let source_hash = document["source_hash"].as_str().unwrap_or("").to_owned();
     let compiler_version = document["compiler_version"].as_str().unwrap_or("").to_owned();
     let schema_version = document["schema_version"].as_u64().unwrap_or(0);
-    let design = compile_asterdoc_to_design(source)?;
-    let design = serde_json::to_string(&design)
-        .map_err(|e| CliError::internal(e.to_string()))?;
+    let mut design_val = compile_asterdoc_to_design(source)?;
     let op = operation_id.filter(|value| !value.trim().is_empty());
 
     let tx = db
@@ -584,6 +932,9 @@ pub(crate) fn create_run_from_asterdoc(
         return Err(CliError::input("design_id 必须指向实验设计"));
     }
     let project = project.ok_or_else(|| CliError::internal("实验设计缺少项目归属"))?;
+    materialize_asterdoc_protocols_tx(&tx, &project, &mut design_val)?;
+    let design = serde_json::to_string(&design_val)
+        .map_err(|e| CliError::internal(e.to_string()))?;
     let next = revision + 1;
     tx.execute(
         "UPDATE records SET revision=?2,data_json=?3,updated_at=?4 WHERE id=?1",
@@ -596,11 +947,11 @@ pub(crate) fn create_run_from_asterdoc(
         Some(&project),
         Some(design_id),
         next,
-        &json!({"design_id": design_id, "design_revision": next, "snapshot": serde_json::from_str::<Value>(&design).unwrap_or(Value::Null)}),
+        &json!({"design_id": design_id, "design_revision": next, "snapshot": design_val}),
     )?;
-    let default_title = serde_json::from_str::<Value>(&design)
-        .ok()
-        .and_then(|value| value["title"].as_str().map(str::to_owned))
+    let default_title = design_val["title"]
+        .as_str()
+        .map(str::to_owned)
         .unwrap_or_else(|| "Run".to_owned())
         + " run";
     let title_str = title.unwrap_or(&default_title);

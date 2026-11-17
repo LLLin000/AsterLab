@@ -1173,8 +1173,10 @@ pub(crate) fn run_creation_audit(design_data: &Value, revision: i64, version_id:
                     let mut chars = well_id.chars();
                     let row = chars.next().unwrap_or(' ');
                     let col: i64 = chars.as_str().parse().unwrap_or(0);
-                    if !('A'..='H').contains(&row) || !(1..=12).contains(&col) {
-                        errors.push(format!("检测 {assay_id} 的孔位 {well_id} 无效，应为 A1–H12。"));
+                    let valid_plate_well = ('A'..='P').contains(&row) && (1..=24).contains(&col);
+                    let valid_linear_slot = well_id.parse::<i64>().is_ok_and(|idx| (1..=1536).contains(&idx));
+                    if !valid_plate_well && !valid_linear_slot {
+                        errors.push(format!("检测 {assay_id} 的孔位 {well_id} 无效，应为 A1–P24 或正整数槽位。"));
                         continue;
                     }
                     if group.is_empty() {

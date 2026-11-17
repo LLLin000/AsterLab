@@ -90,9 +90,9 @@ func TestBuildDesignKeepsOrganizationalStepsExplicit(t *testing.T) {
 	source := strings.Join([]string{
 		"```asterlab", "kind: assay", "id: assay-1", "schema: 1", "title: Assay", "```",
 		"```asterlab", "kind: reference", "id: ref-sample", "schema: 1", "ref: sample-1", "view: sample", "```",
-		"```asterlab", "kind: step", "id: step-run", "schema: 3", "title: Seed",
+		"```asterlab", "kind: step", "id: step-run", "schema: 1", "title: Seed",
 		"execution: executable", "assay: assay-1", "path: cck8/seed", "uses:", "- {ref: ref-sample, role: other}", "```",
-		"```asterlab", "kind: step", "id: step-org", "schema: 3", "title: Incubate",
+		"```asterlab", "kind: step", "id: step-org", "schema: 1", "title: Incubate",
 		"execution: organizational", "```",
 	}, "\n")
 	tree, err := BuildDesign(&asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: source}, nil)

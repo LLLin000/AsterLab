@@ -144,7 +144,7 @@ func Build(tasks []runs.RunTask, doc *asterdoc.FrozenAsterDoc) (*Tree, error) {
 		path, _ := module.Data["path"].(string)
 		order := intValue(module.Data["order"])
 		execution, _ := module.Data["execution"].(string)
-		organizational := module.Schema == 3 && execution == "organizational"
+		organizational := execution == "organizational"
 		if organizational && path == "" {
 			path = module.ID
 		}

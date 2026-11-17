@@ -68,7 +68,7 @@ func SelectKind(task *RunTaskViewModel, grid *resultgrid.Grid, assets []LinkedAs
 		return ViewGallery
 	}
 	for _, m := range task.Modules {
-		if m.Kind == "measurement_profile" {
+		if m.Kind == "data_table" || m.Kind == "readout" || m.Kind == "measurement_profile" {
 			return ViewTable
 		}
 	}

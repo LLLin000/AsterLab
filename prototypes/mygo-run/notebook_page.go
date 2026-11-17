@@ -125,7 +125,7 @@ func (a *app) recordBoard() *recordBoardView {
 		st = &recordBoardView{fov: 1, imgs: map[string]ui.ImageSource{}, imgFailed: map[string]bool{}}
 		recordBoards[a.snap.RunID] = st
 	}
-	if st.fov < 1 || st.fov > 6 {
+	if limit := max(6, a.plannedDocFOV()); st.fov < 1 || st.fov > limit {
 		st.fov = 1
 	}
 	if st.imgs == nil {
@@ -1305,7 +1305,8 @@ func orDash(value string) string {
 func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, board *recordBoardView) {
 	recordBoardSection(c, t, "代表视野矩阵（孔位 × 时间点 × FOV）")
 	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-		for fov := 1; fov <= 6; fov++ {
+		maxFOV := max(6, max(int(proj.Images.FOVPerWell), a.plannedDocFOV()))
+		for fov := 1; fov <= maxFOV; fov++ {
 			fov := fov
 			style := components.ButtonGhost
 			if board.fov == fov {
@@ -1515,6 +1516,7 @@ func (a *app) persistDerivedDesign() {
 		a.deriveErr = err.Error()
 		return
 	}
+	asterSrc := strings.TrimSpace(a.deriveEv.AsterDocSource)
 	saved, err := a.designSvc.SaveDesign(context.Background(), runs.DesignSaveInput{
 		DesignID: a.deriveDesign.DesignID, ExpectedRevision: uint64(a.deriveDesign.ExpectedRevision),
 		Changes: changes, OperationID: a.nextOp(),
@@ -1522,6 +1524,19 @@ func (a *app) persistDerivedDesign() {
 	if err != nil {
 		a.deriveErr = state.MapError(err).Error()
 		return
+	}
+	if asterSrc != "" {
+		var expRev uint64
+		if curDoc, loadErr := a.designSvc.LoadAsterDoc(context.Background(), saved.DesignID); loadErr == nil {
+			expRev = curDoc.Revision
+		}
+		if _, docErr := a.designSvc.SaveAsterDoc(context.Background(), runs.AsterDocSaveInput{
+			DesignID: saved.DesignID, Source: asterSrc, ExpectedRevision: expRev,
+			OperationID: a.nextOp(), ActorID: os.Getenv("USERNAME"),
+		}); docErr != nil {
+			a.deriveErr = state.MapError(docErr).Error()
+			return
+		}
 	}
 	a.deriveEv = nil
 	a.deriveDesign = nil

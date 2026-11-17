@@ -189,11 +189,14 @@ type RunWorkspaceViewModel struct {
 	// cannot be trusted; the legacy rail is then used.
 	Tree       *workflowtree.Tree
 	TreeIssues []string
+	// FrozenDoc holds the parsed frozen AsterML document so Run renders
+	// frozen step.blocks[] with the exact same generic widgets as Design.
+	FrozenDoc *asterdoc.Document
 
 	Selected *RunTaskViewModel
 }
 
-// moduleUse is a parsed step@2.uses entry.
+// moduleUse is a parsed step.uses, step.block_refs, or inline block entry.
 type moduleUse struct {
 	Kind   string
 	ID     string
@@ -201,8 +204,37 @@ type moduleUse struct {
 	Role   string
 }
 
+func roleForBlockKind(kind string) string {
+	switch kind {
+	case "calculator":
+		return "calculator"
+	case "plate":
+		return "plate"
+	case "attachment":
+		return "attachment"
+	case "timer":
+		return "timer"
+	case "checklist":
+		return "checklist"
+	case "data_table", "readout":
+		return "readout"
+	case "param_table":
+		return "parameters"
+	case "group_table", "group":
+		return "group"
+	case "figure":
+		return "figure"
+	case "prose":
+		return "prose"
+	case "subflow":
+		return "subflow"
+	default:
+		return "other"
+	}
+}
+
 // parseAsterDocSource parses the frozen AsterDoc source YAML to extract
-// module definitions and step@2.uses bindings.
+// module definitions, step.uses, step.block_refs, and inline step.blocks[].
 func parseAsterDocSource(source string) (map[string]map[string]any, map[string][]moduleUse) {
 	docModules := map[string]map[string]any{}
 	stepUses := map[string][]moduleUse{}
@@ -220,33 +252,80 @@ func parseAsterDocSource(source string) (map[string]map[string]any, map[string][
 		if m.Kind != "step" {
 			continue
 		}
-		uses, ok := m.Data["uses"].([]any)
-		if !ok {
-			continue
-		}
 		var usesList []moduleUse
-		for _, raw := range uses {
-			item, ok := raw.(map[string]any)
-			if !ok {
-				continue
+		if uses, ok := m.Data["uses"].([]any); ok {
+			for _, raw := range uses {
+				item, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				ref, _ := item["ref"].(string)
+				role, _ := item["role"].(string)
+				if ref == "" {
+					continue
+				}
+				if refDoc, ok := docModules[ref]; ok {
+					usesList = append(usesList, moduleUse{
+						Kind:   textValue(refDoc, "kind"),
+						ID:     ref,
+						Schema: intVal(refDoc["schema"]),
+						Role:   role,
+					})
+				} else {
+					usesList = append(usesList, moduleUse{
+						Kind: "",
+						ID:   ref,
+						Role: role,
+					})
+				}
 			}
-			ref, _ := item["ref"].(string)
-			role, _ := item["role"].(string)
-			if ref == "" {
-				continue
+		}
+		if refs, ok := m.Data["block_refs"].([]any); ok {
+			for _, raw := range refs {
+				ref, _ := raw.(string)
+				ref = strings.TrimSpace(ref)
+				if ref == "" {
+					continue
+				}
+				if refDoc, ok := docModules[ref]; ok {
+					kind := textValue(refDoc, "kind")
+					usesList = append(usesList, moduleUse{
+						Kind:   kind,
+						ID:     ref,
+						Schema: intVal(refDoc["schema"]),
+						Role:   roleForBlockKind(kind),
+					})
+				} else {
+					usesList = append(usesList, moduleUse{
+						ID:   ref,
+						Role: "other",
+					})
+				}
 			}
-			if refDoc, ok := docModules[ref]; ok {
+		}
+		if blocks, ok := m.Data["blocks"].([]any); ok {
+			for idx, raw := range blocks {
+				blockMap, ok := raw.(map[string]any)
+				if !ok || blockMap == nil {
+					continue
+				}
+				kind := textValue(blockMap, "kind")
+				blockID := textValue(blockMap, "id")
+				if blockID == "" {
+					blockID = fmt.Sprintf("%s#block-%d", m.ID, idx)
+				}
+				schema := intVal(blockMap["schema"])
+				if schema <= 0 {
+					schema = 1
+				}
+				if _, exists := docModules[blockID]; !exists {
+					docModules[blockID] = blockMap
+				}
 				usesList = append(usesList, moduleUse{
-					Kind:   textValue(refDoc, "kind"),
-					ID:     ref,
-					Schema: intVal(refDoc["schema"]),
-					Role:   role,
-				})
-			} else {
-				usesList = append(usesList, moduleUse{
-					Kind: "",
-					ID:   ref,
-					Role: role,
+					Kind:   kind,
+					ID:     blockID,
+					Schema: schema,
+					Role:   roleForBlockKind(kind),
 				})
 			}
 		}
@@ -550,6 +629,9 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc, project
 	docModules := map[string]map[string]any{}
 	stepUses := map[string][]moduleUse{}
 	if doc != nil && doc.Source != "" {
+		if parsed, err := asterdoc.Parse(doc.Source); err == nil {
+			vm.FrozenDoc = parsed
+		}
 		docModules, stepUses = parseAsterDocSource(doc.Source)
 	}
 

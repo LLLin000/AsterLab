@@ -85,7 +85,7 @@ amount: {value: 1, unit: mL}
 ```asterlab
 kind: step
 id: step-rna-extract
-schema: 2
+schema: 1
 title: 01 RNA 提取
 assay: assay-rtqpcr
 path: root/rna-extraction
@@ -105,7 +105,7 @@ checks:
 ```asterlab
 kind: step
 id: step-rna-qc
-schema: 2
+schema: 1
 title: 02 RNA 质控
 assay: assay-rtqpcr
 path: root/rna-qc
@@ -124,7 +124,7 @@ checks:
 ```asterlab
 kind: step
 id: step-rt
-schema: 2
+schema: 1
 title: 03 逆转录
 assay: assay-rtqpcr
 path: root/reverse-transcription
@@ -143,7 +143,7 @@ checks:
 ```asterlab
 kind: step
 id: step-qpcr
-schema: 2
+schema: 1
 title: 04 qPCR 扩增及检测
 assay: assay-rtqpcr
 path: root/qpcr

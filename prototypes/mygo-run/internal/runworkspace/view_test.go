@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/workflowtree"
@@ -647,6 +648,71 @@ func TestStatusLabelContractVocabulary(t *testing.T) {
 		}
 		if got := StatusLabel(buildTaskStatus(runs.RunTask{Status: raw})); got != want {
 			t.Errorf("StatusLabel(buildTaskStatus(%q)) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestViewRendersFrozenStepBlocksSameSourceModeRun(t *testing.T) {
+	src := strings.Join([]string{
+		"```asterlab", "kind: experiment", "id: exp-iz", "schema: 1", "title: 抑菌圈定量实验", "```",
+		"```asterlab", "kind: group", "id: g-van", "schema: 1", "name: Van", "role: reference", "```",
+		"```asterlab", "kind: assay", "id: assay-iz", "schema: 1", "title: 抑菌圈测量", "group_refs: [g-van]", "timepoints: [24h]", "```",
+		"```asterlab", "kind: plate", "id: dish-iz", "schema: 1", "format: 6", "topology: dish", "rows: 2", "columns: 2", "assay: assay-iz", "groups:", "  g-van: [A1]", "```",
+		"```asterlab", "kind: step", "id: step-treat", "schema: 1", "title: 抑菌圈加药与孵育",
+		"execution: executable", "assay: assay-iz", "path: root/treat",
+		"blocks:",
+		"  - kind: param_table",
+		"    id: blk-params",
+		"    schema: 1",
+		"    title: 抑菌关键参数",
+		"    rows:",
+		"      - {key: dose, label: 给药体积, value: 10, unit: uL, editable_in_run: true}",
+		"  - kind: figure",
+		"    id: blk-dish",
+		"    schema: 1",
+		"    title: 四象限抑菌圈示意图",
+		"    caption: 数据归属 group_table，示意图只作可视化说明",
+		"    svg: |",
+		"      <svg viewBox=\"0 0 120 120\"><circle cx=\"60\" cy=\"60\" r=\"50\" fill=\"none\" stroke=\"currentColor\"/><text x=\"60\" y=\"64\">Van</text></svg>",
+		"  - kind: checklist",
+		"    id: blk-chk",
+		"    schema: 1",
+		"    title: 操作确认",
+		"    items:",
+		"      - {id: chk-1, label: 确认牛津杯贴壁无渗漏, blocking: true}",
+		"  - kind: attachment",
+		"    id: blk-img",
+		"    schema: 1",
+		"    title: 培养皿拍照留存",
+		"    scope: container_grid",
+		"    container_ref: dish-iz",
+		"    slots_per_cell: 4",
+		"```",
+	}, "\n")
+	snap := runs.RunSnapshot{
+		RunID: "run-iz-1", Title: "抑菌圈定量实验", Revision: 2, Status: "active",
+		Tasks: []runs.RunTask{{
+			Key: "t-treat", DesignStepID: "step-treat", Path: "root/treat",
+			Title: "抑菌圈加药与孵育", AssayID: "assay-iz", Timepoint: "24h", Status: "in_progress",
+		}},
+	}
+	doc := &asterdoc.FrozenAsterDoc{DesignID: "d-iz", Revision: 3, Source: src}
+	vm := BuildViewModel(snap, doc)
+	if len(vm.TaskByKey["t-treat"].Modules) != 4 {
+		t.Fatalf("modules count = %d, want 4", len(vm.TaskByKey["t-treat"].Modules))
+	}
+	if got := FOVPerWellForDoc(src); got != 4 {
+		t.Fatalf("FOVPerWellForDoc = %d, want 4", got)
+	}
+	st := NewState(vm, Callbacks{})
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, st)
+	}, 1280, 820)
+	tt.Frame()
+	for _, want := range []string{"步骤模块 · 同源执行", "4 个内容块", "抑菌关键参数", "四象限抑菌圈示意图", "操作确认"} {
+		if !tt.HasText(want) {
+			t.Fatalf("ModeRun workbench missing %q in %v", want, tt.Texts())
 		}
 	}
 }

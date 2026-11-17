@@ -110,11 +110,19 @@ func numericValue(value any) (float64, bool) {
 	return 0, false
 }
 
+func normalizeUnitSymbol(symbol string) string {
+	s := strings.TrimSpace(symbol)
+	s = strings.ReplaceAll(s, "µ", "u")
+	s = strings.ReplaceAll(s, "μ", "u")
+	s = strings.ReplaceAll(s, "°C", "Cel")
+	return s
+}
+
 func unitFor(symbol string) (unitSpec, bool) {
 	if unitSpecErr != nil {
 		return unitSpec{}, false
 	}
-	unit, ok := unitBySymbol[symbol]
+	unit, ok := unitBySymbol[normalizeUnitSymbol(symbol)]
 	return unit, ok
 }
 

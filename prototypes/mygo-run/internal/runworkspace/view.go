@@ -1,10 +1,13 @@
 package runworkspace
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
+	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
 	workflowtree "asterlab-mygo-prototype/internal/workflowtree"
@@ -137,6 +140,8 @@ type State struct {
 	RecordingDirty map[string]bool
 	// Bench holds the run bench (timers, event composer, capture, blinding).
 	Bench               *BenchState
+	// StepViews keeps per-task asterdoc.View instances for same-source ModeRun block rendering.
+	StepViews           map[string]*asterdoc.View
 	LoadError           string
 	Completing          bool
 	CompletionError     string
@@ -148,7 +153,15 @@ type State struct {
 
 // NewState constructs the runtime state from a view model.
 func NewState(vm *RunWorkspaceViewModel, cb Callbacks) *State {
-	s := &State{VM: vm, Callbacks: cb, Checks: map[string]*bool{}, Collapsed: map[string]bool{}, Expanded: map[string]*bool{}, RecordingDirty: map[string]bool{}}
+	s := &State{
+		VM:             vm,
+		Callbacks:      cb,
+		Checks:         map[string]*bool{},
+		Collapsed:      map[string]bool{},
+		Expanded:       map[string]*bool{},
+		RecordingDirty: map[string]bool{},
+		StepViews:      map[string]*asterdoc.View{},
+	}
 	if vm != nil && vm.Selected != nil {
 		s.Selected = vm.Selected.TaskKey
 	}
@@ -850,6 +863,7 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 		// UX-P1: the bench (timers, skip/deviation entry, capture) leads the
 		// task column so the step's primary action stays in the first viewport.
 		renderBench(c, s, task, t, tokens)
+		renderFrozenStepBlocks(c, s, task, t, tokens)
 		recordingLayer(c, s, t, tokens, task)
 		open := s.ShowProcedure
 		components.Collapsible(c, "操作说明与元数据", &open, components.CollapsibleOptions{}, func() {
@@ -879,6 +893,7 @@ func recordingWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Token
 			return
 		}
 		renderBench(c, s, task, t, tokens)
+		renderFrozenStepBlocks(c, s, task, t, tokens)
 		recordingLayer(c, s, t, tokens, task)
 	})
 }
@@ -925,10 +940,10 @@ func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, t
 
 	ui.Column(c).FillWidth().Padding(16).Radius(float32(tokens.PanelRadius)).
 		Background(tokens.Surface).Border(1, tokens.Border).Gap(t.Space(2)).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 			ui.Text(c, task.StepTitle).FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
-			taskStatusPill(c, task.Status, t, tokens)
 			ui.Spacer(c)
+			taskStatusPill(c, task.Status, t, tokens)
 			ui.Text(c, "当前步骤").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		})
 		// The procedure and planned parameters are frozen; UX-STATE/UX-P2.
@@ -1060,7 +1075,7 @@ func canMarkComplete(task *RunTaskViewModel) bool {
 		return false
 	}
 	for _, module := range task.Modules {
-		if module.Kind == "measurement_profile" {
+		if module.Kind == "data_table" || module.Kind == "readout" || module.Kind == "measurement_profile" {
 			return false
 		}
 	}
@@ -1173,13 +1188,33 @@ func moduleLabel(kind, title string) string {
 		return title
 	}
 	switch kind {
+	case "prose":
+		return "说明文本"
+	case "group_table":
+		return "实验分组表"
+	case "param_table":
+		return "参数表"
+	case "figure":
+		return "示意图 / SVG"
+	case "data_table":
+		return "数据记录表"
+	case "checklist":
+		return "检查清单"
+	case "calculator":
+		return "实验计算器"
+	case "timer":
+		return "计时器"
+	case "attachment":
+		return "附件与采集"
+	case "subflow":
+		return "子流程"
 	case "instrument_profile":
 		return "仪器能力档案"
 	case "dilution":
 		return "稀释计算"
 	case "plate":
 		return "孔板"
-	case "measurement_profile":
+	case "readout", "measurement_profile":
 		return "测量方案"
 	case "material":
 		return "材料"
@@ -1614,4 +1649,308 @@ func timelineTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			})
 		}
 	})
+}
+
+func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *ui.Theme, tokens theme.Tokens) {
+	if s == nil || s.VM == nil || s.VM.FrozenDoc == nil || task == nil || task.StepID == "" {
+		return
+	}
+	var stepMod *asterdoc.Module
+	for i := range s.VM.FrozenDoc.Modules {
+		if s.VM.FrozenDoc.Modules[i].Kind == "step" && s.VM.FrozenDoc.Modules[i].ID == task.StepID {
+			stepMod = &s.VM.FrozenDoc.Modules[i]
+			break
+		}
+	}
+	if stepMod == nil {
+		return
+	}
+	blocks, _ := stepMod.Data["blocks"].([]any)
+	refs, _ := stepMod.Data["block_refs"].([]any)
+	if len(blocks) == 0 && len(refs) == 0 {
+		return
+	}
+	if s.StepViews == nil {
+		s.StepViews = map[string]*asterdoc.View{}
+	}
+	v := s.StepViews[task.TaskKey]
+	if v == nil {
+		v = &asterdoc.View{}
+		s.StepViews[task.TaskKey] = v
+	}
+	v.Doc = s.VM.FrozenDoc
+	v.Mode = asterdoc.ModeRun
+	v.Density = asterdoc.DensityFull
+	v.RunID = s.VM.RunID
+	v.StepID = task.StepID
+	v.HideStepHeader = true
+	v.ReadOnly = task.Status == TaskStatusCompleted || task.Status == TaskStatusSkipped
+	v.Allowed = map[string]bool{
+		asterdoc.PermRunReadout: s.Callbacks.ExecuteCommand != nil,
+	}
+
+	actualParams := map[string]string{}
+	if task.Actual != nil {
+		for k, val := range task.Actual.Parameters {
+			actualParams[k] = val
+		}
+	}
+	v.ActualParams = actualParams
+
+	checked := map[string]bool{}
+	skipped := map[string]string{}
+	for _, chk := range task.Checks {
+		if chk.Status == "passed" || *s.checkOn(task.TaskKey, chk.CheckID) {
+			checked[chk.CheckID] = true
+			checked[task.StepID+":"+chk.CheckID] = true
+		} else if chk.Status == "skipped" {
+			skipped[chk.CheckID] = "已跳过"
+		}
+	}
+	for fullKey, ptr := range s.Checks {
+		if ptr != nil && *ptr && strings.HasPrefix(fullKey, task.TaskKey+"::") {
+			cid := strings.TrimPrefix(fullKey, task.TaskKey+"::")
+			checked[cid] = true
+			checked[task.StepID+":"+cid] = true
+		}
+	}
+	v.CheckedItems = checked
+	v.SkippedItems = skipped
+
+	timers := map[string]asterdoc.TimerRuntimeState{}
+	for _, rec := range s.bench().Timers[task.TaskKey] {
+		plannedS := 0
+		if rec.PlannedS != nil {
+			plannedS = int(*rec.PlannedS)
+		}
+		accumulatedS := int(rec.AccumulatedS)
+		remainingS := 0
+		if plannedS > accumulatedS {
+			remainingS = plannedS - accumulatedS
+		}
+		status := rec.Status
+		if status == "" || status == "ready" {
+			status = "idle"
+		}
+		ts := asterdoc.TimerRuntimeState{
+			TimerID:      rec.TimerID,
+			Status:       status,
+			PlannedS:     plannedS,
+			RemainingS:   remainingS,
+			AccumulatedS: accumulatedS,
+			PhaseIndex:   int(rec.PhaseIndex),
+			RoundIndex:   int(rec.RoundIndex),
+		}
+		timers[rec.TimerID] = ts
+		if idx := strings.LastIndex(rec.TimerID, "@"); idx >= 0 {
+			timers[rec.TimerID[idx+1:]] = ts
+		}
+	}
+	v.TimerStates = timers
+
+	if s.Callbacks.TaskAssets != nil {
+		rawAssets := s.Callbacks.TaskAssets(task.TaskKey)
+		thumbs := make([]asterdoc.AssetThumb, 0, len(rawAssets))
+		grouped := map[string][]asterdoc.AssetThumb{}
+		for _, a := range rawAssets {
+			lbl := a.RelativePath
+			if lbl == "" {
+				lbl = a.AssetID
+			}
+			th := asterdoc.AssetThumb{
+				AssetID:  a.AssetID,
+				Label:    lbl,
+				FilePath: a.RelativePath,
+				WellID:   a.WellID,
+				FovIndex: int(a.FOVIndex),
+			}
+			thumbs = append(thumbs, th)
+			if a.WellID != "" {
+				grouped["well:"+a.WellID] = append(grouped["well:"+a.WellID], th)
+			}
+		}
+		grouped[task.StepID] = thumbs
+		v.LinkedAssets = grouped
+	} else {
+		v.LinkedAssets = nil
+	}
+
+	v.OnToggleCheck = func(stepID, checkID string, on bool) {
+		*s.checkOn(task.TaskKey, checkID) = on
+		inTaskChecks := false
+		for _, chk := range task.Checks {
+			if chk.CheckID == checkID {
+				inTaskChecks = true
+				break
+			}
+		}
+		if inTaskChecks && s.Callbacks.SaveChecks != nil {
+			s.saveChecks(task)
+			return
+		}
+		if s.Callbacks.AppendEvent != nil {
+			stepPath, assayID, pvID, tp := eventScope(task)
+			ev := runs.ExecutionEventInput{
+				EventType: "observation",
+				Content:   fmt.Sprintf("检查项 %s：%v", checkID, on),
+				Timepoint: tp,
+			}
+			if assayID != "" {
+				ev.StepPath, ev.AssayID, ev.ProtocolVersionID = stepPath, assayID, pvID
+			}
+			_, _ = s.Callbacks.AppendEvent(task.TaskKey, ev)
+		}
+	}
+	v.OnRuleSkip = func(stepID, checkID, rule string) {
+		if s.Callbacks.AppendEvent != nil {
+			_, _ = s.Callbacks.AppendEvent(task.TaskKey, SkipEventInput(task, rule))
+		}
+	}
+	v.OnRecordActualParam = func(stepID, blockID, key, value, unit string) {
+		if task.Actual == nil {
+			task.Actual = &ActualRecord{Parameters: map[string]string{}}
+		}
+		if task.Actual.Parameters == nil {
+			task.Actual.Parameters = map[string]string{}
+		}
+		disp := value
+		if unit != "" {
+			disp += " " + unit
+		}
+		task.Actual.Parameters[stepID+":"+blockID+":"+key] = disp
+		task.Actual.Parameters[key] = disp
+		if s.Callbacks.AppendEvent != nil {
+			valBytes, _ := json.Marshal(value)
+			if n, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+				valBytes, _ = json.Marshal(n)
+			}
+			stepPath, assayID, pvID, tp := eventScope(task)
+			ev := runs.ExecutionEventInput{
+				EventType: "observation",
+				Content:   fmt.Sprintf("实测参数 %s = %s", key, disp),
+				ActualParameters: []runs.EventActualParameter{{
+					Key:       key,
+					ValueJSON: string(valBytes),
+					Unit:      unit,
+					Source:    "step_param_table",
+				}},
+				Timepoint: tp,
+			}
+			if assayID != "" {
+				ev.StepPath, ev.AssayID, ev.ProtocolVersionID = stepPath, assayID, pvID
+			}
+			_, _ = s.Callbacks.AppendEvent(task.TaskKey, ev)
+		}
+	}
+	v.OnTimerAction = func(stepID, blockID, action string) {
+		recs := s.bench().Timers[task.TaskKey]
+		var target *runs.TimerRecord
+		for i := range recs {
+			if recs[i].TimerID == blockID || strings.HasSuffix(recs[i].TimerID, "@"+blockID) {
+				target = &recs[i]
+				break
+			}
+		}
+		if target == nil && len(recs) == 1 {
+			target = &recs[0]
+		}
+		if target == nil && action == "start" && s.Callbacks.SaveTimer != nil {
+			plannedS := uint64(300)
+			mode := "countdown"
+			for _, raw := range blocks {
+				if bm, _ := raw.(map[string]any); bm != nil && textValueFromAny(bm["id"]) == blockID {
+					if m := textValueFromAny(bm["mode"]); m == "countdown" || m == "stopwatch" || m == "window" {
+						mode = m
+					}
+					if n := toPositiveInt(bm["duration_s"]); n > 0 {
+						plannedS = uint64(n)
+					} else if n := toPositiveInt(bm["planned_s"]); n > 0 {
+						plannedS = uint64(n)
+					}
+				}
+			}
+			timerID := fmt.Sprintf("%s/%s/%d@%s", task.TaskKey, mode, len(recs)+1, strings.ReplaceAll(blockID, "/", "-"))
+			rec := runs.TimerRecord{TimerID: timerID, TaskKey: task.TaskKey, Mode: mode, Status: "ready"}
+			if mode != "stopwatch" {
+				rec.PlannedS = &plannedS
+			}
+			saved, err := s.Callbacks.SaveTimer(rec)
+			if err != nil {
+				s.bench().TimersErr[task.TaskKey] = timerActionError(err)
+				return
+			}
+			target = &saved
+		}
+		if target != nil && s.Callbacks.TimerAction != nil {
+			var phases []runs.TimerPhase
+			if s.Callbacks.TimerPhases != nil {
+				phases = s.Callbacks.TimerPhases(task.TaskKey)
+			}
+			s.runTimerAction(task, *target, phases, action)
+		}
+	}
+	v.OnSubmitTableReadout = func(stepID, blockID string, payload map[string]any) {
+		if s.Callbacks.ExecuteCommand == nil || payload == nil {
+			return
+		}
+		schemaID, _ := payload["schema_id"].(string)
+		rawRows, _ := payload["rows"].([]map[string]any)
+		if len(rawRows) == 0 {
+			return
+		}
+		colSet := map[string]bool{}
+		var cols []string
+		for _, r := range rawRows {
+			for k := range r {
+				if !colSet[k] {
+					colSet[k] = true
+					cols = append(cols, k)
+				}
+			}
+		}
+		sort.Strings(cols)
+		matrix := make([][]any, 0, len(rawRows))
+		for _, r := range rawRows {
+			rowVals := make([]any, 0, len(cols))
+			for _, col := range cols {
+				rowVals = append(rowVals, r[col])
+			}
+			matrix = append(matrix, rowVals)
+		}
+		cmd, err := buildTableCommand(s.VM.RunID, task.StepPath, task.ProtocolVersionID, task.AssayID, task.Timepoint, schemaID, "", "", cols, matrix, newIdempotencyKey())
+		if err != nil {
+			return
+		}
+		_, _ = s.Callbacks.ExecuteCommand(cmd)
+	}
+	v.OnExcludeSample = func(sampleID, status string) {
+		if s.Callbacks.ExecuteCommand == nil {
+			return
+		}
+		cmd, err := buildExclusionCommand(s.VM.RunID, status, []string{sampleID}, "", task.StepPath, task.AssayID, task.ProtocolVersionID, task.Timepoint, s.bench().Blind, newIdempotencyKey())
+		if err != nil {
+			return
+		}
+		_, _ = s.Callbacks.ExecuteCommand(cmd)
+	}
+	v.OnLinkAsset = func(stepID, blockID, wellID string) {
+		if s.Callbacks.RequestBatchLink != nil {
+			s.Callbacks.RequestBatchLink(task.TaskKey)
+		}
+	}
+
+	ui.Column(c).FillWidth().Padding(float32(tokens.Spacing16)).Radius(float32(tokens.PanelRadius)).
+		Background(tokens.Surface).Border(1, tokens.Border).Gap(float32(tokens.Spacing12)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+			ui.Text(c, "步骤模块 · 同源执行").FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text)
+			ui.Spacer(c)
+			components.Badge(c, fmt.Sprintf("%d 个内容块", len(blocks)+len(refs)), components.BadgeOptions{Tone: components.BadgeAccent})
+		})
+		asterdoc.StepBlockComposer(v, c, stepMod)
+	})
+}
+
+func textValueFromAny(v any) string {
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
 }

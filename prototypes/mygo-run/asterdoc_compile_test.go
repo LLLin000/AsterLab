@@ -108,7 +108,7 @@ func TestCompileAsterDocPreservesSDKModules(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(raw) + `
-` + "```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n" + "```asterlab\nkind: instrument_profile\nid: uv-1\nschema: 1\nclass: uv_curing\nmodel: UV-1\ncapabilities:\n  - name: 365 nm\nsource: built_in\n```\n"
+` + "```asterlab\nkind: calculator\nid: dilution-01\nschema: 1\nmode: dilution\ntitle: Drug dilution\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n" + "```asterlab\nkind: instrument_profile\nid: uv-1\nschema: 1\nclass: uv_curing\nmodel: UV-1\ncapabilities:\n  - name: 365 nm\nsource: built_in\n```\n"
 	saved, err := svc.SaveAsterDoc(ctx, runs.AsterDocSaveInput{
 		DesignID: designs[0].DesignID, Source: source, ExpectedRevision: 0,
 		OperationID: "compile-sdk-modules",
@@ -133,8 +133,8 @@ func TestCompileAsterDocPreservesSDKModules(t *testing.T) {
 	if design.AsterLab.FoundationVersion != 1 || design.AsterLab.SDKVersion == "" || len(design.AsterLab.Modules) != 2 {
 		t.Fatalf("frozen sdk modules = %+v", design.AsterLab)
 	}
-	if design.AsterLab.Modules[0]["kind"] != "dilution" || design.AsterLab.Modules[0]["id"] != "dilution-01" {
-		t.Fatalf("dilution not preserved: %+v", design.AsterLab.Modules[0])
+	if design.AsterLab.Modules[0]["kind"] != "calculator" || design.AsterLab.Modules[0]["id"] != "dilution-01" {
+		t.Fatalf("calculator not preserved: %+v", design.AsterLab.Modules[0])
 	}
 }
 
@@ -150,7 +150,7 @@ func TestCompileAsterDocProjectsStepUses(t *testing.T) {
 	if err != nil || len(designs) == 0 {
 		t.Fatalf("designs: %v %v", designs, err)
 	}
-	source := "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: SDK binding\n```\n```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV cure\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: calculator\n```\n"
+	source := "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: SDK binding\n```\n```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: calculator\nid: dilution-01\nschema: 1\nmode: dilution\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 1\ntitle: UV cure\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: calculator\n```\n"
 	saved, err := svc.SaveAsterDoc(ctx, runs.AsterDocSaveInput{
 		DesignID: designs[0].DesignID, Source: source, ExpectedRevision: 0,
 		OperationID: "compile-step-uses",

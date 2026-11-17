@@ -1,118 +1,64 @@
-# HUVEC 成管实验
+# HUVEC 水凝胶成管实验（12 孔板，AsterML v2）
 
 ```asterlab
 kind: experiment
 id: exp-huvec
 schema: 1
-title: HUVEC 成管实验
-objective: 比较 3%、5%、7% GelMA 水凝胶对 HUVEC 成管的影响
-research_question: 不同 GelMA 浓度是否改变 HUVEC 成管能力？
-experimental_unit: 一个 12 孔板孔
-factors:
-  - name: GelMA 浓度
-    levels: ["3%", "5%", "7%"]
-timepoints: [6 h, 12 h, 24 h]
+title: HUVEC 成管实验（GelMA 梯度 + VEGF 诱导）
+objective: 在 12 孔板上比较 3%、5%、7% (w/v) GelMA 水凝胶基质对 HUVEC 6 h、12 h、24 h 体外成管长度与分枝数的影响。
+experimental_unit: 12 孔板单孔
+primary_endpoint: 管腔总长度与网状结构数
+endpoint_method: 倒置明场显微镜每孔多视野采图定量
+endpoint_unit: um
 ```
 
 ```asterlab
-kind: group
-id: group-3pct
+kind: group_table
+id: gt-huvec
 schema: 1
-name: 3% GelMA
-role: treatment
-condition: 3% GelMA
+title: GelMA 浓度实验分组
+rows:
+  - id: group-3pct
+    name: 3% GelMA + VEGF
+    role: treatment
+    dose: 3 % w/v
+    condition: 3% (w/v) GelMA + 0.25% LAP + 10 ng/mL VEGF
+    replicate_count: 4
+  - id: group-5pct
+    name: 5% GelMA + VEGF
+    role: treatment
+    dose: 5 % w/v
+    condition: 5% (w/v) GelMA + 0.25% LAP + 10 ng/mL VEGF
+    replicate_count: 4
+  - id: group-7pct
+    name: 7% GelMA + VEGF
+    role: treatment
+    dose: 7 % w/v
+    condition: 7% (w/v) GelMA + 0.25% LAP + 10 ng/mL VEGF
+    replicate_count: 4
 ```
 
 ```asterlab
-kind: group
-id: group-5pct
+kind: instrument_profile
+id: inst-uv-405
 schema: 1
-name: 5% GelMA
-role: treatment
-condition: 5% GelMA
-```
-
-```asterlab
-kind: group
-id: group-7pct
-schema: 1
-name: 7% GelMA
-role: treatment
-condition: 7% GelMA
+class: uv_curing
+model: 405 nm 光固化灯（365-405 nm）
+capabilities:
+  - name: photo_crosslinking
+    wavelength: 405 nm
+source: lab_imported
 ```
 
 ```asterlab
 kind: assay
 id: assay-tube
 schema: 1
-title: HUVEC 成管
-endpoint: tube length
-method: 光镜成像
-unit: µm
+title: HUVEC 体外成管
+endpoint: tube_length
+unit: um
 group_refs: [group-3pct, group-5pct, group-7pct]
 timepoints: [6 h, 12 h, 24 h]
-```
-
-```asterlab
-kind: step
-id: step-gel
-schema: 1
-title: GelMA 消毒与脱泡
-assay: assay-tube
-timepoints: []
-path: ""
-tasks:
-  - id: task-gel
-    title: 80℃ 5min / 冰上 10min，重复三次；2000rpm 脱泡
-    kind: procedure
-checks:
-  - checkId: bubbles
-    title: 确认无明显气泡
-    blocking: true
-```
-
-```asterlab
-kind: step
-id: step-cast
-schema: 1
-title: 铺胶与 UV 固化
-assay: assay-tube
-timepoints: []
-path: ""
-tasks:
-  - id: task-cast
-    title: 12 孔板每孔铺 0.5ml 水凝胶，UV 固化 120s
-    kind: procedure
-checks:
-  - checkId: uv
-    title: 确认 UV 120s
-    blocking: true
-```
-
-```asterlab
-kind: step
-id: step-seed
-schema: 1
-title: 接种 HUVEC
-assay: assay-tube
-timepoints: [6 h, 12 h, 24 h]
-path: ""
-tasks:
-  - id: task-seed
-    title: 每孔 0.5ml 细胞悬液，1×10^5/孔，提前加入 VEGF
-    kind: procedure
-```
-
-```asterlab
-kind: workflow
-id: wf-huvec
-schema: 1
-steps: [step-gel, step-cast, step-seed]
-edges:
-  - from: step-gel
-    to: step-cast
-  - from: step-cast
-    to: step-seed
 ```
 
 ```asterlab
@@ -120,10 +66,211 @@ kind: plate
 id: plate-huvec
 schema: 1
 format: 12
+topology: plate
 assay: assay-tube
-timepoint: 6 h
 groups:
   group-3pct: [A1, A2, A3, A4]
   group-5pct: [B1, B2, B3, B4]
   group-7pct: [C1, C2, C3, C4]
+samples:
+  A1: HUVEC-3%-1
+  A2: HUVEC-3%-2
+  A3: HUVEC-3%-3
+  A4: HUVEC-3%-4
+  B1: HUVEC-5%-1
+  B2: HUVEC-5%-2
+  B3: HUVEC-5%-3
+  B4: HUVEC-5%-4
+  C1: HUVEC-7%-1
+  C2: HUVEC-7%-2
+  C3: HUVEC-7%-3
+  C4: HUVEC-7%-4
+roles:
+  A1: sample
+  B1: sample
+  C1: sample
+```
+
+```asterlab
+kind: step
+id: step-01-prep
+schema: 1
+execution: executable
+title: 01 水凝胶热冷消泡与分装体系计算
+assay: assay-tube
+timepoints: [6 h]
+path: huvec/01-prep
+order: 1
+uses:
+  - ref: inst-uv-405
+    role: instrument
+blocks:
+  - kind: prose
+    id: blk-huvec-schedule
+    schema: 1
+    title: 实验时段提醒（7:30 - 10:00 操作窗）
+    tone: tip
+    body: 建议 07:30 开始水浴融胶与 3 轮冷热循环脱泡，08:30 完成铺胶光固化并浸泡，10:00 前完成 HUVEC 接种建立 t0。
+  - kind: timer
+    id: blk-huvec-window
+    schema: 1
+    title: 早班操作窗口与冷热循环计时
+    mode: cycle
+    rounds: 3
+    phases:
+      - name: 80 Cel 水浴溶解
+        duration: {value: 5, unit: min}
+      - name: 冰上静置降泡
+        duration: {value: 10, unit: min}
+      - name: 2000 rpm 离心脱泡（无气泡可跳过）
+        mode: open
+  - kind: calculator
+    id: blk-huvec-vegf-dil
+    schema: 1
+    title: VEGF 因子稀释（100 ug/mL -> 50 ng/mL）
+    mode: dilution
+    stock: {value: 100, unit: ug/mL}
+    target: {value: 50, unit: ng/mL}
+    final_volume: {value: 8, unit: mL}
+  - kind: calculator
+    id: blk-huvec-mix
+    schema: 1
+    title: 12 孔板铺胶反应体系分装（含 15% 余量）
+    mode: group_mastermix
+    plate_ref: plate-huvec
+    volume_per_unit: {value: 500, unit: uL}
+    excess_ratio: 0.15
+    components:
+      - name: GelMA 凝胶前驱液
+        target_percent: 5
+      - name: LAP 光引发剂
+        stock_percent: 2.5
+        target_percent: 0.25
+```
+
+```asterlab
+kind: step
+id: step-02-coat-uv
+schema: 1
+execution: executable
+title: 02 12 孔板铺胶与光固化接种
+assay: assay-tube
+timepoints: [6 h]
+path: huvec/02-coat-uv
+order: 2
+blocks:
+  - kind: param_table
+    id: blk-huvec-uv-params
+    schema: 1
+    title: 光固化与接种参数
+    rows:
+      - key: gel_vol
+        label: 每孔铺胶量
+        value: 0.5
+        unit: mL
+      - key: uv_sec
+        label: 光照固化时间
+        value: 30
+        unit: s
+      - key: seed_cells
+        label: 每孔接种细胞数
+        value: 100000
+        unit: cells/well
+  - kind: timer
+    id: blk-huvec-uv-timer
+    schema: 1
+    title: UV 光固化倒计时
+    mode: countdown
+    duration: {value: 30, unit: s}
+  - kind: checklist
+    id: blk-huvec-uv-chk
+    schema: 1
+    title: 铺胶与接种核查
+    items:
+      - id: chk-degas
+        label: 水凝胶胶面无影响视野的气泡（已离心或目检跳过）
+        blocking: true
+        allow_rule_skip: true
+        skip_rule: 无可见气泡时可豁免离心直接铺胶
+      - id: chk-seed-t0
+        label: 接种完成并记录 t0 时刻
+        blocking: true
+```
+
+```asterlab
+kind: step
+id: step-03-imaging
+schema: 1
+execution: executable
+title: 03 6h / 12h / 24h 明场多视野采图与成管定量
+assay: assay-tube
+timepoints: [6 h, 12 h, 24 h]
+path: huvec/03-imaging
+order: 3
+blocks:
+  - kind: timer
+    id: blk-huvec-6h-timer
+    schema: 1
+    title: 成管 6h 首轮采图倒计时
+    mode: countdown
+    duration: {value: 6, unit: h}
+    anchor: t0_seed
+  - kind: attachment
+    id: blk-huvec-fov-grid
+    schema: 1
+    title: 12 孔板每孔 3 视野明场图像网格
+    scope: container_grid
+    container_ref: plate-huvec
+    slots_per_cell: 3
+    note: 分别采集 6 h、12 h、24 h 同孔固定 3 视野用于总管长定量。
+  - kind: data_table
+    id: blk-huvec-metrics
+    schema: 1
+    title: HUVEC 成管图像定量汇总表
+    schema_id: huvec_tube_metrics
+    endpoint: tube_length
+    columns:
+      - key: well
+        label: 孔位
+        value_kind: text
+      - key: total_length
+        label: 管腔总长度
+        value_kind: number
+        unit: um
+        min: 500
+        max: 25000
+      - key: meshes
+        label: 网状结构数
+        value_kind: number
+        unit: 1
+      - key: branches
+        label: 分支节点数
+        value_kind: number
+        unit: 1
+      - key: mean_branch_len
+        label: 单支均长
+        value_kind: formula
+        formula: "total_length / branches"
+        unit: um
+    rows:
+      - well: A1
+        total_length: 8420
+        meshes: 18
+        branches: 42
+      - well: B1
+        total_length: 12650
+        meshes: 29
+        branches: 58
+```
+
+```asterlab
+kind: workflow
+id: wf-huvec
+schema: 1
+steps: [step-01-prep, step-02-coat-uv, step-03-imaging]
+edges:
+  - from: step-01-prep
+    to: step-02-coat-uv
+  - from: step-02-coat-uv
+    to: step-03-imaging
 ```

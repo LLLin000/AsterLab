@@ -106,19 +106,25 @@ func TestPlanBatchDropsRollsToNextWell(t *testing.T) {
 func TestFOVPerWellForStepReadsFrozenPlan(t *testing.T) {
 	source := "```asterlab\nkind: group\nid: g-tube\nschema: 1\nname: 成管\nrole: sample\n```\n" +
 		"```asterlab\nkind: assay\nid: assay-tube\nschema: 1\ntitle: 成管\nendpoint: 图像\nunit: images\ngroup_refs: [g-tube]\ntimepoints: [6h]\n```\n" +
-		"```asterlab\nkind: step\nid: step-img\nschema: 2\ntitle: 采图\nassay: assay-tube\npath: root/img\nuses:\n  - ref: mp-img\n    role: other\n```\n" +
-		"```asterlab\nkind: measurement_profile\nid: mp-img\nschema: 1\nendpoint: 明场显微图像\nunit: images\nreadout_schema:\n  per_well_fov_count: 6\n  total_wells: 9\n```\n"
+		"```asterlab\nkind: plate\nid: plate-img\nschema: 1\nformat: 12\nassay: assay-tube\ngroups:\n  g-tube: [A1, A2]\n```\n" +
+		"```asterlab\nkind: step\nid: step-img\nschema: 1\ntitle: 采图\nassay: assay-tube\npath: root/img\nblocks:\n  - kind: attachment\n    id: att-fov\n    schema: 1\n    scope: container_grid\n    container_ref: plate-img\n    slots_per_cell: 6\n    media_hint: image/*\n```\n"
 	if got := FOVPerWellForStep(source, "step-img"); got != 6 {
 		t.Fatalf("FOV per well = %d, want 6", got)
+	}
+	if got := FOVPerWellForDoc(source); got != 6 {
+		t.Fatalf("FOVPerWellForDoc = %d, want 6", got)
 	}
 	if got := FOVPerWellForStep(source, "step-missing"); got != 0 {
 		t.Fatalf("unknown step must declare nothing, got %d", got)
 	}
 	plain := "```asterlab\nkind: group\nid: g-tube\nschema: 1\nname: 成管\nrole: sample\n```\n" +
 		"```asterlab\nkind: assay\nid: assay-tube\nschema: 1\ntitle: 成管\nendpoint: 图像\nunit: images\ngroup_refs: [g-tube]\ntimepoints: [6h]\n```\n" +
-		"```asterlab\nkind: step\nid: step-img\nschema: 2\ntitle: 采图\nassay: assay-tube\npath: root/img\n```\n"
+		"```asterlab\nkind: step\nid: step-img\nschema: 1\ntitle: 采图\nassay: assay-tube\npath: root/img\n```\n"
 	if got := FOVPerWellForStep(plain, "step-img"); got != 0 {
-		t.Fatalf("step without a profile must declare nothing, got %d", got)
+		t.Fatalf("step without container_grid attachment must declare nothing, got %d", got)
+	}
+	if got := FOVPerWellForDoc(plain); got != 0 {
+		t.Fatalf("plain doc FOV = %d, want 0", got)
 	}
 }
 

@@ -61,6 +61,7 @@ type DerivedEvidence struct {
 	Params               []ParamUpdate
 	Durations            []DurationUpdate
 	Note                 string
+	AsterDocSource       string
 }
 
 // DecodeDerived decodes a DeriveDesignFromRun response into reviewable
@@ -68,8 +69,9 @@ type DerivedEvidence struct {
 // it for SaveDesign.
 func DecodeDerived(derived runs.DerivedDesign) (DerivedEvidence, error) {
 	var doc struct {
-		Title       string `json:"title"`
-		DerivedFrom *struct {
+		Title          string `json:"title"`
+		AsterDocSource string `json:"asterdoc_source"`
+		DerivedFrom    *struct {
 			DesignVersionID string           `json:"design_version_id"`
 			DesignRevision  int64            `json:"design_revision"`
 			RunID           string           `json:"run_id"`
@@ -89,6 +91,7 @@ func DecodeDerived(derived runs.DerivedDesign) (DerivedEvidence, error) {
 		ExpectedRevision:     derived.ExpectedRevision,
 		Title:                doc.Title,
 		Note:                 derived.Note,
+		AsterDocSource:       strings.TrimSpace(doc.AsterDocSource),
 	}
 	if doc.DerivedFrom != nil {
 		ev.Params = doc.DerivedFrom.Params
@@ -117,6 +120,7 @@ func ChangesForDerived(designData string, derived runs.DerivedDesign, ev Derived
 		return "", fmt.Errorf("派生设计无法解析：%w", err)
 	}
 	delete(draft, "derived_from")
+	delete(draft, "asterdoc_source")
 	var unknown []string
 	for key := range draft {
 		if !derivedChangesWhitelist[key] {

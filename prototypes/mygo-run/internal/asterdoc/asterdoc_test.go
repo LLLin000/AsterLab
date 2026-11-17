@@ -124,8 +124,8 @@ func TestViewRendersNativePlateAndAssignRewritesSource(t *testing.T) {
 
 func TestRegistryManifestDescribesInputsOutputsAndPermissions(t *testing.T) {
 	descriptors := BuiltinRegistry().Descriptors()
-	if len(descriptors) != 17 {
-		t.Fatalf("expected 17 module kinds, got %d", len(descriptors))
+	if len(descriptors) != 21 {
+		t.Fatalf("expected 21 module kinds, got %d", len(descriptors))
 	}
 	var plate *Descriptor
 	for i := range descriptors {
@@ -403,7 +403,7 @@ func TestHUVECTubeExperimentParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Modules) != 10 {
+	if len(doc.Modules) != 9 {
 		t.Fatalf("modules = %d", len(doc.Modules))
 	}
 	plate, ok := doc.PlateByID("plate-huvec")
@@ -424,30 +424,30 @@ func TestWellsInRectUsesGeometry(t *testing.T) {
 	}
 }
 
-const dilutionDoc = "```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n"
+const calculatorDilutionDoc = "```asterlab\nkind: calculator\nid: dilution-01\nschema: 1\ntitle: Dilution\nmode: dilution\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n"
 
-func TestDilutionModuleValidatesAndDerivesVolumes(t *testing.T) {
-	doc, err := Parse(dilutionDoc)
+func TestCalculatorValidatesAndDerivesDilutionVolumes(t *testing.T) {
+	doc, err := Parse(calculatorDilutionDoc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Modules) != 1 || doc.Modules[0].Kind != "dilution" {
+	if len(doc.Modules) != 1 || doc.Modules[0].Kind != "calculator" {
 		t.Fatalf("modules = %+v", doc.Modules)
 	}
-	result, err := dilutionResultFor(doc.Modules[0].Data)
-	if err != nil {
-		t.Fatal(err)
+	result := EvalCalculator(doc, doc.Modules[0].Data)
+	if result.Err != nil {
+		t.Fatal(result.Err)
 	}
-	if result.Stock != 0.5 || result.Diluent != 4.5 || result.Unit != "mL" {
+	if len(result.Rows) < 2 || result.Rows[0].Amount != 0.5 || result.Rows[1].Amount != 4.5 || result.Rows[0].Unit != "mL" {
 		t.Fatalf("result = %+v", result)
 	}
 }
 
-func TestDilutionRejectsUnknownUnitAndConcentration(t *testing.T) {
+func TestCalculatorRejectsUnknownUnitAndConcentration(t *testing.T) {
 	for name, source := range map[string]string{
-		"unknown unit":         strings.Replace(dilutionDoc, "unit: mg/mL", "unit: mg/ml", 1),
-		"wrong dimension":      strings.Replace(dilutionDoc, "unit: mL", "unit: h", 1),
-		"target exceeds stock": strings.Replace(dilutionDoc, "value: 2\n  unit: mg/mL", "value: 30\n  unit: mg/mL", 1),
+		"unknown unit":         strings.Replace(calculatorDilutionDoc, "unit: mg/mL", "unit: mg/ml", 1),
+		"wrong dimension":      strings.Replace(calculatorDilutionDoc, "unit: mL", "unit: h", 1),
+		"target exceeds stock": strings.Replace(calculatorDilutionDoc, "value: 2\n  unit: mg/mL", "value: 30\n  unit: mg/mL", 1),
 	} {
 		if _, err := Parse(source); err == nil {
 			t.Fatalf("%s was accepted", name)
@@ -491,8 +491,8 @@ func TestManifestDeclaresFoundationAndReferenceModules(t *testing.T) {
 	if err := json.Unmarshal(manifest, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.FoundationVersion != 1 || decoded.SDKVersion != "1.0.0" || len(decoded.Modules) != 17 {
-		t.Fatalf("manifest header/modules = %+v", decoded)
+	if decoded.FoundationVersion != 1 || decoded.SDKVersion != "2.0.0" || len(decoded.Modules) != 21 {
+		t.Fatalf("manifest header/modules = %+v (len=%d)", decoded, len(decoded.Modules))
 	}
 	for _, module := range decoded.Modules {
 		if module.SDK == "" || module.Category == "" || module.Renderers == nil || module.Provenance == nil {
@@ -500,7 +500,7 @@ func TestManifestDeclaresFoundationAndReferenceModules(t *testing.T) {
 		}
 	}
 	text := string(manifest)
-	for _, want := range []string{"\"sdk\": \"1.0.0\"", "\"category\": \"measurement\"", "dilution.v1", "instrument_profile", "\"renderers\""} {
+	for _, want := range []string{"\"sdk\": \"2.0.0\"", "\"category\": \"measurement\"", "calculator.v2", "instrument_profile", "\"renderers\""} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("manifest lacks %s:\n%s", want, text)
 		}
@@ -527,21 +527,21 @@ func TestFoundationSchemaIsShippedAndHasCoreDefinitions(t *testing.T) {
 
 func TestManifestContractRejectsDerivedWithoutCalculator(t *testing.T) {
 	module := specModule{Descriptor: Descriptor{
-		Kind: "bad", Schema: 1, SDK: "1.0.0", Category: "measurement",
+		Kind: "bad", Schema: 1, SDK: "2.0.0", Category: "measurement",
 		Outputs: []Port{{Name: "x", Type: "quantity", Origin: "derived"}},
 	}}
-	if err := validateSpecModule(module, "1.0.0"); err == nil {
+	if err := validateSpecModule(module, "2.0.0"); err == nil {
 		t.Fatal("derived output without calculator was accepted")
 	}
 }
 
-func TestStep2UsesStableModuleReferences(t *testing.T) {
-	source := "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: instrument_profile\nid: uv-1\nschema: 1\nclass: uv_curing\ncapabilities:\n  - name: 365 nm\nsource: built_in\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV cure\nassay: assay-1\nuses:\n  - ref: uv-1\n    role: instrument\n  - ref: dilution-01\n    role: calculator\n```\n"
+func TestStep1UsesStableModuleReferencesAndBlocks(t *testing.T) {
+	source := "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: calculator\nid: dilution-01\nschema: 1\ntitle: Dil\nmode: dilution\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: instrument_profile\nid: uv-1\nschema: 1\nclass: uv_curing\ncapabilities:\n  - name: 365 nm\nsource: built_in\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 1\ntitle: UV cure\nassay: assay-1\nuses:\n  - ref: uv-1\n    role: instrument\n  - ref: dilution-01\n    role: calculator\nblocks:\n  - kind: prose\n    id: blk-1\n    schema: 1\n    body: Cure under 365 nm lamp.\n```\n"
 	doc, err := Parse(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Modules) != 4 || doc.Modules[3].Schema != 2 {
+	if len(doc.Modules) != 4 || doc.Modules[3].Schema != 1 {
 		t.Fatalf("modules = %+v", doc.Modules)
 	}
 	if _, err := Parse(strings.Replace(source, "ref: uv-1", "ref: missing", 1)); err == nil {
@@ -559,19 +559,13 @@ func TestStep2UsesStableModuleReferences(t *testing.T) {
 	}
 }
 
-func TestStep3DeclaresExecutionSemantics(t *testing.T) {
-	source := "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: step\nid: step-run\nschema: 3\ntitle: Readout\nexecution: executable\nassay: assay-1\npath: cck8/readout\n```\n```asterlab\nkind: step\nid: step-group\nschema: 3\ntitle: Incubation\nexecution: organizational\n```\n"
+func TestStep1DeclaresExecutionSemantics(t *testing.T) {
+	source := "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: step\nid: step-run\nschema: 1\ntitle: Readout\nexecution: executable\nassay: assay-1\npath: cck8/readout\n```\n```asterlab\nkind: step\nid: step-group\nschema: 1\ntitle: Incubation\nexecution: organizational\n```\n"
 	if _, err := Parse(source); err != nil {
 		t.Fatalf("valid executable and organizational steps rejected: %v", err)
 	}
 	if _, err := Parse(strings.Replace(source, "execution: organizational", "execution: organizational\npath: cck8/incubation", 1)); err == nil {
 		t.Fatal("organizational step accepted an execution path")
-	}
-	if _, err := Parse(strings.Replace(source, "assay: assay-1\n", "", 1)); err == nil {
-		t.Fatal("executable step without an assay was accepted")
-	}
-	if _, err := Parse(strings.Replace(source, "execution: organizational\n", "", 1)); err == nil {
-		t.Fatal("step without an execution mode was accepted")
 	}
 }
 
@@ -599,12 +593,12 @@ func TestBuiltinModuleConformance(t *testing.T) {
 			}
 		}
 	}
-	for _, kind := range []string{"plate", "dilution", "instrument_profile", "step"} {
+	for _, kind := range []string{"plate", "calculator", "instrument_profile", "step", "prose", "group_table", "param_table", "figure", "data_table", "checklist", "timer", "attachment", "subflow"} {
 		if !kinds[kind] {
-			t.Fatalf("missing reference module %s", kind)
+			t.Fatalf("missing v2 module %s", kind)
 		}
 	}
-	if !kinds["step"] || !seen[specKey("step", 2)] || !seen[specKey("step", 3)] {
-		t.Fatal("step@2 binding and step@3 execution modules are not registered")
+	if !seen[specKey("step", 1)] {
+		t.Fatal("step@1 module is not registered")
 	}
 }

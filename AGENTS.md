@@ -23,6 +23,13 @@ Kandev 承载 AsterLab 的全部**任务级规划**：路线图、里程碑、�
 | 架构与模块职责 | `docs/architecture.md` |
 | 当前实施阶段与未完成项 | `docs/implementation-plan.md` |
 | UI 规则 | `docs/product/ux-contract.md` |
+| 模块体系与组合铁律 | `docs/asterdoc-contract.md` |
+
+### 模块与架构硬规则（AsterML v2）
+
+- **能用现有通用内容模块（`prose`、`group_table`、`param_table`、`figure`、`data_table`、`checklist`、`calculator`、`timer`、`attachment`、`subflow`、`plate`）与第二层科学原语组合实现的需求，严禁新增实验专用模块、实验专用字段或实验专用 UI 面板。**
+- **图片 / SVG 模块（`figure@1`）仅负责补充表达，绝不承担结构化实验数据职责**（分组、参数、读数必须存于科学数据模块中，不得从图像文字解析）。
+- **步骤内自由组合与同源渲染**：Design 允许在任意 `step@1.blocks[]` 中自由插入和排列通用模块，支持自包含冻结为 Run（无需预先手动创建外部 `ProtocolBlockVersion` UUID）；Run 和 Notebook 消费同一份冻结模块树与 `RecordProjection`。
 
 Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方。先在卡片评论中记录冲突，改卡或改文档对齐后再动代码。
 

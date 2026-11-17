@@ -50,9 +50,9 @@ func makeFrozenDoc() *asterdoc.FrozenAsterDoc {
 		"```asterlab\nkind: group\nid: g-control\nschema: 1\nname: Control\nrole: control\n```\n" +
 		"```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\nendpoint: OD450\nunit: AU\ngroup_refs: [g-control]\ntimepoints: [D1]\n```\n" +
 		"```asterlab\nkind: instrument_profile\nid: uv-reader\nschema: 1\nclass: plate_reader\nmodel: UV-1\ncapabilities:\n  - name: absorbance\nsource: built_in\n```\n" +
-		"```asterlab\nkind: dilution\nid: dil-stock\nschema: 1\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n" +
-		"```asterlab\nkind: step\nid: step-seed\nschema: 2\ntitle: 细胞接种\nassay: assay-cck8\npath: root/seed\ntimepoints: [D0]\nuses:\n  - ref: uv-reader\n    role: instrument\n```\n" +
-		"```asterlab\nkind: step\nid: step-read\nschema: 2\ntitle: CCK-8 检测\nassay: assay-cck8\npath: root/read\ntimepoints: [D1]\nuses:\n  - ref: uv-reader\n    role: instrument\n  - ref: dil-stock\n    role: calculator\n```\n" +
+		"```asterlab\nkind: calculator\nid: dil-stock\nschema: 1\nmode: dilution\ntitle: 药物稀释\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n" +
+		"```asterlab\nkind: step\nid: step-seed\nschema: 1\ntitle: 细胞接种\nassay: assay-cck8\npath: root/seed\ntimepoints: [D0]\nuses:\n  - ref: uv-reader\n    role: instrument\n```\n" +
+		"```asterlab\nkind: step\nid: step-read\nschema: 1\ntitle: CCK-8 检测\nassay: assay-cck8\npath: root/read\ntimepoints: [D1]\nuses:\n  - ref: uv-reader\n    role: instrument\n  - ref: dil-stock\n    role: calculator\n```\n" +
 		"```asterlab\nkind: workflow\nid: wf-1\nschema: 1\nsteps: [step-seed, step-read]\nedges:\n  - from: step-seed\n    to: step-read\n```\n"
 	return &asterdoc.FrozenAsterDoc{
 		DesignID:        "design-cck8",

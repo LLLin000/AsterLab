@@ -1,9 +1,98 @@
-# 新实验
+# 新空白实验（AsterML v2）
 
 ```asterlab
 kind: experiment
-id: exp-new
+id: exp-blank
 schema: 1
-title: 新实验
-experimental_unit: 一个独立实验单位
+title: 新建实验设计
+objective: 请在此填写实验目的与主要观察终点
+experimental_unit: sample
+```
+
+```asterlab
+kind: group_table
+id: gt-main
+schema: 1
+title: 实验分组
+rows:
+  - id: g-control
+    name: 对照组
+    role: control
+    condition: 空白或溶媒对照
+    replicate_count: 3
+  - id: g-treatment
+    name: 处理组
+    role: treatment
+    condition: 待设定处理条件
+    replicate_count: 3
+```
+
+```asterlab
+kind: assay
+id: assay-main
+schema: 1
+title: 主检测流程
+group_refs: [g-control, g-treatment]
+timepoints: [D1]
+```
+
+```asterlab
+kind: plate
+id: plate-main
+schema: 1
+format: 96
+topology: plate
+assay: assay-main
+groups:
+  g-control: [A1, A2, A3]
+  g-treatment: [B1, B2, B3]
+roles:
+  A1: negative_control
+  A2: negative_control
+  A3: negative_control
+  B1: sample
+  B2: sample
+  B3: sample
+```
+
+```asterlab
+kind: step
+id: step-01-prepare
+schema: 1
+execution: executable
+title: 01 准备材料与分组布置
+assay: assay-main
+path: root/prepare
+order: 1
+blocks:
+  - kind: prose
+    id: blk-blank-note
+    schema: 1
+    title: 实验说明
+    tone: tip
+    body: 在左侧大纲选择步骤，在下方自由插入文本、参数表、示意图、计算器、计时器、检查清单或数据表模块。
+  - kind: param_table
+    id: blk-blank-params
+    schema: 1
+    title: 关键设定参数
+    rows:
+      - key: temp
+        label: 环境温度
+        value: 25
+        unit: Cel
+  - kind: checklist
+    id: blk-blank-check
+    schema: 1
+    title: 执行前确认
+    items:
+      - id: chk-ready
+        label: 分组与器材已核对完毕
+        blocking: true
+```
+
+```asterlab
+kind: workflow
+id: wf-blank
+schema: 1
+steps: [step-01-prepare]
 ```

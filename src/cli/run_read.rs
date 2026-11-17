@@ -1339,12 +1339,11 @@ pub(crate) fn parse_workflow_document(source: &str) -> Result<Document, CliError
                 if id.is_empty() {
                     continue;
                 }
-                let schema = value.get("schema").and_then(|value| value.as_i64()).unwrap_or(0);
                 let execution = value
                     .get("execution")
                     .and_then(|value| value.as_str())
                     .unwrap_or("");
-                let organizational = schema == 3 && execution == "organizational";
+                let organizational = execution == "organizational";
                 let mut path = value
                     .get("path")
                     .and_then(|value| value.as_str())
@@ -1354,6 +1353,17 @@ pub(crate) fn parse_workflow_document(source: &str) -> Result<Document, CliError
                     path = id.to_owned();
                 }
                 let mut refs = Vec::new();
+                if let Some(block_refs) =
+                    value.get("block_refs").and_then(|value| value.as_sequence())
+                {
+                    for item in block_refs {
+                        if let Some(reference) = item.as_str() {
+                            if !reference.is_empty() {
+                                refs.push(reference.to_owned());
+                            }
+                        }
+                    }
+                }
                 if let Some(uses) = value.get("uses").and_then(|value| value.as_sequence()) {
                     for item in uses {
                         if let Some(reference) =

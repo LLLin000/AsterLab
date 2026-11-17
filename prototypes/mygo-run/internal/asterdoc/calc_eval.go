@@ -1,0 +1,487 @@
+package asterdoc
+
+import (
+	"fmt"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode"
+)
+
+type calcTokenKind int
+
+const (
+	tokNum calcTokenKind = iota
+	tokIdent
+	tokPlus
+	tokMinus
+	tokStar
+	tokSlash
+	tokLParen
+	tokRParen
+)
+
+type calcToken struct {
+	kind calcTokenKind
+	text string
+	num  float64
+}
+
+func tokenizeFormula(expr string) ([]calcToken, error) {
+	trimmed := strings.TrimSpace(expr)
+	if trimmed == "" {
+		return nil, fmt.Errorf("formula cannot be empty")
+	}
+	var tokens []calcToken
+	for i := 0; i < len(trimmed); {
+		r := trimmed[i]
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			i++
+			continue
+		}
+		switch r {
+		case '+':
+			tokens = append(tokens, calcToken{kind: tokPlus, text: "+"})
+			i++
+		case '-':
+			tokens = append(tokens, calcToken{kind: tokMinus, text: "-"})
+			i++
+		case '*':
+			tokens = append(tokens, calcToken{kind: tokStar, text: "*"})
+			i++
+		case '/':
+			tokens = append(tokens, calcToken{kind: tokSlash, text: "/"})
+			i++
+		case '(':
+			tokens = append(tokens, calcToken{kind: tokLParen, text: "("})
+			i++
+		case ')':
+			tokens = append(tokens, calcToken{kind: tokRParen, text: ")"})
+			i++
+		default:
+			if (r >= '0' && r <= '9') || r == '.' {
+				start := i
+				for i < len(trimmed) && ((trimmed[i] >= '0' && trimmed[i] <= '9') || trimmed[i] == '.') {
+					i++
+				}
+				val, err := strconv.ParseFloat(trimmed[start:i], 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid number %q in formula", trimmed[start:i])
+				}
+				tokens = append(tokens, calcToken{kind: tokNum, text: trimmed[start:i], num: val})
+			} else if unicode.IsLetter(rune(r)) || r == '_' {
+				start := i
+				for i < len(trimmed) && (unicode.IsLetter(rune(trimmed[i])) || unicode.IsDigit(rune(trimmed[i])) || trimmed[i] == '_') {
+					i++
+				}
+				tokens = append(tokens, calcToken{kind: tokIdent, text: trimmed[start:i]})
+			} else {
+				return nil, fmt.Errorf("unexpected character %q in formula", string(r))
+			}
+		}
+	}
+	return tokens, nil
+}
+
+type formulaParser struct {
+	tokens []calcToken
+	pos    int
+	vars   map[string]float64
+	check  bool
+}
+
+// ValidateFormulaExpr validates arithmetic syntax (+ - * / parentheses, numbers, identifiers).
+func ValidateFormulaExpr(expr string) error {
+	tokens, err := tokenizeFormula(expr)
+	if err != nil {
+		return err
+	}
+	p := &formulaParser{tokens: tokens, check: true}
+	if _, err := p.parseExpr(); err != nil {
+		return err
+	}
+	if p.pos != len(p.tokens) {
+		return fmt.Errorf("trailing tokens in formula")
+	}
+	return nil
+}
+
+// EvalFormula evaluates an arithmetic formula with provided scalar variables.
+func EvalFormula(expr string, vars map[string]float64) (float64, error) {
+	tokens, err := tokenizeFormula(expr)
+	if err != nil {
+		return 0, err
+	}
+	p := &formulaParser{tokens: tokens, vars: vars}
+	res, err := p.parseExpr()
+	if err != nil {
+		return 0, err
+	}
+	if p.pos != len(p.tokens) {
+		return 0, fmt.Errorf("trailing tokens in formula")
+	}
+	if math.IsNaN(res) || math.IsInf(res, 0) {
+		return 0, fmt.Errorf("formula result is not finite")
+	}
+	return res, nil
+}
+
+func (p *formulaParser) peek() (calcToken, bool) {
+	if p.pos >= len(p.tokens) {
+		return calcToken{}, false
+	}
+	return p.tokens[p.pos], true
+}
+
+func (p *formulaParser) parseExpr() (float64, error) {
+	left, err := p.parseTerm()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		tok, ok := p.peek()
+		if !ok || (tok.kind != tokPlus && tok.kind != tokMinus) {
+			break
+		}
+		p.pos++
+		right, err := p.parseTerm()
+		if err != nil {
+			return 0, err
+		}
+		if tok.kind == tokPlus {
+			left += right
+		} else {
+			left -= right
+		}
+	}
+	return left, nil
+}
+
+func (p *formulaParser) parseTerm() (float64, error) {
+	left, err := p.parseFactor()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		tok, ok := p.peek()
+		if !ok || (tok.kind != tokStar && tok.kind != tokSlash) {
+			break
+		}
+		p.pos++
+		right, err := p.parseFactor()
+		if err != nil {
+			return 0, err
+		}
+		if tok.kind == tokStar {
+			left *= right
+		} else if !p.check {
+			if right == 0 {
+				return 0, fmt.Errorf("division by zero")
+			}
+			left /= right
+		}
+	}
+	return left, nil
+}
+
+func (p *formulaParser) parseFactor() (float64, error) {
+	tok, ok := p.peek()
+	if !ok {
+		return 0, fmt.Errorf("unexpected end of formula expression")
+	}
+	switch tok.kind {
+	case tokPlus:
+		p.pos++
+		return p.parseFactor()
+	case tokMinus:
+		p.pos++
+		v, err := p.parseFactor()
+		return -v, err
+	case tokNum:
+		p.pos++
+		return tok.num, nil
+	case tokIdent:
+		p.pos++
+		if p.check {
+			return 1, nil
+		}
+		v, exists := p.vars[tok.text]
+		if !exists {
+			return 0, fmt.Errorf("missing variable %q", tok.text)
+		}
+		return v, nil
+	case tokLParen:
+		p.pos++
+		v, err := p.parseExpr()
+		if err != nil {
+			return 0, err
+		}
+		closeTok, ok := p.peek()
+		if !ok || closeTok.kind != tokRParen {
+			return 0, fmt.Errorf("unclosed '(' in formula")
+		}
+		p.pos++
+		return v, nil
+	default:
+		return 0, fmt.Errorf("unexpected token %q in formula", tok.text)
+	}
+}
+
+// CalcRow is one computed line item from EvalCalculator.
+type CalcRow struct {
+	Label    string
+	Amount   float64
+	Unit     string
+	Note     string
+}
+
+// CalcResult holds the deterministic preview of a calculator@1 module.
+type CalcResult struct {
+	Mode    string
+	Summary string
+	Rows    []CalcRow
+	Err     error
+}
+
+// EvalCalculator computes deterministic preview quantities for calculator@1 across all 5 modes.
+func EvalCalculator(doc *Document, data map[string]any) CalcResult {
+	mode := textValue(data, "mode")
+	res := CalcResult{Mode: mode}
+	switch mode {
+	case "dilution":
+		sv, su, err := quantityParts(data["stock"])
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		tv, tu, err := quantityParts(data["target"])
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		fv, fu, err := quantityParts(data["final_volume"])
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		ss, ok1 := unitFor(su)
+		ts, ok2 := unitFor(tu)
+		_, ok3 := unitFor(fu)
+		if !ok1 || !ok2 || !ok3 || ss.Dimension != ts.Dimension {
+			res.Err = fmt.Errorf("dilution quantities have incompatible units")
+			return res
+		}
+		if sv <= 0 || tv <= 0 || fv <= 0 {
+			res.Err = fmt.Errorf("dilution quantities must be positive")
+			return res
+		}
+		if tv*ts.Factor > sv*ss.Factor {
+			res.Err = fmt.Errorf("target concentration exceeds stock concentration")
+			return res
+		}
+		stockVol := (tv * ts.Factor / (sv * ss.Factor)) * fv
+		diluentVol := fv - stockVol
+		res.Summary = fmt.Sprintf("%s %s 母液 + %s %s 稀释液", formatNumber(round4(stockVol)), fu, formatNumber(round4(diluentVol)), fu)
+		res.Rows = []CalcRow{
+			{Label: "母液体积 (V1)", Amount: round4(stockVol), Unit: fu, Note: fmt.Sprintf("从 %s %s 稀释至 %s %s", formatNumber(sv), su, formatNumber(tv), tu)},
+			{Label: "稀释液体积", Amount: round4(diluentVol), Unit: fu, Note: "补足至目标终体积"},
+			{Label: "目标总体积 (V2)", Amount: round4(fv), Unit: fu, Note: "C1·V1 = C2·V2"},
+		}
+		return res
+
+	case "group_mastermix":
+		vpuVal, vpuUnit, err := quantityParts(data["volume_per_unit"])
+		if err != nil || vpuVal <= 0 {
+			res.Err = fmt.Errorf("group_mastermix needs positive volume_per_unit")
+			return res
+		}
+		vpuSpec, ok := unitFor(vpuUnit)
+		if !ok || vpuSpec.Dimension != "volume" {
+			res.Err = fmt.Errorf("volume_per_unit must use volume unit")
+			return res
+		}
+		excess, _ := numericValue(data["excess_ratio"])
+		if excess < 0 {
+			excess = 0
+		}
+		groupCounts := map[string]int{}
+		groupOrder := []string{}
+		if ref := textValue(data, "plate_ref"); ref != "" && doc != nil {
+			if p, found := doc.PlateByID(ref); found {
+				for _, g := range p.GroupNames() {
+					n := len(p.Groups[g])
+					if n > 0 {
+						groupCounts[g] = n
+						groupOrder = append(groupOrder, g)
+					}
+				}
+			}
+		}
+		if len(groupOrder) == 0 {
+			sc, okSC := numericValue(data["sample_count"])
+			if !okSC || sc < 1 {
+				sc = 1
+			}
+			groupOrder = []string{"总体系"}
+			groupCounts["总体系"] = int(sc)
+		}
+		totalUnits := 0
+		for _, g := range groupOrder {
+			totalUnits += groupCounts[g]
+			groupVol := float64(groupCounts[g]) * vpuVal * (1 + excess)
+			res.Rows = append(res.Rows, CalcRow{
+				Label:  fmt.Sprintf("%s 体系 (%d 孔/份)", g, groupCounts[g]),
+				Amount: round4(groupVol),
+				Unit:   vpuUnit,
+				Note:   fmt.Sprintf("含 %d%% 余量", int(math.Round(excess*100))),
+			})
+		}
+		totalVol := float64(totalUnits) * vpuVal * (1 + excess)
+		if comps, ok := data["components"].([]any); ok {
+			for _, raw := range comps {
+				cm, _ := raw.(map[string]any)
+				cname := textValue(cm, "name")
+				if cname == "" {
+					continue
+				}
+				if ratio, hasR := numericValue(cm["ratio"]); hasR && ratio > 0 {
+					res.Rows = append(res.Rows, CalcRow{
+						Label:  cname,
+						Amount: round4(totalVol * ratio),
+						Unit:   vpuUnit,
+						Note:   fmt.Sprintf("配比系数 %s", formatNumber(ratio)),
+					})
+				} else if targetPct, hasTP := numericValue(cm["target_percent"]); hasTP {
+					stockPct, _ := numericValue(cm["stock_percent"])
+					if stockPct > 0 {
+						vol := totalVol * (targetPct / stockPct)
+						res.Rows = append(res.Rows, CalcRow{
+							Label:  cname,
+							Amount: round4(vol),
+							Unit:   vpuUnit,
+							Note:   fmt.Sprintf("%s%% → %s%%", formatNumber(stockPct), formatNumber(targetPct)),
+						})
+					} else {
+						massMg := (totalVol * vpuSpec.Factor * 1000.0) * (targetPct * 10.0) // mg/mL = 10*% w/v
+						res.Rows = append(res.Rows, CalcRow{
+							Label:  cname,
+							Amount: round4(massMg),
+							Unit:   "mg",
+							Note:   fmt.Sprintf("终浓度 %s%% w/v", formatNumber(targetPct)),
+						})
+					}
+				} else if qv, qu, qerr := quantityParts(cm["volume_per_unit"]); qerr == nil && qv > 0 {
+					res.Rows = append(res.Rows, CalcRow{
+						Label:  cname,
+						Amount: round4(qv * float64(totalUnits) * (1 + excess)),
+						Unit:   qu,
+						Note:   fmt.Sprintf("单份 %s %s", formatNumber(qv), qu),
+					})
+				} else {
+					note := textValue(cm, "note")
+					if note == "" {
+						note = "按分组浓度配置"
+					}
+					res.Rows = append(res.Rows, CalcRow{
+						Label:  cname,
+						Amount: round4(totalVol),
+						Unit:   vpuUnit,
+						Note:   note,
+					})
+				}
+			}
+		}
+		res.Summary = fmt.Sprintf("共 %d 份 · 含 %d%% 余量 · 总配液 %s %s", totalUnits, int(math.Round(excess*100)), formatNumber(round4(totalVol)), vpuUnit)
+		return res
+
+	case "serial_dilution":
+		df, ok1 := numericValue(data["dilution_factor"])
+		steps, ok2 := numericValue(data["steps_count"])
+		if !ok1 || df <= 1 || !ok2 || steps < 1 {
+			res.Err = fmt.Errorf("serial_dilution needs dilution_factor > 1 and steps_count >= 1")
+			return res
+		}
+		transferVal, transferUnit, qerr := quantityParts(data["volume_per_unit"])
+		if qerr != nil || transferVal <= 0 {
+			transferVal, transferUnit = 100, "uL"
+		}
+		diluentVal := transferVal * (df - 1)
+		factor := 1.0
+		for step := 1; step <= int(steps); step++ {
+			factor *= df
+			res.Rows = append(res.Rows, CalcRow{
+				Label:  fmt.Sprintf("第 %d 级 (1:%s)", step, formatNumber(factor)),
+				Amount: round4(transferVal),
+				Unit:   transferUnit,
+				Note:   fmt.Sprintf("吸取 %s %s + 稀释液 %s %s", formatNumber(round4(transferVal)), transferUnit, formatNumber(round4(diluentVal)), transferUnit),
+			})
+		}
+		res.Summary = fmt.Sprintf("%d 级 %s 倍梯度稀释（总稀释至 1:%s）", int(steps), formatNumber(df), formatNumber(factor))
+		return res
+
+	case "sample_normalize":
+		count, _ := numericValue(data["sample_count"])
+		if count < 1 {
+			count = 1
+		}
+		excess, _ := numericValue(data["excess_ratio"])
+		if excess < 0 {
+			excess = 0
+		}
+		if vpu, vu, qerr := quantityParts(data["volume_per_unit"]); qerr == nil && vpu > 0 {
+			tot := count * vpu * (1 + excess)
+			res.Summary = fmt.Sprintf("%d 个样本 · 单样 %s %s · 总配液 %s %s", int(count), formatNumber(vpu), vu, formatNumber(round4(tot)), vu)
+			res.Rows = []CalcRow{
+				{Label: "单样反应体积", Amount: round4(vpu), Unit: vu, Note: fmt.Sprintf("样本数 %d", int(count))},
+				{Label: "含余量总体系", Amount: round4(tot), Unit: vu, Note: fmt.Sprintf("含 %d%% 余量", int(math.Round(excess*100)))},
+			}
+			return res
+		}
+		res.Summary = fmt.Sprintf("归一化 %d 个样本至目标浓度", int(count))
+		return res
+
+	case "formula":
+		expr := textValue(data, "formula")
+		if err := ValidateFormulaExpr(expr); err != nil {
+			res.Err = err
+			return res
+		}
+		vars := map[string]float64{}
+		keys := []string{}
+		if rawIn, ok := data["inputs"].(map[string]any); ok {
+			for k, v := range rawIn {
+				if num, numOK := numericValue(v); numOK {
+					vars[k] = num
+					keys = append(keys, k)
+				} else if qv, _, qerr := quantityParts(v); qerr == nil {
+					vars[k] = qv
+					keys = append(keys, k)
+				}
+			}
+		}
+		sort.Strings(keys)
+		if len(vars) == 0 {
+			res.Summary = fmt.Sprintf("公式：%s（Run 时代入实测值）", expr)
+			return res
+		}
+		val, err := EvalFormula(expr, vars)
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		res.Summary = fmt.Sprintf("%s = %s", expr, formatNumber(round4(val)))
+		res.Rows = []CalcRow{{Label: "计算结果", Amount: round4(val), Unit: "", Note: expr}}
+		return res
+	}
+	res.Err = fmt.Errorf("unsupported calculator mode %q", mode)
+	return res
+}
+
+func round4(v float64) float64 {
+	return math.Round(v*10000) / 10000
+}
+
+func isFiniteNum(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}

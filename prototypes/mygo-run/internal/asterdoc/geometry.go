@@ -27,6 +27,32 @@ func geometryFor(format int) (Geometry, bool) {
 	return g, ok
 }
 
+func geometryForPlate(format int, topology string, rows, cols int) (Geometry, bool) {
+	topo := topology
+	if topo == "" {
+		topo = "plate"
+	}
+	if topo == "plate" {
+		return geometryFor(format)
+	}
+	if rows > 0 && cols > 0 {
+		if rows > 16 || cols > 24 {
+			return Geometry{}, false
+		}
+		if format <= 0 {
+			format = rows * cols
+		}
+		return Geometry{Format: format, Rows: rows, Columns: cols}, true
+	}
+	if g, ok := plateFormats[format]; ok {
+		return g, true
+	}
+	if format >= 1 && format <= 1536 {
+		return Geometry{Format: format, Rows: 1, Columns: format}, true
+	}
+	return Geometry{}, false
+}
+
 func rowLabel(index int) string {
 	// A..Z then AA.. for formats beyond 26 rows; current formats stop at P.
 	if index < 26 {

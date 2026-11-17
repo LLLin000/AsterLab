@@ -36,6 +36,7 @@ import (
 
 	mygo "github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/richtext"
 	"github.com/oneo-me/onevra/source/components"
 )
@@ -106,6 +107,11 @@ type app struct {
 	asterDraftSuspend          bool
 	asterDraftSelection        string
 	designTab                  int
+	designSplitW               float32
+	designSrcSplitPct          float32
+	asterSrcEditor             *editor.State
+	asterSrcLoadedRev          uint64
+	asterSrcLoadedSrc          string
 	designCanvas               *workflow.Editor
 	designCanvasSource         string
 	designCanvasFitPending     bool
@@ -835,6 +841,13 @@ func frozenPlannedWells(asterSource, assayID, stepID string) []string {
 				}
 			}
 			if len(planned) == 0 {
+				for well := range m.Plate.Samples {
+					if well = strings.ToUpper(strings.TrimSpace(well)); well != "" {
+						planned[well] = true
+					}
+				}
+			}
+			if len(planned) == 0 {
 				continue
 			}
 			sources = append(sources, source{id: m.ID, wells: sortedWells(planned)})
@@ -865,14 +878,30 @@ func frozenPlannedWells(asterSource, assayID, stepID string) []string {
 }
 
 // stepContainerRefs reads the container refs a frozen step binds through
-// uses (ref + role), so a 1D/2D container resolves to its assay's task.
+// uses (ref + role), block_refs, or inline container_grid attachment blocks.
 func stepContainerRefs(data map[string]any) []string {
 	refs := []string{}
-	uses, _ := data["uses"].([]any)
-	for _, raw := range uses {
-		item, _ := raw.(map[string]any)
-		if ref, _ := item["ref"].(string); strings.TrimSpace(ref) != "" {
-			refs = append(refs, strings.TrimSpace(ref))
+	if uses, _ := data["uses"].([]any); len(uses) > 0 {
+		for _, raw := range uses {
+			item, _ := raw.(map[string]any)
+			if ref, _ := item["ref"].(string); strings.TrimSpace(ref) != "" {
+				refs = append(refs, strings.TrimSpace(ref))
+			}
+		}
+	}
+	if blockRefs, _ := data["block_refs"].([]any); len(blockRefs) > 0 {
+		for _, raw := range blockRefs {
+			if ref, _ := raw.(string); strings.TrimSpace(ref) != "" {
+				refs = append(refs, strings.TrimSpace(ref))
+			}
+		}
+	}
+	if blocks, _ := data["blocks"].([]any); len(blocks) > 0 {
+		for _, raw := range blocks {
+			bm, _ := raw.(map[string]any)
+			if cref, _ := bm["container_ref"].(string); strings.TrimSpace(cref) != "" {
+				refs = append(refs, strings.TrimSpace(cref))
+			}
 		}
 	}
 	return refs
@@ -1137,14 +1166,22 @@ func (a *app) linkAssetPaths(rootID, rootDir string, paths []string, coordinate 
 	return nil
 }
 
-// recordFOV returns the board's selected FOV layer for the fetch memo (0
-// means Core's default of one planned slot per well). It peeks without
-// creating board state for a Run that has none yet.
+func (a *app) plannedDocFOV() int {
+	if a.asterDoc != nil {
+		if n := runworkspace.FOVPerWellForDoc(a.asterDoc.Source); n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// recordFOV returns the board's selected FOV layer for the fetch memo (falling
+// back to the frozen AsterML container_grid attachment's slots_per_cell).
 func (a *app) recordFOV() int {
 	if st := recordBoards[a.snap.RunID]; st != nil && a.snap.RunID != "" {
 		return st.fov
 	}
-	return 0
+	return a.plannedDocFOV()
 }
 
 // recordBlind reports whether the Run is viewed under blinding. The Run
@@ -1604,6 +1641,15 @@ var starterAsterDoc string
 
 //go:embed blank.asterml
 var blankAsterDoc string
+
+//go:embed internal/asterdoc/testdata/inhibition-zone.asterml
+var inhibitionZoneAsterDoc string
+
+//go:embed internal/asterdoc/testdata/cfu.asterml
+var cfuAsterDoc string
+
+//go:embed internal/asterdoc/testdata/huvec-tube.asterml
+var huvecAsterDoc string
 
 func (a *app) createAsterDocDesign(source, title string) {
 	if a.designSvc == nil {
@@ -3747,16 +3793,16 @@ func (a *app) renderPreflight(c *ui.Context) {
 	if !a.preflightOpen || a.designDoc == nil {
 		return
 	}
-	t := c.Theme()
+	tok := theme.GetTokens(c.Theme())
 	open := a.preflightOpen
 	components.Dialog(c, &open, components.DialogOptions{Label: "创建运行前检查"}, func(panel ui.Element) {
 		panel.Width(560).Children(func() {
-			ui.Text(c, "创建运行前检查").FontSize(15).Bold()
+			ui.Text(c, "创建运行前检查").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 			ui.Text(c, fmt.Sprintf("文档 rev %d · 校验由 Rust Core 生成", a.designDoc.Revision)).
-				FontSize(11).TextColor(t.TextMuted)
+				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			if a.readinessLoading {
-				ui.Text(c, "校验中 · 正在等待 Core 校验结果…").FontSize(12).TextColor(t.TextMuted)
-				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(8).Children(func() {
+				ui.Text(c, "校验中 · 正在等待 Core 校验结果…").FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
 					if components.Button(c, "返回修改", components.ButtonSecondary).Clicked() {
 						a.preflightOpen = false
 					}
@@ -3767,13 +3813,14 @@ func (a *app) renderPreflight(c *ui.Context) {
 			}
 			assessment := a.readiness
 			if assessment == nil {
-				ui.Text(c, "未解析 · 无法获取 Core 校验结果").FontSize(12).Bold().TextColor(t.Danger)
+				ui.Text(c, "未解析 · 无法获取 Core 校验结果").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Danger)
 				if a.readinessErr != "" {
-					ui.Box(c).FillWidth().Padding(6, 8).Radius(t.Space(1)).Background(t.Danger.Alpha(.06)).Children(func() {
-						ui.Text(c, a.readinessErr).FontSize(12).TextColor(t.Danger)
+					ui.Box(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+						Background(tok.Danger.Alpha(.06)).Children(func() {
+						ui.Text(c, a.readinessErr).FontSize(float32(tok.TextBody)).TextColor(tok.Danger)
 					})
 				}
-				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(8).Children(func() {
+				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
 					if components.Button(c, "返回修改", components.ButtonSecondary).Clicked() {
 						a.preflightOpen = false
 					}
@@ -3784,22 +3831,23 @@ func (a *app) renderPreflight(c *ui.Context) {
 				return
 			}
 			if len(assessment.Errors) > 0 {
-				ui.Text(c, "必须修复").FontSize(12).Bold().TextColor(t.Danger)
+				ui.Text(c, "必须修复").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Danger)
 				for _, issue := range assessment.Errors {
-					ui.Row(c).Padding(6, 8).Radius(t.Space(1)).Background(t.Danger.Alpha(.06)).Children(func() {
-						ui.Text(c, issue).FontSize(12).TextColor(t.Danger)
+					ui.Row(c).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+						Background(tok.Danger.Alpha(.06)).Children(func() {
+						ui.Text(c, issue).FontSize(float32(tok.TextBody)).TextColor(tok.Danger)
 					})
 				}
 			}
 			if len(assessment.Warnings) > 0 {
-				ui.Text(c, "可以确认的风险").FontSize(12).Bold().TextColor(t.Warning)
+				ui.Text(c, "可以确认的风险").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Warning)
 				for _, warning := range assessment.Warnings {
-					ui.Text(c, warning).FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, warning).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
 				}
 				components.Checkbox(c, &a.preflightRisk, "我已了解并确认这些风险")
 			}
 			canCreate := len(assessment.Errors) == 0 && (len(assessment.Warnings) == 0 || a.preflightRisk)
-			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(8).Children(func() {
+			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
 				if components.Button(c, "返回修改", components.ButtonSecondary).Clicked() {
 					a.preflightOpen = false
 				}
@@ -3821,23 +3869,42 @@ func (a *app) renderNewDesignDialog(c *ui.Context) {
 	if !a.newDesignOpen {
 		return
 	}
+	tok := theme.GetTokens(c.Theme())
 	open := a.newDesignOpen
 	components.Dialog(c, &open, components.DialogOptions{Label: "新建设计"}, func(panel ui.Element) {
-		panel.Width(520).Children(func() {
-			ui.Text(c, "新建设计").FontSize(15).Bold()
-			ui.Text(c, "从空白实验开始，或使用 CCK-8 骨架快速验证流程。").
-				FontSize(12).TextColor(c.Theme().TextMuted)
-			ui.Row(c).FillWidth().Gap(8).Children(func() {
+		panel.Width(580).Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Text(c, "新建设计").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+			ui.Text(c, "从空白实验开始自由组合步骤模块，或选用通用模块示范方案。").
+				FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+			ui.Box(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "典型通用模块方案").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
+					if components.Button(c, "抑菌圈实验（四象限SVG）", components.ButtonSecondary).Clicked() {
+						a.newDesignOpen = false
+						a.createAsterDocDesign(inhibitionZoneAsterDoc, "抑菌圈定量实验")
+					}
+					if components.Button(c, "涂板菌落计数（CFU）", components.ButtonSecondary).Clicked() {
+						a.newDesignOpen = false
+						a.createAsterDocDesign(cfuAsterDoc, "梯度稀释涂板 CFU")
+					}
+					if components.Button(c, "HUVEC 水凝胶成管（12孔板）", components.ButtonSecondary).Clicked() {
+						a.newDesignOpen = false
+						a.createAsterDocDesign(huvecAsterDoc, "HUVEC 水凝胶成管")
+					}
+					if components.Button(c, "CCK-8 骨架", components.ButtonSecondary).Clicked() {
+						a.newDesignOpen = false
+						a.createAsterDocDesign(starterAsterDoc, "CCK-8 实验")
+					}
+				})
+			})
+			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
+				if components.Button(c, "取消", components.ButtonGhost).Clicked() {
+					a.newDesignOpen = false
+				}
 				if components.Button(c, "空白实验", components.ButtonPrimary).Clicked() {
 					a.newDesignOpen = false
 					a.createAsterDocDesign(blankAsterDoc, "新实验")
-				}
-				if components.Button(c, "CCK-8 骨架", components.ButtonSecondary).Clicked() {
-					a.newDesignOpen = false
-					a.createAsterDocDesign(starterAsterDoc, "新实验")
-				}
-				if components.Button(c, "取消", components.ButtonGhost).Clicked() {
-					a.newDesignOpen = false
 				}
 			})
 		})
@@ -3851,6 +3918,7 @@ func (a *app) renderAddModuleDialog(c *ui.Context, doc *asterdoc.Document) {
 	if !a.addModuleOpen {
 		return
 	}
+	tok := theme.GetTokens(c.Theme())
 	open := a.addModuleOpen
 	groups := []string{}
 	assays := []string{}
@@ -3863,9 +3931,9 @@ func (a *app) renderAddModuleDialog(c *ui.Context, doc *asterdoc.Document) {
 		}
 	}
 	components.Dialog(c, &open, components.DialogOptions{Label: "添加模块"}, func(panel ui.Element) {
-		panel.Width(420).Children(func() {
-			ui.Text(c, "添加模块").FontSize(15).Bold()
-			ui.Row(c).Wrap().Gap(8).Children(func() {
+		panel.Width(420).Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Text(c, "添加模块").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+			ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 				if components.Button(c, "分组", components.ButtonSecondary).Clicked() {
 					id := fmt.Sprintf("group-%d", len(groups)+1)
 					if a.applyDesignRaw(map[string]any{"type": "add_module", "module": map[string]any{
@@ -3903,7 +3971,7 @@ func (a *app) renderAddModuleDialog(c *ui.Context, doc *asterdoc.Document) {
 			})
 			if len(groups) == 0 {
 				ui.Text(c, "先添加一个分组，才能添加检测。").
-					FontSize(11).TextColor(c.Theme().TextMuted)
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			}
 		})
 	})
@@ -3916,20 +3984,21 @@ func (a *app) renderImportDialog(c *ui.Context) {
 	if !a.importOpen {
 		return
 	}
+	tok := theme.GetTokens(c.Theme())
 	open := a.importOpen
 	components.Dialog(c, &open, components.DialogOptions{Label: "导入 AsterML"}, func(panel ui.Element) {
-		panel.Width(560).Children(func() {
-			ui.Text(c, "导入 AsterML 设计").FontSize(15).Bold()
+		panel.Width(560).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Text(c, "导入 AsterML 设计").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 			ui.Text(c, "选择 .asterml / .md 源文件；导入后仍由 Core 校验并生成文档版本。").
-				FontSize(12).TextColor(c.Theme().TextMuted)
-			ui.Text(c, "文件路径").FontSize(11).TextColor(c.Theme().TextMuted)
+				FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+			ui.Text(c, "文件路径").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			ui.TextInput(c, &a.importPath).Placeholder("D:\\...\\experiment.asterml").FillWidth()
-			ui.Text(c, "设计名称").FontSize(11).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "设计名称").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			ui.TextInput(c, &a.importTitle).Placeholder("例如 HUVEC 成管实验").FillWidth()
 			if a.importErr != "" {
-				ui.Text(c, a.importErr).FontSize(11).TextColor(c.Theme().Danger)
+				ui.Text(c, a.importErr).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
 			}
-			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(8).Children(func() {
+			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
 				if components.Button(c, "取消", components.ButtonGhost).Clicked() {
 					a.importOpen = false
 				}

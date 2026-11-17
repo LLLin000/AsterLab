@@ -6,6 +6,7 @@ package asterdoc
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -24,17 +25,22 @@ type Module struct {
 	Data   map[string]any
 }
 
-// Plate is the plate module payload; format selects its geometry.
+// Plate is the container module payload; topology + format/rows/columns select its geometry.
 type Plate struct {
 	Kind       string              `yaml:"kind" json:"kind"`
 	ID         string              `yaml:"id" json:"id"`
 	Schema     int                 `yaml:"schema" json:"schema"`
+	Title      string              `yaml:"title,omitempty" json:"title,omitempty"`
 	Format     int                 `yaml:"format,omitempty" json:"format,omitempty"`
+	Topology   string              `yaml:"topology,omitempty" json:"topology,omitempty"`
+	Rows       int                 `yaml:"rows,omitempty" json:"rows,omitempty"`
+	Columns    int                 `yaml:"columns,omitempty" json:"columns,omitempty"`
 	Assay      string              `yaml:"assay,omitempty" json:"assay,omitempty"`
 	Timepoint  string              `yaml:"timepoint,omitempty" json:"timepoint,omitempty"`
 	Groups     map[string][]string `yaml:"groups" json:"groups"`
 	Samples    map[string]string   `yaml:"samples,omitempty" json:"samples,omitempty"`
 	Replicates map[string]int      `yaml:"replicates,omitempty" json:"replicates,omitempty"`
+	Roles      map[string]string   `yaml:"roles,omitempty" json:"roles,omitempty"`
 }
 
 // Document is a parsed AsterML source. Source is always the canonical text;
@@ -90,6 +96,21 @@ func ParseWith(source string, registry *Registry) (*Document, error) {
 				return nil, fmt.Errorf("asterlab module id %q is duplicated", module.ID)
 			}
 			seen[module.ID] = true
+			if module.Kind == "step" {
+				if blocks, ok := module.Data["blocks"].([]any); ok {
+					for _, rawBlock := range blocks {
+						bm, _ := rawBlock.(map[string]any)
+						bid := textValue(bm, "id")
+						if bid == "" {
+							return nil, fmt.Errorf("inline step block needs a stable id")
+						}
+						if seen[bid] {
+							return nil, fmt.Errorf("asterlab module id %q is duplicated", bid)
+						}
+						seen[bid] = true
+					}
+				}
+			}
 			doc.Modules = append(doc.Modules, module)
 			inFence = false
 			fenceLang = ""
@@ -111,27 +132,67 @@ func ParseWith(source string, registry *Registry) (*Document, error) {
 // validateDocumentRefs checks stable-ID references across modules. It only
 // enforces the kinds the compiler understands; unknown kinds are already
 // rejected by the registry.
+func flattenModules(modules []Module) ([]Module, map[string]bool) {
+	flat := make([]Module, 0, len(modules))
+	topIDs := make(map[string]bool, len(modules))
+	for _, m := range modules {
+		topIDs[m.ID] = true
+		flat = append(flat, m)
+		if m.Kind == "step" {
+			if blocks, ok := m.Data["blocks"].([]any); ok {
+				for _, raw := range blocks {
+					bm, _ := raw.(map[string]any)
+					if bm == nil {
+						continue
+					}
+					flat = append(flat, Module{
+						Kind:   textValue(bm, "kind"),
+						ID:     textValue(bm, "id"),
+						Schema: int(numOrZero(bm["schema"])),
+						Data:   bm,
+					})
+				}
+			}
+		}
+	}
+	return flat, topIDs
+}
+
+func numOrZero(v any) float64 {
+	n, _ := numericValue(v)
+	return n
+}
+
 func validateDocumentRefs(modules []Module) error {
-	if err := validateTypedReferences(modules); err != nil {
+	flat, topIDs := flattenModules(modules)
+	if err := validateTypedReferences(flat); err != nil {
 		return err
 	}
-	if err := validateStepUses(modules); err != nil {
+	if err := validateStepUses(modules, flat, topIDs); err != nil {
 		return err
 	}
 	groups := map[string]bool{}
 	assays := map[string]bool{}
 	steps := map[string]bool{}
-	for _, module := range modules {
+	for _, module := range flat {
 		switch module.Kind {
 		case "group":
 			groups[module.ID] = true
+		case "group_table":
+			rows, _ := module.Data["rows"].([]any)
+			for _, raw := range rows {
+				rm, _ := raw.(map[string]any)
+				if gid := textValue(rm, "id"); gid != "" {
+					groups[gid] = true
+				}
+			}
 		case "assay":
 			assays[module.ID] = true
 		case "step":
 			steps[module.ID] = true
 		}
 	}
-	for _, module := range modules {
+	for _, module := range flat {
 		switch module.Kind {
 		case "assay":
 			for _, ref := range stringList(module.Data, "group_refs") {
@@ -193,6 +254,18 @@ func validateTypedReferences(modules []Module) error {
 			idsByKind[module.Kind] = map[string]bool{}
 		}
 		idsByKind[module.Kind][module.ID] = true
+		if module.Kind == "group_table" {
+			if idsByKind["group"] == nil {
+				idsByKind["group"] = map[string]bool{}
+			}
+			rows, _ := module.Data["rows"].([]any)
+			for _, raw := range rows {
+				rm, _ := raw.(map[string]any)
+				if gid := textValue(rm, "id"); gid != "" {
+					idsByKind["group"][gid] = true
+				}
+			}
+		}
 		allIDs[module.ID] = true
 	}
 	for _, module := range modules {
@@ -233,20 +306,25 @@ func validateTypedReferences(modules []Module) error {
 	return nil
 }
 
-func validateStepUses(modules []Module) error {
-	all := map[string]bool{}
-	for _, module := range modules {
-		all[module.ID] = true
-	}
+func validateStepUses(modules, flat []Module, topIDs map[string]bool) error {
 	byID := map[string]Module{}
-	for _, module := range modules {
+	all := map[string]bool{}
+	for _, module := range flat {
 		byID[module.ID] = module
+		all[module.ID] = true
 	}
 	for _, module := range modules {
 		if module.Kind != "step" {
 			continue
 		}
+		for _, ref := range stringList(module.Data, "block_refs") {
+			ref = strings.TrimSpace(ref)
+			if ref != "" && !topIDs[ref] && !all[ref] {
+				return fmt.Errorf("step %q block_refs references missing module %q", module.ID, ref)
+			}
+		}
 		uses, _ := module.Data["uses"].([]any)
+		seenUses := map[string]bool{}
 		for _, raw := range uses {
 			item, _ := raw.(map[string]any)
 			ref, _ := item["ref"].(string)
@@ -255,6 +333,11 @@ func validateStepUses(modules []Module) error {
 			if ref == "" {
 				continue
 			}
+			useKey := ref + "\x00" + role
+			if seenUses[useKey] {
+				return fmt.Errorf("step %q repeats use %q with role %q", module.ID, ref, role)
+			}
+			seenUses[useKey] = true
 			target, ok := byID[ref]
 			if !ok {
 				return fmt.Errorf("step %q uses missing module %q", module.ID, ref)
@@ -335,6 +418,9 @@ func parseModuleWith(body string, start, end int, registry *Registry) (Module, e
 			return Module{}, fmt.Errorf("plate %q: %w", header.ID, err)
 		}
 		plate.Groups = normalizeGroups(plate.Groups)
+		plate.Samples = normalizeSamples(plate.Samples)
+		plate.Replicates = normalizeReplicates(plate.Replicates)
+		plate.Roles = normalizeRoles(plate.Roles)
 		if plate.Format == 0 {
 			plate.Format = 96
 		}
@@ -363,6 +449,14 @@ func normalizeSamples(samples map[string]string) map[string]string {
 	return out
 }
 
+func normalizeRoles(roles map[string]string) map[string]string {
+	out := make(map[string]string, len(roles))
+	for well, role := range roles {
+		out[strings.ToUpper(strings.TrimSpace(well))] = strings.TrimSpace(role)
+	}
+	return out
+}
+
 func normalizeReplicates(replicates map[string]int) map[string]int {
 	out := make(map[string]int, len(replicates))
 	for well, replicate := range replicates {
@@ -372,15 +466,19 @@ func normalizeReplicates(replicates map[string]int) map[string]int {
 }
 
 func validatePlate(plate Plate) error {
-	geometry, ok := geometryFor(plate.Format)
+	topo := strings.TrimSpace(plate.Topology)
+	if topo == "" {
+		topo = "plate"
+	}
+	geometry, ok := geometryForPlate(plate.Format, topo, plate.Rows, plate.Columns)
 	if !ok {
 		return fmt.Errorf("format %d is not a registered plate geometry", plate.Format)
 	}
 	if plate.Format == 0 {
 		plate.Format = geometry.Format
 	}
-	if len(plate.Groups) == 0 {
-		return fmt.Errorf("needs at least one group")
+	if plate.Groups == nil {
+		return fmt.Errorf("plate needs groups")
 	}
 	seen := map[string]string{}
 	groups := make([]string, 0, len(plate.Groups))
@@ -393,7 +491,7 @@ func validatePlate(plate Plate) error {
 	sort.Strings(groups)
 	for _, group := range groups {
 		for _, well := range plate.Groups[group] {
-			if !validWell(well, geometry) {
+			if !ValidPlateWell(well, topo, geometry.Rows, geometry.Columns) {
 				return fmt.Errorf("well %q is outside %dx%d", well, geometry.Rows, geometry.Columns)
 			}
 			if owner, ok := seen[well]; ok {
@@ -405,7 +503,7 @@ func validatePlate(plate Plate) error {
 	sampleByWell := map[string]string{}
 	for well, sampleID := range plate.Samples {
 		well = strings.ToUpper(strings.TrimSpace(well))
-		if !validWell(well, geometry) {
+		if !ValidPlateWell(well, topo, geometry.Rows, geometry.Columns) {
 			return fmt.Errorf("sample well %q is outside %dx%d", well, geometry.Rows, geometry.Columns)
 		}
 		if _, ok := seen[well]; !ok {
@@ -423,7 +521,7 @@ func validatePlate(plate Plate) error {
 	seenReplicates := map[string]string{}
 	for well, replicate := range plate.Replicates {
 		well = strings.ToUpper(strings.TrimSpace(well))
-		if !validWell(well, geometry) {
+		if !ValidPlateWell(well, topo, geometry.Rows, geometry.Columns) {
 			return fmt.Errorf("replicate well %q is outside %dx%d", well, geometry.Rows, geometry.Columns)
 		}
 		sampleID := sampleByWell[well]
@@ -438,6 +536,17 @@ func validatePlate(plate Plate) error {
 			return fmt.Errorf("sample %s replicate %d is assigned to both %s and %s", sampleID, replicate, previous, well)
 		}
 		seenReplicates[key] = well
+	}
+	for well, role := range plate.Roles {
+		w := strings.ToUpper(strings.TrimSpace(well))
+		if !ValidPlateWell(w, topo, geometry.Rows, geometry.Columns) {
+			return fmt.Errorf("role well %q is outside %dx%d", w, geometry.Rows, geometry.Columns)
+		}
+		switch strings.TrimSpace(role) {
+		case "sample", "blank", "vehicle", "positive_control", "negative_control", "standard", "ntc":
+		default:
+			return fmt.Errorf("invalid well role %q for %s", role, w)
+		}
 	}
 	return nil
 }
@@ -557,19 +666,161 @@ func (p Plate) GroupNames() []string {
 }
 
 func validWell(well string, geometry Geometry) bool {
-	if len(well) < 2 {
+	return ValidPlateWell(well, "plate", geometry.Rows, geometry.Columns)
+}
+
+// ValidPlateWell validates well coordinates (A1..P24) or 1..N linear slot indices for non-plate topologies.
+func ValidPlateWell(well, topology string, rows, cols int) bool {
+	w := strings.ToUpper(strings.TrimSpace(well))
+	if w == "" {
 		return false
 	}
-	row := int(well[0] - 'A')
-	if row < 0 || row >= geometry.Rows {
-		return false
-	}
-	col := 0
-	for _, r := range well[1:] {
-		if r < '0' || r > '9' {
-			return false
+	if len(w) >= 2 && w[0] >= 'A' && w[0] <= 'Z' {
+		row := int(w[0] - 'A')
+		if row >= 0 && row < rows {
+			if col, err := strconv.Atoi(w[1:]); err == nil {
+				return col >= 1 && col <= cols
+			}
 		}
-		col = col*10 + int(r-'0')
 	}
-	return col >= 1 && col <= geometry.Columns
+	if topology != "" && topology != "plate" {
+		if idx, err := strconv.Atoi(w); err == nil {
+			return idx >= 1 && idx <= rows*cols
+		}
+	}
+	return false
+}
+
+// GroupInfo describes a canonical experimental group declared via group@1 or group_table@1.
+type GroupInfo struct {
+	ID               string
+	Name             string
+	Role             string
+	Condition        string
+	IndependentN     int
+	TechnicalRepeats int
+}
+
+// GroupList collects all unique experimental groups declared in top-level group@1 and group_table@1 modules.
+func (d *Document) GroupList() []GroupInfo {
+	if d == nil {
+		return nil
+	}
+	flat, _ := flattenModules(d.Modules)
+	seen := map[string]bool{}
+	var out []GroupInfo
+	for _, m := range flat {
+		switch m.Kind {
+		case "group":
+			if m.ID == "" || seen[m.ID] {
+				continue
+			}
+			seen[m.ID] = true
+			indN, _ := numericValue(m.Data["independent_n"])
+			techR, _ := numericValue(m.Data["technical_repeats"])
+			out = append(out, GroupInfo{
+				ID: m.ID, Name: textValue(m.Data, "name"), Role: textValue(m.Data, "role"),
+				Condition: textValue(m.Data, "condition"), IndependentN: int(indN), TechnicalRepeats: int(techR),
+			})
+		case "group_table":
+			rows, _ := m.Data["rows"].([]any)
+			for _, raw := range rows {
+				rm, _ := raw.(map[string]any)
+				gid := textValue(rm, "id")
+				if gid == "" || seen[gid] {
+					continue
+				}
+				seen[gid] = true
+				indN, _ := numericValue(rm["independent_n"])
+				techR, _ := numericValue(rm["technical_repeats"])
+				out = append(out, GroupInfo{
+					ID: gid, Name: textValue(rm, "name"), Role: textValue(rm, "role"),
+					Condition: textValue(rm, "condition"), IndependentN: int(indN), TechnicalRepeats: int(techR),
+				})
+			}
+		}
+	}
+	return out
+}
+
+// BudgetSummary summarizes document structure and timer duration budgets for the header bar.
+type BudgetSummary struct {
+	Steps           int
+	ExecutableSteps int
+	Groups          int
+	Wells           int
+	HandsOnSec      int
+	TotalSpanSec    int
+	HasOpenPhase    bool
+}
+
+// ComputeBudgetSummary calculates structural counts and timer budgets directly from AsterML v2 modules.
+func ComputeBudgetSummary(doc *Document) BudgetSummary {
+	if doc == nil {
+		return BudgetSummary{}
+	}
+	var sum BudgetSummary
+	sum.Groups = len(doc.GroupList())
+	flat, _ := flattenModules(doc.Modules)
+	for _, m := range flat {
+		switch m.Kind {
+		case "step":
+			sum.Steps++
+			exec := textValue(m.Data, "execution")
+			if exec == "" || exec == "executable" {
+				sum.ExecutableSteps++
+			}
+		case "plate":
+			if p, err := plateFromData(m.Data); err == nil {
+				sum.Wells += len(p.WellGroups())
+			}
+		case "timer":
+			sec, span, open := timerBudgetSec(m.Data)
+			sum.HandsOnSec += sec
+			sum.TotalSpanSec += span
+			if open {
+				sum.HasOpenPhase = true
+			}
+		}
+	}
+	return sum
+}
+
+func quantitySeconds(val any) int {
+	v, err := quantityIn(val, "s")
+	if err != nil || v <= 0 {
+		return 0
+	}
+	return int(v + 0.5)
+}
+
+func timerBudgetSec(data map[string]any) (handsOn, span int, open bool) {
+	switch textValue(data, "mode") {
+	case "countdown":
+		s := quantitySeconds(data["duration"])
+		return s, s, false
+	case "stopwatch":
+		s := quantitySeconds(data["duration"])
+		return s, s, s == 0
+	case "cycle":
+		rounds := 1
+		if r, ok := numericValue(data["rounds"]); ok && r >= 1 {
+			rounds = int(r)
+		}
+		perRound := 0
+		phases, _ := data["phases"].([]any)
+		for _, raw := range phases {
+			ph, _ := raw.(map[string]any)
+			if textValue(ph, "mode") == "open" {
+				open = true
+			}
+			perRound += quantitySeconds(ph["duration"])
+		}
+		tot := perRound * rounds
+		return tot, tot, open
+	case "window":
+		off := quantitySeconds(data["offset"])
+		return 0, off, false
+	}
+	return 0, 0, false
 }

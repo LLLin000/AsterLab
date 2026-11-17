@@ -179,9 +179,9 @@ func PlanBatchDrops(wells []string, timepoint string, fovPerWell int, coverage [
 }
 
 // FOVPerWellForStep reads the planned FOV count from the frozen AsterDoc
-// source: the measurement_profile bound to this design step via uses, field
-// readout_schema.per_well_fov_count. Zero means the plan declares none and the
-// surface must fall back to recorded data instead of guessing.
+// source: inline step blocks[], block_refs, or uses pointing to attachment@1
+// (scope: container_grid, slots_per_cell) or legacy measurement_profile. Zero
+// means the plan declares none and the surface falls back to recorded data.
 func FOVPerWellForStep(source, stepID string) int {
 	stepID = strings.TrimSpace(stepID)
 	if stepID == "" || strings.TrimSpace(source) == "" {
@@ -199,20 +199,84 @@ func FOVPerWellForStep(source, stepID string) int {
 	if !ok {
 		return 0
 	}
+	if blocks, ok := step.Data["blocks"].([]any); ok {
+		for _, raw := range blocks {
+			if m, _ := raw.(map[string]any); m != nil {
+				if n := fovFromModuleMap(m); n > 0 {
+					return n
+				}
+			}
+		}
+	}
+	if refs, ok := step.Data["block_refs"].([]any); ok {
+		for _, raw := range refs {
+			if ref, _ := raw.(string); ref != "" {
+				if target, exists := byID[ref]; exists {
+					if n := fovFromModuleMap(target.Data); n > 0 {
+						return n
+					}
+				}
+			}
+		}
+	}
 	uses, _ := step.Data["uses"].([]any)
 	for _, raw := range uses {
 		item, _ := raw.(map[string]any)
 		ref, _ := item["ref"].(string)
-		mp, ok := byID[ref]
-		if !ok || mp.Kind != "measurement_profile" {
+		target, exists := byID[ref]
+		if !exists {
 			continue
 		}
-		schema, _ := mp.Data["readout_schema"].(map[string]any)
-		if schema == nil {
-			continue
-		}
-		if n := toPositiveInt(schema["per_well_fov_count"]); n > 0 {
+		if n := fovFromModuleMap(target.Data); n > 0 {
 			return n
+		}
+	}
+	return 0
+}
+
+// FOVPerWellForDoc scans the entire frozen or draft AsterDoc source for the
+// maximum planned container_grid slots_per_cell (across top-level attachments
+// and step inline blocks).
+func FOVPerWellForDoc(source string) int {
+	if strings.TrimSpace(source) == "" {
+		return 0
+	}
+	doc, err := asterdoc.Parse(source)
+	if err != nil {
+		return 0
+	}
+	best := 0
+	for _, m := range doc.Modules {
+		if n := fovFromModuleMap(m.Data); n > best {
+			best = n
+		}
+		if blocks, ok := m.Data["blocks"].([]any); ok {
+			for _, raw := range blocks {
+				if bm, _ := raw.(map[string]any); bm != nil {
+					if n := fovFromModuleMap(bm); n > best {
+						best = n
+					}
+				}
+			}
+		}
+	}
+	return best
+}
+
+func fovFromModuleMap(data map[string]any) int {
+	if data == nil {
+		return 0
+	}
+	kind, _ := data["kind"].(string)
+	switch kind {
+	case "attachment":
+		scope, _ := data["scope"].(string)
+		if scope == "container_grid" {
+			return toPositiveInt(data["slots_per_cell"])
+		}
+	case "measurement_profile":
+		if schema, _ := data["readout_schema"].(map[string]any); schema != nil {
+			return toPositiveInt(schema["per_well_fov_count"])
 		}
 	}
 	return 0

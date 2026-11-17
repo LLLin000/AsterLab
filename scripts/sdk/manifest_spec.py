@@ -23,7 +23,7 @@ MANIFEST = "prototypes/mygo-run/internal/asterdoc/spec/modules.json"
 GO_SPEC = "prototypes/mygo-run/internal/asterdoc/spec.go"
 GO_REGISTRY = "prototypes/mygo-run/internal/asterdoc/registry.go"
 GO_MODULES = "prototypes/mygo-run/internal/asterdoc/modules.go"
-RUST_CLI = "src/cli.rs"
+RUST_CLI = "src/cli/asterdoc.rs"
 CATALOG = "docs/sdk/module-catalog-v1.md"
 SCAFFOLD_ROOT = "prototypes/mygo-run/internal/asterdoc/_scaffold"
 

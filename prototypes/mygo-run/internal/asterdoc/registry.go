@@ -283,11 +283,13 @@ func BuiltinRegistry() *Registry {
 			return
 		}
 		specs := []ModuleSpec{
-			plateSpec(), referenceSpec(), experimentSpec(), groupSpec(),
-			assaySpec(), stepSpec(), step2Spec(), step3Spec(), workflowSpec(),
-			dilutionSpec(), instrumentProfileSpec(), materialSpec(),
-			sampleSpec(), containerSpec(), measurementProfileSpec(),
-			rnaReagentSpec(), readoutSpec(),
+			plateSpec(),
+			proseSpec(), groupTableSpec(), paramTableSpec(), figureSpec(),
+			dataTableSpec(), checklistSpec(), calculatorSpec(), timerSpec(),
+			attachmentSpec(), subflowSpec(),
+			referenceSpec(), experimentSpec(), groupSpec(),
+			assaySpec(), stepSpec(), workflowSpec(),
+			instrumentProfileSpec(), materialSpec(), sampleSpec(), readoutSpec(),
 		}
 		for _, spec := range specs {
 			if err := builtin.Register(spec); err != nil {

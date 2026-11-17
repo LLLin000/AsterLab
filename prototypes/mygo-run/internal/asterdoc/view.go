@@ -12,6 +12,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/protocol"
+	"asterlab-mygo-prototype/internal/theme"
 	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 )
 
@@ -40,6 +41,38 @@ type View struct {
 	// OnUpdateModule reports a generic module edit intent. The renderer never
 	// writes Core or the document; the host applies it and reloads a revision.
 	OnUpdateModule func(moduleID string, props map[string]any)
+	// Step-scoped block editing callbacks (Design mode).
+	OnInsertStepBlock    func(stepID string, index int, block map[string]any)
+	OnUpdateStepBlock    func(stepID, blockID string, props map[string]any)
+	OnMoveStepBlock      func(stepID, blockID, direction string)
+	OnRemoveStepBlock    func(stepID, blockID string)
+	OnPickFigureFile     func(stepID, blockID string)
+	StepID               string
+	// Run-mode interactive execution callbacks & state (nil-safe in read-only views).
+	OnRecordActualParam  func(stepID, blockID, key, value, unit string)
+	OnToggleCheck        func(stepID, checkID string, checked bool)
+	OnRuleSkip           func(stepID, checkID, rule string)
+	OnTimerAction        func(stepID, blockID, action string)
+	OnSubmitTableReadout func(stepID, blockID string, payload map[string]any)
+	OnExcludeSample      func(sampleID, status string)
+	OnLinkAsset          func(stepID, blockID, wellID string)
+	ActualParams         map[string]string
+	CheckedItems         map[string]bool
+	SkippedItems         map[string]string
+	TimerStates          map[string]TimerRuntimeState
+	TableCells           map[string]map[string]string
+	TableQualifiers      map[string]map[string]string
+	SampleStatuses       map[string]string
+	LinkedAssets         map[string][]AssetThumb
+	ExpandedFigureID     string
+	figureOpen           bool
+	HideStepHeader       bool
+	widgetTextDrafts     map[string]*string
+	widgetBoolDrafts     map[string]*bool
+	svgCache             map[string]*ui.SVG
+	imgCache             map[string]ui.ImageSource
+	imgErrCache          map[string]string
+	calcScratch          map[string]map[string]*string
 	// ExpandedPlate is the plate rendered in the full-screen overlay; it is
 	// editor state, not document state.
 	ExpandedPlate string
@@ -125,23 +158,25 @@ func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind st
 // visible capability gap. The host must never draw a guess.
 func (v *View) rendererGap(c *ui.Context, kind string, schema int, key string) {
 	t := c.Theme()
+	tok := theme.GetTokens(t)
 	reason := "该模块未声明此视图的渲染能力"
 	if key != "" {
 		reason = fmt.Sprintf("渲染能力 %q 未被实现", key)
 	}
-	ui.Row(c).Padding(10, 12).Radius(t.Radius).
-		Background(t.Warning.Alpha(.08)).Border(1, t.Warning).Children(func() {
+	ui.Row(c).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+		Background(tok.Warning.Alpha(.08)).Border(1, tok.Warning).Children(func() {
 		ui.Text(c, fmt.Sprintf("%s@%d · %s", kind, schema, reason)).
-			FontSize(t.Rem(.85)).TextColor(t.Warning)
+			FontSize(float32(tok.TextMeta)).TextColor(tok.Warning)
 	})
 }
 
 func (v *View) moduleError(c *ui.Context, err error) {
 	t := c.Theme()
-	ui.Row(c).Padding(10, 12).Radius(t.Radius).
-		Background(t.Danger.Alpha(.08)).Border(1, t.Danger).Children(func() {
-		ui.Text(c, "asterlab 模块无法解析："+err.Error()).FontSize(t.Rem(.85)).
-			TextColor(t.Danger)
+	tok := theme.GetTokens(t)
+	ui.Row(c).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+		Background(tok.Danger.Alpha(.08)).Border(1, tok.Danger).Children(func() {
+		ui.Text(c, "asterlab 模块无法解析："+err.Error()).FontSize(float32(tok.TextMeta)).
+			TextColor(tok.Danger)
 	})
 }
 
@@ -158,21 +193,34 @@ func (v *View) RenderModule(c *ui.Context, kind string, schema int, data map[str
 
 func (v *View) plate(c *ui.Context, p *Plate) {
 	t := c.Theme()
+	tok := theme.GetTokens(t)
 	groups := p.GroupNames()
 	counts := map[string]int{}
-	geometry, _ := geometryFor(p.Format)
+	geometry, _ := geometryForPlate(p.Format, p.Topology, p.Rows, p.Columns)
 	wells := map[string]plateui.WellState{}
 	for well, group := range p.WellGroups() {
 		counts[group]++
-		wells[well] = plateui.WellState{Group: group}
+		wells[well] = plateui.WellState{
+			Group:     group,
+			SampleID:  p.Samples[well],
+			Replicate: p.Replicates[well],
+			Role:      p.Roles[well],
+		}
 	}
-	// Every supported format previews inline and opens the format-aware editor.
+	title := p.Title
+	if strings.TrimSpace(title) == "" {
+		if p.Topology == "dish" {
+			title = fmt.Sprintf("培养皿分区（%d 区）", p.Format)
+		} else {
+			title = fmt.Sprintf("%d 孔板", p.Format)
+		}
+	}
 	ui.Row(c).FillWidth().Children(func() {
-		ui.Column(c).FillWidth().Gap(t.Space(1.5)).Padding(t.Space(3)).
-			Radius(t.Space(1.5)).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-				ui.Column(c).Gap(1).Children(func() {
-					ui.Text(c, fmt.Sprintf("%d 孔板", p.Format)).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
+			Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Column(c).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 					meta := p.ID
 					if p.Assay != "" {
 						meta += " · " + p.Assay
@@ -180,11 +228,11 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					if p.Timepoint != "" {
 						meta += " · " + p.Timepoint
 					}
-					ui.Text(c, meta).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+					ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				})
 				ui.Spacer(c)
 				if v.ReadOnly {
-					ui.Text(c, "冻结视图").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+					components.Badge(c, "冻结视图")
 				}
 				if components.IconButton(c, lucide.Maximize2(), "放大孔板", components.IconButtonCompact).Clicked() {
 					v.ExpandedPlate = p.ID
@@ -192,18 +240,21 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					v.PlateZoom = 1
 				}
 			})
-			ui.Row(c).Wrap().Gap(t.Space(1.5)).Children(func() {
+			ui.Row(c).Wrap().Gap(float32(tok.Spacing12)).Children(func() {
 				for _, group := range groups {
-					ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-						ui.Box(c).Size(9, 9).Radius(4.5).Background(groupColor(group))
+					ui.Row(c).Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Background(groupColorForCtx(c, group))
 						ui.Text(c, fmt.Sprintf("%s · %d 孔", group, counts[group])).
-							FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+							FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 					})
 				}
 			})
-			plateui.View(c, plateui.Props{Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns, Interactive: false})
-			ui.Text(c, "放大查看与编辑；行内只读。").
-				FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+			plateui.View(c, plateui.Props{
+				Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns,
+				Topology: p.Topology, Roles: p.Roles, Interactive: false,
+			})
+			ui.Text(c, "点击右上角放大查看与编辑孔位分配。").
+				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		})
 	})
 }
@@ -367,10 +418,10 @@ func (v *View) plateOverlay(c *ui.Context) {
 							ui.Spacer(c)
 							ui.Row(c).Wrap().Gap(t.Space(1.25)).Children(func() {
 								for _, group := range groups {
-									ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-										ui.Box(c).Size(9, 9).Radius(4.5).Background(groupColor(group))
+									ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+										ui.Box(c).Size(t.Space(2), t.Space(2)).Radius(t.Space(1)).Background(groupColorForCtx(c, group))
 										ui.Text(c, fmt.Sprintf("%s %d", group, counts[group])).
-											FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+											FontSize(t.Rem(.7)).TextColor(t.TextMuted).FontFeatures("tnum")
 									})
 								}
 							})
@@ -450,7 +501,7 @@ func (v *View) plateOverlay(c *ui.Context) {
 											selected := containsString(v.ExpandedWells, well)
 											bg := t.Background
 											if group != "" {
-												bg = groupColor(group)
+												bg = groupColorForCtx(c, group)
 											}
 											border := t.Border
 											width := float32(1)
@@ -559,12 +610,12 @@ func (v *View) plateOverlay(c *ui.Context) {
 					for _, group := range groups {
 						group := group
 						active := group == v.SelectedGroup
-						btn := ui.ButtonBase(c).Padding(3, 8).Radius(t.Space(1)).
+						btn := ui.ButtonBase(c).Padding(t.Space(1), t.Space(2)).Radius(t.Space(1)).
 							Background(map[bool]ui.Color{true: t.Accent.Alpha(.16), false: ui.Color{}}[active]).
 							OnClick(func() { v.SelectedGroup = group })
 						btn.Children(func() {
-							ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-								ui.Box(c).Size(9, 9).Radius(3).Background(groupColor(group))
+							ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+								ui.Box(c).Size(t.Space(2), t.Space(2)).Radius(t.Space(.75)).Background(groupColorForCtx(c, group))
 								ui.Text(c, group).FontSize(t.Rem(.75)).TextColor(t.Text)
 							})
 						})
@@ -730,19 +781,9 @@ func removeString(values []string, target string) []string {
 	return out
 }
 
-func groupColor(group string) ui.Color {
-	palette := []ui.Color{
-		ui.Hex("#dcd6c8"), ui.Hex("#cfc4f0"), ui.Hex("#c9d6f0"), ui.Hex("#c9e3d2"),
-		ui.Hex("#f0c8ce"), ui.Hex("#efdab4"),
-	}
-	if group == "" {
-		return ui.Hex("#f4f1ea")
-	}
-	sum := 0
-	for _, r := range group {
-		sum += int(r)
-	}
-	return palette[sum%len(palette)]
+func groupColorForCtx(c *ui.Context, group string) ui.Color {
+	t := c.Theme()
+	return plateui.GroupColor(group, t != nil && t.Dark)
 }
 
 // Assign moves wells into group in the current document and reports the new
@@ -959,13 +1000,15 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 				draft[input.Name+"__unit"] = &empty
 			}
 			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, input.Name).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted).Width(120)
+				ui.Text(c, input.Name).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted).Width(172)
 				switch input.Type {
 				case "string", "reference", "artifact":
 					if input.Type == "artifact" {
 						ui.Text(c, "read-only").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 					} else {
-						ui.TextInput(c, draft[input.Name]).Label(input.Name)
+						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+							ui.TextInput(c, draft[input.Name]).Label(input.Name).FillWidth()
+						})
 					}
 				case "enum":
 					ui.Select(c, draft[input.Name], input.Values)
@@ -976,10 +1019,14 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 					}
 					ui.Checkbox(c, bools[input.Name], "")
 				case "int", "integer", "number", "decimal":
-					ui.DecimalInput(c, draft[input.Name], "", "", "1")
+					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+						ui.DecimalInput(c, draft[input.Name], "", "", "1")
+					})
 				case "quantity":
 					ui.DecimalInput(c, draft[input.Name], "", "", "1").Label(input.Name)
-					ui.TextInput(c, draft[input.Name+"__unit"]).Label(input.Name + " unit")
+					ui.Box(c).Width(96).Children(func() {
+						ui.TextInput(c, draft[input.Name+"__unit"]).Label(input.Name + " unit").FillWidth()
+					})
 				case "string[]":
 					lists := v.moduleLists[moduleID]
 					if lists == nil {
@@ -1239,4 +1286,71 @@ func parseInt(s string) int {
 	var n int
 	fmt.Sscan(s, &n)
 	return n
+}
+
+func (v *View) ensureWidgetDraft(key, initial string) *string {
+	if v.widgetTextDrafts == nil {
+		v.widgetTextDrafts = map[string]*string{}
+	}
+	if ptr, ok := v.widgetTextDrafts[key]; ok {
+		return ptr
+	}
+	val := initial
+	v.widgetTextDrafts[key] = &val
+	return v.widgetTextDrafts[key]
+}
+
+func (v *View) ensureWidgetBool(key string) *bool {
+	return v.ensureWidgetBoolInit(key, false)
+}
+
+func (v *View) ensureWidgetBoolInit(key string, initial bool) *bool {
+	if v.widgetBoolDrafts == nil {
+		v.widgetBoolDrafts = map[string]*bool{}
+	}
+	if ptr, ok := v.widgetBoolDrafts[key]; ok {
+		return ptr
+	}
+	val := initial
+	v.widgetBoolDrafts[key] = &val
+	return v.widgetBoolDrafts[key]
+}
+
+func (v *View) emitAnyModuleEdit(moduleID string, props map[string]any) {
+	if v.StepID != "" && v.OnUpdateStepBlock != nil {
+		v.OnUpdateStepBlock(v.StepID, moduleID, props)
+		return
+	}
+	if v.OnUpdateModule != nil {
+		v.OnUpdateModule(moduleID, props)
+		return
+	}
+	if v.Doc == nil || !v.Can(PermDocumentEdit) {
+		return
+	}
+	source, err := v.Doc.UpdateModule(moduleID, props)
+	if err != nil {
+		return
+	}
+	if v.OnChange != nil {
+		v.OnChange(source)
+	}
+}
+
+func iconButton(c *ui.Context, icon *ui.SVG, label string, variant components.ButtonVariant) ui.Element {
+	tok := theme.GetTokens(c.Theme())
+	btn := components.Button(c, "", variant).Label(label)
+	fg := tok.Text
+	if variant == components.ButtonPrimary {
+		fg = c.Theme().AccentText
+	}
+	btn.Children(func() {
+		ui.Row(c).Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+			if icon != nil {
+				ui.Icon(c, icon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(fg)
+			}
+			components.Text(c, label).SingleLine().TextColor(fg)
+		})
+	})
+	return btn
 }

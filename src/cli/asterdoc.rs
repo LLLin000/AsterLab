@@ -92,6 +92,15 @@ pub(crate) fn save_asterdoc_version(db: &mut Connection, input: &Value) -> Resul
         "created_at": created_at
     });
     insert(&tx, "asterdoc_version", Some(&project), Some(design_id), revision as i64, &data)?;
+    if let Ok(compiled) = compile_asterdoc_to_design(source) {
+        if let Ok(compiled_json) = serde_json::to_string(&compiled) {
+            tx.execute(
+                "UPDATE records SET data_json=?2,updated_at=?3 WHERE id=?1",
+                params![design_id, compiled_json, created_at],
+            )
+            .map_err(|e| CliError::internal(e.to_string()))?;
+        }
+    }
     tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
     Ok(data)
 }
@@ -345,6 +354,11 @@ pub(crate) fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<Stri
         if step_id.is_empty() {
             return Err(CliError::input("step needs an id"));
         }
+        if yaml_kind(&module_yaml) == "step" && module_yaml.get("schema").is_none() {
+            if let Some(map) = module_yaml.as_mapping_mut() {
+                map.insert(serde_yaml::Value::String("schema".to_owned()), serde_yaml::Value::Number(1.into()));
+            }
+        }
         // A step without a path is unreachable in the workflow tree, so the
         // writer derives root/<step-id> instead of storing an empty path.
         if yaml_kind(&module_yaml) == "step" && step_path(&module_yaml).is_empty() {
@@ -360,7 +374,6 @@ pub(crate) fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<Stri
         let blocks = asterdoc_blocks(&next)?;
         let workflow_id = command.get("workflowId").and_then(Value::as_str).unwrap_or("");
         let mut replacements: Vec<(usize, usize, String)> = Vec::new();
-        let mut linked = false;
         for block in &blocks {
             if yaml_kind(&block.value) != "workflow" {
                 continue;
@@ -387,17 +400,11 @@ pub(crate) fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<Stri
             }
             let raw = serde_yaml::to_string(&value).map_err(|e| CliError::internal(e.to_string()))?;
             replacements.push((block.body_start, block.body_end, raw));
-            linked = true;
             break;
         }
-        if !linked {
-            let workflow: serde_yaml::Value = serde_yaml::from_str(&format!(
-                "kind: workflow\nid: workflow-main\nschema: 1\nsteps: [{}]\nedges: []\nbusiness_order: [{}]\n",
-                step_id, step_id
-            )).map_err(|e| CliError::internal(e.to_string()))?;
-            next = append_asterdoc_module(&next, &workflow)?;
+        if !replacements.is_empty() {
+            next = apply_replacements(next, replacements);
         }
-        next = apply_replacements(next, replacements);
         return Ok(next);
     }
     if kind == "reorder_steps" {
@@ -538,6 +545,101 @@ pub(crate) fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<Stri
         next.push_str(&raw);
         next.push_str("```\n");
         return Ok(next);
+    }
+
+    if matches!(kind, "insert_step_block" | "update_step_block" | "move_step_block" | "remove_step_block") {
+        let step_id = command.get("stepId").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or(module_id);
+        let blocks = asterdoc_blocks(source)?;
+        let step_block = blocks.iter().find(|block| yaml_kind(&block.value) == "step" && yaml_id(&block.value) == step_id)
+            .ok_or_else(|| CliError::missing(format!("step {step_id} does not exist")))?;
+        let mut value = step_block.value.clone();
+        let mapping = value.as_mapping_mut()
+            .ok_or_else(|| CliError::input(format!("step {step_id} module must be a mapping")))?;
+        let blocks_key = serde_yaml::Value::String("blocks".to_owned());
+        let seq = mapping.entry(blocks_key).or_insert_with(|| serde_yaml::Value::Sequence(Vec::new()))
+            .as_sequence_mut()
+            .ok_or_else(|| CliError::input(format!("step {step_id}.blocks must be a list")))?;
+        match kind {
+            "insert_step_block" => {
+                let raw_block = command.get("block").cloned().unwrap_or(Value::Null);
+                if raw_block.is_null() {
+                    return Err(CliError::input("insert_step_block needs block"));
+                }
+                let mut block_yaml: serde_yaml::Value = serde_json::from_value(raw_block)
+                    .map_err(|e| CliError::input(format!("step block is invalid: {e}")))?;
+                let bid = yaml_id(&block_yaml);
+                if bid.is_empty() {
+                    return Err(CliError::input("step block needs an id"));
+                }
+                for top in &blocks {
+                    if yaml_id(&top.value) == bid {
+                        return Err(CliError::input(format!("module id {bid} already exists")));
+                    }
+                    for nested in top.value.get("blocks").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                        if yaml_id(nested) == bid {
+                            return Err(CliError::input(format!("module id {bid} already exists")));
+                        }
+                    }
+                }
+                if block_yaml.get("schema").is_none() {
+                    if let Some(bm) = block_yaml.as_mapping_mut() {
+                        bm.insert(serde_yaml::Value::String("schema".to_owned()), serde_yaml::Value::Number(1.into()));
+                    }
+                }
+                let idx = command.get("index").and_then(Value::as_u64).map(|i| i as usize);
+                if let Some(i) = idx.filter(|i| *i < seq.len()) {
+                    seq.insert(i, block_yaml);
+                } else {
+                    seq.push(block_yaml);
+                }
+            }
+            "update_step_block" => {
+                let block_id = command.get("blockId").and_then(Value::as_str).unwrap_or("");
+                let properties = command.get("properties").and_then(Value::as_object)
+                    .ok_or_else(|| CliError::input("update_step_block needs properties"))?;
+                let target = seq.iter_mut().find(|item| yaml_id(item) == block_id)
+                    .ok_or_else(|| CliError::missing(format!("step {step_id} block {block_id} does not exist")))?;
+                let target_map = target.as_mapping_mut()
+                    .ok_or_else(|| CliError::input("step block must be a mapping"))?;
+                for (key, prop) in properties {
+                    if key == "id" || key == "kind" || key == "schema" {
+                        continue;
+                    }
+                    let yv: serde_yaml::Value = serde_json::from_value(prop.clone())
+                        .map_err(|e| CliError::input(format!("property {key}: {e}")))?;
+                    target_map.insert(serde_yaml::Value::String(key.clone()), yv);
+                }
+            }
+            "move_step_block" => {
+                let block_id = command.get("blockId").and_then(Value::as_str).unwrap_or("");
+                let pos = seq.iter().position(|item| yaml_id(item) == block_id)
+                    .ok_or_else(|| CliError::missing(format!("step {step_id} block {block_id} does not exist")))?;
+                let target_pos = if let Some(to) = command.get("toIndex").and_then(Value::as_u64) {
+                    (to as usize).min(seq.len().saturating_sub(1))
+                } else {
+                    match command.get("direction").and_then(Value::as_str).unwrap_or("") {
+                        "up" => pos.saturating_sub(1),
+                        "down" => (pos + 1).min(seq.len().saturating_sub(1)),
+                        other => return Err(CliError::input(format!("move_step_block direction must be up or down, got {other}"))),
+                    }
+                };
+                if pos != target_pos {
+                    let item = seq.remove(pos);
+                    seq.insert(target_pos, item);
+                }
+            }
+            "remove_step_block" => {
+                let block_id = command.get("blockId").and_then(Value::as_str).unwrap_or("");
+                let before = seq.len();
+                seq.retain(|item| yaml_id(item) != block_id);
+                if seq.len() == before {
+                    return Err(CliError::missing(format!("step {step_id} block {block_id} does not exist")));
+                }
+            }
+            _ => {}
+        }
+        let raw = serde_yaml::to_string(&value).map_err(|e| CliError::internal(e.to_string()))?;
+        return Ok(apply_replacements(source.to_owned(), vec![(step_block.body_start, step_block.body_end, raw)]));
     }
 
     let blocks = asterdoc_blocks(source)?;
@@ -750,10 +852,22 @@ pub(crate) fn validate_asterdoc_source(source: &str) -> Result<(), CliError> {
             continue;
         }
         if trimmed == "```" {
-            validate_asterdoc_module(&body, line_no)?;
-            parse_asterdoc_header(&body, &mut ids, line_no)?;
             let module: serde_yaml::Value = serde_yaml::from_str(&body)
                 .map_err(|e| CliError::input(format!("asterlab block near line {line_no}: {e}")))?;
+            validate_asterdoc_module_value(&module, line_no)?;
+            parse_asterdoc_header(&body, &mut ids, line_no)?;
+            if module.get("kind").and_then(|k| k.as_str()) == Some("step") {
+                for nested in module.get("blocks").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                    let bid = yaml_id(nested);
+                    let bid = bid.trim();
+                    if bid.is_empty() {
+                        return Err(CliError::input("inline step block needs a stable id"));
+                    }
+                    if !ids.insert(bid.to_owned()) {
+                        return Err(CliError::input(format!("asterlab module id {bid} is duplicated")));
+                    }
+                }
+            }
             modules.push(module);
             in_fence = false;
             continue;
@@ -787,27 +901,47 @@ pub(crate) fn validate_asterdoc_references(modules: &[serde_yaml::Value]) -> Res
     };
     let kind = |value: &serde_yaml::Value| text(value, "kind");
     let id = |value: &serde_yaml::Value| text(value, "id");
+    let mut flat_modules: Vec<&serde_yaml::Value> = Vec::with_capacity(modules.len());
+    for module in modules {
+        flat_modules.push(module);
+        if kind(module) == "step" {
+            for nested in module.get("blocks").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                flat_modules.push(nested);
+            }
+        }
+    }
     let mut groups = std::collections::HashSet::new();
     let mut assays = std::collections::HashSet::new();
     let mut steps = std::collections::HashSet::new();
-    for module in modules {
-        match kind(module).as_str() {
-            "group" => { groups.insert(id(module)); }
-            "assay" => { assays.insert(id(module)); }
-            "step" => { steps.insert(id(module)); }
-            _ => {}
-        }
-    }
     let mut ids_by_kind: std::collections::HashMap<String, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
     let mut all_ids = std::collections::HashSet::new();
+    let mut top_ids = std::collections::HashSet::new();
     for module in modules {
+        top_ids.insert(id(module));
+    }
+    for module in &flat_modules {
         let module_kind = kind(module);
         let module_id = id(module);
+        match module_kind.as_str() {
+            "group" => { groups.insert(module_id.clone()); }
+            "group_table" => {
+                for row in module.get("rows").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                    let gid = text(row, "id");
+                    if !gid.is_empty() {
+                        groups.insert(gid.clone());
+                        ids_by_kind.entry("group".to_owned()).or_default().insert(gid);
+                    }
+                }
+            }
+            "assay" => { assays.insert(module_id.clone()); }
+            "step" => { steps.insert(module_id.clone()); }
+            _ => {}
+        }
         ids_by_kind.entry(module_kind).or_default().insert(module_id.clone());
         all_ids.insert(module_id);
     }
-    for module in modules {
+    for module in &flat_modules {
         let module_kind = kind(module);
         let module_id = id(module);
         let schema = module.get("schema").and_then(|value| value.as_i64()).unwrap_or(0);
@@ -844,10 +978,19 @@ pub(crate) fn validate_asterdoc_references(modules: &[serde_yaml::Value]) -> Res
         }
     }
     let by_id: std::collections::HashMap<String, &serde_yaml::Value> =
-        modules.iter().map(|module| (id(module), module)).collect();
+        flat_modules.iter().map(|module| (id(module), *module)).collect();
     for module in modules {
         if kind(module) != "step" {
             continue;
+        }
+        for ref_id in strings(module, "block_refs") {
+            let ref_id = ref_id.trim();
+            if !ref_id.is_empty() && !top_ids.contains(ref_id) && !all_ids.contains(ref_id) {
+                return Err(CliError::input(format!(
+                    "step {} block_refs references missing module {ref_id}",
+                    id(module)
+                )));
+            }
         }
         for use_item in module.get("uses").and_then(|value| value.as_sequence()).into_iter().flatten() {
             let ref_id = asterdoc_map_get(use_item, "ref").and_then(|value| value.as_str()).unwrap_or("").trim();
@@ -872,7 +1015,7 @@ pub(crate) fn validate_asterdoc_references(modules: &[serde_yaml::Value]) -> Res
             }
         }
     }
-    for module in modules {
+    for module in &flat_modules {
         match kind(module).as_str() {
             "assay" => {
                 for reference in strings(module, "group_refs") {
@@ -989,23 +1132,26 @@ pub(crate) fn asterdoc_spec() -> &'static Value {
 /// Every rule name the Rust validator implements. A manifest may only use
 /// these names; `validate_asterdoc_spec` rejects anything else at startup.
 pub(crate) const ASTERDOC_RULES: &[&str] = &[
-    "plate-wells",
     "plate-geometry-wells",
     "reference-ref",
     "group-fields",
     "assay-fields",
-    "step-fields",
     "step-execution",
-    "step-uses",
+    "step-blocks",
     "workflow-fields",
-    "dilution-fields",
     "instrument-profile-fields",
     "material-fields",
     "sample-fields",
-    "container-fields",
-    "measurement-profile-fields",
-    "rna-reagent-fields",
-    "plate-mix-fields",
+    "prose-fields",
+    "group_table-fields",
+    "param_table-fields",
+    "figure-fields",
+    "data_table-fields",
+    "checklist-fields",
+    "calculator-fields",
+    "timer-fields",
+    "attachment-fields",
+    "subflow-fields",
 ];
 
 pub(crate) fn validate_asterdoc_spec(spec: &Value) -> Result<(), String> {
@@ -1100,9 +1246,18 @@ pub(crate) fn asterdoc_units() -> &'static Value {
     })
 }
 
+pub(crate) fn normalize_asterdoc_unit(symbol: &str) -> String {
+    symbol
+        .trim()
+        .replace('µ', "u")
+        .replace('μ', "u")
+        .replace("°C", "Cel")
+}
+
 pub(crate) fn asterdoc_unit(symbol: &str) -> Option<(String, f64)> {
+    let normalized = normalize_asterdoc_unit(symbol);
     asterdoc_units()["units"].as_array()?.iter().find_map(|unit| {
-        if unit["symbol"].as_str() != Some(symbol) {
+        if unit["symbol"].as_str() != Some(normalized.as_str()) {
             return None;
         }
         Some((
@@ -1332,198 +1487,136 @@ pub(crate) fn role_allowed_for_module(role: &str, spec: &Value) -> bool {
     required.iter().any(|required| declared.contains(required))
 }
 
-pub(crate) fn asterdoc_plate_mix_fields(mapping: &serde_yaml::Mapping) -> Result<(), CliError> {
-    let field = |key: &str| mapping.get(serde_yaml::Value::String(key.to_owned()));
-    let present = |key: &str| field(key).is_some_and(|value| !value.is_null());
-    let ratio = |key: &str| -> Result<Option<f64>, CliError> {
-        let Some(value) = field(key) else {
-            return Ok(None);
-        };
-        if value.is_null() {
-            return Ok(None);
-        }
-        let number = value
-            .as_f64()
-            .ok_or_else(|| CliError::input(format!("{key} must be a number")))?;
-        if !number.is_finite() || number < 0.0 {
-            return Err(CliError::input(format!(
-                "{key} must be a non-negative finite number"
-            )));
-        }
-        Ok(Some(number))
-    };
-    let quantity = |key: &str, dimension: &str| -> Result<f64, CliError> {
-        let value = field(key)
-            .ok_or_else(|| CliError::input(format!("mix plan needs {key}")))?;
-        let (number, unit, actual, factor) = asterdoc_quantity_parts(value)?;
-        if actual != dimension {
-            return Err(CliError::input(format!(
-                "{key} unit {unit} is {actual}, not {dimension}"
-            )));
-        }
-        Ok(number * factor)
-    };
-
-    let gel_plan = present("mix_gelma_percent_by_group")
-        || present("mix_lap_stock_percent")
-        || present("mix_lap_final_percent");
-    let cell_plan = present("mix_cell_density")
-        || present("mix_factor_stock_concentration")
-        || present("mix_factor_final_concentration");
-    if !gel_plan && !cell_plan {
-        if present("mix_volume_per_well") || present("mix_excess_ratio") {
-            return Err(CliError::input(
-                "mix_volume_per_well and mix_excess_ratio need a gel or cell plan",
-            ));
-        }
-        return Ok(());
+pub(crate) fn validate_formula_expr(expr: &str) -> Result<(), String> {
+    #[derive(Clone, Debug, PartialEq)]
+    enum Tok {
+        Num,
+        Ident,
+        Plus,
+        Minus,
+        Star,
+        Slash,
+        LParen,
+        RParen,
     }
-    if !present("mix_volume_per_well") {
-        return Err(CliError::input("mix plan needs mix_volume_per_well"));
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return Err("formula cannot be empty".into());
     }
-    let volume_per_well_ul = quantity("mix_volume_per_well", "volume")? / 1e-6;
-    if volume_per_well_ul <= 0.0 {
-        return Err(CliError::input("mix_volume_per_well must be positive"));
-    }
-    let excess_ratio = ratio("mix_excess_ratio")?.unwrap_or(0.0);
-
-    let groups = field("groups")
-        .and_then(|value| value.as_mapping())
-        .ok_or_else(|| CliError::input("plate needs groups"))?;
-    let mut wells_by_group = std::collections::BTreeMap::new();
-    for (group, wells) in groups {
-        let name = group.as_str().unwrap_or("").trim().to_owned();
-        if name.is_empty() {
-            return Err(CliError::input("plate group name cannot be empty"));
+    let bytes = trimmed.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
         }
-        let count = wells.as_sequence().map(|items| items.len()).unwrap_or(0);
-        if count == 0 {
-            return Err(CliError::input(format!(
-                "plate group {name} has no wells"
-            )));
-        }
-        wells_by_group.insert(name, count as u32);
-    }
-    if wells_by_group.is_empty() {
-        return Err(CliError::input("mix plan needs at least one plate group"));
-    }
-
-    if gel_plan {
-        let percents = field("mix_gelma_percent_by_group")
-            .and_then(|value| value.as_mapping())
-            .ok_or_else(|| CliError::input("mix_gelma_percent_by_group must be a mapping"))?;
-        let stock_percent = ratio("mix_lap_stock_percent")?
-            .ok_or_else(|| CliError::input("gel plan needs mix_lap_stock_percent"))?;
-        let final_percent = ratio("mix_lap_final_percent")?
-            .ok_or_else(|| CliError::input("gel plan needs mix_lap_final_percent"))?;
-        if stock_percent <= 0.0 {
-            return Err(CliError::input("mix_lap_stock_percent must be positive"));
-        }
-        if final_percent > stock_percent {
-            return Err(CliError::input(
-                "mix_lap_final_percent cannot exceed mix_lap_stock_percent",
-            ));
-        }
-        let mut gel_groups = Vec::with_capacity(wells_by_group.len());
-        for (name, wells) in &wells_by_group {
-            let raw = percents
-                .get(serde_yaml::Value::String(name.clone()))
-                .ok_or_else(|| {
-                    CliError::input(format!(
-                        "mix_gelma_percent_by_group is missing group {name}"
-                    ))
-                })?;
-            let percent = raw.as_f64().ok_or_else(|| {
-                CliError::input(format!("group {name} GelMA percent must be a number"))
-            })?;
-            if !percent.is_finite() || percent <= 0.0 || percent > 100.0 {
-                return Err(CliError::input(format!(
-                    "group {name} GelMA percent must be in (0, 100]"
-                )));
+        match b {
+            b'+' => { tokens.push(Tok::Plus); i += 1; }
+            b'-' => { tokens.push(Tok::Minus); i += 1; }
+            b'*' => { tokens.push(Tok::Star); i += 1; }
+            b'/' => { tokens.push(Tok::Slash); i += 1; }
+            b'(' => { tokens.push(Tok::LParen); i += 1; }
+            b')' => { tokens.push(Tok::RParen); i += 1; }
+            b'0'..=b'9' | b'.' => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                    i += 1;
+                }
+                trimmed[start..i]
+                    .parse::<f64>()
+                    .map_err(|_| format!("invalid number in formula: {}", &trimmed[start..i]))?;
+                tokens.push(Tok::Num);
             }
-            gel_groups.push(GelMastermixGroup {
-                name: name.clone(),
-                gelma_percent_wv: percent,
-                wells: *wells,
-            });
-        }
-        for key in percents.keys() {
-            let name = key.as_str().unwrap_or("");
-            if !wells_by_group.contains_key(name) {
-                return Err(CliError::input(format!(
-                    "mix_gelma_percent_by_group names unknown group {name}"
-                )));
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let _ = &trimmed[start..i];
+                tokens.push(Tok::Ident);
             }
+            _ => return Err(format!("unexpected character '{}' in formula", b as char)),
         }
-        gel_mastermix_calc(&GelMastermixInput {
-            volume_per_well_ul,
-            excess_ratio,
-            lap_stock_percent_wv: stock_percent,
-            lap_final_percent_wv: final_percent,
-            groups: gel_groups,
-        })
-        .map_err(CliError::input)?;
     }
-
-    if cell_plan {
-        if !present("mix_cell_density") {
-            return Err(CliError::input("cell plan needs mix_cell_density"));
+    fn parse_expr(tokens: &[Tok], pos: &mut usize) -> Result<(), String> {
+        parse_term(tokens, pos)?;
+        while matches!(tokens.get(*pos), Some(Tok::Plus | Tok::Minus)) {
+            *pos += 1;
+            parse_term(tokens, pos)?;
         }
-        let density = quantity("mix_cell_density", "cells_per_well")?;
-        if density <= 0.0 {
-            return Err(CliError::input("mix_cell_density must be positive"));
+        Ok(())
+    }
+    fn parse_term(tokens: &[Tok], pos: &mut usize) -> Result<(), String> {
+        parse_factor(tokens, pos)?;
+        while matches!(tokens.get(*pos), Some(Tok::Star | Tok::Slash)) {
+            *pos += 1;
+            parse_factor(tokens, pos)?;
         }
-        if present("mix_factor_stock_concentration")
-            != present("mix_factor_final_concentration")
-        {
-            return Err(CliError::input(
-                "factor stock and final concentration must be provided together",
-            ));
+        Ok(())
+    }
+    fn parse_factor(tokens: &[Tok], pos: &mut usize) -> Result<(), String> {
+        match tokens.get(*pos) {
+            Some(Tok::Plus | Tok::Minus) => {
+                *pos += 1;
+                parse_factor(tokens, pos)
+            }
+            Some(Tok::Num | Tok::Ident) => {
+                *pos += 1;
+                Ok(())
+            }
+            Some(Tok::LParen) => {
+                *pos += 1;
+                parse_expr(tokens, pos)?;
+                if !matches!(tokens.get(*pos), Some(Tok::RParen)) {
+                    return Err("unclosed '(' in formula".into());
+                }
+                *pos += 1;
+                Ok(())
+            }
+            _ => Err("unexpected end of formula expression".into()),
         }
-        let stock = if present("mix_factor_stock_concentration") {
-            quantity("mix_factor_stock_concentration", "mass_concentration")?
-        } else {
-            0.0
-        };
-        let final_concentration = if present("mix_factor_final_concentration") {
-            quantity("mix_factor_final_concentration", "mass_concentration")?
-        } else {
-            0.0
-        };
-        if stock <= 0.0 && final_concentration > 0.0 {
-            return Err(CliError::input("factor stock concentration must be positive"));
-        }
-        if stock > 0.0 && final_concentration > stock {
-            return Err(CliError::input(
-                "factor final concentration cannot exceed stock concentration",
-            ));
-        }
-        let groups = wells_by_group
-            .iter()
-            .map(|(name, wells)| CellSeedingGroup {
-                name: name.clone(),
-                wells: *wells,
-            })
-            .collect();
-        cell_seeding_calc(&CellSeedingInput {
-            density_cells_per_well: density,
-            volume_per_well_ul,
-            excess_ratio,
-            factor_stock_mg_per_ml: stock,
-            factor_final_mg_per_ml: final_concentration,
-            groups,
-        })
-        .map_err(CliError::input)?;
+    }
+    let mut pos = 0usize;
+    parse_expr(&tokens, &mut pos)?;
+    if pos != tokens.len() {
+        return Err("trailing tokens in formula".into());
     }
     Ok(())
+}
+
+pub(crate) fn valid_plate_well(well: &str, topology: &str, rows: i64, cols: i64) -> bool {
+    let w = well.trim().to_uppercase();
+    if w.is_empty() {
+        return false;
+    }
+    if w.len() >= 2 && w.as_bytes()[0].is_ascii_uppercase() {
+        let r = (w.as_bytes()[0] - b'A') as i64;
+        if r >= 0 && r < rows {
+            if let Ok(col) = w[1..].parse::<i64>() {
+                return (1..=cols).contains(&col);
+            }
+        }
+    }
+    if topology != "plate" {
+        if let Ok(idx) = w.parse::<i64>() {
+            return idx >= 1 && idx <= rows.saturating_mul(cols);
+        }
+    }
+    false
 }
 
 pub(crate) fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(), CliError> {
     let value: serde_yaml::Value = serde_yaml::from_str(body)
         .map_err(|e| CliError::input(format!("asterlab block near line {line_no}: {e}")))?;
+    validate_asterdoc_module_value(&value, line_no)
+}
+
+pub(crate) fn validate_asterdoc_module_value(value: &serde_yaml::Value, line_no: usize) -> Result<(), CliError> {
     let mapping = value
         .as_mapping()
-        .ok_or_else(|| CliError::input("asterlab block must be a YAML mapping"))?;
+        .ok_or_else(|| CliError::input(format!("asterlab block near line {line_no} must be a YAML mapping")))?;
     let get = |key: &str| mapping.get(serde_yaml::Value::String(key.to_owned()));
     let text = |key: &str| {
         get(key)
@@ -1555,16 +1648,33 @@ pub(crate) fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(),
     }
     for rule in spec["rules"].as_array().into_iter().flatten() {
         match rule.as_str().unwrap_or("") {
-            "plate-wells" | "plate-geometry-wells" => {
-                let format = if rule.as_str() == Some("plate-wells") {
-                    96
+            "plate-geometry-wells" => {
+                let topology = if text("topology").is_empty() { "plate" } else { text("topology") };
+                let format = get("format").and_then(|value| value.as_i64()).unwrap_or(0);
+                let (rows, cols) = if topology != "plate" {
+                    let custom_r = get("rows").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let custom_c = get("columns").and_then(|v| v.as_i64()).unwrap_or(0);
+                    if custom_r > 0 && custom_c > 0 {
+                        if custom_r > 16 || custom_c > 24 {
+                            return Err(CliError::input("plate custom rows/columns must fit within 16x24"));
+                        }
+                        (custom_r, custom_c)
+                    } else if let Some(geom) = plate_geometry(format) {
+                        geom
+                    } else if (1..=1536).contains(&format) {
+                        (1, format)
+                    } else {
+                        return Err(CliError::input(format!(
+                            "plate format {format} is not valid for topology {topology}"
+                        )));
+                    }
                 } else {
-                    get("format").and_then(|value| value.as_i64()).unwrap_or(0)
-                };
-                let Some((rows, cols)) = plate_geometry(format) else {
-                    return Err(CliError::input(format!(
-                        "plate format {format} is not registered"
-                    )));
+                    let Some(geom) = plate_geometry(format) else {
+                        return Err(CliError::input(format!(
+                            "plate format {format} is not registered"
+                        )));
+                    };
+                    geom
                 };
                 let groups = get("groups")
                     .and_then(|value| value.as_mapping())
@@ -1580,14 +1690,7 @@ pub(crate) fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(),
                     })?;
                     for well in wells {
                         let well = well.as_str().unwrap_or("").trim().to_uppercase();
-                        let valid = well.len() >= 2
-                            && well.as_bytes()[0].is_ascii_uppercase()
-                            && (well.as_bytes()[0] - b'A') < rows as u8
-                            && well[1..]
-                                .parse::<u32>()
-                                .map(|col| (1..=cols as u32).contains(&col))
-                                .unwrap_or(false);
-                        if !valid {
+                        if !valid_plate_well(&well, topology, rows, cols) {
                             return Err(CliError::input(format!(
                                 "well {well} is outside {rows}x{cols}"
                             )));
@@ -1604,14 +1707,7 @@ pub(crate) fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(),
                 if let Some(samples) = get("samples").and_then(|value| value.as_mapping()) {
                     for (well_key, sample_value) in samples {
                         let well = well_key.as_str().unwrap_or("").trim().to_uppercase();
-                        let valid = well.len() >= 2
-                            && well.as_bytes()[0].is_ascii_uppercase()
-                            && (well.as_bytes()[0] - b'A') < rows as u8
-                            && well[1..]
-                                .parse::<u32>()
-                                .map(|col| (1..=cols as u32).contains(&col))
-                                .unwrap_or(false);
-                        if !valid {
+                        if !valid_plate_well(&well, topology, rows, cols) {
                             return Err(CliError::input(format!(
                                 "sample well {well} is outside {rows}x{cols}"
                             )));
@@ -1640,14 +1736,7 @@ pub(crate) fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(),
                 if let Some(replicates) = get("replicates").and_then(|value| value.as_mapping()) {
                     for (well_key, replicate_value) in replicates {
                         let well = well_key.as_str().unwrap_or("").trim().to_uppercase();
-                        let valid = well.len() >= 2
-                            && well.as_bytes()[0].is_ascii_uppercase()
-                            && (well.as_bytes()[0] - b'A') < rows as u8
-                            && well[1..]
-                                .parse::<u32>()
-                                .map(|col| (1..=cols as u32).contains(&col))
-                                .unwrap_or(false);
-                        if !valid {
+                        if !valid_plate_well(&well, topology, rows, cols) {
                             return Err(CliError::input(format!(
                                 "replicate well {well} is outside {rows}x{cols}"
                             )));
@@ -1673,8 +1762,26 @@ pub(crate) fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(),
                         seen_replicates.insert(key, well);
                     }
                 }
+                if let Some(roles) = get("roles").and_then(|value| value.as_mapping()) {
+                    for (well_key, role_value) in roles {
+                        let well = well_key.as_str().unwrap_or("").trim().to_uppercase();
+                        if !valid_plate_well(&well, topology, rows, cols) {
+                            return Err(CliError::input(format!(
+                                "role well {well} is outside {rows}x{cols}"
+                            )));
+                        }
+                        let role = role_value.as_str().unwrap_or("").trim();
+                        if !matches!(
+                            role,
+                            "sample" | "blank" | "vehicle" | "positive_control" | "negative_control" | "standard" | "ntc"
+                        ) {
+                            return Err(CliError::input(format!(
+                                "invalid well role {role} for {well}"
+                            )));
+                        }
+                    }
+                }
             }
-            "plate-mix-fields" => asterdoc_plate_mix_fields(mapping)?,
             "reference-ref" => {
                 if text("ref").is_empty() {
                     return Err(CliError::input("reference needs a ref"));
@@ -1690,74 +1797,65 @@ pub(crate) fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(),
                     return Err(CliError::input("assay needs at least one group_ref"));
                 }
             }
-            "step-fields" => {
-                if text("assay").is_empty() {
-                    return Err(CliError::input("step needs an assay"));
-                }
-            }
-            "step-execution" => match text("execution") {
-                "executable" if text("assay").is_empty() => {
-                    return Err(CliError::input("executable step needs an assay"));
-                }
-                "executable" => {}
-                "organizational" => {
-                    for field in ["assay", "timepoints", "path", "checks", "tasks", "uses"] {
-                        let Some(value) = get(field) else { continue };
-                        let present = match value {
-                            serde_yaml::Value::Null => false,
-                            serde_yaml::Value::String(value) => !value.trim().is_empty(),
-                            serde_yaml::Value::Sequence(values) => !values.is_empty(),
-                            _ => true,
-                        };
-                        if present {
-                            return Err(CliError::input(format!(
-                                "organizational step cannot declare {field}"
-                            )));
+            "step-execution" => {
+                let execution = if get("execution").is_none_or(|value| value.is_null()) {
+                    "executable"
+                } else {
+                    text("execution")
+                };
+                match execution {
+                    "executable" => {}
+                    "organizational" => {
+                        for field in ["assay", "timepoints", "path", "checks", "tasks", "uses", "blocks", "block_refs"] {
+                            let Some(value) = get(field) else { continue };
+                            let present = match value {
+                                serde_yaml::Value::Null => false,
+                                serde_yaml::Value::String(value) => !value.trim().is_empty(),
+                                serde_yaml::Value::Sequence(values) => !values.is_empty(),
+                                _ => true,
+                            };
+                            if present {
+                                return Err(CliError::input(format!(
+                                    "organizational step cannot declare {field}"
+                                )));
+                            }
                         }
                     }
-                }
-                _ => {
-                    return Err(CliError::input(
-                        "step execution must be executable or organizational",
-                    ));
-                }
-            },
-            "step-uses" => {
-                let mut seen = std::collections::HashSet::new();
-                for use_item in get("uses").and_then(|value| value.as_sequence()).into_iter().flatten() {
-                    let ref_id = asterdoc_map_get(use_item, "ref").and_then(|value| value.as_str()).unwrap_or("").trim();
-                    let role = asterdoc_map_get(use_item, "role").and_then(|value| value.as_str()).unwrap_or("").trim();
-                    if ref_id.is_empty() || role.is_empty() {
-                        return Err(CliError::input("step use needs ref and role"));
+                    _ => {
+                        return Err(CliError::input(
+                            "step execution must be executable or organizational",
+                        ));
                     }
-                    if !seen.insert(ref_id.to_owned()) {
-                        return Err(CliError::input(format!("step use repeats {ref_id}")));
+                }
+            }
+            "step-blocks" => {
+                if let Some(blocks_val) = get("blocks") {
+                    let items = blocks_val
+                        .as_sequence()
+                        .ok_or_else(|| CliError::input("step.blocks must be a list"))?;
+                    for item in items {
+                        let item_kind = item
+                            .as_mapping()
+                            .and_then(|m| m.get(serde_yaml::Value::String("kind".to_owned())))
+                            .and_then(|v| v.as_str())
+                            .map(str::trim)
+                            .unwrap_or("");
+                        if !matches!(
+                            item_kind,
+                            "prose" | "group_table" | "param_table" | "figure" | "data_table"
+                                | "checklist" | "calculator" | "timer" | "attachment" | "subflow" | "plate"
+                        ) {
+                            return Err(CliError::input(format!(
+                                "step.blocks cannot embed module kind {item_kind}"
+                            )));
+                        }
+                        validate_asterdoc_module_value(item, line_no)?;
                     }
                 }
             }
             "workflow-fields" => {
                 if get("steps").and_then(|value| value.as_sequence()).is_none_or(|items| items.is_empty()) {
                     return Err(CliError::input("workflow needs at least one step"));
-                }
-            }
-            "dilution-fields" => {
-                let stock = asterdoc_quantity_parts(get("stock").ok_or_else(|| CliError::input("dilution needs stock"))?)?;
-                let target = asterdoc_quantity_parts(get("target").ok_or_else(|| CliError::input("dilution needs target"))?)?;
-                let final_volume = asterdoc_quantity_parts(get("final_volume").ok_or_else(|| CliError::input("dilution needs final_volume"))?)?;
-                if stock.2 != "mass_concentration" || target.2 != "mass_concentration" || final_volume.2 != "volume" {
-                    return Err(CliError::input("dilution needs concentration/concentration/volume"));
-                }
-                if stock.0 <= 0.0 || target.0 <= 0.0 || final_volume.0 <= 0.0 {
-                    return Err(CliError::input("dilution quantities must be positive"));
-                }
-                let stock_base = stock.0 * stock.3;
-                let target_base = target.0 * target.3;
-                if target_base > stock_base {
-                    return Err(CliError::input("target concentration cannot exceed stock concentration"));
-                }
-                let stock_volume = target_base * final_volume.0 * final_volume.3 / stock_base;
-                if stock_volume > final_volume.0 * final_volume.3 {
-                    return Err(CliError::input("stock volume exceeds final volume"));
                 }
             }
             "instrument-profile-fields" => {
@@ -1795,52 +1893,274 @@ pub(crate) fn validate_asterdoc_module(body: &str, line_no: usize) -> Result<(),
                     return Err(CliError::input("sample needs a sample_id"));
                 }
             }
-            "container-fields" => {
-                if text("format").is_empty() {
-                    return Err(CliError::input("container needs a format"));
-                }
-                if get("wells").and_then(|v| v.as_i64()).unwrap_or(0) <= 0 {
-                    return Err(CliError::input("container needs positive wells"));
+            "prose-fields" => {
+                if text("body").is_empty() {
+                    return Err(CliError::input("prose needs non-empty body"));
                 }
             }
-            "measurement-profile-fields" => {
-                if text("endpoint").is_empty() {
-                    return Err(CliError::input("measurement profile needs an endpoint"));
+            "group_table-fields" => {
+                let rows = get("rows")
+                    .and_then(|v| v.as_sequence())
+                    .ok_or_else(|| CliError::input("group_table needs rows"))?;
+                if rows.is_empty() {
+                    return Err(CliError::input("group_table needs at least one group row"));
                 }
-                if text("unit").is_empty() {
-                    return Err(CliError::input("measurement profile needs a unit"));
+                let mut seen_ids = std::collections::HashSet::new();
+                for row in rows {
+                    let row_id = asterdoc_map_get(row, "id").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    let name = asterdoc_map_get(row, "name").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    if row_id.is_empty() || name.is_empty() {
+                        return Err(CliError::input("group_table row needs non-empty id and name"));
+                    }
+                    if !seen_ids.insert(row_id.to_owned()) {
+                        return Err(CliError::input(format!("group_table repeats id {row_id}")));
+                    }
                 }
             }
-            "rna-reagent-fields" => {
-                let sample_count = get("sample_count")
-                    .and_then(|v| v.as_i64())
-                    .ok_or_else(|| CliError::input("rna reagent needs sample_count"))?;
-                if sample_count <= 0 {
-                    return Err(CliError::input("rna reagent sample_count must be positive"));
+            "param_table-fields" => {
+                let rows = get("rows")
+                    .and_then(|v| v.as_sequence())
+                    .ok_or_else(|| CliError::input("param_table needs rows"))?;
+                for row in rows {
+                    let key = asterdoc_map_get(row, "key").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    let label = asterdoc_map_get(row, "label").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    if key.is_empty() && label.is_empty() {
+                        return Err(CliError::input("param_table row needs non-empty key or label"));
+                    }
+                    if asterdoc_map_get(row, "value").is_none_or(serde_yaml::Value::is_null) {
+                        return Err(CliError::input("param_table row needs value"));
+                    }
+                    if let Some(unit) = asterdoc_map_get(row, "unit").and_then(|v| v.as_str()).map(str::trim).filter(|u| !u.is_empty()) {
+                        if asterdoc_unit(unit).is_none() {
+                            return Err(CliError::input(format!("param_table unit {unit} is not in UCUM subset")));
+                        }
+                    }
                 }
-                let (vol_value, vol_unit, vol_dim, _vol_factor) = asterdoc_quantity_parts(get("volume_per_sample").ok_or_else(|| CliError::input("rna reagent needs volume_per_sample"))?)?;
-                let (stock_value, stock_unit, stock_dim, stock_factor) = asterdoc_quantity_parts(get("stock_concentration").ok_or_else(|| CliError::input("rna reagent needs stock_concentration"))?)?;
-                let (target_value, target_unit, target_dim, target_factor) = asterdoc_quantity_parts(get("target_concentration").ok_or_else(|| CliError::input("rna reagent needs target_concentration"))?)?;
-                if vol_dim != "volume" || stock_dim != "mass_concentration" || target_dim != "mass_concentration" {
-                    return Err(CliError::input("rna reagent needs volume/concentration/concentration"));
+            }
+            "figure-fields" => {
+                let src = text("src");
+                let svg = text("svg");
+                if src.is_empty() && svg.is_empty() {
+                    return Err(CliError::input("figure needs src or svg"));
                 }
-                let _ = (vol_unit, stock_unit, target_unit);
-                if vol_value <= 0.0 || stock_value <= 0.0 || target_value <= 0.0 {
-                    return Err(CliError::input("rna reagent quantities must be positive"));
+                if !svg.is_empty() && !svg.contains("<svg") {
+                    return Err(CliError::input("figure svg must contain <svg"));
                 }
-                let extra_ratio = match get("extra_ratio") {
-                    Some(v) => v
-                        .as_f64()
-                        .ok_or_else(|| CliError::input("rna reagent extra_ratio must be a number"))?,
-                    None => 0.0,
-                };
-                if extra_ratio < 0.0 {
-                    return Err(CliError::input("rna reagent extra_ratio must be non-negative"));
+                if src.to_ascii_lowercase().starts_with("data:") && src.len() > 65536 {
+                    return Err(CliError::input("figure data URI exceeds 65536 bytes"));
                 }
-                let stock_base = stock_value * stock_factor;
-                let target_base = target_value * target_factor;
-                if target_base > stock_base {
-                    return Err(CliError::input("target concentration cannot exceed stock concentration"));
+                if let Some(h) = get("max_height").and_then(|v| v.as_i64()) {
+                    if h < 40 {
+                        return Err(CliError::input("figure max_height must be >= 40"));
+                    }
+                }
+            }
+            "data_table-fields" => {
+                let cols = get("columns")
+                    .and_then(|v| v.as_sequence())
+                    .ok_or_else(|| CliError::input("data_table needs columns"))?;
+                if cols.is_empty() {
+                    return Err(CliError::input("data_table needs at least one column"));
+                }
+                let mut col_keys = std::collections::HashSet::new();
+                for col in cols {
+                    let ckey = asterdoc_map_get(col, "key").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    let clabel = asterdoc_map_get(col, "label").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    let vkind = asterdoc_map_get(col, "value_kind").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    if ckey.is_empty() || clabel.is_empty() {
+                        return Err(CliError::input("data_table column needs key and label"));
+                    }
+                    if !col_keys.insert(ckey.to_owned()) {
+                        return Err(CliError::input(format!("data_table repeats column {ckey}")));
+                    }
+                    if !matches!(vkind, "text" | "number" | "categorical" | "formula") {
+                        return Err(CliError::input(format!("data_table column {ckey} has invalid value_kind {vkind}")));
+                    }
+                    if let Some(unit) = asterdoc_map_get(col, "unit").and_then(|v| v.as_str()).map(str::trim).filter(|u| !u.is_empty()) {
+                        if asterdoc_unit(unit).is_none() {
+                            return Err(CliError::input(format!("data_table column {ckey} unit {unit} is not in UCUM subset")));
+                        }
+                    }
+                    if let (Some(min), Some(max)) = (
+                        asterdoc_map_get(col, "min").and_then(|v| v.as_f64()),
+                        asterdoc_map_get(col, "max").and_then(|v| v.as_f64()),
+                    ) {
+                        if min > max {
+                            return Err(CliError::input(format!("data_table column {ckey} min exceeds max")));
+                        }
+                    }
+                    if vkind == "formula" {
+                        let formula = asterdoc_map_get(col, "formula").and_then(|v| v.as_str()).unwrap_or("");
+                        validate_formula_expr(formula)
+                            .map_err(|e| CliError::input(format!("data_table column {ckey} {e}")))?;
+                    }
+                }
+            }
+            "checklist-fields" => {
+                let items = get("items")
+                    .and_then(|v| v.as_sequence())
+                    .ok_or_else(|| CliError::input("checklist needs items"))?;
+                if items.is_empty() {
+                    return Err(CliError::input("checklist needs at least one item"));
+                }
+                let mut seen_ids = std::collections::HashSet::new();
+                for item in items {
+                    let cid = asterdoc_map_get(item, "id").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    let label = asterdoc_map_get(item, "label").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    if cid.is_empty() || label.is_empty() {
+                        return Err(CliError::input("checklist item needs non-empty id and label"));
+                    }
+                    if !seen_ids.insert(cid.to_owned()) {
+                        return Err(CliError::input(format!("checklist repeats item id {cid}")));
+                    }
+                }
+            }
+            "calculator-fields" => {
+                match text("mode") {
+                    "dilution" => {
+                        let stock = asterdoc_quantity_parts(get("stock").ok_or_else(|| CliError::input("calculator dilution needs stock"))?)?;
+                        let target = asterdoc_quantity_parts(get("target").ok_or_else(|| CliError::input("calculator dilution needs target"))?)?;
+                        let final_vol = asterdoc_quantity_parts(get("final_volume").ok_or_else(|| CliError::input("calculator dilution needs final_volume"))?)?;
+                        if stock.0 <= 0.0 || target.0 <= 0.0 || final_vol.0 <= 0.0 {
+                            return Err(CliError::input("calculator dilution quantities must be positive"));
+                        }
+                        if final_vol.2 != "volume" {
+                            return Err(CliError::input("calculator dilution final_volume must have volume unit"));
+                        }
+                        if stock.2 != target.2 {
+                            return Err(CliError::input("calculator dilution stock and target must have compatible units"));
+                        }
+                        if target.0 * target.3 > stock.0 * stock.3 {
+                            return Err(CliError::input("calculator dilution target exceeds stock"));
+                        }
+                    }
+                    "group_mastermix" => {
+                        let vpu = asterdoc_quantity_parts(get("volume_per_unit").ok_or_else(|| CliError::input("calculator group_mastermix needs volume_per_unit"))?)?;
+                        if vpu.2 != "volume" || vpu.0 <= 0.0 {
+                            return Err(CliError::input("calculator group_mastermix volume_per_unit must be positive volume"));
+                        }
+                        if let Some(ex) = get("excess_ratio").and_then(|v| v.as_f64()) {
+                            if ex < 0.0 || !ex.is_finite() {
+                                return Err(CliError::input("calculator excess_ratio must be non-negative"));
+                            }
+                        }
+                        let has_comps = get("components").and_then(|v| v.as_sequence()).is_some_and(|s| !s.is_empty());
+                        let has_plate = !text("plate_ref").is_empty();
+                        if !has_comps && !has_plate {
+                            return Err(CliError::input("calculator group_mastermix needs components or plate_ref"));
+                        }
+                        for comp in get("components").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                            if asterdoc_map_get(comp, "name").and_then(|v| v.as_str()).is_none_or(|n| n.trim().is_empty()) {
+                                return Err(CliError::input("calculator component needs name"));
+                            }
+                        }
+                    }
+                    "serial_dilution" => {
+                        let df = get("dilution_factor").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let steps = get("steps_count").and_then(|v| v.as_i64()).unwrap_or(0);
+                        if !df.is_finite() || df <= 1.0 {
+                            return Err(CliError::input("calculator serial_dilution dilution_factor must be > 1"));
+                        }
+                        if steps < 1 {
+                            return Err(CliError::input("calculator serial_dilution steps_count must be >= 1"));
+                        }
+                    }
+                    "sample_normalize" => {
+                        let count = get("sample_count").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let has_vol = get("volume_per_unit").is_some_and(|v| asterdoc_quantity_parts(v).is_ok_and(|p| p.2 == "volume" && p.0 > 0.0));
+                        if count < 1 && !has_vol {
+                            return Err(CliError::input("calculator sample_normalize needs positive sample_count or volume_per_unit"));
+                        }
+                    }
+                    "formula" => {
+                        validate_formula_expr(text("formula")).map_err(CliError::input)?;
+                    }
+                    bad_mode => {
+                        return Err(CliError::input(format!("unsupported calculator mode {bad_mode}")));
+                    }
+                }
+            }
+            "timer-fields" => {
+                match text("mode") {
+                    "countdown" => {
+                        let d = asterdoc_quantity_parts(get("duration").ok_or_else(|| CliError::input("countdown timer needs duration"))?)?;
+                        if d.2 != "time" || d.0 <= 0.0 {
+                            return Err(CliError::input("countdown timer duration must be positive time"));
+                        }
+                    }
+                    "stopwatch" => {
+                        if let Some(dur) = get("duration").filter(|v| !v.is_null()) {
+                            asterdoc_quantity(dur, "time")?;
+                        }
+                    }
+                    "cycle" => {
+                        let phases = get("phases").and_then(|v| v.as_sequence())
+                            .ok_or_else(|| CliError::input("cycle timer needs phases"))?;
+                        if phases.is_empty() {
+                            return Err(CliError::input("cycle timer needs at least one phase"));
+                        }
+                        if let Some(rounds) = get("rounds").and_then(|v| v.as_i64()) {
+                            if rounds < 1 {
+                                return Err(CliError::input("cycle timer rounds must be >= 1"));
+                            }
+                        }
+                        for phase in phases {
+                            let pname = asterdoc_map_get(phase, "name").and_then(|v| v.as_str()).unwrap_or("").trim();
+                            if pname.is_empty() {
+                                return Err(CliError::input("cycle timer phase needs name"));
+                            }
+                            let pmode = asterdoc_map_get(phase, "mode").and_then(|v| v.as_str()).unwrap_or("").trim();
+                            if pmode != "open" || asterdoc_map_get(phase, "duration").is_some_and(|v| !v.is_null()) {
+                                let dval = asterdoc_map_get(phase, "duration")
+                                    .ok_or_else(|| CliError::input(format!("cycle timer phase {pname} needs duration")))?;
+                                let d = asterdoc_quantity_parts(dval)?;
+                                if d.2 != "time" || d.0 <= 0.0 {
+                                    return Err(CliError::input(format!("cycle timer phase {pname} duration must be positive time")));
+                                }
+                            }
+                        }
+                    }
+                    "window" => {
+                        if text("anchor").is_empty() && text("schedule_window").is_empty() {
+                            return Err(CliError::input("window timer needs anchor or schedule_window"));
+                        }
+                        if let Some(off) = get("offset").filter(|v| !v.is_null()) {
+                            let d = asterdoc_quantity_parts(off)?;
+                            if d.2 != "time" || d.0 < 0.0 {
+                                return Err(CliError::input("window timer offset must be non-negative time"));
+                            }
+                        }
+                    }
+                    bad_mode => {
+                        return Err(CliError::input(format!("unsupported timer mode {bad_mode}")));
+                    }
+                }
+            }
+            "attachment-fields" => {
+                if let Some(slots) = get("slots_per_cell").and_then(|v| v.as_i64()) {
+                    if slots < 1 {
+                        return Err(CliError::input("attachment slots_per_cell must be >= 1"));
+                    }
+                }
+                if text("scope") == "container_grid" && text("container_ref").is_empty() {
+                    return Err(CliError::input("container_grid attachment needs container_ref"));
+                }
+            }
+            "subflow-fields" => {
+                if text("title").is_empty() {
+                    return Err(CliError::input("subflow needs title"));
+                }
+                let items = get("items").and_then(|v| v.as_sequence())
+                    .ok_or_else(|| CliError::input("subflow needs items"))?;
+                if items.is_empty() {
+                    return Err(CliError::input("subflow needs at least one item"));
+                }
+                for item in items {
+                    let sid = asterdoc_map_get(item, "id").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    let stitle = asterdoc_map_get(item, "title").and_then(|v| v.as_str()).unwrap_or("").trim();
+                    if sid.is_empty() || stitle.is_empty() {
+                        return Err(CliError::input("subflow item needs non-empty id and title"));
+                    }
                 }
             }
             other => {
@@ -1924,17 +2244,43 @@ pub(crate) fn ywells(module: &serde_yaml::Value, group: &str) -> Vec<String> {
 
 pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result<Value, CliError> {
     let mut experiments = Vec::new();
-    let mut groups = Vec::new();
+    let mut group_modules = Vec::new();
+    let mut group_table_rows: Vec<(String, serde_yaml::Value)> = Vec::new();
     let mut assays = Vec::new();
     let mut steps = Vec::new();
     let mut workflows = Vec::new();
     let mut plates = Vec::new();
+    let mut by_id: std::collections::HashMap<String, &serde_yaml::Value> = std::collections::HashMap::new();
     for module in modules {
+        let mid = ytext(module, "id");
+        if !mid.is_empty() {
+            by_id.insert(mid, module);
+        }
         match ytext(module, "kind").as_str() {
             "experiment" => experiments.push(module),
-            "group" => groups.push(module),
+            "group" => group_modules.push(module),
+            "group_table" => {
+                for row in module.get("rows").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                    let gid = ytext(row, "id");
+                    if !gid.is_empty() {
+                        group_table_rows.push((gid, row.clone()));
+                    }
+                }
+            }
             "assay" => assays.push(module),
-            "step" => steps.push(module),
+            "step" => {
+                steps.push(module);
+                for nested in module.get("blocks").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                    if ytext(nested, "kind") == "group_table" {
+                        for row in nested.get("rows").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                            let gid = ytext(row, "id");
+                            if !gid.is_empty() {
+                                group_table_rows.push((gid, row.clone()));
+                            }
+                        }
+                    }
+                }
+            }
             "workflow" => workflows.push(module),
             "plate" => plates.push(module),
             _ => {}
@@ -1946,18 +2292,48 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
         ));
     }
     let experiment = experiments[0];
-    let group_index: std::collections::HashMap<String, &serde_yaml::Value> = groups
-        .iter()
-        .map(|group| (ytext(group, "id"), *group))
-        .collect();
-    let assay_index: std::collections::HashMap<String, &serde_yaml::Value> = assays
-        .iter()
-        .map(|assay| (ytext(assay, "id"), *assay))
-        .collect();
-    // Reference modules name the ProtocolBlock version a design step reuses.
-    // The compiled design carries that identity so a frozen task, which stores
-    // the producing block version, can be joined to its design step even
-    // though the design step path and the block's own step paths differ.
+    let mut group_name_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut group_specs: Vec<Value> = Vec::new();
+    let mut seen_group_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let push_group = |val: &serde_yaml::Value,
+                      specs: &mut Vec<Value>,
+                      names: &mut std::collections::HashMap<String, String>,
+                      seen: &mut std::collections::HashSet<String>| {
+        let gid = ytext(val, "id");
+        let name = ytext(val, "name");
+        if gid.is_empty() || !seen.insert(gid.clone()) {
+            return;
+        }
+        names.insert(gid.clone(), name.clone());
+        let mut spec = json!({
+            "id": gid,
+            "name": name,
+        });
+        let role = ytext(val, "role");
+        if !role.is_empty() {
+            spec["role"] = json!(match role.as_str() {
+                "control" | "treatment" | "comparator" | "reference" => role,
+                _ => "other".to_owned(),
+            });
+        }
+        if !ytext(val, "condition").is_empty() {
+            spec["condition"] = json!(ytext(val, "condition"));
+        }
+        if let Some(n) = val.get("independent_n").and_then(|v| v.as_u64()) {
+            spec["independent_n"] = json!(n);
+        }
+        if let Some(n) = val.get("technical_repeats").and_then(|v| v.as_u64()) {
+            spec["technical_repeats"] = json!(n);
+        }
+        specs.push(spec);
+    };
+    for group in &group_modules {
+        push_group(group, &mut group_specs, &mut group_name_by_id, &mut seen_group_ids);
+    }
+    for (_, row) in &group_table_rows {
+        push_group(row, &mut group_specs, &mut group_name_by_id, &mut seen_group_ids);
+    }
+
     let reference_index: std::collections::HashMap<String, String> = modules
         .iter()
         .filter(|module| ytext(module, "kind") == "reference" && ytext(module, "view") == "protocol_block")
@@ -1965,45 +2341,18 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
         .filter(|(id, target)| !id.is_empty() && !target.is_empty())
         .collect();
 
-    let group_specs: Vec<Value> = groups
+    let all_group_ids: Vec<String> = group_specs
         .iter()
-        .map(|group| {
-            let mut spec = json!({
-                "id": ytext(group, "id"),
-                "name": ytext(group, "name"),
-            });
-            let role = ytext(group, "role");
-            if !role.is_empty() {
-                spec["role"] = json!(match role.as_str() {
-                    "control" | "treatment" | "comparator" | "reference" => role,
-                    _ => "other".to_owned(),
-                });
-            }
-            if !ytext(group, "condition").is_empty() {
-                spec["condition"] = json!(ytext(group, "condition"));
-            }
-            if let Some(n) = group.get("independent_n").and_then(|v| v.as_u64()) {
-                spec["independent_n"] = json!(n);
-            }
-            if let Some(n) = group.get("technical_repeats").and_then(|v| v.as_u64()) {
-                spec["technical_repeats"] = json!(n);
-            }
-            spec
-        })
+        .filter_map(|g| g["id"].as_str().map(str::to_owned))
         .collect();
 
-    let assay_plans: Vec<Value> = assays
+    let mut assay_plans: Vec<Value> = assays
         .iter()
         .map(|assay| {
             let group_ids: Vec<String> = ystrings(assay, "group_refs");
             let group_names: Vec<String> = group_ids
                 .iter()
-                .map(|id| {
-                    group_index
-                        .get(id)
-                        .map(|group| ytext(group, "name"))
-                        .unwrap_or_default()
-                })
+                .map(|id| group_name_by_id.get(id).cloned().unwrap_or_default())
                 .collect();
             let mut plan = json!({
                 "id": ytext(assay, "id"),
@@ -2029,23 +2378,65 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
         })
         .collect();
 
+    if assay_plans.is_empty() {
+        let title = {
+            let t = ytext(experiment, "title");
+            if t.is_empty() { "主实验".to_owned() } else { t }
+        };
+        let endpoint = {
+            let e = ytext(experiment, "primary_endpoint");
+            if e.is_empty() { "观测指标".to_owned() } else { e }
+        };
+        let method = {
+            let m = ytext(experiment, "endpoint_method");
+            if m.is_empty() { "通用记录".to_owned() } else { m }
+        };
+        let group_names: Vec<String> = all_group_ids
+            .iter()
+            .map(|id| group_name_by_id.get(id).cloned().unwrap_or_default())
+            .collect();
+        assay_plans.push(json!({
+            "id": "assay-main",
+            "title": title,
+            "endpoint": endpoint,
+            "method": method,
+            "unit": ytext(experiment, "endpoint_unit"),
+            "timepoints": ystrings(experiment, "timepoints"),
+            "group_ids": all_group_ids,
+            "group_names": group_names,
+            "controls": [],
+            "control_group_ids": [],
+            "timepoint_timing": [],
+        }));
+    }
+
+    let default_assay_id = assay_plans
+        .first()
+        .and_then(|a| a["id"].as_str())
+        .unwrap_or("assay-main")
+        .to_owned();
+
     let mut mygo_assays = serde_json::Map::new();
-    for assay in &assays {
-        let assay_id = ytext(assay, "id");
-        let assay_timepoints = ystrings(assay, "timepoints");
-        let control_ref = ytext(assay, "control_group_ref");
-        let control_group = group_index
-            .get(&control_ref)
-            .map(|group| ytext(group, "name"))
-            .unwrap_or_default();
-        let calibrator_ref = ytext(assay, "calibrator_group_ref");
-        let calibrator_group = group_index
-            .get(&calibrator_ref)
-            .map(|group| ytext(group, "name"))
-            .unwrap_or_default();
+    for (assay_idx, assay_plan) in assay_plans.iter().enumerate() {
+        let assay_id = assay_plan["id"].as_str().unwrap_or("").to_owned();
+        let assay_yaml = assays.iter().find(|a| ytext(a, "id") == assay_id).copied();
+        let assay_timepoints: Vec<String> = assay_plan["timepoints"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        let control_ref = assay_yaml.map(|a| ytext(a, "control_group_ref")).unwrap_or_default();
+        let control_group = group_name_by_id.get(&control_ref).cloned().unwrap_or_default();
+        let tech_reps = assay_yaml
+            .and_then(|a| a.get("technical_replicates"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let mut wells = Vec::new();
         for plate in &plates {
-            if ytext(plate, "assay") != assay_id {
+            let plate_assay = ytext(plate, "assay");
+            let matches_assay = plate_assay == assay_id || (plate_assay.is_empty() && assay_idx == 0);
+            if !matches_assay {
                 continue;
             }
             let mut sample_lookup: std::collections::HashMap<String, String> =
@@ -2071,13 +2462,13 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
                 .unwrap_or_default();
             let plate_timepoint = ytext(plate, "timepoint");
             let plate_timepoints = if plate_timepoint.is_empty() {
-                assay_timepoints.clone()
+                if assay_timepoints.is_empty() { vec![String::new()] } else { assay_timepoints.clone() }
             } else {
                 vec![plate_timepoint]
             };
             for (group_value, wells_value) in groups_map {
                 let group_id = group_value.as_str().unwrap_or("").to_owned();
-                if !group_index.contains_key(&group_id) {
+                if !group_name_by_id.contains_key(&group_id) {
                     continue;
                 }
                 let mut coordinates: Vec<String> = wells_value
@@ -2106,10 +2497,10 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
             assay_id,
             json!({
                 "timepoints": assay_timepoints,
-                "technicalReplicates": assay.get("technical_replicates").and_then(|v| v.as_u64()).unwrap_or(0),
+                "technicalReplicates": tech_reps,
                 "controlGroup": control_group,
-                "calibratorGroup": calibrator_group,
-                "referenceGenes": ystrings(assay, "reference_genes"),
+                "calibratorGroup": "",
+                "referenceGenes": [],
                 "wells": wells
             }),
         );
@@ -2123,13 +2514,32 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
     let mut step_details = Vec::new();
     let mut step_uses = serde_json::Map::new();
     let mut step_blocks = serde_json::Map::new();
+    let mut asterlab_steps = serde_json::Map::new();
+    let mut asterlab_step_params = serde_json::Map::new();
+    let mut asterlab_step_timers = serde_json::Map::new();
+    let mut asterlab_step_tables = serde_json::Map::new();
+    let mut asterlab_step_capture = serde_json::Map::new();
+
     for (index, step) in steps.iter().enumerate() {
         let id = ytext(step, "id");
-        let assay = ytext(step, "assay");
         let title = ytext(step, "title");
-        let schema = step.get("schema").and_then(|value| value.as_i64()).unwrap_or(0);
-        let execution = if schema >= 3 { ytext(step, "execution") } else { "executable".to_owned() };
+        let execution = {
+            let e = ytext(step, "execution");
+            if e.is_empty() { "executable".to_owned() } else { e }
+        };
         let is_executable = execution == "executable";
+        let assay = {
+            let a = ytext(step, "assay");
+            if a.is_empty() && is_executable { default_assay_id.clone() } else { a }
+        };
+        let path = {
+            let p = ytext(step, "path");
+            if p.is_empty() && is_executable {
+                ast::derive_step_path(&id).unwrap_or_else(|_| format!("root/{id}"))
+            } else {
+                p
+            }
+        };
         nodes.push(json!({
             "id": id,
             "kind": "flask",
@@ -2151,9 +2561,8 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
                 step_uses.insert(id.clone(), serde_json::to_value(uses).unwrap_or(Value::Null));
             }
         }
-        let timepoints = ystrings(step, "timepoints");
-        let path = ytext(step, "path");
-        let checks: Vec<Value> = step.get("checks")
+
+        let mut checks: Vec<Value> = step.get("checks")
             .and_then(|value| value.as_sequence())
             .into_iter()
             .flatten()
@@ -2169,6 +2578,79 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
                 }))
             })
             .collect();
+
+        let mut resolved_blocks: Vec<Value> = Vec::new();
+        for inline in step.get("blocks").and_then(|v| v.as_sequence()).into_iter().flatten() {
+            if let Ok(v) = serde_json::to_value(inline) {
+                resolved_blocks.push(v);
+            }
+        }
+        for ref_id in ystrings(step, "block_refs") {
+            if let Some(target) = by_id.get(&ref_id) {
+                if let Ok(v) = serde_json::to_value(target) {
+                    resolved_blocks.push(v);
+                }
+            }
+        }
+        if !resolved_blocks.is_empty() {
+            asterlab_steps.insert(id.clone(), Value::Array(resolved_blocks.clone()));
+            let mut params_acc = Vec::new();
+            let mut timers_acc = Vec::new();
+            let mut tables_acc = Vec::new();
+            let mut capture_acc = Vec::new();
+            for blk in &resolved_blocks {
+                match blk["kind"].as_str().unwrap_or("") {
+                    "checklist" => {
+                        for item in blk["items"].as_array().into_iter().flatten() {
+                            let cid = item["id"].as_str().unwrap_or("").trim();
+                            let label = item["label"].as_str().unwrap_or("").trim();
+                            if !cid.is_empty() && !label.is_empty() {
+                                checks.push(json!({
+                                    "check_id": cid,
+                                    "label": label,
+                                    "blocking": item["required"].as_bool().unwrap_or(false),
+                                    "allow_rule_skip": item["allow_rule_skip"].as_bool().unwrap_or(false),
+                                    "skip_rule": item["skip_rule"].as_str().unwrap_or("")
+                                }));
+                            }
+                        }
+                    }
+                    "param_table" => {
+                        for row in blk["rows"].as_array().into_iter().flatten() {
+                            params_acc.push(row.clone());
+                        }
+                    }
+                    "timer" => timers_acc.push(blk.clone()),
+                    "data_table" => tables_acc.push(blk.clone()),
+                    "attachment" => {
+                        let scope = blk["scope"].as_str().unwrap_or("");
+                        if scope == "container_grid" || scope == "step_evidence" {
+                            capture_acc.push(json!({
+                                "id": blk["id"],
+                                "scope": scope,
+                                "container_ref": blk["container_ref"],
+                                "slots_per_cell": blk["slots_per_cell"].as_u64().unwrap_or(1),
+                                "media_hint": blk["media_hint"],
+                            }));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !params_acc.is_empty() {
+                asterlab_step_params.insert(id.clone(), Value::Array(params_acc));
+            }
+            if !timers_acc.is_empty() {
+                asterlab_step_timers.insert(id.clone(), Value::Array(timers_acc));
+            }
+            if !tables_acc.is_empty() {
+                asterlab_step_tables.insert(id.clone(), Value::Array(tables_acc));
+            }
+            if !capture_acc.is_empty() {
+                asterlab_step_capture.insert(id.clone(), Value::Array(capture_acc));
+            }
+        }
+
         if !checks.is_empty() {
             step_checks.push(json!({"stepId": id, "path": path, "checks": checks}));
         }
@@ -2180,6 +2662,7 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
                 step_details.push(json!({"stepId": id, "tasks": tasks}));
             }
         }
+        let timepoints = ystrings(step, "timepoints");
         if is_executable {
             if timepoints.is_empty() {
                 step_tasks.push(json!({"stepId": id, "assayId": assay, "timepoint": "", "path": path}));
@@ -2252,11 +2735,16 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
         .filter(|module| !core_kinds.contains(&ytext(module, "kind").as_str()))
         .filter_map(|module| serde_json::to_value(module).ok())
         .collect();
-    if !sdk_modules.is_empty() {
+    if !sdk_modules.is_empty() || !asterlab_steps.is_empty() {
         design["asterlab"] = json!({
             "foundationVersion": 1,
-            "sdkVersion": asterdoc_spec()["sdkVersion"].as_str().unwrap_or("1.0.0"),
-            "modules": sdk_modules
+            "sdkVersion": asterdoc_spec()["sdkVersion"].as_str().unwrap_or("2.0.0"),
+            "modules": sdk_modules,
+            "steps": asterlab_steps,
+            "stepParameters": asterlab_step_params,
+            "stepTimers": asterlab_step_timers,
+            "stepTables": asterlab_step_tables,
+            "stepCapture": asterlab_step_capture
         });
     }
     if design["research_question"].is_null() {
@@ -2305,5 +2793,96 @@ pub(crate) fn create_asterdoc_design(db: &mut Connection, input: &Value) -> Resu
     }))?;
     doc["design_id"] = json!(design_id);
     Ok(doc)
+}
+
+pub(crate) fn derive_asterdoc_source_from_run(
+    source: &str,
+    run_id: &str,
+    parameter_updates: &[asterlab_core::design_commands::DerivedParameterUpdate],
+    duration_updates: &[asterlab_core::design_commands::DerivedDurationUpdate],
+) -> String {
+    let Ok(blocks) = asterdoc_blocks(source) else {
+        return source.to_owned();
+    };
+    let mut replacements: Vec<(usize, usize, String)> = Vec::new();
+    for block in &blocks {
+        let bkind = yaml_kind(&block.value);
+        if bkind != "step" && bkind != "param_table" && bkind != "timer" {
+            continue;
+        }
+        let mut updated = block.value.clone();
+        let mut changed = false;
+        let patch_param_table = |tbl: &mut serde_yaml::Value, step_path: &str| -> bool {
+            let mut tbl_changed = false;
+            let Some(rows) = tbl.get_mut("rows").and_then(|v| v.as_sequence_mut()) else {
+                return false;
+            };
+            for row in rows {
+                let key = asterdoc_map_get(row, "key").and_then(|v| v.as_str()).unwrap_or("").trim().to_owned();
+                let label = asterdoc_map_get(row, "label").and_then(|v| v.as_str()).unwrap_or("").trim().to_owned();
+                if let Some(upd) = parameter_updates.iter().find(|u| {
+                    let u_sp = u.step_path.as_deref().unwrap_or("");
+                    let u_lbl = u.label.as_deref().unwrap_or("");
+                    (u_sp == step_path || step_path.is_empty() || u_sp.ends_with(&format!("/{step_path}")))
+                        && (u.parameter_key == key || (!label.is_empty() && u_lbl == label))
+                }) {
+                    if let Some(rmap) = row.as_mapping_mut() {
+                        if let Ok(val_yaml) = serde_json::from_value::<serde_yaml::Value>(upd.actual.clone()) {
+                            rmap.insert(serde_yaml::Value::String("value".to_owned()), val_yaml);
+                            if let Some(unit) = upd.unit.as_deref().filter(|s| !s.is_empty()) {
+                                rmap.insert(serde_yaml::Value::String("unit".to_owned()), serde_yaml::Value::String(unit.to_owned()));
+                            }
+                            tbl_changed = true;
+                        }
+                    }
+                }
+            }
+            tbl_changed
+        };
+        if bkind == "param_table" {
+            changed |= patch_param_table(&mut updated, "");
+        } else if bkind == "step" {
+            let spath = step_path(&block.value);
+            let sid = yaml_id(&block.value);
+            if let Some(nested) = updated.get_mut("blocks").and_then(|v| v.as_sequence_mut()) {
+                for blk in nested {
+                    let nk = yaml_kind(blk);
+                    if nk == "param_table" {
+                        changed |= patch_param_table(blk, if spath.is_empty() { &sid } else { &spath });
+                    } else if nk == "timer" && yaml_kind(blk) == "timer" {
+                        let bid = yaml_id(blk);
+                        if let Some(du) = duration_updates.iter().find(|d| d.timer_id == bid) {
+                            if let Some(tm) = blk.as_mapping_mut() {
+                                if let Ok(dur) = serde_yaml::from_str::<serde_yaml::Value>(&format!("value: {}\nunit: s", du.actual_s)) {
+                                    tm.insert(serde_yaml::Value::String("duration".to_owned()), dur);
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if changed {
+            if let Ok(raw) = serde_yaml::to_string(&updated) {
+                replacements.push((block.body_start, block.body_end, raw));
+            }
+        }
+    }
+    let mut next = if replacements.is_empty() {
+        source.to_owned()
+    } else {
+        apply_replacements(source.to_owned(), replacements)
+    };
+    let provenance = format!("> 派生自 Run {run_id}");
+    if !next.contains(&provenance) {
+        if !next.ends_with('\n') {
+            next.push('\n');
+        }
+        next.push('\n');
+        next.push_str(&provenance);
+        next.push('\n');
+    }
+    next
 }
 

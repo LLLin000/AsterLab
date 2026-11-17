@@ -1,7 +1,6 @@
 #![recursion_limit = "256"]
 mod mygo;
 use mygo::*;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[path = "../../../../../../src/cli.rs"]
@@ -522,7 +521,15 @@ impl CoreRunService {
         // A pantry reference is resolved before the write, as the CLI does: an
         // unknown or retired item is NOT_FOUND and nothing is appended.
         let notice = pantry_event_notice(&tx, &input.pantry_item_id)?;
-        cli_impl::create_execution_event_tx(&tx, &input.run_id, &event).map_err(map_cli)?;
+        let saved = cli_impl::create_execution_event_tx(&tx, &input.run_id, &event).map_err(map_cli)?;
+        asterlab_app::AppCore::trigger_timers_for_anchor_tx(
+            &tx,
+            &input.run_id,
+            saved["id"].as_str().unwrap_or_default(),
+            saved["data"]["task_key"].as_str(),
+            saved["data"]["occurred_at"].as_str().unwrap_or_default(),
+        )
+        .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         let mut value = cli_impl::run_workspace(&tx, &input.run_id).map_err(map_cli)?;
         let revision: i64 = tx
             .query_row(
@@ -1576,7 +1583,28 @@ impl CoreDesignService {
         };
         let derived = derive_design_from_run(&workspace, &timers, &command)
             .map_err(|e| Error::Go(format!("INVALID: {}", e.message)))?;
-        let design_json = serde_json::to_string(&derived.to_design_json())
+        let mut json_val = derived.to_design_json();
+        if let Ok(run_rec) = cli_impl::get(db, &input.run_id) {
+            let ast_rev = run_rec["data"]["asterdoc"]["revision"].as_u64().unwrap_or(0);
+            let ast_design_id = run_rec["data"]["asterdoc"]["design_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&derived.design_id);
+            if ast_rev > 0 && !ast_design_id.is_empty() {
+                if let Ok(doc) = cli_impl::load_asterdoc_at(db, ast_design_id, ast_rev) {
+                    if let Some(source) = doc["source"].as_str() {
+                        let updated_source = cli_impl::derive_asterdoc_source_from_run(
+                            source,
+                            &input.run_id,
+                            &derived.parameter_updates,
+                            &derived.duration_updates,
+                        );
+                        json_val["asterdoc_source"] = serde_json::json!(updated_source);
+                    }
+                }
+            }
+        }
+        let design_json = serde_json::to_string(&json_val)
             .map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         Ok(DerivedDesign {
             design_id: derived.design_id,

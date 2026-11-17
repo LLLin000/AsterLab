@@ -44,7 +44,7 @@ func TestBuildViewModelRemapsModules(t *testing.T) {
 			{SampleID: "Control-1", Endpoint: "OD450", Value: 0.82, Unit: "AU", TaskKey: "t-2", ProtocolStepPath: "root/read"},
 		},
 	}
-	source := "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: CCK-8\n```\n```asterlab\nkind: group\nid: g-control\nschema: 1\nname: Control\nrole: control\n```\n```asterlab\nkind: instrument_profile\nid: uv-reader\nschema: 1\nclass: plate_reader\nmodel: UV-1\ncapabilities:\n  - name: absorbance\n    wavelength: 450 nm\nsource: built_in\n```\n```asterlab\nkind: dilution\nid: dil-stock\nschema: 1\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\ngroup_refs: [g-control]\ntimepoints: [D1]\n```\n```asterlab\nkind: step\nid: step-seed\nschema: 2\ntitle: Seed cells\nassay: assay-cck8\npath: root/seed\nuses:\n  - ref: uv-reader\n    role: instrument\n  - ref: dil-stock\n    role: calculator\n```\n```asterlab\nkind: step\nid: step-read\nschema: 2\ntitle: Read OD450\nassay: assay-cck8\npath: root/read\nuses:\n  - ref: uv-reader\n    role: instrument\n```\n"
+	source := "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: CCK-8\n```\n```asterlab\nkind: group\nid: g-control\nschema: 1\nname: Control\nrole: control\n```\n```asterlab\nkind: instrument_profile\nid: uv-reader\nschema: 1\nclass: plate_reader\nmodel: UV-1\ncapabilities:\n  - name: absorbance\n    wavelength: 450 nm\nsource: built_in\n```\n```asterlab\nkind: calculator\nid: dil-stock\nschema: 1\nmode: dilution\ntitle: Stock dilution\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\ngroup_refs: [g-control]\ntimepoints: [D1]\n```\n```asterlab\nkind: step\nid: step-seed\nschema: 1\ntitle: Seed cells\nassay: assay-cck8\npath: root/seed\nuses:\n  - ref: uv-reader\n    role: instrument\n  - ref: dil-stock\n    role: calculator\n```\n```asterlab\nkind: step\nid: step-read\nschema: 1\ntitle: Read OD450\nassay: assay-cck8\npath: root/read\nuses:\n  - ref: uv-reader\n    role: instrument\n```\n"
 	doc := &asterdoc.FrozenAsterDoc{
 		DesignID:        "design-1",
 		Revision:        6,
@@ -132,7 +132,7 @@ func TestBuildViewModelInstanceIndependence(t *testing.T) {
 			{Key: "t-1", DesignStepID: "step-seed", Title: "Seed", Timepoint: "D0", AssayID: "assay-cck8", Status: "completed"},
 		},
 	}
-	source := "```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\n```\n```asterlab\nkind: instrument_profile\nid: uv-reader\nschema: 1\nclass: plate_reader\ncapabilities:\n  - name: absorbance\nsource: built_in\n```\n```asterlab\nkind: step\nid: step-seed\nschema: 2\ntitle: Seed cells\nassay: assay-cck8\npath: root/seed\nuses:\n  - ref: uv-reader\n    role: instrument\n```\n"
+	source := "```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\n```\n```asterlab\nkind: instrument_profile\nid: uv-reader\nschema: 1\nclass: plate_reader\ncapabilities:\n  - name: absorbance\nsource: built_in\n```\n```asterlab\nkind: step\nid: step-seed\nschema: 1\ntitle: Seed cells\nassay: assay-cck8\npath: root/seed\nuses:\n  - ref: uv-reader\n    role: instrument\n```\n"
 	doc := &asterdoc.FrozenAsterDoc{
 		DesignID:        "design-1",
 		Revision:        6,
@@ -165,7 +165,7 @@ func TestBuildViewModelWorkflowEdges(t *testing.T) {
 			{Key: "t-2", DesignStepID: "step-read", Title: "Read", Timepoint: "D1", AssayID: "assay-cck8", Status: "pending"},
 		},
 	}
-	source := "```asterlab\nkind: step\nid: step-seed\nschema: 2\ntitle: Seed cells\nassay: assay-cck8\npath: root/seed\nuses: []\n```\n```asterlab\nkind: step\nid: step-read\nschema: 2\ntitle: Read OD450\nassay: assay-cck8\npath: root/read\nuses: []\n```\n```asterlab\nkind: workflow\nid: wf-1\nschema: 1\nsteps: [step-seed, step-read]\nedges:\n  - from: step-seed\n    to: step-read\n```\n"
+	source := "```asterlab\nkind: step\nid: step-seed\nschema: 1\ntitle: Seed cells\nassay: assay-cck8\npath: root/seed\nuses: []\n```\n```asterlab\nkind: step\nid: step-read\nschema: 1\ntitle: Read OD450\nassay: assay-cck8\npath: root/read\nuses: []\n```\n```asterlab\nkind: workflow\nid: wf-1\nschema: 1\nsteps: [step-seed, step-read]\nedges:\n  - from: step-seed\n    to: step-read\n```\n"
 	doc := &asterdoc.FrozenAsterDoc{
 		DesignID:        "design-1",
 		Revision:        6,
@@ -219,7 +219,7 @@ func TestBuildViewModelBlockedTask(t *testing.T) {
 			},
 		},
 	}
-	source := "```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\n```\n```asterlab\nkind: step\nid: step-seed\nschema: 2\ntitle: Seed cells\nassay: assay-cck8\npath: root/seed\nuses: []\n```\n"
+	source := "```asterlab\nkind: assay\nid: assay-cck8\nschema: 1\ntitle: CCK-8\n```\n```asterlab\nkind: step\nid: step-seed\nschema: 1\ntitle: Seed cells\nassay: assay-cck8\npath: root/seed\nuses: []\n```\n"
 	doc := &asterdoc.FrozenAsterDoc{
 		DesignID:        "design-1",
 		Revision:        6,
@@ -337,8 +337,8 @@ func TestBuildViewModelAssociatesMeasurementsAndAuditEvents(t *testing.T) {
 
 func TestBuildViewModelShowsOrganizationalNodes(t *testing.T) {
 	source := "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n" +
-		"```asterlab\nkind: step\nid: step-seed\nschema: 3\ntitle: Seed\nexecution: executable\nassay: assay-1\npath: cck8/seed\n```\n" +
-		"```asterlab\nkind: step\nid: step-incubate\nschema: 3\ntitle: Incubate\nexecution: organizational\n```\n"
+		"```asterlab\nkind: step\nid: step-seed\nschema: 1\ntitle: Seed\nexecution: executable\nassay: assay-1\npath: cck8/seed\n```\n" +
+		"```asterlab\nkind: step\nid: step-incubate\nschema: 1\ntitle: Incubate\nexecution: organizational\n```\n"
 	snap := runs.RunSnapshot{
 		RunID: "run-1",
 		Tasks: []runs.RunTask{{

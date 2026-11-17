@@ -302,8 +302,8 @@ func TestBuildDesignKeepsTwoUsesOfSameBlockIndependent(t *testing.T) {
 		"```asterlab\nkind: group\nid: g\nschema: 1\nname: G\n```\n\n" +
 		"```asterlab\nkind: assay\nid: assay\nschema: 1\ntitle: A\n```\n\n" +
 		"```asterlab\nkind: reference\nid: ref\nschema: 1\nref: block-v1\nview: protocol_block\n```\n\n" +
-		"```asterlab\nkind: step\nid: s1\nschema: 2\ntitle: Use one\npath: root/one\norder: 1\nassay: assay\nuses:\n  - {ref: ref, role: other}\n```\n\n" +
-		"```asterlab\nkind: step\nid: s2\nschema: 2\ntitle: Use two\npath: root/two\norder: 2\nassay: assay\nuses:\n  - {ref: ref, role: other}\n```\n\n" +
+		"```asterlab\nkind: step\nid: s1\nschema: 1\ntitle: Use one\npath: root/one\norder: 1\nassay: assay\nuses:\n  - {ref: ref, role: other}\n```\n\n" +
+		"```asterlab\nkind: step\nid: s2\nschema: 1\ntitle: Use two\npath: root/two\norder: 2\nassay: assay\nuses:\n  - {ref: ref, role: other}\n```\n\n" +
 		"```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [s1, s2]\nbusiness_order: [s1, s2]\n```\n"
 	tree, err := workflowtree.BuildDesign(&asterdoc.FrozenAsterDoc{DesignID: "d", Revision: 1, Source: source}, provider)
 	if err != nil {

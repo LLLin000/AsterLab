@@ -139,12 +139,73 @@ func BuildSchema(designJSON []byte, assayID, timepoint string) (resultgrid.Schem
 	}
 	cfg, ok := LookupLayout(id)
 	if !ok {
-		return resultgrid.Schema{}, nil, fmt.Errorf("unsupported assay %q", assayID)
+		return genericAssaySchema(spec, params, assayID, timepoint, groups)
 	}
 	if cfg.Build != nil {
 		return cfg.Build(doc, spec, params, assayID, timepoint, groups)
 	}
 	return matrixSchema(cfg, spec, params, assayID, timepoint, groups)
+}
+
+func genericAssaySchema(spec assaySpec, params Design, assayID, timepoint string, groups map[string]groupSpec) (resultgrid.Schema, []resultgrid.Cell, error) {
+	endpoint := strings.TrimSpace(spec.Endpoint)
+	if endpoint == "" {
+		endpoint = "value"
+	}
+	label := strings.TrimSpace(spec.Title)
+	if label == "" {
+		label = endpoint
+	}
+	reps := params.TechnicalReplicates
+	if reps < 1 {
+		reps = 1
+	}
+	metadata := map[string]string{
+		"timepoint":           timepoint,
+		"timepoints":          strings.Join(params.Timepoints, ","),
+		"controlGroup":        params.ControlGroup,
+		"technicalReplicates": fmt.Sprint(reps),
+		"groups":              groupNames(spec, groups),
+	}
+	rows := []string{}
+	seenRows := map[string]bool{}
+	cells := []resultgrid.Cell{}
+	for _, w := range params.Wells {
+		if timepoint != "" && w.Timepoint != "" && w.Timepoint != timepoint {
+			continue
+		}
+		id := strings.ToUpper(strings.TrimSpace(w.WellID))
+		if id == "" {
+			continue
+		}
+		if !seenRows[id] {
+			seenRows[id] = true
+			rows = append(rows, id)
+		}
+		cells = append(cells, resultgrid.Cell{
+			Row:       len(rows) - 1,
+			Column:    0,
+			SampleID:  strings.TrimSpace(w.SampleID),
+			Group:     strings.TrimSpace(w.GroupID),
+			Replicate: w.Replicate,
+			Field:     endpoint,
+			Status:    Missing,
+		})
+	}
+	if len(cells) == 0 {
+		metadata["unresolved"] = "well or sample allocation absent"
+	}
+	schema := resultgrid.Schema{
+		ID:           fmt.Sprintf("generic.%s.v1", strings.ToLower(strings.TrimSpace(assayID))),
+		Version:      1,
+		AssayID:      assayID,
+		Layout:       "generic_table",
+		RowLabels:    rows,
+		ColumnLabels: []string{label},
+		Fields:       []resultgrid.Field{{Key: endpoint, Label: label, DataType: "number"}},
+		Metadata:     metadata,
+	}
+	return schema, cells, nil
 }
 
 func cck8Schema(doc designDocument, spec assaySpec, params Design, assayID, timepoint string, groups map[string]groupSpec) (resultgrid.Schema, []resultgrid.Cell, error) {

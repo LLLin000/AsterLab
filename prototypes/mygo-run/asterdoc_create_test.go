@@ -59,12 +59,11 @@ func TestAssessAsterDocReportsIncompleteStarter(t *testing.T) {
 	if err != nil || len(projects) == 0 {
 		t.Fatalf("projects: %v %v", projects, err)
 	}
-	raw, err := os.ReadFile("starter.asterml")
-	if err != nil {
-		t.Fatal(err)
-	}
+	stepless := "```asterlab\nkind: experiment\nid: exp-empty\nschema: 1\ntitle: 无步骤草稿\n```\n" +
+		"```asterlab\nkind: group\nid: g-c\nschema: 1\nname: 对照\nrole: control\n```\n" +
+		"```asterlab\nkind: assay\nid: assay-main\nschema: 1\ntitle: 检测\ngroup_refs: [g-c]\ntimepoints: [D1]\n```\n"
 	doc, err := svc.CreateAsterDocDesign(ctx, runs.AsterDocCreateInput{
-		ProjectID: projects[0].ProjectID, Title: "新实验", Source: string(raw),
+		ProjectID: projects[0].ProjectID, Title: "无步骤草稿", Source: stepless,
 		OperationID: "assess-create",
 	})
 	if err != nil {
@@ -91,33 +90,22 @@ func TestProtocolBindingMakesStarterReadinessExecutable(t *testing.T) {
 	if err != nil || len(projects) == 0 {
 		t.Fatalf("projects: %v %v", projects, err)
 	}
-	protocols, err := svc.ListProtocols(ctx)
-	if err != nil || len(protocols) == 0 {
-		t.Fatalf("protocols: %v %v", protocols, err)
-	}
 	raw, err := os.ReadFile("starter.asterml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc, err := svc.CreateAsterDocDesign(ctx, runs.AsterDocCreateInput{
 		ProjectID: projects[0].ProjectID, Title: "新实验", Source: string(raw),
-		OperationID: "assess-binding-create",
+		OperationID: "assess-self-contained-create",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := svc.ApplyAsterDocCommand(ctx, runs.AsterDocCommandInput{
-		DesignID: doc.DesignID, ExpectedRevision: doc.Revision, OperationID: "bind-protocol",
-		Command: `{"type":"update_module","moduleId":"assay-main","properties":{"protocol_version_id":"` + protocols[0].ProtocolVersionID + `","timepoints":["D1"]}}`,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assessment, err := svc.AssessAsterDoc(ctx, doc.DesignID, updated.Revision)
+	assessment, err := svc.AssessAsterDoc(ctx, doc.DesignID, doc.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(assessment.Errors) != 0 {
-		t.Fatalf("readiness still has errors after protocol binding: %+v", assessment)
+		t.Fatalf("self-contained v2 starter readiness has errors: %+v", assessment)
 	}
 }

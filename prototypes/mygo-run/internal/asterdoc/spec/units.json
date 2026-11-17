@@ -1,8 +1,9 @@
 {
   "schemaVersion": 1,
-  "note": "Foundation v1 validates this named UCUM subset. Additional UCUM codes require a deliberate registry extension; no implicit conversion is performed.",
+  "note": "AsterML v2 validates this named UCUM subset (including common wet-lab concentration, CFU, absorbance, centrifuge and dosing units). Additional UCUM codes require a deliberate registry extension; no implicit conversion is performed.",
   "units": [
     {"symbol": "1", "dimension": "dimensionless", "factor": 1},
+    {"symbol": "ratio", "dimension": "dimensionless", "factor": 1},
     {"symbol": "s", "dimension": "time", "factor": 1},
     {"symbol": "min", "dimension": "time", "factor": 60},
     {"symbol": "h", "dimension": "time", "factor": 3600},
@@ -25,15 +26,19 @@
     {"symbol": "mg/mL", "dimension": "mass_concentration", "factor": 1},
     {"symbol": "mg/L", "dimension": "mass_concentration", "factor": 0.001},
     {"symbol": "ug/mL", "dimension": "mass_concentration", "factor": 0.001},
+    {"symbol": "ng/uL", "dimension": "mass_concentration", "factor": 0.001},
     {"symbol": "ug/L", "dimension": "mass_concentration", "factor": 0.000001},
     {"symbol": "ng/mL", "dimension": "mass_concentration", "factor": 0.000001},
     {"symbol": "ng/L", "dimension": "mass_concentration", "factor": 0.000000001},
+    {"symbol": "pg/mL", "dimension": "mass_concentration", "factor": 0.000000001},
+    {"symbol": "% w/v", "dimension": "mass_concentration", "factor": 10},
     {"symbol": "M", "dimension": "amount_concentration", "factor": 1},
     {"symbol": "mol/L", "dimension": "amount_concentration", "factor": 1},
     {"symbol": "mM", "dimension": "amount_concentration", "factor": 0.001},
     {"symbol": "uM", "dimension": "amount_concentration", "factor": 0.000001},
     {"symbol": "nM", "dimension": "amount_concentration", "factor": 0.000000001},
     {"symbol": "%", "dimension": "fraction", "factor": 0.01},
+    {"symbol": "% v/v", "dimension": "fraction", "factor": 0.01},
     {"symbol": "cells/mL", "dimension": "cell_concentration", "factor": 1},
     {"symbol": "cells/well", "dimension": "cells_per_well", "factor": 1},
     {"symbol": "mW/cm2", "dimension": "irradiance", "factor": 10},
@@ -41,6 +46,14 @@
     {"symbol": "cm", "dimension": "length", "factor": 0.01},
     {"symbol": "m", "dimension": "length", "factor": 1},
     {"symbol": "um", "dimension": "length", "factor": 0.000001},
-    {"symbol": "nm", "dimension": "length", "factor": 0.000000001}
+    {"symbol": "nm", "dimension": "length", "factor": 0.000000001},
+    {"symbol": "CFU", "dimension": "count", "factor": 1},
+    {"symbol": "CFU/well", "dimension": "count", "factor": 1},
+    {"symbol": "CFU/mL", "dimension": "colony_concentration", "factor": 1},
+    {"symbol": "AU", "dimension": "absorbance", "factor": 1},
+    {"symbol": "OD", "dimension": "absorbance", "factor": 1},
+    {"symbol": "rpm", "dimension": "rotational_speed", "factor": 1},
+    {"symbol": "xg", "dimension": "relative_centrifugal_force", "factor": 1},
+    {"symbol": "mg/kg", "dimension": "dose", "factor": 1}
   ]
 }

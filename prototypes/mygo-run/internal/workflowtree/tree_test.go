@@ -172,9 +172,9 @@ func TestProjectionRejectsCompositeWithoutDefinition(t *testing.T) {
 func TestRunTreeKeepsOrganizationalStepsWithoutTasks(t *testing.T) {
 	source := strings.Join([]string{
 		"```asterlab", "kind: assay", "id: assay-1", "schema: 1", "title: Assay", "```",
-		"```asterlab", "kind: step", "id: step-seed", "schema: 3", "title: Seed",
+		"```asterlab", "kind: step", "id: step-seed", "schema: 1", "title: Seed",
 		"execution: executable", "assay: assay-1", "path: cck8/seed", "```",
-		"```asterlab", "kind: step", "id: step-incubate", "schema: 3", "title: Incubate",
+		"```asterlab", "kind: step", "id: step-incubate", "schema: 1", "title: Incubate",
 		"execution: organizational", "```",
 	}, "\n")
 	tasks := []runs.RunTask{{
@@ -276,7 +276,7 @@ func TestProjectionJoinsByDesignStepIdentity(t *testing.T) {
 		"```asterlab",
 		"kind: step",
 		"id: step-read",
-		"schema: 2",
+		"schema: 1",
 		"title: 02 CCK-8 检测",
 		"assay: assay-cck8",
 		"path: cck8/readout",
@@ -336,10 +336,10 @@ func TestProjectionLinksSeedAndReadoutByExactBlockVersion(t *testing.T) {
 		"```asterlab", "kind: assay", "id: assay-cck8", "schema: 1", "title: CCK-8", "```",
 		"```asterlab", "kind: reference", "id: ref-seed", "schema: 1", "ref: block-seed-v1", "view: protocol_block", "```",
 		"```asterlab", "kind: reference", "id: ref-readout", "schema: 1", "ref: block-readout-v1", "view: protocol_block", "```",
-		"```asterlab", "kind: step", "id: step-seed", "schema: 3", "title: Seed",
+		"```asterlab", "kind: step", "id: step-seed", "schema: 1", "title: Seed",
 		"execution: executable", "assay: assay-cck8", "path: design/seed", "order: 1",
 		"uses:", "- {ref: ref-seed, role: other}", "```",
-		"```asterlab", "kind: step", "id: step-readout", "schema: 3", "title: Readout",
+		"```asterlab", "kind: step", "id: step-readout", "schema: 1", "title: Readout",
 		"execution: executable", "assay: assay-cck8", "path: design/readout", "order: 2",
 		"uses:", "- {ref: ref-readout, role: other}", "```",
 	}, "\n")

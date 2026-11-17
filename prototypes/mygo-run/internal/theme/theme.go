@@ -19,6 +19,7 @@ type Tokens struct {
 	RailBackground, SidebarBackground                                                            ui.Color
 	CardBackground, CardBorder                                                                   ui.Color
 	SuccessBg, SuccessText, WarningBg, WarningText, DangerBg, DangerText, NeutralBg, NeutralText ui.Color
+	AccentSoftBg, InfoBg, InfoText, CodeBg                                                       ui.Color
 	Spacing4, Spacing8, Spacing12, Spacing16, Spacing24, Spacing32, Spacing48                    int
 	TextPage, TextSection, TextBody, TextMeta, TextData                                          int
 	ButtonHeight, InputHeight, RowHeight                                                         int
@@ -58,6 +59,9 @@ func aliases(t Tokens) Tokens {
 	t.WarningBg, t.WarningText = t.Surface, t.Warning
 	t.DangerBg, t.DangerText = t.Surface, t.Danger
 	t.NeutralBg, t.NeutralText = t.Surface, t.TextMuted
+	t.AccentSoftBg = t.Accent.Alpha(.10)
+	t.InfoBg, t.InfoText = t.Elevated, t.Accent
+	t.CodeBg = t.Elevated
 	return t
 }
 

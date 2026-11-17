@@ -188,10 +188,10 @@ impl AppCore {
         self.ensure_writable(&run_id)?;
         let cells = input["cells"].as_array().ok_or("cells is required")?;
         let schema = input["schema_id"].as_str().filter(|s| !s.is_empty()).ok_or("schema_id is required")?;
-        if !matches!(schema, "cck8.plate96.od450.v1" | "qpcr.sample_gene.cq.v1") || input["schema_version"].as_u64() != Some(1) {
+        if input["schema_version"].as_u64() != Some(1) {
             return Err("unsupported result schema".into());
         }
-        if cells.is_empty() || cells.len() > 100 { return Err("batch must contain 1..=100 cells".into()); }
+        if cells.is_empty() || cells.len() > 1536 { return Err("batch must contain 1..=1536 cells".into()); }
         let tx = self.db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         eprintln!("run.save_batch layer=core transaction=start run_id={} operation_id={} schema_id={} cell_count={}", run_id, operation_id, schema, cells.len());
         if let Some(existing) = Self::find_operation_event_tx(&tx, &run_id, &operation_id) {
@@ -403,7 +403,7 @@ impl AppCore {
     /// Apply anchor-triggered timers inside the caller's transaction so a saved
     /// event and its t0 timer start commit atomically. If this fails, the event
     /// is rolled back and a retry cannot observe an event without its timer.
-    pub(crate) fn trigger_timers_for_anchor_tx(
+    pub fn trigger_timers_for_anchor_tx(
         tx: &rusqlite::Transaction<'_>, run_id: &str, event_id: &str,
         task_key: Option<&str>, occurred_at_utc: &str,
     ) -> Result<usize, String> {
@@ -487,6 +487,13 @@ impl AppCore {
                     }
                 }
                 let record = cli_impl::create_execution_event_tx(&tx, &run_id, &event).map_err(map_command_error)?;
+                Self::trigger_timers_for_anchor_tx(
+                    &tx,
+                    &run_id,
+                    record["id"].as_str().unwrap_or_default(),
+                    record["data"]["task_key"].as_str(),
+                    record["data"]["occurred_at"].as_str().unwrap_or_default(),
+                )?;
                 tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
                 let mut out = serde_json::json!({"record": record, "replayed": false});
                 if let Some(notice) = notice {
@@ -517,6 +524,17 @@ impl AppCore {
                 } else {
                     submit_batch_tx(&tx, &run_id, request, idempotency_key)?
                 };
+                if submitted.get("replayed").and_then(Value::as_bool) != Some(true) {
+                    if let Some(record) = submitted.get("record") {
+                        Self::trigger_timers_for_anchor_tx(
+                            &tx,
+                            &run_id,
+                            record["id"].as_str().unwrap_or_default(),
+                            record["data"]["task_key"].as_str(),
+                            record["data"]["occurred_at"].as_str().unwrap_or_default(),
+                        )?;
+                    }
+                }
                 tx.commit().map_err(|e| format!("INTERNAL: {e}"))?;
                 Ok(submitted)
             }

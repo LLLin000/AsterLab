@@ -11,13 +11,13 @@ import (
 )
 
 const storeDoc = "# CCK-8\n\n```asterlab\nkind: assay\nid: cck8\nschema: 1\ntitle: CCK-8\n```\n\n```asterlab\nkind: group\nid: control\nschema: 1\nname: Control\nrole: control\n```\n\n```asterlab\nkind: group\nid: material\nschema: 1\nname: Material\nrole: treatment\n```\n\n```asterlab\nkind: plate\nid: plate-d3\nschema: 1\nformat: 96\nassay: cck8\ngroups:\n  control: [A1, A2]\n  material: [B1]\n```\n"
-const parityDilutionDoc = "```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n"
+const parityDilutionDoc = "```asterlab\nkind: calculator\nid: dilution-01\nschema: 1\nmode: dilution\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n"
 
 const parityInstrumentDoc = "```asterlab\nkind: instrument_profile\nid: instrument-reader\nschema: 1\nclass: plate_reader\nmodel: Synergy H1\ncapabilities:\n  - name: absorbance\n    wavelength: 450 nm\n  - name: fluorescence\nsource: built_in\n```\n"
 
-const parityRnaDoc = "```asterlab\nkind: rna_reagent_usage\nid: rna-01\nschema: 1\nsample_count: 10\nvolume_per_sample:\n  value: 20\n  unit: uL\nstock_concentration:\n  value: 10\n  unit: mg/mL\ntarget_concentration:\n  value: 2\n  unit: mg/mL\nextra_ratio: 0.1\n```\n"
+const parityRnaDoc = "```asterlab\nkind: calculator\nid: rna-01\nschema: 1\nmode: group_mastermix\ntitle: RT 配液计算\nvolume_per_unit:\n  value: 20\n  unit: uL\nextra_ratio: 0.1\ncomponents:\n  - name: RT Mix\n    stock: {value: 10, unit: mg/mL}\n    final: {value: 2, unit: mg/mL}\n```\n"
 
-const parityPlateMixDoc = "```asterlab\nkind: group\nid: \"3%\"\nschema: 1\nname: 3% GelMA\n```\n```asterlab\nkind: group\nid: \"5%\"\nschema: 1\nname: 5% GelMA\n```\n```asterlab\nkind: group\nid: \"7%\"\nschema: 1\nname: 7% GelMA\n```\n```asterlab\nkind: plate\nid: plate-huvec\nschema: 1\nformat: 12\ngroups:\n  \"3%\": [A1, A2, A3]\n  \"5%\": [B1, B2, B3]\n  \"7%\": [C1, C2, C3]\nmix_volume_per_well: {value: 200, unit: uL}\nmix_excess_ratio: 0.1\nmix_gelma_percent_by_group:\n  \"3%\": 3\n  \"5%\": 5\n  \"7%\": 7\nmix_lap_stock_percent: 0.5\nmix_lap_final_percent: 0.05\nmix_cell_density: {value: 20000, unit: cells/well}\nmix_factor_stock_concentration: {value: 10, unit: ug/mL}\nmix_factor_final_concentration: {value: 50, unit: ng/mL}\n```\n"
+const parityPlateMixDoc = "```asterlab\nkind: plate\nid: plate-huvec\nschema: 1\nformat: 12\ngroups:\n  g3: [A1, A2, A3]\n  g5: [B1, B2, B3]\n```\n```asterlab\nkind: calculator\nid: calc-gelma\nschema: 1\nmode: group_mastermix\ntitle: GelMA 母液\nplate_ref: plate-huvec\nvolume_per_unit: {value: 200, unit: uL}\nextra_ratio: 0.1\ncomponents:\n  - name: LAP\n    stock: {value: 0.5, unit: \"% w/v\"}\n    final: {value: 0.05, unit: \"% w/v\"}\n```\n"
 
 func TestAsterDocStoreIsImmutableAndConflictChecked(t *testing.T) {
 	copyFixtureDB(t)
@@ -119,7 +119,7 @@ func TestAsterDocGoRustParity(t *testing.T) {
 		{"duplicate well", "```asterlab\nkind: plate\nid: p2\nschema: 1\nformat: 96\ngroups:\n  a: [A1]\n  b: [A1]\n```\n"},
 		{"missing groups", "```asterlab\nkind: plate\nid: p3\nschema: 1\nformat: 96\n```\n"},
 		{"removed plate96 kind", "```asterlab\nkind: plate96\nid: p-legacy\nschema: 1\nformat: 96\ngroups: {}\n```\n"},
-		{"unknown kind", "```asterlab\nkind: calculator\nid: c1\nschema: 1\n```\n"},
+		{"unknown kind", "```asterlab\nkind: unknown_v1_module\nid: c1\nschema: 1\n```\n"},
 		{"duplicate id", "```asterlab\nkind: reference\nid: dup\nschema: 1\nref: a\n```\n```asterlab\nkind: reference\nid: dup\nschema: 1\nref: b\n```\n"},
 		{"valid dilution", parityDilutionDoc},
 		{"invalid dilution unit", strings.Replace(parityDilutionDoc, "unit: mg/mL", "unit: mg/ml", 1)},
@@ -127,26 +127,23 @@ func TestAsterDocGoRustParity(t *testing.T) {
 		{"valid instrument profile", parityInstrumentDoc},
 		{"invalid instrument profile", strings.Replace(parityInstrumentDoc, "capabilities:\n  - name: absorbance\n    wavelength: 450 nm\n  - name: fluorescence\n", "", 1)},
 		{"missing typed reference", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\ngroup_refs: [missing-group]\n```\n"},
-		{"valid step2 uses", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: calculator\n```\n"},
-		{"invalid step2 missing use", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: missing\n    role: calculator\n```\n"},
-		{"invalid step2 role capability", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: instrument\n```\n"},
+		{"valid step1 uses", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: calculator\nid: dilution-01\nschema: 1\nmode: dilution\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 1\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: calculator\n```\n"},
+		{"invalid step1 missing use", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 1\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: missing\n    role: calculator\n```\n"},
+		{"invalid step1 role capability", "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: A\n```\n```asterlab\nkind: calculator\nid: dilution-01\nschema: 1\nmode: dilution\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 1\ntitle: UV\nassay: assay-1\npath: root/uv\nuses:\n  - ref: dilution-01\n    role: instrument\n```\n"},
 		{"valid material", "```asterlab\nkind: material\nid: mat-1\nschema: 1\nname: GelMA\nrole: treatment\ncondition: 5%\nconcentration: {value: 5, unit: mg/mL}\nsource: lab_imported\n```\n"},
 		{"invalid material role", "```asterlab\nkind: material\nid: mat-2\nschema: 1\nname: GelMA\nrole: \nconcentration: {value: 5, unit: mg/mL}\nsource: lab_imported\n```\n"},
 		{"invalid material concentration", "```asterlab\nkind: material\nid: mat-3\nschema: 1\nname: GelMA\nrole: treatment\nconcentration: {value: 5, unit: mg/ml}\nsource: lab_imported\n```\n"},
 		{"valid sample", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: G\n```\n```asterlab\nkind: sample\nid: s1\nschema: 1\nsample_id: S1\ngroup_ref: g1\namount: {value: 1, unit: mL}\n```\n"},
 		{"invalid sample amount", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: G\n```\n```asterlab\nkind: sample\nid: s2\nschema: 1\nsample_id: S2\ngroup_ref: g1\namount: {value: 1, unit: mg}\n```\n"},
-		{"valid container", "```asterlab\nkind: container\nid: c1\nschema: 1\nformat: 96-well\nwells: 96\n```\n"},
-		{"invalid container format", "```asterlab\nkind: container\nid: c2\nschema: 1\nformat: \nwells: 96\n```\n"},
-		{"valid measurement profile", "```asterlab\nkind: measurement_profile\nid: mp1\nschema: 1\nendpoint: Ct\nunit: Ct\n```\n"},
-		{"invalid measurement profile unit", "```asterlab\nkind: measurement_profile\nid: mp2\nschema: 1\nendpoint: Ct\nunit: \n```\n"},
-		{"valid rna reagent", parityRnaDoc},
-		{"invalid rna target>stock", strings.Replace(parityRnaDoc, "value: 2\n  unit: mg/mL", "value: 20\n  unit: mg/mL", 1)},
-		{"invalid rna extra_ratio", strings.Replace(parityRnaDoc, "extra_ratio: 0.1", "extra_ratio: -0.1", 1)},
-		{"valid plate mix", parityPlateMixDoc},
-		{"invalid plate mix lap", strings.Replace(parityPlateMixDoc, "mix_lap_final_percent: 0.05", "mix_lap_final_percent: 0.6", 1)},
-		{"invalid plate mix group percent", strings.Replace(parityPlateMixDoc, "  \"7%\": 7\n", "", 1)},
-		{"invalid plate mix factor", strings.Replace(parityPlateMixDoc, "mix_factor_final_concentration: {value: 50, unit: ng/mL}", "mix_factor_final_concentration: {value: 20, unit: mg/mL}", 1)},
-		{"invalid plate mix partial factor", strings.Replace(parityPlateMixDoc, "mix_factor_stock_concentration: {value: 10, unit: ug/mL}\n", "", 1)},
+		{"valid dish plate", "```asterlab\nkind: group\nid: g1\nschema: 1\nname: Q1\n```\n```asterlab\nkind: plate\nid: c1\nschema: 1\nformat: 6\ntopology: dish\nrows: 2\ncolumns: 2\ngroups:\n  g1: [A1]\n```\n"},
+		{"invalid dish topology missing groups", "```asterlab\nkind: plate\nid: c2\nschema: 1\nformat: 6\ntopology: dish\n```\n"},
+		{"valid readout", "```asterlab\nkind: readout\nid: r1\nschema: 1\nschema_id: qpcr.ct\nendpoint: Ct\nvalue_kind: numeric\n```\n"},
+		{"invalid readout missing endpoint", "```asterlab\nkind: readout\nid: r2\nschema: 1\nschema_id: qpcr.ct\nendpoint: \nvalue_kind: numeric\n```\n"},
+		{"valid mastermix calc", parityRnaDoc},
+		{"invalid mastermix volume unit", strings.Replace(parityRnaDoc, "unit: uL", "unit: mg", 1)},
+		{"invalid mastermix extra_ratio", strings.Replace(parityRnaDoc, "extra_ratio: 0.1", "extra_ratio: -0.1", 1)},
+		{"valid plate mastermix", parityPlateMixDoc},
+		{"invalid plate mastermix ratio", strings.Replace(parityPlateMixDoc, "extra_ratio: 0.1", "extra_ratio: -0.2", 1)},
 	}
 	revision := uint64(0)
 	for index, sample := range samples {

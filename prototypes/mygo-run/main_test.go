@@ -425,8 +425,7 @@ const close06Huvec9Source = "```asterlab\nkind: group\nid: g-3\nschema: 1\nname:
 	"```asterlab\nkind: group\nid: g-7\nschema: 1\nname: 7% GelMA\nrole: treatment\n```\n" +
 	"```asterlab\nkind: assay\nid: assay-tube\nschema: 1\ntitle: HUVEC 成管\nendpoint: tube length\nunit: µm\ngroup_refs: [g-3, g-5, g-7]\ntimepoints: [6 h, 12 h, 24 h]\n```\n" +
 	"```asterlab\nkind: plate\nid: plate-huvec\nschema: 1\nformat: 12\nassay: assay-tube\ngroups:\n  g-3: [A1, A2, A3]\n  g-5: [B1, B2, B3]\n  g-7: [C1, C2, C3]\n```\n" +
-	"```asterlab\nkind: measurement_profile\nid: mp-img\nschema: 1\nendpoint: 明场显微图像\nunit: images\nreadout_schema:\n  per_well_fov_count: 6\n```\n" +
-	"```asterlab\nkind: step\nid: step-img\nschema: 2\ntitle: 采图\nassay: assay-tube\npath: root/img\nuses:\n  - ref: mp-img\n    role: other\n```\n"
+	"```asterlab\nkind: step\nid: step-img\nschema: 1\ntitle: 采图\nassay: assay-tube\npath: root/img\nblocks:\n  - kind: attachment\n    id: att-img\n    schema: 1\n    scope: container_grid\n    container_ref: plate-huvec\n    slots_per_cell: 6\n    media_hint: image/*\n```\n"
 
 func TestFrozenPlannedWellsUsesPlateGroupsNotCapacity(t *testing.T) {
 	wells := frozenPlannedWells(close06Huvec9Source, "assay-tube", "step-img")
@@ -463,25 +462,25 @@ func TestAssetCoordinateOptionsReadsFrozenPlanNotLiveDraft(t *testing.T) {
 func TestFrozenPlannedWells1DContainerReadsLaneSlots(t *testing.T) {
 	source := "```asterlab\nkind: group\nid: g-cfu\nschema: 1\nname: control\nrole: control\n```\n" +
 		"```asterlab\nkind: assay\nid: assay-cfu\nschema: 1\ntitle: CFU\nendpoint: colonies\nunit: CFU\ngroup_refs: [g-cfu]\ntimepoints: [D1]\n```\n" +
-		"```asterlab\nkind: container\nid: rack-8\nschema: 1\nformat: tube-rack\nwells: 8\n```\n" +
-		"```asterlab\nkind: step\nid: step-count\nschema: 2\ntitle: 计数\nassay: assay-cfu\npath: root/count\nuses:\n  - ref: rack-8\n    role: other\n```\n"
+		"```asterlab\nkind: plate\nid: rack-8\nschema: 1\nformat: 8\ntopology: rack_1d\nrows: 1\ncolumns: 8\nassay: assay-cfu\ngroups:\n  g-cfu: [A1, A2, A3, A4, A5, A6, A7, A8]\n```\n" +
+		"```asterlab\nkind: step\nid: step-count\nschema: 1\ntitle: 计数\nassay: assay-cfu\npath: root/count\nblock_refs: [rack-8]\n```\n"
 	wells := frozenPlannedWells(source, "assay-cfu", "step-count")
-	if len(wells) != 8 || wells[0] != "Lane1" || wells[7] != "Lane8" {
-		t.Fatalf("1D wells = %v, want Lane1..Lane8", wells)
+	if len(wells) != 8 || wells[0] != "A1" || wells[7] != "A8" {
+		t.Fatalf("rack wells = %v, want A1..A8", wells)
 	}
 }
 
 func TestFrozenPlannedWellsContainer2DUsesSampleMapNotCapacity(t *testing.T) {
 	source := "```asterlab\nkind: group\nid: g-q\nschema: 1\nname: control\nrole: control\n```\n" +
 		"```asterlab\nkind: assay\nid: assay-q\nschema: 1\ntitle: qPCR\nendpoint: Ct\nunit: Ct\ngroup_refs: [g-q]\ntimepoints: [D1]\n```\n" +
-		"```asterlab\nkind: container\nid: plate-q\nschema: 1\nformat: 96-well\nwells: 96\nsample_map:\n  A1: s-1\n  H12: s-2\n```\n"
+		"```asterlab\nkind: plate\nid: plate-q\nschema: 1\nformat: 96\nassay: assay-q\ngroups:\n  g-q: [A1, H12]\nsamples:\n  A1: s-1\n  H12: s-2\n```\n"
 	wells := frozenPlannedWells(source, "assay-q", "")
 	if len(wells) != 2 || wells[0] != "A1" || wells[1] != "H12" {
 		t.Fatalf("2D container wells = %v, want map keys not 96 capacity", wells)
 	}
 	bare := "```asterlab\nkind: group\nid: g-q\nschema: 1\nname: control\nrole: control\n```\n" +
 		"```asterlab\nkind: assay\nid: assay-q\nschema: 1\ntitle: qPCR\nendpoint: Ct\nunit: Ct\ngroup_refs: [g-q]\ntimepoints: [D1]\n```\n" +
-		"```asterlab\nkind: container\nid: plate-bare\nschema: 1\nformat: 96-well\nwells: 96\n```\n"
+		"```asterlab\nkind: plate\nid: plate-bare\nschema: 1\nformat: 96\nassay: assay-q\ngroups: {}\n```\n"
 	if got := frozenPlannedWells(bare, "assay-q", ""); len(got) != 0 {
 		t.Fatalf("2D container without a plan must declare no slots, got %v", got)
 	}
@@ -904,7 +903,7 @@ func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
 		}, 1360, 880)
 		tt.Frame()
 
-		if !tt.HasText("AsterDoc 设计") || !tt.HasText("rev 1") {
+		if !tt.HasText("步骤工作台") || !tt.HasText("rev 1") {
 			t.Fatalf("already loaded design-a was hidden on LoadDesign error: %v", tt.Texts())
 		}
 		if !tt.HasText("NOT_FOUND: design-b unavailable") || !tt.HasText("重试") {
@@ -962,7 +961,7 @@ func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
 		if a.designDoc == nil || a.designDoc.DesignID != "design-1" {
 			t.Fatalf("retry did not load design-1: %+v", a.designDoc)
 		}
-		if tt.HasText("NOT_FOUND: design-1 missing") || !tt.HasText("AsterDoc 设计") {
+		if tt.HasText("NOT_FOUND: design-1 missing") || !tt.HasText("步骤工作台") {
 			t.Fatalf("AsterDoc surface not shown after retry: %v", tt.Texts())
 		}
 	})
@@ -1008,7 +1007,7 @@ func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
 		if a.designDoc == nil || a.designDoc.Revision != 4 {
 			t.Fatalf("retry did not load AsterDoc: %+v", a.designDoc)
 		}
-		if tt.HasText("INTERNAL: asterdoc read failed") || !tt.HasText("AsterDoc 设计") {
+		if tt.HasText("INTERNAL: asterdoc read failed") || !tt.HasText("步骤工作台") {
 			t.Fatalf("AsterDoc surface not restored after retry: %v", tt.Texts())
 		}
 	})
@@ -1704,7 +1703,7 @@ func TestDesignStepSwitchKeepsAndWarnsAboutPropertyDraft(t *testing.T) {
 		t.Fatalf("draft dropped on step switch: selected=%q title=%q", a.designSelected, a.canvasTitle)
 	}
 
-	if err := tt.Click("保存属性"); err != nil {
+	if err := tt.Click("保存步骤属性"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()

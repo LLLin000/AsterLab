@@ -11,8 +11,8 @@ import (
 	"asterlab-mygo-prototype/modules/runs"
 )
 
-func TestAsterDesignPageRendersFrozenDocumentSurface(t *testing.T) {
-	raw, err := os.ReadFile("internal/asterdoc/testdata/cck8-experiment.asterml")
+func TestAsterDesignPageRendersThreeTabWorkbench(t *testing.T) {
+	raw, err := os.ReadFile("internal/asterdoc/testdata/inhibition-zone.asterml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,49 +22,52 @@ func TestAsterDesignPageRendersFrozenDocumentSurface(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
 		asterDesignPage(c, a)
-	}, 1200, 760)
+	}, 1280, 820)
 	tt.Frame()
-	if !tt.HasText("AsterDoc 设计") || !tt.HasText("创建 Run") ||
-		!tt.HasText("流程") || !tt.HasText("rev 3") {
-		t.Fatalf("design surface missing: %q", tt.Texts())
+	texts := strings.Join(tt.Texts(), " ")
+	for _, want := range []string{"步骤工作台", "实验全局设定", "AsterML 源码", "步骤大纲", "创建 Run", "rev 3"} {
+		if !strings.Contains(texts, want) {
+			t.Fatalf("design workbench missing %q in %q", want, texts)
+		}
 	}
-	if err := tt.Click("文档"); err != nil {
+	if err := tt.Click("实验全局设定"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("96 孔板") {
-		t.Fatalf("document tab missing: %q", tt.Texts())
+	if !tt.HasText("实验全局设定") || !tt.HasText("四象限给药分组") {
+		t.Fatalf("global setup tab missing group_table: %q", tt.Texts())
+	}
+	if err := tt.Click("AsterML 源码"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("应用并保存修订") || !tt.HasText("AsterML v2 语法有效") {
+		t.Fatalf("source tab missing editor toolbar: %q", tt.Texts())
 	}
 }
 
-func TestWorkflowTabRendersDocStepsAndInspector(t *testing.T) {
+func TestWorkflowTabRendersDocStepsAndBlockComposer(t *testing.T) {
 	raw, err := os.ReadFile("internal/asterdoc/testdata/cck8-experiment.asterml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := strings.ReplaceAll(string(raw), "path: root/seed", `path: ""`)
-	source = strings.ReplaceAll(source, "path: root/read", `path: ""`)
 	a := &app{designDoc: &runs.AsterDocSnapshot{
-		DesignID: "design-1", Revision: 2, Source: source,
+		DesignID: "design-1", Revision: 2, Source: string(raw),
 	}, designTab: 0}
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
 		asterDesignPage(c, a)
-	}, 1200, 760)
+	}, 1280, 820)
 	tt.Frame()
-	texts := strings.Join(tt.Texts(), " ")
-	if !tt.HasText("seed") || !tt.HasText("read") || !strings.Contains(texts, "读取 OD450") ||
-		!tt.HasText("上移") || !tt.HasText("下移") || !tt.HasText("缩进") ||
-		!tt.HasText("提升") || !tt.HasText("删除") || !tt.HasText("需要先设置步骤路径") {
-		t.Fatalf("step list missing row actions or disabled path reason: %q", tt.Texts())
+	if !tt.HasText("seed") || !tt.HasText("read") || !tt.HasText("01") || !tt.HasText("02") {
+		t.Fatalf("step outline rail missing steps: %q", tt.Texts())
 	}
-	if err := tt.Click("seed"); err != nil {
+	if err := tt.Click("read"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if a.designSelected != "step-seed" || !tt.HasText("步骤属性") ||
-		!tt.HasText("操作摘要") || !tt.HasText("检测") || !tt.HasText("时间点") {
-		t.Fatalf("properties drawer missing: %q", tt.Texts())
+	if a.designSelected != "step-read" {
+		t.Fatalf("selected = %q, want step-read", a.designSelected)
 	}
 }
 
@@ -93,20 +96,19 @@ func TestPreflightDialogShowsCoreIssues(t *testing.T) {
 	}
 }
 
-func TestStepInspectorShowsAsterDocProperties(t *testing.T) {
-	source := "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: SDK\n```\n```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: dilution\nid: dilution-01\nschema: 1\nstock: {value: 20, unit: mg/mL}\ntarget: {value: 2, unit: mg/mL}\nfinal_volume: {value: 5, unit: mL}\n```\n```asterlab\nkind: instrument_profile\nid: uv-1\nschema: 1\nclass: uv_curing\ncapabilities:\n  - name: 365 nm\nsource: built_in\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 2\ntitle: UV cure\nassay: assay-1\npath: root/uv\n```\n"
+func TestStepComposerOpensWithAsterMLV2Modules(t *testing.T) {
+	source := "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: SDK\n```\n```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n```asterlab\nkind: step\nid: step-uv\nschema: 1\ntitle: UV cure\nassay: assay-1\npath: root/uv\nblocks:\n  - kind: prose\n    id: blk-p1\n    schema: 1\n    title: 操作注意\n    body: Irradiate 30s\n```\n"
 	a := &app{designDoc: &runs.AsterDocSnapshot{DesignID: "design-1", Revision: 1, Source: source}, designTab: 0}
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
 		asterDesignPage(c, a)
-	}, 1200, 760)
+	}, 1280, 820)
 	tt.Frame()
 	if err := tt.Click("UV cure"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("步骤属性") || !tt.HasText("标题") ||
-		!tt.HasText("检测") || !tt.HasText("时间点") || !tt.HasText("保存属性") {
-		t.Fatalf("properties drawer missing: %q", tt.Texts())
+	if !tt.HasText("操作注意") || !tt.HasText("向本步骤插入通用模块") {
+		t.Fatalf("step block composer missing blocks/palette: %q", tt.Texts())
 	}
 }

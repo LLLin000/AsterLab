@@ -731,7 +731,7 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
                 doc.get("source").and_then(Value::as_str).unwrap_or("").to_owned()
             };
             let mut errors: Vec<String> = Vec::new();
-            let mut warnings: Vec<String> = Vec::new();
+            let warnings: Vec<String> = Vec::new();
             let valid = validate_asterdoc_source(&source).is_ok();
             if let Err(error) = validate_asterdoc_source(&source) {
                 errors.push(error.message);

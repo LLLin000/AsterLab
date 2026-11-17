@@ -153,73 +153,97 @@ amount: {value: 1, unit: mL}
 ```
 
 ```asterlab
-kind: container
+kind: plate
 id: cartridge-S01
 schema: 1
-format: PureLink Spin Cartridge + Collection Tube
-wells: 1
+format: 1
+topology: rack_1d
+rows: 1
+columns: 1
+groups: {}
 ```
 
 ```asterlab
-kind: container
+kind: plate
 id: cartridge-S02
 schema: 1
-format: PureLink Spin Cartridge + Collection Tube
-wells: 1
+format: 1
+topology: rack_1d
+rows: 1
+columns: 1
+groups: {}
 ```
 
 ```asterlab
-kind: container
+kind: plate
 id: cartridge-S03
 schema: 1
-format: PureLink Spin Cartridge + Collection Tube
-wells: 1
+format: 1
+topology: rack_1d
+rows: 1
+columns: 1
+groups: {}
 ```
 
 ```asterlab
-kind: container
+kind: plate
 id: cartridge-S04
 schema: 1
-format: PureLink Spin Cartridge + Collection Tube
-wells: 1
+format: 1
+topology: rack_1d
+rows: 1
+columns: 1
+groups: {}
 ```
 
 ```asterlab
-kind: container
+kind: plate
 id: recovery-S01
 schema: 1
-format: Recovery Tube
-wells: 1
+format: 1
+topology: rack_1d
+rows: 1
+columns: 1
+groups: {}
 ```
 
 ```asterlab
-kind: container
+kind: plate
 id: recovery-S02
 schema: 1
-format: Recovery Tube
-wells: 1
+format: 1
+topology: rack_1d
+rows: 1
+columns: 1
+groups: {}
 ```
 
 ```asterlab
-kind: container
+kind: plate
 id: recovery-S03
 schema: 1
-format: Recovery Tube
-wells: 1
+format: 1
+topology: rack_1d
+rows: 1
+columns: 1
+groups: {}
 ```
 
 ```asterlab
-kind: container
+kind: plate
 id: recovery-S04
 schema: 1
-format: Recovery Tube
-wells: 1
+format: 1
+topology: rack_1d
+rows: 1
+columns: 1
+groups: {}
 ```
 
 ```asterlab
 kind: step
 id: step-01
-schema: 2
+schema: 1
 title: 01 收集细胞
 assay: assay-rna
 path: root/01-collect
@@ -240,7 +264,7 @@ checks:
 ```asterlab
 kind: step
 id: step-02
-schema: 2
+schema: 1
 title: 02 裂解与匀浆
 assay: assay-rna
 path: root/02-lyse
@@ -262,7 +286,7 @@ checks:
 ```asterlab
 kind: step
 id: step-03
-schema: 2
+schema: 1
 title: 03 加乙醇
 assay: assay-rna
 path: root/03-ethanol
@@ -283,7 +307,7 @@ checks:
 ```asterlab
 kind: step
 id: step-04
-schema: 2
+schema: 1
 title: 04 上柱结合
 assay: assay-rna
 path: root/04-bind
@@ -307,7 +331,7 @@ checks:
 ```asterlab
 kind: step
 id: step-05
-schema: 2
+schema: 1
 title: 05 Wash I
 assay: assay-rna
 path: root/05-wash1
@@ -332,7 +356,7 @@ checks:
 ```asterlab
 kind: step
 id: step-06
-schema: 2
+schema: 1
 title: 06 Wash II 第一次
 assay: assay-rna
 path: root/06-wash2a
@@ -357,7 +381,7 @@ checks:
 ```asterlab
 kind: step
 id: step-07
-schema: 2
+schema: 1
 title: 07 Wash II 第二次
 assay: assay-rna
 path: root/07-wash2b
@@ -382,7 +406,7 @@ checks:
 ```asterlab
 kind: step
 id: step-08
-schema: 2
+schema: 1
 title: 08 干柱离心
 assay: assay-rna
 path: root/08-dry
@@ -410,7 +434,7 @@ checks:
 ```asterlab
 kind: step
 id: step-09
-schema: 2
+schema: 1
 title: 09 RNA 洗脱
 assay: assay-rna
 path: root/09-elute
@@ -435,7 +459,7 @@ checks:
 ```asterlab
 kind: step
 id: step-10
-schema: 2
+schema: 1
 title: 10 RNA 质检与保存
 assay: assay-rna
 path: root/10-qc

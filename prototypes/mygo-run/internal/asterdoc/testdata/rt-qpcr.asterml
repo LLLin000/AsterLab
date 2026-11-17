@@ -1,10 +1,27 @@
+# RT-qPCR 检测样板（AsterML v2）
+
 ```asterlab
-kind: group
-id: group-control
+kind: experiment
+id: exp-rtqpcr-v2
 schema: 1
-name: control
-role: control
-condition: untreated
+title: RT-qPCR 相对定量实验
+objective: 比较处理组与对照组靶基因相对表达量（2^-ddCt）
+experimental_unit: well
+primary_endpoint: Ct
+endpoint_method: SYBR Green qPCR
+endpoint_unit: "1"
+```
+
+```asterlab
+kind: group_table
+id: gt-rtqpcr
+schema: 1
+title: qPCR 实验分组
+rows:
+  - id: group-control
+    name: 对照组
+    role: control
+    condition: untreated
 ```
 
 ```asterlab
@@ -33,20 +50,46 @@ amount:
 ```
 
 ```asterlab
-kind: container
-id: plate-qpcr-96
+kind: assay
+id: assay-qpcr
 schema: 1
-format: 96-well
-wells: 96
+title: SYBR qPCR
+endpoint: Ct
+unit: "1"
+group_refs: [group-control]
+timepoints: [40_cycles]
 ```
 
 ```asterlab
-kind: measurement_profile
-id: mp-ct
+kind: plate
+id: plate-qpcr-96
 schema: 1
+format: 96
+topology: plate
+assay: assay-qpcr
+groups:
+  group-control: [A1, A2, A3]
+samples:
+  A1: cDNA-01
+roles:
+  A1: sample
+```
+
+```asterlab
+kind: data_table
+id: dt-ct
+schema: 1
+title: Ct 扩增阈值记录表
+schema_id: qpcr_ct
 endpoint: Ct
-unit: Ct
-readout_schema:
-  columns: [well, Ct]
-calculator_refs: [calculator.dilution]
+columns:
+  - key: well
+    label: 孔位
+    value_kind: text
+  - key: ct
+    label: Ct
+    value_kind: number
+    unit: 1
+    min: 10
+    max: 38
 ```

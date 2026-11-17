@@ -326,8 +326,8 @@ mod tests {
 
     #[test]
     fn asterdoc_reorders_steps_only_with_a_complete_unique_permutation() {
-        let source = "```asterlab\nkind: step\nid: a\nschema: 2\npath: root/a\n```\n\
-```asterlab\nkind: step\nid: b\nschema: 2\npath: root/b\n```\n\
+        let source = "```asterlab\nkind: step\nid: a\nschema: 1\npath: root/a\n```\n\
+```asterlab\nkind: step\nid: b\nschema: 1\npath: root/b\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [a, b]\nedges: [{from: a, to: b}]\nbusiness_order: [a, b]\n```\n";
         let reordered = apply_asterdoc_patch(
             source,
@@ -348,8 +348,8 @@ mod tests {
 
     #[test]
     fn asterdoc_nests_and_promotes_steps_by_updating_paths() {
-        let source = "```asterlab\nkind: step\nid: parent\nschema: 2\npath: root/parent\n```\n\
-```asterlab\nkind: step\nid: child\nschema: 2\npath: root/child\n```\n\
+        let source = "```asterlab\nkind: step\nid: parent\nschema: 1\npath: root/parent\n```\n\
+```asterlab\nkind: step\nid: child\nschema: 1\npath: root/child\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [parent, child]\nedges: []\nbusiness_order: [parent, child]\n```\n";
         let nested = apply_asterdoc_patch(
             source,
@@ -375,8 +375,8 @@ mod tests {
 
     #[test]
     fn asterdoc_derives_missing_step_paths_when_nesting_and_promoting() {
-        let source = "```asterlab\nkind: step\nid: soak\nschema: 2\ntitle: Soak\npath: ''\n```\n\
-```asterlab\nkind: step\nid: seed\nschema: 2\ntitle: Seed\n```\n\
+        let source = "```asterlab\nkind: step\nid: soak\nschema: 1\ntitle: Soak\npath: ''\n```\n\
+```asterlab\nkind: step\nid: seed\nschema: 1\ntitle: Seed\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [soak, seed]\nedges: []\nbusiness_order: [soak, seed]\n```\n";
         let nested = apply_asterdoc_patch(
             source,
@@ -397,8 +397,8 @@ mod tests {
 
     #[test]
     fn asterdoc_nest_materializes_a_pathless_parent_for_a_pathful_child() {
-        let source = "```asterlab\nkind: step\nid: parent\nschema: 2\n```\n\
-```asterlab\nkind: step\nid: child\nschema: 2\npath: root/child\n```\n\
+        let source = "```asterlab\nkind: step\nid: parent\nschema: 1\n```\n\
+```asterlab\nkind: step\nid: child\nschema: 1\npath: root/child\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [parent, child]\nedges: []\nbusiness_order: [parent, child]\n```\n";
         let nested = apply_asterdoc_patch(
             source,
@@ -411,8 +411,8 @@ mod tests {
 
     #[test]
     fn asterdoc_rejects_a_derived_step_path_that_collides() {
-        let source = "```asterlab\nkind: step\nid: imaging\nschema: 2\npath: root/seed\n```\n\
-```asterlab\nkind: step\nid: seed\nschema: 2\n```\n\
+        let source = "```asterlab\nkind: step\nid: imaging\nschema: 1\npath: root/seed\n```\n\
+```asterlab\nkind: step\nid: seed\nschema: 1\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [imaging, seed]\nedges: []\nbusiness_order: [imaging, seed]\n```\n";
         let error = apply_asterdoc_patch(
             source,
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn asterdoc_rejects_promoting_a_step_that_is_already_top_level() {
-        let source = "```asterlab\nkind: step\nid: child\nschema: 2\npath: root/child\n```\n\
+        let source = "```asterlab\nkind: step\nid: child\nschema: 1\npath: root/child\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [child]\nedges: []\nbusiness_order: [child]\n```\n";
         let error = apply_asterdoc_patch(
             source,
@@ -441,7 +441,7 @@ mod tests {
     fn asterdoc_add_step_derives_a_path_when_the_module_omits_one() {
         let added = apply_asterdoc_patch(
             "",
-            &json!({"type":"add_step","module":{"kind":"step","id":"seed","schema":2,"path":""}}),
+            &json!({"type":"add_step","module":{"kind":"step","id":"seed","schema":1,"path":""}}),
         ).unwrap();
         let paths = step_paths_by_id(&added);
         assert_eq!(paths["seed"], "root/seed");
@@ -449,8 +449,8 @@ mod tests {
 
     #[test]
     fn remove_step_cleans_workflow_order_and_edges_when_unreferenced() {
-        let source = "```asterlab\nkind: step\nid: a\nschema: 2\ntitle: A\npath: root/a\n```\n\
-```asterlab\nkind: step\nid: b\nschema: 2\ntitle: B\npath: root/b\n```\n\
+        let source = "```asterlab\nkind: step\nid: a\nschema: 1\ntitle: A\npath: root/a\n```\n\
+```asterlab\nkind: step\nid: b\nschema: 1\ntitle: B\npath: root/b\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [a, b]\nedges: [{from: a, to: b}]\nbusiness_order: [a, b]\n```\n";
         let removed = apply_asterdoc_patch(source, &json!({"type":"remove_step","moduleId":"a"})).unwrap();
         let blocks = asterdoc_blocks(&removed).unwrap();
@@ -470,8 +470,8 @@ mod tests {
              INSERT INTO records VALUES('design-1','design','project-1',NULL,1,'{}','now','now');",
         ).unwrap();
         let source = "```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: Assay\n```\n\
-```asterlab\nkind: step\nid: target\nschema: 2\ntitle: Target\nassay: assay-1\npath: root/target\n```\n\
-```asterlab\nkind: step\nid: consumer\nschema: 2\ntitle: Consumer\nassay: assay-1\npath: root/consumer\nuses: [{ref: target, role: other}]\n```\n\
+```asterlab\nkind: step\nid: target\nschema: 1\ntitle: Target\nassay: assay-1\npath: root/target\n```\n\
+```asterlab\nkind: step\nid: consumer\nschema: 1\ntitle: Consumer\nassay: assay-1\npath: root/consumer\nuses: [{ref: target, role: other}]\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [target, consumer]\nedges: [{from: target, to: consumer}]\nbusiness_order: [target, consumer]\n```\n";
         save_asterdoc_version(&mut db, &json!({
             "design_id":"design-1","source":source,"expected_revision":0
@@ -511,9 +511,9 @@ mod tests {
 ```asterlab\nkind: reference\nid: ref-block\nschema: 1\nref: block-v1\nview: protocol_block\n```\n\
 ```asterlab\nkind: reference\nid: ref-seed-block\nschema: 1\nref: block-seed\nview: protocol_block\n```\n\
 ```asterlab\nkind: sample\nid: s-1\nschema: 1\nsample_id: S1\ngroup_ref: g-1\namount: {value: 1, unit: uL}\n```\n\
-```asterlab\nkind: step\nid: step-read\nschema: 2\ntitle: Read\nassay: assay-cck8\npath: cck8/readout\norder: 1\nuses:\n  - {ref: ref-block, role: other}\n  - {ref: s-1, role: sample}\n```\n\
-```asterlab\nkind: step\nid: step-seed\nschema: 2\ntitle: Seed\nassay: assay-cck8\npath: cck8/seed\norder: 2\nuses:\n  - {ref: s-1, role: sample}\n```\n\
-```asterlab\nkind: step\nid: step-organize\nschema: 3\ntitle: Incubate\nexecution: organizational\norder: 3\n```\n\
+```asterlab\nkind: step\nid: step-read\nschema: 1\ntitle: Read\nassay: assay-cck8\npath: cck8/readout\norder: 1\nuses:\n  - {ref: ref-block, role: other}\n  - {ref: s-1, role: sample}\n```\n\
+```asterlab\nkind: step\nid: step-seed\nschema: 1\ntitle: Seed\nassay: assay-cck8\npath: cck8/seed\norder: 2\nuses:\n  - {ref: s-1, role: sample}\n```\n\
+```asterlab\nkind: step\nid: step-organize\nschema: 1\ntitle: Incubate\nexecution: organizational\norder: 3\n```\n\
 ```asterlab\nkind: workflow\nid: wf\nschema: 1\nsteps: [step-read, step-seed, step-organize]\n```\n";
         let design = compile_asterdoc_to_design(source).unwrap();
         let blocks = &design["mygo"]["stepBlocks"];
@@ -645,6 +645,10 @@ groups:
         db.execute_batch(
             "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
              INSERT INTO records VALUES('project-1','project',NULL,NULL,1,'{}','now','now');
+             INSERT INTO records VALUES('protocol-1','protocol','project-1',NULL,1,'{\"title\":\"CCK-8\"}','now','now');
+             INSERT INTO records VALUES('protocol-v1','protocol_version','project-1','protocol-1',1,'{\"protocol_id\":\"protocol-1\",\"version\":1,\"body\":\"\",\"root_block_version_id\":\"block-v1\",\"root_bindings\":[]}','now','now');
+             INSERT INTO records VALUES('block-1','protocol_block','project-1',NULL,1,'{\"title\":\"CCK-8 block\",\"summary\":\"\"}','now','now');
+             INSERT INTO records VALUES('block-v1','protocol_block_version','project-1','block-1',1,'{\"block_id\":\"block-1\",\"version\":1,\"summary\":\"\",\"parameter_slots\":[],\"steps\":[{\"kind\":\"text\",\"use_id\":\"seed\",\"title\":\"Seed\",\"instruction\":\"Seed cells\"}]}','now','now');
              INSERT INTO records VALUES('design-1','design','project-1',NULL,1,'{}','now','now');",
         ).unwrap();
         let source = r#"```asterlab
@@ -667,12 +671,13 @@ schema: 1
 title: CCK-8
 endpoint: OD450
 unit: AU
+protocol_version_id: protocol-v1
 group_refs: [g-1]
 ```
 ```asterlab
 kind: step
 id: step-seed
-schema: 3
+schema: 1
 title: Seed
 execution: executable
 assay: assay-cck8
@@ -713,6 +718,70 @@ path: cck8/seed
             |row| row.get(0),
         ).unwrap();
         assert_eq!((revision, run_count, design_version_count), (1, 0, 0));
+    }
+
+    #[test]
+    fn self_contained_step_v2_auto_materializes_on_run_creation() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,project_id TEXT,parent_id TEXT,revision INTEGER NOT NULL,data_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+             INSERT INTO records VALUES('project-1','project',NULL,NULL,1,'{}','now','now');
+             INSERT INTO records VALUES('design-sc','design','project-1',NULL,1,'{}','now','now');",
+        ).unwrap();
+        let source = r#"```asterlab
+kind: experiment
+id: exp-sc
+schema: 1
+title: 四象限抑菌圈自包含流程
+```
+```asterlab
+kind: group
+id: g-van
+schema: 1
+name: Van
+role: reference
+```
+```asterlab
+kind: assay
+id: assay-iz
+schema: 1
+title: 抑菌圈测量
+endpoint: zone_mm
+unit: mm
+group_refs: [g-van]
+timepoints: [16h]
+```
+```asterlab
+kind: step
+id: step-disc
+schema: 1
+title: 滤纸片给药
+execution: executable
+assay: assay-iz
+path: iz/disc
+blocks:
+  - kind: param_table
+    id: blk-p1
+    schema: 1
+    title: 参数
+    rows:
+      - key: disc_mm
+        label: 滤纸片直径
+        value: 6
+        unit: mm
+```
+"#;
+        save_asterdoc_version(&mut db, &json!({
+            "design_id": "design-sc",
+            "source": source,
+            "expected_revision": 0
+        })).unwrap();
+        let assessed = assess_asterdoc(&db, &json!({"design_id": "design-sc"})).unwrap();
+        assert_eq!(assessed["state"], "ready", "assessed = {assessed}");
+        assert!(assessed["errors"].as_array().unwrap().is_empty());
+        let created = create_run_from_asterdoc(&mut db, "design-sc", 1, None, None, &[]).unwrap();
+        assert_eq!(created["kind"], "run", "created = {created}");
+        assert!(!created["id"].as_str().unwrap_or("").is_empty(), "created = {created}");
     }
 
     #[test]
@@ -994,24 +1063,20 @@ protocol_version_id: protocol-v1
     }
 
     #[test]
-    fn asterdoc_plate_mix_fields_match_go_calculator_cases() {
+    fn asterdoc_calculator_modes_match_v2_spec() {
         let valid = r#"```asterlab
 kind: group
-id: "3%"
+id: g3
 schema: 1
 name: 3% GelMA
+role: treatment
 ```
 ```asterlab
 kind: group
-id: "5%"
+id: g5
 schema: 1
 name: 5% GelMA
-```
-```asterlab
-kind: group
-id: "7%"
-schema: 1
-name: 7% GelMA
+role: treatment
 ```
 ```asterlab
 kind: plate
@@ -1019,42 +1084,47 @@ id: plate-huvec
 schema: 1
 format: 12
 groups:
-  "3%": [A1, A2, A3]
-  "5%": [B1, B2, B3]
-  "7%": [C1, C2, C3]
-mix_volume_per_well: {value: 200, unit: uL}
-mix_excess_ratio: 0.1
-mix_gelma_percent_by_group:
-  "3%": 3
-  "5%": 5
-  "7%": 7
-mix_lap_stock_percent: 0.5
-mix_lap_final_percent: 0.05
-mix_cell_density: {value: 20000, unit: cells/well}
-mix_factor_stock_concentration: {value: 10, unit: ug/mL}
-mix_factor_final_concentration: {value: 50, unit: ng/mL}
+  g3: [A1, A2, A3]
+  g5: [B1, B2, B3]
+```
+```asterlab
+kind: calculator
+id: calc-mix
+schema: 1
+mode: group_mastermix
+title: GelMA 母液配平
+plate_ref: plate-huvec
+volume_per_unit: {value: 200, unit: uL}
+excess_ratio: 0.1
+components:
+  - name: LAP 光引发剂
+    stock: {value: 0.5, unit: "% w/v"}
+    final: {value: 0.05, unit: "% w/v"}
+```
+```asterlab
+kind: calculator
+id: calc-zone
+schema: 1
+mode: formula
+title: 抑菌圈平均直径
+formula: "(d1 + d2) / 2"
+result_unit: mm
 ```"#;
         assert!(
             validate_asterdoc_source(valid).is_ok(),
-            "valid mix source rejected: {:?}",
+            "valid calculator source rejected: {:?}",
             validate_asterdoc_source(valid).err().map(|e| e.message)
         );
         let invalid = [
-            valid.replace("mix_lap_final_percent: 0.05", "mix_lap_final_percent: 0.6"),
-            valid.replace("  \"7%\": 7\n", ""),
-            valid.replace(
-                "mix_factor_final_concentration: {value: 50, unit: ng/mL}",
-                "mix_factor_final_concentration: {value: 20, unit: mg/mL}",
-            ),
-            valid.replace(
-                "mix_factor_stock_concentration: {value: 10, unit: ug/mL}\n",
-                "",
-            ),
+            valid.replace("excess_ratio: 0.1", "excess_ratio: -0.1"),
+            valid.replace("unit: uL", "unit: mg"),
+            valid.replace("\"(d1 + d2) / 2\"", "\"(d1 + \""),
+            valid.replace("mode: formula", "mode: legacy_unknown"),
         ];
         for source in invalid {
             assert!(
                 validate_asterdoc_source(&source).is_err(),
-                "invalid mix source accepted"
+                "invalid calculator source accepted"
             );
         }
     }

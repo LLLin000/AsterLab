@@ -5,18 +5,6 @@ import (
 	"strings"
 )
 
-func readoutSpec() ModuleSpec {
-	return ModuleSpec{
-		Descriptor: descriptorFor("readout", 1),
-		Validate: func(data map[string]any) error {
-			if err := specValidatorFor("readout", 1)(data); err != nil {
-				return err
-			}
-			return validateReadoutFields(data)
-		},
-	}
-}
-
 func validateReadoutFields(data map[string]any) error {
 	for _, field := range []string{"schema_id", "endpoint"} {
 		value, _ := data[field].(string)

@@ -16,6 +16,7 @@ type WellState struct {
 	SampleID  string
 	Replicate int
 	Timepoint string
+	Role      string
 	Ambiguous bool
 }
 
@@ -26,6 +27,8 @@ type Props struct {
 	Interactive bool
 	Rows        int
 	Cols        int
+	Topology    string
+	Roles       map[string]string
 }
 
 const (
@@ -155,7 +158,11 @@ func View(c *ui.Context, props Props) {
 	if cols == 0 {
 		cols = defaultCols
 	}
-	if !wellGrid(rows, cols) {
+	isCustomTopology := props.Topology != "" && props.Topology != "plate"
+	if !isCustomTopology && !wellGrid(rows, cols) {
+		rows, cols = defaultRows, defaultCols
+	}
+	if rows < 1 || rows > 16 || cols < 1 || cols > 24 {
 		rows, cols = defaultRows, defaultCols
 	}
 	wellSize := float32(t.Spacing24)
@@ -190,19 +197,29 @@ func View(c *ui.Context, props Props) {
 					y := r.Y + topLabel + float32(row)*(wellSize+gap)
 					wr := ui.Rect{X: x, Y: y, W: wellSize, H: wellSize}
 					well, assigned := props.Wells[id]
+					role := well.Role
+					if role == "" && props.Roles != nil {
+						role = props.Roles[id]
+					}
 					fill := t.Canvas
 					if assigned && well.Ambiguous {
 						fill = t.Warning
 					} else if assigned {
 						fill = GroupColor(well.Group, dark)
 					}
-					p.Fill(wr, fill, wellSize/2)
-					p.Stroke(wr, t.Border, wellSize/2, 1)
+					radius := wellSize / 2
+					if props.Topology == "cohort" || props.Topology == "rack_1d" {
+						radius = float32(t.ControlRadius)
+					}
+					p.Fill(wr, fill, radius)
+					p.Stroke(wr, t.Border, radius, 1)
 					if well.Ambiguous {
 						p.Text(x+float32(t.Spacing8), y+float32(t.Spacing4), "!", float32(t.TextMeta), t.Text)
+					} else if roleBadge := roleShort(role); roleBadge != "" {
+						p.Text(x+float32(t.Spacing4), y+float32(t.Spacing4), roleBadge, float32(t.TextMeta), t.Text)
 					}
 					if selected[id] {
-						p.Stroke(wr, t.Accent, wellSize/2, 2)
+						p.Stroke(wr, t.Accent, radius, 2)
 						p.Line(x+float32(t.Spacing4), y+float32(t.Spacing12), x+float32(t.Spacing8), y+float32(t.Spacing16), 2, t.Accent)
 						p.Line(x+float32(t.Spacing8), y+float32(t.Spacing16), x+float32(t.Spacing16), y+float32(t.Spacing8), 2, t.Accent)
 					}
@@ -282,4 +299,23 @@ func View(c *ui.Context, props Props) {
 		}
 		ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 单击选择，Shift+单击多选", len(props.Wells), rows*cols)).FontSize(float32(t.TextMeta)).TextColor(t.TextMuted)
 	})
+}
+
+func roleShort(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "blank":
+		return "B"
+	case "positive_control":
+		return "+"
+	case "negative_control":
+		return "-"
+	case "standard":
+		return "S"
+	case "vehicle":
+		return "V"
+	case "ntc":
+		return "N"
+	default:
+		return ""
+	}
 }

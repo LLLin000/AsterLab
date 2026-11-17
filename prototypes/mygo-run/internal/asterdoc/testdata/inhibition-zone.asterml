@@ -1,0 +1,283 @@
+# 四象限滤纸片抑菌圈实验（AsterML v2）
+
+> 说明：本设计采用通用科学模块自由组合而成；四象限培养皿示意图仅用于步骤可视化辅助表达，所有分组名称、药物浓度与抑菌圈测量读数均存储于结构化模块中。
+
+```asterlab
+kind: experiment
+id: exp-iz
+schema: 1
+title: HAMA / 万古霉素 / 溶菌酶 四象限抑菌圈实验
+objective: 在金黄色葡萄球菌涂布平板上比较 HAMA 水凝胶、万古霉素（Van）与溶菌酶的抑菌圈直径（mm）。
+experimental_unit: 90 mm 琼脂培养皿分区（四象限）
+primary_endpoint: 抑菌圈平均直径
+endpoint_method: 交叉十字双径卡尺测量 (d1 + d2) / 2
+endpoint_unit: mm
+```
+
+```asterlab
+kind: group_table
+id: gt-iz
+schema: 1
+title: 四象限给药分组
+rows:
+  - id: g-blank
+    name: Q1 空白对照 (PBS)
+    role: control
+    dose: 20 uL
+    condition: 无菌 PBS 浸泡滤纸片
+    replicate_count: 3
+  - id: g-hama
+    name: Q2 HAMA 水凝胶组
+    role: treatment
+    dose: 5 % w/v
+    condition: 5% HAMA 光交联样片 (6 mm)
+    replicate_count: 3
+  - id: g-van
+    name: Q3 万古霉素阳性对照
+    role: reference
+    dose: 30 ug/mL
+    condition: Van 药敏滤纸片
+    replicate_count: 3
+  - id: g-lys
+    name: Q4 溶菌酶处理组
+    role: treatment
+    dose: 10 mg/mL
+    condition: 溶菌酶溶液浸渍滤纸片
+    replicate_count: 3
+```
+
+```asterlab
+kind: assay
+id: assay-iz
+schema: 1
+title: 琼脂扩散抑菌圈测定
+endpoint: inhibition_zone_mm
+unit: mm
+group_refs: [g-blank, g-hama, g-van, g-lys]
+timepoints: [16h]
+```
+
+```asterlab
+kind: plate
+id: dish-iz
+schema: 1
+format: 6
+topology: dish
+rows: 2
+columns: 2
+assay: assay-iz
+groups:
+  g-blank: [A1]
+  g-hama: [A2]
+  g-van: [B1]
+  g-lys: [B2]
+roles:
+  A1: blank
+  A2: sample
+  B1: positive_control
+  B2: sample
+samples:
+  A1: Q1-PBS
+  A2: Q2-HAMA
+  B1: Q3-Van
+  B2: Q4-Lys
+```
+
+```asterlab
+kind: step
+id: step-01-lawn
+schema: 1
+execution: executable
+title: 01 菌悬液校正与 LB 琼脂均匀涂布
+assay: assay-iz
+timepoints: [16h]
+path: iz/01-lawn
+order: 1
+blocks:
+  - kind: prose
+    id: blk-iz-lawn-note
+    schema: 1
+    title: 涂布控制要点
+    tone: tip
+    body: 菌液 OD600 稀释至 0.5 AU（约 1×10^8 CFU/mL），吸取 100 uL 用无菌涂布棒旋转三方向均匀涂布。
+  - kind: param_table
+    id: blk-iz-lawn-params
+    schema: 1
+    title: 菌液与培养基参数
+    rows:
+      - key: od600
+        label: 菌液起始 OD600
+        value: 0.5
+        unit: AU
+      - key: inoculum_vol
+        label: 单皿涂布菌液体积
+        value: 100
+        unit: uL
+      - key: agar_temp
+        label: 倒板琼脂温度
+        value: 45
+        unit: Cel
+      - key: agar_vol
+        label: 单皿琼脂铺板量
+        value: 20
+        unit: mL
+```
+
+```asterlab
+kind: step
+id: step-02-quadrants
+schema: 1
+execution: executable
+title: 02 四象限贴片布局与处理分组
+assay: assay-iz
+timepoints: [16h]
+path: iz/02-quadrants
+order: 2
+blocks:
+  - kind: param_table
+    id: blk-iz-disc-params
+    schema: 1
+    title: 滤纸片与加样规格
+    rows:
+      - key: disc_diameter
+        label: 滤纸片直径
+        value: 6
+        unit: mm
+      - key: load_volume
+        label: 单片载药体积
+        value: 20
+        unit: uL
+  - kind: figure
+    id: blk-iz-quadrant-svg
+    schema: 1
+    title: 四象限培养皿布片示意图
+    caption: 示意：90 mm 琼脂皿四象限分区（辅助空间参照，分组数值以结构化分组表为准）
+    max_height: 240
+    svg: |
+      <svg viewBox="0 0 420 264" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="210" cy="130" r="92" fill="none" stroke="currentColor" stroke-width="2.5"/>
+        <circle cx="210" cy="130" r="86" fill="none" stroke="currentColor" stroke-width="0.8" stroke-dasharray="4 4"/>
+        <line x1="118" y1="130" x2="302" y2="130" stroke="currentColor" stroke-width="1.2" stroke-dasharray="6 4"/>
+        <line x1="210" y1="38" x2="210" y2="222" stroke="currentColor" stroke-width="1.2" stroke-dasharray="6 4"/>
+        <circle cx="170" cy="96" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <circle cx="250" cy="96" r="21" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 3"/>
+        <circle cx="250" cy="96" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <circle cx="170" cy="166" r="29" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 3"/>
+        <circle cx="170" cy="166" r="9" fill="none" stroke="currentColor" stroke-width="2.0"/>
+        <circle cx="250" cy="166" r="18" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 3"/>
+        <circle cx="250" cy="166" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <text x="108" y="66" font-size="11" text-anchor="end">Q1 空白 PBS</text>
+        <text x="312" y="66" font-size="11" text-anchor="start">Q2 HAMA</text>
+        <text x="108" y="200" font-size="11" text-anchor="end">Q3 万古霉素 (+)</text>
+        <text x="312" y="200" font-size="11" text-anchor="start">Q4 溶菌酶</text>
+      </svg>
+    annotations:
+      - label: 90 mm Agar Dish
+        x: 210
+        y: 250
+  - kind: checklist
+    id: blk-iz-disc-chk
+    schema: 1
+    title: 贴片操作核查
+    items:
+      - id: chk-dry
+        label: 平板表面菌液已吸收 10 min 无浮液
+        blocking: true
+      - id: chk-press
+        label: 镊子轻压药敏片使其与琼脂紧密接触，片距 > 24 mm
+        blocking: true
+```
+
+```asterlab
+kind: step
+id: step-03-incubate
+schema: 1
+execution: executable
+title: 03 恒温倒置培养与皿底拍照归档
+assay: assay-iz
+timepoints: [16h]
+path: iz/03-incubate
+order: 3
+blocks:
+  - kind: timer
+    id: blk-iz-timer
+    schema: 1
+    title: 37 Cel 恒温倒置培养计时
+    mode: countdown
+    duration: {value: 16, unit: h}
+    anchor: inoculum_done
+  - kind: attachment
+    id: blk-iz-photo
+    schema: 1
+    title: 培养皿实物拍摄归档
+    scope: step_evidence
+    slots_per_cell: 1
+    note: 皿底垫黑色无反光背景，标尺与皿缘同平面垂直拍摄。
+```
+
+```asterlab
+kind: step
+id: step-04-measure
+schema: 1
+execution: executable
+title: 04 十字双径游标卡尺测量与均值计算
+assay: assay-iz
+timepoints: [16h]
+path: iz/04-measure
+order: 4
+blocks:
+  - kind: data_table
+    id: blk-iz-table
+    schema: 1
+    title: 四象限抑菌圈测量记录
+    schema_id: inhibition_zone_mm
+    endpoint: zone_diameter
+    columns:
+      - key: sample
+        label: 象限样本
+        value_kind: text
+      - key: d1
+        label: 水平径 d1
+        value_kind: number
+        unit: mm
+        min: 6
+        max: 45
+      - key: d2
+        label: 垂直径 d2
+        value_kind: number
+        unit: mm
+        min: 6
+        max: 45
+      - key: mean_d
+        label: 平均抑菌直径
+        value_kind: formula
+        formula: "(d1 + d2) / 2"
+        unit: mm
+    rows:
+      - sample: Q1-PBS
+        d1: 6.0
+        d2: 6.0
+      - sample: Q2-HAMA
+        d1: 11.4
+        d2: 11.8
+      - sample: Q3-Van
+        d1: 21.2
+        d2: 20.8
+      - sample: Q4-Lys
+        d1: 14.5
+        d2: 14.1
+```
+
+```asterlab
+kind: workflow
+id: wf-iz
+schema: 1
+steps: [step-01-lawn, step-02-quadrants, step-03-incubate, step-04-measure]
+edges:
+  - from: step-01-lawn
+    to: step-02-quadrants
+  - from: step-02-quadrants
+    to: step-03-incubate
+  - from: step-03-incubate
+    to: step-04-measure
+```

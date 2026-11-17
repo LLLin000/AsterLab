@@ -61,3 +61,29 @@
 | **实验设计 (Design)** | 放弃 2D 画布，改为纵向步骤卡 + 顶部预算条；`流程 / 12孔板 / 配液单` 分段切换；底抽屉编辑 | 左流程链 + 中 `12孔板↔配液联动` + 右精简属性（底层 ID 折叠） | 流程画布 + 12 孔板 + 配液计算器 + 属性同屏全展开，无需切 tab |
 | **实验运行 (Run)** | **纯单步台面模式**：顶栏锁住计时器，大字展示当前参数，底部拇指区主按钮；不渲染大矩阵图槽 | 三栏联动：左步骤轨 + 中大字操作台（含 Timer） + 右动态采集区（Step 5 才展 12 孔板） | 四栏工作台：中操作台**限宽 ~560px 防拉扁**，右放大 6 视野直接判读，最右停靠**多实验并行时钟 + 实时流水** |
 | **记录 (Record)** | 上半区自动摘要 + 按时间点横滑 3 组代表图；下半区短笔记 | 双栏分屏：左自动摘要 + `3×3` 图板，右 `max-width 760px` Markdown 研判 | 居中双栏大画幅（总宽限制 ~1700px）：左展开多视野高清对比与偏差表，右同步撰写与插入动态图块 |
+
+---
+
+## 四、AsterML v2 通用模块基础设施落地状态与后续边界（2026-11-18）
+
+基于三层模块架构与硬规则（“能用通用模块组合实现的需求，严禁新增实验专用模块或面板”），P0 基础设施与核心 UI 工作台已在本分支（`feat/v2-generic-modules`）落地：
+
+1. **AsterML v2 契约与核心收口 (`sdk 2.0.0`)**：
+   - `step@1` 通过有序 `blocks[]`（与可选 `block_refs`）自由组合 10 类通用内容模块（`prose`、`group_table`、`param_table`、`figure`、`data_table`、`checklist`、`calculator`、`timer`、`attachment`、`subflow`）及标准容器 `plate@1`。
+   - 彻底移除 `plate@1` 的 HUVEC 专属 `mix_*` 字段与实验名硬编码（`internal/assays/schema.go` 增加通用 `genericAssaySchema` 回退），单一 `calculator@1` 收口 5 种通用能力模式（`dilution`、`group_mastermix`、`serial_dilution`、`sample_normalize`、`formula`），统一 UCUM 单位表与纯函数公式引擎。
+   - **自包含自动物化冻结**：`step@1` 不再强制预先创建外部 `ProtocolBlockVersion` UUID；创建 Run 时由 Core 自动物化未绑定步骤并冻结同一份模块树。
+
+2. **Design 三标签页工作台 (`prototypes/mygo-run/design_page.go`)**：
+   - 顶部保留单一工作流顶栏 + 实时 `ComputeBudgetSummary` 资源预算条（步骤数、分组数、孔位/皿数、预计占手与总跨度），废除零调用孤岛画布 `design_canvas.go`。
+   - **步骤工作台**：左侧可折叠/调节的步骤大纲（`components.Split`）+ 右侧自由编排流（`StepBlockComposer` + `components.MenuButton` 插入 10 类模块与标准孔板）。
+   - **实验全局设定**：实验档案、分组表、标准容器与仪器/试剂清单集中编辑，无实验硬编码字段。
+   - **AsterML 源码**：基于 `components.SplitPercent` 与 `mygo/ui/editor` 的 Markdown 源码编辑，右侧实时联动 `ModeProtocol` 预览。
+
+3. **Run 同源执行与 Notebook 闭环**：
+   - `internal/runworkspace` 按步骤加载冻结 `step@1.blocks[]` 并以 `asterdoc.ModeRun` 同源渲染，参数实测记录、检查清单确认/按规则跳过、计时器启停、数据表读数提交均回写 Core 不可变事实；`capture.go` 动态读取 `attachment@1`（`scope: container_grid`）的 `slots_per_cell`。
+   - Notebook 动态适配计划/实测 `FOV` 层数，并在实测派生新设计（`DeriveDesignFromRun`）保存后同步写回新版 AsterML 文档修订（`SaveAsterDoc`）。
+
+4. **后续工作方向（Phase 2 / Phase 3）**：
+   - 完整接通步骤工作台内 `Run` 实际值对照回溯、`attachment@1` 真机文件缩略图异步解码缓存与批注缩放；
+   - 补齐 `AGENT_API` 一步生成典型湿实验文档的自动化 E2E 回归（抑菌圈 / CFU / HUVEC）；
+   - Windows 桌面打包与多分辨率实窗人工验收（`Windows Gate` 泳道）。

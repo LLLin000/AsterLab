@@ -1,63 +1,163 @@
-# 新实验
+# 标准细胞活力实验骨架（AsterML v2）
 
 ```asterlab
 kind: experiment
-id: exp-new
+id: exp-starter
 schema: 1
-title: 新实验
-experimental_unit: 一个独立实验单位
+title: 新建 CCK-8 细胞活力实验
+objective: 比较处理组与对照组在不同浓度下的细胞相对活力（OD450）
+experimental_unit: well
+primary_endpoint: OD450 吸光度
+endpoint_method: 酶标仪 450 nm 比色
+endpoint_unit: AU
 ```
 
 ```asterlab
-kind: group
-id: g-control
+kind: group_table
+id: gt-starter
 schema: 1
-name: Control
-role: control
-```
-
-```asterlab
-kind: group
-id: g-treatment
-schema: 1
-name: Treatment
-role: treatment
+title: 实验分组
+rows:
+  - id: g-control
+    name: 阴性对照 (DMEM)
+    role: control
+    condition: 完全培养基
+    replicate_count: 3
+  - id: g-treat
+    name: 材料浸提液组
+    role: treatment
+    dose: 10 mg/mL
+    condition: 100% 浸提液
+    replicate_count: 3
 ```
 
 ```asterlab
 kind: assay
 id: assay-main
 schema: 1
-title: 检测
-group_refs: [g-control, g-treatment]
-timepoints: []
-```
-
-```asterlab
-kind: step
-id: step-1
-schema: 1
-title: 步骤 1
-assay: assay-main
-timepoints: []
-path: ""
-```
-
-```asterlab
-kind: workflow
-id: wf-1
-schema: 1
-steps: [step-1]
-edges: []
+title: CCK-8 细胞活力检测
+endpoint: OD450
+unit: AU
+group_refs: [g-control, g-treat]
+timepoints: [D1]
 ```
 
 ```asterlab
 kind: plate
-id: plate-1
+id: plate-starter
 schema: 1
 format: 96
+topology: plate
 assay: assay-main
 groups:
-  g-control: []
-  g-treatment: []
+  g-control: [A1, A2, A3]
+  g-treat: [B1, B2, B3]
+samples:
+  A1: CTL-1
+  A2: CTL-2
+  A3: CTL-3
+  B1: TRT-1
+  B2: TRT-2
+  B3: TRT-3
+roles:
+  A1: negative_control
+  A2: negative_control
+  A3: negative_control
+  B1: sample
+  B2: sample
+  B3: sample
+```
+
+```asterlab
+kind: step
+id: step-seed
+schema: 1
+execution: executable
+title: 01 细胞接种与贴壁培养
+assay: assay-main
+timepoints: [D1]
+path: root/seed
+order: 1
+blocks:
+  - kind: prose
+    id: blk-seed-prose
+    schema: 1
+    title: 接种要点
+    tone: note
+    body: 96 孔板边缘孔加入 PBS 防蒸发，每孔接种 100 uL 细胞悬液后轻轻十字混匀。
+  - kind: param_table
+    id: blk-seed-params
+    schema: 1
+    title: 接种参数
+    rows:
+      - key: seeding_density
+        label: 接种密度
+        value: 5000
+        unit: cells/well
+      - key: well_volume
+        label: 每孔体积
+        value: 100
+        unit: uL
+  - kind: checklist
+    id: blk-seed-chk
+    schema: 1
+    title: 接种核查
+    items:
+      - id: chk-uniform
+        label: 镜下确认细胞分布均匀、无明显聚团
+        blocking: true
+```
+
+```asterlab
+kind: step
+id: step-read
+schema: 1
+execution: executable
+title: 02 加入 CCK-8 孵育与 OD450 读数
+assay: assay-main
+timepoints: [D1]
+path: root/read
+order: 2
+blocks:
+  - kind: timer
+    id: blk-cck8-timer
+    schema: 1
+    title: CCK-8 避光显色孵育
+    mode: countdown
+    duration: {value: 2, unit: h}
+  - kind: data_table
+    id: blk-cck8-od
+    schema: 1
+    title: 酶标仪 OD450 原始与相对活力表
+    schema_id: cck8_od450
+    endpoint: OD450
+    columns:
+      - key: well
+        label: 孔位
+        value_kind: text
+      - key: od450
+        label: OD450
+        value_kind: number
+        unit: AU
+        min: 0.1
+        max: 3.5
+      - key: blank
+        label: 空白背景
+        value_kind: number
+        unit: AU
+      - key: net_od
+        label: 净吸光度
+        value_kind: formula
+        formula: "od450 - blank"
+        unit: AU
+```
+
+```asterlab
+kind: workflow
+id: wf-starter
+schema: 1
+steps: [step-seed, step-read]
+edges:
+  - from: step-seed
+    to: step-read
 ```

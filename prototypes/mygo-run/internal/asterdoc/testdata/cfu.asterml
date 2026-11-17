@@ -1,52 +1,216 @@
+# 涂板菌落计数实验 CFU（AsterML v2）
+
 ```asterlab
-kind: group
-id: group-control
+kind: experiment
+id: exp-cfu
 schema: 1
-name: control
-role: control
-condition: untreated
+title: 梯度稀释涂板菌落计数（CFU/mL）
+objective: 通过 10 倍系列稀释与琼脂涂板，在 30-300 CFU 有效计数区间内计算原液活菌浓度。
+experimental_unit: 90 mm 涂布平皿
+primary_endpoint: 活菌浓度 CFU/mL
+endpoint_method: 30-300 菌落数平皿涂布法
+endpoint_unit: CFU/mL
 ```
 
 ```asterlab
-kind: material
-id: mat-agar
+kind: group_table
+id: gt-cfu
 schema: 1
-name: LB agar
-role: control
-condition: plate count
-concentration:
-  value: 1.5
-  unit: mg/mL
-source: lab_imported
+title: 菌落计数样本与稀释组
+rows:
+  - id: g-stock
+    name: 原液样本组 (10^-3 ~ 10^-5)
+    role: treatment
+    condition: S. aureus 对数期菌悬液
+    replicate_count: 3
+  - id: g-neg
+    name: 无菌稀释液阴性对照
+    role: control
+    condition: 无菌生理盐水空涂板
+    replicate_count: 2
 ```
 
 ```asterlab
-kind: sample
-id: sample-cfu
+kind: assay
+id: assay-cfu
 schema: 1
-sample_id: CFU-01
-group_ref: group-control
-material_refs: [mat-agar]
-amount:
-  value: 0.1
-  unit: mL
-```
-
-```asterlab
-kind: container
-id: plate-cfu
-schema: 1
-format: petri
-wells: 1
-```
-
-```asterlab
-kind: measurement_profile
-id: mp-cfu
-schema: 1
-endpoint: colony count
+title: 涂板菌落计数
+endpoint: viable_count
 unit: CFU/mL
-readout_schema:
-  columns: [plate, colonies]
-calculator_refs: []
+group_refs: [g-stock, g-neg]
+timepoints: [24h]
+```
+
+```asterlab
+kind: plate
+id: dish-cfu
+schema: 1
+format: 24
+topology: dish
+rows: 2
+columns: 4
+assay: assay-cfu
+groups:
+  g-neg: [A1, A2]
+  g-stock: [B1, B2, B3, B4]
+roles:
+  A1: blank
+  A2: blank
+  B1: sample
+  B2: sample
+  B3: sample
+  B4: sample
+samples:
+  A1: DIL-BLANK-1
+  A2: DIL-BLANK-2
+  B1: CFU-10e-4-1
+  B2: CFU-10e-4-2
+  B3: CFU-10e-5-1
+  B4: CFU-10e-5-2
+```
+
+```asterlab
+kind: step
+id: step-01-serial-dil
+schema: 1
+execution: executable
+title: 01 10倍梯度系列稀释
+assay: assay-cfu
+timepoints: [24h]
+path: cfu/01-serial-dilution
+order: 1
+blocks:
+  - kind: calculator
+    id: blk-cfu-serial
+    schema: 1
+    title: 10 倍系列稀释梯度计算（10^-1 ~ 10^-6）
+    mode: serial_dilution
+    dilution_factor: 10
+    steps_count: 6
+    stock: {value: 100000000, unit: CFU/mL}
+    volume_per_unit: {value: 1, unit: mL}
+  - kind: subflow
+    id: blk-cfu-subflow
+    schema: 1
+    title: 每级稀释规范子步骤（混匀与更换枪头）
+    collapsed: false
+    items:
+      - id: sf-pre
+        title: 每支离心管预先分装 900 uL 无菌 PBS
+      - id: sf-transfer
+        title: 移取 100 uL 上级菌液加入下一管并涡旋混匀 10 s
+      - id: sf-tip
+        title: 每次转移更换新无菌吸头防止交叉带菌
+```
+
+```asterlab
+kind: step
+id: step-02-plate-incubate
+schema: 1
+execution: executable
+title: 02 吸取 0.1 mL 涂布与 37 Cel 恒温培养
+assay: assay-cfu
+timepoints: [24h]
+path: cfu/02-plate-incubate
+order: 2
+blocks:
+  - kind: param_table
+    id: blk-cfu-params
+    schema: 1
+    title: 涂布与培养条件
+    rows:
+      - key: plated_ml
+        label: 单皿涂布体积
+        value: 0.1
+        unit: mL
+      - key: temp
+        label: 培养温度
+        value: 37
+        unit: Cel
+  - kind: timer
+    id: blk-cfu-timer
+    schema: 1
+    title: 37 Cel 菌落形成培养
+    mode: countdown
+    duration: {value: 24, unit: h}
+```
+
+```asterlab
+kind: step
+id: step-03-count
+schema: 1
+execution: executable
+title: 03 30-300 有效区间判定与 CFU/mL 换算
+assay: assay-cfu
+timepoints: [24h]
+path: cfu/03-count
+order: 3
+blocks:
+  - kind: checklist
+    id: blk-cfu-rule
+    schema: 1
+    title: 菌落计数规则核查
+    items:
+      - id: chk-blank
+        label: 阴性对照平板无可见菌落（0 CFU）
+        blocking: true
+      - id: chk-range
+        label: 选用菌落数在 30-300 CFU 的稀释梯度进行换算
+        blocking: true
+        allow_rule_skip: true
+        skip_rule: 若所有稀释度均超出 30-300 区间则按 TNTC/TFTC 记录并重测
+  - kind: data_table
+    id: blk-cfu-table
+    schema: 1
+    title: 平皿菌落计数与原液浓度计算表
+    schema_id: cfu_plate_count
+    endpoint: viable_count
+    columns:
+      - key: well
+        label: 平皿/样本
+        value_kind: text
+      - key: colonies
+        label: 菌落数
+        value_kind: number
+        unit: CFU
+        min: 30
+        max: 300
+      - key: dilution
+        label: 稀释系数
+        value_kind: number
+        unit: 1
+      - key: plated_ml
+        label: 涂布体积
+        value_kind: number
+        unit: mL
+      - key: cfu_ml
+        label: 原液浓度的算术值
+        value_kind: formula
+        formula: "colonies / (dilution * plated_ml)"
+        unit: CFU/mL
+    rows:
+      - well: B1
+        colonies: 142
+        dilution: 0.0001
+        plated_ml: 0.1
+      - well: B2
+        colonies: 158
+        dilution: 0.0001
+        plated_ml: 0.1
+      - well: B3
+        colonies: 16
+        dilution: 0.00001
+        plated_ml: 0.1
+```
+
+```asterlab
+kind: workflow
+id: wf-cfu
+schema: 1
+steps: [step-01-serial-dil, step-02-plate-incubate, step-03-count]
+edges:
+  - from: step-01-serial-dil
+    to: step-02-plate-incubate
+  - from: step-02-plate-incubate
+    to: step-03-count
 ```

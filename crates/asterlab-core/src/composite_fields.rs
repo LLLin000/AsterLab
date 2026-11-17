@@ -129,30 +129,6 @@ pub const DECLARED_OBJECT_LIST_FIELDS: &[DeclaredField] = &[
         shape: DeclaredShape::ObjectList(&STEP_TASKS_SHAPE),
     },
     DeclaredField {
-        kind: "step",
-        schema: 2,
-        field: "checks",
-        shape: DeclaredShape::ObjectList(&STEP_CHECKS_SHAPE),
-    },
-    DeclaredField {
-        kind: "step",
-        schema: 2,
-        field: "tasks",
-        shape: DeclaredShape::ObjectList(&STEP_TASKS_SHAPE),
-    },
-    DeclaredField {
-        kind: "step",
-        schema: 3,
-        field: "checks",
-        shape: DeclaredShape::ObjectList(&STEP_CHECKS_SHAPE),
-    },
-    DeclaredField {
-        kind: "step",
-        schema: 3,
-        field: "tasks",
-        shape: DeclaredShape::ObjectList(&STEP_TASKS_SHAPE),
-    },
-    DeclaredField {
         kind: "workflow",
         schema: 1,
         field: "edges",
@@ -552,11 +528,11 @@ mod tests {
     }
 
     fn step_checks() -> DeclaredShape {
-        declared_shape("step", 2, "checks").expect("step@2 checks is declared")
+        declared_shape("step", 1, "checks").expect("step@1 checks is declared")
     }
 
     fn step_tasks() -> DeclaredShape {
-        declared_shape("step", 3, "tasks").expect("step@3 tasks is declared")
+        declared_shape("step", 1, "tasks").expect("step@1 tasks is declared")
     }
 
     fn factors() -> DeclaredShape {
@@ -592,10 +568,6 @@ mod tests {
                 ("experiment@1".to_owned(), "factors".to_owned()),
                 ("step@1".to_owned(), "checks".to_owned()),
                 ("step@1".to_owned(), "tasks".to_owned()),
-                ("step@2".to_owned(), "checks".to_owned()),
-                ("step@2".to_owned(), "tasks".to_owned()),
-                ("step@3".to_owned(), "checks".to_owned()),
-                ("step@3".to_owned(), "tasks".to_owned()),
                 ("workflow@1".to_owned(), "edges".to_owned()),
             ]
         );
@@ -614,7 +586,7 @@ mod tests {
             ]
         );
         assert_eq!(object_list("step.checks").fields.len(), 3);
-        assert_eq!(declared_shape("step", 3, "timepoints"), None);
+        assert_eq!(declared_shape("step", 1, "timepoints"), None);
         assert_eq!(declared_shape("assay", 1, "checks"), None);
     }
 

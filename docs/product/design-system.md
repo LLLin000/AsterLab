@@ -145,3 +145,18 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 **D12 新增组件**
 - Do: 先在 onevra `components/` 与仓库既有包里找等价实现，复用或加参数。
 - Don't: 每个页面新写一套视觉词汇（P3 直接失败）。
+
+---
+
+## 五、AsterML v2 通用模块组件映射表（2026-11-18）
+
+`prototypes/mygo-run` 的 AsterML v2 工作台（Design 三标签页 + 同源 `ModeRun` 执行）严格遵循上述规则，所有通用内容模块优先复用社区库组件与统一 `Tokens`：
+
+| 场景 / 通用模块 | 复用组件与包 | 关键规范 |
+|---|---|---|
+| 步骤工作台分栏 / 源码双栏预览 | `onevra/components.Split` · `SplitPercent` | 左侧步骤大纲固定像素可调，右侧源码与实时预览按百分比分割 |
+| 插入 10 类通用模块 / 添加全局模块 | `onevra/components.MenuButton` + `Tooltip` | 图标与语义菜单分离；快捷操作只置 tooltip 不写三段常驻说明 |
+| 参数表 / 分组表 / 数据表 / 计算器结果 | `onevra/components.Table` + `TableRow` | 数值列启用 `.FontFeatures("tnum")`，质控边界用 `Badge` 语义色调 |
+| AsterML 源码编辑 | `mygo/ui/editor`（Markdown 高亮、行号、DiffBase） | 与右侧 `asterdoc.ModeProtocol` 实时预览同屏联动 |
+| 示意图 / 培养皿分区 SVG | `mygo/ui.ParseSVG` + `ui.Image` + `<text>` 叠加 | 纯视觉辅助表达；分组与量化数据严格归属 `group_table` / `data_table` |
+| 孔板 / 培养皿 / 1D 管架网格 | `internal/uikit/plate` | 复用 `theme.Palette` 与语义分组色，`ui.Hex` 只保留在 `theme.go` |

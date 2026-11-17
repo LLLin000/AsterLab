@@ -105,13 +105,14 @@ var foundationCategories = map[string]bool{
 // rejects a manifest that declares anything else, so a manifest-only addition
 // fails at startup instead of on a user's document (module-catalog-v1.md §4.1).
 var knownModuleRules = map[string]bool{
-	"plate-wells": true, "plate-geometry-wells": true, "reference-ref": true,
-	"group-fields": true, "assay-fields": true, "step-fields": true,
-	"step-execution": true, "step-uses": true, "workflow-fields": true,
-	"dilution-fields": true, "instrument-profile-fields": true,
-	"material-fields": true, "sample-fields": true, "container-fields": true,
-	"measurement-profile-fields": true, "rna-reagent-fields": true,
-	"plate-mix-fields": true,
+	"plate-geometry-wells": true, "reference-ref": true,
+	"group-fields": true, "assay-fields": true,
+	"step-execution": true, "step-blocks": true, "workflow-fields": true,
+	"instrument-profile-fields": true, "material-fields": true, "sample-fields": true,
+	"prose-fields": true, "group_table-fields": true, "param_table-fields": true,
+	"figure-fields": true, "data_table-fields": true, "checklist-fields": true,
+	"calculator-fields": true, "timer-fields": true, "attachment-fields": true,
+	"subflow-fields": true,
 }
 
 func validateSpecModule(module specModule, sdkVersion string) error {
@@ -225,17 +226,13 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 		}
 		for _, rule := range module.Rules {
 			switch rule {
-			case "plate-wells", "plate-geometry-wells":
+			case "plate-geometry-wells":
 				if _, err := plateFromData(data); err != nil {
-					return err
-				}
-			case "plate-mix-fields":
-				if _, _, err := plateMixPlansFor(data); err != nil {
 					return err
 				}
 			case "reference-ref":
 				ref, _ := data["ref"].(string)
-				if ref == "" {
+				if strings.TrimSpace(ref) == "" {
 					return fmt.Errorf("reference needs a ref")
 				}
 			case "group-fields":
@@ -246,18 +243,15 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 				if refs, ok := data["group_refs"].([]any); ok && len(refs) == 0 {
 					return fmt.Errorf("assay needs at least one group_ref")
 				}
-			case "step-fields":
-				if assay, _ := data["assay"].(string); assay == "" {
-					return fmt.Errorf("step needs an assay")
-				}
 			case "step-execution":
-				switch textValue(data, "execution") {
+				exec := textValue(data, "execution")
+				if exec == "" {
+					exec = "executable"
+				}
+				switch exec {
 				case "executable":
-					if strings.TrimSpace(textValue(data, "assay")) == "" {
-						return fmt.Errorf("executable step needs an assay")
-					}
 				case "organizational":
-					for _, field := range []string{"assay", "timepoints", "path", "checks", "tasks", "uses"} {
+					for _, field := range []string{"assay", "timepoints", "path", "checks", "tasks", "uses", "blocks", "block_refs"} {
 						value, ok := data[field]
 						if !ok || value == nil {
 							continue
@@ -278,29 +272,40 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 				default:
 					return fmt.Errorf("step execution must be executable or organizational")
 				}
+			case "step-blocks":
+				if rawBlocks, present := data["blocks"]; present && rawBlocks != nil {
+					items, ok := rawBlocks.([]any)
+					if !ok {
+						return fmt.Errorf("step.blocks must be a list")
+					}
+					for _, rawItem := range items {
+						itemMap, ok := rawItem.(map[string]any)
+						if !ok {
+							return fmt.Errorf("step.blocks item must be a mapping")
+						}
+						ik := textValue(itemMap, "kind")
+						switch ik {
+						case "prose", "group_table", "param_table", "figure", "data_table",
+							"checklist", "calculator", "timer", "attachment", "subflow", "plate":
+						default:
+							return fmt.Errorf("step.blocks cannot embed module kind %q", ik)
+						}
+						isch, hasSchema := numericValue(itemMap["schema"])
+						if !hasSchema || isch <= 0 {
+							return fmt.Errorf("step.blocks item %q needs positive schema", ik)
+						}
+						if _, specExists := specByKey[specKey(ik, int(isch))]; !specExists {
+							return fmt.Errorf("step.blocks embeds unsupported module %s@%d", ik, int(isch))
+						}
+						if err := specValidatorFor(ik, int(isch))(itemMap); err != nil {
+							return err
+						}
+					}
+				}
 			case "workflow-fields":
 				steps, _ := data["steps"].([]any)
 				if len(steps) == 0 {
 					return fmt.Errorf("workflow needs at least one step")
-				}
-			case "step-uses":
-				uses, _ := data["uses"].([]any)
-				seen := map[string]bool{}
-				for _, raw := range uses {
-					item, _ := raw.(map[string]any)
-					ref, _ := item["ref"].(string)
-					role, _ := item["role"].(string)
-					if strings.TrimSpace(ref) == "" || strings.TrimSpace(role) == "" {
-						return fmt.Errorf("step use needs ref and role")
-					}
-					if seen[ref] {
-						return fmt.Errorf("step use repeats %q", ref)
-					}
-					seen[ref] = true
-				}
-			case "dilution-fields":
-				if _, err := dilutionResultFor(data); err != nil {
-					return err
 				}
 			case "instrument-profile-fields":
 				if strings.TrimSpace(textValue(data, "class")) == "" {
@@ -323,24 +328,255 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 				if role, _ := data["role"].(string); strings.TrimSpace(role) == "" {
 					return fmt.Errorf("material needs a role")
 				}
+				if src, _ := data["source"].(string); strings.TrimSpace(src) == "" {
+					return fmt.Errorf("material needs a source")
+				}
 			case "sample-fields":
 				if id, _ := data["sample_id"].(string); strings.TrimSpace(id) == "" {
 					return fmt.Errorf("sample needs a sample_id")
 				}
-			case "container-fields":
-				if format, _ := data["format"].(string); strings.TrimSpace(format) == "" {
-					return fmt.Errorf("container needs a format")
+			case "prose-fields":
+				if textValue(data, "body") == "" {
+					return fmt.Errorf("prose needs non-empty body")
 				}
-			case "rna-reagent-fields":
-				if _, err := rnaReagentResultFor(data); err != nil {
-					return err
+			case "group_table-fields":
+				rows, ok := data["rows"].([]any)
+				if !ok || len(rows) == 0 {
+					return fmt.Errorf("group_table needs at least one group row")
 				}
-			case "measurement-profile-fields":
-				if endpoint, _ := data["endpoint"].(string); strings.TrimSpace(endpoint) == "" {
-					return fmt.Errorf("measurement profile needs an endpoint")
+				seenIDs := map[string]bool{}
+				for _, raw := range rows {
+					row, _ := raw.(map[string]any)
+					rid := textValue(row, "id")
+					rname := textValue(row, "name")
+					if rid == "" || rname == "" {
+						return fmt.Errorf("group_table row needs non-empty id and name")
+					}
+					if seenIDs[rid] {
+						return fmt.Errorf("group_table repeats id %q", rid)
+					}
+					seenIDs[rid] = true
 				}
-				if unit, _ := data["unit"].(string); strings.TrimSpace(unit) == "" {
-					return fmt.Errorf("measurement profile needs a unit")
+			case "param_table-fields":
+				rows, ok := data["rows"].([]any)
+				if !ok {
+					return fmt.Errorf("param_table needs rows")
+				}
+				for _, raw := range rows {
+					row, _ := raw.(map[string]any)
+					key := textValue(row, "key")
+					label := textValue(row, "label")
+					if key == "" && label == "" {
+						return fmt.Errorf("param_table row needs non-empty key or label")
+					}
+					if row["value"] == nil {
+						return fmt.Errorf("param_table row needs value")
+					}
+					if u := textValue(row, "unit"); u != "" {
+						if _, ok := unitFor(u); !ok {
+							return fmt.Errorf("param_table unit %q is not in UCUM subset", u)
+						}
+					}
+				}
+			case "figure-fields":
+				src := textValue(data, "src")
+				svg := textValue(data, "svg")
+				if src == "" && svg == "" {
+					return fmt.Errorf("figure needs src or svg")
+				}
+				if svg != "" && !strings.Contains(svg, "<svg") {
+					return fmt.Errorf("figure svg must contain <svg")
+				}
+				if strings.HasPrefix(strings.ToLower(src), "data:") && len(src) > 65536 {
+					return fmt.Errorf("figure data URI exceeds 65536 bytes")
+				}
+				if h, hasH := numericValue(data["max_height"]); hasH && h < 40 {
+					return fmt.Errorf("figure max_height must be >= 40")
+				}
+			case "data_table-fields":
+				cols, ok := data["columns"].([]any)
+				if !ok || len(cols) == 0 {
+					return fmt.Errorf("data_table needs at least one column")
+				}
+				seenKeys := map[string]bool{}
+				for _, raw := range cols {
+					col, _ := raw.(map[string]any)
+					ckey := textValue(col, "key")
+					clabel := textValue(col, "label")
+					vkind := textValue(col, "value_kind")
+					if ckey == "" || clabel == "" {
+						return fmt.Errorf("data_table column needs key and label")
+					}
+					if seenKeys[ckey] {
+						return fmt.Errorf("data_table repeats column %q", ckey)
+					}
+					seenKeys[ckey] = true
+					switch vkind {
+					case "text", "number", "categorical", "formula":
+					default:
+						return fmt.Errorf("data_table column %q has invalid value_kind %q", ckey, vkind)
+					}
+					if u := textValue(col, "unit"); u != "" {
+						if _, ok := unitFor(u); !ok {
+							return fmt.Errorf("data_table column %q unit %q is not in UCUM subset", ckey, u)
+						}
+					}
+					minVal, hasMin := numericValue(col["min"])
+					maxVal, hasMax := numericValue(col["max"])
+					if hasMin && hasMax && minVal > maxVal {
+						return fmt.Errorf("data_table column %q min exceeds max", ckey)
+					}
+					if vkind == "formula" {
+						if err := ValidateFormulaExpr(textValue(col, "formula")); err != nil {
+							return fmt.Errorf("data_table column %q %w", ckey, err)
+						}
+					}
+				}
+			case "checklist-fields":
+				items, ok := data["items"].([]any)
+				if !ok || len(items) == 0 {
+					return fmt.Errorf("checklist needs at least one item")
+				}
+				seenIDs := map[string]bool{}
+				for _, raw := range items {
+					item, _ := raw.(map[string]any)
+					cid := textValue(item, "id")
+					label := textValue(item, "label")
+					if cid == "" || label == "" {
+						return fmt.Errorf("checklist item needs non-empty id and label")
+					}
+					if seenIDs[cid] {
+						return fmt.Errorf("checklist repeats item id %q", cid)
+					}
+					seenIDs[cid] = true
+				}
+			case "calculator-fields":
+				switch textValue(data, "mode") {
+				case "dilution":
+					res := EvalCalculator(nil, data)
+					if res.Err != nil {
+						return res.Err
+					}
+				case "group_mastermix":
+					vpuVal, vpuUnit, err := quantityParts(data["volume_per_unit"])
+					if err != nil {
+						return fmt.Errorf("calculator group_mastermix volume_per_unit: %w", err)
+					}
+					spec, ok := unitFor(vpuUnit)
+					if !ok || spec.Dimension != "volume" || vpuVal <= 0 {
+						return fmt.Errorf("calculator group_mastermix volume_per_unit must be positive volume")
+					}
+					if ex, hasEx := numericValue(data["excess_ratio"]); hasEx && (!isFiniteNum(ex) || ex < 0) {
+						return fmt.Errorf("calculator excess_ratio must be non-negative")
+					}
+					comps, _ := data["components"].([]any)
+					if len(comps) == 0 && textValue(data, "plate_ref") == "" {
+						return fmt.Errorf("calculator group_mastermix needs components or plate_ref")
+					}
+					for _, raw := range comps {
+						cm, _ := raw.(map[string]any)
+						if textValue(cm, "name") == "" {
+							return fmt.Errorf("calculator component needs name")
+						}
+					}
+				case "serial_dilution":
+					df, ok1 := numericValue(data["dilution_factor"])
+					steps, ok2 := numericValue(data["steps_count"])
+					if !ok1 || !isFiniteNum(df) || df <= 1 {
+						return fmt.Errorf("calculator serial_dilution dilution_factor must be > 1")
+					}
+					if !ok2 || steps < 1 {
+						return fmt.Errorf("calculator serial_dilution steps_count must be >= 1")
+					}
+				case "sample_normalize":
+					sc, _ := numericValue(data["sample_count"])
+					vpuVal, vpuUnit, verr := quantityParts(data["volume_per_unit"])
+					spec, uok := unitFor(vpuUnit)
+					if sc < 1 && (verr != nil || !uok || spec.Dimension != "volume" || vpuVal <= 0) {
+						return fmt.Errorf("calculator sample_normalize needs positive sample_count or volume_per_unit")
+					}
+				case "formula":
+					if err := ValidateFormulaExpr(textValue(data, "formula")); err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unsupported calculator mode %q", textValue(data, "mode"))
+				}
+			case "timer-fields":
+				switch textValue(data, "mode") {
+				case "countdown":
+					dv, du, err := quantityParts(data["duration"])
+					if err != nil {
+						return fmt.Errorf("countdown timer needs duration: %w", err)
+					}
+					spec, ok := unitFor(du)
+					if !ok || spec.Dimension != "time" || dv <= 0 {
+						return fmt.Errorf("countdown timer duration must be positive time")
+					}
+				case "stopwatch":
+					if dur, ok := data["duration"]; ok && dur != nil {
+						if err := validateQuantity(dur, "time"); err != nil {
+							return err
+						}
+					}
+				case "cycle":
+					phases, ok := data["phases"].([]any)
+					if !ok || len(phases) == 0 {
+						return fmt.Errorf("cycle timer needs at least one phase")
+					}
+					if rounds, hasR := numericValue(data["rounds"]); hasR && rounds < 1 {
+						return fmt.Errorf("cycle timer rounds must be >= 1")
+					}
+					for _, raw := range phases {
+						ph, _ := raw.(map[string]any)
+						pname := textValue(ph, "name")
+						if pname == "" {
+							return fmt.Errorf("cycle timer phase needs name")
+						}
+						if textValue(ph, "mode") != "open" || ph["duration"] != nil {
+							dv, du, err := quantityParts(ph["duration"])
+							if err != nil {
+								return fmt.Errorf("cycle timer phase %q needs duration: %w", pname, err)
+							}
+							spec, uok := unitFor(du)
+							if !uok || spec.Dimension != "time" || dv <= 0 {
+								return fmt.Errorf("cycle timer phase %q duration must be positive time", pname)
+							}
+						}
+					}
+				case "window":
+					if textValue(data, "anchor") == "" && textValue(data, "schedule_window") == "" {
+						return fmt.Errorf("window timer needs anchor or schedule_window")
+					}
+					if off, ok := data["offset"]; ok && off != nil {
+						ov, _, err := quantityParts(off)
+						if err != nil || validateQuantity(off, "time") != nil || ov < 0 {
+							return fmt.Errorf("window timer offset must be non-negative time")
+						}
+					}
+				default:
+					return fmt.Errorf("unsupported timer mode %q", textValue(data, "mode"))
+				}
+			case "attachment-fields":
+				if slots, hasS := numericValue(data["slots_per_cell"]); hasS && slots < 1 {
+					return fmt.Errorf("attachment slots_per_cell must be >= 1")
+				}
+				if textValue(data, "scope") == "container_grid" && textValue(data, "container_ref") == "" {
+					return fmt.Errorf("container_grid attachment needs container_ref")
+				}
+			case "subflow-fields":
+				if textValue(data, "title") == "" {
+					return fmt.Errorf("subflow needs title")
+				}
+				items, ok := data["items"].([]any)
+				if !ok || len(items) == 0 {
+					return fmt.Errorf("subflow needs at least one item")
+				}
+				for _, raw := range items {
+					it, _ := raw.(map[string]any)
+					if textValue(it, "id") == "" || textValue(it, "title") == "" {
+						return fmt.Errorf("subflow item needs non-empty id and title")
+					}
 				}
 			default:
 				return fmt.Errorf("unknown module rule %q", rule)

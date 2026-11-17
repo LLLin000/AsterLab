@@ -10,10 +10,10 @@ import (
 	"asterlab-mygo-prototype/internal/theme"
 )
 
-const dilutionSource = "# Doc\n\n```asterlab\nkind: dilution\nid: dil-1\nschema: 1\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n\n尾注。\n"
+const calculatorSource = "# Doc\n\n```asterlab\nkind: calculator\nid: dil-1\nschema: 1\ntitle: Dilution Plan\nmode: dilution\nstock:\n  value: 20\n  unit: mg/mL\ntarget:\n  value: 2\n  unit: mg/mL\nfinal_volume:\n  value: 5\n  unit: mL\n```\n\n尾注。\n"
 
 func TestUpdateModulePreservesProseAndOtherFences(t *testing.T) {
-	doc, err := Parse(dilutionSource)
+	doc, err := Parse(calculatorSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestUpdateModulePreservesProseAndOtherFences(t *testing.T) {
 }
 
 func TestUpdateModuleRejectsInvalidQuantityUnit(t *testing.T) {
-	doc, err := Parse(dilutionSource)
+	doc, err := Parse(calculatorSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +39,8 @@ func TestUpdateModuleRejectsInvalidQuantityUnit(t *testing.T) {
 	}
 }
 
-func TestGenericEditorRendersDilutionFieldsAndSave(t *testing.T) {
-	doc, err := Parse(dilutionSource)
+func TestGenericEditorRendersCalculatorFieldsAndSave(t *testing.T) {
+	doc, err := Parse(calculatorSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestGenericEditorRendersDilutionFieldsAndSave(t *testing.T) {
 		OnUpdateModule: func(id string, props map[string]any) { saved = props }}
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
-		v.Render(c)
+		v.GenericModuleEditor(c, "dil-1", doc.Modules[0].Data)
 	}, 1000, 900)
 	tt.Frame()
 	if !tt.HasText("stock") || !tt.HasText("target") || !tt.HasText("final_volume") {
@@ -69,14 +69,14 @@ func TestGenericEditorRendersDilutionFieldsAndSave(t *testing.T) {
 }
 
 func TestGenericEditorReadOnlyNoSave(t *testing.T) {
-	doc, err := Parse(dilutionSource)
+	doc, err := Parse(calculatorSource)
 	if err != nil {
 		t.Fatal(err)
 	}
 	v := &View{Doc: doc, Registry: BuiltinRegistry(), ReadOnly: true, Allowed: map[string]bool{PermDocumentEdit: true}}
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
-		v.Render(c)
+		v.GenericModuleEditor(c, "dil-1", doc.Modules[0].Data)
 	}, 1000, 900)
 	tt.Frame()
 	if tt.HasText("保存") {

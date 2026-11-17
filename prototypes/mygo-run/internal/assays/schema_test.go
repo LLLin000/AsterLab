@@ -123,3 +123,18 @@ func TestBuildSchemaThirdAssayViaLayoutConfigOnly(t *testing.T) {
 		t.Fatalf("unexpected field: %+v / %+v", cells[0], schema.Fields)
 	}
 }
+
+func TestBuildSchemaSupportsArbitraryCustomAssay(t *testing.T) {
+	doc := []byte(`{
+		"group_specs": [{"id": "g-van", "name": "Vancomycin", "role": "reference"}],
+		"assays": [{"id": "assay-iz", "title": "Inhibition Zone", "endpoint": "inhibition_zone_mm", "timepoints": ["16h"], "group_refs": ["g-van"]}],
+		"mygo": {"assays": {"assay-iz": {"timepoints": ["16h"], "wells": [{"wellId": "A1", "sampleId": "VAN-1", "groupId": "g-van", "replicate": 1, "timepoint": "16h"}]}}}
+	}`)
+	schema, cells, err := BuildSchema(doc, "assay-iz", "16h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.Layout != "generic_table" || len(cells) != 1 || cells[0].Field != "inhibition_zone_mm" {
+		t.Fatalf("generic schema = %+v, cells=%+v", schema, cells)
+	}
+}
