@@ -52,3 +52,11 @@
 2. **162 全矩阵实窗**：headless 渲染断言了 9 孔×6 FOV 结构与整孔缺口；携带 162 资产的实窗长列表滚动与性能未测。
 3. **实窗 1360×880/900×600 浅/深色**：本目录 PNG 为 tester 实像素渲染（同绘制代码），非 OS 窗口抓屏； Gate 需实窗复核。
 4. **旧 mygo 设计回退链**：`designPlateWells` 容量语义保留给无 AsterDoc 的 legacy run，未新增单测 beyond 既有 `TestDesignPlateWellsUsesConfiguredPlateGeometry`（行为未变）。
+
+## Windows Gate 独立验证（`cceb40a`，coordinator 执行）
+
+- 二进制：门禁构建（`BUILD_INFO` commit `cceb40a` 与 head 一致；`LOCAL_GATE: PASS`），隔离种子库（6h 事件＋A1 FOV1 PNG/FOV2 TIFF 双资产）。
+- `close06-gallery-1360x880-light.png`：画廊显示 2 文件＋`1 个缺口 · 未关联视野`（冻结计划缺口）。
+- 解绑同步：UI 点 `解除关联` 后画廊 2→1；Notebook 图板同步（fov1-png 消失，剩余 tif 按 Core 冻结板图判未定位——种子 Run 无冻结板，属 Core 严格语义，非 bug）。
+- `close06-unlinked-1360x880-light.png`：解绑后状态。
+- 未验证：原生文件选择器 7 图批传点击链（automation 驱不动原生对话框，按惯例标出；`PlanBatchDrops` 单测覆盖 7→A1×6＋A2/FOV1）；162 资产实窗（agent headless 渲染覆盖结构）。
