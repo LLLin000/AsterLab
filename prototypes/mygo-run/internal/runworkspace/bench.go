@@ -15,10 +15,12 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 )
 
-// timerForm holds the create-timer draft per task.
+// timerForm holds the create-timer draft per task. Group is the optional
+// operator scope (e.g. 5%): same-task same-mode timers are told apart by it.
 type timerForm struct {
 	Mode    string
 	Minutes string
+	Group   string
 }
 
 // eventForm holds the composer draft per task.
@@ -219,14 +221,20 @@ func (s *State) runTimerAction(task *RunTaskViewModel, record runs.TimerRecord, 
 }
 
 // createTimer persists one timer row through SaveTimer. The id is
-// deterministic per task/mode/sequence; Core's store is an upsert, so the
-// panel refuses to save over an existing id instead of silently resetting
-// its accumulated progress.
+// deterministic per task/mode/sequence with the optional operator group as
+// scope (task/mode/seq or task/mode/seq@group). Core's store is an upsert,
+// so the panel refuses to save over an existing id instead of silently
+// resetting its accumulated progress, and every refusal names its cause:
+// creation never fails silently (QA-HUVEC F1, UX-P5).
 func (s *State) createTimer(task *RunTaskViewModel, form *timerForm, existing int) {
-	if s == nil || task == nil || form == nil || s.Callbacks.SaveTimer == nil {
+	if s == nil || task == nil || form == nil {
 		return
 	}
 	bench := s.bench()
+	if s.Callbacks.SaveTimer == nil {
+		bench.TimersErr[task.TaskKey] = "计时服务未接线，无法创建计时器"
+		return
+	}
 	bench.CreateBusy = true
 	defer func() { bench.CreateBusy = false }()
 	key := task.TaskKey
@@ -234,27 +242,38 @@ func (s *State) createTimer(task *RunTaskViewModel, form *timerForm, existing in
 		bench.TimersErr[""] = "未选中步骤"
 		return
 	}
-	timerID := fmt.Sprintf("%s/%s/%d", key, form.Mode, existing+1)
+	mode := strings.TrimSpace(form.Mode)
+	if mode != "countdown" && mode != "stopwatch" && mode != "window" {
+		bench.TimersErr[key] = "请先选择计时类型（倒计时/正计时/时间窗）"
+		return
+	}
+	group := strings.TrimSpace(form.Group)
+	group = strings.ReplaceAll(group, "/", "-")
+	group = strings.ReplaceAll(group, "@", "-")
+	timerID := fmt.Sprintf("%s/%s/%d", key, mode, existing+1)
+	if group != "" {
+		timerID += "@" + group
+	}
 	for _, known := range bench.Timers[key] {
 		if known.TimerID == timerID {
-			bench.TimersErr[key] = "同名计时器已存在，请刷新后使用"
+			bench.TimersErr[key] = "同名计时器已存在（" + TimerIdentity(known) + ")，请刷新后使用"
 			return
 		}
 	}
 	record := runs.TimerRecord{
 		TimerID: timerID,
 		TaskKey: key,
-		Mode:    form.Mode,
+		Mode:    mode,
 		Status:  "ready",
 	}
-	if form.Mode != "stopwatch" {
+	if mode != "stopwatch" {
 		planned, err := parseMinutes(form.Minutes)
 		if err != nil {
 			bench.TimersErr[key] = err.Error()
 			return
 		}
 		record.PlannedS = &planned
-		if form.Mode == "window" {
+		if mode == "window" {
 			record.AnchorTaskKey = &key
 		}
 	}
@@ -263,6 +282,8 @@ func (s *State) createTimer(task *RunTaskViewModel, form *timerForm, existing in
 		return
 	}
 	form.Minutes = ""
+	form.Group = ""
+	bench.TimersErr[key] = ""
 	s.refreshTimers(key)
 }
 

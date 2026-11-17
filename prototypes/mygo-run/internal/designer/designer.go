@@ -124,7 +124,11 @@ type Designer struct {
 	budget          runs.TimeBudget
 	budgetLoaded    bool
 	budgetErr       error
-	Callbacks       Callbacks
+	// budgetUnknown counts steps without usable timing; budgetProblems carries
+	// the step-scoped cause so unknowns are never silently estimated.
+	budgetUnknown  int
+	budgetProblems []string
+	Callbacks      Callbacks
 
 	OnCreateRun func(runs.RunSnapshot)
 
@@ -138,18 +142,18 @@ type Designer struct {
 	// pointers are stable across frames so the Collapsible owns its own state.
 	PropertiesOpen map[string]*bool
 
-	InspectorOpen         bool
+	InspectorOpen        bool
 	InspectorUserToggled bool
-	InspectorDock         Dock
-	CreateRunWarnings     []string
-	ConfirmCreateRun      bool
-	PreflightAck      *PreflightAck
-	panelDrag         ui.Point
-	panelDragging     bool
-	ConfirmClearWells bool
-	CmdPaletteOpen    bool
-	CmdQuery          string
-	opSeq             uint64
+	InspectorDock        Dock
+	CreateRunWarnings    []string
+	ConfirmCreateRun     bool
+	PreflightAck         *PreflightAck
+	panelDrag            ui.Point
+	panelDragging        bool
+	ConfirmClearWells    bool
+	CmdPaletteOpen       bool
+	CmdQuery             string
+	opSeq                uint64
 
 	draftUndo      [][]byte
 	draftRedo      [][]byte
@@ -312,6 +316,7 @@ func (d *Designer) Load(ctx context.Context, designID string) {
 	}
 	d.Loading = false
 	d.Empty = len(d.Editor.Doc.Nodes) == 0
+	d.budgetLoaded = false
 }
 
 func (d *Designer) applySnapshot(snap runs.DesignSnapshot) error {
@@ -550,6 +555,8 @@ func splitCSV(value string) []string {
 func (d *Designer) Touch() {
 	d.Dirty = true
 	d.SaveState = SaveDraft
+	// Timing inputs feed the Core budget: any edit re-projects on next view.
+	d.budgetLoaded = false
 }
 
 // stepTasks materializes the explicit step→(assay, timepoint) authoring. Steps
@@ -635,6 +642,7 @@ func (d *Designer) Save(ctx context.Context) {
 	}
 	d.Dirty = false
 	d.SaveState = SaveSaved
+	d.budgetLoaded = false
 }
 
 // CreateRun creates a Run from the saved current design.
@@ -1509,6 +1517,7 @@ func stepInspector(c *ui.Context, d *Designer) {
 			})
 		})
 	})
+	timingInspector(c, d)
 }
 
 func assignmentModule(c *ui.Context, d *Designer) {

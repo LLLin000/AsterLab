@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"asterlab-mygo-prototype/internal/assets"
+	"asterlab-mygo-prototype/internal/designer"
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/runworkspace"
 	"asterlab-mygo-prototype/internal/state"
@@ -42,6 +43,9 @@ func (a *app) syncRunBenchCallbacks() {
 	cb.TaskAssets = a.runAssetsForTask
 	cb.CaptureWells = a.captureWellsForTask
 	cb.RequestBatchLink = a.requestBatchLink
+	// The relay plan comes from the frozen design revision the Run pinned,
+	// never the live draft: Design edits cannot move a running timer.
+	cb.TimerPhases = a.runTimerPhases
 	// The shared record projection reads Core through the app memo
 	// (runID|rev|assets|fov|view); the bench memoizes the pointer by the
 	// host key.
@@ -146,6 +150,27 @@ func (a *app) applyTimerAction(input runs.TimerActionInput) (runs.TimerUpdateRes
 		return runs.TimerUpdateResult{}, state.MapError(err)
 	}
 	return result, nil
+}
+
+// runTimerPhases resolves the relay plan for one task from the frozen design
+// revision the Run pinned. Nil means the step declares no usable timing: the
+// timer keeps its own single phase (Core from_record). A frozen plan is
+// never an empty slice, and the live draft is never consulted.
+func (a *app) runTimerPhases(taskKey string) []runs.TimerPhase {
+	if strings.TrimSpace(taskKey) == "" || strings.TrimSpace(a.snap.DesignData) == "" {
+		return nil
+	}
+	stepID := ""
+	for _, t := range a.snap.Tasks {
+		if t.Key == taskKey {
+			stepID = t.DesignStepID
+			break
+		}
+	}
+	if stepID == "" {
+		return nil
+	}
+	return designer.PhasesForFrozenStep(a.snap.DesignData, stepID)
 }
 
 // appendRunEvent appends one execution event and applies Core's authoritative
