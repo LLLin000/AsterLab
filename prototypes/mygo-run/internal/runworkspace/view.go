@@ -471,45 +471,47 @@ func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			done++
 		}
 	}
-	ui.Column(c).FillWidth().Background(tokens.Surface).Border(1, tokens.Border).Children(func() {
-		ui.Row(c).FillWidth().Height(52).Padding(0, 16).
-			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, vm.Title).FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text).
-				SingleLine().Ellipsis("…").Shrink(1).MaxWidth(420)
-			ui.Spacer(c)
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				if vm.Status != "" {
-					statusPill(c, vm.Status, tokens)
-				}
-				ui.Text(c, fmt.Sprintf("Run rev %d · Design rev %d · AsterDoc rev %d",
-					vm.Revision, vm.DesignRevision, vm.AsterDocRevision)).FontSize(float32(tokens.TextMeta)).
-					TextColor(t.TextMuted)
-				ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(float32(tokens.TextMeta)).
-					TextColor(t.TextMuted).FontFeatures("tnum")
-				if b := components.Button(c, blindSwitchLabel(s.bench().Blind), components.ButtonGhost); b.Clicked() {
-					s.toggleBlind()
-				}
-			})
+	ui.Row(c).FillWidth().Height(52).Padding(0, 16).
+		Background(tokens.Surface).Border(1, tokens.Border).
+		AlignItems(ui.Center).Children(func() {
+		ui.Text(c, vm.Title).FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text).
+			SingleLine().Ellipsis("…").Shrink(1).MaxWidth(420)
+		ui.Spacer(c)
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			if vm.Status != "" {
+				statusPill(c, vm.Status, tokens)
+			}
+			ui.Text(c, fmt.Sprintf("Run rev %d · Design rev %d · AsterDoc rev %d",
+				vm.Revision, vm.DesignRevision, vm.AsterDocRevision)).FontSize(float32(tokens.TextMeta)).
+				TextColor(t.TextMuted)
+			ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(float32(tokens.TextMeta)).
+				TextColor(t.TextMuted).FontFeatures("tnum")
+			if b := components.Button(c, blindSwitchLabel(s.bench().Blind), components.ButtonGhost); b.Clicked() {
+				s.toggleBlind()
+			}
 		})
-		if s.bench().Blind {
-			ui.Row(c).FillWidth().Padding(2, 16).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-				ui.Text(c, "已设盲 · 分组已隐藏，孔位坐标保持可见").FontSize(t.Rem(.68)).TextColor(t.TextMuted)
-			})
-		}
-		// UX-STATE, UX-P5: a rejected blind projection keeps the current mask
-		// and names cause + retry instead of failing silently.
-		if s.BlindErr != "" {
-			ui.Row(c).FillWidth().Padding(6, 16).Background(tokens.DangerBg).
-				AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-				ui.Text(c, "设盲视图："+s.BlindErr).FontSize(t.Rem(.72)).TextColor(tokens.DangerText)
-				ui.Spacer(c)
-				if components.Button(c, "重试", components.ButtonGhost).Clicked() {
-					s.BlindErr = ""
-					s.toggleBlind()
-				}
-			})
-		}
 	})
+	// The banners below only exist when visible, so the default header stays
+	// pixel-identical to main: same 52px row, same border, nothing above it.
+	if s.bench().Blind {
+		ui.Row(c).FillWidth().Padding(2, 16).Background(tokens.Surface).Border(1, tokens.Border).
+			AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+			ui.Text(c, "已设盲 · 分组已隐藏，孔位坐标保持可见").FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+		})
+	}
+	// UX-STATE, UX-P5: a rejected blind projection keeps the current mask
+	// and names cause + retry instead of failing silently.
+	if s.BlindErr != "" {
+		ui.Row(c).FillWidth().Padding(6, 16).Background(tokens.DangerBg).
+			AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Text(c, "设盲视图："+s.BlindErr).FontSize(t.Rem(.72)).TextColor(tokens.DangerText)
+			ui.Spacer(c)
+			if components.Button(c, "重试", components.ButtonGhost).Clicked() {
+				s.BlindErr = ""
+				s.toggleBlind()
+			}
+		})
+	}
 }
 
 func statusPill(c *ui.Context, status string, tokens theme.Tokens) {
