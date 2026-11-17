@@ -201,7 +201,15 @@ func (r *RecordingView) Render(c *ui.Context) {
 			if r.Grid.State == resultgrid.StateError {
 				saveLabel = "重试保存"
 			}
-			save := components.Button(c, saveLabel, components.ButtonPrimary)
+			// UX-P1: one primary per task state. Reads stay primary while
+			// the readout is the task's job; once the task can complete
+			// (no readout plan left), 标记完成 owns the primary and the
+			// save demotes so the two never compete.
+			saveStyle := components.ButtonPrimary
+			if canMarkComplete(r.Task) {
+				saveStyle = components.ButtonSecondary
+			}
+			save := components.Button(c, saveLabel, saveStyle)
 			save.Disabled(r.Grid.State == resultgrid.StateSaving)
 			if save.Clicked() && r.Grid.State != resultgrid.StateSaving {
 				saveNow()

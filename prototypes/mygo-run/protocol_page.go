@@ -315,13 +315,13 @@ func (a *app) renderProtocolArchive(c *ui.Context) {
 				exported := protocol.BuildArchive(proj, tasks, prose, time.Now())
 				a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", exported.Markdown())
 			}
-			if components.Button(c, "导出 PDF", components.ButtonSecondary).Clicked() {
+			if components.Button(c, "导出归档 PDF", components.ButtonSecondary).Clicked() {
 				exported := protocol.BuildArchive(proj, tasks, prose, time.Now())
 				var buf bytes.Buffer
 				if err := exported.PDF(&buf, a.recordPDFLoader()); err != nil {
 					c.AddToast(ui.Toast{Title: "PDF 导出失败", Description: err.Error(), Type: components.ToastError})
 				} else {
-					a.exportRecordBytes(c, "导出 PDF", "record-"+a.snap.RunID+".pdf", buf.Bytes())
+					a.exportRecordBytes(c, "导出归档 PDF", "record-"+a.snap.RunID+".pdf", buf.Bytes())
 				}
 			}
 			if sealed && proj.Archive.Manifest != nil {

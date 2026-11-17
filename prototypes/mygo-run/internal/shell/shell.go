@@ -4,6 +4,7 @@ package shell
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -109,22 +110,25 @@ type Shell struct {
 	Error      string
 	// ActiveTimers feeds the persistent cross-page timer strip. Empty means
 	// no strip at all: no placeholder, no reserved space. UX-LAYOUT, UX-DESIGN.
-	ActiveTimers  []runs.ActiveTimer
-	OnTimerSelect func(runID string)
-	OnSelect      func(string)
-	OnProject     func(string)
-	OnRunSelect   func(string)
-	OnPage        func(Page)
-	OnSidebar     func(bool)
+	ActiveTimers []runs.ActiveTimer
+	// TimersExpanded opens the collapsed tail of the strip; by default only
+	// the current/expiring timers render inline. UX-LAYOUT.
+	TimersExpanded bool
+	OnTimerSelect  func(runID string)
+	OnSelect       func(string)
+	OnProject      func(string)
+	OnRunSelect    func(string)
+	OnPage         func(Page)
+	OnSidebar      func(bool)
 
 	Query string
 	// ShowAllRuns expands the truncated in-progress run list. UX-LAYOUT:
 	// the workspace grid has an explicit "show all" affordance.
 	ShowAllRuns bool
-	OnContinue func()
-	OnCreate   func()
-	OnImport   func()
-	Content    func(*ui.Context)
+	OnContinue  func()
+	OnCreate    func()
+	OnImport    func()
+	Content     func(*ui.Context)
 
 	window *sidebar.Shell
 }
@@ -298,24 +302,65 @@ func (s *Shell) page(c *ui.Context) {
 	})
 }
 
+// timerStripCompactN bounds the default strip: the current/expiring timers
+// stay visible, the rest collapse behind one toggle. Reachability only: the
+// toggle reuses the quiet Ghost control, no new colours or sizes. UX-LAYOUT,
+// UX-P2.
+const timerStripCompactN = 2
+
+// orderedTimers presents ActiveTimers with expiring countdowns first (least
+// remaining first), then the rest in arrival order. Facts unchanged; only
+// presentation order moves so the eye lands on what needs action. UX-LAYOUT.
+func orderedTimers(timers []runs.ActiveTimer) []runs.ActiveTimer {
+	out := make([]runs.ActiveTimer, len(timers))
+	copy(out, timers)
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := out[i].RemainingS, out[j].RemainingS
+		if ri == nil || rj == nil {
+			return rj == nil && ri != nil
+		}
+		return *ri < *rj
+	})
+	return out
+}
+
 // timerStrip is the persistent cross-page global timer bar. It shows running
 // timers only — across experiments, countdowns and windows — and renders
-// nothing when the list is empty. Actions use components.Button Ghost, the
-// quiet one-action control; all values come from theme tokens. UX-IA-3,
-// UX-P3, UX-DESIGN.
+// nothing when the list is empty. The strip stays compact: the expiring and
+// current timers render inline, the rest collapse behind one toggle, and
+// every entry jumps to its Run through OnTimerSelect. Actions use
+// components.Button Ghost, the quiet one-action control; all values come
+// from theme tokens. UX-IA-3, UX-P3, UX-LAYOUT, UX-DESIGN.
 func (s *Shell) timerStrip(c *ui.Context) {
 	if len(s.ActiveTimers) == 0 {
 		return
 	}
+	timers := orderedTimers(s.ActiveTimers)
+	shown := timers
+	hidden := 0
+	if !s.TimersExpanded && len(timers) > timerStripCompactN {
+		shown = timers[:timerStripCompactN]
+		hidden = len(timers) - timerStripCompactN
+	}
 	t := c.Theme()
-	ui.Row(c).FillWidth().Padding(t.Space(1), t.Space(2)).Gap(t.Space(2)).
+	ui.Row(c).FillWidth().Wrap().Padding(t.Space(1), t.Space(2)).Gap(t.Space(2)).
 		Background(t.Surface).Children(func() {
 		components.Text(c, "计时中").TextColor(t.TextMuted).FontSize(t.Rem(.8))
-		for _, timer := range s.ActiveTimers {
+		for _, timer := range shown {
 			timer := timer
 			label := timer.RunTitle + " · " + formatTimerClock(timer)
 			if components.Button(c, label, components.ButtonGhost).Clicked() && s.OnTimerSelect != nil {
 				s.OnTimerSelect(timer.RunID)
+			}
+		}
+		if hidden > 0 {
+			if components.Button(c, fmt.Sprintf("＋%d 更多", hidden), components.ButtonGhost).Clicked() {
+				s.TimersExpanded = true
+			}
+		}
+		if s.TimersExpanded && len(timers) > timerStripCompactN {
+			if components.Button(c, "收起", components.ButtonGhost).Clicked() {
+				s.TimersExpanded = false
 			}
 		}
 	})

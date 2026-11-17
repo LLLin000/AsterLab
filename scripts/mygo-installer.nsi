@@ -27,6 +27,14 @@ Section "Install"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayVersion" "0.1.0-beta-unsigned"
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "NoModify" 1
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "NoRepair" 1
+    ; User-level asterlab:// protocol handler (CLOSE-07): per-user, no
+    ; elevation. The OS hands the raw URL to the exe as one quoted argument;
+    ; strict route parsing happens in-process (internal/state), never shell
+    ; execution.
+    WriteRegStr HKCU "Software\Classes\asterlab" "" "URL:AsterLab Run Link"
+    WriteRegStr HKCU "Software\Classes\asterlab" "URL Protocol" ""
+    WriteRegStr HKCU "Software\Classes\asterlab\DefaultIcon" "" "$\"$INSTDIR\mygo-run.exe$\",0"
+    WriteRegStr HKCU "Software\Classes\asterlab\shell\open\command" "" "$\"$INSTDIR\mygo-run.exe$\" $\"%1$\""
 SectionEnd
 
 Section "Uninstall"
@@ -41,4 +49,5 @@ Section "Uninstall"
     RMDir "$SMPROGRAMS\AsterLab MyGo"
     Delete "$DESKTOP\AsterLab MyGo.lnk"
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo"
+    DeleteRegKey HKCU "Software\Classes\asterlab"
 SectionEnd

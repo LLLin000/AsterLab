@@ -294,7 +294,7 @@ func renderTimerRow(c *ui.Context, s *State, task *RunTaskViewModel, record runs
 					s.runTimerAction(task, record, phases, "pause")
 				}
 				if record.Mode == "countdown" {
-					if advance := components.Button(c, "推进一轮", components.ButtonPrimary); advance.Clicked() && !busy {
+					if advance := components.Button(c, "推进一轮", components.ButtonSecondary); advance.Clicked() && !busy {
 						s.runTimerAction(task, record, phases, "advance")
 					}
 				}

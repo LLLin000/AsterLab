@@ -335,7 +335,7 @@ func renderTypedReadoutSection(c *ui.Context, s *State, task *RunTaskViewModel, 
 				renderTableEntry(c, form, t)
 			}
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-				if submit := components.Button(c, "提交读数", components.ButtonPrimary); submit.Clicked() && !form.Busy {
+				if submit := components.Button(c, "提交读数", components.ButtonSecondary); submit.Clicked() && !form.Busy {
 					s.submitTypedReadout(task, form)
 				}
 				if form.Busy {

@@ -118,6 +118,9 @@ type State struct {
 	// ShowTechnical reveals the raw step/block/protocol identifiers. It stays
 	// collapsed so the default view is identifier-free (UX-P2).
 	ShowTechnical bool
+	// ShowTreeIssues reveals the frozen-plan layer diagnostics. They stay
+	// collapsed so the default rail is diagnostic-free (UX-P2).
+	ShowTreeIssues bool
 	// BlindErr carries the last blind-projection failure. The mask stays as
 	// it was and the header shows cause + retry (UX-STATE, UX-P5).
 	BlindErr string
@@ -556,11 +559,16 @@ func flowRail(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, inline 
 		ui.Text(c, "实验流程").FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.TextMuted).
 			Padding(0, 0, t.Space(2), 0)
 		if len(s.VM.TreeIssues) > 0 {
-			ui.Row(c).FillWidth().Padding(6, 8).Radius(6).Background(tokens.WarningBg).
-				Border(1, tokens.WarningText).Children(func() {
-				ui.Text(c, "层级诊断："+strings.Join(s.VM.TreeIssues, "；")).
-					FontSize(t.Rem(.66)).TextColor(tokens.WarningText)
+			open := s.ShowTreeIssues
+			label := fmt.Sprintf("层级诊断（%d）", len(s.VM.TreeIssues))
+			components.Collapsible(c, label, &open, components.CollapsibleOptions{}, func() {
+				ui.Column(c).FillWidth().Gap(2).Children(func() {
+					for _, issue := range s.VM.TreeIssues {
+						ui.Text(c, issue).FontSize(t.Rem(.66)).TextColor(tokens.WarningText)
+					}
+				})
 			})
+			s.ShowTreeIssues = open
 		}
 		if s.VM.Tree != nil {
 			fingerprint := s.treeExpansionFingerprint()

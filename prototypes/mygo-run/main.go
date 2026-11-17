@@ -1539,11 +1539,14 @@ func (a *app) pollPDFExport(c *ui.Context) {
 	}
 }
 
+// documentExportButton exports the frozen (or preview) protocol document —
+// not the signed archive, which lives on the 终态归档 page as 导出归档 PDF.
+// One entry per meaning. UX-IA-1.
 func (a *app) documentExportButton(c *ui.Context) {
 	if a.snap.AsterDoc == nil {
 		return
 	}
-	button := components.Button(c, "导出 PDF", components.ButtonSecondary)
+	button := components.Button(c, "导出方案 PDF", components.ButtonSecondary)
 	button.Disabled(a.pdfExporting || a.asterErr != "")
 	if button.Clicked() && !a.pdfExporting && a.asterErr == "" {
 		a.startPDFExport(c)
@@ -1908,8 +1911,10 @@ func (a *app) openRunLinkFromEnv() {
 	a.openRunWellLink(raw)
 }
 
-// openRunWellLink resolves asterlab://run/<runID>/well/<well> into a Run-page
-// navigation intent with the well selected on the recording grid.
+// openRunWellLink resolves the asterlab:// run routes into a Run-page
+// navigation intent: asterlab://run/<runID> opens the Run, and
+// asterlab://run/<runID>/well/<well> additionally selects the well on the
+// recording grid. Invalid links surface a visible shell error, never panic.
 func (a *app) openRunWellLink(raw string) {
 	link, err := state.ParseRunWellLink(raw)
 	if err != nil {
@@ -1919,6 +1924,12 @@ func (a *app) openRunWellLink(raw string) {
 		return
 	}
 	a.selectRun(link.RunID)
+	if link.Well == "" {
+		if a.shell != nil {
+			a.shell.Error = ""
+		}
+		return
+	}
 	if a.shell == nil || a.shell.Page != shell.Run {
 		return
 	}
@@ -2810,6 +2821,15 @@ func main() {
 		}
 		return
 	}
+	// One running instance owns the window. A second launch — e.g. an
+	// external asterlab:// click while the app runs — forwards its
+	// arguments to the first instance and exits; the first instance jumps
+	// to the linked Run and focuses its window. No shell is ever invoked:
+	// the OS hands the URL to the exe, the exe parses it in-process.
+	// UX-IA-3, UX-P5.
+	if !mygo.App.RequestSingleInstanceLock() {
+		return
+	}
 	if strings.EqualFold(os.Getenv("ASTERLAB_THEME"), "dark") {
 		mygo.Theme.SetSource(mygo.ThemeDark)
 	}
@@ -3196,6 +3216,24 @@ func main() {
 	a.ws.State = runui.StateLoading
 	a.ws.Width = 1200
 
+	// A forwarded second-instance launch jumps the running app: resolve the
+	// link on the main thread (the socket handler runs off-thread) and
+	// focus the window. Malformed links surface the same visible shell
+	// error as a startup link. UX-IA-3, UX-P5.
+	mygo.App.OnSecondInstance(func(args []string, _ string) {
+		link := deepLinkArg(args)
+		mygo.RunOnMain(func() {
+			if link != "" {
+				a.openRunWellLink(link)
+			}
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+			if w := mygo.FocusedWindow(); w != nil {
+				w.Focus()
+			}
+		})
+	})
 	mygo.App.WhenReady(func() {
 		a.shell.NewWindow()
 		a.windowReady = true
