@@ -67,7 +67,7 @@ func TestProtocolArchiveToggleRendersEndState(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	for _, want := range []string{"终态归档", "实验记录归档", "计划 vs 实际", "导出归档包", "未签核"} {
+	for _, want := range []string{"终态归档", "实验记录归档", "计划 vs 实际", "导出归档包", "导出 PDF", "未签核"} {
 		if !tt.HasText(want) {
 			t.Fatalf("archive view missing %q: %q", want, tt.Texts())
 		}

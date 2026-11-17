@@ -5,11 +5,17 @@
 package protocol
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	_ "image/png"
+	"io"
+	"os"
 	"strings"
 	"time"
 
 	"asterlab-mygo-prototype/internal/notebook/record"
+	"github.com/jung-kurt/gofpdf"
 )
 
 // Archive is the exportable end state of one Run's record.
@@ -244,4 +250,191 @@ func paramRows(sum record.TaskSummary) []string {
 		rows = append(rows, fmt.Sprintf("| %s | %s | %s |", label, plan, act))
 	}
 	return rows
+}
+
+// recordPDFFontCandidates mirrors the CJK search in internal/asterdoc/pdf.go:
+// the record PDF needs the same system font for Chinese output. Unlike the
+// frozen-document export, a missing font is not fatal here: the PDF still
+// builds with Helvetica (Chinese glyphs degrade) so the image board and the
+// parameter facts always export. Windows Gate machines carry simhei.ttf.
+var recordPDFFontCandidates = []string{
+	"C:/Windows/Fonts/simhei.ttf",
+	"C:/Windows/Fonts/simsun.ttc",
+	"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+}
+
+// ImageLoader returns PNG bytes for one placed matrix image. The caller wires
+// it to assets.Roots.Resolve plus a decode/re-encode step (TIFF masters
+// decode through the shared preview decoder, gofpdf embeds PNG). Any error
+// aborts the export with the asset named: images are never silently dropped.
+type ImageLoader func(record.MatrixImage) ([]byte, error)
+
+// PDF renders the same end state as Markdown plus an embedded image board
+// from the same projection: provenance header, planned-vs-actual comparison,
+// signed/expanded prose, and the representative Well x Timepoint x FOV
+// images. Output is deterministic for identical inputs (fixed PDF stamps;
+// pass the same ExportedAt): only the file bytes differ when facts change.
+func (arch Archive) PDF(w io.Writer, load ImageLoader) error {
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetCreationDate(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	pdf.SetModificationDate(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	pdf.SetMargins(16, 16, 16)
+	pdf.SetAutoPageBreak(true, 16)
+	font := "Helvetica"
+	for _, path := range recordPDFFontCandidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		pdf.AddUTF8FontFromBytes("RecordCJK", "", data)
+		pdf.AddUTF8FontFromBytes("RecordCJK", "B", data)
+		if err := pdf.Error(); err != nil {
+			return fmt.Errorf("record PDF: load CJK font %q: %w", path, err)
+		}
+		font = "RecordCJK"
+		break
+	}
+	proj := arch.Projection
+	pdf.SetTitle("Run record archive "+proj.RunID, true)
+	pdf.SetFooterFunc(func() {
+		pdf.SetY(-12)
+		pdf.SetFont(font, "", 8)
+		pdf.CellFormat(0, 8, fmt.Sprintf("Page %d", pdf.PageNo()), "", 0, "C", false, 0, "")
+	})
+	h1 := func(text string) {
+		pdf.SetFont(font, "B", 14)
+		pdf.MultiCell(0, 8, text, "", "", false)
+		pdf.Ln(1)
+	}
+	h2 := func(text string) {
+		pdf.SetFont(font, "B", 11)
+		pdf.MultiCell(0, 7, text, "", "", false)
+	}
+	body := func(text string) {
+		pdf.SetFont(font, "", 9)
+		pdf.MultiCell(0, 5, text, "", "", false)
+	}
+	pdf.AddPage()
+	h1("实验记录归档")
+	stamp := "未导出（预览）"
+	if !arch.ExportedAt.IsZero() {
+		stamp = arch.ExportedAt.UTC().Format(time.RFC3339)
+	}
+	for _, line := range []string{
+		"Run：" + displayValue(proj.RunID),
+		"设计：" + displayValue(proj.DesignID) + " · 冻结 rev " + fmt.Sprint(proj.DesignRevision),
+		"状态：" + displayValue(proj.Status),
+		"导出时间：" + stamp,
+	} {
+		body(line)
+	}
+	if arch.Sealed && arch.Signature != nil {
+		body("签核：" + arch.Signature.Actor + " · " + arch.Signature.At + " · " + arch.Signature.Hash)
+	} else {
+		body("签核：未签核")
+	}
+	body(fmt.Sprintf("任务完成：%d/%d · 矩阵实测值 %d 个 · 缺 %d 个 FOV 槽",
+		proj.CompletedTasks(), len(proj.Summary), proj.MeasurementCount(), proj.Gaps))
+	pdf.Ln(2)
+	h2("计划 vs 实际")
+	if len(proj.Summary) == 0 {
+		body("无冻结任务。")
+	}
+	for _, sum := range proj.Summary {
+		pdf.SetFont(font, "B", 10)
+		pdf.MultiCell(0, 6, taskTitle(sum), "", "", false)
+		if strings.TrimSpace(sum.Timepoint) != "" {
+			body("时间点：" + sum.Timepoint)
+		}
+		body("状态：" + displayValue(sum.Status))
+		if sum.Skipped {
+			body("条件跳过：按规则跳过（skipped_by_rule）")
+		}
+		for _, dev := range sum.Deviations {
+			body("偏差：" + dev)
+		}
+		for _, row := range paramRows(sum) {
+			body(row)
+		}
+		for _, m := range sum.Measurements {
+			body("实测：" + measureEndpoint(m) + measureSample(m) + " " + m.Value + " " + m.Unit)
+		}
+		pdf.Ln(1)
+	}
+	h2("代表视野矩阵")
+	ref := record.MatrixRef{All: true}
+	if len(arch.SourceRefs) > 0 {
+		ref = arch.SourceRefs[0]
+	}
+	cells, _ := record.ResolveMatrixRef(proj, ref)
+	if len(cells) == 0 {
+		body("无实测孔位数据。")
+	}
+	for _, cell := range cells {
+		body(fmt.Sprintf("%s · %s：图 %d/%d", cell.Well, cell.Timepoint, cell.FilledSlots(), record.FOVSlots))
+		for fov := 1; fov <= record.FOVSlots; fov++ {
+			img := cell.Images[fov-1]
+			if !img.Filled {
+				continue
+			}
+			body(fmt.Sprintf("%s · %s · FOV %d — %s", cell.Well, cell.Timepoint, fov, img.Label))
+			if load == nil {
+				return fmt.Errorf("record PDF image %q (%s · %s · FOV %d): no image loader wired", img.AssetID, cell.Well, cell.Timepoint, fov)
+			}
+			data, err := load(img)
+			if err != nil {
+				return fmt.Errorf("record PDF image %q (%s · %s · FOV %d) unavailable: %w", img.AssetID, cell.Well, cell.Timepoint, fov, err)
+			}
+			name := "record-" + img.AssetID
+			pdf.RegisterImageReader(name, "PNG", bytes.NewReader(data))
+			if err := pdf.Error(); err != nil {
+				return fmt.Errorf("record PDF image %q (%s · %s · FOV %d) rejected: %w", img.AssetID, cell.Well, cell.Timepoint, fov, err)
+			}
+			cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+			imgW, imgH := 150.0, 100.0
+			if err == nil && cfg.Width > 0 && cfg.Height > 0 {
+				imgW = 150.0
+				imgH = 150.0 * float64(cfg.Height) / float64(cfg.Width)
+				if imgH > 90 {
+					imgH = 90
+					imgW = 90 * float64(cfg.Width) / float64(cfg.Height)
+				}
+			}
+			if pdf.GetY()+imgH+4 > 297-16 {
+				pdf.AddPage()
+			}
+			x := 16.0
+			if imgW < 178 {
+				x = 16 + (178-imgW)/2
+			}
+			pdf.Image(name, x, pdf.GetY(), imgW, imgH, false, "", 0, "")
+			if err := pdf.Error(); err != nil {
+				return fmt.Errorf("record PDF image %q (%s · %s · FOV %d) embed failed: %w", img.AssetID, cell.Well, cell.Timepoint, fov, err)
+			}
+			pdf.Ln(imgH + 2)
+		}
+	}
+	if len(proj.UnassignedLabels) > 0 {
+		h2("未定位图")
+		for _, label := range proj.UnassignedLabels {
+			body(label)
+		}
+	}
+	h2("研判记录")
+	for _, line := range strings.Split(strings.TrimSpace(stripSignatureBlock(arch.Prose)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			pdf.Ln(2)
+			continue
+		}
+		body(line)
+	}
+	h2("派生设计参数")
+	if len(arch.Derived.Parameters) == 0 {
+		body("无实测参数可派生。")
+	}
+	for _, param := range arch.Derived.Parameters {
+		body(fmt.Sprintf("%s · %s：计划 %s / 实测 %s（%s）",
+			param.TaskKey, param.Label, param.Planned, param.Measured, param.Source))
+	}
+	return pdf.Output(w)
 }

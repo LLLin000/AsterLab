@@ -1,6 +1,11 @@
 package protocol
 
 import (
+	"bytes"
+	"errors"
+	"image"
+	"image/png"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -113,5 +118,128 @@ func TestArchiveHeaderCountsMatrixValuesOnly(t *testing.T) {
 	}
 	if strings.Contains(doc, "· 实测值 ") {
 		t.Fatalf("broad measurement claim leaked:\n%s", doc)
+	}
+}
+
+// pdfImageFixture builds a projection with two coordinated images placed in
+// A1·6h FOV slots (Core coordinates only: WellID/Timepoint/FOVIndex, never
+// filenames) plus a tiny valid PNG the loader serves for any placed image.
+func pdfImageFixture(t *testing.T) (record.RecordProjection, string, ImageLoader) {
+	t.Helper()
+	snap := runs.RunSnapshot{
+		RunID: "run-pdf", Title: "HUVEC", DesignID: "design-1", DesignRevision: 3,
+		Status: "completed",
+		Tasks: []runs.RunTask{
+			{Key: "task-cure", Title: "cure", Timepoint: "0h", Status: "completed",
+				ParametersJSON: `[{"key":"cure_s","label":"cure_s","value":60,"unit":"s"}]`},
+		},
+		Events: []runs.RunEvent{
+			{ID: "evt-read", EventType: "measurement", TaskKey: "task-cure", Timepoint: "6h",
+				BatchID: "batch-1", RecordedAt: "2026-11-10T16:01:00+08:00",
+				ResultCells: []runs.ResultCell{
+					{Row: 0, Column: 0, SampleID: "S1", Field: "OD450", Value: new(0.82)},
+				}},
+		},
+	}
+	assets := []runs.Asset{
+		{ID: "img-a1", RootID: "root-1", RelativePath: "a1-fov1.png", MediaType: "image",
+			Link: runs.AssetLink{RunID: "run-pdf", TaskKey: "task-cure", SampleID: "S1",
+				WellID: "A1", Timepoint: "6h", FOVIndex: 1}},
+		{ID: "img-a2", RootID: "root-1", RelativePath: "a1-fov2.png", MediaType: "image",
+			Link: runs.AssetLink{RunID: "run-pdf", TaskKey: "task-cure", SampleID: "S1",
+				WellID: "A1", Timepoint: "6h", FOVIndex: 2}},
+	}
+	proj := record.Project(snap, assets)
+	if got := placedImageCount(proj); got != 2 {
+		t.Fatalf("fixture placed %d images, want 2", got)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	var pngBytes bytes.Buffer
+	if err := png.Encode(&pngBytes, img); err != nil {
+		t.Fatal(err)
+	}
+	raw := pngBytes.Bytes()
+	return proj, "# note\n\nsee @matrix(6h)\n", func(record.MatrixImage) ([]byte, error) {
+		return raw, nil
+	}
+}
+
+func placedImageCount(proj record.RecordProjection) int {
+	n := 0
+	for _, cell := range proj.Matrix {
+		n += cell.FilledSlots()
+	}
+	return n
+}
+
+func pdfImageObjects(data []byte) int {
+	return bytes.Count(data, []byte("/Subtype /Image"))
+}
+
+// TestArchivePDFDeterministic pins byte-stable output: the same archive
+// (same ExportedAt) renders identical PDF bytes, so exports are comparable.
+func TestArchivePDFDeterministic(t *testing.T) {
+	proj, prose, load := pdfImageFixture(t)
+	stamp := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	var a, b bytes.Buffer
+	if err := BuildArchive(proj, prose, stamp).PDF(&a, load); err != nil {
+		t.Fatal(err)
+	}
+	if err := BuildArchive(proj, prose, stamp).PDF(&b, load); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a.Bytes(), b.Bytes()) {
+		t.Fatal("same archive produced different PDF bytes")
+	}
+	if !bytes.HasPrefix(a.Bytes(), []byte("%PDF-")) {
+		t.Fatal("output is not a PDF")
+	}
+}
+
+// TestArchivePDFEmbedsImages parses the PDF instead of trusting file size:
+// every placed matrix image must arrive as an embedded image object.
+func TestArchivePDFEmbedsImages(t *testing.T) {
+	proj, prose, load := pdfImageFixture(t)
+	var buf bytes.Buffer
+	arch := BuildArchive(proj, prose, time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC))
+	if err := arch.PDF(&buf, load); err != nil {
+		t.Fatal(err)
+	}
+	if got := pdfImageObjects(buf.Bytes()); got != 2 {
+		t.Fatalf("embedded image objects = %d, want 2", got)
+	}
+}
+
+// TestArchivePDFMissingAssetNamesIt: an unavailable image aborts the export
+// with the asset named — never a silent gap in a signed record.
+func TestArchivePDFMissingAssetNamesIt(t *testing.T) {
+	proj, prose, _ := pdfImageFixture(t)
+	arch := BuildArchive(proj, prose, time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC))
+	err := arch.PDF(io.Discard, func(img record.MatrixImage) ([]byte, error) {
+		if img.AssetID == "img-a2" {
+			return nil, errors.New("file gone")
+		}
+		var pngBytes bytes.Buffer
+		if err := png.Encode(&pngBytes, image.NewNRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+			t.Fatal(err)
+		}
+		return pngBytes.Bytes(), nil
+	})
+	if err == nil {
+		t.Fatal("missing image did not fail the export")
+	}
+	if !strings.Contains(err.Error(), "img-a2") || !strings.Contains(err.Error(), "A1") {
+		t.Fatalf("error does not name the asset: %v", err)
+	}
+}
+
+// TestArchivePDFNilLoaderWithImagesFails: building the board without any way
+// to load files is a wiring bug, and it must surface with the asset named.
+func TestArchivePDFNilLoaderWithImagesFails(t *testing.T) {
+	proj, prose, _ := pdfImageFixture(t)
+	arch := BuildArchive(proj, prose, time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC))
+	err := arch.PDF(io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "img-a1") {
+		t.Fatalf("nil loader did not name the first asset: %v", err)
 	}
 }

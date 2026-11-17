@@ -4,17 +4,24 @@ package main
 // two distinct objects (UX-STATE): a Run-backed document is 已冻结; preview is 预览.
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/png"
+	"os"
 	"time"
 
+	"asterlab-mygo-prototype/internal/assets"
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/protocol"
 	"asterlab-mygo-prototype/modules/runs"
+	mygo "github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 	"github.com/oneo-me/onevra/source/components"
+	"path/filepath"
 )
 
 // protocolArchives keys the document/archive view toggle by Run, so switching
@@ -304,6 +311,15 @@ func (a *app) renderProtocolArchive(c *ui.Context) {
 				exported := protocol.BuildArchive(proj, prose, time.Now())
 				a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", exported.Markdown())
 			}
+			if components.Button(c, "导出 PDF", components.ButtonSecondary).Clicked() {
+				exported := protocol.BuildArchive(proj, prose, time.Now())
+				var buf bytes.Buffer
+				if err := exported.PDF(&buf, a.recordPDFLoader()); err != nil {
+					c.AddToast(ui.Toast{Title: "PDF 导出失败", Description: err.Error(), Type: components.ToastError})
+				} else {
+					a.exportRecordBytes(c, "导出 PDF", "record-"+a.snap.RunID+".pdf", buf.Bytes())
+				}
+			}
 		})
 		if sigOK {
 			if arch.Signature != nil {
@@ -324,4 +340,57 @@ func (a *app) renderProtocolArchive(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// recordPDFLoader resolves one placed matrix image to PNG bytes for the
+// archive PDF: Roots.Resolve locates the file (never inferred from names),
+// the shared decoder reads the master (TIFF included), and png.Encode gives
+// gofpdf what it embeds. Any failure names the asset so the export can say
+// exactly which image is missing instead of dropping it.
+func (a *app) recordPDFLoader() protocol.ImageLoader {
+	return func(img record.MatrixImage) ([]byte, error) {
+		if img.RootID == "" || img.RelativePath == "" {
+			return nil, fmt.Errorf("asset %q has no linked file", img.AssetID)
+		}
+		path, err := assets.Roots(a.assetRoots).Resolve(assets.Asset{
+			ID: img.AssetID, RootID: img.RootID, RelativePath: img.RelativePath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		decoded, _, err := image.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("decode %q: %w", img.Label, err)
+		}
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, decoded); err != nil {
+			return nil, fmt.Errorf("encode %q: %w", img.Label, err)
+		}
+		return buf.Bytes(), nil
+	}
+}
+
+// exportRecordBytes writes a binary record artifact (the archive PDF)
+// through a save dialog, mirroring exportRecordFile for text artifacts.
+func (a *app) exportRecordBytes(c *ui.Context, title, filename string, content []byte) {
+	home, _ := os.UserHomeDir()
+	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Parent: mygo.FocusedWindow(), Title: title, DefaultPath: filepath.Join(home, filename),
+	})
+	if err != nil {
+		c.AddToast(ui.Toast{Title: title + "失败", Description: err.Error(), Type: components.ToastError})
+		return
+	}
+	if path == "" {
+		return
+	}
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		c.AddToast(ui.Toast{Title: title + "失败", Description: err.Error(), Type: components.ToastError})
+		return
+	}
+	c.AddToast(ui.Toast{Title: filename + " 已保存", Description: path, Type: components.ToastSuccess})
 }
