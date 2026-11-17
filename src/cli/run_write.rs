@@ -18,6 +18,7 @@ pub(crate) fn patch_run(
     if kind != "run" {
         return Err(CliError::input("id 必须指向实验运行"));
     }
+    ensure_run_not_archived(db, run_id)?;
     if revision != expected_revision {
         return Err(CliError::conflict(format!(
             "运行版本已从 v{expected_revision} 更新为 v{revision}；请先重新读取。"
@@ -71,6 +72,7 @@ pub(crate) fn create_execution_event_tx(
     if kind != "run" {
         return Err(CliError::input("parent_id 必须指向实验运行"));
     }
+    ensure_run_not_archived_tx(tx, run_id)?;
     if ![
         "operation",
         "material_use",

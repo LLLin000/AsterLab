@@ -15,8 +15,9 @@ pub(crate) fn tool_specs() -> Vec<Value> {
         "run.set_status",
         "run.revise",
         "run.workspace",
-        "workflow.inspect_tree",
-        "workflow.progress",
+        "record.projection",
+        "record.sign_archive",
+        "record.archive_state",
         "task.create",
         "task.set_status",
         "protocol.list",
@@ -164,9 +165,11 @@ pub(crate) fn tool_description(tool: &str) -> &'static str {
         "workflow.inspect_tree" => "只读投影 Design（可选 Run）的 Use/Definition/Occurrence 层级树；由 Rust Core 直接计算，不依赖桌面应用。",
         "workflow.progress" => "只读投影一个 Run 每个冻结步骤的样本矩阵：每个样本的当前状态、attempt 历史与最后事件时间；步骤完成只在全部样本完成时成立。",
         "run.create" => "从设计当前版本创建运行并固定设计/Protocol 版本引用；仅受信任的本地写入端可调用，Agent 不得自行创建 Run。",
-        "run.set_status" => "更新运行状态；必须提供读取时的 expected_revision。Protocol 必填参数未确认时拒绝开始运行。",
-        "run.revise" => "按 expected_revision 修订运行名称或计划日期；设计版本、Protocol 清单、材料清单和重复关系不可改写。",
-        "task.create" => "按项目、日期和可选运行创建日历任务。",
+        "run.set_status" => "更新运行状态；必须提供读取时的 expected_revision。Protocol 必填参数未确认时拒绝开始运行；已归档 Run 拒绝一切写入。",
+        "run.revise" => "按 expected_revision 修订运行名称或计划日期；设计版本、Protocol 清单、材料清单和重复关系不可改写；已归档 Run 拒绝一切写入。",
+        "record.projection" => "只读生成 Run 的 Record 投影：冻结计划、参数对比、计时器、图板矩阵、资产、读数、笔记引用与归档状态；不写数据库。",
+        "record.sign_archive" => "按 summarizing→signed→archived 生成归档清单并持久化归档状态；清单绑定确切投影/笔记/资产校验和，失败不部分归档；已归档后一切写入拒绝。",
+        "record.archive_state" => "只读读取 Run 的归档状态（recording/summarizing/signed/archived + 签核与清单）；重启后状态不变，不写数据库。",
         "task.set_status" => "更新任务状态；必须提供读取时的 expected_revision。",
         "protocol.list" => "按项目查询 Protocol。",
         "protocol.version.get" => "读取确切不可变 ProtocolVersion 并递归展开步骤、参数槽位；只读。",
@@ -257,8 +260,9 @@ pub(crate) fn tool_effects(tool: &str) -> &'static str {
         | "protocol.block.get"
         | "protocol.block.preview"
         | "record.list"
-        | "record.get" => "只读；不修改数据库。",
-        "pantry.list" | "label.export" => "只读；只返回储藏室台账的效期投影，不写数据库。",
+        | "record.get"
+        | "record.projection"
+        | "record.archive_state" => "只读；不修改数据库。",
         "pantry.upsert" => "创建或整条覆盖一行储藏室台账并递增 revision；不修改 Design、Protocol 或已冻结 Run。",
         "pantry.delete" => "把一行储藏室台账标记为已停用并递增 revision；行与短标签 ID 保留，读路径不再返回它。",
         "import.study.preview" => "只校验导入内容并返回警告；不写入数据库。",
@@ -280,7 +284,8 @@ pub(crate) fn tool_effects(tool: &str) -> &'static str {
         "run.set_status" | "task.set_status" => {
             "按 expected_revision 更新一个状态并递增 revision。"
         }
-        "run.revise" => "按 expected_revision 只修订运行名称或计划日期；不可修改已冻结的科学设计和 Protocol/材料清单。",
+        "run.revise" => "按 expected_revision 只修订运行名称或计划日期；不可修改已冻结的科学设计和 Protocol/材料清单；已归档 Run 拒绝一切写入。",
+        "record.sign_archive" => "生成归档清单并持久化 summarizing→signed→archived 状态；清单摘要校验失败不部分归档；已归档 Run 的一切写入拒绝。",
         "task.create" => "创建一条日历任务。",
         "protocol.create" => "创建 Protocol 记录并创建不可变的 v1 正文版本。",
         "protocol.revise" => "为 Protocol 追加一个不可变的新版本；不覆盖旧正文。",

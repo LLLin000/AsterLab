@@ -638,6 +638,283 @@ pub(crate) fn normalize_validate_design_data_with_registry(
     serde_json::to_value(design).map_err(|e| CliError::internal(e.to_string()))
 }
 
+/// Run-scoped `run_archive_state` helpers: the terminal Record lifecycle
+/// (`recording`/`summarizing`/`signed`/`archived` + signature + manifest)
+/// persists in the shared database so restarts do not unlock it. Core exposes
+/// the transitions as pure functions; these helpers only load and save them.
+pub(crate) fn load_archive_state(
+    db: &Connection,
+    run_id: &str,
+) -> Result<asterlab_core::record_projection::RecordArchiveState, CliError> {
+    // A missing table (pre-migration database or a raw `records`-only test
+    // fixture) means no Run was ever archived: treat it as recording.
+    let table: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='run_archive_state')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    if !table {
+        return Ok(asterlab_core::record_projection::RecordArchiveState::recording());
+    }
+    let raw: Option<String> = db
+        .query_row(
+            "SELECT data_json FROM run_archive_state WHERE run_id=?1",
+            [run_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    match raw {
+        Some(raw) => serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string())),
+        None => Ok(asterlab_core::record_projection::RecordArchiveState::recording()),
+    }
+}
+
+pub(crate) fn save_archive_state(
+    db: &Connection,
+    run_id: &str,
+    state: &asterlab_core::record_projection::RecordArchiveState,
+) -> Result<(), CliError> {
+    let payload =
+        serde_json::to_string(state).map_err(|e| CliError::internal(e.to_string()))?;
+    db.execute(
+        "INSERT INTO run_archive_state(run_id,data_json,updated_at) VALUES(?1,?2,datetime('now')) \
+         ON CONFLICT(run_id) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at",
+        rusqlite::params![run_id, payload],
+    )
+    .map_err(|e| CliError::internal(e.to_string()))?;
+    Ok(())
+}
+
+/// Rejects any write to a Run whose Record is already archived. Reads stay
+/// open; only facts/prose/links that would change archived content are
+/// refused here so CLI, AppCore and the native bridge share one rule.
+pub(crate) fn ensure_run_not_archived(db: &Connection, run_id: &str) -> Result<(), CliError> {
+    let state = load_archive_state(db, run_id)?;
+    if state.notes_locked() {
+        return Err(CliError::conflict("Run 已签核归档，记录只读"));
+    }
+    Ok(())
+}
+
+/// The single read-only Record projection: frozen plan, timers, links and
+/// notes on one Run. Asset links and timers come from the Run store, notes
+/// and archive state from the Record store; nothing is invented here.
+pub(crate) fn record_projection(
+    db: &Connection,
+    run_id: &str,
+    view: asterlab_core::record_projection::ProjectionView,
+    fov_per_well: u32,
+    now_utc: Option<&str>,
+) -> Result<Value, CliError> {
+    let workspace = run_workspace_typed_for_view(db, run_id, view)?;
+    let timers = load_timer_records(db, run_id)?;
+    let (links, _) = load_record_asset_links(db, run_id)?;
+    let notes = load_record_notes(db, run_id)?;
+    let archive = load_archive_state(db, run_id)?;
+    let projection = asterlab_core::record_projection::build_record_projection(
+        &workspace,
+        &links,
+        &timers,
+        &asterlab_core::record_projection::RecordProjectionInput {
+            view,
+            fov_per_well: fov_per_well.max(1),
+            notes,
+            archive,
+            now_utc: now_utc.map(str::to_owned),
+        },
+    );
+    serde_json::to_value(&projection).map_err(|e| CliError::internal(e.to_string()))
+}
+
+/// `recording -> summarizing -> signed -> archived` in one shared-transaction
+/// step: the manifest fingerprints the exact projection, every note and every
+/// linked asset; the caller supplies the signature clock. The persisted state
+/// survives restarts, so an archived Run stays locked for every write entry.
+pub(crate) fn sign_and_archive_record(
+    db: &Connection,
+    run_id: &str,
+    view: asterlab_core::record_projection::ProjectionView,
+    fov_per_well: u32,
+    now_utc: Option<&str>,
+    signature: asterlab_core::record_projection::ArchiveSignature,
+) -> Result<Value, CliError> {
+    get(db, run_id).and_then(|run| {
+        if run["kind"] != "run" {
+            Err(CliError::input("run_id 必须指向实验运行"))
+        } else {
+            Ok(run)
+        }
+    })?;
+    let mut state = load_archive_state(db, run_id)?;
+    if state.status == asterlab_core::record_projection::RecordStatus::Recording {
+        state = asterlab_core::record_projection::summarize_record(&state)
+            .map_err(|e| CliError::conflict(e.message))?;
+    }
+    let workspace = run_workspace_typed_for_view(db, run_id, view)?;
+    let timers = load_timer_records(db, run_id)?;
+    let (links, assets) = load_record_asset_links(db, run_id)?;
+    let notes = load_record_notes(db, run_id)?;
+    let projection = asterlab_core::record_projection::build_record_projection(
+        &workspace,
+        &links,
+        &timers,
+        &asterlab_core::record_projection::RecordProjectionInput {
+            view,
+            fov_per_well: fov_per_well.max(1),
+            notes,
+            archive: state.clone(),
+            now_utc: now_utc.map(str::to_owned),
+        },
+    );
+    let archived = asterlab_core::record_projection::sign_and_archive(
+        &state, &signature, &projection, &links, &assets,
+    )
+    .map_err(|e| {
+        if matches!(
+            e.code.as_str(),
+            "invalid_transition" | "already_archived" | "asset_checksum_missing"
+        ) {
+            CliError::conflict(e.message)
+        } else {
+            CliError::input(e.message)
+        }
+    })?;
+    save_archive_state(db, run_id, &archived)?;
+    serde_json::to_value(&archived).map_err(|e| CliError::internal(e.to_string()))
+}
+
+fn load_timer_records(
+    db: &Connection,
+    run_id: &str,
+) -> Result<Vec<asterlab_core::timer::TimerRecord>, CliError> {
+    let mut statement = match db
+        .prepare("SELECT data_json FROM timer_records WHERE run_id=?1 ORDER BY task_key,timer_id")
+    {
+        Ok(statement) => statement,
+        Err(e) if e.to_string().contains("no such table") => return Ok(Vec::new()),
+        Err(e) => return Err(CliError::internal(e.to_string())),
+    };
+    let rows = statement
+        .query_map([run_id], |row| row.get::<_, String>(0))
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let mut timers = Vec::new();
+    for raw in rows.flatten() {
+        timers.push(serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?);
+    }
+    Ok(timers)
+}
+
+/// Prose notes of a Run: `note` records plus the notebook-stage observations
+/// the bridge writes. Both are prose, never facts; the projection resolves
+/// the markdown citations, it never stores them.
+fn load_record_notes(
+    db: &Connection,
+    run_id: &str,
+) -> Result<Vec<asterlab_core::record_projection::RecordNote>, CliError> {
+    let mut statement = db
+        .prepare(
+            "SELECT id,kind,data_json,updated_at FROM records \
+             WHERE parent_id=?1 AND (kind='note' OR kind='execution_event') \
+             ORDER BY created_at ASC, rowid ASC",
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let rows = statement
+        .query_map([run_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    let mut notes = Vec::new();
+    for row in rows.flatten() {
+        let (id, kind, raw, updated_at) = row;
+        let data: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+        if kind == "execution_event" && data["stage"].as_str() != Some("notebook") {
+            continue;
+        }
+        let title = if kind == "note" {
+            data.get("title").and_then(|value| value.as_str()).map(str::to_owned)
+        } else {
+            None
+        };
+        let content = data.get("content").and_then(Value::as_str).unwrap_or("").to_owned();
+        notes.push(asterlab_core::record_projection::RecordNote {
+            note_id: id,
+            title,
+            markdown: content,
+            updated_at_utc: updated_at,
+        });
+    }
+    Ok(notes)
+}
+
+/// Stored asset links in the two shapes Core needs: the Run association and
+/// the observed file evidence used for the archive checksums.
+fn load_record_asset_links(
+    db: &Connection,
+    run_id: &str,
+) -> Result<
+    (
+        Vec<asterlab_core::assets::AssetLink>,
+        Vec<asterlab_core::assets::AssetRef>,
+    ),
+    CliError,
+> {
+    let value = list_asset_links(db, run_id)?;
+    let mut links = Vec::new();
+    let mut assets = Vec::new();
+    for item in value.as_array().into_iter().flatten() {
+        let asset: asterlab_core::assets::AssetRef = serde_json::from_value(item.clone())
+            .map_err(|e| CliError::internal(format!("invalid asset link: {e}")))?;
+        let link = &item["link"];
+        links.push(asterlab_core::assets::AssetLink {
+            asset_id: asset.id.clone(),
+            run_id: run_id.to_owned(),
+            task_key: link["taskKey"].as_str().unwrap_or("").to_owned(),
+            sample_id: link["sampleId"].as_str().map(str::to_owned),
+            well_id: link["wellId"].as_str().map(str::to_owned),
+            timepoint: link["timepoint"].as_str().map(str::to_owned),
+            fov_index: link["fovIndex"].as_u64().map(|index| index as u32),
+        });
+        assets.push(asset);
+    }
+    Ok((links, assets))
+}
+pub(crate) fn ensure_run_not_archived_tx(tx: &Transaction<'_>, run_id: &str) -> Result<(), CliError> {
+    let table: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='run_archive_state')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    if !table {
+        return Ok(());
+    }
+    let raw: Option<String> = tx
+        .query_row(
+            "SELECT data_json FROM run_archive_state WHERE run_id=?1",
+            [run_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| CliError::internal(e.to_string()))?;
+    if let Some(raw) = raw {
+        let state: asterlab_core::record_projection::RecordArchiveState =
+            serde_json::from_str(&raw).map_err(|e| CliError::internal(e.to_string()))?;
+        if state.notes_locked() {
+            return Err(CliError::conflict("Run 已签核归档，记录只读"));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn run_workspace(db: &Connection, run_id: &str) -> Result<Value, CliError> {
     run_workspace_for_view(
         db,
@@ -1893,5 +2170,43 @@ mod tests {
             .filter_map(|row| row.ok())
             .collect();
         assert!(revisions.len() >= 2);
+    }
+
+    #[test]
+    fn archived_run_rejects_note_and_event_writes() {
+        use asterlab_core::record_projection::{ArchiveSignature, RecordStatus};
+        let mut db = Connection::open_in_memory().unwrap();
+        super::super::store::migrate_records_schema(&mut db).unwrap();
+        seed_cache_runs(&db);
+        assert_eq!(
+            load_archive_state(&db, "run-1").unwrap().status,
+            RecordStatus::Recording
+        );
+        let signature = ArchiveSignature {
+            signed_by: "operator".to_owned(),
+            signed_at_utc: "2026-11-15T10:00:00Z".to_owned(),
+            statement: None,
+        };
+        let view = asterlab_core::record_projection::ProjectionView::Unblinded;
+        let archived = sign_and_archive_record(&db, "run-1", view, 1, None, signature)
+            .expect("sign and archive an empty run");
+        assert_eq!(archived["status"], "archived");
+        // Persisted, not in-memory: reloading the same row still locks.
+        let reopened = load_archive_state(&db, "run-1").unwrap();
+        assert_eq!(reopened.status, RecordStatus::Archived);
+        assert!(reopened.notes_locked());
+        // Archived Runs reject every write entry through the shared guard.
+        let event_error = super::super::run_write::create_execution_event_tx(
+            &db.unchecked_transaction().unwrap(),
+            "run-1",
+            &serde_json::json!({
+                "run_id": "run-1",
+                "event_type": "observation",
+                "content": "late note",
+            }),
+        )
+        .expect_err("archived Run rejects events");
+        assert_eq!(event_error.code, "REVISION_CONFLICT");
+        ensure_run_not_archived(&db, "run-1").expect_err("guard locks archived Run");
     }
 }

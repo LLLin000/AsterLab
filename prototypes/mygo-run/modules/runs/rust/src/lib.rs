@@ -517,6 +517,7 @@ impl CoreRunService {
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
         let event = execution_event_payload(&input)?;
         let db = core.raw_db();
+        cli_impl::ensure_run_not_archived(db, &input.run_id).map_err(map_cli)?;
         let tx = db.unchecked_transaction().map_err(|e| Error::Go(format!("INTERNAL: {e}")))?;
         // A pantry reference is resolved before the write, as the CLI does: an
         // unknown or retired item is NOT_FOUND and nothing is appended.
@@ -541,6 +542,7 @@ impl CoreRunService {
     fn save_timer_impl(&self, timer: TimerRecord) -> Result<TimerRecord, Error> {
         let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        cli_impl::ensure_run_not_archived(core.raw_db(), &timer.run_id).map_err(map_cli)?;
         let record = timer_to_core(&timer)?;
         core.save_timer_record(&record).map_err(Error::Go)?;
         Ok(timer)
@@ -553,6 +555,7 @@ impl CoreRunService {
     fn update_timer_impl(&self, input: TimerActionInput) -> Result<TimerUpdateResult, Error> {
         let mut guard = self.core.lock().map_err(|_| Error::Go("INTERNAL: core lock poisoned".into()))?;
         let core = guard.as_mut().ok_or_else(|| Error::Go("INTERNAL: closed".into()))?;
+        cli_impl::ensure_run_not_archived(core.raw_db(), &input.timer.run_id).map_err(map_cli)?;
         let mut timer = timer_to_core(&input.timer)?;
         let round = match input.action.as_str() {
             "start" => timer.start(&input.now_utc).map(|()| None),
