@@ -2702,6 +2702,9 @@ func main() {
 			}
 			rv := runworkspace.RecordingView{
 				RunID: a.snap.RunID, Kind: kind, Grid: grid, Assets: linkedAssets, Task: task,
+				// The Run blind switch is the single mask source; the table and
+				// plate renderers hide group identity from this flag.
+				Blind: a.runWS.Bench != nil && a.runWS.Bench.Blind,
 				LinkErr:         linkErr,
 				AssetErr:        assetErr,
 				OnRetryAssetErr: onRetryAsset,

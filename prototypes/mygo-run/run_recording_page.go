@@ -46,6 +46,30 @@ func (a *app) syncRunBenchCallbacks() {
 	cb.HistoryInputs = func() (runs.RunSnapshot, []runs.Asset) {
 		return a.snap, a.runAssets
 	}
+	// Bridge v2 generic channel (INT-01, BE-10): the blind switch reads
+	// run.workspace view=blind|unblinded and the exclusion/typed-readout
+	// composers write execution_event.create / readout.submit. Straight
+	// passthrough to the Run service; Core owns all validation.
+	cb.QueryProjection = func(input runs.QueryProjectionInput) (runs.QueryProjectionResult, error) {
+		if a.runSvc == nil {
+			return runs.QueryProjectionResult{}, fmt.Errorf("运行服务不可用")
+		}
+		result, err := a.runSvc.QueryProjection(context.Background(), input)
+		if err != nil {
+			return runs.QueryProjectionResult{}, state.MapError(err)
+		}
+		return result, nil
+	}
+	cb.ExecuteCommand = func(input runs.ExecuteCommandInput) (runs.ExecuteCommandResult, error) {
+		if a.runSvc == nil {
+			return runs.ExecuteCommandResult{}, fmt.Errorf("运行服务不可用")
+		}
+		result, err := a.runSvc.ExecuteCommand(context.Background(), input)
+		if err != nil {
+			return runs.ExecuteCommandResult{}, state.MapError(err)
+		}
+		return result, nil
+	}
 	// The blind flag is view state on the bench; grids are Core-backed data
 	// the flag only masks at render time.
 	blind := a.runWS.Bench != nil && a.runWS.Bench.Blind
