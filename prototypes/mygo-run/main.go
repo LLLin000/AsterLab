@@ -720,10 +720,10 @@ func frozenAssayTimepoints(raw, assayID string) []string {
 }
 
 func (a *app) assetCoordinateOptions(taskKey string) ([]string, []string) {
-	selectedAssay := ""
+	selectedAssay, stepID := "", ""
 	for _, task := range a.snap.Tasks {
 		if task.Key == taskKey {
-			selectedAssay = task.AssayID
+			selectedAssay, stepID = task.AssayID, task.DesignStepID
 			break
 		}
 	}
@@ -744,16 +744,19 @@ func (a *app) assetCoordinateOptions(taskKey string) ([]string, []string) {
 		addTimepoint(task.Timepoint)
 	}
 
+	// QA-HUVEC F2: capture slots come from the Run's frozen plan only. The
+	// Design page live draft (a.designSnap) is never consulted: a design
+	// edited after freezing must not move an executing Run's slots (UX-STATE).
 	designData := a.snap.DesignData
-	if designData == "" && a.designSnap != nil {
-		designData = a.designSnap.Data
-	}
 	if selectedAssay != "" {
 		for _, value := range frozenAssayTimepoints(designData, selectedAssay) {
 			addTimepoint(value)
 		}
 	}
-	wells := designPlateWells(designData, selectedAssay)
+	wells := frozenPlannedWells(a.frozenAsterSource(), selectedAssay, stepID)
+	if len(wells) == 0 {
+		wells = designPlateWells(designData, selectedAssay)
+	}
 	if len(wells) == 0 && selectedAssay != "" {
 		if schema, _, err := assays.BuildSchema([]byte(designData), selectedAssay, ""); err == nil &&
 			(schema.Layout == "plate96" || schema.Layout == "plate12") {
@@ -765,6 +768,241 @@ func (a *app) assetCoordinateOptions(taskKey string) ([]string, []string) {
 		}
 	}
 	return wells, timepoints
+}
+
+// frozenAsterSource returns the exact AsterDoc text frozen on the open Run.
+// Empty when the Run has no frozen document: callers then fall back to the
+// frozen design JSON, never to the live draft.
+func (a *app) frozenAsterSource() string {
+	if a.asterDoc != nil {
+		return a.asterDoc.Source
+	}
+	return ""
+}
+
+// frozenPlannedWells resolves capture slots in fill order from the Run's
+// frozen AsterDoc plan, never the Design-page live mygo instance (QA-HUVEC
+// F2, UX-STATE). Plates contribute their assigned group wells (planned,
+// never full capacity); containers contribute sample_map keys (2D with a
+// plan) or Lane<N> slots (1D, e.g. petri/tubes). Science is never inferred
+// from filenames: unlisted wells simply have no slots. Wells from a second
+// plate/container qualify as "sourceID:well" so the same A1 on two plates
+// never collides; a single source keeps bare wells.
+func frozenPlannedWells(asterSource, assayID, stepID string) []string {
+	assayID, stepID = strings.TrimSpace(assayID), strings.TrimSpace(stepID)
+	if strings.TrimSpace(asterSource) == "" || assayID == "" {
+		return nil
+	}
+	doc, err := asterdoc.Parse(asterSource)
+	if err != nil {
+		return nil
+	}
+	uses := map[string]bool{}
+	for _, m := range doc.Modules {
+		if strings.TrimSpace(m.ID) != stepID {
+			continue
+		}
+		for _, ref := range stepContainerRefs(m.Data) {
+			uses[ref] = true
+		}
+	}
+	type source struct {
+		id    string
+		wells []string
+	}
+	sources := []source{}
+	singleContainer := 0
+	for _, m := range doc.Modules {
+		if m.Kind == "container" {
+			singleContainer++
+		}
+	}
+	for _, m := range doc.Modules {
+		switch m.Kind {
+		case "plate":
+			if m.Plate == nil {
+				continue
+			}
+			if assay := strings.TrimSpace(m.Plate.Assay); assay != "" && assay != assayID {
+				continue
+			}
+			planned := map[string]bool{}
+			for _, wells := range m.Plate.Groups {
+				for _, well := range wells {
+					if well = strings.ToUpper(strings.TrimSpace(well)); well != "" {
+						planned[well] = true
+					}
+				}
+			}
+			if len(planned) == 0 {
+				continue
+			}
+			sources = append(sources, source{id: m.ID, wells: sortedWells(planned)})
+		case "container":
+			if !uses[m.ID] && len(containerSampleMap(m.Data)) == 0 && singleContainer != 1 {
+				continue
+			}
+			wells := containerPlannedWells(m.Data)
+			if len(wells) == 0 {
+				continue
+			}
+			sources = append(sources, source{id: m.ID, wells: wells})
+		}
+	}
+	if len(sources) == 0 {
+		return nil
+	}
+	if len(sources) == 1 {
+		return sources[0].wells
+	}
+	out := []string{}
+	for _, s := range sources {
+		for _, well := range s.wells {
+			out = append(out, s.id+":"+well)
+		}
+	}
+	return out
+}
+
+// stepContainerRefs reads the container refs a frozen step binds through
+// uses (ref + role), so a 1D/2D container resolves to its assay's task.
+func stepContainerRefs(data map[string]any) []string {
+	refs := []string{}
+	uses, _ := data["uses"].([]any)
+	for _, raw := range uses {
+		item, _ := raw.(map[string]any)
+		if ref, _ := item["ref"].(string); strings.TrimSpace(ref) != "" {
+			refs = append(refs, strings.TrimSpace(ref))
+		}
+	}
+	return refs
+}
+
+// containerSampleMap returns the explicit well→sample plan of a generic
+// container, if it declares one. No map means no planned 2D slots: capacity
+// is never used as a plan.
+func containerSampleMap(data map[string]any) map[string]string {
+	out := map[string]string{}
+	raw, _ := data["sample_map"].(map[string]any)
+	for well, sample := range raw {
+		well = strings.ToUpper(strings.TrimSpace(well))
+		if well == "" {
+			continue
+		}
+		out[well] = strings.TrimSpace(firstString(sample))
+	}
+	return out
+}
+
+func firstString(v any) string {
+	switch value := v.(type) {
+	case string:
+		return value
+	case []any:
+		if len(value) > 0 {
+			if s, _ := value[0].(string); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// containerPlannedWells resolves one generic container's planned slots:
+// sample_map keys for 2D labware with a plan, Lane<N> for 1D labware
+// (petri, tube, rack, strip). A 2D format without a map declares nothing.
+func containerPlannedWells(data map[string]any) []string {
+	if plan := containerSampleMap(data); len(plan) > 0 {
+		planned := make([]string, 0, len(plan))
+		for well := range plan {
+			planned = append(planned, well)
+		}
+		return sortedWellsSlice(planned)
+	}
+	format, _ := data["format"].(string)
+	if isTwoDimensionalFormat(format) {
+		return nil
+	}
+	n := containerWellCount(data)
+	if n <= 0 || n > 4096 {
+		return nil
+	}
+	wells := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		wells = append(wells, "Lane"+strconv.Itoa(i))
+	}
+	return wells
+}
+
+func isTwoDimensionalFormat(format string) bool {
+	lower := strings.ToLower(strings.TrimSpace(format))
+	if lower == "" {
+		return true
+	}
+	for _, token := range []string{"well", "plate", "孔板", "孔"} {
+		if strings.Contains(lower, token) {
+			return true
+		}
+	}
+	if i := strings.IndexAny(lower, "0123456789"); i == 0 {
+		return true
+	}
+	return false
+}
+
+func containerWellCount(data map[string]any) int {
+	switch v := data["wells"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func splitWell(well string) (string, int) {
+	i := len(well)
+	for i > 0 && well[i-1] >= '0' && well[i-1] <= '9' {
+		i--
+	}
+	n, _ := strconv.Atoi(well[i:])
+	return well[:i], n
+}
+
+func wellLess(a, b string) bool {
+	rowA, numA := splitWell(a)
+	rowB, numB := splitWell(b)
+	if rowA != rowB {
+		return rowA < rowB
+	}
+	if numA != numB {
+		return numA < numB
+	}
+	return a < b
+}
+
+func sortedWells(set map[string]bool) []string {
+	return sortedWellsSlice(keysOf(set))
+}
+
+func sortedWellsSlice(wells []string) []string {
+	out := append([]string(nil), wells...)
+	sort.Slice(out, func(i, j int) bool { return wellLess(out[i], out[j]) })
+	return out
+}
+
+func keysOf(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for well := range set {
+		out = append(out, well)
+	}
+	return out
 }
 
 func (a *app) linkRunAsset(taskKey string, coordinate runs.AssetLink) error {
@@ -833,10 +1071,42 @@ func (a *app) relabelRunAsset(_ string, coordinate runs.AssetLink) error {
 		return state.MapError(err)
 	}
 	a.upsertRunAsset(updated)
+	a.syncAssetSurfaces()
+	return nil
+}
+
+// unlinkRunAsset drops one asset link through Core, then syncs every
+// surface (strip, gallery, history projection) from the same updated
+// asset list. The file itself is never touched (UX-P5, UX-STATE).
+func (a *app) unlinkRunAsset(assetID string) error {
+	if a.runSvc == nil || a.snap.RunID == "" || strings.TrimSpace(assetID) == "" {
+		return fmt.Errorf("当前没有可解除关联的 Run 资产")
+	}
+	removed, err := a.runSvc.UnlinkAssetLink(context.Background(), a.snap.RunID, strings.TrimSpace(assetID))
+	if err != nil {
+		return state.MapError(err)
+	}
+	kept := a.runAssets[:0]
+	for _, existing := range a.runAssets {
+		if existing.ID != removed.ID && existing.ID != strings.TrimSpace(assetID) {
+			kept = append(kept, existing)
+		}
+	}
+	a.runAssets = kept
+	a.syncAssetSurfaces()
+	return nil
+}
+
+// syncAssetSurfaces rebuilds the workspace view model from the current
+// snapshot and drops the shared record projection memo so the strip, the
+// gallery and the history matrix all read the same updated asset list.
+// Link writes never bump the Run revision, so the memo key would otherwise
+// keep serving the pre-write projection.
+func (a *app) syncAssetSurfaces() {
 	if a.runWS != nil {
 		a.refreshRunWorkspace()
 	}
-	return nil
+	a.invalidateRecord()
 }
 
 // linkAssetPaths validates every selected path against rootDir before saving
@@ -863,8 +1133,10 @@ func (a *app) linkAssetPaths(rootID, rootDir string, paths []string, coordinate 
 		}
 		a.upsertRunAsset(saved)
 	}
+	a.syncAssetSurfaces()
 	return nil
 }
+
 // recordFOV returns the board's selected FOV layer for the fetch memo (0
 // means Core's default of one planned slot per well). It peeks without
 // creating board state for a Run that has none yet.
@@ -1834,10 +2106,10 @@ func (a *app) prepareGrid() {
 		a.ws.Grid = nil
 		return
 	}
+	// The grid decodes the Run's frozen design only. A live Design-page
+	// draft is never substituted: unfrozen content stays an explicit
+	// "missing frozen design" error with retry (UX-P5, UX-STATE).
 	designData := a.snap.DesignData
-	if designData == "" && a.designSnap != nil {
-		designData = a.designSnap.Data
-	}
 	if designData == "" {
 		a.ws.Grid = nil
 		a.ws.Error = "运行缺少冻结设计数据"
@@ -2793,11 +3065,16 @@ func main() {
 				assetErr = a.assetErr
 				onRetryAsset = a.assetErrRetry
 			}
+			// The gallery renders the same frozen plan as the bench strip:
+			// whole unphotographed wells stay visible as gaps (UX-P4).
+			planWells, planFOV := a.captureWellsForTask(task.TaskKey)
+			_, planTimes := a.assetCoordinateOptions(task.TaskKey)
 			rv := runworkspace.RecordingView{
 				RunID: a.snap.RunID, Kind: kind, Grid: grid, Assets: linkedAssets, Task: task,
+				PlannedWells: planWells, PlannedTimepoints: planTimes, PlannedFOV: planFOV,
 				// The Run blind switch is the single mask source; the table and
 				// plate renderers hide group identity from this flag.
-				Blind: a.runWS.Bench != nil && a.runWS.Bench.Blind,
+				Blind:           a.runWS.Bench != nil && a.runWS.Bench.Blind,
 				LinkErr:         linkErr,
 				AssetErr:        assetErr,
 				OnRetryAssetErr: onRetryAsset,
@@ -2820,6 +3097,18 @@ func main() {
 				},
 				OnRelabelAsset: func(asset runworkspace.LinkedAsset) {
 					a.openAssetLinkForm(task.TaskKey, asset)
+					if a.shell != nil {
+						a.shell.Invalidate()
+					}
+				},
+				OnUnlinkAsset: func(asset runworkspace.LinkedAsset) {
+					if err := a.unlinkRunAsset(asset.AssetID); err != nil {
+						a.setAssetError(task.TaskKey, "解除关联失败："+err.Error(), func() {
+							_ = a.unlinkRunAsset(asset.AssetID)
+						})
+					} else {
+						a.clearAssetError()
+					}
 					if a.shell != nil {
 						a.shell.Invalidate()
 					}

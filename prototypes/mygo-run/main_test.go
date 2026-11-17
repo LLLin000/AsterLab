@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/designer"
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/resultgrid"
@@ -414,6 +415,157 @@ func TestAssetCoordinateOptionsIncludesAllFrozenTimepointsForGapPrefill(t *testi
 	)
 	if err != nil || got.Timepoint != "6 h" {
 		t.Fatalf("gap prefill validation failed: got=%+v err=%v", got, err)
+	}
+}
+
+// CLOSE-06 fixtures: a HUVEC-like frozen AsterDoc with 9 planned wells on a
+// 12-well plate (capacity is never the plan), plus container variants.
+const close06Huvec9Source = "```asterlab\nkind: group\nid: g-3\nschema: 1\nname: 3% GelMA\nrole: treatment\n```\n" +
+	"```asterlab\nkind: group\nid: g-5\nschema: 1\nname: 5% GelMA\nrole: treatment\n```\n" +
+	"```asterlab\nkind: group\nid: g-7\nschema: 1\nname: 7% GelMA\nrole: treatment\n```\n" +
+	"```asterlab\nkind: assay\nid: assay-tube\nschema: 1\ntitle: HUVEC 成管\nendpoint: tube length\nunit: µm\ngroup_refs: [g-3, g-5, g-7]\ntimepoints: [6 h, 12 h, 24 h]\n```\n" +
+	"```asterlab\nkind: plate\nid: plate-huvec\nschema: 1\nformat: 12\nassay: assay-tube\ngroups:\n  g-3: [A1, A2, A3]\n  g-5: [B1, B2, B3]\n  g-7: [C1, C2, C3]\n```\n" +
+	"```asterlab\nkind: measurement_profile\nid: mp-img\nschema: 1\nendpoint: 明场显微图像\nunit: images\nreadout_schema:\n  per_well_fov_count: 6\n```\n" +
+	"```asterlab\nkind: step\nid: step-img\nschema: 2\ntitle: 采图\nassay: assay-tube\npath: root/img\nuses:\n  - ref: mp-img\n    role: other\n```\n"
+
+func TestFrozenPlannedWellsUsesPlateGroupsNotCapacity(t *testing.T) {
+	wells := frozenPlannedWells(close06Huvec9Source, "assay-tube", "step-img")
+	want := []string{"A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"}
+	if len(wells) != len(want) {
+		t.Fatalf("planned wells = %v, want 9 planned not 12 capacity", wells)
+	}
+	for i := range want {
+		if wells[i] != want[i] {
+			t.Fatalf("planned wells = %v, want %v in fill order", wells, want)
+		}
+	}
+	if got := frozenPlannedWells(close06Huvec9Source, "other-assay", "step-img"); len(got) != 0 {
+		t.Fatalf("another assay must resolve no wells, got %v", got)
+	}
+}
+
+func TestAssetCoordinateOptionsReadsFrozenPlanNotLiveDraft(t *testing.T) {
+	a := &app{
+		snap: runs.RunSnapshot{
+			Tasks:      []runs.RunTask{{Key: "task", AssayID: "assay-tube", Timepoint: "6 h", DesignStepID: "step-img"}},
+			DesignData: `{"mygo":{"instances":{"step":[{"id":"plate","type":"plate_12","props":{"rows":3,"cols":4}}]},"assays":{"assay-tube":{"plateInstanceId":"plate"}}}}`,
+		},
+		asterDoc: &asterdoc.FrozenAsterDoc{Source: close06Huvec9Source},
+		// A newer live draft must not move the frozen slots (QA-HUVEC F2).
+		designSnap: &runs.DesignSnapshot{Data: `{"mygo":{"instances":{"step":[{"id":"big","type":"plate_96","props":{"rows":8,"cols":12}}]},"assays":{"assay-tube":{"plateInstanceId":"big"}}}}`},
+	}
+	wells, _ := a.assetCoordinateOptions("task")
+	if len(wells) != 9 || wells[0] != "A1" || wells[8] != "C3" {
+		t.Fatalf("coordinate wells = %v, want frozen 9 planned", wells)
+	}
+}
+
+func TestFrozenPlannedWells1DContainerReadsLaneSlots(t *testing.T) {
+	source := "```asterlab\nkind: group\nid: g-cfu\nschema: 1\nname: control\nrole: control\n```\n" +
+		"```asterlab\nkind: assay\nid: assay-cfu\nschema: 1\ntitle: CFU\nendpoint: colonies\nunit: CFU\ngroup_refs: [g-cfu]\ntimepoints: [D1]\n```\n" +
+		"```asterlab\nkind: container\nid: rack-8\nschema: 1\nformat: tube-rack\nwells: 8\n```\n" +
+		"```asterlab\nkind: step\nid: step-count\nschema: 2\ntitle: 计数\nassay: assay-cfu\npath: root/count\nuses:\n  - ref: rack-8\n    role: other\n```\n"
+	wells := frozenPlannedWells(source, "assay-cfu", "step-count")
+	if len(wells) != 8 || wells[0] != "Lane1" || wells[7] != "Lane8" {
+		t.Fatalf("1D wells = %v, want Lane1..Lane8", wells)
+	}
+}
+
+func TestFrozenPlannedWellsContainer2DUsesSampleMapNotCapacity(t *testing.T) {
+	source := "```asterlab\nkind: group\nid: g-q\nschema: 1\nname: control\nrole: control\n```\n" +
+		"```asterlab\nkind: assay\nid: assay-q\nschema: 1\ntitle: qPCR\nendpoint: Ct\nunit: Ct\ngroup_refs: [g-q]\ntimepoints: [D1]\n```\n" +
+		"```asterlab\nkind: container\nid: plate-q\nschema: 1\nformat: 96-well\nwells: 96\nsample_map:\n  A1: s-1\n  H12: s-2\n```\n"
+	wells := frozenPlannedWells(source, "assay-q", "")
+	if len(wells) != 2 || wells[0] != "A1" || wells[1] != "H12" {
+		t.Fatalf("2D container wells = %v, want map keys not 96 capacity", wells)
+	}
+	bare := "```asterlab\nkind: group\nid: g-q\nschema: 1\nname: control\nrole: control\n```\n" +
+		"```asterlab\nkind: assay\nid: assay-q\nschema: 1\ntitle: qPCR\nendpoint: Ct\nunit: Ct\ngroup_refs: [g-q]\ntimepoints: [D1]\n```\n" +
+		"```asterlab\nkind: container\nid: plate-bare\nschema: 1\nformat: 96-well\nwells: 96\n```\n"
+	if got := frozenPlannedWells(bare, "assay-q", ""); len(got) != 0 {
+		t.Fatalf("2D container without a plan must declare no slots, got %v", got)
+	}
+}
+
+func TestFrozenPlannedWellsMultiPlateQualifiesIdentity(t *testing.T) {
+	source := "```asterlab\nkind: group\nid: g-a\nschema: 1\nname: a\nrole: treatment\n```\n" +
+		"```asterlab\nkind: assay\nid: assay-m\nschema: 1\ntitle: m\nendpoint: e\nunit: u\ngroup_refs: [g-a]\ntimepoints: [D1]\n```\n" +
+		"```asterlab\nkind: plate\nid: p-one\nschema: 1\nformat: 12\nassay: assay-m\ngroups:\n  g-a: [A1]\n```\n" +
+		"```asterlab\nkind: plate\nid: p-two\nschema: 1\nformat: 12\nassay: assay-m\ngroups:\n  g-a: [A1]\n```\n"
+	wells := frozenPlannedWells(source, "assay-m", "")
+	if len(wells) != 2 || wells[0] != "p-one:A1" || wells[1] != "p-two:A1" {
+		t.Fatalf("multi-plate wells = %v, want qualified identities", wells)
+	}
+}
+
+func TestFrozenPlannedWells384Subset(t *testing.T) {
+	source := "```asterlab\nkind: group\nid: g-a\nschema: 1\nname: a\nrole: treatment\n```\n" +
+		"```asterlab\nkind: assay\nid: assay-m\nschema: 1\ntitle: m\nendpoint: e\nunit: u\ngroup_refs: [g-a]\ntimepoints: [D1]\n```\n" +
+		"```asterlab\nkind: plate\nid: p-384\nschema: 1\nformat: 384\nassay: assay-m\ngroups:\n  g-a: [A1, P24]\n```\n"
+	wells := frozenPlannedWells(source, "assay-m", "")
+	if len(wells) != 2 || wells[0] != "A1" || wells[1] != "P24" {
+		t.Fatalf("384 wells = %v, want [A1 P24]", wells)
+	}
+}
+
+func TestPlanBatchDropsSeventhImageOverflowsToNextWell(t *testing.T) {
+	wells := []string{"A1", "A2", "A3"}
+	cov := runworkspace.CoverageByWell(nil, wells, "6h", 6)
+	drops := runworkspace.PlanBatchDrops(wells, "6h", 6, cov, 7)
+	if len(drops) != 7 {
+		t.Fatalf("7-file drops = %+v, want 7", drops)
+	}
+	for i := range 6 {
+		if drops[i] != (runworkspace.BatchDrop{WellID: "A1", Timepoint: "6h", FOVIndex: uint32(i + 1)}) {
+			t.Fatalf("drop %d = %+v, want A1/FOV%d first", i, drops[i], i+1)
+		}
+	}
+	if drops[6] != (runworkspace.BatchDrop{WellID: "A2", Timepoint: "6h", FOVIndex: 1}) {
+		t.Fatalf("7th drop = %+v, want A2/FOV1 overflow", drops[6])
+	}
+}
+
+type assetUnlinkSpy struct {
+	runs.RunService
+	unlinked []string
+	asset    runs.Asset
+}
+
+func (s *assetUnlinkSpy) UnlinkAssetLink(_ context.Context, _ string, assetID string) (runs.Asset, error) {
+	s.unlinked = append(s.unlinked, assetID)
+	removed := s.asset
+	removed.ID = assetID
+	return removed, nil
+}
+
+func (s *assetUnlinkSpy) ListTimers(context.Context, string) ([]runs.TimerRecord, error) {
+	return nil, nil
+}
+
+func TestUnlinkRunAssetSyncsSurfaces(t *testing.T) {
+	spy := &assetUnlinkSpy{asset: runs.Asset{ID: "asset-1"}}
+	a := &app{
+		runSvc: spy,
+		snap:   runs.RunSnapshot{RunID: "run-1", DesignID: "design-1"},
+		runAssets: []runs.Asset{
+			{ID: "asset-1", Link: runs.AssetLink{RunID: "run-1", TaskKey: "t", WellID: "A1"}},
+			{ID: "asset-2", Link: runs.AssetLink{RunID: "run-1", TaskKey: "t", WellID: "A2"}},
+		},
+		recKey: "stale-memo",
+	}
+	if err := a.unlinkRunAsset("asset-1"); err != nil {
+		t.Fatalf("unlink: %v", err)
+	}
+	if len(spy.unlinked) != 1 || spy.unlinked[0] != "asset-1" {
+		t.Fatalf("UnlinkAssetLink calls = %v", spy.unlinked)
+	}
+	if len(a.runAssets) != 1 || a.runAssets[0].ID != "asset-2" {
+		t.Fatalf("runAssets after unlink = %+v", a.runAssets)
+	}
+	// Link writes never bump the Run revision: the shared record memo must
+	// drop or history keeps serving the pre-write projection.
+	if a.recKey != "" || a.recProj != nil {
+		t.Fatalf("record memo not invalidated after unlink")
 	}
 }
 

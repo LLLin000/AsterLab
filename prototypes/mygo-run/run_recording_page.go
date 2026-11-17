@@ -339,7 +339,7 @@ func (a *app) requestBatchLink(taskKey string) {
 		a.upsertRunAsset(saved)
 		linked++
 	}
-	a.refreshRunWorkspace()
+	a.syncAssetSurfaces()
 	done := fmt.Sprintf("已关联 %d 个文件", linked)
 	if skipped > 0 {
 		done += fmt.Sprintf("，%d 个未关联（空槽不足或文件不可读）", skipped)
