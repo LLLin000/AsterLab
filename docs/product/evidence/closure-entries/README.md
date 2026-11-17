@@ -90,3 +90,9 @@
 - `go test . -count=1`（根包，main/protocol/notebook 改动）→ 通过
 - `CLOSE07_EVIDENCE=1 go test ./internal/runworkspace -run TestClose07EntriesEvidence` → 6 张截图
 - 证据 PNG 由 `ui.Tester` 在 1360x880 / 900x600、浅/深色下真实渲染。
+
+## Windows Gate 独立验证（`6923fd4`，coordinator 执行）
+
+- 二进制：门禁构建（`BUILD_INFO` commit `6923fd4` 与 head 一致；`LOCAL_GATE: PASS`）。
+- 双实例跳转（`close07-deeplink-jump-1360x880-light.png`）：实例 A 开工作区，实例 B 带 `asterlab://run/<id>/well/A1` 启动——B 瞬退（rc=0），A 跳到 Run 页并选中 A1。原生 URI 注册表项由安装器写入（RC-01 覆盖 uninstall 清理）。
+- 单盲入口：Run 页恰 1 个设盲开关；导出命名统一（`导出方案 PDF`，无裸 `导出 PDF`）。
