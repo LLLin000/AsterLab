@@ -69,3 +69,19 @@ CARGO_TARGET_DIR=D:/.ci-cache/cargo-target GOCACHE=D:/.ci-cache/go `
   拔掉 `asset_roots` 后导出，Toast 应点名缺失资产。
 2. 全量套件＋原生模块检查（`mygo native build` 后）。
 3. 真窗截图附本目录（本卡未生成 GUI 截图；`ui.Tester` 覆盖见上）。
+
+## Windows Gate 实窗＋落盘验证（`97d3ed7`，coordinator 执行）
+
+- 二进制：`dist/mygo-run.exe`（sha256
+  `D40363884F8293925C33DF1942563CC52BB07D41198D88961B0F1EDD4AB5880B`）＋
+  `dist/Runs.dll`（sha256
+  `6E4A295B0598F494F8767020B47966D0DF09C2BD2C9A4E09F3CD6D3309473D9E`），
+  `BUILD_INFO` commit `97d3ed7` 与 head 一致；`LOCAL_GATE: PASS`。
+- `ui-pdf-archive-1360x880-light.png`：终态归档视图渲染同源内容，
+  `导出归档包` 与 `导出 PDF` 双按钮就位。
+- 落盘链（绕开原生保存对话框的一次性测试，事后已删）：
+  真实 `recordPDFLoader`（`Roots.Resolve`＋共享解码器）读种子 PNG＋TIFF，
+  `BuildArchive.PDF` 写出 18715 字节，内容流含 2 个图像放置操作。
+  注意 gofpdf 会把像素相同的两图去重为 1 个共享对象——这是库行为，
+  不是丢图（两槽位均有放置操作为证）。
+- 未验证：原生保存对话框的点击保存路径（自动化无法驱动，按惯例标出）。
