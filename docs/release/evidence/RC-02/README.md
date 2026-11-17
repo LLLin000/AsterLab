@@ -76,3 +76,18 @@ Post-verification cleanup: uninstalled again (exit 0, INSTDIR/HKCU/shortcuts gon
 - `v2-upgraded-open-old-data.png` — same after overwrite upgrade install.
 - `v3-reinstalled-open-old-data.png` — same after uninstall + reinstall.
 - `uninstalled-no-instdir.png` — foregrounded terminal proving INSTDIR/HKCU/shortcuts gone, data dir intact.
+
+## Screenshot capture proof (per Main's evidence-honesty follow-up)
+
+Each of the three stage screenshots is a **genuine, distinct capture** taken on a separate launch with a separate capture timestamp and a stage-distinguishing terminal panel overlaid (stage label + UTC capture time + live DB hash + integrity/row/user_version). The app window was foregrounded immediately before each capture. md5 hashes differ between all three (and from the uninstall-state shot); see table. No file was duplicated under multiple names.
+
+| file | stage | capture timestamp (UTC) | DB SHA256 at capture (prefix) | md5 of PNG |
+|---|---|---|---|---|
+| `v1-open-old-data.png` | A — fresh v1 install opened on QA-05 v0 fixture (migrated to v1) | 2026-11-17 12:27:47 | `33118C49…` | `bfb1215c50981d91a436227d825931fb` |
+| `v2-upgraded-open-old-data.png` | B — same install after overwrite (v2) upgrade | 2026-11-17 12:30:27 | `1ABEE49A…` | `efce4e3e58c86a0e32b6db5bee5a6a26` |
+| `v3-reinstalled-open-old-data.png` | C — after uninstall + reinstall | 2026-11-17 12:37:50 | `1ABEE49A…` | `713392ff63bf0993fd138c923cbab5d9` |
+| `uninstalled-no-instdir.png` | uninstall-state proof (foregrounded terminal) | 2026-11-17 12:09 (initial) | `1ABEE49A…` | `52387c6687d4fcc60f2085f813b6332d` |
+
+Stage A's DB hash differs from B/C because the first open performs the v0→v1 migration (checkpointed on close); B and C are legitimately the same hash because the upgrade/reinstall only overwrite binaries and never touch the data dir. The three screenshots are not pixel-identical: distinct md5s above (B vs C differ by capture timestamp and terminal panel content even though the app pane is the same).
+
+Capture method: each stage = `Start-Process` of the installed exe with `LABWORKBENCH_DATA_DIR=D:/.ci-cache/rc02-data`, `mygo-automation open/wait/snapshot` to confirm the `Legacy design` / `Legacy project` / `1 个项目 · 1 个设计` state, then a foregrounded full-screen `CopyFromScreen` capture with a stage-labelled terminal panel (stage label + UTC timestamp + live `PRAGMA` output) overlaid in the same frame. App window moved to the left, terminal panel to the right before capture. No file was duplicated under multiple names.
