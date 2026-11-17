@@ -213,6 +213,36 @@ func TestGenericChannelRejectsBadEnvelopes(t *testing.T) {
 	}
 }
 
+func TestTimeBudgetMatchesPersistedSpecsAcrossColdHotAlternation(t *testing.T) {
+	// The card's case: one 5min hands-on step plus one 10min wait step, each
+	// repeated 3x, is 45 minutes of span with 15 minutes hands-on. The Go
+	// service must reuse Core's budget (repeat multiplies, waits are windows),
+	// never re-sum durations.
+	svc, err := NewTimeBudgetService()
+	if err != nil {
+		t.Fatalf("NewTimeBudgetService: %v", err)
+	}
+	ctx := context.Background()
+	budget, err := svc.ProjectTimeBudget(ctx, ProjectTimeBudgetInput{SpecsJSON: `[
+		{"schema_version":2,"operation":{"kind":"incubate","temperature":{"value":80.0,"unit":"C"},"duration":{"value":5.0,"unit":"min"}},"timing":{"kind":"hands_on","duration":{"value":5.0,"unit":"min"}},"repeat":{"count":3}},
+		{"schema_version":2,"operation":{"kind":"incubate","temperature":{"value":-20.0,"unit":"C"},"duration":{"value":10.0,"unit":"min"}},"timing":{"kind":"wait","duration":{"value":10.0,"unit":"min"}},"repeat":{"count":3}}
+	]`})
+	if err != nil {
+		t.Fatalf("ProjectTimeBudget: %v", err)
+	}
+	closeEnough(t, "total span", budget.TotalSpanS, 2700)
+	closeEnough(t, "hands-on", budget.HandsOnS, 900)
+	if len(budget.ParallelWindows) != 1 {
+		t.Fatalf("wait repeats stay one window, got %d", len(budget.ParallelWindows))
+	}
+	if budget.ParallelWindows[0].StartS != 900 || budget.ParallelWindows[0].EndS != 2700 {
+		t.Fatalf("wait window = %+v, want [900,2700]", budget.ParallelWindows[0])
+	}
+	if _, err := svc.ProjectTimeBudget(ctx, ProjectTimeBudgetInput{SpecsJSON: `[{"nope":1}]`}); err == nil {
+		t.Fatal("a malformed spec array must be INVALID, never an empty budget")
+	}
+}
+
 func closeEnough(t *testing.T, label string, got, want float64) {
 	t.Helper()
 	if math.Abs(got-want) > 1e-9 {

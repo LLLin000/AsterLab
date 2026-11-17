@@ -340,16 +340,7 @@ pub(crate) fn expand_block(
     }
     for step in &data.steps {
         match step {
-            ProtocolStep::Text {
-                use_id,
-                title,
-                instruction,
-                parameter_refs,
-                visualization,
-                time_scope,
-                checks,
-                ..
-            } => {
+            ProtocolStep::Text { use_id, title, instruction, parameter_refs, visualization, time_scope, checks, operation_spec, .. } => {
                 if acc.steps.len() >= 500 {
                     return Err(CliError::input("组合展开超过 500 个操作步骤；请拆分预览"));
                 }
@@ -382,18 +373,7 @@ pub(crate) fn expand_block(
                             .map_err(|e| CliError::internal(e.to_string()))
                     })
                     .transpose()?;
-                acc.steps.push(OperationStep {
-                    path: step_path,
-                    use_id: use_id.clone(),
-                    title: title.clone(),
-                    instruction: instruction.clone(),
-                    parameters,
-                    unresolved_parameter_refs: unresolved_refs,
-                    source_block_version_id: version_id.to_owned(),
-                    visualization,
-                    time_scope: *time_scope,
-                    checks: checks.clone(),
-                });
+                acc.steps.push(OperationStep { path: step_path, use_id: use_id.clone(), title: title.clone(), instruction: instruction.clone(), parameters, unresolved_parameter_refs: unresolved_refs, source_block_version_id: version_id.to_owned(), visualization, time_scope: *time_scope, operation_spec: operation_spec.clone(), checks: checks.clone(), });
             }
             ProtocolStep::BlockUse {
                 use_id,
@@ -478,6 +458,35 @@ pub(crate) fn block_preview(
         module_contracts: acc.module_contracts,
     };
     serde_json::to_value(preview).map_err(|e| CliError::internal(e.to_string()))
+}
+/// `protocol.time_budget`: Core's serial time projection over the persisted
+/// OperationSpec v2 sidecars of one block version's expanded steps. Steps
+/// without `timing` add no duration; repeat/schedule/anchor rules follow
+/// `docs/contracts/operation-spec-v2.md`. Read-only: no records change.
+pub(crate) fn protocol_time_budget(db: &Connection, version_id: &str) -> Result<Value, CliError> {
+    let preview = block_preview(db, version_id, &[])?;
+    let steps: Vec<asterlab_core::protocol_preview::OperationStep> =
+        serde_json::from_value(preview["steps"].clone())
+            .map_err(|e| CliError::internal(e.to_string()))?;
+    let mut specs = Vec::with_capacity(steps.len());
+    let mut without_timing = 0usize;
+    for step in &steps {
+        match &step.operation_spec {
+            Some(spec) => specs.push(spec.clone()),
+            None => without_timing += 1,
+        }
+    }
+    let budget = asterlab_core::protocol_preview::project_time_budget(&specs)
+        .map_err(CliError::input)?;
+    Ok(serde_json::json!({
+        "block_version_id": version_id,
+        "step_count": steps.len(),
+        "steps_with_timing": specs.len(),
+        "steps_without_timing": without_timing,
+        "total_span_s": budget.total_span_s,
+        "hands_on_s": budget.hands_on_s,
+        "parallel_windows": budget.parallel_windows,
+    }))
 }
 pub fn protocol_block_manifest(
     db: &Connection,

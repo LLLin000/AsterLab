@@ -44,6 +44,8 @@ pub struct OperationStep {
     pub visualization: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_scope: Option<StepTimeScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_spec: Option<crate::operation_spec::OperationSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<StepCheck>,
 }
@@ -412,6 +414,7 @@ mod tests {
             source_block_version_id: "v".into(),
             visualization: None,
             time_scope: None,
+            operation_spec: None,
             checks: vec![],
         };
         assert!(!serde_json::to_value(step)
@@ -419,5 +422,37 @@ mod tests {
             .as_object()
             .unwrap()
             .contains_key("visualization"));
+    }
+
+    #[test]
+    fn operation_spec_survives_a_preview_round_trip() {
+        use crate::operation_spec::OperationSpec;
+        let spec: OperationSpec = serde_json::from_value(serde_json::json!({
+            "schema_version": 2,
+            "operation": { "kind": "incubate", "temperature": { "value": 4.0, "unit": "C" }, "duration": { "value": 2.0, "unit": "h" } },
+            "timing": { "kind": "wait", "duration": { "value": 2.0, "unit": "h" } },
+            "time_anchor_id": "t0",
+            "schedule": { "interval": { "value": 6.0, "unit": "h" }, "occurrences": 3, "offset": { "value": 6.0, "unit": "h" } }
+        }))
+        .unwrap();
+        assert!(spec.validate().is_ok());
+        let step = OperationStep {
+            path: "root/cold".into(),
+            use_id: "cold".into(),
+            title: "Cold hold".into(),
+            instruction: "Hold".into(),
+            parameters: vec![],
+            unresolved_parameter_refs: vec![],
+            source_block_version_id: "v".into(),
+            visualization: None,
+            time_scope: None,
+            operation_spec: Some(spec.clone()),
+            checks: vec![],
+        };
+        let back: OperationStep = serde_json::from_value(serde_json::to_value(&step).unwrap()).unwrap();
+        assert_eq!(back.operation_spec, Some(spec));
+        let budget = project_time_budget(&[back.operation_spec.unwrap()]).unwrap();
+        assert_eq!(budget.parallel_windows.len(), 3);
+        assert_eq!(budget.parallel_windows[0].time_anchor_id.as_deref(), Some("t0"));
     }
 }
