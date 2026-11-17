@@ -4,6 +4,7 @@ package main
 // Notebook/Protocol Owner after Wave 1 extraction.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -125,7 +126,7 @@ func (a *app) recordBoard() *recordBoardView {
 		st = &recordBoardView{fov: 1, imgs: map[string]ui.ImageSource{}, imgFailed: map[string]bool{}}
 		recordBoards[a.snap.RunID] = st
 	}
-	if st.fov < 1 || st.fov > record.FOVSlots {
+	if st.fov < 1 || st.fov > 6 {
 		st.fov = 1
 	}
 	if st.imgs == nil {
@@ -152,22 +153,22 @@ func (a *app) recordBoard() *recordBoardView {
 
 // recordProjection is the single shared read model for this surface: the
 // automatic board, the protocol archive, and the Run history audit rendering
-// all project from it, so neither surface re-derives summaries from the
-// snapshot on its own.
-func (a *app) recordProjection() record.RecordProjection {
-	return record.Project(a.snap, a.runAssets)
+// all project from Core through the app memo (fetchRecord), so neither
+// surface re-derives summaries from the snapshot on its own. The error
+// string is non-empty when Core refused; surfaces show it (UX-P5).
+func (a *app) recordProjection() (record.Projection, []record.TaskStatus, string) {
+	_, _, _ = a.fetchRecord()
+	if a.recProj != nil {
+		return *a.recProj, a.recTasks, a.recErr
+	}
+	return record.Projection{}, a.recTasks, a.recErr
 }
 
-// recordSeal verifies the persisted draft against its signature trailer. ok
-// means the prose is signed, unmodified, and locked for editing. The seal
-// covers the draft rather than the live rich-text document because the
-// document's Markdown round-trip drops the HTML trailer; the draft is what
-// gets persisted, so it is the correct thing to verify.
-func (a *app) recordSeal() (record.Signature, bool) {
-	if a.noteDirty {
-		return record.Signature{}, false
-	}
-	return record.Verify(a.noteDraft)
+// recordSealed reports the persisted Core lifecycle: only signed/archived
+// state locks editing. The prose trailer is history-only, never a lock.
+func (a *app) recordSealed() bool {
+	_, _, _ = a.recordProjection()
+	return a.recordArchived()
 }
 
 // notebookPage follows Obsidian's shape: one paper sheet, a floating toolbar,
@@ -206,7 +207,7 @@ func notebookPage(c *ui.Context, a *app) {
 		// Floating toolbar above the sheet, following Obsidian's editing
 		// toolbar: mode switch, editing commands, then one save action. A
 		// sealed (signed) record locks editing until explicitly unlocked.
-		_, sealed := a.recordSeal()
+		sealed := a.recordSealed()
 		if c.Shortcut(ui.Cmd, ui.KeyE) && !sealed {
 			if a.noteMode == 2 {
 				a.setNoteMode(a.noteEditMode)
@@ -509,7 +510,7 @@ func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
 	// A sealed record locks every editing mode: the prose verifies against
 	// its signature, so the paper shows the lock instead of an editor until
 	// explicitly unlocked. Reading stays available.
-	if _, ok := a.recordSeal(); ok && a.noteMode != 2 && a.noteMode != 4 {
+	if a.recordSealed() && a.noteMode != 2 && a.noteMode != 4 {
 		a.recordLockedNotice(c, t)
 		return
 	}
@@ -850,9 +851,10 @@ func (a *app) loadNotebook() {
 			a.noteState = "saved"
 		}
 	}
-	// A sealed record opens in reading mode: the prose verifies against its
-	// signature, so no editing mode is shown until explicitly unlocked.
-	if _, ok := record.Verify(a.noteDraft); ok {
+	// A signed/archived record opens in reading mode: only persistent Core
+	// state locks editing, never the prose trailer. Legacy trailers are
+	// stripped for display at the board/archive boundaries.
+	if a.recordArchived() {
 		mode = 2
 	}
 	a.noteMode = mode
@@ -867,6 +869,13 @@ func (a *app) loadNotebook() {
 func (a *app) saveNotebook() {
 	source := a.noteSource()
 	a.noteDraft = source
+	// Archived guard: Core locked the notes at sign/archive, so no save
+	// may land (UX-P5 surfaces the refusal instead of dropping prose).
+	if a.recordArchived() {
+		a.noteErr = "记录已签核归档，笔记已锁定"
+		a.noteState = "error"
+		return
+	}
 	if a.runSvc == nil {
 		a.noteErr = "运行服务不可用"
 		a.noteState = "error"
@@ -912,10 +921,10 @@ func (a *app) saveNotebook() {
 }
 
 func (a *app) notebookToolbarState(tokens theme.Tokens) (string, ui.Color) {
-	// A verified signature outranks everything: the prose is signed,
-	// unmodified, and locked. Verified against the draft (see recordSeal).
-	if _, ok := a.recordSeal(); ok {
-		return string(record.StateSealed), tokens.SuccessText
+	// A signed/archived Core state outranks everything: the notes are
+	// locked. Only persistent Core state is authority (see recordSealed).
+	if a.recordSealed() {
+		return "已签核归档", tokens.SuccessText
 	}
 	switch {
 	case a.noteState == "saving":
@@ -954,13 +963,10 @@ func hasSavedNotebookEvent(events []runs.RunEvent) bool {
 }
 
 func (a *app) markNotebookDirty() {
-	// A sealed record refuses to dirty before syncing: the seal covers the
-	// persisted draft, so a live-document mutation can never land in sealed
-	// prose. Unlocking strips the signature explicitly instead.
-	if !a.noteDirty {
-		if _, ok := record.Verify(a.noteDraft); ok {
-			return
-		}
+	// A signed/archived record refuses to dirty: only persistent Core
+	// state locks editing.
+	if !a.noteDirty && a.recordArchived() {
+		return
 	}
 	if a.noteMode == 0 && a.noteDoc != nil {
 		a.noteDraft = a.noteDoc.Text().Markdown()
@@ -1189,18 +1195,18 @@ func citationKindLabel(kind string) string {
 	}
 }
 
-// recordBoardPage renders the automatic record board (mode 图板): the shared
-// RecordProjection as planned-vs-actual summary plus the representative
-// Well x Timepoint x FOV matrix, with dynamic references, derived design
-// parameters, and sign/lock controls. It writes no facts: inserting a matrix
-// token edits prose, and signing persists prose through the existing save.
+// recordBoardPage renders the automatic record board (mode 图板): Core's
+// shared RecordProjection as planned-vs-actual summary plus the
+// representative Well x Timepoint x FOV matrix, with dynamic references,
+// derived design parameters, and sign/lock controls. It writes no facts:
+// inserting a matrix token edits prose, and sign/archive is a Core command.
 func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 	tokens := theme.GetTokens(t)
-	proj := a.recordProjection()
+	proj, tasks, fetchErr := a.recordProjection()
 	board := a.recordBoard()
-	_, sigOK := a.recordSeal()
-	sealed := sigOK
-	state := record.ClassifyRecordState(a.noteDirty, sigOK)
+	counts := record.Summarize(proj, tasks)
+	sealed := a.recordArchived()
+	state := record.ArchiveStatusWord(proj.Archive.Status)
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			// UX-P4 / UX-LAYOUT: the board is a structured table (summary rows
@@ -1211,28 +1217,30 @@ func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 				Padding(t.Space(4), t.Space(5)).Gap(t.Space(2.5)).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 					ui.Text(c, "记录图板").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
-					components.Badge(c, string(state), components.BadgeOptions{Tone: recordBoardTone(state)})
+					components.Badge(c, state, components.BadgeOptions{Tone: recordBoardTone(proj.Archive.Status)})
 					ui.Spacer(c)
-					ui.Text(c, fmt.Sprintf("任务完成 %d/%d · 矩阵实测值 %d 个 · 缺 %d 个 FOV 槽",
-						proj.CompletedTasks(), len(proj.Summary), proj.MeasurementCount(), proj.Gaps)).
+					ui.Text(c, record.Headline(counts)).
 						FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).FontFeatures("tnum")
 				})
-				a.recordSummarySection(c, t, tokens, proj)
+				if strings.TrimSpace(fetchErr) != "" {
+					ui.Text(c, "记录读取失败："+fetchErr).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
+				}
+				a.recordSummarySection(c, t, tokens, proj, tasks)
 				a.recordGroupBoardSection(c, t, tokens, proj, board)
 				a.recordMatrixSection(c, t, tokens, proj, board)
 				a.recordRefsSection(c, t, tokens, proj, sealed)
 				a.recordDerivedSection(c, t, tokens, proj)
-				a.recordSignSection(c, t, tokens, proj, sealed)
+				a.recordSignSection(c, t, tokens, proj, tasks, sealed)
 			})
 		})
 	})
 }
 
-func recordBoardTone(state record.RecordState) components.BadgeTone {
-	switch state {
-	case record.StateSealed:
+func recordBoardTone(status string) components.BadgeTone {
+	switch status {
+	case "signed", "archived":
 		return components.BadgeSuccess
-	case record.StateUnsaved:
+	case "summarizing":
 		return components.BadgeWarning
 	default:
 		return components.BadgeNeutral
@@ -1244,71 +1252,42 @@ func recordBoardSection(c *ui.Context, t *ui.Theme, title string) {
 	ui.Text(c, title).FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
 }
 
-// recordSummarySection renders one planned-vs-actual row per frozen task from
-// the shared projection. No surface re-derives it.
-func (a *app) recordSummarySection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection) {
+// recordSummarySection renders the frozen plan skeleton plus Core's
+// planned-vs-actual parameter groups. Tasks come from the Core-delivered
+// snapshot; comparisons come from the Core projection. No surface
+// re-derives either.
+func (a *app) recordSummarySection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, tasks []record.TaskStatus) {
 	recordBoardSection(c, t, "计划 vs 实际")
-	if len(proj.Summary) == 0 {
+	if len(tasks) == 0 {
 		ui.Text(c, "无冻结任务。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
-		return
+	} else {
+		for _, task := range tasks {
+			task := task
+			head := strings.TrimSpace(task.Title)
+			if head == "" {
+				head = task.Key
+			}
+			if strings.TrimSpace(task.Timepoint) != "" {
+				head += " · " + task.Timepoint
+			}
+			if word := record.TaskStatusWord(task.Status); word != "" {
+				head += " · " + word
+			}
+			ui.Text(c, head).FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.Text)
+		}
 	}
-	for _, sum := range proj.Summary {
-		sum := sum
-		title := strings.TrimSpace(sum.Title)
-		if title == "" {
-			title = strings.TrimSpace(sum.TaskKey)
+	for _, group := range record.GroupParameters(proj.Parameters) {
+		group := group
+		ui.Text(c, group.Title).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
+		for _, row := range group.Rows {
+			row := row
+			ui.Text(c, row.Label+"：计划 "+row.Planned+" → 实际 "+row.Actual+"（"+row.Status+"）").
+				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 		}
-		head := title
-		if strings.TrimSpace(sum.Timepoint) != "" {
-			head += " · " + sum.Timepoint
-		}
-		if word := notebookStatusWord(sum.Status); word != "" {
-			head += " · " + word
-		}
-		ui.Text(c, head).FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.Text)
-		actual := map[string]record.Param{}
-		order := []string{}
-		for _, p := range sum.Actual {
-			if _, ok := actual[p.Key]; !ok {
-				order = append(order, p.Key)
-			}
-			actual[p.Key] = p
-		}
-		for _, p := range sum.Planned {
-			if _, ok := actual[p.Key]; !ok {
-				order = append(order, p.Key)
-				actual[p.Key] = record.Param{Key: p.Key, Label: p.Label, Unit: p.Unit}
-			}
-		}
-		planned := map[string]record.Param{}
-		for _, p := range sum.Planned {
-			planned[p.Key] = p
-		}
-		for _, key := range order {
-			act, plan := actual[key], planned[key]
-			label := plan.Label
-			if strings.TrimSpace(label) == "" {
-				label = act.Label
-			}
-			if strings.TrimSpace(label) == "" {
-				label = key
-			}
-			line := label + "：计划 " + orDash(plan.Value) + " → 实际 " + orDash(act.Value)
-			unit := act.Unit
-			if unit == "" {
-				unit = plan.Unit
-			}
-			if unit != "" {
-				line += " " + unit
-			}
-			ui.Text(c, line).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-		}
-		if sum.Skipped {
-			ui.Text(c, "条件跳过：按规则跳过").FontSize(float32(tokens.TextData)).TextColor(t.Warning)
-		}
-		for _, dev := range sum.Deviations {
-			ui.Text(c, "偏差："+dev).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
-		}
+	}
+	for _, issue := range proj.Issues {
+		issue := issue
+		ui.Text(c, "缺项 "+issue.Code+"："+issue.Message).FontSize(float32(tokens.TextData)).TextColor(t.Warning)
 	}
 }
 
@@ -1321,11 +1300,12 @@ func orDash(value string) string {
 
 // recordMatrixSection renders the representative Well x Timepoint matrix for
 // the selected FOV layer. Clicking FOV 1–6 switches the layer; empty slots
-// read as gaps, never placeholders.
-func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection, board *recordBoardView) {
+// read as gaps, never placeholders. Slots come from Core's planned matrix,
+// never from uploaded assets.
+func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, board *recordBoardView) {
 	recordBoardSection(c, t, "代表视野矩阵（孔位 × 时间点 × FOV）")
 	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-		for fov := 1; fov <= record.FOVSlots; fov++ {
+		for fov := 1; fov <= 6; fov++ {
 			fov := fov
 			style := components.ButtonGhost
 			if board.fov == fov {
@@ -1333,52 +1313,67 @@ func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Token
 			}
 			if components.Button(c, fmt.Sprintf("FOV %d", fov), style).Clicked() {
 				board.fov = fov
+				a.invalidateRecord()
 			}
 		}
 	})
-	if len(proj.Matrix) == 0 {
+	cells := record.MatrixCells(proj)
+	if len(cells) == 0 {
 		ui.Text(c, "无实测孔位数据。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
-		return
-	}
-	for _, cell := range proj.Matrix {
-		cell := cell
-		main := record.MatrixCellText(cell)
-		img := cell.Representative(board.fov)
-		sub := fmt.Sprintf("FOV %d 缺", board.fov)
-		if img != nil {
-			sub = "图·" + img.Label
-		}
-		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Text(c, cell.Well+" · "+cell.Timepoint).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
-			ui.Text(c, main).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-			ui.Text(c, sub).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+	} else {
+		for _, cell := range cells {
+			cell := cell
+			main := record.MatrixCellText(cell)
+			img := record.SlotImage(proj, cell.Well, cell.Timepoint, board.fov)
+			sub := fmt.Sprintf("FOV %d 缺", board.fov)
 			if img != nil {
-				if components.Button(c, "打开原图", components.ButtonGhost).Clicked() {
-					err := a.openRunAsset(runworkspace.LinkedAsset{
-						AssetID: img.AssetID, RootID: img.RootID, RelativePath: img.RelativePath,
-						MediaType: "image",
-						LinkedTo:  runworkspace.AssetLink{RunID: a.snap.RunID},
-					})
-					if err != nil {
-						c.AddToast(ui.Toast{Title: "打开原图失败", Description: err.Error(), Type: components.ToastError})
+				sub = "图·" + img.AssetID
+			}
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+				ui.Text(c, cell.Well+" · "+cell.Timepoint).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
+				ui.Text(c, main).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+				ui.Text(c, sub).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+				if img != nil {
+					if components.Button(c, "打开原图", components.ButtonGhost).Clicked() {
+						if err := a.openPlacedImage(*img); err != nil {
+							c.AddToast(ui.Toast{Title: "打开原图失败", Description: err.Error(), Type: components.ToastError})
+						}
 					}
 				}
-			}
-		})
+			})
+		}
 	}
-	if len(proj.UnassignedLabels) > 0 {
-		ui.Text(c, fmt.Sprintf("未定位图 %d 张：%s", proj.UnassignedImages, strings.Join(proj.UnassignedLabels, "、"))).
+	if len(proj.Images.UnlocatedAssetIDs) > 0 {
+		ui.Text(c, fmt.Sprintf("未定位图 %d 张：%s", len(proj.Images.UnlocatedAssetIDs), strings.Join(proj.Images.UnlocatedAssetIDs, "、"))).
 			FontSize(float32(tokens.TextData)).TextColor(t.Warning)
 	}
-	if len(proj.UnassignedMeasurements) > 0 {
-		ui.Text(c, fmt.Sprintf("未定位实测 %d 条：无任务认领，见终态归档", len(proj.UnassignedMeasurements))).
+	if len(proj.Images.UnplannedAssetIDs) > 0 {
+		ui.Text(c, fmt.Sprintf("计划外图 %d 张：%s", len(proj.Images.UnplannedAssetIDs), strings.Join(proj.Images.UnplannedAssetIDs, "、"))).
 			FontSize(float32(tokens.TextData)).TextColor(t.Warning)
 	}
 }
 
+// openPlacedImage opens one Core-placed matrix image through the linked
+// asset with the same ID. Coordinates are never inferred from names: the
+// asset must be linked, or the open names it instead of guessing.
+func (a *app) openPlacedImage(img record.PlacedImage) error {
+	for _, asset := range a.runAssets {
+		if asset.ID != img.AssetID {
+			continue
+		}
+		return a.openRunAsset(runworkspace.LinkedAsset{
+			AssetID: asset.ID, RootID: asset.RootID, RelativePath: asset.RelativePath,
+			MediaType: "image",
+			LinkedTo:  runworkspace.AssetLink{RunID: a.snap.RunID},
+		})
+	}
+	return fmt.Errorf("asset %q 未关联到本 Run", img.AssetID)
+}
+
 // recordRefsSection lists the dynamic references in the current prose and
 // offers one-tap insertion of timepoint tokens. Insertion edits prose only.
-func (a *app) recordRefsSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection, sealed bool) {
+// Legacy signature trailers never count as content: display strips them.
+func (a *app) recordRefsSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, sealed bool) {
 	recordBoardSection(c, t, "动态引用 @matrix(…)")
 	refs := record.FindMatrixRefs(a.noteSource())
 	if len(refs) == 0 {
@@ -1394,11 +1389,12 @@ func (a *app) recordRefsSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens,
 			ui.Text(c, line).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 		}
 	}
-	if sealed || len(proj.Timepoints) == 0 {
+	timepoints := record.MatrixTimepoints(proj)
+	if sealed || len(timepoints) == 0 {
 		return
 	}
 	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-		for _, tp := range proj.Timepoints {
+		for _, tp := range timepoints {
 			tp := tp
 			if components.Button(c, "插入 @matrix("+tp+")", components.ButtonGhost).Clicked() {
 				tok := "@matrix(" + tp + ")"
@@ -1415,107 +1411,227 @@ func (a *app) recordRefsSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens,
 	})
 }
 
-// recordDerivedSection renders the new-design draft grown from measured data,
-// with its provenance, plus a JSON handoff export.
-func (a *app) recordDerivedSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection) {
+// recordDerivedSection reviews the next-design draft grown from measured
+// data, with its provenance: DeriveDesignFromRun writes nothing, so the
+// operator reviews evidence before SaveDesign persists it. Surface a Core
+// refusal (e.g. AsterDoc-managed designs) instead of failing silently.
+func (a *app) recordDerivedSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection) {
 	recordBoardSection(c, t, "派生设计（源自实测）")
-	derived := record.DeriveDesign(proj)
-	if len(derived.Parameters) == 0 {
-		ui.Text(c, "无实测参数可派生。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+	if a.deriveEv == nil {
+		if components.Button(c, "从实测派生新设计", components.ButtonSecondary).Clicked() {
+			a.deriveDesignFromRun()
+		}
+		if strings.TrimSpace(a.deriveErr) != "" {
+			ui.Text(c, "派生失败："+a.deriveErr).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
+		}
+		ui.Text(c, "派生只读取已冻结 Run 的实测参数与计时，不写入任何内容；保存前可逐条核对。").
+			FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 		return
 	}
-	ui.Text(c, derived.Title+" · 源自 "+derived.SourceRunID+" · 设计 rev "+fmt.Sprintf("%d", derived.SourceDesignRevision)).
+	ev := a.deriveEv
+	ui.Text(c, fmt.Sprintf("源自 Run %s · 设计 %s rev %d", ev.SourceRunID, ev.DesignID, ev.SourceDesignRevision)).
 		FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-	for _, param := range derived.Parameters {
-		param := param
-		line := param.Label + "：计划 " + orDash(param.Planned) + " → 实测 " + orDash(param.Measured)
-		if param.Unit != "" {
-			line += " " + param.Unit
+	if strings.TrimSpace(ev.Title) != "" {
+		ui.Text(c, ev.Title).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
+	}
+	for _, param := range ev.Params {
+		label := param.ParameterKey
+		if param.Label != nil && strings.TrimSpace(*param.Label) != "" {
+			label = *param.Label
 		}
-		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Text(c, line).FontSize(float32(tokens.TextData)).TextColor(t.Text)
-			ui.Text(c, param.Source).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-		})
+		line := label + "：实测 " + strings.TrimSpace(string(param.Actual))
+		if strings.TrimSpace(string(param.Planned)) != "" {
+			line += "（计划 " + strings.TrimSpace(string(param.Planned)) + "）"
+		}
+		line += " · 事件 " + param.EventID
+		ui.Text(c, line).FontSize(float32(tokens.TextData)).TextColor(t.Text)
 	}
-	if components.Button(c, "导出派生参数", components.ButtonSecondary).Clicked() {
-		a.exportRecordFile(c, "导出派生参数", "derived-design-"+a.snap.RunID+".json", derived.JSON())
+	for _, dur := range ev.Durations {
+		ui.Text(c, dur.TaskKey+" · "+dur.TimerID+"：实测 "+fmt.Sprint(dur.ActualS)+"s").
+			FontSize(float32(tokens.TextData)).TextColor(t.Text)
 	}
+	if strings.TrimSpace(ev.Note) != "" {
+		ui.Text(c, ev.Note).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+	}
+	if strings.TrimSpace(a.deriveErr) != "" {
+		ui.Text(c, "保存失败："+a.deriveErr).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
+	}
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+		if components.Button(c, "保存为新设计版本", components.ButtonSecondary).Clicked() {
+			a.persistDerivedDesign()
+		}
+		if components.Button(c, "重新派生", components.ButtonGhost).Clicked() {
+			a.deriveEv = nil
+			a.deriveDesign = nil
+			a.deriveErr = ""
+			a.deriveConfirm = false
+		}
+	})
 }
 
-// recordSignSection hosts sign/lock and archive export. Signing persists the
-// prose through the existing save path with a signature trailer; the lock is
-// the verified signature, not a separate flag.
-func (a *app) recordSignSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection, sealed bool) {
+// deriveDesignFromRun asks Core for the next-design draft and decodes its
+// evidence for review. It writes nothing; persistence is a separate,
+// explicit step.
+func (a *app) deriveDesignFromRun() {
+	a.deriveErr = ""
+	a.deriveEv = nil
+	a.deriveDesign = nil
+	if a.designSvc == nil || a.snap.RunID == "" {
+		a.deriveErr = "设计服务不可用"
+		return
+	}
+	derived, err := a.designSvc.DeriveDesignFromRun(context.Background(), runs.DeriveDesignInput{RunID: a.snap.RunID})
+	if err != nil {
+		a.deriveErr = state.MapError(err).Error()
+		return
+	}
+	ev, err := record.DecodeDerived(derived)
+	if err != nil {
+		a.deriveErr = err.Error()
+		return
+	}
+	cp := derived
+	ecp := ev
+	a.deriveDesign = &cp
+	a.deriveEv = &ecp
+}
+
+// persistDerivedDesign shapes the reviewed draft into SaveDesign changes and
+// persists it, then opens the new design revision. A Core refusal names the
+// cause; nothing is partially written.
+func (a *app) persistDerivedDesign() {
+	a.deriveErr = ""
+	if a.designSvc == nil || a.deriveDesign == nil || a.deriveEv == nil {
+		a.deriveErr = "无可保存的派生草案"
+		return
+	}
+	snap, err := a.designSvc.LoadDesign(context.Background(), a.deriveDesign.DesignID)
+	if err != nil {
+		a.deriveErr = state.MapError(err).Error()
+		return
+	}
+	changes, err := record.ChangesForDerived(snap.Data, *a.deriveDesign, *a.deriveEv, time.Now())
+	if err != nil {
+		a.deriveErr = err.Error()
+		return
+	}
+	saved, err := a.designSvc.SaveDesign(context.Background(), runs.DesignSaveInput{
+		DesignID: a.deriveDesign.DesignID, ExpectedRevision: uint64(a.deriveDesign.ExpectedRevision),
+		Changes: changes, OperationID: a.nextOp(),
+	})
+	if err != nil {
+		a.deriveErr = state.MapError(err).Error()
+		return
+	}
+	a.deriveEv = nil
+	a.deriveDesign = nil
+	a.loadDesign(saved.DesignID)
+}
+
+// recordSignSection hosts sign/lock and archive export. Sign/archive is one
+// Core command (signed and archived states are never re-signed); the editing
+// lock is the persisted Core state, never prose. The confirmation names the
+// 缺/计划外 counts the operator acknowledges.
+func (a *app) recordSignSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, tasks []record.TaskStatus, sealed bool) {
 	recordBoardSection(c, t, "签核与归档")
+	counts := record.Summarize(proj, tasks)
 	if sealed {
-		sig, _ := a.recordSeal()
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Text(c, "已签核归档 · "+sig.Actor+" · "+sig.At).
-				FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.SuccessText)
-			ui.Spacer(c)
-			if components.Button(c, "解锁", components.ButtonSecondary).Clicked() {
-				a.unlockRecord()
+			line := "已签核归档"
+			if sig := proj.Archive.Signature; sig != nil {
+				if strings.TrimSpace(sig.SignedBy) != "" {
+					line += " · " + sig.SignedBy
+				}
+				if strings.TrimSpace(sig.SignedAtUTC) != "" {
+					line += " · " + sig.SignedAtUTC
+				}
+			}
+			ui.Text(c, line).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.SuccessText)
+		})
+		ui.Text(c, "记录已锁定：签核归档不可撤销，归档包在实验方案页导出。").
+			FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+	} else if a.signConfirm {
+		ui.Text(c, fmt.Sprintf("确认签核？实测 %d 个 · 缺 %d 个 · 排除 %d 个（含计划外），签核后记录锁定、不可撤销。",
+			counts.Measurements, counts.Missing, counts.Excluded)).
+			FontSize(float32(tokens.TextData)).TextColor(t.Text)
+		if strings.TrimSpace(a.signErr) != "" {
+			ui.Text(c, "签核失败："+a.signErr).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
+		}
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			if components.Button(c, "确认签核归档", components.ButtonSecondary).Clicked() {
+				a.signAndArchiveRun()
+			}
+			if components.Button(c, "取消", components.ButtonGhost).Clicked() {
+				a.signConfirm = false
+				a.signErr = ""
 			}
 		})
-		ui.Text(c, "记录已锁定：切换到笔记页查看只读正文，或解锁后继续编辑。").
-			FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 	} else {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			if components.Button(c, "签核归档", components.ButtonSecondary).Clicked() {
-				a.signRecord()
+				a.signConfirm = true
+				a.signErr = ""
 			}
-			ui.Text(c, "签核保存正文并锁定编辑；归档包在实验方案页导出。").
+			ui.Text(c, "签核为 Core 命令：先汇总再签名归档；归档包在实验方案页导出。").
 				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 		})
 	}
-	if components.Button(c, "导出归档包", components.ButtonGhost).Clicked() {
-		arch := protocol.BuildArchive(proj, a.noteSource(), time.Now())
-		a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", arch.Markdown())
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+		if components.Button(c, "导出归档包", components.ButtonGhost).Clicked() {
+			arch := protocol.BuildArchive(proj, tasks, record.StripLegacySignature(a.noteSource()), time.Now())
+			a.exportRecordFile(c, "导出归档包", "record-"+a.snap.RunID+".md", arch.Markdown())
+		}
+		if components.Button(c, "导出归档 PDF", components.ButtonGhost).Clicked() {
+			exported := protocol.BuildArchive(proj, tasks, record.StripLegacySignature(a.noteSource()), time.Now())
+			var buf bytes.Buffer
+			if err := exported.PDF(&buf, a.recordPDFLoader()); err != nil {
+				c.AddToast(ui.Toast{Title: "PDF 导出失败", Description: err.Error(), Type: components.ToastError})
+			} else {
+				a.exportRecordBytes(c, "导出归档 PDF", "record-"+a.snap.RunID+".pdf", buf.Bytes())
+			}
+		}
+	})
+}
+
+// signAndArchiveRun ends the Run's record with one Core command, then drops
+// the shared memo so the next frame reads the signed state. Signed and
+// archived states are rejected by Core, never re-signed.
+func (a *app) signAndArchiveRun() {
+	a.signErr = ""
+	if a.runSvc == nil || a.snap.RunID == "" {
+		a.signErr = "运行服务不可用"
+		return
 	}
+	view := ""
+	if a.recordBlind() {
+		view = "blind"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := a.runSvc.SignAndArchiveRun(context.Background(), runs.SignAndArchiveInput{
+		RunID: a.snap.RunID, View: view, FOVPerWell: uint32(a.recordFOV()),
+		NowUTC: now, SignedBy: recordActor(), SignedAtUTC: now,
+	})
+	if err != nil {
+		a.signErr = state.MapError(err).Error()
+		return
+	}
+	a.signConfirm = false
+	a.invalidateRecord()
+	a.setNoteMode(2)
 }
 
 // recordLockedNotice replaces every editing mode while the record is sealed.
+// There is no unlock: sign/archive is final, and the notice says so.
 func (a *app) recordLockedNotice(c *ui.Context, t *ui.Theme) {
 	tokens := theme.GetTokens(t)
 	ui.Column(c).Grow(1).FillWidth().AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).FillWidth().MaxWidth(820).MaxWidthPercent(100).
 			Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "已签核归档").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
-			ui.Text(c, "记录已锁定为只读。切换到“阅读”查看正文，或解锁后继续编辑。").
+			ui.Text(c, "记录已锁定为只读，不可撤销。切换到“阅读”查看正文，归档包在图板与实验方案页导出。").
 				FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
-			if components.Button(c, "解锁", components.ButtonSecondary).Clicked() {
-				a.unlockRecord()
-			}
 		})
 	})
-}
-
-// signRecord signs the current prose and persists it through the existing
-// Notebook save path, then moves to reading mode under the lock.
-func (a *app) signRecord() {
-	if a.runSvc == nil {
-		a.noteErr = "运行服务不可用"
-		a.noteState = "error"
-		return
-	}
-	source := strings.TrimSpace(a.noteSource())
-	if source == "" {
-		a.noteErr = "Notebook 不能为空"
-		a.noteState = "error"
-		return
-	}
-	if len([]rune(source)) > 4800 {
-		a.noteErr = "内容过长，签核前请精简（签核附带约 200 字符）。"
-		a.noteState = "error"
-		return
-	}
-	signed, _ := record.Sign(source, a.snap.RunID, a.snap.DesignRevision, recordActor(), time.Now())
-	a.noteDraft = signed
-	a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(signed))
-	a.saveNotebook()
-	if a.noteState == "saved" {
-		a.setNoteMode(2)
-	}
 }
 
 // recordActor names the signing operator with the same session identity the
@@ -1528,14 +1644,6 @@ func recordActor() string {
 		return name
 	}
 	return "local-user"
-}
-
-// unlockRecord strips the signature trailer and returns the prose to the
-// editable 未保存 state. Unlocking never edits the prose itself.
-func (a *app) unlockRecord() {
-	a.noteDraft = record.StripSignature(a.noteSource())
-	a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
-	a.markNotebookDirty()
 }
 
 // exportRecordFile writes a record artifact (derived JSON or archive
@@ -1577,7 +1685,7 @@ func decodePreviewImage(data []byte) (ui.ImageSource, error) {
 // unloadable (unconfigured root, missing file, undecodable bytes) returns
 // nil and is remembered, so the board shows an explicit gap instead of
 // retrying every frame.
-func (a *app) recordImageSource(board *recordBoardView, img record.MatrixImage) ui.ImageSource {
+func (a *app) recordImageSource(board *recordBoardView, img record.PlacedImage) ui.ImageSource {
 	if src, ok := board.imgs[img.AssetID]; ok {
 		return src
 	}
@@ -1588,10 +1696,19 @@ func (a *app) recordImageSource(board *recordBoardView, img record.MatrixImage) 
 		board.imgFailed[img.AssetID] = true
 		return nil
 	}
-	if strings.TrimSpace(img.RootID) == "" || strings.TrimSpace(img.RelativePath) == "" {
+	// The file resolves through the linked asset with the same ID, never
+	// from the label or an inferred path.
+	var linked *runs.Asset
+	for i := range a.runAssets {
+		if a.runAssets[i].ID == img.AssetID {
+			linked = &a.runAssets[i]
+			break
+		}
+	}
+	if linked == nil || strings.TrimSpace(linked.RootID) == "" || strings.TrimSpace(linked.RelativePath) == "" {
 		return fail()
 	}
-	path, err := assets.Roots(a.assetRoots).Resolve(assets.Asset{RootID: img.RootID, RelativePath: img.RelativePath})
+	path, err := assets.Roots(a.assetRoots).Resolve(assets.Asset{RootID: linked.RootID, RelativePath: linked.RelativePath})
 	if err != nil {
 		return fail()
 	}
@@ -1651,31 +1768,29 @@ func (a *app) finishPreviewLoad(board *recordBoardView, runID string, gen uint64
 // recorded group read as an explicit 未分组 row) by timepoint columns, each
 // slot showing the selected FOV's inline preview or an explicit gap. Group
 // identity is never inferred from filenames or samples.
-func (a *app) recordGroupBoardSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.RecordProjection, board *recordBoardView) {
+func (a *app) recordGroupBoardSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, board *recordBoardView) {
 	recordBoardSection(c, t, fmt.Sprintf("代表视野（分组 × 时间点 · FOV %d）", board.fov))
-	groups := proj.Groups()
-	if len(groups) == 0 || len(proj.Timepoints) == 0 {
+	groups := record.MatrixGroups(proj)
+	timepoints := record.MatrixTimepoints(proj)
+	if len(groups) == 0 || len(timepoints) == 0 {
 		ui.Text(c, "无分组矩阵数据。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
 		return
 	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
 		ui.Text(c, "分组 ＼ 时间点").FontSize(float32(tokens.TextData)).Bold().TextColor(t.TextMuted)
-		for _, tp := range proj.Timepoints {
+		for _, tp := range timepoints {
 			tp := tp
 			ui.Text(c, tp).FontSize(float32(tokens.TextData)).Bold().TextColor(t.TextMuted)
 		}
 	})
 	for _, group := range groups {
 		group := group
-		label := group
-		if label == "" {
-			label = "未分组"
-		}
+		label := record.GroupDisplayName(proj, group)
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, label).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
-			for _, tp := range proj.Timepoints {
+			for _, tp := range timepoints {
 				tp := tp
-				cell, img, ok := proj.RepresentativeGroup(group, tp, board.fov)
+				well, img, ok := record.RepresentativeGroup(proj, group, tp, board.fov)
 				if !ok {
 					ui.Text(c, "—").FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 					continue
@@ -1692,7 +1807,7 @@ func (a *app) recordGroupBoardSection(c *ui.Context, t *ui.Theme, tokens theme.T
 					} else {
 						ui.Text(c, "缺").FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 					}
-					ui.Text(c, cell.Well).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+					ui.Text(c, well).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 				})
 			}
 		})

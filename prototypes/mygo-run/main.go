@@ -8,6 +8,7 @@ import (
 	"asterlab-mygo-prototype/internal/blockui"
 	"asterlab-mygo-prototype/internal/designer"
 	"asterlab-mygo-prototype/internal/notebook"
+	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/protocol"
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/runui"
@@ -161,11 +162,28 @@ type app struct {
 	linkDialogWells            []string
 	linkDialogTimepoints       []string
 	linkDialogErr              string
-	noteMode                   int
-	noteEditMode               int
-	noteDoc                    *richtext.Document
-	noteAster                  *asterdoc.View
+	// recKey/recProj/recTasks/recErr memoize Core's single read-only Record
+	// projection: key is runID|rev|assets|fov|view, never the prose. The
+	// Notebook board, the protocol archive and the Run history all read
+	// from this memo, so the same Run can never disagree with itself.
+	recKey   string
+	recProj  *record.Projection
+	recTasks []record.TaskStatus
+	recErr   string
+	recAt    time.Time
+	// signConfirm opens the sign-off confirmation; deriveEv/deriveDesign
+	// hold Core's derived draft for review before SaveDesign persists it.
+	signConfirm   bool
+	signErr       string
+	deriveDesign  *runs.DerivedDesign
+	deriveEv      *record.DerivedEvidence
+	deriveErr     string
+	deriveConfirm bool
 
+	noteMode     int
+	noteEditMode int
+	noteDoc      *richtext.Document
+	noteAster    *asterdoc.View
 	shell               *shell.Shell
 	ws                  *runui.Workspace
 	runWS               *runworkspace.State
@@ -846,6 +864,81 @@ func (a *app) linkAssetPaths(rootID, rootDir string, paths []string, coordinate 
 		a.upsertRunAsset(saved)
 	}
 	return nil
+}
+// recordFOV returns the board's selected FOV layer for the fetch memo (0
+// means Core's default of one planned slot per well). It peeks without
+// creating board state for a Run that has none yet.
+func (a *app) recordFOV() int {
+	if st := recordBoards[a.snap.RunID]; st != nil && a.snap.RunID != "" {
+		return st.fov
+	}
+	return 0
+}
+
+// recordBlind reports whether the Run is viewed under blinding. The Run
+// blind switch is the single mask source; the projection carries the mask.
+func (a *app) recordBlind() bool {
+	return a.runWS != nil && a.runWS.Bench != nil && a.runWS.Bench.Blind
+}
+
+// Notebook board, the protocol archive and the Run history all project from
+// this memo. The timer watermark is the fetch instant; the memo moves only
+// with the key, so frames never call Core.
+func (a *app) fetchRecord() (runworkspace.RecordKey, record.Projection, error) {
+	if a.runSvc == nil || a.snap.RunID == "" {
+		return "", record.Projection{}, fmt.Errorf("运行服务不可用")
+	}
+	view := ""
+	if a.recordBlind() {
+		view = "blind"
+	}
+	var assetsFP strings.Builder
+	for _, asset := range a.runAssets {
+		link := asset.Link
+		fmt.Fprintf(&assetsFP, "%s@%s@%s%s%d;", asset.ID, asset.RelativePath, link.WellID, link.Timepoint, link.FOVIndex)
+	}
+	key := runworkspace.RecordKey(fmt.Sprintf("%s|%d|%s|%d|%s", a.snap.RunID, a.snap.Revision, assetsFP.String(), a.recordFOV(), view))
+	if a.recProj != nil && a.recKey == string(key) {
+		return key, *a.recProj, nil
+	}
+	proj, err := record.Fetch(context.Background(), a.runSvc, record.FetchInput{
+		RunID: a.snap.RunID, View: view, FOVPerWell: uint32(a.recordFOV()),
+		NowUTC: time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		a.recErr = state.MapError(err).Error()
+		return key, record.Projection{}, err
+	}
+	cp := proj
+	a.recKey = string(key)
+	a.recProj = &cp
+	a.recTasks = record.SnapshotTasks(a.snap.Tasks)
+	a.recErr = ""
+	a.recAt = time.Now()
+	return key, cp, nil
+}
+
+// recordArchived reports whether Core's persisted record lifecycle already
+// locked the notes. Only persistent Core state is authority; the prose
+// trailer is history and never a lock.
+func (a *app) recordArchived() bool {
+	if a.recProj == nil {
+		return false
+	}
+	return a.recProj.Archive.Status == "signed" || a.recProj.Archive.Status == "archived"
+}
+
+// invalidateRecord drops the shared projection memo so the next frame
+// refetches from Core. The host calls it after sign/archive, which flips
+// the persisted archive state without bumping the Run revision.
+func (a *app) invalidateRecord() {
+	a.recKey = ""
+	a.recProj = nil
+	a.recTasks = nil
+	a.recErr = ""
+	if a.runWS != nil {
+		a.runWS.InvalidateRecord()
+	}
 }
 
 // buildRunWorkspaceVM asks Core for the frozen Run hierarchy. Go only decodes
@@ -2745,6 +2838,9 @@ func main() {
 				},
 			}
 			rv.Render(c)
+		},
+		FetchRecord: func() (runworkspace.RecordKey, record.Projection, error) {
+			return a.fetchRecord()
 		},
 	}
 	a.tools = a.newToolsWorkspace()

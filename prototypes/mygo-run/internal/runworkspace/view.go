@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/theme"
 	workflowtree "asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
@@ -57,7 +58,13 @@ type Callbacks struct {
 	// every asset's identity and coordinates (link writes never bump the
 	// Run revision). Nil hides the summary/matrix and keeps the
 	// entry-level timeline only.
-	HistoryInputs func() (runs.RunSnapshot, []runs.Asset)
+	// RecordKey is the host's opaque memo key for the Core record
+	// projection (run, revision, asset coordinates, FOV plan, view).
+	// History never parses it.
+	// FetchRecord returns the host's memoized Core record projection plus
+	// the opaque key it was memoized under. Nil hides the summary/matrix
+	// and keeps the entry-level timeline only.
+	FetchRecord func() (RecordKey, record.Projection, error)
 	// QueryProjection reads Core through the Bridge v2 generic channel
 	// (INT-01). The blind switch uses kind run.workspace with
 	// view=blind|unblinded; the host decodes ResultJSON verbatim.
@@ -67,6 +74,10 @@ type Callbacks struct {
 	// readout entry uses kind readout.submit; Core owns all validation.
 	ExecuteCommand func(input runs.ExecuteCommandInput) (runs.ExecuteCommandResult, error)
 }
+
+// RecordKey is the host's opaque memo key for the Core record projection
+// (run, revision, asset coordinates, FOV plan, view). History never parses it.
+type RecordKey string
 
 // CheckAckView is one operator verdict sent back to Core.
 type CheckAckView struct {
@@ -1470,14 +1481,14 @@ func historyTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task 
 	// The shared projection renders the audit head (planned-vs-actual and
 	// capture reconciliation); the entry list below stays the notebook.Build
 	// domain and is never re-derived here.
-	proj := s.historyProjection()
+	proj, tasks := s.historyRecord()
 	if len(task.Events) == 0 && proj == nil {
 		ui.Text(c, "尚无执行事件。").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 		return
 	}
 	ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
 		if proj != nil {
-			renderHistoryRecord(c, s, proj, t, tokens)
+			renderHistoryRecord(c, s, proj, tasks, t, tokens)
 		}
 		for _, event := range task.Events {
 			ui.Column(c).FillWidth().Gap(t.Space(.5)).Padding(t.Space(1.5), t.Space(2)).

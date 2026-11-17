@@ -1062,6 +1062,13 @@ func (s *notebookSaveFailSpy) SaveNotebook(_ context.Context, input runs.Noteboo
 	return s.snap, nil
 }
 
+// RecordProjection is unstubbed by design: the record board is out of scope
+// for this save-path test, so the fetch surfaces its refusal (UX-P5) instead
+// of calling into the nil embedded backend.
+func (s *notebookSaveFailSpy) RecordProjection(context.Context, runs.RecordProjectionInput) (string, error) {
+	return "", fmt.Errorf("record not stubbed")
+}
+
 func (s *notebookSaveFailSpy) WorkflowTree(context.Context, string) (string, error) {
 	return "", nil
 }
