@@ -878,8 +878,34 @@ protocol_version_id: protocol-v1
         assert_eq!(groups[0].as_str(), Some("A2"));
         assert!(block.value["samples"].get("A1").is_none());
         assert!(block.value["replicates"].get("A1").is_none());
+    }
 
+    #[test]
+    fn plate_factors_scope_replicates_across_targets() {
+        let valid = "```asterlab\nkind: plate\nid: qpcr\nschema: 1\nformat: 96\ngroups:\n  g1: [A1, A2, B1, B2]\nsamples:\n  A1: cDNA-1\n  A2: cDNA-1\n  B1: cDNA-1\n  B2: cDNA-1\nreplicates:\n  A1: 1\n  A2: 2\n  B1: 1\n  B2: 2\nfactors:\n  target:\n    A1: GAPDH\n    A2: GAPDH\n    B1: VEGFA\n    B2: VEGFA\n```\n";
+        let blocks = asterdoc_blocks(valid).unwrap();
+        assert_eq!(blocks.len(), 1);
+        validate_asterdoc_module_value(&blocks[0].value, 1).unwrap();
 
+        let dup = "```asterlab\nkind: plate\nid: qpcr\nschema: 1\nformat: 96\ngroups:\n  g1: [A1, A2]\nsamples:\n  A1: cDNA-1\n  A2: cDNA-1\nreplicates:\n  A1: 1\n  A2: 1\nfactors:\n  target:\n    A1: GAPDH\n    A2: GAPDH\n```\n";
+        let dup_blocks = asterdoc_blocks(dup).unwrap();
+        match validate_asterdoc_module_value(&dup_blocks[0].value, 1) {
+            Ok(_) => panic!("expected duplicate replicate error"),
+            Err(err) => {
+                let msg = format!("{err:?}");
+                assert!(msg.contains("assigned to both") || msg.contains("duplicate"), "{msg}");
+            }
+        }
+
+        let with_roles = "```asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\ngroups:\n  g1: [A1, A2]\nsamples:\n  A1: S1\n  A2: S2\nroles:\n  A1: ntc\nfactors:\n  target:\n    A1: GAPDH\n    A2: VEGFA\n```\n";
+        let cleared = apply_asterdoc_patch(with_roles, &json!({
+            "type": "clear_wells", "moduleId": "p1", "wells": ["A1"]
+        })).unwrap();
+        let mut cblocks = asterdoc_blocks(&cleared).unwrap();
+        let blk = cblocks.remove(0);
+        assert!(blk.value["roles"].get("A1").is_none());
+        assert!(blk.value["factors"]["target"].get("A1").is_none());
+        assert_eq!(blk.value["factors"]["target"]["A2"].as_str(), Some("VEGFA"));
     }
     #[test]
     fn manifest_rule_must_be_registered_in_rust() {

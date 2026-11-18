@@ -9,8 +9,10 @@ import (
 	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/theme"
-	"github.com/egoist/mygo/ui"
 	"asterlab-mygo-prototype/modules/runs"
+	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
 type Tool string
@@ -321,60 +323,76 @@ func View(c *ui.Context, w *Workspace) {
 	}
 	t := c.Theme()
 	tok := theme.GetTokens(t)
-	ui.Column(c).Fill().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
-		ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
-			ui.Text(c, "Tools & Components").FontSize(float32(tok.TextPage)).Bold().TextColor(t.Text)
+	ui.Column(c).Fill().Background(tok.Canvas).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Text(c, "资料与工具").FontSize(float32(tok.TextPage)).Bold().TextColor(tok.Text)
+			ui.Spacer(c)
+			components.Badge(c, "储藏室台账与实验通用工具")
 		})
-		// UX-P1/UX-LAYOUT: the content pane scrolls (both axes: the 96-well
-		// matrix is wider than 900px) so the handoff primary and every well
-		// stay reachable at 900×600 on every tool. Stretch gives the pane a
-		// bounded height so it actually scrolls instead of sizing to content.
-		ui.Row(c).Grow(1).Gap(float32(tok.Spacing12)).AlignItems(ui.Stretch).Children(func() {
-			ui.Column(c).Width(190).FillHeight().Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).Background(tok.SidebarBackground).Children(func() {
-				ui.Text(c, "WORKSPACE").FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
-				for _, item := range []struct {
-					tool  Tool
-					label string
-				}{{ToolPantry, "储藏室"}, {ToolPlate, "96-well plate"}, {ToolDilution, "Dilution calculator"}, {ToolParameters, "Parameter table"}, {ToolLibrary, "Component library"}, {ToolImport, "Structured import"}} {
-					item := item
-					if ui.Button(c, item.label).Clicked() {
-						w.Active = item.tool
-						if w.PantryRetry == nil && w.Retry == nil {
-							w.Error, w.Status = "", ""
+		// UX-P1/UX-LAYOUT: bounded scrollable main pane so 900x600 stays reachable.
+		ui.Row(c).Grow(1).MinHeight(0).Gap(float32(tok.Spacing12)).AlignItems(ui.Stretch).Children(func() {
+			ui.Column(c).Width(212).FillHeight().Padding(float32(tok.Spacing8)).Radius(float32(tok.PanelRadius)).
+				Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing4)).Children(func() {
+				components.Sidebar(c).Children(func() {
+					components.SidebarSection(c, "工具导航", func() {
+						navItems := []struct {
+							tool  Tool
+							label string
+							icon  *ui.SVG
+						}{
+							{ToolPantry, "储藏室台账", lucide.FlaskConical()},
+							{ToolPlate, "96 孔板速排", lucide.Grid2x2()},
+							{ToolDilution, "稀释配液换算", lucide.Calculator()},
+							{ToolParameters, "实验参数表", lucide.SlidersHorizontal()},
+							{ToolLibrary, "通用模块模板", lucide.Blocks()},
+							{ToolImport, "结构化数据导入", lucide.FileInput()},
 						}
-					}
-				}
+						for _, item := range navItems {
+							item := item
+							if components.SidebarItem(c, item.label, item.icon, w.Active == item.tool).Clicked() {
+								w.Active = item.tool
+								if w.PantryRetry == nil && w.Retry == nil {
+									w.Error, w.Status = "", ""
+								}
+							}
+						}
+					})
+				})
 			})
-			// UX-P1/UX-LAYOUT: the content pane scrolls so the handoff
-			// primary stays reachable at 900×600 on every tool.
 			ui.ScrollBoth(c).Grow(1).Children(func() {
-				ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Background(t.Surface).Children(func() {
+				ui.Column(c).FillWidth().Padding(float32(tok.Spacing16)).Radius(float32(tok.PanelRadius)).
+					Gap(float32(tok.Spacing12)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
 					switch w.Active {
 					case ToolPantry:
-						pantryView(c, w, t, tok)
+						pantryView(c, w, tok)
 					case ToolPlate:
-						plateView(c, w, t)
+						plateView(c, w, tok)
 					case ToolDilution:
-						dilutionView(c, w, t)
+						dilutionView(c, w, tok)
 					case ToolParameters:
-						parameterView(c, w, t)
+						parameterView(c, w, tok)
 					case ToolLibrary:
-						libraryView(c, w, t)
+						libraryView(c, w, tok)
 					case ToolImport:
-						importView(c, w, t)
+						importView(c, w, tok)
 					}
 					if w.Error != "" {
-						ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Text(c, w.Error).TextColor(t.Danger)
-							// UX-P5: cause + retry for pantry ops and import validation.
-							if w.PantryRetry != nil && ui.Button(c, "重试").Clicked() {
+						ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Radius(float32(tok.ControlRadius)).Background(tok.DangerBg).Border(1, tok.Danger).
+							AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Text(c, w.Error).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText).Grow(1).MinWidth(0)
+							if w.PantryRetry != nil && components.Button(c, "重试", components.ButtonSecondary).Clicked() {
 								w.PantryRetry()
-							} else if w.Retry != nil && ui.Button(c, "重试").Clicked() {
+							} else if w.Retry != nil && components.Button(c, "重试", components.ButtonSecondary).Clicked() {
 								w.Retry()
 							}
 						})
 					} else if w.Status != "" {
-						ui.Text(c, w.Status).TextColor(t.Success)
+						ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Radius(float32(tok.ControlRadius)).Background(tok.SuccessBg).Border(1, tok.Success.Alpha(.4)).
+							AlignItems(ui.Center).Children(func() {
+							ui.Text(c, w.Status).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.SuccessText)
+						})
 					}
 				})
 			})
@@ -382,191 +400,293 @@ func View(c *ui.Context, w *Workspace) {
 	})
 }
 
-func plateView(c *ui.Context, w *Workspace, t *ui.Theme) {
-	ui.Text(c, "Plate layout").Bold()
-	ui.Text(c, fmt.Sprintf("96 wells · %d selected", w.Plate.SelectedCount())).FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
-	for row := range 8 {
-		r := row
-		ui.Row(c).Gap(3).Children(func() {
-			ui.Text(c, string(rune('A'+r))).FontSize(t.Rem(0.86)) // UX-P3: 12px → Rem.
-			for col := range 12 {
-				idx := r*12 + col
-				label := fmt.Sprintf("%d", col+1)
-				if w.Plate.IsSelected(idx) {
-					label = "●"
-				}
-				if ui.Button(c, label).Clicked() {
-					if err := w.Plate.ToggleWell(idx); err != nil {
-						w.Error = err.Error()
-					} else {
-						w.Error, w.Status = "", ""
+func plateView(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Text(c, "96 孔板分组速排").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+		ui.Spacer(c)
+		components.Badge(c, fmt.Sprintf("96 孔 · 已选 %d 孔", w.Plate.SelectedCount()), components.BadgeOptions{Tone: components.BadgeAccent})
+	})
+	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing4)).Children(func() {
+		for row := range 8 {
+			r := row
+			ui.Row(c).Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, string(rune('A'+r))).Width(float32(tok.Spacing24)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+				for col := range 12 {
+					idx := r*12 + col
+					selected := w.Plate.IsSelected(idx)
+					bg, fg, borderCol := tok.Surface, tok.TextMuted, tok.Border
+					if selected {
+						bg, fg, borderCol = tok.Accent, tok.AccentText, tok.Accent
+					} else if w.Plate.Props.Groups[idx] != "" {
+						bg, fg, borderCol = tok.SuccessBg, tok.SuccessText, tok.Success
 					}
+					btn := ui.ButtonBase(c).Size(float32(tok.Spacing24), float32(tok.Spacing24)).
+						Radius(float32(tok.ControlRadius)).Background(bg).Border(1, borderCol).
+						Label(fmt.Sprintf("%c%d", 'A'+r, col+1))
+					btn.Children(func() {
+						ui.Box(c).Fill().Center().Children(func() {
+							ui.Text(c, fmt.Sprintf("%d", col+1)).FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum")
+						})
+					})
+					if btn.Clicked() {
+						if err := w.Plate.ToggleWell(idx); err != nil {
+							w.Error = err.Error()
+						} else {
+							w.Error, w.Status = "", ""
+						}
+					}
+				}
+			})
+		}
+	})
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Text(c, "所选孔位分组标签：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+		ui.Box(c).Width(float32(tok.Spacing48)*4).Children(func() {
+			if components.TextBox(c, &w.Group, components.TextBoxOptions{}).Placeholder("例如：对照组 Control").Changed() {
+				for _, well := range w.Plate.Props.Selected {
+					_ = w.Plate.SetGroup(well, w.Group)
 				}
 			}
 		})
-	}
-	ui.Text(c, "Group label for selected wells").FontSize(t.Rem(0.86)) // UX-P3: 12px → Rem.
-	if ui.TextInput(c, &w.Group).Placeholder("e.g. Control").Changed() {
-		for _, well := range w.Plate.Props.Selected {
-			_ = w.Plate.SetGroup(well, w.Group)
-		}
-	}
-	if ui.Button(c, "Use plate in Designer / create draft").Clicked() {
-		w.handoff()
-	}
-}
-func dilutionView(c *ui.Context, w *Workspace, t *ui.Theme) {
-	ui.Text(c, "Dilution calculator").Bold()
-	ui.Text(c, "C₁V₁ = C₂V₂ · use consistent units").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
-	ui.Text(c, "Stock concentration")
-	ui.TextInput(c, &w.Stock).Placeholder("e.g. 100")
-	ui.Text(c, "Target concentration")
-	ui.TextInput(c, &w.Final).Placeholder("e.g. 10")
-	ui.Text(c, "Final volume")
-	ui.TextInput(c, &w.Volume).Placeholder("e.g. 100")
-	if inst, err := w.dilutionDraft(); err == nil {
-		var p blocks.DilutionProps
-		_ = inst.DecodeProps(&p)
-		ui.Text(c, fmt.Sprintf("Stock: %.4g · Diluent: %.4g", p.Result.StockVol, p.Result.DiluentVol)).Bold()
-	} else {
-		ui.Text(c, err.Error()).TextColor(t.TextMuted)
-	}
-	if ui.Button(c, "Use calculation in Designer / create draft").Clicked() {
-		w.handoff()
-	}
-}
-func parameterView(c *ui.Context, w *Workspace, t *ui.Theme) {
-	ui.Text(c, "Parameter table").Bold()
-	ui.Text(c, "Edit the rows, then hand off as a typed component.").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
-	for i := range w.Rows {
-		r := &w.Rows[i]
-		ui.Row(c).Gap(6).Children(func() {
-			ui.TextInput(c, &r.Key).Placeholder("Parameter")
-			ui.TextInput(c, &r.Value).Placeholder("Value")
-			ui.TextInput(c, &r.Unit).Placeholder("Unit")
-		})
-	}
-	ui.Row(c).Gap(8).Children(func() {
-		if ui.Button(c, "Add row").Clicked() {
-			w.Rows = append(w.Rows, blocks.ParamRow{})
-		}
-		if ui.Button(c, "Use table in Designer / create draft").Clicked() {
+		ui.Spacer(c)
+		if components.Button(c, "应用孔板到当前设计", components.ButtonPrimary).Clicked() {
 			w.handoff()
 		}
 	})
 }
-func libraryView(c *ui.Context, w *Workspace, t *ui.Theme) {
-	ui.Text(c, "Component library").Bold()
-	ui.Text(c, "Built-in typed block definitions").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
-	for _, kind := range blocks.AllTypes() {
-		k := kind
-		if ui.Button(c, string(k)).Clicked() {
-			w.SelectedType = k
+
+func dilutionView(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Text(c, "稀释配液速算 (C₁V₁ = C₂V₂)").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+		ui.Spacer(c)
+		components.Badge(c, "浓度单位需保持一致")
+	})
+	ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(140).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Text(c, "母液浓度 (C₁)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			components.TextBox(c, &w.Stock, components.TextBoxOptions{}).Placeholder("如 100")
+		})
+		ui.Column(c).Grow(1).MinWidth(140).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Text(c, "目标终浓度 (C₂)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			components.TextBox(c, &w.Final, components.TextBoxOptions{}).Placeholder("如 10")
+		})
+		ui.Column(c).Grow(1).MinWidth(140).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Text(c, "配制终体积 (V₂)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			components.TextBox(c, &w.Volume, components.TextBoxOptions{}).Placeholder("如 100")
+		})
+	})
+	ui.Row(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+		Background(tok.Elevated).Border(1, tok.Border).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+		if inst, err := w.dilutionDraft(); err == nil {
+			var p blocks.DilutionProps
+			_ = inst.DecodeProps(&p)
+			ui.Text(c, fmt.Sprintf("需吸取母液：%.4g · 补加稀释液：%.4g", p.Result.StockVol, p.Result.DiluentVol)).
+				FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+		} else {
+			ui.Text(c, err.Error()).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		}
+		ui.Spacer(c)
+		if components.Button(c, "插入计算器到当前设计", components.ButtonPrimary).Clicked() {
+			w.handoff()
+		}
+	})
+}
+
+func parameterView(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	ui.Text(c, "实验参数表草稿").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+	ui.Text(c, "编辑常用条件参数行后，可直接加入当前实验步骤。").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+	for i := range w.Rows {
+		r := &w.Rows[i]
+		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Box(c).Grow(2).MinWidth(0).Children(func() { components.TextBox(c, &r.Key, components.TextBoxOptions{}).Placeholder("参数名称（如孵育时间）") })
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() { components.TextBox(c, &r.Value, components.TextBoxOptions{}).Placeholder("数值") })
+			ui.Box(c).Width(float32(tok.Spacing48)*2).Children(func() { components.TextBox(c, &r.Unit, components.TextBoxOptions{}).Placeholder("单位") })
+		})
 	}
-	ui.Text(c, "Selected: "+string(w.SelectedType)).Bold()
-	if inst, err := w.template(w.SelectedType); err == nil {
-		blocks.View(c, inst)
-	} else {
-		ui.Text(c, err.Error()).TextColor(t.Danger)
-	}
-	if ui.Button(c, "Add selected component to Designer / create draft").Clicked() {
-		w.handoff()
+	ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
+		if components.Button(c, "添加参数行", components.ButtonSecondary).Clicked() {
+			w.Rows = append(w.Rows, blocks.ParamRow{})
+		}
+		ui.Spacer(c)
+		if components.Button(c, "插入参数表到当前设计", components.ButtonPrimary).Clicked() {
+			w.handoff()
+		}
+	})
+}
+
+func libraryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	ui.Text(c, "通用模块模板").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+	ui.Text(c, "内置标准化模块结构，可直接插入到实验设计步骤中。").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+	ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).Children(func() {
+		for _, kind := range blocks.AllTypes() {
+			k := kind
+			variant := components.ButtonGhost
+			if w.SelectedType == k {
+				variant = components.ButtonSecondary
+			}
+			if components.Button(c, blockTypeLabel(k), variant).Clicked() {
+				w.SelectedType = k
+			}
+		}
+	})
+	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+		components.Badge(c, "预览 · "+blockTypeLabel(w.SelectedType), components.BadgeOptions{Tone: components.BadgeAccent})
+		if inst, err := w.template(w.SelectedType); err == nil {
+			blocks.View(c, inst)
+		} else {
+			ui.Text(c, err.Error()).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText)
+		}
+	})
+	ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+		if components.Button(c, "添加模块到当前设计", components.ButtonPrimary).Clicked() {
+			w.handoff()
+		}
+	})
+}
+
+func blockTypeLabel(k blocks.BlockType) string {
+	switch k {
+	case blocks.TypeNote:
+		return "操作文本 / 注意"
+	case blocks.TypeParameterTable:
+		return "参数表"
+	case blocks.TypeMeasurementTable:
+		return "数据记录表"
+	case blocks.TypePlate96:
+		return "96 孔板"
+	case blocks.TypePlate12:
+		return "12 孔板"
+	case blocks.TypeDilutionCalculator:
+		return "稀释计算器"
+	case blocks.TypeChecklist:
+		return "检查清单"
+	case blocks.TypeNestedWorkflow:
+		return "嵌套子流程"
+	default:
+		return string(k)
 	}
 }
-func importView(c *ui.Context, w *Workspace, t *ui.Theme) {
-	ui.Text(c, "Structured import").Bold()
-	ui.Text(c, "Paste a typed block instance or assays.Design JSON. Imported values are validated before handoff.").FontSize(t.Rem(0.86)).TextColor(t.TextMuted) // UX-P3: 12px → Rem.
-	ui.TextInput(c, &w.ImportJSON).Placeholder(`{"id":"...","definitionId":"...","definitionVersion":1,"type":"parameter_table","props":{"rows":[]}}`)
-	if ui.Button(c, "Validate and create draft").Clicked() {
-		if err := w.Import(); err != nil {
-			w.Error, w.Status = err.Error(), ""
-			// UX-P5: the error row offers 重试, which re-runs validation.
-			w.Retry = func() {
-				if err := w.Import(); err != nil {
-					w.Error, w.Status = err.Error(), ""
-					return
+
+func importView(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	ui.Text(c, "结构化数据与排板导入").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+	ui.Text(c, "粘贴标准结构化模块或孔板布局内容，通过格式核验后自动生成草稿或加入设计。").
+		FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+	components.TextBox(c, &w.ImportJSON, components.TextBoxOptions{}).
+		Placeholder(`{"id":"...","definitionId":"...","definitionVersion":1,"type":"parameter_table","props":{"rows":[]}}`)
+	ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+		if components.Button(c, "核验并导入草稿", components.ButtonPrimary).Clicked() {
+			if err := w.Import(); err != nil {
+				w.Error, w.Status = err.Error(), ""
+				w.Retry = func() {
+					if err := w.Import(); err != nil {
+						w.Error, w.Status = err.Error(), ""
+						return
+					}
+					w.Retry = nil
 				}
+			} else {
 				w.Retry = nil
 			}
-		} else {
-			w.Retry = nil
 		}
-	}
+	})
 }
-func pantryView(c *ui.Context, w *Workspace, t *ui.Theme, tok theme.Tokens) {
-	ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
-		ui.Text(c, "储藏室台账").FontSize(float32(tok.TextSection)).Bold().TextColor(t.Text)
+
+func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Text(c, "储藏室台账").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 		ui.Spacer(c)
-		if ui.Button(c, "导出贴标清单").Clicked() {
+		if components.Button(c, "导出贴标清单", components.ButtonSecondary).Clicked() {
 			w.ExportPantryLabels()
 		}
 	})
-	ui.Text(c, "名称 · 位置 · 购入/开封日 · 保质期").FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
-	ui.Row(c).Gap(float32(tok.Spacing4)).Children(func() {
-		ui.TextInput(c, &w.PantryName).Placeholder("名称")
-		ui.TextInput(c, &w.PantryLocation).Placeholder("位置")
-	})
-	ui.Row(c).Gap(float32(tok.Spacing4)).Children(func() {
-		ui.TextInput(c, &w.PantryPurchasedOn).Placeholder("购入日 YYYY-MM-DD")
-		ui.TextInput(c, &w.PantryOpenedOn).Placeholder("开封日 YYYY-MM-DD")
-		ui.TextInput(c, &w.PantryShelfLifeDays).Placeholder("保质期（天）")
-	})
-	ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
-		if ui.Button(c, "状态："+pantryStatusText(w.PantryExhausted, w.PantryOpenedOn != "")+"（点击切换）").Clicked() {
-			w.PantryExhausted = !w.PantryExhausted
-		}
-		if ui.Button(c, "保存物品").Clicked() {
-			w.SavePantry()
-		}
-		if w.PantryID != "" && ui.Button(c, "取消编辑").Clicked() {
-			w.clearPantryForm()
-		}
+	ui.Text(c, "统一管理常用试剂、缓冲液与耗材的存放位置、开封日期与效期提醒。").
+		FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() { components.TextBox(c, &w.PantryName, components.TextBoxOptions{}).Placeholder("试剂 / 耗材名称") })
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() { components.TextBox(c, &w.PantryLocation, components.TextBoxOptions{}).Placeholder("存放位置（如 4°C 冷藏柜）") })
+		})
+		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() { components.TextBox(c, &w.PantryPurchasedOn, components.TextBoxOptions{}).Placeholder("购入日 YYYY-MM-DD") })
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() { components.TextBox(c, &w.PantryOpenedOn, components.TextBoxOptions{}).Placeholder("开封日 YYYY-MM-DD") })
+			ui.Box(c).Width(float32(tok.Spacing48)*2.6).Children(func() { components.TextBox(c, &w.PantryShelfLifeDays, components.TextBoxOptions{}).Placeholder("保质期（天）") })
+		})
+		ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+			if components.Button(c, "状态："+pantryStatusText(w.PantryExhausted, w.PantryOpenedOn != "")+"（切换）", components.ButtonGhost).Clicked() {
+				w.PantryExhausted = !w.PantryExhausted
+			}
+			ui.Spacer(c)
+			if w.PantryID != "" && components.Button(c, "取消编辑", components.ButtonGhost).Clicked() {
+				w.clearPantryForm()
+			}
+			if components.Button(c, "保存物品", components.ButtonPrimary).Clicked() {
+				w.SavePantry()
+			}
+		})
 	})
 	if w.PantryLoaded {
-		ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
-			ui.Text(c, "物品").Bold()
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Text(c, fmt.Sprintf("库存清单 (%d)", len(w.Pantry.Items))).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).FontFeatures("tnum")
 			ui.Spacer(c)
-			if ui.Button(c, "刷新").Clicked() {
+			if components.Button(c, "刷新", components.ButtonGhost).Clicked() {
 				w.ReloadPantry()
 			}
 		})
 		if len(w.Pantry.Items) == 0 {
-			ui.Text(c, "台账为空").TextColor(t.TextMuted)
+			ui.Text(c, "台账为空，可在上方录入常备试剂或耗材。").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		}
 		near, other := groupPantryItems(w.Pantry.Items)
 		for _, group := range []struct {
 			title string
 			items []runs.PantryItem
-		}{{"临期", near}, {"其他", other}} {
+			tone  components.BadgeTone
+		}{{"临期提醒", near, components.BadgeWarning}, {"在库清单", other, components.BadgeNeutral}} {
 			if len(group.items) == 0 {
 				continue
 			}
-			ui.Text(c, group.title).Bold()
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, group.title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+				components.Badge(c, fmt.Sprintf("%d 项", len(group.items)), components.BadgeOptions{Tone: group.tone})
+			})
 			for _, item := range group.items {
 				item := item
-				tint := t.Text
-				if item.Status == "near_expiry" {
-					tint = tok.Warning
-				} else if item.Status == "expired" || item.Status == "exhausted" {
-					tint = tok.Danger
+				tint := tok.Text
+				statusTone := components.BadgeNeutral
+				switch item.Status {
+				case "near_expiry":
+					tint, statusTone = tok.WarningText, components.BadgeWarning
+				case "expired", "exhausted":
+					tint, statusTone = tok.DangerText, components.BadgeDanger
+				case "opened":
+					statusTone = components.BadgeAccent
 				}
-				ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Column(c).Grow(1).Children(func() {
-						ui.Text(c, item.Name+" · "+item.Location+" · "+pantryItemStatus(item)).TextColor(tint)
-						details := "购入 "+pantryDate(item.PurchasedOn)+" · 开封 "+pantryDate(item.OpenedOn)+" · 保质期 "+pantryDays(item.ShelfLifeDays)
+				ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+						ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Text(c, item.Name).FontSize(float32(tok.TextBody)).Bold().TextColor(tint)
+							if item.Location != "" {
+								ui.Text(c, "· "+item.Location).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							}
+							components.Badge(c, pantryItemStatus(item), components.BadgeOptions{Tone: statusTone})
+						})
+						details := "购入 " + pantryDate(item.PurchasedOn) + " · 开封 " + pantryDate(item.OpenedOn) + " · 保质期 " + pantryDays(item.ShelfLifeDays)
 						if item.OpenedShelfLifeDays != nil {
-							details += " · 开封后 "+pantryDays(item.OpenedShelfLifeDays)
+							details += " · 开封后 " + pantryDays(item.OpenedShelfLifeDays)
 						}
 						if item.ExpiresOn != "" {
-							details += " · 到期 "+item.ExpiresOn
+							details += " · 到期 " + item.ExpiresOn
 						}
-						ui.Text(c, details).FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
+						ui.Text(c, details).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					})
-					if ui.Button(c, "编辑").Clicked() {
+					if components.Button(c, "编辑", components.ButtonGhost).Clicked() {
 						w.EditPantry(item)
 					}
-					if ui.Button(c, "删除").Clicked() {
+					if components.Button(c, "删除", components.ButtonGhost).Clicked() {
 						w.DeletePantry(item)
 					}
 				})
@@ -574,8 +694,8 @@ func pantryView(c *ui.Context, w *Workspace, t *ui.Theme, tok theme.Tokens) {
 		}
 	}
 	if w.PantryExportJSON != "" {
-		ui.Text(c, "插件清单 JSON").FontSize(float32(tok.TextMeta)).Bold()
-		ui.TextInput(c, &w.PantryExportJSON)
+		ui.Text(c, "贴标清单明细").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+		components.TextBox(c, &w.PantryExportJSON, components.TextBoxOptions{})
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/runworkspace"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -150,6 +151,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 	izSrc := readFixture("internal/asterdoc/testdata/inhibition-zone.asterml")
 	cfuSrc := readFixture("internal/asterdoc/testdata/cfu.asterml")
 	huvecSrc := readFixture("internal/asterdoc/testdata/huvec-tube.asterml")
+	qpcrSrc := readFixture("internal/asterdoc/testdata/rt-qpcr.asterml")
 
 	makeDesignApp := func(src, stepID string, tab int) *app {
 		return &app{
@@ -398,7 +400,12 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 			}`),
 		}}
 		nbSvc := &sealStubSvc{snap: nbSnap, proj: nbProj}
-		nbApp := &app{snap: nbSnap, runAssets: nbAssets, runSvc: nbSvc}
+		nbApp := &app{
+			snap:      nbSnap,
+			runAssets: nbAssets,
+			runSvc:    nbSvc,
+			asterDoc:  &asterdoc.FrozenAsterDoc{DesignID: "visual-huvec", Revision: 3, Source: huvecSrc},
+		}
 		renderVisualPNGSteps(t, outDir, "notebook_record_board_table_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
 			notebookPage(c, nbApp)
 		}, func(tt *ui.Tester) {
@@ -406,9 +413,102 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				t.Fatalf("click notebook board tab: %v", err)
 			}
 			tt.Frame()
-			if !tt.HasText("结构化表格与分类读数") || !tt.HasText("Q2-HAMA") {
-				t.Fatalf("notebook board missing decoded table section: %q", tt.Texts())
+			if !tt.HasText("结构化表格与分类读数") || !tt.HasText("Q2-HAMA") || !tt.HasText("实验方案与实测模块总览") {
+				t.Fatalf("notebook board missing expected sections: %q", tt.Texts())
 			}
+		})
+	}
+
+	// 11. Multi-Dimensional 96-Well qPCR Plate (Samples + Target Genes + Triplicates + Std/NTC) & Zoom Overlay
+	for _, dark := range []bool{false, true} {
+		suffix := "light"
+		if dark {
+			suffix = "dark"
+		}
+		qApp := makeDesignApp(qpcrSrc, "step-02-plate-setup", 0)
+		renderVisualPNGSteps(t, outDir, "design_qpcr_plate_multilayer_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
+			asterDesignPage(c, qApp)
+		}, func(tt *ui.Tester) {
+			if err := tt.Click("靶点基因"); err != nil {
+				t.Fatalf("click factor color mode: %v", err)
+			}
+			tt.Frame()
+		})
+	}
+	{
+		qOverlayApp := makeDesignApp(qpcrSrc, "step-02-plate-setup", 0)
+		renderVisualPNGSteps(t, outDir, "design_qpcr_plate_overlay_light.png", 1360, 880, false, func(c *ui.Context) {
+			asterDesignPage(c, qOverlayApp)
+		}, func(tt *ui.Tester) {
+			if err := tt.Click("放大孔板"); err != nil {
+				t.Fatalf("click expand plate: %v", err)
+			}
+			tt.Frame()
+			if err := tt.Click("按样本"); err != nil {
+				t.Fatalf("click sample color mode in overlay: %v", err)
+			}
+			tt.Frame()
+		})
+	}
+
+	// 12. Redesigned Notebook ELN Split (Reading with embedded asterlab widget + Companion Hydrated Modules)
+	izNoteMarkdown := `# 抑菌圈实验阶段研判
+
+## 关键现象
+- Q3 万古霉素组形成直径 **21.0 mm** 清晰抑菌透明圈，阳性对照符合预期。
+- Q2 HAMA 水凝胶浸提片平均抑菌圈 **11.6 mm**，呈现温和抑菌活性 @matrix(16h)。
+
+` + "```asterlab\nkind: param_table\nid: note-pt-summary\nschema: 1\ntitle: 关键实验条件复核汇总\nrows:\n  - {key: temp, label: 倒置培养温度, value: 37, unit: Cel, record_actual: true}\n  - {key: duration, label: 孵育时长, value: 16, unit: h, record_actual: true}\n  - {key: disc_mm, label: 滤纸片直径, value: 6, unit: mm, record_actual: false}\n```"
+	for _, dark := range []bool{false, true} {
+		suffix := "light"
+		if dark {
+			suffix = "dark"
+		}
+		splitSnap := izRichSnap
+		splitSnap.Events = append([]runs.RunEvent(nil), izRichSnap.Events...)
+		splitSnap.Events = append(splitSnap.Events, runs.RunEvent{
+			ID: "ev-nb-split", EventType: "observation", Stage: "notebook",
+			Content: izNoteMarkdown, RecordedAt: "2026-11-18T11:30:00Z",
+		})
+		splitApp := &app{
+			snap:     splitSnap,
+			asterDoc: &asterdoc.FrozenAsterDoc{DesignID: "visual-design-1", Revision: 4, Source: izSrc},
+		}
+		renderVisualPNGSteps(t, outDir, "notebook_eln_split_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
+			notebookPage(c, splitApp)
+		}, func(tt *ui.Tester) {
+			if err := tt.Click("阅读"); err != nil {
+				t.Fatalf("click reading tab: %v", err)
+			}
+			tt.Frame()
+			if err := tt.Click("实验模块"); err != nil {
+				t.Fatalf("click companion modules tab: %v", err)
+			}
+			tt.Frame()
+			if !tt.HasText("关键实验条件复核汇总") {
+				t.Fatalf("embedded asterlab block did not render in reading mode: %q", tt.Texts())
+			}
+		})
+	}
+
+	// 13. Modernized Tools & Pantry Workbench
+	{
+		nearDays := uint32(180)
+		toolApp := &app{
+			tools: tools.New(tools.Callbacks{
+				ListPantry: func() (runs.PantryLedger, error) {
+					return runs.PantryLedger{
+						Items: []runs.PantryItem{
+							{ID: "p-1", Name: "SYBR Green MasterMix (2×)", Location: "-20°C 酶盒 A2", Status: "near_expiry", PurchasedOn: "2026-06-01", OpenedOn: "2026-10-20", ShelfLifeDays: &nearDays, ExpiresOn: "2026-11-28", Revision: 3},
+							{ID: "p-2", Name: "GelMA 光固化水凝胶前驱液", Location: "4°C 避光冷藏层", Status: "opened", PurchasedOn: "2026-10-01", OpenedOn: "2026-11-05", ShelfLifeDays: &nearDays, ExpiresOn: "2027-04-01", Revision: 2},
+							{ID: "p-3", Name: "万古霉素标准品滤纸片 (30 ug)", Location: "干燥器 B1", Status: "unopened", PurchasedOn: "2026-09-15", ShelfLifeDays: &nearDays, ExpiresOn: "2027-09-15", Revision: 1},
+						},
+					}, nil
+				},
+			}),
+		}
+		renderVisualPNG(t, outDir, "tools_workbench_light.png", 1360, 880, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
 		})
 	}
 }

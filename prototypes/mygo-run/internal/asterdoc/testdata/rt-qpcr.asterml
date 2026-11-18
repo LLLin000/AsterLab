@@ -1,14 +1,14 @@
-# RT-qPCR 检测样板（AsterML v2）
+# RT-qPCR 多靶点相对定量实验（96 孔多维复孔，AsterML v2）
 
 ```asterlab
 kind: experiment
 id: exp-rtqpcr-v2
 schema: 1
-title: RT-qPCR 相对定量实验
-objective: 比较处理组与对照组靶基因相对表达量（2^-ddCt）
-experimental_unit: well
+title: RT-qPCR 多靶点相对定量实验
+objective: 比较 VEGF 诱导与抑制剂干预后 VEGFA、CD31 与内参 GAPDH 的相对表达变化（2^-ddCt），在同一 96 孔板管理生物样本、技术三复孔与 Std/NTC 对照。
+experimental_unit: 96 孔板单孔
 primary_endpoint: Ct
-endpoint_method: SYBR Green qPCR
+endpoint_method: SYBR Green 两步法荧光定量 PCR
 endpoint_unit: "1"
 ```
 
@@ -21,16 +21,38 @@ rows:
   - id: group-control
     name: 对照组
     role: control
-    condition: untreated
+    condition: 无处理 cDNA 对照
+    independent_n: 3
+    technical_repeats: 3
+  - id: group-vegf
+    name: VEGF 诱导组
+    role: treatment
+    dose: 50 ng/mL
+    condition: VEGF 50 ng/mL 处理 24 h
+    independent_n: 3
+    technical_repeats: 3
+  - id: group-drug
+    name: 抑制剂干预组
+    role: treatment
+    dose: 50 ng/mL + 500 ug/mL
+    condition: VEGF 50 ng/mL + 抑制剂共孵育
+    independent_n: 3
+    technical_repeats: 3
+  - id: group-qc
+    name: 质控参照（Std / NTC）
+    role: reference
+    condition: 梯度标准品与无模板阴性对照
+    independent_n: 2
+    technical_repeats: 3
 ```
 
 ```asterlab
 kind: material
 id: mat-sybr
 schema: 1
-name: SYBR Green
+name: SYBR Green MasterMix (2×)
 role: treatment
-condition: qPCR master mix
+condition: qPCR pre-mix
 concentration:
   value: 2
   unit: mg/mL
@@ -38,25 +60,13 @@ source: built_in
 ```
 
 ```asterlab
-kind: sample
-id: sample-cdna
-schema: 1
-sample_id: cDNA-01
-group_ref: group-control
-material_refs: [mat-sybr]
-amount:
-  value: 1
-  unit: uL
-```
-
-```asterlab
 kind: assay
 id: assay-qpcr
 schema: 1
-title: SYBR qPCR
+title: SYBR qPCR 多靶点测定
 endpoint: Ct
 unit: "1"
-group_refs: [group-control]
+group_refs: [group-control, group-vegf, group-drug, group-qc]
 timepoints: [40_cycles]
 ```
 
@@ -64,32 +74,283 @@ timepoints: [40_cycles]
 kind: plate
 id: plate-qpcr-96
 schema: 1
+title: 96 孔 qPCR 多靶点三复孔排板
 format: 96
 topology: plate
 assay: assay-qpcr
 groups:
-  group-control: [A1, A2, A3]
+  group-control: [A1, A2, A3, B1, B2, B3, C1, C2, C3]
+  group-vegf: [A4, A5, A6, B4, B5, B6, C4, C5, C6]
+  group-drug: [A7, A8, A9, B7, B8, B9, C7, C8, C9]
+  group-qc: [H1, H2, H3, H4, H5, H6]
 samples:
-  A1: cDNA-01
+  A1: cDNA-C1
+  A2: cDNA-C1
+  A3: cDNA-C1
+  A4: cDNA-V1
+  A5: cDNA-V1
+  A6: cDNA-V1
+  A7: cDNA-D1
+  A8: cDNA-D1
+  A9: cDNA-D1
+  B1: cDNA-C1
+  B2: cDNA-C1
+  B3: cDNA-C1
+  B4: cDNA-V1
+  B5: cDNA-V1
+  B6: cDNA-V1
+  B7: cDNA-D1
+  B8: cDNA-D1
+  B9: cDNA-D1
+  C1: cDNA-C1
+  C2: cDNA-C1
+  C3: cDNA-C1
+  C4: cDNA-V1
+  C5: cDNA-V1
+  C6: cDNA-V1
+  C7: cDNA-D1
+  C8: cDNA-D1
+  C9: cDNA-D1
+  H1: Std-1e5
+  H2: Std-1e5
+  H3: Std-1e5
+  H4: NTC-Mix
+  H5: NTC-Mix
+  H6: NTC-Mix
+replicates:
+  A1: 1
+  A2: 2
+  A3: 3
+  A4: 1
+  A5: 2
+  A6: 3
+  A7: 1
+  A8: 2
+  A9: 3
+  B1: 1
+  B2: 2
+  B3: 3
+  B4: 1
+  B5: 2
+  B6: 3
+  B7: 1
+  B8: 2
+  B9: 3
+  C1: 1
+  C2: 2
+  C3: 3
+  C4: 1
+  C5: 2
+  C6: 3
+  C7: 1
+  C8: 2
+  C9: 3
+  H1: 1
+  H2: 2
+  H3: 3
+  H4: 1
+  H5: 2
+  H6: 3
 roles:
   A1: sample
+  B1: sample
+  C1: sample
+  H1: standard
+  H2: standard
+  H3: standard
+  H4: ntc
+  H5: ntc
+  H6: ntc
+factors:
+  靶点基因:
+    A1: GAPDH
+    A2: GAPDH
+    A3: GAPDH
+    A4: GAPDH
+    A5: GAPDH
+    A6: GAPDH
+    A7: GAPDH
+    A8: GAPDH
+    A9: GAPDH
+    B1: VEGFA
+    B2: VEGFA
+    B3: VEGFA
+    B4: VEGFA
+    B5: VEGFA
+    B6: VEGFA
+    B7: VEGFA
+    B8: VEGFA
+    B9: VEGFA
+    C1: CD31
+    C2: CD31
+    C3: CD31
+    C4: CD31
+    C5: CD31
+    C6: CD31
+    C7: CD31
+    C8: CD31
+    C9: CD31
+    H1: GAPDH
+    H2: GAPDH
+    H3: GAPDH
+    H4: GAPDH
+    H5: GAPDH
+    H6: GAPDH
+  加药处理:
+    A1: Untreated
+    A2: Untreated
+    A3: Untreated
+    B1: Untreated
+    B2: Untreated
+    B3: Untreated
+    C1: Untreated
+    C2: Untreated
+    C3: Untreated
+    A4: VEGF 50ng/mL
+    A5: VEGF 50ng/mL
+    A6: VEGF 50ng/mL
+    B4: VEGF 50ng/mL
+    B5: VEGF 50ng/mL
+    B6: VEGF 50ng/mL
+    C4: VEGF 50ng/mL
+    C5: VEGF 50ng/mL
+    C6: VEGF 50ng/mL
+    A7: VEGF+Inhibitor
+    A8: VEGF+Inhibitor
+    A9: VEGF+Inhibitor
+    B7: VEGF+Inhibitor
+    B8: VEGF+Inhibitor
+    B9: VEGF+Inhibitor
+    C7: VEGF+Inhibitor
+    C8: VEGF+Inhibitor
+    C9: VEGF+Inhibitor
 ```
 
 ```asterlab
-kind: data_table
-id: dt-ct
+kind: step
+id: step-01-cdna-mix
 schema: 1
-title: Ct 扩增阈值记录表
-schema_id: qpcr_ct
-endpoint: Ct
-columns:
-  - key: well
-    label: 孔位
-    value_kind: text
-  - key: ct
-    label: Ct
-    value_kind: number
-    unit: 1
-    min: 10
-    max: 38
+execution: executable
+title: 01 SYBR 反应体系配制与 cDNA 稀释
+assay: assay-qpcr
+timepoints: [40_cycles]
+path: qpcr/01-mix
+order: 1
+blocks:
+  - kind: param_table
+    id: blk-qpcr-mix-params
+    schema: 1
+    title: 20 uL 单孔反应体系参数
+    rows:
+      - key: rxn_vol
+        label: 单孔总体系
+        value: 20
+        unit: uL
+        record_actual: true
+      - key: primer_conc
+        label: 上下游引物终浓度
+        value: 0.4
+        unit: uM
+        record_actual: true
+      - key: cdna_input
+        label: 单孔 cDNA 上样量
+        value: 2
+        unit: uL
+        record_actual: true
+  - kind: calculator
+    id: blk-qpcr-mastermix
+    schema: 1
+    title: SYBR qPCR MasterMix 按孔组批量配液（含 15% 余量）
+    mode: group_mastermix
+    plate_ref: plate-qpcr-96
+    volume_per_unit:
+      value: 20
+      unit: uL
+    excess_ratio: 0.15
+    components:
+      - name: SYBR Green Mix (2×)
+        stock_percent: 100
+        target_percent: 50
+      - name: F/R 引物预混 (10 uM)
+        stock_percent: 10
+        target_percent: 0.4
+```
+
+```asterlab
+kind: step
+id: step-02-plate-setup
+schema: 1
+execution: executable
+title: 02 96 孔多靶点加样与三复孔核查
+assay: assay-qpcr
+timepoints: [40_cycles]
+path: qpcr/02-plate
+order: 2
+block_refs: [plate-qpcr-96]
+blocks:
+  - kind: checklist
+    id: blk-qpcr-plate-checks
+    schema: 1
+    title: 加样与封膜质控确认
+    items:
+      - id: chk-ntc
+        label: 确认 H4–H6 无模板阴参 NTC 无 cDNA 交叉污染
+        required: true
+      - id: chk-seal
+        label: 光学封板膜封紧后 1500 rpm 离心 1 min 消除气泡
+        required: true
+```
+
+```asterlab
+kind: step
+id: step-03-qpcr-run
+schema: 1
+execution: executable
+title: 03 两步法扩增与 Ct 值记录
+assay: assay-qpcr
+timepoints: [40_cycles]
+path: qpcr/03-readout
+order: 3
+blocks:
+  - kind: timer
+    id: blk-qpcr-run-timer
+    schema: 1
+    title: 上机扩增流程总耗时预估
+    mode: countdown
+    duration:
+      value: 3900
+      unit: s
+  - kind: data_table
+    id: dt-ct
+    schema: 1
+    title: Ct 扩增阈值记录表
+    schema_id: qpcr_ct
+    endpoint: Ct
+    columns:
+      - key: well
+        label: 孔位
+        value_kind: text
+      - key: target
+        label: 靶点基因
+        value_kind: text
+      - key: ct
+        label: Ct 实测值
+        value_kind: number
+        unit: "1"
+        min: 10
+        max: 38
+```
+
+```asterlab
+kind: workflow
+id: wf-rtqpcr
+schema: 1
+steps: [step-01-cdna-mix, step-02-plate-setup, step-03-qpcr-run]
+edges:
+  - id: edge-qpcr-1
+    from: step-01-cdna-mix
+    to: step-02-plate-setup
+  - id: edge-qpcr-2
+    from: step-02-plate-setup
+    to: step-03-qpcr-run
 ```

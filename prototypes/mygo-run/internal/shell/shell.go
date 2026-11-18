@@ -586,7 +586,7 @@ func (s *Shell) runCard(c *ui.Context, run RecentRun) {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
 				components.Text(c, run.Title).FontSize(t.Rem(.9)).FontWeight(600).
 					SingleLine().Ellipsis("…")
-				components.Text(c, "Run · "+statusLabel(run.Meta)).TextColor(t.TextMuted).FontSize(t.Rem(.75))
+				components.Text(c, "实验运行 · "+statusLabel(run.Meta)).TextColor(t.TextMuted).FontSize(t.Rem(.75))
 			})
 			components.Icon(c, lucide.ArrowUpRight()).Size(t.Space(2), t.Space(2)).
 				TextColor(t.TextMuted)
@@ -605,9 +605,12 @@ func (s *Shell) homeTemplates(c *ui.Context) {
 	}
 	matches := []match{}
 	for _, template := range []struct{ title, match string }{
+		{"四象限抑菌圈测定", "抑菌圈"},
+		{"涂板菌落计数 (CFU)", "CFU"},
+		{"HUVEC 水凝胶成管", "HUVEC"},
+		{"RT-qPCR 多靶点复孔", "RT-qPCR"},
 		{"CCK-8 细胞活力", "CCK-8"},
 		{"L929 生物相容性", "L929"},
-		{"RT-qPCR 表达比较", "RT-qPCR"},
 	} {
 		for _, design := range s.Designs {
 			if strings.Contains(design.Title, template.match) {

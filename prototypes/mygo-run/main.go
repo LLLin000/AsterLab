@@ -1651,6 +1651,9 @@ var cfuAsterDoc string
 //go:embed internal/asterdoc/testdata/huvec-tube.asterml
 var huvecAsterDoc string
 
+//go:embed internal/asterdoc/testdata/rt-qpcr.asterml
+var rtQpcrAsterDoc string
+
 func (a *app) createAsterDocDesign(source, title string) {
 	if a.designSvc == nil {
 		msg := "设计服务不可用"
@@ -2809,8 +2812,125 @@ func (a *app) createRunFromDesignDoc() {
 	a.shell.Page = shell.Run
 }
 
+func (a *app) applyToolInstanceToDesign(inst blocks.Instance) {
+	if a.designDoc == nil {
+		if a.shell != nil {
+			a.shell.Page = shell.Design
+		}
+		return
+	}
+	doc, err := asterdoc.Parse(a.designDoc.Source)
+	if err != nil {
+		return
+	}
+	targetStepID := ""
+	for _, m := range doc.Modules {
+		if m.Kind == "step" && m.ID == a.designSelected && moduleString(m.Data, "execution") != "organizational" {
+			targetStepID = m.ID
+			break
+		}
+	}
+	if targetStepID == "" {
+		for _, m := range doc.Modules {
+			if m.Kind == "step" && moduleString(m.Data, "execution") != "organizational" {
+				targetStepID = m.ID
+				break
+			}
+		}
+	}
+	if targetStepID == "" {
+		return
+	}
+	blk := map[string]any{}
+	idBase := fmt.Sprintf("tool-%d", time.Now().Unix()%100000)
+	switch inst.Type {
+	case blocks.TypeDilutionCalculator:
+		var dp blocks.DilutionProps
+		_ = inst.DecodeProps(&dp)
+		blk = map[string]any{
+			"kind": "calculator", "id": idBase + "-calc", "schema": 1, "title": "稀释配液计算", "mode": "dilution",
+			"stock":        map[string]any{"value": dp.Input.StockConc, "unit": "mg/mL"},
+			"target":       map[string]any{"value": dp.Input.FinalConc, "unit": "mg/mL"},
+			"final_volume": map[string]any{"value": dp.Input.FinalVol, "unit": "uL"},
+		}
+	case blocks.TypeParameterTable:
+		var pp blocks.ParameterTableProps
+		_ = inst.DecodeProps(&pp)
+		rows := make([]any, 0, len(pp.Rows))
+		for i, r := range pp.Rows {
+			var v any = r.Value
+			if f, err := strconv.ParseFloat(strings.TrimSpace(r.Value), 64); err == nil {
+				v = f
+			}
+			row := map[string]any{"key": firstNonEmpty(r.Key, fmt.Sprintf("param-%d", i+1)), "label": firstNonEmpty(r.Key, fmt.Sprintf("参数 %d", i+1)), "value": v, "record_actual": true}
+			if r.Unit != "" {
+				row["unit"] = r.Unit
+			}
+			rows = append(rows, row)
+		}
+		if len(rows) > 0 {
+			blk = map[string]any{"kind": "param_table", "id": idBase + "-params", "schema": 1, "title": "实验参数表", "rows": rows}
+		}
+	case blocks.TypeChecklist:
+		var cp blocks.ChecklistProps
+		_ = inst.DecodeProps(&cp)
+		items := make([]any, 0, len(cp.Items))
+		for i, it := range cp.Items {
+			items = append(items, map[string]any{"id": firstNonEmpty(it.ID, fmt.Sprintf("%s-c%d", idBase, i+1)), "label": firstNonEmpty(it.Text, "检查项"), "required": true})
+		}
+		if len(items) == 0 {
+			items = append(items, map[string]any{"id": idBase + "-c1", "label": "确认试剂与耗材准备就绪", "required": true})
+		}
+		blk = map[string]any{"kind": "checklist", "id": idBase + "-chk", "schema": 1, "title": "操作检查清单", "items": items}
+	case blocks.TypeMeasurementTable:
+		blk = asterdoc.DefaultStarterBlock(doc, targetStepID, "data_table")
+	case blocks.TypeNote:
+		var np blocks.NoteProps
+		_ = inst.DecodeProps(&np)
+		blk = map[string]any{"kind": "prose", "id": idBase + "-note", "schema": 1, "title": firstNonEmpty(np.Title, "操作说明"), "tone": "tip", "body": firstNonEmpty(np.Text, "操作说明与质控要点")}
+	case blocks.TypePlate96, blocks.TypePlate12:
+		var pp blocks.Plate96Props
+		_ = inst.DecodeProps(&pp)
+		cols := pp.Cols
+		if cols <= 0 {
+			cols = 12
+		}
+		firstGroup := ""
+		if gl := doc.GroupList(); len(gl) > 0 {
+			firstGroup = gl[0].ID
+		}
+		if firstGroup == "" {
+			blk = asterdoc.DefaultStarterBlock(doc, targetStepID, "prose")
+			break
+		}
+		wells := []any{}
+		for _, idx := range pp.Selected {
+			wells = append(wells, fmt.Sprintf("%c%d", 'A'+(idx/cols), (idx%cols)+1))
+		}
+		if len(wells) == 0 {
+			wells = []any{"A1"}
+		}
+		blk = map[string]any{"kind": "plate", "id": idBase + "-plate", "schema": 1, "title": "孔板排布", "format": 96, "groups": map[string]any{firstGroup: wells}}
+	default:
+		blk = asterdoc.DefaultStarterBlock(doc, targetStepID, "prose")
+	}
+	if len(blk) > 0 {
+		_ = a.applyDesignRaw(map[string]any{
+			"type": "insert_step_block", "stepId": targetStepID, "index": -1, "block": blk,
+		})
+		a.designSelected = targetStepID
+		a.designTab = 0
+		if a.shell != nil {
+			a.shell.Page = shell.Design
+		}
+	}
+}
+
 func (a *app) newToolsWorkspace() *tools.Workspace {
 	return tools.New(tools.Callbacks{
+		UseInDesigner: func(inst blocks.Instance) {
+			a.applyToolInstanceToDesign(inst)
+		},
 		ListPantry: func() (runs.PantryLedger, error) {
 			if a.runSvc == nil {
 				return runs.PantryLedger{}, fmt.Errorf("运行服务不可用")
@@ -2840,15 +2960,7 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 }
 
 func toolsPage(c *ui.Context, a *app) {
-	t := c.Theme()
-	tokens := theme.GetTokens(t)
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(4)).Border(1, t.Border).
-			Background(t.Surface).Children(func() {
-			ui.Text(c, "资料与工具").FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text)
-			ui.Spacer(c)
-			ui.Text(c, "储藏室台账与方法工具").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
-		})
 		if a.tools == nil {
 			a.tools = a.newToolsWorkspace()
 		}
@@ -3891,6 +4003,10 @@ func (a *app) renderNewDesignDialog(c *ui.Context) {
 					if components.Button(c, "HUVEC 水凝胶成管（12孔板）", components.ButtonSecondary).Clicked() {
 						a.newDesignOpen = false
 						a.createAsterDocDesign(huvecAsterDoc, "HUVEC 水凝胶成管")
+					}
+					if components.Button(c, "RT-qPCR 多靶点复孔（96孔板）", components.ButtonSecondary).Clicked() {
+						a.newDesignOpen = false
+						a.createAsterDocDesign(rtQpcrAsterDoc, "RT-qPCR 多靶点定量实验")
 					}
 					if components.Button(c, "CCK-8 骨架", components.ButtonSecondary).Clicked() {
 						a.newDesignOpen = false

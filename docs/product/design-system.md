@@ -16,7 +16,11 @@
 | 圆角 | `ControlRadius`（控件）/`PanelRadius`（面板）/`DialogRadius`（对话框） | `Radius(3)`、`Radius(5)`、`Radius(7)` | `.Radius(float32(tokens.ControlRadius))` |
 | 控件高度 | `ButtonHeight/InputHeight/RowHeight` | `Height(28)`、`MinHeight(33)` | `.Height(float32(tokens.ButtonHeight))` |
 
-颜色字面值只允许出现在 `internal/theme/theme.go`（定义）与确有科学语义的具名调色板函数（如孔板分组色）中；已有同语义调色板时必须复用，不得散落在渲染代码里。
+颜色字面值只允许出现在 `internal/theme/theme.go`（定义）与确有科学语义的具名调色板函数（如孔板分组色、多维分类色与孔角色色）中；已有同语义调色板时必须复用，不得散落在渲染代码里。
+
+当前在 `internal/theme/theme.go` 登记的具名科学调色板函数：
+- `theme.CategoricalPalette(dark)` / `theme.CategoricalColor(key, dark)`：8 色无障碍实验室分类调色板，用于多维孔板（`plate@1`）按样本、正交因子（如靶点基因、加药浓度）与技术复孔区分着色，并配适亮/暗色主题；
+- `theme.WellRoleColor(role, dark)`：孔位对照角色语义色（`sample` / `standard` / `ntc` / `blank` / `positive_control` / `negative_control` / `vehicle`）。
 
 ## 2. 间距体系
 
@@ -159,7 +163,9 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | 参数表 / 分组表 / 数据表 / 计算器结果 | `onevra/components.Table` + `TableRow` | 数值列启用 `.FontFeatures("tnum")`，质控边界用 `Badge` 语义色调 |
 | AsterML 源码编辑 | `mygo/ui/editor`（Markdown 高亮、行号、DiffBase） | 与右侧 `asterdoc.ModeProtocol` 实时预览同屏联动 |
 | 示意图 / 培养皿分区 SVG | `mygo/ui.ParseSVG` + `ui.Image` + `<text>` 叠加 | 纯视觉辅助表达；分组与量化数据严格归属 `group_table` / `data_table` |
-| 孔板 / 培养皿 / 1D 管架网格 | `internal/uikit/plate` | 复用 `theme.Palette` 与语义分组色，`ui.Hex` 只保留在 `theme.go` |
+| 孔板 / 培养皿 / 1D 管架网格 | `internal/uikit/plate` + `theme.CategoricalPalette` | 支持分组、样本、正交因子（`factors`）、复孔与孔角色（NTC/Std/Blank）五维 `ColorBy` 切换与孔内角标；`ui.Hex` 只保留在 `theme.go` |
+| Notebook 科研电子实验记录本 (ELN) | `components.SplitPercent` + 只读水合 `asterdoc.View` + `components.Table` | 笔记页支持内嵌 ` ```asterlab ` 模块与右侧冻结方案同源预览；`图板` 采用双栏结构化仪表盘（5 格 KPI + 计划实际表 + 视野矩阵 + 右栏签核归档） |
+| 资料与工具台账 | `components.Sidebar` + `TextBox` + `Badge` + `UseInDesigner` | 储藏室试剂台账与 96 孔板/稀释计算工具，草稿可直接转化为 AsterML v2 模块插入当前实验设计 |
 | 步骤内模块拖拽排序 | `ui.Box`（`.Drag` / `.DragOver` / `.Drop`）+ `lucide.GripVertical` | 手柄固定于模块标题栏左侧；落位复用 `MoveStepBlockToIndex` 与主题高亮边框 |
 | 图像与实拍附件查看 | `components.Dialog` Lightbox + `ui.ScrollBoth` + `x/image/tiff` | 异步后台解码防阻塞主线程；提供 `75%/100%/150%/200%` 缩放与外部打开，支持 Design 拖入文件 |
 | 通用数据表粘贴与键盘导航 | `components.Table` + `ui.TextField`（`FocusBind` / `OnPaste` / `OnTextKey`） | 支持 Excel TSV/CSV 粘贴自动扩行与方向键/`Enter`/`Tab` 移焦；保存后显示 `数据已记录` `Badge` |

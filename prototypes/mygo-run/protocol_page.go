@@ -157,7 +157,7 @@ func protocolPage(c *ui.Context, a *app) {
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(4)).Gap(t.Space(2)).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Protocol versions · 只读").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			ui.Text(c, "方案历史版本 · 只读").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 			protocol.RenderVersions(c, versions, state.selectedVersionID, func(id string) {
 				state.selectedByUser = true
 				state.selectedVersionID = id
@@ -233,7 +233,7 @@ func protocolPage(c *ui.Context, a *app) {
 func renderUnresolvedProtocol(c *ui.Context) {
 	// UX-P5 / UX-STATE: missing content is explicit, not a fallback or error banner.
 	protocol.RenderVersionState(c, "unresolved", "", 0)
-	ui.Text(c, "Protocol 内容查询缺失。").FontSize(c.Theme().Rem(.82)).TextColor(c.Theme().TextMuted)
+	ui.Text(c, "当前实验方案内容暂不可用。").FontSize(c.Theme().Rem(.82)).TextColor(c.Theme().TextMuted)
 }
 
 func renderProtocolDocument(c *ui.Context, source string, mode asterdoc.Mode, revision uint64) {

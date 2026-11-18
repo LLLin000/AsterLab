@@ -24,13 +24,16 @@ import (
 	"asterlab-mygo-prototype/internal/runworkspace"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
+	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 	"asterlab-mygo-prototype/modules/runs"
 	mygo "github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 	"github.com/egoist/mygo/ui/richtext"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 	_ "golang.org/x/image/tiff" // preview TIFFs: ui.DecodeImage has no TIFF format until registered
+	"gopkg.in/yaml.v3"
 )
 
 type citePickerState struct {
@@ -56,11 +59,17 @@ func (a *app) citePicker() *citePickerState {
 // to. It is derived state only — no prose, no facts are stored here.
 type noteViewState struct {
 	// split is the active projection at narrow widths. At >=1100 both sections
-	// are shown side by side, so split is ignored there.
-	split       int
-	highlightID string
-	scrolledID  string
-	expanded    map[string]bool
+	// are shown via an asymmetric ELN SplitPercent layout.
+	split        int
+	splitPct     float32
+	rightTab     int // 0 = 运行时间线, 1 = 同源实验模块
+	highlightID  string
+	scrolledID   string
+	expanded     map[string]bool
+	hydratedView *asterdoc.View
+	hydratedKey  string
+	readView     *asterdoc.View
+	readKey      string
 }
 
 var noteViews = map[*app]*noteViewState{}
@@ -188,25 +197,39 @@ func notebookPage(c *ui.Context, a *app) {
 	if a.noteRunID != a.snap.RunID {
 		a.loadNotebook()
 	}
-	ui.Column(c).Fill().Padding(t.Space(2), t.Space(3)).Gap(t.Space(2)).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Padding(0, t.Space(1)).Children(func() {
-			ui.Text(c, "Notebook").FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "/").FontSize(float32(tokens.TextMeta)).TextColor(t.Border)
-			ui.Text(c, a.snap.Title).FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted).
-				SingleLine().Ellipsis("…").MaxWidth(420)
-			if a.snap.AsterDoc == nil && a.snap.DesignRevision > 0 {
-				ui.Text(c, fmt.Sprintf("设计版本 %d", a.snap.DesignRevision)).
-					FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+	sealed := a.recordSealed()
+	proj, _, _ := a.recordProjection()
+	hydratedView := a.ensureHydratedNotebookAsterView(proj)
+	readAsterView := a.ensureReadAsterView(hydratedView)
+	defer func() {
+		if a.noteAster != nil {
+			a.noteAster.RenderPlateOverlay(c)
+		}
+		if hydratedView != nil {
+			hydratedView.RenderPlateOverlay(c)
+		}
+		if readAsterView != nil {
+			readAsterView.RenderPlateOverlay(c)
+		}
+	}()
+	ui.Column(c).Fill().Background(tokens.Canvas).Padding(float32(tokens.Spacing12), float32(tokens.Spacing16)).Gap(float32(tokens.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Padding(0, float32(tokens.Spacing4)).Children(func() {
+			ui.Text(c, "Notebook").FontSize(float32(tokens.TextSection)).Bold().TextColor(tokens.Text)
+			ui.Text(c, "/").FontSize(float32(tokens.TextMeta)).TextColor(tokens.BorderStrong)
+			ui.Text(c, a.snap.Title).FontSize(float32(tokens.TextBody)).FontWeight(600).TextColor(tokens.Text).
+				SingleLine().Ellipsis("…").MaxWidth(360)
+			if stWord := notebookStatusWord(a.snap.Status); stWord != "" {
+				components.Badge(c, stWord, components.BadgeOptions{Tone: components.BadgeAccent})
+			}
+			if a.snap.DesignRevision > 0 {
+				ui.Text(c, fmt.Sprintf("方案第 %d 版", a.snap.DesignRevision)).
+					FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted).FontFeatures("tnum")
 			}
 			ui.Spacer(c)
 			a.documentExportButton(c)
-			ui.Text(c, fmt.Sprintf("%d / 5000", len([]rune(a.noteSource())))).
-				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).FontFeatures("tnum")
+			components.Badge(c, fmt.Sprintf("%d / 5000 字", len([]rune(a.noteSource()))))
 		})
-		// Floating toolbar above the sheet, following Obsidian's editing
-		// toolbar: mode switch, editing commands, then one save action. A
-		// sealed (signed) record locks editing until explicitly unlocked.
-		sealed := a.recordSealed()
+		// Floating ELN toolbar above the sheet.
 		if c.Shortcut(ui.Cmd, ui.KeyE) && !sealed {
 			if a.noteMode == 2 {
 				a.setNoteMode(a.noteEditMode)
@@ -218,41 +241,63 @@ func notebookPage(c *ui.Context, a *app) {
 			a.saveNotebook()
 		}
 		ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-			ui.Row(c).Wrap().MaxWidth(960).MaxWidthPercent(100).Padding(t.Space(1), t.Space(1.25)).Radius(t.Space(2.5)).
-				Background(t.Surface).Border(1, t.Border).
-				Shadow(0, 2, 16, 0, t.Text.Alpha(.10)).Gap(t.Space(.75)).
+			ui.Row(c).Wrap().MaxWidth(1040).MaxWidthPercent(100).
+				Padding(float32(tokens.Spacing4), float32(tokens.Spacing12)).Radius(float32(tokens.PanelRadius)).
+				Background(tokens.Surface).Border(1, tokens.Border).
+				Shadow(0, 2, 16, 0, tokens.Text.Alpha(.08)).Gap(float32(tokens.Spacing8)).
 				AlignItems(ui.Center).Children(func() {
 				live := a.noteMode == 0
 				doc := a.noteDoc
-				if live && doc != nil {
+				if live && doc != nil && !sealed {
 					formats := doc.Formatting()
 					a.iconCmd(c, lucide.Undo2(), "撤销", false, doc.CanUndo(), doc.Undo)
 					a.iconCmd(c, lucide.Redo2(), "重做", false, doc.CanRedo(), doc.Redo)
-					ui.Box(c).Width(1).Height(18).Background(t.Border)
+					ui.Box(c).Width(1).Height(18).Background(tokens.Border)
 					a.iconCmd(c, lucide.Bold(), "粗体", formats.Bold == richtext.FormatOn, true, doc.ToggleBold)
 					a.iconCmd(c, lucide.Italic(), "斜体", formats.Italic == richtext.FormatOn, true, doc.ToggleItalic)
 					a.iconCmd(c, lucide.Strikethrough(), "删除线", formats.Strikethrough == richtext.FormatOn, true, doc.ToggleStrikethrough)
 					a.iconCmd(c, lucide.Code(), "行内代码", formats.Code == richtext.FormatOn, true, doc.ToggleCode)
-					ui.Box(c).Width(1).Height(18).Background(t.Border)
+					ui.Box(c).Width(1).Height(18).Background(tokens.Border)
 					a.iconCmd(c, lucide.Heading1(), "一级标题", formats.Paragraph.Heading == 1, true, func() { doc.SetHeading(1) })
 					a.iconCmd(c, lucide.Heading2(), "二级标题", formats.Paragraph.Heading == 2, true, func() { doc.SetHeading(2) })
 					a.iconCmd(c, lucide.List(), "项目列表", formats.Paragraph.List == richtext.Bullets, true, func() { doc.ToggleList(richtext.Bullets) })
 					a.iconCmd(c, lucide.ListOrdered(), "编号列表", formats.Paragraph.List == richtext.Numbers, true, func() { doc.ToggleList(richtext.Numbers) })
 					a.iconCmd(c, lucide.Quote(), "引用", formats.Paragraph.Quote, true, doc.ToggleQuote)
-				} else {
-					a.iconCmd(c, lucide.Bold(), "实时渲染中可格式化", false, false, func() {})
+					ui.Box(c).Width(1).Height(18).Background(tokens.Border)
 				}
-				if a.noteMode == 3 {
+				if a.noteMode == 3 && !sealed {
 					add := components.IconButton(c, lucide.Plus(), "插入孔板模块", components.IconButtonCompact)
+					components.Tooltip(c, add, "插入 96 孔板模块")
 					if add.Clicked() {
 						a.insertPlateModule()
 					}
+					modMenuBtn := components.Button(c, "＋ 插入模块", components.ButtonOutline)
+					components.MenuButton(c, modMenuBtn, func(m *components.Menu) {
+						items := []struct{ kind, label string }{
+							{"prose", "文本 / 注意事项"},
+							{"param_table", "实验参数表"},
+							{"figure", "示意图 / SVG"},
+							{"data_table", "数据记录表"},
+							{"group_table", "实验分组表"},
+							{"checklist", "执行检查清单"},
+							{"calculator", "稀释 / 配液计算器"},
+							{"timer", "步骤计时器"},
+							{"attachment", "附件 / 显微采图"},
+							{"subflow", "详细子步骤"},
+							{"plate", "标准孔板"},
+						}
+						for _, it := range items {
+							if m.Item(it.label).Chosen() {
+								a.insertGenericModuleIntoDraft(it.kind)
+							}
+						}
+					})
 				}
-				// Citations only point to existing Run facts; no fact-writing controls live here (UX-P1, UX-P2, UX-P3).
+				// Citations point to existing Run facts; no fact-writing controls live here (UX-P1, UX-P2, UX-P3).
 				st := a.citePicker()
 				cite := components.Button(c, "@引用", components.ButtonGhost)
-				cite.Disabled(a.noteMode == 2 || sealed)
-				if cite.Clicked() && a.noteMode != 2 && !sealed {
+				cite.Disabled(a.noteMode == 2 || a.noteMode == 4 || sealed)
+				if cite.Clicked() && a.noteMode != 2 && a.noteMode != 4 && !sealed {
 					st.manual = !st.open
 					st.open = !st.open
 					st.filter = "all"
@@ -263,7 +308,6 @@ func notebookPage(c *ui.Context, a *app) {
 					}
 				}
 
-				ui.Box(c).Width(t.Space(1))
 				old := a.noteMode
 				parts := components.TabsWithLeading(c, &a.noteMode, components.TabsSegmented,
 					func(c *ui.Context, i int, size float32) {
@@ -271,9 +315,6 @@ func notebookPage(c *ui.Context, a *app) {
 						components.Icon(c, icon).Size(size, size)
 					}, "实时", "编辑", "阅读", "文档", "图板")
 				if parts.List.Changed() {
-					// The sealed record locks the editing modes; only the
-					// read-only board (mode 4) and reading stay reachable.
-					// Sign/archive is final: there is no unlock.
 					if sealed && a.noteMode != 2 && a.noteMode != 4 {
 						a.noteMode = old
 						c.AddToast(ui.Toast{Title: "已签核归档", Description: "记录已锁定为终态归档，不可撤销。切换到阅读查看正文。", Type: components.ToastWarning})
@@ -281,11 +322,11 @@ func notebookPage(c *ui.Context, a *app) {
 						a.applyNoteModeChange(old)
 					}
 				}
-				// UX-STATE / UX-06: one explicit state word beside Save, from the
-				// projection's single vocabulary — never a bare colour dot.
-				stateLabel, stateColor := a.notebookToolbarState(tokens)
-				ui.Text(c, stateLabel).FontSize(float32(tokens.TextData)).Bold().TextColor(stateColor)
+				ui.Spacer(c)
+				stateLabel, stateTone := a.notebookToolbarBadgeTone()
+				components.Badge(c, stateLabel, components.BadgeOptions{Tone: stateTone})
 				save := components.IconButton(c, lucide.Save(), "保存笔记", components.IconButtonCompact)
+				components.Tooltip(c, save, "保存当前笔记版本 (Ctrl+S)")
 				save.Disabled(a.noteMode == 2 || sealed || a.noteState == "saving")
 				if save.Clicked() && a.noteMode != 2 && !sealed && a.noteState != "saving" {
 					a.saveNotebook()
@@ -480,23 +521,33 @@ func notebookPage(c *ui.Context, a *app) {
 		projection := notebook.Build(a.snap)
 		width, _ := c.Size()
 		if width >= 1100 {
-			ui.Row(c).Grow(1).FillWidth().Gap(t.Space(3)).Children(func() {
-				ui.Column(c).Grow(1).MinWidth(0).Children(func() { a.notebookProse(c, t) })
-				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-					notebookTimeline(c, a, t, projection)
-				})
+			if view.splitPct <= 0 {
+				view.splitPct = 62
+			}
+			ui.Box(c).Grow(1).MinHeight(0).FillWidth().Children(func() {
+				components.SplitPercent(c, &view.splitPct,
+					func() {
+						ui.Column(c).Fill().Padding(0, float32(tokens.Spacing12), 0, 0).Children(func() {
+							a.notebookProse(c, t)
+						})
+					},
+					func() {
+						ui.Column(c).Fill().Padding(0, 0, 0, float32(tokens.Spacing12)).Children(func() {
+							notebookTimeline(c, a, t, projection, hydratedView)
+						})
+					},
+					components.SplitOptions{FirstMin: 460, SecondMin: 320, Default: 62},
+				).Label("Notebook 笔记与同源运行面板分隔条").Fill()
 			})
 			return
 		}
-		// Narrow (covers 900×600): the two sections switch instead of sitting
-		// side by side, so prose keeps a readable measure and Save (above, in
-		// the toolbar) stays in the first viewport (UX-P1, UX-LAYOUT).
+		// Narrow (covers 900×600): switch between ELN sheet and Run companion.
 		ui.Row(c).FillWidth().Children(func() {
 			components.Tabs(c, &view.split, components.TabsSegmented, "笔记", "运行记录")
 		})
 		if view.split == 1 {
 			ui.Row(c).Grow(1).FillWidth().Children(func() {
-				ui.Column(c).Grow(1).MinWidth(0).Children(func() { notebookTimeline(c, a, t, projection) })
+				ui.Column(c).Grow(1).MinWidth(0).Children(func() { notebookTimeline(c, a, t, projection, hydratedView) })
 			})
 			return
 		}
@@ -504,81 +555,158 @@ func notebookPage(c *ui.Context, a *app) {
 	})
 }
 
-// notebookProse renders the editable paper of one mode: live rich text,
-// source editing, reading, or the AsterML document. It writes prose only.
+// notebookProse renders the Craft/Notion-styled ELN paper sheet over live rich text,
+// Markdown source editing, homomorphic reading with inline AsterML v2 modules, or AsterML doc editing.
 func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
-	// A sealed record locks every editing mode: the prose verifies against
-	// its signature, so the paper shows the lock instead of an editor until
-	// explicitly unlocked. Reading stays available.
+	tok := theme.GetTokens(t)
 	if a.recordSealed() && a.noteMode != 2 && a.noteMode != 4 {
 		a.recordLockedNotice(c, t)
 		return
 	}
+	sealed := a.recordSealed()
+	view := a.noteView()
+	renderMasthead := func() {
+		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, firstNonEmpty(a.snap.Title, "实验记录")).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+				ui.Spacer(c)
+				ui.Text(c, fmt.Sprintf("事件 %d · 图像 %d", len(a.snap.Events), len(a.runAssets))).
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+			})
+			if !sealed && strings.TrimSpace(a.noteSource()) == "" && (a.noteMode == 0 || a.noteMode == 1) {
+				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).Children(func() {
+					for _, tmpl := range []struct{ label, body string }{
+						{"＋ 标准实验记录提纲", "# 实验记录与观察\n\n## 1. 实验条件与偏差核对\n- 参数确认：\n\n## 2. 关键现象与样本表现\n- \n\n## 3. 阶段结论与后续动作\n- \n"},
+						{"＋ 异常偏差排查单", "# 异常偏差与排查记录\n\n- **发生步骤**：\n- **现象描述**：\n- **影响评估与处理**：\n"},
+						{"＋ 定量结果研判摘要", "# 结果研判摘要\n\n- **主要指标变化**：\n- **质控样本核查**：\n- **下一步优化建议**：\n"},
+					} {
+						tmpl := tmpl
+						if components.Button(c, tmpl.label, components.ButtonGhost).Clicked() {
+							a.noteDraft = tmpl.body
+							if a.noteMode == 0 {
+								a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
+							}
+							a.markNotebookDirty()
+						}
+					}
+				})
+			}
+			ui.Divider(c)
+		})
+	}
 	paper := func(children func()) {
 		ui.Column(c).Grow(1).FillWidth().AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Grow(1).FillWidth().MaxWidth(820).MaxWidthPercent(100).
-				Background(t.Surface).Border(1, t.Border).
-				Radius(t.Space(2.5)).Shadow(0, 1, 3, 0, t.Text.Alpha(.04)).
-				Padding(t.Space(5), t.Space(7)).Children(children)
+			ui.Box(c).Grow(1).FillWidth().MaxWidth(840).MaxWidthPercent(100).
+				Background(tok.Surface).Border(1, tok.Border).
+				Radius(float32(tok.PanelRadius)).Shadow(0, 2, 10, 0, tok.Text.Alpha(.04)).
+				Padding(float32(tok.Spacing24), float32(tok.Spacing32)).Children(func() {
+				ui.Column(c).Fill().Gap(float32(tok.Spacing12)).Children(children)
+			})
 		})
 	}
 	switch a.noteMode {
 	case 3: // AsterML document
 		paper(func() {
-			if a.noteAster == nil || a.noteAster.Doc == nil || a.noteAster.Doc.Source != a.noteDraft {
-				doc, err := asterdoc.Parse(a.noteDraft)
-				if err != nil {
-					ui.Text(c, "文档语法错误："+err.Error()).FontSize(t.Rem(.85)).TextColor(t.Danger)
-					return
-				}
-				a.noteAster = &asterdoc.View{Doc: doc, Mode: asterdoc.ModeNotebook,
-					Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
-					OnChange: func(source string) {
-						a.noteDraft = source
-						a.markNotebookDirty()
-					}}
-			}
-			a.noteAster.Render(c)
-		})
-	case 2: // reading
-		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).FillWidth().Padding(0, t.Space(2), t.Space(4), t.Space(2)).
-				AlignItems(ui.Center).Children(func() {
-				ui.Box(c).FillWidth().MaxWidth(820).MaxWidthPercent(100).
-					Background(t.Surface).Border(1, t.Border).Radius(t.Space(2.5)).
-					Padding(t.Space(7), t.Space(8)).Children(func() {
-					if strings.TrimSpace(a.noteDraft) == "" {
-						tokens := theme.GetTokens(t)
-						stateWord := "未开始"
-						if a.noteDirty {
-							stateWord = "草稿"
+			renderMasthead()
+			ui.Scroll(c).Grow(1).FillWidth().Children(func() {
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
+					if a.noteAster == nil || a.noteAster.Doc == nil || a.noteAster.Doc.Source != a.noteDraft {
+						doc, err := asterdoc.Parse(a.noteDraft)
+						if err != nil {
+							ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+								Radius(float32(tok.ControlRadius)).Background(tok.DangerBg).Border(1, tok.Danger).Children(func() {
+								ui.Text(c, "文档语法有误："+err.Error()).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText)
+							})
+							return
 						}
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-							components.Badge(c, stateWord, components.BadgeOptions{Tone: components.BadgeNeutral})
-							ui.Text(c, "尚未记录笔记内容，切换到“实时”或“编辑”开始撰写。").
-								FontSize(float32(tokens.TextBody)).TextColor(t.TextMuted)
-						})
-						return
+						a.noteAster = &asterdoc.View{Doc: doc, Mode: asterdoc.ModeNotebook,
+							Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
+							OnChange: func(source string) {
+								a.noteDraft = source
+								a.markNotebookDirty()
+							}}
 					}
-					protocol.RenderMarkdown(c, a.noteDraft)
+					a.noteAster.Render(c)
 				})
 			})
 		})
-	case 1: // source
+	case 2: // reading: homomorphic rendering for markdown + inline asterlab widgets + @matrix snapshots
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Column(c).FillWidth().Padding(0, float32(tok.Spacing8), float32(tok.Spacing16), float32(tok.Spacing8)).
+				AlignItems(ui.Center).Children(func() {
+				ui.Box(c).FillWidth().MaxWidth(840).MaxWidthPercent(100).
+					Background(tok.Surface).Border(1, tok.Border).Radius(float32(tok.PanelRadius)).
+					Shadow(0, 2, 10, 0, tok.Text.Alpha(.04)).
+					Padding(float32(tok.Spacing24), float32(tok.Spacing32)).Children(func() {
+					ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
+						renderMasthead()
+						if strings.TrimSpace(a.noteDraft) == "" {
+							stateWord := "未开始"
+							if a.noteDirty {
+								stateWord = "草稿"
+							}
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								components.Badge(c, stateWord, components.BadgeOptions{Tone: components.BadgeNeutral})
+								ui.Text(c, "尚未记录笔记内容，切换到实时或源码撰写实验记录。").
+									FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+							})
+							return
+						}
+						readView := view.readView
+						protocol.RenderMarkdownWith(c, a.noteDraft, func(c *ui.Context, block *markdown.CodeBlockView) {
+							if block.Language == "asterlab" && readView != nil {
+								src := "```asterlab\n" + block.Code() + "\n```"
+								if parsed, err := asterdoc.Parse(src); err == nil && len(parsed.Modules) > 0 {
+									readView.Doc = parsed
+									for i := range parsed.Modules {
+										m := parsed.Modules[i]
+										readView.RenderModule(c, m.Kind, m.Schema, m.Data)
+									}
+									return
+								}
+							}
+							markdown.DefaultCodeBlock(c, block)
+						})
+						a.notebookNoteRefCards(c, tok)
+					})
+				})
+			})
+		})
+	case 1: // Markdown source
 		paper(func() {
-			area := ui.TextAreaBase(c, &a.noteDraft)
-			area.Fill().Grow(1).MinWidth(0).MinHeight(0)
-			if area.Changed() {
-				a.markNotebookDirty()
+			renderMasthead()
+			if !sealed {
+				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "Markdown 源码").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					ui.Spacer(c)
+					if components.Button(c, "＋ 小节标题", components.ButtonGhost).Clicked() {
+						a.appendSnippetToDraft("\n## 阶段小节\n\n")
+					}
+					if components.Button(c, "＋ 嵌入参数表", components.ButtonGhost).Clicked() {
+						a.insertGenericModuleIntoDraft("param_table")
+					}
+					if components.Button(c, "＋ 嵌入示意图", components.ButtonGhost).Clicked() {
+						a.insertGenericModuleIntoDraft("figure")
+					}
+				})
 			}
+			ui.Box(c).FillWidth().Grow(1).MinHeight(0).Padding(float32(tok.Spacing12)).
+				Radius(float32(tok.ControlRadius)).Background(tok.CodeBg).Border(1, tok.Border).Children(func() {
+				area := ui.TextAreaBase(c, &a.noteDraft)
+				area.Fill().Grow(1).MinWidth(0).MinHeight(0)
+				if area.Changed() {
+					a.markNotebookDirty()
+				}
+			})
 		})
 	default: // live rich rendering
 		paper(func() {
+			renderMasthead()
 			if a.noteDoc == nil {
 				a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
 			}
 			editor := richtext.EditorBase(c, a.noteDoc, richtext.EditorOptions{
-				Label: "Notebook", Placeholder: "开始写实验笔记…",
+				Label: "Notebook", Placeholder: "开始记录实验现象、关键读数与阶段结论…",
 			})
 			editor.Fill().Grow(1).MinWidth(0).MinHeight(0)
 			if editor.Changed() {
@@ -588,11 +716,145 @@ func (a *app) notebookProse(c *ui.Context, t *ui.Theme) {
 	}
 }
 
-// notebookTimeline renders the Run record: a read-only projection of the same
-// RunSnapshot, one row per stored entry, in recorded order. It never edits a
-// fact and holds no copy of one; a row can only jump to the prose citation
-// that named it (UX-IA-4, UX-STATE).
-func notebookTimeline(c *ui.Context, a *app, t *ui.Theme, projection notebook.Notebook) {
+func (a *app) notebookNoteRefCards(c *ui.Context, tok theme.Tokens) {
+	refs := record.FindMatrixRefs(a.noteDraft)
+	if len(refs) == 0 {
+		return
+	}
+	proj, _, _ := a.recordProjection()
+	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
+		Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			components.Icon(c, lucide.Table2()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+			ui.Text(c, "动态数据表快照").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+		})
+		for _, ref := range refs {
+			cells, _ := record.ResolveMatrixRef(proj, ref)
+			ui.Text(c, fmt.Sprintf("%s · %d 个孔位视野记录（可在图板查看高清缩略图）", ref.Raw, len(cells))).
+				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+		}
+	})
+}
+
+func (a *app) appendSnippetToDraft(snippet string) {
+	if strings.TrimSpace(a.noteDraft) != "" {
+		a.noteDraft = strings.TrimRight(a.noteDraft, "\n") + "\n" + strings.TrimLeft(snippet, "\n")
+	} else {
+		a.noteDraft = strings.TrimLeft(snippet, "\n")
+	}
+	if a.noteMode == 0 {
+		a.noteDoc = richtext.NewDocument(richtext.ParseMarkdown(a.noteDraft))
+	}
+	a.markNotebookDirty()
+}
+
+func (a *app) insertGenericModuleIntoDraft(kind string) {
+	a.noteAster = nil
+	existingDoc, _ := asterdoc.Parse(a.noteDraft)
+	blk := asterdoc.DefaultStarterBlock(existingDoc, "note", kind)
+	raw, err := yaml.Marshal(blk)
+	if err != nil {
+		return
+	}
+	fence := "\n```asterlab\n" + string(raw) + "```\n"
+	a.appendSnippetToDraft(fence)
+}
+
+func (a *app) ensureHydratedNotebookAsterView(proj record.Projection) *asterdoc.View {
+	if a.asterDoc == nil || strings.TrimSpace(a.asterDoc.Source) == "" {
+		return nil
+	}
+	st := a.noteView()
+	key := fmt.Sprintf("%s|%d|%d|%d|%d", a.snap.RunID, a.snap.Revision, len(a.runAssets), len(proj.Readouts), len(a.asterDoc.Source))
+	if st.hydratedView != nil && st.hydratedKey == key {
+		return st.hydratedView
+	}
+	vm := runworkspace.BuildViewModel(a.snap, &asterdoc.FrozenAsterDoc{
+		DesignID: a.asterDoc.DesignID, Revision: a.asterDoc.Revision, Source: a.asterDoc.Source,
+	})
+	if vm == nil || vm.FrozenDoc == nil {
+		return nil
+	}
+	resolve := func(asset runworkspace.LinkedAsset) string {
+		if strings.TrimSpace(asset.RootID) == "" || strings.TrimSpace(asset.RelativePath) == "" {
+			return ""
+		}
+		p, err := assets.Roots(a.assetRoots).Resolve(assets.Asset{
+			RootID: asset.RootID, RelativePath: asset.RelativePath,
+		})
+		if err != nil {
+			return ""
+		}
+		return p
+	}
+	v := runworkspace.HydrateReadOnlyAsterDocView(vm, record.DecodeReadouts(proj.Readouts), a.runAssetsForTask, resolve)
+	if v != nil {
+		v.AsyncDecode = a.windowReady
+		v.OnAsyncInvalidate = func() {
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		}
+	}
+	st.hydratedView = v
+	st.hydratedKey = key
+	return v
+}
+
+func (a *app) ensureReadAsterView(hydrated *asterdoc.View) *asterdoc.View {
+	st := a.noteView()
+	key := a.snap.RunID + "|" + fmt.Sprint(a.snap.Revision) + "|" + fmt.Sprint(hydrated != nil)
+	if st.readView == nil || st.readKey != key {
+		rv := &asterdoc.View{
+			Registry: asterdoc.BuiltinRegistry(),
+			Mode:     asterdoc.ModeNotebook,
+			Density:  asterdoc.DensityCompact,
+			RunID:    a.snap.RunID,
+			ReadOnly: true,
+			AsyncDecode: a.windowReady,
+			OnAsyncInvalidate: func() {
+				if a.shell != nil {
+					a.shell.Invalidate()
+				}
+			},
+		}
+		if hydrated != nil {
+			rv.ActualParams = hydrated.ActualParams
+			rv.CalcActuals = hydrated.CalcActuals
+			rv.CheckedItems = hydrated.CheckedItems
+			rv.SkippedItems = hydrated.SkippedItems
+			rv.TableCells = hydrated.TableCells
+			rv.SampleStatuses = hydrated.SampleStatuses
+			rv.LinkedAssets = hydrated.LinkedAssets
+		}
+		st.readView = rv
+		st.readKey = key
+	}
+	return st.readView
+}
+
+func (a *app) notebookToolbarBadgeTone() (string, components.BadgeTone) {
+	if a.recordSealed() {
+		return "已签核归档", components.BadgeSuccess
+	}
+	switch {
+	case a.noteState == "saving":
+		return "保存中", components.BadgeNeutral
+	case a.noteState == "error" || a.noteErr != "":
+		return notebook.SaveStateLabel(true), components.BadgeDanger
+	case a.noteDirty:
+		return notebook.SaveStateLabel(true), components.BadgeWarning
+	case a.noteState == "saved" || hasSavedNotebookEvent(a.snap.Events):
+		return notebook.SaveStateLabel(false), components.BadgeSuccess
+	default:
+		return "草稿", components.BadgeNeutral
+	}
+}
+
+// notebookTimeline renders the Right Companion Panel of the Run ELN:
+// Tab 0 shows carded timeline events with one-click citation;
+// Tab 1 (when frozen AsterML is available) renders hydrated Design/Run v2 widgets side-by-side.
+func notebookTimeline(c *ui.Context, a *app, t *ui.Theme, projection notebook.Notebook, hydratedView *asterdoc.View) {
 	tokens := theme.GetTokens(t)
 	view := a.noteView()
 	if view.expanded == nil {
@@ -609,80 +871,173 @@ func notebookTimeline(c *ui.Context, a *app, t *ui.Theme, projection notebook.No
 		}
 		taskTitles[task.Key] = title
 	}
-	ui.Scroll(c).Grow(1).FillWidth().Children(func() {
-		ui.Column(c).FillWidth().Padding(t.Space(2), 0, t.Space(4), 0).Gap(t.Space(1.5)).Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-				ui.Text(c, "运行记录").FontSize(t.Rem(1.0)).FontWeight(600).TextColor(t.Text)
-				components.Badge(c, "只读", components.BadgeOptions{Tone: components.BadgeNeutral})
+	sealed := a.recordSealed()
+	ui.Column(c).Fill().Padding(float32(tokens.Spacing12)).Radius(float32(tokens.PanelRadius)).
+		Background(tokens.Surface).Border(1, tokens.Border).Gap(float32(tokens.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+			ui.Text(c, "运行记录").FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(tokens.Text)
+			components.Badge(c, "只读", components.BadgeOptions{Tone: components.BadgeNeutral})
+			ui.Spacer(c)
+			if hydratedView != nil && hydratedView.Doc != nil {
+				tlStyle, modStyle := components.ButtonGhost, components.ButtonGhost
+				if view.rightTab == 0 {
+					tlStyle = components.ButtonSecondary
+				} else {
+					modStyle = components.ButtonSecondary
+				}
+				if components.Button(c, fmt.Sprintf("时间线 (%d)", len(projection.Entries)), tlStyle).Clicked() {
+					view.rightTab = 0
+				}
+				if components.Button(c, "实验模块", modStyle).Clicked() {
+					view.rightTab = 1
+				}
+			} else {
 				ui.Text(c, fmt.Sprintf("设计版本 %d · %d 条", projection.DesignRevision, len(projection.Entries))).
-					FontSize(t.Rem(.78)).TextColor(t.TextMuted).FontFeatures("tnum")
-			})
-			if len(projection.Entries) == 0 {
-				ui.Text(c, "此运行还没有可追溯的记录。").FontSize(t.Rem(.85)).TextColor(t.TextMuted)
-				return
-			}
-			for _, entry := range projection.Entries {
-				entry := entry
-				highlighted := entry.ID == view.highlightID
-				row := ui.Column(c).FillWidth().Padding(t.Space(1.5), t.Space(2)).Radius(t.Space(1.5))
-				if highlighted {
-					row.Background(tokens.WarningBg).Border(1, t.Warning)
-				}
-				rawRef := notebookEntryRawLabel(entry)
-				summary := notebookEntrySummary(entry, a.snap, taskTitles)
-				row.Children(func() {
-					ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(t.Space(1.5)).Children(func() {
-						cat := iconForCategory(entry.Category)
-						components.Icon(c, cat).Size(t.Space(3), t.Space(3)).TextColor(t.TextMuted)
-						ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(.5)).Children(func() {
-							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-								ui.Text(c, entry.Title).FontSize(t.Rem(.85)).FontWeight(600).
-									SingleLine().Ellipsis("…")
-								ui.Spacer(c)
-								ui.Text(c, entry.DisplayTime()).FontSize(t.Rem(.75)).
-									TextColor(t.TextMuted).FontFeatures("tnum")
-							})
-							summaryText := ui.Text(c, summary).FontSize(float32(tokens.TextData)).
-								TextColor(t.TextMuted).SingleLine().Ellipsis("…")
-							if rawRef != "" {
-								summaryText.Tooltip(rawRef)
-							}
-							switch entry.Trace {
-							case notebook.TraceInvalid:
-								ui.Text(c, "来源失效").FontSize(t.Rem(.7)).TextColor(t.Warning)
-							case notebook.TraceMissing:
-								ui.Text(c, "来源未记录").FontSize(t.Rem(.7)).TextColor(t.Warning)
-							}
-							open := view.expanded[entry.ID]
-							components.Collapsible(c, "来源详情", &open, components.CollapsibleOptions{}, func() {
-								if rawRef != "" {
-									ui.Text(c, "原始来源："+rawRef).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-								}
-								if entry.TaskID != "" {
-									ui.Text(c, "任务标识："+entry.TaskID).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-								}
-								if entry.DesignStepID != "" {
-									ui.Text(c, "设计步骤："+entry.DesignStepID).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-								}
-								for _, detail := range entry.Details {
-									ui.Text(c, detail.Label+"："+detail.Value).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-								}
-								for _, ref := range entry.References {
-									ui.Text(c, "关联引用："+ref.Label+" "+ref.ID).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-								}
-							})
-							view.expanded[entry.ID] = open
-						})
-					})
-				})
-				rowElement := row
-				if highlighted && view.scrolledID != entry.ID {
-					rowElement.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
-					view.scrolledID = entry.ID
-				}
+					FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted).FontFeatures("tnum")
 			}
 		})
+		ui.Divider(c)
+		ui.Scroll(c).Grow(1).FillWidth().Children(func() {
+			ui.Column(c).FillWidth().Padding(float32(tokens.Spacing4), 0).Gap(float32(tokens.Spacing8)).Children(func() {
+				if view.rightTab == 1 && hydratedView != nil && hydratedView.Doc != nil {
+					renderCompanionModules(c, a, tokens, hydratedView, sealed)
+					return
+				}
+				if len(projection.Entries) == 0 {
+					ui.Text(c, "此运行还没有可追溯的记录。").FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
+					return
+				}
+				for _, entry := range projection.Entries {
+					entry := entry
+					highlighted := entry.ID == view.highlightID
+					bg, borderCol := tokens.Elevated, tokens.Border
+					if highlighted {
+						bg, borderCol = tokens.WarningBg, tokens.Warning
+					}
+					row := ui.Column(c).FillWidth().Padding(float32(tokens.Spacing8), float32(tokens.Spacing12)).
+						Radius(float32(tokens.ControlRadius)).Background(bg).Border(1, borderCol).
+						Gap(float32(tokens.Spacing4))
+					rawRef := notebookEntryRawLabel(entry)
+					summary := notebookEntrySummary(entry, a.snap, taskTitles)
+					row.Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+							cat := iconForCategory(entry.Category)
+							components.Icon(c, cat).Size(float32(tokens.Spacing16), float32(tokens.Spacing16)).TextColor(tokens.Accent)
+							ui.Text(c, entry.Title).FontSize(float32(tokens.TextBody)).FontWeight(600).
+								TextColor(tokens.Text).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+							ui.Text(c, entry.DisplayTime()).FontSize(float32(tokens.TextMeta)).
+								TextColor(tokens.TextMuted).FontFeatures("tnum")
+						})
+						summaryText := ui.Text(c, summary).FontSize(float32(tokens.TextMeta)).
+							TextColor(tokens.TextMuted)
+						if rawRef != "" {
+							summaryText.Tooltip(rawRef)
+						}
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+							components.Badge(c, notebookCategoryLabel(entry.Category))
+							switch entry.Trace {
+							case notebook.TraceInvalid:
+								components.Badge(c, "来源失效", components.BadgeOptions{Tone: components.BadgeWarning})
+							case notebook.TraceMissing:
+								components.Badge(c, "来源未记录", components.BadgeOptions{Tone: components.BadgeWarning})
+							}
+							ui.Spacer(c)
+							if !sealed && a.noteMode != 2 && a.noteMode != 4 {
+								if components.Button(c, "引用此条", components.ButtonGhost).Clicked() {
+									quote := fmt.Sprintf("\n> [%s] %s：%s\n", entry.DisplayTime(), entry.Title, summary)
+									a.appendSnippetToDraft(quote)
+								}
+							}
+						})
+						open := view.expanded[entry.ID]
+						components.Collapsible(c, "来源详情", &open, components.CollapsibleOptions{}, func() {
+							if rawRef != "" {
+								ui.Text(c, "原始来源："+rawRef).FontSize(float32(tokens.TextData)).TextColor(tokens.TextMuted)
+							}
+							if entry.TaskID != "" {
+								ui.Text(c, "步骤关联："+firstNonEmpty(taskTitles[entry.TaskID], "执行步骤")).FontSize(float32(tokens.TextData)).TextColor(tokens.TextMuted)
+							}
+							for _, detail := range entry.Details {
+								ui.Text(c, detail.Label+"："+detail.Value).FontSize(float32(tokens.TextData)).TextColor(tokens.TextMuted)
+							}
+						})
+						view.expanded[entry.ID] = open
+					})
+					rowElement := row
+					if highlighted && view.scrolledID != entry.ID {
+						rowElement.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
+						view.scrolledID = entry.ID
+					}
+				}
+			})
+		})
 	})
+}
+
+func renderCompanionModules(c *ui.Context, a *app, tokens theme.Tokens, v *asterdoc.View, sealed bool) {
+	if v == nil || v.Doc == nil {
+		return
+	}
+	rendered := 0
+	for i := range v.Doc.Modules {
+		m := &v.Doc.Modules[i]
+		if m.Kind == "plate" || m.Kind == "group_table" {
+			rendered++
+			m := m
+			ui.Column(c).FillWidth().Gap(float32(tokens.Spacing4)).Children(func() {
+				v.RenderModule(c, m.Kind, m.Schema, m.Data)
+				if !sealed && a.noteMode != 2 {
+					ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+						if components.Button(c, "嵌入此模块到笔记", components.ButtonGhost).Clicked() {
+							a.appendSnippetToDraft("\n```asterlab\n" + strings.TrimSpace(m.Body) + "\n```\n")
+						}
+					})
+				}
+			})
+		}
+	}
+	for i := range v.Doc.Modules {
+		m := &v.Doc.Modules[i]
+		if m.Kind != "step" {
+			continue
+		}
+		rendered++
+		ui.Column(c).FillWidth().Padding(float32(tokens.Spacing8)).Radius(float32(tokens.ControlRadius)).
+			Background(tokens.Elevated).Border(1, tokens.Border).Gap(float32(tokens.Spacing8)).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+				ui.Text(c, firstNonEmpty(moduleStringFromMap(m.Data, "title"), "实验步骤")).
+					FontSize(float32(tokens.TextBody)).Bold().TextColor(tokens.Text).Grow(1).MinWidth(0)
+				if !sealed && a.noteMode != 2 {
+					if components.Button(c, "引用本步模块", components.ButtonGhost).Clicked() {
+						if rawBlocks, ok := m.Data["blocks"].([]any); ok {
+							var b strings.Builder
+							for _, rb := range rawBlocks {
+								if raw, err := yaml.Marshal(rb); err == nil {
+									b.WriteString("\n```asterlab\n" + string(raw) + "```\n")
+								}
+							}
+							if b.Len() > 0 {
+								a.appendSnippetToDraft(b.String())
+							}
+						}
+					}
+				}
+			})
+			v.HideStepHeader = true
+			asterdoc.StepBlockComposer(v, c, m)
+		})
+	}
+	if rendered == 0 {
+		ui.Text(c, "当前方案暂无可预览的通用模块。").FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
+	}
+}
+
+func moduleStringFromMap(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	s, _ := m[key].(string)
+	return strings.TrimSpace(s)
 }
 
 func iconForCategory(category notebook.Category) *ui.SVG {
@@ -920,25 +1275,7 @@ func (a *app) saveNotebook() {
 	a.applySnap(snap)
 }
 
-func (a *app) notebookToolbarState(tokens theme.Tokens) (string, ui.Color) {
-	// A signed/archived Core state outranks everything: the notes are
-	// locked. Only persistent Core state is authority (see recordSealed).
-	if a.recordSealed() {
-		return "已签核归档", tokens.SuccessText
-	}
-	switch {
-	case a.noteState == "saving":
-		return "保存中", tokens.TextMuted
-	case a.noteState == "error" || a.noteErr != "":
-		return notebook.SaveStateLabel(true), tokens.DangerText
-	case a.noteDirty:
-		return notebook.SaveStateLabel(true), tokens.WarningText
-	case a.noteState == "saved" || hasSavedNotebookEvent(a.snap.Events):
-		return notebook.SaveStateLabel(false), tokens.SuccessText
-	default:
-		return "草稿", tokens.TextMuted
-	}
-}
+// saveNotebook continues here...
 
 func latestNotebookRevision(events []runs.RunEvent) (string, bool) {
 	var latest *runs.RunEvent
@@ -1195,11 +1532,10 @@ func citationKindLabel(kind string) string {
 	}
 }
 
-// recordBoardPage renders the automatic record board (mode 图板): Core's
-// shared RecordProjection as planned-vs-actual summary plus the
-// representative Well x Timepoint x FOV matrix, with dynamic references,
-// derived design parameters, and sign/lock controls. It writes no facts:
-// inserting a matrix token edits prose, and sign/archive is a Core command.
+// recordBoardPage renders the publication-grade ELN Record Board (mode 图板):
+// KPI summary strip, homomorphic frozen-run v2 module showcase, carded Plan vs Actual
+// comparison, typed tables/readouts, group representative preview cards, Well x Timepoint
+// matrix table, dynamic citations, derived design review, and archival sign-off.
 func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 	tokens := theme.GetTokens(t)
 	proj, tasks, fetchErr := a.recordProjection()
@@ -1207,33 +1543,147 @@ func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 	counts := record.Summarize(proj, tasks)
 	sealed := a.recordArchived()
 	state := record.ArchiveStatusWord(proj.Archive.Status)
+	hydratedView := a.ensureHydratedNotebookAsterView(proj)
+	boardCard := func(children func()) {
+		ui.Column(c).FillWidth().Padding(float32(tokens.Spacing16)).Radius(float32(tokens.PanelRadius)).
+			Background(tokens.Surface).Border(1, tokens.Border).Gap(float32(tokens.Spacing12)).Children(children)
+	}
+	width, _ := c.Size()
+	wideBoard := width >= 960
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
-			// UX-P4 / UX-LAYOUT: the board is a structured table (summary rows
-			// plus a Well x Timepoint matrix), not a prose paper, so it takes
-			// a wider measure than the 820 prose cap. Counts use tabular
-			// numerals like the rest of the surface.
-			ui.Column(c).FillWidth().MaxWidth(960).MaxWidthPercent(100).
-				Padding(t.Space(4), t.Space(5)).Gap(t.Space(2.5)).Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-					ui.Text(c, "记录图板").FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
-					components.Badge(c, state, components.BadgeOptions{Tone: recordBoardTone(proj.Archive.Status)})
-					ui.Spacer(c)
-					ui.Text(c, record.Headline(counts)).
-						FontSize(float32(tokens.TextData)).TextColor(t.TextMuted).FontFeatures("tnum")
+			ui.Column(c).FillWidth().MaxWidth(1160).MaxWidthPercent(100).
+				Padding(float32(tokens.Spacing12), float32(tokens.Spacing16)).Gap(float32(tokens.Spacing12)).Children(func() {
+				// Card 1: Masthead + 5-Tile KPI Strip
+				boardCard(func() {
+					ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+						ui.Text(c, "记录图板").FontSize(float32(tokens.TextSection)).Bold().TextColor(tokens.Text)
+						components.Badge(c, state, components.BadgeOptions{Tone: recordBoardTone(proj.Archive.Status)})
+						ui.Spacer(c)
+						ui.Text(c, record.Headline(counts)).
+							FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted).FontFeatures("tnum")
+					})
+					if strings.TrimSpace(fetchErr) != "" {
+						ui.Row(c).FillWidth().Padding(float32(tokens.Spacing8), float32(tokens.Spacing12)).
+							Radius(float32(tokens.ControlRadius)).Background(tokens.DangerBg).Border(1, tokens.Danger).Children(func() {
+							ui.Text(c, "记录读取失败："+fetchErr).FontSize(float32(tokens.TextMeta)).TextColor(tokens.DangerText)
+						})
+					}
+					ui.Row(c).FillWidth().Wrap().Gap(float32(tokens.Spacing8)).Children(func() {
+						kpiTile(c, tokens, "步骤进度", fmt.Sprintf("%d / %d", counts.TasksCompleted, counts.TasksTotal), counts.TasksCompleted == counts.TasksTotal && counts.TasksTotal > 0)
+						kpiTile(c, tokens, "实测读数", fmt.Sprintf("实测 %d 个", counts.Measurements), counts.Measurements > 0)
+						kpiTile(c, tokens, "采图视野", fmt.Sprintf("%d / %d", proj.Images.FilledSlots, proj.Images.PlannedSlots), proj.Images.FilledSlots > 0)
+						kpiTile(c, tokens, "质控排除", fmt.Sprintf("排除 %d 个", counts.Excluded), false)
+						kpiTile(c, tokens, "计时核查", fmt.Sprintf("%d 项", len(proj.Timers)), len(proj.Timers) > 0)
+					})
 				})
-				if strings.TrimSpace(fetchErr) != "" {
-					ui.Text(c, "记录读取失败："+fetchErr).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
+
+				leftBody := func() {
+					ui.Column(c).FillWidth().Gap(float32(tokens.Spacing12)).Children(func() {
+						// FOV Layer Switcher + Representative Group Preview
+						boardCard(func() {
+							a.recordFOVSwitchBar(c, tokens, proj, board)
+							a.recordGroupBoardSection(c, t, tokens, proj, board)
+						})
+						// Plan vs Actual Table Card
+						boardCard(func() { a.recordSummarySection(c, t, tokens, proj, tasks) })
+						// Decoded Typed Readout Tables
+						if len(proj.Readouts) > 0 {
+							a.recordTypedReadoutsSection(c, t, tokens, proj, tasks)
+						}
+						// Well x Timepoint Matrix Table
+						boardCard(func() { a.recordMatrixSection(c, t, tokens, proj, board) })
+						// Homomorphic Design/Run v2 Modules Hydrated with Run Facts
+						if hydratedView != nil && hydratedView.Doc != nil {
+							a.recordHomomorphicModulesSection(c, tokens, hydratedView, proj, tasks)
+						}
+					})
 				}
-				a.recordSummarySection(c, t, tokens, proj, tasks)
-				a.recordTypedReadoutsSection(c, t, tokens, proj, tasks)
-				a.recordGroupBoardSection(c, t, tokens, proj, board)
-				a.recordMatrixSection(c, t, tokens, proj, board)
-				a.recordRefsSection(c, t, tokens, proj, sealed)
-				a.recordDerivedSection(c, t, tokens, proj)
-				a.recordSignSection(c, t, tokens, proj, tasks, sealed)
+				rightGov := func() {
+					ui.Column(c).FillWidth().Gap(float32(tokens.Spacing12)).Children(func() {
+						boardCard(func() { a.recordSignSection(c, t, tokens, proj, tasks, sealed) })
+						boardCard(func() { a.recordDerivedSection(c, t, tokens, proj) })
+						boardCard(func() { a.recordRefsSection(c, t, tokens, proj, sealed) })
+					})
+				}
+
+				if wideBoard {
+					ui.Row(c).FillWidth().Gap(float32(tokens.Spacing12)).AlignItems(ui.Start).Children(func() {
+						ui.Column(c).Grow(3).MinWidth(0).Children(leftBody)
+						ui.Column(c).Grow(2).MinWidth(320).MaxWidth(400).Children(rightGov)
+					})
+				} else {
+					leftBody()
+					rightGov()
+				}
 			})
 		})
+	})
+}
+
+func kpiTile(c *ui.Context, tok theme.Tokens, label, value string, accent bool) {
+	col := tok.Text
+	if accent {
+		col = tok.SuccessText
+	}
+	ui.Column(c).Grow(1).MinWidth(132).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+		Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+		Gap(2).Children(func() {
+		ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+		ui.Text(c, value).FontSize(float32(tok.TextSection)).Bold().TextColor(col).FontFeatures("tnum")
+	})
+}
+
+func (a *app) recordHomomorphicModulesSection(c *ui.Context, tokens theme.Tokens, v *asterdoc.View, proj record.Projection, tasks []record.TaskStatus) {
+	taskByStep := map[string]record.TaskStatus{}
+	for _, rt := range a.snap.Tasks {
+		for _, ts := range tasks {
+			if ts.Key == rt.Key && rt.DesignStepID != "" {
+				taskByStep[rt.DesignStepID] = ts
+				break
+			}
+		}
+	}
+	ui.Column(c).FillWidth().Padding(float32(tokens.Spacing16)).Radius(float32(tokens.PanelRadius)).
+		Background(tokens.Surface).Border(1, tokens.Border).Gap(float32(tokens.Spacing12)).Children(func() {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+			ui.Text(c, "实验方案与实测模块总览").FontSize(float32(tokens.TextSection)).Bold().TextColor(tokens.Text)
+			components.Badge(c, "完整实验模块视图", components.BadgeOptions{Tone: components.BadgeAccent})
+			ui.Spacer(c)
+			ui.Text(c, fmt.Sprintf("方案第 %d 版", proj.Design.DesignRevision)).
+				FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted).FontFeatures("tnum")
+		})
+		for i := range v.Doc.Modules {
+			m := &v.Doc.Modules[i]
+			if m.Kind == "step" {
+				rawBlocks, _ := m.Data["blocks"].([]any)
+				rawRefs, _ := m.Data["block_refs"].([]any)
+				if len(rawBlocks) == 0 && len(rawRefs) == 0 {
+					continue
+				}
+				m := m
+				stepTitle := firstNonEmpty(moduleStringFromMap(m.Data, "title"), "执行步骤")
+				ts, hasTS := taskByStep[m.ID]
+				ui.Column(c).FillWidth().Padding(float32(tokens.Spacing12)).Radius(float32(tokens.ControlRadius)).
+					Background(tokens.Elevated).Border(1, tokens.Border).Gap(float32(tokens.Spacing8)).Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+						ui.Text(c, stepTitle).FontSize(float32(tokens.TextBody)).Bold().TextColor(tokens.Text)
+						if hasTS {
+							tone := components.BadgeNeutral
+							if ts.Status == "completed" {
+								tone = components.BadgeSuccess
+							}
+							components.Badge(c, record.TaskStatusWord(ts.Status), components.BadgeOptions{Tone: tone})
+						}
+						if tps, ok := m.Data["timepoints"].([]any); ok && len(tps) > 0 {
+							components.Badge(c, fmt.Sprint(tps[0]))
+						}
+					})
+					v.HideStepHeader = true
+					asterdoc.StepBlockComposer(v, c, m)
+				})
+			}
+		}
 	})
 }
 
@@ -1250,23 +1700,17 @@ func recordBoardTone(status string) components.BadgeTone {
 
 func recordBoardSection(c *ui.Context, t *ui.Theme, title string) {
 	tokens := theme.GetTokens(t)
-	ui.Text(c, title).FontSize(float32(tokens.TextBody)).Bold().TextColor(t.Text)
+	ui.Text(c, title).FontSize(float32(tokens.TextSection)).Bold().TextColor(tokens.Text)
 }
 
-// recordSummarySection renders the frozen plan skeleton plus Core's
-// planned-vs-actual parameter groups. Tasks come from the Core-delivered
-// snapshot; comparisons come from the Core projection. No surface
-// re-derives either.
 func (a *app) recordSummarySection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, tasks []record.TaskStatus) {
-	recordBoardSection(c, t, "计划 vs 实际")
-	if len(tasks) == 0 {
-		ui.Text(c, "无冻结任务。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
-	} else {
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+		recordBoardSection(c, t, "计划 vs 实际")
+		ui.Spacer(c)
 		for _, task := range tasks {
-			task := task
 			head := strings.TrimSpace(task.Title)
 			if head == "" {
-				head = task.Key
+				head = "执行步骤"
 			}
 			if strings.TrimSpace(task.Timepoint) != "" {
 				head += " · " + task.Timepoint
@@ -1274,21 +1718,84 @@ func (a *app) recordSummarySection(c *ui.Context, t *ui.Theme, tokens theme.Toke
 			if word := record.TaskStatusWord(task.Status); word != "" {
 				head += " · " + word
 			}
-			ui.Text(c, head).FontSize(float32(tokens.TextMeta)).Bold().TextColor(t.Text)
+			tone := components.BadgeNeutral
+			if task.Status == "completed" {
+				tone = components.BadgeSuccess
+			}
+			components.Badge(c, head, components.BadgeOptions{Tone: tone})
+		}
+		if len(tasks) == 0 {
+			ui.Text(c, "无冻结任务。").FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
+		}
+	})
+	taskTitleByKey := map[string]string{}
+	for _, tk := range tasks {
+		if tk.Key != "" && strings.TrimSpace(tk.Title) != "" {
+			taskTitleByKey[tk.Key] = tk.Title
 		}
 	}
-	for _, group := range record.GroupParameters(proj.Parameters) {
-		group := group
-		ui.Text(c, group.Title).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
-		for _, row := range group.Rows {
-			row := row
-			ui.Text(c, row.Label+"：计划 "+row.Planned+" → 实际 "+row.Actual+"（"+row.Status+"）").
-				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+	groups := record.GroupParameters(proj.Parameters)
+	if len(groups) > 0 {
+		type summaryTableRow struct {
+			scope  string
+			row    record.ParamRow
 		}
+		var flatRows []summaryTableRow
+		for _, g := range groups {
+			scopeTitle := taskTitleByKey[g.Title]
+			if scopeTitle == "" {
+				for k, title := range taskTitleByKey {
+					if strings.Contains(g.Title, k) {
+						scopeTitle = title
+						break
+					}
+				}
+			}
+			scopeTitle = firstNonEmpty(scopeTitle, g.Title)
+			for _, r := range g.Rows {
+				flatRows = append(flatRows, summaryTableRow{scope: scopeTitle, row: r})
+			}
+		}
+		cols := []ui.TableColumn{
+			{ID: "scope", Title: "所属步骤", Width: 160},
+			{ID: "param", Title: "参数名称", MinWidth: 140},
+			{ID: "planned", Title: "计划设定", Width: 110, Align: ui.End},
+			{ID: "actual", Title: "实测记录", Width: 110, Align: ui.End},
+			{ID: "status", Title: "核对状态", Width: 100},
+		}
+		components.Table(c, nil, cols, func() {
+			for idx, sr := range flatRows {
+				idx, sr := idx, sr
+				components.TableRow(c, idx, sr.scope+"-"+sr.row.Label, false, func(col int) {
+					switch col {
+					case 0:
+						ui.Text(c, sr.scope).FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
+					case 1:
+						ui.Text(c, sr.row.Label).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.Text)
+					case 2:
+						ui.Text(c, sr.row.Planned).FontSize(float32(tokens.TextData)).TextColor(tokens.TextMuted).FontFeatures("tnum")
+					case 3:
+						ui.Text(c, sr.row.Actual).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.Text).FontFeatures("tnum")
+					case 4:
+						tone := components.BadgeNeutral
+						if sr.row.Status == "一致" || sr.row.Status == "匹配" {
+							tone = components.BadgeSuccess
+						} else if sr.row.Status == "偏离" {
+							tone = components.BadgeWarning
+						}
+						components.Badge(c, sr.row.Status, components.BadgeOptions{Tone: tone})
+					}
+				})
+			}
+		})
 	}
 	for _, issue := range proj.Issues {
 		issue := issue
-		ui.Text(c, "待核实："+firstNonEmpty(strings.TrimSpace(issue.Message), issue.Code)).FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+		ui.Row(c).FillWidth().Padding(float32(tokens.Spacing8), float32(tokens.Spacing12)).
+			Radius(float32(tokens.ControlRadius)).Background(tokens.WarningBg).Border(1, tokens.Warning.Alpha(.35)).Children(func() {
+			ui.Text(c, "待核实："+firstNonEmpty(strings.TrimSpace(issue.Message), issue.Code)).
+				FontSize(float32(tokens.TextData)).TextColor(tokens.WarningText)
+		})
 	}
 }
 
@@ -1395,9 +1902,9 @@ func orDash(value string) string {
 // the selected FOV layer. Clicking FOV 1–6 switches the layer; empty slots
 // read as gaps, never placeholders. Slots come from Core's planned matrix,
 // never from uploaded assets.
-func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, board *recordBoardView) {
-	recordBoardSection(c, t, "代表视野矩阵（孔位 × 时间点 × FOV）")
-	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+func (a *app) recordFOVSwitchBar(c *ui.Context, tokens theme.Tokens, proj record.Projection, board *recordBoardView) {
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing4)).Children(func() {
+		ui.Text(c, "视野层").FontSize(float32(tokens.TextMeta)).Bold().TextColor(tokens.TextMuted)
 		maxFOV := max(6, max(int(proj.Images.FOVPerWell), a.plannedDocFOV()))
 		for fov := 1; fov <= maxFOV; fov++ {
 			fov := fov
@@ -1411,39 +1918,59 @@ func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Token
 			}
 		}
 	})
+}
+
+func (a *app) recordMatrixSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, board *recordBoardView) {
+	recordBoardSection(c, t, "代表视野矩阵（孔位 × 时间点 × FOV）")
 	cells := record.MatrixCells(proj)
 	if len(cells) == 0 {
-		ui.Text(c, "无实测孔位数据。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+		ui.Text(c, "无实测孔位数据。").FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
 	} else {
-		for _, cell := range cells {
-			cell := cell
-			main := record.MatrixCellText(cell)
-			img := record.SlotImage(proj, cell.Well, cell.Timepoint, board.fov)
-			sub := fmt.Sprintf("FOV %d 缺", board.fov)
-			if img != nil {
-				sub = "图·" + img.AssetID
-			}
-			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-				ui.Text(c, cell.Well+" · "+cell.Timepoint).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
-				ui.Text(c, main).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-				ui.Text(c, sub).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
-				if img != nil {
-					if components.Button(c, "打开原图", components.ButtonGhost).Clicked() {
-						if err := a.openPlacedImage(*img); err != nil {
-							c.AddToast(ui.Toast{Title: "打开原图失败", Description: err.Error(), Type: components.ToastError})
+		cols := []ui.TableColumn{
+			{ID: "well", Title: "孔位 · 时间点", Width: 150},
+			{ID: "progress", Title: "采图槽位", Width: 120},
+			{ID: "fov", Title: fmt.Sprintf("FOV %d 状态", board.fov), MinWidth: 160},
+			{ID: "act", Title: "", Width: 96, Fixed: true},
+		}
+		components.Table(c, nil, cols, func() {
+			for idx, cell := range cells {
+				idx, cell := idx, cell
+				main := record.MatrixCellText(cell)
+				img := record.SlotImage(proj, cell.Well, cell.Timepoint, board.fov)
+				components.TableRow(c, idx, cell.Well+"-"+cell.Timepoint, false, func(col int) {
+					switch col {
+					case 0:
+						ui.Text(c, cell.Well+" · "+cell.Timepoint).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.Text)
+					case 1:
+						ui.Text(c, main).FontSize(float32(tokens.TextData)).TextColor(tokens.TextMuted).FontFeatures("tnum")
+					case 2:
+						if img != nil {
+							components.Badge(c, "图·"+img.AssetID, components.BadgeOptions{Tone: components.BadgeAccent})
+						} else {
+							components.Badge(c, fmt.Sprintf("FOV %d 缺", board.fov))
+						}
+					case 3:
+						if img != nil {
+							if components.Button(c, "打开原图", components.ButtonGhost).Clicked() {
+								if err := a.openPlacedImage(*img); err != nil {
+									c.AddToast(ui.Toast{Title: "打开原图失败", Description: err.Error(), Type: components.ToastError})
+								}
+							}
+						} else {
+							ui.Text(c, "—").FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
 						}
 					}
-				}
-			})
-		}
+				})
+			}
+		})
 	}
 	if len(proj.Images.UnlocatedAssetIDs) > 0 {
 		ui.Text(c, fmt.Sprintf("未定位图 %d 张：%s", len(proj.Images.UnlocatedAssetIDs), strings.Join(proj.Images.UnlocatedAssetIDs, "、"))).
-			FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+			FontSize(float32(tokens.TextData)).TextColor(tokens.WarningText)
 	}
 	if len(proj.Images.UnplannedAssetIDs) > 0 {
 		ui.Text(c, fmt.Sprintf("计划外图 %d 张：%s", len(proj.Images.UnplannedAssetIDs), strings.Join(proj.Images.UnplannedAssetIDs, "、"))).
-			FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+			FontSize(float32(tokens.TextData)).TextColor(tokens.WarningText)
 	}
 }
 
@@ -1862,45 +2389,52 @@ func (a *app) finishPreviewLoad(board *recordBoardView, runID string, gen uint64
 // slot showing the selected FOV's inline preview or an explicit gap. Group
 // identity is never inferred from filenames or samples.
 func (a *app) recordGroupBoardSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, board *recordBoardView) {
+	dark := t != nil && t.Dark
 	recordBoardSection(c, t, fmt.Sprintf("代表视野（分组 × 时间点 · FOV %d）", board.fov))
 	groups := record.MatrixGroups(proj)
 	timepoints := record.MatrixTimepoints(proj)
 	if len(groups) == 0 || len(timepoints) == 0 {
-		ui.Text(c, "无分组矩阵数据。").FontSize(float32(tokens.TextMeta)).TextColor(t.TextMuted)
+		ui.Text(c, "无分组矩阵数据。").FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
 		return
 	}
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-		ui.Text(c, "分组 ＼ 时间点").FontSize(float32(tokens.TextData)).Bold().TextColor(t.TextMuted)
+	ui.Row(c).FillWidth().Padding(float32(tokens.Spacing4), float32(tokens.Spacing8)).
+		Radius(float32(tokens.ControlRadius)).Background(tokens.Elevated).
+		AlignItems(ui.Center).Gap(float32(tokens.Spacing12)).Children(func() {
+		ui.Text(c, "实验分组 ＼ 时间点").Width(140).FontSize(float32(tokens.TextMeta)).Bold().TextColor(tokens.TextMuted)
 		for _, tp := range timepoints {
-			tp := tp
-			ui.Text(c, tp).FontSize(float32(tokens.TextData)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, tp).Width(148).FontSize(float32(tokens.TextMeta)).Bold().TextColor(tokens.TextMuted)
 		}
 	})
 	for _, group := range groups {
 		group := group
 		label := record.GroupDisplayName(proj, group)
-		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Text(c, label).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing12)).Children(func() {
+			ui.Row(c).Width(140).Gap(float32(tokens.Spacing8)).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(float32(tokens.Spacing12), float32(tokens.Spacing12)).
+					Radius(float32(tokens.ControlRadius)).Background(plateui.GroupColor(label, dark))
+				ui.Text(c, label).FontSize(float32(tokens.TextData)).Bold().TextColor(tokens.Text)
+			})
 			for _, tp := range timepoints {
 				tp := tp
 				well, img, ok := record.RepresentativeGroup(proj, group, tp, board.fov)
 				if !ok {
-					ui.Text(c, "—").FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+					ui.Text(c, "—").Width(148).FontSize(float32(tokens.TextData)).TextColor(tokens.TextMuted)
 					continue
 				}
-				ui.Column(c).Width(140).Gap(t.Space(.5)).Children(func() {
+				ui.Column(c).Width(148).Padding(float32(tokens.Spacing8)).Radius(float32(tokens.ControlRadius)).
+					Background(tokens.Elevated).Border(1, tokens.Border).Gap(float32(tokens.Spacing4)).Children(func() {
 					if img != nil {
 						if src := a.recordImageSource(board, *img); src != nil {
-							ui.Image(c, src).Size(132, 96).Fit(ui.Contain)
+							ui.Image(c, src).Size(132, 92).Fit(ui.Contain)
 						} else if board.imgLoading[img.AssetID] {
-							ui.Text(c, "图加载中…").FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+							ui.Text(c, "图加载中…").FontSize(float32(tokens.TextData)).TextColor(tokens.TextMuted)
 						} else {
-							ui.Text(c, "图不可读").FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+							ui.Text(c, "图·"+img.AssetID).FontSize(float32(tokens.TextData)).TextColor(tokens.Accent)
 						}
 					} else {
-						ui.Text(c, "缺").FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+						ui.Text(c, "缺").FontSize(float32(tokens.TextData)).TextColor(tokens.TextMuted)
 					}
-					ui.Text(c, well).FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
+					ui.Text(c, well+" · "+tp).FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
 				})
 			}
 		})

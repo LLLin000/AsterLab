@@ -17,6 +17,7 @@ type WellState struct {
 	Replicate int
 	Timepoint string
 	Role      string
+	Factors   map[string]string
 	Ambiguous bool
 }
 
@@ -29,6 +30,9 @@ type Props struct {
 	Cols        int
 	Topology    string
 	Roles       map[string]string
+	ColorBy     string // "group" | "sample" | "factor" | "replicate" | "role"
+	FactorKey   string
+	Blind       bool
 }
 
 const (
@@ -175,48 +179,89 @@ func View(c *ui.Context, props Props) {
 	width := leftLabel + gridW + float32(t.Spacing4)
 	height := topLabel + gridH + float32(t.Spacing32)
 	selected := selectedSet(props)
-	groupCounts := make(map[string]int)
-	for _, well := range props.Wells {
-		if !well.Ambiguous && well.Group != "" {
-			groupCounts[well.Group]++
+	legendCounts := make(map[string]int)
+	legendColors := make(map[string]ui.Color)
+	legendOrder := make([]string, 0)
+	recordLegend := func(label string, col ui.Color) {
+		if label == "" {
+			return
+		}
+		if _, seen := legendCounts[label]; !seen {
+			legendOrder = append(legendOrder, label)
+			legendColors[label] = col
+		}
+		legendCounts[label]++
+	}
+	for id, well := range props.Wells {
+		if well.Ambiguous {
+			continue
+		}
+		role := effectiveRole(well, id, props.Roles)
+		lbl, col := wellLegendCategory(props, well, role, dark, t)
+		if lbl != "" {
+			recordLegend(lbl, col)
 		}
 	}
+	sort.Strings(legendOrder)
 
 	ui.Column(c).Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
 		var el ui.Element
 		el = ui.Box(c).Size(width, height).Draw(func(p *ui.Painter, r ui.Rect) {
 			for col := 0; col < cols; col++ {
-				x := r.X + leftLabel + float32(col)*(wellSize+gap) + wellSize/2 - float32(t.Spacing4)
-				p.Text(x, r.Y+float32(t.Spacing4), fmt.Sprintf("%d", col+1), labelSize, t.TextMuted)
+				cx := r.X + leftLabel + float32(col)*(wellSize+gap) + wellSize/2 - float32(t.Spacing4)*0.8
+				p.Text(cx, r.Y+float32(t.Spacing4)*0.5, fmt.Sprintf("%d", col+1), labelSize, t.TextMuted)
 			}
 			for row := 0; row < rows; row++ {
-				p.Text(r.X+float32(t.Spacing4), r.Y+topLabel+float32(row)*(wellSize+gap)+wellSize/2+float32(t.Spacing4), rowLabel(row), labelSize, t.TextMuted)
+				ry := r.Y + topLabel + float32(row)*(wellSize+gap) + (wellSize-labelSize)*0.42
+				p.Text(r.X+float32(t.Spacing4), ry, rowLabel(row), labelSize, t.TextMuted)
 				for col := 0; col < cols; col++ {
 					id := wellID(row, col)
 					x := r.X + leftLabel + float32(col)*(wellSize+gap)
 					y := r.Y + topLabel + float32(row)*(wellSize+gap)
 					wr := ui.Rect{X: x, Y: y, W: wellSize, H: wellSize}
 					well, assigned := props.Wells[id]
-					role := well.Role
-					if role == "" && props.Roles != nil {
-						role = props.Roles[id]
-					}
-					fill := t.Canvas
-					if assigned && well.Ambiguous {
-						fill = t.Warning
-					} else if assigned {
-						fill = GroupColor(well.Group, dark)
-					}
+					role := effectiveRole(well, id, props.Roles)
+					fill := WellFillColor(props, well, assigned, role, dark, t)
 					radius := wellSize / 2
 					if props.Topology == "cohort" || props.Topology == "rack_1d" {
 						radius = float32(t.ControlRadius)
 					}
 					p.Fill(wr, fill, radius)
-					p.Stroke(wr, t.Border, radius, 1)
+					strokeCol := t.Border
+					if assigned && (len(well.Factors) > 0 || well.SampleID != "") && !props.Blind {
+						strokeCol = fill.Mix(t.Text, 0.28)
+					}
+					p.Stroke(wr, strokeCol, radius, 1)
+					ink := contrastInkForFill(fill, assigned, t)
+					if !props.Blind && assigned && well.SampleID != "" && len(well.Factors) > 0 && well.Replicate > 0 && wellSize >= 20 {
+						inner := ui.Rect{X: x + 2.5, Y: y + 2.5, W: wellSize - 5, H: wellSize - 5}
+						innerR := radius - 2.5
+						if innerR < 2 {
+							innerR = 2
+						}
+						p.Stroke(inner, ink.Alpha(.38), innerR, 1)
+					}
 					if well.Ambiguous {
-						p.Text(x+float32(t.Spacing8), y+float32(t.Spacing4), "!", float32(t.TextMeta), t.Text)
+						fontPx := float32(t.TextMeta) * 0.9
+						p.Text(x+(wellSize-fontPx*0.4)/2, y+(wellSize-fontPx)*0.44, "!", fontPx, ink)
+					} else if !props.Blind && assigned {
+						badge := wellGlyph(props, well, role)
+						if badge != "" {
+							fontPx := float32(t.TextMeta) * 0.68
+							if len([]rune(badge)) == 1 {
+								fontPx = float32(t.TextMeta) * 0.82
+							}
+							glyphW := float32(len([]rune(badge))) * fontPx * 0.56
+							tx := x + (wellSize-glyphW)/2
+							ty := y + (wellSize-fontPx)*0.42
+							if tx < x+2 {
+								tx = x + 2
+							}
+							p.Text(tx, ty, badge, fontPx, ink)
+						}
 					} else if roleBadge := roleShort(role); roleBadge != "" {
-						p.Text(x+float32(t.Spacing4), y+float32(t.Spacing4), roleBadge, float32(t.TextMeta), t.Text)
+						fontPx := float32(t.TextMeta) * 0.78
+						p.Text(x+(wellSize-fontPx*0.6)/2, y+(wellSize-fontPx)*0.44, roleBadge, fontPx, t.Text)
 					}
 					if selected[id] {
 						p.Stroke(wr, t.Accent, radius, 2)
@@ -228,16 +273,43 @@ func View(c *ui.Context, props Props) {
 			hudY := r.Y + topLabel + gridH + float32(t.Spacing8)
 			if lastHoverWell != "" {
 				well, assigned := props.Wells[lastHoverWell]
+				role := effectiveRole(well, lastHoverWell, props.Roles)
 				parts := []string{lastHoverWell}
 				switch {
 				case !assigned:
 					parts = append(parts, "未分配")
 				case well.Ambiguous:
 					parts = append(parts, "分配冲突", well.Timepoint)
-				default:
-					parts = append(parts, well.SampleID, well.Group)
+				case props.Blind:
+					parts = append(parts, "盲态编号")
 					if well.Replicate > 0 {
-						parts = append(parts, fmt.Sprintf("重复 %d", well.Replicate))
+						parts = append(parts, fmt.Sprintf("复孔 #%d", well.Replicate))
+					}
+					if well.Timepoint != "" {
+						parts = append(parts, well.Timepoint)
+					}
+				default:
+					if well.Group != "" {
+						parts = append(parts, well.Group)
+					}
+					if well.SampleID != "" {
+						parts = append(parts, "样本 "+well.SampleID)
+					}
+					if len(well.Factors) > 0 {
+						fdims := make([]string, 0, len(well.Factors))
+						for dk := range well.Factors {
+							fdims = append(fdims, dk)
+						}
+						sort.Strings(fdims)
+						for _, dk := range fdims {
+							parts = append(parts, dk+"="+well.Factors[dk])
+						}
+					}
+					if well.Replicate > 0 {
+						parts = append(parts, fmt.Sprintf("复孔 #%d", well.Replicate))
+					}
+					if rl := RoleLabel(role); rl != "" && role != "" && role != "sample" {
+						parts = append(parts, rl)
 					}
 					if well.Timepoint != "" {
 						parts = append(parts, well.Timepoint)
@@ -282,23 +354,181 @@ func View(c *ui.Context, props Props) {
 			}
 		}).Focusable()
 
-		if len(groupCounts) > 0 {
-			groups := make([]string, 0, len(groupCounts))
-			for group := range groupCounts {
-				groups = append(groups, group)
-			}
-			sort.Strings(groups)
-			ui.Row(c).Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
-				for _, group := range groups {
+		if len(legendOrder) > 0 {
+			ui.Row(c).Wrap().Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
+				for _, label := range legendOrder {
 					ui.Row(c).Gap(float32(t.Spacing4)).AlignItems(ui.Center).Children(func() {
-						ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius)).Background(GroupColor(group, dark))
-						ui.Text(c, fmt.Sprintf("%s %d", group, groupCounts[group])).FontSize(float32(t.TextMeta)).TextColor(t.TextMuted)
+						ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius)).Background(legendColors[label])
+						ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(float32(t.TextMeta)).TextColor(t.TextMuted).FontFeatures("tnum")
 					})
 				}
 			})
 		}
 		ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 单击选择，Shift+单击多选", len(props.Wells), rows*cols)).FontSize(float32(t.TextMeta)).TextColor(t.TextMuted)
 	})
+}
+
+func effectiveRole(well WellState, id string, roles map[string]string) string {
+	if well.Role != "" {
+		return strings.ToLower(strings.TrimSpace(well.Role))
+	}
+	if roles != nil {
+		return strings.ToLower(strings.TrimSpace(roles[id]))
+	}
+	return ""
+}
+
+// RoleLabel returns the researcher-facing Chinese label for a well role.
+func RoleLabel(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "sample":
+		return "常规样本"
+	case "blank":
+		return "空白对照 Blank"
+	case "ntc":
+		return "无模板阴参 NTC"
+	case "standard":
+		return "标准品 Std"
+	case "positive_control":
+		return "阳性对照"
+	case "negative_control":
+		return "阴性对照"
+	case "vehicle":
+		return "溶剂对照"
+	default:
+		return role
+	}
+}
+
+// WellFillColor computes the circle fill color according to active ColorBy mode.
+func WellFillColor(props Props, well WellState, assigned bool, role string, dark bool, t theme.Tokens) ui.Color {
+	if !assigned {
+		return t.Canvas
+	}
+	if well.Ambiguous {
+		return t.Warning
+	}
+	if props.Blind {
+		return t.BorderStrong
+	}
+	switch strings.ToLower(strings.TrimSpace(props.ColorBy)) {
+	case "sample":
+		if strings.TrimSpace(well.SampleID) != "" {
+			return theme.CategoricalColor("sample:"+well.SampleID, dark)
+		}
+		return t.Elevated
+	case "factor":
+		if props.FactorKey != "" && well.Factors != nil {
+			if val := strings.TrimSpace(well.Factors[props.FactorKey]); val != "" {
+				return theme.CategoricalColor(props.FactorKey+":"+val, dark)
+			}
+		}
+		return t.Elevated
+	case "replicate":
+		if well.Replicate > 0 {
+			palette := theme.CategoricalPalette(dark)
+			return palette[(well.Replicate-1)%len(palette)]
+		}
+		return t.Elevated
+	case "role":
+		r := role
+		if r == "" {
+			r = "sample"
+		}
+		return theme.WellRoleColor(r, dark)
+	default:
+		return GroupColor(well.Group, dark)
+	}
+}
+
+func wellLegendCategory(props Props, well WellState, role string, dark bool, t theme.Tokens) (string, ui.Color) {
+	if props.Blind {
+		return "盲态孔位", t.BorderStrong
+	}
+	switch strings.ToLower(strings.TrimSpace(props.ColorBy)) {
+	case "sample":
+		if s := strings.TrimSpace(well.SampleID); s != "" {
+			return s, theme.CategoricalColor("sample:"+s, dark)
+		}
+		return "未标样本", t.Elevated
+	case "factor":
+		if props.FactorKey != "" && well.Factors != nil {
+			if v := strings.TrimSpace(well.Factors[props.FactorKey]); v != "" {
+				return v, theme.CategoricalColor(props.FactorKey+":"+v, dark)
+			}
+		}
+		return "未标因子", t.Elevated
+	case "replicate":
+		if well.Replicate > 0 {
+			palette := theme.CategoricalPalette(dark)
+			return fmt.Sprintf("复孔 #%d", well.Replicate), palette[(well.Replicate-1)%len(palette)]
+		}
+		return "未标复孔", t.Elevated
+	case "role":
+		r := role
+		if r == "" {
+			r = "sample"
+		}
+		return RoleLabel(r), theme.WellRoleColor(r, dark)
+	default:
+		if well.Group == "" {
+			return "", ui.Color{}
+		}
+		return well.Group, GroupColor(well.Group, dark)
+	}
+}
+
+func wellGlyph(props Props, well WellState, role string) string {
+	if rs := roleShort(role); rs != "" {
+		return rs
+	}
+	switch strings.ToLower(strings.TrimSpace(props.ColorBy)) {
+	case "replicate":
+		if well.Replicate > 0 {
+			return fmt.Sprintf("#%d", well.Replicate)
+		}
+	case "sample":
+		if s := strings.TrimSpace(well.SampleID); s != "" {
+			return compactTag(s, 3)
+		}
+	case "factor":
+		if props.FactorKey != "" && well.Factors != nil {
+			if v := strings.TrimSpace(well.Factors[props.FactorKey]); v != "" {
+				return compactTag(v, 3)
+			}
+		}
+	default:
+		if well.Replicate > 0 {
+			return fmt.Sprintf("%d", well.Replicate)
+		}
+	}
+	return ""
+}
+
+func compactTag(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	for _, prefix := range []string{"cDNA-", "sample-", "Std-"} {
+		if strings.HasPrefix(s, prefix) && len(s) > len(prefix) {
+			s = strings.TrimPrefix(s, prefix)
+			break
+		}
+	}
+	rs := []rune(s)
+	if len(rs) <= maxRunes {
+		return s
+	}
+	return string(rs[:maxRunes])
+}
+
+func contrastInkForFill(fill ui.Color, assigned bool, t theme.Tokens) ui.Color {
+	if !assigned || fill.A == 0 {
+		return t.Text
+	}
+	lum := (0.299*float64(fill.R) + 0.587*float64(fill.G) + 0.114*float64(fill.B)) / 255.0
+	if lum > 0.54 {
+		return theme.LightTokens().Text
+	}
+	return theme.DarkTokens().Text
 }
 
 func roleShort(role string) string {

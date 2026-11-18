@@ -301,3 +301,34 @@ func TestWriteBundleVerifiesEveryMember(t *testing.T) {
 		t.Fatalf("tampered member must abort naming it, got %v", err)
 	}
 }
+
+func TestArchiveIncludesDecodedTableReadouts(t *testing.T) {
+	proj, tasks := archiveProjFixture()
+	tp := "16h"
+	proj.Readouts = []record.ReadoutRecord{{
+		EventID:   "ev-tbl-1",
+		StepPath:  "iz/04-measure",
+		Timepoint: &tp,
+		Readout: json.RawMessage(`{
+			"schema_id":"inhibition_zone_mm",
+			"schema_version":1,
+			"value":{"kind":"table","columns":["sample","mean_d"],"rows":[["Q2-HAMA",11.6],["Q3-Van",21.0]]},
+			"source":{"kind":"raw","derived_from":[]}
+		}`),
+	}}
+	arch := BuildArchive(proj, tasks, "# 研判\n", time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC))
+	md := arch.Markdown()
+	for _, want := range []string{"## 实验测定数据与读数", "inhibition_zone_mm", "| sample | mean_d |", "| Q2-HAMA | 11.6 |"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("archive Markdown missing %q:\n%s", want, md)
+		}
+	}
+	load, _ := pngLoader()
+	var pdf bytes.Buffer
+	if err := arch.PDF(&pdf, load); err != nil {
+		t.Fatalf("archive PDF: %v", err)
+	}
+	if !bytes.HasPrefix(pdf.Bytes(), []byte("%PDF")) {
+		t.Fatal("archive PDF output invalid")
+	}
+}

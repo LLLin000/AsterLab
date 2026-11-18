@@ -24,10 +24,10 @@ func (v *View) renderGroupTable(c *ui.Context, data map[string]any) {
 	moduleCardFrame(v, c, lucide.Table2(), title, fmt.Sprintf("%d 组", len(rows)), nil, func() {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 			cols := []ui.TableColumn{
-				{ID: "name", Title: "组别名称", MinWidth: 140},
-				{ID: "role", Title: "角色", Width: float32(tok.Spacing48) * 2.5},
-				{ID: "cond", Title: "处理条件", MinWidth: 160},
-				{ID: "rep", Title: "n / 重复", Width: float32(tok.Spacing48) * 1.6, Align: ui.End},
+				{ID: "name", Title: "组别名称", MinWidth: 96},
+				{ID: "role", Title: "角色", Width: float32(tok.Spacing48) * 2.2},
+				{ID: "cond", Title: "处理条件", MinWidth: 112},
+				{ID: "rep", Title: "n / 重复", Width: float32(tok.Spacing48) * 1.4, Align: ui.End},
 			}
 			if editable && len(rows) > 1 {
 				cols = append(cols, ui.TableColumn{ID: "act", Title: "", Width: float32(tok.Spacing32) + float32(tok.Spacing8), Fixed: true})
@@ -225,7 +225,11 @@ func (v *View) renderParamTable(c *ui.Context, data map[string]any) {
 										}
 									})
 								} else if recorded != "" {
-									components.Badge(c, "实测 "+recorded+" "+unit, components.BadgeOptions{Tone: components.BadgeSuccess})
+									disp := strings.TrimSpace(recorded)
+									if unit != "" && !strings.HasSuffix(disp, unit) {
+										disp += " " + unit
+									}
+									components.Badge(c, "实测 "+disp, components.BadgeOptions{Tone: components.BadgeSuccess})
 								} else {
 									ui.Text(c, "—").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 								}

@@ -37,10 +37,11 @@ type Plate struct {
 	Columns    int                 `yaml:"columns,omitempty" json:"columns,omitempty"`
 	Assay      string              `yaml:"assay,omitempty" json:"assay,omitempty"`
 	Timepoint  string              `yaml:"timepoint,omitempty" json:"timepoint,omitempty"`
-	Groups     map[string][]string `yaml:"groups" json:"groups"`
-	Samples    map[string]string   `yaml:"samples,omitempty" json:"samples,omitempty"`
-	Replicates map[string]int      `yaml:"replicates,omitempty" json:"replicates,omitempty"`
-	Roles      map[string]string   `yaml:"roles,omitempty" json:"roles,omitempty"`
+	Groups     map[string][]string            `yaml:"groups" json:"groups"`
+	Samples    map[string]string              `yaml:"samples,omitempty" json:"samples,omitempty"`
+	Replicates map[string]int                 `yaml:"replicates,omitempty" json:"replicates,omitempty"`
+	Roles      map[string]string              `yaml:"roles,omitempty" json:"roles,omitempty"`
+	Factors    map[string]map[string]string   `yaml:"factors,omitempty" json:"factors,omitempty"`
 }
 
 // Document is a parsed AsterML source. Source is always the canonical text;
@@ -421,6 +422,7 @@ func parseModuleWith(body string, start, end int, registry *Registry) (Module, e
 		plate.Samples = normalizeSamples(plate.Samples)
 		plate.Replicates = normalizeReplicates(plate.Replicates)
 		plate.Roles = normalizeRoles(plate.Roles)
+		plate.Factors = normalizeFactors(plate.Factors)
 		if plate.Format == 0 {
 			plate.Format = 96
 		}
@@ -461,6 +463,39 @@ func normalizeReplicates(replicates map[string]int) map[string]int {
 	out := make(map[string]int, len(replicates))
 	for well, replicate := range replicates {
 		out[strings.ToUpper(strings.TrimSpace(well))] = replicate
+	}
+	return out
+}
+
+func normalizeFactors(factors map[string]map[string]string) map[string]map[string]string {
+	if len(factors) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]string, len(factors))
+	for dim, m := range factors {
+		d := strings.TrimSpace(dim)
+		sub := make(map[string]string, len(m))
+		for well, val := range m {
+			sub[strings.ToUpper(strings.TrimSpace(well))] = strings.TrimSpace(val)
+		}
+		out[d] = sub
+	}
+	return out
+}
+
+func factorSignatureMap(factors map[string]map[string]string) map[string]string {
+	perWell := map[string][]string{}
+	for dim, m := range factors {
+		d := strings.TrimSpace(dim)
+		for well, val := range m {
+			w := strings.ToUpper(strings.TrimSpace(well))
+			perWell[w] = append(perWell[w], d+"="+strings.TrimSpace(val))
+		}
+	}
+	out := make(map[string]string, len(perWell))
+	for well, pairs := range perWell {
+		sort.Strings(pairs)
+		out[well] = strings.Join(pairs, "\x1f")
 	}
 	return out
 }
@@ -518,6 +553,25 @@ func validatePlate(plate Plate) error {
 		}
 		sampleByWell[well] = sampleID
 	}
+	for dim, m := range plate.Factors {
+		d := strings.TrimSpace(dim)
+		if d == "" {
+			return fmt.Errorf("plate factor dimension name cannot be empty")
+		}
+		for well, val := range m {
+			w := strings.ToUpper(strings.TrimSpace(well))
+			if !ValidPlateWell(w, topo, geometry.Rows, geometry.Columns) {
+				return fmt.Errorf("factor %q well %q is outside %dx%d", d, w, geometry.Rows, geometry.Columns)
+			}
+			if _, ok := seen[w]; !ok {
+				return fmt.Errorf("factor %q well %s has no group assignment", d, w)
+			}
+			if strings.TrimSpace(val) == "" {
+				return fmt.Errorf("factor %q value for well %s cannot be empty", d, w)
+			}
+		}
+	}
+	factorSigs := factorSignatureMap(plate.Factors)
 	seenReplicates := map[string]string{}
 	for well, replicate := range plate.Replicates {
 		well = strings.ToUpper(strings.TrimSpace(well))
@@ -531,7 +585,7 @@ func validatePlate(plate Plate) error {
 		if replicate < 1 {
 			return fmt.Errorf("replicate for well %s must be positive", well)
 		}
-		key := fmt.Sprintf("%s\x00%d", sampleID, replicate)
+		key := fmt.Sprintf("%s\x00%s\x00%d", sampleID, factorSigs[well], replicate)
 		if previous, exists := seenReplicates[key]; exists {
 			return fmt.Errorf("sample %s replicate %d is assigned to both %s and %s", sampleID, replicate, previous, well)
 		}
@@ -582,6 +636,37 @@ func (d *Document) UpdatePlate(id string, groups map[string][]string) (string, e
 	previous := module.End
 	plate := *module.Plate
 	plate.Groups = normalizeGroups(groups)
+	assigned := map[string]bool{}
+	for _, ws := range plate.Groups {
+		for _, w := range ws {
+			assigned[w] = true
+		}
+	}
+	for w := range plate.Samples {
+		if !assigned[w] {
+			delete(plate.Samples, w)
+		}
+	}
+	for w := range plate.Replicates {
+		if !assigned[w] {
+			delete(plate.Replicates, w)
+		}
+	}
+	for w := range plate.Roles {
+		if !assigned[w] {
+			delete(plate.Roles, w)
+		}
+	}
+	for dim, m := range plate.Factors {
+		for w := range m {
+			if !assigned[w] {
+				delete(m, w)
+			}
+		}
+		if len(m) == 0 {
+			delete(plate.Factors, dim)
+		}
+	}
 	if err := validatePlate(plate); err != nil {
 		return "", err
 	}
@@ -590,6 +675,26 @@ func (d *Document) UpdatePlate(id string, groups map[string][]string) (string, e
 		return "", err
 	}
 	data["groups"] = plate.Groups
+	if len(plate.Samples) > 0 {
+		data["samples"] = plate.Samples
+	} else {
+		delete(data, "samples")
+	}
+	if len(plate.Replicates) > 0 {
+		data["replicates"] = plate.Replicates
+	} else {
+		delete(data, "replicates")
+	}
+	if len(plate.Roles) > 0 {
+		data["roles"] = plate.Roles
+	} else {
+		delete(data, "roles")
+	}
+	if len(plate.Factors) > 0 {
+		data["factors"] = plate.Factors
+	} else {
+		delete(data, "factors")
+	}
 	raw, err := yaml.Marshal(data)
 	if err != nil {
 		return "", err
@@ -663,6 +768,39 @@ func (p Plate) GroupNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// FactorDimensions returns the sorted orthogonal factor dimension names declared on the plate.
+func (p Plate) FactorDimensions() []string {
+	if len(p.Factors) == 0 {
+		return nil
+	}
+	dims := make([]string, 0, len(p.Factors))
+	for dim, m := range p.Factors {
+		if strings.TrimSpace(dim) != "" && len(m) > 0 {
+			dims = append(dims, dim)
+		}
+	}
+	sort.Strings(dims)
+	return dims
+}
+
+// WellFactors returns all factor key->value annotations on well.
+func (p Plate) WellFactors(well string) map[string]string {
+	if len(p.Factors) == 0 {
+		return nil
+	}
+	w := strings.ToUpper(strings.TrimSpace(well))
+	var out map[string]string
+	for dim, m := range p.Factors {
+		if val := strings.TrimSpace(m[w]); val != "" {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[dim] = val
+		}
+	}
+	return out
 }
 
 func validWell(well string, geometry Geometry) bool {

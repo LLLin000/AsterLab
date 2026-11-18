@@ -434,6 +434,9 @@ func asterDesignPage(c *ui.Context, a *app) {
 	})
 
 	a.renderPreflight(c)
+	if a.designView != nil {
+		a.designView.RenderPlateOverlay(c)
+	}
 	a.captureAsterDraft()
 }
 

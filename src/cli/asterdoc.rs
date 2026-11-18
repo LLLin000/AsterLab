@@ -702,7 +702,7 @@ pub(crate) fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<Stri
                 sorted.sort();
                 *sequence = sorted.into_iter().map(serde_yaml::Value::String).collect();
             } else {
-                for field in ["samples", "replicates"] {
+                for field in ["samples", "replicates", "roles"] {
                     let key = serde_yaml::Value::String(field.to_owned());
                     if let Some(assignments) = mapping.get_mut(&key).and_then(|value| value.as_mapping_mut()) {
                         let remove: Vec<serde_yaml::Value> = assignments
@@ -715,6 +715,30 @@ pub(crate) fn apply_asterdoc_patch(source: &str, command: &Value) -> Result<Stri
                         for key in remove {
                             assignments.remove(&key);
                         }
+                    }
+                }
+                let factors_key = serde_yaml::Value::String("factors".to_owned());
+                if let Some(factors) = mapping.get_mut(&factors_key).and_then(|value| value.as_mapping_mut()) {
+                    let mut empty_dims = Vec::new();
+                    for (dim_key, dim_val) in factors.iter_mut() {
+                        if let Some(dim_map) = dim_val.as_mapping_mut() {
+                            let remove: Vec<serde_yaml::Value> = dim_map
+                                .iter()
+                                .filter_map(|(wk, _)| {
+                                    let assigned = wk.as_str()?.trim().to_uppercase();
+                                    wells.iter().any(|well| well == &assigned).then(|| wk.clone())
+                                })
+                                .collect();
+                            for wk in remove {
+                                dim_map.remove(&wk);
+                            }
+                            if dim_map.is_empty() {
+                                empty_dims.push(dim_key.clone());
+                            }
+                        }
+                    }
+                    for dk in empty_dims {
+                        factors.remove(&dk);
                     }
                 }
             }
@@ -1731,6 +1755,54 @@ pub(crate) fn validate_asterdoc_module_value(value: &serde_yaml::Value, line_no:
                         sample_by_well.insert(well, sample_id);
                     }
                 }
+                let mut factor_pairs_by_well: std::collections::HashMap<String, Vec<(String, String)>> =
+                    std::collections::HashMap::new();
+                if let Some(factors_val) = get("factors") {
+                    let factors = factors_val.as_mapping().ok_or_else(|| {
+                        CliError::input("plate.factors must be a mapping")
+                    })?;
+                    for (dim_key, dim_raw) in factors {
+                        let dim = dim_key.as_str().unwrap_or("").trim().to_owned();
+                        if dim.is_empty() {
+                            return Err(CliError::input("plate factor dimension name cannot be empty"));
+                        }
+                        let dim_map = dim_raw.as_mapping().ok_or_else(|| {
+                            CliError::input(format!("plate factor {dim} must be a mapping"))
+                        })?;
+                        for (well_key, val_raw) in dim_map {
+                            let well = well_key.as_str().unwrap_or("").trim().to_uppercase();
+                            if !valid_plate_well(&well, topology, rows, cols) {
+                                return Err(CliError::input(format!(
+                                    "factor {dim} well {well} is outside {rows}x{cols}"
+                                )));
+                            }
+                            if !seen.contains(&well) {
+                                return Err(CliError::input(format!(
+                                    "factor {dim} well {well} has no group assignment"
+                                )));
+                            }
+                            let val_str = val_raw.as_str().map(str::trim).unwrap_or("").to_owned();
+                            if val_str.is_empty() {
+                                return Err(CliError::input(format!(
+                                    "factor {dim} value for well {well} cannot be empty"
+                                )));
+                            }
+                            factor_pairs_by_well.entry(well).or_default().push((dim.clone(), val_str));
+                        }
+                    }
+                }
+                let factor_sig = |well: &str| -> String {
+                    let Some(pairs) = factor_pairs_by_well.get(well) else {
+                        return String::new();
+                    };
+                    let mut sorted = pairs.clone();
+                    sorted.sort();
+                    sorted
+                        .into_iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect::<Vec<_>>()
+                        .join("\u{1f}")
+                };
                 let mut seen_replicates: std::collections::HashMap<String, String> =
                     std::collections::HashMap::new();
                 if let Some(replicates) = get("replicates").and_then(|value| value.as_mapping()) {
@@ -1753,7 +1825,8 @@ pub(crate) fn validate_asterdoc_module_value(value: &serde_yaml::Value, line_no:
                                 "replicate for well {well} must be positive"
                             )));
                         }
-                        let key = format!("{sample_id}\u{0}{replicate}");
+                        let sig = factor_sig(&well);
+                        let key = format!("{sample_id}\u{0}{sig}\u{0}{replicate}");
                         if let Some(previous) = seen_replicates.get(&key) {
                             return Err(CliError::input(format!(
                                 "sample {sample_id} replicate {replicate} is assigned to both {previous} and {well}"

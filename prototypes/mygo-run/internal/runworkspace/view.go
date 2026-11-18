@@ -458,6 +458,11 @@ func View(c *ui.Context, s *State) {
 			})
 		})
 	})
+	if task := s.selectedTask(); task != nil && s.StepViews != nil {
+		if sv := s.StepViews[task.TaskKey]; sv != nil {
+			sv.RenderPlateOverlay(c)
+		}
+	}
 }
 
 func (s *State) shouldStack(c *ui.Context) bool {
@@ -1210,15 +1215,15 @@ func moduleRoleLabel(role string) string {
 		return "说明"
 	case "calculator":
 		return "配液/换算"
-	case "param_table":
+	case "param_table", "parameters":
 		return "参数"
-	case "checklist":
+	case "checklist", "check", "checks":
 		return "核查"
 	case "subflow":
 		return "子步骤"
 	case "plate":
 		return "孔板"
-	case "group_table":
+	case "group_table", "group", "groups":
 		return "分组"
 	case "material":
 		return "试剂"
@@ -1226,6 +1231,10 @@ func moduleRoleLabel(role string) string {
 		return "数据表"
 	case "figure":
 		return "示意图"
+	case "procedure":
+		return "操作说明"
+	case "other":
+		return "通用模块"
 	default:
 		return role
 	}
@@ -1697,6 +1706,282 @@ func timelineTab(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			})
 		}
 	})
+}
+
+// HydrateReadOnlyAsterDocView builds a read-only asterdoc.View hydrated with
+// Run actual parameters, sample exclusions, calculator substitutions, checklist
+// ticks, persisted data_table readouts, and linked assets so Notebook surfaces
+// reuse the exact same module widgets as Design/Run.
+func HydrateReadOnlyAsterDocView(
+	vm *RunWorkspaceViewModel,
+	decodedReadouts []record.DecodedReadout,
+	taskAssets func(taskKey string) []LinkedAsset,
+	resolveAsset func(LinkedAsset) string,
+) *asterdoc.View {
+	if vm == nil || vm.FrozenDoc == nil {
+		return nil
+	}
+	v := &asterdoc.View{
+		Doc:            vm.FrozenDoc,
+		Registry:       asterdoc.BuiltinRegistry(),
+		Mode:           asterdoc.ModeRun,
+		Density:        asterdoc.DensityCompact,
+		RunID:          vm.RunID,
+		ReadOnly:       true,
+		HideStepHeader: true,
+	}
+	populateAsterViewState(v, vm, nil, decodedReadouts, taskAssets, resolveAsset)
+	return v
+}
+
+func collectAllDataTableBlocks(doc *asterdoc.Document) []map[string]any {
+	if doc == nil {
+		return nil
+	}
+	var out []map[string]any
+	for _, m := range doc.Modules {
+		if m.Kind == "data_table" {
+			out = append(out, m.Data)
+		} else if m.Kind == "step" {
+			if rawBlocks, ok := m.Data["blocks"].([]any); ok {
+				for _, rb := range rawBlocks {
+					if bm, _ := rb.(map[string]any); bm != nil && textValueFromAny(bm["kind"]) == "data_table" {
+						out = append(out, bm)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+func allVMTasks(vm *RunWorkspaceViewModel) []*RunTaskViewModel {
+	if vm == nil {
+		return nil
+	}
+	var out []*RunTaskViewModel
+	for _, st := range vm.Steps {
+		if st == nil {
+			continue
+		}
+		out = append(out, st)
+		for _, ch := range st.Children {
+			if ch != nil {
+				out = append(out, ch)
+			}
+		}
+	}
+	return out
+}
+
+func matchTableForBlock(bid, schemaKey string, tables map[string]PersistedTable) (PersistedTable, bool) {
+	if tbl, ok := tables[schemaKey]; ok {
+		return tbl, true
+	}
+	if tbl, ok := tables[schemaKey+".table"]; ok {
+		return tbl, true
+	}
+	for k, candidate := range tables {
+		if strings.Contains(k, strings.TrimPrefix(strings.ToLower(bid), "dt-")) {
+			return candidate, true
+		}
+	}
+	return PersistedTable{}, false
+}
+
+func populateAsterViewState(
+	v *asterdoc.View,
+	vm *RunWorkspaceViewModel,
+	targetTask *RunTaskViewModel,
+	decodedReadouts []record.DecodedReadout,
+	taskAssets func(string) []LinkedAsset,
+	resolveAsset func(LinkedAsset) string,
+) {
+	if v == nil || vm == nil {
+		return
+	}
+	actualParams := map[string]string{}
+	for k, val := range vm.ActualParamNumbers {
+		disp := strconv.FormatFloat(val, 'g', -1, 64)
+		if u := vm.ActualParamUnits[k]; u != "" {
+			disp += " " + u
+		}
+		actualParams[k] = disp
+	}
+	tasks := allVMTasks(vm)
+	if targetTask != nil {
+		tasks = []*RunTaskViewModel{targetTask}
+	}
+	for _, tk := range tasks {
+		if tk.Actual != nil {
+			for k, val := range tk.Actual.Parameters {
+				actualParams[k] = val
+			}
+		}
+	}
+	v.ActualParams = actualParams
+
+	if len(vm.SampleStatuses) > 0 {
+		if v.SampleStatuses == nil {
+			v.SampleStatuses = map[string]string{}
+		}
+		for sid, st := range vm.SampleStatuses {
+			v.SampleStatuses[sid] = st
+		}
+	}
+
+	calcCtx := &asterdoc.CalcActualContext{
+		Params:     map[string]float64{},
+		ParamUnits: map[string]string{},
+	}
+	for k, n := range vm.ActualParamNumbers {
+		calcCtx.Params[k] = n
+	}
+	for k, u := range vm.ActualParamUnits {
+		calcCtx.ParamUnits[k] = u
+	}
+	if len(vm.SampleMeasurements) > 0 {
+		sids := make([]string, 0, len(vm.SampleMeasurements))
+		for sid := range vm.SampleMeasurements {
+			st := vm.SampleStatuses[sid]
+			if st == "QC剔除" || st == "删失" {
+				continue
+			}
+			sids = append(sids, sid)
+		}
+		sort.Strings(sids)
+		for _, sid := range sids {
+			eps := vm.SampleMeasurements[sid]
+			epKeys := make([]string, 0, len(eps))
+			for ep := range eps {
+				epKeys = append(epKeys, ep)
+			}
+			sort.Strings(epKeys)
+			for _, ep := range epKeys {
+				mv := eps[ep]
+				if num, err := strconv.ParseFloat(strings.TrimSpace(mv.Value), 64); err == nil {
+					calcCtx.Samples = append(calcCtx.Samples, asterdoc.CalcSampleInput{
+						SampleID: sid,
+						Value:    num,
+						Unit:     mv.Unit,
+						Endpoint: mv.Field,
+					})
+				}
+			}
+		}
+	}
+	v.CalcActuals = calcCtx
+
+	// Hydrate data_table cells from task actual tables and decoded readouts.
+	dtBlocks := collectAllDataTableBlocks(vm.FrozenDoc)
+	combinedTables := map[string]PersistedTable{}
+	for _, tk := range tasks {
+		if tk.Actual == nil {
+			continue
+		}
+		for k, tbl := range tk.Actual.Tables {
+			combinedTables[k] = tbl
+		}
+	}
+	for _, dr := range decodedReadouts {
+		if dr.Kind != "table" || len(dr.Columns) == 0 || len(dr.Rows) == 0 {
+			continue
+		}
+		anyRows := make([][]any, 0, len(dr.Rows))
+		for _, r := range dr.Rows {
+			rowAny := make([]any, len(r))
+			for i, cell := range r {
+				rowAny[i] = cell
+			}
+			anyRows = append(anyRows, rowAny)
+		}
+		combinedTables[dr.SchemaID] = PersistedTable{SchemaID: dr.SchemaID, Columns: dr.Columns, Rows: anyRows}
+	}
+	if len(combinedTables) > 0 {
+		for _, bm := range dtBlocks {
+			bid := textValueFromAny(bm["id"])
+			schemaKey := textValueFromAny(bm["schema_id"])
+			if schemaKey == "" {
+				schemaKey = "data_table." + strings.ToLower(strings.ReplaceAll(bid, "_", "-")) + ".v1"
+			}
+			tbl, ok := matchTableForBlock(bid, schemaKey, combinedTables)
+			if !ok {
+				continue
+			}
+			if v.TableCells == nil {
+				v.TableCells = map[string]map[string]string{}
+			}
+			if v.TableCells[bid] == nil {
+				v.TableCells[bid] = map[string]string{}
+			}
+			for rIdx, row := range tbl.Rows {
+				for cIdx, ckey := range tbl.Columns {
+					if cIdx >= len(row) || row[cIdx] == nil {
+						continue
+					}
+					ck := fmt.Sprintf("dt:%s:%d:%s", bid, rIdx, ckey)
+					if _, exists := v.TableCells[bid][ck]; !exists {
+						v.TableCells[bid][ck] = fmt.Sprint(row[cIdx])
+					}
+				}
+			}
+		}
+	}
+
+	checked := map[string]bool{}
+	skipped := map[string]string{}
+	for _, tk := range tasks {
+		for _, chk := range tk.Checks {
+			if chk.Status == "passed" {
+				checked[chk.CheckID] = true
+				checked[tk.StepID+":"+chk.CheckID] = true
+			} else if chk.Status == "skipped" {
+				skipped[chk.CheckID] = "已跳过"
+			}
+		}
+	}
+	v.CheckedItems = checked
+	v.SkippedItems = skipped
+
+	if taskAssets != nil {
+		grouped := map[string][]asterdoc.AssetThumb{}
+		var allThumbs []asterdoc.AssetThumb
+		for _, tk := range tasks {
+			rawAssets := taskAssets(tk.TaskKey)
+			thumbs := make([]asterdoc.AssetThumb, 0, len(rawAssets))
+			for _, a := range rawAssets {
+				lbl := a.RelativePath
+				if lbl == "" {
+					lbl = a.AssetID
+				}
+				filePath := a.RelativePath
+				if resolveAsset != nil {
+					if resolved := resolveAsset(a); resolved != "" {
+						filePath = resolved
+					}
+				}
+				th := asterdoc.AssetThumb{
+					AssetID:  a.AssetID,
+					Label:    lbl,
+					FilePath: filePath,
+					WellID:   a.WellID,
+					FovIndex: int(a.FOVIndex),
+				}
+				thumbs = append(thumbs, th)
+				allThumbs = append(allThumbs, th)
+				if a.WellID != "" {
+					grouped["well:"+a.WellID] = append(grouped["well:"+a.WellID], th)
+				}
+			}
+			if len(thumbs) > 0 {
+				grouped[tk.StepID] = append(grouped[tk.StepID], thumbs...)
+			}
+		}
+		if len(allThumbs) > 0 {
+			grouped[""] = allThumbs
+			v.LinkedAssets = grouped
+		}
+	}
 }
 
 func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *ui.Theme, tokens theme.Tokens) {

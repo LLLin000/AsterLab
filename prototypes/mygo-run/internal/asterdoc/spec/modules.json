@@ -61,18 +61,20 @@
         {"name": "groups", "type": "well-map", "required": true, "description": "组别 ID 到孔位/槽位列表"},
         {"name": "samples", "type": "object", "description": "孔位到显式 sample ID"},
         {"name": "replicates", "type": "object", "description": "孔位到正整数技术重复编号"},
-        {"name": "roles", "type": "object", "description": "孔位到角色（sample/blank/vehicle/positive_control/negative_control/standard/ntc）"}
+        {"name": "roles", "type": "object", "description": "孔位到角色（sample/blank/vehicle/positive_control/negative_control/standard/ntc）"},
+        {"name": "factors", "type": "object", "description": "正交实验因子标注映射（因子维度名 -> 孔位 -> 因子水平，如 靶点基因、加药浓度）"}
       ],
       "outputs": [
         {"name": "rows", "type": "int", "origin": "view"},
         {"name": "columns", "type": "int", "origin": "view"},
         {"name": "wells", "type": "well-map", "origin": "view"},
         {"name": "samples", "type": "object", "origin": "view"},
-        {"name": "replicates", "type": "object", "origin": "view"}
+        {"name": "replicates", "type": "object", "origin": "view"},
+        {"name": "factors", "type": "object", "origin": "view"}
       ],
       "actions": [
         {"id": "assign_wells", "title": "将选中孔位归入组别", "permission": "document.edit", "writes": ["groups"]},
-        {"id": "clear_wells", "title": "清除所选孔位", "permission": "document.edit", "writes": ["groups", "samples", "replicates", "roles"]}
+        {"id": "clear_wells", "title": "清除所选孔位", "permission": "document.edit", "writes": ["groups", "samples", "replicates", "roles", "factors"]}
       ],
       "rules": ["plate-geometry-wells"]
     },

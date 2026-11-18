@@ -113,6 +113,46 @@ func (arch Archive) Markdown() string {
 		}
 		sb.WriteString("\n")
 	}
+	if decoded := record.DecodeReadouts(proj.Readouts); len(decoded) > 0 {
+		sb.WriteString("## 实验测定数据与读数\n\n")
+		for _, dr := range decoded {
+			title := firstNonEmptyArchive(dr.SchemaID, "测定读数")
+			if dr.Timepoint != "" {
+				sb.WriteString(fmt.Sprintf("### %s（%s）\n\n", title, dr.Timepoint))
+			} else {
+				sb.WriteString(fmt.Sprintf("### %s\n\n", title))
+			}
+			switch dr.Kind {
+			case "table":
+				if len(dr.Columns) > 0 {
+					sb.WriteString("| " + strings.Join(dr.Columns, " | ") + " |\n")
+					seps := make([]string, len(dr.Columns))
+					for i := range seps {
+						seps[i] = "---"
+					}
+					sb.WriteString("| " + strings.Join(seps, " | ") + " |\n")
+					for _, row := range dr.Rows {
+						cells := make([]string, len(dr.Columns))
+						for i := range dr.Columns {
+							if i < len(row) {
+								cells[i] = row[i]
+							} else {
+								cells[i] = "—"
+							}
+						}
+						sb.WriteString("| " + strings.Join(cells, " | ") + " |\n")
+					}
+					sb.WriteString("\n")
+				}
+			case "categorical":
+				sb.WriteString(fmt.Sprintf("- 定性结果：%s\n\n", displayValue(dr.Category)))
+			case "numeric":
+				if dr.Number != nil {
+					sb.WriteString(fmt.Sprintf("- 测定数值：%g %s\n\n", *dr.Number, dr.Unit))
+				}
+			}
+		}
+	}
 	sb.WriteString("## 时间线\n\n")
 	sb.WriteString(fmt.Sprintf("- 记录事件 %d 条 · 失败 %d 条 · 重试 %d 条 · 条件跳过 %d 次\n",
 		len(proj.Timeline.Events), len(proj.Timeline.Failures), len(proj.Timeline.Retries), proj.Timeline.SkippedByRule))
@@ -216,6 +256,15 @@ func displayValue(value string) string {
 		return "未记录"
 	}
 	return value
+}
+
+func firstNonEmptyArchive(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // recordPDFFontCandidates copies the working set from internal/asterdoc/pdf.go
@@ -530,6 +579,32 @@ func (arch Archive) PDF(w io.Writer, load ImageLoader) error {
 		pdf.MultiCell(0, 6, group.Title, "", "", false)
 		for _, row := range group.Rows {
 			body(fmt.Sprintf("| %s | %s | %s | %s |", row.Label, row.Planned, row.Actual, row.Status))
+		}
+		pdf.Ln(1)
+	}
+	if decoded := record.DecodeReadouts(proj.Readouts); len(decoded) > 0 {
+		h2("实验测定数据与读数")
+		for _, dr := range decoded {
+			title := firstNonEmptyArchive(dr.SchemaID, "测定读数")
+			if dr.Timepoint != "" {
+				title += "（" + dr.Timepoint + "）"
+			}
+			body(title)
+			switch dr.Kind {
+			case "table":
+				if len(dr.Columns) > 0 {
+					body("| " + strings.Join(dr.Columns, " | ") + " |")
+					for _, row := range dr.Rows {
+						body("| " + strings.Join(row, " | ") + " |")
+					}
+				}
+			case "categorical":
+				body("定性结果：" + displayValue(dr.Category))
+			case "numeric":
+				if dr.Number != nil {
+					body(fmt.Sprintf("测定数值：%g %s", *dr.Number, dr.Unit))
+				}
+			}
 		}
 		pdf.Ln(1)
 	}

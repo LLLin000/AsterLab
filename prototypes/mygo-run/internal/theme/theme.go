@@ -107,6 +107,73 @@ func Window(c *ui.Context) *ui.Theme {
 // start of a root content builder that is not inside an Onevra shell.
 func Apply(c *ui.Context) { c.SetTheme(Window(c)) }
 
+// CategoricalPalette returns the 8-color accessible scientific categorical palette
+// for distinguishing samples, replicates, orthogonal plate factors, and groups.
+func CategoricalPalette(dark bool) []ui.Color {
+	if dark {
+		return []ui.Color{
+			ui.Hex("#6b9cff"), // Cobalt
+			ui.Hex("#72c997"), // Emerald
+			ui.Hex("#e3b354"), // Amber
+			ui.Hex("#b28dff"), // Violet
+			ui.Hex("#f07c8b"), // Coral
+			ui.Hex("#57c5c2"), // Teal
+			ui.Hex("#8c9ae8"), // Indigo
+			ui.Hex("#d6986a"), // Terracotta
+		}
+	}
+	return []ui.Color{
+		ui.Hex("#3b6fd8"), // Cobalt
+		ui.Hex("#2f7a4f"), // Emerald
+		ui.Hex("#c47f17"), // Amber
+		ui.Hex("#7a49c4"), // Violet
+		ui.Hex("#c94a5a"), // Coral
+		ui.Hex("#1b8a88"), // Teal
+		ui.Hex("#5d6bb8"), // Indigo
+		ui.Hex("#9e6235"), // Terracotta
+	}
+}
+
+// CategoricalColor maps an arbitrary label deterministically onto CategoricalPalette.
+func CategoricalColor(key string, dark bool) ui.Color {
+	palette := CategoricalPalette(dark)
+	if len(palette) == 0 {
+		return GetTokens(Palette(dark)).Accent
+	}
+	idx := 0
+	for _, r := range key {
+		idx = (idx*31 + int(r)) % len(palette)
+	}
+	if idx < 0 {
+		idx = -idx
+	}
+	return palette[idx]
+}
+
+// WellRoleColor returns the semantic scientific color for well control roles.
+func WellRoleColor(role string, dark bool) ui.Color {
+	tok := GetTokens(Palette(dark))
+	palette := CategoricalPalette(dark)
+	switch role {
+	case "sample":
+		return palette[0]
+	case "standard":
+		return palette[2]
+	case "positive_control":
+		return tok.Success
+	case "negative_control":
+		return palette[5]
+	case "vehicle":
+		return palette[6]
+	case "ntc":
+		return tok.Danger
+	case "blank":
+		return tok.BorderStrong
+	default:
+		return tok.Accent
+	}
+}
+
 // LightTheme and DarkTheme install a fixed appearance, for isolated studios.
 func LightTheme() *ui.Theme { return LightPalette() }
 

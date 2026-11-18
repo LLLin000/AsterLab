@@ -8,6 +8,8 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"gopkg.in/yaml.v3"
+
+	"asterlab-mygo-prototype/internal/theme"
 )
 
 func plateFromData(data map[string]any) (Plate, error) {
@@ -26,6 +28,7 @@ func plateFromData(data map[string]any) (Plate, error) {
 	plate.Samples = normalizeSamples(plate.Samples)
 	plate.Replicates = normalizeReplicates(plate.Replicates)
 	plate.Roles = normalizeRoles(plate.Roles)
+	plate.Factors = normalizeFactors(plate.Factors)
 	if err := validatePlate(plate); err != nil {
 		return Plate{}, err
 	}
@@ -220,19 +223,21 @@ func stepSpec() ModuleSpec {
 }
 
 func renderStepSummary(v *View, c *ui.Context, data map[string]any) {
-	t := c.Theme()
-	ui.Column(c).FillWidth().Gap(t.Space(2)).Padding(t.Space(3)).Radius(t.Radius).
-		Background(t.Surface).Border(1, t.Border).Children(func() {
-		ui.Row(c).FillWidth().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, textValue(data, "title")).FontSize(t.Rem(.95)).Bold().TextColor(t.Text)
+	tok := theme.GetTokens(c.Theme())
+	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
+		Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
+		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, textValue(data, "title")).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 			if exec := textValue(data, "execution"); exec == "organizational" {
 				components.Badge(c, "组织分组")
+			} else {
+				components.Badge(c, "步骤", components.BadgeOptions{Tone: components.BadgeAccent})
 			}
-			if assay := textValue(data, "assay"); assay != "" {
-				ui.Text(c, assay).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
-			}
-			if path := textValue(data, "path"); path != "" {
-				ui.Text(c, path).FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			ui.Spacer(c)
+			for _, tp := range stringList(data, "timepoints") {
+				if strings.TrimSpace(tp) != "" {
+					components.Badge(c, tp)
+				}
 			}
 		})
 		if blocks, ok := data["blocks"].([]any); ok && len(blocks) > 0 {
@@ -247,6 +252,17 @@ func renderStepSummary(v *View, c *ui.Context, data map[string]any) {
 					bs = 1
 				}
 				v.RenderModule(c, bk, bs, bm)
+			}
+		}
+		if v.Doc != nil {
+			for _, refID := range stringList(data, "block_refs") {
+				for i := range v.Doc.Modules {
+					if v.Doc.Modules[i].ID == refID {
+						m := v.Doc.Modules[i]
+						v.RenderModule(c, m.Kind, m.Schema, m.Data)
+						break
+					}
+				}
 			}
 		}
 	})

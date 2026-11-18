@@ -53,7 +53,7 @@ Rules:
 ## 2. Three-Layer Module Architecture
 
 - **Layer 1 · Generic Content Modules (10 composable blocks + standard `plate`)**:
-  `prose@1`, `group_table@1`, `param_table@1`, `figure@1`, `data_table@1`, `checklist@1`, `calculator@1`, `timer@1`, `attachment@1`, `subflow@1`, and `plate@1` (`plate` / `rack_1d` / `dish` / `cohort`, stripped of all assay-specific `mix_*` fields).
+  `prose@1`, `group_table@1`, `param_table@1`, `figure@1`, `data_table@1`, `checklist@1`, `calculator@1`, `timer@1`, `attachment@1`, `subflow@1`, and `plate@1` (`plate` / `rack_1d` / `dish` / `cohort`, stripped of all assay-specific `mix_*` fields; supports universal orthogonal factor annotations via `factors: { dimension -> { well -> value } }` and factor-scoped technical replicate uniqueness `(sample_id, canonical_factor_signature, replicate)` so multi-target qPCR / dose-response plates share sample IDs across targets while still rejecting true collisions).
 - **Layer 2 · Scientific Data & Logic**:
   `experiment@1`, `group@1` (and `group_table@1`), `assay@1`, `material@1` (with optional `pantry_code`), `sample@1`, `readout@1`, `reference@1`, `instrument_profile@1`.
 - **Layer 3 · Plan, Run & Record (Single Source of Truth)**:

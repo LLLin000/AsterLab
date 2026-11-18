@@ -24,7 +24,7 @@ func TestV2ShowcaseFixturesParseAndComputeBudget(t *testing.T) {
 		{"testdata/inhibition-zone.asterml", 4, 4, 4, false},
 		{"testdata/cfu.asterml", 3, 2, 6, false},
 		{"testdata/huvec-tube.asterml", 3, 3, 12, false},
-		{"testdata/rt-qpcr.asterml", 0, 1, 3, false},
+		{"testdata/rt-qpcr.asterml", 3, 4, 33, false},
 		{"../../blank.asterml", 1, 2, 6, false},
 		{"../../starter.asterml", 2, 2, 6, false},
 	}

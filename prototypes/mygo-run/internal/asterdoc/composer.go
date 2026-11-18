@@ -283,6 +283,11 @@ func blockKindLabel(kind string) string {
 }
 
 func defaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
+	return DefaultStarterBlock(doc, stepID, kind)
+}
+
+// DefaultStarterBlock builds a ready-to-insert generic AsterML v2 module map.
+func DefaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
 	id := nextUniqueBlockID(doc, stepID+"-"+sanitizeIDFrag(kind))
 	switch kind {
 	case "prose":
