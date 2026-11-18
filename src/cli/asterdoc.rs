@@ -2886,3 +2886,680 @@ pub(crate) fn derive_asterdoc_source_from_run(
     next
 }
 
+pub(crate) fn flatten_asterdoc_modules<'a>(modules: &'a [serde_yaml::Value]) -> Vec<&'a serde_yaml::Value> {
+    let mut flat = Vec::with_capacity(modules.len());
+    for module in modules {
+        flat.push(module);
+        if yaml_kind(module) == "step" {
+            if let Some(blocks) = module.get("blocks").and_then(|v| v.as_sequence()) {
+                for item in blocks {
+                    if item.is_mapping() {
+                        flat.push(item);
+                    }
+                }
+            }
+        }
+    }
+    flat
+}
+
+fn yaml_num_f64(value: Option<&serde_yaml::Value>) -> Option<f64> {
+    let v = value?;
+    v.as_f64()
+        .or_else(|| v.as_i64().map(|n| n as f64))
+        .or_else(|| v.as_u64().map(|n| n as f64))
+        .filter(|n| n.is_finite())
+}
+
+fn yaml_quantity_parts(value: Option<&serde_yaml::Value>) -> Option<(f64, String, String, f64)> {
+    asterdoc_quantity_parts(value?).ok()
+}
+
+fn timer_quantity_seconds(value: Option<&serde_yaml::Value>) -> i64 {
+    if let Some((num, _, dim, factor)) = yaml_quantity_parts(value) {
+        if dim == "time" && num > 0.0 {
+            return (num * factor + 0.5) as i64;
+        }
+    }
+    0
+}
+
+/// compute_asterdoc_budget mirrors Go's ComputeBudgetSummary for structural counts and timer budgets.
+pub(crate) fn compute_asterdoc_budget(modules: &[serde_yaml::Value]) -> Value {
+    use std::collections::HashSet;
+    let flat = flatten_asterdoc_modules(modules);
+    let mut groups_seen: HashSet<String> = HashSet::new();
+    let mut steps: i64 = 0;
+    let mut executable_steps: i64 = 0;
+    let mut wells: i64 = 0;
+    let mut hands_on_sec: i64 = 0;
+    let mut total_span_sec: i64 = 0;
+    let mut has_open_phase = false;
+
+    for m in &flat {
+        match yaml_kind(m).as_str() {
+            "group" => {
+                let id = yaml_id(m);
+                if !id.is_empty() {
+                    groups_seen.insert(id);
+                }
+            }
+            "group_table" => {
+                if let Some(rows) = m.get("rows").and_then(|v| v.as_sequence()) {
+                    for row in rows {
+                        let gid = ytext(row, "id");
+                        if !gid.is_empty() {
+                            groups_seen.insert(gid);
+                        }
+                    }
+                }
+            }
+            "plate" => {
+                let mut plate_wells: HashSet<String> = HashSet::new();
+                if let Some(groups) = m.get("groups").and_then(|v| v.as_mapping()) {
+                    for (k, v) in groups {
+                        if let Some(gname) = k.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                            groups_seen.insert(gname.to_owned());
+                        }
+                        if let Some(seq) = v.as_sequence() {
+                            for item in seq {
+                                if let Some(w) = item.as_str().map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()) {
+                                    plate_wells.insert(w);
+                                }
+                            }
+                        }
+                    }
+                }
+                wells += plate_wells.len() as i64;
+            }
+            "step" => {
+                steps += 1;
+                let exec = ytext(m, "execution");
+                if exec.is_empty() || exec == "executable" {
+                    executable_steps += 1;
+                }
+            }
+            "timer" => match ytext(m, "mode").as_str() {
+                "countdown" => {
+                    let s = timer_quantity_seconds(m.get("duration"));
+                    hands_on_sec += s;
+                    total_span_sec += s;
+                }
+                "stopwatch" => {
+                    let s = timer_quantity_seconds(m.get("duration"));
+                    hands_on_sec += s;
+                    total_span_sec += s;
+                    if s == 0 {
+                        has_open_phase = true;
+                    }
+                }
+                "cycle" => {
+                    let rounds = yaml_num_f64(m.get("rounds"))
+                        .filter(|r| *r >= 1.0)
+                        .map(|r| r as i64)
+                        .unwrap_or(1);
+                    let mut per_round = 0i64;
+                    if let Some(phases) = m.get("phases").and_then(|v| v.as_sequence()) {
+                        for ph in phases {
+                            if ytext(ph, "mode") == "open" {
+                                has_open_phase = true;
+                            }
+                            per_round += timer_quantity_seconds(ph.get("duration"));
+                        }
+                    }
+                    let tot = per_round * rounds;
+                    hands_on_sec += tot;
+                    total_span_sec += tot;
+                }
+                "window" => {
+                    total_span_sec += timer_quantity_seconds(m.get("offset"));
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    json!({
+        "steps": steps,
+        "executable_steps": executable_steps,
+        "groups": groups_seen.len() as i64,
+        "wells": wells,
+        "hands_on_sec": hands_on_sec,
+        "total_span_sec": total_span_sec,
+        "has_open_phase": has_open_phase
+    })
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CalcSampleInput {
+    pub sample_id: String,
+    pub value: f64,
+    pub unit: String,
+    pub endpoint: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CalcActualContext {
+    pub params: std::collections::BTreeMap<String, f64>,
+    pub param_units: std::collections::BTreeMap<String, String>,
+    pub samples: Vec<CalcSampleInput>,
+}
+
+fn round4(v: f64) -> f64 {
+    (v * 10_000.0).round() / 10_000.0
+}
+
+fn fmt_calc_num(v: f64) -> String {
+    let r = round4(v);
+    if (r - r.round()).abs() < 1e-9 {
+        format!("{}", r.round() as i64)
+    } else {
+        let s = format!("{:.4}", r);
+        s.trim_end_matches('0').trim_end_matches('.').to_owned()
+    }
+}
+
+fn doc_planned_param_float(flat: &[&serde_yaml::Value], key: &str) -> Option<(f64, String)> {
+    if key.trim().is_empty() {
+        return None;
+    }
+    for m in flat {
+        if yaml_kind(m) != "param_table" {
+            continue;
+        }
+        if let Some(rows) = m.get("rows").and_then(|v| v.as_sequence()) {
+            for row in rows {
+                let rk = ytext(row, "key");
+                let rl = ytext(row, "label");
+                if rk.eq_ignore_ascii_case(key) || rl.eq_ignore_ascii_case(key) {
+                    if let Some(n) = yaml_num_f64(row.get("value")) {
+                        return Some((n, ytext(row, "unit")));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn eval_formula_with_vars(expr: &str, vars: &std::collections::BTreeMap<String, f64>) -> Result<f64, CliError> {
+    validate_formula_expr(expr).map_err(CliError::input)?;
+    #[derive(Clone, Debug)]
+    enum Tok {
+        Num(f64),
+        Ident(String),
+        Plus,
+        Minus,
+        Star,
+        Slash,
+        LParen,
+        RParen,
+    }
+    let bytes = expr.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        match b {
+            b'+' => { tokens.push(Tok::Plus); i += 1; }
+            b'-' => { tokens.push(Tok::Minus); i += 1; }
+            b'*' => { tokens.push(Tok::Star); i += 1; }
+            b'/' => { tokens.push(Tok::Slash); i += 1; }
+            b'(' => { tokens.push(Tok::LParen); i += 1; }
+            b')' => { tokens.push(Tok::RParen); i += 1; }
+            b'0'..=b'9' | b'.' => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                    i += 1;
+                }
+                let val = expr[start..i]
+                    .parse::<f64>()
+                    .map_err(|_| CliError::input(format!("invalid number in formula: {}", &expr[start..i])))?;
+                tokens.push(Tok::Num(val));
+            }
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                tokens.push(Tok::Ident(expr[start..i].to_owned()));
+            }
+            _ => return Err(CliError::input(format!("unexpected character '{}' in formula", b as char))),
+        }
+    }
+    fn parse_expr(tokens: &[Tok], pos: &mut usize, vars: &std::collections::BTreeMap<String, f64>) -> Result<f64, CliError> {
+        let mut left = parse_term(tokens, pos, vars)?;
+        while matches!(tokens.get(*pos), Some(Tok::Plus | Tok::Minus)) {
+            let plus = matches!(tokens.get(*pos), Some(Tok::Plus));
+            *pos += 1;
+            let right = parse_term(tokens, pos, vars)?;
+            left = if plus { left + right } else { left - right };
+        }
+        Ok(left)
+    }
+    fn parse_term(tokens: &[Tok], pos: &mut usize, vars: &std::collections::BTreeMap<String, f64>) -> Result<f64, CliError> {
+        let mut left = parse_factor(tokens, pos, vars)?;
+        while matches!(tokens.get(*pos), Some(Tok::Star | Tok::Slash)) {
+            let mul = matches!(tokens.get(*pos), Some(Tok::Star));
+            *pos += 1;
+            let right = parse_factor(tokens, pos, vars)?;
+            if mul {
+                left *= right;
+            } else {
+                if right == 0.0 {
+                    return Err(CliError::input("division by zero in formula"));
+                }
+                left /= right;
+            }
+        }
+        Ok(left)
+    }
+    fn parse_factor(tokens: &[Tok], pos: &mut usize, vars: &std::collections::BTreeMap<String, f64>) -> Result<f64, CliError> {
+        match tokens.get(*pos).cloned() {
+            Some(Tok::Plus) => {
+                *pos += 1;
+                parse_factor(tokens, pos, vars)
+            }
+            Some(Tok::Minus) => {
+                *pos += 1;
+                Ok(-parse_factor(tokens, pos, vars)?)
+            }
+            Some(Tok::Num(v)) => {
+                *pos += 1;
+                Ok(v)
+            }
+            Some(Tok::Ident(name)) => {
+                *pos += 1;
+                vars.get(&name)
+                    .copied()
+                    .ok_or_else(|| CliError::input(format!("missing formula variable {name}")))
+            }
+            Some(Tok::LParen) => {
+                *pos += 1;
+                let v = parse_expr(tokens, pos, vars)?;
+                if !matches!(tokens.get(*pos), Some(Tok::RParen)) {
+                    return Err(CliError::input("unclosed '(' in formula"));
+                }
+                *pos += 1;
+                Ok(v)
+            }
+            _ => Err(CliError::input("unexpected token in formula")),
+        }
+    }
+    let mut pos = 0usize;
+    let out = parse_expr(&tokens, &mut pos, vars)?;
+    if !out.is_finite() {
+        return Err(CliError::input("formula result is not finite"));
+    }
+    Ok(out)
+}
+
+/// eval_asterdoc_calculator_with_actuals evaluates one calculator@1 module deterministically
+/// with optional Run-stage measured parameters and upstream sample concentrations.
+pub(crate) fn eval_asterdoc_calculator_with_actuals(
+    modules: &[serde_yaml::Value],
+    calc_id: &str,
+    actuals: Option<&CalcActualContext>,
+) -> Result<Value, CliError> {
+    use std::collections::BTreeMap;
+    let flat = flatten_asterdoc_modules(modules);
+    let calc = flat
+        .iter()
+        .copied()
+        .find(|m| yaml_kind(m) == "calculator" && yaml_id(m) == calc_id)
+        .ok_or_else(|| CliError::missing(format!("calculator {calc_id} not found")))?;
+    let mode = ytext(calc, "mode");
+    let mut rows: Vec<Value> = Vec::new();
+    let mut used_actuals: Vec<String> = Vec::new();
+    let summary: String;
+
+    match mode.as_str() {
+        "dilution" => {
+            let (mut sv, mut su, mut sdim, mut sfac) = asterdoc_quantity_parts(
+                calc.get("stock").ok_or_else(|| CliError::input("calculator dilution needs stock"))?,
+            )?;
+            let stock_ref = ytext(calc, "stock_ref");
+            if !stock_ref.is_empty() {
+                let key = stock_ref
+                    .strip_prefix("@actual.")
+                    .or_else(|| stock_ref.strip_prefix("@param."))
+                    .unwrap_or(&stock_ref);
+                if let Some(ctx) = actuals {
+                    if let Some(&av) = ctx.params.get(key).filter(|v| **v > 0.0) {
+                        sv = av;
+                        if let Some(au) = ctx.param_units.get(key).filter(|u| !u.trim().is_empty()) {
+                            let (dim, fac) = asterdoc_unit(au)
+                                .ok_or_else(|| CliError::input(format!("unknown unit {au}")))?;
+                            su = au.clone();
+                            sdim = dim;
+                            sfac = fac;
+                        }
+                        used_actuals.push(format!("{key}={} {su}", fmt_calc_num(sv)));
+                    }
+                } else if let Some((pv, pu)) = doc_planned_param_float(&flat, key).filter(|(v, _)| *v > 0.0) {
+                    sv = pv;
+                    if !pu.is_empty() {
+                        if let Some((dim, fac)) = asterdoc_unit(&pu) {
+                            su = pu;
+                            sdim = dim;
+                            sfac = fac;
+                        }
+                    }
+                }
+            }
+            let (tv, tu, tdim, tfac) = asterdoc_quantity_parts(
+                calc.get("target").ok_or_else(|| CliError::input("calculator dilution needs target"))?,
+            )?;
+            let (fv, fu, fdim, _) = asterdoc_quantity_parts(
+                calc.get("final_volume").ok_or_else(|| CliError::input("calculator dilution needs final_volume"))?,
+            )?;
+            if sdim != tdim || fdim != "volume" {
+                return Err(CliError::input("dilution quantities have incompatible units"));
+            }
+            if sv <= 0.0 || tv <= 0.0 || fv <= 0.0 {
+                return Err(CliError::input("dilution quantities must be positive"));
+            }
+            if tv * tfac > sv * sfac {
+                return Err(CliError::input("target concentration exceeds stock concentration"));
+            }
+            let stock_vol = (tv * tfac / (sv * sfac)) * fv;
+            let diluent_vol = fv - stock_vol;
+            summary = format!(
+                "{} {fu} 母液 + {} {fu} 稀释液",
+                fmt_calc_num(stock_vol),
+                fmt_calc_num(diluent_vol)
+            );
+            rows.push(json!({"label": "母液体积 (V1)", "amount": round4(stock_vol), "unit": fu, "note": format!("从 {} {su} 稀释至 {} {tu}", fmt_calc_num(sv), fmt_calc_num(tv))}));
+            rows.push(json!({"label": "稀释液体积", "amount": round4(diluent_vol), "unit": fu, "note": "补足至目标终体积"}));
+            rows.push(json!({"label": "目标总体积 (V2)", "amount": round4(fv), "unit": fu, "note": "C1·V1 = C2·V2"}));
+        }
+        "group_mastermix" => {
+            let (vpu_val, vpu_unit, vpu_dim, vpu_fac) = asterdoc_quantity_parts(
+                calc.get("volume_per_unit").ok_or_else(|| CliError::input("group_mastermix needs volume_per_unit"))?,
+            )?;
+            if vpu_dim != "volume" || vpu_val <= 0.0 {
+                return Err(CliError::input("volume_per_unit must use positive volume unit"));
+            }
+            let excess = yaml_num_f64(calc.get("excess_ratio")).unwrap_or(0.0).max(0.0);
+            let mut group_counts: BTreeMap<String, i64> = BTreeMap::new();
+            let plate_ref = ytext(calc, "plate_ref");
+            if !plate_ref.is_empty() {
+                if let Some(plate) = flat.iter().copied().find(|m| yaml_kind(m) == "plate" && yaml_id(m) == plate_ref) {
+                    if let Some(groups) = plate.get("groups").and_then(|v| v.as_mapping()) {
+                        for (gk, gv) in groups {
+                            if let (Some(gname), Some(seq)) = (gk.as_str(), gv.as_sequence()) {
+                                if !seq.is_empty() {
+                                    group_counts.insert(gname.to_owned(), seq.len() as i64);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if group_counts.is_empty() {
+                let sc = yaml_num_f64(calc.get("sample_count")).filter(|v| *v >= 1.0).unwrap_or(1.0) as i64;
+                group_counts.insert("总体系".to_owned(), sc);
+            }
+            let mut total_units = 0i64;
+            for (g, count) in &group_counts {
+                total_units += *count;
+                let gvol = (*count as f64) * vpu_val * (1.0 + excess);
+                rows.push(json!({
+                    "label": format!("{g} 体系 ({count} 孔/份)"),
+                    "amount": round4(gvol),
+                    "unit": vpu_unit,
+                    "note": format!("含 {}% 余量", (excess * 100.0).round() as i64)
+                }));
+            }
+            let total_vol = (total_units as f64) * vpu_val * (1.0 + excess);
+            if let Some(comps) = calc.get("components").and_then(|v| v.as_sequence()) {
+                for comp in comps {
+                    let cname = ytext(comp, "name");
+                    if cname.is_empty() {
+                        continue;
+                    }
+                    if let Some(ratio) = yaml_num_f64(comp.get("ratio")).filter(|r| *r > 0.0) {
+                        rows.push(json!({"label": cname, "amount": round4(total_vol * ratio), "unit": vpu_unit, "note": format!("配比系数 {}", fmt_calc_num(ratio))}));
+                    } else if let Some(target_pct) = yaml_num_f64(comp.get("target_percent")) {
+                        let stock_pct = yaml_num_f64(comp.get("stock_percent")).unwrap_or(0.0);
+                        if stock_pct > 0.0 {
+                            rows.push(json!({"label": cname, "amount": round4(total_vol * (target_pct / stock_pct)), "unit": vpu_unit, "note": format!("{}% → {}%", fmt_calc_num(stock_pct), fmt_calc_num(target_pct))}));
+                        } else {
+                            let mass_mg = (total_vol * vpu_fac * 1000.0) * (target_pct * 10.0);
+                            rows.push(json!({"label": cname, "amount": round4(mass_mg), "unit": "mg", "note": format!("终浓度 {}% w/v", fmt_calc_num(target_pct))}));
+                        }
+                    } else if let Some((qv, qu, _, _)) = yaml_quantity_parts(comp.get("volume_per_unit")).filter(|p| p.0 > 0.0) {
+                        rows.push(json!({"label": cname, "amount": round4(qv * (total_units as f64) * (1.0 + excess)), "unit": qu, "note": format!("单份 {} {qu}", fmt_calc_num(qv))}));
+                    } else {
+                        let note = ytext(comp, "note");
+                        rows.push(json!({"label": cname, "amount": round4(total_vol), "unit": vpu_unit, "note": if note.is_empty() { "按分组浓度配置".to_owned() } else { note }}));
+                    }
+                }
+            }
+            summary = format!(
+                "共 {total_units} 份 · 含 {}% 余量 · 总配液 {} {vpu_unit}",
+                (excess * 100.0).round() as i64,
+                fmt_calc_num(total_vol)
+            );
+        }
+        "serial_dilution" => {
+            let df = yaml_num_f64(calc.get("dilution_factor")).filter(|v| *v > 1.0)
+                .ok_or_else(|| CliError::input("serial_dilution needs dilution_factor > 1"))?;
+            let steps = yaml_num_f64(calc.get("steps_count")).filter(|v| *v >= 1.0)
+                .ok_or_else(|| CliError::input("serial_dilution needs steps_count >= 1"))? as i64;
+            let (t_val, t_unit) = yaml_quantity_parts(calc.get("volume_per_unit"))
+                .filter(|p| p.0 > 0.0)
+                .map(|p| (p.0, p.1))
+                .unwrap_or((100.0, "uL".to_owned()));
+            let d_val = t_val * (df - 1.0);
+            let mut factor = 1.0;
+            for step in 1..=steps {
+                factor *= df;
+                rows.push(json!({
+                    "label": format!("第 {step} 级 (1:{})", fmt_calc_num(factor)),
+                    "amount": round4(t_val),
+                    "unit": t_unit,
+                    "note": format!("吸取 {} {t_unit} + 稀释液 {} {t_unit}", fmt_calc_num(t_val), fmt_calc_num(d_val))
+                }));
+            }
+            summary = format!("{steps} 级 {} 倍梯度稀释（总稀释至 1:{}）", fmt_calc_num(df), fmt_calc_num(factor));
+        }
+        "sample_normalize" => {
+            let rxn = yaml_quantity_parts(calc.get("volume_per_unit"))
+                .filter(|p| p.0 > 0.0)
+                .or_else(|| yaml_quantity_parts(calc.get("final_volume")).filter(|p| p.0 > 0.0));
+            let target_mass_ng = if let Some((mv, _, mdim, mfac)) = yaml_quantity_parts(calc.get("target_mass")).filter(|p| p.0 > 0.0) {
+                if mdim != "mass" {
+                    return Err(CliError::input("sample_normalize target_mass must have mass unit"));
+                }
+                mv * mfac * 1e9
+            } else if let Some(ng) = yaml_num_f64(calc.get("target_mass_ng")).filter(|v| *v > 0.0) {
+                ng
+            } else {
+                500.0
+            };
+
+            let mut samples: Vec<CalcSampleInput> = Vec::new();
+            let mut from_actual = false;
+            let wanted_endpoint = ytext(calc, "upstream_endpoint");
+            if let Some(ctx) = actuals {
+                for s in &ctx.samples {
+                    if !wanted_endpoint.is_empty() && !s.endpoint.is_empty() && !s.endpoint.eq_ignore_ascii_case(&wanted_endpoint) {
+                        continue;
+                    }
+                    if s.value > 0.0 {
+                        samples.push(s.clone());
+                    }
+                }
+                if !samples.is_empty() {
+                    from_actual = true;
+                }
+            }
+            if samples.is_empty() {
+                if let Some(seq) = calc.get("samples").and_then(|v| v.as_sequence()) {
+                    for rm in seq {
+                        let sid = {
+                            let s = ytext(rm, "sample_id");
+                            if s.is_empty() { ytext(rm, "name") } else { s }
+                        };
+                        if sid.is_empty() {
+                            continue;
+                        }
+                        let mut val_opt = yaml_num_f64(rm.get("concentration"));
+                        let mut unit = ytext(rm, "unit");
+                        if val_opt.is_none() {
+                            if let Some((qv, qu, _, _)) = yaml_quantity_parts(rm.get("concentration")) {
+                                val_opt = Some(qv);
+                                unit = qu;
+                            }
+                        }
+                        if let Some(v) = val_opt.filter(|v| *v > 0.0) {
+                            samples.push(CalcSampleInput {
+                                sample_id: sid,
+                                value: v,
+                                unit: if unit.is_empty() { "ng/uL".to_owned() } else { unit },
+                                endpoint: String::new(),
+                            });
+                        }
+                    }
+                }
+            }
+            if !samples.is_empty() {
+                if let Some((rv, _, rdim, rfac)) = rxn {
+                    if rdim != "volume" {
+                        return Err(CliError::input("sample_normalize volume unit is invalid"));
+                    }
+                    let rxn_ul = rv * rfac * 1e6;
+                    let norm_unit = "uL";
+                    let mut insufficient_count = 0i64;
+                    for s in &samples {
+                        let eff_unit = if s.unit.trim().is_empty() { "ng/uL" } else { s.unit.as_str() };
+                        let conc_ng_per_ul = asterdoc_unit(eff_unit)
+                            .filter(|(dim, _)| dim == "mass_concentration")
+                            .map(|(_, fac)| s.value * fac * 1000.0);
+                        match conc_ng_per_ul {
+                            Some(conc) if conc > 0.0 => {
+                                let req_ul = target_mass_ng / conc;
+                                let (sample_ul, note) = if req_ul > rxn_ul {
+                                    insufficient_count += 1;
+                                    (
+                                        rxn_ul,
+                                        format!("实测 {} {eff_unit} · 需 {} {norm_unit}（浓度偏低 · 超反应体积上限 insufficient）", fmt_calc_num(s.value), fmt_calc_num(req_ul)),
+                                    )
+                                } else {
+                                    let diluent_ul = rxn_ul - req_ul;
+                                    (
+                                        req_ul,
+                                        format!("实测 {} {eff_unit} · 补稀释液 {} {norm_unit}", fmt_calc_num(s.value), fmt_calc_num(diluent_ul)),
+                                    )
+                                };
+                                rows.push(json!({"label": format!("{} 加样量", s.sample_id), "amount": round4(sample_ul), "unit": norm_unit, "note": note}));
+                                if from_actual {
+                                    used_actuals.push(format!("{}={} {eff_unit}", s.sample_id, fmt_calc_num(s.value)));
+                                }
+                            }
+                            _ => {
+                                rows.push(json!({"label": s.sample_id, "amount": 0.0, "unit": norm_unit, "note": format!("实测 {} {eff_unit} 单位暂不支持换算", fmt_calc_num(s.value))}));
+                            }
+                        }
+                    }
+                    summary = format!(
+                        "{} 个样本归一化至 {} ng / {} {norm_unit}（偏低 {insufficient_count} 项）",
+                        samples.len(),
+                        fmt_calc_num(target_mass_ng),
+                        fmt_calc_num(rxn_ul)
+                    );
+                } else {
+                    summary = format!("归一化 {} 个样本至目标浓度", samples.len());
+                }
+            } else {
+                let count = yaml_num_f64(calc.get("sample_count")).filter(|v| *v >= 1.0).unwrap_or(1.0) as i64;
+                let excess = yaml_num_f64(calc.get("excess_ratio")).unwrap_or(0.0).max(0.0);
+                if let Some((rv, ru, _, _)) = rxn {
+                    let tot = (count as f64) * rv * (1.0 + excess);
+                    summary = format!("{count} 个样本 · 单样 {} {ru} · 总配液 {} {ru}", fmt_calc_num(rv), fmt_calc_num(tot));
+                    rows.push(json!({"label": "单样反应体积", "amount": round4(rv), "unit": ru, "note": format!("样本数 {count}")}));
+                    rows.push(json!({"label": "含余量总体系", "amount": round4(tot), "unit": ru, "note": format!("含 {}% 余量", (excess * 100.0).round() as i64)}));
+                } else {
+                    summary = format!("归一化 {count} 个样本至目标浓度");
+                }
+            }
+        }
+        "formula" => {
+            let expr = ytext(calc, "formula");
+            validate_formula_expr(&expr).map_err(CliError::input)?;
+            let mut vars: BTreeMap<String, f64> = BTreeMap::new();
+            if let Some(inputs) = calc.get("inputs").and_then(|v| v.as_mapping()) {
+                for (k, v) in inputs {
+                    let Some(kname) = k.as_str().map(str::to_owned) else { continue };
+                    if let Some(raw_ref) = v.as_str().map(str::trim) {
+                        if raw_ref.starts_with("@actual.") || raw_ref.starts_with("@param.") {
+                            let ref_key = raw_ref
+                                .strip_prefix("@actual.")
+                                .or_else(|| raw_ref.strip_prefix("@param."))
+                                .unwrap_or(raw_ref);
+                            if let Some(ctx) = actuals {
+                                if let Some(&av) = ctx.params.get(ref_key) {
+                                    vars.insert(kname.clone(), av);
+                                    used_actuals.push(format!("{kname}={}", fmt_calc_num(av)));
+                                    continue;
+                                }
+                            }
+                            if let Some((pv, _)) = doc_planned_param_float(&flat, ref_key) {
+                                vars.insert(kname, pv);
+                            }
+                        }
+                    } else if let Some(num) = yaml_num_f64(Some(v)) {
+                        vars.insert(kname, num);
+                    } else if let Some((qv, _, _, _)) = yaml_quantity_parts(Some(v)) {
+                        vars.insert(kname, qv);
+                    }
+                }
+            }
+            if let Some(ctx) = actuals {
+                let bytes = expr.as_bytes();
+                let mut i = 0usize;
+                while i < bytes.len() {
+                    if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+                        let start = i;
+                        while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                            i += 1;
+                        }
+                        let ident = &expr[start..i];
+                        if !vars.contains_key(ident) {
+                            if let Some(&av) = ctx.params.get(ident) {
+                                vars.insert(ident.to_owned(), av);
+                                used_actuals.push(format!("{ident}={}", fmt_calc_num(av)));
+                            }
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            used_actuals.sort();
+            if vars.is_empty() {
+                summary = format!("公式：{expr}（Run 时代入实测值）");
+            } else {
+                let val = eval_formula_with_vars(&expr, &vars)?;
+                summary = format!("{expr} = {}", fmt_calc_num(val));
+                rows.push(json!({"label": "计算结果", "amount": round4(val), "unit": "", "note": expr}));
+            }
+        }
+        other => return Err(CliError::input(format!("unsupported calculator mode {other}"))),
+    }
+
+    Ok(json!({
+        "module_id": calc_id,
+        "mode": mode,
+        "summary": summary,
+        "rows": rows,
+        "used_actuals": used_actuals
+    }))
+}
+

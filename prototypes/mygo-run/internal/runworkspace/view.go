@@ -55,6 +55,15 @@ type Callbacks struct {
 	// RequestBatchLink opens the host file picker and links the chosen files
 	// across capture slots for the task.
 	RequestBatchLink func(taskKey string)
+	// ResolveAssetPath resolves one LinkedAsset's RootID + RelativePath to a local file path for thumbnail preview.
+	ResolveAssetPath func(asset LinkedAsset) string
+	// RequestStepAssetLink opens single-step / spot file picker when an attachment is not a multi-FOV plate grid.
+	RequestStepAssetLink func(taskKey, wellID string)
+	// OpenAsset opens an asset externally through the host OS launcher.
+	OpenAsset func(taskKey string, asset LinkedAsset)
+	// AsyncDecode enables non-blocking background bitmap decode for thumbnails when a UI window is running.
+	AsyncDecode       bool
+	OnAsyncInvalidate func()
 	// HistoryInputs supplies the stored snapshot plus already-linked assets
 	// for the shared record projection. It is a cheap getter the bench may
 	// call every render; the projection is memoized by Run revision plus
@@ -1684,18 +1693,127 @@ func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *
 	v.RunID = s.VM.RunID
 	v.StepID = task.StepID
 	v.HideStepHeader = true
+	v.AsyncDecode = s.Callbacks.AsyncDecode
+	v.OnAsyncInvalidate = s.Callbacks.OnAsyncInvalidate
 	v.ReadOnly = task.Status == TaskStatusCompleted || task.Status == TaskStatusSkipped
 	v.Allowed = map[string]bool{
 		asterdoc.PermRunReadout: s.Callbacks.ExecuteCommand != nil,
 	}
 
 	actualParams := map[string]string{}
+	for k, val := range s.VM.ActualParamNumbers {
+		disp := strconv.FormatFloat(val, 'g', -1, 64)
+		if u := s.VM.ActualParamUnits[k]; u != "" {
+			disp += " " + u
+		}
+		actualParams[k] = disp
+	}
 	if task.Actual != nil {
 		for k, val := range task.Actual.Parameters {
 			actualParams[k] = val
 		}
 	}
 	v.ActualParams = actualParams
+
+	if len(s.VM.SampleStatuses) > 0 {
+		if v.SampleStatuses == nil {
+			v.SampleStatuses = map[string]string{}
+		}
+		for sid, st := range s.VM.SampleStatuses {
+			v.SampleStatuses[sid] = st
+		}
+	}
+
+	// Build CalcActualContext from upstream Run parameters and live non-excluded sample measurements
+	calcCtx := &asterdoc.CalcActualContext{
+		Params:     map[string]float64{},
+		ParamUnits: map[string]string{},
+	}
+	for k, n := range s.VM.ActualParamNumbers {
+		calcCtx.Params[k] = n
+	}
+	for k, u := range s.VM.ActualParamUnits {
+		calcCtx.ParamUnits[k] = u
+	}
+	if len(s.VM.SampleMeasurements) > 0 {
+		sids := make([]string, 0, len(s.VM.SampleMeasurements))
+		for sid := range s.VM.SampleMeasurements {
+			st := s.VM.SampleStatuses[sid]
+			if st == "QC剔除" || st == "删失" {
+				continue
+			}
+			sids = append(sids, sid)
+		}
+		sort.Strings(sids)
+		for _, sid := range sids {
+			eps := s.VM.SampleMeasurements[sid]
+			epKeys := make([]string, 0, len(eps))
+			for ep := range eps {
+				epKeys = append(epKeys, ep)
+			}
+			sort.Strings(epKeys)
+			for _, ep := range epKeys {
+				mv := eps[ep]
+				if num, err := strconv.ParseFloat(strings.TrimSpace(mv.Value), 64); err == nil {
+					calcCtx.Samples = append(calcCtx.Samples, asterdoc.CalcSampleInput{
+						SampleID: sid,
+						Value:    num,
+						Unit:     mv.Unit,
+						Endpoint: mv.Field,
+					})
+				}
+			}
+		}
+	}
+	v.CalcActuals = calcCtx
+
+	// Hydrate persisted Core data_table readouts into TableCells (non-destructive to unsubmitted edits)
+	if task.Actual != nil && len(task.Actual.Tables) > 0 {
+		for _, raw := range blocks {
+			bm, _ := raw.(map[string]any)
+			if textValueFromAny(bm["kind"]) != "data_table" {
+				continue
+			}
+			bid := textValueFromAny(bm["id"])
+			schemaKey := textValueFromAny(bm["schema_id"])
+			if schemaKey == "" {
+				schemaKey = "data_table." + strings.ToLower(strings.ReplaceAll(bid, "_", "-")) + ".v1"
+			}
+			tbl, ok := task.Actual.Tables[schemaKey]
+			if !ok {
+				tbl, ok = task.Actual.Tables[schemaKey+".table"]
+			}
+			if !ok && len(task.Actual.Tables) > 0 {
+				// Also try hyphen-normalized schema id from widget_tables
+				for k, candidate := range task.Actual.Tables {
+					if strings.Contains(k, strings.TrimPrefix(strings.ToLower(bid), "dt-")) {
+						tbl, ok = candidate, true
+						break
+					}
+				}
+			}
+			if !ok {
+				continue
+			}
+			if v.TableCells == nil {
+				v.TableCells = map[string]map[string]string{}
+			}
+			if v.TableCells[bid] == nil {
+				v.TableCells[bid] = map[string]string{}
+			}
+			for rIdx, row := range tbl.Rows {
+				for cIdx, ckey := range tbl.Columns {
+					if cIdx >= len(row) || row[cIdx] == nil {
+						continue
+					}
+					ck := fmt.Sprintf("dt:%s:%d:%s", bid, rIdx, ckey)
+					if _, exists := v.TableCells[bid][ck]; !exists {
+						v.TableCells[bid][ck] = fmt.Sprint(row[cIdx])
+					}
+				}
+			}
+		}
+	}
 
 	checked := map[string]bool{}
 	skipped := map[string]string{}
@@ -1752,15 +1870,23 @@ func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *
 		rawAssets := s.Callbacks.TaskAssets(task.TaskKey)
 		thumbs := make([]asterdoc.AssetThumb, 0, len(rawAssets))
 		grouped := map[string][]asterdoc.AssetThumb{}
+		assetByID := map[string]LinkedAsset{}
 		for _, a := range rawAssets {
+			assetByID[a.AssetID] = a
 			lbl := a.RelativePath
 			if lbl == "" {
 				lbl = a.AssetID
 			}
+			filePath := a.RelativePath
+			if s.Callbacks.ResolveAssetPath != nil {
+				if resolved := s.Callbacks.ResolveAssetPath(a); resolved != "" {
+					filePath = resolved
+				}
+			}
 			th := asterdoc.AssetThumb{
 				AssetID:  a.AssetID,
 				Label:    lbl,
-				FilePath: a.RelativePath,
+				FilePath: filePath,
 				WellID:   a.WellID,
 				FovIndex: int(a.FOVIndex),
 			}
@@ -1771,8 +1897,16 @@ func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *
 		}
 		grouped[task.StepID] = thumbs
 		v.LinkedAssets = grouped
+		if s.Callbacks.OpenAsset != nil {
+			v.OnOpenExternalAsset = func(th asterdoc.AssetThumb) {
+				if la, ok := assetByID[th.AssetID]; ok {
+					s.Callbacks.OpenAsset(task.TaskKey, la)
+				}
+			}
+		}
 	} else {
 		v.LinkedAssets = nil
+		v.OnOpenExternalAsset = nil
 	}
 
 	v.OnToggleCheck = func(stepID, checkID string, on bool) {
@@ -1819,6 +1953,18 @@ func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *
 		}
 		task.Actual.Parameters[stepID+":"+blockID+":"+key] = disp
 		task.Actual.Parameters[key] = disp
+		if n, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+			if s.VM.ActualParamNumbers == nil {
+				s.VM.ActualParamNumbers = map[string]float64{}
+			}
+			if s.VM.ActualParamUnits == nil {
+				s.VM.ActualParamUnits = map[string]string{}
+			}
+			s.VM.ActualParamNumbers[key] = n
+			if unit != "" {
+				s.VM.ActualParamUnits[key] = unit
+			}
+		}
 		if s.Callbacks.AppendEvent != nil {
 			valBytes, _ := json.Marshal(value)
 			if n, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
@@ -1889,39 +2035,35 @@ func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *
 			s.runTimerAction(task, *target, phases, action)
 		}
 	}
-	v.OnSubmitTableReadout = func(stepID, blockID string, payload map[string]any) {
-		if s.Callbacks.ExecuteCommand == nil || payload == nil {
-			return
+	v.OnSubmitTableReadout = func(stepID, blockID string, payload map[string]any) error {
+		if s.Callbacks.ExecuteCommand == nil {
+			return fmt.Errorf("未连接 Core 执行通道")
+		}
+		if payload == nil {
+			return fmt.Errorf("表格数据为空")
 		}
 		schemaID, _ := payload["schema_id"].(string)
-		rawRows, _ := payload["rows"].([]map[string]any)
-		if len(rawRows) == 0 {
-			return
+		schemaDefJSON, _ := payload["schema_def_json"].(string)
+		cols, _ := payload["columns"].([]string)
+		matrix, _ := payload["rows"].([][]any)
+		if len(cols) == 0 || len(matrix) == 0 {
+			return fmt.Errorf("表格不能为空")
 		}
-		colSet := map[string]bool{}
-		var cols []string
-		for _, r := range rawRows {
-			for k := range r {
-				if !colSet[k] {
-					colSet[k] = true
-					cols = append(cols, k)
-				}
-			}
-		}
-		sort.Strings(cols)
-		matrix := make([][]any, 0, len(rawRows))
-		for _, r := range rawRows {
-			rowVals := make([]any, 0, len(cols))
-			for _, col := range cols {
-				rowVals = append(rowVals, r[col])
-			}
-			matrix = append(matrix, rowVals)
-		}
-		cmd, err := buildTableCommand(s.VM.RunID, task.StepPath, task.ProtocolVersionID, task.AssayID, task.Timepoint, schemaID, "", "", cols, matrix, newIdempotencyKey())
+		stepPath, assayID, pvID, tp := eventScope(task)
+		cmd, err := buildTableCommand(s.VM.RunID, stepPath, pvID, assayID, tp, schemaID, schemaDefJSON, "", cols, matrix, newIdempotencyKey())
 		if err != nil {
-			return
+			return err
 		}
-		_, _ = s.Callbacks.ExecuteCommand(cmd)
+		if _, err := s.Callbacks.ExecuteCommand(cmd); err != nil {
+			return fmt.Errorf("%s", channelError(err))
+		}
+		if task.Actual != nil {
+			if task.Actual.Tables == nil {
+				task.Actual.Tables = map[string]PersistedTable{}
+			}
+			task.Actual.Tables[schemaID] = PersistedTable{SchemaID: schemaID, Columns: cols, Rows: matrix}
+		}
+		return nil
 	}
 	v.OnExcludeSample = func(sampleID, status string) {
 		if s.Callbacks.ExecuteCommand == nil {
@@ -1934,6 +2076,23 @@ func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *
 		_, _ = s.Callbacks.ExecuteCommand(cmd)
 	}
 	v.OnLinkAsset = func(stepID, blockID, wellID string) {
+		scope := ""
+		for _, raw := range blocks {
+			if bm, _ := raw.(map[string]any); bm != nil && textValueFromAny(bm["id"]) == blockID {
+				scope = textValueFromAny(bm["scope"])
+				break
+			}
+		}
+		if scope == "container_grid" && s.Callbacks.CaptureWells != nil && s.Callbacks.RequestBatchLink != nil {
+			if wells, fov := s.Callbacks.CaptureWells(task.TaskKey); len(wells) > 0 && fov > 0 {
+				s.Callbacks.RequestBatchLink(task.TaskKey)
+				return
+			}
+		}
+		if s.Callbacks.RequestStepAssetLink != nil {
+			s.Callbacks.RequestStepAssetLink(task.TaskKey, wellID)
+			return
+		}
 		if s.Callbacks.RequestBatchLink != nil {
 			s.Callbacks.RequestBatchLink(task.TaskKey)
 		}

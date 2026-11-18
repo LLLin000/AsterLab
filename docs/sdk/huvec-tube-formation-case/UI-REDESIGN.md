@@ -80,10 +80,10 @@
    - **AsterML 源码**：基于 `components.SplitPercent` 与 `mygo/ui/editor` 的 Markdown 源码编辑，右侧实时联动 `ModeProtocol` 预览。
 
 3. **Run 同源执行与 Notebook 闭环**：
-   - `internal/runworkspace` 按步骤加载冻结 `step@1.blocks[]` 并以 `asterdoc.ModeRun` 同源渲染，参数实测记录、检查清单确认/按规则跳过、计时器启停、数据表读数提交均回写 Core 不可变事实；`capture.go` 动态读取 `attachment@1`（`scope: container_grid`）的 `slots_per_cell`。
-   - Notebook 动态适配计划/实测 `FOV` 层数，并在实测派生新设计（`DeriveDesignFromRun`）保存后同步写回新版 AsterML 文档修订（`SaveAsterDoc`）。
+   - `internal/runworkspace` 按步骤加载冻结 `step@1.blocks[]` 并以 `asterdoc.ModeRun` 同源渲染，完整水合 `actual_parameters`、`measurements`、`result_cells` 与样本 QC/删失状态（`qc_dropped`/`censored_dead`/`rework`）；参数实测记录、检查清单确认/按规则跳过、计时器启停与 `data_table` 表格读数均回写 Core 不可变事实，并向 `calculator@1` 实时供数（支持 `@actual.*` 引用、`sample_normalize` 样本浓度换算及 `formula` 实测表达式求值）。
+   - `figure@1` 与 `attachment@1` 支持异步多格式解码（PNG/JPEG/BMP/WebP/TIFF）、`75%/100%/150%/200%` Lightbox 放大检视与 Design 文件拖入，`capture.go` 动态读取 `container_grid` 的 `slots_per_cell`。
+   - Notebook 动态适配计划/实测 `FOV` 层数，并在记录图板（`recordBoardPage`）通过 `record.DecodeReadouts` 原生表格呈现已提交的 `ReadoutValue::Table` / 分类读数；实测派生新设计（`DeriveDesignFromRun`）保存后同步写回新版 AsterML 文档修订（`SaveAsterDoc`）。
 
-4. **后续工作方向（Phase 2 / Phase 3）**：
-   - 完整接通步骤工作台内 `Run` 实际值对照回溯、`attachment@1` 真机文件缩略图异步解码缓存与批注缩放；
-   - 补齐 `AGENT_API` 一步生成典型湿实验文档的自动化 E2E 回归（抑菌圈 / CFU / HUVEC）；
-   - Windows 桌面打包与多分辨率实窗人工验收（`Windows Gate` 泳道）。
+4. **全链路验证与 Windows 交付物（`MOD-01..MOD-06` 已收口）**：
+   - Rust CLI 补齐 `compute_asterdoc_budget` 与 `eval_asterdoc_calculator_with_actuals`，`asterdoc.inspect` 返回全局资源预算并支持嵌套 `step.blocks[]` 检索；`agent_api` 新增抑菌圈、CFU、HUVEC 三大旗舰实验无头端到端回归测试。
+   - 桌面端完成多分辨率视觉门禁（`960x640`、`1360x880`、`2560x1440`、`150%` Lightbox 与 Notebook 图板表格视图，Light + Dark）并重新构建签名准备就绪的 Windows `Runs.dll`、`mygo-run.exe`、`.zip` 与 NSIS 安装包。

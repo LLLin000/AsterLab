@@ -1,14 +1,18 @@
 package asterdoc
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
+	_ "golang.org/x/image/tiff"
 
 	"asterlab-mygo-prototype/internal/theme"
 )
@@ -106,7 +110,11 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 		badge = "本地图片"
 	}
 
-	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
+	if v.FigureZoom <= 0 {
+		v.FigureZoom = 1
+	}
+
+	card := ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
 		Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
@@ -117,11 +125,12 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 			components.Tooltip(c, zoomBtn, "放大查看示意图与文字标注")
 			if zoomBtn.Clicked() {
 				v.ExpandedFigureID = moduleID
+				v.FigureZoom = 1
 				v.figureOpen = true
 			}
 		})
 
-		v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, maxH, false)
+		v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, maxH, 1)
 
 		if caption != "" {
 			ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
@@ -129,7 +138,7 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 
 		if editableDesign {
 			openEd := v.ensureWidgetBool("fig_ed:" + moduleID)
-			components.Collapsible(c, "编辑 SVG / 图片路径与图注", openEd, components.CollapsibleOptions{}, func() {
+			components.Collapsible(c, "编辑 SVG / 图片路径与图注（支持直接拖入本地文件）", openEd, components.CollapsibleOptions{}, func() {
 				srcBuf := v.ensureWidgetDraft("fig:"+moduleID+":src", src)
 				capBuf := v.ensureWidgetDraft("fig:"+moduleID+":cap", caption)
 				svgBuf := v.ensureWidgetDraft("fig:"+moduleID+":svg", svgRaw)
@@ -161,41 +170,72 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 			})
 		}
 
-		if v.figureOpen && v.ExpandedFigureID == moduleID {
-			components.Dialog(c, &v.figureOpen, components.DialogOptions{Label: title}, func(panel ui.Element) {
-				ui.Column(c).Width(float32(tok.Spacing48)*12).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-						ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-						ui.Spacer(c)
-						if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
-							v.figureOpen = false
+		openFig := v.figureOpen && v.ExpandedFigureID == moduleID
+		components.Dialog(c.Key("fig-dlg:"+moduleID), &openFig, components.DialogOptions{Label: title}, func(panel ui.Element) {
+			panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+					ui.Spacer(c)
+					for _, z := range []float32{0.75, 1.0, 1.5, 2.0} {
+						z := z
+						style := components.ButtonOutline
+						if v.FigureZoom == z {
+							style = components.ButtonSecondary
 						}
-					})
-					v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, 360, true)
-					if caption != "" {
-						ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
+							v.FigureZoom = z
+						}
+					}
+					if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
+						openFig = false
 					}
 				})
+				ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
+					v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, 320, v.FigureZoom)
+				})
+				if caption != "" {
+					ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				}
 			})
+		})
+		if !openFig && v.ExpandedFigureID == moduleID {
+			v.figureOpen = false
 		}
 	})
+	if editableDesign {
+		if card.FileDragOver() {
+			card.Border(2, tok.Accent)
+		}
+		if dropped := card.DroppedFiles(); len(dropped) > 0 {
+			picked := dropped[0]
+			props := map[string]any{"src": picked}
+			if strings.EqualFold(filepath.Ext(picked), ".svg") {
+				if rawBytes, readErr := os.ReadFile(picked); readErr == nil && strings.Contains(string(rawBytes), "<svg") {
+					props["svg"] = string(rawBytes)
+				}
+			}
+			v.emitAnyModuleEdit(moduleID, props)
+		}
+	}
 }
 
-func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, annotations []svgTextLabel, maxH float32, large bool) {
+func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, annotations []svgTextLabel, maxH float32, zoom float32) {
 	t := c.Theme()
 	tok := theme.GetTokens(t)
+	if zoom <= 0 {
+		zoom = 1
+	}
 	if svgRaw != "" {
 		vbX, vbY, vbW, vbH, labels := parseSVGMetricsAndLabels(svgRaw)
 		allLabels := append(labels, annotations...)
-		drawH := maxH
-		drawW := float32(vbW / vbH * float64(drawH))
-		if large && drawW > 560 {
-			drawW = 560
-			drawH = float32(vbH / vbW * float64(drawW))
-		}
-		if !large && drawW > 380 {
+		drawH := maxH * zoom
+		drawW := float32(vbW/vbH) * drawH
+		if zoom <= 1 && drawW > 380 {
 			drawW = 380
-			drawH = float32(vbH / vbW * float64(drawW))
+			drawH = float32(vbH/vbW) * drawW
+		} else if zoom > 1 && drawW > 960 {
+			drawW = 960
+			drawH = float32(vbH/vbW) * drawW
 		}
 		parsedSVG, err := v.cachedSVG(svgRaw)
 		if err != nil {
@@ -217,8 +257,8 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 					if fsize < float32(tok.TextMeta) {
 						fsize = float32(tok.TextMeta)
 					}
-					if fsize > float32(tok.TextSection) {
-						fsize = float32(tok.TextSection)
+					if fsize > float32(tok.TextSection)*zoom {
+						fsize = float32(tok.TextSection) * zoom
 					}
 					if lbl.Anchor == "middle" {
 						// Offset left slightly based on rune length to visually center text cleanly
@@ -248,7 +288,7 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 		}
 		ui.Row(c).FillWidth().Justify(ui.Center).Padding(float32(tok.Spacing8)).
 			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Children(func() {
-			ui.Image(c, imgSrc).Height(maxH)
+			ui.Image(c, imgSrc).Height(maxH * zoom)
 		})
 	}
 }
@@ -275,22 +315,58 @@ func (v *View) cachedImageFile(path string) (ui.ImageSource, string) {
 	if v.imgErrCache == nil {
 		v.imgErrCache = map[string]string{}
 	}
+	if v.imgLoading == nil {
+		v.imgLoading = map[string]bool{}
+	}
 	if img, ok := v.imgCache[path]; ok {
 		return img, ""
 	}
 	if errText, ok := v.imgErrCache[path]; ok {
 		return nil, errText
 	}
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		v.imgErrCache[path] = "未找到本地文件"
-		return nil, v.imgErrCache[path]
+	if v.imgLoading[path] {
+		return nil, "加载缩略图中…"
 	}
-	img, err := ui.DecodeImage(bytes)
-	if err != nil {
-		v.imgErrCache[path] = "图像解码失败"
-		return nil, v.imgErrCache[path]
+	if !v.AsyncDecode {
+		bytes, err := os.ReadFile(path)
+		if err != nil {
+			v.imgErrCache[path] = "未找到本地文件"
+			return nil, v.imgErrCache[path]
+		}
+		img, err := ui.DecodeImage(bytes)
+		if err != nil {
+			v.imgErrCache[path] = "图像解码失败"
+			return nil, v.imgErrCache[path]
+		}
+		v.imgCache[path] = img
+		return img, ""
 	}
-	v.imgCache[path] = img
-	return img, ""
+	v.imgLoading[path] = true
+	go func(p string) {
+		rawBytes, readErr := os.ReadFile(p)
+		var decoded ui.ImageSource
+		var errText string
+		if readErr != nil {
+			errText = "未找到本地文件"
+		} else {
+			img, decErr := ui.DecodeImage(rawBytes)
+			if decErr != nil {
+				errText = "图像解码失败"
+			} else {
+				decoded = img
+			}
+		}
+		mygo.RunOnMain(func() {
+			delete(v.imgLoading, p)
+			if decoded != nil {
+				v.imgCache[p] = decoded
+			} else {
+				v.imgErrCache[p] = errText
+			}
+			if v.OnAsyncInvalidate != nil {
+				v.OnAsyncInvalidate()
+			}
+		})
+	}(path)
+	return nil, "加载缩略图中…"
 }

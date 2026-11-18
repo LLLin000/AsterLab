@@ -738,9 +738,78 @@ func (d *Document) GroupList() []GroupInfo {
 					Condition: textValue(rm, "condition"), IndependentN: int(indN), TechnicalRepeats: int(techR),
 				})
 			}
+		case "plate":
+			if p, err := plateFromData(m.Data); err == nil {
+				for _, g := range p.GroupNames() {
+					if g == "" || seen[g] {
+						continue
+					}
+					seen[g] = true
+					out = append(out, GroupInfo{ID: g, Name: g})
+				}
+			}
 		}
 	}
 	return out
+}
+
+// MoveStepBlockToIndex reorders one inline block inside stepID's blocks[] list to toIndex
+// directly in AsterML Markdown source and validates the result via Parse.
+func MoveStepBlockToIndex(source, stepID, blockID string, toIndex int) (string, error) {
+	doc, err := Parse(source)
+	if err != nil {
+		return "", err
+	}
+	for _, m := range doc.Modules {
+		if m.Kind != "step" || m.ID != stepID {
+			continue
+		}
+		var data map[string]any
+		if err := yaml.Unmarshal([]byte(m.Body), &data); err != nil {
+			return "", err
+		}
+		seq, _ := data["blocks"].([]any)
+		from := -1
+		for i, raw := range seq {
+			bm, _ := raw.(map[string]any)
+			if textValue(bm, "id") == blockID {
+				from = i
+				break
+			}
+		}
+		if from < 0 {
+			return "", fmt.Errorf("step %q block %q does not exist", stepID, blockID)
+		}
+		if len(seq) <= 1 {
+			return doc.Source, nil
+		}
+		if toIndex < 0 {
+			toIndex = 0
+		}
+		if toIndex >= len(seq) {
+			toIndex = len(seq) - 1
+		}
+		if from == toIndex {
+			return doc.Source, nil
+		}
+		item := seq[from]
+		without := append([]any{}, seq[:from]...)
+		without = append(without, seq[from+1:]...)
+		reordered := append([]any{}, without[:toIndex]...)
+		reordered = append(reordered, item)
+		reordered = append(reordered, without[toIndex:]...)
+		data["blocks"] = reordered
+		raw, err := yaml.Marshal(data)
+		if err != nil {
+			return "", err
+		}
+		next := doc.Source[:m.Start] + string(raw) + doc.Source[m.End:]
+		if _, err := Parse(next); err != nil {
+			return "", err
+		}
+		return next, nil
+	}
+	return "", fmt.Errorf("step %q does not exist", stepID)
 }
 
 // BudgetSummary summarizes document structure and timer duration budgets for the header bar.

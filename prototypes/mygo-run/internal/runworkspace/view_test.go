@@ -1,6 +1,7 @@
 package runworkspace
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -714,5 +715,109 @@ func TestViewRendersFrozenStepBlocksSameSourceModeRun(t *testing.T) {
 		if !tt.HasText(want) {
 			t.Fatalf("ModeRun workbench missing %q in %v", want, tt.Texts())
 		}
+	}
+}
+
+func TestModeRunHydratesActualsSubmitsTableAndFeedsCalculator(t *testing.T) {
+	src := strings.Join([]string{
+		"```asterlab", "kind: experiment", "id: exp-norm", "schema: 1", "title: RNA 定量与归一化", "```",
+		"```asterlab", "kind: group", "id: g-ctrl", "schema: 1", "name: Control", "role: control", "```",
+		"```asterlab", "kind: assay", "id: assay-rna", "schema: 1", "title: Nanodrop + cDNA", "group_refs: [g-ctrl]", "timepoints: [0h]", "```",
+		"```asterlab", "kind: step", "id: step-norm", "schema: 1", "title: 实测归一化加样与记录",
+		"execution: executable", "assay: assay-rna", "path: root/norm",
+		"blocks:",
+		"  - kind: param_table",
+		"    id: pt-norm",
+		"    schema: 1",
+		"    title: 实测参数",
+		"    rows:",
+		"      - {key: stock_conc, label: 母液浓度, value: 10, unit: mg/mL, record_actual: true}",
+		"  - kind: calculator",
+		"    id: calc-norm",
+		"    schema: 1",
+		"    title: 按实测样本稀释归一化",
+		"    mode: sample_normalize",
+		"    upstream_endpoint: rna_conc",
+		"    target_mass: {value: 500, unit: ng}",
+		"    volume_per_unit: {value: 10, unit: uL}",
+		"  - kind: data_table",
+		"    id: dt-norm",
+		"    schema: 1",
+		"    title: 实测记录表",
+		"    schema_id: custom_norm_table",
+		"    endpoint: cfu",
+		"    columns:",
+		"      - {key: sample_id, label: 样本, value_kind: text}",
+		"      - {key: rna_conc, label: 浓度, value_kind: number, unit: ng/uL}",
+		"```",
+	}, "\n")
+	evPayload := map[string]any{
+		"actual_parameters": []map[string]any{
+			{"key": "stock_conc", "value": 25.0, "unit": "mg/mL"},
+		},
+		"result_cells": []map[string]any{{
+			"kind": "record",
+			"readout": map[string]any{
+				"schema_id":      "custom_norm_table",
+				"schema_version": 1,
+				"value": map[string]any{
+					"kind":    "table",
+					"columns": []string{"sample_id", "rna_conc"},
+					"rows":    [][]any{{"S-Keep", 250.0}, {"S-Drop", 200.0}},
+				},
+			},
+		}},
+	}
+	evBytes, _ := json.Marshal(evPayload)
+	dropBytes, _ := json.Marshal(map[string]any{"sample_ids": []string{"S-Drop"}})
+	snap := runs.RunSnapshot{
+		RunID: "run-norm-1", Title: "RNA 定量与归一化", Revision: 2, Status: "active",
+		Tasks: []runs.RunTask{{
+			Key: "t-norm", DesignStepID: "step-norm", Path: "root/norm", ProtocolVersionID: "pv-1",
+			Title: "实测归一化加样与记录", AssayID: "assay-rna", Timepoint: "0h", Status: "in_progress",
+		}},
+		Events: []runs.RunEvent{
+			{ID: "ev-1", EventType: "measurement", TaskKey: "t-norm", ProtocolStepPath: "root/norm", DataJSON: string(evBytes)},
+			{ID: "ev-2", EventType: "operation", TaskKey: "t-norm", ProtocolStepPath: "root/norm", StepStatus: "qc_dropped", DataJSON: string(dropBytes)},
+		},
+	}
+	doc := &asterdoc.FrozenAsterDoc{DesignID: "d-norm", Revision: 1, Source: src}
+	vm := BuildViewModel(snap, doc)
+	if vm.ActualParamNumbers["stock_conc"] != 25.0 {
+		t.Fatalf("ActualParamNumbers = %+v", vm.ActualParamNumbers)
+	}
+	if vm.SampleStatuses["S-Drop"] != "QC剔除" {
+		t.Fatalf("SampleStatuses = %+v", vm.SampleStatuses)
+	}
+
+	var submitted runs.ExecuteCommandInput
+	calls := 0
+	st := NewState(vm, Callbacks{
+		ExecuteCommand: func(input runs.ExecuteCommandInput) (runs.ExecuteCommandResult, error) {
+			calls++
+			submitted = input
+			return runs.ExecuteCommandResult{ResultJSON: `{"id":"ev-new"}`}, nil
+		},
+	})
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		View(c, st)
+	}, 1280, 900)
+	tt.Frame()
+	if !tt.HasText("已代入实测 · S-Keep=250 ng/uL") {
+		t.Fatalf("expected live non-excluded upstream sample in calculator badge, got %v", tt.Texts())
+	}
+	if tt.HasText("S-Drop=200") {
+		t.Fatalf("QC-dropped sample S-Drop leaked into calculator actuals: %v", tt.Texts())
+	}
+	if err := tt.Click("提交表格读数"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if calls != 1 || submitted.Kind != "readout.submit" {
+		t.Fatalf("calls=%d submitted=%+v", calls, submitted)
+	}
+	if !tt.HasText("已保存至 Core") {
+		t.Fatalf("expected save confirmation badge, got %v", tt.Texts())
 	}
 }

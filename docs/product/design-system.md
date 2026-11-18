@@ -160,3 +160,7 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | AsterML 源码编辑 | `mygo/ui/editor`（Markdown 高亮、行号、DiffBase） | 与右侧 `asterdoc.ModeProtocol` 实时预览同屏联动 |
 | 示意图 / 培养皿分区 SVG | `mygo/ui.ParseSVG` + `ui.Image` + `<text>` 叠加 | 纯视觉辅助表达；分组与量化数据严格归属 `group_table` / `data_table` |
 | 孔板 / 培养皿 / 1D 管架网格 | `internal/uikit/plate` | 复用 `theme.Palette` 与语义分组色，`ui.Hex` 只保留在 `theme.go` |
+| 步骤内模块拖拽排序 | `ui.Box`（`.Drag` / `.DragOver` / `.Drop`）+ `lucide.GripVertical` | 手柄固定于模块标题栏左侧；落位复用 `MoveStepBlockToIndex` 与主题高亮边框 |
+| 图像与实拍附件查看 | `components.Dialog` Lightbox + `ui.ScrollBoth` + `x/image/tiff` | 异步后台解码防阻塞主线程；提供 `75%/100%/150%/200%` 缩放与外部打开，支持 Design 拖入文件 |
+| 通用数据表粘贴与键盘导航 | `components.Table` + `ui.TextField`（`FocusBind` / `OnPaste` / `OnTextKey`） | 支持 Excel TSV/CSV 粘贴自动扩行与方向键/`Enter`/`Tab` 移焦；提交成功显示 `已保存至 Core` `Badge` |
+| 计算器实测联动 | `EvalCalculatorWithActuals` + `components.Badge`（`Accent`） | 在 Run `ModeRun` 自动代入 `actual_parameters` 与上游测量值并标记 `已代入实测`；低浓度自动标注 `insufficient` |

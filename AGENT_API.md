@@ -339,6 +339,41 @@ run.create 会把 Assay 引用的 Protocol 版本固定到 `protocol_manifest`�
 - 写入工具只返回记录 ID、所属关系、版本、数据和创建/更新时间；不声称实际实验已经执行。
 - 该 CLI 是本机原型，尚无多用户认证、审计签名、细粒度附件权限或撤销系统。不要把本地访问控制误称为云端安全边界。
 
+## AsterDoc v2 模块与步骤内编排接口
+
+AsterML v2 将实验结构收口为 Markdown + ` ```asterlab ` 通用科学模块与 `step@1.blocks[]` 步骤内自由编排，Core CLI 通过以下工具暴露校验、步骤块编辑、自包含 Run 冻结与结构化表格读数通道：
+
+| 命令 | 用途 | 写入 |
+|---|---|---:|
+| `sdk.modules` / `sdk.describe` | 列出或按 `kind`/`schema` 查询 AsterML v2 通用模块规格、输入端口与能力 | 否 |
+| `sdk.validate` / `asterdoc.validate` | 校验 AsterML 源码并尝试投影为 Design（返回 `valid`、`compiled`、`errors`/`warnings`） | 否 |
+| `asterdoc.load` / `asterdoc.save` | 读取或乐观锁追加保存 Design 的 AsterML 源码修订 | save 创建修订 |
+| `asterdoc.inspect` | 解析并返回文档模块、清单与全局资源预算 `budget`；传入 `module_id` 时同步搜索顶层模块及嵌套 `step.blocks[]` 子块 | 否 |
+| `asterdoc.assess` / `asterdoc.compile` | 评估是否可执行（`ready`/`warning`/`incomplete`）并编译为 Design JSON | 否 |
+| `asterdoc.command` | 对 AsterDoc 执行结构化增量命令，生成新修订 | 创建修订 |
+| `asterdoc.create_run` | 从指定 AsterDoc revision 创建并冻结 Run；未绑定外部 `ProtocolBlockVersion` 的自包含步骤自动物化冻结 | create |
+
+### `asterdoc.command` 支持的操作类型
+
+- 顶层模块与流程：`add_module`、`add_step`、`update_module`、`remove_module`、`remove_step`、`reorder_steps`、`nest_step`、`promote_step`、`connect_steps`、`disconnect_steps`。
+- 容器孔位分派：`assign_wells`、`clear_wells`。
+- **步骤内模块自由编排**（作用目标 `stepId` 或 `moduleId` 指向目标 `step@1`）：
+  - `insert_step_block`：传入 `block`（`{kind, id, schema?, ...}`）及可选插入位置 `index`（省略追加末尾）。
+  - `update_step_block`：传入 `blockId` 与 `properties` 增量更新步骤子块字段（禁止覆盖 `id`/`kind`/`schema`）。
+  - `move_step_block`：传入 `blockId`，支持按 `toIndex`（`>= 0` 拖拽精准落位）或 `direction`（`"up"` / `"down"`）重排步骤内模块顺序。
+  - `remove_step_block`：传入 `blockId` 从步骤 `blocks[]` 中移除对应模块。
+
+### `asterdoc.inspect` 预算结构（`budget`）
+
+返回 `{steps, executable_steps, groups, wells, hands_on_sec, total_span_sec, has_open_phase}`，与桌面端 `ComputeBudgetSummary` 对齐统计：`steps`/`executable_steps`（步骤总数与可执行步骤数）、`groups`（`group`/`group_table`/`plate.groups` 去重实验组数）、`wells`（`plate` 已分配孔/皿位数）、`hands_on_sec` 与 `total_span_sec`（`timer` 四种模式秒级累计，含 `window` 偏置与周期轮次）及 `has_open_phase`（是否含开放式计时阶段）。
+
+### 多值型表格读数（`readout.submit` `ReadoutValue::Table`）
+
+- 结构化表格模块（`data_table@1`）通过 `TypedReadoutSubmit` 的 `readouts[]` + `readout_schemas[]` 提交 `value.kind = "table"`：
+  - `readout_schemas[]` 与 `readouts[]` 均采用 `deny_unknown_fields` 严格校验。
+  - `table.columns` 必须按 `schema.table.columns` 声明顺序对齐；`numeric` 列仅接受数值或 `null`，`categorical` 列必须为非空字符串或 `null`（即便是 `"0.5"`、`"10"` 等纯数字形态分类标签也必须保持 JSON 字符串类型）。
+  - Core 内置标量 schema ID（`cck8_od450`、`rna_concentration`、`rna_purity`、`cfu_count`）禁止以不同 `value_kind` 或列定义覆盖；若 `data_table` 复用上述保留 ID，调用方应映射独立表格 schema ID（例如附加 `.table` 后缀）。
+
 ## 组件/计划容器只读接口（C3）
 
 | 命令 | 用途 | 写入 |

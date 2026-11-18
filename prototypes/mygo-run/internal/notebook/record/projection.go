@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"asterlab-mygo-prototype/modules/runs"
@@ -346,4 +347,83 @@ func Fetch(ctx context.Context, svc runs.RunService, in FetchInput) (Projection,
 		return Projection{}, fmt.Errorf("record projection 属于 %q，不是 %q", proj.RunID, in.RunID)
 	}
 	return proj, nil
+}
+
+// DecodedReadout is a presentation-friendly decode of a stored Core ReadoutRecord.
+type DecodedReadout struct {
+	SchemaID  string
+	Kind      string
+	StepPath  string
+	Timepoint string
+	Category  string
+	Number    *float64
+	Unit      string
+	Columns   []string
+	Rows      [][]string
+}
+
+// DecodeReadouts extracts table, categorical, and scalar readouts from Core's projection verbatim.
+func DecodeReadouts(records []ReadoutRecord) []DecodedReadout {
+	out := make([]DecodedReadout, 0, len(records))
+	for _, rec := range records {
+		if len(rec.Readout) == 0 {
+			continue
+		}
+		var parsed struct {
+			SchemaID string  `json:"schema_id"`
+			Unit     *string `json:"unit"`
+			Missing  *string `json:"missing"`
+			Value    struct {
+				Kind     string   `json:"kind"`
+				Category *string  `json:"category"`
+				Number   *float64 `json:"number"`
+				Columns  []string `json:"columns"`
+				Rows     [][]any  `json:"rows"`
+			} `json:"value"`
+		}
+		if json.Unmarshal(rec.Readout, &parsed) != nil || parsed.Value.Kind == "" {
+			continue
+		}
+		item := DecodedReadout{
+			SchemaID: parsed.SchemaID,
+			Kind:     parsed.Value.Kind,
+			StepPath: rec.StepPath,
+			Columns:  parsed.Value.Columns,
+		}
+		if rec.Timepoint != nil {
+			item.Timepoint = *rec.Timepoint
+		}
+		if parsed.Unit != nil {
+			item.Unit = *parsed.Unit
+		}
+		if parsed.Value.Category != nil {
+			item.Category = *parsed.Value.Category
+		} else if parsed.Missing != nil && parsed.Value.Kind == "categorical" {
+			item.Category = *parsed.Missing
+		}
+		item.Number = parsed.Value.Number
+		if len(parsed.Value.Rows) > 0 {
+			item.Rows = make([][]string, 0, len(parsed.Value.Rows))
+			for _, row := range parsed.Value.Rows {
+				strRow := make([]string, len(row))
+				for i, cell := range row {
+					switch v := cell.(type) {
+					case nil:
+						strRow[i] = "—"
+					case float64:
+						strRow[i] = strconv.FormatFloat(v, 'g', -1, 64)
+					default:
+						s := strings.TrimSpace(fmt.Sprint(v))
+						if s == "" {
+							s = "—"
+						}
+						strRow[i] = s
+					}
+				}
+				item.Rows = append(item.Rows, strRow)
+			}
+		}
+		out = append(out, item)
+	}
+	return out
 }

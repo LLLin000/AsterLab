@@ -312,10 +312,11 @@ mod tests {
                 kind["enum"].as_array().into_iter().flatten().filter_map(Value::as_str)
             )
         }).collect();
-        for action in ["add_module", "add_step", "update_module", "assign_wells", "clear_wells", "connect_steps", "disconnect_steps", "remove_module", "remove_step", "reorder_steps", "nest_step", "promote_step"] {
+        for action in ["add_module", "add_step", "update_module", "assign_wells", "clear_wells", "connect_steps", "disconnect_steps", "remove_module", "remove_step", "reorder_steps", "nest_step", "promote_step", "insert_step_block", "update_step_block", "move_step_block", "remove_step_block"] {
             assert!(declared_types.contains(&action), "command schema omits {action}");
         }
         assert_eq!(result_schema("sdk.modules")["required"][0], "modules");
+        assert!(result_schema("asterdoc.inspect")["required"].as_array().unwrap().contains(&json!("budget")));
         assert_eq!(result_schema("asterdoc.assess")["required"][3], "state");
         let plate = asterdoc_module_spec("plate", 1).unwrap();
         assert!(asterdoc_module_spec("plate96", 1).is_none());
@@ -4513,6 +4514,421 @@ protocol_version_id: protocol-v1
         assert_eq!(result["valid"], false);
         assert_eq!(result["compiled"], false);
         assert!(result["error"]["message"].as_str().is_some_and(|message| !message.is_empty()));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn asterdoc_budget_and_calculator_actuals_parity() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .find(|dir| dir.join("prototypes/mygo-run/internal/asterdoc/testdata/inhibition-zone.asterml").is_file())
+            .expect("repository root with v2 showcase fixtures");
+
+        let load_budget = |rel: &str| -> Value {
+            let src = std::fs::read_to_string(root.join(rel)).unwrap();
+            let mods = parse_asterdoc_modules(&src).unwrap();
+            compute_asterdoc_budget(&mods)
+        };
+
+        let iz = load_budget("prototypes/mygo-run/internal/asterdoc/testdata/inhibition-zone.asterml");
+        assert!(iz["steps"].as_i64().unwrap() >= 4, "iz = {iz}");
+        assert!(iz["executable_steps"].as_i64().unwrap() >= 4, "iz = {iz}");
+        assert_eq!(iz["groups"], 4, "iz = {iz}");
+        assert_eq!(iz["wells"], 4, "iz = {iz}");
+        assert_eq!(iz["hands_on_sec"], 57600, "iz = {iz}");
+
+        let cfu = load_budget("prototypes/mygo-run/internal/asterdoc/testdata/cfu.asterml");
+        assert!(cfu["steps"].as_i64().unwrap() >= 3, "cfu = {cfu}");
+        assert!(cfu["executable_steps"].as_i64().unwrap() >= 3, "cfu = {cfu}");
+        assert_eq!(cfu["groups"], 2, "cfu = {cfu}");
+        assert_eq!(cfu["wells"], 6, "cfu = {cfu}");
+        assert_eq!(cfu["hands_on_sec"], 86400, "cfu = {cfu}");
+
+        let huvec = load_budget("prototypes/mygo-run/internal/asterdoc/testdata/huvec-tube.asterml");
+        assert!(huvec["steps"].as_i64().unwrap() >= 3, "huvec = {huvec}");
+        assert!(huvec["executable_steps"].as_i64().unwrap() >= 3, "huvec = {huvec}");
+        assert_eq!(huvec["groups"], 3, "huvec = {huvec}");
+        assert_eq!(huvec["wells"], 12, "huvec = {huvec}");
+        assert_eq!(huvec["has_open_phase"], true, "huvec = {huvec}");
+
+        let calc_src = r#"```asterlab
+kind: step
+id: step-calc
+schema: 1
+title: Calc checks
+path: calc/1
+blocks:
+  - kind: calculator
+    id: c-dil
+    schema: 1
+    title: VEGF Dilution
+    mode: dilution
+    stock_ref: "@actual.vegf_stock"
+    stock: {value: 100, unit: ug/mL}
+    target: {value: 50, unit: ng/mL}
+    final_volume: {value: 8, unit: mL}
+  - kind: calculator
+    id: c-norm
+    schema: 1
+    title: RNA Normalize
+    mode: sample_normalize
+    volume_per_unit: {value: 20, unit: uL}
+    target_mass: {value: 1, unit: ug}
+    upstream_endpoint: rna_conc
+  - kind: calculator
+    id: c-formula
+    schema: 1
+    title: Mean Diameter
+    mode: formula
+    formula: "(d1 + d2) / 2"
+```
+"#;
+        let mods = parse_asterdoc_modules(calc_src).unwrap();
+        let mut actuals = CalcActualContext::default();
+        actuals.params.insert("vegf_stock".into(), 200.0);
+        actuals.param_units.insert("vegf_stock".into(), "ug/mL".into());
+        actuals.params.insert("d1".into(), 14.0);
+        actuals.params.insert("d2".into(), 18.0);
+        actuals.samples.push(CalcSampleInput {
+            sample_id: "S-OK".into(),
+            value: 100.0,
+            unit: "ng/uL".into(),
+            endpoint: "rna_conc".into(),
+        });
+        actuals.samples.push(CalcSampleInput {
+            sample_id: "S-LOW".into(),
+            value: 20.0,
+            unit: "ng/uL".into(),
+            endpoint: "rna_conc".into(),
+        });
+
+        let dil = eval_asterdoc_calculator_with_actuals(&mods, "c-dil", Some(&actuals)).unwrap();
+        assert_eq!(dil["rows"][0]["amount"], 0.002, "dil = {dil}");
+        assert_eq!(dil["used_actuals"], json!(["vegf_stock=200 ug/mL"]), "dil = {dil}");
+
+        let norm = eval_asterdoc_calculator_with_actuals(&mods, "c-norm", Some(&actuals)).unwrap();
+        assert_eq!(norm["rows"][0]["amount"], 10.0, "norm = {norm}");
+        assert_eq!(norm["rows"][1]["amount"], 20.0, "norm = {norm}");
+        assert!(norm["rows"][1]["note"].as_str().unwrap_or("").contains("insufficient"), "norm = {norm}");
+        assert!(norm["summary"].as_str().unwrap_or("").contains("偏低 1 项"), "norm = {norm}");
+
+        let form = eval_asterdoc_calculator_with_actuals(&mods, "c-formula", Some(&actuals)).unwrap();
+        assert_eq!(form["rows"][0]["amount"], 16.0, "form = {form}");
+        assert_eq!(form["used_actuals"], json!(["d1=14", "d2=18"]), "form = {form}");
+    }
+
+    #[test]
+    fn v2_three_flagship_experiments_end_to_end_cli() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .find(|dir| dir.join("prototypes/mygo-run/internal/asterdoc/testdata/inhibition-zone.asterml").is_file())
+            .expect("repository root with v2 showcase fixtures");
+        let dir = std::env::temp_dir().join(format!("asterlab-v2-e2e-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let project_id = {
+            let db = open_db(&dir).unwrap();
+            let project = create_project(&db, "v2-e2e").unwrap();
+            project["id"].as_str().unwrap().to_owned()
+        };
+
+        struct Case<'a> {
+            tag: &'a str,
+            fixture: &'a str,
+            first_step_id: &'a str,
+            yaml_param_path: &'a str,
+            param_step_title: &'a str,
+            actual_key: &'a str,
+            actual_val: f64,
+            actual_unit: &'a str,
+            table_id: &'a str,
+            measure_step_title: &'a str,
+            assay_id: &'a str,
+            schema_id: &'a str,
+            endpoint: &'a str,
+            cols: Vec<(&'a str, &'a str, &'a str)>,
+            rows: Value,
+        }
+
+        let cases = [
+            Case {
+                tag: "iz",
+                fixture: "prototypes/mygo-run/internal/asterdoc/testdata/inhibition-zone.asterml",
+                first_step_id: "step-01-lawn",
+                yaml_param_path: "iz/01-lawn",
+                param_step_title: "01 菌悬液校正",
+                actual_key: "od600",
+                actual_val: 0.52,
+                actual_unit: "AU",
+                table_id: "blk-iz-table",
+                measure_step_title: "04 十字双径",
+                assay_id: "assay-iz",
+                schema_id: "inhibition_zone_mm",
+                endpoint: "zone_diameter",
+                cols: vec![("sample", "样本", "categorical"), ("d1", "d1", "numeric"), ("d2", "d2", "numeric"), ("mean_d", "均值", "numeric")],
+                rows: json!([["Q1-PBS", 6.0, 6.0, 6.0], ["Q3-Van", 21.2, 20.8, 21.0]]),
+            },
+            Case {
+                tag: "cfu",
+                fixture: "prototypes/mygo-run/internal/asterdoc/testdata/cfu.asterml",
+                first_step_id: "step-01-serial-dil",
+                yaml_param_path: "cfu/02-plate-incubate",
+                param_step_title: "02 吸取",
+                actual_key: "temp",
+                actual_val: 37.2,
+                actual_unit: "Cel",
+                table_id: "blk-cfu-table",
+                measure_step_title: "03 30-300",
+                assay_id: "assay-cfu",
+                schema_id: "cfu_plate_count",
+                endpoint: "viable_count",
+                cols: vec![("well", "平皿", "categorical"), ("colonies", "菌落数", "numeric"), ("dilution", "稀释倍数", "numeric"), ("plated_ml", "涂布体积", "numeric"), ("cfu_ml", "CFU/mL", "numeric")],
+                rows: json!([["B1", 142.0, 0.0001, 0.1, 14200000.0], ["B2", 158.0, 0.0001, 0.1, 15800000.0]]),
+            },
+            Case {
+                tag: "huvec",
+                fixture: "prototypes/mygo-run/internal/asterdoc/testdata/huvec-tube.asterml",
+                first_step_id: "step-01-prep",
+                yaml_param_path: "huvec/02-coat-uv",
+                param_step_title: "02 12 孔板铺胶",
+                actual_key: "uv_sec",
+                actual_val: 32.0,
+                actual_unit: "s",
+                table_id: "blk-huvec-metrics",
+                measure_step_title: "03 6h / 12h",
+                assay_id: "assay-tube",
+                schema_id: "huvec_tube_metrics",
+                endpoint: "tube_length",
+                cols: vec![("well", "孔位", "categorical"), ("total_length", "管腔总长", "numeric"), ("meshes", "网状数", "numeric"), ("branches", "分支数", "numeric"), ("mean_branch_len", "单支均长", "numeric")],
+                rows: json!([["A1", 8420.0, 18.0, 42.0, 200.4762], ["B1", 12650.0, 29.0, 58.0, 218.1034]]),
+            },
+        ];
+
+        for c in cases {
+            let source = std::fs::read_to_string(root.join(c.fixture)).unwrap();
+            let v_res = dispatch(
+                "asterdoc.validate",
+                calculator_input(&dir, &format!("{}-val.json", c.tag), json!({"source": source})).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert_eq!(v_res["valid"], true, "{}: {v_res}", c.tag);
+            assert_eq!(v_res["compiled"], true, "{}: {v_res}", c.tag);
+
+            let design_id = format!("design-v2-{}", c.tag);
+            {
+                let db = open_db(&dir).unwrap();
+                db.execute(
+                    "INSERT INTO records VALUES(?1,'design',?2,NULL,1,'{}','now','now')",
+                    rusqlite::params![design_id, project_id],
+                ).unwrap();
+            }
+
+            let saved = dispatch(
+                "asterdoc.save",
+                calculator_input(&dir, &format!("{}-save.json", c.tag), json!({
+                    "design_id": design_id,
+                    "source": source,
+                    "expected_revision": 0,
+                    "operation_id": format!("op-save-{}", c.tag)
+                })).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert_eq!(saved["revision"], 1);
+
+            let tmp_block_id = format!("blk-tmp-{}", c.tag);
+            let cmd_insert = dispatch(
+                "asterdoc.command",
+                calculator_input(&dir, &format!("{}-ins.json", c.tag), json!({
+                    "design_id": design_id,
+                    "expected_revision": 1,
+                    "command": {
+                        "type": "insert_step_block",
+                        "stepId": c.first_step_id,
+                        "block": {"kind": "prose", "id": tmp_block_id, "schema": 1, "title": "临时注释", "body": "初始备注"}
+                    }
+                })).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert_eq!(cmd_insert["revision"], 2);
+
+            let cmd_move = dispatch(
+                "asterdoc.command",
+                calculator_input(&dir, &format!("{}-mov.json", c.tag), json!({
+                    "design_id": design_id,
+                    "expected_revision": 2,
+                    "command": {"type": "move_step_block", "stepId": c.first_step_id, "blockId": tmp_block_id, "toIndex": 0}
+                })).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert_eq!(cmd_move["revision"], 3);
+
+            let cmd_upd = dispatch(
+                "asterdoc.command",
+                calculator_input(&dir, &format!("{}-upd.json", c.tag), json!({
+                    "design_id": design_id,
+                    "expected_revision": 3,
+                    "command": {"type": "update_step_block", "stepId": c.first_step_id, "blockId": tmp_block_id, "properties": {"body": "已更新备注"}}
+                })).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert_eq!(cmd_upd["revision"], 4);
+
+            let cmd_rem = dispatch(
+                "asterdoc.command",
+                calculator_input(&dir, &format!("{}-rem.json", c.tag), json!({
+                    "design_id": design_id,
+                    "expected_revision": 4,
+                    "command": {"type": "remove_step_block", "stepId": c.first_step_id, "blockId": tmp_block_id}
+                })).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert_eq!(cmd_rem["revision"], 5);
+
+            let insp_all = dispatch(
+                "asterdoc.inspect",
+                calculator_input(&dir, &format!("{}-insp-all.json", c.tag), json!({"design_id": design_id})).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert!(insp_all["budget"]["executable_steps"].as_i64().unwrap() >= 3, "{}: {insp_all}", c.tag);
+
+            let insp_tbl = dispatch(
+                "asterdoc.inspect",
+                calculator_input(&dir, &format!("{}-insp-tbl.json", c.tag), json!({"design_id": design_id, "module_id": c.table_id})).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert_eq!(insp_tbl["modules"].as_array().unwrap().len(), 1, "{}: {insp_tbl}", c.tag);
+            assert_eq!(insp_tbl["modules"][0]["kind"], "data_table", "{}: {insp_tbl}", c.tag);
+
+            let run = dispatch(
+                "asterdoc.create_run",
+                calculator_input(&dir, &format!("{}-run.json", c.tag), json!({
+                    "design_id": design_id,
+                    "revision": 5,
+                    "operation_id": format!("op-run-{}", c.tag)
+                })).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            let run_id = run["id"].as_str().unwrap().to_owned();
+            let manifest_entry = run["data"]["protocol_manifest"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["assay_id"].as_str() == Some(c.assay_id))
+                .expect("frozen manifest entry");
+            let protocol_version_id = manifest_entry["protocol_version_id"]
+                .as_str()
+                .expect("frozen protocol_version_id")
+                .to_owned();
+            let find_frozen_step_path = |needle: &str| -> String {
+                manifest_entry["steps"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|s| s["title"].as_str().unwrap_or("").contains(needle))
+                    .and_then(|s| s["path"].as_str())
+                    .unwrap_or_else(|| panic!("{}: frozen step matching {needle:?} missing in {}", c.tag, manifest_entry["steps"]))
+                    .to_owned()
+            };
+            let frozen_param_path = find_frozen_step_path(c.param_step_title);
+            let frozen_measure_path = find_frozen_step_path(c.measure_step_title);
+
+            let ws = dispatch(
+                "run.workspace",
+                calculator_input(&dir, &format!("{}-ws.json", c.tag), json!({"id": run_id})).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert!(!ws["steps"].as_array().unwrap().is_empty(), "{}: {ws}", c.tag);
+
+            let ev = dispatch(
+                "execution_event.create",
+                calculator_input(&dir, &format!("{}-ev.json", c.tag), json!({
+                    "run_id": run_id,
+                    "event_type": "operation",
+                    "content": format!("实测 {} = {} {}", c.actual_key, c.actual_val, c.actual_unit),
+                    "protocol_step_path": frozen_param_path,
+                    "protocol_version_id": protocol_version_id,
+                    "assay_id": c.assay_id,
+                    "actual_parameters": [{"key": c.actual_key, "value": c.actual_val, "unit": c.actual_unit, "source": "bench"}]
+                })).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert!(!ev["record"]["id"].as_str().unwrap_or("").is_empty());
+
+            let schema_cols: Vec<Value> = c.cols.iter().map(|(k, l, vk)| json!({"key": k, "label": l, "value_kind": vk})).collect();
+            let col_keys: Vec<Value> = c.cols.iter().map(|(k, _, _)| json!(k)).collect();
+            let sub = dispatch(
+                "readout.submit",
+                calculator_input(&dir, &format!("{}-ro.json", c.tag), json!({
+                    "run_id": run_id,
+                    "step_path": frozen_measure_path,
+                    "protocol_version_id": protocol_version_id,
+                    "assay_id": c.assay_id,
+                    "readout_schemas": [{
+                        "schema_id": c.schema_id,
+                        "schema_version": 1,
+                        "endpoint": c.endpoint,
+                        "value_kind": "table",
+                        "unit": {"canonical": null, "required": false},
+                        "missing": {"allowed": [], "null_allowed": true},
+                        "source": {"raw": true, "derived": false},
+                        "link": {"timepoint_required": false, "sample_required": false},
+                        "table": {"columns": schema_cols}
+                    }],
+                    "readouts": [{
+                        "schema_id": c.schema_id,
+                        "schema_version": 1,
+                        "value": {"kind": "table", "columns": col_keys, "rows": c.rows},
+                        "source": {"kind": "raw", "derived_from": []}
+                    }]
+                })).to_str().unwrap(),
+                &dir,
+            ).unwrap();
+            assert_eq!(sub["accepted"], 1, "{}: {sub}", c.tag);
+
+            let proj = {
+                let db = open_db(&dir).unwrap();
+                record_projection(
+                    &db,
+                    &run_id,
+                    asterlab_core::record_projection::ProjectionView::Unblinded,
+                    1,
+                    None,
+                ).unwrap()
+            };
+            let proj_readouts = proj["readouts"].as_array().unwrap();
+            assert!(
+                proj_readouts.iter().any(|r| r["readout"]["schema_id"] == c.schema_id && r["readout"]["value"]["kind"] == "table"),
+                "{}: readouts = {proj_readouts:?}",
+                c.tag
+            );
+            assert!(
+                proj["parameters"].as_array().unwrap().iter().any(|p| {
+                    p["slot"] == c.actual_key
+                        && p["actual"].as_array().is_some_and(|vals| vals.iter().any(|a| a["value"] == c.actual_val))
+                }),
+                "{}: parameters = {}",
+                c.tag,
+                proj["parameters"]
+            );
+
+            let derived = derive_asterdoc_source_from_run(
+                &source,
+                &run_id,
+                &[asterlab_core::design_commands::DerivedParameterUpdate {
+                    scope_id: c.assay_id.to_owned(),
+                    step_path: Some(c.yaml_param_path.to_owned()),
+                    parameter_key: c.actual_key.to_owned(),
+                    label: None,
+                    unit: Some(c.actual_unit.to_owned()),
+                    planned: None,
+                    actual: json!(c.actual_val),
+                    event_id: ev["record"]["id"].as_str().unwrap().to_owned(),
+                }],
+                &[],
+            );
+            validate_asterdoc_source(&derived).expect("derived asterdoc source validates");
+            assert!(derived.contains(&format!("> 派生自 Run {run_id}")), "{}: {derived}", c.tag);
+        }
+
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -17,6 +17,12 @@ type paletteEntry struct {
 	Icon  *ui.SVG
 }
 
+type stepBlockDrag struct {
+	StepID    string
+	BlockID   string
+	FromIndex int
+}
+
 // StepBlockComposer renders the Design-mode interactive step workbench:
 // step metadata header + ordered composable blocks[] + block_refs + 10-module insert palette.
 func StepBlockComposer(v *View, c *ui.Context, step *Module) {
@@ -104,27 +110,36 @@ func StepBlockComposer(v *View, c *ui.Context, step *Module) {
 			if bs <= 0 {
 				bs = 1
 			}
-			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+			wrapper := ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Radius(float32(tok.PanelRadius)).Children(func() {
 				if editable {
-					ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+					hdr := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
 						AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Icon(c, lucide.GripVertical()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
 						ui.Text(c, fmt.Sprintf("#%d · %s", idx+1, blockKindLabel(bk))).
 							FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).FontFeatures("tnum")
 						ui.Text(c, bid).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 						ui.Spacer(c)
-						if idx > 0 && v.OnMoveStepBlock != nil {
+						if idx > 0 && (v.OnMoveStepBlock != nil || v.OnMoveStepBlockIndex != nil) {
 							upBtn := components.IconButton(c, lucide.ArrowUp(), "上移模块", components.IconButtonCompact)
 							components.Tooltip(c, upBtn, "上移此模块")
 							if upBtn.Clicked() {
-								v.OnMoveStepBlock(step.ID, bid, "up")
+								if v.OnMoveStepBlock != nil {
+									v.OnMoveStepBlock(step.ID, bid, "up")
+								} else if v.OnMoveStepBlockIndex != nil {
+									v.OnMoveStepBlockIndex(step.ID, bid, idx-1)
+								}
 							}
 						}
-						if idx < len(blocks)-1 && v.OnMoveStepBlock != nil {
+						if idx < len(blocks)-1 && (v.OnMoveStepBlock != nil || v.OnMoveStepBlockIndex != nil) {
 							dnBtn := components.IconButton(c, lucide.ArrowDown(), "下移模块", components.IconButtonCompact)
 							components.Tooltip(c, dnBtn, "下移此模块")
 							if dnBtn.Clicked() {
-								v.OnMoveStepBlock(step.ID, bid, "down")
+								if v.OnMoveStepBlock != nil {
+									v.OnMoveStepBlock(step.ID, bid, "down")
+								} else if v.OnMoveStepBlockIndex != nil {
+									v.OnMoveStepBlockIndex(step.ID, bid, idx+1)
+								}
 							}
 						}
 						if v.OnRemoveStepBlock != nil {
@@ -135,9 +150,34 @@ func StepBlockComposer(v *View, c *ui.Context, step *Module) {
 							}
 						}
 					})
+					hdr.Cursor(ui.CursorGrab).Drag(stepBlockDrag{
+						StepID:    step.ID,
+						BlockID:   bid,
+						FromIndex: idx,
+					})
 				}
 				v.RenderModule(c, bk, bs, bm)
 			})
+			if editable {
+				if dragged, over := ui.DragOver[stepBlockDrag](wrapper); over && dragged.StepID == step.ID && dragged.FromIndex != idx {
+					wrapper.Border(2, tok.Accent)
+				}
+				if dragged, dropped := ui.Drop[stepBlockDrag](wrapper); dropped && dragged.StepID == step.ID && dragged.FromIndex != idx {
+					if v.OnMoveStepBlockIndex != nil {
+						v.OnMoveStepBlockIndex(step.ID, dragged.BlockID, idx)
+					} else if v.OnMoveStepBlock != nil {
+						if dragged.FromIndex < idx {
+							for stepMove := dragged.FromIndex; stepMove < idx; stepMove++ {
+								v.OnMoveStepBlock(step.ID, dragged.BlockID, "down")
+							}
+						} else {
+							for stepMove := dragged.FromIndex; stepMove > idx; stepMove-- {
+								v.OnMoveStepBlock(step.ID, dragged.BlockID, "up")
+							}
+						}
+					}
+				}
+			}
 		}
 
 		// Resolved top-level block_refs previews (e.g. shared plate)

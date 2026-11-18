@@ -228,24 +228,109 @@ func (p *formulaParser) parseFactor() (float64, error) {
 	}
 }
 
+// CalcSampleInput supplies one upstream measured sample concentration (or scalar sample fact).
+type CalcSampleInput struct {
+	SampleID string
+	Value    float64
+	Unit     string
+	Endpoint string
+}
+
+// CalcActualContext feeds Run-stage measured parameters and upstream sample measurements into calculator@1.
+type CalcActualContext struct {
+	Params     map[string]float64
+	ParamUnits map[string]string
+	Samples    []CalcSampleInput
+}
+
 // CalcRow is one computed line item from EvalCalculator.
 type CalcRow struct {
-	Label    string
-	Amount   float64
-	Unit     string
-	Note     string
+	Label  string
+	Amount float64
+	Unit   string
+	Note   string
 }
 
 // CalcResult holds the deterministic preview of a calculator@1 module.
 type CalcResult struct {
-	Mode    string
-	Summary string
-	Rows    []CalcRow
-	Err     error
+	Mode        string
+	Summary     string
+	Rows        []CalcRow
+	UsedActuals []string
+	Err         error
 }
 
 // EvalCalculator computes deterministic preview quantities for calculator@1 across all 5 modes.
 func EvalCalculator(doc *Document, data map[string]any) CalcResult {
+	return EvalCalculatorWithActuals(doc, data, nil)
+}
+
+func docPlannedParamFloat(doc *Document, key string) (float64, string, bool) {
+	if doc == nil || strings.TrimSpace(key) == "" {
+		return 0, "", false
+	}
+	flat, _ := flattenModules(doc.Modules)
+	for _, m := range flat {
+		if m.Kind != "param_table" {
+			continue
+		}
+		rows, _ := m.Data["rows"].([]any)
+		for _, raw := range rows {
+			rm, _ := raw.(map[string]any)
+			if strings.EqualFold(textValue(rm, "key"), key) || strings.EqualFold(textValue(rm, "label"), key) {
+				if n, ok := numericValue(rm["value"]); ok {
+					return n, textValue(rm, "unit"), true
+				}
+			}
+		}
+	}
+	return 0, "", false
+}
+
+func massToNg(val float64, unit string) (float64, bool) {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "", "ng":
+		return val, true
+	case "ug", "µg", "μg":
+		return val * 1000.0, true
+	case "mg":
+		return val * 1e6, true
+	default:
+		return 0, false
+	}
+}
+
+func massConcToNgPerUL(val float64, unit string) (float64, bool) {
+	u := strings.ReplaceAll(strings.TrimSpace(unit), "μ", "µ")
+	switch strings.ToLower(u) {
+	case "", "ng/ul", "ng/µl", "ug/ml", "µg/ml":
+		return val, true
+	case "mg/ml":
+		return val * 1000.0, true
+	case "pg/ul", "pg/µl", "ng/ml":
+		return val * 0.001, true
+	default:
+		return 0, false
+	}
+}
+
+func volumeToUL(val float64, unit string) (float64, string, bool) {
+	u := strings.ReplaceAll(strings.TrimSpace(unit), "μ", "µ")
+	switch strings.ToLower(u) {
+	case "", "ul", "µl":
+		return val, "uL", true
+	case "ml":
+		return val * 1000.0, "uL", true
+	case "l":
+		return val * 1e6, "uL", true
+	default:
+		return 0, unit, false
+	}
+}
+
+// EvalCalculatorWithActuals computes calculator@1 quantities, substituting live Run
+// measured parameters and upstream sample concentrations when supplied via actuals.
+func EvalCalculatorWithActuals(doc *Document, data map[string]any, actuals *CalcActualContext) CalcResult {
 	mode := textValue(data, "mode")
 	res := CalcResult{Mode: mode}
 	switch mode {
@@ -254,6 +339,23 @@ func EvalCalculator(doc *Document, data map[string]any) CalcResult {
 		if err != nil {
 			res.Err = err
 			return res
+		}
+		if stockRef := textValue(data, "stock_ref"); stockRef != "" {
+			stockKey := strings.TrimPrefix(strings.TrimPrefix(stockRef, "@actual."), "@param.")
+			if actuals != nil {
+				if av, ok := actuals.Params[stockKey]; ok && av > 0 {
+					sv = av
+					if au := actuals.ParamUnits[stockKey]; au != "" {
+						su = au
+					}
+					res.UsedActuals = append(res.UsedActuals, fmt.Sprintf("%s=%s %s", stockKey, formatNumber(sv), su))
+				}
+			} else if pv, pu, ok := docPlannedParamFloat(doc, stockKey); ok && pv > 0 {
+				sv = pv
+				if pu != "" {
+					su = pu
+				}
+			}
 		}
 		tv, tu, err := quantityParts(data["target"])
 		if err != nil {
@@ -421,6 +523,98 @@ func EvalCalculator(doc *Document, data map[string]any) CalcResult {
 		return res
 
 	case "sample_normalize":
+		rxnVal, rxnUnit, rxnErr := quantityParts(data["volume_per_unit"])
+		if rxnErr != nil || rxnVal <= 0 {
+			rxnVal, rxnUnit, rxnErr = quantityParts(data["final_volume"])
+		}
+		var targetMassNg float64
+		hasTargetMass := false
+		if tmVal, tmUnit, tmErr := quantityParts(data["target_mass"]); tmErr == nil && tmVal > 0 {
+			if ng, ok := massToNg(tmVal, tmUnit); ok {
+				targetMassNg = ng
+				hasTargetMass = true
+			}
+		} else if tmNum, ok := numericValue(data["target_mass_ng"]); ok && tmNum > 0 {
+			targetMassNg = tmNum
+			hasTargetMass = true
+		}
+
+		// Collect live upstream sample measurements first, otherwise fall back to authored sample rows.
+		var samples []CalcSampleInput
+		fromActual := false
+		wantedEndpoint := strings.TrimSpace(textValue(data, "upstream_endpoint"))
+		if actuals != nil && len(actuals.Samples) > 0 {
+			for _, s := range actuals.Samples {
+				if wantedEndpoint != "" && s.Endpoint != "" && !strings.EqualFold(s.Endpoint, wantedEndpoint) {
+					continue
+				}
+				if s.Value > 0 {
+					samples = append(samples, s)
+				}
+			}
+			if len(samples) > 0 {
+				fromActual = true
+			}
+		}
+		if len(samples) == 0 {
+			for _, rm := range mapSlice(data["samples"]) {
+				sid := firstNonEmpty(textValue(rm, "sample_id"), textValue(rm, "name"))
+				if sid == "" {
+					continue
+				}
+				val, ok := numericValue(rm["concentration"])
+				unit := textValue(rm, "unit")
+				if !ok {
+					if qv, qu, qerr := quantityParts(rm["concentration"]); qerr == nil {
+						val, unit, ok = qv, qu, true
+					}
+				}
+				if ok && val > 0 {
+					samples = append(samples, CalcSampleInput{SampleID: sid, Value: val, Unit: unit})
+				}
+			}
+		}
+		if len(samples) > 0 && rxnErr == nil && rxnVal > 0 {
+			rxnUL, normUnit, okV := volumeToUL(rxnVal, rxnUnit)
+			if !okV {
+				res.Err = fmt.Errorf("sample_normalize volume unit %q is invalid", rxnUnit)
+				return res
+			}
+			if !hasTargetMass {
+				targetMassNg = 500
+			}
+			insufficientCount := 0
+			for _, s := range samples {
+				concNgPerUL, okC := massConcToNgPerUL(s.Value, s.Unit)
+				if !okC || concNgPerUL <= 0 {
+					res.Rows = append(res.Rows, CalcRow{
+						Label: s.SampleID, Amount: 0, Unit: normUnit,
+						Note: fmt.Sprintf("实测 %s %s 单位暂不支持换算", formatNumber(s.Value), s.Unit),
+					})
+					continue
+				}
+				reqUL := targetMassNg / concNgPerUL
+				sampleUL := reqUL
+				diluentUL := rxnUL - sampleUL
+				note := fmt.Sprintf("实测 %s %s · 补稀释液 %s %s", formatNumber(s.Value), firstNonEmpty(s.Unit, "ng/uL"), formatNumber(round4(diluentUL)), normUnit)
+				if reqUL > rxnUL {
+					insufficientCount++
+					sampleUL = rxnUL
+					note = fmt.Sprintf("实测 %s %s · 需 %s %s（浓度偏低 · 超反应体积上限 insufficient）",
+						formatNumber(s.Value), firstNonEmpty(s.Unit, "ng/uL"), formatNumber(round4(reqUL)), normUnit)
+				}
+				res.Rows = append(res.Rows, CalcRow{
+					Label: s.SampleID + " 加样量", Amount: round4(sampleUL), Unit: normUnit, Note: note,
+				})
+				if fromActual {
+					res.UsedActuals = append(res.UsedActuals, fmt.Sprintf("%s=%s %s", s.SampleID, formatNumber(s.Value), firstNonEmpty(s.Unit, "ng/uL")))
+				}
+			}
+			res.Summary = fmt.Sprintf("%d 个样本归一化至 %s ng / %s %s（偏低 %d 项）",
+				len(samples), formatNumber(round4(targetMassNg)), formatNumber(round4(rxnUL)), normUnit, insufficientCount)
+			return res
+		}
+
 		count, _ := numericValue(data["sample_count"])
 		if count < 1 {
 			count = 1
@@ -429,12 +623,12 @@ func EvalCalculator(doc *Document, data map[string]any) CalcResult {
 		if excess < 0 {
 			excess = 0
 		}
-		if vpu, vu, qerr := quantityParts(data["volume_per_unit"]); qerr == nil && vpu > 0 {
-			tot := count * vpu * (1 + excess)
-			res.Summary = fmt.Sprintf("%d 个样本 · 单样 %s %s · 总配液 %s %s", int(count), formatNumber(vpu), vu, formatNumber(round4(tot)), vu)
+		if rxnErr == nil && rxnVal > 0 {
+			tot := count * rxnVal * (1 + excess)
+			res.Summary = fmt.Sprintf("%d 个样本 · 单样 %s %s · 总配液 %s %s", int(count), formatNumber(rxnVal), rxnUnit, formatNumber(round4(tot)), rxnUnit)
 			res.Rows = []CalcRow{
-				{Label: "单样反应体积", Amount: round4(vpu), Unit: vu, Note: fmt.Sprintf("样本数 %d", int(count))},
-				{Label: "含余量总体系", Amount: round4(tot), Unit: vu, Note: fmt.Sprintf("含 %d%% 余量", int(math.Round(excess*100)))},
+				{Label: "单样反应体积", Amount: round4(rxnVal), Unit: rxnUnit, Note: fmt.Sprintf("样本数 %d", int(count))},
+				{Label: "含余量总体系", Amount: round4(tot), Unit: rxnUnit, Note: fmt.Sprintf("含 %d%% 余量", int(math.Round(excess*100)))},
 			}
 			return res
 		}
@@ -451,16 +645,54 @@ func EvalCalculator(doc *Document, data map[string]any) CalcResult {
 		keys := []string{}
 		if rawIn, ok := data["inputs"].(map[string]any); ok {
 			for k, v := range rawIn {
-				if num, numOK := numericValue(v); numOK {
-					vars[k] = num
-					keys = append(keys, k)
-				} else if qv, _, qerr := quantityParts(v); qerr == nil {
-					vars[k] = qv
-					keys = append(keys, k)
+				switch tv := v.(type) {
+				case string:
+					refKey := strings.TrimSpace(tv)
+					if strings.HasPrefix(refKey, "@actual.") || strings.HasPrefix(refKey, "@param.") {
+						refKey = strings.TrimPrefix(strings.TrimPrefix(refKey, "@actual."), "@param.")
+						if actuals != nil {
+							if av, found := actuals.Params[refKey]; found {
+								vars[k] = av
+								keys = append(keys, k)
+								res.UsedActuals = append(res.UsedActuals, fmt.Sprintf("%s=%s", k, formatNumber(av)))
+								continue
+							}
+						}
+						if pv, _, found := docPlannedParamFloat(doc, refKey); found {
+							vars[k] = pv
+							keys = append(keys, k)
+						}
+					}
+				default:
+					if num, numOK := numericValue(v); numOK {
+						vars[k] = num
+						keys = append(keys, k)
+					} else if qv, _, qerr := quantityParts(v); qerr == nil {
+						vars[k] = qv
+						keys = append(keys, k)
+					}
+				}
+			}
+		}
+		if actuals != nil {
+			if toks, err := tokenizeFormula(expr); err == nil {
+				for _, tok := range toks {
+					if tok.kind != tokIdent {
+						continue
+					}
+					if _, already := vars[tok.text]; already {
+						continue
+					}
+					if av, ok := actuals.Params[tok.text]; ok {
+						vars[tok.text] = av
+						keys = append(keys, tok.text)
+						res.UsedActuals = append(res.UsedActuals, fmt.Sprintf("%s=%s", tok.text, formatNumber(av)))
+					}
 				}
 			}
 		}
 		sort.Strings(keys)
+		sort.Strings(res.UsedActuals)
 		if len(vars) == 0 {
 			res.Summary = fmt.Sprintf("公式：%s（Run 时代入实测值）", expr)
 			return res

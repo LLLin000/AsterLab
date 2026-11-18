@@ -1,6 +1,7 @@
 package asterdoc
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -303,29 +304,66 @@ func (v *View) renderDataTable(c *ui.Context, data map[string]any) {
 	if rowCount == 0 && len(authoredRows) == 0 {
 		rowCount = 2
 	}
+	var editableColKeys []string
+	editableColPos := map[string]int{}
+	for _, cm := range cols {
+		if textValue(cm, "value_kind") == "formula" {
+			continue
+		}
+		ck := textValue(cm, "key")
+		editableColPos[ck] = len(editableColKeys)
+		editableColKeys = append(editableColKeys, ck)
+	}
 
 	badge := firstNonEmpty(endpoint, schemaID, fmt.Sprintf("%d 列", len(cols)))
 	moduleCardFrame(v, c, lucide.Table2(), title, badge, nil, func() {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 			if interactiveRun {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					if iconButton(c, lucide.ClipboardPaste(), "粘贴 CSV/TSV", components.ButtonOutline).Clicked() {
 						clip := c.Services().ReadClipboard()
 						if strings.TrimSpace(clip) != "" {
-							v.applyClipboardToDataTable(moduleID, cols, clip)
+							v.applyClipboardToDataTableAt(moduleID, cols, len(authoredRows), 0, 0, clip)
 						}
 					}
 					if iconButton(c, lucide.Plus(), "新增行", components.ButtonOutline).Clicked() {
 						*extraRowsStr = strconv.Itoa(extraRows + 1)
 					}
 					ui.Spacer(c)
+					if st := v.TableSubmitStatus[moduleID]; st != "" {
+						ui.Row(c.Key("tbl-status:" + moduleID)).AlignItems(ui.Center).Children(func() {
+							components.Badge(c, st, components.BadgeOptions{Tone: components.BadgeSuccess})
+						})
+					}
 					if iconButton(c, lucide.Check(), "提交表格读数", components.ButtonSecondary).Clicked() {
-						if v.OnSubmitTableReadout != nil {
-							payload := v.buildDataTableSubmission(moduleID, schemaID, endpoint, cols, authoredRows, rowCount)
-							v.OnSubmitTableReadout(v.StepID, moduleID, payload)
+						payload, buildErr := v.buildDataTableSubmission(moduleID, schemaID, endpoint, cols, authoredRows, rowCount)
+						if v.TableSubmitErrors == nil {
+							v.TableSubmitErrors = map[string]string{}
+						}
+						if v.TableSubmitStatus == nil {
+							v.TableSubmitStatus = map[string]string{}
+						}
+						if buildErr != nil {
+							v.TableSubmitStatus[moduleID] = ""
+							v.TableSubmitErrors[moduleID] = buildErr.Error()
+						} else if v.OnSubmitTableReadout != nil {
+							if subErr := v.OnSubmitTableReadout(v.StepID, moduleID, payload); subErr != nil {
+								v.TableSubmitStatus[moduleID] = ""
+								v.TableSubmitErrors[moduleID] = subErr.Error()
+							} else {
+								v.TableSubmitErrors[moduleID] = ""
+								v.TableSubmitStatus[moduleID] = "已保存至 Core"
+							}
 						}
 					}
 				})
+				if subErr := v.TableSubmitErrors[moduleID]; subErr != "" {
+					ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+						Radius(float32(tok.ControlRadius)).Background(tok.Danger.Alpha(.08)).Border(1, tok.Danger).
+						AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Text(c, "提交失败："+subErr).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
+					})
+				}
 			}
 
 			// Column headers with unit & threshold pills
@@ -428,14 +466,71 @@ func (v *View) renderDataTable(c *ui.Context, data map[string]any) {
 								}
 							}
 							if interactiveRun {
-								components.TextBox(c, buf, components.TextBoxOptions{}).Placeholder("输入")
-								if v.TableCells == nil {
-									v.TableCells = map[string]map[string]string{}
-								}
-								if v.TableCells[moduleID] == nil {
-									v.TableCells[moduleID] = map[string]string{}
-								}
-								v.TableCells[moduleID][cellKey] = *buf
+								tb := components.TextBox(c, buf, components.TextBoxOptions{}).Placeholder("输入")
+								tb.FocusBind(&v.FocusedTableCell, cellKey)
+								eColIdx := editableColPos[ckey]
+								rowIdxSnap := rIdx
+								colKeySnap := ckey
+								tb.OnPaste(func(text string) bool {
+									if !strings.ContainsAny(text, "\t\n\r") {
+										return false
+									}
+									v.applyClipboardToDataTableAt(moduleID, cols, len(authoredRows), rowIdxSnap, eColIdx, text)
+									return true
+								})
+								tb.OnTextKey(func(k ui.TextKey) bool {
+									switch k.Key {
+									case ui.KeyDown:
+										if rowIdxSnap+1 < rowCount {
+											*buf = k.Text()
+											v.setTableCell(moduleID, v.cellDraftKey(moduleID, rowIdxSnap, colKeySnap), *buf)
+											v.FocusedTableCell = v.cellDraftKey(moduleID, rowIdxSnap+1, colKeySnap)
+											return true
+										}
+									case ui.KeyUp:
+										if rowIdxSnap > 0 {
+											*buf = k.Text()
+											v.setTableCell(moduleID, v.cellDraftKey(moduleID, rowIdxSnap, colKeySnap), *buf)
+											v.FocusedTableCell = v.cellDraftKey(moduleID, rowIdxSnap-1, colKeySnap)
+											return true
+										}
+									case ui.KeyEnter:
+										if k.Mods == 0 {
+											*buf = k.Text()
+											v.setTableCell(moduleID, v.cellDraftKey(moduleID, rowIdxSnap, colKeySnap), *buf)
+											if rowIdxSnap+1 >= rowCount {
+												*extraRowsStr = strconv.Itoa(extraRows + 1)
+											}
+											v.FocusedTableCell = v.cellDraftKey(moduleID, rowIdxSnap+1, colKeySnap)
+											return true
+										}
+									case ui.KeyTab:
+										*buf = k.Text()
+										v.setTableCell(moduleID, v.cellDraftKey(moduleID, rowIdxSnap, colKeySnap), *buf)
+										if len(editableColKeys) == 0 {
+											return false
+										}
+										if k.Mods&ui.Shift != 0 {
+											if eColIdx > 0 {
+												v.FocusedTableCell = v.cellDraftKey(moduleID, rowIdxSnap, editableColKeys[eColIdx-1])
+												return true
+											} else if rowIdxSnap > 0 {
+												v.FocusedTableCell = v.cellDraftKey(moduleID, rowIdxSnap-1, editableColKeys[len(editableColKeys)-1])
+												return true
+											}
+										} else {
+											if eColIdx+1 < len(editableColKeys) {
+												v.FocusedTableCell = v.cellDraftKey(moduleID, rowIdxSnap, editableColKeys[eColIdx+1])
+												return true
+											} else if rowIdxSnap+1 < rowCount {
+												v.FocusedTableCell = v.cellDraftKey(moduleID, rowIdxSnap+1, editableColKeys[0])
+												return true
+											}
+										}
+									}
+									return false
+								})
+								v.setTableCell(moduleID, cellKey, *buf)
 							} else {
 								ui.Text(c, firstNonEmpty(*buf, "—")).FontSize(float32(tok.TextData)).TextColor(tok.Text).FontFeatures("tnum")
 							}
@@ -581,18 +676,35 @@ func (v *View) dataTableCellVal(moduleID string, rowIdx int, colKey string, pre 
 	return ""
 }
 
-func (v *View) applyClipboardToDataTable(moduleID string, cols []map[string]any, raw string) {
+func (v *View) setTableCell(moduleID, cellKey, val string) {
 	if v.TableCells == nil {
 		v.TableCells = map[string]map[string]string{}
 	}
 	if v.TableCells[moduleID] == nil {
 		v.TableCells[moduleID] = map[string]string{}
 	}
+	v.TableCells[moduleID][cellKey] = val
+}
+
+func (v *View) applyClipboardToDataTable(moduleID string, cols []map[string]any, raw string) {
+	v.applyClipboardToDataTableAt(moduleID, cols, 0, 0, 0, raw)
+}
+
+func (v *View) applyClipboardToDataTableAt(moduleID string, cols []map[string]any, authoredRowCount, startRow, startEditableCol int, raw string) int {
+	var editableCols []map[string]any
+	for _, cm := range cols {
+		if textValue(cm, "value_kind") == "formula" {
+			continue
+		}
+		editableCols = append(editableCols, cm)
+	}
+	if len(editableCols) == 0 {
+		return 0
+	}
 	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
-	rIdx := 0
+	var parsedLines [][]string
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		sep := ","
@@ -600,70 +712,204 @@ func (v *View) applyClipboardToDataTable(moduleID string, cols []map[string]any,
 			sep = "\t"
 		}
 		parts := strings.Split(line, sep)
-		cPtr := 0
-		for _, cm := range cols {
-			if textValue(cm, "value_kind") == "formula" {
-				continue
-			}
-			if cPtr >= len(parts) {
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		parsedLines = append(parsedLines, parts)
+	}
+	if len(parsedLines) == 0 {
+		return 0
+	}
+	// Auto-skip header row when pasted from Excel/CSV starting at first editable column
+	if startEditableCol == 0 && len(parsedLines) > 1 {
+		hdrMatches := 0
+		for i, cm := range editableCols {
+			if i >= len(parsedLines[0]) {
 				break
 			}
-			ckey := textValue(cm, "key")
-			val := strings.TrimSpace(parts[cPtr])
+			cell := parsedLines[0][i]
+			key := textValue(cm, "key")
+			lbl := textValue(cm, "label")
+			if strings.EqualFold(cell, key) || (lbl != "" && strings.EqualFold(cell, lbl)) {
+				hdrMatches++
+			}
+		}
+		if hdrMatches >= 2 || (len(editableCols) == 1 && hdrMatches == 1) {
+			parsedLines = parsedLines[1:]
+		}
+	}
+	filledRows := 0
+	maxRowReached := startRow - 1
+	for rowOff, parts := range parsedLines {
+		rIdx := startRow + rowOff
+		wrote := false
+		for cOff, val := range parts {
+			colIdx := startEditableCol + cOff
+			if colIdx >= len(editableCols) {
+				break
+			}
+			ckey := textValue(editableCols[colIdx], "key")
 			ck := v.cellDraftKey(moduleID, rIdx, ckey)
-			v.TableCells[moduleID][ck] = val
+			v.setTableCell(moduleID, ck, val)
 			buf := v.ensureWidgetDraft(ck, val)
 			*buf = val
-			cPtr++
+			wrote = true
 		}
-		rIdx++
+		if wrote {
+			filledRows++
+			if rIdx > maxRowReached {
+				maxRowReached = rIdx
+			}
+		}
+	}
+	if maxRowReached >= 0 {
+		extraPtr := v.ensureWidgetDraft("dt_extra_rows:"+moduleID, "0")
+		curExtra, _ := strconv.Atoi(*extraPtr)
+		curTotal := authoredRowCount + curExtra
+		if curTotal == 0 {
+			curTotal = 2
+		}
+		if maxRowReached+1 > curTotal {
+			neededExtra := maxRowReached + 1 - authoredRowCount
+			if neededExtra < 0 {
+				neededExtra = 0
+			}
+			*extraPtr = strconv.Itoa(neededExtra)
+		}
+	}
+	return filledRows
+}
+
+func resolveSafeTableSchemaID(moduleID, schemaID string) string {
+	id := strings.TrimSpace(schemaID)
+	switch id {
+	case "":
+		return "data_table." + sanitizeIDFrag(moduleID) + ".v1"
+	case "cck8_od450", "rna_concentration", "rna_purity", "cfu_count":
+		return id + ".table"
+	default:
+		return id
 	}
 }
 
-func (v *View) buildDataTableSubmission(moduleID, schemaID, endpoint string, cols, authoredRows []map[string]any, rowCount int) map[string]any {
-	var submittedRows []map[string]any
+func (v *View) buildDataTableSubmission(moduleID, schemaID, endpoint string, cols, authoredRows []map[string]any, rowCount int) (map[string]any, error) {
+	if len(cols) == 0 {
+		return nil, fmt.Errorf("数据表未定义任何列")
+	}
+	colKeys := make([]string, 0, len(cols))
+	schemaCols := make([]map[string]any, 0, len(cols))
+	seenCols := map[string]bool{}
+	for _, cm := range cols {
+		ckey := textValue(cm, "key")
+		if ckey == "" {
+			return nil, fmt.Errorf("数据表存在缺少 key 的列")
+		}
+		if seenCols[ckey] {
+			return nil, fmt.Errorf("数据表列名重复：%s", ckey)
+		}
+		seenCols[ckey] = true
+		colKeys = append(colKeys, ckey)
+
+		clabel := firstNonEmpty(textValue(cm, "label"), ckey)
+		vkind := textValue(cm, "value_kind")
+		schemaKind := "categorical"
+		if vkind == "number" || vkind == "formula" {
+			schemaKind = "numeric"
+		}
+		sc := map[string]any{
+			"key":        ckey,
+			"label":      clabel,
+			"value_kind": schemaKind,
+		}
+		if unit := textValue(cm, "unit"); unit != "" {
+			sc["unit"] = unit
+		}
+		schemaCols = append(schemaCols, sc)
+	}
+
+	resolvedSchemaID := resolveSafeTableSchemaID(moduleID, schemaID)
+	resolvedEndpoint := firstNonEmpty(endpoint, "measurement")
+	schemaDef := map[string]any{
+		"schema_id":      resolvedSchemaID,
+		"schema_version": 1,
+		"endpoint":       resolvedEndpoint,
+		"value_kind":     "table",
+		"unit":           map[string]any{"required": false},
+		"missing": map[string]any{
+			"allowed":      []string{"not_detected", "below_lod", "above_uloq", "invalid", "other"},
+			"null_allowed": true,
+		},
+		"source": map[string]any{"raw": true, "derived": false},
+		"link":   map[string]any{"timepoint_required": false, "sample_required": false},
+		"table":  map[string]any{"columns": schemaCols},
+	}
+	schemaBytes, err := json.Marshal(schemaDef)
+	if err != nil {
+		return nil, fmt.Errorf("生成表格 schema 失败：%w", err)
+	}
+
+	var rowsOut [][]any
 	for rIdx := 0; rIdx < rowCount; rIdx++ {
 		var pre map[string]any
 		if rIdx < len(authoredRows) {
 			pre = authoredRows[rIdx]
 		}
-		rowOut := map[string]any{}
 		rowVars := map[string]float64{}
-		anyValue := false
 		for _, cm := range cols {
-			ckey := textValue(cm, "key")
 			if textValue(cm, "value_kind") == "formula" {
 				continue
 			}
-			raw := v.dataTableCellVal(moduleID, rIdx, ckey, pre)
-			if strings.TrimSpace(raw) != "" {
-				anyValue = true
-				if f, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil {
-					rowOut[ckey] = f
-					rowVars[ckey] = f
-				} else {
-					rowOut[ckey] = strings.TrimSpace(raw)
-				}
+			ckey := textValue(cm, "key")
+			raw := strings.TrimSpace(v.dataTableCellVal(moduleID, rIdx, ckey, pre))
+			if f, err := strconv.ParseFloat(raw, 64); err == nil {
+				rowVars[ckey] = f
 			}
 		}
-		for _, cm := range cols {
-			if textValue(cm, "value_kind") == "formula" {
-				ckey := textValue(cm, "key")
-				if res, err := EvalFormula(textValue(cm, "formula"), rowVars); err == nil {
-					rowOut[ckey] = round4(res)
+		rowVals := make([]any, len(cols))
+		anyNonNil := false
+		for cIdx, cm := range cols {
+			ckey := textValue(cm, "key")
+			clabel := firstNonEmpty(textValue(cm, "label"), ckey)
+			vkind := textValue(cm, "value_kind")
+			if vkind == "formula" {
+				if val, err := EvalFormula(textValue(cm, "formula"), rowVars); err == nil {
+					rowVals[cIdx] = round4(val)
+					anyNonNil = true
 				}
+				continue
 			}
+			raw := strings.TrimSpace(v.dataTableCellVal(moduleID, rIdx, ckey, pre))
+			if raw == "" {
+				rowVals[cIdx] = nil
+				continue
+			}
+			if vkind == "number" {
+				f, err := strconv.ParseFloat(raw, 64)
+				if err != nil {
+					return nil, fmt.Errorf("第 %d 行列 %s 需要数值（当前为 %q）", rIdx+1, clabel, raw)
+				}
+				rowVals[cIdx] = f
+			} else {
+				// Categorical/text cells must stay JSON string (even if text looks like "1")
+				rowVals[cIdx] = raw
+			}
+			anyNonNil = true
 		}
-		if anyValue {
-			submittedRows = append(submittedRows, rowOut)
+		if anyNonNil {
+			rowsOut = append(rowsOut, rowVals)
 		}
+	}
+	if len(rowsOut) == 0 {
+		return nil, fmt.Errorf("请至少填写一行数据再提交")
 	}
 	return map[string]any{
-		"module_id": moduleID,
-		"schema_id": firstNonEmpty(schemaID, "data_table.generic.v1"),
-		"endpoint":  firstNonEmpty(endpoint, "measurement"),
-		"rows":      submittedRows,
-	}
+		"module_id":       moduleID,
+		"schema_id":       resolvedSchemaID,
+		"schema_def_json": string(schemaBytes),
+		"endpoint":        resolvedEndpoint,
+		"columns":         colKeys,
+		"rows":            rowsOut,
+	}, nil
 }
 
 func rangeWarningText(hasMin bool, minV float64, hasMax bool, maxV float64, unit string) string {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
@@ -67,10 +68,18 @@ type Deviation struct {
 	Reason  string
 }
 
+// PersistedTable is one typed table readout decoded from Core execution events.
+type PersistedTable struct {
+	SchemaID string
+	Columns  []string
+	Rows     [][]any
+}
+
 // ActualRecord is the actual execution record for a task (from Core record store).
 type ActualRecord struct {
 	Parameters   map[string]string
 	Measurements []MeasurementView
+	Tables       map[string]PersistedTable
 	Files        []string
 	Deviations   []Deviation
 }
@@ -165,6 +174,7 @@ type EventViewModel struct {
 	Lineage      []LineageView
 	Measurements []MeasurementView
 	Parameters   []PlannedParameter
+	Tables       []PersistedTable
 	SampleIDs    []string
 	CheckAck     bool
 }
@@ -180,6 +190,11 @@ type RunWorkspaceViewModel struct {
 
 	Steps     []*RunTaskViewModel
 	TaskByKey map[string]*RunTaskViewModel
+
+	ActualParamNumbers map[string]float64
+	ActualParamUnits   map[string]string
+	SampleMeasurements map[string]map[string]MeasurementView
+	SampleStatuses     map[string]string
 
 	UnassociatedMeasurements []MeasurementView
 	UnassociatedEvents       []EventViewModel
@@ -536,6 +551,18 @@ func eventViewModel(e runs.RunEvent) EventViewModel {
 			Value any    `json:"value"`
 			Unit  string `json:"unit"`
 		} `json:"actual_parameters"`
+		ResultCells []struct {
+			Kind    string `json:"kind"`
+			Readout *struct {
+				SchemaID string `json:"schema_id"`
+				Unit     string `json:"unit"`
+				Value    struct {
+					Kind    string   `json:"kind"`
+					Columns []string `json:"columns"`
+					Rows    [][]any  `json:"rows"`
+				} `json:"value"`
+			} `json:"readout"`
+		} `json:"result_cells"`
 	}
 	if json.Unmarshal([]byte(e.DataJSON), &data) != nil {
 		return event
@@ -583,6 +610,16 @@ func eventViewModel(e runs.RunEvent) EventViewModel {
 		}
 		event.Parameters = append(event.Parameters, PlannedParameter{Key: parameter.Key, Label: parameter.Key, Value: value, Unit: parameter.Unit})
 	}
+	for _, rc := range data.ResultCells {
+		if rc.Kind != "record" || rc.Readout == nil || rc.Readout.Value.Kind != "table" {
+			continue
+		}
+		event.Tables = append(event.Tables, PersistedTable{
+			SchemaID: rc.Readout.SchemaID,
+			Columns:  rc.Readout.Value.Columns,
+			Rows:     rc.Readout.Value.Rows,
+		})
+	}
 	return event
 }
 
@@ -615,12 +652,16 @@ func LoadProjection(snap runs.RunSnapshot, load func() (*workflowtree.Tree, erro
 // the no-projection path is a test-only oracle and must not be used by the GUI.
 func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc, projection ...Projection) *RunWorkspaceViewModel {
 	vm := &RunWorkspaceViewModel{
-		RunID:          snap.RunID,
-		Title:          snap.Title,
-		Revision:       snap.Revision,
-		DesignRevision: snap.DesignRevision,
-		Status:         snap.Status,
-		TaskByKey:      map[string]*RunTaskViewModel{},
+		RunID:              snap.RunID,
+		Title:              snap.Title,
+		Revision:           snap.Revision,
+		DesignRevision:     snap.DesignRevision,
+		Status:             snap.Status,
+		TaskByKey:          map[string]*RunTaskViewModel{},
+		ActualParamNumbers: map[string]float64{},
+		ActualParamUnits:   map[string]string{},
+		SampleMeasurements: map[string]map[string]MeasurementView{},
+		SampleStatuses:     map[string]string{},
 	}
 	if snap.AsterDoc != nil {
 		vm.AsterDocRevision = snap.AsterDoc.Revision
@@ -657,6 +698,7 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc, project
 			Actual: &ActualRecord{
 				Parameters:   map[string]string{},
 				Measurements: []MeasurementView{},
+				Tables:       map[string]PersistedTable{},
 			},
 		}
 		vmTask.Planned = &PlannedStep{
@@ -710,6 +752,10 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc, project
 			Unit:     m.Unit,
 			Status:   "raw",
 		}
+		if vm.SampleMeasurements[m.SampleID] == nil {
+			vm.SampleMeasurements[m.SampleID] = map[string]MeasurementView{}
+		}
+		vm.SampleMeasurements[m.SampleID][m.Endpoint] = view
 		if target := findTaskForRecord(vm, m.TaskKey, m.ProtocolStepPath); target != nil {
 			target.Actual.Measurements = append(target.Actual.Measurements, view)
 		} else {
@@ -720,8 +766,85 @@ func BuildViewModel(snap runs.RunSnapshot, doc *asterdoc.FrozenAsterDoc, project
 	for sequence, e := range snap.Events {
 		event := eventViewModel(e)
 		event.Sequence = sequence
+		for _, p := range event.Parameters {
+			if f, err := strconv.ParseFloat(strings.TrimSpace(p.Value), 64); err == nil {
+				vm.ActualParamNumbers[p.Key] = f
+				if p.Unit != "" {
+					vm.ActualParamUnits[p.Key] = p.Unit
+				}
+			}
+		}
+		for _, tbl := range event.Tables {
+			sampleCol := -1
+			for ci, ck := range tbl.Columns {
+				if ck == "sample_id" || ck == "sample" {
+					sampleCol = ci
+					break
+				}
+			}
+			if sampleCol >= 0 {
+				for _, row := range tbl.Rows {
+					if sampleCol >= len(row) || row[sampleCol] == nil {
+						continue
+					}
+					sid := strings.TrimSpace(fmt.Sprint(row[sampleCol]))
+					if sid == "" {
+						continue
+					}
+					for ci, ck := range tbl.Columns {
+						if ci == sampleCol || ck == "row" || ci >= len(row) || row[ci] == nil {
+							continue
+						}
+						if num, ok := row[ci].(float64); ok {
+							if vm.SampleMeasurements[sid] == nil {
+								vm.SampleMeasurements[sid] = map[string]MeasurementView{}
+							}
+							vm.SampleMeasurements[sid][ck] = MeasurementView{
+								SampleID: sid,
+								Field:    ck,
+								Value:    fmt.Sprintf("%g", num),
+								Status:   "raw",
+							}
+						}
+					}
+				}
+			}
+		}
+		if len(event.SampleIDs) > 0 && event.StepStatus != "" {
+			var mappedStatus string
+			switch event.StepStatus {
+			case "qc_dropped":
+				mappedStatus = "QC剔除"
+			case "censored_dead":
+				mappedStatus = "删失"
+			case "rework":
+				mappedStatus = "重做"
+			case "completed", "in_progress":
+				mappedStatus = "正常"
+			}
+			if mappedStatus != "" {
+				for _, sid := range event.SampleIDs {
+					vm.SampleStatuses[sid] = mappedStatus
+				}
+			}
+		}
 		if target := findTaskForRecord(vm, e.TaskKey, e.ProtocolStepPath); target != nil {
 			target.Events = append(target.Events, event)
+			if target.Actual != nil {
+				for _, p := range event.Parameters {
+					disp := p.Value
+					if p.Unit != "" {
+						disp += " " + p.Unit
+					}
+					target.Actual.Parameters[p.Key] = disp
+				}
+				for _, tbl := range event.Tables {
+					target.Actual.Tables[tbl.SchemaID] = tbl
+					if base := strings.TrimSuffix(tbl.SchemaID, ".table"); base != tbl.SchemaID {
+						target.Actual.Tables[base] = tbl
+					}
+				}
+			}
 		} else {
 			vm.UnassociatedEvents = append(vm.UnassociatedEvents, event)
 		}

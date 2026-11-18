@@ -286,3 +286,41 @@ func TestChangesForDerived(t *testing.T) {
 		t.Fatal("unknown draft key must fail, not silently drop")
 	}
 }
+
+func TestDecodeReadoutsTableAndCategorical(t *testing.T) {
+	tp := "24h"
+	records := []ReadoutRecord{
+		{
+			StepPath:  "root/measure",
+			Timepoint: &tp,
+			Readout: json.RawMessage(`{
+				"schema_id":"inhibition_zone_mm",
+				"schema_version":1,
+				"value":{"kind":"table","columns":["sample","d1","d2"],"rows":[["Van-1",12.5,null],["HAMA-1",15.0,15.5]]},
+				"source":{"kind":"raw","derived_from":[]}
+			}`),
+		},
+		{
+			StepPath: "root/grade",
+			Readout: json.RawMessage(`{
+				"schema_id":"wb_grade",
+				"schema_version":1,
+				"value":{"kind":"categorical","category":"+++"},
+				"source":{"kind":"raw","derived_from":[]}
+			}`),
+		},
+	}
+	decoded := DecodeReadouts(records)
+	if len(decoded) != 2 {
+		t.Fatalf("decoded = %+v", decoded)
+	}
+	if decoded[0].SchemaID != "inhibition_zone_mm" || decoded[0].Kind != "table" || len(decoded[0].Rows) != 2 {
+		t.Fatalf("decoded[0] = %+v", decoded[0])
+	}
+	if decoded[0].Rows[0][2] != "—" || decoded[0].Rows[0][1] != "12.5" {
+		t.Fatalf("table row formatting = %+v", decoded[0].Rows)
+	}
+	if decoded[1].Kind != "categorical" || decoded[1].Category != "+++" {
+		t.Fatalf("decoded[1] = %+v", decoded[1])
+	}
+}

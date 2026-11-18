@@ -28,7 +28,7 @@ def rust_env() -> dict[str, str]:
 
 
 def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:
-    result = subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True)
+    result = subprocess.run(command, cwd=cwd, env=env, text=True, encoding="utf-8", errors="replace", capture_output=True)
     if result.returncode:
         raise RuntimeError(
             f"command failed ({result.returncode}): {' '.join(command)}\n"
@@ -112,7 +112,7 @@ def rust_results(fixtures: list[dict[str, object]]) -> tuple[dict[str, dict[str,
     rust_environment = rust_env()
     run([CARGO, "build", "--bin", "labworkbench"], cwd=ROOT, env=rust_environment)
     metadata = json.loads(run([CARGO, "metadata", "--format-version", "1", "--no-deps"], cwd=ROOT, env=rust_environment))
-    rust_binary = Path(metadata["target_directory"]) / "debug/labworkbench"
+    rust_binary = Path(metadata["target_directory"]) / ("debug/labworkbench.exe" if os.name == "nt" else "debug/labworkbench")
     if not rust_binary.is_file():
         raise RuntimeError(f"cargo build succeeded but binary is missing: {rust_binary}")
     results = {}

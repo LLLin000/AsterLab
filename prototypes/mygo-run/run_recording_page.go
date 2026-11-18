@@ -43,6 +43,33 @@ func (a *app) syncRunBenchCallbacks() {
 	cb.TaskAssets = a.runAssetsForTask
 	cb.CaptureWells = a.captureWellsForTask
 	cb.RequestBatchLink = a.requestBatchLink
+	cb.ResolveAssetPath = func(asset runworkspace.LinkedAsset) string {
+		if strings.TrimSpace(asset.RootID) == "" || strings.TrimSpace(asset.RelativePath) == "" {
+			return ""
+		}
+		p, err := assets.Roots(a.assetRoots).Resolve(assets.Asset{
+			RootID: asset.RootID, RelativePath: asset.RelativePath,
+		})
+		if err != nil {
+			return ""
+		}
+		return p
+	}
+	cb.RequestStepAssetLink = func(taskKey, wellID string) {
+		a.openAssetLinkForm(taskKey, runworkspace.LinkedAsset{WellID: wellID})
+		if a.shell != nil {
+			a.shell.Invalidate()
+		}
+	}
+	cb.OpenAsset = func(taskKey string, asset runworkspace.LinkedAsset) {
+		_ = a.tryOpenRunAsset(taskKey, asset)
+	}
+	cb.AsyncDecode = a.windowReady
+	cb.OnAsyncInvalidate = func() {
+		if a.shell != nil {
+			a.shell.Invalidate()
+		}
+	}
 	// The relay plan comes from the frozen design revision the Run pinned,
 	// never the live draft: Design edits cannot move a running timer.
 	cb.TimerPhases = a.runTimerPhases
@@ -74,6 +101,12 @@ func (a *app) syncRunBenchCallbacks() {
 		if err != nil {
 			return runs.ExecuteCommandResult{}, state.MapError(err)
 		}
+		if a.snap.RunID != "" {
+			if snap, loadErr := a.runSvc.LoadRun(context.Background(), a.snap.RunID); loadErr == nil {
+				a.applySnap(snap)
+			}
+		}
+		a.invalidateRecord()
 		return result, nil
 	}
 	// The blind flag is view state on the bench; grids are Core-backed data

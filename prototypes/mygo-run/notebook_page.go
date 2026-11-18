@@ -1226,6 +1226,7 @@ func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "记录读取失败："+fetchErr).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
 				}
 				a.recordSummarySection(c, t, tokens, proj, tasks)
+				a.recordTypedReadoutsSection(c, t, tokens, proj)
 				a.recordGroupBoardSection(c, t, tokens, proj, board)
 				a.recordMatrixSection(c, t, tokens, proj, board)
 				a.recordRefsSection(c, t, tokens, proj, sealed)
@@ -1288,6 +1289,63 @@ func (a *app) recordSummarySection(c *ui.Context, t *ui.Theme, tokens theme.Toke
 	for _, issue := range proj.Issues {
 		issue := issue
 		ui.Text(c, "缺项 "+issue.Code+"："+issue.Message).FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+	}
+}
+
+func (a *app) recordTypedReadoutsSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection) {
+	decoded := record.DecodeReadouts(proj.Readouts)
+	if len(decoded) == 0 {
+		return
+	}
+	recordBoardSection(c, t, "结构化表格与分类读数")
+	for _, dr := range decoded {
+		dr := dr
+		ui.Column(c).FillWidth().Padding(float32(tokens.Spacing12)).Radius(float32(tokens.PanelRadius)).
+			Background(tokens.Surface).Border(1, tokens.Border).Gap(float32(tokens.Spacing8)).Children(func() {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+				ui.Text(c, dr.SchemaID).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
+				if dr.StepPath != "" {
+					components.Badge(c, dr.StepPath)
+				}
+				if dr.Timepoint != "" {
+					components.Badge(c, dr.Timepoint, components.BadgeOptions{Tone: components.BadgeAccent})
+				}
+				ui.Spacer(c)
+				switch dr.Kind {
+				case "table":
+					components.Badge(c, fmt.Sprintf("表格 · %d 行", len(dr.Rows)))
+				case "categorical":
+					components.Badge(c, "分类 · "+orDash(dr.Category), components.BadgeOptions{Tone: components.BadgeSuccess})
+				case "numeric":
+					if dr.Number != nil {
+						val := fmt.Sprintf("%g", *dr.Number)
+						if dr.Unit != "" {
+							val += " " + dr.Unit
+						}
+						components.Badge(c, val, components.BadgeOptions{Tone: components.BadgeSuccess})
+					}
+				}
+			})
+			if dr.Kind == "table" && len(dr.Columns) > 0 && len(dr.Rows) > 0 {
+				cols := make([]ui.TableColumn, 0, len(dr.Columns))
+				for _, cname := range dr.Columns {
+					cols = append(cols, ui.TableColumn{ID: cname, Title: cname, MinWidth: 96})
+				}
+				components.Table(c, nil, cols, func() {
+					for rIdx, row := range dr.Rows {
+						rIdx, row := rIdx, row
+						rowKey := fmt.Sprintf("%s-r%d", dr.SchemaID, rIdx)
+						components.TableRow(c, rIdx, rowKey, false, func(col int) {
+							cellTxt := "—"
+							if col < len(row) {
+								cellTxt = row[col]
+							}
+							ui.Text(c, cellTxt).FontSize(float32(tokens.TextData)).TextColor(t.Text).FontFeatures("tnum")
+						})
+					}
+				})
+			}
+		})
 	}
 }
 

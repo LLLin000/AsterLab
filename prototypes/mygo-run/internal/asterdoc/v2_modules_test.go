@@ -1,6 +1,7 @@
 package asterdoc
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -149,5 +150,86 @@ func TestStepBlockComposerRendersAndInsertsGenericModules(t *testing.T) {
 	tt.Frame()
 	if insertedKind != "prose" {
 		t.Fatalf("insertedKind = %q, want prose", insertedKind)
+	}
+}
+
+func TestMoveStepBlockToIndexAndCalculatorActualsAndPaste(t *testing.T) {
+	raw, err := os.ReadFile("testdata/inhibition-zone.asterml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextSrc, err := MoveStepBlockToIndex(string(raw), "step-02-quadrants", "blk-iz-quadrant-svg", 0)
+	if err != nil {
+		t.Fatalf("MoveStepBlockToIndex failed: %v", err)
+	}
+	doc, err := Parse(nextSrc)
+	if err != nil {
+		t.Fatalf("re-parse after move failed: %v", err)
+	}
+	for _, m := range doc.Modules {
+		if m.ID == "step-02-quadrants" {
+			blocks, _ := m.Data["blocks"].([]any)
+			first, _ := blocks[0].(map[string]any)
+			if textValue(first, "id") != "blk-iz-quadrant-svg" {
+				t.Fatalf("first block after reorder = %q, want blk-iz-quadrant-svg", textValue(first, "id"))
+			}
+		}
+	}
+
+	// Upstream actual calculator resolution: formula + dilution + per-sample normalize
+	actuals := &CalcActualContext{
+		Params:     map[string]float64{"stock_van": 20.0, "dose": 2.5},
+		ParamUnits: map[string]string{"stock_van": "mg/mL"},
+		Samples: []CalcSampleInput{
+			{SampleID: "S1", Value: 250, Unit: "ng/uL", Endpoint: "rna_conc"},
+			{SampleID: "S2", Value: 10, Unit: "ng/uL", Endpoint: "rna_conc"},
+		},
+	}
+	dilRes := EvalCalculatorWithActuals(doc, map[string]any{
+		"mode":         "dilution",
+		"stock_ref":    "@actual.stock_van",
+		"stock":        map[string]any{"value": 10.0, "unit": "mg/mL"},
+		"target":       map[string]any{"value": 2.0, "unit": "mg/mL"},
+		"final_volume": map[string]any{"value": 100.0, "unit": "uL"},
+	}, actuals)
+	if dilRes.Err != nil || len(dilRes.UsedActuals) != 1 || math.Abs(dilRes.Rows[0].Amount-10.0) > 1e-4 {
+		t.Fatalf("dilRes = %+v", dilRes)
+	}
+	normRes := EvalCalculatorWithActuals(doc, map[string]any{
+		"mode":              "sample_normalize",
+		"upstream_endpoint": "rna_conc",
+		"target_mass":       map[string]any{"value": 500.0, "unit": "ng"},
+		"volume_per_unit":   map[string]any{"value": 10.0, "unit": "uL"},
+	}, actuals)
+	if normRes.Err != nil || len(normRes.Rows) != 2 || math.Abs(normRes.Rows[0].Amount-2.0) > 1e-4 || !strings.Contains(normRes.Rows[1].Note, "insufficient") {
+		t.Fatalf("normRes = %+v", normRes)
+	}
+
+	// Multi-row paste with header skip, auto-expansion & typed ReadoutSchema generation
+	v := &View{Doc: doc, Mode: ModeRun}
+	cols := []map[string]any{
+		{"key": "sample", "label": "样本", "value_kind": "text"},
+		{"key": "d1", "label": "纵径", "value_kind": "number", "unit": "mm"},
+		{"key": "d2", "label": "横径", "value_kind": "number", "unit": "mm"},
+		{"key": "mean_mm", "label": "平均直径", "value_kind": "formula", "formula": "(d1 + d2) / 2", "unit": "mm"},
+	}
+	filled := v.applyClipboardToDataTableAt("dt-test", cols, 0, 0, 0, "样本\t纵径\t横径\nVan-1\t100\t12\nHAMA-1\t15\t16\nBlank-1\t6\t6")
+	if filled != 3 {
+		t.Fatalf("filled rows = %d, want 3", filled)
+	}
+	sub, err := v.buildDataTableSubmission("dt-test", "cfu_count", "zone_mm", cols, nil, 3)
+	if err != nil {
+		t.Fatalf("buildDataTableSubmission error = %v", err)
+	}
+	if sub["schema_id"] != "cfu_count.table" {
+		t.Fatalf("builtin collision schema_id = %v", sub["schema_id"])
+	}
+	var parsedSchema map[string]any
+	if err := json.Unmarshal([]byte(sub["schema_def_json"].(string)), &parsedSchema); err != nil {
+		t.Fatal(err)
+	}
+	rows := sub["rows"].([][]any)
+	if len(rows) != 3 || rows[0][0] != "Van-1" || rows[0][3] != 56.0 {
+		t.Fatalf("rows = %#v", rows)
 	}
 }

@@ -281,10 +281,20 @@ func (a *app) ensureDesignView(doc *asterdoc.Document, stepID string) *asterdoc.
 					"type": "move_step_block", "stepId": sID, "blockId": blockID, "direction": direction,
 				})
 			},
+			OnMoveStepBlockIndex: func(sID, blockID string, toIndex int) {
+				_ = a.applyDesignRaw(map[string]any{
+					"type": "move_step_block", "stepId": sID, "blockId": blockID, "toIndex": toIndex,
+				})
+			},
 			OnRemoveStepBlock: func(sID, blockID string) {
 				_ = a.applyDesignRaw(map[string]any{
 					"type": "remove_step_block", "stepId": sID, "blockId": blockID,
 				})
+			},
+			OnAsyncInvalidate: func() {
+				if a.shell != nil {
+					a.shell.Invalidate()
+				}
 			},
 			OnPickFigureFile: func(sID, blockID string) {
 				paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
@@ -308,6 +318,7 @@ func (a *app) ensureDesignView(doc *asterdoc.Document, stepID string) *asterdoc.
 		}
 	}
 	a.designView.StepID = stepID
+	a.designView.AsyncDecode = a.windowReady
 	return a.designView
 }
 

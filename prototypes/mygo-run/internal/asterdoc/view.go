@@ -45,6 +45,7 @@ type View struct {
 	OnInsertStepBlock    func(stepID string, index int, block map[string]any)
 	OnUpdateStepBlock    func(stepID, blockID string, props map[string]any)
 	OnMoveStepBlock      func(stepID, blockID, direction string)
+	OnMoveStepBlockIndex func(stepID, blockID string, toIndex int)
 	OnRemoveStepBlock    func(stepID, blockID string)
 	OnPickFigureFile     func(stepID, blockID string)
 	StepID               string
@@ -53,24 +54,36 @@ type View struct {
 	OnToggleCheck        func(stepID, checkID string, checked bool)
 	OnRuleSkip           func(stepID, checkID, rule string)
 	OnTimerAction        func(stepID, blockID, action string)
-	OnSubmitTableReadout func(stepID, blockID string, payload map[string]any)
+	OnSubmitTableReadout func(stepID, blockID string, payload map[string]any) error
 	OnExcludeSample      func(sampleID, status string)
 	OnLinkAsset          func(stepID, blockID, wellID string)
+	OnOpenExternalAsset  func(asset AssetThumb)
+	AsyncDecode          bool
+	OnAsyncInvalidate    func()
 	ActualParams         map[string]string
+	CalcActuals          *CalcActualContext
 	CheckedItems         map[string]bool
 	SkippedItems         map[string]string
 	TimerStates          map[string]TimerRuntimeState
 	TableCells           map[string]map[string]string
 	TableQualifiers      map[string]map[string]string
+	TableSubmitStatus    map[string]string
+	TableSubmitErrors    map[string]string
 	SampleStatuses       map[string]string
 	LinkedAssets         map[string][]AssetThumb
+	FocusedTableCell     string
 	ExpandedFigureID     string
+	FigureZoom           float32
 	figureOpen           bool
+	ExpandedAsset        *AssetThumb
+	AssetZoom            float32
+	assetOpen            bool
 	HideStepHeader       bool
 	widgetTextDrafts     map[string]*string
 	widgetBoolDrafts     map[string]*bool
 	svgCache             map[string]*ui.SVG
 	imgCache             map[string]ui.ImageSource
+	imgLoading           map[string]bool
 	imgErrCache          map[string]string
 	calcScratch          map[string]map[string]*string
 	// ExpandedPlate is the plate rendered in the full-screen overlay; it is

@@ -170,7 +170,7 @@ func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 		}
 	}
 
-	res := EvalCalculator(v.Doc, evalData)
+	res := EvalCalculatorWithActuals(v.Doc, evalData, v.CalcActuals)
 	moduleCardFrame(v, c, lucide.Calculator(), title, calcModeLabel(mode), nil, func() {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 			// Interactive scratchpad inputs row
@@ -188,6 +188,12 @@ func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 					v.renderCalcNumInput(c, moduleID, "excess_ratio", "余量比例", evalData["excess_ratio"])
 				}
 			})
+
+			if len(res.UsedActuals) > 0 {
+				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).Children(func() {
+					components.Badge(c, "已代入实测 · "+strings.Join(res.UsedActuals, ", "), components.BadgeOptions{Tone: components.BadgeSuccess})
+				})
+			}
 
 			if res.Err != nil {
 				v.moduleError(c, res.Err)
@@ -466,20 +472,32 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 					for _, th := range thumbs {
 						th := th
-						ui.Column(c).Width(float32(tok.Spacing48)*2.5).Padding(float32(tok.Spacing4)).
-							Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
-							Gap(float32(tok.Spacing4)).Children(func() {
-							if th.FilePath != "" {
-								if imgSrc, errText := v.cachedImageFile(th.FilePath); errText == "" {
-									ui.Image(c, imgSrc).Height(float32(tok.Spacing48) * 1.4)
+						thumbBtn := ui.ButtonBase(c).Width(float32(tok.Spacing48)*2.7).Padding(float32(tok.Spacing8)).
+							Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Children(func() {
+							ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+								if th.FilePath != "" {
+									if imgSrc, errText := v.cachedImageFile(th.FilePath); errText == "" && imgSrc != nil {
+										ui.Image(c, imgSrc).Height(float32(tok.Spacing48) * 1.5)
+									} else {
+										ui.Row(c).FillWidth().Height(float32(tok.Spacing48)*1.5).Center().
+											Radius(float32(tok.ControlRadius)).Background(tok.Surface).Children(func() {
+											ui.Text(c, firstNonEmpty(errText, "图片不可用")).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										})
+									}
 								}
-							}
-							lbl := firstNonEmpty(th.Label, th.AssetID)
-							if th.WellID != "" {
-								lbl = fmt.Sprintf("%s #%d · %s", th.WellID, th.FovIndex, lbl)
-							}
-							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).FontFeatures("tnum")
+								lbl := firstNonEmpty(th.Label, th.AssetID)
+								if th.WellID != "" {
+									lbl = fmt.Sprintf("%s #%d · %s", th.WellID, th.FovIndex, lbl)
+								}
+								ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).FontFeatures("tnum")
+							})
 						})
+						if thumbBtn.Clicked() {
+							cp := th
+							v.ExpandedAsset = &cp
+							v.AssetZoom = 1
+							v.assetOpen = true
+						}
 					}
 				})
 			} else {
@@ -493,6 +511,55 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 				if iconButton(c, lucide.Paperclip(), "关联图片 / 文件", components.ButtonSecondary).Clicked() {
 					v.OnLinkAsset(v.StepID, moduleID, "")
 				}
+			}
+			if v.assetOpen && v.ExpandedAsset != nil {
+				exp := *v.ExpandedAsset
+				if v.AssetZoom <= 0 {
+					v.AssetZoom = 1
+				}
+				components.Dialog(c.Key("asset-dlg:"+moduleID), &v.assetOpen, components.DialogOptions{Label: firstNonEmpty(exp.Label, exp.AssetID)}, func(panel ui.Element) {
+					panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Text(c, firstNonEmpty(exp.Label, exp.AssetID)).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+							if exp.WellID != "" {
+								components.Badge(c, fmt.Sprintf("%s #%d", exp.WellID, exp.FovIndex))
+							}
+							ui.Spacer(c)
+							for _, z := range []float32{1.0, 1.5, 2.0} {
+								z := z
+								style := components.ButtonOutline
+								if v.AssetZoom == z {
+									style = components.ButtonSecondary
+								}
+								if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
+									v.AssetZoom = z
+								}
+							}
+							if v.OnOpenExternalAsset != nil {
+								if components.Button(c, "系统打开", components.ButtonOutline).Clicked() {
+									v.OnOpenExternalAsset(exp)
+								}
+							}
+							if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
+								v.assetOpen = false
+							}
+						})
+						if exp.FilePath != "" {
+							imgSrc, errText := v.cachedImageFile(exp.FilePath)
+							if errText == "" && imgSrc != nil {
+								ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
+									ui.Image(c, imgSrc).Height(300 * v.AssetZoom)
+								})
+							} else {
+								ui.Text(c, "文件预览不可用："+firstNonEmpty(errText, exp.FilePath)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							}
+						}
+						if exp.AssetID != "" {
+							ui.Text(c, fmt.Sprintf("资产 ID: %s · 路径: %s", exp.AssetID, exp.FilePath)).
+								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						}
+					})
+				})
 			}
 		})
 	})

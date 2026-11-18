@@ -786,8 +786,14 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
             let module_id = input.get("module_id").and_then(Value::as_str);
             let source = doc.get("source").and_then(Value::as_str).unwrap_or("");
             let modules = parse_asterdoc_modules(source)?;
+            let budget = compute_asterdoc_budget(&modules);
             let mut inspected = Vec::new();
-            for module in &modules {
+            let scan_modules: Vec<&serde_yaml::Value> = if module_id.is_some() {
+                flatten_asterdoc_modules(&modules)
+            } else {
+                modules.iter().collect()
+            };
+            for module in scan_modules {
                 let kind = module.get("kind").and_then(|v| v.as_str()).unwrap_or("").to_owned();
                 let id = module.get("id").and_then(|v| v.as_str()).unwrap_or("").to_owned();
                 if let Some(filter) = module_id {
@@ -821,6 +827,7 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
                 "design_id": design_id,
                 "revision": doc.get("revision").cloned().unwrap_or(Value::Null),
                 "source_hash": doc.get("source_hash").cloned().unwrap_or(Value::Null),
+                "budget": budget,
                 "modules": inspected
             }))
         }
@@ -2382,7 +2389,7 @@ pub(crate) fn result_schema(tool: &str) -> Value {
         }
         "sdk.modules" => json!({"type":"object","additionalProperties":false,"required":["modules"],"properties":{"modules":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["kind","schema"],"properties":{"kind":{"type":"string"},"schema":{"type":"integer","minimum":1},"title":{"type":["string","null"]},"category":{"type":["string","null"]},"capabilities":{"type":["array","null"]},"renderers":{"type":["object","null"]},"actions":{"type":["array","null"]}}}}}}),
         "sdk.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled","errors","warnings","modules"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","schema"],"properties":{"kind":{},"schema":{}}}},"design":{"type":"object","additionalProperties":true}}}),
-        "asterdoc.inspect" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","modules"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","id","schema","data","manifest"],"properties":{"kind":{"type":"string"},"id":{"type":"string"},"schema":{"type":"integer","minimum":0},"data":{"type":"object","additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}}}}}),
+        "asterdoc.inspect" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","budget","modules"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"budget":{"type":"object","additionalProperties":false,"required":["steps","executable_steps","groups","wells","hands_on_sec","total_span_sec","has_open_phase"],"properties":{"steps":{"type":"integer","minimum":0},"executable_steps":{"type":"integer","minimum":0},"groups":{"type":"integer","minimum":0},"wells":{"type":"integer","minimum":0},"hands_on_sec":{"type":"integer","minimum":0},"total_span_sec":{"type":"integer","minimum":0},"has_open_phase":{"type":"boolean"}}},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","id","schema","data","manifest"],"properties":{"kind":{"type":"string"},"id":{"type":"string"},"schema":{"type":"integer","minimum":0},"data":{"type":"object","additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}}}}}),
         "asterdoc.assess" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","state","errors","warnings"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"state":{"type":"string","enum":["ready","warning","incomplete"]},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}}}}),
 
         "asterdoc.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"design":{"type":"object","additionalProperties":true},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string"},"message":{"type":"string"}}}}}),
@@ -2673,7 +2680,11 @@ pub(crate) fn input_schema(tool: &str) -> Option<Value> {
                     {"type":"object","additionalProperties":false,"required":["type","moduleId","properties"],"properties":{"type":{"const":"update_module"},"moduleId":{"type":"string","minLength":1},"properties":{"type":"object"}}},
                     {"type":"object","additionalProperties":false,"required":["type","moduleId","group","wells"],"properties":{"type":{"const":"assign_wells"},"moduleId":{"type":"string","minLength":1},"group":{"type":"string","minLength":1},"wells":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
                     {"type":"object","additionalProperties":false,"required":["type","moduleId","wells"],"properties":{"type":{"const":"clear_wells"},"moduleId":{"type":"string","minLength":1},"wells":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
-                    {"type":"object","additionalProperties":false,"required":["type","moduleId","from","to"],"properties":{"type":{"enum":["connect_steps","disconnect_steps"]},"moduleId":{"type":"string","minLength":1},"from":{"type":"string","minLength":1},"to":{"type":"string","minLength":1}}}
+                    {"type":"object","additionalProperties":false,"required":["type","moduleId","from","to"],"properties":{"type":{"enum":["connect_steps","disconnect_steps"]},"moduleId":{"type":"string","minLength":1},"from":{"type":"string","minLength":1},"to":{"type":"string","minLength":1}}},
+                    {"type":"object","additionalProperties":false,"required":["type","block"],"properties":{"type":{"const":"insert_step_block"},"stepId":{"type":"string","minLength":1},"moduleId":{"type":"string","minLength":1},"index":{"type":"integer","minimum":0},"block":{"type":"object","required":["kind","id"],"properties":{"kind":{"type":"string"},"id":{"type":"string","minLength":1},"schema":{"type":"integer","minimum":1}}}}},
+                    {"type":"object","additionalProperties":false,"required":["type","blockId","properties"],"properties":{"type":{"const":"update_step_block"},"stepId":{"type":"string","minLength":1},"moduleId":{"type":"string","minLength":1},"blockId":{"type":"string","minLength":1},"properties":{"type":"object"}}},
+                    {"type":"object","additionalProperties":false,"required":["type","blockId"],"properties":{"type":{"const":"move_step_block"},"stepId":{"type":"string","minLength":1},"moduleId":{"type":"string","minLength":1},"blockId":{"type":"string","minLength":1},"direction":{"type":"string","enum":["up","down"]},"toIndex":{"type":"integer","minimum":0}}},
+                    {"type":"object","additionalProperties":false,"required":["type","blockId"],"properties":{"type":{"const":"remove_step_block"},"stepId":{"type":"string","minLength":1},"moduleId":{"type":"string","minLength":1},"blockId":{"type":"string","minLength":1}}}
                 ]}
             }})
         }
