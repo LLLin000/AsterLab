@@ -49,6 +49,7 @@ type Props struct {
 	Blind       bool
 	GroupIndex  map[string]int
 	GroupLabels map[string]string
+	HideFooter  bool
 	Zoom        float32
 	State       *InteractionState
 }
@@ -702,7 +703,14 @@ func View(c *ui.Context, props Props) {
 							} else if len([]rune(badge)) == 1 {
 								fontPx = labelSize * 0.84
 							}
-							glyphW := float32(len([]rune(badge))) * fontPx * 0.56
+							glyphW := estimatedBadgeWidth(badge, fontPx)
+							if maxW := cellW - 6; glyphW > maxW && maxW > 4 {
+								fontPx *= maxW / glyphW
+								if fontPx < 7.5 {
+									fontPx = 7.5
+								}
+								glyphW = estimatedBadgeWidth(badge, fontPx)
+							}
 							tx := x + (cellW-glyphW)/2
 							ty := y + (cellH-fontPx)*0.42
 							if tx < x+2 {
@@ -761,10 +769,22 @@ func View(c *ui.Context, props Props) {
 				}
 			})
 		}
-		if !mini {
+		if !mini && !props.HideFooter {
 			ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 悬停查看分组与样本明细", len(props.Wells), rows*cols)).FontSize(labelSize).TextColor(t.TextMuted)
 		}
 	})
+}
+
+func estimatedBadgeWidth(badge string, fontPx float32) float32 {
+	var units float32
+	for _, r := range badge {
+		if r > 0x7f {
+			units += 1.0
+		} else {
+			units += 0.56
+		}
+	}
+	return units * fontPx
 }
 
 func wellHoverSummary(props Props, id string) string {

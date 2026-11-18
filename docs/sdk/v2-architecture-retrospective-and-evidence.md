@@ -285,10 +285,23 @@ flowchart TD
 
 ### 7.9 全仓视觉与功能补齐：`Tools` 工作台、实验归档导出与首页样板（提交 `4d5391c`）
 
-- **`Tools` 工具台升级与 Design 闭环**：基于 `onevra/components` 与科研中文重构 [internal/tools/tools.go](../../prototypes/mygo-run/internal/tools/tools.go)（储藏室台账、96 孔板速排、稀释配液换算、实验参数表、通用模块模板、结构化数据导入），移除 [main.go](../../prototypes/mygo-run/main.go) `toolsPage` 冗余外层标题，并将 `UseInDesigner` 接通 `applyToolInstanceToDesign` 实现“工具计算/排板 → 一键带入当前设计”。
+- **`Tools` 工具台升级与 Design 闭环**：基于 `onevra/components` 与科研中文重构 [internal/tools/tools.go](../../prototypes/mygo-run/internal/tools/tools.go)（储藏室台账、孔板速排初版、稀释配液换算、实验参数表、通用模块模板、结构化数据导入），移除 [main.go](../../prototypes/mygo-run/main.go) `toolsPage` 冗余外层标题，并将 `UseInDesigner` 接通 `applyToolInstanceToDesign` 实现“工具计算/排板 → 一键带入当前设计”；随后于 **7.11 节** 将「孔板速排」进一步升级为“先选孔板 + 悬浮标注复用 + SVG/PNG 导出 + 两列历史墙”。
 - **归档导出补充解码表与读数**：在 [internal/protocol/archive.go](../../prototypes/mygo-run/internal/protocol/archive.go) Markdown 与 PDF 导出中追加 `## 实验测定数据与读数` 章节（消费 `proj.Readouts` 并新增 `TestArchiveIncludesDecodedTableReadouts`），同时清理 [protocol_page.go](../../prototypes/mygo-run/protocol_page.go) 残余英文技术提示。
 - **首页运行标题与 v2 样板卡片**：在 [internal/shell/shell.go](../../prototypes/mygo-run/internal/shell/shell.go) 将 `"Run · "` 本地化为 `"实验运行 · "`，并在 `homeTemplates` 中接入 v2 旗舰模板。
 - **契约与设计文档同步**：同步更新 [design-system.md](../../docs/product/design-system.md)、[asterdoc-contract.md](../../docs/asterdoc-contract.md) 与 [AGENT_API.md](../../AGENT_API.md)。
+
+### 7.10 7 项通用引擎闭环与 21 模块逐一打磨（提交 `18ba9e9`）
+
+- **全模块内联编辑与便携路径闭环**：所有 11 类第一层通用模块卡片标题栏统一支持铅笔点击内联重命名并写回 `.asterml`；`figure@1` 拖入或挑选本地图片时自动复制至同级 `./assets/` 并写回相对路径，保证方案与媒体便携打包；默认参数表标题收口为「**实验条件**」。
+- **自适应孔板与单输入悬浮选孔条 (`plate@1`)**：Go 与 Rust 双端补齐 `format: 4` 与 `dish`（4→384 孔随孔数动态调整孔径 56px→17px、`rack_1d` 为 40×58px 竖向胶囊），删掉顶部冗余模式切换，改为「鼠标框选/行列点选 → 底部单输入框悬浮条（`分组/样本` + `维度:值` + `浓度:100/2 uM` + `NTC/Blank/Std` + 无序复孔重算）」与 8 色无冲突分组调色盘；Design、Run、Notebook、Tools 全仓统一消费 `plateui.View`。
+- **`data_table` 2D 孔板矩阵与 21 模块收口**：关联 `container_ref` 时支持 `列表 | 孔板矩阵`（`layout: matrix`）视图与整板 TSV/CSV 粘贴（自动跳过 `<>` / `1..C` 表头与超限标黄提示）；补齐 `readout.viewer` 专属卡与 `GenericModuleEditor` 全中文科研字段名映射。
+
+### 7.11 「孔板速排」独立工作台重构：先选孔板、悬浮标注复用、SVG/PNG 导出与两列历史组件墙
+
+- **左侧导航收口与「先选孔板，再设计」两步工作流**：[internal/tools/tools.go](../../prototypes/mygo-run/internal/tools/tools.go) 与 [internal/tools/plate_studio.go](../../prototypes/mygo-run/internal/tools/plate_studio.go) 将导航项与页面标题正式收口为 **「孔板速排」**；顶部 **`① 选择孔板`** 提供 `4区培养皿`、`6孔板`、`12孔板`、`24孔板`、`48孔板`、`96孔板`、`384孔板`、`8联管/泳道` 共 8 种标准规格及 **`新建空白板`**，切换容器或新建时若当前画布非空会自动保存入下方历史。
+- **100% 复用 `asterdoc.View` 交互底座与 `GroupLabels` 中文图例**：中部设计区直接挂载 `asterdoc.View`（保留鼠标拖拽框选、行列号点击整行/整列选择、Shift 累加、`放大孔板` 全屏浮层、内联改标题与单输入框悬浮标注条）；同时在 [asterdoc.go](../../prototypes/mygo-run/internal/asterdoc/asterdoc.go) 升级双遍 `GroupList()` 优先保留显式分组中文名称，在 [uikit/plate/plate.go](../../prototypes/mygo-run/internal/uikit/plate/plate.go) 补齐 `GroupLabels` 图例解析与中西文等宽排版居中（`estimatedBadgeWidth`），并通过 `UseAsterPlate`（[main.go](../../prototypes/mygo-run/main.go)）无损将新建分组与完整 `plate@1` 写入当前激活实验设计。
+- **出版级 `导出 SVG` / `导出 PNG`**：在 [uikit/plate/export.go](../../prototypes/mygo-run/internal/uikit/plate/export.go) 实现纯矢量 `RenderSVG`（含圆形孔位、圆形皿双壁十字、`rack_1d` 胶囊、多维内环与自动换行图例）与 2× Retina 软件光栅化 `RenderPNG`（经系统原生保存对话框落盘）。
+- **下方两列 `孔板历史` 缩略组件墙**：在速排底部两列网格平铺渲染历次设计的微缩 `plateui.View` 组件卡片（按规格比例缩放、自动持久化至 `plate-history.json`），支持点击微缩画布或「载入编辑」回到上方编辑、卡片内直接 **`导出 SVG` / `导出 PNG`** 及删除记录。
 
 ---
 
@@ -368,7 +381,7 @@ flowchart TD
 
 ![Design HUVEC 2560x1440 宽屏适配门禁视图](./evidence/v2-visual-catalog/design_huvec_2560_light.png)
 
-### 8.3 多维孔板 (`RT-qPCR`)、Notebook ELN 与 `Tools` 工作台实图巡检（8 帧，另同步复检 `Run ModeRun` 参数标签修复）
+### 8.3 多维孔板 (`RT-qPCR`)、Notebook ELN 与「孔板速排」全链路实图巡检（11 帧）
 
 **1. Design RT-qPCR 96 孔多靶点排板：按靶点基因着色 + 孔内微徽标（Light）**
 
@@ -398,13 +411,21 @@ flowchart TD
 
 ![Notebook 双栏卡片化图板（Dark 主题）](./evidence/v2-visual-catalog/notebook_record_board_table_dark.png)
 
-**8. `资料与工具` 工作台：`onevra/components` 边栏 + 储藏室台账与纯科研中文表达（Light）**
+**8. `资料与工具` 工作台：储藏室台账 + 左侧「孔板速排」入口与纯科研中文表达（Light）**
 
-![资料与工具工作台（Light：onevra 边栏与储藏室台账列表）](./evidence/v2-visual-catalog/tools_workbench_light.png)
+![资料与工具工作台（Light：onevra 边栏显示孔板速排入口与储藏室台账列表）](./evidence/v2-visual-catalog/tools_pantry_workbench_v2.png)
 
 **9. `资料与工具 -> 孔板速排`：先选孔板 8 种规格 → 复用悬浮单框选孔标注 + SVG/PNG 导出 + 两列 `孔板历史` 组件墙（Light）**
 
-![孔板速排工作台与两列孔板历史（Light：8规格先选后排、悬浮单框选孔、SVG/PNG导出与点击载入缩略历史）](./evidence/v2-visual-catalog/comp_15b_tools_plate_legacy.png)
+![孔板速排工作台与两列孔板历史（Light：8规格先选后排、悬浮单框选孔、SVG/PNG导出与点击载入缩略历史）](./evidence/v2-visual-catalog/tools_plate_studio_v2.png)
+
+**10. `资料与工具 -> 孔板速排`：点击历史卡片载入并呼出全屏悬浮放大编辑面板（B 行全选 + 单框标注条）**
+
+![孔板速排放大编辑浮层（从历史记录一键载入96孔板并选中整行标注）](./evidence/v2-visual-catalog/tools_plate_studio_overlay_v2.png)
+
+**11. `资料与工具 -> 孔板速排`：点击「导出 PNG」生成的 2× Retina 高清出图（同步支持 SVG 纯矢量导出）**
+
+![导出 PNG 生成的出版级孔板成图（中文标签居中排版与底部图例完整保留）](./evidence/v2-visual-catalog/tools_plate_exported_png_v2.png)
 
 ---
 
@@ -424,9 +445,9 @@ flowchart TD
 | **Rust App 单测 (`--lib`)** | `cargo test --locked --manifest-path crates/asterlab-app/Cargo.toml --lib` | `89 passed; 0 failed; 0 ignored` | PASS |
 | **Rust CLI & 3实验 E2E** | `cargo test --locked -p labworkbench --bins` | `75 passed; 0 failed; 0 ignored` (`1.02s`，含全套 CLI E2E) | PASS |
 | **Go / Rust Parity** | `python tests/sdk-parity/run.py` | `cases=67 pass=67 fail=0 differences=0`（`isolated_data_sha256=271714845b115f0c1460eddd3138cd8b3abdb1312ec8acfe3d70824534b0681e`） | PASS |
-| **MyGo PureGo 桥接** | `go test -count=1 ./modules/runs` | `ok asterlab-mygo-prototype/modules/runs 4.468s` | PASS |
-| **Go Internal 全包** | `go test -count=1 ./internal/...` | 21 个有测试的 `internal/*` 包全部 `ok`（含 `internal/tools 0.523s` 含 `TestPlateStudioWorkflowHistoryAndExport`、`internal/uikit/plate 3.649s` 含 `TestPlateExportSVGAndPNG`、`internal/asterdoc 1.522s`）+ `internal/uikit/workflownode [no test files]` | PASS |
-| **Go 完整 E2E & 视觉门禁** | `go test -tags=e2e -count=1 .` | 全包 E2E 与全套实图视觉门禁全数通过，`ok asterlab-mygo-prototype 7.793s` | PASS |
+| **MyGo PureGo 桥接** | `go test -count=1 ./modules/runs` | `ok asterlab-mygo-prototype/modules/runs 7.802s` | PASS |
+| **Go Internal 全包** | `go test -count=1 ./internal/...` | 21 个有测试的 `internal/*` 包全部 `ok`（含 `internal/tools 0.740s` 含 `TestPlateStudioWorkflowHistoryAndExport`、`internal/uikit/plate 4.726s` 含 `TestPlateExportSVGAndPNG`、`internal/asterdoc 1.867s`）+ `internal/uikit/workflownode [no test files]` | PASS |
+| **Go 完整 E2E & 视觉门禁** | `go test -tags=e2e -count=1 .` | 全包 E2E 与全套实图视觉门禁全数通过，`ok asterlab-mygo-prototype 10.728s` | PASS |
 
 *(全部验证完成后，清理临时构建与测试副产物。)*
 
@@ -434,10 +455,10 @@ flowchart TD
 
 | 产物 | 路径 | 体积 | SHA256 |
 | :--- | :--- | ---: | :--- |
-| Native Rust CDylib | `prototypes/mygo-run/dist/Runs.dll` | 13,794,816 bytes | `213A3FC23113EDDAD82464659C039F30D32CA1580D226E3586740975779A2749` |
-| 桌面可执行文件 | `prototypes/mygo-run/dist/mygo-run.exe` | 32,154,624 bytes | `43317BE8DEAC2F38A8EB465BF4AFEC770A8E82A8609B0E3366CA2B72F3337F87` |
-| 便携压缩包 | `release/AsterLab-MyGo-0.1.0-beta-unsigned-win-x64.zip` | 21,884,745 bytes | `2C1E1C780B76E4E1F6D9715A42796A52A2F791E3C97C5D006D784DC4D5D39ABF` |
-| NSIS 安装包 | `release/AsterLab-MyGo-0.1.0-beta-unsigned-win-x64-setup.exe` | 18,122,878 bytes | `B5BE27D27BAEED85AD91B5E294C07B86D059DE73607714538A4340D0CDBED8E3` |
+| Native Rust CDylib | `prototypes/mygo-run/dist/Runs.dll` | 13,794,816 bytes | `0F6FB364CC9ABF0916902B07D37A4A3A7D920CF03F6945E3C5062A4163382B51` |
+| 桌面可执行文件 | `prototypes/mygo-run/dist/mygo-run.exe` | 32,154,624 bytes | `78EA93FC32B61987B1F07BF9399F62439DD7AC9E631629C6F2890F9ECD9A6427` |
+| 便携压缩包 | `release/AsterLab-MyGo-0.1.0-beta-unsigned-win-x64.zip` | 21,884,754 bytes | `B78CB0102F613FDEE8F4FD32C0652D02A8E15E3126CA90195B3168D1776A2683` |
+| NSIS 安装包 | `release/AsterLab-MyGo-0.1.0-beta-unsigned-win-x64-setup.exe` | 18,124,457 bytes | `1C0812C720C3B61681594C309520466ED3092F10452BF16A5AD466C48627FEFC` |
 
 ---
 

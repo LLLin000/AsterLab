@@ -518,18 +518,21 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		renderVisualPNG(t, outDir, "tools_workbench_light.png", 1360, 880, false, func(c *ui.Context) {
 			toolsPage(c, toolApp)
 		})
+		renderVisualPNG(t, outDir, "tools_pantry_workbench_v2.png", 1360, 880, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
 
 		// 14. 孔板速排（先选孔板 + 悬浮单框选孔标注 + SVG/PNG 导出 + 两列孔板历史）
 		plateStudio := toolApp.tools
 		plateStudio.Active = tools.ToolPlate
 		plateStudio.SelectPlatePreset("plate-96")
 		plateStudio.SelectPlateWells([]string{"A1", "A2", "A3"})
-		_ = plateStudio.AnnotateSelectedWells("Ctrl")
+		_ = plateStudio.AnnotateSelectedWells("对照组")
 		plateStudio.SelectPlateWells([]string{"A4", "A5", "A6"})
 		_ = plateStudio.AnnotateSelectedWells("VEGF-50")
 		plateStudio.SelectPlateWells([]string{"H12"})
 		_ = plateStudio.AnnotateSelectedWells("NTC")
-		plateStudio.SaveCurrentPlateToHistory()
+		hist96, _ := plateStudio.SaveCurrentPlateToHistory()
 
 		plateStudio.SelectPlatePreset("dish-4")
 		plateStudio.SelectPlateWells([]string{"A1", "A2"})
@@ -556,5 +559,135 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		renderVisualPNG(t, outDir, "comp_15b_tools_plate_legacy.png", 1360, 1400, false, func(c *ui.Context) {
 			toolsPage(c, toolApp)
 		})
+		renderVisualPNG(t, outDir, "tools_plate_studio_v2.png", 1360, 1400, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
+
+		// Export genuine 2x Retina PNG of the active 12-well plate studio design
+		plateStudio.SelectPlateWells(nil)
+		if pngBytes, _, err := plateStudio.ExportActivePlate("png", false); err != nil {
+			t.Fatalf("ExportActivePlate png failed: %v", err)
+		} else if err := os.WriteFile(filepath.Join(outDir, "tools_plate_exported_png_v2.png"), pngBytes, 0o644); err != nil {
+			t.Fatalf("write tools_plate_exported_png_v2.png: %v", err)
+		}
+
+		// Load 96-well history card back into studio & open zoomed overlay with row B selected
+		if hist96.ID != "" && !plateStudio.LoadHistoryEntry(hist96.ID) {
+			t.Fatalf("LoadHistoryEntry failed for %s", hist96.ID)
+		}
+		plateStudio.Status = ""
+		renderVisualPNGSteps(t, outDir, "tools_plate_studio_overlay_v2.png", 1360, 920, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		}, func(tt *ui.Tester) {
+			if err := tt.Click("放大孔板"); err != nil {
+				t.Fatalf("tools studio click expand plate: %v", err)
+			}
+			tt.Frame()
+			if err := tt.Click("选择第 B 行"); err != nil {
+				t.Fatalf("tools studio overlay click row B: %v", err)
+			}
+			tt.Frame()
+		})
+
+		// 15. Regenerate updated plate@1 component specimens (Chinese GroupLabels legends)
+		geomSrc := "```asterlab\nkind: group\nid: g-pbs\nschema: 1\nname: PBS对照\nrole: control\n```\n" +
+			"```asterlab\nkind: group\nid: g-hama\nschema: 1\nname: HAMA水凝胶\nrole: treatment\n```\n" +
+			"```asterlab\nkind: group\nid: g-van\nschema: 1\nname: 万古霉素\nrole: comparator\n```\n" +
+			"```asterlab\nkind: plate\nid: pl-dish4\nschema: 1\ntitle: 4区圆形培养皿（56px大孔 + 双皿壁十字）\nformat: 4\ntopology: dish\nrows: 2\ncolumns: 2\ngroups:\n  g-pbs: [A1]\n  g-hama: [A2, B1]\n  g-van: [B2]\nsamples: {A1: PBS, A2: HAMA, B1: Lys, B2: Van}\n```\n" +
+			"```asterlab\nkind: plate\nid: pl-6\nschema: 1\ntitle: 6 孔细胞培养板（48px 大孔）\nformat: 6\ngroups:\n  g-pbs: [A1, A2, A3]\n  g-hama: [B1, B2, B3]\nsamples: {A1: Ctrl-1, A2: Ctrl-2, A3: Ctrl-3, B1: Drug-1, B2: Drug-2, B3: Drug-3}\n```\n" +
+			"```asterlab\nkind: plate\nid: pl-12\nschema: 1\ntitle: 12 孔细胞铺板（42px 孔）\nformat: 12\ngroups:\n  g-pbs: [A1, A2]\n  g-hama: [B1, B2]\n  g-van: [C1, C2]\n```\n" +
+			"```asterlab\nkind: plate\nid: pl-rack\nschema: 1\ntitle: 8 联管 / 电泳泳道（40×58px 竖向胶囊）\nformat: 8\ntopology: rack_1d\nrows: 1\ncolumns: 8\ngroups:\n  g-pbs: [A1, A2]\n  g-hama: [A3, A4, A5]\n  g-van: [A6, A7, A8]\nsamples: {A1: Ladder, A2: Ctrl, A3: Sample, A4: Sample, A5: Sample, A6: KO1, A7: KO2, A8: NTC}\n```\n"
+		geomDoc, err := asterdoc.Parse(geomSrc)
+		if err != nil {
+			t.Fatalf("parse geomSrc: %v", err)
+		}
+		geomView := &asterdoc.View{
+			Doc: geomDoc, Mode: asterdoc.ModeDesign,
+			Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
+		}
+		renderVisualPNG(t, outDir, "comp_12_plate_geometries_v2.png", 1240, 920, false, func(c *ui.Context) {
+			tok := theme.GetTokens(c.Theme())
+			ui.Column(c).Fill().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
+				var plates []*asterdoc.Module
+				for i := range geomDoc.Modules {
+					if geomDoc.Modules[i].Kind == "plate" {
+						plates = append(plates, &geomDoc.Modules[i])
+					}
+				}
+				for i := 0; i < len(plates); i += 2 {
+					left := plates[i]
+					right := plates[i+1]
+					ui.Row(c).FillWidth().Gap(float32(tok.Spacing12)).AlignItems(ui.Stretch).Children(func() {
+						ui.Box(c).Grow(1).Basis(0).MinWidth(0).Children(func() {
+							geomView.RenderModule(c, "plate", 1, left.Data)
+						})
+						ui.Box(c).Grow(1).Basis(0).MinWidth(0).Children(func() {
+							geomView.RenderModule(c, "plate", 1, right.Data)
+						})
+					})
+				}
+			})
+		})
+
+		qpcrDoc, err := asterdoc.Parse(qpcrSrc)
+		if err != nil {
+			t.Fatalf("parse qpcrSrc: %v", err)
+		}
+		var qpcrPlateData map[string]any
+		for _, m := range qpcrDoc.Modules {
+			if m.Kind == "plate" {
+				qpcrPlateData = m.Data
+				break
+			}
+			if m.Kind == "step" && m.ID == "step-02-plate-setup" {
+				if seq, ok := m.Data["blocks"].([]any); ok {
+					for _, raw := range seq {
+						if bm, _ := raw.(map[string]any); bm != nil && bm["kind"] == "plate" {
+							qpcrPlateData = bm
+							break
+						}
+					}
+				}
+			}
+		}
+		if qpcrPlateData != nil {
+			qCompView := &asterdoc.View{
+				Doc: qpcrDoc, Mode: asterdoc.ModeDesign,
+				Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
+			}
+			renderVisualPNGSteps(t, outDir, "comp_13_plate_96_v2.png", 1120, 740, false, func(c *ui.Context) {
+				tok := theme.GetTokens(c.Theme())
+				ui.Box(c).Fill().Padding(float32(tok.Spacing16)).Children(func() {
+					qCompView.RenderModule(c, "plate", 1, qpcrPlateData)
+				})
+				qCompView.RenderPlateOverlay(c)
+			}, func(tt *ui.Tester) {
+				if err := tt.Click("孔 C1"); err != nil {
+					t.Fatalf("comp13 click C1: %v", err)
+				}
+				tt.Frame()
+			})
+
+			qOvView := &asterdoc.View{
+				Doc: qpcrDoc, Mode: asterdoc.ModeDesign,
+				Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
+			}
+			renderVisualPNGSteps(t, outDir, "comp_13b_plate_overlay_bar_v2.png", 1200, 840, false, func(c *ui.Context) {
+				tok := theme.GetTokens(c.Theme())
+				ui.Box(c).Fill().Padding(float32(tok.Spacing16)).Children(func() {
+					qOvView.RenderModule(c, "plate", 1, qpcrPlateData)
+				})
+				qOvView.RenderPlateOverlay(c)
+			}, func(tt *ui.Tester) {
+				if err := tt.Click("放大孔板"); err != nil {
+					t.Fatalf("comp13b expand plate: %v", err)
+				}
+				tt.Frame()
+				if err := tt.Click("选择第 B 行"); err != nil {
+					t.Fatalf("comp13b select row B: %v", err)
+				}
+				tt.Frame()
+			})
+		}
 	}
 }

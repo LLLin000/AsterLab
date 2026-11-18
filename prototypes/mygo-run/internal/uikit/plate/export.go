@@ -283,9 +283,9 @@ func RenderPNG(props Props, title string, dark bool) ([]byte, error) {
 	legend := ComputeLegend(props, dark)
 	legendExtra := 0
 	if len(legend) > 0 {
-		legendExtra = 32 + ((len(legend)*120)/cardW)*22
+		legendExtra = 36 + ((len(legend)*120)/cardW)*22
 	}
-	cardH := int(math.Ceil(float64(topLabel + gridH + dishPad*2 + 128 + float32(legendExtra))))
+	cardH := int(math.Ceil(float64(topLabel + gridH + dishPad*2 + 124 + float32(legendExtra))))
 	if cardH < 300 {
 		cardH = 300
 	}
@@ -298,6 +298,7 @@ func RenderPNG(props Props, title string, dark bool) ([]byte, error) {
 
 	cleanProps := props
 	cleanProps.Interactive = false
+	cleanProps.HideFooter = true
 	cleanProps.SelectedIDs = nil
 	cleanProps.OnSelect = nil
 	cleanProps.Zoom = exportZoom

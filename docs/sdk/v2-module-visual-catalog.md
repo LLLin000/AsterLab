@@ -139,11 +139,11 @@
 - **核心语义**：以同一套 `plateui.View` + `ApplyUnifiedPlateAnnotation` 组件承接 4/6/12/24/48/96/384 孔板（细胞铺板、qPCR、ELISA、CCK-8 等共用统一语言，仅标题区分）、圆形四象限培养皿（`format: 4, topology: dish`）、1D 电泳泳道/8 联管（`rack_1d`）及动物笼位（`cohort`）。
 - **渲染与交互实现**：[uikit/plate/plate.go](../../prototypes/mygo-run/internal/uikit/plate/plate.go) · [uikit/plate/export.go](../../prototypes/mygo-run/internal/uikit/plate/export.go) · [asterdoc/plate_ops.go](../../prototypes/mygo-run/internal/asterdoc/plate_ops.go) · [asterdoc/view.go](../../prototypes/mygo-run/internal/asterdoc/view.go)
 
-![plate@1 自适应孔径实图：4区圆形皿(56px + 双皿壁十字) / 6孔板(48px) / 12孔板(42px) / 8联管竖向胶囊(40×58px)](./evidence/v2-visual-catalog/comp_12_plate_geometries.png)
+![plate@1 自适应孔径实图：4区圆形皿(56px + 双皿壁十字) / 6孔板(48px) / 12孔板(42px) / 8联管竖向胶囊(40×58px)](./evidence/v2-visual-catalog/comp_12_plate_geometries_v2.png)
 
-![plate@1 96孔 qPCR 内联卡：精简图层面切换 + 底部单输入框悬浮选孔标注条实图](./evidence/v2-visual-catalog/comp_13_plate_96.png)
+![plate@1 96孔 qPCR 内联卡：中文分组图例 + 精简图层面切换 + 底部单输入框悬浮选孔标注条实图](./evidence/v2-visual-catalog/comp_13_plate_96_v2.png)
 
-![plate@1 放大编辑浮层：整行快选与单框悬浮标注条实图](./evidence/v2-visual-catalog/comp_13b_plate_overlay_bar.png)
+![plate@1 放大编辑浮层：整行快选与单框悬浮标注条实图](./evidence/v2-visual-catalog/comp_13b_plate_overlay_bar_v2.png)
 
 - **核心升级与闭环落地**：
   1. **支持 `format: 4` 与实时自适应孔径**：Go 与 Rust 双端注册 `4` (`2×2`) 孔规格；孔径随孔数动态缩放（`4` 孔 `56px` → `6` 孔 `48px` → `12` 孔 `42px` → `24` 孔 `36px` → `48` 孔 `28px` → `96` 孔 `26px` → `384` 孔 `17px`），`dish` 自动绘制双层圆形皿壁与十字分区线，`rack_1d` 渲染为 `40×58px` 竖向胶泳道/联管胶囊；
@@ -170,9 +170,30 @@
 
 ![Design 全局设定通用编辑器全中文化实图（zero raw field names / zero "read-only"）](./evidence/v2-visual-catalog/comp_15_generic_editor_and_legacy_compare.png)
 
-![Tools 统一「孔板速排」工作台实图（① 先选孔板 → ② 框选排板与悬浮单框标注 + 导出 SVG/PNG + 底部两列孔板历史缩略组件墙）](./evidence/v2-visual-catalog/comp_15b_tools_plate_legacy.png)
-
-- **3 处收口目标实图确认完成**：
+- **前后端收口实图确认**：
   1. `comp_15`：`GenericModuleEditor` 所有已声明端口均映射为中文科研字段名（如 `结构标识`、`观测终点`、`数据类型`、`容器规格`），复合端口不再显示英文 `"read-only"` 而改用 `结构化列表（在步骤工作台或源码中编辑）`；
-  2. Notebook `@matrix(16h)`：无关联显微视野时展示清晰的中文空态指引（`当前时间点暂未挂载孔位图像（可在右侧实验模块或图板核对数据）`）；
-  3. `comp_15b`：[internal/tools/plate_studio.go](../../prototypes/mygo-run/internal/tools/plate_studio.go) 与 [internal/tools/tools.go](../../prototypes/mygo-run/internal/tools/tools.go) 已收口为「**孔板速排**」独立工作台：顶部 `① 选择孔板`（`4区培养皿 / 6 / 12 / 24 / 48 / 96 / 384孔 / 8联管` + `新建空白板`，切换自动归档当前非空方案），中部完整复用 `asterdoc.View`（保留鼠标框选、行列点选、放大浮层、内联改名与下方悬浮单输入框分组/自动复孔），右上支持 **`导出 SVG` / `导出 PNG` / `应用到当前设计`**，下方铺排 **两列 `孔板历史` 缩略组件墙**（支持点击历史卡片或「载入编辑」回到上方编辑，亦可直接卡片内导出 SVG / PNG）。
+  2. Notebook `@matrix(16h)`：无关联显微视野时展示清晰的中文空态指引（`当前时间点暂未挂载孔位图像（可在右侧实验模块或图板核对数据）`）。
+
+---
+
+## 第四部分：「孔板速排」独立工作台、悬浮面板复用、两列历史墙与 SVG/PNG 导出实图
+
+已按产品反馈在 [internal/tools/plate_studio.go](../../prototypes/mygo-run/internal/tools/plate_studio.go) 与 [internal/uikit/plate/export.go](../../prototypes/mygo-run/internal/uikit/plate/export.go) 将工具栏中的孔板工具正式升级为 **「孔板速排」** 独立工作台，完整复用 `asterdoc.View` 交互底座并新增导出与历史组件墙：
+
+1. **`① 选择孔板 → ② 悬浮单框选孔排板` 全景工作台 + 底部两列 `孔板历史` 缩略组件墙**：
+
+![孔板速排全景工作台（① 先选8规格孔板 → ② 框选孔位后弹出悬浮单框与已有分组快捷胶囊 + 右上保存至历史/导出SVG/导出PNG/应用到当前设计 + 下方两列孔板历史缩略墙）](./evidence/v2-visual-catalog/tools_plate_studio_v2.png)
+
+2. **点击下方历史卡片载入编辑 + 悬浮放大孔板编辑模态框（直接复用 `RenderPlateOverlay`）**：
+
+![孔板速排内点击放大孔板开启全屏悬浮编辑面板（整行选择 B1..B12 + 单输入框悬浮标注条 + 已有分组胶囊）](./evidence/v2-visual-catalog/tools_plate_studio_overlay_v2.png)
+
+3. **真实导出成图效果（`导出 PNG` 生成的 2× Retina 高清卡片 / 同步支持 `导出 SVG` 纯矢量 `<svg>` 文件）**：
+
+![点击「导出 PNG」实际导出的 2x 高清孔板图（可直接用于 PPT / Word / 论文汇报；同期提供纯矢量 SVG 导出）](./evidence/v2-visual-catalog/tools_plate_exported_png_v2.png)
+
+- **架构与交互核心特性**：
+  - **先选规格再设计**：支持 `4区培养皿` / `6孔板` / `12孔板` / `24孔板` / `48孔板` / `96孔板` / `384孔板` / `8联管/泳道` 与 `新建空白板`；切换容器或载入历史前，自动将当前非空设计保存进下方 `孔板历史`（持久化至 `plate-history.json`）；
+  - **100% 复用 `asterdoc` 交互与单输入悬浮条**：保留鼠标拖拽框选、行列号点击整行/整列选择、Shift 多选、内联铅笔重命名、`放大孔板` 浮层、多维 `维度:值` 与自动复孔序号计算，并支持 `应用到当前设计` 无损同步分组表与完整 `plate@1`；
+  - **SVG & PNG 双格式导出**：`RenderSVG` 输出规范 `<svg>` 矢量源码（圆形孔位、皿壁十字、多维内环与换行图例），`RenderPNG` 通过独立离屏光栅器输出 2× 高清中文图卡；
+  - **两列 `孔板历史` 组件墙**：按双列等宽布局展示历史微缩孔板（按孔数/拓扑自动等比缩放、中文群组名图例解析），点击缩略画布或「载入编辑」即刻回到上方编辑，也可卡片内直接导出 SVG / PNG 或删除。
