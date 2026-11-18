@@ -356,7 +356,8 @@ AsterML v2 将实验结构收口为 Markdown + ` ```asterlab ` 通用科学模�
 ### `asterdoc.command` 支持的操作类型
 
 - 顶层模块与流程：`add_module`、`add_step`、`update_module`、`remove_module`、`remove_step`、`reorder_steps`、`nest_step`、`promote_step`、`connect_steps`、`disconnect_steps`。
-- 容器孔位分派与多维标注：`assign_wells`、`clear_wells`（同步清理 `groups`、`samples`、`replicates`、`roles` 与 `factors`）；`plate@1` 支持通用正交实验因子映射 `factors: {<维度名>: {<孔位>: <因子水平>}}`，技术复孔唯一性键按 `(sample_id, canonical_factor_signature, replicate)` 校验，允许同一样本在多靶点基因/多处理水平下拥有独立 `#1..#k` 复孔序列。
+- 容器孔位分派与多维标注：`assign_wells`、`clear_wells`（同步清理 `groups`、`samples`、`replicates`、`roles` 与 `factors`）；`plate@1` 支持 `4`/`6`/`12`/`24`/`48`/`96`/`384` 孔板、`dish`（支持 4 区培养皿 `format: 4`）、`rack_1d` 与 `cohort` 拓扑，支持通用正交实验因子映射 `factors: {<维度名>: {<孔位>: <因子水平>}}`（前端单输入框支持平铺标签、浓度梯度 `浓度:100/2 uM` 与正交维度并按确定性顺序重算复孔），技术复孔唯一性键按 `(sample_id, canonical_factor_signature, replicate)` 校验，允许同一样本在多靶点基因/多处理水平下拥有独立 `#1..#k` 复孔序列。
+- `calculator@1` 的 `group_mastermix` 同时兼容 `container_ref` 与 `plate_ref`；`data_table@1` 支持 `layout: "rows" | "matrix"`（按关联 `container_ref` 孔位排布二维测定矩阵）。
 - **步骤内模块自由编排**（作用目标 `stepId` 或 `moduleId` 指向目标 `step@1`）：
   - `insert_step_block`：传入 `block`（`{kind, id, schema?, ...}`）及可选插入位置 `index`（省略追加末尾）。
   - `update_step_block`：传入 `blockId` 与 `properties` 增量更新步骤子块字段（禁止覆盖 `id`/`kind`/`schema`）。

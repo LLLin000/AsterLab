@@ -1027,6 +1027,9 @@ func timerBudgetSec(data map[string]any) (handsOn, span int, open bool) {
 		return tot, tot, open
 	case "window":
 		off := quantitySeconds(data["offset"])
+		if off == 0 {
+			off = quantitySeconds(data["duration"])
+		}
 		return 0, off, false
 	}
 	return 0, 0, false

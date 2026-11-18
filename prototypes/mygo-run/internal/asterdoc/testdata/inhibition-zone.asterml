@@ -61,7 +61,7 @@ timepoints: [16h]
 kind: plate
 id: dish-iz
 schema: 1
-format: 6
+format: 4
 topology: dish
 rows: 2
 columns: 2

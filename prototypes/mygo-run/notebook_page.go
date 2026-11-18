@@ -730,7 +730,11 @@ func (a *app) notebookNoteRefCards(c *ui.Context, tok theme.Tokens) {
 		})
 		for _, ref := range refs {
 			cells, _ := record.ResolveMatrixRef(proj, ref)
-			ui.Text(c, fmt.Sprintf("%s · %d 个孔位视野记录（可在图板查看高清缩略图）", ref.Raw, len(cells))).
+			msg := fmt.Sprintf("%s · %d 个孔位视野记录（可在图板查看高清缩略图）", ref.Raw, len(cells))
+			if len(cells) == 0 {
+				msg = fmt.Sprintf("%s · 当前时间点暂未挂载孔位图像（可在右侧实验模块或图板核对数据）", ref.Raw)
+			}
+			ui.Text(c, msg).
 				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 		}
 	})

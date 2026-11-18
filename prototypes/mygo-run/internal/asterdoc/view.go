@@ -42,6 +42,7 @@ type View struct {
 	// writes Core or the document; the host applies it and reloads a revision.
 	OnUpdateModule func(moduleID string, props map[string]any)
 	// Step-scoped block editing callbacks (Design mode).
+	OnAddModule          func(module map[string]any)
 	OnInsertStepBlock    func(stepID string, index int, block map[string]any)
 	OnUpdateStepBlock    func(stepID, blockID string, props map[string]any)
 	OnMoveStepBlock      func(stepID, blockID, direction string)
@@ -49,6 +50,10 @@ type View struct {
 	OnRemoveStepBlock    func(stepID, blockID string)
 	OnPickFigureFile     func(stepID, blockID string)
 	StepID               string
+	BaseDir              string
+	currentModuleID      string
+	titleEditID          string
+	titleEditBuf         string
 	// Run-mode interactive execution callbacks & state (nil-safe in read-only views).
 	OnRecordActualParam  func(stepID, blockID, key, value, unit string)
 	OnToggleCheck        func(stepID, checkID string, checked bool)
@@ -105,6 +110,10 @@ type View struct {
 	PlateZoom           float32
 	plateColorBy        map[string]string
 	plateFactorKey      map[string]string
+	plateStates         map[string]*plateui.InteractionState
+	plateSelections     map[string][]string
+	plateInputDrafts    map[string]*string
+	overlayPlateState   plateui.InteractionState
 	gridPointerDown     bool
 	gridPointerStart    ui.Point
 	gridDragging        bool
@@ -176,6 +185,9 @@ func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind st
 		v.rendererGap(c, kind, schema, key)
 		return
 	}
+	prevID := v.currentModuleID
+	v.currentModuleID = moduleID
+	defer func() { v.currentModuleID = prevID }()
 	fn(v, c, data)
 }
 
@@ -219,6 +231,7 @@ func (v *View) RenderModule(c *ui.Context, kind string, schema int, data map[str
 func (v *View) plate(c *ui.Context, p *Plate) {
 	t := c.Theme()
 	tok := theme.GetTokens(t)
+	dark := t != nil && t.Dark
 	factorDims := p.FactorDimensions()
 	geometry, _ := geometryForPlate(p.Format, p.Topology, p.Rows, p.Columns)
 	wells := map[string]plateui.WellState{}
@@ -237,6 +250,17 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 	if v.plateFactorKey == nil {
 		v.plateFactorKey = map[string]string{}
 	}
+	if v.plateStates == nil {
+		v.plateStates = map[string]*plateui.InteractionState{}
+	}
+	if v.plateSelections == nil {
+		v.plateSelections = map[string][]string{}
+	}
+	st := v.plateStates[p.ID]
+	if st == nil {
+		st = &plateui.InteractionState{}
+		v.plateStates[p.ID] = st
+	}
 	colorBy := v.plateColorBy[p.ID]
 	if colorBy == "" {
 		colorBy = "group"
@@ -250,23 +274,30 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 	title := p.Title
 	if strings.TrimSpace(title) == "" {
 		if p.Topology == "dish" {
-			title = fmt.Sprintf("培养皿分区（%d 区）", p.Format)
+			title = fmt.Sprintf("培养皿分区（%d 区）", geometry.Rows*geometry.Columns)
+		} else if p.Topology == "rack_1d" {
+			title = fmt.Sprintf("%d 位样本架 / 泳道", geometry.Rows*geometry.Columns)
 		} else {
 			title = fmt.Sprintf("%d 孔板", p.Format)
 		}
 	}
+	editable := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
+	ownerStepID := v.ownerStepForPlate(p.ID)
+	selected := v.plateSelections[p.ID]
+	idxMap := plateGroupPaletteMap(v.Doc, p)
+
 	ui.Row(c).FillWidth().Children(func() {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
 			Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Column(c).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+					renderInlineEditableTitle(v, c, p.ID, title, editable)
 					meta := p.ID
 					if p.Timepoint != "" {
 						meta += " · " + p.Timepoint
 					}
 					if len(p.Samples) > 0 || len(factorDims) > 0 {
-						meta += fmt.Sprintf(" · 样本 %d · 因子 %d 维", len(p.Samples), len(factorDims))
+						meta += fmt.Sprintf(" · 样本 %d · 维度 %d", len(p.Samples), len(factorDims))
 					}
 					ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				})
@@ -276,71 +307,87 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 				}
 				if components.IconButton(c, lucide.Maximize2(), "放大孔板", components.IconButtonCompact).Clicked() {
 					v.ExpandedPlate = p.ID
-					v.ExpandedWells = nil
+					v.ExpandedWells = append([]string(nil), selected...)
 					v.PlateZoom = 1
 				}
 			})
-			hasMultiLayer := len(p.Samples) > 0 || len(factorDims) > 0 || len(p.Replicates) > 0 || len(p.Roles) > 0
-			if hasMultiLayer || (v.Mode == ModeDesign && !v.ReadOnly) {
-				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "着色维度").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					modes := []struct {
-						id    string
-						label string
-						show  bool
-					}{
-						{"group", "按分组", true},
-						{"sample", "按样本", len(p.Samples) > 0 || v.Mode == ModeDesign},
-						{"factor", "按因子", len(factorDims) > 0},
-						{"replicate", "按复孔", len(p.Replicates) > 0},
-						{"role", "按孔角色", len(p.Roles) > 0},
+
+			plateui.View(c, plateui.Props{
+				Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns,
+				Topology: p.Topology, Roles: p.Roles, Interactive: editable,
+				SelectedIDs: selected,
+				OnSelect: func(ids []string) {
+					v.plateSelections[p.ID] = ids
+				},
+				ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, State: st,
+			})
+
+			hasMultiLayer := len(factorDims) > 0 || len(p.Roles) > 0 || len(p.Samples) > 0
+			if hasMultiLayer && len(p.WellGroups()) > 0 {
+				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+					type layerChip struct {
+						mode, key, label string
 					}
-					for _, m := range modes {
-						if !m.show {
-							continue
-						}
-						m := m
-						lbl := m.label
-						if m.id == "factor" && factorKey != "" {
-							lbl = "按" + factorKey
-						}
+					var chips []layerChip
+					chips = append(chips, layerChip{"group", "", "分组"})
+					if len(p.Samples) > 0 {
+						chips = append(chips, layerChip{"sample", "", "样本"})
+					}
+					for _, dim := range factorDims {
+						chips = append(chips, layerChip{"factor", dim, dim})
+					}
+					if len(p.Roles) > 0 {
+						chips = append(chips, layerChip{"role", "", "孔角色"})
+					}
+					for _, ch := range chips {
+						ch := ch
+						active := colorBy == ch.mode && (ch.mode != "factor" || factorKey == ch.key)
 						variant := components.ButtonGhost
-						if colorBy == m.id {
+						if active {
 							variant = components.ButtonSecondary
 						}
-						if components.Button(c, lbl, variant).Clicked() {
-							v.plateColorBy[p.ID] = m.id
-							colorBy = m.id
-						}
-					}
-					if len(factorDims) > 1 {
-						for _, dim := range factorDims {
-							dim := dim
-							variant := components.ButtonGhost
-							if colorBy == "factor" && factorKey == dim {
-								variant = components.ButtonSecondary
-							}
-							if components.Button(c, dim, variant).Clicked() {
-								v.plateColorBy[p.ID] = "factor"
-								v.plateFactorKey[p.ID] = dim
-								colorBy = "factor"
-								factorKey = dim
+						if components.Button(c, ch.label, variant).Clicked() {
+							v.plateColorBy[p.ID] = ch.mode
+							if ch.mode == "factor" {
+								v.plateFactorKey[p.ID] = ch.key
 							}
 						}
 					}
 				})
 			}
-			plateui.View(c, plateui.Props{
-				Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns,
-				Topology: p.Topology, Roles: p.Roles, Interactive: false,
-				ColorBy: colorBy, FactorKey: factorKey,
-			})
-			if !v.ReadOnly {
-				ui.Text(c, "点击右上角放大查看并标注分组、样本、复孔与因子。").
-					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+
+			if editable {
+				if len(selected) > 0 {
+					v.renderPlateFloatingBar(c, p, ownerStepID, selected, func(next []string) {
+						v.plateSelections[p.ID] = next
+					}, false, 1, nil)
+				} else {
+					ui.Text(c, "框选孔位后，在下方悬浮条直接输入处理、基因或样本名即可标注并自动生成复孔。").
+						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				}
 			}
+			_ = dark
 		})
 	})
+}
+
+func (v *View) ownerStepForPlate(plateID string) string {
+	if v.Doc == nil || plateID == "" {
+		return v.StepID
+	}
+	for i := range v.Doc.Modules {
+		if v.Doc.Modules[i].Kind == "step" {
+			if blocks, ok := v.Doc.Modules[i].Data["blocks"].([]any); ok {
+				for _, raw := range blocks {
+					bm, _ := raw.(map[string]any)
+					if bm != nil && textValue(bm, "kind") == "plate" && textValue(bm, "id") == plateID {
+						return v.Doc.Modules[i].ID
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 const (
@@ -396,8 +443,19 @@ func (v *View) findPlate(plateID string) (plate *Plate, ownerStepID string) {
 }
 
 func (v *View) applyPlateProps(plateID, ownerStepID string, props map[string]any) error {
-	if ownerStepID != "" && v.OnUpdateStepBlock != nil {
-		v.OnUpdateStepBlock(ownerStepID, plateID, props)
+	if ownerStepID != "" {
+		if v.OnUpdateStepBlock != nil {
+			v.OnUpdateStepBlock(ownerStepID, plateID, props)
+			return nil
+		}
+		if v.Doc != nil && v.Can(PermDocumentEdit) {
+			if err := v.updateStepBlockInDoc(ownerStepID, plateID, props); err != nil {
+				return err
+			}
+			if v.OnChange != nil {
+				v.OnChange(v.Doc.Source)
+			}
+		}
 		return nil
 	}
 	if v.OnUpdateModule != nil {
@@ -415,12 +473,9 @@ func (v *View) applyPlateProps(plateID, ownerStepID string, props map[string]any
 	return nil
 }
 
-// plateOverlay floats the enlarged plate over a dimmed canvas with zoom,
-// ColorBy dimension switcher, group brush, batch sample+replicate layout,
-// orthogonal factor painter, and well role tagging.
+// plateOverlay floats the enlarged plate over a dimmed canvas using the exact
+// same unified plateui.View component and floating single-input annotation bar.
 func (v *View) plateOverlay(c *ui.Context) {
-	suppressGridClick := v.gridSuppressClick
-	v.gridSuppressClick = false
 	if v.ExpandedPlate == "" {
 		return
 	}
@@ -431,17 +486,8 @@ func (v *View) plateOverlay(c *ui.Context) {
 	}
 	t := c.Theme()
 	tok := theme.GetTokens(t)
-	dark := t != nil && t.Dark
 	geometry, _ := geometryForPlate(plate.Format, plate.Topology, plate.Rows, plate.Columns)
-	wells := plate.WellGroups()
-	groups := plate.GroupNames()
 	factorDims := plate.FactorDimensions()
-	if v.SelectedGroup == "" && len(groups) > 0 {
-		v.SelectedGroup = groups[0]
-	}
-	if v.PlateRoleChoice == "" {
-		v.PlateRoleChoice = "sample"
-	}
 	if v.plateColorBy == nil {
 		v.plateColorBy = map[string]string{}
 	}
@@ -465,112 +511,17 @@ func (v *View) plateOverlay(c *ui.Context) {
 		v.ExpandedPlate = ""
 		v.ExpandedWells = nil
 	}
-	assign := func() {
-		if len(v.ExpandedWells) == 0 || v.SelectedGroup == "" {
-			return
+	wells := map[string]plateui.WellState{}
+	for well, group := range plate.WellGroups() {
+		wells[well] = plateui.WellState{
+			Group:     group,
+			SampleID:  plate.Samples[well],
+			Replicate: plate.Replicates[well],
+			Role:      plate.Roles[well],
+			Factors:   plate.WellFactors(well),
 		}
-		if v.OnAssignWells != nil && ownerStepID == "" {
-			v.OnAssignWells(plate.ID, v.SelectedGroup, append([]string(nil), v.ExpandedWells...))
-		} else {
-			_ = v.assign(v.ExpandedWells, v.SelectedGroup)
-		}
-		v.ExpandedWells = nil
 	}
-	clear := func() {
-		if len(v.ExpandedWells) == 0 {
-			return
-		}
-		if v.OnClearWells != nil && ownerStepID == "" {
-			v.OnClearWells(plate.ID, append([]string(nil), v.ExpandedWells...))
-		} else {
-			_ = v.assign(v.ExpandedWells, "")
-		}
-		v.ExpandedWells = nil
-	}
-	assignSample := func() {
-		if len(v.ExpandedWells) == 0 {
-			v.PlateSampleError = "请先选择孔位"
-			return
-		}
-		rawStart := strings.TrimSpace(v.PlateReplicateStart)
-		if rawStart != "" || (!strings.ContainsAny(v.PlateSampleID, ",，\n") && v.PlateBatchRepCount == 0) {
-			start := 0
-			if rawStart != "" {
-				n, err := strconv.Atoi(rawStart)
-				if err != nil || n <= 0 {
-					v.PlateSampleError = "技术重复编号必须为正整数"
-					return
-				}
-				start = n
-			}
-			samples, replicates, err := ApplyPlateSamplesWithFactors(geometry, plate.Groups, plate.Samples, plate.Replicates, plate.Factors, v.ExpandedWells, v.PlateSampleID, start)
-			if err != nil {
-				v.PlateSampleError = err.Error()
-				return
-			}
-			if err := v.applyPlateProps(plate.ID, ownerStepID, map[string]any{"samples": samples, "replicates": replicates}); err != nil {
-				v.PlateSampleError = err.Error()
-				return
-			}
-			v.PlateSampleError = ""
-			v.ExpandedWells = nil
-			return
-		}
-		repPerSample := v.PlateBatchRepCount
-		if repPerSample <= 0 {
-			repPerSample = 3
-		}
-		samples, replicates, err := ApplyPlateBatchSamples(geometry, plate.Groups, plate.Samples, plate.Replicates, plate.Factors, v.ExpandedWells, v.PlateSampleID, repPerSample)
-		if err != nil {
-			v.PlateSampleError = err.Error()
-			return
-		}
-		if err := v.applyPlateProps(plate.ID, ownerStepID, map[string]any{"samples": samples, "replicates": replicates}); err != nil {
-			v.PlateSampleError = err.Error()
-			return
-		}
-		v.PlateSampleError = ""
-		v.ExpandedWells = nil
-	}
-	assignFactor := func() {
-		if len(v.ExpandedWells) == 0 {
-			v.PlateSampleError = "请先选择孔位"
-			return
-		}
-		nextFactors, err := ApplyPlateFactor(geometry, plate.Groups, plate.Factors, v.ExpandedWells, v.PlateFactorDim, v.PlateFactorVal)
-		if err != nil {
-			v.PlateSampleError = err.Error()
-			return
-		}
-		dim := strings.TrimSpace(v.PlateFactorDim)
-		if err := v.applyPlateProps(plate.ID, ownerStepID, map[string]any{"factors": nextFactors}); err != nil {
-			v.PlateSampleError = err.Error()
-			return
-		}
-		if dim != "" {
-			v.plateFactorKey[plate.ID] = dim
-			v.plateColorBy[plate.ID] = "factor"
-		}
-		v.PlateSampleError = ""
-		v.ExpandedWells = nil
-	}
-	assignRole := func() {
-		if len(v.ExpandedWells) == 0 {
-			v.PlateSampleError = "请先选择孔位"
-			return
-		}
-		nextRoles, err := ApplyPlateRole(geometry, plate.Roles, v.ExpandedWells, v.PlateRoleChoice)
-		if err != nil {
-			v.PlateSampleError = err.Error()
-			return
-		}
-		if err := v.applyPlateProps(plate.ID, ownerStepID, map[string]any{"roles": nextRoles}); err != nil {
-			v.PlateSampleError = err.Error()
-			return
-		}
-		v.PlateSampleError = ""
-		v.ExpandedWells = nil
-	}
+	idxMap := plateGroupPaletteMap(v.Doc, plate)
 
 	ui.Overlay(c, func() {
 		backdrop := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
@@ -584,367 +535,82 @@ func (v *View) plateOverlay(c *ui.Context) {
 			closeOverlay()
 		}
 		layer.Children(func() {
-			ui.Column(c).Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).MaxWidth(float32(tok.Spacing48)*20).Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
 				ui.Box(c).Background(tok.Surface).Border(1, tok.Border).
 					Radius(float32(tok.DialogRadius)).Shadow(0, float32(tok.Spacing12), float32(tok.Spacing32), 0, ui.RGBA(0, 0, 0, .38)).
 					Padding(float32(tok.Spacing16), float32(tok.Spacing16)).Children(func() {
-					ui.Column(c).Gap(float32(tok.Spacing8)).Children(func() {
-						plateTitle := firstNonEmpty(plate.Title, fmt.Sprintf("%d 孔板", plate.Format))
+					ui.Column(c).Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+						plateTitle := plate.Title
+						if strings.TrimSpace(plateTitle) == "" {
+							if plate.Topology == "dish" {
+								plateTitle = fmt.Sprintf("培养皿分区（%d 区）", geometry.Rows*geometry.Columns)
+							} else {
+								plateTitle = fmt.Sprintf("%d 孔板", plate.Format)
+							}
+						}
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 							ui.Column(c).Gap(2).Children(func() {
-								ui.Text(c, plateTitle).FontSize(float32(tok.TextSection)).
-									Bold().TextColor(tok.Text)
+								ui.Text(c, plateTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 								meta := fmt.Sprintf("%s · %d 孔 · 已选 %d 孔", plate.ID, plate.Format, len(v.ExpandedWells))
 								if len(factorDims) > 0 {
-									meta += " · 因子：" + strings.Join(factorDims, " / ")
+									meta += " · 维度：" + strings.Join(factorDims, " / ")
 								}
 								ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 							})
 							ui.Spacer(c)
-							ui.Row(c).Wrap().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
-								for _, m := range []struct {
-									id, lbl string
-									show    bool
-								}{
-									{"group", "按分组", true},
-									{"sample", "按样本", len(plate.Samples) > 0 || canEdit},
-									{"factor", "按因子", len(factorDims) > 0},
-									{"replicate", "按复孔", len(plate.Replicates) > 0 || canEdit},
-									{"role", "按孔角色", len(plate.Roles) > 0 || canEdit},
-								} {
-									if !m.show {
-										continue
+							if len(factorDims) > 0 || len(plate.Roles) > 0 || len(plate.Samples) > 0 {
+								ui.Row(c).Wrap().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+									if components.Button(c, "分组", map[bool]components.ButtonVariant{true: components.ButtonSecondary, false: components.ButtonGhost}[colorBy == "group"]).Clicked() {
+										v.plateColorBy[plate.ID] = "group"
+										colorBy = "group"
 									}
-									m := m
-									lbl := m.lbl
-									if m.id == "factor" && factorKey != "" {
-										lbl = "按" + factorKey
+									if len(plate.Samples) > 0 {
+										if components.Button(c, "样本", map[bool]components.ButtonVariant{true: components.ButtonSecondary, false: components.ButtonGhost}[colorBy == "sample"]).Clicked() {
+											v.plateColorBy[plate.ID] = "sample"
+											colorBy = "sample"
+										}
 									}
-									btnVariant := components.ButtonGhost
-									if colorBy == m.id {
-										btnVariant = components.ButtonSecondary
+									for _, dim := range factorDims {
+										dim := dim
+										if components.Button(c, dim, map[bool]components.ButtonVariant{true: components.ButtonSecondary, false: components.ButtonGhost}[colorBy == "factor" && factorKey == dim]).Clicked() {
+											v.plateColorBy[plate.ID] = "factor"
+											v.plateFactorKey[plate.ID] = dim
+											colorBy = "factor"
+											factorKey = dim
+										}
 									}
-									if components.Button(c, lbl, btnVariant).Clicked() {
-										v.plateColorBy[plate.ID] = m.id
-										colorBy = m.id
-									}
-								}
-								for _, dim := range factorDims {
-									if len(factorDims) <= 1 {
-										break
-									}
-									dim := dim
-									btnVariant := components.ButtonGhost
-									if colorBy == "factor" && factorKey == dim {
-										btnVariant = components.ButtonSecondary
-									}
-									if components.Button(c, dim, btnVariant).Clicked() {
-										v.plateColorBy[plate.ID] = "factor"
-										v.plateFactorKey[plate.ID] = dim
-										colorBy = "factor"
-										factorKey = dim
-									}
-								}
-							})
-						})
-						viewportW, viewportH, cell := plateGridLayout(geometry, zoom)
-						selectMany := func(ids []string, additive bool) {
-							if !additive {
-								v.ExpandedWells = nil
-							}
-							for _, id := range ids {
-								if !containsString(v.ExpandedWells, id) {
-									v.ExpandedWells = append(v.ExpandedWells, id)
-								}
-							}
-						}
-						applyMarquee := func() {
-							x0, y0 := v.gridStart.X, v.gridStart.Y
-							x1, y1 := v.gridLast.X, v.gridLast.Y
-							if x0 > x1 {
-								x0, x1 = x1, x0
-							}
-							if y0 > y1 {
-								y0, y1 = y1, y0
-							}
-							selected := WellsInRect(geometry, cell, plateGridGap,
-								ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0})
-							v.ExpandedWells = v.ExpandedWells[:0]
-							if v.gridAdditive {
-								v.ExpandedWells = append(v.ExpandedWells, v.gridBase...)
-							}
-							for _, id := range selected {
-								if !containsString(v.ExpandedWells, id) {
-									v.ExpandedWells = append(v.ExpandedWells, id)
-								}
-							}
-						}
-						gridProps := plateui.Props{ColorBy: colorBy, FactorKey: factorKey}
-						ui.Box(c).Key("plate-grid").Size(viewportW, viewportH).Children(func() {
-							ui.Column(c).Fill().Gap(plateGridGap).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-								ui.Row(c).Gap(plateGridGap).Children(func() {
-									ui.Box(c).Width(plateGridLabelWidth).Height(plateGridHeaderHeight)
-									for col := 1; col <= geometry.Columns; col++ {
-										col := col
-										btn := ui.ButtonBase(c).Width(cell).Height(plateGridHeaderHeight).
-											Label(fmt.Sprintf("选择第 %d 列", col))
-										btn.Children(func() {
-											ui.Text(c, fmt.Sprintf("%d", col)).FontSize(t.Rem(.62)).
-												TextColor(tok.TextMuted).Center()
-										})
-										if btn.Clicked() && !v.gridDragging && !suppressGridClick {
-											ids := make([]string, 0, geometry.Rows)
-											for row := 0; row < geometry.Rows; row++ {
-												ids = append(ids, fmt.Sprintf("%s%d", rowLabel(row), col))
-											}
-											selectMany(ids, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
+									if len(plate.Roles) > 0 {
+										if components.Button(c, "孔角色", map[bool]components.ButtonVariant{true: components.ButtonSecondary, false: components.ButtonGhost}[colorBy == "role"]).Clicked() {
+											v.plateColorBy[plate.ID] = "role"
+											colorBy = "role"
 										}
 									}
 								})
-								for row := 0; row < geometry.Rows; row++ {
-									row := row
-									ui.Row(c).Gap(plateGridGap).Children(func() {
-										btn := ui.ButtonBase(c).Width(plateGridLabelWidth).Height(cell).
-											Label("选择第 " + rowLabel(row) + " 行")
-										btn.Children(func() {
-											ui.Text(c, rowLabel(row)).FontSize(t.Rem(.62)).TextColor(tok.TextMuted).Center()
-										})
-										if btn.Clicked() && !v.gridDragging && !suppressGridClick {
-											ids := make([]string, 0, geometry.Columns)
-											for col := 1; col <= geometry.Columns; col++ {
-												ids = append(ids, fmt.Sprintf("%s%d", rowLabel(row), col))
-											}
-											selectMany(ids, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
-										}
-										for col := 1; col <= geometry.Columns; col++ {
-											col := col
-											well := fmt.Sprintf("%s%d", rowLabel(row), col)
-											group := wells[well]
-											ws := plateui.WellState{
-												Group:     group,
-												SampleID:  plate.Samples[well],
-												Replicate: plate.Replicates[well],
-												Role:      plate.Roles[well],
-												Factors:   plate.WellFactors(well),
-											}
-											selected := containsString(v.ExpandedWells, well)
-											assigned := group != ""
-											bg := plateui.WellFillColor(gridProps, ws, assigned, plate.Roles[well], dark, tok)
-											if !assigned {
-												bg = tok.Canvas
-											}
-											border := tok.Border
-											width := float32(1)
-											if selected {
-												border, width = tok.Accent, 2
-											}
-											btn := ui.ButtonBase(c).Key(well).Size(cell, cell).Radius(cell/2).
-												Background(bg).Border(width, border).Label("孔 " + well)
-											if assigned {
-												micro := overlayWellTag(gridProps, ws, plate.Roles[well])
-												if micro != "" {
-													ink := overlayContrastInk(bg, tok)
-													btn.Children(func() {
-														ui.Box(c).Fill().Center().Children(func() {
-															ui.Text(c, micro).FontSize(t.Rem(.58)).Bold().TextColor(ink).SingleLine()
-														})
-													})
-												}
-											}
-											cellPoint := func(x, y float32) ui.Point {
-												return ui.Point{
-													X: float32(col-1)*(cell+plateGridGap) + x,
-													Y: float32(row)*(cell+plateGridGap) + y,
-												}
-											}
-											btn = btn.HandleInput(func(event ui.InputEvent) bool {
-												if (event.Kind == ui.InputPointerDown || event.Kind == ui.InputPointerUp) &&
-													event.Button != 0 {
-													return false
-												}
-												switch event.Kind {
-												case ui.InputPointerDown:
-													point := cellPoint(event.X, event.Y)
-													v.gridPointerDown = true
-													v.gridPointerStart = ui.Point{X: event.X, Y: event.Y}
-													v.gridStart, v.gridLast = point, point
-													v.gridDragging = false
-													v.gridAdditive = event.Mods&(ui.Shift|ui.Cmd) != 0
-													v.gridBase = append(v.gridBase[:0], v.ExpandedWells...)
-													return false
-												case ui.InputPointerMove:
-													if !v.gridPointerDown {
-														return false
-													}
-													dx := event.X - v.gridPointerStart.X
-													dy := event.Y - v.gridPointerStart.Y
-													if !v.gridDragging {
-														if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
-															return false
-														}
-														v.gridDragging = true
-													}
-													v.gridLast = cellPoint(event.X, event.Y)
-													applyMarquee()
-													return true
-												case ui.InputPointerUp:
-													if !v.gridPointerDown {
-														return false
-													}
-													v.gridPointerDown = false
-													if !v.gridDragging {
-														v.gridBase = nil
-														return false
-													}
-													if event.Canceled {
-														v.ExpandedWells = append(v.ExpandedWells[:0], v.gridBase...)
-													} else {
-														v.gridLast = cellPoint(event.X, event.Y)
-														applyMarquee()
-													}
-													v.gridDragging = false
-													v.gridSuppressClick = true
-													v.gridBase = nil
-													return true
-												}
-												return false
-											})
-											if btn.Clicked() && !v.gridDragging && !suppressGridClick {
-												mods := btn.ClickModifiers()
-												if mods&(ui.Shift|ui.Cmd) != 0 {
-													if selected {
-														v.ExpandedWells = removeString(v.ExpandedWells, well)
-													} else {
-														v.ExpandedWells = append(v.ExpandedWells, well)
-													}
-												} else {
-													v.ExpandedWells = []string{well}
-												}
-											}
-										}
-									})
-								}
+							}
+						})
+						overlayZoom := zoom * 1.2
+						if geometry.Rows*geometry.Columns > 96 {
+							overlayZoom = zoom
+						}
+						ui.ScrollBoth(c).MaxWidth(float32(tok.Spacing48)*19).MaxHeight(580).Children(func() {
+							plateui.View(c, plateui.Props{
+								Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns,
+								Topology: plate.Topology, Roles: plate.Roles,
+								Interactive: canEdit || true,
+								SelectedIDs: v.ExpandedWells,
+								OnSelect: func(ids []string) {
+									v.ExpandedWells = ids
+								},
+								ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap,
+								Zoom: overlayZoom, State: &v.overlayPlateState,
 							})
 						})
 					})
 				})
 
-				// Multi-layer Researcher Annotation Bar
-				ui.Column(c).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-					Background(tok.Surface).Border(1, tok.Border).
-					Shadow(0, float32(tok.Spacing8), float32(tok.Spacing24), 0, ui.RGBA(0, 0, 0, .30)).
-					Gap(float32(tok.Spacing8)).Children(func() {
-					// Row 1: Zoom, Group painter, Well role, Clear, Close
-					ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, fmt.Sprintf("%d 孔板", plate.Format)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
-						if components.IconButton(c, lucide.ZoomOut(), "缩小孔板", components.IconButtonCompact).Clicked() && zoom > 0.6 {
-							v.PlateZoom = zoom - 0.1
-						}
-						ui.Text(c, fmt.Sprintf("%.0f%%", zoom*100)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
-						if components.IconButton(c, lucide.ZoomIn(), "放大孔板", components.IconButtonCompact).Clicked() && zoom < 1.6 {
-							v.PlateZoom = zoom + 0.1
-						}
-						if components.IconButton(c, lucide.RotateCcw(), "重置缩放", components.IconButtonCompact).Clicked() {
-							v.PlateZoom = 1
-						}
-						ui.Box(c).Width(1).Height(18).Background(tok.Border)
-						for _, group := range groups {
-							group := group
-							active := group == v.SelectedGroup
-							btn := ui.ButtonBase(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-								Background(map[bool]ui.Color{true: tok.Accent.Alpha(.16), false: ui.Color{}}[active]).
-								OnClick(func() { v.SelectedGroup = group })
-							btn.Children(func() {
-								ui.Row(c).Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
-									ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Background(groupColorForCtx(c, group))
-									ui.Text(c, group).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-								})
-							})
-						}
-						if len(v.ExpandedWells) > 0 {
-							ui.Text(c, fmt.Sprintf("%d 孔", len(v.ExpandedWells))).
-								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
-						}
-						if canEdit {
-							assignBtn := components.Button(c, "分配到 "+v.SelectedGroup, components.ButtonSecondary)
-							assignBtn.Disabled(len(v.ExpandedWells) == 0 || v.SelectedGroup == "")
-							if assignBtn.Clicked() {
-								assign()
-							}
-							erase := components.IconButton(c, lucide.Eraser(), "清除所选孔位", components.IconButtonCompact)
-							erase.Disabled(len(v.ExpandedWells) == 0)
-							if erase.Clicked() {
-								clear()
-							}
-						}
-						if components.IconButton(c, lucide.X(), "关闭放大孔板", components.IconButtonCompact).Clicked() {
-							closeOverlay()
-						}
-					})
-					// Row 2: Sample + Auto-Replicates + Orthogonal Factors + Well Roles
-					if canEdit {
-						ui.Divider(c)
-						ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
-							ui.Box(c).Width(float32(tok.Spacing48) * 3.4).Children(func() {
-								components.TextBox(c, &v.PlateSampleID, components.TextBoxOptions{}).Placeholder("样本ID 逗号多选")
-							})
-							ui.Box(c).Width(float32(tok.Spacing48) * 1.6).Children(func() {
-								components.TextBox(c, &v.PlateReplicateStart, components.TextBoxOptions{}).Placeholder("起始#")
-							})
-							for _, repN := range []int{1, 2, 3, 4} {
-								repN := repN
-								rv := components.ButtonGhost
-								if v.PlateBatchRepCount == repN {
-									rv = components.ButtonSecondary
-								}
-								if components.Button(c, fmt.Sprintf("%d复孔", repN), rv).Clicked() {
-									if v.PlateBatchRepCount == repN {
-										v.PlateBatchRepCount = 0
-									} else {
-										v.PlateBatchRepCount = repN
-									}
-								}
-							}
-							applySample := components.Button(c, "分配样本", components.ButtonSecondary)
-							applySample.Disabled(len(v.ExpandedWells) == 0)
-							if applySample.Clicked() {
-								assignSample()
-							}
-							ui.Box(c).Width(1).Height(18).Background(tok.Border)
-							ui.Box(c).Width(float32(tok.Spacing48) * 2.5).Children(func() {
-								components.TextBox(c, &v.PlateFactorDim, components.TextBoxOptions{}).Placeholder("因子名 如靶点")
-							})
-							ui.Box(c).Width(float32(tok.Spacing48) * 2.6).Children(func() {
-								components.TextBox(c, &v.PlateFactorVal, components.TextBoxOptions{}).Placeholder("因子值 如GAPDH")
-							})
-							applyFactor := components.Button(c, "标注因子", components.ButtonOutline)
-							applyFactor.Disabled(len(v.ExpandedWells) == 0)
-							if applyFactor.Clicked() {
-								assignFactor()
-							}
-							roleSel := components.Select(c, &v.PlateRoleChoice)
-							roleSel.Trigger.Children(func() {
-								ui.Text(c, plateui.RoleLabel(v.PlateRoleChoice)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-							})
-							roleSel.Popup(func(panel ui.Element) {
-								for _, rOpt := range []string{"sample", "ntc", "standard", "blank", "positive_control", "negative_control", "vehicle"} {
-									rOpt := rOpt
-									roleSel.Item(rOpt).Children(func() {
-										ui.Text(c, plateui.RoleLabel(rOpt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-									})
-								}
-							})
-							applyRole := components.Button(c, "标孔角色", components.ButtonOutline)
-							applyRole.Disabled(len(v.ExpandedWells) == 0)
-							if applyRole.Clicked() {
-								assignRole()
-							}
-						})
-						if v.PlateSampleError != "" {
-							ui.Text(c, v.PlateSampleError).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
-						}
-					}
-				})
+				v.renderPlateFloatingBar(c, plate, ownerStepID, v.ExpandedWells, func(next []string) {
+					v.ExpandedWells = next
+				}, true, zoom, closeOverlay)
 			})
 		})
 	})
@@ -1487,11 +1153,11 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 				draft[input.Name+"__unit"] = &empty
 			}
 			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, input.Name).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted).Width(172)
+				ui.Text(c, genericPortLabel(input.Name)).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted).Width(172)
 				switch input.Type {
 				case "string", "reference", "artifact":
 					if input.Type == "artifact" {
-						ui.Text(c, "read-only").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+						ui.Text(c, "结构化列表（在步骤工作台或源码中编辑）").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 					} else {
 						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
 							ui.TextInput(c, draft[input.Name]).Label(input.Name).FillWidth()
@@ -1541,7 +1207,7 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 						lists[input.Name] = items
 					})
 				case "list", "object", "table", "object-list", "well-map", "geometry":
-					ui.Text(c, "read-only").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+					ui.Text(c, "结构化列表（在步骤工作台或源码中编辑）").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
 				default:
 					ui.TextInput(c, draft[input.Name])
 				}
@@ -1551,7 +1217,7 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 			})
 		}
 		if canEdit {
-			btn := ui.Button(c, "保存")
+			btn := components.Button(c, "保存", components.ButtonSecondary)
 			if btn.Clicked() && v.OnUpdateModule != nil {
 				props := map[string]any{}
 				orig := v.moduleOriginals[moduleID]
@@ -1840,4 +1506,104 @@ func iconButton(c *ui.Context, icon *ui.SVG, label string, variant components.Bu
 		})
 	})
 	return btn
+}
+
+var genericPortLabelMap = map[string]string{
+	"title":               "标题",
+	"name":                "名称",
+	"objective":           "实验目的",
+	"role":                "组别角色",
+	"condition":           "处理条件",
+	"independent_n":       "生物学重复 n",
+	"technical_repeats":   "技术重复",
+	"schema_id":           "结构标识",
+	"endpoint":            "观测终点",
+	"value_kind":          "数据类型",
+	"unit":                "单位",
+	"plate_format":        "容器规格",
+	"timepoints":          "采样时间点",
+	"format":              "孔数规格",
+	"topology":            "容器拓扑",
+	"stock_concentration": "母液浓度",
+	"storage":             "储存条件",
+	"lot":                 "批号",
+	"catalog":             "货号",
+	"cas":                 "CAS 号",
+	"mode":                "模式",
+	"groups":              "孔位分组",
+	"samples":             "样本映射",
+	"replicates":          "复孔编号",
+	"roles":               "孔位角色",
+	"factors":             "多维因子",
+	"rows":                "明细行",
+	"columns":             "数据列",
+	"layout":              "视图布局",
+	"container_ref":       "关联容器",
+	"plate_ref":           "关联孔板",
+	"body":                "正文内容",
+	"src":                 "图片路径",
+	"svg":                 "矢量源码",
+	"caption":             "图注",
+	"duration":            "持续时长",
+	"offset":              "时间窗偏移",
+	"rounds":              "循环轮数",
+	"phases":              "循环阶段",
+	"items":               "条目列表",
+	"media_hint":          "采集说明",
+	"scope":               "附件范围",
+	"slots_per_cell":      "每孔采图槽数",
+	"target_mass":         "目标上样量",
+	"volume_per_unit":     "单份体积",
+	"excess_ratio":        "余量比例",
+	"dilution_factor":     "稀释倍数",
+	"steps_count":         "梯度级数",
+	"stock":               "母液浓度",
+	"target":              "目标浓度",
+	"final_volume":        "终体积",
+	"formula":             "计算公式",
+	"timepoint":           "时间点",
+	"missing_reasons":     "缺失原因枚举",
+	"null_allowed":        "允许空值",
+	"source_kinds":        "数据来源类型",
+	"table_columns":       "表格列定义",
+	"method":              "检测方法",
+	"group_refs":          "关联分组",
+	"protocol_version_id": "方案版本标识",
+	"controls":            "对照设置",
+	"timepoint_relation":  "时间点关联",
+	"technical_replicates":"技术重复数",
+	"control_group_ref":   "对照分组引用",
+	"sample_id":           "样本编号",
+	"group_ref":           "所属分组",
+	"material_refs":       "关联试剂/材料",
+	"amount":              "用量/体积",
+	"class":               "仪器类别",
+	"model":               "型号",
+	"capabilities":        "能力清单",
+	"constraints":         "使用约束",
+	"source":              "来源渠道",
+	"pantry_code":         "储藏室短码",
+	"steps":               "步骤序列",
+	"edges":               "依赖连线",
+	"business_order":      "业务顺序",
+	"execution":           "执行属性",
+	"assay":               "关联检测",
+	"path":                "步骤路径",
+	"order":               "排序序号",
+	"block_refs":          "共享模块引用",
+	"blocks":              "步骤内模块",
+	"checks":              "检查项",
+	"tasks":               "任务列表",
+	"uses":                "关联资源",
+	"experimental_unit":   "实验单元",
+	"primary_endpoint":    "主要终点",
+	"endpoint_method":     "测定方法",
+	"endpoint_unit":       "终点单位",
+}
+
+func genericPortLabel(name string) string {
+	if lbl, ok := genericPortLabelMap[name]; ok {
+		return lbl
+	}
+	return name
 }

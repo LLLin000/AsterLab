@@ -233,3 +233,32 @@ func TestMoveStepBlockToIndexAndCalculatorActualsAndPaste(t *testing.T) {
 		t.Fatalf("rows = %#v", rows)
 	}
 }
+
+func TestDataTableMatrixPasteRoundTrip(t *testing.T) {
+	src := "```asterlab\nkind: experiment\nid: exp-mtx\nschema: 1\ntitle: 孔板矩阵测试\nobjective: 验证 2D 整板粘贴\n```\n\n```asterlab\nkind: group\nid: grp-ctrl\nschema: 1\nname: 对照\nrole: control\nindependent_n: 3\n```\n\n```asterlab\nkind: plate\nid: pl-6\nschema: 1\nformat: 6\ngroups:\n  grp-ctrl: [A1, A2, A3]\nsamples:\n  A1: Ctrl-1\n  A2: Ctrl-2\n  A3: Ctrl-3\n```\n\n```asterlab\nkind: data_table\nid: dt-mtx\nschema: 1\ntitle: 6孔板 OD 读数\ncontainer_ref: pl-6\nlayout: matrix\ncolumns:\n  - {key: well, label: 孔位, value_kind: text}\n  - {key: sample_id, label: 样本, value_kind: text}\n  - {key: od450, label: OD450, value_kind: number, unit: AU}\n```\n"
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	v := &View{Doc: doc, Mode: ModeRun}
+	pl, _ := v.findPlate("pl-6")
+	cols := []map[string]any{
+		{"key": "well", "label": "孔位", "value_kind": "text"},
+		{"key": "sample_id", "label": "样本", "value_kind": "text"},
+		{"key": "od450", "label": "OD450", "value_kind": "number", "unit": "AU"},
+	}
+	// Excel/plate-reader TSV with column headers 1..3 and row headers A..B
+	tsv := "<>\t1\t2\t3\nA\t0.412\t0.419\t0.405\nB\t1.102\t1.088\t1.140"
+	filled := v.ApplyMatrixClipboardToDataTable("dt-mtx", pl, cols, nil, "od450", tsv)
+	if filled != 6 {
+		t.Fatalf("filled = %d, want 6", filled)
+	}
+	sub, err := v.buildDataTableSubmission("dt-mtx", "od450_matrix", "od450", cols, nil, 6)
+	if err != nil {
+		t.Fatalf("submission failed: %v", err)
+	}
+	rows := sub["rows"].([][]any)
+	if len(rows) != 6 || rows[0][0] != "A1" || rows[0][1] != "Ctrl-1" || rows[0][2] != 0.412 || rows[5][0] != "B3" || rows[5][2] != 1.140 {
+		t.Fatalf("unexpected submitted matrix rows: %#v", rows)
+	}
+}

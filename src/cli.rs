@@ -4957,4 +4957,64 @@ blocks:
 
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn plate_format_4_and_calculator_container_ref_validate_and_eval() {
+        let source = r#"```asterlab
+kind: experiment
+id: exp-dish4
+schema: 1
+title: 四区培养皿与通用容器引用计算
+objective: 验证 format 4 与 calculator container_ref 兼容
+```
+
+```asterlab
+kind: group
+id: grp-a
+schema: 1
+name: 实验组 A
+role: treatment
+independent_n: 2
+```
+
+```asterlab
+kind: group
+id: grp-b
+schema: 1
+name: 对照组 B
+role: control
+independent_n: 2
+```
+
+```asterlab
+kind: plate
+id: dish-4
+schema: 1
+format: 4
+topology: dish
+groups:
+  grp-a: [A1, A2]
+  grp-b: [B1, B2]
+```
+
+```asterlab
+kind: calculator
+id: calc-mm
+schema: 1
+title: 按容器统计母液混配
+mode: group_mastermix
+container_ref: dish-4
+volume_per_unit: {value: 50, unit: uL}
+excess_ratio: 0.1
+```
+"#;
+        validate_asterdoc_source(source).expect("format: 4 plate with calculator container_ref validates");
+        let mods = parse_asterdoc_modules(source).expect("parse format: 4 asterml");
+        let res = eval_asterdoc_calculator_with_actuals(&mods, "calc-mm", None).expect("eval group_mastermix via container_ref");
+        let rows = res["rows"].as_array().expect("calculator rows");
+        assert_eq!(rows.len(), 2, "expected 2 groups counted from dish-4: {res}");
+        // Each group has 2 wells * 50 uL * 1.1 = 110 uL
+        let first_amt = rows[0]["amount"].as_f64().unwrap();
+        assert!((first_amt - 110.0).abs() < 1e-3, "unexpected amount = {first_amt}, full={res}");
+    }
 }

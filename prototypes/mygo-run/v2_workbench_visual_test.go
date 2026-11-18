@@ -426,9 +426,13 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 			suffix = "dark"
 		}
 		qApp := makeDesignApp(qpcrSrc, "step-02-plate-setup", 0)
-		renderVisualPNGSteps(t, outDir, "design_qpcr_plate_multilayer_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
+		renderVisualPNGSteps(t, outDir, "design_qpcr_plate_multilayer_"+suffix+".png", 1360, 980, dark, func(c *ui.Context) {
 			asterDesignPage(c, qApp)
 		}, func(tt *ui.Tester) {
+			if err := tt.Click("孔 C1"); err != nil {
+				t.Fatalf("click inline C1 well: %v", err)
+			}
+			tt.Frame()
 			if err := tt.Click("靶点基因"); err != nil {
 				t.Fatalf("click factor color mode: %v", err)
 			}
@@ -444,8 +448,12 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				t.Fatalf("click expand plate: %v", err)
 			}
 			tt.Frame()
-			if err := tt.Click("按样本"); err != nil {
+			if err := tt.Click("样本"); err != nil {
 				t.Fatalf("click sample color mode in overlay: %v", err)
+			}
+			tt.Frame()
+			if err := tt.Click("孔 B2"); err != nil {
+				t.Fatalf("click B2 well in overlay: %v", err)
 			}
 			tt.Frame()
 		})
@@ -458,7 +466,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 - Q3 万古霉素组形成直径 **21.0 mm** 清晰抑菌透明圈，阳性对照符合预期。
 - Q2 HAMA 水凝胶浸提片平均抑菌圈 **11.6 mm**，呈现温和抑菌活性 @matrix(16h)。
 
-` + "```asterlab\nkind: param_table\nid: note-pt-summary\nschema: 1\ntitle: 关键实验条件复核汇总\nrows:\n  - {key: temp, label: 倒置培养温度, value: 37, unit: Cel, record_actual: true}\n  - {key: duration, label: 孵育时长, value: 16, unit: h, record_actual: true}\n  - {key: disc_mm, label: 滤纸片直径, value: 6, unit: mm, record_actual: false}\n```"
+` + "```asterlab\nkind: param_table\nid: note-pt-summary\nschema: 1\ntitle: 实验条件\nrows:\n  - {key: temp, label: 倒置培养温度, value: 37, unit: Cel, record_actual: true}\n  - {key: duration, label: 孵育时长, value: 16, unit: h, record_actual: true}\n  - {key: disc_mm, label: 滤纸片直径, value: 6, unit: mm, record_actual: false}\n```"
 	for _, dark := range []bool{false, true} {
 		suffix := "light"
 		if dark {
@@ -485,7 +493,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				t.Fatalf("click companion modules tab: %v", err)
 			}
 			tt.Frame()
-			if !tt.HasText("关键实验条件复核汇总") {
+			if !tt.HasText("实验条件") {
 				t.Fatalf("embedded asterlab block did not render in reading mode: %q", tt.Texts())
 			}
 		})

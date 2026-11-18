@@ -13,6 +13,7 @@ import (
 func moduleCardFrame(v *View, c *ui.Context, icon *ui.SVG, title, badgeText string, accentBar *ui.Color, content func()) {
 	t := c.Theme()
 	tok := theme.GetTokens(t)
+	editableTitle := v != nil && v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit) && v.currentModuleID != ""
 	ui.Row(c).FillWidth().Radius(float32(tok.PanelRadius)).Background(tok.Surface).
 		Border(1, tok.Border).Children(func() {
 		if accentBar != nil {
@@ -25,7 +26,11 @@ func moduleCardFrame(v *View, c *ui.Context, icon *ui.SVG, title, badgeText stri
 						ui.Icon(c, icon).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
 					}
 					if title != "" {
-						ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+						modID := ""
+						if v != nil {
+							modID = v.currentModuleID
+						}
+						renderInlineEditableTitle(v, c, modID, title, editableTitle)
 					}
 					ui.Spacer(c)
 					if badgeText != "" {
@@ -35,6 +40,52 @@ func moduleCardFrame(v *View, c *ui.Context, icon *ui.SVG, title, badgeText stri
 			}
 			content()
 		})
+	})
+}
+
+func renderInlineEditableTitle(v *View, c *ui.Context, moduleID, title string, editable bool) {
+	tok := theme.GetTokens(c.Theme())
+	if v == nil || !editable || moduleID == "" {
+		ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+		return
+	}
+	if v.titleEditID == moduleID {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Box(c).Width(float32(tok.Spacing48) * 4).Children(func() {
+				tb := components.TextBox(c, &v.titleEditBuf, components.TextBoxOptions{}).Placeholder("模块标题")
+				tb.OnTextKey(func(k ui.TextKey) bool {
+					if k.Key == ui.KeyEnter && k.Mods == 0 {
+						next := strings.TrimSpace(v.titleEditBuf)
+						if next != "" && next != title {
+							v.emitAnyModuleEdit(moduleID, map[string]any{"title": next})
+						}
+						v.titleEditID = ""
+						return true
+					}
+					return false
+				})
+			})
+			if components.Button(c, "确定", components.ButtonSecondary).Clicked() {
+				next := strings.TrimSpace(v.titleEditBuf)
+				if next != "" && next != title {
+					v.emitAnyModuleEdit(moduleID, map[string]any{"title": next})
+				}
+				v.titleEditID = ""
+			}
+			if components.IconButton(c, lucide.X(), "取消改名", components.IconButtonCompact).Clicked() {
+				v.titleEditID = ""
+			}
+		})
+		return
+	}
+	ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+		ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+		editBtn := components.IconButton(c, lucide.Pencil(), "修改标题", components.IconButtonCompact)
+		components.Tooltip(c, editBtn, "自定义模块标题")
+		if editBtn.Clicked() {
+			v.titleEditID = moduleID
+			v.titleEditBuf = title
+		}
 	})
 }
 
@@ -142,6 +193,9 @@ func (v *View) renderProse(c *ui.Context, data map[string]any) {
 				line := strings.TrimSpace(para)
 				if line == "" {
 					continue
+				}
+				if strings.HasPrefix(line, "- ") {
+					line = "• " + strings.TrimSpace(strings.TrimPrefix(line, "- "))
 				}
 				ui.Text(c, line).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
 			}

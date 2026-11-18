@@ -11,6 +11,7 @@ type Geometry struct {
 }
 
 var plateFormats = map[int]Geometry{
+	4:   {Format: 4, Rows: 2, Columns: 2},
 	6:   {Format: 6, Rows: 2, Columns: 3},
 	12:  {Format: 12, Rows: 3, Columns: 4},
 	24:  {Format: 24, Rows: 4, Columns: 6},

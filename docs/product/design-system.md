@@ -163,7 +163,8 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | 参数表 / 分组表 / 数据表 / 计算器结果 | `onevra/components.Table` + `TableRow` | 数值列启用 `.FontFeatures("tnum")`，质控边界用 `Badge` 语义色调 |
 | AsterML 源码编辑 | `mygo/ui/editor`（Markdown 高亮、行号、DiffBase） | 与右侧 `asterdoc.ModeProtocol` 实时预览同屏联动 |
 | 示意图 / 培养皿分区 SVG | `mygo/ui.ParseSVG` + `ui.Image` + `<text>` 叠加 | 纯视觉辅助表达；分组与量化数据严格归属 `group_table` / `data_table` |
-| 孔板 / 培养皿 / 1D 管架网格 | `internal/uikit/plate` + `theme.CategoricalPalette` | 支持分组、样本、正交因子（`factors`）、复孔与孔角色（NTC/Std/Blank）五维 `ColorBy` 切换与孔内角标；`ui.Hex` 只保留在 `theme.go` |
+| 孔板 / 培养皿 / 1D 管架网格 | `internal/uikit/plate` + `theme.CategoricalPalette` | Design/Run/Notebook/Tools 全部统一复用 `plateui.View`（`format: 4/6/12/24/48/96/384` 自适应孔径从 `56px` 渐缩至 `17px`，`rack_1d` 为 `40×58px` 竖向胶囊，`dish` 绘制双层圆形皿壁与十字分区线）；采用单输入框悬浮选孔条（`ApplyUnifiedPlateAnnotation`）替代多排模式按钮，默认顺序 8 色无冲突，内联与放大浮层均支持拖拽框选与行列快选；`ui.Hex` 只保留在 `theme.go` |
+| 二维孔板数据矩阵与便携附件 | `asterdoc.View` (`widget_tables.go` / `widget_figure.go`) | `data_table@1` 关联 `container_ref` 时支持 `列表` / `孔板矩阵`（`layout: matrix`）切换与 `粘贴整板矩阵`；`figure@1` 拖放/选取文件自动落入同级 `./assets/`；所有通用模块支持卡片标题内联重命名 |
 | Notebook 科研电子实验记录本 (ELN) | `components.SplitPercent` + 只读水合 `asterdoc.View` + `components.Table` | 笔记页支持内嵌 ` ```asterlab ` 模块与右侧冻结方案同源预览；`图板` 采用双栏结构化仪表盘（5 格 KPI + 计划实际表 + 视野矩阵 + 右栏签核归档） |
 | 资料与工具台账 | `components.Sidebar` + `TextBox` + `Badge` + `UseInDesigner` | 储藏室试剂台账与 96 孔板/稀释计算工具，草稿可直接转化为 AsterML v2 模块插入当前实验设计 |
 | 步骤内模块拖拽排序 | `ui.Box`（`.Drag` / `.DragOver` / `.Drop`）+ `lucide.GripVertical` | 手柄固定于模块标题栏左侧；落位复用 `MoveStepBlockToIndex` 与主题高亮边框 |

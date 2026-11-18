@@ -470,7 +470,7 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 						return fmt.Errorf("calculator excess_ratio must be non-negative")
 					}
 					comps, _ := data["components"].([]any)
-					if len(comps) == 0 && textValue(data, "plate_ref") == "" {
+					if len(comps) == 0 && textValue(data, "plate_ref") == "" && textValue(data, "container_ref") == "" {
 						return fmt.Errorf("calculator group_mastermix needs components or plate_ref")
 					}
 					for _, raw := range comps {

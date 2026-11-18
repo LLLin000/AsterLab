@@ -409,7 +409,7 @@ func EvalCalculatorWithActuals(doc *Document, data map[string]any, actuals *Calc
 		}
 		groupCounts := map[string]int{}
 		groupOrder := []string{}
-		if ref := textValue(data, "plate_ref"); ref != "" && doc != nil {
+		if ref := firstNonEmpty(textValue(data, "plate_ref"), textValue(data, "container_ref")); ref != "" && doc != nil {
 			if p, found := doc.PlateByID(ref); found {
 				for _, g := range p.GroupNames() {
 					n := len(p.Groups[g])
@@ -670,6 +670,11 @@ func EvalCalculatorWithActuals(doc *Document, data map[string]any, actuals *Calc
 					} else if qv, _, qerr := quantityParts(v); qerr == nil {
 						vars[k] = qv
 						keys = append(keys, k)
+					} else if m, ok := v.(map[string]any); ok {
+						if num, numOK := numericValue(m["value"]); numOK {
+							vars[k] = num
+							keys = append(keys, k)
+						}
 					}
 				}
 			}
@@ -702,8 +707,12 @@ func EvalCalculatorWithActuals(doc *Document, data map[string]any, actuals *Calc
 			res.Err = err
 			return res
 		}
+		resUnit := textValue(data, "unit")
 		res.Summary = fmt.Sprintf("%s = %s", expr, formatNumber(round4(val)))
-		res.Rows = []CalcRow{{Label: "计算结果", Amount: round4(val), Unit: "", Note: expr}}
+		if resUnit != "" {
+			res.Summary += " " + resUnit
+		}
+		res.Rows = []CalcRow{{Label: "计算结果", Amount: round4(val), Unit: resUnit, Note: expr}}
 		return res
 	}
 	res.Err = fmt.Errorf("unsupported calculator mode %q", mode)

@@ -118,7 +118,7 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 		Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
-			ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+			renderInlineEditableTitle(v, c, moduleID, title, editableDesign)
 			ui.Spacer(c)
 			components.Badge(c, badge)
 			zoomBtn := components.IconButton(c, lucide.Maximize2(), "放大查看", components.IconButtonCompact)
@@ -208,7 +208,8 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 		}
 		if dropped := card.DroppedFiles(); len(dropped) > 0 {
 			picked := dropped[0]
-			props := map[string]any{"src": picked}
+			srcVal := portableFigureAssetSrc(v.BaseDir, picked)
+			props := map[string]any{"src": srcVal}
 			if strings.EqualFold(filepath.Ext(picked), ".svg") {
 				if rawBytes, readErr := os.ReadFile(picked); readErr == nil && strings.Contains(string(rawBytes), "<svg") {
 					props["svg"] = string(rawBytes)
@@ -217,6 +218,45 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 			v.emitAnyModuleEdit(moduleID, props)
 		}
 	}
+}
+
+// PortableFigureAssetPath resolves or copies a user-selected image into
+// `<baseDir>/assets/<filename>` when baseDir is set, returning `./assets/<filename>`.
+func PortableFigureAssetPath(baseDir, picked string) string {
+	return portableFigureAssetSrc(baseDir, picked)
+}
+
+func resolveFigurePath(baseDir, src string) string {
+	trimmed := strings.TrimSpace(src)
+	if trimmed == "" || filepath.IsAbs(trimmed) || baseDir == "" {
+		return trimmed
+	}
+	return filepath.Join(baseDir, filepath.FromSlash(trimmed))
+}
+
+func portableFigureAssetSrc(baseDir, picked string) string {
+	trimmed := strings.TrimSpace(picked)
+	if baseDir == "" || trimmed == "" {
+		return trimmed
+	}
+	if rawBytes, err := os.ReadFile(trimmed); err == nil {
+		assetsDir := filepath.Join(baseDir, "assets")
+		if mkErr := os.MkdirAll(assetsDir, 0o755); mkErr == nil {
+			base := filepath.Base(trimmed)
+			dest := filepath.Join(assetsDir, base)
+			if writeErr := os.WriteFile(dest, rawBytes, 0o644); writeErr == nil {
+				return "./assets/" + base
+			}
+		}
+	}
+	if rel, err := filepath.Rel(baseDir, trimmed); err == nil && !strings.HasPrefix(rel, "..") {
+		slash := filepath.ToSlash(rel)
+		if !strings.HasPrefix(slash, "./") {
+			slash = "./" + slash
+		}
+		return slash
+	}
+	return trimmed
 }
 
 func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, annotations []svgTextLabel, maxH float32, zoom float32) {
@@ -276,7 +316,8 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 	}
 
 	if src != "" {
-		imgSrc, loadErr := v.cachedImageFile(src)
+		resolved := resolveFigurePath(v.BaseDir, src)
+		imgSrc, loadErr := v.cachedImageFile(resolved)
 		if loadErr != "" {
 			ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
 				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).

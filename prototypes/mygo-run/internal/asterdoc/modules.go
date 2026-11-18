@@ -341,14 +341,69 @@ func sampleSpec() ModuleSpec {
 }
 
 func readoutSpec() ModuleSpec {
-	return ModuleSpec{
-		Descriptor: descriptorFor("readout", 1),
-		Validate: func(data map[string]any) error {
-			if err := specValidatorFor("readout", 1)(data); err != nil {
-				return err
+	return moduleDocumentSpec(builtinDescriptor("readout"), func(data map[string]any) error {
+		if err := specValidatorFor("readout", 1)(data); err != nil {
+			return err
+		}
+		return validateReadoutFields(data)
+	}, func(v *View, c *ui.Context, data map[string]any) {
+		tok := theme.GetTokens(c.Theme())
+		endpoint := textValue(data, "endpoint")
+		schemaID := textValue(data, "schema_id")
+		vkind := textValue(data, "value_kind")
+		unit := textValue(data, "unit")
+		pfmt := textValue(data, "plate_format")
+		title := firstNonEmpty(textValue(data, "title"), endpoint, "观测读数定义")
+		ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Padding(float32(tok.Spacing12)).
+			Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+				ui.Spacer(c)
+				if vkind != "" {
+					components.Badge(c, readoutKindLabel(vkind), components.BadgeOptions{Tone: components.BadgeAccent})
+				}
+				if unit != "" {
+					components.Badge(c, unit)
+				}
+				if pfmt != "" {
+					components.Badge(c, pfmt+" 孔")
+				}
+			})
+			meta := nonEmpty([]string{
+				func() string {
+					if endpoint != "" && endpoint != title {
+						return "观测终点 · " + endpoint
+					}
+					return ""
+				}(),
+				func() string {
+					if schemaID != "" && !IsRawIdentifier(schemaID) {
+						return schemaID
+					}
+					return ""
+				}(),
+			})
+			if len(meta) > 0 {
+				ui.Text(c, strings.Join(meta, " · ")).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			}
-			return validateReadoutFields(data)
-		},
+		})
+	})
+}
+
+func readoutKindLabel(vkind string) string {
+	switch strings.ToLower(strings.TrimSpace(vkind)) {
+	case "numeric":
+		return "定量数值"
+	case "table":
+		return "结构化表格"
+	case "plate":
+		return "孔板矩阵"
+	case "categorical":
+		return "定性分类"
+	case "file":
+		return "文件 / 图像"
+	default:
+		return vkind
 	}
 }
 

@@ -1485,6 +1485,7 @@ pub(crate) fn asterdoc_supported() -> String {
 
 pub(crate) fn plate_geometry(format: i64) -> Option<(i64, i64)> {
     match format {
+        4 => Some((2, 2)),
         6 => Some((2, 3)),
         12 => Some((3, 4)),
         24 => Some((4, 6)),
@@ -2118,7 +2119,7 @@ pub(crate) fn validate_asterdoc_module_value(value: &serde_yaml::Value, line_no:
                             }
                         }
                         let has_comps = get("components").and_then(|v| v.as_sequence()).is_some_and(|s| !s.is_empty());
-                        let has_plate = !text("plate_ref").is_empty();
+                        let has_plate = !text("plate_ref").is_empty() || !text("container_ref").is_empty();
                         if !has_comps && !has_plate {
                             return Err(CliError::input("calculator group_mastermix needs components or plate_ref"));
                         }
@@ -3360,7 +3361,10 @@ pub(crate) fn eval_asterdoc_calculator_with_actuals(
             }
             let excess = yaml_num_f64(calc.get("excess_ratio")).unwrap_or(0.0).max(0.0);
             let mut group_counts: BTreeMap<String, i64> = BTreeMap::new();
-            let plate_ref = ytext(calc, "plate_ref");
+            let mut plate_ref = ytext(calc, "plate_ref");
+            if plate_ref.is_empty() {
+                plate_ref = ytext(calc, "container_ref");
+            }
             if !plate_ref.is_empty() {
                 if let Some(plate) = flat.iter().copied().find(|m| yaml_kind(m) == "plate" && yaml_id(m) == plate_ref) {
                     if let Some(groups) = plate.get("groups").and_then(|v| v.as_mapping()) {

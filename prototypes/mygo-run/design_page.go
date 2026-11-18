@@ -249,17 +249,27 @@ func (a *app) ensureDesignView(doc *asterdoc.Document, stepID string) *asterdoc.
 	if a.designDoc != nil {
 		rev = fmt.Sprint(a.designDoc.Revision)
 	}
+	baseDir := ""
+	if strings.TrimSpace(a.importPath) != "" {
+		baseDir = filepath.Dir(a.importPath)
+	}
 	if a.designView == nil || a.designView.Doc == nil || a.designView.Doc.Source != a.designDoc.Source {
 		a.designView = &asterdoc.View{
 			Doc:              doc,
 			Mode:             asterdoc.ModeDesign,
 			DocumentRevision: rev,
+			BaseDir:          baseDir,
 			Allowed:          map[string]bool{asterdoc.PermDocumentEdit: true},
 			OnAssignWells: func(moduleID, group string, wells []string) {
 				a.applyDesignCommand("assign_wells", moduleID, group, wells)
 			},
 			OnClearWells: func(moduleID string, wells []string) {
 				a.applyDesignCommand("clear_wells", moduleID, "", wells)
+			},
+			OnAddModule: func(mod map[string]any) {
+				_ = a.applyDesignRaw(map[string]any{
+					"type": "add_module", "module": mod,
+				})
 			},
 			OnUpdateModule: func(moduleID string, props map[string]any) {
 				_ = a.applyDesignRaw(map[string]any{
@@ -305,7 +315,12 @@ func (a *app) ensureDesignView(doc *asterdoc.Document, stepID string) *asterdoc.
 					return
 				}
 				picked := paths[0]
-				props := map[string]any{"src": picked}
+				curBase := ""
+				if strings.TrimSpace(a.importPath) != "" {
+					curBase = filepath.Dir(a.importPath)
+				}
+				srcVal := asterdoc.PortableFigureAssetPath(curBase, picked)
+				props := map[string]any{"src": srcVal}
 				if strings.EqualFold(filepath.Ext(picked), ".svg") {
 					if rawBytes, readErr := os.ReadFile(picked); readErr == nil && strings.Contains(string(rawBytes), "<svg") {
 						props["svg"] = string(rawBytes)
@@ -318,6 +333,7 @@ func (a *app) ensureDesignView(doc *asterdoc.Document, stepID string) *asterdoc.
 		}
 	}
 	a.designView.StepID = stepID
+	a.designView.BaseDir = baseDir
 	a.designView.AsyncDecode = a.windowReady
 	return a.designView
 }
@@ -943,11 +959,16 @@ func renderAsterMLSourceTab(c *ui.Context, a *app, lastValidDoc *asterdoc.Docume
 		if docToShow == nil {
 			docToShow = lastValidDoc
 		}
+		baseDir := ""
+		if strings.TrimSpace(a.importPath) != "" {
+			baseDir = filepath.Dir(a.importPath)
+		}
 		previewView := &asterdoc.View{
 			Doc:              docToShow,
 			Registry:         asterdoc.BuiltinRegistry(),
 			Mode:             asterdoc.ModeProtocol,
 			DocumentRevision: fmt.Sprint(a.designDoc.Revision),
+			BaseDir:          baseDir,
 			ReadOnly:         true,
 		}
 		components.ScrollView(c, components.ScrollViewOptions{}).Fill().Children(func() {

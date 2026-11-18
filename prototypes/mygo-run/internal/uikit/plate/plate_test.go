@@ -22,7 +22,7 @@ func TestTwelveWellGeometry(t *testing.T) {
 
 	tester := ui.NewTester(func(c *ui.Context) { View(c, Props{Rows: 3, Cols: 4}) }, 320, 240)
 	tester.Frame()
-	if !tester.HasText("0 / 12 孔已分配 · 单击选择，Shift+单击多选") {
+	if !tester.HasText("0 / 12 孔已分配 · 悬停查看分组与样本明细") {
 		t.Fatalf("12-well plate not rendered: %q", tester.Texts())
 	}
 }
@@ -31,7 +31,7 @@ func TestPlateGeometriesAndWellSelectionRoundTrip(t *testing.T) {
 	formats := []struct {
 		format, rows, cols int
 	}{
-		{6, 2, 3}, {12, 3, 4}, {24, 4, 6}, {48, 6, 8}, {96, 8, 12}, {384, 16, 24},
+		{4, 2, 2}, {6, 2, 3}, {12, 3, 4}, {24, 4, 6}, {48, 6, 8}, {96, 8, 12}, {384, 16, 24},
 	}
 	for _, format := range formats {
 		t.Run(fmt.Sprint(format.format), func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestPlateGeometriesAndWellSelectionRoundTrip(t *testing.T) {
 				View(c, Props{Rows: format.rows, Cols: format.cols})
 			}, 900, 600)
 			tester.Frame()
-			if !tester.HasText(fmt.Sprintf("0 / %d 孔已分配 · 单击选择，Shift+单击多选", format.format)) {
+			if !tester.HasText(fmt.Sprintf("0 / %d 孔已分配 · 悬停查看分组与样本明细", format.format)) {
 				t.Fatalf("plate render for %d wells = %q", format.format, tester.Texts())
 			}
 		})
@@ -74,5 +74,44 @@ func TestPlateGeometriesAndWellSelectionRoundTrip(t *testing.T) {
 	selected = nextSelection(selected, "P24", true)
 	if len(selected) != 1 || !selected["A1"] {
 		t.Fatalf("additive deselect = %v", selected)
+	}
+}
+
+func TestAdaptiveMetricsAndInteractiveSelection(t *testing.T) {
+	w4, _, _ := AdaptiveMetrics(2, 2, "plate", 1)
+	w6, _, _ := AdaptiveMetrics(2, 3, "plate", 1)
+	w12, _, _ := AdaptiveMetrics(3, 4, "plate", 1)
+	w24, _, _ := AdaptiveMetrics(4, 6, "plate", 1)
+	w48, _, _ := AdaptiveMetrics(6, 8, "plate", 1)
+	w96, _, _ := AdaptiveMetrics(8, 12, "plate", 1)
+	w384, _, _ := AdaptiveMetrics(16, 24, "plate", 1)
+	if !(w4 > w6 && w6 > w12 && w12 > w24 && w24 > w48 && w48 > w96 && w96 > w384) {
+		t.Fatalf("expected strictly decreasing adaptive widths, got %.1f > %.1f > %.1f > %.1f > %.1f > %.1f > %.1f", w4, w6, w12, w24, w48, w96, w384)
+	}
+	rw, rh, _ := AdaptiveMetrics(1, 8, "rack_1d", 1)
+	if rh <= rw {
+		t.Fatalf("rack_1d should render vertical capsule (CellH > CellW), got %gx%g", rw, rh)
+	}
+
+	var gotSelected []string
+	st := &InteractionState{}
+	tt := ui.NewTester(func(c *ui.Context) {
+		View(c, Props{
+			Rows: 3, Cols: 4, Interactive: true,
+			SelectedIDs: gotSelected,
+			OnSelect: func(ids []string) {
+				gotSelected = ids
+			},
+			State: st,
+		})
+	}, 480, 360)
+	tt.Frame()
+	if err := tt.Click("选择第 B 行"); err != nil {
+		t.Fatalf("row header click failed: %v", err)
+	}
+	tt.Frame()
+	want := []string{"B1", "B2", "B3", "B4"}
+	if !reflect.DeepEqual(gotSelected, want) {
+		t.Fatalf("row selection = %v, want %v", gotSelected, want)
 	}
 }

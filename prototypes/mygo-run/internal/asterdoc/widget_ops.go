@@ -146,33 +146,97 @@ func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 	moduleID := textValue(data, "id")
 	title := firstNonEmpty(textValue(data, "title"), "科学计算器")
 	mode := textValue(data, "mode")
+	editableDesign := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
 
 	// Apply interactive scratch overrides cleanly without mutating frozen source
 	evalData := make(map[string]any, len(data))
 	for k, val := range data {
 		evalData[k] = val
 	}
-	if mode == "dilution" {
+	switch mode {
+	case "dilution":
 		v.applyQuantityScratch(moduleID, evalData, "stock")
 		v.applyQuantityScratch(moduleID, evalData, "target")
 		v.applyQuantityScratch(moduleID, evalData, "final_volume")
-	} else if mode == "serial_dilution" {
+	case "serial_dilution":
 		if fStr, ok := v.calcScratchFloat(moduleID, "dilution_factor"); ok && fStr > 1 {
 			evalData["dilution_factor"] = fStr
 		}
 		if sStr, ok := v.calcScratchFloat(moduleID, "steps_count"); ok && sStr >= 1 {
 			evalData["steps_count"] = int(sStr)
 		}
-	} else if mode == "group_mastermix" {
+	case "group_mastermix":
 		v.applyQuantityScratch(moduleID, evalData, "volume_per_unit")
 		if ex, ok := v.calcScratchFloat(moduleID, "excess_ratio"); ok && ex >= 0 {
 			evalData["excess_ratio"] = ex
+		}
+	case "sample_normalize":
+		v.applyQuantityScratch(moduleID, evalData, "target_mass")
+		v.applyQuantityScratch(moduleID, evalData, "volume_per_unit")
+	case "formula":
+		if s, ok := v.calcScratchString(moduleID, "formula"); ok {
+			evalData["formula"] = s
+		}
+		if s, ok := v.calcScratchString(moduleID, "unit"); ok {
+			evalData["unit"] = s
 		}
 	}
 
 	res := EvalCalculatorWithActuals(v.Doc, evalData, v.CalcActuals)
 	moduleCardFrame(v, c, lucide.Calculator(), title, calcModeLabel(mode), nil, func() {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+			if editableDesign {
+				modeDraft := v.ensureWidgetDraft("calc_mode:"+moduleID, mode)
+				if *modeDraft != mode && mode != "" {
+					*modeDraft = mode
+				}
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "计算模式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					mSel := components.Select(c, modeDraft)
+					mSel.Trigger.Children(func() {
+						ui.Text(c, calcModeLabel(*modeDraft)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+					})
+					mSel.Popup(func(panel ui.Element) {
+						for _, opt := range []string{"dilution", "serial_dilution", "group_mastermix", "sample_normalize", "formula"} {
+							opt := opt
+							mSel.Item(opt).Children(func() {
+								ui.Text(c, calcModeLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							})
+						}
+					})
+					if mSel.Trigger.Changed() && *modeDraft != "" && *modeDraft != mode {
+						v.emitAnyModuleEdit(moduleID, map[string]any{"mode": *modeDraft})
+					}
+					ui.Spacer(c)
+					if components.Button(c, "保存计算设定", components.ButtonSecondary).Clicked() {
+						props := map[string]any{"mode": *modeDraft}
+						switch *modeDraft {
+						case "dilution":
+							props["stock"] = evalData["stock"]
+							props["target"] = evalData["target"]
+							props["final_volume"] = evalData["final_volume"]
+						case "serial_dilution":
+							props["dilution_factor"] = evalData["dilution_factor"]
+							props["steps_count"] = evalData["steps_count"]
+						case "group_mastermix":
+							props["volume_per_unit"] = evalData["volume_per_unit"]
+							props["excess_ratio"] = evalData["excess_ratio"]
+						case "sample_normalize":
+							props["target_mass"] = evalData["target_mass"]
+							props["volume_per_unit"] = evalData["volume_per_unit"]
+						case "formula":
+							if s := textValue(evalData, "formula"); s != "" {
+								props["formula"] = s
+							}
+							if u := textValue(evalData, "unit"); u != "" {
+								props["unit"] = u
+							}
+						}
+						v.emitAnyModuleEdit(moduleID, props)
+					}
+				})
+			}
+
 			// Interactive scratchpad inputs row
 			ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 				switch mode {
@@ -186,6 +250,12 @@ func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 				case "group_mastermix":
 					v.renderCalcQtyInput(c, moduleID, evalData, "volume_per_unit", "单孔/单份体积")
 					v.renderCalcNumInput(c, moduleID, "excess_ratio", "余量比例", evalData["excess_ratio"])
+				case "sample_normalize":
+					v.renderCalcQtyInput(c, moduleID, evalData, "target_mass", "目标上样量")
+					v.renderCalcQtyInput(c, moduleID, evalData, "volume_per_unit", "终体积")
+				case "formula":
+					v.renderCalcTextInput(c, moduleID, "formula", "计算公式", textValue(evalData, "formula"), float32(tok.Spacing48)*4.5)
+					v.renderCalcTextInput(c, moduleID, "unit", "结果单位", textValue(evalData, "unit"), float32(tok.Spacing48)*2.0)
 				}
 			})
 
@@ -294,6 +364,26 @@ func (v *View) renderCalcNumInput(c *ui.Context, moduleID, field, label string, 
 	})
 }
 
+func (v *View) calcScratchString(moduleID, field string) (string, bool) {
+	if v.calcScratch == nil || v.calcScratch[moduleID] == nil {
+		return "", false
+	}
+	ptr := v.calcScratch[moduleID][field]
+	if ptr == nil {
+		return "", false
+	}
+	return strings.TrimSpace(*ptr), true
+}
+
+func (v *View) renderCalcTextInput(c *ui.Context, moduleID, field, label, initVal string, width float32) {
+	tok := theme.GetTokens(c.Theme())
+	buf := v.ensureCalcScratch(moduleID, field, initVal)
+	ui.Column(c).Width(width).Gap(float32(tok.Spacing4)).Children(func() {
+		ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+		components.TextBox(c, buf, components.TextBoxOptions{})
+	})
+}
+
 func calcModeLabel(mode string) string {
 	switch mode {
 	case "dilution":
@@ -316,6 +406,7 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 	moduleID := textValue(data, "id")
 	title := firstNonEmpty(textValue(data, "title"), "实验计时与周期")
 	mode := textValue(data, "mode")
+	editableDesign := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
 	interactiveRun := v.Mode == ModeRun && !v.ReadOnly && v.OnTimerAction != nil
 
 	plannedSec, spanSec, _ := timerBudgetSec(data)
@@ -332,7 +423,7 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 			displaySec = rt.AccumulatedS
 		}
 		if rt.Status != "" {
-			statusText = rt.Status
+			statusText = timerStatusLabel(rt.Status)
 		}
 	}
 
@@ -389,6 +480,91 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 				})
 			}
 
+			if editableDesign {
+				qRaw := data["duration"]
+				if mode == "window" && data["offset"] != nil {
+					qRaw = data["offset"]
+				}
+				qv, qu, qErr := quantityParts(qRaw)
+				if qErr != nil || qu == "" {
+					qv, qu = 10, "min"
+				}
+				roundsInit := int(numOrZero(data["rounds"]))
+				if roundsInit < 1 {
+					roundsInit = 1
+				}
+				tmMode := v.ensureWidgetDraft("tm:"+moduleID+":mode", firstNonEmpty(mode, "countdown"))
+				if *tmMode != mode && mode != "" {
+					*tmMode = mode
+				}
+				tmVal := v.ensureWidgetDraft("tm:"+moduleID+":val", formatNumber(qv))
+				tmUnit := v.ensureWidgetDraft("tm:"+moduleID+":unit", qu)
+				tmRounds := v.ensureWidgetDraft("tm:"+moduleID+":rounds", strconv.Itoa(roundsInit))
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
+					Padding(float32(tok.Spacing4), 0, 0, 0).Children(func() {
+					ui.Text(c, "模式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					tSel := components.Select(c, tmMode)
+					tSel.Trigger.Children(func() {
+						ui.Text(c, timerModeLabel(*tmMode)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+					})
+					tSel.Popup(func(panel ui.Element) {
+						for _, opt := range []string{"countdown", "stopwatch", "cycle", "window"} {
+							opt := opt
+							tSel.Item(opt).Children(func() {
+								ui.Text(c, timerModeLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							})
+						}
+					})
+					if tSel.Trigger.Changed() && *tmMode != mode {
+						v.emitAnyModuleEdit(moduleID, map[string]any{"mode": *tmMode})
+					}
+					if *tmMode != "stopwatch" && *tmMode != "cycle" {
+						ui.Box(c).Width(float32(tok.Spacing48)*1.5).Children(func() {
+							components.TextBox(c, tmVal, components.TextBoxOptions{}).Placeholder("数值")
+						})
+						uSel := components.Select(c, tmUnit)
+						uSel.Trigger.Children(func() {
+							ui.Text(c, *tmUnit).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+						})
+						uSel.Popup(func(panel ui.Element) {
+							for _, opt := range []string{"s", "min", "h", "d"} {
+								opt := opt
+								uSel.Item(opt).Children(func() {
+									ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+								})
+							}
+						})
+					}
+					if *tmMode == "cycle" {
+						ui.Text(c, "轮数").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						ui.Box(c).Width(float32(tok.Spacing48)*1.2).Children(func() {
+							components.TextBox(c, tmRounds, components.TextBoxOptions{}).Placeholder("轮数")
+						})
+					}
+					ui.Spacer(c)
+					if components.Button(c, "保存计时设定", components.ButtonSecondary).Clicked() {
+						props := map[string]any{"mode": *tmMode}
+						numVal, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64)
+						if err != nil || numVal <= 0 {
+							numVal = 10
+						}
+						switch *tmMode {
+						case "window":
+							props["offset"] = map[string]any{"value": numVal, "unit": *tmUnit}
+						case "cycle":
+							rCnt, _ := strconv.Atoi(strings.TrimSpace(*tmRounds))
+							if rCnt < 1 {
+								rCnt = 1
+							}
+							props["rounds"] = rCnt
+						case "countdown":
+							props["duration"] = map[string]any{"value": numVal, "unit": *tmUnit}
+						}
+						v.emitAnyModuleEdit(moduleID, props)
+					}
+				})
+			}
+
 			if interactiveRun {
 				ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
 					if iconButton(c, lucide.Play(), "开始", components.ButtonSecondary).Clicked() {
@@ -409,6 +585,21 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 			}
 		})
 	})
+}
+
+func timerStatusLabel(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", "idle":
+		return "待启动"
+	case "running":
+		return "计时中"
+	case "paused":
+		return "已暂停"
+	case "completed":
+		return "已完成"
+	default:
+		return status
+	}
 }
 
 func timerModeLabel(mode string) string {
@@ -468,15 +659,79 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 			if mediaHint != "" {
 				ui.Text(c, "采集要求："+mediaHint).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			}
+			if scope == "container_grid" {
+				if pl, _ := v.findPlate(containerRef); pl != nil {
+					if geom, ok := geometryForPlate(pl.Format, pl.Topology, pl.Rows, pl.Columns); ok {
+						countsByWell := map[string]int{}
+						for _, th := range thumbs {
+							if th.WellID != "" {
+								countsByWell[strings.ToUpper(th.WellID)]++
+							}
+						}
+						wellGroups := pl.WellGroups()
+						var previewWells []string
+						for r := 0; r < geom.Rows; r++ {
+							for col := 0; col < geom.Columns; col++ {
+								wID := fmt.Sprintf("%s%d", rowLabel(r), col+1)
+								if wellGroups[wID] != "" || countsByWell[wID] > 0 {
+									previewWells = append(previewWells, wID)
+								}
+							}
+						}
+						if len(previewWells) == 0 {
+							for r := 0; r < geom.Rows && len(previewWells) < 8; r++ {
+								for col := 0; col < geom.Columns && len(previewWells) < 8; col++ {
+									previewWells = append(previewWells, fmt.Sprintf("%s%d", rowLabel(r), col+1))
+								}
+							}
+						}
+						if len(previewWells) > 12 {
+							previewWells = previewWells[:12]
+						}
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+							for _, wID := range previewWells {
+								wID := wID
+								nCnt := countsByWell[wID]
+								label := fmt.Sprintf("%s %d/%d", wID, nCnt, slots)
+								bg := tok.Elevated
+								fg := tok.TextMuted
+								if nCnt >= slots {
+									bg = tok.SuccessBg
+									fg = tok.Success
+								} else if nCnt > 0 {
+									bg = tok.AccentSoftBg
+									fg = tok.Accent
+								}
+								if v.Mode == ModeRun && !v.ReadOnly && v.OnLinkAsset != nil {
+									pill := ui.ButtonBase(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius)).Background(bg).Border(1, tok.Border).Label(label)
+									pill.Children(func() {
+										ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum")
+									})
+									if pill.Clicked() {
+										v.OnLinkAsset(v.StepID, moduleID, wID)
+									}
+								} else {
+									ui.Row(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius)).Background(bg).Border(1, tok.Border).Children(func() {
+										ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum")
+									})
+								}
+							}
+						})
+					}
+				}
+			}
 			if len(thumbs) > 0 {
 				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 					for _, th := range thumbs {
 						th := th
+						resolvedPath := resolveFigurePath(v.BaseDir, th.FilePath)
 						thumbBtn := ui.ButtonBase(c).Width(float32(tok.Spacing48)*2.7).Padding(float32(tok.Spacing8)).
 							Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Children(func() {
 							ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-								if th.FilePath != "" {
-									if imgSrc, errText := v.cachedImageFile(th.FilePath); errText == "" && imgSrc != nil {
+								if resolvedPath != "" {
+									if imgSrc, errText := v.cachedImageFile(resolvedPath); errText == "" && imgSrc != nil {
 										ui.Image(c, imgSrc).Height(float32(tok.Spacing48) * 1.5)
 									} else {
 										ui.Row(c).FillWidth().Height(float32(tok.Spacing48)*1.5).Center().
@@ -544,14 +799,14 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 								v.assetOpen = false
 							}
 						})
-						if exp.FilePath != "" {
-							imgSrc, errText := v.cachedImageFile(exp.FilePath)
+						if resolvedExp := resolveFigurePath(v.BaseDir, exp.FilePath); resolvedExp != "" {
+							imgSrc, errText := v.cachedImageFile(resolvedExp)
 							if errText == "" && imgSrc != nil {
 								ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
 									ui.Image(c, imgSrc).Height(300 * v.AssetZoom)
 								})
 							} else {
-								ui.Text(c, "文件预览不可用："+firstNonEmpty(errText, exp.FilePath)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								ui.Text(c, "文件预览不可用："+firstNonEmpty(errText, resolvedExp)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 							}
 						}
 						if exp.AssetID != "" {
@@ -572,11 +827,13 @@ func (v *View) renderSubflow(c *ui.Context, data map[string]any) {
 	items := mapSlice(data["items"])
 	collapsedDefault, _ := data["collapsed"].(bool)
 	openPtr := v.ensureWidgetBoolInit("sf:"+moduleID, !collapsedDefault)
+	editableDesign := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
 
 	moduleCardFrame(v, c, lucide.GitBranch(), title, fmt.Sprintf("%d 项", len(items)), nil, func() {
 		components.Collapsible(c, fmt.Sprintf("展开子步骤明细（%d）", len(items)), openPtr, components.CollapsibleOptions{}, func() {
 			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Padding(float32(tok.Spacing4), 0, 0, 0).Children(func() {
 				for idx, it := range items {
+					idx := idx
 					sid := textValue(it, "id")
 					stitle := textValue(it, "title")
 					snote := textValue(it, "note")
@@ -596,6 +853,41 @@ func (v *View) renderSubflow(c *ui.Context, data map[string]any) {
 						if snote != "" {
 							ui.Spacer(c)
 							ui.Text(c, snote).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						} else if editableDesign {
+							ui.Spacer(c)
+						}
+						if editableDesign && len(items) > 1 {
+							if components.IconButton(c, lucide.Trash(), "删除子步骤", components.IconButtonCompact).Clicked() {
+								next := removeSliceIndex(items, idx)
+								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+							}
+						}
+					})
+				}
+				if editableDesign {
+					newTitle := v.ensureWidgetDraft("sf:"+moduleID+":new_title", "")
+					newNote := v.ensureWidgetDraft("sf:"+moduleID+":new_note", "")
+					ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing4), 0, 0, 0).
+						AlignItems(ui.Center).Children(func() {
+						ui.Box(c).FillWidth().Children(func() {
+							components.TextBox(c, newTitle, components.TextBoxOptions{}).Placeholder("新增子步骤描述…")
+						})
+						ui.Box(c).Width(float32(tok.Spacing48)*2.5).Children(func() {
+							components.TextBox(c, newNote, components.TextBoxOptions{}).Placeholder("备注（可选）")
+						})
+						if components.Button(c, "添加子步", components.ButtonSecondary).Clicked() && strings.TrimSpace(*newTitle) != "" {
+							next := append([]map[string]any{}, items...)
+							entry := map[string]any{
+								"id":    fmt.Sprintf("sf-%s-%d", sanitizeIDFrag(*newTitle), len(items)+1),
+								"title": strings.TrimSpace(*newTitle),
+							}
+							if strings.TrimSpace(*newNote) != "" {
+								entry["note"] = strings.TrimSpace(*newNote)
+							}
+							next = append(next, entry)
+							v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+							*newTitle = ""
+							*newNote = ""
 						}
 					})
 				}

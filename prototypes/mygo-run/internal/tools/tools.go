@@ -9,6 +9,7 @@ import (
 	"asterlab-mygo-prototype/internal/assays"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/theme"
+	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 	"asterlab-mygo-prototype/modules/runs"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -44,6 +45,9 @@ type Callbacks struct {
 type Workspace struct {
 	Active               Tool
 	Plate                blocks.Plate
+	PlateFormat          int
+	PlateTopology        string
+	plateUIState         plateui.InteractionState
 	Group                string
 	Stock, Final, Volume string
 	Rows                 []blocks.ParamRow
@@ -341,7 +345,7 @@ func View(c *ui.Context, w *Workspace) {
 							icon  *ui.SVG
 						}{
 							{ToolPantry, "储藏室台账", lucide.FlaskConical()},
-							{ToolPlate, "96 孔板速排", lucide.Grid2x2()},
+							{ToolPlate, "孔板与容器速排", lucide.Grid2x2()},
 							{ToolDilution, "稀释配液换算", lucide.Calculator()},
 							{ToolParameters, "实验参数表", lucide.SlidersHorizontal()},
 							{ToolLibrary, "通用模块模板", lucide.Blocks()},
@@ -401,55 +405,148 @@ func View(c *ui.Context, w *Workspace) {
 }
 
 func plateView(c *ui.Context, w *Workspace, tok theme.Tokens) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-		ui.Text(c, "96 孔板分组速排").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+	if w.PlateFormat == 0 {
+		w.PlateFormat = 96
+	}
+	if w.PlateTopology == "" {
+		w.PlateTopology = "plate"
+	}
+	rows, cols := 8, 12
+	switch {
+	case w.PlateTopology == "rack_1d":
+		rows, cols = 1, 8
+	case w.PlateFormat == 4:
+		rows, cols = 2, 2
+	case w.PlateFormat == 6:
+		rows, cols = 2, 3
+	case w.PlateFormat == 12:
+		rows, cols = 3, 4
+	case w.PlateFormat == 24:
+		rows, cols = 4, 6
+	case w.PlateFormat == 48:
+		rows, cols = 6, 8
+	}
+
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Text(c, "通用孔板与容器速排").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 		ui.Spacer(c)
-		components.Badge(c, fmt.Sprintf("96 孔 · 已选 %d 孔", w.Plate.SelectedCount()), components.BadgeOptions{Tone: components.BadgeAccent})
-	})
-	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing4)).Children(func() {
-		for row := range 8 {
-			r := row
-			ui.Row(c).Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, string(rune('A'+r))).Width(float32(tok.Spacing24)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
-				for col := range 12 {
-					idx := r*12 + col
-					selected := w.Plate.IsSelected(idx)
-					bg, fg, borderCol := tok.Surface, tok.TextMuted, tok.Border
-					if selected {
-						bg, fg, borderCol = tok.Accent, tok.AccentText, tok.Accent
-					} else if w.Plate.Props.Groups[idx] != "" {
-						bg, fg, borderCol = tok.SuccessBg, tok.SuccessText, tok.Success
-					}
-					btn := ui.ButtonBase(c).Size(float32(tok.Spacing24), float32(tok.Spacing24)).
-						Radius(float32(tok.ControlRadius)).Background(bg).Border(1, borderCol).
-						Label(fmt.Sprintf("%c%d", 'A'+r, col+1))
-					btn.Children(func() {
-						ui.Box(c).Fill().Center().Children(func() {
-							ui.Text(c, fmt.Sprintf("%d", col+1)).FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum")
-						})
-					})
-					if btn.Clicked() {
-						if err := w.Plate.ToggleWell(idx); err != nil {
-							w.Error = err.Error()
-						} else {
-							w.Error, w.Status = "", ""
-						}
-					}
-				}
-			})
+		presets := []struct {
+			label, topo string
+			format      int
+		}{
+			{"4区皿", "dish", 4},
+			{"6孔", "plate", 6},
+			{"12孔", "plate", 12},
+			{"24孔", "plate", 24},
+			{"96孔", "plate", 96},
+			{"8联管", "rack_1d", 8},
+		}
+		for _, p := range presets {
+			p := p
+			active := w.PlateFormat == p.format && w.PlateTopology == p.topo
+			v := components.ButtonGhost
+			if active {
+				v = components.ButtonSecondary
+			}
+			if components.Button(c, p.label, v).Clicked() {
+				w.PlateFormat = p.format
+				w.PlateTopology = p.topo
+				w.Plate.Props.Selected = nil
+			}
 		}
 	})
-	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-		ui.Text(c, "所选孔位分组标签：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-		ui.Box(c).Width(float32(tok.Spacing48)*4).Children(func() {
-			if components.TextBox(c, &w.Group, components.TextBoxOptions{}).Placeholder("例如：对照组 Control").Changed() {
-				for _, well := range w.Plate.Props.Selected {
-					_ = w.Plate.SetGroup(well, w.Group)
+
+	wells := map[string]plateui.WellState{}
+	groupIdxMap := map[string]int{}
+	nextGIdx := 0
+	for r := 0; r < rows; r++ {
+		for col := 0; col < cols; col++ {
+			id := fmt.Sprintf("%c%d", 'A'+r, col+1)
+			idx := r*12 + col
+			if idx < len(w.Plate.Props.Groups) && strings.TrimSpace(w.Plate.Props.Groups[idx]) != "" {
+				g := strings.TrimSpace(w.Plate.Props.Groups[idx])
+				if _, seen := groupIdxMap[g]; !seen {
+					groupIdxMap[g] = nextGIdx
+					nextGIdx++
+				}
+				wells[id] = plateui.WellState{Group: g, SampleID: g}
+			}
+		}
+	}
+	selectedIDs := make([]string, 0, len(w.Plate.Props.Selected))
+	for _, idx := range w.Plate.Props.Selected {
+		r, col := idx/12, idx%12
+		if r >= 0 && r < rows && col >= 0 && col < cols {
+			selectedIDs = append(selectedIDs, fmt.Sprintf("%c%d", 'A'+r, col+1))
+		}
+	}
+
+	plateui.View(c, plateui.Props{
+		Wells:       wells,
+		Rows:        rows,
+		Cols:        cols,
+		Topology:    w.PlateTopology,
+		Interactive: true,
+		SelectedIDs: selectedIDs,
+		GroupIndex:  groupIdxMap,
+		State:       &w.plateUIState,
+		OnSelect: func(ids []string) {
+			var next []int
+			for _, id := range ids {
+				if len(id) >= 2 {
+					r := int(id[0] - 'A')
+					col, err := strconv.Atoi(id[1:])
+					if err == nil && r >= 0 && r < 8 && col >= 1 && col <= 12 {
+						next = append(next, r*12+(col-1))
+					}
 				}
 			}
+			w.Plate.Props.Selected = next
+			w.Error, w.Status = "", ""
+		},
+	})
+
+	applyGroupText := func(lbl string) {
+		lbl = strings.TrimSpace(lbl)
+		for _, well := range w.Plate.Props.Selected {
+			_ = w.Plate.SetGroup(well, lbl)
+		}
+		if lbl != "" && len(w.Plate.Props.Selected) > 0 {
+			w.Status = fmt.Sprintf("已将 %d 孔标注为 %s", len(w.Plate.Props.Selected), lbl)
+			w.Plate.Props.Selected = nil
+		}
+	}
+
+	ui.Row(c).FillWidth().Wrap().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+		Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.BorderStrong).
+		AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		if len(w.Plate.Props.Selected) > 0 {
+			components.Badge(c, fmt.Sprintf("%d 孔", len(w.Plate.Props.Selected)), components.BadgeOptions{Tone: components.BadgeAccent})
+		} else {
+			components.Badge(c, fmt.Sprintf("%d 孔", rows*cols))
+		}
+		ui.Box(c).Grow(1).MinWidth(200).Children(func() {
+			tb := components.TextBox(c, &w.Group, components.TextBoxOptions{}).
+				Placeholder("框选孔位后输入分组、处理或样本名（如 VEGF / 对照组）")
+			tb.OnTextKey(func(k ui.TextKey) bool {
+				if k.Key == ui.KeyEnter && k.Mods == 0 && len(w.Plate.Props.Selected) > 0 && strings.TrimSpace(w.Group) != "" {
+					applyGroupText(w.Group)
+					return true
+				}
+				return false
+			})
 		})
-		ui.Spacer(c)
+		applyBtn := components.Button(c, "标注", components.ButtonSecondary)
+		applyBtn.Disabled(len(w.Plate.Props.Selected) == 0 || strings.TrimSpace(w.Group) == "")
+		if applyBtn.Clicked() {
+			applyGroupText(w.Group)
+		}
+		clearBtn := components.Button(c, "清除", components.ButtonGhost)
+		clearBtn.Disabled(len(w.Plate.Props.Selected) == 0)
+		if clearBtn.Clicked() {
+			applyGroupText("")
+			w.Plate.Props.Selected = nil
+		}
 		if components.Button(c, "应用孔板到当前设计", components.ButtonPrimary).Clicked() {
 			w.handoff()
 		}

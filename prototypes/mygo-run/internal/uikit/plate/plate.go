@@ -21,6 +21,20 @@ type WellState struct {
 	Ambiguous bool
 }
 
+// InteractionState persists pointer drag-marquee and hover state across frames
+// for interactive inline, overlay, and tool plates.
+type InteractionState struct {
+	pointerDown   bool
+	pointerStart  ui.Point
+	dragStart     ui.Point
+	dragLast      ui.Point
+	dragging      bool
+	additive      bool
+	suppressClick bool
+	baseSelected  []string
+	hoverWell     string
+}
+
 type Props struct {
 	Wells       map[string]WellState
 	SelectedIDs []string
@@ -33,6 +47,9 @@ type Props struct {
 	ColorBy     string // "group" | "sample" | "factor" | "replicate" | "role"
 	FactorKey   string
 	Blind       bool
+	GroupIndex  map[string]int
+	Zoom        float32
+	State       *InteractionState
 }
 
 const (
@@ -40,9 +57,10 @@ const (
 	defaultCols = 12
 )
 
-// supportedPlateSizes are the geometries AsterLab renders: 6, 12, 24, 48, 96
+// supportedPlateSizes are the geometries AsterLab renders: 4, 6, 12, 24, 48, 96
 // and 384 wells as rows×cols. Unsupported dimensions fall back to 96 wells.
 var supportedPlateSizes = [...]struct{ Wells, Rows, Cols int }{
+	{4, 2, 2},
 	{6, 2, 3},
 	{12, 3, 4},
 	{24, 4, 6},
@@ -91,15 +109,18 @@ func wellPosition(id string, rows, cols int) (int, int, bool) {
 }
 
 func GroupColor(group string, dark bool) ui.Color {
+	return GroupColorIndexed(group, nil, dark)
+}
+
+// GroupColorIndexed returns a deterministic semantic color for a group,
+// preferring sequential CategoricalPalette indexing when groupIndex is supplied
+// so adjacent groups never collide.
+func GroupColorIndexed(group string, groupIndex map[string]int, dark bool) ui.Color {
 	g := strings.ToLower(strings.TrimSpace(group))
 	t := theme.GetTokens(theme.Palette(dark))
 	switch {
 	case g == "":
 		return ui.Color{}
-	case strings.Contains(g, "nc"), strings.Contains(g, "对照"), strings.Contains(g, "control"):
-		return t.NeutralBg
-	case strings.Contains(g, "pc"), strings.Contains(g, "阳性"), strings.Contains(g, "positive"):
-		return t.WarningBg
 	case g == "c1":
 		return t.Accent
 	case g == "c2":
@@ -110,14 +131,77 @@ func GroupColor(group string, dark bool) ui.Color {
 		return t.Danger
 	case g == "c5":
 		return t.AccentHover
-	default:
-		palette := [...]ui.Color{t.Accent, t.Success, t.Warning, t.Danger}
-		index := 0
-		for _, r := range g {
-			index = (index*31 + int(r)) % len(palette)
-		}
-		return palette[index]
 	}
+	if groupIndex != nil {
+		if idx, ok := groupIndex[strings.TrimSpace(group)]; ok && idx >= 0 {
+			pal := theme.CategoricalPalette(dark)
+			return pal[idx%len(pal)]
+		}
+	}
+	switch {
+	case strings.Contains(g, "nc"), strings.Contains(g, "空白"), strings.Contains(g, "blank"), strings.Contains(g, "对照"), strings.Contains(g, "control"):
+		return t.BorderStrong
+	case strings.Contains(g, "pc"), strings.Contains(g, "阳性"), strings.Contains(g, "positive"):
+		return t.WarningBg
+	default:
+		return theme.CategoricalColor("group:"+g, dark)
+	}
+}
+
+// AdaptiveMetrics returns responsive well/lane pixel dimensions and gap based
+// on total well count, container topology, and zoom factor.
+func AdaptiveMetrics(rows, cols int, topology string, zoom float32) (cellW, cellH, gap float32) {
+	if zoom <= 0 {
+		zoom = 1
+	}
+	if topology == "rack_1d" {
+		cellW, cellH, gap = 40*zoom, 58*zoom, 6
+		if cols > 12 {
+			cellW = (560*zoom - float32(cols-1)*gap) / float32(cols)
+			if cellW < 18*zoom {
+				cellW = 18 * zoom
+			}
+		}
+		return cellW, cellH, gap
+	}
+	total := rows * cols
+	switch {
+	case total <= 4:
+		cellW, cellH, gap = 56*zoom, 56*zoom, 10
+	case total <= 6:
+		cellW, cellH, gap = 48*zoom, 48*zoom, 8
+	case total <= 12:
+		cellW, cellH, gap = 42*zoom, 42*zoom, 8
+	case total <= 24:
+		cellW, cellH, gap = 36*zoom, 36*zoom, 6
+	case total <= 48:
+		cellW, cellH, gap = 28*zoom, 28*zoom, 5
+	case total <= 96:
+		cellW, cellH, gap = 26*zoom, 26*zoom, 4
+	default:
+		cellW, cellH, gap = 17*zoom, 17*zoom, 3
+	}
+	return cellW, cellH, gap
+}
+
+// WellsInRectCells returns every well/lane ID overlapping rect in row-major order.
+func WellsInRectCells(rows, cols int, cellW, cellH, gap float32, rect ui.Rect) []string {
+	var selected []string
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			cellRect := ui.Rect{
+				X: float32(col) * (cellW + gap),
+				Y: float32(row) * (cellH + gap),
+				W: cellW,
+				H: cellH,
+			}
+			if cellRect.X <= rect.X+rect.W && cellRect.X+cellRect.W >= rect.X &&
+				cellRect.Y <= rect.Y+rect.H && cellRect.Y+cellRect.H >= rect.Y {
+				selected = append(selected, wellID(row, col))
+			}
+		}
+	}
+	return selected
 }
 
 func selectedSet(props Props) map[string]bool {
@@ -169,15 +253,18 @@ func View(c *ui.Context, props Props) {
 	if rows < 1 || rows > 16 || cols < 1 || cols > 24 {
 		rows, cols = defaultRows, defaultCols
 	}
-	wellSize := float32(t.Spacing24)
-	gap := float32(t.Spacing4)
+	cellW, cellH, gap := AdaptiveMetrics(rows, cols, props.Topology, props.Zoom)
 	labelSize := float32(t.TextMeta)
 	leftLabel := float32(t.Spacing24)
 	topLabel := float32(t.Spacing16)
-	gridW := float32(cols)*wellSize + float32(cols-1)*gap
-	gridH := float32(rows)*wellSize + float32(rows-1)*gap
-	width := leftLabel + gridW + float32(t.Spacing4)
-	height := topLabel + gridH + float32(t.Spacing32)
+	dishPad := float32(0)
+	if props.Topology == "dish" {
+		dishPad = float32(t.Spacing24)
+	}
+	gridW := float32(cols)*cellW + float32(cols-1)*gap
+	gridH := float32(rows)*cellH + float32(rows-1)*gap
+	width := leftLabel + gridW + dishPad*2 + float32(t.Spacing4)
+	height := topLabel + gridH + dishPad*2 + float32(t.Spacing32)
 	selected := selectedSet(props)
 	legendCounts := make(map[string]int)
 	legendColors := make(map[string]ui.Color)
@@ -204,28 +291,325 @@ func View(c *ui.Context, props Props) {
 	}
 	sort.Strings(legendOrder)
 
+	wellRadius := func() float32 {
+		if props.Topology == "rack_1d" {
+			return float32(t.ControlRadius) * 2
+		}
+		if props.Topology == "cohort" {
+			return float32(t.ControlRadius)
+		}
+		return cellW / 2
+	}
+
+	drawDishRim := func(p *ui.Painter, gx0, gy0 float32) {
+		if props.Topology != "dish" {
+			return
+		}
+		cx := gx0 + gridW/2
+		cy := gy0 + gridH/2
+		rOuter := gridW
+		if gridH > rOuter {
+			rOuter = gridH
+		}
+		rOuter = rOuter*0.72 + float32(t.Spacing8)
+		outerRect := ui.Rect{X: cx - rOuter, Y: cy - rOuter, W: rOuter * 2, H: rOuter * 2}
+		p.Fill(outerRect, t.Elevated.Alpha(.65), rOuter)
+		p.Stroke(outerRect, t.BorderStrong, rOuter, 1.5)
+		innerR := rOuter - float32(t.Spacing8)
+		if innerR > 8 {
+			innerRect := ui.Rect{X: cx - innerR, Y: cy - innerR, W: innerR * 2, H: innerR * 2}
+			p.Stroke(innerRect, t.Border, innerR, 1)
+		}
+		if rows == 2 && cols == 2 {
+			p.Line(cx-rOuter+float32(t.Spacing8), cy, cx+rOuter-float32(t.Spacing8), cy, 1, t.BorderStrong.Alpha(.55))
+			p.Line(cx, cy-rOuter+float32(t.Spacing8), cx, cy+rOuter-float32(t.Spacing8), 1, t.BorderStrong.Alpha(.55))
+		}
+	}
+
 	ui.Column(c).Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
+		if props.Interactive {
+			st := props.State
+			if st == nil {
+				st = &InteractionState{}
+			}
+			suppressGridClick := st.suppressClick
+			st.suppressClick = false
+			st.hoverWell = ""
+
+			notify := func(ids []string) {
+				sort.Strings(ids)
+				if props.OnSelect != nil {
+					props.OnSelect(ids)
+				}
+			}
+			mergeSelect := func(ids []string, additive bool) {
+				seen := map[string]bool{}
+				out := make([]string, 0, len(props.SelectedIDs)+len(ids))
+				if additive {
+					for _, id := range props.SelectedIDs {
+						if !seen[id] {
+							seen[id] = true
+							out = append(out, id)
+						}
+					}
+				}
+				for _, id := range ids {
+					if !seen[id] {
+						seen[id] = true
+						out = append(out, id)
+					}
+				}
+				notify(out)
+			}
+			applyMarquee := func() {
+				x0, y0 := st.dragStart.X, st.dragStart.Y
+				x1, y1 := st.dragLast.X, st.dragLast.Y
+				if x0 > x1 {
+					x0, x1 = x1, x0
+				}
+				if y0 > y1 {
+					y0, y1 = y1, y0
+				}
+				hit := WellsInRectCells(rows, cols, cellW, cellH, gap, ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0})
+				seen := map[string]bool{}
+				out := make([]string, 0, len(st.baseSelected)+len(hit))
+				if st.additive {
+					for _, id := range st.baseSelected {
+						if !seen[id] {
+							seen[id] = true
+							out = append(out, id)
+						}
+					}
+				}
+				for _, id := range hit {
+					if !seen[id] {
+						seen[id] = true
+						out = append(out, id)
+					}
+				}
+				notify(out)
+			}
+
+			gridBox := ui.Column(c).AlignItems(ui.Center).Padding(dishPad).Children(func() {
+				ui.Column(c).Gap(gap).AlignItems(ui.Center).Children(func() {
+					ui.Row(c).Gap(gap).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Size(leftLabel, topLabel)
+						for col := 0; col < cols; col++ {
+							cIdx := col
+							hdrBtn := ui.ButtonBase(c).Width(cellW).Height(topLabel).
+								Label(fmt.Sprintf("选择第 %d 列", cIdx+1))
+							hdrBtn.Children(func() {
+								ui.Box(c).Fill().Center().Children(func() {
+									ui.Text(c, fmt.Sprintf("%d", cIdx+1)).FontSize(labelSize).TextColor(t.TextMuted).SingleLine()
+								})
+							})
+							if hdrBtn.Clicked() && !st.dragging && !suppressGridClick {
+								ids := make([]string, 0, rows)
+								for r := 0; r < rows; r++ {
+									ids = append(ids, wellID(r, cIdx))
+								}
+								mergeSelect(ids, hdrBtn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
+							}
+						}
+					})
+					for row := 0; row < rows; row++ {
+						rIdx := row
+						ui.Row(c).Gap(gap).AlignItems(ui.Center).Children(func() {
+							rBtn := ui.ButtonBase(c).Width(leftLabel).Height(cellH).
+								Label("选择第 " + rowLabel(rIdx) + " 行")
+							rBtn.Children(func() {
+								ui.Box(c).Fill().Center().Children(func() {
+									ui.Text(c, rowLabel(rIdx)).FontSize(labelSize).TextColor(t.TextMuted).SingleLine()
+								})
+							})
+							if rBtn.Clicked() && !st.dragging && !suppressGridClick {
+								ids := make([]string, 0, cols)
+								for cc := 0; cc < cols; cc++ {
+									ids = append(ids, wellID(rIdx, cc))
+								}
+								mergeSelect(ids, rBtn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
+							}
+							for col := 0; col < cols; col++ {
+								cIdx := col
+								id := wellID(rIdx, cIdx)
+								well, assigned := props.Wells[id]
+								role := effectiveRole(well, id, props.Roles)
+								fill := WellFillColor(props, well, assigned, role, dark, t)
+								strokeCol := t.Border
+								var strokeW float32 = 1
+								if assigned && (len(well.Factors) > 0 || well.SampleID != "") && !props.Blind {
+									strokeCol = fill.Mix(t.Text, 0.28)
+								}
+								if selected[id] {
+									strokeCol, strokeW = t.Accent, 2
+								}
+								ink := contrastInkForFill(fill, assigned, t)
+								badge := ""
+								if well.Ambiguous {
+									badge = "!"
+								} else if !props.Blind && assigned {
+									badge = wellGlyphAdaptive(props, well, role, cellW)
+								} else if rb := roleShort(role); rb != "" {
+									badge = rb
+								}
+								btn := ui.ButtonBase(c).Key(id).Size(cellW, cellH).Radius(wellRadius()).
+									Background(fill).Border(strokeW, strokeCol).Label("孔 " + id)
+								if badge != "" || (selected[id] && cellW >= 32) {
+									fontPx := float32(t.TextMeta) * 0.72
+									if cellW >= 40 {
+										fontPx = float32(t.TextMeta) * 0.86
+									} else if len([]rune(badge)) == 1 {
+										fontPx = float32(t.TextMeta) * 0.84
+									}
+									btn.Children(func() {
+										ui.Column(c).Fill().Center().Gap(1).Children(func() {
+											if badge != "" {
+												ui.Text(c, badge).FontSize(fontPx).Bold().TextColor(ink).SingleLine()
+											}
+											if !props.Blind && assigned && well.Replicate > 0 && cellW >= 38 && props.ColorBy != "replicate" {
+												ui.Text(c, fmt.Sprintf("#%d", well.Replicate)).FontSize(float32(t.TextMeta)*0.64).TextColor(ink.Alpha(.82)).SingleLine()
+											}
+										})
+									})
+								}
+								if btn.Hovered() {
+									st.hoverWell = id
+								}
+								cellPt := func(x, y float32) ui.Point {
+									return ui.Point{
+										X: float32(cIdx)*(cellW+gap) + x,
+										Y: float32(rIdx)*(cellH+gap) + y,
+									}
+								}
+								btn = btn.HandleInput(func(event ui.InputEvent) bool {
+									if (event.Kind == ui.InputPointerDown || event.Kind == ui.InputPointerUp) && event.Button != 0 {
+										return false
+									}
+									switch event.Kind {
+									case ui.InputPointerDown:
+										pt := cellPt(event.X, event.Y)
+										st.pointerDown = true
+										st.pointerStart = ui.Point{X: event.X, Y: event.Y}
+										st.dragStart, st.dragLast = pt, pt
+										st.dragging = false
+										st.additive = event.Mods&(ui.Shift|ui.Cmd) != 0
+										st.baseSelected = append(st.baseSelected[:0], props.SelectedIDs...)
+										return false
+									case ui.InputPointerMove:
+										if !st.pointerDown {
+											return false
+										}
+										dx, dy := event.X-st.pointerStart.X, event.Y-st.pointerStart.Y
+										if !st.dragging {
+											if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+												return false
+											}
+											st.dragging = true
+										}
+										st.dragLast = cellPt(event.X, event.Y)
+										applyMarquee()
+										return true
+									case ui.InputPointerUp:
+										if !st.pointerDown {
+											return false
+										}
+										st.pointerDown = false
+										if !st.dragging {
+											st.baseSelected = nil
+											return false
+										}
+										if event.Canceled {
+											notify(append([]string(nil), st.baseSelected...))
+										} else {
+											st.dragLast = cellPt(event.X, event.Y)
+											applyMarquee()
+										}
+										st.dragging = false
+										st.suppressClick = true
+										st.baseSelected = nil
+										return true
+									}
+									return false
+								})
+								if btn.Clicked() && !st.dragging && !suppressGridClick {
+									next := nextSelection(selected, id, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
+									out := make([]string, 0, len(next))
+									for k := range next {
+										out = append(out, k)
+									}
+									notify(out)
+								}
+							}
+						})
+					}
+				})
+			})
+			if props.Topology == "dish" {
+				gridBox.Draw(func(p *ui.Painter, r ui.Rect) {
+					drawDishRim(p, r.X+dishPad+leftLabel+gap, r.Y+dishPad+topLabel+gap)
+				})
+			}
+			gridBox.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if !st.dragging {
+					return
+				}
+				ox := r.X + dishPad + leftLabel + gap
+				oy := r.Y + dishPad + topLabel + gap
+				x0, y0 := ox+st.dragStart.X, oy+st.dragStart.Y
+				x1, y1 := ox+st.dragLast.X, oy+st.dragLast.Y
+				if x0 > x1 {
+					x0, x1 = x1, x0
+				}
+				if y0 > y1 {
+					y0, y1 = y1, y0
+				}
+				mr := ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}
+				p.Fill(mr, t.Accent.Alpha(.14), 2)
+				p.Stroke(mr, t.Accent, 2, 1)
+			})
+
+			hoverText, hoverColor := "悬停或拖拽孔位查看分组、样本与复孔", t.TextMuted
+			if st.hoverWell != "" {
+				hoverText, hoverColor = wellHoverSummary(props, st.hoverWell), t.Text
+			} else if len(props.Wells) == 0 {
+				hoverText = "尚无计划孔位分配"
+			}
+			ui.Text(c, hoverText).FontSize(labelSize).TextColor(hoverColor).SingleLine()
+			if len(legendOrder) > 0 {
+				ui.Row(c).Wrap().Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
+					for _, label := range legendOrder {
+						ui.Row(c).Gap(float32(t.Spacing4)).AlignItems(ui.Center).Children(func() {
+							ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius)).Background(legendColors[label])
+							ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(labelSize).TextColor(t.TextMuted).FontFeatures("tnum")
+						})
+					}
+				})
+			}
+			ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 拖拽框选或点行列号快速选孔", len(props.Wells), rows*cols)).FontSize(labelSize).TextColor(t.TextMuted)
+			return
+		}
+
 		var el ui.Element
 		el = ui.Box(c).Size(width, height).Draw(func(p *ui.Painter, r ui.Rect) {
+			gx0 := r.X + leftLabel + dishPad
+			gy0 := r.Y + topLabel + dishPad
+			drawDishRim(p, gx0, gy0)
 			for col := 0; col < cols; col++ {
-				cx := r.X + leftLabel + float32(col)*(wellSize+gap) + wellSize/2 - float32(t.Spacing4)*0.8
-				p.Text(cx, r.Y+float32(t.Spacing4)*0.5, fmt.Sprintf("%d", col+1), labelSize, t.TextMuted)
+				cx := gx0 + float32(col)*(cellW+gap) + cellW/2 - float32(t.Spacing4)*0.8
+				p.Text(cx, r.Y+dishPad+float32(t.Spacing4)*0.4, fmt.Sprintf("%d", col+1), labelSize, t.TextMuted)
 			}
 			for row := 0; row < rows; row++ {
-				ry := r.Y + topLabel + float32(row)*(wellSize+gap) + (wellSize-labelSize)*0.42
-				p.Text(r.X+float32(t.Spacing4), ry, rowLabel(row), labelSize, t.TextMuted)
+				ry := gy0 + float32(row)*(cellH+gap) + (cellH-labelSize)*0.42
+				p.Text(r.X+dishPad+float32(t.Spacing4), ry, rowLabel(row), labelSize, t.TextMuted)
 				for col := 0; col < cols; col++ {
 					id := wellID(row, col)
-					x := r.X + leftLabel + float32(col)*(wellSize+gap)
-					y := r.Y + topLabel + float32(row)*(wellSize+gap)
-					wr := ui.Rect{X: x, Y: y, W: wellSize, H: wellSize}
+					x := gx0 + float32(col)*(cellW+gap)
+					y := gy0 + float32(row)*(cellH+gap)
+					wr := ui.Rect{X: x, Y: y, W: cellW, H: cellH}
 					well, assigned := props.Wells[id]
 					role := effectiveRole(well, id, props.Roles)
 					fill := WellFillColor(props, well, assigned, role, dark, t)
-					radius := wellSize / 2
-					if props.Topology == "cohort" || props.Topology == "rack_1d" {
-						radius = float32(t.ControlRadius)
-					}
+					radius := wellRadius()
 					p.Fill(wr, fill, radius)
 					strokeCol := t.Border
 					if assigned && (len(well.Factors) > 0 || well.SampleID != "") && !props.Blind {
@@ -233,8 +617,8 @@ func View(c *ui.Context, props Props) {
 					}
 					p.Stroke(wr, strokeCol, radius, 1)
 					ink := contrastInkForFill(fill, assigned, t)
-					if !props.Blind && assigned && well.SampleID != "" && len(well.Factors) > 0 && well.Replicate > 0 && wellSize >= 20 {
-						inner := ui.Rect{X: x + 2.5, Y: y + 2.5, W: wellSize - 5, H: wellSize - 5}
+					if !props.Blind && assigned && well.SampleID != "" && len(well.Factors) > 0 && well.Replicate > 0 && cellW >= 20 {
+						inner := ui.Rect{X: x + 2.5, Y: y + 2.5, W: cellW - 5, H: cellH - 5}
 						innerR := radius - 2.5
 						if innerR < 2 {
 							innerR = 2
@@ -242,98 +626,55 @@ func View(c *ui.Context, props Props) {
 						p.Stroke(inner, ink.Alpha(.38), innerR, 1)
 					}
 					if well.Ambiguous {
-						fontPx := float32(t.TextMeta) * 0.9
-						p.Text(x+(wellSize-fontPx*0.4)/2, y+(wellSize-fontPx)*0.44, "!", fontPx, ink)
+						fontPx := labelSize * 0.9
+						p.Text(x+(cellW-fontPx*0.4)/2, y+(cellH-fontPx)*0.44, "!", fontPx, ink)
 					} else if !props.Blind && assigned {
-						badge := wellGlyph(props, well, role)
+						badge := wellGlyphAdaptive(props, well, role, cellW)
 						if badge != "" {
-							fontPx := float32(t.TextMeta) * 0.68
-							if len([]rune(badge)) == 1 {
-								fontPx = float32(t.TextMeta) * 0.82
+							fontPx := labelSize * 0.72
+							if cellW >= 40 {
+								fontPx = labelSize * 0.88
+							} else if len([]rune(badge)) == 1 {
+								fontPx = labelSize * 0.84
 							}
 							glyphW := float32(len([]rune(badge))) * fontPx * 0.56
-							tx := x + (wellSize-glyphW)/2
-							ty := y + (wellSize-fontPx)*0.42
+							tx := x + (cellW-glyphW)/2
+							ty := y + (cellH-fontPx)*0.42
 							if tx < x+2 {
 								tx = x + 2
 							}
 							p.Text(tx, ty, badge, fontPx, ink)
 						}
 					} else if roleBadge := roleShort(role); roleBadge != "" {
-						fontPx := float32(t.TextMeta) * 0.78
-						p.Text(x+(wellSize-fontPx*0.6)/2, y+(wellSize-fontPx)*0.44, roleBadge, fontPx, t.Text)
+						fontPx := labelSize * 0.78
+						p.Text(x+(cellW-fontPx*0.6)/2, y+(cellH-fontPx)*0.44, roleBadge, fontPx, t.Text)
 					}
 					if selected[id] {
 						p.Stroke(wr, t.Accent, radius, 2)
-						p.Line(x+float32(t.Spacing4), y+float32(t.Spacing12), x+float32(t.Spacing8), y+float32(t.Spacing16), 2, t.Accent)
-						p.Line(x+float32(t.Spacing8), y+float32(t.Spacing16), x+float32(t.Spacing16), y+float32(t.Spacing8), 2, t.Accent)
 					}
 				}
 			}
-			hudY := r.Y + topLabel + gridH + float32(t.Spacing8)
+			hudY := gy0 + gridH + dishPad + float32(t.Spacing8)
 			if lastHoverWell != "" {
-				well, assigned := props.Wells[lastHoverWell]
-				role := effectiveRole(well, lastHoverWell, props.Roles)
-				parts := []string{lastHoverWell}
-				switch {
-				case !assigned:
-					parts = append(parts, "未分配")
-				case well.Ambiguous:
-					parts = append(parts, "分配冲突", well.Timepoint)
-				case props.Blind:
-					parts = append(parts, "盲态编号")
-					if well.Replicate > 0 {
-						parts = append(parts, fmt.Sprintf("复孔 #%d", well.Replicate))
-					}
-					if well.Timepoint != "" {
-						parts = append(parts, well.Timepoint)
-					}
-				default:
-					if well.Group != "" {
-						parts = append(parts, well.Group)
-					}
-					if well.SampleID != "" {
-						parts = append(parts, "样本 "+well.SampleID)
-					}
-					if len(well.Factors) > 0 {
-						fdims := make([]string, 0, len(well.Factors))
-						for dk := range well.Factors {
-							fdims = append(fdims, dk)
-						}
-						sort.Strings(fdims)
-						for _, dk := range fdims {
-							parts = append(parts, dk+"="+well.Factors[dk])
-						}
-					}
-					if well.Replicate > 0 {
-						parts = append(parts, fmt.Sprintf("复孔 #%d", well.Replicate))
-					}
-					if rl := RoleLabel(role); rl != "" && role != "" && role != "sample" {
-						parts = append(parts, rl)
-					}
-					if well.Timepoint != "" {
-						parts = append(parts, well.Timepoint)
-					}
-				}
-				p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), strings.Join(parts, " · "), float32(t.TextMeta), t.Text)
+				p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), wellHoverSummary(props, lastHoverWell), labelSize, t.Text)
 			} else if len(props.Wells) == 0 {
-				p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), "尚无计划孔位分配", float32(t.TextMeta), t.TextMuted)
+				p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), "尚无计划孔位分配", labelSize, t.TextMuted)
 			}
 		}).HitTest(func(x, y float32, r ui.Rect) bool {
 			lastHitWell, lastHoverWell = "", ""
-			gx := x - (r.X + leftLabel)
-			gy := y - (r.Y + topLabel)
+			gx := x - (r.X + leftLabel + dishPad)
+			gy := y - (r.Y + topLabel + dishPad)
 			if gx < 0 || gy < 0 {
 				return false
 			}
-			col := int(gx / (wellSize + gap))
-			row := int(gy / (wellSize + gap))
+			col := int(gx / (cellW + gap))
+			row := int(gy / (cellH + gap))
 			if col < 0 || col >= cols || row < 0 || row >= rows {
 				return false
 			}
-			cx := gx - float32(col)*(wellSize+gap)
-			cy := gy - float32(row)*(wellSize+gap)
-			if cx > wellSize || cy > wellSize {
+			cx := gx - float32(col)*(cellW+gap)
+			cy := gy - float32(row)*(cellH+gap)
+			if cx > cellW || cy > cellH {
 				return false
 			}
 			lastHitWell = wellID(row, col)
@@ -359,13 +700,60 @@ func View(c *ui.Context, props Props) {
 				for _, label := range legendOrder {
 					ui.Row(c).Gap(float32(t.Spacing4)).AlignItems(ui.Center).Children(func() {
 						ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius)).Background(legendColors[label])
-						ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(float32(t.TextMeta)).TextColor(t.TextMuted).FontFeatures("tnum")
+						ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(labelSize).TextColor(t.TextMuted).FontFeatures("tnum")
 					})
 				}
 			})
 		}
-		ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 单击选择，Shift+单击多选", len(props.Wells), rows*cols)).FontSize(float32(t.TextMeta)).TextColor(t.TextMuted)
+		ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 悬停查看分组与样本明细", len(props.Wells), rows*cols)).FontSize(labelSize).TextColor(t.TextMuted)
 	})
+}
+
+func wellHoverSummary(props Props, id string) string {
+	well, assigned := props.Wells[id]
+	role := effectiveRole(well, id, props.Roles)
+	parts := []string{id}
+	switch {
+	case !assigned:
+		parts = append(parts, "未分配")
+	case well.Ambiguous:
+		parts = append(parts, "分配冲突", well.Timepoint)
+	case props.Blind:
+		parts = append(parts, "盲态编号")
+		if well.Replicate > 0 {
+			parts = append(parts, fmt.Sprintf("复孔 #%d", well.Replicate))
+		}
+		if well.Timepoint != "" {
+			parts = append(parts, well.Timepoint)
+		}
+	default:
+		if well.Group != "" {
+			parts = append(parts, well.Group)
+		}
+		if well.SampleID != "" {
+			parts = append(parts, "样本 "+well.SampleID)
+		}
+		if len(well.Factors) > 0 {
+			fdims := make([]string, 0, len(well.Factors))
+			for dk := range well.Factors {
+				fdims = append(fdims, dk)
+			}
+			sort.Strings(fdims)
+			for _, dk := range fdims {
+				parts = append(parts, dk+"="+well.Factors[dk])
+			}
+		}
+		if well.Replicate > 0 {
+			parts = append(parts, fmt.Sprintf("复孔 #%d", well.Replicate))
+		}
+		if rl := RoleLabel(role); rl != "" && role != "" && role != "sample" {
+			parts = append(parts, rl)
+		}
+		if well.Timepoint != "" {
+			parts = append(parts, well.Timepoint)
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 func effectiveRole(well WellState, id string, roles map[string]string) string {
@@ -437,7 +825,7 @@ func WellFillColor(props Props, well WellState, assigned bool, role string, dark
 		}
 		return theme.WellRoleColor(r, dark)
 	default:
-		return GroupColor(well.Group, dark)
+		return GroupColorIndexed(well.Group, props.GroupIndex, dark)
 	}
 }
 
@@ -474,13 +862,23 @@ func wellLegendCategory(props Props, well WellState, role string, dark bool, t t
 		if well.Group == "" {
 			return "", ui.Color{}
 		}
-		return well.Group, GroupColor(well.Group, dark)
+		return well.Group, GroupColorIndexed(well.Group, props.GroupIndex, dark)
 	}
 }
 
 func wellGlyph(props Props, well WellState, role string) string {
+	return wellGlyphAdaptive(props, well, role, 26)
+}
+
+func wellGlyphAdaptive(props Props, well WellState, role string, cellW float32) string {
 	if rs := roleShort(role); rs != "" {
 		return rs
+	}
+	maxRunes := 3
+	if cellW >= 48 {
+		maxRunes = 7
+	} else if cellW >= 38 {
+		maxRunes = 6
 	}
 	switch strings.ToLower(strings.TrimSpace(props.ColorBy)) {
 	case "replicate":
@@ -489,15 +887,23 @@ func wellGlyph(props Props, well WellState, role string) string {
 		}
 	case "sample":
 		if s := strings.TrimSpace(well.SampleID); s != "" {
-			return compactTag(s, 3)
+			return compactTag(s, maxRunes)
 		}
 	case "factor":
 		if props.FactorKey != "" && well.Factors != nil {
 			if v := strings.TrimSpace(well.Factors[props.FactorKey]); v != "" {
-				return compactTag(v, 3)
+				return compactTag(v, maxRunes)
 			}
 		}
 	default:
+		if cellW >= 38 {
+			if s := strings.TrimSpace(well.SampleID); s != "" {
+				return compactTag(s, maxRunes)
+			}
+			if well.Group != "" {
+				return compactTag(strings.TrimPrefix(well.Group, "g-"), maxRunes)
+			}
+		}
 		if well.Replicate > 0 {
 			return fmt.Sprintf("%d", well.Replicate)
 		}

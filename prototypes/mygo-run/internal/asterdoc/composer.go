@@ -298,7 +298,7 @@ func DefaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
 			map[string]any{"id": id + "-treat", "name": "处理组", "role": "treatment", "independent_n": 3},
 		}}
 	case "param_table":
-		return map[string]any{"kind": "param_table", "id": id, "schema": 1, "title": "实验参数", "rows": []any{
+		return map[string]any{"kind": "param_table", "id": id, "schema": 1, "title": "实验条件", "rows": []any{
 			map[string]any{"key": "volume", "label": "反应体积", "value": 100, "unit": "uL", "record_actual": true},
 		}}
 	case "figure":

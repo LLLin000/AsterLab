@@ -116,3 +116,89 @@ func TestPlateFactorsScopeReplicatesAndBatchLayout(t *testing.T) {
 		t.Fatalf("factor apply err=%v nextF=%+v", err, nextF)
 	}
 }
+
+func TestUnifiedPlateAnnotationOrderIndependenceAndGradients(t *testing.T) {
+	baseSrc := "```asterlab\nkind: experiment\nid: exp-unified\nschema: 1\ntitle: 统一孔板标注\nobjective: 验证样本与多维因子顺序无关性\n```\n\n```asterlab\nkind: plate\nid: pl-unified\nschema: 1\nformat: 24\ngroups: {}\n```\n"
+	doc, err := Parse(baseSrc)
+	if err != nil {
+		t.Fatalf("initial parse failed: %v", err)
+	}
+
+	v := &View{
+		Doc:     doc,
+		Mode:    ModeDesign,
+		Allowed: map[string]bool{PermDocumentEdit: true},
+		OnChange: func(nextSrc string) {
+			parsed, pErr := Parse(nextSrc)
+			if pErr != nil {
+				t.Fatalf("updated AsterML failed Parse: %v\nsource:\n%s", pErr, nextSrc)
+			}
+			doc = parsed
+		},
+	}
+
+	pl, ok := doc.PlateByID("pl-unified")
+	if !ok {
+		t.Fatal("missing plate")
+	}
+	// Case A: plain treatment/sample label auto-creates group and triplicates 1..3
+	if err := v.applyUnifiedPlateInput(pl, "", []string{"B1", "B2", "B3"}, "H2O2-100uM"); err != nil {
+		t.Fatalf("apply plain label failed: %v", err)
+	}
+	v.Doc = doc
+	pl, _ = doc.PlateByID("pl-unified")
+	if err := v.applyUnifiedPlateInput(pl, "", []string{"B1", "B2", "B3"}, "靶点:GAPDH"); err != nil {
+		t.Fatalf("apply factor after sample failed: %v", err)
+	}
+	v.Doc = doc
+	pl, _ = doc.PlateByID("pl-unified")
+	if err := v.applyUnifiedPlateInput(pl, "", []string{"B4", "B5", "B6"}, "H2O2-100uM"); err != nil {
+		t.Fatalf("apply second block plain label failed: %v", err)
+	}
+	v.Doc = doc
+	pl, _ = doc.PlateByID("pl-unified")
+	if err := v.applyUnifiedPlateInput(pl, "", []string{"B4", "B5", "B6"}, "靶点:ACTB"); err != nil {
+		t.Fatalf("apply orthogonal factor to second block failed: %v", err)
+	}
+	v.Doc = doc
+	pl, _ = doc.PlateByID("pl-unified")
+	if pl.Replicates["B1"] != 1 || pl.Replicates["B3"] != 3 || pl.Replicates["B4"] != 1 || pl.Replicates["B6"] != 3 {
+		t.Fatalf("expected independent 1..3 replicates across GAPDH vs ACTB, got %+v", pl.Replicates)
+	}
+
+	// Case B: reverse order (factor first, then plain label)
+	if err := v.applyUnifiedPlateInput(pl, "", []string{"C1", "C2", "C3"}, "靶点:GAPDH"); err != nil {
+		t.Fatalf("reverse order factor first failed: %v", err)
+	}
+	v.Doc = doc
+	pl, _ = doc.PlateByID("pl-unified")
+	if err := v.applyUnifiedPlateInput(pl, "", []string{"C1", "C2", "C3"}, "Sample-1"); err != nil {
+		t.Fatalf("reverse order label second failed: %v", err)
+	}
+	v.Doc = doc
+	pl, _ = doc.PlateByID("pl-unified")
+	if pl.Samples["C2"] != "Sample-1" || pl.Replicates["C2"] != 2 || pl.Factors["靶点"]["C2"] != "GAPDH" {
+		t.Fatalf("reverse order state mismatch: samples=%+v reps=%+v factors=%+v", pl.Samples, pl.Replicates, pl.Factors)
+	}
+
+	// Case C: serial dilution gradient shorthand across 4 wells
+	if err := v.applyUnifiedPlateInput(pl, "", []string{"A1", "A2", "A3", "A4"}, "浓度:100/2 uM"); err != nil {
+		t.Fatalf("serial gradient failed: %v", err)
+	}
+	v.Doc = doc
+	pl, _ = doc.PlateByID("pl-unified")
+	if pl.Factors["浓度"]["A1"] != "100 uM" || pl.Factors["浓度"]["A2"] != "50 uM" ||
+		pl.Factors["浓度"]["A3"] != "25 uM" || pl.Factors["浓度"]["A4"] != "12.5 uM" {
+		t.Fatalf("unexpected serial gradient values: %+v", pl.Factors["浓度"])
+	}
+
+	// Case D: QC role alias
+	if err := v.applyUnifiedPlateInput(pl, "", []string{"D6"}, "NTC"); err != nil {
+		t.Fatalf("NTC role failed: %v", err)
+	}
+	v.Doc = doc
+	pl, _ = doc.PlateByID("pl-unified")
+	if pl.Roles["D6"] != "ntc" {
+		t.Fatalf("expected Roles[D6]=ntc, got %+v", pl.Roles)
+	}
+}

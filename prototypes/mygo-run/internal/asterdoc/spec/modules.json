@@ -47,7 +47,7 @@
         {"name": "id", "type": "string", "required": true, "description": "文档内稳定 ID"},
         {"name": "schema", "type": "int", "required": true, "description": "模块版本，当前为 1"},
         {"name": "title", "type": "string", "description": "容器标题"},
-        {"name": "format", "type": "int", "required": true, "description": "标准孔板孔数 6/12/24/48/96/384，或自定义槽位数"},
+        {"name": "format", "type": "int", "required": true, "description": "标准孔板孔数 4/6/12/24/48/96/384，或自定义槽位数"},
         {
           "name": "topology",
           "type": "enum",
@@ -240,6 +240,7 @@
         {"name": "endpoint", "type": "string"},
         {"name": "bind_groups", "type": "bool"},
         {"name": "container_ref", "type": "reference", "target": "plate"},
+        {"name": "layout", "type": "enum", "values": ["rows", "matrix"], "description": "表格呈现布局：按行列表 rows 或二维孔板矩阵 matrix"},
         {"name": "columns", "type": "object-list", "required": true, "description": "列定义：{key, label, value_kind, unit, options, formula, min, max}"},
         {"name": "rows", "type": "object-list", "description": "可选预填计划行"}
       ],
@@ -318,10 +319,15 @@
         {"name": "volume_per_unit", "type": "quantity", "dimension": "volume"},
         {"name": "excess_ratio", "type": "decimal"},
         {"name": "plate_ref", "type": "reference", "target": "plate"},
+        {"name": "container_ref", "type": "reference", "target": "plate"},
         {"name": "components", "type": "object-list"},
         {"name": "dilution_factor", "type": "decimal"},
         {"name": "steps_count", "type": "int"},
+        {"name": "target_mass", "type": "quantity"},
+        {"name": "samples", "type": "object-list"},
+        {"name": "stock_ref", "type": "string"},
         {"name": "formula", "type": "string"},
+        {"name": "unit", "type": "string"},
         {"name": "inputs", "type": "object"}
       ],
       "outputs": [
@@ -790,7 +796,7 @@
       "permissions": ["run.readout"],
       "renderers": {
         "design": "generic.editor",
-        "document": "generic.editor",
+        "document": "readout.viewer",
         "run": "generic.run"
       },
       "lifecycle": {

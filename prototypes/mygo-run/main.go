@@ -3788,9 +3788,9 @@ func batchPage(c *ui.Context, a *app) {
 		for i := range cols {
 			cols[i] = fmt.Sprint(i + 1)
 		}
-		schema = resultgrid.Schema{ID: "cck8.plate96.od450.v1", Version: 1,
+		schema = resultgrid.Schema{ID: "plate.matrix.v1", Version: 1,
 			Layout: "plate96", RowLabels: rows, ColumnLabels: cols,
-			Fields: []resultgrid.Field{{Key: "od450", Label: "OD450", Unit: "AU", DataType: "number"}}}
+			Fields: []resultgrid.Field{{Key: "value", Label: "测定值", Unit: "", DataType: "number"}}}
 		plan = nil
 	}
 	_ = plan
