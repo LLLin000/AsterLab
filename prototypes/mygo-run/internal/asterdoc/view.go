@@ -129,6 +129,38 @@ func (v *View) Can(permission string) bool {
 	return v.Allowed[permission]
 }
 
+// SetPlateSelection sets the selected well IDs for plateID in Design/Tools hosts.
+func (v *View) SetPlateSelection(plateID string, wells []string) {
+	if v.plateSelections == nil {
+		v.plateSelections = map[string][]string{}
+	}
+	cp := append([]string(nil), wells...)
+	sort.Strings(cp)
+	v.plateSelections[plateID] = cp
+}
+
+// PlateSelection returns the currently selected well IDs for plateID.
+func (v *View) PlateSelection(plateID string) []string {
+	if v.plateSelections == nil {
+		return nil
+	}
+	return append([]string(nil), v.plateSelections[plateID]...)
+}
+
+// PlateColorLayer returns the active ColorBy mode and optional FactorKey for plateID.
+func (v *View) PlateColorLayer(plateID string) (colorBy, factorKey string) {
+	if v.plateColorBy != nil {
+		colorBy = v.plateColorBy[plateID]
+	}
+	if colorBy == "" {
+		colorBy = "group"
+	}
+	if v.plateFactorKey != nil {
+		factorKey = v.plateFactorKey[plateID]
+	}
+	return colorBy, factorKey
+}
+
 // Render draws the whole document, replacing every asterlab fence with the
 // registered module renderer.
 func (v *View) Render(c *ui.Context) {
@@ -285,6 +317,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 	ownerStepID := v.ownerStepForPlate(p.ID)
 	selected := v.plateSelections[p.ID]
 	idxMap := plateGroupPaletteMap(v.Doc, p)
+	lblMap := PlateGroupLabelMap(v.Doc)
 
 	ui.Row(c).FillWidth().Children(func() {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
@@ -319,7 +352,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 				OnSelect: func(ids []string) {
 					v.plateSelections[p.ID] = ids
 				},
-				ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, State: st,
+				ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap, Zoom: v.PlateZoom, State: st,
 			})
 
 			hasMultiLayer := len(factorDims) > 0 || len(p.Roles) > 0 || len(p.Samples) > 0
@@ -522,6 +555,7 @@ func (v *View) plateOverlay(c *ui.Context) {
 		}
 	}
 	idxMap := plateGroupPaletteMap(v.Doc, plate)
+	lblMap := PlateGroupLabelMap(v.Doc)
 
 	ui.Overlay(c, func() {
 		backdrop := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
@@ -601,7 +635,7 @@ func (v *View) plateOverlay(c *ui.Context) {
 								OnSelect: func(ids []string) {
 									v.ExpandedWells = ids
 								},
-								ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap,
+								ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap,
 								Zoom: overlayZoom, State: &v.overlayPlateState,
 							})
 						})

@@ -518,5 +518,43 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		renderVisualPNG(t, outDir, "tools_workbench_light.png", 1360, 880, false, func(c *ui.Context) {
 			toolsPage(c, toolApp)
 		})
+
+		// 14. 孔板速排（先选孔板 + 悬浮单框选孔标注 + SVG/PNG 导出 + 两列孔板历史）
+		plateStudio := toolApp.tools
+		plateStudio.Active = tools.ToolPlate
+		plateStudio.SelectPlatePreset("plate-96")
+		plateStudio.SelectPlateWells([]string{"A1", "A2", "A3"})
+		_ = plateStudio.AnnotateSelectedWells("Ctrl")
+		plateStudio.SelectPlateWells([]string{"A4", "A5", "A6"})
+		_ = plateStudio.AnnotateSelectedWells("VEGF-50")
+		plateStudio.SelectPlateWells([]string{"H12"})
+		_ = plateStudio.AnnotateSelectedWells("NTC")
+		plateStudio.SaveCurrentPlateToHistory()
+
+		plateStudio.SelectPlatePreset("dish-4")
+		plateStudio.SelectPlateWells([]string{"A1", "A2"})
+		_ = plateStudio.AnnotateSelectedWells("万古霉素-30ug")
+		plateStudio.SelectPlateWells([]string{"B1"})
+		_ = plateStudio.AnnotateSelectedWells("空白对照")
+		plateStudio.SaveCurrentPlateToHistory()
+
+		plateStudio.SelectPlatePreset("rack-8")
+		plateStudio.SelectPlateWells([]string{"A1", "A2", "A3", "A4"})
+		_ = plateStudio.AnnotateSelectedWells("浓度:100/2 uM")
+		plateStudio.SaveCurrentPlateToHistory()
+
+		plateStudio.SelectPlatePreset("plate-12")
+		plateStudio.SelectPlateWells([]string{"A1", "A2", "A3"})
+		_ = plateStudio.AnnotateSelectedWells("对照组")
+		plateStudio.SelectPlateWells([]string{"A4", "B1", "B2"})
+		_ = plateStudio.AnnotateSelectedWells("VEGF-50ng/mL")
+		plateStudio.SelectPlateWells([]string{"B4"})
+		_ = plateStudio.AnnotateSelectedWells("NTC")
+		plateStudio.SelectPlateWells([]string{"C1", "C2", "C3"})
+		plateStudio.Status = ""
+
+		renderVisualPNG(t, outDir, "comp_15b_tools_plate_legacy.png", 1360, 1400, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
 	}
 }

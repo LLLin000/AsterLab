@@ -48,6 +48,7 @@ type Props struct {
 	FactorKey   string
 	Blind       bool
 	GroupIndex  map[string]int
+	GroupLabels map[string]string
 	Zoom        float32
 	State       *InteractionState
 }
@@ -154,8 +155,19 @@ func AdaptiveMetrics(rows, cols int, topology string, zoom float32) (cellW, cell
 	if zoom <= 0 {
 		zoom = 1
 	}
+	gapScale := float32(1)
+	if zoom < 1 {
+		gapScale = zoom
+	}
+	scaleGap := func(base float32) float32 {
+		g := base * gapScale
+		if g < 2 {
+			g = 2
+		}
+		return g
+	}
 	if topology == "rack_1d" {
-		cellW, cellH, gap = 40*zoom, 58*zoom, 6
+		cellW, cellH, gap = 40*zoom, 58*zoom, scaleGap(6)
 		if cols > 12 {
 			cellW = (560*zoom - float32(cols-1)*gap) / float32(cols)
 			if cellW < 18*zoom {
@@ -167,21 +179,77 @@ func AdaptiveMetrics(rows, cols int, topology string, zoom float32) (cellW, cell
 	total := rows * cols
 	switch {
 	case total <= 4:
-		cellW, cellH, gap = 56*zoom, 56*zoom, 10
+		cellW, cellH, gap = 56*zoom, 56*zoom, scaleGap(10)
 	case total <= 6:
-		cellW, cellH, gap = 48*zoom, 48*zoom, 8
+		cellW, cellH, gap = 48*zoom, 48*zoom, scaleGap(8)
 	case total <= 12:
-		cellW, cellH, gap = 42*zoom, 42*zoom, 8
+		cellW, cellH, gap = 42*zoom, 42*zoom, scaleGap(8)
 	case total <= 24:
-		cellW, cellH, gap = 36*zoom, 36*zoom, 6
+		cellW, cellH, gap = 36*zoom, 36*zoom, scaleGap(6)
 	case total <= 48:
-		cellW, cellH, gap = 28*zoom, 28*zoom, 5
+		cellW, cellH, gap = 28*zoom, 28*zoom, scaleGap(5)
 	case total <= 96:
-		cellW, cellH, gap = 26*zoom, 26*zoom, 4
+		cellW, cellH, gap = 26*zoom, 26*zoom, scaleGap(4)
 	default:
-		cellW, cellH, gap = 17*zoom, 17*zoom, 3
+		cellW, cellH, gap = 17*zoom, 17*zoom, scaleGap(3)
 	}
 	return cellW, cellH, gap
+}
+
+// ResolveDimensions normalizes plate/dish/rack row & column counts.
+func ResolveDimensions(props Props) (rows, cols int) {
+	rows, cols = props.Rows, props.Cols
+	if rows == 0 {
+		rows = defaultRows
+	}
+	if cols == 0 {
+		cols = defaultCols
+	}
+	isCustomTopology := props.Topology != "" && props.Topology != "plate"
+	if !isCustomTopology && !wellGrid(rows, cols) {
+		rows, cols = defaultRows, defaultCols
+	}
+	if rows < 1 || rows > 16 || cols < 1 || cols > 24 {
+		rows, cols = defaultRows, defaultCols
+	}
+	return rows, cols
+}
+
+// LegendItem describes one category swatch rendered below a plate grid or export.
+type LegendItem struct {
+	Label string
+	Color ui.Color
+	Count int
+}
+
+// ComputeLegend returns the sorted legend entries shared across interactive views,
+// read-only summaries, and SVG/PNG exports.
+func ComputeLegend(props Props, dark bool) []LegendItem {
+	t := theme.GetTokens(theme.Palette(dark))
+	counts := make(map[string]int)
+	colors := make(map[string]ui.Color)
+	order := make([]string, 0)
+	for id, well := range props.Wells {
+		if well.Ambiguous {
+			continue
+		}
+		role := effectiveRole(well, id, props.Roles)
+		lbl, col := wellLegendCategory(props, well, role, dark, t)
+		if lbl == "" {
+			continue
+		}
+		if _, seen := counts[lbl]; !seen {
+			order = append(order, lbl)
+			colors[lbl] = col
+		}
+		counts[lbl]++
+	}
+	sort.Strings(order)
+	out := make([]LegendItem, 0, len(order))
+	for _, lbl := range order {
+		out = append(out, LegendItem{Label: lbl, Color: colors[lbl], Count: counts[lbl]})
+	}
+	return out
 }
 
 // WellsInRectCells returns every well/lane ID overlapping rect in row-major order.
@@ -237,59 +305,51 @@ func View(c *ui.Context, props Props) {
 	th := c.Theme()
 	t := theme.GetTokens(th)
 	dark := th != nil && th.Dark
-	var lastHitWell, lastHoverWell string
+	var lastHoverWell string
 
-	rows, cols := props.Rows, props.Cols
-	if rows == 0 {
-		rows = defaultRows
-	}
-	if cols == 0 {
-		cols = defaultCols
-	}
-	isCustomTopology := props.Topology != "" && props.Topology != "plate"
-	if !isCustomTopology && !wellGrid(rows, cols) {
-		rows, cols = defaultRows, defaultCols
-	}
-	if rows < 1 || rows > 16 || cols < 1 || cols > 24 {
-		rows, cols = defaultRows, defaultCols
-	}
+	rows, cols := ResolveDimensions(props)
 	cellW, cellH, gap := AdaptiveMetrics(rows, cols, props.Topology, props.Zoom)
+	mini := !props.Interactive && props.Zoom > 0 && props.Zoom < 0.75
 	labelSize := float32(t.TextMeta)
 	leftLabel := float32(t.Spacing24)
 	topLabel := float32(t.Spacing16)
 	dishPad := float32(0)
+	footerPad := float32(t.Spacing32)
 	if props.Topology == "dish" {
 		dishPad = float32(t.Spacing24)
+	}
+	if mini {
+		if labelSize = labelSize * (0.7 + 0.3*props.Zoom); labelSize < 9 {
+			labelSize = 9
+		}
+		if leftLabel = float32(t.Spacing24) * (0.65 + 0.35*props.Zoom); leftLabel < 15 {
+			leftLabel = 15
+		}
+		if topLabel = float32(t.Spacing16) * (0.65 + 0.35*props.Zoom); topLabel < 11 {
+			topLabel = 11
+		}
+		if props.Topology == "dish" {
+			dishPad = float32(t.Spacing24) * (0.55 + 0.45*props.Zoom)
+			if dishPad < 20 {
+				dishPad = 20
+			}
+		}
+		footerPad = float32(t.Spacing8)
 	}
 	gridW := float32(cols)*cellW + float32(cols-1)*gap
 	gridH := float32(rows)*cellH + float32(rows-1)*gap
 	width := leftLabel + gridW + dishPad*2 + float32(t.Spacing4)
-	height := topLabel + gridH + dishPad*2 + float32(t.Spacing32)
+	height := topLabel + gridH + dishPad*2 + footerPad
 	selected := selectedSet(props)
-	legendCounts := make(map[string]int)
-	legendColors := make(map[string]ui.Color)
-	legendOrder := make([]string, 0)
-	recordLegend := func(label string, col ui.Color) {
-		if label == "" {
-			return
-		}
-		if _, seen := legendCounts[label]; !seen {
-			legendOrder = append(legendOrder, label)
-			legendColors[label] = col
-		}
-		legendCounts[label]++
+	legend := ComputeLegend(props, dark)
+	legendCounts := make(map[string]int, len(legend))
+	legendColors := make(map[string]ui.Color, len(legend))
+	legendOrder := make([]string, 0, len(legend))
+	for _, item := range legend {
+		legendOrder = append(legendOrder, item.Label)
+		legendColors[item.Label] = item.Color
+		legendCounts[item.Label] = item.Count
 	}
-	for id, well := range props.Wells {
-		if well.Ambiguous {
-			continue
-		}
-		role := effectiveRole(well, id, props.Roles)
-		lbl, col := wellLegendCategory(props, well, role, dark, t)
-		if lbl != "" {
-			recordLegend(lbl, col)
-		}
-	}
-	sort.Strings(legendOrder)
 
 	wellRadius := func() float32 {
 		if props.Topology == "rack_1d" {
@@ -311,11 +371,17 @@ func View(c *ui.Context, props Props) {
 		if gridH > rOuter {
 			rOuter = gridH
 		}
-		rOuter = rOuter*0.72 + float32(t.Spacing8)
+		rimScale := float32(0.72)
+		rimPad := float32(t.Spacing8)
+		if mini {
+			rimScale = 0.65
+			rimPad = float32(t.Spacing4)
+		}
+		rOuter = rOuter*rimScale + rimPad
 		outerRect := ui.Rect{X: cx - rOuter, Y: cy - rOuter, W: rOuter * 2, H: rOuter * 2}
 		p.Fill(outerRect, t.Elevated.Alpha(.65), rOuter)
 		p.Stroke(outerRect, t.BorderStrong, rOuter, 1.5)
-		innerR := rOuter - float32(t.Spacing8)
+		innerR := rOuter - rimPad
 		if innerR > 8 {
 			innerRect := ui.Rect{X: cx - innerR, Y: cy - innerR, W: innerR * 2, H: innerR * 2}
 			p.Stroke(innerRect, t.Border, innerR, 1)
@@ -589,8 +655,7 @@ func View(c *ui.Context, props Props) {
 			return
 		}
 
-		var el ui.Element
-		el = ui.Box(c).Size(width, height).Draw(func(p *ui.Painter, r ui.Rect) {
+		canvas := ui.Box(c).Size(width, height).Draw(func(p *ui.Painter, r ui.Rect) {
 			gx0 := r.X + leftLabel + dishPad
 			gy0 := r.Y + topLabel + dishPad
 			drawDishRim(p, gx0, gy0)
@@ -654,46 +719,37 @@ func View(c *ui.Context, props Props) {
 					}
 				}
 			}
-			hudY := gy0 + gridH + dishPad + float32(t.Spacing8)
-			if lastHoverWell != "" {
-				p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), wellHoverSummary(props, lastHoverWell), labelSize, t.Text)
-			} else if len(props.Wells) == 0 {
-				p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), "尚无计划孔位分配", labelSize, t.TextMuted)
+			if !mini {
+				hudY := gy0 + gridH + dishPad + float32(t.Spacing8)
+				if lastHoverWell != "" {
+					p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), wellHoverSummary(props, lastHoverWell), labelSize, t.Text)
+				} else if len(props.Wells) == 0 {
+					p.Text(r.X+leftLabel, hudY+float32(t.Spacing12), "尚无计划孔位分配", labelSize, t.TextMuted)
+				}
 			}
-		}).HitTest(func(x, y float32, r ui.Rect) bool {
-			lastHitWell, lastHoverWell = "", ""
-			gx := x - (r.X + leftLabel + dishPad)
-			gy := y - (r.Y + topLabel + dishPad)
-			if gx < 0 || gy < 0 {
-				return false
-			}
-			col := int(gx / (cellW + gap))
-			row := int(gy / (cellH + gap))
-			if col < 0 || col >= cols || row < 0 || row >= rows {
-				return false
-			}
-			cx := gx - float32(col)*(cellW+gap)
-			cy := gy - float32(row)*(cellH+gap)
-			if cx > cellW || cy > cellH {
-				return false
-			}
-			lastHitWell = wellID(row, col)
-			lastHoverWell = lastHitWell
-			return true
-		}).OnClick(func() {
-			if !props.Interactive || lastHitWell == "" {
-				return
-			}
-			next := nextSelection(selected, lastHitWell, el.ClickModifiers()&ui.Shift != 0)
-			ids := make([]string, 0, len(next))
-			for id := range next {
-				ids = append(ids, id)
-			}
-			sort.Strings(ids)
-			if props.OnSelect != nil {
-				props.OnSelect(ids)
-			}
-		}).Focusable()
+		})
+		if !mini {
+			canvas.HitTest(func(x, y float32, r ui.Rect) bool {
+				lastHoverWell = ""
+				gx := x - (r.X + leftLabel + dishPad)
+				gy := y - (r.Y + topLabel + dishPad)
+				if gx < 0 || gy < 0 {
+					return false
+				}
+				col := int(gx / (cellW + gap))
+				row := int(gy / (cellH + gap))
+				if col < 0 || col >= cols || row < 0 || row >= rows {
+					return false
+				}
+				cx := gx - float32(col)*(cellW+gap)
+				cy := gy - float32(row)*(cellH+gap)
+				if cx > cellW || cy > cellH {
+					return false
+				}
+				lastHoverWell = wellID(row, col)
+				return true
+			})
+		}
 
 		if len(legendOrder) > 0 {
 			ui.Row(c).Wrap().Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
@@ -705,7 +761,9 @@ func View(c *ui.Context, props Props) {
 				}
 			})
 		}
-		ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 悬停查看分组与样本明细", len(props.Wells), rows*cols)).FontSize(labelSize).TextColor(t.TextMuted)
+		if !mini {
+			ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 悬停查看分组与样本明细", len(props.Wells), rows*cols)).FontSize(labelSize).TextColor(t.TextMuted)
+		}
 	})
 }
 
@@ -728,7 +786,11 @@ func wellHoverSummary(props Props, id string) string {
 		}
 	default:
 		if well.Group != "" {
-			parts = append(parts, well.Group)
+			if gl := strings.TrimSpace(props.GroupLabels[well.Group]); gl != "" {
+				parts = append(parts, gl)
+			} else {
+				parts = append(parts, well.Group)
+			}
 		}
 		if well.SampleID != "" {
 			parts = append(parts, "样本 "+well.SampleID)
@@ -862,7 +924,11 @@ func wellLegendCategory(props Props, well WellState, role string, dark bool, t t
 		if well.Group == "" {
 			return "", ui.Color{}
 		}
-		return well.Group, GroupColorIndexed(well.Group, props.GroupIndex, dark)
+		display := well.Group
+		if gl := strings.TrimSpace(props.GroupLabels[well.Group]); gl != "" {
+			display = gl
+		}
+		return display, GroupColorIndexed(well.Group, props.GroupIndex, dark)
 	}
 }
 

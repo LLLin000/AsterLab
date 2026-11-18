@@ -28,6 +28,11 @@ func geometryFor(format int) (Geometry, bool) {
 	return g, ok
 }
 
+// GeometryForPlate resolves the logical matrix dimensions for a plate, dish, or rack.
+func GeometryForPlate(format int, topology string, rows, cols int) (Geometry, bool) {
+	return geometryForPlate(format, topology, rows, cols)
+}
+
 func geometryForPlate(format int, topology string, rows, cols int) (Geometry, bool) {
 	topo := topology
 	if topo == "" {

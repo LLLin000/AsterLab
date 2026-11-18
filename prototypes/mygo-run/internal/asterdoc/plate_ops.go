@@ -465,6 +465,26 @@ func summarizeWellRange(wells []string) string {
 	return fmt.Sprintf("%s … %s", wells[0], wells[len(wells)-1])
 }
 
+// PlateGroupPaletteMap returns deterministic sequential CategoricalPalette
+// indices for every group declared in doc or assigned in plate.
+func PlateGroupPaletteMap(doc *Document, plate *Plate) map[string]int {
+	return plateGroupPaletteMap(doc, plate)
+}
+
+// PlateGroupLabelMap maps canonical group IDs declared in doc to their display names.
+func PlateGroupLabelMap(doc *Document) map[string]string {
+	out := map[string]string{}
+	if doc == nil {
+		return out
+	}
+	for _, g := range doc.GroupList() {
+		if g.ID != "" && strings.TrimSpace(g.Name) != "" {
+			out[g.ID] = strings.TrimSpace(g.Name)
+		}
+	}
+	return out
+}
+
 func plateGroupPaletteMap(doc *Document, plate *Plate) map[string]int {
 	out := map[string]int{}
 	idx := 0

@@ -1,14 +1,19 @@
 package tools
 
 import (
+	"bytes"
+	"encoding/xml"
+	"errors"
 	"image/png"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/blocks"
-	"github.com/egoist/mygo/ui"
-	"errors"
 	"asterlab-mygo-prototype/modules/runs"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestToolDraftsAndImport(t *testing.T) {
@@ -85,13 +90,151 @@ func TestToolsWorkspacePNG(t *testing.T) {
 	w.Plate.SetGroup(1, "Control")
 	tester := ui.NewTester((&screenshotApp{workspace: w}).view, 1200, 760)
 	tester.Frame()
-	f, err := os.Create("evidence-tools.png")
+	f, err := os.Create(filepath.Join(t.TempDir(), "evidence-tools.png"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
 	if err := png.Encode(f, tester.Image()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPlateStudioWorkflowHistoryAndExport(t *testing.T) {
+	var persisted []PlateHistoryEntry
+	var exportedFiles = map[string][]byte{}
+	var handedOffSource string
+
+	w := New(Callbacks{
+		SavePlateHistory: func(entries []PlateHistoryEntry) error {
+			persisted = append([]PlateHistoryEntry(nil), entries...)
+			return nil
+		},
+		SavePlateFile: func(defaultName, format string, data []byte) (string, error) {
+			p := filepath.Join(t.TempDir(), defaultName)
+			exportedFiles[format] = append([]byte(nil), data...)
+			return p, nil
+		},
+		UseAsterPlate: func(source, plateID string) {
+			handedOffSource = source
+		},
+	})
+	w.Active = ToolPlate
+
+	// Step ① -> Choose 12-well format, select wells & annotate via unified single input.
+	w.SelectPlatePreset("plate-12")
+	w.SelectPlateWells([]string{"A1", "A2", "A3"})
+	if err := w.AnnotateSelectedWells("VEGF-50"); err != nil {
+		t.Fatalf("AnnotateSelectedWells group/sample: %v", err)
+	}
+	w.SelectPlateWells([]string{"A1", "A2", "A3"})
+	if err := w.AnnotateSelectedWells("靶点:VEGFA"); err != nil {
+		t.Fatalf("AnnotateSelectedWells factor: %v", err)
+	}
+	w.SelectPlateWells([]string{"C4"})
+	if err := w.AnnotateSelectedWells("NTC"); err != nil {
+		t.Fatalf("AnnotateSelectedWells qc role: %v", err)
+	}
+
+	// Verify AsterML document holds 12-well geometry + replicates 1..3 + factor + QC role.
+	doc12, err := asterdoc.Parse(w.plateDoc.Source)
+	if err != nil {
+		t.Fatalf("parse 12-well source: %v", err)
+	}
+	p12 := findPrimaryPlate(doc12)
+	if p12 == nil || p12.Format != 12 {
+		t.Fatalf("expected 12-well plate, got %+v", p12)
+	}
+	if p12.Replicates["A1"] != 1 || p12.Replicates["A2"] != 2 || p12.Replicates["A3"] != 3 {
+		t.Fatalf("expected automatic triplicates 1..3, got %+v", p12.Replicates)
+	}
+	if p12.Roles["C4"] != "ntc" {
+		t.Fatalf("expected C4 role=ntc, got %+v", p12.Roles)
+	}
+
+	// Switching preset automatically archives the populated 12-well plate to history.
+	w.SelectPlatePreset("dish-4")
+	if len(w.PlateHistory) != 1 || len(persisted) != 1 {
+		t.Fatalf("expected auto-archived history entry, got history=%d persisted=%d", len(w.PlateHistory), len(persisted))
+	}
+	w.SelectPlateWells([]string{"A1", "A2"})
+	if err := w.AnnotateSelectedWells("Vancomycin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w.SaveCurrentPlateToHistory(); !ok {
+		t.Fatalf("expected explicit save of 4-dish to history")
+	}
+
+	// Add a 3rd 96-well entry to verify odd trailing row in 2-column history layout.
+	w.SelectPlatePreset("plate-96")
+	w.SelectPlateWells([]string{"B1", "B2", "B3"})
+	if err := w.AnnotateSelectedWells("Ctrl"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w.SaveCurrentPlateToHistory(); !ok {
+		t.Fatalf("expected save of 96-well plate to history")
+	}
+	if len(w.PlateHistory) != 3 {
+		t.Fatalf("expected 3 history items, got %d", len(w.PlateHistory))
+	}
+
+	// Select A1..A3 so floating bar renders inside View and mount in strict ui.NewTester.
+	w.SelectPlateWells([]string{"A1", "A2"})
+	tt := ui.NewTester(func(c *ui.Context) {
+		View(c, w)
+	}, 1360, 960)
+	tt.Frame()
+
+	// Export SVG & PNG directly from the active UI frame (ensures nested NewTester works mid-click).
+	if svgBtn, ok := tt.Find("导出 SVG"); !ok {
+		t.Fatalf("missing 导出 SVG button")
+	} else {
+		tt.ClickAt(svgBtn.X+svgBtn.W/2, svgBtn.Y+svgBtn.H/2)
+		tt.Frame()
+	}
+	if err := xml.Unmarshal(exportedFiles["svg"], new(any)); err != nil {
+		t.Fatalf("invalid exported SVG XML: %v", err)
+	}
+	if pngBtn, ok := tt.Find("导出 PNG"); !ok {
+		t.Fatalf("missing 导出 PNG button")
+	} else {
+		tt.ClickAt(pngBtn.X+pngBtn.W/2, pngBtn.Y+pngBtn.H/2)
+		tt.Frame()
+	}
+	if len(exportedFiles["png"]) == 0 {
+		t.Fatalf("expected exported PNG bytes")
+	}
+	if img, err := png.Decode(bytes.NewReader(exportedFiles["png"])); err != nil || img.Bounds().Dx() < 800 {
+		t.Fatalf("invalid exported PNG: err=%v bounds=%v", err, img.Bounds())
+	}
+
+	// Load the earlier 12-well history card back to top designer & hand off to Design.
+	hist12ID := w.PlateHistory[2].ID
+	if !w.LoadHistoryEntry(hist12ID) {
+		t.Fatalf("LoadHistoryEntry failed for %s", hist12ID)
+	}
+	loaded := findPrimaryPlate(w.plateDoc)
+	if loaded == nil || loaded.Format != 12 || loaded.Samples["A2"] != "VEGF-50" {
+		t.Fatalf("expected loaded 12-well plate restored to designer, got %+v", loaded)
+	}
+	tt.Frame()
+
+	// Verify clicking the top history card's miniature preview in UI clicks through to LoadHistoryEntry.
+	ttLarge := ui.NewTester(func(c *ui.Context) {
+		View(c, w)
+	}, 1360, 1280)
+	ttLarge.Frame()
+	if loadBtn, ok := ttLarge.Find("载入编辑"); !ok {
+		t.Fatalf("expected at least one 载入编辑 button on 2-column history card")
+	} else {
+		ttLarge.ClickAt(loadBtn.X+loadBtn.W/2, loadBtn.Y+loadBtn.H/2)
+		ttLarge.Frame()
+	}
+
+	w.LoadHistoryEntry(hist12ID)
+	w.handoff()
+	if handedOffSource == "" || !strings.Contains(handedOffSource, "VEGFA") {
+		t.Fatalf("expected UseAsterPlate handoff containing VEGFA plate, got %q", handedOffSource)
 	}
 }
 

@@ -876,15 +876,19 @@ func (d *Document) GroupList() []GroupInfo {
 					Condition: textValue(rm, "condition"), IndependentN: int(indN), TechnicalRepeats: int(techR),
 				})
 			}
-		case "plate":
-			if p, err := plateFromData(m.Data); err == nil {
-				for _, g := range p.GroupNames() {
-					if g == "" || seen[g] {
-						continue
-					}
-					seen[g] = true
-					out = append(out, GroupInfo{ID: g, Name: g})
+		}
+	}
+	for _, m := range flat {
+		if m.Kind != "plate" {
+			continue
+		}
+		if p, err := plateFromData(m.Data); err == nil {
+			for _, g := range p.GroupNames() {
+				if g == "" || seen[g] {
+					continue
 				}
+				seen[g] = true
+				out = append(out, GroupInfo{ID: g, Name: g})
 			}
 		}
 	}

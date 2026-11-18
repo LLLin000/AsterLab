@@ -2926,10 +2926,230 @@ func (a *app) applyToolInstanceToDesign(inst blocks.Instance) {
 	}
 }
 
+func (a *app) plateHistoryPath() string {
+	dir := workspaceDataDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "plate-history.json")
+}
+
+func (a *app) loadPlateHistory() ([]tools.PlateHistoryEntry, error) {
+	path := a.plateHistoryPath()
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var entries []tools.PlateHistoryEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func (a *app) savePlateHistory(entries []tools.PlateHistoryEntry) error {
+	path := a.plateHistoryPath()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0644)
+}
+
+func (a *app) saveToolPlateExport(defaultName, format string, data []byte) (string, error) {
+	home, _ := os.UserHomeDir()
+	filterName := "PNG 图像"
+	if strings.EqualFold(format, "svg") {
+		filterName = "SVG 矢量图"
+	}
+	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Parent:      mygo.FocusedWindow(),
+		Title:       "导出孔板图",
+		DefaultPath: filepath.Join(home, defaultName),
+		Filters:     []mygo.FileFilter{{Name: filterName, Extensions: []string{strings.ToLower(format)}}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (a *app) applyAsterPlateToDesign(source, plateID string) {
+	if a.designDoc == nil {
+		if a.shell != nil {
+			a.shell.Page = shell.Design
+		}
+		return
+	}
+	srcDoc, err := asterdoc.Parse(source)
+	if err != nil {
+		return
+	}
+	var srcPlate *asterdoc.Plate
+	for i := range srcDoc.Modules {
+		if srcDoc.Modules[i].Plate != nil && (plateID == "" || srcDoc.Modules[i].ID == plateID) {
+			srcPlate = srcDoc.Modules[i].Plate
+			break
+		}
+	}
+	if srcPlate == nil {
+		return
+	}
+	dstDoc, err := asterdoc.Parse(a.designDoc.Source)
+	if err != nil {
+		return
+	}
+	targetStepID := ""
+	for _, m := range dstDoc.Modules {
+		if m.Kind == "step" && m.ID == a.designSelected && moduleString(m.Data, "execution") != "organizational" {
+			targetStepID = m.ID
+			break
+		}
+	}
+	if targetStepID == "" {
+		for _, m := range dstDoc.Modules {
+			if m.Kind == "step" && moduleString(m.Data, "execution") != "organizational" {
+				targetStepID = m.ID
+				break
+			}
+		}
+	}
+	if targetStepID == "" {
+		return
+	}
+
+	// Sync any groups introduced inside 孔板速排 into the target Design.
+	existingGroups := map[string]bool{}
+	for _, g := range dstDoc.GroupList() {
+		if g.ID != "" {
+			existingGroups[g.ID] = true
+		}
+	}
+	srcGroupMeta := map[string]asterdoc.GroupInfo{}
+	for _, g := range srcDoc.GroupList() {
+		srcGroupMeta[g.ID] = g
+	}
+	var groupTableID string
+	var groupTableRows []any
+	for _, m := range dstDoc.Modules {
+		if m.Kind == "group_table" {
+			groupTableID = m.ID
+			if rawRows, ok := m.Data["rows"].([]any); ok {
+				groupTableRows = append(groupTableRows, rawRows...)
+			}
+			break
+		}
+	}
+	addedToTable := false
+	for _, gid := range srcPlate.GroupNames() {
+		if existingGroups[gid] {
+			continue
+		}
+		existingGroups[gid] = true
+		meta := srcGroupMeta[gid]
+		gName := firstNonEmpty(meta.Name, gid)
+		gRole := firstNonEmpty(meta.Role, "treatment")
+		if groupTableID != "" {
+			groupTableRows = append(groupTableRows, map[string]any{
+				"id":   gid,
+				"name": gName,
+				"role": gRole,
+			})
+			addedToTable = true
+		} else {
+			_ = a.applyDesignRaw(map[string]any{
+				"type": "add_module",
+				"module": map[string]any{
+					"kind":   "group",
+					"id":     gid,
+					"schema": 1,
+					"name":   gName,
+					"role":   gRole,
+				},
+			})
+		}
+	}
+	if addedToTable && groupTableID != "" {
+		_ = a.applyDesignRaw(map[string]any{
+			"type":     "update_module",
+			"moduleId": groupTableID,
+			"props":    map[string]any{"rows": groupTableRows},
+		})
+	}
+
+	idBase := fmt.Sprintf("tool-%d", time.Now().Unix()%100000)
+	blk := map[string]any{
+		"kind":   "plate",
+		"id":     idBase + "-plate",
+		"schema": 1,
+		"title":  firstNonEmpty(srcPlate.Title, "孔板排布"),
+		"format": srcPlate.Format,
+		"groups": srcPlate.Groups,
+	}
+	if srcPlate.Topology != "" && srcPlate.Topology != "plate" {
+		blk["topology"] = srcPlate.Topology
+	}
+	if srcPlate.Rows > 0 {
+		blk["rows"] = srcPlate.Rows
+	}
+	if srcPlate.Columns > 0 {
+		blk["columns"] = srcPlate.Columns
+	}
+	if len(srcPlate.Samples) > 0 {
+		blk["samples"] = srcPlate.Samples
+	}
+	if len(srcPlate.Replicates) > 0 {
+		blk["replicates"] = srcPlate.Replicates
+	}
+	if len(srcPlate.Roles) > 0 {
+		blk["roles"] = srcPlate.Roles
+	}
+	if len(srcPlate.Factors) > 0 {
+		blk["factors"] = srcPlate.Factors
+	}
+
+	if a.applyDesignRaw(map[string]any{
+		"type": "insert_step_block", "stepId": targetStepID, "index": -1, "block": blk,
+	}) {
+		a.designSelected = targetStepID
+		a.designTab = 0
+		if a.shell != nil {
+			a.shell.Page = shell.Design
+		}
+	}
+}
+
 func (a *app) newToolsWorkspace() *tools.Workspace {
 	return tools.New(tools.Callbacks{
 		UseInDesigner: func(inst blocks.Instance) {
 			a.applyToolInstanceToDesign(inst)
+		},
+		UseAsterPlate: func(source, plateID string) {
+			a.applyAsterPlateToDesign(source, plateID)
+		},
+		LoadPlateHistory: func() ([]tools.PlateHistoryEntry, error) {
+			return a.loadPlateHistory()
+		},
+		SavePlateHistory: func(entries []tools.PlateHistoryEntry) error {
+			return a.savePlateHistory(entries)
+		},
+		SavePlateFile: func(defaultName, format string, data []byte) (string, error) {
+			return a.saveToolPlateExport(defaultName, format, data)
 		},
 		ListPantry: func() (runs.PantryLedger, error) {
 			if a.runSvc == nil {
