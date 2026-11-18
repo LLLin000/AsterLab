@@ -151,7 +151,7 @@ func renderExclusionSection(c *ui.Context, s *State, task *RunTaskViewModel, t *
 	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, "样本排除").FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
-			ui.Text(c, "经由执行事件写入 Core，不计入步骤完成").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+			ui.Text(c, "标记异常、删失或待重做样本（不计入有效完成数）").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		})
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
 			for _, status := range []string{exclusionQCDropped, exclusionCensoredDead, exclusionRework} {

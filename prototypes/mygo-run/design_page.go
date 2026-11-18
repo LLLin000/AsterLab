@@ -140,7 +140,7 @@ func designExperimentTitle(doc *asterdoc.Document) string {
 			}
 		}
 	}
-	return "AsterDoc 设计"
+	return "未命名实验方案"
 }
 
 // designProvenanceLine names the source Run and design revision when this
@@ -179,7 +179,7 @@ func designPage(c *ui.Context, a *app) {
 				renderDesignErrorBanner(c, "设计加载失败："+a.designLoadErr, retryLoad)
 			}
 			if a.designDocErr != "" {
-				renderDesignErrorBanner(c, "AsterDoc 设计无法读取："+a.designDocErr, retryLoad)
+				renderDesignErrorBanner(c, "实验方案无法读取："+a.designDocErr, retryLoad)
 			}
 			ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 				if a.designer.CanvasMode {
@@ -198,7 +198,7 @@ func designPage(c *ui.Context, a *app) {
 		title := "设计无法读取"
 		msg := a.designLoadErr
 		if msg == "" {
-			title = "AsterDoc 设计无法读取"
+			title = "实验方案无法读取"
 			msg = a.designDocErr
 		}
 		ui.Column(c).Fill().Center().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing16)).Children(func() {
@@ -415,7 +415,7 @@ func asterDesignPage(c *ui.Context, a *app) {
 			renderDesignErrorBanner(c, a.designDocErr, a.designDocRetryFunc())
 		}
 		if a.readinessErr != "" {
-			renderDesignErrorBanner(c, "Core 校验失败："+a.readinessErr, func() { a.refreshReadiness() })
+			renderDesignErrorBanner(c, "实验方案核查未完成："+a.readinessErr, func() { a.refreshReadiness() })
 		}
 		if a.createRunErr != "" {
 			renderDesignErrorBanner(c, "创建 Run 失败："+a.createRunErr, func() { a.createRunFromDesignDoc() })
@@ -734,9 +734,11 @@ func renderStepDetailCanvas(c *ui.Context, a *app, doc *asterdoc.Document, step 
 
 				metaOpenPtr := a.ensureDesignMetaOpen(step.ID)
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					components.Collapsible(c, "步骤绑定与路径标识（"+step.ID+"）", metaOpenPtr, components.CollapsibleOptions{}, func() {
+					components.Collapsible(c, "步骤高级选项与技术标识", metaOpenPtr, components.CollapsibleOptions{}, func() {
 						ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing12)).Padding(float32(tok.Spacing8), 0, 0, 0).
 							AlignItems(ui.Center).Children(func() {
+							ui.Text(c, "步骤标识："+step.ID).
+								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 							ui.Text(c, "执行模式："+firstNonEmpty(moduleString(step.Data, "execution"), "executable")).
 								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 							ui.Text(c, "检测绑定："+firstNonEmpty(moduleString(step.Data, "assay"), "自动默认")).
@@ -752,7 +754,18 @@ func renderStepDetailCanvas(c *ui.Context, a *app, doc *asterdoc.Document, step 
 						components.Badge(c, "可执行步骤", components.BadgeOptions{Tone: components.BadgeAccent})
 					}
 					if assayRef := moduleString(step.Data, "assay"); assayRef != "" {
-						components.Badge(c, assayRef)
+						assayLabel := assayRef
+						if doc != nil {
+							for i := range doc.Modules {
+								if doc.Modules[i].Kind == "assay" && doc.Modules[i].ID == assayRef {
+									if title := moduleString(doc.Modules[i].Data, "title"); title != "" {
+										assayLabel = title
+									}
+									break
+								}
+							}
+						}
+						components.Badge(c, assayLabel)
 					}
 				})
 				dirty = a.syncCurrentStepDraft(step)
@@ -892,9 +905,9 @@ func renderAsterMLSourceTab(c *ui.Context, a *app, lastValidDoc *asterdoc.Docume
 			ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
 				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				if parseErr != nil {
-					components.Badge(c, "语法/契约错误", components.BadgeOptions{Tone: components.BadgeDanger})
+					components.Badge(c, "方案格式有误", components.BadgeOptions{Tone: components.BadgeDanger})
 				} else {
-					components.Badge(c, "AsterML v2 语法有效", components.BadgeOptions{Tone: components.BadgeSuccess})
+					components.Badge(c, "方案格式正常", components.BadgeOptions{Tone: components.BadgeSuccess})
 				}
 				ui.Spacer(c)
 				if dirty {

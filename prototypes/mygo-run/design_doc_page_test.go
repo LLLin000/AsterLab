@@ -41,7 +41,7 @@ func TestAsterDesignPageRendersThreeTabWorkbench(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("应用并保存修订") || !tt.HasText("AsterML v2 语法有效") {
+	if !tt.HasText("应用并保存修订") || !tt.HasText("方案格式正常") {
 		t.Fatalf("source tab missing editor toolbar: %q", tt.Texts())
 	}
 }

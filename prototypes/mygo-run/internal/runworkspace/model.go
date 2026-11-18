@@ -640,7 +640,7 @@ func LoadProjection(snap runs.RunSnapshot, load func() (*workflowtree.Tree, erro
 	tree, err := load()
 	if err != nil {
 		return Projection{Issues: []string{fmt.Sprintf(
-			"冻结 AsterDoc 层级读取失败：%v；请重试，若持续失败请检查 Run 冻结的文档版本。",
+			"冻结实验步骤结构读取失败：%v；请点击重试。",
 			err,
 		)}}
 	}

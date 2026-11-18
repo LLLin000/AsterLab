@@ -17,7 +17,7 @@ func TestGroupedDiffAndRejectNoCommit(t *testing.T){
 	s:=&State{Client:f,JSON:`{"schema_version":1,"proposal_id":"p","target":{"kind":"protocol","object_id":"x"},"base_version_id":"v1","expected_version":1,"origin":{"source":"agent"},"diffs":[{"path":"params.volume","operation":"set","before":1,"after":2}]}`}
 	s.validate(); if len(s.Validation.Diffs)!=2||s.Validation.Diffs[0].Path!=s.Validation.Diffs[1].Path{t.Fatal("path diffs were not retained for grouping")}
 	tt:=ui.NewTester(func(c *ui.Context){c.SetTheme(theme.LightTheme());View(c,s)},900,600);tt.Frame()
-	if !tt.HasText("params.volume")||!tt.HasText("before（声明）") {t.Fatalf("diff review absent: %q",tt.Texts())}
+	if !tt.HasText("params.volume")||!tt.HasText("建议前原值: 1") {t.Fatalf("diff review absent: %q",tt.Texts())}
 	if err:=tt.Click("拒绝");err!=nil{t.Fatal(err)};tt.Frame()
 	if f.commits!=0||!s.Closed{t.Fatalf("reject must close without commit: commits=%d closed=%v",f.commits,s.Closed)}
 }

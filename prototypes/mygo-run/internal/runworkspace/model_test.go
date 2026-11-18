@@ -378,7 +378,7 @@ func TestLoadProjectionSurfacesBrokenFrozenAsterDoc(t *testing.T) {
 	if len(projection.Issues) != 1 {
 		t.Fatalf("projection issues = %v, want one diagnostic", projection.Issues)
 	}
-	for _, text := range []string{want, "请重试", "检查 Run 冻结的文档版本"} {
+	for _, text := range []string{want, "冻结实验步骤结构读取失败", "请点击重试"} {
 		if !strings.Contains(projection.Issues[0], text) {
 			t.Errorf("diagnostic %q does not include %q", projection.Issues[0], text)
 		}

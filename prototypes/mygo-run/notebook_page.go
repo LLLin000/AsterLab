@@ -1226,7 +1226,7 @@ func (a *app) recordBoardPage(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "记录读取失败："+fetchErr).FontSize(float32(tokens.TextData)).TextColor(t.Danger)
 				}
 				a.recordSummarySection(c, t, tokens, proj, tasks)
-				a.recordTypedReadoutsSection(c, t, tokens, proj)
+				a.recordTypedReadoutsSection(c, t, tokens, proj, tasks)
 				a.recordGroupBoardSection(c, t, tokens, proj, board)
 				a.recordMatrixSection(c, t, tokens, proj, board)
 				a.recordRefsSection(c, t, tokens, proj, sealed)
@@ -1288,24 +1288,59 @@ func (a *app) recordSummarySection(c *ui.Context, t *ui.Theme, tokens theme.Toke
 	}
 	for _, issue := range proj.Issues {
 		issue := issue
-		ui.Text(c, "缺项 "+issue.Code+"："+issue.Message).FontSize(float32(tokens.TextData)).TextColor(t.Warning)
+		ui.Text(c, "待核实："+firstNonEmpty(strings.TrimSpace(issue.Message), issue.Code)).FontSize(float32(tokens.TextData)).TextColor(t.Warning)
 	}
 }
 
-func (a *app) recordTypedReadoutsSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection) {
+func (a *app) recordTypedReadoutsSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens, proj record.Projection, tasks []record.TaskStatus) {
 	decoded := record.DecodeReadouts(proj.Readouts)
 	if len(decoded) == 0 {
 		return
 	}
+	taskTitleByKey := map[string]string{}
+	for _, tk := range tasks {
+		if strings.TrimSpace(tk.Key) != "" && strings.TrimSpace(tk.Title) != "" {
+			taskTitleByKey[tk.Key] = strings.TrimSpace(tk.Title)
+		}
+	}
 	recordBoardSection(c, t, "结构化表格与分类读数")
 	for _, dr := range decoded {
 		dr := dr
+		cardTitle := dr.SchemaID
+		if cardTitle == "" || asterdoc.IsRawIdentifier(cardTitle) {
+			switch dr.Kind {
+			case "table":
+				cardTitle = "实验测定数据表"
+			case "categorical":
+				cardTitle = "定性观测记录"
+			default:
+				cardTitle = "定量测定读数"
+			}
+		}
+		stepLabel := ""
+		if title := taskTitleByKey[dr.StepPath]; title != "" {
+			stepLabel = title
+		} else if dr.StepPath != "" {
+			for k, title := range taskTitleByKey {
+				if strings.HasSuffix(dr.StepPath, k) {
+					stepLabel = title
+					break
+				}
+			}
+			if stepLabel == "" {
+				if asterdoc.IsRawIdentifier(dr.StepPath) {
+					stepLabel = "实测记录步骤"
+				} else {
+					stepLabel = dr.StepPath
+				}
+			}
+		}
 		ui.Column(c).FillWidth().Padding(float32(tokens.Spacing12)).Radius(float32(tokens.PanelRadius)).
 			Background(tokens.Surface).Border(1, tokens.Border).Gap(float32(tokens.Spacing8)).Children(func() {
 			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
-				ui.Text(c, dr.SchemaID).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
-				if dr.StepPath != "" {
-					components.Badge(c, dr.StepPath)
+				ui.Text(c, cardTitle).FontSize(float32(tokens.TextData)).Bold().TextColor(t.Text)
+				if stepLabel != "" {
+					components.Badge(c, stepLabel)
 				}
 				if dr.Timepoint != "" {
 					components.Badge(c, dr.Timepoint, components.BadgeOptions{Tone: components.BadgeAccent})
@@ -1645,7 +1680,7 @@ func (a *app) recordSignSection(c *ui.Context, t *ui.Theme, tokens theme.Tokens,
 				a.signConfirm = true
 				a.signErr = ""
 			}
-			ui.Text(c, "签核为 Core 命令：先汇总再签名归档；归档包在实验方案页导出。").
+			ui.Text(c, "签核归档后实验记录将锁定不可修改；完整归档包可在「实验方案」页导出。").
 				FontSize(float32(tokens.TextData)).TextColor(t.TextMuted)
 		})
 	}

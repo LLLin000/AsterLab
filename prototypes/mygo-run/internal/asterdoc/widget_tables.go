@@ -315,7 +315,10 @@ func (v *View) renderDataTable(c *ui.Context, data map[string]any) {
 		editableColKeys = append(editableColKeys, ck)
 	}
 
-	badge := firstNonEmpty(endpoint, schemaID, fmt.Sprintf("%d 列", len(cols)))
+	badge := fmt.Sprintf("%d 列记录", len(cols))
+	if ep := firstNonEmpty(endpoint, schemaID); ep != "" && !IsRawIdentifier(ep) {
+		badge = ep
+	}
 	moduleCardFrame(v, c, lucide.Table2(), title, badge, nil, func() {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 			if interactiveRun {
@@ -335,7 +338,7 @@ func (v *View) renderDataTable(c *ui.Context, data map[string]any) {
 							components.Badge(c, st, components.BadgeOptions{Tone: components.BadgeSuccess})
 						})
 					}
-					if iconButton(c, lucide.Check(), "提交表格读数", components.ButtonSecondary).Clicked() {
+					if iconButton(c, lucide.Check(), "保存本表数据", components.ButtonSecondary).Clicked() {
 						payload, buildErr := v.buildDataTableSubmission(moduleID, schemaID, endpoint, cols, authoredRows, rowCount)
 						if v.TableSubmitErrors == nil {
 							v.TableSubmitErrors = map[string]string{}
@@ -352,7 +355,7 @@ func (v *View) renderDataTable(c *ui.Context, data map[string]any) {
 								v.TableSubmitErrors[moduleID] = subErr.Error()
 							} else {
 								v.TableSubmitErrors[moduleID] = ""
-								v.TableSubmitStatus[moduleID] = "已保存至 Core"
+								v.TableSubmitStatus[moduleID] = "数据已记录"
 							}
 						}
 					}
@@ -845,7 +848,7 @@ func (v *View) buildDataTableSubmission(moduleID, schemaID, endpoint string, col
 	}
 	schemaBytes, err := json.Marshal(schemaDef)
 	if err != nil {
-		return nil, fmt.Errorf("生成表格 schema 失败：%w", err)
+		return nil, fmt.Errorf("整理表格结构失败：%w", err)
 	}
 
 	var rowsOut [][]any
@@ -968,4 +971,24 @@ func sanitizeIDFrag(s string) string {
 		return "item"
 	}
 	return res
+}
+
+// IsRawIdentifier reports whether s is a raw technical ASCII identifier or path
+// (containing '_', '-', or '.') rather than human-readable prose or unit text.
+func IsRawIdentifier(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return false
+	}
+	hasSep := false
+	for _, r := range trimmed {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '/':
+		case r == '_' || r == '-' || r == '.':
+			hasSep = true
+		default:
+			return false
+		}
+	}
+	return hasSep
 }

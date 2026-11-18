@@ -145,7 +145,7 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 				ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing8), 0, 0, 0).Children(func() {
 					ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
 						ui.Box(c).FillWidth().Children(func() {
-							components.TextBox(c, srcBuf, components.TextBoxOptions{}).Placeholder("图片相对路径或 URI（可选）")
+							components.TextBox(c, srcBuf, components.TextBoxOptions{}).Placeholder("本地图片路径（可选，支持直接拖入文件）")
 						})
 						if v.OnPickFigureFile != nil {
 							if components.Button(c, "选择文件", components.ButtonOutline).Clicked() {

@@ -58,7 +58,7 @@ func TestStepCardShowsRecordedParameters(t *testing.T) {
 		}
 	}
 	if !tt.HasText("总跨度") || !tt.HasText("设计标注") || !tt.HasText("净占手") ||
-		!tt.HasText("5m") || !tt.HasText("45m") || !tt.HasText("尚无 OperationSpec v2 时间数据") {
+		!tt.HasText("5m") || !tt.HasText("45m") || !tt.HasText("当前步骤尚未配置预计耗时") {
 		t.Fatalf("annotation budget fallback missing values: %q", tt.Texts())
 	}
 	if budgetSvc.calls != 1 || budgetSvc.input.SpecsJSON != "[]" {
@@ -85,7 +85,7 @@ func TestCoreTimeBudgetRendersReturnedProjection(t *testing.T) {
 		ListView(c, d)
 	}, 1360, 880)
 	tt.Frame()
-	for _, want := range []string{"Core 时间预算", "2h30m", "净占手", "45m", "步骤03 2h (1h–3h) · t0"} {
+	for _, want := range []string{"方案耗时测算", "2h30m", "净占手", "45m", "步骤03 2h (1h–3h) · t0"} {
 		if !tt.HasText(want) {
 			t.Fatalf("Core budget missing %q: %q", want, tt.Texts())
 		}

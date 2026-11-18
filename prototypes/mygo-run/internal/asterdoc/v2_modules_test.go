@@ -201,7 +201,7 @@ func TestMoveStepBlockToIndexAndCalculatorActualsAndPaste(t *testing.T) {
 		"target_mass":       map[string]any{"value": 500.0, "unit": "ng"},
 		"volume_per_unit":   map[string]any{"value": 10.0, "unit": "uL"},
 	}, actuals)
-	if normRes.Err != nil || len(normRes.Rows) != 2 || math.Abs(normRes.Rows[0].Amount-2.0) > 1e-4 || !strings.Contains(normRes.Rows[1].Note, "insufficient") {
+	if normRes.Err != nil || len(normRes.Rows) != 2 || math.Abs(normRes.Rows[0].Amount-2.0) > 1e-4 || !strings.Contains(normRes.Rows[1].Note, "超出单孔反应体积上限") {
 		t.Fatalf("normRes = %+v", normRes)
 	}
 

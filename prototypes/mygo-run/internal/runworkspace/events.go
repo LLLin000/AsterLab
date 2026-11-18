@@ -191,7 +191,7 @@ func renderSkipForm(c *ui.Context, s *State, task *RunTaskViewModel, form *event
 
 func renderDeviationForm(c *ui.Context, s *State, task *RunTaskViewModel, form *eventForm, t *ui.Theme, tokens theme.Tokens) {
 	ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
-		ui.Text(c, "偏差说明（必填，写入 Core）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+		ui.Text(c, "偏离情况与现场处理说明（必填）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 		ui.TextInput(c, &form.Text).FillWidth().Placeholder("例如：实际离心 5 分钟，与方案 3 分钟不符")
 		renderPantryRow(c, s, form, t, tokens)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {

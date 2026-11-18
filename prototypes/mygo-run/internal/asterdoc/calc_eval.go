@@ -600,7 +600,7 @@ func EvalCalculatorWithActuals(doc *Document, data map[string]any, actuals *Calc
 				if reqUL > rxnUL {
 					insufficientCount++
 					sampleUL = rxnUL
-					note = fmt.Sprintf("实测 %s %s · 需 %s %s（浓度偏低 · 超反应体积上限 insufficient）",
+					note = fmt.Sprintf("实测 %s %s · 需 %s %s（浓度偏低，超出单孔反应体积上限）",
 						formatNumber(s.Value), firstNonEmpty(s.Unit, "ng/uL"), formatNumber(round4(reqUL)), normUnit)
 				}
 				res.Rows = append(res.Rows, CalcRow{

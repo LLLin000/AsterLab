@@ -118,7 +118,6 @@ func StepBlockComposer(v *View, c *ui.Context, step *Module) {
 						ui.Icon(c, lucide.GripVertical()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
 						ui.Text(c, fmt.Sprintf("#%d · %s", idx+1, blockKindLabel(bk))).
 							FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).FontFeatures("tnum")
-						ui.Text(c, bid).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 						ui.Spacer(c)
 						if idx > 0 && (v.OnMoveStepBlock != nil || v.OnMoveStepBlockIndex != nil) {
 							upBtn := components.IconButton(c, lucide.ArrowUp(), "上移模块", components.IconButtonCompact)
@@ -190,7 +189,7 @@ func StepBlockComposer(v *View, c *ui.Context, step *Module) {
 				if v.Doc.Modules[i].ID == refID {
 					m := v.Doc.Modules[i]
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-						components.Badge(c, "共享容器/模块引用 · " + refID)
+						components.Badge(c, "引用全局模块 · "+firstNonEmpty(textValue(m.Data, "title"), blockKindLabel(m.Kind)))
 						ui.Spacer(c)
 						if editable && v.OnUpdateModule != nil {
 							unBtn := components.IconButton(c, lucide.Trash(), "取消引用", components.IconButtonCompact)

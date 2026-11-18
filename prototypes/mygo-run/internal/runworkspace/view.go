@@ -517,9 +517,13 @@ func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			if vm.Status != "" {
 				statusPill(c, vm.Status, tokens)
 			}
-			ui.Text(c, fmt.Sprintf("Run rev %d · Design rev %d · AsterDoc rev %d",
-				vm.Revision, vm.DesignRevision, vm.AsterDocRevision)).FontSize(float32(tokens.TextMeta)).
-				TextColor(t.TextMuted)
+			if planRev := vm.DesignRevision; planRev > 0 || vm.AsterDocRevision > 0 {
+				if planRev == 0 {
+					planRev = vm.AsterDocRevision
+				}
+				ui.Text(c, fmt.Sprintf("冻结方案第 %d 版", planRev)).FontSize(float32(tokens.TextMeta)).
+					TextColor(t.TextMuted).FontFeatures("tnum")
+			}
 			ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(float32(tokens.TextMeta)).
 				TextColor(t.TextMuted).FontFeatures("tnum")
 			if b := components.Button(c, blindSwitchLabel(s.bench().Blind), components.ButtonGhost); b.Clicked() {
@@ -1187,9 +1191,44 @@ func moduleChip(c *ui.Context, m ModuleRef, t *ui.Theme, tokens theme.Tokens) {
 		// The raw module id is provenance: it stays in the properties
 		// disclosure instead of the default view (UX-P2).
 		if m.Role != "" {
-			ui.Text(c, m.Role).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+			ui.Text(c, moduleRoleLabel(m.Role)).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		}
 	})
+}
+
+func moduleRoleLabel(role string) string {
+	switch strings.TrimSpace(role) {
+	case "readout":
+		return "读数"
+	case "timer":
+		return "计时"
+	case "attachment":
+		return "采图/附件"
+	case "instrument":
+		return "仪器"
+	case "prose":
+		return "说明"
+	case "calculator":
+		return "配液/换算"
+	case "param_table":
+		return "参数"
+	case "checklist":
+		return "核查"
+	case "subflow":
+		return "子步骤"
+	case "plate":
+		return "孔板"
+	case "group_table":
+		return "分组"
+	case "material":
+		return "试剂"
+	case "data_table":
+		return "数据表"
+	case "figure":
+		return "示意图"
+	default:
+		return role
+	}
 }
 
 func moduleLabel(kind, title string) string {
@@ -2037,7 +2076,7 @@ func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *
 	}
 	v.OnSubmitTableReadout = func(stepID, blockID string, payload map[string]any) error {
 		if s.Callbacks.ExecuteCommand == nil {
-			return fmt.Errorf("未连接 Core 执行通道")
+			return fmt.Errorf("记录保存服务暂未就绪")
 		}
 		if payload == nil {
 			return fmt.Errorf("表格数据为空")
@@ -2101,9 +2140,9 @@ func renderFrozenStepBlocks(c *ui.Context, s *State, task *RunTaskViewModel, t *
 	ui.Column(c).FillWidth().Padding(float32(tokens.Spacing16)).Radius(float32(tokens.PanelRadius)).
 		Background(tokens.Surface).Border(1, tokens.Border).Gap(float32(tokens.Spacing12)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
-			ui.Text(c, "步骤模块 · 同源执行").FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text)
+			ui.Text(c, "本步实验操作与记录").FontSize(float32(tokens.TextSection)).Bold().TextColor(t.Text)
 			ui.Spacer(c)
-			components.Badge(c, fmt.Sprintf("%d 个内容块", len(blocks)+len(refs)), components.BadgeOptions{Tone: components.BadgeAccent})
+			components.Badge(c, fmt.Sprintf("%d 项模块", len(blocks)+len(refs)), components.BadgeOptions{Tone: components.BadgeAccent})
 		})
 		asterdoc.StepBlockComposer(v, c, stepMod)
 	})

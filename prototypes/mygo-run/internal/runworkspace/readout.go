@@ -108,10 +108,10 @@ func checkSchemaDef(raw string) (json.RawMessage, error) {
 	}
 	var v map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &v); err != nil {
-		return nil, fmt.Errorf("schema 定义不是合法 JSON")
+		return nil, fmt.Errorf("自定义指标规则格式有误")
 	}
 	if len(v) == 0 {
-		return nil, fmt.Errorf("schema 定义不能为空对象")
+		return nil, fmt.Errorf("自定义指标规则不能为空")
 	}
 	return json.RawMessage(trimmed), nil
 }
@@ -124,7 +124,7 @@ func buildCategoricalCommand(runID, stepPath, protocolVersionID, assayID, timepo
 	schemaID = strings.TrimSpace(schemaID)
 	category = strings.TrimSpace(category)
 	if schemaID == "" {
-		return runs.ExecuteCommandInput{}, fmt.Errorf("请填写 schema ID")
+		return runs.ExecuteCommandInput{}, fmt.Errorf("请填写观测指标名称")
 	}
 	if category == "" {
 		return runs.ExecuteCommandInput{}, fmt.Errorf("请填写或选择分类结果")
@@ -201,7 +201,7 @@ func parseTableValue(columnsText, rowsText string) ([]string, [][]any, error) {
 func buildTableCommand(runID, stepPath, protocolVersionID, assayID, timepoint, schemaID, schemaDef, sampleID string, columns []string, rows [][]any, idempotencyKey string) (runs.ExecuteCommandInput, error) {
 	schemaID = strings.TrimSpace(schemaID)
 	if schemaID == "" {
-		return runs.ExecuteCommandInput{}, fmt.Errorf("请填写 schema ID")
+		return runs.ExecuteCommandInput{}, fmt.Errorf("请填写观测指标名称")
 	}
 	if len(columns) == 0 || len(rows) == 0 {
 		return runs.ExecuteCommandInput{}, fmt.Errorf("表格不能为空")
@@ -300,7 +300,7 @@ func renderTypedReadoutSection(c *ui.Context, s *State, task *RunTaskViewModel, 
 	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Text(c, "分类与表格读数").FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(t.Text)
-			ui.Text(c, "经 readout.submit 写入 Core，数值读数仍在结果网格录入").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+			ui.Text(c, "补充定性分级或自由表格实验记录").FontSize(t.Rem(.7)).TextColor(t.TextMuted)
 		})
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
 			for _, kind := range []string{typedReadoutCategorical, typedReadoutTable} {
@@ -323,11 +323,11 @@ func renderTypedReadoutSection(c *ui.Context, s *State, task *RunTaskViewModel, 
 		}
 		ui.Column(c).FillWidth().Padding(t.Space(1.5), t.Space(2)).Radius(6).
 			Background(tokens.Elevated).Border(1, tokens.Border).Gap(t.Space(1)).Children(func() {
-			ui.Text(c, "schema ID（必填）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-			ui.TextInput(c, &form.SchemaID).FillWidth().Placeholder("例如：wb_grade（内置 schema 可直接使用）")
-			ui.Text(c, "本次调用的 schema 定义（可选，仅自定义 schema 需要，粘贴 JSON 对象）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
-			ui.TextInput(c, &form.Schema).FillWidth().Placeholder("留空表示使用 Core 内置定义")
-			ui.Text(c, "样本 ID（可选，缺省按 schema 关联策略）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			ui.Text(c, "观测指标标识（必填）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			ui.TextInput(c, &form.SchemaID).FillWidth().Placeholder("例如：wb_grade（条带显色分级）")
+			ui.Text(c, "自定义指标规则（高级可选）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
+			ui.TextInput(c, &form.Schema).FillWidth().Placeholder("留空则按预设实验指标规则核查")
+			ui.Text(c, "样本编号（可选）").FontSize(t.Rem(.72)).TextColor(t.TextMuted)
 			ui.TextInput(c, &form.SampleID).FillWidth().Placeholder("例如：M3-1")
 			if form.Kind == typedReadoutCategorical {
 				renderCategoryEntry(c, form, t)

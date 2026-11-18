@@ -191,7 +191,7 @@ func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 
 			if len(res.UsedActuals) > 0 {
 				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).Children(func() {
-					components.Badge(c, "已代入实测 · "+strings.Join(res.UsedActuals, ", "), components.BadgeOptions{Tone: components.BadgeSuccess})
+					components.Badge(c, "已按实测值换算 · "+strings.Join(res.UsedActuals, ", "), components.BadgeOptions{Tone: components.BadgeSuccess})
 				})
 			}
 

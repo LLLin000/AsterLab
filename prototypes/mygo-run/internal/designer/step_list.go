@@ -123,7 +123,7 @@ func (d *Designer) designBudget() designBudget {
 		d.budgetUnknown = unknown
 		d.budgetProblems = problems
 		if d.TimeBudgetSvc == nil {
-			message := "Core 时间预算服务不可用"
+			message := "耗时估算服务暂不可用"
 			if d.TimeBudgetError != "" {
 				message += ": " + d.TimeBudgetError
 			}
@@ -418,7 +418,7 @@ func BudgetBar(c *ui.Context, d *Designer) {
 	ui.Row(c).FillWidth().Wrap().Padding(float32(tokens.Spacing8), float32(tokens.Spacing16)).
 		Background(tokens.Canvas).AlignItems(ui.Center).Gap(float32(tokens.Spacing16)).Children(func() {
 		if b.HasCore {
-			chip("来源", "Core 时间预算")
+			chip("来源", "方案耗时测算")
 			chip("总跨度", formatBudgetSeconds(b.Core.TotalSpanS, true))
 			chip("净占手", formatBudgetSeconds(b.Core.HandsOnS, true))
 			chip("可并行空窗", formatBudgetWindows(b.Core.ParallelWindows))
@@ -428,10 +428,10 @@ func BudgetBar(c *ui.Context, d *Designer) {
 			chip("净占手", formatBudget(b.HandsOnMinutes, b.HasHandsOn))
 			chip("可并行空窗", "—")
 			if b.CoreErr != nil {
-				components.Text(c, "Core 时间预算不可用："+b.CoreErr.Error()).
+				components.Text(c, "耗时测算暂不可用："+b.CoreErr.Error()).
 					FontSize(float32(tokens.TextMeta)).TextColor(tokens.Danger)
 			} else {
-				components.Text(c, "尚无 OperationSpec v2 时间数据").
+				components.Text(c, "当前步骤尚未配置预计耗时").
 					FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
 			}
 		}

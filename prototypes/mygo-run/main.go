@@ -1311,7 +1311,7 @@ func (a *app) startPDFExport(c *ui.Context) {
 		return
 	}
 	if a.snap.AsterDoc == nil || a.designSvc == nil {
-		c.AddToast(ui.Toast{Title: "无法导出 PDF", Description: "当前 Run 未关联可读取的冻结 AsterDoc。", Type: components.ToastError})
+		c.AddToast(ui.Toast{Title: "无法导出 PDF", Description: "当前实验运行未找到冻结方案快照。", Type: components.ToastError})
 		return
 	}
 	ref := *a.snap.AsterDoc
@@ -1661,7 +1661,7 @@ func (a *app) createAsterDocDesign(source, title string) {
 		return
 	}
 	if len(a.projects) == 0 {
-		msg := "没有可用项目；请先从 Core 导入项目"
+		msg := "当前尚无实验项目，请先新建或导入项目"
 		a.syncErr = msg
 		if a.shell != nil {
 			a.shell.Error = msg
@@ -2641,7 +2641,7 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 		return false
 	}
 	if a.designDoc == nil {
-		a.designDocErr = "尚未加载 AsterDoc 设计文档，无法应用修改"
+		a.designDocErr = "尚未加载实验方案，暂时无法保存修改"
 		a.designDocLoadFailed = false
 		a.retryDesignDoc = func() { _ = a.applyDesignRaw(command) }
 		return false
@@ -2775,7 +2775,7 @@ func (a *app) createRunFromDesignDoc() {
 		return
 	}
 	if a.designDoc == nil {
-		a.createRunErr = "尚未加载 AsterDoc 设计文档，无法创建 Run"
+		a.createRunErr = "尚未加载实验方案，暂时无法启动实验运行"
 		return
 	}
 	a.createRunErr = ""
@@ -3435,7 +3435,7 @@ func (a *app) applyBatchSaveOutcome(req batchSaveRequest, out batchSaveOutcome) 
 		if out.result.Revision > a.snap.Revision {
 			a.snap.Revision = out.result.Revision
 		}
-		setErr("已写入 Core，但刷新 Run 失败：" + state.MapError(out.loadErr).Error())
+		setErr("实验数据已保存，但界面同步未完成：" + state.MapError(out.loadErr).Error())
 		return
 	}
 	savedGrid := req.grid
@@ -3775,7 +3775,7 @@ func (a *app) refreshReadiness() {
 	if a.designSvc == nil {
 		a.readinessLoading = false
 		a.readiness = nil
-		a.readinessErr = "设计服务不可用，无法获取 Core 校验结果"
+		a.readinessErr = "实验方案核查服务暂不可用"
 		return
 	}
 	a.readinessLoading = true
@@ -3798,10 +3798,10 @@ func (a *app) renderPreflight(c *ui.Context) {
 	components.Dialog(c, &open, components.DialogOptions{Label: "创建运行前检查"}, func(panel ui.Element) {
 		panel.Width(560).Children(func() {
 			ui.Text(c, "创建运行前检查").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-			ui.Text(c, fmt.Sprintf("文档 rev %d · 校验由 Rust Core 生成", a.designDoc.Revision)).
+			ui.Text(c, fmt.Sprintf("方案版本 #%d · 运行前完整性核查", a.designDoc.Revision)).
 				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			if a.readinessLoading {
-				ui.Text(c, "校验中 · 正在等待 Core 校验结果…").FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+				ui.Text(c, "校验中 · 正在核查分组、参数与步骤完整性…").FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
 				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
 					if components.Button(c, "返回修改", components.ButtonSecondary).Clicked() {
 						a.preflightOpen = false
@@ -3813,7 +3813,7 @@ func (a *app) renderPreflight(c *ui.Context) {
 			}
 			assessment := a.readiness
 			if assessment == nil {
-				ui.Text(c, "未解析 · 无法获取 Core 校验结果").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Danger)
+				ui.Text(c, "未解析 · 暂时无法完成实验方案核查").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Danger)
 				if a.readinessErr != "" {
 					ui.Box(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
 						Background(tok.Danger.Alpha(.06)).Children(func() {
@@ -3989,7 +3989,7 @@ func (a *app) renderImportDialog(c *ui.Context) {
 	components.Dialog(c, &open, components.DialogOptions{Label: "导入 AsterML"}, func(panel ui.Element) {
 		panel.Width(560).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Text(c, "导入 AsterML 设计").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-			ui.Text(c, "选择 .asterml / .md 源文件；导入后仍由 Core 校验并生成文档版本。").
+			ui.Text(c, "选择 .asterml 或 .md 实验方案文件，导入后将自动核查完整性并生成新版本。").
 				FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
 			ui.Text(c, "文件路径").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			ui.TextInput(c, &a.importPath).Placeholder("D:\\...\\experiment.asterml").FillWidth()

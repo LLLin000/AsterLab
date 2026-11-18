@@ -309,11 +309,11 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		renderVisualPNGSteps(t, outDir, "run_iz_actuals_and_table_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
 			runworkspace.View(c, stTbl)
 		}, func(tt *ui.Tester) {
-			if err := tt.Click("提交表格读数"); err != nil {
+			if err := tt.Click("保存本表数据"); err != nil {
 				t.Fatalf("submit readout table: %v", err)
 			}
 			tt.Frame()
-			if !tt.HasText("已保存至 Core") {
+			if !tt.HasText("数据已记录") {
 				t.Fatalf("expected save confirmation badge in table showcase: %q", tt.Texts())
 			}
 		})
@@ -406,7 +406,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				t.Fatalf("click notebook board tab: %v", err)
 			}
 			tt.Frame()
-			if !tt.HasText("结构化表格与分类读数") || !tt.HasText("inhibition_zone_mm") {
+			if !tt.HasText("结构化表格与分类读数") || !tt.HasText("Q2-HAMA") {
 				t.Fatalf("notebook board missing decoded table section: %q", tt.Texts())
 			}
 		})

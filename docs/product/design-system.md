@@ -162,5 +162,7 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | 孔板 / 培养皿 / 1D 管架网格 | `internal/uikit/plate` | 复用 `theme.Palette` 与语义分组色，`ui.Hex` 只保留在 `theme.go` |
 | 步骤内模块拖拽排序 | `ui.Box`（`.Drag` / `.DragOver` / `.Drop`）+ `lucide.GripVertical` | 手柄固定于模块标题栏左侧；落位复用 `MoveStepBlockToIndex` 与主题高亮边框 |
 | 图像与实拍附件查看 | `components.Dialog` Lightbox + `ui.ScrollBoth` + `x/image/tiff` | 异步后台解码防阻塞主线程；提供 `75%/100%/150%/200%` 缩放与外部打开，支持 Design 拖入文件 |
-| 通用数据表粘贴与键盘导航 | `components.Table` + `ui.TextField`（`FocusBind` / `OnPaste` / `OnTextKey`） | 支持 Excel TSV/CSV 粘贴自动扩行与方向键/`Enter`/`Tab` 移焦；提交成功显示 `已保存至 Core` `Badge` |
-| 计算器实测联动 | `EvalCalculatorWithActuals` + `components.Badge`（`Accent`） | 在 Run `ModeRun` 自动代入 `actual_parameters` 与上游测量值并标记 `已代入实测`；低浓度自动标注 `insufficient` |
+| 通用数据表粘贴与键盘导航 | `components.Table` + `ui.TextField`（`FocusBind` / `OnPaste` / `OnTextKey`） | 支持 Excel TSV/CSV 粘贴自动扩行与方向键/`Enter`/`Tab` 移焦；保存后显示 `数据已记录` `Badge` |
+| 计算器实测联动 | `EvalCalculatorWithActuals` + `components.Badge`（`Accent`） | 在 Run `ModeRun` 自动代入 `actual_parameters` 与上游测量值并标记 `已按实测值换算`；低浓度明确提示`浓度偏低，超出单孔反应体积上限` |
+
+**前端科研文案规范（强制）**：所有面向研究者的界面文案、状态胶囊、提示与报错严禁暴露 `Core`、`Rust Core`、`后端`、`schema`、`JSON`、`readout.submit`、`AsterDoc`、`rev`、英文原词（如 `insufficient`）或原始数据库 ID（如 `blk-*`、`assay-*`、`inhibition_zone_mm`）；统一使用自然科研表达（如「数据已记录」「本步实验操作与记录」「方案耗时测算」「实验测定数据表」「方案格式正常」），底层标识仅在「步骤高级选项与技术标识」等二级折叠区按 `UX-P2` 按需展示。

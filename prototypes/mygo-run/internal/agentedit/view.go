@@ -70,8 +70,8 @@ func View(c *ui.Context, s *State) {
 			}
 		})
 		ui.Row(c).FillWidth().Gap(t.Space(1.5)).Children(func() {
-			ui.TextInput(c, &s.Path).Placeholder("提案 JSON 文件路径").Grow(1)
-			ui.TextInput(c, &s.JSON).Placeholder("粘贴 Proposal JSON").Grow(1)
+			ui.TextInput(c, &s.Path).Placeholder("修改建议文件路径").Grow(1)
+			ui.TextInput(c, &s.JSON).Placeholder("粘贴结构化修改建议内容").Grow(1)
 		})
 		if s.Error != "" {
 			ui.Text(c, s.Error).TextColor(t.Danger)
@@ -105,7 +105,7 @@ func View(c *ui.Context, s *State) {
 										}
 									}
 								}
-								ui.Text(c, fmt.Sprintf("before（声明）: %s · current（Core）: %s", claimed, formatEditValue(d.Current))).TextColor(t.TextMuted)
+								ui.Text(c, fmt.Sprintf("建议前原值: %s · 当前方案值: %s", claimed, formatEditValue(d.Current))).TextColor(t.TextMuted)
 								ui.Text(c, fmt.Sprintf("%s → %s · operation: %s", d.Path, formatEditValue(d.Requested), d.Operation)).TextColor(t.Text)
 							}
 						})

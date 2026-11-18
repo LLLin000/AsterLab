@@ -102,7 +102,7 @@ func View(c *ui.Context, s *State) {
 				} else {
 					ui.Text(c, "No component IDs linked to this step.").FontSize(13).TextColor(t.TextMuted)
 				}
-				ui.Text(c, "Core does not currently store structured reagent or instrument details here.").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "本步骤未单独列出结构化试剂或仪器条目。").FontSize(12).TextColor(t.TextMuted)
 
 				section(c, "Checks")
 				hasChecks := false
@@ -128,7 +128,7 @@ func View(c *ui.Context, s *State) {
 				}
 
 				section(c, "Expected outputs")
-				ui.Text(c, "Expected outputs are not represented in the current Core workflow/block schema.").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "本步骤未声明结构化预期产物。").FontSize(13).TextColor(t.TextMuted)
 
 				section(c, "Recorded measurements")
 				hasMeasurements := false
@@ -151,7 +151,7 @@ func View(c *ui.Context, s *State) {
 
 				section(c, "Design link & version")
 				ui.Text(c, fmt.Sprintf("%s · revision %d · workflow node %s", display(s.DesignID, "No linked design ID"), s.Revision, node.ID)).FontSize(13)
-				ui.Text(c, "Protocol editing and saving are not supported by Core; this view is read-only.").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "实验方案页为只读视图；如需调整方案，请前往「实验设计」页。").FontSize(12).TextColor(t.TextMuted)
 			})
 		})
 		})

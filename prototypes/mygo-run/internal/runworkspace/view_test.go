@@ -711,7 +711,7 @@ func TestViewRendersFrozenStepBlocksSameSourceModeRun(t *testing.T) {
 		View(c, st)
 	}, 1280, 820)
 	tt.Frame()
-	for _, want := range []string{"步骤模块 · 同源执行", "4 个内容块", "抑菌关键参数", "四象限抑菌圈示意图", "操作确认"} {
+	for _, want := range []string{"本步实验操作与记录", "4 项模块", "抑菌关键参数", "四象限抑菌圈示意图", "操作确认"} {
 		if !tt.HasText(want) {
 			t.Fatalf("ModeRun workbench missing %q in %v", want, tt.Texts())
 		}
@@ -804,20 +804,20 @@ func TestModeRunHydratesActualsSubmitsTableAndFeedsCalculator(t *testing.T) {
 		View(c, st)
 	}, 1280, 900)
 	tt.Frame()
-	if !tt.HasText("已代入实测 · S-Keep=250 ng/uL") {
+	if !tt.HasText("已按实测值换算 · S-Keep=250 ng/uL") {
 		t.Fatalf("expected live non-excluded upstream sample in calculator badge, got %v", tt.Texts())
 	}
 	if tt.HasText("S-Drop=200") {
 		t.Fatalf("QC-dropped sample S-Drop leaked into calculator actuals: %v", tt.Texts())
 	}
-	if err := tt.Click("提交表格读数"); err != nil {
+	if err := tt.Click("保存本表数据"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if calls != 1 || submitted.Kind != "readout.submit" {
 		t.Fatalf("calls=%d submitted=%+v", calls, submitted)
 	}
-	if !tt.HasText("已保存至 Core") {
+	if !tt.HasText("数据已记录") {
 		t.Fatalf("expected save confirmation badge, got %v", tt.Texts())
 	}
 }

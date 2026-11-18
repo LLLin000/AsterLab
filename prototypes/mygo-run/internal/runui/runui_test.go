@@ -123,7 +123,7 @@ func TestTaskPanelShowsFrozenProtocolReadOnly(t *testing.T) {
 		taskPanel(c, w, c.Theme(), theme.GetTokens(c.Theme()))
 	}, 700, 700)
 	tt.Frame()
-	for _, text := range []string{"协议与参数 · 只读 · 已冻结", "协议版本 protocol-v2", "Run rev 3 · Design rev 7 · AsterDoc rev 4", "保持 4°C 并轻柔混匀", "温度 · 4 °C"} {
+	for _, text := range []string{"协议与参数 · 只读 · 已冻结", "协议版本 protocol-v2", "实验记录 v3 · 方案第 7 版 · 冻结流程 #4", "保持 4°C 并轻柔混匀", "温度 · 4 °C"} {
 		if !tt.HasText(text) {
 			t.Errorf("frozen task detail missing %q", text)
 		}

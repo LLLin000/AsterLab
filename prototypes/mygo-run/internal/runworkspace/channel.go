@@ -47,7 +47,7 @@ func channelError(err error) string {
 	case strings.Contains(msg, "IDEMPOTENCY_MISMATCH"):
 		return "该操作已提交过不同内容，请刷新后重试"
 	case strings.Contains(msg, "INVALID"):
-		return "Core 拒绝了该请求（" + msg + "），请检查后重试"
+		return "数据未通过实验规则核查（" + msg + "），请核对后重试"
 	default:
 		return msg
 	}

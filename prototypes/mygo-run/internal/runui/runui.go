@@ -1125,7 +1125,7 @@ func taskPanel(c *ui.Context, w *Workspace, t *ui.Theme, tokens theme.Tokens) {
 		if ct.ProtocolVersionID != "" {
 			ui.Text(c, "协议版本 "+ct.ProtocolVersionID).FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		}
-		ui.Text(c, fmt.Sprintf("Run rev %d · Design rev %d · AsterDoc rev %d",
+		ui.Text(c, fmt.Sprintf("实验记录 v%d · 方案第 %d 版 · 冻结流程 #%d",
 			w.View.Revision, w.View.DesignRevision, w.View.AsterDocRevision)).
 			FontSize(t.Rem(0.79)).TextColor(t.TextMuted) // UX-P3: 11px → Rem.
 		if ct.Instruction != "" {

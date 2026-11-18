@@ -407,7 +407,7 @@ func (s *Shell) projectView(c *ui.Context) {
 			ui.Row(c).FillWidth().AlignItems(ui.End).Gap(t.Space(3)).Children(func() {
 				ui.Column(c).Gap(t.Space(.75)).Children(func() {
 					components.Text(c, "项目工作区").FontSize(t.Rem(1.7)).FontWeight(600)
-					components.Text(c, "继续一个设计，或从已有案例开始；所有文档共用同一份 AsterDoc。").
+					components.Text(c, "继续推进现有实验方案，或从典型实验模板快速开始。").
 						TextColor(t.TextMuted).FontSize(t.Rem(.92))
 				})
 				ui.Spacer(c)

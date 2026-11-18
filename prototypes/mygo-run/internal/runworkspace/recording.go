@@ -232,7 +232,7 @@ func (r *RecordingView) Render(c *ui.Context) {
 	if recovered && r.Grid != nil && r.Grid.State != resultgrid.StateSaved {
 		ui.Row(c).FillWidth().Padding(t.Space(.75), t.Space(1.25)).Radius(6).
 			Background(tokens.WarningBg).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-			ui.Text(c, "已从上次未保存草稿恢复（Ctrl+S 保存到 Core）").FontSize(t.Rem(.72)).TextColor(tokens.WarningText)
+			ui.Text(c, "已恢复上次未保存的录入草稿（按 Ctrl+S 保存记录）").FontSize(t.Rem(.72)).TextColor(tokens.WarningText)
 			ui.Spacer(c)
 			if components.Button(c, "丢弃草稿", components.ButtonGhost).Clicked() {
 				discardGridDraft(r.RunID, r.Task.TaskKey, r.Grid)
@@ -301,7 +301,7 @@ func cellStatusLabel(status string) string {
 // renderPlate draws the plate view fed by the result grid.
 func (r *RecordingView) renderPlate(c *ui.Context) {
 	if r.Grid == nil {
-		ui.Text(c, "当前任务没有孔板记录 schema。").FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.Text(c, "当前步骤未配置孔板读数表。").FontSize(12).TextColor(c.Theme().TextMuted)
 		return
 	}
 	ui.Column(c).Key("recording-plate").FillWidth().Children(func() {
@@ -768,12 +768,12 @@ func assetRow(c *ui.Context, a LinkedAsset, open, relocate, relabel, unlink func
 func gridErrorPresentation(errMsg string) (string, string) {
 	lower := strings.ToLower(errMsg)
 	switch {
-	case strings.Contains(errMsg, "刷新") && (strings.Contains(errMsg, "已写入 Core") || strings.Contains(errMsg, "已保存到 Core")):
-		return errMsg, "读数已写入 Core，仅最新视图刷新失败；请点击重试刷新或重新打开当前 Run。"
+	case strings.Contains(errMsg, "实验数据已保存") || (strings.Contains(errMsg, "刷新") && (strings.Contains(errMsg, "已写入 Core") || strings.Contains(errMsg, "已保存到 Core"))):
+		return errMsg, "实验数据已妥善保存，仅界面刷新未完成；请点击重试刷新。"
 	case strings.Contains(lower, "conflict") || strings.Contains(errMsg, "冲突") || strings.Contains(lower, "revision"):
-		return "未保存 · " + errMsg, "Core 修订版本已发生变化（修订冲突）；请重新加载当前 Run 核对最新数据后再重试保存。"
+		return "未保存 · " + errMsg, "实验记录已在其他窗口更新，请重新加载当前运行核对后再保存。"
 	case strings.Contains(errMsg, "未接受全部单元格") || strings.Contains(errMsg, "被 Core 拒绝") || strings.Contains(lower, "rejected") || strings.Contains(lower, "invalid"):
-		return "未保存 · " + errMsg, "Core 拒绝了部分或全部单元格；请核对单元格数值、状态与孔位定义后，点击重试保存。"
+		return "未保存 · " + errMsg, "部分单元格数值、状态或孔位不符合实验方案要求，请核对后重试保存。"
 	case strings.Contains(lower, "permission") || strings.Contains(lower, "read-only") || strings.Contains(lower, "denied") || strings.Contains(errMsg, "权限") || strings.Contains(errMsg, "只读"):
 		return "未保存 · " + errMsg, "检查目标目录权限后，点击重试保存。"
 	case strings.Contains(errMsg, "请输入数字") || strings.Contains(lower, "cell coordinate") || strings.Contains(lower, "must be finite") || strings.Contains(lower, "missing status"):

@@ -1551,7 +1551,7 @@ func TestDesignReadinessStatesAndRetryOnFailure(t *testing.T) {
 	// Preflight dialog also shows 未解析, reason, and 重试.
 	a.preflightOpen = true
 	tt.Frame()
-	if !tt.HasText("未解析 · 无法获取 Core 校验结果") || !tt.HasText("INTERNAL: assessment service timeout for d1 rev 2") {
+	if !tt.HasText("未解析 · 暂时无法完成实验方案核查") || !tt.HasText("INTERNAL: assessment service timeout for d1 rev 2") {
 		t.Fatalf("preflight dialog missing reason on assessment failure: %v", tt.Texts())
 	}
 
@@ -1931,7 +1931,7 @@ func TestSaveBatchPassesThroughStateSavingAndDistinguishesCauses(t *testing.T) {
 	a.saveBatch(schema, grid.Cells)
 	rv.Grid = grid
 	tt.Frame()
-	if grid.State != resultgrid.StateError || !tt.HasText("CONFLICT: expected revision 1, got 2") || !tt.HasText("修订冲突") || !tt.HasText("重试保存") {
+	if grid.State != resultgrid.StateError || !tt.HasText("CONFLICT: expected revision 1, got 2") || !tt.HasText("实验记录已在其他窗口更新") || !tt.HasText("重试保存") {
 		t.Fatalf("revision conflict banner incorrect: state=%q texts=%v", grid.State, tt.Texts())
 	}
 	if tt.HasText("检查目标目录权限") {
@@ -1955,7 +1955,7 @@ func TestSaveBatchPassesThroughStateSavingAndDistinguishesCauses(t *testing.T) {
 	spy.loadErr = fmt.Errorf("INTERNAL: sqlite busy during refresh")
 	a.saveBatch(schema, grid.Cells)
 	tt.Frame()
-	if grid.State != resultgrid.StateError || !tt.HasText("已写入 Core") || !tt.HasText("INTERNAL: sqlite busy during refresh") || !tt.HasText("重试保存") {
+	if grid.State != resultgrid.StateError || !tt.HasText("实验数据已保存") || !tt.HasText("INTERNAL: sqlite busy during refresh") || !tt.HasText("重试保存") {
 		t.Fatalf("refresh failure banner incorrect: state=%q texts=%v", grid.State, tt.Texts())
 	}
 	if tt.HasText("未保存 · ") || tt.HasText("检查目标目录权限") {
