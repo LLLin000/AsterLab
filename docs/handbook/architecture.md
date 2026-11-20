@@ -1,6 +1,12 @@
 # 分层架构与代码包
 
-依据 [ADR-0002（方案 A）](../adr/0002-asterml-vault-pure-go-core.md)，AsterLab 采用「**`.asterml` 本地 Vault 单真源 × Pure-Go 统一科学核心（`astercore`）**」架构，由 MyGo Native（`mygo@v0.8.4`）与 `onevra@v0.2026.18` 驱动桌面与移动端无 WebView 原生运行；原 Rust Core / SQLite 路径仅保留为可选历史桥接。
+AsterLab 采用「**`.asterml` 本地 Vault 单真源 × Pure-Go 统一科学核心（`astercore`）**」架构，由 MyGo Native（`mygo@v0.8.4`）与 `onevra@v0.2026.18` 驱动桌面端与移动端无 WebView 原生运行；原 Rust Core / SQLite 路径退居可选历史桥接。
+
+## 核心架构原则：单真源与统一核心
+
+1. **`.asterml` Vault 是唯一事实源，不引入格式级写锁**：实验文档以开放的 Markdown + YAML 围栏格式直接存于用户目录下，兼容任意文本编辑器、Git、网盘与外部 Agent 协同；任何只读或防误触保护均仅作为软件应用层的可选交互，绝不绑定到 `.asterml` 文件格式本身。
+2. **本地索引只是可丢弃重建的加速层**：`.asterlab/cache/index.json` 仅承担全文检索、反向链接、全库计时聚合与跨实验查询的本地加速职责，删除或清空后不损失任何实验记录，软件可自动从 `<Vault>/**/*.asterml` 重建。
+3. **Pure-Go `astercore` 统一桌面端、移动端与 CLI**：文档解析、单位校准、ARRIVE 2.0 科学诊断、CCK-8 / RT-qPCR 确定性统计以及 Vault CLI 共用同一套纯 Go 包，消除 Go/Rust 双语维护税与 `Runs.dll` 跨平台分发阻碍。
 
 ```mermaid
 flowchart TB
@@ -18,7 +24,7 @@ flowchart TB
     Spec["internal/asterdoc/spec<br/>(modules.json 21 kinds / units.json UCUM / Go Rules)"]
   end
 
-  subgraph Legacy["Optional Legacy Core Bridge (按 ADR-0002 逐步退役)"]
+  subgraph Legacy["Optional Legacy Core Bridge (可选历史桥接)"]
     Bridge["modules/runs & crates/asterlab-core<br/>(可选 Runs.dll / labworkbench SQLite 历史适配)"]
   end
 

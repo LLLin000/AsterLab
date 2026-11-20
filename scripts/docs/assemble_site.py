@@ -12,7 +12,6 @@ from pathlib import Path
 
 BUNDLE_DIRS = [
     "docs/handbook",
-    "docs/adr",
 ]
 
 BUNDLE_FILES = [

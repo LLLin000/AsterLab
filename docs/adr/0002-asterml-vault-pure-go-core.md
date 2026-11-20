@@ -21,12 +21,12 @@ AsterLab's workspace has evolved to an Obsidian-grade single-vault local experim
    - **No file-format locking**: `.asterml` remains a clean, universally editable plain-text format (like `.md` in Obsidian) so external editors, Git, cloud sync, and AI Agents can always inspect and edit files cleanly. Any optional edit-lock or freeze guard lives strictly at the **application layer** as an opt-in UX feature, never as a mandatory lock baked into the `.asterml` format.
    - Syncable vault config (`.asterlab/config.json`) is separated from machine-local layout state (`.asterlab/local.json`). Pantry inventory migrates into human-readable files under `.asterlab/pantry/` so switching or syncing vaults keeps reagent records intact.
 
-2. **SQLite is downgraded to a disposable, rebuildable local query cache**:
-   - `.asterlab/cache/index.sqlite` (implemented with CGo-free pure Go `modernc.org/sqlite` + FTS5) serves solely as a sync-excluded local acceleration index for `MetadataCache`, full-text search, backlinks, and cross-experiment `LabBases` queries.
-   - Deleting or corrupting `index.sqlite` causes zero data loss; AsterLab rebuilds it automatically from `<Vault>/**/*.asterml`.
+2. **Local index is downgraded to a disposable, rebuildable query cache**:
+   - `.asterlab/cache/index.json` (zero-CGo pure Go incremental index) serves solely as a sync-excluded local acceleration cache for `MetadataCache`, full-text search, backlinks, active timers, and cross-experiment `LabBases` queries (and can upgrade transparently to FTS5 SQLite later if needed without changing `.asterml` data).
+   - Deleting or corrupting the cache causes zero data loss; AsterLab rebuilds it automatically from `<Vault>/**/*.asterml`.
 
 3. **Pure Go Unified Core (`astercore`) serves Desktop, Mobile, and CLI**:
-   - All core logic—AsterML parsing/validation/UCUM units/formula evaluation, scientific diagnostics (`Diagnostic`, ARRIVE 2.0 rules, `MixPlan`, `TimeBudget`, `InstrumentProfile` matching), `VaultFS` (`fsnotify` + event bus + conflict-safe atomic writes + File Recovery snapshots), `FileManager`, `VaultIndex`, assay importers/analyzers (CCK-8, ΔΔCq, 4PL/IC50), and the Vault-native `asterlab` JSON CLI—converges into one Pure Go Core shared directly via Go package imports.
+   - All core logic—AsterML parsing/validation/UCUM units/formula evaluation, scientific diagnostics (`Diagnostic`, ARRIVE 2.0 rules, `MixPlan`, `TimeBudget`, `InstrumentProfile` matching), `VaultFS` (event bus + link rewriting + conflict-safe atomic writes + File Recovery snapshots), `FileManager`, `VaultIndex`, assay analyzers (CCK-8, RT-qPCR ΔΔCq, descriptive stats), and the Vault-native `cmd/asterlab` JSON CLI—converges into one Pure Go Core shared directly via Go package imports.
    - Desktop (Windows/macOS/Linux), Mobile (Android/iOS), and CLI compile cleanly without `Runs.dll` or CGo.
 
 4. **Progressive retirement of Rust Core (`crates/asterlab-core` & `Runs.dll`)**:

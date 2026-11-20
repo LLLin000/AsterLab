@@ -4,9 +4,9 @@
 
 ## 移动端运行边界（纯 Go vs Native Core）
 
-当前 `.asterml` 解析与编译校验、`Vault` 目录扫描、`VaultIndex` 增量缓存、**Pure-Go `astercore` 诊断与统计分析（ARRIVE / CCK-8 / RT-qPCR）**、`LiveDocument` 100 步撤销与原子写盘、实验日历以及储藏室货架已 **100% 运行在纯 Go 层**（详见 [ADR-0002](../adr/0002-asterml-vault-pure-go-core.md)）。
+当前 `.asterml` 解析与编译校验、`Vault` 目录扫描、`VaultIndex` 增量缓存、**Pure-Go `astercore` 诊断与统计分析（ARRIVE / CCK-8 / RT-qPCR）**、`LiveDocument` 100 步撤销与原子写盘、实验日历以及储藏室货架已 **100% 运行在纯 Go 层**（架构详情见 [分层架构与代码包](./architecture.md)）。
 
-自 ADR-0002 起，即使桌面或移动端环境未配备可选的 `Runs.dll` / `libRuns.so` 原生库，应用也会安静运行在完整的「**纯 Go Vault 统一核心模式**」，不再弹出启动阻塞报错：
+即使桌面或移动端环境未配备可选的 `Runs.dll` / `libRuns.so` 原生库，应用也会安静运行在完整的「**纯 Go Vault 统一核心模式**」，不再弹出启动阻塞报错：
 
 1. **默认模式：Pure-Go Vault + `astercore` 统一核心（桌面 / 移动 / CLI 全一致）**
    - 直接读写本地或沙盒内的 `.asterml` 与 `./assets/`，并自动将机器私有状态（`vaultPath`、`lastProjectDir`）隔离到 `.asterlab/local.json`，避免污染随云盘同步的 `.asterlab/config.json`。
