@@ -3,246 +3,527 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AsterLab Engineering &amp; Product Handbook</title>
+<title>Docs — AsterLab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
 :root {
   --bg: #ffffff;
-  --surface: #f5f6f8;
-  --elevated: #ededf0;
-  --ink: #16171d;
-  --muted: #5b606e;
-  --border: rgba(22, 23, 29, 0.10);
+  --bg-elev: #f5f6f8;
+  --fg: #14151a;
+  --fg-dim: #4c515f;
+  --fg-faint: #848b9c;
+  --rule: rgba(20, 21, 26, 0.08);
+  --rule-strong: rgba(20, 21, 26, 0.16);
   --accent: #6c5ce7;
-  --accent-soft: #eeebff;
-  --code-bg: #f4f5f7;
-  --shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+  --accent-2: #0ea5e9;
+  --selection: rgba(108, 92, 231, 0.16);
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 html[data-theme="dark"] {
-  --bg: #111215;
-  --surface: #16181d;
-  --elevated: #1e2027;
-  --ink: #eef0f6;
-  --muted: #98a0b2;
-  --border: rgba(255, 255, 255, 0.11);
+  --bg: #08090c;
+  --bg-elev: #12141a;
+  --fg: #f4f5f8;
+  --fg-dim: #b4bac9;
+  --fg-faint: #767d90;
+  --rule: rgba(255, 255, 255, 0.08);
+  --rule-strong: rgba(255, 255, 255, 0.16);
   --accent: #a596ff;
-  --accent-soft: #2a2645;
-  --code-bg: #191b22;
-  --shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  --accent-2: #67e8f9;
+  --selection: rgba(165, 150, 255, 0.24);
 }
-* { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-body {
-  margin: 0;
+*, *::before, *::after { box-sizing: border-box; }
+html {
   background: var(--bg);
-  color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  line-height: 1.65;
+  color: var(--fg);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
 }
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+body { margin: 0; overflow-x: clip; }
+::selection { background: var(--selection); color: var(--fg); }
 
+a { color: inherit; text-decoration: none; }
+
+/* OMP-inspired Topbar: fixed 56px, hairline bottom, clean zero-clutter actions */
 .topbar {
-  position: sticky;
+  position: fixed;
+  inset-inline: 0;
   top: 0;
   z-index: 40;
-  min-height: 54px;
+  height: 56px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  border-bottom: 1px solid var(--rule);
+}
+.topbar-inner {
+  max-width: 1280px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+}
+.brand {
+  display: flex;
+  align-items: center;
   gap: 10px;
-  padding: 8px 22px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--ink); }
-.brand-badge {
-  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
-  background: var(--accent-soft); color: var(--accent);
+.brand-sep { color: var(--fg-faint); font-weight: 400; }
+.brand-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  font-weight: 500;
 }
-.top-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.search-input, .ref-select {
-  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--ink); font-size: 13px;
+.top-nav { display: flex; align-items: center; gap: 18px; }
+.top-link {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--fg-dim);
+  transition: color 0.15s;
 }
-.search-input { width: 200px; max-width: 40vw; }
-.btn-pill {
-  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--ink); cursor: pointer; font-size: 13px;
-  display: inline-flex; align-items: center; gap: 4px;
+.top-link:hover { color: var(--fg); }
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  transition: color 0.15s, border-color 0.15s;
 }
-.btn-pill:hover { background: var(--elevated); text-decoration: none; }
+.icon-btn:hover { color: var(--fg); border-color: var(--rule-strong); }
+.kbd {
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--rule-strong);
+  color: var(--fg-faint);
+}
 
-/* 3-column OMP/VitePress layout: Left Docs Tree + Center Content + Right On-This-Page TOC */
-.layout {
-  max-width: 1560px;
+/* 3-Column Documentation Grid matching omp.sh/docs */
+.shell {
+  max-width: 1280px;
   margin: 0 auto;
+  padding: 88px 24px 96px;
   display: grid;
-  grid-template-columns: 256px minmax(0, 1fr) 232px;
-  gap: 28px;
-  padding: 24px 24px 72px;
+  grid-template-columns: 14rem minmax(0, 1fr) 12.5rem;
+  gap: 48px;
+  align-items: start;
 }
-.sidebar-left, .sidebar-right {
+.sidebar-left {
   position: sticky;
-  top: 74px;
-  max-height: calc(100vh - 94px);
+  top: 84px;
+  max-height: calc(100vh - 104px);
   overflow-y: auto;
   font-size: 13.5px;
+  line-height: 1.5;
 }
-.sidebar-left { padding-right: 10px; border-right: 1px solid var(--border); }
-.sidebar-right { padding-left: 12px; border-left: 1px solid var(--border); }
+.sidebar-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  color: var(--fg-faint);
+  margin-bottom: 18px;
+}
+.nav-group { margin-bottom: 24px; }
+.nav-group-title {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 1px solid var(--rule);
+}
+.nav-item a {
+  display: block;
+  margin-left: -1px;
+  border-left: 1px solid transparent;
+  padding: 4px 0 4px 14px;
+  color: var(--fg-dim);
+  transition: color 0.15s, border-color 0.15s;
+}
+.nav-item a:hover {
+  color: var(--fg);
+  border-left-color: var(--rule-strong);
+}
+.nav-item a.active {
+  color: var(--fg);
+  border-left-color: var(--accent);
+  font-weight: 500;
+}
 
-.nav-section { margin-bottom: 16px; }
-.nav-label {
-  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
-  color: var(--muted); font-weight: 700; margin-bottom: 6px; padding-left: 8px;
+.sidebar-right {
+  position: sticky;
+  top: 84px;
+  max-height: calc(100vh - 104px);
+  overflow-y: auto;
+  font-size: 12.5px;
 }
-.nav-link {
-  display: block; padding: 4px 10px; border-radius: 8px; color: var(--muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+.toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 1px solid var(--rule);
 }
-.nav-link:hover, .nav-link.active { background: var(--elevated); color: var(--ink); text-decoration: none; }
-.nav-link.lvl-3 { padding-left: 20px; font-size: 12.5px; }
-.nav-link.doc-current { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.toc-item a {
+  display: block;
+  margin-left: -1px;
+  border-left: 1px solid transparent;
+  padding: 3px 0 3px 12px;
+  color: var(--fg-faint);
+  transition: color 0.15s, border-color 0.15s;
+}
+.toc-item.lvl-3 a { padding-left: 22px; font-size: 12px; }
+.toc-item a:hover { color: var(--fg-dim); }
+.toc-item a.active {
+  color: var(--fg);
+  border-left-color: var(--accent);
+}
 
-.content { min-width: 0; max-width: 980px; }
-.meta-bar {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
-  font-size: 12.5px; color: var(--muted); padding: 8px 14px; margin-bottom: 18px;
-  background: var(--surface); border-radius: 10px; border: 1px solid var(--border);
+/* Main Editorial Prose */
+.main-col { min-width: 0; }
+.doc-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--accent);
+  margin-bottom: 12px;
 }
-.content h1 { font-size: 2rem; line-height: 1.22; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.02em; }
-.content h2 {
-  font-size: 1.45rem; margin-top: 42px; padding-bottom: 8px;
-  border-bottom: 1px solid var(--border); scroll-margin-top: 72px;
+.prose {
+  --prose-measure: 70ch;
+  color: var(--fg);
+  font-size: 15.5px;
+  line-height: 1.72;
 }
-.content h3 { font-size: 1.15rem; margin-top: 28px; scroll-margin-top: 72px; }
-.content h4 { font-size: 1rem; margin-top: 20px; color: var(--muted); scroll-margin-top: 72px; }
-.anchor { color: var(--muted); opacity: 0; margin-right: 6px; font-weight: 400; }
-h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor { opacity: 0.65; }
+.prose > * + * { margin-top: 1.15em; }
+.prose p, .prose ul, .prose ol, .prose blockquote {
+  max-width: var(--prose-measure);
+  color: var(--fg-dim);
+}
+.prose h1 {
+  font-size: clamp(1.85rem, 1.5rem + 1vw, 2.35rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: 0 0 0.75em;
+  color: var(--fg);
+}
+.prose h2 {
+  font-size: clamp(1.32rem, 1.15rem + 0.5vw, 1.65rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.22;
+  color: var(--fg);
+  border-top: 1px solid var(--rule);
+  margin-top: 2.3em;
+  padding-top: 1.15em;
+  scroll-margin-top: 5.2rem;
+}
+.prose h2:first-of-type { margin-top: 1.6em; }
+.prose h3 {
+  font-size: 1.15rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--fg);
+  margin-top: 1.75em;
+  scroll-margin-top: 5.2rem;
+}
+.prose h4 {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fg-faint);
+  margin-top: 1.5em;
+  scroll-margin-top: 5.2rem;
+}
+.anchor { color: var(--fg-faint); opacity: 0; margin-right: 6px; font-weight: 400; text-decoration: none !important; }
+.prose h2:hover .anchor, .prose h3:hover .anchor, .prose h4:hover .anchor { opacity: 0.8; }
+
+.prose strong { color: var(--fg); font-weight: 600; }
+.prose a {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 58%, transparent);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-color 0.15s;
+}
+.prose a:hover { text-decoration-color: var(--accent); }
+.prose ul, .prose ol { padding-left: 1.25em; }
+.prose li + li { margin-top: 0.35em; }
+.prose ul li::marker { color: var(--accent); content: "— "; }
+
+.prose code {
+  font-family: var(--font-mono);
+  background: var(--bg-elev);
+  border: 1px solid var(--rule);
+  color: var(--fg);
+  padding: 0.08em 0.36em;
+  font-size: 0.86em;
+}
+.prose pre {
+  font-family: var(--font-mono);
+  background: var(--bg-elev);
+  border: 1px solid var(--rule);
+  color: var(--fg);
+  padding: 1rem 1.15rem;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-x: auto;
+}
+.prose pre code { background: none; border: 0; padding: 0; font-size: inherit; }
 
 .callout {
-  border-left: 3px solid var(--accent);
-  background: var(--surface);
-  border-radius: 0 10px 10px 0;
-  padding: 12px 16px;
-  margin: 16px 0;
+  max-width: var(--prose-measure);
+  border-left: 2px solid var(--accent);
+  background: var(--bg-elev);
+  padding: 0.9rem 1.1rem;
+  font-size: 14.5px;
+  color: var(--fg-dim);
 }
-.callout-title { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+.callout-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 4px;
+  font-weight: 600;
+}
 blockquote {
-  margin: 16px 0; padding: 10px 16px; border-left: 3px solid var(--border);
-  background: var(--surface); border-radius: 0 8px 8px 0; color: var(--muted);
+  margin-inline: 0;
+  border-left: 2px solid var(--rule-strong);
+  padding: 0.25rem 0 0.25rem 1rem;
 }
-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.88em; background: var(--code-bg); padding: 2px 6px; border-radius: 6px;
-}
-pre {
-  background: var(--code-bg); border: 1px solid var(--border); border-radius: 12px;
-  padding: 14px 16px; overflow-x: auto; line-height: 1.5;
-}
-pre code { background: none; padding: 0; }
-.mermaid-wrap {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-  padding: 16px; margin: 16px 0; overflow-x: auto; text-align: center;
-}
-.table-scroll { overflow-x: auto; margin: 16px 0; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.data-table th, .data-table td {
-  border: 1px solid var(--border); padding: 8px 12px; text-align: left; vertical-align: top;
-}
-.data-table th { background: var(--surface); font-weight: 600; }
 
-.gallery-table { table-layout: fixed; }
-.gallery-table th {
-  background: var(--surface); padding: 8px 10px; font-size: 13px; text-align: left;
-  border: 1px solid var(--border);
+.mermaid-wrap {
+  border: 1px solid var(--rule);
+  background: var(--bg-elev);
+  padding: 16px;
+  overflow-x: auto;
+  text-align: center;
 }
-.gallery-table td {
-  border: 1px solid var(--border); padding: 8px; vertical-align: top; background: var(--bg);
+
+.table-scroll { overflow-x: auto; }
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+table.data-table th, table.data-table td {
+  border-bottom: 1px solid var(--rule);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+table.data-table th {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-faint);
+  border-bottom-color: var(--rule-strong);
+}
+
+/* Crisp multi-column Gallery Grid replacing awkward bordered HTML tables */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin: 18px 0;
 }
 figure.shot {
-  margin: 4px 0; cursor: zoom-in; border-radius: 10px; overflow: hidden;
-  background: var(--surface); border: 1px solid var(--border);
-  transition: transform .15s ease, box-shadow .15s ease;
+  margin: 0;
+  cursor: zoom-in;
+  border: 1px solid var(--rule);
+  background: var(--bg-elev);
+  transition: border-color 0.15s;
 }
-figure.shot:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+figure.shot:hover { border-color: var(--rule-strong); }
 figure.shot img {
-  width: 100%; height: auto; display: block; object-fit: contain;
-  max-height: 460px; background: var(--bg); min-height: 60px;
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: contain;
+  max-height: 440px;
+  background: var(--bg);
 }
 figure.shot figcaption {
-  padding: 6px 10px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  border-top: 1px solid var(--rule);
 }
 
+/* Page Footer Prev/Next Navigation */
+.pager {
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.pager-card {
+  display: block;
+  border: 1px solid var(--rule);
+  padding: 14px 16px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.pager-card:hover { border-color: var(--rule-strong); background: var(--bg-elev); }
+.pager-card.next { text-align: right; }
+.pager-dir {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--fg-faint);
+  margin-bottom: 4px;
+}
+.pager-title { font-size: 14.5px; font-weight: 500; color: var(--fg); }
+
+/* Search Command Modal (Ctrl+K) */
+#cmdModal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  background: rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(6px);
+}
+#cmdModal.open { display: flex; }
+.cmd-panel {
+  width: min(560px, 92vw);
+  background: var(--bg);
+  border: 1px solid var(--rule-strong);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+}
+.cmd-input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  color: var(--fg);
+  font-size: 14.5px;
+  outline: none;
+}
+.cmd-results { max-height: 340px; overflow-y: auto; padding: 6px; }
+.cmd-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.cmd-item:hover { background: var(--bg-elev); }
+.cmd-group { font-family: var(--font-mono); font-size: 11px; color: var(--fg-faint); }
+
+/* Lightbox */
 #lightbox {
   position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center;
-  flex-direction: column; padding: 24px; background: rgba(10, 11, 15, 0.88); backdrop-filter: blur(10px);
+  flex-direction: column; padding: 24px; background: rgba(8, 9, 12, 0.90); backdrop-filter: blur(10px);
 }
 #lightbox.open { display: flex; }
-#lightbox img { max-width: 92vw; max-height: 82vh; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
-#lightbox .lb-cap { margin-top: 12px; color: #eef0f6; font-size: 14px; text-align: center; }
+#lightbox img { max-width: 92vw; max-height: 82vh; border: 1px solid rgba(255,255,255,0.14); }
+#lightbox .lb-cap { margin-top: 12px; color: #eef0f6; font-size: 13.5px; text-align: center; }
 #lightbox .lb-close, #lightbox .lb-prev, #lightbox .lb-next {
-  position: fixed; background: rgba(255,255,255,0.14); color: #fff;
-  border: none; border-radius: 999px; width: 42px; height: 42px; font-size: 20px; cursor: pointer;
+  position: fixed; background: rgba(255,255,255,0.10); color: #fff;
+  border: 1px solid rgba(255,255,255,0.16); width: 40px; height: 40px; font-size: 20px; cursor: pointer;
 }
 #lightbox .lb-close { top: 18px; right: 22px; }
 #lightbox .lb-prev { left: 18px; top: 50%; transform: translateY(-50%); }
 #lightbox .lb-next { right: 18px; top: 50%; transform: translateY(-50%); }
 
-.loading { padding: 48px 0; text-align: center; color: var(--muted); }
 .menu-btn { display: none; }
-@media (max-width: 1180px) {
-  .layout { grid-template-columns: 240px minmax(0, 1fr); }
+.loading { padding: 48px 0; color: var(--fg-faint); font-family: var(--font-mono); font-size: 13px; }
+@media (max-width: 1120px) {
+  .shell { grid-template-columns: 13.5rem minmax(0, 1fr); gap: 36px; }
   .sidebar-right { display: none; }
 }
-@media (max-width: 860px) {
-  .layout { grid-template-columns: 1fr; padding: 14px 14px 64px; }
+@media (max-width: 820px) {
+  .shell { grid-template-columns: 1fr; padding: 74px 18px 64px; }
   .menu-btn { display: inline-flex; }
   .sidebar-left {
-    display: none; position: fixed; left: 0; top: 54px; bottom: 0; width: 290px; max-height: none;
-    z-index: 50; background: var(--bg); padding: 16px; border-right: 1px solid var(--border);
+    display: none;
+    position: fixed;
+    left: 0; top: 56px; bottom: 0; width: 280px; max-height: none;
+    z-index: 50; background: var(--bg); padding: 20px; border-right: 1px solid var(--rule);
   }
   .sidebar-left.open { display: block; }
-  .gallery-table, .gallery-table thead, .gallery-table tbody, .gallery-table tr, .gallery-table th, .gallery-table td {
-    display: block; width: 100%;
-  }
+  .pager { grid-template-columns: 1fr; }
 }
 </style>
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">
-    <button class="btn-pill menu-btn" id="menuBtn" type="button">☰ 目录</button>
-    <a href="?doc=docs/HANDBOOK.md" id="homeLink" style="color:inherit;text-decoration:none;">AsterLab Engineering Handbook</a>
-    <span class="brand-badge">AsterML v2 · GitHub Pages</span>
-  </div>
-  <div class="top-actions">
-    <input class="search-input" id="tocFilter" type="search" placeholder="过滤目录 (Ctrl+K)..." />
-    <select class="ref-select" id="refSelect" title="数据源模式">
-      <option value="pages">GitHub Pages 同源站点</option>
-      <option value="feat/v2-generic-modules">GitHub 实时 (feat/v2-generic-modules)</option>
-      <option value="main">GitHub 实时 (main)</option>
-    </select>
-    <button class="btn-pill" id="refreshBtn" type="button" title="拉取最新">🔄 同步</button>
-    <a class="btn-pill" id="ghSourceLink" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener">GitHub</a>
-    <button class="btn-pill" id="themeBtn" type="button">🌓 主题</button>
+  <div class="topbar-inner">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <button class="icon-btn menu-btn" id="menuBtn" type="button">☰</button>
+      <a class="brand" href="?doc=docs/HANDBOOK.md" data-doc="docs/HANDBOOK.md">
+        <svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true">
+          <defs><linearGradient id="asterGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6c5ce7"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs>
+          <path fill="url(#asterGrad)" d="M16 3 28 26H21.5L16 14.5 10.5 26H4L16 3Z"/>
+        </svg>
+        <span>AsterLab</span>
+        <span class="brand-sep">/</span>
+        <span class="brand-sub">docs</span>
+      </a>
+    </div>
+    <nav class="top-nav">
+      <button class="icon-btn" id="searchBtn" type="button">Search <span class="kbd">⌘K</span></button>
+      <a class="top-link" id="ghLink" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener">GitHub</a>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle theme">◐</button>
+    </nav>
   </div>
 </header>
 
-<div class="layout">
+<div class="shell">
   <aside class="sidebar-left" id="sidebarLeft"></aside>
-  <main class="content">
-    <div class="meta-bar">
-      <span id="metaDoc">docs/HANDBOOK.md</span>
-      <span id="metaSync">加载中...</span>
-    </div>
-    <article id="docContent"><div class="loading">正在加载 AsterLab 工程与产品手册...</div></article>
+  <main class="main-col">
+    <div class="doc-kicker" id="docKicker">START · OVERVIEW</div>
+    <article class="prose" id="docContent"><div class="loading">Loading documentation...</div></article>
+    <div class="pager" id="docPager"></div>
   </main>
   <aside class="sidebar-right" id="sidebarRight"></aside>
+</div>
+
+<div id="cmdModal">
+  <div class="cmd-panel">
+    <input class="cmd-input" id="cmdInput" type="search" placeholder="跳转章节或搜索页面..." />
+    <div class="cmd-results" id="cmdResults"></div>
+  </div>
 </div>
 
 <div id="lightbox">
@@ -256,68 +537,44 @@ figure.shot figcaption {
 <script>
 (() => {
   const OWNER_REPO = "LLLin000/AsterLab";
-  // OMP-style grouped documentation hierarchy
-  const DOC_GROUPS = [
-    ["总纲与设计入口", [
-      ["docs/HANDBOOK.md", "Handbook 全景手册"],
-      ["docs/README.md", "权威文档索引"],
-      ["DESIGN.md", "DESIGN（v2 执行说明）"],
-      ["CONTEXT.md", "CONTEXT（领域术语）"],
+  const FALLBACK_BRANCH = "feat/v2-generic-modules";
+
+  const NAV_GROUPS = [
+    ["Start", [
+      ["docs/HANDBOOK.md", "Overview"],
+      ["docs/handbook/domain-model.md", "领域模型与科学红线"],
     ]],
-    ["架构、存储与接口", [
-      ["docs/architecture.md", "系统架构与双端边界"],
-      ["docs/sdk/v2-system-audit-and-vault-architecture.md", "Pure-Go Vault 与审计"],
-      ["AGENT_API.md", "AGENT_API（CLI/HTTP）"],
-      ["docs/KNOWN_LIMITATIONS.md", "已知限制清单"],
+    ["Architecture", [
+      ["docs/handbook/architecture.md", "分层架构与代码包"],
+      ["docs/handbook/vault-storage.md", "Vault 存储与原子读写"],
+      ["docs/handbook/mobile-and-sync.md", "移动端与双端同步"],
     ]],
-    ["AsterML v2 SDK 与图鉴", [
-      ["docs/asterdoc-contract.md", "AsterML v2 契约总纲"],
-      ["docs/sdk/v2-module-visual-catalog.md", "21 模块与 PDF 全图鉴"],
-      ["docs/sdk/AGENT_GUIDE.md", "Agent 实验创作指南"],
-      ["docs/sdk/agent-svg-kit.md", "SVG 科研绘件说明"],
-      ["docs/sdk/v2-architecture-retrospective-and-evidence.md", "v2 架构复盘与证据"],
+    ["AsterML SDK", [
+      ["docs/handbook/asterml-spec.md", "AsterML 语法与 Parity"],
+      ["docs/handbook/modules-content.md", "内容模块 (11 种)"],
+      ["docs/handbook/modules-labware-and-pdf.md", "孔板、原语与 PDF"],
     ]],
-    ["UI 视觉与交互契约", [
-      ["docs/product/design-system.md", "Design System & Liquid Glass"],
-      ["docs/product/ux-contract.md", "桌面/移动端 UX 契约"],
-      ["docs/product/audit-shell-design.md", "Shell 外观专项审计"],
-      ["docs/product/ownership.md", "页面与状态归属权"],
+    ["UI & UX", [
+      ["docs/handbook/design-system.md", "Token、色盘与动效"],
+      ["docs/handbook/liquid-glass.md", "Liquid Glass 材质"],
+      ["docs/handbook/desktop-workbench.md", "桌面工作台与分屏"],
+      ["docs/handbook/mobile-ios26.md", "Obsidian iOS 26 移动端"],
     ]],
-    ["工程与 CI 规范", [
-      ["docs/engineering/cross-platform-builds.md", "跨平台构建与 Windows Gate"],
-      ["docs/engineering/kandev-card-template.md", "Kandev 任务卡模板"],
-      ["docs/engineering/local-ci.md", "本地 CI 验证流程"],
+    ["Reference", [
+      ["docs/handbook/ffi-and-cli.md", "FFI 桥接与 CLI 契约"],
+      ["docs/handbook/verification-and-backlog.md", "校验门禁与优化热点"],
     ]],
   ];
+
+  const FLAT_PAGES = NAV_GROUPS.flatMap(([group, items]) =>
+    items.map(([path, title]) => ({ group, path, title }))
+  );
 
   const rootEl = document.documentElement;
   rootEl.setAttribute("data-theme", localStorage.getItem("asterlab-docs-theme") || "light");
 
   const params = new URLSearchParams(location.search);
   let currentDoc = params.get("doc") || "docs/HANDBOOK.md";
-  // "pages" uses same-origin deployed files on GitHub Pages; branch refs pull live from raw.githubusercontent.com / jsDelivr
-  let currentMode = params.get("ref") || "pages";
-
-  function docFetchUrl(mode, repoRel, bust) {
-    const clean = repoRel.replace(/^\/+/, "");
-    const qs = bust ? `?t=${bust}` : "";
-    if (mode === "pages") return `./${clean}${qs}`;
-    return `https://raw.githubusercontent.com/${OWNER_REPO}/${mode}/${clean}${qs}`;
-  }
-  function assetUrls(mode, repoRel) {
-    const clean = repoRel.replace(/^\/+/, "");
-    const branch = mode === "pages" ? "feat/v2-generic-modules" : mode;
-    if (mode === "pages") {
-      return {
-        primary: `./${clean}`,
-        fallback: `https://cdn.jsdelivr.net/gh/${OWNER_REPO}@${branch}/${clean}`,
-      };
-    }
-    return {
-      primary: `https://cdn.jsdelivr.net/gh/${OWNER_REPO}@${branch}/${clean}`,
-      fallback: `https://raw.githubusercontent.com/${OWNER_REPO}/${branch}/${clean}`,
-    };
-  }
 
   function normalizeRepoPath(curDocPath, relHref) {
     const baseParts = curDocPath.split("/").slice(0, -1);
@@ -359,15 +616,17 @@ figure.shot figcaption {
     if (!pathPart) return { href: frag || "#", isDoc: false };
     const repoRel = normalizeRepoPath(curDoc, pathPart.replace(/\\/g, "/"));
     if (/\.(png|jpe?g|svg|webp|gif|pdf)$/i.test(repoRel)) {
-      const a = assetUrls(currentMode, repoRel);
-      return { href: a.primary, fallback: a.fallback, isDoc: false, isAsset: true };
+      return {
+        href: `./${repoRel}`,
+        fallback: `https://cdn.jsdelivr.net/gh/${OWNER_REPO}@${FALLBACK_BRANCH}/${repoRel}`,
+        isDoc: false,
+      };
     }
     if (/\.md$/i.test(repoRel)) {
-      return { href: `?doc=${encodeURIComponent(repoRel)}&ref=${encodeURIComponent(currentMode)}${frag}`, repoRel, frag, isDoc: true };
+      return { href: `?doc=${encodeURIComponent(repoRel)}${frag}`, repoRel, frag, isDoc: true };
     }
-    const branch = currentMode === "pages" ? "feat/v2-generic-modules" : currentMode;
     const ghFrag = /^#L\d+(-L\d+)?$/i.test(frag) ? frag : "";
-    return { href: `https://github.com/${OWNER_REPO}/blob/${branch}/${repoRel}${ghFrag}`, isDoc: false };
+    return { href: `https://github.com/${OWNER_REPO}/blob/${FALLBACK_BRANCH}/${repoRel}${ghFrag}`, isDoc: false };
   }
 
   function renderInline(text, curDoc) {
@@ -530,15 +789,25 @@ figure.shot figcaption {
           i++;
         }
         const isGallery = rows.some((r) => r.some((c) => c.includes("![")));
-        const cls = isGallery ? "gallery-table" : "data-table";
-        let t = `<div class="table-scroll"><table class="${cls}"><thead><tr>`;
-        t += headers.map((h) => `<th>${renderInline(h, curDoc)}</th>`).join("");
-        t += "</tr></thead><tbody>";
-        for (const r of rows) {
-          t += "<tr>" + headers.map((_, ci) => `<td>${renderInline(r[ci] || "", curDoc)}</td>`).join("") + "</tr>";
+        if (isGallery) {
+          // Convert image tables into crisp responsive figure cards without clunky cell borders
+          const figs = [];
+          for (const r of rows) {
+            for (const c of r) {
+              if (c.trim()) figs.push(renderInline(c, curDoc));
+            }
+          }
+          out.push(`<div class="gallery-grid">${figs.join("")}</div>`);
+        } else {
+          let t = `<div class="table-scroll"><table class="data-table"><thead><tr>`;
+          t += headers.map((h) => `<th>${renderInline(h, curDoc)}</th>`).join("");
+          t += "</tr></thead><tbody>";
+          for (const r of rows) {
+            t += "<tr>" + headers.map((_, ci) => `<td>${renderInline(r[ci] || "", curDoc)}</td>`).join("") + "</tr>";
+          }
+          t += "</tbody></table></div>";
+          out.push(t);
         }
-        t += "</tbody></table></div>";
-        out.push(t);
         continue;
       }
 
@@ -577,59 +846,72 @@ figure.shot figcaption {
 
   function renderSidebars(toc) {
     const left = document.getElementById("sidebarLeft");
-    let lh = "";
-    for (const [groupName, items] of DOC_GROUPS) {
-      lh += `<div class="nav-section"><div class="nav-label">${escapeHtml(groupName)}</div>`;
+    let lh = `<div class="sidebar-eyebrow">Documentation</div>`;
+    for (const [groupName, items] of NAV_GROUPS) {
+      lh += `<div class="nav-group"><div class="nav-group-title">${escapeHtml(groupName)}</div><ul class="nav-list">`;
       for (const [docPath, label] of items) {
-        const cls = docPath === currentDoc ? "nav-link doc-current" : "nav-link";
-        lh += `<a class="${cls}" href="?doc=${encodeURIComponent(docPath)}&ref=${encodeURIComponent(currentMode)}" data-doc="${docPath}">${escapeHtml(label)}</a>`;
+        const cls = docPath === currentDoc ? "active" : "";
+        lh += `<li class="nav-item"><a class="${cls}" href="?doc=${encodeURIComponent(docPath)}" data-doc="${docPath}">${escapeHtml(label)}</a></li>`;
       }
-      lh += `</div>`;
+      lh += `</ul></div>`;
     }
     left.innerHTML = lh;
 
     const right = document.getElementById("sidebarRight");
-    let rh = `<div class="nav-section"><div class="nav-label">本页目录</div>`;
-    for (const item of toc) {
-      rh += `<a class="nav-link lvl-${item.level}" href="#${item.id}">${escapeHtml(item.text)}</a>`;
+    if (toc.length) {
+      let rh = `<div class="sidebar-eyebrow">On this page</div><ul class="toc-list">`;
+      for (const item of toc) {
+        rh += `<li class="toc-item lvl-${item.level}"><a href="#${item.id}" data-toc="${item.id}">${escapeHtml(item.text)}</a></li>`;
+      }
+      rh += `</ul>`;
+      right.innerHTML = rh;
+    } else {
+      right.innerHTML = "";
     }
-    rh += `</div>`;
-    right.innerHTML = rh;
+
+    const idx = FLAT_PAGES.findIndex((p) => p.path === currentDoc);
+    const kicker = idx >= 0 ? `${FLAT_PAGES[idx].group.toUpperCase()} · ${FLAT_PAGES[idx].title}` : currentDoc;
+    document.getElementById("docKicker").textContent = kicker;
+
+    const pager = document.getElementById("docPager");
+    let ph = "";
+    if (idx > 0) {
+      const prev = FLAT_PAGES[idx - 1];
+      ph += `<a class="pager-card" href="?doc=${encodeURIComponent(prev.path)}" data-doc="${prev.path}"><div class="pager-dir">← Previous</div><div class="pager-title">${escapeHtml(prev.title)}</div></a>`;
+    } else {
+      ph += `<div></div>`;
+    }
+    if (idx >= 0 && idx < FLAT_PAGES.length - 1) {
+      const next = FLAT_PAGES[idx + 1];
+      ph += `<a class="pager-card next" href="?doc=${encodeURIComponent(next.path)}" data-doc="${next.path}"><div class="pager-dir">Next →</div><div class="pager-title">${escapeHtml(next.title)}</div></a>`;
+    }
+    pager.innerHTML = ph;
   }
 
-  async function loadDoc(docPath, frag = "", forceBust = false) {
+  async function loadDoc(docPath, frag = "") {
     currentDoc = docPath;
-    const refSel = document.getElementById("refSelect");
-    refSel.value = currentMode;
-    const branch = currentMode === "pages" ? "feat/v2-generic-modules" : currentMode;
-    document.getElementById("metaDoc").textContent = `${currentDoc}`;
-    document.getElementById("ghSourceLink").href = `https://github.com/${OWNER_REPO}/blob/${branch}/${currentDoc}`;
-    document.getElementById("homeLink").href = `?doc=docs/HANDBOOK.md&ref=${encodeURIComponent(currentMode)}`;
+    document.getElementById("ghLink").href = `https://github.com/${OWNER_REPO}/blob/${FALLBACK_BRANCH}/${currentDoc}`;
 
-    const bust = forceBust ? Date.now() : "";
-    const metaSync = document.getElementById("metaSync");
-    metaSync.textContent = "加载中...";
     let mdText = "";
     try {
-      let resp = await fetch(docFetchUrl(currentMode, currentDoc, bust));
-      if (!resp.ok && currentMode === "pages") {
-        // Fallback directly to raw.githubusercontent.com if Pages artifact lacks a non-docs root file
-        resp = await fetch(`https://raw.githubusercontent.com/${OWNER_REPO}/${branch}/${currentDoc}`);
+      let resp = await fetch(`./${currentDoc}`, { cache: "no-cache" });
+      if (!resp.ok) {
+        resp = await fetch(`https://raw.githubusercontent.com/${OWNER_REPO}/${FALLBACK_BRANCH}/${currentDoc}`);
       }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       mdText = await resp.text();
-      metaSync.textContent = currentMode === "pages"
-        ? `GitHub Pages 自动部署同步 (${new Date().toLocaleTimeString()})`
-        : `GitHub ${currentMode} 实时拉取 (${new Date().toLocaleTimeString()})`;
     } catch (err) {
-      metaSync.textContent = `加载失败: ${err.message}`;
-      document.getElementById("docContent").innerHTML = `<aside class="callout"><div class="callout-title">LOAD ERROR</div><div>无法加载 <code>${escapeHtml(currentDoc)}</code> (${escapeHtml(String(err))})</div></aside>`;
+      document.getElementById("docContent").innerHTML = `<aside class="callout"><div class="callout-title">Not Found</div><div>无法读取 <code>${escapeHtml(currentDoc)}</code> (${escapeHtml(String(err))})</div></aside>`;
+      renderSidebars([]);
       return;
     }
 
     const { html, toc } = renderMarkdown(mdText, currentDoc);
     document.getElementById("docContent").innerHTML = html;
     renderSidebars(toc);
+
+    const h1 = document.querySelector("#docContent h1");
+    document.title = h1 ? `${h1.textContent.replace(/^#\s*/, "")} — AsterLab` : "Docs — AsterLab";
 
     shots = [...document.querySelectorAll("figure.shot")].map((fig, idx) => {
       fig.addEventListener("click", () => openLb(idx));
@@ -642,9 +924,21 @@ figure.shot figcaption {
     } else {
       window.scrollTo({ top: 0 });
     }
-
     if (window.__renderMermaid) window.__renderMermaid();
   }
+
+  // Scroll-spy for right TOC
+  window.addEventListener("scroll", () => {
+    const headings = [...document.querySelectorAll("#docContent h2, #docContent h3")];
+    if (!headings.length) return;
+    let activeId = headings[0].id;
+    for (const h of headings) {
+      if (h.getBoundingClientRect().top <= 110) activeId = h.id;
+    }
+    document.querySelectorAll(".toc-item a").forEach((a) => {
+      a.classList.toggle("active", a.getAttribute("data-toc") === activeId);
+    });
+  }, { passive: true });
 
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-doc]");
@@ -652,17 +946,14 @@ figure.shot figcaption {
     e.preventDefault();
     const doc = a.getAttribute("data-doc");
     const frag = a.getAttribute("data-frag") || "";
-    const url = `?doc=${encodeURIComponent(doc)}&ref=${encodeURIComponent(currentMode)}${frag}`;
-    history.pushState({ doc, ref: currentMode }, "", url);
+    history.pushState({ doc }, "", `?doc=${encodeURIComponent(doc)}${frag}`);
     document.getElementById("sidebarLeft").classList.remove("open");
     loadDoc(doc, frag);
   });
 
   window.addEventListener("popstate", () => {
     const p = new URLSearchParams(location.search);
-    currentDoc = p.get("doc") || "docs/HANDBOOK.md";
-    currentMode = p.get("ref") || "pages";
-    loadDoc(currentDoc, location.hash);
+    loadDoc(p.get("doc") || "docs/HANDBOOK.md", location.hash);
   });
 
   document.getElementById("themeBtn").addEventListener("click", () => {
@@ -670,20 +961,39 @@ figure.shot figcaption {
     rootEl.setAttribute("data-theme", next);
     localStorage.setItem("asterlab-docs-theme", next);
   });
-  document.getElementById("refSelect").addEventListener("change", (e) => {
-    currentMode = e.target.value;
-    history.pushState({}, "", `?doc=${encodeURIComponent(currentDoc)}&ref=${encodeURIComponent(currentMode)}${location.hash}`);
-    loadDoc(currentDoc, location.hash, true);
+  document.getElementById("menuBtn").addEventListener("click", () => {
+    document.getElementById("sidebarLeft").classList.toggle("open");
   });
-  document.getElementById("refreshBtn").addEventListener("click", () => loadDoc(currentDoc, location.hash, true));
-  document.getElementById("menuBtn").addEventListener("click", () => document.getElementById("sidebarLeft").classList.toggle("open"));
 
-  const filter = document.getElementById("tocFilter");
-  filter.addEventListener("input", () => {
-    const q = filter.value.trim().toLowerCase();
-    document.querySelectorAll(".sidebar-left .nav-link, .sidebar-right .nav-link").forEach((a) => {
-      a.style.display = !q || a.textContent.toLowerCase().includes(q) ? "block" : "none";
-    });
+  // Search Modal (Cmd/Ctrl+K)
+  const cmdModal = document.getElementById("cmdModal");
+  const cmdInput = document.getElementById("cmdInput");
+  const cmdResults = document.getElementById("cmdResults");
+  function renderSearch(q) {
+    const needle = q.trim().toLowerCase();
+    const hits = FLAT_PAGES.filter((p) =>
+      !needle || p.title.toLowerCase().includes(needle) || p.group.toLowerCase().includes(needle) || p.path.toLowerCase().includes(needle)
+    );
+    cmdResults.innerHTML = hits.map((p) =>
+      `<div class="cmd-item" data-jump="${p.path}"><span>${escapeHtml(p.title)}</span><span class="cmd-group">${escapeHtml(p.group)}</span></div>`
+    ).join("");
+  }
+  const openSearch = () => {
+    cmdModal.classList.add("open");
+    cmdInput.value = "";
+    renderSearch("");
+    cmdInput.focus();
+  };
+  document.getElementById("searchBtn").addEventListener("click", openSearch);
+  cmdModal.addEventListener("click", (e) => { if (e.target === cmdModal) cmdModal.classList.remove("open"); });
+  cmdInput.addEventListener("input", () => renderSearch(cmdInput.value));
+  cmdResults.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-jump]");
+    if (!row) return;
+    const doc = row.getAttribute("data-jump");
+    cmdModal.classList.remove("open");
+    history.pushState({ doc }, "", `?doc=${encodeURIComponent(doc)}`);
+    loadDoc(doc);
   });
 
   const closeLb = () => lb.classList.remove("open");
@@ -692,12 +1002,16 @@ figure.shot figcaption {
   document.getElementById("lbNext").addEventListener("click", () => openLb((lbIdx + 1) % shots.length));
   lb.addEventListener("click", (e) => { if (e.target === lb) closeLb(); });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeLb();
+    if (e.key === "Escape") { closeLb(); cmdModal.classList.remove("open"); }
     if (lb.classList.contains("open")) {
       if (e.key === "ArrowLeft") openLb((lbIdx - 1 + shots.length) % shots.length);
       if (e.key === "ArrowRight") openLb((lbIdx + 1) % shots.length);
     }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); filter.focus(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      if (cmdModal.classList.contains("open")) cmdModal.classList.remove("open");
+      else openSearch();
+    }
   });
 
   loadDoc(currentDoc, location.hash);
