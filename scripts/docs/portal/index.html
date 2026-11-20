@@ -52,7 +52,7 @@ a:hover { text-decoration: underline; }
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 20px;
+  padding: 8px 22px;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -76,23 +76,26 @@ a:hover { text-decoration: underline; }
 }
 .btn-pill:hover { background: var(--elevated); text-decoration: none; }
 
+/* 3-column OMP/VitePress layout: Left Docs Tree + Center Content + Right On-This-Page TOC */
 .layout {
-  max-width: 1440px;
+  max-width: 1560px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 276px minmax(0, 1fr);
+  grid-template-columns: 256px minmax(0, 1fr) 232px;
   gap: 28px;
   padding: 24px 24px 72px;
 }
-.sidebar {
+.sidebar-left, .sidebar-right {
   position: sticky;
   top: 74px;
-  max-height: calc(100vh - 96px);
+  max-height: calc(100vh - 94px);
   overflow-y: auto;
-  padding-right: 8px;
   font-size: 13.5px;
 }
-.nav-section { margin-bottom: 18px; }
+.sidebar-left { padding-right: 10px; border-right: 1px solid var(--border); }
+.sidebar-right { padding-left: 12px; border-left: 1px solid var(--border); }
+
+.nav-section { margin-bottom: 16px; }
 .nav-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
   color: var(--muted); font-weight: 700; margin-bottom: 6px; padding-left: 8px;
@@ -102,10 +105,10 @@ a:hover { text-decoration: underline; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
 }
 .nav-link:hover, .nav-link.active { background: var(--elevated); color: var(--ink); text-decoration: none; }
-.nav-link.lvl-3 { padding-left: 22px; font-size: 12.5px; }
+.nav-link.lvl-3 { padding-left: 20px; font-size: 12.5px; }
 .nav-link.doc-current { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
-.content { min-width: 0; max-width: 1040px; }
+.content { min-width: 0; max-width: 980px; }
 .meta-bar {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
   font-size: 12.5px; color: var(--muted); padding: 8px 14px; margin-bottom: 18px;
@@ -192,14 +195,18 @@ figure.shot figcaption {
 
 .loading { padding: 48px 0; text-align: center; color: var(--muted); }
 .menu-btn { display: none; }
-@media (max-width: 920px) {
+@media (max-width: 1180px) {
+  .layout { grid-template-columns: 240px minmax(0, 1fr); }
+  .sidebar-right { display: none; }
+}
+@media (max-width: 860px) {
   .layout { grid-template-columns: 1fr; padding: 14px 14px 64px; }
   .menu-btn { display: inline-flex; }
-  .sidebar {
+  .sidebar-left {
     display: none; position: fixed; left: 0; top: 54px; bottom: 0; width: 290px; max-height: none;
     z-index: 50; background: var(--bg); padding: 16px; border-right: 1px solid var(--border);
   }
-  .sidebar.open { display: block; }
+  .sidebar-left.open { display: block; }
   .gallery-table, .gallery-table thead, .gallery-table tbody, .gallery-table tr, .gallery-table th, .gallery-table td {
     display: block; width: 100%;
   }
@@ -211,29 +218,31 @@ figure.shot figcaption {
   <div class="brand">
     <button class="btn-pill menu-btn" id="menuBtn" type="button">☰ 目录</button>
     <a href="?doc=docs/HANDBOOK.md" id="homeLink" style="color:inherit;text-decoration:none;">AsterLab Engineering Handbook</a>
-    <span class="brand-badge">Live GitHub Sync</span>
+    <span class="brand-badge">AsterML v2 · GitHub Pages</span>
   </div>
   <div class="top-actions">
-    <input class="search-input" id="tocFilter" type="search" placeholder="过滤章节 (Ctrl+K)..." />
-    <select class="ref-select" id="refSelect" title="GitHub 分支">
-      <option value="feat/v2-generic-modules">feat/v2-generic-modules</option>
-      <option value="main">main</option>
+    <input class="search-input" id="tocFilter" type="search" placeholder="过滤目录 (Ctrl+K)..." />
+    <select class="ref-select" id="refSelect" title="数据源模式">
+      <option value="pages">GitHub Pages 同源站点</option>
+      <option value="feat/v2-generic-modules">GitHub 实时 (feat/v2-generic-modules)</option>
+      <option value="main">GitHub 实时 (main)</option>
     </select>
-    <button class="btn-pill" id="refreshBtn" type="button" title="从 GitHub 重新拉取最新内容">🔄 同步</button>
+    <button class="btn-pill" id="refreshBtn" type="button" title="拉取最新">🔄 同步</button>
     <a class="btn-pill" id="ghSourceLink" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener">GitHub</a>
     <button class="btn-pill" id="themeBtn" type="button">🌓 主题</button>
   </div>
 </header>
 
 <div class="layout">
-  <aside class="sidebar" id="sidebar"></aside>
+  <aside class="sidebar-left" id="sidebarLeft"></aside>
   <main class="content">
-    <div class="meta-bar" id="metaBar">
+    <div class="meta-bar">
       <span id="metaDoc">docs/HANDBOOK.md</span>
-      <span id="metaSync">正在从 GitHub 实时拉取...</span>
+      <span id="metaSync">加载中...</span>
     </div>
-    <article id="docContent"><div class="loading">正在同步 GitHub 最新文档与截图清单...</div></article>
+    <article id="docContent"><div class="loading">正在加载 AsterLab 工程与产品手册...</div></article>
   </main>
+  <aside class="sidebar-right" id="sidebarRight"></aside>
 </div>
 
 <div id="lightbox">
@@ -247,38 +256,67 @@ figure.shot figcaption {
 <script>
 (() => {
   const OWNER_REPO = "LLLin000/AsterLab";
-  const CORE_DOCS = [
-    ["docs/HANDBOOK.md", "Handbook 全景手册"],
-    ["docs/README.md", "权威文档索引"],
-    ["docs/architecture.md", "系统架构与双端边界"],
-    ["docs/asterdoc-contract.md", "AsterML v2 SDK 契约"],
-    ["docs/sdk/v2-module-visual-catalog.md", "21 模块与 PDF 全图鉴"],
-    ["docs/product/design-system.md", "UI Design System"],
-    ["docs/product/ux-contract.md", "UX 交互契约"],
-    ["DESIGN.md", "DESIGN（v2 执行说明）"],
-    ["CONTEXT.md", "CONTEXT（领域术语）"],
-    ["AGENT_API.md", "AGENT_API（CLI/HTTP）"],
+  // OMP-style grouped documentation hierarchy
+  const DOC_GROUPS = [
+    ["总纲与设计入口", [
+      ["docs/HANDBOOK.md", "Handbook 全景手册"],
+      ["docs/README.md", "权威文档索引"],
+      ["DESIGN.md", "DESIGN（v2 执行说明）"],
+      ["CONTEXT.md", "CONTEXT（领域术语）"],
+    ]],
+    ["架构、存储与接口", [
+      ["docs/architecture.md", "系统架构与双端边界"],
+      ["docs/sdk/v2-system-audit-and-vault-architecture.md", "Pure-Go Vault 与审计"],
+      ["AGENT_API.md", "AGENT_API（CLI/HTTP）"],
+      ["docs/KNOWN_LIMITATIONS.md", "已知限制清单"],
+    ]],
+    ["AsterML v2 SDK 与图鉴", [
+      ["docs/asterdoc-contract.md", "AsterML v2 契约总纲"],
+      ["docs/sdk/v2-module-visual-catalog.md", "21 模块与 PDF 全图鉴"],
+      ["docs/sdk/AGENT_GUIDE.md", "Agent 实验创作指南"],
+      ["docs/sdk/agent-svg-kit.md", "SVG 科研绘件说明"],
+      ["docs/sdk/v2-architecture-retrospective-and-evidence.md", "v2 架构复盘与证据"],
+    ]],
+    ["UI 视觉与交互契约", [
+      ["docs/product/design-system.md", "Design System & Liquid Glass"],
+      ["docs/product/ux-contract.md", "桌面/移动端 UX 契约"],
+      ["docs/product/audit-shell-design.md", "Shell 外观专项审计"],
+      ["docs/product/ownership.md", "页面与状态归属权"],
+    ]],
+    ["工程与 CI 规范", [
+      ["docs/engineering/cross-platform-builds.md", "跨平台构建与 Windows Gate"],
+      ["docs/engineering/kandev-card-template.md", "Kandev 任务卡模板"],
+      ["docs/engineering/local-ci.md", "本地 CI 验证流程"],
+    ]],
   ];
 
   const rootEl = document.documentElement;
-  const savedTheme = localStorage.getItem("asterlab-docs-theme") || "light";
-  rootEl.setAttribute("data-theme", savedTheme);
+  rootEl.setAttribute("data-theme", localStorage.getItem("asterlab-docs-theme") || "light");
 
   const params = new URLSearchParams(location.search);
   let currentDoc = params.get("doc") || "docs/HANDBOOK.md";
-  let currentRef = params.get("ref") || localStorage.getItem("asterlab-docs-ref") || "feat/v2-generic-modules";
+  // "pages" uses same-origin deployed files on GitHub Pages; branch refs pull live from raw.githubusercontent.com / jsDelivr
+  let currentMode = params.get("ref") || "pages";
 
-  function rawBaseUrl(ref, path, cacheBust) {
-    const clean = path.replace(/^\/+/, "");
-    const qs = cacheBust ? `?t=${cacheBust}` : "";
-    if (location.hostname === "docs.asterlab.party") {
-      return `/gh/${ref}/${clean}${qs}`;
-    }
-    return `https://raw.githubusercontent.com/${OWNER_REPO}/${ref}/${clean}${qs}`;
+  function docFetchUrl(mode, repoRel, bust) {
+    const clean = repoRel.replace(/^\/+/, "");
+    const qs = bust ? `?t=${bust}` : "";
+    if (mode === "pages") return `./${clean}${qs}`;
+    return `https://raw.githubusercontent.com/${OWNER_REPO}/${mode}/${clean}${qs}`;
   }
-  function cdnFallbackUrl(ref, path) {
-    const clean = path.replace(/^\/+/, "");
-    return `https://cdn.jsdelivr.net/gh/${OWNER_REPO}@${ref}/${clean}`;
+  function assetUrls(mode, repoRel) {
+    const clean = repoRel.replace(/^\/+/, "");
+    const branch = mode === "pages" ? "feat/v2-generic-modules" : mode;
+    if (mode === "pages") {
+      return {
+        primary: `./${clean}`,
+        fallback: `https://cdn.jsdelivr.net/gh/${OWNER_REPO}@${branch}/${clean}`,
+      };
+    }
+    return {
+      primary: `https://cdn.jsdelivr.net/gh/${OWNER_REPO}@${branch}/${clean}`,
+      fallback: `https://raw.githubusercontent.com/${OWNER_REPO}/${branch}/${clean}`,
+    };
   }
 
   function normalizeRepoPath(curDocPath, relHref) {
@@ -321,18 +359,15 @@ figure.shot figcaption {
     if (!pathPart) return { href: frag || "#", isDoc: false };
     const repoRel = normalizeRepoPath(curDoc, pathPart.replace(/\\/g, "/"));
     if (/\.(png|jpe?g|svg|webp|gif|pdf)$/i.test(repoRel)) {
-      return {
-        href: rawBaseUrl(currentRef, repoRel, ""),
-        fallback: cdnFallbackUrl(currentRef, repoRel),
-        isDoc: false,
-        isAsset: true,
-      };
+      const a = assetUrls(currentMode, repoRel);
+      return { href: a.primary, fallback: a.fallback, isDoc: false, isAsset: true };
     }
     if (/\.md$/i.test(repoRel)) {
-      return { href: `?doc=${encodeURIComponent(repoRel)}&ref=${encodeURIComponent(currentRef)}${frag}`, repoRel, frag, isDoc: true };
+      return { href: `?doc=${encodeURIComponent(repoRel)}&ref=${encodeURIComponent(currentMode)}${frag}`, repoRel, frag, isDoc: true };
     }
+    const branch = currentMode === "pages" ? "feat/v2-generic-modules" : currentMode;
     const ghFrag = /^#L\d+(-L\d+)?$/i.test(frag) ? frag : "";
-    return { href: `https://github.com/${OWNER_REPO}/blob/${currentRef}/${repoRel}${ghFrag}`, isDoc: false };
+    return { href: `https://github.com/${OWNER_REPO}/blob/${branch}/${repoRel}${ghFrag}`, isDoc: false };
   }
 
   function renderInline(text, curDoc) {
@@ -540,54 +575,61 @@ figure.shot figcaption {
     lb.classList.add("open");
   }
 
-  function renderSidebar(toc) {
-    const sb = document.getElementById("sidebar");
-    let h = `<div class="nav-section"><div class="nav-label">本页目录</div>`;
+  function renderSidebars(toc) {
+    const left = document.getElementById("sidebarLeft");
+    let lh = "";
+    for (const [groupName, items] of DOC_GROUPS) {
+      lh += `<div class="nav-section"><div class="nav-label">${escapeHtml(groupName)}</div>`;
+      for (const [docPath, label] of items) {
+        const cls = docPath === currentDoc ? "nav-link doc-current" : "nav-link";
+        lh += `<a class="${cls}" href="?doc=${encodeURIComponent(docPath)}&ref=${encodeURIComponent(currentMode)}" data-doc="${docPath}">${escapeHtml(label)}</a>`;
+      }
+      lh += `</div>`;
+    }
+    left.innerHTML = lh;
+
+    const right = document.getElementById("sidebarRight");
+    let rh = `<div class="nav-section"><div class="nav-label">本页目录</div>`;
     for (const item of toc) {
-      h += `<a class="nav-link lvl-${item.level}" href="#${item.id}">${escapeHtml(item.text)}</a>`;
+      rh += `<a class="nav-link lvl-${item.level}" href="#${item.id}">${escapeHtml(item.text)}</a>`;
     }
-    h += `</div><div class="nav-section"><div class="nav-label">权威专章</div>`;
-    for (const [docPath, label] of CORE_DOCS) {
-      const cls = docPath === currentDoc ? "nav-link doc-current" : "nav-link";
-      h += `<a class="${cls}" href="?doc=${encodeURIComponent(docPath)}&ref=${encodeURIComponent(currentRef)}" data-doc="${docPath}">${escapeHtml(label)}</a>`;
-    }
-    h += `</div>`;
-    sb.innerHTML = h;
+    rh += `</div>`;
+    right.innerHTML = rh;
   }
 
   async function loadDoc(docPath, frag = "", forceBust = false) {
     currentDoc = docPath;
     const refSel = document.getElementById("refSelect");
-    if (![...refSel.options].some((o) => o.value === currentRef)) {
-      refSel.add(new Option(currentRef, currentRef));
-    }
-    refSel.value = currentRef;
-    document.getElementById("metaDoc").textContent = `${currentDoc} @ ${currentRef}`;
-    document.getElementById("ghSourceLink").href = `https://github.com/${OWNER_REPO}/blob/${currentRef}/${currentDoc}`;
-    document.getElementById("homeLink").href = `?doc=docs/HANDBOOK.md&ref=${encodeURIComponent(currentRef)}`;
+    refSel.value = currentMode;
+    const branch = currentMode === "pages" ? "feat/v2-generic-modules" : currentMode;
+    document.getElementById("metaDoc").textContent = `${currentDoc}`;
+    document.getElementById("ghSourceLink").href = `https://github.com/${OWNER_REPO}/blob/${branch}/${currentDoc}`;
+    document.getElementById("homeLink").href = `?doc=docs/HANDBOOK.md&ref=${encodeURIComponent(currentMode)}`;
 
-    const bust = forceBust ? Date.now() : Math.floor(Date.now() / 30000);
+    const bust = forceBust ? Date.now() : "";
     const metaSync = document.getElementById("metaSync");
-    metaSync.textContent = "正在拉取 GitHub 最新内容...";
+    metaSync.textContent = "加载中...";
     let mdText = "";
     try {
-      let resp = await fetch(rawBaseUrl(currentRef, currentDoc, bust));
-      if (!resp.ok && currentRef === "main" && !params.get("ref")) {
-        currentRef = "feat/v2-generic-modules";
-        resp = await fetch(rawBaseUrl(currentRef, currentDoc, bust));
+      let resp = await fetch(docFetchUrl(currentMode, currentDoc, bust));
+      if (!resp.ok && currentMode === "pages") {
+        // Fallback directly to raw.githubusercontent.com if Pages artifact lacks a non-docs root file
+        resp = await fetch(`https://raw.githubusercontent.com/${OWNER_REPO}/${branch}/${currentDoc}`);
       }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       mdText = await resp.text();
-      metaSync.textContent = `已与 GitHub 同步 (${new Date().toLocaleTimeString()}) · 图片 0 VPS 存储`;
+      metaSync.textContent = currentMode === "pages"
+        ? `GitHub Pages 自动部署同步 (${new Date().toLocaleTimeString()})`
+        : `GitHub ${currentMode} 实时拉取 (${new Date().toLocaleTimeString()})`;
     } catch (err) {
-      metaSync.textContent = `同步失败: ${err.message}`;
-      document.getElementById("docContent").innerHTML = `<aside class="callout"><div class="callout-title">FETCH ERROR</div><div>无法拉取 <code>${escapeHtml(currentDoc)}</code> (${escapeHtml(String(err))})</div></aside>`;
+      metaSync.textContent = `加载失败: ${err.message}`;
+      document.getElementById("docContent").innerHTML = `<aside class="callout"><div class="callout-title">LOAD ERROR</div><div>无法加载 <code>${escapeHtml(currentDoc)}</code> (${escapeHtml(String(err))})</div></aside>`;
       return;
     }
 
     const { html, toc } = renderMarkdown(mdText, currentDoc);
     document.getElementById("docContent").innerHTML = html;
-    renderSidebar(toc);
+    renderSidebars(toc);
 
     shots = [...document.querySelectorAll("figure.shot")].map((fig, idx) => {
       fig.addEventListener("click", () => openLb(idx));
@@ -610,16 +652,16 @@ figure.shot figcaption {
     e.preventDefault();
     const doc = a.getAttribute("data-doc");
     const frag = a.getAttribute("data-frag") || "";
-    const url = `?doc=${encodeURIComponent(doc)}&ref=${encodeURIComponent(currentRef)}${frag}`;
-    history.pushState({ doc, ref: currentRef }, "", url);
-    document.getElementById("sidebar").classList.remove("open");
+    const url = `?doc=${encodeURIComponent(doc)}&ref=${encodeURIComponent(currentMode)}${frag}`;
+    history.pushState({ doc, ref: currentMode }, "", url);
+    document.getElementById("sidebarLeft").classList.remove("open");
     loadDoc(doc, frag);
   });
 
   window.addEventListener("popstate", () => {
     const p = new URLSearchParams(location.search);
     currentDoc = p.get("doc") || "docs/HANDBOOK.md";
-    currentRef = p.get("ref") || currentRef;
+    currentMode = p.get("ref") || "pages";
     loadDoc(currentDoc, location.hash);
   });
 
@@ -627,22 +669,19 @@ figure.shot figcaption {
     const next = rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark";
     rootEl.setAttribute("data-theme", next);
     localStorage.setItem("asterlab-docs-theme", next);
-    if (window.__renderMermaid) window.__renderMermaid();
   });
   document.getElementById("refSelect").addEventListener("change", (e) => {
-    currentRef = e.target.value;
-    localStorage.setItem("asterlab-docs-ref", currentRef);
-    const url = `?doc=${encodeURIComponent(currentDoc)}&ref=${encodeURIComponent(currentRef)}${location.hash}`;
-    history.pushState({}, "", url);
+    currentMode = e.target.value;
+    history.pushState({}, "", `?doc=${encodeURIComponent(currentDoc)}&ref=${encodeURIComponent(currentMode)}${location.hash}`);
     loadDoc(currentDoc, location.hash, true);
   });
   document.getElementById("refreshBtn").addEventListener("click", () => loadDoc(currentDoc, location.hash, true));
-  document.getElementById("menuBtn").addEventListener("click", () => document.getElementById("sidebar").classList.toggle("open"));
+  document.getElementById("menuBtn").addEventListener("click", () => document.getElementById("sidebarLeft").classList.toggle("open"));
 
   const filter = document.getElementById("tocFilter");
   filter.addEventListener("input", () => {
     const q = filter.value.trim().toLowerCase();
-    document.querySelectorAll(".sidebar .nav-link").forEach((a) => {
+    document.querySelectorAll(".sidebar-left .nav-link, .sidebar-right .nav-link").forEach((a) => {
       a.style.display = !q || a.textContent.toLowerCase().includes(q) ? "block" : "none";
     });
   });
@@ -661,17 +700,7 @@ figure.shot figcaption {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); filter.focus(); }
   });
 
-  // Auto-detect whether main already has a newer HANDBOOK.md when user didn't pin ?ref=
-  async function init() {
-    if (!params.get("ref")) {
-      try {
-        const res = await fetch(rawBaseUrl("main", "docs/HANDBOOK.md", Math.floor(Date.now() / 60000)));
-        if (res.ok) currentRef = "main";
-      } catch {}
-    }
-    loadDoc(currentDoc, location.hash);
-  }
-  init();
+  loadDoc(currentDoc, location.hash);
 })();
 </script>
 <script type="module">

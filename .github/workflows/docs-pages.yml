@@ -1,0 +1,57 @@
+name: docs-pages
+
+on:
+  push:
+    branches:
+      - main
+      - feat/v2-generic-modules
+    paths:
+      - "docs/**"
+      - "scripts/docs/**"
+      - "CONTEXT.md"
+      - "DESIGN.md"
+      - "AGENT_API.md"
+      - ".github/workflows/docs-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Assemble static docs artifact
+        run: |
+          mkdir -p _site/docs
+          cp scripts/docs/portal/index.html _site/index.html
+          cp -r docs/. _site/docs/
+          for f in CONTEXT.md DESIGN.md AGENT_API.md README.md; do
+            if [ -f "$f" ]; then cp "$f" "_site/$f"; fi
+          done
+          printf 'docs.asterlab.party\n' > _site/CNAME
+          touch _site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
