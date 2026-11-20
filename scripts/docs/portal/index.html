@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Docs — AsterLab</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%236c5ce7' d='M16 3 28 26H21.5L16 14.5 10.5 26H4L16 3Z'/%3E%3C/svg%3E" />
 <style>
 :root {
   --bg: #ffffff;
@@ -52,9 +53,7 @@ a { color: inherit; text-decoration: none; }
   top: 0;
   z-index: 40;
   height: 56px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  background: color-mix(in srgb, var(--bg) 96%, transparent);
   border-bottom: 1px solid var(--rule);
 }
 .topbar-inner {
@@ -363,6 +362,8 @@ figure.shot {
   border: 1px solid var(--rule);
   background: var(--bg-elev);
   transition: border-color 0.15s;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
 }
 figure.shot:hover { border-color: var(--rule-strong); }
 figure.shot img {
@@ -416,8 +417,7 @@ figure.shot figcaption {
   align-items: flex-start;
   justify-content: center;
   padding-top: 14vh;
-  background: rgba(0, 0, 0, 0.52);
-  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.56);
 }
 #cmdModal.open { display: flex; }
 .cmd-panel {
@@ -450,7 +450,7 @@ figure.shot figcaption {
 /* Lightbox */
 #lightbox {
   position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center;
-  flex-direction: column; padding: 24px; background: rgba(8, 9, 12, 0.90); backdrop-filter: blur(10px);
+  flex-direction: column; padding: 24px; background: rgba(8, 9, 12, 0.94);
 }
 #lightbox.open { display: flex; }
 #lightbox img { max-width: 92vw; max-height: 82vh; border: 1px solid rgba(255,255,255,0.14); }
@@ -531,6 +531,7 @@ figure.shot figcaption {
   <div class="lb-cap" id="lbCap"></div>
 </div>
 
+<script src="./docs-bundle.js"></script>
 <script>
 (() => {
   const OWNER_REPO = "LLLin000/AsterLab";
@@ -888,10 +889,24 @@ figure.shot figcaption {
 
   const docCache = new Map();
   const inflightFetch = new Map();
+  const bundledDocs = (window.__ASTERLAB_DOCS__ && typeof window.__ASTERLAB_DOCS__ === "object") ? window.__ASTERLAB_DOCS__ : null;
   let loadToken = 0;
 
-  async function fetchMarkdown(docPath) {
+  function getCachedOrBundled(docPath) {
     if (docCache.has(docPath)) return docCache.get(docPath);
+    if (bundledDocs && Object.prototype.hasOwnProperty.call(bundledDocs, docPath)) {
+      const mdText = bundledDocs[docPath];
+      const parsed = renderMarkdown(mdText, docPath);
+      const entry = { mdText, html: parsed.html, toc: parsed.toc };
+      docCache.set(docPath, entry);
+      return entry;
+    }
+    return null;
+  }
+
+  async function fetchMarkdown(docPath) {
+    const syncEntry = getCachedOrBundled(docPath);
+    if (syncEntry) return syncEntry;
     if (inflightFetch.has(docPath)) return inflightFetch.get(docPath);
     const p = (async () => {
       let resp = await fetch(`./${docPath}`);
@@ -914,7 +929,7 @@ figure.shot figcaption {
   }
 
   function prefetchDoc(docPath) {
-    if (!docPath || docCache.has(docPath) || inflightFetch.has(docPath)) return;
+    if (!docPath || getCachedOrBundled(docPath) || inflightFetch.has(docPath)) return;
     fetchMarkdown(docPath).catch(() => {});
   }
 
@@ -934,14 +949,16 @@ figure.shot figcaption {
     currentDoc = docPath;
     document.getElementById("ghLink").href = `https://github.com/${OWNER_REPO}/blob/${FALLBACK_BRANCH}/${currentDoc}`;
 
-    let entry;
-    try {
-      entry = await fetchMarkdown(currentDoc);
-    } catch (err) {
-      if (reqId !== loadToken) return;
-      document.getElementById("docContent").innerHTML = `<aside class="callout"><div class="callout-title">Not Found</div><div>无法读取 <code>${escapeHtml(currentDoc)}</code> (${escapeHtml(String(err))})</div></aside>`;
-      renderSidebars([]);
-      return;
+    let entry = getCachedOrBundled(currentDoc);
+    if (!entry) {
+      try {
+        entry = await fetchMarkdown(currentDoc);
+      } catch (err) {
+        if (reqId !== loadToken) return;
+        document.getElementById("docContent").innerHTML = `<aside class="callout"><div class="callout-title">Not Found</div><div>无法读取 <code>${escapeHtml(currentDoc)}</code> (${escapeHtml(String(err))})</div></aside>`;
+        renderSidebars([]);
+        return;
+      }
     }
     if (reqId !== loadToken) return;
 
@@ -1022,12 +1039,23 @@ figure.shot figcaption {
   const cmdResults = document.getElementById("cmdResults");
   function renderSearch(q) {
     const needle = q.trim().toLowerCase();
-    const hits = FLAT_PAGES.filter((p) =>
-      !needle || p.title.toLowerCase().includes(needle) || p.group.toLowerCase().includes(needle) || p.path.toLowerCase().includes(needle)
-    );
-    cmdResults.innerHTML = hits.map((p) =>
-      `<div class="cmd-item" data-jump="${p.path}"><span>${escapeHtml(p.title)}</span><span class="cmd-group">${escapeHtml(p.group)}</span></div>`
-    ).join("");
+    const hits = [];
+    for (const p of FLAT_PAGES) {
+      const metaMatch = !needle || p.title.toLowerCase().includes(needle) || p.group.toLowerCase().includes(needle) || p.path.toLowerCase().includes(needle);
+      let snippet = "";
+      if (needle && !metaMatch) {
+        const raw = (docCache.get(p.path)?.mdText) || (bundledDocs ? bundledDocs[p.path] : "") || "";
+        const idx = raw.toLowerCase().indexOf(needle);
+        if (idx < 0) continue;
+        const start = Math.max(0, idx - 24);
+        snippet = raw.slice(start, Math.min(raw.length, idx + needle.length + 38)).replace(/\s+/g, " ").trim();
+      }
+      hits.push({ ...p, snippet });
+    }
+    cmdResults.innerHTML = hits.map((p) => {
+      const sub = p.snippet ? `<div style="font-size:11.5px;color:var(--fg-faint);margin-top:2px;">…${escapeHtml(p.snippet)}…</div>` : "";
+      return `<div class="cmd-item" data-jump="${p.path}"><div><div>${escapeHtml(p.title)}</div>${sub}</div><span class="cmd-group">${escapeHtml(p.group)}</span></div>`;
+    }).join("");
   }
   const openSearch = () => {
     cmdModal.classList.add("open");

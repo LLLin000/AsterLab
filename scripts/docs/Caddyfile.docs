@@ -1,0 +1,16 @@
+# Caddy v2 configuration for self-hosted AsterLab Docs (`docs.asterlab.party`)
+# Include this block inside your VPS Caddyfile (e.g. `import /path/to/Caddyfile.docs`
+# or copy the site block into `/etc/caddy/Caddyfile`) and reload Caddy.
+
+docs.asterlab.party {
+	root * /var/www/docs.asterlab.party
+	encode zstd gzip
+
+	@immutable path *.png *.jpg *.jpeg *.webp *.svg *.gif *.pdf
+	header @immutable Cache-Control "public, max-age=604800, stale-while-revalidate=86400"
+
+	@entry path / /index.html /docs-bundle.js *.md
+	header @entry Cache-Control "public, max-age=60, must-revalidate"
+
+	file_server
+}
