@@ -15,7 +15,7 @@ Section "Install"
     SetShellVarContext current
     SetOutPath "$INSTDIR"
     File "..\prototypes\mygo-run\dist\mygo-run.exe"
-    File "..\prototypes\mygo-run\dist\Runs.dll"
+    File "..\prototypes\mygo-run\dist\asterlab.exe"
     File "..\prototypes\mygo-run\dist\BUILD_INFO.txt"
     File "..\prototypes\mygo-run\assets\asterlab.ico"
     Delete "$INSTDIR\AsterLab-MyGo.bat"
@@ -45,7 +45,7 @@ SectionEnd
 Section "Uninstall"
     SetShellVarContext current
     Delete "$INSTDIR\mygo-run.exe"
-    Delete "$INSTDIR\Runs.dll"
+    Delete "$INSTDIR\asterlab.exe"
     Delete "$INSTDIR\BUILD_INFO.txt"
     Delete "$INSTDIR\asterlab.ico"
     Delete "$INSTDIR\AsterLab-MyGo.bat"

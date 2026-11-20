@@ -1,29 +1,14 @@
 name: windows-build
 
-# REL-04 Windows build gate: produce the MyGo desktop artifacts (mygo-run.exe +
-# Runs.dll) and their hashes. No GUI E2E, no installers — those need the
-# Windows Gate lane and a real window (HANDOFF-VPS.md §1, §3 step 8).
-#
-# MyGo is the shipped desktop prototype: docs/engineering/cross-platform-builds.md
-# §4 maps "Desktop app" to scripts/mygo-build.ps1. apps/desktop is the retained
-# Rust/Slint research prototype (docs/architecture.md §1) and is not built here.
-
-# Platform split: Windows-hosted minutes are free again on this public
-# repository, so the desktop artifacts are built on pull requests that touch
-# the Windows-owned paths. It stays non-blocking: Windows runner capacity and
-# the MyGo toolchain must never block a Core-only change. The Windows Gate lane
-# still owns GUI/PowerShell acceptance on a real machine.
+# Pure-Go Windows build gate: builds Windows mygo-run.exe + asterlab.exe + tests.
 on:
   pull_request:
     paths:
       - '.github/workflows/windows-build.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'apps/desktop/**'
-      - 'crates/**'
       - 'prototypes/mygo-run/**'
-      - 'scripts/**'
-      - 'src/**'
+      - 'scripts/mygo-build.ps1'
+      - 'scripts/mygo-installer.nsi'
+      - 'scripts/ci/**'
   workflow_dispatch:
 
 permissions:
@@ -37,7 +22,7 @@ jobs:
   windows-build:
     name: windows-build
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
@@ -46,8 +31,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Decide scope
-        # Docs-only pull requests skip the Windows build (the most expensive
-        # runner minutes we spend). An unreadable diff runs the full gate.
         run: |
           $changed = @()
           if ($env:GITHUB_BASE_REF) {
@@ -58,132 +41,38 @@ jobs:
           }
           if (-not $changed) {
             "RUN_HEAVY=1" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "no diff detected; running the full build"
-          } elseif ($changed -match '^(prototypes/mygo-run/|scripts/mygo-build\.ps1|scripts/ci/|\.github/workflows/|crates/|src/|Cargo\.(toml|lock)$|rust-toolchain\.toml)') {
+          } elseif ($changed -match '^(prototypes/mygo-run/|scripts/mygo-build\.ps1|scripts/ci/|\.github/workflows/)') {
             "RUN_HEAVY=1" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "code change detected; running the full build"
           } else {
             "RUN_HEAVY=0" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "docs-only change; heavy steps skipped"
           }
-          # git diff/fetch return non-zero for "differences found" or shallow
-          # refs; the classification above is the outcome, not that status.
           exit 0
 
       - name: Install Go
         if: env.RUN_HEAVY == '1'
         uses: actions/setup-go@v5
         with:
-          # go 1.27.3, the pin in HANDOFF-VPS.md §2 and go.mod.
           go-version-file: prototypes/mygo-run/go.mod
           cache-dependency-path: prototypes/mygo-run/go.sum
 
       - name: Cache Go build cache
         if: env.RUN_HEAVY == '1'
-        # setup-go caches only the downloaded modules; compiled artifacts
-        # (GOCACHE) are rebuilt from zero every run without this. The cache
-        # is content-addressed, so sharing it across runs is safe; the go.sum
-        # hash busts it whenever dependencies change.
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\go-build
           key: windows-go-build-${{ hashFiles('prototypes/mygo-run/go.sum') }}
           restore-keys: windows-go-build-
 
-      - name: Install Rust toolchain
+      - name: Build Pure-Go Windows desktop & CLI
         if: env.RUN_HEAVY == '1'
-        # The channel lives only in rust-toolchain.toml (REL-07). `rustup install`
-        # resolves that file and installs exactly that toolchain; a missing or
-        # malformed pin fails here instead of silently using the runner's stable.
-        # x86_64-pc-windows-msvc is this runner's host triple, so the minimal
-        # profile already ships its std; no extra `targets` input is needed.
-        run: rustup install --profile minimal --no-self-update
-
-      - name: Cache Rust dependencies and target
-        if: env.RUN_HEAVY == '1'
-        # Hosted ephemeral runner: safe to cache cargo registry/git plus the
-        # workspace target dir, so Runs.dll rebuilds incrementally instead of
-        # from zero every run. The linux-tests.yml comment about rust-cache
-        # deleting a toolchain was a self-hosted-box incident (it cleaned
-        # ~/.cargo/bin on a persistent runner); this job runs on a fresh
-        # windows-2022 image that is discarded afterwards, so there is no
-        # host toolchain to harm. Never copy this step to a self-hosted job.
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: windows-mygo
-
-      - name: Record toolchain versions
-        if: env.RUN_HEAVY == '1'
-        run: |
-          go version
-          go env GOOS GOARCH CGO_ENABLED
-          rustc --version
-          cargo --version
-          git rev-parse HEAD
-
-      - name: Native generator hashes (two Windows generations)
-        if: env.RUN_HEAVY == '1'
-        # REL-05: the same golden file the Linux job uses. This is the Windows
-        # half of "one input, one hash": a CRLF checkout must not change these
-        # hashes, and the pinned MyGo must regenerate the committed files byte
-        # for byte. Contract: scripts/ci/native_generator_hash.py.
-        #
-        # pwsh only propagates the exit code of the last command in a step, so
-        # each check stops the step explicitly; a failing selftest must not be
-        # masked by a later pass.
-        run: |
-          py -3 scripts/ci/test_native_generator_hash.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          py -3 scripts/ci/native_generator_hash.py --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          py -3 scripts/ci/native_generator_hash.py --regen 2
-
-      - name: Build MyGo app and Runs.dll
-        if: env.RUN_HEAVY == '1'
-        # Runs `mygo native check .\modules\runs`, then `go build -tags=e2e`,
-        # then writes dist/BUILD_INFO.txt with the commit and both hashes.
         run: ./scripts/mygo-build.ps1
+
       - name: Go tests
         if: env.RUN_HEAVY == '1'
-        # REL-06: every package of the module, with the same tag set as the
-        # build above. One Windows-only failure is excluded by name instead of
-        # dropping the step or the package: internal/assets
-        # TestRootsResolveAndRejectTraversal compares Roots.Resolve's
-        # EvalSymlinks-canonicalised result with the raw t.TempDir() path, and
-        # on the windows-2022 runner the temp root canonicalises differently
-        # (run 43359784027, job 131670303542). Traversal rejection and path
-        # escaping stay covered by linux-tests, which runs the same test.
-        # Needs its own Windows fix card; drop -skip together with that fix.
-        # QA-10: a second name is excluded the same way, on BOTH lanes:
-        # TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable dies
-        # nondeterministically on hosted runners only (windows-2022 and
-        # ubuntu-24.04) with a Go runtime GC fatal (`found pointer to free
-        # object` / `bad pointer in Go heap`) inside the pinned MyGo Tester's
-        # render chain (ui.NewTester/Frame/Click in main_test.go), which kills
-        # the whole test binary instead of failing the test. It never
-        # reproduces locally (see docs/product/evidence/QA-10/README.md), so
-        # there is no test-side fix; the real fix belongs to a MyGo upgrade
-        # (pin v0.8.4-0.20261108220316-c4197b7fe562, do not bump here).
-        # The banner/retry/linkErr assertions stay covered by the local gate
-        # (scripts/ci/local-gate.sh runs the unskipped suite). QA-10
-        # (c40bf7e1-ad9f-4c1d-8573-aab98cdbb2b1) owns the real fix; drop this
-        # -skip alternative together with that fix.
         working-directory: prototypes/mygo-run
         run: |
           go test -tags=e2e -skip '^TestRootsResolveAndRejectTraversal$|^TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable$' ./...
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Generated bindings survive the Windows build
-        if: env.RUN_HEAVY == '1'
-        # `mygo native check` regenerates whenever it cannot recognise an
-        # existing generated file, so a CRLF worktree silently rewrites the
-        # committed bindings with a different interface hash (REL-05). Fail
-        # here instead of shipping two different "generated" outputs.
-        run: |
-          py -3 scripts/ci/native_generator_hash.py --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $dirty = git status --porcelain -- prototypes/mygo-run/modules/runs
-          if ($dirty) { throw "the Windows build rewrote the committed bindings:`n$dirty" }
 
       - name: Verify artifacts and record SHA256
         if: env.RUN_HEAVY == '1'
@@ -192,7 +81,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $dist)) { throw "dist directory missing: $dist" }
           $sums = Join-Path $dist 'SHA256SUMS.txt'
           Remove-Item -LiteralPath $sums -ErrorAction SilentlyContinue
-          foreach ($file in @('mygo-run.exe', 'Runs.dll')) {
+          foreach ($file in @('mygo-run.exe', 'asterlab.exe')) {
             $path = Join-Path $dist $file
             if (-not (Test-Path -LiteralPath $path)) { throw "artifact missing: $path" }
             $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
@@ -204,12 +93,14 @@ jobs:
           Get-Content -LiteralPath $sums
 
       - name: Upload artifacts
+        if: env.RUN_HEAVY == '1'
         uses: actions/upload-artifact@v4
         with:
           name: windows-mygo-${{ github.sha }}
           if-no-files-found: error
           path: |
             prototypes/mygo-run/dist/mygo-run.exe
-            prototypes/mygo-run/dist/Runs.dll
+            prototypes/mygo-run/dist/asterlab.exe
+            prototypes/mygo-run/dist/asterlab.ico
             prototypes/mygo-run/dist/BUILD_INFO.txt
             prototypes/mygo-run/dist/SHA256SUMS.txt

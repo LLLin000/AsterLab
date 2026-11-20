@@ -1,13 +1,11 @@
 # scripts/mygo-build.ps1
-# Build MyGo prototype app + Runs.dll into a clean dist folder.
+# Build Pure-Go AsterLab desktop app + CLI into a clean dist folder.
 # Unsigned: this script does not sign anything.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $protoDir = Join-Path $repoRoot 'prototypes\mygo-run'
 $distDir = Join-Path $protoDir 'dist'
-$mygoPin = 'v0.8.4-0.20261108220316-c4197b7fe562'
-$mygo = 'go'
 
 if (-not (Test-Path -LiteralPath $protoDir)) { throw "prototype dir missing: $protoDir" }
 
@@ -17,17 +15,15 @@ New-Item -ItemType Directory -Path $distDir | Out-Null
 
 Push-Location $protoDir
 try {
-    # 1. Native module
-    & $mygo run github.com/egoist/mygo/cmd/mygo@$mygoPin native check .\modules\runs
-    if ($LASTEXITCODE -ne 0) { throw "mygo native check failed (exit $LASTEXITCODE)" }
-    $dll = Join-Path $protoDir '.mygo\native\windows-amd64\Runs.dll'
-    if (-not (Test-Path -LiteralPath $dll)) { throw "Runs.dll not produced: $dll" }
-    Copy-Item -LiteralPath $dll -Destination (Join-Path $distDir 'Runs.dll')
-
-    # 2. Go app
     $env:CGO_ENABLED = '0'
+
+    # 1. Pure-Go Desktop app
     go build -tags=e2e -trimpath -o (Join-Path $distDir 'mygo-run.exe') .
-    if ($LASTEXITCODE -ne 0) { throw "go build failed (exit $LASTEXITCODE)" }
+    if ($LASTEXITCODE -ne 0) { throw "go build desktop failed (exit $LASTEXITCODE)" }
+
+    # 2. Pure-Go Vault CLI
+    go build -trimpath -o (Join-Path $distDir 'asterlab.exe') ./cmd/asterlab
+    if ($LASTEXITCODE -ne 0) { throw "go build cli failed (exit $LASTEXITCODE)" }
 
     $icoSrc = Join-Path $protoDir 'assets\asterlab.ico'
     if (Test-Path -LiteralPath $icoSrc) {
@@ -36,9 +32,9 @@ try {
 
     # Evidence
     $commit = (git -C $repoRoot rev-parse --short HEAD).Trim()
-    $shaDll = (Get-FileHash -LiteralPath (Join-Path $distDir 'Runs.dll') -Algorithm SHA256).Hash
     $shaExe = (Get-FileHash -LiteralPath (Join-Path $distDir 'mygo-run.exe') -Algorithm SHA256).Hash
-    $info = "AsterLab MyGo Prototype (UNSIGNED)`ncommit $commit`nmygo pin v0.8.4-0.20261108220316-c4197b7fe562`nRuns.dll SHA256 $shaDll`nmygo-run.exe SHA256 $shaExe`n"
+    $shaCli = (Get-FileHash -LiteralPath (Join-Path $distDir 'asterlab.exe') -Algorithm SHA256).Hash
+    $info = "AsterLab Pure-Go Build (UNSIGNED)`ncommit $commit`nmygo-run.exe SHA256 $shaExe`nasterlab.exe SHA256 $shaCli`n"
     Set-Content -LiteralPath (Join-Path $distDir 'BUILD_INFO.txt') -Value $info -Encoding utf8
     Write-Output "dist: $distDir"
     Write-Output $info

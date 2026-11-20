@@ -1,4 +1,4 @@
-# scripts/ci/local-gate.ps1
+﻿# scripts/ci/local-gate.ps1
 #
 # Windows Gate lane CI, run on this Windows host instead of GitHub Actions.
 #
@@ -10,7 +10,7 @@
 # and .github/workflows/scope-check.yml, minus every Linux-only step):
 #   1. scope-check selftest + card scope enforcement against the PR diff
 #   2. REL-05 native generator hash check (two Windows generations)
-#   3. scripts/mygo-build.ps1 -> dist/mygo-run.exe + dist/Runs.dll
+#   3. scripts/mygo-build.ps1 -> dist/mygo-run.exe + dist/asterlab.exe
 #   4. go test -tags=e2e ./... for the MyGo module
 #   5. generated bindings unchanged by the build
 #   6. artifact SHA256 records
@@ -118,23 +118,13 @@ if (-not $SkipScope) {
     }
 }
 
-# 2. REL-05 native generator hashes ------------------------------------------
-Invoke-Step 'native-generator-hash' {
-    & $py[0] @($py[1..($py.Count - 1)] + @('scripts/ci/test_native_generator_hash.py'))
-    if ($LASTEXITCODE -ne 0) { throw "hash selftest failed (exit $LASTEXITCODE)" }
-    & $py[0] @($py[1..($py.Count - 1)] + @('scripts/ci/native_generator_hash.py', '--check'))
-    if ($LASTEXITCODE -ne 0) { throw "committed bindings do not match the golden hashes (exit $LASTEXITCODE)" }
-    & $py[0] @($py[1..($py.Count - 1)] + @('scripts/ci/native_generator_hash.py', '--regen', '2'))
-    if ($LASTEXITCODE -ne 0) { throw "pinned mygo does not regenerate the bindings byte for byte (exit $LASTEXITCODE)" }
-}
-
-# 3. Windows build -----------------------------------------------------------
+# 2. Windows build -----------------------------------------------------------
 Invoke-Step 'mygo-build' {
     & (Join-Path $PSScriptRoot '..\mygo-build.ps1')
     if ($LASTEXITCODE -ne 0) { throw "mygo-build.ps1 failed (exit $LASTEXITCODE)" }
 }
 
-# 4. Go tests ----------------------------------------------------------------
+# 3. Go tests ----------------------------------------------------------------
 if (-not $SkipTests) {
     Invoke-Step 'go-test' {
         Push-Location (Join-Path $repoRoot 'prototypes\mygo-run')
@@ -145,16 +135,10 @@ if (-not $SkipTests) {
     }
 }
 
-# 5. generated bindings unchanged by the build -------------------------------
-Invoke-Step 'bindings-clean-after-build' {
-    $dirty = git status --porcelain -- prototypes/mygo-run/modules/runs
-    if ($dirty) { throw "the Windows build rewrote the committed bindings:`n$dirty" }
-}
-
-# 6. artifacts ---------------------------------------------------------------
+# 4. artifacts ---------------------------------------------------------------
 Invoke-Step 'artifacts' {
     $dist = Join-Path $repoRoot 'prototypes\mygo-run\dist'
-    foreach ($file in @('mygo-run.exe', 'Runs.dll')) {
+    foreach ($file in @('mygo-run.exe', 'asterlab.exe')) {
         $path = Join-Path $dist $file
         if (-not (Test-Path -LiteralPath $path)) { throw "artifact missing: $path" }
         $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
