@@ -25,8 +25,8 @@ AsterML v2 是面向人类科研书写与机器严格校验的声明式实验文
 | **第一层通用内容块** | `prose@1`、`group_table@1`、`param_table@1`、`figure@1`、`data_table@1`、`checklist@1`、`calculator@1`、`timer@1`、`attachment@1`、`subflow@1` | 承载具体书写、参数偏离、计算求解、步骤检查、计时、二维读数与照片取证 |
 | **第二层科学原语** | `experiment@1`、`group@1`、`assay@1`、`workflow@1`、`step@1`、`instrument_profile@1`、`material@1`、`sample@1`、`reference@1`、`readout@1` | 声明科学关系图、资源档案、实验步骤树与结构化结果卡片 |
 
-## 单位校验与双语言 Parity
+## 单位校验与契约门禁
 
 - **UCUM 受控单位集**：数值参数只接受 [units.json](../../prototypes/mygo-run/internal/asterdoc/spec/units.json) 注册的规范单位（如 `Cel`、`uM`、`ng/uL`、`cells/mL`、`mW/cm2`、`xg`），未知单位禁止隐式换算。
 - **引文与跨块引用**：支持 `@groups`、`@plate.<id>`、`@param.<key>`、`@actual.<key>` 显式跨块联动，确保实验条件更改或实测偏离后下游计算自动重算。
-- **Go ⇄ Rust 双端一致性门禁**：通过 `python scripts/sdk/check.py` 与 `TestAsterDocGoRustParity` 强制校验 Go（`internal/asterdoc`）与 Rust（`src/cli/asterdoc.rs`）在 21 个模块、20 条规则、21 种端口类型与 6 个分类上的完全一致。
+- **Schema 与核心一致性门禁**：通过 `python scripts/sdk/check.py` 校验 `modules.json` 清单与 Go 实现（`internal/asterdoc` / `internal/astercore`）在 21 个模块、20 条规则、21 种端口类型与 6 个分类上的完全一致（仓库历史阶段遗留的 Rust crate 镜像仅作只读归档参考）。

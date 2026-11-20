@@ -4,7 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Docs — AsterLab</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%236c5ce7' d='M16 3 28 26H21.5L16 14.5 10.5 26H4L16 3Z'/%3E%3C/svg%3E" />
+<meta name="theme-color" content="#ffffff" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='28' fill='%230c0b0a'/%3E%3Cg transform='translate(24 29) scale(0.078125)' fill='%23f2efe9' fill-rule='evenodd'%3E%3Cpath d='M 0 528.588 L 127.468 528.588 C 170.4 528.588 209.641 504.316 228.814 465.904 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 939.048 896.711 L 939.048 288.031 C 939.048 242.969 921.148 199.754 889.285 167.891 C 824.897 103.503 733.474 74.007 643.596 88.624 C 553.719 103.241 476.354 160.187 435.688 241.661 L 304.823 503.843 C 271.271 571.064 202.598 613.539 127.468 613.539 L 0 613.539 L 0 528.588 Z'/%3E%3Cpath d='M 0 670.174 L 127.468 670.174 C 224.064 670.174 312.357 615.563 355.496 529.136 L 486.36 266.953 C 518.893 201.775 580.785 156.217 652.687 144.524 C 724.589 132.83 797.728 156.427 849.238 207.937 C 870.48 229.179 882.414 257.99 882.414 288.031 L 882.414 896.711 L 797.462 896.711 L 797.462 288.031 C 797.462 280.52 794.479 273.318 789.168 268.007 C 756.974 235.813 711.263 221.065 666.324 228.374 C 621.385 235.682 582.703 264.156 562.37 304.892 L 431.506 567.074 C 373.987 682.311 256.262 755.125 127.468 755.125 L 0 755.125 L 0 670.174 Z'/%3E%3Cpath d='M 0 811.76 L 127.468 811.76 C 277.728 811.76 415.073 726.81 482.179 592.367 L 559.389 437.678 C 586.62 383.121 652.154 359.912 707.652 385.168 C 727.858 394.364 740.828 414.516 740.828 436.716 L 740.828 896.711 L 655.876 896.711 L 655.876 434.59 L 558.188 630.306 C 476.703 793.558 309.926 896.711 127.468 896.711 L 0 896.711 L 0 811.76 Z'/%3E%3C/g%3E%3C/svg%3E" />
 <style>
 :root {
   --bg: #ffffff;
@@ -16,20 +17,22 @@
   --rule-strong: rgba(20, 21, 26, 0.16);
   --accent: #6c5ce7;
   --accent-2: #0ea5e9;
+  --accent-3: #168053;
   --selection: rgba(108, 92, 231, 0.16);
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 html[data-theme="dark"] {
-  --bg: #08090c;
-  --bg-elev: #12141a;
-  --fg: #f4f5f8;
-  --fg-dim: #b4bac9;
-  --fg-faint: #767d90;
-  --rule: rgba(255, 255, 255, 0.08);
-  --rule-strong: rgba(255, 255, 255, 0.16);
+  --bg: #0c0b0a;
+  --bg-elev: #151412;
+  --fg: #f2efe9;
+  --fg-dim: #b4afa6;
+  --fg-faint: #78736a;
+  --rule: rgba(255, 255, 255, 0.09);
+  --rule-strong: rgba(255, 255, 255, 0.18);
   --accent: #a596ff;
-  --accent-2: #67e8f9;
+  --accent-2: #38bdf8;
+  --accent-3: #6fd3a4;
   --selection: rgba(165, 150, 255, 0.24);
 }
 *, *::before, *::after { box-sizing: border-box; }
@@ -41,20 +44,41 @@ html {
   text-rendering: optimizeLegibility;
   scroll-behavior: smooth;
 }
-body { margin: 0; overflow-x: clip; }
+body { margin: 0; overflow-x: clip; position: relative; }
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 320px;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(64% 120% at 50% -10%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 72%);
+}
 ::selection { background: var(--selection); color: var(--fg); }
 
 a { color: inherit; text-decoration: none; }
 
-/* OMP-inspired Topbar: fixed 56px, hairline bottom, clean zero-clutter actions */
+/* Unified Topbar across www.asterlab.party & docs.asterlab.party */
 .topbar {
   position: fixed;
   inset-inline: 0;
   top: 0;
   z-index: 40;
   height: 56px;
-  background: color-mix(in srgb, var(--bg) 96%, transparent);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--rule);
+}
+.read-progress {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 1.5px;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
+  pointer-events: none;
+  transition: width 80ms linear;
 }
 .topbar-inner {
   max-width: 1280px;
@@ -74,6 +98,18 @@ a { color: inherit; text-decoration: none; }
   font-weight: 700;
   letter-spacing: -0.02em;
 }
+.brand-mark { display: block; width: 20px; height: auto; color: var(--fg); overflow: visible; }
+.brand-mark .stream {
+  transition: fill 240ms ease, transform 240ms cubic-bezier(.22,1,.36,1), filter 240ms ease;
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+.brand:hover .brand-mark .stream-1,
+.brand.streaming .brand-mark .stream-1 { fill: var(--accent); transition-delay: 0ms; transform: translateY(-14px); }
+.brand:hover .brand-mark .stream-2,
+.brand.streaming .brand-mark .stream-2 { fill: var(--accent-2); transition-delay: 75ms; transform: translateY(-10px); }
+.brand:hover .brand-mark .stream-3,
+.brand.streaming .brand-mark .stream-3 { fill: var(--accent-3); transition-delay: 150ms; transform: translateY(-6px); }
 .brand-sep { color: var(--fg-faint); font-weight: 400; }
 .brand-sub {
   font-family: var(--font-mono);
@@ -83,33 +119,37 @@ a { color: inherit; text-decoration: none; }
   color: var(--accent);
   font-weight: 500;
 }
-.top-nav { display: flex; align-items: center; gap: 18px; }
+.top-nav { display: flex; align-items: center; gap: 14px; }
 .top-link {
   font-family: var(--font-mono);
   font-size: 11.5px;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   color: var(--fg-dim);
-  transition: color 0.15s;
+  padding: 5px 8px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
 }
-.top-link:hover { color: var(--fg); }
+.top-link:hover { color: var(--fg); background: var(--bg-elev); }
 .icon-btn {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   background: none;
-  border: 1px solid transparent;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
   color: var(--fg-dim);
   cursor: pointer;
-  padding: 5px 8px;
+  padding: 5px 9px;
   font-family: var(--font-mono);
   font-size: 11.5px;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.icon-btn:hover { color: var(--fg); border-color: var(--rule-strong); }
+.icon-btn:hover { color: var(--fg); border-color: var(--rule-strong); background: var(--bg-elev); }
 .kbd {
   font-size: 10px;
   padding: 1px 5px;
+  border-radius: 4px;
   border: 1px solid var(--rule-strong);
   color: var(--fg-faint);
 }
@@ -286,15 +326,83 @@ a { color: inherit; text-decoration: none; }
   font-size: 0.86em;
 }
 .prose pre {
+  position: relative;
   font-family: var(--font-mono);
   background: var(--bg-elev);
   border: 1px solid var(--rule);
+  border-radius: 6px;
   color: var(--fg);
   padding: 1rem 1.15rem;
   font-size: 13px;
   line-height: 1.65;
   overflow-x: auto;
 }
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-faint);
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+.prose pre:hover .code-copy, .code-copy.copied { opacity: 1; }
+.code-copy:hover { color: var(--fg); border-color: var(--rule-strong); }
+.overview-blueprint {
+  position: relative;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, var(--bg-elev)), var(--bg-elev));
+  padding: 18px 20px;
+  margin: 0 0 22px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.overview-blueprint svg.bp-bg {
+  position: absolute;
+  right: -12px;
+  top: -18px;
+  width: 210px;
+  height: auto;
+  color: var(--accent);
+  opacity: 0.13;
+  pointer-events: none;
+}
+.overview-bp-meta { position: relative; z-index: 1; }
+.overview-bp-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.overview-bp-sub { font-size: 13.5px; color: var(--fg-dim); line-height: 1.55; max-width: 58ch; }
+.stream-legend { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.stream-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--fg-dim);
+}
+.stream-dot { width: 7px; height: 7px; border-radius: 999px; }
 .prose pre code { background: none; border: 0; padding: 0; font-size: inherit; }
 
 .callout {
@@ -488,10 +596,11 @@ figure.shot figcaption {
   <div class="topbar-inner">
     <div style="display:flex;align-items:center;gap:12px;">
       <button class="icon-btn menu-btn" id="menuBtn" type="button">☰</button>
-      <a class="brand" href="?doc=docs/HANDBOOK.md" data-doc="docs/HANDBOOK.md">
-        <svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true">
-          <defs><linearGradient id="asterGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6c5ce7"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs>
-          <path fill="url(#asterGrad)" d="M16 3 28 26H21.5L16 14.5 10.5 26H4L16 3Z"/>
+      <a class="brand" id="brandLink" href="?doc=docs/HANDBOOK.md" data-doc="docs/HANDBOOK.md">
+        <svg class="brand-mark" viewBox="0 0 1024 896.711" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+          <path class="stream stream-1" d="M 0 528.588 L 127.468 528.588 C 170.4 528.588 209.641 504.316 228.814 465.904 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 939.048 896.711 L 939.048 288.031 C 939.048 242.969 921.148 199.754 889.285 167.891 C 824.897 103.503 733.474 74.007 643.596 88.624 C 553.719 103.241 476.354 160.187 435.688 241.661 L 304.823 503.843 C 271.271 571.064 202.598 613.539 127.468 613.539 L 0 613.539 L 0 528.588 Z"/>
+          <path class="stream stream-2" d="M 0 670.174 L 127.468 670.174 C 224.064 670.174 312.357 615.563 355.496 529.136 L 486.36 266.953 C 518.893 201.775 580.785 156.217 652.687 144.524 C 724.589 132.83 797.728 156.427 849.238 207.937 C 870.48 229.179 882.414 257.99 882.414 288.031 L 882.414 896.711 L 797.462 896.711 L 797.462 288.031 C 797.462 280.52 794.479 273.318 789.168 268.007 C 756.974 235.813 711.263 221.065 666.324 228.374 C 621.385 235.682 582.703 264.156 562.37 304.892 L 431.506 567.074 C 373.987 682.311 256.262 755.125 127.468 755.125 L 0 755.125 L 0 670.174 Z"/>
+          <path class="stream stream-3" d="M 0 811.76 L 127.468 811.76 C 277.728 811.76 415.073 726.81 482.179 592.367 L 559.389 437.678 C 586.62 383.121 652.154 359.912 707.652 385.168 C 727.858 394.364 740.828 414.516 740.828 436.716 L 740.828 896.711 L 655.876 896.711 L 655.876 434.59 L 558.188 630.306 C 476.703 793.558 309.926 896.711 127.468 896.711 L 0 896.711 L 0 811.76 Z"/>
         </svg>
         <span>AsterLab</span>
         <span class="brand-sep">/</span>
@@ -499,11 +608,13 @@ figure.shot figcaption {
       </a>
     </div>
     <nav class="top-nav">
+      <a class="top-link" href="https://www.asterlab.party" rel="noopener">Home</a>
       <button class="icon-btn" id="searchBtn" type="button">Search <span class="kbd">⌘K</span></button>
       <a class="top-link" id="ghLink" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener">GitHub</a>
       <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle theme">◐</button>
     </nav>
   </div>
+  <div class="read-progress" id="readProgress"></div>
 </header>
 
 <div class="shell">
@@ -559,7 +670,7 @@ figure.shot figcaption {
       ["docs/handbook/mobile-workspace.md", "移动端单手工作台"],
     ]],
     ["Reference", [
-      ["docs/handbook/ffi-and-cli.md", "Pure-Go CLI、深度链接与历史 FFI"],
+      ["docs/handbook/ffi-and-cli.md", "Pure-Go CLI 与深度链接"],
       ["docs/handbook/verification-and-backlog.md", "自动化门禁与已关闭热点"],
     ]],
   ];
@@ -966,6 +1077,34 @@ figure.shot figcaption {
     if (reqId !== loadToken) return;
 
     document.getElementById("docContent").innerHTML = entry.html;
+    if (currentDoc === "docs/HANDBOOK.md") {
+      const h1El = document.querySelector("#docContent h1");
+      if (h1El) {
+        const bp = document.createElement("div");
+        bp.className = "overview-blueprint";
+        bp.innerHTML = `<div class="overview-bp-meta"><div class="overview-bp-title">Architecture · UnifiedLive × Pure-Go</div><div class="overview-bp-sub">三轨并发几何映射 AsterLab 核心流水线：在单一 <code>.asterml</code> 本地文档内统一实验设计、原位执行与确定性科学分析。</div><div class="stream-legend"><span class="stream-chip"><span class="stream-dot" style="background:var(--accent)"></span>01 · 实验设计 Design</span><span class="stream-chip"><span class="stream-dot" style="background:var(--accent-2)"></span>02 · 原位执行 UnifiedLive</span><span class="stream-chip"><span class="stream-dot" style="background:var(--accent-3)"></span>03 · Pure-Go AsterCore</span></div></div><svg class="bp-bg" viewBox="-16 -24 1056 944" aria-hidden="true"><path d="M 0 481.392 L 151.025 481.392 C 193.956 481.392 233.198 457.121 252.371 418.709 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 910.731 896.711 L 910.731 375.105 C 910.731 311.645 884.113 251.094 837.355 208.189 C 790.597 165.284 727.986 143.959 664.76 149.403 C 566.506 157.863 479.73 216.831 435.688 305.068 L 330.251 516.307 C 306.285 564.322 257.233 594.661 203.569 594.661 L 0 594.661 L 0 481.392 Z M 0 632.418 L 226.921 632.418 C 280.586 632.418 329.638 602.078 353.604 554.063 L 461.024 338.85 C 493.871 273.043 553.546 224.634 624.713 206.067 C 684.12 190.567 747.356 203.47 795.94 241.006 C 844.525 278.541 872.975 336.471 872.975 397.866 L 872.975 896.711 L 759.706 896.711 L 759.706 474.637 C 759.706 422.09 723.568 376.444 672.423 364.389 C 621.278 352.334 568.558 377.037 545.091 424.052 L 431.484 651.661 C 402.725 709.279 343.862 745.686 279.465 745.686 L 0 745.686 L 0 632.418 Z M 0 783.443 L 302.818 783.443 C 367.215 783.443 426.077 747.036 454.837 689.417 L 559.389 479.95 C 580.046 438.564 623.792 413.896 669.896 417.637 C 699.302 420.023 721.95 444.584 721.95 474.086 L 721.95 896.711 L 608.681 896.711 L 608.681 634.823 L 540.539 771.344 C 502.193 848.169 423.71 896.711 337.847 896.711 L 0 896.711 L 0 783.443 Z" fill="none" stroke="currentColor" stroke-width="5"/><g stroke="currentColor" stroke-width="3"><line x1="151.03" y1="481.39" x2="193.96" y2="481.39"/><circle cx="193.96" cy="481.39" r="9" fill="none"/><line x1="359.68" y1="203.72" x2="412.54" y2="97.81"/><circle cx="412.54" cy="97.81" r="9" fill="none"/><line x1="837.36" y1="208.19" x2="884.11" y2="251.09"/><circle cx="884.11" cy="251.09" r="9" fill="none"/></g></svg>`;
+        h1El.insertAdjacentElement("afterend", bp);
+      }
+    }
+    for (const pre of document.querySelectorAll("#docContent pre")) {
+      if (pre.querySelector(".code-copy")) continue;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "code-copy";
+      btn.textContent = "Copy";
+      btn.addEventListener("click", async () => {
+        const codeText = pre.querySelector("code")?.textContent || pre.textContent;
+        try { await navigator.clipboard.writeText(codeText.replace(/\n$/, "")); btn.textContent = "Copied"; btn.classList.add("copied"); setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1400); } catch (_) {}
+      });
+      pre.appendChild(btn);
+    }
+    const brandEl = document.getElementById("brandLink");
+    if (brandEl) {
+      brandEl.classList.remove("streaming");
+      void brandEl.offsetWidth;
+      brandEl.classList.add("streaming");
+      setTimeout(() => brandEl.classList.remove("streaming"), 900);
+    }
     renderSidebars(entry.toc);
 
     const h1 = document.querySelector("#docContent h1");
@@ -999,6 +1138,9 @@ figure.shot figcaption {
     scrollRafPending = true;
     requestAnimationFrame(() => {
       scrollRafPending = false;
+      const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      const rp = document.getElementById("readProgress");
+      if (rp) rp.style.width = `${Math.min(100, Math.max(0, (window.scrollY / maxScroll) * 100)).toFixed(1)}%`;
       const headings = [...document.querySelectorAll("#docContent h2, #docContent h3")];
       if (!headings.length) return;
       let activeId = headings[0].id;
@@ -1031,6 +1173,8 @@ figure.shot figcaption {
     const next = rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark";
     rootEl.setAttribute("data-theme", next);
     localStorage.setItem("asterlab-docs-theme", next);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
   });
   document.getElementById("menuBtn").addEventListener("click", () => {
     document.getElementById("sidebarLeft").classList.toggle("open");

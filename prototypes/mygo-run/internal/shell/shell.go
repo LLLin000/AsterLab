@@ -180,6 +180,7 @@ type Shell struct {
 	CreateTargetFolder  string
 	VaultSettingsOpen   bool
 	SettingsView        components.SettingsState
+	AboutMonochromeLogo bool
 	ThemeSource         string // system | light | dark
 	TextScale           float32
 	Density             string // comfortable | compact

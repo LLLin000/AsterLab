@@ -1,6 +1,6 @@
-# Pure-Go CLI、深度链接与历史 FFI 契约
+# Pure-Go CLI 与深度链接契约
 
-Agent 与外部自动化脚本直接通过 **Pure-Go Vault-Native CLI（`cmd/asterlab`）** 读写并校验本地 `.asterml` Vault，不再强制经过 `Runs.dll` 或 SQLite；`asterlab://` 深度链接支持直接定位实验文件、步骤与储藏室试剂。
+Agent 与外部自动化脚本直接通过 **Pure-Go Vault-Native CLI（`cmd/asterlab`）** 读写并校验本地 `.asterml` Vault，产品主运行时已彻底弃用 `Runs.dll` / SQLite 与 Rust CLI；`asterlab://` 深度链接支持直接定位实验文件、步骤与储藏室试剂。
 
 ## 1. Pure-Go Vault-Native CLI (`cmd/asterlab`)
 
@@ -44,9 +44,6 @@ go run ./cmd/asterlab --vault C:\LabVault asterdoc.analyze 2026/cck8.asterml
 | `asterlab://pantry?code=<labelCode>` | 切换至 `TabPantry` 储藏室货架并高亮定位对应试剂条码 |
 | `asterlab://run/<runID>` · `asterlab://run/<runID>/well/<well>` | 打开对应历史 Run 并定位孔板指定孔位 |
 
-## 3. 可选历史 Rust FFI 与 `labworkbench` CLI（Deprecated / Legacy）
+## 3. 已弃用的历史 Rust 路径说明（Archived）
 
-在仍需兼容历史 SQLite 冻存记录或原有测试夹具的场景下，仓库继续保留：
-
-- **`modules/runs`（`//mygo:native`）**：暴露 `RunService`、`DesignService`、`TimeBudgetService` 与 `MixPlanService`；桌面主程序启动若缺少 `Runs.dll` / `libRuns.so` 将静默运行在纯 Go Vault 模式，不再阻塞报错。
-- **`labworkbench` CLI（`src/cli.rs` & [AGENT_API.md](../../AGENT_API.md)）**：历史 SQLite 存储上的 `--input <json>` / `--diagnostics json` 契约参考。
+仓库历史阶段曾存在 `modules/runs`（`Runs.dll`）与 Rust `labworkbench`（`src/cli.rs`）SQLite 存储方案，现已全面弃用并由上方的 Pure-Go `vault` + `astercore` + `cmd/asterlab` 完全替代。新功能与自动化工具一律基于 `.asterml` 与 `cmd/asterlab` 开发，不引入任何 Rust 或 SQLite 依赖。

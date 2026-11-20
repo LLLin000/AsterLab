@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AsterLab — 单文件真源的湿实验研究工作台</title>
+<meta name="description" content="AsterLab 基于 .asterml 本地 Vault 单真源与 Pure-Go astercore 引擎，在同一份结构化文档内统一实验设计、原位执行与统计溯源。" />
+<meta name="theme-color" content="#0c0b0a" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<style>
+:root {
+  --bg: #0c0b0a;
+  --bg-elev: rgba(21, 20, 18, 0.78);
+  --fg: #f2efe9;
+  --fg-dim: #b4afa6;
+  --fg-faint: #78736a;
+  --rule: rgba(255, 255, 255, 0.09);
+  --rule-strong: rgba(255, 255, 255, 0.18);
+  --accent: #a596ff;
+  --accent-solid: #7457ec;
+  --accent-2: #38bdf8;
+  --accent-3: #6fd3a4;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+html[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elev: rgba(245, 246, 248, 0.84);
+  --fg: #14151a;
+  --fg-dim: #4c515f;
+  --fg-faint: #848b9c;
+  --rule: rgba(20, 21, 26, 0.09);
+  --rule-strong: rgba(20, 21, 26, 0.18);
+  --accent: #6c5ce7;
+  --accent-solid: #6c5ce7;
+  --accent-2: #0ea5e9;
+  --accent-3: #168053;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  transition: background 240ms ease, color 240ms ease;
+}
+a { color: inherit; text-decoration: none; }
+
+.stage {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+  isolation: isolate;
+}
+.poster { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.poster canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+
+/* Unified 56px Frosted Topbar matching docs.asterlab.party */
+.topbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 56px;
+  z-index: 30;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--rule);
+}
+.topbar-inner {
+  max-width: 1280px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+}
+.brand-mark { display: block; width: 20px; height: auto; color: var(--fg); overflow: visible; }
+.brand-mark .stream {
+  transition: fill 240ms ease, transform 240ms cubic-bezier(.22,1,.36,1);
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+.brand:hover .brand-mark .stream-1,
+.stage[data-stream="1"] .brand-mark .stream-1 { fill: var(--accent); transform: translateY(-14px); }
+.brand:hover .brand-mark .stream-2,
+.stage[data-stream="2"] .brand-mark .stream-2 { fill: var(--accent-2); transform: translateY(-10px); transition-delay: 65ms; }
+.brand:hover .brand-mark .stream-3,
+.stage[data-stream="3"] .brand-mark .stream-3 { fill: var(--accent-3); transform: translateY(-6px); transition-delay: 130ms; }
+.brand-sep { color: var(--fg-faint); font-weight: 400; }
+.brand-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.top-nav { display: flex; align-items: center; gap: 14px; }
+.navlink {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fg-dim);
+  padding: 5px 8px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.navlink:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.icon-btn:hover { color: var(--fg); border-color: var(--rule-strong); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.icon-btn svg { width: 14px; height: 14px; }
+
+/* Main Editorial Canvas */
+.content-shell {
+  position: relative;
+  z-index: 2;
+  max-width: 1280px;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 88px 24px 72px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(300px, 0.92fr);
+  gap: 48px;
+  align-items: center;
+}
+.caption {
+  margin: 0 0 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.hero h1 {
+  margin: 0;
+  font-size: clamp(32px, 4vw, 50px);
+  font-weight: 600;
+  line-height: 1.16;
+  letter-spacing: -0.025em;
+  color: var(--fg);
+}
+.sub {
+  margin: 18px 0 0;
+  font-size: 15.5px;
+  line-height: 1.72;
+  color: var(--fg-dim);
+  max-width: 48ch;
+}
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 28px; }
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 18px;
+  background: var(--accent-solid);
+  color: #ffffff;
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: filter 0.15s, transform 0.15s;
+}
+.btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  color: var(--fg-dim);
+  font-size: 13.5px;
+  background: var(--bg-elev);
+  backdrop-filter: blur(12px);
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-secondary:hover { color: var(--fg); border-color: var(--accent); }
+
+/* Interactive 3-Stream Lens Card (Design / UnifiedLive / Pure-Go AsterCore) */
+.lens-card {
+  position: relative;
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  padding: 20px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+}
+.lens-blueprint {
+  position: absolute;
+  right: -24px;
+  bottom: -24px;
+  width: 240px;
+  height: auto;
+  color: var(--accent);
+  opacity: 0.12;
+  pointer-events: none;
+}
+.lens-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.lens-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.lens-tab:hover { color: var(--fg); border-color: var(--rule-strong); }
+.lens-tab.active {
+  color: var(--fg);
+  border-color: var(--rule-strong);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.dot { width: 7px; height: 7px; border-radius: 999px; }
+.lens-title { position: relative; z-index: 1; font-size: 16px; font-weight: 600; margin: 0 0 6px; color: var(--fg); }
+.lens-desc { position: relative; z-index: 1; font-size: 13.5px; line-height: 1.65; color: var(--fg-dim); margin: 0 0 14px; }
+.lens-code {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fg-dim);
+  overflow-x: auto;
+}
+.lens-footer {
+  position: relative;
+  z-index: 1;
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.lens-link { color: var(--accent); }
+.lens-link:hover { text-decoration: underline; }
+
+/* Bottom legal bar */
+.legal {
+  position: fixed;
+  right: 24px;
+  bottom: 18px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.motion-toggle {
+  padding: 0; background: none; border: 0; color: var(--fg-faint);
+  font: inherit; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+}
+.motion-toggle:hover { color: var(--accent); }
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.hero-inner { animation: rise 0.65s ease-out both; }
+.lens-card { animation: rise 0.72s 0.08s ease-out both; }
+
+@media (max-width: 960px) {
+  .content-shell { grid-template-columns: 1fr; padding-top: 92px; padding-bottom: 84px; gap: 28px; }
+  .navlink { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-inner, .lens-card { animation: none; }
+}
+</style>
+</head>
+<body>
+<main class="stage" id="stage" data-stream="1">
+  <div class="poster">
+    <canvas id="poster" aria-hidden="true"></canvas>
+    <canvas id="overlay" aria-hidden="true"></canvas>
+  </div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="https://www.asterlab.party/" aria-label="AsterLab 首页">
+        <svg class="brand-mark" viewBox="0 0 1024 896.711" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+          <path class="stream stream-1" d="M 0 528.588 L 127.468 528.588 C 170.4 528.588 209.641 504.316 228.814 465.904 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 939.048 896.711 L 939.048 288.031 C 939.048 242.969 921.148 199.754 889.285 167.891 C 824.897 103.503 733.474 74.007 643.596 88.624 C 553.719 103.241 476.354 160.187 435.688 241.661 L 304.823 503.843 C 271.271 571.064 202.598 613.539 127.468 613.539 L 0 613.539 L 0 528.588 Z"/>
+          <path class="stream stream-2" d="M 0 670.174 L 127.468 670.174 C 224.064 670.174 312.357 615.563 355.496 529.136 L 486.36 266.953 C 518.893 201.775 580.785 156.217 652.687 144.524 C 724.589 132.83 797.728 156.427 849.238 207.937 C 870.48 229.179 882.414 257.99 882.414 288.031 L 882.414 896.711 L 797.462 896.711 L 797.462 288.031 C 797.462 280.52 794.479 273.318 789.168 268.007 C 756.974 235.813 711.263 221.065 666.324 228.374 C 621.385 235.682 582.703 264.156 562.37 304.892 L 431.506 567.074 C 373.987 682.311 256.262 755.125 127.468 755.125 L 0 755.125 L 0 670.174 Z"/>
+          <path class="stream stream-3" d="M 0 811.76 L 127.468 811.76 C 277.728 811.76 415.073 726.81 482.179 592.367 L 559.389 437.678 C 586.62 383.121 652.154 359.912 707.652 385.168 C 727.858 394.364 740.828 414.516 740.828 436.716 L 740.828 896.711 L 655.876 896.711 L 655.876 434.59 L 558.188 630.306 C 476.703 793.558 309.926 896.711 127.468 896.711 L 0 896.711 L 0 811.76 Z"/>
+        </svg>
+        <span>AsterLab</span>
+        <span class="brand-sep">/</span>
+        <span class="brand-sub">v2</span>
+      </a>
+      <nav class="top-nav" aria-label="主导航">
+        <a class="navlink" href="https://docs.asterlab.party/">Docs</a>
+        <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Farchitecture.md">架构</a>
+        <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">AsterML</a>
+        <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdesktop-workbench.md">工作台</a>
+        <button class="icon-btn" id="themeBtn" type="button" aria-label="切换明暗主题">◐</button>
+        <a class="icon-btn" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg viewBox="0 0 98 96" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.852 3.316 2.362C83.714 89.39 97.707 70.973 97.707 49.217 97.707 22 75.788 0 48.854 0z"/></svg>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="content-shell">
+    <div class="hero-inner">
+      <p class="caption">.asterml Local SSOT · Pure-Go astercore</p>
+      <h1>一份可读的实验文档，即完整研发工作区</h1>
+      <p class="sub">AsterLab 以本地 Markdown + 结构化 <code>.asterml</code> 为单一事实源，零 SQLite 与外部动态库绑定；同一份文件原位承载实验分组、孔板映射、倒计时、实测偏离与确定性统计分析。</p>
+      <div class="actions">
+        <a class="btn-primary" href="https://docs.asterlab.party/">浏览工程手册 <span aria-hidden="true">→</span></a>
+        <a class="btn-secondary" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">AsterML v2 规范</a>
+        <a class="btn-secondary" href="https://github.com/LLLin000/AsterLab">GitHub</a>
+      </div>
+    </div>
+
+    <aside class="lens-card" aria-label="三流架构交互预览">
+      <svg class="lens-blueprint" viewBox="-16 -24 1056 944" aria-hidden="true">
+        <path d="M 0 481.392 L 151.025 481.392 C 193.956 481.392 233.198 457.121 252.371 418.709 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 910.731 896.711 L 910.731 375.105 C 910.731 311.645 884.113 251.094 837.355 208.189 C 790.597 165.284 727.986 143.959 664.76 149.403 C 566.506 157.863 479.73 216.831 435.688 305.068 L 330.251 516.307 C 306.285 564.322 257.233 594.661 203.569 594.661 L 0 594.661 L 0 481.392 Z M 0 632.418 L 226.921 632.418 C 280.586 632.418 329.638 602.078 353.604 554.063 L 461.024 338.85 C 493.871 273.043 553.546 224.634 624.713 206.067 C 684.12 190.567 747.356 203.47 795.94 241.006 C 844.525 278.541 872.975 336.471 872.975 397.866 L 872.975 896.711 L 759.706 896.711 L 759.706 474.637 C 759.706 422.09 723.568 376.444 672.423 364.389 C 621.278 352.334 568.558 377.037 545.091 424.052 L 431.484 651.661 C 402.725 709.279 343.862 745.686 279.465 745.686 L 0 745.686 L 0 632.418 Z M 0 783.443 L 302.818 783.443 C 367.215 783.443 426.077 747.036 454.837 689.417 L 559.389 479.95 C 580.046 438.564 623.792 413.896 669.896 417.637 C 699.302 420.023 721.95 444.584 721.95 474.086 L 721.95 896.711 L 608.681 896.711 L 608.681 634.823 L 540.539 771.344 C 502.193 848.169 423.71 896.711 337.847 896.711 L 0 896.711 L 0 783.443 Z" fill="none" stroke="currentColor" stroke-width="5"/>
+      </svg>
+      <div class="lens-tabs" role="tablist" aria-label="三流核心模式">
+        <button class="lens-tab active" type="button" data-lens="1"><span class="dot" style="background:var(--accent)"></span>01 · 设计</button>
+        <button class="lens-tab" type="button" data-lens="2"><span class="dot" style="background:var(--accent-2)"></span>02 · 执行</button>
+        <button class="lens-tab" type="button" data-lens="3"><span class="dot" style="background:var(--accent-3)"></span>03 · 分析</button>
+      </div>
+      <h2 class="lens-title" id="lensTitle">21 个通用原语组合，零专病堆砌</h2>
+      <p class="lens-desc" id="lensDesc">CCK-8、RT-qPCR、转染或抑菌圈均由通用内容块与 plate@1 容器组合定义；支持在编辑、阅读与源码三态间瞬时切换。</p>
+      <pre class="lens-code" id="lensCode">```asterlab
+kind: plate@1
+format: 96
+gradient_ramp: concentration
+links: ["@groups", "@param.seed_density"]
+```</pre>
+      <div class="lens-footer">
+        <span id="lensMeta">Single Source of Truth · .asterml</span>
+        <a class="lens-link" id="lensLink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fmodules-content.md">查看模块目录 →</a>
+      </div>
+    </aside>
+  </section>
+
+  <div class="legal">
+    <span>© 2026 AsterLab · Pure-Go Native</span>
+    <button class="motion-toggle" id="motionToggle" type="button" hidden></button>
+  </div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const stage = document.getElementById("stage");
+  const rootEl = document.documentElement;
+  const poster = document.getElementById("poster");
+  const overlay = document.getElementById("overlay");
+  const pctx = poster.getContext("2d");
+  const octx = overlay.getContext("2d");
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+  const LENS = {
+    1: {
+      title: "21 个通用原语组合，零专病堆砌",
+      desc: "CCK-8、RT-qPCR、转染或抑菌圈均由通用内容块与 plate@1 容器组合定义；支持在编辑、阅读与源码三态间瞬时切换。",
+      code: "```asterlab\nkind: plate@1\nformat: 96\ngradient_ramp: concentration\nlinks: [\"@groups\", \"@param.seed_density\"]\n```",
+      meta: "Single Source of Truth · .asterml",
+      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fmodules-content.md",
+      linkText: "查看模块目录 →"
+    },
+    2: {
+      title: "UnifiedLive 原位执行 · 桌面与移动端同源",
+      desc: "计划参数与实测偏离严格分离；计时器、复核勾选与二维孔板读数直接原子落盘至 .asterml，并保留 100 步撤销与本地快照。",
+      code: "$ asterlab --vault ~/LabVault asterdoc.assess 2026/cck8.asterml\n{\"ok\":true,\"blocking\":0,\"warnings\":0,\"steps\":6}",
+      meta: "100-Undo · Snapshots · A4 Bench PDF",
+      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdesktop-workbench.md",
+      linkText: "探索工作台交互 →"
+    },
+    3: {
+      title: "Pure-Go astercore 确定性统计与诊断",
+      desc: "全套 ARRIVE 2.0 对照校验、稀释越界拦截、CCK-8 活力与 RT-qPCR ΔΔCq 计算均由纯 Go 核心无锁直算，零 SQLite 与 DLL 依赖。",
+      code: "RecordProjection [cck8_viability]\n  Control (DMSO): 100.0% ± 3.2% (n=3)\n  Treat 10 uM   :  41.8% ± 2.7% (IC50 fit OK)",
+      meta: "Zero SQLite · Zero Runs.dll",
+      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Farchitecture.md",
+      linkText: "阅读核心架构 →"
+    }
+  };
+
+  document.querySelectorAll("[data-lens]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const k = btn.getAttribute("data-lens");
+      stage.setAttribute("data-stream", k);
+      document.querySelectorAll(".lens-tab").forEach((t) => t.classList.toggle("active", t === btn));
+      const d = LENS[k];
+      document.getElementById("lensTitle").textContent = d.title;
+      document.getElementById("lensDesc").textContent = d.desc;
+      document.getElementById("lensCode").textContent = d.code;
+      document.getElementById("lensMeta").textContent = d.meta;
+      const ln = document.getElementById("lensLink");
+      ln.href = d.href;
+      ln.textContent = d.linkText;
+    });
+  });
+
+  const savedTheme = localStorage.getItem("asterlab-docs-theme") || "dark";
+  rootEl.setAttribute("data-theme", savedTheme);
+
+  const MAX_PIXELS = 2.0e6;
+  const TAU = Math.PI * 2;
+  let pointerX = -9999, pointerY = -9999;
+
+  stage.addEventListener("pointermove", (e) => {
+    const r = stage.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * scale;
+    pointerY = (e.clientY - r.top) * scale;
+  }, { passive: true });
+  stage.addEventListener("pointerleave", () => { pointerX = pointerY = -9999; }, { passive: true });
+
+  function getPal() {
+    const light = rootEl.getAttribute("data-theme") === "light";
+    return light ? {
+      hi: [108, 92, 231], mid: [14, 165, 233], faint: [215, 219, 234],
+      silver: [20, 21, 26], bg: [255, 255, 255], core: [108, 92, 231],
+      ringA: "108,92,231", ringB: "14,165,233", bgPeak: 255, alphaBoost: 0.24
+    } : {
+      hi: [168, 150, 255], mid: [110, 86, 220], faint: [44, 35, 86],
+      silver: [242, 239, 233], bg: [12, 11, 10], core: [206, 192, 255],
+      ringA: "168,150,255", ringB: "56,189,248", bgPeak: 0, alphaBoost: 0.14
+    };
+  }
+
+  function hash32(n) {
+    n = n >>> 0;
+    n = Math.imul(n ^ (n >>> 16), 2146121005);
+    n = Math.imul(n ^ (n >>> 15), 2221713035);
+    return (n ^ (n >>> 16)) >>> 0;
+  }
+  const random01 = n => (hash32(n) >>> 8) / 16777216;
+
+  let W = 0, H = 0, scale = 1, scene = null, elapsed = 0, lastFrame = 0, raf = 0, resizeTimer = 0;
+
+  function bufferScale(w, h) {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const fit = Math.sqrt(MAX_PIXELS / (w * h));
+    return Math.max(0.55, Math.min(dpr, fit));
+  }
+
+  function motionOn() {
+    if (!reduceMotion.matches) return true;
+    try { return localStorage.getItem("al-motion") === "on"; } catch (_) { return false; }
+  }
+  const toggleBtn = document.getElementById("motionToggle");
+  function syncToggle() {
+    toggleBtn.hidden = !reduceMotion.matches;
+    toggleBtn.textContent = motionOn() ? "✦ 停用动效" : "✦ 启用动效";
+  }
+
+  function buildScene(cssW, cssH) {
+    const s = scale;
+    const R = 0.48 * Math.min(cssW, cssH) * s;
+    const ccx = (cssW < 820 ? 0.55 : 0.72) * cssW * s;
+    const ccy = (cssW < 820 ? 0.22 : 0.50) * cssH * s;
+    const S = Math.min(130 * s, Math.max(54 * s, R / 4.4));
+    const wells = [], rowH = S * 0.866, rows = Math.ceil(R / rowH) + 1, cols = Math.ceil(R / S) + 2;
+    let idx = 0;
+    for (let ry = -rows; ry <= rows; ry++) {
+      for (let rx = -cols; rx <= cols; rx++) {
+        const jx = (random01((idx * 2 + 1) ^ 0x51ed270b) - 0.5) * 0.34 * S;
+        const jy = (random01((idx * 2 + 2) ^ 0x1b873593) - 0.5) * 0.34 * S;
+        idx++;
+        const x = ccx + (rx + (ry & 1 ? 0.5 : 0)) * S + jx;
+        const y = ccy + ry * rowH + jy;
+        if (Math.hypot(x - ccx, y - ccy) > 0.86 * R) continue;
+        if (x < -S || x > W + S || y < -S || y > H + S) continue;
+        wells.push({ x, y });
+      }
+    }
+    const neighbors = wells.map((w, i) => {
+      const list = [];
+      wells.forEach((v, j) => { if (i !== j && Math.hypot(v.x - w.x, v.y - w.y) < S * 1.8) list.push(j); });
+      return list.length ? list : [i];
+    });
+    const particles = [];
+    const count = Math.min(120, Math.max(20, wells.length * 2));
+    for (let i = 0; i < count; i++) {
+      const src = Math.floor(random01(i ^ 0x2f1d2f3a) * wells.length);
+      const nb = neighbors[src] || [0];
+      particles.push({
+        src, dst: nb[Math.floor(random01(i ^ 0x7a1f3c5d) * nb.length)] || 0,
+        t: random01(i ^ 0x9e3779b9), dur: 1.9 + random01(i ^ 0x85ebca6b) * 2.2,
+        dir: random01(i ^ 0xc2b2ae35) < 0.5 ? -1 : 1
+      });
+    }
+    const phases = wells.map((_, i) => random01(i ^ 0x27d4eb2f) * 4.2);
+    scene = { wells, neighbors, particles, phases, S, R, ccx, ccy, sig2: 0.72 * S * S };
+  }
+
+  function renderStatic() {
+    const cssW = Math.max(320, stage.clientWidth);
+    const cssH = Math.max(320, stage.clientHeight);
+    scale = bufferScale(cssW, cssH);
+    W = poster.width = overlay.width = Math.round(cssW * scale);
+    H = poster.height = overlay.height = Math.round(cssH * scale);
+    buildScene(cssW, cssH);
+    const pal = getPal();
+    const img = pctx.createImageData(W, H);
+    const d = img.data;
+    const { wells, R, ccx, ccy, sig2, S } = scene;
+    const light = rootEl.getAttribute("data-theme") === "light";
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const o = (y * W + x) * 4;
+        d[o] = pal.bg[0]; d[o + 1] = pal.bg[1]; d[o + 2] = pal.bg[2]; d[o + 3] = 255;
+      }
+    }
+    // Soft radial well field
+    for (let y = 0; y < H; y += 2) {
+      for (let x = 0; x < W; x += 2) {
+        const dist = Math.hypot(x - ccx, y - ccy);
+        if (dist > 1.25 * R) continue;
+        let rho = 0;
+        for (let k = 0; k < wells.length; k++) {
+          const dx = wells[k].x - x, dy = wells[k].y - y;
+          if (Math.abs(dx) > 2.4 * S || Math.abs(dy) > 2.4 * S) continue;
+          rho += Math.exp(-(dx * dx + dy * dy) / sig2);
+        }
+        const mask = Math.min(1, 1.22 - dist / R);
+        const eff = rho * mask;
+        if (eff < 0.28) continue;
+        const n = random01((y * 4096 + x) ^ 0x9e3779b9);
+        let col = null;
+        if (n < Math.min(0.28, (eff - 1.45) * 0.5)) col = pal.hi;
+        else if (n < Math.min(0.45, (eff - 0.72) * 0.45)) col = pal.mid;
+        else if (n < Math.min(0.60, (eff - 0.30) * 0.38)) col = pal.faint;
+        if (!col) continue;
+        const mix = light ? 0.22 : 0.78;
+        for (let dy = 0; dy < 2 && y + dy < H; dy++) {
+          for (let dx = 0; dx < 2 && x + dx < W; dx++) {
+            const o = ((y + dy) * W + (x + dx)) * 4;
+            d[o] = Math.round(pal.bg[0] + (col[0] - pal.bg[0]) * mix);
+            d[o + 1] = Math.round(pal.bg[1] + (col[1] - pal.bg[1]) * mix);
+            d[o + 2] = Math.round(pal.bg[2] + (col[2] - pal.bg[2]) * mix);
+          }
+        }
+      }
+    }
+    pctx.putImageData(img, 0, 0);
+  }
+
+  function drawOverlay() {
+    octx.clearRect(0, 0, W, H);
+    if (!scene) return;
+    const pal = getPal();
+    const { wells, phases } = scene;
+    const CYCLE = 4.2;
+    const s = scale;
+    octx.lineWidth = Math.max(1, 1.4 * s);
+    for (let i = 0; i < wells.length; i++) {
+      const w = wells[i];
+      const prox = pointerX > -9000 ? Math.max(0, 1 - Math.hypot(w.x - pointerX, w.y - pointerY) / (scene.S * 2.2)) : 0;
+      const prog = ((elapsed + phases[i]) % CYCLE) / CYCLE;
+      const a = (0.12 * (1 - prog)) + prox * 0.25;
+      if (a > 0.005) {
+        octx.strokeStyle = `rgba(${prox > 0.2 ? pal.ringB : pal.ringA},${a.toFixed(3)})`;
+        octx.beginPath();
+        octx.arc(w.x, w.y, scene.S * (0.28 + 1.1 * prog), 0, TAU);
+        octx.stroke();
+      }
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.0 + i * 1.61);
+      octx.fillStyle = `rgba(${pal.ringA},${(0.22 + 0.28 * pulse + prox * 0.35).toFixed(3)})`;
+      octx.beginPath();
+      octx.arc(w.x, w.y, (2.2 + prox * 1.6) * s, 0, TAU);
+      octx.fill();
+    }
+    octx.fillStyle = `rgb(${pal.silver.join(",")})`;
+    for (const p of scene.particles) {
+      const a = scene.wells[p.src], b = scene.wells[p.dst];
+      if (!a || !b) continue;
+      const t = p.t, ease = t * t * (3 - 2 * t);
+      const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+      const bump = Math.sin(Math.PI * t) * scene.S * 0.22 * p.dir;
+      const x = a.x + dx * ease + (-dy / len) * bump;
+      const y = a.y + dy * ease + (dx / len) * bump;
+      octx.globalAlpha = Math.min(1, t * 5, (1 - t) * 5) * 0.85;
+      octx.fillRect(x | 0, y | 0, 2, 2);
+    }
+    octx.globalAlpha = 1;
+  }
+
+  function frame(now) {
+    const dt = Math.min(0.1, (now - lastFrame) / 1000);
+    lastFrame = now;
+    elapsed += dt;
+    if (scene) {
+      for (const p of scene.particles) {
+        p.t += dt / p.dur;
+        if (p.t >= 1) {
+          p.t = 0;
+          const old = p.src;
+          p.src = p.dst;
+          const nb = scene.neighbors[p.src];
+          let next = nb[(Math.random() * nb.length) | 0];
+          if (nb.length > 1 && next === old) next = nb[(nb.indexOf(next) + 1) % nb.length];
+          p.dst = next;
+        }
+      }
+    }
+    drawOverlay();
+    raf = requestAnimationFrame(frame);
+  }
+
+  function start() {
+    if (raf || !motionOn() || document.hidden || !scene) return;
+    lastFrame = performance.now();
+    raf = requestAnimationFrame(frame);
+  }
+  function stop() { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+  function rebuild() { stop(); renderStatic(); if (motionOn()) start(); else drawOverlay(); }
+
+  document.getElementById("themeBtn").addEventListener("click", () => {
+    const next = rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    rootEl.setAttribute("data-theme", next);
+    localStorage.setItem("asterlab-docs-theme", next);
+    document.querySelector('meta[name="theme-color"]').setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
+    rebuild();
+  });
+  toggleBtn.addEventListener("click", () => {
+    try { localStorage.setItem("al-motion", motionOn() ? "off" : "on"); } catch (_) {}
+    syncToggle();
+    rebuild();
+  });
+  window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(rebuild, 150); }, { passive: true });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); else start(); });
+
+  syncToggle();
+  rebuild();
+})();
+</script>
+</body>
+</html>

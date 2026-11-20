@@ -33,7 +33,7 @@ rg -n "ui\.Hex\(|ui\.RGBA\(|FontSize\([0-9]|Radius\([0-9]" prototypes/mygo-run/i
 
 | 已关闭问题 | 修复实现 | 验证状态 |
 |---|---|---|
-| **缺少 `Runs.dll` 时启动阻塞报错** | [main.go](../../prototypes/mygo-run/main.go) 移除 `a.syncErr` 降级报错，纯 Go Vault + `astercore` 独立闭环 | **已解决** |
+| **移除对 `Runs.dll` / SQLite 的运行依赖** | [main.go](../../prototypes/mygo-run/main.go) 移除 `a.syncErr` 报错条，Pure-Go Vault + `astercore` 全面独立闭环 | **已解决** |
 | **Dark 模态弹窗底色透射重影** | [settings.go](../../prototypes/mygo-run/internal/shell/settings.go) 与 [command_palette.go](../../prototypes/mygo-run/internal/shell/command_palette.go) / [search_modal.go](../../prototypes/mygo-run/internal/shell/search_modal.go) 统一铺设 `tok.Surface` 实底与 `tok.BorderStrong` 边框（见下方修复后实图） | **已解决** |
 | **用户快捷键不生效与源码 `Ctrl+Z` 冲突** | [hotkeys.go](../../prototypes/mygo-run/internal/shell/hotkeys.go) 实现规范键位匹配，[live_doc.go](../../prototypes/mygo-run/internal/vault/live_doc.go) 增加 800ms 源码输入撤销防抖 | **已解决** |
 | **孔板浓度因子色阶冲突与 PNG 空导出** | [plate.go](../../prototypes/mygo-run/internal/uikit/plate/plate.go) 启用数值单调梯度渐变；[plate_png.go](../../prototypes/mygo-run/internal/asterdoc/plate_png.go) 实现纯 Go 孔板 PNG 导出 | **已解决** |

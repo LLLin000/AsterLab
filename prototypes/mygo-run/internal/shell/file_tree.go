@@ -54,6 +54,18 @@ func (s *Shell) renderRibbon(c *ui.Context, tok theme.Tokens) {
 		Padding(float32(tok.Spacing8), float32(tok.Spacing4)).
 		Gap(float32(tok.Spacing8)).AlignItems(ui.Center).
 		Background(ribbonBg).Children(func() {
+		// AsterLab Brand Mark (optical small variant) -> opens About card
+		brandBtn := components.IconButton(c, theme.LogoParsedSmall(), "关于 AsterLab", components.IconButtonCompact)
+		brandBtn.TextColor(tok.Accent)
+		if s.VaultSettingsOpen && s.SettingsView.Category == "about" {
+			brandBtn.Background(tok.AccentSoftBg)
+		}
+		if brandBtn.Clicked() {
+			s.SettingsView.Category = "about"
+			s.VaultSettingsOpen = true
+		}
+		ui.Box(c).Width(float32(tok.Spacing24)).Height(1).Background(tok.Border.Alpha(0.7))
+
 		// Toggle file tree (Ctrl+B)
 		treeBtn := components.IconButton(c, lucide.FolderTree(), "切换文件树 (Ctrl+B)", components.IconButtonCompact)
 		if s.window != nil && s.window.LeftExpanded() {

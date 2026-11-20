@@ -555,7 +555,7 @@ func WriteFileAtomic(targetPath string, data []byte) error {
 	}
 	_ = os.Chmod(tmp, 0o644)
 	var renameErr error
-	for attempt := 0; attempt < 4; attempt++ {
+	for attempt := 0; attempt < 8; attempt++ {
 		renameErr = os.Rename(tmp, targetPath)
 		if renameErr == nil {
 			return nil

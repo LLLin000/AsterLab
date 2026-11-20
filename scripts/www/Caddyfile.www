@@ -1,0 +1,9 @@
+www.asterlab.party, asterlab.party {
+    root * /var/www/asterlab.party
+    encode zstd gzip
+    file_server
+
+    header {
+        Cache-Control "public, max-age=60, must-revalidate"
+    }
+}

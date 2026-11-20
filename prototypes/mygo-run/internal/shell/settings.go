@@ -707,11 +707,61 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 
 	aboutCat := components.SettingsCategory{
 		ID:          "about",
-		Title:       "关于实验库与数据",
+		Title:       "关于 AsterLab",
 		Section:     "系统",
-		Icon:        lucide.FlaskConical(),
-		Description: "纯本地 Obsidian 式 .asterml 单真源实验库，零云端锁定。",
+		Icon:        theme.LogoParsedSmall(),
+		Description: "本地单真源 .asterml 实验工作台 × Pure-Go astercore 科学核心（零 SQLite / Rust 依赖）。",
 		Groups: []components.SettingsGroup{
+			{
+				ID:    "brand-identity",
+				Title: "品牌标识与架构",
+				Items: []components.SettingsItem{
+					{
+						ID:          "brand-hero",
+						Title:       "AsterLab 三流几何徽标",
+						Description: "三条并发轨道映照科研数据流：实验设计（Violet）· 步骤执行（Sky）· 分析汇总（Emerald）；支持大/小双尺寸光学适配。",
+						Keywords:    []string{"logo", "brand", "asterlab", "svg", "tri-stream", "图标"},
+						Build: func(c *ui.Context) {
+							t := c.Theme()
+							mark := theme.LogoParsedTriStream(tok.Dark)
+							if s.AboutMonochromeLogo {
+								mark = theme.LogoParsedStandard()
+							}
+							ui.Row(c).Gap(float32(tok.Spacing12)).AlignItems(ui.Center).Children(func() {
+								ui.Box(c).
+									Width(t.Space(16)).Height(t.Space(14)).
+									Radius(float32(tok.ControlRadius)).
+									Background(tok.Elevated).
+									Border(1, tok.Border).
+									Clip().Children(func() {
+									ui.Box(c).Absolute().Fill().Padding(t.Space(1)).Center().
+										TextColor(tok.TextMuted.Alpha(0.18)).Children(func() {
+										ui.Icon(c, theme.LogoParsedOutline()).Width(t.Space(14)).Height(t.Space(12))
+									})
+									ui.Box(c).Fill().Center().
+										TextColor(tok.Text).Children(func() {
+										if s.AboutMonochromeLogo {
+											ui.Icon(c, mark).Width(t.Space(9)).Height(t.Space(8))
+										} else {
+											ui.Image(c, mark).Width(t.Space(9)).Height(t.Space(8))
+										}
+									})
+								})
+								components.Badge(c, "Pure-Go astercore")
+							})
+						},
+					},
+					{
+						ID:          "brand-monochrome-toggle",
+						Title:       "单色极简徽标模式",
+						Description: "切换预览标准单色矢量徽标与设计/执行/分析三流语义着色。",
+						Keywords:    []string{"monochrome", "logo", "tri", "单色", "三流"},
+						Build: func(c *ui.Context) {
+							components.Switch(c, &s.AboutMonochromeLogo, "单色极简", components.SwitchOptions{HideLabel: true})
+						},
+					},
+				},
+			},
 			{
 				ID:    "vault-stats",
 				Title: "当前实验库统计",

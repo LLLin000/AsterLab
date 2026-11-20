@@ -170,6 +170,12 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 	pdf.AddPage()
 	imgSeq := 0
 
+	var hasBrandSeal bool
+	if wm := theme.LogoWatermarkPNG(128); len(wm) > 0 {
+		info := pdf.RegisterImageOptionsReader("asterlab-brand-seal", gofpdf.ImageOptions{ImageType: "PNG"}, bytes.NewReader(wm))
+		hasBrandSeal = info != nil
+	}
+
 	ensureSpace := func(neededMM float64) {
 		if pdf.GetY()+neededMM > pageBreakY {
 			pdf.AddPage()
@@ -177,9 +183,14 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 	}
 
 	// 1. Top Title & Provenance Card (Bench-sheet ready with printable operator blank if draft)
+	titleW := contentW
+	if hasBrandSeal {
+		titleW = contentW - 11
+		pdf.ImageOptions("asterlab-brand-seal", marginL+contentW-6.8, marginT-0.5, 6.4, 5.6, false, gofpdf.ImageOptions{ImageType: "PNG"}, 0, "")
+	}
 	pdf.SetTextColor(28, 27, 24)
 	pdf.SetFont(font, "B", 16)
-	pdf.MultiCell(contentW, 7.5, title, "", "L", false)
+	pdf.MultiCell(titleW, 7.5, title, "", "L", false)
 	pdf.Ln(1.5)
 
 	metaLines := extractExperimentSummaryLines(doc, opts)

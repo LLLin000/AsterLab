@@ -29,6 +29,11 @@ try {
     go build -tags=e2e -trimpath -o (Join-Path $distDir 'mygo-run.exe') .
     if ($LASTEXITCODE -ne 0) { throw "go build failed (exit $LASTEXITCODE)" }
 
+    $icoSrc = Join-Path $protoDir 'assets\asterlab.ico'
+    if (Test-Path -LiteralPath $icoSrc) {
+        Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $distDir 'asterlab.ico')
+    }
+
     # Evidence
     $commit = (git -C $repoRoot rev-parse --short HEAD).Trim()
     $shaDll = (Get-FileHash -LiteralPath (Join-Path $distDir 'Runs.dll') -Algorithm SHA256).Hash

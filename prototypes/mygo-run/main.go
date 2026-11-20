@@ -5183,10 +5183,18 @@ func main() {
 		})
 	})
 	mygo.App.WhenReady(func() {
+		if pngIcon := theme.AppIconPNG(); len(pngIcon) > 0 {
+			_ = mygo.App.Dock.SetIcon(pngIcon)
+		}
 		if err := a.initVaultWorkspace(""); err != nil {
 			a.syncErr = err.Error()
 		}
-		a.shell.NewWindow()
+		win := a.shell.NewWindow()
+		if win != nil && win.Window() != nil {
+			if pngIcon := theme.AppIconPNG(); len(pngIcon) > 0 {
+				_ = win.Window().SetIcon(pngIcon)
+			}
+		}
 		a.windowReady = true
 		a.shell.Quit()
 		a.preload()

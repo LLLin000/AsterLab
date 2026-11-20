@@ -1,6 +1,6 @@
 # 分层架构与代码包
 
-AsterLab 采用「**`.asterml` 本地 Vault 单真源 × Pure-Go 统一科学核心（`astercore`）**」架构，由 MyGo Native（`mygo@v0.8.4`）与 `onevra@v0.2026.18` 驱动桌面端与移动端无 WebView 原生运行；原 Rust Core / SQLite 路径退居可选历史桥接。
+AsterLab 采用「**`.asterml` 本地 Vault 单真源 × Pure-Go 统一科学核心（`astercore`）**」架构，由 MyGo Native（`mygo@v0.8.4`）与 `onevra@v0.2026.18` 驱动桌面端与移动端无 WebView 原生运行；原 Rust Core 与 SQLite 路径已正式弃用，不再参与桌面端、移动端及 CLI 的运行与分发。
 
 ## 核心架构原则：单真源与统一核心
 
@@ -22,10 +22,6 @@ flowchart TB
     Core["internal/astercore<br/>(AssessDocument ARRIVE 诊断 / AnalyzeDocument CCK-8 & RT-qPCR ΔΔCq)"]
     CLI["cmd/asterlab<br/>(Vault-Native JSON CLI: tools / vault.list / vault.search / asterdoc.*)"]
     Spec["internal/asterdoc/spec<br/>(modules.json 21 kinds / units.json UCUM / Go Rules)"]
-  end
-
-  subgraph Legacy["Optional Legacy Core Bridge (可选历史桥接)"]
-    Bridge["modules/runs & crates/asterlab-core<br/>(可选 Runs.dll / labworkbench SQLite 历史适配)"]
   end
 
   Shell --> Theme
@@ -52,4 +48,4 @@ flowchart TB
 | `internal/asterdoc` | AsterML 解析/编译/校验、21 模块渲染器、无框输入、UCUM 显示映射 `DisplayUnit`、纯 Go 孔板 PNG 与 A4 PDF 导出 | [asterdoc.go](../../prototypes/mygo-run/internal/asterdoc/asterdoc.go)、[view.go](../../prototypes/mygo-run/internal/asterdoc/view.go)、[units.go](../../prototypes/mygo-run/internal/asterdoc/units.go)、[plate_png.go](../../prototypes/mygo-run/internal/asterdoc/plate_png.go)、[inputs.go](../../prototypes/mygo-run/internal/asterdoc/inputs.go) |
 | `internal/state` | `asterlab://` URI 深度链接解析（`open` / `pantry` / `run`）与孔板坐标定位 | [deeplink.go](../../prototypes/mygo-run/internal/state/deeplink.go) |
 | `internal/tools` & `uikit` | 储藏室货架、冻存盒/离心管架、NIH BioArt 贴纸生成器与 `plate@1` 2D 交互核心（含数值梯度渐变色阶） | `internal/tools/`、[plate.go](../../prototypes/mygo-run/internal/uikit/plate/plate.go)、`internal/uikit/labsticker/` |
-| `modules/runs`（可选/历史） | 历史 Go ⇄ Rust `mygo:native` 桥接接口（缺失 `Runs.dll` 时静默运行纯 Go Vault 模式） | [runs.go](../../prototypes/mygo-run/modules/runs/runs.go) |
+| `modules/runs`（已弃用归档） | 原 Rust Core 历史兼容桩代码（纯 Go Vault 模式已完全替代，不构建或加载 `Runs.dll`） | [runs.go](../../prototypes/mygo-run/modules/runs/runs.go) |

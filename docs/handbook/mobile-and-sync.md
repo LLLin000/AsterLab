@@ -6,13 +6,11 @@
 
 当前 `.asterml` 解析与编译校验、`Vault` 目录扫描、`VaultIndex` 增量缓存、**Pure-Go `astercore` 诊断与统计分析（ARRIVE / CCK-8 / RT-qPCR）**、`LiveDocument` 100 步撤销与原子写盘、实验日历以及储藏室货架已 **100% 运行在纯 Go 层**（架构详情见 [分层架构与代码包](./architecture.md)）。
 
-即使桌面或移动端环境未配备可选的 `Runs.dll` / `libRuns.so` 原生库，应用也会安静运行在完整的「**纯 Go Vault 统一核心模式**」，不再弹出启动阻塞报错：
+桌面端、移动端与 CLI 均直接运行统一的「**Pure-Go Vault + `astercore` 核心**」，已彻底移除对 `Runs.dll` / `libRuns.so` 与 SQLite 的依赖：
 
-1. **默认模式：Pure-Go Vault + `astercore` 统一核心（桌面 / 移动 / CLI 全一致）**
+1. **统一离线核心（桌面 / 移动 / CLI 全一致）**
    - 直接读写本地或沙盒内的 `.asterml` 与 `./assets/`，并自动将机器私有状态（`vaultPath`、`lastProjectDir`）隔离到 `.asterlab/local.json`，避免污染随云盘同步的 `.asterlab/config.json`。
    - 实验台上的核心操作——查步骤、勾 Checklist/Subflow、启动/暂停 Timer、填参数偏离、手机拍照挂载、孔板快速录入、查看 AsterCore 统计分析与使用速算器——全部离线秒级运行。
-2. **可选历史扩展：Native FFI SQLite 审计模式**
-   - 仅当工作流明确需要对接历史 `crates/asterlab-core` SQLite WAL 冻存表时，可选随包附带对应平台动态库。
 
 ## 双端同步设计路线
 
