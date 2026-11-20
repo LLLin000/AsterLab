@@ -1,8 +1,7 @@
 package main
 
-// Design surface: 3-Tab AsterML v2 Scientific Design Workbench (`步骤工作台`,
-// `实验全局设定`, `AsterML 源码`) backed by Core immutable revisions and
-// reusable generic content modules.
+// Design surface: AsterML v2 Scientific Design Workbench (`编辑`, `阅读`, `源码`)
+// backed by Core immutable revisions and reusable generic content modules.
 
 import (
 	"context"
@@ -11,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"asterlab-mygo-prototype/internal/agentedit"
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/designer"
 	"asterlab-mygo-prototype/internal/state"
@@ -26,44 +25,64 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
-var agentEditStates = map[*app]*agentedit.State{}
-
-func proposalState(a *app) *agentedit.State {
-	if s := agentEditStates[a]; s != nil {
-		return s
-	}
-	s := &agentedit.State{
-		Client:      agentedit.CLIClient{},
-		ConfirmedBy: "researcher",
-		OnCommitted: func(agentedit.CommitResult) {
-			if a.designDoc != nil {
-				a.loadDesign(a.designDoc.DesignID)
-			}
-		},
-	}
-	agentEditStates[a] = s
-	return s
+type designOverviewState struct {
+	open              bool
+	loadedKey         string
+	lastSavedDesignID string
+	lastSavedBody     string
+	title             string
+	scheduledDate     string
+	objective         string
+	endpoint          string
 }
 
-// Agent proposal entry stays secondary to Create Run — UX-P1/P2/P3/P5 and UX-LAYOUT.
-func renderAgentProposal(c *ui.Context, a *app) {
-	t := c.Theme()
-	tok := theme.GetTokens(t)
-	s := proposalState(a)
-	if components.Button(c, "Agent 提案", components.ButtonSecondary).Clicked() {
-		s.Open = true
-		s.Closed = false
+var designOverviewStates = map[*app]*designOverviewState{}
+var stepSavedBodies = map[string]string{}
+
+func ensureDesignOverviewState(a *app, doc *asterdoc.Document) *designOverviewState {
+	st := designOverviewStates[a]
+	if st == nil {
+		st = &designOverviewState{}
+		designOverviewStates[a] = st
 	}
-	if s.Open {
-		components.Dialog(c, &s.Open, components.DialogOptions{Label: "Agent 提案"}, func(panel ui.Element) {
-			panel.FillWidth().MaxWidth(float32(tok.Spacing48)*15).MaxWidthPercent(94).MaxHeightPercent(90).Children(func() {
-				agentedit.View(c, s)
-			})
-		})
-		if !s.Open {
-			s.Closed = true
+	designID := ""
+	if a.designDoc != nil {
+		designID = a.designDoc.DesignID
+	}
+	exp := findExperimentModule(doc)
+	expBody := ""
+	if exp != nil {
+		expBody = exp.Body
+	}
+	if st.loadedKey == "" || st.lastSavedDesignID != designID || (exp != nil && expBody != st.lastSavedBody) {
+		st.loadedKey = designID + ":" + expBody
+		st.lastSavedDesignID = designID
+		st.lastSavedBody = expBody
+		if exp != nil {
+			st.title = moduleString(exp.Data, "title")
+			st.scheduledDate = asterdoc.NormalizeDateYMD(moduleString(exp.Data, "scheduled_date"))
+			st.objective = moduleString(exp.Data, "objective")
+			st.endpoint = moduleString(exp.Data, "primary_endpoint")
+		} else {
+			st.title = ""
+			st.scheduledDate = ""
+			st.objective = ""
+			st.endpoint = ""
 		}
 	}
+	return st
+}
+
+func findExperimentModule(doc *asterdoc.Document) *asterdoc.Module {
+	if doc == nil {
+		return nil
+	}
+	for i := range doc.Modules {
+		if doc.Modules[i].Kind == "experiment" {
+			return &doc.Modules[i]
+		}
+	}
+	return nil
 }
 
 func renderDesignErrorBanner(c *ui.Context, message string, onRetry func()) {
@@ -188,7 +207,6 @@ func designPage(c *ui.Context, a *app) {
 					designer.ListView(c, a.designer)
 				}
 			})
-			renderAgentProposal(c, a)
 		})
 		return
 	}
@@ -210,19 +228,17 @@ func designPage(c *ui.Context, a *app) {
 						a.loadDesign(retryID)
 					}
 				}
-				renderAgentProposal(c, a)
 			})
 		})
 		return
 	}
-	message := "请从项目页选择一个已保存的设计，或点击左上角新建设计。"
+	message := "请从实验日程页选择一个实验，或点击左上角加入新实验。"
 	if a.designSvc == nil {
 		message = "设计服务不可用。"
 	}
 	ui.Column(c).Fill().Center().Gap(float32(tok.Spacing8)).Children(func() {
 		components.Text(c, "还没有打开的设计").FontSize(float32(tok.TextPage)).FontWeight(600)
 		components.Text(c, message).FontSize(float32(tok.TextBody)).TextColor(t.TextMuted)
-		renderAgentProposal(c, a)
 	})
 }
 
@@ -249,10 +265,7 @@ func (a *app) ensureDesignView(doc *asterdoc.Document, stepID string) *asterdoc.
 	if a.designDoc != nil {
 		rev = fmt.Sprint(a.designDoc.Revision)
 	}
-	baseDir := ""
-	if strings.TrimSpace(a.importPath) != "" {
-		baseDir = filepath.Dir(a.importPath)
-	}
+	baseDir := a.designBaseDir()
 	if a.designView == nil || a.designView.Doc == nil || a.designView.Doc.Source != a.designDoc.Source {
 		a.designView = &asterdoc.View{
 			Doc:              doc,
@@ -315,10 +328,7 @@ func (a *app) ensureDesignView(doc *asterdoc.Document, stepID string) *asterdoc.
 					return
 				}
 				picked := paths[0]
-				curBase := ""
-				if strings.TrimSpace(a.importPath) != "" {
-					curBase = filepath.Dir(a.importPath)
-				}
+				curBase := a.designBaseDir()
 				srcVal := asterdoc.PortableFigureAssetPath(curBase, picked)
 				props := map[string]any{"src": srcVal}
 				if strings.EqualFold(filepath.Ext(picked), ".svg") {
@@ -346,26 +356,46 @@ func asterDesignPage(c *ui.Context, a *app) {
 	c.OnShortcut(ui.Cmd|ui.Shift, ui.KeyZ, func() { a.designRedo() })
 	c.OnShortcut(ui.Cmd, ui.KeyY, func() { a.designRedo() })
 
+	if a.designTab < 0 || a.designTab > 2 {
+		a.designTab = 0
+	}
+	srcEd := a.ensureAsterSrcEditor(a.designDoc.Source, a.designDoc.Revision)
 	doc, err := asterdoc.Parse(a.designDoc.Source)
 	if err != nil {
-		ui.Column(c).Fill().Padding(float32(tok.Spacing24)).Gap(float32(tok.Spacing12)).Children(func() {
-			renderDesignErrorBanner(c, "AsterML 语法错误："+err.Error(), a.designDocRetryFunc())
-			if components.Button(c, "切换到源码修复", components.ButtonSecondary).Clicked() {
-				a.designTab = 2
-			}
+		if a.designTab != 2 {
+			ui.Column(c).Fill().Padding(float32(tok.Spacing24)).Gap(float32(tok.Spacing12)).Children(func() {
+				renderDesignErrorBanner(c, "AsterML 语法错误："+err.Error(), a.designDocRetryFunc())
+				if components.Button(c, "切换到源码修复", components.ButtonSecondary).Clicked() {
+					a.designTab = 2
+				}
+			})
+			return
+		}
+		ui.Column(c).Fill().Children(func() {
+			ui.Row(c).FillWidth().Wrap().Padding(float32(tok.Spacing8), float32(tok.Spacing16)).
+				Background(tok.Surface).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+				ui.Text(c, "源码语法修复").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+				components.Badge(c, "语法待修复", components.BadgeOptions{Tone: components.BadgeDanger})
+				ui.Spacer(c)
+				tab := a.designTab
+				components.Tabs(c, &tab, components.TabsSegmented, "编辑", "阅读", "源码")
+				a.designTab = tab
+			})
+			ui.Divider(c)
+			ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+				renderAsterMLSourceTab(c, a, nil, srcEd)
+			})
 		})
 		return
 	}
 
-	srcEd := a.ensureAsterSrcEditor(a.designDoc.Source, a.designDoc.Revision)
-	srcText := srcEd.Buffer.String()
-	srcDirty := strings.ReplaceAll(srcText, "\r\n", "\n") != strings.ReplaceAll(a.designDoc.Source, "\r\n", "\n")
-	stepDirty := a.hasUnsavedStepDrafts(doc)
-	anyDirty := srcDirty || stepDirty
-
-	if a.designTab < 0 || a.designTab > 2 {
-		a.designTab = 0
+	var coreErrors []string
+	if a.readiness != nil {
+		coreErrors = a.readiness.Errors
 	}
+	expMeta := asterdoc.InspectExperiment(a.designDoc.Source, coreErrors)
+	_, srcParseErr := asterdoc.Parse(strings.ReplaceAll(srcEd.Buffer.String(), "\r\n", "\n"))
+	srcDirty := strings.ReplaceAll(srcEd.Buffer.String(), "\r\n", "\n") != strings.ReplaceAll(a.designDoc.Source, "\r\n", "\n")
 
 	ui.Column(c).Fill().Children(func() {
 		// Workbench Header
@@ -374,18 +404,19 @@ func asterDesignPage(c *ui.Context, a *app) {
 			AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Text(c, designExperimentTitle(doc)).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-				ui.Text(c, fmt.Sprintf("rev %d", a.designDoc.Revision)).FontSize(float32(tok.TextMeta)).
-					TextColor(tok.TextMuted).FontFeatures("tnum")
-				stateLabel, stateTone := designReadinessState(a)
-				components.Badge(c, stateLabel, components.BadgeOptions{Tone: stateTone})
-				if anyDirty {
-					components.Badge(c, "未保存", components.BadgeOptions{Tone: components.BadgeWarning})
+				if a.readinessLoading {
+					components.Badge(c, "校验中", components.BadgeOptions{Tone: components.BadgeNeutral})
+				} else if expMeta.Complete {
+					components.Badge(c, "方案就绪", components.BadgeOptions{Tone: components.BadgeSuccess})
+				} else {
+					components.Badge(c, "设计中 · "+expMeta.IncompleteReason, components.BadgeOptions{Tone: components.BadgeWarning})
+				}
+				if srcDirty && srcParseErr != nil {
+					components.Badge(c, "待语法闭合", components.BadgeOptions{Tone: components.BadgeNeutral})
+				} else {
+					ui.Text(c, "实时保存").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				}
 			})
-
-			tab := a.designTab
-			components.Tabs(c, &tab, components.TabsSegmented, "步骤工作台", "实验全局设定", "AsterML 源码")
-			a.designTab = tab
 
 			ui.Spacer(c)
 
@@ -403,18 +434,19 @@ func asterDesignPage(c *ui.Context, a *app) {
 				a.designRedo()
 			}
 
-			renderAgentProposal(c, a)
+			tab := a.designTab
+			components.Tabs(c, &tab, components.TabsSegmented, "编辑", "阅读", "源码")
+			a.designTab = tab
 
-			saveBtn := components.Button(c, "保存修订", components.ButtonSecondary)
-			saveBtn.Disabled(!srcDirty)
-			if saveBtn.Clicked() && srcDirty {
-				a.saveAsterDocSource(srcText)
+			pdfBtn := components.Button(c, "导出 PDF", components.ButtonSecondary)
+			pdfBtn.Disabled(a.pdfExporting)
+			if pdfBtn.Clicked() && !a.pdfExporting {
+				a.startDesignPDFExport(c, doc)
 			}
 
-			stateLabel, _ := designReadinessState(a)
-			createBtn := components.Button(c, "创建 Run", components.ButtonPrimary)
-			createBtn.Disabled(stateLabel == "校验中")
-			if createBtn.Clicked() && stateLabel != "校验中" {
+			createBtn := components.Button(c, "开始实验", components.ButtonPrimary)
+			createBtn.Disabled(a.readinessLoading)
+			if createBtn.Clicked() && !a.readinessLoading {
 				a.preflightRisk = false
 				a.preflightOpen = true
 			}
@@ -434,7 +466,7 @@ func asterDesignPage(c *ui.Context, a *app) {
 			renderDesignErrorBanner(c, "实验方案核查未完成："+a.readinessErr, func() { a.refreshReadiness() })
 		}
 		if a.createRunErr != "" {
-			renderDesignErrorBanner(c, "创建 Run 失败："+a.createRunErr, func() { a.createRunFromDesignDoc() })
+			renderDesignErrorBanner(c, "启动实验失败："+a.createRunErr, func() { a.createRunFromDesignDoc() })
 		}
 
 		ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
@@ -442,7 +474,7 @@ func asterDesignPage(c *ui.Context, a *app) {
 			case 0:
 				renderStepWorkbenchTab(c, a, doc)
 			case 1:
-				renderGlobalSetupTab(c, a, doc)
+				renderSinglePageSheetTab(c, a, doc)
 			case 2:
 				renderAsterMLSourceTab(c, a, doc, srcEd)
 			}
@@ -530,6 +562,50 @@ func renderStepWorkbenchTab(c *ui.Context, a *app, doc *asterdoc.Document) {
 		renderStepDetailCanvas(c, a, doc, steps[a.designSelected])
 	}
 
+	if a.shell != nil && a.shell.SplitOpen {
+		ui.Column(c).Fill().MinWidth(0).MinHeight(0).Children(func() {
+			tok := theme.GetTokens(c.Theme())
+			ui.Row(c).FillWidth().Wrap().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+				Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).
+				Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Text(c, "步骤：").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine()
+				for i, id := range order {
+					i, id := i, id
+					step := steps[id]
+					if step == nil {
+						continue
+					}
+					label := firstNonEmpty(moduleString(step.Data, "title"), fmt.Sprintf("%02d 步骤", i+1))
+					style := components.ButtonGhost
+					if a.designSelected == id {
+						style = components.ButtonSecondary
+					}
+					if components.Button(c, label, style).Clicked() {
+						a.designSelected = id
+					}
+				}
+				if components.Button(c, "＋ 步骤", components.ButtonOutline).Clicked() {
+					nextID := fmt.Sprintf("step-%02d", len(order)+1)
+					cmd := map[string]any{
+						"type":  "add_step",
+						"title": fmt.Sprintf("%02d 新实验步骤", len(order)+1),
+						"id":    nextID,
+					}
+					if assayID := defaultFirstAssayID(doc); assayID != "" {
+						cmd["assay"] = assayID
+					}
+					if a.applyDesignRaw(cmd) {
+						a.designSelected = nextID
+					}
+				}
+			})
+			ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+				detailFn()
+			})
+		})
+		return
+	}
+
 	if designNarrow(c) {
 		components.ScrollView(c, components.ScrollViewOptions{}).Fill().Children(func() {
 			ui.Column(c).FillWidth().Children(func() {
@@ -590,10 +666,12 @@ func renderStepOutlineRail(c *ui.Context, a *app, doc *asterdoc.Document, wf *as
 	tok := theme.GetTokens(c.Theme())
 	ui.Column(c).Fill().Background(tok.Surface).Children(func() {
 		// Rail header + Add Step
-		ui.Row(c).FillWidth().Padding(float32(tok.Spacing12)).
+		ui.Row(c).FillWidth().Wrap().Padding(float32(tok.Spacing12)).
 			AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-			ui.Text(c, "步骤大纲").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-			components.Badge(c, fmt.Sprintf("%d 步", len(order)))
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "步骤大纲").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine()
+				components.Badge(c, fmt.Sprintf("%d 步", len(order)))
+			})
 			ui.Spacer(c)
 			if components.Button(c, "+ 新建步骤", components.ButtonSecondary).Clicked() {
 				nextID := fmt.Sprintf("step-%02d", len(order)+1)
@@ -614,9 +692,6 @@ func renderStepOutlineRail(c *ui.Context, a *app, doc *asterdoc.Document, wf *as
 
 		components.ScrollView(c, components.ScrollViewOptions{}).FillWidth().Grow(1).MinHeight(0).Children(func() {
 			ui.Column(c).FillWidth().Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing8)).Children(func() {
-				if unsaved := a.otherUnsavedStepIDs(order, steps); len(unsaved) > 0 {
-					renderUnsavedDraftWarning(c, a, steps, unsaved)
-				}
 				if len(order) == 0 {
 					ui.Text(c, "暂无步骤，点击右上角「+ 新建步骤」开始设计。").
 						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
@@ -662,8 +737,8 @@ func renderStepOutlineRail(c *ui.Context, a *app, doc *asterdoc.Document, wf *as
 									ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 								})
 							})
-							if a.stepHasUnsavedDraft(step) {
-								components.Badge(c, "未保存", components.BadgeOptions{Tone: components.BadgeWarning})
+							if moduleString(step.Data, "execution") != "organizational" && len(blocks) == 0 && len(moduleStrings(step.Data, "block_refs")) == 0 {
+								components.Badge(c, "待补模块", components.BadgeOptions{Tone: components.BadgeWarning})
 							}
 							moreBtn := components.IconButton(c, lucide.Ellipsis(), "步骤操作", components.IconButtonCompact)
 							components.Tooltip(c, moreBtn, "调整顺序或删除步骤")
@@ -717,18 +792,22 @@ func renderStepDetailCanvas(c *ui.Context, a *app, doc *asterdoc.Document, step 
 		})
 		return
 	}
-	if a.canvasSelLoaded != step.ID {
+	stepStateKey := fmt.Sprintf("%p:%s", a, step.ID)
+	if a.canvasSelLoaded != step.ID || stepSavedBodies[stepStateKey] != step.Body {
 		a.loadStepDraft(step)
-	}
-	dirty := a.isCurrentDrawerDirty(step)
-	if dirty {
-		a.stepPropSaved = ""
+		stepSavedBodies[stepStateKey] = step.Body
 	}
 
 	components.ScrollView(c, components.ScrollViewOptions{}).Fill().Children(func() {
 		ui.Column(c).FillWidth().Padding(float32(tok.Spacing16), float32(tok.Spacing24)).
 			Gap(float32(tok.Spacing16)).Children(func() {
-			// Editable Step Header & Metadata Card
+			view := a.ensureDesignView(doc, step.ID)
+			view.HideStepHeader = true
+
+			// Compact collapsible experiment overview & top-level group_table header card
+			renderDesignOverviewHeaderCard(c, a, doc, view)
+
+			// Editable Step Header & Metadata Card (real-time auto-saved to .asterml)
 			ui.Column(c).FillWidth().Padding(float32(tok.Spacing16)).Radius(float32(tok.PanelRadius)).
 				Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing12)).Children(func() {
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
@@ -738,17 +817,7 @@ func renderStepDetailCanvas(c *ui.Context, a *app, doc *asterdoc.Document, step 
 					ui.Box(c).Width(float32(tok.Spacing48)*3.5).Children(func() {
 						components.TextBox(c, &a.canvasTimepoints, components.TextBoxOptions{}).Placeholder("时间点，例如 6 h, 12 h")
 					})
-					if dirty {
-						if components.Button(c, "保存步骤属性", components.ButtonSecondary).Clicked() {
-							a.saveStepProperties(step)
-						}
-						if components.Button(c, "放弃修改", components.ButtonGhost).Clicked() {
-							delete(a.stepDrafts, step.ID)
-							a.applyDrawerDraft(step.ID, stepBaseProps(step))
-						}
-					} else if a.stepPropSaved == step.ID {
-						components.Badge(c, "已保存", components.BadgeOptions{Tone: components.BadgeSuccess})
-					}
+					ui.Text(c, "已实时写入 .asterml").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				})
 
 				metaOpenPtr := a.ensureDesignMetaOpen(step.ID)
@@ -772,27 +841,27 @@ func renderStepDetailCanvas(c *ui.Context, a *app, doc *asterdoc.Document, step 
 					} else {
 						components.Badge(c, "可执行步骤", components.BadgeOptions{Tone: components.BadgeAccent})
 					}
-					if assayRef := moduleString(step.Data, "assay"); assayRef != "" {
-						assayLabel := assayRef
-						if doc != nil {
-							for i := range doc.Modules {
-								if doc.Modules[i].Kind == "assay" && doc.Modules[i].ID == assayRef {
-									if title := moduleString(doc.Modules[i].Data, "title"); title != "" {
-										assayLabel = title
-									}
-									break
+					if assayRef := moduleString(step.Data, "assay"); assayRef != "" && doc != nil {
+						assayLabel := ""
+						for i := range doc.Modules {
+							if doc.Modules[i].Kind == "assay" && doc.Modules[i].ID == assayRef {
+								if title := moduleString(doc.Modules[i].Data, "title"); title != "" && !asterdoc.IsRawIdentifier(title) {
+									assayLabel = title
 								}
+								break
 							}
 						}
-						components.Badge(c, assayLabel)
+						if assayLabel != "" {
+							components.Badge(c, assayLabel)
+						}
 					}
 				})
-				dirty = a.syncCurrentStepDraft(step)
+				if a.isStepHeaderModified(step) {
+					a.saveStepPropertiesRealtime(step, stepStateKey)
+				}
 			})
 
 			// Composable Generic Module Stream + Palette
-			view := a.ensureDesignView(doc, step.ID)
-			view.HideStepHeader = true
 			asterdoc.StepBlockComposer(view, c, step)
 		})
 	})
@@ -810,103 +879,185 @@ func (a *app) ensureDesignMetaOpen(stepID string) *bool {
 	return &v
 }
 
-func (a *app) saveStepProperties(step *asterdoc.Module) {
+func (a *app) isStepHeaderModified(step *asterdoc.Module) bool {
+	if step == nil || a.canvasSelLoaded != step.ID {
+		return false
+	}
+	curTitle := strings.TrimSpace(a.canvasTitle)
+	if curTitle == "" {
+		curTitle = "未命名步骤"
+	}
+	baseTitle := strings.TrimSpace(moduleString(step.Data, "title"))
+	if baseTitle == "" {
+		baseTitle = "未命名步骤"
+	}
+	if curTitle != baseTitle {
+		return true
+	}
+	curTimes := normalizeTimepointsCSV(a.canvasTimepoints)
+	baseTimes := strings.Join(moduleStrings(step.Data, "timepoints"), ", ")
+	return curTimes != baseTimes
+}
+
+func normalizeTimepointsCSV(raw string) string {
+	var parts []string
+	for _, value := range strings.Split(raw, ",") {
+		if v := strings.TrimSpace(value); v != "" {
+			parts = append(parts, v)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (a *app) saveStepPropertiesRealtime(step *asterdoc.Module, stateKey string) {
 	times := []any{}
 	for _, value := range strings.Split(a.canvasTimepoints, ",") {
 		if value = strings.TrimSpace(value); value != "" {
 			times = append(times, value)
 		}
 	}
-	properties := map[string]any{"title": a.canvasTitle, "timepoints": times}
+	titleVal := strings.TrimSpace(a.canvasTitle)
+	if titleVal == "" {
+		titleVal = "未命名步骤"
+	}
+	properties := map[string]any{"title": titleVal, "timepoints": times}
 	if a.canvasAssay != "" {
 		properties["assay"] = a.canvasAssay
-	}
-	if rawTasks, ok := step.Data["tasks"].([]any); ok && len(rawTasks) > 0 {
-		tasks := make([]any, len(rawTasks))
-		for i, raw := range rawTasks {
-			task, ok := raw.(map[string]any)
-			if !ok {
-				tasks[i] = raw
-				continue
-			}
-			updated := make(map[string]any, len(task))
-			for key, value := range task {
-				updated[key] = value
-			}
-			if i == 0 && len(a.canvasTasks) > 0 {
-				updated["title"] = a.canvasTasks[0].Title
-			}
-			tasks[i] = updated
-		}
-		properties["tasks"] = tasks
 	}
 	if a.applyDesignRaw(map[string]any{
 		"type": "update_module", "moduleId": step.ID, "properties": properties,
 	}) {
 		delete(a.stepDrafts, step.ID)
 		a.stepPropSaved = step.ID
-		a.canvasSelLoaded = ""
+		if a.designDoc != nil {
+			if updatedDoc, err := asterdoc.Parse(a.designDoc.Source); err == nil {
+				for _, m := range updatedDoc.Modules {
+					if m.Kind == "step" && m.ID == step.ID {
+						stepSavedBodies[stateKey] = m.Body
+						break
+					}
+				}
+			}
+		}
 	}
 }
 
-func renderGlobalSetupTab(c *ui.Context, a *app, doc *asterdoc.Document) {
-	tok := theme.GetTokens(c.Theme())
+func (a *app) saveStepProperties(step *asterdoc.Module) {
+	a.saveStepPropertiesRealtime(step, fmt.Sprintf("%p:%s", a, step.ID))
+}
+
+func renderSinglePageSheetTab(c *ui.Context, a *app, doc *asterdoc.Document) {
 	view := a.ensureDesignView(doc, "")
 	components.ScrollView(c, components.ScrollViewOptions{}).Fill().Children(func() {
-		ui.Column(c).FillWidth().Padding(float32(tok.Spacing24)).AlignItems(ui.Center).Children(func() {
-			ui.Column(c).FillWidth().MaxWidth(float32(tok.Spacing48)*22).MaxWidthPercent(100).
-				Gap(float32(tok.Spacing16)).Children(func() {
-				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-					ui.Column(c).Gap(float32(tok.Spacing4)).Children(func() {
-						ui.Text(c, "实验全局设定").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-						ui.Text(c, "集中维护实验档案、实验分组表、标准容器（孔板/培养皿/试管架）、材料试剂与仪器档案。").
-							FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					})
-					ui.Spacer(c)
-					addBtn := components.Button(c, "+ 添加全局模块", components.ButtonSecondary)
-					components.MenuButton(c, addBtn, func(m *components.Menu) {
-						n := len(doc.Modules) + 1
-						if m.Item("分组表 (group_table)").Chosen() {
-							_ = a.applyDesignRaw(map[string]any{"type": "add_module", "module": map[string]any{
-								"kind": "group_table", "id": fmt.Sprintf("gt-%d", n), "schema": 1, "title": "实验分组表",
-								"rows": []any{map[string]any{"id": fmt.Sprintf("g-%d", n), "name": "新实验组", "role": "treatment", "replicate_count": 3}},
-							}})
-						}
-						if m.Item("标准容器 (plate / dish / rack)").Chosen() {
-							aid := defaultFirstAssayID(doc)
-							_ = a.applyDesignRaw(map[string]any{"type": "add_module", "module": map[string]any{
-								"kind": "plate", "id": fmt.Sprintf("plate-%d", n), "schema": 1, "format": 96,
-								"topology": "plate", "assay": aid, "groups": map[string]any{},
-							}})
-						}
-						if m.Item("试剂与耗材 (material)").Chosen() {
-							_ = a.applyDesignRaw(map[string]any{"type": "add_module", "module": map[string]any{
-								"kind": "material", "id": fmt.Sprintf("mat-%d", n), "schema": 1,
-								"name": "新试剂", "role": "treatment", "source": "lab_imported",
-							}})
-						}
-						if m.Item("仪器能力档案 (instrument_profile)").Chosen() {
-							_ = a.applyDesignRaw(map[string]any{"type": "add_module", "module": map[string]any{
-								"kind": "instrument_profile", "id": fmt.Sprintf("inst-%d", n), "schema": 1,
-								"class": "plate_reader", "model": "多功能酶标仪", "source": "lab_imported",
-								"capabilities": []any{map[string]any{"name": "absorbance"}},
-							}})
-						}
-					})
-				})
+		view.RenderDocumentSheet(c)
+	})
+}
 
-				for i := range doc.Modules {
-					m := doc.Modules[i]
-					if m.Kind == "step" || m.Kind == "workflow" {
-						continue
+func renderDesignOverviewHeaderCard(c *ui.Context, a *app, doc *asterdoc.Document, view *asterdoc.View) {
+	tok := theme.GetTokens(c.Theme())
+	st := ensureDesignOverviewState(a, doc)
+	expMod := findExperimentModule(doc)
+	var groupTables []asterdoc.Module
+	if doc != nil {
+		for _, m := range doc.Modules {
+			if m.Kind == "group_table" {
+				groupTables = append(groupTables, m)
+			}
+		}
+	}
+	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+		Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).
+		Gap(float32(tok.Spacing8)).Children(func() {
+		components.Collapsible(c, "实验概览与全局分组", &st.open, components.CollapsibleOptions{}, func() {
+			ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Padding(float32(tok.Spacing8), 0, 0, 0).Children(func() {
+				if expMod != nil {
+					ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.End).Children(func() {
+						ui.Column(c).Grow(1).MinWidth(float32(tok.Spacing48)*4).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Text(c, "实验标题").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							components.TextBox(c, &st.title, components.TextBoxOptions{}).Placeholder("输入实验研究题目")
+						})
+						ui.Column(c).Width(float32(tok.Spacing48)*3.8).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Text(c, "计划日期").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+									components.TextBox(c, &st.scheduledDate, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
+								})
+								if components.Button(c, "今天", components.ButtonGhost).Clicked() {
+									st.scheduledDate = time.Now().Format("2006-01-02")
+								}
+								if components.Button(c, "明天", components.ButtonGhost).Clicked() {
+									st.scheduledDate = time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+								}
+							})
+						})
+						ui.Column(c).Width(float32(tok.Spacing48)*4.0).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Text(c, "主要观测指标").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							components.TextBox(c, &st.endpoint, components.TextBoxOptions{}).Placeholder("例如 抑菌圈直径 (mm)")
+						})
+					})
+					ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+						ui.Text(c, "实验目的 / 核心假说").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &st.objective, components.TextBoxOptions{}).Placeholder("简述实验目标、比较条件与科学问题")
+					})
+					targetTitle := strings.TrimSpace(st.title)
+					if targetTitle == "" {
+						targetTitle = "未命名实验"
 					}
-					view.RenderModule(c, m.Kind, m.Schema, m.Data)
+					curTitle := firstNonEmpty(strings.TrimSpace(moduleString(expMod.Data, "title")), "未命名实验")
+					curDate := asterdoc.NormalizeDateYMD(moduleString(expMod.Data, "scheduled_date"))
+					trimDateInput := strings.TrimSpace(st.scheduledDate)
+					normDate := asterdoc.NormalizeDateYMD(trimDateInput)
+					dateChanged := (trimDateInput == "" && curDate != "") || (normDate != "" && normDate != curDate)
+					trimObjective := strings.TrimSpace(st.objective)
+					trimEndpoint := strings.TrimSpace(st.endpoint)
+					if targetTitle != curTitle ||
+						dateChanged ||
+						trimObjective != strings.TrimSpace(moduleString(expMod.Data, "objective")) ||
+						trimEndpoint != strings.TrimSpace(moduleString(expMod.Data, "primary_endpoint")) {
+						props := map[string]any{
+							"title":            targetTitle,
+							"objective":        trimObjective,
+							"primary_endpoint": trimEndpoint,
+						}
+						if trimDateInput == "" {
+							props["scheduled_date"] = ""
+						} else if normDate != "" {
+							props["scheduled_date"] = normDate
+						}
+						if a.applyDesignRaw(map[string]any{
+							"type": "update_module", "moduleId": expMod.ID, "properties": props,
+						}) {
+							if a.designDoc != nil {
+								if updatedDoc, parseErr := asterdoc.Parse(a.designDoc.Source); parseErr == nil {
+									if updatedExp := findExperimentModule(updatedDoc); updatedExp != nil {
+										st.lastSavedBody = updatedExp.Body
+									}
+								}
+							}
+						}
+					}
 				}
-				for i := range doc.Modules {
-					if doc.Modules[i].Kind == "workflow" {
-						m := doc.Modules[i]
+
+				if len(groupTables) > 0 {
+					for i := range groupTables {
+						m := groupTables[i]
 						view.RenderModule(c, m.Kind, m.Schema, m.Data)
 					}
+				} else {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Text(c, "当前方案尚未包含顶层实验分组表，可按需添加一个。").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						ui.Spacer(c)
+						if components.Button(c, "+ 添加实验分组表", components.ButtonSecondary).Clicked() {
+							n := 1
+							if doc != nil {
+								n = len(doc.Modules) + 1
+							}
+							_ = a.applyDesignRaw(map[string]any{"type": "add_module", "module": map[string]any{
+								"kind": "group_table", "id": fmt.Sprintf("gt-%d", n), "schema": 1, "title": "实验分组表",
+								"rows": []any{map[string]any{"id": fmt.Sprintf("g-%d", n), "name": "对照组", "role": "control", "independent_n": 3}},
+							}})
+						}
+					})
 				}
 			})
 		})
@@ -915,21 +1066,28 @@ func renderGlobalSetupTab(c *ui.Context, a *app, doc *asterdoc.Document) {
 
 func renderAsterMLSourceTab(c *ui.Context, a *app, lastValidDoc *asterdoc.Document, srcEd *editor.State) {
 	tok := theme.GetTokens(c.Theme())
-	bufText := srcEd.Buffer.String()
+	bufText := strings.ReplaceAll(srcEd.Buffer.String(), "\r\n", "\n")
+	curSource := strings.ReplaceAll(a.designDoc.Source, "\r\n", "\n")
 	parsedDoc, parseErr := asterdoc.Parse(bufText)
-	dirty := bufText != a.designDoc.Source
+	dirty := bufText != curSource
+	if dirty && parseErr == nil {
+		if a.saveAsterDocSourceInPlace(bufText) {
+			dirty = false
+			srcEd.DiffBase = editor.NewBuffer(a.designDoc.Source)
+		}
+	}
 
 	editorPane := func() {
 		ui.Column(c).Fill().Background(tok.Surface).Children(func() {
 			ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
 				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				if parseErr != nil {
-					components.Badge(c, "方案格式有误", components.BadgeOptions{Tone: components.BadgeDanger})
+					components.Badge(c, "待语法闭合后自动保存", components.BadgeOptions{Tone: components.BadgeWarning})
 				} else {
-					components.Badge(c, "方案格式正常", components.BadgeOptions{Tone: components.BadgeSuccess})
+					components.Badge(c, "已实时同步 .asterml", components.BadgeOptions{Tone: components.BadgeSuccess})
 				}
 				ui.Spacer(c)
-				if dirty {
+				if dirty && parseErr != nil {
 					if components.Button(c, "还原", components.ButtonGhost).Clicked() {
 						srcEd.Buffer = editor.NewBuffer(a.designDoc.Source)
 						if lang := editor.LanguageFor("design.md"); lang != nil {
@@ -937,11 +1095,6 @@ func renderAsterMLSourceTab(c *ui.Context, a *app, lastValidDoc *asterdoc.Docume
 						}
 						srcEd.DiffBase = editor.NewBuffer(a.designDoc.Source)
 					}
-				}
-				applyBtn := components.Button(c, "应用并保存修订", components.ButtonSecondary)
-				applyBtn.Disabled(!dirty || parseErr != nil)
-				if applyBtn.Clicked() && dirty && parseErr == nil {
-					a.saveAsterDocSource(bufText)
 				}
 			})
 			ui.Divider(c)
@@ -959,17 +1112,20 @@ func renderAsterMLSourceTab(c *ui.Context, a *app, lastValidDoc *asterdoc.Docume
 		if docToShow == nil {
 			docToShow = lastValidDoc
 		}
-		baseDir := ""
-		if strings.TrimSpace(a.importPath) != "" {
-			baseDir = filepath.Dir(a.importPath)
+		if docToShow == nil {
+			ui.Column(c).Fill().Center().Padding(float32(tok.Spacing24)).Children(func() {
+				ui.Text(c, "修正左侧 AsterML 语法后，此处将实时恢复组件预览。").
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			})
+			return
 		}
+		baseDir := a.designBaseDir()
 		previewView := &asterdoc.View{
-			Doc:              docToShow,
-			Registry:         asterdoc.BuiltinRegistry(),
-			Mode:             asterdoc.ModeProtocol,
-			DocumentRevision: fmt.Sprint(a.designDoc.Revision),
-			BaseDir:          baseDir,
-			ReadOnly:         true,
+			Doc:      docToShow,
+			Registry: asterdoc.BuiltinRegistry(),
+			Mode:     asterdoc.ModeProtocol,
+			BaseDir:  baseDir,
+			ReadOnly: true,
 		}
 		components.ScrollView(c, components.ScrollViewOptions{}).Fill().Children(func() {
 			ui.Column(c).FillWidth().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
@@ -1200,17 +1356,37 @@ func (a *app) applyStepListCommand(action string, wf *asterdoc.Module, stepID, p
 }
 
 func (a *app) saveAsterDocSource(source string) bool {
+	return a.saveAsterDocSourceWithMode(source, false)
+}
+
+func (a *app) saveAsterDocSourceInPlace(source string) bool {
+	return a.saveAsterDocSourceWithMode(source, true)
+}
+
+func (a *app) saveAsterDocSourceWithMode(source string, inPlace bool) bool {
 	if a.designSvc == nil || a.designDoc == nil {
 		return false
 	}
 	previous := *a.designDoc
+	expRev := a.designDoc.Revision
 	updated, err := a.designSvc.SaveAsterDoc(context.Background(), runs.AsterDocSaveInput{
 		DesignID:         a.designDoc.DesignID,
 		Source:           source,
-		ExpectedRevision: a.designDoc.Revision,
+		ExpectedRevision: expRev,
 		OperationID:      a.nextOp(),
 		ActorID:          os.Getenv("USERNAME"),
 	})
+	if err != nil && isConflictErr(err) {
+		if latest, loadErr := a.designSvc.LoadAsterDoc(context.Background(), a.designDoc.DesignID); loadErr == nil {
+			updated, err = a.designSvc.SaveAsterDoc(context.Background(), runs.AsterDocSaveInput{
+				DesignID:         a.designDoc.DesignID,
+				Source:           source,
+				ExpectedRevision: latest.Revision,
+				OperationID:      a.nextOp(),
+				ActorID:          os.Getenv("USERNAME"),
+			})
+		}
+	}
 	if err != nil {
 		a.designDocErr = state.MapError(err).Error()
 		a.designDocLoadFailed = false
@@ -1223,11 +1399,26 @@ func (a *app) saveAsterDocSource(source string) bool {
 	a.resetAsterDraftHistory()
 	a.designDoc = &updated
 	a.designView = nil
-	a.asterSrcLoadedRev = 0
+	if inPlace {
+		a.asterSrcLoadedRev = updated.Revision
+		a.asterSrcLoadedSrc = updated.Source
+	} else {
+		a.asterSrcLoadedRev = 0
+	}
 	a.designHierarchy = nil
 	a.designHierarchySource = ""
+	a.syncDesignDiskMirror(updated.DesignID, updated.Source)
 	a.refreshReadiness()
+	a.syncShellExperiments()
 	return true
+}
+
+func isConflictErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	low := strings.ToLower(err.Error())
+	return strings.Contains(low, "conflict") || strings.Contains(low, "expected revision") || strings.Contains(low, "stale")
 }
 
 func firstNonEmpty(values ...string) string {

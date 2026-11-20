@@ -7,22 +7,32 @@ import (
 )
 
 func TestDesignTokens(t *testing.T) {
+	SetActiveLook(PresetObsidian, true)
 	light, dark := LightTokens(), DarkTokens()
-	// DESIGN.md: warm neutral canvas, one violet accent reserved for selection
-	// and primary action, black body text above gray labels.
-	if light.Canvas != ui.Hex("#f7f6f3") || light.Surface != ui.Hex("#ffffff") {
-		t.Fatalf("light surfaces diverged from DESIGN.md: canvas=%v surface=%v", light.Canvas, light.Surface)
+	if light.Canvas != ui.Hex("#ffffff") || light.Elevated != ui.Hex("#f5f6f8") {
+		t.Fatalf("obsidian light surfaces unexpected: canvas=%v elevated=%v", light.Canvas, light.Elevated)
 	}
-	if light.Accent != ui.Hex("#5b45c9") || light.Text != ui.Hex("#1c1b18") || light.TextMuted != ui.Hex("#5f5a52") {
-		t.Fatalf("light ink/accent diverged from DESIGN.md: accent=%v text=%v muted=%v", light.Accent, light.Text, light.TextMuted)
+	if light.Accent != ui.Hex("#6c5ce7") || light.Text != ui.Hex("#18181b") {
+		t.Fatalf("obsidian light ink/accent unexpected: accent=%v text=%v", light.Accent, light.Text)
 	}
-	if dark.Canvas != ui.Hex("#171614") || dark.Accent != ui.Hex("#a996ff") ||
-		dark.Text != ui.Hex("#f2efe9") || dark.TextMuted != ui.Hex("#a9a49a") {
-		t.Fatalf("dark palette diverged from DESIGN.md: %+v", dark)
+	if dark.Canvas != ui.Hex("#111215") || dark.Accent != ui.Hex("#a596ff") || dark.Text != ui.Hex("#f5f5f7") {
+		t.Fatalf("obsidian dark palette unexpected: %+v", dark)
 	}
 	if light.Accent == light.Success || light.Accent == light.Warning {
 		t.Fatal("accent must stay distinct from semantic success/warning")
 	}
+
+	zinc := TokensFor(PresetZinc, false, true)
+	if zinc.Canvas != ui.Hex("#f4f5f7") || zinc.Accent != ui.Hex("#635bff") {
+		t.Fatalf("zinc preset mismatch: %+v", zinc)
+	}
+
+	warmL := TokensFor(PresetWarm, false, false)
+	warmD := TokensFor(PresetWarm, true, false)
+	if warmL.Canvas != ui.Hex("#f7f6f3") || warmD.Canvas != ui.Hex("#171614") {
+		t.Fatalf("warm preset compatibility broken: light=%v dark=%v", warmL.Canvas, warmD.Canvas)
+	}
+
 	lt, dt := LightTheme(), DarkTheme()
 	if lt.Dark || !dt.Dark {
 		t.Fatal("theme selection mismatch")

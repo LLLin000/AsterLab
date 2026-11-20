@@ -29,6 +29,8 @@ func plateFromData(data map[string]any) (Plate, error) {
 	plate.Replicates = normalizeReplicates(plate.Replicates)
 	plate.Roles = normalizeRoles(plate.Roles)
 	plate.Factors = normalizeFactors(plate.Factors)
+	plate.Layers = normalizeFactors(plate.Layers)
+	plate.ExcludedWells = normalizeWellList(plate.ExcludedWells)
 	if err := validatePlate(plate); err != nil {
 		return Plate{}, err
 	}
@@ -198,8 +200,13 @@ func groupSpec() ModuleSpec {
 func assaySpec() ModuleSpec {
 	return moduleDocumentSpec(builtinDescriptor("assay"), specValidator("assay"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
-		ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).Radius(t.Radius).
-			Background(t.Surface).Border(1, t.Border).Children(func() {
+		col := ui.Column(c).FillWidth().Gap(t.Space(1))
+		if v != nil && v.UnifiedLive {
+			col.Padding(t.Space(1.5), 0)
+		} else {
+			col.Padding(t.Space(3)).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
+		}
+		col.Children(func() {
 			ui.Text(c, textValue(data, "title")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
 			line := strings.Join(nonEmpty([]string{
 				textValue(data, "endpoint"), textValue(data, "method"), textValue(data, "unit"),
@@ -224,13 +231,21 @@ func stepSpec() ModuleSpec {
 
 func renderStepSummary(v *View, c *ui.Context, data map[string]any) {
 	tok := theme.GetTokens(c.Theme())
-	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
-		Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
+	prevStep := v.StepID
+	v.StepID = textValue(data, "id")
+	defer func() { v.StepID = prevStep }()
+	stepCol := ui.Column(c).FillWidth().Gap(float32(tok.Spacing8))
+	if v == nil || !v.UnifiedLive {
+		stepCol.Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border)
+	} else {
+		stepCol.Padding(float32(tok.Spacing8), 0)
+	}
+	stepCol.Children(func() {
 		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, textValue(data, "title")).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 			if exec := textValue(data, "execution"); exec == "organizational" {
 				components.Badge(c, "组织分组")
-			} else {
+			} else if v == nil || !v.UnifiedLive {
 				components.Badge(c, "步骤", components.BadgeOptions{Tone: components.BadgeAccent})
 			}
 			ui.Spacer(c)
@@ -290,8 +305,13 @@ func workflowSpec() ModuleSpec {
 func instrumentProfileSpec() ModuleSpec {
 	return moduleDocumentSpec(builtinDescriptor("instrument_profile"), specValidator("instrument_profile"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
-		ui.Column(c).FillWidth().Gap(t.Space(1.5)).Padding(t.Space(3)).Radius(t.Radius).
-			Background(t.Surface).Border(1, t.Border).Children(func() {
+		col := ui.Column(c).FillWidth().Gap(t.Space(1.5))
+		if v != nil && v.UnifiedLive {
+			col.Padding(t.Space(1.5), 0)
+		} else {
+			col.Padding(t.Space(3)).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
+		}
+		col.Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 				ui.Text(c, textValue(data, "class")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
 				if model := textValue(data, "model"); model != "" {

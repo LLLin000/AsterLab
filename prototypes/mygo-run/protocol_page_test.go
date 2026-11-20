@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"asterlab-mygo-prototype/internal/notebook/record"
+	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/modules/runs"
 	"github.com/egoist/mygo/ui"
@@ -23,81 +23,38 @@ func TestProtocolNeverFallsBackToLiveDesignForSelectedRun(t *testing.T) {
 		t.Fatal("error state does not state that the live design is refused")
 	}
 }
-func archiveTestSnap(runID, prose string) runs.RunSnapshot {
-	return runs.RunSnapshot{
-		RunID: runID, Title: "HUVEC 成管",
-		DesignID: "design-1", DesignRevision: 3, Status: "completed",
-		AsterDoc: &runs.AsterDocRef{Revision: 5},
-		Tasks: []runs.RunTask{
-			{
-				Key: "task-cure", Title: "405nm 固化", Timepoint: "0h",
-				Status: "completed", DesignStepID: "step-2",
-				ParametersJSON: `[{"key":"cure_s","label":"固化秒数","value":60,"unit":"s"}]`,
-			},
-		},
-		Events: []runs.RunEvent{
-			{
-				ID: "evt-read", EventType: "measurement", TaskKey: "task-cure", Timepoint: "6h",
-				BatchID: "batch-1", RecordedAt: "2026-11-10T16:01:00+08:00",
-				ResultCells: []runs.ResultCell{
-					{Row: 0, Column: 0, SampleID: "S1", Field: "OD450", Value: new(0.82)},
-				},
-			},
-			{ID: "note-1", Stage: "notebook", Content: prose, RecordedAt: "2026-11-10T17:00:00Z"},
-		},
-	}
-}
 
-func TestProtocolArchiveToggleRendersEndState(t *testing.T) {
+func TestProtocolFrozenDocOffersUnifiedRunRecordPDFExport(t *testing.T) {
+	source := "```asterlab\nkind: experiment\nid: exp-1\nschema: 1\ntitle: HUVEC 成管\n```\n" +
+		"```asterlab\nkind: assay\nid: assay-1\nschema: 1\ntitle: 成管检测\nprotocol_version_id: pv-1\n```\n" +
+		"```asterlab\nkind: step\nid: step-2\nschema: 1\ntitle: 405nm 固化\nassay: assay-1\npath: root/cure\nblocks:\n  - kind: prose\n    id: p-1\n    schema: 1\n    title: 说明\n    body: 60s 固化\n```\n"
 	a := &app{
-		snap:     archiveTestSnap("run-arch-1", "# 研判\n\n结论见对比 @matrix(6h)"),
-		asterErr: "冻结文档损坏（测试夹具）",
+		snap: runs.RunSnapshot{
+			RunID:          "run-proto-1",
+			Title:          "HUVEC 成管",
+			DesignID:       "design-1",
+			DesignRevision: 3,
+			Status:         "completed",
+			AsterDoc:       &runs.AsterDocRef{DesignID: "design-1", Revision: 5, SourceHash: "h1"},
+		},
+		asterDoc: &asterdoc.FrozenAsterDoc{DesignID: "design-1", Revision: 5, Source: source},
+		protocols: []runs.ProtocolSummary{
+			{ProtocolVersionID: "pv-1", Title: "HUVEC SOP", Version: 1},
+		},
 	}
 	tt := ui.NewTester(func(c *ui.Context) {
 		c.SetTheme(theme.LightTheme())
 		protocolPage(c, a)
-	}, 900, 600)
+	}, 1080, 760)
 	tt.Frame()
-	if !tt.HasText("终态归档") {
-		t.Fatalf("archive toggle missing: %q", tt.Texts())
-	}
-	if err := tt.Click("终态归档"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	for _, want := range []string{"终态归档", "实验记录归档", "计划 vs 实际", "导出归档包", "导出归档 PDF", "未签核"} {
+	for _, want := range []string{"关联方案快照 · 只读", "导出实验记录 PDF", "405nm 固化"} {
 		if !tt.HasText(want) {
-			t.Fatalf("archive view missing %q: %q", want, tt.Texts())
+			t.Fatalf("protocol page missing %q: %q", want, tt.Texts())
 		}
 	}
-	if tt.HasText("record-sign") {
-		t.Fatal("signature trailer leaked into the archive view")
-	}
-}
-
-func TestProtocolArchiveShowsSealedState(t *testing.T) {
-	snap := archiveTestSnap("run-arch-2", "# 研判\n\n贴壁良好")
-	proj := boardTestProj("")
-	proj.Archive.Status = "signed"
-	proj.Archive.Signature = &record.ArchiveSignature{SignedBy: "lin", SignedAtUTC: "2026-11-16T12:00:00Z"}
-	a := &app{
-		snap:     snap,
-		runSvc:   &sealStubSvc{snap: snap, proj: proj},
-		asterErr: "冻结文档损坏（测试夹具）",
-	}
-	tt := ui.NewTester(func(c *ui.Context) {
-		c.SetTheme(theme.LightTheme())
-		protocolPage(c, a)
-	}, 900, 600)
-	tt.Frame()
-	if err := tt.Click("终态归档"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if !tt.HasText("已签核归档") {
-		t.Fatalf("sealed state missing: %q", tt.Texts())
-	}
-	if !tt.HasText("lin") {
-		t.Fatalf("signer missing from sealed archive: %q", tt.Texts())
+	for _, forbidden := range []string{"终态归档", "导出归档包", "导出归档 PDF", "方案历史版本"} {
+		if tt.HasText(forbidden) {
+			t.Fatalf("legacy archive text %q should not appear on protocol page: %q", forbidden, tt.Texts())
+		}
 	}
 }

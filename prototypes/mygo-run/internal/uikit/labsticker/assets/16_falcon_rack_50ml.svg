@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <defs>
+    <linearGradient id="rackStoneFront" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#64748B"/>
+      <stop offset="48%" stop-color="#94A3B8"/>
+      <stop offset="100%" stop-color="#475569"/>
+    </linearGradient>
+    <linearGradient id="rackStoneTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F1F5F9"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+    <linearGradient id="tube50Barrel" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E2E8F0"/>
+      <stop offset="35%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+    <linearGradient id="cap50Orange" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EA580C"/>
+      <stop offset="40%" stop-color="#FB923C"/>
+      <stop offset="100%" stop-color="#C2410C"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- Solid rack cabinet backing to keep EDT white die-cut closed -->
+    <rect x="66" y="196" width="368" height="202" rx="16" fill="#E2E8F0" stroke="#334155" stroke-width="2.6"/>
+    <!-- Left and right structural struts -->
+    <rect x="64" y="192" width="28" height="208" rx="8" fill="url(#rackStoneFront)" stroke="#334155" stroke-width="2.4"/>
+    <rect x="408" y="192" width="28" height="208" rx="8" fill="url(#rackStoneFront)" stroke="#334155" stroke-width="2.4"/>
+    <!-- 3 stout 50 mL orange-cap conical tubes seated across the rack -->
+    <g>
+      <!-- Tube Left (FBS Amber) -->
+      <path d="M 110,126 L 178,126 L 178,324 L 154,358 C 150,363 138,363 134,358 L 110,324 Z"
+            fill="url(#tube50Barrel)" stroke="#475569" stroke-width="2.4" stroke-linejoin="round"/>
+      <path d="M 114,196 L 174,196 L 174,322 L 152,354 L 136,354 L 114,322 Z" fill="#FBBF24" fill-opacity="0.82"/>
+      <ellipse cx="144" cy="196" rx="30" ry="5" fill="#FDE68A"/>
+      <rect x="106" y="100" width="76" height="28" rx="5" fill="url(#cap50Orange)" stroke="#9A3412" stroke-width="2.2"/>
+      <!-- Tube Center (Clear PBS) -->
+      <path d="M 216,118 L 284,118 L 284,324 L 260,358 C 256,363 244,363 240,358 L 216,324 Z"
+            fill="url(#tube50Barrel)" stroke="#475569" stroke-width="2.4" stroke-linejoin="round"/>
+      <path d="M 220,174 L 280,174 L 280,322 L 258,354 L 242,354 L 220,322 Z" fill="#60A5FA" fill-opacity="0.62"/>
+      <ellipse cx="250" cy="174" rx="30" ry="5" fill="#BFDBFE"/>
+      <rect x="212" y="92" width="76" height="28" rx="5" fill="url(#cap50Orange)" stroke="#9A3412" stroke-width="2.2"/>
+      <!-- Tube Right (Media Rose) -->
+      <path d="M 322,126 L 390,126 L 390,324 L 366,358 C 362,363 350,363 346,358 L 322,324 Z"
+            fill="url(#tube50Barrel)" stroke="#475569" stroke-width="2.4" stroke-linejoin="round"/>
+      <path d="M 326,214 L 386,214 L 386,322 L 364,354 L 348,354 L 326,322 Z" fill="#F43F5E" fill-opacity="0.68"/>
+      <ellipse cx="356" cy="214" rx="30" ry="5" fill="#FECDD3"/>
+      <rect x="318" y="100" width="76" height="28" rx="5" fill="url(#cap50Orange)" stroke="#9A3412" stroke-width="2.2"/>
+    </g>
+    <!-- Upper rack collar & middle support bar -->
+    <rect x="56" y="188" width="388" height="28" rx="8" fill="url(#rackStoneTop)" stroke="#334155" stroke-width="2.5"/>
+    <line x1="68" y1="196" x2="432" y2="196" stroke="#FFFFFF" stroke-width="2.5" opacity="0.72"/>
+    <rect x="58" y="282" width="384" height="20" rx="6" fill="url(#rackStoneFront)" stroke="#334155" stroke-width="2.3"/>
+    <!-- Bottom rack base with label plaque -->
+    <rect x="56" y="368" width="388" height="32" rx="8" fill="url(#rackStoneFront)" stroke="#334155" stroke-width="2.6"/>
+    <rect x="184" y="376" width="132" height="14" rx="4" fill="#FFFFFF" fill-opacity="0.82"/>
+  </g>
+</svg>

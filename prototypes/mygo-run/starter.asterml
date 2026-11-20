@@ -22,13 +22,12 @@ rows:
     name: 阴性对照 (DMEM)
     role: control
     condition: 完全培养基
-    replicate_count: 3
+    independent_n: 3
   - id: g-treat
     name: 材料浸提液组
     role: treatment
-    dose: 10 mg/mL
-    condition: 100% 浸提液
-    replicate_count: 3
+    condition: 100% 浸提液 (10 mg/mL)
+    independent_n: 3
 ```
 
 ```asterlab

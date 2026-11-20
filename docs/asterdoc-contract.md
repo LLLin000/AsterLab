@@ -64,3 +64,25 @@ Rules:
 ## 3. Shared Registry & Parity
 
 `prototypes/mygo-run/internal/asterdoc/spec/modules.json` (21 `kind@schema` across 21 `kind`s, `sdkVersion: "2.0.0"`) and `spec/units.json` are embedded at compile time by both Go (`internal/asterdoc`) and Rust (`src/cli/asterdoc.rs`). `TestAsterDocGoRustParity` pins identical validation outcomes across both languages.
+
+## 4. AsterML Single-Source Document & Envelope Compatibility (`envelope.go`, `doc_ops.go`)
+
+An `.asterml` file inside the Obsidian-style Vault is a **single unified source of truth** where experimental design and inline execution progress coexist seamlessly inside one human-readable file:
+
+1. **YAML Frontmatter (`--- ... ---` at byte 0)**:
+   - Parsed by `ScanFrontmatter` (`asterdoc/envelope.go`) and updated via `SetFrontmatterMetadata`.
+   - Declares `title`, `date` / `scheduled_date` (`YYYY-MM-DD`, empty for unscheduled experiments or templates), and `status` / `stage` (`planned | in_progress | completed`).
+2. **Unified Inline Execution Fields (Single Source of Truth)**:
+   - `checklist@1.items[]`: optional `done: bool` and `note: string`.
+   - `param_table@1.rows[]`: optional `actual: number|string` and `note: string` alongside `value`.
+   - `timer@1`: optional `status` (`idle|running|paused|completed`), `started_at`, `completed_at`, `elapsed_sec`, `phase_index`, `round_index`.
+   - `plate@1`: optional `layers: map[layerName]map[well]value` and `excluded_wells: []well`.
+   - `calculator@1`: supports both legacy 5 modes and unified `rows: [{key, label, value, formula, unit, note}]` with `@plate.wells` / `@param.<key>` references.
+   - `data_table@1`: supports `source_ref` (`@groups` or `@plate.<id>`) alongside inline `rows` and `matrix` layout.
+   - `experiment@1`: optional `status`, `conclusion`, `outcome`.
+3. **Legacy 3-Part Envelope Auto-Flattening**:
+   - Older files containing `asterlab-exec` / `asterlab-record` envelopes are transparently normalized on load by `FlattenEnvelopeToSingleSource` into the unified inline representation without losing recorded data.
+4. **Atomic Writes, Templates & Archive Interchange**:
+   - `WriteFileAtomic` persists via temp file + `Sync` + atomic `os.Rename`.
+   - `ClearExecutionDataForTemplate` creates clean date-free `.asterml` templates under `<Vault>/templates/`.
+   - Planned archival interchange builds on the open RO-Crate `.eln` (`application/vnd.eln+zip`) profile alongside `./assets/`.

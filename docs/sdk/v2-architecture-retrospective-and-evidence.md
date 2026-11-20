@@ -1,12 +1,12 @@
 # AsterLab v2 通用模块架构演进复盘与全表面实图验收档案
 
-状态：已实现（`feat/v2-generic-modules` · 2026-11-18）
+状态：已实现（`feat/v2-generic-modules` · 2026-11-20 收口至 Obsidian 单库单真源工作台 + 物理动效系统）
 
 **初版审计基准**：远端主干 `origin/main` @ `6010ab9`（2026-11-17，累计 488 Commits / PR #188）+ 待合入分支 `origin/agent/CLOSE-07-entries-deeplink` @ `6923fd4`（第 1–6 节保留当日复盘全文）。  
-**全量交付基线（2026-11-18）**：已在分支 `feat/v2-generic-modules`（基于 `5fcd0c1`，保留安全回退标签 `v0.1.0-beta-legacy-bench`）完成 **P0 基础设施 + `MOD-01..MOD-06` + 前端科研文案治理 + 多维正交孔板标注 (`plate@1`) + Notebook ELN 双分栏重塑 + 7 项通用引擎闭环 +「孔板速排」独立设计器（先选孔板 8 规格、复用悬浮单框选孔标注、SVG/PNG 矢量与高清导出、两列 `孔板历史` 卡片加载与导出）与 Windows 构建发布**（见第 7–10 节）。
+**最新全量基线（2026-11-20）**：已在分支 `feat/v2-generic-modules` 完成 **Obsidian 级单库透明目录 (`internal/vault`) + `UnifiedLive` 单真源 `.asterml` 画布 (`experiment_page.go`) + 40px Ribbon/文件树/全等分屏树 (`internal/shell`) + 去卡片化组件精修（孔板图层与三态填充/参数偏离/计算器参数公式表/Ctrl+V 贴图/数据表列 Popover）+ 独立「储藏室货架」 (`ViewPantry`) + 四档物理动效系统与 8 项科研微交互 (`internal/theme/motion.go`)**。
 
 > [!NOTE]
-> **执行进度更新（第 1–6 节与第 7–10 节的关系）**：下方第 1–6 节完整保留初版代码复盘的现状取证与架构诊断；在此基础上，我们已经接续完成 P0、`MOD-01..MOD-06`、前端科研文案治理、多维正交孔板与 Notebook ELN 改造，以及 **21 个 SDK 模块逐一截屏与「孔板速排」全链路验收**（详见 [v2-module-visual-catalog.md](./v2-module-visual-catalog.md)）。第 7–10 节记录了全量验证账本、实图巡检与 Windows 校验哈希。
+> **执行进度更新（第 1–6 节与最新架构对照）**：下方第 1–6 节保留 2026-11-17 初版代码复盘的取证原文；最新全套界面与 21 模块渲染图鉴已更新至 [v2-module-visual-catalog.md](./v2-module-visual-catalog.md)，动效标尺见 [design-system.md](../product/design-system.md#六动效系统与微交互规范motion-system--micro-interactions)。
 
 ---
 
@@ -206,17 +206,16 @@ flowchart TD
 
 ### 7.2 Design 工作台重构（复用 `onevra/components` + `mygo/ui/editor`）
 
-- **3-Tab 清晰工作台**：在 [design_page.go](../../prototypes/mygo-run/design_page.go) 重构为三大视图：
-  - **Tab 0「步骤与模块画布」**：左侧流程步骤树 + 顶部「实验总览 & 步骤头折叠状态徽章（移除冗余重复步骤头，开启 `HideStepHeader = true`）」 + 中右画布区以通用 `StepBlockComposer` 流式渲染并自由增删重排步骤内任意通用模块；
-  - **Tab 1「全局资源定义」**：统一查看与编辑 `group` / `material` / `plate` / `readout` 等跨步骤科学原语；
-  - **Tab 2「AsterML v2 源码」**：集成 `mygo/ui/editor` 源码编辑器（含行号、语法对照与脏状态检查），并修复 Windows `\r\n` vs `\n` 换行符标准化导致的假「未保存」问题（`design_page.go:335`）。
-- **模态框与设计系统严格合规**：将 [main.go](../../prototypes/mygo-run/main.go#L3761-L3960) 中的预检确认、新建设计、插入模块（提供 10 类 v2 起手模板选项）与导入对话框全面迁至 `theme.GetTokens(c.Theme())`；全仓库 `prototypes/mygo-run/` 扫描 `ui.Hex(` 仅允许存在于 `internal/theme/theme.go` 与 `internal/theme/theme_test.go`。
-- **细节视觉打磨（5 项精修）**：
-  1. 拓宽 [view.go](../../prototypes/mygo-run/internal/asterdoc/view.go#L1002) `GenericModuleEditor` 字段输入框宽度；
-  2. 为 [view.go](../../prototypes/mygo-run/internal/asterdoc/view.go) / [composer.go](../../prototypes/mygo-run/internal/asterdoc/composer.go) / [design_page.go](../../prototypes/mygo-run/design_page.go#L724-L755) / [runworkspace/view.go](../../prototypes/mygo-run/internal/runworkspace/view.go) 统一启用 `HideStepHeader` 消除卡片套娃标题；
-  3. 拓宽 [widget_tables.go](../../prototypes/mygo-run/internal/asterdoc/widget_tables.go#L507) `data_table` 列名输入宽度；
-  4. 调整四象限培养皿内置 SVG 标注坐标（`viewBox="0 0 420 264"`，将象限文字外移至圆外，避免压线遮挡，见 [inhibition-zone.asterml](../../prototypes/mygo-run/internal/asterdoc/testdata/inhibition-zone.asterml) 与 [v2_modules_test.go](../../prototypes/mygo-run/internal/asterdoc/v2_modules_test.go#L74)）；
-  5. 为 [runworkspace/view.go](../../prototypes/mygo-run/internal/runworkspace/view.go#L943) `procedureLayer` 标题头增加换行兜底防止状态胶囊挤换行。
+- **3-Tab 清晰工作台（于 7.13 / 7.15 节最终收敛为纸面直出与统一右对齐模式栏）**：在 [design_page.go](../../prototypes/mygo-run/design_page.go) 重构为三大视图（v2.1 统一命名为右对齐 `编辑 | 阅读 | 源码`，紧贴 `导出 PDF` 左侧）：
+  - **Tab 0「编辑」**：左侧流程步骤树 + 顶部默认折叠「实验概览与全局分组」卡（同步移除冗余步骤头与 `Agent 提案` 按钮，启用 `HideStepHeader = true`） + 中右画布区以通用 `StepBlockComposer` 流式渲染并自由增删重排步骤内任意通用模块；
+  - **Tab 1「阅读」**：整篇连续单页纸面视图，统一浏览实验目的、分组/材料与按序号展开的步骤操作流，并支持顶栏一键 `导出 PDF`；
+  - **Tab 2「源码」**：集成 `mygo/ui/editor` 源码编辑器（含行号、语法对照与脏状态检查），并修复 Windows `\r\n` vs `\n` 换行符标准化导致的假「未保存」问题。
+- **模态框与设计系统严格合规**：将 [main.go](../../prototypes/mygo-run/main.go) 中的预检确认、新建设计、插入模块（提供 11 类 v2 起手模板选项）与导入对话框全面迁至 `theme.GetTokens(c.Theme())`；全仓库 `prototypes/mygo-run/` 扫描 `ui.Hex(` 仅允许存在于 `internal/theme/theme.go` 与 `internal/theme/theme_test.go`。
+- **细节视觉打磨**：
+  1. 为 [view.go](../../prototypes/mygo-run/internal/asterdoc/view.go) / [composer.go](../../prototypes/mygo-run/internal/asterdoc/composer.go) / [design_page.go](../../prototypes/mygo-run/design_page.go) / [runworkspace/view.go](../../prototypes/mygo-run/internal/runworkspace/view.go) 统一启用 `HideStepHeader` 消除卡片套娃标题；
+  2. 拓宽 [widget_tables.go](../../prototypes/mygo-run/internal/asterdoc/widget_tables.go) `data_table` 列名输入宽度并在 `自动公式` 列新增 `点选列插入：` 快捷列胶囊；
+  3. 升级 [inhibition-zone.asterml](../../prototypes/mygo-run/internal/asterdoc/testdata/inhibition-zone.asterml) 90 mm 琼脂平皿 SVG 标注坐标（`viewBox="0 0 360 280"`、`1 mm = 2.4 px`、`<g transform="translate(180, 140)">` 将象限中文文字外移至圆外防裁切）；
+  4. 为 [runworkspace/view.go](../../prototypes/mygo-run/internal/runworkspace/view.go) `procedureLayer` 标题头增加换行兜底防止状态胶囊挤换行。
 
 ### 7.3 Run 同源执行 & Notebook 通用记录投影
 
@@ -283,25 +282,72 @@ flowchart TD
 - **Craft 风格编辑/阅读纸面与双视图右侧伴侣栏**：清理顶栏孤立 `[B]` 按钮；Mode 3 新增 11 类 AsterML v2 通用模块插入下拉菜单（`DefaultStarterBlock`）；Paper 顶栏新增试验标题信头与科研起手模板芯片；Mode 1 优化 Markdown 段落/引用排版；Mode 2 支持直接原位渲染 ```` ```asterlab ```` 通用参数/分组/表格模块卡与 `@matrix(...)` 动态矩阵卡；基于 `components.SplitPercent` 搭建右侧伴侣栏（`时间线` | `实验模块`），直接调用 `HydrateReadOnlyAsterDocView` 完整复用 `group_table`、`plate`、`param_table` 等漂亮组件卡片。
 - **双栏卡片化 `图板` 仪表盘**：新增 5 格 KPI 概览条（`步骤进度` / `实测读数` / `采图视野` / `质控排除` / `计时核查`）、代表视野网格、`计划 vs 实际` 中文步骤名核对表、`实验方案与实测模块总览` 与右轨治理卡（`签核与归档` / `派生设计 (源自实测)` / `动态引用 @matrix(...)`）。
 
-### 7.9 全仓视觉与功能补齐：`Tools` 工作台、实验归档导出与首页样板（提交 `4d5391c`）
+### 7.9 全仓视觉与功能补齐：`Tools` 工作台、实验归档导出与首页样板（提交 `4d5391c` → 于 7.13 节精简收口）
 
-- **`Tools` 工具台升级与 Design 闭环**：基于 `onevra/components` 与科研中文重构 [internal/tools/tools.go](../../prototypes/mygo-run/internal/tools/tools.go)（储藏室台账、孔板速排初版、稀释配液换算、实验参数表、通用模块模板、结构化数据导入），移除 [main.go](../../prototypes/mygo-run/main.go) `toolsPage` 冗余外层标题，并将 `UseInDesigner` 接通 `applyToolInstanceToDesign` 实现“工具计算/排板 → 一键带入当前设计”；随后于 **7.11 节** 将「孔板速排」进一步升级为“先选孔板 + 悬浮标注复用 + SVG/PNG 导出 + 两列历史墙”。
-- **归档导出补充解码表与读数**：在 [internal/protocol/archive.go](../../prototypes/mygo-run/internal/protocol/archive.go) Markdown 与 PDF 导出中追加 `## 实验测定数据与读数` 章节（消费 `proj.Readouts` 并新增 `TestArchiveIncludesDecodedTableReadouts`），同时清理 [protocol_page.go](../../prototypes/mygo-run/protocol_page.go) 残余英文技术提示。
+- **`Tools` 工具台升级与 Design 闭环**：基于 `onevra/components` 与科研中文重构 [internal/tools/tools.go](../../prototypes/mygo-run/internal/tools/tools.go)，移除 [main.go](../../prototypes/mygo-run/main.go) `toolsPage` 冗余外层标题，并将 `UseInDesigner` 接通 `applyToolInstanceToDesign` 实现“工具计算/排板 → 一键带入当前设计”；随后经 **7.11 节** 与 **7.13 节** 迭代最终收口为 **4 大高频正交工具台**（`储藏室货架`、`标准方案库`、`孔板速排`、`实验台速算`）。
+- **归档导出补充解码表与读数**：在 [internal/protocol/archive.go](../../prototypes/mygo-run/internal/protocol/archive.go) Markdown 与 PDF 导出中追加 `## 实验测定数据与读数` 章节（消费 `proj.Readouts` 并新增 `TestArchiveIncludesDecodedTableReadouts`），同时清理 [protocol_page.go](file:///D:/L/AI/Cindy/CellPlanner-ProductStudy/cellplanner-replica/prototypes/mygo-run/protocol_page.go) 残余英文技术提示并将独立入口合并至 `实验记录 → 归档`。
 - **首页运行标题与 v2 样板卡片**：在 [internal/shell/shell.go](../../prototypes/mygo-run/internal/shell/shell.go) 将 `"Run · "` 本地化为 `"实验运行 · "`，并在 `homeTemplates` 中接入 v2 旗舰模板。
 - **契约与设计文档同步**：同步更新 [design-system.md](../../docs/product/design-system.md)、[asterdoc-contract.md](../../docs/asterdoc-contract.md) 与 [AGENT_API.md](../../AGENT_API.md)。
 
 ### 7.10 7 项通用引擎闭环与 21 模块逐一打磨（提交 `18ba9e9`）
 
 - **全模块内联编辑与便携路径闭环**：所有 11 类第一层通用模块卡片标题栏统一支持铅笔点击内联重命名并写回 `.asterml`；`figure@1` 拖入或挑选本地图片时自动复制至同级 `./assets/` 并写回相对路径，保证方案与媒体便携打包；默认参数表标题收口为「**实验条件**」。
-- **自适应孔板与单输入悬浮选孔条 (`plate@1`)**：Go 与 Rust 双端补齐 `format: 4` 与 `dish`（4→384 孔随孔数动态调整孔径 56px→17px、`rack_1d` 为 40×58px 竖向胶囊），删掉顶部冗余模式切换，改为「鼠标框选/行列点选 → 底部单输入框悬浮条（`分组/样本` + `维度:值` + `浓度:100/2 uM` + `NTC/Blank/Std` + 无序复孔重算）」与 8 色无冲突分组调色盘；Design、Run、Notebook、Tools 全仓统一消费 `plateui.View`。
-- **`data_table` 2D 孔板矩阵与 21 模块收口**：关联 `container_ref` 时支持 `列表 | 孔板矩阵`（`layout: matrix`）视图与整板 TSV/CSV 粘贴（自动跳过 `<>` / `1..C` 表头与超限标黄提示）；补齐 `readout.viewer` 专属卡与 `GenericModuleEditor` 全中文科研字段名映射。
+- **自适应孔板与单输入悬浮选孔条 (`plate@1`)**：Go `plateui.View` 支持自适应孔径缩放（`6→384` 孔 `48px→17px`、`rack_1d` 为 `40×58px` 竖向胶囊），鼠标拖拽框选/行列点选后在底部悬浮单框标注与 8 色无冲突分组调色盘；Design、Run、实验记录、Tools 全仓统一消费 `plateui.View`（于 7.13 节进一步精简顶部图层条并确立 `标注 / + 追加标签 / 清空` 交互）。
+- **`data_table` 2D 孔板矩阵与 21 模块收口**：关联 `container_ref` 时支持 `列表 | 孔板矩阵`（`layout: matrix`）视图与整板 TSV/CSV 粘贴（自动跳过 `<>` / `1..C` 表头与超限标黄提示）；补齐 `readout.viewer` 专属阅读态视图卡。
 
 ### 7.11 「孔板速排」独立工作台重构：先选孔板、悬浮标注复用、SVG/PNG 导出与两列历史组件墙
 
-- **左侧导航收口与「先选孔板，再设计」两步工作流**：[internal/tools/tools.go](../../prototypes/mygo-run/internal/tools/tools.go) 与 [internal/tools/plate_studio.go](../../prototypes/mygo-run/internal/tools/plate_studio.go) 将导航项与页面标题正式收口为 **「孔板速排」**；顶部 **`① 选择孔板`** 提供 `4区培养皿`、`6孔板`、`12孔板`、`24孔板`、`48孔板`、`96孔板`、`384孔板`、`8联管/泳道` 共 8 种标准规格及 **`新建空白板`**，切换容器或新建时若当前画布非空会自动保存入下方历史。
-- **100% 复用 `asterdoc.View` 交互底座与 `GroupLabels` 中文图例**：中部设计区直接挂载 `asterdoc.View`（保留鼠标拖拽框选、行列号点击整行/整列选择、Shift 累加、`放大孔板` 全屏浮层、内联改标题与单输入框悬浮标注条）；同时在 [asterdoc.go](../../prototypes/mygo-run/internal/asterdoc/asterdoc.go) 升级双遍 `GroupList()` 优先保留显式分组中文名称，在 [uikit/plate/plate.go](../../prototypes/mygo-run/internal/uikit/plate/plate.go) 补齐 `GroupLabels` 图例解析与中西文等宽排版居中（`estimatedBadgeWidth`），并通过 `UseAsterPlate`（[main.go](../../prototypes/mygo-run/main.go)）无损将新建分组与完整 `plate@1` 写入当前激活实验设计。
-- **出版级 `导出 SVG` / `导出 PNG`**：在 [uikit/plate/export.go](../../prototypes/mygo-run/internal/uikit/plate/export.go) 实现纯矢量 `RenderSVG`（含圆形孔位、圆形皿双壁十字、`rack_1d` 胶囊、多维内环与自动换行图例）与 2× Retina 软件光栅化 `RenderPNG`（经系统原生保存对话框落盘）。
+- **「先选孔板，再设计」工作流**：[internal/tools/tools.go](../../prototypes/mygo-run/internal/tools/tools.go) 与 [internal/tools/plate_studio.go](../../prototypes/mygo-run/internal/tools/plate_studio.go) 将页面标题正式收口为 **「孔板速排」**；顶部 **`① 选择孔板`** 收敛为 **`6孔板`、`12孔板`、`24孔板`、`48孔板`、`96孔板`、`384孔板`、`8联管/泳道` 共 7 种真实孔板/管条规格**及 **`新建空白板`**，切换容器或新建时若当前画布非空会自动保存入下方历史。
+- **100% 复用 `asterdoc.View` 交互底座与 `GroupLabels` 中文图例**：中部设计区直接挂载 `asterdoc.View`（保留鼠标拖拽框选、行列号点击整行/整列选择、Shift 累加、`放大孔板` 全屏浮层、内联改标题与底部悬浮标注条）；同时在 [asterdoc.go](../../prototypes/mygo-run/internal/asterdoc/asterdoc.go) 升级双遍 `GroupList()` 优先保留显式分组中文名称，在 [uikit/plate/plate.go](../../prototypes/mygo-run/internal/uikit/plate/plate.go) 补齐 `GroupLabels` 图例解析与中西文等宽排版居中（`estimatedBadgeWidth`），并通过 `UseAsterPlate`（[main.go](../../prototypes/mygo-run/main.go)）无损将新建分组与完整 `plate@1` 写入当前激活实验设计。
+- **出版级 `导出 SVG` / `导出 PNG`**：在 [uikit/plate/export.go](../../prototypes/mygo-run/internal/uikit/plate/export.go) 实现纯矢量 `RenderSVG`（含圆形孔位、`rack_1d` 胶囊、多维内环与自动换行图例）与 2× Retina 软件光栅化 `RenderPNG`（经系统原生保存对话框落盘）。
 - **下方两列 `孔板历史` 缩略组件墙**：在速排底部两列网格平铺渲染历次设计的微缩 `plateui.View` 组件卡片（按规格比例缩放、自动持久化至 `plate-history.json`），支持点击微缩画布或「载入编辑」回到上方编辑、卡片内直接 **`导出 SVG` / `导出 PNG`** 及删除记录。
+
+### 7.12 `uikit/labsticker` 与 `储藏室货架` 实装（贴纸陈列 · 材质精修 · 说明书上传与产品网址）
+
+- **现代 Public Domain 器皿底座 + BioRender 视觉重塑**：在 [internal/uikit/labsticker/assets](../../prototypes/mygo-run/internal/uikit/labsticker/assets/CREDITS.md) 基于美国 NIH NIAID BioArt Source (2024–2025 Public Domain) 精确矢量骨架清洗并重调配色，打造 12 款清透渐变、比例谐调的实验容器 SVG（涵盖 `0.2 mL PCR 八联管`、`1.5 mL EP 管`、`2.0 mL 冻存管`、`2.0 mL 螺口酶管`、`避光抗体小管`、`冻干西林瓶`、`15/50 mL 离心管`、斜肩方形 PET `500 mL 培养基瓶`、`GL45 蓝盖玻璃瓶`、`500 mL 棕色避光试剂瓶` 与 `250 mL 三角摇瓶`）。
+- **闭孔 2D EDT 刀模白边贴纸合成器**：在 [uikit/labsticker/sdf.go](../../prototypes/mygo-run/internal/uikit/labsticker/sdf.go) 实现“2× 原生尺度光栅化 → 紧致底边裁切 → 四边外围洪水填充闭孔剪影 → 精确可分离二维欧氏距离变换（EDT）→ `4.0 DIP` 平滑纯白贴纸边框 + 浅灰外缘切痕 + 台面投影 → `2×2` 超采样抗锯齿输出”，确保深色主题下透明玻璃器皿同样亮白清透、不透底；并通过 `StickerFromImage` 兼容任意用户导入图片一键转白边贴纸。
+- **Vibe Design Tips 货架重构与自然间距**：在 [shelf.go](../../prototypes/mygo-run/internal/uikit/labsticker/shelf.go) 彻底移除 `Grow(1)` 空洞拉伸，引入 `RenderShelfGrid` 双列紧凑柜格（`142/154 DIP` 自然聚拢 + 悬停抬升 `-2 DIP` + 瓶底接触阴影 + Oklab 顶光内凹柜格 + `ControlRadius` 一体化标签卡 + `FileText`/`Link` 附件角标）；零 `ui.Hex`/`Padding(num)`/`Radius(num)`/`FontSize(num)` 硬编码。
+- **试剂档案详情弹窗 + 本地说明书 PDF/图片上传 + 官网产品网址**（[pantry_shelf.go](../../prototypes/mygo-run/internal/tools/pantry_shelf.go) · [main.go](../../prototypes/mygo-run/main.go)）：已完整接入 `资料与工具 → 储藏室货架`（修复 `ScrollBoth` 横向缩窄并支持 `贴纸货架 | 台账表格` 切换），在不改变 `runs_native.go` FFI 结构的前提下通过 `pantry-meta.json` + `./pantry-manuals/` 托管产品 URL（`ValidateProductURL` + `mygo.Shell.OpenExternal`）及多份本地说明书/COA/SDS（拖拽或选文件导入、`components.FileIcon` 列表、`mygo.Shell.OpenPath` 查阅）。
+
+### 7.13 全量讨论收口与架构净化（2026-11-19）
+
+彻底完成此前多轮科研架构讨论达成共识、但尚留尾项的全部收敛改造，实现代码、截图、PDF 与权威文档 **100% 对齐**：
+
+1. **移除孔板模块中误置的培养皿预设，确立 Agent 科研 SVG 规范**：从 `plate_studio.go` 与历史迁移过滤中下线离散培养皿预设（仅保留 `6/12/24/48/96/384` 与 `8联管/泳道` 7 种真实孔板/管条）；从 `inhibition-zone.asterml` 删除冗余 `plate` 块，升级为 `viewBox="0 0 360 280"`、`1 mm = 2.4 px` 标准比例尺 90 mm 琼脂平皿纯矢量 SVG，并发布 [agent-svg-kit.md](./agent-svg-kit.md) 与 `docs/sdk/svg-parts/*.svg`（6 个通用积木）；同步在 [widget_figure.go](../../prototypes/mygo-run/internal/asterdoc/widget_figure.go) 与 [pdf_sheet.go](../../prototypes/mygo-run/internal/asterdoc/pdf_sheet.go) 补齐 `<g transform="translate(tx, ty)">` 坐标栈累加与 `estimateSVGTextWidth` 中文居中宽度测算。
+2. **彻底精简孔板交互栏并打通计算器中文分组名**：删除内联孔板和放大浮层顶部冗余图层切换条、底层 raw `ID` 及旧版多维按钮，升级为清晰的底部胶囊悬浮栏（`标注` / `+ 追加标签` / `清空` + 缩放控件 + `已有分组快选：`），`AppendPlateAnnotation` 支持 `WT · GAPDH` 交叉叠加与无前缀梯度（如 `100/2 uM`）自动展开；[calc_eval.go](../../prototypes/mygo-run/internal/asterdoc/calc_eval.go) 与 [pdf_sheet.go](../../prototypes/mygo-run/internal/asterdoc/pdf_sheet.go) 通过 `PlateGroupLabelMap(doc)` 让 `group_mastermix` 配液表与导出 PDF 直接展示人类可读中文组名。
+3. **Design 工作台 3-Tab 纯净化与科研用语统一**：从 [design_page.go](../../prototypes/mygo-run/design_page.go) 彻底移除第 4 个机械全局表格 Tab 与 `Agent 提案` 入口，收敛为三标签页（并于 7.15 节统一命名为右对齐 `编辑 | 阅读 | 源码`）并新增默认折叠`实验概览与全局分组` 卡片；在 [widget_tables.go](../../prototypes/mygo-run/internal/asterdoc/widget_tables.go) 为 `data_table@1` `自动公式` 列新增 `点选列插入：` 快捷列胶囊。
+4. **5 步线性主导航与 `资料与工具` 4 大工作台精准收口**：下线独立 `Protocol` 顶层表面；[internal/tools](../../prototypes/mygo-run/internal/tools/tools.go) 裁撤 3 个凑数旧页，精确收口为 **`储藏室货架` / `标准方案库`（[sop_library.go](../../prototypes/mygo-run/internal/tools/sop_library.go)）/ `孔板速排` / `实验台速算`（[bench_calc.go](../../prototypes/mygo-run/internal/tools/bench_calc.go)，4 合 1 配液中心）**。
+
+### 7.14 Obsidian 式 `.asterml` 实时自动保存、`实验日程` 日历主页、v2 运行台净化与 3 模式 ELN 收口（2026-11-19）
+
+针对真实使用与细节审查中发现的四类体验割裂，本轮完成细节收口：
+
+1. **淘汰虚假“版本号”与手动保存阻断**：从 [design_page.go](../../prototypes/mygo-run/design_page.go)、[main.go](../../prototypes/mygo-run/main.go)、[notebook_page.go](../../prototypes/mygo-run/notebook_page.go)、[sheet_view.go](../../prototypes/mygo-run/internal/asterdoc/sheet_view.go) 与 [pdf_sheet.go](../../prototypes/mygo-run/internal/asterdoc/pdf_sheet.go) 移除 `"第 N 版"` 文案与手动保存按钮；任意属性与笔记编辑即时同步，源码语法未闭合时一键切换源码修复。
+2. **`实验日程` 日历主页**：在 [modules.json](../../prototypes/mygo-run/internal/asterdoc/spec/modules.json) 为 `experiment@1` 增加 `scheduled_date`，自动在空库下挂载隐藏默认项目容器，支持 `设计中` / `方案就绪` / `进行中` / `已完成` 四态路由。
+3. **净化 `实验运行` AsterML v2 执行台**：在 [internal/runworkspace/view.go](../../prototypes/mygo-run/internal/runworkspace/view.go) 针对 v2 冻结方案隐藏旧版 `renderBench` / `recordingLayer`，展示 `v2StepPanel`（`方案快照已锁定` + `完成本步骤`）。
+
+### 7.15 v2.1 单文件三段式信封、Obsidian 级多标签与分屏工作台、统一 `编辑|阅读|源码` 与 Apple 风格日历（2026-11-19）
+
+继续围绕「一个实验怎么在单文件中干净落盘」「模式开关语义」「Apple 级日历质感」与「Obsidian 级高自由度、导航闭环不迷路」完成全面重塑：
+
+1. **AsterML v2.1 类型化块单文件信封（[envelope.go](../../prototypes/mygo-run/internal/asterdoc/envelope.go) · [src/cli/asterdoc.rs](../../src/cli/asterdoc.rs)）**：
+   - 统一 `YAML Frontmatter`（$O(1)$ 元数据与 `seal.design_sha256`）+ **Design 正文** + **`` ```asterlab-exec `` 增量执行账本** + **4 反引号 `` ````asterlab-record `` 实验笔记（支持任意内嵌 `` ```asterlab `` 组件防碰撞）**；
+   - 运行与笔记改写通过 `PatchEnvelopeExecution` / `PatchEnvelopeRecord` **按字节区间原地外科替换**，保持 Design 字节零改动（`VerifyDesignSeal()` 恒为有效）并用 `ForkEnvelopeAsDraft` 一键复刻为新日期未封存草稿（记录 `repeat_of` 溯源）；导入直接经 `ParseEnvelope` 抽离纯 Design 源码送入 `runs.dll`，不破坏 Parity。
+2. **Design 与记录统一右对齐 **`编辑 | 阅读 | 源码`** 紧贴 `导出 PDF` 左侧**：两页顶栏彻底对齐（[design_page.go](../../prototypes/mygo-run/design_page.go) · [notebook_page.go](../../prototypes/mygo-run/notebook_page.go)），淘汰居中巨型浮条，阅读态保持纯净纸面；设计页在分屏狭宽下步骤大纲自动退化为顶部横向步骤胶囊防挤压。
+3. **Apple Calendar 级 `实验日程` 交互与原生动效（[internal/shell/calendar.go](../../prototypes/mygo-run/internal/shell/calendar.go)）**：无缝 1px 发丝线网格、周末浅底、实心圆今日徽标、`ui.Snappy` 平滑选中圆圈（`cal-selected-circle`）、苹果左竖条状态胶囊、双击日期格直接新建、点击日期原地呼出毛玻璃 `components.Popover`（一键打开/开始/分屏），以及含 `全天` 条与今日实时红线的 `08:00–20:00` 周视图。
+4. **Obsidian 多标签壳 · 前进后退 · 左右分屏 · 右侧滑出工具抽屉 · `Ctrl+K` 悬浮命令面板（[internal/shell/{shell,tabs,right_drawer,command_palette}.go](../../prototypes/mygo-run/internal/shell/tabs.go)）**：左边栏只留 `实验日程`/`资料与工具` 与 `全部实验`（彻底消灭全局阶段按钮导致的跨实验串台）；顶部支持 `◀/▶` 历史（`Alt+←`/`Alt+→`）、固定日程页与可关闭实验 Tab、`components.SplitPercent` 对照分屏、Onevra 原生 `Right` 工具抽屉（`迷你日历` / `试剂速查` / `随手速算` / `计时与大纲`）及 `Ctrl+K` 命令面板。
+
+### 7.16 储藏室二级收纳盒 / 离心管架层级与全表面 UI 细节精修（2026-11-19）
+
+1. **5 款 BioRender 风二级收纳盒与离心管架贴纸（[internal/uikit/labsticker/catalog.go](../../prototypes/mygo-run/internal/uikit/labsticker/catalog.go) · `assets/13..17_*.svg`）**：在不影响原有 12 款试剂瓶管（`AllVessels() == 12`）的前提下，新增 `9×9/10×10 冻存盒`、`50 孔 EP 管盒`、`15 mL 离心管架`、`50 mL 离心管架`、`96 孔 PCR 盒` 5 款白边贴纸（`AllBoxes()`），支持在温区货架层板自然陈列并显示在盒管数与临期警戒角标。
+2. **点开下钻俯视孔位地图与闭环定位（[internal/tools/pantry_boxes.go](../../prototypes/mygo-run/internal/tools/pantry_boxes.go) · [pantry_shelf.go](../../prototypes/mygo-run/internal/tools/pantry_shelf.go)）**：
+   - 在完全不修改 `runs_native.go` FFI 结构的前提下通过 `pantry-boxes.json` + `PantryItemMeta.{BoxID,BoxSlot,BoxSlots}` 管理盒规格与孔位映射；
+   - 点击货架上的收纳盒即可下钻 `A1..L12` 俯视空间孔位图：大孔管架（`4×4` / `5×5`）直显完整试剂名与状态，密孔盒（`9×9` / `10×10` / `8×12`）通过 `theme.CategoricalColor` 自动配色圆帽与临期边框预警区分；支持搜索在盒外/盒内双向高亮、`96 孔 PCR 盒` 一键八联排整行占位（`B1–B8`）、空位直接新建或快捷移入货架散放试剂、孔位间安全移动、防碰撞校验，以及删盒时自动将盒内试剂退回温区货架防误删；
+   - 右侧抽屉 `试剂速查`（`定位` 按钮）与 `Ctrl+K` 命令面板接入 `OnLocatePantry`，选中任意在盒试剂直接跳入目标盒子并高亮对应孔位。
+3. **基于实图巡检的全表面 UI 精修**：
+   - 双列温区货架阶段设置统一最小展示高度（`tok.Spacing48*2.6`），左右并列柜格层板像素级水平齐平；移除 `资料与工具` 顶栏多余胶囊徽章；
+   - 试剂档案弹窗右上由 `已归档` 改为真实在库状态徽标（`未开封`/`已开封`/`临期`/`已过期`/`已用尽`），增加盒子与孔位选择器及一键 `选空位`，紧凑内边距确保 `配制与存放备注` 在 `1360×880` 完整展示无裁剪；
+   - 清理实验页阶段带重复标题与无关品牌后缀（改为 `AsterLab · 本地实验工作台`）；加宽 Apple 日历毛玻璃 Popover（`11 月 18 日（周三） · 实验安排` 保持单行）；优化对照分屏下 `RenderDocumentSheet` 标题换行与表格留白及 `figure@1` SVG 底部呼吸间距。
 
 ---
 
@@ -327,9 +373,9 @@ flowchart TD
 
 ![Design HUVEC 体外成管 Tab 0（Light 主题：分组配方计算器 + 12 孔板 + 多视野采图槽）](./evidence/v2-visual-catalog/design_huvec_tab0_light.png)
 
-**5. Design 抑菌圈 Tab 1（Light 主题：全局分组/试剂/容器/读数定义视图）**
+**5. Design 抑菌圈 Tab 1（Light 主题：右上 `编辑 | 阅读 | 源码` + 连续纸面「阅读」模式 + 4 组对照与步骤）**
 
-![Design 抑菌圈 Tab 1（Light 主题：全局分组/试剂/容器/读数定义视图）](./evidence/v2-visual-catalog/design_iz_tab1_global_light.png)
+![Design 抑菌圈 Tab 1（Light 主题：右上 编辑|阅读|源码 + 连续纸面阅读模式）](./evidence/v2-visual-catalog/design_iz_tab1_sheet_light.png)
 
 **6. Design 抑菌圈 Tab 2（Light 主题：`mygo/ui/editor` AsterML v2 源码编辑器与换行符无误报状态）**
 
@@ -347,11 +393,11 @@ flowchart TD
 
 ![Run 抑菌圈同源执行态 ModeRun（Dark 主题）](./evidence/v2-visual-catalog/run_iz_mode_run_dark.png)
 
-### 8.2 `MOD-01..MOD-06` 扩展能力实图巡检（8 帧新增高亮场景）
+### 8.2 `MOD-01..MOD-06` 扩展能力实图巡检（8 帧场景）
 
-**1. Design Lightbox 150% 放大检视：四象限培养皿 SVG 与缩放/关闭控制栏**
+**1. Design Lightbox 150% 放大检视：90 mm 琼脂平皿四象限矢量 SVG 与缩放/关闭控制栏**
 
-![Design Lightbox 150% 放大检视：四象限培养皿 SVG 与缩放/关闭控制栏](./evidence/v2-visual-catalog/design_iz_figure_zoom_light.png)
+![Design Lightbox 150% 放大检视：90 mm 琼脂平皿四象限矢量 SVG 与缩放/关闭控制栏](./evidence/v2-visual-catalog/design_iz_figure_zoom_light.png)
 
 **2. Run 抑菌圈实测表格提交：`data_table` 公式列实时求值 + `数据已记录` 徽章（Light）**
 
@@ -369,63 +415,124 @@ flowchart TD
 
 ![Run HUVEC 12孔板计算器实时代入实测母液浓度：已按实测值换算 · vegf_stock=200 ug/mL](./evidence/v2-visual-catalog/run_huvec_calc_actuals_light.png)
 
-**6. Notebook 记录图板：解码渲染四象限抑菌圈实验测定数据表（Light）**
+**6. Apple Calendar 风格 `实验日程` 月视图与原地毛玻璃日程 Popover（`月 | 周` + `◀ / ▶` 历史与 Obsidian 标签栏，Light）**
 
-![Notebook 记录图板：解码渲染四象限抑菌圈实验测定数据表（Light）](./evidence/v2-visual-catalog/notebook_record_board_table_light.png)
+![Apple Calendar 风格实验日程月视图与原地毛玻璃 Popover（Light）](./evidence/v2-visual-catalog/home_calendar_month_light.png)
 
-**7. Notebook 记录图板表格读数视图（Dark）**
+**7. Apple Calendar 风格 `实验日程`（Dark 主题）**
 
-![Notebook 记录图板表格读数视图（Dark）](./evidence/v2-visual-catalog/notebook_record_board_table_dark.png)
+![Apple Calendar 风格实验日程月视图（Dark）](./evidence/v2-visual-catalog/home_calendar_month_dark.png)
 
 **8. Design HUVEC `2560x1440` 宽屏适配门禁视图**
 
 ![Design HUVEC 2560x1440 宽屏适配门禁视图](./evidence/v2-visual-catalog/design_huvec_2560_light.png)
 
-### 8.3 多维孔板 (`RT-qPCR`)、Notebook ELN 与「孔板速排」全链路实图巡检（11 帧）
+### 8.3 实验日程周视图、多维孔板 (`RT-qPCR`)、3 模式 `实验记录`、`资料与工具` 四合一与组件级 A4 PDF 实图巡检
 
-**1. Design RT-qPCR 96 孔多靶点排板：按靶点基因着色 + 孔内微徽标（Light）**
+**1. Design RT-qPCR 96 孔多靶点排板：中文分组图例 + 底部「标注 / + 追加标签 / 清空」悬浮条（无顶部图层切换条）（Light）**
 
-![Design RT-qPCR 96 孔多靶点排板（Light：按靶点基因着色与 5 模/因子维度切换）](./evidence/v2-visual-catalog/design_qpcr_plate_multilayer_light.png)
+![Design RT-qPCR 96 孔多靶点排板（Light：96孔板内联视图、中文图例与底部 + 追加标签 悬浮条）](./evidence/v2-visual-catalog/design_qpcr_plate_multilayer_light.png)
 
 **2. Design RT-qPCR 96 孔多靶点排板（Dark 主题）**
 
 ![Design RT-qPCR 96 孔多靶点排板（Dark 主题）](./evidence/v2-visual-catalog/design_qpcr_plate_multilayer_dark.png)
 
-**3. Design RT-qPCR 放大孔板编辑浮层：按样本复孔着色 + 批量复孔与自定义因子标注栏（Light）**
+**3. Design RT-qPCR 放大孔板编辑浮层：整行点选与单框悬浮标注栏（Light）**
 
-![Design RT-qPCR 放大孔板编辑浮层（Light：样本复孔着色与多维批标注栏）](./evidence/v2-visual-catalog/design_qpcr_plate_overlay_light.png)
+![Design RT-qPCR 放大孔板编辑浮层（Light：96孔放大编辑模态框与 + 追加标签 悬浮条）](./evidence/v2-visual-catalog/design_qpcr_plate_overlay_light.png)
 
-**4. Notebook ELN 双分栏工作面：左侧 Markdown 研判 + 同源参数卡，右侧 `实验模块` 伴侣栏（Light）**
+**4. `实验记录` 阅读态 ELN 双分栏：右上统一 `编辑 | 阅读 | 源码` + 左侧内嵌 `asterlab` 参数表 + 右侧 `实测模块` 伴侣栏（Light）**
 
-![Notebook ELN 双分栏工作面（Light：同源参数卡与右侧冻结分组/培养皿模块）](./evidence/v2-visual-catalog/notebook_eln_split_light.png)
+![实验记录 ELN 双分栏阅读态（Light：同源参数卡与右侧冻结实测模块伴侣栏）](./evidence/v2-visual-catalog/notebook_eln_split_light.png)
 
-**5. Notebook ELN 双分栏工作面（Dark 主题）**
+**5. `实验记录` ELN 阅读态双分栏（Dark 主题）**
 
-![Notebook ELN 双分栏工作面（Dark 主题）](./evidence/v2-visual-catalog/notebook_eln_split_dark.png)
+![实验记录 ELN 双分栏阅读态（Dark 主题）](./evidence/v2-visual-catalog/notebook_eln_split_dark.png)
 
-**6. Notebook 双栏卡片化 `图板`：5 格 KPI 条 + 视野矩阵 + 汉字步骤 `计划 vs 实际` + 右轨治理卡（Light）**
+**6. `实验记录` 统一右上 **`编辑 | 阅读 | 源码`** 紧贴 `导出 PDF` 左侧（Light）**
 
-![Notebook 双栏卡片化图板（Light：5格KPI指标条与计划实测对比卡）](./evidence/v2-visual-catalog/notebook_record_board_table_light.png)
+![实验记录编辑态实图（右对齐 编辑|阅读|源码 + 导出 PDF + 实时已保存 + 右侧实测模块）](./evidence/v2-visual-catalog/notebook_live_and_source_v2.png)
 
-**7. Notebook 双栏卡片化 `图板`（Dark 主题）**
+**7. Apple Calendar 风格周视图（`全天` 条 + `08:00–20:00` 时间轴 + 今日红色当前时间线，Light）**
 
-![Notebook 双栏卡片化图板（Dark 主题）](./evidence/v2-visual-catalog/notebook_record_board_table_dark.png)
+![Apple Calendar 风格周视图与当前时间红线实图（Light）](./evidence/v2-visual-catalog/home_calendar_week_light.png)
 
-**8. `资料与工具` 工作台：储藏室台账 + 左侧「孔板速排」入口与纯科研中文表达（Light）**
+**7b. Obsidian 三栏多标签 + 对照分屏 + 右侧滑出 `迷你日历` 工具抽屉（1440×900，Light）**
 
-![资料与工具工作台（Light：onevra 边栏显示孔板速排入口与储藏室台账列表）](./evidence/v2-visual-catalog/tools_pantry_workbench_v2.png)
+![Obsidian 三栏多标签 + 对照分屏 + 右侧迷你日历抽屉实图](./evidence/v2-visual-catalog/workbench_obsidian_split_drawer_light.png)
 
-**9. `资料与工具 -> 孔板速排`：先选孔板 8 种规格 → 复用悬浮单框选孔标注 + SVG/PNG 导出 + 两列 `孔板历史` 组件墙（Light）**
+**7c. 悬浮 `Ctrl+K` 命令面板（按 `.asterml` 实验、储藏室试剂与快捷命令分组直达，Light）**
 
-![孔板速排工作台与两列孔板历史（Light：8规格先选后排、悬浮单框选孔、SVG/PNG导出与点击载入缩略历史）](./evidence/v2-visual-catalog/tools_plate_studio_v2.png)
+![Ctrl+K 悬浮命令面板实图](./evidence/v2-visual-catalog/workbench_command_palette_light.png)
 
-**10. `资料与工具 -> 孔板速排`：点击历史卡片载入并呼出全屏悬浮放大编辑面板（B 行全选 + 单框标注条）**
+**8. `实验运行` v2 干净执行台（隐藏旧版 v1 控件 + `v2StepPanel`：`方案快照已锁定` + `完成本步骤`，Light）**
 
-![孔板速排放大编辑浮层（从历史记录一键载入96孔板并选中整行标注）](./evidence/v2-visual-catalog/tools_plate_studio_overlay_v2.png)
+![实验运行 v2 干净执行台实图（四象限抑菌圈测量表与右侧 v2StepPanel）](./evidence/v2-visual-catalog/run_iz_actuals_and_table_light.png)
 
-**11. `资料与工具 -> 孔板速排`：点击「导出 PNG」生成的 2× Retina 高清出图（同步支持 SVG 纯矢量导出）**
+**9. `资料与工具` 工作台：储藏室双层货架（温区货架对齐层板 + 5 类收纳盒/离心管架贴纸 + 独立试剂瓶）（Light）**
 
-![导出 PNG 生成的出版级孔板成图（中文标签居中排版与底部图例完整保留）](./evidence/v2-visual-catalog/tools_plate_exported_png_v2.png)
+![资料与工具储藏室双层货架工作台 v4 实图（双列水平对齐柜格 + 冻存盒/EP 管盒/15及50 mL离心管架/PCR 96孔盒贴纸 + 搜索与临期筛选）](./evidence/v2-visual-catalog/tools_pantry_workbench_v4.png)
+
+**9b. 储藏室二级「9×9 冻存盒」下钻孔位地图（A1..I9 孔位矩阵 + 试剂配色圆帽 + 临期边框预警 + 孔位详情与盒内清单，Light / Dark）**
+
+![9x9 冻存盒下钻孔位分布图（Light）](./evidence/v2-visual-catalog/tools_pantry_box_cryo_9x9_light.png)
+
+![9x9 冻存盒下钻孔位分布图（Dark）](./evidence/v2-visual-catalog/tools_pantry_box_cryo_9x9_dark.png)
+
+**9c. 储藏室二级「96 孔 0.2 mL PCR 盒」（`B1–B8` 八联排整行占位）与「15 mL 离心管架」（`5×5` 圆孔管名直视）（Light）**
+
+![96 孔 PCR 盒下钻孔位分布图（Light）](./evidence/v2-visual-catalog/tools_pantry_box_pcr_96_light.png)
+
+![15 mL 离心管架下钻孔位分布图（Light）](./evidence/v2-visual-catalog/tools_pantry_box_falcon_rack_light.png)
+
+**9d. `uikit/labsticker`：5 款 BioRender 风二级收纳盒与离心管架白边贴纸图鉴（Light）**
+
+![5 款 BioRender 风收纳盒与离心管架白边贴纸图鉴](./evidence/v2-visual-catalog/comp_16e_labsticker_boxes_v1.png)
+
+**10. `资料与工具 -> 标准方案库`：4 套旗舰 `.asterml` 原生单页阅读预览 + 一键导出 PDF / 新建设计（Light）**
+
+![资料与工具标准方案库实图（4 套标准化方案切换 + 原生 AsterML v2 整篇渲染预览）](./evidence/v2-visual-catalog/tools_sop_library_v1.png)
+
+**11. `资料与工具 -> 孔板速排`：7 种真实孔板/管条规格 → 悬浮 `+ 追加标签` 标注 + 两列 `孔板历史` 组件墙（Light）**
+
+![孔板速排工作台 v3 与两列孔板历史（Light：7规格先选后排、+ 追加标签 悬浮条、SVG/PNG导出与点击载入缩略历史）](./evidence/v2-visual-catalog/tools_plate_studio_v3.png)
+
+**12. `资料与工具 -> 孔板速排`：点击历史卡片载入并呼出全屏悬浮放大编辑面板（B 行全选 + `+ 追加标签`）**
+
+![孔板速排放大编辑浮层 v3（从历史记录载入 96 孔板并选中整行标注）](./evidence/v2-visual-catalog/tools_plate_studio_overlay_v3.png)
+
+**13. `资料与工具 -> 孔板速排`：点击「导出 PNG」生成的 2× Retina 高清出图（同步支持 SVG 纯矢量导出）**
+
+![导出 PNG 生成的出版级 12 孔板成图（中文标签居中排版与底部图例完整保留）](./evidence/v2-visual-catalog/tools_plate_exported_png_v2.png)
+
+**14. `资料与工具 -> 实验台速算`：4 合 1 配液中心（摩尔配母液 / 单位稀释 / 细胞铺板 / PCR 预混液 + 一键插入设计）**
+
+![资料与工具实验台速算 4 合 1 配液中心实图（含死体积百分比核算与一键插入实验步骤）](./evidence/v2-visual-catalog/tools_bench_calc_v1.png)
+
+**15. `uikit/labsticker`：12 款 BioRender 风实验室容器白边贴纸全览图鉴（Light）**
+
+![12 款 BioRender 风实验室容器白边贴纸图鉴（0.2 mL PCR 联管至 500 mL 试剂瓶与三角摇瓶）](./evidence/v2-visual-catalog/comp_16_labsticker_sheet_v3.png)
+
+**16. 储藏室货架贴纸视图（`v3` Vibe Design 材质精修）：紧凑双列柜格、顶光内凹槽与立体层板（Light / Dark）**
+
+![储藏室货架贴纸视图浅色模式实图（双列紧凑温区柜格、142/154 DIP 自然间距与 📄/🔗 资料指示标）](./evidence/v2-visual-catalog/comp_16b_labsticker_shelf_light_v3.png)
+
+![储藏室货架贴纸视图深色模式实图（透明器皿背衬纯白刀模贴纸与深色内凹柜格深度）](./evidence/v2-visual-catalog/comp_16c_labsticker_shelf_dark_v3.png)
+
+**17. 储藏室「试剂档案与说明书」弹窗：Hero 贴纸展台 + 产品官网链接 + 本地说明书/COA PDF 上传查阅**
+
+![试剂档案弹窗实图（左侧连续性贴纸底座、货号批号、官网域名徽章打开网页与两份 PDF 说明书上传/查阅）](./evidence/v2-visual-catalog/comp_16d_pantry_reagent_detail_v3.png)
+
+**18. 实验设计单页「阅读」纸面视图与统一右上工具栏（编辑 | 阅读 | 源码 + 导出 PDF + 实时保存 + 开始实验）**
+
+![实验设计单页阅读视图 v2 实图（编辑/阅读/源码顶栏 + 方案就绪 + 实时保存 + 开始实验 + 导出 PDF）](./evidence/v2-visual-catalog/design_single_page_sheet_v2.png)
+
+**19–22. 组件级高清 A4 PDF v2 导出成品页实测图（PyMuPDF 光栅化真实 `.pdf`：完整实验实测记录 / RT-qPCR / 四象限抑菌圈纯矢量 SVG / HUVEC 成管）**
+
+![四象限抑菌圈完整实验记录真实导出 A4 PDF v2（含实测参数、✓ 勾选、已填数据表与第三节实验笔记/内嵌模块）](./evidence/v2-visual-catalog/pdf_export_iz_run_record_real_v2.png)
+![RT-qPCR 多靶点实验真实导出 A4 PDF v2](./evidence/v2-visual-catalog/pdf_export_rt_qpcr_real_v2.png)
+![四象限抑菌圈实验真实导出 A4 PDF v2](./evidence/v2-visual-catalog/pdf_export_inhibition_zone_real_v2.png)
+![HUVEC 成管实验真实导出 A4 PDF v2](./evidence/v2-visual-catalog/pdf_export_huvec_real_v2.png)
 
 ---
 
@@ -434,26 +541,26 @@ flowchart TD
 > [!IMPORTANT]
 > 下表所有条目均在最后一次代码改动完成后重新实测通过；鉴于宿主工作目录 `D:\` 存在历史外部沙盒遗传的 NTFS `Low Mandatory Level` 属性，Rust 构建命令统一通过 Cargo 官方环境变量 `CARGO_TARGET_DIR=%TEMP%\asterlab-cargo-target` 与 `CARGO_BUILD_BUILD_DIR=%TEMP%\asterlab-cargo-build`（以及 `CARGO_PROFILE_DEV_DEBUG=0`、`CARGO_PROFILE_TEST_DEBUG=0`）在标准 Medium-IL `%TEMP%` 编译并运行全部测试二进制。
 
-### 9.1 全量测试与契约门禁
+### 9.1 本轮收口后最新全量复验账本（2026-11-19）
 
 | 验证维度 | 命令 | 实测输出摘要 | 状态 |
 | :--- | :--- | :--- | :--- |
 | **SDK 契约强校验** | `python scripts/sdk/check.py` | `21 modules, 21 kinds, sdk 2.0.0` · `20 rules, 21 port types, 6 categories and 20 dispatch arms` -> `sdk check: ok` | PASS |
-| **Native Hash 守门** | `python scripts/ci/native_generator_hash.py --check` | `runs_native.go` & `mygo.rs` 均 `drift none` · `OK golden` | PASS |
-| **Token 颜色约束** | `rg -n "ui\.Hex\(" prototypes/mygo-run --glob "!*_test.go"` | 仅命中 `internal/theme/theme.go`（零调用点泄露） | PASS |
-| **Rust Core 全套** | `cargo test --locked -p asterlab-core` | 单元测试 `473 passed; 0 failed` (`0.06s`) + `catalog_drafts` `3 passed` (`0.00s`) + `operation_surface` `6 passed` (`0.00s`) + Doc-tests `2 passed` (`1.12s`) | PASS |
-| **Rust App 单测 (`--lib`)** | `cargo test --locked --manifest-path crates/asterlab-app/Cargo.toml --lib` | `89 passed; 0 failed; 0 ignored` | PASS |
-| **Rust CLI & 3实验 E2E** | `cargo test --locked -p labworkbench --bins` | `75 passed; 0 failed; 0 ignored` (`1.02s`，含全套 CLI E2E) | PASS |
-| **Go / Rust Parity** | `python tests/sdk-parity/run.py` | `cases=67 pass=67 fail=0 differences=0`（`isolated_data_sha256=271714845b115f0c1460eddd3138cd8b3abdb1312ec8acfe3d70824534b0681e`） | PASS |
-| **MyGo PureGo 桥接** | `go test -count=1 ./modules/runs` | `ok asterlab-mygo-prototype/modules/runs 7.802s` | PASS |
-| **Go Internal 全包** | `go test -count=1 ./internal/...` | 21 个有测试的 `internal/*` 包全部 `ok`（含 `internal/tools 0.740s` 含 `TestPlateStudioWorkflowHistoryAndExport`、`internal/uikit/plate 4.726s` 含 `TestPlateExportSVGAndPNG`、`internal/asterdoc 1.867s`）+ `internal/uikit/workflownode [no test files]` | PASS |
-| **Go 完整 E2E & 视觉门禁** | `go test -tags=e2e -count=1 .` | 全包 E2E 与全套实图视觉门禁全数通过，`ok asterlab-mygo-prototype 10.728s` | PASS |
+| **Native Hash 守门** | `python scripts/ci/native_generator_hash.py --check` | `OK golden scripts\ci\native_generator_hashes.json` | PASS |
+| **UX-DESIGN Token 约束** | 扫描本次新增/改动 11 份 Go UI 文件的 `ui.Hex(`、`FontSize([0-9]`、非零 `Padding([0-9]`、`Radius([0-9]` | `checked_files=11`，非零硬编码字面值违例 `0`（仅 `shell.go` 既有 `Padding(0, ...)` 含 `0` 参数） | PASS |
+| **Rust CLI AsterDoc / v2.1 围栏单测（上轮实测后 Rust 源码未改）** | `cargo test --locked -p labworkbench --bin labworkbench asterdoc` | `11 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out`（本轮仅改 Go UI/储藏室盒子，Rust 源码未改动） | PASS |
+| **Go 全部 `internal/...` 子包（含收纳盒孔位、5 款盒子贴纸、v2.1 信封、Obsidian 壳、Apple 日历与视觉/PDF 单测）** | `go test -p=2 -count=1 ./internal/...` | 有单测的 **22 个子包全部 `ok`**（含 `asterdoc 2.783s`、`runworkspace 0.842s`、`shell 0.819s`、`tools 0.768s`、`uikit/labsticker 2.731s`、`uikit/plate 2.657s` 等；`uikit/workflownode [no test files]`） | PASS |
+| **Go 根包单测与全工作台视觉门禁** | `go test -p=2 -count=1 .` | `ok asterlab-mygo-prototype 10.080s`（含储藏室二级盒架、Obsidian 多标签/分屏/抽屉/`Ctrl+K`、Apple 日历月/周与 Popover、v2.1 `.asterml` 三段信封、右对齐 `编辑 \| 阅读 \| 源码` 与全量视觉门禁） | PASS |
+| **Go 桌面主程序编译检查** | `go build -o "$env:TEMP\asterlab-mygo-check.exe" .` | 退出码 `0`（编译零报错） | PASS |
 
-*(全部验证完成后，清理临时构建与测试副产物。)*
+*(全部验证完成后，已清理 `%TEMP%\asterlab-cargo-*` 与测试生成的 `internal/*/*.png` 副产物。)*
 
-### 9.2 Windows 构建与未签名发布产物（当前头提交构建）
+### 9.2 Windows 安装包基线（`e4a610f` 提交构建快照 · 当前工作区改动待重打包）
 
-| 产物 | 路径 | 体积 | SHA256 |
+> [!NOTE]
+> 下表哈希对应提交 `e4a610f` 时产出的既有打包基线；`2026-11-19` 收口改动已通过上方 `go build .` 编译验证，但 `dist/mygo-run.exe` 与 `release/*.zip` / `-setup.exe` 安装包尚未重新构建打包。
+
+| 产物（`e4a610f` 基线） | 路径 | 体积 | SHA256（`e4a610f`） |
 | :--- | :--- | ---: | :--- |
 | Native Rust CDylib | `prototypes/mygo-run/dist/Runs.dll` | 13,794,816 bytes | `0F6FB364CC9ABF0916902B07D37A4A3A7D920CF03F6945E3C5062A4163382B51` |
 | 桌面可执行文件 | `prototypes/mygo-run/dist/mygo-run.exe` | 32,154,624 bytes | `78EA93FC32B61987B1F07BF9399F62439DD7AC9E631629C6F2890F9ECD9A6427` |
@@ -462,28 +569,49 @@ flowchart TD
 
 ---
 
-## 十、收口现状与分支推送说明
+## 十、收口现状与分支说明
 
 > [!NOTE]
-> **分支与远端同步范围**：遵循要求，已在分支 `feat/v2-generic-modules` 归档两份带真实渲染图鉴与相对路径图片证据的权威笔记（[v2-module-visual-catalog.md](./v2-module-visual-catalog.md) 与 [v2-architecture-retrospective-and-evidence.md](./v2-architecture-retrospective-and-evidence.md)）并推送至 `origin/feat/v2-generic-modules` 便于后续更新对照；**未向 `main` 直接推送，未移动 `sdk-v1-rc3`，亦未操作 Kandev 看板**。
+> **分支与工作区范围**：所有收口代码、截图与文档修订均位于本地分支 `feat/v2-generic-modules`；**未向 `main` 直接推送，未移动 `sdk-v1-rc3`，亦未操作 Kandev 看板**。
 
-### 10.1 交付总清单：核心闭环与组件体验已全部落地
+### 10.1 交付总清单：核心闭环与全量讨论收口已全部落地
 
 | 任务 / 阶段 | 核心目标 | 完成批次 |
 | :--- | :--- | :--- |
 | **P0 基础设施** | AsterML v2 (`sdk 2.0.0`) 单一通用模块、3-Tab Design 工作台、Run `ModeRun` 同源渲染与三旗舰样板 | `b704537` |
 | **MOD-01** | Run 期实测水合 + `calculator@1` 实测代入 + `qc_dropped`/`censored_dead`/`rework` 联动 | `5c27673` |
-| **MOD-02** | 步骤内拖拽排序 + `data_table` CSV/TSV 粘贴、键盘导航与 `ReadoutValue::Table` 回写/Notebook 呈现 | `5c27673` |
+| **MOD-02** | 步骤内拖拽排序 + `data_table` CSV/TSV 粘贴、键盘导航与 `ReadoutValue::Table` 回写/`实验记录`呈现 | `5c27673` |
 | **MOD-03** | `attachment@1`/`figure@1` 多格式异步缩略图解码（含 TIFF）、75%–200% Lightbox 缩放与 Design 拖入 | `5c27673` |
 | **MOD-04** | `AGENT_API.md` v2 文档对齐与抑菌圈/CFU/HUVEC 三旗舰实验无头 CLI E2E 回归 | `5c27673` |
 | **MOD-05** | Rust/Go `ComputeBudgetSummary` 与多模块 `RecordProjection` 审计回归 | `5c27673` |
 | **MOD-06** | `960x640` / `1360x880` / `2560x1440` 多分辨率视觉门禁 + Windows 构建流水线 | `5c27673` |
 | **前端科研文案治理** | 全量替换 `Core` / `后端` / `readout.submit` / `schema` / `同源执行` / `insufficient` / 原始 ID 为科研人员自然表达 | `674139f` |
-| **多维孔板 + Notebook ELN + 全仓补齐** | `plate@1.factors` 多因子复孔作用域与 5 模着色、RT-qPCR 第四旗舰样板、Notebook ELN 纸面/双分栏 `实验模块` 同源复用与 5-KPI `图板`、`Tools` 工作台、归档解码导出 | `4d5391c` |
-| **7 项引擎/交互闭环与 21 模块打磨** | 卡片内联改标题、`.asterml`+`./assets/` 双向回写、`format: 4` 与全自适应孔径（4→384/圆形皿/`rack_1d`）、单输入框悬浮选孔标注（含梯级 `100/2 uM` 与无序复孔重算）、`data_table` 2D 矩阵视图与整板粘贴、`readout.viewer`、全仓统一 `plateui.View`、`实验条件` 默认标题与 17 张组件实图修正 | `18ba9e9` |
-| **「孔板速排」工作台与双图鉴 GitHub 归档** | `孔板速排` 先选 8 种规格后排板、完整复用 `asterdoc.View` 拖拽框选/悬浮标注/放大浮层、`RenderSVG` + 2× `RenderPNG` 导出、两列 `孔板历史` 卡片加载/导出/持久化、`GroupLabels` 图例映射及两份带 47 张真实实图的 `docs/sdk/` 归档推送 GitHub | 本次交付 (`feat/v2-generic-modules`) |
+| **多维孔板 + ELN + 全仓补齐** | `plate@1.factors` 多因子复孔作用域、RT-qPCR 第四旗舰样板、ELN 双分栏 `实验模块` 同源复用与 5-KPI `图板`、归档解码导出 | `4d5391c` |
+| **7 项引擎/交互闭环与 21 模块打磨** | 卡片内联改标题、`.asterml`+`./assets/` 双向回写、全自适应孔径、`data_table` 2D 矩阵视图与整板粘贴、`readout.viewer`、全仓统一 `plateui.View` 与 `实验条件` 默认标题 | `18ba9e9` |
+| **「孔板速排」工作台与双图鉴 GitHub 归档** | `孔板速排` 独立设计器、复用 `asterdoc.View` 拖拽框选/放大浮层、`RenderSVG` + 2× `RenderPNG` 导出、两列 `孔板历史` 与 `GroupLabels` 图例映射 | `e4a610f` |
+| **`uikit/labsticker` 与 `储藏室货架` 实装 + 说明书/官网网址** | 12 款 BioRender 风白边容器贴纸引擎、双列紧凑货架、立体层板与 1:1 资料角标，接入「试剂档案」弹窗（PDF/图片说明书上传查阅 + 产品官网链接校验） | 本分支工作区（截图已更新至 `v4`） |
+| **全维度审计 + 「单页阅读」渲染 + 组件级 A4 PDF + Vault 蓝图** | 后端承载力/UI/Agent/SDK/科研痛点全维审计；Design `阅读` 单页 (`sheet_view.go`) 与组件级 A4 PDF 导出 (`pdf_sheet.go` + 4 份 `v2` 成品图) + Lab Vault 架构规范 | [v2-system-audit-and-vault-architecture.md](./v2-system-audit-and-vault-architecture.md) |
+| **v2.1 Obsidian 级多标签单文件工作台与 Apple 风格日历重构（2026-11-19）** | ① **单文件 `.asterml` v2.1 类型化块信封**；② **Obsidian 多标签壳 / 分屏 / 右抽屉 / `Ctrl+K` 命令面板**；③ **Apple Calendar 风格日历**；④ 设计与记录统一右对齐 **`编辑 \| 阅读 \| 源码`** 紧贴 **`导出 PDF`** 左侧 | 本分支工作区（已全量复验通过） |
+| **储藏室二级收纳盒/离心管架层级与全表面 UI 精修（2026-11-19）** | 5 款 BioRender 盒子/管架贴纸 (`9×9/10×10 冻存盒` · `50 孔 EP 管盒` · `15/50 mL 离心管架` · `96 孔 PCR 盒`) + `A1..L12` 俯视孔位下钻与 `OnLocatePantry` 直达 + 层板齐平/弹窗状态/Popover 单行/分屏排版精修 | 本分支当前工作区（已全量复验通过） |
+| **Agent 端口闭环加固与 5 轮跨实验黑盒盲测（2026-11-19）** | 未知 YAML 键 Go/Rust 双端强拒绝、`checklist.blocking`/`control_group_ref`/`blank|vehicle` 角色编译修复、跨模块 `sample_count`/`independent_n` 与正交 `factors` 一致性校验、`mm3`/`V` 单位扩充、`%LOCALAPPDATA%` 路径统一、CLI 镜像落盘 + 桌面 2s 热同步、[AGENT_GUIDE.md](./AGENT_GUIDE.md) 与 5 轮隔离黑盒全通（CCK-8/384-qPCR/抑菌圈/WB+Run/小鼠体内 `cohort`） | 本分支当前工作区（Rust `76/76` + Go 全量 `ok`） |
+| **Obsidian 单库透明工作区、`UnifiedLive` 单真源与物理动效系统（2026-11-20）** | ① **单库磁盘文件树 (`internal/vault`)** + **40px Ribbon / 递归全等分屏树 (`internal/shell`)**；② **`UnifiedLive` 单真源画布 (`experiment_page.go`)**：移除冗杂 `运行`/`记录` 分离副本与 4 工具大杂烩，实现 `编辑 \| 阅读 \| 源码` 同源切换、内联实操清单/实时计时、`plate@1` 图层与三态序列填充、图片 `Ctrl+V` 贴图与独立 `ViewPantry`；③ **四档物理动效 (`internal/theme/motion.go`)**：精密数字滚轮、磁吸胶囊、Oklab 孔板染色、液态分屏预演、一镜到底灯箱与海绵微晃纠错 | 本分支当前工作区（交互实测 + 最新全量截图验收通过） |
 
 ### 10.2 后续交互试跑与参考入口
 
-1. **交互式实窗体验**：运行最新构建的 `prototypes/mygo-run/dist/mygo-run.exe`（或安装 `release/AsterLab-MyGo-0.1.0-beta-unsigned-win-x64-setup.exe`），在左侧进入「资料与工具 → **孔板速排**」体验先选规格 → 框选悬浮标注 → `导出 SVG` / `导出 PNG` → 下方两列「孔板历史」点击载入编辑与 `应用到当前设计`。
+1. **源码运行与体验**：在 `prototypes/mygo-run` 运行 `go run .`（或完成 Windows 构建后运行新版程序），依次体验：
+   - Obsidian 多标签顶部chrome（`◀ / ▶` 前进后退、`实验日程` 固定标签、可关闭多实验标签页、`Ctrl+K` 悬浮命令面板、左右分屏与右侧滑出工具抽屉 `迷你日历`/`试剂速查`/`随手速算`/`计时与大纲`）；
+   - Apple Calendar 风格 `实验日程` 月/周视图（单击日期呼出毛玻璃日程 Popover、双击日期格直接新建、周视图 `全天` 与实时时间红线）；
+   - 实验页内 `设计 | 运行 | 记录` 阶段带、右上统一 **`编辑 | 阅读 | 源码`** 紧贴 **`导出 PDF`**、`复刻新实验` 及盘上 `.asterml` v2.1 三段信封实时自动落盘；
+   - `资料与工具` 4 大工作台：`储藏室货架`（贴纸货架 + 说明书/官网弹窗）、`标准方案库`、`孔板速排`、`实验台速算`。
 2. **本机工作区权限整洁（可选）**：因本机 `D:\L\...` 祖先目录残留了外部历史 `Low Mandatory Level` ACL 继承，若今后希望在本目录不设置 `CARGO_TARGET_DIR` / `CARGO_BUILD_BUILD_DIR` 直接跑 `cargo test`，可由你自己以管理员身份清理该文件夹继承完整性标签。
+
+### 10.3 长期架构路线储备：领域运行时 + 微型反射弧 / 神经符号引擎（2026-11-19 备忘）
+
+1. **演进主轴（当前先打牢人类与数据底座，再逐层叠加）**：
+   - **L0 · 高自由度人类工作台与轨迹底座**：先确保桌面 GUI、可插拔储藏室图标包（`plugins/sticker-packs/`）、储藏室 `.asterml` 文本化与声明式组件端口化跑通，自然沉淀真实 `Design → 校验修复 → Run → Deviation/Readout` 结构化轨迹。
+   - **L1 · 事务型领域引擎（Domain Runtime）**：在 Rust Core 收拢跨模块级联不变量与 Dry-Run 沙盒推演（返回精确 `affects` 影响图与事务回滚），同时提供纯辅助性的局部几何工具（如孔板区域展开）而**不把 Agent 关进封闭大黑盒**。
+   - **L2 · 极小端侧反射弧（Sub-1B 垂直微调 + 受限解码）**：借鉴 `FunctionGemma (270M)` / `TinyAgent (ToolRAG + LLMCompiler)` / `Octopus (Functional Tokens)` / `Qwen2.5-0.5B + GBNF` 路线；输入端用领域引擎压缩后的 **< 300 tokens 工作区符号摘要**，输出端只吐几十 token 原子命令并挂 GBNF 语法掩码，实现普通 CPU 上 ~0.3–0.8s 响应且无感；训练集同步混入“信息缺失反问/拒答”负样本。
+   - **L3 · 非生成式神经符号引擎（10～50 MB ONNX，完全独立于 LLM 对话）**：
+     - *异构图神经网络（GNN）*：直接在实验图结构上做缺失边/模块补全推荐与反常结构嗅探（不靠手写上千条 `if/else`）；
+     - *AlphaZero 式动作策略/价值搜索*：基于符号合法动作空间与轻量 Policy/Value Net 做毫秒级多步推演；
+     - *Neural-Guided 组合求解器 & 物理世界预测器*：学习实验室排枪/排板/冻存收纳偏好权重，并用历史 Run 偏差轨迹在开跑前预估余量紧缺与时间窗漂移风险。

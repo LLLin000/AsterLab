@@ -1,17 +1,63 @@
-// Package theme is AsterLab's visual system: warm neutral surfaces, one violet
-// accent for selection and primary action, hairline structure instead of card
-// stacks. Palettes start from Onevra's warm theme and replace its colors, so
-// Onevra components, MyGo widgets and AsterLab's own painters share one look.
+// Package theme is AsterLab's visual system: Obsidian-inspired pure editorial
+// surfaces, neutral Zinc option, or classic Warm paper, paired with restrained
+// violet accents and tuned MyGo Liquid Glass capsule materials.
 package theme
 
 import (
+	"sync"
+
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	onevra "github.com/oneo-me/onevra/source/theme"
 )
 
+const (
+	PresetObsidian = "obsidian" // Pure white editorial paper + whisper-cool #f5f6f8 borderless cards
+	PresetZinc     = "zinc"     // Achromatic cool silver-zinc #f4f5f7 canvas + pure #ffffff cards
+	PresetWarm     = "warm"     // Classic warm laboratory paper (#f7f6f3 / #171614)
+)
+
+var (
+	themeCfgMu        sync.RWMutex
+	activePreset      = PresetObsidian
+	activeLiquidGlass = true
+)
+
+// SetActiveLook configures the active surface preset ("obsidian" | "zinc" | "warm")
+// and whether MyGo Liquid Glass refractive surfaces are active.
+func SetActiveLook(preset string, liquidGlass bool) {
+	p := normalizePreset(preset)
+	themeCfgMu.Lock()
+	activePreset = p
+	activeLiquidGlass = liquidGlass
+	themeCfgMu.Unlock()
+}
+
+// ActiveLook returns the currently active theme preset and Liquid Glass toggle.
+func ActiveLook() (preset string, liquidGlass bool) {
+	themeCfgMu.RLock()
+	p, g := activePreset, activeLiquidGlass
+	themeCfgMu.RUnlock()
+	return p, g
+}
+
+func normalizePreset(preset string) string {
+	switch preset {
+	case PresetZinc, PresetWarm, PresetObsidian:
+		return preset
+	case "aurora": // migrate legacy config cleanly to default Obsidian
+		return PresetObsidian
+	default:
+		return PresetObsidian
+	}
+}
+
 // Tokens defines the shared AsterLab design system.
 type Tokens struct {
-	Canvas, Surface, Elevated                                                                    ui.Color
+	Preset                                                                                       string
+	LiquidGlass                                                                                  bool
+	Dark                                                                                         bool
+	Canvas, Surface, Elevated, SelectedRow                                                       ui.Color
 	Border, BorderStrong                                                                         ui.Color
 	Text, TextMuted                                                                              ui.Color
 	Accent, AccentHover, AccentText                                                              ui.Color
@@ -26,31 +72,103 @@ type Tokens struct {
 	ControlRadius, PanelRadius, DialogRadius                                                     int
 }
 
-func LightTokens() Tokens {
+// TokensFor returns the full design token set for an explicit preset, dark flag,
+// and Liquid Glass toggle.
+func TokensFor(preset string, dark, liquidGlass bool) Tokens {
+	p := normalizePreset(preset)
 	t := Tokens{
-		Canvas: ui.Hex("#f7f6f3"), Surface: ui.Hex("#ffffff"), Elevated: ui.Hex("#faf9f7"),
-		Border: ui.Hex("#e7e3db"), BorderStrong: ui.Hex("#d6d0c5"),
-		Text: ui.Hex("#1c1b18"), TextMuted: ui.Hex("#5f5a52"),
-		Accent: ui.Hex("#5b45c9"), AccentHover: ui.Hex("#4b37ae"), AccentText: ui.Hex("#ffffff"),
-		Success: ui.Hex("#2f7a4f"), Warning: ui.Hex("#7a6233"), Danger: ui.Hex("#a3373a"),
-		RailBackground: ui.Hex("#f1efea"), SidebarBackground: ui.Hex("#f1efea"),
-		Spacing4: 4, Spacing8: 8, Spacing12: 12, Spacing16: 16, Spacing24: 24, Spacing32: 32, Spacing48: 48,
-		TextPage: 22, TextSection: 15, TextBody: 13, TextMeta: 12, TextData: 12,
-		ButtonHeight: 30, InputHeight: 30, RowHeight: 32,
-		ControlRadius: 6, PanelRadius: 10, DialogRadius: 12,
+		Preset:        p,
+		LiquidGlass:   liquidGlass,
+		Dark:          dark,
+		Spacing4:      4,
+		Spacing8:      8,
+		Spacing12:     12,
+		Spacing16:     16,
+		Spacing24:     24,
+		Spacing32:     32,
+		Spacing48:     48,
+		TextPage:      22,
+		TextSection:   15,
+		TextBody:      13,
+		TextMeta:      12,
+		TextData:      12,
+		ButtonHeight:  30,
+		InputHeight:   30,
+		RowHeight:     32,
+		ControlRadius: 6,
+		PanelRadius:   12,
+		DialogRadius:  14,
+	}
+
+	switch p {
+	case PresetWarm:
+		if dark {
+			t.Canvas, t.Surface, t.Elevated = ui.Hex("#171614"), ui.Hex("#1e1d1a"), ui.Hex("#242320")
+			t.SelectedRow = ui.Hex("#2c2a25")
+			t.Border, t.BorderStrong = ui.Hex("#37352f"), ui.Hex("#4a473f")
+			t.Text, t.TextMuted = ui.Hex("#f2efe9"), ui.Hex("#a9a49a")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#a996ff"), ui.Hex("#bcabff"), ui.Hex("#1b1533")
+			t.Success, t.Warning, t.Danger = ui.Hex("#84c9a4"), ui.Hex("#d9b878"), ui.Hex("#e79a9c")
+			t.RailBackground, t.SidebarBackground = t.Canvas, t.Canvas
+		} else {
+			t.Canvas, t.Surface, t.Elevated = ui.Hex("#f7f6f3"), ui.Hex("#ffffff"), ui.Hex("#faf9f7")
+			t.SelectedRow = ui.Hex("#edeae3")
+			t.Border, t.BorderStrong = ui.Hex("#e7e3db"), ui.Hex("#d6d0c5")
+			t.Text, t.TextMuted = ui.Hex("#1c1b18"), ui.Hex("#5f5a52")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#5b45c9"), ui.Hex("#4b37ae"), ui.Hex("#ffffff")
+			t.Success, t.Warning, t.Danger = ui.Hex("#2f7a4f"), ui.Hex("#7a6233"), ui.Hex("#a3373a")
+			t.RailBackground, t.SidebarBackground = ui.Hex("#f1efea"), ui.Hex("#f1efea")
+		}
+	case PresetZinc:
+		if dark {
+			t.Canvas, t.Surface, t.Elevated = ui.Hex("#0f1115"), ui.Hex("#16181e"), ui.Hex("#1e2129")
+			t.SelectedRow = ui.Hex("#262a34")
+			t.Border, t.BorderStrong = ui.Hex("#262a35"), ui.Hex("#383e4d")
+			t.Text, t.TextMuted = ui.Hex("#f3f4f6"), ui.Hex("#9ca3af")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#a397ff"), ui.Hex("#b8aeff"), ui.Hex("#131026")
+			t.Success, t.Warning, t.Danger = ui.Hex("#74cfa3"), ui.Hex("#e2b96f"), ui.Hex("#ed939b")
+			t.RailBackground, t.SidebarBackground = ui.Hex("#0c0d10"), ui.Hex("#12141a")
+		} else {
+			t.Canvas, t.Surface, t.Elevated = ui.Hex("#f4f5f7"), ui.Hex("#ffffff"), ui.Hex("#eceef2")
+			t.SelectedRow = ui.Hex("#e5e7ec")
+			t.Border, t.BorderStrong = ui.Hex("#e2e5ec"), ui.Hex("#cbd0da")
+			t.Text, t.TextMuted = ui.Hex("#111827"), ui.Hex("#5c6370")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#635bff"), ui.Hex("#5046e5"), ui.Hex("#ffffff")
+			t.Success, t.Warning, t.Danger = ui.Hex("#18794e"), ui.Hex("#8c6115"), ui.Hex("#c03641")
+			t.RailBackground, t.SidebarBackground = ui.Hex("#eff1f4"), ui.Hex("#f1f2f5")
+		}
+	default: // PresetObsidian: pure crisp white paper (#ffffff) + whisper-cool #f5f6f8 borderless cards
+		if dark {
+			t.Canvas, t.Surface, t.Elevated = ui.Hex("#111215"), ui.Hex("#16181d"), ui.Hex("#1e2027")
+			t.SelectedRow = ui.Hex("#272a33")
+			t.Border, t.BorderStrong = ui.Hex("#272b36"), ui.Hex("#3b4152")
+			t.Text, t.TextMuted = ui.Hex("#f5f5f7"), ui.Hex("#a6abb8")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#a596ff"), ui.Hex("#bab0ff"), ui.Hex("#120f24")
+			t.Success, t.Warning, t.Danger = ui.Hex("#6fd3a4"), ui.Hex("#e6bc6a"), ui.Hex("#f08e96")
+			t.RailBackground, t.SidebarBackground = ui.Hex("#0d0e11"), ui.Hex("#13151a")
+		} else {
+			t.Canvas, t.Surface, t.Elevated = ui.Hex("#ffffff"), ui.Hex("#ffffff"), ui.Hex("#f5f6f8")
+			t.SelectedRow = ui.Hex("#ededf0")
+			t.Border, t.BorderStrong = ui.Hex("#e7e9ee"), ui.Hex("#d2d6df")
+			t.Text, t.TextMuted = ui.Hex("#18181b"), ui.Hex("#71717a")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#6c5ce7"), ui.Hex("#5949d4"), ui.Hex("#ffffff")
+			t.Success, t.Warning, t.Danger = ui.Hex("#168053"), ui.Hex("#9a6715"), ui.Hex("#c23643")
+			t.RailBackground, t.SidebarBackground = ui.Hex("#f7f8fa"), ui.Hex("#f8f9fb")
+		}
 	}
 	return aliases(t)
 }
 
+// LightTokens returns Tokens for the active preset in light mode.
+func LightTokens() Tokens {
+	p, g := ActiveLook()
+	return TokensFor(p, false, g)
+}
+
+// DarkTokens returns Tokens for the active preset in dark mode.
 func DarkTokens() Tokens {
-	t := LightTokens()
-	t.Canvas, t.Surface, t.Elevated = ui.Hex("#171614"), ui.Hex("#1e1d1a"), ui.Hex("#242320")
-	t.Border, t.BorderStrong = ui.Hex("#37352f"), ui.Hex("#4a473f")
-	t.Text, t.TextMuted = ui.Hex("#f2efe9"), ui.Hex("#a9a49a")
-	t.Accent, t.AccentHover, t.AccentText = ui.Hex("#a996ff"), ui.Hex("#bcabff"), ui.Hex("#1b1533")
-	t.Success, t.Warning, t.Danger = ui.Hex("#84c9a4"), ui.Hex("#d9b878"), ui.Hex("#e79a9c")
-	t.RailBackground, t.SidebarBackground = t.Canvas, t.Canvas
-	return aliases(t)
+	p, g := ActiveLook()
+	return TokensFor(p, true, g)
 }
 
 func aliases(t Tokens) Tokens {
@@ -59,10 +177,99 @@ func aliases(t Tokens) Tokens {
 	t.WarningBg, t.WarningText = t.Surface, t.Warning
 	t.DangerBg, t.DangerText = t.Surface, t.Danger
 	t.NeutralBg, t.NeutralText = t.Surface, t.TextMuted
-	t.AccentSoftBg = t.Accent.Alpha(.10)
+	t.AccentSoftBg = t.Accent.Alpha(.14)
+	if t.Dark {
+		t.AccentSoftBg = ui.Hex("#2a2645")
+	} else if t.Preset == PresetObsidian {
+		t.AccentSoftBg = ui.Hex("#eeebff")
+	}
 	t.InfoBg, t.InfoText = t.Elevated, t.Accent
 	t.CodeBg = t.Elevated
 	return t
+}
+
+// PaintCanvasBackground paints a clean, crisp neutral editorial canvas without distracting tints.
+func PaintCanvasBackground(el ui.Element, tok Tokens) ui.Element {
+	return el.Background(tok.Canvas)
+}
+
+// ApplyChromeGlass equips top bars with crisp frosted surface without glass-on-glass washout.
+func ApplyChromeGlass(el ui.Element, tok Tokens, interactive bool) ui.Element {
+	if tok.LiquidGlass {
+		if tok.Dark {
+			// In dark mode, Avoid glass.Regular lifting dark pixels to gray; use deep smoked Clear glass.
+			return el.Material(glass.Glass{
+				Style:       glass.Clear,
+				Tint:        ui.RGBA(20, 22, 28, 0.86),
+				Interactive: interactive,
+			})
+		}
+		return el.Material(glass.Glass{
+			Style:       glass.Regular,
+			Tint:        tok.Surface.Alpha(0.76),
+			Interactive: interactive,
+		})
+	}
+	return el.Background(tok.Surface.Alpha(0.95))
+}
+
+// ApplyCapsuleGlass gives Obsidian iOS 26 floating pills optimal Light/Dark Liquid Glass contrast:
+// Light uses luminous milky frost (76%); Dark uses deep smoked Clear-bezel glass + crisp specular rim
+// so bright elements underneath never bleach or blotch icons.
+func ApplyCapsuleGlass(el ui.Element, tok Tokens, interactive bool) ui.Element {
+	if tok.Dark {
+		el.Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.56)).
+			Border(1, ui.RGBA(255, 255, 255, 0.14))
+		if tok.LiquidGlass {
+			return el.Material(glass.Glass{
+				Style:       glass.Clear,
+				Tint:        ui.RGBA(24, 26, 33, 0.84),
+				Interactive: interactive,
+			})
+		}
+		return el.Background(ui.Hex("#1e2028"))
+	}
+	el.Shadow(0, 8, 28, 0, ui.RGBA(0, 0, 0, 0.11)).
+		Border(1, tok.Surface.Alpha(0.95))
+	if tok.LiquidGlass {
+		return el.Material(glass.Glass{
+			Style:       glass.Regular,
+			Tint:        tok.Surface.Alpha(0.76),
+			Interactive: interactive,
+		})
+	}
+	return el.Background(tok.Surface.Alpha(0.96))
+}
+
+// ApplyPanelGlass applies clean sheet/drawer surfaces (deep smoked glass in dark mode to preserve full text legibility).
+func ApplyPanelGlass(el ui.Element, tok Tokens, clarity float32) ui.Element {
+	if tok.LiquidGlass {
+		if tok.Dark {
+			return el.Material(glass.Glass{
+				Style:   glass.Clear,
+				Clarity: clarity,
+				Tint:    ui.RGBA(20, 22, 28, 0.92),
+			})
+		}
+		return el.Material(glass.Glass{
+			Style:   glass.Regular,
+			Clarity: clarity,
+			Tint:    tok.Surface.Alpha(0.86),
+		})
+	}
+	return el.Background(tok.Surface)
+}
+
+// ApplyAccentGlass gives primary CTA buttons a clean tinted finish.
+func ApplyAccentGlass(el ui.Element, tok Tokens, interactive bool) ui.Element {
+	if tok.LiquidGlass {
+		return el.Material(glass.Glass{
+			Style:       glass.Regular,
+			Tint:        tok.Accent.Alpha(0.88),
+			Interactive: interactive,
+		})
+	}
+	return el.Background(tok.Accent)
 }
 
 // GetTokens returns the painter tokens matching the frame's appearance.
@@ -73,11 +280,17 @@ func GetTokens(t *ui.Theme) Tokens {
 	return LightTokens()
 }
 
-// LightPalette is the AsterLab light theme.
-func LightPalette() *ui.Theme { return apply(false) }
+// LightPalette is the AsterLab light theme for the active look.
+func LightPalette() *ui.Theme {
+	p, g := ActiveLook()
+	return PaletteFor(p, false, g)
+}
 
-// DarkPalette is the AsterLab dark theme.
-func DarkPalette() *ui.Theme { return apply(true) }
+// DarkPalette is the AsterLab dark theme for the active look.
+func DarkPalette() *ui.Theme {
+	p, g := ActiveLook()
+	return PaletteFor(p, true, g)
+}
 
 // Palette returns the AsterLab palette for the given appearance.
 func Palette(dark bool) *ui.Theme {
@@ -85,6 +298,11 @@ func Palette(dark bool) *ui.Theme {
 		return DarkPalette()
 	}
 	return LightPalette()
+}
+
+// PaletteFor constructs a *ui.Theme for the specified preset, dark mode, and glass toggle.
+func PaletteFor(preset string, dark, liquidGlass bool) *ui.Theme {
+	return applyTokens(TokensFor(preset, dark, liquidGlass))
 }
 
 // Window is the theme function Onevra's shells and Apply take: it follows the
@@ -179,13 +397,9 @@ func LightTheme() *ui.Theme { return LightPalette() }
 
 func DarkTheme() *ui.Theme { return DarkPalette() }
 
-func apply(dark bool) *ui.Theme {
-	t := onevra.Palette(dark)
-	c := LightTokens()
-	if dark {
-		c = DarkTokens()
-	}
-	t.Background, t.Surface, t.SurfaceHover, t.SurfacePressed = c.Canvas, c.Surface, c.Elevated, c.Border
+func applyTokens(c Tokens) *ui.Theme {
+	t := onevra.Palette(c.Dark)
+	t.Background, t.Surface, t.SurfaceHover, t.SurfacePressed = c.Canvas, c.Surface, c.Elevated, c.SelectedRow
 	t.Border, t.Text, t.TextMuted = c.Border, c.Text, c.TextMuted
 	t.Accent, t.AccentHover, t.AccentPressed, t.AccentText = c.Accent, c.AccentHover, c.AccentHover, c.AccentText
 	t.Danger, t.Warning, t.Success = c.Danger, c.Warning, c.Success

@@ -6,6 +6,7 @@
 
 | 文档 | 权威范围 |
 |---|---|
+| [`HANDBOOK.md`](./HANDBOOK.md) | **全仓工程与产品手册总览（OMP / OpenCode 风格）**：涵盖领域模型、包架构、FFI/CLI/Vault 接口、AsterML v2 21 模块 SDK、主题/Liquid Glass/动效 UI 规范、桌面与 Obsidian iOS 26 移动端 UX、双端同步决策及巡检热点 |
 | [`../CONTEXT.md`](../CONTEXT.md) | 领域术语、对象边界、读模型/执行身份、工具/仪器边界 |
 | [`../AGENT_API.md`](../AGENT_API.md) | 当前已实现 CLI/HTTP 字段、枚举、错误码 |
 | [`release/doc-authority.md`](release/doc-authority.md) | 文档「权威 / 历史 / 研究」状态登记与冲突处置 |

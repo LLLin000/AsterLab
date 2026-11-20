@@ -26,10 +26,10 @@ type PlatePreset struct {
 	DefaultTitle string
 }
 
-// StandardPlatePresets enumerates the supported plate, dish, and strip geometries
-// available in the "先选孔板，再设计" step.
+// StandardPlatePresets enumerates the supported plate and strip geometries
+// available in the "先选孔板，再设计" step. Continuous agar plates (such as
+// 90 mm Petri dishes) use agent-authored SVG diagrams rather than discrete grids.
 var StandardPlatePresets = []PlatePreset{
-	{Key: "dish-4", Label: "4区培养皿", Format: 4, Rows: 2, Cols: 2, Topology: "dish", DefaultTitle: "四象限培养皿分区"},
 	{Key: "plate-6", Label: "6孔板", Format: 6, Rows: 2, Cols: 3, Topology: "plate", DefaultTitle: "6 孔培养板"},
 	{Key: "plate-12", Label: "12孔板", Format: 12, Rows: 3, Cols: 4, Topology: "plate", DefaultTitle: "12 孔培养板"},
 	{Key: "plate-24", Label: "24孔板", Format: 24, Rows: 4, Cols: 6, Topology: "plate", DefaultTitle: "24 孔培养板"},
@@ -37,6 +37,13 @@ var StandardPlatePresets = []PlatePreset{
 	{Key: "plate-96", Label: "96孔板", Format: 96, Rows: 8, Cols: 12, Topology: "plate", DefaultTitle: "96 孔排板设计"},
 	{Key: "plate-384", Label: "384孔板", Format: 384, Rows: 16, Cols: 24, Topology: "plate", DefaultTitle: "384 孔高通量排板"},
 	{Key: "rack-8", Label: "8联管/泳道", Format: 8, Rows: 1, Cols: 8, Topology: "rack_1d", DefaultTitle: "8 联管 / 样本泳道"},
+}
+
+func default96Preset() PlatePreset {
+	if p, ok := presetForKey("plate-96"); ok {
+		return p
+	}
+	return StandardPlatePresets[0]
 }
 
 // PlateHistoryEntry persists a complete AsterML plate snapshot for quick reload
@@ -91,7 +98,7 @@ func presetForPlate(p *asterdoc.Plate) PlatePreset {
 			}
 		}
 	}
-	return StandardPlatePresets[5] // 96-well default
+	return default96Preset()
 }
 
 func buildStudioPlateSource(preset PlatePreset, title string) string {
@@ -117,7 +124,6 @@ func buildStudioPlateSource(preset PlatePreset, title string) string {
 		"id":     "exp-plate-studio",
 		"schema": 1,
 		"title":  t,
-		"type":   "plate_studio",
 	}
 	expRaw, _ := yaml.Marshal(expMap)
 	plateRaw, _ := yaml.Marshal(plateMap)
@@ -127,10 +133,17 @@ func buildStudioPlateSource(preset PlatePreset, title string) string {
 func (w *Workspace) initPlateStudio() {
 	if len(w.PlateHistory) == 0 && w.Callbacks.LoadPlateHistory != nil {
 		if loaded, err := w.Callbacks.LoadPlateHistory(); err == nil && len(loaded) > 0 {
-			w.PlateHistory = loaded
+			filtered := make([]PlateHistoryEntry, 0, len(loaded))
+			for _, entry := range loaded {
+				if entry.Topology == "dish" || entry.Format == 4 {
+					continue
+				}
+				filtered = append(filtered, entry)
+			}
+			w.PlateHistory = filtered
 		}
 	}
-	defaultPreset := StandardPlatePresets[5] // 96-well
+	defaultPreset := default96Preset()
 	w.ActivePlatePreset = defaultPreset.Key
 	w.PlateFormat = defaultPreset.Format
 	w.PlateTopology = defaultPreset.Topology
@@ -317,7 +330,7 @@ func (w *Workspace) SelectPlatePreset(presetKey string) {
 func (w *Workspace) ResetBlankPlate() {
 	preset, ok := presetForKey(w.ActivePlatePreset)
 	if !ok {
-		preset = StandardPlatePresets[5]
+		preset = default96Preset()
 	}
 	if w.activePlateAssignedCount() > 0 {
 		w.SaveCurrentPlateToHistory()

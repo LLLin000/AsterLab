@@ -1,0 +1,18 @@
+<svg viewBox="0 0 360 260" xmlns="http://www.w3.org/2000/svg">
+  <!-- Transwell invasion/migration chamber schematic -->
+  <g transform="translate(180, 130)">
+    <path d="M -92 -78 L -92 84 C -92 92, -86 98, -78 98 L 78 98 C 86 98, 92 92, 92 84 L 92 -78" fill="none" stroke="currentColor" stroke-width="2.2"/>
+    <rect x="-89" y="18" width="178" height="77" fill="#5B45C9" fill-opacity="0.14"/>
+    <path d="M -68 -72 L -56 -72 L -56 28 L 56 28 L 56 -72 L 68 -72" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    <rect x="-54" y="-32" width="108" height="56" fill="#2F7A4F" fill-opacity="0.12"/>
+    <line x1="-56" y1="28" x2="56" y2="28" stroke="#5B45C9" stroke-width="2.5" stroke-dasharray="4 3"/>
+    <circle cx="-24" cy="-6" r="4.5" fill="#5B45C9"/>
+    <circle cx="0" cy="-2" r="4.5" fill="#5B45C9"/>
+    <circle cx="24" cy="-8" r="4.5" fill="#5B45C9"/>
+    <circle cx="-12" cy="40" r="4.5" fill="#5B45C9"/>
+    <circle cx="16" cy="42" r="4.5" fill="#5B45C9"/>
+  </g>
+  <text x="180" y="34" font-size="11" text-anchor="middle">上室（无血清细胞悬液）</text>
+  <text x="278" y="162" font-size="11" text-anchor="start">8 um 聚碳酸酯滤膜</text>
+  <text x="180" y="212" font-size="11" text-anchor="middle">下室（含 10% FBS / VEGF 趋化因子）</text>
+</svg>

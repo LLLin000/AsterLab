@@ -1,0 +1,534 @@
+package main
+
+import (
+	"fmt"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
+
+	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/shell"
+	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/tools"
+	"asterlab-mygo-prototype/internal/vault"
+)
+
+func defaultTemplateSeeds() map[string]string {
+	seeds := map[string]string{}
+	add := func(name, title, src string) {
+		if cleaned, err := asterdoc.ClearExecutionDataForTemplate(src, title); err == nil {
+			seeds[name] = cleaned
+			return
+		}
+		seeds[name] = src
+	}
+	add("空白实验.asterml", "空白实验", blankAsterDoc)
+	add("CCK-8细胞增殖活力测定.asterml", "CCK-8 细胞增殖测定", starterAsterDoc)
+	add("RT-qPCR多靶点定量.asterml", "RT-qPCR 多靶点定量", rtQpcrAsterDoc)
+	add("HUVEC水凝胶成管.asterml", "HUVEC 水凝胶血管成管", huvecAsterDoc)
+	add("梯度稀释涂板CFU.asterml", "梯度稀释涂板 CFU", cfuAsterDoc)
+	add("抑菌圈定量实验.asterml", "90mm 平皿抑菌圈测定", inhibitionZoneAsterDoc)
+	return seeds
+}
+
+func (a *app) initVaultWorkspace(vaultRoot string) error {
+	v, err := vault.Open(vaultRoot)
+	if err != nil {
+		return err
+	}
+	_ = v.SeedTemplates(defaultTemplateSeeds())
+	if dataDir := workspaceDataDir(); dataDir != "" {
+		_, _ = v.MigrateLegacyExperiments(dataDir)
+	}
+	a.vault = v
+	a.docStore = vault.NewDocStore(v)
+	a.ensureLiveViewsMap()
+
+	if a.shell != nil {
+		a.shell.VaultPathInput = v.Root
+		a.shell.HideAssetsInTree = v.Config.HideAssetsInTree
+		a.shell.DefaultProjectDir = v.Config.DefaultProjectDir
+		a.shell.ThemeSource = v.Config.ThemeSource
+		a.shell.ThemePreset = v.Config.ThemePreset
+		if v.Config.LiquidGlass != nil {
+			a.shell.LiquidGlass = *v.Config.LiquidGlass
+		} else {
+			a.shell.LiquidGlass = true
+		}
+		a.shell.TextScale = v.Config.TextScale
+		a.shell.Density = v.Config.Density
+		a.shell.ReduceMotion = v.Config.ReduceMotion
+		a.shell.DefaultOpenMode = v.Config.DefaultOpenMode
+		a.shell.DefaultPlateFormat = v.Config.DefaultPlateFormat
+		a.shell.DefaultExcessPct = v.Config.DefaultExcessPct
+		if v.Config.AutoArchiveAssets != nil {
+			a.shell.AutoArchiveAssets = *v.Config.AutoArchiveAssets
+		} else {
+			a.shell.AutoArchiveAssets = true
+		}
+		if len(v.Config.Hotkeys) > 0 {
+			a.shell.Hotkeys = v.Config.Hotkeys
+		}
+		if v.Config.MobilePullAction != "" {
+			a.shell.MobilePullAction = v.Config.MobilePullAction
+		}
+		if v.Config.MobileAutoHideDock != nil {
+			a.shell.MobileAutoHideDock = *v.Config.MobileAutoHideDock
+		} else {
+			a.shell.MobileAutoHideDock = true
+		}
+		if v.Config.MobileEditToolbar != nil {
+			a.shell.MobileEditToolbar = *v.Config.MobileEditToolbar
+		} else {
+			a.shell.MobileEditToolbar = true
+		}
+		var persist shell.WorkspacePersistState
+		if err := v.LoadWorkspaceJSON(&persist); err == nil {
+			a.shell.RestorePersistState(persist)
+		}
+	}
+	a.refreshVaultTreeAndCalendar()
+	return nil
+}
+
+func (a *app) saveVaultSettingsFromShell() {
+	if a.vault == nil || a.shell == nil {
+		return
+	}
+	a.vault.Config.HideAssetsInTree = a.shell.HideAssetsInTree
+	a.vault.Config.DefaultProjectDir = a.shell.DefaultProjectDir
+	a.vault.Config.ThemeSource = a.shell.ThemeSource
+	a.vault.Config.ThemePreset = a.shell.ThemePreset
+	lg := a.shell.LiquidGlass
+	a.vault.Config.LiquidGlass = &lg
+	a.vault.Config.TextScale = a.shell.TextScale
+	a.vault.Config.Density = a.shell.Density
+	a.vault.Config.ReduceMotion = a.shell.ReduceMotion
+	a.vault.Config.DefaultOpenMode = a.shell.DefaultOpenMode
+	a.vault.Config.DefaultPlateFormat = a.shell.DefaultPlateFormat
+	a.vault.Config.DefaultExcessPct = a.shell.DefaultExcessPct
+	autoArch := a.shell.AutoArchiveAssets
+	a.vault.Config.AutoArchiveAssets = &autoArch
+	if len(a.shell.Hotkeys) > 0 {
+		a.vault.Config.Hotkeys = a.shell.Hotkeys
+	}
+	a.vault.Config.MobilePullAction = a.shell.MobilePullAction
+	autoHide := a.shell.MobileAutoHideDock
+	a.vault.Config.MobileAutoHideDock = &autoHide
+	editTb := a.shell.MobileEditToolbar
+	a.vault.Config.MobileEditToolbar = &editTb
+	_ = a.vault.SaveConfig()
+}
+
+func (a *app) refreshVaultTreeAndCalendar() {
+	if a.vault == nil || a.shell == nil {
+		return
+	}
+	tree, files, err := a.vault.ScanTree()
+	if err != nil {
+		return
+	}
+	a.shell.VaultTree = tree
+	a.shell.VaultFiles = files
+	a.shell.VaultFolders = a.vault.ProjectFolders()
+
+	var exps []shell.ExperimentItem
+	var designs []shell.DesignItem
+	for _, f := range files {
+		if f.IsTemplate || f.IsAsset {
+			continue
+		}
+		stage := shell.StageReady
+		switch f.Status {
+		case "in_progress":
+			stage = shell.StageInProgress
+		case "completed":
+			stage = shell.StageCompleted
+		}
+		folder := f.Folder
+		if folder == "" {
+			folder = "根目录"
+		}
+		exps = append(exps, shell.ExperimentItem{
+			ID:       f.RelPath,
+			DesignID: f.RelPath,
+			FilePath: f.RelPath,
+			Folder:   folder,
+			Title:    f.Title,
+			Date:     f.Date,
+			Stage:    stage,
+			Summary:  folder,
+			FileName: filepath.Base(f.RelPath),
+		})
+		designs = append(designs, shell.DesignItem{
+			ID:    f.RelPath,
+			Title: f.Title,
+			Meta:  f.Date,
+		})
+	}
+	a.shell.Experiments = exps
+	a.shell.Designs = designs
+	a.syncPantrySnapshotToShell()
+}
+
+func (a *app) syncPantrySnapshotToShell() {
+	if a.shell == nil || a.tools == nil || len(a.tools.Pantry.Items) == 0 {
+		return
+	}
+	qItems := make([]shell.QuickPantryItem, 0, len(a.tools.Pantry.Items))
+	for _, p := range a.tools.Pantry.Items {
+		loc := a.tools.FormatPantryDisplayLocation(p)
+		if loc == "" {
+			loc = p.Location
+		}
+		qItems = append(qItems, shell.QuickPantryItem{
+			ID:        p.ID,
+			Name:      p.Name,
+			Location:  loc,
+			Status:    p.Status,
+			ExpiresOn: p.ExpiresOn,
+			LotNumber: p.LabelCode,
+		})
+	}
+	a.shell.PantryItems = qItems
+}
+
+func (a *app) saveVaultWorkspace() {
+	if a.vault == nil || a.shell == nil {
+		return
+	}
+	st := a.shell.ExportPersistState()
+	_ = a.vault.SaveWorkspaceJSON(st)
+}
+
+func (a *app) openVaultFileInActivePane(relPath, title string) {
+	if a.shell == nil || strings.TrimSpace(relPath) == "" {
+		return
+	}
+	a.shell.EnsureTabs()
+	paneID := a.shell.ActivePaneID
+	if title == "" && a.vault != nil {
+		for _, f := range a.shell.VaultFiles {
+			if f.RelPath == relPath {
+				title = f.Title
+				break
+			}
+		}
+	}
+	mode := shell.ModeEdit
+	if a.shell.DefaultOpenMode == "read" {
+		mode = shell.ModeRead
+	}
+	a.shell.OpenFileInPane(paneID, relPath, title, mode, true)
+	a.saveVaultWorkspace()
+}
+
+func (a *app) openNewExperimentDialog(folderRel, dateYMD string) {
+	if a.vault != nil && strings.TrimSpace(folderRel) == "" {
+		switch a.vault.Config.DefaultProjectDir {
+		case "/":
+			folderRel = ""
+		case "":
+			folderRel = a.vault.Config.LastProjectDir
+		default:
+			folderRel = a.vault.Config.DefaultProjectDir
+		}
+	}
+	a.newExpFolder = folderRel
+	a.newExpTitle = ""
+	a.newExpDate = strings.TrimSpace(dateYMD)
+	if a.newExpTemplate == "" {
+		a.newExpTemplate = "templates/空白实验.asterml"
+	}
+	a.newExpNewFolder = ""
+	a.newExpOpen = true
+}
+
+func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
+	if !a.newExpOpen || a.vault == nil {
+		return
+	}
+	tok := theme.GetTokens(c.Theme())
+	open := a.newExpOpen
+	folders := append([]string{""}, a.vault.ProjectFolders()...)
+	var templates []vault.FileEntry
+	if a.shell != nil {
+		for _, f := range a.shell.VaultFiles {
+			if f.IsTemplate {
+				templates = append(templates, f)
+			}
+		}
+	}
+
+	ui.Box(c.Key("vault-new-exp-dlg")).Children(func() {
+		components.Dialog(c, &open, components.DialogOptions{Label: "新建实验"}, func(panel ui.Element) {
+		panel.Width(float32(tok.Spacing48)*11).Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Icon(c, lucide.FlaskConical()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+				ui.Text(c, "新建实验").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+			})
+
+			// Title
+			titleCol := ui.Column(c.Key("new-exp-title-col")).FillWidth().Gap(float32(tok.Spacing4))
+			theme.ApplyNudge(titleCol, a.newExpNudgeSeq)
+			titleCol.Children(func() {
+				ui.Text(c, "实验名称").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+				tb := components.TextBox(c, &a.newExpTitle, components.TextBoxOptions{}).Placeholder("例如：CCK-8 药物敏感性测定")
+				if tb.Submitted() {
+					if strings.TrimSpace(a.newExpTitle) == "" {
+						a.newExpNudgeSeq++
+					} else {
+						a.confirmCreateVaultExperiment()
+					}
+				}
+			})
+
+			// Location (Project folder picker + inline new folder) + Date
+			ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "保存位置（项目文件夹）").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					sel := components.Select(c, &a.newExpFolder)
+					sel.Trigger.Children(func() {
+						lbl := a.newExpFolder
+						if lbl == "" {
+							lbl = "根目录"
+						}
+						ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+					})
+					sel.Popup(func(p ui.Element) {
+						for _, f := range folders {
+							f := f
+							lbl := f
+							if lbl == "" {
+								lbl = "根目录"
+							}
+							sel.Item(f).Children(func() {
+								ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							})
+						}
+						sel.Item("__new__").Children(func() {
+							ui.Text(c, "+ 新建项目文件夹…").FontSize(float32(tok.TextMeta)).TextColor(tok.Accent)
+						})
+					})
+				})
+				ui.Column(c).Width(float32(tok.Spacing48)*3.0).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "日期（YYYY-MM-DD，可空）").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					components.TextBox(c, &a.newExpDate, components.TextBoxOptions{}).Placeholder("2026-11-20")
+				})
+			})
+
+			if a.newExpFolder == "__new__" {
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "新项目文件夹名").FontSize(float32(tok.TextMeta)).TextColor(tok.Accent)
+					components.TextBox(c, &a.newExpNewFolder, components.TextBoxOptions{}).Placeholder("例如：肿瘤耐药筛选")
+				})
+			}
+
+			// Template picker
+			if len(templates) > 0 {
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "选用模板").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					tSel := components.Select(c, &a.newExpTemplate)
+					tSel.Trigger.Children(func() {
+						lbl := strings.TrimSuffix(filepath.Base(a.newExpTemplate), ".asterml")
+						if lbl == "" || lbl == "." {
+							lbl = "空白实验"
+						}
+						tSel.Trigger.Label(lbl)
+						ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+					})
+					tSel.Popup(func(p ui.Element) {
+						tSel.Item("").Children(func() {
+							ui.Text(c, "空白实验").FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+						})
+						for _, tpl := range templates {
+							tpl := tpl
+							tSel.Item(tpl.RelPath).Children(func() {
+								ui.Text(c, tpl.Name).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							})
+						}
+					})
+				})
+			}
+
+			ui.Row(c).FillWidth().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
+				if components.Button(c, "取消", components.ButtonGhost).Clicked() {
+					a.newExpOpen = false
+				}
+				if components.Button(c, "创建并打开", components.ButtonPrimary).Clicked() {
+					a.confirmCreateVaultExperiment()
+				}
+			})
+		})
+	})
+	})
+	if !open {
+		a.newExpOpen = false
+	}
+}
+
+func (a *app) confirmCreateVaultExperiment() {
+	if a.vault == nil {
+		return
+	}
+	if a.newExpFolder == "__new__" && strings.TrimSpace(a.newExpNewFolder) == "" {
+		a.newExpNudgeSeq++
+		return
+	}
+	if strings.TrimSpace(a.newExpDate) != "" && asterdoc.NormalizeDateYMD(a.newExpDate) == "" {
+		a.newExpNudgeSeq++
+		return
+	}
+	folder := a.newExpFolder
+	if folder == "__new__" {
+		name := strings.TrimSpace(a.newExpNewFolder)
+		if name != "" {
+			if created, err := a.vault.CreateFolder("", name); err == nil {
+				folder = created
+			}
+		} else {
+			folder = ""
+		}
+	}
+	title := strings.TrimSpace(a.newExpTitle)
+	tplSrc := blankAsterDoc
+	if a.newExpTemplate != "" {
+		if ld, err := a.docStore.Open(a.newExpTemplate); err == nil && strings.TrimSpace(ld.Source) != "" {
+			tplSrc = ld.Source
+		}
+	}
+	if title == "" {
+		title = strings.TrimSuffix(filepath.Base(a.newExpTemplate), ".asterml")
+		if title == "" || title == "." {
+			title = "新实验"
+		}
+	}
+	entry, err := a.vault.CreateExperiment(folder, title, strings.TrimSpace(a.newExpDate), tplSrc)
+	a.newExpOpen = false
+	if err != nil {
+		a.syncErr = fmt.Sprintf("创建实验失败：%v", err)
+		return
+	}
+	a.vault.Config.LastProjectDir = folder
+	_ = a.vault.SaveConfig()
+	a.refreshVaultTreeAndCalendar()
+	a.openVaultFileInActivePane(entry.RelPath, entry.Title)
+}
+
+func (a *app) moveVaultFile(srcRel, destFolderRel string) {
+	if a.vault == nil || srcRel == "" {
+		return
+	}
+	newRel, err := a.vault.Move(srcRel, destFolderRel)
+	if err != nil {
+		a.syncErr = fmt.Sprintf("移动失败：%v", err)
+		return
+	}
+	if a.docStore != nil {
+		a.docStore.RenameKey(srcRel, newRel)
+	}
+	if a.shell != nil {
+		a.shell.SyncFileRename(srcRel, newRel, "")
+	}
+	a.refreshVaultTreeAndCalendar()
+	a.saveVaultWorkspace()
+}
+
+func (a *app) deleteVaultFile(relPath string) {
+	if a.vault == nil || relPath == "" {
+		return
+	}
+	if _, err := a.vault.Trash(relPath); err != nil {
+		a.syncErr = fmt.Sprintf("移入回收站失败：%v", err)
+		return
+	}
+	if a.docStore != nil {
+		a.docStore.Evict(relPath)
+	}
+	if a.shell != nil {
+		a.shell.CloseTabsForFile(relPath)
+	}
+	a.refreshVaultTreeAndCalendar()
+	a.saveVaultWorkspace()
+}
+
+func (a *app) undoActiveLiveDoc() {
+	if a.shell == nil || a.docStore == nil {
+		return
+	}
+	tab := a.shell.ActiveTab()
+	if tab == nil || tab.Kind != shell.TabFile || tab.FilePath == "" {
+		a.designUndo()
+		return
+	}
+	if ld, err := a.docStore.Open(tab.FilePath); err == nil {
+		if ld.Undo() {
+			if a.liveEditorSynced != nil {
+				delete(a.liveEditorSynced, tab.FilePath)
+			}
+			a.refreshVaultTreeAndCalendar()
+		}
+	}
+}
+
+func (a *app) redoActiveLiveDoc() {
+	if a.shell == nil || a.docStore == nil {
+		return
+	}
+	tab := a.shell.ActiveTab()
+	if tab == nil || tab.Kind != shell.TabFile || tab.FilePath == "" {
+		a.designRedo()
+		return
+	}
+	if ld, err := a.docStore.Open(tab.FilePath); err == nil {
+		if ld.Redo() {
+			if a.liveEditorSynced != nil {
+				delete(a.liveEditorSynced, tab.FilePath)
+			}
+			a.refreshVaultTreeAndCalendar()
+		}
+	}
+}
+
+func (a *app) revealPathInOS(relPath string) {
+	if a.vault == nil {
+		return
+	}
+	abs := a.vault.AbsPath(relPath)
+	switch runtime.GOOS {
+	case "windows":
+		_ = exec.Command("explorer", "/select,", filepath.FromSlash(abs)).Start()
+	case "darwin":
+		_ = exec.Command("open", "-R", abs).Start()
+	default:
+		_ = exec.Command("xdg-open", filepath.Dir(abs)).Start()
+	}
+}
+
+func (a *app) switchVaultRoot(newPath string) {
+	if strings.TrimSpace(newPath) == "" {
+		return
+	}
+	a.liveViews = nil
+	a.liveEditors = nil
+	a.liveEditorSynced = nil
+	a.liveTitleDrafts = nil
+	a.liveDateDrafts = nil
+	if err := a.initVaultWorkspace(newPath); err != nil {
+		a.syncErr = fmt.Sprintf("切换实验库失败：%v", err)
+		return
+	}
+	a.syncErr = ""
+}
+
+func (a *app) renderStandalonePantry(c *ui.Context) {
+	if a.tools == nil {
+		a.tools = a.newToolsWorkspace()
+	}
+	tools.ViewPantry(c, a.tools)
+}

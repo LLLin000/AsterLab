@@ -17,8 +17,11 @@ import (
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/runworkspace"
+	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
+	"asterlab-mygo-prototype/internal/uikit/labsticker"
+	"asterlab-mygo-prototype/internal/vault"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -153,6 +156,153 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 	huvecSrc := readFixture("internal/asterdoc/testdata/huvec-tube.asterml")
 	qpcrSrc := readFixture("internal/asterdoc/testdata/rt-qpcr.asterml")
 
+	// 0. Experiment Calendar Home (实验日程 · 每月/每周 + 当日实验安排)
+	calendarExperiments := []shell.ExperimentItem{
+		{
+			ID: "exp-1116", DesignID: "d-cfu-prev", Title: "E.coli CFU 梯度涂板计数",
+			Date: "2026-11-16", Stage: shell.StageCompleted, ActiveRunID: "run-cfu-prev",
+			Summary: "已完成 · 实测 18 个涂板计数菌落", StartHour: 14.0, DurationMin: 90,
+		},
+		{
+			ID: "exp-1118-a", DesignID: "d-iz-ready", Title: "HAMA / 万古霉素 四象限抑菌圈实验",
+			Date: "2026-11-18", Stage: shell.StageReady,
+			Summary: "4 组处理 · 4 个可执行步骤 · 约 18 小时", StartHour: 9.0, DurationMin: 120,
+		},
+		{
+			ID: "exp-1118-b", DesignID: "d-huvec-live", Title: "HUVEC 水凝胶成管（GelMA 梯度）",
+			Date: "2026-11-18", Stage: shell.StageInProgress, ActiveRunID: "run-huvec-live",
+			Summary: "步骤 2/3 执行中 · 等待 12h 采图", StartHour: 13.5, DurationMin: 90,
+		},
+		{
+			ID: "exp-1118-c", DesignID: "d-qpcr-draft", Title: "RT-qPCR 多靶点表达定量（草稿）",
+			Date: "2026-11-18", Stage: shell.StageDraft,
+			Summary: "已建 2 组 · 待补充数据记录表", GapHint: "待补充测量方案或数据记录表",
+		},
+		{
+			ID: "exp-1120", DesignID: "d-next", Title: "L929 CCK-8 细胞毒性复测",
+			Date: "2026-11-20", Stage: shell.StageReady,
+			Summary: "3 组对比 · 96 孔板 · 预计 24 小时", StartHour: 10.0, DurationMin: 60,
+		},
+	}
+	for _, dark := range []bool{false, true} {
+		suffix := "light"
+		if dark {
+			suffix = "dark"
+		}
+		calShell := &shell.Shell{
+			Page:             shell.Project,
+			TodayDate:        "2026-11-18",
+			SelectedDate:     "2026-11-18",
+			CalendarCursor:   "2026-11-18",
+			CalendarMode:     0,
+			Experiments:      calendarExperiments,
+			OnCreateForDate:  func(string) {},
+			OnOpenExperiment: func(shell.ExperimentItem) {},
+			OnQuickStartRun:  func(string) {},
+		}
+		renderVisualPNGSteps(t, outDir, "home_calendar_month_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
+			calShell.RenderSplitView(c)
+		}, func(tt *ui.Tester) {
+			if !dark {
+				if err := tt.Click("2026-11-18"); err != nil {
+					t.Fatalf("open apple day popover: %v", err)
+				}
+				tt.Frame()
+				if !tt.HasText("11 月 18 日（周三） · 实验安排") {
+					t.Fatalf("apple day popover missing agenda: %q", tt.Texts())
+				}
+			}
+		})
+	}
+	{
+		weekShell := &shell.Shell{
+			Page:             shell.Project,
+			TodayDate:        "2026-11-18",
+			SelectedDate:     "2026-11-18",
+			CalendarCursor:   "2026-11-18",
+			CurrentHour:      10.5,
+			CalendarMode:     1,
+			Experiments:      calendarExperiments,
+			OnCreateForDate:  func(string) {},
+			OnOpenExperiment: func(shell.ExperimentItem) {},
+			OnQuickStartRun:  func(string) {},
+		}
+		renderVisualPNG(t, outDir, "home_calendar_week_light.png", 1360, 880, false, func(c *ui.Context) {
+			weekShell.RenderSplitView(c)
+		})
+	}
+
+	// 0b. Obsidian 3-Pane Peer Split (Left Edit + Right Read) + File Tree + Right Drawer Showcase
+	{
+		tmpVault := filepath.Join(t.TempDir(), "vault")
+		if v, err := vault.Open(tmpVault); err == nil {
+			_ = v.SeedTemplates(defaultTemplateSeeds())
+			projDir, _ := v.CreateFolder("", "抗菌与细胞实验")
+			e1, _ := v.CreateExperiment(projDir, "四象限抑菌圈实验", "2026-11-18", izSrc)
+			e2, _ := v.CreateExperiment(projDir, "HUVEC 水凝胶成管", "2026-11-18", huvecSrc)
+			_, _ = v.CreateExperiment("", "L929 CCK-8 细胞毒性复测", "2026-11-20", cfuSrc)
+			ds := vault.NewDocStore(v)
+
+			obsShell := &shell.Shell{
+				TodayDate:        "2026-11-18",
+				SelectedDate:     "2026-11-18",
+				SelectedTreePath: e1.RelPath,
+				RightOpen:        true,
+				RightTab:         0,
+				PantryItems: []shell.QuickPantryItem{
+					{ID: "p-1", Name: "SYBR Green 预混液", Location: "-20°C A2", Status: "near_expiry", ExpiresOn: "2026-11-28"},
+					{ID: "p-2", Name: "兔抗-VEGFA 一抗", Location: "-80°C C2", Status: "opened", ExpiresOn: "2027-05-12"},
+				},
+			}
+			primaryApp := &app{
+				shell:    obsShell,
+				vault:    v,
+				docStore: ds,
+			}
+			obsShell.RenderTabContent = func(c *ui.Context, pane *shell.PaneNode, tab shell.WorkspaceTab) {
+				primaryApp.renderVaultTabContent(c, pane, tab)
+			}
+			obsShell.RenderPantryContent = func(c *ui.Context) {
+				primaryApp.renderStandalonePantry(c)
+			}
+			obsShell.RenderOverlays = func(c *ui.Context) {
+				primaryApp.renderVaultNewExperimentDialog(c)
+			}
+			primaryApp.refreshVaultTreeAndCalendar()
+			obsShell.EnsureTabs()
+			obsShell.OpenFileInPane(obsShell.ActivePaneID, e1.RelPath, e1.Title, shell.ModeEdit, true)
+			obsShell.SplitPaneWithTab(obsShell.ActivePaneID, shell.WorkspaceTab{
+				Kind: shell.TabFile, Title: e2.Title, FilePath: e2.RelPath, Mode: shell.ModeRead,
+			}, "right")
+
+			renderVisualPNG(t, outDir, "workbench_obsidian_split_drawer_light.png", 1440, 900, false, func(c *ui.Context) {
+				obsShell.RenderSplitView(c)
+			})
+		}
+	}
+
+	// 0c. Floating Ctrl+K Command Palette Showcase
+	{
+		palShell := &shell.Shell{
+			Page:         shell.Project,
+			TodayDate:    "2026-11-18",
+			SelectedDate: "2026-11-18",
+			Experiments:  calendarExperiments,
+			PantryItems: []shell.QuickPantryItem{
+				{ID: "p-1", Name: "SYBR Green 预混液 (2×)", Location: "-20°C 酶盒 A2", Status: "near_expiry", ExpiresOn: "2026-11-28"},
+				{ID: "p-2", Name: "兔抗-VEGFA 一抗", Location: "-80°C 冻存盒 C2", Status: "opened", ExpiresOn: "2027-05-12"},
+			},
+			PaletteCommands: []shell.PaletteCommand{
+				{ID: "cmd-pdf", Title: "导出当前实验 PDF", Subtitle: "按组件级 A4 版式生成方案与记录打印件"},
+				{ID: "cmd-fork", Title: "复刻当前实验为新草稿", Subtitle: "生成独立未封存 .asterml 并写入 repeat_of 溯源"},
+			},
+			PaletteOpen: true,
+		}
+		renderVisualPNG(t, outDir, "workbench_command_palette_light.png", 1360, 880, false, func(c *ui.Context) {
+			palShell.RenderSplitView(c)
+		})
+	}
+
 	makeDesignApp := func(src, stepID string, tab int) *app {
 		return &app{
 			designDoc: &runs.AsterDocSnapshot{
@@ -187,13 +337,13 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		})
 	}
 
-	// 2. Design Workbench Tab 1 (Global Setup) & Tab 2 (AsterML Source + Live Preview)
+	// 2. Design Workbench Tab 1 (Single-Page Sheet Preview) & Tab 2 (AsterML Source + Live Preview)
 	for _, dark := range []bool{false, true} {
 		suffix := "light"
 		if dark {
 			suffix = "dark"
 		}
-		renderVisualPNG(t, outDir, "design_iz_tab1_global_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
+		renderVisualPNG(t, outDir, "design_iz_tab1_sheet_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
 			asterDesignPage(c, makeDesignApp(izSrc, "step-02-quadrants", 1))
 		})
 		renderVisualPNG(t, outDir, "design_iz_tab2_source_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
@@ -211,6 +361,16 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		a := &app{newDesignOpen: true}
 		a.renderNewDesignDialog(c)
 	})
+
+	liveRunCallbacks := func() runworkspace.Callbacks {
+		return runworkspace.Callbacks{
+			Complete: func(string, []runworkspace.CheckAckView) error { return nil },
+			AppendEvent: func(string, runs.ExecutionEventInput) (string, error) { return "", nil },
+			ExecuteCommand: func(runs.ExecuteCommandInput) (runs.ExecuteCommandResult, error) {
+				return runs.ExecuteCommandResult{ResultJSON: `{"id":"ev-iz-saved"}`}, nil
+			},
+		}
+	}
 
 	// 5. Run Workspace ModeRun same-source execution (Light + Dark)
 	izSnap := runs.RunSnapshot{
@@ -232,7 +392,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 			suffix = "dark"
 		}
 		vm := runworkspace.BuildViewModel(izSnap, izFrozen)
-		st := runworkspace.NewState(vm, runworkspace.Callbacks{})
+		st := runworkspace.NewState(vm, liveRunCallbacks())
 		st.Selected = "t-02"
 		renderVisualPNG(t, outDir, "run_iz_mode_run_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
 			runworkspace.View(c, st)
@@ -245,7 +405,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 	})
 	{
 		vmCompact := runworkspace.BuildViewModel(izSnap, izFrozen)
-		stCompact := runworkspace.NewState(vmCompact, runworkspace.Callbacks{})
+		stCompact := runworkspace.NewState(vmCompact, liveRunCallbacks())
 		stCompact.Selected = "t-02"
 		renderVisualPNG(t, outDir, "run_iz_compact_960_light.png", 960, 640, false, func(c *ui.Context) {
 			runworkspace.View(c, stCompact)
@@ -302,11 +462,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 			suffix = "dark"
 		}
 		vmTbl := runworkspace.BuildViewModel(izRichSnap, izFrozen)
-		stTbl := runworkspace.NewState(vmTbl, runworkspace.Callbacks{
-			ExecuteCommand: func(input runs.ExecuteCommandInput) (runs.ExecuteCommandResult, error) {
-				return runs.ExecuteCommandResult{ResultJSON: `{"id":"ev-iz-saved"}`}, nil
-			},
-		})
+		stTbl := runworkspace.NewState(vmTbl, liveRunCallbacks())
 		stTbl.Selected = "t-04"
 		renderVisualPNGSteps(t, outDir, "run_iz_actuals_and_table_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
 			runworkspace.View(c, stTbl)
@@ -323,20 +479,20 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 
 	{
 		vmDish := runworkspace.BuildViewModel(izSnap, izFrozen)
-		stDish := runworkspace.NewState(vmDish, runworkspace.Callbacks{
-			TaskAssets: func(taskKey string) []runworkspace.LinkedAsset {
-				if taskKey != "t-03" {
-					return nil
-				}
-				return []runworkspace.LinkedAsset{{
-					AssetID: "asset-dish-q4", RootID: "root-dish", RelativePath: "dish_q4_16h.png",
-					MediaType: "image", Available: true, Timepoint: "16h",
-				}}
-			},
-			ResolveAssetPath: func(asset runworkspace.LinkedAsset) string {
-				return dishPath
-			},
-		})
+		cbDish := liveRunCallbacks()
+		cbDish.TaskAssets = func(taskKey string) []runworkspace.LinkedAsset {
+			if taskKey != "t-03" {
+				return nil
+			}
+			return []runworkspace.LinkedAsset{{
+				AssetID: "asset-dish-q4", RootID: "root-dish", RelativePath: "dish_q4_16h.png",
+				MediaType: "image", Available: true, Timepoint: "16h",
+			}}
+		}
+		cbDish.ResolveAssetPath = func(asset runworkspace.LinkedAsset) string {
+			return dishPath
+		}
+		stDish := runworkspace.NewState(vmDish, cbDish)
 		stDish.Selected = "t-03"
 		renderVisualPNG(t, outDir, "run_iz_dish_photo_light.png", 1360, 880, false, func(c *ui.Context) {
 			runworkspace.View(c, stDish)
@@ -368,58 +524,14 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		{"run_huvec_2560_light.png", 2560, 1440},
 	} {
 		vmH := runworkspace.BuildViewModel(huvecSnap, huvecFrozen)
-		stH := runworkspace.NewState(vmH, runworkspace.Callbacks{})
+		stH := runworkspace.NewState(vmH, liveRunCallbacks())
 		stH.Selected = "t-h1"
 		renderVisualPNG(t, outDir, spec.name, spec.w, spec.h, false, func(c *ui.Context) {
 			runworkspace.View(c, stH)
 		})
 	}
 
-	// 10. Notebook Record Board Page with Decoded Core ReadoutValue::Table (Light + Dark)
-	for _, dark := range []bool{false, true} {
-		suffix := "light"
-		if dark {
-			suffix = "dark"
-		}
-		nbSnap, nbAssets := boardTestSnap("run-v2-board-" + suffix)
-		nbProj := boardTestProj("")
-		tp16 := "16h"
-		nbProj.Readouts = []record.ReadoutRecord{{
-			EventID:   "ev-iz-ro-1",
-			StepPath:  "iz/04-measure",
-			Timepoint: &tp16,
-			Readout: json.RawMessage(`{
-				"schema_id":"inhibition_zone_mm",
-				"schema_version":1,
-				"value":{
-					"kind":"table",
-					"columns":["sample","d1","d2","mean_d"],
-					"rows":[["Q1-PBS",6.0,6.0,6.0],["Q2-HAMA",11.4,11.8,11.6],["Q3-Van",21.2,20.8,21.0],["Q4-Lys",14.5,14.1,14.3]]
-				},
-				"source":{"kind":"raw","derived_from":[]}
-			}`),
-		}}
-		nbSvc := &sealStubSvc{snap: nbSnap, proj: nbProj}
-		nbApp := &app{
-			snap:      nbSnap,
-			runAssets: nbAssets,
-			runSvc:    nbSvc,
-			asterDoc:  &asterdoc.FrozenAsterDoc{DesignID: "visual-huvec", Revision: 3, Source: huvecSrc},
-		}
-		renderVisualPNGSteps(t, outDir, "notebook_record_board_table_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
-			notebookPage(c, nbApp)
-		}, func(tt *ui.Tester) {
-			if err := tt.Click("图板"); err != nil {
-				t.Fatalf("click notebook board tab: %v", err)
-			}
-			tt.Frame()
-			if !tt.HasText("结构化表格与分类读数") || !tt.HasText("Q2-HAMA") || !tt.HasText("实验方案与实测模块总览") {
-				t.Fatalf("notebook board missing expected sections: %q", tt.Texts())
-			}
-		})
-	}
-
-	// 11. Multi-Dimensional 96-Well qPCR Plate (Samples + Target Genes + Triplicates + Std/NTC) & Zoom Overlay
+	// 11. Multi-Dimensional 96-Well qPCR Plate & Zoom Overlay (No redundant top mode strip)
 	for _, dark := range []bool{false, true} {
 		suffix := "light"
 		if dark {
@@ -433,10 +545,6 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				t.Fatalf("click inline C1 well: %v", err)
 			}
 			tt.Frame()
-			if err := tt.Click("靶点基因"); err != nil {
-				t.Fatalf("click factor color mode: %v", err)
-			}
-			tt.Frame()
 		})
 	}
 	{
@@ -448,10 +556,6 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				t.Fatalf("click expand plate: %v", err)
 			}
 			tt.Frame()
-			if err := tt.Click("样本"); err != nil {
-				t.Fatalf("click sample color mode in overlay: %v", err)
-			}
-			tt.Frame()
 			if err := tt.Click("孔 B2"); err != nil {
 				t.Fatalf("click B2 well in overlay: %v", err)
 			}
@@ -459,14 +563,31 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		})
 	}
 
-	// 12. Redesigned Notebook ELN Split (Reading with embedded asterlab widget + Companion Hydrated Modules)
+	// 12. Streamlined 3-Mode Notebook ELN Split (阅读 + 编辑 showcase + 右侧实测模块)
 	izNoteMarkdown := `# 抑菌圈实验阶段研判
 
 ## 关键现象
 - Q3 万古霉素组形成直径 **21.0 mm** 清晰抑菌透明圈，阳性对照符合预期。
-- Q2 HAMA 水凝胶浸提片平均抑菌圈 **11.6 mm**，呈现温和抑菌活性 @matrix(16h)。
+- Q2 HAMA 水凝胶浸提片平均抑菌圈 **11.6 mm**，呈现温和抑菌活性。
 
 ` + "```asterlab\nkind: param_table\nid: note-pt-summary\nschema: 1\ntitle: 实验条件\nrows:\n  - {key: temp, label: 倒置培养温度, value: 37, unit: Cel, record_actual: true}\n  - {key: duration, label: 孵育时长, value: 16, unit: h, record_actual: true}\n  - {key: disc_mm, label: 滤纸片直径, value: 6, unit: mm, record_actual: false}\n```"
+	izNoteProj := boardTestProj("")
+	tp16 := "16h"
+	izNoteProj.Readouts = []record.ReadoutRecord{{
+		EventID:   "ev-iz-tbl",
+		StepPath:  "iz/04-measure",
+		Timepoint: &tp16,
+		Readout: json.RawMessage(`{
+			"schema_id":"inhibition_zone_mm",
+			"schema_version":1,
+			"value":{
+				"kind":"table",
+				"columns":["sample","d1","d2","mean_d"],
+				"rows":[["Q1-PBS",6.0,6.0,6.0],["Q2-HAMA",11.4,11.8,11.6],["Q3-Van",21.2,20.8,21.0],["Q4-Lys",14.5,14.1,14.3]]
+			},
+			"source":{"kind":"raw","derived_from":[]}
+		}`),
+	}}
 	for _, dark := range []bool{false, true} {
 		suffix := "light"
 		if dark {
@@ -480,49 +601,187 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		})
 		splitApp := &app{
 			snap:     splitSnap,
+			runSvc:   &sealStubSvc{snap: splitSnap, proj: izNoteProj},
 			asterDoc: &asterdoc.FrozenAsterDoc{DesignID: "visual-design-1", Revision: 4, Source: izSrc},
 		}
 		renderVisualPNGSteps(t, outDir, "notebook_eln_split_"+suffix+".png", 1360, 880, dark, func(c *ui.Context) {
 			notebookPage(c, splitApp)
 		}, func(tt *ui.Tester) {
 			if err := tt.Click("阅读"); err != nil {
-				t.Fatalf("click reading tab: %v", err)
+				t.Fatalf("click reading mode tab: %v", err)
 			}
 			tt.Frame()
-			if err := tt.Click("实验模块"); err != nil {
-				t.Fatalf("click companion modules tab: %v", err)
+			if !tt.HasText("实测模块") || !tt.HasText("导出 PDF") || !tt.HasText("实验条件") {
+				t.Fatalf("3-mode notebook reading view missing controls/module: %q", tt.Texts())
 			}
-			tt.Frame()
-			if !tt.HasText("实验条件") {
-				t.Fatalf("embedded asterlab block did not render in reading mode: %q", tt.Texts())
+		})
+	}
+	{
+		liveSnap := izRichSnap
+		liveSnap.Events = append([]runs.RunEvent(nil), izRichSnap.Events...)
+		liveSnap.Events = append(liveSnap.Events, runs.RunEvent{
+			ID: "ev-nb-live", EventType: "observation", Stage: "notebook",
+			Content: izNoteMarkdown, RecordedAt: "2026-11-18T11:30:00Z",
+		})
+		liveApp := &app{
+			snap:     liveSnap,
+			runSvc:   &sealStubSvc{snap: liveSnap, proj: izNoteProj},
+			asterDoc: &asterdoc.FrozenAsterDoc{DesignID: "visual-design-1", Revision: 4, Source: izSrc},
+		}
+		renderVisualPNGSteps(t, outDir, "notebook_live_and_source_v2.png", 1360, 880, false, func(c *ui.Context) {
+			notebookPage(c, liveApp)
+		}, func(tt *ui.Tester) {
+			if !tt.HasText("编辑") || !tt.HasText("阅读") || !tt.HasText("源码") {
+				t.Fatalf("3-mode segmented control missing: %q", tt.Texts())
+			}
+			if !tt.HasText("实测模块") || !tt.HasText("导出 Markdown") || !tt.HasText("导出 PDF") {
+				t.Fatalf("3-mode toolbar/companion missing: %q", tt.Texts())
 			}
 		})
 	}
 
-	// 13. Modernized Tools & Pantry Workbench
+	// 13. Modernized Tools & Pantry Workbench (Nested Storage Boxes/Racks + Sticker Shelf + Detail Dialog)
 	{
 		nearDays := uint32(180)
+		pantryBoxes := []tools.PantryBox{
+			{ID: "box-cryo-1", Name: "抗体冻存盒 #1", Kind: tools.BoxCryo9x9, ZoneKey: "-80", ShelfPos: "冻存架一层左", Rows: 9, Cols: 9},
+			{ID: "box-ep-1", Name: "分子酶 EP 管盒 #1", Kind: tools.BoxEP50, ZoneKey: "-20", ShelfPos: "二层左", Rows: 5, Cols: 10},
+			{ID: "box-pcr-1", Name: "qPCR 引物 96 孔盒", Kind: tools.BoxPCR96, ZoneKey: "-20", ShelfPos: "二层右", Rows: 8, Cols: 12},
+			{ID: "box-f15-1", Name: "细胞房 15 mL 离心管架", Kind: tools.BoxFalcon15, ZoneKey: "4C", ShelfPos: "三层右", Rows: 5, Cols: 5},
+			{ID: "box-f50-1", Name: "血清与母液 50 mL 管架", Kind: tools.BoxFalcon50, ZoneKey: "4C", ShelfPos: "二层中", Rows: 4, Cols: 4},
+		}
+		pantryItems := []runs.PantryItem{
+			{ID: "p-1", Name: "SYBR Green 预混液 (2×)", Location: "-20°C 冰箱 · 分子酶 EP 管盒 #1 · A2", Status: "near_expiry", PurchasedOn: "2026-06-01", OpenedOn: "2026-10-20", ShelfLifeDays: &nearDays, ExpiresOn: "2026-11-28", Revision: 3},
+			{ID: "p-2", Name: "兔抗-VEGFA 一抗", Location: "-80°C 超低温 · 抗体冻存盒 #1 · C2", Status: "opened", PurchasedOn: "2026-05-12", OpenedOn: "2026-09-04", ShelfLifeDays: &nearDays, ExpiresOn: "2027-05-12", Revision: 1},
+			{ID: "p-3", Name: "T4 DNA 连接酶", Location: "-80°C 超低温 · 抗体冻存盒 #1 · A3", Status: "opened", PurchasedOn: "2026-07-10", OpenedOn: "2026-10-08", ShelfLifeDays: &nearDays, ExpiresOn: "2027-07-10", Revision: 1},
+			{ID: "p-4", Name: "GAPDH 引物八联条", Location: "-20°C 冰箱 · qPCR 引物 96 孔盒 · B1–B8", Status: "exhausted", PurchasedOn: "2026-04-01", OpenedOn: "2026-06-15", ShelfLifeDays: &nearDays, ExpiresOn: "2027-04-01", Revision: 2},
+			{ID: "p-5", Name: "DMEM 高糖培养基", Location: "4°C 冷藏架一层", Status: "opened", PurchasedOn: "2026-10-15", OpenedOn: "2026-11-02", ShelfLifeDays: &nearDays, ExpiresOn: "2027-04-15", Revision: 2},
+			{ID: "p-6", Name: "1× 无菌 PBS 缓冲液", Location: "4°C 冷藏架二层", Status: "unopened", PurchasedOn: "2026-10-28", ShelfLifeDays: &nearDays, ExpiresOn: "2027-10-28", Revision: 1},
+			{ID: "p-7", Name: "胎牛血清 (FBS) 分装", Location: "4°C 冷藏 · 血清与母液 50 mL 管架 · A1", Status: "opened", PurchasedOn: "2026-09-20", OpenedOn: "2026-10-25", ShelfLifeDays: &nearDays, ExpiresOn: "2027-03-20", Revision: 1},
+			{ID: "p-8", Name: "万古霉素标准品", Location: "常温避光干燥柜 B1", Status: "unopened", PurchasedOn: "2026-09-15", ShelfLifeDays: &nearDays, ExpiresOn: "2027-09-15", Revision: 1},
+			{ID: "p-9", Name: "4% 多聚甲醛固定液", Location: "常温避光试剂柜 A1", Status: "unopened", PurchasedOn: "2026-08-18", ShelfLifeDays: &nearDays, ExpiresOn: "2027-08-18", Revision: 1},
+			{ID: "p-10", Name: "抗-CD31 一抗", Location: "-80°C 超低温 · 抗体冻存盒 #1 · C3", Status: "unopened", PurchasedOn: "2026-08-01", ShelfLifeDays: &nearDays, ExpiresOn: "2027-08-01", Revision: 1},
+			{ID: "p-11", Name: "抗-GAPDH 内参", Location: "-80°C 超低温 · 抗体冻存盒 #1 · A1", Status: "opened", PurchasedOn: "2026-06-12", OpenedOn: "2026-09-10", ShelfLifeDays: &nearDays, ExpiresOn: "2027-06-12", Revision: 1},
+			{ID: "p-12", Name: "慢病毒 GFP 浓缩", Location: "-80°C 超低温 · 抗体冻存盒 #1 · E5", Status: "near_expiry", PurchasedOn: "2026-05-01", OpenedOn: "2026-10-10", ShelfLifeDays: &nearDays, ExpiresOn: "2026-12-01", Revision: 1},
+			{ID: "p-13", Name: "HUVEC P3 冻存", Location: "-80°C 超低温 · 抗体冻存盒 #1 · G8", Status: "unopened", PurchasedOn: "2026-09-01", ShelfLifeDays: &nearDays, ExpiresOn: "2027-09-01", Revision: 1},
+			{ID: "p-14", Name: "Taq DNA 聚合酶", Location: "-20°C 冰箱 · 分子酶 EP 管盒 #1 · A4", Status: "opened", PurchasedOn: "2026-07-05", OpenedOn: "2026-10-01", ShelfLifeDays: &nearDays, ExpiresOn: "2027-07-05", Revision: 1},
+			{ID: "p-15", Name: "dNTP Mix 10mM", Location: "-20°C 冰箱 · 分子酶 EP 管盒 #1 · B1", Status: "unopened", PurchasedOn: "2026-08-10", ShelfLifeDays: &nearDays, ExpiresOn: "2027-08-10", Revision: 1},
+			{ID: "p-16", Name: "VEGFA 引物 F/R", Location: "-20°C 冰箱 · qPCR 引物 96 孔盒 · D3", Status: "unopened", PurchasedOn: "2026-09-18", ShelfLifeDays: &nearDays, ExpiresOn: "2027-09-18", Revision: 1},
+			{ID: "p-17", Name: "CD31 引物 F/R", Location: "-20°C 冰箱 · qPCR 引物 96 孔盒 · D4", Status: "unopened", PurchasedOn: "2026-09-18", ShelfLifeDays: &nearDays, ExpiresOn: "2027-09-18", Revision: 1},
+			{ID: "p-18", Name: "0.25% 胰酶 EDTA", Location: "4°C 冷藏 · 细胞房 15 mL 离心管架 · A1", Status: "near_expiry", PurchasedOn: "2026-06-15", OpenedOn: "2026-10-18", ShelfLifeDays: &nearDays, ExpiresOn: "2026-11-30", Revision: 1},
+			{ID: "p-19", Name: "青链霉素双抗 100×", Location: "4°C 冷藏 · 细胞房 15 mL 离心管架 · A2", Status: "opened", PurchasedOn: "2026-09-10", OpenedOn: "2026-10-15", ShelfLifeDays: &nearDays, ExpiresOn: "2027-03-10", Revision: 1},
+			{ID: "p-20", Name: "Matrigel 基底胶分装", Location: "4°C 冷藏 · 细胞房 15 mL 离心管架 · C3", Status: "unopened", PurchasedOn: "2026-10-01", ShelfLifeDays: &nearDays, ExpiresOn: "2027-10-01", Revision: 1},
+			{ID: "p-21", Name: "10× PBS 无菌母液", Location: "4°C 冷藏 · 血清与母液 50 mL 管架 · B2", Status: "unopened", PurchasedOn: "2026-09-25", ShelfLifeDays: &nearDays, ExpiresOn: "2027-09-25", Revision: 1},
+		}
+		pantryMeta := map[string]tools.PantryItemMeta{
+			"p-1": {
+				VesselID:   labsticker.VesselScrewTube2,
+				BoxID:      "box-ep-1",
+				BoxSlot:    "A2",
+				CatalogNo:  "Takara RR820A",
+				LotNo:      "AJF1042A",
+				VolumeNote: "2 mL · 余 40%",
+				ProductURL: "https://www.takarabio.com/products/real-time-pcr/qpcr-master-mixes/tb-green-premix-ex-taq-ii",
+				Notes:      "避光融化后轻柔颠倒混匀，建议分装成 200 uL 小管减少反复冻融。",
+				Manuals: []tools.PantryManual{
+					{ID: "m-1", FileName: "TB_Green_Premix_Ex_Taq_II_说明书.pdf", StoredRel: "p-1/manual.pdf", SizeBytes: 1843200, AddedOn: "2026-10-20"},
+					{ID: "m-2", FileName: "Lot_AJF1042A_COA_质检报告.pdf", StoredRel: "p-1/coa.pdf", SizeBytes: 428100, AddedOn: "2026-10-20"},
+				},
+			},
+			"p-2":  {VesselID: labsticker.VesselAmberMicrovial, BoxID: "box-cryo-1", BoxSlot: "C2", CatalogNo: "Abcam ab46154", LotNo: "GR341902", VolumeNote: "100 uL · 1:1000", ProductURL: "https://www.abcam.com/products/primary-antibodies/vegfa-antibody-ab46154.html", Manuals: []tools.PantryManual{{ID: "m-2b", FileName: "ab46154_VEGF_Datasheet.pdf", SizeBytes: 724000}}},
+			"p-3":  {VesselID: labsticker.VesselCryovial2, BoxID: "box-cryo-1", BoxSlot: "A3", CatalogNo: "NEB M0202S", VolumeNote: "2 mL · Box A3", Manuals: []tools.PantryManual{{ID: "m-3", FileName: "NEB_M0202_Protocol.pdf", SizeBytes: 612000}}},
+			"p-4":  {VesselID: labsticker.VesselPCRStrip, BoxID: "box-pcr-1", BoxSlot: "B1", BoxSlots: []string{"B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"}, VolumeNote: "0.2 mL×8 · 待补购"},
+			"p-5":  {VesselID: labsticker.VesselMediaBottle500, CatalogNo: "Gibco 11965092", VolumeNote: "500 mL · 含谷氨酰胺", ProductURL: "https://www.thermofisher.com/order/catalog/product/11965092", Manuals: []tools.PantryManual{{ID: "m-5", FileName: "Gibco_DMEM_COA.pdf", SizeBytes: 912000}}},
+			"p-6":  {VesselID: labsticker.VesselReagentGL45, VolumeNote: "500 mL · pH 7.4", ProductURL: "https://www.thermofisher.com/order/catalog/product/10010023"},
+			"p-7":  {VesselID: labsticker.VesselFalcon50, BoxID: "box-f50-1", BoxSlot: "A1", CatalogNo: "Gibco 10099141C", VolumeNote: "50 mL · 澳洲血源", Manuals: []tools.PantryManual{{ID: "m-7", FileName: "FBS_Endotoxin_Report.pdf", SizeBytes: 540000}}},
+			"p-8":  {VesselID: labsticker.VesselSerumVial, VolumeNote: "10 mL · 冻干标准品", ProductURL: "https://www.sigmaaldrich.com/catalog/product/sial/v2002"},
+			"p-9":  {VesselID: labsticker.VesselAmberBottle500, VolumeNote: "500 mL · 通风橱旁", Manuals: []tools.PantryManual{{ID: "m-9", FileName: "PFA_4pct_SDS_安全说明.pdf", SizeBytes: 780000}}},
+			"p-10": {VesselID: labsticker.VesselAmberMicrovial, BoxID: "box-cryo-1", BoxSlot: "C3", CatalogNo: "CST #3528", LotNo: "L0814", VolumeNote: "100 uL · WB/IF"},
+			"p-11": {VesselID: labsticker.VesselCryovial2, BoxID: "box-cryo-1", BoxSlot: "A1", CatalogNo: "Proteintech 60004", VolumeNote: "150 uL · 1:5000"},
+			"p-12": {VesselID: labsticker.VesselCryovial2, BoxID: "box-cryo-1", BoxSlot: "E5", VolumeNote: "250 uL · 1e8 TU/mL"},
+			"p-13": {VesselID: labsticker.VesselCryovial2, BoxID: "box-cryo-1", BoxSlot: "G8", VolumeNote: "1.5 mL · 1e6 cells"},
+			"p-14": {VesselID: labsticker.VesselScrewTube2, BoxID: "box-ep-1", BoxSlot: "A4", VolumeNote: "5 U/uL · 250 U"},
+			"p-15": {VesselID: labsticker.VesselEP15, BoxID: "box-ep-1", BoxSlot: "B1", VolumeNote: "10 mM · 1 mL"},
+			"p-16": {VesselID: labsticker.VesselEP15, BoxID: "box-pcr-1", BoxSlot: "D3", VolumeNote: "10 uM · qPCR 通用"},
+			"p-17": {VesselID: labsticker.VesselEP15, BoxID: "box-pcr-1", BoxSlot: "D4", VolumeNote: "10 uM · qPCR 通用"},
+			"p-18": {VesselID: labsticker.VesselFalcon15, BoxID: "box-f15-1", BoxSlot: "A1", VolumeNote: "15 mL · 含酚红"},
+			"p-19": {VesselID: labsticker.VesselFalcon15, BoxID: "box-f15-1", BoxSlot: "A2", VolumeNote: "10 mL · 100×"},
+			"p-20": {VesselID: labsticker.VesselFalcon15, BoxID: "box-f15-1", BoxSlot: "C3", VolumeNote: "5 mL · 4°C 过夜预融"},
+			"p-21": {VesselID: labsticker.VesselFalcon50, BoxID: "box-f50-1", BoxSlot: "B2", VolumeNote: "45 mL · 无 RNase"},
+		}
 		toolApp := &app{
 			tools: tools.New(tools.Callbacks{
 				ListPantry: func() (runs.PantryLedger, error) {
-					return runs.PantryLedger{
-						Items: []runs.PantryItem{
-							{ID: "p-1", Name: "SYBR Green MasterMix (2×)", Location: "-20°C 酶盒 A2", Status: "near_expiry", PurchasedOn: "2026-06-01", OpenedOn: "2026-10-20", ShelfLifeDays: &nearDays, ExpiresOn: "2026-11-28", Revision: 3},
-							{ID: "p-2", Name: "GelMA 光固化水凝胶前驱液", Location: "4°C 避光冷藏层", Status: "opened", PurchasedOn: "2026-10-01", OpenedOn: "2026-11-05", ShelfLifeDays: &nearDays, ExpiresOn: "2027-04-01", Revision: 2},
-							{ID: "p-3", Name: "万古霉素标准品滤纸片 (30 ug)", Location: "干燥器 B1", Status: "unopened", PurchasedOn: "2026-09-15", ShelfLifeDays: &nearDays, ExpiresOn: "2027-09-15", Revision: 1},
-						},
-					}, nil
+					return runs.PantryLedger{Items: pantryItems}, nil
+				},
+				LoadPantryMeta: func() (map[string]tools.PantryItemMeta, error) {
+					return pantryMeta, nil
+				},
+				LoadPantryBoxes: func() ([]tools.PantryBox, error) {
+					return pantryBoxes, nil
+				},
+				ListSOPs: func() []tools.SOPEntry {
+					return []tools.SOPEntry{
+						{ID: "sop-rt-qpcr", Title: "RT-qPCR 多靶点相对定量", Category: "分子生物学", Summary: "96 孔三复孔 × 靶基因 + MasterMix 配平", Source: qpcrSrc},
+						{ID: "sop-huvec", Title: "HUVEC 水凝胶血管成管测定", Category: "细胞与组织工程", Summary: "12 孔水凝胶 + VEGF 梯度稀释与成管定量", Source: huvecSrc},
+						{ID: "sop-cfu", Title: "梯度稀释涂板菌落计数 (CFU)", Category: "微生物学", Summary: "10 倍梯度涂板计数与 CFU/mL 计算", Source: cfuSrc},
+						{ID: "sop-iz", Title: "90 mm 琼脂平皿四象限抑菌圈测定", Category: "微生物与抗菌", Summary: "1 mm = 2.4 px 纯 SVG 排布 + 双径卡尺测量", Source: izSrc},
+					}
 				},
 			}),
 		}
-		renderVisualPNG(t, outDir, "tools_workbench_light.png", 1360, 880, false, func(c *ui.Context) {
-			toolsPage(c, toolApp)
-		})
-		renderVisualPNG(t, outDir, "tools_pantry_workbench_v2.png", 1360, 880, false, func(c *ui.Context) {
+		renderVisualPNG(t, outDir, "tools_pantry_workbench_v4.png", 1360, 880, false, func(c *ui.Context) {
 			toolsPage(c, toolApp)
 		})
 
-		// 14. 孔板速排（先选孔板 + 悬浮单框选孔标注 + SVG/PNG 导出 + 两列孔板历史）
+		// Capture 5 BioRender box/rack die-cut sticker catalog
+		renderVisualPNG(t, outDir, "comp_16e_labsticker_boxes_v1.png", 1280, 420, false, func(c *ui.Context) {
+			labsticker.RenderBoxCatalogSheet(c)
+		})
+
+		// Capture Level 2 Drill-Down: 9x9 Cryobox interior (Light + Dark)
+		toolApp.tools.OpenPantryBox("box-cryo-1", "C2")
+		renderVisualPNG(t, outDir, "tools_pantry_box_cryo_9x9_light.png", 1360, 900, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
+		renderVisualPNG(t, outDir, "tools_pantry_box_cryo_9x9_dark.png", 1360, 900, true, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
+
+		// Capture Level 2 Drill-Down: 8x12 96-well PCR Box showing 8-strip + tubes + empty slot assignment
+		toolApp.tools.OpenPantryBox("box-pcr-1", "B1")
+		renderVisualPNG(t, outDir, "tools_pantry_box_pcr_96_light.png", 1360, 900, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
+
+		// Capture Level 2 Drill-Down: 5x5 15mL Conical Tube Rack
+		toolApp.tools.OpenPantryBox("box-f15-1", "A1")
+		renderVisualPNG(t, outDir, "tools_pantry_box_falcon_rack_light.png", 1360, 900, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
+		toolApp.tools.ClosePantryBox()
+
+		// Capture opened Reagent Detail Dialog with BioRender hero sticker + live status badge + box/slot selector + vendor URL + attached PDF manuals
+		toolApp.tools.OpenPantryDetail(pantryItems[0])
+		renderVisualPNG(t, outDir, "comp_16d_pantry_reagent_detail_v3.png", 1360, 880, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
+		toolApp.tools.PantryDialogOpen = false
+
+		// 13b. 标准方案库 (SOP Library)
+		toolApp.tools.Active = tools.ToolSOP
+		renderVisualPNG(t, outDir, "tools_sop_library_v1.png", 1360, 1020, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
+
+		// 13c. 实验台速算 (4-in-1 Bench Calculator)
+		toolApp.tools.Active = tools.ToolDilution
+		toolApp.tools.BenchCalc.Mode = 3 // PCR MasterMix showcase (or toggle cleanly)
+		renderVisualPNG(t, outDir, "tools_bench_calc_v1.png", 1360, 880, false, func(c *ui.Context) {
+			toolsPage(c, toolApp)
+		})
+
+		// 14. 孔板速排（7 规格不含培养皿 + `+ 追加标签` 精修悬浮条 + SVG/PNG 导出 + 两列孔板历史）
 		plateStudio := toolApp.tools
 		plateStudio.Active = tools.ToolPlate
 		plateStudio.SelectPlatePreset("plate-96")
@@ -534,16 +793,16 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		_ = plateStudio.AnnotateSelectedWells("NTC")
 		hist96, _ := plateStudio.SaveCurrentPlateToHistory()
 
-		plateStudio.SelectPlatePreset("dish-4")
-		plateStudio.SelectPlateWells([]string{"A1", "A2"})
-		_ = plateStudio.AnnotateSelectedWells("万古霉素-30ug")
-		plateStudio.SelectPlateWells([]string{"B1"})
-		_ = plateStudio.AnnotateSelectedWells("空白对照")
-		plateStudio.SaveCurrentPlateToHistory()
-
 		plateStudio.SelectPlatePreset("rack-8")
 		plateStudio.SelectPlateWells([]string{"A1", "A2", "A3", "A4"})
-		_ = plateStudio.AnnotateSelectedWells("浓度:100/2 uM")
+		_ = plateStudio.AnnotateSelectedWells("100/2 uM")
+		plateStudio.SaveCurrentPlateToHistory()
+
+		plateStudio.SelectPlatePreset("plate-24")
+		plateStudio.SelectPlateWells([]string{"A1", "A2", "A3"})
+		_ = plateStudio.AnnotateSelectedWells("空载对照")
+		plateStudio.SelectPlateWells([]string{"B1", "B2", "B3"})
+		_ = plateStudio.AnnotateSelectedWells("梯度处理")
 		plateStudio.SaveCurrentPlateToHistory()
 
 		plateStudio.SelectPlatePreset("plate-12")
@@ -556,10 +815,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 		plateStudio.SelectPlateWells([]string{"C1", "C2", "C3"})
 		plateStudio.Status = ""
 
-		renderVisualPNG(t, outDir, "comp_15b_tools_plate_legacy.png", 1360, 1400, false, func(c *ui.Context) {
-			toolsPage(c, toolApp)
-		})
-		renderVisualPNG(t, outDir, "tools_plate_studio_v2.png", 1360, 1400, false, func(c *ui.Context) {
+		renderVisualPNG(t, outDir, "tools_plate_studio_v3.png", 1360, 1400, false, func(c *ui.Context) {
 			toolsPage(c, toolApp)
 		})
 
@@ -576,7 +832,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 			t.Fatalf("LoadHistoryEntry failed for %s", hist96.ID)
 		}
 		plateStudio.Status = ""
-		renderVisualPNGSteps(t, outDir, "tools_plate_studio_overlay_v2.png", 1360, 920, false, func(c *ui.Context) {
+		renderVisualPNGSteps(t, outDir, "tools_plate_studio_overlay_v3.png", 1360, 920, false, func(c *ui.Context) {
 			toolsPage(c, toolApp)
 		}, func(tt *ui.Tester) {
 			if err := tt.Click("放大孔板"); err != nil {
@@ -589,13 +845,13 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 			tt.Frame()
 		})
 
-		// 15. Regenerate updated plate@1 component specimens (Chinese GroupLabels legends)
-		geomSrc := "```asterlab\nkind: group\nid: g-pbs\nschema: 1\nname: PBS对照\nrole: control\n```\n" +
-			"```asterlab\nkind: group\nid: g-hama\nschema: 1\nname: HAMA水凝胶\nrole: treatment\n```\n" +
-			"```asterlab\nkind: group\nid: g-van\nschema: 1\nname: 万古霉素\nrole: comparator\n```\n" +
-			"```asterlab\nkind: plate\nid: pl-dish4\nschema: 1\ntitle: 4区圆形培养皿（56px大孔 + 双皿壁十字）\nformat: 4\ntopology: dish\nrows: 2\ncolumns: 2\ngroups:\n  g-pbs: [A1]\n  g-hama: [A2, B1]\n  g-van: [B2]\nsamples: {A1: PBS, A2: HAMA, B1: Lys, B2: Van}\n```\n" +
+		// 15. Regenerate updated plate@1 component specimens (no dish-4; 6/12/24/8-strip) & fixed CJK figure@1 SVG
+		geomSrc := "```asterlab\nkind: group\nid: g-pbs\nschema: 1\nname: 空白对照\nrole: control\n```\n" +
+			"```asterlab\nkind: group\nid: g-hama\nschema: 1\nname: 实验处理\nrole: treatment\n```\n" +
+			"```asterlab\nkind: group\nid: g-van\nschema: 1\nname: 阳性对照\nrole: comparator\n```\n" +
 			"```asterlab\nkind: plate\nid: pl-6\nschema: 1\ntitle: 6 孔细胞培养板（48px 大孔）\nformat: 6\ngroups:\n  g-pbs: [A1, A2, A3]\n  g-hama: [B1, B2, B3]\nsamples: {A1: Ctrl-1, A2: Ctrl-2, A3: Ctrl-3, B1: Drug-1, B2: Drug-2, B3: Drug-3}\n```\n" +
 			"```asterlab\nkind: plate\nid: pl-12\nschema: 1\ntitle: 12 孔细胞铺板（42px 孔）\nformat: 12\ngroups:\n  g-pbs: [A1, A2]\n  g-hama: [B1, B2]\n  g-van: [C1, C2]\n```\n" +
+			"```asterlab\nkind: plate\nid: pl-24\nschema: 1\ntitle: 24 孔梯度传代板（36px 孔）\nformat: 24\ngroups:\n  g-pbs: [A1, A2, A3]\n  g-hama: [B1, B2, B3]\n  g-van: [C1, C2, C3]\n```\n" +
 			"```asterlab\nkind: plate\nid: pl-rack\nschema: 1\ntitle: 8 联管 / 电泳泳道（40×58px 竖向胶囊）\nformat: 8\ntopology: rack_1d\nrows: 1\ncolumns: 8\ngroups:\n  g-pbs: [A1, A2]\n  g-hama: [A3, A4, A5]\n  g-van: [A6, A7, A8]\nsamples: {A1: Ladder, A2: Ctrl, A3: Sample, A4: Sample, A5: Sample, A6: KO1, A7: KO2, A8: NTC}\n```\n"
 		geomDoc, err := asterdoc.Parse(geomSrc)
 		if err != nil {
@@ -605,7 +861,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 			Doc: geomDoc, Mode: asterdoc.ModeDesign,
 			Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
 		}
-		renderVisualPNG(t, outDir, "comp_12_plate_geometries_v2.png", 1240, 920, false, func(c *ui.Context) {
+		renderVisualPNG(t, outDir, "comp_12_plate_geometries_v3.png", 1240, 920, false, func(c *ui.Context) {
 			tok := theme.GetTokens(c.Theme())
 			ui.Column(c).Fill().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
 				var plates []*asterdoc.Module
@@ -628,6 +884,28 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				}
 			})
 		})
+
+		// Capture updated comp_04_figure_v2.png showcasing <g transform> + CJK alignment on 90 mm Petri Dish SVG
+		if izDoc, err := asterdoc.Parse(izSrc); err == nil {
+			for _, m := range izDoc.Modules {
+				if m.Kind == "step" && m.ID == "step-02-quadrants" {
+					if seq, ok := m.Data["blocks"].([]any); ok {
+						for _, raw := range seq {
+							if bm, _ := raw.(map[string]any); bm != nil && bm["kind"] == "figure" {
+								figView := &asterdoc.View{Doc: izDoc, Mode: asterdoc.ModeDesign, Allowed: map[string]bool{asterdoc.PermDocumentEdit: true}}
+								renderVisualPNG(t, outDir, "comp_04_figure_v2.png", 760, 420, false, func(c *ui.Context) {
+									tok := theme.GetTokens(c.Theme())
+									ui.Box(c).Fill().Padding(float32(tok.Spacing16)).Children(func() {
+										figView.RenderModule(c, "figure", 1, bm)
+									})
+								})
+								break
+							}
+						}
+					}
+				}
+			}
+		}
 
 		qpcrDoc, err := asterdoc.Parse(qpcrSrc)
 		if err != nil {
@@ -655,7 +933,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				Doc: qpcrDoc, Mode: asterdoc.ModeDesign,
 				Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
 			}
-			renderVisualPNGSteps(t, outDir, "comp_13_plate_96_v2.png", 1120, 740, false, func(c *ui.Context) {
+			renderVisualPNGSteps(t, outDir, "comp_13_plate_96_v3.png", 1120, 740, false, func(c *ui.Context) {
 				tok := theme.GetTokens(c.Theme())
 				ui.Box(c).Fill().Padding(float32(tok.Spacing16)).Children(func() {
 					qCompView.RenderModule(c, "plate", 1, qpcrPlateData)
@@ -672,7 +950,7 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				Doc: qpcrDoc, Mode: asterdoc.ModeDesign,
 				Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
 			}
-			renderVisualPNGSteps(t, outDir, "comp_13b_plate_overlay_bar_v2.png", 1200, 840, false, func(c *ui.Context) {
+			renderVisualPNGSteps(t, outDir, "comp_13b_plate_overlay_bar_v3.png", 1200, 840, false, func(c *ui.Context) {
 				tok := theme.GetTokens(c.Theme())
 				ui.Box(c).Fill().Padding(float32(tok.Spacing16)).Children(func() {
 					qOvView.RenderModule(c, "plate", 1, qpcrPlateData)
@@ -689,5 +967,11 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 				tt.Frame()
 			})
 		}
+
+		// 16. Single-Page Continuous Sheet Preview (阅读 + 导出 PDF) on RT-qPCR
+		sheetApp := makeDesignApp(qpcrSrc, "", 1)
+		renderVisualPNG(t, outDir, "design_single_page_sheet_v2.png", 1360, 1180, false, func(c *ui.Context) {
+			asterDesignPage(c, sheetApp)
+		})
 	}
 }

@@ -6,23 +6,21 @@ deliberately separate from the module SDK manifest.
 
 ## 1. Information architecture
 
-Six surfaces. Each surface has exactly one job, one primary action, and an
-explicit list of what does not belong there.
+Obsidian-grade single-vault local experiment workbench organizing a minimalist `40px` left **Ribbon** + transparent Vault **File Tree** (`.asterlab/`, `assets/`, `templates/`, `<ProjectFolder>/*.asterml`) alongside a recursive **Peer Split-Pane Tree** (`PaneNode` hosting `TabCalendar`, `TabFile`, `TabPantry`), Back/Forward history, a slim collapsible **Right Companion Drawer** (`步骤大纲` & `速算与计时`), and `Ctrl+K/O` floating Command Palette.
 
 | # | Surface | One job | Primary action | Does not belong here |
 |---|---|---|---|---|
-| 1 | 项目工作区 | Find the experiment to continue | Continue the last task / open a design | Editing parameters, recording results, reading protocol text |
-| 2 | 实验设计 | Author and understand the plan | Create Run (after preflight) | Recording readouts, writing prose notes, browsing assets |
-| 3 | 实验运行 | Execute a step and record facts | Record the readout / complete the step | Authoring the plan, writing long-form prose |
-| 4 | Notebook | Interpret and narrate | Write and save prose | Recording measurements, completing steps, attaching execution files |
-| 5 | 实验方案 (Protocol) | Read the frozen plan as a document | Read a step, export the frozen document | Editing anything |
-| 6 | 资料与工具 | Prepare reusable material | Hand a prepared draft to Design or Run | Owning experiment state |
+| 1 | 实验日历（`TabCalendar`） | Orthogonal date view (`月` / `周`) over project folders via frontmatter `date` + drag-to-schedule & day Popover | ＋ 新建实验 / double-click empty day / click day item | Editing module tables, 4-tool clutter |
+| 2 | 实验文档（`TabFile` · `编辑 \| 阅读 \| 源码`） | Single-source-of-truth `.asterml` Live-Preview workbench where Design & inline Execution progress live in one file | Inline edit/execute (`checklist`, `timer`, `param_table`, `plate`, `calculator`, `data_table`, `figure`) + `⋯` Export | Separate frozen `运行`/`记录` copies, manual Save blockers |
+| 3 | 储藏室货架（`TabPantry` · `tools.ViewPantry`） | Standalone reagent shelf, BioRender box/rack maps (`A1..L12`), lot/expiry & manuals | Quick locate from `Ctrl+K` or `param_table` coordinate badge | Nested 4-tool switcher chrome (`Plate Studio`/`Bench Calc`/`SOP Library`) |
 
 Decisions taken:
 
-- **Protocol becomes surface 5** (`internal/shell/shell.go:115` currently lists
-  five pages; `protocolPage` is buried under Tools, `main.go:1761`). It is a
-  read-only projection of the frozen plan, so it must never gain an edit action.
+- **Obsidian Vault & Peer Split-Pane Shell (`internal/shell/` & `internal/vault/`)**:
+  - **40px Ribbon + File Tree (`file_tree.go`)**: hosts `实验日历`, `储藏室货架`, `+ 新建实验`, `+ 新建项目文件夹`, `库设置`, and a true-filesystem tree (`F2` inline rename, drag-to-move/split/schedule, full native `ContextMenu`). Project ownership = folder path; schedule = YAML frontmatter `date`.
+  - **Peer Split-Pane Tree (`tabs.go` & `shell.go`)**: every leaf pane is equal; supports 4-way edge drag-to-split (`left`/`right`/`up`/`down`), middle-click tab close, opening the same `.asterml` file side-by-side in `编辑` and `阅读` sharing one `*vault.LiveDocument` with unified 100-step `Ctrl+Z/Y` Undo/Redo, plus `workspace.json` session restore.
+  - **Motion System (`internal/theme/motion.go`)**: frequency-budgeted 4-tier springs (`MotionMicro`, `MotionSnappy`, `MotionFluid`, `MotionHero`), `NumericRoll`, `FloatingBarTransition`, `LiquidSplitTransition`, `HeroFlyTransition`, `Oklab` color interpolation, and `ApplyNudge` sponge shake.
+  - **UnifiedLive Document Canvas (`experiment_page.go` & `internal/asterdoc/`)**: strips frontmatter into `# Title` + 1-line property pills (`📅 日期` / `📁 项目` / `状态`), renders frameless `prose` & `checklist`/`timer` interactive in both `编辑` and `阅读`, reveals hover `⋮⋮` block grips + `+` insert gaps (`/` slash menu), layer-pill `plate@1` (`[分组]` + layers + `单值 | 平铺列表 | 等比序列` + right-click well ops), `data_table@1` header `Popover`, `figure@1` `Ctrl+V` clipboard PNG paste into `./assets/`, and `param_table@1` inline `记偏离` deviation input.
 - **Notebook keeps prose only.** The run-wide event timeline moves to Run as a
   second tab (`run / history`), because Run already owns the authoritative
   events (`internal/notebook` reads the same `runs.RunSnapshot`). Notebook must
@@ -103,16 +101,15 @@ One word per state, used identically in every surface:
 
 | State | Meaning | Surface treatment |
 |---|---|---|
-| `草稿` | editable, not yet valid | neutral; primary action enabled only if the surface can validate locally |
-| `未保存` | user changed something | warning dot + explicit Save; never auto-discard |
-| `已保存` | persisted, no pending change | success, transient |
+| `设计中` | design missing objective/steps/modules/title | warning pill naming exact missing gap |
+| `方案就绪` | objective completeness rules pass | success pill; quick `开始实验` enabled |
+| `实时保存` / `实时已保存` | Obsidian-style instant sync active & persisted | quiet metadata / success pill; no manual Save |
+| `未保存` | offline/failed write with local draft preserved | warning pill + error cause + retry |
 | `校验中` | Core assessment running | disable Create Run, keep content readable |
-| `不完整` | Core assessment returned errors | danger banner listing each error, each pointing at the offending step/module |
-| `待确认` | warnings require acknowledgement | warning banner + explicit acknowledgement before Run creation |
-| `就绪` | no errors, no warnings | success |
-| `未开始` / `进行中` / `已完成` / `阻塞` | frozen task status | task row + rail |
+| `进行中` / `已完成` / `未开始` / `阻塞` | frozen task or run status | task row, calendar chip & header pill |
 | `未解析` | a required binding is missing | warning; never silently substituted |
-| `已冻结` | immutable snapshot | lock affordance; no edit controls rendered |
+| `已冻结` / `方案快照已锁定` | immutable snapshot | lock affordance; no plan edit controls rendered |
+| `记录已锁定` | signed/sealed final run notes | opens in `阅读`; edit modes locked |
 
 `组织节点` (organizational step) is a node type, not a task state: it renders
 without a status dot and without counts.
@@ -123,16 +120,10 @@ Breakpoints: **≥1360 wide**, **1100–1359 medium**, **<1100 narrow** (covers
 900×600). Layout must be correct at 1360×880 and 900×600; other sizes are
 derived.
 
-- **Design:** persistent right inspector (≥320px) at ≥1100; bottom sheet at
-  <1100. The inspector never overlays the primary action.
-- **Run:** recording panel is the first content block at ≤900; two columns
-  (procedure | recording) at ≥1360. Procedure metadata collapses by default
-  below the recording panel.
-- **Protocol:** step list (224px) + detail side by side; document mode max-width
-  820 centered.
-- **Notebook:** prose paper max-width 820; toolbar wraps rather than hides Save.
-- **Tools:** left list 190px, never collapses.
-- **Project workspace:** grid without a hard item cap; explicit "show all".
+- **Obsidian Shell (`internal/shell/`):** 40px Ribbon + Vault File Tree (`file_tree.go`), peer `PaneNode` split tree with per-pane tab bars & 4-way edge drag-to-split overlays (`LiquidSplitTransition`), Back/Forward chrome + `Ctrl+O/K` palette, and slim Right Companion Drawer (`步骤大纲`, `速算与计时`).
+- **Experiment Calendar (`实验日程`):** minimal top bar (`YYYY 年 MM 月`, `‹ 今天 ›`, `月 | 周`, search, `＋ 新建实验`), seamless month cells or `08:00–20:00` Week time grid, circular Today pill, drag-to-schedule/reschedule drop targets, double-click cell create dialog (project folder + template + date), and day Popover.
+- **UnifiedLive Experiment Canvas (`experiment_page.go`):** 1-row breadcrumb header (`项目 / 标题` + `编辑 | 阅读 | 源码` + copy icon + `⋯` menu), unframed `# Title` + property pills (`日期` / `项目` / `状态`), Live-Preview step stream with hover `⋮⋮` handles, `+` insert gaps, and `/` slash menu; `checklist` & `timer` remain interactive in both `编辑` and `阅读` modes, persisting directly to `.asterml`.
+- **Standalone Pantry (`tools.ViewPantry`):** renders directly inside `TabPantry` without legacy 4-tool switcher chrome.
 
 Primary-action budget: one accent-filled control per surface. Everything else is
 secondary or icon-with-tooltip, and every icon-only control has a text tooltip.
@@ -188,3 +179,9 @@ Binding on every UI task:
   table with a reason.
 - The PR carries a `## 设计一致性` section: tokens used, components reused, new
   components (if any) and why. `UX-DESIGN` is the rule id for these items.
+
+## 9. Obsidian Settings, Context Menus & Mobile Adaptive Layout
+
+- **Settings (`Ctrl+,` / gear icon, `internal/shell/settings.go`)**: Built on `onevra/components.Settings` with real-time search across 6 categories (`实验库与文件`、`外观与主题`、`文档与实验默认`、`快捷键`、`移动端与触控适配`、`关于实验库与数据`), persisting theme preset (`obsidian` default / `zinc` / `warm`), `LiquidGlass` toggle, mobile pull-down action, auto-hide dock, and edit toolbar preferences to `<Vault>/.asterlab/config.json`.
+- **Context-Menu-First Ergonomics (`UX-CLEAN-UI`)**: Secondary operations (file tree rename/move/duplicate/template/delete, pane split/close/pin, calendar quick-create, step block cut/copy/paste/reorder, plate invert/edge-select/outlier-mark/export CSV&PNG) live in native `components.ContextMenu` popups rather than cluttering rows with permanent buttons.
+- **Obsidian iOS 26 Mobile Shell & Dual-Mode Liquid Glass (`internal/shell/mobile.go`, `internal/theme/theme.go`)**: Below `680dp` viewport width or on `android`/`ios` (or `ForceMobilePreview`), collapses to single-pane focus with open top center (`ScrollEdgeSoft` top feather, `40dp` circular drawer orb on left, twin-icon mode/`⋯` glass pill on right), borderless `Tok.Elevated` cards (`实验属性`, compact `实验分组`, day agenda), centered icon-only Liquid Glass bottom capsule (`<` · `>` · `🔍` · `+` · `[N]` · `≡`) that auto-hides on downward scroll and morphs into an icon-only Edit Toolbar in `ModeEdit`, 2-column Tab Switcher card grid, pull-down Quick Action, and left/right edge-swipe `Dragged()`/`DragVelocity()` drawers with Obsidian's 3-tier bottom control island. Light glass uses milky `glass.Regular` (76%); Dark glass prevents Glass-on-Glass washout and uses smoked `glass.Clear` (84%) + `rgba(255,255,255,0.14)` specular rim.

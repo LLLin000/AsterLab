@@ -846,19 +846,50 @@ pub(crate) fn dispatch(tool: &str, path: &str, data_dir: &Path) -> Result<Value,
                 return Ok(json!({
                     "valid": false,
                     "compiled": false,
-                    "error": {"code": error.code, "message": error.message}
+                    "error": {"code": error.code, "message": error.message},
+                    "issues": [{
+                        "code": error.code,
+                        "severity": "blocking",
+                        "path": "source",
+                        "message": error.message,
+                        "next_action": "对照 sdk.describe 字段规范修复对应 .asterml 模块并重跑 asterdoc.validate"
+                    }]
                 }));
             }
             match compile_asterdoc_to_design(source) {
-                Ok(design) => Ok(json!({
-                    "valid": true,
-                    "compiled": true,
-                    "design": design
-                })),
+                Ok(design) => {
+                    let warnings = asterdoc_cross_module_warnings(source);
+                    let issues: Vec<Value> = warnings
+                        .iter()
+                        .map(|w| {
+                            json!({
+                                "code": "cross_module_quantity_mismatch",
+                                "severity": "needs_confirmation",
+                                "path": "source",
+                                "message": w,
+                                "next_action": "核对 calculator.sample_count、group.independent_n 与 plate 分配孔数是否一致"
+                            })
+                        })
+                        .collect();
+                    Ok(json!({
+                        "valid": true,
+                        "compiled": true,
+                        "design": design,
+                        "warnings": warnings,
+                        "issues": issues
+                    }))
+                }
                 Err(error) => Ok(json!({
                     "valid": false,
                     "compiled": false,
-                    "error": {"code": error.code, "message": error.message}
+                    "error": {"code": error.code, "message": error.message},
+                    "issues": [{
+                        "code": error.code,
+                        "severity": "blocking",
+                        "path": "source",
+                        "message": error.message,
+                        "next_action": "检查实验步骤/引用关系并重跑 asterdoc.validate"
+                    }]
                 })),
             }
         }
@@ -2392,7 +2423,7 @@ pub(crate) fn result_schema(tool: &str) -> Value {
         "asterdoc.inspect" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","budget","modules"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"budget":{"type":"object","additionalProperties":false,"required":["steps","executable_steps","groups","wells","hands_on_sec","total_span_sec","has_open_phase"],"properties":{"steps":{"type":"integer","minimum":0},"executable_steps":{"type":"integer","minimum":0},"groups":{"type":"integer","minimum":0},"wells":{"type":"integer","minimum":0},"hands_on_sec":{"type":"integer","minimum":0},"total_span_sec":{"type":"integer","minimum":0},"has_open_phase":{"type":"boolean"}}},"modules":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","id","schema","data","manifest"],"properties":{"kind":{"type":"string"},"id":{"type":"string"},"schema":{"type":"integer","minimum":0},"data":{"type":"object","additionalProperties":true},"manifest":{"type":["object","null"],"additionalProperties":true}}}}}}),
         "asterdoc.assess" => json!({"type":"object","additionalProperties":false,"required":["design_id","revision","source_hash","state","errors","warnings"],"properties":{"design_id":{"type":"string"},"revision":{"type":"integer","minimum":0},"source_hash":{"type":"string"},"state":{"type":"string","enum":["ready","warning","incomplete"]},"errors":{"type":"array","items":{"type":"string"}},"warnings":{"type":"array","items":{"type":"string"}}}}),
 
-        "asterdoc.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"design":{"type":"object","additionalProperties":true},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string"},"message":{"type":"string"}}}}}),
+        "asterdoc.validate" => json!({"type":"object","additionalProperties":false,"required":["valid","compiled"],"properties":{"valid":{"type":"boolean"},"compiled":{"type":"boolean"},"design":{"type":"object","additionalProperties":true},"warnings":{"type":"array","items":{"type":"string"}},"issues":{"type":"array","items":{"type":"object","additionalProperties":true}},"error":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string"},"message":{"type":"string"}}}}}),
         "asterdoc.load" | "asterdoc.save" | "asterdoc.command" => asterdoc_version(),
         "asterdoc.compile" => json!({"type":"object","additionalProperties":false,"required":["design","document"],"properties":{"design":{"type":"object","additionalProperties":true},"document":asterdoc_version()}}),
         "asterdoc.create_run" => record_schema("run"),

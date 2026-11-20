@@ -29,6 +29,10 @@ func StepBlockComposer(v *View, c *ui.Context, step *Module) {
 	if v == nil || c == nil || step == nil {
 		return
 	}
+	if v.UnifiedLive {
+		renderLiveStepComposer(v, c, step)
+		return
+	}
 	tok := theme.GetTokens(c.Theme())
 	v.StepID = step.ID
 	stepTitle := firstNonEmpty(textValue(step.Data, "title"), step.ID)
@@ -291,7 +295,7 @@ func DefaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
 	id := nextUniqueBlockID(doc, stepID+"-"+sanitizeIDFrag(kind))
 	switch kind {
 	case "prose":
-		return map[string]any{"kind": "prose", "id": id, "schema": 1, "title": "操作说明", "tone": "tip", "body": "在此填写实验操作要点与注意事项。"}
+		return map[string]any{"kind": "prose", "id": id, "schema": 1, "tone": "plain", "body": "在此输入操作说明…"}
 	case "group_table":
 		return map[string]any{"kind": "group_table", "id": id, "schema": 1, "title": "实验分组", "rows": []any{
 			map[string]any{"id": id + "-ctrl", "name": "对照组", "role": "control", "independent_n": 3},
@@ -303,26 +307,21 @@ func DefaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
 		}}
 	case "figure":
 		return map[string]any{
-			"kind": "figure", "id": id, "schema": 1, "title": "分区示意图",
-			"caption": "示意图仅作视觉表达，分组真值存于分组数据",
-			"svg": `<svg viewBox="0 0 280 200"><circle cx="140" cy="100" r="82" fill="none" stroke="currentColor" stroke-width="2"/><line x1="58" y1="100" x2="222" y2="100" stroke="currentColor" stroke-dasharray="4 4"/><line x1="140" y1="18" x2="140" y2="182" stroke="currentColor" stroke-dasharray="4 4"/><text x="98" y="65" text-anchor="middle" font-size="13">I 对照</text><text x="182" y="65" text-anchor="middle" font-size="13">II 处理A</text><text x="98" y="140" text-anchor="middle" font-size="13">III 处理B</text><text x="182" y="140" text-anchor="middle" font-size="13">IV 阳参</text></svg>`,
+			"kind": "figure", "id": id, "schema": 1, "title": "图片 / 示意图",
+			"caption": "",
+			"svg":     `<svg viewBox="0 0 360 160"></svg>`,
 		}
 	case "data_table":
-		return map[string]any{"kind": "data_table", "id": id, "schema": 1, "title": "数据记录表", "endpoint": "measurement", "columns": []any{
+		return map[string]any{"kind": "data_table", "id": id, "schema": 1, "title": "数据记录表", "columns": []any{
 			map[string]any{"key": "sample", "label": "样本", "value_kind": "text"},
 			map[string]any{"key": "reading", "label": "测定值", "value_kind": "number", "unit": "AU"},
 		}}
 	case "checklist":
-		return map[string]any{"kind": "checklist", "id": id, "schema": 1, "title": "执行检查", "items": []any{
-			map[string]any{"id": id + "-c1", "label": "确认试剂与耗材准备就绪", "required": true},
+		return map[string]any{"kind": "checklist", "id": id, "schema": 1, "items": []any{
+			map[string]any{"id": id + "-c1", "label": "核对实验器材与试剂", "blocking": true},
 		}}
 	case "calculator":
-		return map[string]any{
-			"kind": "calculator", "id": id, "schema": 1, "title": "稀释计算", "mode": "dilution",
-			"stock": map[string]any{"value": 10, "unit": "mg/mL"},
-			"target": map[string]any{"value": 1, "unit": "mg/mL"},
-			"final_volume": map[string]any{"value": 1, "unit": "mL"},
-		}
+		return DefaultCalculatorPreset(doc, stepID, "dilution")
 	case "timer":
 		return map[string]any{
 			"kind": "timer", "id": id, "schema": 1, "title": "培养计时", "mode": "countdown",
@@ -362,5 +361,363 @@ func nextUniqueBlockID(doc *Document, base string) string {
 		if !used[cand] {
 			return cand
 		}
+	}
+}
+
+// DefaultCalculatorPreset constructs a unified parameter-formula table preset.
+func DefaultCalculatorPreset(doc *Document, stepID, preset string) map[string]any {
+	id := nextUniqueBlockID(doc, stepID+"-calc")
+	switch preset {
+	case "mastermix":
+		return map[string]any{
+			"kind": "calculator", "id": id, "schema": 1, "title": "预混液配制计算", "mode": "formula",
+			"rows": []any{
+				map[string]any{"key": "n", "label": "反应数 (含余量)", "kind": "input", "value": 24, "unit": "孔"},
+				map[string]any{"key": "mix_per", "label": "单孔 2× Mix", "kind": "input", "value": 10, "unit": "uL"},
+				map[string]any{"key": "primer_per", "label": "单孔引物", "kind": "input", "value": 1.6, "unit": "uL"},
+				map[string]any{"key": "water_per", "label": "单孔无核酸酶水", "kind": "input", "value": 6.4, "unit": "uL"},
+				map[string]any{"key": "mix_tot", "label": "总 2× Mix", "kind": "formula", "formula": "n * mix_per", "unit": "uL"},
+				map[string]any{"key": "primer_tot", "label": "总引物", "kind": "formula", "formula": "n * primer_per", "unit": "uL"},
+				map[string]any{"key": "water_tot", "label": "总水", "kind": "formula", "formula": "n * water_per", "unit": "uL"},
+			},
+		}
+	case "molar":
+		return map[string]any{
+			"kind": "calculator", "id": id, "schema": 1, "title": "摩尔配液称量", "mode": "formula",
+			"rows": []any{
+				map[string]any{"key": "conc_mm", "label": "目标浓度", "kind": "input", "value": 10, "unit": "mM"},
+				map[string]any{"key": "vol_ml", "label": "配制体积", "kind": "input", "value": 5, "unit": "mL"},
+				map[string]any{"key": "mw", "label": "分子量", "kind": "input", "value": 543.5, "unit": "g/mol"},
+				map[string]any{"key": "mass_mg", "label": "需称量溶质", "kind": "formula", "formula": "conc_mm * vol_ml * mw / 1000", "unit": "mg"},
+			},
+		}
+	case "seeding":
+		return map[string]any{
+			"kind": "calculator", "id": id, "schema": 1, "title": "细胞铺板计算", "mode": "formula",
+			"rows": []any{
+				map[string]any{"key": "density", "label": "实测悬液密度", "kind": "input", "value": 500000, "unit": "cells/mL"},
+				map[string]any{"key": "per_well", "label": "每孔目标细胞数", "kind": "input", "value": 5000, "unit": "cells"},
+				map[string]any{"key": "well_ul", "label": "每孔接种体积", "kind": "input", "value": 100, "unit": "uL"},
+				map[string]any{"key": "wells", "label": "铺板总孔数 (含余量)", "kind": "input", "value": 60, "unit": "孔"},
+				map[string]any{"key": "susp_ml", "label": "需取细胞悬液", "kind": "formula", "formula": "per_well * wells / density", "unit": "mL"},
+				map[string]any{"key": "med_ml", "label": "补加培养基", "kind": "formula", "formula": "well_ul * wells / 1000 - per_well * wells / density", "unit": "mL"},
+			},
+		}
+	case "blank":
+		return map[string]any{
+			"kind": "calculator", "id": id, "schema": 1, "title": "参数公式计算表", "mode": "formula",
+			"rows": []any{
+				map[string]any{"key": "a", "label": "输入参数 A", "kind": "input", "value": 10, "unit": "uL"},
+				map[string]any{"key": "b", "label": "倍率 / 样本数", "kind": "input", "value": 3, "unit": ""},
+				map[string]any{"key": "res", "label": "计算输出", "kind": "formula", "formula": "a * b", "unit": "uL"},
+			},
+		}
+	default: // dilution
+		return map[string]any{
+			"kind": "calculator", "id": id, "schema": 1, "title": "母液稀释配制", "mode": "formula",
+			"rows": []any{
+				map[string]any{"key": "c1", "label": "母液浓度 (C1)", "kind": "input", "value": 10, "unit": "mM"},
+				map[string]any{"key": "c2", "label": "目标浓度 (C2)", "kind": "input", "value": 0.5, "unit": "mM"},
+				map[string]any{"key": "v2", "label": "配置总体积 (V2)", "kind": "input", "value": 1000, "unit": "uL"},
+				map[string]any{"key": "v1", "label": "取母液体积 (V1)", "kind": "formula", "formula": "v2 * c2 / c1", "unit": "uL"},
+				map[string]any{"key": "dil", "label": "补加稀释液", "kind": "formula", "formula": "v2 - v2 * c2 / c1", "unit": "uL"},
+			},
+		}
+	}
+}
+
+func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
+	tok := theme.GetTokens(c.Theme())
+	prevStep := v.StepID
+	v.StepID = step.ID
+	defer func() { v.StepID = prevStep }()
+	editable := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
+	stepTitle := firstNonEmpty(textValue(step.Data, "title"), step.ID)
+	blocks := mapSlice(step.Data["blocks"])
+
+	buildInsertMenu := func(m *components.Menu, insertIdx int) {
+		if m.Item("文本段落").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "prose"))
+		}
+		if m.Item("检查清单").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "checklist"))
+		}
+		if m.Item("计时器").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "timer"))
+		}
+		m.Separator()
+		if m.Item("实验分组表").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "group_table"))
+		}
+		if m.Item("实验条件参数表").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "param_table"))
+		}
+		if m.Item("孔板 / 管架").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "plate"))
+		}
+		if m.Item("通用数据记录表").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "data_table"))
+		}
+		m.Group("定量计算表", func(sub *components.Menu) {
+			if sub.Item("母液稀释 (C1·V1=C2·V2)").Chosen() {
+				v.OnInsertStepBlock(step.ID, insertIdx, DefaultCalculatorPreset(v.Doc, step.ID, "dilution"))
+			}
+			if sub.Item("预混液体系配制").Chosen() {
+				v.OnInsertStepBlock(step.ID, insertIdx, DefaultCalculatorPreset(v.Doc, step.ID, "mastermix"))
+			}
+			if sub.Item("摩尔配液称量").Chosen() {
+				v.OnInsertStepBlock(step.ID, insertIdx, DefaultCalculatorPreset(v.Doc, step.ID, "molar"))
+			}
+			if sub.Item("细胞计数铺板").Chosen() {
+				v.OnInsertStepBlock(step.ID, insertIdx, DefaultCalculatorPreset(v.Doc, step.ID, "seeding"))
+			}
+			if sub.Item("空白参数公式表").Chosen() {
+				v.OnInsertStepBlock(step.ID, insertIdx, DefaultCalculatorPreset(v.Doc, step.ID, "blank"))
+			}
+		})
+		m.Separator()
+		if m.Item("图片 / 示意图").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "figure"))
+		}
+		if m.Item("附件与采图").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "attachment"))
+		}
+		if m.Item("子流程").Chosen() {
+			v.OnInsertStepBlock(step.ID, insertIdx, defaultStarterBlock(v.Doc, step.ID, "subflow"))
+		}
+		if sharedBlockClipboard != nil {
+			m.Separator()
+			if m.Item("粘贴已复制组件").Shortcut("Ctrl+V").Chosen() {
+				clone := cloneAnyMap(sharedBlockClipboard)
+				delete(clone, "id")
+				v.OnInsertStepBlock(step.ID, insertIdx, clone)
+			}
+		}
+	}
+
+	renderHoverInsertGap := func(insertIdx int, alwaysShow bool) {
+		if !editable || v.OnInsertStepBlock == nil {
+			return
+		}
+		gapBox := ui.Row(c.Key(fmt.Sprintf("gap-%s-%d", step.ID, insertIdx))).FillWidth().
+			Height(float32(tok.Spacing16)).AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+		hovered := gapBox.Hovered()
+		targetOp := float32(0)
+		if hovered || alwaysShow {
+			targetOp = 1
+		}
+		op := gapBox.AnimateTo("gap-op", targetOp, theme.MotionMicroFade)
+		gapBox.Opacity(op).Children(func() {
+			if op > 0.02 || hovered || alwaysShow {
+				ui.Box(c).Grow(1).Height(1).Background(tok.Accent.Alpha(.35))
+				plusBtn := components.IconButton(c, lucide.Plus(), "在此处插入组件", components.IconButtonCompact)
+				components.MenuButton(c, plusBtn, func(m *components.Menu) {
+					buildInsertMenu(m, insertIdx)
+				})
+				ui.Box(c).Grow(1).Height(1).Background(tok.Accent.Alpha(.35))
+			}
+		})
+	}
+
+	// Compute subtle step-checklist completion state for instrument-style indicator settle
+	totalStepChecks, doneStepChecks := 0, 0
+	for _, bm := range blocks {
+		if textValue(bm, "kind") == "checklist" {
+			for _, it := range mapSlice(bm["items"]) {
+				totalStepChecks++
+				cid := textValue(it, "id")
+				doneInline, _ := it["done"].(bool)
+				if doneInline || v.CheckedItems[cid] || v.CheckedItems[step.ID+":"+cid] {
+					doneStepChecks++
+				}
+			}
+		}
+	}
+
+	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+		// Clean Obsidian H2 Step Heading (borderless inline editable in Edit mode)
+		ui.Row(c.Key("live-step-hdr:"+step.ID)).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			if editable {
+				stBuf := v.ensureWidgetDraft("live_step_t:"+step.ID, stepTitle)
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					ti := BorderlessTextInput(c, tok, stBuf, float32(tok.TextSection), true, "步骤标题…")
+					if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*stBuf) != "" && strings.TrimSpace(*stBuf) != stepTitle) {
+						if v.OnUpdateModule != nil {
+							v.OnUpdateModule(step.ID, map[string]any{"title": strings.TrimSpace(*stBuf)})
+						} else if v.Doc != nil && v.OnChange != nil {
+							if nextSrc, uErr := v.Doc.UpdateModule(step.ID, map[string]any{"title": strings.TrimSpace(*stBuf)}); uErr == nil {
+								v.OnChange(nextSrc)
+							}
+						}
+					}
+				})
+			} else {
+				ui.Text(c, stepTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+			}
+			if totalStepChecks > 0 {
+				allDone := doneStepChecks == totalStepChecks
+				pillBox := ui.Row(c.Key("step-chk-prog:"+step.ID)).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).
+					Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Shrink(0)
+				targetBg := ui.Transparent
+				targetFg := tok.TextMuted
+				if allDone {
+					targetBg = tok.Success.Alpha(.10)
+					targetFg = tok.Success
+				}
+				pillBox.Background(pillBox.AnimateColor("sbg", targetBg, theme.MotionSnappy))
+				fgCol := pillBox.AnimateColor("sfg", targetFg, theme.MotionSnappy)
+				pillBox.Children(func() {
+					ico := lucide.CircleDot()
+					if allDone {
+						ico = lucide.Check()
+					}
+					ui.Icon(c, ico).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(fgCol).ContentTransition(theme.IconMorph())
+					lbl := fmt.Sprintf("本步核对 %d / %d", doneStepChecks, totalStepChecks)
+					if allDone {
+						lbl = fmt.Sprintf("本步核对已就绪 (%d/%d)", doneStepChecks, totalStepChecks)
+					}
+					ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fgCol).SingleLine().
+						FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
+				})
+			}
+		})
+		if len(blocks) == 0 && len(stringList(step.Data, "block_refs")) == 0 {
+			if editable {
+				ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), 0).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "空步骤 · 点击 + 插入文本、表格、孔板或计时器").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					renderHoverInsertGap(0, true)
+				})
+			}
+			return
+		}
+
+		for idx, bm := range blocks {
+			idx, bm := idx, bm
+			bk := textValue(bm, "kind")
+			bid := textValue(bm, "id")
+			bs := int(numOrZero(bm["schema"]))
+			if bs <= 0 {
+				bs = 1
+			}
+
+			blockRow := ui.Row(c.Key("blk-row-"+bid)).FillWidth().AlignItems(ui.Start).
+				Gap(float32(tok.Spacing4)).Transition(theme.AccordionTransition())
+			rowHovered := blockRow.Hovered()
+			blockRow.Children(func() {
+				if editable {
+					grip := ui.Box(c.Key("grip-"+bid)).Width(float32(tok.Spacing16)).Height(float32(tok.Spacing24)).
+						Center().Cursor(ui.CursorGrab).Label("操作块 " + bid)
+					gripTarget := float32(0)
+					if rowHovered {
+						gripTarget = 1
+					}
+					gripOp := grip.AnimateTo("grip-op", gripTarget, theme.MotionMicroFade)
+					grip.Opacity(gripOp).Children(func() {
+						ui.Icon(c, lucide.GripVertical()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+					})
+					grip.Drag(stepBlockDrag{StepID: step.ID, BlockID: bid, FromIndex: idx})
+					components.ContextMenu(c, grip, func(m *components.Menu) {
+						v.buildBlockContextMenu(m, step.ID, bid, idx, len(blocks), bm)
+					})
+				}
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					v.RenderModule(c, bk, bs, bm)
+				})
+			})
+
+			if editable {
+				components.ContextMenu(c, blockRow, func(m *components.Menu) {
+					v.buildBlockContextMenu(m, step.ID, bid, idx, len(blocks), bm)
+				})
+				if dragged, over := ui.DragOver[stepBlockDrag](blockRow); over && dragged.StepID == step.ID && dragged.FromIndex != idx {
+					blockRow.Border(2, tok.Accent)
+				}
+				if dragged, dropped := ui.Drop[stepBlockDrag](blockRow); dropped && dragged.StepID == step.ID && dragged.FromIndex != idx {
+					if v.OnMoveStepBlockIndex != nil {
+						v.OnMoveStepBlockIndex(step.ID, dragged.BlockID, idx)
+					}
+				}
+				// Check slash menu open trigger from prose block
+				slashOpen := ui.Local(c.Root(), "slash-menu-step:"+step.ID+":"+bid, func() bool { return false })
+				if *slashOpen && v.OnInsertStepBlock != nil {
+					components.Popover(c, blockRow, slashOpen, func(panel ui.Element) {
+						panel.Width(float32(tok.Spacing48)*5).Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Text(c, "插入组件").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+							for _, ent := range []paletteEntry{
+								{Kind: "prose", Label: "文本段落", Icon: lucide.FileText()},
+								{Kind: "checklist", Label: "检查清单", Icon: lucide.SquareCheck()},
+								{Kind: "timer", Label: "计时器", Icon: lucide.Timer()},
+								{Kind: "param_table", Label: "参数表", Icon: lucide.SlidersHorizontal()},
+								{Kind: "group_table", Label: "分组表", Icon: lucide.Table2()},
+								{Kind: "plate", Label: "孔板 / 管架", Icon: lucide.Grid2x2()},
+								{Kind: "data_table", Label: "数据记录表", Icon: lucide.Table2()},
+								{Kind: "calculator", Label: "稀释计算表", Icon: lucide.Calculator()},
+								{Kind: "figure", Label: "图片 / 示意图", Icon: lucide.Image()},
+								{Kind: "attachment", Label: "附件与采图", Icon: lucide.Paperclip()},
+								{Kind: "subflow", Label: "子流程", Icon: lucide.GitBranch()},
+							} {
+								ent := ent
+								if components.Button(c, ent.Label, components.ButtonGhost).Clicked() {
+									*slashOpen = false
+									v.OnInsertStepBlock(step.ID, idx+1, defaultStarterBlock(v.Doc, step.ID, ent.Kind))
+								}
+							}
+						})
+					})
+				}
+			}
+			renderHoverInsertGap(idx+1, false)
+		}
+
+		// Resolved top-level block_refs
+		for _, refID := range stringList(step.Data, "block_refs") {
+			if v.Doc == nil {
+				continue
+			}
+			for i := range v.Doc.Modules {
+				if v.Doc.Modules[i].ID == refID {
+					m := v.Doc.Modules[i]
+					v.RenderModule(c, m.Kind, m.Schema, m.Data)
+					break
+				}
+			}
+		}
+	})
+}
+
+func (v *View) buildBlockContextMenu(m *components.Menu, stepID, blockID string, idx, total int, bm map[string]any) {
+	if m.Item("剪切").Shortcut("Ctrl+X").Chosen() {
+		sharedBlockClipboard = cloneAnyMap(bm)
+		if v.OnRemoveStepBlock != nil {
+			v.OnRemoveStepBlock(stepID, blockID)
+		}
+	}
+	if m.Item("复制").Shortcut("Ctrl+C").Chosen() {
+		sharedBlockClipboard = cloneAnyMap(bm)
+	}
+	if m.Item("粘贴到下方").Shortcut("Ctrl+V").Disabled(sharedBlockClipboard == nil || v.OnInsertStepBlock == nil).Chosen() {
+		clone := cloneAnyMap(sharedBlockClipboard)
+		delete(clone, "id")
+		v.OnInsertStepBlock(stepID, idx+1, clone)
+	}
+	if m.Item("创建副本").Shortcut("Ctrl+D").Chosen() {
+		if v.OnDuplicateBlock != nil {
+			v.OnDuplicateBlock(stepID, blockID)
+		} else if v.OnInsertStepBlock != nil {
+			clone := cloneAnyMap(bm)
+			delete(clone, "id")
+			v.OnInsertStepBlock(stepID, idx+1, clone)
+		}
+	}
+	m.Separator()
+	if m.Item("上移").Disabled(idx == 0).Chosen() && v.OnMoveStepBlockIndex != nil {
+		v.OnMoveStepBlockIndex(stepID, blockID, idx-1)
+	}
+	if m.Item("下移").Disabled(idx >= total-1).Chosen() && v.OnMoveStepBlockIndex != nil {
+		v.OnMoveStepBlockIndex(stepID, blockID, idx+1)
+	}
+	m.Separator()
+	if m.Item("删除").Shortcut("Del").Chosen() && v.OnRemoveStepBlock != nil {
+		v.OnRemoveStepBlock(stepID, blockID)
 	}
 }

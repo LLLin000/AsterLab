@@ -328,11 +328,203 @@ func volumeToUL(val float64, unit string) (float64, string, bool) {
 	}
 }
 
+func collectCalcContextVars(doc *Document, actuals *CalcActualContext) (map[string]float64, []string) {
+	vars := map[string]float64{}
+	var usedActuals []string
+	if doc != nil {
+		flat, _ := flattenModules(doc.Modules)
+		totalWells := 0
+		groupWells := map[string]int{}
+		for _, m := range flat {
+			switch m.Kind {
+			case "param_table":
+				for _, rm := range mapSlice(m.Data["rows"]) {
+					k := strings.TrimSpace(textValue(rm, "key"))
+					if k == "" {
+						continue
+					}
+					if n, ok := numericValue(rm["value"]); ok {
+						vars[k] = n
+						vars["param_"+k] = n
+					}
+					if act, ok := numericValue(rm["actual"]); ok {
+						vars[k] = act
+						vars["param_"+k] = act
+					}
+				}
+			case "plate":
+				excluded := map[string]bool{}
+				for _, w := range calcStringSlice(m.Data["excluded_wells"]) {
+					excluded[strings.ToUpper(strings.TrimSpace(w))] = true
+				}
+				if gm, ok := m.Data["groups"].(map[string]any); ok {
+					for gKey, raw := range gm {
+						wells := calcStringSlice(raw)
+						cnt := 0
+						for _, w := range wells {
+							if !excluded[strings.ToUpper(strings.TrimSpace(w))] {
+								cnt++
+							}
+						}
+						totalWells += cnt
+						groupWells[gKey] += cnt
+					}
+				}
+			}
+		}
+		if totalWells > 0 {
+			vars["plate_wells"] = float64(totalWells)
+			vars["n_wells"] = float64(totalWells)
+		}
+		for gk, cnt := range groupWells {
+			vars["group_"+sanitizeCalcVar(gk)+"_wells"] = float64(cnt)
+		}
+	}
+	if actuals != nil {
+		for k, v := range actuals.Params {
+			vars[k] = v
+			vars["param_"+k] = v
+			usedActuals = append(usedActuals, fmt.Sprintf("%s=%s", k, formatNumber(v)))
+		}
+	}
+	sort.Strings(usedActuals)
+	return vars, usedActuals
+}
+
+func calcStringSlice(raw any) []string {
+	var out []string
+	switch v := raw.(type) {
+	case []string:
+		return append(out, v...)
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+func sanitizeCalcVar(s string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+func expandCalcFormulaRefs(expr string) string {
+	out := strings.ReplaceAll(expr, "@plate.wells", "plate_wells")
+	for {
+		idx := strings.Index(out, "@group.")
+		if idx < 0 {
+			break
+		}
+		rest := out[idx+len("@group."):]
+		end := strings.Index(rest, ".wells")
+		if end < 0 {
+			break
+		}
+		gid := sanitizeCalcVar(rest[:end])
+		out = out[:idx] + "group_" + gid + "_wells" + rest[end+len(".wells"):]
+	}
+	for {
+		idx := strings.Index(out, "@param.")
+		if idx < 0 {
+			break
+		}
+		rest := out[idx+len("@param."):]
+		end := 0
+		for end < len(rest) && (unicode.IsLetter(rune(rest[end])) || unicode.IsDigit(rune(rest[end])) || rest[end] == '_') {
+			end++
+		}
+		if end == 0 {
+			break
+		}
+		out = out[:idx] + "param_" + rest[:end] + rest[end:]
+	}
+	return out
+}
+
+func evalCalculatorRows(doc *Document, data map[string]any, actuals *CalcActualContext) (CalcResult, bool) {
+	rows := mapSlice(data["rows"])
+	if len(rows) == 0 {
+		return CalcResult{}, false
+	}
+	res := CalcResult{Mode: firstNonEmpty(textValue(data, "mode"), "formula")}
+	vars, usedActuals := collectCalcContextVars(doc, actuals)
+	res.UsedActuals = usedActuals
+
+	var lastSummary string
+	for _, rm := range rows {
+		key := strings.TrimSpace(textValue(rm, "key"))
+		label := firstNonEmpty(textValue(rm, "label"), key, "条目")
+		unit := textValue(rm, "unit")
+		note := textValue(rm, "note")
+		formula := strings.TrimSpace(textValue(rm, "formula"))
+		if formula == "" {
+			valStr := strings.TrimSpace(fmt.Sprintf("%v", rm["value"]))
+			var val float64
+			var ok bool
+			if strings.HasPrefix(valStr, "@") {
+				expanded := expandCalcFormulaRefs(valStr)
+				if v, exists := vars[expanded]; exists {
+					val, ok = v, true
+				}
+			}
+			if !ok {
+				val, ok = numericValue(rm["value"])
+			}
+			if ok && key != "" {
+				vars[key] = val
+			}
+			if ok {
+				res.Rows = append(res.Rows, CalcRow{
+					Label:  label,
+					Amount: round4(val),
+					Unit:   unit,
+					Note:   firstNonEmpty(note, "参数"),
+				})
+			}
+			continue
+		}
+		expanded := expandCalcFormulaRefs(formula)
+		val, err := EvalFormula(expanded, vars)
+		if err != nil {
+			res.Err = fmt.Errorf("%s: %w", label, err)
+			return res, true
+		}
+		if key != "" {
+			vars[key] = val
+		}
+		res.Rows = append(res.Rows, CalcRow{
+			Label:  label,
+			Amount: round4(val),
+			Unit:   unit,
+			Note:   firstNonEmpty(note, formula),
+		})
+		lastSummary = fmt.Sprintf("%s: %s", label, formatNumber(round4(val)))
+		if unit != "" {
+			lastSummary += " " + unit
+		}
+	}
+	res.Summary = lastSummary
+	return res, true
+}
+
 // EvalCalculatorWithActuals computes calculator@1 quantities, substituting live Run
 // measured parameters and upstream sample concentrations when supplied via actuals.
 func EvalCalculatorWithActuals(doc *Document, data map[string]any, actuals *CalcActualContext) CalcResult {
 	mode := textValue(data, "mode")
 	res := CalcResult{Mode: mode}
+	if rowRes, used := evalCalculatorRows(doc, data, actuals); used {
+		return rowRes
+	}
 	switch mode {
 	case "dilution":
 		sv, su, err := quantityParts(data["stock"])
@@ -429,11 +621,16 @@ func EvalCalculatorWithActuals(doc *Document, data map[string]any, actuals *Calc
 			groupCounts["总体系"] = int(sc)
 		}
 		totalUnits := 0
+		lblMap := PlateGroupLabelMap(doc)
 		for _, g := range groupOrder {
 			totalUnits += groupCounts[g]
 			groupVol := float64(groupCounts[g]) * vpuVal * (1 + excess)
+			gLabel := strings.TrimSpace(lblMap[g])
+			if gLabel == "" {
+				gLabel = g
+			}
 			res.Rows = append(res.Rows, CalcRow{
-				Label:  fmt.Sprintf("%s 体系 (%d 孔/份)", g, groupCounts[g]),
+				Label:  fmt.Sprintf("%s 体系 (%d 孔/份)", gLabel, groupCounts[g]),
 				Amount: round4(groupVol),
 				Unit:   vpuUnit,
 				Note:   fmt.Sprintf("含 %d%% 余量", int(math.Round(excess*100))),

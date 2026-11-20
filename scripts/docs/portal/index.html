@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AsterLab Engineering &amp; Product Handbook</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --surface: #f5f6f8;
+  --elevated: #ededf0;
+  --ink: #16171d;
+  --muted: #5b606e;
+  --border: rgba(22, 23, 29, 0.10);
+  --accent: #6c5ce7;
+  --accent-soft: #eeebff;
+  --code-bg: #f4f5f7;
+  --shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+}
+html[data-theme="dark"] {
+  --bg: #111215;
+  --surface: #16181d;
+  --elevated: #1e2027;
+  --ink: #eef0f6;
+  --muted: #98a0b2;
+  --border: rgba(255, 255, 255, 0.11);
+  --accent: #a596ff;
+  --accent-soft: #2a2645;
+  --code-bg: #191b22;
+  --shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  min-height: 54px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 20px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--ink); }
+.brand-badge {
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.top-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.search-input, .ref-select {
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink); font-size: 13px;
+}
+.search-input { width: 200px; max-width: 40vw; }
+.btn-pill {
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink); cursor: pointer; font-size: 13px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.btn-pill:hover { background: var(--elevated); text-decoration: none; }
+
+.layout {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 276px minmax(0, 1fr);
+  gap: 28px;
+  padding: 24px 24px 72px;
+}
+.sidebar {
+  position: sticky;
+  top: 74px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding-right: 8px;
+  font-size: 13.5px;
+}
+.nav-section { margin-bottom: 18px; }
+.nav-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); font-weight: 700; margin-bottom: 6px; padding-left: 8px;
+}
+.nav-link {
+  display: block; padding: 4px 10px; border-radius: 8px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.nav-link:hover, .nav-link.active { background: var(--elevated); color: var(--ink); text-decoration: none; }
+.nav-link.lvl-3 { padding-left: 22px; font-size: 12.5px; }
+.nav-link.doc-current { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+.content { min-width: 0; max-width: 1040px; }
+.meta-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 12.5px; color: var(--muted); padding: 8px 14px; margin-bottom: 18px;
+  background: var(--surface); border-radius: 10px; border: 1px solid var(--border);
+}
+.content h1 { font-size: 2rem; line-height: 1.22; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.02em; }
+.content h2 {
+  font-size: 1.45rem; margin-top: 42px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border); scroll-margin-top: 72px;
+}
+.content h3 { font-size: 1.15rem; margin-top: 28px; scroll-margin-top: 72px; }
+.content h4 { font-size: 1rem; margin-top: 20px; color: var(--muted); scroll-margin-top: 72px; }
+.anchor { color: var(--muted); opacity: 0; margin-right: 6px; font-weight: 400; }
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor { opacity: 0.65; }
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 10px 10px 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+}
+.callout-title { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+blockquote {
+  margin: 16px 0; padding: 10px 16px; border-left: 3px solid var(--border);
+  background: var(--surface); border-radius: 0 8px 8px 0; color: var(--muted);
+}
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em; background: var(--code-bg); padding: 2px 6px; border-radius: 6px;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px; overflow-x: auto; line-height: 1.5;
+}
+pre code { background: none; padding: 0; }
+.mermaid-wrap {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px; margin: 16px 0; overflow-x: auto; text-align: center;
+}
+.table-scroll { overflow-x: auto; margin: 16px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.data-table th, .data-table td {
+  border: 1px solid var(--border); padding: 8px 12px; text-align: left; vertical-align: top;
+}
+.data-table th { background: var(--surface); font-weight: 600; }
+
+.gallery-table { table-layout: fixed; }
+.gallery-table th {
+  background: var(--surface); padding: 8px 10px; font-size: 13px; text-align: left;
+  border: 1px solid var(--border);
+}
+.gallery-table td {
+  border: 1px solid var(--border); padding: 8px; vertical-align: top; background: var(--bg);
+}
+figure.shot {
+  margin: 4px 0; cursor: zoom-in; border-radius: 10px; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+figure.shot:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+figure.shot img {
+  width: 100%; height: auto; display: block; object-fit: contain;
+  max-height: 460px; background: var(--bg); min-height: 60px;
+}
+figure.shot figcaption {
+  padding: 6px 10px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border);
+}
+
+#lightbox {
+  position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center;
+  flex-direction: column; padding: 24px; background: rgba(10, 11, 15, 0.88); backdrop-filter: blur(10px);
+}
+#lightbox.open { display: flex; }
+#lightbox img { max-width: 92vw; max-height: 82vh; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+#lightbox .lb-cap { margin-top: 12px; color: #eef0f6; font-size: 14px; text-align: center; }
+#lightbox .lb-close, #lightbox .lb-prev, #lightbox .lb-next {
+  position: fixed; background: rgba(255,255,255,0.14); color: #fff;
+  border: none; border-radius: 999px; width: 42px; height: 42px; font-size: 20px; cursor: pointer;
+}
+#lightbox .lb-close { top: 18px; right: 22px; }
+#lightbox .lb-prev { left: 18px; top: 50%; transform: translateY(-50%); }
+#lightbox .lb-next { right: 18px; top: 50%; transform: translateY(-50%); }
+
+.loading { padding: 48px 0; text-align: center; color: var(--muted); }
+.menu-btn { display: none; }
+@media (max-width: 920px) {
+  .layout { grid-template-columns: 1fr; padding: 14px 14px 64px; }
+  .menu-btn { display: inline-flex; }
+  .sidebar {
+    display: none; position: fixed; left: 0; top: 54px; bottom: 0; width: 290px; max-height: none;
+    z-index: 50; background: var(--bg); padding: 16px; border-right: 1px solid var(--border);
+  }
+  .sidebar.open { display: block; }
+  .gallery-table, .gallery-table thead, .gallery-table tbody, .gallery-table tr, .gallery-table th, .gallery-table td {
+    display: block; width: 100%;
+  }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <button class="btn-pill menu-btn" id="menuBtn" type="button">☰ 目录</button>
+    <a href="?doc=docs/HANDBOOK.md" id="homeLink" style="color:inherit;text-decoration:none;">AsterLab Engineering Handbook</a>
+    <span class="brand-badge">Live GitHub Sync</span>
+  </div>
+  <div class="top-actions">
+    <input class="search-input" id="tocFilter" type="search" placeholder="过滤章节 (Ctrl+K)..." />
+    <select class="ref-select" id="refSelect" title="GitHub 分支">
+      <option value="feat/v2-generic-modules">feat/v2-generic-modules</option>
+      <option value="main">main</option>
+    </select>
+    <button class="btn-pill" id="refreshBtn" type="button" title="从 GitHub 重新拉取最新内容">🔄 同步</button>
+    <a class="btn-pill" id="ghSourceLink" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener">GitHub</a>
+    <button class="btn-pill" id="themeBtn" type="button">🌓 主题</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <div class="meta-bar" id="metaBar">
+      <span id="metaDoc">docs/HANDBOOK.md</span>
+      <span id="metaSync">正在从 GitHub 实时拉取...</span>
+    </div>
+    <article id="docContent"><div class="loading">正在同步 GitHub 最新文档与截图清单...</div></article>
+  </main>
+</div>
+
+<div id="lightbox">
+  <button class="lb-close" id="lbClose" type="button">×</button>
+  <button class="lb-prev" id="lbPrev" type="button">‹</button>
+  <button class="lb-next" id="lbNext" type="button">›</button>
+  <img id="lbImg" src="" alt="" />
+  <div class="lb-cap" id="lbCap"></div>
+</div>
+
+<script>
+(() => {
+  const OWNER_REPO = "LLLin000/AsterLab";
+  const CORE_DOCS = [
+    ["docs/HANDBOOK.md", "Handbook 全景手册"],
+    ["docs/README.md", "权威文档索引"],
+    ["docs/architecture.md", "系统架构与双端边界"],
+    ["docs/asterdoc-contract.md", "AsterML v2 SDK 契约"],
+    ["docs/sdk/v2-module-visual-catalog.md", "21 模块与 PDF 全图鉴"],
+    ["docs/product/design-system.md", "UI Design System"],
+    ["docs/product/ux-contract.md", "UX 交互契约"],
+    ["DESIGN.md", "DESIGN（v2 执行说明）"],
+    ["CONTEXT.md", "CONTEXT（领域术语）"],
+    ["AGENT_API.md", "AGENT_API（CLI/HTTP）"],
+  ];
+
+  const rootEl = document.documentElement;
+  const savedTheme = localStorage.getItem("asterlab-docs-theme") || "light";
+  rootEl.setAttribute("data-theme", savedTheme);
+
+  const params = new URLSearchParams(location.search);
+  let currentDoc = params.get("doc") || "docs/HANDBOOK.md";
+  let currentRef = params.get("ref") || localStorage.getItem("asterlab-docs-ref") || "feat/v2-generic-modules";
+
+  function rawBaseUrl(ref, path, cacheBust) {
+    const clean = path.replace(/^\/+/, "");
+    const qs = cacheBust ? `?t=${cacheBust}` : "";
+    if (location.hostname === "docs.asterlab.party") {
+      return `/gh/${ref}/${clean}${qs}`;
+    }
+    return `https://raw.githubusercontent.com/${OWNER_REPO}/${ref}/${clean}${qs}`;
+  }
+  function cdnFallbackUrl(ref, path) {
+    const clean = path.replace(/^\/+/, "");
+    return `https://cdn.jsdelivr.net/gh/${OWNER_REPO}@${ref}/${clean}`;
+  }
+
+  function normalizeRepoPath(curDocPath, relHref) {
+    const baseParts = curDocPath.split("/").slice(0, -1);
+    for (const seg of relHref.split("/")) {
+      if (!seg || seg === ".") continue;
+      if (seg === "..") {
+        if (baseParts.length) baseParts.pop();
+      } else {
+        baseParts.push(seg);
+      }
+    }
+    return baseParts.join("/");
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  function slugify(text) {
+    const plain = text
+      .replace(/`([^`]*)`/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .trim()
+      .toLowerCase();
+    let out = "";
+    for (const ch of plain) {
+      if (/[a-z0-9\u4e00-\u9fff_-]/i.test(ch)) out += ch;
+      else if (ch === " ") out += "-";
+    }
+    return out.replace(/^-+|-+$/g, "") || "section";
+  }
+
+  function resolveLink(href, curDoc) {
+    if (!href) return { href: "#", isDoc: false };
+    if (/^(https?:|mailto:|#)/i.test(href)) return { href, isDoc: false };
+    const hashIdx = href.indexOf("#");
+    const pathPart = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
+    const frag = hashIdx >= 0 ? href.slice(hashIdx) : "";
+    if (!pathPart) return { href: frag || "#", isDoc: false };
+    const repoRel = normalizeRepoPath(curDoc, pathPart.replace(/\\/g, "/"));
+    if (/\.(png|jpe?g|svg|webp|gif|pdf)$/i.test(repoRel)) {
+      return {
+        href: rawBaseUrl(currentRef, repoRel, ""),
+        fallback: cdnFallbackUrl(currentRef, repoRel),
+        isDoc: false,
+        isAsset: true,
+      };
+    }
+    if (/\.md$/i.test(repoRel)) {
+      return { href: `?doc=${encodeURIComponent(repoRel)}&ref=${encodeURIComponent(currentRef)}${frag}`, repoRel, frag, isDoc: true };
+    }
+    const ghFrag = /^#L\d+(-L\d+)?$/i.test(frag) ? frag : "";
+    return { href: `https://github.com/${OWNER_REPO}/blob/${currentRef}/${repoRel}${ghFrag}`, isDoc: false };
+  }
+
+  function renderInline(text, curDoc) {
+    const tokens = [];
+    const stash = (h) => {
+      const id = tokens.length;
+      tokens.push(h);
+      return `\u0000T${id}\u0000`;
+    };
+    let s = text.replace(/`([^`]+)`/g, (_, code) => stash(`<code>${escapeHtml(code)}</code>`));
+    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+      const r = resolveLink(url.trim(), curDoc);
+      const eAlt = escapeHtml(alt);
+      const fb = r.fallback ? ` data-fb="${escapeHtml(r.fallback)}"` : "";
+      return stash(
+        `<figure class="shot" data-zoom="${escapeHtml(r.href)}" data-caption="${eAlt}">` +
+        `<img src="${escapeHtml(r.href)}"${fb} alt="${eAlt}" loading="lazy" onerror="if(this.dataset.fb){this.src=this.dataset.fb;this.dataset.fb='';}" />` +
+        `<figcaption>${eAlt}</figcaption></figure>`
+      );
+    });
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+      const r = resolveLink(url.trim(), curDoc);
+      if (r.isDoc) {
+        return stash(`<a href="${escapeHtml(r.href)}" data-doc="${escapeHtml(r.repoRel)}" data-frag="${escapeHtml(r.frag || "")}">${renderInline(label, curDoc)}</a>`);
+      }
+      return stash(`<a href="${escapeHtml(r.href)}" target="_blank" rel="noopener noreferrer">${renderInline(label, curDoc)}</a>`);
+    });
+    s = escapeHtml(s);
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+    for (let i = 0; i < tokens.length; i++) s = s.replace(`\u0000T${i}\u0000`, tokens[i]);
+    return s;
+  }
+
+  function parseTableRow(line) {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map((c) => c.trim());
+  }
+
+  function renderMarkdown(md, curDoc) {
+    const lines = md.replace(/\r\n/g, "\n").split("\n");
+    const out = [];
+    const toc = [];
+    const slugCounts = {};
+    const uniqueSlug = (raw) => {
+      const base = slugify(raw);
+      const c = slugCounts[base] || 0;
+      slugCounts[base] = c + 1;
+      return c === 0 ? base : `${base}-${c}`;
+    };
+
+    function parseList(start) {
+      let i = start;
+      const baseIndent = lines[i].length - lines[i].trimStart().length;
+      const isOrd = /^\s*\d+\.\s+/.test(lines[i]);
+      const tag = isOrd ? "ol" : "ul";
+      const items = [];
+      while (i < lines.length) {
+        const line = lines[i];
+        if (!line.trim()) {
+          let j = i + 1;
+          while (j < lines.length && !lines[j].trim()) j++;
+          if (j < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[j])) {
+            const nxt = lines[j].length - lines[j].trimStart().length;
+            if (nxt >= baseIndent) { i = j; continue; }
+          }
+          break;
+        }
+        const m = line.match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
+        if (!m) break;
+        const ind = m[1].length;
+        if (ind < baseIndent) break;
+        if (ind > baseIndent) {
+          const [subHtml, nextI] = parseList(i);
+          i = nextI;
+          if (items.length) items[items.length - 1] = items[items.length - 1].replace(/<\/li>$/, subHtml + "</li>");
+          else items.push(`<li>${subHtml}</li>`);
+          continue;
+        }
+        if (/^\d/.test(m[2]) !== isOrd) break;
+        let text = m[3].trim();
+        i++;
+        while (i < lines.length && lines[i].trim() && !/^\s*([-*]|\d+\.)\s+/.test(lines[i]) && !/^(```|#)/.test(lines[i].trim())) {
+          const ci = lines[i].length - lines[i].trimStart().length;
+          if (ci > baseIndent) { text += " " + lines[i].trim(); i++; } else break;
+        }
+        items.push(`<li>${renderInline(text, curDoc)}</li>`);
+      }
+      return [`<${tag}>${items.join("")}</${tag}>`, i];
+    }
+
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const s = line.trim();
+      if (!s) { i++; continue; }
+      if (/^[-*_]{3,}$/.test(s)) { out.push("<hr />"); i++; continue; }
+
+      const fence = s.match(/^```(\w*)\s*$/);
+      if (fence) {
+        const lang = fence[1].toLowerCase();
+        i++;
+        const buf = [];
+        while (i < lines.length && !lines[i].trim().startsWith("```")) { buf.push(lines[i]); i++; }
+        i++;
+        if (lang === "mermaid") {
+          out.push(`<div class="mermaid-wrap"><pre class="mermaid">${escapeHtml(buf.join("\n"))}</pre></div>`);
+        } else {
+          out.push(`<pre><code class="language-${escapeHtml(lang)}">${escapeHtml(buf.join("\n"))}</code></pre>`);
+        }
+        continue;
+      }
+
+      const hm = s.match(/^(#{1,4})\s+(.+)$/);
+      if (hm) {
+        const lvl = hm[1].length;
+        const raw = hm[2].trim();
+        const slug = uniqueSlug(raw);
+        const htmlText = renderInline(raw, curDoc);
+        if (lvl === 2 || lvl === 3) {
+          toc.push({ level: lvl, id: slug, text: htmlText.replace(/<[^>]+>/g, "") });
+        }
+        out.push(`<h${lvl} id="${slug}"><a class="anchor" href="#${slug}">#</a>${htmlText}</h${lvl}>`);
+        i++;
+        continue;
+      }
+
+      if (s.startsWith(">")) {
+        const bq = [];
+        while (i < lines.length && lines[i].trim().startsWith(">")) {
+          bq.push(lines[i].trim().replace(/^>\s?/, ""));
+          i++;
+        }
+        let alertType = "";
+        if (bq.length) {
+          const am = bq[0].match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(.*)$/i);
+          if (am) {
+            alertType = am[1].toUpperCase();
+            bq.shift();
+            if (am[2].trim()) bq.unshift(am[2].trim());
+          }
+        }
+        const inner = bq.filter(Boolean).map((l) => renderInline(l, curDoc)).join("<br />");
+        if (alertType) {
+          out.push(`<aside class="callout"><div class="callout-title">${alertType}</div><div>${inner}</div></aside>`);
+        } else {
+          out.push(`<blockquote>${inner}</blockquote>`);
+        }
+        continue;
+      }
+
+      if (s.includes("|") && i + 1 < lines.length && /^\s*\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?\s*$/.test(lines[i + 1])) {
+        const headers = parseTableRow(lines[i]);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
+          rows.push(parseTableRow(lines[i]));
+          i++;
+        }
+        const isGallery = rows.some((r) => r.some((c) => c.includes("![")));
+        const cls = isGallery ? "gallery-table" : "data-table";
+        let t = `<div class="table-scroll"><table class="${cls}"><thead><tr>`;
+        t += headers.map((h) => `<th>${renderInline(h, curDoc)}</th>`).join("");
+        t += "</tr></thead><tbody>";
+        for (const r of rows) {
+          t += "<tr>" + headers.map((_, ci) => `<td>${renderInline(r[ci] || "", curDoc)}</td>`).join("") + "</tr>";
+        }
+        t += "</tbody></table></div>";
+        out.push(t);
+        continue;
+      }
+
+      if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+        const [lh, nextI] = parseList(i);
+        i = nextI;
+        out.push(lh);
+        continue;
+      }
+
+      const p = [];
+      while (i < lines.length) {
+        const c = lines[i];
+        const cs = c.trim();
+        if (!cs || /^(#{1,4}\s+|```|>|---|\*\*\*)/.test(cs) || /^\s*([-*]|\d+\.)\s+/.test(c) || (cs.includes("|") && i + 1 < lines.length && lines[i + 1].includes("---"))) break;
+        p.push(cs);
+        i++;
+      }
+      out.push(`<p>${p.map((x) => renderInline(x, curDoc)).join(" ")}</p>`);
+    }
+    return { html: out.join("\n"), toc };
+  }
+
+  let shots = [];
+  let lbIdx = -1;
+  const lb = document.getElementById("lightbox");
+  const lbImg = document.getElementById("lbImg");
+  const lbCap = document.getElementById("lbCap");
+  function openLb(idx) {
+    if (idx < 0 || idx >= shots.length) return;
+    lbIdx = idx;
+    lbImg.src = shots[idx].url;
+    lbCap.textContent = `${shots[idx].caption} (${idx + 1}/${shots.length})`;
+    lb.classList.add("open");
+  }
+
+  function renderSidebar(toc) {
+    const sb = document.getElementById("sidebar");
+    let h = `<div class="nav-section"><div class="nav-label">本页目录</div>`;
+    for (const item of toc) {
+      h += `<a class="nav-link lvl-${item.level}" href="#${item.id}">${escapeHtml(item.text)}</a>`;
+    }
+    h += `</div><div class="nav-section"><div class="nav-label">权威专章</div>`;
+    for (const [docPath, label] of CORE_DOCS) {
+      const cls = docPath === currentDoc ? "nav-link doc-current" : "nav-link";
+      h += `<a class="${cls}" href="?doc=${encodeURIComponent(docPath)}&ref=${encodeURIComponent(currentRef)}" data-doc="${docPath}">${escapeHtml(label)}</a>`;
+    }
+    h += `</div>`;
+    sb.innerHTML = h;
+  }
+
+  async function loadDoc(docPath, frag = "", forceBust = false) {
+    currentDoc = docPath;
+    const refSel = document.getElementById("refSelect");
+    if (![...refSel.options].some((o) => o.value === currentRef)) {
+      refSel.add(new Option(currentRef, currentRef));
+    }
+    refSel.value = currentRef;
+    document.getElementById("metaDoc").textContent = `${currentDoc} @ ${currentRef}`;
+    document.getElementById("ghSourceLink").href = `https://github.com/${OWNER_REPO}/blob/${currentRef}/${currentDoc}`;
+    document.getElementById("homeLink").href = `?doc=docs/HANDBOOK.md&ref=${encodeURIComponent(currentRef)}`;
+
+    const bust = forceBust ? Date.now() : Math.floor(Date.now() / 30000);
+    const metaSync = document.getElementById("metaSync");
+    metaSync.textContent = "正在拉取 GitHub 最新内容...";
+    let mdText = "";
+    try {
+      let resp = await fetch(rawBaseUrl(currentRef, currentDoc, bust));
+      if (!resp.ok && currentRef === "main" && !params.get("ref")) {
+        currentRef = "feat/v2-generic-modules";
+        resp = await fetch(rawBaseUrl(currentRef, currentDoc, bust));
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      mdText = await resp.text();
+      metaSync.textContent = `已与 GitHub 同步 (${new Date().toLocaleTimeString()}) · 图片 0 VPS 存储`;
+    } catch (err) {
+      metaSync.textContent = `同步失败: ${err.message}`;
+      document.getElementById("docContent").innerHTML = `<aside class="callout"><div class="callout-title">FETCH ERROR</div><div>无法拉取 <code>${escapeHtml(currentDoc)}</code> (${escapeHtml(String(err))})</div></aside>`;
+      return;
+    }
+
+    const { html, toc } = renderMarkdown(mdText, currentDoc);
+    document.getElementById("docContent").innerHTML = html;
+    renderSidebar(toc);
+
+    shots = [...document.querySelectorAll("figure.shot")].map((fig, idx) => {
+      fig.addEventListener("click", () => openLb(idx));
+      return { url: fig.getAttribute("data-zoom"), caption: fig.getAttribute("data-caption") || "" };
+    });
+
+    if (frag) {
+      const target = document.getElementById(decodeURIComponent(frag.slice(1)));
+      if (target) target.scrollIntoView();
+    } else {
+      window.scrollTo({ top: 0 });
+    }
+
+    if (window.__renderMermaid) window.__renderMermaid();
+  }
+
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-doc]");
+    if (!a) return;
+    e.preventDefault();
+    const doc = a.getAttribute("data-doc");
+    const frag = a.getAttribute("data-frag") || "";
+    const url = `?doc=${encodeURIComponent(doc)}&ref=${encodeURIComponent(currentRef)}${frag}`;
+    history.pushState({ doc, ref: currentRef }, "", url);
+    document.getElementById("sidebar").classList.remove("open");
+    loadDoc(doc, frag);
+  });
+
+  window.addEventListener("popstate", () => {
+    const p = new URLSearchParams(location.search);
+    currentDoc = p.get("doc") || "docs/HANDBOOK.md";
+    currentRef = p.get("ref") || currentRef;
+    loadDoc(currentDoc, location.hash);
+  });
+
+  document.getElementById("themeBtn").addEventListener("click", () => {
+    const next = rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    rootEl.setAttribute("data-theme", next);
+    localStorage.setItem("asterlab-docs-theme", next);
+    if (window.__renderMermaid) window.__renderMermaid();
+  });
+  document.getElementById("refSelect").addEventListener("change", (e) => {
+    currentRef = e.target.value;
+    localStorage.setItem("asterlab-docs-ref", currentRef);
+    const url = `?doc=${encodeURIComponent(currentDoc)}&ref=${encodeURIComponent(currentRef)}${location.hash}`;
+    history.pushState({}, "", url);
+    loadDoc(currentDoc, location.hash, true);
+  });
+  document.getElementById("refreshBtn").addEventListener("click", () => loadDoc(currentDoc, location.hash, true));
+  document.getElementById("menuBtn").addEventListener("click", () => document.getElementById("sidebar").classList.toggle("open"));
+
+  const filter = document.getElementById("tocFilter");
+  filter.addEventListener("input", () => {
+    const q = filter.value.trim().toLowerCase();
+    document.querySelectorAll(".sidebar .nav-link").forEach((a) => {
+      a.style.display = !q || a.textContent.toLowerCase().includes(q) ? "block" : "none";
+    });
+  });
+
+  const closeLb = () => lb.classList.remove("open");
+  document.getElementById("lbClose").addEventListener("click", closeLb);
+  document.getElementById("lbPrev").addEventListener("click", () => openLb((lbIdx - 1 + shots.length) % shots.length));
+  document.getElementById("lbNext").addEventListener("click", () => openLb((lbIdx + 1) % shots.length));
+  lb.addEventListener("click", (e) => { if (e.target === lb) closeLb(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeLb();
+    if (lb.classList.contains("open")) {
+      if (e.key === "ArrowLeft") openLb((lbIdx - 1 + shots.length) % shots.length);
+      if (e.key === "ArrowRight") openLb((lbIdx + 1) % shots.length);
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); filter.focus(); }
+  });
+
+  // Auto-detect whether main already has a newer HANDBOOK.md when user didn't pin ?ref=
+  async function init() {
+    if (!params.get("ref")) {
+      try {
+        const res = await fetch(rawBaseUrl("main", "docs/HANDBOOK.md", Math.floor(Date.now() / 60000)));
+        if (res.ok) currentRef = "main";
+      } catch {}
+    }
+    loadDoc(currentDoc, location.hash);
+  }
+  init();
+})();
+</script>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+window.__renderMermaid = () => {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral" });
+  const nodes = document.querySelectorAll(".mermaid:not([data-processed])");
+  if (nodes.length) mermaid.run({ nodes });
+};
+window.__renderMermaid();
+</script>
+</body>
+</html>

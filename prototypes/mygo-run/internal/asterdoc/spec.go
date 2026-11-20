@@ -212,6 +212,22 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 		panic("asterdoc: missing module spec " + kind)
 	}
 	return func(data map[string]any) error {
+		allowed := make(map[string]bool, len(module.Inputs))
+		allowedNames := make([]string, 0, len(module.Inputs))
+		for _, input := range module.Inputs {
+			allowed[input.Name] = true
+			allowedNames = append(allowedNames, input.Name)
+		}
+		var unknown []string
+		for k := range data {
+			if !allowed[k] {
+				unknown = append(unknown, k)
+			}
+		}
+		if len(unknown) > 0 {
+			sort.Strings(unknown)
+			return fmt.Errorf("unknown field %q (allowed: %s)", unknown[0], strings.Join(allowedNames, ", "))
+		}
 		for _, input := range module.Inputs {
 			value, present := data[input.Name]
 			if !present || value == nil {
@@ -496,7 +512,19 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 						return fmt.Errorf("calculator sample_normalize needs positive sample_count or volume_per_unit")
 					}
 				case "formula":
-					if err := ValidateFormulaExpr(textValue(data, "formula")); err != nil {
+					if rows, hasRows := data["rows"].([]any); hasRows && len(rows) > 0 {
+						for _, raw := range rows {
+							rm, _ := raw.(map[string]any)
+							if textValue(rm, "label") == "" && textValue(rm, "key") == "" {
+								return fmt.Errorf("calculator row needs key or label")
+							}
+							if textValue(rm, "kind") == "formula" {
+								if err := ValidateFormulaExpr(textValue(rm, "formula")); err != nil {
+									return err
+								}
+							}
+						}
+					} else if err := ValidateFormulaExpr(textValue(data, "formula")); err != nil {
 						return err
 					}
 				default:

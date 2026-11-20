@@ -87,8 +87,8 @@ func ExportFrozenPDF(w io.Writer, title string, frozen FrozenAsterDoc, runID, pl
 	return ExportFrozenPDFWithRunRecords(w, title, frozen, runID, plan, "")
 }
 
-// ExportFrozenPDFWithRunRecords adds a Run record section to the verified
-// frozen document export.
+// ExportFrozenPDFWithRunRecords renders a verified frozen document into a
+// component-level A4 PDF with optional Run records appended.
 func ExportFrozenPDFWithRunRecords(w io.Writer, title string, frozen FrozenAsterDoc, runID, plan, runRecords string) error {
 	if !frozen.VerifySourceHash(frozen.Source) {
 		return fmt.Errorf("frozen source hash mismatch: document tampered after freeze")
@@ -97,20 +97,14 @@ func ExportFrozenPDFWithRunRecords(w io.Writer, title string, frozen FrozenAster
 	if err != nil {
 		return fmt.Errorf("frozen document parse failed: %w", err)
 	}
-	previews := []string{}
-	if markdown := strings.TrimSpace(markdownOutsideAsterLabFences(frozen.Source)); markdown != "" {
-		previews = append(previews, markdown)
-	}
-	if plan != "" {
-		previews = append(previews, "Experiment Plan\n"+plan)
-	}
-	if modules := StaticDocumentPreview(doc); modules != "" {
-		previews = append(previews, modules)
-	}
-	if strings.TrimSpace(runRecords) != "" {
-		previews = append(previews, runRecords)
-	}
-	return ExportPDFWithRun(w, title, fmt.Sprint(frozen.Revision), frozen.SourceHash, runID, previews)
+	return ExportDocumentPDF(w, doc, DocumentPDFOptions{
+		Title:      title,
+		Revision:   fmt.Sprint(frozen.Revision),
+		SourceHash: frozen.SourceHash,
+		RunID:      runID,
+		Plan:       plan,
+		RunRecords: runRecords,
+	})
 }
 
 func markdownOutsideAsterLabFences(source string) string {

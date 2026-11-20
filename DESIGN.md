@@ -1,30 +1,36 @@
 ---
 version: alpha
 name: AsterLab
-description: "AsterLab is a process-centered research design and execution workbench. Warm neutral canvas, one violet accent reserved for selection and primary action, hairline structure instead of card stacks, and a typography ladder where black body text always outranks gray labels."
+description: "AsterLab is a process-centered research design and execution workbench. Crisp Obsidian pure paper default (#ffffff / #f5f6f8 borderless cards) with selectable Cool Zinc and classic Warm Paper presets, Liquid Glass Light/Dark navigation capsules, restrained violet accent, and a typography ladder where crisp primary ink always outranks muted metadata."
 colors:
-  accent: "#5b45c9"
-  accent-hover: "#4b37ae"
-  accent-soft: "#efebfb"
-  accent-tint: "#faf8ff"
+  accent: "#6c5ce7"
+  accent-hover: "#5949d4"
+  accent-soft: "#eeebff"
+  accent-tint: "#f7f5ff"
   accent-line: "#cfc4f0"
-  ink: "#1c1b18"
-  ink-muted: "#5f5a52"
-  ink-subtle: "#8f897f"
-  canvas: "#f7f6f3"
-  sidebar: "#f1efea"
+  ink: "#18181b"
+  ink-muted: "#71717a"
+  ink-subtle: "#a1a1aa"
+  canvas: "#ffffff"
+  sidebar: "#f7f8fa"
   surface: "#ffffff"
-  surface-subtle: "#faf9f7"
-  surface-inset: "#f4f2ee"
-  hairline: "#e7e3db"
-  hairline-strong: "#d6d0c5"
-  hover: "#efece6"
-  warn: "#7a6233"
-  warn-soft: "#f6eedd"
-  plate-body: "#fbfaf7"
-  plate-line: "#e3ded4"
-  well-empty: "#f7f5f1"
-  well-empty-line: "#ded9cf"
+  surface-subtle: "#f5f6f8"
+  surface-inset: "#ededf0"
+  hairline: "#e7e9ee"
+  hairline-strong: "#d2d6df"
+  hover: "#f2f3f6"
+  dark-canvas: "#111215"
+  dark-surface: "#16181d"
+  dark-elevated: "#1e2027"
+  dark-accent: "#a596ff"
+  preset-zinc-canvas: "#f4f5f7"
+  preset-warm-canvas: "#f7f6f3"
+  warn: "#9a6715"
+  warn-soft: "#fef3c7"
+  plate-body: "#fbfcfd"
+  plate-line: "#e2e6ef"
+  well-empty: "#f8f9fb"
+  well-empty-line: "#dfe3ec"
   well-mapped: "#d7d0c2"
   well-mapped-line: "#a49a88"
 typography:
@@ -366,20 +372,20 @@ Design language must not flatten scientific meaning:
 - Controls: 28px minimum desktop target; plate wells 26px in top view.
 - Focus: 2px accent-line ring, never color alone.
 - State: selection uses background + text/outline, not only color.
-- Motion: 120ms hover, 200ms selection, 320ms plate expand; ease-out/in-out. No continuous animation when idle.
-- Reduced motion: switch to final state; do not animate data meaning.
+- Motion (canonical implementation in `prototypes/mygo-run/internal/theme/motion.go` and `docs/product/design-system.md` §10): 4-tier physical tokens — `MotionMicro` (`100ms` tactile press `0.97` / hover reveal), `MotionSnappy` (`160ms` critically-damped spring for shared magnetic pills, Oklab well dyeing, and floating plate bar exit `110ms`), `MotionFluid` (`220ms` for accordions, liquid 25% split-zone preview, and `NumericRoll`), and `MotionHero` (`260ms` for `figure`/`plate` lightbox and calendar grid switching), plus `ApplyNudge` (`±5px` underdamped error nudge). Never animate from `scale(0)` (`0.95–0.98` minimum), keep exits shorter than enters, and always use Oklab color interpolation.
+- Reduced motion: switch to final state; respect OS `Preferences.ReduceMotion` without animating data meaning.
 
 ## Review Checklist
 
-- [ ] One accent per view; mapped wells are neutral.
-- [ ] No card stack for repeated rows; hairlines + spacing carry structure.
+- [ ] One accent per view; mapped wells are neutral (or tinted smoothly via Oklab across explicit layers).
+- [ ] No card stack for repeated rows; hairlines + spacing carry structure (UnifiedLive borderless document paper + hover insertion lines).
 - [ ] Body 14 black > section 11 gray > field label 11 gray.
-- [ ] Mode tabs read as one segmented control.
-- [ ] Inspector fields are grouped, not a database dump.
-- [ ] Design / prepare / execute each have a different central object.
-- [ ] Frozen Run snapshot is visible; missing Protocol/manifest is stated, not filled.
+- [ ] Mode tabs (`编辑 | 阅读 | 源码`) read as one segmented control with shared-pill motion.
+- [ ] Inspector / right drawer fields (`步骤大纲 | 速算与计时`) stay folded until needed, not a database dump.
+- [ ] Obsidian peer split panes edit/preview the same single-source `.asterml` (`*vault.LiveDocument`) with inline execution state (`checklist.done`, `timer.status`, `param_table.actual`, `plate.layers`), while historical Run freeze stays intact for sealed Core audits.
 - [ ] Unknown and not-applicable states are text, not guessed values.
-- [ ] 96-well expansion and selection work; no idle animation.
+- [ ] 96-well expansion, multi-layer selection, and serial fill bar work smoothly; zero idle animation.
+- [ ] All `components.Dialog` overlays wrap a keyed outer box instead of passing `c.Key(...)` directly into `Dialog`.
 - [ ] The screen is understandable without reading the implementation notes.
 
 ## References

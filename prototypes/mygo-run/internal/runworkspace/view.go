@@ -151,6 +151,10 @@ type State struct {
 	Bench               *BenchState
 	// StepViews keeps per-task asterdoc.View instances for same-source ModeRun block rendering.
 	StepViews           map[string]*asterdoc.View
+	StepNotes           map[string]string
+	ShowStepNote        bool
+	StepNoteErr         string
+	StepNoteSaved       string
 	LoadError           string
 	Completing          bool
 	CompletionError     string
@@ -522,12 +526,9 @@ func runHeader(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			if vm.Status != "" {
 				statusPill(c, vm.Status, tokens)
 			}
-			if planRev := vm.DesignRevision; planRev > 0 || vm.AsterDocRevision > 0 {
-				if planRev == 0 {
-					planRev = vm.AsterDocRevision
-				}
-				ui.Text(c, fmt.Sprintf("冻结方案第 %d 版", planRev)).FontSize(float32(tokens.TextMeta)).
-					TextColor(t.TextMuted).FontFeatures("tnum")
+			if vm.DesignRevision > 0 || vm.AsterDocRevision > 0 {
+				ui.Text(c, "方案快照已锁定").FontSize(float32(tokens.TextMeta)).
+					TextColor(t.TextMuted)
 			}
 			ui.Text(c, fmt.Sprintf("%d/%d 步已完成", done, total)).FontSize(float32(tokens.TextMeta)).
 				TextColor(t.TextMuted).FontFeatures("tnum")
@@ -878,6 +879,11 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 			timelineTab(c, s, t, tokens)
 			return
 		}
+		if isV2Doc(s.VM) {
+			renderFrozenStepBlocks(c, s, task, t, tokens)
+			v2StepPanel(c, s, t, tokens, task)
+			return
+		}
 		// UX-P1: the bench (timers, skip/deviation entry, capture) leads the
 		// task column so the step's primary action stays in the first viewport.
 		renderBench(c, s, task, t, tokens)
@@ -889,6 +895,23 @@ func taskWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) {
 		})
 		s.ShowProcedure = open
 	})
+}
+
+func isV2Doc(vm *RunWorkspaceViewModel) bool {
+	if vm == nil || vm.FrozenDoc == nil {
+		return false
+	}
+	for _, m := range vm.FrozenDoc.Modules {
+		if m.Kind != "step" {
+			continue
+		}
+		blocks, _ := m.Data["blocks"].([]any)
+		refs, _ := m.Data["block_refs"].([]any)
+		if len(blocks) > 0 || len(refs) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // recordingWorkspace is the middle column at ≥1100: the same record projection
@@ -910,6 +933,10 @@ func recordingWorkspace(c *ui.Context, s *State, t *ui.Theme, tokens theme.Token
 			timelineTab(c, s, t, tokens)
 			return
 		}
+		if isV2Doc(s.VM) {
+			renderFrozenStepBlocks(c, s, task, t, tokens)
+			return
+		}
 		renderBench(c, s, task, t, tokens)
 		renderFrozenStepBlocks(c, s, task, t, tokens)
 		recordingLayer(c, s, t, tokens, task)
@@ -923,7 +950,184 @@ func propertiesPanel(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens) 
 	if task == nil {
 		return
 	}
+	if isV2Doc(s.VM) {
+		v2StepPanel(c, s, t, tokens, task)
+		return
+	}
 	procedureLayer(c, s, t, tokens, task)
+}
+
+func v2StepPanel(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {
+	if task == nil {
+		return
+	}
+	sv := s.StepViews[task.TaskKey]
+	paramCount, tableCellCount, checkedCount, skippedCount, assetCount := 0, 0, 0, 0, 0
+	if sv != nil {
+		for _, v := range sv.ActualParams {
+			if strings.TrimSpace(v) != "" {
+				paramCount++
+			}
+		}
+		for _, row := range sv.TableCells {
+			for _, cell := range row {
+				if strings.TrimSpace(cell) != "" {
+					tableCellCount++
+				}
+			}
+		}
+		for _, on := range sv.CheckedItems {
+			if on {
+				checkedCount++
+			}
+		}
+		for _, reason := range sv.SkippedItems {
+			if strings.TrimSpace(reason) != "" {
+				skippedCount++
+			}
+		}
+		for _, list := range sv.LinkedAssets {
+			assetCount += len(list)
+		}
+	}
+	if assetCount == 0 && task.Actual != nil {
+		assetCount = len(task.Actual.Files)
+	}
+	if assetCount == 0 && s.Callbacks.TaskAssets != nil {
+		assetCount = len(s.Callbacks.TaskAssets(task.TaskKey))
+	}
+
+	ui.Column(c).FillWidth().Padding(float32(tokens.Spacing16)).Radius(float32(tokens.PanelRadius)).
+		Background(tokens.Surface).Border(1, tokens.Border).Gap(float32(tokens.Spacing12)).Children(func() {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+			ui.Text(c, fallback(task.StepTitle, "当前步骤")).
+				FontSize(float32(tokens.TextSection)).FontWeight(600).TextColor(tokens.Text).Grow(1).MinWidth(0)
+			taskStatusPill(c, task.Status, t, tokens)
+		})
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tokens.Spacing8)).Children(func() {
+			components.Badge(c, "方案快照已锁定", components.BadgeOptions{Tone: components.BadgeNeutral})
+			if strings.TrimSpace(task.Timepoint) != "" {
+				components.Badge(c, task.Timepoint, components.BadgeOptions{Tone: components.BadgeAccent})
+			}
+		})
+
+		ui.Divider(c)
+		ui.Text(c, "实测填写概览").FontSize(float32(tokens.TextMeta)).Bold().TextColor(tokens.TextMuted)
+		ui.Row(c).FillWidth().Wrap().Gap(float32(tokens.Spacing8)).Children(func() {
+			components.Badge(c, fmt.Sprintf("实测参数 %d 项", paramCount))
+			components.Badge(c, fmt.Sprintf("数据单元格 %d 格", tableCellCount))
+			components.Badge(c, fmt.Sprintf("检查确认 %d 项", checkedCount))
+			if skippedCount > 0 {
+				components.Badge(c, fmt.Sprintf("豁免 %d 项", skippedCount), components.BadgeOptions{Tone: components.BadgeWarning})
+			}
+			if assetCount > 0 {
+				components.Badge(c, fmt.Sprintf("关联附件 %d 个", assetCount))
+			}
+		})
+
+		if len(task.Checks) > 0 {
+			ui.Divider(c)
+			checkList(c, s, t, tokens, task)
+		}
+
+		openChecks := len(s.openBlocking(task))
+		if task.Status != TaskStatusCompleted && task.Status != TaskStatusSkipped {
+			ui.Divider(c)
+			errorText := ""
+			if s.CompletionErrorTask == task.TaskKey {
+				errorText = s.CompletionError
+			}
+			if errorText != "" {
+				ui.Row(c).FillWidth().Padding(float32(tokens.Spacing8), float32(tokens.Spacing12)).
+					Radius(float32(tokens.ControlRadius)).Background(tokens.DangerBg).Border(1, tokens.DangerText).Children(func() {
+					ui.Text(c, "完成失败："+errorText).FontSize(float32(tokens.TextMeta)).TextColor(tokens.DangerText)
+				})
+			}
+			label := "完成本步骤"
+			if errorText != "" {
+				label = "重试完成本步骤"
+			} else if s.Completing {
+				label = "提交中…"
+			}
+			btn := components.Button(c, label, components.ButtonPrimary)
+			btn.Disabled(s.Completing || s.Callbacks.Complete == nil || openChecks > 0)
+			if btn.Clicked() && !s.Completing && s.Callbacks.Complete != nil && openChecks == 0 {
+				s.complete(task)
+			}
+			if openChecks > 0 {
+				ui.Text(c, fmt.Sprintf("请先完成上方 %d 项执行确认。", openChecks)).
+					FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
+			}
+		}
+
+		if s.Callbacks.AppendEvent != nil {
+			noteOpen := s.ShowStepNote
+			components.Collapsible(c, "步骤备注与异常记录", &noteOpen, components.CollapsibleOptions{}, func() {
+				if s.StepNotes == nil {
+					s.StepNotes = map[string]string{}
+				}
+				draft := s.StepNotes[task.TaskKey]
+				ui.Column(c).FillWidth().Gap(float32(tokens.Spacing8)).Children(func() {
+					ui.TextInput(c, &draft).Placeholder("记录本步观察现象或操作偏差…").FillWidth()
+					s.StepNotes[task.TaskKey] = draft
+					if strings.TrimSpace(s.StepNoteErr) != "" {
+						ui.Text(c, s.StepNoteErr).FontSize(float32(tokens.TextMeta)).TextColor(tokens.DangerText)
+					} else if s.StepNoteSaved == task.TaskKey {
+						ui.Text(c, "已写入执行记录").FontSize(float32(tokens.TextMeta)).TextColor(tokens.SuccessText)
+					}
+					ui.Row(c).FillWidth().Wrap().Gap(float32(tokens.Spacing8)).Children(func() {
+						canSend := strings.TrimSpace(draft) != ""
+						obsBtn := components.Button(c, "记录观察", components.ButtonSecondary)
+						obsBtn.Disabled(!canSend)
+						devBtn := components.Button(c, "记录偏差", components.ButtonGhost)
+						devBtn.Disabled(!canSend)
+						submitNote := func(isDev bool) {
+							stepPath, assayID, pvID, tp := eventScope(task)
+							ev := runs.ExecutionEventInput{
+								EventType: "observation",
+								Content:   strings.TrimSpace(draft),
+								Timepoint: tp,
+							}
+							if isDev {
+								ev.EventType = "deviation"
+								ev.Deviation = strings.TrimSpace(draft)
+							}
+							if assayID != "" {
+								ev.StepPath, ev.AssayID, ev.ProtocolVersionID = stepPath, assayID, pvID
+							}
+							if _, err := s.Callbacks.AppendEvent(task.TaskKey, ev); err != nil {
+								s.StepNoteErr = err.Error()
+								s.StepNoteSaved = ""
+							} else {
+								s.StepNoteErr = ""
+								s.StepNoteSaved = task.TaskKey
+								s.StepNotes[task.TaskKey] = ""
+							}
+						}
+						if canSend && obsBtn.Clicked() {
+							submitNote(false)
+						}
+						if canSend && devBtn.Clicked() {
+							submitNote(true)
+						}
+					})
+				})
+			})
+			s.ShowStepNote = noteOpen
+		}
+
+		if identity := frozenIdentity(task); len(identity) > 0 {
+			techOpen := s.ShowTechnical
+			components.Collapsible(c, "技术属性（只读）", &techOpen, components.CollapsibleOptions{}, func() {
+				ui.Column(c).FillWidth().Gap(float32(tokens.Spacing4)).Children(func() {
+					for _, line := range identity {
+						ui.Text(c, line).FontSize(float32(tokens.TextMeta)).TextColor(tokens.TextMuted)
+					}
+				})
+			})
+			s.ShowTechnical = techOpen
+		}
+	})
 }
 
 func procedureLayer(c *ui.Context, s *State, t *ui.Theme, tokens theme.Tokens, task *RunTaskViewModel) {

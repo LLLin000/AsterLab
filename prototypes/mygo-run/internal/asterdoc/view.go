@@ -83,14 +83,25 @@ type View struct {
 	ExpandedAsset        *AssetThumb
 	AssetZoom            float32
 	assetOpen            bool
-	HideStepHeader       bool
-	widgetTextDrafts     map[string]*string
-	widgetBoolDrafts     map[string]*bool
-	svgCache             map[string]*ui.SVG
-	imgCache             map[string]ui.ImageSource
-	imgLoading           map[string]bool
-	imgErrCache          map[string]string
-	calcScratch          map[string]map[string]*string
+	// UnifiedLive enables Obsidian Live-Preview single-source document behavior:
+	// frameless prose/checklist, inline auto-save, hover block handles & `+` lines,
+	// layer-based plate editing, table column popovers, and Ctrl+V figure paste.
+	UnifiedLive        bool
+	MobileCompact      bool
+	OnDuplicateBlock   func(stepID, blockID string)
+	OnImportAssetBytes func(data []byte, origName string) (string, error)
+	OnSavePlateExport  func(defaultName, format string, data []byte) error
+	OnLocatePantryCode func(code string)
+	OnSlashInsert      func(stepID string, afterIndex int, block map[string]any)
+	PantryLocationMap  map[string]string // reagent code/name -> human box/slot location
+	HideStepHeader     bool
+	widgetTextDrafts   map[string]*string
+	widgetBoolDrafts   map[string]*bool
+	svgCache           map[string]*ui.SVG
+	imgCache           map[string]ui.ImageSource
+	imgLoading         map[string]bool
+	imgErrCache        map[string]string
+	calcScratch        map[string]map[string]*string
 	// ExpandedPlate is the plate rendered in the full-screen overlay; it is
 	// editor state, not document state.
 	ExpandedPlate string
@@ -113,7 +124,16 @@ type View struct {
 	plateStates         map[string]*plateui.InteractionState
 	plateSelections     map[string][]string
 	plateInputDrafts    map[string]*string
+	plateFillMode       map[string]int // 0=单值, 1=平铺列表, 2=等比序列
+	plateSerialStart    map[string]*string
+	plateSerialUnit     map[string]*string
+	plateSerialFactor   map[string]*string
+	plateSerialDir      map[string]*string // "row" | "col"
+	plateAddLayerOpen   map[string]bool
+	plateAddLayerName   map[string]*string
 	overlayPlateState   plateui.InteractionState
+	openColPopover      string // "<moduleID>:<colKey>"
+	openFigSVGEdit      string
 	gridPointerDown     bool
 	gridPointerStart    ui.Point
 	gridDragging        bool
@@ -122,6 +142,20 @@ type View struct {
 	gridStart           ui.Point
 	gridLast            ui.Point
 	gridBase            []string
+}
+
+var (
+	sharedBlockClipboard map[string]any
+	sharedWellClipboard  []wellClipboardCell
+)
+
+type wellClipboardCell struct {
+	dRow    int
+	dCol    int
+	group   string
+	sample  string
+	role    string
+	factors map[string]string
 }
 
 // Can reports whether the host granted one business command.
@@ -167,7 +201,13 @@ func (v *View) Render(c *ui.Context) {
 	if v.Doc == nil {
 		return
 	}
-	protocol.RenderMarkdownWith(c, v.Doc.Source, v.codeBlock)
+	src := v.Doc.Source
+	if v.UnifiedLive {
+		if _, fmEnd, hasFM := ScanFrontmatter(src); hasFM && fmEnd <= len(src) {
+			src = src[fmEnd:]
+		}
+	}
+	protocol.RenderMarkdownWith(c, src, v.codeBlock)
 	v.plateOverlay(c)
 }
 
@@ -196,7 +236,57 @@ func (v *View) codeBlock(c *ui.Context, block *markdown.CodeBlockView) {
 
 // renderRegisteredModule checks the surface declared for this mode and then
 // renders the module through the registered implementation.
+func (v *View) renderUnifiedExperimentPurpose(c *ui.Context, moduleID string, data map[string]any) {
+	tok := theme.GetTokens(c.Theme())
+	obj := strings.TrimSpace(textValue(data, "objective"))
+	unit := strings.TrimSpace(textValue(data, "experimental_unit"))
+	editable := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
+	if !editable && obj == "" && unit == "" {
+		return
+	}
+	ui.Row(c.Key("live-exp-obj:"+moduleID)).FillWidth().Radius(float32(tok.ControlRadius)).
+		Background(tok.Text.Alpha(0.025)).Clip().Children(func() {
+		ui.Box(c).Width(2).FillHeight().Background(tok.Accent.Alpha(0.5))
+		ui.Row(c).Grow(1).MinWidth(0).Wrap().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+			AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Text(c, "实验目的").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine().Shrink(0)
+			if editable {
+				buf := v.ensureWidgetDraft("exp_obj:"+moduleID, obj)
+				ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*3).Children(func() {
+					ti := BorderlessTextInput(c, tok, buf, float32(tok.TextBody), false, "一句话说明本实验要验证的科学问题或目标…")
+					if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*buf) != obj) {
+						v.emitAnyModuleEdit(moduleID, map[string]any{"objective": strings.TrimSpace(*buf)})
+					}
+				})
+			} else if obj != "" {
+				ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*3).Children(func() {
+					ui.Text(c, obj).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+				})
+			}
+			if unit != "" {
+				components.Badge(c, unit)
+			}
+		})
+	})
+}
+
 func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind string, schema int, moduleID string, data map[string]any) {
+	if v.UnifiedLive {
+		switch kind {
+		case "workflow":
+			return
+		case "experiment":
+			v.renderUnifiedExperimentPurpose(c, moduleID, data)
+			return
+		case "step":
+			prevStep := v.StepID
+			v.StepID = moduleID
+			defer func() { v.StepID = prevStep }()
+			stepMod := Module{Kind: "step", ID: moduleID, Schema: schema, Data: data}
+			renderLiveStepComposer(v, c, &stepMod)
+			return
+		}
+	}
 	spec, ok := registry.Lookup(kind, schema)
 	if !ok {
 		v.rendererGap(c, kind, schema, "")
@@ -265,15 +355,61 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 	tok := theme.GetTokens(t)
 	dark := t != nil && t.Dark
 	factorDims := p.FactorDimensions()
+	layerSet := map[string]bool{}
+	var layerNames []string
+	addLayerName := func(n string) {
+		n = strings.TrimSpace(n)
+		if n != "" && !layerSet[n] {
+			layerSet[n] = true
+			layerNames = append(layerNames, n)
+		}
+	}
+	for _, d := range factorDims {
+		addLayerName(d)
+	}
+	for d := range p.Layers {
+		addLayerName(d)
+	}
+	sort.Strings(layerNames)
+
+	excludedSet := map[string]bool{}
+	for _, ew := range p.ExcludedWells {
+		excludedSet[strings.ToUpper(strings.TrimSpace(ew))] = true
+	}
+
 	geometry, _ := geometryForPlate(p.Format, p.Topology, p.Rows, p.Columns)
 	wells := map[string]plateui.WellState{}
 	for well, group := range p.WellGroups() {
+		fMap := copyStringMap(p.WellFactors(well))
+		for lName, lVals := range p.Layers {
+			if lv := strings.TrimSpace(lVals[well]); lv != "" {
+				fMap[lName] = lv
+			}
+		}
+		roleVal := p.Roles[well]
+		if excludedSet[strings.ToUpper(well)] && roleVal == "" {
+			roleVal = "blank"
+		}
 		wells[well] = plateui.WellState{
 			Group:     group,
 			SampleID:  p.Samples[well],
 			Replicate: p.Replicates[well],
-			Role:      p.Roles[well],
-			Factors:   p.WellFactors(well),
+			Role:      roleVal,
+			Factors:   fMap,
+		}
+	}
+	// Include layer-only wells that don't yet belong to a group
+	for lName, lVals := range p.Layers {
+		for well, lv := range lVals {
+			if strings.TrimSpace(lv) == "" {
+				continue
+			}
+			ws := wells[well]
+			if ws.Factors == nil {
+				ws.Factors = map[string]string{}
+			}
+			ws.Factors[lName] = lv
+			wells[well] = ws
 		}
 	}
 	if v.plateColorBy == nil {
@@ -298,8 +434,8 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 		colorBy = "group"
 	}
 	factorKey := v.plateFactorKey[p.ID]
-	if factorKey == "" && len(factorDims) > 0 {
-		factorKey = factorDims[0]
+	if factorKey == "" && len(layerNames) > 0 {
+		factorKey = layerNames[0]
 		v.plateFactorKey[p.ID] = factorKey
 	}
 
@@ -320,19 +456,27 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 	lblMap := PlateGroupLabelMap(v.Doc)
 
 	ui.Row(c).FillWidth().Children(func() {
-		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
-			Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Children(func() {
+		plateCard := ui.Column(c).FillWidth().Gap(float32(tok.Spacing8))
+		if v.UnifiedLive {
+			plateCard.Padding(float32(tok.Spacing4), 0)
+		} else {
+			plateCard.Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border)
+		}
+		plateCard.Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Column(c).Gap(float32(tok.Spacing4)).Children(func() {
 					renderInlineEditableTitle(v, c, p.ID, title, editable)
-					meta := p.ID
+					meta := fmt.Sprintf("%d 孔板 · 已排 %d 孔", p.Format, len(p.WellGroups()))
+					switch p.Topology {
+					case "rack_1d":
+						meta = fmt.Sprintf("%d 联管 / 泳道 · 已排 %d 位", geometry.Rows*geometry.Columns, len(p.WellGroups()))
+					case "dish":
+						meta = fmt.Sprintf("%d 区培养皿 · 已排 %d 区", geometry.Rows*geometry.Columns, len(p.WellGroups()))
+					}
 					if p.Timepoint != "" {
 						meta += " · " + p.Timepoint
 					}
-					if len(p.Samples) > 0 || len(factorDims) > 0 {
-						meta += fmt.Sprintf(" · 样本 %d · 维度 %d", len(p.Samples), len(factorDims))
-					}
-					ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 				})
 				ui.Spacer(c)
 				if v.ReadOnly {
@@ -345,46 +489,125 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 				}
 			})
 
-			plateui.View(c, plateui.Props{
-				Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns,
-				Topology: p.Topology, Roles: p.Roles, Interactive: editable,
-				SelectedIDs: selected,
-				OnSelect: func(ids []string) {
-					v.plateSelections[p.ID] = ids
-				},
-				ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap, Zoom: v.PlateZoom, State: st,
-			})
-
-			hasMultiLayer := len(factorDims) > 0 || len(p.Roles) > 0 || len(p.Samples) > 0
-			if hasMultiLayer && len(p.WellGroups()) > 0 {
-				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-					type layerChip struct {
-						mode, key, label string
-					}
-					var chips []layerChip
-					chips = append(chips, layerChip{"group", "", "分组"})
-					if len(p.Samples) > 0 {
-						chips = append(chips, layerChip{"sample", "", "样本"})
-					}
-					for _, dim := range factorDims {
-						chips = append(chips, layerChip{"factor", dim, dim})
-					}
-					if len(p.Roles) > 0 {
-						chips = append(chips, layerChip{"role", "", "孔角色"})
-					}
-					for _, ch := range chips {
-						ch := ch
-						active := colorBy == ch.mode && (ch.mode != "factor" || factorKey == ch.key)
-						variant := components.ButtonGhost
+			if v.UnifiedLive {
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "图层：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					renderLayerPill := func(key, label string, active bool, onClick func()) {
+						targetBg := tok.Surface
+						targetBd := tok.Border
+						targetFg := tok.TextMuted
 						if active {
-							variant = components.ButtonSecondary
+							targetBg = tok.AccentSoftBg
+							targetBd = tok.Accent
+							targetFg = tok.Text
 						}
-						if components.Button(c, ch.label, variant).Clicked() {
-							v.plateColorBy[p.ID] = ch.mode
-							if ch.mode == "factor" {
-								v.plateFactorKey[p.ID] = ch.key
-							}
+						btn := ui.ButtonBase(c.Key("pl-lpill:" + p.ID + ":" + key)).
+							Padding(float32(tok.Spacing4)*0.6, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+							Label(label)
+						btn.Background(btn.AnimateColor("lpbg", targetBg, theme.MotionSnappy)).
+							Border(1, btn.AnimateColor("lpbd", targetBd, theme.MotionSnappy))
+						fg := btn.AnimateColor("lpfg", targetFg, theme.MotionSnappy)
+						theme.ApplyTactilePress(btn)
+						btn.Children(func() {
+							ui.Text(c, label).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg)
+						})
+						if btn.Clicked() {
+							onClick()
 						}
+					}
+					renderLayerPill("__group__", "分组", colorBy == "group", func() {
+						v.plateColorBy[p.ID] = "group"
+					})
+					for _, lName := range layerNames {
+						lName := lName
+						renderLayerPill(lName, lName, colorBy == "factor" && factorKey == lName, func() {
+							v.plateColorBy[p.ID] = "factor"
+							v.plateFactorKey[p.ID] = lName
+						})
+					}
+					if editable {
+						addLayerBtn := components.IconButton(c, lucide.Plus(), "新建孔板图层", components.IconButtonCompact)
+						newLayerOpen := v.ensureWidgetBool("pl_new_layer_open:" + p.ID)
+						if addLayerBtn.Clicked() {
+							*newLayerOpen = !*newLayerOpen
+						}
+						components.Popover(c.Key("pl-new-layer:"+p.ID), addLayerBtn, newLayerOpen, func(panel ui.Element) {
+							panel.Width(float32(tok.Spacing48)*5).Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Text(c, "新建维度图层").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+								lBuf := v.ensureWidgetDraft("pl_new_layer_name:"+p.ID, "")
+								tb := components.TextBox(c, lBuf, components.TextBoxOptions{}).Placeholder("图层名（如 药物浓度、时间点）")
+								commitLayer := func() {
+									ln := strings.TrimSpace(*lBuf)
+									if ln != "" {
+										nextLayers := copyNestedFactorMap(p.Layers)
+										if nextLayers[ln] == nil {
+											nextLayers[ln] = map[string]string{}
+										}
+										v.emitAnyModuleEdit(p.ID, map[string]any{"layers": nextLayers})
+										v.plateColorBy[p.ID] = "factor"
+										v.plateFactorKey[p.ID] = ln
+										*lBuf = ""
+										*newLayerOpen = false
+									}
+								}
+								if tb.Submitted() {
+									commitLayer()
+								}
+								if components.Button(c, "创建图层", components.ButtonPrimary).Clicked() {
+									commitLayer()
+								}
+							})
+						})
+					}
+				})
+			}
+
+			plateGridBox := ui.Column(c.Key("plate-grid:" + p.ID)).FillWidth()
+			plateGridBox.Children(func() {
+				plateui.View(c, plateui.Props{
+					Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns,
+					Topology: p.Topology, Roles: p.Roles, Interactive: editable,
+					SelectedIDs: selected,
+					OnSelect: func(ids []string) {
+						v.plateSelections[p.ID] = ids
+					},
+					ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap, Zoom: v.PlateZoom, State: st,
+				})
+			})
+			if v.UnifiedLive {
+				components.ContextMenu(c, plateGridBox, func(m *components.Menu) {
+					if editable {
+						if m.Item("清空选区标注").Disabled(len(selected) == 0).Chosen() {
+							_ = v.assign(selected, "")
+							v.plateSelections[p.ID] = nil
+						}
+						if m.Item("复制选区标注").Disabled(len(selected) == 0).Chosen() {
+							v.copyPlateWellAnnotations(p, selected)
+						}
+						if m.Item("粘贴标注到选区").Disabled(len(selected) == 0 || len(sharedWellClipboard) == 0).Chosen() {
+							v.pastePlateWellAnnotations(p, ownerStepID, selected)
+						}
+						m.Separator()
+						if m.Item("反选孔位").Chosen() {
+							v.plateSelections[p.ID] = invertPlateSelection(geometry, selected)
+						}
+						if m.Item("选中最外圈边缘孔").Chosen() {
+							v.plateSelections[p.ID] = edgePlateWells(geometry)
+						}
+						if m.Item("标记 / 取消异常孔").Disabled(len(selected) == 0).Chosen() {
+							v.togglePlateExcludedWells(p, selected)
+						}
+						m.Separator()
+					}
+					if m.Item("导出布局 CSV").Chosen() {
+						csvText := formatPlateAsCSV(p, geometry)
+						c.Services().WriteClipboard(csvText)
+						if v.OnSavePlateExport != nil {
+							_ = v.OnSavePlateExport(p.ID+".csv", "csv", []byte(csvText))
+						}
+					}
+					if v.OnSavePlateExport != nil && m.Item("导出布局 PNG").Chosen() {
+						_ = v.OnSavePlateExport(p.ID+".png", "png", nil)
 					}
 				})
 			}
@@ -395,7 +618,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 						v.plateSelections[p.ID] = next
 					}, false, 1, nil)
 				} else {
-					ui.Text(c, "框选孔位后，在下方悬浮条直接输入处理、基因或样本名即可标注并自动生成复孔。").
+					ui.Text(c, "拖拽框选或点击行/列号选择孔位，在底部工具条直接输入名称即可标注（可用「+ 追加标签」交叉叠加）。").
 						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				}
 			}
@@ -506,6 +729,8 @@ func (v *View) applyPlateProps(plateID, ownerStepID string, props map[string]any
 	return nil
 }
 
+type plateHeroMatch struct{ PlateID string }
+
 // plateOverlay floats the enlarged plate over a dimmed canvas using the exact
 // same unified plateui.View component and floating single-input annotation bar.
 func (v *View) plateOverlay(c *ui.Context) {
@@ -569,7 +794,8 @@ func (v *View) plateOverlay(c *ui.Context) {
 			closeOverlay()
 		}
 		layer.Children(func() {
-			ui.Column(c).MaxWidth(float32(tok.Spacing48)*20).Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+			ui.Column(c.Key("plate-modal-col:"+plate.ID)).MaxWidth(float32(tok.Spacing48)*20).Gap(float32(tok.Spacing8)).
+				AlignItems(ui.Center).Transition(theme.DialogSurfaceTransition()).Children(func() {
 				ui.Box(c).Background(tok.Surface).Border(1, tok.Border).
 					Radius(float32(tok.DialogRadius)).Shadow(0, float32(tok.Spacing12), float32(tok.Spacing32), 0, ui.RGBA(0, 0, 0, .38)).
 					Padding(float32(tok.Spacing16), float32(tok.Spacing16)).Children(func() {
@@ -583,44 +809,18 @@ func (v *View) plateOverlay(c *ui.Context) {
 							}
 						}
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Column(c).Gap(2).Children(func() {
+							ui.Column(c).Gap(float32(tok.Spacing4) * 0.5).Children(func() {
 								ui.Text(c, plateTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-								meta := fmt.Sprintf("%s · %d 孔 · 已选 %d 孔", plate.ID, plate.Format, len(v.ExpandedWells))
-								if len(factorDims) > 0 {
-									meta += " · 维度：" + strings.Join(factorDims, " / ")
+								meta := fmt.Sprintf("%d 孔板 · 已排 %d 孔", plate.Format, len(plate.WellGroups()))
+								if plate.Topology == "rack_1d" {
+									meta = fmt.Sprintf("%d 联管 / 泳道 · 已排 %d 位", geometry.Rows*geometry.Columns, len(plate.WellGroups()))
 								}
-								ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								if len(v.ExpandedWells) > 0 {
+									meta += fmt.Sprintf(" · 当前已选 %d 孔", len(v.ExpandedWells))
+								}
+								ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 							})
 							ui.Spacer(c)
-							if len(factorDims) > 0 || len(plate.Roles) > 0 || len(plate.Samples) > 0 {
-								ui.Row(c).Wrap().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
-									if components.Button(c, "分组", map[bool]components.ButtonVariant{true: components.ButtonSecondary, false: components.ButtonGhost}[colorBy == "group"]).Clicked() {
-										v.plateColorBy[plate.ID] = "group"
-										colorBy = "group"
-									}
-									if len(plate.Samples) > 0 {
-										if components.Button(c, "样本", map[bool]components.ButtonVariant{true: components.ButtonSecondary, false: components.ButtonGhost}[colorBy == "sample"]).Clicked() {
-											v.plateColorBy[plate.ID] = "sample"
-											colorBy = "sample"
-										}
-									}
-									for _, dim := range factorDims {
-										dim := dim
-										if components.Button(c, dim, map[bool]components.ButtonVariant{true: components.ButtonSecondary, false: components.ButtonGhost}[colorBy == "factor" && factorKey == dim]).Clicked() {
-											v.plateColorBy[plate.ID] = "factor"
-											v.plateFactorKey[plate.ID] = dim
-											colorBy = "factor"
-											factorKey = dim
-										}
-									}
-									if len(plate.Roles) > 0 {
-										if components.Button(c, "孔角色", map[bool]components.ButtonVariant{true: components.ButtonSecondary, false: components.ButtonGhost}[colorBy == "role"]).Clicked() {
-											v.plateColorBy[plate.ID] = "role"
-											colorBy = "role"
-										}
-									}
-								})
-							}
 						})
 						overlayZoom := zoom * 1.2
 						if geometry.Rows*geometry.Columns > 96 {

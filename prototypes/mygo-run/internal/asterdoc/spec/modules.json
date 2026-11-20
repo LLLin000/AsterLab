@@ -52,17 +52,19 @@
           "name": "topology",
           "type": "enum",
           "values": ["plate", "rack_1d", "dish", "cohort"],
-          "description": "容器拓扑类型，默认 plate"
+          "description": "容器拓扑类型，默认 plate：plate/dish/cohort 使用行列坐标（如 dish format:4 为 A1..B2，cohort format:24 为 A1..D6）；rack_1d 默认 1 行使用 \"1\"..\"N\" 泳道/槽位号"
         },
         {"name": "rows", "type": "int", "description": "自定义行数"},
         {"name": "columns", "type": "int", "description": "自定义列数"},
         {"name": "assay", "type": "reference", "target": "assay", "description": "关联检测 ID"},
         {"name": "timepoint", "type": "timepoint", "description": "所属时间点"},
-        {"name": "groups", "type": "well-map", "required": true, "description": "组别 ID 到孔位/槽位列表"},
-        {"name": "samples", "type": "object", "description": "孔位到显式 sample ID"},
-        {"name": "replicates", "type": "object", "description": "孔位到正整数技术重复编号"},
+        {"name": "groups", "type": "well-map", "required": true, "description": "组别 ID 到孔位/槽位列表（rack_1d 的 Marker 等对照泳道若未归组则只放 roles 不放 samples）"},
+        {"name": "samples", "type": "object", "description": "孔位到显式 sample ID（例如 {\"B2\": \"smp-ctrl-1\"}；建议与 replicates 成对填写以通过完整度检查）"},
+        {"name": "replicates", "type": "object", "description": "孔位到正整数技术重复编号（1, 2, ...）；只要填写了 replicates，对应孔位必须在 samples 中声明 sample_id"},
         {"name": "roles", "type": "object", "description": "孔位到角色（sample/blank/vehicle/positive_control/negative_control/standard/ntc）"},
-        {"name": "factors", "type": "object", "description": "正交实验因子标注映射（因子维度名 -> 孔位 -> 因子水平，如 靶点基因、加药浓度）"}
+        {"name": "factors", "type": "object", "description": "正交实验因子标注映射（因子维度名 -> 孔位 -> 因子水平，如 靶点基因、加药浓度）"},
+        {"name": "layers", "type": "object", "description": "统一多维属性图层映射（图层名 -> 孔位 -> 标注值），与 groups/factors 兼容共生"},
+        {"name": "excluded_wells", "type": "string[]", "description": "可选异常或排空孔位坐标列表"}
       ],
       "outputs": [
         {"name": "rows", "type": "int", "origin": "view"},
@@ -135,7 +137,7 @@
         {"name": "id", "type": "string", "required": true},
         {"name": "schema", "type": "int", "required": true},
         {"name": "title", "type": "string"},
-        {"name": "rows", "type": "object-list", "required": true, "description": "分组行：{id, name, role, condition, independent_n, technical_repeats}"}
+        {"name": "rows", "type": "object-list", "required": true, "description": "分组行对象数组：{id, name, role?(control|treatment|comparator|reference|blank|vehicle|positive_control|negative_control|standard|ntc|other), condition?, independent_n?(int), technical_repeats?(int)}"}
       ],
       "outputs": [
         {"name": "group_specs", "type": "object", "origin": "view"}
@@ -168,7 +170,7 @@
         {"name": "id", "type": "string", "required": true},
         {"name": "schema", "type": "int", "required": true},
         {"name": "title", "type": "string"},
-        {"name": "rows", "type": "object-list", "required": true, "description": "参数行：{key, label, value, unit, record_actual, note}"}
+        {"name": "rows", "type": "object-list", "required": true, "description": "参数行对象数组：{key, label, value, unit?(UCUM单位), actual?(实测偏离值), record_actual?(bool), note?}"}
       ],
       "outputs": [
         {"name": "parameters", "type": "object", "origin": "view"}
@@ -239,10 +241,11 @@
         {"name": "schema_id", "type": "string"},
         {"name": "endpoint", "type": "string"},
         {"name": "bind_groups", "type": "bool"},
+        {"name": "source_ref", "type": "string", "description": "可选关联文档内数据源模块 ID（如 group_table 或 plate）"},
         {"name": "container_ref", "type": "reference", "target": "plate"},
         {"name": "layout", "type": "enum", "values": ["rows", "matrix"], "description": "表格呈现布局：按行列表 rows 或二维孔板矩阵 matrix"},
-        {"name": "columns", "type": "object-list", "required": true, "description": "列定义：{key, label, value_kind, unit, options, formula, min, max}"},
-        {"name": "rows", "type": "object-list", "description": "可选预填计划行"}
+        {"name": "columns", "type": "object-list", "required": true, "description": "列定义对象数组：{key, label, value_kind(text|number|categorical|formula), unit?(UCUM单位), options?(categorical枚举选项数组), formula?(仅formula必填), min?(number), max?(number)}"},
+        {"name": "rows", "type": "object-list", "description": "数据行对象数组（设计预填或运行实测直接原地写入）"}
       ],
       "outputs": [
         {"name": "table_view", "type": "object", "origin": "view"}
@@ -275,7 +278,7 @@
         {"name": "id", "type": "string", "required": true},
         {"name": "schema", "type": "int", "required": true},
         {"name": "title", "type": "string"},
-        {"name": "items", "type": "object-list", "required": true, "description": "{id, label, blocking, allow_rule_skip, skip_rule}"}
+        {"name": "items", "type": "object-list", "required": true, "description": "检查项对象数组：{id, label, done?(bool), blocking?(bool, 必检项请设为true), allow_rule_skip?(bool), skip_rule?(string), note?(string)}"}
       ],
       "outputs": [],
       "actions": [],
@@ -312,23 +315,26 @@
           "values": ["dilution", "group_mastermix", "serial_dilution", "sample_normalize", "formula"],
           "required": true
         },
-        {"name": "stock", "type": "quantity"},
-        {"name": "target", "type": "quantity"},
-        {"name": "final_volume", "type": "quantity", "dimension": "volume"},
-        {"name": "sample_count", "type": "int"},
-        {"name": "volume_per_unit", "type": "quantity", "dimension": "volume"},
-        {"name": "excess_ratio", "type": "decimal"},
-        {"name": "plate_ref", "type": "reference", "target": "plate"},
-        {"name": "container_ref", "type": "reference", "target": "plate"},
-        {"name": "components", "type": "object-list"},
+        {"name": "stock", "type": "quantity", "description": "母液浓度或用量对象：{value: 数值, unit: UCUM单位}"},
+        {"name": "target", "type": "quantity", "description": "目标浓度或用量对象：{value: 数值, unit: UCUM单位}（维度需与 stock 一致）"},
+        {"name": "final_volume", "type": "quantity", "dimension": "volume", "description": "终体积对象：{value: 10, unit: \"mL\"}"},
+        {"name": "sample_count", "type": "int", "description": "样本/孔数；若同时填写 plate_ref 则建议与孔板已分配孔数保持一致"},
+        {"name": "volume_per_unit", "type": "quantity", "dimension": "volume", "description": "单份/单孔体积对象：{value: 100, unit: \"uL\"}"},
+        {"name": "excess_ratio", "type": "decimal", "description": "余量比例（如 0.15 表示多配 15%）"},
+        {"name": "plate_ref", "type": "reference", "target": "plate", "description": "关联孔板模块 ID，自动按组汇总孔数"},
+        {"name": "container_ref", "type": "reference", "target": "plate", "description": "关联容器模块 ID（同 plate_ref）"},
+        {"name": "components", "type": "object-list", "description": "配液组分对象数组：{name, volume_per_unit?, volume?, stock?, target?, unit?, role?, note?}"},
         {"name": "dilution_factor", "type": "decimal"},
         {"name": "steps_count", "type": "int"},
         {"name": "target_mass", "type": "quantity"},
-        {"name": "samples", "type": "object-list"},
+        {"name": "samples", "type": "object-list", "description": "逐样本配平输入对象数组：{sample_id, stock_concentration?, target_concentration?, volume?}"},
         {"name": "stock_ref", "type": "string"},
         {"name": "formula", "type": "string"},
         {"name": "unit", "type": "string"},
-        {"name": "inputs", "type": "object"}
+        {"name": "result_unit", "type": "string", "description": "可选计算结果目标单位"},
+        {"name": "upstream_endpoint", "type": "string", "description": "可选上游读数指标键（跨步计算器引用）"},
+        {"name": "inputs", "type": "object"},
+        {"name": "rows", "type": "object-list", "description": "通用参数公式表行数组：{key, label, kind(input|formula), value?, unit?, formula?}"}
       ],
       "outputs": [
         {"name": "derived_table", "type": "object", "origin": "derived", "calculator": "calculator.v2"}
@@ -364,10 +370,16 @@
         {"name": "mode", "type": "enum", "values": ["countdown", "stopwatch", "cycle", "window"], "required": true},
         {"name": "duration", "type": "quantity", "dimension": "time"},
         {"name": "rounds", "type": "int"},
-        {"name": "phases", "type": "object-list"},
+        {"name": "phases", "type": "object-list", "description": "cycle 模式阶段对象数组：{name, mode?(fixed|open), duration?(非 open 必填 time 量)}"},
         {"name": "anchor", "type": "string"},
         {"name": "offset", "type": "quantity", "dimension": "time"},
-        {"name": "schedule_window", "type": "string"}
+        {"name": "schedule_window", "type": "string"},
+        {"name": "status", "type": "enum", "values": ["idle", "running", "paused", "completed"], "description": "计时状态"},
+        {"name": "started_at", "type": "string", "description": "最近一次启动时间 RFC3339"},
+        {"name": "completed_at", "type": "string", "description": "完成时间 RFC3339"},
+        {"name": "elapsed_sec", "type": "int", "description": "已累计秒数"},
+        {"name": "phase_index", "type": "int", "description": "循环计时当前阶段索引"},
+        {"name": "round_index", "type": "int", "description": "循环计时当前轮次索引"}
       ],
       "outputs": [],
       "actions": [],
@@ -402,7 +414,8 @@
         {"name": "container_ref", "type": "reference", "target": "plate"},
         {"name": "slots_per_cell", "type": "int"},
         {"name": "media_hint", "type": "string"},
-        {"name": "files", "type": "object-list"}
+        {"name": "note", "type": "string", "description": "可选附件说明备注"},
+        {"name": "files", "type": "object-list", "description": "附件文件对象数组：{name?, path?, kind?}"}
       ],
       "outputs": [],
       "actions": [],
@@ -502,7 +515,7 @@
         {"name": "research_question", "type": "string"},
         {"name": "hypothesis", "type": "string"},
         {"name": "experimental_unit", "type": "string"},
-        {"name": "factors", "type": "object-list"},
+        {"name": "factors", "type": "object-list", "description": "实验因子对象数组：{name, dimension?, levels: [...]}"},
         {"name": "timepoints", "type": "string[]"},
         {"name": "primary_endpoint", "type": "string"},
         {"name": "endpoint_method", "type": "string"},
@@ -515,7 +528,11 @@
         {"name": "inclusion_criteria", "type": "string"},
         {"name": "exclusion_criteria", "type": "string"},
         {"name": "planned_run_count", "type": "int"},
-        {"name": "planned_run_relationship", "type": "string"}
+        {"name": "planned_run_relationship", "type": "string"},
+        {"name": "scheduled_date", "type": "string", "description": "计划执行日期（YYYY-MM-DD），存储于 .asterml 供实验日程排程与展示"},
+        {"name": "status", "type": "enum", "values": ["planned", "in_progress", "completed"], "description": "实验状态"},
+        {"name": "conclusion", "type": "string", "description": "实验结果与结论摘要"},
+        {"name": "outcome", "type": "string", "description": "实验结论判定（符合预期/需重做/作废）"}
       ],
       "outputs": [
         {"name": "design_fields", "type": "object", "origin": "view"}
@@ -632,7 +649,7 @@
         {"name": "path", "type": "string"},
         {"name": "order", "type": "int"},
         {"name": "block_refs", "type": "string[]", "description": "引用的顶层共享模块 ID 列表"},
-        {"name": "blocks", "type": "object-list", "description": "步骤内有序排列的通用内容模块数组"},
+        {"name": "blocks", "type": "object-list", "description": "步骤内有序排列的通用内容模块数组（每项需含 kind/id/schema，如 prose/group_table/param_table/figure/data_table/checklist/calculator/timer/attachment/subflow/plate）"},
         {"name": "checks", "type": "object-list"},
         {"name": "tasks", "type": "object-list"},
         {"name": "uses", "type": "list", "item_type": "object"}

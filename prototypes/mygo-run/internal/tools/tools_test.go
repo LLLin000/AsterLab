@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,66 +17,101 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestToolDraftsAndImport(t *testing.T) {
-	var drafts []Draft
-	var used []blocks.Instance
-	w := New(Callbacks{UseInDesigner: func(i blocks.Instance) { used = append(used, i) }, CreateDraft: func(d Draft) { drafts = append(drafts, d) }})
-	if err := w.Plate.ToggleWell(0); err != nil {
-		t.Fatal(err)
+func TestToolsFourSectionNavSOPLibraryAndBenchCalc(t *testing.T) {
+	var createdTitle, createdSource string
+	var insertedBlock map[string]any
+
+	w := New(Callbacks{
+		CreateDesignFromSOP: func(title, source string) {
+			createdTitle, createdSource = title, source
+		},
+		InsertAsterBlock: func(block map[string]any) {
+			insertedBlock = block
+		},
+	})
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		View(c, w)
+	}, 1280, 820)
+	tt.Frame()
+
+	for _, want := range []string{"储藏室货架", "标准方案库", "孔板速排", "实验台速算"} {
+		if !tt.HasText(want) {
+			t.Fatalf("missing tool section %q in %v", want, tt.Texts())
+		}
 	}
-	if err := w.Plate.SetGroup(0, "Control"); err != nil {
-		t.Fatal(err)
+	for _, legacy := range []string{"实验参数表", "通用模块模板", "结构化数据导入"} {
+		if tt.HasText(legacy) {
+			t.Fatalf("legacy retired tool %q still rendered", legacy)
+		}
 	}
-	w.Active = ToolPlate
-	w.handoff()
-	if w.Error != "" || len(used) != 1 || used[0].Type != blocks.TypePlate96 {
-		t.Fatalf("plate handoff: err=%q used=%v", w.Error, used)
-	}
-	var plate blocks.Plate96Props
-	if err := used[0].DecodeProps(&plate); err != nil {
-		t.Fatal(err)
-	}
-	if len(plate.Selected) != 1 || plate.Groups[0] != "Control" {
-		t.Fatalf("plate=%+v", plate)
+	for _, p := range StandardPlatePresets {
+		if p.Key == "dish-4" || p.Topology == "dish" {
+			t.Fatalf("dish-4 must not remain in StandardPlatePresets: %+v", p)
+		}
 	}
 
-	w.Active, w.Stock, w.Final, w.Volume = ToolDilution, "10", "2", "50"
-	w.handoff()
-	if len(used) != 2 || used[1].Type != blocks.TypeDilutionCalculator {
-		t.Fatal("dilution not handed off")
-	}
-	var dilution blocks.DilutionProps
-	if err := used[1].DecodeProps(&dilution); err != nil {
+	// Switch to 标准方案库 and clone an SOP into Design.
+	if err := tt.Click("标准方案库"); err != nil {
 		t.Fatal(err)
 	}
-	if !dilution.Valid || dilution.Result.StockVol != 10 || dilution.Result.DiluentVol != 40 {
-		t.Fatalf("dilution=%+v", dilution)
+	tt.Frame()
+	if !tt.HasText("以此新建实验设计") || !tt.HasText("RT-qPCR 多靶点相对定量标准方案") {
+		t.Fatalf("SOP library missing document preview or clone action: %v", tt.Texts())
+	}
+	if err := tt.Click("以此新建实验设计"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if createdTitle == "" || !strings.Contains(createdSource, "kind: plate") {
+		t.Fatalf("CreateDesignFromSOP callback not invoked properly: title=%q", createdTitle)
 	}
 
-	w.Active, w.Rows = ToolParameters, []blocks.ParamRow{{Key: "incubation", Value: "24", Unit: "h"}}
-	w.handoff()
-	if len(used) != 3 || used[2].Type != blocks.TypeParameterTable {
-		t.Fatal("parameter table not handed off")
+	// Verify 4-in-1 bench calculator precision (pure Go unit logic + block insert).
+	massMg, _, warn, err := ComputeMolarStock(10, "mM", 5, "mL", 1449.25)
+	if err != nil || math.Abs(massMg-72.4625) > 1e-3 || warn != "" {
+		t.Fatalf("ComputeMolarStock = (%v, %q, %v)", massMg, warn, err)
+	}
+	_, _, lowWarn, err := ComputeMolarStock(1, "uM", 1, "mL", 500)
+	if err != nil || !strings.Contains(lowWarn, "不足 1 mg") {
+		t.Fatalf("expected low weighing warning <1 mg, got (%q, %v)", lowWarn, err)
+	}
+	v1, dil, _, err := ComputeUnitDilution(100, "ug/mL", 50, "ng/mL", 4, "mL")
+	if err != nil || math.Abs(v1-0.002) > 1e-6 || math.Abs(dil-3.998) > 1e-6 {
+		t.Fatalf("ComputeUnitDilution = (%v, %v, %v)", v1, dil, err)
+	}
+	if _, _, _, err := ComputeUnitDilution(10, "mM", 50, "ng/mL", 4, "mL"); err == nil {
+		t.Fatal("expected dimension mismatch error between mM and ng/mL")
+	}
+	susp, media, total, err := ComputeCellSeeding(120, "×10⁴/mL", 15000, 12, 500, 15)
+	if err != nil || math.Abs(total-6.9) > 1e-3 || math.Abs(susp-0.1725) > 1e-3 || math.Abs(media-6.7275) > 1e-3 {
+		t.Fatalf("ComputeCellSeeding = (%v, %v, %v, %v)", susp, media, total, err)
+	}
+	rows, mixUL, singleUL, err := ComputeMasterMix(24, 15, []MasterMixComponent{
+		{Name: "SYBR", PerWellUL: "10"},
+		{Name: "Primer", PerWellUL: "1.6"},
+		{Name: "H2O", PerWellUL: "6.4"},
+		{Name: "cDNA", PerWellUL: "2.0", IsTemplate: true},
+	})
+	if err != nil || len(rows) != 4 || math.Abs(singleUL-20) > 1e-6 || math.Abs(mixUL-496.8) > 1e-3 {
+		t.Fatalf("ComputeMasterMix = (%+v, mix=%v, single=%v, err=%v)", rows, mixUL, singleUL, err)
 	}
 
-	w.ImportJSON = `{"id":"x","definitionId":"custom","definitionVersion":1,"type":"note","props":{"title":"Protocol","text":"Step"}}`
-	if err := w.Import(); err != nil {
+	// Verify BenchCalc block insert button in UI triggers InsertAsterBlock.
+	if err := tt.Click("实验台速算"); err != nil {
 		t.Fatal(err)
 	}
-	if len(used) != 4 || used[3].ID != "x" {
-		t.Fatal("valid block import not routed")
-	}
-	w.ImportJSON = `{"samples":[{"id":"s1"}],"wells":[{"wellId":"A1","sampleId":"s1","groupId":"control","replicate":1,"timepoint":"D1"}]}`
-	if err := w.Import(); err != nil {
+	tt.Frame()
+	if err := tt.Click("插入配液表到设计"); err != nil {
 		t.Fatal(err)
 	}
-	if len(drafts) != 5 || drafts[4].Assay == nil || drafts[4].Assay.Wells[0].WellID != "A1" {
-		t.Fatal("assay draft missing")
+	tt.Frame()
+	if insertedBlock == nil || insertedBlock["kind"] != "param_table" {
+		t.Fatalf("expected param_table inserted from molar bench calc, got %#v", insertedBlock)
 	}
-	w.ImportJSON = `{"wells":[{"wellId":"A13","sampleId":"s","groupId":"g","replicate":1,"timepoint":"D1"}]}`
-	if err := w.Import(); err == nil {
-		t.Fatal("invalid well accepted")
-	}
+
+	// Keep unused legacy Draft test import happy.
+	_ = blocks.DilutionProps{}
 }
 
 type screenshotApp struct{ workspace *Workspace }
@@ -153,7 +189,7 @@ func TestPlateStudioWorkflowHistoryAndExport(t *testing.T) {
 	}
 
 	// Switching preset automatically archives the populated 12-well plate to history.
-	w.SelectPlatePreset("dish-4")
+	w.SelectPlatePreset("rack-8")
 	if len(w.PlateHistory) != 1 || len(persisted) != 1 {
 		t.Fatalf("expected auto-archived history entry, got history=%d persisted=%d", len(w.PlateHistory), len(persisted))
 	}
@@ -162,7 +198,7 @@ func TestPlateStudioWorkflowHistoryAndExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := w.SaveCurrentPlateToHistory(); !ok {
-		t.Fatalf("expected explicit save of 4-dish to history")
+		t.Fatalf("expected explicit save of 8-strip to history")
 	}
 
 	// Add a 3rd 96-well entry to verify odd trailing row in 2-column history layout.
@@ -324,32 +360,160 @@ func TestPantryExportOnlyReportsCoreSuccess(t *testing.T) {
 	}
 }
 
-// UX-P5: import/handoff failures speak §3 vocabulary with cause; success
-// states carry no English strings.
-func TestImportFailureChineseCause(t *testing.T) {
-	w := New(Callbacks{})
-	w.ImportJSON = ""
-	if err := w.Import(); err == nil || err.Error() != "请粘贴 Typed block 实例或 assay 设计 JSON" {
-		t.Fatalf("empty import: %v", err)
-	}
-	w.ImportJSON = "not-json{{{"
-	if err := w.Import(); err == nil || len(err.Error()) < len("JSON 无效") || err.Error()[:len("JSON 无效")] != "JSON 无效" {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	w.ImportJSON = `{"wells":[]}`
-	if err := w.Import(); err == nil || err.Error() != "assay 设计至少需要一个孔位分配" {
-		t.Fatalf("empty wells: %v", err)
-	}
-	w.Active = ToolImport
-	w.handoff()
-	if w.Error != "请先选择一个草稿再导入" {
-		t.Fatalf("handoff default: %q", w.Error)
-	}
-	w.ImportJSON = `{"id":"x","definitionId":"custom","definitionVersion":1,"type":"note","props":{"title":"T","text":"S"}}`
-	if err := w.Import(); err != nil {
+func TestPantryStickerShelfDetailManualUploadAndURL(t *testing.T) {
+	dir := t.TempDir()
+	srcPDF := filepath.Join(dir, "SYBR_Green_Manual.pdf")
+	if err := os.WriteFile(srcPDF, []byte("%PDF-1.4\n% mock reagent manual\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if w.Error != "" || w.Status != "导入成功" {
-		t.Fatalf("import success state: err=%q status=%q", w.Error, w.Status)
+
+	items := []runs.PantryItem{
+		{ID: "p-sybr", Name: "SYBR Green 预混液", Location: "-20°C 酶盒 A2", Status: "near_expiry", PurchasedOn: "2026-06-01", OpenedOn: "2026-10-20", ExpiresOn: "2026-11-28", Revision: 2},
+		{ID: "p-dmem", Name: "DMEM 高糖培养基", Location: "4°C 冷藏架", Status: "opened", PurchasedOn: "2026-10-12", OpenedOn: "2026-11-01", Revision: 1},
+	}
+	storedMeta := map[string]PantryItemMeta{}
+	manualsDir := filepath.Join(dir, "manuals")
+	var openedLocal string
+	var openedURL string
+
+	newWorkspace := func() *Workspace {
+		return New(Callbacks{
+			ListPantry: func() (runs.PantryLedger, error) {
+				return runs.PantryLedger{Items: append([]runs.PantryItem(nil), items...)}, nil
+			},
+			UpsertPantry: func(input runs.PantryUpsert) (runs.PantryItem, error) {
+				for i := range items {
+					if items[i].ID == input.ID {
+						items[i].Name = input.Name
+						items[i].Location = input.Location
+						items[i].Revision++
+						return items[i], nil
+					}
+				}
+				return runs.PantryItem{}, errors.New("missing")
+			},
+			LoadPantryMeta: func() (map[string]PantryItemMeta, error) {
+				out := map[string]PantryItemMeta{}
+				for k, v := range storedMeta {
+					out[k] = clonePantryMeta(v)
+				}
+				return out, nil
+			},
+			SavePantryMeta: func(m map[string]PantryItemMeta) error {
+				storedMeta = map[string]PantryItemMeta{}
+				for k, v := range m {
+					storedMeta[k] = clonePantryMeta(v)
+				}
+				return nil
+			},
+			PickManualFiles: func() ([]string, error) {
+				return []string{srcPDF}, nil
+			},
+			ImportPantryFile: func(itemKey, srcPath string) (string, string, int64, error) {
+				data, err := os.ReadFile(srcPath)
+				if err != nil {
+					return "", "", 0, err
+				}
+				rel := filepath.ToSlash(filepath.Join(itemKey, filepath.Base(srcPath)))
+				dst := filepath.Join(manualsDir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+					return "", "", 0, err
+				}
+				if err := os.WriteFile(dst, data, 0o644); err != nil {
+					return "", "", 0, err
+				}
+				return rel, filepath.Base(srcPath), int64(len(data)), nil
+			},
+			ResolvePantryFile: func(storedRel string) string {
+				return filepath.Join(manualsDir, filepath.FromSlash(storedRel))
+			},
+			OpenLocalFile: func(absPath string) error {
+				openedLocal = absPath
+				return nil
+			},
+			OpenExternalURL: func(rawURL string) error {
+				openedURL = rawURL
+				return nil
+			},
+		})
+	}
+
+	w := newWorkspace()
+	tt := ui.NewTester(func(c *ui.Context) {
+		View(c, w)
+	}, 1360, 960)
+	tt.Frame()
+
+	// Clicking the reagent sticker opens its detail modal directly.
+	if btn, ok := tt.Find("SYBR Green 预混液"); !ok {
+		t.Fatalf("expected SYBR Green sticker on pantry shelf, texts=%v", tt.Texts())
+	} else {
+		tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
+		tt.Frame()
+	}
+	if !w.PantryDialogOpen || w.PantryID != "p-sybr" {
+		t.Fatalf("expected reagent detail dialog to open for p-sybr, open=%v id=%q", w.PantryDialogOpen, w.PantryID)
+	}
+
+	// Upload datasheet PDF via button click.
+	if upBtn, ok := tt.Find("上传说明书"); !ok {
+		t.Fatalf("missing 上传说明书 button in detail dialog")
+	} else {
+		tt.ClickAt(upBtn.X+upBtn.W/2, upBtn.Y+upBtn.H/2)
+		tt.Frame()
+	}
+	if len(w.pantryDraftMeta.Manuals) != 1 || w.pantryDraftMeta.Manuals[0].FileName != "SYBR_Green_Manual.pdf" {
+		t.Fatalf("expected imported PDF manual in draft, got %+v", w.pantryDraftMeta.Manuals)
+	}
+
+	// Click 查阅 to open the copied local manual through OpenLocalFile callback.
+	if viewBtn, ok := tt.Find("查阅"); !ok {
+		t.Fatalf("missing 查阅 button for uploaded manual")
+	} else {
+		tt.ClickAt(viewBtn.X+viewBtn.W/2, viewBtn.Y+viewBtn.H/2)
+		tt.Frame()
+	}
+	if !strings.HasSuffix(filepath.ToSlash(openedLocal), "p-sybr/SYBR_Green_Manual.pdf") {
+		t.Fatalf("expected OpenLocalFile with copied manual path, got %q", openedLocal)
+	}
+
+	// Reject dangerous / invalid URL schemes cleanly.
+	w.pantryDraftMeta.ProductURL = "javascript:alert(1)"
+	if w.SavePantryDetail() {
+		t.Fatalf("expected javascript: URL to be rejected")
+	}
+	if !strings.Contains(w.pantryDialogErr, "http://") {
+		t.Fatalf("expected Chinese URL scheme error, got %q", w.pantryDialogErr)
+	}
+
+	// Normalize & open valid vendor product URL, then save and verify persistence on reload.
+	w.pantryDraftMeta.ProductURL = "www.thermofisher.com/order/catalog/product/A25742"
+	tt.Frame()
+	if openURLBtn, ok := tt.Find("打开网页"); !ok {
+		t.Fatalf("missing 打开网页 button in detail dialog")
+	} else {
+		tt.ClickAt(openURLBtn.X+openURLBtn.W/2, openURLBtn.Y+openURLBtn.H/2)
+		tt.Frame()
+	}
+	if openedURL != "https://www.thermofisher.com/order/catalog/product/A25742" {
+		t.Fatalf("expected normalized https URL opened, got %q (err=%q)", openedURL, w.pantryDialogErr)
+	}
+
+	w.pantryDraftMeta.CatalogNo = "Thermo A25742"
+	w.pantryDraftMeta.LotNo = "0128945"
+	if !w.SavePantryDetail() {
+		t.Fatalf("SavePantryDetail failed: %q", w.pantryDialogErr)
+	}
+	if w.PantryDialogOpen {
+		t.Fatalf("expected dialog to close after save")
+	}
+
+	reloaded := newWorkspace()
+	gotMeta := reloaded.MetaForPantryItem(items[0])
+	if gotMeta.ProductURL != "https://www.thermofisher.com/order/catalog/product/A25742" ||
+		gotMeta.CatalogNo != "Thermo A25742" ||
+		len(gotMeta.Manuals) != 1 ||
+		gotMeta.Manuals[0].FileName != "SYBR_Green_Manual.pdf" {
+		t.Fatalf("expected persisted manual & URL after reload, got %+v", gotMeta)
 	}
 }

@@ -10,7 +10,7 @@
 
 | 类别 | 唯一来源 | 禁止写法 | 正确写法 |
 |---|---|---|---|
-| 颜色 | `Tokens`（`Canvas/Surface/Elevated/Border/Text/TextMuted/Accent/Success/Warning/Danger` 及 `*Bg/*Text`）；具名科学调色板（见 §1 例外） | 在渲染/组件调用点写 `ui.Hex(...)`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DangerText`；调色板色复用具名函数 |
+| 颜色 | `Tokens`（`Canvas/Surface/Elevated/SelectedRow/Border/Text/TextMuted/Accent/Success/Warning/Danger` 及 `*Bg/*Text`）；具名科学调色板（见 §1 例外） | 在渲染/组件调用点写 `ui.Hex(...)`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DangerText`；调色板色复用具名函数 |
 | 字号 | `TextPage/TextSection/TextBody/TextMeta/TextData`，或 `t.Rem(x)`（随主题缩放） | `FontSize(12)`、`FontSize(11)` | `FontSize(float32(tokens.TextMeta))`、`.FontSize(t.Rem(.85))` |
 | 间距 | `Spacing4/8/12/16/24/32/48`，或 `t.Space(n)`（n 是单位倍数；`Theme.Spacing=4`，`t.Space(1/2/3/4/6/8/12)` 对应 `4/8/12/16/24/32/48`） | `Padding(3, 8)`、`Padding(6, 12)`、`Gap(5)` | `Padding(t.Space(2), t.Space(4))`、`Gap(t.Space(1))` |
 | 圆角 | `ControlRadius`（控件）/`PanelRadius`（面板）/`DialogRadius`（对话框） | `Radius(3)`、`Radius(5)`、`Radius(7)` | `.Radius(float32(tokens.ControlRadius))` |
@@ -143,7 +143,7 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 - Don't: 插画 + 营销文案，或只有「暂无数据」而不给出口。
 
 **D11 文案**
-- Do: 标题「实验设计」、值「9/12 孔」、动作「创建 Run」。
+- Do: 标题「实验设计」、值「9/12 孔」、动作「开始实验」。
 - Don't: 「一键搞定你的实验！」这类营销腔，或常驻的三段说明文字（应折叠进 tooltip）。
 
 **D12 新增组件**
@@ -152,24 +152,37 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 
 ---
 
-## 五、AsterML v2 通用模块组件映射表（2026-11-18）
+## 9. AsterML v2 通用模块与 Obsidian 单库工作台组件映射（2026-11-20）
 
-`prototypes/mygo-run` 的 AsterML v2 工作台（Design 三标签页 + 同源 `ModeRun` 执行）严格遵循上述规则，所有通用内容模块优先复用社区库组件与统一 `Tokens`：
+`prototypes/mygo-run` 采用 **Obsidian 级单库本地工作区 + 单真源 `.asterml` 文件工作台**：左侧采用 `40px` 极简图标 `Ribbon`（`实验日历` / `储藏室货架` / `新建实验` / `新建项目文件夹` / `库路径与设置`）与透明本地目录文件树（`.asterlab/` 系统态、`assets/` 附件资源、`templates/` 无日期模板、`项目文件夹/*.asterml`；支持 `F2` 重命名、拖拽移动/分屏/排期及完整右键菜单）；中心为全等分屏树 `PaneNode`（支持 `编辑 | 阅读 | 源码` 切换、多窗格共享同一 `*vault.LiveDocument` 与 100 步 `Ctrl+Z/Y` 撤销栈、边缘拖拽四向分屏与中键关闭）；右侧伴侣抽屉默认折叠（只留 `步骤大纲` 与 `速算与计时`）。全部通用控件严格遵循统一 `Tokens` 与社区组件规范：
 
 | 场景 / 通用模块 | 复用组件与包 | 关键规范 |
 |---|---|---|
-| 步骤工作台分栏 / 源码双栏预览 | `onevra/components.Split` · `SplitPercent` | 左侧步骤大纲固定像素可调，右侧源码与实时预览按百分比分割 |
-| 插入 10 类通用模块 / 添加全局模块 | `onevra/components.MenuButton` + `Tooltip` | 图标与语义菜单分离；快捷操作只置 tooltip 不写三段常驻说明 |
-| 参数表 / 分组表 / 数据表 / 计算器结果 | `onevra/components.Table` + `TableRow` | 数值列启用 `.FontFeatures("tnum")`，质控边界用 `Badge` 语义色调 |
-| AsterML 源码编辑 | `mygo/ui/editor`（Markdown 高亮、行号、DiffBase） | 与右侧 `asterdoc.ModeProtocol` 实时预览同屏联动 |
-| 示意图 / 培养皿分区 SVG | `mygo/ui.ParseSVG` + `ui.Image` + `<text>` 叠加 | 纯视觉辅助表达；分组与量化数据严格归属 `group_table` / `data_table` |
-| 孔板 / 培养皿 / 1D 管架网格 | `internal/uikit/plate` + `theme.CategoricalPalette` | Design/Run/Notebook/Tools 全部统一复用 `plateui.View`（`format: 4/6/12/24/48/96/384` 自适应孔径从 `56px` 渐缩至 `17px`，`rack_1d` 为 `40×58px` 竖向胶囊，`dish` 绘制双层圆形皿壁与十字分区线）；采用单输入框悬浮选孔条（`ApplyUnifiedPlateAnnotation`）替代多排模式按钮，默认顺序 8 色无冲突，内联与放大浮层均支持拖拽框选与行列快选；`ui.Hex` 只保留在 `theme.go` |
-| 二维孔板数据矩阵与便携附件 | `asterdoc.View` (`widget_tables.go` / `widget_figure.go`) | `data_table@1` 关联 `container_ref` 时支持 `列表` / `孔板矩阵`（`layout: matrix`）切换与 `粘贴整板矩阵`；`figure@1` 拖放/选取文件自动落入同级 `./assets/`；所有通用模块支持卡片标题内联重命名 |
-| Notebook 科研电子实验记录本 (ELN) | `components.SplitPercent` + 只读水合 `asterdoc.View` + `components.Table` | 笔记页支持内嵌 ` ```asterlab ` 模块与右侧冻结方案同源预览；`图板` 采用双栏结构化仪表盘（5 格 KPI + 计划实际表 + 视野矩阵 + 右栏签核归档） |
-| 资料与工具台账 | `components.Sidebar` + `asterdoc.View` + `plateui` + `UseAsterPlate` | 储藏室试剂台账与「孔板速排」（先选 8 种规格孔板再框选设计、完整复用 `asterdoc` 悬浮标注框与 SVG/PNG 导出、底部两列 `孔板历史` 卡片可点击载入或直接导出）以及稀释计算草稿，可直接无损转为 AsterML v2 模块插入当前实验设计 |
-| 步骤内模块拖拽排序 | `ui.Box`（`.Drag` / `.DragOver` / `.Drop`）+ `lucide.GripVertical` | 手柄固定于模块标题栏左侧；落位复用 `MoveStepBlockToIndex` 与主题高亮边框 |
-| 图像与实拍附件查看 | `components.Dialog` Lightbox + `ui.ScrollBoth` + `x/image/tiff` | 异步后台解码防阻塞主线程；提供 `75%/100%/150%/200%` 缩放与外部打开，支持 Design 拖入文件 |
-| 通用数据表粘贴与键盘导航 | `components.Table` + `ui.TextField`（`FocusBind` / `OnPaste` / `OnTextKey`） | 支持 Excel TSV/CSV 粘贴自动扩行与方向键/`Enter`/`Tab` 移焦；保存后显示 `数据已记录` `Badge` |
-| 计算器实测联动 | `EvalCalculatorWithActuals` + `components.Badge`（`Accent`） | 在 Run `ModeRun` 自动代入 `actual_parameters` 与上游测量值并标记 `已按实测值换算`；低浓度明确提示`浓度偏低，超出单孔反应体积上限` |
+| Obsidian 级全等分屏壳、文件树、历史栈与 `Ctrl+K/O` 命令面板 | `onevra/shells/sidebar`（原生 `VibrancyMica`/`VibrancySidebar`）+ `glass.Glass` + `components.{SplitPercent,Dialog,ContextMenu}` + `internal/shell/{tabs,file_tree,right_drawer,command_palette}.go` + `internal/vault/{vault,live_doc}.go` | 左侧 `Ribbon` 与右抽屉透传系统 `Vibrancy`（无多余不透明背景与边框）；**文件树按显式 `depth` 绘制竖向层级引导线与 `16px` 折叠占位槽，子文件严格缩进于父文件夹图标内侧**；中心平权分屏去外框与圆角，由发丝线分割、焦点页顶部 `2px` `Accent` 指示；标签栏采用 `glass.Glass` 半透明磨砂；`Ctrl+K/O` 命令面板 |
+| 高度自由的 `实验日程`（`月` / `周`）与正交 `项目 × 日期` | `internal/shell/calendar.go` + `onevra/components.{Popover,Tabs,Button,ContextMenu}` + `theme.Motion*` | 项目归属由实验所在文件夹决定，实验时间由 frontmatter `date` 决定；日历与文件树正交联动——可从左树拖拽实验到某天排期、点击/右键日程格新建（可选项目与模板）或跨天拖拽改期 |
+| Obsidian Live-Preview 单真源文档画布（`UnifiedLive`） | `experiment_page.go` + `internal/asterdoc/{inputs,view,composer,modules,widget_prose,widget_ops,widget_tables,widget_figure,plate_ops}.go` | **无框正文哲学（Anti-XP-Box）**：标题、日期、项目、状态、步骤 H2、检查项与参数均采用 `asterdoc.BorderlessTextInput`（基于 `ui.TextInputBase`，静态无框无底色，仅悬停/聚焦柔和高亮）与 `StyleSelectQuiet`，禁止白底圆角文本框套娃；外层模块与表格全面改为纸面发丝线网格与弹性列宽（禁止固定总宽溢出），动作统一收敛为 `IconButton` / `ButtonGhost` |
+| 实操型内联模块（清单 / 计时 / 参数 / 计算 / 数据表） | `asterdoc.View{UnifiedLive: true}` + `onevra/components.{Checkbox,Popover,MenuButton,ContextMenu}` | **唯一真源内联记录**：`checklist@1` 与 `timer@1`（`▶/⏸/↺`）在**编辑**和**阅读**态均直接可点并写入 `.asterml`；`param_table@1` 悬浮行触发 `记偏离` 展开实测输入框；`calculator@1` 支持 `@plate.wells` 与实测联动；`data_table@1` 支持内联编辑、TSV/CSV 粘贴、方向键导航与表头属性配置 |
+| 示意图 / 拍照图片 `figure@1` 与附件 `attachment@1` | `widget_figure.go` / `widget_ops.go` + `components.Dialog` + `mygo/transfer.{PNG,FileList}` + `vault.ImportAssetBytes` | 支持 `Ctrl+V` 粘贴剪贴板截图与文件拖入，自动落库 `<Vault>/assets/` 并引用 `./assets/<name>`；图片与实拍附件弹窗使用 `ui.Box(c.Key(...)).Children(...)` 包裹 `components.Dialog` 防止多浮层 Key 冲突，支持 `HeroFlyTransition` 一镜到底缩放 |
+| 图层化通用孔板 `plate@1` | `internal/uikit/plate` + `view.go` + `plate_ops.go` | 顶部图层胶囊条（`[分组]` + 各因子/浓度图层 + `[+]` 新建图层）；框选后底部托出 `单值 \| 平铺列表 \| 等比序列`（`÷2/÷5/÷10` + 按行/列）填充条；支持完整右键菜单（清空、复制/粘贴标注、反选、选中边缘孔、标记 `excluded_wells`、导出 CSV/PNG） |
+| Obsidian 风格设置中心、多色盘主题引擎与 Liquid Glass 移动端 | `onevra/components.Settings` + `glass.Glass` + `internal/shell/{settings,mobile}.go` + `internal/theme/theme.go` + `internal/vault/vault.go` | **多色盘与材质切换**：支持 `obsidian`（纯白 `#ffffff` + `#f5f6f8` 无边框卡片 / 暗色 `#111215`）、`zinc`（冷银极简 `#f4f5f7`）与 `warm`（经典暖纸 `#f7f6f3`）三档预设及 `LiquidGlass` 开关，持久化写入 `.asterlab/config.json`。**Light/Dark Liquid Glass 分级**：浅色悬浮胶囊用 `glass.Regular`（76% 奶白雾透 + 亮边）；暗色严禁多层玻璃叠加（桌面左右侧栏保持纯正深空底色，禁止 Glass-on-Glass），移动端暗色胶囊采用 `glass.Clear` + `84%` 深烟熏曜石遮罩（避免 `paneDarkLow`/`2.2x saturation` 导致背景穿刺发灰）与亮银高光边。**移动端 iOS 26 布局**：`< 680dp` 或移动平台收敛为左上独立 `40dp` 圆形玻璃钮 + 右上双图标融合药丸 + 居中 `48dp` 纯图标底浮岛（`< > 🔍 + [N] ≡`）及编辑态纯图标条，抽屉配备三层底部控制岛与边缘滑出跟手物理反馈 |
+| 步骤内模块拖拽排序与单页 PDF 导出 | `composer.go`（`.Drag/.DragOver/.Drop`）+ `sheet_view.go` + `pdf_sheet.go` | 悬浮手风琴显隐与手柄拖拽排序；`ExportDocumentPDF` 与纸面同源输出完整方案、实测参数、勾选状态、数据表及 `./assets/` 附图 |
 
-**前端科研文案规范（强制）**：所有面向研究者的界面文案、状态胶囊、提示与报错严禁暴露 `Core`、`Rust Core`、`后端`、`schema`、`JSON`、`readout.submit`、`AsterDoc`、`rev`、英文原词（如 `insufficient`）或原始数据库 ID（如 `blk-*`、`assay-*`、`inhibition_zone_mm`）；统一使用自然科研表达（如「数据已记录」「本步实验操作与记录」「方案耗时测算」「实验测定数据表」「方案格式正常」），底层标识仅在「步骤高级选项与技术标识」等二级折叠区按 `UX-P2` 按需展示。
+---
+
+## 10. 动效系统与微交互规范（Motion System & Micro-interactions）
+
+桌面科研效率工作台的动效遵循 **「精密科学仪器 × 温润纸质实验本」** 原则：高频键盘/输入操作零延迟，中频空间转换使用高刚度可打断物理弹簧维持空间连续性，低频达成态使用克制微交互提供确认感。**调用点严禁手写任意毫秒数字面值或散落自定义弹簧，必须统一复用 `internal/theme/motion.go`：**
+
+| 动效 Token / 构造器 | 曲线与物理特征 | 强制适用边界 |
+|---|---|---|
+| `theme.MotionMicro` | `100ms` `EaseOut` + `Oklab` | 按钮/孔位按压微缩（`ApplyTactilePress` `0.97`）、悬浮 `⋮⋮` 手柄与 `+` 插入线显隐 |
+| `theme.MotionSnappy` | 临界阻尼弹簧 (`160ms, Bounce: 0`) + `Oklab` | 共享几何磁吸滑块（`SharedPillTransition`：标签栏、`Ctrl+K` 列表高亮、孔板图层胶囊、填充模式切换）、孔板 Oklab 染色过渡、选孔底条托出（`FloatingBarTransition`，退场 `110ms`） |
+| `theme.MotionFluid` | 柔和弹簧 (`220ms, Bounce: 0.04`) + `Oklab` | 文件夹/步骤块/检查项/实测偏离框手风琴生长收拢（`AccordionTransition`）、分屏四向 25% 预览框液态变形（`LiquidSplitTransition`）、按位数字滚轮（`NumericRoll`：计时器跳秒、计算器结果、选孔计数） |
+| `theme.MotionHero` | 空间过渡弹簧 (`260ms, Bounce: 0.03`) + `Oklab` | `figure@1` 与 `plate@1` 缩略图至放大灯箱的一镜到底过渡（`HeroFlyTransition`）、日历月/周网格切换 |
+| `theme.ApplyNudge` | 欠阻尼速度脉冲 (`k=580, c=16, v0=240`) | 空输入或非法倍比提交时的 `±5px` 海绵轻晃提醒（替代刺眼弹窗报错） |
+
+**动效红线**：
+1. 禁止从 `Scale: 0` 缩放弹出（最小起始缩放 `0.95 ~ 0.98`）；退场时长必须短于进场时长（`100ms ~ 120ms`）；初始常驻标签禁止挂 `Enter: {Collapse: true}` 以免首帧被零宽裁切。
+2. 色彩插值统一启用 `Oklab: true`；所有位移与弹簧自动遵循系统 `Preferences.ReduceMotion` 无障碍降级；`components.Dialog` 外层须独立用 keyed `ui.Box` 包裹（不在参数内直接传 `c.Key(...)`）。
+
+**前端科研文案规范（强制）**：所有面向研究者的界面文案、状态胶囊、提示与报错严禁暴露 `Core`、`Rust Core`、`后端`、`schema`、`JSON`、`readout.submit`、`AsterDoc`、`rev`、内部数据库版本号（如 `"第 N 版"` / `"方案第 N 版"`）、英文原词（如 `insufficient`）、开发术语（如旧版层名或 `Notebook`）或原始数据库 ID（如 `blk-*`、`assay-*`、`inhibition_zone_mm`）；统一使用自然科研表达（如「数据已记录」「本步实验操作与记录」「方案耗时测算」「实验测定数据表」「计划中」「进行中」「已完成」「实时保存」「开始实验」「记偏离」「+ 追加标签」），底层标识仅在「步骤高级选项与技术标识」「技术属性（只读）」等二级折叠区按 `UX-P2` 按需展示。

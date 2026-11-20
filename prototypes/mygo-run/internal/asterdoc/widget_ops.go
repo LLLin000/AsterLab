@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -40,6 +41,157 @@ func (v *View) renderChecklist(c *ui.Context, data map[string]any) {
 	items := mapSlice(data["items"])
 	editableDesign := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
 	interactiveRun := v.Mode == ModeRun && !v.ReadOnly
+
+	if v.UnifiedLive {
+		interactiveLive := !v.ReadOnly && (v.Mode == ModeDesign || v.Mode == ModeProtocol || v.Mode == ModeRun)
+		ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+			if title != "" && title != "操作检查清单" {
+				ui.Text(c, title).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+			}
+			for idx, it := range items {
+				idx, it := idx, it
+				cid := firstNonEmpty(textValue(it, "id"), fmt.Sprintf("chk-%d", idx+1))
+				label := textValue(it, "label")
+				required, _ := it["required"].(bool)
+				blocking, _ := it["blocking"].(bool)
+				req := required || blocking
+				doneInline, _ := it["done"].(bool)
+				checkedVal := doneInline || v.CheckedItems[cid] || v.CheckedItems[v.StepID+":"+cid]
+
+				chkPtr := v.ensureWidgetBool("chk:" + moduleID + ":" + cid)
+				*chkPtr = checkedVal
+
+				row := ui.Row(c.Key(fmt.Sprintf("live-chk:%s:%d:%s", moduleID, idx, cid))).FillWidth().
+					Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+					Radius(float32(tok.ControlRadius)).
+					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
+					Transition(theme.AccordionTransition())
+				rowHover := row.Hovered()
+				targetRowBg := ui.Transparent
+				if rowHover {
+					targetRowBg = tok.Elevated
+				}
+				row.Background(row.AnimateColor("chk-rbg", targetRowBg, theme.MotionMicroFade))
+				targetTxtCol := tok.Text
+				if *chkPtr {
+					targetTxtCol = tok.TextMuted
+				}
+				animTxtCol := row.AnimateColor("chk-fg", targetTxtCol, theme.MotionMicroFade)
+				row.Children(func() {
+					if interactiveLive {
+						if components.Checkbox(c, chkPtr, "").Changed() {
+							next := cloneRowsSlice(items)
+							if idx < len(next) {
+								next[idx]["done"] = *chkPtr
+								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+							}
+							if v.CheckedItems == nil {
+								v.CheckedItems = map[string]bool{}
+							}
+							v.CheckedItems[cid] = *chkPtr
+							if v.OnToggleCheck != nil {
+								v.OnToggleCheck(v.StepID, cid, *chkPtr)
+							}
+						}
+					} else {
+						mark := "☐"
+						if *chkPtr {
+							mark = "☑"
+						}
+						ui.Text(c, mark).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+					}
+
+					if editableDesign {
+						lblDraft := v.ensureWidgetDraft("chk_lbl:"+moduleID+":"+cid, label)
+						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+							ti := BorderlessTextInput(c, tok, lblDraft, float32(tok.TextBody), false, "输入检查项内容，按 Enter 新增下一项…").
+								TextColor(animTxtCol)
+							ti.OnTextKey(func(k ui.TextKey) bool {
+								if k.Key == ui.KeyBackspace && strings.TrimSpace(k.Text()) == "" && len(items) > 1 {
+									next := removeSliceIndex(items, idx)
+									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+									return true
+								}
+								return false
+							})
+							if ti.Submitted() {
+								next := cloneRowsSlice(items)
+								if idx < len(next) {
+									next[idx]["label"] = strings.TrimSpace(*lblDraft)
+								}
+								newItem := map[string]any{
+									"id":    fmt.Sprintf("chk-%d", len(next)+1),
+									"label": "",
+									"done":  false,
+								}
+								if idx+1 <= len(next) {
+									tail := append([]map[string]any{newItem}, next[idx+1:]...)
+									next = append(next[:idx+1], tail...)
+								} else {
+									next = append(next, newItem)
+								}
+								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+							} else if !ti.Focused() && strings.TrimSpace(*lblDraft) != strings.TrimSpace(label) {
+								next := cloneRowsSlice(items)
+								if idx < len(next) {
+									next[idx]["label"] = strings.TrimSpace(*lblDraft)
+									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+								}
+							}
+						})
+					} else {
+						txtColor := tok.Text
+						if *chkPtr {
+							txtColor = tok.TextMuted
+						}
+						ui.Box(c).FillWidth().Children(func() {
+							ui.Text(c, label).FontSize(float32(tok.TextBody)).TextColor(txtColor)
+						})
+					}
+
+					if req {
+						components.Badge(c, "必检", components.BadgeOptions{Tone: components.BadgeWarning})
+					}
+					if editableDesign && rowHover {
+						reqTip := map[bool]string{true: "取消必检", false: "设为必检"}[req]
+						if components.IconButton(c, lucide.ShieldCheck(), reqTip, components.IconButtonCompact).Clicked() {
+							next := cloneRowsSlice(items)
+							if idx < len(next) {
+								next[idx]["required"] = !req
+								next[idx]["blocking"] = !req
+								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+							}
+						}
+						if len(items) > 1 {
+							if components.IconButton(c, lucide.X(), "删除检查项", components.IconButtonCompact).Clicked() {
+								next := removeSliceIndex(items, idx)
+								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+							}
+						}
+					}
+				})
+			}
+			if editableDesign {
+				addRow := ui.Row(c.Key("live-chk-add:"+moduleID)).
+					Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+					Gap(float32(tok.Spacing4)).AlignItems(ui.Center)
+				addRow.Children(func() {
+					ui.Icon(c, lucide.Plus()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+					ui.Text(c, "添加检查项").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				})
+				if addRow.Clicked() {
+					next := cloneRowsSlice(items)
+					next = append(next, map[string]any{
+						"id":    fmt.Sprintf("chk-%d", len(next)+1),
+						"label": "新检查项",
+						"done":  false,
+					})
+					v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+				}
+			}
+		})
+		return
+	}
 
 	doneCount := 0
 	for _, it := range items {
@@ -140,6 +292,18 @@ func (v *View) renderChecklist(c *ui.Context, data map[string]any) {
 	})
 }
 
+func cloneRowsSlice(in []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(in))
+	for i, m := range in {
+		cp := make(map[string]any, len(m))
+		for k, val := range m {
+			cp[k] = val
+		}
+		out[i] = cp
+	}
+	return out
+}
+
 func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 	t := c.Theme()
 	tok := theme.GetTokens(t)
@@ -147,6 +311,11 @@ func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 	title := firstNonEmpty(textValue(data, "title"), "科学计算器")
 	mode := textValue(data, "mode")
 	editableDesign := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
+
+	if v.UnifiedLive {
+		v.renderUnifiedCalculator(c, tok, moduleID, title, mode, data, editableDesign)
+		return
+	}
 
 	// Apply interactive scratch overrides cleanly without mutating frozen source
 	evalData := make(map[string]any, len(data))
@@ -305,6 +474,191 @@ func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 	})
 }
 
+func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID, title, mode string, data map[string]any, editableDesign bool) {
+	rows := mapSlice(data["rows"])
+	res := EvalCalculatorWithActuals(v.Doc, data, v.CalcActuals)
+	ui.Column(c).FillWidth().Padding(float32(tok.Spacing4), 0).
+		Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Icon(c, lucide.Calculator()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
+			renderInlineEditableTitle(v, c, moduleID, title, editableDesign)
+			ui.Spacer(c)
+			if editableDesign && len(rows) == 0 {
+				if components.Button(c, "转为参数公式表", components.ButtonGhost).Clicked() {
+					v.emitAnyModuleEdit(moduleID, DefaultCalculatorPreset(v.Doc, v.StepID, "formula"))
+				}
+			}
+			if res.Summary != "" {
+				ui.Row(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).
+					Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Children(func() {
+					ui.Text(c, res.Summary).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).
+						FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
+				})
+			}
+		})
+
+		if len(rows) > 0 {
+			for idx, rm := range rows {
+				idx, rm := idx, rm
+				rkey := firstNonEmpty(textValue(rm, "key"), fmt.Sprintf("r%d", idx+1))
+				rlbl := firstNonEmpty(textValue(rm, "label"), rkey)
+				runit := textValue(rm, "unit")
+				formula := strings.TrimSpace(textValue(rm, "formula"))
+				isFormula := formula != ""
+
+				rowBox := ui.Row(c.Key(fmt.Sprintf("calc-row:%s:%d:%s", moduleID, idx, rkey))).FillWidth().
+					Padding(float32(tok.Spacing4)*1.5, float32(tok.Spacing4)).
+					Radius(float32(tok.ControlRadius)).
+					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
+					Transition(theme.AccordionTransition())
+				rowHover := rowBox.Hovered()
+				if rowHover {
+					rowBox.Background(tok.Text.Alpha(0.03))
+				}
+				rowBox.Children(func() {
+					// Label / Key
+					ui.Box(c).Width(float32(tok.Spacing48)*2.4).Shrink(0).Children(func() {
+						if editableDesign {
+							lblBuf := v.ensureWidgetDraft(fmt.Sprintf("calc_lbl:%s:%d:%s", moduleID, idx, rkey), rlbl)
+							ti := BorderlessTextInput(c, tok, lblBuf, float32(tok.TextBody), true, "参数名")
+							if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*lblBuf) != rlbl) {
+								next := cloneRowsSlice(rows)
+								if idx < len(next) {
+									next[idx]["label"] = firstNonEmpty(strings.TrimSpace(*lblBuf), rlbl)
+									v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+								}
+							}
+						} else {
+							ui.Text(c, rlbl).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+						}
+					})
+
+					// Value or Formula expression
+					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+						if isFormula {
+							if editableDesign {
+								fBuf := v.ensureWidgetDraft(fmt.Sprintf("calc_f:%s:%d:%s", moduleID, idx, rkey), formula)
+								tb := BorderlessTextInput(c, tok, fBuf, float32(tok.TextMeta), false, "= 公式，如 n_wells * vol_per_well").
+									TextColor(tok.TextMuted)
+								if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*fBuf) != formula) {
+									next := cloneRowsSlice(rows)
+									if idx < len(next) && strings.TrimSpace(*fBuf) != "" {
+										next[idx]["formula"] = strings.TrimSpace(*fBuf)
+										v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+									}
+								}
+							} else {
+								ui.Text(c, "= "+formula).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+							}
+						} else {
+							valStr := formatAnyValue(rm["value"])
+							if !editableDesign && strings.HasPrefix(valStr, "@plate") {
+								valStr = "自动统计孔板孔数"
+							} else if !editableDesign && strings.HasPrefix(valStr, "@param.") {
+								valStr = "引用条件参数"
+							}
+							vBuf := v.ensureWidgetDraft(fmt.Sprintf("calc_v:%s:%d:%s", moduleID, idx, rkey), valStr)
+							if !v.ReadOnly {
+								tb := BorderlessTextInput(c, tok, vBuf, float32(tok.TextBody), false, "数值").FontFeatures("tnum")
+								if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*vBuf) != valStr) {
+									next := cloneRowsSlice(rows)
+									if idx < len(next) {
+										raw := strings.TrimSpace(*vBuf)
+										if num, err := strconv.ParseFloat(raw, 64); err == nil {
+											next[idx]["value"] = num
+										} else {
+											next[idx]["value"] = raw
+										}
+										v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+									}
+								}
+							} else {
+								ui.Text(c, valStr).FontSize(float32(tok.TextData)).TextColor(tok.Text).FontFeatures("tnum")
+							}
+						}
+					})
+
+					// Computed result on the right
+					var dispAmt string
+					if idx < len(res.Rows) {
+						dispAmt = formatNumber(res.Rows[idx].Amount)
+						if runit != "" {
+							dispAmt += " " + runit
+						}
+					} else if runit != "" {
+						dispAmt = runit
+					}
+					ui.Box(c).Shrink(0).AlignItems(ui.End).Children(func() {
+						col := tok.TextMuted
+						if isFormula {
+							col = tok.Accent
+						}
+						ui.Text(c, firstNonEmpty(dispAmt, "—")).FontSize(float32(tok.TextData)).Bold().
+							TextColor(col).FontFeatures("tnum").SingleLine().ContentTransition(theme.NumericRoll(false))
+					})
+
+					if editableDesign && rowHover && len(rows) > 1 {
+						if components.IconButton(c, lucide.X(), "删除行", components.IconButtonCompact).Clicked() {
+							next := removeSliceIndex(rows, idx)
+							v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+						}
+					}
+				})
+				ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.45))
+			}
+
+			if res.Err != nil {
+				v.moduleError(c, res.Err)
+			}
+			if editableDesign {
+				ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
+					if components.Button(c, "+ 添加参数", components.ButtonGhost).Clicked() {
+						next := cloneRowsSlice(rows)
+						n := len(next) + 1
+						next = append(next, map[string]any{
+							"key":   fmt.Sprintf("p%d", n),
+							"label": fmt.Sprintf("参数 %d", n),
+							"value": 1,
+							"unit":  "",
+						})
+						v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+					}
+					if components.Button(c, "+ 添加公式行", components.ButtonGhost).Clicked() {
+						next := cloneRowsSlice(rows)
+						n := len(next) + 1
+						next = append(next, map[string]any{
+							"key":     fmt.Sprintf("out%d", n),
+							"label":   "计算结果",
+							"formula": "1",
+							"unit":    "uL",
+						})
+						v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+					}
+				})
+			}
+			return
+		}
+
+		// Legacy single-mode calculator rendered cleanly without explicit save button in UnifiedLive
+		if res.Err != nil {
+			v.moduleError(c, res.Err)
+		}
+		for _, r := range res.Rows {
+			r := r
+			amt := formatNumber(r.Amount)
+			if r.Unit != "" {
+				amt += " " + r.Unit
+			}
+			ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, r.Label).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+				ui.Spacer(c)
+				ui.Text(c, amt).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+			})
+		}
+	})
+}
+
 func (v *View) applyQuantityScratch(moduleID string, data map[string]any, field string) {
 	if val, ok := v.calcScratchFloat(moduleID, field); ok && val > 0 {
 		if qm, ok := data[field].(map[string]any); ok {
@@ -408,6 +762,11 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 	mode := textValue(data, "mode")
 	editableDesign := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
 	interactiveRun := v.Mode == ModeRun && !v.ReadOnly && v.OnTimerAction != nil
+
+	if v.UnifiedLive {
+		v.renderUnifiedTimer(c, tok, moduleID, title, mode, data, editableDesign)
+		return
+	}
 
 	plannedSec, spanSec, _ := timerBudgetSec(data)
 	rt, hasRT := v.TimerStates[moduleID]
@@ -584,6 +943,181 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 				})
 			}
 		})
+	})
+}
+
+func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, title, mode string, data map[string]any, editableDesign bool) {
+	mode = firstNonEmpty(mode, "countdown")
+	plannedSec, spanSec, _ := timerBudgetSec(data)
+	if plannedSec == 0 {
+		plannedSec = spanSec
+	}
+
+	inlineStatus := strings.ToLower(strings.TrimSpace(textValue(data, "status")))
+	if inlineStatus == "" {
+		if rt, ok := v.TimerStates[moduleID]; ok && rt.Status != "" {
+			inlineStatus = strings.ToLower(strings.TrimSpace(rt.Status))
+		} else {
+			inlineStatus = "idle"
+		}
+	}
+	baseElapsed := int(numOrZero(data["elapsed_sec"]))
+	liveElapsed := baseElapsed
+	if inlineStatus == "running" {
+		if tStart, err := time.Parse(time.RFC3339, textValue(data, "started_at")); err == nil {
+			delta := int(time.Since(tStart).Seconds())
+			if delta > 0 {
+				liveElapsed += delta
+			}
+		}
+	}
+
+	isCountdown := mode != "stopwatch" && plannedSec > 0
+	displaySec := liveElapsed
+	if isCountdown {
+		displaySec = plannedSec - liveElapsed
+		if displaySec < 0 {
+			displaySec = 0
+		}
+	}
+	if inlineStatus == "running" && v.OnAsyncInvalidate != nil {
+		lastWake := ui.Local(c.Root(), "tm-wake:"+moduleID, func() time.Time { return time.Time{} })
+		if time.Since(*lastWake) >= 240*time.Millisecond {
+			*lastWake = time.Now()
+			inv := v.OnAsyncInvalidate
+			time.AfterFunc(250*time.Millisecond, inv)
+		}
+	}
+
+	timerRow := ui.Row(c.Key("live-tm:"+moduleID)).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+		Radius(float32(tok.ControlRadius)).Background(tok.Elevated.Alpha(0.55)).
+		AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8))
+	targetClockCol := tok.Text
+	if inlineStatus == "running" {
+		targetClockCol = tok.Accent
+	} else if inlineStatus == "completed" {
+		targetClockCol = tok.Success
+	}
+	clockCol := timerRow.AnimateColor("tm-col", targetClockCol, theme.MotionSnappy)
+	timerRow.Children(func() {
+		ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(clockCol)
+		ui.Text(c, formatClockHMS(displaySec)).FontSize(float32(tok.TextSection)).Bold().
+			TextColor(clockCol).
+			FontFeatures("tnum").
+			ContentTransition(theme.NumericRoll(isCountdown))
+		if editableDesign {
+			renderInlineEditableTitle(v, c, moduleID, title, true)
+		} else {
+			ui.Text(c, title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+		}
+
+		// Inline editable duration/mode in Edit mode (borderless quiet inputs)
+		if editableDesign && inlineStatus == "idle" {
+			qRaw := data["duration"]
+			if mode == "window" && data["offset"] != nil {
+				qRaw = data["offset"]
+			}
+			qv, qu, qErr := quantityParts(qRaw)
+			if qErr != nil || qu == "" {
+				qv, qu = 10, "min"
+			}
+			tmMode := v.ensureWidgetDraft("tm:"+moduleID+":mode", mode)
+			tmVal := v.ensureWidgetDraft("tm:"+moduleID+":val", formatNumber(qv))
+			tmUnit := v.ensureWidgetDraft("tm:"+moduleID+":unit", qu)
+			if *tmMode != "stopwatch" && *tmMode != "cycle" {
+				ui.Box(c).Width(float32(tok.Spacing48)*1.1).Children(func() {
+					tb := BorderlessTextInput(c, tok, tmVal, float32(tok.TextBody), false, "时长").FontFeatures("tnum")
+					if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*tmVal) != formatNumber(qv)) {
+						if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && nv > 0 {
+							field := "duration"
+							if *tmMode == "window" {
+								field = "offset"
+							}
+							v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
+						}
+					}
+				})
+				uSel := components.Select(c, tmUnit)
+				StyleSelectQuiet(c, tok, uSel)
+				uSel.Trigger.Children(func() {
+					ui.Text(c, *tmUnit).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				})
+				uSel.Popup(func(panel ui.Element) {
+					for _, opt := range []string{"s", "min", "h", "d"} {
+						opt := opt
+						uSel.Item(opt).Children(func() {
+							ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+						})
+					}
+				})
+				if uSel.Trigger.Changed() && *tmUnit != qu {
+					if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && nv > 0 {
+						field := "duration"
+						if *tmMode == "window" {
+							field = "offset"
+						}
+						v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
+					}
+				}
+			}
+		}
+
+		ui.Spacer(c)
+		badgeTone := components.BadgeNeutral
+		if inlineStatus == "running" {
+			badgeTone = components.BadgeAccent
+		} else if inlineStatus == "completed" {
+			badgeTone = components.BadgeSuccess
+		}
+		components.Badge(c, timerStatusLabel(inlineStatus), components.BadgeOptions{Tone: badgeTone})
+
+		if !v.ReadOnly {
+			if inlineStatus != "running" {
+				if iconButton(c, lucide.Play(), "启动计时", components.ButtonGhost).Clicked() {
+					v.emitAnyModuleEdit(moduleID, map[string]any{
+						"status":     "running",
+						"started_at": time.Now().UTC().Format(time.RFC3339),
+					})
+					if v.OnTimerAction != nil {
+						v.OnTimerAction(v.StepID, moduleID, "start")
+					}
+				}
+			} else {
+				if iconButton(c, lucide.Pause(), "暂停计时", components.ButtonOutline).Clicked() {
+					v.emitAnyModuleEdit(moduleID, map[string]any{
+						"status":      "paused",
+						"elapsed_sec": liveElapsed,
+						"started_at":  "",
+					})
+					if v.OnTimerAction != nil {
+						v.OnTimerAction(v.StepID, moduleID, "pause")
+					}
+				}
+			}
+			if inlineStatus == "running" || inlineStatus == "paused" {
+				if iconButton(c, lucide.Check(), "完成计时", components.ButtonOutline).Clicked() {
+					v.emitAnyModuleEdit(moduleID, map[string]any{
+						"status":       "completed",
+						"elapsed_sec":  liveElapsed,
+						"started_at":   "",
+						"completed_at": time.Now().UTC().Format(time.RFC3339),
+					})
+					if v.OnTimerAction != nil {
+						v.OnTimerAction(v.StepID, moduleID, "complete")
+					}
+				}
+			}
+			if inlineStatus != "idle" {
+				if components.IconButton(c, lucide.RotateCcw(), "重置计时", components.IconButtonCompact).Clicked() {
+					v.emitAnyModuleEdit(moduleID, map[string]any{
+						"status":       "idle",
+						"elapsed_sec":  0,
+						"started_at":   "",
+						"completed_at": "",
+					})
+				}
+			}
+		}
 	})
 }
 
@@ -772,7 +1306,8 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 				if v.AssetZoom <= 0 {
 					v.AssetZoom = 1
 				}
-				components.Dialog(c.Key("asset-dlg:"+moduleID), &v.assetOpen, components.DialogOptions{Label: firstNonEmpty(exp.Label, exp.AssetID)}, func(panel ui.Element) {
+				ui.Box(c.Key("asset-dlg:"+moduleID)).Children(func() {
+					components.Dialog(c, &v.assetOpen, components.DialogOptions{Label: firstNonEmpty(exp.Label, exp.AssetID)}, func(panel ui.Element) {
 					panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
 						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 							ui.Text(c, firstNonEmpty(exp.Label, exp.AssetID)).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
@@ -814,6 +1349,7 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 						}
 					})
+				})
 				})
 			}
 		})

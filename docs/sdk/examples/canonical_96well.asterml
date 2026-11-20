@@ -1,0 +1,122 @@
+# 标准 96 孔板细胞活性检测示例（AsterML v2）
+
+```asterlab
+kind: experiment
+id: exp-canonical-cck8
+schema: 1
+title: 96孔板细胞药物活性测试示例
+objective: 验证药物浓度梯度对贴壁细胞存活率的影响
+experimental_unit: 独立培养孔
+timepoints: [24h]
+primary_endpoint: OD450
+endpoint_method: 酶标仪吸光度
+endpoint_unit: AU
+```
+
+```asterlab
+kind: group_table
+id: gt-main
+schema: 1
+title: 实验分组
+rows:
+  - {id: g_ctrl, name: 对照组, role: control, condition: 0.1% DMSO, independent_n: 3}
+  - {id: g_treat, name: 给药组, role: treatment, condition: 10 uM Drug, independent_n: 3}
+```
+
+```asterlab
+kind: assay
+id: assay-od450
+schema: 1
+title: CCK-8 活性检测
+endpoint: OD450
+method: 微孔板吸光度测定
+unit: AU
+group_refs: [g_ctrl, g_treat]
+control_group_ref: g_ctrl
+timepoints: [24h]
+```
+
+```asterlab
+kind: plate
+id: plate-96-main
+schema: 1
+title: 96孔细胞处理板
+format: 96
+topology: plate
+assay: assay-od450
+timepoint: 24h
+groups:
+  g_ctrl: [B2, B3, B4]
+  g_treat: [C2, C3, C4]
+samples:
+  B2: smp-c1
+  B3: smp-c2
+  B4: smp-c3
+  C2: smp-t1
+  C3: smp-t2
+  C4: smp-t3
+replicates:
+  B2: 1
+  B3: 1
+  B4: 1
+  C2: 1
+  C3: 1
+  C4: 1
+roles:
+  B2: vehicle
+  B3: vehicle
+  B4: vehicle
+  C2: sample
+  C3: sample
+  C4: sample
+```
+
+```asterlab
+kind: step
+id: step-01-treat
+schema: 1
+title: 01 配液加药与测定
+execution: executable
+assay: assay-od450
+timepoints: [24h]
+block_refs: [plate-96-main]
+blocks:
+  - kind: param_table
+    id: pt-treat
+    schema: 1
+    title: 关键条件
+    rows:
+      - {key: seed_density, label: 接种密度, value: 5000, unit: "1"}
+      - {key: cck8_vol, label: CCK-8单孔体积, value: 10, unit: uL}
+  - kind: calculator
+    id: calc-mix
+    schema: 1
+    title: 配液余量计算
+    mode: group_mastermix
+    volume_per_unit: {value: 100, unit: uL}
+    excess_ratio: 0.15
+    plate_ref: plate-96-main
+    sample_count: 6
+  - kind: timer
+    id: tm-cck8
+    schema: 1
+    title: CCK-8 显色孵育
+    mode: countdown
+    duration: {value: 2, unit: h}
+  - kind: checklist
+    id: chk-treat
+    schema: 1
+    items:
+      - {id: chk-bubble, label: 确认加样后孔内无明显气泡, blocking: true}
+  - kind: data_table
+    id: dt-od450
+    schema: 1
+    title: OD450 原始读数
+    endpoint: OD450
+    bind_groups: true
+    container_ref: plate-96-main
+    layout: rows
+    columns:
+      - {key: well, label: 孔位, value_kind: text}
+      - {key: od450, label: OD450, value_kind: number, unit: AU, min: 0, max: 4}
+```

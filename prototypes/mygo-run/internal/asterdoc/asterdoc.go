@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -40,8 +41,10 @@ type Plate struct {
 	Groups     map[string][]string            `yaml:"groups" json:"groups"`
 	Samples    map[string]string              `yaml:"samples,omitempty" json:"samples,omitempty"`
 	Replicates map[string]int                 `yaml:"replicates,omitempty" json:"replicates,omitempty"`
-	Roles      map[string]string              `yaml:"roles,omitempty" json:"roles,omitempty"`
-	Factors    map[string]map[string]string   `yaml:"factors,omitempty" json:"factors,omitempty"`
+	Roles         map[string]string              `yaml:"roles,omitempty" json:"roles,omitempty"`
+	Factors       map[string]map[string]string   `yaml:"factors,omitempty" json:"factors,omitempty"`
+	Layers        map[string]map[string]string   `yaml:"layers,omitempty" json:"layers,omitempty"`
+	ExcludedWells []string                       `yaml:"excluded_wells,omitempty" json:"excluded_wells,omitempty"`
 }
 
 // Document is a parsed AsterML source. Source is always the canonical text;
@@ -65,29 +68,44 @@ func ParseWith(source string, registry *Registry) (*Document, error) {
 		registry = BuiltinRegistry()
 	}
 	doc := &Document{Source: source}
-	lines := strings.SplitAfter(source, "\n")
-	offset := 0
+	_, startOffset, _ := ScanFrontmatter(source)
+	lines := strings.SplitAfter(source[startOffset:], "\n")
+	offset := startOffset
 	inFence := false
+	inOtherFence := false
+	fenceTicks := 0
 	fenceLang := ""
 	bodyStart := 0
 	var body strings.Builder
 	seen := map[string]bool{}
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if !inFence {
-			if strings.HasPrefix(trimmed, "```") {
-				lang := strings.TrimSpace(strings.TrimPrefix(trimmed, "```"))
-				if lang == "asterlab" {
+		if !inFence && !inOtherFence {
+			if ticks := countLeadingBackticks(trimmed); ticks >= 3 {
+				lang := strings.TrimSpace(trimmed[ticks:])
+				if lang == "asterlab" && ticks == 3 {
 					inFence = true
+					fenceTicks = ticks
 					fenceLang = lang
 					bodyStart = offset + len(line)
 					body.Reset()
+				} else {
+					inOtherFence = true
+					fenceTicks = ticks
 				}
 			}
 			offset += len(line)
 			continue
 		}
-		if trimmed == "```" {
+		if inOtherFence {
+			if isClosingBacktickFence(trimmed, fenceTicks) {
+				inOtherFence = false
+				fenceTicks = 0
+			}
+			offset += len(line)
+			continue
+		}
+		if isClosingBacktickFence(trimmed, fenceTicks) {
 			bodyEnd := offset
 			module, err := parseModuleWith(body.String(), bodyStart, bodyEnd, registry)
 			if err != nil {
@@ -114,6 +132,7 @@ func ParseWith(source string, registry *Registry) (*Document, error) {
 			}
 			doc.Modules = append(doc.Modules, module)
 			inFence = false
+			fenceTicks = 0
 			fenceLang = ""
 			offset += len(line)
 			continue
@@ -128,6 +147,29 @@ func ParseWith(source string, registry *Registry) (*Document, error) {
 		return nil, err
 	}
 	return doc, nil
+}
+
+func countLeadingBackticks(trimmed string) int {
+	n := 0
+	for n < len(trimmed) && trimmed[n] == '`' {
+		n++
+	}
+	if n < 3 {
+		return 0
+	}
+	return n
+}
+
+func isClosingBacktickFence(trimmed string, minTicks int) bool {
+	if minTicks < 3 || len(trimmed) < minTicks {
+		return false
+	}
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] != '`' {
+			return false
+		}
+	}
+	return true
 }
 
 // validateDocumentRefs checks stable-ID references across modules. It only
@@ -403,6 +445,9 @@ func parseModuleWith(body string, start, end int, registry *Registry) (Module, e
 	if err := yaml.Unmarshal([]byte(body), &data); err != nil {
 		return Module{}, fmt.Errorf("asterlab module %q: %w", header.ID, err)
 	}
+	if normalized, ok := normalizeYAMLValue(data).(map[string]any); ok {
+		data = normalized
+	}
 	spec, ok := registry.Lookup(header.Kind, header.Schema)
 	if !ok {
 		return Module{}, fmt.Errorf("asterlab module %q uses unsupported %s@%d; supported: %s",
@@ -423,12 +468,36 @@ func parseModuleWith(body string, start, end int, registry *Registry) (Module, e
 		plate.Replicates = normalizeReplicates(plate.Replicates)
 		plate.Roles = normalizeRoles(plate.Roles)
 		plate.Factors = normalizeFactors(plate.Factors)
+		plate.Layers = normalizeFactors(plate.Layers)
+		plate.ExcludedWells = normalizeWellList(plate.ExcludedWells)
 		if plate.Format == 0 {
 			plate.Format = 96
 		}
 		module.Plate = &plate
 	}
 	return module, nil
+}
+
+func normalizeYAMLValue(v any) any {
+	switch tv := v.(type) {
+	case time.Time:
+		if tv.Hour() == 0 && tv.Minute() == 0 && tv.Second() == 0 && tv.Nanosecond() == 0 {
+			return tv.Format("2006-01-02")
+		}
+		return tv.Format(time.RFC3339)
+	case map[string]any:
+		for k, val := range tv {
+			tv[k] = normalizeYAMLValue(val)
+		}
+		return tv
+	case []any:
+		for i, val := range tv {
+			tv[i] = normalizeYAMLValue(val)
+		}
+		return tv
+	default:
+		return v
+	}
 }
 
 func normalizeGroups(groups map[string][]string) map[string][]string {
@@ -479,6 +548,23 @@ func normalizeFactors(factors map[string]map[string]string) map[string]map[strin
 			sub[strings.ToUpper(strings.TrimSpace(well))] = strings.TrimSpace(val)
 		}
 		out[d] = sub
+	}
+	return out
+}
+
+func normalizeWellList(wells []string) []string {
+	if len(wells) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(wells))
+	for _, w := range wells {
+		nw := strings.ToUpper(strings.TrimSpace(w))
+		if nw == "" || seen[nw] {
+			continue
+		}
+		seen[nw] = true
+		out = append(out, nw)
 	}
 	return out
 }
@@ -770,34 +856,44 @@ func (p Plate) GroupNames() []string {
 	return names
 }
 
-// FactorDimensions returns the sorted orthogonal factor dimension names declared on the plate.
+// FactorDimensions returns the sorted orthogonal factor/layer dimension names declared on the plate.
 func (p Plate) FactorDimensions() []string {
-	if len(p.Factors) == 0 {
+	if len(p.Factors) == 0 && len(p.Layers) == 0 {
 		return nil
 	}
-	dims := make([]string, 0, len(p.Factors))
+	seen := map[string]bool{}
+	dims := make([]string, 0, len(p.Factors)+len(p.Layers))
 	for dim, m := range p.Factors {
-		if strings.TrimSpace(dim) != "" && len(m) > 0 {
-			dims = append(dims, dim)
+		if d := strings.TrimSpace(dim); d != "" && len(m) > 0 && !seen[d] {
+			seen[d] = true
+			dims = append(dims, d)
+		}
+	}
+	for dim, m := range p.Layers {
+		if d := strings.TrimSpace(dim); d != "" && len(m) > 0 && !seen[d] {
+			seen[d] = true
+			dims = append(dims, d)
 		}
 	}
 	sort.Strings(dims)
 	return dims
 }
 
-// WellFactors returns all factor key->value annotations on well.
+// WellFactors returns all factor/layer key->value annotations on well.
 func (p Plate) WellFactors(well string) map[string]string {
-	if len(p.Factors) == 0 {
+	if len(p.Factors) == 0 && len(p.Layers) == 0 {
 		return nil
 	}
 	w := strings.ToUpper(strings.TrimSpace(well))
 	var out map[string]string
-	for dim, m := range p.Factors {
-		if val := strings.TrimSpace(m[w]); val != "" {
-			if out == nil {
-				out = map[string]string{}
+	for _, src := range []map[string]map[string]string{p.Factors, p.Layers} {
+		for dim, m := range src {
+			if val := strings.TrimSpace(m[w]); val != "" {
+				if out == nil {
+					out = map[string]string{}
+				}
+				out[dim] = val
 			}
-			out[dim] = val
 		}
 	}
 	return out

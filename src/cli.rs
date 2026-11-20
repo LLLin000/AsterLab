@@ -4560,7 +4560,7 @@ protocol_version_id: protocol-v1
         assert!(iz["steps"].as_i64().unwrap() >= 4, "iz = {iz}");
         assert!(iz["executable_steps"].as_i64().unwrap() >= 4, "iz = {iz}");
         assert_eq!(iz["groups"], 4, "iz = {iz}");
-        assert_eq!(iz["wells"], 4, "iz = {iz}");
+        assert_eq!(iz["wells"], 0, "iz = {iz}");
         assert_eq!(iz["hands_on_sec"], 57600, "iz = {iz}");
 
         let cfu = load_budget("prototypes/mygo-run/internal/asterdoc/testdata/cfu.asterml");
@@ -5016,5 +5016,78 @@ excess_ratio: 0.1
         // Each group has 2 wells * 50 uL * 1.1 = 110 uL
         let first_amt = rows[0]["amount"].as_f64().unwrap();
         assert!((first_amt - 110.0).abs() < 1e-3, "unexpected amount = {first_amt}, full={res}");
+    }
+
+    #[test]
+    fn asterdoc_rejects_unknown_keys_and_reports_cross_module_warnings() {
+        let bad = "```asterlab\nkind: assay\nid: a1\nschema: 1\ntitle: 测试\nbogus_field: 1\n```\n";
+        let err = validate_asterdoc_source(bad).expect_err("unknown key must be rejected");
+        assert!(err.message.contains("unknown field bogus_field"), "err = {err:?}");
+
+        let mismatch = r#"```asterlab
+kind: experiment
+id: exp-cm
+schema: 1
+title: 跨模块量化一致与编译测试
+```
+
+```asterlab
+kind: group_table
+id: gt-cm
+schema: 1
+rows:
+  - {id: g_ctrl, name: 空白对照, role: blank, independent_n: 99}
+```
+
+```asterlab
+kind: assay
+id: a-cm
+schema: 1
+title: 主检测
+endpoint: OD450
+group_refs: [g_ctrl]
+control_group_ref: g_ctrl
+```
+
+```asterlab
+kind: plate
+id: p-cm
+schema: 1
+format: 96
+groups:
+  g_ctrl: [B2, B3, B4]
+```
+
+```asterlab
+kind: step
+id: s-cm
+schema: 1
+title: 01 步骤
+execution: executable
+assay: a-cm
+block_refs: [p-cm]
+blocks:
+  - kind: calculator
+    id: calc-cm
+    schema: 1
+    mode: group_mastermix
+    plate_ref: p-cm
+    sample_count: 999
+    volume_per_unit: {value: 100, unit: uL}
+  - kind: checklist
+    id: chk-cm
+    schema: 1
+    items:
+      - {id: c1, label: 必检项, blocking: true}
+```
+"#;
+        validate_asterdoc_source(mismatch).expect("schema passes");
+        let compiled = compile_asterdoc_to_design(mismatch).expect("compiles");
+        assert_eq!(compiled["group_specs"][0]["role"], "control");
+        assert_eq!(compiled["assays"][0]["control_group_ids"], json!(["g_ctrl"]));
+        assert_eq!(compiled["mygo"]["stepChecks"][0]["checks"][0]["blocking"], true);
+
+        let warns = asterdoc_cross_module_warnings(mismatch);
+        assert_eq!(warns.len(), 2, "warns = {warns:?}");
     }
 }

@@ -42,7 +42,7 @@ func TestBatchPageShowsStoredCellsReadOnly(t *testing.T) {
 		png.Encode(f, tt.Image())
 		f.Close()
 	}
-	if err := tt.Click("← 返回 Notebook"); err != nil {
+	if err := tt.Click("← 返回实验记录"); err != nil {
 		t.Fatalf("back: %v", err)
 	}
 	tt.Frame()

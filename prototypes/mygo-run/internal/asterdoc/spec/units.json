@@ -12,6 +12,7 @@
     {"symbol": "mL", "dimension": "volume", "factor": 0.001},
     {"symbol": "uL", "dimension": "volume", "factor": 0.000001},
     {"symbol": "nL", "dimension": "volume", "factor": 0.000000001},
+    {"symbol": "mm3", "dimension": "volume", "factor": 0.000001},
     {"symbol": "g", "dimension": "mass", "factor": 1},
     {"symbol": "mg", "dimension": "mass", "factor": 0.001},
     {"symbol": "ug", "dimension": "mass", "factor": 0.000001},
@@ -54,6 +55,7 @@
     {"symbol": "OD", "dimension": "absorbance", "factor": 1},
     {"symbol": "rpm", "dimension": "rotational_speed", "factor": 1},
     {"symbol": "xg", "dimension": "relative_centrifugal_force", "factor": 1},
-    {"symbol": "mg/kg", "dimension": "dose", "factor": 1}
+    {"symbol": "mg/kg", "dimension": "dose", "factor": 1},
+    {"symbol": "V", "dimension": "electric_potential", "factor": 1}
   ]
 }

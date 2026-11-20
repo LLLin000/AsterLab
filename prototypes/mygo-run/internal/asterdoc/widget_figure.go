@@ -7,8 +7,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
@@ -26,14 +28,40 @@ type svgTextLabel struct {
 }
 
 var (
-	reViewBox  = regexp.MustCompile(`viewBox\s*=\s*["']([^"']+)["']`)
-	reTextElem = regexp.MustCompile(`(?s)<text\b([^>]*)>(.*?)</text>`)
-	reAttrX    = regexp.MustCompile(`\bx\s*=\s*["']([^"']+)["']`)
-	reAttrY    = regexp.MustCompile(`\by\s*=\s*["']([^"']+)["']`)
-	reAttrSize = regexp.MustCompile(`\bfont-size\s*=\s*["']([^"']+)["']`)
-	reAttrAnch = regexp.MustCompile(`\btext-anchor\s*=\s*["']([^"']+)["']`)
-	reTagStrip = regexp.MustCompile(`<[^>]+>`)
+	reViewBox   = regexp.MustCompile(`viewBox\s*=\s*["']([^"']+)["']`)
+	reSVGToken  = regexp.MustCompile(`(?s)<g\b([^>]*)>|</g>|<text\b([^>]*)>(.*?)</text>`)
+	reTranslate = regexp.MustCompile(`translate\(\s*([-+]?[0-9]*\.?[0-9]+)(?:[\s,]+([-+]?[0-9]*\.?[0-9]+))?\s*\)`)
+	reAttrX     = regexp.MustCompile(`\bx\s*=\s*["']([^"']+)["']`)
+	reAttrY     = regexp.MustCompile(`\by\s*=\s*["']([^"']+)["']`)
+	reAttrSize  = regexp.MustCompile(`\bfont-size\s*=\s*["']([^"']+)["']`)
+	reAttrAnch  = regexp.MustCompile(`\btext-anchor\s*=\s*["']([^"']+)["']`)
+	reTagStrip  = regexp.MustCompile(`<[^>]+>`)
 )
+
+func parseTranslateAttr(attrs string) (float64, float64) {
+	m := reTranslate.FindStringSubmatch(attrs)
+	if len(m) < 2 {
+		return 0, 0
+	}
+	tx, _ := strconv.ParseFloat(m[1], 64)
+	var ty float64
+	if len(m) > 2 && strings.TrimSpace(m[2]) != "" {
+		ty, _ = strconv.ParseFloat(m[2], 64)
+	}
+	return tx, ty
+}
+
+func estimateSVGTextWidth(text string, fsize float32) float32 {
+	var units float32
+	for _, r := range text {
+		if r > 0x7F {
+			units += 0.96
+		} else {
+			units += 0.54
+		}
+	}
+	return units * fsize
+}
 
 func parseSVGMetricsAndLabels(rawSVG string) (vbX, vbY, vbW, vbH float64, labels []svgTextLabel) {
 	vbW, vbH = 360, 260
@@ -54,27 +82,54 @@ func parseSVGMetricsAndLabels(rawSVG string) (vbX, vbY, vbW, vbH float64, labels
 			}
 		}
 	}
-	for _, match := range reTextElem.FindAllStringSubmatch(rawSVG, -1) {
-		attrs, body := match[1], strings.TrimSpace(reTagStrip.ReplaceAllString(match[2], ""))
-		if body == "" {
-			continue
+	var stack [][2]float64
+	var curX, curY float64
+	for _, match := range reSVGToken.FindAllStringSubmatch(rawSVG, -1) {
+		tok := match[0]
+		switch {
+		case strings.HasPrefix(tok, "</g"):
+			if n := len(stack); n > 0 {
+				curX -= stack[n-1][0]
+				curY -= stack[n-1][1]
+				stack = stack[:n-1]
+			}
+		case strings.HasPrefix(tok, "<g"):
+			gAttrs := match[1]
+			if strings.HasSuffix(strings.TrimSpace(gAttrs), "/") {
+				continue
+			}
+			tx, ty := parseTranslateAttr(gAttrs)
+			stack = append(stack, [2]float64{tx, ty})
+			curX += tx
+			curY += ty
+		default:
+			attrs, body := match[2], strings.TrimSpace(reTagStrip.ReplaceAllString(match[3], ""))
+			if body == "" {
+				continue
+			}
+			var x, y float64
+			size := 12.0
+			anchor := "start"
+			if xm := reAttrX.FindStringSubmatch(attrs); len(xm) == 2 {
+				x, _ = strconv.ParseFloat(xm[1], 64)
+			}
+			if ym := reAttrY.FindStringSubmatch(attrs); len(ym) == 2 {
+				y, _ = strconv.ParseFloat(ym[1], 64)
+			}
+			if sm := reAttrSize.FindStringSubmatch(attrs); len(sm) == 2 {
+				size, _ = strconv.ParseFloat(strings.TrimSuffix(sm[1], "px"), 64)
+			}
+			if am := reAttrAnch.FindStringSubmatch(attrs); len(am) == 2 {
+				anchor = am[1]
+			}
+			labels = append(labels, svgTextLabel{
+				X:      x + curX,
+				Y:      y + curY,
+				Anchor: anchor,
+				Text:   body,
+				Size:   size,
+			})
 		}
-		var x, y float64
-		size := 12.0
-		anchor := "start"
-		if xm := reAttrX.FindStringSubmatch(attrs); len(xm) == 2 {
-			x, _ = strconv.ParseFloat(xm[1], 64)
-		}
-		if ym := reAttrY.FindStringSubmatch(attrs); len(ym) == 2 {
-			y, _ = strconv.ParseFloat(ym[1], 64)
-		}
-		if sm := reAttrSize.FindStringSubmatch(attrs); len(sm) == 2 {
-			size, _ = strconv.ParseFloat(strings.TrimSuffix(sm[1], "px"), 64)
-		}
-		if am := reAttrAnch.FindStringSubmatch(attrs); len(am) == 2 {
-			anchor = am[1]
-		}
-		labels = append(labels, svgTextLabel{X: x, Y: y, Anchor: anchor, Text: body, Size: size})
 	}
 	return vbX, vbY, vbW, vbH, labels
 }
@@ -112,6 +167,11 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 
 	if v.FigureZoom <= 0 {
 		v.FigureZoom = 1
+	}
+
+	if v.UnifiedLive {
+		v.renderUnifiedFigure(c, tok, moduleID, title, caption, src, svgRaw, annotations, maxH, editableDesign)
+		return
 	}
 
 	card := ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing12)).
@@ -171,7 +231,8 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 		}
 
 		openFig := v.figureOpen && v.ExpandedFigureID == moduleID
-		components.Dialog(c.Key("fig-dlg:"+moduleID), &openFig, components.DialogOptions{Label: title}, func(panel ui.Element) {
+		ui.Box(c.Key("fig-dlg:"+moduleID)).Children(func() {
+			components.Dialog(c, &openFig, components.DialogOptions{Label: title}, func(panel ui.Element) {
 			panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
@@ -198,6 +259,7 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 				}
 			})
 		})
+		})
 		if !openFig && v.ExpandedFigureID == moduleID {
 			v.figureOpen = false
 		}
@@ -217,6 +279,240 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 			}
 			v.emitAnyModuleEdit(moduleID, props)
 		}
+	}
+}
+
+func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, title, caption, src, svgRaw string, annotations []svgTextLabel, maxH float32, editableDesign bool) {
+	pasteFromClipboard := func() {
+		if v.ReadOnly {
+			return
+		}
+		data := c.Services().ReadClipboardData(transfer.PNG, transfer.FileList)
+		if b, err := data.Read(transfer.PNG); err == nil && len(b) > 0 {
+			fname := fmt.Sprintf("paste_%d.png", time.Now().UnixMilli())
+			if v.OnImportAssetBytes != nil {
+				if srcPath, impErr := v.OnImportAssetBytes(b, fname); impErr == nil && srcPath != "" {
+					v.emitAnyModuleEdit(moduleID, map[string]any{"src": srcPath, "svg": ""})
+					return
+				}
+			}
+			if v.BaseDir != "" {
+				assetsDir := filepath.Join(v.BaseDir, "assets")
+				if mkErr := os.MkdirAll(assetsDir, 0o755); mkErr == nil {
+					dest := filepath.Join(assetsDir, fname)
+					if wErr := os.WriteFile(dest, b, 0o644); wErr == nil {
+						v.emitAnyModuleEdit(moduleID, map[string]any{"src": "./assets/" + fname, "svg": ""})
+						return
+					}
+				}
+			}
+		}
+		if files, err := data.Files(); err == nil && len(files) > 0 {
+			picked := files[0]
+			srcVal := portableFigureAssetSrc(v.BaseDir, picked)
+			if v.OnImportAssetBytes != nil {
+				if raw, rErr := os.ReadFile(picked); rErr == nil && len(raw) > 0 {
+					if srcPath, impErr := v.OnImportAssetBytes(raw, filepath.Base(picked)); impErr == nil && srcPath != "" {
+						srcVal = srcPath
+					}
+				}
+			}
+			props := map[string]any{"src": srcVal}
+			if strings.EqualFold(filepath.Ext(picked), ".svg") {
+				if rawBytes, readErr := os.ReadFile(picked); readErr == nil && strings.Contains(string(rawBytes), "<svg") {
+					props["svg"] = string(rawBytes)
+				}
+			}
+			v.emitAnyModuleEdit(moduleID, props)
+		}
+	}
+
+	if v.FigureZoom <= 0 {
+		v.FigureZoom = 1
+	}
+
+	hasGraphic := strings.TrimSpace(src) != "" || strings.TrimSpace(svgRaw) != ""
+	card := ui.Column(c.Key("live-fig:"+moduleID)).Focusable().FillWidth().Gap(float32(tok.Spacing8)).
+		Padding(float32(tok.Spacing12)).
+		Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border)
+
+	cardHover := card.Hovered()
+	if editableDesign && card.FileDragOver() {
+		card.Border(2, tok.Accent)
+	}
+	type figHeroMatch struct{ ID string }
+	openFig := v.figureOpen && v.ExpandedFigureID == moduleID
+	card.Children(func() {
+		if hasGraphic {
+			heroBox := ui.Column(c.Key("fig-inline-hero:" + moduleID)).FillWidth()
+			if !openFig {
+				heroBox.Transition(theme.HeroFlyTransition(figHeroMatch{ID: moduleID}))
+			}
+			heroBox.Children(func() {
+				v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, maxH, 1)
+			})
+		} else {
+			dropBox := ui.Column(c.Key("live-fig-empty:"+moduleID)).FillWidth().
+				Padding(float32(tok.Spacing24), float32(tok.Spacing16)).
+				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+				AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+			dropBox.Children(func() {
+				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing24), float32(tok.Spacing24)).TextColor(tok.TextMuted)
+				ui.Text(c, "拖入实验照片 / 示意图，或 Ctrl+V 直接粘贴剪贴板截图").
+					FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+				ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
+					if v.OnPickFigureFile != nil && editableDesign {
+						if components.Button(c, "选择本地图片", components.ButtonSecondary).Clicked() {
+							v.OnPickFigureFile(v.StepID, moduleID)
+						}
+					}
+					if editableDesign {
+						if components.Button(c, "粘贴剪贴板图片", components.ButtonOutline).Clicked() {
+							pasteFromClipboard()
+						}
+					}
+				})
+			})
+		}
+
+		// Clean inline caption below figure (clicks/blurs auto-save)
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			if editableDesign {
+				capBuf := v.ensureWidgetDraft("fig:"+moduleID+":cap", caption)
+				ui.Box(c).FillWidth().Children(func() {
+					ti := ui.TextInput(c, capBuf).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+						Placeholder("点击添加图注（如 显微镜明场 10x、手绘接种流路拍照）…")
+					if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*capBuf) != strings.TrimSpace(caption)) {
+						v.emitAnyModuleEdit(moduleID, map[string]any{"caption": strings.TrimSpace(*capBuf)})
+					}
+				})
+			} else if caption != "" {
+				ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			}
+			ui.Spacer(c)
+			if hasGraphic && cardHover {
+				if components.IconButton(c, lucide.Maximize2(), "放大查看", components.IconButtonCompact).Clicked() {
+					v.ExpandedFigureID = moduleID
+					v.FigureZoom = 1
+					v.figureOpen = true
+				}
+			}
+		})
+	})
+
+	if editableDesign {
+		if card.Clicked() {
+			card.Focus()
+		}
+		if card.Shortcut(ui.Cmd, ui.KeyV) {
+			pasteFromClipboard()
+		}
+		if dropped := card.DroppedFiles(); len(dropped) > 0 {
+			picked := dropped[0]
+			srcVal := portableFigureAssetSrc(v.BaseDir, picked)
+			if v.OnImportAssetBytes != nil {
+				if raw, rErr := os.ReadFile(picked); rErr == nil && len(raw) > 0 {
+					if srcPath, impErr := v.OnImportAssetBytes(raw, filepath.Base(picked)); impErr == nil && srcPath != "" {
+						srcVal = srcPath
+					}
+				}
+			}
+			props := map[string]any{"src": srcVal}
+			if strings.EqualFold(filepath.Ext(picked), ".svg") {
+				if rawBytes, readErr := os.ReadFile(picked); readErr == nil && strings.Contains(string(rawBytes), "<svg") {
+					props["svg"] = string(rawBytes)
+				}
+			}
+			v.emitAnyModuleEdit(moduleID, props)
+		}
+	}
+
+	svgEdOpen := v.ensureWidgetBool("fig_svg_dlg:" + moduleID)
+	components.ContextMenu(c, card, func(m *components.Menu) {
+		if editableDesign && v.OnPickFigureFile != nil {
+			if m.Item("从本地选择图片…").Chosen() {
+				v.OnPickFigureFile(v.StepID, moduleID)
+			}
+		}
+		if editableDesign {
+			if m.Item("从剪贴板粘贴图片").Shortcut("Ctrl+V").Chosen() {
+				pasteFromClipboard()
+			}
+		}
+		if hasGraphic {
+			if m.Item("放大查看").Chosen() {
+				v.ExpandedFigureID = moduleID
+				v.FigureZoom = 1
+				v.figureOpen = true
+			}
+		}
+		if editableDesign {
+			m.Separator()
+			if m.Item("编辑 SVG 源码…").Chosen() {
+				*svgEdOpen = true
+			}
+			if hasGraphic && m.Item("清除当前图像").Chosen() {
+				v.emitAnyModuleEdit(moduleID, map[string]any{"src": "", "svg": ""})
+			}
+		}
+	})
+
+	ui.Box(c.Key("fig-dlg:"+moduleID)).Children(func() {
+		components.Dialog(c, &openFig, components.DialogOptions{Label: title}, func(panel ui.Element) {
+		panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+				ui.Spacer(c)
+				for _, z := range []float32{0.75, 1.0, 1.5, 2.0} {
+					z := z
+					style := components.ButtonOutline
+					if v.FigureZoom == z {
+						style = components.ButtonSecondary
+					}
+					if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
+						v.FigureZoom = z
+					}
+				}
+				if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
+					openFig = false
+				}
+			})
+			ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
+				ui.Column(c.Key("fig-modal-hero:"+moduleID)).FillWidth().
+					Transition(theme.HeroFlyTransition(figHeroMatch{ID: moduleID})).Children(func() {
+					v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, 320, v.FigureZoom)
+				})
+			})
+			if caption != "" {
+				ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			}
+		})
+	})
+	})
+	if !openFig && v.ExpandedFigureID == moduleID {
+		v.figureOpen = false
+	}
+
+	if editableDesign {
+		svgBuf := v.ensureWidgetDraft("fig:"+moduleID+":svg", svgRaw)
+		ui.Box(c.Key("fig-svg-ed:"+moduleID)).Children(func() {
+			components.Dialog(c, svgEdOpen, components.DialogOptions{Label: "编辑 SVG 矢量源码"}, func(panel ui.Element) {
+			panel.Width(float32(tok.Spacing48)*11).Gap(float32(tok.Spacing12)).Children(func() {
+				components.TextBox(c, svgBuf, components.TextBoxOptions{Multiline: true}).
+					Placeholder("<svg viewBox=\"0 0 360 220\">…</svg>").Lines(8, 16)
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Spacer(c)
+					if components.Button(c, "取消", components.ButtonOutline).Clicked() {
+						*svgEdOpen = false
+					}
+					if components.Button(c, "应用 SVG", components.ButtonPrimary).Clicked() {
+						v.emitAnyModuleEdit(moduleID, map[string]any{"svg": strings.TrimSpace(*svgBuf)})
+						*svgEdOpen = false
+					}
+				})
+			})
+		})
+		})
 	}
 }
 
@@ -285,7 +581,8 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 			})
 			return
 		}
-		ui.Row(c).FillWidth().Justify(ui.Center).Padding(float32(tok.Spacing8)).
+		ui.Row(c).FillWidth().Justify(ui.Center).
+			Padding(float32(tok.Spacing12), float32(tok.Spacing12), float32(tok.Spacing16), float32(tok.Spacing12)).
 			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Children(func() {
 			ui.Box(c).Size(drawW, drawH).DrawOver(func(p *ui.Painter, r ui.Rect) {
 				sx := float64(r.W) / vbW
@@ -300,11 +597,11 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 					if fsize > float32(tok.TextSection)*zoom {
 						fsize = float32(tok.TextSection) * zoom
 					}
+					textW := estimateSVGTextWidth(lbl.Text, fsize)
 					if lbl.Anchor == "middle" {
-						// Offset left slightly based on rune length to visually center text cleanly
-						px -= float32(len([]rune(lbl.Text))) * fsize * 0.28
+						px -= textW * 0.5
 					} else if lbl.Anchor == "end" {
-						px -= float32(len([]rune(lbl.Text))) * fsize * 0.56
+						px -= textW
 					}
 					p.Text(px, py-fsize*0.35, lbl.Text, fsize, tok.Text)
 				}
@@ -327,7 +624,8 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 			})
 			return
 		}
-		ui.Row(c).FillWidth().Justify(ui.Center).Padding(float32(tok.Spacing8)).
+		ui.Row(c).FillWidth().Justify(ui.Center).
+			Padding(float32(tok.Spacing12), float32(tok.Spacing12), float32(tok.Spacing16), float32(tok.Spacing12)).
 			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Children(func() {
 			ui.Image(c, imgSrc).Height(maxH * zoom)
 		})

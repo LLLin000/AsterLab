@@ -485,6 +485,7 @@ pub(crate) fn assess_asterdoc(db: &Connection, input: &Value) -> Result<Value, C
                         }
                     }
                 }
+                warnings.extend(asterdoc_cross_module_warnings(source));
                 let assays = design["assays"].as_array().cloned().unwrap_or_default();
                 if assays.is_empty() {
                     errors.push("还没有检测（assay）".to_owned());

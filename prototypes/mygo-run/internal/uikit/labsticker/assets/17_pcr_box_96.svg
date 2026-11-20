@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <defs>
+    <linearGradient id="pcrBoxFront" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#A78BFA"/>
+      <stop offset="55%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#5B21B6"/>
+    </linearGradient>
+    <linearGradient id="pcrBoxSide" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#DDD6FE"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="pcrBoxDeck" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FAF5FF"/>
+      <stop offset="100%" stop-color="#EDE9FE"/>
+    </linearGradient>
+    <linearGradient id="pcrBoxLid" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#C4B5FD" stop-opacity="0.44"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- 96-well skirted PCR rack & hinged translucent lid -->
+    <!-- Right angled skirt wall -->
+    <path d="M 442,216 L 442,302 C 442,309 437,315 431,318 L 248,404 L 248,308 Z"
+          fill="url(#pcrBoxSide)" stroke="#4C1D95" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Front angled skirt wall -->
+    <path d="M 58,216 L 248,308 L 248,404 C 242,407 235,406 229,403 L 66,318 C 61,315 58,309 58,302 Z"
+          fill="url(#pcrBoxFront)" stroke="#4C1D95" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Front label badge -->
+    <path d="M 108,268 L 194,308 L 194,336 L 108,296 Z"
+          fill="#FFFFFF" fill-opacity="0.88" stroke="#6D28D9" stroke-width="1.8" stroke-linejoin="round"/>
+    <!-- Top 96-well deck -->
+    <path d="M 58,216 L 248,136 C 254,133 262,133 268,136 L 442,216 L 248,308 Z"
+          fill="url(#pcrBoxDeck)" stroke="#4C1D95" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Visible 8-well PCR tube strips & primer tubes arranged in rows -->
+    <g>
+      <!-- Row A strip (Emerald SYBR caps) -->
+      <ellipse cx="164" cy="184" rx="9.5" ry="5.2" fill="#10B981" stroke="#047857" stroke-width="1.4"/>
+      <ellipse cx="190" cy="173" rx="9.5" ry="5.2" fill="#10B981" stroke="#047857" stroke-width="1.4"/>
+      <ellipse cx="216" cy="162" rx="9.5" ry="5.2" fill="#10B981" stroke="#047857" stroke-width="1.4"/>
+      <ellipse cx="242" cy="151" rx="9.5" ry="5.2" fill="#10B981" stroke="#047857" stroke-width="1.4"/>
+      <ellipse cx="268" cy="162" rx="9.5" ry="5.2" fill="#34D399" stroke="#047857" stroke-width="1.4"/>
+      <!-- Row B strip (Indigo optical caps) -->
+      <ellipse cx="136" cy="198" rx="9.5" ry="5.2" fill="#6366F1" stroke="#4338CA" stroke-width="1.4"/>
+      <ellipse cx="162" cy="209" rx="9.5" ry="5.2" fill="#6366F1" stroke="#4338CA" stroke-width="1.4"/>
+      <ellipse cx="188" cy="198" rx="9.5" ry="5.2" fill="#6366F1" stroke="#4338CA" stroke-width="1.4"/>
+      <ellipse cx="214" cy="187" rx="9.5" ry="5.2" fill="#6366F1" stroke="#4338CA" stroke-width="1.4"/>
+      <ellipse cx="240" cy="176" rx="9.5" ry="5.2" fill="#6366F1" stroke="#4338CA" stroke-width="1.4"/>
+      <ellipse cx="294" cy="174" rx="9.5" ry="5.2" fill="#818CF8" stroke="#4338CA" stroke-width="1.4"/>
+      <ellipse cx="320" cy="186" rx="9.5" ry="5.2" fill="#818CF8" stroke="#4338CA" stroke-width="1.4"/>
+      <!-- Row C & D individual PCR tubes (Violet / Amber) -->
+      <ellipse cx="188" cy="224" rx="9.5" ry="5.2" fill="#F59E0B" stroke="#B45309" stroke-width="1.4"/>
+      <ellipse cx="214" cy="213" rx="9.5" ry="5.2" fill="#F59E0B" stroke="#B45309" stroke-width="1.4"/>
+      <ellipse cx="240" cy="202" rx="9.5" ry="5.2" fill="#F59E0B" stroke="#B45309" stroke-width="1.4"/>
+      <ellipse cx="266" cy="191" rx="9.5" ry="5.2" fill="#F59E0B" stroke="#B45309" stroke-width="1.4"/>
+      <ellipse cx="222" cy="242" rx="9.5" ry="5.2" fill="#EC4899" stroke="#9D174D" stroke-width="1.4"/>
+      <ellipse cx="248" cy="231" rx="9.5" ry="5.2" fill="#EC4899" stroke="#9D174D" stroke-width="1.4"/>
+      <ellipse cx="274" cy="220" rx="9.5" ry="5.2" fill="#EC4899" stroke="#9D174D" stroke-width="1.4"/>
+      <ellipse cx="300" cy="209" rx="9.5" ry="5.2" fill="#14B8A6" stroke="#0F766E" stroke-width="1.4"/>
+      <ellipse cx="326" cy="198" rx="9.5" ry="5.2" fill="#14B8A6" stroke="#0F766E" stroke-width="1.4"/>
+      <ellipse cx="256" cy="260" rx="9.5" ry="5.2" fill="#8B5CF6" stroke="#5B21B6" stroke-width="1.4"/>
+      <ellipse cx="282" cy="249" rx="9.5" ry="5.2" fill="#8B5CF6" stroke="#5B21B6" stroke-width="1.4"/>
+      <ellipse cx="308" cy="238" rx="9.5" ry="5.2" fill="#8B5CF6" stroke="#5B21B6" stroke-width="1.4"/>
+      <ellipse cx="334" cy="227" rx="9.5" ry="5.2" fill="#38BDF8" stroke="#0369A1" stroke-width="1.4"/>
+      <ellipse cx="360" cy="216" rx="9.5" ry="5.2" fill="#38BDF8" stroke="#0369A1" stroke-width="1.4"/>
+    </g>
+    <!-- Clear protective lid top cover -->
+    <path d="M 54,208 L 248,126 C 255,123 263,123 270,126 L 446,208 L 446,222 L 248,314 L 54,222 Z"
+          fill="url(#pcrBoxLid)" stroke="#6D28D9" stroke-width="2.4" stroke-linejoin="round"/>
+    <path d="M 100,196 L 254,134 L 316,162" fill="none" stroke="#FFFFFF" stroke-width="4.2" stroke-linecap="round" opacity="0.82"/>
+    <path d="M 248,314 L 248,402" fill="none" stroke="#FFFFFF" stroke-width="2.0" opacity="0.52"/>
+  </g>
+</svg>

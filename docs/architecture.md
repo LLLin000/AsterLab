@@ -453,3 +453,28 @@ Slint 不直接执行 SQL，不整体替换记录 JSON；写入必须走字段�
 6. P5：写入闭环与性能验收。
 
 P0/P1 不拆 Slint，不实现 StepMeta；每一步都以同一 L929 冻结案例验收。
+
+## 10. 移动端运行边界与双端同步决策记录（2026-11-20 架构讨论）
+
+本节记录针对 `prototypes/mygo-run` 在手机端实际执行实验以及桌面⇄手机双端同步的架构评估与边界决策（非任务待办表；具体开工卡片仍以 Kandev 为准）：
+
+### 10.1 手机端 UX 分工定位
+- **桌面端**承担实验设计编排、多窗格分屏对照、复杂 96/384 孔板因子梯度映射与 PDF 导出。
+- **手机端**定位为湿实验台边的**单手记录本 + 计时器 + 试剂速查卡**：默认优先浏览执行细节（查看试剂盒位 `PantryLocationMap`、勾选 `checklist`、启停 `timer`、在 `param_table` 用「记偏离」录入实测值、现场拍照粘贴到 `./assets/`），高频导航全量收敛在拇指单手舒适区（底部居中纯图标浮岛 `< > 🔍 + [N] ≡`、左滑实验库三层控制岛抽屉、右滑步骤大纲与速算器）。
+
+### 10.2 是否需要改造后端？
+- **结论：以本地 Obsidian 式 `.asterml` Vault 工作区运行，无需架设中心服务器后端；但启动与 FFI 边界需要做双轨适配**：
+  1. **纯 Go Vault 层已完全独立闭环**：`.asterml` 解析与回写（`internal/asterdoc`）、本地文件夹扫描与树状组织（`internal/vault`）、100 步撤销环与原子落盘（`vault.LiveDocument` / `WriteFileAtomic`）、日历与储藏室均为纯 Go 本地文件引擎，零 SQLite/网络依赖。
+  2. **当前启动卡点**：`prototypes/mygo-run/main.go`（`runs.NewRunService()` / `runs.NewDesignService()`）在初始化时会尝试加载原生 Rust FFI 动态库（桌面为 `runs.dll`）；未携带原生动态库时将产生 `syncErr` 报错条。
+  3. **两条可行演进路径**：
+     - **路径 A（轻量立即可跑 · 纯 Go Vault 模式）**：移动端或无原生动态库环境下对 `NewRunService` 报错做非致命降级处理，直接以纯 Go `.asterml` 单库引擎运行，零后端改造。
+     - **路径 B（完整冻结 Run 审计能力）**：将 `crates/asterlab-core` 交叉编译为 `libruns.so`（Android NDK）或静态库 `.a`（iOS），沿用既有 FFI 接口即可。
+
+### 10.3 桌面 ⇄ 手机双端同步策略
+基于单文件自包含 `.asterml` + `./assets/` 透明目录结构，优先采用**文件级透明同步 + 结构化冲突兜底**，而非另起数据库行同步协议：
+
+1. **零服务期（Phase 1 · 兼容通用云盘/P2P）**：直接复用 iCloud Drive / Syncthing / WebDAV / OneDrive 同步整个 `<Vault>` 目录，客户端补齐三项守护即可：
+   - **前后台热重载监听**：App 切回前台与定时轻检调用既有 `LiveDocument.ReloadIfExternalChanged()`（比对 `DiskMtime` 与规范化文本），自动刷新左树、日历与当前视图。
+   - **按块唯一 `id` 的三路合并与冲突副本**：利用 `.asterml` 内 `frontmatter`、`step.id` 及块 `id` 的强结构性，不同步骤分别在桌面与手机修改时优先按块合并；仅在同块同字段撞车时保留本地变更并另存 `*.conflict-<device>.asterml` 提示对比，严禁静默覆盖实验记录。
+   - **`assets/` 大图按需/缩略图分层策略**：避免手机端同步大体积显微原始照片拖慢文字方案热开。
+2. **自托管同步演进（Phase 2 · 可选增强）**：若后续需要跨团队实时同步或无云盘同步，可在不改变本地 `.asterml` 引擎的前提下，于外部增加薄层内容寻址对象同步（按 `sha256` 切分 `.asterml` / `assets/` Blob 上传 S3/WebDAV + 推送 `path + hash + mtime` 元清单），保留完全离线可读可写能力与同等结构化合并逻辑。

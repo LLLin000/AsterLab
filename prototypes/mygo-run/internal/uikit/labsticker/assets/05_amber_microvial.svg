@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <defs>
+    <linearGradient id="amberGlass" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#B45309"/>
+      <stop offset="28%" stop-color="#F59E0B"/>
+      <stop offset="68%" stop-color="#D97706"/>
+      <stop offset="100%" stop-color="#92400E"/>
+    </linearGradient>
+    <linearGradient id="amberLiquid" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#78350F" stop-opacity="0.72"/>
+      <stop offset="40%" stop-color="#B45309" stop-opacity="0.58"/>
+      <stop offset="100%" stop-color="#451A03" stop-opacity="0.78"/>
+    </linearGradient>
+    <linearGradient id="amberCap" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0F766E"/>
+      <stop offset="35%" stop-color="#14B8A6"/>
+      <stop offset="78%" stop-color="#0D9488"/>
+      <stop offset="100%" stop-color="#115E59"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- Amber glass shouldered vial body -->
+    <path d="M 192,150 L 308,150 C 314,162 326,174 326,196 L 326,356 C 326,386 302,406 250,406 C 198,406 174,386 174,356 L 174,196 C 174,174 186,162 192,150 Z"
+          fill="url(#amberGlass)" stroke="#78350F" stroke-width="3.6" stroke-linejoin="round"/>
+    <!-- Dark concentrated antibody/dye pool inside bottom 55% -->
+    <path d="M 181,246 L 319,246 L 319,354 C 319,380 297,398 250,398 C 203,398 181,380 181,354 Z"
+          fill="url(#amberLiquid)"/>
+    <ellipse cx="250" cy="246" rx="69" ry="12" fill="#FBBF24" fill-opacity="0.75"/>
+    <!-- Frosted label band with clean blank area -->
+    <path d="M 176,226 C 224,236 276,236 324,226 L 324,334 C 276,344 224,344 176,334 Z"
+          fill="#FFFBEB" fill-opacity="0.93" stroke="#92400E" stroke-width="1.2" stroke-opacity="0.35"/>
+    <path d="M 176,226 C 224,236 276,236 324,226 L 324,244 C 276,254 224,254 176,244 Z"
+          fill="#0D9488"/>
+    <!-- Decorative clean typography placeholder lines (subtle minimalist style) -->
+    <rect x="206" y="274" width="88" height="7" rx="3.5" fill="#78350F" fill-opacity="0.22"/>
+    <rect x="218" y="294" width="64" height="5" rx="2.5" fill="#78350F" fill-opacity="0.16"/>
+    <!-- Neck glass rim -->
+    <rect x="196" y="138" width="108" height="16" rx="4" fill="#FDE68A" stroke="#78350F" stroke-width="2.6"/>
+    <!-- Ribbed teal micro-vial screw cap -->
+    <path d="M 192,86 C 192,76 308,76 308,86 L 310,136 C 310,143 190,143 190,136 Z"
+          fill="url(#amberCap)" stroke="#115E59" stroke-width="3.2" stroke-linejoin="round"/>
+    <ellipse cx="250" cy="86" rx="58" ry="11" fill="#5EEAD4" stroke="#115E59" stroke-width="2.2"/>
+    <ellipse cx="250" cy="85" rx="40" ry="6.5" fill="#99F6E4" fill-opacity="0.7"/>
+    <!-- Subtle vertical cap grip ribs -->
+    <g stroke="#0F766E" stroke-width="2.2" stroke-linecap="round" opacity="0.55">
+      <line x1="204" y1="98" x2="204" y2="132"/>
+      <line x1="216" y1="100" x2="216" y2="134"/>
+      <line x1="229" y1="102" x2="229" y2="136"/>
+      <line x1="243" y1="103" x2="243" y2="137"/>
+      <line x1="257" y1="103" x2="257" y2="137"/>
+      <line x1="271" y1="102" x2="271" y2="136"/>
+      <line x1="284" y1="100" x2="284" y2="134"/>
+      <line x1="296" y1="98" x2="296" y2="132"/>
+    </g>
+    <!-- Crisp glossy glass specular highlight down left side -->
+    <path d="M 191,178 C 186,192 186,204 186,220 L 186,356 C 186,374 195,384 205,390"
+          fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" opacity="0.48"/>
+    <path d="M 206,96 L 206,130" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" opacity="0.42"/>
+  </g>
+</svg>

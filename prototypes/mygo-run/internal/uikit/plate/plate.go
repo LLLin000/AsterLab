@@ -520,7 +520,19 @@ func View(c *ui.Context, props Props) {
 									badge = rb
 								}
 								btn := ui.ButtonBase(c).Key(id).Size(cellW, cellH).Radius(wellRadius()).
-									Background(fill).Border(strokeW, strokeCol).Label("孔 " + id)
+									Label("孔 " + id)
+								animFill := btn.AnimateColor("wfill", fill, theme.MotionSnappy)
+								animStroke := btn.AnimateColor("wstroke", strokeCol, theme.MotionSnappy)
+								btn.Background(animFill).Border(strokeW, animStroke)
+								targetScale := float32(1.0)
+								if btn.Pressed() {
+									targetScale = 0.93
+								} else if selected[id] && st.hoverWell == id {
+									targetScale = 1.04
+								}
+								if sc := btn.AnimateTo("wscale", targetScale, theme.MotionSnappy); sc > 0 && sc != 1.0 {
+									btn.Scale(sc, sc)
+								}
 								if badge != "" || (selected[id] && cellW >= 32) {
 									fontPx := float32(t.TextMeta) * 0.72
 									if cellW >= 40 {
@@ -645,14 +657,18 @@ func View(c *ui.Context, props Props) {
 			if len(legendOrder) > 0 {
 				ui.Row(c).Wrap().Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
 					for _, label := range legendOrder {
-						ui.Row(c).Gap(float32(t.Spacing4)).AlignItems(ui.Center).Children(func() {
-							ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius)).Background(legendColors[label])
-							ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(labelSize).TextColor(t.TextMuted).FontFeatures("tnum")
+						ui.Row(c).Key("leg-"+label).Gap(float32(t.Spacing4)).AlignItems(ui.Center).
+							Transition(theme.AccordionTransition()).Children(func() {
+							sw := ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius))
+							sw.Background(sw.AnimateColor("lcol", legendColors[label], theme.MotionSnappy))
+							ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(labelSize).
+								TextColor(t.TextMuted).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 						})
 					}
 				})
 			}
-			ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 拖拽框选或点行列号快速选孔", len(props.Wells), rows*cols)).FontSize(labelSize).TextColor(t.TextMuted)
+			ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 拖拽框选或点行列号快速选孔", len(props.Wells), rows*cols)).
+				FontSize(labelSize).TextColor(t.TextMuted).ContentTransition(theme.NumericRoll(false))
 			return
 		}
 

@@ -1,0 +1,663 @@
+package shell
+
+import (
+	"fmt"
+	"runtime"
+	"strings"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
+	"github.com/oneo-me/onevra/source/shells/sidebar"
+
+	"asterlab-mygo-prototype/internal/theme"
+)
+
+type hotkeySpec struct {
+	ID      string
+	Action  string
+	Group   string
+	Default string
+}
+
+var defaultHotkeySpecs = []hotkeySpec{
+	{ID: "cmd.palette", Action: "打开命令面板 / 快速切换实验", Group: "导航与搜索", Default: "Ctrl+K / Ctrl+O"},
+	{ID: "vault.new_exp", Action: "新建实验文档", Group: "导航与搜索", Default: "Ctrl+N"},
+	{ID: "nav.calendar", Action: "跳回实验日程主页", Group: "导航与搜索", Default: "Ctrl+1"},
+	{ID: "nav.back", Action: "浏览历史后退", Group: "导航与搜索", Default: "Alt+←"},
+	{ID: "nav.forward", Action: "浏览历史前进", Group: "导航与搜索", Default: "Alt+→"},
+	{ID: "nav.left_sidebar", Action: "展开 / 收起左侧实验库", Group: "工作区与分屏", Default: "Ctrl+B"},
+	{ID: "nav.right_drawer", Action: "展开 / 收起右侧步骤大纲与速算", Group: "工作区与分屏", Default: "Ctrl+Shift+R"},
+	{ID: "pane.split_right", Action: "当前文档向右分屏对照", Group: "工作区与分屏", Default: "Ctrl+\\"},
+	{ID: "tab.close", Action: "关闭当前非固定标签页", Group: "工作区与分屏", Default: "Ctrl+W"},
+	{ID: "doc.toggle_mode", Action: "切换编辑 / 阅读模式", Group: "实验文档编辑", Default: "Ctrl+E"},
+	{ID: "doc.undo", Action: "撤销上一步修改", Group: "实验文档编辑", Default: "Ctrl+Z"},
+	{ID: "doc.redo", Action: "重做已撤销修改", Group: "实验文档编辑", Default: "Ctrl+Y"},
+	{ID: "tree.rename", Action: "重命名选中项目或实验", Group: "文件树管理", Default: "F2"},
+	{ID: "tree.delete", Action: "移入实验库回收站", Group: "文件树管理", Default: "Del"},
+	{ID: "app.settings", Action: "打开 Obsidian 风格设置中心", Group: "系统", Default: "Ctrl+,"},
+}
+
+func (s *Shell) ensureSettingsDefaults() {
+	if s.ThemeSource == "" {
+		s.ThemeSource = "system"
+	}
+	s.SyncThemeLook(nil)
+	if s.Density == "" {
+		s.Density = "comfortable"
+	}
+	if s.DefaultOpenMode == "" {
+		s.DefaultOpenMode = "edit"
+	}
+	if s.DefaultPlateFormat == 0 {
+		s.DefaultPlateFormat = 96
+	}
+	if s.DefaultExcessPct == 0 {
+		s.DefaultExcessPct = 10
+	}
+	s.EnsureMobileDefaults()
+	if s.Hotkeys == nil {
+		s.Hotkeys = map[string]string{}
+	}
+	for _, spec := range defaultHotkeySpecs {
+		if strings.TrimSpace(s.Hotkeys[spec.ID]) == "" {
+			s.Hotkeys[spec.ID] = spec.Default
+		}
+	}
+}
+
+func (s *Shell) notifySettingsChanged() {
+	if s.OnSettingsChanged != nil {
+		s.OnSettingsChanged()
+	}
+}
+
+// HotkeyDisplay returns the active shortcut badge text for a command ID.
+func (s *Shell) HotkeyDisplay(id string) string {
+	s.ensureSettingsDefaults()
+	if v := strings.TrimSpace(s.Hotkeys[id]); v != "" {
+		return v
+	}
+	for _, spec := range defaultHotkeySpecs {
+		if spec.ID == id {
+			return spec.Default
+		}
+	}
+	return ""
+}
+
+func (s *Shell) renderObsidianSettingsDialog(c *ui.Context) {
+	if !s.VaultSettingsOpen {
+		return
+	}
+	s.ensureSettingsDefaults()
+	t := c.Theme()
+	w, h := c.Size()
+	if w <= 0 {
+		w = 1080
+	}
+	if h <= 0 {
+		h = 720
+	}
+	var inset float32 = 20
+	if s.window != nil {
+		inset = sidebar.HeaderHeight(c)
+	}
+	width := min(t.Space(205), w*0.9, max(0, w-2*inset))
+	height := min(t.Space(175), h*0.86)
+	narrow := width < t.Space(170) || s.IsMobileLayout(c)
+
+	open := s.VaultSettingsOpen
+	ui.Box(c.Key("obsidian-settings-dlg")).Children(func() {
+		components.Dialog(c, &open, components.DialogOptions{Label: "AsterLab 设置", Inset: inset}, func(panel ui.Element) {
+			panel.Width(width).Height(height).Padding(0).Gap(0).Clip()
+			components.Settings(c, &s.SettingsView, s.obsidianSettingsCategories(c), components.SettingsOptions{
+				Narrow:            narrow,
+				Title:             "设置",
+				SearchPlaceholder: "搜索外观、实验库、快捷键、默认板型…",
+				CategoryLabel:     "设置分类",
+				ResultsTitle:      "匹配设置项",
+				EmptyText:         "未找到匹配的设置项",
+				Close: func() {
+					open = false
+				},
+			})
+		})
+	})
+	s.VaultSettingsOpen = open
+}
+
+func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsCategory {
+	tok := theme.GetTokens(c.Theme())
+
+	applyThemeChoice := func(choice string) {
+		s.ThemeSource = choice
+		if s.window != nil {
+			switch choice {
+			case "light":
+				mygo.Theme.SetSource(mygo.ThemeLight)
+			case "dark":
+				mygo.Theme.SetSource(mygo.ThemeDark)
+			default:
+				mygo.Theme.SetSource(mygo.ThemeSystem)
+			}
+		}
+		s.notifySettingsChanged()
+		c.Invalidate()
+	}
+
+	vaultCat := components.SettingsCategory{
+		ID:          "vault",
+		Title:       "实验库与文件",
+		Section:     "工作区",
+		Icon:        lucide.FolderOpen(),
+		Description: "本地单库根目录、透明 .asterml 组织规则、新建默认位置与附件归档策略。",
+		Groups: []components.SettingsGroup{
+			{
+				ID:    "vault-location",
+				Title: "库位置与目录树",
+				Items: []components.SettingsItem{
+					{
+						ID:          "vault-path",
+						Title:       "当前实验库路径",
+						Description: "所有 .asterml 实验、templates 模板与 assets 附件均直接存于该目录。",
+						Keywords:    []string{"vault", "path", "目录", "路径", "切换"},
+						Stacked:     true,
+						Build: func(c *ui.Context) {
+							ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+								ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+									components.TextBox(c, &s.VaultPathInput, components.TextBoxOptions{}).
+										Placeholder("输入本地实验库文件夹路径")
+								})
+								if components.Button(c, "切换路径", components.ButtonSecondary).Clicked() && s.OnSwitchVaultPath != nil {
+									s.OnSwitchVaultPath(strings.TrimSpace(s.VaultPathInput))
+									s.VaultSettingsOpen = false
+								}
+								if s.OnRevealInExplorer != nil && components.Button(c, "打开目录", components.ButtonOutline).Clicked() {
+									s.OnRevealInExplorer("")
+								}
+							})
+						},
+					},
+					{
+						ID:          "hide-assets",
+						Title:       "隐藏 assets 附件目录",
+						Description: "在左侧实验库树中隐藏图片与原始附件目录（不影响文内引用）。",
+						Keywords:    []string{"assets", "隐藏", "附件", "树"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.HideAssetsInTree, "隐藏 assets", components.SwitchOptions{HideLabel: true}).Changed() {
+								if s.OnToggleHideAssets != nil {
+									s.OnToggleHideAssets(s.HideAssetsInTree)
+								}
+								s.notifySettingsChanged()
+							}
+						},
+					},
+					{
+						ID:          "auto-archive-assets",
+						Title:       "粘贴 / 拖入图片自动落库 ./assets/",
+						Description: "Ctrl+V 截图或拖入实验实拍图时自动复制至当前库 assets 目录并写相对路径。",
+						Keywords:    []string{"paste", "drag", "assets", "图片", "相对路径"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.AutoArchiveAssets, "自动落库附件", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+				},
+			},
+			{
+				ID:    "default-folder",
+				Title: "新建归属策略",
+				Items: []components.SettingsItem{
+					{
+						ID:          "default-proj",
+						Title:       "新建实验默认项目文件夹",
+						Description: "日历点击新建或 Ctrl+N 创建时预选的归属目录。",
+						Keywords:    []string{"project", "folder", "默认", "新建", "项目"},
+						Build: func(c *ui.Context) {
+							choices := append([]string{"", "/"}, s.VaultFolders...)
+							sel := components.Select(c, &s.DefaultProjectDir)
+							labelFor := func(v string) string {
+								switch v {
+								case "":
+									return "记住上次所在项目"
+								case "/":
+									return "始终放在根目录"
+								default:
+									return v
+								}
+							}
+							sel.Trigger.MinWidth(c.Theme().Space(40)).Children(func() {
+								components.Text(c, labelFor(s.DefaultProjectDir)).SingleLine()
+							})
+							sel.Popup(func(panel ui.Element) {
+								for _, ch := range choices {
+									ch := ch
+									sel.Item(ch).Children(func() {
+										components.Text(c, labelFor(ch)).SingleLine()
+									})
+								}
+							})
+							if sel.Trigger.Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+				},
+			},
+		},
+	}
+
+	appearanceCat := components.SettingsCategory{
+		ID:          "appearance",
+		Title:       "外观与主题",
+		Section:     "工作区",
+		Icon:        lucide.Palette(),
+		Description: "Obsidian 风格纸面明暗主题、字号缩放、间距紧密度与系统级物理动效偏好。",
+		Groups: []components.SettingsGroup{
+			{
+				ID:    "theme-group",
+				Title: "色彩与材质",
+				Items: []components.SettingsItem{
+					{
+						ID:          "theme-mode",
+						Title:       "基础明暗模式",
+						Description: "切换浅色画布、深空夜视或跟随操作系统明暗外观。",
+						Keywords:    []string{"theme", "dark", "light", "system", "主题", "深色", "浅色"},
+						Build: func(c *ui.Context) {
+							options := []string{"system", "light", "dark"}
+							names := map[string]string{"system": "跟随系统", "light": "浅色模式", "dark": "深色模式"}
+							sel := components.Select(c, &s.ThemeSource)
+							sel.Trigger.MinWidth(c.Theme().Space(32)).Children(func() {
+								components.Text(c, names[s.ThemeSource]).SingleLine()
+							})
+							sel.Popup(func(panel ui.Element) {
+								for _, opt := range options {
+									opt := opt
+									sel.Item(opt).Children(func() {
+										components.Text(c, names[opt]).SingleLine()
+									})
+								}
+							})
+							if sel.Trigger.Changed() {
+								applyThemeChoice(s.ThemeSource)
+							}
+						},
+					},
+					{
+						ID:          "theme-preset",
+						Title:       "界面色盘预设",
+						Description: "切换纯净白纸（Obsidian 极简，无边框冷灰卡片）、冷银灰底（Cool Zinc）或暖润实验纸。",
+						Keywords:    []string{"preset", "obsidian", "zinc", "warm", "配色", "画布", "冷灰", "纯白"},
+						Build: func(c *ui.Context) {
+							options := []string{theme.PresetObsidian, theme.PresetZinc, theme.PresetWarm}
+							names := map[string]string{
+								theme.PresetObsidian: "纯净白纸 · Obsidian（推荐）",
+								theme.PresetZinc:     "冷银极简 · Cool Zinc",
+								theme.PresetWarm:     "经典暖润实验纸",
+							}
+							if s.ThemePreset == "" || s.ThemePreset == "aurora" {
+								s.ThemePreset = theme.PresetObsidian
+							}
+							sel := components.Select(c, &s.ThemePreset)
+							sel.Trigger.MinWidth(c.Theme().Space(36)).Children(func() {
+								components.Text(c, firstNonEmptyStr(names[s.ThemePreset], names[theme.PresetObsidian])).SingleLine()
+							})
+							sel.Popup(func(panel ui.Element) {
+								for _, opt := range options {
+									opt := opt
+									sel.Item(opt).Children(func() {
+										components.Text(c, names[opt]).SingleLine()
+									})
+								}
+							})
+							if sel.Trigger.Changed() {
+								s.SyncThemeLook(c)
+								s.notifySettingsChanged()
+								c.Invalidate()
+							}
+						},
+					},
+					{
+						ID:          "liquid-glass",
+						Title:       "Liquid Glass 液态玻璃材质",
+						Description: "开启 MyGo 原生折射透镜、微光边缘高光与 glass.Group 胶囊融合；关闭可切回经典平铺磨砂。",
+						Keywords:    []string{"glass", "liquid", "blur", "refraction", "液态玻璃", "毛玻璃", "质感"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.LiquidGlass, "Liquid Glass 材质", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.SyncThemeLook(c)
+								s.notifySettingsChanged()
+								c.Invalidate()
+							}
+						},
+					},
+					{
+						ID:          "text-scale",
+						Title:       "界面字体比例",
+						Description: "全局调整实验文档正文、表格与侧栏字号缩放比例。",
+						Keywords:    []string{"font", "scale", "字号", "缩放"},
+						Build: func(c *ui.Context) {
+							scaleStr := fmt.Sprintf("%.2f", s.TextScale)
+							if s.TextScale <= 0 {
+								scaleStr = "0.00"
+							}
+							options := []string{"0.00", "0.90", "1.00", "1.15", "1.25"}
+							names := map[string]string{
+								"0.00": "跟随系统",
+								"0.90": "90% 紧凑",
+								"1.00": "100% 标准",
+								"1.15": "115% 清晰",
+								"1.25": "125% 大字",
+							}
+							sel := components.Select(c, &scaleStr)
+							sel.Trigger.MinWidth(c.Theme().Space(32)).Children(func() {
+								components.Text(c, names[scaleStr]).SingleLine()
+							})
+							sel.Popup(func(panel ui.Element) {
+								for _, opt := range options {
+									opt := opt
+									sel.Item(opt).Children(func() {
+										components.Text(c, names[opt]).SingleLine()
+									})
+								}
+							})
+							if sel.Trigger.Changed() {
+								switch scaleStr {
+								case "0.90":
+									s.TextScale = 0.90
+								case "1.00":
+									s.TextScale = 1.00
+								case "1.15":
+									s.TextScale = 1.15
+								case "1.25":
+									s.TextScale = 1.25
+								default:
+									s.TextScale = 0
+								}
+								s.notifySettingsChanged()
+							}
+						},
+					},
+					{
+						ID:          "reduce-motion",
+						Title:       "减弱物理动效（无障碍）",
+						Description: "跳过四档物理弹簧与数字滚轮位移动画，仅保留瞬时切换与色彩渐变。",
+						Keywords:    []string{"motion", "animation", "reduce", "动效", "无障碍"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.ReduceMotion, "减弱动效", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+				},
+			},
+		},
+	}
+
+	editorCat := components.SettingsCategory{
+		ID:          "editor",
+		Title:       "文档与实验默认",
+		Section:     "实验台",
+		Icon:        lucide.SlidersHorizontal(),
+		Description: "设置 .asterml 默认打开模式、孔板快速创建默认规格与配液默认余量系数。",
+		Groups: []components.SettingsGroup{
+			{
+				ID:    "doc-defaults",
+				Title: "实验文档行为",
+				Items: []components.SettingsItem{
+					{
+						ID:          "default-open-mode",
+						Title:       "打开实验默认视图",
+						Description: "从文件树或日历打开 .asterml 时默认进入编辑态或纯净阅读态（仍可原位勾选与计时）。",
+						Keywords:    []string{"mode", "edit", "read", "编辑", "阅读", "默认"},
+						Build: func(c *ui.Context) {
+							idx := 0
+							if s.DefaultOpenMode == "read" {
+								idx = 1
+							}
+							components.Tabs(c, &idx, components.TabsSegmented, "编辑态", "阅读态")
+							next := "edit"
+							if idx == 1 {
+								next = "read"
+							}
+							if next != s.DefaultOpenMode {
+								s.DefaultOpenMode = next
+								s.notifySettingsChanged()
+							}
+						},
+					},
+					{
+						ID:          "default-plate-format",
+						Title:       "新插入孔板默认规格",
+						Description: "在步骤中通过斜杠 / 或 + 插入孔板时的默认孔数规格。",
+						Keywords:    []string{"plate", "96", "384", "24", "孔板", "默认"},
+						Build: func(c *ui.Context) {
+							opts := []int{6, 12, 24, 48, 96, 384}
+							sel := components.Select(c, &s.DefaultPlateFormat)
+							sel.Trigger.MinWidth(c.Theme().Space(28)).Children(func() {
+								components.Text(c, fmt.Sprintf("%d 孔板", s.DefaultPlateFormat)).SingleLine()
+							})
+							sel.Popup(func(panel ui.Element) {
+								for _, opt := range opts {
+									opt := opt
+									sel.Item(opt).Children(func() {
+										components.Text(c, fmt.Sprintf("%d 孔板", opt)).SingleLine()
+									})
+								}
+							})
+							if sel.Trigger.Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+					{
+						ID:          "default-excess",
+						Title:       "配液计算器默认余量",
+						Description: "插入公式计算器或估算预混液时默认附带的移液损耗余量百分比。",
+						Keywords:    []string{"excess", "calculator", "余量", "配液"},
+						Build: func(c *ui.Context) {
+							opts := []int{10, 15, 20}
+							sel := components.Select(c, &s.DefaultExcessPct)
+							sel.Trigger.MinWidth(c.Theme().Space(28)).Children(func() {
+								components.Text(c, fmt.Sprintf("+%d%% 余量", s.DefaultExcessPct)).SingleLine()
+							})
+							sel.Popup(func(panel ui.Element) {
+								for _, opt := range opts {
+									opt := opt
+									sel.Item(opt).Children(func() {
+										components.Text(c, fmt.Sprintf("+%d%% 余量", opt)).SingleLine()
+									})
+								}
+							})
+							if sel.Trigger.Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+				},
+			},
+		},
+	}
+
+	hotkeyGroups := []components.SettingsGroup{
+		{
+			ID:    "hotkeys-search",
+			Title: "快捷键总览与自定义",
+			Actions: func(c *ui.Context) {
+				if components.Button(c, "恢复默认快捷键", components.ButtonGhost).Clicked() {
+					for _, spec := range defaultHotkeySpecs {
+						s.Hotkeys[spec.ID] = spec.Default
+					}
+					s.notifySettingsChanged()
+				}
+			},
+			Items: func() []components.SettingsItem {
+				var items []components.SettingsItem
+				for _, spec := range defaultHotkeySpecs {
+					spec := spec
+					items = append(items, components.SettingsItem{
+						ID:          "hk-" + spec.ID,
+						Title:       spec.Action,
+						Description: spec.Group,
+						Keywords:    []string{"hotkey", "shortcut", spec.Action, spec.Group, spec.Default},
+						Build: func(c *ui.Context) {
+							cur := s.HotkeyDisplay(spec.ID)
+							ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Box(c).Width(c.Theme().Space(32)).Children(func() {
+									components.TextBox(c, &cur, components.TextBoxOptions{}).Placeholder(spec.Default)
+								})
+								if strings.TrimSpace(cur) != s.Hotkeys[spec.ID] && strings.TrimSpace(cur) != "" {
+									s.Hotkeys[spec.ID] = strings.TrimSpace(cur)
+									s.notifySettingsChanged()
+								}
+							})
+						},
+					})
+				}
+				return items
+			}(),
+		},
+	}
+	hotkeysCat := components.SettingsCategory{
+		ID:          "hotkeys",
+		Title:       "快捷键",
+		Section:     "交互与设备",
+		Icon:        lucide.Keyboard(),
+		Description: "参照 Obsidian 的全键盘流操作映射：支持快捷浏览、搜索过滤、自定义键位提示或一键还原。",
+		Groups:      hotkeyGroups,
+	}
+
+	mobileCat := components.SettingsCategory{
+		ID:          "mobile",
+		Title:       "移动端与触控适配",
+		Section:     "交互与设备",
+		Icon:        lucide.Smartphone(),
+		Description: fmt.Sprintf("Obsidian 风格单窗格触控体验：悬浮液态玻璃底栏、左右边缘跟手抽屉、下拉快捷动作与编辑工具条（当前平台 %s，窗口宽度 < 680dp 自动切换）。", runtime.GOOS),
+		Groups: []components.SettingsGroup{
+			{
+				ID:    "mobile-layout",
+				Title: "响应式布局与预览",
+				Items: []components.SettingsItem{
+					{
+						ID:          "mobile-preview",
+						Title:       "强制启用移动端单栏与悬浮底栏",
+						Description: "即使在桌面宽屏窗口下也可即时切换预览移动端手势抽屉、悬浮液态玻璃底栏与标签页卡片切换器。",
+						Keywords:    []string{"mobile", "android", "ios", "touch", "移动端", "自适应"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.ForceMobilePreview, "移动预览模式", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.MobileDrawer = ""
+								s.MobileTabSwitcherOpen = false
+							}
+						},
+					},
+				},
+			},
+			{
+				ID:    "mobile-gestures",
+				Title: "手势与工具条（Obsidian Mobile）",
+				Items: []components.SettingsItem{
+					{
+						ID:          "mobile-pull-action",
+						Title:       "顶部下拉快捷动作",
+						Description: "在页面顶部继续向下拉动并松手时自动触发的快捷操作。",
+						Keywords:    []string{"pull", "quick action", "下拉", "快捷手势", "命令面板"},
+						Build: func(c *ui.Context) {
+							labels := map[string]string{
+								"palette": "命令面板 / 快速切换",
+								"new_exp": "新建今日实验",
+								"calc":    "打开速算与计时器",
+								"tree":    "展开实验库抽屉",
+							}
+							sel := components.Select(c, &s.MobilePullAction)
+							sel.Trigger.Children(func() {
+								components.Text(c, firstNonEmptyStr(labels[s.MobilePullAction], "命令面板 / 快速切换")).SingleLine()
+							})
+							sel.Popup(func(ui.Element) {
+								for _, opt := range []string{"palette", "new_exp", "calc", "tree"} {
+									opt := opt
+									sel.Item(opt).Children(func() {
+										components.Text(c, labels[opt]).SingleLine()
+									})
+								}
+							})
+							if sel.Trigger.Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+					{
+						ID:          "mobile-autohide-dock",
+						Title:       "向下滚动正文自动收起悬浮底栏",
+						Description: "向下阅读长实验文档或日程时平滑隐退底栏释放视野，轻滑回拉立即浮现。",
+						Keywords:    []string{"autohide", "dock", "scroll", "悬浮", "底栏", "隐藏"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.MobileAutoHideDock, "自动隐藏底栏", components.SwitchOptions{HideLabel: true}).Changed() {
+								if !s.MobileAutoHideDock {
+									s.MobileDockHidden = false
+								}
+								s.notifySettingsChanged()
+							}
+						},
+					},
+					{
+						ID:          "mobile-edit-toolbar",
+						Title:       "编辑态显示底部横滑实验工具条",
+						Description: "打开实验并处于编辑态时，将底部导航切换为可横滑的操作条（撤销、+步骤、核对项、参数、孔板、计时）。",
+						Keywords:    []string{"toolbar", "edit", "mobile", "工具栏", "编辑"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.MobileEditToolbar, "移动编辑工具条", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.MobileDockForceNav = false
+								s.notifySettingsChanged()
+							}
+						},
+					},
+				},
+			},
+		},
+	}
+
+	aboutCat := components.SettingsCategory{
+		ID:          "about",
+		Title:       "关于实验库与数据",
+		Section:     "系统",
+		Icon:        lucide.FlaskConical(),
+		Description: "纯本地 Obsidian 式 .asterml 单真源实验库，零云端锁定。",
+		Groups: []components.SettingsGroup{
+			{
+				ID:    "vault-stats",
+				Title: "当前实验库统计",
+				Items: []components.SettingsItem{
+					{
+						ID:       "stats-summary",
+						Title:    "文件规模",
+						Keywords: []string{"stats", "count", "统计"},
+						Build: func(c *ui.Context) {
+							expCnt, tplCnt, assetCnt := 0, 0, 0
+							for _, f := range s.VaultFiles {
+								if f.IsTemplate {
+									tplCnt++
+								} else if f.IsAsset {
+									assetCnt++
+								} else {
+									expCnt++
+								}
+							}
+							components.Badge(c, fmt.Sprintf("%d 实验 · %d 模板 · %d 附件", expCnt, tplCnt, assetCnt))
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return []components.SettingsCategory{
+		vaultCat,
+		appearanceCat,
+		editorCat,
+		hotkeysCat,
+		mobileCat,
+		aboutCat,
+	}
+}

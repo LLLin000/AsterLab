@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <defs>
+    <linearGradient id="rackBlueGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1D4ED8"/>
+      <stop offset="45%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="rackDeckBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93C5FD"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+    <linearGradient id="tube15Frost" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E2E8F0"/>
+      <stop offset="40%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+    <linearGradient id="cap15Blue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284C7"/>
+      <stop offset="50%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- Solid rear backdrop inside rack frame so EDT silhouette closes cleanly -->
+    <rect x="78" y="192" width="344" height="198" rx="14" fill="#DBEAFE" fill-opacity="0.88" stroke="#1E40AF" stroke-width="2.6"/>
+    <!-- Left and right vertical rack pillars -->
+    <rect x="76" y="188" width="24" height="204" rx="8" fill="url(#rackBlueGrad)" stroke="#1E3A8A" stroke-width="2.4"/>
+    <rect x="400" y="188" width="24" height="204" rx="8" fill="url(#rackBlueGrad)" stroke="#1E3A8A" stroke-width="2.4"/>
+    <!-- Row of 5 tall 15 mL conical tubes seated inside the rack -->
+    <g>
+      <!-- Tube 1 -->
+      <path d="M 118,130 L 154,130 L 154,322 L 140,356 C 138,360 134,360 132,356 L 118,322 Z"
+            fill="url(#tube15Frost)" stroke="#475569" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M 121,210 L 151,210 L 151,320 L 138.5,351 L 133.5,351 L 121,320 Z" fill="#38BDF8" fill-opacity="0.72"/>
+      <rect x="115" y="110" width="42" height="22" rx="4" fill="url(#cap15Blue)" stroke="#075985" stroke-width="2"/>
+      <!-- Tube 2 -->
+      <path d="M 176,120 L 212,120 L 212,322 L 198,356 C 196,360 192,360 190,356 L 176,322 Z"
+            fill="url(#tube15Frost)" stroke="#475569" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M 179,190 L 209,190 L 209,320 L 196.5,351 L 191.5,351 L 179,320 Z" fill="#A855F7" fill-opacity="0.65"/>
+      <rect x="173" y="100" width="42" height="22" rx="4" fill="url(#cap15Blue)" stroke="#075985" stroke-width="2"/>
+      <!-- Tube 3 -->
+      <path d="M 234,126 L 270,126 L 270,322 L 256,356 C 254,360 250,360 248,356 L 234,322 Z"
+            fill="url(#tube15Frost)" stroke="#475569" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M 237,225 L 267,225 L 267,320 L 254.5,351 L 249.5,351 L 237,320 Z" fill="#2DD4BF" fill-opacity="0.76"/>
+      <rect x="231" y="106" width="42" height="22" rx="4" fill="url(#cap15Blue)" stroke="#075985" stroke-width="2"/>
+      <!-- Tube 4 -->
+      <path d="M 292,118 L 328,118 L 328,322 L 314,356 C 312,360 308,360 306,356 L 292,322 Z"
+            fill="url(#tube15Frost)" stroke="#475569" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M 295,180 L 325,180 L 325,320 L 312.5,351 L 307.5,351 L 295,320 Z" fill="#FBBF24" fill-opacity="0.76"/>
+      <rect x="289" y="98" width="42" height="22" rx="4" fill="url(#cap15Blue)" stroke="#075985" stroke-width="2"/>
+      <!-- Tube 5 -->
+      <path d="M 350,132 L 386,132 L 386,322 L 372,356 C 370,360 366,360 364,356 L 350,322 Z"
+            fill="url(#tube15Frost)" stroke="#475569" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M 353,235 L 383,235 L 383,320 L 370.5,351 L 365.5,351 L 353,320 Z" fill="#38BDF8" fill-opacity="0.68"/>
+      <rect x="347" y="112" width="42" height="22" rx="4" fill="url(#cap15Blue)" stroke="#075985" stroke-width="2"/>
+    </g>
+    <!-- Upper grid bar holding tubes -->
+    <rect x="68" y="184" width="364" height="26" rx="7" fill="url(#rackDeckBlue)" stroke="#1E3A8A" stroke-width="2.5"/>
+    <line x1="78" y1="191" x2="422" y2="191" stroke="#FFFFFF" stroke-width="2.4" opacity="0.5"/>
+    <!-- Middle stabilizer bar -->
+    <rect x="68" y="276" width="364" height="18" rx="6" fill="url(#rackBlueGrad)" stroke="#1E3A8A" stroke-width="2.3"/>
+    <!-- Heavy bottom rack deck -->
+    <rect x="66" y="366" width="368" height="30" rx="8" fill="url(#rackBlueGrad)" stroke="#1E3A8A" stroke-width="2.6"/>
+    <rect x="196" y="374" width="108" height="12" rx="4" fill="#FFFFFF" fill-opacity="0.72"/>
+  </g>
+</svg>

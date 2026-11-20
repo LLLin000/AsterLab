@@ -14,8 +14,29 @@ func moduleCardFrame(v *View, c *ui.Context, icon *ui.SVG, title, badgeText stri
 	t := c.Theme()
 	tok := theme.GetTokens(t)
 	editableTitle := v != nil && v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit) && v.currentModuleID != ""
+	if v != nil && v.UnifiedLive {
+		// In UnifiedLive canvas, render an open Obsidian-style hairline section without box cages
+		ui.Column(c).FillWidth().Padding(float32(tok.Spacing4), 0).Gap(float32(tok.Spacing8)).Children(func() {
+			if title != "" || badgeText != "" || icon != nil {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					if icon != nil {
+						ui.Icon(c, icon).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
+					}
+					if title != "" {
+						renderInlineEditableTitle(v, c, v.currentModuleID, title, editableTitle)
+					}
+					ui.Spacer(c)
+					if badgeText != "" {
+						ui.Text(c, badgeText).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+					}
+				})
+			}
+			content()
+		})
+		return
+	}
 	ui.Row(c).FillWidth().Radius(float32(tok.PanelRadius)).Background(tok.Surface).
-		Border(1, tok.Border).Children(func() {
+		Border(1, tok.Border.Alpha(0.7)).Children(func() {
 		if accentBar != nil {
 			ui.Box(c).Width(t.Space(0.75)).FillHeight().Background(*accentBar)
 		}
@@ -129,6 +150,65 @@ func (v *View) renderProse(c *ui.Context, data map[string]any) {
 		badgeLabel = "说明"
 	}
 
+	if v.UnifiedLive {
+		if editable {
+			bodyBuf := v.ensureWidgetDraft("prose:"+moduleID+":body", body)
+			wrapper := ui.Column(c).FillWidth().Gap(float32(tok.Spacing4))
+			if barColor != nil {
+				wrapper = ui.Row(c).FillWidth().Radius(float32(tok.ControlRadius)).Background(bgColor)
+			}
+			var tb ui.Element
+			hasTB := false
+			if barColor != nil {
+				wrapper.Children(func() {
+					ui.Box(c).Width(t.Space(0.75)).FillHeight().Background(*barColor)
+					ui.Box(c).Grow(1).MinWidth(0).Padding(float32(tok.Spacing8)).Children(func() {
+						tb = ui.TextAreaBase(c, bodyBuf).FillWidth().Lines(1, 10).
+							Placeholder("输入操作步骤说明或注意事项（空行输入 / 可插入组件）…").TextColor(tok.Text)
+						hasTB = true
+					})
+				})
+			} else {
+				wrapper.Children(func() {
+					tb = ui.TextAreaBase(c, bodyBuf).FillWidth().Lines(1, 12).
+						Placeholder("输入文字说明（空行输入 / 可插入组件）…").TextColor(tok.Text)
+					hasTB = true
+				})
+			}
+			// Slash trigger when typing "/" in an empty prose block or line
+			if hasTB && strings.TrimSpace(*bodyBuf) == "/" && v.OnInsertStepBlock != nil {
+				*bodyBuf = ""
+				v.openSlashMenuForBlock(c, tb, moduleID)
+			}
+			if hasTB && !tb.Focused() && *bodyBuf != body && strings.TrimSpace(*bodyBuf) != "" {
+				v.emitAnyModuleEdit(moduleID, map[string]any{"body": *bodyBuf})
+			}
+			return
+		}
+		// Clean paper reading prose without form borders
+		renderCleanProseBody := func() {
+			for _, para := range strings.Split(body, "\n") {
+				line := strings.TrimSpace(para)
+				if line == "" {
+					continue
+				}
+				if strings.HasPrefix(line, "- ") {
+					line = "• " + strings.TrimSpace(strings.TrimPrefix(line, "- "))
+				}
+				ui.Text(c, line).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+			}
+		}
+		if barColor != nil {
+			ui.Row(c).FillWidth().Radius(float32(tok.ControlRadius)).Background(bgColor).Children(func() {
+				ui.Box(c).Width(t.Space(0.75)).FillHeight().Background(*barColor)
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Children(renderCleanProseBody)
+			})
+		} else {
+			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(renderCleanProseBody)
+		}
+		return
+	}
+
 	if editable {
 		moduleCardFrame(v, c, icon, firstNonEmpty(title, "文本 / 注意事项"), badgeLabel, barColor, func() {
 			titleBuf := v.ensureWidgetDraft("prose:"+moduleID+":title", title)
@@ -201,6 +281,11 @@ func (v *View) renderProse(c *ui.Context, data map[string]any) {
 			}
 		})
 	})
+}
+
+func (v *View) openSlashMenuForBlock(c *ui.Context, anchor ui.Element, moduleID string) {
+	st := ui.Local(c.Root(), "slash-menu-step:"+v.StepID+":"+moduleID, func() bool { return false })
+	*st = true
 }
 
 func proseToneLabel(tone string) string {

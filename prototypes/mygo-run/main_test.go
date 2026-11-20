@@ -179,7 +179,6 @@ func TestRenderRunRecordsIncludesGroupedAndUnassociatedData(t *testing.T) {
 		t.Fatal("identical Run snapshot produced different record text")
 	}
 	for _, marker := range []string{
-		"Run Revision: 4",
 		"冻结时间：2026-11-13T12:00:00Z",
 		"### RNA 反应 · 24 h",
 		"离心力: 3000 rpm；实际 3200 rpm",
@@ -903,8 +902,8 @@ func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
 		}, 1360, 880)
 		tt.Frame()
 
-		if !tt.HasText("步骤工作台") || !tt.HasText("rev 1") {
-			t.Fatalf("already loaded design-a was hidden on LoadDesign error: %v", tt.Texts())
+		if !tt.HasText("编辑") || !tt.HasText("导出 PDF") || tt.HasText("第 1 版") {
+			t.Fatalf("already loaded design-a missing or showed fake revision: %v", tt.Texts())
 		}
 		if !tt.HasText("NOT_FOUND: design-b unavailable") || !tt.HasText("重试") {
 			t.Fatalf("LoadDesign error or retry missing: %v", tt.Texts())
@@ -918,7 +917,7 @@ func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
 		if a.designDoc == nil || a.designDoc.DesignID != "design-b" {
 			t.Fatalf("retry did not load design-b: %+v", a.designDoc)
 		}
-		if tt.HasText("NOT_FOUND: design-b unavailable") || !tt.HasText("rev 2") {
+		if tt.HasText("NOT_FOUND: design-b unavailable") || tt.HasText("第 2 版") || !tt.HasText("B-") {
 			t.Fatalf("error stayed or new design not rendered after retry: %v", tt.Texts())
 		}
 	})
@@ -961,7 +960,7 @@ func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
 		if a.designDoc == nil || a.designDoc.DesignID != "design-1" {
 			t.Fatalf("retry did not load design-1: %+v", a.designDoc)
 		}
-		if tt.HasText("NOT_FOUND: design-1 missing") || !tt.HasText("步骤工作台") {
+		if tt.HasText("NOT_FOUND: design-1 missing") || !tt.HasText("编辑") {
 			t.Fatalf("AsterDoc surface not shown after retry: %v", tt.Texts())
 		}
 	})
@@ -1007,7 +1006,7 @@ func TestLoadDesignFailuresVisibleKeepLoadedAndRetry(t *testing.T) {
 		if a.designDoc == nil || a.designDoc.Revision != 4 {
 			t.Fatalf("retry did not load AsterDoc: %+v", a.designDoc)
 		}
-		if tt.HasText("INTERNAL: asterdoc read failed") || !tt.HasText("步骤工作台") {
+		if tt.HasText("INTERNAL: asterdoc read failed") || !tt.HasText("编辑") {
 			t.Fatalf("AsterDoc surface not restored after retry: %v", tt.Texts())
 		}
 	})
@@ -1257,24 +1256,16 @@ func TestNotebookSaveFailureVisibleAndRetrySaves(t *testing.T) {
 	}, 1360, 880)
 	tt.Frame()
 
-	if !tt.HasText("草稿") {
-		t.Fatalf("initial unsaved notebook missing 草稿 state word: %q", tt.Texts())
+	if !tt.HasText("实时保存") {
+		t.Fatalf("initial unsaved notebook missing 实时保存 state word: %q", tt.Texts())
 	}
 
-	if err := tt.Click("编辑"); err != nil {
-		t.Fatalf("switch to 编辑: %v", err)
+	if err := tt.Click("源码"); err != nil {
+		t.Fatalf("switch to 源码: %v", err)
 	}
 	tt.Frame()
 	a.noteDraft = "# 失败重试测试\n\n- 细胞状态稳定"
-	a.markNotebookDirty()
-	tt.Frame()
-	if !tt.HasText("未保存") {
-		t.Fatalf("dirty notebook missing 未保存 state word: %q", tt.Texts())
-	}
-
-	if err := tt.Click("保存笔记"); err != nil {
-		t.Fatalf("click 保存笔记: %v", err)
-	}
+	a.autoSaveNotebook()
 	tt.Frame()
 	if spy.saveCalls != 1 {
 		t.Fatalf("SaveNotebook calls = %d, want 1", spy.saveCalls)
@@ -1304,8 +1295,8 @@ func TestNotebookSaveFailureVisibleAndRetrySaves(t *testing.T) {
 	if tt.HasText("CONFLICT: notebook write rejected") {
 		t.Fatalf("error banner remained after retry succeeded: %q", tt.Texts())
 	}
-	if !tt.HasText("已保存") || a.noteDirty {
-		t.Fatalf("notebook did not reach 已保存 after retry: dirty=%v texts=%q", a.noteDirty, tt.Texts())
+	if !tt.HasText("实时已保存") || a.noteDirty {
+		t.Fatalf("notebook did not reach 实时已保存 after retry: dirty=%v texts=%q", a.noteDirty, tt.Texts())
 	}
 }
 
@@ -1336,8 +1327,8 @@ func TestNotebookDraftSurvivesRunSwitchAndRestart(t *testing.T) {
 	}, 1360, 880)
 	tt.Frame()
 
-	if err := tt.Click("编辑"); err != nil {
-		t.Fatalf("switch to 编辑: %v", err)
+	if err := tt.Click("源码"); err != nil {
+		t.Fatalf("switch to 源码: %v", err)
 	}
 	tt.Frame()
 	a.noteDraft = "Run A 未保存草稿"
@@ -1350,7 +1341,7 @@ func TestNotebookDraftSurvivesRunSwitchAndRestart(t *testing.T) {
 	// Switch to Run B: Run B loads its own persisted note, while Run A's draft is kept.
 	a.applySnap(snapB)
 	tt.Frame()
-	if a.noteDraft != "Run B 已保存笔记" || a.noteDirty || !tt.HasText("已保存") {
+	if a.noteDraft != "Run B 已保存笔记" || a.noteDirty || !tt.HasText("实时已保存") {
 		t.Fatalf("Run B state wrong: draft=%q dirty=%v texts=%q", a.noteDraft, a.noteDirty, tt.Texts())
 	}
 
@@ -1376,13 +1367,11 @@ func TestNotebookDraftSurvivesRunSwitchAndRestart(t *testing.T) {
 		t.Fatalf("restarted recovery banner/state missing: %q", ttRestart.Texts())
 	}
 
-	// Saving clears the local disk draft so a subsequent restart starts clean at 已保存.
-	if err := ttRestart.Click("保存笔记"); err != nil {
-		t.Fatalf("save recovered draft: %v", err)
-	}
+	// Auto-saving clears the local disk draft so a subsequent restart starts clean at 实时已保存.
+	restarted.autoSaveNotebook()
 	ttRestart.Frame()
-	if restarted.noteDirty || !ttRestart.HasText("已保存") {
-		t.Fatalf("recovered draft failed to save: dirty=%v texts=%q", restarted.noteDirty, ttRestart.Texts())
+	if restarted.noteDirty || !ttRestart.HasText("实时已保存") {
+		t.Fatalf("recovered draft failed to autosave: dirty=%v texts=%q", restarted.noteDirty, ttRestart.Texts())
 	}
 	afterSave := &app{snap: spy.snap}
 	ttClean := ui.NewTester(func(c *ui.Context) {
@@ -1390,7 +1379,7 @@ func TestNotebookDraftSurvivesRunSwitchAndRestart(t *testing.T) {
 		notebookPage(c, afterSave)
 	}, 1360, 880)
 	ttClean.Frame()
-	if afterSave.noteDirty || ttClean.HasText("已从本地草稿恢复未保存修改。") || !ttClean.HasText("已保存") {
+	if afterSave.noteDirty || ttClean.HasText("已从本地草稿恢复未保存修改。") || !ttClean.HasText("实时已保存") {
 		t.Fatalf("cleared disk draft still recovered: dirty=%v texts=%q", afterSave.noteDirty, ttClean.Texts())
 	}
 }
@@ -1428,7 +1417,7 @@ func TestNotebookStateWordsChineseLabelsAndProgressiveDisclosure(t *testing.T) {
 	}, 1360, 880)
 	tt.Frame()
 
-	for _, want := range []string{"草稿", "设计版本 7", "设计版本 7 · 2 条", "测量记录 · 酶标仪读数 · 24 h · 1 个单元格"} {
+	for _, want := range []string{"实时保存", "方案快照已锁定", "测量记录 · 酶标仪读数 · 24 h · 1 个单元格"} {
 		if !tt.HasText(want) {
 			t.Fatalf("missing expected Chinese text %q in %q", want, tt.Texts())
 		}
@@ -1454,7 +1443,7 @@ func TestNotebookStateWordsChineseLabelsAndProgressiveDisclosure(t *testing.T) {
 		t.Fatalf("expanded detail did not reveal raw event identifier: %q", tt.Texts())
 	}
 
-	// Read-only empty state uses §3 state word and matches 实时/编辑 tabs.
+	// Read-only empty state uses §3 state word and matches 编辑/源码/阅读 tabs.
 	if err := tt.Click("阅读"); err != nil {
 		t.Fatalf("switch to 阅读: %v", err)
 	}
@@ -1544,8 +1533,8 @@ func TestDesignReadinessStatesAndRetryOnFailure(t *testing.T) {
 	}, 1360, 880)
 	tt.Frame()
 
-	if !tt.HasText("未解析") || !tt.HasText("INTERNAL: assessment service timeout for d1 rev 2") || !tt.HasText("重试") {
-		t.Fatalf("readiness failure missing state/reason/retry: %v", tt.Texts())
+	if !tt.HasText("实验方案核查未完成") || !tt.HasText("INTERNAL: assessment service timeout for d1 rev 2") || !tt.HasText("重试") {
+		t.Fatalf("readiness failure missing reason/retry: %v", tt.Texts())
 	}
 
 	// Preflight dialog also shows 未解析, reason, and 重试.
@@ -1563,21 +1552,21 @@ func TestDesignReadinessStatesAndRetryOnFailure(t *testing.T) {
 	if svc.assessCalls < 2 || a.readiness == nil || a.readinessErr != "" {
 		t.Fatalf("retry did not recover readiness: calls=%d readiness=%+v err=%q", svc.assessCalls, a.readiness, a.readinessErr)
 	}
-	if !tt.HasText("就绪") {
-		t.Fatalf("top bar missing 就绪 after retry: %v", tt.Texts())
+	if tt.HasText("实验方案核查未完成") {
+		t.Fatalf("readiness error remained after retry: %v", tt.Texts())
 	}
 
-	// 校验中 state disables 创建 Run.
+	// 校验中 state disables 开始实验.
 	a.preflightOpen = false
 	a.readinessLoading = true
 	tt.Frame()
 	if !tt.HasText("校验中") {
 		t.Fatalf("missing 校验中 state word: %v", tt.Texts())
 	}
-	_ = tt.Click("创建 Run")
+	_ = tt.Click("开始实验")
 	tt.Frame()
 	if a.preflightOpen {
-		t.Fatal("创建 Run opened preflight while 校验中")
+		t.Fatal("开始实验 opened preflight while 校验中")
 	}
 }
 
@@ -1631,7 +1620,7 @@ func TestDesignCreateRunCommandErrorsAndSilentNoOp(t *testing.T) {
 		t.Fatalf("createRun retry failed: calls=%d err=%q page=%v", svc.createRunCalls, a.createRunErr, a.shell.Page)
 	}
 
-	// Command failure banner also shows full message + 重试.
+	// Command failure banner also shows full message + 重试 (1 initial + 1 automatic conflict retry = 2 before manual retry).
 	a.shell.Page = shell.Design
 	if a.applyDesignRaw(map[string]any{"type": "update_module", "moduleId": "step-seed", "properties": map[string]any{"title": "X"}}) {
 		t.Fatal("expected applyDesignRaw failure")
@@ -1645,12 +1634,12 @@ func TestDesignCreateRunCommandErrorsAndSilentNoOp(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if svc.applyCalls != 2 || a.designDocErr != "" {
+	if svc.applyCalls != 3 || a.designDocErr != "" {
 		t.Fatalf("command retry failed: calls=%d err=%q", svc.applyCalls, a.designDocErr)
 	}
 }
 
-func TestDesignStepSwitchKeepsAndWarnsAboutPropertyDraft(t *testing.T) {
+func TestDesignStepPropertyRealTimeAutosave(t *testing.T) {
 	raw, err := os.ReadFile("internal/asterdoc/testdata/cck8-experiment.asterml")
 	if err != nil {
 		t.Fatal(err)
@@ -1672,46 +1661,26 @@ func TestDesignStepSwitchKeepsAndWarnsAboutPropertyDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if tt.HasText("未保存") {
-		t.Fatalf("unexpected 未保存 before edit: %v", tt.Texts())
+	if tt.HasText("保存步骤属性") || tt.HasText("未保存") {
+		t.Fatalf("unexpected manual save or draft warning in real-time mode: %v", tt.Texts())
 	}
 
 	a.canvasTitle = "seed-edited-draft"
 	tt.Frame()
-	if !tt.HasText("未保存") {
-		t.Fatalf("missing 未保存 hint after editing drawer: %v", tt.Texts())
+	if svc.applyCalls != 1 || !strings.Contains(svc.lastApply.Command, "seed-edited-draft") {
+		t.Fatalf("expected immediate real-time autosave on edit, calls=%d cmd=%q", svc.applyCalls, svc.lastApply.Command)
+	}
+	if tt.HasText("保存步骤属性") || tt.HasText("切回草稿") {
+		t.Fatalf("unexpected draft warning after real-time sync: %v", tt.Texts())
 	}
 
-	// Switching to another step keeps the draft and warns the operator.
+	// Switching to another step proceeds directly without blocking warnings.
 	if err := tt.Click("read"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if a.designSelected != "step-read" {
 		t.Fatalf("selected = %q, want step-read", a.designSelected)
-	}
-	if !tt.HasText("未保存") || !tt.HasText("已保留") || !tt.HasText("切回草稿") {
-		t.Fatalf("missing draft switch warning: %v", tt.Texts())
-	}
-
-	// Switching back restores the exact unsaved draft.
-	if err := tt.Click("seed"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if a.designSelected != "step-seed" || a.canvasTitle != "seed-edited-draft" {
-		t.Fatalf("draft dropped on step switch: selected=%q title=%q", a.designSelected, a.canvasTitle)
-	}
-
-	if err := tt.Click("保存步骤属性"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if svc.applyCalls != 1 || !strings.Contains(svc.lastApply.Command, "seed-edited-draft") {
-		t.Fatalf("save did not submit edited draft: calls=%d cmd=%q", svc.applyCalls, svc.lastApply.Command)
-	}
-	if len(a.stepDrafts) != 0 {
-		t.Fatalf("stepDrafts not cleared after save: %+v", a.stepDrafts)
 	}
 }
 

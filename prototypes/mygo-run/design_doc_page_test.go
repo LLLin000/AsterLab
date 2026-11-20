@@ -25,24 +25,55 @@ func TestAsterDesignPageRendersThreeTabWorkbench(t *testing.T) {
 	}, 1280, 820)
 	tt.Frame()
 	texts := strings.Join(tt.Texts(), " ")
-	for _, want := range []string{"步骤工作台", "实验全局设定", "AsterML 源码", "步骤大纲", "创建 Run", "rev 3"} {
+	for _, want := range []string{"编辑", "阅读", "源码", "步骤大纲", "导出 PDF", "开始实验", "方案就绪"} {
 		if !strings.Contains(texts, want) {
 			t.Fatalf("design workbench missing %q in %q", want, texts)
 		}
 	}
-	if err := tt.Click("实验全局设定"); err != nil {
+	if strings.Contains(texts, "实验全局设定") || strings.Contains(texts, "Agent 提案") || strings.Contains(texts, "第 3 版") {
+		t.Fatalf("legacy global setup / agent proposal / revision copy should be removed, got %q", texts)
+	}
+	if err := tt.Click("实验概览与全局分组"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("实验全局设定") || !tt.HasText("四象限给药分组") {
-		t.Fatalf("global setup tab missing group_table: %q", tt.Texts())
+	if !tt.HasText("四象限给药分组") {
+		t.Fatalf("collapsible overview header card missing group_table: %q", tt.Texts())
 	}
-	if err := tt.Click("AsterML 源码"); err != nil {
+	if err := tt.Click("阅读"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("应用并保存修订") || !tt.HasText("方案格式正常") {
-		t.Fatalf("source tab missing editor toolbar: %q", tt.Texts())
+	if !tt.HasText("实验方案预览") || !tt.HasText("四象限给药分组") {
+		t.Fatalf("single-page sheet tab missing header/group_table: %q", tt.Texts())
+	}
+	if err := tt.Click("源码"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("已实时同步 .asterml") || !tt.HasText("AsterML 源码编辑器") {
+		t.Fatalf("source tab missing real-time editor toolbar: %q", tt.Texts())
+	}
+}
+
+func TestBrokenAsterMLSwitchesToSourceTabForRepair(t *testing.T) {
+	a := &app{designDoc: &runs.AsterDocSnapshot{
+		DesignID: "design-broken", Revision: 2, Source: "```asterlab\nkind: broken\n: [invalid\n```\n",
+	}, designTab: 0}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		asterDesignPage(c, a)
+	}, 1280, 820)
+	tt.Frame()
+	if err := tt.Click("切换到源码修复"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.designTab != 2 {
+		t.Fatalf("expected switch to source tab (2), got %d", a.designTab)
+	}
+	if !tt.HasText("AsterML 源码编辑器") || !tt.HasText("待语法闭合后自动保存") {
+		t.Fatalf("source editor did not render after repair jump: %q", tt.Texts())
 	}
 }
 

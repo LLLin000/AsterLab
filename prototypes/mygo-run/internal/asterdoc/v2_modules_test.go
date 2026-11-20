@@ -21,7 +21,7 @@ func TestV2ShowcaseFixturesParseAndComputeBudget(t *testing.T) {
 		minWells       int
 		wantFormulaErr bool
 	}{
-		{"testdata/inhibition-zone.asterml", 4, 4, 4, false},
+		{"testdata/inhibition-zone.asterml", 4, 4, 0, false},
 		{"testdata/cfu.asterml", 3, 2, 6, false},
 		{"testdata/huvec-tube.asterml", 3, 3, 12, false},
 		{"testdata/rt-qpcr.asterml", 3, 4, 33, false},
@@ -72,11 +72,19 @@ func TestFigureSVGMetricAndLabelExtraction(t *testing.T) {
 		t.Fatal("inhibition-zone figure svg missing")
 	}
 	_, _, w, h, labels := parseSVGMetricsAndLabels(svgRaw)
-	if w != 420 || h != 264 {
-		t.Fatalf("viewBox = %gx%g, want 420x264", w, h)
+	if w != 360 || h != 280 {
+		t.Fatalf("viewBox = %gx%g, want 360x280", w, h)
 	}
 	if len(labels) != 4 {
 		t.Fatalf("extracted labels = %d (%+v), want 4", len(labels), labels)
+	}
+	translatedSVG := `<svg viewBox="0 0 200 120"><g transform="translate(40, 30)"><text x="10" y="20" text-anchor="middle">对照</text></g></svg>`
+	_, _, _, _, tLabels := parseSVGMetricsAndLabels(translatedSVG)
+	if len(tLabels) != 1 || tLabels[0].X != 50 || tLabels[0].Y != 50 {
+		t.Fatalf("translated group labels = %+v, want X=50 Y=50", tLabels)
+	}
+	if cw := estimateSVGTextWidth("对照", 12); cw < 20 {
+		t.Fatalf("expected CJK width > 20, got %v", cw)
 	}
 }
 
@@ -260,5 +268,29 @@ func TestDataTableMatrixPasteRoundTrip(t *testing.T) {
 	rows := sub["rows"].([][]any)
 	if len(rows) != 6 || rows[0][0] != "A1" || rows[0][1] != "Ctrl-1" || rows[0][2] != 0.412 || rows[5][0] != "B3" || rows[5][2] != 1.140 {
 		t.Fatalf("unexpected submitted matrix rows: %#v", rows)
+	}
+}
+
+func TestAppendPlateAnnotationAndUnprefixedGradient(t *testing.T) {
+	src := "```asterlab\nkind: group_table\nid: gt-1\nschema: 1\nrows:\n  - {id: g-wt, name: WT, role: control}\n```\n```asterlab\nkind: plate\nid: pl-1\nschema: 1\nformat: 12\ngroups:\n  g-wt: [A1, A2, A3, A4]\nsamples:\n  A1: WT\n  A2: WT\n  A3: WT\n  A4: WT\n```\n"
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &View{Doc: doc, Mode: ModeDesign, Allowed: map[string]bool{PermDocumentEdit: true}, OnChange: func(next string) {}}
+	pl, _ := v.findPlate("pl-1")
+	if err := v.appendPlateInput(pl, "", []string{"A1", "A2"}, "GAPDH"); err != nil {
+		t.Fatalf("appendPlateInput failed: %v", err)
+	}
+	pl2, _ := v.findPlate("pl-1")
+	if pl2.Samples["A1"] != "WT · GAPDH" || pl2.Samples["A2"] != "WT · GAPDH" || pl2.Replicates["A2"] != 2 {
+		t.Fatalf("expected WT · GAPDH with replicate=2, got samples=%+v reps=%+v", pl2.Samples, pl2.Replicates)
+	}
+	if err := v.applyUnifiedPlateInput(pl2, "", []string{"A3", "A4"}, "100/2 uM"); err != nil {
+		t.Fatalf("unprefixed gradient failed: %v", err)
+	}
+	pl3, _ := v.findPlate("pl-1")
+	if pl3.Samples["A3"] != "100 uM" || pl3.Samples["A4"] != "50 uM" {
+		t.Fatalf("expected unprefixed gradient 100 uM / 50 uM, got %+v", pl3.Samples)
 	}
 }

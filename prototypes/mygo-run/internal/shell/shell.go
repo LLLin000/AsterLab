@@ -1,11 +1,12 @@
-// Package shell is the AsterLab natively drawn desktop frame: an Onevra
-// sidebar window whose navigation, page header and pages are AsterLab's.
+// Package shell is the AsterLab natively drawn desktop frame: an Obsidian-grade
+// peer split-pane workspace built on Onevra's sidebar shell with Ribbon + File Tree,
+// Back/Forward history, drag-to-split TabGroups, companion drawer, and Ctrl+O/K palette.
 package shell
 
 import (
 	"fmt"
 	"sort"
-	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -14,6 +15,7 @@ import (
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/vault"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -30,89 +32,81 @@ const (
 
 func (p Page) ShortLabel() string {
 	switch p {
-	case Design:
-		return "设计"
-	case Protocol:
-		return "方案"
-	case Run:
-		return "运行"
-	case Notebook:
-		return "笔记"
 	case Tools:
-		return "工具"
+		return "储藏室"
+	case Design, Protocol, Run, Notebook:
+		return "实验"
 	}
-	return "项目"
+	return "日程"
 }
 
-// PageName is the persisted session name of the current page.
 func (s *Shell) PageName() string {
 	switch s.Page {
-	case Design:
-		return "design"
-	case Protocol:
-		return "protocol"
-	case Run:
-		return "run"
-	case Notebook:
-		return "notebook"
 	case Tools:
 		return "tools"
+	case Design, Protocol, Run, Notebook:
+		return "design"
 	}
 	return "project"
 }
 
 func (p Page) Label() string {
 	switch p {
-	case Design:
-		return "实验设计"
-	case Protocol:
-		return "实验方案"
-	case Run:
-		return "实验运行"
-	case Notebook:
-		return "Notebook"
 	case Tools:
-		return "资料与工具"
+		return "储藏室"
+	case Design, Protocol, Run, Notebook:
+		return "实验文档"
 	}
-	return "项目工作区"
+	return "实验日程"
 }
 
-// icon is the page's navigation icon.
-func (p Page) icon() *ui.SVG {
-	switch p {
-	case Design:
-		return lucide.FlaskConical()
-	case Protocol:
-		return lucide.BookOpen()
-	case Run:
-		return lucide.Play()
-	case Notebook:
-		return lucide.NotebookPen()
-	case Tools:
-		return lucide.Boxes()
-	}
-	return lucide.FolderKanban()
+type ExperimentStage string
+
+const (
+	StageDraft      ExperimentStage = "draft"
+	StageReady      ExperimentStage = "ready"
+	StageInProgress ExperimentStage = "in_progress"
+	StageCompleted  ExperimentStage = "completed"
+)
+
+type ExperimentItem struct {
+	ID          string
+	DesignID    string
+	ActiveRunID string
+	FilePath    string
+	Folder      string
+	Title       string
+	Date        string // YYYY-MM-DD
+	Stage       ExperimentStage
+	Summary     string
+	GapHint     string
+	StartHour   float32
+	DurationMin int
+	FileName    string
 }
 
 type DesignItem struct{ ID, Title, Meta string }
 type RecentRun struct{ ID, Title, Meta string }
 
-// Shell owns AsterLab's window-level state: the page, the selected project and
-// design, and the window Onevra draws.
+type tabDragPayload struct {
+	PaneID string
+	TabID  string
+	Tab    WorkspaceTab
+}
+
+// Shell owns AsterLab's window-level Obsidian workspace state.
 type Shell struct {
-	Project    string
-	Projects   []string
-	Designs    []DesignItem
-	RecentRuns []RecentRun
-	Selected   string
-	Page       Page
-	Loading    bool
-	Error      string
-	// ActiveTimers feeds the persistent cross-page timer strip. Empty means
-	// no strip at all: no placeholder, no reserved space. UX-LAYOUT, UX-DESIGN.
-	ActiveTimers []runs.ActiveTimer
-	// TimersExpanded opens the collapsed tail of the strip; by default only
-	// the current/expiring timers render inline. UX-LAYOUT.
+	Project     string
+	Projects    []string
+	Designs     []DesignItem
+	RecentRuns  []RecentRun
+	Experiments []ExperimentItem
+	Selected    string
+	Page        Page
+	Loading     bool
+	Error       string
+
+	ActiveTimers   []runs.ActiveTimer
 	TimersExpanded bool
 	OnTimerSelect  func(runID string)
 	OnSelect       func(string)
@@ -121,196 +115,704 @@ type Shell struct {
 	OnPage         func(Page)
 	OnSidebar      func(bool)
 
-	Query string
-	// ShowAllRuns expands the truncated in-progress run list. UX-LAYOUT:
-	// the workspace grid has an explicit "show all" affordance.
-	ShowAllRuns bool
-	OnContinue  func()
-	OnCreate    func()
-	OnImport    func()
-	Content     func(*ui.Context)
+	Query          string
+	SelectedDate   string
+	TodayDate      string
+	CurrentHour    float32
+	CalendarMode   int
+	CalendarCursor string
+	DayPopoverOpen bool
+	DayPopoverDate string
+	calAnimDir     int
+	lastDayClickYMD string
+	lastDayClickAt  time.Time
+
+	ShowAllRuns          bool
+	OnContinue           func()
+	OnCreate             func()
+	OnCreateForDate      func(dateYMD string)
+	OnOpenTemplatePicker func(dateYMD string)
+	OnOpenExperiment     func(ExperimentItem)
+	OnQuickStartRun      func(designID string)
+	OnInspectDesign      func(designID string)
+	OnImport             func()
+	Content              func(*ui.Context)
+
+	// Peer split-tree state
+	RootPane     *PaneNode
+	ActivePaneID string
+	Tabs         []WorkspaceTab
+	ActiveTabID  string
+	History      []NavEntry
+	HistoryIdx   int
+	SplitOpen    bool
+	SplitPct     float32
+	SecondaryTab *WorkspaceTab
+	paneSeq      uint64
+	tabSeq       uint64
+	middleHeld   map[string]bool
+
+	// Right companion drawer (Outline + Calc/Timers, collapsed by default)
+	RightOpen        bool
+	RightTab         int
+	RightCalc        RightCalcState
+	PantryItems      []QuickPantryItem
+	OutlineSteps     []OutlineItem
+	PaletteOpen      bool
+	PaletteQuery     string
+	PaletteCursor    int
+	PaletteCommands  []PaletteCommand
+
+	// Vault tree & file lifecycle callbacks
+	VaultTree           *vault.TreeNode
+	VaultFiles          []vault.FileEntry
+	VaultFolders        []string
+	SelectedTreePath    string
+	CreateTargetFolder  string
+	VaultSettingsOpen   bool
+	SettingsView        components.SettingsState
+	ThemeSource         string // system | light | dark
+	TextScale           float32
+	Density             string // comfortable | compact
+	ReduceMotion        bool
+	DefaultOpenMode     string // edit | read
+	DefaultProjectDir   string
+	DefaultPlateFormat  int
+	DefaultExcessPct    int
+	AutoArchiveAssets   bool
+	Hotkeys             map[string]string
+	HotkeyFilter        string
+	ThemePreset         string // aurora | zinc | warm
+	LiquidGlass         bool
+	themeLookInited     bool
+	ForceMobilePreview  bool
+	MobileDrawer        string // "" | "tree" | "outline"
+	MobilePullAction    string // palette | new_exp | calc | tree
+	MobileAutoHideDock  bool
+	MobileEditToolbar   bool
+	MobileTabSwitcherOpen bool
+	MobileDockForceNav    bool
+	MobileDockHidden      bool
+	MobileDrawerProgress  float32
+	MobileSwipeKind       string
+	MobilePullOffset      float32
+	mobilePrefsInited     bool
+	mobileScrollStates    map[string]*ui.ScrollState
+	mobileLastScrollY     map[string]float32
+	VaultPathInput      string
+	HideAssetsInTree    bool
+	folderOpen          map[string]bool
+	renamingRelPath     string
+	renameDraft         string
+	newFolderDialogOpen bool
+	newFolderParent     string
+	newFolderName       string
+
+	OnActivateTab          func(WorkspaceTab)
+	OnSelectOutlineStep    func(stepID string)
+	OnLocatePantry         func(itemID string)
+	OnVaultCreateFile      func(folderRel, dateYMD string)
+	OnVaultCreateFolder    func(parentRel, name string)
+	OnVaultRename          func(relPath, newName string)
+	OnVaultMove            func(srcRel, destFolderRel string)
+	OnVaultDuplicate       func(relPath, targetDate string)
+	OnVaultSaveTemplate    func(relPath string)
+	OnVaultDelete          func(relPath string)
+	OnSetExperimentDate    func(relPath, dateYMD string)
+	OnRevealInExplorer     func(relPath string)
+	OnSwitchVaultPath      func(newPath string)
+	OnToggleHideAssets     func(hide bool)
+	OnSettingsChanged         func()
+	OnUndo                    func()
+	OnRedo                    func()
+	OnMobileDocToolbarAction  func(tab WorkspaceTab, action string)
+	RenderTabContent          func(*ui.Context, *PaneNode, WorkspaceTab)
+	RenderPantryContent    func(*ui.Context)
+	RenderSecondaryContent func(*ui.Context, WorkspaceTab)
+	RenderOverlays         func(*ui.Context)
 
 	window *sidebar.Shell
 }
 
-var pages = []Page{Project, Design, Protocol, Run, Notebook, Tools}
-
-// NewWindow creates the AsterLab window. The Onevra shell owns the title bar,
-// the floating header and the resizable navigation column.
+// NewWindow creates the AsterLab window with Ribbon + File Tree on the left
+// and the slim companion drawer (collapsed by default) on the right.
 func (s *Shell) NewWindow() *sidebar.Shell {
+	s.EnsureTabs()
 	s.window = sidebar.NewShell(sidebar.ShellOptions{
-		Title:        "AsterLab",
-		Width:        1360,
-		Height:       880,
-		MinWidth:     900,
-		MinHeight:    600,
-		StateKey:     "asterlab-desk",
-		Theme:        theme.Window,
-		LeftWidth:    232,
-		Left:         s.navigation,
-		Content:      s.page,
-		ContentTitle: s.breadcrumb,
-		LeftHeader:   s.navigationHeader,
-		LeftToolbar:  s.navigationFooter,
+		Title:          "AsterLab",
+		Width:          1380,
+		Height:         880,
+		MinWidth:       900,
+		MinHeight:      600,
+		StateKey:       "asterlab-desk",
+		Theme:          theme.Window,
+		LeftWidth:      264,
+		LeftMinWidth:   200,
+		LeftMaxWidth:   380,
+		Left:           s.navigation,
+		Content:        s.page,
+		ContentTitle:   s.topChromeBar,
+		LeftHeader:     s.navigationHeader,
+		LeftToolbar:    s.navigationFooter,
+		Right:          s.rightDrawer,
+		RightHeader:    s.rightDrawerHeader,
+		RightWidth:     300,
+		RightMinWidth:  240,
+		RightMaxWidth:  400,
+		RightCollapsed: !s.RightOpen,
 	})
 	return s.window
 }
 
-// Invalidate asks the window for a frame after state changed off the UI thread.
 func (s *Shell) Invalidate() {
 	if s.window != nil {
 		s.window.Window().Invalidate()
 	}
 }
 
-// breadcrumb is the trimmed top bar: the window title already says AsterLab,
-// so only the location and live states render here. UX-P1, UX-LAYOUT, UX-DESIGN.
-func (s *Shell) breadcrumb(c *ui.Context) {
-	t := c.Theme()
-	components.Text(c, s.location()).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
-	ui.Spacer(c)
-	if s.Loading {
-		components.Text(c, "加载中…").TextColor(t.TextMuted).FontSize(t.Rem(.85))
+// topChromeBar draws the clean Obsidian window chrome bar:
+// Back/Forward arrows + Search (Ctrl+K/O) + Companion Drawer toggle.
+// Each peer split pane draws its own interactive tab bar cleanly right above its surface.
+func (s *Shell) topChromeBar(c *ui.Context) {
+	s.EnsureTabs()
+	tok := theme.GetTokens(c.Theme())
+	if s.window != nil {
+		s.RightOpen = s.window.RightExpanded()
 	}
-	if s.Error != "" {
-		components.Text(c, s.Error).TextColor(t.Danger).FontSize(t.Rem(.85)).SingleLine().Ellipsis("…").MaxWidth(420)
-	}
-}
 
-// location names the project, or the design being edited, after AsterLab.
-func (s *Shell) location() string {
-	if s.Page == Design && s.Selected != "" {
-		for _, d := range s.Designs {
-			if d.ID == s.Selected {
-				return d.Title
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+		backBtn := components.IconButton(c, lucide.ArrowLeft(), "后退 (Alt+←)", components.IconButtonCompact)
+		backBtn.Disabled(!s.CanBack())
+		if backBtn.Clicked() {
+			s.GoBack()
+		}
+		fwdBtn := components.IconButton(c, lucide.ArrowRight(), "前进 (Alt+→)", components.IconButtonCompact)
+		fwdBtn.Disabled(!s.CanForward())
+		if fwdBtn.Clicked() {
+			s.GoForward()
+		}
+
+		ui.Spacer(c)
+
+		if s.Loading {
+			components.Text(c, "加载中…").TextColor(tok.TextMuted).FontSize(float32(tok.TextMeta)).Shrink(0)
+		}
+		if s.Error != "" {
+			components.Text(c, s.Error).TextColor(tok.Danger).FontSize(float32(tok.TextMeta)).
+				SingleLine().Ellipsis("…").MaxWidth(float32(tok.Spacing48) * 5)
+		}
+
+		cmdBtn := components.Button(c, "", components.ButtonGhost).Label("快速打开 (Ctrl+O)")
+		cmdBtn.Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Icon(c, lucide.Search()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+				ui.Text(c, "快速打开 (Ctrl+O)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			})
+		})
+		if cmdBtn.Clicked() {
+			s.PaletteOpen = true
+			s.PaletteCursor = 0
+		}
+		if s.window == nil {
+			rdBtn := components.IconButton(c, lucide.PanelRight(), "大纲与速算抽屉", components.IconButtonCompact)
+			if s.RightOpen {
+				rdBtn.Background(tok.AccentSoftBg)
+			}
+			if rdBtn.Clicked() {
+				s.ToggleRightDrawer()
 			}
 		}
-	}
-	if s.Project != "" {
-		return s.Project
-	}
-	return "未选择项目"
+	})
 }
 
 func (s *Shell) navigationHeader(c *ui.Context) {
 	ui.Spacer(c)
-	if s.OnCreate == nil {
-		return
-	}
-	if components.IconButton(c, lucide.SquarePen(), "新建设计", components.IconButtonCompact).Clicked() {
-		s.OnCreate()
-	}
-}
-
-func (s *Shell) navigation(c *ui.Context) {
-	inset := sidebar.HeaderHeight(c)
-	ui.Column(c).Fill().Children(func() {
-		ui.Scroll(c).Grow(1).Padding(inset, 0, 0, 0).Children(func() {
-			components.Sidebar(c).Children(func() {
-				components.SidebarSection(c, "工作区", func() {
-					for _, p := range pages {
-						p := p
-						if components.SidebarItem(c, p.Label(), p.icon(), s.Page == p).Clicked() {
-							s.setPage(p)
-						}
-					}
-				})
-				components.SidebarSectionWithActions(c, "最近设计", nil, func() {
-					if len(s.Designs) == 0 {
-						components.Text(c, "尚无已保存的设计").TextColor(c.Theme().TextMuted).
-							FontSize(c.Theme().Rem(.85)).Padding(c.Theme().Space(1), c.Theme().Space(2))
-						return
-					}
-					for _, d := range s.Designs {
-						d := d
-						item := components.SidebarItemWithSlots(c, d.Title, s.Selected == d.ID,
-							func(c *ui.Context, size float32) {
-								components.Icon(c, lucide.FileText()).Size(size, size).TextColor(c.Theme().Accent)
-							},
-							func(c *ui.Context, _ float32) {
-								components.Text(c, d.Meta).TextColor(c.Theme().TextMuted).FontSize(c.Theme().Rem(.78)).Shrink(0)
-							})
-						if item.Clicked() {
-							s.Selected = d.ID
-							s.Page = Design
-							if s.OnSelect != nil {
-								s.OnSelect(d.ID)
-							}
-							s.setPage(Design)
-						}
-					}
-				})
-			})
-		})
-	})
 }
 
 func (s *Shell) navigationFooter(c *ui.Context) {
 	t := c.Theme()
-	components.Text(c, "AsterLab · 原生设计工作台").TextColor(t.TextMuted).FontSize(t.Rem(.78)).
+	label := fmt.Sprintf("AsterLab · %d 份实验", len(s.VaultFiles))
+	if len(s.VaultFiles) == 0 && len(s.Experiments) > 0 {
+		label = fmt.Sprintf("AsterLab · %d 份实验", len(s.Experiments))
+	}
+	components.Text(c, label).TextColor(t.TextMuted).FontSize(t.Rem(.78)).
 		SingleLine().Ellipsis("…")
 }
 
-func (s *Shell) setPage(p Page) {
-	changed := s.Page != p
-	s.Page = p
-	if s.OnPage != nil {
-		s.OnPage(p)
+func (s *Shell) handleGlobalShortcuts(c *ui.Context) {
+	if c.Shortcut(ui.Cmd, ui.KeyB) && s.window != nil {
+		s.window.SetLeftExpanded(!s.window.LeftExpanded())
 	}
-	if changed && s.window != nil {
-		s.window.Window().Invalidate()
+	if c.Shortcut(ui.Cmd, ui.KeyK) || c.Shortcut(ui.Cmd, ui.KeyO) || c.Shortcut(ui.Cmd, ui.KeyP) {
+		s.PaletteOpen = !s.PaletteOpen
+		s.PaletteCursor = 0
 	}
+	if c.Shortcut(ui.Cmd, ui.KeyN) {
+		s.triggerVaultNewFile("")
+	}
+	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyR) {
+		s.ToggleRightDrawer()
+	}
+	if c.Shortcut(ui.Alt, ui.KeyLeft) || c.Shortcut(0, ui.KeyBack) {
+		s.GoBack()
+	}
+	if c.Shortcut(ui.Alt, ui.KeyRight) || c.Shortcut(0, ui.KeyForward) {
+		s.GoForward()
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyW) {
+		if t := s.ActiveTab(); t != nil && !t.Pinned {
+			s.CloseTabInPane(s.ActivePaneID, t.ID)
+		}
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyBackslash) {
+		if t := s.ActiveTab(); t != nil {
+			cp := *t
+			cp.ID = ""
+			s.SplitPaneWithTab(s.ActivePaneID, cp, "right")
+		}
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyE) {
+		if t := s.ActiveTab(); t != nil && t.Kind == TabFile {
+			if t.Mode == ModeRead {
+				s.SetActiveTabMode(ModeEdit)
+			} else {
+				s.SetActiveTabMode(ModeRead)
+			}
+		}
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyZ) && s.OnUndo != nil {
+		s.OnUndo()
+	}
+	if (c.Shortcut(ui.Cmd, ui.KeyY) || c.Shortcut(ui.Cmd|ui.Shift, ui.KeyZ)) && s.OnRedo != nil {
+		s.OnRedo()
+	}
+	if c.Shortcut(ui.Cmd, ui.Key1) {
+		s.OpenCalendarTab()
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyComma) {
+		s.VaultSettingsOpen = !s.VaultSettingsOpen
+	}
+}
+
+// SyncThemeLook ensures Shell's ThemePreset ("obsidian" | "zinc" | "warm") and
+// LiquidGlass toggle are synced to package theme and installed on c.
+func (s *Shell) SyncThemeLook(c *ui.Context) theme.Tokens {
+	if !s.themeLookInited {
+		s.themeLookInited = true
+		if s.ThemePreset == "" || s.ThemePreset == "aurora" {
+			s.ThemePreset = theme.PresetObsidian
+		}
+		// Default Liquid Glass ON unless explicitly configured otherwise via Vault/test.
+		if !s.LiquidGlass {
+			s.LiquidGlass = true
+		}
+	}
+	if s.ThemePreset == "" || s.ThemePreset == "aurora" {
+		s.ThemePreset = theme.PresetObsidian
+	}
+	theme.SetActiveLook(s.ThemePreset, s.LiquidGlass)
+	if c != nil {
+		c.SetTheme(theme.Window(c))
+		return theme.GetTokens(c.Theme())
+	}
+	return theme.LightTokens()
 }
 
 func (s *Shell) page(c *ui.Context) {
+	s.EnsureTabs()
+	tok := s.SyncThemeLook(c)
+	s.handleGlobalShortcuts(c)
+
 	t := c.Theme()
-	inset := sidebar.HeaderHeight(c)
-	if c.Shortcut(ui.Cmd, ui.KeyB) {
-		if s.window != nil {
-			s.window.SetLeftExpanded(!s.window.LeftExpanded())
-		}
+	if s.IsMobileLayout(c) {
+		s.renderMobileWorkbench(c, tok)
+		return
 	}
-	for i, key := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6} {
-		if c.Shortcut(ui.Cmd, key) {
-			s.setPage(pages[i])
-		}
+	var inset float32
+	if s.window != nil {
+		inset = sidebar.HeaderHeight(c)
 	}
-	padding := t.Space(3)
-	ui.Column(c).Fill().Padding(inset, 0, 0, 0).Background(t.Background).Children(func() {
-		// UX-LAYOUT / UX-DESIGN: the global timer strip sits above every page
-		// and renders nothing at all when no timer runs — no placeholder, no
-		// reserved space.
+
+	rootCol := ui.Column(c).Fill().Padding(inset, 0, 0, 0)
+	if !c.Vibrancy() {
+		theme.PaintCanvasBackground(rootCol, tok)
+	}
+	rootCol.Children(func() {
 		s.timerStrip(c)
-		ui.Column(c).Grow(1).MinHeight(0).Padding(0, padding, padding, padding).Children(func() {
-			if s.Error != "" {
-				// UX-P5 / UX-STATE / UX-DONE: keep a failed write visible on every surface, with cause and recovery guidance.
-				ui.Column(c).FillWidth().Padding(t.Space(1), t.Space(2)).Gap(t.Space(.5)).
-					Background(t.Surface).Children(func() {
-					components.Text(c, "未保存 · "+s.Error).TextColor(t.Danger)
-					components.Text(c, "检查目标目录权限后，返回当前操作并重试保存。").
-						TextColor(t.TextMuted).FontSize(t.Rem(.8))
-				})
+		if s.Error != "" {
+			ui.Column(c).FillWidth().Padding(t.Space(1), t.Space(2)).Gap(t.Space(.5)).
+				Background(t.Surface).Children(func() {
+				components.Text(c, "未保存 · "+s.Error).TextColor(t.Danger)
+				components.Text(c, "检查目标目录权限后，返回当前操作并重试保存。").
+					TextColor(t.TextMuted).FontSize(t.Rem(.8))
+			})
+		}
+		ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+			s.renderPaneNode(c, tok, s.RootPane)
+		})
+	})
+
+	s.renderCommandPalette(c)
+	s.renderVaultDialogs(c)
+	if s.RenderOverlays != nil {
+		s.RenderOverlays(c)
+	}
+}
+
+func (s *Shell) renderPaneNode(c *ui.Context, tok theme.Tokens, node *PaneNode) {
+	if node == nil {
+		return
+	}
+	if node.isLeaf() {
+		s.renderLeafPane(c, tok, node)
+		return
+	}
+	if node.Ratio <= 0 || node.Ratio >= 100 {
+		node.Ratio = 50
+	}
+	orient := components.Horizontal
+	if node.Vertical {
+		orient = components.Vertical
+	}
+	components.SplitPercent(c.Key("split-"+node.ID), &node.Ratio,
+		func() { s.renderPaneNode(c, tok, node.First) },
+		func() { s.renderPaneNode(c, tok, node.Second) },
+		components.SplitOptions{
+			Orientation: orient,
+			FirstMin:    float32(tok.Spacing48) * 4.5,
+			SecondMin:   float32(tok.Spacing48) * 4.5,
+			Default:     50,
+		},
+	).Label("工作区分屏分隔线").Fill()
+}
+
+func (s *Shell) renderLeafPane(c *ui.Context, tok theme.Tokens, pane *PaneNode) {
+	if pane == nil {
+		return
+	}
+	isFocusedPane := pane.ID == s.ActivePaneID
+
+	container := ui.Column(c.Key("leaf-"+pane.ID)).Fill().MinWidth(0).MinHeight(0).Clip()
+	theme.PaintCanvasBackground(container, tok)
+	container.Children(func() {
+		if isFocusedPane && s.leafCount() > 1 {
+			ui.Box(c).FillWidth().Height(2).Background(tok.Accent.Alpha(.75))
+		}
+		// 1. Per-Pane Obsidian Tab Bar (Translucent Frosted Header)
+		s.renderPaneTabBar(c, tok, pane)
+		ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(.55))
+
+		// 2. Active Tab Content Surface + Edge Drag-to-Split Drop Zones
+		var activeTab *WorkspaceTab
+		for i := range pane.Tabs {
+			if pane.Tabs[i].ID == pane.ActiveTabID {
+				activeTab = &pane.Tabs[i]
+				break
 			}
-			if s.Page == Project {
-				s.projectView(c)
-				return
+		}
+		if activeTab == nil && len(pane.Tabs) > 0 {
+			pane.ActiveTabID = pane.Tabs[0].ID
+			activeTab = &pane.Tabs[0]
+		}
+
+		bodyBox := ui.Box(c).FillWidth().Grow(1).MinHeight(0)
+		bodyBox.Children(func() {
+			if activeTab != nil {
+				switch activeTab.Kind {
+				case TabCalendar:
+					s.calendarHomeView(c)
+				case TabPantry:
+					if s.RenderPantryContent != nil {
+						s.RenderPantryContent(c)
+					} else if s.Content != nil {
+						s.Content(c)
+					}
+				default:
+					if s.RenderTabContent != nil {
+						s.RenderTabContent(c, pane, *activeTab)
+					} else if s.Content != nil {
+						s.Content(c)
+					}
+				}
 			}
-			if s.Content != nil {
-				s.Content(c)
+			// Render split drop-zone preview highlight when hovering drag
+			if zone := s.detectPaneDropZone(bodyBox, pane.ID); zone != "" {
+				s.renderDropZoneOverlay(c, tok, pane.ID, zone)
 			}
 		})
+		if dragged, dropped := ui.Drop[tabDragPayload](bodyBox); dropped {
+			zone := detectDropZone(bodyBox)
+			s.MoveOrSplitTab(dragged.PaneID, dragged.TabID, pane.ID, zone)
+		}
+		if dragged, dropped := ui.Drop[fileDragPayload](bodyBox); dropped && !dragged.IsDir && dragged.RelPath != "" {
+			zone := detectDropZone(bodyBox)
+			if zone == "" || zone == "center" {
+				s.OpenFileInPane(pane.ID, dragged.RelPath, dragged.Title, ModeEdit, false)
+			} else {
+				s.SplitPaneWithTab(pane.ID, WorkspaceTab{
+					Kind: TabFile, Title: dragged.Title, FilePath: dragged.RelPath, Mode: ModeEdit,
+				}, zone)
+			}
+		}
 	})
 }
 
-// timerStripCompactN bounds the default strip: the current/expiring timers
-// stay visible, the rest collapse behind one toggle. Reachability only: the
-// toggle reuses the quiet Ghost control, no new colours or sizes. UX-LAYOUT,
-// UX-P2.
+func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode) {
+	if s.middleHeld == nil {
+		s.middleHeld = map[string]bool{}
+	}
+	bar := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+		AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+	theme.ApplyChromeGlass(bar, tok, false)
+	bar.Children(func() {
+		for idx, tab := range pane.Tabs {
+			idx, tab := idx, tab
+			active := tab.ID == pane.ActiveTabID
+			targetBg := ui.Transparent
+			targetFg := tok.TextMuted
+			if active {
+				if tok.LiquidGlass {
+					targetBg = tok.Surface.Alpha(0.72)
+				} else {
+					targetBg = tok.Canvas
+				}
+				targetFg = tok.Text
+			}
+			pill := ui.Row(c.Key("ptab-"+pane.ID+"-"+tab.ID)).AlignItems(ui.Center).
+				Padding(float32(tok.Spacing4)*0.75, float32(tok.Spacing8)).
+				Radius(float32(tok.ControlRadius)).
+				Gap(float32(tok.Spacing4))
+			if active && tok.LiquidGlass {
+				pill.Border(1, tok.Border.Alpha(0.65)).Shadow(0, 1, 6, 0, ui.RGBA(15, 23, 42, 0.06))
+			} else if !active && pill.Hovered() {
+				targetBg = tok.Text.Alpha(0.05)
+			}
+			pill.Background(pill.AnimateColor("ptab-bg", targetBg, theme.MotionSnappy))
+			fg := pill.AnimateColor("ptab-fg", targetFg, theme.MotionSnappy)
+			pill.Children(func() {
+				selBtn := ui.ButtonBase(c).Justify(ui.Start).AlignItems(ui.Center).Label("标签:" + tab.Title)
+				theme.ApplyTactilePress(selBtn)
+				components.Tooltip(c, selBtn, fmtTabTooltip(tab))
+				selBtn.Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+						var icon *ui.SVG
+						switch tab.Kind {
+						case TabCalendar:
+							icon = lucide.CalendarDays()
+						case TabPantry:
+							icon = lucide.Package()
+						default:
+							icon = lucide.FlaskConical()
+						}
+						icoCol := tok.TextMuted
+						if active {
+							icoCol = tok.Accent
+						}
+						ui.Icon(c, icon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(icoCol)
+						// Pinned calendar tab renders compactly when space is tight or pinned
+						if !(tab.Pinned && tab.Kind == TabCalendar && len(pane.Tabs) > 3) {
+							components.Text(c, tab.Title).FontSize(float32(tok.TextMeta)).Bold().
+								TextColor(fg).SingleLine().Ellipsis("…").MaxWidth(float32(tok.Spacing48) * 3.0)
+						}
+					})
+				})
+				if selBtn.Clicked() {
+					s.SwitchTabInPane(pane.ID, tab.ID, true)
+				}
+				// Middle-mouse click closes non-pinned tab cleanly
+				if !tab.Pinned {
+					if btn, pressed := selBtn.PressedButton(); pressed && btn == 2 {
+						s.middleHeld[tab.ID] = true
+					} else if s.middleHeld[tab.ID] {
+						s.middleHeld[tab.ID] = false
+						s.CloseTabInPane(pane.ID, tab.ID)
+					}
+					clsBtn := ui.ButtonBase(c.Key("pclose-"+pane.ID+"-"+tab.ID)).Padding(float32(tok.Spacing4)*0.3).
+						Radius(float32(tok.ControlRadius)*0.5).Label("关闭 " + tab.Title)
+					clsBtn.Children(func() {
+						ui.Icon(c, lucide.X()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+					})
+					if clsBtn.Clicked() {
+						s.CloseTabInPane(pane.ID, tab.ID)
+					}
+				}
+			})
+
+			// Drag tab to reorder or drop onto split edge
+			pill.Drag(tabDragPayload{PaneID: pane.ID, TabID: tab.ID, Tab: tab})
+			if dragged, dropped := ui.Drop[tabDragPayload](pill); dropped && dragged.PaneID == pane.ID && dragged.TabID != tab.ID {
+				s.ReorderTabInPane(pane.ID, dragged.TabID, idx)
+			}
+
+			// Right-click tab context menu
+			components.ContextMenu(c, pill, func(m *components.Menu) {
+				if m.Item("关闭").Shortcut("Ctrl+W").Disabled(tab.Pinned).Chosen() {
+					s.CloseTabInPane(pane.ID, tab.ID)
+				}
+				if m.Item("关闭其他标签页").Chosen() {
+					s.CloseOtherTabs(pane.ID, tab.ID)
+				}
+				if m.Item("关闭右侧标签页").Chosen() {
+					s.CloseTabsToRight(pane.ID, tab.ID)
+				}
+				m.Separator()
+				if m.Item("向右分屏").Shortcut("Ctrl+\\").Chosen() {
+					cp := tab
+					cp.ID = ""
+					s.SplitPaneWithTab(pane.ID, cp, "right")
+				}
+				if m.Item("向下分屏").Chosen() {
+					cp := tab
+					cp.ID = ""
+					s.SplitPaneWithTab(pane.ID, cp, "down")
+				}
+				pinLbl := "固定标签页"
+				if tab.Pinned {
+					pinLbl = "取消固定"
+				}
+				if m.Item(pinLbl).Chosen() {
+					s.TogglePinTab(pane.ID, tab.ID)
+				}
+				if tab.Kind == TabFile && tab.FilePath != "" {
+					if m.Item("在文件树中定位").Chosen() {
+						s.SelectedTreePath = tab.FilePath
+						if s.window != nil && !s.window.LeftExpanded() {
+							s.window.SetLeftExpanded(true)
+						}
+					}
+				}
+			})
+		}
+
+		// Trailing '+' new tab & empty-bar double click
+		addBtn := components.IconButton(c, lucide.Plus(), "新建实验 (Ctrl+N)", components.IconButtonCompact)
+		if addBtn.Clicked() {
+			s.ActivePaneID = pane.ID
+			s.triggerVaultNewFile("")
+		}
+		spacerArea := ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing16)).Height(float32(tok.Spacing24))
+		if spacerArea.DoubleClicked() {
+			s.ActivePaneID = pane.ID
+			s.triggerVaultNewFile("")
+		}
+	})
+}
+
+func detectDropZone(box ui.Element) string {
+	x, y, over := box.PointerPosition()
+	if !over {
+		return ""
+	}
+	r := box.Bounds()
+	w, h := r.W, r.H
+	if w <= 0 || h <= 0 {
+		return "center"
+	}
+	rx, ry := x/w, y/h
+	switch {
+	case rx < 0.25:
+		return "left"
+	case rx > 0.75:
+		return "right"
+	case ry < 0.25:
+		return "up"
+	case ry > 0.75:
+		return "down"
+	default:
+		return "center"
+	}
+}
+
+func (s *Shell) detectPaneDropZone(box ui.Element, _ string) string {
+	if _, over := ui.DragOver[tabDragPayload](box); over {
+		return detectDropZone(box)
+	}
+	if dragged, over := ui.DragOver[fileDragPayload](box); over && !dragged.IsDir {
+		return detectDropZone(box)
+	}
+	return ""
+}
+
+type splitPreviewMatch struct{ PaneID string }
+
+func (s *Shell) renderDropZoneOverlay(c *ui.Context, tok theme.Tokens, paneID, zone string) {
+	pad := float32(tok.Spacing8)
+	ov := ui.Box(c.Key("split-ov-"+paneID+"-"+zone)).Absolute().
+		Radius(float32(tok.PanelRadius)).
+		Background(tok.AccentSoftBg).Border(2, tok.Accent).
+		Transition(theme.LiquidSplitTransition(splitPreviewMatch{PaneID: paneID}))
+	switch zone {
+	case "left":
+		ov.Left(pad).Top(pad).Bottom(pad).WidthPercent(48)
+	case "right":
+		ov.Right(pad).Top(pad).Bottom(pad).WidthPercent(48)
+	case "up":
+		ov.Left(pad).Right(pad).Top(pad).HeightPercent(48)
+	case "down":
+		ov.Left(pad).Right(pad).Bottom(pad).HeightPercent(48)
+	default:
+		ov.Left(pad).Right(pad).Top(pad).Bottom(pad)
+	}
+}
+
+// RenderSplitView renders the complete headless Obsidian frame (auto-switching to
+// the responsive mobile shell when viewport < 680dp or ForceMobilePreview is set).
+func (s *Shell) RenderSplitView(c *ui.Context) {
+	s.EnsureTabs()
+	tok := s.SyncThemeLook(c)
+	if s.IsMobileLayout(c) {
+		s.renderMobileWorkbench(c, tok)
+		return
+	}
+	root := ui.Row(c).Fill()
+	theme.PaintCanvasBackground(root, tok)
+	root.Children(func() {
+		// Content/Sidebar panels stay crisp solid structural surfaces (no stacked glass-on-glass washout)
+		leftCol := ui.Column(c).Width(264).FillHeight().
+			Background(tok.RailBackground).Border(1, tok.Border.Alpha(0.75))
+		leftCol.Children(func() {
+			ui.Box(c).Grow(1).FillWidth().Children(func() {
+				s.navigation(c)
+			})
+			ui.Box(c).Padding(float32(tok.Spacing8)).Children(func() {
+				s.navigationFooter(c)
+			})
+		})
+		ui.Column(c).Grow(1).FillHeight().MinWidth(0).Children(func() {
+			chromeRow := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
+				Border(1, tok.Border.Alpha(0.65)).AlignItems(ui.Center)
+			theme.ApplyChromeGlass(chromeRow, tok, false)
+			chromeRow.Children(func() {
+				s.topChromeBar(c)
+			})
+			ui.Box(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
+				s.page(c)
+			})
+		})
+		if s.RightOpen {
+			rightCol := ui.Column(c).Width(float32(tok.Spacing48)*6.2).FillHeight().
+				Background(tok.SidebarBackground).Border(1, tok.Border.Alpha(0.75))
+			rightCol.Children(func() {
+				hdrRow := ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+					Border(1, tok.Border.Alpha(0.65)).AlignItems(ui.Center)
+				theme.ApplyChromeGlass(hdrRow, tok, false)
+				hdrRow.Children(func() {
+					s.rightDrawerHeader(c)
+					ui.Spacer(c)
+					if components.IconButton(c, lucide.X(), "收起抽屉", components.IconButtonCompact).Clicked() {
+						s.ToggleRightDrawer()
+					}
+				})
+				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+					s.rightDrawer(c)
+				})
+			})
+		}
+	})
+}
+
 const timerStripCompactN = 2
 
-// orderedTimers presents ActiveTimers with expiring countdowns first (least
-// remaining first), then the rest in arrival order. Facts unchanged; only
-// presentation order moves so the eye lands on what needs action. UX-LAYOUT.
 func orderedTimers(timers []runs.ActiveTimer) []runs.ActiveTimer {
 	out := make([]runs.ActiveTimer, len(timers))
 	copy(out, timers)
@@ -324,13 +826,6 @@ func orderedTimers(timers []runs.ActiveTimer) []runs.ActiveTimer {
 	return out
 }
 
-// timerStrip is the persistent cross-page global timer bar. It shows running
-// timers only — across experiments, countdowns and windows — and renders
-// nothing when the list is empty. The strip stays compact: the expiring and
-// current timers render inline, the rest collapse behind one toggle, and
-// every entry jumps to its Run through OnTimerSelect. Actions use
-// components.Button Ghost, the quiet one-action control; all values come
-// from theme tokens. UX-IA-3, UX-P3, UX-LAYOUT, UX-DESIGN.
 func (s *Shell) timerStrip(c *ui.Context) {
 	if len(s.ActiveTimers) == 0 {
 		return
@@ -366,8 +861,6 @@ func (s *Shell) timerStrip(c *ui.Context) {
 	})
 }
 
-// formatTimerClock renders one running timer: remaining time for a countdown,
-// elapsed time for a stopwatch with no planned duration.
 func formatTimerClock(timer runs.ActiveTimer) string {
 	if timer.RemainingS != nil {
 		return "剩余 " + formatDuration(*timer.RemainingS)
@@ -375,7 +868,6 @@ func formatTimerClock(timer runs.ActiveTimer) string {
 	return "已计时 " + formatDuration(timer.ElapsedS)
 }
 
-// formatDuration renders seconds as mm:ss, or h:mm:ss past the hour.
 func formatDuration(total uint64) string {
 	h, m, sec := total/3600, (total%3600)/60, total%60
 	if h > 0 {
@@ -384,182 +876,10 @@ func formatDuration(total uint64) string {
 	return fmt.Sprintf("%d:%02d", m, sec)
 }
 
-func (s *Shell) projectView(c *ui.Context) {
-	t := c.Theme()
-	width, _ := c.Size()
-	columns := 3
-	if width < 980 {
-		columns = 2
-	}
-	if width < 680 {
-		columns = 1
-	}
-	query := strings.ToLower(strings.TrimSpace(s.Query))
-	designs := make([]DesignItem, 0, len(s.Designs))
-	for _, design := range s.Designs {
-		if query == "" || strings.Contains(strings.ToLower(design.Title), query) {
-			designs = append(designs, design)
-		}
-	}
-	ui.Scroll(c).Grow(1).Children(func() {
-		ui.Column(c).Padding(t.Space(5), t.Space(4)).Gap(t.Space(5)).MaxWidth(1040).
-			MaxWidthPercent(100).Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.End).Gap(t.Space(3)).Children(func() {
-				ui.Column(c).Gap(t.Space(.75)).Children(func() {
-					components.Text(c, "项目工作区").FontSize(t.Rem(1.7)).FontWeight(600)
-					components.Text(c, "继续推进现有实验方案，或从典型实验模板快速开始。").
-						TextColor(t.TextMuted).FontSize(t.Rem(.92))
-				})
-				ui.Spacer(c)
-				ui.TextInput(c, &s.Query).Placeholder("搜索设计…").Width(t.Space(32))
-			})
-
-			ui.Row(c).Wrap().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
-				if s.OnCreate != nil && len(s.Designs) > 0 && components.Button(c, "新建设计", components.ButtonPrimary).Clicked() {
-					s.OnCreate()
-				}
-				if s.OnImport != nil && components.Button(c, "导入设计", components.ButtonSecondary).Clicked() {
-					s.OnImport()
-				}
-				if s.OnContinue != nil && len(s.RecentRuns) > 0 && components.Button(c, "继续上次工作", components.ButtonGhost).Clicked() {
-					s.OnContinue()
-				}
-				ui.Spacer(c)
-				count := fmt.Sprintf("%d 个设计 · %d 个运行", len(s.Designs), len(s.RecentRuns))
-				if len(s.Projects) > 0 {
-					count = fmt.Sprintf("%d 个项目 · %s", len(s.Projects), count)
-				}
-				components.Text(c, count).TextColor(t.TextMuted).FontSize(t.Rem(.78))
-			})
-
-			if len(s.Designs) == 0 {
-				s.homeEmpty(c)
-			} else {
-				inProgress := []RecentRun{}
-				for _, run := range s.RecentRuns {
-					if run.Meta != "completed" {
-						inProgress = append(inProgress, run)
-					}
-				}
-				shown := inProgress
-				// UX-LAYOUT: the in-progress preview is truncated, never the
-				// grid — designs are uncapped and the grid scrolls (UX-IA-1).
-				// The truncation carries an explicit show-all affordance.
-				if len(inProgress) > 2 && !s.ShowAllRuns {
-					shown = inProgress[:2]
-				}
-				// No hard item cap: hiding designs made older work unreachable
-				// from the workspace (UX-IA-1). The grid scrolls instead.
-				ui.Column(c).Gap(t.Space(1.5)).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Children(func() {
-						components.Text(c, "继续工作").FontSize(t.Rem(1.05)).FontWeight(600)
-						ui.Spacer(c)
-						components.Text(c, fmt.Sprintf("%d 个工作项", len(designs)+len(inProgress))).
-							TextColor(t.TextMuted).FontSize(t.Rem(.78))
-					})
-					if len(designs) == 0 && len(inProgress) == 0 {
-						components.Text(c, "没有匹配的设计。").
-							TextColor(t.TextMuted).FontSize(t.Rem(.9))
-						return
-					}
-					ui.Grid(c).Columns(columns).Gap(t.Space(1)).Children(func() {
-						for _, run := range shown {
-							s.runCard(c, run)
-						}
-						for _, design := range designs {
-							s.designCard(c, design)
-						}
-					})
-					if len(inProgress) > 2 && !s.ShowAllRuns {
-						if components.Button(c, fmt.Sprintf("显示全部 %d 个进行中", len(inProgress)), components.ButtonGhost).Clicked() {
-							s.ShowAllRuns = true
-						}
-					} else if len(inProgress) > 2 {
-						if components.Button(c, "收起", components.ButtonGhost).Clicked() {
-							s.ShowAllRuns = false
-						}
-					}
-				})
-				s.homeTemplates(c)
-				s.homeRuns(c)
-			}
-
-			if len(s.Projects) > 0 {
-				ui.Column(c).Gap(t.Space(1)).Children(func() {
-					components.Text(c, "项目").FontSize(t.Rem(1.05)).FontWeight(600)
-					ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
-						for _, project := range s.Projects {
-							project := project
-							b := components.Button(c, project, components.ButtonGhost)
-							if project == s.Project {
-								b = components.Button(c, project, components.ButtonSecondary)
-							}
-							if b.Clicked() && s.OnProject != nil {
-								s.OnProject(project)
-							}
-						}
-					})
-				})
-			}
-			if s.Loading {
-				components.Text(c, "正在加载工作区…").TextColor(t.TextMuted)
-			}
-		})
-	})
-}
-
-func (s *Shell) homeEmpty(c *ui.Context) {
-	t := c.Theme()
-	title, detail := "未开始 · 还没有实验设计", "新建一个设计，或导入已有记录开始。"
-	if s.Project == "" && len(s.Projects) == 0 {
-		title, detail = "未开始 · 尚无项目", "新建设计开始工作；现有记录也可以导入。"
-	}
-	// UX-P5 / UX-STATE / UX-DONE: distinguish no-project from an empty project and offer a direct first action.
-	ui.Column(c).FillWidth().Gap(t.Space(1.5)).Padding(t.Space(5)).Radius(t.Space(2)).
-		Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).Children(func() {
-		components.Icon(c, lucide.FlaskConical()).Size(t.Space(6), t.Space(6)).TextColor(t.Accent)
-		components.Text(c, title).FontSize(t.Rem(1.15)).FontWeight(600)
-		components.Text(c, detail).TextColor(t.TextMuted).FontSize(t.Rem(.9))
-		if s.OnCreate != nil && components.Button(c, "新建设计", components.ButtonPrimary).Clicked() {
-			s.OnCreate()
-		}
-	})
-}
-
-func (s *Shell) designCard(c *ui.Context, design DesignItem) {
-	t := c.Theme()
-	card := ui.ButtonBase(c).FillWidth().Padding(t.Space(2), t.Space(2)).Radius(t.Space(1.5)).
-		Background(t.Surface).Border(1, t.Border).Label(design.Title)
-	card.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Box(c).Size(t.Space(4.5), t.Space(4.5)).Radius(t.Space(1)).
-				Background(t.Accent.Alpha(.10)).Center().Children(func() {
-				components.Icon(c, lucide.FileText()).Size(t.Space(2.2), t.Space(2.2)).
-					TextColor(t.Accent)
-			})
-			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
-				components.Text(c, design.Title).FontSize(t.Rem(.9)).FontWeight(600).
-					SingleLine().Ellipsis("…")
-				components.Text(c, design.Meta).TextColor(t.TextMuted).FontSize(t.Rem(.75))
-			})
-			components.Icon(c, lucide.ArrowUpRight()).Size(t.Space(2), t.Space(2)).
-				TextColor(t.TextMuted)
-		})
-	})
-	if card.Clicked() {
-		s.Selected = design.ID
-		s.Page = Design
-		if s.OnSelect != nil {
-			s.OnSelect(design.ID)
-		}
-		s.setPage(Design)
-	}
-}
-
 func statusLabel(status string) string {
 	switch status {
 	case "in_progress":
-		return "进行中" // UX-P5: canonical in-progress wording (was 执行中).
+		return "进行中"
 	case "planned":
 		return "计划中"
 	case "completed":
@@ -572,127 +892,6 @@ func statusLabel(status string) string {
 	return status
 }
 
-func (s *Shell) runCard(c *ui.Context, run RecentRun) {
-	t := c.Theme()
-	card := ui.ButtonBase(c).FillWidth().Padding(t.Space(2), t.Space(2)).Radius(t.Space(1.5)).
-		Background(t.Surface).Border(1, t.Border).Label(run.Title)
-	card.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Box(c).Size(t.Space(4.5), t.Space(4.5)).Radius(t.Space(1)).
-				Background(t.Warning.Alpha(.12)).Center().Children(func() {
-				components.Icon(c, lucide.Play()).Size(t.Space(2.2), t.Space(2.2)).
-					TextColor(t.Warning)
-			})
-			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
-				components.Text(c, run.Title).FontSize(t.Rem(.9)).FontWeight(600).
-					SingleLine().Ellipsis("…")
-				components.Text(c, "实验运行 · "+statusLabel(run.Meta)).TextColor(t.TextMuted).FontSize(t.Rem(.75))
-			})
-			components.Icon(c, lucide.ArrowUpRight()).Size(t.Space(2), t.Space(2)).
-				TextColor(t.TextMuted)
-		})
-	})
-	if card.Clicked() && s.OnRunSelect != nil {
-		s.OnRunSelect(run.ID)
-	}
-}
-
-func (s *Shell) homeTemplates(c *ui.Context) {
-	t := c.Theme()
-	type match struct {
-		title  string
-		design DesignItem
-	}
-	matches := []match{}
-	for _, template := range []struct{ title, match string }{
-		{"四象限抑菌圈测定", "抑菌圈"},
-		{"涂板菌落计数 (CFU)", "CFU"},
-		{"HUVEC 水凝胶成管", "HUVEC"},
-		{"RT-qPCR 多靶点复孔", "RT-qPCR"},
-		{"CCK-8 细胞活力", "CCK-8"},
-		{"L929 生物相容性", "L929"},
-	} {
-		for _, design := range s.Designs {
-			if strings.Contains(design.Title, template.match) {
-				matches = append(matches, match{title: template.title, design: design})
-				break
-			}
-		}
-	}
-	if len(matches) == 0 {
-		return
-	}
-	ui.Column(c).Gap(t.Space(1.5)).Children(func() {
-		components.Text(c, "浏览实验设计").FontSize(t.Rem(1.05)).FontWeight(600)
-		ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
-			for _, item := range matches {
-				item := item
-				b := ui.ButtonBase(c).Padding(t.Space(1.5), t.Space(2)).Radius(t.Space(1.5)).
-					Background(t.Background).Border(1, t.Border).Label(item.design.Title)
-				b.Children(func() {
-					ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-						components.Icon(c, lucide.FlaskConical()).Size(t.Space(2.2), t.Space(2.2)).
-							TextColor(t.Accent)
-						ui.Column(c).Gap(0).Children(func() {
-							components.Text(c, item.title).FontSize(t.Rem(.85))
-							components.Text(c, item.design.Meta).TextColor(t.TextMuted).
-								FontSize(t.Rem(.7))
-						})
-					})
-				})
-				if b.Clicked() {
-					s.Selected = item.design.ID
-					if s.OnSelect != nil {
-						s.OnSelect(item.design.ID)
-					}
-					s.setPage(Design)
-				}
-			}
-		})
-	})
-}
-
-func (s *Shell) homeRuns(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Gap(t.Space(1.5)).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Children(func() {
-			components.Text(c, "最近的运行").FontSize(t.Rem(1.05)).FontWeight(600)
-			ui.Spacer(c)
-			components.Text(c, fmt.Sprintf("%d 个", len(s.RecentRuns))).
-				TextColor(t.TextMuted).FontSize(t.Rem(.78))
-		})
-		if len(s.RecentRuns) == 0 {
-			components.Text(c, "尚无运行。设计保存后可以创建冻结运行。").
-				TextColor(t.TextMuted).FontSize(t.Rem(.88))
-			return
-		}
-		shown := s.RecentRuns
-		if len(shown) > 5 {
-			shown = shown[:5]
-		}
-		for _, run := range shown {
-			run := run
-			b := ui.ButtonBase(c).FillWidth().Padding(t.Space(1.5), t.Space(2)).Radius(t.Space(1.5)).
-				Background(t.Surface).Border(1, t.Border).Label(run.Title)
-			b.Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-					components.Icon(c, lucide.Play()).Size(t.Space(2.2), t.Space(2.2)).
-						TextColor(t.TextMuted)
-					components.Text(c, run.Title).FontSize(t.Rem(.88)).SingleLine().Ellipsis("…")
-					ui.Spacer(c)
-					components.Text(c, statusLabel(run.Meta)).TextColor(t.TextMuted).FontSize(t.Rem(.75))
-					components.Icon(c, lucide.ArrowUpRight()).Size(t.Space(1.8), t.Space(1.8)).
-						TextColor(t.TextMuted)
-				})
-			})
-			if b.Clicked() && s.OnRunSelect != nil {
-				s.OnRunSelect(run.ID)
-			}
-		}
-	})
-}
-
-// Quit closes the application when the AsterLab window closes.
 func (s *Shell) Quit() {
 	if s.window != nil {
 		s.window.Window().OnClosed(func() { mygo.App.Quit() })

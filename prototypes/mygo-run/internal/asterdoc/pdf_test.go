@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -179,5 +181,94 @@ func TestViewerRejectsWriteWhenReadOnly(t *testing.T) {
 	// no DB handle field should be exposed
 	if _, ok := any(v).(interface{ DB() any }); ok {
 		t.Fatal("viewer exposes a DB handle")
+	}
+}
+
+func TestExportDocumentPDFVisualComponents(t *testing.T) {
+	cases := []struct {
+		file      string
+		pdfOut    string
+		wantImage bool
+	}{
+		{"testdata/rt-qpcr.asterml", "sample_rt_qpcr_bench_sheet.pdf", true},
+		{"testdata/inhibition-zone.asterml", "sample_inhibition_zone_sheet.pdf", true},
+		{"testdata/huvec-tube.asterml", "sample_huvec_sheet.pdf", false},
+	}
+	captureDir := os.Getenv("ASTER_CAPTURE_DIR")
+	for _, tc := range cases {
+		raw, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatalf("read %s: %v", tc.file, err)
+		}
+		doc, err := Parse(string(raw))
+		if err != nil {
+			t.Fatalf("parse %s: %v", tc.file, err)
+		}
+		var first, second bytes.Buffer
+		opts := DocumentPDFOptions{SourceHash: "sha256:test-" + tc.pdfOut}
+		if err := ExportDocumentPDF(&first, doc, opts); err != nil {
+			t.Fatalf("ExportDocumentPDF(%s): %v", tc.file, err)
+		}
+		if err := ExportDocumentPDF(&second, doc, opts); err != nil {
+			t.Fatalf("ExportDocumentPDF(%s) 2nd run: %v", tc.file, err)
+		}
+		if !bytes.Equal(first.Bytes(), second.Bytes()) {
+			t.Fatalf("%s: PDF output was not deterministic across two runs", tc.file)
+		}
+		pdfStr := first.String()
+		if !strings.HasPrefix(pdfStr, "%PDF-1.") {
+			t.Fatalf("%s: missing %%PDF header", tc.file)
+		}
+		if tc.wantImage && !strings.Contains(pdfStr, "/Subtype /Image") {
+			t.Fatalf("%s: expected embedded visual image (/Subtype /Image) for plate/figure module", tc.file)
+		}
+		if captureDir != "" {
+			if err := os.MkdirAll(captureDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			outPath := filepath.Join(captureDir, tc.pdfOut)
+			if err := os.WriteFile(outPath, first.Bytes(), 0o644); err != nil {
+				t.Fatalf("write %s: %v", outPath, err)
+			}
+		}
+	}
+
+	// Hydrated Run Record A4 PDF (same component engine with actual params, checked boxes,
+	// calculated table columns, and Markdown lab notes + inline asterlab block).
+	izRaw, err := os.ReadFile("testdata/inhibition-zone.asterml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	izDoc, err := Parse(StampScheduledDate(string(izRaw), "2026-11-19"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recPDF bytes.Buffer
+	recOpts := DocumentPDFOptions{
+		SourceHash:   "sha256:test-iz-run-record",
+		IsRunRecord:  true,
+		StatusLabel:  "已完成",
+		RecordedAt:   "2026-11-19 18:20",
+		ActualParams: map[string]string{"od600": "0.51 AU", "agar_temp": "44.8 Cel"},
+		CheckedItems: map[string]bool{"chk-dry": true, "chk-press": true},
+		TableCells: map[string]map[string]string{
+			"blk-iz-table": {
+				"dt:blk-iz-table:1:d1": "11.8",
+				"dt:blk-iz-table:1:d2": "12.0",
+			},
+		},
+		NotebookMarkdown: "# 实验观察笔记与阶段结论\n\n## 1. 抑菌性能比较\n- **Q3 万古霉素阳性对照** 形成 21.0 mm 清晰抑菌圈，培养基与菌液活性符合预期。\n- **Q2 5% HAMA 水凝胶** 实测平均抑菌直径 11.9 mm，边缘清晰无弥散脱落。\n\n> 结论：5% HAMA 具备稳定缓释抑菌表现，建议下一轮增加 24 h 连续取样。\n\n```asterlab\nkind: param_table\nid: note-pdf-cond\nschema: 1\ntitle: 复核环境实测参数\nrows:\n  - {key: incubator_temp, label: 倒置培养箱实测温度, value: 37.1, unit: Cel}\n  - {key: incubate_time, label: 实际孵育时长, value: 16.0, unit: h}\n```\n",
+	}
+	if err := ExportDocumentPDF(&recPDF, izDoc, recOpts); err != nil {
+		t.Fatalf("ExportDocumentPDF(hydrated run record): %v", err)
+	}
+	if !strings.HasPrefix(recPDF.String(), "%PDF-1.") || !strings.Contains(recPDF.String(), "/Subtype /Image") {
+		t.Fatalf("hydrated run record PDF invalid or missing embedded figure")
+	}
+	if captureDir != "" {
+		outPath := filepath.Join(captureDir, "sample_iz_run_record_sheet.pdf")
+		if err := os.WriteFile(outPath, recPDF.Bytes(), 0o644); err != nil {
+			t.Fatalf("write %s: %v", outPath, err)
+		}
 	}
 }

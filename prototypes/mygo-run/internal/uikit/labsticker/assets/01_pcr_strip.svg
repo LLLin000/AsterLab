@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <defs>
+    <linearGradient id="pcrGlassGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E2E8F0"/>
+      <stop offset="32%" stop-color="#FFFFFF"/>
+      <stop offset="72%" stop-color="#F1F5F9"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+    <linearGradient id="pcrCapGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#CBD5E1"/>
+      <stop offset="40%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+    <linearGradient id="sybrLiquidGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="40%" stop-color="#34D399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="stripBarGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- Top shared optical cap bridge -->
+    <rect x="64" y="167" width="372" height="10" rx="5" fill="#E2E8F0" stroke="#475569" stroke-width="2.2"/>
+    <!-- Shared polypropylene linking deck -->
+    <rect x="50" y="191" width="400" height="14" rx="7" fill="url(#stripBarGrad)" stroke="#475569" stroke-width="2.4"/>
+    
+  <g>
+    <!-- Connecting strip collar -->
+    <!-- Individual conical micro-tube body -->
+    <path d="M 56.0,198 L 92.0,198 L 88.5,278 L 80.2,322 C 78.5,328 69.5,328 67.8,322 L 59.5,278 Z"
+          fill="url(#pcrGlassGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Emerald qPCR / SYBR mix inside tip -->
+    <path d="M 60.8,246 L 87.2,246 L 86.2,277 L 78.8,317 C 77.2,322 70.8,322 69.2,317 L 61.8,277 Z"
+          fill="url(#sybrLiquidGrad)"/>
+    <!-- Liquid meniscus -->
+    <ellipse cx="74.0" cy="246" rx="13.2" ry="4.2" fill="#A7F3D0"/>
+    <ellipse cx="74.0" cy="246" rx="13.2" ry="4.2" fill="none" stroke="#10B981" stroke-width="1" stroke-opacity="0.45"/>
+    <!-- Tube top rim ellipse -->
+    <ellipse cx="74.0" cy="198" rx="19.5" ry="5.5" fill="#F8FAFC" stroke="#475569" stroke-width="2.2"/>
+    <ellipse cx="74.0" cy="198" rx="15" ry="3.4" fill="#CBD5E1" fill-opacity="0.55"/>
+    <!-- Vertical left glass highlight -->
+    <path d="M 62.5,208 L 65.0,276 L 69.5,308"
+          fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-opacity="0.82"/>
+    <!-- Flat optical snap cap hinged above -->
+    <path d="M 58.0,162 C 58.0,155 90.0,155 90.0,162 L 92.5,179 C 92.5,184 55.5,184 55.5,179 Z"
+          fill="url(#pcrCapGrad)" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+    <ellipse cx="74.0" cy="162" rx="15.8" ry="4.6" fill="#FFFFFF" fill-opacity="0.88" stroke="#64748B" stroke-width="1.3"/>
+    <!-- Cap hinge strap -->
+    <path d="M 70.5,182 L 70.5,194 L 77.5,194 L 77.5,182"
+          fill="#E2E8F0" stroke="#475569" stroke-width="1.6"/>
+  </g>
+  <g>
+    <!-- Connecting strip collar -->
+    <!-- Individual conical micro-tube body -->
+    <path d="M 106.0,198 L 142.0,198 L 138.5,278 L 130.2,322 C 128.5,328 119.5,328 117.8,322 L 109.5,278 Z"
+          fill="url(#pcrGlassGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Emerald qPCR / SYBR mix inside tip -->
+    <path d="M 110.8,246 L 137.2,246 L 136.2,277 L 128.8,317 C 127.2,322 120.8,322 119.2,317 L 111.8,277 Z"
+          fill="url(#sybrLiquidGrad)"/>
+    <!-- Liquid meniscus -->
+    <ellipse cx="124.0" cy="246" rx="13.2" ry="4.2" fill="#A7F3D0"/>
+    <ellipse cx="124.0" cy="246" rx="13.2" ry="4.2" fill="none" stroke="#10B981" stroke-width="1" stroke-opacity="0.45"/>
+    <!-- Tube top rim ellipse -->
+    <ellipse cx="124.0" cy="198" rx="19.5" ry="5.5" fill="#F8FAFC" stroke="#475569" stroke-width="2.2"/>
+    <ellipse cx="124.0" cy="198" rx="15" ry="3.4" fill="#CBD5E1" fill-opacity="0.55"/>
+    <!-- Vertical left glass highlight -->
+    <path d="M 112.5,208 L 115.0,276 L 119.5,308"
+          fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-opacity="0.82"/>
+    <!-- Flat optical snap cap hinged above -->
+    <path d="M 108.0,162 C 108.0,155 140.0,155 140.0,162 L 142.5,179 C 142.5,184 105.5,184 105.5,179 Z"
+          fill="url(#pcrCapGrad)" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+    <ellipse cx="124.0" cy="162" rx="15.8" ry="4.6" fill="#FFFFFF" fill-opacity="0.88" stroke="#64748B" stroke-width="1.3"/>
+    <!-- Cap hinge strap -->
+    <path d="M 120.5,182 L 120.5,194 L 127.5,194 L 127.5,182"
+          fill="#E2E8F0" stroke="#475569" stroke-width="1.6"/>
+  </g>
+  <g>
+    <!-- Connecting strip collar -->
+    <!-- Individual conical micro-tube body -->
+    <path d="M 156.0,198 L 192.0,198 L 188.5,278 L 180.2,322 C 178.5,328 169.5,328 167.8,322 L 159.5,278 Z"
+          fill="url(#pcrGlassGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Emerald qPCR / SYBR mix inside tip -->
+    <path d="M 160.8,246 L 187.2,246 L 186.2,277 L 178.8,317 C 177.2,322 170.8,322 169.2,317 L 161.8,277 Z"
+          fill="url(#sybrLiquidGrad)"/>
+    <!-- Liquid meniscus -->
+    <ellipse cx="174.0" cy="246" rx="13.2" ry="4.2" fill="#A7F3D0"/>
+    <ellipse cx="174.0" cy="246" rx="13.2" ry="4.2" fill="none" stroke="#10B981" stroke-width="1" stroke-opacity="0.45"/>
+    <!-- Tube top rim ellipse -->
+    <ellipse cx="174.0" cy="198" rx="19.5" ry="5.5" fill="#F8FAFC" stroke="#475569" stroke-width="2.2"/>
+    <ellipse cx="174.0" cy="198" rx="15" ry="3.4" fill="#CBD5E1" fill-opacity="0.55"/>
+    <!-- Vertical left glass highlight -->
+    <path d="M 162.5,208 L 165.0,276 L 169.5,308"
+          fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-opacity="0.82"/>
+    <!-- Flat optical snap cap hinged above -->
+    <path d="M 158.0,162 C 158.0,155 190.0,155 190.0,162 L 192.5,179 C 192.5,184 155.5,184 155.5,179 Z"
+          fill="url(#pcrCapGrad)" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+    <ellipse cx="174.0" cy="162" rx="15.8" ry="4.6" fill="#FFFFFF" fill-opacity="0.88" stroke="#64748B" stroke-width="1.3"/>
+    <!-- Cap hinge strap -->
+    <path d="M 170.5,182 L 170.5,194 L 177.5,194 L 177.5,182"
+          fill="#E2E8F0" stroke="#475569" stroke-width="1.6"/>
+  </g>
+  <g>
+    <!-- Connecting strip collar -->
+    <!-- Individual conical micro-tube body -->
+    <path d="M 206.0,198 L 242.0,198 L 238.5,278 L 230.2,322 C 228.5,328 219.5,328 217.8,322 L 209.5,278 Z"
+          fill="url(#pcrGlassGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Emerald qPCR / SYBR mix inside tip -->
+    <path d="M 210.8,246 L 237.2,246 L 236.2,277 L 228.8,317 C 227.2,322 220.8,322 219.2,317 L 211.8,277 Z"
+          fill="url(#sybrLiquidGrad)"/>
+    <!-- Liquid meniscus -->
+    <ellipse cx="224.0" cy="246" rx="13.2" ry="4.2" fill="#A7F3D0"/>
+    <ellipse cx="224.0" cy="246" rx="13.2" ry="4.2" fill="none" stroke="#10B981" stroke-width="1" stroke-opacity="0.45"/>
+    <!-- Tube top rim ellipse -->
+    <ellipse cx="224.0" cy="198" rx="19.5" ry="5.5" fill="#F8FAFC" stroke="#475569" stroke-width="2.2"/>
+    <ellipse cx="224.0" cy="198" rx="15" ry="3.4" fill="#CBD5E1" fill-opacity="0.55"/>
+    <!-- Vertical left glass highlight -->
+    <path d="M 212.5,208 L 215.0,276 L 219.5,308"
+          fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-opacity="0.82"/>
+    <!-- Flat optical snap cap hinged above -->
+    <path d="M 208.0,162 C 208.0,155 240.0,155 240.0,162 L 242.5,179 C 242.5,184 205.5,184 205.5,179 Z"
+          fill="url(#pcrCapGrad)" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+    <ellipse cx="224.0" cy="162" rx="15.8" ry="4.6" fill="#FFFFFF" fill-opacity="0.88" stroke="#64748B" stroke-width="1.3"/>
+    <!-- Cap hinge strap -->
+    <path d="M 220.5,182 L 220.5,194 L 227.5,194 L 227.5,182"
+          fill="#E2E8F0" stroke="#475569" stroke-width="1.6"/>
+  </g>
+  <g>
+    <!-- Connecting strip collar -->
+    <!-- Individual conical micro-tube body -->
+    <path d="M 256.0,198 L 292.0,198 L 288.5,278 L 280.2,322 C 278.5,328 269.5,328 267.8,322 L 259.5,278 Z"
+          fill="url(#pcrGlassGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Emerald qPCR / SYBR mix inside tip -->
+    <path d="M 260.8,246 L 287.2,246 L 286.2,277 L 278.8,317 C 277.2,322 270.8,322 269.2,317 L 261.8,277 Z"
+          fill="url(#sybrLiquidGrad)"/>
+    <!-- Liquid meniscus -->
+    <ellipse cx="274.0" cy="246" rx="13.2" ry="4.2" fill="#A7F3D0"/>
+    <ellipse cx="274.0" cy="246" rx="13.2" ry="4.2" fill="none" stroke="#10B981" stroke-width="1" stroke-opacity="0.45"/>
+    <!-- Tube top rim ellipse -->
+    <ellipse cx="274.0" cy="198" rx="19.5" ry="5.5" fill="#F8FAFC" stroke="#475569" stroke-width="2.2"/>
+    <ellipse cx="274.0" cy="198" rx="15" ry="3.4" fill="#CBD5E1" fill-opacity="0.55"/>
+    <!-- Vertical left glass highlight -->
+    <path d="M 262.5,208 L 265.0,276 L 269.5,308"
+          fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-opacity="0.82"/>
+    <!-- Flat optical snap cap hinged above -->
+    <path d="M 258.0,162 C 258.0,155 290.0,155 290.0,162 L 292.5,179 C 292.5,184 255.5,184 255.5,179 Z"
+          fill="url(#pcrCapGrad)" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+    <ellipse cx="274.0" cy="162" rx="15.8" ry="4.6" fill="#FFFFFF" fill-opacity="0.88" stroke="#64748B" stroke-width="1.3"/>
+    <!-- Cap hinge strap -->
+    <path d="M 270.5,182 L 270.5,194 L 277.5,194 L 277.5,182"
+          fill="#E2E8F0" stroke="#475569" stroke-width="1.6"/>
+  </g>
+  <g>
+    <!-- Connecting strip collar -->
+    <!-- Individual conical micro-tube body -->
+    <path d="M 306.0,198 L 342.0,198 L 338.5,278 L 330.2,322 C 328.5,328 319.5,328 317.8,322 L 309.5,278 Z"
+          fill="url(#pcrGlassGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Emerald qPCR / SYBR mix inside tip -->
+    <path d="M 310.8,246 L 337.2,246 L 336.2,277 L 328.8,317 C 327.2,322 320.8,322 319.2,317 L 311.8,277 Z"
+          fill="url(#sybrLiquidGrad)"/>
+    <!-- Liquid meniscus -->
+    <ellipse cx="324.0" cy="246" rx="13.2" ry="4.2" fill="#A7F3D0"/>
+    <ellipse cx="324.0" cy="246" rx="13.2" ry="4.2" fill="none" stroke="#10B981" stroke-width="1" stroke-opacity="0.45"/>
+    <!-- Tube top rim ellipse -->
+    <ellipse cx="324.0" cy="198" rx="19.5" ry="5.5" fill="#F8FAFC" stroke="#475569" stroke-width="2.2"/>
+    <ellipse cx="324.0" cy="198" rx="15" ry="3.4" fill="#CBD5E1" fill-opacity="0.55"/>
+    <!-- Vertical left glass highlight -->
+    <path d="M 312.5,208 L 315.0,276 L 319.5,308"
+          fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-opacity="0.82"/>
+    <!-- Flat optical snap cap hinged above -->
+    <path d="M 308.0,162 C 308.0,155 340.0,155 340.0,162 L 342.5,179 C 342.5,184 305.5,184 305.5,179 Z"
+          fill="url(#pcrCapGrad)" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+    <ellipse cx="324.0" cy="162" rx="15.8" ry="4.6" fill="#FFFFFF" fill-opacity="0.88" stroke="#64748B" stroke-width="1.3"/>
+    <!-- Cap hinge strap -->
+    <path d="M 320.5,182 L 320.5,194 L 327.5,194 L 327.5,182"
+          fill="#E2E8F0" stroke="#475569" stroke-width="1.6"/>
+  </g>
+  <g>
+    <!-- Connecting strip collar -->
+    <!-- Individual conical micro-tube body -->
+    <path d="M 356.0,198 L 392.0,198 L 388.5,278 L 380.2,322 C 378.5,328 369.5,328 367.8,322 L 359.5,278 Z"
+          fill="url(#pcrGlassGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Emerald qPCR / SYBR mix inside tip -->
+    <path d="M 360.8,246 L 387.2,246 L 386.2,277 L 378.8,317 C 377.2,322 370.8,322 369.2,317 L 361.8,277 Z"
+          fill="url(#sybrLiquidGrad)"/>
+    <!-- Liquid meniscus -->
+    <ellipse cx="374.0" cy="246" rx="13.2" ry="4.2" fill="#A7F3D0"/>
+    <ellipse cx="374.0" cy="246" rx="13.2" ry="4.2" fill="none" stroke="#10B981" stroke-width="1" stroke-opacity="0.45"/>
+    <!-- Tube top rim ellipse -->
+    <ellipse cx="374.0" cy="198" rx="19.5" ry="5.5" fill="#F8FAFC" stroke="#475569" stroke-width="2.2"/>
+    <ellipse cx="374.0" cy="198" rx="15" ry="3.4" fill="#CBD5E1" fill-opacity="0.55"/>
+    <!-- Vertical left glass highlight -->
+    <path d="M 362.5,208 L 365.0,276 L 369.5,308"
+          fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-opacity="0.82"/>
+    <!-- Flat optical snap cap hinged above -->
+    <path d="M 358.0,162 C 358.0,155 390.0,155 390.0,162 L 392.5,179 C 392.5,184 355.5,184 355.5,179 Z"
+          fill="url(#pcrCapGrad)" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+    <ellipse cx="374.0" cy="162" rx="15.8" ry="4.6" fill="#FFFFFF" fill-opacity="0.88" stroke="#64748B" stroke-width="1.3"/>
+    <!-- Cap hinge strap -->
+    <path d="M 370.5,182 L 370.5,194 L 377.5,194 L 377.5,182"
+          fill="#E2E8F0" stroke="#475569" stroke-width="1.6"/>
+  </g>
+  <g>
+    <!-- Connecting strip collar -->
+    <!-- Individual conical micro-tube body -->
+    <path d="M 406.0,198 L 442.0,198 L 438.5,278 L 430.2,322 C 428.5,328 419.5,328 417.8,322 L 409.5,278 Z"
+          fill="url(#pcrGlassGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Emerald qPCR / SYBR mix inside tip -->
+    <path d="M 410.8,246 L 437.2,246 L 436.2,277 L 428.8,317 C 427.2,322 420.8,322 419.2,317 L 411.8,277 Z"
+          fill="url(#sybrLiquidGrad)"/>
+    <!-- Liquid meniscus -->
+    <ellipse cx="424.0" cy="246" rx="13.2" ry="4.2" fill="#A7F3D0"/>
+    <ellipse cx="424.0" cy="246" rx="13.2" ry="4.2" fill="none" stroke="#10B981" stroke-width="1" stroke-opacity="0.45"/>
+    <!-- Tube top rim ellipse -->
+    <ellipse cx="424.0" cy="198" rx="19.5" ry="5.5" fill="#F8FAFC" stroke="#475569" stroke-width="2.2"/>
+    <ellipse cx="424.0" cy="198" rx="15" ry="3.4" fill="#CBD5E1" fill-opacity="0.55"/>
+    <!-- Vertical left glass highlight -->
+    <path d="M 412.5,208 L 415.0,276 L 419.5,308"
+          fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-opacity="0.82"/>
+    <!-- Flat optical snap cap hinged above -->
+    <path d="M 408.0,162 C 408.0,155 440.0,155 440.0,162 L 442.5,179 C 442.5,184 405.5,184 405.5,179 Z"
+          fill="url(#pcrCapGrad)" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+    <ellipse cx="424.0" cy="162" rx="15.8" ry="4.6" fill="#FFFFFF" fill-opacity="0.88" stroke="#64748B" stroke-width="1.3"/>
+    <!-- Cap hinge strap -->
+    <path d="M 420.5,182 L 420.5,194 L 427.5,194 L 427.5,182"
+          fill="#E2E8F0" stroke="#475569" stroke-width="1.6"/>
+  </g>
+    <!-- End thumb tabs -->
+    <rect x="44" y="192" width="12" height="12" rx="4" fill="#E2E8F0" stroke="#475569" stroke-width="2.0"/>
+    <rect x="444" y="192" width="12" height="12" rx="4" fill="#E2E8F0" stroke="#475569" stroke-width="2.0"/>
+  </g>
+</svg>

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <defs>
+    <linearGradient id="epBoxBodyGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E2E8F0"/>
+      <stop offset="45%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+    <linearGradient id="epBoxSideGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+    <linearGradient id="epBoxDeckGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F1F5F9"/>
+    </linearGradient>
+    <linearGradient id="epBoxLidGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.66"/>
+      <stop offset="100%" stop-color="#CBD5E1" stop-opacity="0.38"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- Solid polypropylene lower box in 3/4 isometric view -->
+    <!-- Right wall -->
+    <path d="M 438,216 L 438,314 C 438,321 433,327 427,330 L 254,414 L 254,306 Z"
+          fill="url(#epBoxSideGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Front wall -->
+    <path d="M 62,216 L 254,306 L 254,414 C 248,417 241,416 235,413 L 70,330 C 65,327 62,321 62,314 Z"
+          fill="url(#epBoxBodyGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Front recessed clasp label zone -->
+    <path d="M 104,268 L 198,312 L 198,348 L 104,303 Z"
+          fill="#FFFFFF" fill-opacity="0.88" stroke="#94A3B8" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M 116,286 L 184,318" stroke="#6366F1" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M 116,298 L 164,321" stroke="#CBD5E1" stroke-width="2.4" stroke-linecap="round"/>
+    <!-- Top slotted deck -->
+    <path d="M 62,216 L 246,138 C 252,135 260,135 266,138 L 438,216 L 254,306 Z"
+          fill="url(#epBoxDeckGrad)" stroke="#475569" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Row grooves on EP box deck -->
+    <g stroke="#CBD5E1" stroke-width="1.6">
+      <line x1="94" y1="202" x2="288" y2="289"/>
+      <line x1="128" y1="188" x2="322" y2="272"/>
+      <line x1="162" y1="173" x2="356" y2="256"/>
+      <line x1="196" y1="158" x2="390" y2="239"/>
+    </g>
+    <!-- Rows of microcentrifuge EP snap-caps & frosted rims inside -->
+    <g>
+      <!-- Row 1 (teal) -->
+      <ellipse cx="170" cy="184" rx="13" ry="6.8" fill="#14B8A6" stroke="#0F766E" stroke-width="1.6"/>
+      <ellipse cx="204" cy="169" rx="13" ry="6.8" fill="#14B8A6" stroke="#0F766E" stroke-width="1.6"/>
+      <ellipse cx="238" cy="154" rx="13" ry="6.8" fill="#2DD4BF" stroke="#0F766E" stroke-width="1.6"/>
+      <ellipse cx="272" cy="169" rx="13" ry="6.8" fill="#14B8A6" stroke="#0F766E" stroke-width="1.6"/>
+      <!-- Row 2 (indigo) -->
+      <ellipse cx="136" cy="201" rx="13" ry="6.8" fill="#6366F1" stroke="#4338CA" stroke-width="1.6"/>
+      <ellipse cx="170" cy="216" rx="13" ry="6.8" fill="#6366F1" stroke="#4338CA" stroke-width="1.6"/>
+      <ellipse cx="204" cy="201" rx="13" ry="6.8" fill="#818CF8" stroke="#4338CA" stroke-width="1.6"/>
+      <ellipse cx="238" cy="186" rx="13" ry="6.8" fill="#6366F1" stroke="#4338CA" stroke-width="1.6"/>
+      <ellipse cx="306" cy="185" rx="13" ry="6.8" fill="#6366F1" stroke="#4338CA" stroke-width="1.6"/>
+      <!-- Row 3 (amber & slate) -->
+      <ellipse cx="204" cy="233" rx="13" ry="6.8" fill="#F59E0B" stroke="#B45309" stroke-width="1.6"/>
+      <ellipse cx="238" cy="218" rx="13" ry="6.8" fill="#F59E0B" stroke="#B45309" stroke-width="1.6"/>
+      <ellipse cx="272" cy="203" rx="13" ry="6.8" fill="#FBBF24" stroke="#B45309" stroke-width="1.6"/>
+      <ellipse cx="242" cy="252" rx="13" ry="6.8" fill="#64748B" stroke="#334155" stroke-width="1.6"/>
+      <ellipse cx="276" cy="237" rx="13" ry="6.8" fill="#14B8A6" stroke="#0F766E" stroke-width="1.6"/>
+      <ellipse cx="310" cy="222" rx="13" ry="6.8" fill="#F59E0B" stroke="#B45309" stroke-width="1.6"/>
+      <ellipse cx="344" cy="207" rx="13" ry="6.8" fill="#6366F1" stroke="#4338CA" stroke-width="1.6"/>
+    </g>
+    <!-- Clear snap lid slightly overhanging the top tray -->
+    <path d="M 58,208 L 246,128 C 253,125 261,125 268,128 L 442,208 L 442,224 L 254,312 L 58,224 Z"
+          fill="url(#epBoxLidGrad)" stroke="#64748B" stroke-width="2.4" stroke-linejoin="round"/>
+    <path d="M 104,196 L 250,136 L 306,161" fill="none" stroke="#FFFFFF" stroke-width="4.2" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 254,312 L 254,412" fill="none" stroke="#FFFFFF" stroke-width="2.2" opacity="0.55"/>
+  </g>
+</svg>

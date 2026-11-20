@@ -1,0 +1,19 @@
+<svg viewBox="0 0 360 260" xmlns="http://www.w3.org/2000/svg">
+  <!-- Conical centrifuge tube density gradient layers -->
+  <g transform="translate(120, 24)">
+    <rect x="-26" y="0" width="52" height="14" rx="3" fill="#5B45C9" fill-opacity="0.85" stroke="currentColor" stroke-width="1.5"/>
+    <rect x="-22" y="14" width="44" height="58" fill="#FCEFB4" fill-opacity="0.55" stroke="none"/>
+    <rect x="-22" y="72" width="44" height="10" fill="#FFFFFF" stroke="#5B45C9" stroke-width="1.2"/>
+    <rect x="-22" y="82" width="44" height="62" fill="#DCEBFB" fill-opacity="0.6" stroke="none"/>
+    <polygon points="-22,144 22,144 8,194 -8,194" fill="#B91C1C" fill-opacity="0.72"/>
+    <path d="M -22 14 L -22 144 L -8 194 C -4 202, 4 202, 8 194 L 22 144 L 22 14 Z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    <line x1="22" y1="44" x2="72" y2="44" stroke="currentColor" stroke-width="1"/>
+    <line x1="22" y1="77" x2="72" y2="77" stroke="currentColor" stroke-width="1"/>
+    <line x1="22" y1="114" x2="72" y2="114" stroke="currentColor" stroke-width="1"/>
+    <line x1="16" y1="170" x2="72" y2="170" stroke="currentColor" stroke-width="1"/>
+  </g>
+  <text x="198" y="72" font-size="11" text-anchor="start">上清液 / 血浆层</text>
+  <text x="198" y="105" font-size="11" text-anchor="start">白膜层 (PBMC 吸取目标)</text>
+  <text x="198" y="142" font-size="11" text-anchor="start">淋巴细胞分离液层</text>
+  <text x="198" y="198" font-size="11" text-anchor="start">红细胞 / 沉淀层</text>
+</svg>

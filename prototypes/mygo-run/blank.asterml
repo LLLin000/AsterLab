@@ -19,12 +19,12 @@ rows:
     name: 对照组
     role: control
     condition: 空白或溶媒对照
-    replicate_count: 3
+    independent_n: 3
   - id: g-treatment
     name: 处理组
     role: treatment
     condition: 待设定处理条件
-    replicate_count: 3
+    independent_n: 3
 ```
 
 ```asterlab

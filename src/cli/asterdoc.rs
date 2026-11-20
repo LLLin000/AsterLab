@@ -102,7 +102,47 @@ pub(crate) fn save_asterdoc_version(db: &mut Connection, input: &Value) -> Resul
         }
     }
     tx.commit().map_err(|e| CliError::internal(e.to_string()))?;
+    mirror_asterdoc_to_disk(db, design_id, source);
     Ok(data)
+}
+
+fn mirror_asterdoc_to_disk(db: &Connection, design_id: &str, source: &str) {
+    let Some(db_path) = db.path().filter(|p| !p.is_empty() && *p != ":memory:") else {
+        return;
+    };
+    let Some(data_dir) = std::path::Path::new(db_path).parent() else {
+        return;
+    };
+    let clean_id = design_id.trim();
+    if clean_id.is_empty() || clean_id.contains(['/', '\\', '.']) {
+        return;
+    }
+    let exp_dir = data_dir.join("experiments").join(clean_id);
+    if std::fs::create_dir_all(exp_dir.join("assets")).is_err() {
+        return;
+    }
+    let file_path = exp_dir.join("experiment.asterml");
+    let mut final_body = source.to_owned();
+    if let Ok(prev) = std::fs::read_to_string(&file_path) {
+        // Preserve any trailing asterlab-exec / asterlab-record envelope blocks when updating design from CLI.
+        let mut suffix_start: Option<usize> = None;
+        for marker in ["\n```asterlab-exec", "\n````asterlab-record"] {
+            if let Some(pos) = prev.find(marker) {
+                suffix_start = Some(match suffix_start {
+                    Some(cur) => cur.min(pos),
+                    None => pos,
+                });
+            }
+        }
+        if let Some(pos) = suffix_start {
+            let trimmed_src = source.trim_end();
+            final_body = format!("{trimmed_src}\n{}", &prev[pos..]);
+        }
+    }
+    let tmp_path = exp_dir.join(".experiment.asterml.tmp");
+    if std::fs::write(&tmp_path, final_body.as_bytes()).is_ok() {
+        let _ = std::fs::rename(&tmp_path, &file_path);
+    }
 }
 
 /// load_asterdoc_at returns one exact immutable revision, for Run freezing and
@@ -159,23 +199,71 @@ pub(crate) struct AsterBlock {
     pub(crate) value: serde_yaml::Value,
 }
 
+fn leading_backticks(trimmed: &str) -> usize {
+    let n = trimmed.bytes().take_while(|&b| b == b'`').count();
+    if n >= 3 { n } else { 0 }
+}
+
+fn is_closing_backtick_fence(trimmed: &str, min_ticks: usize) -> bool {
+    min_ticks >= 3 && trimmed.len() >= min_ticks && trimmed.bytes().all(|b| b == b'`')
+}
+
+fn frontmatter_end_offset(source: &str) -> usize {
+    let mut iter = source.split_inclusive('\n');
+    let first = match iter.next() {
+        Some(l) => l,
+        None => return 0,
+    };
+    if first.trim_start_matches('\u{feff}').trim() != "---" {
+        return 0;
+    }
+    let mut offset = first.len();
+    for line in iter {
+        offset += line.len();
+        let tr = line.trim();
+        if tr == "---" || tr == "..." {
+            return offset;
+        }
+        if tr.starts_with("```") {
+            return 0;
+        }
+    }
+    0
+}
+
 pub(crate) fn asterdoc_blocks(source: &str) -> Result<Vec<AsterBlock>, CliError> {
     let mut blocks = Vec::new();
-    let mut offset = 0usize;
+    let fm_end = frontmatter_end_offset(source);
+    let mut offset = fm_end;
     let mut in_fence = false;
+    let mut in_other_fence = false;
+    let mut fence_ticks = 0usize;
     let mut body_start = 0usize;
     let mut body = String::new();
     let mut fence_start = 0usize;
-    for line in source.split_inclusive('\n') {
+    for line in source[fm_end..].split_inclusive('\n') {
         let trimmed = line.trim();
-        if !in_fence {
-            if trimmed.strip_prefix("```").map(str::trim) == Some("asterlab") {
-                in_fence = true;
-                fence_start = offset;
-                body_start = offset + line.len();
-                body.clear();
+        if !in_fence && !in_other_fence {
+            let ticks = leading_backticks(trimmed);
+            if ticks >= 3 {
+                let lang = trimmed[ticks..].trim();
+                if ticks == 3 && lang == "asterlab" {
+                    in_fence = true;
+                    fence_ticks = ticks;
+                    fence_start = offset;
+                    body_start = offset + line.len();
+                    body.clear();
+                } else {
+                    in_other_fence = true;
+                    fence_ticks = ticks;
+                }
             }
-        } else if trimmed == "```" {
+        } else if in_other_fence {
+            if is_closing_backtick_fence(trimmed, fence_ticks) {
+                in_other_fence = false;
+                fence_ticks = 0;
+            }
+        } else if is_closing_backtick_fence(trimmed, fence_ticks) {
             let value: serde_yaml::Value = serde_yaml::from_str(&body)
                 .map_err(|e| CliError::input(format!("asterlab block: {e}")))?;
             blocks.push(AsterBlock {
@@ -186,6 +274,7 @@ pub(crate) fn asterdoc_blocks(source: &str) -> Result<Vec<AsterBlock>, CliError>
                 value,
             });
             in_fence = false;
+            fence_ticks = 0;
             body.clear();
         } else {
             body.push_str(line);
@@ -860,22 +949,38 @@ pub(crate) fn load_asterdoc(db: &Connection, design_id: &str) -> Result<Value, C
 pub(crate) fn validate_asterdoc_source(source: &str) -> Result<(), CliError> {
     let mut ids = std::collections::HashSet::new();
     let mut modules: Vec<serde_yaml::Value> = Vec::new();
+    let fm_end = frontmatter_end_offset(source);
     let mut in_fence = false;
+    let mut in_other_fence = false;
+    let mut fence_ticks = 0usize;
     let mut body = String::new();
-    let mut line_no = 0usize;
-    for line in source.lines() {
+    let mut line_no = source[..fm_end].lines().count();
+    for line in source[fm_end..].lines() {
         line_no += 1;
         let trimmed = line.trim();
-        if !in_fence {
-            if let Some(lang) = trimmed.strip_prefix("```") {
-                if lang.trim() == "asterlab" {
+        if !in_fence && !in_other_fence {
+            let ticks = leading_backticks(trimmed);
+            if ticks >= 3 {
+                let lang = trimmed[ticks..].trim();
+                if ticks == 3 && lang == "asterlab" {
                     in_fence = true;
+                    fence_ticks = ticks;
                     body.clear();
+                } else {
+                    in_other_fence = true;
+                    fence_ticks = ticks;
                 }
             }
             continue;
         }
-        if trimmed == "```" {
+        if in_other_fence {
+            if is_closing_backtick_fence(trimmed, fence_ticks) {
+                in_other_fence = false;
+                fence_ticks = 0;
+            }
+            continue;
+        }
+        if is_closing_backtick_fence(trimmed, fence_ticks) {
             let module: serde_yaml::Value = serde_yaml::from_str(&body)
                 .map_err(|e| CliError::input(format!("asterlab block near line {line_no}: {e}")))?;
             validate_asterdoc_module_value(&module, line_no)?;
@@ -894,6 +999,7 @@ pub(crate) fn validate_asterdoc_source(source: &str) -> Result<(), CliError> {
             }
             modules.push(module);
             in_fence = false;
+            fence_ticks = 0;
             continue;
         }
         body.push_str(line);
@@ -1657,6 +1763,24 @@ pub(crate) fn validate_asterdoc_module_value(value: &serde_yaml::Value, line_no:
             asterdoc_supported()
         ))
     })?;
+    let mut allowed_keys: Vec<&str> = Vec::new();
+    for input in spec["inputs"].as_array().into_iter().flatten() {
+        if let Some(name) = input["name"].as_str() {
+            allowed_keys.push(name);
+        }
+    }
+    for (raw_key, _) in mapping {
+        let Some(k) = raw_key.as_str().map(str::trim) else {
+            return Err(CliError::input(format!("{kind} module has non-string field key")));
+        };
+        if !allowed_keys.contains(&k) {
+            return Err(CliError::input(format!(
+                "{kind} module {} has unknown field {k}; allowed fields: {}",
+                text("id"),
+                allowed_keys.join(", ")
+            )));
+        }
+    }
     for input in spec["inputs"].as_array().into_iter().flatten() {
         let name = input["name"].as_str().unwrap_or("");
         let present = get(name).is_some_and(|value| !value.is_null());
@@ -2147,7 +2271,21 @@ pub(crate) fn validate_asterdoc_module_value(value: &serde_yaml::Value, line_no:
                         }
                     }
                     "formula" => {
-                        validate_formula_expr(text("formula")).map_err(CliError::input)?;
+                        if let Some(rows) = get("rows").and_then(|v| v.as_sequence()).filter(|s| !s.is_empty()) {
+                            for row in rows {
+                                let rk = asterdoc_map_get(row, "key").and_then(|v| v.as_str()).unwrap_or("").trim();
+                                let rl = asterdoc_map_get(row, "label").and_then(|v| v.as_str()).unwrap_or("").trim();
+                                if rk.is_empty() && rl.is_empty() {
+                                    return Err(CliError::input("calculator row needs key or label"));
+                                }
+                                if asterdoc_map_get(row, "kind").and_then(|v| v.as_str()) == Some("formula") {
+                                    let expr = asterdoc_map_get(row, "formula").and_then(|v| v.as_str()).unwrap_or("");
+                                    validate_formula_expr(expr).map_err(CliError::input)?;
+                                }
+                            }
+                        } else {
+                            validate_formula_expr(text("formula")).map_err(CliError::input)?;
+                        }
                     }
                     bad_mode => {
                         return Err(CliError::input(format!("unsupported calculator mode {bad_mode}")));
@@ -2261,22 +2399,41 @@ pub(crate) fn compile_asterdoc_to_design(source: &str) -> Result<Value, CliError
 
 pub(crate) fn parse_asterdoc_modules(source: &str) -> Result<Vec<serde_yaml::Value>, CliError> {
     let mut modules = Vec::new();
+    let fm_end = frontmatter_end_offset(source);
     let mut in_fence = false;
+    let mut in_other_fence = false;
+    let mut fence_ticks = 0usize;
     let mut body = String::new();
-    for line in source.lines() {
+    for line in source[fm_end..].lines() {
         let trimmed = line.trim();
-        if !in_fence {
-            if trimmed.strip_prefix("```").map(str::trim) == Some("asterlab") {
-                in_fence = true;
-                body.clear();
+        if !in_fence && !in_other_fence {
+            let ticks = leading_backticks(trimmed);
+            if ticks >= 3 {
+                let lang = trimmed[ticks..].trim();
+                if ticks == 3 && lang == "asterlab" {
+                    in_fence = true;
+                    fence_ticks = ticks;
+                    body.clear();
+                } else {
+                    in_other_fence = true;
+                    fence_ticks = ticks;
+                }
             }
             continue;
         }
-        if trimmed == "```" {
+        if in_other_fence {
+            if is_closing_backtick_fence(trimmed, fence_ticks) {
+                in_other_fence = false;
+                fence_ticks = 0;
+            }
+            continue;
+        }
+        if is_closing_backtick_fence(trimmed, fence_ticks) {
             let module: serde_yaml::Value = serde_yaml::from_str(&body)
                 .map_err(|e| CliError::input(format!("asterlab block: {e}")))?;
             modules.push(module);
             in_fence = false;
+            fence_ticks = 0;
             continue;
         }
         body.push_str(line);
@@ -2387,6 +2544,8 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
         if !role.is_empty() {
             spec["role"] = json!(match role.as_str() {
                 "control" | "treatment" | "comparator" | "reference" => role,
+                "blank" | "vehicle" | "positive_control" | "negative_control" => "control".to_owned(),
+                "standard" | "ntc" => "reference".to_owned(),
                 _ => "other".to_owned(),
             });
         }
@@ -2428,6 +2587,11 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
                 .iter()
                 .map(|id| group_name_by_id.get(id).cloned().unwrap_or_default())
                 .collect();
+            let mut control_group_ids: Vec<String> = Vec::new();
+            let ctrl_ref = ytext(assay, "control_group_ref");
+            if !ctrl_ref.is_empty() {
+                control_group_ids.push(ctrl_ref);
+            }
             let mut plan = json!({
                 "id": ytext(assay, "id"),
                 "title": ytext(assay, "title"),
@@ -2438,7 +2602,7 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
                 "group_ids": group_ids,
                 "group_names": group_names,
                 "controls": ystrings(assay, "controls"),
-                "control_group_ids": [],
+                "control_group_ids": control_group_ids,
                 "timepoint_timing": [],
             });
             if !ytext(assay, "protocol_version_id").is_empty() {
@@ -2682,7 +2846,10 @@ pub(crate) fn compile_modules_to_design(modules: &[serde_yaml::Value]) -> Result
                                 checks.push(json!({
                                     "check_id": cid,
                                     "label": label,
-                                    "blocking": item["required"].as_bool().unwrap_or(false),
+                                    "blocking": item["blocking"]
+                                        .as_bool()
+                                        .or_else(|| item["required"].as_bool())
+                                        .unwrap_or(false),
                                     "allow_rule_skip": item["allow_rule_skip"].as_bool().unwrap_or(false),
                                     "skip_rule": item["skip_rule"].as_str().unwrap_or("")
                                 }));
@@ -3638,5 +3805,143 @@ pub(crate) fn eval_asterdoc_calculator_with_actuals(
         "rows": rows,
         "used_actuals": used_actuals
     }))
+}
+
+/// asterdoc_cross_module_warnings checks quantitative consistency across modules
+/// (such as calculator.sample_count vs plate_ref wells and group independent_n vs plate wells).
+pub(crate) fn asterdoc_cross_module_warnings(source: &str) -> Vec<String> {
+    use std::collections::{BTreeMap, HashMap, HashSet};
+    let Ok(blocks) = asterdoc_blocks(source) else {
+        return Vec::new();
+    };
+    let values: Vec<serde_yaml::Value> = blocks.into_iter().map(|b| b.value).collect();
+    let flat = flatten_asterdoc_modules(&values);
+
+    struct PlateStats {
+        total_wells: usize,
+        has_factors: bool,
+        by_group: BTreeMap<String, usize>,
+    }
+    let mut plates: HashMap<String, PlateStats> = HashMap::new();
+    for m in &flat {
+        if yaml_kind(m) != "plate" {
+            continue;
+        }
+        let pid = yaml_id(m);
+        let has_factors = m.get("factors")
+            .and_then(|v| v.as_mapping())
+            .is_some_and(|fm| !fm.is_empty());
+        let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
+        let mut all_wells: HashSet<String> = HashSet::new();
+        if let Some(groups) = m.get("groups").and_then(|v| v.as_mapping()) {
+            for (k, v) in groups {
+                let Some(gkey) = k.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+                    continue;
+                };
+                let mut gset: HashSet<String> = HashSet::new();
+                if let Some(seq) = v.as_sequence() {
+                    for w in seq {
+                        if let Some(ws) = w.as_str().map(|s| s.trim().to_uppercase()).filter(|s| !s.is_empty()) {
+                            gset.insert(ws.clone());
+                            all_wells.insert(ws);
+                        }
+                    }
+                }
+                if !gset.is_empty() {
+                    *by_group.entry(gkey.to_owned()).or_insert(0) += gset.len();
+                }
+            }
+        }
+        plates.insert(pid, PlateStats { total_wells: all_wells.len(), has_factors, by_group });
+    }
+
+    let mut warnings = Vec::new();
+    for m in &flat {
+        if yaml_kind(m) != "calculator" {
+            continue;
+        }
+        let cid = yaml_id(m);
+        let pref = {
+            let p = ytext(m, "plate_ref");
+            if p.is_empty() { ytext(m, "container_ref") } else { p }
+        };
+        let sc = m.get("sample_count").and_then(|v| v.as_i64()).unwrap_or(0);
+        if !pref.is_empty() && sc > 0 {
+            if let Some(ps) = plates.get(&pref) {
+                if ps.total_wells > 0 && sc as usize != ps.total_wells {
+                    warnings.push(format!(
+                        "calculator {cid} sample_count ({sc}) does not match referenced plate {pref} assigned wells ({})",
+                        ps.total_wells
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut check_group = |row: &serde_yaml::Value| {
+        let gid = ytext(row, "id");
+        let gname = ytext(row, "name");
+        let ind_n = row.get("independent_n").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        if ind_n == 0 {
+            return;
+        }
+        let tech_rep = row.get("technical_repeats").and_then(|v| v.as_u64()).map(|n| n as usize);
+        let mut matched_wells: usize = 0;
+        let mut has_factors = false;
+        for ps in plates.values() {
+            if !gid.is_empty() {
+                if let Some(&cnt) = ps.by_group.get(&gid) {
+                    matched_wells += cnt;
+                    has_factors |= ps.has_factors;
+                    continue;
+                }
+            }
+            if !gname.is_empty() {
+                if let Some(&cnt) = ps.by_group.get(&gname) {
+                    matched_wells += cnt;
+                    has_factors |= ps.has_factors;
+                }
+            }
+        }
+        if matched_wells == 0 {
+            return;
+        }
+        let label = if gname.is_empty() { &gid } else { &gname };
+        if matched_wells < ind_n {
+            warnings.push(format!(
+                "group {gid} ({label}) declares independent_n={ind_n}, but plate assigns only {matched_wells} well(s)"
+            ));
+        } else if let Some(rep) = tech_rep.filter(|&r| r >= 1) {
+            let expected = ind_n * rep;
+            let ok = if has_factors { matched_wells >= expected && matched_wells % expected == 0 } else { matched_wells == expected };
+            if !ok {
+                warnings.push(format!(
+                    "group {gid} ({label}) declares independent_n={ind_n} x technical_repeats={rep} ({expected} wells), but plate assigns {matched_wells} well(s)"
+                ));
+            }
+        } else if matched_wells % ind_n != 0 {
+            warnings.push(format!(
+                "group {gid} ({label}) declares independent_n={ind_n}, which does not evenly divide plate assigned {matched_wells} well(s)"
+            ));
+        }
+    };
+
+    for m in &flat {
+        match yaml_kind(m).as_str() {
+            "group" => check_group(m),
+            "group_table" => {
+                if let Some(rows) = m.get("rows").and_then(|v| v.as_sequence()) {
+                    for row in rows {
+                        check_group(row);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    warnings.sort();
+    warnings.dedup();
+    warnings
 }
 

@@ -103,8 +103,8 @@ func TestViewRendersNativePlateAndAssignRewritesSource(t *testing.T) {
 		v.Render(c)
 	}, 1000, 900)
 	tt.Frame()
-	if !tt.HasText("96 孔板") || !tt.HasText("plate-cck8-d3") {
-		t.Fatalf("plate module did not render: %q", tt.Texts())
+	if !tt.HasText("96 孔板") || !tt.HasText("已排 6 孔") || tt.HasText("plate-cck8-d3") {
+		t.Fatalf("plate module did not render clean subtitle: %q", tt.Texts())
 	}
 	if err := v.Assign([]string{"A1"}, "material"); err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestPlateZoomOverlaySelectsWellsAndReportsAssignment(t *testing.T) {
 	if !tt.HasText("1 孔") {
 		t.Fatalf("selection missing: %q", tt.Texts())
 	}
-	if err := tt.Click("分配到 control"); err != nil {
+	if err := tt.Click("归入分组 Control"); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
 	if len(assigned) != 1 || assigned[0] != "A1" {
@@ -259,7 +259,7 @@ func TestPlateZoomOverlaySelectsWellsAndReportsAssignment(t *testing.T) {
 	tt.Frame()
 	tt.Release(cx, cy)
 	tt.Frame()
-	if _, ok := tt.Find("3 孔"); !ok || len(v.ExpandedWells) != 3 ||
+	if !tt.HasText("已选 3 孔") || len(v.ExpandedWells) != 3 ||
 		!containsString(v.ExpandedWells, "A1") ||
 		!containsString(v.ExpandedWells, "A2") ||
 		!containsString(v.ExpandedWells, "A3") {
@@ -297,7 +297,7 @@ func TestPlate384OverlayMarqueeUsesRows(t *testing.T) {
 	tt.Frame()
 	tt.Release(cx, cy)
 	tt.Frame()
-	if _, ok := tt.Find("3 孔"); !ok || len(v.ExpandedWells) != 3 ||
+	if !tt.HasText("已选 3 孔") || len(v.ExpandedWells) != 3 ||
 		!containsString(v.ExpandedWells, "A1") ||
 		!containsString(v.ExpandedWells, "B1") ||
 		!containsString(v.ExpandedWells, "C1") {
@@ -350,7 +350,7 @@ func TestPlateFormatsUseEditableOverlay(t *testing.T) {
 			if !tt.HasText("1 孔") {
 				t.Fatalf("%d-well selection missing: %q", tc.format, tt.Texts())
 			}
-			if err := tt.Click("分配到 control"); err != nil {
+			if err := tt.Click("归入分组 Control"); err != nil {
 				t.Fatalf("%d-well assignment: %v", tc.format, err)
 			}
 			if gotModule != "plate-cck8-d3" || gotGroup != "control" ||

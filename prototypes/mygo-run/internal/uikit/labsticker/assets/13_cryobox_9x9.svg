@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <defs>
+    <linearGradient id="cryoDeckGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0F9FF"/>
+      <stop offset="60%" stop-color="#E0F2FE"/>
+      <stop offset="100%" stop-color="#BAE6FD"/>
+    </linearGradient>
+    <linearGradient id="cryoFrontGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="45%" stop-color="#0284C7"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+    <linearGradient id="cryoSideGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#BAE6FD"/>
+      <stop offset="100%" stop-color="#0EA5E9"/>
+    </linearGradient>
+    <linearGradient id="cryoLidGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.72"/>
+      <stop offset="55%" stop-color="#E0F2FE" stop-opacity="0.48"/>
+      <stop offset="100%" stop-color="#7DD3FC" stop-opacity="0.58"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- Raised hinged frosted polycarbonate lid tilted back slightly -->
+    <path d="M 102,124 L 306,82 C 314,80 322,82 329,87 L 428,154 L 222,202 L 106,138 C 99,134 97,126 102,124 Z"
+          fill="#E0F2FE" stroke="#0369A1" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Lower solid tray walls (3/4 isometric perspective) -->
+    <!-- Right angled wall -->
+    <path d="M 434,208 L 434,316 C 434,323 430,329 423,332 L 260,418 L 260,304 Z"
+          fill="url(#cryoSideGrad)" stroke="#0369A1" stroke-width="2.8" stroke-linejoin="round"/>
+    <!-- Front angled wall -->
+    <path d="M 66,214 L 260,304 L 260,418 C 254,421 247,420 241,417 L 74,332 C 69,329 66,323 66,317 Z"
+          fill="url(#cryoFrontGrad)" stroke="#0369A1" stroke-width="2.8" stroke-linejoin="round"/>
+    <!-- Molded front latch tab -->
+    <path d="M 134,264 L 188,289 L 188,325 L 134,299 Z"
+          fill="#38BDF8" stroke="#075985" stroke-width="2.2" stroke-linejoin="round"/>
+    <rect x="148" y="294" width="26" height="8" rx="3" transform="rotate(24 161 298)" fill="#E0F2FE" fill-opacity="0.85"/>
+    <!-- Top box deck interior plate -->
+    <path d="M 66,214 L 246,138 C 252,135 260,135 266,138 L 434,208 L 260,304 Z"
+          fill="url(#cryoDeckGrad)" stroke="#0369A1" stroke-width="2.8" stroke-linejoin="round"/>
+    <!-- Crisp internal grid partitions inside the deck -->
+    <g stroke="#7DD3FC" stroke-width="1.6" stroke-opacity="0.85">
+      <line x1="102" y1="199" x2="294" y2="286"/>
+      <line x1="138" y1="184" x2="330" y2="266"/>
+      <line x1="174" y1="168" x2="366" y2="246"/>
+      <line x1="210" y1="153" x2="402" y2="226"/>
+      <line x1="112" y1="234" x2="298" y2="152"/>
+      <line x1="150" y1="252" x2="336" y2="167"/>
+      <line x1="188" y1="270" x2="374" y2="183"/>
+      <line x1="226" y1="288" x2="406" y2="197"/>
+    </g>
+    <!-- Neat cryovial caps peeking out from 9x9 wells -->
+    <g stroke="#1E293B" stroke-width="1.4">
+      <ellipse cx="182" cy="184" rx="11" ry="6.2" fill="#6366F1"/>
+      <ellipse cx="218" cy="168" rx="11" ry="6.2" fill="#818CF8"/>
+      <ellipse cx="254" cy="154" rx="11" ry="6.2" fill="#6366F1"/>
+      <ellipse cx="144" cy="202" rx="11" ry="6.2" fill="#14B8A6"/>
+      <ellipse cx="218" cy="202" rx="11" ry="6.2" fill="#F59E0B"/>
+      <ellipse cx="255" cy="186" rx="11" ry="6.2" fill="#F59E0B"/>
+      <ellipse cx="292" cy="171" rx="11" ry="6.2" fill="#6366F1"/>
+      <ellipse cx="182" cy="220" rx="11" ry="6.2" fill="#EC4899"/>
+      <ellipse cx="254" cy="222" rx="11" ry="6.2" fill="#14B8A6"/>
+      <ellipse cx="292" cy="206" rx="11" ry="6.2" fill="#14B8A6"/>
+      <ellipse cx="330" cy="190" rx="11" ry="6.2" fill="#38BDF8"/>
+      <ellipse cx="220" cy="239" rx="11" ry="6.2" fill="#EC4899"/>
+      <ellipse cx="256" cy="256" rx="11" ry="6.2" fill="#6366F1"/>
+      <ellipse cx="294" cy="240" rx="11" ry="6.2" fill="#F59E0B"/>
+    </g>
+    <!-- Translucent top collar cover / rim -->
+    <path d="M 60,206 L 246,128 C 253,125 261,125 268,128 L 440,200 L 440,218 L 260,312 L 60,222 Z"
+          fill="url(#cryoLidGrad)" stroke="#0284C7" stroke-width="2.6" stroke-linejoin="round"/>
+    <!-- Specular frosted lid highlights -->
+    <path d="M 118,196 L 254,140 L 298,158" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" opacity="0.78"/>
+    <path d="M 88,246 L 222,310" fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" opacity="0.45"/>
+    <path d="M 260,312 L 260,414" fill="none" stroke="#BAE6FD" stroke-width="2.2" opacity="0.65"/>
+  </g>
+</svg>

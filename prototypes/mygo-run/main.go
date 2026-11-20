@@ -17,6 +17,7 @@ import (
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
+	"asterlab-mygo-prototype/internal/vault"
 	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/internal/workflowtree"
 	"asterlab-mygo-prototype/modules/runs"
@@ -24,14 +25,18 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	mygo "github.com/egoist/mygo"
@@ -94,11 +99,18 @@ type app struct {
 	preflightOpen              bool
 	preflightRisk              bool
 	newDesignOpen              bool
+	newDesignTargetDate        string
 	addModuleOpen              bool
 	importOpen                 bool
 	importPath                 string
 	importTitle                string
 	importErr                  string
+	designPaths                map[string]string
+	diskMirrorMtimes           map[string]time.Time
+	externalSyncBusy           atomic.Bool
+	designCache                map[string]runs.AsterDocSnapshot
+	secondaryViews             map[string]*asterdoc.View
+	runSummaries               []runs.RunSummary
 	designHistory              []runs.AsterDocSnapshot
 	designFuture               []runs.AsterDocSnapshot
 	asterDraftUndo             [][]byte
@@ -215,6 +227,22 @@ type app struct {
 	// runLinkArg carries a startup-URL deep link (asterlab://…) handed to
 	// the exe by the OS; the automation env hook stays as fallback.
 	runLinkArg string
+
+	// Obsidian-style local Vault + shared single-source LiveDocuments
+	vault            *vault.Vault
+	docStore         *vault.DocStore
+	liveViews        map[string]*asterdoc.View
+	liveEditors      map[string]*editor.State
+	liveEditorSynced map[string]string
+	liveTitleDrafts  map[string]*string
+	liveDateDrafts   map[string]*string
+	newExpOpen       bool
+	newExpFolder     string
+	newExpNewFolder  string
+	newExpTitle      string
+	newExpDate       string
+	newExpTemplate   string
+	newExpNudgeSeq   int
 }
 
 func (a *app) nextOp() string {
@@ -415,6 +443,8 @@ func (a *app) applySnap(snap runs.RunSnapshot) {
 	if a.noteRunID != a.snap.RunID {
 		a.loadNotebook()
 	}
+	a.syncRunEnvelopeMirror()
+	a.syncShellExperiments()
 }
 
 func assetRootID(designID string) string {
@@ -1175,12 +1205,7 @@ func (a *app) plannedDocFOV() int {
 	return 0
 }
 
-// recordFOV returns the board's selected FOV layer for the fetch memo (falling
-// back to the frozen AsterML container_grid attachment's slots_per_cell).
 func (a *app) recordFOV() int {
-	if st := recordBoards[a.snap.RunID]; st != nil && a.snap.RunID != "" {
-		return st.fov
-	}
 	return a.plannedDocFOV()
 }
 
@@ -1400,11 +1425,279 @@ func (a *app) startPDFExport(c *ui.Context) {
 	}()
 }
 
-func renderRunRecords(vm *runworkspace.RunWorkspaceViewModel, revision uint64, frozenAt string) string {
+func (a *app) startDesignPDFExport(c *ui.Context, doc *asterdoc.Document) {
+	if doc == nil {
+		return
+	}
+	title := designExperimentTitle(doc)
+	srcHash := ""
+	if a.designDoc != nil {
+		srcHash = a.designDoc.SourceHash
+	}
+	baseDir := a.designBaseDir()
+	a.startDocumentPDFExport(c, title, "", srcHash, baseDir, doc)
+}
+
+func (a *app) startRunRecordPDFExport(c *ui.Context) {
+	if a.pdfExporting {
+		return
+	}
+	frozenSrc := ""
+	srcHash := ""
+	if a.asterDoc != nil {
+		frozenSrc = a.asterDoc.Source
+	}
+	if a.snap.AsterDoc != nil {
+		srcHash = a.snap.AsterDoc.SourceHash
+	}
+	if strings.TrimSpace(frozenSrc) == "" && (a.snap.AsterDoc == nil || a.designSvc == nil) {
+		if c != nil {
+			c.AddToast(ui.Toast{Title: "无法导出实验记录 PDF", Description: "当前实验运行未关联实验方案文档。", Type: components.ToastError})
+		}
+		return
+	}
+	proj, _, _ := a.recordProjection()
+	hv := a.ensureHydratedNotebookAsterView(proj)
+	recordedAt := ""
+	if a.snap.CreationAudit != nil {
+		recordedAt = a.snap.CreationAudit.RecordedAt
+	}
+	if a.snap.RunID != "" && len(a.snap.Events) > 0 {
+		last := a.snap.Events[len(a.snap.Events)-1]
+		if strings.TrimSpace(last.RecordedAt) != "" {
+			recordedAt = last.RecordedAt
+		}
+	}
+	statusWord := notebookStatusWord(a.snap.Status)
+	if statusWord == "" {
+		statusWord = "执行记录"
+	}
+	opts := asterdoc.DocumentPDFOptions{
+		Title:            firstNonEmpty(a.snap.Title, "实验记录"),
+		SourceHash:       srcHash,
+		RunID:            a.snap.RunID,
+		IsRunRecord:      true,
+		StatusLabel:      statusWord,
+		RecordedAt:       recordedAt,
+		BaseDir:          a.designBaseDir(),
+		NotebookMarkdown: a.noteSource(),
+	}
+	if hv != nil {
+		if len(hv.ActualParams) > 0 {
+			opts.ActualParams = make(map[string]string, len(hv.ActualParams))
+			for k, v := range hv.ActualParams {
+				opts.ActualParams[k] = v
+			}
+		}
+		opts.CalcActuals = hv.CalcActuals
+		if len(hv.CheckedItems) > 0 {
+			opts.CheckedItems = make(map[string]bool, len(hv.CheckedItems))
+			for k, v := range hv.CheckedItems {
+				opts.CheckedItems[k] = v
+			}
+		}
+		if len(hv.SkippedItems) > 0 {
+			opts.SkippedItems = make(map[string]string, len(hv.SkippedItems))
+			for k, v := range hv.SkippedItems {
+				opts.SkippedItems[k] = v
+			}
+		}
+		if len(hv.TableCells) > 0 {
+			opts.TableCells = make(map[string]map[string]string, len(hv.TableCells))
+			for rk, row := range hv.TableCells {
+				rcp := make(map[string]string, len(row))
+				for ck, cv := range row {
+					rcp[ck] = cv
+				}
+				opts.TableCells[rk] = rcp
+			}
+		}
+		if len(hv.LinkedAssets) > 0 {
+			opts.LinkedAssets = make(map[string][]asterdoc.AssetThumb, len(hv.LinkedAssets))
+			for tk, list := range hv.LinkedAssets {
+				opts.LinkedAssets[tk] = append([]asterdoc.AssetThumb(nil), list...)
+			}
+		}
+	}
+	snapCopy := a.snap
+	refCopy := a.snap.AsterDoc
+	loader := a.designSvc
+	rootsCopy := make(map[string]string, len(a.assetRoots))
+	for k, v := range a.assetRoots {
+		rootsCopy[k] = v
+	}
+	readoutsCopy := record.DecodeReadouts(proj.Readouts)
+
+	a.pdfExporting = true
+	a.pdfExportResults = make(chan pdfExportResult, 1)
+	if c != nil {
+		c.AddToast(ui.Toast{
+			ID: "asterlab-pdf-export", Title: "正在渲染实验记录 PDF…", Timeout: -1,
+			Data: components.ToastContent{Leading: func() { components.Spinner(c, components.SpinnerRing) }},
+		})
+	}
+	results := a.pdfExportResults
+	go func() {
+		defer func() {
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		}()
+		if strings.TrimSpace(frozenSrc) == "" && refCopy != nil && loader != nil {
+			loaded, err := asterdoc.LoadFrozenAsterDocAt(
+				context.Background(), loader, refCopy.DesignID, refCopy.Revision, refCopy.SourceHash,
+			)
+			if err != nil {
+				results <- pdfExportResult{err: err}
+				return
+			}
+			frozenSrc = loaded.Source
+			if hv == nil {
+				vm := runworkspace.BuildViewModel(snapCopy, &asterdoc.FrozenAsterDoc{
+					DesignID: loaded.DesignID, Revision: loaded.Revision, Source: loaded.Source,
+				})
+				if vm != nil && vm.FrozenDoc != nil {
+					resolve := func(asset runworkspace.LinkedAsset) string {
+						if strings.TrimSpace(asset.RootID) == "" || strings.TrimSpace(asset.RelativePath) == "" {
+							return ""
+						}
+						p, err := assets.Roots(rootsCopy).Resolve(assets.Asset{
+							RootID: asset.RootID, RelativePath: asset.RelativePath,
+						})
+						if err != nil {
+							return ""
+						}
+						return p
+					}
+					v2 := runworkspace.HydrateReadOnlyAsterDocView(vm, readoutsCopy, a.runAssetsForTask, resolve)
+					if v2 != nil {
+						opts.ActualParams = v2.ActualParams
+						opts.CalcActuals = v2.CalcActuals
+						opts.CheckedItems = v2.CheckedItems
+						opts.SkippedItems = v2.SkippedItems
+						opts.TableCells = v2.TableCells
+						opts.LinkedAssets = v2.LinkedAssets
+					}
+				}
+			}
+		}
+		doc, err := asterdoc.Parse(frozenSrc)
+		if err != nil {
+			results <- pdfExportResult{err: err}
+			return
+		}
+		home, _ := os.UserHomeDir()
+		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+			Parent: mygo.FocusedWindow(), Title: "导出实验记录 PDF",
+			DefaultPath: filepath.Join(home, pdfFilename(opts.Title+"-实验记录")), ButtonLabel: "保存",
+			Filters: []mygo.FileFilter{{Name: "PDF", Extensions: []string{"pdf"}}},
+		})
+		if err != nil {
+			results <- pdfExportResult{err: err}
+			return
+		}
+		if path == "" {
+			results <- pdfExportResult{canceled: true}
+			return
+		}
+		if !strings.EqualFold(filepath.Ext(path), ".pdf") {
+			path += ".pdf"
+		}
+		tmp, err := os.CreateTemp(filepath.Dir(path), ".asterlab-record-*.pdf")
+		if err != nil {
+			results <- pdfExportResult{err: err}
+			return
+		}
+		tmpPath := tmp.Name()
+		err = asterdoc.ExportDocumentPDF(tmp, doc, opts)
+		if err == nil {
+			err = tmp.Sync()
+		}
+		if closeErr := tmp.Close(); err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			err = os.Rename(tmpPath, path)
+		}
+		if err != nil {
+			_ = os.Remove(tmpPath)
+			results <- pdfExportResult{err: err}
+			return
+		}
+		results <- pdfExportResult{path: path}
+	}()
+}
+
+func (a *app) startDocumentPDFExport(c *ui.Context, title, rev, srcHash, baseDir string, doc *asterdoc.Document) {
+	if doc == nil || a.pdfExporting {
+		return
+	}
+	a.pdfExporting = true
+	a.pdfExportResults = make(chan pdfExportResult, 1)
+	if c != nil {
+		c.AddToast(ui.Toast{
+			ID: "asterlab-pdf-export", Title: "正在渲染实验方案 PDF…", Timeout: -1,
+			Data: components.ToastContent{Leading: func() { components.Spinner(c, components.SpinnerRing) }},
+		})
+	}
+	results := a.pdfExportResults
+	go func() {
+		defer func() {
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		}()
+		home, _ := os.UserHomeDir()
+		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+			Parent: mygo.FocusedWindow(), Title: "导出实验方案 PDF",
+			DefaultPath: filepath.Join(home, pdfFilename(title)), ButtonLabel: "保存",
+			Filters: []mygo.FileFilter{{Name: "PDF", Extensions: []string{"pdf"}}},
+		})
+		if err != nil {
+			results <- pdfExportResult{err: err}
+			return
+		}
+		if path == "" {
+			results <- pdfExportResult{canceled: true}
+			return
+		}
+		if !strings.EqualFold(filepath.Ext(path), ".pdf") {
+			path += ".pdf"
+		}
+		tmp, err := os.CreateTemp(filepath.Dir(path), ".asterlab-design-*.pdf")
+		if err != nil {
+			results <- pdfExportResult{err: err}
+			return
+		}
+		tmpPath := tmp.Name()
+		err = asterdoc.ExportDocumentPDF(tmp, doc, asterdoc.DocumentPDFOptions{
+			Title:      title,
+			Revision:   rev,
+			SourceHash: srcHash,
+			BaseDir:    baseDir,
+		})
+		if err == nil {
+			err = tmp.Sync()
+		}
+		if closeErr := tmp.Close(); err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			err = os.Rename(tmpPath, path)
+		}
+		if err != nil {
+			_ = os.Remove(tmpPath)
+			results <- pdfExportResult{err: err}
+			return
+		}
+		results <- pdfExportResult{path: path}
+	}()
+}
+
+func renderRunRecords(vm *runworkspace.RunWorkspaceViewModel, _ uint64, frozenAt string) string {
 	var output strings.Builder
-	fmt.Fprintf(&output, "Run Revision: %d\n", revision)
 	if frozenAt == "" {
-		output.WriteString("冻结时间：未记录（旧版 Run）\n")
+		output.WriteString("冻结时间：未记录\n")
 	} else {
 		fmt.Fprintf(&output, "冻结时间：%s\n", frozenAt)
 	}
@@ -1576,35 +1869,36 @@ func (a *app) pollPDFExport(c *ui.Context) {
 	}
 }
 
-// documentExportButton exports the frozen (or preview) protocol document —
-// not the signed archive, which lives on the 终态归档 page as 导出归档 PDF.
-// One entry per meaning. UX-IA-1.
+// documentExportButton exports the complete Run record PDF using component-level rendering.
 func (a *app) documentExportButton(c *ui.Context) {
 	if a.snap.AsterDoc == nil {
 		return
 	}
-	button := components.Button(c, "导出方案 PDF", components.ButtonSecondary)
+	button := components.Button(c, "导出实验记录 PDF", components.ButtonSecondary)
 	button.Disabled(a.pdfExporting || a.asterErr != "")
 	if button.Clicked() && !a.pdfExporting && a.asterErr == "" {
-		a.startPDFExport(c)
+		a.startRunRecordPDFExport(c)
 	}
 }
 
 func (a *app) documentToolbar(c *ui.Context) {
-	ui.Row(c).FillWidth().Padding(6, 12).AlignItems(ui.Center).Gap(8).Children(func() {
+	t := c.Theme()
+	tok := theme.GetTokens(t)
+	ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+		AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 		if a.snap.AsterDoc != nil {
-			ui.Text(c, fmt.Sprintf("冻结文档 Revision: %d", a.snap.AsterDoc.Revision)).
-				FontSize(11).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "方案快照已锁定").
+				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		} else if a.snap.DesignRevision > 0 {
-			ui.Text(c, fmt.Sprintf("Document Revision: %d", a.snap.DesignRevision)).
-				FontSize(11).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "已关联实验方案").
+				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		} else {
-			ui.Text(c, "尚未关联文档 Revision").FontSize(11).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "尚未关联实验方案").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		}
 		if a.snap.AsterDoc != nil {
-			label := "查看冻结文档"
+			label := "查看方案原文"
 			if a.showFrozenDoc {
-				label = "隐藏冻结文档"
+				label = "收起方案原文"
 			}
 			if components.Button(c, label, components.ButtonGhost).Clicked() {
 				a.showFrozenDoc = !a.showFrozenDoc
@@ -1631,9 +1925,9 @@ func (a *app) renderFrozenAsterDoc(c *ui.Context, mode asterdoc.Mode) {
 	}
 	view := &asterdoc.View{
 		Doc: doc, Registry: asterdoc.BuiltinRegistry(), Mode: mode,
-		ReadOnly: true, DocumentRevision: fmt.Sprint(a.asterDoc.Revision),
+		ReadOnly: true,
 	}
-	view.Render(c)
+	view.RenderDocumentSheet(c)
 }
 
 //go:embed starter.asterml
@@ -1654,6 +1948,437 @@ var huvecAsterDoc string
 //go:embed internal/asterdoc/testdata/rt-qpcr.asterml
 var rtQpcrAsterDoc string
 
+func (a *app) ensureDefaultProjectID() (string, error) {
+	if len(a.projects) > 0 && strings.TrimSpace(a.projects[0].ProjectID) != "" {
+		return a.projects[0].ProjectID, nil
+	}
+	if a.designSvc != nil {
+		if items, err := a.designSvc.ListProjects(context.Background()); err == nil && len(items) > 0 {
+			a.projects = items
+			if a.shell != nil {
+				names := make([]string, 0, len(items))
+				for _, item := range items {
+					names = append(names, item.Name)
+				}
+				a.shell.Projects = names
+				if a.shell.Project == "" && len(names) > 0 {
+					a.shell.Project = names[0]
+				}
+			}
+			return items[0].ProjectID, nil
+		}
+	}
+	if a.runSvc != nil {
+		if _, err := a.runSvc.ExecuteCommand(context.Background(), runs.ExecuteCommandInput{
+			Kind:           "project.create",
+			IdempotencyKey: "asterlab-default-space",
+			PayloadJSON:    `{"name":"默认实验空间"}`,
+		}); err == nil && a.designSvc != nil {
+			if items, listErr := a.designSvc.ListProjects(context.Background()); listErr == nil && len(items) > 0 {
+				a.projects = items
+				return items[0].ProjectID, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("未找到可用实验工作空间")
+}
+
+func (a *app) designDiskPath(designID string) string {
+	id := strings.TrimSpace(designID)
+	if id == "" {
+		return ""
+	}
+	if a.designPaths != nil {
+		if p := strings.TrimSpace(a.designPaths[id]); p != "" {
+			return p
+		}
+	}
+	if os.Getenv("LABWORKBENCH_DATA_DIR") == "" && testing.Testing() {
+		return ""
+	}
+	dir := workspaceDataDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "experiments", id, "experiment.asterml")
+}
+
+func (a *app) designBaseDir() string {
+	if a.designDoc != nil {
+		if p := a.designDiskPath(a.designDoc.DesignID); p != "" {
+			return filepath.Dir(p)
+		}
+	}
+	if strings.TrimSpace(a.importPath) != "" {
+		return filepath.Dir(a.importPath)
+	}
+	return ""
+}
+
+func (a *app) syncDesignDiskMirror(designID, source string) {
+	p := a.designDiskPath(designID)
+	if p == "" {
+		return
+	}
+	if a.designPaths == nil {
+		a.designPaths = map[string]string{}
+	}
+	a.designPaths[designID] = p
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
+		return
+	}
+
+	designSource := source
+	if envIn, err := asterdoc.ParseEnvelope(source); err == nil && strings.TrimSpace(envIn.DesignSource) != "" {
+		designSource = envIn.DesignSource
+	}
+	meta := asterdoc.InspectExperiment(designSource, nil)
+	stage := "draft"
+	if meta.Complete {
+		stage = "ready"
+	}
+	fm := asterdoc.EnvelopeFrontmatter{
+		AsterML:       asterdoc.EnvelopeFormatVersion,
+		ID:            designID,
+		Title:         firstNonEmpty(meta.Title, "新实验"),
+		ScheduledDate: meta.ScheduledDate,
+		Stage:         stage,
+	}
+	var existingExec *asterdoc.ExecutionLedger
+	var existingRec *asterdoc.RecordSection
+	if prevBytes, err := os.ReadFile(p); err == nil {
+		if prevEnv, pErr := asterdoc.ParseEnvelope(string(prevBytes)); pErr == nil {
+			fm.RepeatOf = prevEnv.Frontmatter.RepeatOf
+			if fm.ScheduledDate == "" {
+				fm.ScheduledDate = prevEnv.Frontmatter.ScheduledDate
+			}
+			if prevEnv.Execution != nil {
+				existingExec = prevEnv.Execution
+				if prevEnv.Frontmatter.Stage == "in_progress" || prevEnv.Frontmatter.Stage == "completed" {
+					fm.Stage = prevEnv.Frontmatter.Stage
+				}
+			}
+			existingRec = prevEnv.Record
+		}
+	}
+	if composed, err := asterdoc.ComposeEnvelope(fm, designSource, existingExec, existingRec); err != nil {
+		_ = asterdoc.WriteFileAtomic(p, []byte(source))
+	} else {
+		_ = asterdoc.WriteFileAtomic(p, []byte(composed))
+	}
+	if info, statErr := os.Stat(p); statErr == nil {
+		if a.diskMirrorMtimes == nil {
+			a.diskMirrorMtimes = map[string]time.Time{}
+		}
+		a.diskMirrorMtimes[designID] = info.ModTime()
+	}
+}
+
+func (a *app) startExternalSyncLoop() {
+	if a.designSvc == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if a.externalSyncBusy.Swap(true) {
+				continue
+			}
+			a.pollExternalDesignChanges()
+			a.externalSyncBusy.Store(false)
+		}
+	}()
+}
+
+func (a *app) pollExternalDesignChanges() {
+	if a.designSvc == nil || a.shell == nil {
+		return
+	}
+	var activeID string
+	var curRev uint64
+	var curSrc string
+	var diskPath string
+	var lastMtime time.Time
+	var knownDesignCount int
+	var editorDirty bool
+
+	doneSnap := make(chan struct{})
+	mygo.RunOnMain(func() {
+		defer close(doneSnap)
+		knownDesignCount = len(a.shell.Designs)
+		if a.designDoc != nil {
+			activeID = a.designDoc.DesignID
+			curRev = a.designDoc.Revision
+			curSrc = a.designDoc.Source
+			diskPath = a.designDiskPath(activeID)
+			if a.diskMirrorMtimes != nil {
+				lastMtime = a.diskMirrorMtimes[activeID]
+			}
+			if a.designTab == 2 && a.asterSrcEditor != nil && a.asterSrcEditor.Buffer != nil && strings.ReplaceAll(a.asterSrcEditor.Buffer.String(), "\r\n", "\n") != strings.ReplaceAll(a.asterSrcLoadedSrc, "\r\n", "\n") {
+				editorDirty = true
+			}
+		}
+	})
+	<-doneSnap
+
+	if items, err := a.fetchDesigns(); err == nil && len(items) != knownDesignCount {
+		mygo.RunOnMain(func() {
+			a.applyDesigns(items, nil)
+			a.shell.Invalidate()
+		})
+	}
+	if activeID == "" || editorDirty {
+		return
+	}
+
+	if latest, err := a.designSvc.LoadAsterDoc(context.Background(), activeID); err == nil && latest.Revision > curRev {
+		mygo.RunOnMain(func() {
+			if a.designDoc == nil || a.designDoc.DesignID != activeID || latest.Revision <= a.designDoc.Revision {
+				return
+			}
+			a.designDoc = &latest
+			if a.designCache == nil {
+				a.designCache = map[string]runs.AsterDocSnapshot{}
+			}
+			a.designCache[activeID] = latest
+			a.syncDesignDiskMirror(activeID, latest.Source)
+			a.designView = nil
+			a.asterSrcLoadedRev = 0
+			a.asterSrcLoadedSrc = ""
+			a.refreshReadiness()
+			a.syncShellExperiments()
+			a.shell.Invalidate()
+		})
+		return
+	}
+
+	if diskPath != "" && !lastMtime.IsZero() {
+		info, err := os.Stat(diskPath)
+		if err != nil || !info.ModTime().After(lastMtime.Add(150*time.Millisecond)) {
+			return
+		}
+		raw, err := os.ReadFile(diskPath)
+		if err != nil || len(raw) == 0 {
+			return
+		}
+		designSrc := string(raw)
+		if env, eErr := asterdoc.ParseEnvelope(designSrc); eErr == nil && strings.TrimSpace(env.DesignSource) != "" {
+			designSrc = env.DesignSource
+		}
+		if strings.TrimSpace(designSrc) == strings.TrimSpace(curSrc) {
+			mygo.RunOnMain(func() {
+				if a.diskMirrorMtimes == nil {
+					a.diskMirrorMtimes = map[string]time.Time{}
+				}
+				a.diskMirrorMtimes[activeID] = info.ModTime()
+			})
+			return
+		}
+		if _, parseErr := asterdoc.Parse(designSrc); parseErr != nil {
+			return
+		}
+		updated, saveErr := a.designSvc.SaveAsterDoc(context.Background(), runs.AsterDocSaveInput{
+			DesignID: activeID, Source: designSrc, ExpectedRevision: curRev,
+			OperationID: a.nextOp(), ActorID: "external-file",
+		})
+		if saveErr != nil {
+			return
+		}
+		mygo.RunOnMain(func() {
+			a.designDoc = &updated
+			if a.designCache == nil {
+				a.designCache = map[string]runs.AsterDocSnapshot{}
+			}
+			a.designCache[activeID] = updated
+			if a.diskMirrorMtimes == nil {
+				a.diskMirrorMtimes = map[string]time.Time{}
+			}
+			a.diskMirrorMtimes[activeID] = info.ModTime()
+			a.designView = nil
+			a.asterSrcLoadedRev = 0
+			a.asterSrcLoadedSrc = ""
+			a.refreshReadiness()
+			a.syncShellExperiments()
+			a.shell.Invalidate()
+		})
+	}
+}
+
+func (a *app) ensureEnvelopeSeedRaw(designID string) (string, string) {
+	p := a.designDiskPath(designID)
+	if p == "" {
+		return "", ""
+	}
+	if existing, err := os.ReadFile(p); err == nil && len(existing) > 0 {
+		return p, string(existing)
+	}
+	designSrc := ""
+	if a.asterDoc != nil && a.asterDoc.DesignID == designID {
+		designSrc = a.asterDoc.Source
+	} else if cached, ok := a.designCache[designID]; ok {
+		designSrc = cached.Source
+	} else if a.designDoc != nil && a.designDoc.DesignID == designID {
+		designSrc = a.designDoc.Source
+	}
+	if strings.TrimSpace(designSrc) == "" {
+		return "", ""
+	}
+	meta := asterdoc.InspectExperiment(designSrc, nil)
+	fm := asterdoc.EnvelopeFrontmatter{
+		AsterML:       asterdoc.EnvelopeFormatVersion,
+		ID:            designID,
+		Title:         firstNonEmpty(meta.Title, a.snap.Title, "实验"),
+		ScheduledDate: meta.ScheduledDate,
+		Stage:         "ready",
+	}
+	composed, err := asterdoc.ComposeEnvelope(fm, designSrc, nil, nil)
+	if err != nil {
+		return "", ""
+	}
+	return p, composed
+}
+
+func (a *app) syncRunEnvelopeMirror() {
+	if a.snap.RunID == "" || a.snap.DesignID == "" {
+		return
+	}
+	p, raw := a.ensureEnvelopeSeedRaw(a.snap.DesignID)
+	if p == "" || raw == "" {
+		return
+	}
+	checks := map[string]string{}
+	for _, tk := range a.snap.Tasks {
+		for _, chk := range tk.Checks {
+			if chk.Status != "" {
+				checks[tk.Key+":"+chk.CheckID] = chk.Status
+			}
+		}
+	}
+	deviations := make([]map[string]any, 0)
+	for _, ev := range a.snap.Events {
+		if ev.EventType == "deviation" || ev.EventType == "observation" {
+			if ev.Stage == "notebook" {
+				continue
+			}
+			deviations = append(deviations, map[string]any{
+				"id":          ev.ID,
+				"type":        ev.EventType,
+				"task_key":    ev.TaskKey,
+				"step_path":   ev.ProtocolStepPath,
+				"content":     ev.Content,
+				"recorded_at": firstNonEmpty(ev.RecordedAt, ev.OccurredAt),
+			})
+		}
+	}
+	assetsMeta := make([]map[string]any, 0, len(a.runAssets))
+	for _, ast := range a.runAssets {
+		assetsMeta = append(assetsMeta, map[string]any{
+			"id":            ast.ID,
+			"relative_path": ast.RelativePath,
+			"sha256":        ast.SHA256,
+			"task_key":      ast.Link.TaskKey,
+			"well":          ast.Link.WellID,
+			"timepoint":     ast.Link.Timepoint,
+			"fov":           ast.Link.FOVIndex,
+		})
+	}
+	readouts := make([]map[string]any, 0, len(a.snap.Measurements))
+	for _, m := range a.snap.Measurements {
+		readouts = append(readouts, map[string]any{
+			"sample":    m.SampleID,
+			"endpoint":  m.Endpoint,
+			"value":     m.Value,
+			"unit":      m.Unit,
+			"step_path": m.ProtocolStepPath,
+		})
+	}
+	ledger := asterdoc.ExecutionLedger{
+		Schema:     1,
+		RunID:      a.snap.RunID,
+		Status:     a.snap.Status,
+		UpdatedAt:  time.Now().UTC().Format(time.RFC3339),
+		Checks:     checks,
+		Readouts:   readouts,
+		Assets:     assetsMeta,
+		Deviations: deviations,
+	}
+	next, err := asterdoc.PatchEnvelopeExecution(raw, ledger)
+	if err != nil {
+		return
+	}
+	_ = asterdoc.WriteFileAtomic(p, []byte(next))
+}
+
+func (a *app) syncNotebookEnvelopeMirror(markdown string) {
+	if a.snap.RunID == "" || a.snap.DesignID == "" {
+		return
+	}
+	p, raw := a.ensureEnvelopeSeedRaw(a.snap.DesignID)
+	if p == "" || raw == "" {
+		return
+	}
+	next, err := asterdoc.PatchEnvelopeRecord(raw, asterdoc.RecordSection{
+		Schema:    1,
+		RunID:     a.snap.RunID,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		Markdown:  markdown,
+	})
+	if err != nil {
+		return
+	}
+	_ = asterdoc.WriteFileAtomic(p, []byte(next))
+}
+
+func (a *app) forkExperimentAsDraft(designID string) {
+	if strings.TrimSpace(designID) == "" {
+		return
+	}
+	raw := ""
+	if p := a.designDiskPath(designID); p != "" {
+		if b, err := os.ReadFile(p); err == nil {
+			raw = string(b)
+		}
+	}
+	if strings.TrimSpace(raw) == "" {
+		if snap, ok := a.designCache[designID]; ok {
+			raw = snap.Source
+		} else if a.designDoc != nil && a.designDoc.DesignID == designID {
+			raw = a.designDoc.Source
+		}
+	}
+	if strings.TrimSpace(raw) == "" {
+		return
+	}
+	targetDate := time.Now().Format("2006-01-02")
+	if a.shell != nil && strings.TrimSpace(a.shell.TodayDate) != "" {
+		targetDate = a.shell.TodayDate
+	}
+	forked, err := asterdoc.ForkEnvelopeAsDraft(raw, "", targetDate)
+	if err != nil {
+		return
+	}
+	env, err := asterdoc.ParseEnvelope(forked)
+	if err != nil {
+		return
+	}
+	title := firstNonEmpty(env.Frontmatter.Title, "新实验") + "（复刻）"
+	a.createAsterDocDesign(env.DesignSource, title)
+	if a.designDoc != nil && env.Frontmatter.RepeatOf != "" {
+		if dp := a.designDiskPath(a.designDoc.DesignID); dp != "" {
+			if curBytes, rErr := os.ReadFile(dp); rErr == nil {
+				if curEnv, pErr := asterdoc.ParseEnvelope(string(curBytes)); pErr == nil {
+					curEnv.Frontmatter.RepeatOf = env.Frontmatter.RepeatOf
+					if next, cErr := asterdoc.ComposeEnvelope(curEnv.Frontmatter, a.designDoc.Source, nil, nil); cErr == nil {
+						_ = asterdoc.WriteFileAtomic(dp, []byte(next))
+					}
+				}
+			}
+		}
+	}
+}
+
 func (a *app) createAsterDocDesign(source, title string) {
 	if a.designSvc == nil {
 		msg := "设计服务不可用"
@@ -1663,17 +2388,21 @@ func (a *app) createAsterDocDesign(source, title string) {
 		}
 		return
 	}
-	if len(a.projects) == 0 {
-		msg := "当前尚无实验项目，请先新建或导入项目"
+	projectID, err := a.ensureDefaultProjectID()
+	if err != nil {
+		msg := err.Error()
 		a.syncErr = msg
 		if a.shell != nil {
 			a.shell.Error = msg
 		}
 		return
 	}
-	project := a.projects[0]
+	cleanSource := source
+	if env, envErr := asterdoc.ParseEnvelope(source); envErr == nil && strings.TrimSpace(env.DesignSource) != "" {
+		cleanSource = env.DesignSource
+	}
 	doc, err := a.designSvc.CreateAsterDocDesign(context.Background(), runs.AsterDocCreateInput{
-		ProjectID: project.ProjectID, Title: title, Source: source,
+		ProjectID: projectID, Title: title, Source: cleanSource,
 		OperationID: a.nextOp(), ActorID: os.Getenv("USERNAME"),
 	})
 	if err != nil {
@@ -1684,16 +2413,38 @@ func (a *app) createAsterDocDesign(source, title string) {
 		}
 		return
 	}
+	if a.designCache == nil {
+		a.designCache = map[string]runs.AsterDocSnapshot{}
+	}
+	a.designCache[doc.DesignID] = doc
+	a.syncDesignDiskMirror(doc.DesignID, doc.Source)
+	meta := asterdoc.InspectExperiment(doc.Source, nil)
+	stageLabel := "设计中"
+	stageEnum := shell.StageDraft
+	if meta.Complete {
+		stageLabel = "方案就绪"
+		stageEnum = shell.StageReady
+	}
+	expTitle := firstNonEmpty(meta.Title, title, "新实验")
 	a.syncErr = ""
+	a.designTab = 0
+	a.loadDesign(doc.DesignID)
 	if a.shell != nil {
 		a.shell.Designs = append([]shell.DesignItem{{
-			ID: doc.DesignID, Title: title, Meta: fmt.Sprintf("rev %d", doc.Revision),
+			ID: doc.DesignID, Title: expTitle, Meta: stageLabel,
 		}}, a.shell.Designs...)
 		a.shell.Selected = doc.DesignID
 		a.shell.Page = shell.Design
 		a.shell.Error = ""
+		a.shell.OpenExperimentTab(shell.ExperimentItem{
+			ID:       doc.DesignID,
+			DesignID: doc.DesignID,
+			Title:    expTitle,
+			Date:     firstNonEmpty(meta.ScheduledDate, a.shell.TodayDate),
+			Stage:    stageEnum,
+		}, shell.Design)
 	}
-	a.loadDesign(doc.DesignID)
+	a.syncShellExperiments()
 	a.saveSession()
 }
 
@@ -1747,6 +2498,7 @@ func (a *app) retryLoadRun() {
 type workspaceSession struct {
 	Project       string                                  `json:"project"`
 	AssetRoots    map[string]string                       `json:"asset_roots,omitempty"`
+	DesignPaths   map[string]string                       `json:"design_paths,omitempty"`
 	CanvasLayouts map[string]map[string]workflow.Position `json:"canvas_layouts,omitempty"`
 	DesignID      string                                  `json:"design_id"`
 	RunID         string                                  `json:"run_id"`
@@ -1764,6 +2516,11 @@ type workspaceSession struct {
 func workspaceDataDir() string {
 	if dir := os.Getenv("LABWORKBENCH_DATA_DIR"); dir != "" {
 		return dir
+	}
+	if runtime.GOOS == "windows" {
+		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+			return filepath.Join(local, "AsterLab", "data")
+		}
 	}
 	if dir, err := os.UserConfigDir(); err == nil {
 		return filepath.Join(dir, "AsterLab", "data")
@@ -1794,6 +2551,7 @@ func (a *app) saveSession() {
 		Page: a.shell.PageName(), DesignTab: a.designTab,
 		CanvasLayouts: a.designLayouts,
 		AssetRoots:    a.assetRoots,
+		DesignPaths:   a.designPaths,
 		UpdatedAt:     time.Now().Format(time.RFC3339),
 	}
 	if a.snap.RunID != "" {
@@ -1846,6 +2604,9 @@ func (a *app) restoreSession() {
 	}
 	if session.AssetRoots != nil {
 		a.assetRoots = session.AssetRoots
+	}
+	if session.DesignPaths != nil {
+		a.designPaths = session.DesignPaths
 	}
 	if session.CanvasLayouts != nil {
 		a.designLayouts = session.CanvasLayouts
@@ -1906,9 +2667,9 @@ func (a *app) rememberRun(snap runs.RunSnapshot) {
 	if a.shell == nil || snap.RunID == "" {
 		return
 	}
-	meta := snap.Status
+	meta := notebookStatusWord(snap.Status)
 	if meta == "" {
-		meta = fmt.Sprintf("rev %d", snap.Revision)
+		meta = "进行中"
 	}
 	next := []shell.RecentRun{{ID: snap.RunID, Title: snap.Title, Meta: meta}}
 	for _, run := range a.shell.RecentRuns {
@@ -2319,8 +3080,14 @@ func (a *app) loadDesign(id string) {
 		}
 	} else if doc.Revision > 0 {
 		a.designDoc = &doc
+		if a.designCache == nil {
+			a.designCache = map[string]runs.AsterDocSnapshot{}
+		}
+		a.designCache[id] = doc
+		a.syncDesignDiskMirror(id, doc.Source)
 		a.stepDrafts = nil
 		a.refreshReadiness()
+		a.syncShellExperiments()
 	}
 	a.preflightOpen = false
 	a.preflightRisk = false
@@ -2439,15 +3206,17 @@ func (a *app) applyRuns(items []runs.RunSummary, err error) {
 	if err != nil || a.shell == nil {
 		return
 	}
+	a.runSummaries = append([]runs.RunSummary(nil), items...)
 	recent := make([]shell.RecentRun, 0, len(items))
 	for _, run := range items {
-		meta := run.Status
+		meta := notebookStatusWord(run.Status)
 		if meta == "" {
 			meta = run.UpdatedAt
 		}
 		recent = append(recent, shell.RecentRun{ID: run.RunID, Title: run.Title, Meta: meta})
 	}
 	a.shell.RecentRuns = recent
+	a.syncShellExperiments()
 }
 
 func (a *app) fetchDesigns() ([]shell.DesignItem, error) {
@@ -2460,7 +3229,7 @@ func (a *app) fetchDesigns() ([]shell.DesignItem, error) {
 	}
 	items := make([]shell.DesignItem, 0, len(ds))
 	for _, d := range ds {
-		items = append(items, shell.DesignItem{ID: d.DesignID, Title: d.Title, Meta: fmt.Sprintf("rev %d", d.Revision)})
+		items = append(items, shell.DesignItem{ID: d.DesignID, Title: d.Title, Meta: "实验方案"})
 	}
 	return items, nil
 }
@@ -2471,6 +3240,7 @@ func (a *app) applyDesigns(items []shell.DesignItem, err error) {
 		return
 	}
 	a.shell.Designs = items
+	a.syncShellExperiments()
 	if id := os.Getenv("ASTERLAB_DESIGN_ID"); id != "" {
 		for _, item := range items {
 			if item.ID == id {
@@ -2478,6 +3248,223 @@ func (a *app) applyDesigns(items []shell.DesignItem, err error) {
 				break
 			}
 		}
+	}
+}
+
+func (a *app) syncShellExperiments() {
+	if a.shell == nil {
+		return
+	}
+	today := time.Now().Format("2006-01-02")
+	if strings.TrimSpace(a.shell.TodayDate) == "" {
+		a.shell.TodayDate = today
+	}
+	if strings.TrimSpace(a.shell.SelectedDate) == "" {
+		a.shell.SelectedDate = a.shell.TodayDate
+	}
+	if a.designCache == nil {
+		a.designCache = map[string]runs.AsterDocSnapshot{}
+	}
+	if a.designDoc != nil && a.designDoc.DesignID != "" {
+		a.designCache[a.designDoc.DesignID] = *a.designDoc
+	}
+	runByDesign := map[string]runs.RunSummary{}
+	for _, r := range a.runSummaries {
+		if r.DesignID == "" {
+			continue
+		}
+		if prev, ok := runByDesign[r.DesignID]; !ok || r.UpdatedAt >= prev.UpdatedAt {
+			runByDesign[r.DesignID] = r
+		}
+	}
+	if a.snap.RunID != "" && a.snap.DesignID != "" {
+		runByDesign[a.snap.DesignID] = runs.RunSummary{
+			RunID:     a.snap.RunID,
+			DesignID:  a.snap.DesignID,
+			Title:     a.snap.Title,
+			Status:    a.snap.Status,
+			UpdatedAt: time.Now().Format("2006-01-02"),
+		}
+	}
+	seenDesigns := map[string]bool{}
+	seenRuns := map[string]bool{}
+	exps := make([]shell.ExperimentItem, 0, len(a.shell.Designs)+len(a.runSummaries))
+	for i := range a.shell.Designs {
+		d := &a.shell.Designs[i]
+		seenDesigns[d.ID] = true
+		docSnap, ok := a.designCache[d.ID]
+		if !ok && a.designSvc != nil {
+			if loaded, err := a.designSvc.LoadAsterDoc(context.Background(), d.ID); err == nil && loaded.Source != "" {
+				docSnap = loaded
+				a.designCache[d.ID] = loaded
+			}
+		}
+		var meta asterdoc.ExperimentMeta
+		if strings.TrimSpace(docSnap.Source) != "" {
+			meta = asterdoc.InspectExperiment(docSnap.Source, nil)
+		} else {
+			meta = asterdoc.ExperimentMeta{
+				Title:            d.Title,
+				IncompleteReason: "待补充实验步骤与模块",
+				Summary:          "尚未编辑实验步骤",
+			}
+		}
+		stage := shell.StageDraft
+		if meta.Complete {
+			stage = shell.StageReady
+			d.Meta = "方案就绪"
+		} else {
+			d.Meta = "设计中"
+		}
+		activeRunID := ""
+		date := meta.ScheduledDate
+		if r, hasRun := runByDesign[d.ID]; hasRun {
+			seenRuns[r.RunID] = true
+			activeRunID = r.RunID
+			if strings.EqualFold(r.Status, "completed") {
+				stage = shell.StageCompleted
+				d.Meta = "已完成"
+			} else {
+				stage = shell.StageInProgress
+				d.Meta = "进行中"
+			}
+			if date == "" {
+				date = asterdoc.NormalizeDateYMD(r.UpdatedAt)
+			}
+		}
+		if date == "" {
+			date = a.shell.TodayDate
+		}
+		title := firstNonEmpty(meta.Title, d.Title, "新实验")
+		summary := meta.Summary
+		if stage == shell.StageInProgress {
+			summary = "实验执行中 · 点击继续记录"
+		} else if stage == shell.StageCompleted {
+			summary = "实验已完成 · 点击查看实验记录与 PDF"
+		}
+		gap := ""
+		if stage == shell.StageDraft {
+			gap = meta.IncompleteReason
+		}
+		exps = append(exps, shell.ExperimentItem{
+			ID:          d.ID,
+			DesignID:    d.ID,
+			ActiveRunID: activeRunID,
+			Title:       title,
+			Date:        date,
+			Stage:       stage,
+			Summary:     summary,
+			GapHint:     gap,
+			DurationMin: meta.Budget.TotalSpanSec / 60,
+			FileName:    filepath.Base(a.designDiskPath(d.ID)),
+		})
+	}
+	for _, r := range a.runSummaries {
+		if seenRuns[r.RunID] || (r.DesignID != "" && seenDesigns[r.DesignID]) {
+			continue
+		}
+		seenRuns[r.RunID] = true
+		stage := shell.StageInProgress
+		summary := "实验执行中 · 点击继续记录"
+		if strings.EqualFold(r.Status, "completed") {
+			stage = shell.StageCompleted
+			summary = "实验已完成 · 点击查看实验记录与 PDF"
+		}
+		date := asterdoc.NormalizeDateYMD(r.UpdatedAt)
+		if date == "" {
+			date = a.shell.TodayDate
+		}
+		exps = append(exps, shell.ExperimentItem{
+			ID:          r.RunID,
+			DesignID:    r.DesignID,
+			ActiveRunID: r.RunID,
+			Title:       firstNonEmpty(r.Title, "实验运行"),
+			Date:        date,
+			Stage:       stage,
+			Summary:     summary,
+		})
+	}
+	if a.snap.RunID != "" && !seenRuns[a.snap.RunID] && (a.snap.DesignID == "" || !seenDesigns[a.snap.DesignID]) {
+		stage := shell.StageInProgress
+		summary := "实验执行中 · 点击继续记录"
+		if strings.EqualFold(a.snap.Status, "completed") {
+			stage = shell.StageCompleted
+			summary = "实验已完成 · 点击查看实验记录与 PDF"
+		}
+		exps = append(exps, shell.ExperimentItem{
+			ID:          a.snap.RunID,
+			DesignID:    a.snap.DesignID,
+			ActiveRunID: a.snap.RunID,
+			Title:       firstNonEmpty(a.snap.Title, "实验运行"),
+			Date:        a.shell.TodayDate,
+			Stage:       stage,
+			Summary:     summary,
+		})
+	}
+	a.shell.Experiments = exps
+	a.syncShellOutlineAndPantry()
+	if a.vault != nil {
+		a.refreshVaultTreeAndCalendar()
+	}
+}
+
+func (a *app) syncShellOutlineAndPantry() {
+	if a.shell == nil {
+		return
+	}
+	var outline []shell.OutlineItem
+	if a.designDoc != nil && strings.TrimSpace(a.designDoc.Source) != "" {
+		if parsed, err := asterdoc.Parse(a.designDoc.Source); err == nil {
+			for _, m := range parsed.Modules {
+				if m.Kind != "step" {
+					continue
+				}
+				blocksCount := 0
+				if rawBlocks, ok := m.Data["blocks"].([]any); ok {
+					blocksCount = len(rawBlocks)
+				}
+				meta := ""
+				if blocksCount > 0 {
+					meta = fmt.Sprintf("%d 板块", blocksCount)
+				}
+				outline = append(outline, shell.OutlineItem{
+					ID:     m.ID,
+					Title:  firstNonEmpty(moduleString(m.Data, "title"), m.ID),
+					Meta:   meta,
+					Active: m.ID == a.designSelected,
+				})
+			}
+		}
+	}
+	a.shell.OutlineSteps = outline
+
+	var pantrySource []runs.PantryItem
+	if a.tools != nil && len(a.tools.Pantry.Items) > 0 {
+		pantrySource = a.tools.Pantry.Items
+	} else if a.runSvc != nil && !testing.Testing() && len(a.shell.PantryItems) == 0 {
+		if ledger, err := a.runSvc.ListPantry(context.Background(), runs.PantryQuery{}); err == nil {
+			pantrySource = ledger.Items
+		}
+	}
+	if len(pantrySource) > 0 {
+		qItems := make([]shell.QuickPantryItem, 0, len(pantrySource))
+		for _, p := range pantrySource {
+			loc := p.Location
+			if a.tools != nil {
+				if formatted := a.tools.FormatPantryDisplayLocation(p); formatted != "" {
+					loc = formatted
+				}
+			}
+			qItems = append(qItems, shell.QuickPantryItem{
+				ID:        p.ID,
+				Name:      p.Name,
+				Location:  loc,
+				Status:    p.Status,
+				ExpiresOn: p.ExpiresOn,
+				LotNumber: p.LabelCode,
+			})
+		}
+		a.shell.PantryItems = qItems
 	}
 }
 
@@ -2489,7 +3476,7 @@ func (a *app) selectDesign(id string) {
 		a.shell.Selected = id
 		return
 	}
-	if a.designer != nil && a.designer.Dirty {
+	if a.designDoc == nil && a.designer != nil && a.designer.Dirty {
 		a.pendingDesignID = id
 		a.confirmDesignSwitch = true
 		a.shell.Selected = a.designer.DesignID
@@ -2661,6 +3648,15 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 		DesignID: a.designDoc.DesignID, ExpectedRevision: a.designDoc.Revision,
 		OperationID: a.nextOp(), ActorID: os.Getenv("USERNAME"), Command: string(raw),
 	})
+	if err != nil && isConflictErr(err) {
+		if latest, loadErr := a.designSvc.LoadAsterDoc(context.Background(), a.designDoc.DesignID); loadErr == nil {
+			a.designDoc = &latest
+			updated, err = a.designSvc.ApplyAsterDocCommand(context.Background(), runs.AsterDocCommandInput{
+				DesignID: latest.DesignID, ExpectedRevision: latest.Revision,
+				OperationID: a.nextOp(), ActorID: os.Getenv("USERNAME"), Command: string(raw),
+			})
+		}
+	}
 	if err != nil {
 		a.designDocErr = state.MapError(err).Error()
 		a.designDocLoadFailed = false
@@ -2674,6 +3670,11 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 	a.designFuture = nil
 	a.resetAsterDraftHistory()
 	a.designDoc = &updated
+	if a.designCache == nil {
+		a.designCache = map[string]runs.AsterDocSnapshot{}
+	}
+	a.designCache[updated.DesignID] = updated
+	a.syncDesignDiskMirror(updated.DesignID, updated.Source)
 	a.designView = nil
 	a.designCanvas = nil
 	a.designCanvasSource = ""
@@ -2687,6 +3688,7 @@ func (a *app) applyDesignRaw(command map[string]any) bool {
 	a.designSubflow = nil
 	a.designSubflowParent = ""
 	a.refreshReadiness()
+	a.syncShellExperiments()
 	return true
 }
 
@@ -2704,6 +3706,15 @@ func (a *app) designUndo() {
 		ExpectedRevision: a.designDoc.Revision, OperationID: a.nextOp(),
 		ActorID: os.Getenv("USERNAME"),
 	})
+	if err != nil && isConflictErr(err) {
+		if latest, loadErr := a.designSvc.LoadAsterDoc(context.Background(), a.designDoc.DesignID); loadErr == nil {
+			updated, err = a.designSvc.SaveAsterDoc(context.Background(), runs.AsterDocSaveInput{
+				DesignID: latest.DesignID, Source: target.Source,
+				ExpectedRevision: latest.Revision, OperationID: a.nextOp(),
+				ActorID: os.Getenv("USERNAME"),
+			})
+		}
+	}
 	if err != nil {
 		a.designDocErr = state.MapError(err).Error()
 		a.designDocLoadFailed = false
@@ -2716,6 +3727,11 @@ func (a *app) designUndo() {
 	a.designDocLoadFailed = false
 	a.retryDesignDoc = nil
 	a.designDoc = &updated
+	if a.designCache == nil {
+		a.designCache = map[string]runs.AsterDocSnapshot{}
+	}
+	a.designCache[updated.DesignID] = updated
+	a.syncDesignDiskMirror(updated.DesignID, updated.Source)
 	a.designView = nil
 	a.designCanvas = nil
 	a.designCanvasSource = ""
@@ -2729,6 +3745,7 @@ func (a *app) designUndo() {
 	a.designSubflow = nil
 	a.designSubflowParent = ""
 	a.refreshReadiness()
+	a.syncShellExperiments()
 }
 
 func (a *app) designRedo() {
@@ -2745,6 +3762,15 @@ func (a *app) designRedo() {
 		ExpectedRevision: a.designDoc.Revision, OperationID: a.nextOp(),
 		ActorID: os.Getenv("USERNAME"),
 	})
+	if err != nil && isConflictErr(err) {
+		if latest, loadErr := a.designSvc.LoadAsterDoc(context.Background(), a.designDoc.DesignID); loadErr == nil {
+			updated, err = a.designSvc.SaveAsterDoc(context.Background(), runs.AsterDocSaveInput{
+				DesignID: latest.DesignID, Source: target.Source,
+				ExpectedRevision: latest.Revision, OperationID: a.nextOp(),
+				ActorID: os.Getenv("USERNAME"),
+			})
+		}
+	}
 	if err != nil {
 		a.designDocErr = state.MapError(err).Error()
 		a.designDocLoadFailed = false
@@ -2757,6 +3783,11 @@ func (a *app) designRedo() {
 	a.designDocLoadFailed = false
 	a.retryDesignDoc = nil
 	a.designDoc = &updated
+	if a.designCache == nil {
+		a.designCache = map[string]runs.AsterDocSnapshot{}
+	}
+	a.designCache[updated.DesignID] = updated
+	a.syncDesignDiskMirror(updated.DesignID, updated.Source)
 	a.designView = nil
 	a.designCanvas = nil
 	a.designCanvasSource = ""
@@ -2770,6 +3801,7 @@ func (a *app) designRedo() {
 	a.designSubflow = nil
 	a.designSubflowParent = ""
 	a.refreshReadiness()
+	a.syncShellExperiments()
 }
 
 func (a *app) createRunFromDesignDoc() {
@@ -2808,8 +3840,65 @@ func (a *app) createRunFromDesignDoc() {
 		a.ws.State = runui.StateReady
 	}
 	a.loadFrozenAsterDoc()
+	a.refreshRunWorkspace()
+	a.rememberRun(run)
+	a.syncRunEnvelopeMirror()
+	a.syncShellExperiments()
 	a.prepareGrid()
 	a.shell.Page = shell.Run
+	if a.shell != nil {
+		a.shell.OpenExperimentTab(shell.ExperimentItem{
+			ID:          firstNonEmpty(run.DesignID, run.RunID),
+			DesignID:    run.DesignID,
+			ActiveRunID: run.RunID,
+			Title:       firstNonEmpty(run.Title, "实验运行"),
+			Stage:       shell.StageInProgress,
+		}, shell.Run)
+	}
+	a.saveSession()
+}
+
+func findTargetDesignStepID(doc *asterdoc.Document, selectedID string) string {
+	if doc == nil {
+		return ""
+	}
+	for _, m := range doc.Modules {
+		if m.Kind == "step" && m.ID == selectedID && moduleString(m.Data, "execution") != "organizational" {
+			return m.ID
+		}
+	}
+	for _, m := range doc.Modules {
+		if m.Kind == "step" && moduleString(m.Data, "execution") != "organizational" {
+			return m.ID
+		}
+	}
+	return ""
+}
+
+func (a *app) insertAsterBlockToDesign(blk map[string]any) {
+	if len(blk) == 0 || a.designDoc == nil {
+		if a.shell != nil {
+			a.shell.Page = shell.Design
+		}
+		return
+	}
+	doc, err := asterdoc.Parse(a.designDoc.Source)
+	if err != nil {
+		return
+	}
+	targetStepID := findTargetDesignStepID(doc, a.designSelected)
+	if targetStepID == "" {
+		return
+	}
+	if a.applyDesignRaw(map[string]any{
+		"type": "insert_step_block", "stepId": targetStepID, "index": -1, "block": blk,
+	}) {
+		a.designSelected = targetStepID
+		a.designTab = 0
+		if a.shell != nil {
+			a.shell.Page = shell.Design
+		}
+	}
 }
 
 func (a *app) applyToolInstanceToDesign(inst blocks.Instance) {
@@ -2823,21 +3912,7 @@ func (a *app) applyToolInstanceToDesign(inst blocks.Instance) {
 	if err != nil {
 		return
 	}
-	targetStepID := ""
-	for _, m := range doc.Modules {
-		if m.Kind == "step" && m.ID == a.designSelected && moduleString(m.Data, "execution") != "organizational" {
-			targetStepID = m.ID
-			break
-		}
-	}
-	if targetStepID == "" {
-		for _, m := range doc.Modules {
-			if m.Kind == "step" && moduleString(m.Data, "execution") != "organizational" {
-				targetStepID = m.ID
-				break
-			}
-		}
-	}
+	targetStepID := findTargetDesignStepID(doc, a.designSelected)
 	if targetStepID == "" {
 		return
 	}
@@ -3134,6 +4209,233 @@ func (a *app) applyAsterPlateToDesign(source, plateID string) {
 	}
 }
 
+func (a *app) pantryMetaPath() string {
+	dir := workspaceDataDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "pantry-meta.json")
+}
+
+func (a *app) pantryManualsDir() string {
+	dir := workspaceDataDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "pantry-manuals")
+}
+
+func (a *app) pantryBoxesPath() string {
+	dir := workspaceDataDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "pantry-boxes.json")
+}
+
+func (a *app) loadPantryBoxes() ([]tools.PantryBox, error) {
+	path := a.pantryBoxesPath()
+	if path == "" {
+		return []tools.PantryBox{}, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []tools.PantryBox{}, nil
+		}
+		return nil, err
+	}
+	var out []tools.PantryBox
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []tools.PantryBox{}
+	}
+	return out, nil
+}
+
+func (a *app) savePantryBoxes(boxes []tools.PantryBox) error {
+	path := a.pantryBoxesPath()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(boxes, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		return err
+	}
+	a.syncShellOutlineAndPantry()
+	return nil
+}
+
+func (a *app) loadPantryMeta() (map[string]tools.PantryItemMeta, error) {
+	path := a.pantryMetaPath()
+	if path == "" {
+		return map[string]tools.PantryItemMeta{}, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]tools.PantryItemMeta{}, nil
+		}
+		return nil, err
+	}
+	var out map[string]tools.PantryItemMeta
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = map[string]tools.PantryItemMeta{}
+	}
+	return out, nil
+}
+
+func (a *app) savePantryMeta(meta map[string]tools.PantryItemMeta) error {
+	path := a.pantryMetaPath()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0644)
+}
+
+func sanitizePantryToken(s string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "item"
+	}
+	return out
+}
+
+func (a *app) pickPantryManualFiles() ([]string, error) {
+	home, _ := os.UserHomeDir()
+	return mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:      mygo.FocusedWindow(),
+		Title:       "上传试剂说明书 / COA / SDS",
+		DefaultPath: home,
+		Multiple:    true,
+		Filters: []mygo.FileFilter{
+			{Name: "试剂说明书与文档", Extensions: []string{"pdf", "png", "jpg", "jpeg", "webp", "doc", "docx", "xls", "xlsx", "csv", "txt", "md"}},
+		},
+	})
+}
+
+func (a *app) pickPantryStickerImage() (string, error) {
+	home, _ := os.UserHomeDir()
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:      mygo.FocusedWindow(),
+		Title:       "选择自定义容器贴纸图片",
+		DefaultPath: home,
+		Filters: []mygo.FileFilter{
+			{Name: "图像文件", Extensions: []string{"png", "jpg", "jpeg"}},
+		},
+	})
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
+}
+
+func (a *app) importPantryFile(itemKey, srcPath string) (storedRel, fileName string, sizeBytes int64, err error) {
+	baseDir := a.pantryManualsDir()
+	if baseDir == "" {
+		return srcPath, filepath.Base(srcPath), 0, nil
+	}
+	folder := sanitizePantryToken(itemKey)
+	dstDir := filepath.Join(baseDir, folder)
+	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		return "", "", 0, err
+	}
+	fileName = filepath.Base(srcPath)
+	ext := filepath.Ext(fileName)
+	stem := strings.TrimSuffix(fileName, ext)
+	candidate := fileName
+	for idx := 1; ; idx++ {
+		if _, statErr := os.Stat(filepath.Join(dstDir, candidate)); os.IsNotExist(statErr) {
+			break
+		}
+		candidate = fmt.Sprintf("%s_%d%s", stem, idx, ext)
+	}
+	dstPath := filepath.Join(dstDir, candidate)
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return "", "", 0, err
+	}
+	defer in.Close()
+	out, err := os.Create(dstPath)
+	if err != nil {
+		return "", "", 0, err
+	}
+	written, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return "", "", 0, copyErr
+	}
+	if closeErr != nil {
+		return "", "", 0, closeErr
+	}
+	return filepath.ToSlash(filepath.Join(folder, candidate)), fileName, written, nil
+}
+
+func (a *app) resolvePantryFile(storedRel string) string {
+	storedRel = strings.TrimSpace(storedRel)
+	if storedRel == "" {
+		return ""
+	}
+	if filepath.IsAbs(storedRel) {
+		return storedRel
+	}
+	baseDir := a.pantryManualsDir()
+	if baseDir == "" {
+		return storedRel
+	}
+	cleaned := filepath.Clean(filepath.FromSlash(storedRel))
+	if strings.HasPrefix(cleaned, "..") {
+		return ""
+	}
+	return filepath.Join(baseDir, cleaned)
+}
+
+func (a *app) openPantryLocalFile(absPath string) error {
+	absPath = strings.TrimSpace(absPath)
+	if absPath == "" {
+		return fmt.Errorf("未找到说明书文件路径")
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		return fmt.Errorf("说明书文件不存在：%s", filepath.Base(absPath))
+	}
+	return mygo.Shell.OpenPath(absPath)
+}
+
+func (a *app) openPantryExternalURL(rawURL string) error {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("仅支持 http:// 或 https:// 协议链接")
+	}
+	return mygo.Shell.OpenExternal(u.String())
+}
+
 func (a *app) newToolsWorkspace() *tools.Workspace {
 	return tools.New(tools.Callbacks{
 		UseInDesigner: func(inst blocks.Instance) {
@@ -3141,6 +4443,37 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 		},
 		UseAsterPlate: func(source, plateID string) {
 			a.applyAsterPlateToDesign(source, plateID)
+		},
+		InsertAsterBlock: func(blk map[string]any) {
+			a.insertAsterBlockToDesign(blk)
+		},
+		ListSOPs: func() []tools.SOPEntry {
+			return []tools.SOPEntry{
+				{
+					ID: "sop-rt-qpcr", Title: "RT-qPCR 多靶点相对定量", Category: "分子生物学",
+					Summary: "96 孔三复孔 × 靶基因 + SYBR MasterMix 自动配平", Source: rtQpcrAsterDoc,
+				},
+				{
+					ID: "sop-huvec", Title: "HUVEC 水凝胶血管成管测定", Category: "细胞与组织工程",
+					Summary: "12 孔水凝胶涂覆 + VEGF 梯度稀释与双时刻计数", Source: huvecAsterDoc,
+				},
+				{
+					ID: "sop-cfu", Title: "梯度稀释涂板菌落计数 (CFU)", Category: "微生物学",
+					Summary: "连续 10 倍稀释、6 孔涂布计数与自动 CFU/mL 公式", Source: cfuAsterDoc,
+				},
+				{
+					ID: "sop-iz", Title: "90 mm 琼脂平皿四象限抑菌圈测定", Category: "微生物与抗菌",
+					Summary: "CLSI 标准物理比例 SVG 四象限排布 + 游标卡尺双径均值", Source: inhibitionZoneAsterDoc,
+				},
+			}
+		},
+		ExportSOPPDF: func(title, source string) {
+			if doc, err := asterdoc.Parse(source); err == nil {
+				a.startDocumentPDFExport(nil, title, "", "", "", doc)
+			}
+		},
+		CreateDesignFromSOP: func(title, source string) {
+			a.createAsterDocDesign(source, title)
 		},
 		LoadPlateHistory: func() ([]tools.PlateHistoryEntry, error) {
 			return a.loadPlateHistory()
@@ -3175,6 +4508,40 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 				return runs.PantryLabels{}, fmt.Errorf("运行服务不可用")
 			}
 			return a.runSvc.ExportPantryLabels(context.Background(), runs.PantryQuery{})
+		},
+		LoadPantryMeta: func() (map[string]tools.PantryItemMeta, error) {
+			return a.loadPantryMeta()
+		},
+		SavePantryMeta: func(meta map[string]tools.PantryItemMeta) error {
+			err := a.savePantryMeta(meta)
+			if err == nil {
+				a.syncShellOutlineAndPantry()
+			}
+			return err
+		},
+		LoadPantryBoxes: func() ([]tools.PantryBox, error) {
+			return a.loadPantryBoxes()
+		},
+		SavePantryBoxes: func(boxes []tools.PantryBox) error {
+			return a.savePantryBoxes(boxes)
+		},
+		PickManualFiles: func() ([]string, error) {
+			return a.pickPantryManualFiles()
+		},
+		PickStickerImage: func() (string, error) {
+			return a.pickPantryStickerImage()
+		},
+		ImportPantryFile: func(itemKey, srcPath string) (string, string, int64, error) {
+			return a.importPantryFile(itemKey, srcPath)
+		},
+		ResolvePantryFile: func(storedRel string) string {
+			return a.resolvePantryFile(storedRel)
+		},
+		OpenLocalFile: func(absPath string) error {
+			return a.openPantryLocalFile(absPath)
+		},
+		OpenExternalURL: func(rawURL string) error {
+			return a.openPantryExternalURL(rawURL)
 		},
 	})
 }
@@ -3239,17 +4606,206 @@ func main() {
 	}
 	a.syncErr = initErr
 	log.Printf("native services: run=%v(%v) design=%v(%v) time-budget=%v(%v)", runSvc != nil, runErr, designSvc != nil, designErr, timeBudgetSvc != nil, timeBudgetErr)
+	today := time.Now().Format("2006-01-02")
 	a.shell = &shell.Shell{
-		Project:       "",
-		Page:          shell.Project,
-		Error:         initErr,
-		OnSelect:      func(id string) { a.selectDesign(id) },
-		OnRunSelect:   func(id string) { a.selectRun(id) },
-		OnTimerSelect: func(id string) { a.selectRun(id) },
-		OnCreate:      func() { a.newDesignOpen = true },
-		OnImport:      func() { a.importOpen = true },
-		OnPage:        func(p shell.Page) { a.shell.Page = p; a.saveSession() },
-		Content:       func(c *ui.Context) { contentPage(c, a) },
+		Project:      "",
+		Page:         shell.Project,
+		Error:        initErr,
+		TodayDate:    today,
+		SelectedDate: today,
+		OnSelect:     func(id string) { a.selectDesign(id) },
+		OnRunSelect:  func(id string) { a.selectRun(id) },
+		OnTimerSelect: func(id string) {
+			a.selectRun(id)
+		},
+		OnCreate: func() {
+			targetDate := ""
+			if a.shell != nil {
+				targetDate = a.shell.SelectedDate
+			}
+			a.openNewExperimentDialog("", targetDate)
+		},
+		OnCreateForDate: func(dateYMD string) {
+			a.openNewExperimentDialog("", dateYMD)
+		},
+		OnOpenTemplatePicker: func(dateYMD string) {
+			a.openNewExperimentDialog("", dateYMD)
+		},
+		OnVaultCreateFile: func(folderRel, dateYMD string) {
+			a.openNewExperimentDialog(folderRel, dateYMD)
+		},
+		OnVaultCreateFolder: func(parentRel, name string) {
+			if a.vault != nil {
+				if _, err := a.vault.CreateFolder(parentRel, name); err != nil {
+					a.syncErr = fmt.Sprintf("新建项目文件夹失败：%v", err)
+				} else {
+					a.refreshVaultTreeAndCalendar()
+				}
+			}
+		},
+		OnVaultRename: func(relPath, newName string) {
+			if a.vault == nil {
+				return
+			}
+			newRel, err := a.vault.Rename(relPath, newName)
+			if err != nil {
+				a.syncErr = fmt.Sprintf("重命名失败：%v", err)
+				return
+			}
+			if a.docStore != nil {
+				a.docStore.RenameKey(relPath, newRel)
+			}
+			if a.shell != nil {
+				a.shell.SyncFileRename(relPath, newRel, newName)
+			}
+			a.refreshVaultTreeAndCalendar()
+			a.saveVaultWorkspace()
+		},
+		OnVaultMove: func(srcRel, destFolderRel string) {
+			a.moveVaultFile(srcRel, destFolderRel)
+		},
+		OnVaultDuplicate: func(relPath, targetDate string) {
+			if a.vault == nil {
+				return
+			}
+			if dup, err := a.vault.DuplicateFile(relPath, targetDate); err != nil {
+				a.syncErr = fmt.Sprintf("创建副本失败：%v", err)
+			} else {
+				a.refreshVaultTreeAndCalendar()
+				a.openVaultFileInActivePane(dup.RelPath, dup.Title)
+			}
+		},
+		OnVaultSaveTemplate: func(relPath string) {
+			if a.vault == nil {
+				return
+			}
+			stem := strings.TrimSuffix(filepath.Base(relPath), ".asterml")
+			if _, err := a.vault.SaveAsTemplate(relPath, stem); err != nil {
+				a.syncErr = fmt.Sprintf("保存为模板失败：%v", err)
+			} else {
+				a.refreshVaultTreeAndCalendar()
+			}
+		},
+		OnVaultDelete: func(relPath string) {
+			a.deleteVaultFile(relPath)
+		},
+		OnSetExperimentDate: func(relPath, dateYMD string) {
+			if a.vault == nil || a.docStore == nil {
+				return
+			}
+			if ld, err := a.docStore.Open(relPath); err == nil {
+				next := asterdoc.SetFrontmatterMetadata(ld.Source, "", dateYMD, "")
+				_ = ld.ApplyEdit(next)
+				a.refreshVaultTreeAndCalendar()
+			}
+		},
+		OnRevealInExplorer: func(relPath string) {
+			a.revealPathInOS(relPath)
+		},
+		OnSwitchVaultPath: func(newPath string) {
+			a.switchVaultRoot(newPath)
+		},
+		OnToggleHideAssets: func(hide bool) {
+			if a.vault != nil {
+				a.vault.Config.HideAssetsInTree = hide
+				_ = a.vault.SaveConfig()
+			}
+		},
+		OnSettingsChanged: func() {
+			a.saveVaultSettingsFromShell()
+		},
+		OnUndo: func() { a.undoActiveLiveDoc() },
+		OnRedo: func() { a.redoActiveLiveDoc() },
+		OnOpenExperiment: func(item shell.ExperimentItem) {
+			if item.FilePath != "" {
+				a.openVaultFileInActivePane(item.FilePath, item.Title)
+				return
+			}
+			if item.DesignID != "" {
+				a.selectDesign(item.DesignID)
+			}
+		},
+		OnActivateTab: func(tab shell.WorkspaceTab) {
+			a.saveVaultWorkspace()
+		},
+		OnSelectOutlineStep: func(stepID string) {
+			a.designSelected = stepID
+		},
+		OnLocatePantry: func(itemID string) {
+			if a.tools == nil {
+				a.tools = a.newToolsWorkspace()
+			}
+			a.tools.LocatePantryItem(itemID)
+			if a.shell != nil {
+				a.shell.OpenPantryTab()
+			}
+		},
+		RenderTabContent: func(c *ui.Context, pane *shell.PaneNode, tab shell.WorkspaceTab) {
+			a.renderVaultTabContent(c, pane, tab)
+		},
+		RenderPantryContent: func(c *ui.Context) {
+			a.renderStandalonePantry(c)
+		},
+		RenderOverlays: func(c *ui.Context) {
+			a.pollPDFExport(c)
+			a.pollTimers()
+			a.renderSyncErrorBanner(c)
+			a.renderVaultNewExperimentDialog(c)
+		},
+		PaletteCommands: []shell.PaletteCommand{
+			{
+				ID:       "new-experiment",
+				Title:    "新建实验",
+				Subtitle: "选择项目文件夹、日期与模板创建 .asterml 实验文档",
+				Shortcut: "Ctrl+N",
+				OnRun: func() {
+					targetDate := ""
+					if a.shell != nil {
+						targetDate = a.shell.SelectedDate
+					}
+					a.openNewExperimentDialog("", targetDate)
+				},
+			},
+			{
+				ID:       "export-pdf",
+				Title:    "导出当前实验 PDF",
+				Subtitle: "按组件级 A4 版式导出当前聚焦的实验文档",
+				OnRun: func() {
+					if a.shell == nil || a.docStore == nil || a.vault == nil {
+						return
+					}
+					if tab := a.shell.ActiveTab(); tab != nil && tab.Kind == shell.TabFile && tab.FilePath != "" {
+						if ld, err := a.docStore.Open(tab.FilePath); err == nil && ld.Parsed != nil {
+							a.startDocumentPDFExport(nil, firstNonEmpty(tab.Title, "实验方案"), "", "", a.vault.Root, ld.Parsed)
+						}
+					}
+				},
+			},
+			{
+				ID:       "open-pantry",
+				Title:    "打开储藏室货架",
+				Subtitle: "管理试剂效期、货架位置与说明书附件",
+				OnRun: func() {
+					if a.tools == nil {
+						a.tools = a.newToolsWorkspace()
+					}
+					a.shell.OpenPantryTab()
+				},
+			},
+			{
+				ID:       "open-calc",
+				Title:    "打开右侧速算与计时面板",
+				Subtitle: "摩尔配液 · C1·V1=C2·V2 稀释 · 计时器",
+				OnRun: func() {
+					if a.shell != nil {
+						a.shell.SetRightDrawer(true, 1)
+					}
+				},
+			},
+		},
+		OnImport: func() { a.importOpen = true },
+		OnPage:   func(p shell.Page) { a.shell.Page = p; a.saveVaultWorkspace() },
+		Content:  func(c *ui.Context) { contentPage(c, a) },
 	}
 
 	// runui workspace.
@@ -3613,10 +5169,14 @@ func main() {
 		})
 	})
 	mygo.App.WhenReady(func() {
+		if err := a.initVaultWorkspace(""); err != nil {
+			a.syncErr = err.Error()
+		}
 		a.shell.NewWindow()
 		a.windowReady = true
 		a.shell.Quit()
 		a.preload()
+		a.startExternalSyncLoop()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
@@ -3857,19 +5417,126 @@ func (a *app) renderSyncErrorBanner(c *ui.Context) {
 	})
 }
 
+func (a *app) renderSecondaryTabContent(c *ui.Context, tab shell.WorkspaceTab) {
+	tok := theme.GetTokens(c.Theme())
+	if tab.Kind == shell.TabTools {
+		toolsPage(c, a)
+		return
+	}
+	src := ""
+	rev := uint64(0)
+	if a.designDoc != nil && a.designDoc.DesignID == tab.DesignID {
+		src = a.designDoc.Source
+		rev = a.designDoc.Revision
+	} else if cached, ok := a.designCache[tab.DesignID]; ok {
+		src = cached.Source
+		rev = cached.Revision
+	} else if a.designSvc != nil && tab.DesignID != "" {
+		if loaded, err := a.designSvc.LoadAsterDoc(context.Background(), tab.DesignID); err == nil {
+			if a.designCache == nil {
+				a.designCache = map[string]runs.AsterDocSnapshot{}
+			}
+			a.designCache[tab.DesignID] = loaded
+			src = loaded.Source
+			rev = loaded.Revision
+		}
+	}
+	if strings.TrimSpace(src) == "" {
+		ui.Column(c).Fill().Center().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing8)).Children(func() {
+			components.Text(c, tab.Title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+			components.Text(c, "暂无可对照的设计内容，点击左侧工作区可继续编辑。").
+				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+		})
+		return
+	}
+	cacheKey := fmt.Sprintf("%s|%d", tab.DesignID, rev)
+	if a.secondaryViews == nil {
+		a.secondaryViews = map[string]*asterdoc.View{}
+	}
+	v := a.secondaryViews[cacheKey]
+	if v == nil {
+		doc, err := asterdoc.Parse(src)
+		if err != nil {
+			ui.Column(c).Fill().Center().Padding(float32(tok.Spacing16)).Children(func() {
+				ui.Text(c, "方案源码存在语法待修复："+err.Error()).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText)
+			})
+			return
+		}
+		baseDir := ""
+		if p := a.designDiskPath(tab.DesignID); p != "" {
+			baseDir = filepath.Dir(p)
+		}
+		v = &asterdoc.View{
+			Registry:    asterdoc.BuiltinRegistry(),
+			Doc:         doc,
+			Mode:        asterdoc.ModeProtocol,
+			ReadOnly:    true,
+			BaseDir:     baseDir,
+			AsyncDecode: a.windowReady,
+			OnAsyncInvalidate: func() {
+				if a.shell != nil {
+					a.shell.Invalidate()
+				}
+			},
+		}
+		a.secondaryViews[cacheKey] = v
+	}
+	ui.Scroll(c).Fill().Children(func() {
+		v.RenderDocumentSheet(c)
+	})
+	v.RenderPlateOverlay(c)
+}
+
+func (a *app) renderExperimentMissingRunPrompt(c *ui.Context, tab shell.WorkspaceTab) {
+	tok := theme.GetTokens(c.Theme())
+	ui.Column(c).Fill().Center().Padding(float32(tok.Spacing24)).Gap(float32(tok.Spacing12)).Children(func() {
+		ui.Text(c, fmt.Sprintf("「%s」尚未开始实验运行", tab.Title)).
+			FontSize(float32(tok.TextPage)).Bold().TextColor(tok.Text)
+		ui.Text(c, "当前实验尚无冻结的 Run 实例；你可以直接冻结当前方案启动运行，或先返回「设计」完善步骤。").
+			FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			if components.Button(c, "开始实验", components.ButtonPrimary).Clicked() {
+				if tab.DesignID != "" && (a.designDoc == nil || a.designDoc.DesignID != tab.DesignID) {
+					a.selectDesign(tab.DesignID)
+				}
+				a.createRunFromDesignDoc()
+			}
+			if components.Button(c, "返回设计", components.ButtonSecondary).Clicked() {
+				a.shell.SetActiveExperimentStage(shell.Design)
+			}
+		})
+	})
+}
+
 func contentPage(c *ui.Context, a *app) {
 	a.pollPDFExport(c)
 	a.pollTimers()
 	ui.Column(c).Fill().Children(func() {
 		a.renderSyncErrorBanner(c)
 		ui.Box(c).Grow(1).MinHeight(0).FillWidth().Children(func() {
+			var activeTab *shell.WorkspaceTab
+			if a.shell != nil {
+				activeTab = a.shell.ActiveTab()
+			}
+			missingRun := (a.shell.Page == shell.Run || a.shell.Page == shell.Notebook) &&
+				activeTab != nil && activeTab.Kind == shell.TabExperiment && activeTab.DesignID != "" &&
+				((activeTab.RunID == "" && a.snap.DesignID != activeTab.DesignID) ||
+					(activeTab.RunID != "" && a.snap.RunID != activeTab.RunID))
+			if missingRun {
+				a.renderExperimentMissingRunPrompt(c, *activeTab)
+				return
+			}
 			switch a.shell.Page {
 			case shell.Design:
 				designPage(c, a)
 			case shell.Run:
 				runPage(c, a)
 			case shell.Protocol:
-				protocolPage(c, a)
+				if a.tools == nil {
+					a.tools = a.newToolsWorkspace()
+				}
+				a.tools.Active = tools.ToolSOP
+				tools.View(c, a.tools)
 			case shell.Notebook:
 				notebookPage(c, a)
 			case shell.Tools:
@@ -3985,7 +5652,7 @@ func batchPage(c *ui.Context, a *app) {
 	header := func() {
 		ui.Row(c).FillWidth().Padding(12, 16).AlignItems(ui.Center).Gap(12).
 			Background(tokens.CardBackground).Border(1, tokens.CardBorder).Children(func() {
-			if components.Button(c, "← 返回 Notebook", components.ButtonGhost).Clicked() {
+			if components.Button(c, "← 返回实验记录", components.ButtonGhost).Clicked() {
 				a.batchView = ""
 			}
 			ui.Text(c, "原始读数").FontSize(18).Bold().TextColor(t.Text)
@@ -4130,7 +5797,7 @@ func (a *app) renderPreflight(c *ui.Context) {
 	components.Dialog(c, &open, components.DialogOptions{Label: "创建运行前检查"}, func(panel ui.Element) {
 		panel.Width(560).Children(func() {
 			ui.Text(c, "创建运行前检查").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-			ui.Text(c, fmt.Sprintf("方案版本 #%d · 运行前完整性核查", a.designDoc.Revision)).
+			ui.Text(c, "开始实验前完整性核查").
 				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			if a.readinessLoading {
 				ui.Text(c, "校验中 · 正在核查分组、参数与步骤完整性…").FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
@@ -4138,7 +5805,7 @@ func (a *app) renderPreflight(c *ui.Context) {
 					if components.Button(c, "返回修改", components.ButtonSecondary).Clicked() {
 						a.preflightOpen = false
 					}
-					create := components.Button(c, "创建 Run", components.ButtonPrimary)
+					create := components.Button(c, "开始实验", components.ButtonPrimary)
 					create.Disabled(true)
 				})
 				return
@@ -4183,7 +5850,7 @@ func (a *app) renderPreflight(c *ui.Context) {
 				if components.Button(c, "返回修改", components.ButtonSecondary).Clicked() {
 					a.preflightOpen = false
 				}
-				create := components.Button(c, "创建 Run", components.ButtonPrimary)
+				create := components.Button(c, "开始实验", components.ButtonPrimary)
 				create.Disabled(!canCreate)
 				if create.Clicked() && canCreate {
 					a.preflightOpen = false
@@ -4203,9 +5870,17 @@ func (a *app) renderNewDesignDialog(c *ui.Context) {
 	}
 	tok := theme.GetTokens(c.Theme())
 	open := a.newDesignOpen
-	components.Dialog(c, &open, components.DialogOptions{Label: "新建设计"}, func(panel ui.Element) {
+	createTemplate := func(src, title string) {
+		if strings.TrimSpace(a.newDesignTargetDate) != "" {
+			src = asterdoc.StampScheduledDate(src, a.newDesignTargetDate)
+			a.newDesignTargetDate = ""
+		}
+		a.newDesignOpen = false
+		a.createAsterDocDesign(src, title)
+	}
+	components.Dialog(c, &open, components.DialogOptions{Label: "加入新实验"}, func(panel ui.Element) {
 		panel.Width(580).Gap(float32(tok.Spacing12)).Children(func() {
-			ui.Text(c, "新建设计").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+			ui.Text(c, "加入新实验").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 			ui.Text(c, "从空白实验开始自由组合步骤模块，或选用通用模块示范方案。").
 				FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
 			ui.Box(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
@@ -4213,40 +5888,36 @@ func (a *app) renderNewDesignDialog(c *ui.Context) {
 				ui.Text(c, "典型通用模块方案").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 				ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 					if components.Button(c, "抑菌圈实验（四象限SVG）", components.ButtonSecondary).Clicked() {
-						a.newDesignOpen = false
-						a.createAsterDocDesign(inhibitionZoneAsterDoc, "抑菌圈定量实验")
+						createTemplate(inhibitionZoneAsterDoc, "抑菌圈定量实验")
 					}
 					if components.Button(c, "涂板菌落计数（CFU）", components.ButtonSecondary).Clicked() {
-						a.newDesignOpen = false
-						a.createAsterDocDesign(cfuAsterDoc, "梯度稀释涂板 CFU")
+						createTemplate(cfuAsterDoc, "梯度稀释涂板 CFU")
 					}
 					if components.Button(c, "HUVEC 水凝胶成管（12孔板）", components.ButtonSecondary).Clicked() {
-						a.newDesignOpen = false
-						a.createAsterDocDesign(huvecAsterDoc, "HUVEC 水凝胶成管")
+						createTemplate(huvecAsterDoc, "HUVEC 水凝胶成管")
 					}
 					if components.Button(c, "RT-qPCR 多靶点复孔（96孔板）", components.ButtonSecondary).Clicked() {
-						a.newDesignOpen = false
-						a.createAsterDocDesign(rtQpcrAsterDoc, "RT-qPCR 多靶点定量实验")
+						createTemplate(rtQpcrAsterDoc, "RT-qPCR 多靶点定量实验")
 					}
 					if components.Button(c, "CCK-8 骨架", components.ButtonSecondary).Clicked() {
-						a.newDesignOpen = false
-						a.createAsterDocDesign(starterAsterDoc, "CCK-8 实验")
+						createTemplate(starterAsterDoc, "CCK-8 实验")
 					}
 				})
 			})
 			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
 				if components.Button(c, "取消", components.ButtonGhost).Clicked() {
 					a.newDesignOpen = false
+					a.newDesignTargetDate = ""
 				}
 				if components.Button(c, "空白实验", components.ButtonPrimary).Clicked() {
-					a.newDesignOpen = false
-					a.createAsterDocDesign(blankAsterDoc, "新实验")
+					createTemplate(blankAsterDoc, "新实验")
 				}
 			})
 		})
 	})
 	if !open {
 		a.newDesignOpen = false
+		a.newDesignTargetDate = ""
 	}
 }
 
@@ -4325,7 +5996,7 @@ func (a *app) renderImportDialog(c *ui.Context) {
 	components.Dialog(c, &open, components.DialogOptions{Label: "导入 AsterML"}, func(panel ui.Element) {
 		panel.Width(560).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Text(c, "导入 AsterML 设计").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-			ui.Text(c, "选择 .asterml 或 .md 实验方案文件，导入后将自动核查完整性并生成新版本。").
+			ui.Text(c, "选择 .asterml 或 .md 实验方案文件，导入后可立即在设计工作台实时编辑。").
 				FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
 			ui.Text(c, "文件路径").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			ui.TextInput(c, &a.importPath).Placeholder("D:\\...\\experiment.asterml").FillWidth()
@@ -4350,8 +6021,13 @@ func (a *app) renderImportDialog(c *ui.Context) {
 }
 
 func (a *app) importAsterDocFile() {
-	if a.designSvc == nil || len(a.projects) == 0 {
-		a.importErr = "设计服务或项目不可用"
+	if a.designSvc == nil {
+		a.importErr = "设计服务不可用"
+		return
+	}
+	projectID, err := a.ensureDefaultProjectID()
+	if err != nil {
+		a.importErr = err.Error()
 		return
 	}
 	path := strings.TrimSpace(a.importPath)
@@ -4364,27 +6040,57 @@ func (a *app) importAsterDocFile() {
 		a.importErr = "无法读取文件：" + err.Error()
 		return
 	}
+	rawStr := string(raw)
+	designSource := rawStr
+	if env, envErr := asterdoc.ParseEnvelope(rawStr); envErr == nil && strings.TrimSpace(env.DesignSource) != "" {
+		designSource = env.DesignSource
+	}
 	title := strings.TrimSpace(a.importTitle)
 	if title == "" {
 		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 	doc, err := a.designSvc.CreateAsterDocDesign(context.Background(), runs.AsterDocCreateInput{
-		ProjectID: a.projects[0].ProjectID, Title: title, Source: string(raw),
+		ProjectID: projectID, Title: title, Source: designSource,
 		OperationID: a.nextOp(), ActorID: os.Getenv("USERNAME"),
 	})
 	if err != nil {
 		a.importErr = state.MapError(err).Error()
 		return
 	}
+	if a.designPaths == nil {
+		a.designPaths = map[string]string{}
+	}
+	a.designPaths[doc.DesignID] = path
+	if a.designCache == nil {
+		a.designCache = map[string]runs.AsterDocSnapshot{}
+	}
+	a.designCache[doc.DesignID] = doc
+	meta := asterdoc.InspectExperiment(doc.Source, nil)
+	stageLabel := "设计中"
+	stageEnum := shell.StageDraft
+	if meta.Complete {
+		stageLabel = "方案就绪"
+		stageEnum = shell.StageReady
+	}
+	expTitle := firstNonEmpty(meta.Title, title)
 	a.importOpen = false
 	a.importErr = ""
+	a.designTab = 0
+	a.loadDesign(doc.DesignID)
 	if a.shell != nil {
 		a.shell.Designs = append([]shell.DesignItem{{
-			ID: doc.DesignID, Title: title, Meta: fmt.Sprintf("rev %d", doc.Revision),
+			ID: doc.DesignID, Title: expTitle, Meta: stageLabel,
 		}}, a.shell.Designs...)
 		a.shell.Selected = doc.DesignID
 		a.shell.Page = shell.Design
+		a.shell.OpenExperimentTab(shell.ExperimentItem{
+			ID:       doc.DesignID,
+			DesignID: doc.DesignID,
+			Title:    expTitle,
+			Date:     firstNonEmpty(meta.ScheduledDate, a.shell.TodayDate),
+			Stage:    stageEnum,
+		}, shell.Design)
 	}
-	a.loadDesign(doc.DesignID)
+	a.syncShellExperiments()
 	a.saveSession()
 }
