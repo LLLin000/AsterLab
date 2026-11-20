@@ -721,18 +721,20 @@ figure.shot figcaption {
 
     let i = 0;
     while (i < lines.length) {
+      const iterStart = i;
       const line = lines[i];
       const s = line.trim();
       if (!s) { i++; continue; }
       if (/^[-*_]{3,}$/.test(s)) { out.push("<hr />"); i++; continue; }
 
-      const fence = s.match(/^```(\w*)\s*$/);
+      const fence = s.match(/^(`{3,})([^\s`]*)\s*$/);
       if (fence) {
-        const lang = fence[1].toLowerCase();
+        const fenceTicks = fence[1];
+        const lang = (fence[2] || "").toLowerCase();
         i++;
         const buf = [];
-        while (i < lines.length && !lines[i].trim().startsWith("```")) { buf.push(lines[i]); i++; }
-        i++;
+        while (i < lines.length && !lines[i].trim().startsWith(fenceTicks)) { buf.push(lines[i]); i++; }
+        if (i < lines.length) i++;
         if (lang === "mermaid") {
           out.push(`<div class="mermaid-wrap"><pre class="mermaid">${escapeHtml(buf.join("\n"))}</pre></div>`);
         } else {
@@ -741,9 +743,9 @@ figure.shot figcaption {
         continue;
       }
 
-      const hm = s.match(/^(#{1,4})\s+(.+)$/);
+      const hm = s.match(/^(#{1,6})\s+(.+)$/);
       if (hm) {
-        const lvl = hm[1].length;
+        const lvl = Math.min(hm[1].length, 4);
         const raw = hm[2].trim();
         const slug = uniqueSlug(raw);
         const htmlText = renderInline(raw, curDoc);
@@ -779,7 +781,8 @@ figure.shot figcaption {
         continue;
       }
 
-      if (s.includes("|") && i + 1 < lines.length && /^\s*\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?\s*$/.test(lines[i + 1])) {
+      const isTableSep = (ln) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(ln || "") && (ln || "").includes("|");
+      if (s.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {
         const headers = parseTableRow(lines[i]);
         i += 2;
         const rows = [];
@@ -812,7 +815,7 @@ figure.shot figcaption {
 
       if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
         const [lh, nextI] = parseList(i);
-        i = nextI;
+        i = nextI > i ? nextI : i + 1;
         out.push(lh);
         continue;
       }
@@ -821,11 +824,12 @@ figure.shot figcaption {
       while (i < lines.length) {
         const c = lines[i];
         const cs = c.trim();
-        if (!cs || /^(#{1,4}\s+|```|>|---|\*\*\*)/.test(cs) || /^\s*([-*]|\d+\.)\s+/.test(c) || (cs.includes("|") && i + 1 < lines.length && lines[i + 1].includes("---"))) break;
+        if (p.length > 0 && (!cs || /^(#{1,6}\s+|`{3,}|>|[-*_]{3,}$)/.test(cs) || /^\s*([-*]|\d+\.)\s+/.test(c) || (cs.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])))) break;
         p.push(cs);
         i++;
       }
-      out.push(`<p>${p.map((x) => renderInline(x, curDoc)).join(" ")}</p>`);
+      if (i === iterStart) i++;
+      if (p.length) out.push(`<p>${p.map((x) => renderInline(x, curDoc)).join(" ")}</p>`);
     }
     return { html: out.join("\n"), toc };
   }
@@ -1100,10 +1104,16 @@ figure.shot figcaption {
 (() => {
   let mermaidPromise = null;
   function loadMermaid() {
+    if (window.mermaid) return Promise.resolve(window.mermaid);
     if (!mermaidPromise) {
-      mermaidPromise = import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")
-        .then((m) => m.default || m)
-        .catch(() => null);
+      mermaidPromise = new Promise((resolve) => {
+        const sc = document.createElement("script");
+        sc.src = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
+        sc.async = true;
+        sc.onload = () => resolve(window.mermaid || null);
+        sc.onerror = () => resolve(null);
+        document.head.appendChild(sc);
+      });
     }
     return mermaidPromise;
   }
