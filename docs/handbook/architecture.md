@@ -5,10 +5,10 @@ AsterLab 采用「**Pure-Go 本地 Vault 工作台 × 可选 Rust Core 审计核
 ```mermaid
 flowchart TB
   subgraph UI["UI & Workbench Shell (MyGo Native + Onevra)"]
-    Shell["internal/shell<br/>(Split Panes / Ribbon / Tree / Calendar / Mobile iOS26 / Settings / Ctrl+K)"]
+    Shell["internal/shell<br/>(Split Panes / Ribbon / Tree / Calendar / Mobile Shell / Settings / Ctrl+K)"]
     Theme["internal/theme<br/>(Tokens / 3 Presets / Liquid Glass / 4-Tier Motion)"]
     DocUI["internal/asterdoc<br/>(UnifiedLive Renderers / Plate Layers / PDF Export)"]
-    Tools["internal/tools & uikit<br/>(Pantry Shelf / Cryo Boxes / BioRender Stickers / Plate 2D)"]
+    Tools["internal/tools & uikit<br/>(Pantry Shelf / Cryo Boxes / Lab Stickers / Plate 2D)"]
   end
 
   subgraph Engine["Pure-Go Vault & Document Engine (零网络/零外部库可独立运行)"]
@@ -35,7 +35,7 @@ flowchart TB
 | 包路径 | 核心职责 | 关键源码入口 |
 |---|---|---|
 | 根目录 (`main`) | 应用启动、窗口生命周期、Vault ↔ Shell 状态同步与设计/执行宿主页面 | [main.go](../../prototypes/mygo-run/main.go)、[vault_host.go](../../prototypes/mygo-run/vault_host.go)、[experiment_page.go](../../prototypes/mygo-run/experiment_page.go) |
-| `internal/shell` | 左 Ribbon + 文件树、平权 `PaneNode` 分屏树、实验日程 Home、`Ctrl+K` 命令面板、`Ctrl+,` 设置中心、Obsidian iOS 26 移动端自适应壳 | [shell.go](../../prototypes/mygo-run/internal/shell/shell.go)、[tabs.go](../../prototypes/mygo-run/internal/shell/tabs.go)、[file_tree.go](../../prototypes/mygo-run/internal/shell/file_tree.go)、[calendar.go](../../prototypes/mygo-run/internal/shell/calendar.go)、[mobile.go](../../prototypes/mygo-run/internal/shell/mobile.go)、[settings.go](../../prototypes/mygo-run/internal/shell/settings.go)、[right_drawer.go](../../prototypes/mygo-run/internal/shell/right_drawer.go)、[command_palette.go](../../prototypes/mygo-run/internal/shell/command_palette.go) |
+| `internal/shell` | 左 Ribbon + 文件树、平权 `PaneNode` 分屏树、实验日程 Home、`Ctrl+K` 命令面板、`Ctrl+,` 设置中心与窄屏单手移动工作台 | [shell.go](../../prototypes/mygo-run/internal/shell/shell.go)、[tabs.go](../../prototypes/mygo-run/internal/shell/tabs.go)、[file_tree.go](../../prototypes/mygo-run/internal/shell/file_tree.go)、[calendar.go](../../prototypes/mygo-run/internal/shell/calendar.go)、[mobile.go](../../prototypes/mygo-run/internal/shell/mobile.go)、[settings.go](../../prototypes/mygo-run/internal/shell/settings.go)、[right_drawer.go](../../prototypes/mygo-run/internal/shell/right_drawer.go)、[command_palette.go](../../prototypes/mygo-run/internal/shell/command_palette.go) |
 | `internal/theme` | 唯一通用设计 Token 源（`Obsidian` / `Zinc` / `Warm`）、`LiquidGlass` 材质辅助器、科学分类 8 色板与 4 档物理动效 | [theme.go](../../prototypes/mygo-run/internal/theme/theme.go)、[motion.go](../../prototypes/mygo-run/internal/theme/motion.go) |
 | `internal/vault` | 本地 Vault 根目录初始化、目录树扫描、模板孵化、软删除回收站与多窗格共享 `LiveDocument` | [vault.go](../../prototypes/mygo-run/internal/vault/vault.go)、[live_doc.go](../../prototypes/mygo-run/internal/vault/live_doc.go) |
 | `internal/asterdoc` | AsterML 解析/编译/校验、21 模块渲染器、无框文本输入、公式求值、孔板写回与 A4 PDF 导出 | [asterdoc.go](../../prototypes/mygo-run/internal/asterdoc/asterdoc.go)、[view.go](../../prototypes/mygo-run/internal/asterdoc/view.go)、[widget_tables.go](../../prototypes/mygo-run/internal/asterdoc/widget_tables.go)、[widget_ops.go](../../prototypes/mygo-run/internal/asterdoc/widget_ops.go)、[widget_figure.go](../../prototypes/mygo-run/internal/asterdoc/widget_figure.go)、[plate_ops.go](../../prototypes/mygo-run/internal/asterdoc/plate_ops.go)、[inputs.go](../../prototypes/mygo-run/internal/asterdoc/inputs.go)、[pdf_sheet.go](../../prototypes/mygo-run/internal/asterdoc/pdf_sheet.go) |

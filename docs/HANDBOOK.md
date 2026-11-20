@@ -1,6 +1,6 @@
 # AsterLab Handbook
 
-AsterLab 是一个面向生物与湿实验研发的**本地单真源（Local-First Single Source of Truth）**实验工作台。它将科研数据的可追溯性与 Obsidian 级无摩擦书写统一在同一份 `.asterml` 文件之上，同时服务于桌面端复杂编排、实验台平板/手机快速记录以及 Agent 结构化协作。
+AsterLab 是一个面向生物与湿实验研发的**本地单真源（Local-First Single Source of Truth）**实验工作台。它将科研数据的可追溯性与无摩擦的连续书写体验统一在同一份 `.asterml` 文件之上，同时服务于桌面端复杂编排、实验台平板/手机快速记录以及 Agent 结构化协作。
 
 ## 核心设计理念
 
@@ -15,7 +15,7 @@ AsterLab 是一个面向生物与湿实验研发的**本地单真源（Local-Fir
 | **Start** | [领域模型与科学红线](./handbook/domain-model.md) | `Design` / `Protocol` / `Run` 三对象边界、`UnifiedLive` 与科学统计学红线 |
 | **Architecture** | [分层架构与代码包](./handbook/architecture.md) · [Vault 存储](./handbook/vault-storage.md) · [移动端与双端同步](./handbook/mobile-and-sync.md) | Pure-Go Vault、Rust Core FFI、100 步 Undo/Redo、Android/iOS 运行边界与协同防冲突 |
 | **AsterML SDK** | [AsterML 语法与 Parity](./handbook/asterml-spec.md) · [内容模块 (11)](./handbook/modules-content.md) · [孔板、原语与 PDF](./handbook/modules-labware-and-pdf.md) | 21 个注册模块规范、UCUM 单位集、A4 执行单 PDF 导出与全组件实图 |
-| **UI & UX** | [Token、色盘与动效](./handbook/design-system.md) · [Liquid Glass 材质](./handbook/liquid-glass.md) · [桌面工作台](./handbook/desktop-workbench.md) · [Obsidian iOS 26 移动端](./handbook/mobile-ios26.md) | `obsidian`/`zinc`/`warm` 色盘数值、Light/Dark 玻璃着墨、平权分屏、储藏室与手势交互 |
+| **UI & UX** | [Token、色盘与动效](./handbook/design-system.md) · [Liquid Glass 材质](./handbook/liquid-glass.md) · [桌面端工作台](./handbook/desktop-workbench.md) · [移动端单手工作台](./handbook/mobile-workspace.md) | 三套色盘（`obsidian`/`zinc`/`warm`）数值、Light/Dark 玻璃着墨、平权分屏、储藏室与手势交互 |
 | **Reference** | [FFI 桥接与 CLI 契约](./handbook/ffi-and-cli.md) · [校验门禁与优化热点](./handbook/verification-and-backlog.md) | `RunService`/`DesignService` 接口、CLI 退出码、自动化巡检命令与当前已知优化项 |
 
 > [!NOTE]

@@ -44,9 +44,9 @@
 
 储藏室通过 `internal/uikit/labsticker` 生成基于 NIH BioArt 矢量化与 EDT 物理白边的试剂耗材图标，并与实验文档内 `material@1` 的 `pantry_code` 双向定位；配套提供 9×9 冻存盒、96 孔 PCR 盒、离心管架孔位盘点及独立孔板 Studio / 速算台。
 
-| 储藏室货架主页（Light） | 储藏室货架（Dark） | NIH BioArt 实验贴纸全表 |
+| 储藏室货架主页（Light） | 储藏室货架（Dark） | 实验器材矢量贴纸全表 |
 |---|---|---|
-| ![储藏室货架](../sdk/evidence/v2-visual-catalog/tools_pantry_standalone_light.png) | ![储藏室暗黑模式](../sdk/evidence/v2-visual-catalog/comp_16c_labsticker_shelf_dark_v3.png) | ![BioRender 实验贴纸表](../sdk/evidence/v2-visual-catalog/comp_16_labsticker_sheet_v3.png) |
+| ![储藏室货架](../sdk/evidence/v2-visual-catalog/tools_pantry_standalone_light.png) | ![储藏室暗黑模式](../sdk/evidence/v2-visual-catalog/comp_16c_labsticker_shelf_dark_v3.png) | ![实验器材贴纸表](../sdk/evidence/v2-visual-catalog/comp_16_labsticker_sheet_v3.png) |
 
 | 9×9 冻存盒（Light） | 9×9 冻存盒（Dark） | 96 孔 PCR 管盒 | 15/50mL 离心管架 |
 |---|---|---|---|

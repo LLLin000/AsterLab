@@ -19,10 +19,10 @@ AsterLab 基于 `mygo/plugins/glass` 为顶栏、移动端悬浮胶囊、命令�
 
 ## 多主题与深浅色 Liquid Glass 实拍对照
 
-| Obsidian Light（纯白默认 + 浅色 Liquid Glass 顶栏） | Obsidian Dark（深空曜石 + 烟熏 `glass.Clear` 胶囊） |
+| 默认纯白 Light（顶栏浅色半透明质感） | 深空曜石 Dark（日历与烟熏 `glass.Clear` 胶囊） |
 |---|---|
-| ![Obsidian Light 桌面端](../sdk/evidence/v2-visual-catalog/liquid_glass_desktop_obsidian_light.png) | ![Obsidian Dark 桌面日历](../sdk/evidence/v2-visual-catalog/liquid_glass_desktop_obsidian_dark.png) |
+| ![默认纯白 Light 桌面端](../sdk/evidence/v2-visual-catalog/liquid_glass_desktop_obsidian_light.png) | ![深空曜石 Dark 桌面日历](../sdk/evidence/v2-visual-catalog/liquid_glass_desktop_obsidian_dark.png) |
 
-| Obsidian Dark 实验文档页 | Cool Zinc Light 桌面端 | Cool Zinc Light 移动端 |
+| 深空曜石 Dark 实验文档页 | 冷银 Zinc Light 桌面端 | 冷银 Zinc Light 移动端 |
 |---|---|---|
-| ![Obsidian Dark 实验页](../sdk/evidence/v2-visual-catalog/liquid_glass_desktop_exp_dark.png) | ![Cool Zinc Light 桌面端](../sdk/evidence/v2-visual-catalog/liquid_glass_desktop_zinc_light.png) | ![Cool Zinc Light 移动端](../sdk/evidence/v2-visual-catalog/liquid_glass_mobile_zinc_light.png) |
+| ![深空曜石 Dark 实验页](../sdk/evidence/v2-visual-catalog/liquid_glass_desktop_exp_dark.png) | ![冷银 Zinc Light 桌面端](../sdk/evidence/v2-visual-catalog/liquid_glass_desktop_zinc_light.png) | ![冷银 Zinc Light 移动端](../sdk/evidence/v2-visual-catalog/liquid_glass_mobile_zinc_light.png) |
