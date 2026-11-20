@@ -4,9 +4,6 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Docs — AsterLab</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
 :root {
   --bg: #ffffff;
@@ -543,10 +540,11 @@ figure.shot figcaption {
     ["Start", [
       ["docs/HANDBOOK.md", "Overview"],
       ["docs/handbook/domain-model.md", "领域模型与科学红线"],
+      ["docs/adr/0002-asterml-vault-pure-go-core.md", "ADR-0002 单真源架构决策"],
     ]],
     ["Architecture", [
       ["docs/handbook/architecture.md", "分层架构与代码包"],
-      ["docs/handbook/vault-storage.md", "Vault 存储与原子读写"],
+      ["docs/handbook/vault-storage.md", "Vault 存储、索引与快照"],
       ["docs/handbook/mobile-and-sync.md", "移动端边界与双端同步"],
     ]],
     ["AsterML SDK", [
@@ -561,8 +559,8 @@ figure.shot figcaption {
       ["docs/handbook/mobile-workspace.md", "移动端单手工作台"],
     ]],
     ["Reference", [
-      ["docs/handbook/ffi-and-cli.md", "FFI 桥接与 CLI 契约"],
-      ["docs/handbook/verification-and-backlog.md", "自动化门禁与已知待办"],
+      ["docs/handbook/ffi-and-cli.md", "Pure-Go CLI、深度链接与历史 FFI"],
+      ["docs/handbook/verification-and-backlog.md", "自动化门禁与已关闭热点"],
     ]],
   ];
 
@@ -643,7 +641,7 @@ figure.shot figcaption {
       const fb = r.fallback ? ` data-fb="${escapeHtml(r.fallback)}"` : "";
       return stash(
         `<figure class="shot" data-zoom="${escapeHtml(r.href)}" data-caption="${eAlt}">` +
-        `<img src="${escapeHtml(r.href)}"${fb} alt="${eAlt}" loading="lazy" onerror="if(this.dataset.fb){this.src=this.dataset.fb;this.dataset.fb='';}" />` +
+        `<img src="${escapeHtml(r.href)}"${fb} alt="${eAlt}" loading="lazy" decoding="async" onerror="if(this.dataset.fb){this.src=this.dataset.fb;this.dataset.fb='';}" />` +
         `<figcaption>${eAlt}</figcaption></figure>`
       );
     });
@@ -888,27 +886,67 @@ figure.shot figcaption {
     pager.innerHTML = ph;
   }
 
+  const docCache = new Map();
+  const inflightFetch = new Map();
+  let loadToken = 0;
+
+  async function fetchMarkdown(docPath) {
+    if (docCache.has(docPath)) return docCache.get(docPath);
+    if (inflightFetch.has(docPath)) return inflightFetch.get(docPath);
+    const p = (async () => {
+      let resp = await fetch(`./${docPath}`);
+      if (!resp.ok) {
+        resp = await fetch(`https://raw.githubusercontent.com/${OWNER_REPO}/${FALLBACK_BRANCH}/${docPath}`);
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const mdText = await resp.text();
+      const parsed = renderMarkdown(mdText, docPath);
+      const entry = { mdText, html: parsed.html, toc: parsed.toc };
+      docCache.set(docPath, entry);
+      return entry;
+    })();
+    inflightFetch.set(docPath, p);
+    try {
+      return await p;
+    } finally {
+      inflightFetch.delete(docPath);
+    }
+  }
+
+  function prefetchDoc(docPath) {
+    if (!docPath || docCache.has(docPath) || inflightFetch.has(docPath)) return;
+    fetchMarkdown(docPath).catch(() => {});
+  }
+
+  function prefetchNeighbors(docPath) {
+    const idx = FLAT_PAGES.findIndex((p) => p.path === docPath);
+    if (idx < 0) return;
+    const warm = () => {
+      if (idx + 1 < FLAT_PAGES.length) prefetchDoc(FLAT_PAGES[idx + 1].path);
+      if (idx - 1 >= 0) prefetchDoc(FLAT_PAGES[idx - 1].path);
+    };
+    if ("requestIdleCallback" in window) requestIdleCallback(warm, { timeout: 1500 });
+    else setTimeout(warm, 350);
+  }
+
   async function loadDoc(docPath, frag = "") {
+    const reqId = ++loadToken;
     currentDoc = docPath;
     document.getElementById("ghLink").href = `https://github.com/${OWNER_REPO}/blob/${FALLBACK_BRANCH}/${currentDoc}`;
 
-    let mdText = "";
+    let entry;
     try {
-      let resp = await fetch(`./${currentDoc}`, { cache: "no-cache" });
-      if (!resp.ok) {
-        resp = await fetch(`https://raw.githubusercontent.com/${OWNER_REPO}/${FALLBACK_BRANCH}/${currentDoc}`);
-      }
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      mdText = await resp.text();
+      entry = await fetchMarkdown(currentDoc);
     } catch (err) {
+      if (reqId !== loadToken) return;
       document.getElementById("docContent").innerHTML = `<aside class="callout"><div class="callout-title">Not Found</div><div>无法读取 <code>${escapeHtml(currentDoc)}</code> (${escapeHtml(String(err))})</div></aside>`;
       renderSidebars([]);
       return;
     }
+    if (reqId !== loadToken) return;
 
-    const { html, toc } = renderMarkdown(mdText, currentDoc);
-    document.getElementById("docContent").innerHTML = html;
-    renderSidebars(toc);
+    document.getElementById("docContent").innerHTML = entry.html;
+    renderSidebars(entry.toc);
 
     const h1 = document.querySelector("#docContent h1");
     document.title = h1 ? `${h1.textContent.replace(/^#\s*/, "")} — AsterLab` : "Docs — AsterLab";
@@ -925,18 +963,31 @@ figure.shot figcaption {
       window.scrollTo({ top: 0 });
     }
     if (window.__renderMermaid) window.__renderMermaid();
+    prefetchNeighbors(currentDoc);
   }
 
-  // Scroll-spy for right TOC
+  // Hover/focus prefetch on any internal markdown link for instant navigation
+  document.addEventListener("pointerenter", (e) => {
+    const a = e.target.closest && e.target.closest("a[data-doc]");
+    if (a) prefetchDoc(a.getAttribute("data-doc"));
+  }, true);
+
+  // Scroll-spy for right TOC (RAF-throttled)
+  let scrollRafPending = false;
   window.addEventListener("scroll", () => {
-    const headings = [...document.querySelectorAll("#docContent h2, #docContent h3")];
-    if (!headings.length) return;
-    let activeId = headings[0].id;
-    for (const h of headings) {
-      if (h.getBoundingClientRect().top <= 110) activeId = h.id;
-    }
-    document.querySelectorAll(".toc-item a").forEach((a) => {
-      a.classList.toggle("active", a.getAttribute("data-toc") === activeId);
+    if (scrollRafPending) return;
+    scrollRafPending = true;
+    requestAnimationFrame(() => {
+      scrollRafPending = false;
+      const headings = [...document.querySelectorAll("#docContent h2, #docContent h3")];
+      if (!headings.length) return;
+      let activeId = headings[0].id;
+      for (const h of headings) {
+        if (h.getBoundingClientRect().top <= 110) activeId = h.id;
+      }
+      document.querySelectorAll(".toc-item a").forEach((a) => {
+        a.classList.toggle("active", a.getAttribute("data-toc") === activeId);
+      });
     });
   }, { passive: true });
 
@@ -1017,15 +1068,28 @@ figure.shot figcaption {
   loadDoc(currentDoc, location.hash);
 })();
 </script>
-<script type="module">
-import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-window.__renderMermaid = () => {
-  const dark = document.documentElement.getAttribute("data-theme") === "dark";
-  mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral" });
-  const nodes = document.querySelectorAll(".mermaid:not([data-processed])");
-  if (nodes.length) mermaid.run({ nodes });
-};
-window.__renderMermaid();
+<script>
+(() => {
+  let mermaidPromise = null;
+  function loadMermaid() {
+    if (!mermaidPromise) {
+      mermaidPromise = import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")
+        .then((m) => m.default || m)
+        .catch(() => null);
+    }
+    return mermaidPromise;
+  }
+  window.__renderMermaid = async () => {
+    const nodes = document.querySelectorAll(".mermaid:not([data-processed])");
+    if (!nodes.length) return;
+    const mermaid = await loadMermaid();
+    if (!mermaid) return;
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral" });
+    await mermaid.run({ nodes });
+  };
+  window.__renderMermaid();
+})();
 </script>
 </body>
 </html>

@@ -6,7 +6,8 @@
 
 | 文档 | 权威范围 |
 |---|---|
-| [`HANDBOOK.md`](./HANDBOOK.md) | **全仓工程与产品手册总览（OMP / OpenCode 风格）**：涵盖领域模型、包架构、FFI/CLI/Vault 接口、AsterML v2 21 模块 SDK、主题/Liquid Glass/动效 UI 规范、桌面与 Obsidian iOS 26 移动端 UX、双端同步决策及巡检热点 |
+| [`HANDBOOK.md`](./HANDBOOK.md) | **全仓工程与产品手册总览（新版本权威实图与手册入口）**：涵盖领域模型、Pure-Go `astercore` + Vault 架构、`cmd/asterlab` CLI、AsterML v2 21 模块 SDK、主题/Liquid Glass/动效规范与双端实拍图集 |
+| [`adr/0002-asterml-vault-pure-go-core.md`](./adr/0002-asterml-vault-pure-go-core.md) | **ADR-0002 架构决策**：`.asterml` 本地 Vault 单真源、Pure-Go 统一科学核心（`astercore`）及可重建增量索引 |
 | [`../CONTEXT.md`](../CONTEXT.md) | 领域术语、对象边界、读模型/执行身份、工具/仪器边界 |
 | [`../AGENT_API.md`](../AGENT_API.md) | 当前已实现 CLI/HTTP 字段、枚举、错误码 |
 | [`release/doc-authority.md`](release/doc-authority.md) | 文档「权威 / 历史 / 研究」状态登记与冲突处置 |

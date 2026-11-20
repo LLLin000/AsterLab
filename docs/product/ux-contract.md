@@ -6,7 +6,7 @@ deliberately separate from the module SDK manifest.
 
 ## 1. Information architecture
 
-Obsidian-grade single-vault local experiment workbench organizing a minimalist `40px` left **Ribbon** + transparent Vault **File Tree** (`.asterlab/`, `assets/`, `templates/`, `<ProjectFolder>/*.asterml`) alongside a recursive **Peer Split-Pane Tree** (`PaneNode` hosting `TabCalendar`, `TabFile`, `TabPantry`), Back/Forward history, a slim collapsible **Right Companion Drawer** (`步骤大纲` & `速算与计时`), and `Ctrl+K/O` floating Command Palette.
+Obsidian-grade single-vault local experiment workbench organizing a minimalist `40px` left **Ribbon** + transparent Vault **File Tree** (`.asterlab/`, `assets/`, `templates/`, `<ProjectFolder>/*.asterml`) alongside a recursive **Peer Split-Pane Tree** (`PaneNode` hosting `TabCalendar`, `TabFile`, `TabPantry`), Back/Forward history, a 24px **Desktop Status Bar**, a slim collapsible 3-tab **Right Companion Drawer** (`步骤大纲` | `速算与计时` | `关联与诊断`), `Ctrl+K/O` floating Command Palette, and `Ctrl+Shift+F` **Vault Global Search Modal**.
 
 | # | Surface | One job | Primary action | Does not belong here |
 |---|---|---|---|---|
@@ -120,9 +120,9 @@ Breakpoints: **≥1360 wide**, **1100–1359 medium**, **<1100 narrow** (covers
 900×600). Layout must be correct at 1360×880 and 900×600; other sizes are
 derived.
 
-- **Obsidian Shell (`internal/shell/`):** 40px Ribbon + Vault File Tree (`file_tree.go`), peer `PaneNode` split tree with per-pane tab bars & 4-way edge drag-to-split overlays (`LiquidSplitTransition`), Back/Forward chrome + `Ctrl+O/K` palette, and slim Right Companion Drawer (`步骤大纲`, `速算与计时`).
+- **Obsidian Shell (`internal/shell/`):** 40px Ribbon + Vault File Tree (`file_tree.go`), peer `PaneNode` split tree with per-pane tab bars & 4-way edge drag-to-split overlays (`LiquidSplitTransition`), Back/Forward chrome + `Ctrl+O/K` palette + `Ctrl+Shift+F` Vault Global Search, 24px bottom Desktop Status Bar, and slim 3-tab Right Companion Drawer (`步骤大纲`, `速算与计时`, `关联与诊断`).
 - **Experiment Calendar (`实验日程`):** minimal top bar (`YYYY 年 MM 月`, `‹ 今天 ›`, `月 | 周`, search, `＋ 新建实验`), seamless month cells or `08:00–20:00` Week time grid, circular Today pill, drag-to-schedule/reschedule drop targets, double-click cell create dialog (project folder + template + date), and day Popover.
-- **UnifiedLive Experiment Canvas (`experiment_page.go`):** 1-row breadcrumb header (`项目 / 标题` + `编辑 | 阅读 | 源码` + copy icon + `⋯` menu), unframed `# Title` + property pills (`日期` / `项目` / `状态`), Live-Preview step stream with hover `⋮⋮` handles, `+` insert gaps, and `/` slash menu; `checklist` & `timer` remain interactive in both `编辑` and `阅读` modes, persisting directly to `.asterml`.
+- **UnifiedLive Experiment Canvas (`experiment_page.go`):** 1-row breadcrumb header (`项目 / 标题` + Read/Edit toggle + `Ctrl+F` in-page find + copy + `⋯`), unframed `# Title` + property pills (`日期` / `项目` / `状态`), Live-Preview step stream with collapsible step headers, hover `⋮⋮` drag handles, `+` insert gaps, `/` slash menu, and collapsible bottom `科学分析汇总 (AsterCore)` projection card; `checklist`, `subflow` & `timer` remain interactive in both `编辑` and `阅读` modes, persisting directly to `.asterml` alongside File Recovery snapshots (`.asterlab/snapshots/`).
 - **Standalone Pantry (`tools.ViewPantry`):** renders directly inside `TabPantry` without legacy 4-tool switcher chrome.
 
 Primary-action budget: one accent-filled control per surface. Everything else is

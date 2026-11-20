@@ -1,34 +1,52 @@
-# Native FFI 桥接与 Agent CLI 契约
+# Pure-Go CLI、深度链接与历史 FFI 契约
 
-当工作流程从日常本地 Vault 笔记升级到不可变受控冻存，或由外部自动化 Agent 协同执行时，系统通过 Go⇄Rust FFI 与 `labworkbench` JSON CLI 操作 Core SQLite 存储。
+依据 [ADR-0002](../adr/0002-asterml-vault-pure-go-core.md)，Agent 与外部自动化脚本直接通过 **Pure-Go Vault-Native CLI（`cmd/asterlab`）** 读写并校验本地 `.asterml` Vault，不再强制经过 `Runs.dll` 或 SQLite；`asterlab://` 深度链接支持直接定位实验文件、步骤与储藏室试剂。
 
-## Native FFI Bridge（`modules/runs`）
+## 1. Pure-Go Vault-Native CLI (`cmd/asterlab`)
 
-`prototypes/mygo-run/modules/runs/runs.go` 通过 `//mygo:native` 自动生成胶水层并绑定至 Rust `crates/asterlab-core`，暴露四组原生服务接口：
-
-| 服务接口 | 核心方法与职责 |
-|---|---|
-| **`RunService`** | `LoadRun`、`ListRuns`、`SaveReadout` / `SaveReadoutsBatch`、`SaveTaskChecks`、`SaveAssetLink` / `UpdateAssetLinkCoordinates` / `UnlinkAssetLink`、`CompleteTask`、`CreateExecutionEvent`、`UpdateTimer`、通用幂等写入口 `ExecuteCommand`（强校验 `IdempotencyKey`）、只读投影查询 `QueryProjection` |
-| **`DesignService`** | `ListDesigns`、`LoadDesign`、`SaveDesign`、`CreateAsterDocDesign`、`SaveAsterDoc`、`ApplyAsterDocCommand`、`CompileAsterDoc`、`AssessAsterDoc`、`CreateRunFromAsterDoc`（将某修订的 AsterDoc 原子冻结为不可变 Run）、`DeriveDesignFromRun` |
-| **`TimeBudgetService`** | 无状态只读接口 `ProjectTimeBudget`，计算流程并行与串行时间窗口预算 |
-| **`MixPlanService`** | 无状态只读接口 `PlateMixPlan`，按分组与复孔数量计算试剂配平总量与富余量 |
-
-## Agent CLI 调用契约（`labworkbench`）
-
-详细命令全表见 [AGENT_API.md](../../AGENT_API.md)。CLI 与桌面端共用同一本地 SQLite 存储，遵循严格的封闭 JSON 契约：
+源码位于 [cmd/asterlab/main.go](../../prototypes/mygo-run/cmd/asterlab/main.go)，通过 `--vault <dir>` 指定实验室目录（默认读取 `vault.DefaultVaultDir()` / `ASTERLAB_VAULT_DIR`）：
 
 ```powershell
-.\target\release\labworkbench.exe tools --json
-.\target\release\labworkbench.exe schema design.create
-.\target\release\labworkbench.exe design.create --input .\design.json --diagnostics json
+# 列出可用工具清单
+go run ./cmd/asterlab tools --json
+
+# 按状态/标签筛选 Vault 中的实验列表
+go run ./cmd/asterlab --vault C:\LabVault vault.list --status in_progress --tag cck8
+
+# 全库全文搜索
+go run ./cmd/asterlab --vault C:\LabVault vault.search "OD450"
+
+# 读取实验 Frontmatter 与 step 模块树
+go run ./cmd/asterlab --vault C:\LabVault asterdoc.read 2026/cck8.asterml
+
+# 运行 Pure-Go AsterCore 分级科学诊断（ARRIVE 2.0 / 对照组 / 浓度越界）
+go run ./cmd/asterlab --vault C:\LabVault asterdoc.assess 2026/cck8.asterml
+
+# 运行确定性 CCK-8 / RT-qPCR ΔΔCq / 描述性统计分析
+go run ./cmd/asterlab --vault C:\LabVault asterdoc.analyze 2026/cck8.asterml
 ```
 
-- **封闭输入**：所有业务命令均通过 `--input <json-file|->` 传入最大 2 MiB 的 UTF-8 JSON；未知字段、超范围数值或类型不匹配一律拒绝。
-- **单行结构化响应**：`stdout` 每次固定输出一行 JSON（`{"ok":true,"tool":...,"result":...}` 或 `{"ok":false,"tool":...,"error":{"code":...,"message":...}}`）。
+- **单行 JSON stdout 契约**：所有子命令向标准输出打印单行结构化 JSON（包含 `ok` 及对应结果或 `code`/`error`）。
 - **固定退出码语义**：
-  - `0`：成功
-  - `2`：输入或用法错误（`INVALID_INPUT`）
-  - `3`：目标对象不存在
-  - `4`：`REVISION_CONFLICT`（乐观锁版本冲突，需重新读取后再修订）
-  - `5`：内部错误
-- **机器诊断视图 (`--diagnostics json`)**：追加标准 `Diagnostic` 数组（`path`、`code`、`severity`: `blocking | needs_confirmation | advisory`、`message`、`affects`、`next_action`、`source`），Agent 必须基于稳定 `code` 分支决策，禁止正则解析自然语言 `message`。
+  - `0`：成功（对 `asterdoc.assess` 表示无 `blocking` 阻断问题）
+  - `2`：参数或子命令用法错误
+  - `3`：Vault 目录或目标 `.asterml` 文件不存在
+  - `4`：科学诊断阻断（`asterdoc.assess` 检测到 `SeverityBlocking` 问题，如目标浓度高于母液）
+  - `5`：`.asterml` 语法解析失败
+
+## 2. `asterlab://` URI 深度链接路由
+
+解析实现位于 [deeplink.go](../../prototypes/mygo-run/internal/state/deeplink.go) 的 `ParseAsterLabURI`，并在 [main.go](../../prototypes/mygo-run/main.go) 单实例与启动参数中统一调度：
+
+| URI 路由格式 | 路由动作 |
+|---|---|
+| `asterlab://open?file=<relPath>&step=<stepID>` | 在活动窗格打开指定 `.asterml` 文件并自动滚动聚焦至 `<stepID>` |
+| `asterlab://pantry?code=<labelCode>` | 切换至 `TabPantry` 储藏室货架并高亮定位对应试剂条码 |
+| `asterlab://run/<runID>` · `asterlab://run/<runID>/well/<well>` | 打开对应历史 Run 并定位孔板指定孔位 |
+
+## 3. 可选历史 Rust FFI 与 `labworkbench` CLI（Deprecated / Legacy）
+
+在仍需兼容历史 SQLite 冻存记录或原有测试夹具的场景下，仓库继续保留：
+
+- **`modules/runs`（`//mygo:native`）**：暴露 `RunService`、`DesignService`、`TimeBudgetService` 与 `MixPlanService`；依据 ADR-0002，桌面主程序启动若缺少 `Runs.dll` / `libRuns.so` 将静默运行在纯 Go Vault 模式，不再阻塞报错。
+- **`labworkbench` CLI（`src/cli.rs` & [AGENT_API.md](../../AGENT_API.md)）**：历史 SQLite 存储上的 `--input <json>` / `--diagnostics json` 契约参考。

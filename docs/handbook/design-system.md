@@ -17,14 +17,15 @@ AsterLab 所有界面的颜色、间距、圆角、字号与物理动效均收�
 通用界面禁止使用 `ui.Hex(...)`；唯有孔板分组、样本标签与对照角色色允许且必须调用具名科学调色板函数：
 
 - **`theme.CategoricalPalette(dark)` / `CategoricalColor(key, dark)`**：提供 Light/Dark 双套校准的 8 色序列（Cobalt、Emerald、Amber、Violet、Coral、Teal、Indigo、Terracotta）。
+- **`theme.GradientRampColor(tNorm, dark)`**：用于 `plate@1` 数值浓度梯度的单调连续色阶渐变（图例自动按浓度从高到低排列）。
 - **`theme.WellRoleColor(role, dark)`**：统一映射 `sample`、`standard`、`positive_control`、`negative_control`、`vehicle`、`ntc` 与 `blank`。
 
-## 间距、字号、圆角与去重框规范
+## 间距、字号、圆角、去重框与无障碍缩放
 
 - **4px 基准间距**：仅使用 `Spacing4 (4)`、`Spacing8 (8)`、`Spacing12 (12)`、`Spacing16 (16)`、`Spacing24 (24)`、`Spacing32 (32)`、`Spacing48 (48)`。
-- **字号层级**：`TextPage (22)`、`TextSection (15)`、`TextBody (13)`、`TextMeta (12)`、`TextData (12)`；控件基准高度 `ButtonHeight / InputHeight = 30`、`RowHeight = 32`。
-- **三档圆角**：`ControlRadius (6)`、`PanelRadius (12)`、`DialogRadius (14)`；悬浮胶囊与圆形图标按钮使用 `height / 2`。
-- **Anti-XP-Box（去重框）**：正文与属性内联输入禁止白底圆角框套娃，必须使用 `asterdoc.BorderlessTextInput`（静态透明，仅 Hover/Focus 柔和底色）与 `StyleSelectQuiet`。
+- **字号层级与全库缩放**：`TextPage (22)`、`TextSection (15)`、`TextBody (13)`、`TextMeta (12)`、`TextData (12)`；控件基准高度 `ButtonHeight / InputHeight = 30`、`RowHeight = 32`，全部通过 `SetAccessibilityPrefs(textScale, reduceMotion)` 动态响应设置中心的字体缩放滑块。
+- **三档圆角统一**：`ControlRadius (6)`（全局基准 `t.Radius = float32(ControlRadius)`）、`PanelRadius (12)`、`DialogRadius (14)`；悬浮胶囊与圆形图标按钮使用 `height / 2`。
+- **Anti-XP-Box（去重框）与实底 Dark 弹窗**：正文与属性内联输入禁止白底圆角框套娃，统一使用 `asterdoc.BorderlessTextInput`、`StyleSelectQuiet` 与科学显示单位映射 `DisplayUnit`（`°C`、`μL`、`μm`、`μM`、`×g`）；模态弹窗在 Dark 模式下强制铺设高对比度实底 `tok.Surface` + `tok.BorderStrong` 防止底层文本透射。
 
 ## 四档 Oklab 物理动效系统
 

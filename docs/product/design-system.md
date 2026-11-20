@@ -20,6 +20,7 @@
 
 当前在 `internal/theme/theme.go` 登记的具名科学调色板函数：
 - `theme.CategoricalPalette(dark)` / `theme.CategoricalColor(key, dark)`：8 色无障碍实验室分类调色板，用于多维孔板（`plate@1`）按样本、正交因子（如靶点基因、加药浓度）与技术复孔区分着色，并配适亮/暗色主题；
+- `theme.GradientRampColor(tNorm, dark)`：孔板数值浓度梯度因子的连续单调色阶渐变（图例按浓度从高到低排序）；
 - `theme.WellRoleColor(role, dark)`：孔位对照角色语义色（`sample` / `standard` / `ntc` / `blank` / `positive_control` / `negative_control` / `vehicle`）。
 
 ## 2. 间距体系

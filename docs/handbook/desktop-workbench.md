@@ -1,22 +1,30 @@
 # 桌面端工作台、平权分屏与储藏室
 
-桌面端以「**三个主要表面 + 平权四向分屏**」组织全部科研界面，去除多余顶栏工具堆砌与二级模式弹窗。
+桌面端以「**三个主要表面 + 平权四向分屏 + 全库闭环辅助面板**」组织全部科研界面，去除多余顶栏工具堆砌与二级模式弹窗。
 
-## 三大工作区表面
+## 工作区四域布局
 
 1. **左栏（40px Ribbon + Vault 文件树）**
-   - 文件树依据显式 `depth` 绘制纵向缩进引导线，支持 `F2` 内联重命名、文件右键菜单，以及直接将 `.asterml` 文件拖入日程改期或拖入编辑区边缘拆屏。
-2. **主区（`PaneNode` 平权分屏树）**
+   - 文件树依据显式 `depth` 绘制纵向缩进引导线，支持 `F2` 内联重命名（同步自动重写全库 `[[wikilink]]` 与 `repeat_of`）、文件右键菜单，以及直接将 `.asterml` 文件拖入日程改期或拖入编辑区边缘拆屏。
+2. **主区（`PaneNode` 平权分屏树 + 底部状态栏）**
    - 任意叶窗格均可平权托管 `实验日程`、`储藏室货架` 或 `.asterml` 文档（`编辑 | 阅读 | 源码`），拖拽页签至窗格四周 25% 热区即可通过 `LiquidSplitTransition` 动态四向分屏。
-   - 多个窗格同时打开同一 `.asterml` 文件时共享同一内存 `*vault.LiveDocument`，编辑与撤销完全同步。
-3. **右伴侣抽屉（默认折叠）**
-   - 仅收拢与当前实验直接相关的「步骤大纲」与「速算与计时」两项辅助工具，不承载全域数据或设置。
+   - 文档页采用简洁单行面包屑头 + 阅读/编辑切换 + 页内查找（`Ctrl+F`）+ 自适应阅读列宽（`760px` 正文 / `940px` 宽孔板与数据表）。
+   - 底部常驻 `24px` **Obsidian 风格状态栏**，实时展示保存状态（`实时已保存` / 语法提醒）、当前步骤与模块计数、可点击的**全库运行中计时器角标**、模式名称与全局命令快捷键提示。
+3. **右伴侣抽屉（三页签，默认折叠）**
+   - 收拢与实验直接相关的三类工具：**「步骤大纲」**、**「速算与计时（含跨 Vault 实时计时器与跳转）」**、**「关联与诊断（双向链接/复现谱系 + AsterCore 分级诊断）」**。
+4. **全库全文搜索与命令面板**
+   - `Ctrl+Shift+F` 打开 **Vault 全局全文搜索模态窗**，键盘上下键与回车直达对应 `.asterml` 文件并自动唤醒页内 `Ctrl+F` 高亮定位。
+   - `Ctrl+K` / `Ctrl+O` 命令面板统一检索实验文件、储藏室试剂与工作区动作。
 
-## 分屏与 UnifiedLive 三态视图
+## 分屏、全文搜索、伴侣抽屉与科学分析实拍
 
 | 桌面分屏 + 右伴侣抽屉（Light） | 桌面分屏 + 右伴侣抽屉（Dark） |
 |---|---|
 | ![桌面分屏 Light](../sdk/evidence/v2-visual-catalog/workbench_obsidian_split_drawer_light.png) | ![桌面分屏 Dark](../sdk/evidence/v2-visual-catalog/workbench_obsidian_split_drawer_dark.png) |
+
+| `Ctrl+Shift+F` 全局全文搜索（Dark） | 右抽屉「关联与诊断」页签（Light） | AsterCore 科学分析汇总 + `Ctrl+F`（Light） |
+|---|---|---|
+| ![全局全文搜索 Dark](../sdk/evidence/v2-visual-catalog/workbench_global_search_dark.png) | ![右抽屉关联与诊断 Light](../sdk/evidence/v2-visual-catalog/companion_drawer_links_diagnostics_light.png) | ![科学分析汇总 Light](../sdk/evidence/v2-visual-catalog/unified_live_analysis_summary_light.png) |
 
 | UnifiedLive「编辑」态 | UnifiedLive「阅读」态 | UnifiedLive「源码」态 |
 |---|---|---|
@@ -26,19 +34,18 @@
 |---|---|
 | ![方案灯箱放大](../sdk/evidence/v2-visual-catalog/design_iz_figure_zoom_light.png) | ![Notebook ELN 双栏对照](../sdk/evidence/v2-visual-catalog/notebook_eln_split_light.png) |
 
-## 实验日程、`Ctrl+K` 命令面板与设置中心
+## 实验日程、命令面板、设置中心与快照恢复
 
 - **实验日程（Home）**：默认提供月视图与周时间网格，支持直接从左栏拖拽实验改期、点击空白格快速建实验，以及右键变更状态。
-- **全局命令面板 (`Ctrl+K` / `Ctrl+O`)**：统一检索实验文件、储藏室试剂、常用操作命令及实时主题/毛玻璃开关。
-- **设置中心 (`Ctrl+,`)**：内置关键字筛选，分为 6 类清晰配置项。
+- **设置中心（`Ctrl+,`）**：支持全文关键字过滤、可绑定热键映射（含 `Ctrl+Shift+F`）、`TextScale` 字号缩放、`ReduceMotion` 动效降级、回收站一键还原与 **File Recovery 历史版本快照一键恢复**，并在 Dark 模式下使用高对比度实底卡片消除透射重影。
 
 | 实验日程月视图（Light） | 实验日程月视图（Dark） | 实验日程周网格（Light） |
 |---|---|---|
 | ![日程月视图 Light](../sdk/evidence/v2-visual-catalog/home_calendar_month_light.png) | ![日程月视图 Dark](../sdk/evidence/v2-visual-catalog/home_calendar_month_dark.png) | ![日程周视图 Light](../sdk/evidence/v2-visual-catalog/home_calendar_week_light.png) |
 
-| 从模板新建实验 | `Ctrl+K` 全局命令面板 | 设置中心 — 外观开关 |
-|---|---|---|
-| ![新建实验对话框](../sdk/evidence/v2-visual-catalog/vault_new_exp_dialog_light.png) | ![Ctrl+K 命令面板](../sdk/evidence/v2-visual-catalog/workbench_command_palette_light.png) | ![设置中心外观](../sdk/evidence/v2-visual-catalog/vault_settings_appearance_light.png) |
+| 从模板新建实验 | `Ctrl+K` 全局命令面板 | 设置中心 — 外观（Light） | 设置中心 — 快照恢复（Dark） |
+|---|---|---|---|
+| ![新建实验对话框](../sdk/evidence/v2-visual-catalog/vault_new_exp_dialog_light.png) | ![Ctrl+K 命令面板](../sdk/evidence/v2-visual-catalog/workbench_command_palette_light.png) | ![设置中心外观](../sdk/evidence/v2-visual-catalog/vault_settings_appearance_light.png) | ![设置中心快照恢复 Dark](../sdk/evidence/v2-visual-catalog/vault_settings_recovery_dark.png) |
 
 ## 储藏室货架、容器贴纸与独立工具
 

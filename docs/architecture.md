@@ -1,7 +1,7 @@
 # AsterLab 架构设计
 
-- 日期：2026-11-05
-- 状态：权威（模块依赖、分层与迁移方向）· 生效日期 2026-11-13
+- 日期：2026-11-05（**2026-11-20 演进**：依据 [ADR-0002](adr/0002-asterml-vault-pure-go-core.md) 确立 `.asterml` Vault 为单一事实源，MyGo 桌面端、移动端与 `cmd/asterlab` CLI 共用 Pure-Go `astercore` 科学核心，详见 [docs/handbook/architecture.md](handbook/architecture.md)；原 Rust Core / SQLite 契约保留为可选历史桥接）
+- 状态：权威（模块依赖、分层与迁移方向）· 生效日期 2026-11-13 / ADR-0002 更新 2026-11-20
 - 交付前端：MyGo Native（`prototypes/mygo-run`）。Web 包与 Slint 原型是历史/研究资产；§3、§6 的 Slint 前端内容保留为历史记录。
 - 文档权威登记：[`release/doc-authority.md`](release/doc-authority.md)；Beta 交付范围：[`release/beta-scope.md`](release/beta-scope.md)。
 - 关联：[实验地图契约](prototypes/2026-11-05-experiment-map-and-agent-contract.md)、[协议知识](research/2026-11-05-protocol-knowledge-and-related-projects.md)、[仪器步骤模块](prototypes/instrument-step-modules.md)、[K0 审计](research/2026-11-05-k0-knowledge-coverage-audit.md)、[OperationModule v1](contracts/operation-module-v1.md)、[Semantic Component S0](contracts/semantic-component-contract.md)。
