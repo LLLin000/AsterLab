@@ -1,5 +1,5 @@
 www.asterlab.party, asterlab.party {
-    root * /var/www/asterlab.party
+    root * /srv/projects/asterlab-web
     encode zstd gzip
     file_server
 
