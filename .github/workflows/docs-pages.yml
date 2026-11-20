@@ -35,7 +35,10 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Assemble static docs artifact with inlined bundle
-        run: python3 scripts/docs/assemble_site.py _site
+        run: |
+          python3 scripts/docs/assemble_site.py _site
+          mkdir -p _site/vendor
+          curl -fsSL https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js -o _site/vendor/mermaid.min.js || true
 
       - name: Upload artifact for VPS deploy
         uses: actions/upload-artifact@v4
