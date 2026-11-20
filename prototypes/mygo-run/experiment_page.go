@@ -696,15 +696,26 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 				applyLiveSource(next)
 			}
 		}
+		v.OnCopyImage = func(pngBytes []byte) error {
+			if len(pngBytes) == 0 {
+				return nil
+			}
+			return mygo.Clipboard.WriteImage(pngBytes)
+		}
 		v.OnSavePlateExport = func(defaultName, format string, data []byte) error {
 			if len(data) == 0 {
 				return nil
 			}
-			title := "导出孔板文件"
-			if format == "csv" {
+			title := "导出组件文件"
+			switch format {
+			case "csv":
 				title = "导出孔板 CSV 布局"
-			} else if format == "png" {
+			case "png":
 				title = "导出孔板 PNG 图像"
+			case "svg":
+				title = "导出组件 SVG 矢量图"
+			case "md":
+				title = "导出组件 Markdown"
 			}
 			path, sErr := mygo.Dialog.Save(mygo.SaveDialogOptions{
 				Parent:      mygo.FocusedWindow(),

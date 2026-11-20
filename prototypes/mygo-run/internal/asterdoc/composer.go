@@ -681,7 +681,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 						blockRow.Opacity(0.45)
 					}
 					components.ContextMenu(c, grip, func(m *components.Menu) {
-						v.buildBlockContextMenu(m, step.ID, bid, idx, len(blocks), bm)
+						v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bm, editable)
 					})
 				}
 				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
@@ -689,10 +689,10 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 				})
 			})
 
+			components.ContextMenu(c, blockRow, func(m *components.Menu) {
+				v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bm, editable)
+			})
 			if editable {
-				components.ContextMenu(c, blockRow, func(m *components.Menu) {
-					v.buildBlockContextMenu(m, step.ID, bid, idx, len(blocks), bm)
-				})
 				if dragged, over := ui.DragOver[stepBlockDrag](blockRow); over && dragged.StepID == step.ID && dragged.FromIndex != idx {
 					blockRow.Border(2, tok.Accent)
 				}
@@ -755,47 +755,51 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 	})
 }
 
-func (v *View) buildBlockContextMenu(m *components.Menu, stepID, blockID string, idx, total int, bm map[string]any) {
-	if m.Item("剪切").Shortcut("Ctrl+X").Chosen() {
-		sharedBlockClipboard = cloneAnyMap(bm)
-		if v.OnRemoveStepBlock != nil {
-			v.OnRemoveStepBlock(stepID, blockID)
+func (v *View) buildBlockContextMenu(c *ui.Context, m *components.Menu, stepID, blockID string, idx, total int, kind string, bm map[string]any, editable bool) {
+	if editable {
+		if m.Item("剪切").Shortcut("Ctrl+X").Chosen() {
+			sharedBlockClipboard = cloneAnyMap(bm)
+			if v.OnRemoveStepBlock != nil {
+				v.OnRemoveStepBlock(stepID, blockID)
+			}
 		}
-	}
-	if m.Item("复制").Shortcut("Ctrl+C").Chosen() {
-		sharedBlockClipboard = cloneAnyMap(bm)
-	}
-	if m.Item("粘贴到下方").Shortcut("Ctrl+V").Disabled(sharedBlockClipboard == nil || v.OnInsertStepBlock == nil).Chosen() {
-		clone := cloneAnyMap(sharedBlockClipboard)
-		delete(clone, "id")
-		v.OnInsertStepBlock(stepID, idx+1, clone)
-	}
-	if m.Item("创建副本").Shortcut("Ctrl+D").Chosen() {
-		if v.OnDuplicateBlock != nil {
-			v.OnDuplicateBlock(stepID, blockID)
-		} else if v.OnInsertStepBlock != nil {
-			clone := cloneAnyMap(bm)
+		if m.Item("复制块").Shortcut("Ctrl+C").Chosen() {
+			sharedBlockClipboard = cloneAnyMap(bm)
+		}
+		if m.Item("粘贴到下方").Shortcut("Ctrl+V").Disabled(sharedBlockClipboard == nil || v.OnInsertStepBlock == nil).Chosen() {
+			clone := cloneAnyMap(sharedBlockClipboard)
 			delete(clone, "id")
 			v.OnInsertStepBlock(stepID, idx+1, clone)
 		}
-	}
-	m.Separator()
-	if m.Item("上移").Disabled(idx == 0).Chosen() {
-		if v.OnMoveStepBlockIndex != nil {
-			v.OnMoveStepBlockIndex(stepID, blockID, idx-1)
-		} else if v.OnMoveStepBlock != nil {
-			v.OnMoveStepBlock(stepID, blockID, "up")
+		if m.Item("创建副本").Shortcut("Ctrl+D").Chosen() {
+			if v.OnDuplicateBlock != nil {
+				v.OnDuplicateBlock(stepID, blockID)
+			} else if v.OnInsertStepBlock != nil {
+				clone := cloneAnyMap(bm)
+				delete(clone, "id")
+				v.OnInsertStepBlock(stepID, idx+1, clone)
+			}
 		}
-	}
-	if m.Item("下移").Disabled(idx >= total-1).Chosen() {
-		if v.OnMoveStepBlockIndex != nil {
-			v.OnMoveStepBlockIndex(stepID, blockID, idx+1)
-		} else if v.OnMoveStepBlock != nil {
-			v.OnMoveStepBlock(stepID, blockID, "down")
+		m.Separator()
+		if m.Item("上移").Disabled(idx == 0).Chosen() {
+			if v.OnMoveStepBlockIndex != nil {
+				v.OnMoveStepBlockIndex(stepID, blockID, idx-1)
+			} else if v.OnMoveStepBlock != nil {
+				v.OnMoveStepBlock(stepID, blockID, "up")
+			}
 		}
+		if m.Item("下移").Disabled(idx >= total-1).Chosen() {
+			if v.OnMoveStepBlockIndex != nil {
+				v.OnMoveStepBlockIndex(stepID, blockID, idx+1)
+			} else if v.OnMoveStepBlock != nil {
+				v.OnMoveStepBlock(stepID, blockID, "down")
+			}
+		}
+		m.Separator()
+		if m.Item("删除").Shortcut("Del").Chosen() && v.OnRemoveStepBlock != nil {
+			v.OnRemoveStepBlock(stepID, blockID)
+		}
+		m.Separator()
 	}
-	m.Separator()
-	if m.Item("删除").Shortcut("Del").Chosen() && v.OnRemoveStepBlock != nil {
-		v.OnRemoveStepBlock(stepID, blockID)
-	}
+	v.buildComponentShareMenu(c, m, kind, bm)
 }

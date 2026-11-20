@@ -3,75 +3,95 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>AsterLab — 单文件真源的湿实验研究工作台</title>
-<meta name="description" content="AsterLab 基于 .asterml 本地 Vault 单真源与 Pure-Go astercore 引擎，在同一份结构化文档内统一实验设计、原位执行与统计溯源。" />
+<title>AsterLab — 单文件真源与全组件可导出的科研工作台</title>
+<meta name="description" content="AsterLab 基于 .asterml 本地 Vault 单真源与 Pure-Go astercore 引擎：三轨合一设计，支持任意孔板、表格与步骤模块右键导出 SVG / Markdown 单张分享。" />
 <meta name="theme-color" content="#0c0b0a" />
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
 <style>
 :root {
   --bg: #0c0b0a;
-  --bg-elev: rgba(21, 20, 18, 0.78);
+  --bg-panel: #131210;
+  --bg-elev: #1a1816;
   --fg: #f2efe9;
   --fg-dim: #b4afa6;
   --fg-faint: #78736a;
-  --rule: rgba(255, 255, 255, 0.09);
-  --rule-strong: rgba(255, 255, 255, 0.18);
+  --rule: rgba(255, 255, 255, 0.085);
+  --rule-strong: rgba(255, 255, 255, 0.16);
   --accent: #a596ff;
   --accent-solid: #7457ec;
   --accent-2: #38bdf8;
   --accent-3: #6fd3a4;
+  --grid-line: rgba(255, 255, 255, 0.032);
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
 html[data-theme="light"] {
   --bg: #ffffff;
-  --bg-elev: rgba(245, 246, 248, 0.84);
+  --bg-panel: #f7f8fa;
+  --bg-elev: #eef0f4;
   --fg: #14151a;
   --fg-dim: #4c515f;
   --fg-faint: #848b9c;
-  --rule: rgba(20, 21, 26, 0.09);
-  --rule-strong: rgba(20, 21, 26, 0.18);
+  --rule: rgba(20, 21, 26, 0.085);
+  --rule-strong: rgba(20, 21, 26, 0.17);
   --accent: #6c5ce7;
   --accent-solid: #6c5ce7;
   --accent-2: #0ea5e9;
   --accent-3: #168053;
+  --grid-line: rgba(20, 21, 26, 0.045);
 }
 *, *::before, *::after { box-sizing: border-box; }
-html, body { height: 100%; }
-body {
-  margin: 0;
+html {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
   overflow-x: hidden;
-  transition: background 240ms ease, color 240ms ease;
+  transition: background 220ms ease, color 220ms ease;
 }
 a { color: inherit; text-decoration: none; }
 
-.stage {
-  position: relative;
-  min-height: 100dvh;
-  overflow: hidden;
-  background: var(--bg);
-  isolation: isolate;
+/* Subtle architectural drafting grid backdrop (zero noisy particles) */
+.draft-grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 80% 65% at 62% 28%, #000 10%, transparent 82%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 65% at 62% 28%, #000 10%, transparent 82%);
 }
-.poster { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
-.poster canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+.ambient-glow {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 520px;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(52% 85% at 68% 12%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 72%);
+}
 
-/* Unified 56px Frosted Topbar matching docs.asterlab.party */
+/* Unified 56px Topbar matching docs.asterlab.party */
 .topbar {
   position: fixed;
   top: 0; left: 0; right: 0;
   height: 56px;
-  z-index: 30;
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  z-index: 40;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--rule);
 }
 .topbar-inner {
-  max-width: 1280px;
+  max-width: 1240px;
   height: 100%;
   margin: 0 auto;
   padding: 0 24px;
@@ -87,605 +107,679 @@ a { color: inherit; text-decoration: none; }
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--fg);
 }
 .brand-mark { display: block; width: 20px; height: auto; color: var(--fg); overflow: visible; }
-.brand-mark .stream {
-  transition: fill 240ms ease, transform 240ms cubic-bezier(.22,1,.36,1);
-  transform-box: fill-box;
-  transform-origin: center bottom;
-}
-.brand:hover .brand-mark .stream-1,
-.stage[data-stream="1"] .brand-mark .stream-1 { fill: var(--accent); transform: translateY(-14px); }
-.brand:hover .brand-mark .stream-2,
-.stage[data-stream="2"] .brand-mark .stream-2 { fill: var(--accent-2); transform: translateY(-10px); transition-delay: 65ms; }
-.brand:hover .brand-mark .stream-3,
-.stage[data-stream="3"] .brand-mark .stream-3 { fill: var(--accent-3); transform: translateY(-6px); transition-delay: 130ms; }
+.brand-mark .stream { transition: fill 220ms ease, transform 220ms cubic-bezier(.22,1,.36,1); transform-box: fill-box; transform-origin: center bottom; }
+.brand:hover .stream-1 { fill: var(--accent); transform: translateY(-14px); }
+.brand:hover .stream-2 { fill: var(--accent-2); transform: translateY(-10px); transition-delay: 65ms; }
+.brand:hover .stream-3 { fill: var(--accent-3); transform: translateY(-6px); transition-delay: 130ms; }
 .brand-sep { color: var(--fg-faint); font-weight: 400; }
-.brand-sub {
-  font-family: var(--mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  color: var(--accent);
-  font-weight: 500;
-}
+.brand-sub { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--accent); font-weight: 500; }
 
-.top-nav { display: flex; align-items: center; gap: 14px; }
+.top-nav { display: flex; align-items: center; gap: 12px; }
 .navlink {
   font-family: var(--mono);
   font-size: 11.5px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--fg-dim);
-  padding: 5px 8px;
+  padding: 5px 9px;
   border-radius: 6px;
   transition: color 0.15s, background 0.15s;
 }
-.navlink:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.navlink:hover { color: var(--fg); background: var(--bg-elev); }
 .icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: none;
-  color: var(--fg-dim);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 32px; min-width: 32px; padding: 0 9px;
+  border: 1px solid var(--rule); border-radius: 6px;
+  background: none; color: var(--fg-dim);
+  font-family: var(--mono); font-size: 11.5px; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.icon-btn:hover { color: var(--fg); border-color: var(--rule-strong); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.icon-btn:hover { color: var(--fg); border-color: var(--rule-strong); background: var(--bg-elev); }
 .icon-btn svg { width: 14px; height: 14px; }
 
-/* Main Editorial Canvas */
-.content-shell {
-  position: relative;
-  z-index: 2;
-  max-width: 1280px;
-  min-height: 100dvh;
-  margin: 0 auto;
-  padding: 88px 24px 72px;
+/* Main Page Container */
+.page { position: relative; z-index: 2; max-width: 1240px; margin: 0 auto; padding: 0 24px; }
+
+/* Band 1: Badge-Driven Hero */
+.hero {
+  min-height: 86vh;
+  padding: 108px 0 64px;
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(300px, 0.92fr);
-  gap: 48px;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1.12fr);
+  gap: 52px;
   align-items: center;
 }
-.caption {
-  margin: 0 0 16px;
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--bg-panel);
   font-family: var(--mono);
   font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--fg-dim);
 }
+.eyebrow-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--accent); }
 .hero h1 {
   margin: 0;
-  font-size: clamp(32px, 4vw, 50px);
-  font-weight: 600;
-  line-height: 1.16;
-  letter-spacing: -0.025em;
+  font-size: clamp(34px, 4.1vw, 52px);
+  font-weight: 650;
+  line-height: 1.13;
+  letter-spacing: -0.03em;
   color: var(--fg);
 }
-.sub {
-  margin: 18px 0 0;
-  font-size: 15.5px;
+.hero-sub {
+  margin: 20px 0 0;
+  font-size: 16px;
   line-height: 1.72;
   color: var(--fg-dim);
   max-width: 48ch;
 }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 28px; }
 .btn-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 18px;
-  background: var(--accent-solid);
-  color: #ffffff;
-  border-radius: 6px;
-  font-size: 13.5px;
-  font-weight: 500;
-  transition: filter 0.15s, transform 0.15s;
+  display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 20px;
+  background: var(--accent-solid); color: #fff; border-radius: 6px;
+  font-size: 13.5px; font-weight: 500; transition: filter 0.15s, transform 0.15s;
 }
 .btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 16px;
-  border: 1px solid var(--rule-strong);
-  border-radius: 6px;
-  color: var(--fg-dim);
-  font-size: 13.5px;
-  background: var(--bg-elev);
-  backdrop-filter: blur(12px);
+  display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px;
+  border: 1px solid var(--rule-strong); border-radius: 6px;
+  color: var(--fg-dim); background: var(--bg-panel); font-size: 13.5px;
   transition: color 0.15s, border-color 0.15s;
 }
 .btn-secondary:hover { color: var(--fg); border-color: var(--accent); }
 
-/* Interactive 3-Stream Lens Card (Design / UnifiedLive / Pure-Go AsterCore) */
-.lens-card {
+.metrics-strip {
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1px solid var(--rule);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.metric-val { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--fg); }
+.metric-lbl { font-size: 12.5px; color: var(--fg-faint); margin-top: 4px; }
+
+/* The Badge Conduit Instrument (Right Column Hero) */
+.badge-instrument {
   position: relative;
   border: 1px solid var(--rule-strong);
-  border-radius: 10px;
-  background: var(--bg-elev);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  padding: 20px;
+  border-radius: 14px;
+  background: linear-gradient(155deg, color-mix(in srgb, var(--bg-elev) 82%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent));
+  padding: 24px 24px 20px;
   overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.24);
 }
-.lens-blueprint {
-  position: absolute;
-  right: -24px;
-  bottom: -24px;
-  width: 240px;
-  height: auto;
-  color: var(--accent);
-  opacity: 0.12;
-  pointer-events: none;
-}
-.lens-tabs {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 16px;
-}
-.lens-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 11px;
-  border-radius: 6px;
-  border: 1px solid var(--rule);
-  background: transparent;
-  color: var(--fg-dim);
-  font-family: var(--mono);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.16s ease;
-}
-.lens-tab:hover { color: var(--fg); border-color: var(--rule-strong); }
-.lens-tab.active {
-  color: var(--fg);
-  border-color: var(--rule-strong);
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-}
-.dot { width: 7px; height: 7px; border-radius: 999px; }
-.lens-title { position: relative; z-index: 1; font-size: 16px; font-weight: 600; margin: 0 0 6px; color: var(--fg); }
-.lens-desc { position: relative; z-index: 1; font-size: 13.5px; line-height: 1.65; color: var(--fg-dim); margin: 0 0 14px; }
-.lens-code {
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  padding: 12px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--rule);
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--fg-dim);
-  overflow-x: auto;
-}
-.lens-footer {
-  position: relative;
-  z-index: 1;
-  margin-top: 14px;
+.instrument-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--fg-faint);
-}
-.lens-link { color: var(--accent); }
-.lens-link:hover { text-decoration: underline; }
-
-/* Bottom legal bar */
-.legal {
-  position: fixed;
-  right: 24px;
-  bottom: 18px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--fg-faint);
+  margin-bottom: 14px;
 }
-.motion-toggle {
-  padding: 0; background: none; border: 0; color: var(--fg-faint);
-  font: inherit; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+.badge-stage {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 18px;
+  align-items: end;
 }
-.motion-toggle:hover { color: var(--accent); }
+.rail-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.rail-btn {
+  text-align: left;
+  padding: 9px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.rail-btn:hover { border-color: var(--rule-strong); color: var(--fg); }
+.rail-btn.active { border-color: var(--rule-strong); background: var(--bg-elev); color: var(--fg); }
+.rail-btn[data-track="1"].active { border-left: 3px solid var(--accent); }
+.rail-btn[data-track="2"].active { border-left: 3px solid var(--accent-2); }
+.rail-btn[data-track="3"].active { border-left: 3px solid var(--accent-3); }
+.rail-k { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-faint); }
+.rail-t { font-size: 13px; font-weight: 600; margin-top: 3px; color: var(--fg); }
+.dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; }
 
-@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-.hero-inner { animation: rise 0.65s ease-out both; }
-.lens-card { animation: rise 0.72s 0.08s ease-out both; }
-
-@media (max-width: 960px) {
-  .content-shell { grid-template-columns: 1fr; padding-top: 92px; padding-bottom: 84px; gap: 28px; }
-  .navlink { display: none; }
+.badge-svg-wrap { position: relative; display: flex; align-items: center; justify-content: center; padding: 6px 4px 2px; }
+.badge-hero-svg { width: 100%; max-width: 340px; height: auto; display: block; overflow: visible; }
+.bp-wire { stroke: var(--fg-faint); stroke-opacity: 0.25; fill: none; }
+.bp-node { fill: var(--fg-faint); fill-opacity: 0.35; }
+.arch-track {
+  cursor: pointer;
+  fill-opacity: 0.22;
+  stroke-width: 1.5;
+  stroke-opacity: 0.55;
+  transition: fill-opacity 240ms ease, stroke-opacity 240ms ease, filter 240ms ease;
+}
+.arch-track.active {
+  fill-opacity: 0.92;
+  stroke-opacity: 1;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, currentColor 28%, transparent));
+}
+.laminar-flow {
+  fill: none;
+  stroke-width: 14;
+  stroke-linecap: round;
+  stroke-dasharray: 260 1600;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+}
+.laminar-flow.active {
+  opacity: 0.85;
+  animation: laminarGlide 4.2s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+@keyframes laminarGlide {
+  from { stroke-dashoffset: 1860; }
+  to { stroke-dashoffset: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hero-inner, .lens-card { animation: none; }
+  .laminar-flow.active { animation: none; stroke-dasharray: none; opacity: 0.45; }
+}
+
+.instrument-readout {
+  margin-top: 16px;
+  padding: 13px 15px;
+  border-radius: 8px;
+  border: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.readout-title { font-size: 13.5px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
+.readout-desc { font-size: 12.5px; line-height: 1.6; color: var(--fg-dim); margin: 0; }
+.readout-link {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+  padding-top: 2px;
+}
+.readout-link:hover { text-decoration: underline; }
+
+/* Band 2: Interactive Component Export Sandbox */
+.section { padding: 64px 0; border-top: 1px solid var(--rule); }
+.section-kicker { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--accent); margin: 0 0 10px; }
+.section-h2 { font-size: clamp(24px, 2.8vw, 34px); font-weight: 600; letter-spacing: -0.025em; margin: 0 0 12px; color: var(--fg); }
+.section-lead { font-size: 15px; line-height: 1.7; color: var(--fg-dim); max-width: 60ch; margin: 0 0 32px; }
+
+.sandbox-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 32px;
+  align-items: start;
+}
+.sandbox-card {
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  padding: 20px;
+}
+.sandbox-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.sandbox-title { font-size: 14px; font-weight: 600; color: var(--fg); }
+.sandbox-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chip-btn:hover { color: var(--fg); border-color: var(--accent); }
+.chip-btn.primary { background: var(--accent-solid); border-color: transparent; color: #fff; }
+.chip-btn.primary:hover { filter: brightness(1.08); }
+
+.mini-plate-grid {
+  display: grid;
+  grid-template-columns: 22px repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  align-items: center;
+  max-width: 420px;
+}
+.mp-hdr { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); text-align: center; }
+.mp-well {
+  aspect-ratio: 1;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.mp-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px; font-size: 12px; color: var(--fg-dim); }
+.mp-leg-item { display: inline-flex; align-items: center; gap: 6px; }
+.sandbox-preview {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  max-height: 190px;
+  overflow: auto;
+  display: none;
+}
+.sandbox-preview.open { display: block; }
+.sandbox-toast {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--accent-3);
+  min-height: 18px;
+}
+
+.adv-list { display: flex; flex-direction: column; gap: 14px; }
+.adv-item {
+  padding: 16px 18px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--bg-panel);
+}
+.adv-item h3 { margin: 0 0 6px; font-size: 14.5px; font-weight: 600; color: var(--fg); }
+.adv-item p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--fg-dim); }
+
+/* Band 3: 3-Track Bento */
+.bento-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.bento-card {
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  transition: border-color 0.15s;
+}
+.bento-card:hover { border-color: var(--rule-strong); }
+.bento-tag { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; }
+.bento-card h3 { margin: 6px 0 8px; font-size: 16px; color: var(--fg); }
+.bento-card p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--fg-dim); }
+.bento-foot { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+
+.site-footer {
+  border-top: 1px solid var(--rule);
+  padding: 28px 0 42px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+.footer-links { display: flex; gap: 18px; }
+.footer-links a:hover { color: var(--fg); }
+
+@media (max-width: 960px) {
+  .hero, .sandbox-grid, .bento-3 { grid-template-columns: 1fr; }
+  .badge-stage { grid-template-columns: 1fr; }
+  .navlink { display: none; }
 }
 </style>
 </head>
 <body>
-<main class="stage" id="stage" data-stream="1">
-  <div class="poster">
-    <canvas id="poster" aria-hidden="true"></canvas>
-    <canvas id="overlay" aria-hidden="true"></canvas>
-  </div>
+<div class="draft-grid" aria-hidden="true"></div>
+<div class="ambient-glow" aria-hidden="true"></div>
 
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a class="brand" href="https://www.asterlab.party/" aria-label="AsterLab 首页">
-        <svg class="brand-mark" viewBox="0 0 1024 896.711" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
-          <path class="stream stream-1" d="M 0 528.588 L 127.468 528.588 C 170.4 528.588 209.641 504.316 228.814 465.904 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 939.048 896.711 L 939.048 288.031 C 939.048 242.969 921.148 199.754 889.285 167.891 C 824.897 103.503 733.474 74.007 643.596 88.624 C 553.719 103.241 476.354 160.187 435.688 241.661 L 304.823 503.843 C 271.271 571.064 202.598 613.539 127.468 613.539 L 0 613.539 L 0 528.588 Z"/>
-          <path class="stream stream-2" d="M 0 670.174 L 127.468 670.174 C 224.064 670.174 312.357 615.563 355.496 529.136 L 486.36 266.953 C 518.893 201.775 580.785 156.217 652.687 144.524 C 724.589 132.83 797.728 156.427 849.238 207.937 C 870.48 229.179 882.414 257.99 882.414 288.031 L 882.414 896.711 L 797.462 896.711 L 797.462 288.031 C 797.462 280.52 794.479 273.318 789.168 268.007 C 756.974 235.813 711.263 221.065 666.324 228.374 C 621.385 235.682 582.703 264.156 562.37 304.892 L 431.506 567.074 C 373.987 682.311 256.262 755.125 127.468 755.125 L 0 755.125 L 0 670.174 Z"/>
-          <path class="stream stream-3" d="M 0 811.76 L 127.468 811.76 C 277.728 811.76 415.073 726.81 482.179 592.367 L 559.389 437.678 C 586.62 383.121 652.154 359.912 707.652 385.168 C 727.858 394.364 740.828 414.516 740.828 436.716 L 740.828 896.711 L 655.876 896.711 L 655.876 434.59 L 558.188 630.306 C 476.703 793.558 309.926 896.711 127.468 896.711 L 0 896.711 L 0 811.76 Z"/>
-        </svg>
-        <span>AsterLab</span>
-        <span class="brand-sep">/</span>
-        <span class="brand-sub">v2</span>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="https://www.asterlab.party/" aria-label="AsterLab 首页">
+      <svg class="brand-mark" viewBox="0 0 1024 896.711" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+        <path class="stream stream-1" d="M 0 528.588 L 127.468 528.588 C 170.4 528.588 209.641 504.316 228.814 465.904 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 939.048 896.711 L 939.048 288.031 C 939.048 242.969 921.148 199.754 889.285 167.891 C 824.897 103.503 733.474 74.007 643.596 88.624 C 553.719 103.241 476.354 160.187 435.688 241.661 L 304.823 503.843 C 271.271 571.064 202.598 613.539 127.468 613.539 L 0 613.539 L 0 528.588 Z"/>
+        <path class="stream stream-2" d="M 0 670.174 L 127.468 670.174 C 224.064 670.174 312.357 615.563 355.496 529.136 L 486.36 266.953 C 518.893 201.775 580.785 156.217 652.687 144.524 C 724.589 132.83 797.728 156.427 849.238 207.937 C 870.48 229.179 882.414 257.99 882.414 288.031 L 882.414 896.711 L 797.462 896.711 L 797.462 288.031 C 797.462 280.52 794.479 273.318 789.168 268.007 C 756.974 235.813 711.263 221.065 666.324 228.374 C 621.385 235.682 582.703 264.156 562.37 304.892 L 431.506 567.074 C 373.987 682.311 256.262 755.125 127.468 755.125 L 0 755.125 L 0 670.174 Z"/>
+        <path class="stream stream-3" d="M 0 811.76 L 127.468 811.76 C 277.728 811.76 415.073 726.81 482.179 592.367 L 559.389 437.678 C 586.62 383.121 652.154 359.912 707.652 385.168 C 727.858 394.364 740.828 414.516 740.828 436.716 L 740.828 896.711 L 655.876 896.711 L 655.876 434.59 L 558.188 630.306 C 476.703 793.558 309.926 896.711 127.468 896.711 L 0 896.711 L 0 811.76 Z"/>
+      </svg>
+      <span>AsterLab</span>
+      <span class="brand-sep">/</span>
+      <span class="brand-sub">v2</span>
+    </a>
+    <nav class="top-nav" aria-label="主导航">
+      <a class="navlink" href="https://docs.asterlab.party/">Docs</a>
+      <a class="navlink" href="#export-lab">组件导出</a>
+      <a class="navlink" href="#architecture">三轨架构</a>
+      <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">AsterML</a>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="切换明暗主题">◐</button>
+      <a class="icon-btn" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener" aria-label="GitHub">
+        <svg viewBox="0 0 98 96" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.852 3.316 2.362C83.714 89.39 97.707 70.973 97.707 49.217 97.707 22 75.788 0 48.854 0z"/></svg>
       </a>
-      <nav class="top-nav" aria-label="主导航">
-        <a class="navlink" href="https://docs.asterlab.party/">Docs</a>
-        <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Farchitecture.md">架构</a>
-        <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">AsterML</a>
-        <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdesktop-workbench.md">工作台</a>
-        <button class="icon-btn" id="themeBtn" type="button" aria-label="切换明暗主题">◐</button>
-        <a class="icon-btn" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener" aria-label="GitHub">
-          <svg viewBox="0 0 98 96" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.852 3.316 2.362C83.714 89.39 97.707 70.973 97.707 49.217 97.707 22 75.788 0 48.854 0z"/></svg>
-        </a>
-      </nav>
-    </div>
-  </header>
+    </nav>
+  </div>
+</header>
 
-  <section class="content-shell">
-    <div class="hero-inner">
-      <p class="caption">.asterml Local SSOT · Pure-Go astercore</p>
-      <h1>一份可读的实验文档，即完整研发工作区</h1>
-      <p class="sub">AsterLab 以本地 Markdown + 结构化 <code>.asterml</code> 为单一事实源，零 SQLite 与外部动态库绑定；同一份文件原位承载实验分组、孔板映射、倒计时、实测偏离与确定性统计分析。</p>
+<main class="page">
+  <!-- BAND 1: BADGE-DRIVEN HERO -->
+  <section class="hero">
+    <div>
+      <p class="eyebrow"><span class="eyebrow-dot"></span>.asterml Local SSOT · Pure-Go astercore</p>
+      <h1>单文件即研发工作区，<br />从设计到分析同源流转</h1>
+      <p class="hero-sub">AsterLab 以开放可读的 <code>.asterml</code> 本地文件为单一事实源，零 SQLite 与外部动态库绑定；三条几何轨道将实验设计、原位执行与确定性统计分析收束为一体。</p>
       <div class="actions">
         <a class="btn-primary" href="https://docs.asterlab.party/">浏览工程手册 <span aria-hidden="true">→</span></a>
-        <a class="btn-secondary" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">AsterML v2 规范</a>
-        <a class="btn-secondary" href="https://github.com/LLLin000/AsterLab">GitHub</a>
+        <a class="btn-secondary" href="#export-lab">体验单组件导出 SVG / MD ↓</a>
+      </div>
+      <div class="metrics-strip">
+        <div>
+          <div class="metric-val">21 种原语</div>
+          <div class="metric-lbl">通用块自由组合，零专病代码堆砌</div>
+        </div>
+        <div>
+          <div class="metric-val">SVG · PNG · MD</div>
+          <div class="metric-lbl">任意孔板与表格右键单张导出分享</div>
+        </div>
+        <div>
+          <div class="metric-val">Pure-Go Core</div>
+          <div class="metric-lbl">桌面、移动与 CLI 同源零 DLL 依赖</div>
+        </div>
       </div>
     </div>
 
-    <aside class="lens-card" aria-label="三流架构交互预览">
-      <svg class="lens-blueprint" viewBox="-16 -24 1056 944" aria-hidden="true">
-        <path d="M 0 481.392 L 151.025 481.392 C 193.956 481.392 233.198 457.121 252.371 418.709 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 910.731 896.711 L 910.731 375.105 C 910.731 311.645 884.113 251.094 837.355 208.189 C 790.597 165.284 727.986 143.959 664.76 149.403 C 566.506 157.863 479.73 216.831 435.688 305.068 L 330.251 516.307 C 306.285 564.322 257.233 594.661 203.569 594.661 L 0 594.661 L 0 481.392 Z M 0 632.418 L 226.921 632.418 C 280.586 632.418 329.638 602.078 353.604 554.063 L 461.024 338.85 C 493.871 273.043 553.546 224.634 624.713 206.067 C 684.12 190.567 747.356 203.47 795.94 241.006 C 844.525 278.541 872.975 336.471 872.975 397.866 L 872.975 896.711 L 759.706 896.711 L 759.706 474.637 C 759.706 422.09 723.568 376.444 672.423 364.389 C 621.278 352.334 568.558 377.037 545.091 424.052 L 431.484 651.661 C 402.725 709.279 343.862 745.686 279.465 745.686 L 0 745.686 L 0 632.418 Z M 0 783.443 L 302.818 783.443 C 367.215 783.443 426.077 747.036 454.837 689.417 L 559.389 479.95 C 580.046 438.564 623.792 413.896 669.896 417.637 C 699.302 420.023 721.95 444.584 721.95 474.086 L 721.95 896.711 L 608.681 896.711 L 608.681 634.823 L 540.539 771.344 C 502.193 848.169 423.71 896.711 337.847 896.711 L 0 896.711 L 0 783.443 Z" fill="none" stroke="currentColor" stroke-width="5"/>
-      </svg>
-      <div class="lens-tabs" role="tablist" aria-label="三流核心模式">
-        <button class="lens-tab active" type="button" data-lens="1"><span class="dot" style="background:var(--accent)"></span>01 · 设计</button>
-        <button class="lens-tab" type="button" data-lens="2"><span class="dot" style="background:var(--accent-2)"></span>02 · 执行</button>
-        <button class="lens-tab" type="button" data-lens="3"><span class="dot" style="background:var(--accent-3)"></span>03 · 分析</button>
+    <!-- Centerpiece: Interactive Badge Blueprint Instrument -->
+    <div class="badge-instrument" aria-label="AsterLab 三轨徽标构造仪">
+      <div class="instrument-head">
+        <span>Brand Geometry · Tri-Stream Conduit</span>
+        <span id="trackCoord">R=481 · C¹ BEZIER</span>
       </div>
-      <h2 class="lens-title" id="lensTitle">21 个通用原语组合，零专病堆砌</h2>
-      <p class="lens-desc" id="lensDesc">CCK-8、RT-qPCR、转染或抑菌圈均由通用内容块与 plate@1 容器组合定义；支持在编辑、阅读与源码三态间瞬时切换。</p>
-      <pre class="lens-code" id="lensCode">```asterlab
-kind: plate@1
-format: 96
-gradient_ramp: concentration
-links: ["@groups", "@param.seed_density"]
-```</pre>
-      <div class="lens-footer">
-        <span id="lensMeta">Single Source of Truth · .asterml</span>
-        <a class="lens-link" id="lensLink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fmodules-content.md">查看模块目录 →</a>
+      <div class="badge-stage">
+        <div class="rail-selector" role="tablist" aria-label="徽章三轨说明">
+          <button class="rail-btn active" type="button" data-track="1">
+            <div class="rail-k"><span class="dot" style="background:var(--accent)"></span>Track 01</div>
+            <div class="rail-t">实验设计 Design</div>
+          </button>
+          <button class="rail-btn" type="button" data-track="2">
+            <div class="rail-k"><span class="dot" style="background:var(--accent-2)"></span>Track 02</div>
+            <div class="rail-t">原位执行 UnifiedLive</div>
+          </button>
+          <button class="rail-btn" type="button" data-track="3">
+            <div class="rail-k"><span class="dot" style="background:var(--accent-3)"></span>Track 03</div>
+            <div class="rail-t">纯 Go 核心 AsterCore</div>
+          </button>
+        </div>
+
+        <div class="badge-svg-wrap">
+          <svg class="badge-hero-svg" viewBox="-26 -28 1076 956" aria-label="AsterLab 几何品牌徽标交互视图">
+            <defs>
+              <linearGradient id="gFlow1" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.15"/><stop offset="50%" stop-color="var(--accent)" stop-opacity="1"/><stop offset="100%" stop-color="var(--accent-2)" stop-opacity="0.3"/></linearGradient>
+              <linearGradient id="gFlow2" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--accent-2)" stop-opacity="0.15"/><stop offset="50%" stop-color="var(--accent-2)" stop-opacity="1"/><stop offset="100%" stop-color="var(--accent-3)" stop-opacity="0.3"/></linearGradient>
+              <linearGradient id="gFlow3" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--accent-3)" stop-opacity="0.15"/><stop offset="50%" stop-color="var(--accent-3)" stop-opacity="1"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.3"/></linearGradient>
+            </defs>
+            <!-- Construction tangents & anchor nodes directly from asterlab-symbol-logo-outline.svg -->
+            <g class="bp-wire" stroke-width="2" stroke-dasharray="6 6">
+              <line x1="151.03" y1="481.39" x2="252.37" y2="418.71"/><circle cx="193.96" cy="481.39" r="7"/>
+              <line x1="359.68" y1="203.72" x2="412.54" y2="97.81"/><circle cx="412.54" cy="97.81" r="7"/>
+              <line x1="513.12" y1="23.78" x2="746.8" y2="-14.23"/><circle cx="629.96" cy="4.77" r="7"/>
+              <line x1="790.6" y1="165.28" x2="884.11" y2="251.09"/><circle cx="837.36" cy="208.19" r="7"/>
+              <line x1="402.73" y1="709.28" x2="493.87" y2="273.04"/><circle cx="545.09" cy="424.05" r="7"/>
+            </g>
+            <g class="bp-node">
+              <rect x="-6" y="475" width="12" height="12"/><rect x="353" y="197" width="12" height="12"/>
+              <rect x="1017" y="281" width="12" height="12"/><rect x="1017" y="890" width="12" height="12"/>
+              <rect x="618" y="200" width="12" height="12"/><rect x="753" y="468" width="12" height="12"/>
+              <rect x="663" y="411" width="12" height="12"/><rect x="331" y="890" width="12" height="12"/>
+            </g>
+            <!-- Track 1: Design (Outer Arch) -->
+            <path class="arch-track active" data-track-shape="1" fill="var(--accent)" stroke="var(--accent)"
+              d="M 0 481.392 L 151.025 481.392 C 193.956 481.392 233.198 457.121 252.371 418.709 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 910.731 896.711 L 910.731 375.105 C 910.731 311.645 884.113 251.094 837.355 208.189 C 790.597 165.284 727.986 143.959 664.76 149.403 C 566.506 157.863 479.73 216.831 435.688 305.068 L 330.251 516.307 C 306.285 564.322 257.233 594.661 203.569 594.661 L 0 594.661 Z"/>
+            <!-- Track 2: UnifiedLive (Middle Arch) -->
+            <path class="arch-track" data-track-shape="2" fill="var(--accent-2)" stroke="var(--accent-2)"
+              d="M 0 632.418 L 226.921 632.418 C 280.586 632.418 329.638 602.078 353.604 554.063 L 461.024 338.85 C 493.871 273.043 553.546 224.634 624.713 206.067 C 684.12 190.567 747.356 203.47 795.94 241.006 C 844.525 278.541 872.975 336.471 872.975 397.866 L 872.975 896.711 L 759.706 896.711 L 759.706 474.637 C 759.706 422.09 723.568 376.444 672.423 364.389 C 621.278 352.334 568.558 377.037 545.091 424.052 L 431.484 651.661 C 402.725 709.279 343.862 745.686 279.465 745.686 L 0 745.686 Z"/>
+            <!-- Track 3: Pure-Go Core (Inner Arch) -->
+            <path class="arch-track" data-track-shape="3" fill="var(--accent-3)" stroke="var(--accent-3)"
+              d="M 0 783.443 L 302.818 783.443 C 367.215 783.443 426.077 747.036 454.837 689.417 L 559.389 479.95 C 580.046 438.564 623.792 413.896 669.896 417.637 C 699.302 420.023 721.95 444.584 721.95 474.086 L 721.95 896.711 L 608.681 896.711 L 608.681 634.823 L 540.539 771.344 C 502.193 848.169 423.71 896.711 337.847 896.711 L 0 896.711 Z"/>
+            <!-- Smooth laminar centerline conduit pulses (NOT flies!) -->
+            <path class="laminar-flow active" data-flow="1" stroke="url(#gFlow1)" d="M 0 538 L 177 538 C 228 538 274 509 296 462 L 401 251 C 446 161 539 98 640 84 C 742 70 843 108 906 184 C 948 234 968 292 968 355 L 968 896"/>
+            <path class="laminar-flow" data-flow="2" stroke="url(#gFlow2)" d="M 0 689 L 253 689 C 312 689 366 655 392 602 L 502 381 C 542 301 625 256 710 278 C 776 295 816 352 816 422 L 816 896"/>
+            <path class="laminar-flow" data-flow="3" stroke="url(#gFlow3)" d="M 0 840 L 320 840 C 392 840 458 799 491 734 L 606 502 C 626 462 666 470 666 510 L 666 896"/>
+          </svg>
+        </div>
       </div>
-    </aside>
+      <div class="instrument-readout">
+        <div>
+          <p class="readout-title" id="readoutTitle">Track 01 · .asterml 结构化实验设计</p>
+          <p class="readout-desc" id="readoutDesc">以 Markdown + YAML 围栏声明因子分组、样本量 n 与 96/384 孔板浓度梯度；纯文本存储，Git 与外部 Agent 天然可读可审查。</p>
+        </div>
+        <a class="readout-link" id="readoutLink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">规范文档 →</a>
+      </div>
+    </div>
   </section>
 
-  <div class="legal">
-    <span>© 2026 AsterLab · Pure-Go Native</span>
-    <button class="motion-toggle" id="motionToggle" type="button" hidden></button>
-  </div>
+  <!-- BAND 2: INTERACTIVE COMPONENT EXPORT LAB -->
+  <section class="section" id="export-lab">
+    <p class="section-kicker">Interactive Export Workflow</p>
+    <h2 class="section-h2">任意孔板与表格，右键即得矢量 SVG / Markdown</h2>
+    <p class="section-lead">不再截图拼图发微信群。在 AsterLab 文档内右键任何 <code>plate@1</code> 孔板或参数/分组表格，即可选择<strong>复制为 SVG</strong>、<strong>复制为 Markdown</strong>、<strong>复制 PNG 图片</strong>或导出单张高清文件直接分享给协作者或置入论文排版。</p>
+
+    <div class="sandbox-grid">
+      <div class="sandbox-card">
+        <div class="sandbox-bar">
+          <div class="sandbox-title">plate-cck8 · 96 孔药敏梯度示例（实图同源导出）</div>
+          <div class="sandbox-actions">
+            <button class="chip-btn primary" type="button" id="btnCopySVG">复制为 SVG</button>
+            <button class="chip-btn" type="button" id="btnCopyMD">复制 Markdown</button>
+            <button class="chip-btn" type="button" id="btnDlSVG">下载 .svg</button>
+          </div>
+        </div>
+        <div class="mini-plate-grid" aria-label="6x4 实验孔板示意图">
+          <div class="mp-hdr"></div><div class="mp-hdr">1</div><div class="mp-hdr">2</div><div class="mp-hdr">3</div><div class="mp-hdr">4</div><div class="mp-hdr">5</div><div class="mp-hdr">6</div>
+          <div class="mp-hdr">A</div>
+          <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
+          <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
+          <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#0ea5e9">10µM</div>
+          <div class="mp-hdr">B</div>
+          <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
+          <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
+          <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#c23643">×</div>
+          <div class="mp-hdr">C</div>
+          <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
+          <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
+          <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#0ea5e9">10µM</div>
+        </div>
+        <div class="mp-legend">
+          <span class="mp-leg-item"><span class="dot" style="background:#168053"></span>DMSO Control (n=6)</span>
+          <span class="mp-leg-item"><span class="dot" style="background:#6c5ce7"></span>Drug 1 µM (n=6)</span>
+          <span class="mp-leg-item"><span class="dot" style="background:#0ea5e9"></span>Drug 10 µM (n=5)</span>
+          <span class="mp-leg-item"><span class="dot" style="background:#c23643"></span>B6 异常剔除</span>
+        </div>
+        <pre class="sandbox-preview" id="exportPreview"></pre>
+        <div class="sandbox-toast" id="exportToast"></div>
+      </div>
+
+      <div class="adv-list">
+        <div class="adv-item">
+          <h3>单文件单真源（UnifiedLive）</h3>
+          <p>取消脆弱的数据库黑盒锁库。实验策划、台面实测记录与 SVG 矢量图同住在你的文件夹中，天然适配 Git、iCloud、Syncthing 与 AI Agent。</p>
+        </div>
+        <div class="adv-item">
+          <h3>全组件矢量 SVG / GFM Markdown 导出</h3>
+          <p><code>plate@1</code>、<code>group_table@1</code>、<code>param_table@1</code>、<code>data_table@1</code> 与 <code>checklist@1</code> 均内置右键导出菜单：Vector SVG 直贴 PPT / Figma / Illustrator，Markdown 直贴飞书 / Notion / Obsidian。</p>
+        </div>
+        <div class="adv-item">
+          <h3>Pure-Go 统一科学核心（零 Rust / SQLite）</h3>
+          <p>ARRIVE 2.0 对照校验、稀释母液越界预警、CCK-8 活力拟合与 RT-qPCR ΔΔCq 计算由纯 Go 引擎直算完成，无 DLL 缺失报错，双端结果 100% 确定一致。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BAND 3: THREE-TRACK CAPABILITIES -->
+  <section class="section" id="architecture">
+    <p class="section-kicker">Architecture Alignment</p>
+    <h2 class="section-h2">徽章的三条轨道，即 AsterLab 全部产品契约</h2>
+    <div class="bento-3">
+      <a class="bento-card" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdomain-model.md">
+        <div>
+          <div class="bento-tag" style="color:var(--accent)">01 · Design Stream</div>
+          <h3>受控领域边界，不混淆计划与实测</h3>
+          <p>严格区分独立生物重复 <code>n</code> 与技术复孔；设计阶段写下目标浓度，执行偏离独立记录而不污染方案定义。</p>
+        </div>
+        <div class="bento-foot">阅读领域模型 →</div>
+      </a>
+      <a class="bento-card" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdesktop-workbench.md">
+        <div>
+          <div class="bento-tag" style="color:var(--accent-2)">02 · Execution Stream</div>
+          <h3>桌面分屏与移动端单手协同</h3>
+          <p>原生无 WebView 极速渲染；桌面端支持 <code>Ctrl+\</code> 平权分屏与 A4 执行单 PDF，移动端支持单手底岛与块级热重载。</p>
+        </div>
+        <div class="bento-foot">查看工作台交互 →</div>
+      </a>
+      <a class="bento-card" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fffi-and-cli.md">
+        <div>
+          <div class="bento-tag" style="color:var(--accent-3)">03 · Pure-Go Core Stream</div>
+          <h3>Headless CLI 与 Agent 深度链接</h3>
+          <p><code>cmd/asterlab</code> 原生读取同一份本地 Vault 输出单行 JSON 诊断；支持 <code>asterlab://open</code> 直达任意步骤与孔板。</p>
+        </div>
+        <div class="bento-foot">查看 CLI 契约 →</div>
+      </a>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <span>© 2026 AsterLab · Unified `.asterml` Workbench</span>
+    <div class="footer-links">
+      <a href="https://docs.asterlab.party/">工程手册 Docs</a>
+      <a href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </footer>
 </main>
 
 <script>
 (() => {
   "use strict";
-  const stage = document.getElementById("stage");
   const rootEl = document.documentElement;
-  const poster = document.getElementById("poster");
-  const overlay = document.getElementById("overlay");
-  const pctx = poster.getContext("2d");
-  const octx = overlay.getContext("2d");
-  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
-
-  const LENS = {
-    1: {
-      title: "21 个通用原语组合，零专病堆砌",
-      desc: "CCK-8、RT-qPCR、转染或抑菌圈均由通用内容块与 plate@1 容器组合定义；支持在编辑、阅读与源码三态间瞬时切换。",
-      code: "```asterlab\nkind: plate@1\nformat: 96\ngradient_ramp: concentration\nlinks: [\"@groups\", \"@param.seed_density\"]\n```",
-      meta: "Single Source of Truth · .asterml",
-      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fmodules-content.md",
-      linkText: "查看模块目录 →"
-    },
-    2: {
-      title: "UnifiedLive 原位执行 · 桌面与移动端同源",
-      desc: "计划参数与实测偏离严格分离；计时器、复核勾选与二维孔板读数直接原子落盘至 .asterml，并保留 100 步撤销与本地快照。",
-      code: "$ asterlab --vault ~/LabVault asterdoc.assess 2026/cck8.asterml\n{\"ok\":true,\"blocking\":0,\"warnings\":0,\"steps\":6}",
-      meta: "100-Undo · Snapshots · A4 Bench PDF",
-      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdesktop-workbench.md",
-      linkText: "探索工作台交互 →"
-    },
-    3: {
-      title: "Pure-Go astercore 确定性统计与诊断",
-      desc: "全套 ARRIVE 2.0 对照校验、稀释越界拦截、CCK-8 活力与 RT-qPCR ΔΔCq 计算均由纯 Go 核心无锁直算，零 SQLite 与 DLL 依赖。",
-      code: "RecordProjection [cck8_viability]\n  Control (DMSO): 100.0% ± 3.2% (n=3)\n  Treat 10 uM   :  41.8% ± 2.7% (IC50 fit OK)",
-      meta: "Zero SQLite · Zero Runs.dll",
-      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Farchitecture.md",
-      linkText: "阅读核心架构 →"
-    }
-  };
-
-  document.querySelectorAll("[data-lens]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const k = btn.getAttribute("data-lens");
-      stage.setAttribute("data-stream", k);
-      document.querySelectorAll(".lens-tab").forEach((t) => t.classList.toggle("active", t === btn));
-      const d = LENS[k];
-      document.getElementById("lensTitle").textContent = d.title;
-      document.getElementById("lensDesc").textContent = d.desc;
-      document.getElementById("lensCode").textContent = d.code;
-      document.getElementById("lensMeta").textContent = d.meta;
-      const ln = document.getElementById("lensLink");
-      ln.href = d.href;
-      ln.textContent = d.linkText;
-    });
-  });
-
-  const savedTheme = localStorage.getItem("asterlab-docs-theme") || "dark";
-  rootEl.setAttribute("data-theme", savedTheme);
-
-  const MAX_PIXELS = 2.0e6;
-  const TAU = Math.PI * 2;
-  let pointerX = -9999, pointerY = -9999;
-
-  stage.addEventListener("pointermove", (e) => {
-    const r = stage.getBoundingClientRect();
-    pointerX = (e.clientX - r.left) * scale;
-    pointerY = (e.clientY - r.top) * scale;
-  }, { passive: true });
-  stage.addEventListener("pointerleave", () => { pointerX = pointerY = -9999; }, { passive: true });
-
-  function getPal() {
-    const light = rootEl.getAttribute("data-theme") === "light";
-    return light ? {
-      hi: [108, 92, 231], mid: [14, 165, 233], faint: [215, 219, 234],
-      silver: [20, 21, 26], bg: [255, 255, 255], core: [108, 92, 231],
-      ringA: "108,92,231", ringB: "14,165,233", bgPeak: 255, alphaBoost: 0.24
-    } : {
-      hi: [168, 150, 255], mid: [110, 86, 220], faint: [44, 35, 86],
-      silver: [242, 239, 233], bg: [12, 11, 10], core: [206, 192, 255],
-      ringA: "168,150,255", ringB: "56,189,248", bgPeak: 0, alphaBoost: 0.14
-    };
-  }
-
-  function hash32(n) {
-    n = n >>> 0;
-    n = Math.imul(n ^ (n >>> 16), 2146121005);
-    n = Math.imul(n ^ (n >>> 15), 2221713035);
-    return (n ^ (n >>> 16)) >>> 0;
-  }
-  const random01 = n => (hash32(n) >>> 8) / 16777216;
-
-  let W = 0, H = 0, scale = 1, scene = null, elapsed = 0, lastFrame = 0, raf = 0, resizeTimer = 0;
-
-  function bufferScale(w, h) {
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const fit = Math.sqrt(MAX_PIXELS / (w * h));
-    return Math.max(0.55, Math.min(dpr, fit));
-  }
-
-  function motionOn() {
-    if (!reduceMotion.matches) return true;
-    try { return localStorage.getItem("al-motion") === "on"; } catch (_) { return false; }
-  }
-  const toggleBtn = document.getElementById("motionToggle");
-  function syncToggle() {
-    toggleBtn.hidden = !reduceMotion.matches;
-    toggleBtn.textContent = motionOn() ? "✦ 停用动效" : "✦ 启用动效";
-  }
-
-  function buildScene(cssW, cssH) {
-    const s = scale;
-    const R = 0.48 * Math.min(cssW, cssH) * s;
-    const ccx = (cssW < 820 ? 0.55 : 0.72) * cssW * s;
-    const ccy = (cssW < 820 ? 0.22 : 0.50) * cssH * s;
-    const S = Math.min(130 * s, Math.max(54 * s, R / 4.4));
-    const wells = [], rowH = S * 0.866, rows = Math.ceil(R / rowH) + 1, cols = Math.ceil(R / S) + 2;
-    let idx = 0;
-    for (let ry = -rows; ry <= rows; ry++) {
-      for (let rx = -cols; rx <= cols; rx++) {
-        const jx = (random01((idx * 2 + 1) ^ 0x51ed270b) - 0.5) * 0.34 * S;
-        const jy = (random01((idx * 2 + 2) ^ 0x1b873593) - 0.5) * 0.34 * S;
-        idx++;
-        const x = ccx + (rx + (ry & 1 ? 0.5 : 0)) * S + jx;
-        const y = ccy + ry * rowH + jy;
-        if (Math.hypot(x - ccx, y - ccy) > 0.86 * R) continue;
-        if (x < -S || x > W + S || y < -S || y > H + S) continue;
-        wells.push({ x, y });
-      }
-    }
-    const neighbors = wells.map((w, i) => {
-      const list = [];
-      wells.forEach((v, j) => { if (i !== j && Math.hypot(v.x - w.x, v.y - w.y) < S * 1.8) list.push(j); });
-      return list.length ? list : [i];
-    });
-    const particles = [];
-    const count = Math.min(120, Math.max(20, wells.length * 2));
-    for (let i = 0; i < count; i++) {
-      const src = Math.floor(random01(i ^ 0x2f1d2f3a) * wells.length);
-      const nb = neighbors[src] || [0];
-      particles.push({
-        src, dst: nb[Math.floor(random01(i ^ 0x7a1f3c5d) * nb.length)] || 0,
-        t: random01(i ^ 0x9e3779b9), dur: 1.9 + random01(i ^ 0x85ebca6b) * 2.2,
-        dir: random01(i ^ 0xc2b2ae35) < 0.5 ? -1 : 1
-      });
-    }
-    const phases = wells.map((_, i) => random01(i ^ 0x27d4eb2f) * 4.2);
-    scene = { wells, neighbors, particles, phases, S, R, ccx, ccy, sig2: 0.72 * S * S };
-  }
-
-  function renderStatic() {
-    const cssW = Math.max(320, stage.clientWidth);
-    const cssH = Math.max(320, stage.clientHeight);
-    scale = bufferScale(cssW, cssH);
-    W = poster.width = overlay.width = Math.round(cssW * scale);
-    H = poster.height = overlay.height = Math.round(cssH * scale);
-    buildScene(cssW, cssH);
-    const pal = getPal();
-    const img = pctx.createImageData(W, H);
-    const d = img.data;
-    const { wells, R, ccx, ccy, sig2, S } = scene;
-    const light = rootEl.getAttribute("data-theme") === "light";
-
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const o = (y * W + x) * 4;
-        d[o] = pal.bg[0]; d[o + 1] = pal.bg[1]; d[o + 2] = pal.bg[2]; d[o + 3] = 255;
-      }
-    }
-    // Soft radial well field
-    for (let y = 0; y < H; y += 2) {
-      for (let x = 0; x < W; x += 2) {
-        const dist = Math.hypot(x - ccx, y - ccy);
-        if (dist > 1.25 * R) continue;
-        let rho = 0;
-        for (let k = 0; k < wells.length; k++) {
-          const dx = wells[k].x - x, dy = wells[k].y - y;
-          if (Math.abs(dx) > 2.4 * S || Math.abs(dy) > 2.4 * S) continue;
-          rho += Math.exp(-(dx * dx + dy * dy) / sig2);
-        }
-        const mask = Math.min(1, 1.22 - dist / R);
-        const eff = rho * mask;
-        if (eff < 0.28) continue;
-        const n = random01((y * 4096 + x) ^ 0x9e3779b9);
-        let col = null;
-        if (n < Math.min(0.28, (eff - 1.45) * 0.5)) col = pal.hi;
-        else if (n < Math.min(0.45, (eff - 0.72) * 0.45)) col = pal.mid;
-        else if (n < Math.min(0.60, (eff - 0.30) * 0.38)) col = pal.faint;
-        if (!col) continue;
-        const mix = light ? 0.22 : 0.78;
-        for (let dy = 0; dy < 2 && y + dy < H; dy++) {
-          for (let dx = 0; dx < 2 && x + dx < W; dx++) {
-            const o = ((y + dy) * W + (x + dx)) * 4;
-            d[o] = Math.round(pal.bg[0] + (col[0] - pal.bg[0]) * mix);
-            d[o + 1] = Math.round(pal.bg[1] + (col[1] - pal.bg[1]) * mix);
-            d[o + 2] = Math.round(pal.bg[2] + (col[2] - pal.bg[2]) * mix);
-          }
-        }
-      }
-    }
-    pctx.putImageData(img, 0, 0);
-  }
-
-  function drawOverlay() {
-    octx.clearRect(0, 0, W, H);
-    if (!scene) return;
-    const pal = getPal();
-    const { wells, phases } = scene;
-    const CYCLE = 4.2;
-    const s = scale;
-    octx.lineWidth = Math.max(1, 1.4 * s);
-    for (let i = 0; i < wells.length; i++) {
-      const w = wells[i];
-      const prox = pointerX > -9000 ? Math.max(0, 1 - Math.hypot(w.x - pointerX, w.y - pointerY) / (scene.S * 2.2)) : 0;
-      const prog = ((elapsed + phases[i]) % CYCLE) / CYCLE;
-      const a = (0.12 * (1 - prog)) + prox * 0.25;
-      if (a > 0.005) {
-        octx.strokeStyle = `rgba(${prox > 0.2 ? pal.ringB : pal.ringA},${a.toFixed(3)})`;
-        octx.beginPath();
-        octx.arc(w.x, w.y, scene.S * (0.28 + 1.1 * prog), 0, TAU);
-        octx.stroke();
-      }
-      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.0 + i * 1.61);
-      octx.fillStyle = `rgba(${pal.ringA},${(0.22 + 0.28 * pulse + prox * 0.35).toFixed(3)})`;
-      octx.beginPath();
-      octx.arc(w.x, w.y, (2.2 + prox * 1.6) * s, 0, TAU);
-      octx.fill();
-    }
-    octx.fillStyle = `rgb(${pal.silver.join(",")})`;
-    for (const p of scene.particles) {
-      const a = scene.wells[p.src], b = scene.wells[p.dst];
-      if (!a || !b) continue;
-      const t = p.t, ease = t * t * (3 - 2 * t);
-      const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
-      const bump = Math.sin(Math.PI * t) * scene.S * 0.22 * p.dir;
-      const x = a.x + dx * ease + (-dy / len) * bump;
-      const y = a.y + dy * ease + (dx / len) * bump;
-      octx.globalAlpha = Math.min(1, t * 5, (1 - t) * 5) * 0.85;
-      octx.fillRect(x | 0, y | 0, 2, 2);
-    }
-    octx.globalAlpha = 1;
-  }
-
-  function frame(now) {
-    const dt = Math.min(0.1, (now - lastFrame) / 1000);
-    lastFrame = now;
-    elapsed += dt;
-    if (scene) {
-      for (const p of scene.particles) {
-        p.t += dt / p.dur;
-        if (p.t >= 1) {
-          p.t = 0;
-          const old = p.src;
-          p.src = p.dst;
-          const nb = scene.neighbors[p.src];
-          let next = nb[(Math.random() * nb.length) | 0];
-          if (nb.length > 1 && next === old) next = nb[(nb.indexOf(next) + 1) % nb.length];
-          p.dst = next;
-        }
-      }
-    }
-    drawOverlay();
-    raf = requestAnimationFrame(frame);
-  }
-
-  function start() {
-    if (raf || !motionOn() || document.hidden || !scene) return;
-    lastFrame = performance.now();
-    raf = requestAnimationFrame(frame);
-  }
-  function stop() { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
-  function rebuild() { stop(); renderStatic(); if (motionOn()) start(); else drawOverlay(); }
+  rootEl.setAttribute("data-theme", localStorage.getItem("asterlab-docs-theme") || "dark");
 
   document.getElementById("themeBtn").addEventListener("click", () => {
     const next = rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark";
     rootEl.setAttribute("data-theme", next);
     localStorage.setItem("asterlab-docs-theme", next);
     document.querySelector('meta[name="theme-color"]').setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
-    rebuild();
   });
-  toggleBtn.addEventListener("click", () => {
-    try { localStorage.setItem("al-motion", motionOn() ? "off" : "on"); } catch (_) {}
-    syncToggle();
-    rebuild();
-  });
-  window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(rebuild, 150); }, { passive: true });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); else start(); });
 
-  syncToggle();
-  rebuild();
+  // Badge track interactivity
+  const TRACKS = {
+    1: {
+      coord: "TRACK 01 · OUTER ARCH · R=481",
+      title: "Track 01 · .asterml 结构化实验设计",
+      desc: "以 Markdown + YAML 围栏声明因子分组、样本量 n 与 96/384 孔板浓度梯度；纯文本存储，Git 与外部 Agent 天然可读可审查。",
+      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md",
+      linkText: "AsterML 规范 →"
+    },
+    2: {
+      coord: "TRACK 02 · MIDDLE ARCH · UNIFIEDLIVE",
+      title: "Track 02 · 原位执行与全组件单张导出",
+      desc: "桌面与平板共享 UnifiedLive 视图，支持计时、实测偏离、异常孔标 ×，以及任意孔板/表格右键复制 SVG / Markdown 直接分享。",
+      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdesktop-workbench.md",
+      linkText: "工作台交互 →"
+    },
+    3: {
+      coord: "TRACK 03 · INNER ARCH · PURE-GO CORE",
+      title: "Track 03 · Pure-Go astercore 统计与诊断",
+      desc: "零 Runs.dll / SQLite 依赖，统一执行 ARRIVE 2.0 校验、稀释超标阻断、CCK-8 与 RT-qPCR ΔΔCq 统计以及 Vault CLI。",
+      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Farchitecture.md",
+      linkText: "查看核心架构 →"
+    }
+  };
+
+  function selectTrack(id) {
+    document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("active", b.getAttribute("data-track") === id));
+    document.querySelectorAll("[data-track-shape]").forEach((p) => p.classList.toggle("active", p.getAttribute("data-track-shape") === id));
+    document.querySelectorAll("[data-flow]").forEach((f) => f.classList.toggle("active", f.getAttribute("data-flow") === id));
+    const d = TRACKS[id];
+    document.getElementById("trackCoord").textContent = d.coord;
+    document.getElementById("readoutTitle").textContent = d.title;
+    document.getElementById("readoutDesc").textContent = d.desc;
+    const rl = document.getElementById("readoutLink");
+    rl.href = d.href;
+    rl.textContent = d.linkText;
+  }
+
+  document.querySelectorAll(".rail-btn").forEach((b) => b.addEventListener("click", () => selectTrack(b.getAttribute("data-track"))));
+  document.querySelectorAll("[data-track-shape]").forEach((p) => {
+    p.addEventListener("click", () => selectTrack(p.getAttribute("data-track-shape")));
+  });
+
+  // Live Component Export Demo (SVG & Markdown generator)
+  const DEMO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="220" viewBox="0 0 420 220">
+  <rect width="420" height="220" rx="12" fill="#ffffff" stroke="#e7e9ee"/>
+  <text x="20" y="26" font-size="14" font-weight="600" font-family="system-ui,sans-serif" fill="#18181b">plate-cck8 · 96 孔药敏梯度</text>
+  <text x="400" y="26" font-size="11" font-family="ui-monospace,monospace" fill="#71717a" text-anchor="end">3×6 · group</text>
+  <line x1="20" y1="36" x2="400" y2="36" stroke="#e7e9ee"/>
+  <circle cx="58" cy="74" r="15" fill="#168053"/><circle cx="96" cy="74" r="15" fill="#168053"/>
+  <circle cx="144" cy="74" r="15" fill="#6c5ce7"/><circle cx="182" cy="74" r="15" fill="#6c5ce7"/>
+  <circle cx="230" cy="74" r="15" fill="#0ea5e9"/><circle cx="268" cy="74" r="15" fill="#0ea5e9"/>
+  <circle cx="58" cy="112" r="15" fill="#168053"/><circle cx="96" cy="112" r="15" fill="#168053"/>
+  <circle cx="144" cy="112" r="15" fill="#6c5ce7"/><circle cx="182" cy="112" r="15" fill="#6c5ce7"/>
+  <circle cx="230" cy="112" r="15" fill="#0ea5e9"/><circle cx="268" cy="112" r="15" fill="#c23643"/>
+  <text x="20" y="202" font-size="11" font-family="system-ui,sans-serif" fill="#71717a">Ctrl (n=6) · 1µM (n=6) · 10µM (n=5)</text>
+  <text x="400" y="202" font-size="10" font-family="ui-monospace,monospace" fill="#71717a" text-anchor="end">AsterLab · .asterml</text>
+</svg>`;
+
+  const DEMO_MD = `### plate-cck8 · 96 孔药敏梯度\n\n| | 1 | 2 | 3 | 4 | 5 | 6 |\n|---|---|---|---|---|---|---|\n| **A** | Ctrl | Ctrl | 1µM | 1µM | 10µM | 10µM |\n| **B** | Ctrl | Ctrl | 1µM | 1µM | 10µM | × |\n| **C** | Ctrl | Ctrl | 1µM | 1µM | 10µM | 10µM |`;
+
+  const previewEl = document.getElementById("exportPreview");
+  const toastEl = document.getElementById("exportToast");
+
+  async function copySample(kind, content, msg) {
+    previewEl.textContent = content;
+    previewEl.classList.add("open");
+    try { await navigator.clipboard.writeText(content); } catch (_) {}
+    toastEl.textContent = msg;
+  }
+
+  document.getElementById("btnCopySVG").addEventListener("click", () => copySample("svg", DEMO_SVG, "✓ 已复制 SVG 矢量源码 — 可直接粘贴至 Figma / PPT / 浏览器"));
+  document.getElementById("btnCopyMD").addEventListener("click", () => copySample("md", DEMO_MD, "✓ 已复制 GFM Markdown 孔位表 — 可直接粘贴至 Obsidian / Notion"));
+  document.getElementById("btnDlSVG").addEventListener("click", () => {
+    const blob = new Blob([DEMO_SVG], { type: "image/svg+xml" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "plate-cck8.svg";
+    a.click();
+    toastEl.textContent = "✓ 已生成并触发下载 plate-cck8.svg";
+  });
 })();
 </script>
 </body>

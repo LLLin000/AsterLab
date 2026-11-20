@@ -51,9 +51,11 @@ type View struct {
 	OnPickFigureFile     func(stepID, blockID string)
 	StepID               string
 	BaseDir              string
-	currentModuleID      string
-	titleEditID          string
-	titleEditBuf         string
+	currentModuleID    string
+	currentModuleKind  string
+	currentModuleData  map[string]any
+	titleEditID        string
+	titleEditBuf       string
 	// Run-mode interactive execution callbacks & state (nil-safe in read-only views).
 	OnRecordActualParam  func(stepID, blockID, key, value, unit string)
 	OnToggleCheck        func(stepID, checkID string, checked bool)
@@ -96,8 +98,9 @@ type View struct {
 	OnDuplicateBlock   func(stepID, blockID string)
 	OnImportAssetBytes func(data []byte, origName string) (string, error)
 	OnPickAttachmentFile func(stepID, blockID string)
-	OnSavePlateExport  func(defaultName, format string, data []byte) error
-	OnLocatePantryCode func(code string)
+	OnSavePlateExport    func(defaultName, format string, data []byte) error
+	OnCopyImage          func(pngBytes []byte) error
+	OnLocatePantryCode   func(code string)
 	OnSlashInsert      func(stepID string, afterIndex int, block map[string]any)
 	PantryLocationMap  map[string]string // reagent code/name -> human box/slot location
 	HideStepHeader     bool
@@ -341,9 +344,13 @@ func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind st
 		v.rendererGap(c, kind, schema, key)
 		return
 	}
-	prevID := v.currentModuleID
+	prevID, prevKind, prevData := v.currentModuleID, v.currentModuleKind, v.currentModuleData
 	v.currentModuleID = moduleID
-	defer func() { v.currentModuleID = prevID }()
+	v.currentModuleKind = kind
+	v.currentModuleData = data
+	defer func() {
+		v.currentModuleID, v.currentModuleKind, v.currentModuleData = prevID, prevKind, prevData
+	}()
 	fn(v, c, data)
 }
 
@@ -618,45 +625,32 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap, Zoom: v.PlateZoom, State: st,
 				})
 			})
-			if v.UnifiedLive {
-				components.ContextMenu(c, plateGridBox, func(m *components.Menu) {
-					if editable {
-						if m.Item("清空选区标注").Disabled(len(selected) == 0).Chosen() {
-							_ = v.assign(selected, "")
-							v.plateSelections[p.ID] = nil
-						}
-						if m.Item("复制选区标注").Disabled(len(selected) == 0).Chosen() {
-							v.copyPlateWellAnnotations(p, selected)
-						}
-						if m.Item("粘贴标注到选区").Disabled(len(selected) == 0 || len(sharedWellClipboard) == 0).Chosen() {
-							v.pastePlateWellAnnotations(p, ownerStepID, selected)
-						}
-						m.Separator()
-						if m.Item("反选孔位").Chosen() {
-							v.plateSelections[p.ID] = invertPlateSelection(geometry, selected)
-						}
-						if m.Item("选中最外圈边缘孔").Chosen() {
-							v.plateSelections[p.ID] = edgePlateWells(geometry)
-						}
-						if m.Item("标记 / 取消异常孔").Disabled(len(selected) == 0).Chosen() {
-							v.togglePlateExcludedWells(p, selected)
-						}
-						m.Separator()
+			components.ContextMenu(c, plateGridBox, func(m *components.Menu) {
+				if editable {
+					if m.Item("清空选区标注").Disabled(len(selected) == 0).Chosen() {
+						_ = v.assign(selected, "")
+						v.plateSelections[p.ID] = nil
 					}
-					if m.Item("导出布局 CSV").Chosen() {
-						csvText := formatPlateAsCSV(p, geometry)
-						c.Services().WriteClipboard(csvText)
-						if v.OnSavePlateExport != nil {
-							_ = v.OnSavePlateExport(p.ID+".csv", "csv", []byte(csvText))
-						}
+					if m.Item("复制选区标注").Disabled(len(selected) == 0).Chosen() {
+						v.copyPlateWellAnnotations(p, selected)
 					}
-					if v.OnSavePlateExport != nil && m.Item("导出布局 PNG").Chosen() {
-						if pngBytes, err := RenderPlatePNG(p, geometry, v.Doc, colorBy, factorKey, dark); err == nil && len(pngBytes) > 0 {
-							_ = v.OnSavePlateExport(p.ID+".png", "png", pngBytes)
-						}
+					if m.Item("粘贴标注到选区").Disabled(len(selected) == 0 || len(sharedWellClipboard) == 0).Chosen() {
+						v.pastePlateWellAnnotations(p, ownerStepID, selected)
 					}
-				})
-			}
+					m.Separator()
+					if m.Item("反选孔位").Chosen() {
+						v.plateSelections[p.ID] = invertPlateSelection(geometry, selected)
+					}
+					if m.Item("选中最外圈边缘孔").Chosen() {
+						v.plateSelections[p.ID] = edgePlateWells(geometry)
+					}
+					if m.Item("标记 / 取消异常孔").Disabled(len(selected) == 0).Chosen() {
+						v.togglePlateExcludedWells(p, selected)
+					}
+					m.Separator()
+				}
+				v.buildComponentShareMenu(c, m, "plate", map[string]any{"id": p.ID, "title": p.Title})
+			})
 
 			if editable {
 				if len(selected) > 0 {
