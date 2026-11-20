@@ -10,50 +10,81 @@ import (
 // Every spring preserves velocity on interruption, mixes colors in Oklab space,
 // and automatically respects OS ReduceMotion preferences via mygo/ui.
 var (
-	// MotionMicro drives immediate tactile press states (:active 0.97) and hover reveals.
-	MotionMicro = ui.Animation{
+	baseMotionMicro = ui.Animation{
 		Duration: 100 * time.Millisecond,
 		Ease:     ui.EaseOut,
 		Oklab:    true,
 	}
-
-	// MotionMicroFade drives pure opacity/color shifts that remain smooth even under ReduceMotion.
-	MotionMicroFade = ui.Animation{
+	baseMotionMicroFade = ui.Animation{
 		Duration:  110 * time.Millisecond,
 		Ease:      ui.EaseOut,
 		Oklab:     true,
 		NonMotion: true,
 	}
-
-	// MotionSnappy is a critically damped spring (~160ms, zero overshoot) for magnetic
-	// shared-layout pills, well Oklab dyeing, and crisp popover/bar entrances.
-	MotionSnappy = ui.Animation{
+	baseMotionSnappy = ui.Animation{
 		Spring: ui.SpringOptions{
 			Duration: 160 * time.Millisecond,
 			Bounce:   0,
 		},
 		Oklab: true,
 	}
-
-	// MotionFluid is a gentle physical spring (~220ms, subtle 0.04 bounce) for accordion
-	// height expand/collapse, liquid split drop-zone morphing, and numeric rolling wheels.
-	MotionFluid = ui.Animation{
+	baseMotionFluid = ui.Animation{
 		Spring: ui.SpringOptions{
 			Duration: 220 * time.Millisecond,
 			Bounce:   0.04,
 		},
 		Oklab: true,
 	}
-
-	// MotionHero drives spatial continuity across larger distances (figure & plate lightbox zoom).
-	MotionHero = ui.Animation{
+	baseMotionHero = ui.Animation{
 		Spring: ui.SpringOptions{
 			Duration: 260 * time.Millisecond,
 			Bounce:   0.03,
 		},
 		Oklab: true,
 	}
+	instantMotion = ui.Animation{
+		Duration: 1 * time.Millisecond,
+		Ease:     ui.EaseOut,
+		Oklab:    true,
+	}
+
+	// MotionMicro drives immediate tactile press states (:active 0.97) and hover reveals.
+	MotionMicro = baseMotionMicro
+
+	// MotionMicroFade drives pure opacity/color shifts that remain smooth even under ReduceMotion.
+	MotionMicroFade = baseMotionMicroFade
+
+	// MotionSnappy is a critically damped spring (~160ms, zero overshoot) for magnetic
+	// shared-layout pills, well Oklab dyeing, and crisp popover/bar entrances.
+	MotionSnappy = baseMotionSnappy
+
+	// MotionFluid is a gentle physical spring (~220ms, subtle 0.04 bounce) for accordion
+	// height expand/collapse, liquid split drop-zone morphing, and numeric rolling wheels.
+	MotionFluid = baseMotionFluid
+
+	// MotionHero drives spatial continuity across larger distances (figure & plate lightbox zoom).
+	MotionHero = baseMotionHero
 )
+
+func applyMotionPreference(reduce bool) {
+	if reduce {
+		MotionMicro = instantMotion
+		MotionSnappy = instantMotion
+		MotionFluid = instantMotion
+		MotionHero = instantMotion
+		return
+	}
+	MotionMicro = baseMotionMicro
+	MotionSnappy = baseMotionSnappy
+	MotionFluid = baseMotionFluid
+	MotionHero = baseMotionHero
+}
+
+// ReducedMotionEnabled reports whether in-app reduced motion is active.
+func ReducedMotionEnabled() bool {
+	_, rm := AccessibilityPrefs()
+	return rm
+}
 
 // AccordionTransition smoothly expands and collapses list items, folder children,
 // inline deviation inputs, and newly inserted document blocks without jarring layout jumps.
@@ -142,6 +173,9 @@ func IconMorph() ui.ContentTransition {
 
 // ApplyTactilePress applies a subtle physical `:active` 0.97 press scale to interactive controls.
 func ApplyTactilePress(elem ui.Element) ui.Element {
+	if ReducedMotionEnabled() {
+		return elem
+	}
 	target := float32(1.0)
 	if elem.Pressed() {
 		target = 0.97
@@ -157,7 +191,7 @@ func ApplyTactilePress(elem ui.Element) ui.Element {
 // whenever seq increments (e.g., submitting an empty required field or invalid factor),
 // using a velocity-injected spring with zero timers or goroutines.
 func ApplyNudge(elem ui.Element, seq int) ui.Element {
-	if seq <= 0 {
+	if seq <= 0 || ReducedMotionEnabled() {
 		return elem
 	}
 	target := float32(seq%2) * 0.001

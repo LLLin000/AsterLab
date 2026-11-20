@@ -13,10 +13,36 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
+	"asterlab-mygo-prototype/internal/astercore"
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
 )
+
+type cachedAssayResult struct {
+	sourceLen int
+	source    string
+	summaries []astercore.AssaySummary
+}
+
+func (a *app) cachedDocumentAnalysis(relPath, source string, doc *asterdoc.Document) []astercore.AssaySummary {
+	if doc == nil {
+		return nil
+	}
+	if a.cachedAssays == nil {
+		a.cachedAssays = map[string]cachedAssayResult{}
+	}
+	if prev, ok := a.cachedAssays[relPath]; ok && prev.sourceLen == len(source) && prev.source == source {
+		return prev.summaries
+	}
+	res := astercore.AnalyzeDocument(doc, relPath)
+	a.cachedAssays[relPath] = cachedAssayResult{
+		sourceLen: len(source),
+		source:    source,
+		summaries: res,
+	}
+	return res
+}
 
 func (a *app) ensureLiveViewsMap() {
 	if a.liveViews == nil {
@@ -151,10 +177,16 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			return
 		}
 		_ = ld.ApplyEdit(next)
+		ld.NotifySaved(a.vault, false)
+		if a.vaultIndex != nil {
+			a.vaultIndex.UpsertSource(tab.FilePath, ld.Source)
+		}
 		if a.liveEditorSynced != nil {
 			a.liveEditorSynced[tab.FilePath] = strings.ReplaceAll(ld.Source, "\r\n", "\n")
 		}
+		a.lastCompanionKey = ""
 		a.refreshVaultTreeAndCalendar()
+		a.syncActiveDocCompanionState(tab.FilePath, ld.Source, ld.Parsed)
 	}
 
 	mobileLayout := a.shell != nil && a.shell.IsMobileLayout(c)
@@ -222,11 +254,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			case "add_checklist":
 				sid := ensureTargetStep()
 				if sid != "" {
-					blk := map[string]any{
-						"kind": "checklist", "schema": 1,
-						"title": "关键核对",
-						"items": []map[string]any{{"id": "chk-new", "text": "确认条件与耗材就绪", "checked": false}},
-					}
+					blk := asterdoc.DefaultStarterBlockWithPrefs(curLD.Parsed, sid, "checklist", a.shell.DefaultPlateFormat, a.shell.DefaultExcessPct)
 					if next, err := asterdoc.InsertStepBlockInSource(curLD.Source, sid, afterIdx, blk); err == nil {
 						applyDoc(next)
 						c.AddToast(ui.Toast{Title: "已插入检查清单", Type: components.ToastSuccess})
@@ -235,11 +263,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			case "add_param":
 				sid := ensureTargetStep()
 				if sid != "" {
-					blk := map[string]any{
-						"kind": "param_table", "schema": 1,
-						"title": "条件参数",
-						"rows":  []map[string]any{{"key": "conc", "label": "工作浓度", "value": "10", "unit": "uM", "record_actual": true}},
-					}
+					blk := asterdoc.DefaultStarterBlockWithPrefs(curLD.Parsed, sid, "param_table", a.shell.DefaultPlateFormat, a.shell.DefaultExcessPct)
 					if next, err := asterdoc.InsertStepBlockInSource(curLD.Source, sid, afterIdx, blk); err == nil {
 						applyDoc(next)
 						c.AddToast(ui.Toast{Title: "已插入参数表", Type: components.ToastSuccess})
@@ -248,13 +272,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			case "add_plate":
 				sid := ensureTargetStep()
 				if sid != "" {
-					blk := map[string]any{
-						"kind": "plate", "schema": 1,
-						"title": "96 孔板布板", "plate_format": 96,
-					}
+					blk := asterdoc.DefaultStarterBlockWithPrefs(curLD.Parsed, sid, "plate", a.shell.DefaultPlateFormat, a.shell.DefaultExcessPct)
 					if next, err := asterdoc.InsertStepBlockInSource(curLD.Source, sid, afterIdx, blk); err == nil {
 						applyDoc(next)
-						c.AddToast(ui.Toast{Title: "已插入 96 孔板", Type: components.ToastSuccess})
+						c.AddToast(ui.Toast{Title: fmt.Sprintf("已插入 %v 孔板", blk["format"]), Type: components.ToastSuccess})
 					}
 				}
 			case "open_timer":
@@ -295,24 +316,80 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 
 	pageCol := ui.Column(c.Key("vault-page:"+pane.ID+":"+tab.ID)).Fill()
 	theme.PaintCanvasBackground(pageCol, tok)
+	findOpen := ui.Local(c.Root(), "doc-find-open:"+pane.ID+":"+tab.ID, func() bool { return false })
+	findQuery := ui.Local(c.Root(), "doc-find-q:"+pane.ID+":"+tab.ID, func() string { return "" })
+	if a.pendingFindQuery != nil {
+		if pq := a.pendingFindQuery[tab.FilePath]; pq != "" {
+			*findQuery = pq
+			*findOpen = true
+			delete(a.pendingFindQuery, tab.FilePath)
+		}
+	}
+	if pane.ID == a.shell.ActivePaneID && c.Shortcut(ui.Cmd, ui.KeyF) {
+		*findOpen = !*findOpen
+	}
+	if a.shell != nil && pane.ID == a.shell.ActivePaneID {
+		a.syncActiveDocCompanionState(tab.FilePath, ld.Source, ld.Parsed)
+		if ld.ParseErr != nil {
+			a.shell.StatusSaveLabel = "待语法闭合"
+			a.shell.StatusWarnLabel = "AsterML 语法待修复"
+		} else {
+			a.shell.StatusSaveLabel = "实时已保存"
+			a.shell.StatusWarnLabel = ""
+		}
+		if ld.Parsed != nil {
+			stepsN := 0
+			for _, m := range ld.Parsed.Modules {
+				if m.Kind == "step" {
+					stepsN++
+				}
+			}
+			a.shell.StatusMetaLabel = fmt.Sprintf("%d 步骤 · %d 模块", stepsN, len(ld.Parsed.Modules))
+		}
+	}
+
 	pageCol.Children(func() {
-		// 1. Clean 1-row Document Header on Desktop/Tablet (collapsed on Mobile so zero duplicate double-headers)
+		// 1. Clean Obsidian 1-row Document Header on Desktop/Tablet (Breadcrumbs + single Read/Edit toggle + Find + More)
 		if !mobileLayout {
-			ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)*1.5, float32(tok.Spacing16)).
+			ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing16)).
 				Background(tok.Surface.Alpha(0.86)).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				components.Text(c, folderLabel+" / "+docTitle).
-					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
-					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+				chosenCrumb := -1
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					bc := components.Breadcrumbs(c, []string{folderLabel, docTitle}, &chosenCrumb)
+					if bc.Changed() && chosenCrumb == 0 && a.shell != nil {
+						a.shell.SelectedTreePath = folderRel
+					}
+				})
 
 				if ld.ParseErr != nil {
 					components.Badge(c, "待语法闭合", components.BadgeOptions{Tone: components.BadgeWarning})
 				}
 
-				modeInt := int(tab.Mode)
-				components.Tabs(c, &modeInt, components.TabsSegmented, "编辑", "阅读", "源码")
-				if shell.ViewMode(modeInt) != tab.Mode {
-					setTabMode(shell.ViewMode(modeInt))
-					tab.Mode = shell.ViewMode(modeInt)
+				if tab.Mode == shell.ModeSource {
+					if components.Button(c, "返回编辑", components.ButtonSecondary).Clicked() {
+						setTabMode(shell.ModeEdit)
+						tab.Mode = shell.ModeEdit
+					}
+				} else if tab.Mode == shell.ModeRead {
+					edBtn := components.IconButton(c, lucide.PenLine(), "切换到编辑态 (Ctrl+E)", components.IconButtonCompact)
+					if edBtn.Clicked() {
+						setTabMode(shell.ModeEdit)
+						tab.Mode = shell.ModeEdit
+					}
+				} else {
+					rdBtn := components.IconButton(c, lucide.BookOpen(), "切换到阅读态 (Ctrl+E)", components.IconButtonCompact)
+					if rdBtn.Clicked() {
+						setTabMode(shell.ModeRead)
+						tab.Mode = shell.ModeRead
+					}
+				}
+
+				findBtn := components.IconButton(c, lucide.Search(), "页内查找 (Ctrl+F)", components.IconButtonCompact)
+				if *findOpen {
+					findBtn.Background(tok.AccentSoftBg)
+				}
+				if findBtn.Clicked() {
+					*findOpen = !*findOpen
 				}
 
 				copiedAt := ui.Local(c.Root(), "doc-copy-ok:"+tab.FilePath, func() time.Time { return time.Time{} })
@@ -337,10 +414,24 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 
 				moreBtn := components.IconButton(c, lucide.Ellipsis(), "文档操作菜单", components.IconButtonCompact)
 				components.MenuButton(c, moreBtn, func(m *components.Menu) {
+					srcLbl := "查看 / 编辑源码 (.asterml)"
+					if tab.Mode == shell.ModeSource {
+						srcLbl = "返回可视化编辑"
+					}
+					if m.Item(srcLbl).Chosen() {
+						if tab.Mode == shell.ModeSource {
+							setTabMode(shell.ModeEdit)
+							tab.Mode = shell.ModeEdit
+						} else {
+							setTabMode(shell.ModeSource)
+							tab.Mode = shell.ModeSource
+						}
+					}
+					m.Separator()
 					if m.Item("导出 PDF…").Chosen() && ld.Parsed != nil {
 						a.startDocumentPDFExport(c, docTitle, "", "", a.vault.Root, ld.Parsed)
 					}
-					if m.Item("导出 Markdown").Chosen() {
+					if m.Item("复制 AsterML 原文").Chosen() {
 						c.Services().WriteClipboard(ld.Source)
 						*copiedAt = time.Now()
 						if a.shell != nil {
@@ -371,6 +462,33 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 						a.deleteVaultFile(tab.FilePath)
 					}
 				})
+			})
+			ui.Box(c).FillWidth().Height(1).Background(tok.Border)
+		}
+
+		// In-page Find Bar (Ctrl+F)
+		if *findOpen && tab.Mode != shell.ModeSource {
+			ui.Row(c.Key("doc-find-bar")).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing16)).
+				Background(tok.Elevated).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Icon(c, lucide.Search()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+				ui.Box(c).Width(float32(tok.Spacing48)*6).Children(func() {
+					tb := components.TextBox(c, findQuery, components.TextBoxOptions{}).Placeholder("在当前实验步骤与模块中查找…")
+					tb.AutoFocus()
+					if tb.Shortcut(0, ui.KeyEscape) {
+						*findOpen = false
+						*findQuery = ""
+					}
+				})
+				if strings.TrimSpace(*findQuery) != "" {
+					qLower := strings.ToLower(strings.TrimSpace(*findQuery))
+					hits := strings.Count(strings.ToLower(ld.Source), qLower)
+					components.Badge(c, fmt.Sprintf("%d 处匹配", hits))
+				}
+				ui.Spacer(c)
+				if components.IconButton(c, lucide.X(), "关闭查找", components.IconButtonCompact).Clicked() {
+					*findOpen = false
+					*findQuery = ""
+				}
 			})
 			ui.Box(c).FillWidth().Height(1).Background(tok.Border)
 		}
@@ -445,8 +563,18 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			v.Allowed = map[string]bool{asterdoc.PermDocumentEdit: true}
 		}
 		v.Doc = doc
+		v.DocumentTitle = docTitle
+		v.SearchQuery = *findQuery
 		v.BaseDir = a.vault.Root
 		v.MobileCompact = mobileLayout
+		if a.shell != nil {
+			v.DefaultPlateFormat = a.shell.DefaultPlateFormat
+			v.DefaultExcessPct = a.shell.DefaultExcessPct
+		}
+		if a.scrollToStepID != "" && pane.ID == a.shell.ActivePaneID {
+			v.ScrollToStepID = a.scrollToStepID
+			a.scrollToStepID = ""
+		}
 		v.PantryLocationMap = a.buildPantryLocationMap()
 		if tab.Mode == shell.ModeRead {
 			v.Mode = asterdoc.ModeProtocol
@@ -483,8 +611,65 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 				applyLiveSource(next)
 			}
 		}
+		v.OnMoveStepBlockIndex = func(stepID, blockID string, toIndex int) {
+			if next, err := asterdoc.MoveStepBlockToIndex(ld.Source, stepID, blockID, toIndex); err == nil {
+				applyLiveSource(next)
+			}
+		}
 		v.OnImportAssetBytes = func(data []byte, origName string) (string, error) {
 			return a.vault.ImportAssetBytes(data, origName)
+		}
+		v.OnPickAttachmentFile = func(stepID, blockID string) {
+			paths, pErr := mygo.Dialog.Open(mygo.OpenDialogOptions{
+				Parent: mygo.FocusedWindow(),
+				Title:  "选择实验照片或原始附件",
+			})
+			if pErr != nil || len(paths) == 0 {
+				return
+			}
+			picked := paths[0]
+			refPath := picked
+			if a.shell == nil || a.shell.AutoArchiveAssets {
+				if rel, impErr := a.vault.ImportAssetFile(picked); impErr == nil {
+					refPath = rel
+				}
+			}
+			// Append to block's items[] list inside `.asterml`
+			var existing []any
+			if ld.Parsed != nil {
+				for _, m := range ld.Parsed.Modules {
+					if m.ID == blockID {
+						if arr, ok := m.Data["items"].([]any); ok {
+							existing = append(existing, arr...)
+						}
+					}
+					if m.Kind == "step" && m.ID == stepID {
+						if blks, ok := m.Data["blocks"].([]any); ok {
+							for _, raw := range blks {
+								if bm, ok := raw.(map[string]any); ok && fmt.Sprint(bm["id"]) == blockID {
+									if arr, ok := bm["items"].([]any); ok {
+										existing = append(existing, arr...)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			existing = append(existing, map[string]any{
+				"id":    fmt.Sprintf("att-%d", len(existing)+1),
+				"label": filepath.Base(picked),
+				"src":   refPath,
+			})
+			if stepID != "" {
+				if next, uErr := asterdoc.UpdateStepBlockInSource(ld.Source, stepID, blockID, map[string]any{"items": existing}); uErr == nil {
+					applyLiveSource(next)
+				}
+			} else if ld.Parsed != nil {
+				if next, uErr := ld.Parsed.UpdateModule(blockID, map[string]any{"items": existing}); uErr == nil {
+					applyLiveSource(next)
+				}
+			}
 		}
 		v.OnPickFigureFile = func(stepID, blockID string) {
 			paths, pErr := mygo.Dialog.Open(mygo.OpenDialogOptions{
@@ -495,28 +680,42 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 				return
 			}
 			picked := paths[0]
-			if rel, impErr := a.vault.ImportAssetFile(picked); impErr == nil {
-				props := map[string]any{"src": rel}
-				if strings.EqualFold(filepath.Ext(picked), ".svg") {
-					if raw, rErr := os.ReadFile(picked); rErr == nil && strings.Contains(string(raw), "<svg") {
-						props["svg"] = string(raw)
-					}
+			refPath := picked
+			if a.shell == nil || a.shell.AutoArchiveAssets {
+				if rel, impErr := a.vault.ImportAssetFile(picked); impErr == nil {
+					refPath = rel
 				}
-				if next, uErr := asterdoc.UpdateStepBlockInSource(ld.Source, stepID, blockID, props); uErr == nil {
-					applyLiveSource(next)
+			}
+			props := map[string]any{"src": refPath}
+			if strings.EqualFold(filepath.Ext(picked), ".svg") {
+				if raw, rErr := os.ReadFile(picked); rErr == nil && strings.Contains(string(raw), "<svg") {
+					props["svg"] = string(raw)
 				}
+			}
+			if next, uErr := asterdoc.UpdateStepBlockInSource(ld.Source, stepID, blockID, props); uErr == nil {
+				applyLiveSource(next)
 			}
 		}
 		v.OnSavePlateExport = func(defaultName, format string, data []byte) error {
-			if format == "csv" && len(data) > 0 {
-				path, sErr := mygo.Dialog.Save(mygo.SaveDialogOptions{
-					Parent:      mygo.FocusedWindow(),
-					Title:       "导出孔板 CSV 布局",
-					DefaultPath: defaultName,
-				})
-				if sErr == nil && path != "" {
-					return os.WriteFile(path, data, 0o644)
+			if len(data) == 0 {
+				return nil
+			}
+			title := "导出孔板文件"
+			if format == "csv" {
+				title = "导出孔板 CSV 布局"
+			} else if format == "png" {
+				title = "导出孔板 PNG 图像"
+			}
+			path, sErr := mygo.Dialog.Save(mygo.SaveDialogOptions{
+				Parent:      mygo.FocusedWindow(),
+				Title:       title,
+				DefaultPath: defaultName,
+			})
+			if sErr == nil && path != "" {
+				if wErr := os.WriteFile(path, data, 0o644); wErr != nil {
+					return wErr
 				}
+				c.AddToast(ui.Toast{Title: "已导出：" + filepath.Base(path), Type: components.ToastSuccess})
 			}
 			return nil
 		}
@@ -527,6 +726,52 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			a.tools.LocatePantryItem(code)
 			if a.shell != nil {
 				a.shell.OpenPantryTab()
+			}
+		}
+		v.OnTimerAction = func(stepID, blockID, action string) {
+			var curProps map[string]any
+			if ld.Parsed != nil {
+				for _, m := range ld.Parsed.Modules {
+					if m.Kind == "step" && m.ID == stepID {
+						if blks, ok := m.Data["blocks"].([]any); ok {
+							for _, raw := range blks {
+								if bm, ok := raw.(map[string]any); ok && fmt.Sprint(bm["id"]) == blockID {
+									curProps = bm
+									break
+								}
+							}
+						}
+					}
+				}
+			}
+			nowRFC := time.Now().UTC().Format(time.RFC3339)
+			patch := map[string]any{}
+			switch action {
+			case "start":
+				patch["status"] = "running"
+				patch["started_at"] = nowRFC
+			case "pause":
+				elapsed := 0
+				if curProps != nil {
+					if n, ok := curProps["elapsed_sec"].(int); ok {
+						elapsed = n
+					}
+					if sa, _ := curProps["started_at"].(string); sa != "" {
+						if started, err := time.Parse(time.RFC3339, sa); err == nil {
+							elapsed += int(time.Since(started).Seconds())
+						}
+					}
+				}
+				patch["status"] = "paused"
+				patch["elapsed_sec"] = elapsed
+			case "complete":
+				patch["status"] = "completed"
+				patch["completed_at"] = nowRFC
+			}
+			if len(patch) > 0 {
+				if next, err := asterdoc.UpdateStepBlockInSource(ld.Source, stepID, blockID, patch); err == nil {
+					applyLiveSource(next)
+				}
 			}
 		}
 
@@ -560,8 +805,31 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 				padBot = a.shell.MobileBottomReserve(c) + float32(tok.Spacing24)
 			}
 			docScroll.Children(func() {
+				// Readable line length (760px for prose, widens to 940px when document has plates or data tables)
+				maxColW := float32(760)
+				if doc != nil {
+					for _, m := range doc.Modules {
+						if m.Kind == "plate" || m.Kind == "data_table" {
+							maxColW = 940
+							break
+						}
+						if m.Kind == "step" {
+							if blks, ok := m.Data["blocks"].([]any); ok {
+								for _, raw := range blks {
+									if bm, ok := raw.(map[string]any); ok {
+										k := fmt.Sprint(bm["kind"])
+										if k == "plate" || k == "data_table" {
+											maxColW = 940
+											break
+										}
+									}
+								}
+							}
+						}
+					}
+				}
 				ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-					ui.Column(c).FillWidth().MaxWidth(920).
+					ui.Column(c).FillWidth().MaxWidth(maxColW).
 						Padding(padTop, padH, padBot, padH).
 						Gap(float32(tok.Spacing16)).Children(func() {
 						// Clean unframed `# Title` (Obsidian/Notion borderless display heading)
@@ -620,8 +888,8 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 								ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 									ui.Text(c, "实验属性").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
 									ui.Column(c).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-										Radius(14).Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
-										propRow(lucide.Calendar(), "date", func() {
+										Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
+										propRow(lucide.Calendar(), "日期", func() {
 											if tab.Mode == shell.ModeEdit {
 												dt := asterdoc.BorderlessTextInput(c, tok, dBuf, float32(tok.TextBody), false, "YYYY-MM-DD").
 													FontFeatures("tnum")
@@ -633,7 +901,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 												ui.Text(c, dateBadge).FontSize(float32(tok.TextBody)).TextColor(tok.Text).FontFeatures("tnum")
 											}
 										})
-										propRow(lucide.Folder(), "project", func() {
+										propRow(lucide.Folder(), "项目", func() {
 											if tab.Mode == shell.ModeEdit {
 												pSel := components.Select(c, &folderVal)
 												asterdoc.StyleSelectQuiet(c, tok, pSel)
@@ -656,14 +924,11 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 												ui.Text(c, folderLabel).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
 											}
 										})
-										propRow(lucide.Tag(), "status", func() {
+										propRow(lucide.Tag(), "状态", func() {
 											sSel := components.Select(c, &sVal)
 											asterdoc.StyleSelectQuiet(c, tok, sSel)
 											sSel.Trigger.Children(func() {
-												ui.Box(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).
-													Radius(12).Background(tok.AccentSoftBg).Children(func() {
-													ui.Text(c, statusLabels[sVal]).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent)
-												})
+												components.Badge(c, statusLabels[sVal], components.BadgeOptions{Tone: components.BadgeAccent})
 											})
 											sSel.Popup(func(panel ui.Element) {
 												for _, opt := range []string{"planned", "in_progress", "completed"} {
@@ -755,6 +1020,76 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 
 						// Render the single-source document body & step modules
 						v.Render(c)
+
+						// Deterministic Pure-Go Scientific Analysis Projection (CCK-8 / RT-qPCR ΔΔCq / Descriptive)
+						if summaries := a.cachedDocumentAnalysis(tab.FilePath, ld.Source, doc); len(summaries) > 0 {
+							analOpen := ui.Local(c.Root(), "doc-analysis-open:"+pane.ID+":"+tab.ID, func() bool { return true })
+							ui.Column(c.Key("doc-analysis-card:"+tab.FilePath)).FillWidth().
+								Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+								Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+								hdrBtn := ui.Row(c.Key("doc-analysis-hdr")).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+								chev := lucide.ChevronRight()
+								if *analOpen {
+									chev = lucide.ChevronDown()
+								}
+								hdrBtn.Children(func() {
+									ui.Icon(c, chev).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+									ui.Text(c, "科学分析汇总 (AsterCore)").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+									ui.Spacer(c)
+									components.Badge(c, fmt.Sprintf("%d 项读板统计", len(summaries)))
+								})
+								if hdrBtn.Clicked() {
+									*analOpen = !*analOpen
+								}
+								if *analOpen {
+									for sIdx, sum := range summaries {
+										sum := sum
+										ui.Column(c.Key(fmt.Sprintf("sum-%d-%s", sIdx, sum.Kind))).FillWidth().
+											Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+											Background(tok.Elevated).Gap(float32(tok.Spacing4)).Children(func() {
+											ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+												ui.Text(c, sum.Title).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+												if sum.Control != "" {
+													ui.Text(c, "对照: "+sum.Control).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted)
+												}
+												if sum.ExcludedN > 0 {
+													ui.Text(c, fmt.Sprintf("已剔除 %d 异常孔", sum.ExcludedN)).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.Warning).FontFeatures("tnum")
+												}
+											})
+											switch sum.Kind {
+											case "cck8":
+												if sum.CCK8 != nil {
+													for _, g := range sum.CCK8.Groups {
+														ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+															ui.Text(c, g.Group).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).Width(140).SingleLine().Ellipsis("…")
+															ui.Text(c, fmt.Sprintf("Mean %.3f ± %.3f (n=%d)", g.Mean, g.SD, g.N)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
+															ui.Text(c, fmt.Sprintf("相对活力 %.1f%%", g.RelativeActivity*100)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+														})
+													}
+												}
+											case "qpcr":
+												if sum.QPCR != nil {
+													for _, g := range sum.QPCR.Groups {
+														ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+															ui.Text(c, g.SampleID).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).Width(140).SingleLine().Ellipsis("…")
+															ui.Text(c, fmt.Sprintf("ΔΔCq %.2f", g.DeltaDeltaCq)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
+															ui.Text(c, fmt.Sprintf("FoldChange %.2fx", g.FoldChange)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+														})
+													}
+												}
+											default:
+												for _, g := range sum.Groups {
+													ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+														ui.Text(c, g.Group).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).Width(140).SingleLine().Ellipsis("…")
+														ui.Text(c, fmt.Sprintf("Mean %.3f ± %.3f (n=%d)", g.Mean, g.SD, g.N)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
+													})
+												}
+											}
+										})
+									}
+								}
+							})
+						}
 
 						// Bottom add-step control in Edit mode
 						if tab.Mode == shell.ModeEdit {

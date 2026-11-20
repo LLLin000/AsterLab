@@ -292,6 +292,12 @@ func defaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
 
 // DefaultStarterBlock builds a ready-to-insert generic AsterML v2 module map.
 func DefaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
+	return DefaultStarterBlockWithPrefs(doc, stepID, kind, 0, 0)
+}
+
+// DefaultStarterBlockWithPrefs builds a ready-to-insert generic AsterML v2 module map
+// honoring user preferences for default plate format and mastermix excess percentage.
+func DefaultStarterBlockWithPrefs(doc *Document, stepID, kind string, plateFormat, excessPct int) map[string]any {
 	id := nextUniqueBlockID(doc, stepID+"-"+sanitizeIDFrag(kind))
 	switch kind {
 	case "prose":
@@ -321,7 +327,11 @@ func DefaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
 			map[string]any{"id": id + "-c1", "label": "核对实验器材与试剂", "blocking": true},
 		}}
 	case "calculator":
-		return DefaultCalculatorPreset(doc, stepID, "dilution")
+		blk := DefaultCalculatorPreset(doc, stepID, "dilution")
+		if excessPct > 0 {
+			blk["excess_pct"] = excessPct
+		}
+		return blk
 	case "timer":
 		return map[string]any{
 			"kind": "timer", "id": id, "schema": 1, "title": "培养计时", "mode": "countdown",
@@ -340,7 +350,13 @@ func DefaultStarterBlock(doc *Document, stepID, kind string) map[string]any {
 				firstGroup = gl[0].ID
 			}
 		}
-		return map[string]any{"kind": "plate", "id": id, "schema": 1, "title": "12孔板布局", "format": 12, "groups": map[string]any{firstGroup: []any{"A1"}}}
+		fmtVal := plateFormat
+		switch fmtVal {
+		case 4, 6, 12, 24, 48, 96, 384:
+		default:
+			fmtVal = 12
+		}
+		return map[string]any{"kind": "plate", "id": id, "schema": 1, "title": fmt.Sprintf("%d 孔板布局", fmtVal), "format": fmtVal, "groups": map[string]any{firstGroup: []any{"A1"}}}
 	}
 	return map[string]any{"kind": "prose", "id": id, "schema": 1, "body": "新模块"}
 }
@@ -534,9 +550,48 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 		}
 	}
 
-	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
-		// Clean Obsidian H2 Step Heading (borderless inline editable in Edit mode)
-		ui.Row(c.Key("live-step-hdr:"+step.ID)).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+	if v.stepCollapsed == nil {
+		v.stepCollapsed = map[string]bool{}
+	}
+	collapsed := v.stepCollapsed[step.ID]
+	stepMatchesSearch := false
+	if sq := strings.ToLower(strings.TrimSpace(v.SearchQuery)); sq != "" {
+		if strings.Contains(strings.ToLower(stepTitle), sq) {
+			stepMatchesSearch = true
+		} else {
+			for _, bm := range blocks {
+				if strings.Contains(strings.ToLower(fmt.Sprintf("%v", bm)), sq) {
+					stepMatchesSearch = true
+					collapsed = false
+					break
+				}
+			}
+		}
+	}
+
+	stepBox := ui.Column(c).FillWidth().Gap(float32(tok.Spacing8))
+	if stepMatchesSearch {
+		stepBox.Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+			Background(tok.AccentSoftBg.Alpha(0.35)).Border(1, tok.Accent.Alpha(0.45))
+	}
+	stepBox.Children(func() {
+		// Clean Obsidian H2 Step Heading with collapse chevron
+		hdrRow := ui.Row(c.Key("live-step-hdr:"+step.ID)).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+		if v.ScrollToStepID != "" && v.ScrollToStepID == step.ID {
+			hdrRow.ScrollIntoView()
+			v.ScrollToStepID = ""
+		}
+		hdrRow.Children(func() {
+			chev := lucide.ChevronDown()
+			chevTip := "折叠本步骤"
+			if collapsed {
+				chev = lucide.ChevronRight()
+				chevTip = "展开本步骤"
+			}
+			foldBtn := components.IconButton(c, chev, chevTip, components.IconButtonCompact)
+			if foldBtn.Clicked() {
+				v.stepCollapsed[step.ID] = !collapsed
+			}
 			if editable {
 				stBuf := v.ensureWidgetDraft("live_step_t:"+step.ID, stepTitle)
 				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
@@ -553,6 +608,9 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 				})
 			} else {
 				ui.Text(c, stepTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+			}
+			if collapsed && len(blocks) > 0 {
+				components.Badge(c, fmt.Sprintf("%d 块", len(blocks)))
 			}
 			if totalStepChecks > 0 {
 				allDone := doneStepChecks == totalStepChecks
@@ -581,6 +639,9 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 				})
 			}
 		})
+		if collapsed {
+			return
+		}
 		if len(blocks) == 0 && len(stringList(step.Data, "block_refs")) == 0 {
 			if editable {
 				ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), 0).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
@@ -616,6 +677,9 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 						ui.Icon(c, lucide.GripVertical()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
 					})
 					grip.Drag(stepBlockDrag{StepID: step.ID, BlockID: bid, FromIndex: idx})
+					if grip.Dragging() {
+						blockRow.Opacity(0.45)
+					}
 					components.ContextMenu(c, grip, func(m *components.Menu) {
 						v.buildBlockContextMenu(m, step.ID, bid, idx, len(blocks), bm)
 					})
@@ -635,6 +699,12 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 				if dragged, dropped := ui.Drop[stepBlockDrag](blockRow); dropped && dragged.StepID == step.ID && dragged.FromIndex != idx {
 					if v.OnMoveStepBlockIndex != nil {
 						v.OnMoveStepBlockIndex(step.ID, dragged.BlockID, idx)
+					} else if v.OnMoveStepBlock != nil {
+						if idx > dragged.FromIndex {
+							v.OnMoveStepBlock(step.ID, dragged.BlockID, "down")
+						} else {
+							v.OnMoveStepBlock(step.ID, dragged.BlockID, "up")
+						}
 					}
 				}
 				// Check slash menu open trigger from prose block
@@ -659,7 +729,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 								ent := ent
 								if components.Button(c, ent.Label, components.ButtonGhost).Clicked() {
 									*slashOpen = false
-									v.OnInsertStepBlock(step.ID, idx+1, defaultStarterBlock(v.Doc, step.ID, ent.Kind))
+									v.OnInsertStepBlock(step.ID, idx+1, DefaultStarterBlockWithPrefs(v.Doc, step.ID, ent.Kind, v.DefaultPlateFormat, v.DefaultExcessPct))
 								}
 							}
 						})
@@ -710,11 +780,19 @@ func (v *View) buildBlockContextMenu(m *components.Menu, stepID, blockID string,
 		}
 	}
 	m.Separator()
-	if m.Item("上移").Disabled(idx == 0).Chosen() && v.OnMoveStepBlockIndex != nil {
-		v.OnMoveStepBlockIndex(stepID, blockID, idx-1)
+	if m.Item("上移").Disabled(idx == 0).Chosen() {
+		if v.OnMoveStepBlockIndex != nil {
+			v.OnMoveStepBlockIndex(stepID, blockID, idx-1)
+		} else if v.OnMoveStepBlock != nil {
+			v.OnMoveStepBlock(stepID, blockID, "up")
+		}
 	}
-	if m.Item("下移").Disabled(idx >= total-1).Chosen() && v.OnMoveStepBlockIndex != nil {
-		v.OnMoveStepBlockIndex(stepID, blockID, idx+1)
+	if m.Item("下移").Disabled(idx >= total-1).Chosen() {
+		if v.OnMoveStepBlockIndex != nil {
+			v.OnMoveStepBlockIndex(stepID, blockID, idx+1)
+		} else if v.OnMoveStepBlock != nil {
+			v.OnMoveStepBlock(stepID, blockID, "down")
+		}
 	}
 	m.Separator()
 	if m.Item("删除").Shortcut("Del").Chosen() && v.OnRemoveStepBlock != nil {

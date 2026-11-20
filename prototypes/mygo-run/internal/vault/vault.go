@@ -25,13 +25,21 @@ const (
 	TemplatesDirName = "templates"
 	TrashDirName     = "trash"
 	ConfigFileName   = "config.json"
+	LocalFileName    = "local.json"
 	WorkspaceFile    = "workspace.json"
 	TrashMetaFile    = "trash_meta.json"
 )
 
-// Config holds user-level vault & workspace preferences inside `.asterlab/config.json`.
+// LocalMachineState keeps machine-specific paths and UI layout isolated from
+// syncable `.asterlab/config.json` so cloud-syncing a Vault never overwrites another device's path.
+type LocalMachineState struct {
+	VaultPath      string `json:"vaultPath,omitempty"`
+	LastProjectDir string `json:"lastProjectDir,omitempty"`
+}
+
+// Config holds syncable vault & workspace preferences inside `.asterlab/config.json`.
 type Config struct {
-	VaultPath           string            `json:"vaultPath,omitempty"`
+	VaultPath           string            `json:"vaultPath,omitempty"` // mirrored from local.json at runtime only
 	LastProjectDir      string            `json:"lastProjectDir,omitempty"`
 	DefaultProjectDir   string            `json:"defaultProjectDir,omitempty"`
 	HideAssetsInTree    bool              `json:"hideAssetsInTree,omitempty"`
@@ -85,10 +93,11 @@ type TrashItem struct {
 	DeletedAt time.Time `json:"deletedAt"`
 }
 
-// Vault owns the local root directory and atomic file operations.
+// Vault owns the local root directory, event bus, and atomic file operations.
 type Vault struct {
 	Root   string
 	Config Config
+	Events *EventBus
 }
 
 // DefaultVaultDir returns the default single-vault path on the user's machine.
@@ -118,6 +127,8 @@ func Open(rootDir string) (*Vault, error) {
 		abs,
 		filepath.Join(abs, SystemDirName),
 		filepath.Join(abs, SystemDirName, TrashDirName),
+		filepath.Join(abs, SystemDirName, SnapshotsDirName),
+		filepath.Join(abs, SystemDirName, "cache"),
 		filepath.Join(abs, AssetsDirName),
 		filepath.Join(abs, TemplatesDirName),
 	} {
@@ -126,7 +137,8 @@ func Open(rootDir string) (*Vault, error) {
 		}
 	}
 	v := &Vault{
-		Root: abs,
+		Root:   abs,
+		Events: &EventBus{},
 		Config: Config{
 			VaultPath:        abs,
 			HideAssetsInTree: false,
@@ -174,26 +186,40 @@ func (v *Vault) RelPath(abs string) string {
 	return slash
 }
 
-// LoadConfig reads `.asterlab/config.json` when present.
+// LoadConfig reads syncable `.asterlab/config.json` and machine-local `.asterlab/local.json`.
 func (v *Vault) LoadConfig() error {
 	p := v.systemPath(ConfigFileName)
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return err
+	if data, err := os.ReadFile(p); err == nil {
+		var cfg Config
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return err
+		}
+		v.Config = cfg
 	}
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return err
+	if localData, err := os.ReadFile(v.systemPath(LocalFileName)); err == nil {
+		var lm LocalMachineState
+		if json.Unmarshal(localData, &lm) == nil && lm.LastProjectDir != "" {
+			v.Config.LastProjectDir = lm.LastProjectDir
+		}
 	}
-	cfg.VaultPath = v.Root
-	v.Config = cfg
+	v.Config.VaultPath = v.Root
 	return nil
 }
 
-// SaveConfig persists `.asterlab/config.json`.
+// SaveConfig persists syncable `.asterlab/config.json` (without machine-local absolute paths)
+// and stores machine-local state inside `.asterlab/local.json`.
 func (v *Vault) SaveConfig() error {
-	v.Config.VaultPath = v.Root
-	data, err := json.MarshalIndent(v.Config, "", "  ")
+	lm := LocalMachineState{
+		VaultPath:      v.Root,
+		LastProjectDir: v.Config.LastProjectDir,
+	}
+	if lData, err := json.MarshalIndent(lm, "", "  "); err == nil {
+		_ = asterdoc.WriteFileAtomic(v.systemPath(LocalFileName), lData)
+	}
+	syncCfg := v.Config
+	syncCfg.VaultPath = ""
+	syncCfg.LastProjectDir = ""
+	data, err := json.MarshalIndent(syncCfg, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -488,6 +514,11 @@ func (v *Vault) CreateExperiment(folderRel, title, dateYMD, templateSource strin
 		return FileEntry{}, fmt.Errorf("缺少初始实验内容")
 	}
 	src := templateSource
+	// Instantiate template via asterdoc.InstantiateTemplate so module IDs and internal
+	// references are freshly remapped instead of duplicating template IDs.
+	if instantiated, instErr := asterdoc.InstantiateTemplate(src, nil); instErr == nil && strings.TrimSpace(instantiated) != "" {
+		src = instantiated
+	}
 	if norm := asterdoc.NormalizeDateYMD(dateYMD); norm != "" {
 		src = asterdoc.SetFrontmatterMetadata(src, baseTitle, norm, "planned")
 	} else {
@@ -501,6 +532,9 @@ func (v *Vault) CreateExperiment(folderRel, title, dateYMD, templateSource strin
 		_ = v.SaveConfig()
 	}
 	rel := v.RelPath(targetAbs)
+	if v.Events != nil {
+		v.Events.Emit(VaultEvent{Kind: EventCreate, RelPath: rel})
+	}
 	return v.inspectFileEntry(targetAbs, rel, folderRel), nil
 }
 
@@ -586,7 +620,14 @@ func (v *Vault) Rename(relPath, newName string) (string, error) {
 			_ = asterdoc.WriteFileAtomic(newAbs, []byte(updated))
 		}
 	}
-	return v.RelPath(newAbs), nil
+	newRel := v.RelPath(newAbs)
+	if !info.IsDir() && strings.HasSuffix(strings.ToLower(newAbs), ".asterml") {
+		_, _ = v.RewriteWikiAndRepeatLinks(relPath, newRel)
+	}
+	if v.Events != nil {
+		v.Events.Emit(VaultEvent{Kind: EventRename, RelPath: newRel, OldPath: relPath})
+	}
+	return newRel, nil
 }
 
 // Move moves a file or folder into destFolderRel ("" for vault root).
@@ -615,7 +656,14 @@ func (v *Vault) Move(srcRel, destFolderRel string) (string, error) {
 	if err := os.Rename(srcAbs, destAbs); err != nil {
 		return "", err
 	}
-	return v.RelPath(destAbs), nil
+	newRel := v.RelPath(destAbs)
+	if info, stErr := os.Stat(destAbs); stErr == nil && !info.IsDir() && strings.HasSuffix(strings.ToLower(destAbs), ".asterml") {
+		_, _ = v.RewriteWikiAndRepeatLinks(srcRel, newRel)
+	}
+	if v.Events != nil {
+		v.Events.Emit(VaultEvent{Kind: EventRename, RelPath: newRel, OldPath: srcRel})
+	}
+	return newRel, nil
 }
 
 // Trash soft-deletes a file or folder into `.asterlab/trash/`.
@@ -639,6 +687,9 @@ func (v *Vault) Trash(relPath string) (TrashItem, error) {
 	}
 	item := TrashItem{TrashName: trashName, OrigRel: relPath, DeletedAt: time.Now()}
 	_ = v.appendTrashMeta(item)
+	if v.Events != nil {
+		v.Events.Emit(VaultEvent{Kind: EventDelete, RelPath: relPath})
+	}
 	return item, nil
 }
 
@@ -670,6 +721,21 @@ func (v *Vault) RestoreFromTrash(trashName string) (string, error) {
 	}
 	_ = v.saveTrashMeta(remaining)
 	return v.RelPath(origAbs), nil
+}
+
+// ListTrash returns all recorded soft-deleted items in `.asterlab/trash/`, newest first.
+func (v *Vault) ListTrash() []TrashItem {
+	items := v.listTrashMeta()
+	out := make([]TrashItem, 0, len(items))
+	for _, it := range items {
+		if _, err := os.Stat(v.systemPath(TrashDirName, it.TrashName)); err == nil {
+			out = append(out, it)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].DeletedAt.After(out[j].DeletedAt)
+	})
+	return out
 }
 
 func (v *Vault) listTrashMeta() []TrashItem {

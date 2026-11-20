@@ -11,6 +11,7 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
+	"asterlab-mygo-prototype/internal/astercore"
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
@@ -46,6 +47,7 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		_, _ = v.MigrateLegacyExperiments(dataDir)
 	}
 	a.vault = v
+	a.vaultIndex = vault.NewVaultIndex(v)
 	a.docStore = vault.NewDocStore(v)
 	a.ensureLiveViewsMap()
 
@@ -54,12 +56,11 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		a.shell.HideAssetsInTree = v.Config.HideAssetsInTree
 		a.shell.DefaultProjectDir = v.Config.DefaultProjectDir
 		a.shell.ThemeSource = v.Config.ThemeSource
-		a.shell.ThemePreset = v.Config.ThemePreset
+		lgVal := true
 		if v.Config.LiquidGlass != nil {
-			a.shell.LiquidGlass = *v.Config.LiquidGlass
-		} else {
-			a.shell.LiquidGlass = true
+			lgVal = *v.Config.LiquidGlass
 		}
+		a.shell.SetInitialThemeLook(v.Config.ThemePreset, lgVal)
 		a.shell.TextScale = v.Config.TextScale
 		a.shell.Density = v.Config.Density
 		a.shell.ReduceMotion = v.Config.ReduceMotion
@@ -74,19 +75,16 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		if len(v.Config.Hotkeys) > 0 {
 			a.shell.Hotkeys = v.Config.Hotkeys
 		}
-		if v.Config.MobilePullAction != "" {
-			a.shell.MobilePullAction = v.Config.MobilePullAction
-		}
+		autoHide := true
 		if v.Config.MobileAutoHideDock != nil {
-			a.shell.MobileAutoHideDock = *v.Config.MobileAutoHideDock
-		} else {
-			a.shell.MobileAutoHideDock = true
+			autoHide = *v.Config.MobileAutoHideDock
 		}
+		editTb := true
 		if v.Config.MobileEditToolbar != nil {
-			a.shell.MobileEditToolbar = *v.Config.MobileEditToolbar
-		} else {
-			a.shell.MobileEditToolbar = true
+			editTb = *v.Config.MobileEditToolbar
 		}
+		a.shell.SetInitialMobilePrefs(v.Config.MobilePullAction, autoHide, editTb)
+		a.shell.SyncThemeLook(nil)
 		var persist shell.WorkspacePersistState
 		if err := v.LoadWorkspaceJSON(&persist); err == nil {
 			a.shell.RestorePersistState(persist)
@@ -136,6 +134,11 @@ func (a *app) refreshVaultTreeAndCalendar() {
 	a.shell.VaultTree = tree
 	a.shell.VaultFiles = files
 	a.shell.VaultFolders = a.vault.ProjectFolders()
+	a.shell.TrashItems = a.vault.ListTrash()
+	if a.vaultIndex != nil {
+		_ = a.vaultIndex.Refresh()
+		a.shell.VaultTimers = a.vaultIndex.ActiveTimers()
+	}
 
 	var exps []shell.ExperimentItem
 	var designs []shell.DesignItem
@@ -457,6 +460,104 @@ func (a *app) deleteVaultFile(relPath string) {
 	a.saveVaultWorkspace()
 }
 
+func (a *app) restoreVaultTrash(trashName string) {
+	if a.vault == nil || trashName == "" {
+		return
+	}
+	restoredRel, err := a.vault.RestoreFromTrash(trashName)
+	if err != nil {
+		a.syncErr = fmt.Sprintf("恢复文件失败：%v", err)
+		return
+	}
+	a.refreshVaultTreeAndCalendar()
+	if strings.HasSuffix(strings.ToLower(restoredRel), ".asterml") {
+		a.openVaultFileInActivePane(restoredRel, "")
+	}
+}
+
+func (a *app) syncActiveDocCompanionState(relPath, source string, doc *asterdoc.Document) {
+	if a.shell == nil || a.vault == nil || relPath == "" {
+		return
+	}
+	cacheKey := fmt.Sprintf("%s|%d|%s", relPath, len(source), source)
+	if a.lastCompanionKey == cacheKey && a.shell.CurrentDocRelPath == relPath {
+		return
+	}
+	a.lastCompanionKey = cacheKey
+	a.shell.CurrentDocRelPath = relPath
+	a.shell.CurrentSnapshots = a.vault.ListSnapshots(relPath)
+	if a.vaultIndex != nil {
+		a.shell.CurrentBacklinks = a.vaultIndex.BacklinksFor(relPath)
+		a.shell.VaultTimers = a.vaultIndex.ActiveTimers()
+	}
+	knownPantry := map[string]bool{}
+	if a.tools != nil {
+		for _, p := range a.tools.Pantry.Items {
+			if p.LabelCode != "" {
+				knownPantry[strings.TrimSpace(p.LabelCode)] = true
+			}
+		}
+	}
+	rep := astercore.AssessDocument(doc, knownPantry)
+	diags := make([]shell.DiagnosticItem, 0, len(rep.Diagnostics))
+	for _, d := range rep.Diagnostics {
+		diags = append(diags, shell.DiagnosticItem{
+			Code:       d.Code,
+			Severity:   string(d.Severity),
+			Path:       d.Path,
+			Message:    d.Message,
+			NextAction: d.NextAction,
+		})
+	}
+	a.shell.CurrentDiagnostics = diags
+}
+
+func (a *app) restoreSnapshotFromHistory(relPath, snapshotID string) {
+	if a.vault == nil || a.docStore == nil || relPath == "" || snapshotID == "" {
+		return
+	}
+	snapSrc, err := a.vault.ReadSnapshot(relPath, snapshotID)
+	if err != nil {
+		a.syncErr = fmt.Sprintf("读取历史快照失败：%v", err)
+		return
+	}
+	ld, err := a.docStore.Open(relPath)
+	if err != nil {
+		a.syncErr = fmt.Sprintf("打开文档失败：%v", err)
+		return
+	}
+	_ = a.vault.RecordSnapshot(relPath, ld.Source, true)
+	if err := ld.ApplyEdit(snapSrc); err != nil {
+		a.syncErr = fmt.Sprintf("恢复快照失败：%v", err)
+		return
+	}
+	ld.NotifySaved(a.vault, true)
+	if a.vaultIndex != nil {
+		a.vaultIndex.UpsertSource(relPath, ld.Source)
+	}
+	a.resetLiveDraftCachesForFile(relPath)
+	a.lastCompanionKey = ""
+	a.refreshVaultTreeAndCalendar()
+	a.syncActiveDocCompanionState(relPath, ld.Source, ld.Parsed)
+}
+
+func (a *app) resetLiveDraftCachesForFile(relPath string) {
+	if a.liveEditorSynced != nil {
+		delete(a.liveEditorSynced, relPath)
+	}
+	if a.liveTitleDrafts != nil {
+		delete(a.liveTitleDrafts, relPath)
+	}
+	if a.liveDateDrafts != nil {
+		delete(a.liveDateDrafts, relPath)
+	}
+	for key, v := range a.liveViews {
+		if strings.HasSuffix(key, "|"+relPath) {
+			v.ClearTextDrafts()
+		}
+	}
+}
+
 func (a *app) undoActiveLiveDoc() {
 	if a.shell == nil || a.docStore == nil {
 		return
@@ -468,9 +569,7 @@ func (a *app) undoActiveLiveDoc() {
 	}
 	if ld, err := a.docStore.Open(tab.FilePath); err == nil {
 		if ld.Undo() {
-			if a.liveEditorSynced != nil {
-				delete(a.liveEditorSynced, tab.FilePath)
-			}
+			a.resetLiveDraftCachesForFile(tab.FilePath)
 			a.refreshVaultTreeAndCalendar()
 		}
 	}
@@ -487,9 +586,7 @@ func (a *app) redoActiveLiveDoc() {
 	}
 	if ld, err := a.docStore.Open(tab.FilePath); err == nil {
 		if ld.Redo() {
-			if a.liveEditorSynced != nil {
-				delete(a.liveEditorSynced, tab.FilePath)
-			}
+			a.resetLiveDraftCachesForFile(tab.FilePath)
 			a.refreshVaultTreeAndCalendar()
 		}
 	}

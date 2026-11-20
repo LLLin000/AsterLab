@@ -68,6 +68,63 @@ func validWell(well string) bool {
 	return well[letters] != '0'
 }
 
+// URIIntent represents a generalized deep-link route under the `asterlab://` scheme.
+type URIIntent struct {
+	Kind       string // "run" | "open" | "pantry"
+	RunID      string
+	Well       string
+	FilePath   string
+	StepID     string
+	PantryCode string
+}
+
+// ParseAsterLabURI parses all supported `asterlab://` routes:
+//   - asterlab://run/<runID>
+//   - asterlab://run/<runID>/well/<well>
+//   - asterlab://open?file=<relPath>&step=<stepID>
+//   - asterlab://pantry?code=<labelCode>
+func ParseAsterLabURI(raw string) (URIIntent, error) {
+	trimmed := strings.TrimSpace(raw)
+	u, err := url.Parse(trimmed)
+	if err != nil || u == nil || !strings.EqualFold(u.Scheme, "asterlab") {
+		return URIIntent{}, fmt.Errorf("打不开实验链接：协议应为 asterlab://")
+	}
+	switch strings.ToLower(u.Host) {
+	case "run":
+		rl, err := ParseRunWellLink(trimmed)
+		if err != nil {
+			return URIIntent{}, err
+		}
+		return URIIntent{Kind: "run", RunID: rl.RunID, Well: rl.Well}, nil
+	case "open":
+		q := u.Query()
+		fp := strings.TrimSpace(q.Get("file"))
+		if fp == "" {
+			fp = strings.Trim(u.Path, "/")
+		}
+		if fp == "" {
+			return URIIntent{}, fmt.Errorf("打不开实验链接：缺少 file 参数")
+		}
+		return URIIntent{
+			Kind:     "open",
+			FilePath: fp,
+			StepID:   strings.TrimSpace(q.Get("step")),
+		}, nil
+	case "pantry":
+		q := u.Query()
+		code := strings.TrimSpace(q.Get("code"))
+		if code == "" {
+			code = strings.Trim(u.Path, "/")
+		}
+		if code == "" {
+			return URIIntent{}, fmt.Errorf("打不开储藏室链接：缺少试剂编号")
+		}
+		return URIIntent{Kind: "pantry", PantryCode: code}, nil
+	default:
+		return URIIntent{}, fmt.Errorf("不支持的链接路由 %q", u.Host)
+	}
+}
+
 // FindWellCell maps a parsed well onto grid coordinates by matching the
 // schema's row+column labels, so any plate format resolves without a
 // hardcoded matrix. UX-P4.

@@ -20,6 +20,18 @@ const (
 	mobileEdgeSwipeZoneWidth = float32(18)
 )
 
+// SetInitialMobilePrefs loads persisted mobile shell preferences without letting
+// EnsureMobileDefaults overwrite explicitly saved false booleans back to true.
+func (s *Shell) SetInitialMobilePrefs(pullAction string, autoHideDock, editToolbar bool) {
+	if pullAction == "" {
+		pullAction = "palette"
+	}
+	s.MobilePullAction = pullAction
+	s.MobileAutoHideDock = autoHideDock
+	s.MobileEditToolbar = editToolbar
+	s.mobilePrefsInited = true
+}
+
 // EnsureMobileDefaults initializes Obsidian Mobile v2 shell defaults once without
 // overriding explicit user preferences loaded from disk.
 func (s *Shell) EnsureMobileDefaults() {
@@ -224,6 +236,7 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 	})
 
 	s.renderCommandPalette(c)
+	s.renderGlobalSearchModal(c)
 	s.renderVaultDialogs(c)
 	if s.RenderOverlays != nil {
 		s.RenderOverlays(c)
@@ -537,16 +550,25 @@ func (s *Shell) renderMobileFloatingBottomBar(
 		tabCount = len(activePane.Tabs)
 	}
 
-	// Centered compact floating capsule (never stretched edge-to-edge!)
+	// Centered compact floating capsule (horizontally scrollable on narrow screens for edit toolbar!)
+	vw, _ := c.Size()
+	maxCapsuleW := float32(360)
+	if vw > 48 {
+		maxCapsuleW = vw - 32
+	}
 	ui.Row(c.Key("mb-dock-wrap")).Absolute().Left(16).Right(16).Bottom(14).Center().PassThrough().Children(func() {
-		capsule := ui.Row(c.Key("mb-dock-capsule")).Height(48).Radius(24).
-			Padding(0, 12).AlignItems(ui.Center).Gap(4).
+		capsule := ui.Row(c.Key("mb-dock-capsule")).Height(48).MaxWidth(maxCapsuleW).Radius(24).
+			Padding(0, 12).AlignItems(ui.Center).Gap(4).Clip().
 			Translate(0, hideT*78).
 			Opacity(1 - hideT*0.92)
 		theme.ApplyCapsuleGlass(capsule, tok, false)
 		capsule.Children(func() {
 			if editingBar {
-				s.renderMobileEditToolbarItems(c, tok, activeTab)
+				ui.ScrollHorizontal(c.Key("mb-edit-tb-scroll")).MaxWidth(maxCapsuleW - 24).Height(40).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
+						s.renderMobileEditToolbarItems(c, tok, activeTab)
+					})
+				})
 				return
 			}
 			s.renderMobileNavDockItems(c, tok, activeTab, tabCount)
@@ -683,6 +705,9 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 	if activeKind == "" && s.MobileSwipeKind != "" && s.MobileDrawerProgress > 0.01 {
 		activeKind = s.MobileSwipeKind
 	}
+	if activeKind != "" {
+		s.mobileLastDrawerKind = activeKind
+	}
 	targetP := float32(0)
 	if s.MobileDrawer != "" {
 		targetP = 1
@@ -696,10 +721,14 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 		pAnim = targetP
 	}
 	if activeKind == "" && pAnim <= 0.01 {
+		s.mobileLastDrawerKind = ""
 		return
 	}
 	if activeKind == "" {
-		activeKind = "tree"
+		activeKind = s.mobileLastDrawerKind
+		if activeKind == "" {
+			activeKind = "tree"
+		}
 	}
 
 	root.Children(func() {

@@ -229,13 +229,18 @@ type app struct {
 	runLinkArg string
 
 	// Obsidian-style local Vault + shared single-source LiveDocuments
-	vault            *vault.Vault
-	docStore         *vault.DocStore
-	liveViews        map[string]*asterdoc.View
-	liveEditors      map[string]*editor.State
-	liveEditorSynced map[string]string
-	liveTitleDrafts  map[string]*string
-	liveDateDrafts   map[string]*string
+	vault             *vault.Vault
+	vaultIndex        *vault.VaultIndex
+	docStore          *vault.DocStore
+	liveViews         map[string]*asterdoc.View
+	liveEditors       map[string]*editor.State
+	liveEditorSynced  map[string]string
+	liveTitleDrafts   map[string]*string
+	liveDateDrafts    map[string]*string
+	pendingFindQuery  map[string]string
+	lastCompanionKey  string
+	cachedAssays      map[string]cachedAssayResult
+	scrollToStepID    string
 	newExpOpen       bool
 	newExpFolder     string
 	newExpNewFolder  string
@@ -2721,23 +2726,39 @@ func (a *app) openRunLinkFromEnv() {
 	a.openRunWellLink(raw)
 }
 
-// openRunWellLink resolves the asterlab:// run routes into a Run-page
-// navigation intent: asterlab://run/<runID> opens the Run, and
-// asterlab://run/<runID>/well/<well> additionally selects the well on the
-// recording grid. Invalid links surface a visible shell error, never panic.
+// openRunWellLink resolves all asterlab:// deep-link routes (`run`, `open`, `pantry`)
+// into in-process navigation intents. Invalid links surface a visible shell error.
 func (a *app) openRunWellLink(raw string) {
-	link, err := state.ParseRunWellLink(raw)
+	intent, err := state.ParseAsterLabURI(raw)
 	if err != nil {
 		if a.shell != nil {
 			a.shell.Error = err.Error()
 		}
 		return
 	}
-	a.selectRun(link.RunID)
-	if link.Well == "" {
-		if a.shell != nil {
-			a.shell.Error = ""
+	if a.shell != nil {
+		a.shell.Error = ""
+	}
+	switch intent.Kind {
+	case "open":
+		if intent.StepID != "" {
+			a.scrollToStepID = intent.StepID
+			a.designSelected = intent.StepID
 		}
+		a.openVaultFileInActivePane(intent.FilePath, "")
+		return
+	case "pantry":
+		if a.tools == nil {
+			a.tools = a.newToolsWorkspace()
+		}
+		a.tools.LocatePantryItem(intent.PantryCode)
+		if a.shell != nil {
+			a.shell.OpenPantryTab()
+		}
+		return
+	}
+	a.selectRun(intent.RunID)
+	if intent.Well == "" {
 		return
 	}
 	if a.shell == nil || a.shell.Page != shell.Run {
@@ -2748,13 +2769,12 @@ func (a *app) openRunWellLink(raw string) {
 		return
 	}
 	schema := a.ws.Grid.Schema
-	row, col, ok := state.FindWellCell(link.Well, schema.RowLabels, schema.ColumnLabels)
+	row, col, ok := state.FindWellCell(intent.Well, schema.RowLabels, schema.ColumnLabels)
 	if !ok {
-		a.shell.Error = "孔位 " + link.Well + " 不在当前任务的孔板上"
+		a.shell.Error = "孔位 " + intent.Well + " 不在当前任务的孔板上"
 		return
 	}
 	a.ws.Grid.SetSelection(resultgrid.Selection{StartRow: row, StartColumn: col, EndRow: row, EndColumn: col})
-	a.shell.Error = ""
 }
 
 // pollTimers refreshes the global timer strip at most every five seconds, so
@@ -4596,21 +4616,17 @@ func main() {
 		assetRoots: map[string]string{}, runViewKinds: map[string]runworkspace.ViewKind{},
 		runLinkArg: runLink,
 	}
-	initErr := ""
-	if designErr != nil {
-		initErr = "设计服务：" + designErr.Error()
-	} else if runErr != nil {
-		initErr = "运行服务：" + runErr.Error()
-	} else if designSvc == nil {
-		initErr = "设计服务返回空实现"
+	// Per ADR-0002, `.asterml` local Vault is the single source of truth and runs
+	// natively in pure Go without requiring the optional legacy Runs.dll native bridge.
+	// Log missing native services quietly instead of showing a blocking error banner.
+	if designErr != nil || runErr != nil || designSvc == nil {
+		log.Printf("running in pure-Go local Vault mode (optional legacy native bridge unavailable: run=%v design=%v)", runErr, designErr)
 	}
-	a.syncErr = initErr
 	log.Printf("native services: run=%v(%v) design=%v(%v) time-budget=%v(%v)", runSvc != nil, runErr, designSvc != nil, designErr, timeBudgetSvc != nil, timeBudgetErr)
 	today := time.Now().Format("2006-01-02")
 	a.shell = &shell.Shell{
 		Project:      "",
 		Page:         shell.Project,
-		Error:        initErr,
 		TodayDate:    today,
 		SelectedDate: today,
 		OnSelect:     func(id string) { a.selectDesign(id) },
@@ -4689,6 +4705,27 @@ func main() {
 		OnVaultDelete: func(relPath string) {
 			a.deleteVaultFile(relPath)
 		},
+		OnVaultRestoreTrash: func(trashName string) {
+			a.restoreVaultTrash(trashName)
+		},
+		OnGlobalSearch: func(query string) []vault.SearchHit {
+			if a.vaultIndex == nil {
+				return nil
+			}
+			return a.vaultIndex.SearchFullText(query, 50)
+		},
+		OnOpenSearchHit: func(relPath, query string) {
+			if strings.TrimSpace(query) != "" {
+				if a.pendingFindQuery == nil {
+					a.pendingFindQuery = map[string]string{}
+				}
+				a.pendingFindQuery[relPath] = strings.TrimSpace(query)
+			}
+			a.openVaultFileInActivePane(relPath, "")
+		},
+		OnRestoreSnapshot: func(relPath, snapshotID string) {
+			a.restoreSnapshotFromHistory(relPath, snapshotID)
+		},
 		OnSetExperimentDate: func(relPath, dateYMD string) {
 			if a.vault == nil || a.docStore == nil {
 				return
@@ -4730,6 +4767,7 @@ func main() {
 		},
 		OnSelectOutlineStep: func(stepID string) {
 			a.designSelected = stepID
+			a.scrollToStepID = stepID
 		},
 		OnLocatePantry: func(itemID string) {
 			if a.tools == nil {
@@ -4754,19 +4792,6 @@ func main() {
 		},
 		PaletteCommands: []shell.PaletteCommand{
 			{
-				ID:       "new-experiment",
-				Title:    "新建实验",
-				Subtitle: "选择项目文件夹、日期与模板创建 .asterml 实验文档",
-				Shortcut: "Ctrl+N",
-				OnRun: func() {
-					targetDate := ""
-					if a.shell != nil {
-						targetDate = a.shell.SelectedDate
-					}
-					a.openNewExperimentDialog("", targetDate)
-				},
-			},
-			{
 				ID:       "export-pdf",
 				Title:    "导出当前实验 PDF",
 				Subtitle: "按组件级 A4 版式导出当前聚焦的实验文档",
@@ -4779,17 +4804,6 @@ func main() {
 							a.startDocumentPDFExport(nil, firstNonEmpty(tab.Title, "实验方案"), "", "", a.vault.Root, ld.Parsed)
 						}
 					}
-				},
-			},
-			{
-				ID:       "open-pantry",
-				Title:    "打开储藏室货架",
-				Subtitle: "管理试剂效期、货架位置与说明书附件",
-				OnRun: func() {
-					if a.tools == nil {
-						a.tools = a.newToolsWorkspace()
-					}
-					a.shell.OpenPantryTab()
 				},
 			},
 			{

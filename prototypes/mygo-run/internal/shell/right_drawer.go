@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -12,10 +13,11 @@ import (
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/vault"
 )
 
 func (s *Shell) ensureRightDrawerDefaults() {
-	if s.RightTab < 0 || s.RightTab > 1 {
+	if s.RightTab < 0 || s.RightTab > 2 {
 		s.RightTab = 0
 	}
 	if s.RightCalc.Stock == "" {
@@ -35,7 +37,7 @@ func (s *Shell) ensureRightDrawerDefaults() {
 func (s *Shell) rightDrawerHeader(c *ui.Context) {
 	tok := theme.GetTokens(c.Theme())
 	s.ensureRightDrawerDefaults()
-	titles := []string{"步骤大纲", "速算与计时"}
+	titles := []string{"步骤大纲", "速算与计时", "关联与诊断"}
 	components.Text(c, titles[s.RightTab]).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 }
 
@@ -55,7 +57,7 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 		ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
 			Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
 			tabIdx := s.RightTab
-			components.Tabs(c, &tabIdx, components.TabsSegmented, "步骤大纲", "速算与计时")
+			components.Tabs(c, &tabIdx, components.TabsSegmented, "步骤大纲", "速算与计时", "关联与诊断")
 			s.RightTab = tabIdx
 		})
 		ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.5))
@@ -67,6 +69,8 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 					s.renderDrawerOutline(c, tok)
 				case 1:
 					s.renderDrawerTimerAndCalc(c, tok)
+				case 2:
+					s.renderDrawerLinksAndDiagnostics(c, tok)
 				}
 			})
 		})
@@ -118,6 +122,28 @@ func (s *Shell) renderDrawerOutline(c *ui.Context, tok theme.Tokens) {
 }
 
 func (s *Shell) renderDrawerTimerAndCalc(c *ui.Context, tok theme.Tokens) {
+	if len(s.VaultTimers) > 0 {
+		components.Text(c, "Vault 全局计时器").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+		now := time.Now()
+		for _, vt := range s.VaultTimers {
+			vt := vt
+			ui.Row(c.Key("rd-vt-"+vt.RelPath+"-"+vt.TimerID)).FillWidth().Padding(float32(tok.Spacing8)).
+				Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(.25)).
+				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+					components.Text(c, fmt.Sprintf("%s · %s", firstNonEmptyStr(vt.DocTitle, vt.RelPath), vt.Title)).
+						FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+					components.Text(c, formatVaultTimerClock(vt, now)).
+						FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum")
+				})
+				if s.OnOpenSearchHit != nil && components.Button(c, "打开", components.ButtonGhost).Clicked() {
+					s.OnOpenSearchHit(vt.RelPath, "")
+				}
+			})
+		}
+		ui.Divider(c)
+	}
 	if len(s.ActiveTimers) > 0 {
 		components.Text(c, "运行中计时器").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 		for _, tm := range s.ActiveTimers {
@@ -140,6 +166,125 @@ func (s *Shell) renderDrawerTimerAndCalc(c *ui.Context, tok theme.Tokens) {
 	s.renderDrawerQuickCalc(c, tok)
 }
 
+func formatVaultTimerClock(vt vault.VaultTimerEntry, now time.Time) string {
+	elapsed := vt.ElapsedSec
+	if vt.Status == "running" && vt.StartedAt != "" {
+		if started, err := time.Parse(time.RFC3339, vt.StartedAt); err == nil {
+			if delta := int(now.Sub(started).Seconds()); delta > elapsed {
+				elapsed = delta
+			}
+		}
+	}
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	formatSec := func(sec int) string {
+		h := sec / 3600
+		m := (sec % 3600) / 60
+		s := sec % 60
+		if h > 0 {
+			return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+		}
+		return fmt.Sprintf("%02d:%02d", m, s)
+	}
+	stateLbl := "暂停"
+	if vt.Status == "running" {
+		stateLbl = "进行中"
+	}
+	if vt.Mode == "countdown" && vt.PlannedSec > 0 {
+		rem := vt.PlannedSec - elapsed
+		if rem < 0 {
+			rem = 0
+		}
+		return fmt.Sprintf("%s · 剩余 %s", stateLbl, formatSec(rem))
+	}
+	return fmt.Sprintf("%s · 已用 %s", stateLbl, formatSec(elapsed))
+}
+
+func (s *Shell) renderDrawerLinksAndDiagnostics(c *ui.Context, tok theme.Tokens) {
+	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			components.Text(c, "反向链接与复现谱系").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+			ui.Spacer(c)
+			components.Badge(c, fmt.Sprintf("%d", len(s.CurrentBacklinks)))
+		})
+		if len(s.CurrentBacklinks) == 0 {
+			components.Text(c, "暂无其他实验通过 [[双链]] 或 repeat_of 引用本文档。").
+				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+		} else {
+			for i, ref := range s.CurrentBacklinks {
+				ref := ref
+				kindLbl := "双链引用"
+				if ref.Kind == "repeat_of" {
+					kindLbl = "复现引用"
+				}
+				row := ui.Row(c.Key(fmt.Sprintf("rd-link-%d-%s", i, ref.SourceRel))).FillWidth().
+					Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+					Background(tok.Elevated).AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+				theme.ApplyTactilePress(row)
+				row.Children(func() {
+					ui.Icon(c, lucide.Link()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+					ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+						components.Text(c, firstNonEmptyStr(ref.SourceTitle, ref.SourceRel)).
+							FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+						sub := kindLbl
+						if ref.SourceDate != "" {
+							sub += " · " + ref.SourceDate
+						}
+						components.Text(c, sub).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted).SingleLine()
+					})
+				})
+				if row.Clicked() && s.OnOpenSearchHit != nil {
+					s.OnOpenSearchHit(ref.SourceRel, "")
+				}
+			}
+		}
+
+		ui.Divider(c)
+
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			components.Text(c, "科学诊断与校验 (AsterCore)").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+			ui.Spacer(c)
+			components.Badge(c, fmt.Sprintf("%d", len(s.CurrentDiagnostics)))
+		})
+		if len(s.CurrentDiagnostics) == 0 {
+			ui.Row(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Icon(c, lucide.CircleCheck()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Success)
+				components.Text(c, "未发现结构阻断或 ARRIVE 对照缺失。").FontSize(float32(tok.TextMeta)).TextColor(tok.Success)
+			})
+			return
+		}
+		for i, diag := range s.CurrentDiagnostics {
+			diag := diag
+			sevLbl := "建议"
+			sevCol := tok.Accent
+			switch diag.Severity {
+			case "blocking":
+				sevLbl = "阻断"
+				sevCol = tok.Danger
+			case "needs_confirmation":
+				sevLbl = "待确认"
+				sevCol = tok.Warning
+			}
+			ui.Column(c.Key(fmt.Sprintf("rd-diag-%d-%s", i, diag.Code))).FillWidth().
+				Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).Border(1, sevCol.Alpha(0.32)).Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, sevLbl).FontSize(float32(tok.TextMeta)*0.88).Bold().TextColor(sevCol)
+					if diag.Code != "" {
+						ui.Text(c, diag.Code).FontSize(float32(tok.TextMeta)*0.85).TextColor(tok.TextMuted)
+					}
+				})
+				components.Text(c, diag.Message).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+				if diag.NextAction != "" {
+					components.Text(c, "建议: "+diag.NextAction).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted)
+				}
+			})
+		}
+	})
+}
+
 func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 	mode := s.RightCalc.Mode
 	components.Tabs(c, &mode, components.TabsSegmented, "C1·V1 稀释", "摩尔称量")
@@ -158,10 +303,10 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 					components.Text(c, msg).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
 					return
 				}
-				ui.Text(c, fmt.Sprintf("取母液 V1 = %.2f uL", v1UL)).FontSize(float32(tok.TextSection)).Bold().
-					TextColor(tok.Accent).FontFeatures("tnum")
-				ui.Text(c, fmt.Sprintf("补加稀释液 = %.2f uL", diluentUL)).FontSize(float32(tok.TextMeta)).
-					TextColor(tok.Text).FontFeatures("tnum")
+				ui.Text(c, fmt.Sprintf("取母液 V1 = %.2f μL", v1UL)).FontSize(float32(tok.TextSection)).Bold().
+					TextColor(tok.Accent).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
+				ui.Text(c, fmt.Sprintf("补加稀释液 = %.2f μL", diluentUL)).FontSize(float32(tok.TextMeta)).
+					TextColor(tok.Text).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 			})
 		})
 		return
@@ -172,7 +317,7 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 		drawerLabeledInput(c, tok, "配置体积", &s.RightCalc.FinalVol, &s.RightCalc.VolUnit, []string{"mL", "uL"})
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
 			ui.Text(c, "分子量 MW (g/mol)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-			ui.TextInput(c, &s.RightCalc.MolarMass).Placeholder("例如 1449.25").FillWidth()
+			components.TextBox(c, &s.RightCalc.MolarMass, components.TextBoxOptions{}).Placeholder("例如 1449.25")
 		})
 		massMg, msg := computeQuickMolarMass(s.RightCalc)
 		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
@@ -182,7 +327,7 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 				return
 			}
 			ui.Text(c, fmt.Sprintf("需称量溶质 = %.3f mg", massMg)).FontSize(float32(tok.TextSection)).Bold().
-				TextColor(tok.Accent).FontFeatures("tnum")
+				TextColor(tok.Accent).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 		})
 	})
 }
@@ -191,7 +336,9 @@ func drawerLabeledInput(c *ui.Context, tok theme.Tokens, label string, val *stri
 	ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
 		ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		ui.Row(c).FillWidth().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
-			ui.TextInput(c, val).Grow(1).MinWidth(0)
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+				components.TextBox(c, val, components.TextBoxOptions{}).FontFeatures("tnum")
+			})
 			if unit != nil && len(units) > 0 {
 				sel := components.Select(c, unit)
 				sel.Trigger.Children(func() { components.Text(c, *unit).SingleLine() })

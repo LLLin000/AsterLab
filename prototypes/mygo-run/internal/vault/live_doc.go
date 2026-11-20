@@ -9,7 +9,10 @@ import (
 	"asterlab-mygo-prototype/internal/asterdoc"
 )
 
-const maxUndoStack = 100
+const (
+	maxUndoStack            = 100
+	sourceUndoCoalesceDelay = 800 * time.Millisecond
+)
 
 // LiveDocument represents one in-memory `.asterml` file shared across any number
 // of open split panes/tabs. All visual edits and raw source edits mutate this single
@@ -25,8 +28,9 @@ type LiveDocument struct {
 	DiskMtime time.Time
 	Dirty    bool
 
-	undoStack []string
-	redoStack []string
+	undoStack      []string
+	redoStack      []string
+	lastSourceEdit time.Time
 }
 
 // DocStore caches shared *LiveDocument instances keyed by normalized RelPath.
@@ -128,13 +132,19 @@ func (ld *LiveDocument) ApplyEdit(nextSource string) error {
 
 // ApplySourceDraft updates Source from raw text editor without failing if intermediate
 // syntax is temporarily incomplete; only persists when valid or explicitly flushed.
+// Rapid keystrokes within sourceUndoCoalesceDelay are coalesced into a single undo
+// snapshot so continuous typing never exhausts the 100-step undo history.
 func (ld *LiveDocument) ApplySourceDraft(nextSource string) {
 	ld.mu.Lock()
 	defer ld.mu.Unlock()
 	if nextSource == ld.Source {
 		return
 	}
-	ld.pushUndoLocked(ld.Source)
+	now := time.Now()
+	if ld.lastSourceEdit.IsZero() || now.Sub(ld.lastSourceEdit) > sourceUndoCoalesceDelay {
+		ld.pushUndoLocked(ld.Source)
+	}
+	ld.lastSourceEdit = now
 	ld.Source = nextSource
 	ld.Parsed, ld.ParseErr = asterdoc.Parse(nextSource)
 	ld.Dirty = true
@@ -253,4 +263,16 @@ func (ld *LiveDocument) writeLocked() error {
 	ld.LastSave = time.Now()
 	ld.Dirty = false
 	return nil
+}
+
+// WriteWithVaultSnapshot persists via writeLocked and optionally records a throttled
+// recovery snapshot plus Vault EventBus notification.
+func (ld *LiveDocument) NotifySaved(v *Vault, forceSnapshot bool) {
+	if ld == nil || v == nil {
+		return
+	}
+	_ = v.RecordSnapshot(ld.RelPath, ld.Source, forceSnapshot)
+	if v.Events != nil {
+		v.Events.Emit(VaultEvent{Kind: EventModify, RelPath: ld.RelPath})
+	}
 }

@@ -73,9 +73,10 @@ func TestObsidianVaultInteractiveExperienceAndVisualCatalog(t *testing.T) {
 		},
 	}
 	a := &app{
-		shell:    sh,
-		vault:    v,
-		docStore: ds,
+		shell:      sh,
+		vault:      v,
+		vaultIndex: vault.NewVaultIndex(v),
+		docStore:   ds,
 		tools: tools.New(tools.Callbacks{
 			ListPantry: func() (runs.PantryLedger, error) {
 				return runs.PantryLedger{
@@ -251,7 +252,7 @@ func TestVisualArchiveSettingsMobileAndContextMenus(t *testing.T) {
 
 	richSrc := "---\ntitle: L929 药物梯度测定\ndate: 2026-11-20\nstatus: in_progress\n---\n\n" +
 		"```asterlab\nkind: group_table\nid: gt-1\nschema: 1\ntitle: 实验分组\nrows:\n  - id: g-ctrl\n    name: 溶剂对照\n    role: control\n    independent_n: 3\n  - id: g-tx\n    name: 给药处理\n    role: treatment\n    independent_n: 3\n```\n\n" +
-		"```asterlab\nkind: step\nid: step-01-prep\nschema: 1\ntitle: 01 细胞接种与配液\nblocks:\n  - kind: prose\n    id: p1\n    schema: 1\n    body: 每孔接种 100 uL 细胞悬液，37°C 过夜贴壁后按浓度梯度加药。\n  - kind: checklist\n    id: chk1\n    schema: 1\n    items:\n      - id: c1\n        label: 消毒超净台并紫外照射 30 min\n        done: true\n      - id: c2\n        label: 确认细胞状态正常，无污染\n        done: false\n  - kind: plate\n    id: pl1\n    schema: 1\n    title: 96 孔药敏排布\n    format: 96\n    groups:\n      g-ctrl: [A1, A2, A3]\n      g-tx: [B1, B2, B3, C1, C2, C3]\n    layers:\n      浓度梯度: {A1: DMSO, A2: DMSO, A3: DMSO, B1: 100 uM, B2: 50 uM, B3: 25 uM, C1: 12.5 uM, C2: 6.25 uM, C3: 3.125 uM}\n```\n"
+		"```asterlab\nkind: step\nid: step-01-prep\nschema: 1\ntitle: 01 细胞接种与配液\nblocks:\n  - kind: prose\n    id: p1\n    schema: 1\n    body: 每孔接种 100 uL 细胞悬液，37°C 过夜贴壁后按浓度梯度加药。\n  - kind: checklist\n    id: chk1\n    schema: 1\n    items:\n      - id: c1\n        label: 消毒超净台并紫外照射 30 min\n        done: true\n      - id: c2\n        label: 确认细胞状态正常，无污染\n        done: false\n  - kind: plate\n    id: pl1\n    schema: 1\n    title: 96 孔药敏排布\n    format: 96\n    groups:\n      g-ctrl: [A1, A2, A3]\n      g-tx: [B1, B2, B3, C1, C2, C3]\n    layers:\n      浓度梯度: {A1: DMSO, A2: DMSO, A3: DMSO, B1: 100 uM, B2: 50 uM, B3: 25 uM, C1: 12.5 uM, C2: 6.25 uM, C3: 3.125 uM}\n  - kind: data_table\n    id: dt1\n    schema: 1\n    title: CCK-8 读数记录\n    columns:\n      - key: well\n        label: 孔位\n        value_kind: text\n      - key: od450\n        label: OD450\n        value_kind: number\n        unit: AU\n    rows:\n      - well: A1\n        od450: 1.42\n      - well: B1\n        od450: 0.58\n```\n"
 
 	expRich, err := v.CreateExperiment(proj1, "L929 药物梯度测定", "2026-11-20", richSrc)
 	if err != nil {
@@ -259,6 +260,9 @@ func TestVisualArchiveSettingsMobileAndContextMenus(t *testing.T) {
 	}
 	huvecB, _ := os.ReadFile("internal/asterdoc/testdata/huvec-tube.asterml")
 	_, _ = v.CreateExperiment(proj2, "HUVEC 水凝胶成管", "2026-11-18", string(huvecB))
+	followSrc := "---\ntitle: L929 药物梯度复现验证\nscheduled_date: 2026-11-21\nstage: planned\nrepeat_of: \"" + strings.TrimSuffix(expRich.RelPath, ".asterml") + "\"\n---\n\n```asterlab\nkind: step\nid: step-follow\nschema: 1\ntitle: 复核对照\nblocks:\n  - kind: prose\n    id: pf1\n    schema: 1\n    body: \"参照基线实验 [[L929 药物梯度测定]] 复测 IC50。\"\n```\n"
+	_, _ = v.CreateExperiment(proj1, "L929 药物梯度复现验证", "2026-11-21", followSrc)
+	_ = v.RecordSnapshot(expRich.RelPath, richSrc, true)
 
 	sh := &shell.Shell{
 		TodayDate:        "2026-11-20",
@@ -269,9 +273,10 @@ func TestVisualArchiveSettingsMobileAndContextMenus(t *testing.T) {
 		VaultPathInput:   v.Root,
 	}
 	a := &app{
-		shell:    sh,
-		vault:    v,
-		docStore: ds,
+		shell:      sh,
+		vault:      v,
+		vaultIndex: vault.NewVaultIndex(v),
+		docStore:   ds,
 		tools: tools.New(tools.Callbacks{
 			ListPantry: func() (runs.PantryLedger, error) {
 				return runs.PantryLedger{Items: []runs.PantryItem{
@@ -292,11 +297,23 @@ func TestVisualArchiveSettingsMobileAndContextMenus(t *testing.T) {
 		a.renderVaultNewExperimentDialog(c)
 	}
 	sh.OnSettingsChanged = func() { a.saveVaultSettingsFromShell() }
+	sh.OnGlobalSearch = func(query string) []vault.SearchHit {
+		return a.vaultIndex.SearchFullText(query, 30)
+	}
+	sh.OnOpenSearchHit = func(relPath, query string) {
+		if query != "" {
+			if a.pendingFindQuery == nil {
+				a.pendingFindQuery = map[string]string{}
+			}
+			a.pendingFindQuery[relPath] = query
+		}
+		a.openVaultFileInActivePane(relPath, "")
+	}
 	a.refreshVaultTreeAndCalendar()
 	sh.EnsureTabs()
 	sh.OpenFileInPane(sh.ActivePaneID, expRich.RelPath, "L929 药物梯度测定", shell.ModeEdit, true)
 
-	// 1. Obsidian Settings Center (Appearance Light + Hotkeys Dark)
+	// 1. Obsidian Settings Center (Appearance Light + Hotkeys Dark + Vault File Recovery Dark)
 	sh.VaultSettingsOpen = true
 	sh.SettingsView = components.SettingsState{Category: "appearance"}
 	renderVisualPNGSteps(t, outDir, "vault_settings_appearance_light.png", 1080, 680, false, func(c *ui.Context) {
@@ -316,11 +333,79 @@ func TestVisualArchiveSettingsMobileAndContextMenus(t *testing.T) {
 		st.Frame()
 		st.Advance(220 * time.Millisecond)
 		st.Frame()
-		if !st.HasText("打开命令面板 / 快速切换实验") {
+		if !st.HasText("打开命令面板 / 快速切换实验") || !st.HasText("全局全文搜索 Vault") {
 			t.Fatalf("expected Obsidian hotkeys settings content")
 		}
 	})
+	sh.SettingsView = components.SettingsState{Category: "vault", Query: "恢复"}
+	renderVisualPNGSteps(t, outDir, "vault_settings_recovery_dark.png", 1080, 680, true, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("恢复此版本") {
+			t.Fatalf("expected File Recovery snapshot restore item in dark settings")
+		}
+	})
+	sh.SettingsView = components.SettingsState{}
 	sh.VaultSettingsOpen = false
+
+	// 1b. Global Full-Text Search Modal (Ctrl+Shift+F) + Right Drawer Links & Diagnostics + AsterCore Summary
+	sh.GlobalSearchOpen = true
+	sh.GlobalSearchQuery = "CCK-8"
+	renderVisualPNGSteps(t, outDir, "workbench_global_search_dark.png", 1280, 800, true, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("L929 药物梯度测定") {
+			t.Fatalf("expected global search modal match, got: %q", st.Texts())
+		}
+	})
+	sh.GlobalSearchOpen = false
+
+	sh.SetRightDrawer(true, 2)
+	renderVisualPNGSteps(t, outDir, "companion_drawer_links_diagnostics_light.png", 1360, 880, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		if err := st.Click("关联与诊断"); err != nil {
+			t.Fatalf("click companion drawer tab 2: %v", err)
+		}
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("L929 药物梯度复现验证") {
+			t.Fatalf("expected backlinks/repeat lineage in companion drawer, got: %q", st.Texts())
+		}
+	})
+	sh.SetRightDrawer(false, 0)
+
+	// UnifiedLive canvas + AsterCore scientific analysis summary card (concise focused CCK-8 doc so plate + analysis card fit cleanly)
+	analysisSrc := "---\ntitle: L929 CCK-8 细胞活力统计分析\nscheduled_date: 2026-11-20\nstage: completed\n---\n\n" +
+		"```asterlab\nkind: step\nid: step-cck8-read\nschema: 1\ntitle: 01 酶标仪 OD450 读板与活力投影\nblocks:\n  - kind: group_table\n    id: gt-a1\n    schema: 1\n    title: 剂量分组\n    rows:\n      - id: g-ctrl\n        name: DMSO 对照组\n        role: control\n        independent_n: 3\n      - id: g-low\n        name: 化合物 10 uM\n        role: treatment\n        independent_n: 3\n      - id: g-high\n        name: 化合物 50 uM\n        role: treatment\n        independent_n: 3\n  - kind: data_table\n    id: dt-a1\n    schema: 1\n    title: OD450 实测读数\n    columns:\n      - key: well\n        label: 孔位\n        value_kind: text\n      - key: group\n        label: 分组\n        value_kind: text\n      - key: value\n        label: OD450\n        value_kind: number\n        unit: AU\n    rows:\n      - well: A1\n        group: DMSO 对照组\n        value: 1.48\n      - well: A2\n        group: DMSO 对照组\n        value: 1.52\n      - well: B1\n        group: 化合物 10 uM\n        value: 1.05\n      - well: B2\n        group: 化合物 10 uM\n        value: 1.11\n      - well: C1\n        group: 化合物 50 uM\n        value: 0.42\n      - well: C2\n        group: 化合物 50 uM\n        value: 0.46\n```\n"
+	expAnalysis, err := v.CreateExperiment(proj1, "L929 CCK-8 细胞活力统计分析", "2026-11-20", analysisSrc)
+	if err != nil {
+		t.Fatalf("CreateExperiment analysis: %v", err)
+	}
+	a.refreshVaultTreeAndCalendar()
+	sh.OpenFileInPane(sh.ActivePaneID, expAnalysis.RelPath, expAnalysis.Title, shell.ModeRead, false)
+	if a.pendingFindQuery == nil {
+		a.pendingFindQuery = map[string]string{}
+	}
+	a.pendingFindQuery[expAnalysis.RelPath] = "OD450"
+	renderVisualPNGSteps(t, outDir, "unified_live_analysis_summary_light.png", 1360, 1060, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("科学分析汇总 (AsterCore)") || !st.HasText("相对活力") {
+			t.Fatalf("expected AsterCore analysis summary card, got: %q", st.Texts())
+		}
+	})
+	sh.OpenFileInPane(sh.ActivePaneID, expRich.RelPath, "L929 药物梯度测定", shell.ModeEdit, true)
 
 	// 2. Right-Click Context Menus Visual Archive
 	renderVisualPNGSteps(t, outDir, "context_menu_file_tree_light.png", 1160, 740, false, func(c *ui.Context) {

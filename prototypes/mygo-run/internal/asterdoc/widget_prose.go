@@ -153,49 +153,93 @@ func (v *View) renderProse(c *ui.Context, data map[string]any) {
 	if v.UnifiedLive {
 		if editable {
 			bodyBuf := v.ensureWidgetDraft("prose:"+moduleID+":body", body)
-			wrapper := ui.Column(c).FillWidth().Gap(float32(tok.Spacing4))
+			var wrapper ui.Element
 			if barColor != nil {
-				wrapper = ui.Row(c).FillWidth().Radius(float32(tok.ControlRadius)).Background(bgColor)
+				wrapper = ui.Row(c.Key("prose-ed:"+moduleID)).FillWidth().Radius(float32(tok.ControlRadius)).Background(bgColor)
+			} else {
+				wrapper = ui.Column(c.Key("prose-ed:"+moduleID)).FillWidth().Gap(float32(tok.Spacing4))
 			}
+			hovered := wrapper.Hovered()
 			var tb ui.Element
 			hasTB := false
+			renderToneBar := func() {
+				toneOp := float32(0)
+				if hovered || tone != "plain" || v.MobileCompact {
+					toneOp = 1
+				}
+				bar := ui.Row(c.Key("prose-tone:"+moduleID)).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+				if bar.AnimateTo("pt-op", toneOp, theme.MotionMicroFade) > 0.05 {
+					bar.Opacity(bar.AnimateTo("pt-op", toneOp, theme.MotionMicroFade)).Children(func() {
+						toneChoice := tone
+						sel := components.Select(c, &toneChoice)
+						StyleSelectQuiet(c, tok, sel)
+						sel.Trigger.Children(func() {
+							ui.Text(c, proseToneLabel(toneChoice)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						})
+						sel.Popup(func(panel ui.Element) {
+							for _, opt := range []string{"plain", "note", "tip", "warning"} {
+								opt := opt
+								sel.Item(opt).Children(func() {
+									ui.Text(c, proseToneLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+								})
+							}
+						})
+						if sel.Trigger.Changed() && toneChoice != tone {
+							v.emitAnyModuleEdit(moduleID, map[string]any{"tone": toneChoice})
+						}
+					})
+				}
+			}
 			if barColor != nil {
 				wrapper.Children(func() {
 					ui.Box(c).Width(t.Space(0.75)).FillHeight().Background(*barColor)
-					ui.Box(c).Grow(1).MinWidth(0).Padding(float32(tok.Spacing8)).Children(func() {
+					ui.Column(c).Grow(1).MinWidth(0).Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).Children(func() {
+						renderToneBar()
 						tb = ui.TextAreaBase(c, bodyBuf).FillWidth().Lines(1, 10).
-							Placeholder("输入操作步骤说明或注意事项（空行输入 / 可插入组件）…").TextColor(tok.Text)
+							Placeholder("输入操作步骤说明或注意事项（新行输入 / 可插入组件）…").TextColor(tok.Text)
 						hasTB = true
 					})
 				})
 			} else {
 				wrapper.Children(func() {
+					renderToneBar()
 					tb = ui.TextAreaBase(c, bodyBuf).FillWidth().Lines(1, 12).
-						Placeholder("输入文字说明（空行输入 / 可插入组件）…").TextColor(tok.Text)
+						Placeholder("输入文字说明（新行输入 / 可插入组件）…").TextColor(tok.Text)
 					hasTB = true
 				})
 			}
-			// Slash trigger when typing "/" in an empty prose block or line
-			if hasTB && strings.TrimSpace(*bodyBuf) == "/" && v.OnInsertStepBlock != nil {
-				*bodyBuf = ""
-				v.openSlashMenuForBlock(c, tb, moduleID)
+			// Slash trigger when typing "/" on an empty prose block or a standalone "/" line
+			if hasTB && v.OnInsertStepBlock != nil {
+				if nextBody, triggered := stripStandaloneSlashLine(*bodyBuf); triggered {
+					*bodyBuf = nextBody
+					v.openSlashMenuForBlock(c, tb, moduleID)
+				}
 			}
-			if hasTB && !tb.Focused() && *bodyBuf != body && strings.TrimSpace(*bodyBuf) != "" {
+			if hasTB && !tb.Focused() && *bodyBuf != body {
 				v.emitAnyModuleEdit(moduleID, map[string]any{"body": *bodyBuf})
 			}
 			return
 		}
-		// Clean paper reading prose without form borders
+		// Clean paper reading prose without form borders (supports basic bold/list formatting)
 		renderCleanProseBody := func() {
 			for _, para := range strings.Split(body, "\n") {
 				line := strings.TrimSpace(para)
 				if line == "" {
 					continue
 				}
-				if strings.HasPrefix(line, "- ") {
+				isHeading := false
+				if strings.HasPrefix(line, "### ") {
+					line = strings.TrimSpace(strings.TrimPrefix(line, "### "))
+					isHeading = true
+				} else if strings.HasPrefix(line, "- ") {
 					line = "• " + strings.TrimSpace(strings.TrimPrefix(line, "- "))
 				}
-				ui.Text(c, line).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+				txt := ui.Text(c, line).TextColor(tok.Text)
+				if isHeading {
+					txt.FontSize(float32(tok.TextSection)).Bold()
+				} else {
+					txt.FontSize(float32(tok.TextBody))
+				}
 			}
 		}
 		if barColor != nil {
@@ -286,6 +330,20 @@ func (v *View) renderProse(c *ui.Context, data map[string]any) {
 func (v *View) openSlashMenuForBlock(c *ui.Context, anchor ui.Element, moduleID string) {
 	st := ui.Local(c.Root(), "slash-menu-step:"+v.StepID+":"+moduleID, func() bool { return false })
 	*st = true
+}
+
+func stripStandaloneSlashLine(raw string) (string, bool) {
+	if strings.TrimSpace(raw) == "/" {
+		return "", true
+	}
+	lines := strings.Split(raw, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "/" {
+			kept := append(lines[:i], lines[i+1:]...)
+			return strings.Join(kept, "\n"), true
+		}
+	}
+	return raw, false
 }
 
 func proseToneLabel(tone string) string {

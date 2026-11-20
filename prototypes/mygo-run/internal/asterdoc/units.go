@@ -118,6 +118,46 @@ func normalizeUnitSymbol(symbol string) string {
 	return s
 }
 
+// DisplayUnit formats a registered UCUM unit symbol into clean scientific
+// typography for UI display while keeping underlying YAML strictly UCUM.
+func DisplayUnit(unit string) string {
+	u := strings.TrimSpace(unit)
+	switch u {
+	case "Cel":
+		return "°C"
+	case "uL", "µL":
+		return "μL"
+	case "um", "µm":
+		return "μm"
+	case "uM", "µM":
+		return "μM"
+	case "ug", "µg":
+		return "μg"
+	case "ug/mL", "µg/mL":
+		return "μg/mL"
+	case "ng/uL", "ng/µL":
+		return "ng/μL"
+	case "ug/uL", "µg/µL":
+		return "μg/μL"
+	case "umol", "µmol":
+		return "μmol"
+	case "um2", "µm2":
+		return "μm²"
+	case "mm2":
+		return "mm²"
+	case "cm2":
+		return "cm²"
+	case "mW/cm2":
+		return "mW/cm²"
+	case "1/min":
+		return "min⁻¹"
+	case "xg":
+		return "×g"
+	default:
+		return u
+	}
+}
+
 func unitFor(symbol string) (unitSpec, bool) {
 	if unitSpecErr != nil {
 		return unitSpec{}, false

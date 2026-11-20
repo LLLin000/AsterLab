@@ -8,8 +8,8 @@ import (
 )
 
 // BorderlessTextInput builds a clean Notion/Obsidian-style inline text input on raw
-// ui.TextInputBase: transparent and borderless at rest, with only a subtle surface
-// wash on hover or focus so documents never look like boxed XP forms.
+// ui.TextInputBase: transparent and borderless at rest, with only a subtle animated
+// surface wash on hover or focus so documents never look like boxed XP forms.
 func BorderlessTextInput(c *ui.Context, tok theme.Tokens, value *string, fontSize float32, bold bool, placeholder string) ui.Element {
 	ti := ui.TextInputBase(c, value).
 		FillWidth().
@@ -21,31 +21,31 @@ func BorderlessTextInput(c *ui.Context, tok theme.Tokens, value *string, fontSiz
 	if bold {
 		ti.Bold()
 	}
-	bg := ui.Transparent
+	targetBg := ui.Transparent
 	if ti.Focused() {
-		bg = tok.Accent.Alpha(0.07)
+		targetBg = tok.Accent.Alpha(0.07)
 	} else if ti.Hovered() {
-		bg = tok.Text.Alpha(0.04)
+		targetBg = tok.Text.Alpha(0.04)
 	}
-	ti.Background(bg)
+	ti.Background(ti.AnimateColor("bt-bg", targetBg, theme.MotionMicroFade))
 	return ti
 }
 
 // StyleSelectQuiet transforms a standard bordered components.Select trigger into an
-// unboxed inline property chip whose surface tint appears gently on hover/focus.
+// unboxed inline property chip whose surface tint appears smoothly on hover/focus.
 func StyleSelectQuiet[T comparable](c *ui.Context, tok theme.Tokens, sel *components.SelectParts[T]) {
 	if sel == nil {
 		return
 	}
 	b := sel.Trigger
 	t := c.Theme()
-	bg := ui.Transparent
+	targetBg := ui.Transparent
 	if b.Pressed() {
-		bg = tok.Text.Alpha(0.08)
+		targetBg = tok.Text.Alpha(0.08)
 	} else if b.Hovered() || b.Focused() {
-		bg = tok.Text.Alpha(0.045)
+		targetBg = tok.Text.Alpha(0.045)
 	}
-	b.Background(bg).
+	b.Background(b.AnimateColor("sq-bg", targetBg, theme.MotionMicroFade)).
 		Border(0, ui.Transparent).
 		Radius(float32(tok.ControlRadius)).
 		Padding(t.Space(1), t.Space(5.5), t.Space(1), t.Space(1.5))

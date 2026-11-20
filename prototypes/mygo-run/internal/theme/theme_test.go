@@ -37,7 +37,7 @@ func TestDesignTokens(t *testing.T) {
 	if lt.Dark || !dt.Dark {
 		t.Fatal("theme selection mismatch")
 	}
-	if lt.Background != light.Canvas || lt.Accent != light.Accent || lt.Radius != 8 || lt.Spacing != 4 {
+	if lt.Background != light.Canvas || lt.Accent != light.Accent || lt.Radius != float32(light.ControlRadius) || lt.Spacing != 4 {
 		t.Fatalf("onevra palette not layered with asterlab tokens: %+v", lt)
 	}
 	if GetTokens(dt).Danger != dark.Danger {

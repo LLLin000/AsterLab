@@ -32,7 +32,9 @@ type paletteEntry struct {
 
 func (s *Shell) renderCommandPalette(c *ui.Context) {
 	if !s.PaletteOpen {
-		components.Dialog(c, &s.PaletteOpen, components.DialogOptions{Label: "命令面板"}, nil)
+		ui.Box(c.Key("command-palette-dlg")).Children(func() {
+			components.Dialog(c, &s.PaletteOpen, components.DialogOptions{Label: "命令面板"}, nil)
+		})
 		return
 	}
 	tok := theme.GetTokens(c.Theme())
@@ -49,12 +51,15 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 		}
 	}
 
-	components.Dialog(c, &open, components.DialogOptions{Label: "命令面板"}, func(panel ui.Element) {
-		panel.Width(float32(tok.Spacing48)*11.5).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing8)).
-			MaxHeight(float32(tok.Spacing48) * 11.5)
-		if tok.LiquidGlass {
-			theme.ApplyPanelGlass(panel, tok, 0.36)
-		}
+	ui.Box(c.Key("command-palette-dlg")).Children(func() {
+		components.Dialog(c, &open, components.DialogOptions{Label: "命令面板"}, func(panel ui.Element) {
+			panel.Width(float32(tok.Spacing48)*11.5).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing8)).
+				MaxHeight(float32(tok.Spacing48) * 11.5)
+			if tok.Dark {
+				panel.Background(tok.Surface).Border(1, tok.BorderStrong)
+			} else if tok.LiquidGlass {
+				theme.ApplyPanelGlass(panel, tok, 0.36)
+			}
 		panel.Children(func() {
 			if len(entries) > 0 {
 				if panel.Shortcut(0, ui.KeyDown) {
@@ -79,10 +84,10 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Icon(c, lucide.Search()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
-				inp := ui.TextInput(c, &s.PaletteQuery).Placeholder("搜索实验 (.asterml)、试剂批号或快捷命令…").
+				inp := ui.TextInputBase(c, &s.PaletteQuery).FillWidth().FontSize(float32(tok.TextBody)).TextColor(tok.Text).
+					Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).Placeholder("搜索实验 (.asterml)、试剂批号或快捷命令…").
 					Grow(1).MinWidth(0)
 				inp.AutoFocus()
-				components.Badge(c, "Esc 关闭", components.BadgeOptions{Tone: components.BadgeNeutral})
 			})
 
 			ui.Divider(c)
@@ -107,17 +112,14 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 								Padding(float32(tok.Spacing4), float32(tok.Spacing4))
 						}
 						selected := i == s.PaletteCursor
-						targetBg := tok.Elevated
-						targetBd := tok.Border
+						targetBg := ui.Transparent
 						if selected {
 							targetBg = tok.AccentSoftBg
-							targetBd = tok.Accent
 						}
-						palRow := ui.Row(c.Key("pal-"+entry.key)).FillWidth().Padding(float32(tok.Spacing8)).
+						palRow := ui.Row(c.Key("pal-"+entry.key)).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 							Radius(float32(tok.ControlRadius)).
 							AlignItems(ui.Center).Gap(float32(tok.Spacing8))
-						palRow.Background(palRow.AnimateColor("pal-bg", targetBg, theme.MotionSnappy)).
-							Border(1, palRow.AnimateColor("pal-bd", targetBd, theme.MotionSnappy))
+						palRow.Background(palRow.AnimateColor("pal-bg", targetBg, theme.MotionSnappy))
 						palRow.Children(func() {
 							rowBtn := ui.ButtonBase(c).Grow(1).MinWidth(0).Justify(ui.Start).Label(entry.title)
 							theme.ApplyTactilePress(rowBtn)
@@ -150,7 +152,13 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 					}
 				})
 			})
+			ui.Divider(c)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+				components.Text(c, "↑↓ 移动 · Enter 打开 · Ctrl+Enter 分屏打开 · Esc 关闭").
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			})
 		})
+	})
 	})
 	s.PaletteOpen = open
 }
@@ -277,22 +285,30 @@ func (s *Shell) buildPaletteEntries() []paletteEntry {
 	actions = append(actions,
 		paletteEntry{
 			kind: paletteAction, key: "cmd-new", title: "新建实验",
-			subtitle: "在当前项目与日期新建 .asterml 实验文档", shortcut: "Ctrl+N",
+			subtitle: "在当前项目与日期新建 .asterml 实验文档", shortcut: s.HotkeyDisplay("vault.new_exp"),
 			runAct: func() { s.triggerCreateForDate(s.ensureSelectedDate()) },
 		},
 		paletteEntry{
+			kind: paletteAction, key: "cmd-global-search", title: "Vault 全局全文搜索",
+			subtitle: "跨所有 .asterml 实验步骤、配方、试剂编号与笔记全文检索", shortcut: s.HotkeyDisplay("nav.global_search"),
+			runAct: func() {
+				s.GlobalSearchOpen = true
+				s.refreshGlobalSearch()
+			},
+		},
+		paletteEntry{
 			kind: paletteAction, key: "cmd-drawer-outline", title: "打开 / 收起右侧步骤大纲与速算抽屉",
-			subtitle: "查看当前实验步骤大纲或使用稀释/摩尔速算器", shortcut: "Ctrl+Shift+R",
+			subtitle: "查看当前实验步骤大纲或使用稀释/摩尔速算器", shortcut: s.HotkeyDisplay("nav.right_drawer"),
 			runAct: func() { s.ToggleRightDrawer() },
 		},
 		paletteEntry{
 			kind: paletteAction, key: "cmd-split", title: "向右分屏打开当前标签页",
-			subtitle: "并排对照两份实验、同一实验的不同区域或储藏室", shortcut: "Ctrl+\\",
+			subtitle: "并排对照两份实验、同一实验的不同区域或储藏室", shortcut: s.HotkeyDisplay("pane.split_right"),
 			runAct: func() { s.ToggleSplit() },
 		},
 		paletteEntry{
 			kind: paletteAction, key: "cmd-cal", title: "切换到实验日程",
-			subtitle: "查看月/周实验安排与排期", shortcut: "Ctrl+1",
+			subtitle: "查看月/周实验安排与排期", shortcut: s.HotkeyDisplay("nav.calendar"),
 			runAct: func() { s.OpenCalendarTab() },
 		},
 		paletteEntry{

@@ -264,7 +264,7 @@ func TestSlimRightCompanionDrawerOutlineAndCalc(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("取母液 V1 = 2.00 uL") {
+	if !tt.HasText("取母液 V1 = 2.00 μL") {
 		t.Fatalf("quick dilution calculation mismatch: %q", tt.Texts())
 	}
 }

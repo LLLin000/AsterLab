@@ -23,6 +23,7 @@ type hotkeySpec struct {
 
 var defaultHotkeySpecs = []hotkeySpec{
 	{ID: "cmd.palette", Action: "打开命令面板 / 快速切换实验", Group: "导航与搜索", Default: "Ctrl+K / Ctrl+O"},
+	{ID: "nav.global_search", Action: "全局全文搜索 Vault", Group: "导航与搜索", Default: "Ctrl+Shift+F"},
 	{ID: "vault.new_exp", Action: "新建实验文档", Group: "导航与搜索", Default: "Ctrl+N"},
 	{ID: "nav.calendar", Action: "跳回实验日程主页", Group: "导航与搜索", Default: "Ctrl+1"},
 	{ID: "nav.back", Action: "浏览历史后退", Group: "导航与搜索", Default: "Alt+←"},
@@ -109,9 +110,15 @@ func (s *Shell) renderObsidianSettingsDialog(c *ui.Context) {
 	narrow := width < t.Space(170) || s.IsMobileLayout(c)
 
 	open := s.VaultSettingsOpen
+	tok := theme.GetTokens(t)
 	ui.Box(c.Key("obsidian-settings-dlg")).Children(func() {
 		components.Dialog(c, &open, components.DialogOptions{Label: "AsterLab 设置", Inset: inset}, func(panel ui.Element) {
 			panel.Width(width).Height(height).Padding(0).Gap(0).Clip()
+			// Prevent high-contrast underlying document text from bleeding through translucent
+			// glass modals in Dark mode by backing the settings container with solid Surface + crisp rim.
+			if tok.Dark {
+				panel.Background(tok.Surface).Border(1, tok.BorderStrong)
+			}
 			components.Settings(c, &s.SettingsView, s.obsidianSettingsCategories(c), components.SettingsOptions{
 				Narrow:            narrow,
 				Title:             "设置",
@@ -247,6 +254,82 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 					},
 				},
 			},
+			{
+				ID:    "vault-trash",
+				Title: "回收站与文件恢复",
+				Items: []components.SettingsItem{
+					{
+						ID:          "trash-restore-list",
+						Title:       "最近删除的实验与目录",
+						Description: "删除的文件保存在 .asterlab/trash/，可随时一键还原至原路径。",
+						Keywords:    []string{"trash", "restore", "回收站", "恢复", "删除"},
+						Stacked:     true,
+						Build: func(c *ui.Context) {
+							if len(s.TrashItems) == 0 {
+								components.Text(c, "回收站为空").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								return
+							}
+							ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+								limit := len(s.TrashItems)
+								if limit > 8 {
+									limit = 8
+								}
+								for i := 0; i < limit; i++ {
+									it := s.TrashItems[i]
+									ui.Row(c.Key("trash-it-"+it.TrashName)).FillWidth().AlignItems(ui.Center).
+										Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
+										ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+											components.Text(c, it.OrigRel).FontSize(float32(tok.TextBody)).TextColor(tok.Text).SingleLine().Ellipsis("…")
+											components.Text(c, it.DeletedAt.Format("2006-01-02 15:04")).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+										})
+										if components.Button(c, "还原", components.ButtonSecondary).Clicked() && s.OnVaultRestoreTrash != nil {
+											s.OnVaultRestoreTrash(it.TrashName)
+										}
+									})
+								}
+							})
+						},
+					},
+					{
+						ID:          "snapshot-recovery-list",
+						Title:       "当前实验历史版本快照 (File Recovery)",
+						Description: "自动防抖留存的离线版本快照（.asterlab/snapshots/），可一键恢复至历史时间点。",
+						Keywords:    []string{"snapshot", "recovery", "history", "快照", "历史版本", "恢复"},
+						Stacked:     true,
+						Build: func(c *ui.Context) {
+							if s.CurrentDocRelPath == "" {
+								components.Text(c, "先打开一份 .asterml 实验文档，即可在此浏览并恢复其历史快照。").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								return
+							}
+							if len(s.CurrentSnapshots) == 0 {
+								components.Text(c, "当前文档尚无历史快照（每次编辑稳定保存后自动留存，最多保留 20 个）。").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								return
+							}
+							ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+								limit := len(s.CurrentSnapshots)
+								if limit > 8 {
+									limit = 8
+								}
+								for i := 0; i < limit; i++ {
+									sn := s.CurrentSnapshots[i]
+									ui.Row(c.Key("snap-"+sn.ID)).FillWidth().AlignItems(ui.Center).
+										Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
+										ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+											components.Text(c, sn.CreatedAt.Format("2006-01-02 15:04:05")).FontSize(float32(tok.TextBody)).TextColor(tok.Text).FontFeatures("tnum")
+											components.Text(c, fmt.Sprintf("%d 字节 · %s", sn.Size, sn.RelPath)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…").FontFeatures("tnum")
+										})
+										if components.Button(c, "恢复此版本", components.ButtonSecondary).Clicked() && s.OnRestoreSnapshot != nil {
+											s.OnRestoreSnapshot(s.CurrentDocRelPath, sn.ID)
+										}
+									})
+								}
+							})
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -376,7 +459,9 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								default:
 									s.TextScale = 0
 								}
+								s.SyncThemeLook(c)
 								s.notifySettingsChanged()
+								c.Invalidate()
 							}
 						},
 					},
@@ -387,7 +472,9 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Keywords:    []string{"motion", "animation", "reduce", "动效", "无障碍"},
 						Build: func(c *ui.Context) {
 							if components.Switch(c, &s.ReduceMotion, "减弱动效", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.SyncThemeLook(c)
 								s.notifySettingsChanged()
+								c.Invalidate()
 							}
 						},
 					},

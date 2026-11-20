@@ -57,7 +57,7 @@ func (v *View) renderGroupTable(c *ui.Context, data map[string]any) {
 					}
 					ui.Row(c.Key("gt-mob-row:"+moduleID+":"+gid)).FillWidth().
 						Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-						Radius(12).
+						Radius(float32(tok.PanelRadius)).
 						Background(tok.Elevated).
 						AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).
@@ -497,7 +497,7 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 					} else {
 						disp := valStr
 						if unit != "" {
-							disp += " " + unit
+							disp += " " + DisplayUnit(unit)
 						}
 						ui.Text(c, firstNonEmpty(disp, "—")).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).FontFeatures("tnum").SingleLine()
 					}
@@ -515,7 +515,7 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 					ui.Box(c.Key("pt-dev-box:"+moduleID+":"+key)).Width(float32(tok.Spacing48)*2.2).
 						Transition(theme.AccordionTransition()).Children(func() {
 						if !v.ReadOnly {
-							tb := components.TextBox(c, actBuf, components.TextBoxOptions{}).Placeholder("实测偏离值")
+							tb := BorderlessTextInput(c, tok, actBuf, float32(tok.TextMeta), false, "实测偏离值").FontFeatures("tnum")
 							if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*actBuf) != actualStr) {
 								next := cloneRowsSlice(rows)
 								if idx < len(next) {
@@ -535,20 +535,34 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 								}
 							}
 						} else {
-							components.Badge(c, "实测 "+actualStr+" "+unit, components.BadgeOptions{Tone: components.BadgeWarning})
+							components.Badge(c, "实测 "+actualStr+" "+DisplayUnit(unit), components.BadgeOptions{Tone: components.BadgeWarning})
 						}
 					})
-				} else if !v.ReadOnly && (rowHover || touchMode || v.Mode == ModeProtocol) {
-					if components.Button(c, "记偏离", components.ButtonGhost).Clicked() {
-						*devOpenPtr = true
+				} else if !v.ReadOnly {
+					devOp := float32(0.0)
+					if rowHover || touchMode || v.Mode == ModeProtocol {
+						devOp = 1.0
 					}
+					devWrap := ui.Box(c.Key("pt-dev-btn:" + moduleID + ":" + key)).Shrink(0)
+					devWrap.Opacity(devWrap.AnimateTo("pt-dop", devOp, theme.MotionMicroFade)).Children(func() {
+						if components.Button(c, "记偏离", components.ButtonGhost).Clicked() {
+							*devOpenPtr = true
+						}
+					})
 				}
 
-				if editableDesign && (rowHover || touchMode) && len(rows) > 1 {
-					if components.IconButton(c, lucide.X(), "删除参数", components.IconButtonCompact).Clicked() {
-						next := removeSliceIndex(rows, idx)
-						v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+				if editableDesign && len(rows) > 1 {
+					delOp := float32(0.0)
+					if rowHover || touchMode {
+						delOp = 1.0
 					}
+					delWrap := ui.Box(c.Key("pt-del-btn:" + moduleID + ":" + key)).Shrink(0)
+					delWrap.Opacity(delWrap.AnimateTo("pt-delop", delOp, theme.MotionMicroFade)).Children(func() {
+						if components.IconButton(c, lucide.X(), "删除参数", components.IconButtonCompact).Clicked() {
+							next := removeSliceIndex(rows, idx)
+							v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+						}
+					})
 				}
 			})
 		}

@@ -375,27 +375,35 @@ func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, ti
 			})
 		}
 
-		// Clean inline caption below figure (clicks/blurs auto-save)
+		// Clean inline caption below figure (clicks/blurs auto-save; zoom button stays accessible on touch/mobile)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			if editableDesign {
 				capBuf := v.ensureWidgetDraft("fig:"+moduleID+":cap", caption)
-				ui.Box(c).FillWidth().Children(func() {
-					ti := ui.TextInput(c, capBuf).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
-						Placeholder("点击添加图注（如 显微镜明场 10x、手绘接种流路拍照）…")
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					ti := BorderlessTextInput(c, tok, capBuf, float32(tok.TextMeta), false, "点击添加图注（如 显微镜明场 10x、手绘接种流路拍照）…").
+						TextColor(tok.TextMuted)
 					if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*capBuf) != strings.TrimSpace(caption)) {
 						v.emitAnyModuleEdit(moduleID, map[string]any{"caption": strings.TrimSpace(*capBuf)})
 					}
 				})
 			} else if caption != "" {
-				ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+			} else {
+				ui.Spacer(c)
 			}
-			ui.Spacer(c)
-			if hasGraphic && cardHover {
-				if components.IconButton(c, lucide.Maximize2(), "放大查看", components.IconButtonCompact).Clicked() {
-					v.ExpandedFigureID = moduleID
-					v.FigureZoom = 1
-					v.figureOpen = true
+			if hasGraphic {
+				zoomOp := float32(0.55)
+				if cardHover || v.MobileCompact {
+					zoomOp = 1.0
 				}
+				zoomWrap := ui.Box(c.Key("fig-zoom-wrap:" + moduleID)).Shrink(0)
+				zoomWrap.Opacity(zoomWrap.AnimateTo("fz-op", zoomOp, theme.MotionMicroFade)).Children(func() {
+					if components.IconButton(c, lucide.Maximize2(), "放大查看", components.IconButtonCompact).Clicked() {
+						v.ExpandedFigureID = moduleID
+						v.FigureZoom = 1
+						v.figureOpen = true
+					}
+				})
 			}
 		})
 	})

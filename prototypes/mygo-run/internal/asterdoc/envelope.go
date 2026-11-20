@@ -32,6 +32,7 @@ type EnvelopeFrontmatter struct {
 	Title         string        `yaml:"title,omitempty" json:"title,omitempty"`
 	ScheduledDate string        `yaml:"scheduled_date,omitempty" json:"scheduled_date,omitempty"`
 	Stage         string        `yaml:"stage,omitempty" json:"stage,omitempty"`
+	Tags          []string      `yaml:"tags,omitempty" json:"tags,omitempty"`
 	RepeatOf      string        `yaml:"repeat_of,omitempty" json:"repeat_of,omitempty"`
 	Seal          *EnvelopeSeal `yaml:"seal,omitempty" json:"seal,omitempty"`
 }
@@ -521,7 +522,9 @@ func ForkEnvelopeAsDraft(raw string, newID, scheduledDate string) (string, error
 	return ComposeEnvelope(fm, designSrc, nil, nil)
 }
 
-// WriteFileAtomic writes data safely via a temp file + sync + rename in the same directory.
+// WriteFileAtomic writes data safely via a unique temp file + sync + rename in the same directory.
+// Using os.CreateTemp prevents concurrent writers from corrupting a shared ".tmp" file,
+// and short retries handle transient Windows antivirus/indexer file locks on os.Rename.
 func WriteFileAtomic(targetPath string, data []byte) error {
 	if strings.TrimSpace(targetPath) == "" {
 		return errors.New("empty target path")
@@ -530,25 +533,35 @@ func WriteFileAtomic(targetPath string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp := targetPath + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	f, err := os.CreateTemp(dir, ".asterlab-*.tmp")
 	if err != nil {
 		return err
 	}
-	_, wErr := f.Write(data)
-	sErr := f.Sync()
-	cErr := f.Close()
-	if wErr != nil {
-		_ = os.Remove(tmp)
-		return wErr
+	tmp := f.Name()
+	cleanup := func() { _ = os.Remove(tmp) }
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		cleanup()
+		return err
 	}
-	if sErr != nil {
-		_ = os.Remove(tmp)
-		return sErr
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		cleanup()
+		return err
 	}
-	if cErr != nil {
-		_ = os.Remove(tmp)
-		return cErr
+	if err := f.Close(); err != nil {
+		cleanup()
+		return err
 	}
-	return os.Rename(tmp, targetPath)
+	_ = os.Chmod(tmp, 0o644)
+	var renameErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		renameErr = os.Rename(tmp, targetPath)
+		if renameErr == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 15 * time.Millisecond)
+	}
+	cleanup()
+	return renameErr
 }

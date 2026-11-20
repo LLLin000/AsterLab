@@ -88,6 +88,15 @@ type ExperimentItem struct {
 type DesignItem struct{ ID, Title, Meta string }
 type RecentRun struct{ ID, Title, Meta string }
 
+// DiagnosticItem renders one graded scientific or structural diagnostic in the companion drawer.
+type DiagnosticItem struct {
+	Code       string
+	Severity   string // "blocking" | "needs_confirmation" | "advisory"
+	Path       string
+	Message    string
+	NextAction string
+}
+
 type tabDragPayload struct {
 	PaneID string
 	TabID  string
@@ -196,17 +205,37 @@ type Shell struct {
 	MobileDrawerProgress  float32
 	MobileSwipeKind       string
 	MobilePullOffset      float32
+	mobileLastDrawerKind  string
 	mobilePrefsInited     bool
 	mobileScrollStates    map[string]*ui.ScrollState
 	mobileLastScrollY     map[string]float32
-	VaultPathInput      string
-	HideAssetsInTree    bool
-	folderOpen          map[string]bool
-	renamingRelPath     string
-	renameDraft         string
-	newFolderDialogOpen bool
-	newFolderParent     string
-	newFolderName       string
+	VaultPathInput        string
+	HideAssetsInTree      bool
+	TrashItems            []vault.TrashItem
+	folderOpen            map[string]bool
+	renamingRelPath       string
+	renameDraft           string
+	newFolderDialogOpen   bool
+	newFolderParent       string
+	newFolderName         string
+
+	// Status Bar & Companion Diagnostics / Search fed by host
+	StatusSaveLabel       string
+	StatusMetaLabel       string
+	StatusWarnLabel       string
+	GlobalSearchOpen      bool
+	GlobalSearchQuery     string
+	GlobalSearchLastQuery string
+	GlobalSearchCursor    int
+	GlobalSearchHits      []vault.SearchHit
+	OnGlobalSearch        func(string) []vault.SearchHit
+	OnOpenSearchHit       func(relPath, query string)
+	VaultTimers           []vault.VaultTimerEntry
+	CurrentDocRelPath     string
+	CurrentBacklinks      []vault.LinkRef
+	CurrentDiagnostics    []DiagnosticItem
+	CurrentSnapshots      []vault.SnapshotMeta
+	OnRestoreSnapshot     func(relPath, snapshotID string)
 
 	OnActivateTab          func(WorkspaceTab)
 	OnSelectOutlineStep    func(stepID string)
@@ -218,6 +247,7 @@ type Shell struct {
 	OnVaultDuplicate       func(relPath, targetDate string)
 	OnVaultSaveTemplate    func(relPath string)
 	OnVaultDelete          func(relPath string)
+	OnVaultRestoreTrash    func(trashName string)
 	OnSetExperimentDate    func(relPath, dateYMD string)
 	OnRevealInExplorer     func(relPath string)
 	OnSwitchVaultPath      func(newPath string)
@@ -340,38 +370,44 @@ func (s *Shell) navigationFooter(c *ui.Context) {
 }
 
 func (s *Shell) handleGlobalShortcuts(c *ui.Context) {
-	if c.Shortcut(ui.Cmd, ui.KeyB) && s.window != nil {
+	if s.matchHotkey(c, "nav.left_sidebar", parsedHotkey{ui.Cmd, ui.KeyB}) && s.window != nil {
 		s.window.SetLeftExpanded(!s.window.LeftExpanded())
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyK) || c.Shortcut(ui.Cmd, ui.KeyO) || c.Shortcut(ui.Cmd, ui.KeyP) {
+	if s.matchHotkey(c, "cmd.palette", parsedHotkey{ui.Cmd, ui.KeyK}, parsedHotkey{ui.Cmd, ui.KeyO}) || c.Shortcut(ui.Cmd, ui.KeyP) {
 		s.PaletteOpen = !s.PaletteOpen
 		s.PaletteCursor = 0
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyN) {
+	if s.matchHotkey(c, "nav.global_search", parsedHotkey{ui.Cmd | ui.Shift, ui.KeyF}) {
+		s.GlobalSearchOpen = !s.GlobalSearchOpen
+		if s.GlobalSearchOpen {
+			s.refreshGlobalSearch()
+		}
+	}
+	if s.matchHotkey(c, "vault.new_exp", parsedHotkey{ui.Cmd, ui.KeyN}) {
 		s.triggerVaultNewFile("")
 	}
-	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyR) {
+	if s.matchHotkey(c, "nav.right_drawer", parsedHotkey{ui.Cmd | ui.Shift, ui.KeyR}) {
 		s.ToggleRightDrawer()
 	}
-	if c.Shortcut(ui.Alt, ui.KeyLeft) || c.Shortcut(0, ui.KeyBack) {
+	if s.matchHotkey(c, "nav.back", parsedHotkey{ui.Alt, ui.KeyLeft}) || c.Shortcut(0, ui.KeyBack) {
 		s.GoBack()
 	}
-	if c.Shortcut(ui.Alt, ui.KeyRight) || c.Shortcut(0, ui.KeyForward) {
+	if s.matchHotkey(c, "nav.forward", parsedHotkey{ui.Alt, ui.KeyRight}) || c.Shortcut(0, ui.KeyForward) {
 		s.GoForward()
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyW) {
+	if s.matchHotkey(c, "tab.close", parsedHotkey{ui.Cmd, ui.KeyW}) {
 		if t := s.ActiveTab(); t != nil && !t.Pinned {
 			s.CloseTabInPane(s.ActivePaneID, t.ID)
 		}
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyBackslash) {
+	if s.matchHotkey(c, "pane.split_right", parsedHotkey{ui.Cmd, ui.KeyBackslash}) {
 		if t := s.ActiveTab(); t != nil {
 			cp := *t
 			cp.ID = ""
 			s.SplitPaneWithTab(s.ActivePaneID, cp, "right")
 		}
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyE) {
+	if s.matchHotkey(c, "doc.toggle_mode", parsedHotkey{ui.Cmd, ui.KeyE}) {
 		if t := s.ActiveTab(); t != nil && t.Kind == TabFile {
 			if t.Mode == ModeRead {
 				s.SetActiveTabMode(ModeEdit)
@@ -380,29 +416,48 @@ func (s *Shell) handleGlobalShortcuts(c *ui.Context) {
 			}
 		}
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyZ) && s.OnUndo != nil {
-		s.OnUndo()
+	// Let native text editors (Source mode & focused text inputs) handle their own Cmd+Z / Cmd+Y
+	// instead of hijacking and resetting the cursor position.
+	activeIsSource := false
+	if t := s.ActiveTab(); t != nil && t.Kind == TabFile && t.Mode == ModeSource {
+		activeIsSource = true
 	}
-	if (c.Shortcut(ui.Cmd, ui.KeyY) || c.Shortcut(ui.Cmd|ui.Shift, ui.KeyZ)) && s.OnRedo != nil {
-		s.OnRedo()
+	if !activeIsSource && !c.FocusTakesText() {
+		if s.matchHotkey(c, "doc.undo", parsedHotkey{ui.Cmd, ui.KeyZ}) && s.OnUndo != nil {
+			s.OnUndo()
+		}
+		if (s.matchHotkey(c, "doc.redo", parsedHotkey{ui.Cmd, ui.KeyY}) || c.Shortcut(ui.Cmd|ui.Shift, ui.KeyZ)) && s.OnRedo != nil {
+			s.OnRedo()
+		}
 	}
-	if c.Shortcut(ui.Cmd, ui.Key1) {
+	if s.matchHotkey(c, "nav.calendar", parsedHotkey{ui.Cmd, ui.Key1}) {
 		s.OpenCalendarTab()
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyComma) {
+	if s.matchHotkey(c, "app.settings", parsedHotkey{ui.Cmd, ui.KeyComma}) {
 		s.VaultSettingsOpen = !s.VaultSettingsOpen
 	}
 }
 
-// SyncThemeLook ensures Shell's ThemePreset ("obsidian" | "zinc" | "warm") and
-// LiquidGlass toggle are synced to package theme and installed on c.
+// SetInitialThemeLook loads persisted appearance settings without letting first-frame
+// defaults overwrite an explicitly saved LiquidGlass=false preference.
+func (s *Shell) SetInitialThemeLook(preset string, liquidGlass bool) {
+	if preset == "" || preset == "aurora" {
+		preset = theme.PresetObsidian
+	}
+	s.ThemePreset = preset
+	s.LiquidGlass = liquidGlass
+	s.themeLookInited = true
+	theme.SetActiveLook(s.ThemePreset, s.LiquidGlass)
+}
+
+// SyncThemeLook ensures Shell's ThemePreset ("obsidian" | "zinc" | "warm"),
+// LiquidGlass, TextScale, and ReduceMotion are synced to package theme and installed on c.
 func (s *Shell) SyncThemeLook(c *ui.Context) theme.Tokens {
 	if !s.themeLookInited {
 		s.themeLookInited = true
 		if s.ThemePreset == "" || s.ThemePreset == "aurora" {
 			s.ThemePreset = theme.PresetObsidian
 		}
-		// Default Liquid Glass ON unless explicitly configured otherwise via Vault/test.
 		if !s.LiquidGlass {
 			s.LiquidGlass = true
 		}
@@ -411,6 +466,7 @@ func (s *Shell) SyncThemeLook(c *ui.Context) theme.Tokens {
 		s.ThemePreset = theme.PresetObsidian
 	}
 	theme.SetActiveLook(s.ThemePreset, s.LiquidGlass)
+	theme.SetAccessibilityPrefs(s.TextScale, s.ReduceMotion)
 	if c != nil {
 		c.SetTheme(theme.Window(c))
 		return theme.GetTokens(c.Theme())
@@ -450,13 +506,74 @@ func (s *Shell) page(c *ui.Context) {
 		ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 			s.renderPaneNode(c, tok, s.RootPane)
 		})
+		s.renderDesktopStatusBar(c, tok)
 	})
 
 	s.renderCommandPalette(c)
+	s.renderGlobalSearchModal(c)
 	s.renderVaultDialogs(c)
 	if s.RenderOverlays != nil {
 		s.RenderOverlays(c)
 	}
+}
+
+func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
+	saveLbl := firstNonEmptyStr(s.StatusSaveLabel, "实时已保存")
+	modeLbl := ""
+	if tab := s.ActiveTab(); tab != nil {
+		switch tab.Kind {
+		case TabCalendar:
+			modeLbl = "实验日程"
+		case TabPantry:
+			modeLbl = "储藏室货架"
+		default:
+			switch tab.Mode {
+			case ModeRead:
+				modeLbl = "阅读模式"
+			case ModeSource:
+				modeLbl = "源码模式"
+			default:
+				modeLbl = "编辑模式"
+			}
+		}
+	}
+	ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.55))
+	ui.Row(c.Key("desktop-status-bar")).FillWidth().Height(24).
+		Padding(0, float32(tok.Spacing12)).
+		Background(tok.SidebarBackground).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			dotCol := tok.Success
+			if s.StatusWarnLabel != "" {
+				dotCol = tok.Warning
+			}
+			ui.Box(c).Size(6, 6).Radius(3).Background(dotCol)
+			ui.Text(c, saveLbl).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.TextMuted).SingleLine()
+		})
+		if s.StatusWarnLabel != "" {
+			ui.Text(c, "· "+s.StatusWarnLabel).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.Warning).SingleLine()
+		}
+		if s.StatusMetaLabel != "" {
+			ui.Text(c, s.StatusMetaLabel).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+		}
+		ui.Spacer(c)
+		timerTotal := len(s.ActiveTimers) + len(s.VaultTimers)
+		if timerTotal > 0 {
+			btn := ui.ButtonBase(c).Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Label("查看计时器")
+			btn.Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+					ui.Text(c, fmt.Sprintf("%d 个计时中", timerTotal)).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+				})
+			})
+			if btn.Clicked() {
+				s.SetRightDrawer(true, 1)
+			}
+		}
+		if modeLbl != "" {
+			ui.Text(c, modeLbl).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.TextMuted).SingleLine()
+		}
+		ui.Text(c, s.HotkeyDisplay("cmd.palette")).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.TextMuted).SingleLine()
+	})
 }
 
 func (s *Shell) renderPaneNode(c *ui.Context, tok theme.Tokens, node *PaneNode) {
@@ -565,132 +682,135 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 		AlignItems(ui.Center).Gap(float32(tok.Spacing4))
 	theme.ApplyChromeGlass(bar, tok, false)
 	bar.Children(func() {
-		for idx, tab := range pane.Tabs {
-			idx, tab := idx, tab
-			active := tab.ID == pane.ActiveTabID
-			targetBg := ui.Transparent
-			targetFg := tok.TextMuted
-			if active {
-				if tok.LiquidGlass {
-					targetBg = tok.Surface.Alpha(0.72)
-				} else {
-					targetBg = tok.Canvas
-				}
-				targetFg = tok.Text
-			}
-			pill := ui.Row(c.Key("ptab-"+pane.ID+"-"+tab.ID)).AlignItems(ui.Center).
-				Padding(float32(tok.Spacing4)*0.75, float32(tok.Spacing8)).
-				Radius(float32(tok.ControlRadius)).
-				Gap(float32(tok.Spacing4))
-			if active && tok.LiquidGlass {
-				pill.Border(1, tok.Border.Alpha(0.65)).Shadow(0, 1, 6, 0, ui.RGBA(15, 23, 42, 0.06))
-			} else if !active && pill.Hovered() {
-				targetBg = tok.Text.Alpha(0.05)
-			}
-			pill.Background(pill.AnimateColor("ptab-bg", targetBg, theme.MotionSnappy))
-			fg := pill.AnimateColor("ptab-fg", targetFg, theme.MotionSnappy)
-			pill.Children(func() {
-				selBtn := ui.ButtonBase(c).Justify(ui.Start).AlignItems(ui.Center).Label("标签:" + tab.Title)
-				theme.ApplyTactilePress(selBtn)
-				components.Tooltip(c, selBtn, fmtTabTooltip(tab))
-				selBtn.Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-						var icon *ui.SVG
-						switch tab.Kind {
-						case TabCalendar:
-							icon = lucide.CalendarDays()
-						case TabPantry:
-							icon = lucide.Package()
-						default:
-							icon = lucide.FlaskConical()
+		ui.ScrollHorizontal(c.Key("tab-scroll-"+pane.ID)).Grow(1).MinWidth(0).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				for idx, tab := range pane.Tabs {
+					idx, tab := idx, tab
+					active := tab.ID == pane.ActiveTabID
+					targetBg := ui.Transparent
+					targetFg := tok.TextMuted
+					if active {
+						if tok.LiquidGlass {
+							targetBg = tok.Surface.Alpha(0.72)
+						} else {
+							targetBg = tok.Canvas
 						}
-						icoCol := tok.TextMuted
-						if active {
-							icoCol = tok.Accent
+						targetFg = tok.Text
+					}
+					pill := ui.Row(c.Key("ptab-"+pane.ID+"-"+tab.ID)).AlignItems(ui.Center).
+						Padding(float32(tok.Spacing4)*0.75, float32(tok.Spacing8)).
+						Radius(float32(tok.ControlRadius)).
+						Gap(float32(tok.Spacing4)).Shrink(0)
+					if active && tok.LiquidGlass {
+						pill.Border(1, tok.Border.Alpha(0.65)).Shadow(0, 1, 6, 0, tok.Text.Alpha(0.06))
+					} else if !active && pill.Hovered() {
+						targetBg = tok.Text.Alpha(0.05)
+					}
+					pill.Background(pill.AnimateColor("ptab-bg", targetBg, theme.MotionSnappy))
+					fg := pill.AnimateColor("ptab-fg", targetFg, theme.MotionSnappy)
+					pill.Children(func() {
+						selBtn := ui.ButtonBase(c).Justify(ui.Start).AlignItems(ui.Center).Label("标签:" + tab.Title)
+						theme.ApplyTactilePress(selBtn)
+						components.Tooltip(c, selBtn, fmtTabTooltip(tab))
+						selBtn.Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								var icon *ui.SVG
+								switch tab.Kind {
+								case TabCalendar:
+									icon = lucide.CalendarDays()
+								case TabPantry:
+									icon = lucide.Package()
+								default:
+									icon = lucide.FlaskConical()
+								}
+								icoCol := tok.TextMuted
+								if active {
+									icoCol = tok.Accent
+								}
+								ui.Icon(c, icon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(icoCol)
+								// Pinned calendar tab renders compactly when space is tight
+								if !(tab.Pinned && tab.Kind == TabCalendar && len(pane.Tabs) > 3) {
+									components.Text(c, tab.Title).FontSize(float32(tok.TextMeta)).Bold().
+										TextColor(fg).SingleLine().Ellipsis("…").MaxWidth(float32(tok.Spacing48) * 3.0)
+								}
+								if tab.Pinned {
+									ui.Icon(c, lucide.Pin()).Size(float32(tok.Spacing12)*0.85, float32(tok.Spacing12)*0.85).TextColor(tok.TextMuted)
+								}
+							})
+						})
+						if selBtn.Clicked() {
+							s.SwitchTabInPane(pane.ID, tab.ID, true)
 						}
-						ui.Icon(c, icon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(icoCol)
-						// Pinned calendar tab renders compactly when space is tight or pinned
-						if !(tab.Pinned && tab.Kind == TabCalendar && len(pane.Tabs) > 3) {
-							components.Text(c, tab.Title).FontSize(float32(tok.TextMeta)).Bold().
-								TextColor(fg).SingleLine().Ellipsis("…").MaxWidth(float32(tok.Spacing48) * 3.0)
+						// Middle-mouse click closes non-pinned tab cleanly
+						if !tab.Pinned {
+							if btn, pressed := selBtn.PressedButton(); pressed && btn == 2 {
+								s.middleHeld[tab.ID] = true
+							} else if s.middleHeld[tab.ID] {
+								s.middleHeld[tab.ID] = false
+								s.CloseTabInPane(pane.ID, tab.ID)
+							}
+							clsBtn := components.IconButton(c, lucide.X(), "关闭 "+tab.Title, components.IconButtonCompact)
+							if clsBtn.Clicked() {
+								s.CloseTabInPane(pane.ID, tab.ID)
+							}
 						}
 					})
-				})
-				if selBtn.Clicked() {
-					s.SwitchTabInPane(pane.ID, tab.ID, true)
-				}
-				// Middle-mouse click closes non-pinned tab cleanly
-				if !tab.Pinned {
-					if btn, pressed := selBtn.PressedButton(); pressed && btn == 2 {
-						s.middleHeld[tab.ID] = true
-					} else if s.middleHeld[tab.ID] {
-						s.middleHeld[tab.ID] = false
-						s.CloseTabInPane(pane.ID, tab.ID)
-					}
-					clsBtn := ui.ButtonBase(c.Key("pclose-"+pane.ID+"-"+tab.ID)).Padding(float32(tok.Spacing4)*0.3).
-						Radius(float32(tok.ControlRadius)*0.5).Label("关闭 " + tab.Title)
-					clsBtn.Children(func() {
-						ui.Icon(c, lucide.X()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
-					})
-					if clsBtn.Clicked() {
-						s.CloseTabInPane(pane.ID, tab.ID)
-					}
-				}
-			})
 
-			// Drag tab to reorder or drop onto split edge
-			pill.Drag(tabDragPayload{PaneID: pane.ID, TabID: tab.ID, Tab: tab})
-			if dragged, dropped := ui.Drop[tabDragPayload](pill); dropped && dragged.PaneID == pane.ID && dragged.TabID != tab.ID {
-				s.ReorderTabInPane(pane.ID, dragged.TabID, idx)
-			}
+					// Drag tab to reorder or drop onto split edge
+					pill.Drag(tabDragPayload{PaneID: pane.ID, TabID: tab.ID, Tab: tab})
+					if dragged, dropped := ui.Drop[tabDragPayload](pill); dropped && dragged.PaneID == pane.ID && dragged.TabID != tab.ID {
+						s.ReorderTabInPane(pane.ID, dragged.TabID, idx)
+					}
 
-			// Right-click tab context menu
-			components.ContextMenu(c, pill, func(m *components.Menu) {
-				if m.Item("关闭").Shortcut("Ctrl+W").Disabled(tab.Pinned).Chosen() {
-					s.CloseTabInPane(pane.ID, tab.ID)
-				}
-				if m.Item("关闭其他标签页").Chosen() {
-					s.CloseOtherTabs(pane.ID, tab.ID)
-				}
-				if m.Item("关闭右侧标签页").Chosen() {
-					s.CloseTabsToRight(pane.ID, tab.ID)
-				}
-				m.Separator()
-				if m.Item("向右分屏").Shortcut("Ctrl+\\").Chosen() {
-					cp := tab
-					cp.ID = ""
-					s.SplitPaneWithTab(pane.ID, cp, "right")
-				}
-				if m.Item("向下分屏").Chosen() {
-					cp := tab
-					cp.ID = ""
-					s.SplitPaneWithTab(pane.ID, cp, "down")
-				}
-				pinLbl := "固定标签页"
-				if tab.Pinned {
-					pinLbl = "取消固定"
-				}
-				if m.Item(pinLbl).Chosen() {
-					s.TogglePinTab(pane.ID, tab.ID)
-				}
-				if tab.Kind == TabFile && tab.FilePath != "" {
-					if m.Item("在文件树中定位").Chosen() {
-						s.SelectedTreePath = tab.FilePath
-						if s.window != nil && !s.window.LeftExpanded() {
-							s.window.SetLeftExpanded(true)
+					// Right-click tab context menu
+					components.ContextMenu(c, pill, func(m *components.Menu) {
+						if m.Item("关闭").Shortcut("Ctrl+W").Disabled(tab.Pinned).Chosen() {
+							s.CloseTabInPane(pane.ID, tab.ID)
 						}
-					}
+						if m.Item("关闭其他标签页").Chosen() {
+							s.CloseOtherTabs(pane.ID, tab.ID)
+						}
+						if m.Item("关闭右侧标签页").Chosen() {
+							s.CloseTabsToRight(pane.ID, tab.ID)
+						}
+						m.Separator()
+						if m.Item("向右分屏").Shortcut("Ctrl+\\").Chosen() {
+							cp := tab
+							cp.ID = ""
+							s.SplitPaneWithTab(pane.ID, cp, "right")
+						}
+						if m.Item("向下分屏").Chosen() {
+							cp := tab
+							cp.ID = ""
+							s.SplitPaneWithTab(pane.ID, cp, "down")
+						}
+						pinLbl := "固定标签页"
+						if tab.Pinned {
+							pinLbl = "取消固定"
+						}
+						if m.Item(pinLbl).Chosen() {
+							s.TogglePinTab(pane.ID, tab.ID)
+						}
+						if tab.Kind == TabFile && tab.FilePath != "" {
+							if m.Item("在文件树中定位").Chosen() {
+								s.SelectedTreePath = tab.FilePath
+								if s.window != nil && !s.window.LeftExpanded() {
+									s.window.SetLeftExpanded(true)
+								}
+							}
+						}
+					})
+				}
+
+				// Trailing '+' new tab
+				addBtn := components.IconButton(c, lucide.Plus(), "新建实验 (Ctrl+N)", components.IconButtonCompact)
+				if addBtn.Clicked() {
+					s.ActivePaneID = pane.ID
+					s.triggerVaultNewFile("")
 				}
 			})
-		}
-
-		// Trailing '+' new tab & empty-bar double click
-		addBtn := components.IconButton(c, lucide.Plus(), "新建实验 (Ctrl+N)", components.IconButtonCompact)
-		if addBtn.Clicked() {
-			s.ActivePaneID = pane.ID
-			s.triggerVaultNewFile("")
-		}
-		spacerArea := ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing16)).Height(float32(tok.Spacing24))
+		})
+		spacerArea := ui.Box(c).Width(float32(tok.Spacing24)).Height(float32(tok.Spacing24)).Shrink(0)
 		if spacerArea.DoubleClicked() {
 			s.ActivePaneID = pane.ID
 			s.triggerVaultNewFile("")

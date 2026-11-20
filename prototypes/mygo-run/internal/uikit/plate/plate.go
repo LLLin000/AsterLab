@@ -2,9 +2,11 @@ package plate
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/egoist/mygo/ui"
 
@@ -224,18 +226,20 @@ type LegendItem struct {
 }
 
 // ComputeLegend returns the sorted legend entries shared across interactive views,
-// read-only summaries, and SVG/PNG exports.
+// read-only summaries, and SVG/PNG exports. Numeric factor layers sort high-to-low
+// with monotonic sequential ramp swatches instead of unordered string hashes.
 func ComputeLegend(props Props, dark bool) []LegendItem {
 	t := theme.GetTokens(theme.Palette(dark))
 	counts := make(map[string]int)
 	colors := make(map[string]ui.Color)
 	order := make([]string, 0)
+	scale := buildFactorColorScale(props, dark, t)
 	for id, well := range props.Wells {
 		if well.Ambiguous {
 			continue
 		}
 		role := effectiveRole(well, id, props.Roles)
-		lbl, col := wellLegendCategory(props, well, role, dark, t)
+		lbl, col := wellLegendCategoryWithScale(props, well, role, dark, t, scale)
 		if lbl == "" {
 			continue
 		}
@@ -245,12 +249,133 @@ func ComputeLegend(props Props, dark bool) []LegendItem {
 		}
 		counts[lbl]++
 	}
-	sort.Strings(order)
+	if scale != nil && scale.isNumeric {
+		sort.Slice(order, func(i, j int) bool {
+			vi, oki := parseNumericFactorValue(order[i])
+			vj, okj := parseNumericFactorValue(order[j])
+			if oki && okj {
+				if vi != vj {
+					return vi > vj
+				}
+				return order[i] < order[j]
+			}
+			if oki != okj {
+				return oki
+			}
+			return order[i] < order[j]
+		})
+	} else {
+		sort.Strings(order)
+	}
 	out := make([]LegendItem, 0, len(order))
 	for _, lbl := range order {
 		out = append(out, LegendItem{Label: lbl, Color: colors[lbl], Count: counts[lbl]})
 	}
 	return out
+}
+
+type factorColorScale struct {
+	isNumeric bool
+	colors    map[string]ui.Color
+}
+
+func parseNumericFactorValue(raw string) (float64, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0, false
+	}
+	end := 0
+	for end < len(s) {
+		ch := s[end]
+		if (ch >= '0' && ch <= '9') || ch == '.' || (end == 0 && (ch == '+' || ch == '-')) {
+			end++
+			continue
+		}
+		break
+	}
+	if end == 0 {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(s[:end], 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, false
+	}
+	rest := strings.TrimSpace(s[end:])
+	if rest != "" {
+		for _, r := range rest {
+			if unicode.IsDigit(r) && !strings.ContainsAny(rest, "uUmMnNpPkKgGLl%") {
+				return 0, false
+			}
+		}
+	}
+	return v, true
+}
+
+func buildFactorColorScale(props Props, dark bool, t theme.Tokens) *factorColorScale {
+	if !strings.EqualFold(strings.TrimSpace(props.ColorBy), "factor") || props.FactorKey == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var vals []string
+	var numVals []float64
+	for _, well := range props.Wells {
+		if well.Factors == nil {
+			continue
+		}
+		v := strings.TrimSpace(well.Factors[props.FactorKey])
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		vals = append(vals, v)
+		if num, ok := parseNumericFactorValue(v); ok && num > 0 {
+			numVals = append(numVals, num)
+		}
+	}
+	if len(vals) == 0 {
+		return nil
+	}
+	colors := make(map[string]ui.Color, len(vals))
+	isNumeric := len(numVals) >= 2
+	if isNumeric {
+		minV, maxV := numVals[0], numVals[0]
+		for _, nv := range numVals[1:] {
+			if nv < minV {
+				minV = nv
+			}
+			if nv > maxV {
+				maxV = nv
+			}
+		}
+		useLog := minV > 0 && maxV/minV >= 8
+		for _, v := range vals {
+			nv, ok := parseNumericFactorValue(v)
+			if !ok || nv <= 0 {
+				colors[v] = t.BorderStrong
+				continue
+			}
+			norm := 0.5
+			if maxV > minV {
+				if useLog {
+					norm = (math.Log10(nv) - math.Log10(minV)) / (math.Log10(maxV) - math.Log10(minV))
+				} else {
+					norm = (nv - minV) / (maxV - minV)
+				}
+			}
+			colors[v] = theme.GradientRampColor(norm, dark)
+		}
+		return &factorColorScale{isNumeric: true, colors: colors}
+	}
+	sort.Strings(vals)
+	pal := theme.CategoricalPalette(dark)
+	for i, v := range vals {
+		if len(pal) > 0 {
+			colors[v] = pal[i%len(pal)]
+		} else {
+			colors[v] = theme.CategoricalColor(props.FactorKey+":"+v, dark)
+		}
+	}
+	return &factorColorScale{isNumeric: false, colors: colors}
 }
 
 // WellsInRectCells returns every well/lane ID overlapping rect in row-major order.
@@ -897,6 +1022,7 @@ func WellFillColor(props Props, well WellState, assigned bool, role string, dark
 	if props.Blind {
 		return t.BorderStrong
 	}
+	scale := buildFactorColorScale(props, dark, t)
 	switch strings.ToLower(strings.TrimSpace(props.ColorBy)) {
 	case "sample":
 		if strings.TrimSpace(well.SampleID) != "" {
@@ -906,6 +1032,11 @@ func WellFillColor(props Props, well WellState, assigned bool, role string, dark
 	case "factor":
 		if props.FactorKey != "" && well.Factors != nil {
 			if val := strings.TrimSpace(well.Factors[props.FactorKey]); val != "" {
+				if scale != nil {
+					if c, ok := scale.colors[val]; ok {
+						return c
+					}
+				}
 				return theme.CategoricalColor(props.FactorKey+":"+val, dark)
 			}
 		}
@@ -928,6 +1059,10 @@ func WellFillColor(props Props, well WellState, assigned bool, role string, dark
 }
 
 func wellLegendCategory(props Props, well WellState, role string, dark bool, t theme.Tokens) (string, ui.Color) {
+	return wellLegendCategoryWithScale(props, well, role, dark, t, buildFactorColorScale(props, dark, t))
+}
+
+func wellLegendCategoryWithScale(props Props, well WellState, role string, dark bool, t theme.Tokens, scale *factorColorScale) (string, ui.Color) {
 	if props.Blind {
 		return "盲态孔位", t.BorderStrong
 	}
@@ -940,6 +1075,11 @@ func wellLegendCategory(props Props, well WellState, role string, dark bool, t t
 	case "factor":
 		if props.FactorKey != "" && well.Factors != nil {
 			if v := strings.TrimSpace(well.Factors[props.FactorKey]); v != "" {
+				if scale != nil {
+					if c, ok := scale.colors[v]; ok {
+						return v, c
+					}
+				}
 				return v, theme.CategoricalColor(props.FactorKey+":"+v, dark)
 			}
 		}

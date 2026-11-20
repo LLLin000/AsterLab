@@ -247,7 +247,9 @@ func (s *Shell) calendarHomeView(c *ui.Context) {
 	}
 
 	if mobileMode {
-		ui.Scroll(c.Key("cal-mobile-scroll")).Fill().TrackScroll(s.MobileContentScrollState()).Children(func() {
+		ui.Scroll(c.Key("cal-mobile-scroll")).Fill().
+			TrackScroll(s.MobileContentScrollState()).
+			ScrollbarInsets(s.MobileTopReserve(c), 0, s.MobileBottomReserve(c), 0).Children(func() {
 			s.calendarHomeBody(c, tok, cursor, today, todayYMD, selDateYMD, compactV, mobileMode, allExps, byDate)
 		})
 		return
@@ -403,7 +405,7 @@ func (s *Shell) renderMobileDayAgenda(c *ui.Context, tok theme.Tokens, ymd strin
 			exp := exp
 			row := ui.ButtonBase(c.Key("mb-ag-"+exp.ID)).FillWidth().
 				Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-				Radius(12).Background(tok.Elevated).
+				Radius(float32(tok.PanelRadius)).Background(tok.Elevated).
 				Justify(ui.Start).Label(exp.Title)
 			row.Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
@@ -472,7 +474,7 @@ func (s *Shell) renderAppleMonthGrid(c *ui.Context, tok theme.Tokens, cursor tim
 		if slideX != 0 {
 			gridBody.Transition(ui.ElementTransition{
 				Enter:     &ui.Motion{X: slideX, Opacity: 0},
-				Animation: &ui.Smooth,
+				Animation: &theme.MotionFluid,
 			})
 		}
 		gridBody.Children(func() {
@@ -663,7 +665,7 @@ func (s *Shell) renderAppleDayNumberBadge(c *ui.Context, tok theme.Tokens, dayNu
 	if isToday {
 		ui.Box(c.Key("today-pill")).Size(badgeSize, badgeSize).Radius(circleRad).
 			Background(tok.Accent).Center().
-			Transition(ui.ElementTransition{Animation: &ui.Snappy}).Children(func() {
+			Transition(ui.ElementTransition{Animation: &theme.MotionSnappy}).Children(func() {
 			components.Text(c, numStr).FontSize(float32(tok.TextMeta)).Bold().
 				TextColor(tok.AccentText).FontFeatures("tnum")
 		})
@@ -672,7 +674,7 @@ func (s *Shell) renderAppleDayNumberBadge(c *ui.Context, tok theme.Tokens, dayNu
 	if isSelected {
 		ui.Box(c.Key("sel-pill")).Size(badgeSize, badgeSize).Radius(circleRad).
 			Background(tok.AccentSoftBg).Border(1, tok.Accent).Center().
-			Transition(ui.ElementTransition{Match: "cal-selected-circle", Animation: &ui.Snappy}).Children(func() {
+			Transition(theme.SharedPillTransition("cal-selected-circle")).Children(func() {
 			components.Text(c, numStr).FontSize(float32(tok.TextMeta)).Bold().
 				TextColor(tok.Accent).FontFeatures("tnum")
 		})

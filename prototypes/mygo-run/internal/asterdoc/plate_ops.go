@@ -854,39 +854,11 @@ func (v *View) renderUnifiedPlateFloatingBar(
 	}
 	box.Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-			ui.Row(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).
-				Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Children(func() {
-				ui.Text(c, fmt.Sprintf("已选 %d 孔 · 图层「%s」", len(selected), activeLayer)).
-					FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).
-					FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
-			})
-			for _, mOpt := range []struct {
-				id    int
-				label string
-			}{{0, "单值"}, {1, "平铺列表"}, {2, "等比序列"}} {
-				mOpt := mOpt
-				active := fillMode == mOpt.id
-				targetBg := ui.Transparent
-				targetBd := ui.Transparent
-				targetFg := tok.TextMuted
-				if active {
-					targetBg = tok.Surface
-					targetBd = tok.Border
-					targetFg = tok.Text
-				}
-				btn := ui.ButtonBase(c.Key(fmt.Sprintf("pl-fmode:%s:%d", plate.ID, mOpt.id))).
-					Padding(float32(tok.Spacing4)*0.6, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-					Label(mOpt.label)
-				btn.Background(btn.AnimateColor("fmbg", targetBg, theme.MotionSnappy)).
-					Border(1, btn.AnimateColor("fmbd", targetBd, theme.MotionSnappy))
-				fg := btn.AnimateColor("fmfg", targetFg, theme.MotionSnappy)
-				theme.ApplyTactilePress(btn)
-				btn.Children(func() {
-					ui.Text(c, mOpt.label).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg)
-				})
-				if btn.Clicked() {
-					v.plateFillMode[plate.ID] = mOpt.id
-				}
+			components.Badge(c, fmt.Sprintf("已选 %d 孔 · 图层「%s」", len(selected), activeLayer), components.BadgeOptions{Tone: components.BadgeAccent})
+			fmIdx := fillMode
+			components.Tabs(c, &fmIdx, components.TabsSegmented, "单值", "平铺列表", "等比序列")
+			if fmIdx != fillMode {
+				v.plateFillMode[plate.ID] = fmIdx
 			}
 			ui.Spacer(c)
 			if inOverlay {
@@ -932,18 +904,15 @@ func (v *View) renderUnifiedPlateFloatingBar(
 							*factorDraft = preset.fac
 						}
 					}
-					for _, dOpt := range []struct {
-						id  string
-						lbl string
-					}{{"row", "按行"}, {"col", "按列"}} {
-						dOpt := dOpt
-						dBtn := components.ButtonOutline
-						if *dirDraft == dOpt.id {
-							dBtn = components.ButtonSecondary
-						}
-						if components.Button(c, dOpt.lbl, dBtn).Clicked() {
-							*dirDraft = dOpt.id
-						}
+					dirIdx := 0
+					if *dirDraft == "col" {
+						dirIdx = 1
+					}
+					components.Tabs(c, &dirIdx, components.TabsSegmented, "按行", "按列")
+					if dirIdx == 1 {
+						*dirDraft = "col"
+					} else {
+						*dirDraft = "row"
 					}
 					if components.Button(c, "生成梯度", components.ButtonPrimary).Clicked() {
 						applySerial()
@@ -964,18 +933,15 @@ func (v *View) renderUnifiedPlateFloatingBar(
 						})
 					})
 					if fillMode == 1 {
-						for _, dOpt := range []struct {
-							id  string
-							lbl string
-						}{{"row", "按行"}, {"col", "按列"}} {
-							dOpt := dOpt
-							dBtn := components.ButtonOutline
-							if *dirDraft == dOpt.id {
-								dBtn = components.ButtonSecondary
-							}
-							if components.Button(c, dOpt.lbl, dBtn).Clicked() {
-								*dirDraft = dOpt.id
-							}
+						dirIdx := 0
+						if *dirDraft == "col" {
+							dirIdx = 1
+						}
+						components.Tabs(c, &dirIdx, components.TabsSegmented, "按行", "按列")
+						if dirIdx == 1 {
+							*dirDraft = "col"
+						} else {
+							*dirDraft = "row"
 						}
 					}
 					if components.Button(c, "应用", components.ButtonPrimary).Clicked() && strings.TrimSpace(*draft) != "" {

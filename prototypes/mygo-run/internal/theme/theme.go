@@ -18,9 +18,11 @@ const (
 )
 
 var (
-	themeCfgMu        sync.RWMutex
-	activePreset      = PresetObsidian
-	activeLiquidGlass = true
+	themeCfgMu         sync.RWMutex
+	activePreset       = PresetObsidian
+	activeLiquidGlass  = true
+	activeTextScale    float32
+	activeReduceMotion bool
 )
 
 // SetActiveLook configures the active surface preset ("obsidian" | "zinc" | "warm")
@@ -31,6 +33,27 @@ func SetActiveLook(preset string, liquidGlass bool) {
 	activePreset = p
 	activeLiquidGlass = liquidGlass
 	themeCfgMu.Unlock()
+}
+
+// SetAccessibilityPrefs configures user-selected in-app text scale (0 = follow OS)
+// and reduced motion preference, immediately syncing motion tokens.
+func SetAccessibilityPrefs(textScale float32, reduceMotion bool) {
+	if textScale < 0 {
+		textScale = 0
+	}
+	themeCfgMu.Lock()
+	activeTextScale = textScale
+	activeReduceMotion = reduceMotion
+	themeCfgMu.Unlock()
+	applyMotionPreference(reduceMotion)
+}
+
+// AccessibilityPrefs returns the currently active in-app text scale and reduce-motion flag.
+func AccessibilityPrefs() (textScale float32, reduceMotion bool) {
+	themeCfgMu.RLock()
+	s, rm := activeTextScale, activeReduceMotion
+	themeCfgMu.RUnlock()
+	return s, rm
 }
 
 // ActiveLook returns the currently active theme preset and Liquid Glass toggle.
@@ -72,10 +95,22 @@ type Tokens struct {
 	ControlRadius, PanelRadius, DialogRadius                                                     int
 }
 
+func scaleTextToken(base int, scale float32) int {
+	if scale <= 0 || scale == 1 {
+		return base
+	}
+	v := int(float32(base)*scale + 0.5)
+	if v < 9 {
+		v = 9
+	}
+	return v
+}
+
 // TokensFor returns the full design token set for an explicit preset, dark flag,
 // and Liquid Glass toggle.
 func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 	p := normalizePreset(preset)
+	scale, _ := AccessibilityPrefs()
 	t := Tokens{
 		Preset:        p,
 		LiquidGlass:   liquidGlass,
@@ -87,11 +122,11 @@ func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 		Spacing24:     24,
 		Spacing32:     32,
 		Spacing48:     48,
-		TextPage:      22,
-		TextSection:   15,
-		TextBody:      13,
-		TextMeta:      12,
-		TextData:      12,
+		TextPage:      scaleTextToken(22, scale),
+		TextSection:   scaleTextToken(15, scale),
+		TextBody:      scaleTextToken(13, scale),
+		TextMeta:      scaleTextToken(12, scale),
+		TextData:      scaleTextToken(12, scale),
 		ButtonHeight:  30,
 		InputHeight:   30,
 		RowHeight:     32,
@@ -315,7 +350,9 @@ func Window(c *ui.Context) *ui.Theme {
 		t.TextMuted = t.TextMuted.Mix(t.Text, 0.4)
 		t.Scrollbar = t.Scrollbar.Alpha(1.6)
 	}
-	if s := p.TextScale; s > 0 && s != 1 {
+	if userScale, _ := AccessibilityPrefs(); userScale > 0 && userScale != 1 {
+		t.FontSize *= userScale
+	} else if s := p.TextScale; s > 0 && s != 1 {
 		t.FontSize *= s
 	}
 	return t
@@ -392,6 +429,26 @@ func WellRoleColor(role string, dark bool) ui.Color {
 	}
 }
 
+// GradientRampColor returns a monotonic light-to-dark scientific sequential color
+// along [0, 1] (used by plate concentration / numeric factor layers).
+func GradientRampColor(tNorm float64, dark bool) ui.Color {
+	if tNorm < 0 {
+		tNorm = 0
+	}
+	if tNorm > 1 {
+		tNorm = 1
+	}
+	// Low -> High concentration: pale misty violet/indigo to deep cobalt-violet.
+	if dark {
+		lo := ui.Hex("#312e59")
+		hi := ui.Hex("#8b7cff")
+		return lo.Mix(hi, float32(tNorm))
+	}
+	lo := ui.Hex("#ddd6fe")
+	hi := ui.Hex("#4c35b5")
+	return lo.Mix(hi, float32(tNorm))
+}
+
 // LightTheme and DarkTheme install a fixed appearance, for isolated studios.
 func LightTheme() *ui.Theme { return LightPalette() }
 
@@ -407,7 +464,7 @@ func applyTokens(c Tokens) *ui.Theme {
 	t.Focus = c.Accent.Alpha(.55)
 	t.Scrollbar = c.Text.Alpha(.28)
 	t.FocusRingWidth, t.FocusRingOffset = 2, 1
-	t.Radius = 8
+	t.Radius = float32(c.ControlRadius)
 	t.Spacing = 4
 	return t
 }

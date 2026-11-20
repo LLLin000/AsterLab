@@ -88,13 +88,20 @@ type View struct {
 	// layer-based plate editing, table column popovers, and Ctrl+V figure paste.
 	UnifiedLive        bool
 	MobileCompact      bool
+	DocumentTitle      string
+	SearchQuery        string
+	DefaultPlateFormat int
+	DefaultExcessPct   int
+	ScrollToStepID     string
 	OnDuplicateBlock   func(stepID, blockID string)
 	OnImportAssetBytes func(data []byte, origName string) (string, error)
+	OnPickAttachmentFile func(stepID, blockID string)
 	OnSavePlateExport  func(defaultName, format string, data []byte) error
 	OnLocatePantryCode func(code string)
 	OnSlashInsert      func(stepID string, afterIndex int, block map[string]any)
 	PantryLocationMap  map[string]string // reagent code/name -> human box/slot location
 	HideStepHeader     bool
+	stepCollapsed      map[string]bool
 	widgetTextDrafts   map[string]*string
 	widgetBoolDrafts   map[string]*bool
 	svgCache           map[string]*ui.SVG
@@ -206,9 +213,36 @@ func (v *View) Render(c *ui.Context) {
 		if _, fmEnd, hasFM := ScanFrontmatter(src); hasFM && fmEnd <= len(src) {
 			src = src[fmEnd:]
 		}
+		src = stripDuplicateLeadingH1(src, v.DocumentTitle)
 	}
 	protocol.RenderMarkdownWith(c, src, v.codeBlock)
 	v.plateOverlay(c)
+}
+
+// stripDuplicateLeadingH1 removes a leading Markdown `# Title` line in UnifiedLive
+// mode when it duplicates the rendered inline document title, preventing double H1s.
+func stripDuplicateLeadingH1(body, docTitle string) string {
+	lines := strings.Split(body, "\n")
+	norm := func(s string) string {
+		s = strings.TrimSpace(strings.ToLower(s))
+		s = strings.TrimSuffix(s, "(asterml v2)")
+		return strings.TrimSpace(s)
+	}
+	want := norm(docTitle)
+	for i, ln := range lines {
+		tr := strings.TrimSpace(ln)
+		if tr == "" {
+			continue
+		}
+		if strings.HasPrefix(tr, "# ") {
+			h1 := strings.TrimSpace(strings.TrimPrefix(tr, "# "))
+			if want == "" || norm(h1) == want || strings.Contains(norm(h1), want) || strings.Contains(want, norm(h1)) {
+				return strings.Join(append(lines[:i], lines[i+1:]...), "\n")
+			}
+		}
+		break
+	}
+	return body
 }
 
 // RenderPlateOverlay draws the zoomed plate overlay when ExpandedPlate is active.
@@ -493,20 +527,27 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 					ui.Text(c, "图层：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					renderLayerPill := func(key, label string, active bool, onClick func()) {
-						targetBg := tok.Surface
-						targetBd := tok.Border
-						targetFg := tok.TextMuted
+						fgCol := tok.TextMuted
 						if active {
-							targetBg = tok.AccentSoftBg
-							targetBd = tok.Accent
-							targetFg = tok.Text
+							fgCol = tok.Text
 						}
 						btn := ui.ButtonBase(c.Key("pl-lpill:" + p.ID + ":" + key)).
 							Padding(float32(tok.Spacing4)*0.6, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 							Label(label)
-						btn.Background(btn.AnimateColor("lpbg", targetBg, theme.MotionSnappy)).
-							Border(1, btn.AnimateColor("lpbd", targetBd, theme.MotionSnappy))
-						fg := btn.AnimateColor("lpfg", targetFg, theme.MotionSnappy)
+						if active {
+							ui.Box(c.Key("pl-lpill-bg:"+p.ID)).Absolute().Fill().
+								Radius(float32(tok.ControlRadius)).
+								Background(tok.AccentSoftBg).Border(1, tok.Accent).
+								Transition(theme.SharedPillTransition("pl-layer-pill:" + p.ID))
+						} else {
+							hoverBg := ui.Transparent
+							if btn.Hovered() {
+								hoverBg = tok.Text.Alpha(0.04)
+							}
+							btn.Background(btn.AnimateColor("lpbg", hoverBg, theme.MotionMicroFade)).
+								Border(1, tok.Border)
+						}
+						fg := btn.AnimateColor("lpfg", fgCol, theme.MotionSnappy)
 						theme.ApplyTactilePress(btn)
 						btn.Children(func() {
 							ui.Text(c, label).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg)
@@ -563,6 +604,9 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 			}
 
 			plateGridBox := ui.Column(c.Key("plate-grid:" + p.ID)).FillWidth()
+			if v.ExpandedPlate != p.ID {
+				plateGridBox.Transition(theme.HeroFlyTransition(plateHeroMatch{PlateID: p.ID}))
+			}
 			plateGridBox.Children(func() {
 				plateui.View(c, plateui.Props{
 					Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns,
@@ -607,7 +651,9 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 						}
 					}
 					if v.OnSavePlateExport != nil && m.Item("导出布局 PNG").Chosen() {
-						_ = v.OnSavePlateExport(p.ID+".png", "png", nil)
+						if pngBytes, err := RenderPlatePNG(p, geometry, v.Doc, colorBy, factorKey, dark); err == nil && len(pngBytes) > 0 {
+							_ = v.OnSavePlateExport(p.ID+".png", "png", pngBytes)
+						}
 					}
 				})
 			}
@@ -729,6 +775,21 @@ func (v *View) applyPlateProps(plateID, ownerStepID string, props map[string]any
 	return nil
 }
 
+// ClearTextDrafts resets cached inline input buffers so Undo/Redo or external
+// document reloads immediately reflect the updated source values in editable fields.
+func (v *View) ClearTextDrafts() {
+	if v == nil {
+		return
+	}
+	v.widgetTextDrafts = nil
+	v.widgetBoolDrafts = nil
+	v.moduleDrafts = nil
+	v.moduleDraftBool = nil
+	v.calcScratch = nil
+	v.titleEditID = ""
+	v.titleEditBuf = ""
+}
+
 type plateHeroMatch struct{ PlateID string }
 
 // plateOverlay floats the enlarged plate over a dimmed canvas using the exact
@@ -783,8 +844,9 @@ func (v *View) plateOverlay(c *ui.Context) {
 	lblMap := PlateGroupLabelMap(v.Doc)
 
 	ui.Overlay(c, func() {
+		scrimCol := theme.DarkTokens().Canvas.Alpha(0.62)
 		backdrop := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Background(ui.RGBA(0, 0, 0, .62)).Modal()
+			Background(scrimCol).Modal()
 		if backdrop.Clicked() {
 			closeOverlay()
 		}
@@ -795,9 +857,9 @@ func (v *View) plateOverlay(c *ui.Context) {
 		}
 		layer.Children(func() {
 			ui.Column(c.Key("plate-modal-col:"+plate.ID)).MaxWidth(float32(tok.Spacing48)*20).Gap(float32(tok.Spacing8)).
-				AlignItems(ui.Center).Transition(theme.DialogSurfaceTransition()).Children(func() {
+				AlignItems(ui.Center).Transition(theme.HeroFlyTransition(plateHeroMatch{PlateID: plate.ID})).Children(func() {
 				ui.Box(c).Background(tok.Surface).Border(1, tok.Border).
-					Radius(float32(tok.DialogRadius)).Shadow(0, float32(tok.Spacing12), float32(tok.Spacing32), 0, ui.RGBA(0, 0, 0, .38)).
+					Radius(float32(tok.DialogRadius)).Shadow(0, float32(tok.Spacing12), float32(tok.Spacing32), 0, theme.DarkTokens().Canvas.Alpha(0.45)).
 					Padding(float32(tok.Spacing16), float32(tok.Spacing16)).Children(func() {
 					ui.Column(c).Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
 						plateTitle := plate.Title
@@ -830,10 +892,12 @@ func (v *View) plateOverlay(c *ui.Context) {
 							plateui.View(c, plateui.Props{
 								Wells: wells, Rows: geometry.Rows, Cols: geometry.Columns,
 								Topology: plate.Topology, Roles: plate.Roles,
-								Interactive: canEdit || true,
+								Interactive: canEdit,
 								SelectedIDs: v.ExpandedWells,
 								OnSelect: func(ids []string) {
-									v.ExpandedWells = ids
+									if canEdit {
+										v.ExpandedWells = ids
+									}
 								},
 								ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap,
 								Zoom: overlayZoom, State: &v.overlayPlateState,
@@ -842,9 +906,17 @@ func (v *View) plateOverlay(c *ui.Context) {
 					})
 				})
 
-				v.renderPlateFloatingBar(c, plate, ownerStepID, v.ExpandedWells, func(next []string) {
-					v.ExpandedWells = next
-				}, true, zoom, closeOverlay)
+				if canEdit {
+					v.renderPlateFloatingBar(c, plate, ownerStepID, v.ExpandedWells, func(next []string) {
+						v.ExpandedWells = next
+					}, true, zoom, closeOverlay)
+				} else {
+					ui.Row(c).Justify(ui.Center).Children(func() {
+						if components.Button(c, "关闭放大视图", components.ButtonSecondary).Clicked() {
+							closeOverlay()
+						}
+					})
+				}
 			})
 		})
 	})
