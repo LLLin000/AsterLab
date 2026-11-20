@@ -74,8 +74,9 @@ func TestGlobalSearchModalAndCompanionDiagnosticsTab(t *testing.T) {
 		t.Fatalf("expected backlinks and diagnostics in tab 2, got: %q", tt.Texts())
 	}
 
-	// Open File Recovery snapshot item in settings (Vault category is active by default)
+	// Open File Recovery snapshot item in settings and focus it via search so OS font metrics never clip it below the fold
 	s.VaultSettingsOpen = true
+	s.SettingsView.Query = "文件恢复"
 	tt.Frame()
 	if !tt.HasText("恢复此版本") {
 		t.Fatalf("expected File Recovery snapshot restore button in settings")

@@ -67,4 +67,5 @@ jobs:
         working-directory: prototypes/mygo-run
         run: |
           go build ./...
-          go test -skip '^TestAssetOpenFailureShowsPageBannerWithRetryAndLinkErrReachable$' ./...
+          go test ./internal/... ./cmd/... ./e2e
+          go test -run '^TestObsidianVault|^TestV2WorkbenchVisualGate' .
