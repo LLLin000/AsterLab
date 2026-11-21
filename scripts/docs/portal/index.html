@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Docs — AsterLab</title>
 <meta name="theme-color" content="#ffffff" />
+<script>
+(() => {
+  const m = document.cookie.match(/(?:^|;\s*)asterlab_theme=(light|dark)\b/);
+  const t = (m && m[1]) || localStorage.getItem("asterlab-docs-theme") || "light";
+  document.documentElement.setAttribute("data-theme", t);
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute("content", t === "dark" ? "#0c0b0a" : "#ffffff");
+})();
+</script>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='28' fill='%230c0b0a'/%3E%3Cg transform='translate(24 29) scale(0.078125)' fill='%23f2efe9' fill-rule='evenodd'%3E%3Cpath d='M 0 528.588 L 127.468 528.588 C 170.4 528.588 209.641 504.316 228.814 465.904 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 939.048 896.711 L 939.048 288.031 C 939.048 242.969 921.148 199.754 889.285 167.891 C 824.897 103.503 733.474 74.007 643.596 88.624 C 553.719 103.241 476.354 160.187 435.688 241.661 L 304.823 503.843 C 271.271 571.064 202.598 613.539 127.468 613.539 L 0 613.539 L 0 528.588 Z'/%3E%3Cpath d='M 0 670.174 L 127.468 670.174 C 224.064 670.174 312.357 615.563 355.496 529.136 L 486.36 266.953 C 518.893 201.775 580.785 156.217 652.687 144.524 C 724.589 132.83 797.728 156.427 849.238 207.937 C 870.48 229.179 882.414 257.99 882.414 288.031 L 882.414 896.711 L 797.462 896.711 L 797.462 288.031 C 797.462 280.52 794.479 273.318 789.168 268.007 C 756.974 235.813 711.263 221.065 666.324 228.374 C 621.385 235.682 582.703 264.156 562.37 304.892 L 431.506 567.074 C 373.987 682.311 256.262 755.125 127.468 755.125 L 0 755.125 L 0 670.174 Z'/%3E%3Cpath d='M 0 811.76 L 127.468 811.76 C 277.728 811.76 415.073 726.81 482.179 592.367 L 559.389 437.678 C 586.62 383.121 652.154 359.912 707.652 385.168 C 727.858 394.364 740.828 414.516 740.828 436.716 L 740.828 896.711 L 655.876 896.711 L 655.876 434.59 L 558.188 630.306 C 476.703 793.558 309.926 896.711 127.468 896.711 L 0 896.711 L 0 811.76 Z'/%3E%3C/g%3E%3C/svg%3E" />
 <style>
 :root {
@@ -680,7 +689,17 @@ figure.shot figcaption {
   );
 
   const rootEl = document.documentElement;
-  rootEl.setAttribute("data-theme", localStorage.getItem("asterlab-docs-theme") || "light");
+  function saveTheme(next) {
+    rootEl.setAttribute("data-theme", next);
+    localStorage.setItem("asterlab-docs-theme", next);
+    if (location.hostname === "asterlab.party" || location.hostname.endsWith(".asterlab.party")) {
+      document.cookie = "asterlab_theme=" + next + "; domain=.asterlab.party; path=/; max-age=31536000; SameSite=Lax";
+    }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
+  }
+  const cookieMatch = document.cookie.match(/(?:^|;\s*)asterlab_theme=(light|dark)\b/);
+  saveTheme((cookieMatch && cookieMatch[1]) || localStorage.getItem("asterlab-docs-theme") || "light");
 
   const params = new URLSearchParams(location.search);
   let currentDoc = params.get("doc") || "docs/HANDBOOK.md";
@@ -1170,11 +1189,7 @@ figure.shot figcaption {
   });
 
   document.getElementById("themeBtn").addEventListener("click", () => {
-    const next = rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    rootEl.setAttribute("data-theme", next);
-    localStorage.setItem("asterlab-docs-theme", next);
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
+    saveTheme(rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark");
   });
   document.getElementById("menuBtn").addEventListener("click", () => {
     document.getElementById("sidebarLeft").classList.toggle("open");

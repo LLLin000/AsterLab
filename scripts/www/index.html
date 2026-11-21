@@ -1,32 +1,23 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>AsterLab — 单文件同源与科学红线内建的湿实验工作台</title>
 <meta name="description" content="AsterLab 基于 .asterml 本地单真源与 Pure-Go astercore 科学核心：统一实验设计、台面原位执行与 ARRIVE / ΔΔCq 确定性统计诊断，零专病堆砌、零数据库锁库。" />
-<meta name="theme-color" content="#0c0b0a" />
+<meta name="theme-color" content="#ffffff" />
+<script>
+(() => {
+  const m = document.cookie.match(/(?:^|;\s*)asterlab_theme=(light|dark)\b/);
+  const t = (m && m[1]) || localStorage.getItem("asterlab-docs-theme") || "light";
+  document.documentElement.setAttribute("data-theme", t);
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute("content", t === "dark" ? "#0c0b0a" : "#ffffff");
+})();
+</script>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
 <style>
 :root {
-  --bg: #0c0b0a;
-  --bg-panel: #131210;
-  --bg-elev: #1a1816;
-  --fg: #f2efe9;
-  --fg-dim: #b4afa6;
-  --fg-faint: #78736a;
-  --rule: rgba(255, 255, 255, 0.085);
-  --rule-strong: rgba(255, 255, 255, 0.16);
-  --accent: #a596ff;
-  --accent-solid: #7457ec;
-  --accent-2: #38bdf8;
-  --accent-3: #6fd3a4;
-  --warn: #e6bc6a;
-  --grid-line: rgba(255, 255, 255, 0.032);
-  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --sans: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-}
-html[data-theme="light"] {
   --bg: #ffffff;
   --bg-panel: #f7f8fa;
   --bg-elev: #eef0f4;
@@ -41,6 +32,26 @@ html[data-theme="light"] {
   --accent-3: #168053;
   --warn: #9a6715;
   --grid-line: rgba(20, 21, 26, 0.045);
+  --shadow-instrument: 0 20px 56px rgba(20, 21, 26, 0.08);
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+html[data-theme="dark"] {
+  --bg: #0c0b0a;
+  --bg-panel: #131210;
+  --bg-elev: #1a1816;
+  --fg: #f2efe9;
+  --fg-dim: #b4afa6;
+  --fg-faint: #78736a;
+  --rule: rgba(255, 255, 255, 0.085);
+  --rule-strong: rgba(255, 255, 255, 0.16);
+  --accent: #a596ff;
+  --accent-solid: #7457ec;
+  --accent-2: #38bdf8;
+  --accent-3: #6fd3a4;
+  --warn: #e6bc6a;
+  --grid-line: rgba(255, 255, 255, 0.032);
+  --shadow-instrument: 0 28px 72px rgba(0, 0, 0, 0.28);
 }
 *, *::before, *::after { box-sizing: border-box; }
 html {
@@ -218,7 +229,7 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(155deg, color-mix(in srgb, var(--bg-elev) 82%, transparent), color-mix(in srgb, var(--bg-panel) 94%, transparent));
   padding: 24px 24px 20px;
   overflow: hidden;
-  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--shadow-instrument);
 }
 .instrument-head {
   display: flex;
@@ -754,13 +765,20 @@ excluded_wells: [B6]
 (() => {
   "use strict";
   const rootEl = document.documentElement;
-  rootEl.setAttribute("data-theme", localStorage.getItem("asterlab-docs-theme") || "dark");
-
-  document.getElementById("themeBtn").addEventListener("click", () => {
-    const next = rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  function saveTheme(next) {
     rootEl.setAttribute("data-theme", next);
     localStorage.setItem("asterlab-docs-theme", next);
-    document.querySelector('meta[name="theme-color"]').setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
+    if (location.hostname === "asterlab.party" || location.hostname.endsWith(".asterlab.party")) {
+      document.cookie = "asterlab_theme=" + next + "; domain=.asterlab.party; path=/; max-age=31536000; SameSite=Lax";
+    }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
+  }
+  const cookieMatch = document.cookie.match(/(?:^|;\s*)asterlab_theme=(light|dark)\b/);
+  saveTheme((cookieMatch && cookieMatch[1]) || localStorage.getItem("asterlab-docs-theme") || "light");
+
+  document.getElementById("themeBtn").addEventListener("click", () => {
+    saveTheme(rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark");
   });
 
   const TRACKS = {
