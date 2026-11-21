@@ -132,8 +132,9 @@ jobs:
 
       - name: Stage www static bundle
         run: |
-          mkdir -p _www_site/assets
-          cp scripts/www/index.html _www_site/index.html
+          mkdir -p _www_site/assets _www_site/download
+          cp scripts/www/*.html _www_site/
+          cp scripts/www/download.html _www_site/download/index.html
           if [ -d scripts/www/assets ]; then
             cp -r scripts/www/assets/. _www_site/assets/
           fi

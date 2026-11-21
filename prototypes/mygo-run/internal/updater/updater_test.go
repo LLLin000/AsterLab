@@ -44,6 +44,10 @@ func TestCheckForUpdateAndAssetMatching(t *testing.T) {
 				Body:       "Preview release",
 				Assets: []ReleaseAsset{
 					{Name: "AsterLab-MyGo-0.2.0-rc.1-win-x64.zip", BrowserDownloadURL: "https://example.com/rc.zip"},
+					{Name: "AsterLab-MyGo-0.2.0-rc.1-macOS-universal.dmg", BrowserDownloadURL: "https://example.com/rc.dmg"},
+					{Name: "AsterLab-MyGo-0.2.0-rc.1-macOS-universal.zip", BrowserDownloadURL: "https://example.com/rc-mac.zip"},
+					{Name: "AsterLab-MyGo-0.2.0-rc.1-linux-amd64.deb", BrowserDownloadURL: "https://example.com/rc.deb"},
+					{Name: "AsterLab-MyGo-0.2.0-rc.1-linux-x64.tar.gz", BrowserDownloadURL: "https://example.com/rc-x64.tar.gz"},
 					{Name: "SHA256SUMS.txt", BrowserDownloadURL: "https://example.com/SHA256SUMS.txt"},
 				},
 			},
@@ -82,8 +86,8 @@ func TestCheckForUpdateAndAssetMatching(t *testing.T) {
 	if !preRes.HasUpdate || preRes.Latest == nil || preRes.Latest.TagName != "v0.2.0-rc.1" {
 		t.Fatalf("expected v0.2.0-rc.1 prerelease update, got %+v", preRes)
 	}
-	if preRes.Latest.ZipURL == "" || preRes.Latest.SumsURL == "" {
-		t.Fatalf("expected ZipURL and SumsURL matched, got %+v", preRes.Latest)
+	if preRes.Latest.ZipURL == "" || preRes.Latest.SumsURL == "" || preRes.Latest.MacDmgURL == "" || preRes.Latest.LinuxDebURL == "" {
+		t.Fatalf("expected tri-platform assets and SumsURL matched, got %+v", preRes.Latest)
 	}
 
 	sameRes, err := CheckForUpdate(context.Background(), "v0.2.0-rc.1", true)

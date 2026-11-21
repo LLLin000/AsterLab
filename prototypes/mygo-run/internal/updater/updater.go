@@ -63,6 +63,12 @@ type ReleaseInfo struct {
 	ZipName     string           `json:"-"`
 	SetupURL    string           `json:"-"`
 	SetupName   string           `json:"-"`
+	MacDmgURL   string           `json:"-"`
+	MacDmgName  string           `json:"-"`
+	MacZipURL   string           `json:"-"`
+	MacZipName  string           `json:"-"`
+	LinuxDebURL string           `json:"-"`
+	LinuxTarURL string           `json:"-"`
 	SumsURL     string           `json:"-"`
 	ManifestURL string           `json:"-"`
 	Manifest    *ReleaseManifest `json:"-"`
@@ -222,6 +228,22 @@ func populateMatchedAssets(rel *ReleaseInfo) {
 		case strings.Contains(lower, "win-x64") && strings.HasSuffix(lower, "setup.exe"):
 			rel.SetupURL = a.BrowserDownloadURL
 			rel.SetupName = a.Name
+		case strings.Contains(lower, "macos") && strings.HasSuffix(lower, ".dmg"):
+			rel.MacDmgURL = a.BrowserDownloadURL
+			rel.MacDmgName = a.Name
+		case strings.Contains(lower, "macos") && strings.HasSuffix(lower, ".zip"):
+			rel.MacZipURL = a.BrowserDownloadURL
+			rel.MacZipName = a.Name
+		case strings.Contains(lower, "linux-amd64") && strings.HasSuffix(lower, ".deb"):
+			rel.LinuxDebURL = a.BrowserDownloadURL
+		case strings.Contains(lower, "linux-") && strings.HasSuffix(lower, ".tar.gz"):
+			archTag := "linux-x64"
+			if runtime.GOARCH == "arm64" {
+				archTag = "linux-arm64"
+			}
+			if strings.Contains(lower, archTag) || rel.LinuxTarURL == "" {
+				rel.LinuxTarURL = a.BrowserDownloadURL
+			}
 		}
 	}
 }

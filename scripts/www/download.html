@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>下载 AsterLab — Windows / macOS / Linux 纯净原生桌面端与 CLI</title>
+<meta name="description" content="下载 AsterLab 桌面客户端（Windows、macOS Apple Silicon &amp; Intel、Linux .deb / .tar.gz）。本地单真源 .asterml 实验工作台与 Pure-Go astercore。" />
+<meta name="theme-color" content="#ffffff" />
+<script>
+(() => {
+  const m = document.cookie.match(/(?:^|;\s*)asterlab_theme=(light|dark)\b/);
+  const t = (m && m[1]) || localStorage.getItem("asterlab-docs-theme") || "light";
+  document.documentElement.setAttribute("data-theme", t);
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute("content", t === "dark" ? "#0c0b0a" : "#ffffff");
+})();
+</script>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-panel: #f7f8fa;
+  --bg-elev: #eef0f4;
+  --fg: #14151a;
+  --fg-dim: #4c515f;
+  --fg-faint: #848b9c;
+  --rule: rgba(20, 21, 26, 0.085);
+  --rule-strong: rgba(20, 21, 26, 0.17);
+  --accent: #6c5ce7;
+  --accent-solid: #6c5ce7;
+  --accent-2: #0ea5e9;
+  --accent-3: #168053;
+  --warn: #9a6715;
+  --grid-line: rgba(20, 21, 26, 0.045);
+  --shadow-card: 0 18px 46px rgba(20, 21, 26, 0.06);
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+html[data-theme="dark"] {
+  --bg: #0c0b0a;
+  --bg-panel: #131210;
+  --bg-elev: #1a1816;
+  --fg: #f2efe9;
+  --fg-dim: #b4afa6;
+  --fg-faint: #78736a;
+  --rule: rgba(255, 255, 255, 0.085);
+  --rule-strong: rgba(255, 255, 255, 0.16);
+  --accent: #a596ff;
+  --accent-solid: #7457ec;
+  --accent-2: #38bdf8;
+  --accent-3: #6fd3a4;
+  --warn: #e6bc6a;
+  --grid-line: rgba(255, 255, 255, 0.032);
+  --shadow-card: 0 24px 60px rgba(0, 0, 0, 0.30);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--bg); color: var(--fg); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--bg); color: var(--fg); overflow-x: hidden; transition: background 220ms ease, color 220ms ease; }
+a { color: inherit; text-decoration: none; }
+
+.draft-grid {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 80% 65% at 50% 18%, #000 10%, transparent 82%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 65% at 50% 18%, #000 10%, transparent 82%);
+}
+.ambient-glow {
+  position: fixed; inset: 0 0 auto 0; height: 480px; pointer-events: none; z-index: 0;
+  background: radial-gradient(56% 85% at 52% 10%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 72%);
+}
+
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 56px; z-index: 40;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--rule);
+}
+.topbar-inner {
+  max-width: 1240px; height: 100%; margin: 0 auto; padding: 0 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+.brand-mark { display: block; width: 20px; height: auto; color: var(--fg); overflow: visible; }
+.brand-sep { color: var(--fg-faint); font-weight: 400; }
+.brand-sub { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--accent); font-weight: 500; }
+.top-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.navlink {
+  font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--fg-dim); padding: 5px 9px; border-radius: 6px; transition: color 0.15s, background 0.15s;
+}
+.navlink:hover, .navlink.active { color: var(--fg); background: var(--bg-elev); }
+.navlink.active { color: var(--accent); }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 32px; min-width: 32px; padding: 0 9px; border: 1px solid var(--rule); border-radius: 6px;
+  background: none; color: var(--fg-dim); font-family: var(--mono); font-size: 11.5px; cursor: pointer;
+}
+.icon-btn:hover { color: var(--fg); border-color: var(--rule-strong); background: var(--bg-elev); }
+.icon-btn svg { width: 14px; height: 14px; }
+
+.page { position: relative; z-index: 2; max-width: 1160px; margin: 0 auto; padding: 92px 24px 64px; }
+
+.dl-hero {
+  background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 16px;
+  padding: 36px; box-shadow: var(--shadow-card);
+  display: grid; grid-template-columns: 1.25fr 0.95fr; gap: 32px; align-items: center;
+}
+@media (max-width: 860px) { .dl-hero { grid-template-columns: 1fr; padding: 24px; } }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent); margin: 0 0 12px;
+}
+.eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+h1 { margin: 0 0 12px; font-size: clamp(28px, 3.6vw, 40px); line-height: 1.18; letter-spacing: -0.03em; }
+.lead { margin: 0 0 22px; color: var(--fg-dim); font-size: 15.5px; line-height: 1.68; }
+
+.primary-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 9px; padding: 12px 20px; border-radius: 9px;
+  background: var(--accent-solid); color: #ffffff; font-weight: 600; font-size: 14.5px;
+  border: 1px solid transparent; transition: transform 0.14s, opacity 0.14s;
+}
+.btn-primary:hover { transform: translateY(-1px); opacity: 0.94; }
+.btn-secondary {
+  display: inline-flex; align-items: center; gap: 8px; padding: 11px 16px; border-radius: 9px;
+  background: var(--bg); color: var(--fg); font-weight: 500; font-size: 14px;
+  border: 1px solid var(--rule-strong); transition: background 0.14s;
+}
+.btn-secondary:hover { background: var(--bg-elev); }
+
+.meta-line {
+  display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+  font-family: var(--mono); font-size: 12px; color: var(--fg-faint);
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent); font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+}
+.pill.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+
+.sys-switch {
+  background: var(--bg); border: 1px solid var(--rule); border-radius: 12px; padding: 20px;
+}
+.sys-switch h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: var(--fg-dim); }
+.spec-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 13.5px; color: var(--fg-dim); }
+.spec-list li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dashed var(--rule); padding-bottom: 8px; }
+.spec-list li:last-child { border-bottom: none; padding-bottom: 0; }
+.spec-list code { font-family: var(--mono); font-size: 12px; color: var(--fg); }
+
+.os-grid {
+  margin-top: 28px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+}
+@media (max-width: 960px) { .os-grid { grid-template-columns: 1fr; } }
+.os-card {
+  background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 14px; padding: 24px;
+  display: flex; flex-direction: column; gap: 14px; transition: border-color 0.15s;
+}
+.os-card.detected { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.os-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.os-title { font-size: 18px; font-weight: 700; margin: 0; }
+.os-sub { font-size: 13px; color: var(--fg-dim); margin: 0; line-height: 1.55; }
+.pkg-list { display: flex; flex-direction: column; gap: 8px; }
+.pkg-link {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--rule);
+  font-size: 13.5px; font-weight: 500; transition: border-color 0.14s, background 0.14s;
+}
+.pkg-link:hover { border-color: var(--accent); background: var(--bg-elev); }
+.pkg-meta { font-family: var(--mono); font-size: 11.5px; color: var(--fg-faint); }
+
+.install-tip {
+  margin-top: auto; padding: 12px; border-radius: 8px; background: var(--bg-elev);
+  font-size: 12.5px; color: var(--fg-dim); line-height: 1.6;
+}
+.install-tip code {
+  display: block; margin-top: 6px; padding: 7px 9px; border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--rule); font-family: var(--mono); font-size: 11.5px;
+  color: var(--fg); overflow-x: auto; user-select: all;
+}
+
+.notes-section {
+  margin-top: 28px; display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 20px;
+}
+@media (max-width: 860px) { .notes-section { grid-template-columns: 1fr; } }
+.card-box {
+  background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 14px; padding: 24px;
+}
+.card-box h3 { margin: 0 0 12px; font-size: 16px; font-weight: 700; }
+.release-body {
+  margin: 0; font-family: var(--sans); font-size: 13.5px; line-height: 1.7;
+  color: var(--fg-dim); white-space: pre-wrap;
+}
+.sums-pre {
+  margin: 0; padding: 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--rule);
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.55; color: var(--fg-dim);
+  overflow-x: auto; max-height: 240px;
+}
+
+.site-footer {
+  margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--rule);
+  display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+  font-size: 13px; color: var(--fg-faint);
+}
+.footer-links { display: flex; gap: 18px; }
+.footer-links a:hover { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="draft-grid" aria-hidden="true"></div>
+<div class="ambient-glow" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html" aria-label="AsterLab 首页">
+      <svg class="brand-mark" viewBox="0 0 1024 896.711" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+        <path d="M 0 528.588 L 127.468 528.588 C 170.4 528.588 209.641 504.316 228.814 465.904 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 939.048 896.711 L 939.048 288.031 C 939.048 242.969 921.148 199.754 889.285 167.891 C 824.897 103.503 733.474 74.007 643.596 88.624 C 553.719 103.241 476.354 160.187 435.688 241.661 L 304.823 503.843 C 271.271 571.064 202.598 613.539 127.468 613.539 L 0 613.539 L 0 528.588 Z"/>
+        <path d="M 0 670.174 L 127.468 670.174 C 224.064 670.174 312.357 615.563 355.496 529.136 L 486.36 266.953 C 518.893 201.775 580.785 156.217 652.687 144.524 C 724.589 132.83 797.728 156.427 849.238 207.937 C 870.48 229.179 882.414 257.99 882.414 288.031 L 882.414 896.711 L 797.462 896.711 L 797.462 288.031 C 797.462 280.52 794.479 273.318 789.168 268.007 C 756.974 235.813 711.263 221.065 666.324 228.374 C 621.385 235.682 582.703 264.156 562.37 304.892 L 431.506 567.074 C 373.987 682.311 256.262 755.125 127.468 755.125 L 0 755.125 L 0 670.174 Z"/>
+        <path d="M 0 811.76 L 127.468 811.76 C 277.728 811.76 415.073 726.81 482.179 592.367 L 559.389 437.678 C 586.62 383.121 652.154 359.912 707.652 385.168 C 727.858 394.364 740.828 414.516 740.828 436.716 L 740.828 896.711 L 655.876 896.711 L 655.876 434.59 L 558.188 630.306 C 476.703 793.558 309.926 896.711 127.468 896.711 L 0 896.711 L 0 811.76 Z"/>
+      </svg>
+      <span>AsterLab</span>
+      <span class="brand-sep">/</span>
+      <span class="brand-sub">Download</span>
+    </a>
+    <nav class="top-nav" aria-label="主导航">
+      <a class="navlink" href="index.html">首页</a>
+      <a class="navlink active" href="download.html">下载客户端</a>
+      <a class="navlink" href="https://docs.asterlab.party/">Docs</a>
+      <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">AsterML</a>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="切换明暗主题">◐</button>
+      <a class="icon-btn" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener" aria-label="GitHub">
+        <svg viewBox="0 0 98 96" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.852 3.316 2.362C83.714 89.39 97.707 70.973 97.707 49.217 97.707 22 75.788 0 48.854 0z"/></svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+  <section class="dl-hero">
+    <div>
+      <p class="eyebrow"><span class="eyebrow-dot"></span>Pure-Go Native Desktop + CLI · Local-First Vault</p>
+      <h1>下载 AsterLab 桌面端</h1>
+      <p class="lead">零外部运行库、零数据库锁库，纯文本 <code>.asterml</code> 本地实验台。一次安装，支持 Windows、macOS（Apple Silicon &amp; Intel）与 Linux 桌面工作台及命令行 CLI。</p>
+      <div class="primary-actions">
+        <a class="btn-primary" id="heroPrimaryBtn" href="https://github.com/LLLin000/AsterLab/releases" target="_blank" rel="noopener">
+          <span id="heroPrimaryLabel">前往 GitHub Releases 获取最新版</span> →
+        </a>
+        <a class="btn-secondary" id="heroSecondaryBtn" href="https://github.com/LLLin000/AsterLab/releases" target="_blank" rel="noopener" style="display:none;">
+          <span id="heroSecondaryLabel">便携包</span>
+        </a>
+      </div>
+      <div class="meta-line">
+        <span class="pill" id="verBadge">正在获取版本…</span>
+        <span class="pill warn" id="signBadge">Preview · 未代码签名</span>
+        <span id="releaseDateText">数据来源：GitHub Releases</span>
+      </div>
+    </div>
+
+    <aside class="sys-switch" aria-label="运行环境与版本信息">
+      <h2>本机检测与发行说明</h2>
+      <ul class="spec-list">
+        <li><span>当前检测平台</span><code id="detectedOS">检测中…</code></li>
+        <li><span>最新版本号</span><code id="latestTag">—</code></li>
+        <li><span>发布渠道</span><code id="latestChannel">—</code></li>
+        <li><span>内置科学核心</span><code>Pure-Go astercore (ARRIVE / ΔΔCq)</code></li>
+        <li><span>存储格式</span><code>.asterml 纯文本单真源</code></li>
+      </ul>
+    </aside>
+  </section>
+
+  <section class="os-grid" aria-label="全平台安装包">
+    <!-- Windows -->
+    <article class="os-card" id="card-windows">
+      <div class="os-head">
+        <h2 class="os-title">Windows</h2>
+        <span class="pill">Windows 10 / 11 (x64)</span>
+      </div>
+      <p class="os-sub">独立 Pure-Go 安装包与便携压缩包，内置同目录原位升级、`.asterml` 双击文件关联及 `asterlab.exe` CLI。</p>
+      <div class="pkg-list" id="pkgs-windows">
+        <a class="pkg-link" href="https://github.com/LLLin000/AsterLab/releases" target="_blank" rel="noopener">
+          <span>标准安装程序 (.exe)</span>
+          <span class="pkg-meta">Releases 查看</span>
+        </a>
+      </div>
+      <div class="install-tip">
+        <strong>首次运行提示：</strong>当前预发布版暂未附带商业代码签名，若遇 Windows SmartScreen 提示，点击「更多信息 → 仍要运行」即可。后续更新可在软件内 <b>设置 → 关于 AsterLab</b> 一键原位完成。
+      </div>
+    </article>
+
+    <!-- macOS -->
+    <article class="os-card" id="card-macos">
+      <div class="os-head">
+        <h2 class="os-title">macOS</h2>
+        <span class="pill">macOS 12+ · Universal</span>
+      </div>
+      <p class="os-sub">单包内建 Apple Silicon (M1–M4) 与 Intel 双架构（Universal），包含 `AsterLab.app` 与 `.asterml` 文稿关联。</p>
+      <div class="pkg-list" id="pkgs-macos">
+        <a class="pkg-link" href="https://github.com/LLLin000/AsterLab/releases" target="_blank" rel="noopener">
+          <span>通用磁盘映像 (.dmg)</span>
+          <span class="pkg-meta">Releases 查看</span>
+        </a>
+      </div>
+      <div class="install-tip">
+        <strong>首次打开（未公证阶段）：</strong>拖入「应用程序」后，首次右键点击 <b>AsterLab.app → 打开</b>；若被 Gatekeeper 拦截，在终端执行一次：
+        <code>xattr -cr /Applications/AsterLab.app</code>
+      </div>
+    </article>
+
+    <!-- Linux -->
+    <article class="os-card" id="card-linux">
+      <div class="os-head">
+        <h2 class="os-title">Linux</h2>
+        <span class="pill">x86_64 &amp; ARM64</span>
+      </div>
+      <p class="os-sub">提供 Ubuntu/Debian 原生 `.deb` 与通用绿色压缩包（含桌面图标与 `.asterml` MIME 注册脚本）。</p>
+      <div class="pkg-list" id="pkgs-linux">
+        <a class="pkg-link" href="https://github.com/LLLin000/AsterLab/releases" target="_blank" rel="noopener">
+          <span>Ubuntu / Debian (.deb) &amp; .tar.gz</span>
+          <span class="pkg-meta">Releases 查看</span>
+        </a>
+      </div>
+      <div class="install-tip">
+        <strong>终端快速安装：</strong>`.deb` 包直接运行 <code>sudo apt install ./AsterLab-MyGo-*.deb</code>
+        便携版解压后执行目录内的 <code>./install.sh</code> 即可添加到应用启动器。
+      </div>
+    </article>
+  </section>
+
+  <section class="notes-section">
+    <div class="card-box">
+      <h3>更新日志 (Release Notes)</h3>
+      <pre class="release-body" id="releaseNotes">正在从 GitHub Releases 加载最新更新说明…
+您也可以直接访问：https://github.com/LLLin000/AsterLab/releases</pre>
+    </div>
+    <div class="card-box">
+      <h3>SHA256 完整性校验</h3>
+      <pre class="sums-pre" id="sumsBox">正在加载 SHA256SUMS.txt…</pre>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <span>© 2026 AsterLab · Local-First `.asterml` Scientific Workbench</span>
+    <div class="footer-links">
+      <a href="index.html">产品首页</a>
+      <a href="https://docs.asterlab.party/">工程手册 Docs</a>
+      <a href="https://github.com/LLLin000/AsterLab/releases" target="_blank" rel="noopener">全部历史版本</a>
+      <a href="https://github.com/LLLin000/AsterLab/issues" target="_blank" rel="noopener">问题反馈</a>
+    </div>
+  </footer>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const rootEl = document.documentElement;
+  function saveTheme(next) {
+    rootEl.setAttribute("data-theme", next);
+    localStorage.setItem("asterlab-docs-theme", next);
+    if (location.hostname === "asterlab.party" || location.hostname.endsWith(".asterlab.party")) {
+      document.cookie = "asterlab_theme=" + next + "; domain=.asterlab.party; path=/; max-age=31536000; SameSite=Lax";
+    }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
+  }
+  const cookieMatch = document.cookie.match(/(?:^|;\s*)asterlab_theme=(light|dark)\b/);
+  saveTheme((cookieMatch && cookieMatch[1]) || localStorage.getItem("asterlab-docs-theme") || "light");
+  document.getElementById("themeBtn").addEventListener("click", () => {
+    saveTheme(rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+
+  function detectPlatform() {
+    const ua = navigator.userAgent || "";
+    const plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+    const raw = (ua + " " + plat).toLowerCase();
+    if (raw.includes("win")) return { os: "windows", label: "Windows x64" };
+    if (raw.includes("mac") || raw.includes("darwin")) return { os: "macos", label: "macOS (Universal arm64 + x64)" };
+    if (raw.includes("linux") || raw.includes("x11")) {
+      const arm = raw.includes("aarch64") || raw.includes("arm64");
+      return { os: "linux", label: arm ? "Linux (ARM64)" : "Linux (x86_64)" };
+    }
+    return { os: "windows", label: "未知平台（默认显示全平台）" };
+  }
+
+  function fmtSize(bytes) {
+    if (!bytes || bytes <= 0) return "";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  const detected = detectPlatform();
+  document.getElementById("detectedOS").textContent = detected.label;
+  const activeCard = document.getElementById("card-" + detected.os);
+  if (activeCard) activeCard.classList.add("detected");
+
+  const API_URL = "https://api.github.com/repos/LLLin000/AsterLab/releases?per_page=8";
+  fetch(API_URL, { headers: { Accept: "application/vnd.github+json" } })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(list => {
+      const rel = (list || []).find(x => !x.draft);
+      if (!rel) return;
+
+      document.getElementById("verBadge").textContent = rel.tag_name;
+      document.getElementById("latestTag").textContent = rel.tag_name;
+      document.getElementById("latestChannel").textContent = rel.prerelease ? "Pre-release (预览版)" : "Stable (稳定版)";
+      if (rel.published_at) {
+        document.getElementById("releaseDateText").textContent = "发布于 " + rel.published_at.slice(0, 10);
+      }
+      if (rel.body) {
+        document.getElementById("releaseNotes").textContent = rel.body;
+      }
+
+      const assets = rel.assets || [];
+      const findOne = fn => assets.find(a => fn(a.name.toLowerCase()));
+      const winSetup = findOne(n => n.includes("win-x64") && n.endsWith("setup.exe"));
+      const winZip = findOne(n => n.includes("win-x64") && n.endsWith(".zip"));
+      const macDmg = findOne(n => n.includes("macos") && n.endsWith(".dmg"));
+      const macZip = findOne(n => n.includes("macos") && n.endsWith(".zip"));
+      const linDeb = findOne(n => n.includes("linux-amd64") && n.endsWith(".deb"));
+      const linX64 = findOne(n => n.includes("linux-x64") && n.endsWith(".tar.gz"));
+      const linArm = findOne(n => n.includes("linux-arm64") && n.endsWith(".tar.gz"));
+      const sums = findOne(n => n === "sha256sums.txt");
+
+      function renderPkgs(elId, rows, fallbackHint) {
+        const el = document.getElementById(elId);
+        const valid = rows.filter(r => r.asset);
+        if (valid.length === 0) {
+          el.innerHTML = `<a class="pkg-link" href="${rel.html_url}" target="_blank" rel="noopener"><span>${fallbackHint}</span><span class="pkg-meta">前往 GitHub 查看</span></a>`;
+          return;
+        }
+        el.innerHTML = valid.map(r => `
+          <a class="pkg-link" href="${r.asset.browser_download_url}" rel="noopener">
+            <span>${r.title}</span>
+            <span class="pkg-meta">${fmtSize(r.asset.size)}</span>
+          </a>
+        `).join("");
+      }
+
+      renderPkgs("pkgs-windows", [
+        { title: "Windows 安装包 (.exe)", asset: winSetup },
+        { title: "Windows 便携压缩包 (.zip)", asset: winZip },
+      ], "该版本未附带 Windows 包");
+
+      renderPkgs("pkgs-macos", [
+        { title: "macOS 通用安装包 (.dmg)", asset: macDmg },
+        { title: "macOS 便携归档 (.zip)", asset: macZip },
+      ], "将在下次 Tag 自动构建上线 macOS 版");
+
+      renderPkgs("pkgs-linux", [
+        { title: "Ubuntu / Debian 安装包 (.deb)", asset: linDeb },
+        { title: "Linux x64 通用包 (.tar.gz)", asset: linX64 },
+        { title: "Linux ARM64 通用包 (.tar.gz)", asset: linArm },
+      ], "将在下次 Tag 自动构建上线 Linux 版");
+
+      const heroPrimary = document.getElementById("heroPrimaryBtn");
+      const heroPrimaryLbl = document.getElementById("heroPrimaryLabel");
+      const heroSec = document.getElementById("heroSecondaryBtn");
+      const heroSecLbl = document.getElementById("heroSecondaryLabel");
+
+      let primary = null, secondary = null;
+      if (detected.os === "macos" && macDmg) {
+        primary = { label: `下载 macOS 通用版 (${rel.tag_name})`, url: macDmg.browser_download_url };
+        if (macZip) secondary = { label: "下载 .zip 归档", url: macZip.browser_download_url };
+      } else if (detected.os === "linux" && (linDeb || linX64)) {
+        const first = detected.label.includes("ARM64") ? linArm : (linDeb || linX64);
+        const sec = linX64 && first !== linX64 ? linX64 : null;
+        if (first) primary = { label: `下载 Linux 版 (${rel.tag_name})`, url: first.browser_download_url };
+        if (sec) secondary = { label: "下载 .tar.gz 通用包", url: sec.browser_download_url };
+      } else if (winSetup) {
+        primary = { label: `下载 Windows 安装包 (${rel.tag_name})`, url: winSetup.browser_download_url };
+        if (winZip) secondary = { label: "便携版 .zip", url: winZip.browser_download_url };
+      }
+
+      if (primary) {
+        heroPrimary.href = primary.url;
+        heroPrimary.removeAttribute("target");
+        heroPrimaryLbl.textContent = primary.label;
+      } else {
+        heroPrimary.href = rel.html_url;
+        heroPrimaryLbl.textContent = `查看 ${rel.tag_name} 发布包`;
+      }
+      if (secondary) {
+        heroSec.href = secondary.url;
+        heroSecLbl.textContent = secondary.label;
+        heroSec.style.display = "inline-flex";
+      }
+
+      if (sums) {
+        fetch(sums.browser_download_url)
+          .then(r => r.text())
+          .then(txt => { document.getElementById("sumsBox").textContent = txt.trim(); })
+          .catch(() => {
+            document.getElementById("sumsBox").innerHTML = `<a href="${sums.browser_download_url}" target="_blank" rel="noopener">点击下载 SHA256SUMS.txt 校验文件</a>`;
+          });
+      }
+    })
+    .catch(() => {
+      document.getElementById("verBadge").textContent = "GitHub Releases";
+      document.getElementById("releaseNotes").textContent = "无法直连 GitHub API，请直接点击上方按钮前往 GitHub Releases 下载最新版本。";
+    });
+})();
+</script>
+</body>
+</html>
