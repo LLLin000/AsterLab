@@ -456,49 +456,168 @@ func canWriteDir(dir string) bool {
 	return true
 }
 
-const windowsReplaceScript = `param(
-    [int]$TargetPid,
-    [string]$UnpackedDir,
-    [string]$InstallDir,
-    [string]$ExeName,
-    [string]$StageDir
-)
-$ErrorActionPreference = 'Stop'
-for ($i = 0; $i -lt 40; $i++) {
-    if (-not (Get-Process -Id $TargetPid -ErrorAction SilentlyContinue)) { break }
-    Start-Sleep -Milliseconds 250
+func copyRegularFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(dst)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(dst)
+		return closeErr
+	}
+	return nil
 }
-if (Get-Process -Id $TargetPid -ErrorAction SilentlyContinue) {
-    Stop-Process -Id $TargetPid -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 400
-}
-Get-Process -Name 'mygo-run','asterlab' -ErrorAction SilentlyContinue | Where-Object {
-    $_.Path -and [System.IO.Path]::GetDirectoryName($_.Path).TrimEnd('\') -ieq $InstallDir.TrimEnd('\')
-} | ForEach-Object {
-    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-}
-Start-Sleep -Milliseconds 250
-Get-ChildItem -LiteralPath $UnpackedDir -File | ForEach-Object {
-    $src = $_.FullName
-    $dst = Join-Path $InstallDir $_.Name
-    for ($retry = 0; $retry -lt 25; $retry++) {
-        try {
-            Copy-Item -LiteralPath $src -Destination $dst -Force
-            break
-        } catch {
-            Start-Sleep -Milliseconds 300
-        }
-    }
-}
-$exePath = Join-Path $InstallDir $ExeName
-if (Test-Path -LiteralPath $exePath) {
-    Start-Process -FilePath $exePath -WorkingDirectory $InstallDir
-}
-Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction SilentlyContinue
-`
 
-// InstallAndScheduleRestart downloads the release archive or installer on Windows and launches
-// a background replacement/restart flow. Returns "zip" (in-place update) or "installer".
+func cleanupOldUpdatesDir(dir string) {
+	if dir == "" {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, ent := range entries {
+		if ent.IsDir() {
+			continue
+		}
+		name := ent.Name()
+		if strings.Contains(name, ".old") || strings.Contains(name, ".new.") {
+			p := filepath.Join(dir, name)
+			for i := 0; i < 3; i++ {
+				if err := os.Remove(p); err == nil || os.IsNotExist(err) {
+					break
+				}
+				time.Sleep(80 * time.Millisecond)
+			}
+		}
+	}
+}
+
+// CleanupOldUpdates removes leftover .old / .new staging files left behind by a prior
+// Windows in-place self-update or installer replacement. Call early in main().
+func CleanupOldUpdates() {
+	exePath, err := os.Executable()
+	if err != nil || exePath == "" {
+		return
+	}
+	cleanupOldUpdatesDir(filepath.Dir(exePath))
+}
+
+func validatePEBinary(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var hdr [2]byte
+	if _, err := io.ReadFull(f, hdr[:]); err != nil {
+		return err
+	}
+	if hdr[0] != 'M' || hdr[1] != 'Z' {
+		return fmt.Errorf("更新文件 %s 不是有效的 Windows 可执行程序", filepath.Base(path))
+	}
+	return nil
+}
+
+// applyDirectorySwap follows go-selfupdate's two-phase Windows atomic replacement:
+// stage as .new.<ts>, rename active files (even running EXEs) to .old.<ts>, rename .new -> target,
+// with full rollback if any step fails.
+func applyDirectorySwap(unpackedDir, installDir string) error {
+	entries, err := os.ReadDir(unpackedDir)
+	if err != nil {
+		return err
+	}
+	stamp := fmt.Sprintf("%d", time.Now().UnixNano())
+	type swapped struct {
+		dst    string
+		newTmp string
+		oldBak string
+		hadOld bool
+	}
+	var plan []swapped
+	for _, ent := range entries {
+		if ent.IsDir() {
+			continue
+		}
+		src := filepath.Join(unpackedDir, ent.Name())
+		if strings.HasSuffix(strings.ToLower(ent.Name()), ".exe") {
+			if err := validatePEBinary(src); err != nil {
+				return err
+			}
+		}
+		dst := filepath.Join(installDir, ent.Name())
+		newTmp := dst + ".new." + stamp
+		if err := copyRegularFile(src, newTmp); err != nil {
+			for _, p := range plan {
+				_ = os.Remove(p.newTmp)
+			}
+			return fmt.Errorf("写入暂存更新文件 %s 失败：%w", ent.Name(), err)
+		}
+		plan = append(plan, swapped{
+			dst:    dst,
+			newTmp: newTmp,
+			oldBak: dst + ".old." + stamp,
+		})
+	}
+	if len(plan) == 0 {
+		return fmt.Errorf("更新包内未包含可替换文件")
+	}
+
+	rollback := func(upto int) {
+		for i := upto; i >= 0; i-- {
+			p := plan[i]
+			_ = os.Remove(p.dst)
+			if p.hadOld {
+				_ = os.Rename(p.oldBak, p.dst)
+			}
+		}
+		for _, p := range plan {
+			_ = os.Remove(p.newTmp)
+		}
+	}
+
+	for i := range plan {
+		p := &plan[i]
+		if _, err := os.Stat(p.dst); err == nil {
+			var renameErr error
+			for attempt := 0; attempt < 5; attempt++ {
+				renameErr = os.Rename(p.dst, p.oldBak)
+				if renameErr == nil {
+					break
+				}
+				time.Sleep(150 * time.Millisecond)
+			}
+			if renameErr != nil {
+				rollback(i - 1)
+				return fmt.Errorf("无法重命名旧文件 %s：%w", filepath.Base(p.dst), renameErr)
+			}
+			p.hadOld = true
+		}
+		if err := os.Rename(p.newTmp, p.dst); err != nil {
+			if p.hadOld {
+				_ = os.Rename(p.oldBak, p.dst)
+			}
+			rollback(i - 1)
+			return fmt.Errorf("替换更新文件 %s 失败：%w", filepath.Base(p.dst), err)
+		}
+	}
+	return nil
+}
+
+// InstallAndScheduleRestart downloads and verifies the release archive on Windows, atomically swaps
+// the executables in-place inside the same folder (go-selfupdate .old pattern), and schedules a clean
+// detached relaunch after the current instance releases its single-instance lock.
 func InstallAndScheduleRestart(ctx context.Context, rel *ReleaseInfo, exePath string, pid int) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("当前系统请前往 GitHub Release 页面下载更新包")
@@ -523,21 +642,19 @@ func InstallAndScheduleRestart(ctx context.Context, rel *ReleaseInfo, exePath st
 		if _, err := os.Stat(filepath.Join(unpackedDir, "mygo-run.exe")); err != nil {
 			return "", fmt.Errorf("更新包内缺少 mygo-run.exe")
 		}
-		scriptPath := filepath.Join(stageDir, "apply-update.ps1")
-		if err := os.WriteFile(scriptPath, []byte(windowsReplaceScript), 0o644); err != nil {
+		if err := applyDirectorySwap(unpackedDir, installDir); err != nil {
 			return "", err
 		}
-		cmd := exec.Command("powershell.exe",
-			"-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
-			"-ExecutionPolicy", "Bypass", "-File", scriptPath,
-			"-TargetPid", strconv.Itoa(pid),
-			"-UnpackedDir", unpackedDir,
-			"-InstallDir", installDir,
-			"-ExeName", filepath.Base(exePath),
-			"-StageDir", stageDir,
+		_ = os.RemoveAll(stageDir)
+		// Wait briefly for current PID to exit and release RequestSingleInstanceLock before relaunch.
+		relaunchPS := fmt.Sprintf("for ($i=0;$i -lt 40;$i++){if(-not (Get-Process -Id %d -ErrorAction SilentlyContinue)){break};Start-Sleep -Milliseconds 150}; Start-Process -FilePath '%s' -WorkingDirectory '%s'",
+			pid,
+			strings.ReplaceAll(exePath, "'", "''"),
+			strings.ReplaceAll(installDir, "'", "''"),
 		)
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", relaunchPS)
 		if err := cmd.Start(); err != nil {
-			return "", fmt.Errorf("启动更新替换脚本失败：%w", err)
+			return "", fmt.Errorf("更新文件已就绪，请手动重启应用：%w", err)
 		}
 		return "zip", nil
 	}

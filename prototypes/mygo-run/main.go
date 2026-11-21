@@ -4618,6 +4618,7 @@ func toolsPage(c *ui.Context, a *app) {
 }
 
 func main() {
+	updater.CleanupOldUpdates()
 	// A startup-URL deep link (mygo-run.exe asterlab://run/…/well/…) takes
 	// precedence over the ASTERLAB_RUN_LINK automation hook. UX-IA-3.
 	runLink := deepLinkArg(os.Args[1:])

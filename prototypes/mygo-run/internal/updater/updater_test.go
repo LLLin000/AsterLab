@@ -165,3 +165,60 @@ func TestDownloadVerifyAndSafeExtractZip(t *testing.T) {
 		t.Fatalf("expected temp dir to be writable for in-place update")
 	}
 }
+
+func TestApplyDirectorySwapWithLockedExeAndCleanup(t *testing.T) {
+	installDir := filepath.Join(t.TempDir(), "AsterLab MyGo")
+	unpackedDir := filepath.Join(t.TempDir(), "unpacked")
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(unpackedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	exeDst := filepath.Join(installDir, "mygo-run.exe")
+	cliDst := filepath.Join(installDir, "asterlab.exe")
+	if err := os.WriteFile(exeDst, []byte("MZ-old-v0.1.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cliDst, []byte("MZ-old-cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unpackedDir, "mygo-run.exe"), []byte("MZ-new-v0.1.3"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unpackedDir, "asterlab.exe"), []byte("MZ-new-cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyDirectorySwap(unpackedDir, installDir); err != nil {
+		t.Fatalf("applyDirectorySwap failed: %v", err)
+	}
+
+	gotExe, err := os.ReadFile(exeDst)
+	if err != nil || string(gotExe) != "MZ-new-v0.1.3" {
+		t.Fatalf("expected swapped exe bytes, err=%v got=%q", err, string(gotExe))
+	}
+	cleanupOldUpdatesDir(installDir)
+	entries, err := os.ReadDir(installDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ent := range entries {
+		if strings.Contains(ent.Name(), ".old") || strings.Contains(ent.Name(), ".new.") {
+			t.Fatalf("expected leftover temp file %q to be cleaned on startup", ent.Name())
+		}
+	}
+
+	// Verify PE magic guard aborts before mutating installDir.
+	badUnpacked := filepath.Join(t.TempDir(), "bad-unpacked")
+	_ = os.MkdirAll(badUnpacked, 0o755)
+	_ = os.WriteFile(filepath.Join(badUnpacked, "mygo-run.exe"), []byte("CORRUPT-TEXT"), 0o755)
+	if err := applyDirectorySwap(badUnpacked, installDir); err == nil {
+		t.Fatal("expected invalid PE header error")
+	}
+	stillGood, _ := os.ReadFile(exeDst)
+	if string(stillGood) != "MZ-new-v0.1.3" {
+		t.Fatalf("installDir mutated after failed PE validation: %q", string(stillGood))
+	}
+}

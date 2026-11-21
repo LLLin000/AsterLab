@@ -27,19 +27,56 @@ SetOverwrite on
 
 Section "Install"
     SetShellVarContext current
-    ; Close any running AsterLab instance in the target folder so in-place upgrades overwrite cleanly.
-    IfFileExists "$INSTDIR\mygo-run.exe" 0 doneClose
-        DetailPrint "Closing running AsterLab instance for in-place upgrade..."
-        System::Call 'Kernel32::SetEnvironmentVariable(t "ASTERLAB_UPGRADE_DIR", t "$INSTDIR")'
-        nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$dir = [System.IO.Path]::GetFullPath($$env:ASTERLAB_UPGRADE_DIR).TrimEnd([char]92); Get-Process mygo-run,asterlab -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and [System.IO.Path]::GetDirectoryName($$_.Path).TrimEnd([char]92) -ieq $$dir } | ForEach-Object { $$null = $$_.CloseMainWindow(); if (-not $$_.WaitForExit(2000)) { Stop-Process -Id $$_.Id -Force -ErrorAction SilentlyContinue } }; $$exe = Join-Path $$dir mygo-run.exe; for ($$i=0; $$i -lt 20; $$i++) { try { if (Test-Path -LiteralPath $$exe) { $$fs = [System.IO.File]::Open($$exe, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None); $$fs.Close() }; break } catch { Start-Sleep -Milliseconds 250 } }"'
-    doneClose:
-    Delete "$INSTDIR\mygo-run.exe.old"
     SetOutPath "$INSTDIR"
+
+    ; Electron-Builder / NSIS mature in-place upgrade flow (pure Win32 + NSIS, zero WOW64 PowerShell traps):
+    ; 1) Ask running AsterLab to close gracefully, then force-terminate remaining locked processes.
+    IfFileExists "$INSTDIR\mygo-run.exe" 0 doneClose
+        DetailPrint "Closing running AsterLab processes..."
+        nsExec::Exec 'taskkill.exe /IM "mygo-run.exe"'
+        Sleep 700
+        nsExec::Exec 'taskkill.exe /F /T /IM "mygo-run.exe"'
+        nsExec::Exec 'taskkill.exe /F /T /IM "asterlab.exe"'
+        Sleep 400
+    doneClose:
+
+    ; 2) Clear read-only attributes and atomically move aside old binaries (.old) before unpacking.
+    ;    On Windows, Rename succeeds even if Explorer/AV holds a brief handle on an .exe.
+    Delete "$INSTDIR\mygo-run.exe.old"
+    Delete "$INSTDIR\asterlab.exe.old"
+    Delete "$INSTDIR\uninstall.exe.old"
+    IfFileExists "$INSTDIR\mygo-run.exe" 0 skipRenameExe
+        SetFileAttributes "$INSTDIR\mygo-run.exe" NORMAL
+        ClearErrors
+        Rename "$INSTDIR\mygo-run.exe" "$INSTDIR\mygo-run.exe.old"
+        IfErrors 0 skipRenameExe
+            ; Wait briefly if OS is still flushing process handles
+            StrCpy $0 0
+            waitLockLoop:
+                IntCmp $0 20 skipRenameExe skipRenameExe 0
+                Sleep 250
+                IntOp $0 $0 + 1
+                ClearErrors
+                Rename "$INSTDIR\mygo-run.exe" "$INSTDIR\mygo-run.exe.old"
+                IfErrors waitLockLoop skipRenameExe
+    skipRenameExe:
+    IfFileExists "$INSTDIR\asterlab.exe" 0 skipRenameCli
+        SetFileAttributes "$INSTDIR\asterlab.exe" NORMAL
+        Rename "$INSTDIR\asterlab.exe" "$INSTDIR\asterlab.exe.old"
+    skipRenameCli:
+    IfFileExists "$INSTDIR\uninstall.exe" 0 skipRenameUninst
+        SetFileAttributes "$INSTDIR\uninstall.exe" NORMAL
+        Rename "$INSTDIR\uninstall.exe" "$INSTDIR\uninstall.exe.old"
+    skipRenameUninst:
+
     File "..\prototypes\mygo-run\dist\mygo-run.exe"
     File "..\prototypes\mygo-run\dist\asterlab.exe"
     File "..\prototypes\mygo-run\dist\BUILD_INFO.txt"
     File "..\prototypes\mygo-run\assets\asterlab.ico"
     Delete "$INSTDIR\AsterLab-MyGo.bat"
+    Delete "$INSTDIR\mygo-run.exe.old"
+    Delete "$INSTDIR\asterlab.exe.old"
+    Delete "$INSTDIR\uninstall.exe.old"
 
     CreateDirectory "$SMPROGRAMS\AsterLab MyGo"
     CreateShortcut "$SMPROGRAMS\AsterLab MyGo\AsterLab MyGo.lnk" "$INSTDIR\mygo-run.exe" "" "$INSTDIR\asterlab.ico" 0
