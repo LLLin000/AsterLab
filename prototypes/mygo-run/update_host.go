@@ -217,11 +217,12 @@ func (a *app) triggerInstallUpdate() {
 	a.shell.Invalidate()
 
 	exePath, _ := os.Executable()
+	dataDir := workspaceDataDir()
 	pid := os.Getpid()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		_, err := updater.InstallAndScheduleRestart(ctx, rel, exePath, pid)
+		_, err := updater.InstallAndScheduleRestartWithState(ctx, rel, exePath, dataDir, pid)
 		a.runUpdateOnUI(func() {
 			a.updateBusy = false
 			if a.shell == nil {

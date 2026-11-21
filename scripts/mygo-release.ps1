@@ -34,6 +34,22 @@ foreach ($f in @($installer, $zip, (Join-Path $repoRoot 'prototypes\mygo-run\dis
     $name = [System.IO.Path]::GetFileName($f)
     "$h  $name ($len bytes)" | Out-File -FilePath $sumsPath -Append -Encoding utf8
 }
+$commit = (git -C $repoRoot rev-parse --short HEAD).Trim()
+$channel = if ($Version -match '-(rc|beta|alpha|dev|unsigned)') { 'prerelease' } else { 'stable' }
+$manifestPath = Join-Path $releaseDir 'release-manifest.json'
+@{
+    version    = $Version
+    tag        = "v$($Version -replace '-unsigned$','')"
+    channel    = $channel
+    commit     = $commit
+    builtAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    assets     = @{
+        setup = [System.IO.Path]::GetFileName($installer)
+        zip   = [System.IO.Path]::GetFileName($zip)
+        sums  = 'SHA256SUMS.txt'
+    }
+} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 Write-Output "installer: $installer"
 Write-Output "zip: $zip"
 Write-Output "sums: $sumsPath"
+Write-Output "manifest: $manifestPath"

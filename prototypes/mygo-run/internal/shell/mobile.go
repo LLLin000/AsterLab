@@ -737,7 +737,7 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 			maxScrim = 0.48
 		}
 		scrimAlpha := maxScrim * pAnim
-		backdrop := ui.Box(c.Key("mb-drawer-scrim")).Absolute().Fill().Background(ui.RGBA(0, 0, 0, scrimAlpha))
+		backdrop := ui.Box(c.Key("mb-drawer-scrim")).Absolute().Fill().Background(tok.Text.Alpha(scrimAlpha))
 		if s.MobileDrawer != "" && backdrop.Clicked() {
 			s.MobileDrawer = ""
 			s.MobileDrawerProgress = 0
@@ -752,7 +752,7 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 		}
 
 		sheet := ui.Column(c.Key("mb-sheet-"+activeKind)).Absolute().Top(0).Bottom(0).Width(sheetMaxW).
-			Shadow(0, 8, 32, 0, ui.RGBA(0, 0, 0, 0.16)).
+			Shadow(0, 8, 32, 0, tok.Text.Alpha(0.16)).
 			Translate(sheetOffsetX, 0)
 		theme.ApplyPanelGlass(sheet, tok, 0.45)
 		if isLeft {

@@ -1518,7 +1518,7 @@ func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
 									ui.Text(c, sp.ShortTitle).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).
 										SingleLine().Ellipsis("…")
 									ui.Text(c, fmt.Sprintf("%d×%d · %s", sp.DefaultRows, sp.DefaultCols, sp.TubeHint)).
-										FontSize(t.Rem(.78)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+										FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
 								})
 							})
 						})

@@ -1,0 +1,160 @@
+name: release
+
+# Automated tag-driven Pure-Go Windows release pipeline (optional Azure Trusted Signing).
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.1.4-unsigned)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark GitHub release as pre-release'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: sdk-and-go-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CJK font for PDF tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-droid-fallback
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+      - name: SDK & UI hygiene checks
+        run: |
+          python3 scripts/sdk/check.py
+          python3 scripts/ci/check_ui_hygiene.py
+      - name: Go build & full test suite
+        working-directory: prototypes/mygo-run
+        run: |
+          go build ./...
+          go test -count=1 ./internal/... ./cmd/... ./e2e
+          go test -count=1 -run '^TestObsidianVault|^TestV2WorkbenchVisualGate|^TestLocalPantryStore' .
+
+  build-windows:
+    name: build-and-package-windows
+    needs: verify
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          $rawTag = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.version }}' } else { '${{ github.ref_name }}' }
+          $cleanVer = $rawTag.TrimStart('v')
+          $hasSign = '${{ vars.ENABLE_AZURE_SIGN }}' -eq 'true'
+          if (-not $hasSign -and $cleanVer -notmatch 'unsigned') {
+            $pkgVer = "$cleanVer-unsigned"
+          } else {
+            $pkgVer = $cleanVer
+          }
+          $isPre = if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            '${{ inputs.prerelease }}'
+          } elseif ($rawTag -match '-' -or $cleanVer -match '^0\.') {
+            'true'
+          } else {
+            'false'
+          }
+          "tag=$rawTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$pkgVer" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "prerelease=$isPre" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build & Package Release Artifacts
+        run: ./scripts/mygo-release.ps1 -Version '${{ steps.meta.outputs.version }}'
+
+      - name: Sign binaries with Azure Trusted Signing (optional)
+        if: vars.ENABLE_AZURE_SIGN == 'true'
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          dotnet tool install --global dotnet-sign
+          $targets = @(
+            'prototypes/mygo-run/dist/mygo-run.exe',
+            'prototypes/mygo-run/dist/asterlab.exe',
+            "release/AsterLab-MyGo-${{ steps.meta.outputs.version }}-win-x64-setup.exe"
+          )
+          foreach ($f in $targets) {
+            dotnet sign code azure-key-vault `
+              --file $f `
+              --kvUri "${{ vars.AZURE_SIGN_URI }}" `
+              --certProfileName "${{ vars.AZURE_SIGN_PROFILE }}" `
+              --client-id "$env:AZURE_CLIENT_ID" `
+              --client-secret "$env:AZURE_CLIENT_SECRET" `
+              --tenant-id "$env:AZURE_TENANT_ID"
+          }
+
+      - name: Smoke-test packaged CLI
+        run: |
+          $tmp = Join-Path $env:TEMP ("smoke-" + [guid]::NewGuid().ToString("N").Substring(0,8))
+          Expand-Archive -LiteralPath "release/AsterLab-MyGo-${{ steps.meta.outputs.version }}-win-x64.zip" -DestinationPath $tmp -Force
+          $dir = Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1
+          & (Join-Path $dir.FullName 'asterlab.exe') tools --json | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "packaged asterlab.exe failed" }
+          Remove-Item -LiteralPath $tmp -Recurse -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asterlab-windows-release
+          if-no-files-found: error
+          path: |
+            release/AsterLab-MyGo-*-win-x64-setup.exe
+            release/AsterLab-MyGo-*-win-x64.zip
+            release/SHA256SUMS.txt
+            release/BUILD_INFO.txt
+            release/release-manifest.json
+
+  publish-github:
+    name: publish-release
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: asterlab-windows-release
+          path: release
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build-windows.outputs.tag }}
+          name: AsterLab ${{ needs.build-windows.outputs.tag }}
+          prerelease: ${{ needs.build-windows.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: |
+            release/AsterLab-MyGo-*-win-x64-setup.exe
+            release/AsterLab-MyGo-*-win-x64.zip
+            release/SHA256SUMS.txt
+            release/BUILD_INFO.txt
+            release/release-manifest.json

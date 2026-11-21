@@ -294,9 +294,10 @@ func workflowSpec() ModuleSpec {
 		edges, _ := data["edges"].([]any)
 		ui.Column(c).FillWidth().Gap(t.Space(1.5)).Padding(t.Space(3)).Radius(t.Radius).
 			Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Text(c, "流程").FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+			tok := theme.GetTokens(t)
+			ui.Text(c, "流程").FontSize(float32(tok.TextSection)).Bold().TextColor(t.Text)
 			ui.Text(c, fmt.Sprintf("%d 个步骤 · %d 条依赖", len(steps), len(edges))).
-				FontSize(t.Rem(.78)).TextColor(t.TextMuted).FontFeatures("tnum")
+				FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted).FontFeatures("tnum")
 			ui.Row(c).Wrap().Gap(t.Space(1)).Children(func() {
 				for _, step := range steps {
 					components.Badge(c, step)

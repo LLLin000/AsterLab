@@ -59,11 +59,13 @@ type ReleaseInfo struct {
 	PublishedAt string         `json:"published_at"`
 	Assets      []ReleaseAsset `json:"assets"`
 
-	ZipURL    string `json:"-"`
-	ZipName   string `json:"-"`
-	SetupURL  string `json:"-"`
-	SetupName string `json:"-"`
-	SumsURL   string `json:"-"`
+	ZipURL      string           `json:"-"`
+	ZipName     string           `json:"-"`
+	SetupURL    string           `json:"-"`
+	SetupName   string           `json:"-"`
+	SumsURL     string           `json:"-"`
+	ManifestURL string           `json:"-"`
+	Manifest    *ReleaseManifest `json:"-"`
 }
 
 // CheckResult is returned by CheckForUpdate.
@@ -212,6 +214,8 @@ func populateMatchedAssets(rel *ReleaseInfo) {
 		switch {
 		case lower == "sha256sums.txt":
 			rel.SumsURL = a.BrowserDownloadURL
+		case lower == "release-manifest.json":
+			rel.ManifestURL = a.BrowserDownloadURL
 		case strings.Contains(lower, "win-x64") && strings.HasSuffix(lower, ".zip"):
 			rel.ZipURL = a.BrowserDownloadURL
 			rel.ZipName = a.Name
@@ -290,8 +294,31 @@ func CheckForUpdate(ctx context.Context, currentVersion string, includePrereleas
 		return res, nil
 	}
 	populateMatchedAssets(best)
+	if best.ManifestURL != "" && validateDownloadURL(best.ManifestURL) == nil {
+		if mReq, mErr := http.NewRequestWithContext(ctx, http.MethodGet, best.ManifestURL, nil); mErr == nil {
+			mReq.Header.Set("User-Agent", "AsterLab-Desktop/"+NormalizeVersion(currentVersion))
+			if mResp, mErr := client.Do(mReq); mErr == nil {
+				if mResp.StatusCode >= 200 && mResp.StatusCode < 300 {
+					var mf ReleaseManifest
+					if json.NewDecoder(io.LimitReader(mResp.Body, 256<<10)).Decode(&mf) == nil {
+						best.Manifest = &mf
+					}
+				}
+				_ = mResp.Body.Close()
+			}
+		}
+	}
 	res.Latest = best
 	res.HasUpdate = CompareVersions(best.TagName, currentVersion) > 0
+	if res.HasUpdate && best.Manifest != nil {
+		for _, yanked := range best.Manifest.YankedVersions {
+			if CompareVersions(yanked, best.TagName) == 0 {
+				res.HasUpdate = false
+				res.Summary = fmt.Sprintf("版本 %s 已撤回推送，保持当前版本", best.TagName)
+				return res, nil
+			}
+		}
+	}
 	if res.HasUpdate {
 		res.Summary = fmt.Sprintf("发现新版本 %s", best.TagName)
 	} else {
@@ -533,10 +560,10 @@ func validatePEBinary(path string) error {
 // applyDirectorySwap follows go-selfupdate's two-phase Windows atomic replacement:
 // stage as .new.<ts>, rename active files (even running EXEs) to .old.<ts>, rename .new -> target,
 // with full rollback if any step fails.
-func applyDirectorySwap(unpackedDir, installDir string) error {
+func applyDirectorySwap(unpackedDir, installDir string) (string, error) {
 	entries, err := os.ReadDir(unpackedDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	stamp := fmt.Sprintf("%d", time.Now().UnixNano())
 	type swapped struct {
@@ -553,7 +580,7 @@ func applyDirectorySwap(unpackedDir, installDir string) error {
 		src := filepath.Join(unpackedDir, ent.Name())
 		if strings.HasSuffix(strings.ToLower(ent.Name()), ".exe") {
 			if err := validatePEBinary(src); err != nil {
-				return err
+				return "", err
 			}
 		}
 		dst := filepath.Join(installDir, ent.Name())
@@ -562,7 +589,7 @@ func applyDirectorySwap(unpackedDir, installDir string) error {
 			for _, p := range plan {
 				_ = os.Remove(p.newTmp)
 			}
-			return fmt.Errorf("写入暂存更新文件 %s 失败：%w", ent.Name(), err)
+			return "", fmt.Errorf("写入暂存更新文件 %s 失败：%w", ent.Name(), err)
 		}
 		plan = append(plan, swapped{
 			dst:    dst,
@@ -571,7 +598,7 @@ func applyDirectorySwap(unpackedDir, installDir string) error {
 		})
 	}
 	if len(plan) == 0 {
-		return fmt.Errorf("更新包内未包含可替换文件")
+		return "", fmt.Errorf("更新包内未包含可替换文件")
 	}
 
 	rollback := func(upto int) {
@@ -600,7 +627,7 @@ func applyDirectorySwap(unpackedDir, installDir string) error {
 			}
 			if renameErr != nil {
 				rollback(i - 1)
-				return fmt.Errorf("无法重命名旧文件 %s：%w", filepath.Base(p.dst), renameErr)
+				return "", fmt.Errorf("无法重命名旧文件 %s：%w", filepath.Base(p.dst), renameErr)
 			}
 			p.hadOld = true
 		}
@@ -609,16 +636,21 @@ func applyDirectorySwap(unpackedDir, installDir string) error {
 				_ = os.Rename(p.oldBak, p.dst)
 			}
 			rollback(i - 1)
-			return fmt.Errorf("替换更新文件 %s 失败：%w", filepath.Base(p.dst), err)
+			return "", fmt.Errorf("替换更新文件 %s 失败：%w", filepath.Base(p.dst), err)
 		}
 	}
-	return nil
+	return stamp, nil
 }
 
-// InstallAndScheduleRestart downloads and verifies the release archive on Windows, atomically swaps
-// the executables in-place inside the same folder (go-selfupdate .old pattern), and schedules a clean
-// detached relaunch after the current instance releases its single-instance lock.
+// InstallAndScheduleRestart preserves compatibility for callers without an explicit dataDir.
 func InstallAndScheduleRestart(ctx context.Context, rel *ReleaseInfo, exePath string, pid int) (string, error) {
+	return InstallAndScheduleRestartWithState(ctx, rel, exePath, "", pid)
+}
+
+// InstallAndScheduleRestartWithState downloads and verifies the release archive on Windows,
+// backs up local data, atomically swaps binaries in-place (preserving .old.<stamp> for
+// boot-watchdog rollback), and schedules a detached relaunch.
+func InstallAndScheduleRestartWithState(ctx context.Context, rel *ReleaseInfo, exePath, dataDir string, pid int) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("当前系统请前往 GitHub Release 页面下载更新包")
 	}
@@ -642,9 +674,18 @@ func InstallAndScheduleRestart(ctx context.Context, rel *ReleaseInfo, exePath st
 		if _, err := os.Stat(filepath.Join(unpackedDir, "mygo-run.exe")); err != nil {
 			return "", fmt.Errorf("更新包内缺少 mygo-run.exe")
 		}
-		if err := applyDirectorySwap(unpackedDir, installDir); err != nil {
+		BackupLocalData(dataDir, rel.TagName)
+		stamp, err := applyDirectorySwap(unpackedDir, installDir)
+		if err != nil {
 			return "", err
 		}
+		SaveUpdateState(dataDir, UpdateState{
+			PendingVersion:  rel.TagName,
+			PreviousVersion: Version,
+			BackupStamp:     stamp,
+			BootAttempts:    0,
+			SwappedAt:       time.Now().UTC().Format(time.RFC3339),
+		})
 		_ = os.RemoveAll(stageDir)
 		// Wait briefly for current PID to exit and release RequestSingleInstanceLock before relaunch.
 		relaunchPS := fmt.Sprintf("for ($i=0;$i -lt 40;$i++){if(-not (Get-Process -Id %d -ErrorAction SilentlyContinue)){break};Start-Sleep -Milliseconds 150}; Start-Process -FilePath '%s' -WorkingDirectory '%s'",
@@ -663,6 +704,7 @@ func InstallAndScheduleRestart(ctx context.Context, rel *ReleaseInfo, exePath st
 		if err != nil {
 			return "", err
 		}
+		BackupLocalData(dataDir, rel.TagName)
 		var args []string
 		if exePath != "" {
 			// Pre-select the running install folder (/D must be last without quotes in NSIS CLI).

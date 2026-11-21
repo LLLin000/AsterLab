@@ -46,7 +46,7 @@ func TestWindowsInPlaceSwapWhileExecutableMapped(t *testing.T) {
 		t.Fatalf("CreateFile lock simulation: %v", err)
 	}
 
-	swapErr := applyDirectorySwap(unpackedDir, installDir)
+	_, swapErr := applyDirectorySwap(unpackedDir, installDir)
 	_ = syscall.CloseHandle(h)
 	if swapErr != nil {
 		t.Fatalf("applyDirectorySwap while PE-mapped failed: %v", swapErr)

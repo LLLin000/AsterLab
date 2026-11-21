@@ -810,6 +810,28 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 				},
 			},
 			{
+				ID:    "diag-feedback",
+				Title: "诊断、日志与问题反馈",
+				Items: []components.SettingsItem{
+					{
+						ID:          "diag-actions",
+						Title:       "反馈异常或导出脱敏诊断包",
+						Description: "导出只含脱敏运行日志与异常堆栈的诊断 ZIP（绝不包含 .asterml 实验内容），或打开反馈提交弹窗。",
+						Keywords:    []string{"feedback", "bug", "log", "crash", "diagnostic", "反馈", "日志", "诊断"},
+						Build: func(c *ui.Context) {
+							ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+								if components.Button(c, "导出诊断包 (.zip)", components.ButtonSecondary).Clicked() && s.OnExportDiagBundle != nil {
+									s.OnExportDiagBundle()
+								}
+								if components.Button(c, "反馈问题 / 建议", components.ButtonPrimary).Clicked() {
+									s.FeedbackOpen = true
+								}
+							})
+						},
+					},
+				},
+			},
+			{
 				ID:    "brand-identity",
 				Title: "品牌标识与架构",
 				Items: []components.SettingsItem{

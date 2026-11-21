@@ -62,6 +62,10 @@ jobs:
         if: env.RUN_HEAVY == '1'
         run: python3 scripts/sdk/check.py
 
+      - name: UI design-system & typography hygiene check
+        if: env.RUN_HEAVY == '1'
+        run: python3 scripts/ci/check_ui_hygiene.py
+
       - name: Go build & tests (Pure-Go Vault + astercore + desktop)
         if: env.RUN_HEAVY == '1'
         working-directory: prototypes/mygo-run

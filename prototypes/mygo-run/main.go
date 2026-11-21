@@ -7,6 +7,7 @@ import (
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/blockui"
 	"asterlab-mygo-prototype/internal/designer"
+	"asterlab-mygo-prototype/internal/diag"
 	"asterlab-mygo-prototype/internal/notebook"
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/protocol"
@@ -4618,10 +4619,19 @@ func toolsPage(c *ui.Context, a *app) {
 }
 
 func main() {
-	updater.CleanupOldUpdates()
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
+	rollbackNotice := updater.EvaluateStartupWatchdog(workspaceDataDir(), updater.Version, exeDir)
+	if dir := workspaceDataDir(); dir != "" {
+		_ = diag.Init(filepath.Join(dir, "logs"))
+		defer diag.Close()
+	}
+	defer diag.RecoverAndLog("main")
+
 	// A startup-URL deep link (mygo-run.exe asterlab://run/…/well/…) takes
 	// precedence over the ASTERLAB_RUN_LINK automation hook. UX-IA-3.
 	runLink := deepLinkArg(os.Args[1:])
+	startupAsterml := astermlFileArg(os.Args[1:])
 	if len(os.Args) > 1 && os.Args[1] == "--inspect-tree" {
 		if err := runInspectTree(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -5246,9 +5256,12 @@ func main() {
 	// error as a startup link. UX-IA-3, UX-P5.
 	mygo.App.OnSecondInstance(func(args []string, _ string) {
 		link := deepLinkArg(args)
+		extFile := astermlFileArg(args)
 		mygo.RunOnMain(func() {
 			if link != "" {
 				a.openRunWellLink(link)
+			} else if extFile != "" {
+				a.openExternalAstermlFile(extFile)
 			}
 			if a.shell != nil {
 				a.shell.Invalidate()
@@ -5273,10 +5286,19 @@ func main() {
 		}
 		a.windowReady = true
 		a.wireUpdaterCallbacks()
+		a.wireFeedbackAndWelcome(rollbackNotice)
+		if startupAsterml != "" {
+			a.openExternalAstermlFile(startupAsterml)
+		}
 		a.shell.Quit()
 		a.preload()
 		a.startExternalSyncLoop()
 		a.startAutoUpdateCheck()
+		go func() {
+			defer diag.RecoverAndLog("boot-watchdog")
+			time.Sleep(10 * time.Second)
+			updater.MarkBootHealthy(workspaceDataDir(), exeDir)
+		}()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

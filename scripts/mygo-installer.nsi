@@ -29,6 +29,16 @@ Section "Install"
     SetShellVarContext current
     SetOutPath "$INSTDIR"
 
+    ; Pre-flight write permission check before killing or unpacking files.
+    ClearErrors
+    FileOpen $1 "$INSTDIR\.asterlab-install-probe.tmp" w
+    IfErrors 0 probeWritableOk
+        MessageBox MB_ICONSTOP|MB_OK "Cannot write to target folder:$\r$\n$INSTDIR$\r$\n$\r$\nPlease select a user-writable folder (such as %LOCALAPPDATA%\Programs\AsterLab MyGo) or run as Administrator."
+        Abort
+    probeWritableOk:
+    FileClose $1
+    Delete "$INSTDIR\.asterlab-install-probe.tmp"
+
     ; Electron-Builder / NSIS mature in-place upgrade flow (pure Win32 + NSIS, zero WOW64 PowerShell traps):
     ; 1) Ask running AsterLab to close gracefully, then force-terminate remaining locked processes.
     IfFileExists "$INSTDIR\mygo-run.exe" 0 doneClose
@@ -98,6 +108,11 @@ Section "Install"
     WriteRegStr HKCU "Software\Classes\asterlab" "URL Protocol" ""
     WriteRegStr HKCU "Software\Classes\asterlab\DefaultIcon" "" "$\"$INSTDIR\asterlab.ico$\",0"
     WriteRegStr HKCU "Software\Classes\asterlab\shell\open\command" "" "$\"$INSTDIR\mygo-run.exe$\" $\"%1$\""
+    ; Register .asterml single-source file association so double-clicking opens in AsterLab.
+    WriteRegStr HKCU "Software\Classes\.asterml" "" "AsterLab.AstermlFile"
+    WriteRegStr HKCU "Software\Classes\AsterLab.AstermlFile" "" "AsterLab Experiment Document (.asterml)"
+    WriteRegStr HKCU "Software\Classes\AsterLab.AstermlFile\DefaultIcon" "" "$\"$INSTDIR\asterlab.ico$\",0"
+    WriteRegStr HKCU "Software\Classes\AsterLab.AstermlFile\shell\open\command" "" "$\"$INSTDIR\mygo-run.exe$\" $\"%1$\""
 SectionEnd
 
 Section "Uninstall"
@@ -114,4 +129,6 @@ Section "Uninstall"
     Delete "$DESKTOP\AsterLab MyGo.lnk"
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo"
     DeleteRegKey HKCU "Software\Classes\asterlab"
+    DeleteRegKey HKCU "Software\Classes\.asterml"
+    DeleteRegKey HKCU "Software\Classes\AsterLab.AstermlFile"
 SectionEnd

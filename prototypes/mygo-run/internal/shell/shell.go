@@ -237,6 +237,18 @@ type Shell struct {
 	OnCheckUpdate         func()
 	OnInstallUpdate       func()
 	OnOpenUpdatePage      func()
+	CrashNotice           string
+	OnDismissCrashNotice  func()
+	FeedbackOpen          bool
+	FeedbackCategory      string
+	FeedbackText          string
+	FeedbackIncludeLogs   bool
+	FeedbackStatus        string
+	OnExportDiagBundle    func()
+	OnCopyFeedbackReport  func()
+	OnSubmitFeedback      func()
+	WelcomeOpen           bool
+	OnOnboardingChoice    func(choice string)
 	GlobalSearchOpen      bool
 	GlobalSearchQuery     string
 	GlobalSearchLastQuery string
@@ -509,6 +521,7 @@ func (s *Shell) page(c *ui.Context) {
 		theme.PaintCanvasBackground(rootCol, tok)
 	}
 	rootCol.Children(func() {
+		s.renderCrashOrWatchdogBanner(c, tok)
 		s.timerStrip(c)
 		if s.Error != "" {
 			ui.Column(c).FillWidth().Padding(t.Space(1), t.Space(2)).Gap(t.Space(.5)).
@@ -527,6 +540,8 @@ func (s *Shell) page(c *ui.Context) {
 	s.renderCommandPalette(c)
 	s.renderGlobalSearchModal(c)
 	s.renderVaultDialogs(c)
+	s.renderFeedbackDialog(c)
+	s.renderWelcomeDialog(c)
 	if s.RenderOverlays != nil {
 		s.RenderOverlays(c)
 	}
@@ -599,6 +614,16 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 		}
 		if modeLbl != "" {
 			ui.Text(c, modeLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+		}
+		fbBtn := ui.ButtonBase(c).Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Label("反馈与诊断")
+		fbBtn.Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Icon(c, lucide.LifeBuoy()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+				ui.Text(c, "反馈").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			})
+		})
+		if fbBtn.Clicked() {
+			s.FeedbackOpen = true
 		}
 		ui.Text(c, s.HotkeyDisplay("cmd.palette")).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 	})

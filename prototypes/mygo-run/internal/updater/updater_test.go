@@ -191,7 +191,7 @@ func TestApplyDirectorySwapWithLockedExeAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := applyDirectorySwap(unpackedDir, installDir); err != nil {
+	if _, err := applyDirectorySwap(unpackedDir, installDir); err != nil {
 		t.Fatalf("applyDirectorySwap failed: %v", err)
 	}
 
@@ -214,7 +214,7 @@ func TestApplyDirectorySwapWithLockedExeAndCleanup(t *testing.T) {
 	badUnpacked := filepath.Join(t.TempDir(), "bad-unpacked")
 	_ = os.MkdirAll(badUnpacked, 0o755)
 	_ = os.WriteFile(filepath.Join(badUnpacked, "mygo-run.exe"), []byte("CORRUPT-TEXT"), 0o755)
-	if err := applyDirectorySwap(badUnpacked, installDir); err == nil {
+	if _, err := applyDirectorySwap(badUnpacked, installDir); err == nil {
 		t.Fatal("expected invalid PE header error")
 	}
 	stillGood, _ := os.ReadFile(exeDst)

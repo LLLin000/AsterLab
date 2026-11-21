@@ -347,6 +347,20 @@ func (s *Shell) buildPaletteEntries() []paletteEntry {
 				}
 			},
 		},
+		paletteEntry{
+			kind: paletteAction, key: "cmd-feedback-diag", title: "反馈问题 / 导出脱敏诊断包",
+			subtitle: "收集脱敏运行日志、异常快照并在 GitHub 快速提交反馈",
+			runAct: func() {
+				s.FeedbackOpen = true
+			},
+		},
+		paletteEntry{
+			kind: paletteAction, key: "cmd-welcome-guide", title: "打开首次使用引导 / 示范实验库",
+			subtitle: "创建 CCK-8 示范实验与预置试剂，快速熟悉 AsterLab 结构",
+			runAct: func() {
+				s.WelcomeOpen = true
+			},
+		},
 	)
 	for _, b := range actions {
 		if q != "" && !strings.Contains(strings.ToLower(b.title+" "+b.subtitle), q) {
