@@ -51,10 +51,12 @@ type View struct {
 	OnPickFigureFile     func(stepID, blockID string)
 	StepID               string
 	BaseDir              string
-	currentModuleID    string
-	currentModuleKind  string
-	currentModuleData  map[string]any
-	titleEditID        string
+	currentModuleID     string
+	currentModuleKind   string
+	currentModuleSchema int
+	currentModuleData   map[string]any
+	isExportRender      bool
+	titleEditID         string
 	titleEditBuf       string
 	// Run-mode interactive execution callbacks & state (nil-safe in read-only views).
 	OnRecordActualParam  func(stepID, blockID, key, value, unit string)
@@ -344,13 +346,24 @@ func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind st
 		v.rendererGap(c, kind, schema, key)
 		return
 	}
-	prevID, prevKind, prevData := v.currentModuleID, v.currentModuleKind, v.currentModuleData
+	prevID, prevKind, prevSchema, prevData := v.currentModuleID, v.currentModuleKind, v.currentModuleSchema, v.currentModuleData
 	v.currentModuleID = moduleID
 	v.currentModuleKind = kind
+	v.currentModuleSchema = schema
 	v.currentModuleData = data
 	defer func() {
-		v.currentModuleID, v.currentModuleKind, v.currentModuleData = prevID, prevKind, prevData
+		v.currentModuleID, v.currentModuleKind, v.currentModuleSchema, v.currentModuleData = prevID, prevKind, prevSchema, prevData
 	}()
+	if !v.isExportRender && v.StepID == "" && kind != "plate" && kind != "step" && kind != "workflow" && kind != "experiment" {
+		wrap := ui.Column(c).FillWidth()
+		wrap.Children(func() {
+			fn(v, c, data)
+		})
+		components.ContextMenu(c, wrap, func(m *components.Menu) {
+			v.buildComponentShareMenu(c, m, kind, schema, data)
+		})
+		return
+	}
 	fn(v, c, data)
 }
 
@@ -622,7 +635,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					OnSelect: func(ids []string) {
 						v.plateSelections[p.ID] = ids
 					},
-					ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap, Zoom: v.PlateZoom, State: st,
+					ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap, ExcludedIDs: excludedSet, Zoom: v.PlateZoom, State: st,
 				})
 			})
 			components.ContextMenu(c, plateGridBox, func(m *components.Menu) {
@@ -649,7 +662,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					}
 					m.Separator()
 				}
-				v.buildComponentShareMenu(c, m, "plate", map[string]any{"id": p.ID, "title": p.Title})
+				v.buildComponentShareMenu(c, m, "plate", 1, map[string]any{"id": p.ID, "title": p.Title})
 			})
 
 			if editable {

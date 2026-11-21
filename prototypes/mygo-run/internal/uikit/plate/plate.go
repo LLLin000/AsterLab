@@ -51,6 +51,7 @@ type Props struct {
 	Blind       bool
 	GroupIndex  map[string]int
 	GroupLabels map[string]string
+	ExcludedIDs map[string]bool
 	HideFooter  bool
 	Zoom        float32
 	State       *InteractionState
@@ -637,12 +638,14 @@ func View(c *ui.Context, props Props) {
 								}
 								ink := contrastInkForFill(fill, assigned, t)
 								badge := ""
-								if well.Ambiguous {
-									badge = "!"
-								} else if !props.Blind && assigned {
-									badge = wellGlyphAdaptive(props, well, role, cellW)
-								} else if rb := roleShort(role); rb != "" {
-									badge = rb
+								if !props.ExcludedIDs[id] {
+									if well.Ambiguous {
+										badge = "!"
+									} else if !props.Blind && assigned {
+										badge = wellGlyphAdaptive(props, well, role, cellW)
+									} else if rb := roleShort(role); rb != "" {
+										badge = rb
+									}
 								}
 								btn := ui.ButtonBase(c).Key(id).Size(cellW, cellH).Radius(wellRadius()).
 									Label("孔 " + id)
@@ -674,6 +677,17 @@ func View(c *ui.Context, props Props) {
 												ui.Text(c, fmt.Sprintf("#%d", well.Replicate)).FontSize(float32(t.TextMeta)*0.64).TextColor(ink.Alpha(.82)).SingleLine()
 											}
 										})
+									})
+								}
+								if props.ExcludedIDs[id] {
+									btn.DrawOver(func(p *ui.Painter, r ui.Rect) {
+										pad := r.W * 0.28
+										cross := &ui.Path{}
+										cross.MoveTo(r.X+pad, r.Y+pad)
+										cross.LineTo(r.X+r.W-pad, r.Y+r.H-pad)
+										cross.MoveTo(r.X+r.W-pad, r.Y+pad)
+										cross.LineTo(r.X+pad, r.Y+r.H-pad)
+										p.StrokePath(cross, 2.2, t.Danger)
 									})
 								}
 								if btn.Hovered() {
@@ -832,7 +846,15 @@ func View(c *ui.Context, props Props) {
 						}
 						p.Stroke(inner, ink.Alpha(.38), innerR, 1)
 					}
-					if well.Ambiguous {
+					if props.ExcludedIDs[id] {
+						pad := cellW * 0.28
+						cross := &ui.Path{}
+						cross.MoveTo(x+pad, y+pad)
+						cross.LineTo(x+cellW-pad, y+cellH-pad)
+						cross.MoveTo(x+cellW-pad, y+pad)
+						cross.LineTo(x+pad, y+cellH-pad)
+						p.StrokePath(cross, 2.2, t.Danger)
+					} else if well.Ambiguous {
 						fontPx := labelSize * 0.9
 						p.Text(x+(cellW-fontPx*0.4)/2, y+(cellH-fontPx)*0.44, "!", fontPx, ink)
 					} else if !props.Blind && assigned {

@@ -711,7 +711,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			case "csv":
 				title = "导出孔板 CSV 布局"
 			case "png":
-				title = "导出孔板 PNG 图像"
+				title = "导出组件 PNG 图像"
 			case "svg":
 				title = "导出组件 SVG 矢量图"
 			case "md":

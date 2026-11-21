@@ -681,7 +681,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 						blockRow.Opacity(0.45)
 					}
 					components.ContextMenu(c, grip, func(m *components.Menu) {
-						v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bm, editable)
+						v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bs, bm, editable)
 					})
 				}
 				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
@@ -690,7 +690,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 			})
 
 			components.ContextMenu(c, blockRow, func(m *components.Menu) {
-				v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bm, editable)
+				v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bs, bm, editable)
 			})
 			if editable {
 				if dragged, over := ui.DragOver[stepBlockDrag](blockRow); over && dragged.StepID == step.ID && dragged.FromIndex != idx {
@@ -755,7 +755,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 	})
 }
 
-func (v *View) buildBlockContextMenu(c *ui.Context, m *components.Menu, stepID, blockID string, idx, total int, kind string, bm map[string]any, editable bool) {
+func (v *View) buildBlockContextMenu(c *ui.Context, m *components.Menu, stepID, blockID string, idx, total int, kind string, schema int, bm map[string]any, editable bool) {
 	if editable {
 		if m.Item("剪切").Shortcut("Ctrl+X").Chosen() {
 			sharedBlockClipboard = cloneAnyMap(bm)
@@ -801,5 +801,5 @@ func (v *View) buildBlockContextMenu(c *ui.Context, m *components.Menu, stepID, 
 		}
 		m.Separator()
 	}
-	v.buildComponentShareMenu(c, m, kind, bm)
+	v.buildComponentShareMenu(c, m, kind, schema, bm)
 }

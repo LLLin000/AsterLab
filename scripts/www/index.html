@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>AsterLab — 单文件真源与全组件可导出的科研工作台</title>
-<meta name="description" content="AsterLab 基于 .asterml 本地 Vault 单真源与 Pure-Go astercore 引擎：三轨合一设计，支持任意孔板、表格与步骤模块右键导出 SVG / Markdown 单张分享。" />
+<title>AsterLab — 单文件同源与科学红线内建的湿实验工作台</title>
+<meta name="description" content="AsterLab 基于 .asterml 本地单真源与 Pure-Go astercore 科学核心：统一实验设计、台面原位执行与 ARRIVE / ΔΔCq 确定性统计诊断，零专病堆砌、零数据库锁库。" />
 <meta name="theme-color" content="#0c0b0a" />
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
 <style>
@@ -21,6 +21,7 @@
   --accent-solid: #7457ec;
   --accent-2: #38bdf8;
   --accent-3: #6fd3a4;
+  --warn: #e6bc6a;
   --grid-line: rgba(255, 255, 255, 0.032);
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -38,6 +39,7 @@ html[data-theme="light"] {
   --accent-solid: #6c5ce7;
   --accent-2: #0ea5e9;
   --accent-3: #168053;
+  --warn: #9a6715;
   --grid-line: rgba(20, 21, 26, 0.045);
 }
 *, *::before, *::after { box-sizing: border-box; }
@@ -57,7 +59,7 @@ body {
 }
 a { color: inherit; text-decoration: none; }
 
-/* Subtle architectural drafting grid backdrop (zero noisy particles) */
+/* Architectural drafting grid backdrop */
 .draft-grid {
   position: fixed;
   inset: 0;
@@ -139,15 +141,14 @@ a { color: inherit; text-decoration: none; }
 .icon-btn:hover { color: var(--fg); border-color: var(--rule-strong); background: var(--bg-elev); }
 .icon-btn svg { width: 14px; height: 14px; }
 
-/* Main Page Container */
 .page { position: relative; z-index: 2; max-width: 1240px; margin: 0 auto; padding: 0 24px; }
 
 /* Band 1: Badge-Driven Hero */
 .hero {
-  min-height: 86vh;
-  padding: 108px 0 64px;
+  min-height: min(84vh, 740px);
+  padding: 96px 0 56px;
   display: grid;
-  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1.12fr);
+  grid-template-columns: minmax(0, 1.04fr) minmax(0, 1.1fr);
   gap: 52px;
   align-items: center;
 }
@@ -171,7 +172,7 @@ a { color: inherit; text-decoration: none; }
   margin: 0;
   font-size: clamp(34px, 4.1vw, 52px);
   font-weight: 650;
-  line-height: 1.13;
+  line-height: 1.14;
   letter-spacing: -0.03em;
   color: var(--fg);
 }
@@ -180,7 +181,7 @@ a { color: inherit; text-decoration: none; }
   font-size: 16px;
   line-height: 1.72;
   color: var(--fg-dim);
-  max-width: 48ch;
+  max-width: 49ch;
 }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 28px; }
 .btn-primary {
@@ -197,16 +198,17 @@ a { color: inherit; text-decoration: none; }
 }
 .btn-secondary:hover { color: var(--fg); border-color: var(--accent); }
 
+/* The 3 Flagship Differentiators Strip */
 .metrics-strip {
   margin-top: 34px;
   padding-top: 22px;
   border-top: 1px solid var(--rule);
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 18px;
 }
-.metric-val { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--fg); }
-.metric-lbl { font-size: 12.5px; color: var(--fg-faint); margin-top: 4px; }
+.metric-val { font-family: var(--mono); font-size: 14.5px; font-weight: 600; color: var(--fg); }
+.metric-lbl { font-size: 12.5px; line-height: 1.5; color: var(--fg-faint); margin-top: 4px; }
 
 /* The Badge Conduit Instrument (Right Column Hero) */
 .badge-instrument {
@@ -231,16 +233,11 @@ a { color: inherit; text-decoration: none; }
 }
 .badge-stage {
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-columns: 176px minmax(0, 1fr);
   gap: 18px;
   align-items: end;
 }
-.rail-selector {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 8px;
-}
+.rail-selector { display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; }
 .rail-btn {
   text-align: left;
   padding: 9px 11px;
@@ -261,7 +258,7 @@ a { color: inherit; text-decoration: none; }
 .dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; }
 
 .badge-svg-wrap { position: relative; display: flex; align-items: center; justify-content: center; padding: 6px 4px 2px; }
-.badge-hero-svg { width: 100%; max-width: 340px; height: auto; display: block; overflow: visible; }
+.badge-hero-svg { width: 100%; max-width: 336px; height: auto; display: block; overflow: visible; }
 .bp-wire { stroke: var(--fg-faint); stroke-opacity: 0.25; fill: none; }
 .bp-node { fill: var(--fg-faint); fill-opacity: 0.35; }
 .arch-track {
@@ -320,25 +317,65 @@ a { color: inherit; text-decoration: none; }
 }
 .readout-link:hover { text-decoration: underline; }
 
-/* Band 2: Interactive Component Export Sandbox */
-.section { padding: 64px 0; border-top: 1px solid var(--rule); }
+/* Band 2: The 3 Core Pillars of AsterLab */
+.section { padding: 68px 0; border-top: 1px solid var(--rule); }
 .section-kicker { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--accent); margin: 0 0 10px; }
 .section-h2 { font-size: clamp(24px, 2.8vw, 34px); font-weight: 600; letter-spacing: -0.025em; margin: 0 0 12px; color: var(--fg); }
-.section-lead { font-size: 15px; line-height: 1.7; color: var(--fg-dim); max-width: 60ch; margin: 0 0 32px; }
+.section-lead { font-size: 15px; line-height: 1.7; color: var(--fg-dim); max-width: 64ch; margin: 0 0 36px; }
 
-.sandbox-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  gap: 32px;
-  align-items: start;
+.pillars-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.pillar-card {
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  padding: 24px 22px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
 }
-.sandbox-card {
+.pillar-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pillar-card h3 { margin: 10px 0 10px; font-size: 17.5px; font-weight: 620; line-height: 1.35; color: var(--fg); }
+.pillar-card p { margin: 0; font-size: 13.8px; line-height: 1.7; color: var(--fg-dim); }
+.pillar-points {
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--rule);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+}
+.pillar-points li::before { content: "· "; color: var(--accent); font-weight: 700; }
+.pillar-foot { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+.pillar-foot:hover { text-decoration: underline; }
+
+/* Band 3: Live .asterml Document Workbench Preview */
+.workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+  gap: 28px;
+  align-items: stretch;
+}
+.wb-card {
   border: 1px solid var(--rule-strong);
   border-radius: 12px;
   background: var(--bg-panel);
   padding: 20px;
+  display: flex;
+  flex-direction: column;
 }
-.sandbox-bar {
+.wb-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -348,12 +385,11 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 16px;
   border-bottom: 1px solid var(--rule);
 }
-.sandbox-title { font-size: 14px; font-weight: 600; color: var(--fg); }
-.sandbox-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip-btn {
-  padding: 5px 10px;
+  padding: 5px 11px;
   border-radius: 6px;
-  border: 1px solid var(--rule-strong);
+  border: 1px solid var(--rule);
   background: var(--bg);
   color: var(--fg-dim);
   font-family: var(--mono);
@@ -361,9 +397,19 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: all 0.15s;
 }
-.chip-btn:hover { color: var(--fg); border-color: var(--accent); }
-.chip-btn.primary { background: var(--accent-solid); border-color: transparent; color: #fff; }
-.chip-btn.primary:hover { filter: brightness(1.08); }
+.chip-btn:hover { color: var(--fg); border-color: var(--rule-strong); }
+.chip-btn.active { background: var(--bg-elev); border-color: var(--accent); color: var(--fg); }
+.micro-btn {
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.micro-btn:hover { color: var(--fg); border-color: var(--rule-strong); }
 
 .mini-plate-grid {
   display: grid;
@@ -387,58 +433,29 @@ a { color: inherit; text-decoration: none; }
 }
 .mp-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px; font-size: 12px; color: var(--fg-dim); }
 .mp-leg-item { display: inline-flex; align-items: center; gap: 6px; }
-.sandbox-preview {
-  margin-top: 14px;
-  padding: 12px;
+
+.wb-pane { display: none; }
+.wb-pane.active { display: block; }
+.wb-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.wb-table th { text-align: left; padding: 8px 10px; background: var(--bg-elev); color: var(--fg-faint); font-weight: 600; font-size: 11.5px; }
+.wb-table td { padding: 9px 10px; border-bottom: 1px solid var(--rule); color: var(--fg); }
+.pill-ok { display: inline-block; padding: 2px 7px; border-radius: 4px; font-family: var(--mono); font-size: 11px; color: var(--accent-3); border: 1px solid var(--accent-3); }
+.pill-warn { display: inline-block; padding: 2px 7px; border-radius: 4px; font-family: var(--mono); font-size: 11px; color: var(--warn); border: 1px solid var(--warn); }
+
+.source-box {
+  flex: 1;
+  margin: 0;
+  padding: 14px 16px;
   border-radius: 8px;
   border: 1px solid var(--rule);
   background: var(--bg);
   font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.62;
   color: var(--fg-dim);
-  white-space: pre-wrap;
-  max-height: 190px;
-  overflow: auto;
-  display: none;
+  overflow-x: auto;
 }
-.sandbox-preview.open { display: block; }
-.sandbox-toast {
-  margin-top: 10px;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--accent-3);
-  min-height: 18px;
-}
-
-.adv-list { display: flex; flex-direction: column; gap: 14px; }
-.adv-item {
-  padding: 16px 18px;
-  border: 1px solid var(--rule);
-  border-radius: 10px;
-  background: var(--bg-panel);
-}
-.adv-item h3 { margin: 0 0 6px; font-size: 14.5px; font-weight: 600; color: var(--fg); }
-.adv-item p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--fg-dim); }
-
-/* Band 3: 3-Track Bento */
-.bento-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-.bento-card {
-  border: 1px solid var(--rule);
-  border-radius: 10px;
-  background: var(--bg-panel);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 14px;
-  transition: border-color 0.15s;
-}
-.bento-card:hover { border-color: var(--rule-strong); }
-.bento-tag { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; }
-.bento-card h3 { margin: 6px 0 8px; font-size: 16px; color: var(--fg); }
-.bento-card p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--fg-dim); }
-.bento-foot { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+.wb-toast { margin-top: 10px; font-family: var(--mono); font-size: 11px; color: var(--accent-3); min-height: 16px; }
 
 .site-footer {
   border-top: 1px solid var(--rule);
@@ -456,7 +473,7 @@ a { color: inherit; text-decoration: none; }
 .footer-links a:hover { color: var(--fg); }
 
 @media (max-width: 960px) {
-  .hero, .sandbox-grid, .bento-3 { grid-template-columns: 1fr; }
+  .hero, .pillars-3, .workbench-grid { grid-template-columns: 1fr; }
   .badge-stage { grid-template-columns: 1fr; }
   .navlink { display: none; }
 }
@@ -479,9 +496,9 @@ a { color: inherit; text-decoration: none; }
       <span class="brand-sub">v2</span>
     </a>
     <nav class="top-nav" aria-label="主导航">
+      <a class="navlink" href="#pillars">核心优势</a>
+      <a class="navlink" href="#workbench">活文档预览</a>
       <a class="navlink" href="https://docs.asterlab.party/">Docs</a>
-      <a class="navlink" href="#export-lab">组件导出</a>
-      <a class="navlink" href="#architecture">三轨架构</a>
       <a class="navlink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">AsterML</a>
       <button class="icon-btn" id="themeBtn" type="button" aria-label="切换明暗主题">◐</button>
       <a class="icon-btn" href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener" aria-label="GitHub">
@@ -495,25 +512,25 @@ a { color: inherit; text-decoration: none; }
   <!-- BAND 1: BADGE-DRIVEN HERO -->
   <section class="hero">
     <div>
-      <p class="eyebrow"><span class="eyebrow-dot"></span>.asterml Local SSOT · Pure-Go astercore</p>
-      <h1>单文件即研发工作区，<br />从设计到分析同源流转</h1>
-      <p class="hero-sub">AsterLab 以开放可读的 <code>.asterml</code> 本地文件为单一事实源，零 SQLite 与外部动态库绑定；三条几何轨道将实验设计、原位执行与确定性统计分析收束为一体。</p>
+      <p class="eyebrow"><span class="eyebrow-dot"></span>Local-First .asterml · Scientific Guardrails</p>
+      <h1>把方案设计、台面执行<br />与科学统计收束进一份文档</h1>
+      <p class="hero-sub">告别散落在 Word、Excel 与手机计时器里的割裂记录。AsterLab 以纯文本 <code>.asterml</code> 为单一事实源，在不篡改原始方案的前提下原位记录台面偏离，并内建 ARRIVE 2.0 统计红线与确定性分析。</p>
       <div class="actions">
         <a class="btn-primary" href="https://docs.asterlab.party/">浏览工程手册 <span aria-hidden="true">→</span></a>
-        <a class="btn-secondary" href="#export-lab">体验单组件导出 SVG / MD ↓</a>
+        <a class="btn-secondary" href="#pillars">了解三大核心特征 ↓</a>
       </div>
       <div class="metrics-strip">
         <div>
-          <div class="metric-val">21 种原语</div>
-          <div class="metric-lbl">通用块自由组合，零专病代码堆砌</div>
+          <div class="metric-val">.asterml 单真源</div>
+          <div class="metric-lbl">计划与实测原位分离，Git 与 Agent 原生可读</div>
         </div>
         <div>
-          <div class="metric-val">SVG · PNG · MD</div>
-          <div class="metric-lbl">任意孔板与表格右键单张导出分享</div>
+          <div class="metric-val">21 原语自由组合</div>
+          <div class="metric-lbl">多维孔板与跨块公式联动，零专病代码堆砌</div>
         </div>
         <div>
-          <div class="metric-val">Pure-Go Core</div>
-          <div class="metric-lbl">桌面、移动与 CLI 同源零 DLL 依赖</div>
+          <div class="metric-val">科学红线内建</div>
+          <div class="metric-lbl">严分生物重复 n 与复孔，台前阻断配液错误</div>
         </div>
       </div>
     </div>
@@ -522,21 +539,21 @@ a { color: inherit; text-decoration: none; }
     <div class="badge-instrument" aria-label="AsterLab 三轨徽标构造仪">
       <div class="instrument-head">
         <span>Brand Geometry · Tri-Stream Conduit</span>
-        <span id="trackCoord">R=481 · C¹ BEZIER</span>
+        <span id="trackCoord">TRACK 01 · DESIGN</span>
       </div>
       <div class="badge-stage">
         <div class="rail-selector" role="tablist" aria-label="徽章三轨说明">
           <button class="rail-btn active" type="button" data-track="1">
             <div class="rail-k"><span class="dot" style="background:var(--accent)"></span>Track 01</div>
-            <div class="rail-t">实验设计 Design</div>
+            <div class="rail-t">单真源与原语组合</div>
           </button>
           <button class="rail-btn" type="button" data-track="2">
             <div class="rail-k"><span class="dot" style="background:var(--accent-2)"></span>Track 02</div>
-            <div class="rail-t">原位执行 UnifiedLive</div>
+            <div class="rail-t">台面原位执行与联动</div>
           </button>
           <button class="rail-btn" type="button" data-track="3">
             <div class="rail-k"><span class="dot" style="background:var(--accent-3)"></span>Track 03</div>
-            <div class="rail-t">纯 Go 核心 AsterCore</div>
+            <div class="rail-t">科学红线与确定直算</div>
           </button>
         </div>
 
@@ -547,7 +564,6 @@ a { color: inherit; text-decoration: none; }
               <linearGradient id="gFlow2" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--accent-2)" stop-opacity="0.15"/><stop offset="50%" stop-color="var(--accent-2)" stop-opacity="1"/><stop offset="100%" stop-color="var(--accent-3)" stop-opacity="0.3"/></linearGradient>
               <linearGradient id="gFlow3" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--accent-3)" stop-opacity="0.15"/><stop offset="50%" stop-color="var(--accent-3)" stop-opacity="1"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.3"/></linearGradient>
             </defs>
-            <!-- Construction tangents & anchor nodes directly from asterlab-symbol-logo-outline.svg -->
             <g class="bp-wire" stroke-width="2" stroke-dasharray="6 6">
               <line x1="151.03" y1="481.39" x2="252.37" y2="418.71"/><circle cx="193.96" cy="481.39" r="7"/>
               <line x1="359.68" y1="203.72" x2="412.54" y2="97.81"/><circle cx="412.54" cy="97.81" r="7"/>
@@ -561,16 +577,12 @@ a { color: inherit; text-decoration: none; }
               <rect x="618" y="200" width="12" height="12"/><rect x="753" y="468" width="12" height="12"/>
               <rect x="663" y="411" width="12" height="12"/><rect x="331" y="890" width="12" height="12"/>
             </g>
-            <!-- Track 1: Design (Outer Arch) -->
             <path class="arch-track active" data-track-shape="1" fill="var(--accent)" stroke="var(--accent)"
               d="M 0 481.392 L 151.025 481.392 C 193.956 481.392 233.198 457.121 252.371 418.709 L 359.678 203.722 C 412.544 97.807 513.118 23.776 629.959 4.774 C 746.8 -14.228 865.65 24.117 949.355 107.821 C 997.149 155.615 1024 220.439 1024 288.031 L 1024 896.711 L 910.731 896.711 L 910.731 375.105 C 910.731 311.645 884.113 251.094 837.355 208.189 C 790.597 165.284 727.986 143.959 664.76 149.403 C 566.506 157.863 479.73 216.831 435.688 305.068 L 330.251 516.307 C 306.285 564.322 257.233 594.661 203.569 594.661 L 0 594.661 Z"/>
-            <!-- Track 2: UnifiedLive (Middle Arch) -->
             <path class="arch-track" data-track-shape="2" fill="var(--accent-2)" stroke="var(--accent-2)"
               d="M 0 632.418 L 226.921 632.418 C 280.586 632.418 329.638 602.078 353.604 554.063 L 461.024 338.85 C 493.871 273.043 553.546 224.634 624.713 206.067 C 684.12 190.567 747.356 203.47 795.94 241.006 C 844.525 278.541 872.975 336.471 872.975 397.866 L 872.975 896.711 L 759.706 896.711 L 759.706 474.637 C 759.706 422.09 723.568 376.444 672.423 364.389 C 621.278 352.334 568.558 377.037 545.091 424.052 L 431.484 651.661 C 402.725 709.279 343.862 745.686 279.465 745.686 L 0 745.686 Z"/>
-            <!-- Track 3: Pure-Go Core (Inner Arch) -->
             <path class="arch-track" data-track-shape="3" fill="var(--accent-3)" stroke="var(--accent-3)"
               d="M 0 783.443 L 302.818 783.443 C 367.215 783.443 426.077 747.036 454.837 689.417 L 559.389 479.95 C 580.046 438.564 623.792 413.896 669.896 417.637 C 699.302 420.023 721.95 444.584 721.95 474.086 L 721.95 896.711 L 608.681 896.711 L 608.681 634.823 L 540.539 771.344 C 502.193 848.169 423.71 896.711 337.847 896.711 L 0 896.711 Z"/>
-            <!-- Smooth laminar centerline conduit pulses (NOT flies!) -->
             <path class="laminar-flow active" data-flow="1" stroke="url(#gFlow1)" d="M 0 538 L 177 538 C 228 538 274 509 296 462 L 401 251 C 446 161 539 98 640 84 C 742 70 843 108 906 184 C 948 234 968 292 968 355 L 968 896"/>
             <path class="laminar-flow" data-flow="2" stroke="url(#gFlow2)" d="M 0 689 L 253 689 C 312 689 366 655 392 602 L 502 381 C 542 301 625 256 710 278 C 776 295 816 352 816 422 L 816 896"/>
             <path class="laminar-flow" data-flow="3" stroke="url(#gFlow3)" d="M 0 840 L 320 840 C 392 840 458 799 491 734 L 606 502 C 626 462 666 470 666 510 L 666 896"/>
@@ -579,108 +591,160 @@ a { color: inherit; text-decoration: none; }
       </div>
       <div class="instrument-readout">
         <div>
-          <p class="readout-title" id="readoutTitle">Track 01 · .asterml 结构化实验设计</p>
-          <p class="readout-desc" id="readoutDesc">以 Markdown + YAML 围栏声明因子分组、样本量 n 与 96/384 孔板浓度梯度；纯文本存储，Git 与外部 Agent 天然可读可审查。</p>
+          <p class="readout-title" id="readoutTitle">Track 01 · 单文件 .asterml 本地真源</p>
+          <p class="readout-desc" id="readoutDesc">一份纯文本 Markdown + 结构化模块同时承载设计方案与实验记录，零黑盒数据库锁库，天然兼容 Git、云盘与 AI Agent。</p>
         </div>
-        <a class="readout-link" id="readoutLink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">规范文档 →</a>
+        <a class="readout-link" id="readoutLink" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fvault-storage.md">存储架构 →</a>
       </div>
     </div>
   </section>
 
-  <!-- BAND 2: INTERACTIVE COMPONENT EXPORT LAB -->
-  <section class="section" id="export-lab">
-    <p class="section-kicker">Interactive Export Workflow</p>
-    <h2 class="section-h2">任意孔板与表格，右键即得矢量 SVG / Markdown</h2>
-    <p class="section-lead">不再截图拼图发微信群。在 AsterLab 文档内右键任何 <code>plate@1</code> 孔板或参数/分组表格，即可选择<strong>复制为 SVG</strong>、<strong>复制为 Markdown</strong>、<strong>复制 PNG 图片</strong>或导出单张高清文件直接分享给协作者或置入论文排版。</p>
+  <!-- BAND 2: THE THREE CORE PILLARS -->
+  <section class="section" id="pillars">
+    <p class="section-kicker">Why AsterLab</p>
+    <h2 class="section-h2">支撑严谨湿实验的三大核心特征</h2>
+    <p class="section-lead">AsterLab 不做臃肿的云端表单堆砌，只围绕实验台最关键的三件事建立确定性契约：<strong>数据主权与过程同源</strong>、<strong>通用原语与空间联动</strong>、以及<strong>不可逾越的科学统计红线</strong>。</p>
 
-    <div class="sandbox-grid">
-      <div class="sandbox-card">
-        <div class="sandbox-bar">
-          <div class="sandbox-title">plate-cck8 · 96 孔药敏梯度示例（实图同源导出）</div>
-          <div class="sandbox-actions">
-            <button class="chip-btn primary" type="button" id="btnCopySVG">复制为 SVG</button>
-            <button class="chip-btn" type="button" id="btnCopyMD">复制 Markdown</button>
-            <button class="chip-btn" type="button" id="btnDlSVG">下载 .svg</button>
+    <div class="pillars-3">
+      <article class="pillar-card">
+        <div>
+          <div class="pillar-num" style="color:var(--accent)"><span class="dot" style="background:var(--accent)"></span>Pillar 01 · UnifiedLive SSOT</div>
+          <h3>单文件全周期同源，计划与实测严格解耦</h3>
+          <p>一份本地 <code>.asterml</code> 文档无缝切换「编辑 · 阅读 · 源码」三态。执行阶段的勾选、倒计时、异常孔剔除与实测温度/浓度偏离全部<strong>原位记录而不覆盖原始方案定义</strong>。</p>
+          <ul class="pillar-points">
+            <li>纯文本开放格式，无 SQLite 锁库，Git / Obsidian / 网盘直接协同</li>
+            <li>内建 100 步撤销栈与本地版本快照恢复，离线实验台零丢失</li>
+            <li>保存模板时自动剥离实测读数与日期，杜绝历史残留污染新实验</li>
+          </ul>
+        </div>
+        <a class="pillar-foot" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdomain-model.md">阅读领域模型与单文件工作流 →</a>
+      </article>
+
+      <article class="pillar-card">
+        <div>
+          <div class="pillar-num" style="color:var(--accent-2)"><span class="dot" style="background:var(--accent-2)"></span>Pillar 02 · Compositional Labware</div>
+          <h3>21 原语通用组合 × 多维孔板与跨块重算</h3>
+          <p>无论是 CCK-8、RT-qPCR、Western Blot 还是抑菌圈，全部由 11 种内容块、<code>plate@1</code> 容器与 10 种科学原语组合表达，<strong>零专病硬编码页面</strong>。</p>
+          <ul class="pillar-points">
+            <li>支持 6–384 孔板、一维联管/泳道、培养皿分区与动物队列自由切换</li>
+            <li>多图层叠加（分组 / 浓度单调色阶 / 时间点），拖拽框选即标孔位</li>
+            <li><code>@groups</code> / <code>@plate</code> / <code>@actual</code> 跨块引用，改孔数自动重算预混余量</li>
+          </ul>
+        </div>
+        <a class="pillar-foot" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md">查看 21 模块规范与联动语法 →</a>
+      </article>
+
+      <article class="pillar-card">
+        <div>
+          <div class="pillar-num" style="color:var(--accent-3)"><span class="dot" style="background:var(--accent-3)"></span>Pillar 03 · Scientific Guardrails</div>
+          <h3>科学统计红线内建，台前拦截与确定直算</h3>
+          <p>纯 Go 引擎 <code>astercore</code> 在桌面端、移动端与无头 CLI 共享同一套科学校验与统计投影，把配液失误和假阳性重复拦在加样之前。</p>
+          <ul class="pillar-points">
+            <li>严分独立生物样本量 <code>n</code> 与技术复孔，拒绝把 6 个复孔谎报为 <code>n=6</code></li>
+            <li>ARRIVE 2.0 对照缺失预警与目标浓度高于母液的台前阻断诊断</li>
+            <li>原位确定性计算 CCK-8 相对活力与 RT-qPCR <code>ΔΔCq</code>，并支持 CLI JSON 调用</li>
+          </ul>
+        </div>
+        <a class="pillar-foot" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Farchitecture.md">了解 Pure-Go astercore 引擎 →</a>
+      </article>
+    </div>
+  </section>
+
+  <!-- BAND 3: LIVE WORKBENCH PREVIEW -->
+  <section class="section" id="workbench">
+    <p class="section-kicker">Live Document Preview</p>
+    <h2 class="section-h2">同一份 `.asterml`，多视角实时同源投影</h2>
+    <p class="section-lead">左侧交互组件与右侧纯文本源码始终对应同一份事实；日常汇报时，任意孔板、参数表或配方卡片均可直接右键复制高清 PNG、矢量 SVG 或 Markdown，亦可一键输出 A4 实验台执行单。</p>
+
+    <div class="workbench-grid">
+      <div class="wb-card">
+        <div class="wb-bar">
+          <div class="wb-tabs" role="tablist">
+            <button class="chip-btn active" type="button" data-pane="plate">孔板空间图层</button>
+            <button class="chip-btn" type="button" data-pane="calc">预混液自动重算</button>
+            <button class="chip-btn" type="button" data-pane="guard">科学红线诊断</button>
+          </div>
+          <button class="micro-btn" type="button" id="btnCopyDemo">复制当前块 Markdown</button>
+        </div>
+
+        <div class="wb-pane active" id="pane-plate">
+          <div class="mini-plate-grid" aria-label="96 孔药敏排布局部">
+            <div class="mp-hdr"></div><div class="mp-hdr">1</div><div class="mp-hdr">2</div><div class="mp-hdr">3</div><div class="mp-hdr">4</div><div class="mp-hdr">5</div><div class="mp-hdr">6</div>
+            <div class="mp-hdr">A</div>
+            <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
+            <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
+            <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#0ea5e9">10µM</div>
+            <div class="mp-hdr">B</div>
+            <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
+            <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
+            <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#c23643">×</div>
+            <div class="mp-hdr">C</div>
+            <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
+            <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
+            <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#0ea5e9">10µM</div>
+          </div>
+          <div class="mp-legend">
+            <span class="mp-leg-item"><span class="dot" style="background:#168053"></span>DMSO 对照 (n=3, rep=6)</span>
+            <span class="mp-leg-item"><span class="dot" style="background:#6c5ce7"></span>1 µM 给药 (n=3, rep=6)</span>
+            <span class="mp-leg-item"><span class="dot" style="background:#0ea5e9"></span>10 µM 给药 (有效 5 孔 · B6 异常剔除)</span>
           </div>
         </div>
-        <div class="mini-plate-grid" aria-label="6x4 实验孔板示意图">
-          <div class="mp-hdr"></div><div class="mp-hdr">1</div><div class="mp-hdr">2</div><div class="mp-hdr">3</div><div class="mp-hdr">4</div><div class="mp-hdr">5</div><div class="mp-hdr">6</div>
-          <div class="mp-hdr">A</div>
-          <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
-          <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
-          <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#0ea5e9">10µM</div>
-          <div class="mp-hdr">B</div>
-          <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
-          <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
-          <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#c23643">×</div>
-          <div class="mp-hdr">C</div>
-          <div class="mp-well" style="background:#168053">Ctrl</div><div class="mp-well" style="background:#168053">Ctrl</div>
-          <div class="mp-well" style="background:#6c5ce7">1µM</div><div class="mp-well" style="background:#6c5ce7">1µM</div>
-          <div class="mp-well" style="background:#0ea5e9">10µM</div><div class="mp-well" style="background:#0ea5e9">10µM</div>
+
+        <div class="wb-pane" id="pane-calc">
+          <table class="wb-table">
+            <thead><tr><th>分项配方（自动引用 @plate.p1 孔数 + 10% 余量）</th><th>计算体积</th><th>换算依据</th></tr></thead>
+            <tbody>
+              <tr><td><strong>10 µM 给药工作液总需</strong></td><td><code>1320 µL</code></td><td>6 计划孔 × 200 µL × 1.10</td></tr>
+              <tr><td><strong>10 mM 母液取样量</strong></td><td><code>1.32 µL</code></td><td>C₁V₁ = C₂V₂ 实测联动</td></tr>
+              <tr><td><strong>完全培养基补足量</strong></td><td><code>1318.68 µL</code></td><td>自动扣除母液体积</td></tr>
+            </tbody>
+          </table>
         </div>
-        <div class="mp-legend">
-          <span class="mp-leg-item"><span class="dot" style="background:#168053"></span>DMSO Control (n=6)</span>
-          <span class="mp-leg-item"><span class="dot" style="background:#6c5ce7"></span>Drug 1 µM (n=6)</span>
-          <span class="mp-leg-item"><span class="dot" style="background:#0ea5e9"></span>Drug 10 µM (n=5)</span>
-          <span class="mp-leg-item"><span class="dot" style="background:#c23643"></span>B6 异常剔除</span>
+
+        <div class="wb-pane" id="pane-guard">
+          <table class="wb-table">
+            <thead><tr><th>AsterCore 诊断项</th><th>状态</th><th>科学契约说明</th></tr></thead>
+            <tbody>
+              <tr><td><strong>独立样本量与复孔解耦</strong></td><td><span class="pill-ok">PASS · n=3</span></td><td>6 复孔归并至 3 独立生物样本，未虚增自由度</td></tr>
+              <tr><td><strong>ARRIVE 溶剂对照核查</strong></td><td><span class="pill-ok">PASS · Control</span></td><td>已声明 DMSO 阴性对照并映射 A1–C2</td></tr>
+              <tr><td><strong>异常孔位审计留痕</strong></td><td><span class="pill-warn">EXCLUDED · B6</span></td><td>B6 标记污染剔除，CCK-8 均值自动按 5 孔重算</td></tr>
+            </tbody>
+          </table>
         </div>
-        <pre class="sandbox-preview" id="exportPreview"></pre>
-        <div class="sandbox-toast" id="exportToast"></div>
+
+        <div class="wb-toast" id="wbToast"></div>
       </div>
 
-      <div class="adv-list">
-        <div class="adv-item">
-          <h3>单文件单真源（UnifiedLive）</h3>
-          <p>取消脆弱的数据库黑盒锁库。实验策划、台面实测记录与 SVG 矢量图同住在你的文件夹中，天然适配 Git、iCloud、Syncthing 与 AI Agent。</p>
-        </div>
-        <div class="adv-item">
-          <h3>全组件矢量 SVG / GFM Markdown 导出</h3>
-          <p><code>plate@1</code>、<code>group_table@1</code>、<code>param_table@1</code>、<code>data_table@1</code> 与 <code>checklist@1</code> 均内置右键导出菜单：Vector SVG 直贴 PPT / Figma / Illustrator，Markdown 直贴飞书 / Notion / Obsidian。</p>
-        </div>
-        <div class="adv-item">
-          <h3>Pure-Go 统一科学核心（零 Rust / SQLite）</h3>
-          <p>ARRIVE 2.0 对照校验、稀释母液越界预警、CCK-8 活力拟合与 RT-qPCR ΔΔCq 计算由纯 Go 引擎直算完成，无 DLL 缺失报错，双端结果 100% 确定一致。</p>
-        </div>
-      </div>
-    </div>
-  </section>
+      <pre class="source-box" id="wbSource">---
+title: CCK-8 梯度药敏实验
+status: in_progress
+---
 
-  <!-- BAND 3: THREE-TRACK CAPABILITIES -->
-  <section class="section" id="architecture">
-    <p class="section-kicker">Architecture Alignment</p>
-    <h2 class="section-h2">徽章的三条轨道，即 AsterLab 全部产品契约</h2>
-    <div class="bento-3">
-      <a class="bento-card" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdomain-model.md">
-        <div>
-          <div class="bento-tag" style="color:var(--accent)">01 · Design Stream</div>
-          <h3>受控领域边界，不混淆计划与实测</h3>
-          <p>严格区分独立生物重复 <code>n</code> 与技术复孔；设计阶段写下目标浓度，执行偏离独立记录而不污染方案定义。</p>
-        </div>
-        <div class="bento-foot">阅读领域模型 →</div>
-      </a>
-      <a class="bento-card" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdesktop-workbench.md">
-        <div>
-          <div class="bento-tag" style="color:var(--accent-2)">02 · Execution Stream</div>
-          <h3>桌面分屏与移动端单手协同</h3>
-          <p>原生无 WebView 极速渲染；桌面端支持 <code>Ctrl+\</code> 平权分屏与 A4 执行单 PDF，移动端支持单手底岛与块级热重载。</p>
-        </div>
-        <div class="bento-foot">查看工作台交互 →</div>
-      </a>
-      <a class="bento-card" href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fffi-and-cli.md">
-        <div>
-          <div class="bento-tag" style="color:var(--accent-3)">03 · Pure-Go Core Stream</div>
-          <h3>Headless CLI 与 Agent 深度链接</h3>
-          <p><code>cmd/asterlab</code> 原生读取同一份本地 Vault 输出单行 JSON 诊断；支持 <code>asterlab://open</code> 直达任意步骤与孔板。</p>
-        </div>
-        <div class="bento-foot">查看 CLI 契约 →</div>
-      </a>
+```asterlab
+kind: group_table
+id: g-main
+schema: 1
+rows:
+  - {id: ctrl, name: DMSO 对照, role: control, independent_n: 3, technical_repeats: 6}
+  - {id: d10,  name: Drug 10uM, role: treatment, independent_n: 3, technical_repeats: 6}
+```
+
+```asterlab
+kind: plate
+id: p1
+schema: 1
+format: 96
+groups: {ctrl: [A1, A2, B1, B2, C1, C2], d10: [A5, A6, B5, B6, C5, C6]}
+excluded_wells: [B6]
+```</pre>
     </div>
   </section>
 
   <footer class="site-footer">
-    <span>© 2026 AsterLab · Unified `.asterml` Workbench</span>
+    <span>© 2026 AsterLab · Local-First `.asterml` Scientific Workbench</span>
     <div class="footer-links">
       <a href="https://docs.asterlab.party/">工程手册 Docs</a>
+      <a href="https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fffi-and-cli.md">Pure-Go CLI</a>
       <a href="https://github.com/LLLin000/AsterLab" target="_blank" rel="noopener">GitHub</a>
     </div>
   </footer>
@@ -699,28 +763,27 @@ a { color: inherit; text-decoration: none; }
     document.querySelector('meta[name="theme-color"]').setAttribute("content", next === "dark" ? "#0c0b0a" : "#ffffff");
   });
 
-  // Badge track interactivity
   const TRACKS = {
     1: {
-      coord: "TRACK 01 · OUTER ARCH · R=481",
-      title: "Track 01 · .asterml 结构化实验设计",
-      desc: "以 Markdown + YAML 围栏声明因子分组、样本量 n 与 96/384 孔板浓度梯度；纯文本存储，Git 与外部 Agent 天然可读可审查。",
+      coord: "TRACK 01 · SINGLE SOURCE .ASTERML",
+      title: "Track 01 · 单文件 .asterml 本地真源",
+      desc: "一份纯文本 Markdown + 结构化模块同时承载设计方案与实验记录，零黑盒数据库锁库，天然兼容 Git、云盘与 AI Agent。",
+      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fvault-storage.md",
+      linkText: "存储架构 →"
+    },
+    2: {
+      coord: "TRACK 02 · COMPOSITIONAL LABWARE",
+      title: "Track 02 · 21 原语组合与台面原位执行",
+      desc: "多维孔板图层与 @plate / @actual 跨块公式实时联动；桌面分屏与手机底岛同源读写，任意组件支持右键导出 PNG / SVG / MD。",
       href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fasterml-spec.md",
       linkText: "AsterML 规范 →"
     },
-    2: {
-      coord: "TRACK 02 · MIDDLE ARCH · UNIFIEDLIVE",
-      title: "Track 02 · 原位执行与全组件单张导出",
-      desc: "桌面与平板共享 UnifiedLive 视图，支持计时、实测偏离、异常孔标 ×，以及任意孔板/表格右键复制 SVG / Markdown 直接分享。",
-      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdesktop-workbench.md",
-      linkText: "工作台交互 →"
-    },
     3: {
-      coord: "TRACK 03 · INNER ARCH · PURE-GO CORE",
-      title: "Track 03 · Pure-Go astercore 统计与诊断",
-      desc: "零 Runs.dll / SQLite 依赖，统一执行 ARRIVE 2.0 校验、稀释超标阻断、CCK-8 与 RT-qPCR ΔΔCq 统计以及 Vault CLI。",
-      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Farchitecture.md",
-      linkText: "查看核心架构 →"
+      coord: "TRACK 03 · SCIENTIFIC GUARDRAILS",
+      title: "Track 03 · 科学统计红线与 Pure-Go 直算",
+      desc: "严分独立生物重复 n 与技术复孔，台前阻断母液浓度越界与对照缺失，无锁直算 CCK-8 活力与 RT-qPCR ΔΔCq。",
+      href: "https://docs.asterlab.party/?doc=docs%2Fhandbook%2Fdomain-model.md",
+      linkText: "科学红线契约 →"
     }
   };
 
@@ -738,47 +801,35 @@ a { color: inherit; text-decoration: none; }
   }
 
   document.querySelectorAll(".rail-btn").forEach((b) => b.addEventListener("click", () => selectTrack(b.getAttribute("data-track"))));
-  document.querySelectorAll("[data-track-shape]").forEach((p) => {
-    p.addEventListener("click", () => selectTrack(p.getAttribute("data-track-shape")));
+  document.querySelectorAll("[data-track-shape]").forEach((p) => p.addEventListener("click", () => selectTrack(p.getAttribute("data-track-shape"))));
+
+  const SOURCES = {
+    plate: `---\ntitle: CCK-8 梯度药敏实验\nstatus: in_progress\n---\n\n\`\`\`asterlab\nkind: group_table\nid: g-main\nschema: 1\nrows:\n  - {id: ctrl, name: DMSO 对照, role: control, independent_n: 3, technical_repeats: 6}\n  - {id: d10,  name: Drug 10uM, role: treatment, independent_n: 3, technical_repeats: 6}\n\`\`\`\n\n\`\`\`asterlab\nkind: plate\nid: p1\nschema: 1\nformat: 96\ngroups: {ctrl: [A1, A2, B1, B2, C1, C2], d10: [A5, A6, B5, B6, C5, C6]}\nexcluded_wells: [B6]\n\`\`\``,
+    calc: `\`\`\`asterlab\nkind: calculator\nid: calc-drug\nschema: 1\ntitle: 10 µM 给药预混液\nmode: group_mastermix\nplate_ref: p1\nvolume_per_unit: {value: 200, unit: uL}\nexcess_ratio: 0.10\ncomponents:\n  - {name: Drug 母液, stock_conc: 10000, target_conc: 10, unit: uM}\n\`\`\``,
+    guard: `$ asterlab --vault ~/LabVault asterdoc.assess 2026/cck8.asterml\n{\n  "ok": true,\n  "blocking": 0,\n  "independent_n": {"ctrl": 3, "d10": 3},\n  "excluded_wells": ["B6"],\n  "projection": "cck8_relative_viability"\n}`
+  };
+
+  const MD_EXPORTS = {
+    plate: `### 96 孔药敏排布 (p1)\n\n| | 1 | 2 | 3 | 4 | 5 | 6 |\n|---|---|---|---|---|---|---|\n| **A** | Ctrl | Ctrl | 1µM | 1µM | 10µM | 10µM |\n| **B** | Ctrl | Ctrl | 1µM | 1µM | 10µM | 10µM (×) |\n| **C** | Ctrl | Ctrl | 1µM | 1µM | 10µM | 10µM |`,
+    calc: `### 10 µM 给药预混液\n\n| 分项 | 计算体积 | 换算依据 |\n|---|---|---|\n| 工作液总需 | 1320 µL | 6 孔 × 200 µL × 1.10 |\n| 10 mM 母液 | 1.32 µL | C₁V₁ = C₂V₂ |\n| 培养基补足 | 1318.68 µL | 扣除母液体积 |`,
+    guard: `### AsterCore 科学红线诊断\n\n- [x] 独立样本量解耦：n=3（6 技术复孔未虚增自由度）\n- [x] ARRIVE 对照核查：DMSO Control 已映射\n- [-] B6 标记异常剔除：均值按 5 有效孔自动重算`
+  };
+
+  let activePane = "plate";
+  const toastEl = document.getElementById("wbToast");
+  document.querySelectorAll("[data-pane]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      activePane = btn.getAttribute("data-pane");
+      document.querySelectorAll("[data-pane]").forEach((b) => b.classList.toggle("active", b === btn));
+      document.querySelectorAll(".wb-pane").forEach((p) => p.classList.toggle("active", p.id === "pane-" + activePane));
+      document.getElementById("wbSource").textContent = SOURCES[activePane];
+      toastEl.textContent = "";
+    });
   });
 
-  // Live Component Export Demo (SVG & Markdown generator)
-  const DEMO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="220" viewBox="0 0 420 220">
-  <rect width="420" height="220" rx="12" fill="#ffffff" stroke="#e7e9ee"/>
-  <text x="20" y="26" font-size="14" font-weight="600" font-family="system-ui,sans-serif" fill="#18181b">plate-cck8 · 96 孔药敏梯度</text>
-  <text x="400" y="26" font-size="11" font-family="ui-monospace,monospace" fill="#71717a" text-anchor="end">3×6 · group</text>
-  <line x1="20" y1="36" x2="400" y2="36" stroke="#e7e9ee"/>
-  <circle cx="58" cy="74" r="15" fill="#168053"/><circle cx="96" cy="74" r="15" fill="#168053"/>
-  <circle cx="144" cy="74" r="15" fill="#6c5ce7"/><circle cx="182" cy="74" r="15" fill="#6c5ce7"/>
-  <circle cx="230" cy="74" r="15" fill="#0ea5e9"/><circle cx="268" cy="74" r="15" fill="#0ea5e9"/>
-  <circle cx="58" cy="112" r="15" fill="#168053"/><circle cx="96" cy="112" r="15" fill="#168053"/>
-  <circle cx="144" cy="112" r="15" fill="#6c5ce7"/><circle cx="182" cy="112" r="15" fill="#6c5ce7"/>
-  <circle cx="230" cy="112" r="15" fill="#0ea5e9"/><circle cx="268" cy="112" r="15" fill="#c23643"/>
-  <text x="20" y="202" font-size="11" font-family="system-ui,sans-serif" fill="#71717a">Ctrl (n=6) · 1µM (n=6) · 10µM (n=5)</text>
-  <text x="400" y="202" font-size="10" font-family="ui-monospace,monospace" fill="#71717a" text-anchor="end">AsterLab · .asterml</text>
-</svg>`;
-
-  const DEMO_MD = `### plate-cck8 · 96 孔药敏梯度\n\n| | 1 | 2 | 3 | 4 | 5 | 6 |\n|---|---|---|---|---|---|---|\n| **A** | Ctrl | Ctrl | 1µM | 1µM | 10µM | 10µM |\n| **B** | Ctrl | Ctrl | 1µM | 1µM | 10µM | × |\n| **C** | Ctrl | Ctrl | 1µM | 1µM | 10µM | 10µM |`;
-
-  const previewEl = document.getElementById("exportPreview");
-  const toastEl = document.getElementById("exportToast");
-
-  async function copySample(kind, content, msg) {
-    previewEl.textContent = content;
-    previewEl.classList.add("open");
-    try { await navigator.clipboard.writeText(content); } catch (_) {}
-    toastEl.textContent = msg;
-  }
-
-  document.getElementById("btnCopySVG").addEventListener("click", () => copySample("svg", DEMO_SVG, "✓ 已复制 SVG 矢量源码 — 可直接粘贴至 Figma / PPT / 浏览器"));
-  document.getElementById("btnCopyMD").addEventListener("click", () => copySample("md", DEMO_MD, "✓ 已复制 GFM Markdown 孔位表 — 可直接粘贴至 Obsidian / Notion"));
-  document.getElementById("btnDlSVG").addEventListener("click", () => {
-    const blob = new Blob([DEMO_SVG], { type: "image/svg+xml" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "plate-cck8.svg";
-    a.click();
-    toastEl.textContent = "✓ 已生成并触发下载 plate-cck8.svg";
+  document.getElementById("btnCopyDemo").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(MD_EXPORTS[activePane]); } catch (_) {}
+    toastEl.textContent = "✓ 已复制当前组件 Markdown（桌面端右键同时支持复制高清 PNG 与矢量 SVG）";
   });
 })();
 </script>

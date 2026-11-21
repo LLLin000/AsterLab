@@ -18,8 +18,7 @@ func moduleCardFrame(v *View, c *ui.Context, icon *ui.SVG, title, badgeText stri
 		// In UnifiedLive canvas, render an open Obsidian-style hairline section without box cages
 		ui.Column(c).FillWidth().Padding(float32(tok.Spacing4), 0).Gap(float32(tok.Spacing8)).Children(func() {
 			if title != "" || badgeText != "" || icon != nil {
-				hdrRow := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8))
-				hdrRow.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					if icon != nil {
 						ui.Icon(c, icon).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
 					}
@@ -31,11 +30,6 @@ func moduleCardFrame(v *View, c *ui.Context, icon *ui.SVG, title, badgeText stri
 						ui.Text(c, badgeText).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 					}
 				})
-				if v.currentModuleData != nil && v.currentModuleKind != "" {
-					components.ContextMenu(c, hdrRow, func(m *components.Menu) {
-						v.buildComponentShareMenu(c, m, v.currentModuleKind, v.currentModuleData)
-					})
-				}
 			}
 			content()
 		})

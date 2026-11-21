@@ -202,7 +202,12 @@ func RenderSVG(props Props, title string, dark bool) string {
 
 			cx := x + cellW/2
 			cy := y + cellH/2
-			if well.Ambiguous {
+			if props.ExcludedIDs[id] {
+				pad := cellW * 0.28
+				fmt.Fprintf(&b, `  <path d="M%.1f %.1f L%.1f %.1f M%.1f %.1f L%.1f %.1f" stroke="%s" stroke-width="2.2" stroke-linecap="round"/>`,
+					x+pad, y+pad, x+cellW-pad, y+cellH-pad, x+cellW-pad, y+pad, x+pad, y+cellH-pad, svgColor(t.Danger))
+				b.WriteByte('\n')
+			} else if well.Ambiguous {
 				fmt.Fprintf(&b, `  <text x="%.1f" y="%.1f" text-anchor="middle" dominant-baseline="central" font-family="Inter, sans-serif" font-size="%.1f" font-weight="700" fill="%s">!</text>`,
 					cx, cy, labelSize*0.9, svgColor(ink))
 				b.WriteByte('\n')
@@ -237,22 +242,33 @@ func RenderSVG(props Props, title string, dark bool) string {
 		}
 	}
 
-	// Color legend
+	// Color legend (centered circular swatches matching plateui.View)
 	if len(legend) > 0 {
-		ly := padY + headerH + gridBlockH + 18
-		lx := padX
+		ly := padY + headerH + gridBlockH + 20
+		var totalRowW float32
+		if legendRows == 1 {
+			for _, item := range legend {
+				lbl := fmt.Sprintf("%s %d", item.Label, item.Count)
+				totalRowW += float32(16 + len([]rune(lbl))*10 + 16)
+			}
+		}
+		startX := padX
+		if legendRows == 1 && totalRowW > 0 && totalRowW < cardW-padX*2 {
+			startX = (cardW - totalRowW + 16) / 2
+		}
+		lx := startX
 		for _, item := range legend {
 			lbl := fmt.Sprintf("%s %d", item.Label, item.Count)
-			itemW := float32(18 + len([]rune(lbl))*11 + 18)
-			if lx > padX && lx+itemW > cardW-padX {
+			itemW := float32(16 + len([]rune(lbl))*10 + 16)
+			if lx > startX && lx+itemW > cardW-padX {
 				lx = padX
 				ly += 24
 			}
-			fmt.Fprintf(&b, `  <rect x="%.1f" y="%.1f" width="10" height="10" rx="2.5" fill="%s"/>`,
-				lx, ly-5, svgColor(item.Color))
+			fmt.Fprintf(&b, `  <circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>`,
+				lx+4.5, ly, svgColor(item.Color))
 			b.WriteByte('\n')
-			fmt.Fprintf(&b, `  <text x="%.1f" y="%.1f" dominant-baseline="central" font-family="Microsoft YaHei, PingFang SC, Inter, sans-serif" font-size="11" fill="%s">%s</text>`,
-				lx+15, ly, svgColor(t.TextMuted), html.EscapeString(lbl))
+			fmt.Fprintf(&b, `  <text x="%.1f" y="%.1f" dominant-baseline="central" font-family="Microsoft YaHei, PingFang SC, Inter, sans-serif" font-size="11.5" fill="%s">%s</text>`,
+				lx+14, ly, svgColor(t.TextMuted), html.EscapeString(lbl))
 			b.WriteByte('\n')
 			lx += itemW
 		}
