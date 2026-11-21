@@ -1029,17 +1029,6 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 						}
 						renderPropsFields()
 
-						if tab.Mode == shell.ModeEdit {
-							ui.Row(c.Key("edit-structure-guide")).FillWidth().
-								Padding(float32(tok.Spacing4)+2, float32(tok.Spacing12)).
-								Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
-								AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-								ui.Icon(c, lucide.Layers()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent).Shrink(0)
-								ui.Text(c, "实验结构：上方设定目的与分组；下方每个「步骤」通过左侧竖线组织内部组件（文本 / 参数 / 孔板 / 计时器 / 数据表）。").
-									FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
-							})
-						}
-
 						// Render the single-source document body & step modules
 						v.Render(c)
 
@@ -1113,21 +1102,34 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 							})
 						}
 
-						// Bottom add-step control in Edit mode
+						// Clear full-width Add Step action outside all Step Cards
 						if tab.Mode == shell.ModeEdit {
-							ui.Row(c).FillWidth().Justify(ui.Start).Gap(float32(tok.Spacing8)).Children(func() {
-								if components.Button(c, "+ 添加实验步骤", components.ButtonSecondary).Clicked() {
-									stepNum := 1
-									for _, m := range doc.Modules {
-										if m.Kind == "step" {
-											stepNum++
-										}
-									}
-									if next, _, err := asterdoc.AddStepInSource(ld.Source, fmt.Sprintf("步骤 %d", stepNum)); err == nil {
-										applyLiveSource(next)
+							addStepBtn := ui.ButtonBase(c.Key("add-new-step-bar")).FillWidth().
+								Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+								Radius(float32(tok.PanelRadius)).
+								Background(tok.Elevated.Alpha(0.45)).
+								Border(1.5, tok.BorderStrong).BorderStyle(ui.BorderDashed).
+								Label("添加新步骤")
+							if addStepBtn.Hovered() {
+								addStepBtn.Background(tok.AccentSoftBg.Alpha(0.45)).BorderColor(tok.Accent)
+							}
+							addStepBtn.Children(func() {
+								ui.Row(c).FillWidth().Center().Gap(float32(tok.Spacing8)).Children(func() {
+									ui.Icon(c, lucide.Plus()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+									ui.Text(c, "添加新步骤").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+								})
+							})
+							if addStepBtn.Clicked() {
+								stepNum := 1
+								for _, m := range doc.Modules {
+									if m.Kind == "step" {
+										stepNum++
 									}
 								}
-							})
+								if next, _, err := asterdoc.AddStepInSource(ld.Source, fmt.Sprintf("步骤 %d", stepNum)); err == nil {
+									applyLiveSource(next)
+								}
+							}
 						}
 					})
 				})

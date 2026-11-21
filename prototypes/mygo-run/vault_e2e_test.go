@@ -28,7 +28,7 @@ func TestVaultObsidianSplitHostEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFolder: %v", err)
 	}
-	tplLD, err := ds.Open("templates/CCK-8细胞增殖活力测定.asterml")
+	tplLD, err := ds.Open("templates/空白实验.asterml")
 	if err != nil {
 		t.Fatalf("open seeded template: %v", err)
 	}

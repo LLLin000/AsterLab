@@ -569,14 +569,30 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 		}
 	}
 
-	stepBox := ui.Column(c).FillWidth().Gap(float32(tok.Spacing8))
+	// Compute 1-based ordinal index of this step among all steps in the document.
+	stepOrdinal := 0
+	if v != nil && v.Doc != nil {
+		for _, m := range v.Doc.Modules {
+			if m.Kind == "step" {
+				stepOrdinal++
+				if m.ID == step.ID {
+					break
+				}
+			}
+		}
+	}
+
+	stepBox := ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+		Background(tok.Surface).Border(1, tok.Border).Clip()
 	if stepMatchesSearch {
-		stepBox.Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-			Background(tok.AccentSoftBg.Alpha(0.35)).Border(1, tok.Accent.Alpha(0.45))
+		stepBox.Border(1.5, tok.Accent)
 	}
 	stepBox.Children(func() {
-		// Clean Obsidian H2 Step Heading with collapse chevron
-		hdrRow := ui.Row(c.Key("live-step-hdr:"+step.ID)).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+		// Distinct native Step Card header band so steps are unmistakably separated from inner components.
+		hdrRow := ui.Row(c.Key("live-step-hdr:"+step.ID)).FillWidth().
+			Padding(float32(tok.Spacing8)+2, float32(tok.Spacing16)).
+			Background(tok.Elevated.Alpha(0.65)).
+			AlignItems(ui.Center).Gap(float32(tok.Spacing8))
 		if v.ScrollToStepID != "" && v.ScrollToStepID == step.ID {
 			hdrRow.ScrollIntoView()
 			v.ScrollToStepID = ""
@@ -592,10 +608,17 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 			if foldBtn.Clicked() {
 				v.stepCollapsed[step.ID] = !collapsed
 			}
+			if stepOrdinal > 0 {
+				ui.Box(c).Padding(2, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+					Background(tok.AccentSoftBg).Shrink(0).Children(func() {
+					ui.Text(c, fmt.Sprintf("步骤 %d", stepOrdinal)).
+						FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+				})
+			}
 			if editable {
 				stBuf := v.ensureWidgetDraft("live_step_t:"+step.ID, stepTitle)
 				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-					ti := BorderlessTextInput(c, tok, stBuf, float32(tok.TextSection), true, "步骤标题…")
+					ti := BorderlessTextInput(c, tok, stBuf, float32(tok.TextSection), true, "输入步骤名称…")
 					if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*stBuf) != "" && strings.TrimSpace(*stBuf) != stepTitle) {
 						if v.OnUpdateModule != nil {
 							v.OnUpdateModule(step.ID, map[string]any{"title": strings.TrimSpace(*stBuf)})
@@ -610,7 +633,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 				ui.Text(c, stepTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
 			}
 			if collapsed && len(blocks) > 0 {
-				components.Badge(c, fmt.Sprintf("%d 块", len(blocks)))
+				components.Badge(c, fmt.Sprintf("%d 个组件", len(blocks)))
 			}
 			if totalStepChecks > 0 {
 				allDone := doneStepChecks == totalStepChecks
@@ -639,7 +662,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 				})
 			}
 			if editable && v.OnInsertStepBlock != nil {
-				addBtn := components.Button(c, "+ 添加组件", components.ButtonGhost)
+				addBtn := components.Button(c, "+ 添加组件", components.ButtonSecondary)
 				components.MenuButton(c, addBtn, func(m *components.Menu) {
 					buildInsertMenu(m, len(blocks))
 				})
@@ -648,144 +671,165 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 		if collapsed {
 			return
 		}
-		// Visual step rail: clearly indicates all blocks below belong to this step.
-		ui.Row(c.Key("live-step-rail:"+step.ID)).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
-			ui.Box(c).Width(2).FillHeight().Radius(float32(tok.ControlRadius)).Background(tok.Accent.Alpha(0.28))
-			ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing8)).Children(func() {
-				if len(blocks) == 0 && len(stringList(step.Data, "block_refs")) == 0 {
-					if editable && v.OnInsertStepBlock != nil {
-						ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-							Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Text(c, "此步骤暂无内容组件 — 选择下方常用组件直接添加到本步骤：").
-								FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
-							ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
-								for _, q := range []struct {
-									kind, label string
-								}{
-									{"prose", "+ 文本说明"},
-									{"checklist", "+ 检查清单"},
-									{"timer", "+ 计时器"},
-									{"param_table", "+ 参数表"},
-									{"plate", "+ 孔板"},
-									{"data_table", "+ 数据表"},
-									{"calculator", "+ 计算器"},
-								} {
-									q := q
-									if components.Button(c, q.label, components.ButtonSecondary).Clicked() {
-										v.OnInsertStepBlock(step.ID, 0, defaultStarterBlock(v.Doc, step.ID, q.kind))
-									}
-								}
-								moreBtn := components.Button(c, "更多组件 ▾", components.ButtonGhost)
-								components.MenuButton(c, moreBtn, func(m *components.Menu) {
-									buildInsertMenu(m, 0)
-								})
-							})
-						})
+		ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.75))
+
+		// Step Card body containing all nested components clearly scoped to this step.
+		ui.Column(c.Key("live-step-body:"+step.ID)).FillWidth().
+			Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
+			if len(blocks) == 0 && len(stringList(step.Data, "block_refs")) == 0 {
+				if editable && v.OnInsertStepBlock != nil {
+					slotBtn := ui.ButtonBase(c.Key("empty-step-slot:"+step.ID)).FillWidth().
+						Padding(float32(tok.Spacing24), float32(tok.Spacing16)).
+						Radius(float32(tok.ControlRadius)).
+						Background(tok.Elevated.Alpha(0.45)).
+						Border(1.5, tok.BorderStrong).BorderStyle(ui.BorderDashed).
+						Label("点击此处添加组件")
+					if slotBtn.Hovered() {
+						slotBtn.Background(tok.AccentSoftBg.Alpha(0.45)).BorderColor(tok.Accent)
 					}
-					return
+					slotBtn.Children(func() {
+						ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Icon(c, lucide.Plus()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+								ui.Text(c, "点击此处添加组件").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+							})
+							ui.Text(c, "文本说明 · 检查清单 · 计时器 · 参数表 · 孔板 · 数据表 · 计算器").
+								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						})
+					})
+					components.MenuButton(c, slotBtn, func(m *components.Menu) {
+						buildInsertMenu(m, 0)
+					})
+				} else {
+					ui.Text(c, "此步骤暂无组件内容").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				}
+				return
+			}
+
+			for idx, bm := range blocks {
+				idx, bm := idx, bm
+				bk := textValue(bm, "kind")
+				bid := textValue(bm, "id")
+				bs := int(numOrZero(bm["schema"]))
+				if bs <= 0 {
+					bs = 1
 				}
 
-				for idx, bm := range blocks {
-					idx, bm := idx, bm
-					bk := textValue(bm, "kind")
-					bid := textValue(bm, "id")
-					bs := int(numOrZero(bm["schema"]))
-					if bs <= 0 {
-						bs = 1
-					}
-
-					blockRow := ui.Row(c.Key("blk-row-"+bid)).FillWidth().AlignItems(ui.Start).
-						Gap(float32(tok.Spacing4)).Transition(theme.AccordionTransition())
-					rowHovered := blockRow.Hovered()
-					blockRow.Children(func() {
-						if editable {
-							grip := ui.Box(c.Key("grip-"+bid)).Width(float32(tok.Spacing16)).Height(float32(tok.Spacing24)).
-								Center().Cursor(ui.CursorGrab).Label("操作块 " + bid)
-							gripTarget := float32(0)
-							if rowHovered {
-								gripTarget = 1
-							}
-							gripOp := grip.AnimateTo("grip-op", gripTarget, theme.MotionMicroFade)
-							grip.Opacity(gripOp).Children(func() {
-								ui.Icon(c, lucide.GripVertical()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
-							})
-							grip.Drag(stepBlockDrag{StepID: step.ID, BlockID: bid, FromIndex: idx})
-							if grip.Dragging() {
-								blockRow.Opacity(0.45)
-							}
-							components.ContextMenu(c, grip, func(m *components.Menu) {
-								v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bs, bm, editable)
-							})
-						}
-						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-							v.RenderModule(c, bk, bs, bm)
-						})
-					})
-
-					components.ContextMenu(c, blockRow, func(m *components.Menu) {
-						v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bs, bm, editable)
-					})
+				blockRow := ui.Row(c.Key("blk-row-"+bid)).FillWidth().AlignItems(ui.Start).
+					Gap(float32(tok.Spacing4)).Transition(theme.AccordionTransition())
+				rowHovered := blockRow.Hovered()
+				blockRow.Children(func() {
 					if editable {
-						if dragged, over := ui.DragOver[stepBlockDrag](blockRow); over && dragged.StepID == step.ID && dragged.FromIndex != idx {
-							blockRow.Border(2, tok.Accent)
+						grip := ui.Box(c.Key("grip-"+bid)).Width(float32(tok.Spacing16)).Height(float32(tok.Spacing24)).
+							Center().Cursor(ui.CursorGrab).Label("操作块 " + bid)
+						gripTarget := float32(0)
+						if rowHovered {
+							gripTarget = 1
 						}
-						if dragged, dropped := ui.Drop[stepBlockDrag](blockRow); dropped && dragged.StepID == step.ID && dragged.FromIndex != idx {
-							if v.OnMoveStepBlockIndex != nil {
-								v.OnMoveStepBlockIndex(step.ID, dragged.BlockID, idx)
-							} else if v.OnMoveStepBlock != nil {
-								if idx > dragged.FromIndex {
-									v.OnMoveStepBlock(step.ID, dragged.BlockID, "down")
-								} else {
-									v.OnMoveStepBlock(step.ID, dragged.BlockID, "up")
-								}
+						gripOp := grip.AnimateTo("grip-op", gripTarget, theme.MotionMicroFade)
+						grip.Opacity(gripOp).Children(func() {
+							ui.Icon(c, lucide.GripVertical()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+						})
+						grip.Drag(stepBlockDrag{StepID: step.ID, BlockID: bid, FromIndex: idx})
+						if grip.Dragging() {
+							blockRow.Opacity(0.45)
+						}
+						components.ContextMenu(c, grip, func(m *components.Menu) {
+							v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bs, bm, editable)
+						})
+					}
+					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+						v.RenderModule(c, bk, bs, bm)
+					})
+				})
+
+				components.ContextMenu(c, blockRow, func(m *components.Menu) {
+					v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bs, bm, editable)
+				})
+				if editable {
+					if dragged, over := ui.DragOver[stepBlockDrag](blockRow); over && dragged.StepID == step.ID && dragged.FromIndex != idx {
+						blockRow.Border(2, tok.Accent)
+					}
+					if dragged, dropped := ui.Drop[stepBlockDrag](blockRow); dropped && dragged.StepID == step.ID && dragged.FromIndex != idx {
+						if v.OnMoveStepBlockIndex != nil {
+							v.OnMoveStepBlockIndex(step.ID, dragged.BlockID, idx)
+						} else if v.OnMoveStepBlock != nil {
+							if idx > dragged.FromIndex {
+								v.OnMoveStepBlock(step.ID, dragged.BlockID, "down")
+							} else {
+								v.OnMoveStepBlock(step.ID, dragged.BlockID, "up")
 							}
 						}
-						// Check slash menu open trigger from prose block
-						slashOpen := ui.Local(c.Root(), "slash-menu-step:"+step.ID+":"+bid, func() bool { return false })
-						if *slashOpen && v.OnInsertStepBlock != nil {
-							components.Popover(c, blockRow, slashOpen, func(panel ui.Element) {
-								panel.Width(float32(tok.Spacing48)*5).Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).Children(func() {
-									ui.Text(c, "插入组件").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
-									for _, ent := range []paletteEntry{
-										{Kind: "prose", Label: "文本段落", Icon: lucide.FileText()},
-										{Kind: "checklist", Label: "检查清单", Icon: lucide.SquareCheck()},
-										{Kind: "timer", Label: "计时器", Icon: lucide.Timer()},
-										{Kind: "param_table", Label: "参数表", Icon: lucide.SlidersHorizontal()},
-										{Kind: "group_table", Label: "分组表", Icon: lucide.Table2()},
-										{Kind: "plate", Label: "孔板 / 管架", Icon: lucide.Grid2x2()},
-										{Kind: "data_table", Label: "数据记录表", Icon: lucide.Table2()},
-										{Kind: "calculator", Label: "稀释计算表", Icon: lucide.Calculator()},
-										{Kind: "figure", Label: "图片 / 示意图", Icon: lucide.Image()},
-										{Kind: "attachment", Label: "附件与采图", Icon: lucide.Paperclip()},
-										{Kind: "subflow", Label: "子流程", Icon: lucide.GitBranch()},
-									} {
-										ent := ent
-										if components.Button(c, ent.Label, components.ButtonGhost).Clicked() {
-											*slashOpen = false
-											v.OnInsertStepBlock(step.ID, idx+1, DefaultStarterBlockWithPrefs(v.Doc, step.ID, ent.Kind, v.DefaultPlateFormat, v.DefaultExcessPct))
-										}
-									}
-								})
-							})
-						}
 					}
+					// Check slash menu open trigger from prose block
+					slashOpen := ui.Local(c.Root(), "slash-menu-step:"+step.ID+":"+bid, func() bool { return false })
+					if *slashOpen && v.OnInsertStepBlock != nil {
+						components.Popover(c, blockRow, slashOpen, func(panel ui.Element) {
+							panel.Width(float32(tok.Spacing48)*5).Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Text(c, "插入组件").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+								for _, ent := range []paletteEntry{
+									{Kind: "prose", Label: "文本段落", Icon: lucide.FileText()},
+									{Kind: "checklist", Label: "检查清单", Icon: lucide.SquareCheck()},
+									{Kind: "timer", Label: "计时器", Icon: lucide.Timer()},
+									{Kind: "param_table", Label: "参数表", Icon: lucide.SlidersHorizontal()},
+									{Kind: "group_table", Label: "分组表", Icon: lucide.Table2()},
+									{Kind: "plate", Label: "孔板 / 管架", Icon: lucide.Grid2x2()},
+									{Kind: "data_table", Label: "数据记录表", Icon: lucide.Table2()},
+									{Kind: "calculator", Label: "稀释计算表", Icon: lucide.Calculator()},
+									{Kind: "figure", Label: "图片 / 示意图", Icon: lucide.Image()},
+									{Kind: "attachment", Label: "附件与采图", Icon: lucide.Paperclip()},
+									{Kind: "subflow", Label: "子流程", Icon: lucide.GitBranch()},
+								} {
+									ent := ent
+									if components.Button(c, ent.Label, components.ButtonGhost).Clicked() {
+										*slashOpen = false
+										v.OnInsertStepBlock(step.ID, idx+1, DefaultStarterBlockWithPrefs(v.Doc, step.ID, ent.Kind, v.DefaultPlateFormat, v.DefaultExcessPct))
+									}
+								}
+							})
+						})
+					}
+				}
+				if idx < len(blocks)-1 {
 					renderHoverInsertGap(idx+1, false)
 				}
+			}
 
-				// Resolved top-level block_refs
-				for _, refID := range stringList(step.Data, "block_refs") {
-					if v.Doc == nil {
-						continue
-					}
-					for i := range v.Doc.Modules {
-						if v.Doc.Modules[i].ID == refID {
-							m := v.Doc.Modules[i]
-							v.RenderModule(c, m.Kind, m.Schema, m.Data)
-							break
-						}
+			// Resolved top-level block_refs
+			for _, refID := range stringList(step.Data, "block_refs") {
+				if v.Doc == nil {
+					continue
+				}
+				for i := range v.Doc.Modules {
+					if v.Doc.Modules[i].ID == refID {
+						m := v.Doc.Modules[i]
+						v.RenderModule(c, m.Kind, m.Schema, m.Data)
+						break
 					}
 				}
-			})
+			}
+
+			// Compact dashed footer drop-slot inside populated step card for effortless appending.
+			if editable && v.OnInsertStepBlock != nil {
+				addMore := ui.ButtonBase(c.Key("append-step-slot:"+step.ID)).FillWidth().
+					Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+					Radius(float32(tok.ControlRadius)).
+					Background(ui.Transparent).
+					Border(1, tok.Border).BorderStyle(ui.BorderDashed).
+					Label("继续添加组件到本步骤")
+				if addMore.Hovered() {
+					addMore.Background(tok.AccentSoftBg.Alpha(0.35)).BorderColor(tok.Accent)
+				}
+				addMore.Children(func() {
+					ui.Row(c).FillWidth().Center().Gap(float32(tok.Spacing4)).Children(func() {
+						ui.Icon(c, lucide.Plus()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+						ui.Text(c, "点击此处继续添加组件").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					})
+				})
+				components.MenuButton(c, addMore, func(m *components.Menu) {
+					buildInsertMenu(m, len(blocks))
+				})
+			}
 		})
 	})
 }

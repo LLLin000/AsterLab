@@ -19,22 +19,31 @@ import (
 	"asterlab-mygo-prototype/internal/vault"
 )
 
+const releaseBlankTemplateDoc = `---
+title: 空白实验
+---
+
+` + "```asterlab" + `
+kind: step
+id: step-01
+schema: 1
+title: 步骤 1
+blocks: []
+` + "```" + `
+
+` + "```asterlab" + `
+kind: step
+id: step-02
+schema: 1
+title: 步骤 2
+blocks: []
+` + "```" + `
+`
+
 func defaultTemplateSeeds() map[string]string {
-	seeds := map[string]string{}
-	add := func(name, title, src string) {
-		if cleaned, err := asterdoc.ClearExecutionDataForTemplate(src, title); err == nil {
-			seeds[name] = cleaned
-			return
-		}
-		seeds[name] = src
+	return map[string]string{
+		"空白实验.asterml": releaseBlankTemplateDoc,
 	}
-	add("空白实验.asterml", "空白实验", blankAsterDoc)
-	add("CCK-8细胞增殖活力测定.asterml", "CCK-8 细胞增殖测定", starterAsterDoc)
-	add("RT-qPCR多靶点定量.asterml", "RT-qPCR 多靶点定量", rtQpcrAsterDoc)
-	add("HUVEC水凝胶成管.asterml", "HUVEC 水凝胶血管成管", huvecAsterDoc)
-	add("梯度稀释涂板CFU.asterml", "梯度稀释涂板 CFU", cfuAsterDoc)
-	add("抑菌圈定量实验.asterml", "90mm 平皿抑菌圈测定", inhibitionZoneAsterDoc)
-	return seeds
 }
 
 func (a *app) initVaultWorkspace(vaultRoot string) error {
@@ -348,9 +357,18 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 						ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 					})
 					tSel.Popup(func(p ui.Element) {
-						tSel.Item("").Children(func() {
-							ui.Text(c, "空白实验").FontSize(float32(tok.TextData)).TextColor(tok.Text)
-						})
+						hasBlank := false
+						for _, tpl := range templates {
+							if tpl.Name == "空白实验" {
+								hasBlank = true
+								break
+							}
+						}
+						if !hasBlank {
+							tSel.Item("").Children(func() {
+								ui.Text(c, "空白实验").FontSize(float32(tok.TextData)).TextColor(tok.Text)
+							})
+						}
 						for _, tpl := range templates {
 							tpl := tpl
 							tSel.Item(tpl.RelPath).Children(func() {
@@ -407,7 +425,7 @@ func (a *app) confirmCreateVaultExperiment() {
 		}
 	}
 	title := strings.TrimSpace(a.newExpTitle)
-	tplSrc := blankAsterDoc
+	tplSrc := releaseBlankTemplateDoc
 	if a.newExpTemplate != "" {
 		if ld, err := a.docStore.Open(a.newExpTemplate); err == nil && strings.TrimSpace(ld.Source) != "" {
 			tplSrc = ld.Source

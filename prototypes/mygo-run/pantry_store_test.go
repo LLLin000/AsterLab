@@ -210,14 +210,27 @@ func TestObsidianVaultPantryAnd27InchVisualAudit(t *testing.T) {
 		st.Frame()
 		st.Advance(200 * time.Millisecond)
 		st.Frame()
-		if !st.HasText("CCK-8 试剂测试") || !st.HasText("此步骤暂无内容组件") {
-			t.Fatalf("expected guided empty step quick-insert controls, got: %q", st.Texts())
+		if !st.HasText("CCK-8 试剂测试") || !st.HasText("点击此处添加组件") {
+			t.Fatalf("expected guided empty step dashed dropzone, got: %q", st.Texts())
 		}
 		if st.HasText("方案版本标识") || st.HasText("结构化列表（在步骤工作台或源码中编辑）") {
 			t.Fatalf("unexpected raw schema table in UnifiedLive edit view: %q", st.Texts())
 		}
 	})
 	sh.SetRightDrawer(false, 0)
+
+	// Verify the release blank template renders cleanly with 2 empty steps + dashed dropzones.
+	sh.OpenFileInPane(sh.ActivePaneID, "templates/空白实验.asterml", "空白实验", shell.ModeEdit, true)
+	renderVisualPNGSteps(t, outDir, "desktop_27inch_blank_light.png", 2560, 1440, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("步骤 1") || !st.HasText("步骤 2") || !st.HasText("点击此处添加组件") || !st.HasText("添加新步骤") {
+			t.Fatalf("expected 2 empty steps with dashed dropzones in blank template, got: %q", st.Texts())
+		}
+	})
 
 	// Verify update badge & Settings "about" update panel render cleanly.
 	sh.UpdateStatus = "available"

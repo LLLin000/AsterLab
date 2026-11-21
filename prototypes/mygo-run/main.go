@@ -6032,7 +6032,7 @@ func (a *app) renderNewDesignDialog(c *ui.Context) {
 					a.newDesignTargetDate = ""
 				}
 				if components.Button(c, "空白实验", components.ButtonPrimary).Clicked() {
-					createTemplate(blankAsterDoc, "新实验")
+					createTemplate(releaseBlankTemplateDoc, "新实验")
 				}
 			})
 		})

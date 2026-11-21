@@ -195,8 +195,8 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 							}
 						})
 					}
-					card("demo", "体验「CCK-8 细胞活力示范实验库」", "一键生成含完整分组、步骤模块、96孔板及读数统计的示范实验，并预置示范试剂架。", "推荐首次体验", true, "demo")
-					card("new", "从模板新建第一份实验", "直接打开模板选择器（CCK-8 / RT-qPCR / 成管 / 涂板 / 空白实验）。", "", false, "new")
+					card("new", "新建空白实验（推荐）", "打开极简双步骤空白画布，点击虚线框即可自由添加文本、表格、孔板与计时器。", "快速开始", true, "new")
+					card("demo", "体验「CCK-8 细胞活力示范实验库」", "一键生成含分组、步骤卡片、96孔板与读数统计的示范实验，直观感受完整用法。", "", false, "demo")
 					card("existing", "打开本地已有实验库目录", fmt.Sprintf("当前默认路径：%s", firstNonEmptyStr(s.VaultPathInput, "默认实验库目录")), "", false, "existing")
 				})
 
