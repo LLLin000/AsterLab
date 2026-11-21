@@ -177,6 +177,14 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 									components.TextBox(c, &s.VaultPathInput, components.TextBoxOptions{}).
 										Placeholder("输入本地实验库文件夹路径")
 								})
+								if s.OnPickVaultPath != nil && components.Button(c, "浏览…", components.ButtonOutline).Clicked() {
+									if picked := strings.TrimSpace(s.OnPickVaultPath()); picked != "" {
+										s.VaultPathInput = picked
+										if s.OnSwitchVaultPath != nil {
+											s.OnSwitchVaultPath(picked)
+										}
+									}
+								}
 								if components.Button(c, "切换路径", components.ButtonSecondary).Clicked() && s.OnSwitchVaultPath != nil {
 									s.OnSwitchVaultPath(strings.TrimSpace(s.VaultPathInput))
 									s.VaultSettingsOpen = false
@@ -713,6 +721,95 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 		Description: "本地单真源 .asterml 实验工作台 × Pure-Go astercore 科学核心（零 SQLite / Rust 依赖）。",
 		Groups: []components.SettingsGroup{
 			{
+				ID:    "app-update",
+				Title: "软件版本与自动更新",
+				Items: []components.SettingsItem{
+					{
+						ID:          "update-status",
+						Title:       "当前版本与发布通道",
+						Description: "检查 GitHub Releases 中的最新 Pure-Go Windows 版本并自动校验 SHA256 后替换重启。",
+						Keywords:    []string{"update", "version", "release", "升级", "更新", "版本"},
+						Stacked:     true,
+						Build: func(c *ui.Context) {
+							curVer := firstNonEmptyStr(s.AppVersion, "0.1.0-dev")
+							commitStr := strings.TrimSpace(s.BuildCommit)
+							ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+									verLabel := "v" + strings.TrimPrefix(curVer, "v")
+									if commitStr != "" && commitStr != "dev" {
+										verLabel += " (" + commitStr + ")"
+									}
+									components.Badge(c, verLabel)
+									switch s.UpdateStatus {
+									case "checking":
+										components.Text(c, "正在检查更新…").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
+									case "up_to_date":
+										components.Text(c, "已是最新版本").FontSize(float32(tok.TextData)).TextColor(tok.Success)
+									case "available":
+										components.Badge(c, "发现新版本 "+s.UpdateLatestVersion)
+									case "downloading":
+										components.Text(c, "正在下载并校验更新包…").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
+									case "restarting":
+										components.Text(c, "更新已就绪，正在重启应用…").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
+									case "error":
+										if s.UpdateErr != "" {
+											components.Text(c, s.UpdateErr).FontSize(float32(tok.TextData)).TextColor(tok.Danger)
+										}
+									}
+								})
+								ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+									chkBtn := components.Button(c, "检查更新", components.ButtonSecondary)
+									if s.UpdateStatus == "checking" || s.UpdateStatus == "downloading" || s.UpdateStatus == "restarting" {
+										chkBtn.Disabled(true)
+									}
+									if chkBtn.Clicked() && s.OnCheckUpdate != nil {
+										s.OnCheckUpdate()
+									}
+									if s.UpdateStatus == "available" && s.OnInstallUpdate != nil {
+										if components.Button(c, "立即更新并重启", components.ButtonPrimary).Clicked() {
+											s.OnInstallUpdate()
+										}
+									}
+									if s.UpdateDownloadURL != "" && s.OnOpenUpdatePage != nil {
+										if components.Button(c, "查看发布说明", components.ButtonGhost).Clicked() {
+											s.OnOpenUpdatePage()
+										}
+									}
+								})
+								if strings.TrimSpace(s.UpdateNotes) != "" && s.UpdateStatus == "available" {
+									ui.Box(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+										Background(tok.Elevated).Children(func() {
+										ui.Text(c, s.UpdateNotes).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+									})
+								}
+							})
+						},
+					},
+					{
+						ID:          "update-auto-check",
+						Title:       "启动时自动检查更新",
+						Description: "桌面启动后在后台静默检查是否有可用新版本，仅在状态栏轻提示。",
+						Keywords:    []string{"auto update", "自动检查"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.UpdateAutoCheck, "自动检查", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+					{
+						ID:          "update-prerelease",
+						Title:       "接收预发布版本 (Pre-release)",
+						Description: "包含功能预览版与候选测试版；关闭则仅检查正式 Release。",
+						Keywords:    []string{"prerelease", "beta", "rc", "预发布"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.UpdateIncludePre, "预发布", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+				},
+			},
+			{
 				ID:    "brand-identity",
 				Title: "品牌标识与架构",
 				Items: []components.SettingsItem{
@@ -721,6 +818,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Title:       "AsterLab 三流几何徽标",
 						Description: "三条并发轨道映照科研数据流：实验设计（Violet）· 步骤执行（Sky）· 分析汇总（Emerald）；支持大/小双尺寸光学适配。",
 						Keywords:    []string{"logo", "brand", "asterlab", "svg", "tri-stream", "图标"},
+						Stacked:     true,
 						Build: func(c *ui.Context) {
 							t := c.Theme()
 							mark := theme.LogoParsedTriStream(tok.Dark)

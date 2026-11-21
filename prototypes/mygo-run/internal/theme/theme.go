@@ -123,10 +123,10 @@ func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 		Spacing32:     32,
 		Spacing48:     48,
 		TextPage:      scaleTextToken(22, scale),
-		TextSection:   scaleTextToken(15, scale),
-		TextBody:      scaleTextToken(13, scale),
+		TextSection:   scaleTextToken(16, scale),
+		TextBody:      scaleTextToken(14, scale),
 		TextMeta:      scaleTextToken(12, scale),
-		TextData:      scaleTextToken(12, scale),
+		TextData:      scaleTextToken(13, scale),
 		ButtonHeight:  30,
 		InputHeight:   30,
 		RowHeight:     32,
@@ -350,10 +350,15 @@ func Window(c *ui.Context) *ui.Theme {
 		t.TextMuted = t.TextMuted.Mix(t.Text, 0.4)
 		t.Scrollbar = t.Scrollbar.Alpha(1.6)
 	}
+	scale := float32(1)
 	if userScale, _ := AccessibilityPrefs(); userScale > 0 && userScale != 1 {
-		t.FontSize *= userScale
+		scale = userScale
 	} else if s := p.TextScale; s > 0 && s != 1 {
-		t.FontSize *= s
+		scale = s
+	}
+	if scale != 1 {
+		t.FontSize *= scale
+		t.Spacing = max(3.5, min(5.5, 4.0*scale))
 	}
 	return t
 }
@@ -465,6 +470,11 @@ func applyTokens(c Tokens) *ui.Theme {
 	t.Scrollbar = c.Text.Alpha(.28)
 	t.FocusRingWidth, t.FocusRingOffset = 2, 1
 	t.Radius = float32(c.ControlRadius)
-	t.Spacing = 4
+	if c.TextBody > 0 {
+		t.FontSize = float32(c.TextBody)
+		t.Spacing = max(3.5, min(5.5, 4.0*float32(c.TextBody)/14.0))
+	} else {
+		t.Spacing = 4
+	}
 	return t
 }

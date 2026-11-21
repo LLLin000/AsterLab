@@ -249,6 +249,7 @@ func (a *app) openNewExperimentDialog(folderRel, dateYMD string) {
 		a.newExpTemplate = "templates/空白实验.asterml"
 	}
 	a.newExpNewFolder = ""
+	a.newExpErr = ""
 	a.newExpOpen = true
 }
 
@@ -280,10 +281,11 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 			titleCol := ui.Column(c.Key("new-exp-title-col")).FillWidth().Gap(float32(tok.Spacing4))
 			theme.ApplyNudge(titleCol, a.newExpNudgeSeq)
 			titleCol.Children(func() {
-				ui.Text(c, "实验名称").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+				ui.Text(c, "实验名称").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
 				tb := components.TextBox(c, &a.newExpTitle, components.TextBoxOptions{}).Placeholder("例如：CCK-8 药物敏感性测定")
 				if tb.Submitted() {
 					if strings.TrimSpace(a.newExpTitle) == "" {
+						a.newExpErr = "请输入实验名称"
 						a.newExpNudgeSeq++
 					} else {
 						a.confirmCreateVaultExperiment()
@@ -294,14 +296,14 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 			// Location (Project folder picker + inline new folder) + Date
 			ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "保存位置（项目文件夹）").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					ui.Text(c, "保存位置（项目文件夹）").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
 					sel := components.Select(c, &a.newExpFolder)
 					sel.Trigger.Children(func() {
 						lbl := a.newExpFolder
 						if lbl == "" {
 							lbl = "根目录"
 						}
-						ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+						ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 					})
 					sel.Popup(func(p ui.Element) {
 						for _, f := range folders {
@@ -311,23 +313,23 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 								lbl = "根目录"
 							}
 							sel.Item(f).Children(func() {
-								ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+								ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 							})
 						}
 						sel.Item("__new__").Children(func() {
-							ui.Text(c, "+ 新建项目文件夹…").FontSize(float32(tok.TextMeta)).TextColor(tok.Accent)
+							ui.Text(c, "+ 新建项目文件夹…").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
 						})
 					})
 				})
-				ui.Column(c).Width(float32(tok.Spacing48)*3.0).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "日期（YYYY-MM-DD，可空）").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+				ui.Column(c).Width(float32(tok.Spacing48)*3.3).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "日期（YYYY-MM-DD，可空）").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
 					components.TextBox(c, &a.newExpDate, components.TextBoxOptions{}).Placeholder("2026-11-20")
 				})
 			})
 
 			if a.newExpFolder == "__new__" {
 				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "新项目文件夹名").FontSize(float32(tok.TextMeta)).TextColor(tok.Accent)
+					ui.Text(c, "新项目文件夹名").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
 					components.TextBox(c, &a.newExpNewFolder, components.TextBoxOptions{}).Placeholder("例如：肿瘤耐药筛选")
 				})
 			}
@@ -335,7 +337,7 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 			// Template picker
 			if len(templates) > 0 {
 				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "选用模板").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					ui.Text(c, "选用模板").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
 					tSel := components.Select(c, &a.newExpTemplate)
 					tSel.Trigger.Children(func() {
 						lbl := strings.TrimSuffix(filepath.Base(a.newExpTemplate), ".asterml")
@@ -343,20 +345,23 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 							lbl = "空白实验"
 						}
 						tSel.Trigger.Label(lbl)
-						ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+						ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 					})
 					tSel.Popup(func(p ui.Element) {
 						tSel.Item("").Children(func() {
-							ui.Text(c, "空白实验").FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							ui.Text(c, "空白实验").FontSize(float32(tok.TextData)).TextColor(tok.Text)
 						})
 						for _, tpl := range templates {
 							tpl := tpl
 							tSel.Item(tpl.RelPath).Children(func() {
-								ui.Text(c, tpl.Name).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+								ui.Text(c, tpl.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 							})
 						}
 					})
 				})
+			}
+			if a.newExpErr != "" {
+				ui.Text(c, a.newExpErr).FontSize(float32(tok.TextData)).TextColor(tok.Danger)
 			}
 
 			ui.Row(c).FillWidth().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
@@ -380,13 +385,16 @@ func (a *app) confirmCreateVaultExperiment() {
 		return
 	}
 	if a.newExpFolder == "__new__" && strings.TrimSpace(a.newExpNewFolder) == "" {
+		a.newExpErr = "请填写新项目文件夹名称"
 		a.newExpNudgeSeq++
 		return
 	}
 	if strings.TrimSpace(a.newExpDate) != "" && asterdoc.NormalizeDateYMD(a.newExpDate) == "" {
+		a.newExpErr = "日期格式请填写 YYYY-MM-DD（或留空）"
 		a.newExpNudgeSeq++
 		return
 	}
+	a.newExpErr = ""
 	folder := a.newExpFolder
 	if folder == "__new__" {
 		name := strings.TrimSpace(a.newExpNewFolder)

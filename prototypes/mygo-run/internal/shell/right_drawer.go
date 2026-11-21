@@ -54,11 +54,34 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 		drawerCol.Background(tok.Surface.Alpha(0.92))
 	}
 	drawerCol.Children(func() {
-		ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-			Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
-			tabIdx := s.RightTab
-			components.Tabs(c, &tabIdx, components.TabsSegmented, "步骤大纲", "速算与计时", "关联与诊断")
-			s.RightTab = tabIdx
+		ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Children(func() {
+			ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)).
+				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
+				Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+				ariaLabels := []string{"步骤大纲", "速算与计时", "关联与诊断"}
+				for idx, lbl := range []string{"大纲", "速算计时", "关联诊断"} {
+					idx, lbl := idx, lbl
+					active := s.RightTab == idx
+					btn := ui.ButtonBase(c.Key(fmt.Sprintf("rd-tab-%d", idx))).
+						Grow(1).MinWidth(0).Center().
+						Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
+						Radius(float32(tok.ControlRadius)).Label(ariaLabels[idx])
+					fg := tok.TextMuted
+					if active {
+						btn.Background(tok.Surface).Border(1, tok.Border.Alpha(0.75))
+						fg = tok.Text
+					} else if btn.Hovered() {
+						btn.Background(tok.Text.Alpha(0.04))
+						fg = tok.Text
+					}
+					btn.Children(func() {
+						ui.Text(c, lbl).FontSize(float32(tok.TextData)).Bold().TextColor(fg).SingleLine().Ellipsis("…")
+					})
+					if btn.Clicked() {
+						s.RightTab = idx
+					}
+				}
+			})
 		})
 		ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.5))
 
@@ -108,10 +131,10 @@ func (s *Shell) renderDrawerOutline(c *ui.Context, tok theme.Tokens) {
 				} else {
 					ui.Box(c).Size(float32(tok.Spacing4), float32(tok.Spacing4)).Radius(float32(tok.ControlRadius)).Background(tok.TextMuted.Alpha(0.45))
 				}
-				components.Text(c, step.Title).FontSize(float32(tok.TextMeta)).TextColor(fg).
+				components.Text(c, step.Title).FontSize(float32(tok.TextData)).TextColor(fg).
 					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 				if step.Meta != "" {
-					ui.Text(c, step.Meta).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted).Shrink(0)
+					ui.Text(c, step.Meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Shrink(0)
 				}
 			})
 		})
@@ -226,12 +249,12 @@ func (s *Shell) renderDrawerLinksAndDiagnostics(c *ui.Context, tok theme.Tokens)
 					ui.Icon(c, lucide.Link()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
 					ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 						components.Text(c, firstNonEmptyStr(ref.SourceTitle, ref.SourceRel)).
-							FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+							FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 						sub := kindLbl
 						if ref.SourceDate != "" {
 							sub += " · " + ref.SourceDate
 						}
-						components.Text(c, sub).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted).SingleLine()
+						components.Text(c, sub).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 					})
 				})
 				if row.Clicked() && s.OnOpenSearchHit != nil {
@@ -271,14 +294,14 @@ func (s *Shell) renderDrawerLinksAndDiagnostics(c *ui.Context, tok theme.Tokens)
 				Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 				Background(tok.Elevated).Border(1, sevCol.Alpha(0.32)).Gap(float32(tok.Spacing4)).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, sevLbl).FontSize(float32(tok.TextMeta)*0.88).Bold().TextColor(sevCol)
+					ui.Text(c, sevLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(sevCol)
 					if diag.Code != "" {
-						ui.Text(c, diag.Code).FontSize(float32(tok.TextMeta)*0.85).TextColor(tok.TextMuted)
+						ui.Text(c, diag.Code).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					}
 				})
-				components.Text(c, diag.Message).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+				components.Text(c, diag.Message).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 				if diag.NextAction != "" {
-					components.Text(c, "建议: "+diag.NextAction).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted)
+					components.Text(c, "建议: "+diag.NextAction).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				}
 			})
 		}
@@ -286,9 +309,32 @@ func (s *Shell) renderDrawerLinksAndDiagnostics(c *ui.Context, tok theme.Tokens)
 }
 
 func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
-	mode := s.RightCalc.Mode
-	components.Tabs(c, &mode, components.TabsSegmented, "C1·V1 稀释", "摩尔称量")
-	s.RightCalc.Mode = mode
+	ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)).
+		Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
+		Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+		for idx, lbl := range []string{"C1·V1 稀释", "摩尔称量"} {
+			idx, lbl := idx, lbl
+			active := s.RightCalc.Mode == idx
+			btn := ui.ButtonBase(c.Key(fmt.Sprintf("rd-calc-%d", idx))).
+				Grow(1).MinWidth(0).Center().
+				Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
+				Radius(float32(tok.ControlRadius)).Label(lbl)
+			fg := tok.TextMuted
+			if active {
+				btn.Background(tok.Surface).Border(1, tok.Border.Alpha(0.75))
+				fg = tok.Text
+			} else if btn.Hovered() {
+				btn.Background(tok.Text.Alpha(0.04))
+				fg = tok.Text
+			}
+			btn.Children(func() {
+				ui.Text(c, lbl).FontSize(float32(tok.TextData)).Bold().TextColor(fg).SingleLine().Ellipsis("…")
+			})
+			if btn.Clicked() {
+				s.RightCalc.Mode = idx
+			}
+		}
+	})
 
 	if s.RightCalc.Mode == 0 {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {

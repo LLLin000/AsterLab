@@ -972,7 +972,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 											}
 										})
 									} else {
-										ui.Text(c, dateBadge).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+										ui.Text(c, dateBadge).FontSize(float32(tok.TextData)).TextColor(tok.TextMuted).FontFeatures("tnum")
 									}
 								})
 
@@ -982,7 +982,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 									pSel.Trigger.Children(func() {
 										ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 											ui.Icon(c, lucide.Folder()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
-											ui.Text(c, folderLabel).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+											ui.Text(c, folderLabel).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 										})
 									})
 									pSel.Popup(func(panel ui.Element) {
@@ -990,7 +990,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 											pf := pf
 											lbl := firstNonEmpty(pf, "根目录")
 											pSel.Item(pf).Children(func() {
-												ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+												ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 											})
 										}
 									})
@@ -1000,7 +1000,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 								} else {
 									ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 										ui.Icon(c, lucide.Folder()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
-										ui.Text(c, folderLabel).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										ui.Text(c, folderLabel).FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
 									})
 								}
 
@@ -1009,14 +1009,14 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 								sSel.Trigger.Children(func() {
 									ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 										ui.Box(c).Size(float32(tok.Spacing4)*1.5, float32(tok.Spacing4)*1.5).Radius(float32(tok.ControlRadius)).Background(tok.Accent)
-										ui.Text(c, statusLabels[sVal]).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent)
+										ui.Text(c, statusLabels[sVal]).FontSize(float32(tok.TextData)).TextColor(tok.Accent)
 									})
 								})
 								sSel.Popup(func(panel ui.Element) {
 									for _, opt := range []string{"planned", "in_progress", "completed"} {
 										opt := opt
 										sSel.Item(opt).Children(func() {
-											ui.Text(c, statusLabels[opt]).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+											ui.Text(c, statusLabels[opt]).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 										})
 									}
 								})
@@ -1028,6 +1028,17 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 							ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.45))
 						}
 						renderPropsFields()
+
+						if tab.Mode == shell.ModeEdit {
+							ui.Row(c.Key("edit-structure-guide")).FillWidth().
+								Padding(float32(tok.Spacing4)+2, float32(tok.Spacing12)).
+								Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
+								AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Icon(c, lucide.Layers()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent).Shrink(0)
+								ui.Text(c, "实验结构：上方设定目的与分组；下方每个「步骤」通过左侧竖线组织内部组件（文本 / 参数 / 孔板 / 计时器 / 数据表）。").
+									FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+							})
+						}
 
 						// Render the single-source document body & step modules
 						v.Render(c)
@@ -1059,12 +1070,12 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 											Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 											Background(tok.Elevated).Gap(float32(tok.Spacing4)).Children(func() {
 											ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-												ui.Text(c, sum.Title).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+												ui.Text(c, sum.Title).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
 												if sum.Control != "" {
-													ui.Text(c, "对照: "+sum.Control).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted)
+													ui.Text(c, "对照: "+sum.Control).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 												}
 												if sum.ExcludedN > 0 {
-													ui.Text(c, fmt.Sprintf("已剔除 %d 异常孔", sum.ExcludedN)).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.Warning).FontFeatures("tnum")
+													ui.Text(c, fmt.Sprintf("已剔除 %d 异常孔", sum.ExcludedN)).FontSize(float32(tok.TextMeta)).TextColor(tok.Warning).FontFeatures("tnum")
 												}
 											})
 											switch sum.Kind {
@@ -1105,9 +1116,14 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 						// Bottom add-step control in Edit mode
 						if tab.Mode == shell.ModeEdit {
 							ui.Row(c).FillWidth().Justify(ui.Start).Gap(float32(tok.Spacing8)).Children(func() {
-								if components.Button(c, "+ 添加实验步骤", components.ButtonGhost).Clicked() {
-									n := len(doc.Modules) + 1
-									if next, _, err := asterdoc.AddStepInSource(ld.Source, fmt.Sprintf("步骤 %d", n)); err == nil {
+								if components.Button(c, "+ 添加实验步骤", components.ButtonSecondary).Clicked() {
+									stepNum := 1
+									for _, m := range doc.Modules {
+										if m.Kind == "step" {
+											stepNum++
+										}
+									}
+									if next, _, err := asterdoc.AddStepInSource(ld.Source, fmt.Sprintf("步骤 %d", stepNum)); err == nil {
 										applyLiveSource(next)
 									}
 								}

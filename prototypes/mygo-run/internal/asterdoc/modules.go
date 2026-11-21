@@ -152,10 +152,11 @@ func referenceSpec() ModuleSpec {
 		view := textValue(data, "view")
 		ui.Row(c).Padding(t.Space(2), t.Space(3)).Radius(t.Radius).Background(t.Surface).
 			Border(1, t.Border).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+			tok := theme.GetTokens(t)
 			components.Badge(c, "引用")
-			ui.Text(c, ref).FontSize(t.Rem(.85)).TextColor(t.Text)
+			ui.Text(c, ref).FontSize(float32(tok.TextData)).TextColor(t.Text)
 			if view != "" {
-				ui.Text(c, "· "+view).FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+				ui.Text(c, "· "+view).FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 			}
 		})
 	})
@@ -166,15 +167,16 @@ func experimentSpec() ModuleSpec {
 		t := c.Theme()
 		ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).Radius(t.Radius).
 			Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Text(c, textValue(data, "title")).FontSize(t.Rem(1.1)).Bold().TextColor(t.Text)
+			tok := theme.GetTokens(t)
+			ui.Text(c, textValue(data, "title")).FontSize(float32(tok.TextSection)).Bold().TextColor(t.Text)
 			for _, key := range []string{"objective", "research_question", "experimental_unit"} {
 				if value := textValue(data, key); value != "" {
-					ui.Text(c, value).FontSize(t.Rem(.85)).TextColor(t.TextMuted)
+					ui.Text(c, value).FontSize(float32(tok.TextBody)).TextColor(t.TextMuted)
 				}
 			}
 			if points := stringList(data, "timepoints"); len(points) > 0 {
 				ui.Text(c, "时间点 · "+strings.Join(points, " / ")).
-					FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+					FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 			}
 		})
 	})
@@ -185,13 +187,14 @@ func groupSpec() ModuleSpec {
 		t := c.Theme()
 		ui.Row(c).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius).Background(t.Surface).
 			Border(1, t.Border).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+			tok := theme.GetTokens(t)
 			ui.Box(c).Size(t.Space(2), t.Space(2)).Radius(t.Radius).Background(groupColorForCtx(c, textValue(data, "id")))
-			ui.Text(c, textValue(data, "name")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
+			ui.Text(c, textValue(data, "name")).FontSize(float32(tok.TextBody)).Bold().TextColor(t.Text)
 			if role := textValue(data, "role"); role != "" {
 				components.Badge(c, role)
 			}
 			if condition := textValue(data, "condition"); condition != "" {
-				ui.Text(c, condition).FontSize(t.Rem(.78)).TextColor(t.TextMuted)
+				ui.Text(c, condition).FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 			}
 		})
 	})
@@ -207,16 +210,17 @@ func assaySpec() ModuleSpec {
 			col.Padding(t.Space(3)).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
 		}
 		col.Children(func() {
-			ui.Text(c, textValue(data, "title")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+			tok := theme.GetTokens(t)
+			ui.Text(c, textValue(data, "title")).FontSize(float32(tok.TextSection)).Bold().TextColor(t.Text)
 			line := strings.Join(nonEmpty([]string{
 				textValue(data, "endpoint"), textValue(data, "method"), textValue(data, "unit"),
 			}), " · ")
 			if line != "" {
-				ui.Text(c, line).FontSize(t.Rem(.78)).TextColor(t.TextMuted)
+				ui.Text(c, line).FontSize(float32(tok.TextData)).TextColor(t.TextMuted)
 			}
 			if points := stringList(data, "timepoints"); len(points) > 0 {
 				ui.Text(c, "时间点 · "+strings.Join(points, " / ")).
-					FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+					FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 			}
 		})
 	})
@@ -312,10 +316,11 @@ func instrumentProfileSpec() ModuleSpec {
 			col.Padding(t.Space(3)).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
 		}
 		col.Children(func() {
+			tok := theme.GetTokens(t)
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-				ui.Text(c, textValue(data, "class")).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+				ui.Text(c, textValue(data, "class")).FontSize(float32(tok.TextSection)).Bold().TextColor(t.Text)
 				if model := textValue(data, "model"); model != "" {
-					ui.Text(c, "· "+model).FontSize(t.Rem(.8)).TextColor(t.TextMuted)
+					ui.Text(c, "· "+model).FontSize(float32(tok.TextData)).TextColor(t.TextMuted)
 				}
 				ui.Spacer(c)
 				components.Badge(c, "能力档案")
@@ -337,9 +342,10 @@ func instrumentProfileSpec() ModuleSpec {
 func materialSpec() ModuleSpec {
 	return moduleDocumentSpec(builtinDescriptor("material"), specValidator("material"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
+		tok := theme.GetTokens(t)
 		ui.Row(c).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius).Background(t.Surface).
 			Border(1, t.Border).Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, textValue(data, "name")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
+			ui.Text(c, textValue(data, "name")).FontSize(float32(tok.TextBody)).Bold().TextColor(t.Text)
 			if role := textValue(data, "role"); role != "" {
 				components.Badge(c, role)
 			}
@@ -350,9 +356,10 @@ func materialSpec() ModuleSpec {
 func sampleSpec() ModuleSpec {
 	return moduleDocumentSpec(builtinDescriptor("sample"), specValidator("sample"), func(v *View, c *ui.Context, data map[string]any) {
 		t := c.Theme()
+		tok := theme.GetTokens(t)
 		ui.Row(c).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius).Background(t.Surface).
 			Border(1, t.Border).Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, textValue(data, "sample_id")).FontSize(t.Rem(.85)).Bold().TextColor(t.Text)
+			ui.Text(c, textValue(data, "sample_id")).FontSize(float32(tok.TextBody)).Bold().TextColor(t.Text)
 			if grp := textValue(data, "group_ref"); grp != "" {
 				components.Badge(c, grp)
 			}

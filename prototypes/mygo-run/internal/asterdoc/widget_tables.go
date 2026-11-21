@@ -1626,7 +1626,7 @@ func (v *View) renderDataTableMatrix(
 									}
 									lbl = wID + " " + sid
 								}
-								ui.Text(c, lbl).FontSize(float32(tok.TextMeta)*0.82).TextColor(tok.TextMuted).SingleLine()
+								ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 							})
 							if interactiveRun {
 								tb := components.TextBox(c, buf, components.TextBoxOptions{}).Placeholder("—")

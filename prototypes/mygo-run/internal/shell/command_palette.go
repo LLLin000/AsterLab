@@ -336,6 +336,17 @@ func (s *Shell) buildPaletteEntries() []paletteEntry {
 			subtitle: "在 MyGo 折射液态玻璃与经典平铺磨砂之间实时切换",
 			runAct: func() { s.LiquidGlass = !s.LiquidGlass; s.notifySettingsChanged(); s.Invalidate() },
 		},
+		paletteEntry{
+			kind: paletteAction, key: "cmd-check-update", title: "检查软件更新",
+			subtitle: "查询 AsterLab 最新发布版本并下载更新",
+			runAct: func() {
+				s.SettingsView.Category = "about"
+				s.VaultSettingsOpen = true
+				if s.OnCheckUpdate != nil {
+					s.OnCheckUpdate()
+				}
+			},
+		},
 	)
 	for _, b := range actions {
 		if q != "" && !strings.Contains(strings.ToLower(b.title+" "+b.subtitle), q) {

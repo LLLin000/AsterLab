@@ -117,7 +117,7 @@ func (s *Shell) renderFileTreePane(c *ui.Context, tok theme.Tokens) {
 	// Compact icon-only header toolbar on Desktop
 	ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 		AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-		components.Text(c, "实验库").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
+		components.Text(c, "实验库").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted).
 			Grow(1).MinWidth(0)
 		if components.IconButton(c, lucide.FilePlus(), "新建实验 (Ctrl+N)", components.IconButtonCompact).Clicked() {
 			s.triggerVaultNewFile("")
@@ -255,7 +255,7 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 					icoCol = tok.Text
 				}
 				ui.Icon(c, icon).Size(float32(tok.Spacing16)*0.88, float32(tok.Spacing16)*0.88).TextColor(icoCol).ContentTransition(theme.IconMorph())
-				components.Text(c, node.Name).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).
+				components.Text(c, node.Name).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
 					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 			})
 		})
@@ -373,10 +373,10 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 				icoCol = tok.Text
 			}
 			ui.Icon(c, icon).Size(float32(tok.Spacing16)*0.85, float32(tok.Spacing16)*0.85).TextColor(icoCol)
-			components.Text(c, node.Name).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).
+			components.Text(c, node.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text).
 				SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 			if shortDate != "" {
-				ui.Text(c, shortDate).FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted).
+				ui.Text(c, shortDate).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
 					FontFeatures("tnum").Shrink(0)
 			}
 		})
@@ -427,6 +427,11 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 				}, "down")
 			}
 			m.Separator()
+			if isTemplate && s.OnOpenTemplatePicker != nil && m.Item("以此模板新建实验").Chosen() {
+				s.CreateTargetFolder = ""
+				s.CreateTargetTemplate = entry.RelPath
+				s.OnOpenTemplatePicker(s.ensureSelectedDate())
+			}
 			if m.Item("创建副本").Chosen() && s.OnVaultDuplicate != nil {
 				s.OnVaultDuplicate(entry.RelPath, "")
 			}

@@ -4,7 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-& (Join-Path $PSScriptRoot 'mygo-build.ps1')
+& (Join-Path $PSScriptRoot 'mygo-build.ps1') -Version $Version
 if ($LASTEXITCODE -ne 0) { throw "mygo-build.ps1 failed" }
 
 $zip = & (Join-Path $PSScriptRoot 'mygo-package.ps1') -Version $Version

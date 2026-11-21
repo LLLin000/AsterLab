@@ -43,4 +43,14 @@ func TestDesignTokens(t *testing.T) {
 	if GetTokens(dt).Danger != dark.Danger {
 		t.Fatal("painter tokens do not follow the dark palette")
 	}
+
+	if !(light.TextPage >= light.TextSection && light.TextSection > light.TextBody && light.TextBody == 14 && light.TextData == 13 && light.TextMeta >= 12) {
+		t.Fatalf("typography hierarchy mismatch with Onevra 14px base: %+v", light)
+	}
+	SetAccessibilityPrefs(1.2, false)
+	defer SetAccessibilityPrefs(1.0, false)
+	scaled := LightTokens()
+	if scaled.TextBody <= light.TextBody || scaled.TextMeta <= light.TextMeta {
+		t.Fatalf("accessibility font scale did not apply cleanly: base=%+v scaled=%+v", light, scaled)
+	}
 }

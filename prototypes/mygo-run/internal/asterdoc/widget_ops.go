@@ -867,16 +867,16 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 				tmRounds := v.ensureWidgetDraft("tm:"+moduleID+":rounds", strconv.Itoa(roundsInit))
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
 					Padding(float32(tok.Spacing4), 0, 0, 0).Children(func() {
-					ui.Text(c, "模式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					ui.Text(c, "模式").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
 					tSel := components.Select(c, tmMode)
 					tSel.Trigger.Children(func() {
-						ui.Text(c, timerModeLabel(*tmMode)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+						ui.Text(c, timerModeLabel(*tmMode)).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 					})
 					tSel.Popup(func(panel ui.Element) {
 						for _, opt := range []string{"countdown", "stopwatch", "cycle", "window"} {
 							opt := opt
 							tSel.Item(opt).Children(func() {
-								ui.Text(c, timerModeLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+								ui.Text(c, timerModeLabel(opt)).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 							})
 						}
 					})
@@ -889,19 +889,19 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 						})
 						uSel := components.Select(c, tmUnit)
 						uSel.Trigger.Children(func() {
-							ui.Text(c, *tmUnit).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							ui.Text(c, *tmUnit).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 						})
 						uSel.Popup(func(panel ui.Element) {
 							for _, opt := range []string{"s", "min", "h", "d"} {
 								opt := opt
 								uSel.Item(opt).Children(func() {
-									ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+									ui.Text(c, opt).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 								})
 							}
 						})
 					}
 					if *tmMode == "cycle" {
-						ui.Text(c, "轮数").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						ui.Text(c, "轮数").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
 						ui.Box(c).Width(float32(tok.Spacing48)*1.2).Children(func() {
 							components.TextBox(c, tmRounds, components.TextBoxOptions{}).Placeholder("轮数")
 						})

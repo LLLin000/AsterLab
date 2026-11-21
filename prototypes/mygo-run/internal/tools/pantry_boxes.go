@@ -1188,7 +1188,7 @@ func renderBoxCellContent(
 			coordColor = tok.Accent
 		}
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(0)).Children(func() {
-			ui.Text(c, coord).FontSize(t.Rem(.78)).FontFeatures("tnum").TextColor(coordColor)
+			ui.Text(c, coord).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(coordColor)
 		})
 		return
 	}
@@ -1219,23 +1219,23 @@ func renderBoxCellContent(
 	// Render adaptive content density so 4x4 racks show full names while 9x9/8x12 stay crisp
 	ui.Column(c).FillWidth().Padding(t.Space(0), t.Space(1)).AlignItems(ui.Center).Gap(t.Space(0)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Justify(ui.Center).Gap(t.Space(1)).Children(func() {
-			ui.Text(c, coord).FontSize(t.Rem(.72)).FontFeatures("tnum").Bold().TextColor(tok.TextMuted)
+			ui.Text(c, coord).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").Bold().TextColor(tok.TextMuted)
 			ui.Box(c).Size(capSz, capSz).Radius(capSz * 0.5).
 				Background(capCol).Border(t.Space(0)+1, ringColor)
 		})
 		if box.Cols <= 5 {
-			ui.Text(c, item.Name).FontSize(t.Rem(.80)).Bold().TextColor(tok.Text).
+			ui.Text(c, item.Name).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).
 				SingleLine().Ellipsis("…").MinWidth(0)
 			if box.Cols <= 4 {
-				ui.Text(c, pantryItemStatus(item)).FontSize(t.Rem(.72)).TextColor(boxStatusTextColor(tok, item.Status))
+				ui.Text(c, pantryItemStatus(item)).FontSize(float32(tok.TextMeta)).TextColor(boxStatusTextColor(tok, item.Status))
 			}
 		} else if box.Cols <= 10 {
 			shortLabel := truncateRunes(item.Name, 5)
-			ui.Text(c, shortLabel).FontSize(t.Rem(.72)).Bold().TextColor(tok.Text).
+			ui.Text(c, shortLabel).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).
 				SingleLine().Ellipsis("…").MinWidth(0)
 		} else {
 			// Compact 96-well PCR grid: clear single initial or strip badge + cap dot above
-			ui.Text(c, truncateRunes(item.Name, 3)).FontSize(t.Rem(.68)).TextColor(tok.Text).
+			ui.Text(c, truncateRunes(item.Name, 3)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).
 				SingleLine().MinWidth(0)
 		}
 	})
@@ -1430,7 +1430,7 @@ func renderBoxInspectorPanel(
 								Background(theme.CategoricalColor(e.item.ID, t.Dark)).Shrink(0)
 							ui.Text(c, e.item.Name).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).
 								Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
-							ui.Text(c, pantryItemStatus(e.item)).FontSize(t.Rem(.78)).TextColor(tok.TextMuted).Shrink(0)
+							ui.Text(c, pantryItemStatus(e.item)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Shrink(0)
 						})
 					})
 				}

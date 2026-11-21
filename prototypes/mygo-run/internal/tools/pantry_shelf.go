@@ -693,7 +693,7 @@ func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(0)).Children(func() {
 			ui.Text(c, "储藏室货架 · 试剂盒与贴纸台账").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 			ui.Text(c, "点击收纳盒贴纸下钻查看盒内孔位坐标；点击瓶管贴纸查阅批号效期、说明书 (PDF) 与产品网址。").
-				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
 		})
 		components.Tabs(c, &w.pantryViewTab, components.TabsSegmented, "贴纸货架", "台账表格")
 		if components.Button(c, "+ 新建收纳盒", components.ButtonSecondary).Clicked() {
@@ -996,7 +996,7 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 								Exhausted:       w.pantryStatusIdx == 2,
 							})
 							if spec, ok := labsticker.Lookup(w.pantryDraftMeta.VesselID); ok {
-								ui.Text(c, spec.Title).FontSize(t.Rem(.82)).TextColor(tok.TextMuted).
+								ui.Text(c, spec.Title).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
 									SingleLine().Ellipsis("…")
 							}
 							btnLabel := "更换器皿贴纸"
@@ -1087,7 +1087,7 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 													TargetHeightDIP: 42,
 													BorderDIP:       3.0,
 												})
-												ui.Text(c, spec.Title).FontSize(t.Rem(.78)).TextColor(tok.TextMuted).
+												ui.Text(c, spec.Title).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
 													SingleLine().Ellipsis("…").MinWidth(0)
 											})
 										})
@@ -1242,7 +1242,7 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 									ui.Text(c, manual.FileName).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).
 										Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
 									if manual.SizeBytes > 0 {
-										ui.Text(c, formatByteSize(manual.SizeBytes)).FontSize(t.Rem(.82)).
+										ui.Text(c, formatByteSize(manual.SizeBytes)).FontSize(float32(tok.TextMeta)).
 											FontFeatures("tnum").TextColor(tok.TextMuted)
 									}
 									if components.Button(c, "查阅", components.ButtonGhost).Clicked() {

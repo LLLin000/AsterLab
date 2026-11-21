@@ -17,6 +17,7 @@ import (
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
+	"asterlab-mygo-prototype/internal/updater"
 	"asterlab-mygo-prototype/internal/vault"
 	"asterlab-mygo-prototype/internal/workflow"
 	"asterlab-mygo-prototype/internal/workflowtree"
@@ -77,6 +78,8 @@ type app struct {
 	asterErr                   string
 	pdfExporting               bool
 	pdfExportResults           chan pdfExportResult
+	latestRelease              *updater.ReleaseInfo
+	updateBusy                 bool
 	showFrozenDoc              bool
 	designDoc                  *runs.AsterDocSnapshot
 	designView                 *asterdoc.View
@@ -247,6 +250,7 @@ type app struct {
 	newExpTitle      string
 	newExpDate       string
 	newExpTemplate   string
+	newExpErr        string
 	newExpNudgeSeq   int
 }
 
@@ -2385,6 +2389,36 @@ func (a *app) forkExperimentAsDraft(designID string) {
 }
 
 func (a *app) createAsterDocDesign(source, title string) {
+	if a.designSvc == nil && a.vault != nil {
+		cleanSource := source
+		if env, envErr := asterdoc.ParseEnvelope(source); envErr == nil && strings.TrimSpace(env.DesignSource) != "" {
+			cleanSource = env.DesignSource
+		}
+		meta := asterdoc.InspectExperiment(cleanSource, nil)
+		expTitle := firstNonEmpty(strings.TrimSpace(title), meta.Title, "新实验")
+		dateYMD := strings.TrimSpace(meta.ScheduledDate)
+		if dateYMD == "" && a.shell != nil {
+			dateYMD = a.shell.SelectedDate
+		}
+		folder := ""
+		switch a.vault.Config.DefaultProjectDir {
+		case "/", "":
+			if a.vault.Config.DefaultProjectDir == "" {
+				folder = a.vault.Config.LastProjectDir
+			}
+		default:
+			folder = a.vault.Config.DefaultProjectDir
+		}
+		entry, err := a.vault.CreateExperiment(folder, expTitle, dateYMD, cleanSource)
+		if err != nil {
+			a.syncErr = fmt.Sprintf("创建实验失败：%v", err)
+			return
+		}
+		a.syncErr = ""
+		a.refreshVaultTreeAndCalendar()
+		a.openVaultFileInActivePane(entry.RelPath, entry.Title)
+		return
+	}
 	if a.designSvc == nil {
 		msg := "设计服务不可用"
 		a.syncErr = msg
@@ -4505,29 +4539,37 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 			return a.saveToolPlateExport(defaultName, format, data)
 		},
 		ListPantry: func() (runs.PantryLedger, error) {
-			if a.runSvc == nil {
-				return runs.PantryLedger{}, fmt.Errorf("运行服务不可用")
+			if a.runSvc != nil {
+				return a.runSvc.ListPantry(context.Background(), runs.PantryQuery{})
 			}
-			return a.runSvc.ListPantry(context.Background(), runs.PantryQuery{})
+			return a.localListPantry()
 		},
 		UpsertPantry: func(input runs.PantryUpsert) (runs.PantryItem, error) {
-			if a.runSvc == nil {
-				return runs.PantryItem{}, fmt.Errorf("运行服务不可用")
+			if a.runSvc != nil {
+				return a.runSvc.UpsertPantry(context.Background(), input)
 			}
-			return a.runSvc.UpsertPantry(context.Background(), input)
+			item, err := a.localUpsertPantry(input)
+			if err == nil {
+				a.syncPantrySnapshotToShell()
+			}
+			return item, err
 		},
 		DeletePantry: func(input runs.PantryDelete) error {
-			if a.runSvc == nil {
-				return fmt.Errorf("运行服务不可用")
+			if a.runSvc != nil {
+				_, err := a.runSvc.DeletePantry(context.Background(), input)
+				return err
 			}
-			_, err := a.runSvc.DeletePantry(context.Background(), input)
+			err := a.localDeletePantry(input)
+			if err == nil {
+				a.syncPantrySnapshotToShell()
+			}
 			return err
 		},
 		ExportPantry: func() (runs.PantryLabels, error) {
-			if a.runSvc == nil {
-				return runs.PantryLabels{}, fmt.Errorf("运行服务不可用")
+			if a.runSvc != nil {
+				return a.runSvc.ExportPantryLabels(context.Background(), runs.PantryQuery{})
 			}
-			return a.runSvc.ExportPantryLabels(context.Background(), runs.PantryQuery{})
+			return a.localExportPantryLabels()
 		},
 		LoadPantryMeta: func() (map[string]tools.PantryItemMeta, error) {
 			return a.loadPantryMeta()
@@ -4645,7 +4687,16 @@ func main() {
 			a.openNewExperimentDialog("", dateYMD)
 		},
 		OnOpenTemplatePicker: func(dateYMD string) {
-			a.openNewExperimentDialog("", dateYMD)
+			folder := ""
+			if a.shell != nil {
+				folder = a.shell.CreateTargetFolder
+				a.shell.CreateTargetFolder = ""
+				if strings.TrimSpace(a.shell.CreateTargetTemplate) != "" {
+					a.newExpTemplate = a.shell.CreateTargetTemplate
+					a.shell.CreateTargetTemplate = ""
+				}
+			}
+			a.openNewExperimentDialog(folder, dateYMD)
 		},
 		OnVaultCreateFile: func(folderRel, dateYMD string) {
 			a.openNewExperimentDialog(folderRel, dateYMD)
@@ -4739,6 +4790,22 @@ func main() {
 		OnRevealInExplorer: func(relPath string) {
 			a.revealPathInOS(relPath)
 		},
+		OnPickVaultPath: func() string {
+			startDir := ""
+			if a.vault != nil {
+				startDir = a.vault.Root
+			}
+			paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+				Parent:      mygo.FocusedWindow(),
+				Title:       "选择本地实验库根目录",
+				DefaultPath: startDir,
+				Directory:   true,
+			})
+			if err != nil || len(paths) == 0 {
+				return ""
+			}
+			return paths[0]
+		},
 		OnSwitchVaultPath: func(newPath string) {
 			a.switchVaultRoot(newPath)
 		},
@@ -4789,6 +4856,7 @@ func main() {
 			a.pollTimers()
 			a.renderSyncErrorBanner(c)
 			a.renderVaultNewExperimentDialog(c)
+			a.renderImportDialog(c)
 		},
 		PaletteCommands: []shell.PaletteCommand{
 			{
@@ -4799,10 +4867,17 @@ func main() {
 					if a.shell == nil || a.docStore == nil || a.vault == nil {
 						return
 					}
-					if tab := a.shell.ActiveTab(); tab != nil && tab.Kind == shell.TabFile && tab.FilePath != "" {
-						if ld, err := a.docStore.Open(tab.FilePath); err == nil && ld.Parsed != nil {
-							a.startDocumentPDFExport(nil, firstNonEmpty(tab.Title, "实验方案"), "", "", a.vault.Root, ld.Parsed)
-						}
+					tab := a.shell.ActiveTab()
+					if tab == nil || tab.Kind != shell.TabFile || tab.FilePath == "" {
+						a.syncErr = "请先打开一份 .asterml 实验文档，再导出 PDF"
+						return
+					}
+					if ld, err := a.docStore.Open(tab.FilePath); err == nil && ld.Parsed != nil {
+						a.startDocumentPDFExport(nil, firstNonEmpty(tab.Title, "实验方案"), "", "", a.vault.Root, ld.Parsed)
+					} else if err != nil {
+						a.syncErr = fmt.Sprintf("导出 PDF 失败：%v", err)
+					} else {
+						a.syncErr = "当前文档语法尚未闭合，请先修复后再导出 PDF"
 					}
 				},
 			},
@@ -5196,9 +5271,11 @@ func main() {
 			}
 		}
 		a.windowReady = true
+		a.wireUpdaterCallbacks()
 		a.shell.Quit()
 		a.preload()
 		a.startExternalSyncLoop()
+		a.startAutoUpdateCheck()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
@@ -5426,7 +5503,7 @@ func (a *app) renderSyncErrorBanner(c *ui.Context) {
 		Background(tokens.DangerBg).Border(1, tokens.DangerText).
 		AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 		ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-			ui.Text(c, a.syncErr).FontSize(t.Rem(.78)).TextColor(tokens.DangerText)
+			ui.Text(c, a.syncErr).FontSize(float32(tokens.TextData)).TextColor(tokens.DangerText)
 		})
 		if a.runSvc != nil && (a.pendingRunID != "" || a.snap.RunID != "") {
 			if components.Button(c, "重新加载 Run", components.ButtonSecondary).Clicked() {
@@ -6015,46 +6092,61 @@ func (a *app) renderImportDialog(c *ui.Context) {
 	}
 	tok := theme.GetTokens(c.Theme())
 	open := a.importOpen
-	components.Dialog(c, &open, components.DialogOptions{Label: "导入 AsterML"}, func(panel ui.Element) {
-		panel.Width(560).Gap(float32(tok.Spacing8)).Children(func() {
-			ui.Text(c, "导入 AsterML 设计").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-			ui.Text(c, "选择 .asterml 或 .md 实验方案文件，导入后可立即在设计工作台实时编辑。").
-				FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
-			ui.Text(c, "文件路径").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-			ui.TextInput(c, &a.importPath).Placeholder("D:\\...\\experiment.asterml").FillWidth()
-			ui.Text(c, "设计名称").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-			ui.TextInput(c, &a.importTitle).Placeholder("例如 HUVEC 成管实验").FillWidth()
-			if a.importErr != "" {
-				ui.Text(c, a.importErr).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
-			}
-			ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
-				if components.Button(c, "取消", components.ButtonGhost).Clicked() {
-					a.importOpen = false
+	ui.Box(c.Key("vault-import-dlg")).Children(func() {
+		components.Dialog(c, &open, components.DialogOptions{Label: "导入 AsterML"}, func(panel ui.Element) {
+			panel.Width(560).Gap(float32(tok.Spacing12)).Children(func() {
+				ui.Text(c, "导入 AsterML 实验文档").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+				ui.Text(c, "选择本地 .asterml 或 .md 实验方案文件，导入当前实验库后即可在工作台实时编辑。").
+					FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+				ui.Text(c, "文件路径").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
+				ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+						components.TextBox(c, &a.importPath, components.TextBoxOptions{}).Placeholder("D:\\...\\experiment.asterml")
+					})
+					if components.Button(c, "浏览文件…", components.ButtonSecondary).Clicked() {
+						home, _ := os.UserHomeDir()
+						paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+							Parent:      mygo.FocusedWindow(),
+							Title:       "选择要导入的实验文件",
+							DefaultPath: home,
+							Filters:     []mygo.FileFilter{{Name: "AsterML / Markdown", Extensions: []string{"asterml", "md"}}},
+						})
+						if err == nil && len(paths) > 0 {
+							a.importPath = paths[0]
+							a.importErr = ""
+							if strings.TrimSpace(a.importTitle) == "" {
+								a.importTitle = strings.TrimSuffix(filepath.Base(paths[0]), filepath.Ext(paths[0]))
+							}
+						}
+					}
+				})
+				ui.Text(c, "实验名称（可选，留空自动读取文件标题）").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
+				components.TextBox(c, &a.importTitle, components.TextBoxOptions{}).Placeholder("例如 HUVEC 成管实验")
+				if a.importErr != "" {
+					ui.Text(c, a.importErr).FontSize(float32(tok.TextData)).TextColor(tok.Danger)
 				}
-				if components.Button(c, "导入", components.ButtonPrimary).Clicked() {
-					a.importAsterDocFile()
-				}
+				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
+					if components.Button(c, "取消", components.ButtonGhost).Clicked() {
+						a.importOpen = false
+						a.importErr = ""
+					}
+					if components.Button(c, "导入并打开", components.ButtonPrimary).Clicked() {
+						a.importAsterDocFile()
+					}
+				})
 			})
 		})
 	})
 	if !open {
 		a.importOpen = false
+		a.importErr = ""
 	}
 }
 
 func (a *app) importAsterDocFile() {
-	if a.designSvc == nil {
-		a.importErr = "设计服务不可用"
-		return
-	}
-	projectID, err := a.ensureDefaultProjectID()
-	if err != nil {
-		a.importErr = err.Error()
-		return
-	}
 	path := strings.TrimSpace(a.importPath)
 	if path == "" {
-		a.importErr = "请填写文件路径"
+		a.importErr = "请填写或选择文件路径"
 		return
 	}
 	raw, err := os.ReadFile(path)
@@ -6067,9 +6159,46 @@ func (a *app) importAsterDocFile() {
 	if env, envErr := asterdoc.ParseEnvelope(rawStr); envErr == nil && strings.TrimSpace(env.DesignSource) != "" {
 		designSource = env.DesignSource
 	}
+	meta := asterdoc.InspectExperiment(designSource, nil)
 	title := strings.TrimSpace(a.importTitle)
 	if title == "" {
-		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		title = firstNonEmpty(meta.Title, strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), "导入实验")
+	}
+	if a.designSvc == nil && a.vault != nil {
+		dateYMD := strings.TrimSpace(meta.ScheduledDate)
+		if dateYMD == "" && a.shell != nil {
+			dateYMD = a.shell.SelectedDate
+		}
+		folder := ""
+		switch a.vault.Config.DefaultProjectDir {
+		case "/", "":
+			if a.vault.Config.DefaultProjectDir == "" {
+				folder = a.vault.Config.LastProjectDir
+			}
+		default:
+			folder = a.vault.Config.DefaultProjectDir
+		}
+		entry, cErr := a.vault.CreateExperiment(folder, title, dateYMD, designSource)
+		if cErr != nil {
+			a.importErr = "导入到实验库失败：" + cErr.Error()
+			return
+		}
+		a.importOpen = false
+		a.importPath = ""
+		a.importTitle = ""
+		a.importErr = ""
+		a.refreshVaultTreeAndCalendar()
+		a.openVaultFileInActivePane(entry.RelPath, entry.Title)
+		return
+	}
+	if a.designSvc == nil {
+		a.importErr = "设计服务不可用"
+		return
+	}
+	projectID, err := a.ensureDefaultProjectID()
+	if err != nil {
+		a.importErr = err.Error()
+		return
 	}
 	doc, err := a.designSvc.CreateAsterDocDesign(context.Background(), runs.AsterDocCreateInput{
 		ProjectID: projectID, Title: title, Source: designSource,
@@ -6087,7 +6216,7 @@ func (a *app) importAsterDocFile() {
 		a.designCache = map[string]runs.AsterDocSnapshot{}
 	}
 	a.designCache[doc.DesignID] = doc
-	meta := asterdoc.InspectExperiment(doc.Source, nil)
+	meta = asterdoc.InspectExperiment(doc.Source, nil)
 	stageLabel := "设计中"
 	stageEnum := shell.StageDraft
 	if meta.Complete {

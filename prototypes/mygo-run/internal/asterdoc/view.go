@@ -309,6 +309,60 @@ func (v *View) renderUnifiedExperimentPurpose(c *ui.Context, moduleID string, da
 	})
 }
 
+func (v *View) renderUnifiedAssayBar(c *ui.Context, moduleID string, data map[string]any) {
+	tok := theme.GetTokens(c.Theme())
+	title := strings.TrimSpace(textValue(data, "title"))
+	endpoint := strings.TrimSpace(textValue(data, "endpoint"))
+	unit := strings.TrimSpace(textValue(data, "unit"))
+	tps := stringList(data, "timepoints")
+	editable := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
+
+	// Skip empty default assay boilerplate when no endpoint/unit/custom title is set.
+	if title == "主检测流程" && endpoint == "" && unit == "" {
+		return
+	}
+
+	ui.Row(c.Key("live-assay:"+moduleID)).FillWidth().Wrap().
+		Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+		Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
+		AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		components.Badge(c, "检测指标")
+		if editable {
+			tBuf := v.ensureWidgetDraft("assay_title:"+moduleID, title)
+			eBuf := v.ensureWidgetDraft("assay_ep:"+moduleID, endpoint)
+			uBuf := v.ensureWidgetDraft("assay_unit:"+moduleID, unit)
+			ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*3).Children(func() {
+				ti := BorderlessTextInput(c, tok, tBuf, float32(tok.TextData), true, "检测名称（如 CCK-8 活力）…")
+				if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*tBuf) != title) {
+					v.emitAnyModuleEdit(moduleID, map[string]any{"title": strings.TrimSpace(*tBuf)})
+				}
+			})
+			ui.Text(c, "终点:").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			ui.Box(c).Width(float32(tok.Spacing48)*2.4).Children(func() {
+				ei := BorderlessTextInput(c, tok, eBuf, float32(tok.TextData), false, "OD450")
+				if ei.Submitted() || (!ei.Focused() && strings.TrimSpace(*eBuf) != endpoint) {
+					v.emitAnyModuleEdit(moduleID, map[string]any{"endpoint": strings.TrimSpace(*eBuf)})
+				}
+			})
+			ui.Text(c, "单位:").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			ui.Box(c).Width(float32(tok.Spacing48)*1.5).Children(func() {
+				uiIn := BorderlessTextInput(c, tok, uBuf, float32(tok.TextData), false, "AU")
+				if uiIn.Submitted() || (!uiIn.Focused() && strings.TrimSpace(*uBuf) != unit) {
+					v.emitAnyModuleEdit(moduleID, map[string]any{"unit": strings.TrimSpace(*uBuf)})
+				}
+			})
+		} else {
+			summary := strings.Join(nonEmpty([]string{title, endpoint, unit}), " · ")
+			if summary != "" {
+				ui.Text(c, summary).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+			}
+		}
+		if len(tps) > 0 {
+			components.Badge(c, "时间点 "+strings.Join(tps, " / "))
+		}
+	})
+}
+
 func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind string, schema int, moduleID string, data map[string]any) {
 	if v.UnifiedLive {
 		switch kind {
@@ -316,6 +370,9 @@ func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind st
 			return
 		case "experiment":
 			v.renderUnifiedExperimentPurpose(c, moduleID, data)
+			return
+		case "assay":
+			v.renderUnifiedAssayBar(c, moduleID, data)
 			return
 		case "step":
 			prevStep := v.StepID
@@ -335,6 +392,13 @@ func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind st
 	if !declared {
 		v.rendererGap(c, kind, schema, "")
 		return
+	}
+	if v.UnifiedLive && key == "generic.editor" {
+		if docKey, docOK := spec.Descriptor.RendererKey(ModeRun); docOK && registry.HasRenderer(docKey) && docKey != "generic.run" {
+			key = docKey
+		} else if nbKey, nbOK := spec.Descriptor.RendererKey(ModeNotebook); nbOK && registry.HasRenderer(nbKey) && nbKey != "generic.run" {
+			key = nbKey
+		}
 	}
 	if !registry.HasRenderer(key) {
 		v.rendererGap(c, kind, schema, key)
@@ -1445,7 +1509,8 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 	canEdit := v.Can(PermDocumentEdit) && !v.ReadOnly
 	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(3)).Radius(t.Space(1.5)).
 		Background(t.Surface).Border(1, t.Border).Children(func() {
-		ui.Text(c, spec.Descriptor.Title).FontSize(t.Rem(1.0)).Bold().TextColor(t.Text)
+		tok := theme.GetTokens(t)
+		ui.Text(c, spec.Descriptor.Title).FontSize(float32(tok.TextSection)).Bold().TextColor(t.Text)
 		for _, input := range spec.Descriptor.Inputs {
 			if input.Name == "kind" || input.Name == "id" || input.Name == "schema" {
 				continue
@@ -1466,11 +1531,11 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 				draft[input.Name+"__unit"] = &empty
 			}
 			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, genericPortLabel(input.Name)).FontSize(t.Rem(.8)).Bold().TextColor(t.TextMuted).Width(172)
+				ui.Text(c, genericPortLabel(input.Name)).FontSize(float32(tok.TextData)).Bold().TextColor(t.TextMuted).Width(172)
 				switch input.Type {
 				case "string", "reference", "artifact":
 					if input.Type == "artifact" {
-						ui.Text(c, "结构化列表（在步骤工作台或源码中编辑）").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+						ui.Text(c, "结构化列表（在步骤工作台或源码中编辑）").FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 					} else {
 						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
 							ui.TextInput(c, draft[input.Name]).Label(input.Name).FillWidth()
@@ -1520,12 +1585,12 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 						lists[input.Name] = items
 					})
 				case "list", "object", "table", "object-list", "well-map", "geometry":
-					ui.Text(c, "结构化列表（在步骤工作台或源码中编辑）").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+					ui.Text(c, "结构化列表（在步骤工作台或源码中编辑）").FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 				default:
 					ui.TextInput(c, draft[input.Name])
 				}
 				if input.Description != "" {
-					ui.Text(c, "· "+input.Description).FontSize(t.Rem(.7)).TextColor(t.TextMuted)
+					ui.Text(c, "· "+input.Description).FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 				}
 			})
 		}
@@ -1678,11 +1743,12 @@ func (v *View) GenericModuleSummary(c *ui.Context, data map[string]any) {
 		}
 	}
 	t := c.Theme()
+	tok := theme.GetTokens(t)
 	ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(2)).Radius(t.Space(1)).
 		Background(t.Surface).Border(1, t.Border).Children(func() {
-		ui.Text(c, spec.Title).FontSize(t.Rem(.9)).Bold().TextColor(t.Text)
+		ui.Text(c, spec.Title).FontSize(float32(tok.TextData)).Bold().TextColor(t.Text)
 		if len(fields) == 0 {
-			ui.Text(c, "暂无可预览的参数").FontSize(t.Rem(.75)).TextColor(t.TextMuted)
+			ui.Text(c, "暂无可预览的参数").FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 			return
 		}
 		limit := len(fields)
@@ -1695,16 +1761,16 @@ func (v *View) GenericModuleSummary(c *ui.Context, data map[string]any) {
 				continue
 			}
 			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, input.Name).FontSize(t.Rem(.72)).TextColor(t.TextMuted).Width(112)
-				ui.Text(c, value).FontSize(t.Rem(.78)).TextColor(t.Text)
+				ui.Text(c, input.Name).FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted).Width(112)
+				ui.Text(c, value).FontSize(float32(tok.TextData)).TextColor(t.Text)
 			})
 			if density == DensityFull && input.Description != "" {
-				ui.Text(c, input.Description).FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+				ui.Text(c, input.Description).FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 			}
 		}
 		if limit < len(fields) {
 			ui.Text(c, fmt.Sprintf("另有 %d 项参数", len(fields)-limit)).
-				FontSize(t.Rem(.68)).TextColor(t.TextMuted)
+				FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
 		}
 	})
 }

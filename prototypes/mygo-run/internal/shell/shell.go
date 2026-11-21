@@ -176,8 +176,9 @@ type Shell struct {
 	VaultTree           *vault.TreeNode
 	VaultFiles          []vault.FileEntry
 	VaultFolders        []string
-	SelectedTreePath    string
-	CreateTargetFolder  string
+	SelectedTreePath     string
+	CreateTargetFolder   string
+	CreateTargetTemplate string
 	VaultSettingsOpen   bool
 	SettingsView        components.SettingsState
 	AboutMonochromeLogo bool
@@ -224,6 +225,18 @@ type Shell struct {
 	StatusSaveLabel       string
 	StatusMetaLabel       string
 	StatusWarnLabel       string
+	AppVersion            string
+	BuildCommit           string
+	UpdateStatus          string // "" | "checking" | "up_to_date" | "available" | "downloading" | "restarting" | "error"
+	UpdateLatestVersion   string
+	UpdateNotes           string
+	UpdateDownloadURL     string
+	UpdateErr             string
+	UpdateIncludePre      bool
+	UpdateAutoCheck       bool
+	OnCheckUpdate         func()
+	OnInstallUpdate       func()
+	OnOpenUpdatePage      func()
 	GlobalSearchOpen      bool
 	GlobalSearchQuery     string
 	GlobalSearchLastQuery string
@@ -251,6 +264,7 @@ type Shell struct {
 	OnVaultRestoreTrash    func(trashName string)
 	OnSetExperimentDate    func(relPath, dateYMD string)
 	OnRevealInExplorer     func(relPath string)
+	OnPickVaultPath        func() string
 	OnSwitchVaultPath      func(newPath string)
 	OnToggleHideAssets     func(hide bool)
 	OnSettingsChanged         func()
@@ -287,9 +301,9 @@ func (s *Shell) NewWindow() *sidebar.Shell {
 		LeftToolbar:    s.navigationFooter,
 		Right:          s.rightDrawer,
 		RightHeader:    s.rightDrawerHeader,
-		RightWidth:     300,
-		RightMinWidth:  240,
-		RightMaxWidth:  400,
+		RightWidth:     360,
+		RightMinWidth:  280,
+		RightMaxWidth:  540,
 		RightCollapsed: !s.RightOpen,
 	})
 	return s.window
@@ -337,7 +351,7 @@ func (s *Shell) topChromeBar(c *ui.Context) {
 		cmdBtn.Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 				ui.Icon(c, lucide.Search()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
-				ui.Text(c, "快速打开 (Ctrl+O)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+				ui.Text(c, "快速打开 (Ctrl+O)").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted).SingleLine()
 			})
 		})
 		if cmdBtn.Clicked() {
@@ -361,12 +375,12 @@ func (s *Shell) navigationHeader(c *ui.Context) {
 }
 
 func (s *Shell) navigationFooter(c *ui.Context) {
-	t := c.Theme()
+	tok := theme.GetTokens(c.Theme())
 	label := fmt.Sprintf("AsterLab · %d 份实验", len(s.VaultFiles))
 	if len(s.VaultFiles) == 0 && len(s.Experiments) > 0 {
 		label = fmt.Sprintf("AsterLab · %d 份实验", len(s.Experiments))
 	}
-	components.Text(c, label).TextColor(t.TextMuted).FontSize(t.Rem(.78)).
+	components.Text(c, label).TextColor(tok.TextMuted).FontSize(float32(tok.TextMeta)).
 		SingleLine().Ellipsis("…")
 }
 
@@ -499,9 +513,9 @@ func (s *Shell) page(c *ui.Context) {
 		if s.Error != "" {
 			ui.Column(c).FillWidth().Padding(t.Space(1), t.Space(2)).Gap(t.Space(.5)).
 				Background(t.Surface).Children(func() {
-				components.Text(c, "未保存 · "+s.Error).TextColor(t.Danger)
+				components.Text(c, "未保存 · "+s.Error).FontSize(float32(tok.TextData)).TextColor(t.Danger)
 				components.Text(c, "检查目标目录权限后，返回当前操作并重试保存。").
-					TextColor(t.TextMuted).FontSize(t.Rem(.8))
+					TextColor(t.TextMuted).FontSize(float32(tok.TextMeta))
 			})
 		}
 		ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
@@ -539,7 +553,7 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 		}
 	}
 	ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.55))
-	ui.Row(c.Key("desktop-status-bar")).FillWidth().Height(24).
+	ui.Row(c.Key("desktop-status-bar")).FillWidth().Height(28).
 		Padding(0, float32(tok.Spacing12)).
 		Background(tok.SidebarBackground).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
@@ -548,22 +562,35 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 				dotCol = tok.Warning
 			}
 			ui.Box(c).Size(6, 6).Radius(3).Background(dotCol)
-			ui.Text(c, saveLbl).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.TextMuted).SingleLine()
+			ui.Text(c, saveLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 		})
 		if s.StatusWarnLabel != "" {
-			ui.Text(c, "· "+s.StatusWarnLabel).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.Warning).SingleLine()
+			ui.Text(c, "· "+s.StatusWarnLabel).FontSize(float32(tok.TextMeta)).TextColor(tok.Warning).SingleLine()
 		}
 		if s.StatusMetaLabel != "" {
-			ui.Text(c, s.StatusMetaLabel).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+			ui.Text(c, s.StatusMetaLabel).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
 		}
 		ui.Spacer(c)
+		if s.UpdateStatus == "available" && s.UpdateLatestVersion != "" {
+			updBtn := ui.ButtonBase(c).Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Label("发现新版本")
+			updBtn.Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Icon(c, lucide.CircleArrowUp()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+					ui.Text(c, "新版本 "+s.UpdateLatestVersion).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).SingleLine()
+				})
+			})
+			if updBtn.Clicked() {
+				s.SettingsView.Category = "about"
+				s.VaultSettingsOpen = true
+			}
+		}
 		timerTotal := len(s.ActiveTimers) + len(s.VaultTimers)
 		if timerTotal > 0 {
 			btn := ui.ButtonBase(c).Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Label("查看计时器")
 			btn.Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 					ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
-					ui.Text(c, fmt.Sprintf("%d 个计时中", timerTotal)).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+					ui.Text(c, fmt.Sprintf("%d 个计时中", timerTotal)).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
 				})
 			})
 			if btn.Clicked() {
@@ -571,9 +598,9 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 			}
 		}
 		if modeLbl != "" {
-			ui.Text(c, modeLbl).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.TextMuted).SingleLine()
+			ui.Text(c, modeLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 		}
-		ui.Text(c, s.HotkeyDisplay("cmd.palette")).FontSize(float32(tok.TextMeta)*0.92).TextColor(tok.TextMuted).SingleLine()
+		ui.Text(c, s.HotkeyDisplay("cmd.palette")).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 	})
 }
 
@@ -731,8 +758,8 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 								ui.Icon(c, icon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(icoCol)
 								// Pinned calendar tab renders compactly when space is tight
 								if !(tab.Pinned && tab.Kind == TabCalendar && len(pane.Tabs) > 3) {
-									components.Text(c, tab.Title).FontSize(float32(tok.TextMeta)).Bold().
-										TextColor(fg).SingleLine().Ellipsis("…").MaxWidth(float32(tok.Spacing48) * 3.0)
+									components.Text(c, tab.Title).FontSize(float32(tok.TextData)).Bold().
+										TextColor(fg).SingleLine().Ellipsis("…").MaxWidth(float32(tok.Spacing48) * 3.8)
 								}
 								if tab.Pinned {
 									ui.Icon(c, lucide.Pin()).Size(float32(tok.Spacing12)*0.85, float32(tok.Spacing12)*0.85).TextColor(tok.TextMuted)
@@ -959,9 +986,10 @@ func (s *Shell) timerStrip(c *ui.Context) {
 		hidden = len(timers) - timerStripCompactN
 	}
 	t := c.Theme()
+	tok := theme.GetTokens(t)
 	ui.Row(c).FillWidth().Wrap().Padding(t.Space(1), t.Space(2)).Gap(t.Space(2)).
 		Background(t.Surface).Children(func() {
-		components.Text(c, "计时中").TextColor(t.TextMuted).FontSize(t.Rem(.8))
+		components.Text(c, "计时中").TextColor(t.TextMuted).FontSize(float32(tok.TextMeta))
 		for _, timer := range shown {
 			timer := timer
 			label := timer.RunTitle + " · " + formatTimerClock(timer)

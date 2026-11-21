@@ -288,7 +288,7 @@ func (s *Shell) calendarHomeBody(
 				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Icon(c, lucide.CalendarDays()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
 				components.Text(c, "双击任意日期格新建实验，或从左侧文件树创建项目文件夹分类整理 .asterml 文件。").
-					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+					FontSize(float32(tok.TextData)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
 			})
 		}
 		// 1. Minimal Single-Row Apple Calendar Toolbar
@@ -545,7 +545,7 @@ func (s *Shell) renderAppleMonthGrid(c *ui.Context, tok theme.Tokens, cursor tim
 												}
 												pill.Children(func() {
 													components.Text(c, fmt.Sprintf("%d/%d", day.Month(), day.Day())).
-														FontSize(float32(tok.TextMeta)*0.92).Bold().TextColor(txtColor).
+														FontSize(float32(tok.TextMeta)).Bold().TextColor(txtColor).
 														FontFeatures("tnum").SingleLine()
 												})
 											} else {
