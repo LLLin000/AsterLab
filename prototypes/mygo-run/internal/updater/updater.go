@@ -464,22 +464,29 @@ const windowsReplaceScript = `param(
     [string]$StageDir
 )
 $ErrorActionPreference = 'Stop'
-for ($i = 0; $i -lt 120; $i++) {
+for ($i = 0; $i -lt 40; $i++) {
     if (-not (Get-Process -Id $TargetPid -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Milliseconds 250
 }
-Start-Sleep -Milliseconds 300
-foreach ($file in @('mygo-run.exe', 'asterlab.exe', 'asterlab.ico', 'BUILD_INFO.txt', 'UNSIGNED.txt')) {
-    $src = Join-Path $UnpackedDir $file
-    if (Test-Path -LiteralPath $src) {
-        $dst = Join-Path $InstallDir $file
-        for ($retry = 0; $retry -lt 20; $retry++) {
-            try {
-                Copy-Item -LiteralPath $src -Destination $dst -Force
-                break
-            } catch {
-                Start-Sleep -Milliseconds 300
-            }
+if (Get-Process -Id $TargetPid -ErrorAction SilentlyContinue) {
+    Stop-Process -Id $TargetPid -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 400
+}
+Get-Process -Name 'mygo-run','asterlab' -ErrorAction SilentlyContinue | Where-Object {
+    $_.Path -and [System.IO.Path]::GetDirectoryName($_.Path).TrimEnd('\') -ieq $InstallDir.TrimEnd('\')
+} | ForEach-Object {
+    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+}
+Start-Sleep -Milliseconds 250
+Get-ChildItem -LiteralPath $UnpackedDir -File | ForEach-Object {
+    $src = $_.FullName
+    $dst = Join-Path $InstallDir $_.Name
+    for ($retry = 0; $retry -lt 25; $retry++) {
+        try {
+            Copy-Item -LiteralPath $src -Destination $dst -Force
+            break
+        } catch {
+            Start-Sleep -Milliseconds 300
         }
     }
 }
@@ -539,7 +546,12 @@ func InstallAndScheduleRestart(ctx context.Context, rel *ReleaseInfo, exePath st
 		if err != nil {
 			return "", err
 		}
-		cmd := exec.Command(setupPath)
+		var args []string
+		if exePath != "" {
+			// Pre-select the running install folder (/D must be last without quotes in NSIS CLI).
+			args = append(args, "/D="+installDir)
+		}
+		cmd := exec.Command(setupPath, args...)
 		if err := cmd.Start(); err != nil {
 			return "", fmt.Errorf("启动安装程序失败：%w", err)
 		}

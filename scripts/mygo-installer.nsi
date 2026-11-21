@@ -11,8 +11,10 @@
 Name "AsterLab (${VERSION})"
 OutFile "..\release\AsterLab-MyGo-${VERSION}-win-x64-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\AsterLab MyGo"
+InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "InstallLocation"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
+SetOverwrite on
 
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -25,6 +27,13 @@ SetCompressor /SOLID lzma
 
 Section "Install"
     SetShellVarContext current
+    ; Close any running AsterLab instance in the target folder so in-place upgrades overwrite cleanly.
+    IfFileExists "$INSTDIR\mygo-run.exe" 0 doneClose
+        DetailPrint "Closing running AsterLab instance for in-place upgrade..."
+        System::Call 'Kernel32::SetEnvironmentVariable(t "ASTERLAB_UPGRADE_DIR", t "$INSTDIR")'
+        nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$dir = [System.IO.Path]::GetFullPath($$env:ASTERLAB_UPGRADE_DIR).TrimEnd([char]92); Get-Process mygo-run,asterlab -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and [System.IO.Path]::GetDirectoryName($$_.Path).TrimEnd([char]92) -ieq $$dir } | ForEach-Object { $$null = $$_.CloseMainWindow(); if (-not $$_.WaitForExit(2000)) { Stop-Process -Id $$_.Id -Force -ErrorAction SilentlyContinue } }; $$exe = Join-Path $$dir mygo-run.exe; for ($$i=0; $$i -lt 20; $$i++) { try { if (Test-Path -LiteralPath $$exe) { $$fs = [System.IO.File]::Open($$exe, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None); $$fs.Close() }; break } catch { Start-Sleep -Milliseconds 250 } }"'
+    doneClose:
+    Delete "$INSTDIR\mygo-run.exe.old"
     SetOutPath "$INSTDIR"
     File "..\prototypes\mygo-run\dist\mygo-run.exe"
     File "..\prototypes\mygo-run\dist\asterlab.exe"

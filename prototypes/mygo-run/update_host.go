@@ -236,11 +236,15 @@ func (a *app) triggerInstallUpdate() {
 			a.shell.UpdateStatus = string(updater.StatusReadyToRestart)
 			a.shell.UpdateErr = ""
 			a.shell.Invalidate()
+			a.saveUpdatePrefs()
+			a.saveSession()
 			go func() {
 				time.Sleep(250 * time.Millisecond)
 				mygo.RunOnMain(func() {
 					mygo.App.Quit()
 				})
+				time.Sleep(1200 * time.Millisecond)
+				os.Exit(0)
 			}()
 		})
 	}()

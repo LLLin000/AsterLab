@@ -160,4 +160,8 @@ func TestDownloadVerifyAndSafeExtractZip(t *testing.T) {
 	); err == nil || !strings.Contains(err.Error(), "SHA256") {
 		t.Fatalf("expected SHA256 mismatch error, got: %v", err)
 	}
+
+	if !canWriteDir(tmp) {
+		t.Fatalf("expected temp dir to be writable for in-place update")
+	}
 }
