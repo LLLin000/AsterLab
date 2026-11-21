@@ -1,15 +1,27 @@
 !include "MUI2.nsh"
 
+!ifndef VERSION
+  !define VERSION "0.1.0-unsigned"
+!endif
+
 !define MUI_ICON "..\prototypes\mygo-run\assets\asterlab.ico"
 !define MUI_UNICON "..\prototypes\mygo-run\assets\asterlab.ico"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\mygo-run.exe"
 
-Name "AsterLab MyGo (Unsigned Beta)"
-OutFile "..\release\AsterLab-MyGo-0.1.0-beta-unsigned-win-x64-setup.exe"
+Name "AsterLab (${VERSION})"
+OutFile "..\release\AsterLab-MyGo-${VERSION}-win-x64-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\AsterLab MyGo"
 RequestExecutionLevel user
-SilentInstall silent
-SilentUnInstall silent
 SetCompressor /SOLID lzma
+
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
     SetShellVarContext current
@@ -25,11 +37,11 @@ Section "Install"
     CreateShortcut "$DESKTOP\AsterLab MyGo.lnk" "$INSTDIR\mygo-run.exe" "" "$INSTDIR\asterlab.ico" 0
 
     WriteUninstaller "$INSTDIR\uninstall.exe"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayName" "AsterLab MyGo (Unsigned Beta)"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayName" "AsterLab (${VERSION})"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "InstallLocation" "$INSTDIR"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayIcon" "$INSTDIR\asterlab.ico"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayVersion" "0.1.0-beta-unsigned"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "DisplayVersion" "${VERSION}"
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "NoModify" 1
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AsterLabMyGo" "NoRepair" 1
     ; User-level asterlab:// protocol handler (CLOSE-07): per-user, no

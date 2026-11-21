@@ -17,12 +17,12 @@ Push-Location $protoDir
 try {
     $env:CGO_ENABLED = '0'
 
-    # 1. Pure-Go Desktop app
-    go build -tags=e2e -trimpath -o (Join-Path $distDir 'mygo-run.exe') .
+    # 1. Pure-Go Desktop app (windowsgui hides the console window when double-clicked)
+    go build -tags=e2e -trimpath -ldflags="-s -w -H=windowsgui" -o (Join-Path $distDir 'mygo-run.exe') .
     if ($LASTEXITCODE -ne 0) { throw "go build desktop failed (exit $LASTEXITCODE)" }
 
     # 2. Pure-Go Vault CLI
-    go build -trimpath -o (Join-Path $distDir 'asterlab.exe') ./cmd/asterlab
+    go build -trimpath -ldflags="-s -w" -o (Join-Path $distDir 'asterlab.exe') ./cmd/asterlab
     if ($LASTEXITCODE -ne 0) { throw "go build cli failed (exit $LASTEXITCODE)" }
 
     $icoSrc = Join-Path $protoDir 'assets\asterlab.ico'
