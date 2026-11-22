@@ -748,7 +748,7 @@ func localRouteSentence(text string) (kind, mode string, conf, noul float64) {
 		return "attachment", "", 0.94, 0.82
 	}
 	// 2. Calculators (dilution / weighing / mastermix / seeding) — allow partial-parameter sentences for fallback UI
-	if strings.Contains(text, "稀释") && (len(concs) >= 1 || strings.Contains(text, "母液") || strings.Contains(text, "工作液")) {
+	if strings.Contains(text, "稀释") && (len(concs) >= 1 || reNLRatio.MatchString(text) || strings.Contains(text, "倍比") || strings.Contains(text, "母液") || strings.Contains(text, "工作液")) {
 		return "calculator", "dilution", 0.96, 0.86
 	}
 	if (strings.Contains(text, "悬液密度") || strings.Contains(text, "cells/mL")) && (strings.Contains(text, "接种") || strings.Contains(text, "每孔") || strings.Contains(text, "铺")) {
@@ -775,7 +775,7 @@ func localRouteSentence(text string) (kind, mode string, conf, noul float64) {
 	if strings.Contains(text, "至少") || strings.Contains(text, "≥") || (strings.Contains(text, "t0") && len(reNLDuration.FindAllString(text, -1)) >= 2) {
 		return "timer", "window", 0.88, 0.58
 	}
-	if hasDur && (strings.Contains(text, "孵育") || strings.Contains(text, "离心") || strings.Contains(text, "水浴") || strings.Contains(text, "照射") || strings.Contains(text, "固化") || strings.Contains(text, "浸泡") || strings.Contains(text, "静置")) {
+	if hasDur && (strings.Contains(text, "孵育") || strings.Contains(text, "离心") || strings.Contains(text, "水浴") || strings.Contains(text, "照射") || strings.Contains(text, "固化") || strings.Contains(text, "浸泡") || strings.Contains(text, "静置") || strings.Contains(text, "染核") || strings.Contains(text, "封闭") || strings.Contains(text, "透膜") || strings.Contains(text, "固定") || strings.Contains(text, "裂解") || strings.Contains(text, "灭活") || strings.Contains(text, "变性")) {
 		return "timer", "countdown", 0.90, 0.55
 	}
 	return "none", "", 0, 0

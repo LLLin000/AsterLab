@@ -104,11 +104,7 @@ func nlPrismInkColor(tok theme.Tokens, dark bool, pos01, phase float32) ui.Color
 	i0 := int(scaled) % len(stops)
 	i1 := (i0 + 1) % len(stops)
 	frac := float32(scaled - math.Floor(scaled))
-	c0, c1 := stops[i0], stops[i1]
-	mix := func(a, b uint8) uint8 {
-		return uint8(math.Round(float64(a)*(1-float64(frac)) + float64(b)*float64(frac)))
-	}
-	return ui.RGBA(mix(c0.R, c1.R), mix(c0.G, c1.G), mix(c0.B, c1.B), 1.0)
+	return theme.MixColor(stops[i0], stops[i1], frac)
 }
 
 // buildRainbowTextReplacements overlays pure per-glyph rolling rainbow text colors onto the hovered
