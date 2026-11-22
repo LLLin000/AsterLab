@@ -1,6 +1,7 @@
 package astercore
 
 import (
+	"strings"
 	"testing"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
@@ -200,5 +201,131 @@ blocks:
 	qSums := AnalyzeDocument(qDoc, "qpcr-doc")
 	if len(qSums) != 1 || qSums[0].Kind != "qpcr" || qSums[0].QPCR == nil {
 		t.Fatalf("expected 1 qpcr summary, got %+v", qSums)
+	}
+}
+
+func TestV020AnalyzeDocumentSciUnitMultiPlateBlankAndExcluded(t *testing.T) {
+	src := `---
+title: "SciUnit 统计闭环测试（多板 + Blank 本底 + 异常孔剔除 + 生/技重复区分）"
+date: "2026-11-22"
+---
+
+` + "```asterlab" + `
+id: gt-main
+kind: group_table
+schema: 1
+rows:
+  - id: g_ctrl
+    name: Control
+    role: control
+    independent_n: 2
+  - id: g_drug
+    name: Drug
+    role: treatment
+    independent_n: 2
+  - id: g_blank
+    name: Blank
+    role: control
+    independent_n: 1
+` + "```" + `
+
+` + "```asterlab" + `
+id: plate-1
+kind: plate
+schema: 1
+format: 12
+groups:
+  g_ctrl: [A1, A2]
+  g_drug: [B1, B2, B3]
+  g_blank: [C1, C2]
+roles:
+  C1: blank
+  C2: blank
+excluded_wells: [B2]
+samples:
+  A1: Mouse-1
+  A2: Mouse-2
+  B1: Mouse-3
+  B3: Mouse-3
+` + "```" + `
+
+` + "```asterlab" + `
+id: dt-plate1
+kind: data_table
+schema: 1
+title: "板1 荧光读数"
+container_ref: plate-1
+columns:
+  - key: well
+    label: 孔位
+    value_kind: text
+  - key: value
+    label: Intensity
+    value_kind: number
+rows:
+  - well: A1
+    value: 110
+  - well: A2
+    value: 110
+  - well: B1
+    value: 60
+  - well: B2
+    value: 9999
+  - well: B3
+    value: 60
+  - well: C1
+    value: 10
+  - well: C2
+    value: 10
+` + "```" + `
+`
+	doc, err := asterdoc.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	sums := AnalyzeDocument(doc, "sciunit-stat")
+	if len(sums) != 1 {
+		t.Fatalf("expected 1 summary, got %+v", sums)
+	}
+	s := sums[0]
+	if s.PlateID != "plate-1" {
+		t.Fatalf("expected PlateID=plate-1, got %q", s.PlateID)
+	}
+	if s.ExcludedN != 1 {
+		t.Fatalf("expected ExcludedN=1 (B2 excluded), got %d", s.ExcludedN)
+	}
+	if s.BlankN != 2 || s.BlankMean == nil || *s.BlankMean != 10 {
+		t.Fatalf("expected BlankN=2 BlankMean=10, got BlankN=%d BlankMean=%v", s.BlankN, s.BlankMean)
+	}
+	// Because Control is present, AnalyzeCCK8 runs and computes relative viability with B2=9999 EXCLUDED!
+	if s.Kind != "cck8" || s.CCK8 == nil {
+		t.Fatalf("expected cck8 summary with blank+excluded handling, got %+v", s)
+	}
+	for _, g := range s.CCK8.Groups {
+		if g.Group == "Drug" && g.N != 2 {
+			t.Fatalf("expected Drug N=2 after excluding B2=9999, got %+v", g)
+		}
+	}
+
+	// Also verify descriptive fallback preserves TechReplicates vs BioSamples when no control role exists
+	descSrc := strings.Replace(src, "role: control", "role: treatment", 1)
+	descDoc, err := asterdoc.Parse(descSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dSums := AnalyzeDocument(descDoc, "sciunit-desc")
+	if len(dSums) != 1 || dSums[0].Kind != "descriptive" {
+		t.Fatalf("expected descriptive summary, got %+v", dSums)
+	}
+	for _, g := range dSums[0].Groups {
+		if g.Group == "Drug" {
+			// B1 and B3 both belong to Mouse-3 -> 2 technical replicates, 1 independent biological sample!
+			if g.TechReplicates != 2 || g.BioSamples != 1 {
+				t.Fatalf("expected Drug TechReplicates=2 BioSamples=1, got %+v", g)
+			}
+			if g.BlankCorrMean == nil || *g.BlankCorrMean != 50 {
+				t.Fatalf("expected Drug BlankCorrMean = 60 - 10 = 50, got %v", g.BlankCorrMean)
+			}
+		}
 	}
 }

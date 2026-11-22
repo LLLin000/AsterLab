@@ -655,17 +655,23 @@ figure.shot figcaption {
 <script>
 (() => {
   const OWNER_REPO = "LLLin000/AsterLab";
-  const FALLBACK_BRANCH = "feat/v2-generic-modules";
+  const FALLBACK_BRANCH = "main";
 
   const NAV_GROUPS = [
     ["Start", [
       ["docs/HANDBOOK.md", "Overview"],
       ["docs/handbook/domain-model.md", "领域模型与科学红线"],
     ]],
+    ["Install & Deploy", [
+      ["docs/handbook/install-and-update.md", "安装、升级与离线 AI 模型分发"],
+    ]],
     ["Architecture", [
       ["docs/handbook/architecture.md", "分层架构与代码包"],
       ["docs/handbook/vault-storage.md", "Vault 存储、索引与快照"],
       ["docs/handbook/mobile-and-sync.md", "移动端边界与双端同步"],
+    ]],
+    ["SciGraph & AI", [
+      ["docs/handbook/scigraph-and-ai.md", "SciGraph 科学网络、离线 AI 与孔板引擎"],
     ]],
     ["AsterML SDK", [
       ["docs/handbook/asterml-spec.md", "AsterML 语法与 Parity"],
