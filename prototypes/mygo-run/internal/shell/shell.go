@@ -250,6 +250,10 @@ type Shell struct {
 	OnSubmitFeedback      func()
 	WelcomeOpen           bool
 	OnOnboardingChoice    func(choice string)
+	TourOpen              bool
+	TourStep              int
+	OnOpenUserGuide       func()
+	inSplitViewRoot       bool
 	GlobalSearchOpen      bool
 	GlobalSearchQuery     string
 	GlobalSearchLastQuery string
@@ -544,6 +548,9 @@ func (s *Shell) page(c *ui.Context) {
 	s.renderVaultDialogs(c)
 	s.renderFeedbackDialog(c)
 	s.renderWelcomeDialog(c)
+	if !s.inSplitViewRoot {
+		s.renderSpotlightTour(c, tok)
+	}
 	if s.RenderOverlays != nil {
 		s.RenderOverlays(c)
 	}
@@ -617,6 +624,21 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 		if modeLbl != "" {
 			ui.Text(c, modeLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 		}
+		guideBtn := ui.ButtonBase(c.Key("status-guide-btn")).Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Label("新手指南与界面导览")
+		guideBtn.Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Icon(c, lucide.BookOpen()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+				ui.Text(c, "指南").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			})
+		})
+		components.MenuButton(c, guideBtn, func(m *components.Menu) {
+			if m.Item("1 分钟界面区域导览").Chosen() {
+				s.StartTour()
+			}
+			if s.OnOpenUserGuide != nil && m.Item("打开「新手入门指南」互动文档").Chosen() {
+				s.OnOpenUserGuide()
+			}
+		})
 		fbBtn := ui.ButtonBase(c).Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).Label("反馈与诊断")
 		fbBtn.Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
@@ -1002,6 +1024,8 @@ func (s *Shell) RenderSplitView(c *ui.Context) {
 		s.renderMobileWorkbench(c, tok)
 		return
 	}
+	s.inSplitViewRoot = true
+	defer func() { s.inSplitViewRoot = false }()
 	root := ui.Row(c).Fill()
 	theme.PaintCanvasBackground(root, tok)
 	root.Children(func() {
@@ -1041,6 +1065,7 @@ func (s *Shell) RenderSplitView(c *ui.Context) {
 				})
 			})
 		}
+		s.renderSpotlightTour(c, tok)
 	})
 }
 

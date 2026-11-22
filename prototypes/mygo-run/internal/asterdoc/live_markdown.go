@@ -1002,17 +1002,53 @@ func (v *View) renderLiveMarkdownSegmentFull(
 					}
 				}
 			} else if v.nlHover != nil && v.nlHover.editorKey == key && !v.nlHover.byShortcut {
-				// Keep card open while pointer moves into the card to click; dismiss smoothly after 260ms grace
+				// Keep card open while pointer moves into the card to click; generous 900ms grace period
 				if v.nlHover.overCard {
 					v.nlHover.hideAt = time.Time{}
 				} else {
 					if v.nlHover.hideAt.IsZero() {
-						v.nlHover.hideAt = c.Now().Add(260 * time.Millisecond)
+						v.nlHover.hideAt = c.Now().Add(900 * time.Millisecond)
 					}
 					if wait := v.nlHover.hideAt.Sub(c.Now()); wait > 0 {
 						c.After(wait)
 					} else {
 						v.nlHover = nil
+					}
+				}
+			}
+		}
+
+		// Quiet, text-free ✦ micro-icon at right margin of the focused actionable line (L1 progressive disclosure).
+		// Clicking it opens the exact same preview card as Alt+Hover / Alt+Enter without cluttering resting text.
+		if !readOnly && focused && (v.nlHover == nil || v.nlHover.editorKey != key) {
+			if lnStart, lnEnd, ok := lineBoundsForIndex(curBuf, activeLine); ok {
+				lnTxt := strings.TrimSpace(curBuf[lnStart:lnEnd])
+				if len([]rune(lnTxt)) >= 6 {
+					sugs := AnalyzeLabSentenceWithContext(v.Doc, lnTxt, entry.docOffset+lnStart, nil)
+					if len(sugs) > 0 && sugs[0] != nil {
+						lineTop := float32(st.LineTop(activeLine) - st.ScrollY())
+						lineBot := float32(st.LineTop(activeLine+1) - st.ScrollY())
+						lineH := lineBot - lineTop
+						if lineH < float32(tok.TextBody)*1.3 {
+							lineH = float32(tok.TextBody) * 1.56
+						}
+						btnSz := float32(tok.Spacing24) - 2
+						sparkBtn := ui.ButtonBase(c.Key(fmt.Sprintf("nl-spark:%s:%d", key, activeLine))).
+							Absolute().Top(lineTop + (lineH-btnSz)/2).Right(2).
+							Size(btnSz, btnSz).Center().
+							Radius(float32(tok.ControlRadius)).
+							Label("智能转为交互组件")
+						if sparkBtn.Hovered() {
+							sparkBtn.Background(tok.AccentSoftBg)
+						}
+						sparkBtn.Children(func() {
+							ui.Icon(c, lucide.Sparkles()).Size(float32(tok.Spacing12)+1, float32(tok.Spacing12)+1).
+								TextColor(tok.Accent.Alpha(0.75))
+						})
+						components.Tooltip(c, sparkBtn, "转为交互组件（快捷键 Alt+悬停 或 Alt+Enter）")
+						if sparkBtn.Clicked() {
+							activateNLHoverForLine(curBuf, lnStart, true)
+						}
 					}
 				}
 			}

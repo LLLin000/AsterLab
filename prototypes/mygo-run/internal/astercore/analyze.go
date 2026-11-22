@@ -205,8 +205,9 @@ func AnalyzeDocument(doc *asterdoc.Document, docID string) []AssaySummary {
 			}
 		}
 
-		// Try CCK-8 relative viability if a control group is present
-		if controlGroup != "" {
+		// Only normalize as CCK-8 relative viability when the table/document explicitly indicates a viability assay;
+		// general quantitative tables (ELISA, protein conc, fluorescence intensity, tube counts) stay descriptive!
+		if controlGroup != "" && isViabilityAssayTable(doc, dt, title) {
 			if cckRes, err := analysis.AnalyzeCCK8(cells, controlGroup, prov); err == nil {
 				summaries = append(summaries, AssaySummary{
 					Kind:      "cck8",
@@ -262,6 +263,33 @@ func AnalyzeDocument(doc *asterdoc.Document, docID string) []AssaySummary {
 		}
 	}
 	return summaries
+}
+
+func isViabilityAssayTable(doc *asterdoc.Document, dt map[string]any, title string) bool {
+	var sb strings.Builder
+	sb.WriteString(strings.ToLower(title))
+	if doc != nil {
+		fm, _, _ := asterdoc.ScanFrontmatter(doc.Source)
+		sb.WriteString(" ")
+		sb.WriteString(strings.ToLower(fm.Title))
+	}
+	if cols, ok := dt["columns"].([]any); ok {
+		for _, cRaw := range cols {
+			if cm, ok := cRaw.(map[string]any); ok {
+				sb.WriteString(" ")
+				sb.WriteString(strings.ToLower(stringVal(cm["key"])))
+				sb.WriteString(" ")
+				sb.WriteString(strings.ToLower(stringVal(cm["label"])))
+			}
+		}
+	}
+	hay := sb.String()
+	for _, kw := range []string{"cck8", "cck-8", "od450", "od 450", "viability", "mtt", "alamar", "活力", "存活率", "增殖"} {
+		if strings.Contains(hay, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNumericReading(rm map[string]any) (float64, bool) {
