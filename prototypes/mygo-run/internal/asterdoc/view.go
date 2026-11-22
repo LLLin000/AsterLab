@@ -1171,6 +1171,49 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 						v.togglePlateExcludedWells(p, selected)
 					}
 					m.Separator()
+					// Deterministic sequential plate layout actions (row-major / col-major / optional edge-blank)
+					hasEdgeBlank := false
+					for _, rv := range p.Roles {
+						if strings.EqualFold(rv, "blank") {
+							hasEdgeBlank = true
+							break
+						}
+					}
+					applyRelayout := func(dir PlateLayoutDirection, edgeBlank bool) {
+						nextGroups, nextRoles, _, relErr := RelayoutExistingPlate(v.Doc, p, dir, edgeBlank)
+						if relErr != nil {
+							v.PlateSampleError = relErr.Error()
+							return
+						}
+						v.PlateSampleError = ""
+						gMap := map[string]any{}
+						for gid, ws := range nextGroups {
+							arr := make([]any, len(ws))
+							for i, w := range ws {
+								arr[i] = w
+							}
+							gMap[gid] = arr
+						}
+						rMap := map[string]any{}
+						for w, rv := range nextRoles {
+							rMap[w] = rv
+						}
+						v.emitAnyModuleEdit(p.ID, map[string]any{"groups": gMap, "roles": rMap})
+					}
+					if m.Item("自动顺排：按行横排").Disabled(len(p.Groups) == 0).Chosen() {
+						applyRelayout(LayoutRowMajor, hasEdgeBlank)
+					}
+					if m.Item("自动顺排：按列竖排 (8 道排枪)").Disabled(len(p.Groups) == 0).Chosen() {
+						applyRelayout(LayoutColMajor, hasEdgeBlank)
+					}
+					edgeItemLbl := "自动排版：外周留空防蒸发 (PBS)"
+					if hasEdgeBlank {
+						edgeItemLbl = "自动排版：取消外周留空 (紧凑满排)"
+					}
+					if m.Item(edgeItemLbl).Disabled(len(p.Groups) == 0).Chosen() {
+						applyRelayout(LayoutRowMajor, !hasEdgeBlank)
+					}
+					m.Separator()
 				} else if v.LabMode && !v.ReadOnly {
 					if m.Item("标记 / 取消异常孔").Disabled(len(selected) == 0).Chosen() {
 						v.togglePlateExcludedWells(p, selected)

@@ -6,7 +6,7 @@ status: active
 tags: [cell-biology, huvec, hydrogel, angiogenesis]
 ---
 
-## 1.1 实验设计
+## 1.1 实验设计（全局蓝图：分组与容器）
 - **研究体系**：DMEM 高糖 + 10% FBS + 10 ng/mL VEGF（稀释比 1/1000）
 - **单一自变量**：GelMA 浓度（3%、5%、7% w/v），固定光引发剂 0.25% (w/v) LAP
 - **容器与复孔**：1 块 12 孔板（3×4），9 孔实验组（每组 3 技术复孔），第 4 列加无菌 PBS 防边缘蒸发
@@ -61,6 +61,11 @@ roles:
   C4: blank
 ```
 
+## 1.2 实验步骤（就地执行工具流）
+
+#@ GelMA 前驱液配制、热循环溶解与光交联
+- 将 5% w/v GelMA 冻干粉配制 2 mL 溶液，计算称粉量
+
 ```asterlab
 id: calc-huvec-mm
 kind: calculator
@@ -114,10 +119,6 @@ rows:
     unit: mg
 ```
 
-## 1.2 实验步骤
-
-#@ GelMA 前驱液溶解与光交联
-- 将 5% w/v GelMA 冻干粉配制 2 mL 溶液，计算称粉量
 - 80°C 水浴 5 min 与冰上 10 min 交替 3 轮至完全澄清
 - 肉眼确认溶液完全澄清；若无气泡则按规则跳过 2000 rpm 离心脱泡
 - 405 nm 蓝光照射直至水凝胶完全固化，记录实际固化秒数

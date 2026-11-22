@@ -1780,6 +1780,10 @@ func (v *View) ApplyMatrixClipboardToDataTable(moduleID string, pl *Plate, cols,
 	}
 
 	wellToRow, wellColKey, sampleColKey := dataTableWellRowMap(cols, authoredRows, geom)
+	var docGraph *SciGraph
+	if v.Doc != nil {
+		docGraph = BuildSciGraph(v.Doc)
+	}
 	filled := 0
 	maxRowReached := -1
 	for r, parts := range parsed {
@@ -1791,6 +1795,14 @@ func (v *View) ApplyMatrixClipboardToDataTable(moduleID string, pl *Plate, cols,
 				continue
 			}
 			wID := fmt.Sprintf("%s%d", rowLabel(r), col+1)
+			// Consume unified SciUnit: skip excluded wells cleanly and auto-label sample/group!
+			unit, hasUnit := SciUnit{}, false
+			if docGraph != nil {
+				unit, hasUnit = docGraph.UnitForWell(pl.ID, wID)
+				if hasUnit && unit.Excluded {
+					continue
+				}
+			}
 			rIdx := wellToRow[wID]
 			ck := v.cellDraftKey(moduleID, rIdx, valColKey)
 			v.setTableCell(moduleID, ck, val)
@@ -1809,6 +1821,15 @@ func (v *View) ApplyMatrixClipboardToDataTable(moduleID string, pl *Plate, cols,
 				}
 				if strings.TrimSpace(v.dataTableCellVal(moduleID, rIdx, sampleColKey, pre)) == "" {
 					sid := firstNonEmpty(pl.Samples[wID], wID)
+					if pl.Samples[wID] == "" && hasUnit && unit.GroupName != "" {
+						if unit.Blank {
+							sid = unit.GroupName + " (Blank)"
+						} else if unit.RepIndex > 0 {
+							sid = fmt.Sprintf("%s #%d", unit.GroupName, unit.RepIndex)
+						} else {
+							sid = unit.GroupName
+						}
+					}
 					sck := v.cellDraftKey(moduleID, rIdx, sampleColKey)
 					v.setTableCell(moduleID, sck, sid)
 					sbuf := v.ensureWidgetDraft(sck, sid)

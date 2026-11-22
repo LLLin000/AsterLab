@@ -394,6 +394,15 @@ func collectCalcContextVars(doc *Document, actuals *CalcActualContext) (map[stri
 					vars["n_wells"] = float64(pl.TotalWells)
 				}
 			}
+			if allSW := g.AllSampleWells(); allSW > 0 {
+				vars["plate_all_sample_wells"] = float64(allSW)
+			}
+			for _, c := range g.Containers {
+				cid := sanitizeCalcVar(c.ID)
+				vars["plate_"+cid+"_sample_wells"] = float64(c.SampleWells)
+				vars["plate_"+cid+"_wells"] = float64(c.TotalWells)
+				vars["plate_"+cid+"_blank_wells"] = float64(c.BlankWells)
+			}
 			// Inject upstream single-document calculator outputs (`@calc.<id>.<key>`)!
 			for _, co := range g.CalcOutputs {
 				varKey := "calc_" + sanitizeCalcVar(co.ModuleID) + "_" + sanitizeCalcVar(co.Key)
@@ -443,9 +452,35 @@ func sanitizeCalcVar(s string) string {
 }
 
 func expandCalcFormulaRefs(expr string) string {
-	out := strings.ReplaceAll(expr, "@plate.sample_wells", "plate_sample_wells")
+	out := strings.ReplaceAll(expr, "@plate.all_sample_wells", "plate_all_sample_wells")
+	out = strings.ReplaceAll(out, "@plate.sample_wells", "plate_sample_wells")
 	out = strings.ReplaceAll(out, "@plate.blank_wells", "plate_blank_wells")
 	out = strings.ReplaceAll(out, "@plate.wells", "plate_wells")
+	// Scoped multi-plate references: @plate.<id>.sample_wells / @plate.<id>.wells / @plate.<id>.blank_wells
+	for {
+		idx := strings.Index(out, "@plate.")
+		if idx < 0 {
+			break
+		}
+		rest := out[idx+len("@plate."):]
+		dot := strings.IndexByte(rest, '.')
+		if dot <= 0 {
+			break
+		}
+		pid := sanitizeCalcVar(rest[:dot])
+		after := rest[dot+1:]
+		matched := false
+		for _, suffix := range []string{"sample_wells", "blank_wells", "wells"} {
+			if strings.HasPrefix(after, suffix) {
+				out = out[:idx] + "plate_" + pid + "_" + suffix + after[len(suffix):]
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			break
+		}
+	}
 	for {
 		idx := strings.Index(out, "@group.")
 		if idx < 0 {

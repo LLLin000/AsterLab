@@ -13,15 +13,31 @@ import (
 
 // SciContainer represents one live plate/container node in the document's Scientific Graph.
 type SciContainer struct {
-	ID          string
-	Title       string
-	Format      int
-	TotalWells  int
-	SampleWells int // Assigned wells excluding role == "blank" (e.g. PBS edge-evaporation wells)
-	BlankWells  int
-	BlankSet    map[string]bool
-	GroupWells  map[string][]string
-	ByteOffset  int
+	ID            string
+	Title         string
+	Format        int
+	TotalWells    int
+	SampleWells   int // Assigned wells excluding role == "blank" AND excluded_wells
+	BlankWells    int
+	ExcludedWells int
+	BlankSet      map[string]bool
+	ExcludedSet   map[string]bool
+	GroupWells    map[string][]string
+	ByteOffset    int
+}
+
+// SciUnit represents one unified experimental unit (one physical well/sample slot bound to its
+// experimental group, replicate index, and blank/excluded status) consumed across calculators,
+// capture grids, and data tables within the same document.
+type SciUnit struct {
+	PlateID   string
+	WellID    string
+	GroupID   string
+	GroupName string
+	Role      string // "treatment" | "control" | "blank" | "excluded"
+	RepIndex  int    // 1-based technical replicate index within its group
+	Blank     bool
+	Excluded  bool
 }
 
 // SciGroup represents one experimental group node from group_table@1.
@@ -85,16 +101,18 @@ type SciModuleNode struct {
 //   - Deterministic structural zone gating (blocking headings/metadata/materials/review from NL popups)
 //   - Dynamic upstream context inheritance (reagents, plate, anchors, enclosing step, previous line)
 type SciGraph struct {
-	SourceHash  string
-	Source      string
-	Containers  []SciContainer
-	Groups      []SciGroup
-	Reagents    []SciReagent
-	Anchors     []SciAnchor
-	CalcOutputs []SciCalcOutput
-	Modules     []SciModuleNode
-	Outline     []*OutlineNode
-	Steps       *StepTree
+	SourceHash      string
+	Source          string
+	Containers      []SciContainer
+	Groups          []SciGroup
+	Units           []SciUnit
+	UnitByPlateWell map[string]SciUnit // key: plateID + ":" + strings.ToUpper(wellID)
+	Reagents        []SciReagent
+	Anchors         []SciAnchor
+	CalcOutputs     []SciCalcOutput
+	Modules         []SciModuleNode
+	Outline         []*OutlineNode
+	Steps           *StepTree
 }
 
 // NLZone classifies a line's structural role in the AsterML document.
@@ -163,7 +181,49 @@ func (ctx ScientificLineContext) LookupReagent(name string) *SciReagent {
 	return proseFallback
 }
 
-// MicroContextText formats the tiny non-polluting context prefix for the 23 MB ONNX sensor
+// LookupReagentForDilution finds the best upstream stock reagent whose concentration is
+// physically higher than the target concentration (C1 > C2 in the same unit family), preventing
+// working concentrations from ever being mistakenly inherited as stock solutions.
+func (ctx ScientificLineContext) LookupReagentForDilution(name string, targetVal float64, targetUnit string) *SciReagent {
+	want := strings.ToLower(strings.TrimSpace(name))
+	if want == "" {
+		return nil
+	}
+	s2, f2 := concFactorToBase(targetUnit)
+	tBase := targetVal * s2
+
+	satisfiesPhys := func(r *SciReagent) bool {
+		if r == nil || r.StockVal <= 0 || r.StockUnit == "" {
+			return false
+		}
+		if targetVal <= 0 {
+			return true
+		}
+		s1, f1 := concFactorToBase(r.StockUnit)
+		if f1 == f2 && f1 != "" {
+			return r.StockVal*s1 > tBase
+		}
+		return true
+	}
+
+	var proseFallback *SciReagent
+	for i := len(ctx.UpstreamReagents) - 1; i >= 0; i-- {
+		r := &ctx.UpstreamReagents[i]
+		rn := strings.ToLower(strings.TrimSpace(r.Name))
+		if rn != "" && (rn == want || strings.Contains(rn, want) || strings.Contains(want, rn)) {
+			if !satisfiesPhys(r) {
+				continue
+			}
+			if r.SourceModuleID != "prose" {
+				return r
+			}
+			if proseFallback == nil {
+				proseFallback = r
+			}
+		}
+	}
+	return proseFallback
+}
 // ONLY when the sentence is short or contains implicit anaphoric references ("同上"/"刚才"/"再做").
 func (ctx ScientificLineContext) MicroContextText(sentence string) string {
 	s := strings.TrimSpace(sentence)
@@ -183,8 +243,9 @@ var (
 	reMaterialsChap = regexp.MustCompile(`(?i)(试剂|耗材|材料|仪器|设备|materials|reagents|equipment)`)
 	reReviewChap    = regexp.MustCompile(`(?i)(讨论|复盘|总结|结论|数据分析|结果分析|discussion|troubleshooting|analysis|review|notes)`)
 	reDesignChap    = regexp.MustCompile(`(?i)(设计|分组|孔板|布局|因子|配液|计算|方案概览|design|layout|setup)`)
-	reKnownReagName = regexp.MustCompile(`(?i)\b(VEGF|EGF|bFGF|TGF-?β1?|GelMA|LAP|FBS|DMEM|RPMI|PBS|DPBS|DMSO|PFA|BSA|Triton|PMSF|RIPA|IPTG|EDTA|HEPES|Tris|NaCl|DTT|DAPI|CCK-?8|Matrigel|SYBR|Doxorubicin|Cisplatin|Rapamycin|Ampicillin|Kanamycin|Puromycin|Primer|引物|一抗|二抗|多聚甲醛)\b`)
-	reProseStockCue = regexp.MustCompile(`(?i)(母液|储液|原液|stock|浓缩液|浓度|MW|分子量)`)
+	reKnownReagName   = regexp.MustCompile(`(?i)\b(VEGF|EGF|bFGF|TGF-?β1?|GelMA|LAP|FBS|DMEM|RPMI|PBS|DPBS|DMSO|PFA|BSA|Triton|PMSF|RIPA|IPTG|EDTA|HEPES|Tris|NaCl|DTT|DAPI|CCK-?8|Matrigel|SYBR|Doxorubicin|Cisplatin|Rapamycin|Ampicillin|Kanamycin|Puromycin|Primer|引物|一抗|二抗|多聚甲醛)\b`)
+	reProseStockCue   = regexp.MustCompile(`(?i)(母液|储液|原液|stock|浓缩液|MW|分子量)`)
+	reProseWorkingCue = regexp.MustCompile(`(?i)(工作浓度|终浓度|工作液|处理浓度|稀释至|稀释到|稀释成)`)
 )
 
 func needsStepMicroContext(sentence string) bool {
@@ -236,10 +297,11 @@ func BuildSciGraphWithStats(doc *Document) (g *SciGraph, cacheHit bool, dur time
 
 func compileSciGraph(doc *Document, hash string) *SciGraph {
 	g := &SciGraph{
-		SourceHash: hash,
-		Source:     doc.Source,
-		Outline:    ParseDocumentOutline(doc.Source, doc),
-		Steps:      ParseStepTree(doc.Source, doc),
+		SourceHash:      hash,
+		Source:          doc.Source,
+		UnitByPlateWell: map[string]SciUnit{},
+		Outline:         ParseDocumentOutline(doc.Source, doc),
+		Steps:           ParseStepTree(doc.Source, doc),
 	}
 
 	// 1. Collect step anchors ({#t0}, {#obs-6h}, ...) and link any persisted timer timestamp inside that step!
@@ -333,9 +395,185 @@ func compileSciGraph(doc *Document, hash string) *SciGraph {
 		}
 	}
 
+	// 2b. Build unified experimental units table (SciUnit) linking every plate well to group/role/rep/excluded
+	populateSciUnits(g)
+
 	// 3. Evaluate upstream calculator outputs in document order for reactive `@calc.<id>.<key>` chaining
 	populateCalcOutputsDAG(doc, g)
 	return g
+}
+
+func populateSciUnits(g *SciGraph) {
+	if g == nil {
+		return
+	}
+	groupNames := map[string]string{}
+	groupRoles := map[string]string{}
+	for _, grp := range g.Groups {
+		if grp.ID != "" {
+			groupNames[grp.ID] = firstNonEmpty(grp.Name, grp.ID)
+			groupRoles[grp.ID] = grp.Role
+		}
+	}
+	for _, c := range g.Containers {
+		for gid, wells := range c.GroupWells {
+			gName := firstNonEmpty(groupNames[gid], gid)
+			gRole := firstNonEmpty(groupRoles[gid], "treatment")
+			rep := 0
+			for _, w := range wells {
+				uw := strings.ToUpper(strings.TrimSpace(w))
+				if uw == "" {
+					continue
+				}
+				isBlank := c.BlankSet != nil && c.BlankSet[uw]
+				isExcl := c.ExcludedSet != nil && c.ExcludedSet[uw]
+				role := gRole
+				if isBlank {
+					role = "blank"
+				} else if isExcl {
+					role = "excluded"
+				} else {
+					rep++
+				}
+				u := SciUnit{
+					PlateID:   c.ID,
+					WellID:    uw,
+					GroupID:   gid,
+					GroupName: gName,
+					Role:      role,
+					RepIndex:  rep,
+					Blank:     isBlank,
+					Excluded:  isExcl,
+				}
+				g.Units = append(g.Units, u)
+				g.UnitByPlateWell[c.ID+":"+uw] = u
+			}
+		}
+	}
+}
+
+// AllSampleWells returns the sum of active experimental wells (excluding blank & excluded wells)
+// across all plates in the document (for multi-plate mastermix totals via `@plate.all_sample_wells`).
+func (g *SciGraph) AllSampleWells() int {
+	if g == nil {
+		return 0
+	}
+	tot := 0
+	for _, c := range g.Containers {
+		tot += c.SampleWells
+	}
+	return tot
+}
+
+// UnitForWell looks up the unified SciUnit for a plate+well coordinate.
+func (g *SciGraph) UnitForWell(plateID, wellID string) (SciUnit, bool) {
+	if g == nil || g.UnitByPlateWell == nil {
+		return SciUnit{}, false
+	}
+	uw := strings.ToUpper(strings.TrimSpace(wellID))
+	if plateID != "" {
+		if u, ok := g.UnitByPlateWell[plateID+":"+uw]; ok {
+			return u, true
+		}
+	}
+	for _, c := range g.Containers {
+		if u, ok := g.UnitByPlateWell[c.ID+":"+uw]; ok {
+			return u, true
+		}
+	}
+	return SciUnit{}, false
+}
+
+// SciGroupReadoutStats holds per-group summary statistics computed from SciUnit-linked well readings,
+// automatically excluding blank and excluded wells and optionally subtracting blank mean background.
+type SciGroupReadoutStats struct {
+	GroupID   string
+	GroupName string
+	Count     int
+	Mean      float64
+	SD        float64
+	CorrMean  float64 // Mean - BlankMean when blank wells have readings
+}
+
+// SummarizeWellReadings aggregates numeric well readings by SciUnit group, automatically
+// skipping excluded wells and computing blank-subtracted means when blank wells are present.
+func (g *SciGraph) SummarizeWellReadings(plateID string, readings map[string]float64) (blankMean float64, hasBlank bool, stats []SciGroupReadoutStats) {
+	if g == nil || len(readings) == 0 {
+		return 0, false, nil
+	}
+	var blankVals []float64
+	byGroup := map[string][]float64{}
+	groupName := map[string]string{}
+	var order []string
+	seenOrd := map[string]bool{}
+
+	for _, u := range g.Units {
+		if plateID != "" && u.PlateID != plateID {
+			continue
+		}
+		val, ok := readings[u.WellID]
+		if !ok || u.Excluded {
+			continue
+		}
+		if u.Blank {
+			blankVals = append(blankVals, val)
+			continue
+		}
+		if !seenOrd[u.GroupID] {
+			seenOrd[u.GroupID] = true
+			order = append(order, u.GroupID)
+			groupName[u.GroupID] = u.GroupName
+		}
+		byGroup[u.GroupID] = append(byGroup[u.GroupID], val)
+	}
+	if len(blankVals) > 0 {
+		sum := 0.0
+		for _, v := range blankVals {
+			sum += v
+		}
+		blankMean = sum / float64(len(blankVals))
+		hasBlank = true
+	}
+	for _, gid := range order {
+		vals := byGroup[gid]
+		if len(vals) == 0 {
+			continue
+		}
+		sum := 0.0
+		for _, v := range vals {
+			sum += v
+		}
+		mean := sum / float64(len(vals))
+		sd := 0.0
+		if len(vals) > 1 {
+			vSum := 0.0
+			for _, v := range vals {
+				d := v - mean
+				vSum += d * d
+			}
+			sd = sqrtFloat(vSum / float64(len(vals)-1))
+		}
+		stats = append(stats, SciGroupReadoutStats{
+			GroupID:   gid,
+			GroupName: groupName[gid],
+			Count:     len(vals),
+			Mean:      round4(mean),
+			SD:        round4(sd),
+			CorrMean:  round4(mean - blankMean),
+		})
+	}
+	return blankMean, hasBlank, stats
+}
+
+func sqrtFloat(x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	z := x
+	for i := 0; i < 16; i++ {
+		z = 0.5 * (z + x/z)
+	}
+	return z
 }
 
 func harvestProseReagents(src string, g *SciGraph) {
@@ -359,9 +597,8 @@ func harvestProseReagents(src string, g *SciGraph) {
 		if inFence || trim == "" || strings.HasPrefix(trim, "#") {
 			continue
 		}
-		// Never mis-harvest a downstream dilution action sentence ("将 VEGF 母液稀释至 50 ng/mL")
-		// as a stock concentration definition!
-		if strings.Contains(trim, "稀释至") || strings.Contains(trim, "稀释到") || strings.Contains(trim, "稀释成") {
+		// Never mis-harvest working/final concentrations or dilution actions as stock solutions!
+		if reProseWorkingCue.MatchString(trim) {
 			continue
 		}
 		if !reProseStockCue.MatchString(trim) {
@@ -419,8 +656,23 @@ func populateCalcOutputsDAG(doc *Document, g *SciGraph) {
 			baseVars["n_wells"] = float64(pl.TotalWells)
 		}
 		for gk, ws := range pl.GroupWells {
-			baseVars["group_"+sanitizeCalcVar(gk)+"_wells"] = float64(len(ws))
+			active := 0
+			for _, w := range ws {
+				if !pl.BlankSet[w] && !pl.ExcludedSet[w] {
+					active++
+				}
+			}
+			baseVars["group_"+sanitizeCalcVar(gk)+"_wells"] = float64(active)
 		}
+	}
+	if allSW := g.AllSampleWells(); allSW > 0 {
+		baseVars["plate_all_sample_wells"] = float64(allSW)
+	}
+	for _, c := range g.Containers {
+		cid := sanitizeCalcVar(c.ID)
+		baseVars["plate_"+cid+"_sample_wells"] = float64(c.SampleWells)
+		baseVars["plate_"+cid+"_wells"] = float64(c.TotalWells)
+		baseVars["plate_"+cid+"_blank_wells"] = float64(c.BlankWells)
 	}
 	for _, m := range doc.Modules {
 		if m.Kind == "param_table" {
@@ -534,14 +786,28 @@ func (g *SciGraph) UpstreamCalcOutputs(beforeModuleID string) []SciCalcOutput {
 
 func compilePlateContainer(m Module) SciContainer {
 	sc := SciContainer{
-		ID:         m.ID,
-		Title:      firstNonEmpty(textValue(m.Data, "title"), m.ID),
-		Format:     int(numOrZero(m.Data["format"])),
-		BlankSet:   map[string]bool{},
-		GroupWells: map[string][]string{},
-		ByteOffset: m.Start,
+		ID:          m.ID,
+		Title:       firstNonEmpty(textValue(m.Data, "title"), m.ID),
+		Format:      int(numOrZero(m.Data["format"])),
+		BlankSet:    map[string]bool{},
+		ExcludedSet: map[string]bool{},
+		GroupWells:  map[string][]string{},
+		ByteOffset:  m.Start,
 	}
 	blankSet := sc.BlankSet
+	excludedSet := sc.ExcludedSet
+	for _, w := range calcStringSlice(m.Data["excluded_wells"]) {
+		if uw := strings.ToUpper(strings.TrimSpace(w)); uw != "" {
+			excludedSet[uw] = true
+		}
+	}
+	if m.Plate != nil {
+		for _, w := range m.Plate.ExcludedWells {
+			if uw := strings.ToUpper(strings.TrimSpace(w)); uw != "" {
+				excludedSet[uw] = true
+			}
+		}
+	}
 	if rolesMap, ok := m.Data["roles"].(map[string]any); ok {
 		for w, rv := range rolesMap {
 			if strings.EqualFold(strings.TrimSpace(fmt.Sprint(rv)), "blank") {
@@ -585,6 +851,8 @@ func compilePlateContainer(m Module) SciContainer {
 		sc.TotalWells++
 		if blankSet[w] {
 			sc.BlankWells++
+		} else if excludedSet[w] {
+			sc.ExcludedWells++
 		} else {
 			sc.SampleWells++
 		}

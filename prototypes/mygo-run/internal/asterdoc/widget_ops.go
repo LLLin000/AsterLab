@@ -2282,13 +2282,15 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 							}
 						}
 						wellGroups := pl.WellGroups()
-						var blankSet map[string]bool
-						blankCount := 0
+						var blankSet, excludedSet map[string]bool
+						blankCount, exclCount := 0, 0
 						if v.Doc != nil {
 							if g := BuildSciGraph(v.Doc); g != nil {
 								if sc := g.ContainerByID(containerRef); sc != nil {
 									blankSet = sc.BlankSet
 									blankCount = sc.BlankWells
+									excludedSet = sc.ExcludedSet
+									exclCount = sc.ExcludedWells
 								}
 							}
 						}
@@ -2296,7 +2298,7 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 						for r := 0; r < geom.Rows; r++ {
 							for col := 0; col < geom.Columns; col++ {
 								wID := fmt.Sprintf("%s%d", rowLabel(r), col+1)
-								if blankSet != nil && blankSet[wID] && countsByWell[wID] == 0 {
+								if ((blankSet != nil && blankSet[wID]) || (excludedSet != nil && excludedSet[wID])) && countsByWell[wID] == 0 {
 									continue
 								}
 								if wellGroups[wID] != "" || countsByWell[wID] > 0 {
@@ -2314,8 +2316,15 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 						if len(previewWells) > 12 {
 							previewWells = previewWells[:12]
 						}
-						if blankCount > 0 {
-							ui.Text(c, fmt.Sprintf("有效实验孔 %d 孔（已自动排除 %d 个空白/PBS 边缘孔）", len(previewWells), blankCount)).
+						if blankCount > 0 || exclCount > 0 {
+							var exclParts []string
+							if blankCount > 0 {
+								exclParts = append(exclParts, fmt.Sprintf("%d 个空白/PBS 边缘孔", blankCount))
+							}
+							if exclCount > 0 {
+								exclParts = append(exclParts, fmt.Sprintf("%d 个异常孔", exclCount))
+							}
+							ui.Text(c, fmt.Sprintf("有效实验孔 %d 孔（已自动排除 %s）", len(previewWells), strings.Join(exclParts, "、"))).
 								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 						}
 						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {

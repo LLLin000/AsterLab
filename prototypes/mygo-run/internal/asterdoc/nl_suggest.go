@@ -1212,9 +1212,9 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			if strings.Contains(text, "稀释至") || strings.Contains(text, "稀释到") || strings.Contains(text, "稀释成") {
 				c2v, c2u = vOnly, uOnly
 				c2Missing = false
-				// Try inheriting upstream stock concentration from SciGraph before marking missing!
+				// Try inheriting upstream stock concentration from SciGraph with physical C1 > C2 guard!
 				if hasCtx && reagent != "母液" {
-					if up := ctx.LookupReagent(reagent); up != nil && up.StockVal > 0 && up.StockUnit != "" {
+					if up := ctx.LookupReagentForDilution(reagent, c2v, c2u); up != nil && up.StockVal > 0 && up.StockUnit != "" {
 						c1v, c1u = up.StockVal, up.StockUnit
 						s1, f1 := concFactorToBase(c1u)
 						s2, f2 := concFactorToBase(c2u)
@@ -1419,7 +1419,11 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			wellsRowVal = wells
 		} else if hasCtx && ctx.ActivePlate != nil && ctx.ActivePlate.SampleWells > 0 {
 			wells = float64(ctx.ActivePlate.SampleWells)
-			if ctx.ActivePlate.BlankWells > 0 {
+			multiPlate := doc != nil && len(BuildSciGraph(doc).Containers) >= 2
+			if multiPlate {
+				wellsRowVal = "@plate." + ctx.ActivePlate.ID + ".sample_wells"
+				wellsLabel = "有效实验孔数"
+			} else if ctx.ActivePlate.BlankWells > 0 {
 				wellsRowVal = "@plate.sample_wells"
 				wellsLabel = "有效实验孔数"
 			} else {
@@ -1488,7 +1492,10 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			}
 		} else if hasCtx && ctx.ActivePlate != nil && ctx.ActivePlate.SampleWells > 0 {
 			wells = float64(ctx.ActivePlate.SampleWells)
-			if ctx.ActivePlate.BlankWells > 0 {
+			multiPlate := doc != nil && len(BuildSciGraph(doc).Containers) >= 2
+			if multiPlate {
+				wellsRowVal = "@plate." + ctx.ActivePlate.ID + ".sample_wells"
+			} else if ctx.ActivePlate.BlankWells > 0 {
 				wellsRowVal = "@plate.sample_wells"
 			} else {
 				wellsRowVal = "@plate.wells"
@@ -1672,11 +1679,18 @@ func extractPlateGroupSuggestion(doc *Document, text string) *NLSuggestion {
 		geom, _ = geometryForPlate(12, "", 0, 0)
 	}
 
+	// Delegate physical well coordinate assignment 100% to our deterministic Plate Layout Engine!
+	// Model/NL extracts ONLY logical groups & replicate counts; zero LLM coordinate hallucinations.
+	wantEdgeBlank := strings.Contains(text, "防蒸发") || strings.Contains(text, "边缘") ||
+		strings.Contains(text, "外周") || strings.Contains(text, "四周") || strings.Contains(text, "第 4 列")
+	dir := LayoutRowMajor
+	if strings.Contains(text, "竖排") || strings.Contains(text, "按列") || strings.Contains(text, "8道") || strings.Contains(text, "8 道") {
+		dir = LayoutColMajor
+	}
+
+	var layoutSpecs []PlateLayoutGroupSpec
 	gtRows := make([]any, 0, len(groups))
-	plateGroups := map[string]any{}
-	plateRoles := map[string]any{}
-	usedWells := 0
-	rowCursor := 0
+	blankGroupID := ""
 	for _, g := range groups {
 		gtRows = append(gtRows, map[string]any{
 			"id":                g.id,
@@ -1684,34 +1698,28 @@ func extractPlateGroupSuggestion(doc *Document, text string) *NLSuggestion {
 			"role":              g.role,
 			"technical_repeats": repCount,
 		})
-		var wells []any
-		if g.id == "g-nl-blank" && strings.Contains(text, "第 4 列") && geom.Columns >= 4 {
-			for r := 0; r < geom.Rows; r++ {
-				w := fmt.Sprintf("%s4", rowLabel(r))
-				wells = append(wells, w)
-				plateRoles[w] = "blank"
-				usedWells++
-			}
-		} else {
-			if rowCursor < geom.Rows {
-				for col := 1; col <= repCount && col <= geom.Columns; col++ {
-					w := fmt.Sprintf("%s%d", rowLabel(rowCursor), col)
-					wells = append(wells, w)
-					if g.id == "g-nl-blank" {
-						plateRoles[w] = "blank"
-					}
-					usedWells++
-				}
-				rowCursor++
-			}
+		lRole := g.role
+		if g.id == "g-nl-blank" {
+			lRole = "blank"
+			blankGroupID = g.id
 		}
-		if len(wells) > 0 {
-			plateGroups[g.id] = wells
-		}
+		layoutSpecs = append(layoutSpecs, PlateLayoutGroupSpec{
+			ID:         g.id,
+			Name:       g.name,
+			Role:       lRole,
+			Replicates: repCount,
+		})
 	}
 
+	plan := ComputePlateLayout(PlateLayoutSpec{
+		Format:       format,
+		Groups:       layoutSpecs,
+		Direction:    dir,
+		EdgeBlank:    wantEdgeBlank,
+		BlankGroupID: blankGroupID,
+	})
+
 	gtID := nextUniqueBlockID(doc, "gt-nl")
-	plID := nextUniqueBlockID(doc, "plate-nl")
 	gtMod := map[string]any{
 		"kind":   "group_table",
 		"id":     gtID,
@@ -1719,32 +1727,69 @@ func extractPlateGroupSuggestion(doc *Document, text string) *NLSuggestion {
 		"title":  "实验分组",
 		"rows":   gtRows,
 	}
-	plMod := map[string]any{
-		"kind":   "plate",
-		"id":     plID,
-		"schema": 1,
-		"title":  fmt.Sprintf("%d 孔板布局", format),
-		"format": format,
-		"groups": plateGroups,
-	}
-	if len(plateRoles) > 0 {
-		plMod["roles"] = plateRoles
+	mods := []map[string]any{gtMod}
+	usedWells := 0
+	for pIdx, pr := range plan.Plates {
+		plID := nextUniqueBlockID(doc, fmt.Sprintf("plate-nl-%d", pIdx+1))
+		if len(plan.Plates) == 1 {
+			plID = nextUniqueBlockID(doc, "plate-nl")
+		}
+		plTitle := fmt.Sprintf("%d 孔板布局", pr.Format)
+		if len(plan.Plates) > 1 {
+			plTitle = fmt.Sprintf("%d 孔板 #%d（共 %d 块）", pr.Format, pIdx+1, len(plan.Plates))
+		}
+		plateGroups := map[string]any{}
+		for gid, ws := range pr.Groups {
+			arr := make([]any, len(ws))
+			for i, w := range ws {
+				arr[i] = w
+			}
+			plateGroups[gid] = arr
+			usedWells += len(ws)
+		}
+		plMod := map[string]any{
+			"kind":   "plate",
+			"id":     plID,
+			"schema": 1,
+			"title":  plTitle,
+			"format": pr.Format,
+			"groups": plateGroups,
+		}
+		if len(pr.Roles) > 0 {
+			plateRoles := map[string]any{}
+			for w, rv := range pr.Roles {
+				plateRoles[w] = rv
+			}
+			plMod["roles"] = plateRoles
+		}
+		mods = append(mods, plMod)
 	}
 
 	names := make([]string, 0, len(groups))
 	for _, g := range groups {
 		names = append(names, g.name)
 	}
+	kindLabel := fmt.Sprintf("%d 孔板 + %d 组", format, len(groups))
+	if len(plan.Plates) > 1 {
+		kindLabel = fmt.Sprintf("%d 块 %d 孔板 + %d 组", len(plan.Plates), format, len(groups))
+	}
+	summary := fmt.Sprintf("已自动顺排 %d 孔：%s", usedWells, strings.Join(names, " · "))
+	if plan.EdgeBlankUsed {
+		summary += "（已含外周/边缘 PBS 留空）"
+	}
+	if len(plan.Plates) > 1 {
+		summary += fmt.Sprintf(" · 自动拆分 %d 块板", len(plan.Plates))
+	}
 	return &NLSuggestion{
 		Kind:      "plate_group",
-		KindLabel: fmt.Sprintf("%d 孔板 + %d 组", format, len(groups)),
-		Summary:   fmt.Sprintf("已自动分配 %d 孔：%s", usedWells, strings.Join(names, " · ")),
+		KindLabel: kindLabel,
+		Summary:   summary,
 		Params: []NLParamKV{
 			{Label: "容器规格", Value: fmt.Sprintf("%d 孔板 (%d×%d)", format, geom.Rows, geom.Columns)},
 			{Label: "组别数", Value: fmt.Sprintf("%d 组", len(groups))},
 			{Label: "每组复孔", Value: fmt.Sprintf("%d 复孔", repCount)},
 		},
-		Modules: []map[string]any{gtMod, plMod},
+		Modules: mods,
 	}
 }
 
