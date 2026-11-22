@@ -14,7 +14,7 @@ AsterLab 是一个面向生物与湿实验研发的**本地单真源（Local-Fir
 
 | 模块 | 阅读入口 | 核心覆盖内容 |
 |---|---|---|
-| **Start** | [领域模型与科学红线](./handbook/domain-model.md) | `Design` / `Protocol` / `Run` 三对象边界、`UnifiedLive` 与科学统计学红线 |
+| **Start** | [领域模型与科学红线](./handbook/domain-model.md) · [公开用户手册（`docs/guide/`）](./guide/index.md) | `Design`/`Protocol`/`Run` 三对象边界与科学统计红线（线上用户手册见 `docs/guide/`） |
 | **Install & Deploy** | [安装、升级与离线 AI 模型分发](./handbook/install-and-update.md) | Windows/macOS/Linux 分发、NSIS `.old` 原子覆盖升级、应用内自更新与看门狗回滚、离线 AI 模型包热升级与降级 |
 | **Architecture** | [分层架构与代码包](./handbook/architecture.md) · [Vault 存储](./handbook/vault-storage.md) · [移动端与双端同步](./handbook/mobile-and-sync.md) | `.asterml` 单真源与 `astercore` 架构决策、增量索引缓存、事件总线、快照恢复与双端同步 |
 | **SciGraph & AI** | [SciGraph 科学网络、离线 AI 路由与孔板引擎](./handbook/scigraph-and-ai.md) | 单文档 `SciGraph` DAG、`SciUnit` 消费闭环、物理量纲与 `C₁>C₂`/MW 护栏、离线 ONNX 语义路由边界与确定性孔板排版引擎 |

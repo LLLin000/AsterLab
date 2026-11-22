@@ -1423,12 +1423,15 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 		var wellsRowVal any = 24.0
 		wellsLabel := "反应孔数"
 		inheritedFrom := ""
+		wellsMissing := true
 		if pm := reNLPlateFmt.FindStringSubmatch(text); len(pm) >= 2 {
 			wells, _ = strconv.ParseFloat(pm[1], 64)
 			wellsRowVal = wells
+			wellsMissing = false
 		} else if wm := reNLWellCount.FindStringSubmatch(text); len(wm) >= 2 {
 			wells, _ = strconv.ParseFloat(wm[1], 64)
 			wellsRowVal = wells
+			wellsMissing = false
 		} else if hasCtx && ctx.ActivePlate != nil && ctx.ActivePlate.SampleWells > 0 {
 			wells = float64(ctx.ActivePlate.SampleWells)
 			multiPlate := doc != nil && len(BuildSciGraph(doc).Containers) >= 2
@@ -1442,16 +1445,28 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 				wellsRowVal = "@plate.wells"
 			}
 			inheritedFrom = "@" + ctx.ActivePlate.ID
+			wellsMissing = false
 		}
 		overage := 0.15
+		overageMissing := true
 		if om := reNLOverage.FindStringSubmatch(text); len(om) >= 2 {
 			if p, err := strconv.ParseFloat(om[1], 64); err == nil {
 				overage = round4(p / 100.0)
+				overageMissing = false
 			}
 		}
 		perWell := 10.0
+		perWellMissing := true
 		if vols := reNLVolume.FindAllStringSubmatch(text, -1); len(vols) >= 1 {
 			perWell, _ = strconv.ParseFloat(vols[0][1], 64)
+			perWellMissing = false
+		}
+		var mmMissing []string
+		if wellsMissing {
+			mmMissing = append(mmMissing, "反应孔数 N")
+		}
+		if perWellMissing {
+			mmMissing = append(mmMissing, "单孔体积 V₀")
 		}
 		tot := round4(wells * perWell * (1 + overage))
 		mod := map[string]any{
@@ -1473,34 +1488,41 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			KindLabel:     "预混液计算器",
 			Summary:       fmt.Sprintf("%s 孔 × %s µL × (1+%s%%) = %s µL", formatNumber(wells), formatNumber(perWell), formatNumber(overage*100), formatNumber(tot)),
 			InheritedFrom: inheritedFrom,
+			MissingSlots:  mmMissing,
 			Params: []NLParamKV{
-				{Label: wellsLabel, Value: fmt.Sprintf("%s 孔", formatNumber(wells))},
-				{Label: "单孔体积", Value: fmt.Sprintf("%s µL", formatNumber(perWell))},
-				{Label: "富余比例", Value: fmt.Sprintf("+%s%%", formatNumber(overage*100))},
+				{Label: wellsLabel, Value: fmt.Sprintf("%s 孔", formatNumber(wells)), IsDefault: wellsMissing},
+				{Label: "单孔体积", Value: fmt.Sprintf("%s µL", formatNumber(perWell)), IsDefault: perWellMissing},
+				{Label: "富余比例", Value: fmt.Sprintf("+%s%%", formatNumber(overage*100)), IsDefault: overageMissing},
 			},
 			Modules: []map[string]any{mod},
 		}
 
 	case "seeding":
 		density := 500000.0
+		densityMissing := true
 		if dm := reNLDensity.FindStringSubmatch(text); len(dm) >= 2 {
 			if v, ok := parseSciNum(dm[1]); ok {
 				density = v
+				densityMissing = false
 			}
 		}
 		perWell := 50000.0
+		perWellMissing := true
 		if cm := reNLCellsPerW.FindStringSubmatch(text); len(cm) >= 2 {
 			if v, ok := parseSciNum(cm[1]); ok {
 				perWell = v
+				perWellMissing = false
 			}
 		}
 		wells := 14.0
 		var wellsRowVal any = 14.0
+		wellsMissing := true
 		inheritedFrom := ""
 		if wm := reNLWellCount.FindStringSubmatch(text); len(wm) >= 2 {
 			if v, err := strconv.ParseFloat(wm[1], 64); err == nil {
 				wells = v
 				wellsRowVal = v
+				wellsMissing = false
 			}
 		} else if hasCtx && ctx.ActivePlate != nil && ctx.ActivePlate.SampleWells > 0 {
 			wells = float64(ctx.ActivePlate.SampleWells)
@@ -1513,10 +1535,26 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 				wellsRowVal = "@plate.wells"
 			}
 			inheritedFrom = "@" + ctx.ActivePlate.ID
+			wellsMissing = false
 		}
 		volUL := 500.0
+		volMissing := true
 		if vols := reNLVolume.FindAllStringSubmatch(text, -1); len(vols) >= 1 {
 			volUL, _ = strconv.ParseFloat(vols[0][1], 64)
+			volMissing = false
+		}
+		var seedMissing []string
+		if densityMissing {
+			seedMissing = append(seedMissing, "悬液密度")
+		}
+		if perWellMissing {
+			seedMissing = append(seedMissing, "每孔细胞数")
+		}
+		if wellsMissing {
+			seedMissing = append(seedMissing, "接种孔数")
+		}
+		if volMissing {
+			seedMissing = append(seedMissing, "每孔体积")
 		}
 		suspML := round4(perWell * wells / density)
 		medML := round4(volUL*wells/1000 - suspML)
@@ -1541,10 +1579,11 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			KindLabel:     "细胞接种计算器",
 			Summary:       fmt.Sprintf("取细胞悬液 %s mL + 补培养基 %s mL", formatNumber(suspML), formatNumber(medML)),
 			InheritedFrom: inheritedFrom,
+			MissingSlots:  seedMissing,
 			Params: []NLParamKV{
-				{Label: "悬液密度", Value: fmt.Sprintf("%s cells/mL", formatNumber(density))},
-				{Label: "每孔细胞", Value: formatNumber(perWell)},
-				{Label: "接种孔数", Value: fmt.Sprintf("%s 孔", formatNumber(wells))},
+				{Label: "悬液密度", Value: fmt.Sprintf("%s cells/mL", formatNumber(density)), IsDefault: densityMissing},
+				{Label: "每孔细胞", Value: formatNumber(perWell), IsDefault: perWellMissing},
+				{Label: "接种孔数", Value: fmt.Sprintf("%s 孔", formatNumber(wells)), IsDefault: wellsMissing},
 			},
 			Modules: []map[string]any{mod},
 		}

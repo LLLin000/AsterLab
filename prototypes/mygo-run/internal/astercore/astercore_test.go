@@ -297,35 +297,35 @@ rows:
 	if s.BlankN != 2 || s.BlankMean == nil || *s.BlankMean != 10 {
 		t.Fatalf("expected BlankN=2 BlankMean=10, got BlankN=%d BlankMean=%v", s.BlankN, s.BlankMean)
 	}
-	// Because Control is present, AnalyzeCCK8 runs and computes relative viability with B2=9999 EXCLUDED!
-	if s.Kind != "cck8" || s.CCK8 == nil {
-		t.Fatalf("expected cck8 summary with blank+excluded handling, got %+v", s)
+	// General fluorescence intensity table MUST remain descriptive (NOT misclassified as CCK-8 viability!)
+	// while still excluding B2=9999, computing BlankMean=10, and separating TechReplicates=2 vs BioSamples=1!
+	if s.Kind != "descriptive" {
+		t.Fatalf("expected descriptive summary for fluorescence intensity table, got %+v", s)
 	}
-	for _, g := range s.CCK8.Groups {
-		if g.Group == "Drug" && g.N != 2 {
-			t.Fatalf("expected Drug N=2 after excluding B2=9999, got %+v", g)
-		}
-	}
-
-	// Also verify descriptive fallback preserves TechReplicates vs BioSamples when no control role exists
-	descSrc := strings.Replace(src, "role: control", "role: treatment", 1)
-	descDoc, err := asterdoc.Parse(descSrc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dSums := AnalyzeDocument(descDoc, "sciunit-desc")
-	if len(dSums) != 1 || dSums[0].Kind != "descriptive" {
-		t.Fatalf("expected descriptive summary, got %+v", dSums)
-	}
-	for _, g := range dSums[0].Groups {
+	for _, g := range s.Groups {
 		if g.Group == "Drug" {
-			// B1 and B3 both belong to Mouse-3 -> 2 technical replicates, 1 independent biological sample!
 			if g.TechReplicates != 2 || g.BioSamples != 1 {
 				t.Fatalf("expected Drug TechReplicates=2 BioSamples=1, got %+v", g)
 			}
 			if g.BlankCorrMean == nil || *g.BlankCorrMean != 50 {
 				t.Fatalf("expected Drug BlankCorrMean = 60 - 10 = 50, got %v", g.BlankCorrMean)
 			}
+		}
+	}
+
+	// Explicit CCK-8 / OD450 table DOES trigger relative viability analysis with B2=9999 excluded!
+	cckSrc := strings.Replace(src, `"板1 荧光读数"`, `"板1 CCK-8 OD450 读数"`, 1)
+	cckDoc, err := asterdoc.Parse(cckSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cSums := AnalyzeDocument(cckDoc, "sciunit-cck8")
+	if len(cSums) != 1 || cSums[0].Kind != "cck8" || cSums[0].CCK8 == nil {
+		t.Fatalf("expected cck8 summary for explicit CCK-8 OD450 table, got %+v", cSums)
+	}
+	for _, g := range cSums[0].CCK8.Groups {
+		if g.Group == "Drug" && g.N != 2 {
+			t.Fatalf("expected Drug N=2 after excluding B2=9999, got %+v", g)
 		}
 	}
 }

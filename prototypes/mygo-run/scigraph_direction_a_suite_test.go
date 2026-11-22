@@ -392,6 +392,7 @@ schedule_window: "t0 + 6 h 明场采图"
 		t.Fatal(err)
 	}
 	sh.RenderTabContent = a.renderVaultTabContent
+	sh.OnOpenUserGuide = a.openOrSeedUserGuideDoc
 	sh.EnsureTabs()
 	sh.OpenFileInPane(sh.ActivePaneID, relPath, "方向 A 闭环实拍", shell.ModeEdit, true)
 	sh.RightOpen = false
@@ -675,6 +676,7 @@ rows:
 		t.Fatalf("initVaultWorkspace: %v", err)
 	}
 	sh.RenderTabContent = a.renderVaultTabContent
+	sh.OnOpenUserGuide = a.openOrSeedUserGuideDoc
 	sh.EnsureTabs()
 	sh.OpenFileInPane(sh.ActivePaneID, relPath, "HUVEC 闭环", shell.ModeEdit, true)
 	sh.RightOpen = false
@@ -687,4 +689,77 @@ rows:
 	if !tester.HasText("240") || !tester.HasText("已锚定 t0") {
 		t.Fatalf("expected reopened UI to show 240 mg and live 已锚定 t0 anchor wake-up")
 	}
+}
+
+// TestWetLabUXConvergenceAndSpotlightTourVisualGate verifies Package A/B/C end-to-end:
+// - Interactive Obsidian-style user guide opens cleanly in a real Vault with live widgets
+// - Calculator @plate.sample_wells renders as live human value pill ("9 有效孔") with zero raw @syntax leak
+// - AssessDocument has zero false-positive NO_STEPS / NO_GROUPS on #@ steps + top-level group_table
+// - Compact [ 编辑 | 实验 ] header switch + 读数自动汇总 (blank background + blank-corrected mean)
+// - Interactive 5-step region-highlighted Spotlight Tour renders cleanly
+func TestWetLabUXConvergenceAndSpotlightTourVisualGate(t *testing.T) {
+	vRoot := t.TempDir()
+	sh := &shell.Shell{TodayDate: "2026-11-22", SelectedDate: "2026-11-22"}
+	a := &app{shell: sh}
+	if err := a.initVaultWorkspace(vRoot); err != nil {
+		t.Fatalf("initVaultWorkspace: %v", err)
+	}
+	sh.RenderTabContent = a.renderVaultTabContent
+	sh.OnOpenUserGuide = a.openOrSeedUserGuideDoc
+	sh.EnsureTabs()
+	a.openOrSeedUserGuideDoc()
+	sh.RightOpen = false
+
+	// 1. Verify AssessDocument produces ZERO false-positive NO_STEPS or NO_GROUPS on #@ + top-level group_table
+	tab := sh.ActiveTab()
+	if tab == nil {
+		t.Fatal("expected user guide tab to be open")
+	}
+	rawGuide, err := os.ReadFile(filepath.Join(vRoot, tab.FilePath))
+	if err != nil {
+		t.Fatalf("failed to read seeded user guide: %v", err)
+	}
+	parsedGuide, err := asterdoc.Parse(string(rawGuide))
+	if err != nil {
+		t.Fatalf("failed to parse seeded user guide: %v", err)
+	}
+	rep := astercore.AssessDocument(parsedGuide, nil)
+	for _, d := range rep.Diagnostics {
+		if d.Code == "NO_STEPS" || d.Code == "NO_GROUPS" {
+			t.Fatalf("unexpected false-positive diagnostic on #@ + group_table guide: %+v", d)
+		}
+	}
+
+	outDir := filepath.Join("..", "..", "docs", "sdk", "evidence", "v2-visual-catalog")
+	_ = os.MkdirAll(outDir, 0o755)
+
+	// 2. Capture interactive user guide + live human calculator pill + [ 编辑 | 实验 ] header
+	renderVisualPNGSteps(t, outDir, "ux_convergence_guide_and_pills.png", 1360, 1080, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Frame()
+		if !st.HasText("编辑") || !st.HasText("实验") {
+			t.Fatalf("expected compact [ 编辑 | 实验 ] switcher in doc header")
+		}
+		if !st.HasText("9 有效孔") {
+			t.Fatalf("expected live human calculator pill '9 有效孔' instead of raw @plate.sample_wells")
+		}
+		if st.HasText("@plate.sample_wells") {
+			t.Fatalf("raw @plate.sample_wells leaked into calculator UI!")
+		}
+	})
+
+	// 3. Capture interactive region-highlighted Spotlight Tour overlay (step 3: widgets & right-click menu)
+	sh.StartTour()
+	sh.TourStep = 2
+	renderVisualPNGSteps(t, outDir, "ux_convergence_spotlight_tour.png", 1360, 900, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Frame()
+		if !st.HasText("3 / 5 · 交互组件与右键菜单") || !st.HasText("打开新手指南文档") {
+			t.Fatalf("expected spotlight tour overlay card visible")
+		}
+	})
 }

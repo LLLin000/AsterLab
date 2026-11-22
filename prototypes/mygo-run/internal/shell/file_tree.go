@@ -255,7 +255,16 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 					icoCol = tok.Text
 				}
 				ui.Icon(c, icon).Size(float32(tok.Spacing16)*0.88, float32(tok.Spacing16)*0.88).TextColor(icoCol).ContentTransition(theme.IconMorph())
-				components.Text(c, node.Name).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
+				dispName := node.Name
+				if node.IsSystem {
+					switch strings.ToLower(node.Name) {
+					case "templates":
+						dispName = "实验模板"
+					case "assets":
+						dispName = "图片与附件"
+					}
+				}
+				components.Text(c, dispName).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
 					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 			})
 		})

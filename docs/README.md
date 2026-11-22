@@ -2,13 +2,12 @@
 
 本文件解决“哪份文档当前具有权威”以及“按模块去哪里找规范”。研究笔记不是规范；被权威文档引用后才进入当前设计。
 
-## 1. 产品手册总览与安装更新（Handbook）
+## 1. 两套手册边界（公开用户指南 vs 仓库工程手册）
 
-| 文档 | 覆盖范围 |
-|---|---|
-| [`HANDBOOK.md`](./HANDBOOK.md) | **全仓产品与工程手册总览**：面向开发者与科研用户的唯一主导航入口（自动装配至 `docs.asterlab.party`） |
-| [`handbook/install-and-update.md`](./handbook/install-and-update.md) | **安装、升级与离线 AI 模型分发**：Windows/macOS/Linux 安装、NSIS 原子覆盖升级、应用内自更新与启动看门狗回滚、`-IncludeNLModel` 打包与热升级路径 |
-| [`handbook/domain-model.md`](./handbook/domain-model.md) | 领域对象边界（`Design`/`Protocol`/`Run`）与科学统计红线 |
+| 手册体系 | 面向读者与发布位置 | 入口文档 |
+|---|---|---|
+| **用户帮助手册（`docs/guide/`）** | **面向科研工作者 · 部署上线至 `docs.asterlab.party`**（Obsidian Help 风格，零开发/设计语言术语，专注举例、快捷键与右键菜单） | [`guide/index.md`](./guide/index.md) · [`guide/quickstart.md`](./guide/quickstart.md) · [`guide/menus-and-faq.md`](./guide/menus-and-faq.md) |
+| **工程与架构手册（`docs/HANDBOOK.md` + `docs/handbook/`）** | **面向项目维护者与开发者 · 保留在仓库内部查阅**（涵盖架构包、SciGraph/scimath/ONNX/updater 源码细节、AsterML SDK 与设计系统） | [`HANDBOOK.md`](./HANDBOOK.md) · [`handbook/install-and-update.md`](./handbook/install-and-update.md) · [`handbook/domain-model.md`](./handbook/domain-model.md) |
 
 ## 2. 架构、存储与科学语义引擎（Core & AI）
 

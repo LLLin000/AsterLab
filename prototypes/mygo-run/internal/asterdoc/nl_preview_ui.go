@@ -362,6 +362,40 @@ func (v *View) renderNLSuggestionPopover(
 	})
 }
 
+func (v *View) humanizeInheritedFrom(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "#") {
+		anc := strings.TrimPrefix(raw, "#")
+		if v.Doc != nil {
+			for _, a := range BuildSciGraph(v.Doc).Anchors {
+				if a.ID == anc && a.StepTitle != "" {
+					return "时间起点「" + a.StepTitle + "」"
+				}
+			}
+		}
+		return "时间起点 " + anc
+	}
+	if strings.HasPrefix(raw, "@") {
+		id := strings.TrimPrefix(raw, "@")
+		if v.Doc != nil {
+			g := BuildSciGraph(v.Doc)
+			if pl := g.ContainerByID(id); pl != nil {
+				return fmt.Sprintf("「%s」（%d 有效孔）", firstNonEmpty(pl.Title, "孔板"), pl.SampleWells)
+			}
+			for _, m := range v.Doc.Modules {
+				if m.ID == id {
+					return "「" + firstNonEmpty(textValue(m.Data, "title"), m.Kind) + "」"
+				}
+			}
+		}
+		return "上游模块"
+	}
+	return raw
+}
+
 func (v *View) renderNLSuggestionPopoverInner(
 	c *ui.Context,
 	tok theme.Tokens,
@@ -386,17 +420,16 @@ func (v *View) renderNLSuggestionPopoverInner(
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
 				ui.Text(c, sug.KindLabel).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-				subTxt := "Alt 悬停语义识别 · 预填参数预览"
-				if sug.InheritedFrom != "" {
-					subTxt = "已自动继承上下文 " + sug.InheritedFrom
+				subTxt := "智能识别参数 · 确认后插入"
+				humanInherit := v.humanizeInheritedFrom(sug.InheritedFrom)
+				if humanInherit != "" {
+					subTxt = "已参考 " + humanInherit
 				}
 				ui.Text(c, subTxt).FontSize(float32(tok.TextMeta)-1).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
 			})
-			if sug.InheritedFrom != "" {
-				inlineBadge(c, "继承 "+sug.InheritedFrom, components.BadgeOptions{Tone: components.BadgeSuccess})
+			if humanInherit := v.humanizeInheritedFrom(sug.InheritedFrom); humanInherit != "" {
+				inlineBadge(c, "已联动", components.BadgeOptions{Tone: components.BadgeSuccess})
 			}
-			confText := fmt.Sprintf("%s · %.0f%%", sug.Source, sug.Confidence*100)
-			inlineBadge(c, confText, components.BadgeOptions{Tone: components.BadgeAccent})
 		})
 
 		// 2. Mini Visual Component Diagram (简易组件渲染图)
