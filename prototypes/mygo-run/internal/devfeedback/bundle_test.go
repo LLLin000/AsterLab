@@ -240,4 +240,26 @@ func TestResolveWritableOutputDirAndDraftPersistence(t *testing.T) {
 	if err != nil || len(after) != 0 {
 		t.Fatalf("expected empty draft after ClearDraft, got %d err=%v", len(after), err)
 	}
+
+	// Real-time per-issue persistence (survives crash immediately on first save)
+	liveDir := LiveSessionDir(resolved)
+	sess := SessionMeta{AppVersion: "0.1.10-devdebug", Commit: "test"}
+	mdPath, err := AppendRealtimeIssue(liveDir, sess, in, in[0])
+	if err != nil {
+		t.Fatalf("AppendRealtimeIssue: %v", err)
+	}
+	if _, err := os.Stat(mdPath); err != nil {
+		t.Fatalf("expected live feedback.md at %s: %v", mdPath, err)
+	}
+	loaded, err := LoadRealtimeSession(liveDir)
+	if err != nil || len(loaded) != 1 || loaded[0].ID != "UI-01" || len(loaded[0].FullPNG) == 0 {
+		t.Fatalf("LoadRealtimeSession mismatch: len=%d err=%v", len(loaded), err)
+	}
+	if _, err := SyncRealtimeSession(liveDir, sess, nil); err != nil {
+		t.Fatalf("SyncRealtimeSession clear: %v", err)
+	}
+	loaded2, err := LoadRealtimeSession(liveDir)
+	if err != nil || len(loaded2) != 0 {
+		t.Fatalf("expected empty live session after clear, got %d err=%v", len(loaded2), err)
+	}
 }
