@@ -58,13 +58,18 @@ type devInspectorState struct {
 	draftInspector  string
 	draftCaptureErr string
 
-	// Recorded session queue & export status.
-	issues       []devfeedback.Issue
-	nextID       int
-	queueOpen    bool
-	exportBanner string
-	exportZip    string
-	exportErr    string
+	// Recorded session queue & export / remote upload status.
+	issues              []devfeedback.Issue
+	nextID              int
+	queueOpen           bool
+	testerName          string
+	uploading           bool
+	uploadID            string
+	pendingCrashLog     string
+	pendingCrashSummary string
+	exportBanner        string
+	exportZip           string
+	exportErr           string
 }
 
 var devCategories = []string{"样式/间距", "文字裁切", "交互逻辑", "功能Bug"}
@@ -186,30 +191,41 @@ func (a *app) hydrateDevDraftOnce() {
 	}
 	a.devInsp.draftHydrated = true
 	baseDir, err := a.resolveDevFeedbackDir()
-	if err != nil {
-		return
-	}
-	liveDir := devfeedback.LiveSessionDir(baseDir)
-	restored, err := devfeedback.LoadRealtimeSession(liveDir)
-	if err != nil || len(restored) == 0 {
-		// Backward-compat fallback to legacy autosave-draft dir if present
-		restored, err = devfeedback.LoadDraft(baseDir)
-		if err != nil || len(restored) == 0 {
-			return
+	if err == nil {
+		if rawName, rErr := os.ReadFile(filepath.Join(baseDir, "tester.txt")); rErr == nil {
+			a.devInsp.testerName = strings.TrimSpace(string(rawName))
+		}
+		liveDir := devfeedback.LiveSessionDir(baseDir)
+		restored, lErr := devfeedback.LoadRealtimeSession(liveDir)
+		if lErr != nil || len(restored) == 0 {
+			restored, _ = devfeedback.LoadDraft(baseDir)
+		}
+		if len(restored) > 0 {
+			a.devInsp.issues = restored
+			a.devInsp.liveMDPath = filepath.Join(liveDir, "feedback.md")
+			maxNum := len(restored)
+			for _, it := range restored {
+				if strings.HasPrefix(it.ID, "UI-") {
+					if n, convErr := strconv.Atoi(strings.TrimPrefix(it.ID, "UI-")); convErr == nil && n > maxNum {
+						maxNum = n
+					}
+				}
+			}
+			a.devInsp.nextID = maxNum
+			a.devInsp.exportBanner = fmt.Sprintf("已自动恢复上次落盘的 %d 条记录", len(restored))
 		}
 	}
-	a.devInsp.issues = restored
-	a.devInsp.liveMDPath = filepath.Join(liveDir, "feedback.md")
-	maxNum := len(restored)
-	for _, it := range restored {
-		if strings.HasPrefix(it.ID, "UI-") {
-			if n, convErr := strconv.Atoi(strings.TrimPrefix(it.ID, "UI-")); convErr == nil && n > maxNum {
-				maxNum = n
+	if rec := diag.PendingCrash(""); rec != nil {
+		a.devInsp.pendingCrashSummary = rec.Summary
+		a.devInsp.pendingCrashLog = diag.ReadLatestCrashLog("")
+		if a.devInsp.pendingCrashLog != "" {
+			if len(a.devInsp.issues) > 0 {
+				a.devInsp.exportBanner = fmt.Sprintf("⚠ 检测到上次异常退出，已保留 %d 条批注与崩溃堆栈 → 点「队列」一键上报", len(a.devInsp.issues))
+			} else {
+				a.devInsp.exportBanner = "⚠ 检测到上次异常退出，已捕获崩溃堆栈 → 点「队列」一键上报开发者"
 			}
 		}
 	}
-	a.devInsp.nextID = maxNum
-	a.devInsp.exportBanner = fmt.Sprintf("已自动恢复上次落盘的 %d 条记录", len(restored))
 }
 
 func (a *app) buildDevSessionMeta(winW, winH float32, tok theme.Tokens) devfeedback.SessionMeta {
@@ -219,21 +235,24 @@ func (a *app) buildDevSessionMeta(winW, winH float32, tok theme.Tokens) devfeedb
 		vaultRoot = a.vault.Root
 	}
 	return devfeedback.SessionMeta{
-		SessionID:  time.Now().Format("20060102-150405"),
-		ExportedAt: time.Now().Format(time.RFC3339),
-		AppVersion: updater.Version,
-		Commit:     updater.Commit,
-		OS:         runtime.GOOS,
-		Arch:       runtime.GOARCH,
-		WindowW:    winW,
-		WindowH:    winH,
-		UIScale:    uiScale,
-		DarkTheme:  tok.Dark,
-		VaultRoot:  diag.SanitizeText(vaultRoot),
-		ActiveTab:  tabTitle,
-		ActiveFile: activeFile,
-		ActiveMode: activeMode,
-		PageName:   pageName,
+		SessionID:   time.Now().Format("20060102-150405"),
+		ExportedAt:  time.Now().Format(time.RFC3339),
+		TesterName:  strings.TrimSpace(a.devInsp.testerName),
+		AppVersion:  updater.Version,
+		Commit:      updater.Commit,
+		OS:          runtime.GOOS,
+		Arch:        runtime.GOARCH,
+		WindowW:     winW,
+		WindowH:     winH,
+		UIScale:     uiScale,
+		DarkTheme:   tok.Dark,
+		VaultRoot:   diag.SanitizeText(vaultRoot),
+		ActiveTab:   tabTitle,
+		ActiveFile:  activeFile,
+		ActiveMode:  activeMode,
+		PageName:    pageName,
+		HasCrashLog: strings.TrimSpace(a.devInsp.pendingCrashLog) != "",
+		CrashLog:    a.devInsp.pendingCrashLog,
 	}
 }
 
@@ -437,34 +456,133 @@ func (a *app) syncLiveSessionAfterMutation(c *ui.Context, tok theme.Tokens) {
 
 func (a *app) exportDevFeedbackBundle(c *ui.Context, tok theme.Tokens) {
 	st := &a.devInsp
-	if len(st.issues) == 0 {
+	if len(st.issues) == 0 && strings.TrimSpace(st.pendingCrashLog) == "" {
 		st.exportErr = "当前尚未记录任何 UI 问题，请先按 Ctrl+Shift+D 拾取页面元素"
 		return
 	}
-	winW, winH := c.Size()
-	sess := a.buildDevSessionMeta(winW, winH, tok)
-
-	outBase, dirErr := a.resolveDevFeedbackDir()
-	if dirErr != nil {
-		st.exportErr = fmt.Sprintf("无法找到可写导出目录: %v", dirErr)
-		return
-	}
-	rawLogs := diag.RecentLines(180)
-	cleanLogs := make([]string, 0, len(rawLogs))
-	for _, line := range rawLogs {
-		cleanLogs = append(cleanLogs, diag.SanitizeText(line))
-	}
-
-	folder, zipPath, err := devfeedback.ExportSession(outBase, sess, st.issues, cleanLogs)
+	folder, zipPath, err := a.buildExportZipOnDisk(c, tok)
 	if err != nil {
 		st.exportErr = fmt.Sprintf("导出失败: %v", err)
 		return
 	}
 	st.exportErr = ""
 	st.exportZip = zipPath
-	st.exportBanner = fmt.Sprintf("✓ 已打包 %d 条: %s（路径已复制）", len(st.issues), zipPath)
-	c.WriteClipboard(zipPath)
+	clipErr := devfeedback.CopyFileToSystemClipboard(zipPath)
+	if clipErr == nil && (runtime.GOOS == "windows" || runtime.GOOS == "darwin") {
+		st.exportBanner = fmt.Sprintf("✓ 已打包 %d 条并复制 .zip 文件（微信/飞书直接 Ctrl+V 发送）", len(st.issues))
+	} else {
+		c.WriteClipboard(zipPath)
+		st.exportBanner = fmt.Sprintf("✓ 已打包 %d 条: %s（路径已复制）", len(st.issues), zipPath)
+	}
 	revealInFileManager(zipPath, folder)
+}
+
+func (a *app) buildExportZipOnDisk(c *ui.Context, tok theme.Tokens) (string, string, error) {
+	st := &a.devInsp
+	winW, winH := c.Size()
+	sess := a.buildDevSessionMeta(winW, winH, tok)
+	outBase, dirErr := a.resolveDevFeedbackDir()
+	if dirErr != nil {
+		return "", "", fmt.Errorf("无法找到可写导出目录: %w", dirErr)
+	}
+	if strings.TrimSpace(st.testerName) != "" {
+		_ = os.WriteFile(filepath.Join(outBase, "tester.txt"), []byte(strings.TrimSpace(st.testerName)+"\n"), 0o644)
+	}
+	rawLogs := diag.RecentLines(180)
+	cleanLogs := make([]string, 0, len(rawLogs))
+	for _, line := range rawLogs {
+		cleanLogs = append(cleanLogs, diag.SanitizeText(line))
+	}
+	return devfeedback.ExportSession(outBase, sess, st.issues, cleanLogs)
+}
+
+func (a *app) devUploadConfigured() bool {
+	endpoint := strings.TrimSpace(devfeedback.DefaultUploadEndpoint)
+	if env := strings.TrimSpace(os.Getenv("ASTERLAB_FEEDBACK_ENDPOINT")); env != "" {
+		endpoint = env
+	}
+	key := strings.TrimSpace(devfeedback.DefaultUploadKey)
+	if env := strings.TrimSpace(os.Getenv("ASTERLAB_FEEDBACK_KEY")); env != "" {
+		key = env
+	}
+	return endpoint != "" && key != ""
+}
+
+func (a *app) uploadDevFeedbackBundleAsync(c *ui.Context, tok theme.Tokens) {
+	st := &a.devInsp
+	if st.uploading {
+		return
+	}
+	if len(st.issues) == 0 && strings.TrimSpace(st.pendingCrashLog) == "" {
+		st.exportErr = "当前尚未记录任何 UI 问题或崩溃日志"
+		return
+	}
+	endpoint := strings.TrimSpace(devfeedback.DefaultUploadEndpoint)
+	if env := strings.TrimSpace(os.Getenv("ASTERLAB_FEEDBACK_ENDPOINT")); env != "" {
+		endpoint = env
+	}
+	key := strings.TrimSpace(devfeedback.DefaultUploadKey)
+	if env := strings.TrimSpace(os.Getenv("ASTERLAB_FEEDBACK_KEY")); env != "" {
+		key = env
+	}
+	if endpoint == "" || key == "" {
+		st.exportErr = "当前本地编译包未内置上报口令，请改用「导出并复制 .zip」发给开发者"
+		return
+	}
+
+	_, zipPath, err := a.buildExportZipOnDisk(c, tok)
+	if err != nil {
+		st.exportErr = fmt.Sprintf("打包失败: %v", err)
+		return
+	}
+	tester := strings.TrimSpace(st.testerName)
+	if tester == "" {
+		tester = "内测用户"
+	}
+	issueCount := len(st.issues)
+	hasCrash := strings.TrimSpace(st.pendingCrashLog) != ""
+	var sumLines []string
+	for i, it := range st.issues {
+		if i >= 5 {
+			sumLines = append(sumLines, fmt.Sprintf("…共 %d 条", len(st.issues)))
+			break
+		}
+		txt := strings.TrimSpace(it.Suggestion)
+		if txt == "" {
+			txt = it.Region.Label
+		}
+		sumLines = append(sumLines, fmt.Sprintf("- %s: %s", it.ID, txt))
+	}
+	summary := strings.Join(sumLines, "\n")
+
+	st.uploading = true
+	st.exportErr = ""
+	st.exportBanner = "正在提交反馈包给开发者…"
+
+	go func() {
+		defer diag.RecoverAndLog("dev-feedback-upload")
+		resp, upErr := devfeedback.UploadBundle(endpoint, key, zipPath, tester, updater.Version, issueCount, hasCrash, summary)
+		mygo.RunOnMain(func() {
+			defer diag.RecoverAndLog("dev-feedback-upload-main")
+			a.devInsp.uploading = false
+			if upErr != nil {
+				a.devInsp.exportErr = fmt.Sprintf("直传失败（可改点右侧导出 .zip）: %v", upErr)
+				a.devInsp.exportBanner = ""
+			} else {
+				a.devInsp.exportErr = ""
+				a.devInsp.uploadID = resp.ID
+				a.devInsp.exportBanner = fmt.Sprintf("✓ 已直达开发者！编号 %s（共 %d 条，已推送通知）", resp.ID, issueCount)
+				if hasCrash {
+					diag.DismissPendingCrash("")
+					a.devInsp.pendingCrashLog = ""
+					a.devInsp.pendingCrashSummary = ""
+				}
+			}
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		})
+	}()
 }
 
 func revealInFileManager(zipPath, folderPath string) {
@@ -645,12 +763,25 @@ func (a *app) renderDevFloatingPill(c *ui.Context, tok theme.Tokens) {
 					a.scheduleDelayedDevPick(2 * time.Second)
 				}
 				queueLabel := fmt.Sprintf("队列 (%d)", len(st.issues))
+				if strings.TrimSpace(st.pendingCrashLog) != "" {
+					queueLabel = fmt.Sprintf("⚠ 队列 (%d+崩溃)", len(st.issues))
+				}
 				if components.Button(c, queueLabel, components.ButtonSecondary).Clicked() {
 					st.queueOpen = !st.queueOpen
 				}
-				if len(st.issues) > 0 {
-					if components.Button(c, "导出反馈包", components.ButtonPrimary).Clicked() {
-						a.exportDevFeedbackBundle(c, tok)
+				if len(st.issues) > 0 || strings.TrimSpace(st.pendingCrashLog) != "" {
+					if a.devUploadConfigured() {
+						btnLbl := "提交给开发者"
+						if st.uploading {
+							btnLbl = "上传中…"
+						}
+						if components.Button(c, btnLbl, components.ButtonPrimary).Clicked() && !st.uploading {
+							a.uploadDevFeedbackBundleAsync(c, tok)
+						}
+					} else {
+						if components.Button(c, "导出反馈包", components.ButtonPrimary).Clicked() {
+							a.exportDevFeedbackBundle(c, tok)
+						}
 					}
 				}
 				if st.exportBanner != "" {
@@ -807,13 +938,30 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 				}
 			})
 
-			if st.liveMDPath != "" {
-				components.Text(c, "实时落盘路径: "+filepath.Dir(st.liveMDPath)).
-					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-			} else {
-				components.Text(c, "提示：每保存一条即实时写入 dist-dev\\feedback\\live-session\\，即使意外关闭也不会丢失。").
-					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			if strings.TrimSpace(st.pendingCrashLog) != "" {
+				ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+					Radius(float32(tok.ControlRadius)).Background(tok.DangerBg).Border(1, tok.Danger).
+					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					msg := "检测到上次会话异常退出，已自动捕获完整脱敏崩溃堆栈，提交或导出时将一并附带。"
+					if st.pendingCrashSummary != "" {
+						msg = fmt.Sprintf("检测到上次异常退出（%s）— 已保留批注并自动附带崩溃日志。", st.pendingCrashSummary)
+					}
+					components.Text(c, msg).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText).Grow(1).MinWidth(0)
+				})
 			}
+
+			// Tester name row so incoming bundles in the private feedback repo are easy to identify
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				components.Text(c, "测试者昵称:").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).Shrink(0)
+				ui.Box(c).Width(float32(tok.Spacing48) * 4).Children(func() {
+					components.TextBox(c.Key("dev-tester-name"), &st.testerName, components.TextBoxOptions{}).
+						Placeholder("如：小王 / Alice（方便开发者归类回复）")
+				})
+				ui.Spacer(c)
+				if st.liveMDPath != "" {
+					components.Text(c, "实时落盘已开启").FontSize(float32(tok.TextMeta)).TextColor(tok.Success)
+				}
+			})
 
 			if len(st.issues) == 0 {
 				ui.Box(c).FillWidth().Padding(float32(tok.Spacing16)).Radius(float32(tok.ControlRadius)).
@@ -879,9 +1027,18 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 				if components.Button(c.Key("dev-queue-close"), "关闭", components.ButtonSecondary).Clicked() {
 					open = false
 				}
-				if len(st.issues) > 0 {
-					if components.Button(c.Key("dev-queue-export"), "打包导出 .zip", components.ButtonPrimary).Clicked() {
+				if len(st.issues) > 0 || strings.TrimSpace(st.pendingCrashLog) != "" {
+					if components.Button(c.Key("dev-queue-export"), "导出并复制 .zip", components.ButtonSecondary).Clicked() {
 						a.exportDevFeedbackBundle(c, tok)
+					}
+					if a.devUploadConfigured() {
+						upLbl := "一键提交给开发者"
+						if st.uploading {
+							upLbl = "正在上传…"
+						}
+						if components.Button(c.Key("dev-queue-upload"), upLbl, components.ButtonPrimary).Clicked() && !st.uploading {
+							a.uploadDevFeedbackBundleAsync(c, tok)
+						}
 					}
 				}
 			})

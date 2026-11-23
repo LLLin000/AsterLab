@@ -92,6 +92,11 @@ jobs:
         run: choco install nsis -y --no-progress
       - name: Build & Package Windows Artifacts
         run: ./scripts/mygo-release.ps1 -Version '${{ needs.verify.outputs.version }}'
+      - name: Build BetaFeedback Windows Zip (devdebug tester channel)
+        env:
+          BETA_FEEDBACK_ENDPOINT: ${{ vars.BETA_FEEDBACK_ENDPOINT }}
+          BETA_FEEDBACK_KEY: ${{ secrets.BETA_FEEDBACK_KEY }}
+        run: ./scripts/mygo-package-devbeta.ps1 -Version '${{ needs.verify.outputs.version }}'
       - name: Sign binaries with Azure Trusted Signing (optional)
         if: vars.ENABLE_AZURE_SIGN == 'true'
         env:
@@ -129,6 +134,7 @@ jobs:
           path: |
             release/AsterLab-MyGo-*-win-x64-setup.exe
             release/AsterLab-MyGo-*-win-x64.zip
+            release/AsterLab-BetaFeedback-*-win-x64.zip
             release/SHA256SUMS.txt
             release/BUILD_INFO.txt
 
@@ -145,6 +151,11 @@ jobs:
           cache-dependency-path: prototypes/mygo-run/go.sum
       - name: Build & Package macOS Universal (.dmg + .zip)
         run: bash scripts/mygo-package-macos.sh "${{ needs.verify.outputs.version }}"
+      - name: Build BetaFeedback macOS Universal Zip (devdebug tester channel)
+        env:
+          BETA_FEEDBACK_ENDPOINT: ${{ vars.BETA_FEEDBACK_ENDPOINT }}
+          BETA_FEEDBACK_KEY: ${{ secrets.BETA_FEEDBACK_KEY }}
+        run: bash scripts/mygo-package-devbeta-macos.sh "${{ needs.verify.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: asterlab-macos-release
@@ -152,6 +163,7 @@ jobs:
           path: |
             release/AsterLab-MyGo-*-macOS-universal.dmg
             release/AsterLab-MyGo-*-macOS-universal.zip
+            release/AsterLab-BetaFeedback-*-macOS-universal.zip
             release/sums-macos.txt
 
   build-linux:
@@ -211,6 +223,7 @@ jobs:
           generate_release_notes: true
           files: |
             release/AsterLab-MyGo-*
+            release/AsterLab-BetaFeedback-*
             release/SHA256SUMS.txt
             release/BUILD_INFO.txt
             release/release-manifest.json

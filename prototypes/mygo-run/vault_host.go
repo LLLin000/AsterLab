@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"testing"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -38,7 +39,9 @@ func defaultTemplateSeeds() map[string]string {
 }
 
 type vaultPrefs struct {
-	LastVaultRoot string `json:"lastVaultRoot,omitempty"`
+	LastVaultRoot string   `json:"lastVaultRoot,omitempty"`
+	RecentVaults  []string `json:"recentVaults,omitempty"`
+	UsingSandbox  bool     `json:"usingSandbox,omitempty"`
 }
 
 func vaultPrefsPath() string {
@@ -49,22 +52,45 @@ func vaultPrefsPath() string {
 	return filepath.Join(dir, "vault-prefs.json")
 }
 
+func loadVaultPrefs() vaultPrefs {
+	p := vaultPrefsPath()
+	if p == "" {
+		return vaultPrefs{}
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return vaultPrefs{}
+	}
+	var prefs vaultPrefs
+	if json.Unmarshal(raw, &prefs) != nil {
+		return vaultPrefs{}
+	}
+	return prefs
+}
+
+func saveVaultPrefs(prefs vaultPrefs) {
+	p := vaultPrefsPath()
+	if p == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	if raw, err := json.MarshalIndent(prefs, "", "  "); err == nil {
+		_ = asterdoc.WriteFileAtomic(p, raw)
+	}
+}
+
+func isSandboxVaultPath(root string) bool {
+	if strings.TrimSpace(root) == "" {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(root), filepath.Clean(vault.DefaultVaultDir()))
+}
+
 func loadLastVaultRoot() string {
 	if strings.TrimSpace(os.Getenv("ASTERLAB_VAULT_DIR")) != "" {
 		return ""
 	}
-	p := vaultPrefsPath()
-	if p == "" {
-		return ""
-	}
-	raw, err := os.ReadFile(p)
-	if err != nil {
-		return ""
-	}
-	var prefs vaultPrefs
-	if json.Unmarshal(raw, &prefs) != nil {
-		return ""
-	}
+	prefs := loadVaultPrefs()
 	root := strings.TrimSpace(prefs.LastVaultRoot)
 	if root == "" {
 		return ""
@@ -77,20 +103,82 @@ func loadLastVaultRoot() string {
 
 func saveLastVaultRoot(root string) {
 	root = strings.TrimSpace(root)
-	p := vaultPrefsPath()
-	if root == "" || p == "" {
+	if root == "" {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	if raw, err := json.MarshalIndent(vaultPrefs{LastVaultRoot: root}, "", "  "); err == nil {
-		_ = asterdoc.WriteFileAtomic(p, raw)
+	clean := filepath.Clean(root)
+	prefs := loadVaultPrefs()
+	prefs.LastVaultRoot = clean
+	prefs.UsingSandbox = isSandboxVaultPath(clean)
+	next := []string{clean}
+	for _, old := range prefs.RecentVaults {
+		oc := filepath.Clean(strings.TrimSpace(old))
+		if oc == "" || strings.EqualFold(oc, clean) {
+			continue
+		}
+		next = append(next, oc)
+		if len(next) >= 8 {
+			break
+		}
 	}
+	prefs.RecentVaults = next
+	saveVaultPrefs(prefs)
+}
+
+func (a *app) syncRecentVaultsToShell() {
+	if a.shell == nil {
+		return
+	}
+	cur := ""
+	if a.vault != nil {
+		cur = filepath.Clean(a.vault.Root)
+	}
+	a.shell.IsTempSandboxVault = isSandboxVaultPath(cur)
+	prefs := loadVaultPrefs()
+	seen := map[string]bool{}
+	var out []shell.RecentVaultEntry
+	addPath := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		clean := filepath.Clean(p)
+		key := strings.ToLower(clean)
+		if seen[key] {
+			return
+		}
+		if info, err := os.Stat(clean); err != nil || !info.IsDir() {
+			return
+		}
+		seen[key] = true
+		name := filepath.Base(clean)
+		sandbox := isSandboxVaultPath(clean)
+		if sandbox {
+			name = "临时体验库"
+		}
+		out = append(out, shell.RecentVaultEntry{
+			Name:    name,
+			Path:    clean,
+			Active:  cur != "" && strings.EqualFold(cur, clean),
+			Sandbox: sandbox,
+		})
+	}
+	if cur != "" {
+		addPath(cur)
+	}
+	for _, p := range prefs.RecentVaults {
+		addPath(p)
+	}
+	a.shell.RecentVaults = out
 }
 
 func (a *app) initVaultWorkspace(vaultRoot string) error {
+	firstRunNoVault := false
 	if strings.TrimSpace(vaultRoot) == "" {
 		if saved := loadLastVaultRoot(); saved != "" {
 			vaultRoot = saved
+		} else if strings.TrimSpace(os.Getenv("ASTERLAB_VAULT_DIR")) == "" && !testing.Testing() {
+			firstRunNoVault = true
 		}
 	}
 	v, err := vault.Open(vaultRoot)
@@ -116,6 +204,10 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 	if a.shell != nil {
 		a.shell.Error = ""
 		a.shell.VaultPathInput = v.Root
+		a.shell.VaultLauncherSeedDemo = true
+		if firstRunNoVault {
+			a.shell.VaultLauncherOpen = true
+		}
 		a.shell.HideAssetsInTree = v.Config.HideAssetsInTree
 		a.shell.DefaultProjectDir = v.Config.DefaultProjectDir
 		a.shell.ThemeSource = v.Config.ThemeSource
@@ -162,6 +254,7 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		}
 	}
 	a.refreshVaultTreeAndCalendar()
+	a.syncRecentVaultsToShell()
 	a.lastVaultSig, a.lastPantrySig = computeVaultDiskSignatures(v.Root)
 	return nil
 }
@@ -720,8 +813,53 @@ func (a *app) switchVaultRoot(newPath string) {
 	}
 	if a.vault != nil {
 		saveLastVaultRoot(a.vault.Root)
+		a.syncRecentVaultsToShell()
 	}
 	a.syncErr = ""
+}
+
+func (a *app) createVaultAt(targetPath string, seedDemo bool) error {
+	targetPath = strings.TrimSpace(targetPath)
+	if targetPath == "" {
+		return fmt.Errorf("实验库路径不能为空")
+	}
+	clean := filepath.Clean(targetPath)
+	if err := os.MkdirAll(clean, 0o755); err != nil {
+		return fmt.Errorf("创建实验库目录失败：%w", err)
+	}
+	a.switchVaultRoot(clean)
+	if a.syncErr != "" {
+		return fmt.Errorf("%s", a.syncErr)
+	}
+	if seedDemo && a.vault != nil {
+		a.openOrSeedUserGuideDoc()
+	}
+	return nil
+}
+
+func (a *app) openSandboxVault() {
+	defDir := vault.DefaultVaultDir()
+	if defDir == "" {
+		return
+	}
+	a.switchVaultRoot(defDir)
+}
+
+func (a *app) removeRecentVault(vaultPath string) {
+	clean := filepath.Clean(strings.TrimSpace(vaultPath))
+	if clean == "" {
+		return
+	}
+	prefs := loadVaultPrefs()
+	var kept []string
+	for _, p := range prefs.RecentVaults {
+		if !strings.EqualFold(filepath.Clean(strings.TrimSpace(p)), clean) {
+			kept = append(kept, p)
+		}
+	}
+	prefs.RecentVaults = kept
+	saveVaultPrefs(prefs)
+	a.syncRecentVaultsToShell()
 }
 
 // computeVaultDiskSignatures hashes the directory structure + file mtimes/sizes of
