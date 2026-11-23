@@ -267,7 +267,11 @@ func (s *Shell) renderDrawerCalendarSummary(c *ui.Context, tok theme.Tokens) {
 				}
 				row.Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-						ui.Text(c, exp.Date[5:]).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum").Shrink(0)
+						dateShort := exp.Date
+						if len(dateShort) >= 5 {
+							dateShort = dateShort[5:]
+						}
+						ui.Text(c, dateShort).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum").Shrink(0)
 						components.Text(c, exp.Title).FontSize(float32(tok.TextData)).TextColor(tok.Text).
 							SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 					})

@@ -604,6 +604,170 @@ func ClearDraft(baseDir string) error {
 	return os.RemoveAll(filepath.Join(baseDir, autosaveDirName))
 }
 
+const liveSessionDirName = "live-session"
+
+// LiveSessionDir returns the real-time per-issue persistence directory under baseDir.
+func LiveSessionDir(baseDir string) string {
+	return filepath.Join(baseDir, liveSessionDirName)
+}
+
+// AppendRealtimeIssue persists a single UI issue and its PNG screenshots immediately
+// to <sessionDir>/issues/<id>.json and <sessionDir>/shots/<id>-*.png, then refreshes
+// <sessionDir>/feedback.md and <sessionDir>/manifest.json so zero records are ever lost
+// even if the application crashes or is force-closed.
+func AppendRealtimeIssue(sessionDir string, session SessionMeta, allIssues []Issue, newIssue Issue) (string, error) {
+	if strings.TrimSpace(sessionDir) == "" {
+		return "", fmt.Errorf("empty live session dir")
+	}
+	issuesDir := filepath.Join(sessionDir, "issues")
+	shotsDir := filepath.Join(sessionDir, "shots")
+	if err := os.MkdirAll(issuesDir, 0o755); err != nil {
+		return "", fmt.Errorf("create live issues dir: %w", err)
+	}
+	if err := os.MkdirAll(shotsDir, 0o755); err != nil {
+		return "", fmt.Errorf("create live shots dir: %w", err)
+	}
+
+	slug := strings.ToLower(strings.ReplaceAll(fallback(newIssue.ID, "ui-item"), " ", "-"))
+	if len(newIssue.FullPNG) > 0 {
+		rel := fmt.Sprintf("shots/%s-full.png", slug)
+		if err := os.WriteFile(filepath.Join(sessionDir, filepath.FromSlash(rel)), newIssue.FullPNG, 0o644); err != nil {
+			return "", fmt.Errorf("write %s: %w", rel, err)
+		}
+		newIssue.FullShotFile = rel
+	}
+	if len(newIssue.CropPNG) > 0 {
+		rel := fmt.Sprintf("shots/%s-crop.png", slug)
+		if err := os.WriteFile(filepath.Join(sessionDir, filepath.FromSlash(rel)), newIssue.CropPNG, 0o644); err != nil {
+			return "", fmt.Errorf("write %s: %w", rel, err)
+		}
+		newIssue.CropShotFile = rel
+	}
+
+	itemJSON, err := json.MarshalIndent(newIssue, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal %s: %w", newIssue.ID, err)
+	}
+	if err := os.WriteFile(filepath.Join(issuesDir, slug+".json"), itemJSON, 0o644); err != nil {
+		return "", fmt.Errorf("write %s.json: %w", slug, err)
+	}
+
+	return refreshLiveSessionIndex(sessionDir, session, allIssues)
+}
+
+// SyncRealtimeSession refreshes feedback.md / manifest.json and removes stale issue files
+// after a deletion or clear operation.
+func SyncRealtimeSession(sessionDir string, session SessionMeta, allIssues []Issue) (string, error) {
+	if strings.TrimSpace(sessionDir) == "" {
+		return "", fmt.Errorf("empty live session dir")
+	}
+	if len(allIssues) == 0 {
+		_ = os.RemoveAll(sessionDir)
+		return "", nil
+	}
+	issuesDir := filepath.Join(sessionDir, "issues")
+	if err := os.MkdirAll(issuesDir, 0o755); err != nil {
+		return "", err
+	}
+	keep := map[string]bool{}
+	for _, it := range allIssues {
+		slug := strings.ToLower(strings.ReplaceAll(fallback(it.ID, "ui-item"), " ", "-"))
+		keep[slug+".json"] = true
+	}
+	if entries, err := os.ReadDir(issuesDir); err == nil {
+		for _, ent := range entries {
+			if !ent.IsDir() && strings.HasSuffix(ent.Name(), ".json") && !keep[ent.Name()] {
+				_ = os.Remove(filepath.Join(issuesDir, ent.Name()))
+			}
+		}
+	}
+	return refreshLiveSessionIndex(sessionDir, session, allIssues)
+}
+
+func refreshLiveSessionIndex(sessionDir string, session SessionMeta, allIssues []Issue) (string, error) {
+	now := time.Now()
+	if session.SessionID == "" {
+		session.SessionID = now.Format("20060102-150405")
+	}
+	session.ExportedAt = now.Format(time.RFC3339)
+
+	normalized := make([]Issue, len(allIssues))
+	for i, it := range allIssues {
+		slug := strings.ToLower(strings.ReplaceAll(fallback(it.ID, fmt.Sprintf("UI-%02d", i+1)), " ", "-"))
+		if it.FullShotFile == "" && len(it.FullPNG) > 0 {
+			it.FullShotFile = fmt.Sprintf("shots/%s-full.png", slug)
+		}
+		if it.CropShotFile == "" && len(it.CropPNG) > 0 {
+			it.CropShotFile = fmt.Sprintf("shots/%s-crop.png", slug)
+		}
+		normalized[i] = it
+	}
+
+	mdPath := filepath.Join(sessionDir, "feedback.md")
+	md := RenderMarkdown(session, normalized)
+	if err := os.WriteFile(mdPath, []byte(md), 0o644); err != nil {
+		return "", fmt.Errorf("write live feedback.md: %w", err)
+	}
+	manBytes, err := json.MarshalIndent(Manifest{Schema: 1, Session: session, Issues: normalized}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal live manifest.json: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "manifest.json"), manBytes, 0o644); err != nil {
+		return "", fmt.Errorf("write live manifest.json: %w", err)
+	}
+	return mdPath, nil
+}
+
+// LoadRealtimeSession restores all real-time persisted issues (and their screenshots)
+// from <sessionDir>/manifest.json (falling back to scanning <sessionDir>/issues/*.json).
+func LoadRealtimeSession(sessionDir string) ([]Issue, error) {
+	if strings.TrimSpace(sessionDir) == "" {
+		return nil, nil
+	}
+	var issues []Issue
+	if raw, err := os.ReadFile(filepath.Join(sessionDir, "manifest.json")); err == nil {
+		var man Manifest
+		if json.Unmarshal(raw, &man) == nil && len(man.Issues) > 0 {
+			issues = man.Issues
+		}
+	}
+	if len(issues) == 0 {
+		entries, err := os.ReadDir(filepath.Join(sessionDir, "issues"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		for _, ent := range entries {
+			if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
+				continue
+			}
+			raw, rErr := os.ReadFile(filepath.Join(sessionDir, "issues", ent.Name()))
+			if rErr != nil {
+				continue
+			}
+			var it Issue
+			if json.Unmarshal(raw, &it) == nil {
+				issues = append(issues, it)
+			}
+		}
+	}
+	for i := range issues {
+		if issues[i].FullShotFile != "" {
+			if b, err := os.ReadFile(filepath.Join(sessionDir, filepath.FromSlash(issues[i].FullShotFile))); err == nil {
+				issues[i].FullPNG = b
+			}
+		}
+		if issues[i].CropShotFile != "" {
+			if b, err := os.ReadFile(filepath.Join(sessionDir, filepath.FromSlash(issues[i].CropShotFile))); err == nil {
+				issues[i].CropPNG = b
+			}
+		}
+	}
+	return issues, nil
+}
+
 func zipDirectory(srcDir, dstZip string) error {
 	f, err := os.Create(dstZip)
 	if err != nil {

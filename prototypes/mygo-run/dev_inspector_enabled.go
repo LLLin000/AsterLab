@@ -28,6 +28,7 @@ import (
 type devInspectorState struct {
 	pickActive      bool
 	dragging        bool
+	capturePending  bool
 	hoverX          float32
 	hoverY          float32
 	startX          float32
@@ -38,6 +39,7 @@ type devInspectorState struct {
 	delayScheduled  bool
 	draftHydrated   bool
 	resolvedOutBase string
+	liveMDPath      string
 
 	// Draft annotation popup after picking a UI element or dragging a pixel box.
 	draftOpen       bool
@@ -73,7 +75,7 @@ func (a *app) devInspectorPaletteCommands() []shell.PaletteCommand {
 		{
 			ID:       "dev-ui-pick",
 			Title:    "[DEV] 切换 UI 细节拾取标注模式 (Ctrl+Shift+D)",
-			Subtitle: "点击或框选任意像素/组件细节，自动红框截图并记录修改建议",
+			Subtitle: "点击或框选任意像素/组件细节，自动红框截图并实时落盘",
 			OnRun: func() {
 				a.toggleDevPickMode()
 			},
@@ -89,7 +91,7 @@ func (a *app) devInspectorPaletteCommands() []shell.PaletteCommand {
 		{
 			ID:       "dev-ui-queue",
 			Title:    "[DEV] 打开 UI 调试反馈队列与导出面板",
-			Subtitle: "查看已记录问题并一键生成反馈包 (.zip + feedback.md + 截图)",
+			Subtitle: "查看实时落盘的反馈记录并一键打包 .zip",
 			OnRun: func() {
 				a.devInsp.pickActive = false
 				a.devInsp.draftOpen = false
@@ -100,6 +102,9 @@ func (a *app) devInspectorPaletteCommands() []shell.PaletteCommand {
 }
 
 func (a *app) toggleDevPickMode() {
+	if a.devInsp.capturePending {
+		return
+	}
 	if a.devInsp.pickActive {
 		a.devInsp.pickActive = false
 		a.devInsp.dragging = false
@@ -125,7 +130,9 @@ func (a *app) scheduleDelayedDevPick(delay time.Duration) {
 	st.delayScheduled = true
 	st.exportBanner = fmt.Sprintf("%.0f 秒后自动拾取：请立刻打开目标弹窗 / 面板…", delay.Seconds())
 	time.AfterFunc(delay, func() {
+		defer diag.RecoverAndLog("dev-delay-pick")
 		mygo.RunOnMain(func() {
+			defer diag.RecoverAndLog("dev-delay-pick-main")
 			if !a.devInsp.delayScheduled {
 				return
 			}
@@ -148,15 +155,22 @@ func (a *app) resolveDevFeedbackDir() (string, error) {
 		}
 	}
 	var candidates []string
+	// 1. Right beside asterlab-dev executable (always visible, writable, immune to Desktop/OneDrive DLP)
+	if exePath, err := os.Executable(); err == nil && strings.TrimSpace(exePath) != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exePath), "feedback"))
+	}
+	// 2. Inside active Vault `.asterlab/dev-feedback`
 	if a.vault != nil && strings.TrimSpace(a.vault.Root) != "" {
 		candidates = append(candidates, filepath.Join(a.vault.Root, ".asterlab", "dev-feedback"))
 	}
+	// 3. App data dir
 	if dataDir := workspaceDataDir(); strings.TrimSpace(dataDir) != "" {
 		candidates = append(candidates, filepath.Join(dataDir, "dev-feedback"))
 	}
 	if localApp := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localApp != "" {
 		candidates = append(candidates, filepath.Join(localApp, "AsterLab", "dev-feedback"))
 	}
+	// 4. Temp fallback
 	candidates = append(candidates, filepath.Join(os.TempDir(), "AsterLab-DevFeedback"))
 
 	dir, err := devfeedback.ResolveWritableOutputDir(candidates...)
@@ -175,11 +189,17 @@ func (a *app) hydrateDevDraftOnce() {
 	if err != nil {
 		return
 	}
-	restored, err := devfeedback.LoadDraft(baseDir)
+	liveDir := devfeedback.LiveSessionDir(baseDir)
+	restored, err := devfeedback.LoadRealtimeSession(liveDir)
 	if err != nil || len(restored) == 0 {
-		return
+		// Backward-compat fallback to legacy autosave-draft dir if present
+		restored, err = devfeedback.LoadDraft(baseDir)
+		if err != nil || len(restored) == 0 {
+			return
+		}
 	}
 	a.devInsp.issues = restored
+	a.devInsp.liveMDPath = filepath.Join(liveDir, "feedback.md")
 	maxNum := len(restored)
 	for _, it := range restored {
 		if strings.HasPrefix(it.ID, "UI-") {
@@ -189,15 +209,32 @@ func (a *app) hydrateDevDraftOnce() {
 		}
 	}
 	a.devInsp.nextID = maxNum
-	a.devInsp.exportBanner = fmt.Sprintf("已自动恢复上次未导出的 %d 条草稿", len(restored))
+	a.devInsp.exportBanner = fmt.Sprintf("已自动恢复上次落盘的 %d 条记录", len(restored))
 }
 
-func (a *app) persistDevDraft() {
-	baseDir, err := a.resolveDevFeedbackDir()
-	if err != nil {
-		return
+func (a *app) buildDevSessionMeta(winW, winH float32, tok theme.Tokens) devfeedback.SessionMeta {
+	pageName, _, tabTitle, activeFile, activeMode, _, _, _, _, uiScale := a.devContextSnapshot(winW, winH, tok)
+	vaultRoot := ""
+	if a.vault != nil {
+		vaultRoot = a.vault.Root
 	}
-	_ = devfeedback.SaveDraft(baseDir, a.devInsp.issues)
+	return devfeedback.SessionMeta{
+		SessionID:  time.Now().Format("20060102-150405"),
+		ExportedAt: time.Now().Format(time.RFC3339),
+		AppVersion: updater.Version,
+		Commit:     updater.Commit,
+		OS:         runtime.GOOS,
+		Arch:       runtime.GOARCH,
+		WindowW:    winW,
+		WindowH:    winH,
+		UIScale:    uiScale,
+		DarkTheme:  tok.Dark,
+		VaultRoot:  diag.SanitizeText(vaultRoot),
+		ActiveTab:  tabTitle,
+		ActiveFile: activeFile,
+		ActiveMode: activeMode,
+		PageName:   pageName,
+	}
 }
 
 func tabKindString(k shell.TabKind) string {
@@ -257,10 +294,15 @@ func (a *app) devContextSnapshot(winW, winH float32, tok theme.Tokens) (pageName
 	return
 }
 
-func (a *app) beginDraftFromPick(rect devfeedback.Rect, pickKind string, winW, winH float32, tok theme.Tokens) {
+// beginDraftFromPickAsync exits pick mode cleanly FIRST, waits one frame so MyGo finishes
+// HandleInput and removes the crosshair overlay (preventing CapturePage() re-entrancy crashes!),
+// captures the unobstructed window screenshot safely off-event, annotates off the UI thread,
+// and opens the draft annotation card on the main thread.
+func (a *app) beginDraftFromPickAsync(rect devfeedback.Rect, pickKind string, winW, winH float32, tok theme.Tokens) {
 	st := &a.devInsp
 	st.pickActive = false
 	st.dragging = false
+	st.capturePending = true
 	st.draftRect = rect
 	st.draftPickKind = pickKind
 	st.draftWinW = winW
@@ -280,28 +322,53 @@ func (a *app) beginDraftFromPick(rect devfeedback.Rect, pickKind string, winW, w
 	cy := rect.Y + rect.H*0.5
 	st.draftRegion = devfeedback.DetectRegion(cx, cy, winW, winH, leftW, rightW, leftOpen, rightOpen, pageName, tabKind)
 
-	// Capture clean screenshot BEFORE opening the draft annotation modal.
+	var win *mygo.Window
 	if a.shell != nil {
-		if win := a.shell.MyGoWindow(); win != nil {
-			rawPNG, err := win.CapturePage()
-			if err != nil {
-				st.draftCaptureErr = fmt.Sprintf("窗口截图失败: %v", err)
-			} else if len(rawPNG) > 0 {
-				fullPNG, cropPNG, imgW, imgH, annErr := devfeedback.AnnotateAndCrop(rawPNG, rect, winW, winH)
-				if annErr != nil {
-					st.draftCaptureErr = fmt.Sprintf("红框标注失败: %v", annErr)
-				} else {
-					st.draftFullPNG = fullPNG
-					st.draftCropPNG = cropPNG
-					st.draftImgW = imgW
-					st.draftImgH = imgH
-				}
-			}
-		} else {
-			st.draftCaptureErr = "无头窗口模式（未捕获像素截图，仍可记录坐标与建议）"
-		}
+		win = a.shell.MyGoWindow()
 	}
-	st.draftOpen = true
+	if win == nil {
+		st.capturePending = false
+		st.draftCaptureErr = "无头窗口模式（未捕获像素截图，仍可记录坐标与建议）"
+		st.draftOpen = true
+		return
+	}
+
+	// Capture safely AFTER HandleInput returns and overlay unmounts (fixes MyGo re-entrancy crash!).
+	go func() {
+		defer diag.RecoverAndLog("dev-async-capture")
+		time.Sleep(60 * time.Millisecond)
+
+		var (
+			fullPNG, cropPNG []byte
+			imgW, imgH       int
+			capErrStr        string
+		)
+		rawPNG, err := win.CapturePage()
+		if err != nil {
+			capErrStr = fmt.Sprintf("窗口截图失败: %v", err)
+		} else if len(rawPNG) > 0 {
+			fPNG, cPNG, w, h, annErr := devfeedback.AnnotateAndCrop(rawPNG, rect, winW, winH)
+			if annErr != nil {
+				capErrStr = fmt.Sprintf("红框标注失败: %v", annErr)
+			} else {
+				fullPNG, cropPNG, imgW, imgH = fPNG, cPNG, w, h
+			}
+		}
+
+		mygo.RunOnMain(func() {
+			defer diag.RecoverAndLog("dev-async-capture-main")
+			a.devInsp.capturePending = false
+			a.devInsp.draftFullPNG = fullPNG
+			a.devInsp.draftCropPNG = cropPNG
+			a.devInsp.draftImgW = imgW
+			a.devInsp.draftImgH = imgH
+			a.devInsp.draftCaptureErr = capErrStr
+			a.devInsp.draftOpen = true
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		})
+	}()
 }
 
 func (a *app) commitDraftIssue(tok theme.Tokens) {
@@ -334,9 +401,38 @@ func (a *app) commitDraftIssue(tok theme.Tokens) {
 	}
 	st.issues = append(st.issues, it)
 	st.draftOpen = false
-	a.persistDevDraft()
-	st.exportBanner = fmt.Sprintf("已自动保存 %s（累计 %d 条）· Ctrl+Shift+D 继续拾取", it.ID, len(st.issues))
+
+	// Immediately persist this issue + PNGs + feedback.md to disk (never silently swallow errors!).
+	baseDir, dirErr := a.resolveDevFeedbackDir()
+	if dirErr != nil {
+		st.exportErr = fmt.Sprintf("实时落盘失败（仅存内存）: %v", dirErr)
+		st.exportBanner = ""
+		return
+	}
+	liveDir := devfeedback.LiveSessionDir(baseDir)
+	sess := a.buildDevSessionMeta(st.draftWinW, st.draftWinH, tok)
+	mdPath, saveErr := devfeedback.AppendRealtimeIssue(liveDir, sess, st.issues, it)
+	if saveErr != nil {
+		st.exportErr = fmt.Sprintf("实时落盘失败（仅存内存）: %v", saveErr)
+		st.exportBanner = ""
+		return
+	}
+	st.liveMDPath = mdPath
 	st.exportErr = ""
+	st.exportBanner = fmt.Sprintf("✓ 已实时落盘 %s（共 %d 条）→ %s", it.ID, len(st.issues), liveDir)
+}
+
+func (a *app) syncLiveSessionAfterMutation(c *ui.Context, tok theme.Tokens) {
+	baseDir, err := a.resolveDevFeedbackDir()
+	if err != nil {
+		a.devInsp.exportErr = fmt.Sprintf("同步落盘失败: %v", err)
+		return
+	}
+	winW, winH := c.Size()
+	liveDir := devfeedback.LiveSessionDir(baseDir)
+	if _, err := devfeedback.SyncRealtimeSession(liveDir, a.buildDevSessionMeta(winW, winH, tok), a.devInsp.issues); err != nil {
+		a.devInsp.exportErr = fmt.Sprintf("同步落盘失败: %v", err)
+	}
 }
 
 func (a *app) exportDevFeedbackBundle(c *ui.Context, tok theme.Tokens) {
@@ -346,28 +442,7 @@ func (a *app) exportDevFeedbackBundle(c *ui.Context, tok theme.Tokens) {
 		return
 	}
 	winW, winH := c.Size()
-	pageName, _, tabTitle, activeFile, activeMode, _, _, _, _, uiScale := a.devContextSnapshot(winW, winH, tok)
-	vaultRoot := ""
-	if a.vault != nil {
-		vaultRoot = a.vault.Root
-	}
-	sess := devfeedback.SessionMeta{
-		SessionID:  time.Now().Format("20060102-150405"),
-		ExportedAt: time.Now().Format(time.RFC3339),
-		AppVersion: updater.Version,
-		Commit:     updater.Commit,
-		OS:         runtime.GOOS,
-		Arch:       runtime.GOARCH,
-		WindowW:    winW,
-		WindowH:    winH,
-		UIScale:    uiScale,
-		DarkTheme:  tok.Dark,
-		VaultRoot:  diag.SanitizeText(vaultRoot),
-		ActiveTab:  tabTitle,
-		ActiveFile: activeFile,
-		ActiveMode: activeMode,
-		PageName:   pageName,
-	}
+	sess := a.buildDevSessionMeta(winW, winH, tok)
 
 	outBase, dirErr := a.resolveDevFeedbackDir()
 	if dirErr != nil {
@@ -385,10 +460,9 @@ func (a *app) exportDevFeedbackBundle(c *ui.Context, tok theme.Tokens) {
 		st.exportErr = fmt.Sprintf("导出失败: %v", err)
 		return
 	}
-	_ = devfeedback.ClearDraft(outBase)
 	st.exportErr = ""
 	st.exportZip = zipPath
-	st.exportBanner = fmt.Sprintf("已导出 %d 条反馈包: %s（路径已复制）", len(st.issues), zipPath)
+	st.exportBanner = fmt.Sprintf("✓ 已打包 %d 条: %s（路径已复制）", len(st.issues), zipPath)
 	c.WriteClipboard(zipPath)
 	revealInFileManager(zipPath, folder)
 }
@@ -413,6 +487,7 @@ func revealInFileManager(zipPath, folderPath string) {
 }
 
 func (a *app) renderDevInspectorOverlay(c *ui.Context) {
+	defer diag.RecoverAndLog("dev-overlay")
 	a.hydrateDevDraftOnce()
 	tok := theme.GetTokens(c.Theme())
 	st := &a.devInsp
@@ -435,6 +510,11 @@ func (a *app) renderDevInspectorOverlay(c *ui.Context) {
 	// 1. Live Full-Window Pick / Drag-Box Capture Overlay (.Modal() sits ABOVE any open app Dialog!)
 	if st.pickActive {
 		a.renderDevPickOverlay(c, tok)
+		return
+	}
+
+	// While async CapturePage() is grabbing the unobstructed window frame, hide DEV chrome completely!
+	if st.capturePending {
 		return
 	}
 
@@ -463,6 +543,7 @@ func (a *app) renderDevPickOverlay(c *ui.Context, tok theme.Tokens) {
 			Modal().
 			Background(tok.Accent.Alpha(0.03)).
 			HandleInput(func(ev ui.InputEvent) bool {
+				defer diag.RecoverAndLog("dev-pick-input")
 				switch ev.Kind {
 				case ui.InputPointerMove:
 					st.hoverX, st.hoverY = ev.X, ev.Y
@@ -498,7 +579,7 @@ func (a *app) renderDevPickOverlay(c *ui.Context, tok theme.Tokens) {
 						rw = dx
 						rh = dy
 					}
-					a.beginDraftFromPick(devfeedback.Rect{X: rx, Y: ry, W: rw, H: rh}, pickKind, winW, winH, tok)
+					a.beginDraftFromPickAsync(devfeedback.Rect{X: rx, Y: ry, W: rw, H: rh}, pickKind, winW, winH, tok)
 					return true
 				}
 				return false
@@ -608,7 +689,7 @@ func (a *app) renderDevDraftDialog(c *ui.Context, tok theme.Tokens) {
 			if st.draftCaptureErr != "" {
 				components.Text(c, st.draftCaptureErr).FontSize(float32(tok.TextMeta)).TextColor(tok.Warning)
 			} else if len(st.draftFullPNG) > 0 {
-				components.Text(c, fmt.Sprintf("✓ 已捕获无遮挡红框全图 + 2x 局部放大图 (%d×%d px)", st.draftImgW, st.draftImgH)).
+				components.Text(c, fmt.Sprintf("✓ 已捕获无遮挡红框全图 + 2x 局部放大图 (%d×%d px) · 保存即实时落盘", st.draftImgW, st.draftImgH)).
 					FontSize(float32(tok.TextMeta)).TextColor(tok.Success)
 			}
 
@@ -695,9 +776,14 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 			Background(tok.Surface).Border(1, tok.BorderStrong)
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				components.Text(c, fmt.Sprintf("已记录 %d 条 UI 反馈（自动落盘防丢失）", len(st.issues))).
+				components.Text(c, fmt.Sprintf("已记录 %d 条 UI 反馈（每条实时落盘）", len(st.issues))).
 					FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 				ui.Spacer(c)
+				if st.liveMDPath != "" {
+					if components.Button(c, "打开实时目录", components.ButtonGhost).Clicked() {
+						revealInFileManager(st.liveMDPath, filepath.Dir(st.liveMDPath))
+					}
+				}
 				if components.Button(c, "延迟2s截弹窗", components.ButtonGhost).Clicked() {
 					a.scheduleDelayedDevPick(2 * time.Second)
 				}
@@ -707,8 +793,13 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 				}
 			})
 
-			components.Text(c, "提示：要截取设置/弹窗/下拉菜单画面，请点「延迟2s截弹窗」后立即打开该面板，2秒后自动进入顶层拾取。").
-				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			if st.liveMDPath != "" {
+				components.Text(c, "实时落盘路径: "+filepath.Dir(st.liveMDPath)).
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			} else {
+				components.Text(c, "提示：每保存一条即实时写入 dist-dev\\feedback\\live-session\\，即使意外关闭也不会丢失。").
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			}
 
 			if len(st.issues) == 0 {
 				ui.Box(c).FillWidth().Padding(float32(tok.Spacing16)).Radius(float32(tok.ControlRadius)).
@@ -749,7 +840,7 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 						}
 						if deleteIdx >= 0 && deleteIdx < len(st.issues) {
 							st.issues = append(st.issues[:deleteIdx], st.issues[deleteIdx+1:]...)
-							a.persistDevDraft()
+							a.syncLiveSessionAfterMutation(c, tok)
 						}
 					})
 				})
@@ -768,14 +859,14 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 						st.issues = nil
 						st.exportBanner = ""
 						st.exportErr = ""
-						a.persistDevDraft()
+						a.syncLiveSessionAfterMutation(c, tok)
 					}
 				}
 				if components.Button(c, "关闭", components.ButtonSecondary).Clicked() {
 					st.queueOpen = false
 				}
 				if len(st.issues) > 0 {
-					if components.Button(c, "导出反馈包 (.zip + 目录)", components.ButtonPrimary).Clicked() {
+					if components.Button(c, "打包导出 .zip", components.ButtonPrimary).Clicked() {
 						a.exportDevFeedbackBundle(c, tok)
 					}
 				}
