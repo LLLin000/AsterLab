@@ -521,15 +521,10 @@ func (a *app) renderDevInspectorOverlay(c *ui.Context) {
 	// 2. Floating Compact Dev Pill (bottom-right, devdebug builds ONLY)
 	a.renderDevFloatingPill(c, tok)
 
-	// 3. Draft Annotation Dialog (after click / drag-box)
-	if st.draftOpen {
-		a.renderDevDraftDialog(c, tok)
-	}
-
-	// 4. Recorded Issue Queue & Bundle Export Dialog
-	if st.queueOpen {
-		a.renderDevQueueDialog(c, tok)
-	}
+	// 3 & 4. Always keep Dialog wrappers mounted (nil body when closed) so closing/canceling
+	// completes MyGo's modal exit lifecycle cleanly without corrupting modal state.
+	a.renderDevDraftDialog(c, tok)
+	a.renderDevQueueDialog(c, tok)
 }
 
 func (a *app) renderDevPickOverlay(c *ui.Context, tok theme.Tokens) {
@@ -670,10 +665,19 @@ func (a *app) renderDevFloatingPill(c *ui.Context, tok theme.Tokens) {
 
 func (a *app) renderDevDraftDialog(c *ui.Context, tok theme.Tokens) {
 	st := &a.devInsp
+	if !st.draftOpen {
+		ui.Box(c.Key("dev-draft-dlg-host")).Children(func() {
+			components.Dialog(c.Key("dev-draft-dlg"), &st.draftOpen, components.DialogOptions{
+				Label: "记录 UI 细节问题",
+			}, nil)
+		})
+		return
+	}
 	open := st.draftOpen
-	components.Dialog(c.Key("dev-draft-dlg"), &open, components.DialogOptions{
-		Label: "记录 UI 细节问题",
-	}, func(panel ui.Element) {
+	ui.Box(c.Key("dev-draft-dlg-host")).Children(func() {
+		components.Dialog(c.Key("dev-draft-dlg"), &open, components.DialogOptions{
+			Label: "记录 UI 细节问题",
+		}, func(panel ui.Element) {
 		panel.Width(540).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).
 			Background(tok.Surface).Border(1, tok.BorderStrong)
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
@@ -748,30 +752,40 @@ func (a *app) renderDevDraftDialog(c *ui.Context, tok theme.Tokens) {
 			})
 
 			ui.Row(c).FillWidth().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
-				if components.Button(c, "取消", components.ButtonGhost).Clicked() {
-					st.draftOpen = false
+				if components.Button(c.Key("dev-draft-cancel"), "取消", components.ButtonGhost).Clicked() {
+					open = false
 				}
-				if components.Button(c, "保存并继续拾取", components.ButtonSecondary).Clicked() {
+				if components.Button(c.Key("dev-draft-save-cont"), "保存并继续拾取", components.ButtonSecondary).Clicked() {
 					a.commitDraftIssue(tok)
+					open = false
 					st.pickActive = true
 				}
-				if components.Button(c, "保存此条", components.ButtonPrimary).Clicked() {
+				if components.Button(c.Key("dev-draft-save"), "保存此条", components.ButtonPrimary).Clicked() {
 					a.commitDraftIssue(tok)
+					open = false
 				}
 			})
 		})
+		})
 	})
-	if !open {
-		st.draftOpen = false
-	}
+	st.draftOpen = open
 }
 
 func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 	st := &a.devInsp
+	if !st.queueOpen {
+		ui.Box(c.Key("dev-queue-dlg-host")).Children(func() {
+			components.Dialog(c.Key("dev-queue-dlg"), &st.queueOpen, components.DialogOptions{
+				Label: "UI 调试反馈队列",
+			}, nil)
+		})
+		return
+	}
 	open := st.queueOpen
-	components.Dialog(c.Key("dev-queue-dlg"), &open, components.DialogOptions{
-		Label: "UI 调试反馈队列",
-	}, func(panel ui.Element) {
+	ui.Box(c.Key("dev-queue-dlg-host")).Children(func() {
+		components.Dialog(c.Key("dev-queue-dlg"), &open, components.DialogOptions{
+			Label: "UI 调试反馈队列",
+		}, func(panel ui.Element) {
 		panel.Width(640).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).
 			Background(tok.Surface).Border(1, tok.BorderStrong)
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
@@ -862,20 +876,19 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 						a.syncLiveSessionAfterMutation(c, tok)
 					}
 				}
-				if components.Button(c, "关闭", components.ButtonSecondary).Clicked() {
-					st.queueOpen = false
+				if components.Button(c.Key("dev-queue-close"), "关闭", components.ButtonSecondary).Clicked() {
+					open = false
 				}
 				if len(st.issues) > 0 {
-					if components.Button(c, "打包导出 .zip", components.ButtonPrimary).Clicked() {
+					if components.Button(c.Key("dev-queue-export"), "打包导出 .zip", components.ButtonPrimary).Clicked() {
 						a.exportDevFeedbackBundle(c, tok)
 					}
 				}
 			})
 		})
+		})
 	})
-	if !open {
-		st.queueOpen = false
-	}
+	st.queueOpen = open
 }
 
 func min32Dev(a, b float32) float32 {

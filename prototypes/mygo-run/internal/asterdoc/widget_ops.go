@@ -1710,7 +1710,7 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 			if editableDesign {
 				renderInlineEditableTitle(v, c, moduleID, title, true)
 			} else {
-				ui.Text(c, title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+				ui.Text(c, FormatDisplayText(title)).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 			}
 
 			// Inline editable duration/mode in Edit mode (borderless quiet inputs)

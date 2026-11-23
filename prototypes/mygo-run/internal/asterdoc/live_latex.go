@@ -397,3 +397,35 @@ func renderSciNumber(c *ui.Context, tok theme.Tokens, v float64, unit string, ba
 	}
 	renderNativeScriptRow(c, tok, expr, baseSize, col, false, bold)
 }
+
+var (
+	reStandaloneCel = regexp.MustCompile(`\bCel\b`)
+	reTextSciPower  = regexp.MustCompile(`(\b(?:10|[a-zA-Z]{1,3}))\^(?:\{([+-]?[0-9a-zA-Z]+)\}|([+-]?[0-9]+))`)
+)
+
+// FormatDisplayText converts UCUM unit tokens like "37 Cel" -> "37 °C" and inline powers
+// like "10^-3 ~ 10^-5" -> "10⁻³ ~ 10⁻⁵" for clean display in titles, chips, and summaries (UI-04, UI-06).
+func FormatDisplayText(s string) string {
+	if s == "" {
+		return s
+	}
+	out := reStandaloneCel.ReplaceAllString(s, "°C")
+	out = reTextSciPower.ReplaceAllStringFunc(out, func(m string) string {
+		sub := reTextSciPower.FindStringSubmatch(m)
+		exp := sub[2]
+		if exp == "" {
+			exp = sub[3]
+		}
+		return sub[1] + toUnicodeSuperscript(exp)
+	})
+	return out
+}
+
+// FormatSciStat formats statistical metrics (mean, SD, blank) using scientific notation
+// whenever |v| >= 1000 or 0 < |v| <= 0.001 (UI-07), otherwise clean 3-decimal notation.
+func FormatSciStat(v float64) string {
+	if _, _, isSci := formatSciParts(v); isSci {
+		return formatSciCompactText(v)
+	}
+	return fmt.Sprintf("%.3f", v)
+}

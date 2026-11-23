@@ -58,9 +58,9 @@ type PantryBox struct {
 var pantryBoxSpecs = []PantryBoxSpec{
 	{
 		Kind:              BoxCryo9x9,
-		Title:             "9×9 标准冻存盒",
-		ShortTitle:        "9×9 冻存盒",
-		TubeHint:          "1.5 / 2.0 mL 冻存管",
+		Title:             "标准冻存管盒",
+		ShortTitle:        "冻存管盒",
+		TubeHint:          "适配 1.5 / 2.0 mL 冻存管",
 		DefaultRows:       9,
 		DefaultCols:       9,
 		DefaultZone:       "-80",
@@ -70,9 +70,9 @@ var pantryBoxSpecs = []PantryBoxSpec{
 	},
 	{
 		Kind:              BoxCryo10x10,
-		Title:             "10×10 冻存盒",
-		ShortTitle:        "10×10 冻存盒",
-		TubeHint:          "0.5 / 1.5 mL 冻存管",
+		Title:             "小管径冻存盒",
+		ShortTitle:        "小管径冻存盒",
+		TubeHint:          "适配 0.5 / 1.5 mL 冻存管",
 		DefaultRows:       10,
 		DefaultCols:       10,
 		DefaultZone:       "-80",
@@ -82,9 +82,9 @@ var pantryBoxSpecs = []PantryBoxSpec{
 	},
 	{
 		Kind:              BoxEP50,
-		Title:             "50 孔 EP 离心管盒",
+		Title:             "EP 离心管盒",
 		ShortTitle:        "EP 离心管盒",
-		TubeHint:          "1.5 / 2.0 mL EP 管 · 酶管",
+		TubeHint:          "适配 1.5 / 2.0 mL EP 管 · 酶管",
 		DefaultRows:       5,
 		DefaultCols:       10,
 		DefaultZone:       "-20",
@@ -95,8 +95,8 @@ var pantryBoxSpecs = []PantryBoxSpec{
 	{
 		Kind:              BoxFalcon15,
 		Title:             "15 mL 离心管架",
-		ShortTitle:        "15 mL 管架",
-		TubeHint:          "15 mL 锥底离心管",
+		ShortTitle:        "15 mL 离心管架",
+		TubeHint:          "适配 15 mL 锥底离心管",
 		DefaultRows:       5,
 		DefaultCols:       5,
 		DefaultZone:       "4C",
@@ -107,8 +107,8 @@ var pantryBoxSpecs = []PantryBoxSpec{
 	{
 		Kind:              BoxFalcon50,
 		Title:             "50 mL 离心管架",
-		ShortTitle:        "50 mL 管架",
-		TubeHint:          "50 mL 大锥底离心管",
+		ShortTitle:        "50 mL 离心管架",
+		TubeHint:          "适配 50 mL 大锥底离心管",
 		DefaultRows:       4,
 		DefaultCols:       4,
 		DefaultZone:       "4C",
@@ -118,9 +118,9 @@ var pantryBoxSpecs = []PantryBoxSpec{
 	},
 	{
 		Kind:              BoxPCR96,
-		Title:             "96 孔 0.2 mL PCR 盒",
+		Title:             "96 孔 PCR 盒",
 		ShortTitle:        "96 孔 PCR 盒",
-		TubeHint:          "0.2 mL 单管 / 八联排",
+		TubeHint:          "适配 0.2 mL 单管 / 八联排（固定 8×12）",
 		DefaultRows:       8,
 		DefaultCols:       12,
 		DefaultZone:       "-20",
@@ -1132,14 +1132,25 @@ func renderBoxSlotGrid(
 						renderBoxCellContent(c, tok, box, spec, coord, item, occupied, selected, isMatch, dark)
 					})
 
+					if cellBtn.DoubleClicked() {
+						// UI-12: Double-clicking an empty slot immediately creates a new reagent in that slot;
+						// double-clicking an occupied slot opens its detail dialog.
+						w.selectedBoxSlot = coord
+						if occupied {
+							w.OpenPantryDetail(item)
+						} else {
+							w.OpenNewPantryDialogInBox(box, coord)
+						}
+					}
+
 					if occupied {
-						tip := fmt.Sprintf("%s · %s · %s", coord, item.Name, pantryItemStatus(item))
+						tip := fmt.Sprintf("%s · %s · %s · 双击查看详情", coord, item.Name, pantryItemStatus(item))
 						if m, ok := w.PantryMeta[item.ID]; ok && m.LotNo != "" {
 							tip += " · Lot " + m.LotNo
 						}
 						components.Tooltip(c, cellBtn, tip)
 					} else {
-						tip := coord + " · 空位 · 点击选中放入试剂"
+						tip := coord + " · 空位 · 双击新建试剂"
 						if w.boxMoveItemID != "" {
 							tip = "点击将试剂移入 " + coord
 						}
@@ -1460,6 +1471,11 @@ func (w *Workspace) looseReagentsForBox(box PantryBox) []runs.PantryItem {
 
 func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
 	if !w.PantryBoxDialogOpen {
+		ui.Box(c.Key("pantry-box-dlg")).Children(func() {
+			components.Dialog(c, &w.PantryBoxDialogOpen, components.DialogOptions{
+				Label: "新建储藏室收纳盒 / 离心管架",
+			}, nil)
+		})
 		return
 	}
 	t := c.Theme()
@@ -1517,7 +1533,7 @@ func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
 								ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(0)).Children(func() {
 									ui.Text(c, sp.ShortTitle).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).
 										SingleLine().Ellipsis("…")
-									ui.Text(c, fmt.Sprintf("%d×%d · %s", sp.DefaultRows, sp.DefaultCols, sp.TubeHint)).
+									ui.Text(c, sp.TubeHint).
 										FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
 								})
 							})
@@ -1531,14 +1547,17 @@ func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
 					ui.Text(c, "盒子名称 *").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					components.TextBox(c, &w.boxDraft.Name, components.TextBoxOptions{}).Placeholder("如 抗体冻存盒 #1 / qPCR 引物 96 孔盒")
 				})
-				ui.Column(c).Width(float32(tok.Spacing48)*2.0).Gap(t.Space(1)).Children(func() {
-					ui.Text(c, "行数 (2–12)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					components.TextBox(c, &w.boxDraftRowsStr, components.TextBoxOptions{})
-				})
-				ui.Column(c).Width(float32(tok.Spacing48)*2.0).Gap(t.Space(1)).Children(func() {
-					ui.Text(c, "列数 (2–12)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					components.TextBox(c, &w.boxDraftColsStr, components.TextBoxOptions{})
-				})
+				// UI-10: PCR 96-well box has fixed standard 8×12 dimensions; other boxes let user edit rows/cols freely.
+				if w.boxDraft.Kind != BoxPCR96 {
+					ui.Column(c).Width(float32(tok.Spacing48)*2.0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "行数 (2–12)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.boxDraftRowsStr, components.TextBoxOptions{})
+					})
+					ui.Column(c).Width(float32(tok.Spacing48)*2.0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "列数 (2–12)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.boxDraftColsStr, components.TextBoxOptions{})
+					})
+				}
 			})
 
 			ui.Row(c).FillWidth().AlignItems(ui.End).Gap(t.Space(2)).Children(func() {
@@ -1589,18 +1608,18 @@ func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
 							w.PantryBoxDialogOpen = false
 							w.boxConfirmDel = false
 						}
-						if components.Button(c, "取消", components.ButtonGhost).Clicked() {
+						if components.Button(c.Key("box-del-cancel"), "取消", components.ButtonGhost).Clicked() {
 							w.boxConfirmDel = false
 						}
 					}
 				}
 				ui.Spacer(c)
-				if components.Button(c, "取消", components.ButtonSecondary).Clicked() {
+				if components.Button(c.Key("box-dlg-cancel"), "取消", components.ButtonSecondary).Clicked() {
 					w.PantryBoxDialogOpen = false
 					w.boxConfirmDel = false
 					w.boxDialogErr = ""
 				}
-				if components.Button(c, "保存收纳盒", components.ButtonPrimary).Clicked() {
+				if components.Button(c.Key("box-dlg-save"), "保存收纳盒", components.ButtonPrimary).Clicked() {
 					_ = w.SavePantryBoxDialog()
 				}
 			})

@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -825,7 +826,8 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 		})
 		ui.Box(c).FillWidth().Height(1).Background(tok.Border)
 
-		// 3. Scrollable 07:00 – 22:00 Hourly Axis (UI-18: full-height matched frame + live hover time guide)
+		// 3. Scrollable 07:00 – 22:00 Hourly Axis (UI-09 & UI-18: full-width continuous timeline
+		// with gentle 30-minute magnetic snap across all 7 weekday columns).
 		curHour := s.CurrentHour
 		if curHour <= 0 {
 			now := time.Now()
@@ -842,102 +844,149 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 				rowH = fitH
 			}
 		}
+		totalGridH := rowH * rowCount
 
 		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
-			ui.Column(c).FillWidth().Gap(0).Children(func() {
-				for hr := startHr; hr <= endHr; hr++ {
-					hr := hr
-					if hr > startHr {
-						ui.Box(c).FillWidth().Height(1).Background(tok.Border)
+			axisBox := ui.Box(c.Key("wk-axis-canvas")).FillWidth().HandleInput(func(ev ui.InputEvent) bool {
+				if ev.Kind == ui.InputPointerMove {
+					if ev.Y >= 0 && ev.Y <= totalGridH {
+						s.weekHoverOn = true
+						s.weekHoverY = ev.Y
+					} else {
+						s.weekHoverOn = false
 					}
-					ui.Row(c.Key(fmt.Sprintf("wk-row-%d", hr))).FillWidth().Height(rowH).Gap(0).Children(func() {
-						// Hour gutter
-						ui.Row(c).Width(gutterW).FillHeight().Shrink(0).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-							AlignItems(ui.Start).Justify(ui.End).Children(func() {
-							ui.Text(c, fmt.Sprintf("%02d:00", hr)).FontSize(float32(tok.TextMeta)).
-								TextColor(tok.TextMuted).FontFeatures("tnum")
-						})
-						for _, day := range days {
-							day := day
-							ymd := day.Format("2006-01-02")
-							isToday := ymd == todayYMD
-							ui.Box(c).FillHeight().Width(1).Background(tok.Border)
-							cellBg := tok.Surface
-							if isWeekend(day.Weekday()) {
-								cellBg = tok.Elevated
-							}
-							slot := ui.Box(c.Key(fmt.Sprintf("wk-slot-%s-%d", ymd, hr))).Grow(1).MinWidth(0).FillHeight().
-								Background(cellBg).Padding(float32(tok.Spacing4))
-							hovered := slot.Hovered()
-							if hovered {
-								slot.Background(tok.AccentSoftBg.Alpha(0.45))
-							}
-							slot.Children(func() {
-								hasTimed := false
-								for _, exp := range byDate[ymd] {
-									exp := exp
-									if exp.StartHour > 0 && int(exp.StartHour) == hr {
-										hasTimed = true
-										bg, bar, fg := stagePillColors(tok, exp.Stage)
-										blk := ui.ButtonBase(c.Key("wk-hr-"+exp.ID)).FillWidth().Justify(ui.Start).
-											Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-											Radius(float32(tok.ControlRadius)).Background(bg).Label(exp.Title)
-										blk.Children(func() {
-											ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-												ui.Box(c).Width(float32(tok.Spacing4)*0.75).Height(float32(tok.Spacing16)).
-													Radius(float32(tok.ControlRadius)*0.35).Background(bar).Shrink(0)
-												components.Text(c, exp.Title).FontSize(float32(tok.TextMeta)).Bold().
-													TextColor(fg).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
-												if exp.DurationMin > 0 {
-													ui.Text(c, formatMinutesCompact(exp.DurationMin)).
-														FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum").Shrink(0)
-												}
-											})
-										})
-										if blk.Clicked() {
-											s.openExperiment(exp)
-										}
-									}
-								}
-								// UI-18: Live hover time-indicator guide line + affordance badge
-								if hovered {
-									ui.Row(c).Absolute().Left(0).Right(0).Top(float32(tok.Spacing4)).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-										ui.Box(c).Width(float32(tok.Spacing4) * 1.5).Height(float32(tok.Spacing4) * 1.5).
-											Radius(float32(tok.Spacing4)).Background(tok.Accent)
-										ui.Box(c).Grow(1).Height(1.5).Background(tok.Accent.Alpha(0.75))
-										if !hasTimed {
-											ui.Row(c).Padding(1, float32(tok.Spacing4)).Radius(float32(tok.ControlRadius)).
-												Background(tok.Accent).Children(func() {
-												ui.Text(c, fmt.Sprintf("%02d:00 +", hr)).FontSize(float32(tok.TextMeta)-1).
-													Bold().TextColor(tok.AccentText).FontFeatures("tnum").SingleLine()
-											})
-										}
-									})
-								}
-								if isToday && int(curHour) == hr {
-									frac := curHour - float32(hr)
-									if frac < 0.08 {
-										frac = 0.08
-									}
-									if frac > 0.9 {
-										frac = 0.9
-									}
-									ui.Row(c).Absolute().Left(0).Right(0).Top(rowH*frac).AlignItems(ui.Center).Children(func() {
-										dotSize := float32(tok.Spacing8)
-										ui.Box(c).Size(dotSize, dotSize).Radius(dotSize * 0.5).Background(tok.Danger)
-										ui.Box(c).Grow(1).Height(1.5).Background(tok.Danger)
-									})
-								}
-							})
-							if slot.DoubleClicked() {
-								s.SelectedDate = ymd
-								s.triggerCreateForDate(ymd)
-							}
-						}
-					})
 				}
-				// Crisp closing bottom hairline so the week grid never looks abruptly cut off
-				ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.6))
+				return false
+			})
+			if !axisBox.Hovered() {
+				s.weekHoverOn = false
+			}
+			axisBox.Children(func() {
+				ui.Column(c).FillWidth().Gap(0).Children(func() {
+					for hr := startHr; hr <= endHr; hr++ {
+						hr := hr
+						if hr > startHr {
+							ui.Box(c).FillWidth().Height(1).Background(tok.Border)
+						}
+						ui.Row(c.Key(fmt.Sprintf("wk-row-%d", hr))).FillWidth().Height(rowH).Gap(0).Children(func() {
+							// Hour gutter
+							ui.Row(c).Width(gutterW).FillHeight().Shrink(0).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+								AlignItems(ui.Start).Justify(ui.End).Children(func() {
+								ui.Text(c, fmt.Sprintf("%02d:00", hr)).FontSize(float32(tok.TextMeta)).
+									TextColor(tok.TextMuted).FontFeatures("tnum")
+							})
+							for dIdx, day := range days {
+								dIdx, day := dIdx, day
+								ymd := day.Format("2006-01-02")
+								isToday := ymd == todayYMD
+								ui.Box(c).FillHeight().Width(1).Background(tok.Border)
+								cellBg := tok.Surface
+								if isWeekend(day.Weekday()) {
+									cellBg = tok.Elevated
+								}
+								slot := ui.Box(c.Key(fmt.Sprintf("wk-slot-%s-%d", ymd, hr))).Grow(1).MinWidth(0).FillHeight().
+									Background(cellBg).Padding(float32(tok.Spacing4))
+								if slot.Hovered() {
+									s.weekHoverDay = dIdx
+								}
+								slot.Children(func() {
+									for _, exp := range byDate[ymd] {
+										exp := exp
+										if exp.StartHour > 0 && int(exp.StartHour) == hr {
+											bg, bar, fg := stagePillColors(tok, exp.Stage)
+											blk := ui.ButtonBase(c.Key("wk-hr-"+exp.ID)).FillWidth().Justify(ui.Start).
+												Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+												Radius(float32(tok.ControlRadius)).Background(bg).Label(exp.Title)
+											blk.Children(func() {
+												ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+													ui.Box(c).Width(float32(tok.Spacing4)*0.75).Height(float32(tok.Spacing16)).
+														Radius(float32(tok.ControlRadius)*0.35).Background(bar).Shrink(0)
+													components.Text(c, exp.Title).FontSize(float32(tok.TextMeta)).Bold().
+														TextColor(fg).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+													if exp.DurationMin > 0 {
+														ui.Text(c, formatMinutesCompact(exp.DurationMin)).
+															FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum").Shrink(0)
+													}
+												})
+											})
+											if blk.Clicked() {
+												s.openExperiment(exp)
+											}
+										}
+									}
+									if isToday && int(curHour) == hr {
+										frac := curHour - float32(hr)
+										if frac < 0.08 {
+											frac = 0.08
+										}
+										if frac > 0.9 {
+											frac = 0.9
+										}
+										ui.Row(c).Absolute().Left(0).Right(0).Top(rowH*frac).AlignItems(ui.Center).Children(func() {
+											dotSize := float32(tok.Spacing8)
+											ui.Box(c).Size(dotSize, dotSize).Radius(dotSize * 0.5).Background(tok.Danger)
+											ui.Box(c).Grow(1).Height(1.5).Background(tok.Danger)
+										})
+									}
+								})
+								if slot.DoubleClicked() {
+									s.SelectedDate = ymd
+									s.triggerCreateForDate(ymd)
+								}
+							}
+						})
+					}
+					// Crisp closing bottom hairline so the week grid never looks abruptly cut off
+					ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.6))
+				})
+			})
+			// UI-09: Full-width click-through hover timeline spanning from left time gutter across all 7 columns,
+			// with gentle magnetic snap to 30-minute ticks (:00 and :30).
+			axisBox.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if !s.weekHoverOn || s.weekHoverY < 0 || s.weekHoverY > totalGridH {
+					return
+				}
+				halfH := rowH * 0.5
+				nearestStep := float32(math.Round(float64(s.weekHoverY / halfH)))
+				snapY := nearestStep * halfH
+				lineY := s.weekHoverY
+				snapped := false
+				if abs32Cal(s.weekHoverY-snapY) <= 7 {
+					lineY = snapY
+					snapped = true
+				}
+				totalMins := int(math.Round(float64(lineY/rowH)*60.0)) + startHr*60
+				if snapped {
+					totalMins = int(nearestStep)*30 + startHr*60
+				}
+				if totalMins < startHr*60 {
+					totalMins = startHr * 60
+				}
+				if totalMins > (endHr+1)*60 {
+					totalMins = (endHr + 1) * 60
+				}
+				timeLbl := fmt.Sprintf("%02d:%02d", totalMins/60, totalMins%60)
+				yAbs := r.Y + lineY
+				// Continuous horizontal line across all 7 weekday columns
+				lineRect := ui.Rect{X: r.X + gutterW, Y: yAbs - 0.75, W: r.W - gutterW, H: 1.5}
+				p.Fill(lineRect, tok.Accent.Alpha(0.75), 0)
+				// Anchor dot at gutter boundary (slightly larger when magnetically snapped to :00/:30)
+				dotR := float32(3)
+				if snapped {
+					dotR = 4
+				}
+				p.Fill(ui.Rect{X: r.X + gutterW - dotR, Y: yAbs - dotR, W: dotR * 2, H: dotR * 2}, tok.Accent, dotR)
+				// Accent HH:MM pill in the left time gutter
+				pillW := gutterW - float32(tok.Spacing8)
+				pillH := float32(tok.Spacing16) + 2
+				pillX := r.X + float32(tok.Spacing4)
+				pillY := yAbs - pillH*0.5
+				if pillY < r.Y {
+					pillY = r.Y
+				}
+				p.Fill(ui.Rect{X: pillX, Y: pillY, W: pillW, H: pillH}, tok.Accent, float32(tok.ControlRadius))
+				fontPx := float32(tok.TextMeta) - 1
+				p.Text(pillX+float32(tok.Spacing4), pillY+(pillH-fontPx)*0.42, timeLbl, fontPx, tok.AccentText)
 			})
 		})
 	})
@@ -1089,4 +1138,11 @@ func (s *Shell) renderAgendaExperimentRow(c *ui.Context, tok theme.Tokens, exp E
 			}
 		}
 	})
+}
+
+func abs32Cal(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

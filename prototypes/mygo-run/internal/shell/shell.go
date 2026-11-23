@@ -130,11 +130,14 @@ type Shell struct {
 	CurrentHour    float32
 	CalendarMode   int
 	CalendarCursor string
-	DayPopoverOpen bool
-	DayPopoverDate string
-	calAnimDir     int
+	DayPopoverOpen  bool
+	DayPopoverDate  string
+	calAnimDir      int
 	lastDayClickYMD string
 	lastDayClickAt  time.Time
+	weekHoverOn     bool
+	weekHoverY      float32
+	weekHoverDay    int
 
 	ShowAllRuns          bool
 	OnContinue           func()

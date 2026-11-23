@@ -107,8 +107,9 @@ func moduleCardFrame(v *View, c *ui.Context, icon *ui.SVG, title, badgeText stri
 
 func renderInlineEditableTitle(v *View, c *ui.Context, moduleID, title string, editable bool) {
 	tok := theme.GetTokens(c.Theme())
+	displayTitle := FormatDisplayText(title)
 	if v == nil || !editable || moduleID == "" {
-		ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+		ui.Text(c, displayTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 		return
 	}
 	if v.titleEditID == moduleID {
@@ -141,7 +142,7 @@ func renderInlineEditableTitle(v *View, c *ui.Context, moduleID, title string, e
 		return
 	}
 	ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-		ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+		ui.Text(c, displayTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 		editBtn := components.IconButton(c, lucide.Pencil(), "修改标题", components.IconButtonCompact)
 		components.Tooltip(c, editBtn, "自定义模块标题")
 		if editBtn.Clicked() {
