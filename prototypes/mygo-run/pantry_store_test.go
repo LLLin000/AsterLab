@@ -334,14 +334,19 @@ func TestVaultIsolatedPantryLastVaultMemoryAndNoGlobalPollution(t *testing.T) {
 		t.Fatalf("expected fresh VaultA not to inherit legacy global experiments, got: %+v", a.shell.Experiments)
 	}
 
-	// Add a reagent inside VaultA and verify it persists strictly under <VaultA>/.asterlab/.
+	// Add a reagent inside VaultA and verify it persists strictly under <VaultA>/.asterlab/pantry.jsonl.
 	if _, err := a.localUpsertPantry(runs.PantryUpsert{Name: "Lysostaphin 1 mg/mL", Location: "-20°C"}); err != nil {
 		t.Fatalf("upsert VaultA reagent: %v", err)
 	}
 	a.tools.ReloadPantry()
 	a.syncPantrySnapshotToShell()
-	if _, err := os.Stat(filepath.Join(vaultA, ".asterlab", "pantry-ledger.json")); err != nil {
-		t.Fatalf("expected VaultA pantry ledger inside .asterlab/: %v", err)
+	if _, err := os.Stat(filepath.Join(vaultA, ".asterlab", pantryJSONLFileName)); err != nil {
+		t.Fatalf("expected VaultA single-file pantry.jsonl inside .asterlab/: %v", err)
+	}
+	for _, legacyName := range []string{"pantry-ledger.json", "pantry-meta.json", "pantry-boxes.json"} {
+		if _, err := os.Stat(filepath.Join(vaultA, ".asterlab", legacyName)); !os.IsNotExist(err) {
+			t.Fatalf("expected fresh VaultA not to create legacy %s alongside pantry.jsonl", legacyName)
+		}
 	}
 	if len(a.shell.PantryItems) != 1 {
 		t.Fatalf("expected 1 pantry item synced to shell in VaultA, got %d", len(a.shell.PantryItems))
@@ -428,5 +433,86 @@ func TestVaultLiveDiskWatcherAndAgentGuideDiscovery(t *testing.T) {
 	}
 	if !strings.Contains(ld.Source, "外部 Agent 计划 v2") {
 		t.Fatalf("expected open LiveDocument to auto-reload external disk changes, got: %q", ld.Source)
+	}
+}
+
+func TestPantryJSONLSingleFileSyncMigrationAndExternalAppend(t *testing.T) {
+	t.Setenv("LABWORKBENCH_DATA_DIR", t.TempDir())
+
+	// 1. Unified single-file write (boxes + reagent + meta) without volatile derived fields on disk.
+	root := filepath.Join(t.TempDir(), "JSONLVault")
+	a := &app{shell: &shell.Shell{TodayDate: "2026-11-23", SelectedDate: "2026-11-23"}}
+	if err := a.initVaultWorkspace(root); err != nil {
+		t.Fatalf("initVaultWorkspace: %v", err)
+	}
+	a.tools = a.newToolsWorkspace()
+
+	if err := a.savePantryBoxes([]tools.PantryBox{{
+		ID: "box-1", Name: "抗菌冻存盒 #1", Kind: tools.BoxCryo9x9, ZoneKey: "-80", Rows: 9, Cols: 9,
+	}}); err != nil {
+		t.Fatalf("savePantryBoxes: %v", err)
+	}
+	shelf := uint32(365)
+	saved, err := a.localUpsertPantry(runs.PantryUpsert{
+		Name: "Vancomycin HCl", Location: "-80°C", PurchasedOn: "2026-11-20", ShelfLifeDays: &shelf,
+	})
+	if err != nil {
+		t.Fatalf("localUpsertPantry: %v", err)
+	}
+	if err := a.savePantryMeta(map[string]tools.PantryItemMeta{
+		saved.ID: {CatalogNo: "Sigma V2002", LotNo: "LOT-2026A", BoxID: "box-1", BoxSlot: "A1"},
+	}); err != nil {
+		t.Fatalf("savePantryMeta: %v", err)
+	}
+
+	jsonlPath := filepath.Join(root, ".asterlab", pantryJSONLFileName)
+	rawBytes, err := os.ReadFile(jsonlPath)
+	if err != nil {
+		t.Fatalf("read pantry.jsonl: %v", err)
+	}
+	rawStr := string(rawBytes)
+	if !strings.Contains(rawStr, `"type":"schema"`) || !strings.Contains(rawStr, `"type":"box"`) || !strings.Contains(rawStr, `"type":"reagent"`) {
+		t.Fatalf("expected schema + box + reagent lines in pantry.jsonl, got:\n%s", rawStr)
+	}
+	if !strings.Contains(rawStr, `"catalogNo":"Sigma V2002"`) || !strings.Contains(rawStr, `"boxSlot":"A1"`) {
+		t.Fatalf("expected reagent metadata embedded on reagent line, got:\n%s", rawStr)
+	}
+	if strings.Contains(rawStr, `"daysRemaining"`) || strings.Contains(rawStr, `"expiresOn"`) {
+		t.Fatalf("expected volatile derived fields omitted from pantry.jsonl for clean diffs, got:\n%s", rawStr)
+	}
+
+	// 2. External Agent appends a minimal reagent line -> live watcher picks it up automatically.
+	appended := rawStr + `{"type":"reagent","name":"Lysostaphin 2 mg/mL","location":"-20°C","purchasedOn":"2026-11-23","shelfLifeDays":180}` + "\n"
+	if err := os.WriteFile(jsonlPath, []byte(appended), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	_ = os.Chtimes(jsonlPath, future, future)
+
+	if !a.syncVaultDiskChangesNow() {
+		t.Fatal("expected syncVaultDiskChangesNow to detect external append to .asterlab/pantry.jsonl")
+	}
+	if len(a.tools.Pantry.Items) != 2 {
+		t.Fatalf("expected 2 pantry items after external JSONL append, got %d: %+v", len(a.tools.Pantry.Items), a.tools.Pantry.Items)
+	}
+
+	// 3. Legacy 3-file JSON auto-migrates losslessly into single-file pantry.jsonl on first load.
+	migDir := filepath.Join(t.TempDir(), "LegacyMig")
+	if err := os.MkdirAll(migDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(migDir, "pantry-ledger.json"), []byte(`{"nextSeq":2,"items":[{"id":"old-1","labelCode":"PN-002","name":"Old PBS","location":"4°C","revision":1}]}`), 0o644)
+	_ = os.WriteFile(filepath.Join(migDir, "pantry-meta.json"), []byte(`{"old-1":{"catalogNo":"Gibco 10010","boxId":"old-box","boxSlot":"B3"}}`), 0o644)
+	_ = os.WriteFile(filepath.Join(migDir, "pantry-boxes.json"), []byte(`[{"id":"old-box","name":"4C 管架","kind":"tube_rack_15ml","zoneKey":"4C","rows":5,"cols":5}]`), 0o644)
+
+	migrated, err := loadPantryStore(migDir)
+	if err != nil {
+		t.Fatalf("loadPantryStore legacy migration: %v", err)
+	}
+	if len(migrated.Items) != 1 || migrated.Items[0].Name != "Old PBS" || len(migrated.Boxes) != 1 || migrated.Meta["old-1"].CatalogNo != "Gibco 10010" {
+		t.Fatalf("unexpected migrated store: %+v", migrated)
+	}
+	if _, err := os.Stat(filepath.Join(migDir, pantryJSONLFileName)); err != nil {
+		t.Fatalf("expected pantry.jsonl written during migration: %v", err)
 	}
 }

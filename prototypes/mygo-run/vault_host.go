@@ -774,7 +774,7 @@ func computeVaultDiskSignatures(vaultRoot string) (vaultSig, pantrySig string) {
 	vaultSig = hex.EncodeToString(vh.Sum(nil))
 
 	ph := sha256.New()
-	for _, fname := range []string{"pantry-ledger.json", "pantry-meta.json", "pantry-boxes.json"} {
+	for _, fname := range []string{pantryJSONLFileName, "pantry-ledger.json", "pantry-meta.json", "pantry-boxes.json"} {
 		p := filepath.Join(vaultRoot, vault.SystemDirName, fname)
 		if info, err := os.Stat(p); err == nil {
 			fmt.Fprintf(ph, "%s:%d:%d\n", fname, info.Size(), info.ModTime().UnixNano())

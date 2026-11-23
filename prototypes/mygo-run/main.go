@@ -4313,14 +4313,6 @@ func (a *app) applyAsterPlateToDesign(source, plateID string) {
 	}
 }
 
-func (a *app) pantryMetaPath() string {
-	dir := a.pantryDataDir()
-	if dir == "" {
-		return ""
-	}
-	return filepath.Join(dir, "pantry-meta.json")
-}
-
 func (a *app) pantryManualsDir() string {
 	dir := a.pantryDataDir()
 	if dir == "" {
@@ -4329,49 +4321,28 @@ func (a *app) pantryManualsDir() string {
 	return filepath.Join(dir, "pantry-manuals")
 }
 
-func (a *app) pantryBoxesPath() string {
-	dir := a.pantryDataDir()
-	if dir == "" {
-		return ""
-	}
-	return filepath.Join(dir, "pantry-boxes.json")
-}
-
 func (a *app) loadPantryBoxes() ([]tools.PantryBox, error) {
-	path := a.pantryBoxesPath()
-	if path == "" {
+	store, err := loadPantryStore(a.pantryDataDir())
+	if err != nil {
+		return nil, err
+	}
+	if store.Boxes == nil {
 		return []tools.PantryBox{}, nil
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []tools.PantryBox{}, nil
-		}
-		return nil, err
-	}
-	var out []tools.PantryBox
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = []tools.PantryBox{}
-	}
-	return out, nil
+	return store.Boxes, nil
 }
 
 func (a *app) savePantryBoxes(boxes []tools.PantryBox) error {
-	path := a.pantryBoxesPath()
-	if path == "" {
+	dir := a.pantryDataDir()
+	if dir == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(boxes, "", "  ")
+	store, err := loadPantryStore(dir)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, raw, 0644); err != nil {
+	store.Boxes = append([]tools.PantryBox(nil), boxes...)
+	if err := savePantryStore(dir, store); err != nil {
 		return err
 	}
 	a.syncShellOutlineAndPantry()
@@ -4379,40 +4350,33 @@ func (a *app) savePantryBoxes(boxes []tools.PantryBox) error {
 }
 
 func (a *app) loadPantryMeta() (map[string]tools.PantryItemMeta, error) {
-	path := a.pantryMetaPath()
-	if path == "" {
+	store, err := loadPantryStore(a.pantryDataDir())
+	if err != nil {
+		return nil, err
+	}
+	if store.Meta == nil {
 		return map[string]tools.PantryItemMeta{}, nil
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]tools.PantryItemMeta{}, nil
-		}
-		return nil, err
-	}
-	var out map[string]tools.PantryItemMeta
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = map[string]tools.PantryItemMeta{}
-	}
-	return out, nil
+	return store.Meta, nil
 }
 
 func (a *app) savePantryMeta(meta map[string]tools.PantryItemMeta) error {
-	path := a.pantryMetaPath()
-	if path == "" {
+	dir := a.pantryDataDir()
+	if dir == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(meta, "", "  ")
+	store, err := loadPantryStore(dir)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, raw, 0644)
+	clean := map[string]tools.PantryItemMeta{}
+	for k, v := range meta {
+		if !isEmptyPantryMeta(v) {
+			clean[k] = v
+		}
+	}
+	store.Meta = clean
+	return savePantryStore(dir, store)
 }
 
 func sanitizePantryToken(s string) string {

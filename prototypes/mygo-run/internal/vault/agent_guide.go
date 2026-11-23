@@ -23,9 +23,11 @@ const DefaultVaultAgentGuide = `# AsterLab Vault · AI Agent 协作指南
 - ` + "`templates/*.asterml`" + `：无日期复用模板（不会出现在实验日程日历中）。
 - ` + "`assets/`" + `：实验图片与附件（文档内使用相对路径引用）。
 - ` + "`.asterlab/`" + `：本 Vault 独立配置与**储藏室试剂台账**（随 Vault 同步与隔离）：
-  - ` + "`.asterlab/pantry-ledger.json`" + `：在库试剂主台账（JSON，` + "`items[]`" + ` 含 ` + "`id, name, location, purchasedOn, openedOn, shelfLifeDays, status`" + `）。
-  - ` + "`.asterlab/pantry-meta.json`" + `：试剂扩展档案（货号 ` + "`catalogNo`" + `、批号 ` + "`lotNo`" + `、容器贴纸 ` + "`vesselId`" + `、盒内坐标 ` + "`boxId/boxSlot`" + `、说明书路径）。
-  - ` + "`.asterlab/pantry-boxes.json`" + `：冻存盒 / EP 管盒 / 离心管架 / 96 孔 PCR 盒空间定义（` + "`id, name, kind, zoneKey, rows, cols`" + `）。
+  - ` + "`.asterlab/pantry.jsonl`" + `：单文件 JSONL 储藏室总账（每行一个 JSON 对象，按 ` + "`type + id`" + ` 排序，云盘/Git 同步友好）：
+    - ` + "`{\"type\":\"schema\",\"version\":1}`" + `
+    - ` + "`{\"type\":\"box\",\"id\":\"...\",\"name\":\"冻存盒 #1\",\"kind\":\"cryobox_9x9\",\"zoneKey\":\"-80\",\"rows\":9,\"cols\":9}`" + `
+    - ` + "`{\"type\":\"reagent\",\"id\":\"...\",\"labelCode\":\"PN-001\",\"name\":\"Vancomycin\",\"location\":\"-20°C\",\"purchasedOn\":\"2026-11-23\",\"shelfLifeDays\":365,\"revision\":1,\"meta\":{\"catalogNo\":\"...\",\"lotNo\":\"...\",\"boxId\":\"...\",\"boxSlot\":\"A1\"}}`" + `
+  - ` + "`.asterlab/pantry-manuals/`" + `：上传的试剂说明书 PDF / COA / SDS 与自定义贴纸图片。
 
 ## 2. AsterML v2.1 编写规范
 
