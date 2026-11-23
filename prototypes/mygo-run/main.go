@@ -4845,6 +4845,9 @@ func main() {
 		OnRemoveRecentVault: func(vaultPath string) {
 			a.removeRecentVault(vaultPath)
 		},
+		OnSetFolderTemplate: func(folderRel, templateRel string) {
+			a.setFolderDefaultTemplate(folderRel, templateRel)
+		},
 		OnToggleHideAssets: func(hide bool) {
 			if a.vault != nil {
 				a.vault.Config.HideAssetsInTree = hide
@@ -4925,6 +4928,32 @@ func main() {
 				OnRun: func() {
 					if a.shell != nil {
 						a.shell.SetRightDrawer(true, 1)
+					}
+				},
+			},
+			{
+				ID:       "pantry-new-box",
+				Title:    "新建储藏室冻存盒 / 离心管架",
+				Subtitle: "打开储藏室并新建 -80°C 冻存盒、EP 管盒或离心管架",
+				OnRun: func() {
+					if a.shell != nil {
+						a.shell.OpenPantryTab()
+					}
+					if a.tools != nil {
+						a.tools.OpenNewBoxDialog("-80")
+					}
+				},
+			},
+			{
+				ID:       "pantry-new-reagent",
+				Title:    "新增储藏室试剂 / 生物样本",
+				Subtitle: "打开储藏室并录入新试剂、细胞株、菌株或质粒档案",
+				OnRun: func() {
+					if a.shell != nil {
+						a.shell.OpenPantryTab()
+					}
+					if a.tools != nil {
+						a.tools.OpenNewPantryDialog("")
 					}
 				},
 			},

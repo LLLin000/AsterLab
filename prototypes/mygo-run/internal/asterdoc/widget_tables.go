@@ -419,8 +419,10 @@ func (v *View) renderParamTable(c *ui.Context, data map[string]any) {
 }
 
 func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID, title string, rows []map[string]any, editableDesign bool) {
-	renderUnifiedModuleShell(v, c, lucide.SlidersHorizontal(), moduleID, title, fmt.Sprintf("%d 项条件", len(rows)), editableDesign, nil, func() {
-		ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+	// UI-05: Compact high-density parameter strip (saves ~45% vertical height while preserving
+	// all SciGraph bindings, editable values/units, and actual-vs-planned tracking).
+	renderUnifiedModuleShell(v, c, lucide.SlidersHorizontal(), moduleID, title, fmt.Sprintf("%d 项", len(rows)), editableDesign, nil, func() {
+		ui.Column(c).FillWidth().Gap(2).Children(func() {
 
 		for idx, rm := range rows {
 			idx, rm := idx, rm
@@ -444,14 +446,16 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 			}
 
 			rowBox := ui.Row(c.Key(fmt.Sprintf("live-pt:%s:%d:%s", moduleID, idx, key))).FillWidth().
-				Padding(float32(tok.Spacing4)*1.5, float32(tok.Spacing4)).
+				Padding(2, float32(tok.Spacing4)).
 				Radius(float32(tok.ControlRadius)).
 				AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).
 				Transition(theme.AccordionTransition())
 			rowHover := rowBox.Hovered()
+			targetRowBg := ui.Transparent
 			if rowHover {
-				rowBox.Background(tok.Text.Alpha(0.03))
+				targetRowBg = tok.Text.Alpha(0.03)
 			}
+			rowBox.Background(rowBox.AnimateColor("ptrow-bg", targetRowBg, theme.MotionSnappy))
 			rowBox.Children(func() {
 				// Column 1: Parameter label (+ optional pantry badge)
 				ui.Row(c).Grow(1).MinWidth(float32(tok.Spacing48)*2.0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {

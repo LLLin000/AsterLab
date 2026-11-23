@@ -54,6 +54,8 @@ type Config struct {
 	DefaultPlateFormat  int               `json:"defaultPlateFormat,omitempty"`
 	DefaultExcessPct    int               `json:"defaultExcessPct,omitempty"`
 	AutoArchiveAssets   *bool             `json:"autoArchiveAssets,omitempty"`
+	TemplatesDir        string            `json:"templatesDir,omitempty"`
+	FolderTemplates     map[string]string `json:"folderTemplates,omitempty"`
 	Hotkeys             map[string]string `json:"hotkeys,omitempty"`
 	MobilePullAction    string            `json:"mobilePullAction,omitempty"` // palette | new_exp | calc | tree
 	MobileAutoHideDock  *bool             `json:"mobileAutoHideDock,omitempty"`

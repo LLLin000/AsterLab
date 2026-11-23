@@ -204,6 +204,7 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 	if a.shell != nil {
 		a.shell.Error = ""
 		a.shell.VaultPathInput = v.Root
+		a.shell.FolderTemplates = v.Config.FolderTemplates
 		a.shell.VaultLauncherSeedDemo = true
 		if firstRunNoVault {
 			a.shell.VaultLauncherOpen = true
@@ -418,6 +419,12 @@ func (a *app) openNewExperimentDialog(folderRel, dateYMD string) {
 	a.newExpFolder = folderRel
 	a.newExpTitle = ""
 	a.newExpDate = strings.TrimSpace(dateYMD)
+	// UI-10: Auto-apply folder's bound default template from `.asterlab/config.json` when configured.
+	if a.vault != nil && a.vault.Config.FolderTemplates != nil {
+		if boundTpl := strings.TrimSpace(a.vault.Config.FolderTemplates[folderRel]); boundTpl != "" {
+			a.newExpTemplate = boundTpl
+		}
+	}
 	if a.newExpTemplate == "" {
 		a.newExpTemplate = "templates/空白实验.asterml"
 	}
@@ -860,6 +867,29 @@ func (a *app) removeRecentVault(vaultPath string) {
 	prefs.RecentVaults = kept
 	saveVaultPrefs(prefs)
 	a.syncRecentVaultsToShell()
+}
+
+func (a *app) setFolderDefaultTemplate(folderRel, templateRel string) {
+	if a.vault == nil {
+		return
+	}
+	folderRel = strings.TrimSpace(folderRel)
+	if folderRel == "" {
+		return
+	}
+	if a.vault.Config.FolderTemplates == nil {
+		a.vault.Config.FolderTemplates = map[string]string{}
+	}
+	templateRel = strings.TrimSpace(templateRel)
+	if templateRel == "" {
+		delete(a.vault.Config.FolderTemplates, folderRel)
+	} else {
+		a.vault.Config.FolderTemplates[folderRel] = templateRel
+	}
+	_ = a.vault.SaveConfig()
+	if a.shell != nil {
+		a.shell.FolderTemplates = a.vault.Config.FolderTemplates
+	}
 }
 
 // computeVaultDiskSignatures hashes the directory structure + file mtimes/sizes of

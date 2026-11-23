@@ -160,23 +160,25 @@ func (a *app) resolveDevFeedbackDir() (string, error) {
 		}
 	}
 	var candidates []string
-	// 1. Right beside asterlab-dev executable (always visible, writable, immune to Desktop/OneDrive DLP)
+	// 1. OS user cache directory (~/Library/Caches/AsterLab/beta-feedback on macOS,
+	//    %LOCALAPPDATA%\AsterLab\beta-feedback on Windows): standard per-user cache,
+	//    never pollutes the user's scientific Vault (.asterlab) or macOS .app bundle!
+	if cacheDir, err := os.UserCacheDir(); err == nil && strings.TrimSpace(cacheDir) != "" {
+		candidates = append(candidates, filepath.Join(cacheDir, "AsterLab", "beta-feedback"))
+	}
+	// 2. OS temp dir fallback (always writable on standard Windows/macOS/Linux installs)
+	if tmpDir := strings.TrimSpace(os.TempDir()); tmpDir != "" {
+		candidates = append(candidates, filepath.Join(tmpDir, "AsterLab-BetaFeedback"))
+	}
+	// 3. Beside executable ONLY when not inside a macOS .app bundle (handles corporate Windows DLP
+	//    like aTrust that blocks unsigned exe writes to C:\Users\* while allowing sibling dir writes)
 	if exePath, err := os.Executable(); err == nil && strings.TrimSpace(exePath) != "" {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exePath), "feedback"))
+		exeDir := filepath.Dir(exePath)
+		slashDir := filepath.ToSlash(exeDir)
+		if !strings.Contains(slashDir, ".app/Contents/MacOS") {
+			candidates = append(candidates, filepath.Join(exeDir, "feedback"))
+		}
 	}
-	// 2. Inside active Vault `.asterlab/dev-feedback`
-	if a.vault != nil && strings.TrimSpace(a.vault.Root) != "" {
-		candidates = append(candidates, filepath.Join(a.vault.Root, ".asterlab", "dev-feedback"))
-	}
-	// 3. App data dir
-	if dataDir := workspaceDataDir(); strings.TrimSpace(dataDir) != "" {
-		candidates = append(candidates, filepath.Join(dataDir, "dev-feedback"))
-	}
-	if localApp := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localApp != "" {
-		candidates = append(candidates, filepath.Join(localApp, "AsterLab", "dev-feedback"))
-	}
-	// 4. Temp fallback
-	candidates = append(candidates, filepath.Join(os.TempDir(), "AsterLab-DevFeedback"))
 
 	dir, err := devfeedback.ResolveWritableOutputDir(candidates...)
 	if err == nil {

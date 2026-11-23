@@ -1697,13 +1697,18 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 		}
 	}
 
-	timerWrap := ui.Column(c.Key("live-tm:"+moduleID)).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-		Radius(float32(tok.ControlRadius)).Background(tok.Elevated.Alpha(0.55)).Gap(float32(tok.Spacing8))
+	// UI-08: Sleek compact inline timer pill (no bulky 70px full-width gray slab)
+	timerWrap := ui.Column(c.Key("live-tm:"+moduleID)).AlignSelf(ui.Start).
+		Padding(float32(tok.Spacing4)+1, float32(tok.Spacing12)).
+		Radius(float32(tok.ControlRadius)).
+		Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing4))
 	targetClockCol := tok.Text
 	if inlineStatus == "running" {
 		targetClockCol = tok.Accent
+		timerWrap.Background(tok.AccentSoftBg.Alpha(0.55)).Border(1, tok.Accent.Alpha(0.45))
 	} else if inlineStatus == "completed" {
 		targetClockCol = tok.Success
+		timerWrap.Border(1, tok.Success.Alpha(0.45))
 	}
 	clockCol := timerWrap.AnimateColor("tm-col", targetClockCol, theme.MotionSnappy)
 	phases := mapSlice(data["phases"])
@@ -1715,16 +1720,16 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 	schedWin := textValue(data, "schedule_window")
 
 	timerWrap.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).Children(func() {
-			ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(clockCol)
-			ui.Text(c, formatClockHMS(displaySec)).FontSize(float32(tok.TextSection)).Bold().
+		ui.Row(c).AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(clockCol)
+			ui.Text(c, formatClockHMS(displaySec)).FontSize(float32(tok.TextData)).Bold().
 				TextColor(clockCol).
 				FontFeatures("tnum").
 				ContentTransition(theme.NumericRoll(isCountdown))
 			if editableDesign {
 				renderInlineEditableTitle(v, c, moduleID, title, true)
 			} else {
-				ui.Text(c, FormatDisplayText(title)).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+				ui.Text(c, FormatDisplayText(title)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
 			}
 
 			// Inline editable duration/mode in Edit mode (borderless quiet inputs)

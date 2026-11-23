@@ -34,6 +34,13 @@ type PantryManual struct {
 // PantryItemMeta persists rich UI & documentation metadata per PantryItem.ID
 // alongside Core's authoritative PantryLedger without changing native FFI structs.
 type PantryItemMeta struct {
+	ItemType         string              `json:"itemType,omitempty"` // ""|"reagent" | "biosample" (cells/strains/plasmids/tissues)
+	SampleKind       string              `json:"sampleKind,omitempty"`
+	Passage          string              `json:"passage,omitempty"`
+	FrozenOn         string              `json:"frozenOn,omitempty"`
+	CryoMedium       string              `json:"cryoMedium,omitempty"`
+	Concentration    string              `json:"concentration,omitempty"`
+	Operator         string              `json:"operator,omitempty"`
 	VesselID         labsticker.VesselID `json:"vesselId,omitempty"`
 	CustomStickerRel string              `json:"customStickerRel,omitempty"`
 	CatalogNo        string              `json:"catalogNo,omitempty"`
@@ -1024,59 +1031,151 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 							}
 						}
 
-						// Right structured identity + stock fields
+						// Right structured identity + stock fields (UI-12: Dual-mode Reagent vs Biosample/Cell/Strain)
+						isBio := w.pantryDraftMeta.ItemType == "biosample"
 						ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(2)).Children(func() {
-							ui.Row(c).FillWidth().Gap(t.Space(2)).AlignItems(ui.End).Children(func() {
-								ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
-									ui.Text(c, "试剂 / 耗材名称 *").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-									components.TextBox(c, &w.PantryName, components.TextBoxOptions{}).
-										Placeholder("例如：SYBR Green Premix Ex Taq (2×)")
-								})
-								ui.Column(c).Gap(t.Space(1)).Children(func() {
-									ui.Text(c, "在库状态").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-									// NOTE: Do NOT use components.Tabs inside components.Dialog — Onevra's
-									// Tabs.Draw captures a frame-local ui.Element for slideBehind(), which
-									// panics ("element from pass N used in pass M") during Dialog's exit transition.
-									ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
-										Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
-										for idx, lbl := range []string{"未开封", "已开封", "已用尽"} {
-											idx, lbl := idx, lbl
-											active := w.pantryStatusIdx == idx
-											bg, fg := ui.Transparent, tok.TextMuted
-											if active {
-												bg, fg = tok.AccentSoftBg, tok.Accent
-											}
-											seg := ui.ButtonBase(c.Key(fmt.Sprintf("pantry-status-%d", idx))).Label(lbl).
-												Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-												Radius(float32(tok.ControlRadius) - 1).Background(bg).
-												OnClick(func() { w.pantryStatusIdx = idx })
-											seg.Children(func() {
-												txt := ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
-												if active {
-													txt.Bold()
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+								ui.Text(c, "条目类型").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+									Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
+									for _, opt := range []struct{ key, lbl string }{
+										{"reagent", "试剂 / 耗材"},
+										{"biosample", "生物样本（细胞 / 菌株 / 质粒）"},
+									} {
+										opt := opt
+										active := (opt.key == "biosample") == isBio
+										bg, fg := ui.Transparent, tok.TextMuted
+										if active {
+											bg, fg = tok.AccentSoftBg, tok.Accent
+										}
+										btn := ui.ButtonBase(c.Key("pantry-type-"+opt.key)).Label(opt.lbl).
+											Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+											Radius(float32(tok.ControlRadius) - 1).Background(bg).
+											OnClick(func() {
+												w.pantryDraftMeta.ItemType = opt.key
+												if opt.key == "biosample" && w.pantryDraftMeta.SampleKind == "" {
+													w.pantryDraftMeta.SampleKind = "细胞株"
 												}
 											})
-										}
+										btn.Children(func() {
+											txt := ui.Text(c, opt.lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+											if active {
+												txt.Bold()
+											}
+										})
+									}
+								})
+							})
+
+							ui.Row(c).FillWidth().Gap(t.Space(2)).AlignItems(ui.End).Children(func() {
+								ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									nameLbl := "试剂 / 耗材名称 *"
+									namePH := "例如：SYBR Green Premix Ex Taq (2×)"
+									if isBio {
+										nameLbl = "细胞株 / 菌株 / 样本名称 *"
+										namePH = "例如：HUVEC / S. aureus ATCC 25923 / pEGFP-N1"
+									}
+									ui.Text(c, nameLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+									components.TextBox(c, &w.PantryName, components.TextBoxOptions{}).
+										Placeholder(namePH)
+								})
+								if !isBio {
+									ui.Column(c).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "在库状态").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										// NOTE: Do NOT use components.Tabs inside components.Dialog — Onevra's
+										// Tabs.Draw captures a frame-local ui.Element for slideBehind(), which
+										// panics ("element from pass N used in pass M") during Dialog's exit transition.
+										ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+											Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
+											for idx, lbl := range []string{"未开封", "已开封", "已用尽"} {
+												idx, lbl := idx, lbl
+												active := w.pantryStatusIdx == idx
+												bg, fg := ui.Transparent, tok.TextMuted
+												if active {
+													bg, fg = tok.AccentSoftBg, tok.Accent
+												}
+												seg := ui.ButtonBase(c.Key(fmt.Sprintf("pantry-status-%d", idx))).Label(lbl).
+													Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+													Radius(float32(tok.ControlRadius) - 1).Background(bg).
+													OnClick(func() { w.pantryStatusIdx = idx })
+												seg.Children(func() {
+													txt := ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+													if active {
+														txt.Bold()
+													}
+												})
+											}
+										})
+									})
+								} else {
+									ui.Column(c).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "样本类别").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+											Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
+											for _, sk := range []string{"细胞株", "菌株", "质粒", "组织"} {
+												sk := sk
+												active := w.pantryDraftMeta.SampleKind == sk
+												bg, fg := ui.Transparent, tok.TextMuted
+												if active {
+													bg, fg = tok.AccentSoftBg, tok.Accent
+												}
+												seg := ui.ButtonBase(c.Key("pantry-sk-"+sk)).Label(sk).
+													Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+													Radius(float32(tok.ControlRadius) - 1).Background(bg).
+													OnClick(func() { w.pantryDraftMeta.SampleKind = sk })
+												seg.Children(func() {
+													txt := ui.Text(c, sk).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+													if active {
+														txt.Bold()
+													}
+												})
+											}
+										})
+									})
+								}
+							})
+							if !isBio {
+								ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+									ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "品牌与货号 (Catalog #)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										components.TextBox(c, &w.pantryDraftMeta.CatalogNo, components.TextBoxOptions{}).
+											Placeholder("如 Takara RR820A")
+									})
+									ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "批次号 (Lot #)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										components.TextBox(c, &w.pantryDraftMeta.LotNo, components.TextBoxOptions{}).
+											Placeholder("如 AJF1042A")
+									})
+									ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "货架标签说明").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										components.TextBox(c, &w.pantryDraftMeta.VolumeNote, components.TextBoxOptions{}).
+											Placeholder("如 2 mL · 余 40%")
 									})
 								})
-							})
-							ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
-								ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
-									ui.Text(c, "品牌与货号 (Catalog #)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-									components.TextBox(c, &w.pantryDraftMeta.CatalogNo, components.TextBoxOptions{}).
-										Placeholder("如 Takara RR820A")
+							} else {
+								ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+									ui.Column(c).Width(float32(tok.Spacing48)*1.8).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "代次 (Passage)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										components.TextBox(c, &w.pantryDraftMeta.Passage, components.TextBoxOptions{}).
+											Placeholder("如 P4 / 原代")
+									})
+									ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "冻存液 / 保护体系").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										components.TextBox(c, &w.pantryDraftMeta.CryoMedium, components.TextBoxOptions{}).
+											Placeholder("如 90% FBS + 10% DMSO / 25% 甘油")
+									})
+									ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "浓度 / 细胞数").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										components.TextBox(c, &w.pantryDraftMeta.Concentration, components.TextBoxOptions{}).
+											Placeholder("如 1×10⁶ cells/mL · 1 mL")
+									})
+									ui.Column(c).Width(float32(tok.Spacing48)*2.0).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "冻存人 / 来源").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										components.TextBox(c, &w.pantryDraftMeta.Operator, components.TextBoxOptions{}).
+											Placeholder("如 小林 / ATCC")
+									})
 								})
-								ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
-									ui.Text(c, "批次号 (Lot #)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-									components.TextBox(c, &w.pantryDraftMeta.LotNo, components.TextBoxOptions{}).
-										Placeholder("如 AJF1042A")
-								})
-								ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
-									ui.Text(c, "货架标签说明").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-									components.TextBox(c, &w.pantryDraftMeta.VolumeNote, components.TextBoxOptions{}).
-										Placeholder("如 2 mL · 余 40%")
-								})
-							})
+							}
 						})
 					})
 

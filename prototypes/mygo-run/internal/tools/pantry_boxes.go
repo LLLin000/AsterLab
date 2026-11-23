@@ -883,10 +883,20 @@ func (w *Workspace) OpenNewPantryDialogInBox(box PantryBox, slot string) {
 	}
 	w.clearPantryForm()
 	w.PantryLocation = FormatBoxLocation(box.ZoneKey, box.Name, norm)
+	itemType := "reagent"
+	sampleKind := ""
+	if box.Kind == BoxCryo9x9 || box.Kind == BoxCryo10x10 || box.ZoneKey == "-80" {
+		// UI-12: Cryo boxes primarily store frozen cells, bacterial strains, plasmids, or tissue samples.
+		itemType = "biosample"
+		sampleKind = "细胞株"
+	}
 	w.pantryDraftMeta = PantryItemMeta{
-		VesselID: spec.DefaultTubeVessel,
-		BoxID:    box.ID,
-		BoxSlot:  norm,
+		ItemType:   itemType,
+		SampleKind: sampleKind,
+		FrozenOn:   time.Now().Format("2006-01-02"),
+		VesselID:   spec.DefaultTubeVessel,
+		BoxID:      box.ID,
+		BoxSlot:    norm,
 	}
 	w.pantryStatusIdx = 0
 	w.pantryPickerOpen = false

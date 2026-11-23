@@ -84,10 +84,63 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Icon(c, lucide.Search()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+				ph := "搜索实验 (.asterml)、试剂/样本或快捷命令…"
+				if s.PaletteMode == "files" {
+					ph = "快速切换：搜索实验文档 (.asterml) 或储藏室试剂 / 样本…"
+				} else if s.PaletteMode == "commands" {
+					ph = "命令面板：输入操作名称（如 新建、模板、冻存盒、导出、切库）…"
+				}
 				inp := ui.TextInputBase(c, &s.PaletteQuery).FillWidth().FontSize(float32(tok.TextBody)).TextColor(tok.Text).
-					Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).Placeholder("搜索实验 (.asterml)、试剂批号或快捷命令…").
+					Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).Placeholder(ph).
 					Grow(1).MinWidth(0)
+				// UI-15: Handle Enter / Up / Down directly on the focused TextInput so pressing Enter
+				// always executes the highlighted command or file immediately!
+				inp.OnTextKey(func(k ui.TextKey) bool {
+					if len(entries) == 0 {
+						return false
+					}
+					switch k.Key {
+					case ui.KeyDown:
+						s.PaletteCursor = (s.PaletteCursor + 1) % len(entries)
+						return true
+					case ui.KeyUp:
+						s.PaletteCursor = (s.PaletteCursor - 1 + len(entries)) % len(entries)
+						return true
+					case ui.KeyEnter:
+						chosen := entries[s.PaletteCursor]
+						s.executePaletteEntry(chosen, k.Mods&ui.Cmd != 0)
+						open = false
+						return true
+					}
+					return false
+				})
 				inp.AutoFocus()
+
+				// Compact mode switcher chips (Obsidian Ctrl+O vs Ctrl+P separation — UI-14)
+				for _, m := range []struct{ key, lbl string }{
+					{"", "全部"},
+					{"files", "文件/储藏室"},
+					{"commands", "命令"},
+				} {
+					m := m
+					active := s.PaletteMode == m.key
+					bg, fg := ui.Transparent, tok.TextMuted
+					if active {
+						bg, fg = tok.AccentSoftBg, tok.Accent
+					}
+					chip := ui.ButtonBase(c.Key("pal-mode-"+m.key)).Label(m.lbl).
+						Padding(2, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+						Background(bg).Shrink(0).OnClick(func() {
+						s.PaletteMode = m.key
+						s.PaletteCursor = 0
+					})
+					chip.Children(func() {
+						txt := ui.Text(c, m.lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+						if active {
+							txt.Bold()
+						}
+					})
+				}
 			})
 
 			ui.Divider(c)
@@ -230,43 +283,51 @@ func (s *Shell) executePaletteEntry(entry paletteEntry, split bool) {
 func (s *Shell) buildPaletteEntries() []paletteEntry {
 	q := strings.ToLower(strings.TrimSpace(s.PaletteQuery))
 	var out []paletteEntry
+	includeFiles := s.PaletteMode != "commands"
+	includeCommands := s.PaletteMode != "files"
 
-	// 1. Experiments
-	for _, exp := range s.resolvedExperiments() {
-		exp := exp
-		sub := fmt.Sprintf("%s · %s", firstNonEmptyStr(exp.Date, s.resolvedToday().Format("2006-01-02")), StageLabel(exp.Stage))
-		if exp.Summary != "" {
-			sub += " · " + exp.Summary
+	if includeFiles {
+		// 1. Experiments
+		for _, exp := range s.resolvedExperiments() {
+			exp := exp
+			sub := fmt.Sprintf("%s · %s", firstNonEmptyStr(exp.Date, s.resolvedToday().Format("2006-01-02")), StageLabel(exp.Stage))
+			if exp.Summary != "" {
+				sub += " · " + exp.Summary
+			}
+			if q != "" && !strings.Contains(strings.ToLower(exp.Title+" "+sub), q) {
+				continue
+			}
+			out = append(out, paletteEntry{
+				kind:     paletteExperiment,
+				key:      "exp-" + exp.ID,
+				title:    exp.Title,
+				subtitle: sub,
+				exp:      &exp,
+			})
 		}
-		if q != "" && !strings.Contains(strings.ToLower(exp.Title+" "+sub), q) {
-			continue
+
+		// 2. Pantry reagents & biosamples
+		for _, p := range s.PantryItems {
+			stLabel, _ := pantryQuickStatusBadge(p.Status)
+			sub := fmt.Sprintf("%s · %s", p.Location, stLabel)
+			if p.ExpiresOn != "" {
+				sub += " · 效期 " + p.ExpiresOn
+			}
+			if q != "" && !strings.Contains(strings.ToLower(p.Name+" "+sub+" "+p.LotNumber), q) {
+				continue
+			}
+			out = append(out, paletteEntry{
+				kind:     palettePantry,
+				key:      "pan-" + p.ID,
+				title:    p.Name,
+				subtitle: sub,
+				pantryID: p.ID,
+			})
 		}
-		out = append(out, paletteEntry{
-			kind:     paletteExperiment,
-			key:      "exp-" + exp.ID,
-			title:    exp.Title,
-			subtitle: sub,
-			exp:      &exp,
-		})
 	}
 
-	// 2. Pantry reagents
-	for _, p := range s.PantryItems {
-		stLabel, _ := pantryQuickStatusBadge(p.Status)
-		sub := fmt.Sprintf("%s · %s", p.Location, stLabel)
-		if p.ExpiresOn != "" {
-			sub += " · 效期 " + p.ExpiresOn
-		}
-		if q != "" && !strings.Contains(strings.ToLower(p.Name+" "+sub+" "+p.LotNumber), q) {
-			continue
-		}
-		out = append(out, paletteEntry{
-			kind:     palettePantry,
-			key:      "pan-" + p.ID,
-			title:    p.Name,
-			subtitle: sub,
-			pantryID: p.ID,
-		})
+	if !includeCommands {
+		return out
 	}
 
 	// 3. Host context actions + Built-in workspace commands
@@ -287,6 +348,20 @@ func (s *Shell) buildPaletteEntries() []paletteEntry {
 			kind: paletteAction, key: "cmd-new", title: "新建实验",
 			subtitle: "在当前项目与日期新建 .asterml 实验文档", shortcut: s.HotkeyDisplay("vault.new_exp"),
 			runAct: func() { s.triggerCreateForDate(s.ensureSelectedDate()) },
+		},
+		paletteEntry{
+			kind: paletteAction, key: "cmd-apply-template", title: "从模板新建 / 套用模板…",
+			subtitle: "选择 templates/ 文件夹中的任意实验模板新建文档",
+			runAct: func() {
+				if s.OnOpenTemplatePicker != nil {
+					s.OnOpenTemplatePicker(s.ensureSelectedDate())
+				}
+			},
+		},
+		paletteEntry{
+			kind: paletteAction, key: "cmd-vault-launcher", title: "切换 / 管理本地实验库 (Vault)…",
+			subtitle: "新建实验库、切换已有文件夹或管理最近打开的实验库",
+			runAct: func() { s.openVaultLauncher() },
 		},
 		paletteEntry{
 			kind: paletteAction, key: "cmd-global-search", title: "Vault 全局全文搜索",
