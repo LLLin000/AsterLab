@@ -1,0 +1,17 @@
+[Unit]
+Description=AsterLab Beta Feedback Intake Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/kandev-ready-feeder.env
+EnvironmentFile=/etc/asterlab-feedback-relay.env
+ExecStart=/usr/local/bin/asterlab-feedback-relay
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

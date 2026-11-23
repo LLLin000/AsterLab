@@ -4637,7 +4637,9 @@ func main() {
 	exeDir := filepath.Dir(exePath)
 	rollbackNotice := updater.EvaluateStartupWatchdog(workspaceDataDir(), updater.Version, exeDir)
 	if dir := workspaceDataDir(); dir != "" {
-		_ = diag.Init(filepath.Join(dir, "logs"))
+		logDir := filepath.Join(dir, "logs")
+		_ = diag.Init(logDir)
+		_ = diag.EnableFatalCrashCapture(logDir)
 		defer diag.Close()
 	}
 	defer diag.RecoverAndLog("main")
@@ -4833,6 +4835,15 @@ func main() {
 		},
 		OnSwitchVaultPath: func(newPath string) {
 			a.switchVaultRoot(newPath)
+		},
+		OnCreateVault: func(targetPath string, seedDemo bool) error {
+			return a.createVaultAt(targetPath, seedDemo)
+		},
+		OnOpenSandboxVault: func() {
+			a.openSandboxVault()
+		},
+		OnRemoveRecentVault: func(vaultPath string) {
+			a.removeRecentVault(vaultPath)
 		},
 		OnToggleHideAssets: func(hide bool) {
 			if a.vault != nil {

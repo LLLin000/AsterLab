@@ -218,6 +218,13 @@ type Shell struct {
 	VaultPathInput        string
 	HideAssetsInTree      bool
 	TrashItems            []vault.TrashItem
+	VaultLauncherOpen     bool
+	VaultLauncherName     string
+	VaultLauncherParent   string
+	VaultLauncherSeedDemo bool
+	VaultLauncherErr      string
+	IsTempSandboxVault    bool
+	RecentVaults          []RecentVaultEntry
 	folderOpen            map[string]bool
 	renamingRelPath       string
 	renameDraft           string
@@ -287,6 +294,9 @@ type Shell struct {
 	OnRevealInExplorer     func(relPath string)
 	OnPickVaultPath        func() string
 	OnSwitchVaultPath      func(newPath string)
+	OnCreateVault          func(targetPath string, seedDemo bool) error
+	OnOpenSandboxVault     func()
+	OnRemoveRecentVault    func(vaultPath string)
 	OnToggleHideAssets     func(hide bool)
 	OnSettingsChanged         func()
 	OnUndo                    func()

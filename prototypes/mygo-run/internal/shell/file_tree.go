@@ -134,6 +134,7 @@ func (s *Shell) renderFileTreePane(c *ui.Context, tok theme.Tokens) {
 	})
 	ui.Divider(c)
 	s.renderFileTreeScrollBody(c, tok)
+	s.renderVaultSwitcherFooter(c, tok)
 }
 
 func (s *Shell) renderFileTreeScrollBody(c *ui.Context, tok theme.Tokens) {
@@ -548,6 +549,7 @@ func (s *Shell) renderVaultDialogs(c *ui.Context) {
 		s.newFolderDialogOpen = open
 	}
 
+	s.renderVaultLauncherDialog(c)
 	if s.VaultSettingsOpen {
 		s.renderObsidianSettingsDialog(c)
 	}

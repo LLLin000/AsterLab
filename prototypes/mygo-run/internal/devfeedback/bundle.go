@@ -39,6 +39,7 @@ type RegionHint struct {
 type SessionMeta struct {
 	SessionID   string  `json:"session_id"`
 	ExportedAt  string  `json:"exported_at"`
+	TesterName  string  `json:"tester_name,omitempty"`
 	AppVersion  string  `json:"app_version"`
 	Commit      string  `json:"commit"`
 	OS          string  `json:"os"`
@@ -52,6 +53,8 @@ type SessionMeta struct {
 	ActiveFile  string  `json:"active_file,omitempty"`
 	ActiveMode  string  `json:"active_mode,omitempty"`
 	PageName    string  `json:"page_name,omitempty"`
+	HasCrashLog bool    `json:"has_crash_log,omitempty"`
+	CrashLog    string  `json:"-"`
 }
 
 // Issue is a single developer-annotated UI defect / suggestion.
@@ -363,10 +366,16 @@ func RenderMarkdown(session SessionMeta, issues []Issue) string {
 	b.WriteString("# AsterLab UI 调试反馈包\n\n")
 	b.WriteString("## 环境信息\n\n")
 	fmt.Fprintf(&b, "- **Session**: `%s`\n", session.SessionID)
+	if strings.TrimSpace(session.TesterName) != "" {
+		fmt.Fprintf(&b, "- **测试者**: `%s`\n", strings.TrimSpace(session.TesterName))
+	}
 	fmt.Fprintf(&b, "- **导出时间**: `%s`\n", session.ExportedAt)
 	fmt.Fprintf(&b, "- **版本 / Commit**: `%s` (`%s`)\n", fallback(session.AppVersion, "dev"), fallback(session.Commit, "local"))
 	fmt.Fprintf(&b, "- **平台**: `%s/%s` · 窗口 `%.0f×%.0f DIP` · 缩放 `%.2fx` · 主题 `%s`\n",
 		session.OS, session.Arch, session.WindowW, session.WindowH, session.UIScale, themeName(session.DarkTheme))
+	if session.HasCrashLog || strings.TrimSpace(session.CrashLog) != "" {
+		b.WriteString("- **崩溃日志**: `logs/crash.log`（检测到上次会话异常退出，已自动附带完整脱敏堆栈）\n")
+	}
 	if session.ActiveFile != "" {
 		fmt.Fprintf(&b, "- **当前文档**: `%s` (`%s`)\n", session.ActiveFile, fallback(session.ActiveMode, "live"))
 	}
@@ -417,9 +426,11 @@ func RenderMarkdown(session SessionMeta, issues []Issue) string {
 // ExportSession writes both an uncompressed timestamped feedback folder and a matching .zip archive
 // containing feedback.md, manifest.json, shots/*.png, and logs/recent.log.
 func ExportSession(outBaseDir string, session SessionMeta, issues []Issue, recentLogs []string) (folderPath, zipPath string, err error) {
-	if len(issues) == 0 {
-		return "", "", fmt.Errorf("no UI issues recorded yet")
+	hasCrash := strings.TrimSpace(session.CrashLog) != ""
+	if len(issues) == 0 && !hasCrash {
+		return "", "", fmt.Errorf("no UI issues or crash log recorded yet")
 	}
+	session.HasCrashLog = hasCrash
 	now := time.Now()
 	if session.SessionID == "" {
 		session.SessionID = now.Format("20060102-150405")
@@ -485,6 +496,15 @@ func ExportSession(outBaseDir string, session SessionMeta, issues []Issue, recen
 	}
 	if err := os.WriteFile(filepath.Join(logsDir, "recent.log"), []byte(logContent), 0o644); err != nil {
 		return "", "", fmt.Errorf("write recent.log: %w", err)
+	}
+	if strings.TrimSpace(session.CrashLog) != "" {
+		crashBody := session.CrashLog
+		if !strings.HasSuffix(crashBody, "\n") {
+			crashBody += "\n"
+		}
+		if err := os.WriteFile(filepath.Join(logsDir, "crash.log"), []byte(crashBody), 0o644); err != nil {
+			return "", "", fmt.Errorf("write crash.log: %w", err)
+		}
 	}
 
 	zipPath = folderPath + ".zip"

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -305,6 +306,99 @@ func DismissPendingCrash(logDir string) {
 		return
 	}
 	_ = os.Remove(filepath.Join(logDir, "last-crash.json"))
+}
+
+var fatalCrashFile *os.File
+
+// EnableFatalCrashCapture redirects Go runtime fatal crash/panic stack traces to
+// <logDir>/crash-fatal.log via debug.SetCrashOutput (Go 1.23+), ensuring even
+// unrecovered panics in -H windowsgui builds leave a complete stack trace on disk.
+// If a non-empty crash-fatal.log exists from the previous run, it is promoted into
+// a timestamped crash-*.log and last-crash.json so the restart UI can offer 1-click upload.
+func EnableFatalCrashCapture(logDir string) error {
+	if strings.TrimSpace(logDir) == "" {
+		logDir = LogDir()
+	}
+	if logDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return err
+	}
+	fatalPath := filepath.Join(logDir, "crash-fatal.log")
+	if raw, err := os.ReadFile(fatalPath); err == nil && len(bytesTrimSpace(raw)) > 0 {
+		clean := SanitizeText(string(raw))
+		firstLine := "unexpected fatal panic"
+		for _, ln := range strings.Split(clean, "\n") {
+			if t := strings.TrimSpace(ln); t != "" {
+				firstLine = t
+				break
+			}
+		}
+		if len([]rune(firstLine)) > 140 {
+			firstLine = string([]rune(firstLine)[:140]) + "…"
+		}
+		name := fmt.Sprintf("crash-%s-fatal.log", time.Now().UTC().Format("20060102-150405"))
+		_ = os.WriteFile(filepath.Join(logDir, name), []byte(clean), 0o644)
+		rec := CrashRecord{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Tag:       "fatal",
+			Summary:   firstLine,
+			CrashFile: name,
+		}
+		if j, jErr := json.MarshalIndent(rec, "", "  "); jErr == nil {
+			_ = os.WriteFile(filepath.Join(logDir, "last-crash.json"), j, 0o644)
+		}
+		pruneOldCrashLogs(logDir, 10)
+	}
+	f, err := os.OpenFile(fatalPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
+		_ = f.Close()
+		return err
+	}
+	mu.Lock()
+	if fatalCrashFile != nil {
+		_ = fatalCrashFile.Close()
+	}
+	fatalCrashFile = f
+	mu.Unlock()
+	return nil
+}
+
+// ReadLatestCrashLog returns the sanitized contents of the pending or most recent crash log.
+func ReadLatestCrashLog(logDir string) string {
+	if strings.TrimSpace(logDir) == "" {
+		logDir = LogDir()
+	}
+	if logDir == "" {
+		return ""
+	}
+	if rec := PendingCrash(logDir); rec != nil && rec.CrashFile != "" {
+		if raw, err := os.ReadFile(filepath.Join(logDir, rec.CrashFile)); err == nil && len(raw) > 0 {
+			return SanitizeText(string(raw))
+		}
+	}
+	matches, _ := filepath.Glob(filepath.Join(logDir, "crash-*.log"))
+	if len(matches) == 0 {
+		return ""
+	}
+	sort.Strings(matches)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if filepath.Base(matches[i]) == "crash-fatal.log" {
+			continue
+		}
+		if raw, err := os.ReadFile(matches[i]); err == nil && len(bytesTrimSpace(raw)) > 0 {
+			return SanitizeText(string(raw))
+		}
+	}
+	return ""
+}
+
+func bytesTrimSpace(b []byte) []byte {
+	return []byte(strings.TrimSpace(string(b)))
 }
 
 // ExportBundle writes a privacy-scrubbed diagnostic ZIP containing logs, crash reports,
