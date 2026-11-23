@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/updater"
 
+	mygo "github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 )
@@ -24,14 +26,18 @@ import (
 // devInspectorState holds developer-only UI pick/annotate/export session state.
 // Compiled ONLY with `-tags devdebug`; completely stripped from public releases.
 type devInspectorState struct {
-	pickActive bool
-	dragging   bool
-	hoverX     float32
-	hoverY     float32
-	startX     float32
-	startY     float32
-	curX       float32
-	curY       float32
+	pickActive      bool
+	dragging        bool
+	hoverX          float32
+	hoverY          float32
+	startX          float32
+	startY          float32
+	curX            float32
+	curY            float32
+	delayUntil      time.Time
+	delayScheduled  bool
+	draftHydrated   bool
+	resolvedOutBase string
 
 	// Draft annotation popup after picking a UI element or dragging a pixel box.
 	draftOpen       bool
@@ -73,6 +79,14 @@ func (a *app) devInspectorPaletteCommands() []shell.PaletteCommand {
 			},
 		},
 		{
+			ID:       "dev-ui-delay-pick",
+			Title:    "[DEV] 延迟 2 秒拾取（用于截取设置弹窗 / 下拉菜单 / 面板）",
+			Subtitle: "2 秒后在所有打开的弹窗最顶层自动进入红框拾取模式",
+			OnRun: func() {
+				a.scheduleDelayedDevPick(2 * time.Second)
+			},
+		},
+		{
 			ID:       "dev-ui-queue",
 			Title:    "[DEV] 打开 UI 调试反馈队列与导出面板",
 			Subtitle: "查看已记录问题并一键生成反馈包 (.zip + feedback.md + 截图)",
@@ -98,6 +112,120 @@ func (a *app) toggleDevPickMode() {
 	a.devInsp.dragging = false
 }
 
+// scheduleDelayedDevPick lets the developer open any modal dialog, dropdown menu,
+// or hover popover (UI-13) and automatically activates the top-most modal pick overlay
+// right over the open surface after delay.
+func (a *app) scheduleDelayedDevPick(delay time.Duration) {
+	st := &a.devInsp
+	st.queueOpen = false
+	st.draftOpen = false
+	st.pickActive = false
+	st.exportErr = ""
+	st.delayUntil = time.Now().Add(delay)
+	st.delayScheduled = true
+	st.exportBanner = fmt.Sprintf("%.0f 秒后自动拾取：请立刻打开目标弹窗 / 面板…", delay.Seconds())
+	time.AfterFunc(delay, func() {
+		mygo.RunOnMain(func() {
+			if !a.devInsp.delayScheduled {
+				return
+			}
+			a.devInsp.delayScheduled = false
+			a.devInsp.delayUntil = time.Time{}
+			a.devInsp.exportBanner = ""
+			a.devInsp.pickActive = true
+			a.devInsp.dragging = false
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		})
+	})
+}
+
+func (a *app) resolveDevFeedbackDir() (string, error) {
+	if a.devInsp.resolvedOutBase != "" {
+		if dir, err := devfeedback.ResolveWritableOutputDir(a.devInsp.resolvedOutBase); err == nil {
+			return dir, nil
+		}
+	}
+	var candidates []string
+	if a.vault != nil && strings.TrimSpace(a.vault.Root) != "" {
+		candidates = append(candidates, filepath.Join(a.vault.Root, ".asterlab", "dev-feedback"))
+	}
+	if dataDir := workspaceDataDir(); strings.TrimSpace(dataDir) != "" {
+		candidates = append(candidates, filepath.Join(dataDir, "dev-feedback"))
+	}
+	if localApp := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localApp != "" {
+		candidates = append(candidates, filepath.Join(localApp, "AsterLab", "dev-feedback"))
+	}
+	candidates = append(candidates, filepath.Join(os.TempDir(), "AsterLab-DevFeedback"))
+
+	dir, err := devfeedback.ResolveWritableOutputDir(candidates...)
+	if err == nil {
+		a.devInsp.resolvedOutBase = dir
+	}
+	return dir, err
+}
+
+func (a *app) hydrateDevDraftOnce() {
+	if a.devInsp.draftHydrated {
+		return
+	}
+	a.devInsp.draftHydrated = true
+	baseDir, err := a.resolveDevFeedbackDir()
+	if err != nil {
+		return
+	}
+	restored, err := devfeedback.LoadDraft(baseDir)
+	if err != nil || len(restored) == 0 {
+		return
+	}
+	a.devInsp.issues = restored
+	maxNum := len(restored)
+	for _, it := range restored {
+		if strings.HasPrefix(it.ID, "UI-") {
+			if n, convErr := strconv.Atoi(strings.TrimPrefix(it.ID, "UI-")); convErr == nil && n > maxNum {
+				maxNum = n
+			}
+		}
+	}
+	a.devInsp.nextID = maxNum
+	a.devInsp.exportBanner = fmt.Sprintf("已自动恢复上次未导出的 %d 条草稿", len(restored))
+}
+
+func (a *app) persistDevDraft() {
+	baseDir, err := a.resolveDevFeedbackDir()
+	if err != nil {
+		return
+	}
+	_ = devfeedback.SaveDraft(baseDir, a.devInsp.issues)
+}
+
+func tabKindString(k shell.TabKind) string {
+	switch k {
+	case shell.TabCalendar:
+		return "calendar"
+	case shell.TabFile:
+		return "file"
+	case shell.TabPantry:
+		return "pantry"
+	default:
+		return ""
+	}
+}
+
+func viewModeString(m shell.ViewMode) string {
+	switch m {
+	case shell.ModeEdit:
+		return "live"
+	case shell.ModeLab:
+		return "lab"
+	case shell.ModeSource:
+		return "source"
+	default:
+		return "live"
+	}
+}
+
 func (a *app) devContextSnapshot(winW, winH float32, tok theme.Tokens) (pageName, tabKind, tabTitle, activeFile, activeMode string, leftW, rightW float32, leftOpen, rightOpen bool, uiScale float32) {
 	uiScale = 1.0
 	leftW = 284
@@ -116,10 +244,10 @@ func (a *app) devContextSnapshot(winW, winH float32, tok theme.Tokens) (pageName
 		uiScale = s
 	}
 	if tab := a.shell.ActiveTab(); tab != nil {
-		tabKind = string(tab.Kind)
+		tabKind = tabKindString(tab.Kind)
 		tabTitle = tab.Title
 		activeFile = tab.FilePath
-		activeMode = string(tab.Mode)
+		activeMode = viewModeString(tab.Mode)
 		if a.vault != nil && activeFile != "" {
 			if rel, err := filepath.Rel(a.vault.Root, activeFile); err == nil {
 				activeFile = filepath.ToSlash(rel)
@@ -206,7 +334,8 @@ func (a *app) commitDraftIssue(tok theme.Tokens) {
 	}
 	st.issues = append(st.issues, it)
 	st.draftOpen = false
-	st.exportBanner = fmt.Sprintf("已记录 %s（累计 %d 条）· 按 Ctrl+Shift+D 继续拾取", it.ID, len(st.issues))
+	a.persistDevDraft()
+	st.exportBanner = fmt.Sprintf("已自动保存 %s（累计 %d 条）· Ctrl+Shift+D 继续拾取", it.ID, len(st.issues))
 	st.exportErr = ""
 }
 
@@ -240,7 +369,11 @@ func (a *app) exportDevFeedbackBundle(c *ui.Context, tok theme.Tokens) {
 		PageName:   pageName,
 	}
 
-	outBase := devFeedbackOutputDir()
+	outBase, dirErr := a.resolveDevFeedbackDir()
+	if dirErr != nil {
+		st.exportErr = fmt.Sprintf("无法找到可写导出目录: %v", dirErr)
+		return
+	}
 	rawLogs := diag.RecentLines(180)
 	cleanLogs := make([]string, 0, len(rawLogs))
 	for _, line := range rawLogs {
@@ -252,22 +385,12 @@ func (a *app) exportDevFeedbackBundle(c *ui.Context, tok theme.Tokens) {
 		st.exportErr = fmt.Sprintf("导出失败: %v", err)
 		return
 	}
+	_ = devfeedback.ClearDraft(outBase)
 	st.exportErr = ""
 	st.exportZip = zipPath
 	st.exportBanner = fmt.Sprintf("已导出 %d 条反馈包: %s（路径已复制）", len(st.issues), zipPath)
 	c.WriteClipboard(zipPath)
 	revealInFileManager(zipPath, folder)
-}
-
-func devFeedbackOutputDir() string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		desktop := filepath.Join(home, "Desktop")
-		if info, statErr := os.Stat(desktop); statErr == nil && info.IsDir() {
-			return filepath.Join(desktop, "AsterLab-DevFeedback")
-		}
-		return filepath.Join(home, "AsterLab-DevFeedback")
-	}
-	return filepath.Join(os.TempDir(), "AsterLab-DevFeedback")
 }
 
 func revealInFileManager(zipPath, folderPath string) {
@@ -290,12 +413,17 @@ func revealInFileManager(zipPath, folderPath string) {
 }
 
 func (a *app) renderDevInspectorOverlay(c *ui.Context) {
+	a.hydrateDevDraftOnce()
 	tok := theme.GetTokens(c.Theme())
 	st := &a.devInsp
 
-	// Global developer shortcut: Ctrl+Shift+D toggles UI pick mode anywhere.
+	// Global developer shortcuts: Ctrl+Shift+D toggles immediate UI pick mode;
+	// Ctrl+Shift+Y triggers 2-second delayed pick for open modals/menus (UI-13).
 	c.OnWindowShortcut(ui.Cmd|ui.Shift, ui.KeyD, func() {
 		a.toggleDevPickMode()
+	})
+	c.OnWindowShortcut(ui.Cmd|ui.Shift, ui.KeyY, func() {
+		a.scheduleDelayedDevPick(2 * time.Second)
 	})
 	if st.pickActive {
 		c.OnWindowShortcut(0, ui.KeyEscape, func() {
@@ -304,7 +432,7 @@ func (a *app) renderDevInspectorOverlay(c *ui.Context) {
 		})
 	}
 
-	// 1. Live Full-Window Pick / Drag-Box Capture Overlay
+	// 1. Live Full-Window Pick / Drag-Box Capture Overlay (.Modal() sits ABOVE any open app Dialog!)
 	if st.pickActive {
 		a.renderDevPickOverlay(c, tok)
 		return
@@ -330,7 +458,9 @@ func (a *app) renderDevPickOverlay(c *ui.Context, tok theme.Tokens) {
 	pageName, tabKind, _, _, _, leftW, rightW, leftOpen, rightOpen, _ := a.devContextSnapshot(winW, winH, tok)
 
 	ui.Overlay(c, func() {
-		capture := ui.Box(c.Key("dev-pick-surface")).Fill().
+		// .Modal() ensures this capture layer sits ABOVE open Settings / Pantry / Dialog panels (UI-13).
+		capture := ui.Box(c.Key("dev-pick-surface")).Absolute().Left(0).Top(0).Right(0).Bottom(0).
+			Modal().
 			Background(tok.Accent.Alpha(0.03)).
 			HandleInput(func(ev ui.InputEvent) bool {
 				switch ev.Kind {
@@ -357,14 +487,8 @@ func (a *app) renderDevPickOverlay(c *ui.Context, tok theme.Tokens) {
 					}
 					st.dragging = false
 					st.curX, st.curY = ev.X, ev.Y
-					dx := st.curX - st.startX
-					dy := st.curY - st.startY
-					if dx < 0 {
-						dx = -dx
-					}
-					if dy < 0 {
-						dy = -dy
-					}
+					dx := abs32Dev(st.curX - st.startX)
+					dy := abs32Dev(st.curY - st.startY)
 					pickKind := "click"
 					rx, ry, rw, rh := st.startX, st.startY, float32(0), float32(0)
 					if dx >= 6 || dy >= 6 {
@@ -402,7 +526,7 @@ func (a *app) renderDevPickOverlay(c *ui.Context, tok theme.Tokens) {
 				}
 			}
 
-			// Top centered HUD banner showing live region & instructions.
+			// Top HUD banner showing live region & instructions.
 			reg := devfeedback.DetectRegion(st.hoverX, st.hoverY, winW, winH, leftW, rightW, leftOpen, rightOpen, pageName, tabKind)
 			hudText := fmt.Sprintf("DEV 拾取模式 · 点击或拖拽框选任意 UI 细节 · 当前: %s (%.0f, %.0f) · Esc / 右键退出",
 				reg.Label, st.hoverX, st.hoverY)
@@ -432,6 +556,17 @@ func (a *app) renderDevFloatingPill(c *ui.Context, tok theme.Tokens) {
 				components.Badge(c, "DEV", components.BadgeOptions{Tone: components.BadgeAccent})
 				if components.Button(c, "拾取细节 (Ctrl+Shift+D)", components.ButtonGhost).Clicked() {
 					a.toggleDevPickMode()
+				}
+				delayLbl := "延迟2s(截弹窗)"
+				if st.delayScheduled {
+					rem := time.Until(st.delayUntil).Seconds()
+					if rem < 0 {
+						rem = 0
+					}
+					delayLbl = fmt.Sprintf("%.1fs后拾取…", rem)
+				}
+				if components.Button(c, delayLbl, components.ButtonGhost).Clicked() {
+					a.scheduleDelayedDevPick(2 * time.Second)
 				}
 				queueLabel := fmt.Sprintf("队列 (%d)", len(st.issues))
 				if components.Button(c, queueLabel, components.ButtonSecondary).Clicked() {
@@ -556,20 +691,23 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 	components.Dialog(c.Key("dev-queue-dlg"), &open, components.DialogOptions{
 		Label: "UI 调试反馈队列",
 	}, func(panel ui.Element) {
-		panel.Width(620).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).
+		panel.Width(640).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).
 			Background(tok.Surface).Border(1, tok.BorderStrong)
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				components.Text(c, fmt.Sprintf("已记录 %d 条 UI 反馈", len(st.issues))).
+				components.Text(c, fmt.Sprintf("已记录 %d 条 UI 反馈（自动落盘防丢失）", len(st.issues))).
 					FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 				ui.Spacer(c)
-				if components.Button(c, "+ 继续拾取 (Ctrl+Shift+D)", components.ButtonSecondary).Clicked() {
+				if components.Button(c, "延迟2s截弹窗", components.ButtonGhost).Clicked() {
+					a.scheduleDelayedDevPick(2 * time.Second)
+				}
+				if components.Button(c, "+ 继续拾取", components.ButtonSecondary).Clicked() {
 					st.queueOpen = false
 					st.pickActive = true
 				}
 			})
 
-			components.Text(c, "提示：按 F12 (Ctrl+Shift+I) 可同时开启 MyGo 原生元素检查器，Ctrl+Shift+C 精确查看任意 Box/Row 的 Go 源码行号。").
+			components.Text(c, "提示：要截取设置/弹窗/下拉菜单画面，请点「延迟2s截弹窗」后立即打开该面板，2秒后自动进入顶层拾取。").
 				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 
 			if len(st.issues) == 0 {
@@ -611,6 +749,7 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 						}
 						if deleteIdx >= 0 && deleteIdx < len(st.issues) {
 							st.issues = append(st.issues[:deleteIdx], st.issues[deleteIdx+1:]...)
+							a.persistDevDraft()
 						}
 					})
 				})
@@ -629,6 +768,7 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 						st.issues = nil
 						st.exportBanner = ""
 						st.exportErr = ""
+						a.persistDevDraft()
 					}
 				}
 				if components.Button(c, "关闭", components.ButtonSecondary).Clicked() {

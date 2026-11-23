@@ -494,6 +494,116 @@ func ExportSession(outBaseDir string, session SessionMeta, issues []Issue, recen
 	return folderPath, zipPath, nil
 }
 
+// ResolveWritableOutputDir probes candidate directories in order by creating each
+// directory and verifying actual file creation/removal, avoiding paths blocked by
+// OS/DLP/Desktop folder protection (e.g. Access is denied on C:\Users\...\Desktop).
+func ResolveWritableOutputDir(candidates ...string) (string, error) {
+	var lastErr error
+	for _, raw := range candidates {
+		dir := strings.TrimSpace(raw)
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			lastErr = err
+			continue
+		}
+		probe := filepath.Join(dir, fmt.Sprintf(".write-probe-%d", time.Now().UnixNano()))
+		if err := os.WriteFile(probe, []byte("ok"), 0o644); err != nil {
+			lastErr = err
+			continue
+		}
+		_ = os.Remove(probe)
+		return dir, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no candidate output directories provided")
+	}
+	return "", fmt.Errorf("no writable feedback directory found: %w", lastErr)
+}
+
+const autosaveDirName = "autosave-draft"
+
+// SaveDraft persists the current in-memory issue queue (including PNG screenshots)
+// into <baseDir>/autosave-draft so notes are never lost if the dev app restarts.
+func SaveDraft(baseDir string, issues []Issue) error {
+	if strings.TrimSpace(baseDir) == "" {
+		return fmt.Errorf("empty draft base dir")
+	}
+	draftDir := filepath.Join(baseDir, autosaveDirName)
+	shotsDir := filepath.Join(draftDir, "shots")
+	if len(issues) == 0 {
+		return ClearDraft(baseDir)
+	}
+	if err := os.MkdirAll(shotsDir, 0o755); err != nil {
+		return fmt.Errorf("create draft shots dir: %w", err)
+	}
+	saved := make([]Issue, len(issues))
+	for i, it := range issues {
+		slug := strings.ToLower(strings.ReplaceAll(fallback(it.ID, fmt.Sprintf("UI-%02d", i+1)), " ", "-"))
+		if len(it.FullPNG) > 0 {
+			rel := fmt.Sprintf("shots/%s-full.png", slug)
+			if err := os.WriteFile(filepath.Join(draftDir, filepath.FromSlash(rel)), it.FullPNG, 0o644); err != nil {
+				return fmt.Errorf("write draft %s: %w", rel, err)
+			}
+			it.FullShotFile = rel
+		}
+		if len(it.CropPNG) > 0 {
+			rel := fmt.Sprintf("shots/%s-crop.png", slug)
+			if err := os.WriteFile(filepath.Join(draftDir, filepath.FromSlash(rel)), it.CropPNG, 0o644); err != nil {
+				return fmt.Errorf("write draft %s: %w", rel, err)
+			}
+			it.CropShotFile = rel
+		}
+		saved[i] = it
+	}
+	raw, err := json.MarshalIndent(saved, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal draft.json: %w", err)
+	}
+	return os.WriteFile(filepath.Join(draftDir, "draft.json"), raw, 0o644)
+}
+
+// LoadDraft restores any previously auto-saved UI feedback queue from <baseDir>/autosave-draft.
+func LoadDraft(baseDir string) ([]Issue, error) {
+	if strings.TrimSpace(baseDir) == "" {
+		return nil, nil
+	}
+	draftDir := filepath.Join(baseDir, autosaveDirName)
+	raw, err := os.ReadFile(filepath.Join(draftDir, "draft.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var issues []Issue
+	if err := json.Unmarshal(raw, &issues); err != nil {
+		return nil, err
+	}
+	for i := range issues {
+		if issues[i].FullShotFile != "" {
+			if b, rErr := os.ReadFile(filepath.Join(draftDir, filepath.FromSlash(issues[i].FullShotFile))); rErr == nil {
+				issues[i].FullPNG = b
+			}
+		}
+		if issues[i].CropShotFile != "" {
+			if b, rErr := os.ReadFile(filepath.Join(draftDir, filepath.FromSlash(issues[i].CropShotFile))); rErr == nil {
+				issues[i].CropPNG = b
+			}
+		}
+	}
+	return issues, nil
+}
+
+// ClearDraft removes the auto-saved draft directory once exported or explicitly cleared.
+func ClearDraft(baseDir string) error {
+	if strings.TrimSpace(baseDir) == "" {
+		return nil
+	}
+	return os.RemoveAll(filepath.Join(baseDir, autosaveDirName))
+}
+
 func zipDirectory(srcDir, dstZip string) error {
 	f, err := os.Create(dstZip)
 	if err != nil {

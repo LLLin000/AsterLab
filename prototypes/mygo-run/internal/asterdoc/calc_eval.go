@@ -636,13 +636,13 @@ func EvalCalculatorWithActuals(doc *Document, data map[string]any, actuals *Calc
 		for step := 1; step <= int(steps); step++ {
 			factor *= df
 			res.Rows = append(res.Rows, CalcRow{
-				Label:  fmt.Sprintf("第 %d 级 (1:%s)", step, formatNumber(factor)),
+				Label:  fmt.Sprintf("第 %d 级 (1:%s)", step, formatSciCompactText(factor)),
 				Amount: round4(transferVal),
 				Unit:   transferUnit,
-				Note:   fmt.Sprintf("吸取 %s %s + 稀释液 %s %s", formatNumber(round4(transferVal)), transferUnit, formatNumber(round4(diluentVal)), transferUnit),
+				Note:   fmt.Sprintf("吸取 %s %s + 稀释液 %s %s", formatSciCompactText(round4(transferVal)), DisplayUnit(transferUnit), formatSciCompactText(round4(diluentVal)), DisplayUnit(transferUnit)),
 			})
 		}
-		res.Summary = fmt.Sprintf("%d 级 %s 倍梯度稀释（总稀释至 1:%s）", int(steps), formatNumber(df), formatNumber(factor))
+		res.Summary = fmt.Sprintf("%d 级 %s 倍梯度稀释（总稀释至 1:%s）", int(steps), formatNumber(df), formatSciCompactText(factor))
 		return res
 
 	case "sample_normalize":
