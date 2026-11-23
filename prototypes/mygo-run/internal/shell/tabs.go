@@ -963,10 +963,10 @@ func (s *Shell) ToggleRightDrawer() {
 	}
 }
 
-// SetRightDrawer opens the Right Companion Drawer on a specific tab (0 = 大纲, 1 = 速算与计时).
+// SetRightDrawer opens the Right Companion Drawer on a specific tab (0 = 大纲, 1 = 速算与计时, 2 = 关联与诊断).
 func (s *Shell) SetRightDrawer(open bool, toolTab int) {
 	s.RightOpen = open
-	if toolTab >= 0 && toolTab <= 1 {
+	if toolTab >= 0 && toolTab <= 2 {
 		s.RightTab = toolTab
 	}
 	if s.window != nil {
@@ -997,7 +997,7 @@ func (s *Shell) RestorePersistState(st WorkspacePersistState) {
 		s.ActivePaneID = st.ActivePaneID
 	}
 	s.RightOpen = st.RightOpen
-	if st.RightTab >= 0 && st.RightTab <= 1 {
+	if st.RightTab >= 0 && st.RightTab <= 2 {
 		s.RightTab = st.RightTab
 	}
 	if st.CalendarMode == 0 || st.CalendarMode == 1 {

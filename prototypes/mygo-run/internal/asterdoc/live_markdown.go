@@ -729,6 +729,21 @@ func (v *View) renderLiveMarkdownSegmentFull(
 				v.OnAsyncInvalidate()
 			}
 		})
+		jevReady := dec != nil
+		// Fast-path: if the exact same line is already active and Jev state didn't just arrive,
+		// keep the existing nlHoverState untouched (zero churn, zero Cancel() flicker, zero invalidate storm).
+		if v.nlHover != nil &&
+			v.nlHover.editorKey == key &&
+			v.nlHover.lineIdx == lineIdx &&
+			v.nlHover.lineText == lineText &&
+			v.nlHover.sug != nil &&
+			v.nlHover.jevReady == jevReady {
+			v.nlHover.hideAt = time.Time{}
+			if byShortcut {
+				v.nlHover.byShortcut = true
+			}
+			return true
+		}
 		sugs := AnalyzeLabSentenceWithContext(v.Doc, lineText, entry.docOffset+lnStart, dec)
 		if len(sugs) == 0 {
 			if v.nlHover != nil && v.nlHover.editorKey == key && !byShortcut {
@@ -760,6 +775,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			openedAt:    openedAt,
 			byShortcut:  byShortcut,
 			overCard:    v.nlHover != nil && v.nlHover.overCard,
+			jevReady:    jevReady,
 		}
 		c.Invalidate()
 		return true
@@ -978,13 +994,13 @@ func (v *View) renderLiveMarkdownSegmentFull(
 	ui.Box(c.Key("live-md:" + key)).FillWidth().Children(func() {
 		edEl := editor.View(c, st).FillWidth()
 
-		// Instant zero-delay real Alt+Hover tracking (works whether user holds Alt BEFORE or AFTER moving pointer!)
+		// Instant zero-delay real Alt+Hover tracking (rock-solid while Alt is held OR while pointer is on card/line)
 		if !readOnly && v.AltHoverPreviewQuery == "" {
 			_, py, insideEd := edEl.PointerPosition()
-			if altHeld && insideEd {
+			hitLine := -1
+			if insideEd {
 				contentY := float64(py) + st.ScrollY()
 				lineCount := strings.Count(curBuf, "\n") + 1
-				hitLine := -1
 				for ln := 0; ln < lineCount; ln++ {
 					top := st.LineTop(ln)
 					bot := st.LineTop(ln + 1)
@@ -996,14 +1012,26 @@ func (v *View) renderLiveMarkdownSegmentFull(
 						break
 					}
 				}
-				if hitLine >= 0 {
+			}
+			activeHere := v.nlHover != nil && v.nlHover.editorKey == key
+			if altHeld {
+				// While Alt is held:
+				// 1. If pointer is already on the open card, keep it rock-solid (never kill it!).
+				// 2. If pointer is inside the editor on a line, activate/preserve that line.
+				// 3. If pointer is outside the editor (e.g. moving toward card), keep existing card rock-solid!
+				if activeHere && v.nlHover.overCard {
+					v.nlHover.hideAt = time.Time{}
+				} else if insideEd && hitLine >= 0 {
 					if lnStart, _, ok := lineBoundsForIndex(curBuf, hitLine); ok {
 						activateNLHoverForLine(curBuf, lnStart, false)
 					}
+				} else if activeHere {
+					v.nlHover.hideAt = time.Time{}
 				}
-			} else if v.nlHover != nil && v.nlHover.editorKey == key && !v.nlHover.byShortcut {
-				// Keep card open while pointer moves into the card to click; generous 900ms grace period
-				if v.nlHover.overCard {
+			} else if activeHere && !v.nlHover.byShortcut {
+				// Alt released: stay rock-solid indefinitely while pointer is over the card OR still on the highlighted line.
+				onActiveLine := insideEd && hitLine == v.nlHover.lineIdx
+				if v.nlHover.overCard || onActiveLine {
 					v.nlHover.hideAt = time.Time{}
 				} else {
 					if v.nlHover.hideAt.IsZero() {
