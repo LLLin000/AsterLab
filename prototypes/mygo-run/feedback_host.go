@@ -272,6 +272,9 @@ func (a *app) openExternalAstermlFile(filePath string) {
 			log.Printf("open external .asterml initVaultWorkspace(%s): %v", vaultRoot, err)
 			return
 		}
+		if a.vault != nil {
+			saveLastVaultRoot(a.vault.Root)
+		}
 	}
 	rel, err := filepath.Rel(a.vault.Root, absPath)
 	if err != nil || strings.HasPrefix(rel, "..") {

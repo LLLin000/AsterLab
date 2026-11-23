@@ -19,15 +19,22 @@ type localPantryDisk struct {
 	Items   []runs.PantryItem `json:"items"`
 }
 
+// pantryDataDir returns the storage directory for Pantry JSON ledgers and manuals.
+// When a local Vault is active, Pantry data lives strictly inside `<Vault>/.asterlab/`
+// so each Vault is self-contained, portable, and isolated from other Vaults or legacy global data.
+func (a *app) pantryDataDir() string {
+	if a.vault != nil && strings.TrimSpace(a.vault.Root) != "" {
+		return filepath.Join(a.vault.Root, ".asterlab")
+	}
+	return workspaceDataDir()
+}
+
 func (a *app) pantryLedgerPath() string {
-	dir := workspaceDataDir()
-	if dir != "" {
-		return filepath.Join(dir, "pantry-ledger.json")
+	dir := a.pantryDataDir()
+	if dir == "" {
+		return ""
 	}
-	if a.vault != nil && a.vault.Root != "" {
-		return filepath.Join(a.vault.Root, ".asterlab", "pantry-ledger.json")
-	}
-	return ""
+	return filepath.Join(dir, "pantry-ledger.json")
 }
 
 func loadLocalPantryDisk(path string) (localPantryDisk, error) {

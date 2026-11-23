@@ -254,6 +254,8 @@ type app struct {
 	newExpTemplate   string
 	newExpErr        string
 	newExpNudgeSeq   int
+	lastVaultSig     string
+	lastPantrySig    string
 }
 
 func (a *app) nextOp() string {
@@ -2087,20 +2089,52 @@ func (a *app) syncDesignDiskMirror(designID, source string) {
 }
 
 func (a *app) startExternalSyncLoop() {
-	if a.designSvc == nil {
-		return
-	}
 	go func() {
-		ticker := time.NewTicker(2 * time.Second)
+		ticker := time.NewTicker(1200 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
 			if a.externalSyncBusy.Swap(true) {
 				continue
 			}
-			a.pollExternalDesignChanges()
+			a.pollVaultExternalChanges()
+			if a.designSvc != nil && a.vault == nil {
+				a.pollExternalDesignChanges()
+			}
 			a.externalSyncBusy.Store(false)
 		}
 	}()
+}
+
+func (a *app) pollVaultExternalChanges() {
+	if a.shell == nil {
+		return
+	}
+	var root, prevVaultSig, prevPantrySig string
+	doneSnap := make(chan struct{})
+	mygo.RunOnMain(func() {
+		defer close(doneSnap)
+		if a.vault != nil {
+			root = a.vault.Root
+			prevVaultSig = a.lastVaultSig
+			prevPantrySig = a.lastPantrySig
+		}
+	})
+	<-doneSnap
+	if strings.TrimSpace(root) == "" {
+		return
+	}
+	nextVaultSig, nextPantrySig := computeVaultDiskSignatures(root)
+	if nextVaultSig == prevVaultSig && nextPantrySig == prevPantrySig {
+		return
+	}
+	mygo.RunOnMain(func() {
+		if a.vault == nil || !strings.EqualFold(filepath.Clean(a.vault.Root), filepath.Clean(root)) {
+			return
+		}
+		if a.applyVaultDiskSignatures(nextVaultSig, nextPantrySig) && a.shell != nil {
+			a.shell.Invalidate()
+		}
+	})
 }
 
 func (a *app) pollExternalDesignChanges() {
@@ -3174,6 +3208,20 @@ func (a *app) currentDesignID() string {
 // thread, so the fetch runs on its own goroutine and the result is applied on
 // the main thread.
 func (a *app) preload() {
+	// Per ADR-0002, when a local `.asterml` Vault is active, it is the sole
+	// source of truth for experiments, calendar, and pantry. Do not overwrite
+	// Shell experiments or surface legacy SQLite "设计服务不可用" errors.
+	if a.vault != nil {
+		if a.runLinkArg != "" {
+			a.openRunWellLink(a.runLinkArg)
+		} else {
+			a.openRunLinkFromEnv()
+		}
+		if a.shell != nil {
+			a.shell.Invalidate()
+		}
+		return
+	}
 	go func() {
 		items, designErr := a.fetchDesigns()
 		projects, projectErr := a.fetchProjects()
@@ -4266,7 +4314,7 @@ func (a *app) applyAsterPlateToDesign(source, plateID string) {
 }
 
 func (a *app) pantryMetaPath() string {
-	dir := workspaceDataDir()
+	dir := a.pantryDataDir()
 	if dir == "" {
 		return ""
 	}
@@ -4274,7 +4322,7 @@ func (a *app) pantryMetaPath() string {
 }
 
 func (a *app) pantryManualsDir() string {
-	dir := workspaceDataDir()
+	dir := a.pantryDataDir()
 	if dir == "" {
 		return ""
 	}
@@ -4282,7 +4330,7 @@ func (a *app) pantryManualsDir() string {
 }
 
 func (a *app) pantryBoxesPath() string {
-	dir := workspaceDataDir()
+	dir := a.pantryDataDir()
 	if dir == "" {
 		return ""
 	}
@@ -4541,13 +4589,13 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 			return a.saveToolPlateExport(defaultName, format, data)
 		},
 		ListPantry: func() (runs.PantryLedger, error) {
-			if a.runSvc != nil {
+			if a.vault == nil && a.runSvc != nil {
 				return a.runSvc.ListPantry(context.Background(), runs.PantryQuery{})
 			}
 			return a.localListPantry()
 		},
 		UpsertPantry: func(input runs.PantryUpsert) (runs.PantryItem, error) {
-			if a.runSvc != nil {
+			if a.vault == nil && a.runSvc != nil {
 				return a.runSvc.UpsertPantry(context.Background(), input)
 			}
 			item, err := a.localUpsertPantry(input)
@@ -4557,7 +4605,7 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 			return item, err
 		},
 		DeletePantry: func(input runs.PantryDelete) error {
-			if a.runSvc != nil {
+			if a.vault == nil && a.runSvc != nil {
 				_, err := a.runSvc.DeletePantry(context.Background(), input)
 				return err
 			}
@@ -4568,7 +4616,7 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 			return err
 		},
 		ExportPantry: func() (runs.PantryLabels, error) {
-			if a.runSvc != nil {
+			if a.vault == nil && a.runSvc != nil {
 				return a.runSvc.ExportPantryLabels(context.Background(), runs.PantryQuery{})
 			}
 			return a.localExportPantryLabels()
