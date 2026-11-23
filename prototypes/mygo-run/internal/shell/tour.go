@@ -76,6 +76,24 @@ var workbenchTourSteps = []tourStepSpec{
 func (s *Shell) StartTour() {
 	s.TourOpen = true
 	s.TourStep = 0
+	s.syncTourRightDrawer()
+}
+
+// syncTourRightDrawer ensures the Right Companion Drawer is actually open during
+// Step 5 ("right") so the highlight box frames the real drawer instead of empty canvas,
+// and cleanly restores its prior collapsed state when stepping away or closing.
+func (s *Shell) syncTourRightDrawer() {
+	needRight := s.TourOpen && s.TourStep >= 0 && s.TourStep < len(workbenchTourSteps) &&
+		workbenchTourSteps[s.TourStep].Region == "right"
+	if needRight {
+		if !s.RightOpen {
+			s.tourAutoOpenedRight = true
+			s.SetRightDrawer(true, 0)
+		}
+	} else if s.tourAutoOpenedRight {
+		s.tourAutoOpenedRight = false
+		s.SetRightDrawer(false, s.RightTab)
+	}
 }
 
 // renderSpotlightTour draws a calm region-highlighted overlay teaching the 5 workbench zones.
@@ -103,19 +121,19 @@ func (s *Shell) renderSpotlightTour(c *ui.Context, tok theme.Tokens) {
 		case "left":
 			hl.Top(8).Bottom(34).Left(8).Width(252)
 		case "top":
-			hl.Top(4).Left(272).Right(24).Height(46)
+			hl.Top(4).Left(272).Right(14).Height(88)
 		case "center":
 			hl.Top(62).Bottom(44).Left(292).Right(48)
 		case "ai":
 			hl.Top(160).Left(320).Right(80).Height(110)
 		case "right":
-			hl.Top(8).Bottom(34).Right(8).Width(272)
+			hl.Top(4).Bottom(4).Right(4).Width(float32(tok.Spacing48)*6.2 + 2)
 		}
 
 		// Centered floating guide card with crisp step navigation
 		cardWrap := ui.Box(c.Key("tour-card-wrap")).Absolute().Fill().Center()
 		cardWrap.Children(func() {
-			card := ui.Column(c.Key("tour-card")).
+			card := ui.Column(c.Key(fmt.Sprintf("tour-card-%d", s.TourStep))).
 				Width(float32(tok.Spacing48)*10.5).
 				Padding(float32(tok.Spacing24)).
 				Radius(float32(tok.PanelRadius)).
@@ -129,6 +147,7 @@ func (s *Shell) renderSpotlightTour(c *ui.Context, tok theme.Tokens) {
 					closeBtn := components.IconButton(c, lucide.X(), "关闭导览", components.IconButtonCompact)
 					if closeBtn.Clicked() {
 						s.TourOpen = false
+						s.syncTourRightDrawer()
 					}
 				})
 
@@ -166,21 +185,25 @@ func (s *Shell) renderSpotlightTour(c *ui.Context, tok theme.Tokens) {
 					if s.OnOpenUserGuide != nil {
 						if components.Button(c, "打开新手指南文档", components.ButtonGhost).Clicked() {
 							s.TourOpen = false
+							s.syncTourRightDrawer()
 							s.OnOpenUserGuide()
 						}
 					}
 					if s.TourStep > 0 {
 						if components.Button(c, "上一步", components.ButtonOutline).Clicked() {
 							s.TourStep--
+							s.syncTourRightDrawer()
 						}
 					}
 					if s.TourStep < len(workbenchTourSteps)-1 {
 						if components.Button(c, "下一步", components.ButtonPrimary).Clicked() {
 							s.TourStep++
+							s.syncTourRightDrawer()
 						}
 					} else {
 						if components.Button(c, "开始使用", components.ButtonPrimary).Clicked() {
 							s.TourOpen = false
+							s.syncTourRightDrawer()
 						}
 					}
 				})

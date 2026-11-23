@@ -252,6 +252,7 @@ type Shell struct {
 	OnOnboardingChoice    func(choice string)
 	TourOpen              bool
 	TourStep              int
+	tourAutoOpenedRight   bool
 	OnOpenUserGuide       func()
 	inSplitViewRoot       bool
 	GlobalSearchOpen      bool
@@ -337,6 +338,7 @@ func (s *Shell) Invalidate() {
 // Each peer split pane draws its own interactive tab bar cleanly right above its surface.
 func (s *Shell) topChromeBar(c *ui.Context) {
 	s.EnsureTabs()
+	s.syncTourRightDrawer()
 	tok := theme.GetTokens(c.Theme())
 	if s.leafCount() == 1 {
 		if leaf := s.firstLeaf(s.RootPane); leaf != nil {
@@ -1026,6 +1028,7 @@ func (s *Shell) RenderSplitView(c *ui.Context) {
 	}
 	s.inSplitViewRoot = true
 	defer func() { s.inSplitViewRoot = false }()
+	s.syncTourRightDrawer()
 	root := ui.Row(c).Fill()
 	theme.PaintCanvasBackground(root, tok)
 	root.Children(func() {

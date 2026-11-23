@@ -36,6 +36,7 @@ type nlHoverState struct {
 	hideAt      time.Time
 	byShortcut  bool
 	overCard    bool
+	jevReady    bool
 }
 
 // buildPrismSweepStops constructs a smooth left-to-right scrolling multi-stop Oklab gradient
@@ -226,16 +227,15 @@ func (v *View) renderNLHoverOverlay(
 			Role(ui.RoleTooltip).
 			Cursor(ui.CursorDefault)
 
-		// While Alt is held, let pointer pass straight through the card so the user can sweep
-		// smoothly DOWN from Line 1 -> Line 2 -> Line 3 without the card ever blocking scanning!
-		// The moment Alt is released, the card becomes solid & clickable (260ms grace bridge).
-		if altHeld && !st.byShortcut {
-			panel.PassThrough()
-			st.overCard = false
-		} else {
-			st.overCard = panel.Hovered()
+		// Keep the preview card solid & interactive whether Alt is still held or already released,
+		// and detect containment geometrically via PointerPosition() in addition to Hovered() so
+		// moving across child buttons inside the card NEVER flickers overCard to false.
+		_, _, insideCard := panel.PointerPosition()
+		st.overCard = panel.Hovered() || insideCard
+		if st.overCard || altHeld {
+			st.hideAt = time.Time{}
 		}
-		if panel.Shortcut(0, ui.KeyEscape) && onDismiss != nil {
+		if c.Shortcut(0, ui.KeyEscape) && onDismiss != nil {
 			onDismiss()
 		}
 
