@@ -1034,7 +1034,30 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 								})
 								ui.Column(c).Gap(t.Space(1)).Children(func() {
 									ui.Text(c, "在库状态").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-									components.Tabs(c, &w.pantryStatusIdx, components.TabsSegmented, "未开封", "已开封", "已用尽")
+									// NOTE: Do NOT use components.Tabs inside components.Dialog — Onevra's
+									// Tabs.Draw captures a frame-local ui.Element for slideBehind(), which
+									// panics ("element from pass N used in pass M") during Dialog's exit transition.
+									ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+										Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
+										for idx, lbl := range []string{"未开封", "已开封", "已用尽"} {
+											idx, lbl := idx, lbl
+											active := w.pantryStatusIdx == idx
+											bg, fg := ui.Transparent, tok.TextMuted
+											if active {
+												bg, fg = tok.AccentSoftBg, tok.Accent
+											}
+											seg := ui.ButtonBase(c.Key(fmt.Sprintf("pantry-status-%d", idx))).Label(lbl).
+												Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+												Radius(float32(tok.ControlRadius) - 1).Background(bg).
+												OnClick(func() { w.pantryStatusIdx = idx })
+											seg.Children(func() {
+												txt := ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+												if active {
+													txt.Bold()
+												}
+											})
+										}
+									})
 								})
 							})
 							ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {

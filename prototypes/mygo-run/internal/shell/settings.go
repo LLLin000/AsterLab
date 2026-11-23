@@ -521,19 +521,34 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Description: "从文件树或日历打开 .asterml 时默认进入编辑态或纯净阅读态（仍可原位勾选与计时）。",
 						Keywords:    []string{"mode", "edit", "read", "编辑", "阅读", "默认"},
 						Build: func(c *ui.Context) {
-							idx := 0
-							if s.DefaultOpenMode == "read" {
-								idx = 1
-							}
-							components.Tabs(c, &idx, components.TabsSegmented, "编辑态", "阅读态")
-							next := "edit"
-							if idx == 1 {
-								next = "read"
-							}
-							if next != s.DefaultOpenMode {
-								s.DefaultOpenMode = next
-								s.notifySettingsChanged()
-							}
+							// Avoid components.Tabs inside Settings Dialog (Onevra Tabs.Draw panics on Dialog Exit transition).
+							tok := theme.GetTokens(c.Theme())
+							ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+								Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
+								for _, item := range []struct{ key, lbl string }{{"edit", "编辑态"}, {"read", "阅读态"}} {
+									item := item
+									active := s.DefaultOpenMode == item.key || (s.DefaultOpenMode == "" && item.key == "edit")
+									bg, fg := ui.Transparent, tok.TextMuted
+									if active {
+										bg, fg = tok.Surface, tok.Text
+									}
+									btn := ui.ButtonBase(c.Key("set-open-mode-"+item.key)).Label(item.lbl).
+										Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
+										Radius(float32(tok.ControlRadius) - 1).Background(bg).
+										OnClick(func() {
+											if item.key != s.DefaultOpenMode {
+												s.DefaultOpenMode = item.key
+												s.notifySettingsChanged()
+											}
+										})
+									btn.Children(func() {
+										txt := ui.Text(c, item.lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+										if active {
+											txt.Bold()
+										}
+									})
+								}
+							})
 						},
 					},
 					{
