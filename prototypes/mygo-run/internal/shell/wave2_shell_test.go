@@ -63,7 +63,8 @@ func TestGlobalSearchModalAndCompanionDiagnosticsTab(t *testing.T) {
 		t.Fatalf("OnOpenSearchHit mismatch: rel=%q query=%q", openedRel, openedQuery)
 	}
 
-	// Open companion drawer tab 2 ("关联与诊断")
+	// Open document tab and companion drawer tab 2 ("关联与诊断")
+	s.OpenFileInPane(s.ActivePaneID, "2026/cck8.asterml", "CCK-8 筛选实验", ModeEdit, false)
 	s.SetRightDrawer(true, 2)
 	tt.Frame()
 	if err := tt.Click("关联与诊断"); err != nil {

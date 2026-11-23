@@ -60,6 +60,7 @@ var (
 	reWikiBracket   = regexp.MustCompile(`(!?)\[\[([^\]|\r\n]+?)(?:\|([^\]\r\n]*))?\]\]`)
 	reMDDisplayMath = regexp.MustCompile(`^\s*\$\$(.+?)\$\$\s*$`)
 	reMDInlineMath  = regexp.MustCompile(`\$([^\$\r\n]+?)\$`)
+	rePlainSciPower = regexp.MustCompile(`\b(?:10|[a-zA-Z]{1,3})\^(?:\{[+-]?[0-9a-zA-Z]+\}|[+-]?[0-9]+)`)
 )
 
 func liveEditorTheme(t *ui.Theme, tok theme.Tokens) *editor.Theme {
@@ -480,6 +481,7 @@ func ComputeLivePreviewDecorations(
 				}
 				return false
 			}
+			var mathSpans [][]int
 			for _, m := range reMDInlineMath.FindAllStringSubmatchIndex(lineText, -1) {
 				if inCodeSpan(m[0]) || inCodeSpan(m[1]-1) {
 					continue
@@ -492,12 +494,13 @@ func ComputeLivePreviewDecorations(
 				if !looksLikeInlineLatex(inner) {
 					continue
 				}
+				mathSpans = append(mathSpans, []int{m[0], m[1]})
 				expr := strings.TrimSpace(inner)
 				pretty := formatLatexInlinePretty(expr)
 				parsedNode, pErr := ParseLatexMath(expr)
 				// Use 2D RenderMathNode when scimath parses cleanly AND contains no unsupported TeX macros;
-				// otherwise render crisp Unicode math typography (π, μ, ×, ≈, ², ₀, /).
-				use2D := pErr == nil && parsedNode != nil && !strings.Contains(expr, `\approx`) && !strings.Contains(expr, `\text`) && !strings.Contains(expr, `\%`)
+				// otherwise render native raised/lowered superscript/subscript spans (UI-01).
+				use2D := pErr == nil && parsedNode != nil && !strings.Contains(expr, `\approx`) && !strings.Contains(expr, `\text`) && !strings.Contains(expr, `\%`) && !strings.Contains(expr, `\sim`)
 				chipW := estimateChipWidth(pretty, float32(tok.TextBody)) + float32(tok.Spacing4)
 				if use2D && strings.Contains(expr, `\frac`) {
 					chipW += float32(tok.Spacing8)
@@ -514,8 +517,39 @@ func ComputeLivePreviewDecorations(
 							if use2D {
 								RenderMathNode(c, tok, parsedNode, float32(tok.TextBody)-0.5, tok.Text)
 							} else {
-								ui.Text(c, pretty).FontSize(float32(tok.TextBody)-0.5).Italic().TextColor(tok.Text).SingleLine()
+								renderNativeScriptRow(c, tok, expr, float32(tok.TextBody)-0.5, tok.Text, true, false)
 							}
+						})
+					},
+				})
+			}
+			// UI-01: Plain scientific powers (`10^-3`, `10^8`, `cm^2`) outside code/math spans render with native raised superscripts.
+			inMathSpan := func(pos int) bool {
+				for _, ms := range mathSpans {
+					if pos >= ms[0] && pos < ms[1] {
+						return true
+					}
+				}
+				return false
+			}
+			for _, m := range rePlainSciPower.FindAllStringIndex(lineText, -1) {
+				if inCodeSpan(m[0]) || inMathSpan(m[0]) {
+					continue
+				}
+				rawPow := lineText[m[0]:m[1]]
+				prettyPow := formatLatexInlinePretty(rawPow)
+				powW := estimateChipWidth(prettyPow, float32(tok.TextBody)) - float32(tok.Spacing12)
+				if powW < float32(tok.Spacing24) {
+					powW = float32(tok.Spacing24)
+				}
+				repls = append(repls, editor.Replacement{
+					Start: lineStart + m[0],
+					End:   lineStart + m[1],
+					Width: powW,
+					Label: prettyPow,
+					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+						e.Row().AlignItems(ui.Center).Children(func() {
+							renderNativeScriptRow(c, tok, rawPow, float32(tok.TextBody), tok.Text, false, false)
 						})
 					},
 				})

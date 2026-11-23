@@ -247,6 +247,8 @@ func TestSlimRightCompanionDrawerOutlineAndCalc(t *testing.T) {
 		OutlineSteps: []OutlineItem{{ID: "step-2", Title: "02 滤纸片贴敷", Meta: "3 块", Active: true}},
 		OnSelectOutlineStep: func(id string) { jumpedStep = id },
 	}
+	s.EnsureTabs()
+	s.OpenFileInPane(s.ActivePaneID, "proj/disc.asterml", "抑菌圈实验", ModeEdit, false)
 	tt := render(s.RenderSplitView, 1400, 880)
 	tt.Frame()
 
@@ -264,7 +266,7 @@ func TestSlimRightCompanionDrawerOutlineAndCalc(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("取母液 V1 = 2.00 μL") {
+	if !tt.HasText("取母液 V₁") || !tt.HasText("2.00 µL") {
 		t.Fatalf("quick dilution calculation mismatch: %q", tt.Texts())
 	}
 }

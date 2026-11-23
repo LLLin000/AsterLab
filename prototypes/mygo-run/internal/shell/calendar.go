@@ -269,15 +269,21 @@ func (s *Shell) calendarHomeBody(
 	allExps []ExperimentItem,
 	byDate map[string][]ExperimentItem,
 ) {
-	padTop := float32(tok.Spacing12)
-	padH := float32(tok.Spacing16)
-	padB := float32(tok.Spacing12)
+	// UI-15: Generous desktop breathing margins so the calendar grid sits comfortably in the canvas.
+	padTop := float32(tok.Spacing24)
+	padH := float32(tok.Spacing32)
+	padB := float32(tok.Spacing24)
+	if compactV {
+		padTop = float32(tok.Spacing12)
+		padH = float32(tok.Spacing24)
+		padB = float32(tok.Spacing12)
+	}
 	if mobileMode {
 		padTop = s.MobileTopReserve(c) + float32(tok.Spacing8)
 		padH = float32(tok.Spacing8)
 		padB = s.MobileBottomReserve(c) + float32(tok.Spacing16)
 	}
-	col := ui.Column(c).FillWidth().Padding(padTop, padH, padB, padH).Gap(float32(tok.Spacing12))
+	col := ui.Column(c).FillWidth().Padding(padTop, padH, padB, padH).Gap(float32(tok.Spacing16))
 	if !mobileMode {
 		col.FillHeight()
 	}
@@ -291,61 +297,70 @@ func (s *Shell) calendarHomeBody(
 					FontSize(float32(tok.TextData)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
 			})
 		}
-		// 1. Minimal Single-Row Apple Calendar Toolbar
-		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-			periodLabel := cursor.Format("2006 年 01 月")
-			if s.CalendarMode == 1 {
-				wStart := cursor.AddDate(0, 0, -weekdayMondayIndex(cursor.Weekday()))
-				wEnd := wStart.AddDate(0, 0, 6)
-				periodLabel = fmt.Sprintf("%d 年 %d 月 · %s – %s", cursor.Year(), cursor.Month(), wStart.Format("01/02"), wEnd.Format("01/02"))
-			}
-			components.Text(c, periodLabel).FontSize(float32(tok.TextPage)).Bold().
-				TextColor(tok.Text).FontFeatures("tnum")
+		// 1. Balanced 3-Column Calendar Toolbar:
+		// UI-16: Left & Right tracks share equal Grow(1) so the center "月 | 周" segmented control
+		// stays mathematically fixed in position regardless of date title width.
+		// UI-17: Week date range renders as a smaller muted subtitle next to the bold year-month title.
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+			// Left track (Grow 1): Period heading + prev/today/next controls
+			ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+				ui.Row(c).AlignItems(ui.Baseline).Gap(float32(tok.Spacing8)).Children(func() {
+					components.Text(c, cursor.Format("2006 年 01 月")).FontSize(float32(tok.TextPage)).Bold().
+						TextColor(tok.Text).FontFeatures("tnum").SingleLine()
+					if s.CalendarMode == 1 {
+						wStart := cursor.AddDate(0, 0, -weekdayMondayIndex(cursor.Weekday()))
+						wEnd := wStart.AddDate(0, 0, 6)
+						rangeLbl := fmt.Sprintf("%s – %s", wStart.Format("01/02"), wEnd.Format("01/02"))
+						components.Text(c, rangeLbl).FontSize(float32(tok.TextData)).
+							TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+					}
+				})
 
-			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-				if components.IconButton(c, lucide.ChevronLeft(), "上一时段", components.IconButtonCompact).Clicked() {
-					s.calAnimDir = -1
-					s.DayPopoverOpen = false
-					if s.CalendarMode == 0 {
-						cursor = cursor.AddDate(0, -1, 0)
-					} else {
-						cursor = cursor.AddDate(0, 0, -7)
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Shrink(0).Children(func() {
+					if components.IconButton(c, lucide.ChevronLeft(), "上一时段", components.IconButtonCompact).Clicked() {
+						s.calAnimDir = -1
+						s.DayPopoverOpen = false
+						if s.CalendarMode == 0 {
+							cursor = cursor.AddDate(0, -1, 0)
+						} else {
+							cursor = cursor.AddDate(0, 0, -7)
+						}
+						s.CalendarCursor = cursor.Format("2006-01-02")
 					}
-					s.CalendarCursor = cursor.Format("2006-01-02")
-				}
-				if components.Button(c, "今天", components.ButtonOutline).Clicked() {
-					s.calAnimDir = 0
-					s.SelectedDate = todayYMD
-					s.CalendarCursor = todayYMD
-					s.DayPopoverDate = todayYMD
-					s.DayPopoverOpen = true
-					selDateYMD = todayYMD
-					cursor = today
-				}
-				if components.IconButton(c, lucide.ChevronRight(), "下一时段", components.IconButtonCompact).Clicked() {
-					s.calAnimDir = 1
-					s.DayPopoverOpen = false
-					if s.CalendarMode == 0 {
-						cursor = cursor.AddDate(0, 1, 0)
-					} else {
-						cursor = cursor.AddDate(0, 0, 7)
+					if components.Button(c, "今天", components.ButtonOutline).Clicked() {
+						s.calAnimDir = 0
+						s.SelectedDate = todayYMD
+						s.CalendarCursor = todayYMD
+						s.DayPopoverDate = todayYMD
+						s.DayPopoverOpen = true
+						selDateYMD = todayYMD
+						cursor = today
 					}
-					s.CalendarCursor = cursor.Format("2006-01-02")
+					if components.IconButton(c, lucide.ChevronRight(), "下一时段", components.IconButtonCompact).Clicked() {
+						s.calAnimDir = 1
+						s.DayPopoverOpen = false
+						if s.CalendarMode == 0 {
+							cursor = cursor.AddDate(0, 1, 0)
+						} else {
+							cursor = cursor.AddDate(0, 0, 7)
+						}
+						s.CalendarCursor = cursor.Format("2006-01-02")
+					}
+				})
+			})
+
+			// Center pinned track (Shrink 0): Month / Week segmented switcher
+			ui.Row(c).Shrink(0).AlignItems(ui.Center).Children(func() {
+				modeTab := s.CalendarMode
+				components.Tabs(c, &modeTab, components.TabsSegmented, "月", "周")
+				if modeTab != s.CalendarMode {
+					s.DayPopoverOpen = false
+					s.CalendarMode = modeTab
 				}
 			})
 
-			ui.Spacer(c)
-
-			modeTab := s.CalendarMode
-			components.Tabs(c, &modeTab, components.TabsSegmented, "月", "周")
-			if modeTab != s.CalendarMode {
-				s.DayPopoverOpen = false
-				s.CalendarMode = modeTab
-			}
-
-			ui.Spacer(c)
-
-			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			// Right track (Grow 1): Search + Primary CTA + More menu
+			ui.Row(c).Grow(1).MinWidth(0).Justify(ui.End).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				if !mobileMode {
 					ui.TextInput(c, &s.Query).Placeholder("搜索实验…").Width(float32(tok.Spacing48) * 3)
 				}
@@ -810,23 +825,32 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 		})
 		ui.Box(c).FillWidth().Height(1).Background(tok.Border)
 
-		// 3. Scrollable 08:00 – 20:00 Hourly Axis
+		// 3. Scrollable 07:00 – 22:00 Hourly Axis (UI-18: full-height matched frame + live hover time guide)
 		curHour := s.CurrentHour
 		if curHour <= 0 {
 			now := time.Now()
 			curHour = float32(now.Hour()) + float32(now.Minute())/60.0
 		}
+		_, availH := c.Size()
+		const startHr = 7
+		const endHr = 22
+		rowCount := float32(endHr - startHr + 1)
 		rowH := float32(tok.Spacing48)
-		const startHr = 8
-		const endHr = 20
+		if availH > 260 {
+			fitH := (availH - 220) / rowCount
+			if fitH > rowH {
+				rowH = fitH
+			}
+		}
 
 		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 			ui.Column(c).FillWidth().Gap(0).Children(func() {
 				for hr := startHr; hr <= endHr; hr++ {
+					hr := hr
 					if hr > startHr {
 						ui.Box(c).FillWidth().Height(1).Background(tok.Border)
 					}
-					ui.Row(c).FillWidth().Height(rowH).Gap(0).Children(func() {
+					ui.Row(c.Key(fmt.Sprintf("wk-row-%d", hr))).FillWidth().Height(rowH).Gap(0).Children(func() {
 						// Hour gutter
 						ui.Row(c).Width(gutterW).FillHeight().Shrink(0).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 							AlignItems(ui.Start).Justify(ui.End).Children(func() {
@@ -842,12 +866,18 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 							if isWeekend(day.Weekday()) {
 								cellBg = tok.Elevated
 							}
-							slot := ui.Box(c).Grow(1).MinWidth(0).FillHeight().Background(cellBg).
-								Padding(float32(tok.Spacing4))
+							slot := ui.Box(c.Key(fmt.Sprintf("wk-slot-%s-%d", ymd, hr))).Grow(1).MinWidth(0).FillHeight().
+								Background(cellBg).Padding(float32(tok.Spacing4))
+							hovered := slot.Hovered()
+							if hovered {
+								slot.Background(tok.AccentSoftBg.Alpha(0.45))
+							}
 							slot.Children(func() {
+								hasTimed := false
 								for _, exp := range byDate[ymd] {
 									exp := exp
 									if exp.StartHour > 0 && int(exp.StartHour) == hr {
+										hasTimed = true
 										bg, bar, fg := stagePillColors(tok, exp.Stage)
 										blk := ui.ButtonBase(c.Key("wk-hr-"+exp.ID)).FillWidth().Justify(ui.Start).
 											Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
@@ -868,6 +898,21 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 											s.openExperiment(exp)
 										}
 									}
+								}
+								// UI-18: Live hover time-indicator guide line + affordance badge
+								if hovered {
+									ui.Row(c).Absolute().Left(0).Right(0).Top(float32(tok.Spacing4)).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+										ui.Box(c).Width(float32(tok.Spacing4) * 1.5).Height(float32(tok.Spacing4) * 1.5).
+											Radius(float32(tok.Spacing4)).Background(tok.Accent)
+										ui.Box(c).Grow(1).Height(1.5).Background(tok.Accent.Alpha(0.75))
+										if !hasTimed {
+											ui.Row(c).Padding(1, float32(tok.Spacing4)).Radius(float32(tok.ControlRadius)).
+												Background(tok.Accent).Children(func() {
+												ui.Text(c, fmt.Sprintf("%02d:00 +", hr)).FontSize(float32(tok.TextMeta)-1).
+													Bold().TextColor(tok.AccentText).FontFeatures("tnum").SingleLine()
+											})
+										}
+									})
 								}
 								if isToday && int(curHour) == hr {
 									frac := curHour - float32(hr)
@@ -891,6 +936,8 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 						}
 					})
 				}
+				// Crisp closing bottom hairline so the week grid never looks abruptly cut off
+				ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.6))
 			})
 		})
 	})

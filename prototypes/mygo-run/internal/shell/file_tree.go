@@ -66,13 +66,14 @@ func (s *Shell) renderRibbon(c *ui.Context, tok theme.Tokens) {
 		}
 		ui.Box(c).Width(float32(tok.Spacing24)).Height(1).Background(tok.Border.Alpha(0.7))
 
-		// Toggle file tree (Ctrl+B)
-		treeBtn := components.IconButton(c, lucide.FolderTree(), "切换文件树 (Ctrl+B)", components.IconButtonPlain)
+		// Focus / open file tree (UI-19: never collapse sidebar when already showing file tree;
+		// hiding the sidebar belongs strictly to the top-left collapse button / Ctrl+B).
+		treeBtn := components.IconButton(c, lucide.FolderTree(), "实验文件树", components.IconButtonPlain)
 		if s.window != nil && s.window.LeftExpanded() {
 			treeBtn.Background(tok.AccentSoftBg)
 		}
-		if treeBtn.Clicked() && s.window != nil {
-			s.window.SetLeftExpanded(!s.window.LeftExpanded())
+		if treeBtn.Clicked() && s.window != nil && !s.window.LeftExpanded() {
+			s.window.SetLeftExpanded(true)
 		}
 
 		// Calendar Home

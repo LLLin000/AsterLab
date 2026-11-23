@@ -191,3 +191,53 @@ func TestExportSession_WritesFolderManifestMarkdownAndZip(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveWritableOutputDirAndDraftPersistence(t *testing.T) {
+	tmp := t.TempDir()
+	// Create a regular file to act as an un-mkdir-able path, followed by a valid candidate.
+	blocker := filepath.Join(tmp, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	good := filepath.Join(tmp, "good-out")
+	resolved, err := ResolveWritableOutputDir(filepath.Join(blocker, "sub"), good)
+	if err != nil {
+		t.Fatalf("ResolveWritableOutputDir failed: %v", err)
+	}
+	if resolved != good {
+		t.Fatalf("got %q, want %q", resolved, good)
+	}
+
+	raw := makeSyntheticPNG(t, 400, 300)
+	fullPNG, cropPNG, w, h, err := AnnotateAndCrop(raw, Rect{X: 20, Y: 20, W: 80, H: 40}, 400, 300)
+	if err != nil {
+		t.Fatalf("AnnotateAndCrop: %v", err)
+	}
+	in := []Issue{{
+		ID:         "UI-01",
+		Category:   "交互逻辑",
+		Severity:   "P1",
+		Suggestion: "保持草稿自动落盘不丢失",
+		ImageW:     w,
+		ImageH:     h,
+		FullPNG:    fullPNG,
+		CropPNG:    cropPNG,
+	}}
+	if err := SaveDraft(resolved, in); err != nil {
+		t.Fatalf("SaveDraft: %v", err)
+	}
+	got, err := LoadDraft(resolved)
+	if err != nil {
+		t.Fatalf("LoadDraft: %v", err)
+	}
+	if len(got) != 1 || got[0].Suggestion != in[0].Suggestion || len(got[0].FullPNG) == 0 || len(got[0].CropPNG) == 0 {
+		t.Fatalf("draft round-trip mismatch: %+v", got)
+	}
+	if err := ClearDraft(resolved); err != nil {
+		t.Fatalf("ClearDraft: %v", err)
+	}
+	after, err := LoadDraft(resolved)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("expected empty draft after ClearDraft, got %d err=%v", len(after), err)
+	}
+}

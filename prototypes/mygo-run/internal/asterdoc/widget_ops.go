@@ -569,34 +569,6 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 		activeFPos = 0
 	}
 
-	// Detect which built-in preset matches the current title for active tab highlight
-	detectPreset := func() string {
-		tl := strings.ToLower(title)
-		switch {
-		case strings.Contains(tl, "连续") || strings.Contains(tl, "倍比"):
-			return "serial_dilution"
-		case strings.Contains(tl, "比例稀释") || strings.Contains(tl, "1:n"):
-			return "ratio_dilution"
-		case strings.Contains(tl, "稀释"):
-			return "dilution"
-		case strings.Contains(tl, "% w/v") || strings.Contains(tl, "w/v"):
-			return "weighing_wv"
-		case strings.Contains(tl, "称量") || strings.Contains(tl, "摩尔"):
-			return "weighing"
-		case strings.Contains(tl, "预混"):
-			return "mastermix"
-		case strings.Contains(tl, "细胞") || strings.Contains(tl, "接种") || strings.Contains(tl, "铺板"):
-			return "seeding"
-		case strings.Contains(tl, "离心") || strings.Contains(tl, "rcf") || strings.Contains(tl, "rpm"):
-			return "rcf_rpm"
-		case strings.Contains(tl, "自定义") || strings.Contains(tl, "latex"):
-			return "custom"
-		default:
-			return ""
-		}
-	}
-	activePreset := detectPreset()
-
 	var primaryPlate *SciContainer
 	var upstreamCalcs []SciCalcOutput
 	var docGraph *SciGraph
@@ -623,133 +595,69 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 		if res.Summary != "" {
 			inlineBadge(c, res.Summary, components.BadgeOptions{Tone: components.BadgeAccent})
 		}
+		// UI-05 & UI-06: Collapse the noisy 7-pill mode bar (with inconsistent icons) into ONE
+		// clean header dropdown menu button so calculator cards stay calm and focused.
+		if editableDesign {
+			tplBtn := ui.ButtonBase(c.Key("calc-tpl-menu:"+moduleID)).
+				Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
+				AlignItems(ui.Center).AlignSelf(ui.Center).
+				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border.Alpha(0.75)).
+				Label("切换计算模板或编辑公式")
+			if tplBtn.Hovered() {
+				tplBtn.Background(tok.Text.Alpha(0.05))
+			}
+			tplBtn.Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "公式模板").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine()
+					ui.Icon(c, lucide.ChevronDown()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+				})
+			})
+			components.MenuButton(c, tplBtn, func(m *components.Menu) {
+				lastCat := ""
+				for _, pr := range CalculatorFormulaPresets() {
+					if lastCat != "" && pr.Category != lastCat {
+						m.Separator()
+					}
+					lastCat = pr.Category
+					itemText := pr.Label + "  (" + pr.ShortFormula + ")"
+					if m.Item(itemText).Chosen() {
+						applyCalcPreset(pr.ID)
+					}
+				}
+				m.Separator()
+				customLbl := "展开自定义 LaTeX 公式编辑"
+				if *customOpen {
+					customLbl = "收起自定义 LaTeX 公式编辑"
+				}
+				if m.Item(customLbl).Chosen() {
+					*customOpen = !*customOpen
+					if len(formulaIdxs) == 0 {
+						applyCalcPreset("custom")
+					}
+				}
+			})
+		}
 	}, func() {
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
-			// 1. Clean Mode Switcher Pills + Universal Formula Library Dropdown + Custom LaTeX
-			if editableDesign {
-				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-					quickModes := []struct {
-						id    string
-						label string
-					}{
-						{"dilution", "稀释 C₁V₁"},
-						{"weighing_wv", "% w/v 称量"},
-						{"weighing", "摩尔称量"},
-						{"mastermix", "孔板预混"},
-						{"seeding", "细胞接种"},
-					}
-					for _, md := range quickModes {
-						md := md
-						isAct := activePreset == md.id
-						pill := ui.ButtonBase(c.Key("calc-mode:"+moduleID+":"+md.id)).
-							Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
-							AlignItems(ui.Center).AlignSelf(ui.Center).
-							Radius(float32(tok.ControlRadius)).Label("切换计算模式：" + md.label)
-						fg := tok.TextMuted
-						if isAct {
-							pill.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.35))
-							fg = tok.Accent
-						} else {
-							pill.Background(tok.Elevated).Border(1, tok.Border.Alpha(0.75))
-							if pill.Hovered() {
-								pill.Background(tok.Text.Alpha(0.05))
-								fg = tok.Text
-							}
-						}
-						pill.Children(func() {
-							ui.Text(c, md.label).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
-						})
-						if pill.Clicked() {
-							applyCalcPreset(md.id)
-						}
-					}
-
-					// Universal Formula Library Menu (9 curated wet-lab templates inside calculator@1)
-					libIsOther := activePreset == "ratio_dilution" || activePreset == "serial_dilution" || activePreset == "rcf_rpm"
-					libBtn := ui.ButtonBase(c.Key("calc-lib:"+moduleID)).
-						Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
-						AlignItems(ui.Center).AlignSelf(ui.Center).
-						Radius(float32(tok.ControlRadius)).Label("打开公式库")
-					libFg := tok.TextMuted
-					if libIsOther {
-						libBtn.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.35))
-						libFg = tok.Accent
-					} else {
-						libBtn.Background(tok.Elevated).Border(1, tok.Border.Alpha(0.75))
-						if libBtn.Hovered() {
-							libBtn.Background(tok.Text.Alpha(0.05))
-							libFg = tok.Text
-						}
-					}
-					libBtn.Children(func() {
-						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-							ui.Icon(c, lucide.BookOpen()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(libFg)
-							ui.Text(c, "公式库").FontSize(float32(tok.TextMeta)).Bold().TextColor(libFg).SingleLine()
-							ui.Icon(c, lucide.ChevronDown()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(libFg)
-						})
-					})
-					components.MenuButton(c, libBtn, func(m *components.Menu) {
-						lastCat := ""
-						for _, pr := range CalculatorFormulaPresets() {
-							if lastCat != "" && pr.Category != lastCat {
-								m.Separator()
-							}
-							lastCat = pr.Category
-							itemText := pr.Label + "  (" + pr.ShortFormula + ")"
-							if m.Item(itemText).Chosen() {
-								applyCalcPreset(pr.ID)
-							}
-						}
-					})
-
-					// Custom LaTeX toggle pill (never permanently locked open!)
-					custAct := *customOpen
-					custPill := ui.ButtonBase(c.Key("calc-mode:"+moduleID+":custom")).
-						Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
-						AlignItems(ui.Center).AlignSelf(ui.Center).
-						Radius(float32(tok.ControlRadius)).Label("切换自定义公式编辑")
-					custFg := tok.TextMuted
-					if custAct {
-						custPill.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.35))
-						custFg = tok.Accent
-					} else {
-						custPill.Background(tok.Elevated).Border(1, tok.Border.Alpha(0.75))
-						if custPill.Hovered() {
-							custPill.Background(tok.Text.Alpha(0.05))
-							custFg = tok.Text
-						}
-					}
-					custPill.Children(func() {
-						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-							ui.Icon(c, lucide.Sigma()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(custFg)
-							ui.Text(c, "自定义公式").FontSize(float32(tok.TextMeta)).Bold().TextColor(custFg).SingleLine()
-						})
-					})
-					if custPill.Clicked() {
-						*customOpen = !*customOpen
-						if len(formulaIdxs) == 0 {
-							applyCalcPreset("custom")
-						}
-					}
-				})
+			// UI-04 & UI-05: Horizontal 1.5 mL microcentrifuge tube schematic with transfer arrows
+			// and native scientific notation for serial_dilution mode!
+			if mode == "serial_dilution" && len(rows) == 0 {
+				v.renderSerialDilutionTubeSchematic(c, tok, moduleID, data, res)
+				return
 			}
 
-			// Fallback for legacy non-row modes (dilution / group_mastermix / serial_dilution / sample_normalize)
+			// Fallback for other legacy non-row modes (dilution / group_mastermix / sample_normalize)
 			if len(rows) == 0 {
 				if res.Err != nil {
 					ui.Text(c, friendlyCalcError(res.Err)).FontSize(float32(tok.TextMeta)).TextColor(tok.Warning)
 				}
 				for _, r := range res.Rows {
 					r := r
-					amt := formatNumber(r.Amount)
-					if r.Unit != "" {
-						amt += " " + DisplayUnit(r.Unit)
-					}
 					ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
 						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Text(c, r.Label).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
 						ui.Spacer(c)
-						ui.Text(c, amt).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+						renderSciNumber(c, tok, r.Amount, r.Unit, float32(tok.TextData), tok.Accent, true)
 					})
 				}
 				return
@@ -902,14 +810,18 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 							render2D()
 						}
 						ui.Text(c, "=").FontSize(float32(tok.TextSection)+2).TextColor(tok.TextMuted).SingleLine()
-						// Highlighted Computed Result Pill
+						// Highlighted Computed Result Pill (UI-05: native scientific notation when >= 1000 or <= 0.001)
 						ui.Row(c).Padding(float32(tok.Spacing4)*1.2, float32(tok.Spacing12)).
 							Radius(float32(tok.ControlRadius)).
 							Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.35)).
 							AlignItems(ui.Center).Children(func() {
-							ui.Text(c, dispAmt).FontSize(float32(tok.TextSection)+2).Bold().
-								TextColor(tok.Accent).FontFeatures("tnum").SingleLine().
-								ContentTransition(theme.NumericRoll(false))
+							if activeRowIdx < len(res.Rows) && res.Err == nil {
+								renderSciNumber(c, tok, res.Rows[activeRowIdx].Amount, runit, float32(tok.TextSection)+2, tok.Accent, true)
+							} else {
+								ui.Text(c, dispAmt).FontSize(float32(tok.TextSection)+2).Bold().
+									TextColor(tok.Accent).FontFeatures("tnum").SingleLine().
+									ContentTransition(theme.NumericRoll(false))
+							}
 						})
 					})
 

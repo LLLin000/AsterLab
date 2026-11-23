@@ -119,3 +119,32 @@ func TestNLSuggest_MastermixPreservesMLUnitAndDedupesStepModules(t *testing.T) {
 		t.Fatalf("expected 0 suggestions (blockquote gated & existing timer deduped), got %+v", docRep.Suggestions)
 	}
 }
+
+func TestNativeScriptRunsAndScientificNotation(t *testing.T) {
+	runs := parseRichScriptRuns(`10^{-3} \sim 10^{-5} + H_2O`)
+	var sawSup, sawSub bool
+	for _, r := range runs {
+		if r.Kind == scriptSup && r.Text == "-3" {
+			sawSup = true
+		}
+		if r.Kind == scriptSub && r.Text == "2" {
+			sawSub = true
+		}
+	}
+	if !sawSup || !sawSub {
+		t.Fatalf("expected native sup(-3) and sub(2) runs, got %+v", runs)
+	}
+
+	if got := formatSciCompactText(1000000); got != "10⁶" {
+		t.Fatalf("1e6 -> %q, want 10⁶", got)
+	}
+	if got := formatSciCompactText(14200000); got != "1.42×10⁷" {
+		t.Fatalf("1.42e7 -> %q, want 1.42×10⁷", got)
+	}
+	if got := formatSciCompactText(0.0001); got != "10⁻⁴" {
+		t.Fatalf("1e-4 -> %q, want 10⁻⁴", got)
+	}
+	if got := formatSciCompactText(250); got != "250" {
+		t.Fatalf("250 should stay plain, got %q", got)
+	}
+}
