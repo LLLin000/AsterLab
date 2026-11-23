@@ -98,7 +98,29 @@ var (
 	reStepTaskLine      = regexp.MustCompile(`^[ \t]*[-*+][ \t]+\[([ xX])\][ \t]*(.*)$`)
 	reStepBulletLine    = regexp.MustCompile(`^[ \t]*[-*+][ \t]+(.+)$`)
 	reStepOrderedLine   = regexp.MustCompile(`^[ \t]*\d+[.)][ \t]+(.+)$`)
+	reLeadingStepNumber = regexp.MustCompile(`^\d+(?:\.\d+)*[\.、\s]+`)
 )
+
+// LeadingStepNumberPrefixLen returns the byte length of a redundant leading
+// numeric prefix such as "1. ", "01 ", or "1.1 " at the start of a step title
+// (while preserving the entire title if stripping would leave it empty).
+func LeadingStepNumberPrefixLen(title string) int {
+	loc := reLeadingStepNumber.FindStringIndex(title)
+	if loc == nil || loc[0] != 0 || loc[1] >= len(strings.TrimSpace(title)) {
+		return 0
+	}
+	return loc[1]
+}
+
+// StripLeadingStepNumber removes redundant numeric prefixes like "1. " or "01 "
+// for display in step pills and outlines without mutating document source.
+func StripLeadingStepNumber(title string) string {
+	n := LeadingStepNumberPrefixLen(title)
+	if n <= 0 {
+		return title
+	}
+	return strings.TrimSpace(title[n:])
+}
 
 // ParseHeadingStepLine parses one line of Markdown (without trailing newline) as an
 // orthogonal AsterML step header (`#@ 主步骤`, `##@ 子步骤`). Returns ok=false for
@@ -532,7 +554,7 @@ func ParseDocumentOutline(source string, doc *Document) []*OutlineNode {
 			legacyEmitted[sn.ID] = true
 			out = append(out, &OutlineNode{
 				ID:            sn.ID,
-				Title:         sn.Title,
+				Title:         StripLeadingStepNumber(sn.Title),
 				IsStep:        true,
 				Number:        sn.Number,
 				Depth:         currentChapterBaseDepth() + sn.Depth,
@@ -585,7 +607,7 @@ func ParseDocumentOutline(source string, doc *Document) []*OutlineNode {
 			if sn := stepTree.ByLineStart[off]; sn != nil {
 				out = append(out, &OutlineNode{
 					ID:            sn.ID,
-					Title:         sn.Title,
+					Title:         StripLeadingStepNumber(sn.Title),
 					IsStep:        true,
 					Number:        sn.Number,
 					Depth:         currentChapterBaseDepth() + sn.Depth,

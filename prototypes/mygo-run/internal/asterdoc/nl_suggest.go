@@ -1456,9 +1456,13 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			}
 		}
 		perWell := 10.0
+		perWellUnit := "uL"
 		perWellMissing := true
 		if vols := reNLVolume.FindAllStringSubmatch(text, -1); len(vols) >= 1 {
 			perWell, _ = strconv.ParseFloat(vols[0][1], 64)
+			if len(vols[0]) >= 3 && strings.EqualFold(strings.TrimSpace(vols[0][2]), "mL") {
+				perWellUnit = "mL"
+			}
 			perWellMissing = false
 		}
 		var mmMissing []string
@@ -1469,6 +1473,10 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			mmMissing = append(mmMissing, "单孔体积 V₀")
 		}
 		tot := round4(wells * perWell * (1 + overage))
+		dispUnit := "µL"
+		if perWellUnit == "mL" {
+			dispUnit = "mL"
+		}
 		mod := map[string]any{
 			"kind":   "calculator",
 			"id":     id,
@@ -1476,22 +1484,22 @@ func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			"title":  "孔板预混液配制计算",
 			"mode":   "formula",
 			"rows": []any{
-				map[string]any{"key": "N", "label": wellsLabel, "kind": "input", "value": wellsRowVal, "unit": "孔"},
-				map[string]any{"key": "V_0", "label": "单孔加样体积", "kind": "input", "value": perWell, "unit": "uL"},
-				map[string]any{"key": "r", "label": "富余系数", "kind": "input", "value": overage, "unit": ""},
-				map[string]any{"key": "V_tot", "label": "预混液总体积", "kind": "formula", "formula": `N \times V_{0} \times (1 + r)`, "unit": "uL"},
+				map[string]any{"key": "N", "label": wellsLabel, "kind": "input", "value": wellsRowVal, "unit": "1"},
+				map[string]any{"key": "V_0", "label": "单孔加样体积", "kind": "input", "value": perWell, "unit": perWellUnit},
+				map[string]any{"key": "r", "label": "富余系数", "kind": "input", "value": overage, "unit": "1"},
+				map[string]any{"key": "V_tot", "label": "预混液总体积", "kind": "formula", "formula": `N \times V_{0} \times (1 + r)`, "unit": perWellUnit},
 			},
 		}
 		return &NLSuggestion{
 			Kind:          "calculator",
 			Mode:          "mastermix",
 			KindLabel:     "预混液计算器",
-			Summary:       fmt.Sprintf("%s 孔 × %s µL × (1+%s%%) = %s µL", formatNumber(wells), formatNumber(perWell), formatNumber(overage*100), formatNumber(tot)),
+			Summary:       fmt.Sprintf("%s 孔 × %s %s × (1+%s%%) = %s %s", formatNumber(wells), formatNumber(perWell), dispUnit, formatNumber(overage*100), formatNumber(tot), dispUnit),
 			InheritedFrom: inheritedFrom,
 			MissingSlots:  mmMissing,
 			Params: []NLParamKV{
 				{Label: wellsLabel, Value: fmt.Sprintf("%s 孔", formatNumber(wells)), IsDefault: wellsMissing},
-				{Label: "单孔体积", Value: fmt.Sprintf("%s µL", formatNumber(perWell)), IsDefault: perWellMissing},
+				{Label: "单孔体积", Value: fmt.Sprintf("%s %s", formatNumber(perWell), dispUnit), IsDefault: perWellMissing},
 				{Label: "富余比例", Value: fmt.Sprintf("+%s%%", formatNumber(overage*100)), IsDefault: overageMissing},
 			},
 			Modules: []map[string]any{mod},

@@ -64,12 +64,30 @@ func SuggestDocumentModules(doc *Document) DocumentSuggestReport {
 	_, bodyStart, _ := ScanFrontmatter(src)
 	graph := BuildSciGraph(doc)
 
-	// Track existing + newly suggested IDs so every proposed block has a unique ID.
+	// Track existing + newly suggested IDs so every proposed block has a unique ID,
+	// and track module kinds already present per step (or top-level) to avoid noisy duplicate suggestions.
 	usedIDs := map[string]bool{}
+	existingKindsByStep := map[string]map[string]bool{}
+	docHasPlate := false
 	for _, m := range doc.Modules {
 		if m.ID != "" {
 			usedIDs[m.ID] = true
 		}
+		if m.Kind == "plate" {
+			docHasPlate = true
+		}
+		stepKey := ""
+		if graph != nil && graph.Steps != nil {
+			for _, sn := range graph.Steps.Flat {
+				if sn != nil && m.Start >= sn.LineStart && m.Start < sn.ScopeEnd {
+					stepKey = sn.Title
+				}
+			}
+		}
+		if existingKindsByStep[stepKey] == nil {
+			existingKindsByStep[stepKey] = map[string]bool{}
+		}
+		existingKindsByStep[stepKey][m.Kind] = true
 		if m.Kind == "step" {
 			for _, bm := range mapSlice(m.Data["blocks"]) {
 				if id := textValue(bm, "id"); id != "" {
@@ -149,6 +167,15 @@ func SuggestDocumentModules(doc *Document) DocumentSuggestReport {
 		}
 		for _, sug := range sugs {
 			if sug == nil || len(sug.Modules) == 0 {
+				continue
+			}
+			// Deduplicate: skip suggesting a module kind already placed in this step (or a plate if doc already has one).
+			if sug.Kind == "plate_group" && docHasPlate {
+				rep.SkippedLines++
+				continue
+			}
+			if stepKinds := existingKindsByStep[ctx.StepTitle]; stepKinds != nil && stepKinds[sug.Kind] {
+				rep.SkippedLines++
 				continue
 			}
 			clonedMods := make([]map[string]any, 0, len(sug.Modules))

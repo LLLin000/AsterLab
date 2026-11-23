@@ -430,7 +430,7 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 					switch vkind {
 					case "text", "number", "categorical", "formula":
 					default:
-						return fmt.Errorf("data_table column %q has invalid value_kind %q", ckey, vkind)
+						return fmt.Errorf("data_table column %q has invalid value_kind %q (valid: text | number | categorical | formula)", ckey, vkind)
 					}
 					if u := textValue(col, "unit"); u != "" {
 						if _, ok := unitFor(u); !ok {
@@ -442,8 +442,12 @@ func specValidatorFor(kind string, schema int) func(map[string]any) error {
 					if hasMin && hasMax && minVal > maxVal {
 						return fmt.Errorf("data_table column %q min exceeds max", ckey)
 					}
+					formulaExpr := strings.TrimSpace(textValue(col, "formula"))
+					if formulaExpr != "" && vkind != "formula" {
+						return fmt.Errorf("data_table column %q defines formula %q but value_kind is %q (must use value_kind: formula so AsterLab auto-evaluates it)", ckey, formulaExpr, vkind)
+					}
 					if vkind == "formula" {
-						if err := ValidateFormulaExpr(textValue(col, "formula")); err != nil {
+						if err := ValidateFormulaExpr(formulaExpr); err != nil {
 							return fmt.Errorf("data_table column %q %w", ckey, err)
 						}
 					}

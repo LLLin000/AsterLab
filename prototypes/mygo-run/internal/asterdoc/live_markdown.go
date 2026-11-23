@@ -55,9 +55,11 @@ var (
 	reMDBullet    = regexp.MustCompile(`^([ \t]*)([-*+])([ \t]+)`)
 	reMDBold      = regexp.MustCompile(`\*\*([^*\r\n]+?)\*\*`)
 	reMDItalic    = regexp.MustCompile(`(?:^|[^*])\*([^*\r\n]+?)\*(?:[^*]|$)`)
-	reMDCode      = regexp.MustCompile("`([^`\r\n]+?)`")
-	reMDStrike    = regexp.MustCompile(`~~([^~\r\n]+?)~~`)
-	reWikiBracket = regexp.MustCompile(`(!?)\[\[([^\]|\r\n]+?)(?:\|([^\]\r\n]*))?\]\]`)
+	reMDCode        = regexp.MustCompile("`([^`\r\n]+?)`")
+	reMDStrike      = regexp.MustCompile(`~~([^~\r\n]+?)~~`)
+	reWikiBracket   = regexp.MustCompile(`(!?)\[\[([^\]|\r\n]+?)(?:\|([^\]\r\n]*))?\]\]`)
+	reMDDisplayMath = regexp.MustCompile(`^\s*\$\$(.+?)\$\$\s*$`)
+	reMDInlineMath  = regexp.MustCompile(`\$([^\$\r\n]+?)\$`)
 )
 
 func liveEditorTheme(t *ui.Theme, tok theme.Tokens) *editor.Theme {
@@ -192,12 +194,18 @@ func ComputeLivePreviewDecorations(
 						pillLabel = sn.Number
 					}
 				}
+				// Hide redundant manual numbering like "1. " or "01 " right after "#@ " on non-active lines
+				// so users never see double numbering ("STEP 1  1.") while preserving raw source when editing.
+				pillEnd := lineStart + hs.PrefixEnd
+				if hs.PrefixEnd < len(lineText) {
+					pillEnd += LeadingStepNumberPrefixLen(lineText[hs.PrefixEnd:])
+				}
 				if isMainStep {
 					// Scheme B Mainline Stage Header Pill: accent-tinted badge with 3px bold left stripe
 					pillW := estimateStepPillWidth(pillLabel, float32(tok.TextMeta)) + float32(tok.Spacing4)
 					repls = append(repls, editor.Replacement{
 						Start: lineStart,
-						End:   lineStart + hs.PrefixEnd,
+						End:   pillEnd,
 						Width: pillW,
 						Label: pillLabel,
 						Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
@@ -221,7 +229,7 @@ func ComputeLivePreviewDecorations(
 					pillW := estimateStepPillWidth(pillLabel, float32(tok.TextMeta)) - float32(tok.Spacing4)
 					repls = append(repls, editor.Replacement{
 						Start: lineStart,
-						End:   lineStart + hs.PrefixEnd,
+						End:   pillEnd,
 						Width: pillW,
 						Label: pillLabel,
 						Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
@@ -273,6 +281,39 @@ func ComputeLivePreviewDecorations(
 			}
 			lineStart += len(rawLine)
 			continue
+		}
+
+		// 1a-math. Standalone display LaTeX block (`$$ ... $$`) -> Obsidian-style rendered math block
+		if m := reMDDisplayMath.FindStringSubmatchIndex(lineText); m != nil && !isActive {
+			expr := strings.TrimSpace(lineText[m[2]:m[3]])
+			if expr != "" {
+				pretty := formatLatexInlinePretty(expr)
+				parsedNode, pErr := ParseLatexMath(expr)
+				mathW := max(estimateChipWidth(pretty, float32(tok.TextBody)+1)+float32(tok.Spacing24), float32(tok.Spacing48)*4)
+				styles = append(styles, editor.LineStyle{
+					Line:       lineIdx,
+					Font:       ui.Font{Family: fontFamily, Size: float32(tok.TextBody) + 2, Weight: 500},
+					LineHeight: 1.9,
+				})
+				repls = append(repls, editor.Replacement{
+					Start: lineStart + m[0],
+					End:   lineStart + m[1],
+					Width: mathW,
+					Label: pretty,
+					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+						e.Row().AlignItems(ui.Center).Justify(ui.Center).Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
+							Radius(float32(tok.ControlRadius)).Background(tok.Elevated.Alpha(0.75)).Border(1, tok.Border.Alpha(0.7)).Children(func() {
+							if pErr == nil && parsedNode != nil {
+								RenderMathNode(c, tok, parsedNode, float32(tok.TextBody)+1, tok.Text)
+							} else {
+								ui.Text(c, pretty).FontSize(float32(tok.TextBody)+1).Italic().TextColor(tok.Text).SingleLine()
+							}
+						})
+					},
+				})
+				lineStart += len(rawLine)
+				continue
+			}
 		}
 
 		// 1a-hr. Thematic break (`---`) -> sleek horizontal divider closing preceding step cleanly
@@ -428,6 +469,56 @@ func ComputeLivePreviewDecorations(
 					editor.Replacement{Start: lineStart + m[0], End: lineStart + openEnd},
 					editor.Replacement{Start: lineStart + closeStart, End: lineStart + m[1]},
 				)
+			}
+			// Obsidian-style inline LaTeX (`$...$`) on non-active lines (skipping code spans & currency like $10)
+			codeSpans := reMDCode.FindAllStringSubmatchIndex(lineText, -1)
+			inCodeSpan := func(pos int) bool {
+				for _, cs := range codeSpans {
+					if pos >= cs[0] && pos < cs[1] {
+						return true
+					}
+				}
+				return false
+			}
+			for _, m := range reMDInlineMath.FindAllStringSubmatchIndex(lineText, -1) {
+				if inCodeSpan(m[0]) || inCodeSpan(m[1]-1) {
+					continue
+				}
+				// Skip `$$` display delimiters
+				if (m[0] > 0 && lineText[m[0]-1] == '$') || (m[1] < len(lineText) && lineText[m[1]] == '$') {
+					continue
+				}
+				inner := lineText[m[2]:m[3]]
+				if !looksLikeInlineLatex(inner) {
+					continue
+				}
+				expr := strings.TrimSpace(inner)
+				pretty := formatLatexInlinePretty(expr)
+				parsedNode, pErr := ParseLatexMath(expr)
+				// Use 2D RenderMathNode when scimath parses cleanly AND contains no unsupported TeX macros;
+				// otherwise render crisp Unicode math typography (π, μ, ×, ≈, ², ₀, /).
+				use2D := pErr == nil && parsedNode != nil && !strings.Contains(expr, `\approx`) && !strings.Contains(expr, `\text`) && !strings.Contains(expr, `\%`)
+				chipW := estimateChipWidth(pretty, float32(tok.TextBody)) + float32(tok.Spacing4)
+				if use2D && strings.Contains(expr, `\frac`) {
+					chipW += float32(tok.Spacing8)
+				}
+				repls = append(repls, editor.Replacement{
+					Start: lineStart + m[0],
+					End:   lineStart + m[1],
+					Width: chipW,
+					Label: pretty,
+					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+						e.Row().AlignItems(ui.Center).Padding(0, float32(tok.Spacing4)*0.75).
+							Radius(float32(tok.ControlRadius) * 0.75).
+							Background(tok.AccentSoftBg.Alpha(0.55)).Children(func() {
+							if use2D {
+								RenderMathNode(c, tok, parsedNode, float32(tok.TextBody)-0.5, tok.Text)
+							} else {
+								ui.Text(c, pretty).FontSize(float32(tok.TextBody)-0.5).Italic().TextColor(tok.Text).SingleLine()
+							}
+						})
+					},
+				})
 			}
 		}
 
