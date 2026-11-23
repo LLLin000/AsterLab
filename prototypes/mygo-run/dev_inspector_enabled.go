@@ -17,6 +17,7 @@ import (
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/updater"
+	"asterlab-mygo-prototype/internal/vault"
 
 	mygo "github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -153,6 +154,11 @@ func (a *app) scheduleDelayedDevPick(delay time.Duration) {
 	})
 }
 
+func (a *app) resetDevFeedbackDirCache() {
+	a.devInsp.resolvedOutBase = ""
+	a.devInsp.draftHydrated = false
+}
+
 func (a *app) resolveDevFeedbackDir() (string, error) {
 	if a.devInsp.resolvedOutBase != "" {
 		if dir, err := devfeedback.ResolveWritableOutputDir(a.devInsp.resolvedOutBase); err == nil {
@@ -160,24 +166,27 @@ func (a *app) resolveDevFeedbackDir() (string, error) {
 		}
 	}
 	var candidates []string
-	// 1. OS user cache directory (~/Library/Caches/AsterLab/beta-feedback on macOS,
-	//    %LOCALAPPDATA%\AsterLab\beta-feedback on Windows): standard per-user cache,
-	//    never pollutes the user's scientific Vault (.asterlab) or macOS .app bundle!
-	if cacheDir, err := os.UserCacheDir(); err == nil && strings.TrimSpace(cacheDir) != "" {
-		candidates = append(candidates, filepath.Join(cacheDir, "AsterLab", "beta-feedback"))
+	// 1. Active Vault's `.asterlab/cache/beta-feedback` FIRST: user explicitly owns their Vault
+	//    directory (predictable location, avoids corporate DLP blocks on C:\Users\*, auto-purged
+	//    right after upload or Save export so nothing piles up).
+	if a.vault != nil && strings.TrimSpace(a.vault.Root) != "" {
+		candidates = append(candidates, filepath.Join(a.vault.Root, vault.SystemDirName, "cache", "beta-feedback"))
 	}
-	// 2. OS temp dir fallback (always writable on standard Windows/macOS/Linux installs)
-	if tmpDir := strings.TrimSpace(os.TempDir()); tmpDir != "" {
-		candidates = append(candidates, filepath.Join(tmpDir, "AsterLab-BetaFeedback"))
-	}
-	// 3. Beside executable ONLY when not inside a macOS .app bundle (handles corporate Windows DLP
-	//    like aTrust that blocks unsigned exe writes to C:\Users\* while allowing sibling dir writes)
+	// 2. Beside executable when not inside a macOS .app bundle
 	if exePath, err := os.Executable(); err == nil && strings.TrimSpace(exePath) != "" {
 		exeDir := filepath.Dir(exePath)
 		slashDir := filepath.ToSlash(exeDir)
 		if !strings.Contains(slashDir, ".app/Contents/MacOS") {
 			candidates = append(candidates, filepath.Join(exeDir, "feedback"))
 		}
+	}
+	// 3. OS user cache directory fallback
+	if cacheDir, err := os.UserCacheDir(); err == nil && strings.TrimSpace(cacheDir) != "" {
+		candidates = append(candidates, filepath.Join(cacheDir, "AsterLab", "beta-feedback"))
+	}
+	// 4. OS temp dir fallback
+	if tmpDir := strings.TrimSpace(os.TempDir()); tmpDir != "" {
+		candidates = append(candidates, filepath.Join(tmpDir, "AsterLab-BetaFeedback"))
 	}
 
 	dir, err := devfeedback.ResolveWritableOutputDir(candidates...)

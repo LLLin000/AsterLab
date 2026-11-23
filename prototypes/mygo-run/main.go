@@ -252,6 +252,7 @@ type app struct {
 	newExpNewFolder  string
 	newExpTitle      string
 	newExpDate       string
+	newExpStartTime  string
 	newExpTemplate   string
 	newExpErr        string
 	newExpNudgeSeq   int
@@ -4712,6 +4713,9 @@ func main() {
 		},
 		OnCreateForDate: func(dateYMD string) {
 			a.openNewExperimentDialog("", dateYMD)
+		},
+		OnCreateForDateTime: func(dateYMD, startTimeHHMM string) {
+			a.openNewExperimentDialogAt("", dateYMD, startTimeHHMM)
 		},
 		OnOpenTemplatePicker: func(dateYMD string) {
 			folder := ""

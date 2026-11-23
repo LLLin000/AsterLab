@@ -392,7 +392,8 @@ type SlashEntry struct {
 	SearchTerms string
 }
 
-// SlashEntries returns the unified insertable Slash / `+` menu entries derived from the Registry.
+// SlashEntries returns the streamlined scientific `/` / `+` menu entries derived from the Registry.
+// UI-18: Keeps ONLY high-signal core scientific blocks (no verbose step-template/checklist/attachment bloat).
 func (r *Registry) SlashEntries(contextName string, mode ExecMode) []SlashEntry {
 	var entries []SlashEntry
 	add := func(e SlashEntry, allowInLab bool) {
@@ -402,32 +403,14 @@ func (r *Registry) SlashEntries(contextName string, mode ExecMode) []SlashEntry 
 		entries = append(entries, e)
 	}
 
-	if contextName != "step" {
-		add(SlashEntry{CommandID: "step.create", Label: "主步骤", Detail: "新建一个实验阶段主步骤", Slash: "/step", Preset: "blank", SearchTerms: "step buzhou 步骤 主步骤 空白步骤 #@"}, false)
-		add(SlashEntry{CommandID: "step.create", Label: "子步骤", Detail: "在当前步骤下新增缩进子步骤", Slash: "/substep", Preset: "substep", SearchTerms: "substep zibuzhou 子步骤 分支步骤 ##@"}, false)
-		for _, p := range StepPresetDefs()[1:] {
-			add(SlashEntry{
-				CommandID:   "step.create",
-				Label:       "步骤模板 · " + p.Label,
-				Detail:      p.Description,
-				Slash:       "/step-" + p.ID,
-				Preset:      p.ID,
-				SearchTerms: "step template yushe 预设 " + p.ID + " " + p.Label + " " + p.Description,
-			}, false)
-		}
-	}
-
-	add(SlashEntry{CommandID: "group.create", Label: "实验分组表", Detail: "定义对照组与处理组", Slash: "/group", Kind: "group_table", SearchTerms: "group fenzu 分组表 对照 处理"}, false)
-	add(SlashEntry{CommandID: "plate.create", Label: "孔板 / 培养皿 / 管架", Detail: "可视化排板与分组涂色", Slash: "/plate", Kind: "plate", SearchTerms: "plate kongban 孔板 96 12 培养皿 dish"}, false)
-	add(SlashEntry{CommandID: "block.insert", Label: "参数表", Detail: "计划条件与实测值记录", Slash: "/param", Kind: "param_table", SearchTerms: "param canshu 参数表 条件"}, false)
-	add(SlashEntry{CommandID: "block.insert", Label: "数据记录表", Detail: "读数录入、Excel 粘贴与孔板矩阵", Slash: "/table", Kind: "data_table", SearchTerms: "table data shuju 数据表 读数"}, false)
-	add(SlashEntry{CommandID: "block.insert", Label: "定量计算器", Detail: "稀释 / 预混液 / 公式自动联动", Slash: "/calc", Kind: "calculator", SearchTerms: "calc jisuan 计算器 稀释 配液"}, false)
-	add(SlashEntry{CommandID: "block.insert", Label: "计时器", Detail: "倒计时 / 秒表 / 多阶段循环", Slash: "/timer", Kind: "timer", SearchTerms: "timer jishi 计时器 孵育"}, false)
-	add(SlashEntry{CommandID: "block.insert", Label: "检查清单", Detail: "带必检标记的操作核对项", Slash: "/check", Kind: "checklist", SearchTerms: "check checklist qingdan 检查清单 核对"}, false)
-	add(SlashEntry{CommandID: "asset.embed", Label: "插入照片并关联", Detail: "插入显微照片或结果图并绑定孔位", Slash: "/image", Kind: "image", SearchTerms: "image photo tupian zhaopian 图片 照片 显微 关联"}, true)
-	add(SlashEntry{CommandID: "block.insert", Label: "示意图 / 图片", Detail: "插入实验流程示意图或本地图片", Slash: "/figure", Kind: "figure", SearchTerms: "figure svg shiyitu 示意图"}, false)
-	add(SlashEntry{CommandID: "block.insert", Label: "附件与采图网格", Detail: "原始数据附件或按孔位采图槽", Slash: "/file", Kind: "attachment", SearchTerms: "file attachment fujian 附件 采图"}, false)
-	add(SlashEntry{CommandID: "doc.append_note", Label: "实验现场备注", Detail: "在空白处追加实验观察笔记", Slash: "/note", Kind: "note", SearchTerms: "note memo biji 笔记 备注 观察"}, true)
+	add(SlashEntry{CommandID: "group.create", Label: "实验分组", Detail: "对照组与处理组定义，联动孔板与数据表", Slash: "/group", Kind: "group_table", SearchTerms: "group fenzu 分组表 对照 处理"}, false)
+	add(SlashEntry{CommandID: "plate.create", Label: "孔板布局", Detail: "可视化排板涂色，自动同步分组与计算器", Slash: "/plate", Kind: "plate", SearchTerms: "plate kongban 孔板 96 12 培养皿 dish"}, false)
+	add(SlashEntry{CommandID: "block.insert", Label: "计算器", Detail: "LaTeX 公式实时配液、稀释与预混计算", Slash: "/calc", Kind: "calculator", SearchTerms: "calc jisuan 计算器 稀释 配液 公式"}, false)
+	add(SlashEntry{CommandID: "block.insert", Label: "计时器", Detail: "倒计时、秒表与多阶段循环提醒", Slash: "/timer", Kind: "timer", SearchTerms: "timer jishi 计时器 孵育 倒计时"}, false)
+	add(SlashEntry{CommandID: "block.insert", Label: "数据表", Detail: "实验读数录入、Excel 粘贴与分组统计", Slash: "/table", Kind: "data_table", SearchTerms: "table data shuju 数据表 读数"}, false)
+	add(SlashEntry{CommandID: "block.insert", Label: "条件参数", Detail: "温度、转速、缓冲液等结构化条件记录", Slash: "/param", Kind: "param_table", SearchTerms: "param canshu 参数表 条件"}, false)
+	add(SlashEntry{CommandID: "asset.embed", Label: "实验照片", Detail: "嵌入显微照片或结果图并可关联孔位", Slash: "/image", Kind: "image", SearchTerms: "image photo tupian zhaopian 图片 照片 显微"}, true)
+	add(SlashEntry{CommandID: "block.insert", Label: "示意图", Detail: "插入矢量流程示意图或外部图表", Slash: "/figure", Kind: "figure", SearchTerms: "figure svg shiyitu 示意图"}, false)
 	return entries
 }
 

@@ -152,6 +152,56 @@ func renderInlineEditableTitle(v *View, c *ui.Context, moduleID, title string, e
 	})
 }
 
+// renderCompactEditableTitle renders a subordinate inline title at tok.TextData size
+// (for compact rows like timers so they never compete visually with H2/Step headings).
+func renderCompactEditableTitle(v *View, c *ui.Context, moduleID, title string, editable bool) {
+	tok := theme.GetTokens(c.Theme())
+	displayTitle := FormatDisplayText(title)
+	if v == nil || !editable || moduleID == "" {
+		ui.Text(c, displayTitle).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+		return
+	}
+	if v.titleEditID == moduleID {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Box(c).Width(float32(tok.Spacing48) * 3.5).Children(func() {
+				tb := components.TextBox(c, &v.titleEditBuf, components.TextBoxOptions{}).Placeholder("计时器名称")
+				tb.OnTextKey(func(k ui.TextKey) bool {
+					if k.Key == ui.KeyEnter && k.Mods == 0 {
+						next := strings.TrimSpace(v.titleEditBuf)
+						if next != "" && next != title {
+							v.emitAnyModuleEdit(moduleID, map[string]any{"title": next})
+						}
+						v.titleEditID = ""
+						return true
+					}
+					return false
+				})
+			})
+			if components.Button(c, "确定", components.ButtonSecondary).Clicked() {
+				next := strings.TrimSpace(v.titleEditBuf)
+				if next != "" && next != title {
+					v.emitAnyModuleEdit(moduleID, map[string]any{"title": next})
+				}
+				v.titleEditID = ""
+			}
+			if components.IconButton(c, lucide.X(), "取消改名", components.IconButtonCompact).Clicked() {
+				v.titleEditID = ""
+			}
+		})
+		return
+	}
+	row := ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+	row.Children(func() {
+		ui.Text(c, displayTitle).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+		editBtn := components.IconButton(c, lucide.Pencil(), "修改标题", components.IconButtonCompact)
+		components.Tooltip(c, editBtn, "修改名称")
+		if editBtn.Clicked() {
+			v.titleEditID = moduleID
+			v.titleEditBuf = title
+		}
+	})
+}
+
 func (v *View) renderProse(c *ui.Context, data map[string]any) {
 	t := c.Theme()
 	tok := theme.GetTokens(t)

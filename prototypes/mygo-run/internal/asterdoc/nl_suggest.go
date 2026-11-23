@@ -532,7 +532,7 @@ func callTypeSafeJevAPI(apiKey, sentence string) *JevRouteDecision {
 }
 
 var (
-	reNLListPrefix  = regexp.MustCompile(`^[ \t]*(?:[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d+[.)][ \t]+)`)
+	reNLListPrefix  = regexp.MustCompile(`^[ \t]*(?:[-*+•·▪‣⁃][ \t]+(?:\[[ xX]\][ \t]+)?|\d+[.)][ \t]+)`)
 	reNLDuration    = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(h|hr|hrs|小时|min|分钟|分|s|sec|秒)`)
 	reNLRounds      = regexp.MustCompile(`(\d+)\s*(?:轮|个?循环|次循环|cycles?|rounds?)`)
 	reNLConc        = regexp.MustCompile(`(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(mg/mL|ug/mL|µg/mL|μg/mL|ng/mL|mg/ml|ug/ml|µg/ml|μg/ml|ng/ml|mM|uM|µM|μM|nM|M)(?:[^a-zA-Z/]|$)`)
@@ -651,6 +651,20 @@ func AnalyzeLabSentenceWithContext(doc *Document, rawLine string, globalOffset i
 		return k, m, c, n, false, "本地速判", false
 	}
 
+	// UI-21: High-precision multi-reagent mix recipe detection (e.g.
+	// "VL3 联用药液 (1 mL)：10 µL Van 母液 (10 mg/mL) + 20 µL Lys 母液 (100 mg/mL) + 970 µL PBS").
+	// Checked BEFORE ONNX/heuristic gating so multi-component volume recipes always produce a scalable
+	// proportional batch calculator instead of returning empty.
+	if mixSug := extractMultiReagentMixSuggestion(doc, text); mixSug != nil {
+		if !hasCtx || ctx.AllowsKind("calculator") {
+			mixSug.SourceText = text
+			mixSug.Confidence = 0.95
+			mixSug.Noul = 0.90
+			mixSug.Source = "配方解析"
+			return []*NLSuggestion{mixSug}
+		}
+	}
+
 	kind, mode, conf, noul, isMulti, source, hasMultiProbe := routeOne(text, true, jev)
 	// Model-driven whole-sentence p_pos gate (never split negative/past-tense/discussion sentences!)
 	if noul < 0.25 && (kind == "" || kind == "none") {
@@ -752,6 +766,9 @@ func localRouteSentence(text string) (kind, mode string, conf, noul float64) {
 	// 2. Calculators (dilution / weighing / mastermix / seeding) — allow partial-parameter sentences for fallback UI
 	if strings.Contains(text, "稀释") && (len(concs) >= 1 || reNLRatio.MatchString(text) || strings.Contains(text, "倍比") || strings.Contains(text, "母液") || strings.Contains(text, "工作液")) {
 		return "calculator", "dilution", 0.96, 0.86
+	}
+	if len(concs) >= 1 && strings.Contains(text, "母液") && len(reNLVolume.FindAllString(text, -1)) >= 2 {
+		return "calculator", "dilution", 0.92, 0.82
 	}
 	if (strings.Contains(text, "悬液密度") || strings.Contains(text, "cells/mL")) && (strings.Contains(text, "接种") || strings.Contains(text, "每孔") || strings.Contains(text, "铺")) {
 		return "calculator", "seeding", 0.92, 0.80
@@ -1025,6 +1042,140 @@ func concFactorToBase(unit string) (scale float64, family string) {
 		return s, f
 	}
 	return 1, scimath.NormalizeUnit(unit)
+}
+
+// extractMultiReagentMixSuggestion detects multi-component proportional mix recipes such as:
+// "VL3 联用药液 (1 mL)：10 µL Van 母液 (10 mg/mL) + 20 µL Lys 母液 (100 mg/mL) + 970 µL PBS → 单片加样 10 µL ..."
+// and builds a scalable batch-volume formula calculator where changing V_tot proportionally scales every reagent.
+func extractMultiReagentMixSuggestion(doc *Document, text string) *NLSuggestion {
+	// Strip trailing delivery/result note after arrow ("→" or "->") so we parse only the mix recipe itself.
+	recipePart := text
+	if idx := strings.Index(recipePart, "→"); idx >= 0 {
+		recipePart = recipePart[:idx]
+	} else if idx := strings.Index(recipePart, "->"); idx >= 0 {
+		recipePart = recipePart[:idx]
+	}
+	recipePart = strings.TrimSpace(recipePart)
+	if !strings.Contains(recipePart, "+") {
+		return nil
+	}
+
+	title := "多组分联用配液计算"
+	declaredTotalUL := 0.0
+	body := recipePart
+	if colIdx := strings.IndexAny(recipePart, ":："); colIdx > 0 && colIdx < len(recipePart)-1 {
+		prefix := strings.TrimSpace(recipePart[:colIdx])
+		body = strings.TrimSpace(recipePart[colIdx+1:])
+		if vols := reNLVolume.FindAllStringSubmatch(prefix, -1); len(vols) >= 1 {
+			if vv, err := strconv.ParseFloat(vols[0][1], 64); err == nil && vv > 0 {
+				vu := strings.ReplaceAll(strings.ReplaceAll(vols[0][2], "µ", "u"), "μ", "u")
+				switch {
+				case strings.EqualFold(vu, "mL"):
+					declaredTotalUL = vv * 1000
+				case strings.EqualFold(vu, "L"):
+					declaredTotalUL = vv * 1e6
+				default:
+					declaredTotalUL = vv
+				}
+			}
+		}
+		// Clean parenthetical volume out of title for crisp display
+		if pIdx := strings.IndexAny(prefix, "(（"); pIdx > 0 {
+			prefix = strings.TrimSpace(prefix[:pIdx])
+		}
+		if len([]rune(prefix)) >= 2 && len([]rune(prefix)) <= 32 {
+			title = prefix + " 配液计算"
+		}
+	}
+
+	rawParts := strings.Split(body, "+")
+	if len(rawParts) < 2 || len(rawParts) > 8 {
+		return nil
+	}
+	type mixComp struct {
+		volUL float64
+		label string
+	}
+	var comps []mixComp
+	sumUL := 0.0
+	for _, rp := range rawParts {
+		seg := strings.TrimSpace(rp)
+		if seg == "" {
+			return nil
+		}
+		loc := reNLVolume.FindStringSubmatchIndex(seg)
+		if loc == nil {
+			return nil
+		}
+		vv, err := strconv.ParseFloat(seg[loc[2]:loc[3]], 64)
+		if err != nil || vv <= 0 {
+			return nil
+		}
+		vu := strings.ReplaceAll(strings.ReplaceAll(seg[loc[4]:loc[5]], "µ", "u"), "μ", "u")
+		volUL := vv
+		if strings.EqualFold(vu, "mL") {
+			volUL = vv * 1000
+		} else if strings.EqualFold(vu, "L") {
+			volUL = vv * 1e6
+		}
+		lbl := strings.TrimSpace(seg[:loc[0]] + " " + seg[loc[1]:])
+		lbl = strings.Trim(lbl, "，,。;；:： ")
+		if lbl == "" {
+			lbl = fmt.Sprintf("组分 %d", len(comps)+1)
+		}
+		comps = append(comps, mixComp{volUL: round4(volUL), label: lbl})
+		sumUL += volUL
+	}
+	if len(comps) < 2 || sumUL <= 0 {
+		return nil
+	}
+	baseTotalUL := round4(sumUL)
+	if declaredTotalUL > 0 && math.Abs(declaredTotalUL-sumUL)/declaredTotalUL <= 0.10 {
+		baseTotalUL = round4(declaredTotalUL)
+	}
+
+	id := nextUniqueBlockID(doc, "calc-nl")
+	rows := []any{
+		map[string]any{"key": "V_tot", "label": "目标配制总体积", "kind": "input", "value": baseTotalUL, "unit": "uL"},
+		map[string]any{"key": "V_ref", "label": "基准配方总体积", "kind": "input", "value": baseTotalUL, "unit": "uL"},
+	}
+	var summaryParts []string
+	params := []NLParamKV{
+		{Label: "配方总体积", Value: fmt.Sprintf("%s µL", formatNumber(baseTotalUL))},
+	}
+	for i, cp := range comps {
+		key := fmt.Sprintf("V_%d", i+1)
+		rows = append(rows, map[string]any{
+			"key":     key,
+			"label":   cp.label,
+			"kind":    "formula",
+			"formula": fmt.Sprintf(`\frac{%s \times V_{tot}}{V_{ref}}`, formatNumber(cp.volUL)),
+			"unit":    "uL",
+		})
+		summaryParts = append(summaryParts, fmt.Sprintf("%s %s µL", cp.label, formatNumber(cp.volUL)))
+		if len(params) < 4 {
+			params = append(params, NLParamKV{Label: cp.label, Value: fmt.Sprintf("%s µL", formatNumber(cp.volUL))})
+		}
+	}
+	mod := map[string]any{
+		"kind":   "calculator",
+		"id":     id,
+		"schema": 1,
+		"title":  title,
+		"mode":   "formula",
+		"rows":   rows,
+	}
+	if err := specValidator("calculator")(mod); err != nil {
+		return nil
+	}
+	return &NLSuggestion{
+		Kind:      "calculator",
+		Mode:      "mix_recipe",
+		KindLabel: "联用配液计算器",
+		Summary:   strings.Join(summaryParts, " + "),
+		Params:    params,
+		Modules:   []map[string]any{mod},
+	}
 }
 
 func extractCalculatorSuggestionCtx(doc *Document, ctx ScientificLineContext, hasCtx bool, text, mode string) *NLSuggestion {

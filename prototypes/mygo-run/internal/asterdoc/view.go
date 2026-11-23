@@ -117,6 +117,8 @@ type View struct {
 	stepCollapsed       map[string]bool
 	liveEditors         map[string]*liveEditorEntry
 	nlHover             *nlHoverState
+	nlLineCacheDoc      string
+	nlLineCache         map[string][]*NLSuggestion
 	nlMissKey           string
 	nlMissLine          int
 	nlMissText          string

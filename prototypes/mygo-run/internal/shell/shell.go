@@ -143,6 +143,7 @@ type Shell struct {
 	OnContinue           func()
 	OnCreate             func()
 	OnCreateForDate      func(dateYMD string)
+	OnCreateForDateTime  func(dateYMD, startTimeHHMM string)
 	OnOpenTemplatePicker func(dateYMD string)
 	OnOpenExperiment     func(ExperimentItem)
 	OnQuickStartRun      func(designID string)
@@ -865,7 +866,10 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 
 	bar := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 		AlignItems(ui.Center).Gap(float32(tok.Spacing4))
-	theme.ApplyChromeGlass(bar, tok, false)
+	// Avoid double-glass vertical clip seams when hosted inside sidebar.Shell's native ContentTitle chrome
+	if !(s.window != nil && s.leafCount() == 1) {
+		theme.ApplyChromeGlass(bar, tok, false)
+	}
 	bar.Children(func() {
 		// Unified Obsidian Top Bar: compact Back/Forward history controls inline on the left of the tab strip
 		if isFirstPane {
@@ -879,7 +883,6 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 			if fwdBtn.Clicked() {
 				s.GoForward()
 			}
-			ui.Box(c).Width(1).Height(float32(tok.Spacing16)).Margin(0, float32(tok.Spacing4)).Background(tok.Border.Alpha(0.7))
 		}
 
 		ui.ScrollHorizontal(c.Key("tab-scroll-"+pane.ID)).Grow(1).MinWidth(0).Children(func() {

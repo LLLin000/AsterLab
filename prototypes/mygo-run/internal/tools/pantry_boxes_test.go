@@ -174,7 +174,7 @@ func TestPantryBoxUIDrillDownNavigationAndSelection(t *testing.T) {
 		t.Fatalf("click back to shelf failed: %v", err)
 	}
 	tt.Frame()
-	if w.activeBoxID != "" || !tt.HasText("+ 新建收纳盒") {
+	if w.activeBoxID != "" || !tt.HasText("+ 收纳盒") {
 		t.Fatalf("expected return to Level 1 shelf, activeBox=%q", w.activeBoxID)
 	}
 }
