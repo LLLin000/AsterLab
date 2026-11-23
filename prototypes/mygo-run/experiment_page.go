@@ -366,7 +366,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 							if edAct {
 								col = tok.Text
 							}
-							ui.Text(c, "编辑").FontSize(float32(tok.TextMeta)).Bold().TextColor(col).SingleLine()
+							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Icon(c, lucide.Pencil()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(col)
+								ui.Text(c, "编辑").FontSize(float32(tok.TextMeta)).Bold().TextColor(col).SingleLine()
+							})
 						})
 						if edSeg.Clicked() && !edAct {
 							setTabMode(shell.ModeEdit)
@@ -1212,15 +1215,15 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 									for sIdx, sum := range summaries {
 										sum := sum
 										ui.Column(c.Key(fmt.Sprintf("sum-%d-%s", sIdx, sum.Kind))).FillWidth().
-											Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-											Background(tok.Elevated).Gap(float32(tok.Spacing4)).Children(func() {
+											Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+											Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
 											ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-												ui.Text(c, sum.Title).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+												ui.Text(c, asterdoc.FormatDisplayText(sum.Title)).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
 												if sum.Control != "" {
-													ui.Text(c, "对照："+sum.Control).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+													ui.Text(c, "对照："+asterdoc.FormatDisplayText(sum.Control)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 												}
 												if sum.BlankN > 0 && sum.BlankMean != nil {
-													ui.Text(c, fmt.Sprintf("空白本底 %.3f（%d 孔）", *sum.BlankMean, sum.BlankN)).
+													ui.Text(c, fmt.Sprintf("空白本底 %s（%d 孔）", asterdoc.FormatSciStat(*sum.BlankMean), sum.BlankN)).
 														FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 												}
 												if sum.ExcludedN > 0 {
@@ -1231,9 +1234,9 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 											case "cck8":
 												if sum.CCK8 != nil {
 													for _, g := range sum.CCK8.Groups {
-														ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-															ui.Text(c, g.Group).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).Width(140).SingleLine().Ellipsis("…")
-															ui.Text(c, fmt.Sprintf("均值 %.3f ± %.3f（%d 复孔）", g.Mean, g.SD, g.N)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
+														ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+															ui.Text(c, asterdoc.FormatDisplayText(g.Group)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).MinWidth(160)
+															ui.Text(c, fmt.Sprintf("均值 %s ± %s（%d 复孔）", asterdoc.FormatSciStat(g.Mean), asterdoc.FormatSciStat(g.SD), g.N)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
 															ui.Text(c, fmt.Sprintf("相对活力 %.1f%%", g.RelativeActivity*100)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
 														})
 													}
@@ -1241,8 +1244,8 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 											case "qpcr":
 												if sum.QPCR != nil {
 													for _, g := range sum.QPCR.Groups {
-														ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-															ui.Text(c, g.SampleID).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).Width(140).SingleLine().Ellipsis("…")
+														ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+															ui.Text(c, asterdoc.FormatDisplayText(g.SampleID)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).MinWidth(160)
 															ui.Text(c, fmt.Sprintf("ΔΔCq %.2f", g.DeltaDeltaCq)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
 															ui.Text(c, fmt.Sprintf("相对表达 %.2f×", g.FoldChange)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
 														})
@@ -1250,16 +1253,16 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 												}
 											default:
 												for _, g := range sum.Groups {
-													ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-														ui.Text(c, g.Group).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).Width(140).SingleLine().Ellipsis("…")
+													ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+														ui.Text(c, asterdoc.FormatDisplayText(g.Group)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).MinWidth(160)
 														repTxt := fmt.Sprintf("%d 复孔", g.TechReplicates)
 														if g.BioSamples > 0 {
 															repTxt = fmt.Sprintf("%d 复孔 · 独立 n=%d", g.TechReplicates, g.BioSamples)
 														}
-														statTxt := fmt.Sprintf("均值 %.3f ± %.3f（%s）", g.Mean, g.SD, repTxt)
+														statTxt := fmt.Sprintf("均值 %s ± %s（%s）", asterdoc.FormatSciStat(g.Mean), asterdoc.FormatSciStat(g.SD), repTxt)
 														ui.Text(c, statTxt).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
 														if g.BlankCorrMean != nil {
-															ui.Text(c, fmt.Sprintf("扣空白 %.3f", *g.BlankCorrMean)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+															ui.Text(c, fmt.Sprintf("扣空白 %s", asterdoc.FormatSciStat(*g.BlankCorrMean))).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
 														}
 													})
 												}

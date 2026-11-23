@@ -499,13 +499,17 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 								}
 							}
 						})
-						unitBuf := v.ensureWidgetDraft(fmt.Sprintf("pt_u:%s:%d:%s", moduleID, idx, key), unit)
+						dispUnit := DisplayUnit(unit)
+						unitBuf := v.ensureWidgetDraft(fmt.Sprintf("pt_u:%s:%d:%s", moduleID, idx, key), dispUnit)
 						ui.Box(c).Width(float32(tok.Spacing48)*1.0).Children(func() {
 							tb := BorderlessTextInput(c, tok, unitBuf, float32(tok.TextMeta), false, "单位").TextColor(tok.TextMuted)
-							if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*unitBuf) != unit) {
+							if !tb.Focused() && *unitBuf != dispUnit {
+								*unitBuf = dispUnit
+							}
+							if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*unitBuf) != dispUnit) {
 								next := cloneRowsSlice(rows)
 								if idx < len(next) {
-									next[idx]["unit"] = strings.TrimSpace(*unitBuf)
+									next[idx]["unit"] = normalizeUnitSymbol(strings.TrimSpace(*unitBuf))
 									v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
 								}
 							}
@@ -891,12 +895,8 @@ func (v *View) renderUnifiedDataTable(c *ui.Context, tok theme.Tokens, dark bool
 							if err != nil {
 								ui.Text(c, "—").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted).FontFeatures("tnum")
 							} else {
-								txt := formatNumber(round4(res))
-								if cunit != "" {
-									txt += " " + cunit
-								}
-								ui.Text(c, txt).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Accent).
-									FontFeatures("tnum").SingleLine().Ellipsis("…").ContentTransition(theme.NumericRoll(false))
+								// UI-07: Always format qualifying numbers (>= 1000 or <= 0.001) in native scientific notation.
+								renderSciNumber(c, tok, res, cunit, float32(tok.TextData), tok.Accent, true)
 							}
 							return
 						}
@@ -907,23 +907,53 @@ func (v *View) renderUnifiedDataTable(c *ui.Context, tok theme.Tokens, dark bool
 						cellKey := v.cellDraftKey(moduleID, rIdx, ckey)
 						buf := v.ensureWidgetDraft(cellKey, initStr)
 						if !v.ReadOnly {
-							tb := BorderlessTextInput(c, tok, buf, float32(tok.TextData), false, "—").FontFeatures("tnum")
-							tb.FocusBind(&v.FocusedTableCell, cellKey)
-							tb.OnPaste(func(text string) bool {
-								if !strings.ContainsAny(text, "\t\n\r") {
-									return false
+							isFocused := v.FocusedTableCell == cellKey
+							if vkind == "number" && !isFocused && strings.TrimSpace(*buf) != "" {
+								if numVal, parseErr := strconv.ParseFloat(strings.TrimSpace(*buf), 64); parseErr == nil {
+									if _, _, isSci := formatSciParts(numVal); isSci {
+										// UI-07: Display scientific notation cleanly when unfocused; click focuses raw input!
+										sciBtn := ui.ButtonBase(c.Key("sci-cell:"+cellKey)).FillWidth().Justify(ui.Start).
+											Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).
+											Radius(float32(tok.ControlRadius)).Label("编辑数值 " + *buf)
+										if sciBtn.Hovered() {
+											sciBtn.Background(tok.Text.Alpha(0.04))
+										}
+										sciBtn.Children(func() {
+											renderSciNumber(c, tok, numVal, "", float32(tok.TextData), tok.Text, false)
+										})
+										if sciBtn.Clicked() {
+											v.FocusedTableCell = cellKey
+										}
+										goto rangeCheck
+									}
 								}
-								v.applyClipboardToDataTableAt(moduleID, cols, len(authoredRows), rIdx, cIdx, text)
-								v.flushTableCellsToSource(moduleID, cols, authoredRows)
-								return true
-							})
-							if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*buf) != strings.TrimSpace(initStr)) {
-								syncRowEdit(rIdx, ckey, *buf)
+							}
+							{
+								tb := BorderlessTextInput(c, tok, buf, float32(tok.TextData), false, "—").FontFeatures("tnum")
+								tb.FocusBind(&v.FocusedTableCell, cellKey)
+								tb.OnPaste(func(text string) bool {
+									if !strings.ContainsAny(text, "\t\n\r") {
+										return false
+									}
+									v.applyClipboardToDataTableAt(moduleID, cols, len(authoredRows), rIdx, cIdx, text)
+									v.flushTableCellsToSource(moduleID, cols, authoredRows)
+									return true
+								})
+								if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*buf) != strings.TrimSpace(initStr)) {
+									syncRowEdit(rIdx, ckey, *buf)
+								}
 							}
 						} else {
+							if vkind == "number" && strings.TrimSpace(*buf) != "" {
+								if numVal, parseErr := strconv.ParseFloat(strings.TrimSpace(*buf), 64); parseErr == nil {
+									renderSciNumber(c, tok, numVal, "", float32(tok.TextData), tok.Text, false)
+									goto rangeCheck
+								}
+							}
 							ui.Text(c, firstNonEmpty(*buf, "—")).FontSize(float32(tok.TextData)).TextColor(tok.Text).
 								FontFeatures("tnum").SingleLine().Ellipsis("…")
 						}
+					rangeCheck:
 						if vkind == "number" && strings.TrimSpace(*buf) != "" {
 							if numVal, err := strconv.ParseFloat(strings.TrimSpace(*buf), 64); err == nil {
 								if (hasMin && numVal < minV) || (hasMax && numVal > maxV) {

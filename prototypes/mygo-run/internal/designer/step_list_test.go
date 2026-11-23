@@ -187,7 +187,7 @@ func TestPlateAndDilutionSections(t *testing.T) {
 	d.Section = SectionPlate
 	plate := ui.NewTester(func(c *ui.Context) { ListView(c, d) }, 900, 600)
 	plate.Frame()
-	if !plate.HasText("3 / 12 孔已分配 · 拖拽框选或点行列号快速选孔") {
+	if !plate.HasText("3 / 12 孔已分配") || !plate.HasText("点击/框选或右键排板") {
 		t.Fatalf("12-well section missing: %q", plate.Texts())
 	}
 

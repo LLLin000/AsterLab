@@ -26,15 +26,16 @@ type WellState struct {
 // InteractionState persists pointer drag-marquee and hover state across frames
 // for interactive inline, overlay, and tool plates.
 type InteractionState struct {
-	pointerDown   bool
-	pointerStart  ui.Point
-	dragStart     ui.Point
-	dragLast      ui.Point
-	dragging      bool
-	additive      bool
-	suppressClick bool
-	baseSelected  []string
-	hoverWell     string
+	pointerDown     bool
+	pointerStart    ui.Point
+	dragStart       ui.Point
+	dragLast        ui.Point
+	dragging        bool
+	additive        bool
+	suppressClick   bool
+	baseSelected    []string
+	hoverWell       string
+	stickyHoverWell string
 }
 
 type Props struct {
@@ -519,7 +520,7 @@ func View(c *ui.Context, props Props) {
 		}
 	}
 
-	ui.Column(c).Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
+	ui.Column(c).FillWidth().Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
 		if props.Interactive {
 			st := props.State
 			if st == nil {
@@ -528,6 +529,47 @@ func View(c *ui.Context, props Props) {
 			suppressGridClick := st.suppressClick
 			st.suppressClick = false
 			st.hoverWell = ""
+
+			// UI-02: Place color legend cleanly in the top-right above the plate/dish so it never overlaps the dish rim.
+			if len(legendOrder) > 0 {
+				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
+					for _, label := range legendOrder {
+						dispLbl := formatPlateSuperLabel(label)
+						ui.Row(c).Key("leg-"+label).Gap(float32(t.Spacing4)).AlignItems(ui.Center).
+							Transition(theme.AccordionTransition()).Children(func() {
+							sw := ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius))
+							sw.Background(sw.AnimateColor("lcol", legendColors[label], theme.MotionSnappy))
+							ui.Text(c, fmt.Sprintf("%s (%d)", dispLbl, legendCounts[label])).FontSize(labelSize).
+								TextColor(t.TextMuted).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
+						})
+					}
+				})
+			}
+
+			// Compute exact padding around dish rim so the outer circle never spills over bottom text (UI-02).
+			dishPadH := dishPad
+			dishPadV := dishPad
+			if props.Topology == "dish" {
+				rOuter := gridW
+				if gridH > rOuter {
+					rOuter = gridH
+				}
+				rimScale := float32(0.72)
+				rimPad := float32(t.Spacing8)
+				if mini {
+					rimScale = 0.65
+					rimPad = float32(t.Spacing4)
+				}
+				rOuter = rOuter*rimScale + rimPad
+				needH := rOuter - gridW/2 + float32(t.Spacing8)
+				needV := rOuter - gridH/2 + float32(t.Spacing8)
+				if needH > dishPadH {
+					dishPadH = needH
+				}
+				if needV > dishPadV {
+					dishPadV = needV
+				}
+			}
 
 			notify := func(ids []string) {
 				sort.Strings(ids)
@@ -583,7 +625,7 @@ func View(c *ui.Context, props Props) {
 				notify(out)
 			}
 
-			gridBox := ui.Column(c).AlignItems(ui.Center).Padding(dishPad).Children(func() {
+			gridBox := ui.Column(c).AlignItems(ui.Center).Padding(dishPadV, dishPadH, dishPadV, dishPadH).Children(func() {
 				ui.Column(c).Gap(gap).AlignItems(ui.Center).Children(func() {
 					ui.Row(c).Gap(gap).AlignItems(ui.Center).Children(func() {
 						ui.Box(c).Size(leftLabel, topLabel)
@@ -764,15 +806,15 @@ func View(c *ui.Context, props Props) {
 			})
 			if props.Topology == "dish" {
 				gridBox.Draw(func(p *ui.Painter, r ui.Rect) {
-					drawDishRim(p, r.X+dishPad+leftLabel+gap, r.Y+dishPad+topLabel+gap)
+					drawDishRim(p, r.X+dishPadH+leftLabel+gap, r.Y+dishPadV+topLabel+gap)
 				})
 			}
 			gridBox.DrawOver(func(p *ui.Painter, r ui.Rect) {
 				if !st.dragging {
 					return
 				}
-				ox := r.X + dishPad + leftLabel + gap
-				oy := r.Y + dishPad + topLabel + gap
+				ox := r.X + dishPadH + leftLabel + gap
+				oy := r.Y + dishPadV + topLabel + gap
 				x0, y0 := ox+st.dragStart.X, oy+st.dragStart.Y
 				x1, y1 := ox+st.dragLast.X, oy+st.dragLast.Y
 				if x0 > x1 {
@@ -786,28 +828,28 @@ func View(c *ui.Context, props Props) {
 				p.Stroke(mr, t.Accent, 2, 1)
 			})
 
-			hoverText, hoverColor := "悬停或拖拽孔位查看分组、样本与复孔", t.TextMuted
+			// Sticky hover prevents flashing/jumping when moving across inter-well gaps (UI-11).
 			if st.hoverWell != "" {
-				hoverText, hoverColor = wellHoverSummary(props, st.hoverWell), t.Text
-			} else if len(props.Wells) == 0 {
-				hoverText = "尚无计划孔位分配"
+				st.stickyHoverWell = st.hoverWell
+			} else if !gridBox.Hovered() {
+				st.stickyHoverWell = ""
 			}
-			ui.Text(c, hoverText).FontSize(labelSize).TextColor(hoverColor).SingleLine()
-			if len(legendOrder) > 0 {
-				ui.Row(c).Wrap().Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
-					for _, label := range legendOrder {
-						ui.Row(c).Key("leg-"+label).Gap(float32(t.Spacing4)).AlignItems(ui.Center).
-							Transition(theme.AccordionTransition()).Children(func() {
-							sw := ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius))
-							sw.Background(sw.AnimateColor("lcol", legendColors[label], theme.MotionSnappy))
-							ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(labelSize).
-								TextColor(t.TextMuted).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
-						})
-					}
-				})
-			}
-			ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 拖拽框选或点行列号快速选孔", len(props.Wells), rows*cols)).
-				FontSize(labelSize).TextColor(t.TextMuted).ContentTransition(theme.NumericRoll(false))
+
+			// UI-02: Single concise bottom status/hover bar strictly below the dish rim.
+			ui.Row(c).FillWidth().Height(float32(t.Spacing24)).Padding(0, float32(t.Spacing8)).
+				AlignItems(ui.Center).Gap(float32(t.Spacing12)).Children(func() {
+				allocText := fmt.Sprintf("%d / %d 孔已分配", len(props.Wells), rows*cols)
+				ui.Text(c, allocText).FontSize(labelSize).TextColor(t.TextMuted).FontFeatures("tnum").Shrink(0).SingleLine()
+				ui.Box(c).Width(1).Height(float32(t.Spacing12)).Background(t.Border)
+				hoverText, hoverColor := "点击/框选或右键排板", t.TextMuted
+				if st.stickyHoverWell != "" {
+					hoverText, hoverColor = formatPlateSuperLabel(wellHoverSummary(props, st.stickyHoverWell)), t.Text
+				} else if len(props.Wells) == 0 {
+					hoverText = "尚无计划孔位分配 · 点击或拖拽框选"
+				}
+				ui.Text(c, hoverText).FontSize(labelSize).TextColor(hoverColor).
+					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+			})
 			return
 		}
 
@@ -1237,4 +1279,90 @@ func roleShort(role string) string {
 	default:
 		return ""
 	}
+}
+
+// formatPlateSuperLabel prettifies scientific powers (10^-3 -> 10⁻³) and UCUM Cel -> °C
+// inside plate legend/hover labels without importing asterdoc.
+func formatPlateSuperLabel(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, " Cel", " °C")
+	if !strings.Contains(s, "^") {
+		return s
+	}
+	var out strings.Builder
+	rs := []rune(s)
+	for i := 0; i < len(rs); i++ {
+		if rs[i] == '^' && i+1 < len(rs) {
+			j := i + 1
+			if rs[j] == '{' {
+				end := j + 1
+				for end < len(rs) && rs[end] != '}' {
+					end++
+				}
+				if end < len(rs) {
+					if sup, ok := plateToSup(string(rs[j+1 : end])); ok {
+						out.WriteString(sup)
+						i = end
+						continue
+					}
+				}
+			}
+			end := j
+			if end < len(rs) && (rs[end] == '-' || rs[end] == '+') {
+				end++
+			}
+			for end < len(rs) && unicode.IsDigit(rs[end]) {
+				end++
+			}
+			if end > j {
+				if sup, ok := plateToSup(string(rs[j:end])); ok {
+					out.WriteString(sup)
+					i = end - 1
+					continue
+				}
+			}
+		}
+		out.WriteRune(rs[i])
+	}
+	return out.String()
+}
+
+func plateToSup(s string) (string, bool) {
+	if s == "" {
+		return "", false
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '0':
+			b.WriteRune('⁰')
+		case '1':
+			b.WriteRune('¹')
+		case '2':
+			b.WriteRune('²')
+		case '3':
+			b.WriteRune('³')
+		case '4':
+			b.WriteRune('⁴')
+		case '5':
+			b.WriteRune('⁵')
+		case '6':
+			b.WriteRune('⁶')
+		case '7':
+			b.WriteRune('⁷')
+		case '8':
+			b.WriteRune('⁸')
+		case '9':
+			b.WriteRune('⁹')
+		case '-':
+			b.WriteRune('⁻')
+		case '+':
+			b.WriteRune('⁺')
+		default:
+			return "", false
+		}
+	}
+	return b.String(), true
 }

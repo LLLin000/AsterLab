@@ -534,6 +534,14 @@ func WriteFileAtomic(targetPath string, data []byte) error {
 		return err
 	}
 	f, err := os.CreateTemp(dir, ".asterlab-*.tmp")
+	if err != nil && errors.Is(err, os.ErrPermission) {
+		// Some Windows endpoint DLP / antivirus rules block hidden dot-prefixed `.tmp`
+		// creation under AppData; retry with a visible temp name, then direct write.
+		f, err = os.CreateTemp(dir, "asterlab-save-*.json")
+		if err != nil && errors.Is(err, os.ErrPermission) {
+			return os.WriteFile(targetPath, data, 0o644)
+		}
+	}
 	if err != nil {
 		return err
 	}

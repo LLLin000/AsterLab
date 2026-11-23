@@ -856,12 +856,37 @@ func (v *View) renderUnifiedPlateFloatingBar(
 	}
 	box.Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-			components.Badge(c, fmt.Sprintf("已选 %d 孔 · 图层「%s」", len(selected), activeLayer), components.BadgeOptions{Tone: components.BadgeAccent})
-			fmIdx := fillMode
-			components.Tabs(c, &fmIdx, components.TabsSegmented, "单值", "平铺列表", "等比序列")
-			if fmIdx != fillMode {
-				v.plateFillMode[plate.ID] = fmIdx
-			}
+			// UI-03: Uniform-height controls on the first row + scientist-friendly fill mode names
+			ui.Row(c).Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
+				Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.32)).
+				AlignItems(ui.Center).Children(func() {
+				ui.Text(c, fmt.Sprintf("已选 %d 孔 · 图层「%s」", len(selected), activeLayer)).
+					FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
+			})
+			ui.Row(c).Height(float32(tok.Spacing24)).Padding(2).Radius(float32(tok.ControlRadius)).
+				Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Gap(2).Children(func() {
+				for idx, lbl := range []string{"统一填充", "逐孔填入", "梯度稀释"} {
+					idx, lbl := idx, lbl
+					act := fillMode == idx
+					seg := ui.ButtonBase(c.Key(fmt.Sprintf("pl-fm-%s-%d", plate.ID, idx))).
+						Height(float32(tok.Spacing24)-4).Padding(0, float32(tok.Spacing8)).
+						Radius(float32(tok.ControlRadius)-1).AlignItems(ui.Center).Label("填充模式：" + lbl)
+					fg := tok.TextMuted
+					if act {
+						seg.Background(tok.AccentSoftBg)
+						fg = tok.Accent
+					} else if seg.Hovered() {
+						seg.Background(tok.Text.Alpha(0.04))
+						fg = tok.Text
+					}
+					seg.Children(func() {
+						ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+					})
+					if seg.Clicked() {
+						v.plateFillMode[plate.ID] = idx
+					}
+				}
+			})
 			ui.Spacer(c)
 			if inOverlay {
 				if components.IconButton(c, lucide.ZoomOut(), "缩小", components.IconButtonCompact).Clicked() && zoom > 0.6 {
@@ -985,7 +1010,7 @@ func (v *View) renderUnifiedPlateFloatingBar(
 							ui.Row(c).Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
 								ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 									Background(plateui.GroupColorIndexed(gid, idxMap, dark))
-								ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+								renderNativeScriptRow(c, tok, FormatDisplayText(lbl), float32(tok.TextMeta), tok.Text, false, false)
 							})
 						})
 						if chip.Clicked() {

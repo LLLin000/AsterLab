@@ -945,6 +945,11 @@ func renderPantryTableView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 
 func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 	if !w.PantryDialogOpen {
+		ui.Box(c.Key("pantry-detail-dlg")).Children(func() {
+			components.Dialog(c, &w.PantryDialogOpen, components.DialogOptions{
+				Label: "新增储藏室试剂",
+			}, nil)
+		})
 		return
 	}
 	t := c.Theme()
@@ -1057,7 +1062,7 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 						ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
 							Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
 							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-								ui.Text(c, "选择容器贴纸样式（12 款 BioRender 器皿）").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+								ui.Text(c, "选择容器样式").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 								ui.Spacer(c)
 								if components.Button(c, "上传自定义图片", components.ButtonSecondary).Clicked() && w.Callbacks.PickStickerImage != nil {
 									if p, err := w.Callbacks.PickStickerImage(); err == nil && p != "" {
@@ -1104,28 +1109,45 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 					}
 
 					// 3. Storage Location & Dates
+					// UI-13: When already placed inside a storage box (e.g. -80°C freezer box),
+					// hide the redundant manual "存放柜层" & freezer quick-picker to avoid confusion.
+					w.EnsurePantryBoxesLoaded()
+					activeBox, placedInBox := w.FindPantryBox(w.pantryDraftMeta.BoxID)
+					if placedInBox {
+						w.PantryLocation = FormatBoxLocation(activeBox.ZoneKey, activeBox.Name, w.pantryDraftMeta.BoxSlot)
+					}
 					ui.Column(c).FillWidth().Padding(t.Space(2)).Radius(float32(tok.PanelRadius)).
 						Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(1)).Children(func() {
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-							ui.Text(c, "存放位置与效期记录").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+							secTitle := "存放位置与效期记录"
+							if placedInBox {
+								secTitle = "盒内定位与效期记录"
+							}
+							ui.Text(c, secTitle).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 							ui.Spacer(c)
-							for _, preset := range []string{"-80°C", "-20°C 酶盒", "4°C 冷藏架", "常温避光"} {
-								preset := preset
-								variant := components.ButtonGhost
-								if w.PantryLocation == preset {
-									variant = components.ButtonSecondary
-								}
-								if components.Button(c, preset, variant).Clicked() {
-									w.PantryLocation = preset
+							if placedInBox {
+								components.Badge(c, fmt.Sprintf("%s · %s · 孔位 %s", ZoneDisplayPrefix(activeBox.ZoneKey), activeBox.Name, firstNonEmptyStr(w.pantryDraftMeta.BoxSlot, "未选")), components.BadgeOptions{Tone: components.BadgeAccent})
+							} else {
+								for _, preset := range []string{"-80°C", "-20°C 酶盒", "4°C 冷藏架", "常温避光"} {
+									preset := preset
+									variant := components.ButtonGhost
+									if w.PantryLocation == preset {
+										variant = components.ButtonSecondary
+									}
+									if components.Button(c, preset, variant).Clicked() {
+										w.PantryLocation = preset
+									}
 								}
 							}
 						})
 						ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
-							ui.Column(c).Grow(2).MinWidth(0).Gap(t.Space(1)).Children(func() {
-								ui.Text(c, "存放柜层").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-								components.TextBox(c, &w.PantryLocation, components.TextBoxOptions{}).
-									Placeholder("如 -20°C 酶盒 A2")
-							})
+							if !placedInBox {
+								ui.Column(c).Grow(2).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									ui.Text(c, "存放柜层").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+									components.TextBox(c, &w.PantryLocation, components.TextBoxOptions{}).
+										Placeholder("如 -20°C 酶盒 A2")
+								})
+							}
 							ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
 								ui.Text(c, "购入日期").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 								components.TextBox(c, &w.PantryPurchasedOn, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
@@ -1141,7 +1163,6 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 						})
 
 						// Optional nested Box / Rack & Slot placement row
-						w.EnsurePantryBoxesLoaded()
 						if len(w.PantryBoxes) > 0 {
 							ui.Row(c).FillWidth().AlignItems(ui.End).Gap(t.Space(2)).Children(func() {
 								ui.Column(c).Grow(2).MinWidth(0).Gap(t.Space(1)).Children(func() {
@@ -1298,18 +1319,18 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 							w.PantryDialogOpen = false
 							w.pantryConfirmDel = false
 						}
-						if components.Button(c, "取消", components.ButtonGhost).Clicked() {
+						if components.Button(c.Key("pantry-del-cancel"), "取消", components.ButtonGhost).Clicked() {
 							w.pantryConfirmDel = false
 						}
 					}
 				}
 				ui.Spacer(c)
-				if components.Button(c, "取消", components.ButtonSecondary).Clicked() {
+				if components.Button(c.Key("pantry-dlg-cancel"), "取消", components.ButtonSecondary).Clicked() {
 					w.PantryDialogOpen = false
 					w.pantryConfirmDel = false
 					w.pantryDialogErr = ""
 				}
-				if components.Button(c, "保存试剂档案", components.ButtonPrimary).Clicked() {
+				if components.Button(c.Key("pantry-dlg-save"), "保存试剂档案", components.ButtonPrimary).Clicked() {
 					_ = w.SavePantryDetail()
 				}
 			})
