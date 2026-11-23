@@ -1,0 +1,217 @@
+---
+title: HUVEC 水凝胶体外成管测定
+scheduled_date: ""
+stage: planned
+tags:
+  - 细胞
+  - 组织工程
+  - HUVEC
+---
+
+> **实验目标**：在 12 孔板上比较 3%、5%、7% (w/v) GelMA 水凝胶基质（均含 0.25% LAP + VEGF 诱导）对 HUVEC 在 6 h、12 h、24 h 体外成管长度与分支结构的影响。
+
+## 实验分组与 12 孔板排布
+
+- 备料提示：VEGF 母液 100 ug/mL；405 nm 光固化灯预检光强。
+
+```asterlab
+kind: group_table
+id: gt-huvec
+schema: 1
+title: GelMA 浓度实验分组
+rows:
+  - id: group-3pct
+    name: 3% GelMA + VEGF
+    role: treatment
+    dose: 3 % w/v
+    condition: 3% (w/v) GelMA + 0.25% LAP + 50 ng/mL VEGF
+    independent_n: 4
+  - id: group-5pct
+    name: 5% GelMA + VEGF
+    role: treatment
+    dose: 5 % w/v
+    condition: 5% (w/v) GelMA + 0.25% LAP + 50 ng/mL VEGF
+    independent_n: 4
+  - id: group-7pct
+    name: 7% GelMA + VEGF
+    role: treatment
+    dose: 7 % w/v
+    condition: 7% (w/v) GelMA + 0.25% LAP + 50 ng/mL VEGF
+    independent_n: 4
+```
+
+```asterlab
+kind: plate
+id: plate-huvec
+schema: 1
+title: 12 孔成管板排布
+format: 12
+topology: plate
+groups:
+  group-3pct: [A1, A2, A3, A4]
+  group-5pct: [B1, B2, B3, B4]
+  group-7pct: [C1, C2, C3, C4]
+samples:
+  A1: HUVEC-3%-1
+  A2: HUVEC-3%-2
+  A3: HUVEC-3%-3
+  A4: HUVEC-3%-4
+  B1: HUVEC-5%-1
+  B2: HUVEC-5%-2
+  B3: HUVEC-5%-3
+  B4: HUVEC-5%-4
+  C1: HUVEC-7%-1
+  C2: HUVEC-7%-2
+  C3: HUVEC-7%-3
+  C4: HUVEC-7%-4
+roles:
+  A1: sample
+  B1: sample
+  C1: sample
+```
+
+#@ 1. 水凝胶冷热循环脱泡与配液体系计算
+
+> **时段提醒**：建议 07:30 开始水浴融胶与 3 轮冷热循环脱泡，08:30 完成铺胶光固化并浸泡，10:00 前完成 HUVEC 接种建立 `t0`。
+
+```asterlab
+kind: timer
+id: blk-huvec-window
+schema: 1
+title: 3 轮冷热循环溶解与脱泡计时
+mode: cycle
+status: idle
+rounds: 3
+phases:
+  - name: 80 °C 水浴溶解
+    duration: {value: 5, unit: min}
+  - name: 冰上静置降泡
+    duration: {value: 10, unit: min}
+  - name: 2000 rpm 离心脱泡（无气泡可跳过）
+    mode: open
+```
+
+```asterlab
+kind: calculator
+id: blk-huvec-vegf-dil
+schema: 1
+title: VEGF 因子稀释（100 ug/mL -> 50 ng/mL）
+mode: dilution
+stock: {value: 100, unit: ug/mL}
+target: {value: 50, unit: ng/mL}
+final_volume: {value: 8, unit: mL}
+```
+
+```asterlab
+kind: calculator
+id: blk-huvec-mix
+schema: 1
+title: 12 孔板铺胶反应体系分装（含 15% 余量）
+mode: group_mastermix
+plate_ref: plate-huvec
+volume_per_unit: {value: 500, unit: uL}
+excess_ratio: 0.15
+components:
+  - name: GelMA 凝胶前驱液
+    target_percent: 5
+  - name: LAP 光引发剂
+    stock_percent: 2.5
+    target_percent: 0.25
+```
+
+#@ 2. 12 孔板铺胶、405 nm 光固化与接种 {#t0}
+
+- [ ] 确认水凝胶胶面平整、无影响显微视野的气泡（无气泡可豁免离心直接铺胶）
+- [ ] 每孔按 0.5 mL 铺胶并 405 nm 光固化 30 s
+- [ ] 完成 HUVEC 接种（1×10⁵ cells/well）并记录 `t0` 时刻
+
+```asterlab
+kind: param_table
+id: blk-huvec-uv-params
+schema: 1
+title: 光固化与接种参数
+rows:
+  - key: gel_vol
+    label: 每孔铺胶量
+    value: 0.5
+    unit: mL
+  - key: uv_sec
+    label: 405 nm 光照固化时间
+    value: 30
+    unit: s
+  - key: seed_cells
+    label: 每孔接种细胞数
+    value: 100000
+    unit: cells/well
+```
+
+```asterlab
+kind: timer
+id: blk-huvec-uv-timer
+schema: 1
+title: 405 nm UV 光固化倒计时
+mode: countdown
+status: idle
+duration: {value: 30, unit: s}
+```
+
+#@ 3. 6 h / 12 h / 24 h 明场多视野采图与成管定量
+
+分别在接种后 **6 h、12 h、24 h** 对 12 孔板每孔采集 3 个非重叠明场视野，随后汇总管腔总长度、网状结构数与分支节点数。
+
+```asterlab
+kind: timer
+id: blk-huvec-6h-timer
+schema: 1
+title: 成管 6 h 首轮采图倒计时
+mode: countdown
+status: idle
+duration: {value: 6, unit: h}
+```
+
+```asterlab
+kind: attachment
+id: blk-huvec-fov-grid
+schema: 1
+title: 12 孔板每孔 3 视野明场图像网格
+scope: container_grid
+container_ref: plate-huvec
+slots_per_cell: 3
+note: 分别采集 6 h、12 h、24 h 同孔固定 3 视野用于总管长定量。
+```
+
+```asterlab
+kind: data_table
+id: blk-huvec-metrics
+schema: 1
+title: HUVEC 成管图像定量汇总表
+schema_id: huvec_tube_metrics
+endpoint: tube_length
+columns:
+  - key: well
+    label: 孔位
+    value_kind: text
+  - key: total_length
+    label: 管腔总长度
+    value_kind: number
+    unit: um
+    min: 500
+    max: 25000
+  - key: meshes
+    label: 网状结构数
+    value_kind: number
+    unit: "1"
+  - key: branches
+    label: 分支节点数
+    value_kind: number
+    unit: "1"
+  - key: mean_branch_len
+    label: 平均分支长度
+    value_kind: formula
+    formula: "total_length / branches"
+    unit: um
+rows:
+  - well: A1
+  - well: B1
+  - well: C1
+```

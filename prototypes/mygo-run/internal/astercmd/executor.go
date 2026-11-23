@@ -473,6 +473,14 @@ func executeSingleOp(source, cmdID string, args map[string]any, plateFormat, exc
 			}
 		}
 		for _, bk := range preset.BlockKinds {
+			if bk == "markdown" || bk == "prose" {
+				placeholder := "在此填写本步骤操作要点与注意事项。"
+				working = insertProseAt(working, insertCursor, placeholder)
+				if insertCursor >= 0 {
+					insertCursor = min(len(working), insertCursor+len("\n\n"+placeholder))
+				}
+				continue
+			}
 			if bk == "checklist" {
 				working = insertProseAt(working, insertCursor, "- [ ] 待填写核对项")
 				if insertCursor >= 0 {
