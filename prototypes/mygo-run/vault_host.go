@@ -148,9 +148,17 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		}
 		a.shell.SetInitialMobilePrefs(v.Config.MobilePullAction, autoHide, editTb)
 		a.shell.SyncThemeLook(nil)
+		a.shell.ResetWorkspaceForVault()
 		var persist shell.WorkspacePersistState
 		if err := v.LoadWorkspaceJSON(&persist); err == nil {
-			a.shell.RestorePersistState(persist)
+			repaired := a.shell.RestorePersistState(persist)
+			pruned := a.shell.PruneMissingFileTabs(func(rel string) bool {
+				_, statErr := os.Stat(v.AbsPath(rel))
+				return statErr == nil
+			})
+			if repaired || pruned {
+				a.saveVaultWorkspace()
+			}
 		}
 	}
 	a.refreshVaultTreeAndCalendar()
@@ -298,11 +306,8 @@ func (a *app) openVaultFileInActivePane(relPath, title string) {
 			}
 		}
 	}
-	mode := shell.ModeEdit
-	if a.shell.DefaultOpenMode == "read" {
-		mode = shell.ModeRead
-	}
-	a.shell.OpenFileInPane(paneID, relPath, title, mode, true)
+	mode := a.shell.DefaultFileOpenMode()
+	a.shell.OpenFileInPane(paneID, relPath, title, mode, false)
 	a.saveVaultWorkspace()
 }
 

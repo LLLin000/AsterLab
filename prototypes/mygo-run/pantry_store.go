@@ -148,6 +148,7 @@ func parsePantryJSONL(data []byte) (pantryStore, error) {
 	itemsByID := map[string]runs.PantryItem{}
 	boxesByID := map[string]tools.PantryBox{}
 
+	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	lineNo := 0

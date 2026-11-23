@@ -297,7 +297,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 		}
 	}
 
-	pageCol := ui.Column(c.Key("vault-page:"+pane.ID+":"+tab.ID)).Fill()
+	pageCol := ui.Column(c.Key("vault-page:"+pane.ID+":"+tab.ID+":"+tab.FilePath)).Fill()
 	theme.PaintCanvasBackground(pageCol, tok)
 	findOpen := ui.Local(c.Root(), "doc-find-open:"+pane.ID+":"+tab.ID, func() bool { return false })
 	findQuery := ui.Local(c.Root(), "doc-find-q:"+pane.ID+":"+tab.ID, func() string { return "" })
@@ -397,7 +397,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 					})
 				}
 
-				findBtn := components.IconButton(c, lucide.Search(), "页内查找 (Ctrl+F)", components.IconButtonCompact)
+				findBtn := components.IconButton(c, lucide.Search(), "页内查找 (Ctrl+F)", components.IconButtonPlain)
 				if *findOpen {
 					findBtn.Background(tok.AccentSoftBg)
 				}
@@ -405,7 +405,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 					*findOpen = !*findOpen
 				}
 
-				moreBtn := components.IconButton(c, lucide.Ellipsis(), "更多文档操作", components.IconButtonCompact)
+				moreBtn := components.IconButton(c, lucide.Ellipsis(), "更多文档操作", components.IconButtonPlain)
 				components.MenuButton(c, moreBtn, func(m *components.Menu) {
 					if m.Item("导出 PDF 执行单…").Chosen() && ld.Parsed != nil {
 						a.startDocumentPDFExport(c, docTitle, "", "", a.vault.Root, ld.Parsed)
@@ -944,12 +944,18 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 				padBot = a.shell.MobileBottomReserve(c) + float32(tok.Spacing24)
 			}
 			docScroll.Children(func() {
-				// Readable line length (760px for prose, widens to 940px when document has plates or data tables)
-				maxColW := float32(760)
+				// Readable line length adapts smoothly to viewport width (widens gently on 27"+ monitors)
+				winW, _ := c.Size()
+				maxColW := float32(780)
+				wideColW := float32(960)
+				if winW >= 1800 {
+					maxColW = 860
+					wideColW = 1060
+				}
 				if doc != nil {
 					for _, m := range doc.Modules {
 						if m.Kind == "plate" || m.Kind == "data_table" {
-							maxColW = 940
+							maxColW = wideColW
 							break
 						}
 						if m.Kind == "step" {
@@ -958,7 +964,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 									if bm, ok := raw.(map[string]any); ok {
 										k := fmt.Sprint(bm["kind"])
 										if k == "plate" || k == "data_table" {
-											maxColW = 940
+											maxColW = wideColW
 											break
 										}
 									}
@@ -1033,8 +1039,19 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 												dt := asterdoc.BorderlessTextInput(c, tok, dBuf, float32(tok.TextBody), false, "YYYY-MM-DD").
 													FontFeatures("tnum")
 												if dt.Submitted() || (!dt.Focused() && strings.TrimSpace(*dBuf) != docDate) {
-													next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, strings.TrimSpace(*dBuf), docStatus)
-													applyLiveSource(next)
+													rawDate := strings.TrimSpace(*dBuf)
+													if rawDate == "" {
+														next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, "", docStatus)
+														applyLiveSource(next)
+													} else if normDate := asterdoc.NormalizeDateYMD(rawDate); normDate != "" {
+														*dBuf = normDate
+														if normDate != docDate {
+															next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, normDate, docStatus)
+															applyLiveSource(next)
+														}
+													} else {
+														*dBuf = docDate
+													}
 												}
 											} else {
 												ui.Text(c, dateBadge).FontSize(float32(tok.TextBody)).TextColor(tok.Text).FontFeatures("tnum")
@@ -1095,8 +1112,19 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 											dt := asterdoc.BorderlessTextInput(c, tok, dBuf, float32(tok.TextMeta), false, "YYYY-MM-DD").
 												FontFeatures("tnum")
 											if dt.Submitted() || (!dt.Focused() && strings.TrimSpace(*dBuf) != docDate) {
-												next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, strings.TrimSpace(*dBuf), docStatus)
-												applyLiveSource(next)
+												rawDate := strings.TrimSpace(*dBuf)
+												if rawDate == "" {
+													next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, "", docStatus)
+													applyLiveSource(next)
+												} else if normDate := asterdoc.NormalizeDateYMD(rawDate); normDate != "" {
+													*dBuf = normDate
+													if normDate != docDate {
+														next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, normDate, docStatus)
+														applyLiveSource(next)
+													}
+												} else {
+													*dBuf = docDate
+												}
 											}
 										})
 									} else {
