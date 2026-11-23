@@ -175,6 +175,17 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 			},
 			wantTexts: []string{"Van-Lys 液体共培养涂板计数计划", "Van-Lys 滤纸片扩散抑菌圈计划"},
 		},
+		{
+			name: "monitor_27inch_2560x1440_light",
+			w:    2560, h: 1440, dark: false,
+			setup: func() {
+				sh.TextScale = 0
+				sh.ResetWorkspaceForVault()
+				sh.OpenFileInPane(sh.ActivePaneID, "Proj/Alpha.asterml", "Alpha", shell.ModeEdit, false)
+				sh.SetRightDrawer(true, 0)
+			},
+			wantTexts: []string{"Van-Lys 液体共培养涂板计数计划", "共培养孵育计时", "实验库"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -226,4 +237,17 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 			_ = fmt.Sprint(tc.name)
 		})
 	}
+
+	// Verify Ctrl+= / Ctrl+- / Ctrl+0 unified zoom scaling changes TextScale cleanly.
+	sh.TextScale = 0
+	sh.StepUIScale(nil, 0.15)
+	if sh.TextScale < 1.14 || sh.TextScale > 1.16 {
+		t.Fatalf("expected StepUIScale(+0.15) from 1.0 -> 1.15, got %.2f", sh.TextScale)
+	}
+	sh.StepUIScale(nil, -0.35)
+	if sh.TextScale < 0.84 || sh.TextScale > 0.86 {
+		t.Fatalf("expected StepUIScale clamp to 0.85, got %.2f", sh.TextScale)
+	}
+	sh.TextScale = 0
+	sh.SyncThemeLook(nil)
 }
