@@ -454,27 +454,91 @@ func (a *app) syncLiveSessionAfterMutation(c *ui.Context, tok theme.Tokens) {
 	}
 }
 
+func (a *app) cleanupDevTempFiles(tempFolder, tempZip string, clearLiveSession bool) {
+	if strings.TrimSpace(tempFolder) != "" {
+		_ = os.RemoveAll(tempFolder)
+	}
+	if strings.TrimSpace(tempZip) != "" {
+		_ = os.Remove(tempZip)
+	}
+	if !clearLiveSession {
+		return
+	}
+	if baseDir, err := a.resolveDevFeedbackDir(); err == nil && baseDir != "" {
+		_ = os.RemoveAll(devfeedback.LiveSessionDir(baseDir))
+		_ = devfeedback.ClearDraft(baseDir)
+	}
+	a.devInsp.issues = nil
+	a.devInsp.nextID = 0
+	a.devInsp.liveMDPath = ""
+	a.devInsp.exportZip = ""
+}
+
 func (a *app) exportDevFeedbackBundle(c *ui.Context, tok theme.Tokens) {
 	st := &a.devInsp
 	if len(st.issues) == 0 && strings.TrimSpace(st.pendingCrashLog) == "" {
 		st.exportErr = "当前尚未记录任何 UI 问题，请先按 Ctrl+Shift+D 拾取页面元素"
 		return
 	}
-	folder, zipPath, err := a.buildExportZipOnDisk(c, tok)
-	if err != nil {
-		st.exportErr = fmt.Sprintf("导出失败: %v", err)
+	defaultName := "AsterLab-Feedback-" + time.Now().Format("20060102-150405") + ".zip"
+	startDir := ""
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		startDir = filepath.Join(home, "Downloads", defaultName)
+	}
+	// Let the user choose where to save the exported .zip via native OS Save dialog.
+	destZip, saveErr := mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Parent:      mygo.FocusedWindow(),
+		Title:       "导出 UI 反馈包 (.zip)",
+		DefaultPath: startDir,
+		Filters:     []mygo.FileFilter{{Name: "ZIP 压缩包", Extensions: []string{"zip"}}},
+	})
+	if saveErr != nil {
+		st.exportErr = fmt.Sprintf("打开保存对话框失败: %v", saveErr)
 		return
 	}
-	st.exportErr = ""
-	st.exportZip = zipPath
-	clipErr := devfeedback.CopyFileToSystemClipboard(zipPath)
-	if clipErr == nil && (runtime.GOOS == "windows" || runtime.GOOS == "darwin") {
-		st.exportBanner = fmt.Sprintf("✓ 已打包 %d 条并复制 .zip 文件（微信/飞书直接 Ctrl+V 发送）", len(st.issues))
-	} else {
-		c.WriteClipboard(zipPath)
-		st.exportBanner = fmt.Sprintf("✓ 已打包 %d 条: %s（路径已复制）", len(st.issues), zipPath)
+	destZip = strings.TrimSpace(destZip)
+	if destZip == "" {
+		return // user cancelled
 	}
-	revealInFileManager(zipPath, folder)
+	if !strings.HasSuffix(strings.ToLower(destZip), ".zip") {
+		destZip += ".zip"
+	}
+
+	tmpFolder, tmpZip, err := a.buildExportZipOnDisk(c, tok)
+	if err != nil {
+		st.exportErr = fmt.Sprintf("打包失败: %v", err)
+		return
+	}
+	rawZip, rErr := os.ReadFile(tmpZip)
+	if rErr != nil {
+		a.cleanupDevTempFiles(tmpFolder, tmpZip, false)
+		st.exportErr = fmt.Sprintf("读取临时包失败: %v", rErr)
+		return
+	}
+	if wErr := os.WriteFile(destZip, rawZip, 0o644); wErr != nil {
+		a.cleanupDevTempFiles(tmpFolder, tmpZip, false)
+		st.exportErr = fmt.Sprintf("写入目标路径失败: %v", wErr)
+		return
+	}
+
+	exportedCount := len(st.issues)
+	hasCrash := strings.TrimSpace(st.pendingCrashLog) != ""
+	// Clean temporary scratch once exported safely to user's chosen location.
+	a.cleanupDevTempFiles(tmpFolder, tmpZip, true)
+	if hasCrash {
+		diag.DismissPendingCrash("")
+		st.pendingCrashLog = ""
+		st.pendingCrashSummary = ""
+	}
+	st.exportErr = ""
+	clipErr := devfeedback.CopyFileToSystemClipboard(destZip)
+	if clipErr == nil && (runtime.GOOS == "windows" || runtime.GOOS == "darwin") {
+		st.exportBanner = fmt.Sprintf("✓ 已导出 %d 条至 %s 并复制文件（已清理临时缓存）", exportedCount, filepath.Base(destZip))
+	} else {
+		c.WriteClipboard(destZip)
+		st.exportBanner = fmt.Sprintf("✓ 已导出 %d 条至 %s（已清理临时缓存）", exportedCount, filepath.Base(destZip))
+	}
+	revealInFileManager(destZip, filepath.Dir(destZip))
 }
 
 func (a *app) buildExportZipOnDisk(c *ui.Context, tok theme.Tokens) (string, string, error) {
@@ -526,11 +590,11 @@ func (a *app) uploadDevFeedbackBundleAsync(c *ui.Context, tok theme.Tokens) {
 		key = env
 	}
 	if endpoint == "" || key == "" {
-		st.exportErr = "当前本地编译包未内置上报口令，请改用「导出并复制 .zip」发给开发者"
+		st.exportErr = "当前本地编译包未内置上报口令，请改用旁边的「导出 .zip…」发给开发者"
 		return
 	}
 
-	_, zipPath, err := a.buildExportZipOnDisk(c, tok)
+	tmpFolder, tmpZip, err := a.buildExportZipOnDisk(c, tok)
 	if err != nil {
 		st.exportErr = fmt.Sprintf("打包失败: %v", err)
 		return
@@ -561,17 +625,21 @@ func (a *app) uploadDevFeedbackBundleAsync(c *ui.Context, tok theme.Tokens) {
 
 	go func() {
 		defer diag.RecoverAndLog("dev-feedback-upload")
-		resp, upErr := devfeedback.UploadBundle(endpoint, key, zipPath, tester, updater.Version, issueCount, hasCrash, summary)
+		resp, upErr := devfeedback.UploadBundle(endpoint, key, tmpZip, tester, updater.Version, issueCount, hasCrash, summary)
 		mygo.RunOnMain(func() {
 			defer diag.RecoverAndLog("dev-feedback-upload-main")
 			a.devInsp.uploading = false
 			if upErr != nil {
-				a.devInsp.exportErr = fmt.Sprintf("直传失败（可改点右侧导出 .zip）: %v", upErr)
+				// Keep live-session intact as fallback; remove only the transient export folder/zip.
+				a.cleanupDevTempFiles(tmpFolder, tmpZip, false)
+				a.devInsp.exportErr = fmt.Sprintf("直传失败（本地暂存已保留，请改点「导出 .zip…」）: %v", upErr)
 				a.devInsp.exportBanner = ""
 			} else {
+				// Upload confirmed -> purge temporary local scratch so disk never accumulates stale bundles.
+				a.cleanupDevTempFiles(tmpFolder, tmpZip, true)
 				a.devInsp.exportErr = ""
 				a.devInsp.uploadID = resp.ID
-				a.devInsp.exportBanner = fmt.Sprintf("✓ 已直达开发者！编号 %s（共 %d 条，已推送通知）", resp.ID, issueCount)
+				a.devInsp.exportBanner = fmt.Sprintf("✓ 已提交给开发者！编号 %s（共 %d 条，已清理本地缓存）", resp.ID, issueCount)
 				if hasCrash {
 					diag.DismissPendingCrash("")
 					a.devInsp.pendingCrashLog = ""
@@ -770,6 +838,9 @@ func (a *app) renderDevFloatingPill(c *ui.Context, tok theme.Tokens) {
 					st.queueOpen = !st.queueOpen
 				}
 				if len(st.issues) > 0 || strings.TrimSpace(st.pendingCrashLog) != "" {
+					if components.Button(c, "导出 .zip…", components.ButtonGhost).Clicked() && !st.uploading {
+						a.exportDevFeedbackBundle(c, tok)
+					}
 					if a.devUploadConfigured() {
 						btnLbl := "提交给开发者"
 						if st.uploading {
@@ -777,10 +848,6 @@ func (a *app) renderDevFloatingPill(c *ui.Context, tok theme.Tokens) {
 						}
 						if components.Button(c, btnLbl, components.ButtonPrimary).Clicked() && !st.uploading {
 							a.uploadDevFeedbackBundleAsync(c, tok)
-						}
-					} else {
-						if components.Button(c, "导出反馈包", components.ButtonPrimary).Clicked() {
-							a.exportDevFeedbackBundle(c, tok)
 						}
 					}
 				}
@@ -1028,7 +1095,7 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 					open = false
 				}
 				if len(st.issues) > 0 || strings.TrimSpace(st.pendingCrashLog) != "" {
-					if components.Button(c.Key("dev-queue-export"), "导出并复制 .zip", components.ButtonSecondary).Clicked() {
+					if components.Button(c.Key("dev-queue-export"), "导出 .zip…", components.ButtonSecondary).Clicked() && !st.uploading {
 						a.exportDevFeedbackBundle(c, tok)
 					}
 					if a.devUploadConfigured() {

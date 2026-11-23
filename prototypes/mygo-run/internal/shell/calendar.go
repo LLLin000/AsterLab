@@ -847,101 +847,121 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 		totalGridH := rowH * rowCount
 
 		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
-			axisBox := ui.Box(c.Key("wk-axis-canvas")).FillWidth().HandleInput(func(ev ui.InputEvent) bool {
-				if ev.Kind == ui.InputPointerMove {
-					if ev.Y >= 0 && ev.Y <= totalGridH {
-						s.weekHoverOn = true
-						s.weekHoverY = ev.Y
-					} else {
-						s.weekHoverOn = false
-					}
-				}
-				return false
-			})
-			if !axisBox.Hovered() {
+			// UI-04: Virtualized single-canvas week hourly grid (O(1) layout nodes instead of
+			// 112 nested slot boxes) — eliminates hover lag completely and keeps the magnetic
+			// 30-minute timeline butter-smooth across all 7 weekday columns.
+			axisBox := ui.Box(c.Key("wk-axis-canvas")).FillWidth().Height(totalGridH)
+			px, py, insideAxis := axisBox.PointerPosition()
+			if insideAxis && py >= 0 && py <= totalGridH {
+				s.weekHoverOn = true
+				s.weekHoverY = py
+			} else {
 				s.weekHoverOn = false
 			}
-			axisBox.Children(func() {
-				ui.Column(c).FillWidth().Gap(0).Children(func() {
-					for hr := startHr; hr <= endHr; hr++ {
-						hr := hr
-						if hr > startHr {
-							ui.Box(c).FillWidth().Height(1).Background(tok.Border)
+
+			// Single GPU Draw pass for all 7 day columns, hour lines, time labels, and current-time line.
+			axisBox.Draw(func(p *ui.Painter, r ui.Rect) {
+				gridW := r.W - gutterW
+				if gridW <= 0 {
+					return
+				}
+				colW := gridW / 7.0
+				// 1. Column weekend shading + vertical separators
+				for dIdx, day := range days {
+					colX := r.X + gutterW + float32(dIdx)*colW
+					if isWeekend(day.Weekday()) {
+						p.Fill(ui.Rect{X: colX, Y: r.Y, W: colW, H: r.H}, tok.Elevated, 0)
+					}
+					p.Fill(ui.Rect{X: colX, Y: r.Y, W: 1, H: r.H}, tok.Border, 0)
+				}
+				// 2. Horizontal hour dividers (07:00 .. 22:00)
+				for hr := startHr; hr <= endHr; hr++ {
+					y := r.Y + float32(hr-startHr)*rowH
+					if hr > startHr {
+						p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: 1}, tok.Border, 0)
+					}
+				}
+				// Closing bottom hairline
+				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, tok.Border.Alpha(0.6), 0)
+
+				// 3. Today's live red current-time indicator
+				if curHour >= float32(startHr) && curHour <= float32(endHr+1) {
+					for dIdx, day := range days {
+						if day.Format("2006-01-02") == todayYMD {
+							cy := r.Y + (curHour-float32(startHr))*rowH
+							colX := r.X + gutterW + float32(dIdx)*colW
+							dotR := float32(tok.Spacing4)
+							p.Fill(ui.Rect{X: colX - dotR, Y: cy - dotR, W: dotR * 2, H: dotR * 2}, tok.Danger, dotR)
+							p.Fill(ui.Rect{X: colX, Y: cy - 0.75, W: colW, H: 1.5}, tok.Danger, 0)
+							break
 						}
-						ui.Row(c.Key(fmt.Sprintf("wk-row-%d", hr))).FillWidth().Height(rowH).Gap(0).Children(func() {
-							// Hour gutter
-							ui.Row(c).Width(gutterW).FillHeight().Shrink(0).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+					}
+				}
+			})
+
+			// Mount accessible left hour gutter labels (16 static labels) + real buttons ONLY for scheduled hourly events.
+			axisBox.Children(func() {
+				ui.Row(c).Fill().Gap(0).Children(func() {
+					ui.Column(c).Width(gutterW).FillHeight().Shrink(0).Gap(0).Children(func() {
+						for hr := startHr; hr <= endHr; hr++ {
+							ui.Row(c).FillWidth().Height(rowH).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 								AlignItems(ui.Start).Justify(ui.End).Children(func() {
 								ui.Text(c, fmt.Sprintf("%02d:00", hr)).FontSize(float32(tok.TextMeta)).
-									TextColor(tok.TextMuted).FontFeatures("tnum")
+									TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
 							})
-							for dIdx, day := range days {
-								dIdx, day := dIdx, day
-								ymd := day.Format("2006-01-02")
-								isToday := ymd == todayYMD
-								ui.Box(c).FillHeight().Width(1).Background(tok.Border)
-								cellBg := tok.Surface
-								if isWeekend(day.Weekday()) {
-									cellBg = tok.Elevated
+						}
+					})
+					for _, day := range days {
+						day := day
+						ymd := day.Format("2006-01-02")
+						ui.Box(c.Key("wk-col-"+ymd)).Grow(1).MinWidth(0).FillHeight().Children(func() {
+							for _, exp := range byDate[ymd] {
+								exp := exp
+								if exp.StartHour < float32(startHr) || exp.StartHour > float32(endHr)+0.95 {
+									continue
 								}
-								slot := ui.Box(c.Key(fmt.Sprintf("wk-slot-%s-%d", ymd, hr))).Grow(1).MinWidth(0).FillHeight().
-									Background(cellBg).Padding(float32(tok.Spacing4))
-								if slot.Hovered() {
-									s.weekHoverDay = dIdx
-								}
-								slot.Children(func() {
-									for _, exp := range byDate[ymd] {
-										exp := exp
-										if exp.StartHour > 0 && int(exp.StartHour) == hr {
-											bg, bar, fg := stagePillColors(tok, exp.Stage)
-											blk := ui.ButtonBase(c.Key("wk-hr-"+exp.ID)).FillWidth().Justify(ui.Start).
-												Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-												Radius(float32(tok.ControlRadius)).Background(bg).Label(exp.Title)
-											blk.Children(func() {
-												ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-													ui.Box(c).Width(float32(tok.Spacing4)*0.75).Height(float32(tok.Spacing16)).
-														Radius(float32(tok.ControlRadius)*0.35).Background(bar).Shrink(0)
-													components.Text(c, exp.Title).FontSize(float32(tok.TextMeta)).Bold().
-														TextColor(fg).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
-													if exp.DurationMin > 0 {
-														ui.Text(c, formatMinutesCompact(exp.DurationMin)).
-															FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum").Shrink(0)
-													}
-												})
-											})
-											if blk.Clicked() {
-												s.openExperiment(exp)
-											}
+								topY := (exp.StartHour - float32(startHr)) * rowH
+								bg, bar, fg := stagePillColors(tok, exp.Stage)
+								blk := ui.ButtonBase(c.Key("wk-hr-"+exp.ID)).Absolute().
+									Left(float32(tok.Spacing4)).Right(float32(tok.Spacing4)).Top(topY + 2).
+									Justify(ui.Start).
+									Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+									Radius(float32(tok.ControlRadius)).Background(bg).Label(exp.Title)
+								blk.Children(func() {
+									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+										ui.Box(c).Width(float32(tok.Spacing4)*0.75).Height(float32(tok.Spacing16)).
+											Radius(float32(tok.ControlRadius)*0.35).Background(bar).Shrink(0)
+										components.Text(c, exp.Title).FontSize(float32(tok.TextMeta)).Bold().
+											TextColor(fg).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+										if exp.DurationMin > 0 {
+											ui.Text(c, formatMinutesCompact(exp.DurationMin)).
+												FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum").Shrink(0)
 										}
-									}
-									if isToday && int(curHour) == hr {
-										frac := curHour - float32(hr)
-										if frac < 0.08 {
-											frac = 0.08
-										}
-										if frac > 0.9 {
-											frac = 0.9
-										}
-										ui.Row(c).Absolute().Left(0).Right(0).Top(rowH*frac).AlignItems(ui.Center).Children(func() {
-											dotSize := float32(tok.Spacing8)
-											ui.Box(c).Size(dotSize, dotSize).Radius(dotSize * 0.5).Background(tok.Danger)
-											ui.Box(c).Grow(1).Height(1.5).Background(tok.Danger)
-										})
-									}
+									})
 								})
-								if slot.DoubleClicked() {
-									s.SelectedDate = ymd
-									s.triggerCreateForDate(ymd)
+								if blk.Clicked() {
+									s.openExperiment(exp)
 								}
 							}
 						})
 					}
-					// Crisp closing bottom hairline so the week grid never looks abruptly cut off
-					ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.6))
 				})
 			})
-			// UI-09: Full-width click-through hover timeline spanning from left time gutter across all 7 columns,
-			// with gentle magnetic snap to 30-minute ticks (:00 and :30).
+
+			if axisBox.DoubleClicked() && px > gutterW {
+				bounds := axisBox.LayoutBounds()
+				gridW := bounds.W - gutterW
+				if gridW > 0 {
+					dIdx := int((px - gutterW) / (gridW / 7.0))
+					if dIdx >= 0 && dIdx < 7 {
+						ymd := days[dIdx].Format("2006-01-02")
+						s.SelectedDate = ymd
+						s.triggerCreateForDate(ymd)
+					}
+				}
+			}
+
+			// Smooth click-through hover timeline with gentle 30-minute magnetic snap (:00 / :30).
 			axisBox.DrawOver(func(p *ui.Painter, r ui.Rect) {
 				if !s.weekHoverOn || s.weekHoverY < 0 || s.weekHoverY > totalGridH {
 					return
@@ -967,16 +987,13 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 				}
 				timeLbl := fmt.Sprintf("%02d:%02d", totalMins/60, totalMins%60)
 				yAbs := r.Y + lineY
-				// Continuous horizontal line across all 7 weekday columns
 				lineRect := ui.Rect{X: r.X + gutterW, Y: yAbs - 0.75, W: r.W - gutterW, H: 1.5}
 				p.Fill(lineRect, tok.Accent.Alpha(0.75), 0)
-				// Anchor dot at gutter boundary (slightly larger when magnetically snapped to :00/:30)
 				dotR := float32(3)
 				if snapped {
 					dotR = 4
 				}
 				p.Fill(ui.Rect{X: r.X + gutterW - dotR, Y: yAbs - dotR, W: dotR * 2, H: dotR * 2}, tok.Accent, dotR)
-				// Accent HH:MM pill in the left time gutter
 				pillW := gutterW - float32(tok.Spacing8)
 				pillH := float32(tok.Spacing16) + 2
 				pillX := r.X + float32(tok.Spacing4)

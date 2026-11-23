@@ -592,42 +592,58 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 	}
 
 	renderUnifiedModuleShell(v, c, lucide.Calculator(), moduleID, title, "", editableDesign, func() {
-		if res.Summary != "" {
-			inlineBadge(c, res.Summary, components.BadgeOptions{Tone: components.BadgeAccent})
-		}
-		// UI-05 & UI-06: Collapse the noisy 7-pill mode bar (with inconsistent icons) into ONE
-		// clean header dropdown menu button so calculator cards stay calm and focused.
+		// UI-06 & UI-07: Do NOT repeat the bench summary pill in the header (it already appears
+		// cleanly once below the 2D equation). Replace the bloated 9-formula dictionary menu
+		// with a focused 4+1 wet-lab scenario switcher.
 		if editableDesign {
 			tplBtn := ui.ButtonBase(c.Key("calc-tpl-menu:"+moduleID)).
 				Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
 				AlignItems(ui.Center).AlignSelf(ui.Center).
-				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border.Alpha(0.75)).
-				Label("切换计算模板或编辑公式")
+				Radius(float32(tok.ControlRadius)).Border(1, tok.Border.Alpha(0.75)).
+				Label("切换计算场景")
+			targetBg := tok.Elevated
 			if tplBtn.Hovered() {
-				tplBtn.Background(tok.Text.Alpha(0.05))
+				targetBg = tok.Text.Alpha(0.06)
 			}
+			tplBtn.Background(tplBtn.AnimateColor("ctpl-bg", targetBg, theme.MotionSnappy))
 			tplBtn.Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "公式模板").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine()
+					ui.Text(c, "计算场景").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine()
 					ui.Icon(c, lucide.ChevronDown()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
 				})
 			})
 			components.MenuButton(c, tplBtn, func(m *components.Menu) {
-				lastCat := ""
-				for _, pr := range CalculatorFormulaPresets() {
-					if lastCat != "" && pr.Category != lastCat {
-						m.Separator()
-					}
-					lastCat = pr.Category
-					itemText := pr.Label + "  (" + pr.ShortFormula + ")"
-					if m.Item(itemText).Chosen() {
-						applyCalcPreset(pr.ID)
+				scenarios := []struct {
+					id    string
+					label string
+				}{
+					{"dilution", "溶液稀释（C₁V₁ = C₂V₂）"},
+					{"weighing", "固体称量配母液（m = C·V·MW）"},
+					{"serial_dilution", "倍比梯度稀释（离心管图）"},
+					{"mastermix", "孔板铺板 / Master Mix 预混液"},
+				}
+				for _, sc := range scenarios {
+					if m.Item(sc.label).Chosen() {
+						if sc.id == "serial_dilution" {
+							*customOpen = false
+							v.emitAnyModuleEdit(moduleID, map[string]any{
+								"title":           "10 倍系列稀释梯度计算",
+								"mode":            "serial_dilution",
+								"dilution_factor": 10,
+								"steps_count":     6,
+								"stock":           map[string]any{"value": 1000, "unit": "ug/mL"},
+								"volume_per_unit": map[string]any{"value": 1, "unit": "mL"},
+								"rows":            []any{},
+							})
+						} else {
+							applyCalcPreset(sc.id)
+						}
 					}
 				}
 				m.Separator()
-				customLbl := "展开自定义 LaTeX 公式编辑"
+				customLbl := "自定义 LaTeX 公式"
 				if *customOpen {
-					customLbl = "收起自定义 LaTeX 公式编辑"
+					customLbl = "收起自定义公式编辑"
 				}
 				if m.Item(customLbl).Chosen() {
 					*customOpen = !*customOpen
@@ -702,11 +718,11 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 				if activeRowIdx >= 0 {
 					rm := rows[activeRowIdx]
 					rkey := firstNonEmpty(textValue(rm, "key"), "y")
-					rlbl := firstNonEmpty(textValue(rm, "label"), "计算结果")
 					runit := textValue(rm, "unit")
 					formulaStr := strings.TrimSpace(textValue(rm, "formula"))
 
-					// Subtle top caption row inside hero stage (output label + quick edit toggle)
+					// Subtle top caption row inside hero stage: only show tabs when multiple formula outputs exist
+					// (avoid repeating the single output label that already appears in the bench strip below — UI-06).
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						if len(formulaIdxs) > 1 {
 							for fPos, rIdx := range formulaIdxs {
@@ -728,8 +744,6 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 									*activeFormulaIdxStr = strconv.Itoa(fPos)
 								}
 							}
-						} else {
-							ui.Text(c, rlbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 						}
 						ui.Spacer(c)
 						if formulaStr != "" {

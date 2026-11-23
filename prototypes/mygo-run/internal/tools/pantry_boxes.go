@@ -557,6 +557,7 @@ func (w *Workspace) SavePantryBoxDialog() bool {
 		Cols:     cols,
 		Notes:    strings.TrimSpace(w.boxDraft.Notes),
 	}
+	prevBoxes := append([]PantryBox(nil), w.PantryBoxes...)
 	if box.ID == "" {
 		box.ID = fmt.Sprintf("box-%d", time.Now().UnixNano()%1000000)
 		w.PantryBoxes = append(w.PantryBoxes, box)
@@ -574,7 +575,13 @@ func (w *Workspace) SavePantryBoxDialog() bool {
 		}
 	}
 	if err := w.savePantryBoxes(); err != nil {
-		w.boxDialogErr = "保存收纳盒失败：" + err.Error()
+		// Roll back in-memory state on disk failure so no phantom box lingers (UI-11).
+		w.PantryBoxes = prevBoxes
+		msg := "保存收纳盒失败：" + err.Error()
+		if strings.Contains(strings.ToLower(err.Error()), "access is denied") {
+			msg += "（本机安全软件可能拦截了未签名程序跨目录写入，请将程序加入白名单或使用正式签名版）"
+		}
+		w.boxDialogErr = msg
 		return false
 	}
 	w.PantryBoxDialogOpen = false
@@ -1112,7 +1119,6 @@ func renderBoxSlotGrid(
 						Grow(1).Basis(0).MinWidth(0).MinHeight(cellMinH).
 						Padding(t.Space(1), t.Space(0)).
 						Radius(cellRadius).
-						Background(bg).Border(borderW, border).
 						Center().
 						OnClick(func() {
 							if w.boxMoveItemID != "" && !occupied {
@@ -1124,9 +1130,14 @@ func renderBoxSlotGrid(
 							w.selectedBoxSlot = coord
 						})
 
+					targetBorder := border
+					targetBg := bg
 					if cellBtn.Hovered() && !selected {
-						cellBtn.Border(borderW, tok.Accent.Alpha(0.75))
+						targetBorder = tok.Accent.Alpha(0.75)
+						targetBg = bg.Mix(tok.Accent, 0.04)
 					}
+					cellBtn.Background(cellBtn.AnimateColor("cell-bg", targetBg, theme.MotionSnappy)).
+						Border(borderW, cellBtn.AnimateColor("cell-bdr", targetBorder, theme.MotionSnappy))
 
 					cellBtn.Children(func() {
 						renderBoxCellContent(c, tok, box, spec, coord, item, occupied, selected, isMatch, dark)
