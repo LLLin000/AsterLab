@@ -4,6 +4,7 @@
 # Unsigned: this script does not sign anything.
 param(
     [string]$Version = '0.1.0-dev',
+    [switch]$Release,
     [switch]$IncludeNLModel,
     [string]$NLModelDir = '',
     [string]$OnnxRuntimeDll = ''
@@ -26,8 +27,10 @@ try {
     $commit = (git -C $repoRoot rev-parse --short HEAD).Trim()
     $verFlags = "-X 'asterlab-mygo-prototype/internal/updater.Version=$Version' -X 'asterlab-mygo-prototype/internal/updater.Commit=$commit'"
 
-    # 1. Pure-Go Desktop app (windowsgui hides the console window when double-clicked)
-    go build -tags=e2e -trimpath -ldflags="-s -w -H=windowsgui $verFlags" -o (Join-Path $distDir 'mygo-run.exe') .
+    # 1. Pure-Go Desktop app (windowsgui hides the console window when double-clicked).
+    # Public releases pass -Release to compile with mygo_noinspector (strips DevTools/automation/devdebug).
+    $buildTags = if ($Release) { 'mygo_noinspector' } else { 'e2e' }
+    go build "-tags=$buildTags" -trimpath -ldflags="-s -w -H=windowsgui $verFlags" -o (Join-Path $distDir 'mygo-run.exe') .
     if ($LASTEXITCODE -ne 0) { throw "go build desktop failed (exit $LASTEXITCODE)" }
 
     # 2. Pure-Go Vault CLI

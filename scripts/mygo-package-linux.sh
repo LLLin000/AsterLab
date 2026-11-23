@@ -22,7 +22,7 @@ package_arch() {
 
   pushd "${PROTO_DIR}" >/dev/null
   export CGO_ENABLED=0
-  GOOS=linux GOARCH="${goarch}" go build -tags=e2e -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${work}/mygo-run" .
+  GOOS=linux GOARCH="${goarch}" go build -tags=mygo_noinspector -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${work}/mygo-run" .
   GOOS=linux GOARCH="${goarch}" go build -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${work}/asterlab" ./cmd/asterlab
   popd >/dev/null
   chmod +x "${work}/mygo-run" "${work}/asterlab"

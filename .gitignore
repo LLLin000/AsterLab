@@ -16,6 +16,7 @@
 /crates/asterlab-app/target/
 
 /prototypes/mygo-run/dist/
+/prototypes/mygo-run/dist-dev/
 # Large local artifacts kept for research / release use — NOT committed.
 # These folders/files are useful but too large for git. Their absence does
 # NOT mean missing source: the SDK v1 RC baseline lives in committed
