@@ -289,11 +289,11 @@ func TestStandalonePantrySingleClickOpensDetailAndBoxDialogs(t *testing.T) {
 	a.tools.PantryDialogOpen = false
 	st.Frame()
 
-	// Single click on "+ 新建收纳盒" must open AND render the Box Dialog.
-	st.Click("+ 新建收纳盒")
+	// Single click on "+ 收纳盒" must open AND render the Box Dialog.
+	st.Click("+ 收纳盒")
 	st.Frame()
 	if !a.tools.PantryBoxDialogOpen {
-		t.Fatalf("expected + 新建收纳盒 click to set PantryBoxDialogOpen=true")
+		t.Fatalf("expected + 收纳盒 click to set PantryBoxDialogOpen=true")
 	}
 	if !st.HasText("保存收纳盒") || !st.HasText("选择容器规格") {
 		t.Fatalf("expected box dialog to actually render in ViewPantry, got: %q", st.Texts())
