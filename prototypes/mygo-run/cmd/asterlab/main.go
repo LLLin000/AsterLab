@@ -389,6 +389,8 @@ func runCLIWithStdin(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 			b, _ := io.ReadAll(stdin)
 			payload = strings.TrimSpace(string(b))
 		}
+		// Strip Windows UTF-8 BOM (\xef\xbb\xbf) commonly emitted by PowerShell pipes.
+		payload = strings.TrimSpace(strings.TrimPrefix(payload, "\xef\xbb\xbf"))
 		if payload == "" {
 			return emitError(stdout, exitUsage, cmd+" requires a JSON BatchRequest via --ops or stdin")
 		}

@@ -140,4 +140,12 @@ func TestCLIAsterdocSuggestFileAndTextMode(t *testing.T) {
 	if int(textRes["count"].(float64)) != 1 {
 		t.Fatalf("expected 1 suggestion for single timer sentence, got %v", textRes)
 	}
+
+	// 3. UTF-8 BOM piped via PowerShell stdin into asterdoc.preview must parse cleanly
+	var bomOut, bomErr bytes.Buffer
+	bomPayload := "\xef\xbb\xbf" + `{"operations":[{"command_id":"doc.append_note","args":{"text":"BOM-OK"}}]}`
+	bomCode := runCLIWithStdin([]string{"--vault", vaultDir, "asterdoc.preview", "cfu.asterml"}, strings.NewReader(bomPayload), &bomOut, &bomErr)
+	if bomCode != exitOK {
+		t.Fatalf("asterdoc.preview with UTF-8 BOM failed (code=%d): %s %s", bomCode, bomOut.String(), bomErr.String())
+	}
 }
