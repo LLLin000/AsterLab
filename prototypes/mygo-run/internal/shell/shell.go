@@ -172,6 +172,7 @@ type Shell struct {
 	OutlineSteps     []OutlineItem
 	OutlineOnlySteps bool
 	PaletteOpen      bool
+	PaletteMode      string // "" (all) | "files" (Ctrl+O files+pantry) | "commands" (Ctrl+P/K actions)
 	PaletteQuery     string
 	PaletteCursor    int
 	PaletteCommands  []PaletteCommand
@@ -180,6 +181,8 @@ type Shell struct {
 	VaultTree           *vault.TreeNode
 	VaultFiles          []vault.FileEntry
 	VaultFolders        []string
+	FolderTemplates     map[string]string
+	OnSetFolderTemplate func(folderRel, templateRel string)
 	SelectedTreePath     string
 	CreateTargetFolder   string
 	CreateTargetTemplate string
@@ -437,9 +440,25 @@ func (s *Shell) handleGlobalShortcuts(c *ui.Context) {
 	if s.matchHotkey(c, "nav.left_sidebar", parsedHotkey{ui.Cmd, ui.KeyB}) && s.window != nil {
 		s.window.SetLeftExpanded(!s.window.LeftExpanded())
 	}
-	if s.matchHotkey(c, "cmd.palette", parsedHotkey{ui.Cmd, ui.KeyK}, parsedHotkey{ui.Cmd, ui.KeyO}) || c.Shortcut(ui.Cmd, ui.KeyP) {
-		s.PaletteOpen = !s.PaletteOpen
-		s.PaletteCursor = 0
+	// UI-14: Obsidian-style split shortcuts:
+	// Ctrl+O -> Quick Switcher (files + pantry two-group lookup)
+	// Ctrl+P / Ctrl+K -> Command Palette (workspace & tool actions)
+	if c.Shortcut(ui.Cmd, ui.KeyO) {
+		if s.PaletteOpen && s.PaletteMode == "files" {
+			s.PaletteOpen = false
+		} else {
+			s.PaletteMode = "files"
+			s.PaletteOpen = true
+			s.PaletteCursor = 0
+		}
+	} else if s.matchHotkey(c, "cmd.palette", parsedHotkey{ui.Cmd, ui.KeyK}) || c.Shortcut(ui.Cmd, ui.KeyP) {
+		if s.PaletteOpen && s.PaletteMode == "commands" {
+			s.PaletteOpen = false
+		} else {
+			s.PaletteMode = "commands"
+			s.PaletteOpen = true
+			s.PaletteCursor = 0
+		}
 	}
 	if s.matchHotkey(c, "nav.global_search", parsedHotkey{ui.Cmd | ui.Shift, ui.KeyF}) {
 		s.GlobalSearchOpen = !s.GlobalSearchOpen
@@ -977,11 +996,18 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 							s.TogglePinTab(pane.ID, tab.ID)
 						}
 						if tab.Kind == TabFile && tab.FilePath != "" {
+							m.Separator()
 							if m.Item("在文件树中定位").Chosen() {
 								s.SelectedTreePath = tab.FilePath
 								if s.window != nil && !s.window.LeftExpanded() {
 									s.window.SetLeftExpanded(true)
 								}
+							}
+							if m.Item("复制相对路径").Chosen() {
+								c.WriteClipboard(tab.FilePath)
+							}
+							if s.OnRevealInExplorer != nil && m.Item("在资源管理器中显示").Chosen() {
+								s.OnRevealInExplorer(tab.FilePath)
 							}
 						}
 					})

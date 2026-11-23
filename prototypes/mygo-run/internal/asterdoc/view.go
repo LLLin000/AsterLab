@@ -117,6 +117,10 @@ type View struct {
 	stepCollapsed       map[string]bool
 	liveEditors         map[string]*liveEditorEntry
 	nlHover             *nlHoverState
+	nlMissKey           string
+	nlMissLine          int
+	nlMissText          string
+	nlMissJevReady      bool
 	lastFocusedLiveKey  string
 	lastActiveTailKey   string
 	pendingFocusLiveKey string

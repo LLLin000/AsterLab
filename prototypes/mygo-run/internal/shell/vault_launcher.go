@@ -43,9 +43,11 @@ func (s *Shell) renderVaultSwitcherFooter(c *ui.Context, tok theme.Tokens) {
 		OnClick(func() {
 			s.openVaultLauncher()
 		})
+	targetBg := ui.Transparent
 	if rowBtn.Hovered() {
-		rowBtn.Background(tok.Elevated)
+		targetBg = tok.Elevated
 	}
+	rowBtn.Background(rowBtn.AnimateColor("vsf-bg", targetBg, theme.MotionSnappy))
 	rowBtn.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			iconCol := tok.TextMuted

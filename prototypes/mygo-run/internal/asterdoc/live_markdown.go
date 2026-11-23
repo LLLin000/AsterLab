@@ -849,6 +849,15 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		}
 		lineIdx, lnStart, lnEnd := lineBoundsForOffset(bufStr, off)
 		lineText := bufStr[lnStart:lnEnd]
+		// UI-09: Fast-path cache for lines already checked (both hits AND misses!)
+		// Prevents 60 FPS synchronous re-evaluation / model polling while Alt is held over non-matching lines.
+		if !byShortcut &&
+			v.nlMissKey == key &&
+			v.nlMissLine == lineIdx &&
+			v.nlMissText == lineText &&
+			v.nlMissJevReady {
+			return false
+		}
 		dec, _ := QueryJevDecisionAsync(lineText, func() {
 			if v.OnAsyncInvalidate != nil {
 				v.OnAsyncInvalidate()
@@ -869,13 +878,25 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			}
 			return true
 		}
+		if !byShortcut &&
+			v.nlMissKey == key &&
+			v.nlMissLine == lineIdx &&
+			v.nlMissText == lineText &&
+			v.nlMissJevReady == jevReady {
+			return false
+		}
 		sugs := AnalyzeLabSentenceWithContext(v.Doc, lineText, entry.docOffset+lnStart, dec)
 		if len(sugs) == 0 {
+			v.nlMissKey = key
+			v.nlMissLine = lineIdx
+			v.nlMissText = lineText
+			v.nlMissJevReady = jevReady
 			if v.nlHover != nil && v.nlHover.editorKey == key && !byShortcut {
 				v.nlHover = nil
 			}
 			return false
 		}
+		v.nlMissKey = ""
 		closeOtherHovers()
 		st.Run(editor.Cancel) // keep editor's built-in above-line hover closed so only our below-line prism card shows
 		openedAt := c.Now()

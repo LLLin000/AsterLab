@@ -210,20 +210,18 @@ func StepBlockComposer(v *View, c *ui.Context, step *Module) {
 			}
 		}
 
-		// Bottom 10-Module + Plate Insertion Palette
+		// UI-02 & UI-05: Focused Core-5 scientific modules + compact param_table & figure
+		// (retiring redundant checklist/prose/subflow from primary insert menus while preserving
+		// full SciGraph semantics, native Markdown `- [ ]`, and backward read compatibility).
 		if editable && execMode != "organizational" && v.OnInsertStepBlock != nil {
 			entries := []paletteEntry{
-				{Kind: "prose", Label: "文本/注意", Icon: lucide.FileText()},
-				{Kind: "param_table", Label: "参数表", Icon: lucide.SlidersHorizontal()},
-				{Kind: "figure", Label: "示意图/SVG", Icon: lucide.Image()},
-				{Kind: "data_table", Label: "数据表", Icon: lucide.Table2()},
 				{Kind: "group_table", Label: "分组表", Icon: lucide.Table2()},
-				{Kind: "checklist", Label: "检查清单", Icon: lucide.SquareCheck()},
-				{Kind: "calculator", Label: "计算器", Icon: lucide.Calculator()},
+				{Kind: "plate", Label: "孔板 / 平皿", Icon: lucide.Grid2x2()},
+				{Kind: "calculator", Label: "配液计算器", Icon: lucide.Calculator()},
+				{Kind: "data_table", Label: "数据记录表", Icon: lucide.Table2()},
 				{Kind: "timer", Label: "计时器", Icon: lucide.Timer()},
-				{Kind: "attachment", Label: "附件/拍照", Icon: lucide.Paperclip()},
-				{Kind: "subflow", Label: "子流程", Icon: lucide.GitBranch()},
-				{Kind: "plate", Label: "标准孔板", Icon: lucide.Grid2x2()},
+				{Kind: "param_table", Label: "关键参数", Icon: lucide.SlidersHorizontal()},
+				{Kind: "figure", Label: "示意图 / 采图", Icon: lucide.Image()},
 			}
 			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
 				Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
@@ -843,17 +841,13 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 							panel.Width(float32(tok.Spacing48)*5).Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).Children(func() {
 								ui.Text(c, "插入组件").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 								for _, ent := range []paletteEntry{
-									{Kind: "prose", Label: "文本段落", Icon: lucide.FileText()},
-									{Kind: "checklist", Label: "检查清单", Icon: lucide.SquareCheck()},
-									{Kind: "timer", Label: "计时器", Icon: lucide.Timer()},
-									{Kind: "param_table", Label: "参数表", Icon: lucide.SlidersHorizontal()},
 									{Kind: "group_table", Label: "分组表", Icon: lucide.Table2()},
-									{Kind: "plate", Label: "孔板 / 管架", Icon: lucide.Grid2x2()},
+									{Kind: "plate", Label: "孔板 / 平皿", Icon: lucide.Grid2x2()},
+									{Kind: "calculator", Label: "配液计算器", Icon: lucide.Calculator()},
 									{Kind: "data_table", Label: "数据记录表", Icon: lucide.Table2()},
-									{Kind: "calculator", Label: "稀释计算表", Icon: lucide.Calculator()},
-									{Kind: "figure", Label: "图片 / 示意图", Icon: lucide.Image()},
-									{Kind: "attachment", Label: "附件与采图", Icon: lucide.Paperclip()},
-									{Kind: "subflow", Label: "子流程", Icon: lucide.GitBranch()},
+									{Kind: "timer", Label: "计时器", Icon: lucide.Timer()},
+									{Kind: "param_table", Label: "关键参数", Icon: lucide.SlidersHorizontal()},
+									{Kind: "figure", Label: "示意图 / 采图", Icon: lucide.Image()},
 								} {
 									ent := ent
 									if components.Button(c, ent.Label, components.ButtonGhost).Clicked() {

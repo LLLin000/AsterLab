@@ -147,17 +147,17 @@ func TestStepBlockComposerRendersAndInsertsGenericModules(t *testing.T) {
 	}, 1100, 1400)
 	tt.Frame()
 	joined := strings.Join(tt.Texts(), " ")
-	for _, want := range []string{"滤纸片与加样规格", "四象限培养皿布片示意图", "贴片操作核查", "向本步骤插入通用模块", "文本/注意", "计时器"} {
+	for _, want := range []string{"滤纸片与加样规格", "四象限培养皿布片示意图", "贴片操作核查", "向本步骤插入通用模块", "配液计算器", "计时器"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in composer texts: %q", want, joined)
 		}
 	}
-	if err := tt.Click("文本/注意"); err != nil {
+	if err := tt.Click("配液计算器"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if insertedKind != "prose" {
-		t.Fatalf("insertedKind = %q, want prose", insertedKind)
+	if insertedKind != "calculator" {
+		t.Fatalf("insertedKind = %q, want calculator", insertedKind)
 	}
 }
 

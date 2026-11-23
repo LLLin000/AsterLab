@@ -308,6 +308,41 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 					s.OnOpenTemplatePicker(s.ensureSelectedDate())
 				}
 			}
+			// UI-10: Obsidian-style per-folder default template binding
+			if !node.IsSystem && s.OnSetFolderTemplate != nil {
+				m.Group("绑定文件夹默认模板", func(sub *components.Menu) {
+					bound := ""
+					if s.FolderTemplates != nil {
+						bound = s.FolderTemplates[node.RelPath]
+					}
+					if bound != "" {
+						if sub.Item("清除默认模板（新建为空白）").Chosen() {
+							s.OnSetFolderTemplate(node.RelPath, "")
+						}
+						sub.Separator()
+					}
+					foundTpl := false
+					for _, f := range s.VaultFiles {
+						if !f.IsTemplate {
+							continue
+						}
+						foundTpl = true
+						lbl := f.Title
+						if lbl == "" {
+							lbl = f.Name
+						}
+						if bound == f.RelPath {
+							lbl = "✓ " + lbl
+						}
+						if sub.Item(lbl).Chosen() {
+							s.OnSetFolderTemplate(node.RelPath, f.RelPath)
+						}
+					}
+					if !foundTpl {
+						sub.Item("（在 templates/ 放入 .asterml 即可选用）").Disabled(true)
+					}
+				})
+			}
 			if m.Item("新建子文件夹").Chosen() {
 				s.startNewFolderPrompt(node.RelPath)
 			}

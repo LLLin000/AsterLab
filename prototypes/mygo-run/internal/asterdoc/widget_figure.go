@@ -34,8 +34,9 @@ var (
 	reAttrX     = regexp.MustCompile(`\bx\s*=\s*["']([^"']+)["']`)
 	reAttrY     = regexp.MustCompile(`\by\s*=\s*["']([^"']+)["']`)
 	reAttrSize  = regexp.MustCompile(`\bfont-size\s*=\s*["']([^"']+)["']`)
-	reAttrAnch  = regexp.MustCompile(`\btext-anchor\s*=\s*["']([^"']+)["']`)
-	reTagStrip  = regexp.MustCompile(`<[^>]+>`)
+	reAttrAnch     = regexp.MustCompile(`\btext-anchor\s*=\s*["']([^"']+)["']`)
+	reTagStrip     = regexp.MustCompile(`<[^>]+>`)
+	reStripSVGText = regexp.MustCompile(`(?is)<text\b[^>]*>.*?</text>`)
 )
 
 func parseTranslateAttr(attrs string) (float64, float64) {
@@ -649,7 +650,11 @@ func (v *View) cachedSVG(raw string) (*ui.SVG, error) {
 	if s, ok := v.svgCache[raw]; ok {
 		return s, nil
 	}
-	s, err := ui.ParseSVG([]byte(raw))
+	// UI-01: MyGo v0.10+ natively renders SVG <text>, which collided with our
+	// CJK-safe DrawOver text pass and created double labels. Strip <text> from
+	// the vector geometry before parsing so each label renders cleanly once.
+	geomOnly := reStripSVGText.ReplaceAllString(raw, "")
+	s, err := ui.ParseSVG([]byte(geomOnly))
 	if err != nil {
 		return nil, err
 	}

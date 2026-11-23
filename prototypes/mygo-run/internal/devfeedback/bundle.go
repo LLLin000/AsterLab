@@ -528,7 +528,7 @@ func ResolveWritableOutputDir(candidates ...string) (string, error) {
 			lastErr = err
 			continue
 		}
-		probe := filepath.Join(dir, fmt.Sprintf(".write-probe-%d", time.Now().UnixNano()))
+		probe := filepath.Join(dir, fmt.Sprintf("asterlab-write-probe-%d.txt", time.Now().UnixNano()))
 		if err := os.WriteFile(probe, []byte("ok"), 0o644); err != nil {
 			lastErr = err
 			continue
