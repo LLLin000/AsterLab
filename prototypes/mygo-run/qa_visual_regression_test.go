@@ -95,9 +95,15 @@ func pixelDiffRatio(a, b image.Image) float64 {
 }
 
 // TestQA4_VisualRegression_MultiThemeAndViewportMatrix verifies Layer 4 (Visual
-// Regression Testing) across Light/Dark themes and 900x600 compact / 1440x900 desktop
-// viewports on all 4 core AsterLab surfaces, with optional golden-PNG pixel-diff mode
-// via ASTERLAB_VRT_DIR (+ ASTERLAB_UPDATE_VRT=1 to refresh baselines).
+// Regression Testing) across Light/Dark themes, compact/desktop/27-inch viewports
+// (900x600, 1360x880, 1440x900, 2560x1440), and all core workspaces & edge states
+// (Calendar, Document Edit, Lab Mode, Dense 96-well RT-qPCR, Corrupt Error Banner,
+// Split Panes, Pantry Detail, Settings Modal, 125% Scale).
+//
+// Baseline options:
+//   - ASTERLAB_VRT_DIR=<dir>: compare against golden PNGs (1.5% threshold) or save rendered PNGs
+//   - ASTERLAB_UPDATE_VRT=1: write/refresh golden PNG baselines into ASTERLAB_VRT_DIR
+//   - ASTERLAB_VRT_STRICT=1: fail if any expected golden baseline is missing in ASTERLAB_VRT_DIR
 func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 	vaultRoot := filepath.Join(t.TempDir(), "VRTVault")
 	if err := os.MkdirAll(filepath.Join(vaultRoot, "Proj"), 0o755); err != nil {
@@ -107,6 +113,16 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(vaultRoot, "Proj", "Beta.asterml"), []byte(fsmTestDocBeta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultRoot, "Proj", "HUVEC.asterml"), []byte(huvecAsterDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultRoot, "Proj", "RT-qPCR-Dense.asterml"), []byte(rtQpcrAsterDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	corruptDoc := "---\ntitle: 损坏实验测试\n---\n\n#@ 1. 异常模块\n\n```asterlab\nkind: param_table\nid: [unclosed_yaml\n```\n"
+	if err := os.WriteFile(filepath.Join(vaultRoot, "Proj", "Corrupt.asterml"), []byte(corruptDoc), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,6 +139,15 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 	outDir := t.TempDir()
 	goldenDir := os.Getenv("ASTERLAB_VRT_DIR")
 	updateGolden := os.Getenv("ASTERLAB_UPDATE_VRT") == "1"
+	strictGolden := os.Getenv("ASTERLAB_VRT_STRICT") == "1"
+
+	resetOverlays := func() {
+		sh.VaultSettingsOpen = false
+		a.tools.PantryDialogOpen = false
+		sh.TextScale = 0
+		sh.SyncThemeLook(nil)
+		sh.SetRightDrawer(false, 0)
+	}
 
 	type matrixCase struct {
 		name      string
@@ -133,28 +158,75 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 	}
 	cases := []matrixCase{
 		{
-			name: "calendar_1440x900_light",
+			name: "01_calendar_1440x900_light",
 			w:    1440, h: 900, dark: false,
 			setup: func() {
-				sh.SetRightDrawer(false, 0)
+				resetOverlays()
 				sh.OpenCalendarTab()
 			},
 			wantTexts: []string{"实验日程", "实验库"},
 		},
 		{
-			name: "doc_edit_drawer_900x600_dark",
+			name: "02_calendar_1360x880_dark",
+			w:    1360, h: 880, dark: true,
+			setup: func() {
+				resetOverlays()
+				sh.OpenCalendarTab()
+			},
+			wantTexts: []string{"实验日程", "实验库"},
+		},
+		{
+			name: "03_doc_edit_drawer_900x600_dark",
 			w:    900, h: 600, dark: true,
 			setup: func() {
+				resetOverlays()
 				sh.OpenFileInPane(sh.ActivePaneID, "Proj/Alpha.asterml", "Alpha", shell.ModeEdit, false)
 				sh.SetRightDrawer(true, 0)
 			},
 			wantTexts: []string{"Van-Lys 液体共培养涂板计数计划", "共培养孵育计时"},
 		},
 		{
-			name: "pantry_detail_1440x900_light",
+			name: "04_doc_huvec_modern_1360x880_light",
+			w:    1360, h: 880, dark: false,
+			setup: func() {
+				resetOverlays()
+				sh.OpenFileInPane(sh.ActivePaneID, "Proj/HUVEC.asterml", "HUVEC", shell.ModeEdit, false)
+				sh.SetRightDrawer(true, 0)
+			},
+			wantTexts: []string{"HUVEC 水凝胶体外成管测定", "GelMA 浓度实验分组"},
+		},
+		{
+			name: "05_doc_lab_mode_1360x880_light",
+			w:    1360, h: 880, dark: false,
+			setup: func() {
+				resetOverlays()
+				sh.OpenFileInPane(sh.ActivePaneID, "Proj/HUVEC.asterml", "HUVEC", shell.ModeLab, false)
+			},
+			wantTexts: []string{"HUVEC 水凝胶体外成管测定"},
+		},
+		{
+			name: "06_doc_dense_rtqpcr_1440x900_light",
 			w:    1440, h: 900, dark: false,
 			setup: func() {
-				sh.SetRightDrawer(false, 0)
+				resetOverlays()
+				sh.OpenFileInPane(sh.ActivePaneID, "Proj/RT-qPCR-Dense.asterml", "RT-qPCR", shell.ModeEdit, false)
+			},
+			wantTexts: []string{"RT-qPCR 多靶点相对定量实验", "96 孔 qPCR 多靶点三复孔排板"},
+		},
+		{
+			name: "07_doc_corrupt_error_1360x880_light",
+			w:    1360, h: 880, dark: false,
+			setup: func() {
+				resetOverlays()
+				sh.OpenFileInPane(sh.ActivePaneID, "Proj/Corrupt.asterml", "Corrupt", shell.ModeEdit, false)
+			},
+			wantTexts: []string{"实验库"},
+		},
+		{
+			name: "08_pantry_detail_1440x900_light",
+			w:    1440, h: 900, dark: false,
+			setup: func() {
+				resetOverlays()
 				sh.OpenPantryTab()
 				if len(a.tools.Pantry.Items) > 0 {
 					a.tools.OpenPantryDetail(a.tools.Pantry.Items[0])
@@ -163,10 +235,20 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 			wantTexts: []string{"储藏室货架", "保存试剂档案", "说明书与产品网址"},
 		},
 		{
-			name: "split_two_docs_1440x900_dark",
+			name: "09_settings_modal_1360x880_dark",
+			w:    1360, h: 880, dark: true,
+			setup: func() {
+				resetOverlays()
+				sh.OpenCalendarTab()
+				sh.VaultSettingsOpen = true
+			},
+			wantTexts: []string{"设置", "外观"},
+		},
+		{
+			name: "10_split_two_docs_1440x900_dark",
 			w:    1440, h: 900, dark: true,
 			setup: func() {
-				a.tools.PantryDialogOpen = false
+				resetOverlays()
 				sh.ResetWorkspaceForVault()
 				sh.OpenFileInPane(sh.ActivePaneID, "Proj/Alpha.asterml", "Alpha", shell.ModeEdit, false)
 				sh.SplitPaneWithTab(sh.ActivePaneID, shell.WorkspaceTab{
@@ -176,15 +258,25 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 			wantTexts: []string{"Van-Lys 液体共培养涂板计数计划", "Van-Lys 滤纸片扩散抑菌圈计划"},
 		},
 		{
-			name: "monitor_27inch_2560x1440_light",
+			name: "11_monitor_27inch_2560x1440_light",
 			w:    2560, h: 1440, dark: false,
 			setup: func() {
-				sh.TextScale = 0
+				resetOverlays()
 				sh.ResetWorkspaceForVault()
-				sh.OpenFileInPane(sh.ActivePaneID, "Proj/Alpha.asterml", "Alpha", shell.ModeEdit, false)
+				sh.OpenFileInPane(sh.ActivePaneID, "Proj/HUVEC.asterml", "HUVEC", shell.ModeEdit, false)
 				sh.SetRightDrawer(true, 0)
 			},
-			wantTexts: []string{"Van-Lys 液体共培养涂板计数计划", "共培养孵育计时", "实验库"},
+			wantTexts: []string{"HUVEC 水凝胶体外成管测定", "实验库"},
+		},
+		{
+			name: "12_scaled_125pct_1360x880_light",
+			w:    1360, h: 880, dark: false,
+			setup: func() {
+				resetOverlays()
+				sh.TextScale = 1.25
+				sh.OpenFileInPane(sh.ActivePaneID, "Proj/Alpha.asterml", "Alpha", shell.ModeEdit, false)
+			},
+			wantTexts: []string{"Van-Lys 液体共培养涂板计数计划", "实验库"},
 		},
 	}
 
@@ -230,6 +322,8 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 						t.Fatalf("VRT %s pixel diff %.2f%% exceeded 1.50%% threshold against %s", tc.name, diff*100, goldenPath)
 					}
 					t.Logf("VRT %s pixel diff=%.3f%% (ok)", tc.name, diff*100)
+				} else if strictGolden {
+					t.Fatalf("VRT %s missing golden baseline at %s (ASTERLAB_VRT_STRICT=1)", tc.name, goldenPath)
 				} else {
 					t.Logf("VRT %s baseline not found at %s (run with ASTERLAB_UPDATE_VRT=1 to seed)", tc.name, goldenPath)
 				}
@@ -239,7 +333,7 @@ func TestQA4_VisualRegression_MultiThemeAndViewportMatrix(t *testing.T) {
 	}
 
 	// Verify Ctrl+= / Ctrl+- / Ctrl+0 unified zoom scaling changes TextScale cleanly.
-	sh.TextScale = 0
+	resetOverlays()
 	sh.StepUIScale(nil, 0.15)
 	if sh.TextScale < 1.14 || sh.TextScale > 1.16 {
 		t.Fatalf("expected StepUIScale(+0.15) from 1.0 -> 1.15, got %.2f", sh.TextScale)

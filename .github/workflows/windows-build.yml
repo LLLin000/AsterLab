@@ -71,9 +71,9 @@ jobs:
         if: env.RUN_HEAVY == '1'
         working-directory: prototypes/mygo-run
         run: |
-          go test -tags=e2e -skip '^TestRootsResolveAndRejectTraversal$' ./internal/... ./cmd/... ./e2e
+          go test -count=1 -tags=e2e -skip '^TestRootsResolveAndRejectTraversal$' ./internal/... ./cmd/... ./e2e
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go test -tags=e2e -run '^TestObsidianVault|^TestV2WorkbenchVisualGate' .
+          go test -count=1 -tags=e2e -run '^TestObsidianVault|^TestV2WorkbenchVisualGate|^TestFSM_|^TestQA[1-5]_|^TestScenario_|^TestStandalonePantry|^TestVaultIsolatedPantry|^TestVaultLiveDiskWatcher|^TestPantryJSONL|^TestEcosystem' .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify artifacts and record SHA256

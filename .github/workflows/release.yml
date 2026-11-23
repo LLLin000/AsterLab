@@ -72,7 +72,7 @@ jobs:
         run: |
           go build ./...
           go test -count=1 ./internal/... ./cmd/... ./e2e
-          go test -count=1 -run '^TestObsidianVault|^TestV2WorkbenchVisualGate|^TestLocalPantryStore|^TestEcosystem' .
+          go test -count=1 -run '^TestObsidianVault|^TestV2WorkbenchVisualGate|^TestFSM_|^TestQA[1-5]_|^TestScenario_|^TestStandalonePantry|^TestVaultIsolatedPantry|^TestVaultLiveDiskWatcher|^TestPantryJSONL|^TestLocalPantryStore|^TestEcosystem' .
 
   build-windows:
     name: build-windows

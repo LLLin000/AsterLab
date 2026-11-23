@@ -593,9 +593,18 @@ func (s *Shell) page(c *ui.Context) {
 }
 
 func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
-	saveLbl := firstNonEmptyStr(s.StatusSaveLabel, "实时已保存")
+	tab := s.ActiveTab()
+	isFileTab := tab != nil && tab.Kind == TabFile
+	saveLbl := "实时已保存"
+	warnLbl := ""
+	metaLbl := ""
+	if isFileTab {
+		saveLbl = firstNonEmptyStr(s.StatusSaveLabel, "实时已保存")
+		warnLbl = s.StatusWarnLabel
+		metaLbl = s.StatusMetaLabel
+	}
 	modeLbl := ""
-	if tab := s.ActiveTab(); tab != nil {
+	if tab != nil {
 		switch tab.Kind {
 		case TabCalendar:
 			modeLbl = "实验日程"
@@ -618,17 +627,17 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 		Background(tok.SidebarBackground).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 			dotCol := tok.Success
-			if s.StatusWarnLabel != "" {
+			if warnLbl != "" {
 				dotCol = tok.Warning
 			}
 			ui.Box(c).Size(6, 6).Radius(3).Background(dotCol)
 			ui.Text(c, saveLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 		})
-		if s.StatusWarnLabel != "" {
-			ui.Text(c, "· "+s.StatusWarnLabel).FontSize(float32(tok.TextMeta)).TextColor(tok.Warning).SingleLine()
+		if warnLbl != "" {
+			ui.Text(c, "· "+warnLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Warning).SingleLine()
 		}
-		if s.StatusMetaLabel != "" {
-			ui.Text(c, s.StatusMetaLabel).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+		if metaLbl != "" {
+			ui.Text(c, metaLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
 		}
 		ui.Spacer(c)
 		if s.UpdateStatus == "available" && s.UpdateLatestVersion != "" {

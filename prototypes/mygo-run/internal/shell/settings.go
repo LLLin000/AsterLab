@@ -122,7 +122,7 @@ func (s *Shell) renderObsidianSettingsDialog(c *ui.Context) {
 			components.Settings(c, &s.SettingsView, s.obsidianSettingsCategories(c), components.SettingsOptions{
 				Narrow:            narrow,
 				Title:             "设置",
-				SearchPlaceholder: "搜索外观、实验库、快捷键、默认板型…",
+				SearchPlaceholder: "搜索设置项…",
 				CategoryLabel:     "设置分类",
 				ResultsTitle:      "匹配设置项",
 				EmptyText:         "未找到匹配的设置项",

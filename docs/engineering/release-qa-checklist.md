@@ -12,21 +12,26 @@
 | **1. 数据安全与文件系统对抗 (Chaos FS)** | `prototypes/mygo-run/qa_chaos_scale_test.go` (`TestQA1_*`) | 截断/损坏的 `config.json`、`workspace.json`、`pantry.jsonl`、未闭合 `.asterml` 不崩溃、不静默清空用户数据；UTF-8 BOM 与重复 ID 兼容 | 每次 PR 自动跑 |
 | **2. 中文输入法与实时编辑鲁棒性 (IME/CJK)** | `prototypes/mygo-run/qa_ime_editing_test.go` (`TestQA2_*`) | `/` 触发边界（`1/1000` 与 URL 不误触发）、多字节 UTF-8 装饰切分安全、中文打字/退格/撤销重做 | 每次 PR 自动跑 |
 | **3. 规模与响应性能基准 (Scale & Latency)** | `prototypes/mygo-run/qa_chaos_scale_test.go` (`TestQA3_*`) | 200 份 `.asterml` Vault 扫描/索引/1.2s 目录监听签名/全文搜索耗时门禁 + 24 模块长文档稳态帧耗 `<500ms` | 每次 PR 自动跑 |
-| **4. 视觉回归矩阵 (Visual Regression)** | `prototypes/mygo-run/qa_visual_regression_test.go` (`TestQA4_*`) | 浅色/深色 × `900×600` 最小窗/`1440×900` 桌面 × 日历/编辑+抽屉/储藏室弹窗/双文档分屏；非白屏方差校验 + 可选像素 diff 基准对比 | 每次 PR 自动跑（可选像素 diff） |
+| **4. 视觉回归矩阵 (Visual Regression)** | `prototypes/mygo-run/qa_visual_regression_test.go` (`TestQA4_*`) | 12 组场景：浅色/深色 × `900×600`/`1360×880`/`1440×900`/`2560×1440` × `100%`/`125%` 缩放 × 日历/编辑/实验模式/96孔密集/损坏报错/储藏室弹窗/设置弹窗/分屏；非白屏方差校验 + `ASTERLAB_VRT_DIR` / `ASTERLAB_VRT_STRICT=1` 强制像素对比 | 每次 PR + Release 自动跑 |
+| **4.5. 全链路 4-SOP 场景与帧耗 p95** | `prototypes/mygo-run/qa_scenario_test.go` (`TestScenario_*`) | HUVEC / CFU / 抑菌圈 / RT-qPCR 完整 9 阶段闭环（创建→编辑→联动→离线 AI 建议→实验模式→拍照关联→重启恢复→外部热更新→PDF 导出）、非法单位/并发冲突不变量与 96 孔密集页热帧 p95 耗时门禁 | 每次 PR + Release 自动跑 |
 | **5. 长时间浸泡与泄漏测试 (Soak — 独立隔离)** | `prototypes/mygo-run/soak_test.go` (`//go:build soak`) | 600～5000+ 步连续混合负载，监测 `NumGoroutine` 泄漏、`HeapAlloc` 增长与 p95 帧耗 | 发大版本前 / 有空时单独手动跑 |
+| **5.5. 真机 Windows GUI E2E（Pure-Go Vault）** | `scripts/gui-e2e-vault.ps1` (`mygo-automation`) | 在完全隔离的临时 Vault 上启动真实 `-tags e2e` Windows 窗口，执行新建 HUVEC/CFU、多标签切换、实验模式、储藏室、设置、CLI 外部修改热同步与重启恢复，自动截图并生成 `qa-report.md` | Windows Gate / 发版前必跑 |
 
 ### 常用执行命令
 
 ```bash
-# 1. 常规 PR 门禁（Layer 0 + 1 + 2 + 3 + 4）
+# 1. 统一 PR & Release 门禁（linux-tests.yml / windows-build.yml / release.yml 同源）
 cd prototypes/mygo-run
-go test -count=1 -v -run "TestFSM_|TestQA1_|TestQA2_|TestQA3_|TestQA4_" .
+go test -count=1 -v -run "^TestFSM_|^TestQA[1-4]_|^TestScenario_" .
 
-# 2. 视觉回归像素基准模式（生成基准 / 对比基准）
+# 2. 视觉回归像素基准模式（生成基准 / 严格门禁对比）
 ASTERLAB_VRT_DIR=/tmp/asterlab-vrt ASTERLAB_UPDATE_VRT=1 go test -count=1 -v -run TestQA4_ .
-ASTERLAB_VRT_DIR=/tmp/asterlab-vrt go test -count=1 -v -run TestQA4_ .
+ASTERLAB_VRT_DIR=/tmp/asterlab-vrt ASTERLAB_VRT_STRICT=1 go test -count=1 -v -run TestQA4_ .
 
-# 3. Layer 5 独立浸泡测试（有空时跑，可按需调大步数）
+# 3. 真机 Windows GUI E2E（mygo-automation + 隔离 Vault + 自动产出 qa-report.md）
+pwsh -File scripts/gui-e2e-vault.ps1
+
+# 4. Layer 5 独立浸泡测试（有空时跑，可按需调大步数）
 go test -tags soak -v -timeout 30m -run TestQA5_Soak .
 ASTERLAB_SOAK_STEPS=3000 go test -tags soak -v -timeout 30m -run TestQA5_Soak .
 ```
