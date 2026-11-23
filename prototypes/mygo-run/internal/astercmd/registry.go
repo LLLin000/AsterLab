@@ -58,13 +58,13 @@ func StepPresetDefs() []StepPreset {
 		{
 			ID:          "standard",
 			Label:       "常规操作",
-			Description: "文本说明 + 参数表 + 检查清单",
-			BlockKinds:  []string{"prose", "param_table", "checklist"},
+			Description: "Markdown 说明 + 参数表 + 勾选清单",
+			BlockKinds:  []string{"markdown", "param_table", "checklist"},
 		},
 		{
 			ID:          "timed",
 			Label:       "计时 / 循环",
-			Description: "计时器 + 参数表 + 检查清单",
+			Description: "计时器 + 参数表 + 勾选清单",
 			BlockKinds:  []string{"timer", "param_table", "checklist"},
 		},
 		{
@@ -76,8 +76,8 @@ func StepPresetDefs() []StepPreset {
 		{
 			ID:          "analysis",
 			Label:       "结果整理",
-			Description: "数据记录表 + 计算器 + 文本说明",
-			BlockKinds:  []string{"data_table", "calculator", "prose"},
+			Description: "数据记录表 + 计算器 + Markdown 总结",
+			BlockKinds:  []string{"data_table", "calculator", "markdown"},
 		},
 	}
 }
@@ -183,13 +183,13 @@ func buildDefaultRegistry() *Registry {
 			Label:       "实验步骤",
 			Category:    "step",
 			Slash:       "/step",
-			Aliases:     []string{"step", "buzhou", "步骤", "操作步骤", "template", "预设"},
+			Aliases:     []string{"step", "buzhou", "步骤", "操作步骤", "template", "预设", "#@"},
 			Contexts:    []string{"top_level"},
 			AllowInLab:  false,
-			Description: "插入一个实验步骤容器，支持空白或 4 种轻量预设（blank | standard | timed | capture | analysis）",
+			Description: "以正交步骤标题语法（#@ 主步骤 / ##@ 子步骤）插入实验步骤，支持空白或 4 种轻量预设（blank | standard | timed | capture | analysis | substep）",
 			InputSchema: map[string]FieldSpec{
 				"title":     {Type: "string", Description: "步骤标题"},
-				"preset":    {Type: "string", Description: "预设：blank | standard | timed | capture | analysis", Default: "blank"},
+				"preset":    {Type: "string", Description: "预设：blank | standard | timed | capture | analysis | substep", Default: "blank"},
 				"at_offset": {Type: "int", Description: "可选：顶层插入字节偏移"},
 			},
 		},
@@ -427,8 +427,6 @@ func (r *Registry) SlashEntries(contextName string, mode ExecMode) []SlashEntry 
 	add(SlashEntry{CommandID: "asset.embed", Label: "插入照片并关联", Detail: "插入显微照片或结果图并绑定孔位", Slash: "/image", Kind: "image", SearchTerms: "image photo tupian zhaopian 图片 照片 显微 关联"}, true)
 	add(SlashEntry{CommandID: "block.insert", Label: "示意图 / 图片", Detail: "插入实验流程示意图或本地图片", Slash: "/figure", Kind: "figure", SearchTerms: "figure svg shiyitu 示意图"}, false)
 	add(SlashEntry{CommandID: "block.insert", Label: "附件与采图网格", Detail: "原始数据附件或按孔位采图槽", Slash: "/file", Kind: "attachment", SearchTerms: "file attachment fujian 附件 采图"}, false)
-	add(SlashEntry{CommandID: "block.insert", Label: "子流程", Detail: "嵌套多步细分操作", Slash: "/subflow", Kind: "subflow", SearchTerms: "subflow ziliucheng 子流程"}, false)
-	add(SlashEntry{CommandID: "block.insert", Label: "说明 / 警示框", Detail: "带提示或注意事项样式的说明块", Slash: "/prose", Kind: "prose", SearchTerms: "prose text shuoming 文本 说明 警示"}, false)
 	add(SlashEntry{CommandID: "doc.append_note", Label: "实验现场备注", Detail: "在空白处追加实验观察笔记", Slash: "/note", Kind: "note", SearchTerms: "note memo biji 笔记 备注 观察"}, true)
 	return entries
 }

@@ -8,43 +8,46 @@ Status: AsterML v2 (`sdkVersion: "2.0.0"`), self-contained composable step modul
 2. **Figures (`figure@1`) are supplementary visual expression only**: Diagrams, hand-drawn Petri dish quadrants, and agent-generated SVGs live in `figure@1` for human comprehension. Structured experimental groups, parameters, and measurements belong exclusively in structured modules (`group_table`, `param_table`, `plate`, `data_table`, `readout`) and Run records — never parsed out of SVG/image text.
 3. **Self-contained step composition**: `step@1` owns an ordered `blocks: [...]` array of Layer-1 content modules plus optional `block_refs: [...]` to shared top-level modules (`plate`, `group_table`, `calculator`). A self-contained AsterML v2 document compiles and freezes directly into a Run via `CreateRunFromAsterDoc` without pre-registering `ProtocolBlockVersion` UUIDs.
 
-## 1. Source syntax
+## 1. Source syntax (AsterML v2.1 Markdown-First)
 
-An AsterDoc is ordinary Markdown. A fenced block whose language is `asterlab` declares one module:
+An AsterDoc is ordinary Markdown with **YAML Frontmatter**, **orthogonal step headings (`#@` / `##@`)**, and **fenced `asterlab` interactive cards** only where structured calculation, layout, timing, or tabular readout is needed:
 
 ````markdown
-## 实验步骤 02：处理与分组
+---
+title: 实验标题
+scheduled_date: 2026-11-24
+stage: planned
+---
+
+#@ 1. 实验处理与分组 {#t0}
+
+- [ ] 准备实验材料，将菌液 OD600 校正至 0.5 AU
+- [ ] 按四象限完成分组加样后 37 °C 倒置培养 16 h
 
 ```asterlab
-kind: step
-id: step-02-treatment
+kind: param_table
+id: pt-02
 schema: 1
-title: 02 实验处理与分组
-execution: executable
-blocks:
-  - kind: param_table
-    id: pt-02
-    schema: 1
-    title: 实验参数
-    rows:
-      - {key: od600, label: OD600, value: 0.5, unit: AU}
-  - kind: figure
-    id: fig-02
-    schema: 1
-    title: 培养皿四象限分区示意图
-    svg: "<svg viewBox='0 0 200 200'>...</svg>"
-    caption: 示意：四象限分区（仅视觉辅助，分组真值在 group_table）
-  - kind: checklist
-    id: chk-02
-    schema: 1
-    items:
-      - {id: prep, label: 准备实验材料, blocking: true}
-      - {id: assign, label: 按四象限完成分组加样, blocking: true}
+title: 实验条件
+rows:
+  - {key: od600, label: OD600, value: 0.5, unit: AU}
+```
+
+```asterlab
+kind: timer
+id: timer-02
+schema: 1
+title: 37 °C 倒置培养
+mode: countdown
+status: idle
+duration: {value: 16, unit: h}
 ```
 ````
 
 Rules:
 
+- **Canonical step authoring**: New documents, built-in SOP templates, `/step` commands, and AI Agents MUST author steps using orthogonal Markdown headings (`#@ 主步骤` / `##@ 子步骤`), plain Markdown prose, and `- [ ]` checklists. This unlocks unified outline/progress tracking, SciGraph context, desktop `Alt+Hover`, and CLI `asterlab asterdoc.suggest` compilation.
+- **Legacy container compatibility**: Fenced `step@1`, `workflow@1`, `prose@1`, and `subflow@1` blocks remain registered in `spec/modules.json` strictly for backward-compatible parsing and frozen Run replay; they are NOT exposed in foreground templates or slash menus.
 - `kind` and `schema` select a registered module specification from `prototypes/mygo-run/internal/asterdoc/spec/modules.json`.
 - `id` is stable and unique across all top-level blocks and inline `step.blocks[]` items in one document.
 - Unknown `kind`, unknown `schema`, or unknown UCUM unit in `spec/units.json` is rejected by both Go and Rust Core (`TestAsterDocGoRustParity`).

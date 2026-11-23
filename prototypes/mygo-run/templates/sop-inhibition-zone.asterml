@@ -1,0 +1,194 @@
+---
+title: 四象限滤纸片抑菌圈测定
+scheduled_date: ""
+stage: planned
+tags:
+  - 微生物
+  - 抗菌
+  - 抑菌圈
+---
+
+> **实验目标**：在金黄色葡萄球菌涂布平板上，通过四象限滤纸片琼脂扩散法比较 HAMA 水凝胶、万古霉素（Van）与溶菌酶的抑菌圈平均直径（mm）。
+
+## 四象限给药分组
+
+```asterlab
+kind: group_table
+id: gt-iz
+schema: 1
+title: 四象限给药分组
+rows:
+  - id: g-blank
+    name: Q1 空白对照 (PBS)
+    role: control
+    dose: 20 uL
+    condition: 无菌 PBS 浸泡滤纸片
+    independent_n: 3
+  - id: g-hama
+    name: Q2 HAMA 水凝胶组
+    role: treatment
+    dose: 5 % w/v
+    condition: 5% HAMA 光交联样片 (6 mm)
+    independent_n: 3
+  - id: g-van
+    name: Q3 万古霉素阳性对照
+    role: positive_control
+    dose: 30 ug/mL
+    condition: Van 药敏滤纸片
+    independent_n: 3
+  - id: g-lys
+    name: Q4 溶菌酶处理组
+    role: treatment
+    dose: 10 mg/mL
+    condition: 溶菌酶溶液浸渍滤纸片
+    independent_n: 3
+```
+
+#@ 1. 菌悬液校正与 LB 琼脂均匀涂布
+
+将对数期菌液 OD600 校正至 **0.5 AU**（约 1×10⁸ CFU/mL），吸取 **100 uL** 用无菌涂布棒旋转三方向均匀涂布于 90 mm 琼脂平板。
+
+```asterlab
+kind: param_table
+id: blk-iz-lawn-params
+schema: 1
+title: 菌液与培养基参数
+rows:
+  - key: od600
+    label: 菌液起始 OD600
+    value: 0.5
+    unit: AU
+  - key: inoculum_vol
+    label: 单皿涂布菌液体积
+    value: 100
+    unit: uL
+  - key: agar_temp
+    label: 倒板琼脂温度
+    value: 45
+    unit: Cel
+  - key: agar_vol
+    label: 单皿琼脂铺板量
+    value: 20
+    unit: mL
+```
+
+#@ 2. 四象限贴片布局与处理分组
+
+- [ ] 平板表面菌液静置吸收 10 min 至无明显浮液
+- [ ] 无菌镊子轻压药敏片/样片使其与琼脂紧密接触，相邻片心距 > 24 mm
+
+```asterlab
+kind: param_table
+id: blk-iz-disc-params
+schema: 1
+title: 滤纸片与加样规格
+rows:
+  - key: disc_diameter
+    label: 滤纸片直径
+    value: 6
+    unit: mm
+  - key: load_volume
+    label: 单片载药体积
+    value: 20
+    unit: uL
+```
+
+```asterlab
+kind: figure
+id: blk-iz-quadrant-svg
+schema: 1
+title: 四象限培养皿布片示意图
+caption: 示意：90 mm 琼脂皿四象限标准排布（1 mm = 2.4 px；分组参数与测量读数存于结构化表格）
+max_height: 260
+svg: |
+  <svg viewBox="0 0 360 280" xmlns="http://www.w3.org/2000/svg">
+    <g transform="translate(180, 140)">
+      <circle cx="0" cy="0" r="108" fill="none" stroke="currentColor" stroke-width="2.5"/>
+      <circle cx="0" cy="0" r="102" fill="none" stroke="currentColor" stroke-width="0.9" stroke-dasharray="4 4"/>
+      <line x1="-102" y1="0" x2="102" y2="0" stroke="currentColor" stroke-width="1.1" stroke-dasharray="6 4"/>
+      <line x1="0" y1="-102" x2="0" y2="102" stroke="currentColor" stroke-width="1.1" stroke-dasharray="6 4"/>
+      <circle cx="-44" cy="-44" r="7.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <circle cx="44" cy="-44" r="19" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 3"/>
+      <circle cx="44" cy="-44" r="7.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <circle cx="-44" cy="44" r="28" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 3"/>
+      <circle cx="-44" cy="44" r="7.2" fill="none" stroke="currentColor" stroke-width="2.0"/>
+      <circle cx="44" cy="44" r="17" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 3"/>
+      <circle cx="44" cy="44" r="7.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <line x1="-51" y1="-51" x2="-96" y2="-100" stroke="currentColor" stroke-width="0.8"/>
+      <line x1="51" y1="-51" x2="96" y2="-100" stroke="currentColor" stroke-width="0.8"/>
+      <line x1="-51" y1="51" x2="-96" y2="100" stroke="currentColor" stroke-width="0.8"/>
+      <line x1="51" y1="51" x2="96" y2="100" stroke="currentColor" stroke-width="0.8"/>
+    </g>
+    <text x="12" y="28" font-size="11" text-anchor="start">Q1 空白 PBS</text>
+    <text x="348" y="28" font-size="11" text-anchor="end">Q2 HAMA 水凝胶</text>
+    <text x="12" y="254" font-size="11" text-anchor="start">Q3 万古霉素 (+)</text>
+    <text x="348" y="254" font-size="11" text-anchor="end">Q4 溶菌酶</text>
+  </svg>
+annotations:
+  - label: 90 mm Agar Dish · 1 mm = 2.4 px
+    x: 180
+    y: 268
+```
+
+#@ 3. 37 °C 恒温倒置培养与皿底拍照归档 {#t0}
+
+贴片完成后 15 min 内入箱，37 °C 倒置培养 16 h。拍照时皿底垫黑色无反光背景，标尺与皿缘同平面垂直拍摄。
+
+```asterlab
+kind: timer
+id: blk-iz-timer
+schema: 1
+title: 37 °C 恒温倒置培养计时
+mode: countdown
+status: idle
+duration: {value: 16, unit: h}
+```
+
+```asterlab
+kind: attachment
+id: blk-iz-photo
+schema: 1
+title: 培养皿实物拍摄归档
+scope: step_evidence
+slots_per_cell: 1
+note: 皿底垫黑色无反光背景，标尺与皿缘同平面垂直拍摄。
+```
+
+#@ 4. 十字双径游标卡尺测量与均值计算
+
+使用游标卡尺分别测量每个象限抑菌圈的水平径 `d1` 与垂直径 `d2`（无抑菌圈按纸片直径 6.0 mm 记）。
+
+```asterlab
+kind: data_table
+id: blk-iz-table
+schema: 1
+title: 四象限抑菌圈测量记录
+schema_id: inhibition_zone_mm
+endpoint: zone_diameter
+columns:
+  - key: sample
+    label: 象限样本
+    value_kind: text
+  - key: d1
+    label: 水平径 d1
+    value_kind: number
+    unit: mm
+    min: 6
+    max: 45
+  - key: d2
+    label: 垂直径 d2
+    value_kind: number
+    unit: mm
+    min: 6
+    max: 45
+  - key: mean_d
+    label: 平均抑菌直径
+    value_kind: formula
+    formula: "(d1 + d2) / 2"
+    unit: mm
+rows:
+  - sample: Q1-PBS
+  - sample: Q2-HAMA
+  - sample: Q3-Van
+  - sample: Q4-Lys
+```

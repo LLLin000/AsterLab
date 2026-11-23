@@ -1058,7 +1058,7 @@ func (g *SciGraph) ContextAt(offset int) ScientificLineContext {
 				if sn == nil {
 					continue
 				}
-				if offset >= sn.LineStart && offset <= sn.ScopeEnd {
+				if offset >= sn.LineStart && offset < sn.ScopeEnd {
 					inStep = sn
 					findStep(sn.Children)
 				}
@@ -1093,12 +1093,14 @@ func (g *SciGraph) ContextAt(offset int) ScientificLineContext {
 		} else {
 			ctx.Zone = ZoneMetadata
 		}
+	case inStep != nil:
+		// An explicit orthogonal step (`#@` / `##@`) always owns its body as ZoneStepBody,
+		// even if an earlier chapter heading like `## 实验材料` preceded the first `#@` step.
+		ctx.Zone = ZoneStepBody
 	case reMaterialsChap.MatchString(ctx.ChapterTitle):
 		ctx.Zone = ZoneMaterials
 	case reReviewChap.MatchString(ctx.ChapterTitle):
 		ctx.Zone = ZoneReview
-	case inStep != nil:
-		ctx.Zone = ZoneStepBody
 	case reDesignChap.MatchString(ctx.ChapterTitle):
 		ctx.Zone = ZoneDesignPlan
 	default:

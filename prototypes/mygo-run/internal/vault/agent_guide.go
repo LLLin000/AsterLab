@@ -29,35 +29,31 @@ const DefaultVaultAgentGuide = `# AsterLab Vault · AI Agent 协作指南
     - ` + "`{\"type\":\"reagent\",\"id\":\"...\",\"labelCode\":\"PN-001\",\"name\":\"Vancomycin\",\"location\":\"-20°C\",\"purchasedOn\":\"2026-11-23\",\"shelfLifeDays\":365,\"revision\":1,\"meta\":{\"catalogNo\":\"...\",\"lotNo\":\"...\",\"boxId\":\"...\",\"boxSlot\":\"A1\"}}`" + `
   - ` + "`.asterlab/pantry-manuals/`" + `：上传的试剂说明书 PDF / COA / SDS 与自定义贴纸图片。
 
-## 2. AsterML v2.1 编写规范
+## 2. AsterML v2.1 编写规范（Markdown 优先 + 渐进结构化）
 
-每份 ` + "`.asterml`" + ` 文件由 **YAML Frontmatter** + **标准 Markdown 正文** + **结构化科学模块**组成。
+每份 ` + "`.asterml`" + ` 文件遵循 **80% 自由 Markdown + 20% 关键交互卡片** 原则：给人看和记笔记的内容全部用标准 Markdown 写，只在需要计算、排板、倒计时、数据汇总时放置 ` + "```asterlab" + ` 交互模块。
 
-### 2.1 Frontmatter（文件头）
+### 2.1 Frontmatter（唯一文档头）
 
 ` + "```yaml" + `
 ---
 title: 实验标题
 scheduled_date: 2026-11-24
 stage: planned
+tags:
+  - 抗菌实验
 ---
 ` + "```" + `
 
 - ` + "`stage`" + ` 合法枚举：` + "`planned`" + `（计划中）| ` + "`in_progress`" + `（进行中）| ` + "`completed`" + `（已完成）。
-- 模板文件省略 ` + "`scheduled_date`" + `。
+- 模板文件省略或留空 ` + "`scheduled_date`" + `。
+- 实验目的与背景直接用 Markdown 引用块 ` + "`> **实验目标**：...`" + ` 与普通列表说明，**不要再手写老式 ` + "`kind: experiment`" + `、` + "`kind: assay`" + `、` + "`kind: workflow`" + ` 块**。
 
-### 2.2 顶层实验元信息与分组表
+### 2.2 顶部实验蓝图（分组表 + 孔板/平皿）
+
+需要分组对照或孔板排布时，在顶部放 ` + "`group_table`" + ` 与 ` + "`plate`" + `（供下方计算器 ` + "`@plate.sample_wells`" + ` 与数据表自动联动）：
 
 ` + "````markdown" + `
-` + "```asterlab" + `
-kind: experiment
-id: exp-01
-schema: 1
-title: 实验标题
-objective: 一句话描述科学目标与终点指标
-experimental_unit: well
-` + "```" + `
-
 ` + "```asterlab" + `
 kind: group_table
 id: gt-groups
@@ -77,26 +73,24 @@ rows:
 ` + "```" + `
 ` + "````" + `
 
-- ` + "`experimental_unit`" + ` 常用值：` + "`well`" + ` | ` + "`tube`" + ` | ` + "`plate`" + ` | ` + "`dish`" + ` | ` + "`sample`" + ` | ` + "`animal`" + `。
-- ` + "`group_table.rows[].role`" + ` 常用值：` + "`control`" + ` | ` + "`positive_control`" + ` | ` + "`treatment`" + ` | ` + "`blank`" + `。
+- ` + "`group_table.rows[].role`" + ` 常用值：` + "`control`" + ` | ` + "`positive_control`" + ` | ` + "`treatment`" + ` | ` + "`blank`" + ` | ` + "`reference`" + `。
 
-### 2.3 步骤与 11 种标准模块（严禁自造新 ` + "`kind`" + `）
+### 2.3 步骤骨架与 7 类核心交互卡片（统一标准）
 
-使用 ` + "`#@ 01 步骤标题`" + ` 或 ` + "```asterlab\nkind: step\n```" + ` 组织实验步骤。在 ` + "`step.blocks[]`" + ` 中可自由组合以下 **11 种通用模块**：
+- **步骤一律使用正交标题语法**：` + "`#@ 1. 主步骤标题`" + `、` + "`##@ 1.1 子步骤标题`" + `（可选末尾加 ` + "`{#t0}`" + ` 时间锚点）。桌面端会自动识别步骤树、大纲、勾选进度以及 **` + "`Alt+悬停`" + ` 智能解析作用域**。
+- **操作说明与核对清单直接写普通 Markdown 段落和 ` + "`- [ ]`" + ` 复选框**。
+- **严禁在新文档中使用老式容器/冗余块**：不要生成 ` + "`kind: step`" + `、` + "`kind: workflow`" + `、` + "`kind: assay`" + `、` + "`kind: experiment`" + `、` + "`kind: prose`" + `、` + "`kind: subflow`" + `（引擎仅保留对历史旧文件的静默兼容）。
+- 仅在真正需要交互计算、排布或读数汇总时，在 ` + "`#@`" + ` 步骤下按需插入以下 **7 类交互模块**（严禁自造新 ` + "`kind`" + `）：
 
 | ` + "`kind`" + ` | 用途 | 核心字段 |
 |---|---|---|
-| ` + "`prose`" + ` | 操作说明、注意事项、观察记录 | ` + "`body`" + ` |
 | ` + "`group_table`" + ` | 分组设计（对照、处理、独立重复数） | ` + "`title, rows[{id, name, role, condition, independent_n}]`" + ` |
-| ` + "`param_table`" + ` | 关键参数（温度、浓度、转速、体积等） | ` + "`title, rows[{key, label, value, unit}]`" + ` |
-| ` + "`plate`" + ` | 孔板 / 平皿排布映射 | ` + "`title, format (6|12|24|48|96|384), groups: {group_id: [A1, A2]}`" + ` |
-| ` + "`calculator`" + ` | 稀释、配液、MasterMix 计算 | ` + "`title, formula, inputs, outputs`" + ` |
-| ` + "`timer`" + ` | 孵育/离心倒计时或正计时 | ` + "`title, mode (countdown|stopwatch), status (idle), duration: {value, unit}`" + ` |
-| ` + "`checklist`" + ` | 关键质控核对清单 | ` + "`title, items[{id, label, checked, blocking}]`" + ` |
-| ` + "`data_table`" + ` | 计划测量表与实测读数表 | ` + "`title, columns[{key, label, value_kind, unit}], rows[...]`" + ` |
-| ` + "`figure`" + ` | 示意图 / 实拍图（仅作视觉补充，不存结构化数据） | ` + "`title, src, caption`" + ` |
-| ` + "`attachment`" + ` | 原始数据/质检附件链接 | ` + "`title, path, mime`" + ` |
-| ` + "`subflow`" + ` | 可复用子流程引用 | ` + "`title, ref`" + ` |
+| ` + "`plate`" + ` | 孔板 / 平皿 / 管架排布映射 | ` + "`title, format (6|12|24|48|96|384), topology (plate|dish|rack_1d), groups`" + ` |
+| ` + "`param_table`" + ` | 需要记录“计划 vs 实测”的关键条件 | ` + "`title, rows[{key, label, value, unit}]`" + ` |
+| ` + "`calculator`" + ` | 稀释、称量、MasterMix 或公式自动计算 | ` + "`title, mode (dilution|serial_dilution|group_mastermix|formula), ...`" + ` |
+| ` + "`timer`" + ` | 孵育 / 离心 / 光固化倒计时、秒表或循环计时 | ` + "`title, mode (countdown|stopwatch|cycle), status (idle), duration: {value, unit}`" + ` |
+| ` + "`data_table`" + ` | 计划测量表、自动换算公式与实测读数表 | ` + "`title, columns[{key, label, value_kind, unit, formula}], rows[...]`" + ` |
+| ` + "`figure`" + ` / ` + "`attachment`" + ` | 物理比例 SVG 示意图 / 按孔位采图网格（日常插图直接用 ` + "`![[./assets/图.png]]`" + `） | ` + "`title, svg|src|scope, container_ref`" + ` |
 
 每个模块都必须包含 ` + "`kind`" + `、` + "`id`" + `（文档内唯一）和 ` + "`schema: 1`" + `。
 
@@ -111,18 +105,24 @@ rows:
 2. **严禁伪造实测数据**：编写实验计划时，` + "`data_table`" + ` 只预填样本/组别/计划浓度等自变量列，**所有待测读数列必须留空（` + "`null`" + ` 或省略）**，等实验执行时由实验人员录入。
 3. **不修改历史冻结记录**：除非用户明确要求，不要篡改已完成实验的原始读数。
 
-## 3. 校验命令（CLI）
+## 3. 内置校验与智能卡片编译（CLI）
 
-若环境已安装 ` + "`asterlab`" + ` CLI，写入或修改 ` + "`.asterml`" + ` 后建议运行校验与就绪度检查：
+若环境已安装 ` + "`asterlab`" + ` CLI，推荐采用 **“先写清爽 ` + "`#@`" + ` Markdown → 调 ` + "`asterdoc.suggest`" + ` 获取确定性卡片建议 → ` + "`asterdoc.validate`" + ` 校验”** 工作流：
 
 ` + "```bash" + `
-# 校验 AsterML 语法、模块 Schema 与 UCUM 单位
+# 1. 调用内置离线语义引擎 + 确定性编译器，检查文档中哪些步骤句适合升格为计时器/计算器/孔板卡片（附带合规 YAML）
+asterlab asterdoc.suggest ./项目目录/实验计划.asterml
+
+#    也可直接对单句自然语言编译合规模块 YAML（零单位错、自动联动已有孔板）
+asterlab asterdoc.suggest --text "37°C 倒置培养 24 h" ./项目目录/实验计划.asterml
+
+# 2. 校验 AsterML 语法、模块 Schema 与 UCUM 单位
 asterlab asterdoc.validate ./项目目录/实验计划.asterml
 
-# 评估实验方案就绪度（检查对照、重复数、缺失参数等）
+# 3. 评估实验方案就绪度（检查对照、重复数、缺失参数等）
 asterlab asterdoc.assess ./项目目录/实验计划.asterml
 
-# 查看全部可用命令与结构化参数说明
+# 4. 查看全部可用语义命令与参数说明
 asterlab cmd.list
 ` + "```" + `
 `

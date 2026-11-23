@@ -777,7 +777,7 @@ func localRouteSentence(text string) (kind, mode string, conf, noul float64) {
 	if strings.Contains(text, "至少") || strings.Contains(text, "≥") || (strings.Contains(text, "t0") && len(reNLDuration.FindAllString(text, -1)) >= 2) {
 		return "timer", "window", 0.88, 0.58
 	}
-	if hasDur && (strings.Contains(text, "孵育") || strings.Contains(text, "离心") || strings.Contains(text, "水浴") || strings.Contains(text, "照射") || strings.Contains(text, "固化") || strings.Contains(text, "浸泡") || strings.Contains(text, "静置") || strings.Contains(text, "染核") || strings.Contains(text, "封闭") || strings.Contains(text, "透膜") || strings.Contains(text, "固定") || strings.Contains(text, "裂解") || strings.Contains(text, "灭活") || strings.Contains(text, "变性")) {
+	if hasDur && (strings.Contains(text, "孵育") || strings.Contains(text, "离心") || strings.Contains(text, "水浴") || strings.Contains(text, "照射") || strings.Contains(text, "固化") || strings.Contains(text, "浸泡") || strings.Contains(text, "静置") || strings.Contains(text, "染核") || strings.Contains(text, "封闭") || strings.Contains(text, "透膜") || strings.Contains(text, "固定") || strings.Contains(text, "裂解") || strings.Contains(text, "灭活") || strings.Contains(text, "变性") || strings.Contains(text, "摇床") || strings.Contains(text, "振荡") || strings.Contains(text, "消化") || (strings.Contains(text, "培养") && !strings.Contains(text, "培养基"))) {
 		return "timer", "countdown", 0.90, 0.55
 	}
 	return "none", "", 0, 0

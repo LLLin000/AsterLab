@@ -1,0 +1,159 @@
+---
+title: 梯度稀释涂板菌落计数（CFU）
+scheduled_date: ""
+stage: planned
+tags:
+  - 微生物
+  - CFU
+---
+
+> **实验目标**：通过 10 倍系列稀释与琼脂涂板，在 **30–300 CFU** 有效计数区间内计算原液活菌浓度（CFU/mL）。
+
+## 实验分组与平皿排布
+
+```asterlab
+kind: group_table
+id: gt-cfu
+schema: 1
+title: 菌落计数样本与稀释组
+rows:
+  - id: g-stock
+    name: 原液样本组（10^-4 ~ 10^-5）
+    role: treatment
+    condition: S. aureus 对数期菌悬液
+    independent_n: 3
+  - id: g-neg
+    name: 无菌稀释液阴性对照
+    role: control
+    condition: 无菌 PBS 空涂板
+    independent_n: 2
+```
+
+```asterlab
+kind: plate
+id: dish-cfu
+schema: 1
+title: 90 mm 涂布平皿排布
+format: 24
+topology: dish
+rows: 2
+columns: 4
+groups:
+  g-neg: [A1, A2]
+  g-stock: [B1, B2, B3, B4]
+roles:
+  A1: blank
+  A2: blank
+  B1: sample
+  B2: sample
+  B3: sample
+  B4: sample
+samples:
+  A1: DIL-BLANK-1
+  A2: DIL-BLANK-2
+  B1: CFU-10e-4-1
+  B2: CFU-10e-4-2
+  B3: CFU-10e-5-1
+  B4: CFU-10e-5-2
+```
+
+#@ 1. 10 倍梯度系列稀释（10⁻¹ ~ 10⁻⁶）
+
+从约 10⁸ CFU/mL 菌悬液原液进行 10 倍连续稀释 6 级，每管终体积 1 mL。
+
+- [ ] 6 支无菌离心管预先各分装 **900 uL 无菌 PBS**
+- [ ] 从上级管移取 **100 uL** 菌液加入下一管并涡旋混匀 10 s
+- [ ] **每转移一级更换新无菌吸头**，防止交叉带菌导致高倍稀释虚高
+
+```asterlab
+kind: calculator
+id: blk-cfu-serial
+schema: 1
+title: 10 倍系列稀释梯度计算（10^-1 ~ 10^-6）
+mode: serial_dilution
+dilution_factor: 10
+steps_count: 6
+stock: {value: 100000000, unit: CFU/mL}
+volume_per_unit: {value: 1, unit: mL}
+```
+
+#@ 2. 平皿涂布与 37 °C 恒温培养 {#t0}
+
+- [ ] 选取 10⁻⁴、10⁻⁵ 稀释液及阴性对照 PBS，各吸取 **0.1 mL** 滴加至琼脂平板中央并均匀涂布
+- [ ] 静置晾干至表面无游离液膜后，37 °C 倒置培养 24 h
+
+```asterlab
+kind: param_table
+id: blk-cfu-params
+schema: 1
+title: 涂布与培养条件
+rows:
+  - key: plated_ml
+    label: 单皿涂布体积
+    value: 0.1
+    unit: mL
+  - key: temp
+    label: 培养温度
+    value: 37
+    unit: Cel
+```
+
+```asterlab
+kind: timer
+id: blk-cfu-timer
+schema: 1
+title: 37 °C 菌落形成倒置培养
+mode: countdown
+status: idle
+duration: {value: 24, unit: h}
+```
+
+#@ 3. 30–300 有效区间判定与 CFU/mL 换算
+
+- [ ] 确认阴性对照平板无可见菌落（0 CFU）
+- [ ] 仅选用菌落数在 **30–300 CFU** 有效区间的稀释梯度进行换算；若全部超出则按 TNTC / TFTC 备注并重测
+
+```asterlab
+kind: data_table
+id: blk-cfu-table
+schema: 1
+title: 平皿菌落计数与原液浓度计算表
+schema_id: cfu_plate_count
+endpoint: viable_count
+columns:
+  - key: well
+    label: 平皿/样本
+    value_kind: text
+  - key: colonies
+    label: 菌落数
+    value_kind: number
+    unit: CFU
+    min: 30
+    max: 300
+  - key: dilution
+    label: 稀释系数
+    value_kind: number
+    unit: "1"
+  - key: plated_ml
+    label: 涂布体积
+    value_kind: number
+    unit: mL
+  - key: cfu_ml
+    label: 原液活菌浓度
+    value_kind: formula
+    formula: "colonies / (dilution * plated_ml)"
+    unit: CFU/mL
+rows:
+  - well: B1 (10^-4-1)
+    dilution: 0.0001
+    plated_ml: 0.1
+  - well: B2 (10^-4-2)
+    dilution: 0.0001
+    plated_ml: 0.1
+  - well: B3 (10^-5-1)
+    dilution: 0.00001
+    plated_ml: 0.1
+  - well: B4 (10^-5-2)
+    dilution: 0.00001
+    plated_ml: 0.1
+```

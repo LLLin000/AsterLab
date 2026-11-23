@@ -54,7 +54,7 @@ func runCLIWithStdin(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		return emitError(stdout, exitUsage, "missing subcommand (try: tools | cmd.list | cmd.describe | vault.list | vault.search | asterdoc.read | asterdoc.objects | asterdoc.relations | asterdoc.validate | asterdoc.preview | asterdoc.exec | asterdoc.assess | asterdoc.analyze)")
+		return emitError(stdout, exitUsage, "missing subcommand (try: tools | cmd.list | cmd.describe | vault.list | vault.search | asterdoc.read | asterdoc.objects | asterdoc.relations | asterdoc.validate | asterdoc.suggest | asterdoc.preview | asterdoc.exec | asterdoc.assess | asterdoc.analyze)")
 	}
 	cmd := rest[0]
 	cmdArgs := rest[1:]
@@ -78,6 +78,7 @@ func runCLIWithStdin(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 				{"name": "asterdoc.objects", "description": "List all stable-ID scientific objects (groups, plates, steps, blocks) with docHash"},
 				{"name": "asterdoc.relations", "description": "Extract and resolve all inline ![[...]]{@...} and attachment scientific relations"},
 				{"name": "asterdoc.validate", "description": "Validate AsterML syntax, references, and inline relation diagnostics"},
+				{"name": "asterdoc.suggest", "description": "Run built-in offline SciGraph + NL router + deterministic compiler to suggest interactive modules for natural-language steps"},
 				{"name": "asterdoc.preview", "description": "Dry-run a JSON BatchRequest of Semantic Commands and return diff summary & warnings"},
 				{"name": "asterdoc.exec", "description": "Atomically execute a JSON BatchRequest of Semantic Commands with expected_hash & idempotency"},
 				{"name": "asterdoc.assess", "description": "Run Pure Go ARRIVE/control/dilution scientific diagnostics"},
@@ -312,6 +313,63 @@ func runCLIWithStdin(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 			})
 			return exitOK
 		}
+
+	case "asterdoc.suggest":
+		sub := flag.NewFlagSet("asterdoc.suggest", flag.ContinueOnError)
+		sub.SetOutput(stderr)
+		textFlag := sub.String("text", "", "Optional single natural-language lab sentence to compile into AsterML module(s)")
+		if err := sub.Parse(cmdArgs); err != nil {
+			return emitError(stdout, exitUsage, err.Error())
+		}
+		posArgs := sub.Args()
+		sentence := strings.TrimSpace(*textFlag)
+		var rel string
+		var doc *asterdoc.Document
+		var docHash string
+		if len(posArgs) > 0 && strings.TrimSpace(posArgs[0]) != "" {
+			rel = posArgs[0]
+			abs := v.AbsPath(rel)
+			rawBytes, rErr := os.ReadFile(abs)
+			if rErr != nil {
+				return emitError(stdout, exitNotFound, fmt.Sprintf("read %q: %v", rel, rErr))
+			}
+			src := string(rawBytes)
+			docHash = astercmd.DocumentHash(src)
+			parsed, pErr := asterdoc.Parse(src)
+			if pErr != nil {
+				return emitError(stdout, exitInvalid, fmt.Sprintf("parse %q: %v", rel, pErr))
+			}
+			doc = parsed
+		}
+		if sentence != "" {
+			rep := asterdoc.SuggestSentenceModules(doc, sentence)
+			emitJSON(stdout, map[string]any{
+				"ok":           true,
+				"relPath":      rel,
+				"docHash":      docHash,
+				"engine":       rep.Engine,
+				"scannedLines": rep.ScannedLines,
+				"skippedLines": rep.SkippedLines,
+				"count":        len(rep.Suggestions),
+				"suggestions":  rep.Suggestions,
+			})
+			return exitOK
+		}
+		if doc == nil {
+			return emitError(stdout, exitUsage, "asterdoc.suggest requires a relative .asterml file path or --text <sentence>")
+		}
+		rep := asterdoc.SuggestDocumentModules(doc)
+		emitJSON(stdout, map[string]any{
+			"ok":           true,
+			"relPath":      rel,
+			"docHash":      docHash,
+			"engine":       rep.Engine,
+			"scannedLines": rep.ScannedLines,
+			"skippedLines": rep.SkippedLines,
+			"count":        len(rep.Suggestions),
+			"suggestions":  rep.Suggestions,
+		})
+		return exitOK
 
 	case "asterdoc.preview", "asterdoc.exec":
 		sub := flag.NewFlagSet(cmd, flag.ContinueOnError)

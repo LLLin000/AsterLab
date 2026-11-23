@@ -1949,16 +1949,16 @@ var starterAsterDoc string
 //go:embed blank.asterml
 var blankAsterDoc string
 
-//go:embed internal/asterdoc/testdata/inhibition-zone.asterml
+//go:embed templates/sop-inhibition-zone.asterml
 var inhibitionZoneAsterDoc string
 
-//go:embed internal/asterdoc/testdata/cfu.asterml
+//go:embed templates/sop-cfu.asterml
 var cfuAsterDoc string
 
-//go:embed internal/asterdoc/testdata/huvec-tube.asterml
+//go:embed templates/sop-huvec-tube.asterml
 var huvecAsterDoc string
 
-//go:embed internal/asterdoc/testdata/rt-qpcr.asterml
+//go:embed templates/sop-rt-qpcr.asterml
 var rtQpcrAsterDoc string
 
 func (a *app) ensureDefaultProjectID() (string, error) {

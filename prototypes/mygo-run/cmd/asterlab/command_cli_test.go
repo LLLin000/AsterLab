@@ -91,3 +91,53 @@ func TestCLIAgentCommandFullLoop(t *testing.T) {
 		t.Fatalf("asterdoc.validate failed: code=%d res=%v", code, valRes)
 	}
 }
+
+func TestCLIAsterdocSuggestFileAndTextMode(t *testing.T) {
+	vaultDir := t.TempDir()
+	expPath := filepath.Join(vaultDir, "cfu.asterml")
+	docSrc := strings.Join([]string{
+		"---",
+		"title: CFU 计划",
+		"scheduled_date: \"2026-11-24\"",
+		"stage: planned",
+		"---",
+		"",
+		"#@ 1. 恒温培养与稀释",
+		"- [ ] 将母液从 100 ug/mL 稀释至 50 ng/mL，配制 8 mL 工作液",
+		"- [ ] 37°C 恒温倒置培养 24 h",
+		"- [ ] 无菌 PBS 吹打混匀",
+		"",
+	}, "\n")
+	if err := os.WriteFile(expPath, []byte(docSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(args ...string) (int, map[string]any) {
+		var out, errBuf bytes.Buffer
+		full := append([]string{"--vault", vaultDir}, args...)
+		code := runCLIWithStdin(full, strings.NewReader(""), &out, &errBuf)
+		var parsed map[string]any
+		if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+			t.Fatalf("CLI %v invalid JSON (%q): %v (stderr=%s)", args, out.String(), err, errBuf.String())
+		}
+		return code, parsed
+	}
+
+	// 1. File mode
+	code, res := run("asterdoc.suggest", "cfu.asterml")
+	if code != exitOK || res["ok"] != true {
+		t.Fatalf("asterdoc.suggest file mode failed: code=%d res=%v", code, res)
+	}
+	if int(res["count"].(float64)) < 2 {
+		t.Fatalf("expected >= 2 suggestions for cfu.asterml, got %v", res)
+	}
+
+	// 2. Single-sentence --text mode
+	code, textRes := run("asterdoc.suggest", "--text", "37°C 孵育 30 min")
+	if code != exitOK || textRes["ok"] != true {
+		t.Fatalf("asterdoc.suggest --text mode failed: code=%d res=%v", code, textRes)
+	}
+	if int(textRes["count"].(float64)) != 1 {
+		t.Fatalf("expected 1 suggestion for single timer sentence, got %v", textRes)
+	}
+}
