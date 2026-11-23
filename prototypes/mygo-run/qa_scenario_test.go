@@ -159,11 +159,11 @@ func TestScenario_AllFourModernSOPWorkflowsEndToEnd(t *testing.T) {
 					t.Fatalf("%s expected valid plate relation on embedded photo, got %+v", sop.name, rels)
 				}
 			}
-			// Built-in offline AI suggestion report must compile cleanly without panics or invalid YAML
+			// Built-in offline AI suggestion report must compile cleanly inside its target document (preserving SciGraph plate refs)
 			sugRep := asterdoc.SuggestDocumentModules(updatedDoc)
 			for _, sg := range sugRep.Suggestions {
-				if _, pErr := asterdoc.Parse("# check\n\n" + sg.YAML + "\n"); pErr != nil {
-					t.Fatalf("%s suggestion YAML invalid: %v\n%s", sop.name, pErr, sg.YAML)
+				if _, pErr := asterdoc.Parse(updatedDoc.Source + "\n\n" + sg.YAML + "\n"); pErr != nil {
+					t.Fatalf("%s suggestion YAML invalid when inserted into document: %v\n%s", sop.name, pErr, sg.YAML)
 				}
 			}
 
