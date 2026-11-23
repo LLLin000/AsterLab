@@ -333,6 +333,22 @@ func (s *Shell) Invalidate() {
 	}
 }
 
+// MyGoWindow returns the underlying native mygo.Window when mounted (nil in headless tests).
+func (s *Shell) MyGoWindow() *mygo.Window {
+	if s.window == nil {
+		return nil
+	}
+	return s.window.Window()
+}
+
+// LeftExpanded reports whether the left navigation sidebar is currently visible.
+func (s *Shell) LeftExpanded() bool {
+	if s.window == nil {
+		return true
+	}
+	return s.window.LeftExpanded()
+}
+
 // topChromeBar draws the clean Obsidian window chrome bar:
 // Back/Forward arrows + Search (Ctrl+K/O) + Companion Drawer toggle.
 // Each peer split pane draws its own interactive tab bar cleanly right above its surface.

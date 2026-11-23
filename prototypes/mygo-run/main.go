@@ -248,6 +248,7 @@ type app struct {
 	scrollToStepID    string
 	newExpOpen       bool
 	newExpFolder     string
+	devInsp          devInspectorState
 	newExpNewFolder  string
 	newExpTitle      string
 	newExpDate       string
@@ -4881,8 +4882,9 @@ func main() {
 			a.renderSyncErrorBanner(c)
 			a.renderVaultNewExperimentDialog(c)
 			a.renderImportDialog(c)
+			a.renderDevInspectorOverlay(c)
 		},
-		PaletteCommands: []shell.PaletteCommand{
+		PaletteCommands: append([]shell.PaletteCommand{
 			{
 				ID:       "export-pdf",
 				Title:    "导出当前实验 PDF",
@@ -4915,7 +4917,7 @@ func main() {
 					}
 				},
 			},
-		},
+		}, a.devInspectorPaletteCommands()...),
 		OnImport: func() { a.importOpen = true },
 		OnPage:   func(p shell.Page) { a.shell.Page = p; a.saveVaultWorkspace() },
 		Content:  func(c *ui.Context) { contentPage(c, a) },

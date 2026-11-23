@@ -15,8 +15,8 @@ VER_FLAGS="-X 'asterlab-mygo-prototype/internal/updater.Version=${VERSION}' -X '
 echo "Building macOS arm64 + amd64 Universal Pure-Go binaries (${VERSION}, ${COMMIT})..."
 pushd "${PROTO_DIR}" >/dev/null
 export CGO_ENABLED=0
-GOOS=darwin GOARCH=arm64 go build -tags=e2e -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${STAGE_DIR}/mygo-run-arm64" .
-GOOS=darwin GOARCH=amd64 go build -tags=e2e -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${STAGE_DIR}/mygo-run-amd64" .
+GOOS=darwin GOARCH=arm64 go build -tags=mygo_noinspector -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${STAGE_DIR}/mygo-run-arm64" .
+GOOS=darwin GOARCH=amd64 go build -tags=mygo_noinspector -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${STAGE_DIR}/mygo-run-amd64" .
 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${STAGE_DIR}/asterlab-arm64" ./cmd/asterlab
 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w ${VER_FLAGS}" -o "${STAGE_DIR}/asterlab-amd64" ./cmd/asterlab
 popd >/dev/null
