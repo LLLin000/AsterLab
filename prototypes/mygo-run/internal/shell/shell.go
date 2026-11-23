@@ -444,10 +444,10 @@ func (s *Shell) handleGlobalShortcuts(c *ui.Context) {
 	}
 	if s.matchHotkey(c, "doc.toggle_mode", parsedHotkey{ui.Cmd, ui.KeyE}) {
 		if t := s.ActiveTab(); t != nil && t.Kind == TabFile {
-			if t.Mode == ModeRead {
-				s.SetActiveTabMode(ModeEdit)
+			if t.Mode == ModeEdit {
+				s.SetActiveTabMode(ModeLab)
 			} else {
-				s.SetActiveTabMode(ModeRead)
+				s.SetActiveTabMode(ModeEdit)
 			}
 		}
 	}
@@ -745,14 +745,21 @@ func (s *Shell) renderLeafPane(c *ui.Context, tok theme.Tokens, pane *PaneNode) 
 		if dragged, dropped := ui.Drop[fileDragPayload](bodyBox); dropped && !dragged.IsDir && dragged.RelPath != "" {
 			zone := detectDropZone(bodyBox)
 			if zone == "" || zone == "center" {
-				s.OpenFileInPane(pane.ID, dragged.RelPath, dragged.Title, ModeEdit, false)
+				s.OpenFileInPane(pane.ID, dragged.RelPath, dragged.Title, s.DefaultFileOpenMode(), false)
 			} else {
 				s.SplitPaneWithTab(pane.ID, WorkspaceTab{
-					Kind: TabFile, Title: dragged.Title, FilePath: dragged.RelPath, Mode: ModeEdit,
+					Kind: TabFile, Title: dragged.Title, FilePath: dragged.RelPath, Mode: s.DefaultFileOpenMode(),
 				}, zone)
 			}
 		}
 	})
+	// Clicking or interacting inside an unfocused split pane activates it so shortcuts,
+	// file-tree clicks, and the companion outline drawer target the pane the user focused.
+	if !isFocusedPane && (container.Pressed() || container.Clicked()) {
+		s.ActivePaneID = pane.ID
+		s.syncLegacyMirror()
+		s.Invalidate()
+	}
 }
 
 func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode) {

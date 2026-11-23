@@ -135,6 +135,7 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 	}
 	tok := theme.GetTokens(c.Theme())
 	open := s.WelcomeOpen
+	choiceHandled := false
 	ui.Box(c.Key("welcome-dlg")).Children(func() {
 		components.Dialog(c, &open, components.DialogOptions{Label: "欢迎使用 AsterLab"}, func(panel ui.Element) {
 			panel.Width(float32(tok.Spacing48)*12).Padding(float32(tok.Spacing24)).Gap(float32(tok.Spacing16))
@@ -189,6 +190,7 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 							}
 							if components.Button(c, "开始", btnStyle).Clicked() {
 								open = false
+								choiceHandled = true
 								if s.OnOnboardingChoice != nil {
 									s.OnOnboardingChoice(choice)
 								}
@@ -204,6 +206,7 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					if components.Button(c, "1 分钟界面区域导览", components.ButtonOutline).Clicked() {
 						open = false
+						choiceHandled = true
 						if s.OnOnboardingChoice != nil {
 							s.OnOnboardingChoice("tour")
 						}
@@ -211,6 +214,7 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 					ui.Spacer(c)
 					if components.Button(c, "稍后探索", components.ButtonGhost).Clicked() {
 						open = false
+						choiceHandled = true
 						if s.OnOnboardingChoice != nil {
 							s.OnOnboardingChoice("skip")
 						}
@@ -219,7 +223,7 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 			})
 		})
 	})
-	if !open && s.WelcomeOpen && s.OnOnboardingChoice != nil {
+	if !open && !choiceHandled && s.WelcomeOpen && s.OnOnboardingChoice != nil {
 		s.OnOnboardingChoice("skip")
 	}
 	s.WelcomeOpen = open

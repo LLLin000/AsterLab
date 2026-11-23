@@ -297,7 +297,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 		}
 	}
 
-	pageCol := ui.Column(c.Key("vault-page:"+pane.ID+":"+tab.ID)).Fill()
+	pageCol := ui.Column(c.Key("vault-page:"+pane.ID+":"+tab.ID+":"+tab.FilePath)).Fill()
 	theme.PaintCanvasBackground(pageCol, tok)
 	findOpen := ui.Local(c.Root(), "doc-find-open:"+pane.ID+":"+tab.ID, func() bool { return false })
 	findQuery := ui.Local(c.Root(), "doc-find-q:"+pane.ID+":"+tab.ID, func() string { return "" })
@@ -1033,8 +1033,19 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 												dt := asterdoc.BorderlessTextInput(c, tok, dBuf, float32(tok.TextBody), false, "YYYY-MM-DD").
 													FontFeatures("tnum")
 												if dt.Submitted() || (!dt.Focused() && strings.TrimSpace(*dBuf) != docDate) {
-													next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, strings.TrimSpace(*dBuf), docStatus)
-													applyLiveSource(next)
+													rawDate := strings.TrimSpace(*dBuf)
+													if rawDate == "" {
+														next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, "", docStatus)
+														applyLiveSource(next)
+													} else if normDate := asterdoc.NormalizeDateYMD(rawDate); normDate != "" {
+														*dBuf = normDate
+														if normDate != docDate {
+															next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, normDate, docStatus)
+															applyLiveSource(next)
+														}
+													} else {
+														*dBuf = docDate
+													}
 												}
 											} else {
 												ui.Text(c, dateBadge).FontSize(float32(tok.TextBody)).TextColor(tok.Text).FontFeatures("tnum")
@@ -1095,8 +1106,19 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 											dt := asterdoc.BorderlessTextInput(c, tok, dBuf, float32(tok.TextMeta), false, "YYYY-MM-DD").
 												FontFeatures("tnum")
 											if dt.Submitted() || (!dt.Focused() && strings.TrimSpace(*dBuf) != docDate) {
-												next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, strings.TrimSpace(*dBuf), docStatus)
-												applyLiveSource(next)
+												rawDate := strings.TrimSpace(*dBuf)
+												if rawDate == "" {
+													next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, "", docStatus)
+													applyLiveSource(next)
+												} else if normDate := asterdoc.NormalizeDateYMD(rawDate); normDate != "" {
+													*dBuf = normDate
+													if normDate != docDate {
+														next := asterdoc.SetFrontmatterMetadata(ld.Source, docTitle, normDate, docStatus)
+														applyLiveSource(next)
+													}
+												} else {
+													*dBuf = docDate
+												}
 											}
 										})
 									} else {

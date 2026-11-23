@@ -394,7 +394,7 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 	if row.Clicked() {
 		s.SelectedTreePath = node.RelPath
 		if entry != nil && !isAsset {
-			s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, ModeEdit, false)
+			s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, s.DefaultFileOpenMode(), false)
 		} else if isAsset && s.OnRevealInExplorer != nil {
 			s.OnRevealInExplorer(node.RelPath)
 		}
@@ -420,19 +420,19 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 	components.ContextMenu(c, row, func(m *components.Menu) {
 		if entry != nil && !isAsset {
 			if m.Item("打开").Chosen() {
-				s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, ModeEdit, false)
+				s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, s.DefaultFileOpenMode(), false)
 			}
 			if m.Item("在新标签页打开").Chosen() {
-				s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, ModeEdit, true)
+				s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, s.DefaultFileOpenMode(), true)
 			}
 			if m.Item("向右分屏打开").Chosen() {
 				s.SplitPaneWithTab(s.ActivePaneID, WorkspaceTab{
-					Kind: TabFile, Title: entry.Title, FilePath: entry.RelPath, Mode: ModeEdit,
+					Kind: TabFile, Title: entry.Title, FilePath: entry.RelPath, Mode: s.DefaultFileOpenMode(),
 				}, "right")
 			}
 			if m.Item("向下分屏打开").Chosen() {
 				s.SplitPaneWithTab(s.ActivePaneID, WorkspaceTab{
-					Kind: TabFile, Title: entry.Title, FilePath: entry.RelPath, Mode: ModeEdit,
+					Kind: TabFile, Title: entry.Title, FilePath: entry.RelPath, Mode: s.DefaultFileOpenMode(),
 				}, "down")
 			}
 			m.Separator()
