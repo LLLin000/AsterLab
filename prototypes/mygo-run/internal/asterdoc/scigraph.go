@@ -1085,6 +1085,9 @@ func (g *SciGraph) ContextAt(offset int) ScientificLineContext {
 	case strings.HasPrefix(rawLine, "#"):
 		// Covers BOTH plain Markdown headings (# / ## / ###) AND step headings (#@ / ##@)!
 		ctx.Zone = ZoneHeading
+	case inStep == nil && strings.HasPrefix(rawLine, ">"):
+		// Top-level summary blockquotes (e.g. `> **实验目标**：...`) are design metadata, not executable steps.
+		ctx.Zone = ZoneMetadata
 	case reMetaKeyBullet.MatchString(rawLine) || rePlainMetaKey.MatchString(rawLine):
 		// Design metadata bullets like `- **研究体系**：...`, `- **单一自变量**：...`, `实验目的：...`
 		// Exception: explicit container/plate layout summary bullet (`- **容器与复孔**：1 块 12 孔板...`)

@@ -264,10 +264,20 @@ func groupRoleLabel(role string) string {
 		return "对照组"
 	case "treatment":
 		return "处理组"
-	case "comparator":
+	case "comparator", "positive_control":
 		return "阳性对照"
+	case "negative_control":
+		return "阴性对照"
+	case "blank":
+		return "空白组"
+	case "vehicle":
+		return "溶剂对照"
 	case "reference":
 		return "参照组"
+	case "standard":
+		return "标准品"
+	case "ntc":
+		return "无模板对照"
 	default:
 		return role
 	}

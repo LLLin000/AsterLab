@@ -45,10 +45,43 @@ func emitError(w io.Writer, code int, msg string) int {
 	return code
 }
 
+func resolveVaultDocPath(v *vault.Vault, arg string) (rel, abs string) {
+	raw := strings.TrimSpace(arg)
+	if raw == "" || v == nil {
+		return raw, ""
+	}
+	if filepath.IsAbs(raw) {
+		cleanAbs := filepath.Clean(raw)
+		if r, err := filepath.Rel(v.Root, cleanAbs); err == nil && !strings.HasPrefix(r, "..") {
+			return filepath.ToSlash(r), cleanAbs
+		}
+		return raw, cleanAbs
+	}
+	return filepath.ToSlash(filepath.Clean(raw)), v.AbsPath(raw)
+}
+
 func runCLIWithStdin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("asterlab", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	vaultDir := fs.String("vault", "", "AsterLab Vault directory (defaults to local Vault)")
+	fs.Usage = func() {
+		fmt.Fprintf(stderr, "Usage: asterlab [--vault <dir>] <subcommand> [args...]\n\nSubcommands:\n"+
+			"  tools                List available CLI tools as JSON\n"+
+			"  cmd.list             List registered Semantic Commands\n"+
+			"  cmd.describe <id>    Describe schema for one Semantic Command\n"+
+			"  vault.list           List .asterml experiments (--status/--tag/--folder)\n"+
+			"  vault.search <q>     Full-text search across .asterml files\n"+
+			"  asterdoc.read <f>    Parse frontmatter, steps & modules\n"+
+			"  asterdoc.objects <f> List stable-ID scientific objects\n"+
+			"  asterdoc.relations <f> Resolve inline ![[...]]{@...} relations\n"+
+			"  asterdoc.validate <f> Validate AsterML syntax, schema & UCUM units\n"+
+			"  asterdoc.suggest <f> Offline AI card suggestions & deterministic YAML compiler\n"+
+			"  asterdoc.preview <f> Dry-run JSON BatchRequest (--ops or stdin)\n"+
+			"  asterdoc.exec <f>    Atomically execute JSON BatchRequest (--ops or stdin)\n"+
+			"  asterdoc.assess <f>  Run ARRIVE/control/dilution scientific readiness check\n"+
+			"  asterdoc.analyze <f> Run deterministic CCK-8 / RT-qPCR / descriptive analysis\n\nFlags:\n")
+		fs.PrintDefaults()
+	}
 	if err := fs.Parse(args); err != nil {
 		return emitError(stdout, exitUsage, err.Error())
 	}
@@ -166,8 +199,7 @@ func runCLIWithStdin(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 		if len(cmdArgs) == 0 || strings.TrimSpace(cmdArgs[0]) == "" {
 			return emitError(stdout, exitUsage, cmd+" requires a relative .asterml file path")
 		}
-		rel := cmdArgs[0]
-		abs := v.AbsPath(rel)
+		rel, abs := resolveVaultDocPath(v, cmdArgs[0])
 		rawBytes, rErr := os.ReadFile(abs)
 		if rErr != nil {
 			return emitError(stdout, exitNotFound, fmt.Sprintf("read %q: %v", rel, rErr))
@@ -327,8 +359,8 @@ func runCLIWithStdin(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 		var doc *asterdoc.Document
 		var docHash string
 		if len(posArgs) > 0 && strings.TrimSpace(posArgs[0]) != "" {
-			rel = posArgs[0]
-			abs := v.AbsPath(rel)
+			var abs string
+			rel, abs = resolveVaultDocPath(v, posArgs[0])
 			rawBytes, rErr := os.ReadFile(abs)
 			if rErr != nil {
 				return emitError(stdout, exitNotFound, fmt.Sprintf("read %q: %v", rel, rErr))
@@ -382,8 +414,7 @@ func runCLIWithStdin(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 		if len(posArgs) == 0 || strings.TrimSpace(posArgs[0]) == "" {
 			return emitError(stdout, exitUsage, cmd+" requires a relative .asterml file path")
 		}
-		rel := posArgs[0]
-		abs := v.AbsPath(rel)
+		rel, abs := resolveVaultDocPath(v, posArgs[0])
 		payload := strings.TrimSpace(*opsJSON)
 		if payload == "" && stdin != nil {
 			b, _ := io.ReadAll(stdin)

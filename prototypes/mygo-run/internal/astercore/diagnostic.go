@@ -83,8 +83,12 @@ func AssessDocument(doc *asterdoc.Document, knownPantryCodes map[string]bool) As
 				continue
 			}
 			role, _ := rm["role"].(string)
-			if role == "control" || role == "reference" {
+			if role == "control" || role == "reference" || role == "blank" || role == "negative_control" || role == "vehicle" {
 				hasControlGroup = true
+			}
+			// Blank / edge-PBS anti-evaporation control rows do not represent biological experimental units.
+			if role == "blank" {
+				continue
 			}
 			indN := numericFromAny(rm["independent_n"])
 			if indN <= 0 {

@@ -148,4 +148,10 @@ func TestCLIAsterdocSuggestFileAndTextMode(t *testing.T) {
 	if bomCode != exitOK {
 		t.Fatalf("asterdoc.preview with UTF-8 BOM failed (code=%d): %s %s", bomCode, bomOut.String(), bomErr.String())
 	}
+
+	// 4. Absolute path inside --vault must resolve cleanly without double-joining paths
+	code, absRes := run("asterdoc.validate", expPath)
+	if code != exitOK || absRes["ok"] != true {
+		t.Fatalf("asterdoc.validate with absolute path inside --vault failed: code=%d res=%v", code, absRes)
+	}
 }

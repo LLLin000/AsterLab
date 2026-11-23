@@ -882,8 +882,12 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 								ui.Icon(c, icon).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(icoCol)
 								// Pinned calendar tab renders compactly when space is tight
 								if !(tab.Pinned && tab.Kind == TabCalendar && len(pane.Tabs) > 3) {
+									tabMaxW := float32(tok.Spacing48) * 3.6
+									if len(pane.Tabs) >= 4 {
+										tabMaxW = float32(tok.Spacing48) * 2.8
+									}
 									components.Text(c, tab.Title).FontSize(float32(tok.TextData)).Bold().
-										TextColor(fg).SingleLine().Ellipsis("…").MaxWidth(float32(tok.Spacing48) * 3.8)
+										TextColor(fg).SingleLine().Ellipsis("…").MaxWidth(tabMaxW)
 								}
 								if tab.Pinned {
 									ui.Icon(c, lucide.Pin()).Size(float32(tok.IconSm)*0.85, float32(tok.IconSm)*0.85).TextColor(tok.TextMuted)
@@ -953,16 +957,16 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 						}
 					})
 				}
-
-				// Trailing '+' new tab
-				addBtn := components.IconButton(c, lucide.Plus(), "新建实验 (Ctrl+N)", components.IconButtonPlain)
-				if addBtn.Clicked() {
-					s.ActivePaneID = pane.ID
-					s.triggerVaultNewFile("")
-				}
 			})
 		})
-		spacerArea := ui.Box(c).Width(float32(tok.Spacing16)).Height(float32(tok.Spacing24)).Shrink(0)
+		// Keep trailing '+' new-tab button pinned immediately after the horizontal tab scroll
+		// so long Chinese tab titles can never push '+' off screen.
+		addBtn := components.IconButton(c, lucide.Plus(), "新建实验 (Ctrl+N)", components.IconButtonPlain)
+		if addBtn.Clicked() {
+			s.ActivePaneID = pane.ID
+			s.triggerVaultNewFile("")
+		}
+		spacerArea := ui.Box(c).Width(float32(tok.Spacing8)).Height(float32(tok.Spacing24)).Shrink(0)
 		if spacerArea.DoubleClicked() {
 			s.ActivePaneID = pane.ID
 			s.triggerVaultNewFile("")
@@ -1082,8 +1086,19 @@ func (s *Shell) RenderSplitView(c *ui.Context) {
 	root := ui.Row(c).Fill()
 	theme.PaintCanvasBackground(root, tok)
 	root.Children(func() {
+		// Responsive sidebar clamping on narrow viewports (< 1100 DIP) so the center
+		// document editor always retains >= 460 DIP instead of clipping title/tables.
+		winW, _ := c.Size()
+		leftW := float32(284)
+		rightW := float32(tok.Spacing48) * 6.2
+		if winW > 0 && winW < 1100 {
+			leftW = 220
+			if s.RightOpen {
+				rightW = 220
+			}
+		}
 		// Content/Sidebar panels stay crisp solid structural surfaces (no stacked glass-on-glass washout)
-		leftCol := ui.Column(c).Width(284).FillHeight().
+		leftCol := ui.Column(c).Width(leftW).FillHeight().
 			Background(tok.RailBackground).Border(1, tok.Border.Alpha(0.75))
 		leftCol.Children(func() {
 			ui.Box(c).Grow(1).FillWidth().Children(func() {
@@ -1100,7 +1115,7 @@ func (s *Shell) RenderSplitView(c *ui.Context) {
 			})
 		})
 		if s.RightOpen {
-			rightCol := ui.Column(c).Width(float32(tok.Spacing48)*6.2).FillHeight().
+			rightCol := ui.Column(c).Width(rightW).FillHeight().
 				Background(tok.SidebarBackground).Border(1, tok.Border.Alpha(0.75))
 			rightCol.Children(func() {
 				hdrRow := ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
