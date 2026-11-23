@@ -697,20 +697,18 @@ func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 	}
 
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-		ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(0)).Children(func() {
-			ui.Text(c, "储藏室货架 · 试剂盒与贴纸台账").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-			ui.Text(c, "点击收纳盒贴纸下钻查看盒内孔位坐标；点击瓶管贴纸查阅批号效期、说明书 (PDF) 与产品网址。").
-				FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
+		ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+			ui.Text(c, "储藏室").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine()
 		})
 		components.Tabs(c, &w.pantryViewTab, components.TabsSegmented, "贴纸货架", "台账表格")
-		if components.Button(c, "+ 新建收纳盒", components.ButtonSecondary).Clicked() {
+		if components.Button(c, "+ 收纳盒", components.ButtonSecondary).Clicked() {
 			zone := w.pantryZoneFilter
 			if zone == "" || zone == "all" || zone == "near_expiry" {
 				zone = "-80"
 			}
 			w.OpenNewBoxDialog(zone)
 		}
-		if components.Button(c, "+ 新试剂上架", components.ButtonPrimary).Clicked() {
+		if components.Button(c, "+ 新试剂", components.ButtonPrimary).Clicked() {
 			w.OpenNewPantryDialog("")
 		}
 	})

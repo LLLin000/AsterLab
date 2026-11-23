@@ -122,3 +122,24 @@ func TestMissingParameterFallback(t *testing.T) {
 		t.Fatalf("expected missing phase durations recorded, got %v", sugC.MissingSlots)
 	}
 }
+
+func TestMultiReagentMixRecipeSuggestion(t *testing.T) {
+	line := "• VL3 联用药液 (1 mL)：10 µL Van 母液 (10 mg/mL) + 20 µL Lys 母液 (100 mg/mL) + 970 µL PBS → 单片加样 10 µL 含 Van 1 µg + Lys 20 µg。"
+	sug := AnalyzeLabSentence(nil, line, nil)
+	if sug == nil || sug.Kind != "calculator" || sug.Mode != "mix_recipe" {
+		t.Fatalf("expected mix_recipe calculator suggestion for VL3 recipe, got %+v", sug)
+	}
+	if len(sug.Modules) != 1 {
+		t.Fatalf("expected 1 calculator module, got %d", len(sug.Modules))
+	}
+	res := EvalCalculator(nil, sug.Modules[0])
+	if res.Err != nil {
+		t.Fatalf("EvalCalculator failed: %v", res.Err)
+	}
+	if len(res.Rows) != 5 {
+		t.Fatalf("expected 2 inputs + 3 formula rows, got %d", len(res.Rows))
+	}
+	if res.Rows[2].Amount != 10 || res.Rows[3].Amount != 20 || res.Rows[4].Amount != 970 {
+		t.Fatalf("unexpected recipe amounts: %.2f, %.2f, %.2f", res.Rows[2].Amount, res.Rows[3].Amount, res.Rows[4].Amount)
+	}
+}

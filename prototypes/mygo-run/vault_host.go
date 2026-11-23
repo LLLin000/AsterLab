@@ -194,6 +194,7 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		_, _ = v.MigrateLegacyExperiments(dataDir)
 	}
 	a.vault = v
+	a.resetDevFeedbackDirCache()
 	a.vaultIndex = vault.NewVaultIndex(v)
 	a.docStore = vault.NewDocStore(v)
 	a.ensureLiveViewsMap()
@@ -324,15 +325,16 @@ func (a *app) refreshVaultTreeAndCalendar() {
 			folder = "根目录"
 		}
 		exps = append(exps, shell.ExperimentItem{
-			ID:       f.RelPath,
-			DesignID: f.RelPath,
-			FilePath: f.RelPath,
-			Folder:   folder,
-			Title:    f.Title,
-			Date:     f.Date,
-			Stage:    stage,
-			Summary:  folder,
-			FileName: filepath.Base(f.RelPath),
+			ID:        f.RelPath,
+			DesignID:  f.RelPath,
+			FilePath:  f.RelPath,
+			Folder:    folder,
+			Title:     f.Title,
+			Date:      f.Date,
+			StartHour: f.StartHour,
+			Stage:     stage,
+			Summary:   folder,
+			FileName:  filepath.Base(f.RelPath),
 		})
 		designs = append(designs, shell.DesignItem{
 			ID:    f.RelPath,
@@ -406,6 +408,10 @@ func (a *app) openVaultFileInActivePane(relPath, title string) {
 }
 
 func (a *app) openNewExperimentDialog(folderRel, dateYMD string) {
+	a.openNewExperimentDialogAt(folderRel, dateYMD, "")
+}
+
+func (a *app) openNewExperimentDialogAt(folderRel, dateYMD, startTimeHHMM string) {
 	if a.vault != nil && strings.TrimSpace(folderRel) == "" {
 		switch a.vault.Config.DefaultProjectDir {
 		case "/":
@@ -419,6 +425,7 @@ func (a *app) openNewExperimentDialog(folderRel, dateYMD string) {
 	a.newExpFolder = folderRel
 	a.newExpTitle = ""
 	a.newExpDate = strings.TrimSpace(dateYMD)
+	a.newExpStartTime = asterdoc.NormalizeStartTimeHHMM(startTimeHHMM)
 	// UI-10: Auto-apply folder's bound default template from `.asterlab/config.json` when configured.
 	if a.vault != nil && a.vault.Config.FolderTemplates != nil {
 		if boundTpl := strings.TrimSpace(a.vault.Config.FolderTemplates[folderRel]); boundTpl != "" {
@@ -473,17 +480,17 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 				}
 			})
 
-			// Location (Project folder picker + inline new folder) + Date
-			ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+			// Location (Project folder picker + inline new folder) + Date + Optional Start Time (UI-20 aligned)
+			ui.Row(c).FillWidth().AlignItems(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "保存位置（项目文件夹）").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
+					ui.Text(c, "保存位置").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted).SingleLine()
 					sel := components.Select(c, &a.newExpFolder)
 					sel.Trigger.Children(func() {
 						lbl := a.newExpFolder
 						if lbl == "" {
 							lbl = "根目录"
 						}
-						ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
+						ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text).SingleLine()
 					})
 					sel.Popup(func(p ui.Element) {
 						for _, f := range folders {
@@ -501,9 +508,13 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 						})
 					})
 				})
-				ui.Column(c).Width(float32(tok.Spacing48)*3.3).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "日期（YYYY-MM-DD，可空）").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
-					components.TextBox(c, &a.newExpDate, components.TextBoxOptions{}).Placeholder("2026-11-20")
+				ui.Column(c).Width(float32(tok.Spacing48)*2.7).Shrink(0).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "日期").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted).SingleLine()
+					components.TextBox(c, &a.newExpDate, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
+				})
+				ui.Column(c).Width(float32(tok.Spacing48)*1.8).Shrink(0).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, "时段").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted).SingleLine()
+					components.TextBox(c, &a.newExpStartTime, components.TextBoxOptions{}).Placeholder("如 14:00")
 				})
 			})
 
@@ -583,6 +594,11 @@ func (a *app) confirmCreateVaultExperiment() {
 		a.newExpNudgeSeq++
 		return
 	}
+	if strings.TrimSpace(a.newExpStartTime) != "" && asterdoc.NormalizeStartTimeHHMM(a.newExpStartTime) == "" {
+		a.newExpErr = "开始时间格式请填写 HH:MM（如 09:30，或留空）"
+		a.newExpNudgeSeq++
+		return
+	}
 	a.newExpErr = ""
 	folder := a.newExpFolder
 	if folder == "__new__" {
@@ -613,6 +629,9 @@ func (a *app) confirmCreateVaultExperiment() {
 	if err != nil {
 		a.syncErr = fmt.Sprintf("创建实验失败：%v", err)
 		return
+	}
+	if stNorm := asterdoc.NormalizeStartTimeHHMM(a.newExpStartTime); stNorm != "" {
+		_ = a.vault.SetExperimentStartTime(entry.RelPath, stNorm)
 	}
 	a.vault.Config.LastProjectDir = folder
 	_ = a.vault.SaveConfig()

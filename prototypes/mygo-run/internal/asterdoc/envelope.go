@@ -31,6 +31,7 @@ type EnvelopeFrontmatter struct {
 	ID            string        `yaml:"id,omitempty" json:"id,omitempty"`
 	Title         string        `yaml:"title,omitempty" json:"title,omitempty"`
 	ScheduledDate string        `yaml:"scheduled_date,omitempty" json:"scheduled_date,omitempty"`
+	StartTime     string        `yaml:"start_time,omitempty" json:"start_time,omitempty"`
 	Stage         string        `yaml:"stage,omitempty" json:"stage,omitempty"`
 	Tags          []string      `yaml:"tags,omitempty" json:"tags,omitempty"`
 	RepeatOf      string        `yaml:"repeat_of,omitempty" json:"repeat_of,omitempty"`
@@ -137,12 +138,51 @@ func ScanFrontmatter(raw string) (EnvelopeFrontmatter, int, bool) {
 	} else if rawDate, ok := m["date"]; ok {
 		fm.ScheduledDate = NormalizeDateYMD(formatYAMLDateValue(rawDate))
 	}
+	if rawST, ok := m["start_time"]; ok {
+		fm.StartTime = NormalizeStartTimeHHMM(fmt.Sprint(rawST))
+	}
 	if fm.Stage == "" {
 		if st, ok := m["status"].(string); ok {
 			fm.Stage = strings.TrimSpace(st)
 		}
 	}
 	return fm, bomLen + offset, true
+}
+
+// NormalizeStartTimeHHMM parses "H:MM" or "HH:MM" into canonical "HH:MM" (or "" if invalid).
+func NormalizeStartTimeHHMM(raw string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(raw, "：", ":"))
+	if s == "" {
+		return ""
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) != 2 {
+		return ""
+	}
+	var h, m int
+	if _, err := fmt.Sscanf(parts[0], "%d", &h); err != nil {
+		return ""
+	}
+	if _, err := fmt.Sscanf(parts[1], "%d", &m); err != nil {
+		return ""
+	}
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return ""
+	}
+	return fmt.Sprintf("%02d:%02d", h, m)
+}
+
+// ParseStartHour converts "HH:MM" into fractional hour (e.g. "09:30" -> 9.5, "" -> 0).
+func ParseStartHour(raw string) float32 {
+	norm := NormalizeStartTimeHHMM(raw)
+	if norm == "" {
+		return 0
+	}
+	var h, m int
+	if _, err := fmt.Sscanf(norm, "%d:%d", &h, &m); err != nil {
+		return 0
+	}
+	return float32(h) + float32(m)/60.0
 }
 
 func formatYAMLDateValue(v any) string {

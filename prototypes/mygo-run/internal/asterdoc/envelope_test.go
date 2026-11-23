@@ -153,3 +153,18 @@ func TestEnvelopeSurgicalPatchPreservesDesignAndSeal(t *testing.T) {
 		t.Fatalf("fork Design scheduled_date not updated:\n%s", forkEnv.DesignSource)
 	}
 }
+
+func TestStartTimeFrontmatterRoundTrip(t *testing.T) {
+	raw := "---\nasterml: \"2.1\"\ntitle: Timed Assay\nscheduled_date: \"2026-11-24\"\n---\n\n# Timed Assay\n"
+	updated := SetFrontmatterStartTime(raw, "14:30")
+	fm, _, ok := ScanFrontmatter(updated)
+	if !ok {
+		t.Fatalf("ScanFrontmatter failed on updated source:\n%s", updated)
+	}
+	if fm.StartTime != "14:30" {
+		t.Fatalf("StartTime = %q, want 14:30", fm.StartTime)
+	}
+	if h := ParseStartHour(fm.StartTime); h != 14.5 {
+		t.Fatalf("ParseStartHour = %v, want 14.5", h)
+	}
+}

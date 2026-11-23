@@ -158,6 +158,15 @@ func (s *Shell) triggerCreateForDate(dateYMD string) {
 	}
 }
 
+func (s *Shell) triggerCreateForDateTime(dateYMD, startTimeHHMM string) {
+	s.DayPopoverOpen = false
+	if s.OnCreateForDateTime != nil {
+		s.OnCreateForDateTime(dateYMD, startTimeHHMM)
+		return
+	}
+	s.triggerCreateForDate(dateYMD)
+}
+
 func (s *Shell) openExperiment(exp ExperimentItem) {
 	s.DayPopoverOpen = false
 	if exp.DesignID != "" {
@@ -956,7 +965,17 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 					if dIdx >= 0 && dIdx < 7 {
 						ymd := days[dIdx].Format("2006-01-02")
 						s.SelectedDate = ymd
-						s.triggerCreateForDate(ymd)
+						halfH := rowH * 0.5
+						nearestStep := float32(math.Round(float64(py / halfH)))
+						totalMins := int(nearestStep)*30 + startHr*60
+						if totalMins < startHr*60 {
+							totalMins = startHr * 60
+						}
+						if totalMins > endHr*60+30 {
+							totalMins = endHr*60 + 30
+						}
+						startHHMM := fmt.Sprintf("%02d:%02d", totalMins/60, totalMins%60)
+						s.triggerCreateForDateTime(ymd, startHHMM)
 					}
 				}
 			}

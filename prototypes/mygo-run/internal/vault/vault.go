@@ -71,8 +71,10 @@ type FileEntry struct {
 	IsTemplate bool
 	IsAsset    bool
 	Title      string
-	Date       string // YYYY-MM-DD (empty if unscheduled or template)
-	Status     string // planned | in_progress | completed
+	Date       string  // YYYY-MM-DD (empty if unscheduled or template)
+	StartTime  string  // HH:MM (empty if all-day / untimed)
+	StartHour  float32 // fractional hour for Week Calendar hourly grid (0 if untimed)
+	Status     string  // planned | in_progress | completed
 	ModTime    time.Time
 	Size       int64
 }
@@ -429,6 +431,8 @@ func (v *Vault) inspectFileEntry(abs, rel, folder string) FileEntry {
 		}
 		if !isTmpl {
 			fe.Date = asterdoc.NormalizeDateYMD(fm.ScheduledDate)
+			fe.StartTime = asterdoc.NormalizeStartTimeHHMM(fm.StartTime)
+			fe.StartHour = asterdoc.ParseStartHour(fe.StartTime)
 		}
 		if strings.TrimSpace(fm.Stage) != "" {
 			fe.Status = normalizeStatus(fm.Stage)
@@ -538,6 +542,20 @@ func (v *Vault) CreateExperiment(folderRel, title, dateYMD, templateSource strin
 		v.Events.Emit(VaultEvent{Kind: EventCreate, RelPath: rel})
 	}
 	return v.inspectFileEntry(targetAbs, rel, folderRel), nil
+}
+
+// SetExperimentStartTime updates start_time (HH:MM) in an experiment's frontmatter.
+func (v *Vault) SetExperimentStartTime(relPath, startTimeHHMM string) error {
+	abs := v.AbsPath(relPath)
+	raw, err := os.ReadFile(abs)
+	if err != nil {
+		return err
+	}
+	updated := asterdoc.SetFrontmatterStartTime(string(raw), startTimeHHMM)
+	if updated == string(raw) {
+		return nil
+	}
+	return asterdoc.WriteFileAtomic(abs, []byte(updated))
 }
 
 // DuplicateFile creates a non-colliding copy in the same folder (`<Name> 2.asterml`),

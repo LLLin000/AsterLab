@@ -47,6 +47,10 @@ type liveEditorEntry struct {
 	docOffset            int
 	baseRepls            []editor.Replacement
 	lastNLTextSig        string
+	sparkDocSrc          string
+	sparkBufVer          uint64
+	sparkLineIdx         int
+	sparkHasSug          bool
 }
 
 var (
@@ -843,21 +847,38 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		}
 		return lnStart, lnEnd, true
 	}
+	// UI-21: Per-document line suggestion cache — guarantees AnalyzeLabSentenceWithContext
+	// (including SciGraph + ONNX inference) runs AT MOST ONCE per unique line while Alt is held
+	// or while the cursor rests on a line (eliminates 60-FPS hover/spark freeze!).
+	lookupLineSuggestionsCached := func(lineText string, globalOff int, dec *JevRouteDecision) []*NLSuggestion {
+		if v.Doc == nil {
+			return nil
+		}
+		if v.nlLineCache == nil || v.nlLineCacheDoc != curDocSrc {
+			v.nlLineCache = make(map[string][]*NLSuggestion, 32)
+			v.nlLineCacheDoc = curDocSrc
+		}
+		jevTag := "0"
+		if dec != nil {
+			jevTag = dec.Kind + ":" + dec.Mode
+		}
+		cKey := fmt.Sprintf("%d|%s|%s", globalOff, jevTag, lineText)
+		if cached, ok := v.nlLineCache[cKey]; ok {
+			return cached
+		}
+		sugs := AnalyzeLabSentenceWithContext(v.Doc, lineText, globalOff, dec)
+		if len(v.nlLineCache) > 256 {
+			v.nlLineCache = make(map[string][]*NLSuggestion, 32)
+		}
+		v.nlLineCache[cKey] = sugs
+		return sugs
+	}
 	activateNLHoverForLine := func(bufStr string, off int, byShortcut bool) bool {
 		if readOnly || v.Doc == nil {
 			return false
 		}
 		lineIdx, lnStart, lnEnd := lineBoundsForOffset(bufStr, off)
 		lineText := bufStr[lnStart:lnEnd]
-		// UI-09: Fast-path cache for lines already checked (both hits AND misses!)
-		// Prevents 60 FPS synchronous re-evaluation / model polling while Alt is held over non-matching lines.
-		if !byShortcut &&
-			v.nlMissKey == key &&
-			v.nlMissLine == lineIdx &&
-			v.nlMissText == lineText &&
-			v.nlMissJevReady {
-			return false
-		}
 		dec, _ := QueryJevDecisionAsync(lineText, func() {
 			if v.OnAsyncInvalidate != nil {
 				v.OnAsyncInvalidate()
@@ -885,7 +906,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			v.nlMissJevReady == jevReady {
 			return false
 		}
-		sugs := AnalyzeLabSentenceWithContext(v.Doc, lineText, entry.docOffset+lnStart, dec)
+		sugs := lookupLineSuggestionsCached(lineText, entry.docOffset+lnStart, dec)
 		if len(sugs) == 0 {
 			v.nlMissKey = key
 			v.nlMissLine = lineIdx
@@ -1193,36 +1214,44 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		}
 
 		// Quiet, text-free ✦ micro-icon at right margin of the focused actionable line (L1 progressive disclosure).
-		// Clicking it opens the exact same preview card as Alt+Hover / Alt+Enter without cluttering resting text.
+		// UI-21: Strictly memoized per (docSource, bufferVersion, activeLine) — zero per-frame SciGraph/ONNX churn!
 		if !readOnly && focused && (v.nlHover == nil || v.nlHover.editorKey != key) {
 			if lnStart, lnEnd, ok := lineBoundsForIndex(curBuf, activeLine); ok {
-				lnTxt := strings.TrimSpace(curBuf[lnStart:lnEnd])
-				if len([]rune(lnTxt)) >= 6 {
-					sugs := AnalyzeLabSentenceWithContext(v.Doc, lnTxt, entry.docOffset+lnStart, nil)
-					if len(sugs) > 0 && sugs[0] != nil {
-						lineTop := float32(st.LineTop(activeLine) - st.ScrollY())
-						lineBot := float32(st.LineTop(activeLine+1) - st.ScrollY())
-						lineH := lineBot - lineTop
-						if lineH < float32(tok.TextBody)*1.3 {
-							lineH = float32(tok.TextBody) * 1.56
-						}
-						btnSz := float32(tok.Spacing24) - 2
-						sparkBtn := ui.ButtonBase(c.Key(fmt.Sprintf("nl-spark:%s:%d", key, activeLine))).
-							Absolute().Top(lineTop + (lineH-btnSz)/2).Right(2).
-							Size(btnSz, btnSz).Center().
-							Radius(float32(tok.ControlRadius)).
-							Label("智能转为交互组件")
-						if sparkBtn.Hovered() {
-							sparkBtn.Background(tok.AccentSoftBg)
-						}
-						sparkBtn.Children(func() {
-							ui.Icon(c, lucide.Sparkles()).Size(float32(tok.Spacing12)+1, float32(tok.Spacing12)+1).
-								TextColor(tok.Accent.Alpha(0.75))
-						})
-						components.Tooltip(c, sparkBtn, "转为交互组件（快捷键 Alt+悬停 或 Alt+Enter）")
-						if sparkBtn.Clicked() {
-							activateNLHoverForLine(curBuf, lnStart, true)
-						}
+				if entry.sparkDocSrc != curDocSrc || entry.sparkBufVer != ver || entry.sparkLineIdx != activeLine {
+					entry.sparkDocSrc = curDocSrc
+					entry.sparkBufVer = ver
+					entry.sparkLineIdx = activeLine
+					lnTxt := strings.TrimSpace(curBuf[lnStart:lnEnd])
+					if len([]rune(lnTxt)) >= 6 {
+						sugs := lookupLineSuggestionsCached(lnTxt, entry.docOffset+lnStart, nil)
+						entry.sparkHasSug = len(sugs) > 0 && sugs[0] != nil
+					} else {
+						entry.sparkHasSug = false
+					}
+				}
+				if entry.sparkHasSug {
+					lineTop := float32(st.LineTop(activeLine) - st.ScrollY())
+					lineBot := float32(st.LineTop(activeLine+1) - st.ScrollY())
+					lineH := lineBot - lineTop
+					if lineH < float32(tok.TextBody)*1.3 {
+						lineH = float32(tok.TextBody) * 1.56
+					}
+					btnSz := float32(tok.Spacing24) - 2
+					sparkBtn := ui.ButtonBase(c.Key(fmt.Sprintf("nl-spark:%s:%d", key, activeLine))).
+						Absolute().Top(lineTop + (lineH-btnSz)/2).Right(2).
+						Size(btnSz, btnSz).Center().
+						Radius(float32(tok.ControlRadius)).
+						Label("智能转为交互组件")
+					if sparkBtn.Hovered() {
+						sparkBtn.Background(tok.AccentSoftBg)
+					}
+					sparkBtn.Children(func() {
+						ui.Icon(c, lucide.Sparkles()).Size(float32(tok.Spacing12)+1, float32(tok.Spacing12)+1).
+							TextColor(tok.Accent.Alpha(0.75))
+					})
+					components.Tooltip(c, sparkBtn, "转为交互组件（快捷键 Alt+悬停 或 Alt+Enter）")
+					if sparkBtn.Clicked() {
+						activateNLHoverForLine(curBuf, lnStart, true)
 					}
 				}
 			}
@@ -1370,8 +1399,9 @@ func completionIconForItem(it editor.Completion) *ui.SVG {
 }
 
 // renderStyledCompletionMenu renders a clean TopInspo / Notion / Linear-inspired command
-// dropdown for `/`, `{@`, and `[[` completions with Lucide icons, crisp hover/selection
-// states, and right-aligned command badges.
+// dropdown for `/`, `{@`, and `[[` completions.
+// UI-18: For `/` component commands, uses a crisp 2-column visual picker (compact list on left,
+// live GPU vector wireframe mini-preview on right — zero verbose text walls!).
 func (v *View) renderStyledCompletionMenu(c *ui.Context, panel ui.Element, m *editor.CompletionMenu) {
 	t := c.Theme()
 	tok := theme.GetTokens(t)
@@ -1384,83 +1414,196 @@ func (v *View) renderStyledCompletionMenu(c *ui.Context, panel ui.Element, m *ed
 	if dark {
 		borderCol = tok.BorderStrong
 	}
-	headerTitle := "插入科研组件与步骤"
+	isSlashMenu := strings.HasPrefix(strings.TrimSpace(items[0].Detail), "/")
+	headerTitle := "插入科研组件"
 	if strings.HasPrefix(items[0].Label, "@") {
 		headerTitle = "关联实验对象"
 	} else if items[0].Detail == "实验库文件" {
 		headerTitle = "引用实验库文件"
 	}
 
+	panelW := float32(tok.Spacing48) * 6.8
+	if isSlashMenu {
+		panelW = float32(tok.Spacing48) * 9.2
+	}
 	panel.Background(tok.Surface).
 		Border(1, borderCol).
 		Radius(float32(tok.PanelRadius)).
 		Shadow(0, float32(tok.Spacing8), float32(tok.Spacing24), 0, tok.Text.Alpha(0.16)).
 		Padding(float32(tok.Spacing4)).
-		Width(float32(tok.Spacing48) * 7.2).
-		MaxHeight(float32(tok.Spacing48) * 7.5)
+		Width(panelW).
+		MaxHeight(float32(tok.Spacing48) * 7.2)
 
 	panel.Children(func() {
 		// Micro-header with keyboard affordance hints
 		ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, headerTitle).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 			ui.Spacer(c)
-			ui.Text(c, "↑↓ · Enter · Esc").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+			ui.Text(c, "↑↓ · Enter").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 		})
 		ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.55)).Margin(0, 0, float32(tok.Spacing4), 0)
 
-		ui.Scroll(c).Key("slash-rows").FillWidth().MaxHeight(float32(tok.Spacing48) * 6.2).Children(func() {
-			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4) * 0.5).Children(func() {
-				for i, it := range items {
-					if i >= 40 {
-						break
-					}
-					sel := i == m.Selected()
-					row := m.Item(i).Row().FillWidth().AlignItems(ui.Center).
-						Gap(float32(tok.Spacing8)).
-						Padding(float32(tok.Spacing4)*1.5, float32(tok.Spacing8)).
-						Radius(float32(tok.ControlRadius))
-					if sel {
-						row.Background(tok.AccentSoftBg)
-					} else if row.Hovered() {
-						row.Background(tok.Text.Alpha(0.04))
-					}
-					row.Children(func() {
-						iconBg := tok.Elevated
-						iconCol := tok.TextMuted
-						if sel {
-							iconBg = tok.Surface
-							iconCol = tok.Accent
+		renderList := func() {
+			ui.Scroll(c).Key("slash-rows").FillWidth().MaxHeight(float32(tok.Spacing48) * 5.8).Children(func() {
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4) * 0.5).Children(func() {
+					for i, it := range items {
+						if i >= 40 {
+							break
 						}
-						ui.Row(c).Size(float32(tok.Spacing24), float32(tok.Spacing24)).Center().
-							Radius(float32(tok.ControlRadius)).Background(iconBg).Border(1, tok.Border.Alpha(0.7)).Shrink(0).Children(func() {
-							ui.Icon(c, completionIconForItem(it)).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(iconCol)
-						})
-						ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4) * 0.25).Children(func() {
+						sel := i == m.Selected()
+						row := m.Item(i).Row().FillWidth().AlignItems(ui.Center).
+							Gap(float32(tok.Spacing8)).
+							Padding(float32(tok.Spacing4)*1.25, float32(tok.Spacing8)).
+							Radius(float32(tok.ControlRadius))
+						if sel {
+							row.Background(tok.AccentSoftBg)
+						} else if row.Hovered() {
+							row.Background(tok.Text.Alpha(0.04))
+						}
+						row.Children(func() {
+							iconBg := tok.Elevated
+							iconCol := tok.TextMuted
+							if sel {
+								iconBg = tok.Surface
+								iconCol = tok.Accent
+							}
+							ui.Row(c).Size(float32(tok.Spacing24), float32(tok.Spacing24)).Center().
+								Radius(float32(tok.ControlRadius)).Background(iconBg).Border(1, tok.Border.Alpha(0.65)).Shrink(0).Children(func() {
+								ui.Icon(c, completionIconForItem(it)).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(iconCol)
+							})
 							lblCol := tok.Text
 							if sel {
 								lblCol = tok.Accent
 							}
-							ui.Text(c, it.Label).FontSize(float32(tok.TextData)).Bold().TextColor(lblCol).SingleLine().Ellipsis("…")
-							if it.Documentation != "" {
-								ui.Text(c, it.Documentation).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+							ui.Text(c, it.Label).FontSize(float32(tok.TextData)).Bold().TextColor(lblCol).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+							if it.Detail != "" {
+								badgeBg := tok.Elevated
+								badgeFg := tok.TextMuted
+								if sel {
+									badgeBg = tok.Accent.Alpha(0.14)
+									badgeFg = tok.Accent
+								}
+								ui.Row(c).Padding(float32(tok.Spacing4)*0.3, float32(tok.Spacing8)*0.65).
+									Radius(float32(tok.ControlRadius)).Background(badgeBg).Shrink(0).Children(func() {
+									ui.Text(c, it.Detail).FontSize(float32(tok.TextMeta)).TextColor(badgeFg).FontFeatures("tnum").SingleLine()
+								})
 							}
 						})
-						if it.Detail != "" {
-							badgeBg := tok.Elevated
-							badgeFg := tok.TextMuted
-							if sel {
-								badgeBg = tok.Accent.Alpha(0.14)
-								badgeFg = tok.Accent
-							}
-							ui.Row(c).Padding(float32(tok.Spacing4)*0.35, float32(tok.Spacing8)*0.75).
-								Radius(float32(tok.ControlRadius)).Background(badgeBg).Shrink(0).Children(func() {
-								ui.Text(c, it.Detail).FontSize(float32(tok.TextMeta)).TextColor(badgeFg).FontFeatures("tnum").SingleLine()
-							})
-						}
-					})
+					}
+				})
+			})
+		}
+
+		if !isSlashMenu {
+			renderList()
+			return
+		}
+
+		selIdx := m.Selected()
+		if selIdx < 0 || selIdx >= len(items) {
+			selIdx = 0
+		}
+		activeItem := items[selIdx]
+
+		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Stretch).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Children(renderList)
+			ui.Box(c).Width(1).Background(tok.Border.Alpha(0.55))
+			ui.Column(c).Width(float32(tok.Spacing48)*3.8).Shrink(0).
+				Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing8)).
+				AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+				renderSlashVisualPreview(c, tok, activeItem)
+				ui.Text(c, activeItem.Label).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine()
+				if activeItem.Documentation != "" {
+					ui.Text(c, activeItem.Documentation).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				}
 			})
 		})
+	})
+}
+
+// renderSlashVisualPreview draws a crisp GPU vector wireframe miniature of each scientific component
+// so users recognize `/plate`, `/calc`, `/timer`, `/group`, `/table`, `/param`, `/image`, `/figure`
+// instantaneously without reading paragraphs.
+func renderSlashVisualPreview(c *ui.Context, tok theme.Tokens, it editor.Completion) {
+	slash := strings.TrimSpace(it.Detail)
+	box := ui.Box(c.Key("slash-prev:"+slash)).
+		Width(float32(tok.Spacing48)*3.2).Height(float32(tok.Spacing48)*2.0).
+		Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border.Alpha(0.75))
+	box.Draw(func(p *ui.Painter, r ui.Rect) {
+		pad := float32(10)
+		ix, iy := r.X+pad, r.Y+pad
+		iw, ih := r.W-pad*2, r.H-pad*2
+		mutedBar := tok.TextMuted.Alpha(0.24)
+		accentSoft := tok.Accent.Alpha(0.24)
+		switch slash {
+		case "/plate":
+			// 4x3 well plate miniature with color-coded experimental groups
+			cols, rows := 4, 3
+			cellW := iw / float32(cols)
+			cellH := ih / float32(rows)
+			rad := min(cellW, cellH) * 0.34
+			rowCols := []ui.Color{tok.Accent, tok.Success, tok.Warning}
+			for rr := 0; rr < rows; rr++ {
+				for cc := 0; cc < cols; cc++ {
+					cx := ix + (float32(cc)+0.5)*cellW
+					cy := iy + (float32(rr)+0.5)*cellH
+					col := rowCols[rr%len(rowCols)]
+					if cc == cols-1 {
+						col = mutedBar
+					}
+					p.Fill(ui.Rect{X: cx - rad, Y: cy - rad, W: rad * 2, H: rad * 2}, col.Alpha(0.78), rad)
+				}
+			}
+		case "/group":
+			// 3 color-coded experimental group rows
+			rowCols := []ui.Color{tok.Accent, tok.Success, tok.Warning}
+			rh := (ih - 8) / 3
+			for rr := 0; rr < 3; rr++ {
+				y := iy + float32(rr)*(rh+4)
+				p.Fill(ui.Rect{X: ix, Y: y, W: 6, H: rh}, rowCols[rr], 3)
+				p.Fill(ui.Rect{X: ix + 12, Y: y + 3, W: iw * 0.44, H: rh - 6}, mutedBar, 3)
+				p.Fill(ui.Rect{X: ix + iw*0.64, Y: y + 3, W: iw * 0.34, H: rh - 6}, accentSoft, 3)
+			}
+		case "/calc":
+			// Centered fraction equation + highlighted result pill
+			p.Fill(ui.Rect{X: ix + 6, Y: iy + 8, W: iw * 0.42, H: 8}, mutedBar, 3)
+			p.Fill(ui.Rect{X: ix + 4, Y: iy + 20, W: iw * 0.46, H: 2}, tok.TextMuted.Alpha(0.55), 1)
+			p.Fill(ui.Rect{X: ix + 14, Y: iy + 26, W: iw * 0.28, H: 8}, mutedBar, 3)
+			p.Fill(ui.Rect{X: ix + iw*0.58, Y: iy + 12, W: iw * 0.38, H: 18}, tok.Accent.Alpha(0.22), 5)
+			p.Fill(ui.Rect{X: ix + iw*0.64, Y: iy + 18, W: iw * 0.26, H: 6}, tok.Accent, 3)
+			// Bottom 2 input lines
+			p.Fill(ui.Rect{X: ix, Y: iy + ih - 18, W: iw * 0.44, H: 8}, mutedBar, 3)
+			p.Fill(ui.Rect{X: ix + iw*0.52, Y: iy + ih - 18, W: iw * 0.48, H: 8}, mutedBar, 3)
+		case "/timer":
+			// Sleek compact timer strip + countdown digits bar + play pill
+			cy := iy + ih*0.32
+			p.Fill(ui.Rect{X: ix, Y: cy, W: iw, H: 28}, tok.Surface, 6)
+			p.Fill(ui.Rect{X: ix + 8, Y: cy + 8, W: 12, H: 12}, tok.Accent, 6)
+			p.Fill(ui.Rect{X: ix + 26, Y: cy + 9, W: iw * 0.36, H: 10}, tok.Accent.Alpha(0.72), 3)
+			p.Fill(ui.Rect{X: ix + iw - 28, Y: cy + 6, W: 20, H: 16}, tok.Accent.Alpha(0.22), 4)
+		case "/table":
+			// 3x3 data matrix with shaded header row
+			p.Fill(ui.Rect{X: ix, Y: iy, W: iw, H: 14}, accentSoft, 3)
+			for rr := 0; rr < 3; rr++ {
+				y := iy + 18 + float32(rr)*16
+				for cc := 0; cc < 3; cc++ {
+					cw := (iw - 8) / 3
+					p.Fill(ui.Rect{X: ix + float32(cc)*(cw+4), Y: y, W: cw, H: 10}, mutedBar, 2)
+				}
+			}
+		case "/param":
+			// Compact 2-column key-value parameter strip
+			for rr := 0; rr < 3; rr++ {
+				y := iy + float32(rr)*20 + 6
+				p.Fill(ui.Rect{X: ix, Y: y, W: iw * 0.34, H: 10}, mutedBar, 3)
+				p.Fill(ui.Rect{X: ix + iw*0.42, Y: y, W: iw * 0.56, H: 10}, accentSoft, 3)
+			}
+		default:
+			// Framed image / schematic diagram thumbnail
+			p.Fill(ui.Rect{X: ix + 6, Y: iy + 4, W: iw - 12, H: ih - 8}, tok.Surface, 6)
+			p.Fill(ui.Rect{X: ix + 16, Y: iy + 14, W: 14, H: 14}, tok.Accent.Alpha(0.65), 7)
+			p.Fill(ui.Rect{X: ix + 14, Y: iy + ih - 24, W: iw - 28, H: 12}, tok.Success.Alpha(0.32), 4)
+		}
 	})
 }
 

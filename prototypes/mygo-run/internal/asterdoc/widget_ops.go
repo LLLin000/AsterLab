@@ -747,39 +747,22 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 						}
 						ui.Spacer(c)
 						if formulaStr != "" {
-							copyBtn := ui.ButtonBase(c.Key("calc-copy-f:"+moduleID)).
-								Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
-								AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label("复制公式")
-							if copyBtn.Hovered() {
-								copyBtn.Background(tok.Text.Alpha(0.05))
-							}
-							copyBtn.Children(func() {
-								ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-									ui.Icon(c, lucide.Copy()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
-									ui.Text(c, "复制公式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-								})
-							})
+							copyBtn := components.IconButton(c, lucide.Copy(), "复制公式", components.IconButtonPlain)
+							components.Tooltip(c, copyBtn, "复制 LaTeX 公式")
 							if copyBtn.Clicked() {
 								c.Services().WriteClipboard(formulaStr)
 							}
 						}
 						if editableDesign {
-							edLbl := "编辑公式"
+							edTip := "编辑公式"
 							if *customOpen {
-								edLbl = "收起公式栏"
+								edTip = "收起公式编辑栏"
 							}
-							toggleBtn := ui.ButtonBase(c.Key("calc-edit-f:"+moduleID)).
-								Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
-								AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label(edLbl)
-							if toggleBtn.Hovered() {
-								toggleBtn.Background(tok.Text.Alpha(0.05))
+							toggleBtn := components.IconButton(c, lucide.Pencil(), edTip, components.IconButtonPlain)
+							if *customOpen {
+								toggleBtn.Background(tok.AccentSoftBg)
 							}
-							toggleBtn.Children(func() {
-								ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-									ui.Icon(c, lucide.Pencil()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
-									ui.Text(c, edLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).SingleLine()
-								})
-							})
+							components.Tooltip(c, toggleBtn, edTip)
 							if toggleBtn.Clicked() {
 								*customOpen = !*customOpen
 							}
@@ -1055,70 +1038,79 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 				}
 			}
 
-			// 5. BOTTOM INPUT VARIABLES ZONE (clearly separated from outputs; click variable pill to insert into formula!)
+			// 5. BOTTOM INPUT VARIABLES ZONE (UI-17: ultra-clean formula-first minimalism, single quiet `+ 变量 ▾` menu)
 			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Text(c, "输入变量").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
-					if editableDesign {
-						ui.Text(c, "点击符号胶囊可直接插入公式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted.Alpha(0.75))
-					}
+					ui.Text(c, "变量").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 					ui.Spacer(c)
 					if editableDesign {
-						if hasPlate {
-							if components.Button(c, "+ 引入孔板实验孔数", components.ButtonGhost).Clicked() {
-								next := cloneRowsSlice(rows)
-								insertPos := len(inputIdxs)
-								refVal := "@plate.sample_wells"
-								refLbl := "有效实验孔数"
-								if primaryPlate != nil && primaryPlate.BlankWells == 0 {
-									refVal = "@plate.wells"
-									refLbl = "孔板已分配孔数"
+						addVarBtn := ui.ButtonBase(c.Key("calc-addvar-menu:"+moduleID)).
+							Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
+							AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label("添加或引用变量")
+						if addVarBtn.Hovered() {
+							addVarBtn.Background(tok.Text.Alpha(0.05))
+						}
+						addVarBtn.Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Icon(c, lucide.Plus()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
+								ui.Text(c, "添加变量").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+								if hasPlate || len(upstreamCalcs) > 0 {
+									ui.Icon(c, lucide.ChevronDown()).Size(float32(tok.Spacing12)-1, float32(tok.Spacing12)-1).TextColor(tok.TextMuted)
 								}
+							})
+						})
+						if !hasPlate && len(upstreamCalcs) == 0 {
+							if addVarBtn.Clicked() {
+								next := cloneRowsSlice(rows)
+								n := len(inputIdxs) + 1
+								insertPos := len(inputIdxs)
 								newRow := map[string]any{
-									"key":   "N",
-									"label": refLbl,
+									"key":   fmt.Sprintf("x_%d", n),
+									"label": fmt.Sprintf("参数 %d", n),
 									"kind":  "input",
-									"value": refVal,
-									"unit":  "孔",
+									"value": 1,
+									"unit":  "",
 								}
 								head := append([]map[string]any{}, next[:insertPos]...)
 								head = append(head, newRow)
 								next = append(head, next[insertPos:]...)
 								v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
 							}
-						}
-						if len(upstreamCalcs) > 0 {
-							upBtn := ui.ButtonBase(c.Key("calc-upref:"+moduleID)).
-								Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
-								AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).
-								Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.32)).Label("引用上游计算结果")
-							upBtn.Children(func() {
-								ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-									ui.Icon(c, lucide.Link()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
-									ui.Text(c, "+ 引用上游计算").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
-								})
-							})
-							components.MenuButton(c, upBtn, func(m *components.Menu) {
-								for _, uco := range upstreamCalcs {
-									uco := uco
-									uStr := formatNumber(uco.Amount)
-									if uco.Unit != "" {
-										uStr += " " + DisplayUnit(uco.Unit)
+						} else {
+							components.MenuButton(c, addVarBtn, func(m *components.Menu) {
+								if m.Item("自定义输入变量").Chosen() {
+									next := cloneRowsSlice(rows)
+									n := len(inputIdxs) + 1
+									insertPos := len(inputIdxs)
+									newRow := map[string]any{
+										"key":   fmt.Sprintf("x_%d", n),
+										"label": fmt.Sprintf("参数 %d", n),
+										"kind":  "input",
+										"value": 1,
+										"unit":  "",
 									}
-									itemLbl := fmt.Sprintf("%s · %s (%s)", uco.Title, uco.Label, uStr)
-									if m.Item(itemLbl).Chosen() {
+									head := append([]map[string]any{}, next[:insertPos]...)
+									head = append(head, newRow)
+									next = append(head, next[insertPos:]...)
+									v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+								}
+								if hasPlate {
+									m.Separator()
+									if m.Item("引用孔板有效孔数 (@plate)").Chosen() {
 										next := cloneRowsSlice(rows)
 										insertPos := len(inputIdxs)
-										newKey := sanitizeCalcVar(uco.Key)
-										if definedNormVars[normalizeVarLookup(newKey)] {
-											newKey = fmt.Sprintf("%s_%d", newKey, len(inputIdxs)+1)
+										refVal := "@plate.sample_wells"
+										refLbl := "有效实验孔数"
+										if primaryPlate != nil && primaryPlate.BlankWells == 0 {
+											refVal = "@plate.wells"
+											refLbl = "孔板已分配孔数"
 										}
 										newRow := map[string]any{
-											"key":   newKey,
-											"label": uco.Label + "（联动）",
+											"key":   "N",
+											"label": refLbl,
 											"kind":  "input",
-											"value": fmt.Sprintf("@calc.%s.%s", uco.ModuleID, uco.Key),
-											"unit":  uco.Unit,
+											"value": refVal,
+											"unit":  "孔",
 										}
 										head := append([]map[string]any{}, next[:insertPos]...)
 										head = append(head, newRow)
@@ -1126,23 +1118,37 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 										v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
 									}
 								}
+								if len(upstreamCalcs) > 0 {
+									m.Separator()
+									for _, uco := range upstreamCalcs {
+										uco := uco
+										uStr := formatNumber(uco.Amount)
+										if uco.Unit != "" {
+											uStr += " " + DisplayUnit(uco.Unit)
+										}
+										itemLbl := fmt.Sprintf("引用 %s · %s (%s)", uco.Title, uco.Label, uStr)
+										if m.Item(itemLbl).Chosen() {
+											next := cloneRowsSlice(rows)
+											insertPos := len(inputIdxs)
+											newKey := sanitizeCalcVar(uco.Key)
+											if definedNormVars[normalizeVarLookup(newKey)] {
+												newKey = fmt.Sprintf("%s_%d", newKey, len(inputIdxs)+1)
+											}
+											newRow := map[string]any{
+												"key":   newKey,
+												"label": uco.Label + "（联动）",
+												"kind":  "input",
+												"value": fmt.Sprintf("@calc.%s.%s", uco.ModuleID, uco.Key),
+												"unit":  uco.Unit,
+											}
+											head := append([]map[string]any{}, next[:insertPos]...)
+											head = append(head, newRow)
+											next = append(head, next[insertPos:]...)
+											v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+										}
+									}
+								}
 							})
-						}
-						if components.Button(c, "+ 添加变量", components.ButtonGhost).Clicked() {
-							next := cloneRowsSlice(rows)
-							n := len(inputIdxs) + 1
-							insertPos := len(inputIdxs)
-							newRow := map[string]any{
-								"key":   fmt.Sprintf("x_%d", n),
-								"label": fmt.Sprintf("参数 %d", n),
-								"kind":  "input",
-								"value": 1,
-								"unit":  "",
-							}
-							head := append([]map[string]any{}, next[:insertPos]...)
-							head = append(head, newRow)
-							next = append(head, next[insertPos:]...)
-							v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
 						}
 					}
 				})
@@ -1697,9 +1703,9 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 		}
 	}
 
-	// UI-08: Sleek compact inline timer pill (no bulky 70px full-width gray slab)
-	timerWrap := ui.Column(c.Key("live-tm:"+moduleID)).AlignSelf(ui.Start).
-		Padding(float32(tok.Spacing4)+1, float32(tok.Spacing12)).
+	// UI-19: Uniform full-width sleek timer strip (compact single-row height + subordinate TextData title)
+	timerWrap := ui.Column(c.Key("live-tm:"+moduleID)).FillWidth().
+		Padding(float32(tok.Spacing4)+2, float32(tok.Spacing12)).
 		Radius(float32(tok.ControlRadius)).
 		Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing4))
 	targetClockCol := tok.Text
@@ -1720,16 +1726,16 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 	schedWin := textValue(data, "schedule_window")
 
 	timerWrap.Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(clockCol)
 			ui.Text(c, formatClockHMS(displaySec)).FontSize(float32(tok.TextData)).Bold().
 				TextColor(clockCol).
 				FontFeatures("tnum").
 				ContentTransition(theme.NumericRoll(isCountdown))
 			if editableDesign {
-				renderInlineEditableTitle(v, c, moduleID, title, true)
+				renderCompactEditableTitle(v, c, moduleID, title, true)
 			} else {
-				ui.Text(c, FormatDisplayText(title)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+				ui.Text(c, FormatDisplayText(title)).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 			}
 
 			// Inline editable duration/mode in Edit mode (borderless quiet inputs)

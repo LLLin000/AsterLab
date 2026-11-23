@@ -73,6 +73,29 @@ func SetFrontmatterMetadata(source, title, dateYMD, status string) string {
 	return out
 }
 
+// SetFrontmatterStartTime updates start_time (HH:MM) in the YAML frontmatter without altering body.
+func SetFrontmatterStartTime(source, startTimeHHMM string) string {
+	fm, fmEnd, hasFM := ScanFrontmatter(source)
+	body := source
+	if hasFM {
+		body = source[fmEnd:]
+	}
+	if strings.TrimSpace(fm.AsterML) == "" {
+		fm.AsterML = EnvelopeFormatVersion
+	}
+	fm.StartTime = NormalizeStartTimeHHMM(startTimeHHMM)
+	fmBytes, err := yaml.Marshal(fm)
+	if err != nil {
+		return source
+	}
+	cleanBody := strings.TrimLeft(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	out := "---\n" + strings.TrimRight(string(fmBytes), "\r\n") + "\n---\n\n" + cleanBody
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return out
+}
+
 // ClearExecutionDataForTemplate creates a clean date-free template copy from
 // an experiment `.asterml` file by removing frontmatter date/status and clearing
 // inline execution values (done flags, actuals, timer runs, table row readouts).

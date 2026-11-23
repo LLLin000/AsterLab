@@ -15,3 +15,5 @@ type devInspectorState struct{}
 func (a *app) renderDevInspectorOverlay(_ *ui.Context) {}
 
 func (a *app) devInspectorPaletteCommands() []shell.PaletteCommand { return nil }
+
+func (a *app) resetDevFeedbackDirCache() {}
