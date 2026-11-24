@@ -138,7 +138,9 @@ type View struct {
 	calcScratch        map[string]map[string]*string
 	// ExpandedPlate is the plate rendered in the full-screen overlay; it is
 	// editor state, not document state.
-	ExpandedPlate string
+	ExpandedPlate       string
+	inPairedRow         bool
+	suppressLeftGutter  bool
 	// moduleDrafts stores editable text per module/field across frames.
 	moduleDrafts        map[string]map[string]*string
 	moduleDraftBool     map[string]map[string]*bool
@@ -291,7 +293,17 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 	visualSegs := expandSegmentsForStepContainers(src, segs, stepTree, stepExcludeOff)
 
 	// Tightened vertical rhythm: 8px base gap (heading->content = 8px, component<->prose/component = 12px)
-	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+	docCol := ui.Column(c.Key("unified-doc-root")).FillWidth().Gap(float32(tok.Spacing8))
+	availW := docCol.Bounds().W
+	if availW <= 0 {
+		if winW, _ := c.Size(); winW > 0 {
+			availW = winW - float32(tok.Spacing48)*1.5
+			if availW > 860 {
+				availW = 860
+			}
+		}
+	}
+	docCol.Children(func() {
 		renderedTrailingEditableProse := false
 		prevAnchorID := "__start__"
 		embedOrdinal := 0
@@ -330,6 +342,18 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 						if menu.Item("复制模块（新 ID）").Chosen() && v.OnChange != nil {
 							if next, _, err := DuplicateTopLevelModuleInSource(v.Doc.Source, moduleID); err == nil {
 								v.OnChange(next)
+							}
+						}
+						if mod := findModuleByID(v.Doc, moduleID); mod != nil && isPairableModuleKind(mod.Kind) && v.OnChange != nil {
+							isFull := hasLayoutFullDirective(mod.Body)
+							lbl := "设为独占整行"
+							if isFull {
+								lbl = "允许自动并排"
+							}
+							if menu.Item(lbl).Chosen() {
+								if next, err := ToggleTopLevelModuleFullWidthInSource(v.Doc.Source, moduleID, !isFull); err == nil {
+									v.OnChange(next)
+								}
 							}
 						}
 						menu.Separator()
@@ -479,7 +503,7 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 				embHover := embRow.Hovered()
 				embRow.Children(func() {
 					v.renderEmbedCard(c, seg, resolvedBySpan, editableDesign, !v.ReadOnly)
-					if editableDesign && !v.MobileCompact {
+					if editableDesign && !v.MobileCompact && !v.suppressLeftGutter {
 						op := float32(0)
 						if embHover {
 							op = 1
@@ -503,13 +527,19 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 				prevAnchorID = m.ID
 				renderedTrailingEditableProse = false
 				modRow := ui.Box(c.Key("top-mod-row:"+m.ID)).FillWidth().Padding(float32(tok.Spacing4), 0, 0, 0)
+				if v.inPairedRow {
+					modRow.FillHeight()
+				}
 				modHover := modRow.Hovered()
 				modRow.Children(func() {
 					modWrap := ui.Column(c.Key("top-mod:" + m.ID)).FillWidth().Gap(float32(tok.Spacing4))
+					if v.inPairedRow {
+						modWrap.FillHeight()
+					}
 					modWrap.Children(func() {
 						v.renderRegisteredModule(c, registry, m.Kind, m.Schema, m.ID, m.Data)
 					})
-					if editableDesign && !v.MobileCompact {
+					if editableDesign && !v.MobileCompact && !v.suppressLeftGutter {
 						op := float32(0)
 						if modHover {
 							op = 1
@@ -537,6 +567,18 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 									v.OnChange(next)
 								}
 							}
+							if isPairableModuleKind(m.Kind) && v.OnChange != nil {
+								isFull := hasLayoutFullDirective(m.Body)
+								lbl := "设为独占整行"
+								if isFull {
+									lbl = "允许自动并排"
+								}
+								if menu.Item(lbl).Chosen() {
+									if next, err := ToggleTopLevelModuleFullWidthInSource(v.Doc.Source, m.ID, !isFull); err == nil {
+										v.OnChange(next)
+									}
+								}
+							}
 							menu.Separator()
 							if menu.Item("删除模块").Chosen() && v.OnChange != nil {
 								if next, err := RemoveTopLevelModuleInSource(v.Doc.Source, m.ID); err == nil {
@@ -552,8 +594,8 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 		// Render segments recursively into TRUE nested Step / Sub-step containers with
 		// ONE unbroken vertical guide rail per step scope (zero broken dashes, components
 		// strictly aligned with their owning step!).
-		var renderRange func(startIdx, endIdx int)
-		renderRange = func(startIdx, endIdx int) {
+		var renderRange func(startIdx, endIdx int, colW float32)
+		renderRange = func(startIdx, endIdx int, colW float32) {
 			for i := startIdx; i < endIdx; {
 				vs := visualSegs[i]
 				if vs.isStepHeader && vs.stepNode != nil {
@@ -595,7 +637,11 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 								AlignItems(ui.Stretch).Gap(float32(tok.Spacing12)).Children(func() {
 								ui.Box(c).Width(railW).Radius(1).Background(railColor).Shrink(0)
 								ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing8)).Children(func() {
-									renderRange(i+1, j)
+									nestedW := colW - float32(tok.Spacing24)
+									if nestedW < 0 {
+										nestedW = 0
+									}
+									renderRange(i+1, j, nestedW)
 								})
 							})
 						}
@@ -603,11 +649,40 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 					i = j
 					continue
 				}
+				if !v.MobileCompact {
+					if nextIdx := nextNonBlankVisualSegIndex(visualSegs, i, endIdx); nextIdx > i && canPairVisualSegments(v.Doc, vs, visualSegs[nextIdx], colW) {
+						leftSeg := vs
+						rightSeg := visualSegs[nextIdx]
+						pairKey := fmt.Sprintf("%d-%d", leftSeg.seg.Start, rightSeg.seg.Start)
+						ui.Row(c.Key("pair-row:" + pairKey)).FillWidth().AlignItems(ui.Stretch).Gap(float32(tok.Spacing12)).Children(func() {
+							ui.Box(c.Key("pair-l:"+pairKey)).Grow(1).Basis(0).MinWidth(0).Children(func() {
+								prevPaired := v.inPairedRow
+								prevSuppress := v.suppressLeftGutter
+								v.inPairedRow = true
+								v.suppressLeftGutter = false
+								renderSingleSegment(leftSeg, false)
+								v.inPairedRow = prevPaired
+								v.suppressLeftGutter = prevSuppress
+							})
+							ui.Box(c.Key("pair-r:"+pairKey)).Grow(1).Basis(0).MinWidth(0).Children(func() {
+								prevPaired := v.inPairedRow
+								prevSuppress := v.suppressLeftGutter
+								v.inPairedRow = true
+								v.suppressLeftGutter = true
+								renderSingleSegment(rightSeg, nextIdx == len(visualSegs)-1)
+								v.inPairedRow = prevPaired
+								v.suppressLeftGutter = prevSuppress
+							})
+						})
+						i = nextIdx + 1
+						continue
+					}
+				}
 				renderSingleSegment(vs, i == len(visualSegs)-1)
 				i++
 			}
 		}
-		renderRange(0, len(visualSegs))
+		renderRange(0, len(visualSegs), availW)
 
 		// Always-ready Notion-style writable trailing Markdown line in Edit Mode:
 		// Guarantees that after inserting ANY top-level plate/group/calc/step/embed,
@@ -1059,6 +1134,10 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 	lblMap := PlateGroupLabelMap(v.Doc)
 
 	plateIcon := lucide.Grid2x2()
+	totalWells := p.Format
+	if geometry.Rows*geometry.Columns > 0 && p.Topology != "" && p.Topology != "grid_2d" {
+		totalWells = geometry.Rows * geometry.Columns
+	}
 	meta := fmt.Sprintf("%d 孔板 · 已排 %d 孔", p.Format, len(p.WellGroups()))
 	switch p.Topology {
 	case "rack_1d":
@@ -1068,12 +1147,46 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 		plateIcon = lucide.CircleDot()
 		meta = fmt.Sprintf("%d 区培养皿 · 已排 %d 区", geometry.Rows*geometry.Columns, len(p.WellGroups()))
 	}
+	if v.UnifiedLive {
+		meta = fmt.Sprintf("%d/%d", len(p.WellGroups()), totalWells)
+	}
 	if p.Timepoint != "" {
 		meta += " · " + p.Timepoint
 	}
 
+	newLayerOpen := v.ensureWidgetBool("pl_new_layer_open:" + p.ID)
+	renderNewLayerPopover := func(anchor ui.Element) {
+		components.Popover(c.Key("pl-new-layer:"+p.ID), anchor, newLayerOpen, func(panel ui.Element) {
+			panel.Width(float32(tok.Spacing48)*5).Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "新建维度图层").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+				lBuf := v.ensureWidgetDraft("pl_new_layer_name:"+p.ID, "")
+				tb := components.TextBox(c, lBuf, components.TextBoxOptions{}).Placeholder("图层名（如 药物浓度、时间点）")
+				commitLayer := func() {
+					ln := strings.TrimSpace(*lBuf)
+					if ln != "" {
+						nextLayers := copyNestedFactorMap(p.Layers)
+						if nextLayers[ln] == nil {
+							nextLayers[ln] = map[string]string{}
+						}
+						v.emitAnyModuleEdit(p.ID, map[string]any{"layers": nextLayers})
+						v.plateColorBy[p.ID] = "factor"
+						v.plateFactorKey[p.ID] = ln
+						*lBuf = ""
+						*newLayerOpen = false
+					}
+				}
+				if tb.Submitted() {
+					commitLayer()
+				}
+				if components.Button(c, "创建图层", components.ButtonPrimary).Clicked() {
+					commitLayer()
+				}
+			})
+		})
+	}
+
 	renderPlateBody := func() {
-			if v.UnifiedLive {
+			if v.UnifiedLive && (len(layerNames) > 0 || *newLayerOpen) {
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					ui.Text(c, "图层").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					renderLayerPill := func(key, label string, active bool, onClick func()) {
@@ -1115,37 +1228,10 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					}
 					if editable {
 						addLayerBtn := components.IconButton(c, lucide.Plus(), "新建孔板图层", components.IconButtonCompact)
-						newLayerOpen := v.ensureWidgetBool("pl_new_layer_open:" + p.ID)
 						if addLayerBtn.Clicked() {
 							*newLayerOpen = !*newLayerOpen
 						}
-						components.Popover(c.Key("pl-new-layer:"+p.ID), addLayerBtn, newLayerOpen, func(panel ui.Element) {
-							panel.Width(float32(tok.Spacing48)*5).Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {
-								ui.Text(c, "新建维度图层").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
-								lBuf := v.ensureWidgetDraft("pl_new_layer_name:"+p.ID, "")
-								tb := components.TextBox(c, lBuf, components.TextBoxOptions{}).Placeholder("图层名（如 药物浓度、时间点）")
-								commitLayer := func() {
-									ln := strings.TrimSpace(*lBuf)
-									if ln != "" {
-										nextLayers := copyNestedFactorMap(p.Layers)
-										if nextLayers[ln] == nil {
-											nextLayers[ln] = map[string]string{}
-										}
-										v.emitAnyModuleEdit(p.ID, map[string]any{"layers": nextLayers})
-										v.plateColorBy[p.ID] = "factor"
-										v.plateFactorKey[p.ID] = ln
-										*lBuf = ""
-										*newLayerOpen = false
-									}
-								}
-								if tb.Submitted() {
-									commitLayer()
-								}
-								if components.Button(c, "创建图层", components.ButtonPrimary).Clicked() {
-									commitLayer()
-								}
-							})
-						})
+						renderNewLayerPopover(addLayerBtn)
 					}
 				})
 			}
@@ -1248,9 +1334,6 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					v.renderPlateFloatingBar(c, p, ownerStepID, selected, func(next []string) {
 						v.plateSelections[p.ID] = next
 					}, false, 1, nil)
-				} else {
-					ui.Text(c, "拖拽框选或点击行/列号标注孔位，右键可快速排版。").
-						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				}
 			} else if v.LabMode && !v.ReadOnly && len(selected) > 0 {
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
@@ -1299,6 +1382,14 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					v.emitAnyModuleEdit(p.ID, patch)
 				}
 			}
+		}
+		if editable && v.UnifiedLive && len(layerNames) == 0 && !*newLayerOpen {
+			hdrLayerBtn := components.IconButton(c, lucide.Layers(), "新建孔板图层", components.IconButtonCompact)
+			components.Tooltip(c, hdrLayerBtn, "新建维度图层")
+			if hdrLayerBtn.Clicked() {
+				*newLayerOpen = true
+			}
+			renderNewLayerPopover(hdrLayerBtn)
 		}
 		if v.ReadOnly {
 			components.Badge(c, "只读视图")

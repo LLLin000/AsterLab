@@ -1844,7 +1844,7 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 
 			// 3. Subordinate concise title
 			if editableDesign {
-				renderCompactEditableTitle(v, c, moduleID, title, true)
+				renderCompactEditableTitleHover(v, c, moduleID, title, true, rowHover || v.MobileCompact)
 			} else {
 				ui.Text(c, FormatDisplayText(title)).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 			}
@@ -2346,111 +2346,116 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 	scopeBadge := "步骤证据"
 	switch scope {
 	case "design_ref":
-		scopeBadge = "设计参考文档"
+		scopeBadge = "设计参考"
 	case "container_grid":
 		plateLabel := containerRef
 		if pl, _ := v.findPlate(containerRef); pl != nil && strings.TrimSpace(pl.Title) != "" {
 			plateLabel = pl.Title
 		}
-		scopeBadge = fmt.Sprintf("网格采图 · %s × %d 视野", firstNonEmpty(plateLabel, "孔板"), slots)
+		scopeBadge = fmt.Sprintf("%s × %d 视野", firstNonEmpty(plateLabel, "孔板"), slots)
 	}
 
-	moduleCardFrame(v, c, lucide.Paperclip(), title, scopeBadge, nil, func() {
-		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
-			if editableDesign {
-				var docPlates []*Plate
-				if v.Doc != nil {
-					for _, fm := range flattenAllDocModules(v.Doc) {
-						if fm.Kind == "plate" && fm.Plate != nil {
-							docPlates = append(docPlates, fm.Plate)
-						}
-					}
-				}
-				ui.Row(c.Key("att-cfg:"+moduleID)).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Text(c, "采图模式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					scopeVal := firstNonEmpty(scope, "step_evidence")
-					sSel := components.Select(c.Key("att-scope:"+moduleID), &scopeVal)
-					StyleSelectQuiet(c, tok, sSel)
-					sSel.Trigger.Label("切换采图模式")
-					scopeLabelFn := func(s string) string {
-						switch s {
-						case "design_ref":
-							return "设计参考"
-						case "container_grid":
-							return "孔板网格采图"
-						default:
-							return "步骤证据"
-						}
-					}
-					sSel.Trigger.Children(func() {
-						ui.Text(c, scopeLabelFn(scopeVal)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-					})
-					sSel.Popup(func(panel ui.Element) {
-						for _, opt := range []string{"step_evidence", "container_grid", "design_ref"} {
-							opt := opt
-							sSel.Item(opt).Children(func() {
-								ui.Text(c, scopeLabelFn(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-							})
-						}
-					})
-					if sSel.Trigger.Changed() && scopeVal != scope {
-						patch := map[string]any{"scope": scopeVal}
-						if scopeVal == "container_grid" {
-							ref := containerRef
-							if ref == "" && len(docPlates) > 0 {
-								ref = docPlates[0].ID
-							}
-							if ref != "" {
-								patch["container_ref"] = ref
-							}
-							if slots < 1 {
-								patch["slots_per_cell"] = 1
-							}
-						}
-						v.emitAnyModuleEdit(moduleID, patch)
-					}
+	var docPlates []*Plate
+	if editableDesign && v.UnifiedLive && v.Doc != nil {
+		for _, fm := range flattenAllDocModules(v.Doc) {
+			if fm.Kind == "plate" && fm.Plate != nil {
+				docPlates = append(docPlates, fm.Plate)
+			}
+		}
+	}
 
-					if scope == "container_grid" {
-						if len(docPlates) > 0 {
-							refVal := containerRef
-							pSel := components.Select(c.Key("att-plate:"+moduleID), &refVal)
-							StyleSelectQuiet(c, tok, pSel)
-							pSel.Trigger.Label("选择关联孔板")
-							plateNameFor := func(id string) string {
-								for _, dp := range docPlates {
-									if dp.ID == id {
-										return firstNonEmpty(dp.Title, fmt.Sprintf("%d 孔板", dp.Format))
-									}
-								}
-								return "选择孔板"
-							}
-							pSel.Trigger.Children(func() {
-								ui.Text(c, plateNameFor(refVal)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-							})
-							pSel.Popup(func(panel ui.Element) {
-								for _, dp := range docPlates {
-									dp := dp
-									pSel.Item(dp.ID).Children(func() {
-										ui.Text(c, firstNonEmpty(dp.Title, fmt.Sprintf("%d 孔板", dp.Format))).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-									})
-								}
-							})
-							if pSel.Trigger.Changed() && refVal != containerRef {
-								v.emitAnyModuleEdit(moduleID, map[string]any{"container_ref": refVal})
-							}
+	renderConfigControls := func() {
+		ui.Text(c, "采图模式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+		scopeVal := firstNonEmpty(scope, "step_evidence")
+		sSel := components.Select(c.Key("att-scope:"+moduleID), &scopeVal)
+		StyleSelectQuiet(c, tok, sSel)
+		sSel.Trigger.Label("切换采图模式")
+		scopeLabelFn := func(s string) string {
+			switch s {
+			case "design_ref":
+				return "设计参考"
+			case "container_grid":
+				return "孔板网格采图"
+			default:
+				return "步骤证据"
+			}
+		}
+		sSel.Trigger.Children(func() {
+			ui.Text(c, scopeLabelFn(scopeVal)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+		})
+		sSel.Popup(func(panel ui.Element) {
+			for _, opt := range []string{"step_evidence", "container_grid", "design_ref"} {
+				opt := opt
+				sSel.Item(opt).Children(func() {
+					ui.Text(c, scopeLabelFn(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+				})
+			}
+		})
+		if sSel.Trigger.Changed() && scopeVal != scope {
+			patch := map[string]any{"scope": scopeVal}
+			if scopeVal == "container_grid" {
+				ref := containerRef
+				if ref == "" && len(docPlates) > 0 {
+					ref = docPlates[0].ID
+				}
+				if ref != "" {
+					patch["container_ref"] = ref
+				}
+				if slots < 1 {
+					patch["slots_per_cell"] = 1
+				}
+			}
+			v.emitAnyModuleEdit(moduleID, patch)
+		}
+
+		if scope == "container_grid" {
+			if len(docPlates) > 0 {
+				refVal := containerRef
+				pSel := components.Select(c.Key("att-plate:"+moduleID), &refVal)
+				StyleSelectQuiet(c, tok, pSel)
+				pSel.Trigger.Label("选择关联孔板")
+				plateNameFor := func(id string) string {
+					for _, dp := range docPlates {
+						if dp.ID == id {
+							return firstNonEmpty(dp.Title, fmt.Sprintf("%d 孔板", dp.Format))
 						}
-						ui.Text(c, "每孔视野").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-						sBuf := v.ensureWidgetDraft("att:"+moduleID+":slots", strconv.Itoa(slots))
-						ui.Box(c).Width(float32(tok.Spacing48)*1.0).Children(func() {
-							tb := BorderlessTextInput(c, tok, sBuf, float32(tok.TextMeta), true, "槽位数").FontFeatures("tnum")
-							if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*sBuf) != strconv.Itoa(slots)) {
-								if sn, err := strconv.Atoi(strings.TrimSpace(*sBuf)); err == nil && sn >= 1 {
-									v.emitAnyModuleEdit(moduleID, map[string]any{"slots_per_cell": sn})
-								}
-							}
+					}
+					return "选择孔板"
+				}
+				pSel.Trigger.Children(func() {
+					ui.Text(c, plateNameFor(refVal)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+				})
+				pSel.Popup(func(panel ui.Element) {
+					for _, dp := range docPlates {
+						dp := dp
+						pSel.Item(dp.ID).Children(func() {
+							ui.Text(c, firstNonEmpty(dp.Title, fmt.Sprintf("%d 孔板", dp.Format))).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
 						})
 					}
 				})
+				if pSel.Trigger.Changed() && refVal != containerRef {
+					v.emitAnyModuleEdit(moduleID, map[string]any{"container_ref": refVal})
+				}
+			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "每孔视野").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				sBuf := v.ensureWidgetDraft("att:"+moduleID+":slots", strconv.Itoa(slots))
+				ui.Box(c).Width(float32(tok.Spacing48)*1.0).Children(func() {
+					tb := BorderlessTextInput(c, tok, sBuf, float32(tok.TextMeta), true, "槽位数").FontFeatures("tnum")
+					if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*sBuf) != strconv.Itoa(slots)) {
+						if sn, err := strconv.Atoi(strings.TrimSpace(*sBuf)); err == nil && sn >= 1 {
+							v.emitAnyModuleEdit(moduleID, map[string]any{"slots_per_cell": sn})
+						}
+					}
+				})
+			})
+		}
+	}
+
+	renderBody := func() {
+		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+			if editableDesign && !v.UnifiedLive {
+				ui.Row(c.Key("att-cfg:"+moduleID)).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(renderConfigControls)
 			}
 			if mediaHint != "" {
 				ui.Text(c, "采集要求："+mediaHint).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
@@ -2578,16 +2583,18 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 					}
 				})
 			} else {
-				emptyMsg := "Run 执行时可关联原始培养皿照片、显微视野或文件"
+				emptyMsg := "暂无关联图片或文件"
 				if scope == "container_grid" {
-					emptyMsg = fmt.Sprintf("计划每孔 %d 个采图槽位 · 当前 0 个已关联", slots)
+					emptyMsg = fmt.Sprintf("计划每孔 %d 视野 · 当前 0 个已关联", slots)
 				}
 				ui.Text(c, emptyMsg).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 			}
 			if !v.ReadOnly && v.UnifiedLive && v.OnPickAttachmentFile != nil {
-				if components.Button(c, "+ 挂载图片 / 原始文件", components.ButtonSecondary).Clicked() {
-					v.OnPickAttachmentFile(v.StepID, moduleID)
-				}
+				ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
+					if components.Button(c, "+ 挂载图片 / 文件", components.ButtonGhost).Clicked() {
+						v.OnPickAttachmentFile(v.StepID, moduleID)
+					}
+				})
 			} else if v.Mode == ModeRun && !v.ReadOnly && v.OnLinkAsset != nil {
 				if iconButton(c, lucide.Paperclip(), "关联图片 / 文件", components.ButtonSecondary).Clicked() {
 					v.OnLinkAsset(v.StepID, moduleID, "")
@@ -2645,7 +2652,26 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 				})
 			}
 		})
-	})
+	}
+	if v.UnifiedLive {
+		renderUnifiedModuleShell(v, c, lucide.Paperclip(), moduleID, title, scopeBadge, editableDesign, func() {
+			if editableDesign {
+				cfgOpen := v.ensureWidgetBool("att_cfg_open:" + moduleID)
+				cfgBtn := components.IconButton(c, lucide.SlidersHorizontal(), "采图设置", components.IconButtonCompact)
+				components.Tooltip(c, cfgBtn, "采图模式与关联设置")
+				if cfgBtn.Clicked() {
+					*cfgOpen = !*cfgOpen
+				}
+				components.Popover(c.Key("att-cfg-pop:"+moduleID), cfgBtn, cfgOpen, func(panel ui.Element) {
+					panel.Width(float32(tok.Spacing48)*5.4).Padding(float32(tok.Spacing12)).
+						Background(tok.Surface).Border(1, tok.Border).Radius(float32(tok.PanelRadius)).
+						Gap(float32(tok.Spacing8)).Children(renderConfigControls)
+				})
+			}
+		}, renderBody)
+		return
+	}
+	moduleCardFrame(v, c, lucide.Paperclip(), title, scopeBadge, nil, renderBody)
 }
 
 func (v *View) renderSubflow(c *ui.Context, data map[string]any) {

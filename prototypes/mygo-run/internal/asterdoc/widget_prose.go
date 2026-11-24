@@ -31,6 +31,9 @@ func renderUnifiedModuleShell(
 	tok := theme.GetTokens(c.Theme())
 	isTopLevel := v == nil || v.StepID == ""
 	box := ui.Column(c).FillWidth().Gap(float32(tok.Spacing12))
+	if v != nil && v.inPairedRow && isTopLevel {
+		box.FillHeight()
+	}
 	if isTopLevel {
 		box.Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
 			Radius(float32(tok.PanelRadius)).
@@ -39,22 +42,28 @@ func renderUnifiedModuleShell(
 	} else {
 		box.Padding(float32(tok.Spacing4), 0)
 	}
+	cardHover := box.Hovered() || (v != nil && v.MobileCompact)
 	box.Children(func() {
 		if title != "" || metaText != "" || icon != nil || extraRight != nil {
 			ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					if icon != nil {
-						ui.Icon(c, icon).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+						ui.Icon(c, icon).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent).Shrink(0)
 					}
 					if title != "" {
-						renderInlineEditableTitle(v, c, moduleID, title, editableTitle)
+						ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Children(func() {
+							renderInlineEditableTitleHover(v, c, moduleID, title, editableTitle, cardHover)
+						})
+					} else {
+						ui.Spacer(c)
 					}
-					ui.Spacer(c)
 					if metaText != "" {
-						ui.Text(c, metaText).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+						ui.Text(c, metaText).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Shrink(0)
 					}
 					if extraRight != nil {
-						extraRight()
+						ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+							extraRight()
+						})
 					}
 				})
 				ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.55))
@@ -106,10 +115,14 @@ func moduleCardFrame(v *View, c *ui.Context, icon *ui.SVG, title, badgeText stri
 }
 
 func renderInlineEditableTitle(v *View, c *ui.Context, moduleID, title string, editable bool) {
+	renderInlineEditableTitleHover(v, c, moduleID, title, editable, true)
+}
+
+func renderInlineEditableTitleHover(v *View, c *ui.Context, moduleID, title string, editable bool, revealPencil bool) {
 	tok := theme.GetTokens(c.Theme())
 	displayTitle := FormatDisplayText(title)
 	if v == nil || !editable || moduleID == "" {
-		ui.Text(c, displayTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+		ui.Text(c, displayTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 		return
 	}
 	if v.titleEditID == moduleID {
@@ -141,20 +154,32 @@ func renderInlineEditableTitle(v *View, c *ui.Context, moduleID, title string, e
 		})
 		return
 	}
-	ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-		ui.Text(c, displayTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-		editBtn := components.IconButton(c, lucide.Pencil(), "修改标题", components.IconButtonCompact)
-		components.Tooltip(c, editBtn, "自定义模块标题")
-		if editBtn.Clicked() {
-			v.titleEditID = moduleID
-			v.titleEditBuf = title
+	ui.Row(c).MinWidth(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+		ui.Text(c, displayTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+			SingleLine().Ellipsis("…").Shrink(1).MinWidth(0)
+		penOp := float32(0)
+		if revealPencil {
+			penOp = 1
 		}
+		penWrap := ui.Box(c.Key("title-pen:" + moduleID)).Shrink(0)
+		penWrap.Opacity(penWrap.AnimateTo("tpop", penOp, theme.MotionMicroFade)).Children(func() {
+			editBtn := components.IconButton(c, lucide.Pencil(), "修改标题", components.IconButtonCompact)
+			components.Tooltip(c, editBtn, "自定义模块标题")
+			if editBtn.Clicked() {
+				v.titleEditID = moduleID
+				v.titleEditBuf = title
+			}
+		})
 	})
 }
 
 // renderCompactEditableTitle renders a subordinate inline title at tok.TextData size
 // (for compact rows like timers so they never compete visually with H2/Step headings).
 func renderCompactEditableTitle(v *View, c *ui.Context, moduleID, title string, editable bool) {
+	renderCompactEditableTitleHover(v, c, moduleID, title, editable, false)
+}
+
+func renderCompactEditableTitleHover(v *View, c *ui.Context, moduleID, title string, editable bool, revealPencil bool) {
 	tok := theme.GetTokens(c.Theme())
 	displayTitle := FormatDisplayText(title)
 	if v == nil || !editable || moduleID == "" {
@@ -190,15 +215,23 @@ func renderCompactEditableTitle(v *View, c *ui.Context, moduleID, title string, 
 		})
 		return
 	}
-	row := ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+	row := ui.Row(c).MinWidth(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4))
 	row.Children(func() {
-		ui.Text(c, displayTitle).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-		editBtn := components.IconButton(c, lucide.Pencil(), "修改标题", components.IconButtonCompact)
-		components.Tooltip(c, editBtn, "修改名称")
-		if editBtn.Clicked() {
-			v.titleEditID = moduleID
-			v.titleEditBuf = title
+		ui.Text(c, displayTitle).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
+			SingleLine().Ellipsis("…").Shrink(1).MinWidth(0)
+		penOp := float32(0)
+		if revealPencil || row.Hovered() || v.MobileCompact {
+			penOp = 1
 		}
+		penWrap := ui.Box(c.Key("ctitle-pen:" + moduleID)).Shrink(0)
+		penWrap.Opacity(penWrap.AnimateTo("ctpop", penOp, theme.MotionMicroFade)).Children(func() {
+			editBtn := components.IconButton(c, lucide.Pencil(), "修改标题", components.IconButtonCompact)
+			components.Tooltip(c, editBtn, "修改名称")
+			if editBtn.Clicked() {
+				v.titleEditID = moduleID
+				v.titleEditBuf = title
+			}
+		})
 	})
 }
 

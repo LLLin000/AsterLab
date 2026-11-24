@@ -825,6 +825,9 @@ func (d *Document) UpdateModule(id string, properties map[string]any) (string, e
 		return "", err
 	}
 	body := string(raw)
+	if hasLayoutFullDirective(module.Body) && !hasLayoutFullDirective(body) {
+		body = layoutFullDirectiveLine + "\n" + body
+	}
 	source := d.Source[:module.Start] + body + d.Source[module.End:]
 	next, err := Parse(source)
 	if err != nil {
