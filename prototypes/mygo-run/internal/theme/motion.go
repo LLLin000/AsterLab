@@ -47,6 +47,14 @@ var (
 		Ease:     ui.EaseOut,
 		Oklab:    true,
 	}
+	baseMotionInstant = ui.Animation{
+		Duration: 60 * time.Millisecond,
+		Ease:     ui.EaseOut,
+		Oklab:    true,
+	}
+
+	// MotionInstant drives high-frequency hover/tab color snaps per the frequency-tiered motion law.
+	MotionInstant = baseMotionInstant
 
 	// MotionMicro drives immediate tactile press states (:active 0.97) and hover reveals.
 	MotionMicro = baseMotionMicro
@@ -68,12 +76,14 @@ var (
 
 func applyMotionPreference(reduce bool) {
 	if reduce {
+		MotionInstant = instantMotion
 		MotionMicro = instantMotion
 		MotionSnappy = instantMotion
 		MotionFluid = instantMotion
 		MotionHero = instantMotion
 		return
 	}
+	MotionInstant = baseMotionInstant
 	MotionMicro = baseMotionMicro
 	MotionSnappy = baseMotionSnappy
 	MotionFluid = baseMotionFluid

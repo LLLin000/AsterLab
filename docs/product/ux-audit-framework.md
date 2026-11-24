@@ -45,6 +45,13 @@
 3. **Color & State Transition（`AnimateColor` / `MotionMicroFade`）**：分段按钮选中底色、检查项完成态文字柔化、滑块开关保持连续渐变。
 4. **Numeric Continuity（`NumericRoll` + `tnum`）**：计算结果、计时读数与孔位统计启用 `FontFeatures("tnum")` 与数字滚动/无抖动更新。
 5. **Surface Entrance（`DialogSurfaceTransition` / `FloatingBarTransition`）**：弹窗与浮动操作栏轻量缩放渐入，不生硬闪现。
+6. **Surface Ladder & Hairline Contrast（表面阶梯与极细边线）**：顶层科学模块卡片使用 `BorderSubtle` 静息描边并在悬停时切换至 `Border`，配合 `ShadowAmbient` 建立柔和景深；多窗格分屏顶部以 `2px Accent` 条与 `Canvas`/`Surface` 底色区分活跃焦点与静默非活跃窗格。
+7. **Frequency-Tiered Motion Law（按操作频率分级的动效时长）**：高频切换（分屏标签、右键菜单项悬停、`[ 编辑 | 实验 ]` 切换、卡片边框）使用 `MotionInstant`（`60ms`）；中频反馈使用 `MotionSnappy`；显隐微渐变使用 `MotionMicroFade`。
+
+---
+
+## 滚动帧预算（Scroll Frame Budget）
+- **单帧零重复全量解析**：滚动与光标重绘路径必须走 `internal/asterdoc` 的 `RenderFrameCache`（`CachedSplitDocumentSegments`、`CachedParseStepTree`、`CachedParseDocumentOutline`、`CachedResolveRelations`、`CachedSVGMetrics`、`CachedLatexAST`）与 `FastSourceHash` 零分配摘要，禁止每帧重算 AST 或拷贝整篇文档字符串作为缓存键。
 
 ### L5 真实环境边界层（IME / DPI / Windows Permissions）
 1. **门禁脚本**：`python scripts/sdk/check.py` 与 `python scripts/ci/check_ui_hygiene.py` 必须全绿通过。

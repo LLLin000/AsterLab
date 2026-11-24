@@ -8,6 +8,7 @@ import (
 
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/uikit/labsticker"
+	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -255,7 +256,7 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 	})
 
 	if vesselMode == "plate96" {
-		renderSerialDilutionPlate96Strip(c, tok, moduleID, df, steps, diluentLabel, transferLabel, hasStock, stockVal, stockUnit)
+		v.renderSerialDilutionPlate96Strip(c, tok, moduleID, df, steps, diluentLabel, transferLabel, hasStock, stockVal, stockUnit)
 		return
 	}
 
@@ -288,72 +289,156 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 	})
 }
 
-func renderSerialDilutionPlate96Strip(c *ui.Context, tok theme.Tokens, moduleID string, df float64, steps int, diluentLabel, transferLabel string, hasStock bool, stockVal float64, stockUnit string) {
-	ui.ScrollHorizontal(c.Key("serial-p96-" + moduleID)).FillWidth().Children(func() {
-		ui.Row(c).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-			Radius(float32(tok.ControlRadius)).Background(tok.Elevated.Alpha(0.65)).Border(1, tok.Border.Alpha(0.65)).
-			AlignItems(ui.End).Gap(0).Children(func() {
-			renderWellCol := func(colLabel, dilExpr string, colIndex int, isStock bool, concVal float64) {
-				ui.Column(c).Width(float32(tok.Spacing48)*1.32).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-					if isStock {
-						ui.Text(c, "原液列").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
-					} else {
-						renderNativeScriptRow(c, tok, dilExpr, float32(tok.TextMeta), tok.Text, false, true)
-					}
-					// 3 representative multichannel rows (A/B/C) showing progressive concentration ramp
-					rampAlpha := float32(0.88) - float32(colIndex)*0.11
-					if rampAlpha < 0.16 {
-						rampAlpha = 0.16
-					}
-					wellBg := tok.Accent.Alpha(rampAlpha)
-					wellBd := tok.Accent.Alpha(0.55)
-					ui.Column(c).Padding(float32(tok.Spacing4)).Radius(float32(tok.ControlRadius)).
-						Background(tok.Surface).Border(1, tok.Border.Alpha(0.85)).Gap(3).Children(func() {
-						for _, rowCh := range []string{"A", "B", "C"} {
-							ui.Row(c).Size(float32(tok.Spacing24), float32(tok.Spacing16)+2).
-								Radius(float32(tok.Spacing12)).Background(wellBg).Border(1, wellBd).
-								Center().Children(func() {
-								ui.Text(c, rowCh).FontSize(float32(tok.TextMeta)-2).Bold().TextColor(tok.AccentText).SingleLine()
-							})
-						}
-					})
-					ui.Text(c, colLabel).FontSize(float32(tok.TextMeta)-1).Bold().TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
-					if !isStock {
-						ui.Text(c, diluentLabel).FontSize(float32(tok.TextMeta)-2).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
-					}
-					if concVal > 0 {
-						renderSciNumber(c, tok, concVal, "", float32(tok.TextMeta)-1, tok.Accent, true)
-					}
-				})
-			}
+func toUnicodeSuperExp(exp int) string {
+	supDigits := map[rune]rune{
+		'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+		'5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '+': '⁺',
+	}
+	raw := strconv.Itoa(exp)
+	var b strings.Builder
+	for _, r := range raw {
+		if sr, ok := supDigits[r]; ok {
+			b.WriteRune(sr)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
-			if hasStock {
-				renderWellCol("Col 1", "Stock", 0, true, stockVal)
-				renderTransferArrowBridge(c, tok, transferLabel)
-			}
-			factor := 1.0
-			for i := 1; i <= steps; i++ {
-				factor *= df
-				var dilExpr string
-				if math.Abs(df-10) < 1e-6 {
-					dilExpr = fmt.Sprintf("10^{-%d}", i)
-				} else {
-					dilExpr = "1:" + formatSciCompactText(factor)
+func (v *View) serialDilutionGroupRows() []string {
+	var names []string
+	if v != nil && v.Doc != nil {
+		for _, m := range v.Doc.Modules {
+			if m.Kind == "group_table" {
+				if rows, ok := m.Data["rows"].([]any); ok {
+					for _, raw := range rows {
+						if rowMap, ok := raw.(map[string]any); ok {
+							nm := firstNonEmpty(textValue(rowMap, "name"), textValue(rowMap, "label"), textValue(rowMap, "id"))
+							if nm != "" {
+								names = append(names, nm)
+							}
+						}
+						if len(names) >= 8 {
+							break
+						}
+					}
 				}
-				concVal := 0.0
-				if hasStock {
-					concVal = stockVal / factor
-				}
-				colNum := i
-				if hasStock {
-					colNum = i + 1
-				}
-				renderWellCol(fmt.Sprintf("Col %d", colNum), dilExpr, i, false, concVal)
-				if i < steps {
-					renderTransferArrowBridge(c, tok, transferLabel)
+				if len(names) > 0 {
+					break
 				}
 			}
+		}
+	}
+	if len(names) == 0 {
+		return []string{"复孔 A", "复孔 B", "复孔 C"}
+	}
+	return names
+}
+
+func (v *View) renderSerialDilutionPlate96Strip(c *ui.Context, tok theme.Tokens, moduleID string, df float64, steps int, diluentLabel, transferLabel string, hasStock bool, stockVal float64, stockUnit string) {
+	rowGroups := v.serialDilutionGroupRows()
+	activeRows := len(rowGroups)
+	if activeRows < 1 {
+		activeRows = 3
+	}
+	if activeRows > 8 {
+		activeRows = 8
+	}
+
+	type colMeta struct {
+		colIdx int
+		header string
+		alpha  float32
+	}
+	var colSpecs []colMeta
+	colIdx := 0
+	if hasStock {
+		colSpecs = append(colSpecs, colMeta{colIdx: colIdx, header: "原液", alpha: 0.92})
+		colIdx++
+	}
+	factor := 1.0
+	totalCols := steps
+	if hasStock {
+		totalCols++
+	}
+	if totalCols > 12 {
+		totalCols = 12
+	}
+	for i := 1; i <= steps && colIdx < 12; i++ {
+		factor *= df
+		hdr := "1:" + formatSciCompactText(factor)
+		if math.Abs(df-10) < 1e-6 {
+			hdr = "10" + toUnicodeSuperExp(-i)
+		}
+		alpha := float32(0.85)
+		if totalCols > 1 {
+			alpha = 0.94 - (float32(colIdx)/float32(totalCols-1))*0.74
+		}
+		if alpha < 0.20 {
+			alpha = 0.20
+		}
+		colSpecs = append(colSpecs, colMeta{colIdx: colIdx, header: hdr, alpha: alpha})
+		colIdx++
+	}
+
+	wells := make(map[string]plateui.WellState, len(colSpecs)*activeRows)
+	groupIndex := make(map[string]int, activeRows)
+	groupLabels := make(map[string]string, activeRows)
+	dilCols := make([]plateui.DilutionColumn, 0, len(colSpecs))
+
+	for r, gName := range rowGroups {
+		if r >= activeRows {
+			break
+		}
+		groupIndex[gName] = r
+		groupLabels[gName] = gName
+	}
+
+	for _, cs := range colSpecs {
+		dilCols = append(dilCols, plateui.DilutionColumn{
+			ColIndex: cs.colIdx,
+			Header:   cs.header,
+			Alpha:    cs.alpha,
 		})
+		for r := 0; r < activeRows; r++ {
+			id := fmt.Sprintf("%c%d", 'A'+r, cs.colIdx+1)
+			gName := rowGroups[r]
+			wells[id] = plateui.WellState{
+				Group:     gName,
+				Replicate: r + 1,
+				Factors:   map[string]string{"稀释度": cs.header},
+			}
+		}
+	}
+
+	ui.Column(c.Key("serial-p96-" + moduleID)).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+		ui.ScrollHorizontal(c).FillWidth().Children(func() {
+			ui.Column(c).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+				Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated.Alpha(0.55)).
+				Border(1, tok.BorderSubtle).Children(func() {
+				plateui.View(c, plateui.Props{
+					Wells:       wells,
+					Rows:        8,
+					Cols:        12,
+					Topology:    "plate",
+					ColorBy:     "group",
+					GroupIndex:  groupIndex,
+					GroupLabels: groupLabels,
+					HideFooter:  true,
+					Zoom:        1.0,
+					DilutionFlow: &plateui.DilutionOverlay{
+						Columns:       dilCols,
+						TransferLabel: transferLabel,
+						ActiveRows:    activeRows,
+					},
+				})
+			})
+		})
+		ui.Text(c, fmt.Sprintf("8×12 标准 96 孔板 · 第 1–%d 列逐级移液 · 每孔预加 %s 稀释液 · 逐列移取 %s · 复孔行 A–%c",
+			len(colSpecs), diluentLabel, transferLabel, rune('A'+activeRows-1))).
+			FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 	})
 }
 

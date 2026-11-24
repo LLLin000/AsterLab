@@ -807,7 +807,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 						if grip.Dragging() {
 							blockRow.Opacity(0.45)
 						}
-						components.ContextMenu(c, grip, func(m *components.Menu) {
+						asterContextMenu(c, grip, func(m *asterMenu) {
 							v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bs, bm, editable)
 						})
 					}
@@ -816,7 +816,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 					})
 				})
 
-				components.ContextMenu(c, blockRow, func(m *components.Menu) {
+				asterContextMenu(c, blockRow, func(m *asterMenu) {
 					v.buildBlockContextMenu(c, m, step.ID, bid, idx, len(blocks), bk, bs, bm, editable)
 				})
 				if editable {
@@ -903,7 +903,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 	})
 }
 
-func (v *View) buildBlockContextMenu(c *ui.Context, m *components.Menu, stepID, blockID string, idx, total int, kind string, schema int, bm map[string]any, editable bool) {
+func (v *View) buildBlockContextMenu(c *ui.Context, m *asterMenu, stepID, blockID string, idx, total int, kind string, schema int, bm map[string]any, editable bool) {
 	if editable {
 		if m.Item("剪切").Shortcut("Ctrl+X").Chosen() {
 			sharedBlockClipboard = cloneAnyMap(bm)

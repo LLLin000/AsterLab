@@ -65,9 +65,9 @@ func (v *View) RenderFloatingToolbar(c *ui.Context, locked bool) {
 	dark := t != nil && t.Dark
 
 	bgCol := tok.Surface
-	borderCol := tok.Border
+	borderCol := tok.BorderSubtle
 	if dark {
-		borderCol = tok.BorderStrong
+		borderCol = tok.Border
 	}
 
 	bar := ui.Row(c.Key("doc-floating-toolbar")).
@@ -77,12 +77,13 @@ func (v *View) RenderFloatingToolbar(c *ui.Context, locked bool) {
 		Radius(float32(tok.PanelRadius)).
 		Background(bgCol).
 		Border(1, borderCol).
-		Shadow(0, float32(tok.Spacing4), float32(tok.Spacing16), 0, tok.Text.Alpha(0.10))
+		Shadow(0, 2, float32(tok.Spacing8), 0, tok.ShadowAmbient)
 
 	bar.Children(func() {
 		toolBtn := func(key string, icon *ui.SVG, tip string, accent bool, onClick func()) {
 			btn := components.IconButton(c.Key("ftb-"+key), icon, tip, components.IconButtonCompact)
 			btn.KeepFocus()
+			theme.ApplyTactilePress(btn)
 			if locked {
 				btn.Disabled(true).Opacity(0.45)
 				components.Tooltip(c, btn, "实验模式已锁定排版，切换编辑模式可修改")

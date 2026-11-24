@@ -698,3 +698,215 @@ func TestFB113233AndSettingsVisualAudit(t *testing.T) {
 		st.Frame()
 	})
 }
+
+func TestStage1And2HighCraftVisualAudit(t *testing.T) {
+	outDir := os.Getenv("ASTERLAB_HIGHCRAFT_OUT")
+	if outDir == "" {
+		outDir = `C:\Users\Lin\.gemini\antigravity-cli\brain\16e71d44-0152-40cd-8151-d8a1d2df13bb\scratch\highcraft_visual\r1`
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir highcraft out: %v", err)
+	}
+
+	// 1. UI-01 Context Menu Dismiss: right-click inside component card -> open -> left-click inside SAME card -> must dismiss!
+	ctxSrc := "---\ntitle: UI-01 右键菜单点击组件内部关闭回归\n---\n\n" +
+		"```asterlab\nkind: param_table\nid: pt-ctx\nschema: 1\ntitle: 培养基配方参数\nrows:\n" +
+		"  - key: serum\n    label: 胎牛血清 (FBS)\n    value: 10\n    unit: \"%\"\n" +
+		"  - key: pen_strep\n    label: 青链霉素双抗\n    value: 1\n    unit: \"%\"\n" +
+		"  - key: glucose\n    label: 高糖 DMEM 基底\n    value: 4.5\n    unit: g/L\n" +
+		"  - key: co2\n    label: 孵育二氧化碳浓度\n    value: 5\n    unit: \"%\"\n```\n"
+	ctxDoc, err := asterdoc.Parse(ctxSrc)
+	if err != nil {
+		t.Fatalf("parse ctxSrc: %v", err)
+	}
+	ctxView := &asterdoc.View{
+		Doc: ctxDoc, Mode: asterdoc.ModeDesign, UnifiedLive: true,
+		Allowed: map[string]bool{asterdoc.PermDocumentEdit: true},
+	}
+	renderVisualPNGSteps(t, outDir, "hc_01a_ctx_open.png", 920, 480, false, func(c *ui.Context) {
+		tok := theme.GetTokens(c.Theme())
+		ui.Column(c).Fill().Padding(float32(tok.Spacing16)).Children(func() {
+			ui.Column(c).FillWidth().MaxWidth(780).Children(func() {
+				ctxView.Render(c)
+			})
+		})
+	}, func(st *ui.Tester) {
+		st.Frame()
+		hdrRect, ok := st.Find("培养基配方参数")
+		if !ok {
+			t.Fatalf("expected card title inside component card, texts=%v", st.Texts())
+		}
+		st.RightClickAt(hdrRect.X+8, hdrRect.Y+hdrRect.H/2)
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("复制为 SVG") {
+			t.Fatalf("expected context menu item '复制为 SVG' to be open after right-click, texts=%v menu=%v", st.Texts(), st.Menu())
+		}
+	})
+
+	renderVisualPNGSteps(t, outDir, "hc_01b_ctx_dismissed_inside.png", 920, 480, false, func(c *ui.Context) {
+		tok := theme.GetTokens(c.Theme())
+		ui.Column(c).Fill().Padding(float32(tok.Spacing16)).Children(func() {
+			ui.Column(c).FillWidth().MaxWidth(780).Children(func() {
+				ctxView.Render(c)
+			})
+		})
+	}, func(st *ui.Tester) {
+		st.Frame()
+		hdrRect, okHdr := st.Find("培养基配方参数")
+		if !okHdr {
+			t.Fatalf("expected card title inside component card, texts=%v", st.Texts())
+		}
+		metaRect, okMeta := st.Find("4 项")
+		if !okMeta {
+			t.Fatalf("expected '4 项' inside same component card, texts=%v", st.Texts())
+		}
+		// Right-click left side of card inside component
+		st.RightClickAt(hdrRect.X+8, hdrRect.Y+hdrRect.H/2)
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("复制为 SVG") {
+			t.Fatalf("expected context menu open before inside-card click, texts=%v menu=%v", st.Texts(), st.Menu())
+		}
+		// Left-click "4 项" on the far right INSIDE the same component card (strictly outside menu panel)
+		st.ClickAt(metaRect.X+metaRect.W/2, metaRect.Y+metaRect.H/2)
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+		if st.HasText("复制为 SVG") {
+			t.Fatalf("UI-01 regression: clicking inside same component card failed to dismiss context menu!")
+		}
+	})
+
+	// 2. UI-02 Real 8x12 96-well Serial Dilution Plate (Light & Dark)
+	sdSrc := "---\ntitle: UI-02 96 孔板排枪梯度稀释视觉审计\n---\n\n" +
+		"```asterlab\nkind: group_table\nid: gt-sd\nschema: 1\ntitle: 抑菌梯度受试组\nrows:\n" +
+		"  - id: g-a\n    name: 样品组 A\n    role: treatment\n" +
+		"  - id: g-b\n    name: 样品组 B\n    role: treatment\n" +
+		"  - id: g-c\n    name: 阳性对照\n    role: comparator\n```\n\n" +
+		"```asterlab\n# @vessel: plate96\nkind: calculator\nid: sd-96-hc\nschema: 1\ntitle: 96 孔板 10 倍连续梯度稀释\n" +
+		"mode: serial_dilution\nstock:\n  value: 1000000\n  unit: CFU/mL\n" +
+		"dilution_factor: 10\nsteps_count: 7\n" +
+		"volume_per_unit:\n  value: 200\n  unit: uL\n```\n"
+	renderAuditDoc(t, outDir, "hc_02a_sd96_light.png", sdSrc, 940, 780, false, 860)
+	renderAuditDoc(t, outDir, "hc_02b_sd96_dark.png", sdSrc, 940, 780, true, 860)
+
+	// 3. UI-03 Independent 90mm Agar Plates Matrix (12 dishes) vs Single 4-Quadrant Petri Dish
+	cfuMatrixSrc := "---\ntitle: UI-03 独立平皿矩阵 vs 四分区单皿\n---\n\n" +
+		"```asterlab\nkind: group_table\nid: gt-cfu\nschema: 1\ntitle: 涂板实验组\nrows:\n" +
+		"  - id: g-pbs\n    name: PBS\n    role: control\n" +
+		"  - id: g-van\n    name: Van\n    role: comparator\n" +
+		"  - id: g-vl3\n    name: VL3\n    role: treatment\n```\n\n" +
+		"```asterlab\nkind: plate\nid: dish-matrix-12\nschema: 1\ntitle: 12 块独立 CFU 涂布琼脂平板\nformat: 12\ntopology: dish\nrows: 3\ncolumns: 4\n" +
+		"groups:\n" +
+		"  g-pbs: [A1, A2, A3, A4]\n" +
+		"  g-van: [B1, B2, B3, B4]\n" +
+		"  g-vl3: [C1, C2, C3, C4]\n" +
+		"layers:\n" +
+		"  稀释度: {A1: '10^-2', A2: '10^-3', A3: '10^-4', A4: '10^-5', B1: '10^-2', B2: '10^-3', B3: '10^-4', B4: '10^-5', C1: '10^-2', C2: '10^-3', C3: '10^-4', C4: '10^-5'}\n```\n"
+	renderAuditDoc(t, outDir, "hc_03a_cfu_dish_matrix_12.png", cfuMatrixSrc, 860, 700, false, 780)
+
+	quadDishSrc := "---\ntitle: 2x2 四分区单培养皿保留\n---\n\n" +
+		"```asterlab\nkind: group_table\nid: gt-quad\nschema: 1\nrows:\n" +
+		"  - id: q1\n    name: C(PBS)\n    role: control\n" +
+		"  - id: q2\n    name: L3(Lys)\n    role: treatment\n" +
+		"  - id: q3\n    name: V3(Van)\n    role: treatment\n" +
+		"  - id: q4\n    name: VL3\n    role: comparator\n```\n\n" +
+		"```asterlab\nkind: plate\nid: dish-quad-4\nschema: 1\ntitle: 单培养皿四分区抑菌圈测试\nformat: 4\ntopology: dish\nrows: 2\ncolumns: 2\n" +
+		"groups:\n  q1: [A1]\n  q2: [A2]\n  q3: [B1]\n  q4: [B2]\n```\n"
+	renderAuditDoc(t, outDir, "hc_03b_quad_dish_4.png", quadDishSrc, 760, 520, false, 720)
+
+	// 4 & 5. Docked Toolbar (scrolled doc at 1365x872) & Split Pane Active Indicator (Light & Dark)
+	root := filepath.Join(t.TempDir(), "hc_vault")
+	v, err := vault.Open(root)
+	if err != nil {
+		t.Fatalf("vault.Open: %v", err)
+	}
+	_ = v.SeedTemplates(defaultTemplateSeeds())
+	longDocSrc := "---\ntitle: HAMA 水凝胶双靶向抗菌及 CFU 涂板实验\ndate: 2026-11-24\nstatus: in_progress\n---\n\n" +
+		"## 1. 实验设计概要\n\n" +
+		"本实验评估 GelMA/HAMA 复合水凝胶在体外对耐甲氧西林金黄色葡萄球菌的抑菌活性与剂量依赖性梯度稀释结果。\n\n" +
+		"#@ STEP 1 · 材料预备与分组\n" +
+		"- [x] 超净台紫外灭菌 30 min\n" +
+		"- [ ] 配制 10 mg/mL HAMA 储备液并 0.22 um 滤膜除菌\n\n" +
+		"```asterlab\nkind: group_table\nid: gt-main\nschema: 1\ntitle: 实验分组矩阵\nrows:\n" +
+		"  - id: g-ctrl\n    name: PBS 空白对照\n    role: control\n    condition: 无菌 PBS\n    independent_n: 3\n" +
+		"  - id: g-tx\n    name: HAMA-Van 复合组\n    role: treatment\n    condition: 20 ug/mL\n    independent_n: 3\n```\n\n" +
+		"#@ STEP 2 · 96 孔板倍比梯度稀释\n" +
+		"- [ ] 每孔预加 180 uL TSB 肉汤液体培养基\n" +
+		"- [ ] 第 1 列加入原液，排枪逐列混匀转移 20 uL\n\n" +
+		"```asterlab\n# @vessel: plate96\nkind: calculator\nid: sd-main\nschema: 1\ntitle: 96 孔板逐级稀释流程\n" +
+		"mode: serial_dilution\ndilution_factor: 10\nsteps_count: 6\nvolume_per_unit:\n  value: 200\n  unit: uL\n```\n\n" +
+		"#@ STEP 3 · 涂板培养与菌落计数（滚动后不得被工具栏遮挡）\n" +
+		"- [ ] 各梯度吸取 100 uL 均匀涂布至 TSA 琼脂平板\n" +
+		"- [ ] 37°C 倒置培养 18 h 后拍照计数\n\n" +
+		"```asterlab\nkind: plate\nid: pl-scrolled\nschema: 1\ntitle: 涂板菌落分布\nformat: 12\ntopology: dish\nrows: 3\ncolumns: 4\ngroups:\n  g-ctrl: [A1, A2, A3, A4]\n  g-tx: [B1, B2, B3, B4]\n```\n"
+	expMain, err := v.CreateExperiment("", "HAMA 水凝胶双靶向抗菌实验", "2026-11-24", longDocSrc)
+	if err != nil {
+		t.Fatalf("CreateExperiment main: %v", err)
+	}
+	expAlt, err := v.CreateExperiment("", "CCK-8 细胞毒性复核", "2026-11-24", ctxSrc)
+	if err != nil {
+		t.Fatalf("CreateExperiment alt: %v", err)
+	}
+	ds := vault.NewDocStore(v)
+	sh := &shell.Shell{
+		TodayDate:        "2026-11-24",
+		SelectedDate:     "2026-11-24",
+		SelectedTreePath: expMain.RelPath,
+		AppVersion:       "0.1.10-devdebug-r11",
+		LiquidGlass:      true,
+	}
+	a := &app{
+		shell:      sh,
+		vault:      v,
+		vaultIndex: vault.NewVaultIndex(v),
+		docStore:   ds,
+	}
+	sh.RenderTabContent = func(c *ui.Context, pane *shell.PaneNode, tab shell.WorkspaceTab) {
+		a.renderVaultTabContent(c, pane, tab)
+	}
+	sh.EnsureTabs()
+	sh.OpenFileInPane(sh.ActivePaneID, expMain.RelPath, expMain.Title, shell.ModeEdit, true)
+
+	renderVisualPNGSteps(t, outDir, "hc_04a_docked_toolbar_scrolled_light.png", 1365, 872, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		for i := 0; i < 6; i++ {
+			st.Wheel(750, 480, 0, -140)
+			st.Frame()
+		}
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+	})
+	renderVisualPNGSteps(t, outDir, "hc_04b_docked_toolbar_scrolled_dark.png", 1365, 872, true, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		for i := 0; i < 6; i++ {
+			st.Wheel(750, 480, 0, -140)
+			st.Frame()
+		}
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+	})
+
+	// 5. Split Pane Active Accent Top Bar (Light & Dark)
+	sh.SplitPaneWithTab(sh.ActivePaneID, shell.WorkspaceTab{
+		Kind: shell.TabFile, Title: expAlt.Title, FilePath: expAlt.RelPath, Mode: shell.ModeEdit,
+	}, "right")
+	renderVisualPNGSteps(t, outDir, "hc_05a_split_pane_light.png", 1365, 872, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+	})
+	renderVisualPNGSteps(t, outDir, "hc_05b_split_pane_dark.png", 1365, 872, true, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+	})
+}

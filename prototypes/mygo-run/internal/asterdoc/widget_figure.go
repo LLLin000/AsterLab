@@ -481,7 +481,7 @@ func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, ti
 	}
 
 	svgEdOpen := v.ensureWidgetBool("fig_svg_dlg:" + moduleID)
-	components.ContextMenu(c, card, func(m *components.Menu) {
+	asterContextMenu(c, card, func(m *asterMenu) {
 		if editableDesign && v.OnPickFigureFile != nil {
 			if m.Item("从本地选择图片…").Chosen() {
 				v.OnPickFigureFile(v.StepID, moduleID)
@@ -615,7 +615,7 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 		zoom = 1
 	}
 	if svgRaw != "" {
-		vbX, vbY, vbW, vbH, labels := parseSVGMetricsAndLabels(svgRaw)
+		vbX, vbY, vbW, vbH, labels := CachedSVGMetrics(svgRaw)
 		allLabels := append(labels, annotations...)
 		drawH := maxH * zoom
 		drawW := float32(vbW/vbH) * drawH

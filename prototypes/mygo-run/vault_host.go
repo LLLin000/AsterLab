@@ -695,7 +695,7 @@ func (a *app) syncActiveDocCompanionState(relPath, source string, doc *asterdoc.
 	if a.shell == nil || a.vault == nil || relPath == "" {
 		return
 	}
-	cacheKey := fmt.Sprintf("%s|%d|%s", relPath, len(source), source)
+	cacheKey := fmt.Sprintf("%s|%d|%x", relPath, len(source), asterdoc.FastSourceHash(relPath, source))
 	if a.lastCompanionKey == cacheKey && a.shell.CurrentDocRelPath == relPath {
 		return
 	}

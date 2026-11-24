@@ -1212,7 +1212,7 @@ func (v *View) renderUnifiedDataTable(c *ui.Context, tok theme.Tokens, dark bool
 				}
 			})
 			if !v.ReadOnly {
-				components.ContextMenu(c, rowElem, func(m *components.Menu) {
+				asterContextMenu(c, rowElem, func(m *asterMenu) {
 					if m.Item("在上方插入行").Chosen() {
 						next := cloneRowsSlice(authoredRows)
 						if rIdx <= len(next) {

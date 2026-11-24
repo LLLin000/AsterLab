@@ -271,13 +271,13 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 			}
 		}
 	}
-	segs := SplitDocumentSegmentsExcludingLine(src, v.Doc, activeEditOffset)
+	segs := CachedSplitDocumentSegments(src, v.Doc, activeEditOffset)
 	stepExcludeOff := -1
 	if !activeEditInStepHdr {
 		stepExcludeOff = activeEditOffset
 	}
-	stepTree := ParseStepTreeExcludingLine(src, v.Doc, stepExcludeOff)
-	resolved := ResolveRelations(v.Doc)
+	stepTree := CachedParseStepTree(src, v.Doc, stepExcludeOff)
+	resolved := CachedResolveRelations(v.Doc)
 	resolvedBySpan := make(map[int]ResolvedRelation, len(resolved))
 	for _, rr := range resolved {
 		if rr.SourceKind == "inline" {
@@ -551,7 +551,7 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 						})
 					}
 					if editableDesign && m.Kind != "workflow" {
-						components.ContextMenu(c, modWrap, func(menu *components.Menu) {
+						asterContextMenu(c, modWrap, func(menu *asterMenu) {
 							if menu.Item("上移模块").Chosen() && v.OnChange != nil {
 								if next, err := MoveTopLevelModuleInSource(v.Doc.Source, m.ID, -1); err == nil {
 									v.OnChange(next)
@@ -983,7 +983,7 @@ func (v *View) renderRegisteredModule(c *ui.Context, registry *Registry, kind st
 		wrap.Children(func() {
 			fn(v, c, data)
 		})
-		components.ContextMenu(c, wrap, func(m *components.Menu) {
+		asterContextMenu(c, wrap, func(m *asterMenu) {
 			v.buildComponentShareMenu(c, m, kind, schema, data)
 		})
 		return
@@ -1251,7 +1251,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 					ColorBy: colorBy, FactorKey: factorKey, GroupIndex: idxMap, GroupLabels: lblMap, ExcludedIDs: excludedSet, Zoom: v.PlateZoom, State: st,
 				})
 			})
-			components.ContextMenu(c, plateGridBox, func(m *components.Menu) {
+			asterContextMenu(c, plateGridBox, func(m *asterMenu) {
 				if editable {
 					if m.Item("清空选区标注").Disabled(len(selected) == 0).Chosen() {
 						_ = v.assign(selected, "")

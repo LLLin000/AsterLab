@@ -247,12 +247,12 @@ func TestFloatingToolbarSlashSingleEscAndInlineEmbedTyping(t *testing.T) {
 	}
 	tt.Frame()
 	tt.Frame()
-	if !tt.HasText("插入科研组件与步骤") {
+	if !tt.HasText("↑↓ · Enter") {
 		t.Fatalf("expected Slash menu to stay open after clicking floating toolbar '+'")
 	}
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
-	if tt.HasText("插入科研组件与步骤") {
+	if tt.HasText("↑↓ · Enter") {
 		t.Fatalf("expected 1 single Esc to close Slash menu immediately")
 	}
 	ld, err := a.docStore.Open(relPath)
