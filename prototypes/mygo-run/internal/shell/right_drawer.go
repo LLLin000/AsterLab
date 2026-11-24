@@ -314,6 +314,10 @@ func (s *Shell) renderDrawerPantrySummary(c *ui.Context, tok theme.Tokens) {
 		})
 	})
 
+	if s.RenderPantryInspector != nil {
+		s.RenderPantryInspector(c, tok)
+	}
+
 	if len(lowItems) == 0 && len(expItems) == 0 {
 		ui.Row(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
 			Background(tok.Elevated).Border(1, tok.Border).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {

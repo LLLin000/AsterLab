@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/uikit/labsticker"
 	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 
@@ -227,8 +228,25 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 					})
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Text(c, "终体积 (µL)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48)*1.5)
-						ui.Box(c).Grow(1).Children(func() {
-							components.TextBox(c, vDraft, components.TextBoxOptions{}).Placeholder("200")
+						ui.Row(c).Grow(1).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+								components.TextBox(c, vDraft, components.TextBoxOptions{}).Placeholder("200")
+							})
+							scrubVol := finalVolUL
+							if parsed, err := strconv.ParseFloat(strings.TrimSpace(*vDraft), 64); err == nil && parsed > 0 {
+								scrubVol = parsed
+							}
+							sc := kit.ScrubNumber(c, "sd-vol-scrub:"+moduleID, tok, &scrubVol, kit.ScrubOptions{
+								Label: "拖拽微调", Unit: "µL", Min: 10, Max: 50000, Step: 10, Decimals: 0, Width: float32(tok.Spacing48) * 3.0,
+							})
+							if sc.Changed {
+								*vDraft = formatNumber(scrubVol)
+							}
+							if sc.Committed {
+								v.emitModuleDirectiveEdit(moduleID, "", "", map[string]any{
+									"volume_per_unit": map[string]any{"value": scrubVol, "unit": "uL"},
+								})
+							}
 						})
 					})
 					ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).Children(func() {

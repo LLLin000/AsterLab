@@ -437,6 +437,13 @@ func (s *Shell) buildPaletteEntries() []paletteEntry {
 				s.WelcomeOpen = true
 			},
 		},
+		paletteEntry{
+			kind: paletteAction, key: "cmd-ui-storybook", title: "打开全站 UI 组件画廊 (Storybook)",
+			subtitle: "浏览全站 Token、动效、Shell、AsterDoc 模块、科学载体与动物贴纸",
+			runAct: func() {
+				s.ComponentGalleryOpen = true
+			},
+		},
 	)
 	for _, b := range actions {
 		if q != "" && !strings.Contains(strings.ToLower(b.title+" "+b.subtitle), q) {

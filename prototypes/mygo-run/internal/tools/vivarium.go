@@ -243,17 +243,69 @@ func (w *Workspace) SaveVivariumDraft() bool {
 	return true
 }
 
-func (w *Workspace) deleteVivariumCage(id string) {
+// OpenVivariumPeek opens the right-hand Linear/Twenty-style SidePeek live inspector
+// for cg without losing context of the rack or table view.
+func (w *Workspace) OpenVivariumPeek(cg VivariumCage) {
 	w.EnsureVivariumLoaded()
-	next := w.VivariumCages[:0]
-	for _, c := range w.VivariumCages {
-		if c.ID != id {
-			next = append(next, c)
+	w.vivariumPeekID = cg.ID
+	w.VivariumPeekOpen = true
+}
+
+func (w *Workspace) findVivariumCageIdx(id string) int {
+	for i := range w.VivariumCages {
+		if w.VivariumCages[i].ID == id {
+			return i
 		}
 	}
+	return -1
+}
+
+func (w *Workspace) deleteVivariumCage(id string) {
+	w.EnsureVivariumLoaded()
+	idx := w.findVivariumCageIdx(id)
+	if idx < 0 {
+		w.VivariumDialogOpen = false
+		w.VivariumPeekOpen = false
+		return
+	}
+	deleted := w.VivariumCages[idx]
+	cp := deleted
+	if len(deleted.WeightHistory) > 0 {
+		cp.WeightHistory = append([]WeightEntry(nil), deleted.WeightHistory...)
+	}
+	w.lastDeletedCage = &cp
+	w.lastDeletedCageIdx = idx
+
+	next := make([]VivariumCage, 0, len(w.VivariumCages)-1)
+	next = append(next, w.VivariumCages[:idx]...)
+	next = append(next, w.VivariumCages[idx+1:]...)
 	w.VivariumCages = next
 	_ = w.saveVivarium()
 	w.VivariumDialogOpen = false
+	if w.vivariumPeekID == id {
+		w.VivariumPeekOpen = false
+		w.vivariumPeekID = ""
+	}
+	if w.Callbacks.OnToast != nil {
+		restoreCage := cp
+		restoreIdx := idx
+		w.Callbacks.OnToast(kit.Toast{
+			Tone:      kit.ToastInfo,
+			Message:   fmt.Sprintf("已移除笼卡 %s（%s）", cp.CageCode, cp.Strain),
+			UndoLabel: "撤销",
+			OnUndo: func() {
+				w.EnsureVivariumLoaded()
+				if w.findVivariumCageIdx(restoreCage.ID) >= 0 {
+					return
+				}
+				if restoreIdx < 0 || restoreIdx > len(w.VivariumCages) {
+					restoreIdx = len(w.VivariumCages)
+				}
+				w.VivariumCages = append(w.VivariumCages[:restoreIdx], append([]VivariumCage{restoreCage}, w.VivariumCages[restoreIdx:]...)...)
+				_ = w.saveVivarium()
+			},
+		})
+	}
 }
 
 func vivariumMatchesFilter(c VivariumCage, query, filter string) bool {
@@ -287,8 +339,63 @@ func vivariumMatchesFilter(c VivariumCage, query, filter string) bool {
 	return strings.Contains(hay, q)
 }
 
+func vivariumMatchesFilterState(c VivariumCage, fs kit.FilterBarState) bool {
+	if !vivariumMatchesFilter(c, fs.Query, "") {
+		return false
+	}
+	if len(fs.Active) == 0 {
+		return true
+	}
+	// Group active pills by FieldKey: OR within the same field, AND across fields.
+	byField := map[string][]string{}
+	for _, af := range fs.Active {
+		byField[af.FieldKey] = append(byField[af.FieldKey], af.Value)
+	}
+	for fk, vals := range byField {
+		matched := false
+		for _, v := range vals {
+			switch fk {
+			case "grade":
+				g := c.FacilityGrade
+				if g == "" {
+					g = "SPF"
+				}
+				if g == v {
+					matched = true
+				}
+			case "status":
+				if c.Status == v {
+					matched = true
+				}
+			case "species":
+				if string(c.Species) == v {
+					matched = true
+				}
+			case "density":
+				warn := VivariumDensityWarning(c)
+				if (v == "alert" && warn != "") || (v == "ok" && warn == "") {
+					matched = true
+				}
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func vivariumNextStatus(cur string) string {
+	order := []string{"active", "in_study", "breeding", "quarantine", "archived"}
+	for i, s := range order {
+		if s == cur {
+			return order[(i+1)%len(order)]
+		}
+	}
+	return "in_study"
+}
+
 func renderVivariumView(c *ui.Context, w *Workspace, tok theme.Tokens) {
-	t := c.Theme()
 	w.EnsureVivariumLoaded()
 
 	// Aggregate stats
@@ -316,7 +423,7 @@ func renderVivariumView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 		}
 	}
 
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 		kit.SectionHeader(c, tok, lucide.PawPrint(), "动物房 · 笼卡与实验动物台账",
 			fmt.Sprintf("%d 笼 · %d 只/尾", totalCages, totalAnimals), func() {
 				components.Tabs(c, &w.vivariumViewTab, components.TabsSegmented, "笼架视图", "动物台账")
@@ -326,41 +433,57 @@ func renderVivariumView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 			})
 	})
 
-	// Search & compliance filter bar
-	ui.Row(c).FillWidth().Wrap().Padding(t.Space(2), t.Space(3)).
-		Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.Border).
-		AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-		ui.Box(c).Width(float32(tok.Spacing48)*5.4).Children(func() {
-			components.TextBox(c, &w.vivariumSearch, components.TextBoxOptions{
-				LeadingIcon: lucide.Search(),
-			}).Placeholder("搜笼号、品系、基因型、伦理批件或实验…")
-		})
-		ui.Box(c).Width(1).Height(t.Space(4)).Background(tok.BorderStrong)
-		filters := []struct {
-			key, label string
-		}{
-			{"all", fmt.Sprintf("全部 (%d)", totalCages)},
-			{"SPF", fmt.Sprintf("SPF 屏障 (%d)", spfCages)},
-			{"in_study", fmt.Sprintf("实验中 (%d)", inStudyCages)},
-			{"quarantine_breeding", fmt.Sprintf("检疫/繁育 (%d)", qbCages)},
-			{"density_alert", fmt.Sprintf("密度预警 (%d)", densityAlerts)},
-		}
-		for _, f := range filters {
-			f := f
-			active := w.vivariumFilter == f.key || (w.vivariumFilter == "" && f.key == "all")
-			variant := components.ButtonGhost
-			if active {
-				variant = components.ButtonToolbar
-			}
-			if components.Button(c, f.label, variant).FontFeatures("tnum").Clicked() {
-				w.vivariumFilter = f.key
-			}
-		}
-	})
+	// Twenty/Plane-style composable FilterBar with Saved Quick Views + multi-condition pills
+	speciesOpts := make([]kit.FilterOption, 0, len(labsticker.AllAnimals()))
+	for _, sp := range labsticker.AllAnimals() {
+		speciesOpts = append(speciesOpts, kit.FilterOption{Value: string(sp.ID), Label: sp.Title})
+	}
+	fields := []kit.FilterField{
+		{
+			Key: "grade", Label: "设施等级",
+			Options: []kit.FilterOption{
+				{Value: "SPF", Label: "SPF 屏障"},
+				{Value: "conventional", Label: "普通级"},
+				{Value: "isolator", Label: "无菌隔离器"},
+				{Value: "aquatic", Label: "水生循环系统"},
+			},
+		},
+		{
+			Key: "status", Label: "动物状态",
+			Options: []kit.FilterOption{
+				{Value: "in_study", Label: "实验中"},
+				{Value: "active", Label: "正常在养"},
+				{Value: "breeding", Label: "繁育配对"},
+				{Value: "quarantine", Label: "检疫隔离"},
+				{Value: "archived", Label: "已结题/归档"},
+			},
+		},
+		{Key: "species", Label: "物种", Options: speciesOpts},
+		{
+			Key: "density", Label: "密度合规",
+			Options: []kit.FilterOption{
+				{Value: "alert", Label: "超密度预警"},
+				{Value: "ok", Label: "密度正常"},
+			},
+		},
+	}
+	savedViews := []kit.SavedFilterView{
+		{ID: "all", Label: fmt.Sprintf("全部 (%d)", totalCages)},
+		{ID: "SPF", Label: fmt.Sprintf("SPF 屏障 (%d)", spfCages), Filters: []kit.ActiveFilter{{FieldKey: "grade", Value: "SPF"}}},
+		{ID: "in_study", Label: fmt.Sprintf("实验中 (%d)", inStudyCages), Filters: []kit.ActiveFilter{{FieldKey: "status", Value: "in_study"}}},
+		{ID: "qb", Label: fmt.Sprintf("检疫/繁育 (%d)", qbCages), Filters: []kit.ActiveFilter{{FieldKey: "status", Value: "quarantine"}, {FieldKey: "status", Value: "breeding"}}},
+		{ID: "density", Label: fmt.Sprintf("密度预警 (%d)", densityAlerts), Filters: []kit.ActiveFilter{{FieldKey: "density", Value: "alert"}}},
+	}
+	// Keep legacy vivariumSearch synced on first non-empty assignment
+	if w.vivariumSearch != "" && w.vivariumFilterState.Query == "" {
+		w.vivariumFilterState.Query = w.vivariumSearch
+	}
+	kit.FilterBar(c, "vivarium-filter-bar", tok, &w.vivariumFilterState, fields, savedViews, "搜笼号、品系、基因型、伦理批件或实验…")
+	w.vivariumSearch = w.vivariumFilterState.Query
 
 	var filtered []VivariumCage
 	for _, cg := range w.VivariumCages {
-		if vivariumMatchesFilter(cg, w.vivariumSearch, w.vivariumFilter) {
+		if vivariumMatchesFilterState(cg, w.vivariumFilterState) {
 			filtered = append(filtered, cg)
 		}
 	}
@@ -368,7 +491,7 @@ func renderVivariumView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 	if len(filtered) == 0 {
 		msg := "点击右上角「+ 新建笼卡」登记小鼠、大鼠、兔、比格犬等实验动物笼位与 IACUC 批件。"
 		if totalCages > 0 {
-			msg = "当前搜索或筛选条件下无匹配笼卡，可切换「全部」查看。"
+			msg = "当前组合筛选条件下无匹配笼卡，可清空筛选条件查看全部。"
 		}
 		kit.EmptyState(c, tok, lucide.PawPrint(), "动物房暂无匹配笼卡", msg, "+ 新建笼卡", func() {
 			w.OpenNewVivariumDialog()
@@ -415,6 +538,16 @@ func renderVivariumView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 			})
 		})
 	}
+}
+
+// RenderVivariumPreviewCards renders read-only Vivarium cage cards (for Storybook / edge demos).
+func RenderVivariumPreviewCards(c *ui.Context, tok theme.Tokens, cages []VivariumCage, now time.Time) {
+	ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing12)).Children(func() {
+		for _, cg := range cages {
+			cg := cg
+			renderVivariumCageCard(c, nil, tok, cg, now)
+		}
+	})
 }
 
 func renderVivariumCageCard(c *ui.Context, w *Workspace, tok theme.Tokens, cg VivariumCage, now time.Time) {
@@ -504,23 +637,29 @@ func renderVivariumCageCard(c *ui.Context, w *Workspace, tok theme.Tokens, cg Vi
 		})
 	})
 
-	if card.Clicked() {
-		w.OpenEditVivariumDialog(cg)
+	if w != nil && card.Clicked() {
+		w.OpenVivariumPeek(cg)
 	}
-	kit.ContextMenu(c, card, func(m *kit.Menu) {
-		if m.Item("编辑笼卡 / 记录体重").Chosen() {
-			w.OpenEditVivariumDialog(cg)
-		}
-		if m.Item("标记为实验中").Chosen() {
-			cg.Status = "in_study"
-			w.OpenEditVivariumDialog(cg)
-			w.SaveVivariumDraft()
-		}
-		m.Separator()
-		if m.Item("删除笼卡").Chosen() {
-			w.deleteVivariumCage(cg.ID)
-		}
-	})
+	if w != nil {
+		kit.ContextMenu(c, card, func(m *kit.Menu) {
+			if m.Item("右侧滑出快速检查 (SidePeek)").Chosen() {
+				w.OpenVivariumPeek(cg)
+			}
+			if m.Item("完整弹窗编辑档案…").Chosen() {
+				w.OpenEditVivariumDialog(cg)
+			}
+			if m.Item("标记为实验中").Chosen() {
+				if idx := w.findVivariumCageIdx(cg.ID); idx >= 0 {
+					w.VivariumCages[idx].Status = "in_study"
+					_ = w.saveVivarium()
+				}
+			}
+			m.Separator()
+			if m.Item("删除笼卡").Chosen() {
+				w.deleteVivariumCage(cg.ID)
+			}
+		})
+	}
 }
 
 func renderVivariumTableView(c *ui.Context, w *Workspace, tok theme.Tokens, filtered []VivariumCage) {
@@ -528,13 +667,13 @@ func renderVivariumTableView(c *ui.Context, w *Workspace, tok theme.Tokens, filt
 	cols := []ui.TableColumn{
 		{ID: "code", Title: "笼号", Width: 88},
 		{ID: "strain", Title: "物种与品系", MinWidth: 160},
-		{ID: "geno", Title: "基因型", Width: 108},
-		{ID: "census", Title: "存栏 (♂/♀)", Width: 104, Align: ui.End},
+		{ID: "geno", Title: "基因型", Width: 112},
+		{ID: "census", Title: "存栏", Width: 92, Align: ui.End},
 		{ID: "age", Title: "周龄", Width: 84, Align: ui.End},
-		{ID: "weight", Title: "体重 (g)", Width: 84, Align: ui.End},
+		{ID: "weight", Title: "体重 (可拖)", Width: 114, Align: ui.End},
 		{ID: "loc", Title: "设施/位置", Width: 140},
 		{ID: "iacuc", Title: "伦理批件", Width: 128},
-		{ID: "status", Title: "状态", Width: 96},
+		{ID: "status", Title: "状态 (点切)", Width: 112},
 	}
 	components.Table(c, nil, cols, func() {
 		for _, cg := range filtered {
@@ -545,7 +684,7 @@ func renderVivariumTableView(c *ui.Context, w *Workspace, tok theme.Tokens, filt
 				case 0:
 					btn := ui.ButtonBase(c.Key("viv-row-" + cg.ID)).Label("查看笼卡 " + cg.CageCode).
 						FillWidth().Justify(ui.Start).OnClick(func() {
-						w.OpenEditVivariumDialog(cg)
+						w.OpenVivariumPeek(cg)
 					})
 					btn.Children(func() {
 						ui.Text(c, cg.CageCode).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
@@ -563,11 +702,14 @@ func renderVivariumTableView(c *ui.Context, w *Workspace, tok theme.Tokens, filt
 				case 4:
 					ui.Text(c, VivariumAgeLabel(cg.DOB, now)).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine()
 				case 5:
-					wt := "—"
-					if cg.WeightG > 0 {
-						wt = fmt.Sprintf("%.1f", cg.WeightG)
+					if idx := w.findVivariumCageIdx(cg.ID); idx >= 0 {
+						sc := kit.ScrubNumber(c, "viv-tbl-wt-"+cg.ID, tok, &w.VivariumCages[idx].WeightG, kit.ScrubOptions{
+							Unit: "g", Min: 0.1, Max: 25000, Step: 0.2, Decimals: 1, Width: 96,
+						})
+						if sc.Committed {
+							_ = w.saveVivarium()
+						}
 					}
-					ui.Text(c, wt).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.Text).SingleLine()
 				case 6:
 					loc := firstNonEmptyStr(strings.TrimSpace(cg.Room+" "+cg.RackPos), vivariumGradeLabel(cg.FacilityGrade))
 					ui.Text(c, loc).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
@@ -575,8 +717,209 @@ func renderVivariumTableView(c *ui.Context, w *Workspace, tok theme.Tokens, filt
 					ui.Text(c, firstNonEmptyStr(cg.IACUCNo, "—")).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
 				case 8:
 					txt, tone := vivariumStatusInfo(cg.Status)
-					components.Badge(c, txt, components.BadgeOptions{Tone: tone})
+					stBtn := ui.ButtonBase(c.Key("viv-tbl-st-" + cg.ID)).Label("切换状态 " + txt)
+					stBtn.Children(func() {
+						components.Badge(c, txt, components.BadgeOptions{Tone: tone})
+					})
+					if stBtn.Clicked() {
+						if idx := w.findVivariumCageIdx(cg.ID); idx >= 0 {
+							w.VivariumCages[idx].Status = vivariumNextStatus(w.VivariumCages[idx].Status)
+							_ = w.saveVivarium()
+						}
+					}
 				}
+			})
+		}
+	})
+}
+
+func renderVivariumSidePeek(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	if !w.VivariumPeekOpen || w.vivariumPeekID == "" {
+		return
+	}
+	idx := w.findVivariumCageIdx(w.vivariumPeekID)
+	if idx < 0 {
+		w.VivariumPeekOpen = false
+		return
+	}
+	cg := &w.VivariumCages[idx]
+	spec, _ := labsticker.LookupAnimal(cg.Species)
+	statusTxt, statusTone := vivariumStatusInfo(cg.Status)
+	densityWarn := VivariumDensityWarning(*cg)
+
+	kit.SidePeek(c, "vivarium-sidepeek", tok, &w.VivariumPeekOpen, kit.SidePeekOptions{
+		Title:    fmt.Sprintf("%s · %s", cg.CageCode, cg.Strain),
+		Subtitle: fmt.Sprintf("%s · %s · %s", spec.Title, vivariumGradeLabel(cg.FacilityGrade), firstNonEmptyStr(cg.Room, "未分配房间")),
+		Icon:     lucide.PawPrint(),
+		HeaderActions: func() {
+			components.Badge(c, statusTxt, components.BadgeOptions{Tone: statusTone})
+			if components.Button(c, "完整弹窗编辑", components.ButtonSecondary).Clicked() {
+				snap := *cg
+				w.VivariumPeekOpen = false
+				w.OpenEditVivariumDialog(snap)
+			}
+		},
+		Footer: func() {
+			ui.Box(c.Key("viv-peek-del-" + cg.ID)).Children(func() {
+				h := components.HoldToConfirm(c, &w.vivariumHoldDelReady, "长按删除笼卡", components.HoldToConfirmOptions{
+					ConfirmedLabel: "已删除",
+					Duration:       800 * time.Millisecond,
+					Tone:           components.HoldDanger,
+				})
+				if h.Changed() {
+					w.vivariumHoldDelReady = false
+					w.deleteVivariumCage(cg.ID)
+				}
+			})
+			ui.Spacer(c)
+			if components.Button(c, "关闭", components.ButtonSecondary).Clicked() {
+				w.VivariumPeekOpen = false
+			}
+			if components.Button(c, "保存更新", components.ButtonPrimary).Clicked() {
+				cg.UpdatedAt = time.Now().Format("2006-01-02 15:04")
+				_ = w.saveVivarium()
+				if w.Callbacks.OnToast != nil {
+					w.Callbacks.OnToast(kit.Toast{Tone: kit.ToastSuccess, Message: fmt.Sprintf("笼卡 %s 已保存", cg.CageCode)})
+				}
+			}
+		},
+	}, func() {
+		// Species sticker + IACUC & Density summary
+		ui.Row(c).FillWidth().Padding(float32(tok.Spacing12)).
+			Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle).
+			AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+			labsticker.RenderAnimalSticker(c, cg.Species, 46)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
+				ui.Text(c, fmt.Sprintf("IACUC：%s · 基因型：%s", firstNonEmptyStr(cg.IACUCNo, "待补"), firstNonEmptyStr(cg.Genotype, "WT"))).
+					FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+				ui.Text(c, fmt.Sprintf("位置：%s %s · 周龄：%s · 标号：%s",
+					firstNonEmptyStr(cg.Room, "—"), cg.RackPos, VivariumAgeLabel(cg.DOB, time.Now()), firstNonEmptyStr(cg.AnimalIDs, "—"))).
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+			})
+		})
+
+		if densityWarn != "" {
+			kit.InlineBanner(c, tok, lucide.TriangleAlert(), kit.BannerDanger,
+				"GB 14925-2023 合规预警："+densityWarn+"（当前合计 "+fmt.Sprintf("%d 只/尾", cg.TotalAnimals())+"）", "", nil)
+		}
+
+		// Live ScrubNumber Census & Body Weight Controls
+		ui.Text(c, "实时存栏与称重微调（左右拖拽数值 · 松手自动存盘）").
+			FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+		maleF := float64(cg.MaleCount)
+		femaleF := float64(cg.FemaleCount)
+		ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
+			if sc := kit.ScrubNumber(c, "peek-male-"+cg.ID, tok, &maleF, kit.ScrubOptions{
+				Label: "雄性 ♂", Unit: "只", Min: 0, Max: 99, Step: 1, Decimals: 0, Width: 138,
+			}); sc.Changed || sc.Committed {
+				cg.MaleCount = max(0, int(maleF+0.5))
+				if sc.Committed {
+					_ = w.saveVivarium()
+				}
+			}
+			if sc := kit.ScrubNumber(c, "peek-female-"+cg.ID, tok, &femaleF, kit.ScrubOptions{
+				Label: "雌性 ♀", Unit: "只", Min: 0, Max: 99, Step: 1, Decimals: 0, Width: 138,
+			}); sc.Changed || sc.Committed {
+				cg.FemaleCount = max(0, int(femaleF+0.5))
+				if sc.Committed {
+					_ = w.saveVivarium()
+				}
+			}
+			if sc := kit.ScrubNumber(c, "peek-wt-"+cg.ID, tok, &cg.WeightG, kit.ScrubOptions{
+				Label: "均重", Unit: "g", Min: 0.1, Max: 25000, Step: 0.2, Decimals: 1, Width: 150,
+			}); sc.Committed {
+				_ = w.saveVivarium()
+			}
+		})
+
+		// Quick actions: log weight today + cycle status
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			if components.Button(c, "+ 记录今日称重", components.ButtonSecondary).Clicked() && cg.WeightG > 0 {
+				cg.WeightHistory = append(cg.WeightHistory, WeightEntry{
+					Date:    time.Now().Format("2006-01-02"),
+					WeightG: cg.WeightG,
+				})
+				_ = w.saveVivarium()
+				if w.Callbacks.OnToast != nil {
+					w.Callbacks.OnToast(kit.Toast{Tone: kit.ToastSuccess, Message: fmt.Sprintf("已记录 %s 今日称重 %.1f g", cg.CageCode, cg.WeightG)})
+				}
+			}
+			if components.Button(c, "切换状态 ("+statusTxt+")", components.ButtonGhost).Clicked() {
+				cg.Status = vivariumNextStatus(cg.Status)
+				_ = w.saveVivarium()
+			}
+		})
+
+		// Weight history trace
+		if len(cg.WeightHistory) > 0 {
+			ui.Column(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle).
+				Gap(4).Children(func() {
+				ui.Text(c, fmt.Sprintf("近期体征称重记录（共 %d 条）", len(cg.WeightHistory))).
+					FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+				start := max(0, len(cg.WeightHistory)-4)
+				for i := len(cg.WeightHistory) - 1; i >= start; i-- {
+					we := cg.WeightHistory[i]
+					ui.Text(c, fmt.Sprintf("%s  ·  %.1f g", we.Date, we.WeightG)).
+						FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.Text)
+				}
+			})
+		}
+
+		// Inline experiment & welfare notes
+		ui.Column(c).FillWidth().Gap(4).Children(func() {
+			ui.Text(c, "关联实验课题").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+			components.TextBox(c, &cg.ExperimentRef, components.TextBoxOptions{}).Placeholder("关联 .asterml 实验或实验分组")
+		})
+		ui.Column(c).FillWidth().Gap(4).Children(func() {
+			ui.Text(c, "动物福利与健康观察（精神/被毛/人道终点）").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+			components.TextBox(c, &cg.HealthNotes, components.TextBoxOptions{Multiline: true}).Placeholder("每日观察记录…")
+		})
+	})
+}
+
+// RenderVivariumInspector draws a compact Rerun-style vivarium & active-cage summary inside
+// Shell's Right Companion Drawer when inspecting Pantry / Vivarium.
+func (w *Workspace) RenderVivariumInspector(c *ui.Context, tok theme.Tokens) {
+	w.EnsureVivariumLoaded()
+	totalCages := len(w.VivariumCages)
+	totalAnimals := 0
+	alertCages := 0
+	var activeCage *VivariumCage
+	for i := range w.VivariumCages {
+		cg := &w.VivariumCages[i]
+		if cg.Status != "archived" {
+			totalAnimals += cg.TotalAnimals()
+		}
+		if VivariumDensityWarning(*cg) != "" {
+			alertCages++
+		}
+		if cg.ID == w.vivariumPeekID {
+			activeCage = cg
+		}
+	}
+
+	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "动物房 · 实时合规概览").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+			ui.Spacer(c)
+			components.Badge(c, fmt.Sprintf("%d 笼 / %d 只", totalCages, totalAnimals), components.BadgeOptions{Tone: components.BadgeAccent})
+		})
+		if alertCages > 0 {
+			kit.InlineBanner(c, tok, lucide.TriangleAlert(), kit.BannerDanger,
+				fmt.Sprintf("%d 笼超出 GB 14925 推荐密度，请核查分笼。", alertCages), "", nil)
+		}
+		if activeCage != nil {
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				labsticker.RenderAnimalSticker(c, activeCage.Species, 28)
+				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+					ui.Text(c, fmt.Sprintf("%s · %s", activeCage.CageCode, activeCage.Strain)).
+						FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine()
+					ui.Text(c, fmt.Sprintf("IACUC %s · %.1f g", firstNonEmptyStr(activeCage.IACUCNo, "待补"), activeCage.WeightG)).
+						FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine()
+				})
 			})
 		}
 	})

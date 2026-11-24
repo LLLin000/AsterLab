@@ -1109,3 +1109,156 @@ func TestStage3UIKitAndVivariumVisualAudit(t *testing.T) {
 		}
 	})
 }
+
+func TestStage4StorybookAndEnginesVisualAudit(t *testing.T) {
+	outDir := os.Getenv("ASTERLAB_VISUAL_OUT")
+	if outDir == "" {
+		outDir = t.TempDir()
+	} else if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir visual out: %v", err)
+	}
+
+	root := filepath.Join(t.TempDir(), "s4_vault")
+	v, err := vault.Open(root)
+	if err != nil {
+		t.Fatalf("vault.Open: %v", err)
+	}
+	_ = v.SeedTemplates(defaultTemplateSeeds())
+	exp1, err := v.CreateExperiment("", "HAMA 水凝胶抗菌及动物体内评估", "2026-11-24", "---\ntitle: HAMA 抗菌实验\n---\n\n#@ STEP 1 · 准备\n")
+	if err != nil {
+		t.Fatalf("CreateExperiment: %v", err)
+	}
+	sh := &shell.Shell{
+		TodayDate:        "2026-11-24",
+		SelectedDate:     "2026-11-24",
+		SelectedTreePath: exp1.RelPath,
+		AppVersion:       "0.1.10-devdebug-r13",
+		LiquidGlass:      true,
+		Density:          theme.DensityDefault,
+	}
+	a := &app{
+		shell:      sh,
+		vault:      v,
+		vaultIndex: vault.NewVaultIndex(v),
+		docStore:   vault.NewDocStore(v),
+	}
+	sh.GalleryExtraSections = a.buildStorybookExtraSections()
+
+	// 1. Full Storybook: Tokens + Elevation + Motion (Light & Dark)
+	stTokens := &kit.GalleryState{ActiveSection: "tokens-motion", SampleNum: 12, ScrubVal: 22.5}
+	renderVisualPNGSteps(t, outDir, "s4_01a_storybook_tokens_light.png", 1280, 860, false, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stTokens, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+	})
+	stTokensDark := &kit.GalleryState{ActiveSection: "tokens-motion", SampleNum: 12, ScrubVal: 22.5}
+	renderVisualPNGSteps(t, outDir, "s4_01b_storybook_tokens_dark.png", 1280, 860, true, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stTokensDark, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+	})
+
+	// 2. Full Storybook: Controls + 6 UI Engines (ScrubNumber, FilterBar, ContextMenu, Toast trigger)
+	stCtrl := &kit.GalleryState{ActiveSection: "controls-kit", SampleNum: 10, ScrubVal: 24.8, SelectedIdx: 1}
+	renderVisualPNGSteps(t, outDir, "s4_02_storybook_controls_engines_light.png", 1280, 860, false, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stCtrl, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		_ = tt.Click("触发乐观撤销 Toast")
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+	})
+
+	// 3. Full Storybook: Science Carriers (Plate + Dish + Cryo Rack + Reagent Stickers + 8 Animals)
+	stSci := &kit.GalleryState{ActiveSection: "science-carriers", SampleNum: 12, ScrubVal: 20.0}
+	renderVisualPNGSteps(t, outDir, "s4_03_storybook_science_carriers_light.png", 1280, 920, false, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stSci, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+	})
+
+	// 4. Full Storybook: AsterDoc Modules + Shell Chrome (Dark)
+	stDoc := &kit.GalleryState{ActiveSection: "asterdoc-modules", SampleNum: 12}
+	renderVisualPNGSteps(t, outDir, "s4_04_storybook_asterdoc_shell_dark.png", 1280, 900, true, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stDoc, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("受试实验分组表") || !tt.HasText("关键操作参数与实测偏离") {
+			t.Fatalf("expected live asterdoc modules inside Storybook section, texts=%v", tt.Texts())
+		}
+	})
+
+	// 5 & 6. Vivarium: FilterBar + SidePeek Live Drawer (Light) & Inline Table + Undo Toast (Dark)
+	w := tools.New(tools.Callbacks{
+		OnToast: func(tst kit.Toast) { sh.PushToast(tst) },
+	})
+	w.VivariumCages = []tools.VivariumCage{
+		{
+			ID: "viv-4a", CageCode: "SPF-M101", Species: labsticker.AnimalMouseWhite,
+			Strain: "BALB/c", Genotype: "WT", MaleCount: 4, FemaleCount: 0,
+			FacilityGrade: "SPF", Room: "屏障 302", RackPos: "IVC-A1-01",
+			DOB: "2026-10-10", WeightG: 22.5, IACUCNo: "IACUC-2026-088",
+			Vendor: "维通利华", IDMethod: "耳标", AnimalIDs: "#01~#04",
+			WeightHistory: []tools.WeightEntry{{Date: "2026-11-17", WeightG: 21.8}, {Date: "2026-11-24", WeightG: 22.5}},
+			Status: "in_study", ExperimentRef: "HAMA 凝胶皮下移植瘤实验",
+			HealthNotes: "皮下移植 7 天状态稳定，进食饮水正常",
+		},
+		{
+			ID: "viv-4b", CageCode: "SPF-M204", Species: labsticker.AnimalMouseBlack,
+			Strain: "C57BL/6J", Genotype: "Rosa26-CreERT2 +/-", MaleCount: 3, FemaleCount: 4,
+			FacilityGrade: "SPF", Room: "屏障 302", RackPos: "IVC-B2-04",
+			DOB: "2026-09-25", WeightG: 24.8, IACUCNo: "IACUC-2026-091",
+			Status: "breeding", HealthNotes: "超密度复核",
+		},
+		{
+			ID: "viv-4c", CageCode: "AQ-ZF08", Species: labsticker.AnimalZebrafish,
+			Strain: "AB 品系斑马鱼", Genotype: "Tg(fli1a:EGFP)", MaleCount: 6, FemaleCount: 6,
+			FacilityGrade: "aquatic", Room: "水生房 A", RackPos: "Tank-Z3-08",
+			DOB: "2026-07-01", WeightG: 0.6, IACUCNo: "IACUC-2026-112",
+			Status: "in_study", ExperimentRef: "血管新生荧光活体观察",
+		},
+	}
+
+	renderVisualPNGSteps(t, outDir, "s4_05_vivarium_sidepeek_filterbar_light.png", 1320, 860, false, func(c *ui.Context) {
+		tools.ViewPantry(c, w)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		_ = tt.Click("动物房")
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		w.OpenVivariumPeek(w.VivariumCages[0])
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("实时存栏与称重微调") {
+			t.Fatalf("expected SidePeek live inspector open, texts=%v", tt.Texts())
+		}
+	})
+
+	w.VivariumPeekOpen = false
+	sh.PushToast(kit.Toast{
+		Tone:      kit.ToastInfo,
+		Message:   "已移除笼卡 SPF-R099（SD 大鼠）",
+		UndoLabel: "撤销",
+		OnUndo:    func() {},
+	})
+	renderVisualPNGSteps(t, outDir, "s4_06_vivarium_table_inline_toast_dark.png", 1320, 860, true, func(c *ui.Context) {
+		tok := theme.GetTokens(c.Theme())
+		tools.ViewPantry(c, w)
+		if sh.Toasts != nil {
+			sh.Toasts.Render(c, tok)
+		}
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		_ = tt.Click("动物台账")
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+	})
+}

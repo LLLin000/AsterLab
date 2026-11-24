@@ -10,6 +10,7 @@ import (
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/blocks"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/modules/runs"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -57,6 +58,7 @@ type Callbacks struct {
 	SavePlateHistory    func([]PlateHistoryEntry) error
 	SavePlateFile       func(defaultName, format string, data []byte) (string, error)
 	CreateDraft         func(Draft)
+	OnToast             func(kit.Toast)
 }
 
 // Workspace holds editable tool drafts until an explicit handoff action.
@@ -139,6 +141,11 @@ type Workspace struct {
 	vivariumEditingID    string
 	vivariumDialogErr    string
 	vivariumHoldDelReady bool
+	vivariumFilterState  kit.FilterBarState
+	VivariumPeekOpen     bool
+	vivariumPeekID       string
+	lastDeletedCage      *VivariumCage
+	lastDeletedCageIdx   int
 }
 
 func New(cb Callbacks) *Workspace {
@@ -391,6 +398,7 @@ func ViewPantry(c *ui.Context, w *Workspace) {
 	})
 	w.renderPantryDetailDialog(c)
 	w.renderPantryBoxDialog(c)
+	renderVivariumSidePeek(c, w, theme.GetTokens(c.Theme()))
 	renderVivariumDialog(c, w, theme.GetTokens(c.Theme()))
 }
 
@@ -474,6 +482,7 @@ func View(c *ui.Context, w *Workspace) {
 	if w.Active == ToolPantry {
 		w.renderPantryDetailDialog(c)
 		w.renderPantryBoxDialog(c)
+		renderVivariumSidePeek(c, w, tok)
 		renderVivariumDialog(c, w, tok)
 	}
 }
