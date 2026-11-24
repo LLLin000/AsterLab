@@ -688,7 +688,7 @@ func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 	w.EnsurePantryBoxesLoaded()
 
 	// Level 2 Drill-Down: Spatial Storage Box / Tube Rack Interior View
-	if w.activeBoxID != "" {
+	if w.pantryDomainTab == 0 && w.activeBoxID != "" {
 		if box, ok := w.FindPantryBox(w.activeBoxID); ok {
 			renderPantryBoxInteriorView(c, w, tok, box)
 			return
@@ -699,19 +699,26 @@ func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 		ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 			ui.Text(c, "储藏室").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine()
+			components.Tabs(c, &w.pantryDomainTab, components.TabsSegmented, "试剂耗材", "动物房")
 		})
-		components.Tabs(c, &w.pantryViewTab, components.TabsSegmented, "贴纸货架", "台账表格")
-		if components.Button(c, "+ 收纳盒", components.ButtonSecondary).Clicked() {
-			zone := w.pantryZoneFilter
-			if zone == "" || zone == "all" || zone == "near_expiry" {
-				zone = "-80"
+		if w.pantryDomainTab == 0 {
+			components.Tabs(c, &w.pantryViewTab, components.TabsSegmented, "贴纸货架", "台账表格")
+			if components.Button(c, "+ 收纳盒", components.ButtonSecondary).Clicked() {
+				zone := w.pantryZoneFilter
+				if zone == "" || zone == "all" || zone == "near_expiry" {
+					zone = "-80"
+				}
+				w.OpenNewBoxDialog(zone)
 			}
-			w.OpenNewBoxDialog(zone)
-		}
-		if components.Button(c, "+ 新试剂", components.ButtonPrimary).Clicked() {
-			w.OpenNewPantryDialog("")
+			if components.Button(c, "+ 新试剂", components.ButtonPrimary).Clicked() {
+				w.OpenNewPantryDialog("")
+			}
 		}
 	})
+	if w.pantryDomainTab == 1 {
+		renderVivariumView(c, w, tok)
+		return
+	}
 
 	// Count zone stats & expiring alerts
 	total := len(w.Pantry.Items)

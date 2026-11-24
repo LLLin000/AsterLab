@@ -10,6 +10,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 // RecentVaultEntry represents one remembered local Vault directory shown in the
@@ -78,7 +79,7 @@ func (s *Shell) renderVaultSwitcherFooter(c *ui.Context, tok theme.Tokens) {
 	}
 	components.Tooltip(c, rowBtn, tip)
 
-	components.ContextMenu(c, rowBtn, func(m *components.Menu) {
+	kit.ContextMenu(c, rowBtn, func(m *kit.Menu) {
 		if m.Item("切换 / 管理本地实验库…").Chosen() {
 			s.openVaultLauncher()
 		}

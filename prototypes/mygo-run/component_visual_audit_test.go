@@ -15,6 +15,9 @@ import (
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/tools"
+	"asterlab-mygo-prototype/internal/uikit/kit"
+	"asterlab-mygo-prototype/internal/uikit/labsticker"
 	"asterlab-mygo-prototype/internal/vault"
 )
 
@@ -908,5 +911,201 @@ func TestStage1And2HighCraftVisualAudit(t *testing.T) {
 		st.Frame()
 		st.Advance(220 * time.Millisecond)
 		st.Frame()
+	})
+}
+
+func TestStage3UIKitAndVivariumVisualAudit(t *testing.T) {
+	outDir := os.Getenv("ASTERLAB_VISUAL_OUT")
+	if outDir == "" {
+		outDir = t.TempDir()
+	} else if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir visual out: %v", err)
+	}
+
+	// 1. UI Kit Component Gallery (Light & Dark)
+	galleryLight := &kit.GalleryState{SampleNum: 12, SelectedIdx: 1}
+	renderVisualPNGSteps(t, outDir, "s3_01a_kit_gallery_light.png", 1120, 860, false, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, galleryLight)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(180 * time.Millisecond)
+		st.Frame()
+	})
+	galleryDark := &kit.GalleryState{SampleNum: 12, SelectedIdx: 1}
+	renderVisualPNGSteps(t, outDir, "s3_01b_kit_gallery_dark.png", 1120, 860, true, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, galleryDark)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(180 * time.Millisecond)
+		st.Frame()
+	})
+
+	// 2. Pantry -> Vivarium Cage Rack (Light & Dark) + Edit Dialog (Light)
+	w := tools.New(tools.Callbacks{})
+	w.VivariumCages = []tools.VivariumCage{
+		{
+			ID:            "viv-a1",
+			CageCode:      "SPF-M101",
+			Species:       labsticker.AnimalMouseWhite,
+			Strain:        "BALB/c",
+			Genotype:      "WT",
+			MaleCount:     4,
+			FemaleCount:   0,
+			FacilityGrade: "SPF",
+			Room:          "屏障 302",
+			RackPos:       "IVC-A1-01",
+			DOB:           "2026-10-10",
+			WeightG:       22.5,
+			IACUCNo:       "IACUC-2026-088",
+			Vendor:        "维通利华",
+			CertNo:        "SCXK-2026-0011",
+			IDMethod:      "耳标",
+			AnimalIDs:     "#01~#04",
+			Status:        "in_study",
+			ExperimentRef: "HAMA 凝胶皮下移植瘤实验",
+			HealthNotes:   "体温饮水正常，皮下移植 7 天状态稳定",
+		},
+		{
+			ID:            "viv-a2",
+			CageCode:      "SPF-M204",
+			Species:       labsticker.AnimalMouseBlack,
+			Strain:        "C57BL/6J",
+			Genotype:      "Rosa26-CreERT2 +/-",
+			MaleCount:     3,
+			FemaleCount:   4,
+			FacilityGrade: "SPF",
+			Room:          "屏障 302",
+			RackPos:       "IVC-B2-04",
+			DOB:           "2026-09-25",
+			WeightG:       24.8,
+			IACUCNo:       "IACUC-2026-091",
+			Vendor:        "集萃药康",
+			Status:        "breeding",
+			HealthNotes:   "含 2 只待分笼子代，触发 GB 14925 单笼密度复核提醒",
+		},
+		{
+			ID:            "viv-a3",
+			CageCode:      "SPF-R012",
+			Species:       labsticker.AnimalRat,
+			Strain:        "SD 大鼠",
+			Genotype:      "WT",
+			MaleCount:     2,
+			FemaleCount:   0,
+			FacilityGrade: "SPF",
+			Room:          "大鼠屏障 201",
+			RackPos:       "Rack-R1-02",
+			DOB:           "2026-08-20",
+			WeightG:       265.0,
+			IACUCNo:       "IACUC-2026-104",
+			Vendor:        "斯贝福",
+			Status:        "active",
+			ExperimentRef: "骨缺损水凝胶修复",
+			HealthNotes:   "毛色洁白顺滑，精神活跃",
+		},
+		{
+			ID:            "viv-a4",
+			CageCode:      "AQ-ZF08",
+			Species:       labsticker.AnimalZebrafish,
+			Strain:        "AB 品系斑马鱼",
+			Genotype:      "Tg(fli1a:EGFP)",
+			MaleCount:     6,
+			FemaleCount:   6,
+			FacilityGrade: "aquatic",
+			Room:          "水生房 A",
+			RackPos:       "Tank-Z3-08",
+			DOB:           "2026-07-01",
+			WeightG:       0.6,
+			IACUCNo:       "IACUC-2026-112",
+			Status:        "in_study",
+			ExperimentRef: "血管新生荧光活体观察",
+		},
+	}
+
+	renderVisualPNGSteps(t, outDir, "s3_02a_vivarium_rack_light.png", 1280, 860, false, func(c *ui.Context) {
+		tools.ViewPantry(c, w)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Click("动物房")
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("SPF-M101") {
+			t.Fatalf("expected vivarium cage SPF-M101 after clicking 动物房 tab, texts=%v", st.Texts())
+		}
+	})
+
+	renderVisualPNGSteps(t, outDir, "s3_02b_vivarium_rack_dark.png", 1280, 860, true, func(c *ui.Context) {
+		tools.ViewPantry(c, w)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+	})
+
+	// 3. Vivarium IACUC + ARRIVE 2.0 + GB 14925-2023 Form Dialog
+	w.OpenEditVivariumDialog(w.VivariumCages[0])
+	renderVisualPNGSteps(t, outDir, "s3_03_vivarium_dialog_light.png", 1120, 840, false, func(c *ui.Context) {
+		tools.ViewPantry(c, w)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("编辑笼卡 · SPF-M101") {
+			t.Fatalf("expected vivarium edit dialog open, texts=%v", st.Texts())
+		}
+	})
+
+	// 4 & 5. Command Palette (Dark, Keycap + ListItem + ElevationModal) & Settings Density (Light)
+	root := filepath.Join(t.TempDir(), "s3_vault")
+	v, err := vault.Open(root)
+	if err != nil {
+		t.Fatalf("vault.Open: %v", err)
+	}
+	_ = v.SeedTemplates(defaultTemplateSeeds())
+	exp1, err := v.CreateExperiment("", "BALB-c 小鼠肿瘤模型接种记录", "2026-11-24", "---\ntitle: BALB/c 小鼠肿瘤模型\n---\n\n#@ STEP 1 · 接种与称重\n")
+	if err != nil {
+		t.Fatalf("CreateExperiment: %v", err)
+	}
+	ds := vault.NewDocStore(v)
+	sh := &shell.Shell{
+		TodayDate:        "2026-11-24",
+		SelectedDate:     "2026-11-24",
+		SelectedTreePath: exp1.RelPath,
+		AppVersion:       "0.1.10-devdebug-r12",
+		LiquidGlass:      true,
+		Density:          theme.DensityDefault,
+	}
+	a := &app{
+		shell:      sh,
+		vault:      v,
+		vaultIndex: vault.NewVaultIndex(v),
+		docStore:   ds,
+	}
+	sh.RenderTabContent = func(c *ui.Context, pane *shell.PaneNode, tab shell.WorkspaceTab) {
+		a.renderVaultTabContent(c, pane, tab)
+	}
+	sh.EnsureTabs()
+	sh.OpenFileInPane(sh.ActivePaneID, exp1.RelPath, exp1.Title, shell.ModeEdit, true)
+
+	sh.PaletteOpen = true
+	renderVisualPNGSteps(t, outDir, "s3_04_palette_keycaps_dark.png", 1280, 820, true, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+	})
+
+	sh.PaletteOpen = false
+	sh.VaultSettingsOpen = true
+	renderVisualPNGSteps(t, outDir, "s3_05_settings_density_light.png", 1160, 780, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Click("外观")
+		st.Advance(200 * time.Millisecond)
+		st.Frame()
+		if !st.HasText("界面密度") {
+			t.Fatalf("expected 界面密度 in Appearance settings, texts=%v", st.Texts())
+		}
 	})
 }

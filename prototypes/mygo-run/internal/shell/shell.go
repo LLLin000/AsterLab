@@ -15,6 +15,7 @@ import (
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/vault"
 	"asterlab-mygo-prototype/modules/runs"
 )
@@ -187,8 +188,10 @@ type Shell struct {
 	SelectedTreePath     string
 	CreateTargetFolder   string
 	CreateTargetTemplate string
-	VaultSettingsOpen   bool
-	SettingsView        components.SettingsState
+	VaultSettingsOpen    bool
+	ComponentGalleryOpen bool
+	galleryState         kit.GalleryState
+	SettingsView         components.SettingsState
 	AboutMonochromeLogo bool
 	ThemeSource         string // system | light | dark
 	TextScale           float32
@@ -584,6 +587,7 @@ func (s *Shell) SyncThemeLook(c *ui.Context) theme.Tokens {
 		s.ThemePreset = theme.PresetObsidian
 	}
 	theme.SetActiveLook(s.ThemePreset, s.LiquidGlass)
+	theme.SetActiveDensity(s.Density)
 	theme.SetAccessibilityPrefs(s.TextScale, s.ReduceMotion)
 	if c != nil {
 		c.SetTheme(theme.Window(c))
@@ -633,12 +637,50 @@ func (s *Shell) page(c *ui.Context) {
 	s.renderVaultDialogs(c)
 	s.renderFeedbackDialog(c)
 	s.renderWelcomeDialog(c)
+	s.renderComponentGalleryDialog(c)
 	if !s.inSplitViewRoot {
 		s.renderSpotlightTour(c, tok)
 	}
 	if s.RenderOverlays != nil {
 		s.RenderOverlays(c)
 	}
+}
+
+func (s *Shell) renderComponentGalleryDialog(c *ui.Context) {
+	if !s.ComponentGalleryOpen {
+		return
+	}
+	tok := theme.GetTokens(c.Theme())
+	open := s.ComponentGalleryOpen
+	w, h := c.Size()
+	if w <= 0 {
+		w = 1040
+	}
+	if h <= 0 {
+		h = 760
+	}
+	dlgW := min(float32(tok.Spacing48)*20, w*0.92)
+	dlgH := min(float32(tok.Spacing48)*15, h*0.88)
+	ui.Box(c.Key("kit-gallery-dlg")).Children(func() {
+		components.Dialog(c, &open, components.DialogOptions{Label: "AsterLab UI 组件画廊"}, func(panel ui.Element) {
+			panel.Width(dlgW).Height(dlgH).Padding(0).Gap(0).Clip()
+			kit.ApplyElevation(panel, tok, kit.ElevationModal)
+			panel.Children(func() {
+				ui.Row(c).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Icon(c, lucide.Layers()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+					ui.Text(c, "UI 组件画廊").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+					ui.Spacer(c)
+					if components.IconButton(c, lucide.X(), "关闭画廊", components.IconButtonPlain).Clicked() {
+						open = false
+					}
+				})
+				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+				kit.RenderComponentGallery(c, &s.galleryState)
+			})
+		})
+	})
+	s.ComponentGalleryOpen = open
 }
 
 func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
@@ -986,7 +1028,7 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 					}
 
 					// Right-click tab context menu
-					components.ContextMenu(c, pill, func(m *components.Menu) {
+					kit.ContextMenu(c, pill, func(m *kit.Menu) {
 						if m.Item("关闭").Shortcut("Ctrl+W").Disabled(tab.Pinned).Chosen() {
 							s.CloseTabInPane(pane.ID, tab.ID)
 						}

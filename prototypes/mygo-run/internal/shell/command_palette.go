@@ -9,6 +9,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 type paletteEntryKind uint8
@@ -55,11 +56,7 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 		components.Dialog(c, &open, components.DialogOptions{Label: "命令面板"}, func(panel ui.Element) {
 			panel.Width(float32(tok.Spacing48)*11.5).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing8)).
 				MaxHeight(float32(tok.Spacing48) * 11.5)
-			if tok.Dark {
-				panel.Background(tok.Surface).Border(1, tok.BorderStrong)
-			} else if tok.LiquidGlass {
-				theme.ApplyPanelGlass(panel, tok, 0.36)
-			}
+			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 		panel.Children(func() {
 			if len(entries) > 0 {
 				if panel.Shortcut(0, ui.KeyDown) {
@@ -146,10 +143,7 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 			ui.Divider(c)
 
 			if len(entries) == 0 {
-				ui.Column(c).FillWidth().Padding(float32(tok.Spacing24)).Center().Gap(float32(tok.Spacing4)).Children(func() {
-					components.Text(c, "未找到匹配实验、试剂或命令").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.TextMuted)
-					components.Text(c, "尝试输入实验名称、试剂位置或直接清空搜索。").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-				})
+				kit.EmptyState(c, tok, lucide.Search(), "未找到匹配实验、试剂或命令", "尝试输入实验名称、试剂位置或直接清空搜索。", "", nil)
 				return
 			}
 
@@ -186,7 +180,7 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 										}
 									})
 									if entry.shortcut != "" {
-										components.Badge(c, entry.shortcut, components.BadgeOptions{Tone: components.BadgeNeutral})
+										kit.Keycap(c, tok, entry.shortcut)
 									}
 								})
 							})
@@ -206,9 +200,16 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 				})
 			})
 			ui.Divider(c)
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-				components.Text(c, "↑↓ 移动 · Enter 打开 · Ctrl+Enter 分屏打开 · Esc 关闭").
-					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				kit.Keycap(c, tok, "↑↓")
+				components.Text(c, "移动").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+				kit.Keycap(c, tok, "Enter")
+				components.Text(c, "打开").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+				kit.Keycap(c, tok, "Ctrl+Enter")
+				components.Text(c, "分屏").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+				ui.Spacer(c)
+				kit.Keycap(c, tok, "Esc")
+				components.Text(c, "关闭").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 			})
 		})
 	})

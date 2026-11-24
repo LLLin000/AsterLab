@@ -62,6 +62,28 @@ func TestAllBoxesParseAndComposeDieCutStickers(t *testing.T) {
 	}
 }
 
+func TestAllAnimalsParseCleanlyAndSuggestSpecies(t *testing.T) {
+	animals := AllAnimals()
+	if len(animals) != 8 {
+		t.Fatalf("expected 8 curated lab animal species, got %d", len(animals))
+	}
+	for _, sp := range animals {
+		svg, err := ParseAnimalSVG(sp.ID)
+		if err != nil || svg == nil {
+			t.Fatalf("ParseAnimalSVG(%s): err=%v", sp.ID, err)
+		}
+	}
+	if got := SuggestAnimalID("C57BL/6J 雄性"); got != AnimalMouseBlack {
+		t.Fatalf("expected C57BL/6J -> mouse_black, got %s", got)
+	}
+	if got := SuggestAnimalID("新西兰白兔"); got != AnimalRabbit {
+		t.Fatalf("expected rabbit, got %s", got)
+	}
+	if got := SuggestAnimalID("Beagle 比格犬"); got != AnimalBeagle {
+		t.Fatalf("expected beagle, got %s", got)
+	}
+}
+
 func TestExteriorFloodFillClosesTransparentCavitiesAndDrawsWhiteBorder(t *testing.T) {
 	// Ring shape with a transparent hollow inside (20..40, 20..40) inside 60x60 art
 	ring := image.NewRGBA(image.Rect(0, 0, 60, 60))

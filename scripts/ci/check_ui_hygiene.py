@@ -14,6 +14,7 @@ TARGET_DIRS = [
     PROTO / "internal" / "shell",
     PROTO / "internal" / "asterdoc",
     PROTO / "internal" / "tools",
+    PROTO / "internal" / "uikit" / "kit",
 ]
 TARGET_FILES = [
     PROTO / "experiment_page.go",
@@ -23,6 +24,7 @@ TARGET_FILES = [
 
 LITERAL_COLOR_RE = re.compile(r"\bui\.(Hex|RGBA)\(")
 TINY_REM_RE = re.compile(r"\bt\.Rem\(\s*0?\.(?:[0-7]\d*|8[0-4])\s*\)")
+RAW_CTX_MENU_RE = re.compile(r"\bcomponents\.ContextMenu\(")
 
 
 def iter_go_files():
@@ -48,6 +50,8 @@ def main() -> int:
                 violations.append(f"{rel}:{lineno}: literal color {m.group(0)} outside internal/theme")
             if m := TINY_REM_RE.search(line):
                 violations.append(f"{rel}:{lineno}: sub-12px {m.group(0)}; use theme Tokens Text* instead")
+            if RAW_CTX_MENU_RE.search(line):
+                violations.append(f"{rel}:{lineno}: raw components.ContextMenu(...) banned; use internal/uikit/kit.ContextMenu")
     if violations:
         print("UI hygiene check failed:", file=sys.stderr)
         for v in violations:

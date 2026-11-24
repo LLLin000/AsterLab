@@ -4351,6 +4351,34 @@ func (a *app) savePantryBoxes(boxes []tools.PantryBox) error {
 	return nil
 }
 
+func (a *app) loadVivarium() ([]tools.VivariumCage, error) {
+	store, err := loadPantryStore(a.pantryDataDir())
+	if err != nil {
+		return nil, err
+	}
+	if store.Vivarium == nil {
+		return []tools.VivariumCage{}, nil
+	}
+	return store.Vivarium, nil
+}
+
+func (a *app) saveVivarium(cages []tools.VivariumCage) error {
+	dir := a.pantryDataDir()
+	if dir == "" {
+		return nil
+	}
+	store, err := loadPantryStore(dir)
+	if err != nil {
+		return err
+	}
+	store.Vivarium = append([]tools.VivariumCage(nil), cages...)
+	if err := savePantryStore(dir, store); err != nil {
+		return err
+	}
+	a.syncShellOutlineAndPantry()
+	return nil
+}
+
 func (a *app) loadPantryMeta() (map[string]tools.PantryItemMeta, error) {
 	store, err := loadPantryStore(a.pantryDataDir())
 	if err != nil {
@@ -4602,6 +4630,12 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 		},
 		SavePantryBoxes: func(boxes []tools.PantryBox) error {
 			return a.savePantryBoxes(boxes)
+		},
+		LoadVivarium: func() ([]tools.VivariumCage, error) {
+			return a.loadVivarium()
+		},
+		SaveVivarium: func(cages []tools.VivariumCage) error {
+			return a.saveVivarium(cages)
 		},
 		PickManualFiles: func() ([]string, error) {
 			return a.pickPantryManualFiles()

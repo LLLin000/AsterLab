@@ -47,12 +47,17 @@ const (
 	PresetObsidian = "obsidian" // Pure white editorial paper + whisper-cool #f5f6f8 borderless cards
 	PresetZinc     = "zinc"     // Achromatic cool silver-zinc #f4f5f7 canvas + pure #ffffff cards
 	PresetWarm     = "warm"     // Classic warm laboratory paper (#f7f6f3 / #171614)
+
+	DensityCompact     = "compact"
+	DensityDefault     = "default"
+	DensityComfortable = "comfortable"
 )
 
 var (
 	themeCfgMu            sync.RWMutex
 	activePreset          = PresetObsidian
 	activeLiquidGlass     = true
+	activeDensity         = DensityDefault
 	activeTextScale       float32
 	activeSystemTextScale float32 = 1.0
 	activeReduceMotion    bool
@@ -128,6 +133,34 @@ func EffectiveScale() float32 {
 	return 1.0
 }
 
+// NormalizeDensity normalizes UI density string to compact | default | comfortable.
+func NormalizeDensity(density string) string {
+	switch strings.ToLower(strings.TrimSpace(density)) {
+	case DensityCompact:
+		return DensityCompact
+	case DensityComfortable:
+		return DensityComfortable
+	default:
+		return DensityDefault
+	}
+}
+
+// SetActiveDensity updates the global active UI spacing density tier.
+func SetActiveDensity(density string) {
+	d := NormalizeDensity(density)
+	themeCfgMu.Lock()
+	activeDensity = d
+	themeCfgMu.Unlock()
+}
+
+// ActiveDensity returns the active UI spacing density tier.
+func ActiveDensity() string {
+	themeCfgMu.RLock()
+	d := activeDensity
+	themeCfgMu.RUnlock()
+	return NormalizeDensity(d)
+}
+
 // ActiveLook returns the currently active theme preset and Liquid Glass toggle.
 func ActiveLook() (preset string, liquidGlass bool) {
 	themeCfgMu.RLock()
@@ -150,12 +183,17 @@ func normalizePreset(preset string) string {
 // Tokens defines the shared AsterLab design system.
 type Tokens struct {
 	Preset                                                                                       string
+	Density                                                                                      string
 	LiquidGlass                                                                                  bool
 	Dark                                                                                         bool
 	Canvas, Surface, Elevated, SelectedRow                                                       ui.Color
 	Border, BorderStrong, BorderSubtle, TopHighlight, ShadowAmbient                              ui.Color
-	Text, TextMuted                                                                              ui.Color
+	BorderFocused, BorderSelected, BorderDisabled                                                ui.Color
+	ElementBg, ElementHover, ElementActive, ElementSelected, ElementDisabled                     ui.Color
+	GhostHover, GhostActive, GhostSelected                                                       ui.Color
+	Text, TextMuted, TextPlaceholder, TextDisabled                                               ui.Color
 	Accent, AccentHover, AccentText                                                              ui.Color
+	DropTargetBg, DropTargetBorder                                                               ui.Color
 	Success, Warning, Danger                                                                     ui.Color
 	RailBackground, SidebarBackground                                                            ui.Color
 	CardBackground, CardBorder                                                                   ui.Color
@@ -185,17 +223,29 @@ func scaleToken(base int, scale float32, minVal int) int {
 func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 	p := normalizePreset(preset)
 	scale := EffectiveScale()
+	density := ActiveDensity()
+	sp8, sp12, sp16, sp24, sp32, sp48 := 8, 12, 16, 24, 32, 48
+	btnH, inpH, rowH := 32, 32, 34
+	switch density {
+	case DensityCompact:
+		sp8, sp12, sp16, sp24, sp32, sp48 = 6, 9, 12, 18, 26, 40
+		btnH, inpH, rowH = 28, 28, 30
+	case DensityComfortable:
+		sp8, sp12, sp16, sp24, sp32, sp48 = 8, 14, 18, 28, 36, 52
+		btnH, inpH, rowH = 34, 34, 38
+	}
 	t := Tokens{
 		Preset:        p,
+		Density:       density,
 		LiquidGlass:   liquidGlass,
 		Dark:          dark,
 		Spacing4:      4,
-		Spacing8:      8,
-		Spacing12:     scaleToken(12, scale, 10),
-		Spacing16:     scaleToken(16, scale, 14),
-		Spacing24:     scaleToken(24, scale, 20),
-		Spacing32:     scaleToken(32, scale, 28),
-		Spacing48:     scaleToken(48, scale, 42),
+		Spacing8:      scaleToken(sp8, scale, 6),
+		Spacing12:     scaleToken(sp12, scale, 8),
+		Spacing16:     scaleToken(sp16, scale, 12),
+		Spacing24:     scaleToken(sp24, scale, 16),
+		Spacing32:     scaleToken(sp32, scale, 24),
+		Spacing48:     scaleToken(sp48, scale, 36),
 		TextPage:      scaleToken(26, scale, 20),
 		TextSection:   scaleToken(18, scale, 15),
 		TextBody:      scaleToken(15, scale, 13),
@@ -204,9 +254,9 @@ func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 		IconSm:        scaleToken(15, scale, 13),
 		IconMd:        scaleToken(17, scale, 15),
 		IconLg:        scaleToken(20, scale, 18),
-		ButtonHeight:  scaleToken(32, scale, 28),
-		InputHeight:   scaleToken(32, scale, 28),
-		RowHeight:     scaleToken(34, scale, 30),
+		ButtonHeight:  scaleToken(btnH, scale, 26),
+		InputHeight:   scaleToken(inpH, scale, 26),
+		RowHeight:     scaleToken(rowH, scale, 28),
 		ControlRadius: 6,
 		PanelRadius:   12,
 		DialogRadius:  14,
@@ -287,13 +337,40 @@ func aliases(t Tokens) Tokens {
 	t.CardBackground, t.CardBorder = t.Elevated, t.Border
 	if t.Dark {
 		t.BorderSubtle = ui.RGBA(255, 255, 255, 0.08)
-		t.TopHighlight = ui.RGBA(255, 255, 255, 0.06)
+		t.TopHighlight = ui.RGBA(255, 255, 255, 0.07)
 		t.ShadowAmbient = ui.RGBA(0, 0, 0, 0.36)
+		t.ElementBg = t.Elevated
+		t.ElementHover = t.SelectedRow
+		t.ElementActive = t.BorderStrong.Alpha(0.55)
+		t.ElementSelected = ui.Hex("#2a2645")
+		t.ElementDisabled = t.Elevated.Alpha(0.45)
+		t.GhostHover = ui.RGBA(255, 255, 255, 0.06)
+		t.GhostActive = ui.RGBA(255, 255, 255, 0.11)
+		t.GhostSelected = t.Accent.Alpha(0.18)
+		t.TextPlaceholder = t.TextMuted.Alpha(0.72)
+		t.TextDisabled = t.TextMuted.Alpha(0.48)
+		t.DropTargetBg = t.Accent.Alpha(0.16)
+		t.DropTargetBorder = t.Accent.Alpha(0.75)
 	} else {
 		t.BorderSubtle = t.Border.Alpha(0.65)
 		t.TopHighlight = ui.Transparent
 		t.ShadowAmbient = ui.RGBA(15, 23, 42, 0.08)
+		t.ElementBg = t.Elevated
+		t.ElementHover = t.SelectedRow
+		t.ElementActive = t.BorderStrong.Alpha(0.42)
+		t.ElementSelected = ui.Hex("#eeebff")
+		t.ElementDisabled = t.Elevated.Alpha(0.55)
+		t.GhostHover = ui.RGBA(15, 23, 42, 0.045)
+		t.GhostActive = ui.RGBA(15, 23, 42, 0.085)
+		t.GhostSelected = t.Accent.Alpha(0.12)
+		t.TextPlaceholder = t.TextMuted.Alpha(0.75)
+		t.TextDisabled = t.TextMuted.Alpha(0.45)
+		t.DropTargetBg = t.Accent.Alpha(0.10)
+		t.DropTargetBorder = t.Accent.Alpha(0.65)
 	}
+	t.BorderFocused = t.Accent
+	t.BorderSelected = t.Accent
+	t.BorderDisabled = t.BorderSubtle
 	t.SuccessBg, t.SuccessText = t.Surface, t.Success
 	t.WarningBg, t.WarningText = t.Surface, t.Warning
 	t.DangerBg, t.DangerText = t.Surface, t.Danger

@@ -516,3 +516,59 @@ func TestPantryJSONLSingleFileSyncMigrationAndExternalAppend(t *testing.T) {
 		t.Fatalf("expected pantry.jsonl written during migration: %v", err)
 	}
 }
+
+func TestVivariumJSONLPersistenceRoundTrip(t *testing.T) {
+	t.Setenv("LABWORKBENCH_DATA_DIR", t.TempDir())
+	root := filepath.Join(t.TempDir(), "VivariumVault")
+	a := &app{shell: &shell.Shell{TodayDate: "2026-11-24", SelectedDate: "2026-11-24"}}
+	if err := a.initVaultWorkspace(root); err != nil {
+		t.Fatalf("initVaultWorkspace: %v", err)
+	}
+	a.tools = a.newToolsWorkspace()
+
+	cages := []tools.VivariumCage{
+		{
+			ID:            "viv-test-1",
+			CageCode:      "SPF-M101",
+			Species:       "mouse_white",
+			Strain:        "BALB/c",
+			Genotype:      "WT",
+			MaleCount:     4,
+			FemaleCount:   0,
+			FacilityGrade: "SPF",
+			Room:          "屏障 302",
+			RackPos:       "IVC-A1-01",
+			DOB:           "2026-10-15",
+			WeightG:       22.4,
+			IACUCNo:       "IACUC-2026-088",
+			Vendor:        "维通利华",
+			CertNo:        "SCXK-2026-0011",
+			Status:        "in_study",
+			ExperimentRef: "2026-11-24_HUVEC.asterml",
+			HealthNotes:   "体重稳步增长，进食饮水正常",
+		},
+	}
+	if err := a.saveVivarium(cages); err != nil {
+		t.Fatalf("saveVivarium failed: %v", err)
+	}
+	loaded, err := a.loadVivarium()
+	if err != nil {
+		t.Fatalf("loadVivarium failed: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 vivarium cage loaded, got %d", len(loaded))
+	}
+	got := loaded[0]
+	if got.CageCode != "SPF-M101" || got.Strain != "BALB/c" || got.IACUCNo != "IACUC-2026-088" || got.MaleCount != 4 {
+		t.Fatalf("vivarium round-trip mismatch: %+v", got)
+	}
+
+	// Ensure type: "vivarium" lines coexist cleanly with pantry items in the same pantry.jsonl
+	raw, err := os.ReadFile(filepath.Join(root, ".asterlab", pantryJSONLFileName))
+	if err != nil {
+		t.Fatalf("read pantry.jsonl: %v", err)
+	}
+	if !strings.Contains(string(raw), `"type":"vivarium"`) && !strings.Contains(string(raw), `"type": "vivarium"`) {
+		t.Fatalf("expected type:vivarium record in pantry.jsonl, got:\n%s", string(raw))
+	}
+}

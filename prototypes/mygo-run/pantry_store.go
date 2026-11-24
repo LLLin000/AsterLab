@@ -31,9 +31,10 @@ type localPantryDisk struct {
 // pantryStore holds the unified Vault-local Pantry state persisted in a single
 // canonical, line-oriented `<Vault>/.asterlab/pantry.jsonl` file.
 type pantryStore struct {
-	Items []runs.PantryItem
-	Meta  map[string]tools.PantryItemMeta
-	Boxes []tools.PantryBox
+	Items    []runs.PantryItem
+	Meta     map[string]tools.PantryItemMeta
+	Boxes    []tools.PantryBox
+	Vivarium []tools.VivariumCage
 }
 
 type pantrySchemaRecord struct {
@@ -78,6 +79,11 @@ type pantryMetaOnlyRecord struct {
 	Type string               `json:"type"`
 	ID   string               `json:"id"`
 	Meta tools.PantryItemMeta `json:"meta"`
+}
+
+type pantryVivariumRecord struct {
+	Type string `json:"type"`
+	tools.VivariumCage
 }
 
 type pantryJSONLRawLine struct {
@@ -141,12 +147,14 @@ func isEmptyPantryMeta(m tools.PantryItemMeta) bool {
 
 func parsePantryJSONL(data []byte) (pantryStore, error) {
 	store := pantryStore{
-		Items: []runs.PantryItem{},
-		Meta:  map[string]tools.PantryItemMeta{},
-		Boxes: []tools.PantryBox{},
+		Items:    []runs.PantryItem{},
+		Meta:     map[string]tools.PantryItemMeta{},
+		Boxes:    []tools.PantryBox{},
+		Vivarium: []tools.VivariumCage{},
 	}
 	itemsByID := map[string]runs.PantryItem{}
 	boxesByID := map[string]tools.PantryBox{}
+	vivariumByID := map[string]tools.VivariumCage{}
 
 	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -223,10 +231,29 @@ func parsePantryJSONL(data []byte) (pantryStore, error) {
 			if id != "" && rec.Meta != nil && !isEmptyPantryMeta(*rec.Meta) {
 				store.Meta[id] = *rec.Meta
 			}
+		case "vivarium":
+			var vrec pantryVivariumRecord
+			if err := json.Unmarshal([]byte(line), &vrec); err == nil {
+				vc := vrec.VivariumCage
+				vc.ID = strings.TrimSpace(vc.ID)
+				if vc.ID == "" {
+					vc.ID = fmt.Sprintf("viv-line-%d", lineNo)
+				}
+				vivariumByID[vc.ID] = vc
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return pantryStore{}, err
+	}
+
+	vivIDs := make([]string, 0, len(vivariumByID))
+	for id := range vivariumByID {
+		vivIDs = append(vivIDs, id)
+	}
+	sort.Strings(vivIDs)
+	for _, id := range vivIDs {
+		store.Vivarium = append(store.Vivarium, vivariumByID[id])
 	}
 
 	boxIDs := make([]string, 0, len(boxesByID))
@@ -332,6 +359,17 @@ func marshalPantryJSONL(store pantryStore) ([]byte, error) {
 			}); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	cages := append([]tools.VivariumCage(nil), store.Vivarium...)
+	sort.Slice(cages, func(i, j int) bool { return cages[i].ID < cages[j].ID })
+	for _, vc := range cages {
+		if err := writeLine(pantryVivariumRecord{
+			Type:         "vivarium",
+			VivariumCage: vc,
+		}); err != nil {
+			return nil, err
 		}
 	}
 

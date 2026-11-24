@@ -65,4 +65,20 @@ func TestDesignTokens(t *testing.T) {
 	if osScaled.TextBody <= light.TextBody || osTheme.FontSize != float32(osScaled.TextBody) {
 		t.Fatalf("OS TextScale must drive both Tokens and Onevra FontSize without double-scaling: tok=%d theme=%.1f", osScaled.TextBody, osTheme.FontSize)
 	}
+
+	SetSystemTextScale(1.0)
+	SetActiveDensity(DensityCompact)
+	defer SetActiveDensity(DensityDefault)
+	comp := LightTokens()
+	if comp.Density != DensityCompact || comp.RowHeight >= light.RowHeight || comp.Spacing16 >= light.Spacing16 {
+		t.Fatalf("compact density should tighten row height & spacing: comp=(%d,%d) def=(%d,%d)", comp.RowHeight, comp.Spacing16, light.RowHeight, light.Spacing16)
+	}
+	SetActiveDensity(DensityComfortable)
+	comf := LightTokens()
+	if comf.Density != DensityComfortable || comf.RowHeight <= light.RowHeight || comf.Spacing16 <= light.Spacing16 {
+		t.Fatalf("comfortable density should expand row height & spacing: comf=(%d,%d) def=(%d,%d)", comf.RowHeight, comf.Spacing16, light.RowHeight, light.Spacing16)
+	}
+	if dark.GhostHover.A == 0 || dark.TopHighlight.A == 0 || dark.BorderFocused != dark.Accent {
+		t.Fatalf("expected Zed-inspired interaction state & top highlight tokens in dark mode: %+v", dark)
+	}
 }
