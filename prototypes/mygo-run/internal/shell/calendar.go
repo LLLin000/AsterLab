@@ -1220,11 +1220,6 @@ func (s *Shell) renderDayPopover(c *ui.Context, panel ui.Element, tok theme.Toke
 			components.Text(c, popoverTitle).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
 				SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 			kit.Badge(c, fmt.Sprintf("%d 项", totalItems), components.BadgeOptions{Tone: components.BadgeNeutral})
-			if s.OnCreateForDate != nil || s.OnCreate != nil {
-				if components.Button(c, "＋ 实验", components.ButtonSecondary).Clicked() {
-					s.triggerCreateForDate(ymd)
-				}
-			}
 		})
 
 		if totalItems == 0 {
@@ -1282,8 +1277,13 @@ func (s *Shell) renderDayPopover(c *ui.Context, panel ui.Element, tok theme.Toke
 			})
 		})
 
-		if s.OnCreateReagentForDate != nil || s.OnCreateAnimalForDate != nil {
+		if s.OnCreateForDate != nil || s.OnCreate != nil || s.OnCreateReagentForDate != nil || s.OnCreateAnimalForDate != nil {
 			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				if s.OnCreateForDate != nil || s.OnCreate != nil {
+					if components.Button(c, "＋ 在此日新建实验", components.ButtonSecondary).Clicked() {
+						s.triggerCreateForDate(ymd)
+					}
+				}
 				if s.OnCreateReagentForDate != nil && components.Button(c, "+ 登记试剂购入", components.ButtonGhost).Clicked() {
 					s.DayPopoverOpen = false
 					s.OnCreateReagentForDate(ymd)
