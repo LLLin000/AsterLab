@@ -339,7 +339,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			a.shell.StatusWarnLabel = ""
 		}
 		if ld.Parsed != nil {
-			stepTree := asterdoc.ParseStepTree(ld.Source, ld.Parsed)
+			stepTree := asterdoc.CachedParseStepTree(ld.Source, ld.Parsed, -1)
 			a.shell.StatusMetaLabel = fmt.Sprintf("%d 步骤 · %d 模块", len(stepTree.Flat), len(ld.Parsed.Modules))
 		}
 	}
@@ -376,9 +376,12 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 						edSeg := ui.ButtonBase(c.Key("doc-mode-ed:"+tab.ID)).
 							Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
 							AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label("编辑设计模式 (Ctrl+E)")
+						theme.ApplyTactilePress(edSeg)
+						edBg := ui.Transparent
 						if edAct {
-							edSeg.Background(tok.Surface)
+							edBg = tok.Surface
 						}
+						edSeg.Background(edSeg.AnimateColor("edseg-bg", edBg, theme.MotionInstant))
 						edSeg.Children(func() {
 							col := tok.TextMuted
 							if edAct {
@@ -398,9 +401,12 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 						labSeg := ui.ButtonBase(c.Key("doc-mode-lab:"+tab.ID)).
 							Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
 							AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label("实验执行模式 · 防误触 (Ctrl+E)")
+						theme.ApplyTactilePress(labSeg)
+						labBg := ui.Transparent
 						if labAct {
-							labSeg.Background(tok.AccentSoftBg)
+							labBg = tok.AccentSoftBg
 						}
+						labSeg.Background(labSeg.AnimateColor("labseg-bg", labBg, theme.MotionInstant))
 						labSeg.Children(func() {
 							col := tok.TextMuted
 							if labAct {
@@ -917,7 +923,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 
 		// Sync unified Document Outline (plain chapters + orthogonal nested steps)
 		if pane.ID == a.shell.ActivePaneID {
-			docOutline := asterdoc.ParseDocumentOutline(ld.Source, doc)
+			docOutline := asterdoc.CachedParseDocumentOutline(ld.Source, doc)
 			var outline []shell.OutlineItem
 			for _, on := range docOutline {
 				meta := ""
@@ -946,16 +952,25 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			a.shell.OutlineSteps = outline
 		}
 
+		// Docked centered pure-icon toolbar rail on desktop/tablet so scrolled STEP headings never clip under it
+		if !mobileLayout {
+			ui.Row(c.Key("doc-ftb-rail")).FillWidth().
+				Padding(float32(tok.Spacing8), float32(tok.Spacing16)).
+				Justify(ui.Center).Background(tok.Canvas).Children(func() {
+				v.RenderFloatingToolbar(c, tab.Mode == shell.ModeLab)
+			})
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+		}
+
 		ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 			docScroll := ui.Scroll(c).Fill()
 			if mobileLayout && a.shell != nil {
 				docScroll.TrackScroll(a.shell.MobileContentScrollState()).
 					ScrollbarInsets(a.shell.MobileTopReserve(c), 0, a.shell.MobileBottomReserve(c), 0)
 			}
-			padTop := float32(tok.Spacing24)
+			padTop := float32(tok.Spacing16)
 			if !mobileLayout {
-				// Reserve breathing room for the centered floating pure-icon toolbar at top of canvas
-				padTop = float32(tok.Spacing48) + float32(tok.Spacing16)
+				padTop = float32(tok.Spacing24)
 			}
 			padH := float32(tok.Spacing24)
 			padBot := float32(tok.Spacing48)
@@ -1294,13 +1309,6 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 					})
 				})
 			})
-			// Centered top floating pure-icon toolbar on desktop/tablet (locked in-place during Lab Mode)
-			if !mobileLayout {
-				ui.Row(c.Key("doc-ftb-anchor")).Absolute().Top(float32(tok.Spacing12)).Left(0).Right(0).
-					Justify(ui.Center).HitTest(func(float32, float32, ui.Rect) bool { return false }).Children(func() {
-					v.RenderFloatingToolbar(c, tab.Mode == shell.ModeLab)
-				})
-			}
 			v.RenderPlateOverlay(c)
 		})
 	})

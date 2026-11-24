@@ -816,7 +816,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 						ui.Text(c, "=").FontSize(float32(tok.TextSection)+2).TextColor(tok.TextMuted).SingleLine()
 						// 2D Rendered LaTeX Math AST (clickable in Design mode to toggle editor!)
 						render2D := func() {
-							if ast, parseErr := ParseLatexMath(formulaStr); parseErr == nil {
+							if ast, parseErr := CachedLatexAST(formulaStr); parseErr == nil {
 								RenderMathNode(c, tok, ast, float32(tok.TextSection)+2, tok.Text)
 							} else {
 								ui.Text(c, formulaStr).Font("monospace").FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)

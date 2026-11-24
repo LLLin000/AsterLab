@@ -38,6 +38,8 @@ type liveEditorEntry struct {
 	lastFocused          bool
 	lastDark             bool
 	lastReadOnly         bool
+	lastDocHash          uint64
+	lastDocOffset        int
 	lastCompletionVer    uint64
 	dismissedSlashVer    uint64
 	toolbarSlashStart    int
@@ -144,8 +146,8 @@ func ComputeLivePreviewDecorations(
 	var stepTree *StepTree
 	usedAnchors := map[string]bool{}
 	if doc != nil {
-		resolvedAll = ResolveRelations(doc)
-		stepTree = ParseStepTree(doc.Source, doc)
+		resolvedAll = CachedResolveRelations(doc)
+		stepTree = CachedParseStepTree(doc.Source, doc, -1)
 		flatMods, _ := flattenModules(doc.Modules)
 		for _, fm := range flatMods {
 			if fm.Kind == "timer" && strings.EqualFold(textValue(fm.Data, "mode"), "window") {
@@ -1278,7 +1280,11 @@ func (v *View) renderLiveMarkdownSegmentFull(
 
 	dark := t != nil && t.Dark
 	ver := st.Buffer.Version()
-	if ver != entry.lastVersion || activeLine != entry.lastActiveLn || focused != entry.lastFocused || dark != entry.lastDark || readOnly != entry.lastReadOnly {
+	var docHash uint64
+	if v.Doc != nil {
+		docHash = FastSourceHash("", v.Doc.Source)
+	}
+	if ver != entry.lastVersion || activeLine != entry.lastActiveLn || focused != entry.lastFocused || dark != entry.lastDark || readOnly != entry.lastReadOnly || docHash != entry.lastDocHash || entry.docOffset != entry.lastDocOffset {
 		styles, repls, diags := ComputeLivePreviewDecorations(
 			curBuf,
 			activeLine,
@@ -1324,6 +1330,8 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		entry.lastFocused = focused
 		entry.lastDark = dark
 		entry.lastReadOnly = readOnly
+		entry.lastDocHash = docHash
+		entry.lastDocOffset = entry.docOffset
 		entry.lastNLTextSig = ""
 	}
 

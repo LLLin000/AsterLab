@@ -38,24 +38,38 @@ type InteractionState struct {
 	stickyHoverWell string
 }
 
+type DilutionColumn struct {
+	ColIndex int
+	Header   string
+	SubLabel string
+	Alpha    float32
+}
+
+type DilutionOverlay struct {
+	Columns       []DilutionColumn
+	TransferLabel string
+	ActiveRows    int
+}
+
 type Props struct {
-	Wells       map[string]WellState
-	SelectedIDs []string
-	OnSelect    func(wellIDs []string)
-	Interactive bool
-	Rows        int
-	Cols        int
-	Topology    string
-	Roles       map[string]string
-	ColorBy     string // "group" | "sample" | "factor" | "replicate" | "role"
-	FactorKey   string
-	Blind       bool
-	GroupIndex  map[string]int
-	GroupLabels map[string]string
-	ExcludedIDs map[string]bool
-	HideFooter  bool
-	Zoom        float32
-	State       *InteractionState
+	Wells        map[string]WellState
+	SelectedIDs  []string
+	OnSelect     func(wellIDs []string)
+	Interactive  bool
+	Rows         int
+	Cols         int
+	Topology     string
+	Roles        map[string]string
+	ColorBy      string // "group" | "sample" | "factor" | "replicate" | "role"
+	FactorKey    string
+	Blind        bool
+	GroupIndex   map[string]int
+	GroupLabels  map[string]string
+	ExcludedIDs  map[string]bool
+	HideFooter   bool
+	Zoom         float32
+	State        *InteractionState
+	DilutionFlow *DilutionOverlay
 }
 
 const (
@@ -182,6 +196,14 @@ func AdaptiveMetrics(rows, cols int, topology string, zoom float32) (cellW, cell
 		return cellW, cellH, gap
 	}
 	total := rows * cols
+	if strings.EqualFold(topology, "dish") && total > 4 {
+		switch {
+		case total <= 12:
+			return 58 * zoom, 58 * zoom, scaleGap(10)
+		case total <= 24:
+			return 48 * zoom, 48 * zoom, scaleGap(8)
+		}
+	}
 	switch {
 	case total <= 4:
 		cellW, cellH, gap = 56*zoom, 56*zoom, scaleGap(10)
@@ -436,14 +458,21 @@ func View(c *ui.Context, props Props) {
 	var lastHoverWell string
 
 	rows, cols := ResolveDimensions(props)
+	isDish := strings.EqualFold(props.Topology, "dish")
+	isDishMatrix := isDish && rows*cols > 4
+	isSingleDish := isDish && !isDishMatrix
 	cellW, cellH, gap := AdaptiveMetrics(rows, cols, props.Topology, props.Zoom)
 	mini := !props.Interactive && props.Zoom > 0 && props.Zoom < 0.75
 	labelSize := float32(t.TextMeta)
 	leftLabel := float32(t.Spacing24)
 	topLabel := float32(t.Spacing16)
+	dilHeaderH := float32(0)
+	if !props.Interactive && props.DilutionFlow != nil && len(props.DilutionFlow.Columns) > 0 {
+		dilHeaderH = float32(t.Spacing32) + float32(t.Spacing8)
+	}
 	dishPad := float32(0)
 	footerPad := float32(t.Spacing32)
-	if props.Topology == "dish" {
+	if isSingleDish {
 		dishPad = float32(t.Spacing24)
 	}
 	if mini {
@@ -456,7 +485,7 @@ func View(c *ui.Context, props Props) {
 		if topLabel = float32(t.Spacing16) * (0.65 + 0.35*props.Zoom); topLabel < 11 {
 			topLabel = 11
 		}
-		if props.Topology == "dish" {
+		if isSingleDish {
 			dishPad = float32(t.Spacing24) * (0.55 + 0.45*props.Zoom)
 			if dishPad < 20 {
 				dishPad = 20
@@ -467,7 +496,7 @@ func View(c *ui.Context, props Props) {
 	gridW := float32(cols)*cellW + float32(cols-1)*gap
 	gridH := float32(rows)*cellH + float32(rows-1)*gap
 	width := leftLabel + gridW + dishPad*2 + float32(t.Spacing4)
-	height := topLabel + gridH + dishPad*2 + footerPad
+	height := dilHeaderH + topLabel + gridH + dishPad*2 + footerPad
 	selected := selectedSet(props)
 	legend := ComputeLegend(props, dark)
 	legendCounts := make(map[string]int, len(legend))
@@ -490,7 +519,7 @@ func View(c *ui.Context, props Props) {
 	}
 
 	drawDishRim := func(p *ui.Painter, gx0, gy0 float32) {
-		if props.Topology != "dish" {
+		if !isSingleDish {
 			return
 		}
 		cx := gx0 + gridW/2
@@ -546,10 +575,10 @@ func View(c *ui.Context, props Props) {
 				})
 			}
 
-			// Compute exact padding around dish rim so the outer circle never spills over bottom text (UI-02).
+			// Compute exact padding around single dish rim so the outer circle never spills over bottom text (UI-02).
 			dishPadH := dishPad
 			dishPadV := dishPad
-			if props.Topology == "dish" {
+			if isSingleDish {
 				rOuter := gridW
 				if gridH > rOuter {
 					rOuter = gridH
@@ -694,6 +723,16 @@ func View(c *ui.Context, props Props) {
 								animFill := btn.AnimateColor("wfill", fill, theme.MotionSnappy)
 								animStroke := btn.AnimateColor("wstroke", strokeCol, theme.MotionSnappy)
 								btn.Background(animFill).Border(strokeW, animStroke)
+								if isDishMatrix && cellW >= 24 {
+									innerRimCol := strokeCol.Alpha(0.45)
+									btn.Draw(func(p *ui.Painter, r ui.Rect) {
+										inset := float32(3.5)
+										if r.W > inset*2+8 {
+											ir := ui.Rect{X: r.X + inset, Y: r.Y + inset, W: r.W - inset*2, H: r.H - inset*2}
+											p.Stroke(ir, innerRimCol, ir.W/2, 1)
+										}
+									})
+								}
 								targetScale := float32(1.0)
 								if btn.Pressed() {
 									targetScale = 0.93
@@ -804,7 +843,7 @@ func View(c *ui.Context, props Props) {
 					}
 				})
 			})
-			if props.Topology == "dish" {
+			if isSingleDish {
 				gridBox.Draw(func(p *ui.Painter, r ui.Rect) {
 					drawDishRim(p, r.X+dishPadH+leftLabel+gap, r.Y+dishPadV+topLabel+gap)
 				})
@@ -853,13 +892,95 @@ func View(c *ui.Context, props Props) {
 			return
 		}
 
+		dilByCol := map[int]DilutionColumn{}
+		if props.DilutionFlow != nil {
+			for _, dc := range props.DilutionFlow.Columns {
+				dilByCol[dc.ColIndex] = dc
+			}
+		}
+		dilActiveRows := 0
+		if props.DilutionFlow != nil {
+			dilActiveRows = props.DilutionFlow.ActiveRows
+			if dilActiveRows <= 0 {
+				dilActiveRows = rows
+			}
+		}
+
 		canvas := ui.Box(c).Size(width, height).Draw(func(p *ui.Painter, r ui.Rect) {
 			gx0 := r.X + leftLabel + dishPad
-			gy0 := r.Y + topLabel + dishPad
+			gy0 := r.Y + dilHeaderH + topLabel + dishPad
 			drawDishRim(p, gx0, gy0)
+			if dilHeaderH > 0 && props.DilutionFlow != nil && len(props.DilutionFlow.Columns) > 0 {
+				minCol, maxCol := cols, -1
+				for colIdx := range dilByCol {
+					if colIdx >= 0 && colIdx < cols {
+						if colIdx < minCol {
+							minCol = colIdx
+						}
+						if colIdx > maxCol {
+							maxCol = colIdx
+						}
+					}
+				}
+				if props.DilutionFlow.TransferLabel != "" && minCol <= maxCol {
+					spanX0 := gx0 + float32(minCol)*(cellW+gap)
+					spanX1 := gx0 + float32(maxCol)*(cellW+gap) + cellW
+					banner := fmt.Sprintf("排枪逐列混匀移液 %s →", props.DilutionFlow.TransferLabel)
+					bfSize := labelSize - 1
+					if bfSize < 9.5 {
+						bfSize = 9.5
+					}
+					bw := estimatedBadgeWidth(banner, bfSize)
+					bx := spanX0 + (spanX1-spanX0-bw)/2
+					if bx < gx0 {
+						bx = gx0
+					}
+					p.Text(bx, r.Y+dishPad+1, banner, bfSize, t.Accent)
+				}
+				hdrY := r.Y + dishPad + float32(t.Spacing16) + 2
+				for col := 0; col < cols; col++ {
+					dc, ok := dilByCol[col]
+					if !ok || dc.Header == "" {
+						continue
+					}
+					hf := labelSize - 1.5
+					if hf < 8.5 {
+						hf = 8.5
+					}
+					hw := estimatedBadgeWidth(dc.Header, hf)
+					maxAllow := cellW + gap - 1
+					if hw > maxAllow && hw > 0 {
+						hf *= maxAllow / hw
+						if hf < 7.5 {
+							hf = 7.5
+						}
+						hw = estimatedBadgeWidth(dc.Header, hf)
+					}
+					cx := gx0 + float32(col)*(cellW+gap) + (cellW-hw)/2
+					colInk := t.Text
+					if col == minCol {
+						colInk = t.Accent
+					}
+					p.Text(cx, hdrY, dc.Header, hf, colInk)
+					if _, hasNext := dilByCol[col+1]; hasNext && col+1 < cols {
+						ax0 := gx0 + float32(col)*(cellW+gap) + cellW + 0.5
+						ax1 := gx0 + float32(col+1)*(cellW+gap) - 0.5
+						ay := gy0 + float32(dilActiveRows)*(cellH+gap)/2 - gap/2
+						if ax1 > ax0+1 {
+							arrow := &ui.Path{}
+							arrow.MoveTo(ax0, ay)
+							arrow.LineTo(ax1, ay)
+							arrow.MoveTo(ax1-2.2, ay-2.0)
+							arrow.LineTo(ax1, ay)
+							arrow.LineTo(ax1-2.2, ay+2.0)
+							p.StrokePath(arrow, 1.3, t.Accent.Alpha(0.85))
+						}
+					}
+				}
+			}
 			for col := 0; col < cols; col++ {
 				cx := gx0 + float32(col)*(cellW+gap) + cellW/2 - float32(t.Spacing4)*0.8
-				p.Text(cx, r.Y+dishPad+float32(t.Spacing4)*0.4, fmt.Sprintf("%d", col+1), labelSize, t.TextMuted)
+				p.Text(cx, r.Y+dilHeaderH+dishPad+float32(t.Spacing4)*0.4, fmt.Sprintf("%d", col+1), labelSize, t.TextMuted)
 			}
 			for row := 0; row < rows; row++ {
 				ry := gy0 + float32(row)*(cellH+gap) + (cellH-labelSize)*0.42
@@ -872,13 +993,32 @@ func View(c *ui.Context, props Props) {
 					well, assigned := props.Wells[id]
 					role := effectiveRole(well, id, props.Roles)
 					fill := WellFillColor(props, well, assigned, role, dark, t)
+					if assigned {
+						if dc, ok := dilByCol[col]; ok && row < dilActiveRows && dc.Alpha > 0 {
+							targetHue := fill
+							if targetHue == t.Canvas || targetHue == t.Elevated {
+								targetHue = t.Accent
+							}
+							fill = t.Elevated.Mix(targetHue, dc.Alpha)
+						}
+					}
 					radius := wellRadius()
 					p.Fill(wr, fill, radius)
 					strokeCol := t.Border
+					strokeWidth := float32(1)
+					if isDishMatrix {
+						strokeCol = t.BorderStrong
+						strokeWidth = 1.5
+					}
 					if assigned && (len(well.Factors) > 0 || well.SampleID != "") && !props.Blind {
 						strokeCol = fill.Mix(t.Text, 0.28)
 					}
-					p.Stroke(wr, strokeCol, radius, 1)
+					p.Stroke(wr, strokeCol, radius, strokeWidth)
+					if isDishMatrix && cellW >= 24 {
+						inset := float32(3.5)
+						innerRect := ui.Rect{X: x + inset, Y: y + inset, W: cellW - inset*2, H: cellH - inset*2}
+						p.Stroke(innerRect, strokeCol.Alpha(0.42), innerRect.W/2, 1)
+					}
 					ink := contrastInkForFill(fill, assigned, t)
 					if !props.Blind && assigned && well.SampleID != "" && len(well.Factors) > 0 && well.Replicate > 0 && cellW >= 20 {
 						inner := ui.Rect{X: x + 2.5, Y: y + 2.5, W: cellW - 5, H: cellH - 5}
@@ -945,7 +1085,7 @@ func View(c *ui.Context, props Props) {
 			canvas.HitTest(func(x, y float32, r ui.Rect) bool {
 				lastHoverWell = ""
 				gx := x - (r.X + leftLabel + dishPad)
-				gy := y - (r.Y + topLabel + dishPad)
+				gy := y - (r.Y + dilHeaderH + topLabel + dishPad)
 				if gx < 0 || gy < 0 {
 					return false
 				}

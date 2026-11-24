@@ -951,7 +951,7 @@ func renderVectorTextCardSVG(title, badge, body string, tok theme.Tokens) string
 
 // buildComponentShareMenu populates standardized standalone copy & export actions
 // (PNG, SVG, Markdown, and CSV for plates) across Edit, Read, and Run modes.
-func (v *View) buildComponentShareMenu(c *ui.Context, m *components.Menu, kind string, schema int, data map[string]any) {
+func (v *View) buildComponentShareMenu(c *ui.Context, m *asterMenu, kind string, schema int, data map[string]any) {
 	if v == nil || data == nil {
 		return
 	}

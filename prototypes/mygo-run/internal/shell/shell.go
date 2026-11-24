@@ -863,14 +863,30 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 	}
 	isFirstPane := s.firstLeaf(s.RootPane) == pane
 	isLastPane := s.lastLeaf(s.RootPane) == pane
+	isFocusedPane := pane.ID == s.ActivePaneID
+	multiPane := s.leafCount() > 1
 
-	bar := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-		AlignItems(ui.Center).Gap(float32(tok.Spacing4))
-	// Avoid double-glass vertical clip seams when hosted inside sidebar.Shell's native ContentTitle chrome
-	if !(s.window != nil && s.leafCount() == 1) {
-		theme.ApplyChromeGlass(bar, tok, false)
-	}
-	bar.Children(func() {
+	wrapCol := ui.Column(c).FillWidth()
+	wrapCol.Children(func() {
+		if multiPane {
+			accentBarCol := tok.BorderSubtle
+			if isFocusedPane {
+				accentBarCol = tok.Accent
+			}
+			ui.Box(c).FillWidth().Height(2).Background(wrapCol.AnimateColor("pane-ind", accentBarCol, theme.MotionInstant))
+		}
+
+		bar := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+			AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+		// Avoid double-glass vertical clip seams when hosted inside sidebar.Shell's native ContentTitle chrome
+		if !(s.window != nil && s.leafCount() == 1) {
+			if multiPane && !isFocusedPane {
+				bar.Background(tok.Canvas)
+			} else {
+				theme.ApplyChromeGlass(bar, tok, false)
+			}
+		}
+		bar.Children(func() {
 		// Unified Obsidian Top Bar: compact Back/Forward history controls inline on the left of the tab strip
 		if isFirstPane {
 			backBtn := components.IconButton(c, lucide.ArrowLeft(), "后退 (Alt+←)", components.IconButtonPlain)
@@ -909,8 +925,8 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 					} else if !active && pill.Hovered() {
 						targetBg = tok.Text.Alpha(0.05)
 					}
-					pill.Background(pill.AnimateColor("ptab-bg", targetBg, theme.MotionSnappy))
-					fg := pill.AnimateColor("ptab-fg", targetFg, theme.MotionSnappy)
+					pill.Background(pill.AnimateColor("ptab-bg", targetBg, theme.MotionInstant))
+					fg := pill.AnimateColor("ptab-fg", targetFg, theme.MotionInstant)
 					pill.Children(func() {
 						selBtn := ui.ButtonBase(c).Justify(ui.Start).AlignItems(ui.Center).Label("标签:" + tab.Title)
 						theme.ApplyTactilePress(selBtn)
@@ -1056,6 +1072,7 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 				}
 			}
 		}
+		})
 	})
 }
 

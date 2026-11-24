@@ -35,10 +35,15 @@ func renderUnifiedModuleShell(
 		box.FillHeight()
 	}
 	if isTopLevel {
+		cardBorder := tok.BorderSubtle
+		if box.Hovered() {
+			cardBorder = tok.Border
+		}
 		box.Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
 			Radius(float32(tok.PanelRadius)).
 			Background(tok.Surface).
-			Border(1, tok.Border)
+			Border(1, box.AnimateColor("mcbd", cardBorder, theme.MotionInstant)).
+			Shadow(0, 1, 3, 0, tok.ShadowAmbient)
 	} else {
 		box.Padding(float32(tok.Spacing4), 0)
 	}
@@ -66,7 +71,7 @@ func renderUnifiedModuleShell(
 						})
 					}
 				})
-				ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.55))
+				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
 			})
 		}
 		content()

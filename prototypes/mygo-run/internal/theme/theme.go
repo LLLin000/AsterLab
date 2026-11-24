@@ -153,7 +153,7 @@ type Tokens struct {
 	LiquidGlass                                                                                  bool
 	Dark                                                                                         bool
 	Canvas, Surface, Elevated, SelectedRow                                                       ui.Color
-	Border, BorderStrong                                                                         ui.Color
+	Border, BorderStrong, BorderSubtle, TopHighlight, ShadowAmbient                              ui.Color
 	Text, TextMuted                                                                              ui.Color
 	Accent, AccentHover, AccentText                                                              ui.Color
 	Success, Warning, Danger                                                                     ui.Color
@@ -285,6 +285,15 @@ func DarkTokens() Tokens {
 
 func aliases(t Tokens) Tokens {
 	t.CardBackground, t.CardBorder = t.Elevated, t.Border
+	if t.Dark {
+		t.BorderSubtle = ui.RGBA(255, 255, 255, 0.08)
+		t.TopHighlight = ui.RGBA(255, 255, 255, 0.06)
+		t.ShadowAmbient = ui.RGBA(0, 0, 0, 0.36)
+	} else {
+		t.BorderSubtle = t.Border.Alpha(0.65)
+		t.TopHighlight = ui.Transparent
+		t.ShadowAmbient = ui.RGBA(15, 23, 42, 0.08)
+	}
 	t.SuccessBg, t.SuccessText = t.Surface, t.Success
 	t.WarningBg, t.WarningText = t.Surface, t.Warning
 	t.DangerBg, t.DangerText = t.Surface, t.Danger
