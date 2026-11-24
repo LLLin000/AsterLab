@@ -355,22 +355,22 @@ func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, ti
 				v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, maxH, 1)
 			})
 		} else {
-			dropBox := ui.Column(c.Key("live-fig-empty:"+moduleID)).FillWidth().
-				Padding(float32(tok.Spacing24), float32(tok.Spacing16)).
-				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
-				AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+			dropBox := ui.Row(c.Key("live-fig-empty:"+moduleID)).FillWidth().
+				Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+				Radius(float32(tok.ControlRadius)).Background(tok.Elevated.Alpha(0.7)).Border(1, tok.Border).
+				AlignItems(ui.Center).Gap(float32(tok.Spacing12))
 			dropBox.Children(func() {
-				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing24), float32(tok.Spacing24)).TextColor(tok.TextMuted)
-				ui.Text(c, "拖入实验照片 / 示意图，或 Ctrl+V 直接粘贴剪贴板截图").
-					FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
-				ui.Row(c).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted).Shrink(0)
+				ui.Text(c, "拖入或点击添加实验图 / SVG").
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+				ui.Row(c).Shrink(0).Gap(float32(tok.Spacing4)).Children(func() {
 					if v.OnPickFigureFile != nil && editableDesign {
-						if components.Button(c, "选择本地图片", components.ButtonSecondary).Clicked() {
+						if components.Button(c, "选择文件", components.ButtonGhost).Clicked() {
 							v.OnPickFigureFile(v.StepID, moduleID)
 						}
 					}
 					if editableDesign {
-						if components.Button(c, "粘贴剪贴板图片", components.ButtonOutline).Clicked() {
+						if components.Button(c, "粘贴", components.ButtonGhost).Clicked() {
 							pasteFromClipboard()
 						}
 					}
@@ -378,37 +378,44 @@ func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, ti
 			})
 		}
 
-		// Clean inline caption below figure (clicks/blurs auto-save; zoom button stays accessible on touch/mobile)
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-			if editableDesign {
-				capBuf := v.ensureWidgetDraft("fig:"+moduleID+":cap", caption)
-				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-					ti := BorderlessTextInput(c, tok, capBuf, float32(tok.TextMeta), false, "点击添加图注（如 显微镜明场 10x、手绘接种流路拍照）…").
-						TextColor(tok.TextMuted)
-					if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*capBuf) != strings.TrimSpace(caption)) {
-						v.emitAnyModuleEdit(moduleID, map[string]any{"caption": strings.TrimSpace(*capBuf)})
-					}
-				})
-			} else if caption != "" {
-				ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
-			} else {
-				ui.Spacer(c)
-			}
-			if hasGraphic {
-				zoomOp := float32(0.55)
-				if cardHover || v.MobileCompact {
-					zoomOp = 1.0
+		// Clean inline caption below figure (subtle placeholder shown on hover/focus or when graphic exists)
+		capBuf := v.ensureWidgetDraft("fig:"+moduleID+":cap", caption)
+		showCapRow := hasGraphic || strings.TrimSpace(*capBuf) != "" || cardHover
+		if showCapRow && (editableDesign || caption != "" || hasGraphic) {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				if editableDesign {
+					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+						capPh := ""
+						if cardHover || strings.TrimSpace(*capBuf) != "" {
+							capPh = "添加图注…"
+						}
+						ti := BorderlessTextInput(c, tok, capBuf, float32(tok.TextMeta), false, capPh).
+							TextColor(tok.TextMuted)
+						if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*capBuf) != strings.TrimSpace(caption)) {
+							v.emitAnyModuleEdit(moduleID, map[string]any{"caption": strings.TrimSpace(*capBuf)})
+						}
+					})
+				} else if caption != "" {
+					ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+				} else {
+					ui.Spacer(c)
 				}
-				zoomWrap := ui.Box(c.Key("fig-zoom-wrap:" + moduleID)).Shrink(0)
-				zoomWrap.Opacity(zoomWrap.AnimateTo("fz-op", zoomOp, theme.MotionMicroFade)).Children(func() {
-					if components.IconButton(c, lucide.Maximize2(), "放大查看", components.IconButtonCompact).Clicked() {
-						v.ExpandedFigureID = moduleID
-						v.FigureZoom = 1
-						v.figureOpen = true
+				if hasGraphic {
+					zoomOp := float32(0)
+					if cardHover || v.MobileCompact {
+						zoomOp = 1.0
 					}
-				})
-			}
-		})
+					zoomWrap := ui.Box(c.Key("fig-zoom-wrap:" + moduleID)).Shrink(0)
+					zoomWrap.Opacity(zoomWrap.AnimateTo("fz-op", zoomOp, theme.MotionMicroFade)).Children(func() {
+						if components.IconButton(c, lucide.Maximize2(), "放大查看", components.IconButtonCompact).Clicked() {
+							v.ExpandedFigureID = moduleID
+							v.FigureZoom = 1
+							v.figureOpen = true
+						}
+					})
+				}
+			})
+		}
 	})
 
 	if editableDesign {
