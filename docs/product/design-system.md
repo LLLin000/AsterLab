@@ -237,3 +237,19 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | 3 档界面密度 | `internal/theme/theme.go` (`UiDensity`) | 支持 `compact`（紧凑 `0.85x`）/ `default`（默认 `1.0x`）/ `comfortable`（宽松 `1.15x`），持久化于 `.asterlab/config.json`，通过设置中心实时切换 |
 | 暗色模式附图柔光 + `onevra` 数值输入 | `asterdoc/{widget_figure,widget_serial_dilution}.go` | Obsidian 风格暗色正文图片 `0.86` 柔光减刺眼、悬停回升 `1.0`；倍比稀释等精确数值步进使用 `onevra/components.NumberInput` 与 `HoldToConfirm` |
 | 储藏室 · 动物房与实验动物矢量贴纸 | `internal/uikit/labsticker/animals.go` + `internal/tools/vivarium.go` + `pantry_store.go` | 在 `储藏室` 顶部与试剂耗材平级隔离为 `[ 试剂耗材 \| 动物房 ]`，基于 **IACUC + ARRIVE 2.0 + GB 14925-2023 SPF** 设计笼卡与动物台账表单（伦理批件、品系/基因型、♂/♀ 存栏、自动周龄、体征称重、SPF 设施/房/架/笼、单笼密度合规预警、健康福祉记录），数据以 `type: "vivarium"` 写入同一 `pantry.jsonl`；内置 8 枚无 `<text>` 纯矢量实验室动物贴纸（小白鼠、C57黑鼠、裸鼠、SD大鼠、新西兰兔、比格犬、豚鼠、斑马鱼） |
+
+---
+
+## 13. 全站 UI 组件画廊（Full Storybook）与 6 大底层 UI 交互引擎（2026-11-24）
+
+借鉴 **Zed GPUI (`gpui-storybook` + `Command`/Action)、Ariakit / React Aria (`OverlayLayerStack`)、Blender / Figma (`ScrubNumber` 三态指针机)、Linear / Twenty / Plane (`SidePeek` + `ToastQueue` + `FilterBar`) 与 Rerun (`Inspector`)** 的核心交互架构，将 `internal/uikit/kit` 升级为涵盖交互逻辑层与全站视觉回归基线：
+
+| 引擎 / 能力 | 实现位置 | 核心机制与规则 |
+|---|---|---|
+| 集中式浮层栈 (`LayerStack`) | `internal/uikit/kit/layer_stack.go` + `shell/shell.go` | 按绘制层级（Welcome → VaultLauncher → Feedback → Settings → Storybook → GlobalSearch → CommandPalette → Tour）登记活跃浮层；全局 `Escape` 严格逐层退栈关闭最顶层 |
+| 单真源命令注册表 (`CommandRegistry`) | `internal/uikit/kit/commands.go` + `shell/commands_registry.go` | 以 `when` 上下文谓词（`ModalOpen`/`TextInputFocused`/`IsFileTab`/`ModeLab`）统一管理快捷命令、快捷键覆盖及命令面板检索入口，禁止多处硬编码副本漂移 |
+| 拖拽数值微调 (`ScrubNumber`) | `internal/uikit/kit/scrub_number.go` | 实现 `idle → pointing → 3px deadzone → dragging → editing` 显式指针状态机（`Shift` 0.1x 精细、`Ctrl/Cmd` 5x 快速、`Esc` 回滚），松手才触发 `Committed=true` 单次原子持久化（用于 `SidePeek` 存栏/体重、台账表格内联称重与倍比稀释体积微调） |
+| 乐观撤销提示队列 (`ToastQueue`) | `internal/uikit/kit/toast.go` + `shell/shell.go` | 右下角非阻塞浮层队列（最多叠放 3 条、自动过期清理、不覆盖背景点击），支持 `撤销` 回调（动物房删除笼卡支持一键撤销恢复） |
+| 侧滑详情检查器 (`SidePeek`) | `internal/uikit/kit/side_peek.go` + `tools/vivarium.go` | 动物房点击笼卡或台账笼号优先于右侧滑出 `SidePeek`，保留左侧全局笼架/台账视野，支持无缝跳转完整模态弹窗或触发 Rerun 风格右抽屉检查器 (`RenderVivariumInspector`) |
+| 多条件组合筛选栏 (`FilterBar`) | `internal/uikit/kit/filter_bar.go` + `tools/vivarium.go` | 支持快捷预设视图 + `+ 筛选` 多维度组合胶囊（可点 `×` 单独移除条件，用于动物房设施/状态/物种/密度告警多维过滤） |
+| 全站 UI 组件画廊 (Full Storybook) | `internal/uikit/kit/gallery.go` + `shell/storybook.go` + `storybook_sections.go` | 通过 `kit.StorySection` 无环注入覆盖 **6 大板块**（1. 全局 Token/色板/字体/海拔/动效沙盒；2. 基础控件 + 6 大 UI 引擎；3. 孔板/平皿/管架/全量试剂与 8 种动物贴纸；4. 全局 Shell 壳层；5. AsterML v2 文档模块；6. 动物房与边界压测），顶部支持实时切换浅/深色、三色盘、三档密度与 `520dp` 窄屏边界 |

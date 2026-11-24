@@ -188,10 +188,15 @@ type Shell struct {
 	SelectedTreePath     string
 	CreateTargetFolder   string
 	CreateTargetTemplate string
-	VaultSettingsOpen    bool
-	ComponentGalleryOpen bool
-	galleryState         kit.GalleryState
-	SettingsView         components.SettingsState
+	VaultSettingsOpen     bool
+	ComponentGalleryOpen  bool
+	galleryState          kit.GalleryState
+	GalleryExtraSections  []kit.StorySection
+	Layers                kit.LayerStack
+	Commands              *kit.CommandRegistry
+	Toasts                *kit.ToastQueue
+	RenderPantryInspector func(c *ui.Context, tok theme.Tokens)
+	SettingsView          components.SettingsState
 	AboutMonochromeLogo bool
 	ThemeSource         string // system | light | dark
 	TextScale           float32
@@ -599,7 +604,11 @@ func (s *Shell) SyncThemeLook(c *ui.Context) theme.Tokens {
 func (s *Shell) page(c *ui.Context) {
 	s.EnsureTabs()
 	tok := s.SyncThemeLook(c)
-	s.handleGlobalShortcuts(c)
+	s.ensureCommandRegistry()
+	s.registerShellOverlays(c)
+	if !s.Layers.HandleEscape(c) {
+		s.handleGlobalShortcuts(c)
+	}
 
 	t := c.Theme()
 	if s.IsMobileLayout(c) {
@@ -644,6 +653,9 @@ func (s *Shell) page(c *ui.Context) {
 	if s.RenderOverlays != nil {
 		s.RenderOverlays(c)
 	}
+	if s.Toasts != nil {
+		s.Toasts.Render(c, tok)
+	}
 }
 
 func (s *Shell) renderComponentGalleryDialog(c *ui.Context) {
@@ -654,29 +666,30 @@ func (s *Shell) renderComponentGalleryDialog(c *ui.Context) {
 	open := s.ComponentGalleryOpen
 	w, h := c.Size()
 	if w <= 0 {
-		w = 1040
+		w = 1280
 	}
 	if h <= 0 {
-		h = 760
+		h = 880
 	}
-	dlgW := min(float32(tok.Spacing48)*20, w*0.92)
-	dlgH := min(float32(tok.Spacing48)*15, h*0.88)
+	dlgW := min(float32(tok.Spacing48)*26.5, w*0.95)
+	dlgH := min(float32(tok.Spacing48)*18.2, h*0.92)
 	ui.Box(c.Key("kit-gallery-dlg")).Children(func() {
-		components.Dialog(c, &open, components.DialogOptions{Label: "AsterLab UI 组件画廊"}, func(panel ui.Element) {
+		components.Dialog(c, &open, components.DialogOptions{Label: "AsterLab 全站 UI 组件画廊"}, func(panel ui.Element) {
 			panel.Width(dlgW).Height(dlgH).Padding(0).Gap(0).Clip()
 			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 			panel.Children(func() {
 				ui.Row(c).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
 					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					ui.Icon(c, lucide.Layers()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
-					ui.Text(c, "UI 组件画廊").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+					ui.Text(c, "全站 UI 组件画廊 (Storybook)").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 					ui.Spacer(c)
 					if components.IconButton(c, lucide.X(), "关闭画廊", components.IconButtonPlain).Clicked() {
 						open = false
 					}
 				})
 				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
-				kit.RenderComponentGallery(c, &s.galleryState)
+				extra := append([]kit.StorySection{s.BuiltinShellStorySection()}, s.GalleryExtraSections...)
+				kit.RenderComponentGallery(c, &s.galleryState, extra...)
 			})
 		})
 	})

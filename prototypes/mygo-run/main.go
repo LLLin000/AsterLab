@@ -18,6 +18,7 @@ import (
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/updater"
 	"asterlab-mygo-prototype/internal/vault"
 	"asterlab-mygo-prototype/internal/workflow"
@@ -4655,6 +4656,11 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 		OpenExternalURL: func(rawURL string) error {
 			return a.openPantryExternalURL(rawURL)
 		},
+		OnToast: func(t kit.Toast) {
+			if a.shell != nil {
+				a.shell.PushToast(t)
+			}
+		},
 	})
 }
 
@@ -4996,9 +5002,15 @@ func main() {
 				},
 			},
 		}, a.devInspectorPaletteCommands()...),
-		OnImport: func() { a.importOpen = true },
-		OnPage:   func(p shell.Page) { a.shell.Page = p; a.saveVaultWorkspace() },
-		Content:  func(c *ui.Context) { contentPage(c, a) },
+		OnImport:             func() { a.importOpen = true },
+		OnPage:               func(p shell.Page) { a.shell.Page = p; a.saveVaultWorkspace() },
+		GalleryExtraSections: a.buildStorybookExtraSections(),
+		RenderPantryInspector: func(c *ui.Context, tok theme.Tokens) {
+			if a.tools != nil {
+				a.tools.RenderVivariumInspector(c, tok)
+			}
+		},
+		Content: func(c *ui.Context) { contentPage(c, a) },
 	}
 
 	// runui workspace.
