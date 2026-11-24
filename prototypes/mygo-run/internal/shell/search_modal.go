@@ -9,6 +9,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/vault"
 )
 
@@ -83,11 +84,7 @@ func (s *Shell) renderGlobalSearchModal(c *ui.Context) {
 		components.Dialog(c, &open, components.DialogOptions{Label: "Vault 全局全文搜索"}, func(panel ui.Element) {
 			panel.Width(float32(tok.Spacing48)*12.5).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing8)).
 				MaxHeight(float32(tok.Spacing48) * 12.0)
-			if tok.Dark {
-				panel.Background(tok.Surface).Border(1, tok.BorderStrong)
-			} else if tok.LiquidGlass {
-				theme.ApplyPanelGlass(panel, tok, 0.36)
-			}
+			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 			panel.Children(func() {
 				if len(hits) > 0 {
 					if panel.Shortcut(0, ui.KeyDown) {
@@ -132,10 +129,7 @@ func (s *Shell) renderGlobalSearchModal(c *ui.Context) {
 				}
 
 				if len(hits) == 0 {
-					ui.Column(c).FillWidth().Padding(float32(tok.Spacing24)).Center().Gap(float32(tok.Spacing4)).Children(func() {
-						components.Text(c, "未找到包含该关键词的实验文档").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.TextMuted)
-						components.Text(c, "尝试更换试剂名、细胞系名称或实验日期。").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					})
+					kit.EmptyState(c, tok, lucide.FileSearch(), "未找到包含该关键词的实验文档", "尝试更换试剂名、细胞系名称或实验日期。", "", nil)
 					return
 				}
 

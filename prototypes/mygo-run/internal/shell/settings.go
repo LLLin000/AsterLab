@@ -45,7 +45,7 @@ func (s *Shell) ensureSettingsDefaults() {
 	}
 	s.SyncThemeLook(nil)
 	if s.Density == "" {
-		s.Density = "comfortable"
+		s.Density = theme.DensityDefault
 	}
 	if s.DefaultOpenMode == "" {
 		s.DefaultOpenMode = "edit"
@@ -129,7 +129,11 @@ func (s *Shell) renderObsidianSettingsDialog(c *ui.Context) {
 			})
 		})
 	})
-	s.VaultSettingsOpen = open
+	if s.ComponentGalleryOpen {
+		s.VaultSettingsOpen = false
+	} else {
+		s.VaultSettingsOpen = open
+	}
 }
 
 func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsCategory {
@@ -538,6 +542,37 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						},
 					},
 					{
+						ID:       "ui-density",
+						Title:    "界面密度",
+						Keywords: []string{"density", "compact", "comfortable", "密度", "紧凑", "舒展"},
+						Build: func(c *ui.Context) {
+							s.Density = theme.NormalizeDensity(s.Density)
+							options := []string{theme.DensityCompact, theme.DensityDefault, theme.DensityComfortable}
+							names := map[string]string{
+								theme.DensityCompact:     "紧凑",
+								theme.DensityDefault:     "标准",
+								theme.DensityComfortable: "舒展",
+							}
+							sel := components.Select(c, &s.Density)
+							sel.Trigger.MinWidth(c.Theme().Space(32)).Children(func() {
+								components.Text(c, firstNonEmptyStr(names[s.Density], names[theme.DensityDefault])).SingleLine()
+							})
+							sel.Popup(func(panel ui.Element) {
+								for _, opt := range options {
+									opt := opt
+									sel.Item(opt).Children(func() {
+										components.Text(c, names[opt]).SingleLine()
+									})
+								}
+							})
+							if sel.Trigger.Changed() {
+								s.SyncThemeLook(c)
+								s.notifySettingsChanged()
+								c.Invalidate()
+							}
+						},
+					},
+					{
 						ID:       "reduce-motion",
 						Title:    "减弱动效",
 						Keywords: []string{"motion", "animation", "reduce", "动效", "无障碍"},
@@ -811,6 +846,9 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								}
 								if components.Button(c, "反馈问题 / 建议", components.ButtonPrimary).Clicked() {
 									s.FeedbackOpen = true
+								}
+								if components.Button(c, "UI 组件画廊", components.ButtonGhost).Clicked() {
+									s.ComponentGalleryOpen = true
 								}
 							})
 						},

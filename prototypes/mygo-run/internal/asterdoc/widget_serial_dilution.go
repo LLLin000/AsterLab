@@ -154,6 +154,15 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 					stDraft := v.ensureWidgetDraft("sd:"+moduleID+":steps", strconv.Itoa(steps))
 					vDraft := v.ensureWidgetDraft("sd:"+moduleID+":vpu", formatNumber(finalVolUL))
 
+					dfVal := df
+					if parsed, err := strconv.ParseFloat(strings.TrimSpace(*dfDraft), 64); err == nil && parsed > 1 {
+						dfVal = parsed
+					}
+					stepsVal := float64(steps)
+					if parsed, err := strconv.Atoi(strings.TrimSpace(*stDraft)); err == nil && parsed >= 1 && parsed <= 12 {
+						stepsVal = float64(parsed)
+					}
+
 					ui.Row(c).FillWidth().Padding(2).Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 						for _, vm := range []struct {
 							id    string
@@ -197,13 +206,23 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Text(c, "倍比 D").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48)*1.5)
 						ui.Box(c).Grow(1).Children(func() {
-							components.TextBox(c, dfDraft, components.TextBoxOptions{}).Placeholder("10")
+							ni := components.NumberInput(c, &dfVal, 2, 1000, 1, components.NumberInputOptions{
+								LeadingText: "×",
+							}).Label("倍比 D")
+							if ni.Changed() {
+								*dfDraft = formatNumber(dfVal)
+							}
 						})
 					})
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Text(c, "级数 (列/管)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48)*1.5)
 						ui.Box(c).Grow(1).Children(func() {
-							components.TextBox(c, stDraft, components.TextBoxOptions{}).Placeholder("6")
+							ni := components.NumberInput(c, &stepsVal, 1, 12, 1, components.NumberInputOptions{
+								LeadingText: "#",
+							}).Label("级数")
+							if ni.Changed() {
+								*stDraft = strconv.Itoa(int(math.Round(stepsVal)))
+							}
 						})
 					})
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {

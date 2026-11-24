@@ -698,10 +698,18 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 			})
 			return
 		}
-		ui.Row(c).FillWidth().Justify(ui.Center).
+		imgRow := ui.Row(c).FillWidth().Justify(ui.Center).
 			Padding(float32(tok.Spacing12), float32(tok.Spacing12), float32(tok.Spacing16), float32(tok.Spacing12)).
-			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Children(func() {
-			ui.Image(c, imgSrc).Height(maxH * zoom)
+			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle)
+		imgRow.Children(func() {
+			imgEl := ui.Image(c, imgSrc).Height(maxH * zoom)
+			if tok.Dark && zoom <= 1 {
+				op := float32(0.86)
+				if imgRow.Hovered() {
+					op = 1.0
+				}
+				imgEl.Opacity(imgRow.AnimateTo("fig-dark-op", op, theme.MotionMicroFade))
+			}
 		})
 	}
 }

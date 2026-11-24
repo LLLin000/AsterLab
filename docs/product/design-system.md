@@ -221,3 +221,19 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 5. **计算器自解释表格解剖规范**：
    - 顶部必须提供清晰表头（`项目名称 | 公式代号 | 数值 / 公式表达式 | 单位 | 计算结果`）及一键预设模板菜单。
    - 公式代号以等宽浅底代码胶囊呈现（保留 `_` 合法变量字符），修改代号时自动词边界联动重写同表公式；输入行右侧静默标示「输入项」，公式行左侧显 `=` 徽标且右侧以 Accent 粗体突出计算输出。
+
+---
+
+## 12. 统一应用级 UI 框架（`internal/uikit/kit`）、状态 Token、三档密度与动物房（2026-11-24）
+
+借鉴 **Zed GPUI / Radix Themes / Obsidian Minimal / AFFiNE** 的统一系统层设计，应用层 UI 原语收口在 `internal/uikit/kit`（受 `scripts/ci/check_ui_hygiene.py` 同等约束）：
+
+| 原语 / 能力 | 实现位置 | 核心规则 |
+|---|---|---|
+| 交互态与投影 Token | `internal/theme/theme.go` (`Tokens`) | 统一 `ElementHover/Active/Selected`、`GhostHover/Active/Selected`、`BorderFocused/Selected/Disabled`、`TextPlaceholder/Disabled`、`DropTargetBg/Border` 及暗色 `TopHighlight`（Zed 顶边 `1px` 内高光）。调用点禁止硬编码阴影或 `components.ContextMenu` |
+| 四层物理高度 | `internal/uikit/kit/elevation.go` (`Elevation`) | `ElevationCanvas` → `ElevationSurface`（悬浮工具条）→ `ElevationPopup`（右键菜单/浮层、`top + 1px` 暗色内高光 + 柔阴影）→ `ElevationModal`（命令面板/搜索/设置弹窗） |
+| 光标锚定右键菜单 | `internal/uikit/kit/context_menu.go` (`kit.ContextMenu` / `kit.Menu`) | 统一定位到 `1×1` 右键点击坐标，内部自包含 `OverlayPortal` 与键盘/外部点击关闭；`shell` / `asterdoc` / `tools` 禁止直接调用 `components.ContextMenu` |
+| 按键胶囊 / 列表行 / 空态与横幅 | `internal/uikit/kit/{keycap,list_item,empty_banner}.go` | `kit.Keycap` 渲染键盘组合键（命令面板与工具提示）；`kit.ListItem` 统一文件树/命令面板/搜索行高与选中指示；`kit.EmptyState` / `kit.InlineBanner` / `kit.SectionHeader` 统一空态与提示条；`kit.RenderComponentGallery` 在「设置 → 外观与布局 → UI 组件画廊」中提供统一预览与交互验证 |
+| 3 档界面密度 | `internal/theme/theme.go` (`UiDensity`) | 支持 `compact`（紧凑 `0.85x`）/ `default`（默认 `1.0x`）/ `comfortable`（宽松 `1.15x`），持久化于 `.asterlab/config.json`，通过设置中心实时切换 |
+| 暗色模式附图柔光 + `onevra` 数值输入 | `asterdoc/{widget_figure,widget_serial_dilution}.go` | Obsidian 风格暗色正文图片 `0.86` 柔光减刺眼、悬停回升 `1.0`；倍比稀释等精确数值步进使用 `onevra/components.NumberInput` 与 `HoldToConfirm` |
+| 储藏室 · 动物房与实验动物矢量贴纸 | `internal/uikit/labsticker/animals.go` + `internal/tools/vivarium.go` + `pantry_store.go` | 在 `储藏室` 顶部与试剂耗材平级隔离为 `[ 试剂耗材 \| 动物房 ]`，基于 **IACUC + ARRIVE 2.0 + GB 14925-2023 SPF** 设计笼卡与动物台账表单（伦理批件、品系/基因型、♂/♀ 存栏、自动周龄、体征称重、SPF 设施/房/架/笼、单笼密度合规预警、健康福祉记录），数据以 `type: "vivarium"` 写入同一 `pantry.jsonl`；内置 8 枚无 `<text>` 纯矢量实验室动物贴纸（小白鼠、C57黑鼠、裸鼠、SD大鼠、新西兰兔、比格犬、豚鼠、斑马鱼） |

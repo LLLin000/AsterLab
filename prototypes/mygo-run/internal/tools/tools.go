@@ -45,6 +45,8 @@ type Callbacks struct {
 	SavePantryMeta      func(map[string]PantryItemMeta) error
 	LoadPantryBoxes     func() ([]PantryBox, error)
 	SavePantryBoxes     func([]PantryBox) error
+	LoadVivarium        func() ([]VivariumCage, error)
+	SaveVivarium        func([]VivariumCage) error
 	PickManualFiles     func() ([]string, error)
 	PickStickerImage    func() (string, error)
 	ImportPantryFile    func(itemKey, srcPath string) (storedRel, fileName string, sizeBytes int64, err error)
@@ -121,6 +123,22 @@ type Workspace struct {
 	boxDialogErr        string
 	boxConfirmDel       bool
 	boxEditingID        string
+
+	// Level 3 Vivarium (动物房: 实验动物笼卡与繁育/福利/伦理合规台账)
+	pantryDomainTab      int // 0 = 试剂耗材, 1 = 动物房
+	VivariumCages        []VivariumCage
+	vivariumLoaded       bool
+	vivariumViewTab      int // 0 = 笼架视图, 1 = 动物台账
+	vivariumSearch       string
+	vivariumFilter       string // ""|"all"|"SPF"|"in_study"|"quarantine_breeding"|"density_alert"
+	VivariumDialogOpen   bool
+	vivariumDraft        VivariumCage
+	vivariumMaleF        float64
+	vivariumFemaleF      float64
+	vivariumWeightF      float64
+	vivariumEditingID    string
+	vivariumDialogErr    string
+	vivariumHoldDelReady bool
 }
 
 func New(cb Callbacks) *Workspace {
@@ -137,6 +155,7 @@ func New(cb Callbacks) *Workspace {
 	w.ReloadPantry()
 	w.EnsurePantryMetaLoaded()
 	w.EnsurePantryBoxesLoaded()
+	w.EnsureVivariumLoaded()
 	return w
 }
 
@@ -372,6 +391,7 @@ func ViewPantry(c *ui.Context, w *Workspace) {
 	})
 	w.renderPantryDetailDialog(c)
 	w.renderPantryBoxDialog(c)
+	renderVivariumDialog(c, w, theme.GetTokens(c.Theme()))
 }
 
 func View(c *ui.Context, w *Workspace) {
@@ -454,6 +474,7 @@ func View(c *ui.Context, w *Workspace) {
 	if w.Active == ToolPantry {
 		w.renderPantryDetailDialog(c)
 		w.renderPantryBoxDialog(c)
+		renderVivariumDialog(c, w, tok)
 	}
 }
 

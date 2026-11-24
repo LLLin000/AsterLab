@@ -126,7 +126,7 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 						btn.Background(tok.Surface).Border(1, tok.Border.Alpha(0.75))
 						fg = tok.Text
 					} else if btn.Hovered() {
-						btn.Background(tok.Text.Alpha(0.04))
+						btn.Background(tok.GhostHover)
 						fg = tok.Text
 					}
 					btn.Children(func() {
@@ -138,7 +138,7 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 				}
 			})
 		})
-		ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.5))
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
 
 		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {

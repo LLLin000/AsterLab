@@ -11,6 +11,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 // StageLabel returns the human-readable Chinese lifecycle label for an ExperimentStage.
@@ -666,7 +667,7 @@ func (s *Shell) renderAppleMonthGrid(c *ui.Context, tok theme.Tokens, cursor tim
 								s.OnSetExperimentDate(dragged.FilePath, ymd)
 							}
 						}
-						components.ContextMenu(c, btn, func(m *components.Menu) {
+						kit.ContextMenu(c, btn, func(m *kit.Menu) {
 							if m.Item("在此日新建实验").Chosen() {
 								s.SelectedDate = ymd
 								s.triggerCreateForDate(ymd)
@@ -731,7 +732,7 @@ func (s *Shell) renderAppleEventPill(c *ui.Context, tok theme.Tokens, exp Experi
 	})
 	if exp.FilePath != "" {
 		pill.Drag(exp)
-		components.ContextMenu(c, pill, func(m *components.Menu) {
+		kit.ContextMenu(c, pill, func(m *kit.Menu) {
 			if m.Item("打开").Chosen() {
 				s.openExperiment(exp)
 			}
@@ -745,7 +746,7 @@ func (s *Shell) renderAppleEventPill(c *ui.Context, tok theme.Tokens, exp Experi
 				s.OnSetExperimentDate(exp.FilePath, "")
 			}
 			if len(s.VaultFolders) > 0 && s.OnVaultMove != nil {
-				m.Group("移动至项目", func(sub *components.Menu) {
+				m.Group("移动至项目", func(sub *kit.Menu) {
 					if sub.Item("根目录 /").Chosen() {
 						s.OnVaultMove(exp.FilePath, "")
 					}

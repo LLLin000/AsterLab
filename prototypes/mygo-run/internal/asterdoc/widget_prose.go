@@ -8,6 +8,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 // renderUnifiedModuleShell enforces one consistent visual anatomy across all structured
@@ -35,15 +36,11 @@ func renderUnifiedModuleShell(
 		box.FillHeight()
 	}
 	if isTopLevel {
-		cardBorder := tok.BorderSubtle
+		box.Padding(float32(tok.Spacing12), float32(tok.Spacing16))
+		kit.ApplyElevation(box, tok, kit.ElevationCard)
 		if box.Hovered() {
-			cardBorder = tok.Border
+			box.Border(1, box.AnimateColor("mcbd", tok.Border, theme.MotionInstant))
 		}
-		box.Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-			Radius(float32(tok.PanelRadius)).
-			Background(tok.Surface).
-			Border(1, box.AnimateColor("mcbd", cardBorder, theme.MotionInstant)).
-			Shadow(0, 1, 3, 0, tok.ShadowAmbient)
 	} else {
 		box.Padding(float32(tok.Spacing4), 0)
 	}

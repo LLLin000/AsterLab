@@ -12,6 +12,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 )
 
@@ -66,8 +67,8 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 		metaSummary = fmt.Sprintf("已关联 %d 处对象", len(rr.Contexts))
 	}
 	card := ui.Column(c.Key("emb-card:" + cardKey)).FillWidth().
-		Padding(float32(tok.Spacing12), float32(tok.Spacing16)).Radius(float32(tok.PanelRadius)).
-		Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing12))
+		Padding(float32(tok.Spacing12), float32(tok.Spacing16)).Gap(float32(tok.Spacing12))
+	kit.ApplyElevation(card, tok, kit.ElevationCard)
 
 	cardHover := card.Hovered()
 	card.Children(func() {
@@ -90,7 +91,7 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 					v.figureOpen = true
 				}
 			})
-			ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.55))
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
 		})
 
 		// 1. Image canvas (reuses unified async figure loader & zoom dialog)

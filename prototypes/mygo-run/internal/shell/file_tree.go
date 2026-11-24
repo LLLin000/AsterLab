@@ -10,6 +10,7 @@ import (
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/vault"
 )
 
@@ -173,7 +174,7 @@ func (s *Shell) renderFileTreeScrollBody(c *ui.Context, tok theme.Tokens) {
 	}
 
 	// Context menu on file tree background
-	components.ContextMenu(c, scrollArea, func(m *components.Menu) {
+	kit.ContextMenu(c, scrollArea, func(m *kit.Menu) {
 		if m.Item("新建实验").Shortcut("Ctrl+N").Chosen() {
 			s.triggerVaultNewFile("")
 		}
@@ -298,7 +299,7 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 			row.Drag(fileDragPayload{RelPath: node.RelPath, Title: node.Name, IsDir: true})
 		}
 
-		components.ContextMenu(c, row, func(m *components.Menu) {
+		kit.ContextMenu(c, row, func(m *kit.Menu) {
 			if m.Item("在此文件夹新建实验").Chosen() {
 				s.triggerVaultNewFile(node.RelPath)
 			}
@@ -310,7 +311,7 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 			}
 			// UI-10: Obsidian-style per-folder default template binding
 			if !node.IsSystem && s.OnSetFolderTemplate != nil {
-				m.Group("绑定文件夹默认模板", func(sub *components.Menu) {
+				m.Group("绑定文件夹默认模板", func(sub *kit.Menu) {
 					bound := ""
 					if s.FolderTemplates != nil {
 						bound = s.FolderTemplates[node.RelPath]
@@ -454,7 +455,7 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 		row.Drag(fileDragPayload{RelPath: node.RelPath, Title: titleVal, Date: dateVal})
 	}
 
-	components.ContextMenu(c, row, func(m *components.Menu) {
+	kit.ContextMenu(c, row, func(m *kit.Menu) {
 		if entry != nil && !isAsset {
 			if m.Item("打开").Chosen() {
 				s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, s.DefaultFileOpenMode(), false)
@@ -485,7 +486,7 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 				s.OnVaultSaveTemplate(entry.RelPath)
 			}
 			if len(s.VaultFolders) > 0 && s.OnVaultMove != nil {
-				m.Group("移动至", func(sub *components.Menu) {
+				m.Group("移动至", func(sub *kit.Menu) {
 					if sub.Item("根目录 /").Chosen() {
 						s.OnVaultMove(entry.RelPath, "")
 					}
