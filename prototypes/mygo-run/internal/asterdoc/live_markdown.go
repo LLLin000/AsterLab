@@ -54,17 +54,20 @@ type liveEditorEntry struct {
 }
 
 var (
-	reMDHeading   = regexp.MustCompile(`^(#{1,4})([ \t]+)`)
-	reMDTask      = regexp.MustCompile(`^([ \t]*[-*+][ \t]+)\[([ xX])\]`)
-	reMDBullet    = regexp.MustCompile(`^([ \t]*)([-*+])([ \t]+)`)
-	reMDBold      = regexp.MustCompile(`\*\*([^*\r\n]+?)\*\*`)
-	reMDItalic    = regexp.MustCompile(`(?:^|[^*])\*([^*\r\n]+?)\*(?:[^*]|$)`)
-	reMDCode        = regexp.MustCompile("`([^`\r\n]+?)`")
-	reMDStrike      = regexp.MustCompile(`~~([^~\r\n]+?)~~`)
-	reWikiBracket   = regexp.MustCompile(`(!?)\[\[([^\]|\r\n]+?)(?:\|([^\]\r\n]*))?\]\]`)
-	reMDDisplayMath = regexp.MustCompile(`^\s*\$\$(.+?)\$\$\s*$`)
-	reMDInlineMath  = regexp.MustCompile(`\$([^\$\r\n]+?)\$`)
-	rePlainSciPower = regexp.MustCompile(`\b(?:10|[a-zA-Z]{1,3})\^(?:\{[+-]?[0-9a-zA-Z]+\}|[+-]?[0-9]+)`)
+	reMDHeading       = regexp.MustCompile(`^(#{1,4})([ \t]+)`)
+	reMDCalloutHeader = regexp.MustCompile(`(?i)^[ \t]*>[ \t]*\[!(note|tip|info|warning|caution|important|danger|check|todo)\][ \t]*(.*)$`)
+	reMDEmojiCallout  = regexp.MustCompile(`^[ \t]*>[ \t]*(⚠️|⚠|💡|📌|❗|ℹ️|ℹ|✅)[ \t]*`)
+	reMDBlockquote    = regexp.MustCompile(`^[ \t]*>[ \t]?`)
+	reMDTask          = regexp.MustCompile(`^([ \t]*)([-*+][ \t]+)\[([ xX])\]`)
+	reMDBullet        = regexp.MustCompile(`^([ \t]*)([-*+])([ \t]+)`)
+	reMDBold          = regexp.MustCompile(`\*\*([^*\r\n]+?)\*\*`)
+	reMDItalic        = regexp.MustCompile(`(?:^|[^*])\*([^*\r\n]+?)\*(?:[^*]|$)`)
+	reMDCode          = regexp.MustCompile("`([^`\r\n]+?)`")
+	reMDStrike        = regexp.MustCompile(`~~([^~\r\n]+?)~~`)
+	reWikiBracket     = regexp.MustCompile(`(!?)\[\[([^\]|\r\n]+?)(?:\|([^\]\r\n]*))?\]\]`)
+	reMDDisplayMath   = regexp.MustCompile(`^\s*\$\$(.+?)\$\$\s*$`)
+	reMDInlineMath    = regexp.MustCompile(`\$([^\$\r\n]+?)\$`)
+	rePlainSciPower   = regexp.MustCompile(`\b(?:10|[a-zA-Z]{1,3})\^(?:\{[+-]?[0-9a-zA-Z]+\}|[+-]?[0-9]+)`)
 )
 
 func liveEditorTheme(t *ui.Theme, tok theme.Tokens) *editor.Theme {
@@ -135,12 +138,22 @@ func ComputeLivePreviewDecorations(
 	lineStart := 0
 	inCodeFence := false
 	fenceTicks := 0
+	activeCalloutTone := ""
 
 	var resolvedAll []ResolvedRelation
 	var stepTree *StepTree
+	usedAnchors := map[string]bool{}
 	if doc != nil {
 		resolvedAll = ResolveRelations(doc)
 		stepTree = ParseStepTree(doc.Source, doc)
+		flatMods, _ := flattenModules(doc.Modules)
+		for _, fm := range flatMods {
+			if fm.Kind == "timer" && strings.EqualFold(textValue(fm.Data, "mode"), "window") {
+				if anc := strings.TrimSpace(strings.TrimPrefix(textValue(fm.Data, "anchor"), "#")); anc != "" {
+					usedAnchors[anc] = true
+				}
+			}
+		}
 	}
 	resolvedBySpan := make(map[int]ResolvedRelation, len(resolvedAll))
 	for _, rr := range resolvedAll {
@@ -251,13 +264,33 @@ func ComputeLivePreviewDecorations(
 					})
 				}
 				if hs.AttrStart >= 0 && hs.AttrEnd > hs.AttrStart {
-					attrChip := ""
-					if hs.Anchor != "" {
-						attrChip = "#" + hs.Anchor
+					// UI-02: Only surface step time anchors when an active window timer references it;
+					// otherwise hide raw `{#t0}` syntax cleanly so headings stay focused for bench scientists.
+					if hs.Anchor != "" && usedAnchors[hs.Anchor] {
+						attrChip := "T₀ 起点"
+						if !strings.EqualFold(hs.Anchor, "t0") {
+							attrChip = strings.ToUpper(hs.Anchor) + " 锚点"
+						}
+						aW := estimateStepPillWidth(attrChip, float32(tok.TextMeta)) + float32(tok.Spacing4)
+						repls = append(repls, editor.Replacement{
+							Start: lineStart + hs.AttrStart,
+							End:   lineStart + hs.AttrEnd,
+							Width: aW,
+							Label: attrChip,
+							Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+								e.Row().AlignItems(ui.Center).Padding(0, 0, 0, float32(tok.Spacing4)).Children(func() {
+									ui.Row(c).Height(float32(tok.Spacing24)-4).Padding(0, float32(tok.Spacing8)*0.75).
+										AlignItems(ui.Center).AlignSelf(ui.Center).
+										Radius(float32(tok.ControlRadius)).
+										Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.28)).Children(func() {
+										ui.Text(c, attrChip).FontSize(float32(tok.TextMeta)).Bold().
+											TextColor(tok.Accent).SingleLine()
+									})
+								})
+							},
+						})
 					} else if hs.Optional {
-						attrChip = "可选"
-					}
-					if attrChip != "" {
+						attrChip := "可选"
 						aW := estimateStepPillWidth(attrChip, float32(tok.TextMeta)) + float32(tok.Spacing4)
 						repls = append(repls, editor.Replacement{
 							Start: lineStart + hs.AttrStart,
@@ -270,7 +303,7 @@ func ComputeLivePreviewDecorations(
 										AlignItems(ui.Center).AlignSelf(ui.Center).
 										Radius(float32(tok.ControlRadius)).
 										Background(tok.Elevated).Border(1, tok.Border).Children(func() {
-										ui.Text(c, attrChip).Font("monospace").FontSize(float32(tok.TextMeta)).
+										ui.Text(c, attrChip).FontSize(float32(tok.TextMeta)).
 											TextColor(tok.TextMuted).SingleLine()
 									})
 								})
@@ -370,20 +403,94 @@ func ComputeLivePreviewDecorations(
 			}
 		}
 
-		// 2. Task list `- [ ]` / `- [x]` -> Sleek 14x14 optically-centered checkbox on non-active lines
+		// 2-quote. UI-01: Obsidian Callouts (`> [!warning]`, `> ⚠️ ...`) & crisp blockquotes (`> ...`)
+		if cm := reMDCalloutHeader.FindStringSubmatchIndex(lineText); cm != nil {
+			kindKey := strings.ToLower(lineText[cm[2]:cm[3]])
+			activeCalloutTone = calloutToneFromKeyword(kindKey)
+			if !isActive {
+				titleTail := strings.TrimSpace(lineText[cm[4]:cm[5]])
+				col, icon, label := calloutVisualMeta(tok, activeCalloutTone)
+				prefixEnd := cm[4]
+				if titleTail == "" {
+					prefixEnd = cm[1]
+				}
+				badgeW := float32(tok.Spacing48) + float32(tok.Spacing12)
+				if titleTail == "" {
+					badgeW += float32(tok.Spacing8)
+				}
+				repls = append(repls, editor.Replacement{
+					Start: lineStart + cm[0],
+					End:   lineStart + prefixEnd,
+					Width: badgeW,
+					Label: label,
+					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+						e.Row().AlignItems(ui.Center).Padding(0, float32(tok.Spacing4), 0, 0).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(1.5).Background(col)
+							ui.Row(c).Height(float32(tok.Spacing24)-4).Padding(0, float32(tok.Spacing8)*0.75).
+								Radius(float32(tok.ControlRadius)).Background(col.Alpha(0.14)).
+								AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Icon(c, icon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(col)
+								ui.Text(c, label).FontSize(float32(tok.TextMeta)).Bold().TextColor(col).SingleLine()
+							})
+						})
+					},
+				})
+			}
+		} else if em := reMDEmojiCallout.FindStringSubmatchIndex(lineText); em != nil {
+			emTok := lineText[em[2]:em[3]]
+			activeCalloutTone = calloutToneFromEmoji(emTok)
+			if !isActive {
+				col, icon, _ := calloutVisualMeta(tok, activeCalloutTone)
+				repls = append(repls, editor.Replacement{
+					Start: lineStart + em[0],
+					End:   lineStart + em[1],
+					Width: float32(tok.Spacing24) + float32(tok.Spacing4),
+					Label: activeCalloutTone,
+					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+						e.Row().AlignItems(ui.Center).Padding(0, float32(tok.Spacing4), 0, 0).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(1.5).Background(col)
+							ui.Icon(c, icon).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(col)
+						})
+					},
+				})
+			}
+		} else if bm := reMDBlockquote.FindStringSubmatchIndex(lineText); bm != nil {
+			if activeCalloutTone == "" {
+				activeCalloutTone = "quote"
+			}
+			if !isActive {
+				col, _, _ := calloutVisualMeta(tok, activeCalloutTone)
+				repls = append(repls, editor.Replacement{
+					Start: lineStart + bm[0],
+					End:   lineStart + bm[1],
+					Width: float32(tok.Spacing12),
+					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+						e.Row().AlignItems(ui.Center).Children(func() {
+							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(1.5).Background(col.Alpha(0.8))
+						})
+					},
+				})
+			}
+		} else {
+			activeCalloutTone = ""
+		}
+
+		// 2. Task list `- [ ]` / `- [x]` -> Sleek 14x14 optically-centered checkbox + true multi-level indent (UI-04a)
 		if m := reMDTask.FindStringSubmatchIndex(lineText); m != nil {
 			if !isActive {
-				checked := lineText[m[4]:m[5]] != " "
+				indentLvl := listIndentLevel(lineText[m[2]:m[3]])
+				indentPx := float32(indentLvl) * float32(tok.Spacing24)
+				checked := lineText[m[6]:m[7]] != " "
 				boxStart := lineStart + m[0]
 				boxEnd := lineStart + m[1]
 				repls = append(repls, editor.Replacement{
 					Start:       boxStart,
 					End:         boxEnd,
-					Width:       float32(tok.Spacing24) - 2,
+					Width:       indentPx + float32(tok.Spacing24) - 2,
 					Interactive: allowCheckToggle,
 					Label:       map[bool]string{true: "已完成", false: "未完成"}[checked],
 					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
-						e.Row().AlignItems(ui.Center).Justify(ui.Start).Padding(0, float32(tok.Spacing4), 0, 0).Children(func() {
+						e.Row().AlignItems(ui.Center).Justify(ui.Start).Padding(0, float32(tok.Spacing4), 0, indentPx).Children(func() {
 							boxSz := float32(tok.Spacing12) + 2 // crisp 14dp optical checkbox matching 14dp body text
 							chkEl := ui.ButtonBase(c).Size(boxSz, boxSz).Radius(float32(tok.Spacing4)).
 								AlignSelf(ui.Center).KeepFocus().Label(r.Label)
@@ -409,13 +516,33 @@ func ComputeLivePreviewDecorations(
 				})
 			}
 		} else if m := reMDBullet.FindStringSubmatchIndex(lineText); m != nil && !isActive {
-			// Bullet `- ` -> crisp `•` dot
-			repls = append(repls, editor.Replacement{
-				Start: lineStart + m[4],
-				End:   lineStart + m[5],
-				Text:  "•",
-				Color: tok.Accent,
-			})
+			// UI-04a: Bullet `- ` with real visual nesting indentation (`24px`/level) + crisp dot
+			indentLvl := listIndentLevel(lineText[m[2]:m[3]])
+			if indentLvl > 0 {
+				indentPx := float32(indentLvl) * float32(tok.Spacing24)
+				glyph := "•"
+				if indentLvl >= 2 {
+					glyph = "◦"
+				}
+				repls = append(repls, editor.Replacement{
+					Start: lineStart + m[0],
+					End:   lineStart + m[1],
+					Width: indentPx + float32(tok.Spacing16),
+					Label: glyph,
+					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+						e.Row().AlignItems(ui.Center).Padding(0, float32(tok.Spacing4), 0, indentPx).Children(func() {
+							ui.Text(c, glyph).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Accent).SingleLine()
+						})
+					},
+				})
+			} else {
+				repls = append(repls, editor.Replacement{
+					Start: lineStart + m[4],
+					End:   lineStart + m[5],
+					Text:  "•",
+					Color: tok.Accent,
+				})
+			}
 		} else if om := reStepOrderedLine.FindStringSubmatchIndex(lineText); om != nil && !isActive {
 			// Clean tabular accent number for ordered list items `1. `
 			numTok := strings.TrimSpace(lineText[:om[2]])
@@ -629,6 +756,63 @@ func ComputeLivePreviewDecorations(
 		lineStart += len(rawLine)
 	}
 	return styles, repls, diags
+}
+
+func listIndentLevel(ws string) int {
+	cols := 0
+	for _, r := range ws {
+		if r == '\t' {
+			cols += 2
+		} else {
+			cols++
+		}
+	}
+	lvl := cols / 2
+	if lvl > 4 {
+		lvl = 4
+	}
+	return lvl
+}
+
+func calloutToneFromKeyword(kw string) string {
+	switch strings.ToLower(strings.TrimSpace(kw)) {
+	case "warning", "caution":
+		return "warning"
+	case "danger":
+		return "danger"
+	case "tip", "check":
+		return "tip"
+	default:
+		return "note"
+	}
+}
+
+func calloutToneFromEmoji(em string) string {
+	switch em {
+	case "⚠️", "⚠":
+		return "warning"
+	case "❗":
+		return "danger"
+	case "💡", "✅":
+		return "tip"
+	default:
+		return "note"
+	}
+}
+
+func calloutVisualMeta(tok theme.Tokens, tone string) (col ui.Color, icon *ui.SVG, label string) {
+	switch tone {
+	case "warning":
+		return tok.Warning, lucide.TriangleAlert(), "提醒"
+	case "danger":
+		return tok.Danger, lucide.CircleAlert(), "警告"
+	case "tip":
+		return tok.Success, lucide.Lightbulb(), "提示"
+	case "quote":
+		return tok.BorderStrong, lucide.Quote(), "引用"
+	default:
+		return tok.Accent, lucide.Info(), "说明"
+	}
 }
 
 func formatRelationChipLabel(ir InlineRelation, rr ResolvedRelation, hasResolved bool) string {

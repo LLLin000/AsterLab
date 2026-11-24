@@ -256,19 +256,25 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 	// Defer promoting the currently edited line into a standalone SegmentEmbed card while
 	// the user is actively typing on it (so `![[img.png]]{@plate:A1 ...}` never drops focus after `]]`).
 	activeEditOffset := -1
+	activeEditInStepHdr := false
 	if v.liveEditors != nil {
-		for _, ent := range v.liveEditors {
+		for k, ent := range v.liveEditors {
 			if ent != nil && ent.state != nil && !ent.state.ReadOnly && ent.state.Focused() {
 				// Clamp cursor to syncedText length because st.Buffer may hold newly typed bytes
 				// (e.g. `{` right after `]]`) not yet committed to v.Doc.Source in this pass.
 				localCur := min(ent.state.Cursor(), len(ent.syncedText))
 				activeEditOffset = ent.docOffset + localCur
+				activeEditInStepHdr = strings.HasPrefix(k, "step-hdr:")
 				break
 			}
 		}
 	}
 	segs := SplitDocumentSegmentsExcludingLine(src, v.Doc, activeEditOffset)
-	stepTree := ParseStepTree(src, v.Doc)
+	stepExcludeOff := -1
+	if !activeEditInStepHdr {
+		stepExcludeOff = activeEditOffset
+	}
+	stepTree := ParseStepTreeExcludingLine(src, v.Doc, stepExcludeOff)
 	resolved := ResolveRelations(v.Doc)
 	resolvedBySpan := make(map[int]ResolvedRelation, len(resolved))
 	for _, rr := range resolved {
@@ -282,7 +288,7 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 	// Partition Prose segments at step-header / step-exit boundaries ONLY when the document
 	// uses heading steps, so each STEP and Sub-step renders inside a TRUE continuous nested
 	// layout container with unbroken guide rails and strictly aligned indented components!
-	visualSegs := expandSegmentsForStepContainers(src, segs, stepTree)
+	visualSegs := expandSegmentsForStepContainers(src, segs, stepTree, stepExcludeOff)
 
 	// Tightened vertical rhythm: 8px base gap (heading->content = 8px, component<->prose/component = 12px)
 	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
@@ -2561,7 +2567,7 @@ type visualFlowSeg struct {
 // step-exit boundaries (`## 讨论` / `---`) purely for visual container grouping so every
 // STEP and Sub-step renders inside ONE continuous indented layout container with unbroken
 // guide rails across mixed prose + embedded components.
-func expandSegmentsForStepContainers(source string, segs []DocSegment, stepTree *StepTree) []visualFlowSeg {
+func expandSegmentsForStepContainers(source string, segs []DocSegment, stepTree *StepTree, activeByteOffset int) []visualFlowSeg {
 	hasHeadingSteps := false
 	if stepTree != nil {
 		for _, sn := range stepTree.Flat {
@@ -2651,7 +2657,11 @@ func expandSegmentsForStepContainers(source string, segs []DocSegment, stepTree 
 					off = lineEnd
 					continue
 				}
-				if (rePlainHeadingLine.MatchString(lineText) || reThematicBreakLine.MatchString(lineText)) && off > curStart {
+				isActiveLine := activeByteOffset >= 0 && activeByteOffset >= off && activeByteOffset <= lineEnd
+				if strings.HasSuffix(rawLine, "\n") && activeByteOffset == lineEnd {
+					isActiveLine = false
+				}
+				if !isActiveLine && (rePlainHeadingLine.MatchString(lineText) || reThematicBreakLine.MatchString(lineText)) && off > curStart {
 					// Exit any open step scope cleanly BEFORE the plain heading or `---` divider
 					if StepOwnerAtOffset(stepTree, curStart) != nil {
 						flushProse(off)

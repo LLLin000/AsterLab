@@ -137,3 +137,12 @@ scripts/kandev-home-status.sh   # 只读；等价于 engctl status --project ast
 - Home 不是任务权威：任务范围、依赖和状态仍以 Kandev 为准；项目技术语义仍以本仓库权威文档为准。
 - 不要直接写 Kandev SQLite 或改变合并权限；状态修复用 Kandev API 并随后对账。
 
+## 8. 内测反馈与拉取规范（Beta Feedback）
+
+当用户给出 `FB-YYYYMMDD-HHMMSS` 反馈编号并要求「拉取修复」或「看看问题」时，**所有新会话按 [`docs/engineering/beta-feedback-workflow.md`](docs/engineering/beta-feedback-workflow.md) 执行**：
+
+- **反馈源**：私有仓库 `LLLin000/asterlab-feedback` 的 `submissions/FB-*/`（包含 `feedback.md`、`manifest.json`、`logs/recent.log` 与 `shots/*.png`）；客户端通过 VPS 中继 `https://dev.asterlab.party/api/feedback` 上传（仅 `-tags=devdebug` 内测包启用，正式发行包严格 `-tags=mygo_noinspector`）。
+- **拉取边界**：统一 clone/pull `LLLin000/asterlab-feedback` 到会话 `scratch` 临时目录读取 `feedback.md` 并逐张查看截图，**禁止把原始反馈截图或真实 Key/Token 提交进主仓库**。
+- **本地缓存优先级**：内测端优先写 `<ActiveVault>/.asterlab/cache/beta-feedback`（上传或另存导出后自动清空）；若本机 exe 从带 `Low Mandatory Level` 的目录编译运行且遇到保存 `Access is denied`，先用 `icacls <exe> /setintegritylevel Medium` 排查令牌完整性级别。
+
+

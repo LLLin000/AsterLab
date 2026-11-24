@@ -48,6 +48,7 @@
 | [`product/ownership.md`](./product/ownership.md) | 文件所有权与并发开发泳道约束 |
 | [`handbook/verification-and-backlog.md`](./handbook/verification-and-backlog.md) | 自动化门禁、视觉回归与已关闭优化热点 |
 | [`engineering/cross-platform-builds.md`](./engineering/cross-platform-builds.md) | 跨平台构建与 Windows Gate 执行手册 |
+| [`engineering/beta-feedback-workflow.md`](./engineering/beta-feedback-workflow.md) | 内测反馈机制、私有反馈仓拉取 SOP 与 Dev 包重打指南 |
 
 ## 归档与研究分组
 

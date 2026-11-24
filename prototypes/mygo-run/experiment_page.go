@@ -21,25 +21,43 @@ import (
 )
 
 type cachedAssayResult struct {
-	sourceLen int
-	source    string
+	modSig    string
 	summaries []astercore.AssaySummary
 }
 
-func (a *app) cachedDocumentAnalysis(relPath, source string, doc *asterdoc.Document) []astercore.AssaySummary {
+func analysisModuleSignature(doc *asterdoc.Document) string {
+	if doc == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, m := range doc.Modules {
+		switch m.Kind {
+		case "group_table", "plate", "data_table", "step":
+			b.WriteString(m.Kind)
+			b.WriteByte(':')
+			b.WriteString(m.ID)
+			b.WriteByte(':')
+			b.WriteString(m.Body)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func (a *app) cachedDocumentAnalysis(relPath, _ string, doc *asterdoc.Document) []astercore.AssaySummary {
 	if doc == nil {
 		return nil
 	}
 	if a.cachedAssays == nil {
 		a.cachedAssays = map[string]cachedAssayResult{}
 	}
-	if prev, ok := a.cachedAssays[relPath]; ok && prev.sourceLen == len(source) && prev.source == source {
+	sig := analysisModuleSignature(doc)
+	if prev, ok := a.cachedAssays[relPath]; ok && prev.modSig == sig {
 		return prev.summaries
 	}
 	res := astercore.AnalyzeDocument(doc, relPath)
 	a.cachedAssays[relPath] = cachedAssayResult{
-		sourceLen: len(source),
-		source:    source,
+		modSig:    sig,
 		summaries: res,
 	}
 	return res

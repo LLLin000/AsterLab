@@ -216,6 +216,13 @@ func StepOwnerAtOffset(tree *StepTree, byteOffset int) *StepNode {
 //  3. Plain unordered/ordered lists and embedded modules inside a step's scope form one
 //     continuous ordered StepNode.Items flow (never broken when a component sits between lists).
 func ParseStepTree(source string, doc *Document) *StepTree {
+	return ParseStepTreeExcludingLine(source, doc, -1)
+}
+
+// ParseStepTreeExcludingLine builds the unified nested StepTree like ParseStepTree, except when
+// activeByteOffset >= 0, the currently edited line is ignored for heading-step transitions and
+// heading/divider closures so mid-typing/IME composition (e.g. `#@ ...`) never splits an open editor.
+func ParseStepTreeExcludingLine(source string, doc *Document, activeByteOffset int) *StepTree {
 	tree := &StepTree{
 		ByID:        map[string]*StepNode{},
 		ByLineStart: map[int]*StepNode{},
@@ -356,59 +363,66 @@ func ParseStepTree(source string, doc *Document) *StepTree {
 			continue
 		}
 
-		// 1. Orthogonal step header (`#@ 主步骤` / `##@ 子步骤`)
-		if hs, ok := ParseHeadingStepLine(lineText); ok {
-			addLegacyStepsBefore(off)
-			closeToStepLevel(hs.Level, off)
-			parent := currentStep()
-			var num string
-			depth := 0
-			parentID := ""
-			if parent == nil {
-				num = fmt.Sprintf("%d", len(tree.Roots)+1)
-			} else {
-				depth = parent.Depth + 1
-				parentID = parent.ID
-				num = fmt.Sprintf("%s.%d", parent.Number, len(parent.Children)+1)
-			}
-			id := allocID(hs.Anchor, "step-"+strings.ReplaceAll(num, ".", "-"))
-			nd := &StepNode{
-				ID:         id,
-				Anchor:     hs.Anchor,
-				Title:      hs.Title,
-				Number:     num,
-				Level:      hs.Level,
-				Depth:      depth,
-				ParentID:   parentID,
-				SourceKind: "heading",
-				Optional:   hs.Optional,
-				Line:       lineNum,
-				LineStart:  off,
-				LineEnd:    off + len(lineText),
-			}
-			if parent == nil {
-				tree.Roots = append(tree.Roots, nd)
-			} else {
-				parent.Children = append(parent.Children, nd)
-			}
-			tree.Flat = append(tree.Flat, nd)
-			tree.ByID[nd.ID] = nd
-			if nd.Anchor != "" {
-				tree.ByID[nd.Anchor] = nd
-			}
-			tree.ByLineStart[nd.LineStart] = nd
-			stack = append(stack, stepFrame{level: hs.Level, node: nd})
-			off = lineEnd
-			lineNum++
-			continue
+		isActiveLine := activeByteOffset >= 0 && activeByteOffset >= off && activeByteOffset <= lineEnd
+		if strings.HasSuffix(rawLine, "\n") && activeByteOffset == lineEnd {
+			isActiveLine = false
 		}
 
-		// 2. Plain Markdown heading (`# .. ######`) or thematic break (`---`) closes active steps unambiguously
-		if rePlainHeadingLine.MatchString(lineText) || reThematicBreakLine.MatchString(lineText) {
-			closeAllSteps(off)
-			off = lineEnd
-			lineNum++
-			continue
+		// 1. Orthogonal step header (`#@ 主步骤` / `##@ 子步骤`)
+		if !isActiveLine {
+			if hs, ok := ParseHeadingStepLine(lineText); ok {
+				addLegacyStepsBefore(off)
+				closeToStepLevel(hs.Level, off)
+				parent := currentStep()
+				var num string
+				depth := 0
+				parentID := ""
+				if parent == nil {
+					num = fmt.Sprintf("%d", len(tree.Roots)+1)
+				} else {
+					depth = parent.Depth + 1
+					parentID = parent.ID
+					num = fmt.Sprintf("%s.%d", parent.Number, len(parent.Children)+1)
+				}
+				id := allocID(hs.Anchor, "step-"+strings.ReplaceAll(num, ".", "-"))
+				nd := &StepNode{
+					ID:         id,
+					Anchor:     hs.Anchor,
+					Title:      hs.Title,
+					Number:     num,
+					Level:      hs.Level,
+					Depth:      depth,
+					ParentID:   parentID,
+					SourceKind: "heading",
+					Optional:   hs.Optional,
+					Line:       lineNum,
+					LineStart:  off,
+					LineEnd:    off + len(lineText),
+				}
+				if parent == nil {
+					tree.Roots = append(tree.Roots, nd)
+				} else {
+					parent.Children = append(parent.Children, nd)
+				}
+				tree.Flat = append(tree.Flat, nd)
+				tree.ByID[nd.ID] = nd
+				if nd.Anchor != "" {
+					tree.ByID[nd.Anchor] = nd
+				}
+				tree.ByLineStart[nd.LineStart] = nd
+				stack = append(stack, stepFrame{level: hs.Level, node: nd})
+				off = lineEnd
+				lineNum++
+				continue
+			}
+
+			// 2. Plain Markdown heading (`# .. ######`) or thematic break (`---`) closes active steps unambiguously
+			if rePlainHeadingLine.MatchString(lineText) || reThematicBreakLine.MatchString(lineText) {
+				closeAllSteps(off)
+				off = lineEnd
+				lineNum++
+				continue
+			}
 		}
 
 		// 3. Collect ordered/unordered list items & checkboxes belonging to the innermost open step

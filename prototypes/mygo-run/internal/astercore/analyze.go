@@ -98,6 +98,7 @@ func AnalyzeDocument(doc *asterdoc.Document, docID string) []AssaySummary {
 		var cells []analysis.Cell
 		var blankVals []float64
 		excludedCount := 0
+		rawCount := 0
 		genes := map[string]bool{}
 		samples := map[string]bool{}
 		bioByGroup := map[string]map[string]bool{}
@@ -117,10 +118,11 @@ func AnalyzeDocument(doc *asterdoc.Document, docID string) []AssaySummary {
 					continue
 				}
 			}
-			val, hasVal := firstNumericReading(rm)
+			val, hasVal := firstNumericReadingForTable(dt, rm)
 			if hasUnit && unit.Blank {
 				if hasVal {
 					blankVals = append(blankVals, val)
+					rawCount++
 				}
 				continue
 			}
@@ -149,6 +151,7 @@ func AnalyzeDocument(doc *asterdoc.Document, docID string) []AssaySummary {
 				})
 				continue
 			}
+			rawCount++
 			vCopy := val
 			cells = append(cells, analysis.Cell{
 				Group: grp, SampleID: sample, Gene: gene, Value: &vCopy, Status: analysis.Raw,
@@ -166,7 +169,7 @@ func AnalyzeDocument(doc *asterdoc.Document, docID string) []AssaySummary {
 				samples[sample] = true
 			}
 		}
-		if len(cells) == 0 {
+		if len(cells) == 0 || rawCount == 0 {
 			continue
 		}
 
@@ -292,20 +295,60 @@ func isViabilityAssayTable(doc *asterdoc.Document, dt map[string]any, title stri
 	return false
 }
 
-func firstNumericReading(rm map[string]any) (float64, bool) {
-	for _, key := range []string{"reading", "value", "od", "od450", "cq", "ct", "viability"} {
+func isNonReadingParamKey(k string) bool {
+	lk := strings.ToLower(strings.TrimSpace(k))
+	switch lk {
+	case "", "id", "well", "well_id", "group", "sample", "sample_id", "gene", "target",
+		"note", "unit", "dilution", "dilution_factor", "dilution_exp", "plated_ml",
+		"volume", "volume_ml", "volume_ul", "time", "timepoint", "replicate", "repeat",
+		"rep", "row", "col", "index":
+		return true
+	}
+	return strings.HasPrefix(lk, "dilution_") || strings.HasPrefix(lk, "plated_")
+}
+
+func firstNumericReadingForTable(dt, rm map[string]any) (float64, bool) {
+	for _, key := range []string{
+		"reading", "value", "od", "od450", "cq", "ct", "viability",
+		"cfu_per_ml", "cfu", "colonies", "zone_mm", "diameter",
+		"concentration", "conc", "fluorescence", "luminescence", "absorbance", "abs",
+	} {
 		if v, ok := rm[key]; ok {
 			if f, fok := parseFloatAny(v); fok {
 				return f, true
 			}
 		}
 	}
-	for k, v := range rm {
-		switch k {
-		case "id", "well", "group", "sample", "gene", "target", "note", "unit":
-			continue
+	// Follow declared table column order first so planned parameter columns (dilution_factor,
+	// plated_ml, etc.) are skipped and output order is 100% deterministic.
+	if cols, ok := dt["columns"].([]any); ok && len(cols) > 0 {
+		for _, rawCol := range cols {
+			cm, _ := rawCol.(map[string]any)
+			if cm == nil {
+				continue
+			}
+			ck := strings.TrimSpace(stringVal(cm["key"]))
+			if ck == "" || isNonReadingParamKey(ck) {
+				continue
+			}
+			if v, exists := rm[ck]; exists {
+				if f, fok := parseFloatAny(v); fok {
+					return f, true
+				}
+			}
 		}
-		if f, fok := parseFloatAny(v); fok {
+		return 0, false
+	}
+	// Fallback when table omits columns schema: sort keys deterministically (NEVER iterate unsorted Go map!).
+	keys := make([]string, 0, len(rm))
+	for k := range rm {
+		if !isNonReadingParamKey(k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if f, fok := parseFloatAny(rm[k]); fok {
 			return f, true
 		}
 	}

@@ -58,6 +58,40 @@ func TestLivePreviewLaTeX_InlineAndDisplayMath(t *testing.T) {
 	}
 }
 
+func TestLivePreviewCalloutsNestedIndentAndAnchorHiding(t *testing.T) {
+	tok := theme.GetTokens(nil)
+	src := strings.Join([]string{
+		"#> bad",
+		"> [!warning] **注意**：现行混匀比例",
+		"> ⚠️ **共培养终浓度提醒**：工作液 1:1 混合减半",
+		"  - 二级缩进条目",
+		"#@ 2. 平板干燥 {#t0}",
+	}, "\n")
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	_, repls, _ := ComputeLivePreviewDecorations(src, -1, false, nil, tok, doc, 0, true, nil, nil)
+	hasWarningCallout := false
+	hasIndentedBullet := false
+	hasHiddenAnchor := false
+	for _, r := range repls {
+		frag := src[r.Start:r.End]
+		if strings.Contains(frag, "[!warning]") && r.Label == "提醒" {
+			hasWarningCallout = true
+		}
+		if strings.HasPrefix(frag, "  - ") && r.Width >= float32(tok.Spacing24) {
+			hasIndentedBullet = true
+		}
+		if frag == "{#t0}" && r.Width == 0 {
+			hasHiddenAnchor = true
+		}
+	}
+	if !hasWarningCallout || !hasIndentedBullet || !hasHiddenAnchor {
+		t.Fatalf("missing decorations: callout=%v indent=%v hiddenAnchor=%v", hasWarningCallout, hasIndentedBullet, hasHiddenAnchor)
+	}
+}
+
 func TestSpecGuardrails_DataTableFormulaKindAndBioUCUMUnits(t *testing.T) {
 	// 1. data_table column with formula but value_kind: number MUST fail with actionable hint
 	badDT := "---\ntitle: bad\n---\n\n```asterlab\nkind: data_table\nid: dt1\nschema: 1\ncolumns:\n  - {key: d1, label: d1, value_kind: number, unit: mm}\n  - {key: d2, label: d2, value_kind: number, unit: mm}\n  - {key: avg, label: avg, value_kind: number, unit: mm, formula: \"(d1 + d2) / 2\"}\n```\n"

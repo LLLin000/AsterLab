@@ -146,3 +146,25 @@ func TestParseHeadingStepLineRejectsNonSteps(t *testing.T) {
 		t.Fatalf("unexpected parsed substep: ok=%v %+v", ok, hs2)
 	}
 }
+
+func TestParseStepTreeExcludingActiveLineNoMidTypingSplit(t *testing.T) {
+	prefix := "#@ 1. 第一步\n正文行\n"
+	typing := "#@ 5. 正在拼写中文"
+	src := prefix + typing + "\n"
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	// Cursor is mid-line inside `#@ 5. ...` -> must NOT promote to STEP 2/5 yet
+	activeOff := len(prefix) + len("#@ 5. ")
+	treeMid := ParseStepTreeExcludingLine(src, doc, activeOff)
+	if len(treeMid.Flat) != 1 {
+		t.Fatalf("expected 1 step while cursor is mid-line on new #@ line, got %d (%+v)", len(treeMid.Flat), treeMid.Flat)
+	}
+	// Moving cursor to next line commits the step cleanly
+	afterNewlineOff := len(src)
+	treeCommitted := ParseStepTreeExcludingLine(src, doc, afterNewlineOff)
+	if len(treeCommitted.Flat) != 2 {
+		t.Fatalf("expected 2 steps once cursor leaves the #@ line, got %d", len(treeCommitted.Flat))
+	}
+}
