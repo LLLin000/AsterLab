@@ -36,6 +36,7 @@
 | 文档 | 覆盖范围 |
 |---|---|
 | [`product/ux-contract.md`](./product/ux-contract.md) | 信息架构、UX 规则与布局契约 |
+| [`product/ux-audit-framework.md`](./product/ux-audit-framework.md) | **五层 UI / UX 与微动效审计框架**（交互闭环、视口矩阵、Obsidian 文案预算、动效规范与环境边界） |
 | [`product/design-system.md`](./product/design-system.md) · [`../DESIGN.md`](../DESIGN.md) | 唯一 Token 源、4 倍数间距、组件对照表与科学语义色盘 |
 | [`handbook/design-system.md`](./handbook/design-system.md) · [`handbook/liquid-glass.md`](./handbook/liquid-glass.md) | 主题色盘、Liquid Glass 材质与物理动效 |
 | [`handbook/desktop-workbench.md`](./handbook/desktop-workbench.md) · [`handbook/mobile-workspace.md`](./handbook/mobile-workspace.md) | 桌面端分屏工作台、实验模式（ModeLab）与移动端单手底岛 |

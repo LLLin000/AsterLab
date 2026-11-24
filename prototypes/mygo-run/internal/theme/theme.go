@@ -5,12 +5,30 @@ package theme
 
 import (
 	"math"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	onevra "github.com/oneo-me/onevra/source/theme"
 )
+
+// ParseHexColor parses a #RGB or #RRGGBB color attribute string cleanly.
+func ParseHexColor(raw string) (ui.Color, bool) {
+	s := strings.TrimPrefix(strings.TrimSpace(raw), "#")
+	if len(s) == 3 {
+		s = string([]byte{s[0], s[0], s[1], s[1], s[2], s[2]})
+	}
+	if len(s) != 6 {
+		return ui.Transparent, false
+	}
+	v, err := strconv.ParseUint(s, 16, 32)
+	if err != nil {
+		return ui.Transparent, false
+	}
+	return ui.RGBA(uint8(v>>16), uint8((v>>8)&0xFF), uint8(v&0xFF), 1.0), true
+}
 
 // MixColor linearly interpolates between two registered theme colors in sRGB space.
 func MixColor(c0, c1 ui.Color, frac float32) ui.Color {

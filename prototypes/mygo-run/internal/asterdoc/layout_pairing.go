@@ -8,6 +8,78 @@ import (
 
 const layoutFullDirectiveLine = "# @layout: full"
 
+func moduleDirectivePrefix(key string) string {
+	return "# @" + strings.TrimSpace(key) + ":"
+}
+
+func moduleDirectiveValue(body, key string) string {
+	pref := moduleDirectivePrefix(key)
+	for _, ln := range strings.Split(body, "\n") {
+		tr := strings.TrimSpace(ln)
+		if strings.HasPrefix(tr, pref) {
+			return strings.TrimSpace(strings.TrimPrefix(tr, pref))
+		}
+	}
+	return ""
+}
+
+func isModuleDirectiveLine(ln string) bool {
+	tr := strings.TrimSpace(ln)
+	return strings.HasPrefix(tr, "# @") && strings.Contains(tr, ":")
+}
+
+// leadingModuleDirectives collects every `# @key: value` directive line in body
+// as a newline-terminated prefix so UpdateModule rewrites never drop them.
+func leadingModuleDirectives(body string) string {
+	var b strings.Builder
+	for _, ln := range strings.Split(body, "\n") {
+		tr := strings.TrimSpace(ln)
+		if isModuleDirectiveLine(tr) {
+			b.WriteString(tr)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func stripModuleDirective(body, key string) string {
+	pref := moduleDirectivePrefix(key)
+	lines := strings.SplitAfter(body, "\n")
+	var kept []string
+	for _, ln := range lines {
+		if strings.HasPrefix(strings.TrimSpace(ln), pref) {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	return strings.Join(kept, "")
+}
+
+// SetTopLevelModuleDirectiveInSource sets or clears `# @<key>: <value>` at the top
+// of a top-level module fence without touching validated AsterML YAML keys.
+func SetTopLevelModuleDirectiveInSource(source, moduleID, key, value string) (string, error) {
+	doc, err := Parse(source)
+	if err != nil {
+		return "", err
+	}
+	for _, m := range doc.Modules {
+		if m.ID != moduleID {
+			continue
+		}
+		cleaned := strings.TrimLeft(stripModuleDirective(m.Body, key), "\r\n")
+		nextBody := cleaned
+		if strings.TrimSpace(value) != "" {
+			nextBody = fmt.Sprintf("# @%s: %s\n%s", strings.TrimSpace(key), strings.TrimSpace(value), cleaned)
+		}
+		nextSrc := source[:m.Start] + nextBody + source[m.End:]
+		if _, err := Parse(nextSrc); err != nil {
+			return "", err
+		}
+		return nextSrc, nil
+	}
+	return "", fmt.Errorf("module %q is not in this document", moduleID)
+}
+
 func findModuleByID(doc *Document, moduleID string) *Module {
 	if doc == nil || moduleID == "" {
 		return nil
@@ -21,51 +93,17 @@ func findModuleByID(doc *Document, moduleID string) *Module {
 }
 
 func hasLayoutFullDirective(body string) bool {
-	for _, ln := range strings.Split(body, "\n") {
-		if strings.TrimSpace(ln) == layoutFullDirectiveLine {
-			return true
-		}
-	}
-	return false
-}
-
-// stripLayoutFullDirective removes any standalone `# @layout: full` lines while
-// preserving original ordering of all other YAML lines.
-func stripLayoutFullDirective(body string) string {
-	lines := strings.SplitAfter(body, "\n")
-	var kept []string
-	for _, ln := range lines {
-		if strings.TrimSpace(ln) == layoutFullDirectiveLine {
-			continue
-		}
-		kept = append(kept, ln)
-	}
-	return strings.Join(kept, "")
+	return strings.EqualFold(moduleDirectiveValue(body, "layout"), "full")
 }
 
 // ToggleTopLevelModuleFullWidthInSource persists or clears `# @layout: full` on
 // a top-level module fence without altering any validated AsterML YAML keys.
 func ToggleTopLevelModuleFullWidthInSource(source, moduleID string, full bool) (string, error) {
-	doc, err := Parse(source)
-	if err != nil {
-		return "", err
+	val := ""
+	if full {
+		val = "full"
 	}
-	for _, m := range doc.Modules {
-		if m.ID != moduleID {
-			continue
-		}
-		cleaned := strings.TrimLeft(stripLayoutFullDirective(m.Body), "\r\n")
-		nextBody := cleaned
-		if full {
-			nextBody = layoutFullDirectiveLine + "\n" + cleaned
-		}
-		nextSrc := source[:m.Start] + nextBody + source[m.End:]
-		if _, err := Parse(nextSrc); err != nil {
-			return "", err
-		}
-		return nextSrc, nil
-	}
-	return "", fmt.Errorf("module %q is not in this document", moduleID)
+	return SetTopLevelModuleDirectiveInSource(source, moduleID, "layout", val)
 }
 
 // isPairableModuleKind reports whether a top-level module kind can participate in

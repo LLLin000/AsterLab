@@ -5,12 +5,17 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/vault"
 )
 
 func renderAuditDoc(t *testing.T, outDir, name, src string, w, h int, dark bool, maxColW float32) {
@@ -543,4 +548,153 @@ duration:
 			t.Fatalf("missing/empty visual output %s: %v", fn, err)
 		}
 	}
+}
+
+func TestFB113233AndSettingsVisualAudit(t *testing.T) {
+	outDir := os.Getenv("ASTERLAB_VISUAL_OUT")
+	if outDir == "" {
+		outDir = t.TempDir()
+	} else if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir visual out: %v", err)
+	}
+
+	// L1 + L2: FB-20261124-113233 UI-01 serial_dilution 96-well click-through & zero T6 clip
+	sdSrc := "---\ntitle: 系列稀释回归验证\n---\n\n```asterlab\n" +
+		"kind: calculator\nid: calc-sd-audit\nschema: 1\n" +
+		"title: 10 倍系列稀释梯度参考（每管 900 uL PBS + 100 uL 上级）\n" +
+		"mode: serial_dilution\ndilution_factor: 10\nsteps_count: 6\n" +
+		"stock: {value: 100000000, unit: CFU/mL}\nvolume_per_unit: {value: 1, unit: mL}\n" +
+		"```\n"
+	curSrc := sdSrc
+	docSD, err := asterdoc.Parse(curSrc)
+	if err != nil {
+		t.Fatalf("Parse serial_dilution: %v", err)
+	}
+	vSD := &asterdoc.View{
+		Doc:         docSD,
+		Mode:        asterdoc.ModeDesign,
+		UnifiedLive: true,
+		Allowed:     map[string]bool{asterdoc.PermDocumentEdit: true},
+	}
+	vSD.OnChange = func(nextSrc string) {
+		curSrc = nextSrc
+		if parsed, perr := asterdoc.Parse(nextSrc); perr == nil {
+			vSD.Doc = parsed
+		}
+	}
+
+	var ttSD *ui.Tester
+	ttSD = ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		tok := theme.GetTokens(c.Theme())
+		ui.Row(c).Fill().Background(tok.Canvas).Justify(ui.Center).Padding(float32(tok.Spacing16)).Children(func() {
+			ui.Column(c).FillWidth().MaxWidth(820).Children(func() {
+				vSD.Render(c)
+			})
+		})
+	}, 880, 360)
+	ttSD.SetDark(false)
+	ttSD.Frame()
+	ttSD.Frame()
+	if !ttSD.HasText("T6") {
+		t.Fatalf("expected T6 visible cleanly, got: %q", ttSD.Texts())
+	}
+	if err := ttSD.Click("调整稀释参数"); err != nil {
+		t.Fatalf("click 参数 trigger: %v", err)
+	}
+	ttSD.Advance(250 * time.Millisecond)
+	ttSD.Frame()
+	if err := ttSD.Click("96 孔板排枪"); err != nil {
+		t.Fatalf("click 96 孔板排枪 inside 参数 popover: %v", err)
+	}
+	ttSD.Advance(250 * time.Millisecond)
+	ttSD.Frame()
+	if !strings.Contains(curSrc, "# @vessel: plate96") {
+		t.Fatalf("expected # @vessel: plate96 persisted in source, got:\n%s", curSrc)
+	}
+	if !ttSD.HasText("Col 6") {
+		t.Fatalf("expected 96-well multichannel Col 6 after toggle, got: %q", ttSD.Texts())
+	}
+
+	// Render combined Tube + Plate96 view for visual inspection
+	combinedSDSrc := "---\ntitle: FB-20261124-113233 UI-01 修复对比（离心管 vs 96 孔板排枪）\n---\n\n" +
+		"```asterlab\nkind: calculator\nid: sd-tube\nschema: 1\n" +
+		"title: 10 倍系列稀释梯度（离心管 T1~T6 零裁切）\n" +
+		"mode: serial_dilution\ndilution_factor: 10\nsteps_count: 6\n" +
+		"stock: {value: 100000000, unit: CFU/mL}\nvolume_per_unit: {value: 1, unit: mL}\n```\n\n" +
+		"```asterlab\n# @vessel: plate96\nkind: calculator\nid: sd-plate96\nschema: 1\n" +
+		"title: 96 孔板排枪系列稀释（已可点击持久化）\n" +
+		"mode: serial_dilution\ndilution_factor: 10\nsteps_count: 6\n" +
+		"stock: {value: 100000000, unit: CFU/mL}\nvolume_per_unit: {value: 200, unit: uL}\n```\n"
+	renderAuditDoc(t, outDir, "fb113233_01_sd_tube_vs_plate96.png", combinedSDSrc, 880, 620, false, 820)
+
+	// L2: FB-20261124-113233 UI-02 exact 90mm petri dish SVG + long caption wrapping
+	const exactDishSVG = `<svg viewBox="0 0 360 280">` +
+		`<circle cx="180" cy="148" r="102" fill="#F8F9FA" stroke="#1E293B" stroke-width="2.5"/>` +
+		`<circle cx="180" cy="148" r="90" fill="none" stroke="#64748B" stroke-dasharray="4 3"/>` +
+		`<line x1="180" y1="46" x2="180" y2="250" stroke="#475569" stroke-dasharray="4 3"/>` +
+		`<line x1="78" y1="148" x2="282" y2="148" stroke="#475569" stroke-dasharray="4 3"/>` +
+		`<polygon points="180,38 175,48 185,48" fill="#1E293B"/>` +
+		`<text x="180" y="28" text-anchor="middle" font-size="12" fill="#1E293B">↑ 12点方向基准记号</text>` +
+		`<circle cx="132" cy="108" r="9" fill="#FFFFFF" stroke="#1E293B" stroke-width="1.5"/>` +
+		`<circle cx="228" cy="108" r="9" fill="#FFFFFF" stroke="#1E293B" stroke-width="1.5"/>` +
+		`<circle cx="228" cy="108" r="22" fill="none" stroke="#334155" stroke-dasharray="3 2"/>` +
+		`<circle cx="132" cy="192" r="9" fill="#FFFFFF" stroke="#1E293B" stroke-width="1.5"/>` +
+		`<circle cx="132" cy="192" r="26" fill="none" stroke="#334155" stroke-dasharray="3 2"/>` +
+		`<circle cx="228" cy="192" r="9" fill="#FFFFFF" stroke="#1E293B" stroke-width="1.5"/>` +
+		`<circle cx="228" cy="192" r="38" fill="none" stroke="#334155" stroke-dasharray="3 2"/>` +
+		`<text x="114" y="62" text-anchor="end" font-size="11" fill="#1E293B">Q1: C (PBS 10 µL)</text>` +
+		`<text x="246" y="62" text-anchor="start" font-size="11" fill="#1E293B">Q2: L3 (Lys 20 µg)</text>` +
+		`<text x="114" y="264" text-anchor="end" font-size="11" fill="#1E293B">Q3: V3 (Van 1 µg)</text>` +
+		`<text x="246" y="264" text-anchor="start" font-size="11" fill="#1E293B">Q4: VL3 (Van+Lys)</text>` +
+		`</svg>`
+	dishSrc := "---\ntitle: FB-20261124-113233 UI-02 SVG 文字与长图注修复\n---\n\n" +
+		"```asterlab\nkind: figure\nid: fig-dish-audit\nschema: 1\n" +
+		"caption: 固定方向约定：皿底 12 点钟画「↑」箭头；左上 Q1=C(PBS)、右上 Q2=L3(Lys 20 µg)、左下 Q3=V3(Van 1 µg)、右下 Q4=VL3(Van+Lys)\n" +
+		"svg: |\n  " + exactDishSVG + "\n```\n"
+	renderAuditDoc(t, outDir, "fb113233_02_svg_and_caption_light.png", dishSrc, 820, 420, false, 780)
+	renderAuditDoc(t, outDir, "fb113233_02_svg_and_caption_dark.png", dishSrc, 820, 420, true, 780)
+
+	// L2+L3: Obsidian-minimal Settings screenshots
+	sh := &shell.Shell{
+		TodayDate:       "2026-11-24",
+		VaultPathInput:  `D:\LabVault\AsterLab`,
+		VaultFiles:        []vault.FileEntry{{RelPath: "a.asterml"}, {RelPath: "templates/t.asterml", IsTemplate: true}, {RelPath: "assets/p.png", IsAsset: true}},
+		AppVersion:      "0.1.10-devdebug-r9",
+		BuildCommit:     "9fa8ff9",
+		UpdateStatus:    "up_to_date",
+		LiquidGlass:     true,
+		VaultSettingsOpen: true,
+		SettingsView:    components.SettingsState{Category: "vault"},
+	}
+	renderVisualPNGSteps(t, outDir, "fb113233_03_settings_vault.png", 1040, 660, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+	})
+	sh.SettingsView = components.SettingsState{Category: "appearance"}
+	renderVisualPNGSteps(t, outDir, "fb113233_04_settings_appearance_light.png", 1040, 660, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+	})
+	renderVisualPNGSteps(t, outDir, "fb113233_04_settings_appearance_dark.png", 1040, 660, true, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+	})
+	sh.SettingsView = components.SettingsState{Category: "about"}
+	renderVisualPNGSteps(t, outDir, "fb113233_05_settings_about.png", 1040, 660, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(st *ui.Tester) {
+		st.Frame()
+		st.Advance(220 * time.Millisecond)
+		st.Frame()
+	})
 }

@@ -799,6 +799,12 @@ func (d *Document) UpdatePlate(id string, groups map[string][]string) (string, e
 // UpdateModule merges properties into one module's fence body and rewrites
 // only that fence. It re-parses the document, so invalid edits are rejected.
 func (d *Document) UpdateModule(id string, properties map[string]any) (string, error) {
+	return d.UpdateModuleWithDirective(id, "", "", properties)
+}
+
+// UpdateModuleWithDirective atomically applies property updates and sets/clears a
+// zero-schema `# @<dirKey>: <dirVal>` directive line (when dirKey != "") inside the module fence.
+func (d *Document) UpdateModuleWithDirective(id, dirKey, dirVal string, properties map[string]any) (string, error) {
 	index := -1
 	for i := range d.Modules {
 		if d.Modules[i].ID == id {
@@ -825,8 +831,15 @@ func (d *Document) UpdateModule(id string, properties map[string]any) (string, e
 		return "", err
 	}
 	body := string(raw)
-	if hasLayoutFullDirective(module.Body) && !hasLayoutFullDirective(body) {
-		body = layoutFullDirectiveLine + "\n" + body
+	dirBody := module.Body
+	if strings.TrimSpace(dirKey) != "" {
+		dirBody = stripModuleDirective(dirBody, dirKey)
+		if strings.TrimSpace(dirVal) != "" {
+			dirBody = fmt.Sprintf("# @%s: %s\n%s", strings.TrimSpace(dirKey), strings.TrimSpace(dirVal), dirBody)
+		}
+	}
+	if dirs := leadingModuleDirectives(dirBody); dirs != "" {
+		body = dirs + body
 	}
 	source := d.Source[:module.Start] + body + d.Source[module.End:]
 	next, err := Parse(source)

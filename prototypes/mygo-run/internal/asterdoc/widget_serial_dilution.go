@@ -59,10 +59,15 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 	case "L":
 		vpuUL = vpuVal * 1e6
 	}
-	vesselMode := strings.ToLower(strings.TrimSpace(textValue(data, "vessel")))
+	vesselMode := ""
+	if mod := findModuleByID(v.Doc, moduleID); mod != nil {
+		vesselMode = strings.ToLower(strings.TrimSpace(moduleDirectiveValue(mod.Body, "vessel")))
+	}
+	if vesselMode == "" {
+		vesselMode = strings.ToLower(strings.TrimSpace(textValue(data, "vessel")))
+	}
 	if vesselMode == "" && vpuUL > 0 && vpuUL <= 250 {
-		// Micro-volume dilutions (<= 250 µL) naturally default to 96-well multichannel mode if unspecified.
-		vesselMode = "tube"
+		vesselMode = "plate96"
 	}
 	if vesselMode != "plate96" {
 		vesselMode = "tube"
@@ -89,45 +94,33 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 	hasStock := stockErr == nil && stockVal > 0
 	editableDesign := v.Mode == ModeDesign && !v.ReadOnly && !v.LabMode && v.Can(PermDocumentEdit)
 
-	// 1. Sleek single-line vessel toggle + quiet bench cue + Popover param editor (zero bloated bordered slabs!)
+	// 1. Clean single-line bench cue + subtle vessel badge + right-aligned 参数 Popover trigger
+	// (vessel switcher lives cleanly inside 参数 Popover — zero redundant toggle bar clutter!).
 	cfgOpen := ui.Local(c.Root(), "sd-cfg:"+moduleID, func() bool { return false })
 	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-		ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border.Alpha(0.6)).Gap(2).Children(func() {
-			for _, vm := range []struct {
-				id    string
-				label string
-			}{
-				{"tube", "离心管"},
-				{"plate96", "96 孔板排枪"},
-			} {
-				vm := vm
-				active := vesselMode == vm.id
-				btn := ui.ButtonBase(c.Key("sd-ves:"+moduleID+":"+vm.id)).
-					Height(float32(tok.Spacing24)-4).Padding(0, float32(tok.Spacing8)).
-					Radius(float32(tok.ControlRadius)*0.8).AlignItems(ui.Center).Label("切换容器：" + vm.label)
-				fg := tok.TextMuted
-				if active {
-					btn.Background(tok.Surface).Border(1, tok.Border.Alpha(0.75))
-					fg = tok.Accent
-				}
-				btn.Children(func() {
-					ui.Text(c, vm.label).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
-				})
-				if btn.Clicked() && !active {
-					patch := map[string]any{"vessel": vm.id}
-					if vm.id == "plate96" && finalVolUL >= 500 {
-						patch["volume_per_unit"] = map[string]any{"value": 200, "unit": "uL"}
-					} else if vm.id == "tube" && finalVolUL <= 250 {
-						patch["volume_per_unit"] = map[string]any{"value": 1, "unit": "mL"}
-					}
-					v.emitAnyModuleEdit(moduleID, patch)
-				}
+		vesselModeName := "离心管"
+		if vesselMode == "plate96" {
+			vesselModeName = "96 孔板排枪"
+		}
+		if editableDesign {
+			modeChip := ui.ButtonBase(c.Key("sd-mode-chip:"+moduleID)).
+				Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
+				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+				AlignItems(ui.Center).Label("切换稀释容器")
+			theme.ApplyTactilePress(modeChip)
+			modeChip.Children(func() {
+				ui.Text(c, vesselModeName).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine()
+			})
+			if modeChip.Clicked() {
+				*cfgOpen = !*cfgOpen
 			}
-		})
+		} else {
+			components.Badge(c, vesselModeName)
+		}
 
 		benchCue := fmt.Sprintf("预加 %s 稀释液 · 逐级移取 %s 混匀转移", diluentLabel, transferLabel)
 		if vesselMode == "plate96" {
-			benchCue = fmt.Sprintf("每孔预加 %s LB/稀释液 · 排枪 %s 混匀逐列转移（末列弃 %s）", diluentLabel, transferLabel, transferLabel)
+			benchCue = fmt.Sprintf("每孔预加 %s 稀释液 · 排枪 %s 混匀逐列转移（末列弃 %s）", diluentLabel, transferLabel, transferLabel)
 		}
 		ui.Text(c, benchCue).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 		ui.Spacer(c)
@@ -136,9 +129,12 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 			paramBtn := ui.ButtonBase(c.Key("sd-param-btn:"+moduleID)).
 				Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
 				Radius(float32(tok.ControlRadius)).AlignItems(ui.Center).Label("调整稀释参数")
+			theme.ApplyTactilePress(paramBtn)
+			hoverBg := ui.Transparent
 			if *cfgOpen || paramBtn.Hovered() {
-				paramBtn.Background(tok.Text.Alpha(0.05))
+				hoverBg = tok.Text.Alpha(0.05)
 			}
+			paramBtn.Background(paramBtn.AnimateColor("sd-pbg", hoverBg, theme.MotionMicroFade))
 			paramBtn.Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 					ui.Icon(c, lucide.SlidersHorizontal()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted)
@@ -149,13 +145,53 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 				*cfgOpen = !*cfgOpen
 			}
 			components.Popover(c.Key("sd-pop:"+moduleID), paramBtn, cfgOpen, func(panel ui.Element) {
-				panel.Width(float32(tok.Spacing48)*5.8).Padding(float32(tok.Spacing12)).
+				panel.Width(float32(tok.Spacing48)*6.0).Padding(float32(tok.Spacing12)).
 					Background(tok.Surface).Border(1, tok.Border).Radius(float32(tok.PanelRadius)).
 					Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Text(c, "梯度稀释参数").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+					ui.Text(c, "稀释参数").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
 					dfDraft := v.ensureWidgetDraft("sd:"+moduleID+":df", formatNumber(df))
 					stDraft := v.ensureWidgetDraft("sd:"+moduleID+":steps", strconv.Itoa(steps))
 					vDraft := v.ensureWidgetDraft("sd:"+moduleID+":vpu", formatNumber(finalVolUL))
+
+					ui.Row(c).FillWidth().Padding(2).Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
+						for _, vm := range []struct {
+							id    string
+							label string
+						}{
+							{"tube", "离心管"},
+							{"plate96", "96 孔板排枪"},
+						} {
+							vm := vm
+							active := vesselMode == vm.id
+							vBtn := ui.ButtonBase(c.Key("sd-ves:"+moduleID+":"+vm.id)).
+								Grow(1).Height(float32(tok.Spacing24)-2).Radius(float32(tok.ControlRadius)-1).
+								Center().Label(vm.label)
+							theme.ApplyTactilePress(vBtn)
+							targetBg, targetFg := ui.Transparent, tok.TextMuted
+							if active {
+								targetBg, targetFg = tok.Surface, tok.Accent
+							}
+							vBtn.Background(vBtn.AnimateColor("sdv-bg", targetBg, theme.MotionMicroFade))
+							vBtn.Children(func() {
+								ui.Text(c, vm.label).FontSize(float32(tok.TextMeta)).Bold().TextColor(targetFg).SingleLine()
+							})
+							if vBtn.Clicked() && !active {
+								patch := map[string]any{}
+								if vm.id == "plate96" {
+									*vDraft = "200"
+									if finalVolUL >= 500 {
+										patch["volume_per_unit"] = map[string]any{"value": 200, "unit": "uL"}
+									}
+								} else {
+									*vDraft = "1000"
+									if finalVolUL <= 250 {
+										patch["volume_per_unit"] = map[string]any{"value": 1, "unit": "mL"}
+									}
+								}
+								v.emitModuleDirectiveEdit(moduleID, "vessel", vm.id, patch)
+							}
+						}
+					})
 
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Text(c, "倍比 D").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48)*1.5)
@@ -179,8 +215,7 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 						if components.Button(c, "96孔板 180+20 µL", components.ButtonGhost).Clicked() {
 							*dfDraft = "10"
 							*vDraft = "200"
-							v.emitAnyModuleEdit(moduleID, map[string]any{
-								"vessel":          "plate96",
+							v.emitModuleDirectiveEdit(moduleID, "vessel", "plate96", map[string]any{
 								"dilution_factor": 10,
 								"volume_per_unit": map[string]any{"value": 200, "unit": "uL"},
 							})
@@ -189,8 +224,7 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 						if components.Button(c, "EP管 900+100 µL", components.ButtonGhost).Clicked() {
 							*dfDraft = "10"
 							*vDraft = "1000"
-							v.emitAnyModuleEdit(moduleID, map[string]any{
-								"vessel":          "tube",
+							v.emitModuleDirectiveEdit(moduleID, "vessel", "tube", map[string]any{
 								"dilution_factor": 10,
 								"volume_per_unit": map[string]any{"value": 1, "unit": "mL"},
 							})
@@ -260,7 +294,7 @@ func renderSerialDilutionPlate96Strip(c *ui.Context, tok theme.Tokens, moduleID 
 			Radius(float32(tok.ControlRadius)).Background(tok.Elevated.Alpha(0.65)).Border(1, tok.Border.Alpha(0.65)).
 			AlignItems(ui.End).Gap(0).Children(func() {
 			renderWellCol := func(colLabel, dilExpr string, colIndex int, isStock bool, concVal float64) {
-				ui.Column(c).Width(float32(tok.Spacing48)*1.35).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Column(c).Width(float32(tok.Spacing48)*1.32).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 					if isStock {
 						ui.Text(c, "原液列").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
 					} else {
@@ -324,12 +358,12 @@ func renderSerialDilutionPlate96Strip(c *ui.Context, tok theme.Tokens, moduleID 
 }
 
 func renderTransferArrowBridge(c *ui.Context, tok theme.Tokens, transferLabel string) {
-	ui.Column(c).Width(float32(tok.Spacing48)).AlignItems(ui.Center).
+	ui.Column(c).Width(float32(tok.Spacing48)+float32(tok.Spacing4)).AlignItems(ui.Center).
 		Padding(0, 0, float32(tok.Spacing48)+float32(tok.Spacing12), 0).Gap(2).Children(func() {
 		ui.Row(c).Padding(1, float32(tok.Spacing4)).Radius(float32(tok.ControlRadius)).
 			Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.30)).Children(func() {
 			ui.Text(c, transferLabel).FontSize(float32(tok.TextMeta)-1).Bold().
-				TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+				TextColor(tok.Accent).FontFeatures("tnum").SingleLine().Shrink(0)
 		})
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Padding(0, 2).Gap(0).Children(func() {
 			ui.Box(c).Grow(1).Height(2).Background(tok.Accent.Alpha(0.75))
@@ -339,7 +373,7 @@ func renderTransferArrowBridge(c *ui.Context, tok theme.Tokens, transferLabel st
 }
 
 func renderMicroTubeNode(c *ui.Context, tok theme.Tokens, vesselID labsticker.VesselID, vesselLabel, code, dilExpr string, concVal float64, concUnit string, isStock bool) {
-	ui.Column(c).Width(float32(tok.Spacing48)*1.55).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+	ui.Column(c).Width(float32(tok.Spacing48)*1.42).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 		// Tube dilution header with native raised exponent (e.g. 10^-1)
 		if isStock {
 			ui.Text(c, code).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()

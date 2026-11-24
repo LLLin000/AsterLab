@@ -322,7 +322,7 @@ func TestVisualArchiveSettingsMobileAndContextMenus(t *testing.T) {
 		st.Frame()
 		st.Advance(220 * time.Millisecond)
 		st.Frame()
-		if !st.HasText("基础明暗模式") || !st.HasText("界面色盘预设") || !st.HasText("Liquid Glass 液态玻璃材质") {
+		if !st.HasText("外观模式") || !st.HasText("配色方案") || !st.HasText("液态玻璃") {
 			t.Fatalf("expected Obsidian settings appearance content, got: %q", st.Texts())
 		}
 	})
