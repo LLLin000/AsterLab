@@ -25,10 +25,15 @@ Push-Location $protoDir
 try {
     $env:CGO_ENABLED = '0'
     $commit = (git -C $repoRoot rev-parse --short HEAD).Trim()
-    $verFlags = "-X 'asterlab-mygo-prototype/internal/updater.Version=$Version' -X 'asterlab-mygo-prototype/internal/updater.Commit=$commit'"
+    $fbEndpoint = if ($env:BETA_FEEDBACK_ENDPOINT) { $env:BETA_FEEDBACK_ENDPOINT.Trim() } else { 'https://dev.asterlab.party/api/feedback' }
+    $fbKey = if ($env:BETA_FEEDBACK_KEY) { $env:BETA_FEEDBACK_KEY.Trim() } else { '' }
+    $verFlags = "-X 'asterlab-mygo-prototype/internal/updater.Version=$Version' " +
+        "-X 'asterlab-mygo-prototype/internal/updater.Commit=$commit' " +
+        "-X 'asterlab-mygo-prototype/internal/devfeedback.DefaultUploadEndpoint=$fbEndpoint' " +
+        "-X 'asterlab-mygo-prototype/internal/devfeedback.DefaultUploadKey=$fbKey'"
 
     # 1. Pure-Go Desktop app (windowsgui hides the console window when double-clicked).
-    # Public releases pass -Release to compile with mygo_noinspector (strips DevTools/automation/devdebug).
+    # Public releases pass -Release to compile with mygo_noinspector (strips MyGo F12 inspector while keeping toggleable Visual Feedback Mode).
     $buildTags = if ($Release) { 'mygo_noinspector' } else { 'e2e' }
     go build "-tags=$buildTags" -trimpath -ldflags="-s -w -H=windowsgui $verFlags" -o (Join-Path $distDir 'mygo-run.exe') .
     if ($LASTEXITCODE -ne 0) { throw "go build desktop failed (exit $LASTEXITCODE)" }

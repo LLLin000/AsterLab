@@ -223,6 +223,7 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		a.shell.TextScale = v.Config.TextScale
 		a.shell.Density = v.Config.Density
 		a.shell.ReduceMotion = v.Config.ReduceMotion
+		a.shell.FeedbackMode = v.Config.FeedbackMode
 		a.shell.DefaultOpenMode = v.Config.DefaultOpenMode
 		a.shell.DefaultPlateFormat = v.Config.DefaultPlateFormat
 		a.shell.DefaultExcessPct = v.Config.DefaultExcessPct
@@ -276,6 +277,7 @@ func (a *app) saveVaultSettingsFromShell() {
 	a.vault.Config.TextScale = a.shell.TextScale
 	a.vault.Config.Density = a.shell.Density
 	a.vault.Config.ReduceMotion = a.shell.ReduceMotion
+	a.vault.Config.FeedbackMode = a.shell.FeedbackMode
 	a.vault.Config.DefaultOpenMode = a.shell.DefaultOpenMode
 	a.vault.Config.DefaultPlateFormat = a.shell.DefaultPlateFormat
 	a.vault.Config.DefaultExcessPct = a.shell.DefaultExcessPct

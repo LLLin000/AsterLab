@@ -2,7 +2,7 @@
 
 > 状态：已实现 · 适用于所有新开启的 Agent 会话与维护者
 
-本文件说明 AsterLab 内测版（`-tags=devdebug`）如何采集、中继与落盘反馈，以及**新开启的 AI 会话在收到类似 `FB-20261124-xxxxxx` 的反馈编号时如何一键拉取、排查与重打内测包**。
+本文件说明 AsterLab 内置可开关的**可视化截图标注反馈模式**（随所有标准发行包一同编译，默认关闭，可通过底部状态栏「反馈」、`设置 → 关于 → 诊断与反馈`、`Ctrl+K` 命令面板或 `Ctrl+Shift+D` 随时开启）如何采集、中继与落盘反馈，以及**新开启的 AI 会话在收到类似 `FB-20261124-xxxxxx` 的反馈编号时如何一键拉取、排查与重打发行包**。
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 环节 | 说明 | 权威位置 / 参数 |
 |---|---|---|
-| **内测客户端构建** | 仅启用 `-tags=devdebug` 时编译内嵌拾取/批注/崩溃恢复工具条；面向普通用户的正式发行包必须使用 `-tags=mygo_noinspector`（零调试代码） | `prototypes/mygo-run/dev_inspector_enabled.go`、`dev_inspector_stub.go`、`internal/devfeedback/` |
+| **内置反馈模式（默认关闭）** | 无须单独安装独立内测包；标准发行构建（`-tags=mygo_noinspector` 仅剥离 MyGo 底层 F12 检查器）已内置可视化红框拾取、弹窗批注、队列管理与直传能力，默认 `FeedbackMode=false`（零悬浮打扰、零启动磁盘 I/O） | `prototypes/mygo-run/dev_inspector_enabled.go`、`internal/shell/{feedback_welcome,settings}.go`、`internal/devfeedback/` |
 | **VPS 中继服务** | 写只读授权中继，接收客户端提交的 JSON/截图并推送至私有反馈仓库 | `https://dev.asterlab.party/api/feedback`（`ssh vps` 上 `asterlab-feedback-relay.service`，监听 `127.0.0.1:38435`，Caddy 反代） |
 | **密钥与凭据管理** | 仅存在于 VPS 与 GitHub Secrets，**严禁写入代码仓库、提交记录、日志或终端回显** | VPS `/etc/asterlab-feedback-relay.env`（`FEEDBACK_UPLOAD_KEY`）；GitHub Secrets `BETA_FEEDBACK_KEY` / `BETA_FEEDBACK_ENDPOINT` |
 | **私有反馈存储库** | 存储所有已上传的用户内测截图、环境元数据与问题清单 | 私有仓库 `LLLin000/asterlab-feedback`，目录格式 `submissions/FB-<YYYYMMDD-HHMMSS>-<tester>-<version>/` |

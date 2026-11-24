@@ -271,6 +271,7 @@ type Shell struct {
 	CrashNotice           string
 	OnDismissCrashNotice  func()
 	FeedbackOpen          bool
+	FeedbackMode          bool
 	FeedbackCategory      string
 	FeedbackText          string
 	FeedbackIncludeLogs   bool
@@ -278,6 +279,8 @@ type Shell struct {
 	OnExportDiagBundle    func()
 	OnCopyFeedbackReport  func()
 	OnSubmitFeedback      func()
+	OnStartFeedbackPick   func()
+	OnOpenFeedbackQueue   func()
 	WelcomeOpen           bool
 	OnOnboardingChoice    func(choice string)
 	TourOpen              bool
