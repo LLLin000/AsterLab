@@ -13,7 +13,9 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
+	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/vault"
 )
 
@@ -278,6 +280,40 @@ func (s *Shell) renderDrawerCalendarSummary(c *ui.Context, tok theme.Tokens) {
 				})
 				if row.Clicked() {
 					s.openExperiment(exp)
+				}
+			}
+		})
+	}
+
+	// Upcoming 7-day Reagent & Vivarium schedule alerts & harvests
+	upSum := schedule.SummarizeUpcoming(s.CalendarEvents, todayYMD, 7)
+	if len(upSum.NextEvents) > 0 {
+		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+			Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Icon(c, lucide.FlaskConical()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+				components.Text(c, "未来 7 天试剂与动物节点").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				kit.Badge(c, fmt.Sprintf("%d 项", len(upSum.NextEvents)), components.BadgeOptions{Tone: components.BadgeAccent})
+			})
+			for i, ev := range upSum.NextEvents {
+				ev := ev
+				row := ui.ButtonBase(c.Key(fmt.Sprintf("rd-dom-%d-%s", i, ev.ID))).FillWidth().Justify(ui.Start).
+					Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+					Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.BorderSubtle).Label(ev.Title)
+				row.Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+						dtCol := tok.Accent
+						if ev.Severity == schedule.SeverityDanger {
+							dtCol = tok.Danger
+						} else if ev.Severity == schedule.SeverityWarning {
+							dtCol = tok.Warning
+						}
+						ui.Text(c, ev.DateYMD).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(dtCol).Shrink(0)
+						ui.Text(c, ev.Title).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+					})
+				})
+				if row.Clicked() && s.OnOpenScheduleEvent != nil {
+					s.OnOpenScheduleEvent(ev)
 				}
 			}
 		})

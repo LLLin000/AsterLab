@@ -61,6 +61,9 @@ func ListItem(c *ui.Context, key any, tok theme.Tokens, opts ListItemOptions) ui
 		ui.Row(c).FillWidth().AlignItems(ui.Center).
 			Padding(0, 0, 0, indentPx).
 			Gap(float32(tok.Spacing8)).Children(func() {
+			if opts.Selected {
+				ui.Box(c).Width(2).Height(float32(tok.Spacing16)-2).Radius(1).Background(tok.Accent).Shrink(0)
+			}
 			if opts.StartSlot != nil {
 				ui.Row(c).Shrink(0).AlignItems(ui.Center).Children(opts.StartSlot)
 			}

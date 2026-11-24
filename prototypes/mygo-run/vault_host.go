@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -20,6 +21,7 @@ import (
 
 	"asterlab-mygo-prototype/internal/astercore"
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
@@ -351,6 +353,7 @@ func (a *app) syncPantrySnapshotToShell() {
 	if a.shell == nil {
 		return
 	}
+	defer a.syncCalendarEventsToShell()
 	if a.tools == nil {
 		a.shell.PantryItems = nil
 		return
@@ -378,6 +381,17 @@ func (a *app) syncPantrySnapshotToShell() {
 		})
 	}
 	a.shell.PantryItems = qItems
+}
+
+func (a *app) syncCalendarEventsToShell() {
+	if a.shell == nil || a.tools == nil {
+		return
+	}
+	now := time.Now()
+	evs := make([]schedule.Event, 0, len(a.tools.Pantry.Items)*2+len(a.tools.VivariumCages)*3)
+	evs = append(evs, a.tools.ProjectReagentCalendarEvents(now)...)
+	evs = append(evs, a.tools.ProjectVivariumCalendarEvents(now)...)
+	a.shell.CalendarEvents = evs
 }
 
 func (a *app) saveVaultWorkspace() {

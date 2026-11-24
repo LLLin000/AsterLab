@@ -14,6 +14,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
+	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/vault"
@@ -129,9 +130,16 @@ type Shell struct {
 	SelectedDate   string
 	TodayDate      string
 	CurrentHour    float32
-	CalendarMode   int
-	CalendarCursor string
-	DayPopoverOpen  bool
+	CalendarMode              int    // 0 = Month Grid, 1 = Week Time Grid
+	CalendarCursor            string // YYYY-MM-DD (month / week anchor)
+	CalendarEvents            []schedule.Event
+	CalendarDomainFilter      schedule.Filter
+	calFilterInited           bool
+	OnOpenScheduleEvent       func(ev schedule.Event)
+	OnToggleScheduleEventDone func(ev schedule.Event)
+	OnCreateReagentForDate    func(dateYMD string)
+	OnCreateAnimalForDate     func(dateYMD string)
+	DayPopoverOpen            bool
 	DayPopoverDate  string
 	calAnimDir      int
 	lastDayClickYMD string

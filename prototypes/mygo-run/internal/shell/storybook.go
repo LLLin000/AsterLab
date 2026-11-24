@@ -17,6 +17,7 @@ func (s *Shell) BuiltinShellStorySection() kit.StorySection {
 	return kit.StorySection{
 		ID:       "shell-chrome",
 		Group:    "全局壳层",
+		NavTitle: "全局工作台壳层",
 		Title:    "4. 全局工作台壳层（Shell Chrome & Navigation）",
 		Subtitle: "多窗格激活紫条 · Pinned/Dirty 标签 · 文件树引导线 · 状态栏 · 移动端浮岛",
 		Icon:     lucide.AppWindow(),

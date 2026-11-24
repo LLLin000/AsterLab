@@ -17,7 +17,10 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
+	"asterlab-mygo-prototype/internal/reagent"
+	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/uikit/labsticker"
 	"asterlab-mygo-prototype/modules/runs"
 )
@@ -49,9 +52,14 @@ type PantryItemMeta struct {
 	ProductURL       string              `json:"productUrl,omitempty"`
 	Notes            string              `json:"notes,omitempty"`
 	Manuals          []PantryManual      `json:"manuals,omitempty"`
-	BoxID            string              `json:"boxId,omitempty"`
-	BoxSlot          string              `json:"boxSlot,omitempty"`
-	BoxSlots         []string            `json:"boxSlots,omitempty"`
+	BoxID             string              `json:"boxId,omitempty"`
+	BoxSlot           string              `json:"boxSlot,omitempty"`
+	BoxSlots          []string            `json:"boxSlots,omitempty"`
+	RemainingQty      float64             `json:"remainingQty,omitempty"`
+	QtyUnit           string              `json:"qtyUnit,omitempty"`
+	LowStockThreshold float64             `json:"lowStockThreshold,omitempty"`
+	RestockBy         string              `json:"restockBy,omitempty"`
+	StockLedger       []reagent.StockTx   `json:"stockLedger,omitempty"`
 }
 
 type pantryImageCacheEntry struct {
@@ -104,7 +112,58 @@ func clonePantryMeta(m PantryItemMeta) PantryItemMeta {
 	if len(m.BoxSlots) > 0 {
 		out.BoxSlots = append([]string(nil), m.BoxSlots...)
 	}
+	if len(m.StockLedger) > 0 {
+		out.StockLedger = append([]reagent.StockTx(nil), m.StockLedger...)
+	}
 	return out
+}
+
+// OpenPantryByID switches Pantry to the reagents domain, locates item by ID, and opens its detail dialog.
+func (w *Workspace) OpenPantryByID(id string) bool {
+	w.pantryDomainTab = 0
+	w.activeBoxID = ""
+	w.ReloadPantry()
+	if item, ok := findPantryItemByID(w.Pantry.Items, id); ok {
+		w.OpenPantryDetail(item)
+		return true
+	}
+	return false
+}
+
+// OpenNewPantryDialogOnDate opens the new reagent registration dialog pre-filled with PurchasedOn=dateYMD.
+func (w *Workspace) OpenNewPantryDialogOnDate(dateYMD string) {
+	w.pantryDomainTab = 0
+	w.activeBoxID = ""
+	w.OpenNewPantryDialog("")
+	if strings.TrimSpace(dateYMD) != "" {
+		w.PantryPurchasedOn = dateYMD
+	}
+}
+
+// ProjectReagentCalendarEvents projects reagent purchase, opening, restock, and dual-expiry milestones.
+func (w *Workspace) ProjectReagentCalendarEvents(today time.Time) []schedule.Event {
+	w.EnsurePantryMetaLoaded()
+	inputs := make([]reagent.LifecycleInput, 0, len(w.Pantry.Items))
+	for _, it := range w.Pantry.Items {
+		meta := w.MetaForPantryItem(it)
+		inputs = append(inputs, reagent.LifecycleInput{
+			ID:                  it.ID,
+			Name:                it.Name,
+			Location:            it.Location,
+			PurchasedOn:         it.PurchasedOn,
+			OpenedOn:            it.OpenedOn,
+			ExpiresOn:           it.ExpiresOn,
+			RestockBy:           meta.RestockBy,
+			Status:              it.Status,
+			ShelfLifeDays:       it.ShelfLifeDays,
+			OpenedShelfLifeDays: it.OpenedShelfLifeDays,
+			Exhausted:           it.Exhausted,
+			RemainingQty:        meta.RemainingQty,
+			LowStockThreshold:   meta.LowStockThreshold,
+			QtyUnit:             meta.QtyUnit,
+		})
+	}
+	return reagent.ProjectCalendarEvents(inputs, today)
 }
 
 // OpenPantryDetail opens the reagent detail dialog pre-populated for an existing reagent.
@@ -439,6 +498,9 @@ func (w *Workspace) SavePantryDetail() bool {
 	w.PantryDialogOpen = false
 	w.pantryConfirmDel = false
 	w.ReloadPantry()
+	if w.Callbacks.OnScheduleChanged != nil {
+		w.Callbacks.OnScheduleChanged()
+	}
 	if w.Error == "" {
 		w.Status = "已保存试剂档案：" + saved.Name
 	}
@@ -986,12 +1048,12 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 					Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
 				if w.PantryID != "" {
 					if curItem, ok := findPantryItemByID(w.Pantry.Items, w.PantryID); ok {
-						components.Badge(c, pantryItemStatus(curItem), components.BadgeOptions{Tone: detailStatusTone(curItem.Status)})
+						kit.Badge(c, pantryItemStatus(curItem), components.BadgeOptions{Tone: detailStatusTone(curItem.Status)})
 					} else {
-						components.Badge(c, "在库试剂", components.BadgeOptions{Tone: components.BadgeNeutral})
+						kit.Badge(c, "在库试剂", components.BadgeOptions{Tone: components.BadgeNeutral})
 					}
 				} else {
-					components.Badge(c, "新试剂上架", components.BadgeOptions{Tone: components.BadgeAccent})
+					kit.Badge(c, "新试剂上架", components.BadgeOptions{Tone: components.BadgeAccent})
 				}
 			})
 
@@ -1411,13 +1473,77 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 						if dropped := dropBox.DroppedFiles(); len(dropped) > 0 {
 							_ = w.AttachManualFiles(dropped)
 						}
+					})
 
-						// Notes
-						ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
-							ui.Text(c, "配制与存放备注").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-							components.TextBox(c, &w.pantryDraftMeta.Notes, components.TextBoxOptions{}).
-								Placeholder("如分装体积、避免反复冻融、配制比例…")
+					// 5. Reagent Engine: Remaining Qty, Low-Stock Threshold, Restock Date & Ledger Transactions
+					ui.Column(c).FillWidth().Padding(t.Space(2)).Radius(float32(tok.PanelRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							ui.Icon(c, lucide.Gauge()).Size(t.Space(4), t.Space(4)).TextColor(tok.Accent)
+							ui.Text(c, "库存余量、计划补货与领用流水").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+							if w.pantryDraftMeta.LowStockThreshold > 0 && w.pantryDraftMeta.RemainingQty <= w.pantryDraftMeta.LowStockThreshold {
+								kit.Badge(c, "低库存预警", components.BadgeOptions{Tone: components.BadgeWarning})
+							}
 						})
+						if w.pantryDraftMeta.QtyUnit == "" {
+							w.pantryDraftMeta.QtyUnit = "mL"
+						}
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.End).Gap(t.Space(2)).Children(func() {
+							ui.Column(c).Gap(4).Children(func() {
+								ui.Text(c, "当前余量").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+								kit.ScrubNumber(c, "rg-rem-qty", tok, &w.pantryDraftMeta.RemainingQty, kit.ScrubOptions{
+									Unit: w.pantryDraftMeta.QtyUnit, Min: 0, Max: 100000, Step: 0.5, Decimals: 1, Width: float32(tok.Spacing48) * 2.6,
+								})
+							})
+							ui.Column(c).Width(float32(tok.Spacing48)*1.3).Gap(4).Children(func() {
+								ui.Text(c, "单位").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+								components.TextBox(c, &w.pantryDraftMeta.QtyUnit, components.TextBoxOptions{}).Placeholder("mL")
+							})
+							ui.Column(c).Gap(4).Children(func() {
+								ui.Text(c, "低库存警戒线").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+								kit.ScrubNumber(c, "rg-low-thr", tok, &w.pantryDraftMeta.LowStockThreshold, kit.ScrubOptions{
+									Unit: w.pantryDraftMeta.QtyUnit, Min: 0, Max: 10000, Step: 0.5, Decimals: 1, Width: float32(tok.Spacing48) * 2.6,
+								})
+							})
+							ui.Column(c).Width(float32(tok.Spacing48)*2.9).Gap(4).Children(func() {
+								ui.Text(c, "计划补货 (日历)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+								components.TextBox(c, &w.pantryDraftMeta.RestockBy, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
+							})
+						})
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							if components.Button(c, "- 记领用 1 份", components.ButtonSecondary).Clicked() {
+								reagent.ApplyTransaction(&w.pantryDraftMeta.RemainingQty, &w.pantryDraftMeta.StockLedger, reagent.StockTx{
+									Kind: reagent.TxOut, Delta: -1, Unit: w.pantryDraftMeta.QtyUnit, Note: "实验领用",
+								})
+							}
+							if components.Button(c, "+ 记入库 5 份", components.ButtonSecondary).Clicked() {
+								reagent.ApplyTransaction(&w.pantryDraftMeta.RemainingQty, &w.pantryDraftMeta.StockLedger, reagent.StockTx{
+									Kind: reagent.TxIn, Delta: 5, Unit: w.pantryDraftMeta.QtyUnit, Note: "采购入库",
+								})
+							}
+							if len(w.pantryDraftMeta.StockLedger) > 0 {
+								last := w.pantryDraftMeta.StockLedger[len(w.pantryDraftMeta.StockLedger)-1]
+								absDelta := last.Delta
+								if absDelta < 0 {
+									absDelta = -absDelta
+								}
+								sign := "+"
+								if last.Kind == reagent.TxOut {
+									sign = "-"
+								}
+								ui.Text(c, fmt.Sprintf("最近流水：%s %s%.1f %s（%s）",
+									reagent.TxKindLabel(last.Kind), sign, absDelta, last.Unit, last.DateYMD)).
+									FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted)
+							}
+						})
+					})
+
+					// 6. Notes
+					ui.Column(c).FillWidth().Padding(t.Space(2)).Radius(float32(tok.PanelRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "配制与存放备注").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.pantryDraftMeta.Notes, components.TextBoxOptions{}).
+							Placeholder("如分装体积、避免反复冻融、配制比例…")
 					})
 				})
 			})
