@@ -20,6 +20,7 @@ import (
 type StorySection struct {
 	ID       string
 	Group    string
+	NavTitle string
 	Title    string
 	Subtitle string
 	Icon     *ui.SVG
@@ -109,6 +110,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 		{
 			ID:       "tokens-motion",
 			Group:    "基础规范",
+			NavTitle: "全局 Token 与动效",
 			Title:    "1. 全局 Token、色板、海拔与动效",
 			Subtitle: "语义色彩 · 字体阶梯 · 4px 间距 · 5 级表面海拔 · Motion",
 			Icon:     lucide.Palette(),
@@ -119,6 +121,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 		{
 			ID:       "controls-kit",
 			Group:    "通用原语",
+			NavTitle: "控件与交互引擎",
 			Title:    "2. 基础控件与 6 大 UI 交互引擎",
 			Subtitle: "onevra 控件 · ScrubNumber · ContextMenu · FilterBar · SidePeek · Toast",
 			Icon:     lucide.SlidersHorizontal(),
@@ -129,6 +132,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 		{
 			ID:       "science-carriers",
 			Group:    "科学载体",
+			NavTitle: "空间载体与贴纸",
 			Title:    "3. 孔板、平皿、冻存盒与全量科研贴纸",
 			Subtitle: "plate.View · plate.Rack · 全量试剂载体 + 8 种实验动物矢量贴纸",
 			Icon:     lucide.FlaskConical(),
@@ -139,6 +143,27 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 	}
 	sections = append(sections, extra...)
 
+	densityLabel := map[string]string{
+		theme.DensityCompact:     "紧凑密度",
+		theme.DensityDefault:     "标准密度",
+		theme.DensityComfortable: "舒展密度",
+	}[tok.Density]
+	if densityLabel == "" {
+		densityLabel = "标准密度"
+	}
+	presetLabel := map[string]string{
+		theme.PresetObsidian: "纯净白纸",
+		theme.PresetZinc:     "冷银极简",
+		theme.PresetWarm:     "暖润纸面",
+	}[tok.Preset]
+	if presetLabel == "" {
+		presetLabel = "纯净白纸"
+	}
+	modeLabel := "浅色"
+	if tok.Dark {
+		modeLabel = "深色"
+	}
+
 	root := ui.Column(c).Fill().Background(tok.Canvas)
 	root.Children(func() {
 		// Top Story Title & Live Control Toolbar
@@ -147,7 +172,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 			Background(tok.Surface).
 			Gap(float32(tok.Spacing8)).Children(func() {
 			SectionHeader(c, tok, lucide.Layers(), "AsterLab 统一 UI 组件画廊",
-				fmt.Sprintf("密度：%s · 主题：%s · 暗色：%v", tok.Density, tok.Preset, tok.Dark), func() {
+				fmt.Sprintf("%s · %s · %s", densityLabel, presetLabel, modeLabel), func() {
 					ui.Box(c).Width(float32(tok.Spacing48) * 3.8).Children(func() {
 						components.TextBox(c, &st.Search, components.TextBoxOptions{
 							LeadingIcon: lucide.Search(),
@@ -157,6 +182,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 
 			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				// Theme Light/Dark override pills
+				ui.Text(c, "明暗").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 				ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 					for _, tm := range []struct{ id, lbl string }{
@@ -177,6 +203,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 				})
 
 				// Preset override pills
+				ui.Text(c, "色盘").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 				ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 					for _, pr := range []struct{ id, lbl string }{
@@ -197,6 +224,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 				})
 
 				// Density override pills
+				ui.Text(c, "密度").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 				ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 					for _, dn := range []struct{ id, lbl string }{
@@ -253,8 +281,12 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 									ui.Text(c, sec.Group).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine()
 								})
 							}
+							navLbl := sec.NavTitle
+							if navLbl == "" {
+								navLbl = sec.Title
+							}
 							ListItem(c, "story-nav-"+sec.ID, tok, ListItemOptions{
-								Title:    sec.Title,
+								Title:    navLbl,
 								Selected: st.ActiveSection == sec.ID,
 								StartSlot: func() {
 									ico := sec.Icon
@@ -351,6 +383,7 @@ func renderStoryTokensAndMotion(c *ui.Context, tok theme.Tokens, st *GalleryStat
 		SectionHeader(c, tok, lucide.Palette(), "1A. 全局色彩色板与状态 Token",
 			fmt.Sprintf("Canvas/Surface/Element/Ghost/Border · 字号 %d/%d/%d/%d px", tok.TextPage, tok.TextSection, tok.TextBody, tok.TextMeta), nil)
 
+		cat := theme.CategoricalPalette(tok.Dark)
 		swatches := []struct {
 			name string
 			col  ui.Color
@@ -365,10 +398,12 @@ func renderStoryTokensAndMotion(c *ui.Context, tok theme.Tokens, st *GalleryStat
 			{"Success", tok.Success},
 			{"Warning", tok.Warning},
 			{"Danger", tok.Danger},
-			{"Cat-0 水鸭", theme.CategoricalColor("g0", tok.Dark)},
-			{"Cat-1 钴蓝", theme.CategoricalColor("g1", tok.Dark)},
-			{"Cat-2 琥珀", theme.CategoricalColor("g2", tok.Dark)},
-			{"Cat-3 紫丁", theme.CategoricalColor("g3", tok.Dark)},
+		}
+		for idx := 0; idx < min(4, len(cat)); idx++ {
+			swatches = append(swatches, struct {
+				name string
+				col  ui.Color
+			}{fmt.Sprintf("实验分组 #%d", idx+1), cat[idx]})
 		}
 		ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 			for i, sw := range swatches {
@@ -402,25 +437,25 @@ func renderStoryTokensAndMotion(c *ui.Context, tok theme.Tokens, st *GalleryStat
 		})
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
 			tiers := []struct {
-				lbl string
-				ev  Elevation
+				lbl, sub string
+				ev       Elevation
 			}{
-				{"Canvas", ElevationCanvas},
-				{"Surface", ElevationSurface},
-				{"Card", ElevationCard},
-				{"Floating", ElevationFloating},
-				{"Modal", ElevationModal},
+				{"Canvas", "Level 0 · 画布", ElevationCanvas},
+				{"Surface", "Level 1 · 表面", ElevationSurface},
+				{"Card", "Level 2 · 卡片", ElevationCard},
+				{"Floating", "Level 3 · 顶光", ElevationFloating},
+				{"Modal", "Level 4 · 模态", ElevationModal},
 			}
 			for _, tr := range tiers {
-				tile := ui.Column(c).Width(float32(tok.Spacing48)*2.3).
+				tile := ui.Column(c).Width(float32(tok.Spacing48)*2.35).
 					Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Gap(2)
 				ApplyElevation(tile, tok, tr.ev)
 				if tr.ev <= ElevationSurface {
-					tile.Radius(float32(tok.ControlRadius)).Border(1, tok.BorderSubtle)
+					tile.Radius(float32(tok.ControlRadius)).Border(1, tok.BorderStrong)
 				}
 				tile.Children(func() {
 					ui.Text(c, tr.lbl).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
-					ui.Text(c, "Elevation").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					ui.Text(c, tr.sub).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 				})
 			}
 		})
@@ -471,10 +506,10 @@ func renderStoryControlsAndEngines(c *ui.Context, tok theme.Tokens, st *GalleryS
 			components.Button(c, "Toolbar 工具", components.ButtonToolbar)
 			components.Button(c, "Ghost 幽灵", components.ButtonGhost)
 			components.IconButton(c, lucide.Columns2(), "分屏图标钮", components.IconButtonCompact)
-			components.Badge(c, "Success", components.BadgeOptions{Tone: components.BadgeSuccess})
-			components.Badge(c, "Warning", components.BadgeOptions{Tone: components.BadgeWarning})
-			components.Badge(c, "Danger", components.BadgeOptions{Tone: components.BadgeDanger})
-			components.Badge(c, "Accent", components.BadgeOptions{Tone: components.BadgeAccent})
+			Badge(c, "Success", components.BadgeOptions{Tone: components.BadgeSuccess})
+			Badge(c, "Warning", components.BadgeOptions{Tone: components.BadgeWarning})
+			Badge(c, "Danger", components.BadgeOptions{Tone: components.BadgeDanger})
+			Badge(c, "Accent", components.BadgeOptions{Tone: components.BadgeAccent})
 		})
 
 		// Inputs, ScrubNumber, NumberInput, HoldToConfirm, Keycaps
@@ -601,12 +636,12 @@ func renderStoryScienceCarriers(c *ui.Context, tok theme.Tokens, st *GalleryStat
 			"复用 internal/uikit/plate 与 workflownode 渲染", nil)
 
 		demoWells := map[string]plate.WellState{
-			"A1": {Group: "PBS 对照", Role: "control"},
-			"A2": {Group: "PBS 对照", Role: "control"},
-			"B1": {Group: "10 ug/mL", Role: "treatment"},
-			"B2": {Group: "10 ug/mL", Role: "treatment"},
-			"C1": {Group: "50 ug/mL", Role: "comparator"},
-			"C2": {Group: "50 ug/mL", Role: "comparator"},
+			"A1": {Group: "PBS", Role: "control"},
+			"A2": {Group: "PBS", Role: "control"},
+			"B1": {Group: "10uM", Role: "treatment"},
+			"B2": {Group: "10uM", Role: "treatment"},
+			"C1": {Group: "50uM", Role: "comparator"},
+			"C2": {Group: "50uM", Role: "comparator"},
 		}
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Start).Gap(float32(tok.Spacing16)).Children(func() {
 			ui.Column(c).Width(float32(tok.Spacing48)*8.2).Gap(float32(tok.Spacing8)).Children(func() {
@@ -616,10 +651,10 @@ func renderStoryScienceCarriers(c *ui.Context, tok theme.Tokens, st *GalleryStat
 					Interactive: true, HideFooter: true, Zoom: 0.72, State: &st.plateState,
 				})
 			})
-			ui.Column(c).Width(float32(tok.Spacing48)*4.8).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Column(c).Width(float32(tok.Spacing48)*5.2).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Text(c, "四象限 90mm 琼脂平皿").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 				plate.View(c, plate.Props{
-					Rows: 2, Cols: 2, Topology: "dish", Wells: demoWells, HideFooter: true, Zoom: 0.68,
+					Rows: 2, Cols: 2, Topology: "dish", Wells: demoWells, HideFooter: true, Zoom: 0.78,
 				})
 			})
 			ui.Column(c).Width(float32(tok.Spacing48)*5.2).Gap(float32(tok.Spacing8)).Children(func() {
@@ -655,7 +690,7 @@ func renderStoryScienceCarriers(c *ui.Context, tok theme.Tokens, st *GalleryStat
 			for _, sp := range vessels {
 				sp := sp
 				tile := ui.Column(c.Key("gal-ves-" + string(sp.ID))).
-					Width(float32(tok.Spacing48)*3.1).
+					Width(float32(tok.Spacing48)*3.9).
 					Padding(float32(tok.Spacing8)).
 					Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated).Border(1, tok.BorderSubtle).

@@ -59,6 +59,7 @@ type Callbacks struct {
 	SavePlateFile       func(defaultName, format string, data []byte) (string, error)
 	CreateDraft         func(Draft)
 	OnToast             func(kit.Toast)
+	OnScheduleChanged   func()
 }
 
 // Workspace holds editable tool drafts until an explicit handoff action.
@@ -146,6 +147,9 @@ type Workspace struct {
 	vivariumPeekID       string
 	lastDeletedCage      *VivariumCage
 	lastDeletedCageIdx   int
+	vivariumMsKindIdx    int // 0=收样取材, 1=计划称重, 2=造模给药
+	vivariumMsDateDraft  string
+	vivariumMsTitleDraft string
 }
 
 func New(cb Callbacks) *Workspace {

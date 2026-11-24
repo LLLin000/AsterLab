@@ -202,7 +202,7 @@ func ScrubNumber(c *ui.Context, key any, tok theme.Tokens, val *float64, opts Sc
 			Height(float32(tok.InputHeight)).
 			Padding(0, float32(tok.Spacing8)).
 			Radius(float32(tok.ControlRadius)).
-			Background(tok.Elevated).
+			Background(tok.Surface).
 			Border(1, tok.Border).
 			Justify(ui.Start).
 			AlignItems(ui.Center)

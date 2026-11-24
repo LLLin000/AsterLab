@@ -90,6 +90,39 @@ rows:
   - {group: "PBS 对照", d1: 6.0, d2: 6.0}
   - {group: "HAMA-Van", d1: 18.4, d2: 18.2}
 ` + "```" + `
+
+` + "```asterlab" + `
+# @vessel: plate96
+kind: calculator
+id: sb-sd96
+schema: 1
+title: 96 孔板 10 倍连续梯度稀释（与孔板联动）
+mode: serial_dilution
+stock:
+  value: 1000000
+  unit: CFU/mL
+dilution_factor: 10
+steps_count: 5
+volume_per_unit:
+  value: 200
+  unit: uL
+` + "```" + `
+
+` + "```asterlab" + `
+kind: figure
+id: sb-fig
+schema: 1
+title: 菌落抑菌圈模式示意图（暗色模式自动 0.86 柔光）
+caption: 悬停图片恢复 1.0 亮度
+svg: |
+  <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 260 110'>
+    <rect width='260' height='110' rx='8' fill='#F8FAFC'/>
+    <circle cx='78' cy='55' r='34' fill='#FEF3C7' stroke='#B45309' stroke-width='2'/>
+    <circle cx='78' cy='55' r='7' fill='#92400E'/>
+    <circle cx='182' cy='55' r='34' fill='#DBEAFE' stroke='#1D4ED8' stroke-width='2'/>
+    <circle cx='182' cy='55' r='16' fill='#FFFFFF' stroke='#2563EB' stroke-width='1.5'/>
+  </svg>
+` + "```" + `
 `
 
 func (a *app) buildStorybookExtraSections() []kit.StorySection {
@@ -129,6 +162,7 @@ func (a *app) buildStorybookExtraSections() []kit.StorySection {
 		{
 			ID:       "asterdoc-modules",
 			Group:    "文档模块",
+			NavTitle: "AsterDoc 文档模块",
 			Title:    "5. AsterML v2 实验文档模块矩阵",
 			Subtitle: "Live Preview 正文 · checklist · group_table · param_table · timer · data_table",
 			Icon:     lucide.FileText(),
@@ -149,6 +183,7 @@ func (a *app) buildStorybookExtraSections() []kit.StorySection {
 		{
 			ID:       "vivarium-edge",
 			Group:    "边界压测",
+			NavTitle: "动物房与边界压测",
 			Title:    "6. 动物房笼卡与边界/错误压测",
 			Subtitle: "GB 14925 单笼密度预警 · 超长中英文混排截断 · Danger/Empty 状态",
 			Icon:     lucide.PawPrint(),

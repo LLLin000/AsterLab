@@ -13,12 +13,16 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/reagent"
+	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/uikit/labsticker"
 	"asterlab-mygo-prototype/internal/vault"
+	"asterlab-mygo-prototype/internal/vivarium"
+	"asterlab-mygo-prototype/modules/runs"
 )
 
 func renderAuditDoc(t *testing.T, outDir, name, src string, w, h int, dark bool, maxColW float32) {
@@ -1260,5 +1264,242 @@ func TestStage4StorybookAndEnginesVisualAudit(t *testing.T) {
 		_ = tt.Click("动物台账")
 		tt.Advance(180 * time.Millisecond)
 		tt.Frame()
+	})
+}
+
+func TestStage5UnifiedEnginesAndCalendarVisualAudit(t *testing.T) {
+	outDir := os.Getenv("ASTERLAB_VISUAL_OUT")
+	if outDir == "" {
+		outDir = t.TempDir()
+	} else if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir visual out: %v", err)
+	}
+
+	root := filepath.Join(t.TempDir(), "s5_vault")
+	v, err := vault.Open(root)
+	if err != nil {
+		t.Fatalf("vault.Open: %v", err)
+	}
+	_ = v.SeedTemplates(defaultTemplateSeeds())
+	exp1, err := v.CreateExperiment("", "HAMA 水凝胶皮下移植抑瘤实验", "2026-11-24", "---\ntitle: HAMA 抑瘤\n---\n\n#@ STEP 1 · 准备\n")
+	if err != nil {
+		t.Fatalf("CreateExperiment: %v", err)
+	}
+	exp2, err := v.CreateExperiment("", "DMEM 细胞毒性 CCK-8 复测", "2026-11-28", "---\ntitle: CCK-8 复测\n---\n\n#@ STEP 1 · 种板\n")
+	if err != nil {
+		t.Fatalf("CreateExperiment 2: %v", err)
+	}
+
+	sh := &shell.Shell{
+		TodayDate:        "2026-11-24",
+		SelectedDate:     "2026-11-24",
+		SelectedTreePath: exp1.RelPath,
+		AppVersion:       "0.1.10-devdebug-r14",
+		LiquidGlass:      true,
+		Density:          theme.DensityDefault,
+		Experiments: []shell.ExperimentItem{
+			{ID: exp1.RelPath, Title: exp1.Title, Date: "2026-11-24", FilePath: exp1.RelPath, Stage: shell.StageInProgress, StartHour: 9.5, DurationMin: 90},
+			{ID: exp2.RelPath, Title: exp2.Title, Date: "2026-11-28", FilePath: exp2.RelPath, Stage: shell.StageReady, StartHour: 14.0, DurationMin: 60},
+		},
+	}
+	a := &app{
+		shell:      sh,
+		vault:      v,
+		vaultIndex: vault.NewVaultIndex(v),
+		docStore:   vault.NewDocStore(v),
+	}
+	sh.GalleryExtraSections = a.buildStorybookExtraSections()
+
+	// 1a. Fixed Storybook Tokens & Controls (Light)
+	stTokens := &kit.GalleryState{ActiveSection: "tokens-motion", SampleNum: 12, ScrubVal: 22.5}
+	renderVisualPNGSteps(t, outDir, "s5_01a_storybook_tokens_fixed_light.png", 1280, 860, false, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stTokens, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("标准密度 · 纯净白纸 · 浅色") || !tt.HasText("明暗") || !tt.HasText("色盘") {
+			t.Fatalf("expected updated Chinese header meta in Storybook, texts=%v", tt.Texts())
+		}
+	})
+
+	stCtrl := &kit.GalleryState{ActiveSection: "controls-kit", SampleNum: 10, ScrubVal: 24.8, SelectedIdx: 1}
+	renderVisualPNGSteps(t, outDir, "s5_01_storybook_fixed_tokens_controls_light.png", 1280, 860, false, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stCtrl, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+	})
+
+	// 2. Fixed Storybook Science Carriers + AsterDoc (Dark)
+	stSci := &kit.GalleryState{ActiveSection: "science-carriers", SampleNum: 12, ScrubVal: 20.0}
+	renderVisualPNGSteps(t, outDir, "s5_02a_storybook_carriers_fixed_light.png", 1280, 920, false, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stSci, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+	})
+
+	stDoc := &kit.GalleryState{ActiveSection: "asterdoc-modules", SampleNum: 12}
+	renderVisualPNGSteps(t, outDir, "s5_02_storybook_fixed_carriers_asterdoc_dark.png", 1280, 1480, true, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stDoc, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("96 孔板 10 倍连续梯度稀释") || !tt.HasText("悬停图片恢复 1.0 亮度") {
+			t.Fatalf("expected calculator & figure in storybook AsterDoc section, texts=%v", tt.Texts())
+		}
+	})
+
+	// Build unified Pantry + Vivarium workspace for Stage 5 engines & 3-domain calendar
+	ptrU32 := func(v uint32) *uint32 { return &v }
+	pantryLedger := runs.PantryLedger{
+		NearExpiryDays: 30,
+		Items: []runs.PantryItem{
+			{
+				ID: "p-dmem", Name: "DMEM 高糖培养基", Location: "4℃ 细胞间冰箱-上层",
+				PurchasedOn: "2026-11-24", OpenedOn: "2026-11-24", ExpiresOn: "2026-11-28",
+				ShelfLifeDays: ptrU32(180), OpenedShelfLifeDays: ptrU32(14), Status: "near_expiry", LabelCode: "LOT-202611A",
+			},
+			{
+				ID: "p-fbs", Name: "胎牛血清 FBS (Gibco)", Location: "-20℃ 冰柜-A2",
+				PurchasedOn: "2026-11-20", OpenedOn: "2026-11-24", ExpiresOn: "2027-05-01",
+				ShelfLifeDays: ptrU32(365), OpenedShelfLifeDays: ptrU32(30), Status: "opened", LabelCode: "FBS-9921",
+			},
+		},
+	}
+	pantryMetas := map[string]tools.PantryItemMeta{
+		"p-dmem": {
+			VesselID:          labsticker.VesselMediaBottle500,
+			RemainingQty:      120,
+			QtyUnit:           "mL",
+			LowStockThreshold: 150,
+			RestockBy:         "2026-11-26",
+			StockLedger: []reagent.StockTx{
+				{DateYMD: "2026-11-20", Kind: reagent.TxIn, Delta: 500, Unit: "mL", Note: "新批号验收"},
+				{DateYMD: "2026-11-24", Kind: reagent.TxOut, Delta: 380, Unit: "mL", Note: "HUVEC 传代配液"},
+			},
+		},
+		"p-fbs": {
+			VesselID: labsticker.VesselSerumVial, RemainingQty: 45, QtyUnit: "mL",
+			LowStockThreshold: 50, RestockBy: "2026-11-25",
+		},
+	}
+	w := tools.New(tools.Callbacks{
+		ListPantry:        func() (runs.PantryLedger, error) { return pantryLedger, nil },
+		LoadPantryMeta:    func() (map[string]tools.PantryItemMeta, error) { return pantryMetas, nil },
+		SavePantryMeta:    func(m map[string]tools.PantryItemMeta) error { pantryMetas = m; return nil },
+		OnToast:           func(tst kit.Toast) { sh.PushToast(tst) },
+		OnScheduleChanged: func() {},
+	})
+	w.PantryLoaded = true
+	w.Pantry = pantryLedger
+	w.PantryMeta = pantryMetas
+	w.EnsurePantryMetaLoaded()
+
+	w.VivariumCages = []tools.VivariumCage{
+		{
+			ID: "viv-5a", CageCode: "SPF-M101", Species: labsticker.AnimalMouseWhite,
+			Strain: "BALB/c", Genotype: "WT 荷瘤模型", MaleCount: 5, FemaleCount: 0,
+			FacilityGrade: "SPF", Room: "屏障 302", RackPos: "IVC-A1-01",
+			DOB: "2026-10-05", ArrivedOn: "2026-11-17", QuarantineDays: 7,
+			WeightG: 18.2, IACUCNo: "IACUC-2026-088", IACUCExpiresOn: "2026-11-30",
+			Vendor: "维通利华", IDMethod: "耳标", AnimalIDs: "#01~#05",
+			WeightHistory: []tools.WeightEntry{
+				{Date: "2026-11-17", WeightG: 22.8},
+				{Date: "2026-11-24", WeightG: 18.2},
+			},
+			Status: "in_study", ExperimentRef: "HAMA 水凝胶皮下移植抑瘤实验",
+			HealthNotes: "体重下降需人道终点复核",
+			Milestones: []vivarium.Milestone{
+				{ID: "ms-d1", Kind: vivarium.MilestoneDosing, DateYMD: "2026-11-24", Title: "D7 水凝胶瘤内给药"},
+				{ID: "ms-h1", Kind: vivarium.MilestoneHarvest, DateYMD: "2026-11-24", Title: "瘤体称重与取材收样"},
+				{ID: "ms-w1", Kind: vivarium.MilestoneWeigh, DateYMD: "2026-11-27", Title: "D10 晨间称重"},
+			},
+		},
+	}
+
+	now := time.Date(2026, 11, 24, 10, 0, 0, 0, time.Local)
+	evs := append([]schedule.Event{}, w.ProjectReagentCalendarEvents(now)...)
+	evs = append(evs, w.ProjectVivariumCalendarEvents(now)...)
+	sh.CalendarEvents = evs
+	sh.OnOpenScheduleEvent = func(ev schedule.Event) {}
+	sh.OnToggleScheduleEventDone = func(ev schedule.Event) {}
+	sh.OnCreateReagentForDate = func(dateYMD string) {}
+	sh.OnCreateAnimalForDate = func(dateYMD string) {}
+	sh.PantryItems = []shell.QuickPantryItem{
+		{ID: "p-dmem", Name: "DMEM 高糖培养基", Location: "4℃ 细胞间冰箱-上层", Status: "near_expiry", ExpiresOn: "2026-11-28", LotNumber: "LOT-202611A"},
+	}
+
+	// 3a & 3b. 3-Domain Month Calendar + Right Drawer 7-day Upcoming Summary (Light & Dark)
+	sh.OpenCalendarTab()
+	sh.SetRightDrawer(true, 0) // Right Drawer 日程概览 & 未来 7 天试剂与动物节点
+	renderVisualPNGSteps(t, outDir, "s5_03a_calendar_3domain_month_light.png", 1400, 900, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("全部三域") || !tt.HasText("试剂效期与采购") || !tt.HasText("动物入栏与收样") {
+			t.Fatalf("expected 3-domain calendar layer bar, texts=%v", tt.Texts())
+		}
+	})
+	renderVisualPNGSteps(t, outDir, "s5_03b_calendar_3domain_month_dark.png", 1400, 900, true, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+	})
+
+	// 4. 3-Domain DayPopover on 2026-11-24 (Experiment + Reagent + Animal Harvest with inline Done toggle)
+	sh.SetRightDrawer(false, 0)
+	sh.DayPopoverDate = "2026-11-24"
+	sh.DayPopoverOpen = true
+	renderVisualPNGSteps(t, outDir, "s5_04_calendar_day_popover_3domain_light.png", 1360, 880, false, func(c *ui.Context) {
+		sh.RenderSplitView(c)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("动物房节点") && !tt.HasText("✓ 完成") {
+			t.Fatalf("expected 3-domain DayPopover with animal milestone completion button, texts=%v", tt.Texts())
+		}
+	})
+	sh.DayPopoverOpen = false
+
+	// 5. Vivarium SidePeek with Welfare Weight Alert Banner, Split Cage, and Milestones Checklist
+	renderVisualPNGSteps(t, outDir, "s5_05_vivarium_milestones_split_sidepeek_light.png", 1320, 880, false, func(c *ui.Context) {
+		tools.ViewPantry(c, w)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		_ = tt.Click("动物房")
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		w.OpenVivariumPeek(w.VivariumCages[0])
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("实验与收样节点（同步至日历）") {
+			t.Fatalf("expected vivarium SidePeek milestones panel, texts=%v", tt.Texts())
+		}
+	})
+	w.VivariumPeekOpen = false
+
+	// 6. Reagent Detail Dialog showing RemainingQty, LowStockThreshold, RestockBy, StockLedger
+	if !w.OpenPantryByID("p-dmem") {
+		t.Fatalf("OpenPantryByID(p-dmem) returned false")
+	}
+	renderVisualPNGSteps(t, outDir, "s5_06_reagent_ledger_detail_light.png", 1280, 900, false, func(c *ui.Context) {
+		tools.ViewPantry(c, w)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(180 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("库存余量、计划补货与领用流水") {
+			t.Fatalf("expected reagent stock ledger block in detail dialog, texts=%v", tt.Texts())
+		}
 	})
 }

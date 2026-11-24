@@ -233,7 +233,7 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | 交互态与投影 Token | `internal/theme/theme.go` (`Tokens`) | 统一 `ElementHover/Active/Selected`、`GhostHover/Active/Selected`、`BorderFocused/Selected/Disabled`、`TextPlaceholder/Disabled`、`DropTargetBg/Border` 及暗色 `TopHighlight`（Zed 顶边 `1px` 内高光）。调用点禁止硬编码阴影或 `components.ContextMenu` |
 | 四层物理高度 | `internal/uikit/kit/elevation.go` (`Elevation`) | `ElevationCanvas` → `ElevationSurface`（悬浮工具条）→ `ElevationPopup`（右键菜单/浮层、`top + 1px` 暗色内高光 + 柔阴影）→ `ElevationModal`（命令面板/搜索/设置弹窗） |
 | 光标锚定右键菜单 | `internal/uikit/kit/context_menu.go` (`kit.ContextMenu` / `kit.Menu`) | 统一定位到 `1×1` 右键点击坐标，内部自包含 `OverlayPortal` 与键盘/外部点击关闭；`shell` / `asterdoc` / `tools` 禁止直接调用 `components.ContextMenu` |
-| 按键胶囊 / 列表行 / 空态与横幅 | `internal/uikit/kit/{keycap,list_item,empty_banner}.go` | `kit.Keycap` 渲染键盘组合键（命令面板与工具提示）；`kit.ListItem` 统一文件树/命令面板/搜索行高与选中指示；`kit.EmptyState` / `kit.InlineBanner` / `kit.SectionHeader` 统一空态与提示条；`kit.RenderComponentGallery` 在「设置 → 外观与布局 → UI 组件画廊」中提供统一预览与交互验证 |
+| 按键胶囊 / 徽标 / 列表行 / 空态与横幅 | `internal/uikit/kit/{keycap,badge,list_item,empty_banner}.go` | `kit.Keycap` 渲染键盘组合键（命令面板与工具提示）；`kit.Badge` 强制 `.AlignSelf(ui.Center)` 保障行内光学居中；`kit.ListItem` 统一文件树/命令面板/搜索行高与左侧 `2px` Accent 选中标；`kit.EmptyState` / `kit.InlineBanner` / `kit.SectionHeader` 统一空态与提示条；`kit.RenderComponentGallery` 在「设置 → 外观与布局 → UI 组件画廊」中提供统一预览与交互验证 |
 | 3 档界面密度 | `internal/theme/theme.go` (`UiDensity`) | 支持 `compact`（紧凑 `0.85x`）/ `default`（默认 `1.0x`）/ `comfortable`（宽松 `1.15x`），持久化于 `.asterlab/config.json`，通过设置中心实时切换 |
 | 暗色模式附图柔光 + `onevra` 数值输入 | `asterdoc/{widget_figure,widget_serial_dilution}.go` | Obsidian 风格暗色正文图片 `0.86` 柔光减刺眼、悬停回升 `1.0`；倍比稀释等精确数值步进使用 `onevra/components.NumberInput` 与 `HoldToConfirm` |
 | 储藏室 · 动物房与实验动物矢量贴纸 | `internal/uikit/labsticker/animals.go` + `internal/tools/vivarium.go` + `pantry_store.go` | 在 `储藏室` 顶部与试剂耗材平级隔离为 `[ 试剂耗材 \| 动物房 ]`，基于 **IACUC + ARRIVE 2.0 + GB 14925-2023 SPF** 设计笼卡与动物台账表单（伦理批件、品系/基因型、♂/♀ 存栏、自动周龄、体征称重、SPF 设施/房/架/笼、单笼密度合规预警、健康福祉记录），数据以 `type: "vivarium"` 写入同一 `pantry.jsonl`；内置 8 枚无 `<text>` 纯矢量实验室动物贴纸（小白鼠、C57黑鼠、裸鼠、SD大鼠、新西兰兔、比格犬、豚鼠、斑马鱼） |
@@ -253,3 +253,16 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | 侧滑详情检查器 (`SidePeek`) | `internal/uikit/kit/side_peek.go` + `tools/vivarium.go` | 动物房点击笼卡或台账笼号优先于右侧滑出 `SidePeek`，保留左侧全局笼架/台账视野，支持无缝跳转完整模态弹窗或触发 Rerun 风格右抽屉检查器 (`RenderVivariumInspector`) |
 | 多条件组合筛选栏 (`FilterBar`) | `internal/uikit/kit/filter_bar.go` + `tools/vivarium.go` | 支持快捷预设视图 + `+ 筛选` 多维度组合胶囊（可点 `×` 单独移除条件，用于动物房设施/状态/物种/密度告警多维过滤） |
 | 全站 UI 组件画廊 (Full Storybook) | `internal/uikit/kit/gallery.go` + `shell/storybook.go` + `storybook_sections.go` | 通过 `kit.StorySection` 无环注入覆盖 **6 大板块**（1. 全局 Token/色板/字体/海拔/动效沙盒；2. 基础控件 + 6 大 UI 引擎；3. 孔板/平皿/管架/全量试剂与 8 种动物贴纸；4. 全局 Shell 壳层；5. AsterML v2 文档模块；6. 动物房与边界压测），顶部支持实时切换浅/深色、三色盘、三档密度与 `520dp` 窄屏边界 |
+
+---
+
+## 14. 独立试剂/动物领域管理引擎与三域日历联动（2026-11-24）
+
+保持“统一抽象而不强行同构”的零环架构：三个独立零 GUI 引擎各自维护严谨科学领域规则，再经统一只读投影契约汇聚至工作台日历与右抽屉。
+
+| 引擎 / 视图 | 实现位置 | 核心领域模型与交互 |
+|---|---|---|
+| 统一三域调度投影 | `internal/schedule/schedule.go` | 定义 `DomainExperiment` / `DomainReagent` / `DomainVivarium`、10 种业务事件类型（采购入库、开瓶启用、计划补货、试剂效期、开瓶效期、动物入栏、检疫解除、伦理到期、给药、称重、收样取材），提供 `IndexByDate` 与 `SummarizeUpcoming`（右抽屉 7 日即将发生摘要） |
+| 试剂独立生命周期与流水引擎 | `internal/reagent/engine.go` + `internal/tools/pantry_shelf.go` | 独立维护 `RemainingQty`、`QtyUnit`、`LowStockThreshold`、`RestockBy`、`StockLedger`（入库 `in`/领用 `out` 原子流水扣减与自动余量同步）；基于开瓶日期计算开瓶后失效日期，并与批次效期联合投射「双效期 × 低库存补货」日历事件 |
+| 动物房独立福祉、里程碑与分笼引擎 | `internal/vivarium/engine.go` + `internal/tools/vivarium.go` | 独立维护 `ArrivedOn`、`QuarantineDays`（自动推算检疫解除日）、`IACUCExpiresOn` 与 `Milestones`（`dosing`/`weigh`/`harvest`）；遵循 **GB 14925-2023 + ARRIVE 人道终点** 评估体重较基线下降 ≥15% 预警 / ≥20% 紧急停验；支持 `SplitVivariumCage` 一键从母笼拆笼分出子代/组别并继承品系、设施、IACUC 批件 |
+| 三域联动日历与 7 日抽屉摘要 | `internal/shell/{calendar,right_drawer}.go` + `vault_host.go` | 日历顶部提供 `[ 全部三域 \| 实验 \| 试剂效期与采购 \| 动物入栏与收样 ]` 分层胶囊；月/周视图同屏叠加并支持点击胶囊直达 `OpenPantryByID` / `OpenVivariumCageByID`；单日弹出层与右键菜单支持分组查看、内联 `✓ 完成` 勾选动物收样节点及按日期快捷新增入库/入栏 |

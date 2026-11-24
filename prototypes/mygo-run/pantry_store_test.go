@@ -9,9 +9,12 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"asterlab-mygo-prototype/internal/reagent"
+	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/vault"
+	"asterlab-mygo-prototype/internal/vivarium"
 	"asterlab-mygo-prototype/modules/runs"
 )
 
@@ -528,24 +531,30 @@ func TestVivariumJSONLPersistenceRoundTrip(t *testing.T) {
 
 	cages := []tools.VivariumCage{
 		{
-			ID:            "viv-test-1",
-			CageCode:      "SPF-M101",
-			Species:       "mouse_white",
-			Strain:        "BALB/c",
-			Genotype:      "WT",
-			MaleCount:     4,
-			FemaleCount:   0,
-			FacilityGrade: "SPF",
-			Room:          "屏障 302",
-			RackPos:       "IVC-A1-01",
-			DOB:           "2026-10-15",
-			WeightG:       22.4,
-			IACUCNo:       "IACUC-2026-088",
-			Vendor:        "维通利华",
-			CertNo:        "SCXK-2026-0011",
-			Status:        "in_study",
-			ExperimentRef: "2026-11-24_HUVEC.asterml",
-			HealthNotes:   "体重稳步增长，进食饮水正常",
+			ID:             "viv-test-1",
+			CageCode:       "SPF-M101",
+			Species:        "mouse_white",
+			Strain:         "BALB/c",
+			Genotype:       "WT",
+			MaleCount:      4,
+			FemaleCount:    0,
+			FacilityGrade:  "SPF",
+			Room:           "屏障 302",
+			RackPos:        "IVC-A1-01",
+			DOB:            "2026-10-15",
+			ArrivedOn:      "2026-11-17",
+			QuarantineDays: 7,
+			WeightG:        22.4,
+			IACUCNo:        "IACUC-2026-088",
+			IACUCExpiresOn: "2027-06-30",
+			Vendor:         "维通利华",
+			CertNo:         "SCXK-2026-0011",
+			Status:         "in_study",
+			ExperimentRef:  "2026-11-24_HUVEC.asterml",
+			HealthNotes:    "体重稳步增长，进食饮水正常",
+			Milestones: []vivarium.Milestone{
+				{ID: "ms-1", Kind: vivarium.MilestoneHarvest, DateYMD: "2026-11-28", Title: "收样取材"},
+			},
 		},
 	}
 	if err := a.saveVivarium(cages); err != nil {
@@ -559,9 +568,12 @@ func TestVivariumJSONLPersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 vivarium cage loaded, got %d", len(loaded))
 	}
 	got := loaded[0]
-	if got.CageCode != "SPF-M101" || got.Strain != "BALB/c" || got.IACUCNo != "IACUC-2026-088" || got.MaleCount != 4 {
+	if got.CageCode != "SPF-M101" || got.Strain != "BALB/c" || got.IACUCNo != "IACUC-2026-088" || got.MaleCount != 4 ||
+		got.ArrivedOn != "2026-11-17" || got.QuarantineDays != 7 || got.IACUCExpiresOn != "2027-06-30" ||
+		len(got.Milestones) != 1 || got.Milestones[0].DateYMD != "2026-11-28" {
 		t.Fatalf("vivarium round-trip mismatch: %+v", got)
 	}
+	a.tools.VivariumCages = loaded
 
 	// Ensure type: "vivarium" lines coexist cleanly with pantry items in the same pantry.jsonl
 	raw, err := os.ReadFile(filepath.Join(root, ".asterlab", pantryJSONLFileName))
@@ -570,5 +582,58 @@ func TestVivariumJSONLPersistenceRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"type":"vivarium"`) && !strings.Contains(string(raw), `"type": "vivarium"`) {
 		t.Fatalf("expected type:vivarium record in pantry.jsonl, got:\n%s", string(raw))
+	}
+
+	// Verify Reagent lifecycle fields + StockLedger + 3-domain calendar projection round-trip.
+	shelf := uint32(180)
+	openedShelf := uint32(14)
+	item, err := a.localUpsertPantry(runs.PantryUpsert{
+		Name:                "DMEM 基础培养基",
+		Location:            "4℃ 冰箱",
+		PurchasedOn:         "2026-11-20",
+		OpenedOn:            "2026-11-22",
+		ShelfLifeDays:       &shelf,
+		OpenedShelfLifeDays: &openedShelf,
+	})
+	if err != nil {
+		t.Fatalf("localUpsertPantry failed: %v", err)
+	}
+	meta := tools.PantryItemMeta{
+		VesselID:          "reagent_bottle",
+		RemainingQty:      250,
+		QtyUnit:           "mL",
+		LowStockThreshold: 100,
+		RestockBy:         "2026-11-29",
+		StockLedger: []reagent.StockTx{
+			{DateYMD: "2026-11-20", Kind: reagent.TxIn, Delta: 500, Unit: "mL", Note: "新批号入库"},
+			{DateYMD: "2026-11-22", Kind: reagent.TxOut, Delta: 250, Unit: "mL", Note: "细胞传代配液"},
+		},
+	}
+	if err := a.savePantryMeta(map[string]tools.PantryItemMeta{item.ID: meta}); err != nil {
+		t.Fatalf("savePantryMeta failed: %v", err)
+	}
+	gotMetas, err := a.loadPantryMeta()
+	if err != nil {
+		t.Fatalf("loadPantryMeta failed: %v", err)
+	}
+	gotMeta, ok := gotMetas[item.ID]
+	if !ok || gotMeta.RemainingQty != 250 || gotMeta.QtyUnit != "mL" || gotMeta.RestockBy != "2026-11-29" || len(gotMeta.StockLedger) != 2 {
+		t.Fatalf("pantry meta lifecycle round-trip mismatch: %+v", gotMeta)
+	}
+	a.tools = a.newToolsWorkspace()
+	a.tools.VivariumCages = loaded
+	a.syncPantrySnapshotToShell()
+	hasReagentEv := false
+	hasVivariumEv := false
+	for _, ev := range a.shell.CalendarEvents {
+		if ev.Domain == schedule.DomainReagent {
+			hasReagentEv = true
+		}
+		if ev.Domain == schedule.DomainVivarium {
+			hasVivariumEv = true
+		}
+	}
+	if !hasReagentEv || !hasVivariumEv {
+		t.Fatalf("expected both reagent and vivarium events in CalendarEvents, got: %+v", a.shell.CalendarEvents)
 	}
 }

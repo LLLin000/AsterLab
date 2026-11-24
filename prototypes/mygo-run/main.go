@@ -14,6 +14,7 @@ import (
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/runui"
 	"asterlab-mygo-prototype/internal/runworkspace"
+	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/state"
 	"asterlab-mygo-prototype/internal/theme"
@@ -4661,6 +4662,9 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 				a.shell.PushToast(t)
 			}
 		},
+		OnScheduleChanged: func() {
+			a.syncCalendarEventsToShell()
+		},
 	})
 }
 
@@ -4927,6 +4931,52 @@ func main() {
 			if a.shell != nil {
 				a.shell.OpenPantryTab()
 			}
+		},
+		OnOpenScheduleEvent: func(ev schedule.Event) {
+			if a.tools == nil {
+				a.tools = a.newToolsWorkspace()
+			}
+			switch ev.Domain {
+			case schedule.DomainReagent:
+				a.tools.OpenPantryByID(ev.SourceID)
+			case schedule.DomainVivarium:
+				a.tools.OpenVivariumCageByID(ev.SourceID)
+			}
+			if a.shell != nil {
+				a.shell.OpenPantryTab()
+			}
+		},
+		OnToggleScheduleEventDone: func(ev schedule.Event) {
+			if a.tools == nil || ev.Domain != schedule.DomainVivarium || ev.MilestoneID == "" {
+				return
+			}
+			lbl, done := a.tools.ToggleVivariumMilestoneDone(ev.SourceID, ev.MilestoneID)
+			a.syncCalendarEventsToShell()
+			if lbl != "" && a.shell != nil {
+				msg := "已完成：" + lbl
+				if !done {
+					msg = "已恢复待办：" + lbl
+				}
+				a.shell.PushToast(kit.Toast{Tone: kit.ToastSuccess, Message: msg})
+			}
+		},
+		OnCreateReagentForDate: func(dateYMD string) {
+			if a.tools == nil {
+				a.tools = a.newToolsWorkspace()
+			}
+			if a.shell != nil {
+				a.shell.OpenPantryTab()
+			}
+			a.tools.OpenNewPantryDialogOnDate(dateYMD)
+		},
+		OnCreateAnimalForDate: func(dateYMD string) {
+			if a.tools == nil {
+				a.tools = a.newToolsWorkspace()
+			}
+			if a.shell != nil {
+				a.shell.OpenPantryTab()
+			}
+			a.tools.OpenNewVivariumDialogOnDate(dateYMD)
 		},
 		RenderTabContent: func(c *ui.Context, pane *shell.PaneNode, tab shell.WorkspaceTab) {
 			a.renderVaultTabContent(c, pane, tab)

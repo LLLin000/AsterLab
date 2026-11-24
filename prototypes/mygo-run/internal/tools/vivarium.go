@@ -10,9 +10,11 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
+	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/uikit/labsticker"
+	"asterlab-mygo-prototype/internal/vivarium"
 )
 
 // WeightEntry records a dated body-weight measurement for ARRIVE 2.0 & welfare tracking.
@@ -35,11 +37,15 @@ type VivariumCage struct {
 	FacilityGrade string                     `json:"facilityGrade"` // SPF | conventional | isolator | aquatic
 	Room          string                     `json:"room"`
 	RackPos       string                     `json:"rackPos"`
-	DOB           string                     `json:"dob,omitempty"`
-	WeightG       float64                    `json:"weightG,omitempty"`
-	WeightHistory []WeightEntry              `json:"weightHistory,omitempty"`
-	IACUCNo       string                     `json:"iacucNo,omitempty"`
-	Vendor        string                     `json:"vendor,omitempty"`
+	DOB            string                `json:"dob,omitempty"`
+	ArrivedOn      string                `json:"arrivedOn,omitempty"`
+	QuarantineDays int                   `json:"quarantineDays,omitempty"`
+	WeightG        float64               `json:"weightG,omitempty"`
+	WeightHistory  []WeightEntry         `json:"weightHistory,omitempty"`
+	IACUCNo        string                `json:"iacucNo,omitempty"`
+	IACUCExpiresOn string                `json:"iacucExpiresOn,omitempty"`
+	Milestones     []vivarium.Milestone  `json:"milestones,omitempty"`
+	Vendor         string                `json:"vendor,omitempty"`
 	CertNo        string                     `json:"certNo,omitempty"`
 	IDMethod      string                     `json:"idMethod,omitempty"`
 	AnimalIDs     string                     `json:"animalIds,omitempty"`
@@ -71,10 +77,159 @@ func (w *Workspace) EnsureVivariumLoaded() {
 }
 
 func (w *Workspace) saveVivarium() error {
+	var err error
 	if w.Callbacks.SaveVivarium != nil {
-		return w.Callbacks.SaveVivarium(w.VivariumCages)
+		err = w.Callbacks.SaveVivarium(w.VivariumCages)
 	}
-	return nil
+	if err == nil && w.Callbacks.OnScheduleChanged != nil {
+		w.Callbacks.OnScheduleChanged()
+	}
+	return err
+}
+
+func (c VivariumCage) toEngineInput() vivarium.CageInput {
+	pts := make([]vivarium.WeightPoint, 0, len(c.WeightHistory))
+	for _, wp := range c.WeightHistory {
+		pts = append(pts, vivarium.WeightPoint{Date: wp.Date, WeightG: wp.WeightG, Note: wp.Note})
+	}
+	return vivarium.CageInput{
+		ID:             c.ID,
+		CageCode:       c.CageCode,
+		Species:        string(c.Species),
+		Strain:         c.Strain,
+		Genotype:       c.Genotype,
+		Room:           c.Room,
+		RackPos:        c.RackPos,
+		DOB:            c.DOB,
+		ArrivedOn:      c.ArrivedOn,
+		QuarantineDays: c.QuarantineDays,
+		IACUCNo:        c.IACUCNo,
+		IACUCExpiresOn: c.IACUCExpiresOn,
+		Status:         c.Status,
+		ExperimentRef:  c.ExperimentRef,
+		MaleCount:      c.MaleCount,
+		FemaleCount:    c.FemaleCount,
+		WeightG:        c.WeightG,
+		WeightHistory:  pts,
+		Milestones:     c.Milestones,
+	}
+}
+
+// VivariumWelfareReport computes GB 14925 stocking density + weight-loss humane endpoint alerts.
+func VivariumWelfareReport(c VivariumCage) vivarium.WelfareReport {
+	return vivarium.AssessWelfare(c.toEngineInput())
+}
+
+// OpenVivariumCageByID switches Pantry to the animal facility domain and opens SidePeek for cage id.
+func (w *Workspace) OpenVivariumCageByID(id string) bool {
+	w.pantryDomainTab = 1
+	w.EnsureVivariumLoaded()
+	for _, cg := range w.VivariumCages {
+		if cg.ID == id {
+			w.OpenVivariumPeek(cg)
+			return true
+		}
+	}
+	return false
+}
+
+// OpenNewVivariumDialogOnDate opens the new animal cage registration modal pre-filled with ArrivedOn=dateYMD.
+func (w *Workspace) OpenNewVivariumDialogOnDate(dateYMD string) {
+	w.pantryDomainTab = 1
+	w.OpenNewVivariumDialog()
+	if strings.TrimSpace(dateYMD) != "" {
+		w.vivariumDraft.ArrivedOn = dateYMD
+		w.vivariumDraft.QuarantineDays = 7
+	}
+}
+
+// ToggleVivariumMilestoneDone flips milestone completion state, persists to disk, and returns its title.
+func (w *Workspace) ToggleVivariumMilestoneDone(cageID, milestoneID string) (string, bool) {
+	w.EnsureVivariumLoaded()
+	for i := range w.VivariumCages {
+		if w.VivariumCages[i].ID != cageID {
+			continue
+		}
+		for j := range w.VivariumCages[i].Milestones {
+			ms := &w.VivariumCages[i].Milestones[j]
+			if ms.ID == milestoneID {
+				ms.Done = !ms.Done
+				if ms.Done {
+					ms.DoneAt = time.Now().Format("2006-01-02")
+				} else {
+					ms.DoneAt = ""
+				}
+				_ = w.saveVivarium()
+				return fmt.Sprintf("%s · %s", w.VivariumCages[i].CageCode, firstNonEmptyStr(ms.Title, vivarium.MilestoneKindLabel(ms.Kind))), ms.Done
+			}
+		}
+	}
+	return "", false
+}
+
+// SplitVivariumCage splits animals out of parentID into a new child cage using internal/vivarium rules.
+func (w *Workspace) SplitVivariumCage(parentID string, splitMale, splitFemale int) (VivariumCage, bool) {
+	w.EnsureVivariumLoaded()
+	idx := w.findVivariumCageIdx(parentID)
+	if idx < 0 {
+		return VivariumCage{}, false
+	}
+	parent := w.VivariumCages[idx]
+	childCode := fmt.Sprintf("%s-S%d", parent.CageCode, len(w.VivariumCages)+1)
+	updIn, childIn, err := vivarium.ComputeSplit(parent.toEngineInput(), childCode, splitMale, splitFemale)
+	if err != nil {
+		if w.Callbacks.OnToast != nil {
+			w.Callbacks.OnToast(kit.Toast{Tone: kit.ToastWarning, Message: err.Error()})
+		}
+		return VivariumCage{}, false
+	}
+	parent.MaleCount = updIn.MaleCount
+	parent.FemaleCount = updIn.FemaleCount
+	w.VivariumCages[idx] = parent
+
+	child := parent
+	child.ID = childIn.ID
+	child.CageCode = childIn.CageCode
+	child.MaleCount = childIn.MaleCount
+	child.FemaleCount = childIn.FemaleCount
+	child.Status = childIn.Status
+	child.Milestones = nil
+	w.VivariumCages = append(w.VivariumCages, child)
+	_ = w.saveVivarium()
+
+	if w.Callbacks.OnToast != nil {
+		origParent := parent
+		origParent.MaleCount += splitMale
+		origParent.FemaleCount += splitFemale
+		childID := child.ID
+		w.Callbacks.OnToast(kit.Toast{
+			Tone:      kit.ToastSuccess,
+			Message:   fmt.Sprintf("已分笼新建 %s（%d♂/%d♀）", child.CageCode, splitMale, splitFemale),
+			UndoLabel: "撤销分笼",
+			OnUndo: func() {
+				if pIdx := w.findVivariumCageIdx(origParent.ID); pIdx >= 0 {
+					w.VivariumCages[pIdx].MaleCount = origParent.MaleCount
+					w.VivariumCages[pIdx].FemaleCount = origParent.FemaleCount
+				}
+				if cIdx := w.findVivariumCageIdx(childID); cIdx >= 0 {
+					w.VivariumCages = append(w.VivariumCages[:cIdx], w.VivariumCages[cIdx+1:]...)
+				}
+				_ = w.saveVivarium()
+			},
+		})
+	}
+	return child, true
+}
+
+// ProjectVivariumCalendarEvents projects animal arrival, quarantine clearance, milestones,
+// and IACUC expiration alerts into shared Calendar Event projections.
+func (w *Workspace) ProjectVivariumCalendarEvents(today time.Time) []schedule.Event {
+	w.EnsureVivariumLoaded()
+	inputs := make([]vivarium.CageInput, 0, len(w.VivariumCages))
+	for _, cg := range w.VivariumCages {
+		inputs = append(inputs, cg.toEngineInput())
+	}
+	return vivarium.ProjectCalendarEvents(inputs, today)
 }
 
 // VivariumAgeLabel computes live biological age (weeks or days) from YYYY-MM-DD DOB.
@@ -99,18 +254,7 @@ func VivariumAgeLabel(dob string, now time.Time) string {
 
 // VivariumDensityWarning checks GB 14925-2023 recommended single-cage occupancy thresholds.
 func VivariumDensityWarning(c VivariumCage) string {
-	if c.Status == "archived" {
-		return ""
-	}
-	spec, ok := labsticker.LookupAnimal(c.Species)
-	if !ok || spec.DefaultMaxPerCage <= 0 {
-		return ""
-	}
-	tot := c.TotalAnimals()
-	if tot > spec.DefaultMaxPerCage {
-		return fmt.Sprintf("超密度 %d/限%d", tot, spec.DefaultMaxPerCage)
-	}
-	return ""
+	return VivariumWelfareReport(c).DensityWarning
 }
 
 func vivariumGradeLabel(grade string) string {
@@ -667,7 +811,7 @@ func renderVivariumTableView(c *ui.Context, w *Workspace, tok theme.Tokens, filt
 	cols := []ui.TableColumn{
 		{ID: "code", Title: "笼号", Width: 88},
 		{ID: "strain", Title: "物种与品系", MinWidth: 160},
-		{ID: "geno", Title: "基因型", Width: 112},
+		{ID: "geno", Title: "基因型", Width: 140},
 		{ID: "census", Title: "存栏", Width: 92, Align: ui.End},
 		{ID: "age", Title: "周龄", Width: 84, Align: ui.End},
 		{ID: "weight", Title: "体重 (可拖)", Width: 114, Align: ui.End},
@@ -745,14 +889,15 @@ func renderVivariumSidePeek(c *ui.Context, w *Workspace, tok theme.Tokens) {
 	cg := &w.VivariumCages[idx]
 	spec, _ := labsticker.LookupAnimal(cg.Species)
 	statusTxt, statusTone := vivariumStatusInfo(cg.Status)
-	densityWarn := VivariumDensityWarning(*cg)
+	welfare := VivariumWelfareReport(*cg)
+	densityWarn := welfare.DensityWarning
 
 	kit.SidePeek(c, "vivarium-sidepeek", tok, &w.VivariumPeekOpen, kit.SidePeekOptions{
 		Title:    fmt.Sprintf("%s · %s", cg.CageCode, cg.Strain),
 		Subtitle: fmt.Sprintf("%s · %s · %s", spec.Title, vivariumGradeLabel(cg.FacilityGrade), firstNonEmptyStr(cg.Room, "未分配房间")),
 		Icon:     lucide.PawPrint(),
 		HeaderActions: func() {
-			components.Badge(c, statusTxt, components.BadgeOptions{Tone: statusTone})
+			kit.Badge(c, statusTxt, components.BadgeOptions{Tone: statusTone})
 			if components.Button(c, "完整弹窗编辑", components.ButtonSecondary).Clicked() {
 				snap := *cg
 				w.VivariumPeekOpen = false
@@ -802,6 +947,13 @@ func renderVivariumSidePeek(c *ui.Context, w *Workspace, tok theme.Tokens) {
 			kit.InlineBanner(c, tok, lucide.TriangleAlert(), kit.BannerDanger,
 				"GB 14925-2023 合规预警："+densityWarn+"（当前合计 "+fmt.Sprintf("%d 只/尾", cg.TotalAnimals())+"）", "", nil)
 		}
+		if welfare.WeightAlert != "" {
+			tone := kit.BannerWarning
+			if welfare.HumaneEndpoint {
+				tone = kit.BannerDanger
+			}
+			kit.InlineBanner(c, tok, lucide.Activity(), tone, "福利体征监测："+welfare.WeightAlert, "", nil)
+		}
 
 		// Live ScrubNumber Census & Body Weight Controls
 		ui.Text(c, "实时存栏与称重微调（左右拖拽数值 · 松手自动存盘）").
@@ -848,6 +1000,107 @@ func renderVivariumSidePeek(c *ui.Context, w *Workspace, tok theme.Tokens) {
 				cg.Status = vivariumNextStatus(cg.Status)
 				_ = w.saveVivarium()
 			}
+			if cg.TotalAnimals() >= 2 {
+				splitM, splitF := 0, 0
+				if cg.MaleCount > 1 {
+					splitM = 1
+				} else if cg.FemaleCount > 1 {
+					splitF = 1
+				} else if cg.MaleCount == 1 && cg.FemaleCount == 1 {
+					splitF = 1
+				}
+				if splitM+splitF > 0 && components.Button(c, fmt.Sprintf("分笼拆出 %d 只", splitM+splitF), components.ButtonSecondary).Clicked() {
+					_, _ = w.SplitVivariumCage(cg.ID, splitM, splitF)
+				}
+			}
+		})
+
+		// Scheduled Vivarium Milestones (Harvest / Weigh / Dosing -> synced directly to Calendar)
+		ui.Column(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle).
+			Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Icon(c, lucide.CalendarClock()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
+				ui.Text(c, "实验与收样节点（同步至日历）").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				if cg.ArrivedOn != "" {
+					kit.Badge(c, "入栏 "+cg.ArrivedOn, components.BadgeOptions{Tone: components.BadgeNeutral})
+				}
+			})
+			for mIdx := range cg.Milestones {
+				ms := &cg.Milestones[mIdx]
+				kindLbl := vivarium.MilestoneKindLabel(ms.Kind)
+				tone := components.BadgeAccent
+				if ms.Kind == vivarium.MilestoneHarvest {
+					tone = components.BadgeWarning
+				}
+				if ms.Done {
+					tone = components.BadgeSuccess
+				}
+				lbl := firstNonEmptyStr(ms.Title, kindLbl)
+				ui.Row(c.Key("peek-ms-"+ms.ID)).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					chkIco := lucide.Circle()
+					chkCol := tok.TextMuted
+					if ms.Done {
+						chkIco = lucide.CircleCheck()
+						chkCol = tok.Success
+					}
+					chkBtn := ui.ButtonBase(c).Label("完成节点 " + lbl).Padding(2)
+					chkBtn.Children(func() {
+						ui.Icon(c, chkIco).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(chkCol)
+					})
+					if chkBtn.Clicked() {
+						_, _ = w.ToggleVivariumMilestoneDone(cg.ID, ms.ID)
+					}
+					kit.Badge(c, kindLbl, components.BadgeOptions{Tone: tone})
+					ui.Text(c, ms.DateYMD).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).Shrink(0)
+					ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+				})
+			}
+
+			// Quick add milestone row
+			msKinds := []struct {
+				kind  vivarium.MilestoneKind
+				label string
+			}{
+				{vivarium.MilestoneHarvest, "收样取材"},
+				{vivarium.MilestoneWeigh, "计划称重"},
+				{vivarium.MilestoneDosing, "造模给药"},
+			}
+			if w.vivariumMsKindIdx < 0 || w.vivariumMsKindIdx >= len(msKinds) {
+				w.vivariumMsKindIdx = 0
+			}
+			if strings.TrimSpace(w.vivariumMsDateDraft) == "" {
+				w.vivariumMsDateDraft = time.Now().AddDate(0, 0, 3).Format("2006-01-02")
+			}
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				if components.Button(c, msKinds[w.vivariumMsKindIdx].label, components.ButtonGhost).Clicked() {
+					w.vivariumMsKindIdx = (w.vivariumMsKindIdx + 1) % len(msKinds)
+				}
+				ui.Box(c).Width(float32(tok.Spacing48)*2.3).Children(func() {
+					components.TextBox(c, &w.vivariumMsDateDraft, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
+				})
+				ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*2.0).Children(func() {
+					components.TextBox(c, &w.vivariumMsTitleDraft, components.TextBoxOptions{}).Placeholder("如 处死取瘤/血清…")
+				})
+				if components.Button(c, "+ 加节点", components.ButtonSecondary).Clicked() {
+					chosen := msKinds[w.vivariumMsKindIdx]
+					title := strings.TrimSpace(w.vivariumMsTitleDraft)
+					if title == "" {
+						title = chosen.label
+					}
+					cg.Milestones = append(cg.Milestones, vivarium.Milestone{
+						ID:      fmt.Sprintf("ms-%d", time.Now().UnixNano()),
+						Kind:    chosen.kind,
+						DateYMD: strings.TrimSpace(w.vivariumMsDateDraft),
+						Title:   title,
+					})
+					w.vivariumMsTitleDraft = ""
+					_ = w.saveVivarium()
+					if w.Callbacks.OnToast != nil {
+						w.Callbacks.OnToast(kit.Toast{Tone: kit.ToastSuccess, Message: fmt.Sprintf("已添加 %s（%s）并同步日历", title, strings.TrimSpace(w.vivariumMsDateDraft))})
+					}
+				}
+			})
 		})
 
 		// Weight history trace
@@ -1130,6 +1383,26 @@ func renderVivariumDialog(c *ui.Context, w *Workspace, tok theme.Tokens) {
 							ui.Column(c).Grow(1).MinWidth(float32(tok.Spacing48)*4).Gap(4).Children(func() {
 								ui.Text(c, "关联实验课题").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 								components.TextBox(c, &w.vivariumDraft.ExperimentRef, components.TextBoxOptions{}).Placeholder("如 HAMA 水凝胶创面愈合实验")
+							})
+						})
+
+						ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing12)).Children(func() {
+							ui.Column(c).Grow(1).MinWidth(float32(tok.Spacing48)*3.0).Gap(4).Children(func() {
+								ui.Text(c, "购入入栏日 (ArrivedOn)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								components.TextBox(c, &w.vivariumDraft.ArrivedOn, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
+							})
+							ui.Column(c).Width(float32(tok.Spacing48)*2.6).Gap(4).Children(func() {
+								ui.Text(c, "检疫适应期 (天)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								qF := float64(w.vivariumDraft.QuarantineDays)
+								if sc := kit.ScrubNumber(c, "viv-dlg-qdays", tok, &qF, kit.ScrubOptions{
+									Unit: "天", Min: 0, Max: 30, Step: 1, Decimals: 0,
+								}); sc.Changed || sc.Committed {
+									w.vivariumDraft.QuarantineDays = max(0, int(qF+0.5))
+								}
+							})
+							ui.Column(c).Grow(1).MinWidth(float32(tok.Spacing48)*3.0).Gap(4).Children(func() {
+								ui.Text(c, "伦理批件到期日").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								components.TextBox(c, &w.vivariumDraft.IACUCExpiresOn, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
 							})
 						})
 
