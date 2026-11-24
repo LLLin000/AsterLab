@@ -329,3 +329,64 @@ rows:
 		}
 	}
 }
+
+func TestAnalyzeDocumentDeterministicAndSkipsUnfilledCFUParams(t *testing.T) {
+	unfilledSrc := `---
+title: "CFU 计划态无读数"
+date: "2026-11-24"
+---
+
+` + "```" + `asterlab
+id: dt-cfu
+kind: data_table
+schema: 1
+title: "菌落计数表"
+columns:
+  - key: sample_id
+    label: 样本
+    value_kind: text
+  - key: group
+    label: 分组
+    value_kind: text
+  - key: dilution_factor
+    label: 稀释因子
+    value_kind: number
+  - key: plated_ml
+    label: 涂布体积
+    value_kind: number
+  - key: colonies
+    label: 实测菌落数
+    value_kind: number
+rows:
+  - sample_id: C-10e-4-R1
+    group: Control
+    dilution_factor: 0.0001
+    plated_ml: 0.1
+    colonies: ""
+  - sample_id: C-10e-5-R1
+    group: Control
+    dilution_factor: 0.00001
+    plated_ml: 0.1
+    colonies: ""
+` + "```" + `
+`
+	docUnfilled, err := asterdoc.Parse(unfilledSrc)
+	if err != nil {
+		t.Fatalf("Parse unfilled: %v", err)
+	}
+	if got := AnalyzeDocument(docUnfilled, "cfu-unfilled"); len(got) != 0 {
+		t.Fatalf("expected 0 summaries when only dilution_factor/plated_ml are filled, got %+v", got)
+	}
+
+	filledSrc := strings.Replace(unfilledSrc, `    colonies: ""`, `    colonies: 120`, 1)
+	filledDoc, err := asterdoc.Parse(filledSrc)
+	if err != nil {
+		t.Fatalf("Parse filled: %v", err)
+	}
+	for iter := 0; iter < 25; iter++ {
+		got := AnalyzeDocument(filledDoc, "cfu-filled")
+		if len(got) != 1 || len(got[0].Groups) != 1 || got[0].Groups[0].Mean != 120 {
+			t.Fatalf("iter %d: expected stable Mean=120 from colonies column, got %+v", iter, got)
+		}
+	}
+}

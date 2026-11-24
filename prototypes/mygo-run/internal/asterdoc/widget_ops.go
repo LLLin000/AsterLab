@@ -45,151 +45,184 @@ func (v *View) renderChecklist(c *ui.Context, data map[string]any) {
 
 	if v.UnifiedLive {
 		interactiveLive := !v.ReadOnly && (v.Mode == ModeDesign || v.Mode == ModeProtocol || v.Mode == ModeRun)
-		ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-			if title != "" && title != "操作检查清单" {
-				ui.Text(c, title).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+		hasRequired := false
+		for _, it := range items {
+			r1, _ := it["required"].(bool)
+			r2, _ := it["blocking"].(bool)
+			if r1 || r2 {
+				hasRequired = true
+				break
 			}
-			for idx, it := range items {
-				idx, it := idx, it
-				cid := firstNonEmpty(textValue(it, "id"), fmt.Sprintf("chk-%d", idx+1))
-				label := textValue(it, "label")
-				required, _ := it["required"].(bool)
-				blocking, _ := it["blocking"].(bool)
-				req := required || blocking
-				doneInline, _ := it["done"].(bool)
-				checkedVal := doneInline || v.CheckedItems[cid] || v.CheckedItems[v.StepID+":"+cid]
-
-				chkPtr := v.ensureWidgetBool("chk:" + moduleID + ":" + cid)
-				*chkPtr = checkedVal
-
-				row := ui.Row(c.Key(fmt.Sprintf("live-chk:%s:%d:%s", moduleID, idx, cid))).FillWidth().
-					Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-					Radius(float32(tok.ControlRadius)).
-					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
-					Transition(theme.AccordionTransition())
-				rowHover := row.Hovered()
-				targetRowBg := ui.Transparent
-				if rowHover {
-					targetRowBg = tok.Elevated
-				}
-				row.Background(row.AnimateColor("chk-rbg", targetRowBg, theme.MotionMicroFade))
-				targetTxtCol := tok.Text
-				if *chkPtr {
-					targetTxtCol = tok.TextMuted
-				}
-				animTxtCol := row.AnimateColor("chk-fg", targetTxtCol, theme.MotionMicroFade)
-				row.Children(func() {
-					if interactiveLive {
-						if components.Checkbox(c, chkPtr, "").Changed() {
-							next := cloneRowsSlice(items)
-							if idx < len(next) {
-								next[idx]["done"] = *chkPtr
-								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-							}
-							if v.CheckedItems == nil {
-								v.CheckedItems = map[string]bool{}
-							}
-							v.CheckedItems[cid] = *chkPtr
-							if v.OnToggleCheck != nil {
-								v.OnToggleCheck(v.StepID, cid, *chkPtr)
-							}
+		}
+		stripeCol := tok.Accent.Alpha(0.55)
+		calloutBg := tok.Elevated.Alpha(0.55)
+		calloutBd := tok.Border.Alpha(0.65)
+		if hasRequired {
+			stripeCol = tok.Warning.Alpha(0.75)
+			calloutBg = tok.Warning.Alpha(0.05)
+			calloutBd = tok.Warning.Alpha(0.28)
+		}
+		ui.Row(c.Key("live-chk-callout:"+moduleID)).FillWidth().
+			Radius(float32(tok.ControlRadius)).Background(calloutBg).Border(1, calloutBd).
+			Clip().AlignItems(ui.Stretch).Children(func() {
+			ui.Box(c).Width(3).FillHeight().Background(stripeCol).Shrink(0)
+			ui.Column(c).Grow(1).MinWidth(0).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Gap(float32(tok.Spacing4)).Children(func() {
+				if title != "" && title != "操作检查清单" {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+						ico := lucide.ListChecks()
+						icoCol := tok.Accent
+						if hasRequired {
+							ico = lucide.ShieldCheck()
+							icoCol = tok.Warning
 						}
-					} else {
-						mark := "☐"
-						if *chkPtr {
-							mark = "☑"
-						}
-						ui.Text(c, mark).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
-					}
-
-					if editableDesign {
-						lblDraft := v.ensureWidgetDraft("chk_lbl:"+moduleID+":"+cid, label)
-						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-							ti := BorderlessTextInput(c, tok, lblDraft, float32(tok.TextBody), false, "输入检查项内容，按 Enter 新增下一项…").
-								TextColor(animTxtCol)
-							ti.OnTextKey(func(k ui.TextKey) bool {
-								if k.Key == ui.KeyBackspace && strings.TrimSpace(k.Text()) == "" && len(items) > 1 {
-									next := removeSliceIndex(items, idx)
-									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-									return true
-								}
-								return false
-							})
-							if ti.Submitted() {
-								next := cloneRowsSlice(items)
-								if idx < len(next) {
-									next[idx]["label"] = strings.TrimSpace(*lblDraft)
-								}
-								newItem := map[string]any{
-									"id":    fmt.Sprintf("chk-%d", len(next)+1),
-									"label": "",
-									"done":  false,
-								}
-								if idx+1 <= len(next) {
-									tail := append([]map[string]any{newItem}, next[idx+1:]...)
-									next = append(next[:idx+1], tail...)
-								} else {
-									next = append(next, newItem)
-								}
-								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-							} else if !ti.Focused() && strings.TrimSpace(*lblDraft) != strings.TrimSpace(label) {
-								next := cloneRowsSlice(items)
-								if idx < len(next) {
-									next[idx]["label"] = strings.TrimSpace(*lblDraft)
-									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-								}
-							}
-						})
-					} else {
-						txtColor := tok.Text
-						if *chkPtr {
-							txtColor = tok.TextMuted
-						}
-						ui.Box(c).FillWidth().Children(func() {
-							ui.Text(c, label).FontSize(float32(tok.TextBody)).TextColor(txtColor)
-						})
-					}
-
-					if req {
-						components.Badge(c, "必检", components.BadgeOptions{Tone: components.BadgeWarning})
-					}
-					if editableDesign {
-						actOp := float32(0)
-						if rowHover || v.MobileCompact {
-							actOp = 1
-						}
-						actWrap := ui.Row(c.Key("chk-acts:"+moduleID+":"+cid)).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4))
-						actWrap.Opacity(actWrap.AnimateTo("caop", actOp, theme.MotionMicroFade)).Children(func() {
-							reqTip := map[bool]string{true: "取消必检", false: "设为必检"}[req]
-							if components.IconButton(c, lucide.ShieldCheck(), reqTip, components.IconButtonCompact).Clicked() {
-								next := cloneRowsSlice(items)
-								if idx < len(next) {
-									next[idx]["required"] = !req
-									next[idx]["blocking"] = !req
-									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-								}
-							}
-							if len(items) > 1 {
-								if components.IconButton(c, lucide.X(), "删除检查项", components.IconButtonCompact).Clicked() {
-									next := removeSliceIndex(items, idx)
-									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-								}
-							}
-						})
-					}
-				})
-			}
-			if editableDesign {
-				if components.Button(c, "+ 添加检查项", components.ButtonGhost).Clicked() {
-					next := cloneRowsSlice(items)
-					next = append(next, map[string]any{
-						"id":    fmt.Sprintf("chk-%d", len(next)+1),
-						"label": "新检查项",
-						"done":  false,
+						ui.Icon(c, ico).Size(float32(tok.Spacing12)+1, float32(tok.Spacing12)+1).TextColor(icoCol)
+						ui.Text(c, title).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
 					})
-					v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
 				}
-			}
+				for idx, it := range items {
+					idx, it := idx, it
+					cid := firstNonEmpty(textValue(it, "id"), fmt.Sprintf("chk-%d", idx+1))
+					label := textValue(it, "label")
+					required, _ := it["required"].(bool)
+					blocking, _ := it["blocking"].(bool)
+					req := required || blocking
+					doneInline, _ := it["done"].(bool)
+					checkedVal := doneInline || v.CheckedItems[cid] || v.CheckedItems[v.StepID+":"+cid]
+
+					chkPtr := v.ensureWidgetBool("chk:" + moduleID + ":" + cid)
+					*chkPtr = checkedVal
+
+					row := ui.Row(c.Key(fmt.Sprintf("live-chk:%s:%d:%s", moduleID, idx, cid))).FillWidth().
+						Padding(float32(tok.Spacing4)*0.75, float32(tok.Spacing4)).
+						Radius(float32(tok.ControlRadius)).
+						AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
+						Transition(theme.AccordionTransition())
+					rowHover := row.Hovered()
+					targetRowBg := ui.Transparent
+					if rowHover {
+						targetRowBg = tok.Surface.Alpha(0.7)
+					}
+					row.Background(row.AnimateColor("chk-rbg", targetRowBg, theme.MotionMicroFade))
+					targetTxtCol := tok.Text
+					if *chkPtr {
+						targetTxtCol = tok.TextMuted
+					}
+					animTxtCol := row.AnimateColor("chk-fg", targetTxtCol, theme.MotionMicroFade)
+					row.Children(func() {
+						if interactiveLive {
+							if components.Checkbox(c, chkPtr, "").Changed() {
+								next := cloneRowsSlice(items)
+								if idx < len(next) {
+									next[idx]["done"] = *chkPtr
+									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+								}
+								if v.CheckedItems == nil {
+									v.CheckedItems = map[string]bool{}
+								}
+								v.CheckedItems[cid] = *chkPtr
+								if v.OnToggleCheck != nil {
+									v.OnToggleCheck(v.StepID, cid, *chkPtr)
+								}
+							}
+						} else {
+							mark := "☐"
+							if *chkPtr {
+								mark = "☑"
+							}
+							ui.Text(c, mark).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+						}
+
+						if editableDesign {
+							lblDraft := v.ensureWidgetDraft("chk_lbl:"+moduleID+":"+cid, label)
+							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+								ti := BorderlessTextInput(c, tok, lblDraft, float32(tok.TextBody), false, "输入检查项内容，按 Enter 新增下一项…").
+									TextColor(animTxtCol)
+								ti.OnTextKey(func(k ui.TextKey) bool {
+									if k.Key == ui.KeyBackspace && strings.TrimSpace(k.Text()) == "" && len(items) > 1 {
+										next := removeSliceIndex(items, idx)
+										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+										return true
+									}
+									return false
+								})
+								if ti.Submitted() {
+									next := cloneRowsSlice(items)
+									if idx < len(next) {
+										next[idx]["label"] = strings.TrimSpace(*lblDraft)
+									}
+									newItem := map[string]any{
+										"id":    fmt.Sprintf("chk-%d", len(next)+1),
+										"label": "",
+										"done":  false,
+									}
+									if idx+1 <= len(next) {
+										tail := append([]map[string]any{newItem}, next[idx+1:]...)
+										next = append(next[:idx+1], tail...)
+									} else {
+										next = append(next, newItem)
+									}
+									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+								} else if !ti.Focused() && strings.TrimSpace(*lblDraft) != strings.TrimSpace(label) {
+									next := cloneRowsSlice(items)
+									if idx < len(next) {
+										next[idx]["label"] = strings.TrimSpace(*lblDraft)
+										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+									}
+								}
+							})
+						} else {
+							txtColor := tok.Text
+							if *chkPtr {
+								txtColor = tok.TextMuted
+							}
+							ui.Box(c).FillWidth().Children(func() {
+								ui.Text(c, label).FontSize(float32(tok.TextBody)).TextColor(txtColor)
+							})
+						}
+
+						if req {
+							ui.Text(c, "必检").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Warning).Shrink(0)
+						}
+						if editableDesign {
+							actOp := float32(0)
+							if rowHover || v.MobileCompact {
+								actOp = 1
+							}
+							actWrap := ui.Row(c.Key("chk-acts:"+moduleID+":"+cid)).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+							actWrap.Opacity(actWrap.AnimateTo("caop", actOp, theme.MotionMicroFade)).Children(func() {
+								reqTip := map[bool]string{true: "取消必检", false: "设为必检"}[req]
+								if components.IconButton(c, lucide.ShieldCheck(), reqTip, components.IconButtonCompact).Clicked() {
+									next := cloneRowsSlice(items)
+									if idx < len(next) {
+										next[idx]["required"] = !req
+										next[idx]["blocking"] = !req
+										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+									}
+								}
+								if len(items) > 1 {
+									if components.IconButton(c, lucide.X(), "删除检查项", components.IconButtonCompact).Clicked() {
+										next := removeSliceIndex(items, idx)
+										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+									}
+								}
+							})
+						}
+					})
+				}
+				if editableDesign {
+					ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
+						if components.Button(c, "+ 添加检查项", components.ButtonGhost).Clicked() {
+							next := cloneRowsSlice(items)
+							next = append(next, map[string]any{
+								"id":    fmt.Sprintf("chk-%d", len(next)+1),
+								"label": "新检查项",
+								"done":  false,
+							})
+							v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+						}
+					})
+				}
+			})
 		})
 		return
 	}
@@ -619,7 +652,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 				}{
 					{"dilution", "溶液稀释（C₁V₁ = C₂V₂）"},
 					{"weighing", "固体称量配母液（m = C·V·MW）"},
-					{"serial_dilution", "倍比梯度稀释（离心管图）"},
+					{"serial_dilution", "倍比梯度稀释（离心管 / 96 孔板）"},
 					{"mastermix", "孔板铺板 / Master Mix 预混液"},
 				}
 				for _, sc := range scenarios {
@@ -1703,7 +1736,10 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 		}
 	}
 
-	// UI-19: Uniform full-width sleek timer strip (compact single-row height + subordinate TextData title)
+	// UI-04b: Minimalist Apple Clock / Linear / Raycast timer strip:
+	// Resting state shows ONLY [Play] [08:00] [Title], hiding mode/value/unit/status form noise
+	// inside a lightweight click-on-clock Popover.
+	cfgOpen := ui.Local(c.Root(), "tm-cfg:"+moduleID, func() bool { return false })
 	timerWrap := ui.Column(c.Key("live-tm:"+moduleID)).FillWidth().
 		Padding(float32(tok.Spacing4)+2, float32(tok.Spacing12)).
 		Radius(float32(tok.ControlRadius)).
@@ -1724,122 +1760,27 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 	}
 	anchorVal := textValue(data, "anchor")
 	schedWin := textValue(data, "schedule_window")
+	rowHover := timerWrap.Hovered()
 
 	timerWrap.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).Children(func() {
-			ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(clockCol)
-			ui.Text(c, formatClockHMS(displaySec)).FontSize(float32(tok.TextData)).Bold().
-				TextColor(clockCol).
-				FontFeatures("tnum").
-				ContentTransition(theme.NumericRoll(isCountdown))
-			if editableDesign {
-				renderCompactEditableTitle(v, c, moduleID, title, true)
-			} else {
-				ui.Text(c, FormatDisplayText(title)).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-			}
-
-			// Inline editable duration/mode in Edit mode (borderless quiet inputs)
-			if editableDesign && inlineStatus == "idle" {
-				qRaw := data["duration"]
-				if mode == "window" && data["offset"] != nil {
-					qRaw = data["offset"]
-				}
-				qv, qu, qErr := quantityParts(qRaw)
-				if qErr != nil || qu == "" {
-					qv, qu = 10, "min"
-				}
-				tmMode := v.ensureWidgetDraft("tm:"+moduleID+":mode", mode)
-				*tmMode = mode
-				mSel := components.Select(c, tmMode)
-				StyleSelectQuiet(c, tok, mSel)
-				mSel.Trigger.Children(func() {
-					ui.Text(c, timerModeLabel(*tmMode)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-				})
-				mSel.Popup(func(panel ui.Element) {
-					for _, opt := range []string{"countdown", "stopwatch", "cycle", "window"} {
-						opt := opt
-						mSel.Item(opt).Children(func() {
-							ui.Text(c, timerModeLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-						})
-					}
-				})
-				if mSel.Trigger.Changed() && *tmMode != mode {
-					patch := map[string]any{"mode": *tmMode}
-					switch *tmMode {
-					case "countdown":
-						if qv <= 0 {
-							qv, qu = 10, "min"
-						}
-						patch["duration"] = map[string]any{"value": qv, "unit": qu}
-					case "cycle":
-						patch["rounds"] = max(1, rounds)
-						if len(phases) == 0 {
-							patch["phases"] = []any{
-								map[string]any{"name": "阶段 1", "mode": "fixed", "duration": map[string]any{"value": 5, "unit": "min"}},
-								map[string]any{"name": "阶段 2", "mode": "fixed", "duration": map[string]any{"value": 10, "unit": "min"}},
-							}
-						}
-					case "window":
-						patch["anchor"] = firstNonEmpty(anchorVal, "t0")
-						if qv < 0 {
-							qv = 0
-						}
-						patch["offset"] = map[string]any{"value": qv, "unit": firstNonEmpty(qu, "h")}
-					}
-					v.emitAnyModuleEdit(moduleID, patch)
-				}
-				tmVal := v.ensureWidgetDraft("tm:"+moduleID+":val", formatNumber(qv))
-				tmUnit := v.ensureWidgetDraft("tm:"+moduleID+":unit", qu)
-				if mode != "stopwatch" && mode != "cycle" {
-					ui.Box(c).Width(float32(tok.Spacing48)*1.1).Children(func() {
-						tb := BorderlessTextInput(c, tok, tmVal, float32(tok.TextBody), false, "时长").FontFeatures("tnum")
-						if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*tmVal) != formatNumber(qv)) {
-							if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
-								field := "duration"
-								if mode == "window" {
-									field = "offset"
-								}
-								v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
-							}
-						}
-					})
-					uSel := components.Select(c, tmUnit)
-					StyleSelectQuiet(c, tok, uSel)
-					uSel.Trigger.Children(func() {
-						ui.Text(c, *tmUnit).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					})
-					uSel.Popup(func(panel ui.Element) {
-						for _, opt := range []string{"s", "min", "h", "d"} {
-							opt := opt
-							uSel.Item(opt).Children(func() {
-								ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-							})
-						}
-					})
-					if uSel.Trigger.Changed() && *tmUnit != qu {
-						if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
-							field := "duration"
-							if mode == "window" {
-								field = "offset"
-							}
-							v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
-						}
-					}
-				}
-			}
-
-			ui.Spacer(c)
-			badgeTone := components.BadgeNeutral
-			if inlineStatus == "running" {
-				badgeTone = components.BadgeAccent
-			} else if inlineStatus == "completed" {
-				badgeTone = components.BadgeSuccess
-			}
-			inlineBadge(c, timerStatusLabel(inlineStatus), components.BadgeOptions{Tone: badgeTone})
-
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			// 1. Tactile Play / Pause pill on the left
 			if !v.ReadOnly {
 				if inlineStatus != "running" {
-					if iconButton(c, lucide.Play(), "启动计时", components.ButtonGhost).Clicked() {
+					playBtn := ui.ButtonBase(c.Key("tm-play:"+moduleID)).
+						Size(float32(tok.Spacing24)+2, float32(tok.Spacing24)+2).
+						Radius(float32(tok.Spacing12)+1).Center().
+						Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.28)).
+						Label("启动计时")
+					if playBtn.Hovered() {
+						playBtn.Background(tok.Accent.Alpha(0.20))
+					}
+					playBtn.Children(func() {
+						ui.Icon(c, lucide.Play()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+					})
+					components.Tooltip(c, playBtn, "启动计时")
+					if playBtn.Clicked() {
+						*cfgOpen = false
 						v.emitAnyModuleEdit(moduleID, map[string]any{
 							"status":     "running",
 							"started_at": time.Now().UTC().Format(time.RFC3339),
@@ -1849,7 +1790,15 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 						}
 					}
 				} else {
-					if iconButton(c, lucide.Pause(), "暂停计时", components.ButtonOutline).Clicked() {
+					pauseBtn := ui.ButtonBase(c.Key("tm-pause:"+moduleID)).
+						Size(float32(tok.Spacing24)+2, float32(tok.Spacing24)+2).
+						Radius(float32(tok.Spacing12)+1).Center().
+						Background(tok.Accent).Label("暂停计时")
+					pauseBtn.Children(func() {
+						ui.Icon(c, lucide.Pause()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.AccentText)
+					})
+					components.Tooltip(c, pauseBtn, "暂停计时")
+					if pauseBtn.Clicked() {
 						v.emitAnyModuleEdit(moduleID, map[string]any{
 							"status":      "paused",
 							"elapsed_sec": liveElapsed,
@@ -1860,6 +1809,172 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 						}
 					}
 				}
+			} else {
+				ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(clockCol)
+			}
+
+			// 2. Crisp tabular readout (clicking opens lightweight configuration Popover when idle & editable)
+			var clockAnchor ui.Element
+			hasClockAnchor := false
+			if editableDesign && inlineStatus == "idle" {
+				clkBtn := ui.ButtonBase(c.Key("tm-clk-btn:"+moduleID)).
+					Padding(2, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+					Background(tok.Elevated.Alpha(0.85)).Label("设置计时参数")
+				if *cfgOpen || clkBtn.Hovered() {
+					clkBtn.Background(tok.AccentSoftBg)
+				}
+				clkBtn.Children(func() {
+					ui.Text(c, formatClockHMS(displaySec)).FontSize(float32(tok.TextData)).Bold().
+						TextColor(clockCol).
+						FontFeatures("tnum").
+						ContentTransition(theme.NumericRoll(isCountdown))
+				})
+				components.Tooltip(c, clkBtn, "点击设置计时模式与时长")
+				if clkBtn.Clicked() {
+					*cfgOpen = !*cfgOpen
+				}
+				clockAnchor = clkBtn
+				hasClockAnchor = true
+			} else {
+				ui.Text(c, formatClockHMS(displaySec)).FontSize(float32(tok.TextData)).Bold().
+					TextColor(clockCol).
+					FontFeatures("tnum").
+					ContentTransition(theme.NumericRoll(isCountdown))
+			}
+
+			// 3. Subordinate concise title
+			if editableDesign {
+				renderCompactEditableTitle(v, c, moduleID, title, true)
+			} else {
+				ui.Text(c, FormatDisplayText(title)).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+			}
+
+			ui.Spacer(c)
+
+			// 4. Right side: silent at rest (hover reveals tune icon); show active controls only once started
+			if editableDesign && inlineStatus == "idle" && hasClockAnchor {
+				tuneOp := float32(0)
+				if rowHover || *cfgOpen || v.MobileCompact {
+					tuneOp = 1
+				}
+				tuneWrap := ui.Box(c.Key("tm-tune-wrap:" + moduleID)).Shrink(0)
+				tuneWrap.Opacity(tuneWrap.AnimateTo("tmtop", tuneOp, theme.MotionMicroFade)).Children(func() {
+					tBtn := components.IconButton(c, lucide.SlidersHorizontal(), "调整计时时长", components.IconButtonCompact)
+					if tBtn.Clicked() {
+						*cfgOpen = !*cfgOpen
+					}
+				})
+				components.Popover(c.Key("tm-pop:"+moduleID), clockAnchor, cfgOpen, func(panel ui.Element) {
+					qRaw := data["duration"]
+					if mode == "window" && data["offset"] != nil {
+						qRaw = data["offset"]
+					}
+					qv, qu, qErr := quantityParts(qRaw)
+					if qErr != nil || qu == "" {
+						qv, qu = 10, "min"
+					}
+					panel.Width(float32(tok.Spacing48)*5.6).Padding(float32(tok.Spacing12)).
+						Background(tok.Surface).Border(1, tok.Border).Radius(float32(tok.PanelRadius)).
+						Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Text(c, "计时设置").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+						tmMode := v.ensureWidgetDraft("tm:"+moduleID+":mode", mode)
+						*tmMode = mode
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Text(c, "模式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48))
+							mSel := components.Select(c, tmMode)
+							StyleSelectQuiet(c, tok, mSel)
+							mSel.Trigger.Children(func() {
+								ui.Text(c, timerModeLabel(*tmMode)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							})
+							mSel.Popup(func(p ui.Element) {
+								for _, opt := range []string{"countdown", "stopwatch", "cycle", "window"} {
+									opt := opt
+									mSel.Item(opt).Children(func() {
+										ui.Text(c, timerModeLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+									})
+								}
+							})
+							if mSel.Trigger.Changed() && *tmMode != mode {
+								patch := map[string]any{"mode": *tmMode}
+								switch *tmMode {
+								case "countdown":
+									if qv <= 0 {
+										qv, qu = 10, "min"
+									}
+									patch["duration"] = map[string]any{"value": qv, "unit": qu}
+								case "cycle":
+									patch["rounds"] = max(1, rounds)
+									if len(phases) == 0 {
+										patch["phases"] = []any{
+											map[string]any{"name": "阶段 1", "mode": "fixed", "duration": map[string]any{"value": 5, "unit": "min"}},
+											map[string]any{"name": "阶段 2", "mode": "fixed", "duration": map[string]any{"value": 10, "unit": "min"}},
+										}
+									}
+								case "window":
+									patch["anchor"] = firstNonEmpty(anchorVal, "t0")
+									if qv < 0 {
+										qv = 0
+									}
+									patch["offset"] = map[string]any{"value": qv, "unit": firstNonEmpty(qu, "h")}
+								}
+								v.emitAnyModuleEdit(moduleID, patch)
+							}
+						})
+						if mode != "stopwatch" && mode != "cycle" {
+							tmVal := v.ensureWidgetDraft("tm:"+moduleID+":val", formatNumber(qv))
+							tmUnit := v.ensureWidgetDraft("tm:"+moduleID+":unit", qu)
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Text(c, "时长").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48))
+								ui.Box(c).Grow(1).Children(func() {
+									tb := BorderlessTextInput(c, tok, tmVal, float32(tok.TextBody), false, "时长").FontFeatures("tnum")
+									if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*tmVal) != formatNumber(qv)) {
+										if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
+											field := "duration"
+											if mode == "window" {
+												field = "offset"
+											}
+											v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
+										}
+									}
+								})
+								uSel := components.Select(c, tmUnit)
+								StyleSelectQuiet(c, tok, uSel)
+								uSel.Trigger.Children(func() {
+									ui.Text(c, *tmUnit).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								})
+								uSel.Popup(func(p ui.Element) {
+									for _, opt := range []string{"s", "min", "h", "d"} {
+										opt := opt
+										uSel.Item(opt).Children(func() {
+											ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+										})
+									}
+								})
+								if uSel.Trigger.Changed() && *tmUnit != qu {
+									if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
+										field := "duration"
+										if mode == "window" {
+											field = "offset"
+										}
+										v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
+									}
+								}
+							})
+						}
+					})
+				})
+			}
+
+			if inlineStatus != "idle" {
+				badgeTone := components.BadgeNeutral
+				if inlineStatus == "running" {
+					badgeTone = components.BadgeAccent
+				} else if inlineStatus == "completed" {
+					badgeTone = components.BadgeSuccess
+				}
+				inlineBadge(c, timerStatusLabel(inlineStatus), components.BadgeOptions{Tone: badgeTone})
+			}
+			if !v.ReadOnly {
 				if inlineStatus == "running" || inlineStatus == "paused" {
 					if iconButton(c, lucide.Check(), "完成计时", components.ButtonOutline).Clicked() {
 						v.emitAnyModuleEdit(moduleID, map[string]any{
