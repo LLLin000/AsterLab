@@ -171,12 +171,8 @@ func (v *View) renderChecklist(c *ui.Context, data map[string]any) {
 								}
 							})
 						} else {
-							txtColor := tok.Text
-							if *chkPtr {
-								txtColor = tok.TextMuted
-							}
 							ui.Box(c).FillWidth().Children(func() {
-								ui.Text(c, label).FontSize(float32(tok.TextBody)).TextColor(txtColor)
+								ui.Text(c, label).FontSize(float32(tok.TextBody)).TextColor(animTxtCol)
 							})
 						}
 
@@ -781,7 +777,8 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 						ui.Spacer(c)
 						if formulaStr != "" {
 							copyBtn := components.IconButton(c, lucide.Copy(), "复制公式", components.IconButtonPlain)
-							components.Tooltip(c, copyBtn, "复制 LaTeX 公式")
+							theme.ApplyTactilePress(copyBtn)
+							components.Tooltip(c, copyBtn, "复制公式")
 							if copyBtn.Clicked() {
 								c.Services().WriteClipboard(formulaStr)
 							}
@@ -792,6 +789,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 								edTip = "收起公式编辑栏"
 							}
 							toggleBtn := components.IconButton(c, lucide.Pencil(), edTip, components.IconButtonPlain)
+							theme.ApplyTactilePress(toggleBtn)
 							if *customOpen {
 								toggleBtn.Background(tok.AccentSoftBg)
 							}
@@ -1772,6 +1770,7 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 						Radius(float32(tok.Spacing12)+1).Center().
 						Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.28)).
 						Label("启动计时")
+					theme.ApplyTactilePress(playBtn)
 					if playBtn.Hovered() {
 						playBtn.Background(tok.Accent.Alpha(0.20))
 					}

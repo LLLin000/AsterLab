@@ -2529,6 +2529,28 @@ func (v *View) emitAnyModuleEdit(moduleID string, props map[string]any) {
 	}
 }
 
+func (v *View) emitModuleDirectiveEdit(moduleID, dirKey, dirVal string, props map[string]any) {
+	if v.StepID != "" && v.OnUpdateStepBlock != nil {
+		if len(props) > 0 {
+			v.OnUpdateStepBlock(v.StepID, moduleID, props)
+		}
+		return
+	}
+	if v.Doc != nil && v.Can(PermDocumentEdit) {
+		source, err := v.Doc.UpdateModuleWithDirective(moduleID, dirKey, dirVal, props)
+		if err != nil {
+			return
+		}
+		if v.OnChange != nil {
+			v.OnChange(source)
+		}
+		return
+	}
+	if len(props) > 0 {
+		v.emitAnyModuleEdit(moduleID, props)
+	}
+}
+
 func iconButton(c *ui.Context, icon *ui.SVG, label string, variant components.ButtonVariant) ui.Element {
 	tok := theme.GetTokens(c.Theme())
 	btn := components.Button(c, "", variant).Label(label)

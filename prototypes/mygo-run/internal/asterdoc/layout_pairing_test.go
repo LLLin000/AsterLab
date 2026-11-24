@@ -98,3 +98,32 @@ func TestToggleFullWidthAndPreservationInUpdateModule(t *testing.T) {
 		t.Fatalf("expected directive removed, got:\n%s", cleared)
 	}
 }
+
+func TestUpdateModuleWithVesselDirectivePreservesAndValidates(t *testing.T) {
+	src := "---\ntitle: Serial Dilution Vessel Directive\n---\n\n" +
+		"```asterlab\nkind: calculator\nid: calc-sd\nschema: 1\nmode: serial_dilution\ndilution_factor: 10\nsteps_count: 6\nstock: {value: 100000000, unit: CFU/mL}\nvolume_per_unit: {value: 1, unit: mL}\n```\n"
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse initial: %v", err)
+	}
+	next, err := doc.UpdateModuleWithDirective("calc-sd", "vessel", "plate96", map[string]any{
+		"volume_per_unit": map[string]any{"value": 200, "unit": "uL"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateModuleWithDirective plate96: %v", err)
+	}
+	if !strings.Contains(next, "# @vessel: plate96") {
+		t.Fatalf("expected # @vessel: plate96 directive, got:\n%s", next)
+	}
+	if got := moduleDirectiveValue(doc.Modules[0].Body, "vessel"); got != "plate96" {
+		t.Fatalf("moduleDirectiveValue = %q, want plate96", got)
+	}
+	// Subsequent property edit preserves # @vessel: plate96
+	next2, err := doc.UpdateModule("calc-sd", map[string]any{"dilution_factor": 5})
+	if err != nil {
+		t.Fatalf("UpdateModule after directive: %v", err)
+	}
+	if !strings.Contains(next2, "# @vessel: plate96") {
+		t.Fatalf("expected # @vessel: plate96 preserved across UpdateModule, got:\n%s", next2)
+	}
+}

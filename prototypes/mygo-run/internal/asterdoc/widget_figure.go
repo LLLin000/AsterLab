@@ -20,21 +20,25 @@ import (
 )
 
 type svgTextLabel struct {
-	X      float64
-	Y      float64
-	Anchor string
-	Text   string
-	Size   float64
+	X        float64
+	Y        float64
+	Anchor   string
+	Baseline string
+	Fill     string
+	Text     string
+	Size     float64
 }
 
 var (
-	reViewBox   = regexp.MustCompile(`viewBox\s*=\s*["']([^"']+)["']`)
-	reSVGToken  = regexp.MustCompile(`(?s)<g\b([^>]*)>|</g>|<text\b([^>]*)>(.*?)</text>`)
-	reTranslate = regexp.MustCompile(`translate\(\s*([-+]?[0-9]*\.?[0-9]+)(?:[\s,]+([-+]?[0-9]*\.?[0-9]+))?\s*\)`)
-	reAttrX     = regexp.MustCompile(`\bx\s*=\s*["']([^"']+)["']`)
-	reAttrY     = regexp.MustCompile(`\by\s*=\s*["']([^"']+)["']`)
-	reAttrSize  = regexp.MustCompile(`\bfont-size\s*=\s*["']([^"']+)["']`)
+	reViewBox      = regexp.MustCompile(`viewBox\s*=\s*["']([^"']+)["']`)
+	reSVGToken     = regexp.MustCompile(`(?s)<g\b([^>]*)>|</g>|<text\b([^>]*)>(.*?)</text>`)
+	reTranslate    = regexp.MustCompile(`translate\(\s*([-+]?[0-9]*\.?[0-9]+)(?:[\s,]+([-+]?[0-9]*\.?[0-9]+))?\s*\)`)
+	reAttrX        = regexp.MustCompile(`\bx\s*=\s*["']([^"']+)["']`)
+	reAttrY        = regexp.MustCompile(`\by\s*=\s*["']([^"']+)["']`)
+	reAttrSize     = regexp.MustCompile(`\bfont-size\s*=\s*["']([^"']+)["']`)
 	reAttrAnch     = regexp.MustCompile(`\btext-anchor\s*=\s*["']([^"']+)["']`)
+	reAttrFill     = regexp.MustCompile(`\bfill\s*=\s*["']([^"']+)["']`)
+	reAttrBaseline = regexp.MustCompile(`\bdominant-baseline\s*=\s*["']([^"']+)["']`)
 	reTagStrip     = regexp.MustCompile(`<[^>]+>`)
 	reStripSVGText = regexp.MustCompile(`(?is)<text\b[^>]*>.*?</text>`)
 )
@@ -111,6 +115,8 @@ func parseSVGMetricsAndLabels(rawSVG string) (vbX, vbY, vbW, vbH float64, labels
 			var x, y float64
 			size := 12.0
 			anchor := "start"
+			baseline := ""
+			fillAttr := ""
 			if xm := reAttrX.FindStringSubmatch(attrs); len(xm) == 2 {
 				x, _ = strconv.ParseFloat(xm[1], 64)
 			}
@@ -123,12 +129,20 @@ func parseSVGMetricsAndLabels(rawSVG string) (vbX, vbY, vbW, vbH float64, labels
 			if am := reAttrAnch.FindStringSubmatch(attrs); len(am) == 2 {
 				anchor = am[1]
 			}
+			if bm := reAttrBaseline.FindStringSubmatch(attrs); len(bm) == 2 {
+				baseline = strings.ToLower(strings.TrimSpace(bm[1]))
+			}
+			if fm := reAttrFill.FindStringSubmatch(attrs); len(fm) == 2 {
+				fillAttr = strings.TrimSpace(fm[1])
+			}
 			labels = append(labels, svgTextLabel{
-				X:      x + curX,
-				Y:      y + curY,
-				Anchor: anchor,
-				Text:   body,
-				Size:   size,
+				X:        x + curX,
+				Y:        y + curY,
+				Anchor:   anchor,
+				Baseline: baseline,
+				Fill:     fillAttr,
+				Text:     body,
+				Size:     size,
 			})
 		}
 	}
@@ -378,25 +392,46 @@ func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, ti
 			})
 		}
 
-		// Clean inline caption below figure (subtle placeholder shown on hover/focus or when graphic exists)
+		// Clean inline caption below figure (wraps naturally at rest; single click enters inline edit)
 		capBuf := v.ensureWidgetDraft("fig:"+moduleID+":cap", caption)
+		capFocusKey := "figcap:" + moduleID
+		editingCap := editableDesign && (v.FocusedTableCell == capFocusKey || strings.TrimSpace(*capBuf) == "")
 		showCapRow := hasGraphic || strings.TrimSpace(*capBuf) != "" || cardHover
 		if showCapRow && (editableDesign || caption != "" || hasGraphic) {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				if editableDesign {
+				if editingCap {
 					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
 						capPh := ""
-						if cardHover || strings.TrimSpace(*capBuf) != "" {
+						if cardHover || v.FocusedTableCell == capFocusKey || strings.TrimSpace(*capBuf) != "" {
 							capPh = "添加图注…"
 						}
 						ti := BorderlessTextInput(c, tok, capBuf, float32(tok.TextMeta), false, capPh).
 							TextColor(tok.TextMuted)
+						ti.FocusBind(&v.FocusedTableCell, capFocusKey)
+						if ti.Submitted() {
+							v.FocusedTableCell = ""
+						}
 						if ti.Submitted() || (!ti.Focused() && strings.TrimSpace(*capBuf) != strings.TrimSpace(caption)) {
 							v.emitAnyModuleEdit(moduleID, map[string]any{"caption": strings.TrimSpace(*capBuf)})
 						}
 					})
-				} else if caption != "" {
-					ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+				} else if strings.TrimSpace(*capBuf) != "" {
+					if editableDesign {
+						capBtn := ui.ButtonBase(c.Key("fig-cap-btn:" + moduleID)).
+							Grow(1).MinWidth(0).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).
+							Radius(float32(tok.ControlRadius)).Label("编辑图注")
+						if capBtn.Hovered() {
+							capBtn.Background(tok.Text.Alpha(0.04))
+						}
+						capBtn.Children(func() {
+							ui.Text(c, *capBuf).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FillWidth()
+						})
+						if capBtn.Clicked() {
+							v.FocusedTableCell = capFocusKey
+						}
+					} else {
+						ui.Text(c, *capBuf).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+					}
 				} else {
 					ui.Spacer(c)
 				}
@@ -584,8 +619,12 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 		allLabels := append(labels, annotations...)
 		drawH := maxH * zoom
 		drawW := float32(vbW/vbH) * drawH
-		if zoom <= 1 && drawW > 380 {
-			drawW = 380
+		maxInlineW := float32(480)
+		if v.inPairedRow {
+			maxInlineW = 360
+		}
+		if zoom <= 1 && drawW > maxInlineW {
+			drawW = maxInlineW
 			drawH = float32(vbH/vbW) * drawW
 		} else if zoom > 1 && drawW > 960 {
 			drawW = 960
@@ -609,8 +648,8 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 					px := r.X + float32((lbl.X-vbX)*sx)
 					py := r.Y + float32((lbl.Y-vbY)*sy)
 					fsize := float32(lbl.Size * sx)
-					if fsize < float32(tok.TextMeta) {
-						fsize = float32(tok.TextMeta)
+					if fsize < 9.5 {
+						fsize = 9.5
 					}
 					if fsize > float32(tok.TextSection)*zoom {
 						fsize = float32(tok.TextSection) * zoom
@@ -621,7 +660,24 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 					} else if lbl.Anchor == "end" {
 						px -= textW
 					}
-					p.Text(px, py-fsize*0.35, lbl.Text, fsize, tok.Text)
+					// SVG y denotes the alphabetic baseline; MyGo Painter draws from top-left Y.
+					topOffset := fsize * 0.84
+					switch lbl.Baseline {
+					case "middle", "central":
+						topOffset = fsize * 0.50
+					case "hanging", "text-before-edge":
+						topOffset = 0
+					}
+					col := tok.Text
+					if lbl.Fill != "" {
+						if parsedCol, ok := theme.ParseHexColor(lbl.Fill); ok {
+							luma := 0.299*float64(parsedCol.R) + 0.587*float64(parsedCol.G) + 0.114*float64(parsedCol.B)
+							if !(tok.Dark && luma < 90) {
+								col = parsedCol
+							}
+						}
+					}
+					p.Text(px, py-topOffset, lbl.Text, fsize, col)
 				}
 			}).Children(func() {
 				ui.Image(c, parsedSVG).Size(drawW, drawH)
