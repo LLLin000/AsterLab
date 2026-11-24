@@ -60,6 +60,7 @@ type Config struct {
 	MobilePullAction    string            `json:"mobilePullAction,omitempty"` // palette | new_exp | calc | tree
 	MobileAutoHideDock  *bool             `json:"mobileAutoHideDock,omitempty"`
 	MobileEditToolbar   *bool             `json:"mobileEditToolbar,omitempty"`
+	FeedbackMode        bool              `json:"feedbackMode,omitempty"`
 }
 
 // FileEntry summarizes one `.asterml` experiment or template discovered on disk.

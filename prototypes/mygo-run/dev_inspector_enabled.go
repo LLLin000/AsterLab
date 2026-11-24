@@ -1,5 +1,3 @@
-//go:build devdebug
-
 package main
 
 import (
@@ -16,16 +14,18 @@ import (
 	"asterlab-mygo-prototype/internal/diag"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/updater"
 	"asterlab-mygo-prototype/internal/vault"
 
 	mygo "github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
-// devInspectorState holds developer-only UI pick/annotate/export session state.
-// Compiled ONLY with `-tags devdebug`; completely stripped from public releases.
+// devInspectorState holds built-in visual screenshot/annotation feedback session state.
+// Off by default for regular lab work; users can toggle FeedbackMode anytime.
 type devInspectorState struct {
 	pickActive      bool
 	dragging        bool
@@ -76,11 +76,40 @@ type devInspectorState struct {
 var devCategories = []string{"样式/间距", "文字裁切", "交互逻辑", "功能Bug"}
 var devSeverities = []string{"P1", "P2", "P3"}
 
+func (a *app) isFeedbackModeActive() bool {
+	return a.shell != nil && a.shell.FeedbackMode
+}
+
+func (a *app) setFeedbackMode(on bool) {
+	if a.shell == nil {
+		return
+	}
+	if !on {
+		a.devInsp.pickActive = false
+		a.devInsp.dragging = false
+		a.devInsp.delayScheduled = false
+		a.devInsp.delayUntil = time.Time{}
+	}
+	if a.shell.FeedbackMode == on {
+		return
+	}
+	a.shell.FeedbackMode = on
+	a.saveVaultSettingsFromShell()
+}
+
 func (a *app) devInspectorPaletteCommands() []shell.PaletteCommand {
 	return []shell.PaletteCommand{
 		{
+			ID:       "feedback-mode-toggle",
+			Title:    "开启 / 关闭可视化截图标注反馈模式",
+			Subtitle: "在右下角显示悬浮反馈工具条，支持红框截图批注并直传开发者",
+			OnRun: func() {
+				a.setFeedbackMode(!a.isFeedbackModeActive())
+			},
+		},
+		{
 			ID:       "dev-ui-pick",
-			Title:    "[DEV] 切换 UI 细节拾取标注模式 (Ctrl+Shift+D)",
+			Title:    "框选页面细节并反馈 (Ctrl+Shift+D)",
 			Subtitle: "点击或框选任意像素/组件细节，自动红框截图并实时落盘",
 			OnRun: func() {
 				a.toggleDevPickMode()
@@ -88,7 +117,7 @@ func (a *app) devInspectorPaletteCommands() []shell.PaletteCommand {
 		},
 		{
 			ID:       "dev-ui-delay-pick",
-			Title:    "[DEV] 延迟 2 秒拾取（用于截取设置弹窗 / 下拉菜单 / 面板）",
+			Title:    "延迟 2 秒框选反馈（用于截取弹窗 / 菜单）(Ctrl+Shift+Y)",
 			Subtitle: "2 秒后在所有打开的弹窗最顶层自动进入红框拾取模式",
 			OnRun: func() {
 				a.scheduleDelayedDevPick(2 * time.Second)
@@ -96,9 +125,10 @@ func (a *app) devInspectorPaletteCommands() []shell.PaletteCommand {
 		},
 		{
 			ID:       "dev-ui-queue",
-			Title:    "[DEV] 打开 UI 调试反馈队列与导出面板",
-			Subtitle: "查看实时落盘的反馈记录并一键打包 .zip",
+			Title:    "打开截图标注反馈队列与提交面板",
+			Subtitle: "查看实时落盘的反馈记录，一键直传开发者或导出 .zip",
 			OnRun: func() {
+				a.setFeedbackMode(true)
 				a.devInsp.pickActive = false
 				a.devInsp.draftOpen = false
 				a.devInsp.queueOpen = true
@@ -111,6 +141,7 @@ func (a *app) toggleDevPickMode() {
 	if a.devInsp.capturePending {
 		return
 	}
+	a.setFeedbackMode(true)
 	if a.devInsp.pickActive {
 		a.devInsp.pickActive = false
 		a.devInsp.dragging = false
@@ -123,10 +154,11 @@ func (a *app) toggleDevPickMode() {
 	a.devInsp.dragging = false
 }
 
-// scheduleDelayedDevPick lets the developer open any modal dialog, dropdown menu,
-// or hover popover (UI-13) and automatically activates the top-most modal pick overlay
+// scheduleDelayedDevPick lets the user open any modal dialog, dropdown menu,
+// or hover popover and automatically activates the top-most modal pick overlay
 // right over the open surface after delay.
 func (a *app) scheduleDelayedDevPick(delay time.Duration) {
+	a.setFeedbackMode(true)
 	st := &a.devInsp
 	st.queueOpen = false
 	st.draftOpen = false
@@ -685,12 +717,10 @@ func revealInFileManager(zipPath, folderPath string) {
 
 func (a *app) renderDevInspectorOverlay(c *ui.Context) {
 	defer diag.RecoverAndLog("dev-overlay")
-	a.hydrateDevDraftOnce()
-	tok := theme.GetTokens(c.Theme())
 	st := &a.devInsp
 
-	// Global developer shortcuts: Ctrl+Shift+D toggles immediate UI pick mode;
-	// Ctrl+Shift+Y triggers 2-second delayed pick for open modals/menus (UI-13).
+	// Global feedback shortcuts: Ctrl+Shift+D toggles immediate UI pick mode;
+	// Ctrl+Shift+Y triggers 2-second delayed pick for open modals/menus.
 	c.OnWindowShortcut(ui.Cmd|ui.Shift, ui.KeyD, func() {
 		a.toggleDevPickMode()
 	})
@@ -704,19 +734,28 @@ func (a *app) renderDevInspectorOverlay(c *ui.Context) {
 		})
 	}
 
+	activeSurface := a.isFeedbackModeActive() || st.pickActive || st.delayScheduled || st.draftOpen || st.queueOpen
+	if activeSurface {
+		a.hydrateDevDraftOnce()
+	}
+
 	// 1. Live Full-Window Pick / Drag-Box Capture Overlay (.Modal() sits ABOVE any open app Dialog!)
 	if st.pickActive {
-		a.renderDevPickOverlay(c, tok)
+		a.renderDevPickOverlay(c, theme.GetTokens(c.Theme()))
 		return
 	}
 
-	// While async CapturePage() is grabbing the unobstructed window frame, hide DEV chrome completely!
+	// While async CapturePage() is grabbing the unobstructed window frame, hide feedback chrome completely!
 	if st.capturePending {
 		return
 	}
 
-	// 2. Floating Compact Dev Pill (bottom-right, devdebug builds ONLY)
-	a.renderDevFloatingPill(c, tok)
+	tok := theme.GetTokens(c.Theme())
+
+	// 2. Floating Compact Feedback Pill (bottom-right, ONLY when FeedbackMode or active flow is on)
+	if activeSurface {
+		a.renderDevFloatingPill(c, tok)
+	}
 
 	// 3 & 4. Always keep Dialog wrappers mounted (nil body when closed) so closing/canceling
 	// completes MyGo's modal exit lifecycle cleanly without corrupting modal state.
@@ -801,7 +840,7 @@ func (a *app) renderDevPickOverlay(c *ui.Context, tok theme.Tokens) {
 
 			// Top HUD banner showing live region & instructions.
 			reg := devfeedback.DetectRegion(st.hoverX, st.hoverY, winW, winH, leftW, rightW, leftOpen, rightOpen, pageName, tabKind)
-			hudText := fmt.Sprintf("DEV 拾取模式 · 点击或拖拽框选任意 UI 细节 · 当前: %s (%.0f, %.0f) · Esc / 右键退出",
+			hudText := fmt.Sprintf("反馈拾取模式 · 点击或拖拽框选页面细节 · 当前: %s (%.0f, %.0f) · Esc / 右键退出",
 				reg.Label, st.hoverX, st.hoverY)
 			ui.Row(c).Absolute().Top(float32(tok.Spacing12)).Left(float32(tok.Spacing16)).
 				Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
@@ -826,7 +865,7 @@ func (a *app) renderDevFloatingPill(c *ui.Context, tok theme.Tokens) {
 			AlignItems(ui.Center).
 			Gap(float32(tok.Spacing8)).
 			Children(func() {
-				components.Badge(c, "DEV", components.BadgeOptions{Tone: components.BadgeAccent})
+				kit.Badge(c, "反馈模式", components.BadgeOptions{Tone: components.BadgeAccent})
 				if components.Button(c, "拾取细节 (Ctrl+Shift+D)", components.ButtonGhost).Clicked() {
 					a.toggleDevPickMode()
 				}
@@ -868,6 +907,9 @@ func (a *app) renderDevFloatingPill(c *ui.Context, tok theme.Tokens) {
 				if st.exportErr != "" {
 					components.Text(c, st.exportErr).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
 				}
+				if components.IconButton(c.Key("fb-pill-close"), lucide.X(), "退出反馈模式", components.IconButtonCompact).Clicked() {
+					a.setFeedbackMode(false)
+				}
 			})
 	})
 }
@@ -891,14 +933,13 @@ func (a *app) renderDevDraftDialog(c *ui.Context, tok theme.Tokens) {
 			Background(tok.Surface).Border(1, tok.BorderStrong)
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				components.Badge(c, "DEV UI 拾取", components.BadgeOptions{Tone: components.BadgeAccent})
+				kit.Badge(c, "可视化反馈拾取", components.BadgeOptions{Tone: components.BadgeAccent})
 				components.Text(c, st.draftRegion.Label).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 				ui.Spacer(c)
 				coord := fmt.Sprintf("(%.0f, %.0f, %.0f×%.0f DIP)", st.draftRect.X, st.draftRect.Y, st.draftRect.W, st.draftRect.H)
 				components.Text(c, coord).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			})
 
-			components.Text(c, "参考源码: "+st.draftRegion.SourceHint).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			if st.draftCaptureErr != "" {
 				components.Text(c, st.draftCaptureErr).FontSize(float32(tok.TextMeta)).TextColor(tok.Warning)
 			} else if len(st.draftFullPNG) > 0 {
@@ -936,28 +977,11 @@ func (a *app) renderDevDraftDialog(c *ui.Context, tok theme.Tokens) {
 
 			// Suggestion input
 			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-				components.Text(c, "修改建议（具体说明你看到的 UI 问题与期望效果）").
+				components.Text(c, "修改建议（具体说明你看到的界面问题与期望效果）").
 					FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
 				ui.TextInput(c.Key("dev-suggestion-input"), &st.draftSuggestion).
 					FillWidth().
 					Placeholder("例如：此处按钮右边文字被裁切，建议加宽内边距或缩短文案…")
-			})
-
-			// Optional MyGo native F12 Inspector snippet bridge
-			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					components.Text(c, "可选：MyGo F12 / Ctrl+Shift+C 精确组件源码定位").
-						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					ui.Spacer(c)
-					if components.Button(c, "粘贴剪贴板定位", components.ButtonGhost).Clicked() {
-						if clip := strings.TrimSpace(c.ReadClipboard()); clip != "" {
-							st.draftInspector = clip
-						}
-					}
-				})
-				ui.TextInput(c.Key("dev-inspector-input"), &st.draftInspector).
-					FillWidth().
-					Placeholder("如需组件级 Go 行号，可按 F12/Ctrl+Shift+C 复制后点右侧粘贴")
 			})
 
 			ui.Row(c).FillWidth().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
@@ -985,7 +1009,7 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 	if !st.queueOpen {
 		ui.Box(c.Key("dev-queue-dlg-host")).Children(func() {
 			components.Dialog(c.Key("dev-queue-dlg"), &st.queueOpen, components.DialogOptions{
-				Label: "UI 调试反馈队列",
+				Label: "可视化截图标注反馈队列",
 			}, nil)
 		})
 		return
@@ -993,7 +1017,7 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 	open := st.queueOpen
 	ui.Box(c.Key("dev-queue-dlg-host")).Children(func() {
 		components.Dialog(c.Key("dev-queue-dlg"), &open, components.DialogOptions{
-			Label: "UI 调试反馈队列",
+			Label: "可视化截图标注反馈队列",
 		}, func(panel ui.Element) {
 		panel.Width(640).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).
 			Background(tok.Surface).Border(1, tok.BorderStrong)
@@ -1062,9 +1086,9 @@ func (a *app) renderDevQueueDialog(c *ui.Context, tok theme.Tokens) {
 								Gap(float32(tok.Spacing4)).
 								Children(func() {
 									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-										components.Badge(c, item.ID, components.BadgeOptions{Tone: components.BadgeAccent})
-										components.Badge(c, item.Severity, components.BadgeOptions{Tone: components.BadgeWarning})
-										components.Badge(c, item.Category, components.BadgeOptions{Tone: components.BadgeNeutral})
+										kit.Badge(c, item.ID, components.BadgeOptions{Tone: components.BadgeAccent})
+										kit.Badge(c, item.Severity, components.BadgeOptions{Tone: components.BadgeWarning})
+										kit.Badge(c, item.Category, components.BadgeOptions{Tone: components.BadgeNeutral})
 										components.Text(c, item.Region.Label).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
 										ui.Spacer(c)
 										if components.Button(c.Key("del-"+item.ID), "删除", components.ButtonGhost).Clicked() {

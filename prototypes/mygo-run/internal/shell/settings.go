@@ -835,6 +835,17 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 				Title: "诊断与反馈",
 				Items: []components.SettingsItem{
 					{
+						ID:          "feedback-mode",
+						Title:       "可视化截图标注反馈模式",
+						Description: "开启右下角悬浮反馈条，随时红框截图批注并一键直传开发者（Ctrl+Shift+D）",
+						Keywords:    []string{"feedback", "beta", "反馈模式", "截图标注", "红框"},
+						Build: func(c *ui.Context) {
+							if components.Switch(c, &s.FeedbackMode, "反馈模式", components.SwitchOptions{HideLabel: true}).Changed() {
+								s.notifySettingsChanged()
+							}
+						},
+					},
+					{
 						ID:          "diag-actions",
 						Title:       "诊断日志与问题反馈",
 						Description: "仅含脱敏日志，不含实验内容",

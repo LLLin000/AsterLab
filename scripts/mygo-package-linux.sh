@@ -10,7 +10,9 @@ trap 'rm -rf "${STAGE_DIR}"' EXIT
 
 mkdir -p "${OUT_DIR}"
 COMMIT="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo "dev")"
-VER_FLAGS="-X 'asterlab-mygo-prototype/internal/updater.Version=${VERSION}' -X 'asterlab-mygo-prototype/internal/updater.Commit=${COMMIT}'"
+ENDPOINT="${BETA_FEEDBACK_ENDPOINT:-https://dev.asterlab.party/api/feedback}"
+UPLOAD_KEY="${BETA_FEEDBACK_KEY:-}"
+VER_FLAGS="-X 'asterlab-mygo-prototype/internal/updater.Version=${VERSION}' -X 'asterlab-mygo-prototype/internal/updater.Commit=${COMMIT}' -X 'asterlab-mygo-prototype/internal/devfeedback.DefaultUploadEndpoint=${ENDPOINT}' -X 'asterlab-mygo-prototype/internal/devfeedback.DefaultUploadKey=${UPLOAD_KEY}'"
 ICON_PNG="${PROTO_DIR}/assets/icon-256.png"
 
 package_arch() {

@@ -9,6 +9,7 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 func (s *Shell) renderCrashOrWatchdogBanner(c *ui.Context, tok theme.Tokens) {
@@ -64,7 +65,38 @@ func (s *Shell) renderFeedbackDialog(c *ui.Context) {
 					ui.Text(c, "反馈与诊断中心").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 					ui.Spacer(c)
 					ver := firstNonEmptyStr(s.AppVersion, "0.1.0-dev")
-					components.Badge(c, "v"+strings.TrimPrefix(ver, "v"))
+					kit.Badge(c, "v"+strings.TrimPrefix(ver, "v"), components.BadgeOptions{Tone: components.BadgeNeutral})
+				})
+
+				ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+					Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Icon(c, lucide.Camera()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent).Shrink(0)
+						ui.Text(c, "可视化截图标注反馈模式").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+						if s.FeedbackMode {
+							kit.Badge(c, "已开启", components.BadgeOptions{Tone: components.BadgeAccent})
+						} else {
+							kit.Badge(c, "默认关闭", components.BadgeOptions{Tone: components.BadgeNeutral})
+						}
+					})
+					ui.Text(c, "支持随时开启并在界面红框截图批注、一键直传开发者（Ctrl+Shift+D），无需单独下载内测版。").
+						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						if components.Switch(c, &s.FeedbackMode, "显示右下角悬浮反馈条", components.SwitchOptions{}).Changed() {
+							s.notifySettingsChanged()
+						}
+						ui.Spacer(c)
+						if s.OnOpenFeedbackQueue != nil {
+							if components.Button(c, "反馈队列", components.ButtonSecondary).Clicked() {
+								s.OnOpenFeedbackQueue()
+							}
+						}
+						if s.OnStartFeedbackPick != nil {
+							if components.Button(c, "立即框选截图", components.ButtonPrimary).Clicked() {
+								s.OnStartFeedbackPick()
+							}
+						}
+					})
 				})
 
 				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {

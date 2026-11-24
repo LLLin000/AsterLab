@@ -166,6 +166,21 @@ func (a *app) wireFeedbackAndWelcome(rollbackNotice string) {
 		a.openOrSeedUserGuideDoc()
 	}
 
+	a.shell.OnStartFeedbackPick = func() {
+		a.shell.FeedbackOpen = false
+		a.setFeedbackMode(true)
+		a.toggleDevPickMode()
+	}
+
+	a.shell.OnOpenFeedbackQueue = func() {
+		a.shell.FeedbackOpen = false
+		a.setFeedbackMode(true)
+		a.hydrateDevDraftOnce()
+		a.devInsp.pickActive = false
+		a.devInsp.draftOpen = false
+		a.devInsp.queueOpen = true
+	}
+
 	a.shell.OnOnboardingChoice = func(choice string) {
 		markOnboardingSeen()
 		a.shell.WelcomeOpen = false
