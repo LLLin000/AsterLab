@@ -2722,6 +2722,10 @@ func (v *View) renderSubflow(c *ui.Context, data map[string]any) {
 	moduleCardFrame(v, c, lucide.GitBranch(), title, fmt.Sprintf("%d 项", len(items)), nil, func() {
 		components.Collapsible(c, fmt.Sprintf("展开子步骤明细（%d）", len(items)), openPtr, components.CollapsibleOptions{}, func() {
 			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Padding(float32(tok.Spacing4), 0, 0, 0).Children(func() {
+				if len(items) == 0 {
+					ui.Text(c, "暂无子步骤，可在下方填写后按回车或点击添加").
+						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				}
 				for idx, it := range items {
 					idx := idx
 					sid := textValue(it, "id")
@@ -2759,7 +2763,7 @@ func (v *View) renderSubflow(c *ui.Context, data map[string]any) {
 						} else if editableDesign {
 							ui.Spacer(c)
 						}
-						if editableDesign && len(items) > 1 {
+						if editableDesign {
 							if components.IconButton(c, lucide.Trash(), "删除子步骤", components.IconButtonCompact).Clicked() {
 								next := removeSliceIndex(items, idx)
 								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
@@ -2770,27 +2774,39 @@ func (v *View) renderSubflow(c *ui.Context, data map[string]any) {
 				if editableDesign {
 					newTitle := v.ensureWidgetDraft("sf:"+moduleID+":new_title", "")
 					newNote := v.ensureWidgetDraft("sf:"+moduleID+":new_note", "")
+					addSub := func() {
+						if strings.TrimSpace(*newTitle) == "" {
+							return
+						}
+						next := append([]map[string]any{}, items...)
+						entry := map[string]any{
+							"id":    fmt.Sprintf("sf-%s-%d", sanitizeIDFrag(*newTitle), len(items)+1),
+							"title": strings.TrimSpace(*newTitle),
+						}
+						if strings.TrimSpace(*newNote) != "" {
+							entry["note"] = strings.TrimSpace(*newNote)
+						}
+						next = append(next, entry)
+						v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+						*newTitle = ""
+						*newNote = ""
+					}
 					ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing4), 0, 0, 0).
 						AlignItems(ui.Center).Children(func() {
-						ui.Box(c).FillWidth().Children(func() {
-							components.TextBox(c, newTitle, components.TextBoxOptions{}).Placeholder("新增子步骤描述…")
-						})
-						ui.Box(c).Width(float32(tok.Spacing48)*2.5).Children(func() {
-							components.TextBox(c, newNote, components.TextBoxOptions{}).Placeholder("备注（可选）")
-						})
-						if components.Button(c, "添加子步", components.ButtonSecondary).Clicked() && strings.TrimSpace(*newTitle) != "" {
-							next := append([]map[string]any{}, items...)
-							entry := map[string]any{
-								"id":    fmt.Sprintf("sf-%s-%d", sanitizeIDFrag(*newTitle), len(items)+1),
-								"title": strings.TrimSpace(*newTitle),
+						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+							tb := components.TextBox(c, newTitle, components.TextBoxOptions{}).Placeholder("新增子步骤描述…")
+							if tb.Submitted() {
+								addSub()
 							}
-							if strings.TrimSpace(*newNote) != "" {
-								entry["note"] = strings.TrimSpace(*newNote)
+						})
+						ui.Box(c).Width(float32(tok.Spacing48)*2.5).Shrink(0).Children(func() {
+							tbNote := components.TextBox(c, newNote, components.TextBoxOptions{}).Placeholder("备注（可选）")
+							if tbNote.Submitted() {
+								addSub()
 							}
-							next = append(next, entry)
-							v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-							*newTitle = ""
-							*newNote = ""
+						})
+						if components.Button(c, "添加子步", components.ButtonSecondary).Shrink(0).Clicked() {
+							addSub()
 						}
 					})
 				}

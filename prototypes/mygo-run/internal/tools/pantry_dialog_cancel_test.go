@@ -72,3 +72,21 @@ func TestPantryDialogCancelDoesNotPanic(t *testing.T) {
 		t.Fatal("expected PantryBoxDialogOpen to be false after clicking 取消")
 	}
 }
+
+func TestNewPantryZoneInheritanceAndPickerDefault(t *testing.T) {
+	w := New(Callbacks{})
+	if got := zonePresetLocation("-80"); got != "-80°C" {
+		t.Fatalf("zonePresetLocation(-80) = %q", got)
+	}
+	if zk, _, _ := pantryZoneCategory(zonePresetLocation("-80")); zk != "-80" {
+		t.Fatalf("expected -80 category, got %q", zk)
+	}
+	w.pantryZoneFilter = "-20"
+	w.OpenNewPantryDialog(zonePresetLocation(w.pantryZoneFilter))
+	if w.PantryLocation != "-20°C 酶盒" {
+		t.Fatalf("expected inherited -20°C location, got %q", w.PantryLocation)
+	}
+	if w.pantryPickerOpen {
+		t.Fatalf("expected sticker picker collapsed by default so storage zone section is visible immediately")
+	}
+}

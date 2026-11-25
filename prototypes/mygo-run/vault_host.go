@@ -451,6 +451,7 @@ func (a *app) openNewExperimentDialogAt(folderRel, dateYMD, startTimeHHMM string
 	if a.newExpTemplate == "" {
 		a.newExpTemplate = "templates/空白实验.asterml"
 	}
+	a.newExpTplQuery = ""
 	a.newExpErr = ""
 	a.newExpOpen = true
 }
@@ -511,16 +512,20 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 								ui.Text(c, "已有目录").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 							})
 							sel.Popup(func(p ui.Element) {
-								for _, f := range folders {
-									f := f
-									lbl := f
-									if lbl == "" {
-										lbl = "根目录 (/)"
-									}
-									sel.Item(f).Children(func() {
-										ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
+								ui.Scroll(c).FillWidth().MaxHeight(float32(tok.Spacing48) * 5.2).Children(func() {
+									ui.Column(c).FillWidth().Gap(2).Children(func() {
+										for _, f := range folders {
+											f := f
+											lbl := f
+											if lbl == "" {
+												lbl = "根目录 (/)"
+											}
+											sel.Item(f).Children(func() {
+												ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
+											})
+										}
 									})
-								}
+								})
 							})
 						})
 						if folderPick != a.newExpFolder {
@@ -569,24 +574,42 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 						ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 					})
 					tSel.Popup(func(p ui.Element) {
-						hasBlank := false
-						for _, tpl := range templates {
-							if tpl.Name == "空白实验" {
-								hasBlank = true
-								break
-							}
+						if len(templates) > 8 {
+							tSel.SearchField(&a.newExpTplQuery).Label("筛选模板").Placeholder("搜索模板…")
 						}
-						if !hasBlank {
-							tSel.Item("").Children(func() {
-								ui.Text(c, "空白实验").FontSize(float32(tok.TextData)).TextColor(tok.Text)
+						q := strings.ToLower(strings.TrimSpace(a.newExpTplQuery))
+						ui.Scroll(c).FillWidth().MaxHeight(float32(tok.Spacing48) * 5.8).Children(func() {
+							ui.Column(c).FillWidth().Gap(2).Children(func() {
+								matched := 0
+								hasBlank := false
+								for _, tpl := range templates {
+									if tpl.Name == "空白实验" {
+										hasBlank = true
+										break
+									}
+								}
+								if !hasBlank && (q == "" || strings.Contains("空白实验", q)) {
+									matched++
+									tSel.Item("").Children(func() {
+										ui.Text(c, "空白实验").FontSize(float32(tok.TextData)).TextColor(tok.Text)
+									})
+								}
+								for _, tpl := range templates {
+									tpl := tpl
+									if q != "" && !strings.Contains(strings.ToLower(tpl.Name), q) {
+										continue
+									}
+									matched++
+									tSel.Item(tpl.RelPath).Children(func() {
+										ui.Text(c, tpl.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text).SingleLine().Ellipsis("…")
+									})
+								}
+								if matched == 0 {
+									ui.Text(c, "无匹配模板").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+										Padding(float32(tok.Spacing8), float32(tok.Spacing8))
+								}
 							})
-						}
-						for _, tpl := range templates {
-							tpl := tpl
-							tSel.Item(tpl.RelPath).Children(func() {
-								ui.Text(c, tpl.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text)
-							})
-						}
+						})
 					})
 				})
 			}

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -600,5 +601,61 @@ func TestBuiltinModuleConformance(t *testing.T) {
 	}
 	if !seen[specKey("step", 1)] {
 		t.Fatal("step@1 module is not registered")
+	}
+}
+
+func TestSubflowStarterEmptyAndInteractiveAddDelete(t *testing.T) {
+	blk := defaultStarterBlock(nil, "step-1", "subflow")
+	items, ok := blk["items"].([]any)
+	if !ok || len(items) != 0 {
+		t.Fatalf("subflow starter must start empty without boilerplate items, got %+v", blk["items"])
+	}
+
+	src := "```asterlab\nkind: subflow\nid: sf-test\nschema: 1\ntitle: 详细子步骤\nitems: []\n```\n"
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse empty subflow failed: %v", err)
+	}
+	v := &View{
+		Doc:         doc,
+		Mode:        ModeDesign,
+		UnifiedLive: true,
+		Allowed:     map[string]bool{PermDocumentEdit: true},
+	}
+	v.OnUpdateModule = func(id string, props map[string]any) {
+		if _, err := doc.UpdateModule(id, props); err != nil {
+			t.Fatalf("UpdateModule(%s): %v", id, err)
+		}
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		v.Render(c)
+	}, 960, 640)
+	tt.Frame()
+	if !tt.HasText("暂无子步骤") {
+		t.Fatalf("expected empty subflow hint, got: %q", tt.Texts())
+	}
+
+	*v.ensureWidgetDraft("sf:sf-test:new_title", "") = "现配无菌 PBS"
+	*v.ensureWidgetDraft("sf:sf-test:new_note", "") = "现配"
+	if err := tt.Click("添加子步"); err != nil {
+		t.Fatalf("click 添加子步: %v", err)
+	}
+	tt.Frame()
+	tt.Advance(300 * time.Millisecond)
+	tt.Frame()
+	rawItems, _ := doc.Modules[0].Data["items"].([]any)
+	if len(rawItems) != 1 || textValue(rawItems[0].(map[string]any), "title") != "现配无菌 PBS" {
+		t.Fatalf("expected 1 added subflow item, got %+v", doc.Modules[0].Data["items"])
+	}
+
+	// Verify even the last remaining subflow item can be deleted
+	if err := tt.Click("删除子步骤"); err != nil {
+		t.Fatalf("click 删除子步骤: %v", err)
+	}
+	tt.Frame()
+	rawItems, _ = doc.Modules[0].Data["items"].([]any)
+	if len(rawItems) != 0 {
+		t.Fatalf("expected last subflow item to be deletable, got %+v", rawItems)
 	}
 }

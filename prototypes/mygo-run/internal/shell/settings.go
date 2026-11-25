@@ -234,7 +234,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 									return v
 								}
 							}
-							sel.Trigger.MinWidth(c.Theme().Space(36)).Children(func() {
+							sel.Trigger.MinWidth(c.Theme().Space(36)).Shrink(0).Children(func() {
 								components.Text(c, labelFor(s.DefaultProjectDir)).SingleLine()
 							})
 							sel.Popup(func(panel ui.Element) {
@@ -418,7 +418,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 							options := []string{"system", "light", "dark"}
 							names := map[string]string{"system": "跟随系统", "light": "浅色", "dark": "深色"}
 							sel := components.Select(c, &s.ThemeSource)
-							sel.Trigger.MinWidth(c.Theme().Space(32)).Children(func() {
+							sel.Trigger.MinWidth(c.Theme().Space(32)).Shrink(0).Children(func() {
 								components.Text(c, names[s.ThemeSource]).SingleLine()
 							})
 							sel.Popup(func(panel ui.Element) {
@@ -449,7 +449,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								s.ThemePreset = theme.PresetObsidian
 							}
 							sel := components.Select(c, &s.ThemePreset)
-							sel.Trigger.MinWidth(c.Theme().Space(32)).Children(func() {
+							sel.Trigger.MinWidth(c.Theme().Space(32)).Shrink(0).Children(func() {
 								components.Text(c, firstNonEmptyStr(names[s.ThemePreset], names[theme.PresetObsidian])).SingleLine()
 							})
 							sel.Popup(func(panel ui.Element) {
@@ -505,7 +505,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								curLabel = fmt.Sprintf("%.0f%%", s.TextScale*100)
 							}
 							sel := components.Select(c, &scaleStr)
-							sel.Trigger.MinWidth(c.Theme().Space(32)).Children(func() {
+							sel.Trigger.MinWidth(c.Theme().Space(32)).Shrink(0).Children(func() {
 								components.Text(c, curLabel).SingleLine()
 							})
 							sel.Popup(func(panel ui.Element) {
@@ -554,7 +554,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								theme.DensityComfortable: "舒展",
 							}
 							sel := components.Select(c, &s.Density)
-							sel.Trigger.MinWidth(c.Theme().Space(32)).Children(func() {
+							sel.Trigger.MinWidth(c.Theme().Space(32)).Shrink(0).Children(func() {
 								components.Text(c, firstNonEmptyStr(names[s.Density], names[theme.DensityDefault])).SingleLine()
 							})
 							sel.Popup(func(panel ui.Element) {
@@ -610,7 +610,8 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Keywords: []string{"mode", "edit", "read", "编辑", "阅读", "默认"},
 						Build: func(c *ui.Context) {
 							// Avoid components.Tabs inside Settings Dialog (Onevra Tabs.Draw panics on Dialog Exit transition).
-							ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+							// Keep Shrink(0) on container and buttons so right-hand segmented pills never clip text (FB-103901).
+							ui.Row(c).Shrink(0).AlignItems(ui.Center).Padding(2).Radius(float32(tok.ControlRadius)).
 								Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 								for _, item := range []struct{ key, lbl string }{{"edit", "编辑态"}, {"read", "阅读态"}} {
 									item := item
@@ -620,6 +621,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 										targetBg, fg = tok.Surface, tok.Text
 									}
 									btn := ui.ButtonBase(c.Key("set-open-mode-"+item.key)).Label(item.lbl).
+										Shrink(0).
 										Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
 										Radius(float32(tok.ControlRadius) - 1)
 									theme.ApplyTactilePress(btn)
@@ -647,7 +649,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Build: func(c *ui.Context) {
 							opts := []int{6, 12, 24, 48, 96, 384}
 							sel := components.Select(c, &s.DefaultPlateFormat)
-							sel.Trigger.MinWidth(c.Theme().Space(28)).Children(func() {
+							sel.Trigger.MinWidth(c.Theme().Space(28)).Shrink(0).Children(func() {
 								components.Text(c, fmt.Sprintf("%d 孔板", s.DefaultPlateFormat)).SingleLine()
 							})
 							sel.Popup(func(panel ui.Element) {
@@ -670,7 +672,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Build: func(c *ui.Context) {
 							opts := []int{10, 15, 20}
 							sel := components.Select(c, &s.DefaultExcessPct)
-							sel.Trigger.MinWidth(c.Theme().Space(28)).Children(func() {
+							sel.Trigger.MinWidth(c.Theme().Space(28)).Shrink(0).Children(func() {
 								components.Text(c, fmt.Sprintf("+%d%%", s.DefaultExcessPct)).SingleLine()
 							})
 							sel.Popup(func(panel ui.Element) {

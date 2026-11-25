@@ -1012,7 +1012,9 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 			// 30-minute timeline butter-smooth across all 7 weekday columns.
 			axisBox := ui.Box(c.Key("wk-axis-canvas")).FillWidth().Height(totalGridH)
 			px, py, insideAxis := axisBox.PointerPosition()
-			if insideAxis && py >= 0 && py <= totalGridH {
+			if s.AnyModalOpen() {
+				s.weekHoverOn = false
+			} else if insideAxis && py >= 0 && py <= totalGridH {
 				s.weekHoverOn = true
 				s.weekHoverY = py
 			} else {
@@ -1108,7 +1110,7 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 				})
 			})
 
-			if axisBox.DoubleClicked() && px > gutterW {
+			if !s.AnyModalOpen() && axisBox.DoubleClicked() && px > gutterW {
 				bounds := axisBox.LayoutBounds()
 				gridW := bounds.W - gutterW
 				if gridW > 0 {
@@ -1118,6 +1120,7 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 						s.SelectedDate = ymd
 						totalMins, _, _ := weekGridYToMinutes(py, rowH, startHr, endHr)
 						startHHMM := fmt.Sprintf("%02d:%02d", totalMins/60, totalMins%60)
+						s.weekHoverOn = false
 						s.triggerCreateForDateTime(ymd, startHHMM)
 					}
 				}
@@ -1125,7 +1128,7 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 
 			// Smooth click-through hover timeline with gentle ±7px 30-min snap and 5-min fine precision (:05/:15...).
 			axisBox.DrawOver(func(p *ui.Painter, r ui.Rect) {
-				if !s.weekHoverOn || s.weekHoverY < 0 || s.weekHoverY > totalGridH {
+				if s.AnyModalOpen() || !s.weekHoverOn || s.weekHoverY < 0 || s.weekHoverY > totalGridH {
 					return
 				}
 				totalMins, snapped, lineY := weekGridYToMinutes(s.weekHoverY, rowH, startHr, endHr)

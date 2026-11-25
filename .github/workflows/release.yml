@@ -90,11 +90,23 @@ jobs:
           cache-dependency-path: prototypes/mygo-run/go.sum
       - name: Install NSIS
         run: choco install nsis -y --no-progress
+      - name: Prepare Offline AI NL-Router Model Bundle & ORT
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $nlTmp = Join-Path $env:TEMP 'nl-router-bundle'
+          New-Item -ItemType Directory -Path $nlTmp -Force | Out-Null
+          gh release download nl-router-v1.3.0 -R LLLin000/AsterLab -p 'nl-router-v1.3.0.zip' --dir $nlTmp --clobber
+          $nlDst = Join-Path $PWD 'prototypes\mygo-run\models\nl-router'
+          New-Item -ItemType Directory -Path $nlDst -Force | Out-Null
+          Expand-Archive -LiteralPath (Join-Path $nlTmp 'nl-router-v1.3.0.zip') -DestinationPath $nlDst -Force
+          Remove-Item -LiteralPath $nlTmp -Recurse -Force
+          python -m pip install --quiet onnxruntime
       - name: Build & Package Windows Artifacts
         env:
           BETA_FEEDBACK_ENDPOINT: ${{ vars.BETA_FEEDBACK_ENDPOINT }}
           BETA_FEEDBACK_KEY: ${{ secrets.BETA_FEEDBACK_KEY }}
-        run: ./scripts/mygo-release.ps1 -Version '${{ needs.verify.outputs.version }}'
+        run: ./scripts/mygo-release.ps1 -Version '${{ needs.verify.outputs.version }}' -IncludeNLModel
       - name: Sign binaries with Azure Trusted Signing (optional)
         if: vars.ENABLE_AZURE_SIGN == 'true'
         env:
@@ -124,6 +136,8 @@ jobs:
           $dir = Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1
           & (Join-Path $dir.FullName 'asterlab.exe') tools --json | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "packaged asterlab.exe failed" }
+          if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName 'onnxruntime.dll'))) { throw "missing onnxruntime.dll in packaged release zip" }
+          if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName 'models\nl-router\router.int8.onnx'))) { throw "missing bundled router.int8.onnx in packaged release zip" }
           Remove-Item -LiteralPath $tmp -Recurse -Force
       - uses: actions/upload-artifact@v4
         with:

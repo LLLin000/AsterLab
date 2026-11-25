@@ -256,6 +256,7 @@ type app struct {
 	newExpDate       string
 	newExpStartTime  string
 	newExpTemplate   string
+	newExpTplQuery   string
 	newExpErr        string
 	newExpNudgeSeq   int
 	lastVaultSig     string
@@ -4991,6 +4992,10 @@ func main() {
 			a.renderVaultNewExperimentDialog(c)
 			a.renderImportDialog(c)
 			a.renderDevInspectorOverlay(c)
+		},
+		IsExternalModalOpen: func() bool {
+			return a.newExpOpen || a.importOpen || a.linkDialogOpen || a.confirmDesignSwitch ||
+				(a.tools != nil && (a.tools.PantryDialogOpen || a.tools.PantryBoxDialogOpen || a.tools.VivariumDialogOpen))
 		},
 		PaletteCommands: append([]shell.PaletteCommand{
 			{
