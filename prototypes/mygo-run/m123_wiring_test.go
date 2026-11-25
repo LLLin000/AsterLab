@@ -684,3 +684,65 @@ func TestM123UserGuideSeedSOP(t *testing.T) {
 		t.Fatalf("expected near_expiry reagent in seeded pantry, got %+v", ledger.Items)
 	}
 }
+
+func TestM123ShellSyncAndBackupCallbackGlue(t *testing.T) {
+	vRoot := t.TempDir()
+	sh := &shell.Shell{TodayDate: "2026-11-26", SelectedDate: "2026-11-26"}
+	a := &app{shell: sh}
+	if err := a.initVaultWorkspace(vRoot); err != nil {
+		t.Fatalf("initVaultWorkspace: %v", err)
+	}
+	a.wireRecoveryHost()
+	a.wireSyncAndBackupShellCallbacks()
+
+	if sh.OnSaveSyncSettings == nil || sh.OnTestSyncConnection == nil || sh.OnTriggerSyncNow == nil ||
+		sh.OnClearOriginalsCache == nil || sh.OnResolveSyncConflict == nil ||
+		sh.OnVaultBackupZip == nil || sh.OnVaultRestoreZip == nil {
+		t.Fatal("expected all Shell sync and backup callbacks to be wired")
+	}
+
+	sh.SyncSettings = shell.SyncSettings{
+		Enabled:           true,
+		Endpoint:          "https://dav.jianguoyun.com/dav/AsterLab",
+		Username:          "lab@example.com",
+		Password:          "app-pass",
+		ImagePolicy:       shell.SyncImagePolicyThreshold,
+		ImageThresholdMB:  5,
+		WiFiOnlyOriginals: true,
+	}
+	sh.OnSaveSyncSettings()
+
+	loaded, err := a.loadSyncConfig()
+	if err != nil {
+		t.Fatalf("loadSyncConfig after OnSaveSyncSettings: %v", err)
+	}
+	if !loaded.Enabled || loaded.ThresholdBytes != 5<<20 || !loaded.WiFiOnlyForOriginals {
+		t.Fatalf("unexpected persisted sync config via shell callback: %+v", loaded)
+	}
+
+	// Verify open_copy & use_remote conflict resolution callbacks through Shell.
+	origRel := "冲突验证实验.asterml"
+	confRel := "冲突验证实验.sync-conflict-mac-20261126T010000Z.asterml"
+	if err := os.WriteFile(filepath.Join(vRoot, origRel), []byte("# 本地原件\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vRoot, confRel), []byte("# 远端并发版本\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.hydrateSyncShellState()
+	if len(sh.SyncConflicts) != 1 || sh.SyncState.Status != "conflict" {
+		t.Fatalf("expected 1 hydrated conflict, got conflicts=%+v state=%+v", sh.SyncConflicts, sh.SyncState)
+	}
+	sh.OnResolveSyncConflict(origRel, confRel, "open_copy")
+	if sh.ActiveTab() == nil || sh.ActiveTab().FilePath != confRel {
+		t.Fatalf("expected open_copy to open %s, got %+v", confRel, sh.ActiveTab())
+	}
+	sh.OnResolveSyncConflict(origRel, confRel, "use_remote")
+	if len(sh.SyncConflicts) != 0 {
+		t.Fatalf("expected conflict cleared after use_remote, got %+v", sh.SyncConflicts)
+	}
+	updated, _ := os.ReadFile(filepath.Join(vRoot, origRel))
+	if !strings.Contains(string(updated), "远端并发版本") {
+		t.Fatalf("expected use_remote to promote remote content, got %s", string(updated))
+	}
+}

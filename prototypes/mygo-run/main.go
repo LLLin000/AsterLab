@@ -5497,6 +5497,7 @@ func main() {
 		}
 		_, _ = a.checkAndRecoverEmergencyDrafts()
 		a.wireRecoveryHost()
+		a.wireSyncAndBackupShellCallbacks()
 		win := a.shell.NewWindow()
 		if win != nil && win.Window() != nil {
 			if pngIcon := theme.AppIconPNG(); len(pngIcon) > 0 {
