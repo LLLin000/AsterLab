@@ -98,6 +98,29 @@ func (a *app) buildPantryLocationMap() map[string]string {
 	return out
 }
 
+func (a *app) buildPantryMentionItems() []asterdoc.PantryMentionItem {
+	if a.tools == nil || len(a.tools.Pantry.Items) == 0 {
+		return nil
+	}
+	out := make([]asterdoc.PantryMentionItem, 0, len(a.tools.Pantry.Items))
+	for _, it := range a.tools.Pantry.Items {
+		loc := a.tools.FormatPantryDisplayLocation(it)
+		if loc == "" {
+			loc = it.Location
+		}
+		meta := a.tools.MetaForPantryItem(it)
+		out = append(out, asterdoc.PantryMentionItem{
+			ID:        it.ID,
+			Name:      it.Name,
+			LabelCode: it.LabelCode,
+			Location:  loc,
+			ItemType:  meta.ItemType,
+			Status:    it.Status,
+		})
+	}
+	return out
+}
+
 func (a *app) ensureLiveSourceEditor(relPath, src string) *editor.State {
 	a.ensureLiveViewsMap()
 	normSrc := strings.ReplaceAll(src, "\r\n", "\n")
@@ -590,6 +613,25 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			a.scrollToStepID = ""
 		}
 		v.PantryLocationMap = a.buildPantryLocationMap()
+		v.PantryCompletionItems = a.buildPantryMentionItems()
+		v.OnOpenVaultLink = func(relPath string) {
+			resolved := strings.TrimSpace(relPath)
+			if a.shell != nil && resolved != "" {
+				for _, f := range a.shell.VaultFiles {
+					if f.RelPath == resolved {
+						resolved = f.RelPath
+						break
+					}
+					noExt := strings.TrimSuffix(f.RelPath, filepath.Ext(f.RelPath))
+					base := strings.TrimSuffix(filepath.Base(f.RelPath), filepath.Ext(f.RelPath))
+					if noExt == resolved || base == resolved || f.Title == resolved {
+						resolved = f.RelPath
+						break
+					}
+				}
+			}
+			a.openVaultFileInActivePane(resolved, "")
+		}
 		if tab.Mode == shell.ModeLab {
 			v.Mode = asterdoc.ModeProtocol
 			v.LabMode = true
