@@ -665,6 +665,17 @@ func AnalyzeLabSentenceWithContext(doc *Document, rawLine string, globalOffset i
 		}
 	}
 
+	// Deterministic multi-parameter extraction (PCR cycling, refrigerated centrifugation, CO2 incubator, optical settings)
+	// before v1.3.0 4-class gating so rich parameter rows are captured regardless of ONNX schema version.
+	isPCRProgram := reParamCyc.MatchString(text) && (strings.Contains(strings.ToUpper(text), "PCR") || strings.Contains(text, "变性") || strings.Contains(text, "退火") || strings.Contains(text, "延伸"))
+	if jev == nil && !strings.Contains(text, "交替") && (isPCRProgram || !reNLRounds.MatchString(text)) && isMultiParamConditionSentence(text) {
+		if !hasCtx || ctx.AllowsKind("param_table") {
+			if pSug := buildValidatedSuggestion(doc, ctx, hasCtx, text, "param_table", "", 0.90, 0.78, "参数解析"); pSug != nil {
+				return []*NLSuggestion{pSug}
+			}
+		}
+	}
+
 	kind, mode, conf, noul, isMulti, source, hasMultiProbe := routeOne(text, true, jev)
 	// Model-driven whole-sentence p_pos gate (never split negative/past-tense/discussion sentences!)
 	if noul < 0.25 && (kind == "" || kind == "none") {
@@ -734,6 +745,8 @@ func buildValidatedSuggestion(doc *Document, ctx ScientificLineContext, hasCtx b
 		sug = extractPlateGroupSuggestion(doc, text)
 	case "attachment":
 		sug = extractAttachmentSuggestionCtx(doc, ctx, hasCtx, text)
+	case "param_table":
+		sug = extractParamTableSuggestion(doc, text)
 	}
 	if sug == nil || len(sug.Modules) == 0 {
 		return nil
@@ -793,6 +806,10 @@ func localRouteSentence(text string) (kind, mode string, conf, noul float64) {
 	}
 	if strings.Contains(text, "至少") || strings.Contains(text, "≥") || (strings.Contains(text, "t0") && len(reNLDuration.FindAllString(text, -1)) >= 2) {
 		return "timer", "window", 0.88, 0.58
+	}
+	// Multi-parameter wet-lab conditions -> param_table (e.g. PCR thermal steps, CO2 incubation, refrigerated centrifugation)
+	if isMultiParamConditionSentence(text) {
+		return "param_table", "", 0.88, 0.72
 	}
 	if hasDur && (strings.Contains(text, "孵育") || strings.Contains(text, "离心") || strings.Contains(text, "水浴") || strings.Contains(text, "照射") || strings.Contains(text, "固化") || strings.Contains(text, "浸泡") || strings.Contains(text, "静置") || strings.Contains(text, "染核") || strings.Contains(text, "封闭") || strings.Contains(text, "透膜") || strings.Contains(text, "固定") || strings.Contains(text, "裂解") || strings.Contains(text, "灭活") || strings.Contains(text, "变性") || strings.Contains(text, "摇床") || strings.Contains(text, "振荡") || strings.Contains(text, "消化") || (strings.Contains(text, "培养") && !strings.Contains(text, "培养基"))) {
 		return "timer", "countdown", 0.90, 0.55
@@ -2062,5 +2079,167 @@ func extractAttachmentSuggestionCtx(doc *Document, ctx ScientificLineContext, ha
 			{Label: "预计槽位", Value: fmt.Sprintf("%d 张", wellCount*slots)},
 		},
 		Modules: []map[string]any{mod},
+	}
+}
+
+var (
+	reParamTemp = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(?:°\s*C|℃|度)`)
+	reParamCO2  = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*%\s*(?:CO2|CO₂)`)
+	reParamRPM  = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(rpm|r/min)`)
+	reParamRCF  = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(?:×\s*g|x\s*g|xg)`)
+	reParamCyc  = regexp.MustCompile(`(?i)(?:共\s*)?(\d+)\s*(?:个\s*)?(?:循环|cycles?)`)
+	reParamWave = regexp.MustCompile(`(?i)(\d{3,4})\s*nm\b`)
+)
+
+func isMultiParamConditionSentence(text string) bool {
+	temps := reParamTemp.FindAllString(text, -1)
+	durs := reNLDuration.FindAllString(text, -1)
+	hasCO2 := reParamCO2.MatchString(text)
+	hasSpin := reParamRPM.MatchString(text) || reParamRCF.MatchString(text)
+	hasCyc := reParamCyc.MatchString(text)
+	// PCR cycling program (multiple temp steps + durations or cycles), CO2 chamber conditions, or multi-axis centrifugation
+	if len(temps) >= 2 && (len(durs) >= 2 || hasCyc) {
+		return true
+	}
+	if hasCO2 && (len(temps) >= 1 || len(durs) >= 1) {
+		return true
+	}
+	if hasSpin && (len(temps) >= 1 || len(durs) >= 1) {
+		return true
+	}
+	if reParamWave.MatchString(text) && (strings.Contains(text, "OD") || strings.Contains(text, "激发") || strings.Contains(text, "波长")) {
+		return true
+	}
+	return false
+}
+
+func extractParamTableSuggestion(doc *Document, text string) *NLSuggestion {
+	var rows []any
+	var kvs []NLParamKV
+	usedKeys := map[string]bool{}
+
+	safeUnit := func(u string) string {
+		if u == "" {
+			return ""
+		}
+		if _, ok := unitFor(u); ok {
+			return u
+		}
+		return ""
+	}
+	addRow := func(key, label string, val any, unit string) {
+		if usedKeys[key] {
+			n := 2
+			for usedKeys[fmt.Sprintf("%s_%d", key, n)] {
+				n++
+			}
+			key = fmt.Sprintf("%s_%d", key, n)
+		}
+		usedKeys[key] = true
+		su := safeUnit(unit)
+		rows = append(rows, map[string]any{
+			"key":   key,
+			"label": label,
+			"value": val,
+			"unit":  su,
+		})
+		disp := fmt.Sprint(val)
+		if su != "" {
+			disp += " " + DisplayUnit(su)
+		}
+		kvs = append(kvs, NLParamKV{Label: label, Value: disp})
+	}
+
+	temps := reParamTemp.FindAllStringSubmatch(text, -1)
+	for i, tm := range temps {
+		if v, err := strconv.ParseFloat(tm[1], 64); err == nil {
+			lbl := "设定温度"
+			if len(temps) > 1 {
+				lbl = fmt.Sprintf("温控段 %d", i+1)
+			}
+			addRow("temp", lbl, v, "Cel")
+		}
+	}
+	if cm := reParamCO2.FindStringSubmatch(text); len(cm) >= 2 {
+		if v, err := strconv.ParseFloat(cm[1], 64); err == nil {
+			addRow("co2", "CO₂ 浓度", v, "%")
+		}
+	}
+	if rm := reParamRPM.FindStringSubmatch(text); len(rm) >= 2 {
+		if v, err := strconv.ParseFloat(rm[1], 64); err == nil {
+			addRow("speed", "转速", v, "rpm")
+		}
+	} else if gm := reParamRCF.FindStringSubmatch(text); len(gm) >= 2 {
+		if v, err := strconv.ParseFloat(gm[1], 64); err == nil {
+			addRow("rcf", "离心力", v, "xg")
+		}
+	}
+	if wm := reParamWave.FindStringSubmatch(text); len(wm) >= 2 {
+		if v, err := strconv.ParseFloat(wm[1], 64); err == nil {
+			u := safeUnit("nm")
+			addRow("wavelength", "测定波长", v, u)
+		}
+	}
+	if cm := reParamCyc.FindStringSubmatch(text); len(cm) >= 2 {
+		if v, err := strconv.Atoi(cm[1]); err == nil && v > 0 {
+			addRow("cycles", "循环次数", v, "1")
+		}
+	}
+	for i, dm := range reNLDuration.FindAllStringSubmatch(text, -1) {
+		if len(dm) >= 3 {
+			if v, err := strconv.ParseFloat(dm[1], 64); err == nil && v > 0 {
+				lbl := "处理时长"
+				if i > 0 || len(temps) > 1 {
+					lbl = fmt.Sprintf("时段 %d", i+1)
+				}
+				addRow("duration", lbl, v, normDurationUnit(dm[2]))
+			}
+		}
+	}
+	if rm := reNLRatio.FindStringSubmatch(text); len(rm) >= 3 {
+		addRow("ratio", "稀释比例", rm[1]+":"+rm[2], "")
+	}
+
+	if len(rows) < 2 {
+		return nil
+	}
+	if len(rows) > 6 {
+		rows = rows[:6]
+		kvs = kvs[:6]
+	}
+
+	title := "关键参数"
+	switch {
+	case reParamCyc.MatchString(text) || strings.Contains(strings.ToUpper(text), "PCR"):
+		title = "PCR 温控参数"
+	case reParamRPM.MatchString(text) || reParamRCF.MatchString(text) || strings.Contains(text, "离心"):
+		title = "离心条件"
+	case reParamCO2.MatchString(text) || strings.Contains(text, "培养"):
+		title = "培养条件"
+	case reParamWave.MatchString(text):
+		title = "检测波长与条件"
+	}
+
+	id := nextUniqueBlockID(doc, "param-nl")
+	mod := map[string]any{
+		"kind":   "param_table",
+		"id":     id,
+		"schema": 1,
+		"title":  title,
+		"rows":   rows,
+	}
+	var sumParts []string
+	for i, kv := range kvs {
+		if i >= 3 {
+			break
+		}
+		sumParts = append(sumParts, kv.Label+" "+kv.Value)
+	}
+	return &NLSuggestion{
+		Kind:      "param_table",
+		KindLabel: title,
+		Summary:   strings.Join(sumParts, " · "),
+		Params:    kvs,
+		Modules:   []map[string]any{mod},
 	}
 }

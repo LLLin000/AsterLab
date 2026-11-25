@@ -106,9 +106,11 @@ type BasesRow struct {
 // VaultIndex provides incremental caching, full-text search, backlinks, global timer
 // aggregation, and cross-experiment LabBases queries over a local Vault.
 type VaultIndex struct {
-	mu    sync.RWMutex
-	vault *Vault
-	docs  map[string]IndexedDoc
+	mu       sync.RWMutex
+	vault    *Vault
+	docs     map[string]IndexedDoc
+	semMu    sync.RWMutex
+	semCache map[string]semanticDocEntry
 }
 
 // NewVaultIndex creates (and loads any cached `.asterlab/cache/index.json` for) v.

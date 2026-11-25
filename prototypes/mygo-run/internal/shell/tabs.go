@@ -91,6 +91,36 @@ type OutlineItem struct {
 	Active    bool
 }
 
+// DocSuggestionItem represents a quiet sentence-to-component structuring candidate inside the active doc.
+type DocSuggestionItem struct {
+	Line         int
+	ByteOffset   int
+	Kind         string
+	KindLabel    string
+	Summary      string
+	OriginalLine string
+	YAML         string
+}
+
+// RelatedDocItem represents a semantically related sibling experiment recalled from the local Vault.
+type RelatedDocItem struct {
+	RelPath string
+	Title   string
+	Date    string
+	Folder  string
+	Score   float32
+	Reason  string
+}
+
+// MatchedReagentItem links a reagent name mentioned in the active document to live Pantry inventory status.
+type MatchedReagentItem struct {
+	ID        string
+	Name      string
+	Location  string
+	Status    string // unopened|opened|near_expiry|expired|exhausted
+	ExpiresOn string
+}
+
 // PaletteCommand represents a host-registered quick action inside Ctrl+K Command Palette.
 type PaletteCommand struct {
 	ID       string
@@ -449,6 +479,10 @@ func (s *Shell) ResetWorkspaceForVault() {
 	s.OutlineSteps = nil
 	s.CurrentBacklinks = nil
 	s.CurrentDiagnostics = nil
+	s.CurrentDocSuggestions = nil
+	s.CurrentRelatedDocs = nil
+	s.CurrentMatchedReagents = nil
+	s.drawerExpandAllSugs = false
 	s.CurrentSnapshots = nil
 	s.StatusSaveLabel = ""
 	s.StatusMetaLabel = ""

@@ -445,6 +445,8 @@ func (v *View) renderNLSuggestionPopoverInner(
 				v.renderMiniPlateDiagram(c, tok, sug, dark)
 			case "attachment":
 				v.renderMiniAttachmentDiagram(c, tok, sug)
+			case "param_table":
+				v.renderMiniParamDiagram(c, tok, sug)
 			}
 		})
 
@@ -748,4 +750,49 @@ func (v *View) renderMiniAttachmentDiagram(c *ui.Context, tok theme.Tokens, sug 
 			ui.Text(c, sug.Summary).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum")
 		})
 	})
+}
+
+func (v *View) renderMiniParamDiagram(c *ui.Context, tok theme.Tokens, sug *NLSuggestion) {
+	if len(sug.Modules) == 0 {
+		return
+	}
+	rows := mapSlice(sug.Modules[0]["rows"])
+	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+		for i, rm := range rows {
+			if i >= 6 {
+				break
+			}
+			lbl := firstNonEmpty(textValue(rm, "label"), textValue(rm, "key"))
+			val := fmt.Sprint(rm["value"])
+			if u := textValue(rm, "unit"); u != "" {
+				val += " " + DisplayUnit(u)
+			}
+			ui.Row(c).Padding(float32(tok.Spacing4)*0.6, float32(tok.Spacing8)).
+				Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border).
+				Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Text(c, lbl).FontSize(float32(tok.TextMeta)-1).TextColor(tok.TextMuted).SingleLine()
+				ui.Text(c, val).FontSize(float32(tok.TextMeta)-1).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+			})
+		}
+	})
+}
+
+func shortNLChipLabel(sug *NLSuggestion) (*ui.SVG, string) {
+	if sug == nil {
+		return lucide.Sparkles(), "组件"
+	}
+	switch sug.Kind {
+	case "timer":
+		return lucide.Timer(), "计时"
+	case "calculator":
+		return lucide.Calculator(), "配液"
+	case "plate_group":
+		return lucide.Grid2x2(), "孔板"
+	case "attachment":
+		return lucide.Camera(), "采图"
+	case "param_table":
+		return lucide.SlidersHorizontal(), "参数"
+	default:
+		return lucide.Sparkles(), "组件"
+	}
 }

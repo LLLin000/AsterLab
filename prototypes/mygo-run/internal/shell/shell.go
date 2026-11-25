@@ -92,11 +92,12 @@ type RecentRun struct{ ID, Title, Meta string }
 
 // DiagnosticItem renders one graded scientific or structural diagnostic in the companion drawer.
 type DiagnosticItem struct {
-	Code       string
-	Severity   string // "blocking" | "needs_confirmation" | "advisory"
-	Path       string
-	Message    string
-	NextAction string
+	Code         string
+	Severity     string // "blocking" | "needs_confirmation" | "advisory"
+	Path         string
+	Message      string
+	NextAction   string
+	PantryItemID string
 }
 
 type tabDragPayload struct {
@@ -296,11 +297,16 @@ type Shell struct {
 	GlobalSearchHits      []vault.SearchHit
 	OnGlobalSearch        func(string) []vault.SearchHit
 	OnOpenSearchHit       func(relPath, query string)
-	VaultTimers           []vault.VaultTimerEntry
-	CurrentDocRelPath     string
-	CurrentBacklinks      []vault.LinkRef
-	CurrentDiagnostics    []DiagnosticItem
-	CurrentSnapshots      []vault.SnapshotMeta
+	VaultTimers            []vault.VaultTimerEntry
+	CurrentDocRelPath      string
+	CurrentBacklinks       []vault.LinkRef
+	CurrentDiagnostics     []DiagnosticItem
+	CurrentDocSuggestions  []DocSuggestionItem
+	CurrentRelatedDocs     []RelatedDocItem
+	CurrentMatchedReagents []MatchedReagentItem
+	OnApplyDocSuggestion   func(DocSuggestionItem)
+	drawerExpandAllSugs    bool
+	CurrentSnapshots       []vault.SnapshotMeta
 	OnRestoreSnapshot     func(relPath, snapshotID string)
 
 	OnActivateTab          func(WorkspaceTab)
@@ -767,6 +773,47 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 		}
 		if metaLbl != "" {
 			ui.Text(c, metaLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+		}
+		if isFileTab && s.CurrentDocRelPath != "" {
+			blockingCnt, warnCnt := 0, 0
+			for _, d := range s.CurrentDiagnostics {
+				if d.Severity == "blocking" {
+					blockingCnt++
+				} else if d.Severity == "needs_confirmation" {
+					warnCnt++
+				}
+			}
+			alertCnt := blockingCnt + warnCnt
+			sugCnt := len(s.CurrentDocSuggestions)
+			pill := ui.ButtonBase(c.Key("status-steward-pill")).
+				Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+				Label("方案体检与关联建议")
+			if pill.Hovered() {
+				pill.Background(tok.Text.Alpha(0.05))
+			}
+			pill.Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					switch {
+					case alertCnt > 0:
+						dotCol := tok.Warning
+						if blockingCnt > 0 {
+							dotCol = tok.Danger
+						}
+						ui.Box(c).Size(6, 6).Radius(3).Background(dotCol)
+						ui.Text(c, fmt.Sprintf("%d 项提醒", alertCnt)).FontSize(float32(tok.TextMeta)).TextColor(dotCol).FontFeatures("tnum").SingleLine()
+					case sugCnt > 0:
+						ui.Icon(c, lucide.Sparkles()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+						ui.Text(c, fmt.Sprintf("%d 处可结构化", sugCnt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+					default:
+						ui.Box(c).Size(6, 6).Radius(3).Background(tok.Success)
+						ui.Text(c, "方案就绪").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+					}
+				})
+			})
+			components.Tooltip(c, pill, "查看方案体检、关联试剂与可结构化步骤")
+			if pill.Clicked() {
+				s.SetRightDrawer(true, 2)
+			}
 		}
 		ui.Spacer(c)
 		if s.UpdateStatus == "available" && s.UpdateLatestVersion != "" {

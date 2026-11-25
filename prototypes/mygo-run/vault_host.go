@@ -15,12 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/astercore"
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/diag"
 	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
@@ -743,6 +745,9 @@ func (a *app) syncActiveDocCompanionState(relPath, source string, doc *asterdoc.
 		return
 	}
 	a.lastCompanionKey = cacheKey
+	if a.shell.CurrentDocRelPath != relPath {
+		a.shell.CurrentRelatedDocs = nil
+	}
 	a.shell.CurrentDocRelPath = relPath
 	a.shell.CurrentSnapshots = a.vault.ListSnapshots(relPath)
 	if a.vaultIndex != nil {
@@ -750,15 +755,85 @@ func (a *app) syncActiveDocCompanionState(relPath, source string, doc *asterdoc.
 		a.shell.VaultTimers = a.vaultIndex.ActiveTimers()
 	}
 	knownPantry := map[string]bool{}
+	var matchedReagents []shell.MatchedReagentItem
+	var pantryDiags []shell.DiagnosticItem
 	if a.tools != nil {
+		srcLower := strings.ToLower(source)
+		seenReag := map[string]bool{}
 		for _, p := range a.tools.Pantry.Items {
 			if p.LabelCode != "" {
 				knownPantry[strings.TrimSpace(p.LabelCode)] = true
 			}
+			pName := strings.TrimSpace(p.Name)
+			if len([]rune(pName)) < 2 || seenReag[pName] {
+				continue
+			}
+			if !strings.Contains(srcLower, strings.ToLower(pName)) {
+				continue
+			}
+			seenReag[pName] = true
+			matchedReagents = append(matchedReagents, shell.MatchedReagentItem{
+				ID:        p.ID,
+				Name:      pName,
+				Location:  p.Location,
+				Status:    p.Status,
+				ExpiresOn: p.ExpiresOn,
+			})
+			switch p.Status {
+			case "expired":
+				pantryDiags = append(pantryDiags, shell.DiagnosticItem{
+					Code:         "PANTRY_EXPIRED",
+					Severity:     string(astercore.SeverityBlocking),
+					Path:         "pantry." + p.ID,
+					Message:      fmt.Sprintf("文中提及试剂「%s」在储藏室中已过期（%s）", pName, p.ExpiresOn),
+					PantryItemID: p.ID,
+				})
+			case "exhausted":
+				pantryDiags = append(pantryDiags, shell.DiagnosticItem{
+					Code:         "PANTRY_EXHAUSTED",
+					Severity:     string(astercore.SeverityNeedsConfirmation),
+					Path:         "pantry." + p.ID,
+					Message:      fmt.Sprintf("文中提及试剂「%s」在储藏室中已用尽", pName),
+					PantryItemID: p.ID,
+				})
+			case "near_expiry":
+				pantryDiags = append(pantryDiags, shell.DiagnosticItem{
+					Code:         "PANTRY_NEAR_EXPIRY",
+					Severity:     string(astercore.SeverityNeedsConfirmation),
+					Path:         "pantry." + p.ID,
+					Message:      fmt.Sprintf("文中提及试剂「%s」即将过期（%s）", pName, p.ExpiresOn),
+					PantryItemID: p.ID,
+				})
+			}
+		}
+		sort.SliceStable(matchedReagents, func(i, j int) bool {
+			rank := func(st string) int {
+				switch st {
+				case "expired":
+					return 0
+				case "exhausted":
+					return 1
+				case "near_expiry":
+					return 2
+				default:
+					return 3
+				}
+			}
+			ri, rj := rank(matchedReagents[i].Status), rank(matchedReagents[j].Status)
+			if ri != rj {
+				return ri < rj
+			}
+			return matchedReagents[i].Name < matchedReagents[j].Name
+		})
+		if len(matchedReagents) > 8 {
+			matchedReagents = matchedReagents[:8]
 		}
 	}
+	a.shell.CurrentMatchedReagents = matchedReagents
+
 	rep := astercore.AssessDocument(doc, knownPantry)
-	diags := make([]shell.DiagnosticItem, 0, len(rep.Diagnostics))
+	diags := make([]shell.DiagnosticItem, 0, len(pantryDiags)+len(rep.Diagnostics))
+	diags = append(diags, pantryDiags...)
 	for _, d := range rep.Diagnostics {
 		diags = append(diags, shell.DiagnosticItem{
 			Code:       d.Code,
@@ -769,6 +844,98 @@ func (a *app) syncActiveDocCompanionState(relPath, source string, doc *asterdoc.
 		})
 	}
 	a.shell.CurrentDiagnostics = diags
+
+	var docSugs []shell.DocSuggestionItem
+	if doc != nil {
+		sRep := asterdoc.SuggestDocumentModules(doc)
+		for _, sg := range sRep.Suggestions {
+			if strings.TrimSpace(sg.YAML) == "" {
+				continue
+			}
+			docSugs = append(docSugs, shell.DocSuggestionItem{
+				Line:         sg.Line,
+				ByteOffset:   sg.ByteOffset,
+				Kind:         sg.Kind,
+				KindLabel:    sg.KindLabel,
+				Summary:      sg.Summary,
+				OriginalLine: sg.OriginalLine,
+				YAML:         sg.YAML,
+			})
+		}
+	}
+	a.shell.CurrentDocSuggestions = docSugs
+
+	if a.vaultIndex != nil {
+		idx := a.vaultIndex
+		targetRel := relPath
+		toShellRelated := func(hits []vault.RelatedDocHit) []shell.RelatedDocItem {
+			out := make([]shell.RelatedDocItem, 0, len(hits))
+			for _, h := range hits {
+				out = append(out, shell.RelatedDocItem{
+					RelPath: h.RelPath,
+					Title:   h.Title,
+					Date:    h.Date,
+					Folder:  h.Folder,
+					Score:   h.Score,
+					Reason:  h.Reason,
+				})
+			}
+			return out
+		}
+		if a.windowReady {
+			go func() {
+				defer diag.RecoverAndLog("related-docs")
+				relHits := toShellRelated(idx.RelatedDocs(targetRel, 3))
+				mygo.RunOnMain(func() {
+					if a.shell != nil && a.shell.CurrentDocRelPath == targetRel {
+						a.shell.CurrentRelatedDocs = relHits
+						a.shell.Invalidate()
+					}
+				})
+			}()
+		} else {
+			a.shell.CurrentRelatedDocs = toShellRelated(idx.RelatedDocs(targetRel, 3))
+		}
+	}
+}
+
+func applyDocSuggestionYAML(src string, byteOffset int, origLine string, fencedYAML string) (string, bool) {
+	if strings.TrimSpace(fencedYAML) == "" {
+		return src, false
+	}
+	insertPos := -1
+	if byteOffset >= 0 && byteOffset < len(src) {
+		lineEnd := len(src)
+		if nl := strings.IndexByte(src[byteOffset:], '\n'); nl >= 0 {
+			lineEnd = byteOffset + nl
+		}
+		seg := strings.TrimSpace(src[byteOffset:lineEnd])
+		if origLine == "" || strings.Contains(seg, strings.TrimSpace(origLine)) || seg == strings.TrimSpace(origLine) {
+			insertPos = lineEnd
+		}
+	}
+	if insertPos < 0 && strings.TrimSpace(origLine) != "" {
+		if idx := strings.Index(src, strings.TrimSpace(origLine)); idx >= 0 {
+			lineEnd := len(src)
+			if nl := strings.IndexByte(src[idx:], '\n'); nl >= 0 {
+				lineEnd = idx + nl
+			}
+			insertPos = lineEnd
+		}
+	}
+	if insertPos < 0 {
+		return src, false
+	}
+	prefix := "\n\n"
+	if insertPos < len(src) && src[insertPos] == '\n' {
+		insertPos++
+		prefix = "\n"
+	}
+	suffix := "\n\n"
+	if insertPos < len(src) && strings.HasPrefix(src[insertPos:], "\n") {
+		suffix = "\n"
+	}
+	return src[:insertPos] + prefix + strings.TrimSpace(fencedYAML) + suffix + src[insertPos:], true
 }
 
 func (a *app) restoreSnapshotFromHistory(relPath, snapshotID string) {

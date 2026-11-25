@@ -589,3 +589,61 @@ func TestWeekCalendarSuppressesHoverBehindModalAndSettingsSegmentedFits(t *testi
 		t.Fatalf("unexpected 阅读态 bounds in 1365dp window: %+v", el)
 	}
 }
+
+func TestAmbientStewardStatusPillAndCompactDrawer(t *testing.T) {
+	applied := ""
+	located := ""
+	opened := ""
+	s := &Shell{
+		TodayDate:         "2026-11-25",
+		CurrentDocRelPath: "exp/demo.asterml",
+		StatusMetaLabel:   "2 步骤 · 3 模块",
+		CurrentMatchedReagents: []MatchedReagentItem{
+			{ID: "r1", Name: "Vancomycin", Location: "-20°C", Status: "expired", ExpiresOn: "2026-11-20"},
+		},
+		CurrentDocSuggestions: []DocSuggestionItem{
+			{Line: 12, ByteOffset: 120, Kind: "timer", KindLabel: "倒计时器", Summary: "37°C 孵育 30 min", YAML: "```asterlab\nkind: timer\n```"},
+		},
+		CurrentRelatedDocs: []RelatedDocItem{
+			{RelPath: "exp/prev.asterml", Title: "上一轮抑菌试验", Date: "2026-11-18", Folder: "抗菌", Score: 0.78},
+		},
+		OnApplyDocSuggestion: func(it DocSuggestionItem) { applied = it.KindLabel },
+		OnLocatePantry:       func(id string) { located = id },
+		OnOpenSearchHit:      func(rel, _ string) { opened = rel },
+	}
+	s.EnsureTabs()
+	s.OpenFileInPane(s.ActivePaneID, "exp/demo.asterml", "示范实验", ModeEdit, false)
+	tt := render(s.RenderSplitView, 1365, 860)
+	tt.Frame()
+	if !tt.HasText("1 处可结构化") {
+		t.Fatalf("expected status bar structuring pill, got %q", tt.Texts())
+	}
+	if err := tt.Click("方案体检与关联建议"); err != nil {
+		t.Fatalf("click status steward pill: %v", err)
+	}
+	tt.Frame()
+	if !s.RightOpen || s.RightTab != 2 {
+		t.Fatalf("expected right drawer opened to tab 2, got open=%v tab=%d", s.RightOpen, s.RightTab)
+	}
+	if !tt.HasText("结构与试剂状态正常") || !tt.HasText("Vancomycin · 已过期") || !tt.HasText("相关历史实验") {
+		t.Fatalf("expected compact Tab 2 sections, got %q", tt.Texts())
+	}
+	if err := tt.Click("插入"); err != nil {
+		t.Fatal(err)
+	}
+	if applied != "倒计时器" {
+		t.Fatalf("expected OnApplyDocSuggestion fired, got %q", applied)
+	}
+	if err := tt.Click("Vancomycin"); err != nil {
+		t.Fatal(err)
+	}
+	if located != "r1" {
+		t.Fatalf("expected OnLocatePantry fired with r1, got %q", located)
+	}
+	if err := tt.Click("上一轮抑菌试验"); err != nil {
+		t.Fatal(err)
+	}
+	if opened != "exp/prev.asterml" {
+		t.Fatalf("expected OnOpenSearchHit fired with exp/prev.asterml, got %q", opened)
+	}
+}
